@@ -50,8 +50,6 @@
     // Copies of other projects' files, kept as they are there.
     "**/testdata/**",
     "patches/**",
-    "tools/bench/fixtures.json",
-    "tools/bench/style.json",
     "tools/style-codegen/v8.json",
   ],
   "plugins": [

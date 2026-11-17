@@ -1,6 +1,6 @@
 //! Rendering without a window: [`HeadlessFrontend`] draws a map into an
-//! offscreen texture on the calling thread, for the render tests, the
-//! benchmarks and the tests that render a map.
+//! offscreen texture on the calling thread, for the render tests and the
+//! tests that render a map.
 
 // C++ renders with the one backend it was built with. The frontend renders
 // on the device it is given, or on WebGPU, or on the backend the

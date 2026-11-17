@@ -61,10 +61,6 @@ RUST_BACKTRACE = "{% if get_env(name='RUST_BACKTRACE', default='') != '' %}{{ ge
 # it on purpose, with the one in dprint.jsonc, then run `mise run fix`.
 MLN_NIGHTLY = "nightly-2026-11-04"
 
-[tasks."bench:fixtures"]
-description = "Download the benchmarks' map data into target/bench-fixtures, once"
-run = "python3 -I tools/bench/fixtures.py target/bench-fixtures"
-
 [tasks.check]
 description = "Check every file with the formatters and linters (hk.pkl)"
 run = "hk check --all"

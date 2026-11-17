@@ -8,7 +8,6 @@ resolver = "3"
 members = [
   "crates/*",
   "examples/*",
-  "tools/bench",
   "tools/c-abi-gen",
   "tools/expression-test",
   "tools/render-test",
@@ -70,26 +69,25 @@ mln_runtime = { package = "mln-rs-runtime", path = "crates/mln_runtime", version
 mln_sprite = { package = "mln-rs-sprite", path = "crates/mln_sprite", version = "=0.0.13" }
 # Without SQLite (its `sqlite` feature) unless a package asks for it, so
 # that examples/web leaves it out.
-mln_storage = { package = "mln-rs-storage", path = "crates/mln_storage", version = "=0.0.13", default-features = false }
-mln_storage_offline = { package = "mln-rs-storage-offline", path = "crates/mln_storage_offline", version = "=0.0.13" }
-mln_style = { package = "mln-rs-style", path = "crates/mln_style", version = "=0.0.13" }
-mln_style_types = { package = "mln-rs-style-types", path = "crates/mln_style_types", version = "=0.0.13" }
-mln_system_fonts = { package = "mln-rs-system-fonts", path = "crates/mln_system_fonts", version = "=0.0.13" }
-mln_text = { package = "mln-rs-text", path = "crates/mln_text", version = "=0.0.13" }
-mln_tile = { package = "mln-rs-tile", path = "crates/mln_tile", version = "=0.0.13" }
-mln_tile_id = { package = "mln-rs-tile-id", path = "crates/mln_tile_id", version = "=0.0.13" }
-mln_util = { package = "mln-rs-util", path = "crates/mln_util", version = "=0.0.13" }
-mln_vec_map = { package = "mln-rs-vec-map", path = "crates/mln_vec_map", version = "=0.0.13" }
-mln_vulkan = { package = "mln-rs-vulkan", path = "crates/mln_vulkan", version = "=0.0.13" }
-mln_wire = { package = "mln-rs-wire", path = "crates/mln_wire", version = "=0.0.13" }
-mln_wire_derive = { package = "mln-rs-wire-derive", path = "crates/mln_wire_derive", version = "=0.0.13" }
-mln_web_host = { package = "mln-rs-web-host", path = "crates/mln_web_host", version = "=0.0.13" }
-mln_webgpu = { package = "mln-rs-webgpu", path = "crates/mln_webgpu", version = "=0.0.13" }
-pixelmatch = { package = "mln-rs-pixelmatch", path = "vendor/pixelmatch", version = "=0.0.13" }
-polylabel = { package = "mln-rs-polylabel", path = "vendor/polylabel", version = "=0.0.13" }
-render_test = { package = "mln-rs-render-test", path = "tools/render-test", version = "=0.0.13" }
-style_codegen = { package = "mln-rs-style-codegen", path = "tools/style-codegen", version = "=0.0.13" }
-supercluster = { package = "mln-rs-supercluster", path = "vendor/supercluster", version = "=0.0.13" }
+mln_storage = { package = "mln-rs-storage", path = "crates/mln_storage", version = "=0.0.12", default-features = false }
+mln_storage_offline = { package = "mln-rs-storage-offline", path = "crates/mln_storage_offline", version = "=0.0.12" }
+mln_style = { package = "mln-rs-style", path = "crates/mln_style", version = "=0.0.12" }
+mln_style_types = { package = "mln-rs-style-types", path = "crates/mln_style_types", version = "=0.0.12" }
+mln_system_fonts = { package = "mln-rs-system-fonts", path = "crates/mln_system_fonts", version = "=0.0.12" }
+mln_text = { package = "mln-rs-text", path = "crates/mln_text", version = "=0.0.12" }
+mln_tile = { package = "mln-rs-tile", path = "crates/mln_tile", version = "=0.0.12" }
+mln_tile_id = { package = "mln-rs-tile-id", path = "crates/mln_tile_id", version = "=0.0.12" }
+mln_util = { package = "mln-rs-util", path = "crates/mln_util", version = "=0.0.12" }
+mln_vec_map = { package = "mln-rs-vec-map", path = "crates/mln_vec_map", version = "=0.0.12" }
+mln_vulkan = { package = "mln-rs-vulkan", path = "crates/mln_vulkan", version = "=0.0.12" }
+mln_wire = { package = "mln-rs-wire", path = "crates/mln_wire", version = "=0.0.12" }
+mln_wire_derive = { package = "mln-rs-wire-derive", path = "crates/mln_wire_derive", version = "=0.0.12" }
+mln_web_host = { package = "mln-rs-web-host", path = "crates/mln_web_host", version = "=0.0.12" }
+mln_webgpu = { package = "mln-rs-webgpu", path = "crates/mln_webgpu", version = "=0.0.12" }
+pixelmatch = { package = "mln-rs-pixelmatch", path = "vendor/pixelmatch", version = "=0.0.12" }
+polylabel = { package = "mln-rs-polylabel", path = "vendor/polylabel", version = "=0.0.12" }
+style_codegen = { package = "mln-rs-style-codegen", path = "tools/style-codegen", version = "=0.0.12" }
+supercluster = { package = "mln-rs-supercluster", path = "vendor/supercluster", version = "=0.0.12" }
 
 # Third-party crates, for both builds (Cargo.lock pins their versions). Only
 # add a crate when nothing in the C++ core has to be ported for it.
@@ -129,17 +127,15 @@ image-webp = { version = "0.2.4" }
 # crates/mln_gl's headless backend: an EGL context. `dynamic` loads libEGL at
 # run time, so builds need no system development packages.
 khronos-egl = { version = "6.0.0", features = ["dynamic"] }
-# tools/bench: the process's CPU time, which std lacks: clock_gettime on Unix,
-# GetProcessTimes on Windows.
+# System calls that std doesn't wrap (each package says which).
 libc = { version = "0.2.191" }
-# tools/bench's GetProcessTimes, and crates/mln_gl's WGL contexts, their pixel
-# formats and the hidden windows they are current on.
+# crates/mln_gl's WGL contexts, their pixel formats and the hidden windows
+# they are current on.
 windows-sys = { version = "0.61.2", features = [
   "Win32_Foundation",
   "Win32_Graphics_Gdi",
   "Win32_Graphics_OpenGL",
   "Win32_System_LibraryLoader",
-  "Win32_System_Threading",
   "Win32_UI_WindowsAndMessaging",
 ] }
 # crates/mln_gl's window backend: loads libwayland-egl at run time.

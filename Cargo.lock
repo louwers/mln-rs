@@ -2459,38 +2459,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mln-rs-bench"
-version = "0.0.13"
-dependencies = [
- "libc",
- "mln-rs-d3d12",
- "mln-rs-feature",
- "mln-rs-gfx",
- "mln-rs-gl",
- "mln-rs-headless",
- "mln-rs-image",
- "mln-rs-map",
- "mln-rs-pixelmatch",
- "mln-rs-render-test",
- "mln-rs-renderer",
- "mln-rs-runtime",
- "mln-rs-storage",
- "mln-rs-style",
- "mln-rs-style-types",
- "mln-rs-text",
- "mln-rs-util",
- "mln-rs-vulkan",
- "mlt-core",
- "parking_lot",
- "proc-macro2",
- "serde",
- "serde_json",
- "tempfile",
- "wgpu",
- "windows-sys 0.61.2",
-]
-
-[[package]]
 name = "mln-rs-c"
 version = "0.0.13"
 dependencies = [

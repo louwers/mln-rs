@@ -35,10 +35,9 @@ const VIEWS = [
   { id: "text-font/font-faces-bidi" },
   { id: "is-supported-script/font-faces-layout" },
   // Interactions (interact()): a right-drag that turns the map back and
-  // forth, and a pinch that pans and zooms it back and forth, as
-  // mln-bench's Frame/Oscillate and Frame/OscillatePanZoom move their
-  // cameras. Each starts where some tiles come into view only for moments
-  // of each swing, shorter than a tile takes to load.
+  // forth, and a pinch that pans and zooms it back and forth. Each starts
+  // where some tiles come into view only for moments of each swing, shorter
+  // than a tile takes to load.
   {
     id: "real-world/chicago",
     name: "interaction/rotate",

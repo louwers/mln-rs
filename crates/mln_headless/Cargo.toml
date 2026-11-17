@@ -8,8 +8,7 @@ license.workspace = true
 repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
-# The frontend that render-test, the benchmarks and the storage tests draw
-# maps with. Not released: mln_runtime's offscreen render session is the
+# The frontend that render-test and the storage tests draw maps with. Not released: mln_runtime's offscreen render session is the
 # public way to render without a window.
 publish = false
 # The [[test]]s below; tests/ also holds their modules.

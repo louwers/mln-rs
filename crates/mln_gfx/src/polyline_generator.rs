@@ -202,7 +202,7 @@ impl<'a, V, S> PolylineGenerator<'a, V, S> {
     }
 
     pub fn generate(&mut self, coordinates: &GeometryCoordinates, options: &PolylineGeneratorOptions) {
-        // Pre-allocate for triangles based on measuring benchmark execution
+        // Pre-allocate for the triangles a segment typically generates.
         const APPROX_TRIANGLES_PER_SEGMENT: usize = 6;
         let len = {
             let mut l = coordinates.len();
