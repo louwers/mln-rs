@@ -104,12 +104,6 @@ pub enum Edit {
         id: String,
         common: SourceCommon,
     },
-    /// Sets the tile URLs of a vector, raster or raster-dem source's loaded
-    /// tileset; a source whose tileset hasn't loaded keeps none.
-    SetSourceTiles {
-        id: String,
-        tiles: Vec<String>,
-    },
     /// Makes a GeoJSON source load its data from `url`. Its data stays
     /// until the URL's arrives.
     SetGeoJsonUrl {

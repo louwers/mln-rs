@@ -179,36 +179,6 @@ impl<K: TilesetKind> StyleSourceType for TilesetSourceType<K> {
     }
 }
 
-/// The options and loaded tileset of `source`, if it's a vector, raster or
-/// raster-dem source.
-#[must_use]
-pub fn tileset_parts(source: &Source) -> Option<(&TilesetSourceOptions, Option<&Tileset>)> {
-    fn parts<K: TilesetKind>(data: &SourceData<TilesetSourceType<K>>) -> (&TilesetSourceOptions, Option<&Tileset>) {
-        (&data.options, data.description.as_ref())
-    }
-    if let Some(data) = SourceData::<VectorSourceType>::recover(source) {
-        Some(parts(data))
-    } else if let Some(data) = SourceData::<RasterSourceType>::recover(source) {
-        Some(parts(data))
-    } else {
-        SourceData::<RasterDemSourceType>::recover(source).map(parts)
-    }
-}
-
-/// `source` with `tiles` as the tile URLs of its loaded tileset, if it's a
-/// vector, raster or raster-dem source with one.
-#[must_use]
-pub(crate) fn with_tiles(source: &Source, tiles: Vec<String>) -> Option<Source> {
-    fn with<K: TilesetKind>(source: &Source, tiles: Vec<String>) -> Option<Source> {
-        let data = SourceData::<TilesetSourceType<K>>::recover(source)?;
-        let tileset = Tileset { tiles, ..data.description.clone()? };
-        Some(source.with_data(SourceData::<TilesetSourceType<K>> { description: Some(tileset), ..data.clone() }))
-    }
-    with::<VectorKind>(source, tiles.clone())
-        .or_else(|| with::<RasterKind>(source, tiles.clone()))
-        .or_else(|| with::<RasterDemKind>(source, tiles))
-}
-
 fn tileset_source<K: TilesetKind>(id: &str, url: Option<String>, tileset: PartialTileset, tile_size: u16) -> Source {
     Source::new(id, SourceData::<TilesetSourceType<K>>::new(TilesetSourceOptions { url, tileset, tile_size }))
 }

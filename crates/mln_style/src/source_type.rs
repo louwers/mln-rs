@@ -5,8 +5,7 @@
 //! source has ([`SourceCommon`]) and its type's [`SourceData<T>`], shared as
 //! an `Arc<dyn ErasedSource>`. A [`StyleRegistry`](crate::StyleRegistry)
 //! holds the types as `&'static dyn ErasedStyleSourceType`, by name. An
-//! erased value gets back to its type only through [`SourceData::recover`]
-//! and [`SourceData::recover_arc`].
+//! erased value gets back to its type only through [`SourceData::recover`].
 //!
 //! A source's description is what loading its options finds, such as the
 //! tileset of a TileJSON. The type says how it loads ([`StyleSourceType::load`]
@@ -243,14 +242,6 @@ impl<T: StyleSourceType> SourceData<T> {
         let any: &dyn Any = &*source.data;
         any.downcast_ref()
     }
-
-    /// `source`'s data as a `T` source's, sharing its allocation, or `None`
-    /// for another type's.
-    #[must_use]
-    pub fn recover_arc(source: &Source) -> Option<Arc<Self>> {
-        let any: Arc<dyn Any + Send + Sync> = Arc::<dyn ErasedSource>::clone(&source.data);
-        any.downcast().ok()
-    }
 }
 
 /// A source's data, whichever its type.
@@ -417,15 +408,6 @@ impl Source {
     #[must_use]
     pub fn with_description(&self, description: Option<ErasedDescription>) -> Option<Self> {
         Some(self.with_erased_data(self.data.with_description(description)?))
-    }
-
-    /// This source with its data changed by `f`, or `None` if it isn't a
-    /// `T` source.
-    #[must_use]
-    pub fn map_data<T: StyleSourceType>(&self, f: impl FnOnce(&mut SourceData<T>)) -> Option<Self> {
-        let mut data = SourceData::<T>::recover(self)?.clone();
-        f(&mut data);
-        Some(self.with_data(data))
     }
 
     /// This source with `common` in place of its common members. Logs a

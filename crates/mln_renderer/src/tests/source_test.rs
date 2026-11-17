@@ -18,8 +18,10 @@ use mln_style::layers::{Circle, Hillshade, Line, Raster};
 use mln_style::sources::custom_geometry_source::{self, Options as CustomGeometrySourceOptions};
 use mln_style::sources::custom_vector_source::{self, Options as CustomVectorSourceOptions, TileDataFormat};
 use mln_style::sources::geojson::{GeoJSONOptions, create_geojson_data, geojson_source};
+use mln_style::source_type::SourceData;
 use mln_style::sources::{
-    CustomGeometrySourceHandle, CustomVectorSourceHandle, raster_dem_source, raster_source, vector_source,
+    CustomGeometrySourceHandle, CustomVectorSourceHandle, VectorSourceType, raster_dem_source, raster_source,
+    vector_source,
 };
 use mln_style::{Edit, Source, Style};
 use mln_style_types::{ProjectionDefinition, SourceType};
@@ -30,7 +32,7 @@ use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, EventSeverity, Log, Observer as LogObserver};
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
-use mln_util::tileset::PartialTileset;
+use mln_util::tileset::{PartialTileset, Tileset};
 use parking_lot::Mutex;
 
 use crate::Registry;
@@ -173,6 +175,15 @@ fn edited(source: &Source, edit: Edit) -> Source {
     style.apply(Edit::AddSource(source.clone())).unwrap();
     style.apply(edit).unwrap();
     style.get_source(source.id()).unwrap().clone()
+}
+
+/// `source`, a vector source with a loaded tileset, with `tiles` as that
+/// tileset's tile URLs.
+fn with_tiles(source: &Source, tiles: &[&str]) -> Source {
+    let data = SourceData::<VectorSourceType>::recover(source).expect("a vector source");
+    let tileset = data.description.clone().expect("a loaded tileset");
+    let tileset = Tileset { tiles: tiles.iter().map(|&tile| tile.to_owned()).collect(), ..tileset };
+    source.with_data(SourceData::<VectorSourceType> { description: Some(tileset), ..data.clone() })
 }
 
 /// The three tiled source types the C++ tests repeat each case for.
@@ -750,15 +761,15 @@ fn empty_tileset() {
     render_source.update(&mut store, source.clone(), &layers, true, true, &parameters);
     assert!(render_source.is_loaded(&store));
 
-    source = edited(&source, Edit::SetSourceTiles { id: "source".to_owned(), tiles: vec!["tiles".to_owned()] });
+    source = with_tiles(&source, &["tiles"]);
     render_source.update(&mut store, source.clone(), &layers, true, false, &parameters);
     assert!(!render_source.is_loaded(&store));
 
-    source = edited(&source, Edit::SetSourceTiles { id: "source".to_owned(), tiles: Vec::new() });
+    source = with_tiles(&source, &[]);
     render_source.update(&mut store, source.clone(), &layers, true, false, &parameters);
     assert!(render_source.is_loaded(&store));
 
-    source = edited(&source, Edit::SetSourceTiles { id: "source".to_owned(), tiles: vec!["tiles".to_owned()] });
+    source = with_tiles(&source, &["tiles"]);
     render_source.update(&mut store, source.clone(), &layers, true, false, &parameters);
     assert!(!render_source.is_loaded(&store));
 

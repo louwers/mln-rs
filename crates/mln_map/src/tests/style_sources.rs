@@ -8,8 +8,7 @@ use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Response};
 use mln_style::source_type::SourceData;
 use mln_style::sources::geojson::{GeoJSONOptions, GeoJsonSourceType, geojson_data, geojson_source};
-use mln_style::sources::tileset::tileset_parts;
-use mln_style::sources::{ImageSourceType, image_source, vector_source as tileset_vector_source};
+use mln_style::sources::{ImageSourceType, VectorSourceType, image_source, vector_source as tileset_vector_source};
 use mln_style::{Edit, Layer};
 use mln_tile_id::CanonicalTileID;
 use mln_util::ErrorKind;
@@ -221,8 +220,8 @@ fn an_inline_tileset_describes_its_source_at_once() {
     let mut map = map_over(&file_source, &run_loop);
     let tileset = PartialTileset { tiles: Some(vec!["tiles".to_owned()]), ..PartialTileset::default() };
     map.add_source(tileset_vector_source("source", None, tileset)).unwrap();
-    let (_, loaded) = tileset_parts(map.source("source").unwrap()).unwrap();
-    assert_eq!(vec!["tiles".to_owned()], loaded.expect("a tileset").tiles);
+    let data = SourceData::<VectorSourceType>::recover(map.source("source").unwrap()).unwrap();
+    assert_eq!(vec!["tiles".to_owned()], data.description.as_ref().expect("a tileset").tiles);
     assert!(map.style_loaded());
 }
 

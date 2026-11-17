@@ -439,17 +439,6 @@ impl Style {
                     Arc::make_mut(&mut self.sources).set(source);
                 }
             }
-            Edit::SetSourceTiles { id, tiles } => {
-                let source = self.sources.get(&id).ok_or_else(|| source_not_found(&id))?;
-                let Some((_, tileset)) = crate::sources::tileset::tileset_parts(source) else {
-                    return Err(not_a(&id, "a vector, raster or raster-dem source"));
-                };
-                if tileset.is_some_and(|tileset| tileset.tiles != tiles)
-                    && let Some(source) = crate::sources::tileset::with_tiles(source, tiles)
-                {
-                    Arc::make_mut(&mut self.sources).set(source);
-                }
-            }
             Edit::SetGeoJsonUrl { id, url } => {
                 self.update_source::<GeoJsonSourceType>(&id, "a GeoJSON source", |data| {
                     data.options.url = Some(url);

@@ -10,9 +10,11 @@ use mln_util::tileset::{PartialTileset, RasterEncoding, Tileset, VectorEncoding}
 use super::util::parse_json;
 use crate::conversion::Error;
 use crate::conversion::source::convert_source;
-use crate::source_type::{Described, ErasedDescription, Load, Source};
+use crate::source_type::{Described, ErasedDescription, Load, Source, SourceData};
 use crate::sources::geojson::{GeoJSONOptions, geojson_source};
-use crate::sources::tileset::{raster_dem_source, raster_source, tileset_parts, vector_source};
+use crate::sources::tileset::{
+    RasterDemKind, RasterKind, TilesetKind, TilesetSourceType, VectorKind, raster_dem_source, raster_source, vector_source,
+};
 use crate::{Edit, Style, StyleRegistry};
 
 /// What `source`'s type describes `data`, its fetched resource, as.
@@ -36,10 +38,16 @@ fn ready(source: &Source) -> Source {
     source.with_description(Some(description)).expect("a description of the source's type")
 }
 
-/// The tileset `source` loads from a TileJSON with `"minzoom": 4, "maxzoom": 12`.
-fn tileset_loaded_from_tilejson(source: &Source) -> Tileset {
+/// The loaded tileset of `source`, a tileset source of the kind `K`.
+fn loaded_tileset<K: TilesetKind>(source: &Source) -> Option<Tileset> {
+    SourceData::<TilesetSourceType<K>>::recover(source).expect("a tileset source of the kind").description.clone()
+}
+
+/// The tileset `source`, a tileset source of the kind `K`, loads from a
+/// TileJSON with `"minzoom": 4, "maxzoom": 12`.
+fn tileset_loaded_from_tilejson<K: TilesetKind>(source: &Source) -> Tileset {
     let source = described(source, br#"{ "tilejson": "2.1.0", "tiles": [ "tiles" ], "minzoom": 4, "maxzoom": 12 }"#);
-    tileset_parts(&source).and_then(|(_, tileset)| tileset.cloned()).expect("a tileset")
+    loaded_tileset::<K>(&source).expect("a tileset")
 }
 
 fn style_with(source: Source) -> Style {
@@ -115,45 +123,18 @@ fn geojson_that_does_not_parse_describes_no_data() {
     assert!(matches!(describe(&source, b"not json"), Ok(None)));
 }
 
-fn tiles(style: &Style) -> Option<Vec<String>> {
-    tileset_parts(style.get_source("source").unwrap()).and_then(|(_, tileset)| tileset.map(|t| t.tiles.clone()))
-}
-
-// gtest: Source.VectorSourceSetTiles
+// A vector source's TileJSON gives it its tileset, which changes its metadata.
 #[test]
-fn vector_source_set_tiles() {
-    let tileset = PartialTileset { tiles: Some(vec!["url".to_owned()]), ..Default::default() };
-    let source = vector_source("source", None, tileset);
-    let mut style = style_with(source.clone());
-    // Tiles set before the tileset loads change nothing.
-    style.apply(Edit::SetSourceTiles { id: "source".to_owned(), tiles: vec!["unused".to_owned()] }).unwrap();
-    assert_eq!(None, tiles(&style));
-
-    let mut style = style_with(ready(&source));
-    assert_eq!(Some(vec!["url".to_owned()]), tiles(&style));
-    style.apply(Edit::SetSourceTiles { id: "source".to_owned(), tiles: vec!["new".to_owned()] }).unwrap();
-    assert_eq!(Some(vec!["new".to_owned()]), tiles(&style));
-
-    let error = style_with(geojson_source("source", GeoJSONOptions::default_options()))
-        .apply(Edit::SetSourceTiles { id: "source".to_owned(), tiles: Vec::new() })
-        .unwrap_err();
-    assert_eq!(r#"source "source" is not a vector, raster or raster-dem source"#, error.message);
-}
-
-// gtest: Source.VectorSourceUrlSetTiles
-#[test]
-fn vector_source_url_set_tiles() {
+fn a_tilejson_describes_a_vector_source() {
     let source = vector_source("source", Some("url".to_owned()), PartialTileset::default());
     let mut style = style_with(source.clone());
     let instance = source.instance();
     let description = describe(&source, br#"{"tiles": ["tiles"]}"#);
     let edit = Edit::SetSourceDescription { id: "source".to_owned(), instance, load: 0, result: description };
     style.apply(edit).unwrap();
-    assert_eq!(Some(vec!["tiles".to_owned()]), tiles(&style));
-    assert!(style.get_source("source").unwrap().metadata_changed_from(&source));
-
-    style.apply(Edit::SetSourceTiles { id: "source".to_owned(), tiles: vec!["new".to_owned()] }).unwrap();
-    assert_eq!(Some(vec!["new".to_owned()]), tiles(&style));
+    let source_now = style.get_source("source").unwrap();
+    assert_eq!(Some(vec!["tiles".to_owned()]), loaded_tileset::<VectorKind>(source_now).map(|tileset| tileset.tiles));
+    assert!(source_now.metadata_changed_from(&source));
 }
 
 #[test]
@@ -182,7 +163,7 @@ fn raster_dem_inline_zoom_overrides_tile_json() {
         PartialTileset { raster_encoding: Some(RasterEncoding::Terrarium), max_zoom: Some(15), ..Default::default() },
         512,
     );
-    let tileset = tileset_loaded_from_tilejson(&source);
+    let tileset = tileset_loaded_from_tilejson::<RasterDemKind>(&source);
     // The inline maxzoom wins over the TileJSON's; minzoom was not given inline, so the TileJSON
     // value is kept.
     assert_eq!(4, tileset.zoom_range.min);
@@ -199,7 +180,7 @@ fn raster_inline_zoom_overrides_tile_json() {
         PartialTileset { max_zoom: Some(16), ..Default::default() },
         512,
     );
-    let tileset = tileset_loaded_from_tilejson(&source);
+    let tileset = tileset_loaded_from_tilejson::<RasterKind>(&source);
     // The inline maxzoom wins; minzoom was not given inline, so the TileJSON's is kept.
     assert_eq!(4, tileset.zoom_range.min);
     assert_eq!(16, tileset.zoom_range.max);
@@ -209,7 +190,7 @@ fn raster_inline_zoom_overrides_tile_json() {
 #[test]
 fn raster_dem_tile_json_zoom_kept_without_inline_override() {
     let source = raster_dem_source("source", Some("url".to_owned()), PartialTileset::default(), 512);
-    let tileset = tileset_loaded_from_tilejson(&source);
+    let tileset = tileset_loaded_from_tilejson::<RasterDemKind>(&source);
     assert_eq!(4, tileset.zoom_range.min);
     assert_eq!(12, tileset.zoom_range.max);
 }
@@ -226,14 +207,13 @@ fn converted_source(json: &str) -> Result<Source, String> {
 fn vector_sources_take_the_style_sparse() {
     let source =
         converted_source(r#"{"type": "vector", "url": "url", "sparse": true}"#).unwrap_or_else(|e| panic!("{e}"));
-    assert!(tileset_loaded_from_tilejson(&source).sparse);
+    assert!(tileset_loaded_from_tilejson::<VectorKind>(&source).sparse);
 
     let source = converted_source(r#"{"type": "vector", "url": "url"}"#).unwrap();
-    assert!(!tileset_loaded_from_tilejson(&source).sparse);
+    assert!(!tileset_loaded_from_tilejson::<VectorKind>(&source).sparse);
 
     let source = ready(&converted_source(r#"{"type": "vector", "tiles": ["tiles"], "sparse": true}"#).unwrap());
-    let (_, loaded) = tileset_parts(&source).expect("a tileset source");
-    assert!(loaded.unwrap().sparse);
+    assert!(loaded_tileset::<VectorKind>(&source).unwrap().sparse);
 
     let Err(error) = converted_source(r#"{"type": "vector", "url": "url", "sparse": "yes"}"#) else {
         panic!("an invalid sparse converts");
@@ -245,5 +225,5 @@ fn vector_sources_take_the_style_sparse() {
 #[test]
 fn vector_source_style_encoding_applies_to_tile_json() {
     let source = converted_source(r#"{"type": "vector", "url": "url", "encoding": "mlt"}"#).unwrap();
-    assert_eq!(Some(VectorEncoding::MLT), tileset_loaded_from_tilejson(&source).vector_encoding);
+    assert_eq!(Some(VectorEncoding::MLT), tileset_loaded_from_tilejson::<VectorKind>(&source).vector_encoding);
 }
