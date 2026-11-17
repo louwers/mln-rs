@@ -9,7 +9,7 @@
 //
 // A glyph PBF is parsed on the renderer's thread pool as soon as it arrives,
 // so that its bytes don't wait for the next update and its parsing stays off
-// the render thread. Its glyphs go through the `GlyphCache` the store is
+// the render thread. Its glyphs then go through the `GlyphCache` the store is
 // given (thread-safe, so renderers on other threads can share it), and each
 // range keeps its glyphs in one shared map; `Entry::glyphs` holds only the
 // local and HarfBuzz glyphs.
@@ -60,8 +60,8 @@ pub(crate) type HBShapeResults = VecMap<FontStack, VecMap<GlyphIDType, BTreeMap<
 
 /// What a glyph range's response brought.
 pub(crate) enum GlyphData {
-    /// The glyphs of a glyph PBF, interned in the store's glyph cache.
-    Glyphs(Vec<Arc<Glyph>>),
+    /// The glyphs of a glyph PBF.
+    Glyphs(Vec<Glyph>),
     /// A font file, which the font-face engine loads on the render thread.
     Font(FontData),
 }
@@ -406,7 +406,7 @@ impl GlyphStore {
 
         let inbox = inbox.clone();
         let callback_font_stack = font_stack.clone();
-        let parser = (range.type_ == GlyphIDType::FontPBF).then(|| (self.pool.clone(), Arc::clone(&self.glyph_cache)));
+        let pool = (range.type_ == GlyphIDType::FontPBF).then(|| self.pool.clone());
         // Only the first answer applies: the range is no longer loading once
         // it has one. A revalidation's not-modified isn't an answer.
         let mut answered = false;
@@ -416,11 +416,10 @@ impl GlyphStore {
             }
             let font_stack = callback_font_stack.clone();
             let inbox = inbox.clone();
-            match (font_data(response), &parser) {
-                (Ok(Some(data)), Some((pool, glyph_cache))) => {
-                    let glyph_cache = Arc::clone(glyph_cache);
+            match (font_data(response), &pool) {
+                (Ok(Some(data)), Some(pool)) => {
                     pool.schedule(Box::new(move || {
-                        let result = parse_glyphs(range, &data, &glyph_cache);
+                        let result = parse_glyphs(range, &data);
                         inbox.send(TileEvent::Glyphs { font_stack, range, id, result });
                     }));
                 }
@@ -447,10 +446,12 @@ impl GlyphStore {
         let mut range_glyphs = None;
         match data {
             Some(GlyphData::Glyphs(glyphs)) => {
+                // Interned here rather than on the pool, where a renderer's
+                // ranges would contend for the cache's lock.
                 let interned: GlyphCacheRange = glyphs
                     .into_iter()
                     .filter(|glyph| !self.local_glyph_rasterizer.can_rasterize_glyph(font_stack, glyph.id))
-                    .map(|glyph| (glyph.id, glyph))
+                    .map(|glyph| (glyph.id, self.glyph_cache.intern_glyph(glyph)))
                     .collect();
                 range_glyphs = Some(self.glyph_cache.intern_range(interned));
             }
@@ -604,10 +605,10 @@ fn font_data(response: Response) -> Result<Option<FontData>, Error> {
     }
 }
 
-/// The glyphs of `range`'s glyph PBF `data`, interned in `glyph_cache`.
-fn parse_glyphs(range: GlyphRange, data: &FontData, glyph_cache: &GlyphCache) -> GlyphResult {
+/// The glyphs of `range`'s glyph PBF `data`.
+fn parse_glyphs(range: GlyphRange, data: &FontData) -> GlyphResult {
     let glyphs = parse_glyph_pbf(&range, data.as_bytes()).map_err(|error| Error::native(error.to_string()))?;
-    Ok(Some(GlyphData::Glyphs(glyphs.into_iter().map(|glyph| glyph_cache.intern_glyph(glyph)).collect())))
+    Ok(Some(GlyphData::Glyphs(glyphs)))
 }
 
 /// Whether `glyph_id` is a glyph a layout draws: a font face's glyph 0 only
