@@ -295,6 +295,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "block-buffer"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2f6c7dbe95a6ed67ad9f18e57daf93a2f034c524b99fd2b76d18fdfeb6660aa"
+dependencies = [
+ "hybrid-array",
+]
+
+[[package]]
 name = "block2"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -582,6 +591,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "const-oid"
+version = "0.10.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be95d4a884358a21a199689323c29e9256b4a1b315e22f183d155422041d3a9a"
+
+[[package]]
 name = "core-foundation"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -674,6 +689,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 
 [[package]]
+name = "crypto-common"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce6e4c961d6cd6c9a86db418387425e8bdeaf05b3c8bc1411e6dca4c252f1453"
+dependencies = [
+ "hybrid-array",
+]
+
+[[package]]
 name = "csscolorparser"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -716,6 +740,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "digest"
+version = "0.11.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f1dd6dbb5841937940781866fa1281a1ff7bd3bf827091440879f9994983d5c2"
+dependencies = [
+ "block-buffer",
+ "const-oid",
+ "crypto-common",
 ]
 
 [[package]]
@@ -1708,6 +1743,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "hybrid-array"
+version = "0.4.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "27f864f10dfb56725ce5ce5472bc52252c8f93a4ab86327122cebf62c5f59a17"
+dependencies = [
+ "typenum",
+]
+
+[[package]]
 name = "hyper"
 version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2456,6 +2500,52 @@ dependencies = [
  "mln-rs-vulkan",
  "mln-rs-web-host",
  "mln-rs-webgpu",
+]
+
+[[package]]
+name = "mln-rs-bench"
+version = "0.0.12"
+dependencies = [
+ "libc",
+ "mln-rs-conversion",
+ "mln-rs-d3d12",
+ "mln-rs-expression",
+ "mln-rs-feature",
+ "mln-rs-gfx",
+ "mln-rs-gl",
+ "mln-rs-headless",
+ "mln-rs-image",
+ "mln-rs-map",
+ "mln-rs-renderer",
+ "mln-rs-runtime",
+ "mln-rs-sprite",
+ "mln-rs-storage",
+ "mln-rs-style",
+ "mln-rs-style-types",
+ "mln-rs-text",
+ "mln-rs-tile",
+ "mln-rs-tile-id",
+ "mln-rs-util",
+ "mln-rs-vulkan",
+ "parking_lot",
+ "pmtiles",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "wgpu",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "mln-rs-bench-snapshot"
+version = "0.0.12"
+dependencies = [
+ "mlt-core",
+ "pmtiles",
+ "serde_json",
+ "sha2",
+ "tempfile",
 ]
 
 [[package]]
@@ -4100,6 +4190,7 @@ dependencies = [
  "flate2",
  "integer-encoding",
  "thiserror 2.0.21",
+ "twox-hash",
 ]
 
 [[package]]
@@ -4894,6 +4985,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha2"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47d7069beb7d6ac7b9acd1039986e73443f24234f41074da099d6f994ac9ad19"
+dependencies = [
+ "cfg-if",
+ "cpufeatures",
+ "digest",
+]
+
+[[package]]
 name = "shlex"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5424,6 +5526,12 @@ name = "ttf-parser"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
+
+[[package]]
+name = "twox-hash"
+version = "2.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "86a801b3cea342a06d468c8710662aa29e5e05e4f5c0d62f00bbb7f2ad7941c2"
 
 [[package]]
 name = "type-map"

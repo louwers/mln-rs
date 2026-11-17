@@ -79,10 +79,10 @@ its sizes are the ones it uses.
 | `micro/feature-state/apply/dense`    | What does applying feature state to a dense tile's roads and buildings cost?                              |
 | `micro/worker-codec/tile/sparse`     | What does a sparse tile's job and its laid-out reply cost to cross between the map and a worker instance? |
 | `micro/worker-codec/tile/dense`      | What does a dense tile's job and its laid-out reply cost to cross between the map and a worker instance?  |
-| `micro/run-loop/timers/small`        | What do the timers of 64 requests in flight cost a run loop?                                              |
-| `micro/run-loop/timers/large`        | What do the timers of 4,096 requests in flight cost a run loop?                                           |
-| `micro/runtime/commands/small`       | What does a command cost through the runtime's queue and a turn of its loop, sent one per turn?           |
-| `micro/runtime/commands/large`       | What does a command cost through the runtime's queue and a turn of its loop, sent 256 per turn?           |
+| `micro/queue/commands/small`         | What does a command cost through a thread's queue and a turn of it, sent one per turn?                    |
+| `micro/queue/commands/large`         | What does a command cost through a thread's queue and a turn of it, sent 256 per turn?                    |
+| `micro/queue/timers/small`           | What do the deadlines of 64 requests in flight cost a thread's queue?                                     |
+| `micro/queue/timers/large`           | What do the deadlines of 4,096 requests in flight cost a thread's queue?                                  |
 | `macro/load/street`                  | What does showing a city's streets from nothing take, until the first complete frame?                     |
 | `macro/load/globe`                   | What does showing the whole world on the globe from nothing take, until the first complete frame?         |
 | `macro/load/cjk`                     | What does showing a city labelled in Japanese script from nothing take, until the first complete frame?   |
@@ -106,9 +106,10 @@ change in how its cost grows shows as a changed ratio between the two.
 
 Macro scenarios drive a map over the fixtures one step at a time on the
 scenario's own thread (see [Driving a map](#driving-a-map)), the core that the
-runtime runs on its thread. `macro/load/runtime` instead loads a map through
-`mln_runtime`, as an application or the C API does: its thread, its workers and
-an offscreen render session, which interleave differently from run to run.
+runtime runs on its thread, with its background work on that thread too.
+`macro/load/runtime` instead loads a map through `mln_runtime`, as an
+application or the C API does: its thread, its pool's workers and an offscreen
+render session, which interleave differently from run to run.
 
 ## Fixtures
 
@@ -193,9 +194,8 @@ repeat exactly in most scenarios. Instructions move by a few hundredths of a
 percent between runs of one binary, but also with where the binary's code lies,
 which an edit anywhere can change: by a few tenths of a percent in most
 scenarios, and by a few percent in some. Counts that depend on how several
-threads interleave, such as the peak heap while workers lay tiles out in
-parallel, or every count of `macro/load/runtime`, move by more. Times depend on
-the machine and its load.
+threads interleave, such as every count of `macro/load/runtime`, move by more.
+Times depend on the machine and its load.
 
 ## Comparing
 
@@ -343,21 +343,20 @@ the scenario drives it, so that it does the same work on every run:
 
 - Each frame is a tick of a 60 Hz frame clock that only frames advance, so
   symbol placement, fades and transitions don't depend on how long a frame took.
-- The map's background work (file reads, tile layout, glyphs, the sprite) runs
-  on the process's thread pool behind `support::workers::Workers`, which knows
-  when none is left. `HeadlessMap::load`, `settle` and `render_still` wait for
-  it before each frame, so each frame has everything the frames before it asked
-  for, and a map loads in the same steps on every run. It wraps each task to
-  track it, which adds an allocation per task to the counts of both sides.
+- The map's background work (file reads, tile layout, glyphs, the sprite,
+  GeoJSON slicing) runs on a pool without threads, as in the browser:
+  `HeadlessMap::load`, `settle` and `render_still` run all of it before each
+  frame, so each frame has everything the frames before it asked for, and a map
+  loads in the same steps, in the same order, on every run. A macro scenario's
+  times are therefore the sum of its work, not what the runtime's four workers
+  would take in parallel.
 - `support::map::Frontend` holds the GPU device and target, made apart from the
   map, so that a scenario can leave them out of what it measures. A frame's part
   includes waiting for the GPU to finish it.
-- A GeoJSON source that `HeadlessMap::add_geojson_source` adds cuts its tiles on
-  those workers too, rather than on threads of its own.
 - `support::latency::Latency` holds a file source's answers back for a number of
-  frames: a scenario that calls its `tick` before each frame, then waits for the
-  workers, sees each answer arrive the same number of frames after its request
-  on every run.
+  frames: a scenario that calls its `tick` before each frame, then runs the
+  background work, sees each answer arrive the same number of frames after its
+  request on every run.
 
 ### Repeating counts
 

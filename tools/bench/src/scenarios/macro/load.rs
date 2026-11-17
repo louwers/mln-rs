@@ -82,7 +82,7 @@ fn load(bench: &mut Bench, fixtures: &Fixtures, style: &str, camera: &CameraOpti
     let frontend = Frontend::new(VIEW);
     bench.gpu = Some(frontend.gpu());
     let (map, frames) = bench.measure(|| {
-        let file_source = fixtures.file_source(frontend.workers());
+        let file_source = fixtures.file_source(frontend.pool());
         let mut map = HeadlessMap::new(frontend, MapMode::Continuous, file_source);
         map.jump(camera);
         map.map().load_style_json(style);
@@ -124,7 +124,8 @@ fn runtime(bench: &mut Bench) {
         bench.gpu = Some(frontend.gpu());
         frontend.device()
     };
-    let options = RuntimeOptions { asset_path: Some(fixtures.dir().to_owned()), cache_path: None };
+    let options =
+        RuntimeOptions { asset_path: Some(fixtures.dir().to_owned()), cache_path: None, network_status: None };
     let map_options = MapOptions {
         map: mln_map::MapOptions { size: VIEW, pixel_ratio: 1.0, map_mode: MapMode::Static, ..Default::default() },
         // The fonts of the machine would make the work differ between

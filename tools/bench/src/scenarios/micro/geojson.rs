@@ -5,7 +5,6 @@ use std::hint::black_box;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use mln_actor::scheduler::{Scheduler, Task};
 use mln_style::sources::geojson::{GeoJSONOptions, TileFeatures, create_geojson_data};
 use mln_tile_id::CanonicalTileID;
 
@@ -105,30 +104,18 @@ fn cut(bench: &mut Bench, every: usize) {
         .collect();
     let features = Arc::new(AtomicUsize::new(0));
     let data = bench.measure(|| {
-        let data = create_geojson_data(geojson, Arc::new(Unused), &options).expect("GeoJSON data");
+        let data = create_geojson_data(geojson, &options).expect("GeoJSON data");
         for tile in &tiles {
             let features = Arc::clone(&features);
             let cut = move |tile: TileFeatures| {
                 features.fetch_add(tile.len(), Ordering::Relaxed);
                 drop(black_box(tile));
             };
-            data.get_tile(tile, Box::new(cut), true);
+            data.get_tile(tile, Box::new(cut), None);
         }
         data
     });
     assert!(features.load(Ordering::Relaxed) > tiles.len(), "the tiles hold the countries");
     drop(data);
     bench.per("kb", (text.len() / 1024) as u64);
-}
-
-/// The scheduler of data whose tiles are cut on the calling thread: it never
-/// gets a task.
-struct Unused;
-
-impl Scheduler for Unused {
-    fn schedule(&self, _task: Task) {
-        unreachable!("tiles cut on the calling thread schedule nothing");
-    }
-
-    fn wait_for_empty(&self) {}
 }

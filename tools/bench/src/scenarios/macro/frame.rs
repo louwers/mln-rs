@@ -93,7 +93,7 @@ fn frames(bench: &mut Bench, mut map: HeadlessMap, camera: impl Fn(usize) -> Cam
 
     let drawn = map.frames();
     let objects = map.gpu_objects_created();
-    let tasks = map.background_tasks();
+    let tasks = map.background_work();
     let mut times = Vec::with_capacity(FRAMES);
     for frame in 0..FRAMES {
         map.jump(&camera(frame));
@@ -101,7 +101,7 @@ fn frames(bench: &mut Bench, mut map: HeadlessMap, camera: impl Fn(usize) -> Cam
         bench.measure(|| map.draw_frame());
         times.push(start.elapsed());
     }
-    assert_eq!(map.background_tasks(), tasks, "the path needs tiles it didn't start with");
+    assert_eq!(map.background_work(), tasks, "the path needs tiles it didn't start with");
     assert_eq!(map.frames() - drawn, FRAMES as u64, "one frame per camera");
     bench.per("frame", FRAMES as u64);
     bench.bytes("gpu_buffers", map.gpu_buffer_bytes());

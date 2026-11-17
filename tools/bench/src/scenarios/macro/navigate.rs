@@ -84,7 +84,7 @@ fn street(bench: &mut Bench) {
 
     let frontend = Frontend::new(VIEW);
     bench.gpu = Some(frontend.gpu());
-    let latency = Latency::new(fixtures.file_source(frontend.workers()));
+    let latency = Latency::new(fixtures.file_source(frontend.pool()));
     let mut map = HeadlessMap::new(frontend, MapMode::Continuous, Arc::<Latency>::clone(&latency));
     map.jump(&camera(0));
     map.map().load_style_json(&fixtures.style(Tiles::Street));

@@ -123,7 +123,7 @@ mod tests {
 
     fn request(latency: &Latency, answered: &Arc<AtomicUsize>) -> Request {
         let answered = Arc::clone(answered);
-        let (request, responder) = Request::direct(move |_| {
+        let (request, responder) = Request::new(move |_| {
             answered.fetch_add(1, Ordering::SeqCst);
         });
         latency.load(&Resource::style("asset://style.json"), responder);

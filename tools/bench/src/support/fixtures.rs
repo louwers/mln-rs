@@ -5,8 +5,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use mln_actor::scheduler::SchedulerPtr;
 use mln_storage::{FileSource, Loader};
+use mln_util::pool::Pool;
 
 use crate::fixtures::{CACHE_VARIABLE, Manifest, cache_root};
 use crate::scenario::Bench;
@@ -123,9 +123,9 @@ impl Fixtures {
 
     /// A file source that loads `asset://` URLs from the snapshot and local
     /// files on `pool`, and nothing from the network.
-    pub(crate) fn file_source(&self, pool: SchedulerPtr) -> Arc<dyn FileSource> {
+    pub(crate) fn file_source(&self, pool: &Pool) -> Arc<dyn FileSource> {
         let dir = self.dir.to_str().expect("the fixtures' directory is UTF-8");
-        Arc::new(Loader::builder().asset_path(dir).pool(pool).build())
+        Arc::new(Loader::builder(pool).asset_path(dir).build())
     }
 }
 

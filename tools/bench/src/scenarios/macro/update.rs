@@ -335,7 +335,7 @@ fn feature_state(bench: &mut Bench) {
         |hovered: bool| -> FeatureState { std::iter::once(("hover".to_owned(), Value::Bool(hovered))).collect() };
     let (mut row, mut column) = (ROWS / 2, COLUMNS / 2);
     let mut hovered: Option<String> = None;
-    let tasks = map.background_tasks();
+    let tasks = map.background_work();
     for _ in 0..FRAMES {
         match random.below(4) {
             0 => row = (row + 1).min(ROWS - 1),
@@ -353,7 +353,7 @@ fn feature_state(bench: &mut Bench) {
         });
         hovered = Some(next);
     }
-    assert_eq!(map.background_tasks(), tasks, "a hover state that needs background work");
+    assert_eq!(map.background_work(), tasks, "a hover state that needs background work");
     bench.per("frame", FRAMES as u64);
     bench.bytes("gpu_buffers", map.gpu_buffer_bytes());
     if let Some(path) = &bench.image {

@@ -6,20 +6,20 @@
 
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use mln_actor::RunLoop;
-use mln_actor::scheduler::SchedulerPtr;
 use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapEvent, MapMode, MapOptions, RenderFrameStatus, RenderMode};
 use mln_runtime::Device;
 use mln_storage::FileSource;
 use mln_style::sources::geojson::{GeoJSONOptions, GeoJsonSourceType, create_geojson_data, geojson_source};
 use mln_util::geo::LatLng;
+use mln_util::pool::Pool;
+use mln_util::queue::Queue;
 use mln_util::size::Size;
 
 use super::fixtures::Fixtures;
-use super::workers::Workers;
 use crate::environment::Gpu;
 use crate::scenario::Bench;
 
@@ -30,13 +30,20 @@ const FRAME_INTERVAL: Duration = Duration::from_nanos(16_666_667);
 /// draw: a guard against a map that never completes.
 const FRAME_LIMIT: u64 = 10_000;
 
-/// The GPU device and the offscreen target a map draws into, with the run
-/// loop and the workers the map runs on. Making one is the part of a map's
+/// The GPU device and the offscreen target a map draws into, with the
+/// queue and the pool the map runs on. Making one is the part of a map's
 /// start that a scenario leaves out.
+///
+/// The pool has no threads: the map's background work (file reads, tile
+/// layout, glyph and sprite parsing, GeoJSON slicing) runs on the calling
+/// thread when the scenario waits for it, one task after another in the
+/// same order on every run, as in the browser.
 pub(crate) struct Frontend {
-    /// The loop of the map and the frontend, on the calling thread.
-    run_loop: RunLoop,
-    workers: Arc<Workers>,
+    /// The frontend's queue, on the calling thread.
+    queue: Queue<()>,
+    pool: Pool,
+    /// The times work arrived at the pool while none was queued.
+    arrivals: Arc<AtomicU64>,
     frontend: HeadlessFrontend,
 }
 
@@ -44,17 +51,21 @@ impl Frontend {
     /// A frontend of `size` at pixel ratio 1, on the device the tests
     /// render on: the backend `MLN_RENDER_BACKEND` names, or WebGPU.
     pub(crate) fn new(size: Size) -> Frontend {
-        let workers = Workers::new();
-        let pool: SchedulerPtr = Arc::<Workers>::clone(&workers);
-        let run_loop = RunLoop::with_pool(pool);
-        let frontend = HeadlessFrontend::new(size, 1.0, &run_loop).expect("a headless frontend");
-        Frontend { run_loop, workers, frontend }
+        let queue = Queue::new();
+        let pool = Pool::local();
+        let arrivals = Arc::new(AtomicU64::new(0));
+        let counter = Arc::clone(&arrivals);
+        pool.set_waker(Some(Arc::new(move || {
+            counter.fetch_add(1, Ordering::Relaxed);
+        })));
+        let frontend = HeadlessFrontend::new(size, 1.0, &queue, &pool).expect("a headless frontend");
+        Frontend { queue, pool, arrivals, frontend }
     }
 
-    /// Where a file source for the map should run its reads, so that
-    /// waiting for the workers waits for them too.
-    pub(crate) fn workers(&self) -> SchedulerPtr {
-        Arc::<Workers>::clone(&self.workers)
+    /// The pool a file source for the map should run its reads on, so that
+    /// waiting for the map's work runs them too.
+    pub(crate) fn pool(&self) -> &Pool {
+        &self.pool
     }
 
     /// The device the frontend draws on, which other maps' render sessions
@@ -138,19 +149,22 @@ pub(crate) struct HeadlessMap {
     frames: u64,
     incomplete: u64,
     last_frame: Option<RenderFrameStatus>,
+    /// [`background_work`](Self::background_work) when the pool was last
+    /// emptied.
+    drained: u64,
 }
 
 impl HeadlessMap {
     /// A map in `mode`, the frontend's size, whose resources come from
     /// `file_source`, attached to the frontend. Make `file_source` run on
-    /// [`Frontend::workers`].
+    /// [`Frontend::pool`].
     pub(crate) fn new(mut frontend: Frontend, mode: MapMode, file_source: Arc<dyn FileSource>) -> HeadlessMap {
         let size = frontend.frontend.size();
         let options = MapOptions { map_mode: mode, size, pixel_ratio: 1.0, ..Default::default() };
-        let map = Map::with_file_source(file_source, options, &frontend.run_loop).expect("a map");
-        frontend.frontend.attach(&map);
+        let mut map = Map::with_file_source(file_source, options, &frontend.pool).expect("a map");
+        frontend.frontend.attach(&mut map);
         let clock = Instant::now() + Duration::from_hours(24);
-        HeadlessMap { map, frontend, clock, frames: 0, incomplete: 0, last_frame: None }
+        HeadlessMap { map, frontend, clock, frames: 0, incomplete: 0, last_frame: None, drained: 0 }
     }
 
     /// A map as [`new`](Self::new) makes, over the fixtures, on a new
@@ -166,7 +180,7 @@ impl HeadlessMap {
     ) -> HeadlessMap {
         let frontend = Frontend::new(size);
         bench.gpu = Some(frontend.gpu());
-        let file_source = fixtures.file_source(frontend.workers());
+        let file_source = fixtures.file_source(frontend.pool());
         let mut map = HeadlessMap::new(frontend, mode, file_source);
         map.jump(camera);
         map.map().load_style_json(style);
@@ -181,9 +195,10 @@ impl HeadlessMap {
         self.map.jump_to(camera);
     }
 
-    /// The background tasks the map has started so far.
-    pub(crate) fn background_tasks(&self) -> u64 {
-        self.frontend.workers.started()
+    /// How many times background work has arrived at the map's idle pool
+    /// so far: unchanged while the map starts none.
+    pub(crate) fn background_work(&self) -> u64 {
+        self.frontend.arrivals.load(Ordering::Relaxed)
     }
 
     /// The frames drawn so far.
@@ -199,20 +214,20 @@ impl HeadlessMap {
     /// Runs the map's background work, and what it sends back to the map
     /// and its renderer, until none is left. Returns whether there was any.
     pub(crate) fn wait_for_workers(&mut self) -> bool {
-        let mut any = false;
+        let mut any = self.background_work() != self.drained;
         loop {
-            self.frontend.workers.wait_until_idle();
-            let mut ran = false;
-            while self.frontend.run_loop.run_once() {
-                ran = true;
-            }
+            self.frontend.pool.run_all();
+            // The pool is empty now, so any task spawned from here on
+            // arrives at an idle pool, and counts.
+            self.drained = self.background_work();
+            let mut ran = self.frontend.queue.run_once(&mut ());
             // The map's handling of what the workers sent can start more
             // work, such as the requests of a style that loaded.
             if self.map.has_reports() {
                 self.map.process_events();
                 ran = true;
             }
-            if !ran && self.frontend.workers.is_idle() {
+            if !ran && self.background_work() == self.drained {
                 self.observe();
                 return any;
             }
@@ -225,7 +240,7 @@ impl HeadlessMap {
     /// presenting a frame. Runs what is ready on the map's run loop first,
     /// but doesn't wait for the workers. Returns how the frame went.
     pub(crate) fn draw_frame(&mut self) -> RenderFrameStatus {
-        while self.frontend.run_loop.run_once() {}
+        self.frontend.queue.run_once(&mut ());
         self.map.set_frame_time(Some(self.clock));
         self.clock += FRAME_INTERVAL;
         // An update at this frame's time, whether or not the map had one.
@@ -294,13 +309,10 @@ impl HeadlessMap {
     /// Replaces the data of the GeoJSON source `id` with the GeoJSON text
     /// `json`, as an application's update through the runtime does: parses
     /// it, indexes it for tiling and gives it to the source. The source's
-    /// tiles are cut on the map's workers, where a GeoJSON source otherwise
-    /// cuts them on threads of its own, so that
-    /// [`wait_for_workers`](Self::wait_for_workers) waits for them too.
+    /// tiles are cut on the renderer's pool, the map's.
     pub(crate) fn set_geojson(&mut self, id: &str, json: &str) {
         let geojson = mln_runtime::bench::parse_geojson(json).expect("GeoJSON");
-        let data = create_geojson_data(geojson, self.frontend.workers(), &GeoJSONOptions::default_options())
-            .expect("GeoJSON that tiles");
+        let data = create_geojson_data(geojson, &GeoJSONOptions::default_options()).expect("GeoJSON that tiles");
         self.map
             .edit_style(|style| style.apply(GeoJsonSourceType::set_data(id, Some(data))))
             .expect("a GeoJSON source");

@@ -24,7 +24,6 @@ layout-probe = []
 # any base's Cargo.lock satisfies them as it stands.
 [dependencies]
 feature = { package = "mln-rs-feature", path = "../../vendor/feature" }
-mln_actor = { package = "mln-rs-actor", path = "../../crates/mln_actor" }
 mln_conversion = { package = "mln-rs-conversion", path = "../../crates/mln_conversion" }
 mln_expression = { package = "mln-rs-expression", path = "../../crates/mln_expression" }
 mln_gfx = { package = "mln-rs-gfx", path = "../../crates/mln_gfx" }

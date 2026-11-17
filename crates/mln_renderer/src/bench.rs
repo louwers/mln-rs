@@ -131,7 +131,6 @@ impl TileLayout {
                 show_collision_boxes: false,
                 subdivision_granularity: style.get_projection().get_subdivision_granularity(),
                 first_load: true,
-                capture_rendered_features: false,
             },
             resolved: Arc::default(),
         };
@@ -281,7 +280,6 @@ impl SymbolView {
             still_image_request_id: 0,
             cross_source_collisions: true,
             fast_pfor_enabled: false,
-            capture_rendered_features: false,
             tile_lod_min_radius: 3.0,
             tile_lod_scale: 1.0,
             tile_lod_pitch_threshold: mln_math::deg2rad(60.0),
@@ -303,7 +301,7 @@ impl SymbolView {
         for layer in self.layers.iter().rev() {
             let layer = layer.try_borrow().map_err(|_| Error::native("a render layer in use"))?;
             let result = index.0.add_layer(&*layer, longitude, &self.update.transform_state);
-            if result.contains(crate::text::cross_tile_symbol_index::AddLayerResult::BUCKETS_ADDED) {
+            if result.buckets_added {
                 added += 1;
             }
         }
@@ -317,7 +315,7 @@ impl SymbolView {
     /// without one shows nowhere.
     #[must_use]
     pub fn place(&self) -> usize {
-        let previous = Rc::new(Placement::new_default());
+        let previous = Placement::new_default();
         let mut placement = Placement::create(Arc::clone(&self.update), Some(previous));
         placement.place_layers(&self.layers);
         placement.shown()
