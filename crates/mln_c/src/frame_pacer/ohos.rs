@@ -13,10 +13,10 @@ pub(super) mod native_vsync {
     use std::sync::Arc;
     use std::time::Duration;
 
+    use ::mln_frame_pacer::{Limit, VsyncSource, Vsyncs};
     use parking_lot::Mutex;
 
     use crate::error::Error;
-    use crate::frame_pacer::{Limit, VsyncSource, Vsyncs};
 
     #[repr(C)]
     struct OH_NativeVSync {

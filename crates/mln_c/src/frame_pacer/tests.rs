@@ -1,10 +1,11 @@
-//! The pacer's tests: its limit, its scheduling, and its sessions with a
+//! The pacer's tests: its options, its scheduling, and its sessions with a
 //! fake display that the tests refresh, and helpers for each platform's tests
 //! of its own source.
 
 use core::ffi::c_void;
 use std::time::Instant;
 
+use ::mln_frame_pacer::{VsyncSource, Vsyncs};
 use parking_lot::{Condvar, Mutex};
 
 use super::*;
@@ -27,114 +28,6 @@ use crate::runtime::tests::{Waiter, channel_completion, create as create_runtime
 
 const NO_DIAGNOSTIC: *mut mln_diagnostic = core::ptr::null_mut();
 const TIMEOUT: Duration = Duration::from_secs(30);
-
-// MARK: - Limit
-
-/// How many of the refreshes at `display_rate` over `seconds` a limit of
-/// `limit` frames per second admits, with each refresh `jitter` early or late
-/// in turn.
-fn admitted(limit: Option<u32>, display_rate: u32, seconds: u32, jitter: Duration) -> u32 {
-    let mut throttle = Throttle::new(limit.map(|limit| Limit::new(limit).unwrap()));
-    let period = Duration::from_secs(1) / display_rate;
-    let start = Duration::from_secs(1000);
-    (0..display_rate * seconds)
-        .filter(|&refresh| {
-            let ideal = start + period * refresh;
-            let time = if refresh % 2 == 0 { ideal + jitter } else { ideal.checked_sub(jitter).unwrap() };
-            throttle.admit(time)
-        })
-        .count() as u32
-}
-
-#[test]
-fn without_a_limit_every_refresh_demands() {
-    assert_eq!(admitted(None, 60, 10, Duration::ZERO), 600);
-    assert_eq!(admitted(None, 240, 10, Duration::from_millis(1)), 2400);
-}
-
-#[test]
-fn a_limit_at_the_display_rate_takes_every_jittery_refresh() {
-    assert_eq!(admitted(Some(60), 60, 10, Duration::from_micros(500)), 600);
-    assert_eq!(admitted(Some(120), 120, 10, Duration::from_micros(300)), 1200);
-}
-
-#[test]
-fn a_limit_below_the_display_rate_demands_up_to_its_rate() {
-    for (limit, display_rate) in [(30, 60), (55, 60), (50, 120), (60, 144), (1, 60), (59, 60), (45, 120)] {
-        let frames = admitted(Some(limit), display_rate, 10, Duration::from_micros(200));
-        // At most one frame more than the limit, and no fewer than taking
-        // every nth refresh, for the smallest n that stays within it.
-        let floor = display_rate / display_rate.div_ceil(limit);
-        assert!(frames <= limit * 10 + 1, "{frames} frames at {limit} on a {display_rate} Hz display");
-        assert!(frames >= floor * 10, "{frames} frames at {limit} on a {display_rate} Hz display");
-    }
-}
-
-#[test]
-fn a_limit_above_the_display_rate_takes_every_refresh() {
-    assert_eq!(admitted(Some(120), 60, 10, Duration::from_micros(500)), 600);
-}
-
-#[test]
-fn an_early_refresh_waits_for_the_next() {
-    let mut throttle = Throttle::new(Limit::new(30));
-    let at = Duration::from_millis;
-    assert!(throttle.admit(at(1000)));
-    assert!(!throttle.admit(at(1016)));
-    // Within the slack before the grid's next point, at 1033.3 ms.
-    assert!(throttle.admit(at(1031)));
-    assert!(!throttle.admit(at(1050)));
-    assert!(throttle.admit(at(1066)));
-}
-
-#[test]
-fn an_idle_spell_or_a_clock_that_moves_backward_starts_the_grid_again() {
-    let mut throttle = Throttle::new(Limit::new(10));
-    let at = Duration::from_millis;
-    assert!(throttle.admit(at(1000)));
-    // Over a period past the grid's next point.
-    assert!(throttle.admit(at(5000)));
-    assert!(!throttle.admit(at(5050)));
-    assert!(throttle.admit(at(100)));
-    assert!(!throttle.admit(at(150)));
-    assert!(throttle.admit(at(195)));
-}
-
-#[test]
-fn a_new_limit_counts_from_the_last_demand() {
-    let at = Duration::from_millis;
-    // A higher limit lets the next refresh come sooner.
-    let mut throttle = Throttle::new(Limit::new(10));
-    assert!(throttle.admit(at(1000)));
-    throttle.set_limit(Limit::new(60));
-    assert!(!throttle.admit(at(1008)));
-    assert!(throttle.admit(at(1016)));
-    assert!(!throttle.admit(at(1025)));
-    assert!(throttle.admit(at(1033)));
-
-    // A lower limit skips the refreshes that the old one took.
-    throttle.set_limit(Limit::new(10));
-    assert!(!throttle.admit(at(1050)));
-    assert!(!throttle.admit(at(1116)));
-    assert!(throttle.admit(at(1133)));
-
-    // Without a limit, every refresh demands, and a limit set after them
-    // counts from the last.
-    throttle.set_limit(None);
-    assert!(throttle.admit(at(1150)));
-    assert!(throttle.admit(at(1166)));
-    throttle.set_limit(Limit::new(30));
-    assert!(!throttle.admit(at(1183)));
-    assert!(throttle.admit(at(1200)));
-}
-
-#[test]
-fn a_limit_set_before_any_demand_takes_the_next_refresh() {
-    let mut throttle = Throttle::new(None);
-    throttle.set_limit(Limit::new(30));
-    assert!(throttle.admit(Duration::from_millis(1000)));
-    assert!(!throttle.admit(Duration::from_millis(1016)));
-}
 
 // MARK: - Options
 
@@ -226,12 +119,15 @@ fn now() -> Duration {
 fn create_fake(options: *const mln_frame_pacer_options) -> Result<(mln_frame_pacer, Arc<FakeDisplay>), mln_status> {
     let display = Arc::new(FakeDisplay::default());
     let mut pacer = handles::NULL;
-    let source = |vsyncs: Vsyncs, _: Option<Limit>| {
-        let _ = display.vsyncs.set(vsyncs);
-        Ok(FakeSource(Arc::clone(&display)))
+    let frames = |limit, on_refresh| {
+        let source = |vsyncs: Vsyncs, _: Option<Limit>| {
+            let _ = display.vsyncs.set(vsyncs);
+            Ok(FakeSource(Arc::clone(&display)))
+        };
+        FramePacer::with_source(limit, on_refresh, source)
     };
     // SAFETY: the caller's options, and a local out-handle.
-    match unsafe { create(options, &raw mut pacer, source) } {
+    match unsafe { create(options, &raw mut pacer, frames) } {
         Ok(()) => Ok((pacer, display)),
         Err(error) => Err(error.status()),
     }
@@ -251,18 +147,18 @@ fn set_options(pacer: mln_frame_pacer, options: *const mln_frame_pacer_options) 
 }
 
 fn limit_of(pacer: mln_frame_pacer) -> Option<Limit> {
-    resolve(pacer).unwrap().state.lock().throttle.limit
+    resolve(pacer).unwrap().frames.limit()
 }
 
 #[test]
 fn options_check_their_fields_and_limit() {
     let limited = pacer_options(MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND, 30);
     let (pacer, _) = create_fake(&raw const limited).unwrap();
-    assert_eq!(resolve(pacer).unwrap().state.lock().throttle.limit, Limit::new(30));
+    assert_eq!(limit_of(pacer), Limit::new(30));
     mln_frame_pacer_release(pacer);
     // A limit that its field doesn't set is no limit.
     let (pacer, _) = create_fake(&pacer_options(0, 0)).unwrap();
-    assert_eq!(resolve(pacer).unwrap().state.lock().throttle.limit, None);
+    assert_eq!(limit_of(pacer), None);
     mln_frame_pacer_release(pacer);
 
     // The removal of a limit is the default.
@@ -282,12 +178,15 @@ fn options_check_their_fields_and_limit() {
     let small = mln_frame_pacer_options { size: 4, ..limited };
     assert_eq!(create_fake(&raw const small).err().unwrap(), MLN_STATUS_INVALID_ARGUMENT);
 
+    let frames = |limit, on_refresh| {
+        FramePacer::with_source(limit, on_refresh, |_, _| Ok::<_, Error>(FakeSource(Arc::default())))
+    };
     let mut pacer = 7;
     // SAFETY: an out-handle that isn't null.
-    let created = unsafe { create(core::ptr::null(), &raw mut pacer, |_, _| Ok(FakeSource(Arc::default()))) };
+    let created = unsafe { create(core::ptr::null(), &raw mut pacer, frames) };
     assert_eq!(created.unwrap_err().status(), MLN_STATUS_INVALID_ARGUMENT);
     // SAFETY: a null out-handle.
-    let created = unsafe { create(core::ptr::null(), core::ptr::null_mut(), |_, _| Ok(FakeSource(Arc::default()))) };
+    let created = unsafe { create(core::ptr::null(), core::ptr::null_mut(), frames) };
     assert_eq!(created.unwrap_err().status(), MLN_STATUS_INVALID_ARGUMENT);
 }
 
@@ -358,9 +257,9 @@ fn requests_share_one_refresh_until_it_comes() {
     pacer.request(2);
     pacer.request(1);
     assert_eq!(display.scheduled(), 1);
-    assert_eq!(pacer.state.lock().waiting, [1, 2]);
+    assert_eq!(*pacer.waiting.lock(), [1, 2]);
     assert!(display.refresh(now()));
-    assert_eq!(pacer.state.lock().waiting, Vec::<u64>::new());
+    assert_eq!(*pacer.waiting.lock(), Vec::<u64>::new());
     assert_eq!(display.scheduled(), 0);
 
     pacer.request(3);
@@ -378,9 +277,9 @@ fn a_refresh_that_the_limit_skips_schedules_the_next() {
     assert!(display.refresh(at(1000)));
     pacer.request(1);
     assert!(display.refresh(at(1016)));
-    assert_eq!((display.scheduled(), pacer.state.lock().waiting.len()), (1, 1));
+    assert_eq!((display.scheduled(), pacer.waiting.lock().len()), (1, 1));
     assert!(display.refresh(at(1033)));
-    assert_eq!((display.scheduled(), pacer.state.lock().waiting.len()), (0, 0));
+    assert_eq!((display.scheduled(), pacer.waiting.lock().len()), (0, 0));
     mln_frame_pacer_release(handle);
 }
 
@@ -394,23 +293,23 @@ fn a_new_limit_applies_to_the_refresh_on_its_way() {
     assert!(display.refresh(at(1000)));
     pacer.request(1);
     assert!(display.refresh(at(1016)));
-    assert_eq!((display.scheduled(), pacer.state.lock().waiting.len()), (1, 1));
+    assert_eq!((display.scheduled(), pacer.waiting.lock().len()), (1, 1));
 
     // The higher limit takes the refresh that the old one would skip.
     let faster = pacer_options(MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND, 30);
     assert_eq!(set_options(handle, &raw const faster), MLN_STATUS_OK);
     assert_eq!(display.scheduled(), 1, "the refresh on its way serves the new limit");
     assert!(display.refresh(at(1033)));
-    assert_eq!((display.scheduled(), pacer.state.lock().waiting.len()), (0, 0));
+    assert_eq!((display.scheduled(), pacer.waiting.lock().len()), (0, 0));
 
     // The lower limit skips the refresh that the old one would take.
     pacer.request(1);
     let slower = pacer_options(MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND, 5);
     assert_eq!(set_options(handle, &raw const slower), MLN_STATUS_OK);
     assert!(display.refresh(at(1066)));
-    assert_eq!((display.scheduled(), pacer.state.lock().waiting.len()), (1, 1));
+    assert_eq!((display.scheduled(), pacer.waiting.lock().len()), (1, 1));
     assert!(display.refresh(at(1233)));
-    assert_eq!((display.scheduled(), pacer.state.lock().waiting.len()), (0, 0));
+    assert_eq!((display.scheduled(), pacer.waiting.lock().len()), (0, 0));
     mln_frame_pacer_release(handle);
 }
 
@@ -636,7 +535,7 @@ fn a_demand_answers_what_the_session_had_to_draw() {
     wake();
     assert_eq!(display.scheduled(), 0);
     pacing.set(77, Some(Arc::clone(&pacer)));
-    assert_eq!((display.scheduled(), pacer.state.lock().waiting.clone()), (1, vec![77]));
+    assert_eq!((display.scheduled(), pacer.waiting.lock().clone()), (1, vec![77]));
     // A host's demand answers it, so the refresh demands nothing.
     pacing.demanded();
     assert!(!pacing.take_redraw(&pacer));

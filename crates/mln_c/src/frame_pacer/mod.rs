@@ -1,12 +1,14 @@
 //! Frame pacers: `mln_frame_pacer_create()` and
-//! `mln_frame_pacer_set_options()`, the part that every platform shares, and
-//! each platform's source of display refreshes.
+//! `mln_frame_pacer_set_options()` over `mln_frame_pacer`, and the sources of
+//! display refreshes on Android and `OpenHarmony`.
 //!
 //! A [`Pacer`] keeps the render sessions that have something new to draw, and
 //! at the next display refresh that its frame rate limit allows, demands a
-//! frame without flags and with token 0 from each of them. A platform gives
-//! it a [`VsyncSource`], which reports one refresh to [`Vsyncs`] each time the
-//! pacer schedules one.
+//! frame without flags and with token 0 from each of them. Its
+//! [`FramePacer`] follows the platform's display: a `CADisplayLink` of
+//! `mln_frame_pacer`'s on Apple platforms, or a `VsyncSource` of this
+//! crate's, which reports one refresh to its `Vsyncs` each time the pacer
+//! schedules one.
 //!
 //! A session without a redraw wake of the host's has a [`SessionPacing`],
 //! whose redraw wake the runtime runs when the map has something new to draw.
@@ -15,10 +17,8 @@
 //! session that uses it is released or takes another pacer.
 //!
 //! Locks: a session's pacing lock is never held while it calls into its
-//! pacer, and the pacer's lock is never held while it calls into a session
-//! or its source, so neither waits on the other. A pacer's limit lock orders
-//! the changes of its limit, and is held while it tells its source, which
-//! never calls back into the pacer then.
+//! pacer, and the pacer's locks are never held while it calls into a session
+//! or its source, so neither waits on the other.
 
 // Elsewhere no platform creates pacers, and only the tests' fake ones exist.
 #![cfg_attr(
@@ -33,6 +33,7 @@ pub(crate) mod ohos;
 use std::sync::{Arc, OnceLock, Weak};
 use std::time::Duration;
 
+use ::mln_frame_pacer::{FramePacer, Limit};
 use parking_lot::Mutex;
 
 use crate::abi::{self, Fields};
@@ -78,18 +79,25 @@ pub(crate) unsafe extern "C" fn mln_frame_pacer_create(
     export!(out_diagnostic, {
         #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
         {
+            let frames = |limit, on_refresh| FramePacer::new(limit, on_refresh).map_err(Error::from);
             // SAFETY: the caller's contract.
-            unsafe { create(options, out_pacer, apple::display_link::DisplayLinkSource::new) }
+            unsafe { create(options, out_pacer, frames) }
         }
         #[cfg(target_os = "android")]
         {
+            let frames = |limit, on_refresh| {
+                FramePacer::with_source(limit, on_refresh, android::choreographer::ChoreographerSource::new)
+            };
             // SAFETY: the caller's contract.
-            unsafe { create(options, out_pacer, android::choreographer::ChoreographerSource::new) }
+            unsafe { create(options, out_pacer, frames) }
         }
         #[cfg(target_env = "ohos")]
         {
+            let frames = |limit, on_refresh| {
+                FramePacer::with_source(limit, on_refresh, ohos::native_vsync::NativeVsyncSource::new)
+            };
             // SAFETY: the caller's contract.
-            unsafe { create(options, out_pacer, ohos::native_vsync::NativeVsyncSource::new) }
+            unsafe { create(options, out_pacer, frames) }
         }
         #[cfg(not(any(
             target_os = "macos",
@@ -131,27 +139,37 @@ pub(crate) unsafe extern "C" fn mln_frame_pacer_set_options(
     })
 }
 
+/// The callback of a [`Pacer`]'s [`FramePacer`].
+pub(crate) type OnRefresh = Box<dyn Fn(Duration) + Send + Sync>;
+
 /// What `mln_frame_pacer_create()` does on each platform with a source:
-/// checks `options` and `out_pacer`, builds the platform's source with the
-/// limit that `options` sets, and writes the new pacer's handle to
-/// `out_pacer`.
+/// checks `options` and `out_pacer`, builds the platform's [`FramePacer`]
+/// with `frames` from the limit that `options` sets and the new pacer's
+/// callback, and writes the new pacer's handle to `out_pacer`.
 ///
 /// # Safety
 ///
 /// `options` is null or points to a readable struct of the size it declares,
 /// and `out_pacer` is null or points to a writable, initialized handle.
-pub(crate) unsafe fn create<S: VsyncSource + 'static>(
+pub(crate) unsafe fn create(
     options: *const mln_frame_pacer_options,
     out_pacer: *mut mln_frame_pacer,
-    source: impl FnOnce(Vsyncs, Option<Limit>) -> Result<S, Error>,
+    frames: impl FnOnce(Option<Limit>, OnRefresh) -> Result<Arc<FramePacer>, Error>,
 ) -> Result<(), Error> {
     // SAFETY: the caller's contract.
     let limit = unsafe { limit(options) }?;
     // SAFETY: the caller's contract.
     let out_pacer = unsafe { handles::out_handle(out_pacer, "out_pacer") }?;
-    let vsyncs = Vsyncs::default();
-    let source = source(vsyncs.clone(), limit)?;
-    *out_pacer = PACERS.insert(Pacer::new(limit, vsyncs, Box::new(source)))?;
+    let pacer: Arc<OnceLock<Weak<Pacer>>> = Arc::default();
+    let refreshes = Arc::clone(&pacer);
+    let on_refresh: OnRefresh = Box::new(move |_| {
+        if let Some(pacer) = refreshes.get().and_then(Weak::upgrade) {
+            pacer.on_refresh();
+        }
+    });
+    let new = Arc::new(Pacer { frames: frames(limit, on_refresh)?, waiting: Mutex::new(Vec::new()) });
+    let _ = pacer.set(Arc::downgrade(&new));
+    *out_pacer = PACERS.insert(new)?;
     Ok(())
 }
 
@@ -204,199 +222,38 @@ fn limit_change(options: &mln_frame_pacer_options) -> Result<LimitChange, Error>
     }
 }
 
-// MARK: - Limit
-
-/// A frame rate limit.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Limit {
-    frames_per_second: u32,
-    period: Duration,
-}
-
-impl Limit {
-    fn new(frames_per_second: u32) -> Option<Self> {
-        let period = Duration::from_secs(1).checked_div(frames_per_second)?;
-        Some(Self { frames_per_second, period })
-    }
-
-    /// The most frames per second.
-    #[cfg_attr(
-        not(any(target_os = "macos", target_os = "ios", target_os = "tvos")),
-        expect(dead_code, reason = "only the Apple platforms' pacer asks for the rate")
-    )]
-    pub(crate) fn frames_per_second(self) -> u32 {
-        self.frames_per_second
-    }
-
-    /// How early a refresh can come and still count as on time: a display
-    /// that runs at the limit's rate reports refreshes with some jitter, and
-    /// a pacer that skipped each one that came a little early would demand
-    /// frames at half the rate.
-    fn slack(self) -> Duration {
-        self.period / 10
-    }
-}
-
-/// Which refreshes a limit lets the pacer demand frames at.
-///
-/// It demands frames on a grid of the limit's period, so that over any span
-/// it demands no more than the limit's rate, give or take one frame. A
-/// refresh within the slack before the grid's next point takes that point,
-/// and one that comes a whole period after it, as after an idle spell,
-/// starts the grid again. A new limit's grid starts a period of it after the
-/// last demand.
-#[derive(Debug, Default)]
-struct Throttle {
-    limit: Option<Limit>,
-    /// The grid's next point.
-    next: Option<Duration>,
-    /// The refresh that the pacer last demanded frames at, with or without
-    /// a limit.
-    last: Option<Duration>,
-}
-
-impl Throttle {
-    fn new(limit: Option<Limit>) -> Self {
-        Self { limit, ..Self::default() }
-    }
-
-    /// Whether the pacer may demand frames at a refresh at `time`, which
-    /// then counts as a demand.
-    fn admit(&mut self, time: Duration) -> bool {
-        let Some(limit) = self.limit else {
-            self.last = Some(time);
-            return true;
-        };
-        // A clock that moves backward starts the grid again.
-        if self.last.is_some_and(|last| time < last) {
-            self.next = None;
-        }
-        if self.next.is_some_and(|next| time + limit.slack() < next) {
-            return false;
-        }
-        self.next = Some(match self.next {
-            Some(next) if time < next + limit.period => next + limit.period,
-            _ => time + limit.period,
-        });
-        self.last = Some(time);
-        true
-    }
-
-    /// Takes `limit` from the next refresh on, counted from the last demand:
-    /// a refresh within the new limit's period after it waits for the next.
-    fn set_limit(&mut self, limit: Option<Limit>) {
-        self.limit = limit;
-        self.next = limit.zip(self.last).map(|(limit, last)| last + limit.period);
-    }
-}
-
 // MARK: - Pacer
 
-/// A platform's source of display refreshes.
-pub(crate) trait VsyncSource: Send + Sync {
-    /// Arranges one call to [`Vsyncs::vsync`] at the display's next refresh.
-    /// It runs on any thread, holding none of the library's locks, and doesn't
-    /// block.
-    fn schedule(&self);
-
-    /// Follows a new frame rate limit, which the pacer's throttle applies to
-    /// the refreshes either way. It runs on any thread, holding the pacer's
-    /// limit lock and no other lock of the library's, and doesn't block. The
-    /// default ignores it, for a source whose refreshes don't depend on it.
-    fn set_limit(&self, _limit: Option<Limit>) {}
-}
-
-/// Where a [`VsyncSource`] reports refreshes: to its pacer, while it lives.
-/// A source that the pacer drops can still report the refreshes it
-/// scheduled, which then go nowhere.
-#[derive(Clone, Default)]
-pub(crate) struct Vsyncs(Arc<OnceLock<Weak<Pacer>>>);
-
-impl Vsyncs {
-    /// Reports a refresh at `time` on a monotonic clock. The pacer demands
-    /// frames from its sessions on this thread before it returns.
-    pub(crate) fn vsync(&self, time: Duration) {
-        if let Some(pacer) = self.0.get().and_then(Weak::upgrade) {
-            pacer.on_vsync(time);
-        }
-    }
-}
-
-/// A frame pacer: the sessions that wait for a refresh, its limit, and its
-/// platform's source of refreshes. Dropping it drops the source, which stops.
+/// A frame pacer: the sessions that wait for a refresh, and the
+/// [`FramePacer`] that calls back at the refresh. Dropping it drops the
+/// frame pacer, whose source stops.
 pub(crate) struct Pacer {
-    state: Mutex<PacerState>,
-    /// Held while the limit changes, so that the source ends with the
-    /// throttle's limit.
-    limit_lock: Mutex<()>,
-    source: Box<dyn VsyncSource>,
-}
-
-struct PacerState {
+    frames: Arc<FramePacer>,
     /// The sessions that asked for a frame since the last demands.
-    waiting: Vec<mln_render_session>,
-    /// Whether the source has a refresh on its way.
-    scheduled: bool,
-    throttle: Throttle,
+    waiting: Mutex<Vec<mln_render_session>>,
 }
 
 impl Pacer {
-    #[expect(
-        clippy::needless_pass_by_value,
-        reason = "the new pacer takes the handle that its source's refreshes reach it by"
-    )]
-    pub(crate) fn new(limit: Option<Limit>, vsyncs: Vsyncs, source: Box<dyn VsyncSource>) -> Arc<Self> {
-        let pacer = Arc::new(Self {
-            state: Mutex::new(PacerState { waiting: Vec::new(), scheduled: false, throttle: Throttle::new(limit) }),
-            limit_lock: Mutex::new(()),
-            source,
-        });
-        // A new `Vsyncs` is unset.
-        let _ = vsyncs.0.set(Arc::downgrade(&pacer));
-        pacer
-    }
-
     /// Takes `limit` from the next refresh on, including one that is on its
     /// way already.
     pub(crate) fn set_limit(&self, limit: Option<Limit>) {
-        let _changing = self.limit_lock.lock();
-        self.state.lock().throttle.set_limit(limit);
-        self.source.set_limit(limit);
+        self.frames.set_limit(limit);
     }
 
     /// Asks for a frame demand for `session` at the next refresh that the
     /// limit allows.
     fn request(&self, session: mln_render_session) {
         {
-            let mut state = self.state.lock();
-            if !state.waiting.contains(&session) {
-                state.waiting.push(session);
-            }
-            if std::mem::replace(&mut state.scheduled, true) {
-                return;
+            let mut waiting = self.waiting.lock();
+            if !waiting.contains(&session) {
+                waiting.push(session);
             }
         }
-        self.source.schedule();
+        self.frames.request();
     }
 
-    fn on_vsync(&self, time: Duration) {
-        let due = {
-            let mut state = self.state.lock();
-            if state.waiting.is_empty() {
-                state.scheduled = false;
-                return;
-            }
-            if state.throttle.admit(time) {
-                state.scheduled = false;
-                Some(std::mem::take(&mut state.waiting))
-            } else {
-                None
-            }
-        };
-        let Some(due) = due else {
-            // Waits for the next refresh.
-            return self.source.schedule();
-        };
+    fn on_refresh(&self) {
+        let due = std::mem::take(&mut *self.waiting.lock());
         for session in due {
             render_session::demand_paced(session, self);
         }

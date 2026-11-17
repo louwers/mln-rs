@@ -2426,6 +2426,7 @@ dependencies = [
  "mln-rs-d3d12",
  "mln-rs-expression",
  "mln-rs-feature",
+ "mln-rs-frame-pacer",
  "mln-rs-geojson-vt",
  "mln-rs-geometry",
  "mln-rs-gestures",
@@ -2501,6 +2502,7 @@ dependencies = [
  "mln-rs-d3d12",
  "mln-rs-expression",
  "mln-rs-feature",
+ "mln-rs-frame-pacer",
  "mln-rs-gl",
  "mln-rs-map",
  "mln-rs-map-types",
@@ -2518,9 +2520,6 @@ dependencies = [
  "mln-rs-vulkan",
  "mln-rs-web-host",
  "objc2 0.6.5",
- "objc2-core-foundation",
- "objc2-foundation 0.3.2",
- "objc2-quartz-core 0.3.2",
  "parking_lot",
  "raw-window-handle",
  "serde_json",
@@ -2666,6 +2665,18 @@ dependencies = [
  "mln-rs-vec-map",
  "mln-rs-wire",
  "serde_json",
+]
+
+[[package]]
+name = "mln-rs-frame-pacer"
+version = "0.0.12"
+dependencies = [
+ "mln-rs-util",
+ "objc2 0.6.5",
+ "objc2-core-foundation",
+ "objc2-foundation 0.3.2",
+ "objc2-quartz-core 0.3.2",
+ "parking_lot",
 ]
 
 [[package]]

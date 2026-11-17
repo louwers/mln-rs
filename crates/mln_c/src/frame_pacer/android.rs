@@ -24,10 +24,10 @@ pub(crate) mod choreographer {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
 
+    use ::mln_frame_pacer::{Limit, VsyncSource, Vsyncs};
     use parking_lot::Mutex;
 
     use crate::error::Error;
-    use crate::frame_pacer::{Limit, VsyncSource, Vsyncs};
 
     /// Longer than a vsync period at the lowest refresh rate that a phone
     /// display runs at while it is on.
