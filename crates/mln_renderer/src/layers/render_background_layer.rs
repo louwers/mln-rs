@@ -37,7 +37,7 @@ use crate::globe_tile_mesh::raw_globe_tile_mesh;
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{LayerPrepareParameters, LayerValues, RenderLayer, RenderLayerBase, TypedLayer};
+use crate::render_layer::{LayerPrepareParameters, LayerTiles, LayerValues, RenderLayer, RenderLayerBase, TypedLayer};
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::tile_matrix::{get_projection_data, to_projection_ubo};
@@ -207,7 +207,9 @@ impl RenderLayer for RenderBackgroundLayer {
         Some(*evaluated.background_color.uniform() * *evaluated.background_opacity.uniform())
     }
 
-    fn prepare(&mut self, parameters: &mut LayerPrepareParameters<'_>) {
+    /// Adds the layer's pattern to the pattern atlas. The layer draws
+    /// the tiles that cover the view, not its source's.
+    fn prepare(&mut self, parameters: &mut LayerPrepareParameters<'_>) -> Option<Vec<usize>> {
         let evaluated = &self.values.evaluated.paint;
         if !evaluated.background_pattern.faded().to.empty() {
             // Ensures that the pattern bitmap gets copied to atlas bitmap.
@@ -216,6 +218,7 @@ impl RenderLayer for RenderBackgroundLayer {
             add_pattern_if_needed(evaluated.background_pattern.faded().from.id(), parameters);
             add_pattern_if_needed(evaluated.background_pattern.faded().to.id(), parameters);
         }
+        None
     }
 
     /// Makes the frame's draws of the layer, one of each tile that covers
@@ -228,6 +231,7 @@ impl RenderLayer for RenderBackgroundLayer {
         state: &TransformState,
         update_parameters: &Arc<UpdateParameters>,
         paint_parameters: &PaintParameters<'_>,
+        _tiles: Option<LayerTiles<'_>>,
         draws: &mut LayerDraws,
     ) {
         let zoom = state.get_integer_zoom();

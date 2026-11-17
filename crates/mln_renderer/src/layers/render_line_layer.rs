@@ -52,7 +52,7 @@ use crate::layout::pattern_layout::{LineLayoutSpec, PatternLayout, uses_pattern}
 use crate::line_atlas::LinePatternCap;
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
-use crate::render_layer::{LayerPrepareParameters, LayerValues, RenderLayer, RenderLayerBase, TypedLayer};
+use crate::render_layer::{LayerPrepareParameters, LayerTiles, LayerValues, RenderLayer, RenderLayerBase, TypedLayer};
 use crate::render_pass::RenderPass;
 use crate::render_tile::RenderTile;
 use crate::tile_matrix::{get_projection_data, to_projection_ubo};
@@ -513,11 +513,12 @@ impl RenderLayer for RenderLineLayer {
         mln_util::intersection_tests::polygon_intersects_buffered_multi_line(query, geometry, half_width)
     }
 
-    fn prepare(&mut self, params: &mut LayerPrepareParameters<'_>) {
-        // RenderLayer::prepare(params)
-        crate::render_layer::prepare_base(self, params);
-        let Some(render_tiles) = self.base.render_tiles.clone() else {
-            return;
+    /// Picks the tiles as the default does, and adds the dash patterns of
+    /// their buckets to the line atlas.
+    fn prepare(&mut self, params: &mut LayerPrepareParameters<'_>) -> Option<Vec<usize>> {
+        let order = crate::render_layer::prepare_base(self, params);
+        let Some(render_tiles) = params.tiles(order.as_deref()) else {
+            return order;
         };
         let style = Arc::clone(&self.base.style);
         for tile in render_tiles.iter() {
@@ -543,6 +544,7 @@ impl RenderLayer for RenderLineLayer {
                 cap,
             );
         }
+        order
     }
 
     /// Makes the frame's draws of the layer, those of each of its tiles,
@@ -555,6 +557,7 @@ impl RenderLayer for RenderLineLayer {
         state: &TransformState,
         _parameters: &Arc<UpdateParameters>,
         paint_parameters: &PaintParameters<'_>,
+        tiles: Option<LayerTiles<'_>>,
         draws: &mut LayerDraws,
     ) {
         if std::mem::take(&mut self.color_ramp_changed) {
@@ -563,7 +566,7 @@ impl RenderLayer for RenderLineLayer {
         }
         self.update_projection_variant(state, draws);
 
-        let Some(render_tiles) = self.base.render_tiles.clone().filter(|t| !t.is_empty()) else {
+        let Some(render_tiles) = tiles.filter(|tiles| !tiles.is_empty()) else {
             self.remove_all_draws(draws);
             return;
         };

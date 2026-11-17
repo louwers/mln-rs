@@ -62,7 +62,9 @@ use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{LayerPrepareParameters, LayerValues, RenderLayer, RenderLayerBase, TypedLayer};
+use crate::render_layer::{
+    LayerPrepareParameters, LayerTiles, LayerValues, RenderLayer, RenderLayerBase, TypedLayer, set_layer_tiles,
+};
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_target::RenderTarget;
@@ -305,19 +307,12 @@ impl RenderLayer for RenderHillshadeLayer {
         self.values.set_evaluated(&mut self.base, properties);
     }
 
-    fn prepare(&mut self, params: &mut LayerPrepareParameters<'_>) {
-        match params.source {
-            Some(source) => {
-                self.base.render_tiles = source.get_render_tiles();
-                self.base.render_tiles_owner = source.get_raw_render_tiles();
-                self.maxzoom = source.get_max_zoom();
-            }
-            None => {
-                self.base.render_tiles = None;
-            }
-        }
-
-        self.update_tile_entries(params.draws);
+    fn prepare(&mut self, params: &mut LayerPrepareParameters<'_>) -> Option<Vec<usize>> {
+        let order = params.source.and_then(|source| {
+            self.maxzoom = source.get_max_zoom();
+            source.tile_order()
+        });
+        set_layer_tiles(params, order)
     }
 
     fn release_render_data(&mut self, draws: &mut LayerDraws) {
@@ -354,6 +349,7 @@ impl RenderLayer for RenderHillshadeLayer {
         state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         paint_parameters: &PaintParameters<'_>,
+        tiles: Option<LayerTiles<'_>>,
         draws: &mut LayerDraws,
     ) {
         if self.update_projection_variant(state, draws) {
@@ -362,7 +358,7 @@ impl RenderLayer for RenderHillshadeLayer {
                 self.globe_meshes.clear();
             }
         }
-        let Some(render_tiles) = self.base.render_tiles.clone().filter(|t| !t.is_empty()) else {
+        let Some(render_tiles) = tiles.filter(|tiles| !tiles.is_empty()) else {
             self.remove_all_draws(draws);
             return;
         };

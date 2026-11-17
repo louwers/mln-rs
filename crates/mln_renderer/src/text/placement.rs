@@ -56,7 +56,7 @@ use crate::layout::symbol_projection::{
     LabelPlaneProjector, add_dynamic_attributes, evaluate_size_for_feature, get_tile_skew_vectors, hide_glyphs,
     reproject_line_labels,
 };
-use crate::render_layer::{BucketPlacementData, RenderLayer, SymbolTranslate};
+use crate::render_layer::{BucketPlacementData, PlacedTile, RenderLayer, SymbolTranslate};
 use crate::render_tile::RenderTile;
 use crate::text::collision_feature::{CollisionBox, CollisionFeature, ProjectedCollisionBox};
 use crate::text::collision_index::{
@@ -269,8 +269,7 @@ pub(crate) struct PlacementProjectors<'a> {
 
 pub(crate) struct PlacementContext {
     bucket: Arc<SymbolBucket>,
-    tile_owner: Rc<Vec<RenderTile>>,
-    tile_index: usize,
+    tile: PlacedTile,
     bearing: f64,
 
     pub(crate) pixels_to_tile_units: f32,
@@ -333,8 +332,8 @@ impl PlacementContext {
         avoid_edges: Option<CollisionBoundaries>,
     ) -> Self {
         let bucket = &*params.bucket;
-        let render_tile = params.tile();
-        let overscaled_id = *render_tile.get_overscaled_tile_id();
+        let render_tile = &params.tile;
+        let overscaled_id = render_tile.overscaled_id;
         let pixels_to_tile_units = render_tile.id.pixels_to_tile_units(1.0, placement_zoom);
         // `std::pow(2, placementZoom - overscaledZ)`: a double pow.
         let scale = 2f64.powf(f64::from(placement_zoom - f32::from(overscaled_id.overscaled_z))) as f32;
@@ -373,8 +372,7 @@ impl PlacementContext {
 
         PlacementContext {
             bucket: Arc::clone(&params.bucket),
-            tile_owner: Rc::clone(&params.tile_owner),
-            tile_index: params.tile_index,
+            tile: params.tile,
             bearing: state.get_bearing(),
             pixels_to_tile_units,
             scale,
@@ -401,7 +399,7 @@ impl PlacementContext {
 
     /// The context's projectors through `state`, the collision index's.
     pub(crate) fn projectors<'a>(&self, state: &'a TransformState) -> PlacementProjectors<'a> {
-        let tile_projector = TileProjector::with_data(state, &self.get_render_tile().id, self.tile_projection);
+        let tile_projector = TileProjector::with_data(state, &self.tile().id, self.tile_projection);
         PlacementProjectors {
             text_label_plane: LabelPlaneProjector::new(
                 &tile_projector,
@@ -432,13 +430,13 @@ impl PlacementContext {
     }
 
     #[must_use]
-    pub(crate) fn get_render_tile(&self) -> &RenderTile {
-        &self.tile_owner[self.tile_index]
+    pub(crate) fn tile(&self) -> &PlacedTile {
+        &self.tile
     }
 
     #[must_use]
     pub(crate) fn get_overscaled_id(&self) -> &OverscaledTileID {
-        self.get_render_tile().get_overscaled_tile_id()
+        &self.tile.overscaled_id
     }
 
     fn collision_group_predicate(&self) -> Option<&dyn Fn(&IndexedSubfeature) -> bool> {
@@ -959,7 +957,7 @@ impl Placement {
     ) {
         debug_assert!(self.update_parameters.is_some());
         let symbol_bucket = &*params.bucket;
-        let render_tile = params.tile();
+        let render_tile = &params.tile;
         let collision_group = self.collision_groups.get(&params.source_id);
         let avoid_edges = self.get_avoid_edges(symbol_bucket, &render_tile.matrix);
         let ctx = PlacementContext::new(
@@ -981,7 +979,7 @@ impl Placement {
 
             // Prevent a flickering issue while zooming out.
             if let Some(id) = symbol.cross_tile_id()
-                && !ctx.get_render_tile().hold_for_fade()
+                && !ctx.tile().hold_for_fade
             {
                 seen_cross_tile_ids.insert(id);
             }
@@ -1017,14 +1015,14 @@ impl Placement {
             return k_unplaced;
         };
 
-        if ctx.get_render_tile().hold_for_fade() {
+        if ctx.tile().hold_for_fade {
             // Mark all symbols from this tile as "not placed", but don't add to
             // seenCrossTileIDs, because we don't know yet if we have a duplicate in
             // a parent tile that _should_ be placed.
             return k_unplaced;
         }
         let bucket = ctx.get_bucket();
-        let pos_matrix = ctx.get_render_tile().matrix;
+        let pos_matrix = ctx.tile().matrix;
         let tile_projector = &projectors.tile_projector;
         let mut variable_text_anchors = symbol_instance.get_text_anchors();
         self.text_boxes.clear();
@@ -1668,7 +1666,7 @@ impl Placement {
         data: &BucketPlacementData,
         layer_id: Option<&str>,
     ) -> bool {
-        let tile = data.tile();
+        let tile = &data.tile;
         let layout = &*bucket.layout;
         let along_line = *layout.symbol_placement.uniform() != SymbolPlacementType::Point;
         let has_variable_text_anchors = bucket.has_variable_text_anchors();
@@ -1768,7 +1766,7 @@ impl Placement {
             let mut has_variable_placement = false;
 
             let partially_evaluated_size = bucket.text_size_binder.evaluate_for_zoom(state.get_zoom() as f32);
-            let tile_scale = 2f64.powf(state.get_zoom() - f64::from(tile.get_overscaled_tile_id().overscaled_z)) as f32;
+            let tile_scale = 2f64.powf(state.get_zoom() - f64::from(tile.overscaled_id.overscaled_z)) as f32;
             let rotate_with_map = *layout.text_rotation_alignment.uniform() == TextRotationAlignmentType::Map;
             let pitch_with_map = *layout.text_pitch_alignment.uniform() == AlignmentType::Map;
             let pixels_to_tile_units = tile.id.pixels_to_tile_units(1.0, state.get_zoom() as f32);
@@ -2527,7 +2525,7 @@ impl Placement {
             // Collect intersection only for point placement.
             return;
         }
-        let render_tile = params.tile();
+        let render_tile = &params.tile;
         let collision_group = self.collision_groups.get(&params.source_id);
         let avoid_edges = self.get_avoid_edges(bucket, &render_tile.matrix);
         let ctx = Rc::new(PlacementContext::new(

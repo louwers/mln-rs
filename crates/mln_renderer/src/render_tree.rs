@@ -43,6 +43,10 @@ pub(crate) struct LayerRenderItem {
     /// The id of the orchestrator's render source, `None` for layers without
     /// a source.
     pub(crate) source: Option<String>,
+    /// The order the layer draws its source's tiles in, as indexes into the
+    /// source's render tiles, which the layer's prepare returns; `None` for
+    /// a layer without tiles.
+    pub(crate) tile_order: Option<Vec<usize>>,
 }
 
 pub(crate) struct RenderTreeParameters {

@@ -58,8 +58,11 @@ use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_type::LayerType;
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{LayerPrepareParameters, LayerValues, RenderLayer, RenderLayerBase, TypedLayer};
+use crate::render_layer::{
+    LayerPrepareParameters, LayerTiles, LayerValues, RenderLayer, RenderLayerBase, TypedLayer, set_layer_tiles,
+};
 use crate::render_pass::RenderPass;
+use crate::render_source::RenderSource;
 use crate::render_static_data::RenderStaticData;
 use crate::tile_matrix::to_projection_ubo;
 use crate::update_parameters::UpdateParameters;
@@ -331,17 +334,9 @@ impl RenderLayer for RenderColorReliefLayer {
         self.dem_textures.clear();
     }
 
-    fn prepare(&mut self, params: &mut LayerPrepareParameters<'_>) {
-        match params.source {
-            Some(source) => {
-                self.base.render_tiles = source.get_render_tiles();
-                self.base.render_tiles_owner = source.get_raw_render_tiles();
-            }
-            None => {
-                self.base.render_tiles = None;
-            }
-        }
-        self.update_tile_entries(params.draws);
+    fn prepare(&mut self, params: &mut LayerPrepareParameters<'_>) -> Option<Vec<usize>> {
+        let order = params.source.and_then(RenderSource::tile_order);
+        set_layer_tiles(params, order)
     }
 
     /// Makes the frame's draws of the layer, those of each of its tiles,
@@ -354,6 +349,7 @@ impl RenderLayer for RenderColorReliefLayer {
         state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         paint_parameters: &PaintParameters<'_>,
+        tiles: Option<LayerTiles<'_>>,
         draws: &mut LayerDraws,
     ) {
         if self.update_projection_variant(state, draws) {
@@ -362,7 +358,7 @@ impl RenderLayer for RenderColorReliefLayer {
                 self.globe_meshes.clear();
             }
         }
-        let Some(render_tiles) = self.base.render_tiles.clone().filter(|t| !t.is_empty()) else {
+        let Some(render_tiles) = tiles.filter(|tiles| !tiles.is_empty()) else {
             self.remove_all_draws(draws);
             return;
         };

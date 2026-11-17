@@ -51,8 +51,11 @@ use crate::layer_composite::Composite;
 use crate::layer_type::LayerType;
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{LayerPrepareParameters, LayerValues, RenderLayer, RenderLayerBase, TypedLayer};
+use crate::render_layer::{
+    LayerPrepareParameters, LayerTiles, LayerValues, RenderLayer, RenderLayerBase, TypedLayer, set_layer_tiles,
+};
 use crate::render_pass::RenderPass;
+use crate::render_source::RenderSource;
 use crate::render_static_data::RenderStaticData;
 use crate::sources::render_image_source::ImageSourceRenderData;
 use crate::tile_matrix::{get_projection_data, to_projection_ubo};
@@ -351,21 +354,13 @@ impl RenderLayer for RenderRasterLayer {
         self.values.set_evaluated(&mut self.base, properties);
     }
 
-    fn prepare(&mut self, params: &mut LayerPrepareParameters<'_>) {
-        // `renderTiles = params.source->getRenderTiles()`; the C++ base
-        // prepare is not called (no addRenderPassesFromTiles).
-        match params.source {
-            Some(source) => {
-                self.base.render_tiles = source.get_render_tiles();
-                self.base.render_tiles_owner = source.get_raw_render_tiles();
-            }
-            None => {
-                self.base.render_tiles = None;
-            }
-        }
-        self.image_data = params.source.and_then(crate::render_source::RenderSource::get_image_render_data);
-        // It is possible image data is not available until the source loads it.
-        self.update_tile_entries(params.draws);
+    /// Picks the source's tiles, or an image source's image, which may not
+    /// be available until the source loads it. The passes are the layer's
+    /// own, whatever its tiles' buckets were laid out for.
+    fn prepare(&mut self, params: &mut LayerPrepareParameters<'_>) -> Option<Vec<usize>> {
+        let order = params.source.and_then(RenderSource::tile_order);
+        self.image_data = params.source.and_then(RenderSource::get_image_render_data);
+        set_layer_tiles(params, order)
     }
 
     fn release_render_data(&mut self, draws: &mut LayerDraws) {
@@ -385,6 +380,7 @@ impl RenderLayer for RenderRasterLayer {
         state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         paint_parameters: &PaintParameters<'_>,
+        tiles: Option<LayerTiles<'_>>,
         draws: &mut LayerDraws,
     ) {
         if self.update_projection_variant(state, draws) {
@@ -393,7 +389,7 @@ impl RenderLayer for RenderRasterLayer {
                 self.globe_meshes.clear();
             }
         }
-        let render_tiles = self.base.render_tiles.clone().filter(|t| !t.is_empty());
+        let render_tiles = tiles.filter(|tiles| !tiles.is_empty());
         let image_data = self.image_data.clone();
         if render_tiles.is_none() && image_data.is_none() {
             draws.clear_draws();

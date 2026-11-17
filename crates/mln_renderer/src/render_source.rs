@@ -25,36 +25,6 @@ pub(crate) struct SourcePrepareParameters<'a> {
     pub(crate) source_name: String,
 }
 
-/// A shared selection of the render tiles of an `Rc<Vec<RenderTile>>`,
-/// which it keeps alive.
-#[derive(Clone)]
-pub(crate) struct RenderTiles {
-    owner: Rc<Vec<RenderTile>>,
-    indices: Rc<Vec<usize>>,
-}
-
-impl RenderTiles {
-    #[must_use]
-    pub(crate) fn new(owner: Rc<Vec<RenderTile>>, indices: Vec<usize>) -> Self {
-        RenderTiles { owner, indices: Rc::new(indices) }
-    }
-
-    pub(crate) fn iter(&self) -> impl Iterator<Item = &RenderTile> + '_ {
-        self.indices.iter().map(|&i| &self.owner[i])
-    }
-
-    #[must_use]
-    pub(crate) fn is_empty(&self) -> bool {
-        self.indices.is_empty()
-    }
-
-    /// The tiles the selection points into.
-    #[must_use]
-    pub(crate) fn owner(&self) -> &Rc<Vec<RenderTile>> {
-        &self.owner
-    }
-}
-
 /// The data members of `RenderSource`.
 pub(crate) struct RenderSourceBase {
     pub(crate) style_source: Source,
@@ -97,27 +67,29 @@ pub(crate) trait RenderSource {
         None
     }
 
-    /// If supported, returns a shared list of `RenderTiles`, sorted by tile id
-    /// and excluding tiles hold for fade; returns `None` otherwise.
-    fn get_render_tiles(&self) -> Option<RenderTiles> {
+    /// The source's render tiles, as of the last `prepare`.
+    fn render_tiles(&self) -> &[RenderTile] {
+        &[]
+    }
+
+    /// The order a layer draws the source's tiles in, as indexes into
+    /// `render_tiles`: by tile id, without the tiles held for fade. `None`
+    /// for a source without tiles.
+    fn tile_order(&self) -> Option<Vec<usize>> {
         None
     }
 
-    /// If supported, returns a shared list of `RenderTiles`, sorted in
-    /// opposite y position, so tiles with overlapping symbols are drawn on
-    /// top of each other, with lower symbols being drawn on top of higher
-    /// symbols; returns `None` otherwise.
-    fn get_render_tiles_sorted_by_y_position(&self) -> Option<RenderTiles> {
+    /// The order a symbol layer draws the source's tiles in, as indexes into
+    /// `render_tiles`: by opposite y position, so the lower of two tiles'
+    /// overlapping symbols draw over the higher's. `None` for a source
+    /// without tiles.
+    fn tile_order_by_y(&self) -> Option<Vec<usize>> {
         None
     }
 
     /// conformance: `getImageRenderData()` (image sources).
     fn get_image_render_data(&self) -> Option<Rc<crate::sources::render_image_source::ImageSourceRenderData>> {
         None
-    }
-
-    fn get_raw_render_tiles(&self) -> Rc<Vec<RenderTile>> {
-        Rc::new(Vec::new())
     }
 
     /// Queries a feature extension; sources without extensions return a null

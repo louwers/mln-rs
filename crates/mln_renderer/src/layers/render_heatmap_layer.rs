@@ -49,9 +49,8 @@ use crate::layout::heatmap_layout::HeatmapLayout;
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
-use crate::render_layer::{LayerValues, RenderLayer, RenderLayerBase, TypedLayer};
+use crate::render_layer::{LayerTiles, LayerValues, RenderLayer, RenderLayerBase, TypedLayer};
 use crate::render_pass::RenderPass;
-use crate::render_source::RenderTiles;
 use crate::render_static_data::RenderStaticData;
 use crate::render_target::RenderTarget;
 use crate::tile_matrix::{bind_no_projection, get_projection_data, globe_extrude_scale, to_projection_ubo};
@@ -245,10 +244,11 @@ impl RenderLayer for RenderHeatmapLayer {
         state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         paint_parameters: &PaintParameters<'_>,
+        tiles: Option<LayerTiles<'_>>,
         draws: &mut LayerDraws,
     ) {
         self.update_projection_variant(state, draws);
-        let Some(render_tiles) = self.base.render_tiles.clone().filter(|t| !t.is_empty()) else {
+        let Some(render_tiles) = tiles.filter(|tiles| !tiles.is_empty()) else {
             self.remove_all_draws(draws);
             return;
         };
@@ -260,7 +260,7 @@ impl RenderLayer for RenderHeatmapLayer {
             .get_or_insert_with(|| RenderTarget::new(context, size, TextureChannelDataType::HalfFloat));
         render_target.set_size(context, size);
         let render_target_texture = render_target.get_texture();
-        if self.draw_tiles(shaders, context, &render_tiles, paint_parameters, draws) {
+        if self.draw_tiles(shaders, context, render_tiles, paint_parameters, draws) {
             self.draw_texture(shaders, context, render_target_texture, paint_parameters, draws);
         }
     }
@@ -274,7 +274,7 @@ impl RenderHeatmapLayer {
         &mut self,
         shaders: &ShaderRegistry,
         context: &Context,
-        render_tiles: &RenderTiles,
+        render_tiles: LayerTiles<'_>,
         paint_parameters: &PaintParameters<'_>,
         draws: &mut LayerDraws,
     ) -> bool {

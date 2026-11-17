@@ -30,7 +30,9 @@ use crate::gfx::context::Context;
 use crate::layer_type::LayerType;
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{LayerParts, LayerPrepareParameters, LayerValues, RenderLayer, RenderLayerBase, TypedLayer};
+use crate::render_layer::{
+    LayerParts, LayerPrepareParameters, LayerTiles, LayerValues, RenderLayer, RenderLayerBase, TypedLayer,
+};
 use crate::render_pass::RenderPass;
 use crate::update_parameters::UpdateParameters;
 
@@ -154,7 +156,9 @@ impl RenderLayer for RenderCustomLayer {
         self.base.passes = RenderPass::Translucent;
     }
 
-    fn prepare(&mut self, _parameters: &mut LayerPrepareParameters<'_>) {}
+    fn prepare(&mut self, _parameters: &mut LayerPrepareParameters<'_>) -> Option<Vec<usize>> {
+        None
+    }
 
     fn update(
         &mut self,
@@ -163,6 +167,7 @@ impl RenderLayer for RenderCustomLayer {
         _state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
+        _tiles: Option<LayerTiles<'_>>,
         _draws: &mut LayerDraws,
     ) {
         if self.draw.is_none() {

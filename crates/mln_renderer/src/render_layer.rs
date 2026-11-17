@@ -4,17 +4,18 @@
 // it keeps of each one's drawing (`LayerDraws`).
 
 use std::cell::RefCell;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_gfx::ShaderRegistry;
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_map_types::{TileProjector, TransformState};
+use mln_map_types::{ProjectionData, TileProjector, TransformState};
 use mln_style::expression::Dependency;
 use mln_style::layer_type::{ErasedLayerStyle, LayerStyle, PaintSet};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_style_types::{TranslateAnchorType, VisibilityType};
+use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::Color;
+use mln_util::mat4::Mat4;
 
 use crate::bucket::BucketPtr;
 use crate::draw_cache::{DrawGroup, LayerDraws};
@@ -24,7 +25,7 @@ use crate::line_atlas::LineAtlas;
 use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;
 use crate::render_pass::RenderPass;
-use crate::render_source::{RenderSource, RenderTiles};
+use crate::render_source::RenderSource;
 use crate::render_tile::RenderTile;
 use crate::update_parameters::UpdateParameters;
 
@@ -49,9 +50,6 @@ impl LayerRenderData {
     }
 }
 
-// symbols: `BucketPlacementData`. C++ holds `reference_wrapper`s to the
-// bucket and the render tile; here the bucket is shared and the tile is
-// kept alive by the vector that owns it.
 /// A symbol layer's `*-translate` in pixels, carried into placement the way
 /// GL JS passes `translation`.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -66,12 +64,36 @@ impl Default for SymbolTranslate {
     }
 }
 
+/// What placement reads of the render tile of a symbol bucket, as the frame
+/// that prepared the bucket's placement data set it.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct PlacedTile {
+    pub(crate) id: UnwrappedTileID,
+    pub(crate) overscaled_id: OverscaledTileID,
+    pub(crate) hold_for_fade: bool,
+    /// The tile's projection; `matrix` is its main matrix.
+    pub(crate) projection: ProjectionData,
+    pub(crate) matrix: Mat4,
+}
+
+impl PlacedTile {
+    #[must_use]
+    pub(crate) fn new(tile: &RenderTile) -> PlacedTile {
+        PlacedTile {
+            id: tile.id,
+            overscaled_id: *tile.get_overscaled_tile_id(),
+            hold_for_fade: tile.hold_for_fade(),
+            projection: tile.projection,
+            matrix: tile.matrix,
+        }
+    }
+}
+
+/// symbols: a symbol bucket a layer places or draws, with its tile.
 #[derive(Clone)]
 pub(crate) struct BucketPlacementData {
     pub(crate) bucket: Arc<crate::buckets::symbol_bucket::SymbolBucket>,
-    /// The `RenderTile` (`tile`): `tile_owner[tile_index]`.
-    pub(crate) tile_owner: Rc<Vec<RenderTile>>,
-    pub(crate) tile_index: usize,
+    pub(crate) tile: PlacedTile,
     pub(crate) feature_index: Option<Arc<crate::geometry::feature_index::FeatureIndex>>,
     pub(crate) source_id: String,
     pub(crate) sort_key_range: Option<crate::buckets::symbol_bucket::SortKeyRange>,
@@ -79,15 +101,34 @@ pub(crate) struct BucketPlacementData {
     pub(crate) icon_translate: SymbolTranslate,
 }
 
-impl BucketPlacementData {
-    /// `tile`.
+/// The tiles a layer draws in a frame: a selection of its source's render
+/// tiles, in the order the layer draws them.
+#[derive(Clone, Copy)]
+pub(crate) struct LayerTiles<'a> {
+    tiles: &'a [RenderTile],
+    order: &'a [usize],
+}
+
+impl<'a> LayerTiles<'a> {
+    /// The tiles of `tiles` at the indexes of `order`, in that order.
     #[must_use]
-    pub(crate) fn tile(&self) -> &RenderTile {
-        &self.tile_owner[self.tile_index]
+    pub(crate) fn new(tiles: &'a [RenderTile], order: &'a [usize]) -> LayerTiles<'a> {
+        LayerTiles { tiles, order }
+    }
+
+    pub(crate) fn iter(self) -> impl Iterator<Item = &'a RenderTile> + 'a {
+        self.order.iter().filter_map(|&i| self.tiles.get(i))
+    }
+
+    #[must_use]
+    pub(crate) fn is_empty(self) -> bool {
+        self.order.is_empty()
     }
 }
 
 pub(crate) struct LayerPrepareParameters<'a> {
+    /// The layer's source, `None` for a layer without one or a source type
+    /// the renderer has no render source for.
     pub(crate) source: Option<&'a dyn RenderSource>,
     /// What the renderer keeps of the layer's drawing, whose tiles become
     /// the frame's.
@@ -96,6 +137,18 @@ pub(crate) struct LayerPrepareParameters<'a> {
     pub(crate) images: &'a crate::image_store::ImageStore,
     pub(crate) pattern_atlas: &'a RefCell<PatternAtlas>,
     pub(crate) line_atlas: &'a RefCell<LineAtlas>,
+}
+
+impl<'a> LayerPrepareParameters<'a> {
+    /// The source's tiles at the indexes of `order`; `None` without either.
+    #[must_use]
+    pub(crate) fn tiles<'b>(&self, order: Option<&'b [usize]>) -> Option<LayerTiles<'b>>
+    where
+        'a: 'b,
+    {
+        let source = self.source?;
+        Some(LayerTiles::new(source.render_tiles(), order?))
+    }
 }
 
 /// The data members of `RenderLayer`.
@@ -108,10 +161,6 @@ pub(crate) struct RenderLayerBase {
     /// Whether the frame draws the layer.
     pub(crate) is_renderable: bool,
 
-    /// Stores current set of tiles to be rendered for this layer.
-    pub(crate) render_tiles: Option<RenderTiles>,
-    /// Retains ownership of tiles
-    pub(crate) render_tiles_owner: Rc<Vec<RenderTile>>,
     /// The projection variant this layer's draws are built with.
     pub(crate) projection_variant: ProjectionVariant,
 }
@@ -125,8 +174,6 @@ impl RenderLayerBase {
             passes: RenderPass::None,
             style_dependencies: Dependency::NONE,
             is_renderable: false,
-            render_tiles: None,
-            render_tiles_owner: Rc::new(Vec::new()),
             projection_variant: ProjectionVariant::Mercator,
         }
     }
@@ -269,9 +316,12 @@ pub(crate) trait RenderLayer: LayerParts {
         self.is_3d()
     }
 
-    /// Reads the source's render tiles (`prepare_base`).
-    fn prepare(&mut self, parameters: &mut LayerPrepareParameters<'_>) {
-        prepare_base(self, parameters);
+    /// Picks the tiles of the source the layer draws in the frame, and
+    /// returns their order, as indexes into the source's render tiles
+    /// (`prepare_base`); `None` for a layer without tiles. The frame's update
+    /// gets them in that order.
+    fn prepare(&mut self, parameters: &mut LayerPrepareParameters<'_>) -> Option<Vec<usize>> {
+        prepare_base(self, parameters)
     }
 
     /// TODO: Only for background layers.
@@ -280,8 +330,12 @@ pub(crate) trait RenderLayer: LayerParts {
     }
 
     /// Makes the layer's draws of the frame in `draws`, from the frame's
-    /// tiles and what `draws` keeps of them, with the values of their
-    /// uniforms.
+    /// `tiles` of the layer, the order its `prepare` returned, and what
+    /// `draws` keeps of them, with the values of their uniforms.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the shaders, context, camera and frame parameters a layer's draws are made with, with its tiles and what it keeps of them"
+    )]
     fn update(
         &mut self,
         _shaders: &ShaderRegistry,
@@ -289,6 +343,7 @@ pub(crate) trait RenderLayer: LayerParts {
         _state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
+        _tiles: Option<LayerTiles<'_>>,
         _draws: &mut LayerDraws,
     ) {
     }
@@ -335,8 +390,9 @@ pub(crate) trait RenderLayer: LayerParts {
         mark_layer_renderable_base(self, will_render, draws);
     }
 
-    /// Drops what the last `prepare` and `update` built: the draws, and
-    /// the tiles and placement data that keep the tiles' buckets alive.
+    /// Drops what the last `prepare` and `update` built: the draws, the
+    /// tiles' entries, and the placement data that keeps the tiles' buckets
+    /// alive.
     /// Called when the layer stops rendering, since neither runs again until
     /// it renders, and they then rebuild everything from the source's tiles.
     fn release_render_data(&mut self, draws: &mut LayerDraws) {
@@ -370,21 +426,14 @@ pub(crate) trait RenderLayer: LayerParts {
         true
     }
 
-    fn add_render_passes_from_tiles(&mut self) {
+    /// Adds the passes the layer's buckets of `tiles` were laid out to draw
+    /// in to the layer's.
+    fn add_render_passes_from_tiles(&mut self, tiles: LayerTiles<'_>) {
         let base = self.base_mut();
-        let render_tiles = base.render_tiles.clone().expect("renderTiles");
-        for tile in render_tiles.iter() {
+        for tile in tiles.iter() {
             if let Some(render_data) = tile.get_layer_render_data(&*base.style) {
                 base.passes |= RenderPass(render_data.layer.render_passes());
             }
-        }
-    }
-
-    /// Makes the tiles of `render_tiles` those `draws` has entries for.
-    fn update_tile_entries(&self, draws: &mut LayerDraws) {
-        match &self.base().render_tiles {
-            Some(render_tiles) => draws.set_tiles(render_tiles.iter().map(|tile| *tile.get_overscaled_tile_id())),
-            None => draws.clear_tiles(),
         }
     }
 
@@ -480,30 +529,36 @@ pub(crate) fn mark_layer_renderable_base<L: RenderLayer + ?Sized>(
 /// The default `RenderLayer::release_render_data`, callable from overrides.
 pub(crate) fn release_render_data_base<L: RenderLayer + ?Sized>(layer: &mut L, draws: &mut LayerDraws) {
     layer.remove_all_draws(draws);
-    let base = layer.base_mut();
-    base.render_tiles = None;
-    base.render_tiles_owner = Rc::new(Vec::new());
     draws.clear_tiles();
 }
 
-/// The default `RenderLayer::prepare(params)`, callable from overrides (C++
-/// `RenderLayer::prepare(params)`). C++ asserts a source; without one (a
-/// source type the port has no render source for) the layer gets no tiles.
-pub(crate) fn prepare_base<L: RenderLayer + ?Sized>(layer: &mut L, parameters: &mut LayerPrepareParameters<'_>) {
-    let Some(source) = parameters.source else {
-        layer.base_mut().render_tiles = None;
-        parameters.draws.clear_tiles();
-        return;
-    };
-    debug_assert!(source.is_enabled());
+/// Makes the source's tiles at the indexes of `order` those
+/// `parameters.draws` has entries for, none for `None`, and returns `order`.
+pub(crate) fn set_layer_tiles(
+    parameters: &mut LayerPrepareParameters<'_>,
+    order: Option<Vec<usize>>,
+) -> Option<Vec<usize>> {
+    match parameters.tiles(order.as_deref()) {
+        Some(tiles) => parameters.draws.set_tiles(tiles.iter().map(|tile| *tile.get_overscaled_tile_id())),
+        None => parameters.draws.clear_tiles(),
+    }
+    order
+}
 
-    let render_tiles = source.get_render_tiles();
-    let render_tiles_owner = source.get_raw_render_tiles();
-    let base = layer.base_mut();
-    base.render_tiles = render_tiles;
-    base.render_tiles_owner = render_tiles_owner;
-
-    layer.add_render_passes_from_tiles();
-
-    layer.update_tile_entries(parameters.draws);
+/// The default `RenderLayer::prepare`, callable from overrides: the layer
+/// draws its source's tiles in [`RenderSource::tile_order`], in the passes
+/// their buckets were laid out for. Without a source (a source type the
+/// port has no render source for), it gets no tiles.
+pub(crate) fn prepare_base<L: RenderLayer + ?Sized>(
+    layer: &mut L,
+    parameters: &mut LayerPrepareParameters<'_>,
+) -> Option<Vec<usize>> {
+    let order = parameters.source.and_then(|source| {
+        debug_assert!(source.is_enabled());
+        source.tile_order()
+    });
+    if let Some(tiles) = parameters.tiles(order.as_deref()) {
+        layer.add_render_passes_from_tiles(tiles);
+    }
+    set_layer_tiles(parameters, order)
 }

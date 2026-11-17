@@ -18,8 +18,7 @@ use mln_vec_map::{VecMap, VecSet};
 
 use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::layout::symbol_instance::{SymbolInstance, SymbolInstancePools};
-use crate::render_layer::RenderLayer;
-use crate::render_tile::RenderTile;
+use crate::render_layer::{PlacedTile, RenderLayer};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct IndexedSymbolInstance {
@@ -400,7 +399,7 @@ impl CrossTileSymbolIndex {
         layer_index.handle_wrap_jump(lng);
 
         for item in layer.get_placement_data() {
-            let render_tile = item.tile();
+            let render_tile = &item.tile;
             let pair =
                 item.bucket.register_at_cross_tile_index(layer_index, render_tile, state, &mut self.max_cross_tile_id);
             debug_assert!(pair.0 != 0);
@@ -426,12 +425,12 @@ impl SymbolBucket {
     pub(crate) fn register_at_cross_tile_index(
         &self,
         index: &mut CrossTileSymbolLayerIndex,
-        render_tile: &RenderTile,
+        render_tile: &PlacedTile,
         state: &TransformState,
         max_cross_tile_id: &mut u32,
     ) -> (u32, bool) {
         let first_time_added = index.add_bucket(
-            render_tile.get_overscaled_tile_id(),
+            &render_tile.overscaled_id,
             &TileProjector::with_data(state, &render_tile.id, render_tile.projection),
             self,
             max_cross_tile_id,

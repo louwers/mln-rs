@@ -14,7 +14,7 @@ use mln_util::vectors::Vec4;
 use crate::buckets::symbol_bucket::{
     PlacedSymbol, PlacedSymbolPools, SymbolBucket, SymbolDynamicLayoutVertex, SymbolSizeBinder, ZoomEvaluatedSize,
 };
-use crate::render_tile::RenderTile;
+use crate::render_layer::PlacedTile;
 
 pub(crate) fn get_tile_skew_vectors(state: &TransformState) -> ([f64; 2], [f64; 2]) {
     let cos_roll = state.get_roll().cos();
@@ -726,7 +726,7 @@ pub(crate) fn reproject_line_labels(
     pitch_with_map: bool,
     rotate_with_map: bool,
     keep_upright: bool,
-    tile: &RenderTile,
+    tile: &PlacedTile,
     size_binder: &SymbolSizeBinder,
     state: &TransformState,
     translation: Vec2,

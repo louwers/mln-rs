@@ -63,7 +63,8 @@ use crate::layout::symbol_projection::{get_gl_coord_matrix, get_label_plane_matr
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
 use crate::render_layer::{
-    BucketPlacementData, LayerPrepareParameters, LayerValues, RenderLayer, RenderLayerBase, SymbolTranslate, TypedLayer,
+    BucketPlacementData, LayerPrepareParameters, LayerTiles, LayerValues, PlacedTile, RenderLayer, RenderLayerBase,
+    SymbolTranslate, TypedLayer, set_layer_tiles,
 };
 use crate::render_pass::RenderPass;
 use crate::render_tile::RenderTile;
@@ -623,14 +624,12 @@ impl RenderSymbolLayer {
         (text_translate, icon_translate)
     }
 
-    /// Adds `bucket`, of the tile at `tile_index` of `owner`, to what the
-    /// layer places: when the layer leads the bucket, to its placement data,
-    /// with the tile's feature index, in order of sort key; otherwise to its
-    /// follower data.
+    /// Adds `bucket`, of `tile`, to what the layer places: when the layer
+    /// leads the bucket, to its placement data, with the tile's feature
+    /// index, in order of sort key; otherwise to its follower data.
     pub(crate) fn add_placement_data(
         &mut self,
-        owner: &Rc<Vec<RenderTile>>,
-        tile_index: usize,
+        tile: PlacedTile,
         bucket: Arc<SymbolBucket>,
         feature_index: impl FnOnce() -> Option<Arc<FeatureIndex>>,
         (text_translate, icon_translate): (SymbolTranslate, SymbolTranslate),
@@ -638,8 +637,7 @@ impl RenderSymbolLayer {
         if bucket.bucket_leader_id != self.get_id() {
             self.follower_data.push(BucketPlacementData {
                 bucket,
-                tile_owner: Rc::clone(owner),
-                tile_index,
+                tile,
                 feature_index: None,
                 source_id: self.base.style.base().source.clone(),
                 sort_key_range: None,
@@ -654,8 +652,7 @@ impl RenderSymbolLayer {
         if bucket.sort_key_ranges.is_empty() {
             self.placement_data.push(BucketPlacementData {
                 bucket,
-                tile_owner: Rc::clone(owner),
-                tile_index,
+                tile,
                 feature_index,
                 source_id: self.base.style.base().source.clone(),
                 sort_key_range: None,
@@ -667,8 +664,7 @@ impl RenderSymbolLayer {
         for sort_key_range in &bucket.sort_key_ranges {
             let layer_data = BucketPlacementData {
                 bucket: Arc::clone(&bucket),
-                tile_owner: Rc::clone(owner),
-                tile_index,
+                tile,
                 feature_index: feature_index.clone(),
                 source_id: self.base.style.base().source.clone(),
                 sort_key_range: Some(*sort_key_range),
@@ -1148,28 +1144,28 @@ impl RenderLayer for RenderSymbolLayer {
         self.placement_data.clear();
     }
 
-    fn prepare(&mut self, params: &mut LayerPrepareParameters<'_>) {
+    /// Picks the source's tiles in
+    /// [`tile_order_by_y`](crate::render_source::RenderSource::tile_order_by_y), and
+    /// collects the symbol buckets of the tiles the layer places, and of
+    /// those whose buckets another layer places and this one draws.
+    fn prepare(&mut self, params: &mut LayerPrepareParameters<'_>) -> Option<Vec<usize>> {
         let Some(source) = params.source else {
-            self.base.render_tiles = None;
             params.draws.clear_tiles();
-            return;
+            return None;
         };
-        self.base.render_tiles = source.get_render_tiles_sorted_by_y_position();
-        self.base.render_tiles_owner = source.get_raw_render_tiles();
-
-        self.update_tile_entries(params.draws);
-        if self.base.render_tiles.is_some() {
-            self.add_render_passes_from_tiles();
+        let order = source.tile_order_by_y();
+        let tiles = params.tiles(order.as_deref());
+        if let Some(tiles) = tiles {
+            self.add_render_passes_from_tiles(tiles);
         }
 
         self.placement_data.clear();
         self.follower_data.clear();
 
         let translates = self.symbol_translates();
-        let Some(render_tiles) = self.base.render_tiles.clone() else {
-            return;
+        let Some(render_tiles) = tiles else {
+            return set_layer_tiles(params, order);
         };
-        let owner = Rc::clone(render_tiles.owner());
         for render_tile in render_tiles.iter() {
             let Some(bucket_ptr) = render_tile.get_bucket(&*self.base.style) else {
                 continue;
@@ -1177,11 +1173,9 @@ impl RenderLayer for RenderSymbolLayer {
             let Some(bucket) = crate::bucket::recover::<SymbolBucket>(bucket_ptr) else {
                 continue;
             };
-            let Some(tile_index) = owner.iter().position(|t| std::ptr::eq(t, render_tile)) else {
-                continue;
-            };
-            self.add_placement_data(&owner, tile_index, bucket, || render_tile.get_feature_index(), translates);
+            self.add_placement_data(PlacedTile::new(render_tile), bucket, || render_tile.get_feature_index(), translates);
         }
+        set_layer_tiles(params, order)
     }
 
     /// Makes the frame's draws of the layer: those of each of its tiles,
@@ -1195,6 +1189,7 @@ impl RenderLayer for RenderSymbolLayer {
         state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         paint_parameters: &PaintParameters<'_>,
+        tiles: Option<LayerTiles<'_>>,
         draws: &mut LayerDraws,
     ) {
         /// The atlases' textures given to one tile's draws.
@@ -1206,7 +1201,7 @@ impl RenderLayer for RenderSymbolLayer {
 
         self.update_projection_variant(state, draws);
         let passes = self.base.passes;
-        let Some(render_tiles) = self.base.render_tiles.clone().filter(|t| !t.is_empty()) else {
+        let Some(render_tiles) = tiles.filter(|tiles| !tiles.is_empty()) else {
             self.remove_all_draws(draws);
             return;
         };

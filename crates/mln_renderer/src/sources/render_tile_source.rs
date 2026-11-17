@@ -50,7 +50,7 @@ use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layers::cast_matrix;
 use crate::paint_parameters::PaintParameters;
 use crate::query::FeatureExtensionValue;
-use crate::render_source::{RenderSource, RenderSourceBase, RenderTiles, SourcePrepareParameters};
+use crate::render_source::{RenderSource, RenderSourceBase, SourcePrepareParameters};
 use crate::render_tile::RenderTile;
 use crate::render_tree::{DebugLayers, DebugType, RenderItem, debug_layer};
 use crate::source_type::{OriginUpdate, TileOrigin};
@@ -416,8 +416,6 @@ pub(crate) struct RenderTileSource {
     origin: Box<dyn TileOrigin>,
     fast_pfor_enabled: bool,
     pub(crate) render_tiles: Rc<Vec<RenderTile>>,
-    filtered_render_tiles: RefCell<Option<RenderTiles>>,
-    render_tiles_sorted_by_y: RefCell<Option<RenderTiles>>,
     bearing: f32,
 }
 
@@ -439,8 +437,6 @@ impl RenderTileSource {
             origin,
             fast_pfor_enabled: false,
             render_tiles: Rc::new(Vec::new()),
-            filtered_render_tiles: RefCell::new(None),
-            render_tiles_sorted_by_y: RefCell::new(None),
             bearing: 0.0,
         }
     }
@@ -496,8 +492,6 @@ impl RenderSource for RenderTileSource {
 
     fn prepare(&mut self, store: &mut TileStore, parameters: &SourcePrepareParameters<'_>) {
         self.bearing = parameters.transform.state.get_bearing() as f32;
-        *self.filtered_render_tiles.borrow_mut() = None;
-        *self.render_tiles_sorted_by_y.borrow_mut() = None;
         let pool = store.pool().clone();
         let Some((source, _)) = store.source_mut(self.key) else {
             self.render_tiles = Rc::new(Vec::new());
@@ -514,8 +508,6 @@ impl RenderSource for RenderTileSource {
 
     fn release_render_data(&mut self) {
         if !self.render_tiles.is_empty() {
-            *self.filtered_render_tiles.borrow_mut() = None;
-            *self.render_tiles_sorted_by_y.borrow_mut() = None;
             self.render_tiles = Rc::new(Vec::new());
         }
     }
@@ -524,47 +516,26 @@ impl RenderSource for RenderTileSource {
         Some(self.key)
     }
 
-    fn get_render_tiles(&self) -> Option<RenderTiles> {
-        let mut filtered = self.filtered_render_tiles.borrow_mut();
-        if filtered.is_none() {
-            let indices: Vec<usize> = self
-                .render_tiles
-                .iter()
-                .enumerate()
-                .filter(|(_, render_tile)| !render_tile.hold_for_fade())
-                .map(|(i, _)| i)
-                .collect();
-            *filtered = Some(RenderTiles::new(Rc::clone(&self.render_tiles), indices));
-        }
-        filtered.clone()
+    fn render_tiles(&self) -> &[RenderTile] {
+        &self.render_tiles
     }
 
-    fn get_render_tiles_sorted_by_y_position(&self) -> Option<RenderTiles> {
-        let mut sorted = self.render_tiles_sorted_by_y.borrow_mut();
-        if sorted.is_none() {
-            let source_bearing = self.bearing;
-            let tiles = &self.render_tiles;
-            let mut indices: Vec<usize> = (0..tiles.len()).collect();
-            indices.sort_by(|&a, &b| {
-                let a = &tiles[a];
-                let b = &tiles[b];
-                let pa = Vec2::new(a.id.canonical.x as f32, a.id.canonical.y as f32);
-                let pb = Vec2::new(b.id.canonical.x as f32, b.id.canonical.y as f32);
-
-                let rotation = Vec2::from_angle(source_bearing);
-                let par = rotation.rotate(pa);
-                let pbr = rotation.rotate(pb);
-
-                // std::tie(b.z, par.y, par.x) < std::tie(a.z, pbr.y, pbr.x)
-                b.id.canonical.z.cmp(&a.id.canonical.z).then(par.y.total_cmp(&pbr.y)).then(par.x.total_cmp(&pbr.x))
-            });
-            *sorted = Some(RenderTiles::new(Rc::clone(&self.render_tiles), indices));
-        }
-        sorted.clone()
+    fn tile_order(&self) -> Option<Vec<usize>> {
+        Some((0..self.render_tiles.len()).filter(|&i| !self.render_tiles[i].hold_for_fade()).collect())
     }
 
-    fn get_raw_render_tiles(&self) -> Rc<Vec<RenderTile>> {
-        Rc::clone(&self.render_tiles)
+    fn tile_order_by_y(&self) -> Option<Vec<usize>> {
+        let rotation = Vec2::from_angle(self.bearing);
+        let tiles = &self.render_tiles;
+        let mut order: Vec<usize> = (0..tiles.len()).collect();
+        order.sort_by(|&a, &b| {
+            let (a, b) = (&tiles[a].id.canonical, &tiles[b].id.canonical);
+            let par = rotation.rotate(Vec2::new(a.x as f32, a.y as f32));
+            let pbr = rotation.rotate(Vec2::new(b.x as f32, b.y as f32));
+            // std::tie(b.z, par.y, par.x) < std::tie(a.z, pbr.y, pbr.x)
+            b.z.cmp(&a.z).then(par.y.total_cmp(&pbr.y)).then(par.x.total_cmp(&pbr.x))
+        });
+        Some(order)
     }
 
     fn query_feature_extensions(

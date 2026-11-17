@@ -64,7 +64,7 @@ use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::pattern_layout::{PatternLayout, uses_pattern};
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
-use crate::render_layer::{LayerValues, RenderLayer, RenderLayerBase, TypedLayer};
+use crate::render_layer::{LayerTiles, LayerValues, RenderLayer, RenderLayerBase, TypedLayer};
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_tile::RenderTile;
@@ -411,11 +411,12 @@ impl RenderLayer for RenderFillExtrusionLayer {
         state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         paint_parameters: &PaintParameters<'_>,
+        tiles: Option<LayerTiles<'_>>,
         draws: &mut LayerDraws,
     ) {
         self.update_projection_variant(state, draws);
 
-        let render_tiles = match self.base.render_tiles.clone() {
+        let render_tiles = match tiles {
             Some(tiles) if !tiles.is_empty() && self.base.passes != RenderPass::None => tiles,
             _ => {
                 self.remove_all_draws(draws);

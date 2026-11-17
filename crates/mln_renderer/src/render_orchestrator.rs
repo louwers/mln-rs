@@ -36,7 +36,7 @@ use crate::layer_type::ErasedEvaluatedLayer;
 use crate::line_atlas::LineAtlas;
 use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;
-use crate::render_layer::{LayerPrepareParameters, RenderLayer};
+use crate::render_layer::{LayerPrepareParameters, LayerTiles, RenderLayer};
 use crate::render_source::{self, RenderSource, SourcePrepareParameters};
 use crate::render_tree::{DebugLayers, LayerRenderItem, RenderItem, RenderTree, RenderTreeParameters};
 use crate::renderer_event::RendererEvent;
@@ -401,7 +401,7 @@ impl RenderOrchestrator {
         update_parameters: &Arc<UpdateParameters>,
         frame_layers: FrameLayers,
     ) -> RenderTree {
-        let FrameLayers { mut parameters, layer_render_items, start_time } = frame_layers;
+        let FrameLayers { mut parameters, mut layer_render_items, start_time } = frame_layers;
 
         // The buckets whose vertex data the frame's feature state and symbol
         // placement change, which the draws that copied it copy again.
@@ -431,11 +431,11 @@ impl RenderOrchestrator {
         let mut layers_need_placement: Vec<usize> = Vec::new();
         let mut layers_following_placement: Vec<usize> = Vec::new();
         let mut opaque_pass_cut_off_estimation = layer_render_items.len();
-        for (&index, render_item) in &layer_render_items {
+        for (&index, render_item) in &mut layer_render_items {
             let index = index as usize;
             let render_layer = &mut self.layers[index];
             let source = render_item.source.as_ref().and_then(|id| self.render_sources.get(id)).map(AsRef::as_ref);
-            render_layer.prepare(&mut LayerPrepareParameters {
+            render_item.tile_order = render_layer.prepare(&mut LayerPrepareParameters {
                 source,
                 draws: &mut self.draws[index],
                 images: self.tile_store.images(), // conformance
@@ -912,7 +912,7 @@ impl RenderOrchestrator {
                                 let source_id = style_source.id().to_owned();
                                 layer_render_items
                                     .entry(index as u32)
-                                    .or_insert_with(|| LayerRenderItem { source: Some(source_id) });
+                                    .or_insert_with(|| LayerRenderItem { source: Some(source_id), tile_order: None });
                                 update_list[index] = true;
                             }
                         }
@@ -940,7 +940,9 @@ impl RenderOrchestrator {
                             // and it shall not be added to render items.
                         }
                     }
-                    layer_render_items.entry(index as u32).or_insert_with(|| LayerRenderItem { source: None });
+                    layer_render_items
+                        .entry(index as u32)
+                        .or_insert_with(|| LayerRenderItem { source: None, tile_order: None });
                     update_list[index] = true;
                 }
             }
@@ -1227,16 +1229,19 @@ impl RenderOrchestrator {
         render_tree: &RenderTree,
     ) {
         let mut has_3d = false;
-        for &index in render_tree.get_layer_render_item_map().keys() {
+        for (&index, render_item) in render_tree.get_layer_render_item_map() {
             let render_layer = &mut self.layers[index as usize];
-            // C++ catches exceptions from update() and reports them through
-            // onRenderError; the Rust layers don't throw.
+            let source = render_item.source.as_ref().and_then(|id| self.render_sources.get(id));
+            let tiles = source
+                .zip(render_item.tile_order.as_deref())
+                .map(|(source, order)| LayerTiles::new(source.render_tiles(), order));
             render_layer.update(
                 shaders,
                 context,
                 state,
                 update_parameters,
                 paint_parameters,
+                tiles,
                 &mut self.draws[index as usize],
             );
             has_3d = has_3d || render_layer.needs_globe_depth();
