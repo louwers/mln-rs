@@ -39,7 +39,7 @@ use crate::bucket::Bucket;
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::fill_bucket::{FillBinders, FillBucket, FillLayoutVertex};
 use crate::draw::DrawObjects;
-use crate::draw_cache::{FrameDraws, LayerDraws, TileCache, TileDraw};
+use crate::draw_cache::{DrawCache, FrameDraw, FrameDraws, LayerDraws};
 use crate::gfx::context::Context;
 use crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker;
 use crate::layer_composite::Composite;
@@ -126,7 +126,7 @@ struct FillTile {
     atlases: Option<Rc<DrawableAtlasesTweaker>>,
 }
 
-impl TileCache for FillTile {
+impl DrawCache for FillTile {
     fn objects_mut(&mut self, id: SimpleIdentity) -> Option<&mut DrawObjects> {
         [&mut self.fill, &mut self.outline]
             .into_iter()
@@ -507,7 +507,7 @@ impl RenderFillLayer {
 
     /// Writes the layer's buffers of `draws`, the frame's in drawing order,
     /// to `frame`'s.
-    fn write_uniforms(&self, frame: &mut FrameDraws, draws: &[(TileDraw, FillUniforms)], context: &Context) {
+    fn write_uniforms(&self, frame: &mut FrameDraws, draws: &[(FrameDraw, FillUniforms)], context: &Context) {
         let layer = &*self.values.evaluated;
         let evaluated = &layer.paint;
         let props = FillEvaluatedPropsUBO {
@@ -685,7 +685,7 @@ impl RenderLayer for RenderFillLayer {
             fill_depth: None,
         };
 
-        let mut frame_draws: Vec<(TileDraw, FillUniforms)> = Vec::new();
+        let mut frame_draws: Vec<(FrameDraw, FillUniforms)> = Vec::new();
         for tile in render_tiles.iter() {
             let tile_id = *tile.get_overscaled_tile_id();
 
@@ -735,14 +735,13 @@ impl RenderLayer for RenderFillLayer {
             for (draw, outline) in tile_draws.into_iter().filter_map(|(draw, outline)| Some((draw.as_ref()?, outline)))
             {
                 let uniforms = self.uniforms(tile, bucket, binders, cached.pattern, draw, outline, paint_parameters);
-                let tile_draw = TileDraw {
-                    tile: tile_id,
-                    id: draw.id,
-                    priority: 0,
+                let tile_draw = FrameDraw {
                     pass: RENDER_PASS,
                     sub_layer: draw.sub_layer,
-                    depth: draw.depth,
+                    depth: Some(draw.depth),
+                    clip: true,
                     atlases: cached.atlases.clone(),
+                    ..FrameDraw::new(Some(tile_id), draw.id)
                 };
                 frame_draws.push((tile_draw, uniforms));
             }

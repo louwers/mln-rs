@@ -1,16 +1,11 @@
 //! The render layers and their layer tweakers.
 
-pub(crate) mod background_layer_tweaker;
-pub(crate) mod circle_layer_tweaker;
 pub(crate) mod collision_layer_tweaker;
 pub(crate) mod color_relief_layer_tweaker; // dem-heatmap
 pub(crate) mod fill_extrusion_layer_tweaker;
-pub(crate) mod heatmap_layer_tweaker; // dem-heatmap
-pub(crate) mod heatmap_texture_layer_tweaker; // dem-heatmap
 pub(crate) mod hillshade_layer_tweaker; // dem-heatmap
 pub(crate) mod hillshade_prepare_layer_tweaker; // dem-heatmap
 pub(crate) mod line_layer_tweaker;
-pub(crate) mod raster_layer_tweaker;
 pub(crate) mod render_background_layer;
 pub(crate) mod render_circle_layer;
 pub(crate) mod render_color_relief_layer; // dem-heatmap
@@ -24,31 +19,17 @@ pub(crate) mod render_raster_layer;
 pub(crate) mod render_symbol_layer;
 pub(crate) mod symbol_layer_tweaker;
 
-use std::sync::Arc;
-
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
-use mln_style::CrossfadeParameters;
 use mln_style::layer_type::ErasedLayerStyle;
-use mln_style::layers::{Background, BackgroundPaintProperties};
 use mln_tile_id::OverscaledTileID;
 use mln_util::hash::HashMap;
 
 use crate::draw::DrawObjects;
 use crate::draw_cache::BucketChanges;
 use crate::drawable::Drawable;
-use crate::layer_type::{ErasedEvaluatedLayer, LayerType, evaluated};
+use crate::layer_type::LayerType;
 use crate::render_source::RenderTiles;
 use crate::render_tile::RenderTile;
-
-pub(crate) fn background_layer_properties(
-    properties: &Arc<dyn ErasedEvaluatedLayer>,
-) -> &BackgroundPaintProperties::PossiblyEvaluated {
-    &evaluated::<Background>(properties).paint
-}
-
-pub(crate) fn background_crossfade(properties: &Arc<dyn ErasedEvaluatedLayer>) -> &CrossfadeParameters {
-    &evaluated::<Background>(properties).crossfade
-}
 
 /// The frame's tiles of a layer by tile id, from which its tweakers take
 /// the tile and the bucket each drawable draws.

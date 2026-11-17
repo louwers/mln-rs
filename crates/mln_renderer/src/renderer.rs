@@ -395,7 +395,7 @@ impl Renderer {
     /// objects are lost, so that they forget theirs, and lets go of them.
     /// Call it before the renderer goes when its device or target went first.
     pub fn lose_custom_layers(&mut self) {
-        self.orchestrator.visit_render_layers(|layer| layer.lose_context());
+        self.orchestrator.visit_render_layers(|layer, _| layer.lose_context());
     }
 
     /// Destroys what the renderer released and waits for the GPU, so that
@@ -551,7 +551,7 @@ impl Renderer {
 
         // Give the render targets a chance to upload
         // dem-heatmap
-        orchestrator.visit_render_layers(|layer| layer.upload_render_targets(context));
+        orchestrator.visit_render_layers(|layer, draws| layer.upload_render_targets(context, draws));
 
         // Upload the Debug layer group
         // layers: debug
@@ -670,7 +670,7 @@ impl Renderer {
 
         // drawableTargetsPass: draw render targets
         // dem-heatmap
-        orchestrator.visit_render_layers(|layer| layer.render_targets(&mut parameters));
+        orchestrator.visit_render_layers(|layer, draws| layer.render_targets(&mut parameters, draws));
 
         let mut gpu = context.gpu();
         // commonClearPass

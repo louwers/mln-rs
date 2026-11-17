@@ -85,9 +85,10 @@ pub(crate) struct RenderHillshadeLayer {
     /// the DEM that the layer's drawables shade.
     prepare_layer_tweaker: Option<Box<dyn LayerTweaker>>,
 
-    /// Each bucket's render target, with the bucket's prepare generation, by
-    /// bucket id. They draw while the layer is renderable.
-    bucket_render_targets: HashMap<SimpleIdentity, (RenderTarget, u64)>,
+    /// Each bucket's render target, with the group of the drawables that draw
+    /// into it and the bucket's prepare generation, by bucket id. They draw
+    /// while the layer is renderable.
+    bucket_render_targets: HashMap<SimpleIdentity, (RenderTarget, LayerGroup, u64)>,
 }
 
 impl RenderHillshadeLayer {
@@ -194,25 +195,24 @@ impl RenderLayer for RenderHillshadeLayer {
         self.bucket_render_targets.clear();
     }
 
-    fn upload_render_targets(&mut self, context: &Context) {
+    fn upload_render_targets(&mut self, context: &Context, _draws: &mut LayerDraws) {
         if self.base.is_renderable {
-            for (render_target, _) in self.bucket_render_targets.values_mut() {
-                render_target.upload(context);
+            for (_, group, _) in self.bucket_render_targets.values_mut() {
+                group.upload(context);
             }
         }
     }
 
-    fn render_targets(&mut self, parameters: &mut PaintParameters<'_>) {
+    fn render_targets(&mut self, parameters: &mut PaintParameters<'_>, _draws: &mut LayerDraws) {
         if !self.base.is_renderable {
             return;
         }
-        for (render_target, _) in self.bucket_render_targets.values_mut() {
-            let tweaker = &mut self.prepare_layer_tweaker;
-            render_target.render(parameters, |group, parameters| {
-                if let Some(tweaker) = tweaker {
-                    tweaker.execute(group, &LayerTiles::none(), parameters);
-                }
-            });
+        for (render_target, group, _) in self.bucket_render_targets.values_mut() {
+            parameters.current_layer = 0;
+            if let Some(tweaker) = &mut self.prepare_layer_tweaker {
+                tweaker.execute(group, &LayerTiles::none(), parameters);
+            }
+            render_target.render(parameters, |gpu, parameters| group.render(gpu, parameters));
         }
     }
 
@@ -318,19 +318,19 @@ impl RenderLayer for RenderHillshadeLayer {
 
                 let generation = bucket.render_target_generation();
                 let render_target_prepared =
-                    self.bucket_render_targets.get(&bucket_id).is_some_and(|(_, prepared)| *prepared == generation);
+                    self.bucket_render_targets.get(&bucket_id).is_some_and(|(_, _, prepared)| *prepared == generation);
                 if !render_target_prepared {
                     // Set up tile render target
                     let (tilesize, stride, encoding, dem_image) = {
                         let dem = bucket.get_dem_data();
                         (dem.dim as u16, dem.stride, dem.encoding, dem.get_image().clone())
                     };
-                    let mut render_target = RenderTarget::new(
+                    let render_target = RenderTarget::new(
                         context,
                         Size::new(u32::from(tilesize), u32::from(tilesize)),
                         TextureChannelDataType::UnsignedByte,
-                        LayerGroup::tiles(),
                     );
+                    let mut tile_group = LayerGroup::tiles();
 
                     if self.prepare_layer_tweaker.is_none() {
                         self.prepare_layer_tweaker = Some(Box::new(HillshadePrepareLayerTweaker::new(
@@ -375,7 +375,6 @@ impl RenderLayer for RenderHillshadeLayer {
 
                     hillshade_prepare_builder.flush();
 
-                    let tile_group = &mut render_target.layer_group;
                     for mut drawable in hillshade_prepare_builder.clear_drawables() {
                         drawable.tile_id = Some(tile_id);
                         drawable.tweaker = prepare_layer_tweaker;
@@ -387,7 +386,7 @@ impl RenderLayer for RenderHillshadeLayer {
                             }));
                         tile_group.add_tile_drawable(render_pass, &tile_id, drawable);
                     }
-                    self.bucket_render_targets.insert(bucket_id, (render_target, generation));
+                    self.bucket_render_targets.insert(bucket_id, (render_target, tile_group, generation));
                 }
                 let render_target_texture =
                     self.bucket_render_targets.get(&bucket_id).expect("render target").0.get_texture();

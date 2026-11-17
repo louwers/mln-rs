@@ -5,16 +5,19 @@
 //! to the layer's calls. Each tile's entry says which bucket the tile's draws
 //! were built from, and what of that bucket's vertex data changed since, as
 //! the frame's prepare reports it. A layer keeps the GPU objects of its
-//! draws either in drawables of its layer group, or in each tile's entry,
-//! with state of its own type ([`TileCache`]); such a layer's update returns
-//! the frame's draws as values ([`TileDraw`]), which the frame's encode
-//! issues ([`DrawGroup`]).
+//! draws either in drawables of its layer group, or in caches of state of its
+//! own type ([`DrawCache`]): one in each tile's entry, and one of the layer's
+//! draws that no tile holds. Such a layer's update returns the frame's draws
+//! as values ([`FrameDraw`]), which the frame's encode issues
+//! ([`DrawGroup`]).
 
 use std::any::Any;
 use std::ops::BitOrAssign;
 use std::rc::Rc;
 
+use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::gpu::Gpu;
+use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::types::DepthMaskType;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::hash::HashMap;
@@ -85,11 +88,32 @@ impl ChangedBuckets {
     }
 }
 
-/// What a layer type keeps of a tile it draws between frames: the GPU
-/// objects of the tile's draws, and its own state of them.
-pub(crate) trait TileCache: Any {
-    /// The GPU objects of the tile's draw `id`.
+/// What a layer type keeps of its draws between frames, of a tile or of the
+/// layer: the GPU objects of the draws, and its own state of them.
+pub(crate) trait DrawCache: Any {
+    /// The GPU objects of the draw `id`.
     fn objects_mut(&mut self, id: SimpleIdentity) -> Option<&mut DrawObjects>;
+}
+
+/// The GPU objects of one draw a layer keeps, with the id that draws bind
+/// them by. Ids are made with the objects, so they order the draws by when
+/// their objects were made.
+pub(crate) struct KeptDraw {
+    pub(crate) id: SimpleIdentity,
+    pub(crate) objects: DrawObjects,
+}
+
+impl KeptDraw {
+    #[must_use]
+    pub(crate) fn new(objects: DrawObjects) -> KeptDraw {
+        KeptDraw { id: SimpleIdentity::new(), objects }
+    }
+}
+
+impl DrawCache for KeptDraw {
+    fn objects_mut(&mut self, id: SimpleIdentity) -> Option<&mut DrawObjects> {
+        (self.id == id).then_some(&mut self.objects)
+    }
 }
 
 /// What the renderer keeps of a tile a layer draws.
@@ -101,29 +125,50 @@ struct TileEntry {
     /// What of the bucket's vertex data changed since the draws copied it.
     changes: BucketChanges,
     /// The layer type's draws of the tile, of a layer that keeps them here.
-    cache: Option<Box<dyn TileCache>>,
+    cache: Option<Box<dyn DrawCache>>,
 }
 
 /// One draw of a layer's frame: the cached GPU objects it binds, and the
 /// state it draws them with. Its uniform values are the entries at its index
 /// in the layer's storage buffers.
-pub(crate) struct TileDraw {
-    /// The tile whose cache holds the draw's GPU objects, and whose clipping
-    /// mask the draw clips to.
-    pub(crate) tile: OverscaledTileID,
-    /// The id of the draw's GPU objects in the tile's cache.
+pub(crate) struct FrameDraw {
+    /// The tile whose cache holds the draw's GPU objects, or `None` for the
+    /// layer's own cache.
+    pub(crate) tile: Option<OverscaledTileID>,
+    /// The id of the draw's GPU objects in their cache.
     pub(crate) id: SimpleIdentity,
     pub(crate) priority: DrawPriority,
     /// The passes the draw draws in.
     pub(crate) pass: RenderPass,
     /// The sub-layer of the layer's depth the draw tests and writes at.
     pub(crate) sub_layer: u8,
-    pub(crate) depth: DepthMaskType,
+    /// How the draw writes the depth it tests, `None` where it draws without
+    /// a depth test.
+    pub(crate) depth: Option<DepthMaskType>,
+    /// Whether the draw clips to the mask of its tile.
+    pub(crate) clip: bool,
     /// Gives the draw the textures of its tile's atlases before it draws.
     pub(crate) atlases: Option<Rc<DrawableAtlasesTweaker>>,
 }
 
-impl TileDraw {
+impl FrameDraw {
+    /// A draw of the GPU objects `id` in the cache of `tile`, or of the
+    /// layer for `None`, in the translucent pass at the layer's depth, which
+    /// it reads, without clipping.
+    #[must_use]
+    pub(crate) fn new(tile: Option<OverscaledTileID>, id: SimpleIdentity) -> FrameDraw {
+        FrameDraw {
+            tile,
+            id,
+            priority: 0,
+            pass: RenderPass::Translucent,
+            sub_layer: 0,
+            depth: Some(DepthMaskType::ReadOnly),
+            clip: false,
+            atlases: None,
+        }
+    }
+
     /// The order of the layer's draws: by priority, then by the id of their
     /// GPU objects, which is the order the objects were made in.
     #[must_use]
@@ -132,14 +177,15 @@ impl TileDraw {
     }
 }
 
-/// A layer's draws of the frame, and what they share.
+/// A layer's draws of the frame, or of a render target it draws, and what
+/// they share.
 pub(crate) struct FrameDraws {
     /// Tells the layer's draws apart in the layer composite.
     id: SimpleIdentity,
-    /// The draws, in [`TileDraw::order`]. A draw's index is the index of its
+    /// The draws, in [`FrameDraw::order`]. A draw's index is the index of its
     /// entries in the layer's storage buffers, which shaders read as
     /// `globalIndex`.
-    pub(crate) draws: Vec<TileDraw>,
+    pub(crate) draws: Vec<FrameDraw>,
     /// The buffers the draws bind, by id.
     pub(crate) uniform_buffers: UniformBufferArray,
     /// How the draws composite onto the frame in the translucent pass, as one
@@ -177,6 +223,8 @@ pub(crate) struct LayerDraws {
     /// when there are none.
     pub(crate) frame: Option<FrameDraws>,
     tiles: HashMap<OverscaledTileID, TileEntry>,
+    /// The layer type's draws that no tile holds.
+    layer_cache: Option<Box<dyn DrawCache>>,
 }
 
 impl LayerDraws {
@@ -251,14 +299,14 @@ impl LayerDraws {
 
     /// The cache of `tile_id`'s draws, if the tile is one of the frame's and
     /// has one of type `C`.
-    pub(crate) fn cache_mut<C: TileCache>(&mut self, tile_id: &OverscaledTileID) -> Option<&mut C> {
+    pub(crate) fn cache_mut<C: DrawCache>(&mut self, tile_id: &OverscaledTileID) -> Option<&mut C> {
         let cache: &mut dyn Any = self.tiles.get_mut(tile_id)?.cache.as_deref_mut()?;
         cache.downcast_mut()
     }
 
     /// Makes `cache` that of `tile_id`'s draws, if the tile is one of the
     /// frame's.
-    pub(crate) fn set_cache(&mut self, tile_id: &OverscaledTileID, cache: impl TileCache) {
+    pub(crate) fn set_cache(&mut self, tile_id: &OverscaledTileID, cache: impl DrawCache) {
         if let Some(entry) = self.tiles.get_mut(tile_id) {
             entry.cache = Some(Box::new(cache));
         }
@@ -271,8 +319,18 @@ impl LayerDraws {
         }
     }
 
-    /// Removes the drawables, the draws of the frame and the tiles' caches
-    /// of them. The tiles' entries stay.
+    /// Makes `cache` that of the layer's draws that no tile holds.
+    pub(crate) fn set_layer_cache(&mut self, cache: impl DrawCache) {
+        self.layer_cache = Some(Box::new(cache));
+    }
+
+    /// Drops the cache of the layer's draws that no tile holds.
+    pub(crate) fn drop_layer_cache(&mut self) {
+        self.layer_cache = None;
+    }
+
+    /// Removes the drawables, the draws of the frame and the caches of them.
+    /// The tiles' entries stay.
     pub(crate) fn clear_drawables(&mut self) {
         if let Some(group) = &mut self.group {
             group.clear_drawables();
@@ -283,18 +341,28 @@ impl LayerDraws {
         for entry in self.tiles.values_mut() {
             entry.cache = None;
         }
+        self.layer_cache = None;
     }
 
-    /// Uploads the GPU objects of the frame's draws, in drawing order, and
-    /// destroys the buffers each upload replaced.
+    /// Uploads the GPU objects of `draws`, draws of the layer's caches, in
+    /// drawing order, and destroys the buffers each upload replaced.
+    pub(crate) fn upload_draws(&mut self, draws: &FrameDraws, context: &Context) {
+        upload_draws(draws, &mut self.caches(), context);
+    }
+
+    /// Draws `draws`, draws of the layer's caches, of the pass into the open
+    /// pass of `gpu`, the context's.
+    pub(crate) fn render_draws(&mut self, draws: &FrameDraws, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        if !draws.draws.is_empty() && parameters.pass_target().is_some() {
+            render_draws(draws, &mut self.caches(), gpu, parameters);
+        }
+    }
+
+    /// Uploads the GPU objects of the frame's draws.
     fn upload_frame(&mut self, context: &Context) {
         let Some(frame) = &self.frame else { return };
-        for draw in &frame.draws {
-            if let Some(objects) = objects_mut(&mut self.tiles, draw) {
-                objects.upload(context);
-                context.destroy_released();
-            }
-        }
+        let caches = &mut Caches { tiles: &mut self.tiles, layer: &mut self.layer_cache };
+        upload_draws(frame, caches, context);
     }
 
     /// Draws the frame's draws of the pass into the open pass of `gpu`, the
@@ -305,31 +373,50 @@ impl LayerDraws {
         if frame.draws.is_empty() || parameters.pass_target().is_none() {
             return;
         }
-        let tiles = &mut self.tiles;
+        let caches = &mut Caches { tiles: &mut self.tiles, layer: &mut self.layer_cache };
         if frame.composite.is_some() && parameters.pass == RenderPass::Translucent {
-            parameters.draw_composited(gpu, frame.id, |gpu, parameters| render_draws(frame, tiles, gpu, parameters));
+            parameters.draw_composited(gpu, frame.id, |gpu, parameters| render_draws(frame, caches, gpu, parameters));
         } else {
-            render_draws(frame, tiles, gpu, parameters);
+            render_draws(frame, caches, gpu, parameters);
+        }
+    }
+
+    fn caches(&mut self) -> Caches<'_> {
+        Caches { tiles: &mut self.tiles, layer: &mut self.layer_cache }
+    }
+}
+
+/// The caches of a layer's draws, which hold the draws' GPU objects.
+struct Caches<'a> {
+    tiles: &'a mut HashMap<OverscaledTileID, TileEntry>,
+    layer: &'a mut Option<Box<dyn DrawCache>>,
+}
+
+impl Caches<'_> {
+    /// The GPU objects of `draw` in its cache.
+    fn objects_mut(&mut self, draw: &FrameDraw) -> Option<&mut DrawObjects> {
+        let cache = match draw.tile {
+            Some(tile) => self.tiles.get_mut(&tile)?.cache.as_mut(),
+            None => self.layer.as_mut(),
+        };
+        cache?.objects_mut(draw.id)
+    }
+}
+
+/// Uploads the GPU objects of `frame`'s draws, in drawing order, and
+/// destroys the buffers each upload replaced.
+fn upload_draws(frame: &FrameDraws, caches: &mut Caches<'_>, context: &Context) {
+    for draw in &frame.draws {
+        if let Some(objects) = caches.objects_mut(draw) {
+            objects.upload(context);
+            context.destroy_released();
         }
     }
 }
 
-/// The GPU objects of `draw` in its tile's cache.
-fn objects_mut<'a>(
-    tiles: &'a mut HashMap<OverscaledTileID, TileEntry>,
-    draw: &TileDraw,
-) -> Option<&'a mut DrawObjects> {
-    tiles.get_mut(&draw.tile)?.cache.as_mut()?.objects_mut(draw.id)
-}
-
-/// Draws `frame`'s draws of the pass, each clipped to its tile's mask, which
-/// this draws first.
-fn render_draws(
-    frame: &FrameDraws,
-    tiles: &mut HashMap<OverscaledTileID, TileEntry>,
-    gpu: &mut dyn Gpu,
-    parameters: &mut PaintParameters<'_>,
-) {
+/// Draws `frame`'s draws of the pass, those that clip each clipped to its
+/// tile's mask, which this draws first.
+fn render_draws(frame: &FrameDraws, caches: &mut Caches<'_>, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
     if let Some(stencil_tiles) = frame.stencil_tiles.as_ref().filter(|tiles| !tiles.is_empty()) {
         parameters.render_tile_clipping_masks(gpu, stencil_tiles);
     }
@@ -338,15 +425,20 @@ fn render_draws(
         if draw.pass.underlying_type() & pass == 0 {
             continue;
         }
-        let Some(objects) = objects_mut(tiles, draw) else {
+        let Some(objects) = caches.objects_mut(draw) else {
             debug_assert!(false, "a draw of tile {:?} has no GPU objects", draw.tile);
             continue;
         };
         if let Some(atlases) = &draw.atlases {
             atlases.execute(objects, parameters);
         }
-        let depth = parameters.depth_mode_for_sublayer(draw.sub_layer, draw.depth);
-        let stencil = parameters.stencil_mode_for_clipping(&draw.tile.to_unwrapped());
+        let depth = draw
+            .depth
+            .map_or_else(DepthMode::disabled, |mask| parameters.depth_mode_for_sublayer(draw.sub_layer, mask));
+        let stencil = match draw.tile.filter(|_| draw.clip) {
+            Some(tile) => parameters.stencil_mode_for_clipping(&tile.to_unwrapped()),
+            None => StencilMode::disabled(),
+        };
         objects.draw(gpu, parameters, Some(&frame.uniform_buffers), depth, stencil, index as u32);
     }
 }
@@ -419,7 +511,7 @@ mod tests {
     use mln_tile_id::OverscaledTileID;
     use mln_util::identity::SimpleIdentity;
 
-    use super::{BucketChanges, ChangedBuckets, LayerDraws, TileCache};
+    use super::{BucketChanges, ChangedBuckets, DrawCache, LayerDraws};
     use crate::draw::DrawObjects;
 
     /// A tile's changes are those of the bucket its drawables were built
@@ -453,7 +545,7 @@ mod tests {
 
     struct Cache(SimpleIdentity, DrawObjects);
 
-    impl TileCache for Cache {
+    impl DrawCache for Cache {
         fn objects_mut(&mut self, id: SimpleIdentity) -> Option<&mut DrawObjects> {
             (self.0 == id).then_some(&mut self.1)
         }

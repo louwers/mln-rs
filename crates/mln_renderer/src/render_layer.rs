@@ -323,13 +323,13 @@ pub(crate) trait RenderLayer: LayerParts {
         }
     }
 
-    /// Uploads the drawables of the layer's render targets, which draw
-    /// before the frame's passes.
-    fn upload_render_targets(&mut self, _context: &Context) {}
+    /// Uploads what draws into the layer's render targets, which draw before
+    /// the frame's passes, with what the renderer keeps of its drawing.
+    fn upload_render_targets(&mut self, _context: &Context, _draws: &mut LayerDraws) {}
 
     /// Draws the layer's render targets, ahead of the frame's passes, which
-    /// sample them.
-    fn render_targets(&mut self, _parameters: &mut PaintParameters<'_>) {}
+    /// sample them, with what the renderer keeps of its drawing.
+    fn render_targets(&mut self, _parameters: &mut PaintParameters<'_>, _draws: &mut LayerDraws) {}
 
     /// Runs a custom layer's prerender, after the layer groups upload and
     /// before the frame's first pass, which draws into `target`.

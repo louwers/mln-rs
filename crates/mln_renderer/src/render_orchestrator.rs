@@ -1215,10 +1215,11 @@ impl RenderOrchestrator {
         }
     }
 
-    /// Visits every render layer, in no order.
-    pub(crate) fn visit_render_layers(&mut self, mut f: impl FnMut(&mut dyn RenderLayer)) {
-        for layer in &mut self.layers {
-            f(&mut **layer);
+    /// Visits every render layer, with what the renderer keeps of its
+    /// drawing, in no order.
+    pub(crate) fn visit_render_layers(&mut self, mut f: impl FnMut(&mut dyn RenderLayer, &mut LayerDraws)) {
+        for (layer, draws) in self.layers.iter_mut().zip(&mut self.draws) {
+            f(&mut **layer, draws);
         }
     }
 
