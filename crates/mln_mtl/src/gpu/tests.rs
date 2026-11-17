@@ -2,8 +2,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use mln_gfx::gpu::conformance::{
-    clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures, instanced_walls,
-    invalid_calls, readbacks, topologies, transparent_replace, vertex_layouts,
+    clip_mask_and_background, custom_layers, depth_only, destroyed_resources_draw_until_their_users_go, foreign_ids,
+    imported_textures, instanced_walls, invalid_calls, readbacks, topologies, transparent_replace, vertex_layouts,
 };
 use mln_gfx::gpu::{BufferUsage, ColorAttachment};
 use mln_gfx::shaders::shader_source::BuiltIn;
@@ -48,6 +48,12 @@ fn topologies_through_gpu() {
 fn readbacks_through_gpu() {
     let device = Device::new(None).expect("Metal device");
     readbacks(&mut MetalGpu::new(&device)).expect("the readbacks");
+}
+
+#[test]
+fn destroyed_resources_draw_until_their_users_go_through_gpu() {
+    let device = Device::new(None).expect("Metal device");
+    destroyed_resources_draw_until_their_users_go(&mut MetalGpu::new(&device)).expect("the frames");
 }
 
 #[test]

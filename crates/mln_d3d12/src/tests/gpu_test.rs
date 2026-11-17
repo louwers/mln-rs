@@ -1,6 +1,7 @@
 use mln_gfx::gpu::conformance::{
-    clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures, instanced_walls,
-    invalid_calls, readbacks, topologies, transparent_replace, vertex_layouts, wall_quads,
+    clip_mask_and_background, custom_layers, depth_only, destroyed_resources_draw_until_their_users_go, foreign_ids,
+    imported_textures, instanced_walls, invalid_calls, readbacks, topologies, transparent_replace, vertex_layouts,
+    wall_quads,
 };
 use mln_gfx::gpu::{Gpu as _, GpuError, ShaderKey};
 use mln_gfx::shader_group::GLOBE_DEFINE;
@@ -50,6 +51,11 @@ fn vertex_layouts_through_gpu() {
 #[test]
 fn readbacks_through_gpu() {
     readbacks(&mut gpu()).expect("the readbacks");
+}
+
+#[test]
+fn destroyed_resources_draw_until_their_users_go_through_gpu() {
+    destroyed_resources_draw_until_their_users_go(&mut gpu()).expect("the frames");
 }
 
 #[test]

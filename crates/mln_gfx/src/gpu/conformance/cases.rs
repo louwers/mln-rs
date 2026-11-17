@@ -1,5 +1,5 @@
-//! Cases that draw a solid color with the background shader, and the calls
-//! every backend rejects.
+//! Cases that draw a solid color, most with the background shader, and the
+//! calls every backend rejects.
 
 use std::any::Any;
 
@@ -20,7 +20,8 @@ use crate::shaders::fill_extrusion_layer_ubo::{
     FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO,
 };
 use crate::shaders::fill_layer_ubo::{FillDrawableUBO, FillDrawableUnionUBO, FillEvaluatedPropsUBO};
-use crate::shaders::layer_ubo::ProjectionUBO;
+use crate::shaders::heatmap_texture_layer_ubo::HeatmapTexturePropsUBO;
+use crate::shaders::layer_ubo::{GlobalPaintParamsUBO, ProjectionUBO};
 use crate::shaders::shader_defines::{
     ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_PROPS_UBO,
     ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE, ID_FILL_COLOR_VERTEX_ATTRIBUTE, ID_FILL_DRAWABLE_UBO,
@@ -28,10 +29,12 @@ use crate::shaders::shader_defines::{
     ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE,
     ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_PROPS_UBO,
     ID_FILL_EXTRUSION_TILE_PROPS_UBO, ID_FILL_OPACITY_VERTEX_ATTRIBUTE, ID_FILL_POS_VERTEX_ATTRIBUTE,
-    ID_PROJECTION_UBO,
+    ID_GLOBAL_PAINT_PARAMS_UBO, ID_HEATMAP_COLOR_RAMP_TEXTURE, ID_HEATMAP_IMAGE_TEXTURE,
+    ID_HEATMAP_POS_VERTEX_ATTRIBUTE, ID_HEATMAP_TEXTURE_PROPS_UBO, ID_PROJECTION_UBO,
 };
 use crate::shaders::shader_source::BuiltIn;
 use crate::stencil_mode::StencilMode;
+use crate::texture2d::SamplerState;
 use crate::types::DepthFunctionType;
 
 const BLACK: Color = Color::black();
@@ -816,6 +819,92 @@ pub fn readbacks(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     let gone = gpu.write_texture(written, part, &[0; 4 * 2 * 2]);
     assert!(matches!(gone, Err(GpuError::UnknownId("texture"))), "a write to a destroyed texture");
     Ok(())
+}
+
+/// Checks that destroyed resources draw until their users go: buffers, a
+/// texture and a sampler that bindings and geometry hold draw as before for
+/// several frames once destroyed, though calls that name them fail. Returns
+/// the error of a call that should succeed.
+///
+/// # Panics
+///
+/// Where a check doesn't hold.
+pub fn destroyed_resources_draw_until_their_users_go<G: Gpu>(gpu: &mut G) -> Result<(), GpuError> {
+    let size = Size { width: 2, height: 2 };
+    let image = gpu.create_texture(&TextureDesc {
+        label: "image",
+        size,
+        format: TextureFormat::Rgba8Unorm,
+        usage: TextureUsage { sampled: true, ..TextureUsage::default() },
+    })?;
+    gpu.write_texture(image, TextureRegion::whole(size), &[255, 0, 0, 255].repeat(4))?;
+    let sampler = gpu.create_sampler(&SamplerState::default())?;
+    // The heatmap's texture, the image, looked up in its color ramp, the
+    // image again, through the sampler: red over the target.
+    let paint = GlobalPaintParamsUBO { world_size: [1.0, 1.0], ..GlobalPaintParamsUBO::default() };
+    let props = HeatmapTexturePropsUBO { matrix: tile_matrix(1.0), opacity: 1.0, ..HeatmapTexturePropsUBO::default() };
+    let (paint, props) = (bytemuck::bytes_of(&paint), bytemuck::bytes_of(&props));
+    let paint_buffer = buffer(gpu, BufferUsage::Uniform, paint)?;
+    let props_buffer = buffer(gpu, BufferUsage::Uniform, props)?;
+    // GL's shaders declare the projection block, which must be bound though
+    // this shader doesn't read it.
+    let projection = [ProjectionUBO::default()];
+    let projection = bytemuck::cast_slice(&projection);
+    let projection_buffer = buffer(gpu, BufferUsage::Storage, projection)?;
+    let (vertices, indices) = quad(gpu)?;
+    let shader = gpu.create_shader(&ShaderKey::new(BuiltIn::HeatmapTextureShader, []))?;
+    let layouts = [position_layout(ID_HEATMAP_POS_VERTEX_ATTRIBUTE)];
+    let pipeline = gpu.create_pipeline(&PipelineDesc {
+        shader,
+        vertex_buffers: &layouts,
+        state: fixed(ColorMode::unblended(), StencilState::from(&StencilMode::disabled())),
+        targets: RGBA8,
+    })?;
+    let entries = [
+        whole(ID_GLOBAL_PAINT_PARAMS_UBO, paint_buffer, paint),
+        whole(ID_HEATMAP_TEXTURE_PROPS_UBO, props_buffer, props),
+        whole(ID_PROJECTION_UBO, projection_buffer, projection),
+        BindGroupEntry::Texture { id: ID_HEATMAP_IMAGE_TEXTURE as u32, texture: image, sampler },
+        BindGroupEntry::Texture { id: ID_HEATMAP_COLOR_RAMP_TEXTURE as u32, texture: image, sampler },
+    ];
+    let bindings = gpu.create_bindings(&BindingsDesc { label: "heatmap", shader, entries: &entries })?;
+    let geometry = gpu.create_geometry(&GeometryDesc {
+        shader,
+        layouts: &layouts,
+        vertex_buffers: &[(vertices, 0)],
+        index_buffer: indices,
+    })?;
+    let target = target(gpu, TextureFormat::Rgba8Unorm)?;
+    let frames = |gpu: &mut G, count, what: &str| -> Result<(), GpuError> {
+        for _ in 0..count {
+            gpu.begin_pass(&PassDesc {
+                label: "heatmap",
+                color: Some(ColorAttachment { texture: target, load: LoadOp::Clear(BLACK) }),
+                depth_stencil: None,
+            })?;
+            gpu.draw(&draw(pipeline, bindings, geometry, 6))?;
+            gpu.end_pass()?;
+            assert!(read(gpu, target)?.chunks(4).all(|texel| texel == [255, 0, 0, 255]), "{what}");
+        }
+        Ok(())
+    };
+    frames(gpu, 1, "the draw")?;
+
+    for buffer in [paint_buffer, props_buffer, projection_buffer, vertices, indices] {
+        gpu.destroy(buffer.into());
+    }
+    gpu.destroy(image.into());
+    gpu.destroy(sampler.into());
+    assert!(matches!(gpu.write_buffer(props_buffer, 0, props), Err(GpuError::UnknownId("buffer"))));
+    let destroyed = gpu.create_bindings(&BindingsDesc { label: "destroyed", shader, entries: &entries });
+    assert!(matches!(destroyed, Err(GpuError::UnknownId(_))), "bindings of destroyed resources");
+    // More frames than a backend keeps copies of a uniform buffer for, so
+    // that each copy draws after the buffer is destroyed.
+    frames(gpu, 4, "a draw of destroyed resources")?;
+
+    gpu.destroy(bindings.into());
+    gpu.destroy(geometry.into());
+    gpu.flush(true)
 }
 
 /// Checks custom-layer lending: `encoder` gets what the backend lends

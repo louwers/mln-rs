@@ -6,7 +6,9 @@
 //! half. [`invalid_calls`] checks the calls that every backend rejects, and
 //! [`foreign_ids`] that a backend takes no other backend's ids,
 //! [`readbacks`] what a readback copies, [`custom_layers`] what a custom
-//! layer is lent, and [`imported_textures`] textures made elsewhere.
+//! layer is lent, [`imported_textures`] textures made elsewhere, and
+//! [`destroyed_resources_draw_until_their_users_go`] that a destroyed
+//! resource draws while bindings or geometry hold it.
 //! [`instanced_walls`] draws fill extrusion walls over the left half, and
 //! [`wall_quads`] draws them again from quads of their own. The
 //! other cases draw one color over the whole target, as

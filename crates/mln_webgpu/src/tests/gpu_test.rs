@@ -1,6 +1,7 @@
 use mln_gfx::gpu::conformance::{
-    clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures, instanced_walls,
-    invalid_calls, readbacks, topologies, transparent_replace, vertex_layouts, wall_quads,
+    clip_mask_and_background, custom_layers, depth_only, destroyed_resources_draw_until_their_users_go, foreign_ids,
+    imported_textures, instanced_walls, invalid_calls, readbacks, topologies, transparent_replace, vertex_layouts,
+    wall_quads,
 };
 use mln_gfx::gpu::{Gpu, TextureDesc, TextureFormat, TextureRegion, TextureUsage};
 use mln_util::size::Size;
@@ -53,6 +54,12 @@ fn vertex_layouts_through_gpu() {
 fn readbacks_through_gpu() {
     let device = Device::new(None).expect("WebGPU device");
     readbacks(&mut WebGpu::new(&device)).expect("the readbacks");
+}
+
+#[test]
+fn destroyed_resources_draw_until_their_users_go_through_gpu() {
+    let device = Device::new(None).expect("WebGPU device");
+    destroyed_resources_draw_until_their_users_go(&mut WebGpu::new(&device)).expect("the frames");
 }
 
 // A frame read back each time copies into the buffer of the readback
