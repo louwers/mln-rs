@@ -93,8 +93,12 @@ struct VertexInput {
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
+#ifndef HAS_UNIFORM_u_outline_color
     @location(0) color: vec4<f32>,
+#endif
+#ifndef HAS_UNIFORM_u_opacity
     @location(1) opacity: f32,
+#endif
     @location(2) pos: vec2<f32>,
 };
 
@@ -159,15 +163,10 @@ fn main(in: VertexInput) -> VertexOutput {
     out.position = corner.position;
     out.pos = corner.pos;
 
-#ifdef HAS_UNIFORM_u_outline_color
-    out.color = props.outline_color;
-#else
+#ifndef HAS_UNIFORM_u_outline_color
     out.color = unpack_mix_color(in.outline_color, drawable.outline_color_t);
 #endif
-
-#ifdef HAS_UNIFORM_u_opacity
-    out.opacity = props.opacity;
-#else
+#ifndef HAS_UNIFORM_u_opacity
     out.opacity = unpack_mix_float(in.opacity, drawable.opacity_t);
 #endif
 

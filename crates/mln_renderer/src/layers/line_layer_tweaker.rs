@@ -76,7 +76,6 @@ pub(crate) struct LineLayerTweaker {
     tile_props_uniform_buffer: Option<UniformBufferPtr>,
     /// The `LineExpressionUBO`, where the line shaders read it.
     expression_uniform_buffer: Option<UniformBufferPtr>,
-    expression_mask: u32,
 }
 
 impl LineLayerTweaker {
@@ -87,7 +86,6 @@ impl LineLayerTweaker {
             drawable_uniform_buffer: None,
             tile_props_uniform_buffer: None,
             expression_uniform_buffer: None,
-            expression_mask: line_expression_mask::NONE,
         }
     }
 }
@@ -127,35 +125,6 @@ impl LayerTweaker for LineLayerTweaker {
 
         let gpu_expressions = context.caps().line_expressions;
         if self.evaluated_props_uniform_buffer.is_none() || self.base.properties_updated {
-            use line_expression_mask::{BLUR, COLOR, FLOOR_WIDTH, GAP_WIDTH, NONE, OFFSET, OPACITY, WIDTH};
-            self.expression_mask = NONE;
-            // Where the shaders read the expression UBO, the mask marks the
-            // properties evaluated on the GPU (none, see the top of the
-            // file); elsewhere, the constant ones.
-            if !gpu_expressions {
-                if evaluated.line_color.is_constant() {
-                    self.expression_mask |= COLOR;
-                }
-                if evaluated.line_blur.is_constant() {
-                    self.expression_mask |= BLUR;
-                }
-                if evaluated.line_opacity.is_constant() {
-                    self.expression_mask |= OPACITY;
-                }
-                if evaluated.line_gap_width.is_constant() {
-                    self.expression_mask |= GAP_WIDTH;
-                }
-                if evaluated.line_offset.is_constant() {
-                    self.expression_mask |= OFFSET;
-                }
-                if evaluated.line_width.is_constant() {
-                    self.expression_mask |= WIDTH;
-                }
-                if evaluated.line_floor_width.is_constant() {
-                    self.expression_mask |= FLOOR_WIDTH;
-                }
-            }
-
             let props_ubo = LineEvaluatedPropsUBO {
                 color: evaluated.line_color.constant_or(&LinePaintProperties::Defaults::line_color()).to_float_array(),
                 blur: evaluated.line_blur.constant_or(&LinePaintProperties::Defaults::line_blur()),
@@ -164,7 +133,7 @@ impl LayerTweaker for LineLayerTweaker {
                 offset: evaluated.line_offset.constant_or(&LinePaintProperties::Defaults::line_offset()),
                 width: evaluated.line_width.constant_or(&LinePaintProperties::Defaults::line_width()),
                 floorwidth: evaluated.line_floor_width.constant_or(&LinePaintProperties::Defaults::line_floor_width()),
-                expression_mask: self.expression_mask,
+                expression_mask: line_expression_mask::NONE,
                 pad1: 0.0,
             };
             context.write_uniform_buffer_pod(&mut self.evaluated_props_uniform_buffer, &props_ubo);

@@ -76,9 +76,9 @@ pub struct Caps {
     /// Whether the renderer clears the stencil inside a pass by ending it
     /// and beginning one that clears it, rather than drawing zero over it.
     pub clear_stencil_with_pass: bool,
-    /// Whether the line shaders read `ID_LINE_EXPRESSION_UBO`, whose
-    /// expression mask marks the properties they evaluate, where other
-    /// backends' marks the constant ones.
+    /// Whether the line shaders read `ID_LINE_EXPRESSION_UBO` for the
+    /// properties that `LineEvaluatedPropsUBO::expression_mask` marks. Other
+    /// backends' line shaders read neither.
     pub line_expressions: bool,
     /// Whether the device rasterizes on the CPU, as Mesa's llvmpipe and
     /// lavapipe do. Their vertex pipeline runs once per instance, so an
