@@ -498,14 +498,6 @@ impl BindingType {
     }
 }
 
-/// `program` for wgpu: natively, the module naga parsed already; in a
-/// browser, its WGSL.
-#[cfg(not(target_family = "wasm"))]
-fn source(program: &mln_shaders::Program) -> wgpu::ShaderSource<'_> {
-    wgpu::ShaderSource::Naga(Cow::Owned(program.module.clone()))
-}
-
-#[cfg(target_family = "wasm")]
 fn source(program: &mln_shaders::Program) -> wgpu::ShaderSource<'_> {
     wgpu::ShaderSource::Wgsl(Cow::Borrowed(&program.wgsl))
 }

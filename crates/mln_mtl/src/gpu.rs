@@ -1097,10 +1097,9 @@ pub(crate) fn primitive_type(mode: DrawModeType) -> Option<MTLPrimitiveType> {
 fn input_format(input: &mln_shaders::VertexInput) -> Option<AttributeDataType> {
     use AttributeDataType as A;
     let formats = match input.scalar {
-        mln_shaders::naga::ScalarKind::Sint => [A::Int, A::Int2, A::Int3, A::Int4],
-        mln_shaders::naga::ScalarKind::Uint => [A::UInt, A::UInt2, A::UInt3, A::UInt4],
-        mln_shaders::naga::ScalarKind::Float => [A::Float, A::Float2, A::Float3, A::Float4],
-        _ => return None,
+        mln_shaders::ScalarKind::Sint => [A::Int, A::Int2, A::Int3, A::Int4],
+        mln_shaders::ScalarKind::Uint => [A::UInt, A::UInt2, A::UInt3, A::UInt4],
+        mln_shaders::ScalarKind::Float => [A::Float, A::Float2, A::Float3, A::Float4],
     };
     formats.get((input.components as usize).checked_sub(1)?).copied()
 }

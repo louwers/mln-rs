@@ -413,8 +413,10 @@ gpu-allocator = { version = "0.28.0", default-features = false, features = [
 # for a host's own shaders, which needs a module that only `wgsl-in` or
 # `spv-in` builds.
 naga = { version = "30.0.1", features = ["wgsl-in"] }
-# Links crates/mln_shaders' WESL into WGSL.
+# Links crates/mln_shaders' WESL into WGSL, in its build script, and reads
+# the syntax trees it links.
 wesl = { version = "0.6.0", default-features = false }
+wgsl-parse = { version = "0.6.0", features = ["wesl"] }
 # examples/desktop: the CAMetalLayer of the window's view on macOS.
 raw-window-metal = { version = "1.1.0" }
 # examples/desktop's window and input. On Linux it loads the X11 and Wayland

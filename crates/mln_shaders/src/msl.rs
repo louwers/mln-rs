@@ -77,7 +77,8 @@ fn write(program: &Program) -> Result<Msl, String> {
                 msl::BindTarget { sampler: Some(msl::BindSamplerTarget::Resource(slot)), ..msl::BindTarget::default() }
             }
         };
-        resources.insert(resource.binding, target);
+        let binding = resource.binding;
+        resources.insert(naga::ResourceBinding { group: binding.group, binding: binding.binding }, target);
     }
     let entry = msl::EntryPointResources { resources, immediates_buffer: None, sizes_buffer: Some(SIZES_BUFFER_SLOT) };
     let options = msl::Options {
@@ -95,10 +96,11 @@ fn write(program: &Program) -> Result<Msl, String> {
         ..msl::Options::default()
     };
     let pipeline = msl::PipelineOptions::default();
-    let (source, info) = msl::write_string(&program.module, &program.info, &options, &pipeline)
+    let validated = program.validated()?;
+    let (source, info) = msl::write_string(&validated.module, &validated.info, &options, &pipeline)
         .map_err(|error| fail(error.to_string()))?;
     let name = |stage: Stage| -> Result<String, String> {
-        let index = program.entry_point_index(stage);
+        let index = program.entry_point_index(stage)?;
         info.entry_point_names[index].clone().map_err(|error| fail(format!("{stage:?}: {error}")))
     };
     Ok(Msl { source, entry_points: [name(Stage::Vertex)?, name(Stage::Fragment)?] })

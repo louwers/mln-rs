@@ -3194,6 +3194,7 @@ dependencies = [
  "naga",
  "parking_lot",
  "wesl",
+ "wgsl-parse",
 ]
 
 [[package]]

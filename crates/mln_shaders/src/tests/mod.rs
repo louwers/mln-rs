@@ -7,7 +7,9 @@ use mln_gfx::shaders::{
     raster_layer_ubo as raster, sky_ubo, symbol_layer_ubo as symbol,
 };
 
-use crate::{MAX_EXHAUSTIVE_FLAGS, PROGRAMS, ResourceKind, Stage, Target, flags_of, link, variants};
+use crate::{MAX_EXHAUSTIVE_FLAGS, PROGRAMS, ResourceKind, Stage, Target, flags_of, link, validate, variants};
+
+mod direct;
 
 /// Writes `target`'s language for each stage of `module` with `flags`.
 fn write(module: &'static str, target: Target, flags: &[String]) -> Result<(), String> {
@@ -48,8 +50,8 @@ fn write(module: &'static str, target: Target, flags: &[String]) -> Result<(), S
         Target::Metal => {
             program.msl()?;
         }
-        // The WGSL is the linked source, which `link` validated.
         Target::WebGpu => {
+            validate(&program.wgsl)?;
             if program.resources.iter().any(|resource| resource.binding.group > 3) {
                 return Err(format!("{module}: more than WebGPU's four groups"));
             }
@@ -77,8 +79,8 @@ fn shared_blocks_come_first(program: &crate::Program, glsl: &crate::glsl::GlslSt
     Ok(())
 }
 
-/// Every variant of every program links and validates for every target,
-/// and naga writes each target's language from it.
+/// Every variant of every program validates for every target, and naga
+/// writes each target's language from it.
 #[test]
 fn every_variant_of_every_program_translates() {
     let failures: Vec<String> = std::thread::scope(|scope| {
@@ -227,17 +229,24 @@ fn every_buffer_is_the_renderers() {
         for target in [Target::WebGpu, Target::Gl] {
             for flags in [Vec::new(), flags.clone()] {
                 let linked = link(module, target, &flags).expect("links");
+                let validated = validate(&linked.wgsl).expect("validates");
                 for resource in &linked.resources {
                     let storage = match resource.kind {
                         ResourceKind::UniformBuffer => false,
                         ResourceKind::StorageBuffer => true,
                         _ => continue,
                     };
-                    let mut ty = linked.module.global_variables[resource.handle].ty;
-                    if let naga::TypeInner::Array { base, .. } = linked.module.types[ty].inner {
+                    let naga_module = &validated.module;
+                    let (_, global) = naga_module
+                        .global_variables
+                        .iter()
+                        .find(|(_, global)| global.name.as_deref() == Some(resource.name))
+                        .expect("a global of each resource");
+                    let mut ty = global.ty;
+                    if let naga::TypeInner::Array { base, .. } = naga_module.types[ty].inner {
                         ty = base;
                     }
-                    let name = linked.module.types[ty].name.as_deref().unwrap_or_default();
+                    let name = naga_module.types[ty].name.as_deref().unwrap_or_default();
                     // WESL names a struct after its module's path and its own.
                     let name = name.rsplit('_').next().unwrap_or_default();
                     if name == "GlobalIndexUBO" {
@@ -260,4 +269,84 @@ fn every_buffer_is_the_renderers() {
     }
     failures.dedup();
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// naga's WGSL of `module`.
+fn written_wgsl(module: &naga::Module) -> Result<String, String> {
+    use naga::valid::{Capabilities, ValidationFlags, Validator};
+    let info = Validator::new(ValidationFlags::all(), Capabilities::all())
+        .validate(module)
+        .map_err(|error| format!("{error:?}"))?;
+    naga::back::wgsl::write_string(module, &info, naga::back::wgsl::WriterFlags::empty())
+        .map_err(|error| error.to_string())
+}
+
+/// How `module`'s variant of `flags` for `target`, from the embedded text
+/// and tables, differs from WESL's direct link of the variant and naga's
+/// reflection of it, if it does.
+fn compare(module: &'static str, target: Target, flags: &[String]) -> Result<(), String> {
+    let direct = direct::link(module, target, flags)?;
+    let built = link(module, target, flags)?;
+    let validated = validate(&built.wgsl)?;
+    let mut ours: Vec<_> = built
+        .resources
+        .iter()
+        .map(|r| (r.name.to_owned(), r.kind, r.set, r.id, r.binding, r.size, r.vertex, r.fragment))
+        .collect();
+    let mut theirs: Vec<_> = direct
+        .resources
+        .iter()
+        .map(|r| (r.name.clone(), r.kind, r.set, r.id, r.binding, r.size, r.vertex, r.fragment))
+        .collect();
+    ours.sort_by(|a, b| a.0.cmp(&b.0));
+    theirs.sort_by(|a, b| a.0.cmp(&b.0));
+    if ours != theirs {
+        return Err(format!("resources\n  tables: {ours:?}\n  naga:   {theirs:?}"));
+    }
+    if built.inputs != direct.inputs {
+        return Err(format!("inputs\n  tables: {:?}\n  naga:   {:?}", built.inputs, direct.inputs));
+    }
+    if built.index_group != direct.index_group {
+        return Err(format!("index group {:?}, not {:?}", built.index_group, direct.index_group));
+    }
+    let (ours, theirs) = (written_wgsl(&validated.module)?, written_wgsl(&direct.module)?);
+    if ours != theirs {
+        let line = ours.lines().zip(theirs.lines()).position(|(a, b)| a != b).unwrap_or(0);
+        let context = |text: &str| text.lines().skip(line.saturating_sub(3)).take(8).collect::<Vec<_>>().join("\n");
+        return Err(format!(
+            "naga writes other WGSL, from line {line}:\n--- embedded\n{}\n--- direct\n{}",
+            context(&ours),
+            context(&theirs)
+        ));
+    }
+    Ok(())
+}
+
+/// Every variant of every program for every target, from the embedded text
+/// and tables, is what WESL links for the variant: both validate, naga
+/// writes the same WGSL of them, and the tables give the resources and
+/// vertex inputs that naga finds each stage uses.
+#[test]
+fn every_variant_is_what_wesl_links() {
+    let failures: Vec<String> = std::thread::scope(|scope| {
+        let threads: Vec<_> = Target::ALL
+            .into_iter()
+            .map(|target| {
+                scope.spawn(move || {
+                    let mut failures = Vec::new();
+                    for &(program, module) in PROGRAMS {
+                        for flags in variants(&flags_of(program), MAX_EXHAUSTIVE_FLAGS) {
+                            if let Err(error) = compare(module, target, &flags) {
+                                failures.push(format!("{module} {target:?} {flags:?}: {error}"));
+                            }
+                        }
+                    }
+                    failures
+                })
+            })
+            .collect();
+        threads.into_iter().flat_map(|thread| thread.join().expect("no panic")).collect()
+    });
+    let shown: Vec<&str> = failures.iter().take(10).map(String::as_str).collect();
+    assert!(failures.is_empty(), "{} variants differ:\n{}", failures.len(), shown.join("\n\n"));
 }

@@ -1,6 +1,5 @@
-//! Links a program's WESL into WGSL for a target, rewriting its resource
-//! declarations into the target's binding convention (see the crate's doc
-//! comment).
+//! The oracle of the embedded programs: a variant linked directly by WESL,
+//! with every flag decided, and naga's reflection of it.
 
 use mln_gfx::shaders::shader_defines::ID_GLOBAL_UBO_INDEX;
 use mln_util::hash::HashMap;
@@ -11,48 +10,21 @@ use wesl::syntax::{
 };
 use wesl::{CompileOptions, Compiler, Feature, Features, ManglerKind};
 
-use crate::layout::{
-    DescriptorSetType, IMAGE_SAMPLER_START, drawable_uniform_binding, global_uniform_binding, image_sampler_binding,
-    image_texture_binding, layer_storage_binding, layer_uniform_binding,
-};
-use crate::{ResourceKind, SOURCES, Target};
-
-/// What a resource declaration of the WESL is, by its convention.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Declared {
-    /// Its `@group`.
-    pub(crate) set: DescriptorSetType,
-    pub(crate) kind: DeclaredKind,
-    /// The buffer's or texture's id; a sampler's texture's.
-    pub(crate) id: u32,
-}
-
-/// The kind of a resource declaration, before a target's rewriting.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum DeclaredKind {
-    Uniform,
-    Storage,
-    Texture,
-    Sampler,
-}
-
-impl DeclaredKind {
-    pub(crate) fn is_buffer(self) -> bool {
-        matches!(self, DeclaredKind::Uniform | DeclaredKind::Storage)
-    }
-}
+use crate::bindings::{Declared, DeclaredKind, vulkan_binding};
+use crate::layout::{DescriptorSetType, IMAGE_SAMPLER_START};
+use crate::{ResourceBinding, ResourceKind, SOURCES, ScalarKind, Stage, Target, VertexInput};
 
 /// A program linked for a target: its WGSL, what each resource declaration
 /// in it is, by its name, and, for WebGPU, the group of the draw's index.
-pub(crate) struct Linked {
-    pub(crate) wgsl: String,
-    pub(crate) declared: HashMap<String, Declared>,
-    pub(crate) index_group: Option<u32>,
+struct Linked {
+    wgsl: String,
+    declared: HashMap<String, Declared>,
+    index_group: Option<u32>,
 }
 
 /// Links the program `module` for `target` with the feature flags `flags`
 /// on, the target's own among them.
-pub(crate) fn link(module: &str, target: Target, flags: &[String]) -> Result<Linked, String> {
+fn link_wesl(module: &str, target: Target, flags: &[String]) -> Result<Linked, String> {
     let mut resolver = VirtualResolver::new();
     for &(name, source) in SOURCES {
         let path = format!("package::{name}").parse().map_err(|error| format!("{name}: {error:?}"))?;
@@ -125,9 +97,11 @@ fn rewrite(syntax: &mut TranslationUnit, target: Target) -> Result<(HashMap<Stri
         let Some(&resource) = declared.get(&*declaration.ident.name()) else { continue };
         let name = declaration.ident.name().clone();
         let at = match target {
-            Target::Vulkan | Target::D3d12 => Some(vulkan_binding(resource).ok_or_else(|| {
-                format!("{name}: no binding of {:?} {} in set {:?}", resource.kind, resource.id, resource.set)
-            })?),
+            Target::Vulkan | Target::D3d12 => {
+                Some(vulkan_binding(resource).map(|b| (b.group, b.binding)).ok_or_else(|| {
+                    format!("{name}: no binding of {:?} {} in set {:?}", resource.kind, resource.id, resource.set)
+                })?)
+            }
             Target::WebGpu => Some(webgpu_binding(resource, &declared)),
             Target::Gl | Target::Metal => None,
         };
@@ -178,22 +152,6 @@ fn literal(value: u32) -> ExpressionNode {
     Expression::Literal(LiteralExpression::AbstractInt(i64::from(value))).into()
 }
 
-/// The set and binding of `resource` in the Vulkan layout (`crate::layout`),
-/// with each texture at the index of its id.
-pub(crate) fn vulkan_binding(resource: Declared) -> Option<(u32, u32)> {
-    let id = resource.id as usize;
-    let binding = match (resource.set, resource.kind) {
-        (DescriptorSetType::Global, DeclaredKind::Uniform) => global_uniform_binding(id)?,
-        (DescriptorSetType::Layer, DeclaredKind::Storage) => layer_storage_binding(id)?,
-        (DescriptorSetType::Layer, DeclaredKind::Uniform) => layer_uniform_binding(id)?,
-        (DescriptorSetType::DrawableUniform, DeclaredKind::Uniform) => drawable_uniform_binding(id)?,
-        (DescriptorSetType::DrawableImage, DeclaredKind::Texture) => image_texture_binding(id),
-        (DescriptorSetType::DrawableImage, DeclaredKind::Sampler) => image_sampler_binding(id),
-        _ => return None,
-    };
-    Some((resource.set.set_index(), binding))
-}
-
 /// Whether `resource` is the draw's index, which WebGPU binds in a group of
 /// its own.
 fn is_global_index(resource: Declared) -> bool {
@@ -234,13 +192,152 @@ fn webgpu_binding(resource: Declared, declared: &HashMap<String, Declared>) -> (
     (group.unwrap_or_default(), binding)
 }
 
-impl From<DeclaredKind> for ResourceKind {
-    fn from(kind: DeclaredKind) -> ResourceKind {
-        match kind {
-            DeclaredKind::Uniform => ResourceKind::UniformBuffer,
-            DeclaredKind::Storage => ResourceKind::StorageBuffer,
-            DeclaredKind::Texture => ResourceKind::Texture { filterable: true },
-            DeclaredKind::Sampler => ResourceKind::Sampler,
+/// A resource as the program before this crate's tables reported it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Resource {
+    pub(crate) name: String,
+    pub(crate) handle: naga::Handle<naga::GlobalVariable>,
+    pub(crate) kind: ResourceKind,
+    pub(crate) set: DescriptorSetType,
+    pub(crate) id: u32,
+    pub(crate) binding: ResourceBinding,
+    pub(crate) size: u64,
+    pub(crate) vertex: bool,
+    pub(crate) fragment: bool,
+}
+
+/// A variant linked directly, validated, and reflected by naga.
+pub(crate) struct Direct {
+    pub(crate) module: naga::Module,
+    pub(crate) resources: Vec<Resource>,
+    pub(crate) inputs: Vec<VertexInput>,
+    pub(crate) index_group: Option<u32>,
+}
+
+/// Links `module`'s variant of `flags` for `target` with WESL, and parses,
+/// validates and reflects it with naga.
+pub(crate) fn link(module: &'static str, target: Target, flags: &[String]) -> Result<Direct, String> {
+    use naga::valid::{Capabilities, ValidationFlags, Validator};
+
+    let linked = link_wesl(module, target, flags)?;
+    let wgsl = linked.wgsl;
+    let parsed = naga::front::wgsl::parse_str(&wgsl)
+        .map_err(|error| format!("{module} ({target:?}): {}", error.emit_to_string(&wgsl)))?;
+    let info = Validator::new(ValidationFlags::all(), Capabilities::all())
+        .validate(&parsed)
+        .map_err(|error| format!("{module} ({target:?}): {}", error.emit_to_string(&wgsl)))?;
+    let resources = resources(&parsed, &info, &linked.declared)?;
+    let inputs = inputs(&parsed)?;
+    Ok(Direct { module: parsed, resources, inputs, index_group: linked.index_group })
+}
+
+/// The resources of `module` that either entry point uses.
+fn resources(
+    module: &naga::Module,
+    info: &naga::valid::ModuleInfo,
+    declared: &HashMap<String, Declared>,
+) -> Result<Vec<Resource>, String> {
+    let mut layouter = naga::proc::Layouter::default();
+    layouter.update(module.to_ctx()).map_err(|error| format!("{error:?}"))?;
+    let used_by = |stage: Stage, handle: naga::Handle<naga::GlobalVariable>| {
+        module
+            .entry_points
+            .iter()
+            .position(|entry| entry.stage == stage.naga())
+            .is_some_and(|index| !info.get_entry_point(index)[handle].is_empty())
+    };
+    let (sampled, loaded) = texture_uses(module);
+    let mut resources = Vec::new();
+    for (handle, global) in module.global_variables.iter() {
+        let Some(binding) = global.binding else { continue };
+        let name = global.name.clone().unwrap_or_default();
+        let resource =
+            *declared.get(&name).ok_or_else(|| format!("{name} has a binding the program doesn't declare"))?;
+        let (vertex, fragment) = (used_by(Stage::Vertex, handle), used_by(Stage::Fragment, handle));
+        if !vertex && !fragment {
+            continue;
+        }
+        // The kind declared: OpenGL's storage buffers are uniform blocks.
+        let kind = match resource.kind {
+            DeclaredKind::Texture => {
+                ResourceKind::Texture { filterable: sampled.contains(&handle) || !loaded.contains(&handle) }
+            }
+            kind => kind.into(),
+        };
+        let size = match kind {
+            ResourceKind::UniformBuffer | ResourceKind::StorageBuffer => u64::from(layouter[global.ty].size),
+            _ => 0,
+        };
+        resources.push(Resource {
+            name,
+            handle,
+            kind,
+            set: resource.set,
+            id: resource.id,
+            binding: ResourceBinding { group: binding.group, binding: binding.binding },
+            size,
+            vertex,
+            fragment,
+        });
+    }
+    Ok(resources)
+}
+
+/// The textures that some function of `module` samples, and those it loads
+/// texels of, where it names the global itself.
+fn texture_uses(
+    module: &naga::Module,
+) -> (Vec<naga::Handle<naga::GlobalVariable>>, Vec<naga::Handle<naga::GlobalVariable>>) {
+    let (mut sampled, mut loaded) = (Vec::new(), Vec::new());
+    let functions = module.functions.iter().map(|(_, function)| function);
+    for function in functions.chain(module.entry_points.iter().map(|entry| &entry.function)) {
+        for (_, expression) in function.expressions.iter() {
+            let (image, uses) = match *expression {
+                naga::Expression::ImageSample { image, .. } => (image, &mut sampled),
+                naga::Expression::ImageLoad { image, .. } => (image, &mut loaded),
+                _ => continue,
+            };
+            if let naga::Expression::GlobalVariable(global) = function.expressions[image] {
+                uses.push(global);
+            }
         }
     }
+    (sampled, loaded)
+}
+
+/// The inputs of `module`'s vertex entry point.
+fn inputs(module: &naga::Module) -> Result<Vec<VertexInput>, String> {
+    let entry = module
+        .entry_points
+        .iter()
+        .find(|entry| entry.stage == naga::ShaderStage::Vertex)
+        .ok_or("no vertex entry point")?;
+    let mut inputs = Vec::new();
+    let mut add = |binding: &Option<naga::Binding>, ty: naga::Handle<naga::Type>| {
+        if let Some(naga::Binding::Location { location, .. }) = *binding {
+            let inner = &module.types[ty].inner;
+            let scalar = match inner.scalar().map(|scalar| scalar.kind) {
+                Some(naga::ScalarKind::Sint) => ScalarKind::Sint,
+                Some(naga::ScalarKind::Uint) => ScalarKind::Uint,
+                _ => ScalarKind::Float,
+            };
+            let components = match *inner {
+                naga::TypeInner::Vector { size, .. } => size as u32,
+                _ => 1,
+            };
+            inputs.push(VertexInput { location, scalar, components });
+        }
+    };
+    for argument in &entry.function.arguments {
+        match &module.types[argument.ty].inner {
+            naga::TypeInner::Struct { members, .. } => {
+                for member in members {
+                    add(&member.binding, member.ty);
+                }
+            }
+            _ => add(&argument.binding, argument.ty),
+        }
+    }
+    inputs.sort_by_key(|input| input.location);
+    Ok(inputs)
 }

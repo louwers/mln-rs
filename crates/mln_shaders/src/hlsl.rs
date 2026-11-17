@@ -113,7 +113,8 @@ impl Program {
         debug_assert_eq!(self.target, Target::D3d12, "the bindings are the Vulkan layout's");
         self.written.hlsl[stage as usize]
             .get_or_init(|| {
-                write(&self.module, &self.info, stage.naga(), stage.entry_point())
+                let validated = self.validated()?;
+                write(&validated.module, &validated.info, stage.naga(), stage.entry_point())
                     .map_err(|error| format!("{} {stage:?}: {error}", self.name))
             })
             .as_ref()

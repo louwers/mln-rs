@@ -24,6 +24,7 @@ fn write(program: &Program, stage: Stage) -> Result<Vec<u32>, String> {
         ..spv::Options::default()
     };
     let pipeline = spv::PipelineOptions { shader_stage: stage.naga(), entry_point: stage.entry_point().to_owned() };
-    spv::write_vec(&program.module, &program.info, &options, Some(&pipeline))
+    let validated = program.validated()?;
+    spv::write_vec(&validated.module, &validated.info, &options, Some(&pipeline))
         .map_err(|error| format!("{} {stage:?}: {error}", program.name))
 }

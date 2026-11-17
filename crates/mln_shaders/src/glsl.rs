@@ -54,11 +54,12 @@ fn write(program: &Program, stage: Stage, desktop: bool) -> Result<GlslStage, St
         multiview: None,
     };
     let fail = |error: glsl::Error| format!("{} {stage:?}: {error}", program.name);
+    let validated = program.validated()?;
     let mut source = String::new();
     let mut writer = glsl::Writer::new(
         &mut source,
-        &program.module,
-        &program.info,
+        &validated.module,
+        &validated.info,
         &options,
         &pipeline,
         naga::proc::BoundsCheckPolicies::default(),
@@ -71,18 +72,15 @@ fn write(program: &Program, stage: Stage, desktop: bool) -> Result<GlslStage, St
     }
     let mut blocks = Vec::new();
     for (handle, name) in reflection.uniforms {
-        let index = program
-            .resources
-            .iter()
-            .position(|resource| resource.handle == handle)
-            .ok_or_else(|| format!("{}: uniform {name} is no resource", program.name))?;
+        let (index, _) =
+            program.resource_of(handle).ok_or_else(|| format!("{}: uniform {name} is no resource", program.name))?;
         blocks.push((name, index));
     }
     blocks.sort();
     let mut samplers = Vec::new();
     for (name, mapping) in reflection.texture_mapping {
-        let texture = program
-            .resource(mapping.texture)
+        let (_, texture) = program
+            .resource_of(mapping.texture)
             .ok_or_else(|| format!("{}: sampler {name} samples no texture", program.name))?;
         samplers.push((name, texture.id));
     }

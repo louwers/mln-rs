@@ -1,20 +1,39 @@
-//! The renderer's programs, each written once in WESL (`shaders/`), linked
-//! into WGSL for a backend and a variant, and checked by naga, whose back
-//! ends write each backend's shading language.
+//! The renderer's programs, each written once in WESL (`shaders/`).
 //!
 //! A program is `shaders/programs/<BuiltIn>.wesl`, named after its
 //! [`BuiltIn`]; the other modules are shared. Its entry points are `vs_main`
-//! and `fs_main` ([`Stage::entry_point`]). A backend gets a program, linked
-//! for it, from [`program_of`].
+//! and `fs_main` ([`Stage::entry_point`]). A backend gets a program, for its
+//! target and a variant, from [`program_of`].
 //!
 //! # Feature flags
 //!
-//! A variant is linked with the feature flags of its `ShaderKey`'s defines
-//! that have no value (`HAS_UNIFORM_u_<name>`, `PROJECTION_GLOBE`,
-//! `OVERDRAW_INSPECTOR`) and the target's own: `vulkan`, `d3d12`, `gl`,
-//! `metal` or `webgpu` ([`Target`]). A define with a value, such as
+//! A variant has the feature flags of its `ShaderKey`'s defines that have
+//! no value (`HAS_UNIFORM_u_<name>`, `PROJECTION_GLOBE`,
+//! `OVERDRAW_INSPECTOR`), and a target ([`Target`]) its own: `vulkan`,
+//! `d3d12`, `gl`, `metal` or `webgpu`. A define with a value, such as
 //! `DEVICE_PIXEL_RATIO`, is no flag: a program reads the value from a
 //! uniform.
+//!
+//! # Linking
+//!
+//! The build script links each program once for each target, with the
+//! target's flag on, the other targets' off and the variant flags left
+//! undecided. Each `@if` that tests a variant flag becomes `#if` lines
+//! around its declaration, struct member, parameter or statement, and each
+//! declaration takes the condition under which an entry point reaches it, so
+//! that a variant's lines are what WESL links for the variant. With the text
+//! come tables of the program's resources and vertex inputs, each with the
+//! conditions under which a variant has it and each stage uses it.
+//!
+//! At run time a variant is the lines of its flags (`preprocess`), its
+//! resources and inputs those of the tables whose conditions hold, and each
+//! resource's `@group` and `@binding` its target's ([`Program::resources`]).
+//! naga parses and validates the WGSL for every target but WebGPU, which
+//! takes it as it is, and writes the backend's language.
+//!
+//! A crate feature embeds each target's programs: `spirv` (Vulkan), `hlsl`
+//! (D3D12), `glsl` (OpenGL), `msl` (Metal), each with naga and its writer,
+//! and `wgsl` (WebGPU), without naga.
 //!
 //! # Resources
 //!
@@ -25,8 +44,8 @@
 //! a buffer's id, a texture's id, or for a sampler,
 //! [`layout::IMAGE_SAMPLER_START`] plus its texture's id. A layer's buffer of
 //! an element for each drawable is `var<storage, read>` of an array, which a
-//! draw indexes with `globals::drawable_index()`. Each target links the
-//! declarations rewritten into its own convention:
+//! draw indexes with `globals::drawable_index()`. Each target binds them
+//! in its own convention:
 //!
 //! - Vulkan and D3D12: the set and binding of [`layout`], each texture at the
 //!   index of its id; D3D12 then puts a set's bindings in the registers of
@@ -49,8 +68,9 @@
 //!
 //! The crate's README says how to add a program.
 
+mod bindings;
 pub mod layout;
-mod link;
+mod preprocess;
 mod variants;
 
 #[cfg(any(test, feature = "glsl"))]
@@ -70,15 +90,64 @@ use std::sync::{Arc, LazyLock};
 use mln_gfx::gpu::ShaderKey;
 use mln_gfx::shaders::shader_source::BuiltIn;
 use mln_util::hash::HashMap;
+#[cfg(any(test, feature = "naga"))]
 pub use naga;
-use naga::valid::{Capabilities, ModuleInfo, ValidationFlags, Validator};
 use parking_lot::Mutex;
 
+use crate::bindings::{Declared, DeclaredKind};
 pub use crate::layout::DescriptorSetType;
-use crate::link::{Declared, DeclaredKind};
+use crate::preprocess::{eval, preprocess};
 pub use crate::variants::{MAX_EXHAUSTIVE_FLAGS, flags_of, variants};
 
-include!(concat!(env!("OUT_DIR"), "/registry.rs"));
+include!(concat!(env!("OUT_DIR"), "/built.rs"));
+
+/// A program linked for a target with its variant flags left to decide:
+/// the text for the preprocessor, and its resources and vertex inputs, each
+/// with the conditions under which a variant has it.
+struct Built {
+    text: &'static str,
+    /// In the order of their macros' indexes.
+    resources: &'static [BuiltResource],
+    inputs: &'static [BuiltInput],
+}
+
+/// A resource of a [`Built`], as the WESL declares it.
+struct BuiltResource {
+    name: &'static str,
+    kind: DeclaredKind,
+    group: u32,
+    binding: u32,
+    /// The bytes of a buffer, of an element of a storage buffer.
+    size: u64,
+    /// When the vertex stage uses it.
+    vertex: &'static str,
+    /// When the fragment stage uses it.
+    fragment: &'static str,
+    /// When a texture is sampled, or never loaded.
+    filterable: &'static str,
+}
+
+/// A vertex input of a [`Built`].
+struct BuiltInput {
+    location: u32,
+    scalar: ScalarKind,
+    components: u32,
+    /// When the vertex stage has it.
+    cond: &'static str,
+}
+
+/// The [`Built`] of the program at `index` in `PROGRAMS` for `target`, if
+/// the crate embeds the target's programs.
+fn built(index: usize, target: Target) -> Option<&'static Built> {
+    let programs: &[Built] = match target {
+        Target::Vulkan => VULKAN,
+        Target::D3d12 => D3D12,
+        Target::Gl => GL,
+        Target::Metal => METAL,
+        Target::WebGpu => WEBGPU,
+    };
+    programs.get(index)
+}
 
 /// The backend a program is linked for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -116,6 +185,7 @@ pub enum Stage {
 impl Stage {
     pub const ALL: [Stage; 2] = [Stage::Vertex, Stage::Fragment];
 
+    #[cfg(any(test, feature = "naga"))]
     #[must_use]
     pub fn naga(self) -> naga::ShaderStage {
         match self {
@@ -149,19 +219,25 @@ pub enum ResourceKind {
     Sampler,
 }
 
+/// The group and binding of a resource in a target's module.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ResourceBinding {
+    pub group: u32,
+    pub binding: u32,
+}
+
 /// A resource of a program.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Resource {
     /// The global variable's name in the module.
-    pub name: String,
-    pub handle: naga::Handle<naga::GlobalVariable>,
+    pub name: &'static str,
     pub kind: ResourceKind,
     /// The descriptor set its WESL declares it in.
     pub set: DescriptorSetType,
     /// The renderer's id of the buffer or texture; of a sampler's texture.
     pub id: u32,
     /// Its group and binding in the target's module.
-    pub binding: naga::ResourceBinding,
+    pub binding: ResourceBinding,
     /// The bytes of a buffer: of a [`ResourceKind::StorageBuffer`], of one
     /// element, the stride of the layer's buffer. 0 for a texture or
     /// sampler.
@@ -183,13 +259,21 @@ impl Resource {
     }
 }
 
+/// The kind of the scalars of a vertex input.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScalarKind {
+    Float,
+    Sint,
+    Uint,
+}
+
 /// A vertex input of a program.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct VertexInput {
     /// The input's location: its attribute's id.
     pub location: u32,
     /// The kind of its scalars: an integer input reads integers.
-    pub scalar: naga::ScalarKind,
+    pub scalar: ScalarKind,
     /// The number of its components, 1 to 4.
     pub components: u32,
 }
@@ -198,19 +282,17 @@ impl VertexInput {
     /// Whether the input reads integers, unconverted.
     #[must_use]
     pub fn is_integer(&self) -> bool {
-        matches!(self.scalar, naga::ScalarKind::Sint | naga::ScalarKind::Uint)
+        matches!(self.scalar, ScalarKind::Sint | ScalarKind::Uint)
     }
 }
 
-/// A program linked for a target and a variant, and validated.
+/// A program for a target and a variant.
 #[derive(Debug)]
 pub struct Program {
     /// The program's name, its `BuiltIn`'s.
     pub name: &'static str,
     pub target: Target,
-    pub module: naga::Module,
-    pub info: ModuleInfo,
-    /// The WGSL that WESL linked, which `module` is parsed from.
+    /// The variant's WGSL.
     pub wgsl: String,
     /// The resources either stage uses.
     pub resources: Vec<Resource>,
@@ -218,9 +300,12 @@ pub struct Program {
     /// For WebGPU, the group of the draw's index (`ID_GLOBAL_UBO_INDEX`), if
     /// the program reads it.
     pub index_group: Option<u32>,
-    /// The index in the module of each stage's entry point.
-    entry_points: [usize; 2],
+    /// The module naga parsed and validated: for every target but WebGPU,
+    /// which takes the WGSL as it is.
+    #[cfg(any(test, feature = "naga"))]
+    naga: Option<Validated>,
     /// What the writers of the backends' languages wrote, once each.
+    #[cfg(any(test, feature = "naga"))]
     #[cfg_attr(
         not(any(test, feature = "glsl", feature = "hlsl", feature = "msl", feature = "spirv")),
         expect(dead_code, reason = "only the writers read it")
@@ -228,7 +313,18 @@ pub struct Program {
     written: Written,
 }
 
+/// A program's module, parsed and validated by naga.
+#[cfg(any(test, feature = "naga"))]
+#[derive(Debug)]
+pub(crate) struct Validated {
+    pub(crate) module: naga::Module,
+    pub(crate) info: naga::valid::ModuleInfo,
+    /// The index in the module of each stage's entry point.
+    entry_points: [usize; 2],
+}
+
 /// The outputs of the writers, by stage where they write one.
+#[cfg(any(test, feature = "naga"))]
 #[derive(Debug, Default)]
 struct Written {
     #[cfg(any(test, feature = "spirv"))]
@@ -243,22 +339,31 @@ struct Written {
 }
 
 impl Program {
-    /// The index of `stage`'s entry point in the module.
-    #[must_use]
-    pub fn entry_point_index(&self, stage: Stage) -> usize {
-        self.entry_points[stage as usize]
-    }
-
-    /// The resource of the global `handle`, if it is one.
-    #[must_use]
-    pub fn resource(&self, handle: naga::Handle<naga::GlobalVariable>) -> Option<&Resource> {
-        self.resources.iter().find(|resource| resource.handle == handle)
-    }
-
     /// The vertex input at `location`, if the program reads it.
     #[must_use]
     pub fn input(&self, location: u32) -> Option<VertexInput> {
         self.inputs.iter().copied().find(|input| input.location == location)
+    }
+}
+
+#[cfg(any(test, feature = "naga"))]
+impl Program {
+    /// The module naga validated; none for WebGPU.
+    pub(crate) fn validated(&self) -> Result<&Validated, String> {
+        self.naga.as_ref().ok_or_else(|| format!("{} for {:?} has no naga module", self.name, self.target))
+    }
+
+    /// The index of `stage`'s entry point in the module.
+    #[cfg_attr(not(any(test, feature = "msl")), expect(dead_code, reason = "only MSL reads it"))]
+    pub(crate) fn entry_point_index(&self, stage: Stage) -> Result<usize, String> {
+        Ok(self.validated()?.entry_points[stage as usize])
+    }
+
+    /// The resource of the global `handle` of the module, if it is one.
+    #[cfg_attr(not(any(test, feature = "glsl")), expect(dead_code, reason = "only GLSL reads it"))]
+    pub(crate) fn resource_of(&self, handle: naga::Handle<naga::GlobalVariable>) -> Option<(usize, &Resource)> {
+        let name = self.validated().ok()?.module.global_variables[handle].name.as_deref()?;
+        self.resources.iter().enumerate().find(|(_, resource)| resource.name == name)
     }
 }
 
@@ -273,8 +378,8 @@ pub fn programs() -> impl Iterator<Item = BuiltIn> {
     PROGRAMS.iter().map(|&(program, _)| program)
 }
 
-/// The program of `key` for `target`, linked once a process. Fails for a
-/// program without a WESL source, or one that doesn't link or validate.
+/// The program of `key` for `target`, made once a process. Fails for a
+/// program without a WESL source, or one that doesn't validate.
 pub fn program_of(key: &ShaderKey, target: Target) -> Result<Arc<Program>, String> {
     let program = key.program();
     let module = module_of(program).ok_or_else(|| format!("{program:?} has no WESL source"))?;
@@ -282,8 +387,8 @@ pub fn program_of(key: &ShaderKey, target: Target) -> Result<Arc<Program>, Strin
     self::program(module, target, flags)
 }
 
-/// The program `module` linked for `target` with the feature flags `flags`
-/// on, once a process.
+/// The program `module` for `target` with the feature flags `flags` on,
+/// once a process.
 pub fn program<'a>(
     module: &'static str,
     target: Target,
@@ -304,142 +409,99 @@ pub fn program<'a>(
     Ok(program)
 }
 
-/// Links, parses and validates `module` uncached; [`program`] caches it.
+/// Makes `module`'s variant of `flags` for `target` uncached: its lines of
+/// the program linked for the target, and naga's module of them for every
+/// target but WebGPU. [`program`] caches it.
 pub fn link(module: &'static str, target: Target, flags: &[String]) -> Result<Program, String> {
-    let linked = link::link(module, target, flags)?;
-    let wgsl = linked.wgsl;
-    let parsed = naga::front::wgsl::parse_str(&wgsl)
-        .map_err(|error| format!("{module} ({target:?}): {}", error.emit_to_string(&wgsl)))?;
-    let info = Validator::new(ValidationFlags::all(), Capabilities::all())
-        .validate(&parsed)
-        .map_err(|error| format!("{module} ({target:?}): {}", error.emit_to_string(&wgsl)))?;
-    let resources = resources(&parsed, &info, &linked.declared)?;
-    let inputs = inputs(&parsed)?;
-    let entry_point = |stage: Stage| {
-        parsed
-            .entry_points
-            .iter()
-            .position(|entry| entry.stage == stage.naga() && entry.name == stage.entry_point())
-            .ok_or_else(|| format!("{module} has no {stage:?} entry point {}", stage.entry_point()))
-    };
-    let entry_points = [entry_point(Stage::Vertex)?, entry_point(Stage::Fragment)?];
-    Ok(Program {
-        name: module.rsplit("::").next().unwrap_or(module),
-        target,
-        module: parsed,
-        info,
-        wgsl,
-        resources,
-        inputs,
-        index_group: linked.index_group,
-        entry_points,
-        written: Written::default(),
-    })
-}
+    let index = PROGRAMS.iter().position(|&(_, m)| m == module).ok_or_else(|| format!("no program {module}"))?;
+    let built =
+        built(index, target).ok_or_else(|| format!("{module}: the crate doesn't embed {target:?}'s programs"))?;
+    let name = module.rsplit("::").next().unwrap_or(module);
+    let fail = |error: String| format!("{name} ({target:?}): {error}");
+    let on = |flag: &str| flags.iter().any(|f| f == flag);
 
-/// The resources of `module` that either entry point uses.
-fn resources(
-    module: &naga::Module,
-    info: &ModuleInfo,
-    declared: &HashMap<String, Declared>,
-) -> Result<Vec<Resource>, String> {
-    let mut layouter = naga::proc::Layouter::default();
-    layouter.update(module.to_ctx()).map_err(|error| format!("{error:?}"))?;
-    let used_by = |stage: Stage, handle: naga::Handle<naga::GlobalVariable>| {
-        module
-            .entry_points
-            .iter()
-            .position(|entry| entry.stage == stage.naga())
-            .is_some_and(|index| !info.get_entry_point(index)[handle].is_empty())
-    };
-    let (sampled, loaded) = texture_uses(module);
-    let mut resources = Vec::new();
-    for (handle, global) in module.global_variables.iter() {
-        let Some(binding) = global.binding else { continue };
-        let name = global.name.clone().unwrap_or_default();
-        let resource =
-            *declared.get(&name).ok_or_else(|| format!("{name} has a binding the program doesn't declare"))?;
-        let (vertex, fragment) = (used_by(Stage::Vertex, handle), used_by(Stage::Fragment, handle));
-        if !vertex && !fragment {
-            continue;
+    let mut used = Vec::new();
+    for (index, resource) in built.resources.iter().enumerate() {
+        let (vertex, fragment) =
+            (eval(resource.vertex, &on).map_err(fail)?, eval(resource.fragment, &on).map_err(fail)?);
+        if vertex || fragment {
+            let declared =
+                Declared::new(resource.name, resource.kind, resource.group, resource.binding).map_err(fail)?;
+            used.push((index, resource, declared, vertex, fragment));
         }
-        // The kind declared: OpenGL's storage buffers are uniform blocks.
-        let kind = match resource.kind {
+    }
+    let declared: Vec<Declared> = used.iter().map(|&(_, _, declared, _, _)| declared).collect();
+    let (bindings, index_group) = bindings::bindings(&declared, target).map_err(fail)?;
+    let mut resources = Vec::with_capacity(used.len());
+    for (&(_, resource, declared, vertex, fragment), &binding) in used.iter().zip(&bindings) {
+        let kind = match declared.kind {
             DeclaredKind::Texture => {
-                ResourceKind::Texture { filterable: sampled.contains(&handle) || !loaded.contains(&handle) }
+                ResourceKind::Texture { filterable: eval(resource.filterable, &on).map_err(fail)? }
             }
             kind => kind.into(),
         };
-        let size = match kind {
-            ResourceKind::UniformBuffer | ResourceKind::StorageBuffer => u64::from(layouter[global.ty].size),
-            _ => 0,
-        };
+        let size = if declared.kind.is_buffer() { resource.size } else { 0 };
         resources.push(Resource {
-            name,
-            handle,
+            name: resource.name,
             kind,
-            set: resource.set,
-            id: resource.id,
+            set: declared.set,
+            id: declared.id,
             binding,
             size,
             vertex,
             fragment,
         });
     }
-    Ok(resources)
-}
-
-/// The textures that some function of `module` samples, and those it loads
-/// texels of, where it names the global itself.
-fn texture_uses(
-    module: &naga::Module,
-) -> (Vec<naga::Handle<naga::GlobalVariable>>, Vec<naga::Handle<naga::GlobalVariable>>) {
-    let (mut sampled, mut loaded) = (Vec::new(), Vec::new());
-    let functions = module.functions.iter().map(|(_, function)| function);
-    for function in functions.chain(module.entry_points.iter().map(|entry| &entry.function)) {
-        for (_, expression) in function.expressions.iter() {
-            let (image, uses) = match *expression {
-                naga::Expression::ImageSample { image, .. } => (image, &mut sampled),
-                naga::Expression::ImageLoad { image, .. } => (image, &mut loaded),
-                _ => continue,
-            };
-            if let naga::Expression::GlobalVariable(global) = function.expressions[image] {
-                uses.push(global);
-            }
-        }
-    }
-    (sampled, loaded)
-}
-
-/// The inputs of `module`'s vertex entry point.
-fn inputs(module: &naga::Module) -> Result<Vec<VertexInput>, String> {
-    let entry = module
-        .entry_points
-        .iter()
-        .find(|entry| entry.stage == naga::ShaderStage::Vertex)
-        .ok_or("no vertex entry point")?;
     let mut inputs = Vec::new();
-    let mut add = |binding: &Option<naga::Binding>, ty: naga::Handle<naga::Type>| {
-        if let Some(naga::Binding::Location { location, .. }) = *binding {
-            let inner = &module.types[ty].inner;
-            let scalar = inner.scalar().map_or(naga::ScalarKind::Float, |scalar| scalar.kind);
-            let components = match *inner {
-                naga::TypeInner::Vector { size, .. } => size as u32,
-                _ => 1,
-            };
-            inputs.push(VertexInput { location, scalar, components });
-        }
-    };
-    for argument in &entry.function.arguments {
-        match &module.types[argument.ty].inner {
-            naga::TypeInner::Struct { members, .. } => {
-                for member in members {
-                    add(&member.binding, member.ty);
-                }
-            }
-            _ => add(&argument.binding, argument.ty),
+    for input in built.inputs {
+        if eval(input.cond, &on).map_err(fail)? {
+            inputs.push(VertexInput { location: input.location, scalar: input.scalar, components: input.components });
         }
     }
-    inputs.sort_by_key(|input| input.location);
-    Ok(inputs)
+
+    // `__mln_group_<n>` and `__mln_binding_<n>` of the resource at `n`.
+    let define = |name: &str| {
+        let (group, index) = if let Some(index) = name.strip_prefix("__mln_group_") {
+            (true, index)
+        } else {
+            (false, name.strip_prefix("__mln_binding_")?)
+        };
+        let index: usize = index.parse().ok()?;
+        let at = used.iter().position(|&(i, ..)| i == index)?;
+        Some(if group { bindings[at].group } else { bindings[at].binding })
+    };
+    let wgsl = preprocess(built.text, &on, &define).map_err(fail)?;
+
+    Ok(Program {
+        name,
+        target,
+        #[cfg(any(test, feature = "naga"))]
+        naga: (target != Target::WebGpu).then(|| validate(&wgsl)).transpose().map_err(fail)?,
+        wgsl,
+        resources,
+        inputs,
+        index_group,
+        #[cfg(any(test, feature = "naga"))]
+        written: Written::default(),
+    })
+}
+
+/// Parses and validates `wgsl`, a program.
+#[cfg(any(test, feature = "naga"))]
+fn validate(wgsl: &str) -> Result<Validated, String> {
+    use naga::valid::{Capabilities, ValidationFlags, Validator};
+
+    let module = naga::front::wgsl::parse_str(wgsl).map_err(|error| error.emit_to_string(wgsl))?;
+    let info = Validator::new(ValidationFlags::all(), Capabilities::all())
+        .validate(&module)
+        .map_err(|error| error.emit_to_string(wgsl))?;
+    let entry_point = |stage: Stage| {
+        module
+            .entry_points
+            .iter()
+            .position(|entry| entry.stage == stage.naga() && entry.name == stage.entry_point())
+            .ok_or_else(|| format!("no {stage:?} entry point {}", stage.entry_point()))
+    };
+    let entry_points = [entry_point(Stage::Vertex)?, entry_point(Stage::Fragment)?];
+    Ok(Validated { module, info, entry_points })
 }

@@ -6,18 +6,29 @@
 > without notice. mln-rs doesn't re-export it.
 
 The renderer's shader programs, each written once in
-[WESL](https://wesl-lang.dev) and translated for every backend at run time:
+[WESL](https://wesl-lang.dev) and translated for every backend:
 
-- WESL (`wesl` crate) links a program's module and the shared modules it imports
-  into WGSL, with the variant's feature flags deciding its `@if`s.
-- The crate rewrites the program's resource declarations into the target
-  backend's binding convention, then naga parses and validates the WGSL.
-- naga's back ends write SPIR-V (Vulkan), HLSL (D3D12), GLSL ES 3.00 or GLSL
-  3.30 (OpenGL, WebGL2) and MSL (Metal); WebGPU takes the WGSL itself.
+- At build time, WESL (`wesl` crate) links each program once for each target
+  into WGSL, with the target's feature flag decided and the variant flags left
+  as `#if` lines. Each resource's group and binding are left to the target's
+  convention. Tables of the program's resources and vertex inputs say when a
+  variant has each, and which stages use it.
+- At run time, a small preprocessor keeps a variant's lines and fills in the
+  bindings. naga parses and validates the WGSL, and its back ends write SPIR-V
+  (Vulkan), HLSL (D3D12), GLSL ES 3.00 or GLSL 3.30 (OpenGL, WebGL2) and MSL
+  (Metal). WebGPU takes the WGSL as it is, so the browser's WebGPU build has no
+  naga.
 
-A backend asks for a program with `program_of(key, target)`, which links each
+A backend asks for a program with `program_of(key, target)`, which makes each
 variant once a process and reports the program's resources and vertex inputs,
-from which the backend binds it.
+from which the backend binds it. Each target's programs are behind a crate
+feature: `spirv`, `hlsl`, `glsl`, `msl` or `wgsl`.
+
+The build script (`build/`) is in four parts: `normalize` makes each `@if`,
+`@elif` and `@else` a standalone `@if` before linking (WESL inlines a compound
+statement under an `@if` it leaves undecided, losing its condition), `analyze`
+finds under which flags an entry point reaches each declaration, `emit` lowers
+the linked program into the text and tables, and `cond` is their conditions.
 
 ## Modules
 
@@ -79,9 +90,10 @@ its own convention:
    every varying. `CircleShader.wesl` is the model.
 2. Import what it needs from the shared modules. Don't edit them unless a helper
    is missing.
-3. `cargo test -p mln-rs-shaders` links and validates every variant for every
-   target, writes each target's language, and checks each buffer against the
-   renderer's UBO of its name (`tests.rs`, which lists them).
+3. `cargo test -p mln-rs-shaders` validates every variant for every target,
+   writes each target's language, checks that each is what WESL links for the
+   variant directly (`every_variant_is_what_wesl_links`), and checks each buffer
+   against the renderer's UBO of its name (`tests/mod.rs`, which lists them).
    `T=<target> D=<flags> P=<BuiltIn> cargo test -p mln-rs-shaders print_variant -- --ignored --nocapture`
    prints a variant.
 4. Each backend's `every_program_compiles_for_gpu` test (`every_program_links`
@@ -95,8 +107,9 @@ its own convention:
   where GLSL sampled anywhere. Sample before branching, or use
   `textureSampleLevel`.
 - `@if` on a compound statement inlines it into the enclosing scope, so a `let`
-  in it is visible after it; `@if` works on declarations, struct members and
-  statements, and `@elif`/`@else` follow it.
+  in it is visible after it; `@if` works on declarations, struct members,
+  function parameters and statements, and `@elif`/`@else` follow it. The build
+  script rejects an `@if` anywhere else, such as on a switch clause.
 - An `@if(PROJECTION_GLOBE) import` brings in globe-only helpers.
 - OpenGL, WebGPU, Metal and D3D12 take the clip space the program writes;
   Vulkan's flips Y. A constant that depends on the depth range (OpenGL's -1 to
