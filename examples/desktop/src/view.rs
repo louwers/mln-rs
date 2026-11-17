@@ -231,6 +231,7 @@ pub(crate) fn run(launch: Launch) {
         kind: window.kind(),
         window: Some(window),
         demanded: None,
+        demanded_after: 0,
         next_token: 0,
         redraw: false,
         dirty: true,
@@ -342,6 +343,8 @@ struct View {
     window: Option<WindowSession>,
     /// The token of the frame demand whose result hasn't come yet.
     demanded: Option<u64>,
+    /// The map's last command when the view last demanded a frame.
+    demanded_after: u64,
     next_token: u64,
     /// The map has something new to draw.
     redraw: bool,
@@ -499,10 +502,14 @@ impl View {
         }
     }
 
-    /// Whether the map has a frame to draw: a new update, or what the view
-    /// marked.
+    /// Whether the map has a frame to draw: a new update, commands sent since
+    /// the last demand, or what the view marked. The session wakes the thread
+    /// for the first update after each demand, so the update of a command
+    /// that ran before the demand that drew it wakes nothing, and a command
+    /// sent in the next frame hasn't woken the thread by the time that frame
+    /// would demand.
     fn needs_frame(&self) -> bool {
-        self.redraw || self.dirty || self.benchmark
+        self.redraw || self.dirty || self.benchmark || self.map.sent_sequence() > self.demanded_after
     }
 
     /// Whether a frame has something to do.
@@ -562,10 +569,12 @@ impl View {
         }
         let Some(window) = &self.window else { return };
         let mode = if self.dirty || self.benchmark { DemandMode::Force } else { DemandMode::IfChanged };
+        let sent = self.map.sent_sequence();
         self.next_token += 1;
         match window.session().demand_frame(FrameDemand::new(mode, self.next_token)) {
             Ok(()) => {
                 self.demanded = Some(self.next_token);
+                self.demanded_after = sent;
                 self.redraw = false;
                 self.dirty = false;
             }
