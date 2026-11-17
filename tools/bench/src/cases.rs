@@ -136,6 +136,7 @@ pub fn all() -> Vec<Case> {
         cases.push(Case::new(name, move |cx| frame_extrusions(cx, name, data_driven)));
     }
     cases.push(Case::new("Frame/Globe", frame_globe));
+    cases.push(Case::new("Frame/CrossAntimeridian", frame_cross_antimeridian));
     let basemap_mlt = View { name: "basemap-mlt", style: Style::BasemapMlt, ..basemap_view() };
     let basemap_globe = View { name: "basemap-globe", style: Style::BasemapGlobe, ..basemap_view() };
     for view in views().into_iter().chain([basemap_mlt, basemap_globe]) {
@@ -684,6 +685,75 @@ fn frame_globe(cx: &Context) -> Metrics {
         planet_turn(&mut scene, 0);
         scene.settle();
         write_frame(dir, "Frame/Globe", &scene.read_frame());
+    }
+    metrics
+}
+
+/// The layers `Frame/CrossAntimeridian` draws the planet's land with: a
+/// basemap's style has about as many over its tiles.
+const LAND_LAYERS: usize = 96;
+
+/// The planet of `Frame/Globe` on a flat map, its land drawn by
+/// `LAND_LAYERS` layers under its coastlines and places.
+fn world_style(fixtures: &std::path::Path) -> String {
+    let mut style: serde_json::Value = serde_json::from_str(&planet_style(fixtures)).expect("the planet style is JSON");
+    let style_object = style.as_object_mut().expect("the style is an object");
+    for globe_only in ["projection", "sky", "light"] {
+        style_object.remove(globe_only);
+    }
+    let layers = style["layers"].as_array_mut().expect("the style has layers");
+    let land = layers.iter().position(|layer| layer["id"] == "land").expect("the land layer");
+    for index in 1..LAND_LAYERS {
+        let mut layer = layers[land].clone();
+        layer["id"] = format!("land-{index}").into();
+        // The outlines of the planet's land, drawn once, take the GPU longer
+        // than the fills of every layer.
+        layer["paint"]["fill-antialias"] = false.into();
+        layers.insert(land + index, layer);
+    }
+    style.to_string()
+}
+
+/// `Frame/CrossAntimeridian`'s camera at `step`: three quarters of a degree
+/// west of the antimeridian, then east of it, in turn.
+fn cross_antimeridian(scene: &mut Scene, step: usize) {
+    let longitude = if step.is_multiple_of(2) { 179.25 } else { -179.25 };
+    scene.jump(LatLng::new(PLANET_LATITUDE, longitude).expect("a center"), PLANET_ZOOM);
+}
+
+/// Frames of a flat map whose center crosses the antimeridian, as a pan
+/// around the world does once a turn: from a camera step to the other side
+/// until the GPU has finished the frame that shows it, over tiles that
+/// untimed steps loaded. Every tile of the view is in another world copy
+/// after each step.
+fn frame_cross_antimeridian(cx: &Context) -> Metrics {
+    let mut scene = Scene::new(BASEMAP_SIZE, Mode::OnDemand);
+    cross_antimeridian(&mut scene, 0);
+    scene.load_json(&world_style(&cx.fixtures));
+    scene.settle();
+    // Untimed, and with no pause before the timed steps: the tiles of both
+    // sides load, and the first frames after a pause take the GPU longer.
+    for step in 0..64 {
+        cross_antimeridian(&mut scene, step);
+        scene.pump();
+        scene.render_frame();
+    }
+    let mut meter = Meter::new();
+    for step in 0..cx.iterations(300) {
+        cross_antimeridian(&mut scene, step);
+        meter.time(|| {
+            scene.pump();
+            scene.render_frame()
+        });
+    }
+    let (p95, p99) = (percentile(meter.times(), 95.0), percentile(meter.times(), 99.0));
+    let mut metrics = meter.finish();
+    metrics.lead("frame_p95_ms", p95);
+    metrics.lead("frame_p99_ms", p99);
+    if let Some(dir) = &cx.frames {
+        cross_antimeridian(&mut scene, 0);
+        scene.settle();
+        write_frame(dir, "Frame/CrossAntimeridian", &scene.read_frame());
     }
     metrics
 }

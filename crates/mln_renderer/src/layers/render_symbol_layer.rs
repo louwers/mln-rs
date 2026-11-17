@@ -60,7 +60,7 @@ use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
 use crate::render_layer::{
     BucketPlacementData, LayerPrepareParameters, RenderLayer, RenderLayerBase, RenderLayerPtr, SymbolTranslate,
-    activate_layer_group, change_layer_index, set_style,
+    activate_layer_group, change_layer_index, handle_wrap_jump_base, set_style,
 };
 use crate::render_pass::RenderPass;
 use crate::render_tile::RenderTile;
@@ -852,6 +852,18 @@ impl RenderLayer for RenderSymbolLayer {
             group.borrow_mut().clear_drawables();
         }
         self.tile_bucket_versions.clear();
+    }
+
+    fn handle_wrap_jump(&mut self, wrap_delta: i16) {
+        handle_wrap_jump_base(self, wrap_delta);
+        self.tile_bucket_versions = std::mem::take(&mut self.tile_bucket_versions)
+            .into_iter()
+            .map(|(id, versions)| (id.unwrap_to(id.wrap.wrapping_add(wrap_delta)), versions))
+            .collect();
+    }
+
+    fn tile_layer_groups(&self) -> Vec<LayerGroupPtr> {
+        self.base.layer_group.iter().chain(&self.collision_tile_layer_group).cloned().collect()
     }
 
     fn prepare(&mut self, params: &mut LayerPrepareParameters<'_>) {

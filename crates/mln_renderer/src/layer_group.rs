@@ -157,6 +157,27 @@ impl LayerGroup {
         keys.iter().filter_map(|sort| self.drawables.remove(sort)).map(|(_, drawable)| drawable).collect()
     }
 
+    /// Moves the tiles' drawables to the tiles `wrap_delta` world copies
+    /// east of theirs.
+    pub(crate) fn shift_wraps(&mut self, wrap_delta: i16) {
+        let shift = |id: &mut OverscaledTileID| *id = id.unwrap_to(id.wrap.wrapping_add(wrap_delta));
+        for (key, drawable) in self.drawables.values_mut() {
+            if let Some(key) = key {
+                shift(&mut key.tile_id);
+            }
+            if let Some(tile_id) = &mut drawable.tile_id {
+                shift(tile_id);
+            }
+        }
+        self.tiles = std::mem::take(&mut self.tiles)
+            .into_iter()
+            .map(|(mut key, sorts)| {
+                shift(&mut key.tile_id);
+                (key, sorts)
+            })
+            .collect();
+    }
+
     /// Removes the drawables for which `f` returns true, and returns how
     /// many.
     pub(crate) fn remove_drawables_if(&mut self, mut f: impl FnMut(&mut Drawable) -> bool) -> usize {
@@ -359,4 +380,42 @@ fn draw(drawable: &mut Drawable, gpu: &mut dyn Gpu, parameters: &PaintParameters
         atlases.execute(drawable, parameters);
     }
     drawable.draw(gpu, parameters, Some(layer));
+}
+
+#[cfg(test)]
+mod tests {
+    use mln_tile_id::OverscaledTileID;
+
+    use super::LayerGroup;
+    use crate::drawable::Drawable;
+    use crate::render_pass::RenderPass;
+
+    /// A wrap jump moves a tile's drawables with the tile: its drawables in
+    /// each pass are found under the tile's new id, and clip to it.
+    #[test]
+    fn shift_wraps_moves_the_tiles_drawables() {
+        let group = LayerGroup::tiles(0);
+        let mut group = group.borrow_mut();
+        let tile = OverscaledTileID::with_zxy(1, 0, 1, 1, 0);
+        let other = OverscaledTileID::with_zxy(1, 1, 1, 0, 0);
+        for (pass, id) in [(RenderPass::Opaque, tile), (RenderPass::Translucent, tile), (RenderPass::Opaque, other)] {
+            let mut drawable = Box::new(Drawable::new("test".to_owned()));
+            drawable.tile_id = Some(id);
+            group.add_tile_drawable(pass, &id, drawable);
+        }
+
+        group.shift_wraps(-1);
+
+        let (moved, moved_other) = (tile.unwrap_to(-1), other.unwrap_to(0));
+        assert_eq!(1, group.drawable_count_for(RenderPass::Opaque, &moved));
+        assert_eq!(1, group.drawable_count_for(RenderPass::Translucent, &moved));
+        assert_eq!(1, group.drawable_count_for(RenderPass::Opaque, &moved_other));
+        assert_eq!(0, group.drawable_count_for(RenderPass::Translucent, &tile));
+        let mut ids = Vec::new();
+        for pass in [RenderPass::Opaque, RenderPass::Translucent] {
+            group.visit_drawables_for(pass, &moved, |drawable| ids.push(drawable.tile_id));
+        }
+        assert_eq!(vec![Some(moved), Some(moved)], ids);
+        assert_eq!(3, group.remove_drawables_if(|drawable| drawable.tile_id.is_some_and(|id| id.wrap <= 0)));
+    }
 }

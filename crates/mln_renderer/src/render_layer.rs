@@ -264,6 +264,19 @@ pub(crate) trait RenderLayer {
         }
     }
 
+    /// Moves what the layer keeps for each tile to the tile `wrap_delta`
+    /// world copies east of it: the tiles are the same ones under new ids
+    /// once the map's center has crossed the antimeridian, and their
+    /// drawables stay rather than being built again.
+    fn handle_wrap_jump(&mut self, wrap_delta: i16) {
+        handle_wrap_jump_base(self, wrap_delta);
+    }
+
+    /// The groups that hold the drawables of the layer's tiles.
+    fn tile_layer_groups(&self) -> Vec<LayerGroupPtr> {
+        self.base().layer_group.iter().cloned().collect()
+    }
+
     // Non-virtual members of the C++ class.
 
     /// Picks the shader variant for the state's projection; returns true and
@@ -445,6 +458,18 @@ pub(crate) fn mark_layer_renderable_base<L: RenderLayer + ?Sized>(
 
     if !will_render {
         layer.release_render_data();
+    }
+}
+
+/// The default `RenderLayer::handle_wrap_jump`, callable from overrides.
+pub(crate) fn handle_wrap_jump_base<L: RenderLayer + ?Sized>(layer: &mut L, wrap_delta: i16) {
+    let base = layer.base_mut();
+    base.render_tile_ids = std::mem::take(&mut base.render_tile_ids)
+        .into_iter()
+        .map(|(id, bucket)| (id.unwrap_to(id.wrap.wrapping_add(wrap_delta)), bucket))
+        .collect();
+    for group in layer.tile_layer_groups() {
+        group.borrow_mut().shift_wraps(wrap_delta);
     }
 }
 

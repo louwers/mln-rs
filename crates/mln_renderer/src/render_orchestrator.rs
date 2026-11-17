@@ -195,6 +195,8 @@ pub(crate) struct RenderOrchestrator {
     /// Port-only: when the last `create_render_tree` started placing
     /// symbols, for the renderer's `RenderTimings`.
     pub(crate) symbol_placement_start: Option<Instant>,
+    /// The center's longitude at the last update, which tells a wrap jump.
+    longitude: f32,
     tile_cache_enabled: bool,
 
     /// Vector with reference wrappers to the layers in style order.
@@ -290,6 +292,7 @@ impl RenderOrchestrator {
             background_layer_as_color,
             placed_symbol_data_collected: false,
             symbol_placement_start: None,
+            longitude: 0.0,
             tile_cache_enabled: true,
             ordered_layers: Vec::new(),
             remake_render_layers: false,
@@ -823,10 +826,21 @@ impl RenderOrchestrator {
             self.events.emit(RendererEvent::Invalidate);
         }
 
+        // The sources' tiles are in other world copies once the center has
+        // crossed the antimeridian (`SourceTiles::handle_wrap_jump`), and
+        // the layers' drawables go with them.
+        let longitude =
+            update_parameters.transform_state.get_lat_lng(mln_util::geo::WrapMode::Unwrapped).longitude() as f32;
+        let wrap_delta = ((longitude - self.longitude) / 360.0).round() as i16;
+        self.longitude = longitude;
+
         // Update all layers with their new renderability status, if it
         // changed.
         for (i, will_render) in update_list.iter().enumerate() {
             let mut layer = self.ordered_layers[i].borrow_mut();
+            if wrap_delta != 0 {
+                layer.handle_wrap_jump(wrap_delta);
+            }
             if layer.is_layer_renderable() != *will_render {
                 layer.mark_layer_renderable(*will_render, &mut changes);
             }

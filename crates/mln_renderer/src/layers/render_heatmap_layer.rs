@@ -326,6 +326,10 @@ impl RenderLayer for RenderHeatmapLayer {
         }
     }
 
+    fn tile_layer_groups(&self) -> Vec<LayerGroupPtr> {
+        self.base.layer_group.iter().cloned().chain(self.render_target_layer_group()).collect()
+    }
+
     fn update(
         &mut self,
         shaders: &ShaderRegistry,
