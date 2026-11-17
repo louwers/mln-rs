@@ -15,10 +15,10 @@ use mln_storage::{FileSource, FileSourceExt, Kind, RequestOrder, Resource, Respo
 use mln_style::layer::Layer;
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::{Circle, Hillshade, Line, Raster};
+use mln_style::source_type::SourceData;
 use mln_style::sources::custom_geometry_source::{self, Options as CustomGeometrySourceOptions};
 use mln_style::sources::custom_vector_source::{self, Options as CustomVectorSourceOptions, TileDataFormat};
-use mln_style::sources::geojson::{GeoJSONOptions, create_geojson_data, geojson_source};
-use mln_style::source_type::SourceData;
+use mln_style::sources::geojson::{GeoJSONOptions, GeoJsonSourceType, create_geojson_data, geojson_source};
 use mln_style::sources::{
     CustomGeometrySourceHandle, CustomVectorSourceHandle, VectorSourceType, raster_dem_source, raster_source,
     vector_source,
@@ -811,7 +811,7 @@ fn geojson_source_tiles_after_data_reset() {
         .unwrap();
     let geojson_data =
         create_geojson_data(geojson, scheduler::get_sequenced(), &GeoJSONOptions::default_options()).unwrap();
-    source = edited(&source, Edit::SetGeoJsonData { id: "source".to_owned(), data: Some(Arc::clone(&geojson_data)) });
+    source = edited(&source, GeoJsonSourceType::set_data("source", Some(Arc::clone(&geojson_data))));
     let mut store = test.store();
     let mut render_source = crate::tests::create_render_source(&source, &mut store);
 
@@ -825,15 +825,15 @@ fn geojson_source_tiles_after_data_reset() {
     // loaded == false, means that the source contains pending tiles.
     assert!(!render_source.is_loaded(&store));
 
-    source = edited(&source, Edit::SetGeoJsonData { id: "source".to_owned(), data: None });
+    source = edited(&source, GeoJsonSourceType::set_data("source", None));
     render_source.update(&mut store, source.clone(), &layers, true, true, &continuous);
     assert!(!render_source.is_loaded(&store)); // Tiles remain in continuous mode.
 
-    source = edited(&source, Edit::SetGeoJsonData { id: "source".to_owned(), data: Some(geojson_data) });
+    source = edited(&source, GeoJsonSourceType::set_data("source", Some(geojson_data)));
     render_source.update(&mut store, source.clone(), &layers, true, true, &continuous);
     assert!(!render_source.is_loaded(&store));
 
-    source = edited(&source, Edit::SetGeoJsonData { id: "source".to_owned(), data: None });
+    source = edited(&source, GeoJsonSourceType::set_data("source", None));
     render_source.update(&mut store, source.clone(), &layers, true, true, &test.tile_parameters(MapMode::Static));
     assert!(render_source.is_loaded(&store)); // Tiles are reset in static mode.
 }
@@ -876,7 +876,7 @@ impl SynchronousUpdateSource {
             .parse::<GeoJson>()
             .unwrap();
         let data = Some(create_geojson_data(geojson, scheduler::get_sequenced(), &self.options).unwrap());
-        self.source = edited(&self.source, Edit::SetGeoJsonData { id: "source".to_owned(), data });
+        self.source = edited(&self.source, GeoJsonSourceType::set_data("source", data));
         let mut parameters = test.tile_parameters(MapMode::Continuous);
         parameters.is_update_synchronous = self.source.data().is_update_synchronous();
         self.render_source.update(&mut self.store, self.source.clone(), &self.layers, true, true, &parameters);
@@ -887,7 +887,7 @@ impl SynchronousUpdateSource {
 
 /// The edit that sets the synchronous update of the GeoJSON source "source".
 fn synchronous_update(synchronous: bool) -> Edit {
-    Edit::SetGeoJsonSynchronous { id: "source".to_owned(), synchronous }
+    GeoJsonSourceType::set_synchronous("source", synchronous)
 }
 
 // gtest: Source.GeoJSONSourceSynchronousUpdateOverrideAppliesToExistingTiles
@@ -944,7 +944,7 @@ fn geojson_source_slices_inline_while_a_background_slice_runs() {
         .unwrap();
     let data =
         create_geojson_data(geojson, Arc::<HeldScheduler>::clone(&slicer), &GeoJSONOptions::default_options()).unwrap();
-    source = edited(&source, Edit::SetGeoJsonData { id: "source".to_owned(), data: Some(data) });
+    source = edited(&source, GeoJsonSourceType::set_data("source", Some(data)));
     let mut store = test.store();
     let mut render_source = crate::tests::create_render_source(&source, &mut store);
     let layers = circle_layers();

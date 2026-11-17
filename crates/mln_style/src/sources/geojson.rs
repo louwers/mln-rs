@@ -16,6 +16,7 @@ use mln_util::range::Range;
 use mln_vec_map::VecMap;
 use parking_lot::Mutex;
 
+use crate::Edit;
 use crate::conversion::geojson::convert_json_geojson;
 use crate::conversion::{Convertible, Error as ConversionError};
 use crate::expression::{Expr, Functions, from_expression_value};
@@ -417,6 +418,41 @@ impl StyleSourceType for GeoJsonSourceType {
             Some(url) => OfflineResources::Source { url: url.clone() },
             None => OfflineResources::None,
         }
+    }
+}
+
+impl GeoJsonSourceType {
+    /// The edit that makes the GeoJSON source `id` load its data from
+    /// `url`. Its data stays until the URL's arrives.
+    pub fn set_url(id: impl Into<String>, url: impl Into<String>) -> Edit {
+        let url = url.into();
+        Edit::update_source::<Self>(id, "a GeoJSON source", |data| {
+            data.options.url = Some(url);
+            data.load += 1;
+            true
+        })
+    }
+
+    /// The edit that replaces the data of the GeoJSON source `id`, which no
+    /// longer loads it from a URL.
+    pub fn set_data(id: impl Into<String>, geojson: Option<Arc<dyn GeoJSONData>>) -> Edit {
+        Edit::update_source::<Self>(id, "a GeoJSON source", |data| {
+            data.options.url = None;
+            data.description = geojson;
+            data.load += 1;
+            true
+        })
+    }
+
+    /// The edit that sets whether the tiles of the GeoJSON source `id` lay
+    /// out in the call that asks for them, in place of its
+    /// `synchronous_update` option.
+    pub fn set_synchronous(id: impl Into<String>, synchronous: bool) -> Edit {
+        Edit::update_source::<Self>(id, "a GeoJSON source", move |data| {
+            let changed = data.options.synchronous_update != synchronous;
+            data.options.synchronous_update = synchronous;
+            changed
+        })
     }
 }
 

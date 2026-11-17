@@ -11,9 +11,10 @@ use super::util::parse_json;
 use crate::conversion::Error;
 use crate::conversion::source::convert_source;
 use crate::source_type::{Described, ErasedDescription, Load, Source, SourceData};
-use crate::sources::geojson::{GeoJSONOptions, geojson_source};
+use crate::sources::geojson::{GeoJSONOptions, GeoJsonSourceType, geojson_source};
 use crate::sources::tileset::{
-    RasterDemKind, RasterKind, TilesetKind, TilesetSourceType, VectorKind, raster_dem_source, raster_source, vector_source,
+    RasterDemKind, RasterKind, TilesetKind, TilesetSourceType, VectorKind, raster_dem_source, raster_source,
+    vector_source,
 };
 use crate::{Edit, Style, StyleRegistry};
 
@@ -77,22 +78,22 @@ fn geojson_source_synchronous_update_override_replaces_the_option() {
     assert!(synchronous(&style, "source"));
 
     let published = style.get_source("source").unwrap().clone();
-    style.apply(Edit::SetGeoJsonSynchronous { id: "source".to_owned(), synchronous: false }).unwrap();
+    style.apply(GeoJsonSourceType::set_synchronous("source", false)).unwrap();
     assert!(!synchronous(&style, "source"));
     // The version the renderer may hold keeps its mode.
     assert!(published.data().is_update_synchronous());
 
     // Setting the mode the source has changes nothing.
     let before = style.get_source("source").unwrap().clone();
-    style.apply(Edit::SetGeoJsonSynchronous { id: "source".to_owned(), synchronous: false }).unwrap();
+    style.apply(GeoJsonSourceType::set_synchronous("source", false)).unwrap();
     assert!(Source::ptr_eq(&before, style.get_source("source").unwrap()));
 
-    style.apply(Edit::SetGeoJsonSynchronous { id: "source".to_owned(), synchronous: true }).unwrap();
+    style.apply(GeoJsonSourceType::set_synchronous("source", true)).unwrap();
     assert!(synchronous(&style, "source"));
 
     style.apply(Edit::AddSource(geojson_source("asynchronous", GeoJSONOptions::default_options()))).unwrap();
     assert!(!synchronous(&style, "asynchronous"));
-    style.apply(Edit::SetGeoJsonSynchronous { id: "asynchronous".to_owned(), synchronous: true }).unwrap();
+    style.apply(GeoJsonSourceType::set_synchronous("asynchronous", true)).unwrap();
     assert!(synchronous(&style, "asynchronous"));
 }
 
@@ -108,10 +109,10 @@ fn geojson_source_keeps_the_style_attribution() {
     let mut style = style_with(source);
     let options = crate::sources::geojson::GeoJsonSourceOptions::new(GeoJSONOptions::default_options());
     let data = options.data_builder().build(r#"{"type": "Point", "coordinates": [1.1, 1.1]}"#.parse().unwrap());
-    style.apply(Edit::SetGeoJsonData { id: "source".to_owned(), data: Some(data.unwrap()) }).unwrap();
+    style.apply(GeoJsonSourceType::set_data("source", Some(data.unwrap()))).unwrap();
     assert_eq!(Some("Fixture data".to_owned()), style.get_source("source").unwrap().data().attribution());
 
-    style.apply(Edit::SetGeoJsonUrl { id: "source".to_owned(), url: "url".to_owned() }).unwrap();
+    style.apply(GeoJsonSourceType::set_url("source", "url")).unwrap();
     let source = described(style.get_source("source").unwrap(), br#"{"type": "Point", "coordinates": [2.2, 2.2]}"#);
     assert!(crate::sources::geojson::geojson_data(&source).is_some());
     assert_eq!(Some("Fixture data".to_owned()), source.data().attribution());
@@ -141,7 +142,7 @@ fn a_tilejson_describes_a_vector_source() {
 fn a_description_of_a_load_the_source_moved_on_from_changes_nothing() {
     let source = geojson_source("source", GeoJSONOptions::default_options());
     let mut style = style_with(source.clone());
-    style.apply(Edit::SetGeoJsonUrl { id: "source".to_owned(), url: "url".to_owned() }).unwrap();
+    style.apply(GeoJsonSourceType::set_url("source", "url")).unwrap();
     let before = style.clone();
     let description = describe(&source, br#"{"type": "Point", "coordinates": [2.2, 2.2]}"#);
     let edit = Edit::SetSourceDescription {

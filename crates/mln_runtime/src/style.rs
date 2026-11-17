@@ -580,7 +580,7 @@ impl Map {
         self.send(
             move |entry, outbox| {
                 require_loaded(&entry.core)?;
-                let edit = Edit::SetGeoJsonUrl { id: source_id.clone(), url };
+                let edit = GeoJsonSourceType::set_url(source_id.clone(), url);
                 entry.core.edit_style(|style| style.apply(edit))?;
                 if let Some((_, resolver)) =
                     entry.geojson_updates.0.get_mut(&source_id).and_then(|update| update.waiting.take())
@@ -652,7 +652,7 @@ impl Map {
         let source_id = source_id.into();
         self.command(move |map| {
             require_loaded(map)?;
-            map.edit_style(|style| style.apply(Edit::SetGeoJsonSynchronous { id: source_id, synchronous: enabled }))
+            map.edit_style(|style| style.apply(GeoJsonSourceType::set_synchronous(source_id, enabled)))
         })
     }
 
@@ -886,7 +886,7 @@ impl Map {
         let (source_id, url) = (source_id.into(), url.into());
         self.command(move |map| {
             require_loaded(map)?;
-            map.edit_style(|style| style.apply(Edit::SetImageSourceUrl { id: source_id, url }))
+            map.edit_style(|style| style.apply(ImageSourceType::set_url(source_id, url)))
         })
     }
 
@@ -899,7 +899,7 @@ impl Map {
         let source_id = source_id.into();
         self.command(move |map| {
             require_loaded(map)?;
-            map.edit_style(|style| style.apply(Edit::SetImageSourceImage { id: source_id, image }))
+            map.edit_style(|style| style.apply(ImageSourceType::set_image(source_id, image)))
         })
     }
 
@@ -913,7 +913,7 @@ impl Map {
         let source_id = source_id.into();
         self.command(move |map| {
             require_loaded(map)?;
-            map.edit_style(|style| style.apply(Edit::SetImageSourceCoordinates { id: source_id, coordinates }))
+            map.edit_style(|style| style.apply(ImageSourceType::set_coordinates(source_id, coordinates)))
         })
     }
 
@@ -1028,7 +1028,7 @@ fn queue_geojson(
     if synchronous {
         return match builder.build(geojson) {
             Ok(data) => {
-                let edit = Edit::SetGeoJsonData { id: source_id.to_owned(), data: Some(data) };
+                let edit = GeoJsonSourceType::set_data(source_id, Some(data));
                 match entry.core.edit_style(|style| style.apply(edit)) {
                     Ok(()) => Ok(Some(resolver)),
                     Err(error) => Err((error, resolver)),
@@ -1107,7 +1107,7 @@ fn install_geojson(
             Err(Error::cancelled("the source's data was replaced before this data was ready"))
         }
         Ok(data) => {
-            let edit = Edit::SetGeoJsonData { id: source_id.to_owned(), data: Some(data) };
+            let edit = GeoJsonSourceType::set_data(source_id, Some(data));
             entry.core.edit_style(|style| style.apply(edit))
         }
     };

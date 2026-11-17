@@ -19,9 +19,7 @@ use crate::projection::Projection;
 use crate::registry::StyleRegistry;
 use crate::sky::Sky;
 use crate::source_list::SourceList;
-use crate::source_type::{Source, SourceData, StyleSourceType};
-use crate::sources::geojson::GeoJsonSourceType;
-use crate::sources::image::ImageSourceType;
+use crate::source_type::Source;
 use crate::sprite::Sprite;
 use crate::transition_options::TransitionOptions;
 
@@ -439,67 +437,14 @@ impl Style {
                     Arc::make_mut(&mut self.sources).set(source);
                 }
             }
-            Edit::SetGeoJsonUrl { id, url } => {
-                self.update_source::<GeoJsonSourceType>(&id, "a GeoJSON source", |data| {
-                    data.options.url = Some(url);
-                    data.load += 1;
-                    true
-                })?;
+            Edit::UpdateSource { id, update } => {
+                let source = self.sources.get(&id).ok_or_else(|| source_not_found(&id))?;
+                let instance = source.instance();
+                if let Some(source) = update(source)? {
+                    debug_assert!(source.id() == id && source.instance() == instance, "an update keeps its source");
+                    Arc::make_mut(&mut self.sources).set(source);
+                }
             }
-            Edit::SetGeoJsonData { id, data: geojson } => {
-                self.update_source::<GeoJsonSourceType>(&id, "a GeoJSON source", |data| {
-                    data.options.url = None;
-                    data.description = geojson;
-                    data.load += 1;
-                    true
-                })?;
-            }
-            Edit::SetGeoJsonSynchronous { id, synchronous } => {
-                self.update_source::<GeoJsonSourceType>(&id, "a GeoJSON source", |data| {
-                    let changed = data.options.synchronous_update != synchronous;
-                    data.options.synchronous_update = synchronous;
-                    changed
-                })?;
-            }
-            Edit::SetImageSourceUrl { id, url } => {
-                self.update_source::<ImageSourceType>(&id, "an image source", |data| {
-                    data.options.url = Some(url);
-                    data.load += 1;
-                    true
-                })?;
-            }
-            Edit::SetImageSourceImage { id, image } => {
-                self.update_source::<ImageSourceType>(&id, "an image source", |data| {
-                    data.options.url = None;
-                    data.description = Some(Arc::new(image));
-                    data.load += 1;
-                    true
-                })?;
-            }
-            Edit::SetImageSourceCoordinates { id, coordinates } => {
-                self.update_source::<ImageSourceType>(&id, "an image source", |data| {
-                    data.options.coordinates = coordinates;
-                    true
-                })?;
-            }
-        }
-        Ok(())
-    }
-
-    /// Changes the data of the source `id`, a `T` source, which `kind`
-    /// names in the error for a source of another type. `change` returns
-    /// whether it changed anything; the source keeps its data if not.
-    fn update_source<T: StyleSourceType>(
-        &mut self,
-        id: &str,
-        kind: &str,
-        change: impl FnOnce(&mut SourceData<T>) -> bool,
-    ) -> Result<(), Error> {
-        let source = self.sources.get(id).ok_or_else(|| source_not_found(id))?;
-        let mut data = SourceData::<T>::recover(source).ok_or_else(|| not_a(id, kind))?.clone();
-        if change(&mut data) {
-            let source = source.with_data(data);
-            Arc::make_mut(&mut self.sources).set(source);
         }
         Ok(())
     }
@@ -609,12 +554,6 @@ impl Style {
 
 fn source_not_found(id: &str) -> Error {
     Error::not_found(format!("source \"{id}\" does not exist"))
-}
-
-/// The error for the source `id`, which isn't `kind`, as in `source "water"
-/// is not a GeoJSON source`.
-fn not_a(id: &str, kind: &str) -> Error {
-    Error::invalid_argument(format!("source \"{id}\" is not {kind}"))
 }
 
 /// Sets the property `name` of `layer` to the style JSON `value`: a layer

@@ -1731,11 +1731,11 @@ fn an_image_source_without_a_url_draws_once_it_has_an_image() {
 
     let mut red = PremultipliedImage::new(Size::new(1, 1));
     red.data.copy_from_slice(&[255, 0, 0, 255]);
-    let edit = Edit::SetImageSourceImage { id: "image".to_owned(), image: red };
+    let edit = ImageSourceType::set_image("image", red);
     test.map().edit_style(|style| style.apply(edit)).unwrap();
     assert_eq!(center_pixel(&test.render().image), [255, 0, 0, 255]);
 
-    let edit = Edit::SetImageSourceUrl { id: "image".to_owned(), url: "fixture://image.png".to_owned() };
+    let edit = ImageSourceType::set_url("image", "fixture://image.png");
     test.map().edit_style(|style| style.apply(edit)).unwrap();
     assert_eq!(test.file_source.requests_len(), 1);
     // The frontend's device logs the platform or GPU it is on, and the
