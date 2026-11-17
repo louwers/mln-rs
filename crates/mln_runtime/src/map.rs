@@ -4,8 +4,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, Weak};
 
 use mln_map::{
-    BoundOptions, Camera, CameraCommandId, CameraDelta, CameraOptions, CameraUpdate, FreeCameraOptions, LogicalExtent,
-    MapDebugOptions, MapEvent, MapMode, MapSnapshot, ProjectionMode, StyleLoadError, TransitionEnd, TransitionOutcome,
+    BoundOptions, Camera, CameraCommandId, CameraDelta, CameraOptions, CameraUpdate, FrameClock, FreeCameraOptions,
+    LogicalExtent, MapDebugOptions, MapEvent, MapMode, MapSnapshot, ProjectionMode, StyleLoadError, TransitionEnd,
+    TransitionOutcome,
 };
 use mln_renderer::text::font_face_engine::FontFaceEngine;
 use mln_renderer::{Registry, UpdateReader};
@@ -104,8 +105,19 @@ pub(crate) struct Published {
     snapshot: Mutex<Option<MapSnapshot>>,
     /// The map's updates for its renderer, once the map is built.
     updates: OnceLock<UpdateReader>,
-    /// The sequence number of the last command that ran.
+    /// The sequence number of the last command that ran and whose changes a
+    /// frame can show.
     applied: AtomicU64,
+    /// The map's frame clock, once the map is built: each frame demand sets
+    /// it.
+    frame_clock: OnceLock<FrameClock>,
+    /// The frame samples that demands asked for, numbered from 1, and the
+    /// last that the map took and a frame can show.
+    samples_requested: AtomicU64,
+    sampled: AtomicU64,
+    /// Whether a sample is on its way to the runtime's thread, which takes
+    /// the demands that ask meanwhile.
+    sample_queued: AtomicBool,
     event_mask: AtomicU64,
     /// The still image that waits for a frame, as the
     /// `still_image_request_id` of the updates that ask for it, or 0.
@@ -113,9 +125,15 @@ pub(crate) struct Published {
 }
 
 impl Published {
-    /// The sequence number of the last command that ran.
+    /// The sequence number of the last command that ran and whose changes a
+    /// frame can show.
     pub(crate) fn applied(&self) -> u64 {
         self.applied.load(Ordering::SeqCst)
+    }
+
+    /// The last frame sample that the map took and a frame can show.
+    pub(crate) fn sampled(&self) -> u64 {
+        self.sampled.load(Ordering::SeqCst)
     }
 
     /// The still image that waits for a frame, as the
@@ -130,6 +148,10 @@ impl Published {
             snapshot: Mutex::new(None),
             updates: OnceLock::new(),
             applied: AtomicU64::new(0),
+            frame_clock: OnceLock::new(),
+            samples_requested: AtomicU64::new(0),
+            sampled: AtomicU64::new(0),
+            sample_queued: AtomicBool::new(false),
             event_mask: AtomicU64::new(event_mask.bits()),
             still_image: AtomicU64::new(0),
         }
@@ -336,7 +358,9 @@ impl Map {
         *self.shared.sent.lock()
     }
 
-    /// The sequence number of the last command that ran.
+    /// The sequence number of the last command that ran. While the
+    /// runtime's thread runs several queued commands as one burst, they
+    /// count once the frame that shows them all can.
     #[must_use]
     pub fn applied_sequence(&self) -> u64 {
         self.shared.published.applied.load(Ordering::SeqCst)
@@ -812,29 +836,28 @@ impl Map {
         );
     }
 
-    /// Puts the map on the frame clock of a frame demanded now: a command
-    /// samples its animations at this time, and starts later ones from it,
-    /// as [`mln_map::Map::set_frame_time`] does.
-    pub(crate) fn sample_animations_for_frame(&self) {
-        if self.shared.mode != MapMode::Continuous {
-            return;
+    /// For a frame demanded now: sets the map's frame clock, which its
+    /// animations sample at and its camera commands start from, and while
+    /// an animation runs, has the map sample it at this time. Returns the
+    /// sample that the frame waits for, or 0 for none. The demands that ask
+    /// before the runtime's thread takes a sample share it.
+    pub(crate) fn frame_demanded(&self) -> u64 {
+        let published = &self.shared.published;
+        if let Some(clock) = published.frame_clock.get() {
+            clock.set(Some(Instant::now()));
         }
-        // The demand waits for the command. A still map without commands on
-        // their way has nothing to sample, and its frames don't wait for the
-        // runtime's thread.
-        let animating = self.shared.published.snapshot.lock().is_some_and(|snapshot| snapshot.transition_in_progress);
-        if !animating && self.sent_sequence() == self.applied_sequence() {
-            return;
+        // A still map has nothing to sample, and its frames don't wait for
+        // the runtime's thread.
+        let animating = published.snapshot.lock().is_some_and(|snapshot| snapshot.transition_in_progress);
+        if self.shared.mode != MapMode::Continuous || !animating {
+            return 0;
         }
-        let time = Instant::now();
-        // A map released meanwhile has no animations to sample.
-        let _ = self.shared.send(Some(|_| {}), move |core, outbox, id, sequence, resolver| {
-            let sample = move |entry: &mut MapEntry, _: &mut Outbox| {
-                entry.core.set_frame_time(Some(time));
-                Ok(())
-            };
-            run_command(core, id, sequence, sample, |(), _| (), resolver, outbox);
-        });
+        let sample = published.samples_requested.fetch_add(1, Ordering::SeqCst) + 1;
+        if !published.sample_queued.swap(true, Ordering::SeqCst) {
+            let id = self.shared.id;
+            self.shared.runtime.post_apart(move |core, outbox| sample_frame(core, id, outbox));
+        }
+        sample
     }
 
     /// Sends a command that resizes the map to `size` at `scale_factor`,
@@ -1459,6 +1482,10 @@ pub(crate) struct MapEntry {
     mask: EventMask,
     /// The sequence number of the last command that ran.
     applied: u64,
+    /// The last command and frame sample that ran while a burst held the
+    /// map's updates back, which the session learns of once they show.
+    held_applied: Option<u64>,
+    held_sampled: Option<u64>,
     /// The style load in progress.
     pending_style: Option<PendingStyle>,
     pending_still: Option<PendingStill>,
@@ -1541,6 +1568,7 @@ pub(crate) fn create(
         map.set_fallback_font_face_list(mln_system_fonts::fallback_font_face_list());
     }
     let _ = published.updates.set(map.update_reader());
+    let _ = published.frame_clock.set(map.frame_clock());
     let flush_pending = FlushFlag::default();
     map.set_reports_waker(Some(flush_pending.waker(&core.queue, id)));
     published.applied.store(1, Ordering::SeqCst);
@@ -1551,6 +1579,8 @@ pub(crate) fn create(
             published,
             mask: options.event_mask,
             applied: 1,
+            held_applied: None,
+            held_sampled: None,
             pending_style: None,
             pending_still: None,
             session: None,
@@ -1570,7 +1600,9 @@ pub(crate) fn create(
 /// before it, applies it, publishes the map's state, sends its events, and
 /// runs `after` with what `apply` returned. Then it tells the map's render
 /// session that the command ran, so `after` can send the session what the
-/// session must see first.
+/// session must see first. While a burst holds the map's updates back, it
+/// tells the session once they show, so that no frame that waits for the
+/// command draws the update before it.
 pub(crate) fn apply_command<T>(
     core: &mut RuntimeCore,
     id: MapId,
@@ -1589,13 +1621,66 @@ pub(crate) fn apply_command<T>(
     let value = apply(entry, outbox);
     entry.applied = sequence;
     flush(core, id, outbox);
-    let Some(entry) = core.maps.get(&id) else { return };
+    let holding = core.holding_updates();
+    let Some(entry) = core.maps.get_mut(&id) else { return };
     after(entry, value, entry.applied(), outbox);
+    if holding {
+        entry.held_applied = Some(sequence);
+    } else {
+        report_applied(entry, sequence);
+    }
+}
+
+/// Tells the map's session that the command `sequence` ran, once a frame can
+/// show it.
+fn report_applied(entry: &MapEntry, sequence: u64) {
     entry.published.applied.store(sequence, Ordering::SeqCst);
     if let Some(link) = &entry.session
         && sequence >= link.awaited.load(Ordering::SeqCst)
     {
         worker_post(&link.queue, move |worker, outbox| worker.map_applied(sequence, outbox));
+    }
+}
+
+/// Tells the map's session that the map took the frame sample `sample`, once
+/// a frame can show it.
+fn report_sampled(entry: &MapEntry, sample: u64) {
+    entry.published.sampled.fetch_max(sample, Ordering::SeqCst);
+    if let Some(link) = &entry.session {
+        worker_post(&link.queue, move |worker, outbox| worker.map_sampled(sample, outbox));
+    }
+}
+
+/// Tells the map's session what ran while a burst held the map's updates
+/// back, now that they show.
+pub(crate) fn report_held(entry: &mut MapEntry) {
+    if let Some(sequence) = entry.held_applied.take() {
+        report_applied(entry, sequence);
+    }
+    if let Some(sample) = entry.held_sampled.take() {
+        report_sampled(entry, sample);
+    }
+}
+
+/// Has the map `id` sample its animations at its frame clock's time for the
+/// frame samples that demands asked for.
+fn sample_frame(core: &mut RuntimeCore, id: MapId, outbox: &mut Outbox) {
+    let Some(entry) = core.maps.get(&id) else { return };
+    // A demand from now on asks for another sample.
+    entry.published.sample_queued.store(false, Ordering::SeqCst);
+    let sample = entry.published.samples_requested.load(Ordering::SeqCst);
+    if entry.flush_pending.is_set() || entry.core.has_reports() {
+        flush(core, id, outbox);
+    }
+    let Some(entry) = core.maps.get_mut(&id) else { return };
+    entry.core.sample_frame();
+    flush(core, id, outbox);
+    let holding = core.holding_updates();
+    let Some(entry) = core.maps.get_mut(&id) else { return };
+    if holding {
+        entry.held_sampled = Some(sample);
+    } else {
+        report_sampled(entry, sample);
     }
 }
 

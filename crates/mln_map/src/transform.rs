@@ -9,6 +9,7 @@
 
 use std::f64::consts::PI;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 
 use geometry::Point;
@@ -28,6 +29,7 @@ use mln_util::logging::{Event, Log};
 use mln_util::projection::Projection;
 use mln_util::size::Size;
 use mln_util::time::Instant;
+use parking_lot::Mutex;
 
 use crate::map_event::{CameraChange, CameraChangeMode, CameraChangeSource};
 
@@ -479,6 +481,24 @@ fn momentum_value(state: &TransformState, part: usize) -> f64 {
     }
 }
 
+/// The time of the latest frame that a map's host drew, which the map's
+/// animations sample at and its camera commands start from (see
+/// [`Transform::set_frame_time`]). A clone shares the clock, so the thread
+/// that draws can set it while the map lives on another.
+#[derive(Clone, Debug, Default)]
+pub struct FrameClock(Arc<Mutex<Option<Instant>>>);
+
+impl FrameClock {
+    pub fn set(&self, time: Option<Instant>) {
+        *self.0.lock() = time;
+    }
+
+    #[must_use]
+    pub fn get(&self) -> Option<Instant> {
+        *self.0.lock()
+    }
+}
+
 pub struct Transform {
     state: TransformState,
 
@@ -500,7 +520,7 @@ pub struct Transform {
     source: CameraChangeSource,
     gesture: GestureState,
     /// The host's current frame time (see [`Self::set_frame_time`]).
-    frame_time: Option<Instant>,
+    frame_time: FrameClock,
     projection_for_zoom: Option<ProjectionForZoomFn>,
     globe_free_bearing: bool,
     globe_drag_hold: Option<GlobeDragHold>,
@@ -579,7 +599,7 @@ impl Transform {
             joint_ends: Vec::new(),
             source: CameraChangeSource::Command,
             gesture: GestureState::default(),
-            frame_time: None,
+            frame_time: FrameClock::default(),
             projection_for_zoom: None,
             globe_free_bearing: false,
             globe_drag_hold: None,
@@ -2323,7 +2343,12 @@ impl Transform {
     /// keeps the camera still for that frame; a glide that continues a drag
     /// would pause there.
     pub fn set_frame_time(&mut self, time: Option<Instant>) {
-        self.frame_time = time;
+        self.frame_time.set(time);
+    }
+
+    /// The clock that [`set_frame_time`](Self::set_frame_time) sets.
+    pub(crate) fn frame_clock(&self) -> FrameClock {
+        self.frame_time.clone()
     }
 
     /// The host's frame time, unless it is stale: older than
@@ -2336,7 +2361,7 @@ impl Transform {
     }
 
     fn fresh_frame_time(&self, now: Instant) -> Option<Instant> {
-        self.frame_time.filter(|&time| now.saturating_duration_since(time) <= STALE_FRAME_TIME)
+        self.frame_time.get().filter(|&time| now.saturating_duration_since(time) <= STALE_FRAME_TIME)
     }
 
     /// When commands start: the frame time, or now.

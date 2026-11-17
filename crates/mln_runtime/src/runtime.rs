@@ -125,6 +125,13 @@ impl RuntimeShared {
         self.queue.post(move |core| run(core, task, true));
     }
 
+    /// Runs `task` on the runtime's thread, after everything sent before it,
+    /// outside the bursts of the tasks that [`post`](Self::post) sends: it
+    /// neither starts one nor counts in one.
+    pub(crate) fn post_apart(&self, task: impl FnOnce(&mut RuntimeCore, &mut Outbox) + Send + 'static) {
+        post(&self.queue, task);
+    }
+
     /// Runs `task` with `value` on the runtime's thread, after everything
     /// sent before it, or `instead` with `value` on this thread when the
     /// runtime has shut down, so that what must happen either way isn't lost
@@ -397,7 +404,7 @@ impl RuntimeCore {
     }
 
     /// Ends a task of the burst, and after its last, shows what the maps
-    /// held back.
+    /// held back, and tells their sessions what ran meanwhile.
     fn end_burst_task(&mut self, outbox: &mut Outbox) {
         self.burst_left = self.burst_left.saturating_sub(1);
         if self.burst_left > 0 || !std::mem::take(&mut self.holding) {
@@ -409,7 +416,15 @@ impl RuntimeCore {
                 entry.core.release_updates();
             }
             crate::map::flush(self, id, outbox);
+            if let Some(entry) = self.maps.get_mut(&id) {
+                crate::map::report_held(entry);
+            }
         }
+    }
+
+    /// Whether the maps hold their updates back for a burst.
+    pub(crate) fn holding_updates(&self) -> bool {
+        self.holding
     }
 
     /// The loader that the runtime's maps share.

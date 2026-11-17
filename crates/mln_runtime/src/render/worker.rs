@@ -350,6 +350,8 @@ fn set_tile_workers(renderer: &mut Renderer, registry: &Arc<Registry>) {
 struct PendingDemand {
     demand: FrameDemand,
     sequence: u64,
+    /// The map's frame sample that the demand waits for, or 0.
+    sample: u64,
     /// The demand's place among the demands that reached the session.
     serial: u64,
 }
@@ -423,6 +425,8 @@ pub(crate) struct Worker {
     update_scheduled: Arc<AtomicBool>,
     /// The sequence number of the map's last command that ran.
     map_applied: u64,
+    /// The map's last frame sample.
+    map_sampled: u64,
     /// What the map publishes, from the bind on: the last command that ran.
     map_published: Option<Arc<MapPublished>>,
     /// The demands in the order they came, each waiting until the map ran
@@ -612,6 +616,7 @@ impl Worker {
             renderer_events,
             update_scheduled: Arc::new(AtomicBool::new(false)),
             map_applied: 0,
+            map_sampled: 0,
             map_published: None,
             queue: VecDeque::new(),
             waiting: Vec::new(),
@@ -719,6 +724,18 @@ impl Worker {
         self.pump(outbox);
     }
 
+    /// The map took its frame sample `sample`, and published the update.
+    pub(crate) fn map_sampled(&mut self, sample: u64, outbox: &mut Outbox) {
+        self.map_sampled = self.map_sampled.max(sample);
+        self.pump(outbox);
+    }
+
+    /// Whether the map ran what `pending` waits for: the commands sent
+    /// before it, and its frame sample.
+    fn ran(&self, pending: &PendingDemand) -> bool {
+        pending.sequence <= self.map_applied && pending.sample <= self.map_sampled
+    }
+
     /// The map published an update.
     fn on_update(&mut self, outbox: &mut Outbox) {
         self.update_scheduled.store(false, Ordering::SeqCst);
@@ -773,7 +790,7 @@ impl Worker {
 
     /// Takes a host's demand, which supersedes the demands with its mode on
     /// their way unless it forces a frame.
-    pub(crate) fn demand(&mut self, demand: FrameDemand, sequence: u64, outbox: &mut Outbox) {
+    pub(crate) fn demand(&mut self, demand: FrameDemand, sequence: u64, sample: u64, outbox: &mut Outbox) {
         if self.torn_down {
             let result = FrameResult::unrendered(Some(demand.token), FrameDisposition::TargetNotReady, 0);
             return self.publish(&result, outbox);
@@ -793,7 +810,7 @@ impl Worker {
             }
         }
         self.demands_received += 1;
-        self.queue.push_back(PendingDemand { demand, sequence, serial: self.demands_received });
+        self.queue.push_back(PendingDemand { demand, sequence, sample, serial: self.demands_received });
         self.pump(outbox);
     }
 
@@ -845,6 +862,10 @@ impl Worker {
     /// the map's commands. Work doesn't wait for a ring to free a texture,
     /// as a parked demand and those behind it do.
     fn run_queued(&mut self, outbox: &mut Outbox) {
+        // A sample that the map took before the session bound to it told no
+        // session.
+        let sampled = self.map_published.as_ref().map_or(0, |published| published.sampled());
+        self.map_sampled = self.map_sampled.max(sampled);
         loop {
             self.run_ready(outbox);
             // The map tells the session of the commands that the demands
@@ -869,7 +890,7 @@ impl Worker {
     /// commands that the session knows ran.
     fn run_ready(&mut self, outbox: &mut Outbox) {
         loop {
-            let front = self.queue.front().map(|pending| (pending.serial, pending.sequence <= self.map_applied));
+            let front = self.queue.front().map(|pending| (pending.serial, self.ran(pending)));
             let work_first =
                 self.behind.front().is_some_and(|behind| front.is_none_or(|(serial, _)| behind.demands < serial));
             let evaluable = !self.torn_down && self.reader.is_some() && self.parked.is_empty();
@@ -883,10 +904,7 @@ impl Worker {
             }
             let waits = |behind: &Behind| {
                 behind.resizes > self.resizes_landed
-                    || self
-                        .queue
-                        .iter()
-                        .any(|pending| pending.serial <= behind.demands && pending.sequence > self.map_applied)
+                    || self.queue.iter().any(|pending| pending.serial <= behind.demands && !self.ran(pending))
             };
             match self.behind.front() {
                 Some(behind) if !waits(behind) => {

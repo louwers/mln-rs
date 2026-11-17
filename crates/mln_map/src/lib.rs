@@ -31,7 +31,7 @@ pub use mln_renderer::{
 pub use mln_style::StyleLoadError;
 pub use mln_util::event_queue::Waker;
 pub use mln_util::{Error, ErrorKind};
-pub use transform::{CameraCommandId, CommandEnd};
+pub use transform::{CameraCommandId, CommandEnd, FrameClock};
 
 #[cfg(test)]
 mod tests;

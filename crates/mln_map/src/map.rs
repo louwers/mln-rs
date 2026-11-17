@@ -37,7 +37,7 @@ use crate::map_options::{MapOptions, UnusedStyleImagePolicy};
 use crate::map_snapshot::{CameraBounds, FreeCamera, MapSnapshot, TileSettings};
 use crate::rendering_stats_view::{RenderingStatsView, RenderingStatsViewOptions};
 use crate::style_loader::{LoadEvent, StyleLoader};
-use crate::transform::{CameraCommandId, CommandEnd, Transform, TransformEvent};
+use crate::transform::{CameraCommandId, CommandEnd, FrameClock, Transform, TransformEvent};
 
 /// Where a still image that [`Map::render_still`] asked for stands.
 #[derive(Debug, PartialEq)]
@@ -520,9 +520,13 @@ impl Map {
                 rendering_stats: stats,
             }));
 
-            if needs_repaint || self.transform.in_transition() {
+            // A host on a frame clock has each frame sample the running
+            // animations (`sample_frame`), so a frame's report adds no update
+            // for them, which would only repeat the frame's camera.
+            let animating = self.transform.in_transition();
+            if needs_repaint || (animating && self.transform.frame_time().is_none()) {
                 self.on_update();
-            } else if self.renderer_fully_loaded {
+            } else if !animating && self.renderer_fully_loaded {
                 self.emit(MapEvent::Idle);
             }
         } else if self.renderer_fully_loaded
@@ -1016,6 +1020,21 @@ impl Map {
     /// [`Transform::set_frame_time`](crate::transform::Transform::set_frame_time).
     pub fn set_frame_time(&mut self, time: Option<Instant>) {
         self.transform.set_frame_time(time);
+        self.sample_frame();
+    }
+
+    /// The clock that [`set_frame_time`](Self::set_frame_time) sets, for a
+    /// host that sets it from the thread that draws, without updating the
+    /// map. It then calls [`sample_frame`](Self::sample_frame) for each frame
+    /// that an animation runs in.
+    #[must_use]
+    pub fn frame_clock(&self) -> FrameClock {
+        self.transform.frame_clock()
+    }
+
+    /// Updates the map for a frame at the frame clock's time, if an
+    /// animation runs.
+    pub fn sample_frame(&mut self) {
         if self.transform.in_transition() {
             self.on_update();
         }

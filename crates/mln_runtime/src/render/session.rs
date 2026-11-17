@@ -1244,12 +1244,10 @@ impl RenderSession {
                     "every texture of the ring is quarantined: give the session new textures",
                 ));
             }
-            let sequence = state.map.as_ref().map_or(0, |map| {
-                map.sample_animations_for_frame();
-                map.sent_sequence()
-            });
+            let (sequence, sample) =
+                state.map.as_ref().map_or((0, 0), |map| (map.sent_sequence(), map.frame_demanded()));
             state.redraw_armed = true;
-            worker::post(&shared.queue, move |worker, outbox| worker.demand(demand, sequence, outbox));
+            worker::post(&shared.queue, move |worker, outbox| worker.demand(demand, sequence, sample, outbox));
             Ok(())
         })
     }
