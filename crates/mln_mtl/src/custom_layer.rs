@@ -1,8 +1,8 @@
 // What a custom layer's host gets of a Metal frame.
 
-use objc2::rc::Retained;
-use objc2::runtime::ProtocolObject;
-use objc2_metal::{MTLCommandBuffer, MTLPixelFormat, MTLRenderCommandEncoder};
+use objc2_metal::MTLPixelFormat;
+
+use crate::mtl_fwd::{MTLCommandBufferPtr, MTLRenderCommandEncoderPtr};
 
 /// The pixel formats of a pass's attachments.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -16,7 +16,7 @@ pub struct AttachmentFormats {
 /// prerender. End each encoder made on it before the call returns, and don't
 /// commit it.
 pub struct CustomLayerEncoder {
-    pub command_buffer: Retained<ProtocolObject<dyn MTLCommandBuffer>>,
+    pub command_buffer: MTLCommandBufferPtr,
 }
 
 /// The map's render pass at a custom layer's place in the style.
@@ -26,8 +26,8 @@ pub struct CustomLayerEncoder {
 /// what its next draws need again. Don't end `encoder`, and don't commit
 /// `command_buffer`.
 pub struct CustomLayerPass {
-    pub encoder: Retained<ProtocolObject<dyn MTLRenderCommandEncoder>>,
-    pub command_buffer: Retained<ProtocolObject<dyn MTLCommandBuffer>>,
+    pub encoder: MTLRenderCommandEncoderPtr,
+    pub command_buffer: MTLCommandBufferPtr,
     pub formats: AttachmentFormats,
     pub sample_count: usize,
 }
