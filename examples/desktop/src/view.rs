@@ -14,7 +14,8 @@
 // or at its refresh interval where the platform reports no refreshes
 // (pacing.rs). In benchmark mode (benchmark.rs) they come as fast as the
 // surface takes them, each at the next point of the benchmark's camera path,
-// without the controls, and input doesn't move the map.
+// without the controls, and input doesn't move the map. While the surface
+// takes none, as for a hidden window, they come at the refresh interval.
 //
 // Mouse, touch, wheel, trackpad and the arrow, `+` and `-` keys go to a
 // `GestureRecognizer` (mln_gestures), which moves the map's camera and
@@ -250,6 +251,7 @@ pub(crate) fn run(launch: Launch) {
         next_token: 0,
         redraw: false,
         dirty: true,
+        target_not_ready: false,
         style_loaded: false,
         idle: false,
         gestures: GestureRecognizer::default(),
@@ -380,6 +382,9 @@ struct View {
     redraw: bool,
     /// The view has something new to draw besides the map's updates.
     dirty: bool,
+    /// The last frame found no surface texture to draw into, so the next
+    /// waits for the frame pacing, even in benchmark mode.
+    target_not_ready: bool,
     /// The map loaded the current style.
     style_loaded: bool,
     /// The map has become idle since the view opened.
@@ -480,7 +485,7 @@ impl View {
                 self.inbox.wait(self.next_deadline());
                 continue;
             }
-            if self.benchmark.is_none()
+            if (self.benchmark.is_none() || self.target_not_ready)
                 && let Ready::Wait(until) = self.pacing.ready(now)
             {
                 self.inbox.wait(Some(until));
@@ -518,6 +523,7 @@ impl View {
             match result.disposition {
                 FrameDisposition::Rendered => {
                     rendered = true;
+                    self.target_not_ready = false;
                     if let Some(benchmark) = &mut self.benchmark
                         && benchmark.rendered(result.token, now, result.mode == RenderMode::Full, result.needs_repaint)
                     {
@@ -526,7 +532,10 @@ impl View {
                 }
                 // No texture right now (e.g. a timeout while the compositor
                 // is busy, or a hidden window): try again on the next frame.
-                FrameDisposition::TargetNotReady => self.dirty = true,
+                FrameDisposition::TargetNotReady => {
+                    self.dirty = true;
+                    self.target_not_ready = true;
+                }
                 FrameDisposition::Failed => {
                     let failure = window.session().snapshot().ok().and_then(|snapshot| snapshot.failure);
                     let failure = failure.map_or_else(|| "unknown".to_owned(), |e| e.message);
