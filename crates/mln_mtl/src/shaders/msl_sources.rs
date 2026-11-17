@@ -7207,7 +7207,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     const float gammaScaled = gamma * in.gamma_scale;
     const half4 color = tileProps.is_halo ? halo_color : fill_color;
     const float fillInnerEdge = (256.0 - 64.0) / 256.0;
-    const float haloInnerEdge = fillInnerEdge + haloGamma * tileProps.gamma_scale;
+    const float haloInnerEdge = fillInnerEdge + haloGamma * in.gamma_scale;
     const float innerEdge = tileProps.is_halo ? haloInnerEdge : fillInnerEdge;
     const float dist = image.sample(image_sampler, atlas_pos(in.tex_origin, in.tex)).a;
 
@@ -7572,7 +7572,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     const float gammaScaled = gamma * in.gamma_scale;
     const half4 color = tileProps.is_halo ? halo_color : fill_color;
     const float fillInnerEdge = (256.0 - 64.0) / 256.0;
-    const float haloInnerEdge = fillInnerEdge + haloGamma * tileProps.gamma_scale;
+    const float haloInnerEdge = fillInnerEdge + haloGamma * in.gamma_scale;
     const float innerEdge = tileProps.is_halo ? haloInnerEdge : fillInnerEdge;
     const float dist = glyph_image.sample(glyph_sampler, pos).a;
 
