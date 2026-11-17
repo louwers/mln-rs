@@ -6,6 +6,7 @@
 //! stages' internals can change without changing what the benchmarks call.
 
 use std::collections::BTreeSet;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, TransformState};
@@ -32,7 +33,7 @@ use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layers::render_symbol_layer::RenderSymbolLayer;
 use crate::layout::tile_layout::{Dependencies, LayoutParams, Resolved};
 use crate::paint_parameters::TransformParameters;
-use crate::render_layer::{PlacedTile, RenderLayer};
+use crate::render_layer::RenderLayer;
 use crate::render_tile::RenderTile;
 use crate::text::cross_tile_symbol_index::CrossTileSymbolIndex;
 use crate::text::glyph_store::HBShapeResults;
@@ -158,11 +159,8 @@ impl TileLayout {
     /// tile, to `states`, as a tile does when a map's feature state
     /// changes: each bucket whose paint depends on feature state evaluates
     /// that paint again for the features that have a state.
-    /// Returns whether a bucket's vertex data changed.
-    pub fn set_feature_state(&self, laid_out: &LaidOut, states: &LayerFeatureStates) -> bool {
-        let mut changed = crate::draw_cache::ChangedBuckets::default();
-        laid_out.result.set_feature_state(states, &self.resolved.patterns, &mut changed);
-        !changed.is_empty()
+    pub fn set_feature_state(&self, laid_out: &LaidOut, states: &LayerFeatureStates) {
+        laid_out.result.set_feature_state(states, &self.resolved.patterns);
     }
 
     fn job(&self, data: TileData) -> JobResult {
@@ -225,14 +223,16 @@ impl SymbolView {
         state.set_size(Size::new(width, height));
         state.set_lat_lng_zoom(&center, zoom);
         let transform = TransformParameters::new(&state);
-        let render_tiles: Vec<RenderTile> = tiles
-            .iter()
-            .map(|laid_out| {
-                let mut render_tile = RenderTile::of_tile_id(laid_out.id.to_unwrapped(), laid_out.id, false);
-                render_tile.set_projection(&transform);
-                render_tile
-            })
-            .collect();
+        let render_tiles: Rc<Vec<RenderTile>> = Rc::new(
+            tiles
+                .iter()
+                .map(|laid_out| {
+                    let mut render_tile = RenderTile::of_tile_id(laid_out.id.to_unwrapped(), laid_out.id, false);
+                    render_tile.set_projection(&transform);
+                    render_tile
+                })
+                .collect(),
+        );
 
         let parameters = PropertyEvaluationParameters::new(zoom as f32);
         let mut layers = Vec::new();
@@ -251,12 +251,7 @@ impl SymbolView {
                 let Some(render_data) = laid_out.result.layer_render_data.get(layer.get_id()) else { continue };
                 let Some(bucket) = crate::bucket::recover(&render_data.bucket) else { continue };
                 let feature_index = || Some(Arc::clone(&laid_out.result.feature_index));
-                render_layer.add_placement_data(
-                    PlacedTile::new(&render_tiles[tile_index]),
-                    bucket,
-                    feature_index,
-                    translates,
-                );
+                render_layer.add_placement_data(&render_tiles, tile_index, bucket, feature_index, translates);
             }
             if render_layer.has_placement_data() {
                 layers.push(render_layer);
@@ -552,13 +547,15 @@ mod tests {
         let (style, data) = (style(), data());
         let layout = TileLayout::new(&style, "s", |type_| type_ == "line", (0, 0, 0), &data, |_| None).unwrap();
         let laid_out = layout.run(data).unwrap();
+        let set = |states: &LayerFeatureStates| laid_out.result.set_feature_state(states, &layout.resolved.patterns);
 
         let mut states = LayerFeatureStates::default();
-        assert!(!layout.set_feature_state(&laid_out, &states), "no state, no change");
+        assert!(set(&states).is_empty(), "no state, no change");
         let mut on = mln_style::expression::expression::FeatureState::new();
         on.insert("on".to_owned(), Value::Bool(true));
         states.entry("l".to_owned()).or_default().insert("1".to_owned(), on);
-        assert!(layout.set_feature_state(&laid_out, &states));
+        let roads = laid_out.result.layer_render_data["roads"].bucket.get_id();
+        assert_eq!(set(&states), [roads]);
     }
 
     #[test]

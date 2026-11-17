@@ -635,16 +635,21 @@ impl RenderSymbolLayer {
         (text_translate, icon_translate)
     }
 
-    /// Adds `bucket`, of `tile`, to what the layer places: when the layer
-    /// leads the bucket, to its placement data, with the tile's feature
-    /// index, in order of sort key; otherwise to its follower data.
+    /// Adds `bucket`, of the tile at `tile_index` of `tiles`, to what the
+    /// layer places: when the layer leads the bucket, to its placement data,
+    /// with the tile's feature index, in order of sort key; otherwise to its
+    /// follower data.
     pub(crate) fn add_placement_data(
         &mut self,
-        tile: PlacedTile,
+        tiles: &[RenderTile],
+        tile_index: usize,
         bucket: Arc<SymbolBucket>,
         feature_index: impl FnOnce() -> Option<Arc<FeatureIndex>>,
         (text_translate, icon_translate): (SymbolTranslate, SymbolTranslate),
     ) {
+        let Some(tile) = tiles.get(tile_index).map(PlacedTile::new) else {
+            return;
+        };
         if bucket.bucket_leader_id != self.get_id() {
             self.follower_data.push(BucketPlacementData {
                 bucket,
@@ -1174,14 +1179,15 @@ impl RenderLayer for RenderSymbolLayer {
         let Some(render_tiles) = tiles else {
             return set_layer_tiles(params, order);
         };
-        for render_tile in render_tiles.iter() {
+        for (tile_index, render_tile) in render_tiles.indexed() {
             let Some(bucket_ptr) = render_tile.get_bucket(&*self.base.style) else {
                 continue;
             };
             let Some(bucket) = crate::bucket::recover::<SymbolBucket>(bucket_ptr) else {
                 continue;
             };
-            self.add_placement_data(PlacedTile::new(render_tile), bucket, || render_tile.get_feature_index(), translates);
+            let feature_index = || render_tile.get_feature_index();
+            self.add_placement_data(render_tiles.source_tiles(), tile_index, bucket, feature_index, translates);
         }
         set_layer_tiles(params, order)
     }

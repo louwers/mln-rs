@@ -120,6 +120,18 @@ impl<'a> LayerTiles<'a> {
         self.order.iter().filter_map(|&i| self.tiles.get(i))
     }
 
+    /// The tiles in order, each with its index in the source's tiles
+    /// ([`source_tiles`](Self::source_tiles)).
+    pub(crate) fn indexed(self) -> impl Iterator<Item = (usize, &'a RenderTile)> + 'a {
+        self.order.iter().filter_map(|&i| Some((i, self.tiles.get(i)?)))
+    }
+
+    /// All the source's tiles, which the order indexes.
+    #[must_use]
+    pub(crate) fn source_tiles(self) -> &'a [RenderTile] {
+        self.tiles
+    }
+
     #[must_use]
     pub(crate) fn is_empty(self) -> bool {
         self.order.is_empty()

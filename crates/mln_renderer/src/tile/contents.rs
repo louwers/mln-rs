@@ -17,6 +17,7 @@ use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
 use mln_util::feature::Feature;
 use mln_util::hash::HashMap;
+use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
 use mln_util::mat4::Mat4;
 use mln_util::pool::TaskGroup;
@@ -65,20 +66,20 @@ impl LayoutResult {
     }
 
     /// Brings the buckets' feature state to `states`, for the features of
-    /// the data they were built from, and adds the buckets whose vertex data
-    /// that changed to `changed`; `pattern_positions` are where the layout's
-    /// patterns are in its atlas.
+    /// the data they were built from; `pattern_positions` are where the
+    /// layout's patterns are in its atlas. Returns the ids of the buckets
+    /// whose vertex data changed.
     pub(crate) fn set_feature_state(
         &self,
         states: &LayerFeatureStates,
         pattern_positions: &ImagePositions,
-        changed: &mut ChangedBuckets,
-    ) {
+    ) -> Vec<SimpleIdentity> {
+        let mut changed = Vec::new();
         let Some(layers) = self.feature_index.get_data() else {
-            return;
+            return changed;
         };
         if states.is_empty() {
-            return;
+            return changed;
         }
         for (layer_id, render_data) in &self.layer_render_data {
             let source_layer_id = &render_data.layer.style().base().source_layer;
@@ -93,10 +94,11 @@ impl LayoutResult {
                 if render_data.bucket.has_data()
                     && render_data.bucket.update(feature_states, &source_layer, layer_id, pattern_positions)
                 {
-                    changed.mark(render_data.bucket.get_id(), BucketChanges { paint: true, ..BucketChanges::default() });
+                    changed.push(render_data.bucket.get_id());
                 }
             }
         }
+        changed
     }
 }
 
@@ -256,7 +258,9 @@ impl GeometryContents {
     /// that changed to `changed`.
     pub(crate) fn set_feature_state(&self, states: &LayerFeatureStates, changed: &mut ChangedBuckets) {
         let no_patterns = ImagePositions::default();
-        self.result.set_feature_state(states, self.pattern_positions().unwrap_or(&no_patterns), changed);
+        for id in self.result.set_feature_state(states, self.pattern_positions().unwrap_or(&no_patterns)) {
+            changed.mark(id, BucketChanges { paint: true, ..BucketChanges::default() });
+        }
     }
 
     /// The largest query radius of `layers`' buckets.
