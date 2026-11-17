@@ -50,10 +50,14 @@ impl<R: Refreshes> Pacing<R> {
         Pacing { refreshes, interval, next_frame_at: now, requested: None }
     }
 
-    /// Whether the frame that is due at `now` can start: the display
-    /// refreshed since the frame asked it to, or it waited
-    /// [`REFRESH_TIMEOUT`] for the refresh. Without refreshes, whether an
-    /// interval passed since the last frame.
+    /// Whether the frame that is due at `now` can start: at a refresh whose
+    /// frame the display hasn't shown yet, or once it waited
+    /// [`REFRESH_TIMEOUT`] for one. Without refreshes, whether an interval
+    /// passed since the last frame.
+    ///
+    /// A frame that starts asks for the next refresh at once, so that a frame
+    /// that runs past that refresh starts right after, for the refresh after
+    /// it, rather than skipping one.
     pub(crate) fn ready(&mut self, now: Instant) -> Ready {
         let Some(refreshes) = &self.refreshes else {
             if now < self.next_frame_at {
@@ -62,20 +66,25 @@ impl<R: Refreshes> Pacing<R> {
             self.next_frame_at = now + self.interval;
             return Ready::Now(None);
         };
+        if let Some(refresh) = refreshes.take() {
+            // A refresh whose frame the display has shown is stale, as one
+            // that a frame which started without it asked for. Without that
+            // time, a refresh counts if the frame waits for it.
+            let fresh = refresh.shown_at.map_or(self.requested.is_some(), |shown_at| shown_at > now);
+            if fresh {
+                self.requested = None;
+                refreshes.request();
+                return Ready::Now(refresh.shown_at);
+            }
+        }
         let requested = *self.requested.get_or_insert_with(|| {
-            // A refresh that came before the frame asked, for an earlier
-            // frame that started without it, is stale.
-            refreshes.take();
             refreshes.request();
             now
         });
         let late = requested + REFRESH_TIMEOUT;
-        if let Some(refresh) = refreshes.take() {
-            self.requested = None;
-            return Ready::Now(refresh.shown_at);
-        }
         if now >= late {
             self.requested = None;
+            refreshes.request();
             return Ready::Now(None);
         }
         Ready::Wait(late)
@@ -124,12 +133,33 @@ mod tests {
         assert_eq!(display.requests.get(), 1);
         display.refresh(Some(start + 16 * MS));
         assert_eq!(pacing.ready(start + 8 * MS), Ready::Now(Some(start + 16 * MS)));
+        // And asks for the next one at once.
+        assert_eq!(display.requests.get(), 2);
+    }
+
+    // A frame that runs past the next refresh starts right after, for the
+    // refresh after that one, rather than waiting a refresh more.
+    #[test]
+    fn a_frame_that_runs_past_the_next_refresh_starts_right_after() {
+        let display = FakeRefreshes::default();
+        let start = Instant::now();
+        let mut pacing = Pacing::new(Some(&display), 8 * MS, start);
+        assert_eq!(pacing.ready(start), Ready::Wait(start + REFRESH_TIMEOUT));
+        display.refresh(Some(start + 16 * MS));
+        assert_eq!(pacing.ready(start + 8 * MS), Ready::Now(Some(start + 16 * MS)));
+        // The frame took until the refresh at 16 ms passed.
+        display.refresh(Some(start + 24 * MS));
+        assert_eq!(pacing.ready(start + 18 * MS), Ready::Now(Some(start + 24 * MS)));
     }
 
     #[test]
-    fn a_refresh_from_before_the_frame_asked_is_stale() {
+    fn a_refresh_whose_frame_was_shown_is_stale() {
         let display = FakeRefreshes::default();
-        let start = Instant::now();
+        let start = Instant::now() + 50 * MS;
+        let mut pacing = Pacing::new(Some(&display), 16 * MS, start);
+        display.refresh(Some(start.checked_sub(MS).unwrap()));
+        assert_eq!(pacing.ready(start), Ready::Wait(start + REFRESH_TIMEOUT));
+        // Without its display time, one that came before the frame asked is.
         let mut pacing = Pacing::new(Some(&display), 16 * MS, start);
         display.refresh(None);
         assert_eq!(pacing.ready(start), Ready::Wait(start + REFRESH_TIMEOUT));
@@ -144,10 +174,9 @@ mod tests {
         let mut pacing = Pacing::new(Some(&display), 16 * MS, start);
         assert_eq!(pacing.ready(start), Ready::Wait(start + REFRESH_TIMEOUT));
         assert_eq!(pacing.ready(start + REFRESH_TIMEOUT), Ready::Now(None));
-        display.refresh(None);
+        display.refresh(Some(start + REFRESH_TIMEOUT + 8 * MS));
         let later = start + 10 * REFRESH_TIMEOUT;
         assert_eq!(pacing.ready(later), Ready::Wait(later + REFRESH_TIMEOUT));
-        assert_eq!(display.requests.get(), 2);
     }
 
     #[test]

@@ -107,6 +107,10 @@ pub(crate) struct Cadence {
     /// The intervals over one and a half times the median: a refresh that
     /// showed the frame before again.
     pub(crate) late: usize,
+    /// The frames that sampled over one and a half times the median interval
+    /// after the frame before them in a run: a refresh that no frame
+    /// started at.
+    pub(crate) skipped: usize,
     pub(crate) longest: f64,
     /// The median time from sending a frame to the display showing it.
     pub(crate) latency: f64,
@@ -135,12 +139,17 @@ impl Cadence {
         latencies.sort_by(f64::total_cmp);
         syncs.sort_by(f64::total_cmp);
         let interval = intervals[intervals.len() / 2];
+        let skipped = frames
+            .windows(2)
+            .filter(|pair| pair[1].sent - pair[0].sent < RUN_GAP && pair[1].sampled - pair[0].sampled > 1.5 * interval)
+            .count();
         let percentile = |sorted: &[f64], at: usize| sorted[(sorted.len() - 1) * at / 100];
         Some(Cadence {
             frames: frames.len(),
             dropped,
             interval,
             late: intervals.iter().filter(|&&each| each > 1.5 * interval).count(),
+            skipped,
             longest: intervals[intervals.len() - 1],
             latency: percentile(&latencies, 50),
             sync: percentile(&syncs, 50),
@@ -153,12 +162,13 @@ impl std::fmt::Display for Cadence {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{} frames shown every {:.2} ms, {} late (longest {:.2} ms), {} dropped, {:.2} ms from sent to shown, \
-             {:.2} ms from sampled to shown varying by {:.2} ms",
+            "{} frames shown every {:.2} ms, {} late (longest {:.2} ms), {} skipped, {} dropped, {:.2} ms from sent to \
+             shown, {:.2} ms from sampled to shown varying by {:.2} ms",
             self.frames - self.dropped,
             self.interval * 1000.0,
             self.late,
             self.longest * 1000.0,
+            self.skipped,
             self.dropped,
             self.latency * 1000.0,
             self.sync * 1000.0,
@@ -201,6 +211,20 @@ mod tests {
         let cadence = Cadence::of(&frames).unwrap();
         assert_eq!(cadence.late, 0);
         assert!((cadence.sync_spread - 0.002).abs() < 1e-9, "{cadence:?}");
+    }
+
+    #[test]
+    fn a_refresh_that_no_frame_started_at_counts_as_skipped() {
+        let mut frames: Vec<_> = (0..10).map(|i| frame(f64::from(i) * REFRESH, Some(f64::from(i) * REFRESH))).collect();
+        // No frame started at the fifth refresh: the next sampled a refresh
+        // later, and the display showed the fourth again.
+        for frame in &mut frames[4..] {
+            frame.sampled += REFRESH;
+            frame.sent += REFRESH;
+            frame.shown = frame.shown.map(|shown| shown + REFRESH);
+        }
+        let cadence = Cadence::of(&frames).unwrap();
+        assert_eq!((cadence.skipped, cadence.late), (1, 1));
     }
 
     #[test]
