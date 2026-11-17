@@ -993,6 +993,12 @@ layout (location = 5) in highp vec4 a_color;
 #endif
 
 void main() {
+    // The vertex that ends a ring has no wall.
+    if (mod(a_decimals_ed.x, 2.0) > 0.0) {
+        gl_Position = vec4(0.0);
+        return;
+    }
+
     #ifndef HAS_UNIFORM_u_base
 highp float base = unpack_mix_vec2(a_base, u_base_t);
 #else
@@ -1009,11 +1015,6 @@ highp vec4 color = unpack_mix_color(a_color, u_color_t);
 highp vec4 color = u_color;
 #endif
 
-    // The vertex that ends a ring has no wall.
-    if (mod(a_decimals_ed.x, 2.0) > 0.0) {
-        gl_Position = vec4(0.0);
-        return;
-    }
     vec2 p1 = a_outline_pos + unpack_float(floor(a_decimals_ed.x / 2.0)) / 128.0;
     vec2 p2 = a_next_outline_pos + unpack_float(floor(a_next_decimals_ed.x / 2.0)) / 128.0;
     vec2 edge = normalize(p2 - p1);
@@ -1160,6 +1161,12 @@ flat out highp vec4 pattern_to;
 #endif
 
 void main() {
+    // The vertex that ends a ring has no wall.
+    if (mod(a_decimals_ed.x, 2.0) > 0.0) {
+        gl_Position = vec4(0.0);
+        return;
+    }
+
     #ifndef HAS_UNIFORM_u_base
 base = unpack_mix_vec2(a_base, u_base_t);
 #else
@@ -1191,11 +1198,6 @@ highp vec4 pattern_to = u_pattern_to;
     float fromScale = u_from_scale;
     float toScale = u_to_scale;
 
-    // The vertex that ends a ring has no wall.
-    if (mod(a_decimals_ed.x, 2.0) > 0.0) {
-        gl_Position = vec4(0.0);
-        return;
-    }
     vec2 p1 = a_outline_pos + unpack_float(floor(a_decimals_ed.x / 2.0)) / 128.0;
     vec2 p2 = a_next_outline_pos + unpack_float(floor(a_next_decimals_ed.x / 2.0)) / 128.0;
     vec2 edge = normalize(p2 - p1);
