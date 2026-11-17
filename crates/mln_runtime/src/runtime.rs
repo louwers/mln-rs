@@ -8,7 +8,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::thread::ThreadId;
 
-use mln_actor::{AsyncTask, RunLoop};
 use mln_renderer::Registry;
 use mln_renderer::text::font_face_engine::FontFaceEngine;
 use mln_storage::http_header_transform::{HttpHeaderTransform, HttpHeaders};
@@ -21,6 +20,7 @@ use mln_storage_offline::RegionDatabase;
 use mln_text::GlyphCache;
 use mln_util::error::Error;
 use mln_util::pool::Pool;
+use mln_util::queue::Queue;
 use mln_util::thread::Joined;
 use parking_lot::Mutex;
 
@@ -28,7 +28,6 @@ use crate::completion::{Completion, Resolver};
 use crate::event::{EventHandler, RuntimeEvent};
 use crate::map::{Applied, Map, MapEntry, MapId, MapOptions, MapShared, Published};
 use crate::offline::Offline;
-use crate::queue::Queue;
 use crate::resources::{CacheDatabaseOperation, ProviderFileSource, ResourceHooks, ResourceProvider};
 
 /// Where a runtime keeps its assets and its cache, and the network status
@@ -122,7 +121,7 @@ impl RuntimeShared {
     /// Runs `task` with `value` on the runtime's thread, after everything
     /// sent before it, or `instead` with `value` on this thread when the
     /// runtime has shut down, so that what must happen either way isn't lost
-    /// with the runtime's loop.
+    /// with the runtime's queue.
     pub(crate) fn post_or<V: Send + 'static>(
         &self,
         value: V,
@@ -253,22 +252,6 @@ pub(crate) fn post(queue: &CoreQueue, task: impl FnOnce(&mut RuntimeCore, &mut O
     queue.post(move |core| run(core, task, false));
 }
 
-/// An `AsyncTask` on the runtime's loop, `run_loop`, that posts `task` to
-/// `queue`, which runs it once the loop has run the tasks queued on it.
-/// Sends before it runs make one run. It must be made on the runtime's
-/// thread.
-pub(crate) fn async_task(
-    run_loop: &RunLoop,
-    queue: &CoreQueue,
-    task: impl Fn(&mut RuntimeCore, &mut Outbox) + Send + Sync + 'static,
-) -> AsyncTask {
-    let (queue, task) = (queue.clone(), Arc::new(task));
-    AsyncTask::new(run_loop, move || {
-        let task = Arc::clone(&task);
-        queue.post(move |core| run(core, |core, outbox| task(core, outbox), false));
-    })
-}
-
 /// Runs `task` on the runtime's state, then delivers what it sends to the
 /// host. A task that comes after the runtime shut down drops, which cancels
 /// its completions. A task that [`RuntimeShared::post`] sent runs in its
@@ -338,8 +321,6 @@ pub(crate) struct RuntimeCore {
     /// The runtime's thread's work.
     pub(crate) queue: CoreQueue,
     pub(crate) registry: Arc<Registry>,
-    /// The runtime's thread's loop, which its maps run their own work on.
-    pub(crate) run_loop: RunLoop,
     /// [`RuntimeShared::pool`].
     pub(crate) pool: Pool,
     /// [`RuntimeShared::queued`].
@@ -360,7 +341,6 @@ impl RuntimeCore {
         queue: CoreQueue,
         queued: Arc<AtomicUsize>,
         registry: Arc<Registry>,
-        run_loop: &RunLoop,
         pool: Pool,
     ) -> Self {
         RuntimeCore {
@@ -376,7 +356,6 @@ impl RuntimeCore {
             network: OnceCell::new(),
             queue,
             registry,
-            run_loop: run_loop.clone(),
             pool,
             queued,
             burst_left: 0,
@@ -586,17 +565,12 @@ impl Runtime {
         pool: Pool,
     ) -> Result<(ThreadId, Option<Joined>), Error> {
         let thread = mln_util::thread::spawn("Runtime", move || {
-            let run_loop = RunLoop::new();
-            let mut core = Some(RuntimeCore::new(
-                resource_options,
-                network_status,
-                queue.clone(),
-                queued,
-                registry,
-                &run_loop,
-                pool,
-            ));
-            queue.run_until_stopped(&run_loop, &mut core);
+            let mut core =
+                Some(RuntimeCore::new(resource_options, network_status, queue.clone(), queued, registry, pool));
+            queue.run(&mut core);
+            // What comes after the shutdown drops at once, so tasks that hold
+            // the queue can't keep it alive.
+            queue.close();
             drop(core);
         })
         .map_err(|error| Error::native(format!("can't start the runtime's thread: {error}")))?;
@@ -617,11 +591,9 @@ impl Runtime {
         registry: Arc<Registry>,
         pool: Pool,
     ) -> Result<(ThreadId, Option<Joined>), Error> {
-        crate::web::install();
-        let run_loop = RunLoop::new();
-        let core = RuntimeCore::new(resource_options, network_status, queue.clone(), queued, registry, &run_loop, pool);
+        let core = RuntimeCore::new(resource_options, network_status, queue.clone(), queued, registry, pool);
         let pool = core.pool.clone();
-        crate::web::drive(&run_loop, &pool, queue, Some(core));
+        crate::web::drive(&pool, queue, Some(core));
         Ok((std::thread::current().id(), None))
     }
 

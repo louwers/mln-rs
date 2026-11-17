@@ -660,7 +660,7 @@ pub(crate) fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperatio
                 duration = Duration::from_millis(u64::from(get_u64(arg(1)) as u32));
             }
             result.push(Box::new(move |ctx: &mut TestContext<'_>| {
-                // C++ runs the run loop until a util::Timer fires.
+                // C++ runs its loop until a timer fires.
                 let result = ctx.get_map().sleep(duration);
                 infallible(ctx, result)
             }));

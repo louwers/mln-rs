@@ -3,10 +3,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
-use mln_actor::RunLoop;
 use parking_lot::Mutex;
 
-use super::{Dispatcher, LocalRequests, cpp_path, req};
+use super::{LocalRequests, TestLoop, cpp_path, req};
 use crate::asset_file_source::AssetFileSource;
 use crate::file_source::{FileSource, FileSourceExt};
 use crate::request::Request;
@@ -19,8 +18,8 @@ fn asset_file_source() -> AssetFileSource {
 
 /// Requests `resource`, runs the loop until the response and returns it.
 fn request(fs: &AssetFileSource, resource: &Resource) -> Response {
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let req = req();
     let result = Rc::new(RefCell::new(None));
     let (r, out, stop) = (Rc::clone(&req), Rc::clone(&result), run_loop.clone());
@@ -78,7 +77,7 @@ impl WorkerChain {
 // gtest: AssetFileSource.Load
 #[test]
 fn load() {
-    let run_loop = RunLoop::new();
+    let run_loop = TestLoop::new();
 
     let fs = Arc::new(asset_file_source());
 

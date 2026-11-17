@@ -5,11 +5,10 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use mln_actor::{ActorRef, Mailbox, RunLoop, Timer};
 use mln_test_server::HttpServer;
 use mln_util::chrono::{Timestamp, now};
 
-use super::{Dispatcher, LocalRequests, local_callback, req, temp_path};
+use super::{LocalRequests, TestLoop, req, temp_path};
 use crate::database_file_source::{Cache, DatabaseFileSource};
 use crate::loader::Loader;
 use crate::network_status::{NetworkStatus, Status};
@@ -79,8 +78,8 @@ fn cache_only(url: &str) -> Resource {
 fn cache_response() {
     let file_sources = TestSources::new();
     let server = HttpServer::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let queue = local.clone();
     let fs = main_resource_loader(&file_sources);
 
@@ -134,8 +133,8 @@ fn cache_response() {
 fn volatile_storage_policy() {
     let file_sources = TestSources::new();
     let server = HttpServer::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let queue = local.clone();
     let fs = main_resource_loader(&file_sources);
 
@@ -175,8 +174,8 @@ fn volatile_storage_policy() {
 fn cache_revalidate(path: &str, check: fn(&Response)) {
     let file_sources = TestSources::new();
     let server = HttpServer::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let queue = local.clone();
     let fs = main_resource_loader(&file_sources);
 
@@ -274,8 +273,8 @@ fn cache_revalidate_modified() {
 fn cache_revalidate_etag() {
     let file_sources = TestSources::new();
     let server = HttpServer::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let queue = local.clone();
     let fs = main_resource_loader(&file_sources);
 
@@ -343,8 +342,8 @@ fn cache_revalidate_etag() {
 fn http_issue_1369() {
     let file_sources = TestSources::new();
     let server = HttpServer::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let fs = main_resource_loader(&file_sources);
 
     let resource = Resource::new(Kind::Unknown, server.url("/test"));
@@ -376,8 +375,8 @@ fn http_issue_1369() {
 /// expired or not.
 fn optional_cached(expires: Timestamp) {
     let file_sources = TestSources::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let queue = local.clone();
     let fs = main_resource_loader(&file_sources);
 
@@ -394,8 +393,7 @@ fn optional_cached(expires: Timestamp) {
     dbfs.put_then(
         &optional_resource,
         &response,
-        &run_loop.handle(),
-        local_callback(move || {
+        run_loop.dispatcher().callback(move || {
             let rc = Rc::clone(&r);
             *r.borrow_mut() = Some(fs2.request_local(
                 &queue,
@@ -434,8 +432,8 @@ fn optional_expired() {
 #[test]
 fn optional_not_found() {
     let file_sources = TestSources::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let fs = main_resource_loader(&file_sources);
 
     let optional_resource = cache_only("http://127.0.0.1:3000/test");
@@ -466,8 +464,8 @@ fn optional_not_found() {
 /// not retrieving anything from the cache, then request network-only.
 fn no_cache(resource: &Resource, check: impl Fn(&Response) + 'static) {
     let file_sources = TestSources::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let queue = local.clone();
     let fs = main_resource_loader(&file_sources);
 
@@ -480,8 +478,7 @@ fn no_cache(resource: &Resource, check: impl Fn(&Response) + 'static) {
     dbfs.put_then(
         resource,
         &response,
-        &run_loop.handle(),
-        local_callback(move || {
+        run_loop.dispatcher().callback(move || {
             let rc = Rc::clone(&r);
             *r.borrow_mut() = Some(fs2.request_local(
                 &queue,
@@ -604,14 +601,13 @@ fn no_cache_refresh_modified_modified() {
     });
 }
 
-/// The actor the test's resource transform forwards to.
-struct TransformActor {
+/// What the test's resource transform runs on the test's thread.
+struct UrlTransform {
     test_url: String,
 }
 
-impl TransformActor {
-    /// The actor's callback: translates "<localhost://test>" to the test
-    /// server's /test.
+impl UrlTransform {
+    /// Translates "<localhost://test>" to the test server's /test.
     fn call(&self, url: &str, cb: FinishedCallback) {
         if url == "localhost://test" {
             cb(Ok(self.test_url.clone()));
@@ -626,18 +622,20 @@ impl TransformActor {
 fn set_resource_transform() {
     let file_sources = TestSources::new();
     let server = HttpServer::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let resource_loader = main_resource_loader(&file_sources);
     let onlinefs = online_file_source(&file_sources);
 
     // Translates the URL "localhost://test to http://127.0.0.1:3000/test
-    let transform = Mailbox::with_target(&run_loop.handle(), Rc::new(TransformActor { test_url: server.url("/test") }));
-
-    let actor_ref = ActorRef::<TransformActor>::new(&transform);
+    // on the test's thread.
+    let transform = Arc::new(UrlTransform { test_url: server.url("/test") });
+    let queue = run_loop.handle().downgrade();
     onlinefs.set_resource_transform(Some(Arc::new(move |_kind: Kind, url: &str, cb: FinishedCallback| {
-        let url = url.to_owned();
-        actor_ref.invoke(move |transform: &TransformActor| transform.call(&url, cb));
+        let (url, transform) = (url.to_owned(), Arc::clone(&transform));
+        if let Some(queue) = queue.upgrade() {
+            queue.post(move |_| transform.call(&url, cb));
+        }
     })));
     let resource1 = Resource::new(Kind::Unknown, "localhost://test");
 
@@ -678,14 +676,13 @@ fn set_resource_transform() {
     ));
 
     run_loop.run();
-    transform.close();
 }
 
 // gtest: MainResourceLoader.SetResourceCachePath
 #[test]
 fn set_resource_cache_path() {
     let file_sources = TestSources::new();
-    let run_loop = RunLoop::new();
+    let run_loop = TestLoop::new();
     let _resource_loader = main_resource_loader(&file_sources);
     let dbfs = database_file_source(&file_sources);
     let stop = run_loop.handle();
@@ -702,8 +699,8 @@ fn set_resource_cache_path() {
 fn respond_to_stale_must_revalidate() {
     let file_sources = TestSources::new();
     let server = HttpServer::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let queue = local.clone();
     let fs = main_resource_loader(&file_sources);
 
@@ -725,8 +722,7 @@ fn respond_to_stale_must_revalidate() {
     dbfs.put_then(
         &forwarded,
         &response,
-        &run_loop.handle(),
-        local_callback(move || {
+        run_loop.dispatcher().callback(move || {
             let rc = Rc::clone(&r);
             let request = resource2.borrow().clone();
             *r.borrow_mut() = Some(fs2.request_local(
@@ -804,8 +800,8 @@ fn respond_to_stale_must_revalidate() {
 fn cached_resource_low_priority() {
     let file_sources = TestSources::new();
     let server = HttpServer::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let fs = main_resource_loader(&file_sources);
 
     let mut response = Response::new();
@@ -938,8 +934,8 @@ fn cached_resource_low_priority() {
 fn no_double_dispatch() {
     let file_sources = TestSources::new();
     let server = HttpServer::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let queue = local.clone();
     let fs = main_resource_loader(&file_sources);
 
@@ -952,15 +948,13 @@ fn no_double_dispatch() {
     let response_count = Rc::new(Cell::new(0u32));
     // A second dispatch would answer within moments of the first, so the
     // check waits that long after the first answer, however long it took.
-    let timer = Rc::new(Timer::new(&run_loop));
     let dbfs = database_file_source(&file_sources);
     let (r, fs2, resource2, count) = (Rc::clone(&req), Rc::clone(&fs), resource.clone(), Rc::clone(&response_count));
-    let (stop, check) = (run_loop.clone(), Rc::clone(&timer));
+    let (stop, handle) = (run_loop.clone(), run_loop.handle());
     dbfs.put_then(
         &resource,
         &response,
-        &run_loop.handle(),
-        local_callback(move || {
+        run_loop.dispatcher().callback(move || {
             *r.borrow_mut() = Some(fs2.request_local(
                 &queue,
                 &resource2,
@@ -974,10 +968,11 @@ fn no_double_dispatch() {
                         count.set(count.get() + 1);
                         if count.get() == 1 {
                             let (stop, count) = (stop.clone(), Rc::clone(&count));
-                            check.start(Duration::from_millis(100), Duration::ZERO, move || {
+                            let check = stop.dispatcher().callback(move || {
                                 assert_eq!(1, count.get());
                                 stop.stop();
                             });
+                            handle.post_after(Duration::from_millis(100), move |_| check());
                         }
                     }
                 }),
@@ -993,8 +988,8 @@ fn no_double_dispatch() {
 // with no loading method that no file source accepts).
 #[test]
 fn unsupported_resource_request() {
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let fs = Loader::new(&ResourceOptions::default(), &super::pool());
     let resource = Resource::with_tile_data(Kind::Unknown, "http://example.com/x.json", None, LoadingMethod::None);
     let result: Rc<RefCell<Option<Response>>> = Rc::new(RefCell::new(None));

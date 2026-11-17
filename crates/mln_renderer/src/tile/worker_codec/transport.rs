@@ -19,12 +19,13 @@
 
 use std::cell::{Cell, OnceCell, RefCell};
 use std::rc::{Rc, Weak};
-use std::sync::Arc;
+use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
-use mln_actor::{LocalObject, RunLoopHandle, Thread};
+use mln_actor::LocalObject;
 use mln_util::hash::HashSet;
 use mln_util::logging::{Event, Log};
+use mln_util::thread::Joined;
 use mln_util::time::Instant;
 
 use super::TileWorkerHost;
@@ -54,12 +55,16 @@ pub trait WorkerInstances {
     }
 }
 
+/// Runs a task on the thread of the renderer that uses a `RemoteWorkers`,
+/// after the tasks posted before it. Called from any thread.
+pub type Post = Arc<dyn Fn(Box<dyn FnOnce() + Send>) + Send + Sync>;
+
 /// Delivers worker instances' replies to their `RemoteWorkers`, from any
-/// thread: each is handled by a task on the transport's thread, in the
+/// thread: each is handled by a task on the renderer's thread, in the
 /// order they were sent.
 #[derive(Clone)]
 pub struct ReplySink {
-    scheduler: RunLoopHandle,
+    post: Post,
     workers: Arc<LocalObject<Weak<RemoteWorkers>>>,
 }
 
@@ -76,11 +81,11 @@ impl ReplySink {
 
     fn deliver(&self, f: impl FnOnce(&RemoteWorkers) + Send + 'static) {
         let workers = Arc::clone(&self.workers);
-        self.scheduler.invoke(move || {
+        (self.post)(Box::new(move || {
             if let Some(workers) = workers.get().and_then(|weak| weak.upgrade()) {
                 f(&workers);
             }
-        });
+        }));
     }
 }
 
@@ -122,18 +127,18 @@ impl RemoteLane {
 
 impl RemoteWorkers {
     /// Workers in the instances `instances` creates, with the sink for their
-    /// replies. The replies are handled in tasks of `scheduler`, the
-    /// renderer's loop, which runs on this thread, the one that uses the
-    /// workers. The jobs name `registry`'s registrations, so each instance's
-    /// host needs a registry filled by the same calls.
+    /// replies. The replies are handled in the tasks that `post` runs on
+    /// this thread, the renderer's, which uses the workers. The jobs name
+    /// `registry`'s registrations, so each instance's host needs a registry
+    /// filled by the same calls.
     pub fn new(
-        scheduler: &RunLoopHandle,
+        post: Post,
         registry: Arc<Registry>,
         instances: impl FnOnce(ReplySink) -> Box<dyn WorkerInstances>,
     ) -> Rc<Self> {
         Rc::new_cyclic(|self_weak: &Weak<RemoteWorkers>| {
             let workers = Arc::new(LocalObject::new(Weak::clone(self_weak)));
-            let instances = instances(ReplySink { scheduler: scheduler.clone(), workers });
+            let instances = instances(ReplySink { post, workers });
             let count = instances.count();
             assert!(count > 0, "RemoteWorkers need a worker instance");
             RemoteWorkers {
@@ -277,9 +282,19 @@ impl TileWorkers for RemoteJobs {
 /// Worker instances on threads of this process: a `TileWorkerHost` on each
 /// thread.
 pub struct ThreadWorkerInstances {
-    threads: Vec<Thread<TileWorkerHost>>,
+    /// Each instance's thread, or `None` for one that couldn't start, whose
+    /// lane is lost.
+    threads: Vec<Option<WorkerThread>>,
     registry: Arc<Registry>,
     replies: ReplySink,
+}
+
+/// A thread that builds a `TileWorkerHost` and hands it the requests sent
+/// to it, in order. Dropping it lets the thread end once it handled the
+/// requests sent before, and waits for it.
+struct WorkerThread {
+    requests: mpsc::Sender<Vec<u8>>,
+    _thread: Joined,
 }
 
 impl ThreadWorkerInstances {
@@ -287,15 +302,34 @@ impl ThreadWorkerInstances {
     /// against `registry` and send their replies to `replies`.
     #[must_use]
     pub fn new(count: usize, registry: Arc<Registry>, replies: &ReplySink) -> Self {
-        let threads = (0..count).map(|instance| Self::start(instance, &registry, replies)).collect();
+        let threads = (0..count)
+            .map(|instance| {
+                let thread = Self::start(instance, &registry, replies);
+                if thread.is_none() {
+                    replies.lost(instance);
+                }
+                thread
+            })
+            .collect();
         ThreadWorkerInstances { threads, registry, replies: replies.clone() }
     }
 
-    fn start(instance: usize, registry: &Arc<Registry>, replies: &ReplySink) -> Thread<TileWorkerHost> {
+    fn start(instance: usize, registry: &Arc<Registry>, replies: &ReplySink) -> Option<WorkerThread> {
         let (registry, replies) = (Arc::clone(registry), replies.clone());
-        Thread::new(&format!("TileWorker {instance}"), move |_, _| {
-            TileWorkerHost::new(registry, move |reply| replies.send(instance, reply))
-        })
+        let (requests, received) = mpsc::channel::<Vec<u8>>();
+        let thread = mln_util::thread::spawn(format!("TileWorker {instance}"), move || {
+            let host = TileWorkerHost::new(registry, move |reply| replies.send(instance, reply));
+            for request in received {
+                host.handle(&request);
+            }
+        });
+        match thread {
+            Ok(thread) => Some(WorkerThread { requests, _thread: Joined::new(thread) }),
+            Err(error) => {
+                Log::error(Event::General, format!("Tile worker {instance}'s thread didn't start: {error}"));
+                None
+            }
+        }
     }
 }
 
@@ -305,11 +339,13 @@ impl WorkerInstances for ThreadWorkerInstances {
     }
 
     fn post(&mut self, instance: usize, request: Vec<u8>) {
-        self.threads[instance].actor().invoke(move |host: &TileWorkerHost| host.handle(&request));
+        if let Some(thread) = &self.threads[instance] {
+            let _ = thread.requests.send(request);
+        }
     }
 
     fn replace(&mut self, instance: usize) -> bool {
         self.threads[instance] = Self::start(instance, &self.registry, &self.replies);
-        true
+        self.threads[instance].is_some()
     }
 }

@@ -1,11 +1,10 @@
 //! The instance's work, run on the browser's event loop of its thread.
 //!
 //! An instance has one thread, which the browser's event loop runs, so
-//! nothing of the instance may block it. The instance's `RunLoop`s, its
-//! pools and its cooperative scheduler call [`waker`] when they get work,
-//! which posts one message to a `MessageChannel` of the pump's own. Its task
-//! runs a slice: each [`Step`], then the loops of the cooperative scheduler
-//! and the pools' tasks until the slice's time is spent, then each step
+//! nothing of the instance may block it. The instance's queues and pools
+//! call [`waker`] when they get work, which posts one message to a
+//! `MessageChannel` of the pump's own. Its task runs a slice: each [`Step`],
+//! then the pools' tasks until the slice's time is spent, then each step
 //! again for what those tasks delivered. Work that
 //! remains, or that arrives meanwhile, posts the next slice. A message
 //! rather than `setTimeout`, whose delay grows once timeouts nest, so that
@@ -17,7 +16,6 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::time::Duration;
 
-use mln_actor::scheduler;
 use mln_util::pool::Pool;
 use mln_util::time::Instant;
 use wasm_bindgen::prelude::*;
@@ -43,8 +41,8 @@ struct Pump {
     scheduled: Cell<bool>,
     running: Cell<bool>,
     stopped: Cell<bool>,
-    /// The time the slices spent on the scheduler's and the pools' tasks
-    /// since [`take_scheduler_time`] last took it.
+    /// The time the slices spent on the pools' tasks since
+    /// [`take_scheduler_time`] last took it.
     scheduler_time: Cell<Duration>,
     steps: RefCell<Vec<Rc<Entry>>>,
     pools: RefCell<Vec<Rc<Pool>>>,
@@ -111,21 +109,15 @@ impl Pump {
         }
     }
 
-    /// Runs the cooperative scheduler's loops, then the pools' tasks until
-    /// `deadline`, then the loops again for what the tasks sent them.
-    /// Returns whether work remains.
+    /// Runs the pools' tasks until `deadline`. Returns whether work remains.
     fn run_tasks(&self, deadline: Instant) -> bool {
-        let cooperative = scheduler::cooperative();
-        if let Some(scheduler) = cooperative {
-            scheduler.run_loops();
-        }
         // Not borrowed while the tasks run, which may add or drop pools.
         let pools: Vec<Rc<Pool>> = self.pools.try_borrow().map(|pools| pools.clone()).unwrap_or_default();
         let mut more = false;
         for pool in pools {
             more |= pool.run_until(Some(deadline));
         }
-        cooperative.is_some_and(|scheduler| scheduler.run_loops()) || more
+        more
     }
 
     fn run_steps(&self) {
@@ -217,16 +209,14 @@ pub fn wake() {
     PUMP.with(|pump| pump.wake());
 }
 
-/// [`wake`], for `RunLoop::set_waker`, `Pool::set_waker` and
-/// `CooperativeScheduler::set_waker`.
+/// [`wake`], for `Queue::set_waker` and `Pool::set_waker`.
 /// The instance has one thread, so it runs on the pump's.
 #[must_use]
 pub fn waker() -> Arc<dyn Fn() + Send + Sync> {
     Arc::new(wake)
 }
 
-/// The time the slices spent on the scheduler's and the pools' tasks since
-/// the last call, for a host that reports the instance's work between its
+/// The time the slices spent on the pools' tasks since the last call, for a host that reports the instance's work between its
 /// frames.
 #[must_use]
 pub fn take_scheduler_time() -> Duration {

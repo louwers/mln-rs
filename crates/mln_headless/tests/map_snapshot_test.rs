@@ -1,20 +1,19 @@
 //! What rendering changes in `Map::snapshot`.
 
-use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
 use mln_map::{Map, MapMode, MapOptions};
 use mln_util::pool::Pool;
+use mln_util::queue::Queue;
 use mln_util::size::Size;
 
 #[test]
 fn a_rendered_still_shows_in_the_snapshot() {
-    let run_loop = RunLoop::new();
+    let run_loop = Queue::new();
     let pool = Pool::new(4).unwrap();
     let size = Size::new(64, 64);
     let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop, &pool).expect("a headless frontend");
-    let mut map =
-        Map::new(MapOptions { map_mode: MapMode::Static, size, ..Default::default() }, &run_loop, &pool).unwrap();
-    frontend.attach(&map);
+    let mut map = Map::new(MapOptions { map_mode: MapMode::Static, size, ..Default::default() }, &pool).unwrap();
+    frontend.attach(&mut map);
     map.load_style_json(
         r#"{"version":8,"sources":{},"layers":[{"id":"background","type":"background","paint":{"background-color":"red"}}]}"#,
     );

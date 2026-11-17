@@ -18,7 +18,6 @@ doctest = false
 # Only the browser target has anything to build.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys.workspace = true
-mln_actor.workspace = true
 mln_renderer.workspace = true
 mln_text.workspace = true
 mln_util.workspace = true

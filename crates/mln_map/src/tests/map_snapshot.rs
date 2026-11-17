@@ -5,11 +5,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use mln_actor::RunLoop;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style_types::{ProjectionDefinition, ProjectionType};
 use mln_util::error::ErrorKind;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
+use mln_util::queue::Queue;
 use mln_util::size::Size;
 
 use crate::map_snapshot::{CameraBounds, FreeCamera, TileSettings};
@@ -19,11 +19,10 @@ use crate::{
     NorthOrientation, ProjectionMode, TileLodMode, UpdateReader, Viewport, ViewportMode,
 };
 
-fn map(options: MapOptions, run_loop: &RunLoop) -> Map {
+fn map(options: MapOptions, run_loop: &Queue<()>) -> Map {
     Map::with_file_source(
-        StubFileSource::on_loop(run_loop, ResponseType::Asynchronous),
+        StubFileSource::on_queue(run_loop, ResponseType::Asynchronous),
         options,
-        run_loop,
         &crate::tests::pool(),
     )
     .expect("map")
@@ -43,7 +42,7 @@ fn assert_near(actual: f64, expected: f64) {
 
 #[test]
 fn snapshot_reports_every_member() {
-    let run_loop = RunLoop::new();
+    let run_loop = Queue::<()>::new();
     let mut map = map(
         MapOptions {
             size: Size::new(512, 256),
@@ -169,7 +168,7 @@ fn snapshot_reports_every_member() {
 
 #[test]
 fn generation_grows_with_each_change() {
-    let run_loop = RunLoop::new();
+    let run_loop = Queue::<()>::new();
     let mut map = map(MapOptions { size: Size::new(256, 256), ..Default::default() }, &run_loop);
 
     let mut last = map.generation();
@@ -215,7 +214,7 @@ fn generation_grows_with_each_change() {
 /// style's report.
 #[test]
 fn a_source_that_reloads_its_description_changes_the_generation() {
-    let run_loop = RunLoop::new();
+    let run_loop = Queue::<()>::new();
     let mut map = map(MapOptions { size: Size::new(256, 256), ..Default::default() }, &run_loop);
     map.load_style_json(
         r#"{"version":8,"sources":{"points":{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}},"layers":[]}"#,
@@ -243,7 +242,7 @@ fn count_wakes(map: &Map) -> (UpdateReader, Arc<AtomicU64>) {
 
 #[test]
 fn update_generation_counts_the_updates_published() {
-    let run_loop = RunLoop::new();
+    let run_loop = Queue::<()>::new();
     let mut map = map(MapOptions { size: Size::new(256, 256), ..Default::default() }, &run_loop);
     let before = map.update_generation();
     let (_reader, wakes) = count_wakes(&map);
@@ -261,7 +260,7 @@ fn update_generation_counts_the_updates_published() {
 
 #[test]
 fn a_static_map_changes_without_publishing_updates() {
-    let run_loop = RunLoop::new();
+    let run_loop = Queue::<()>::new();
     let mut map =
         map(MapOptions { size: Size::new(256, 256), map_mode: MapMode::Static, ..Default::default() }, &run_loop);
     let (_reader, wakes) = count_wakes(&map);
@@ -278,7 +277,7 @@ fn a_static_map_changes_without_publishing_updates() {
 
 #[test]
 fn projection_from_a_view_matches_the_map() {
-    let run_loop = RunLoop::new();
+    let run_loop = Queue::<()>::new();
     let mut map = map(MapOptions { size: Size::new(400, 300), pixel_ratio: 1.5, ..Default::default() }, &run_loop);
     // Bounds past the antimeridian keep the center's copy of the world, which
     // the view keeps too.
@@ -322,7 +321,7 @@ fn projection_from_a_view_matches_the_map() {
 
 #[test]
 fn projection_from_a_view_rejects_views_no_map_shows() {
-    let run_loop = RunLoop::new();
+    let run_loop = Queue::<()>::new();
     let map = map(MapOptions { size: Size::new(256, 256), ..Default::default() }, &run_loop);
     let view = map.snapshot().view;
     assert!(MapProjection::from_view(&view).is_ok());
@@ -348,7 +347,7 @@ fn projection_from_a_view_rejects_views_no_map_shows() {
 
 #[test]
 fn projection_from_a_globe_view_matches_the_map() {
-    let run_loop = RunLoop::new();
+    let run_loop = Queue::<()>::new();
     let mut map = map(MapOptions { size: Size::new(400, 300), ..Default::default() }, &run_loop);
     map.load_style_json(r#"{"version":8,"sources":{},"layers":[],"projection":{"type":"globe"}}"#);
     map.process_events();

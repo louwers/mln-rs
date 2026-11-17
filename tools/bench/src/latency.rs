@@ -5,16 +5,16 @@
 //! counts the tile requests that reach the files. Without a delay it passes
 //! everything on at once.
 
-use std::cell::RefCell;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 
-use mln_actor::timer::Timer;
-use mln_actor::{ActorRef, RunLoop, Thread};
 use mln_storage::{FileSource, Kind, Request, Resource, Responder, Response};
 use mln_util::chrono::Timestamp;
 use mln_util::hash::HashMap;
+use mln_util::queue::{Queue, WeakQueue};
+use mln_util::thread::Joined;
+use mln_util::time::Instant;
 use parking_lot::Mutex;
 
 /// How long a tile stays fresh: a tile server's `Cache-Control: max-age`.
@@ -37,12 +37,17 @@ pub(crate) fn take_tile_requests() -> usize {
 
 /// `inner`, with the tile latency.
 pub(crate) fn delayed(inner: Arc<dyn FileSource>) -> Arc<dyn FileSource> {
-    let timers = Thread::new("TileLatency", |self_ref, run_loop| Timers {
-        self_ref,
-        run_loop: run_loop.clone(),
-        waiting: RefCell::default(),
-    });
-    Arc::new(Delayed { inner, timers })
+    let timers = Queue::new();
+    let thread = {
+        let queue = timers.clone();
+        mln_util::thread::spawn("TileLatency", move || {
+            let mut waits = Waits { waiting: HashMap::default(), queue: queue.downgrade() };
+            queue.run(&mut waits);
+            queue.close();
+        })
+        .expect("the tile latency's thread")
+    };
+    Arc::new(Delayed { inner, timers, _thread: Joined::new(thread) })
 }
 
 /// Names a tile's wait.
@@ -50,34 +55,38 @@ static NEXT_WAIT: AtomicU64 = AtomicU64::new(0);
 
 struct Delayed {
     inner: Arc<dyn FileSource>,
-    /// The thread whose timers the tiles wait out their latency on.
-    timers: Thread<Timers>,
+    /// The thread where the tiles wait out their latency.
+    timers: Queue<Waits>,
+    _thread: Joined,
 }
 
-/// The timers of the tiles that wait, on their thread.
-struct Timers {
-    self_ref: ActorRef<Timers>,
-    run_loop: RunLoop,
-    waiting: RefCell<HashMap<u64, Timer>>,
+impl Drop for Delayed {
+    fn drop(&mut self) {
+        self.timers.stop();
+    }
 }
 
-impl Timers {
-    /// Runs `then` after `delay`, unless `stop(id)` comes first.
-    fn start(&self, id: u64, delay: Duration, then: impl FnOnce() + 'static) {
-        let timer = Timer::new(&self.run_loop);
-        let (mut then, actor) = (Some(then), self.self_ref.clone());
-        timer.start(delay, Duration::ZERO, move || {
-            if let Some(then) = then.take() {
-                then();
-            }
-            actor.invoke(move |timers: &Timers| timers.stop(id));
-        });
-        self.waiting.borrow_mut().insert(id, timer);
+/// What a wait runs when it ends, by wait, on the timers' thread.
+struct Waits {
+    waiting: HashMap<u64, Box<dyn FnOnce() + Send>>,
+    queue: WeakQueue<Waits>,
+}
+
+impl Waits {
+    /// Runs `then` at `deadline`, unless `stop(id)` comes first.
+    fn start(&mut self, id: u64, deadline: Instant, then: Box<dyn FnOnce() + Send>) {
+        self.waiting.insert(id, then);
+        if let Some(queue) = self.queue.upgrade() {
+            queue.post_at(deadline, move |waits| {
+                if let Some(then) = waits.waiting.remove(&id) {
+                    then();
+                }
+            });
+        }
     }
 
-    fn stop(&self, id: u64) {
-        let timer = self.waiting.borrow_mut().remove(&id);
-        drop(timer);
+    fn stop(&mut self, id: u64) {
+        self.waiting.remove(&id);
     }
 }
 
@@ -116,11 +125,16 @@ impl FileSource for Delayed {
             *slot.lock() = Some(fresh);
             inner.load(&resource, inner_responder);
         };
-        let (id, delay, timers) =
-            (NEXT_WAIT.fetch_add(1, Ordering::Relaxed), Duration::from_millis(latency), self.timers.actor());
-        timers.invoke(move |timers: &Timers| timers.start(id, delay, fire));
+        let (id, deadline, timers) = (
+            NEXT_WAIT.fetch_add(1, Ordering::Relaxed),
+            Instant::now() + Duration::from_millis(latency),
+            self.timers.downgrade(),
+        );
+        self.timers.post(move |waits| waits.start(id, deadline, Box::new(fire)));
         responder.on_cancel(move || {
-            timers.invoke(move |timers: &Timers| timers.stop(id));
+            if let Some(timers) = timers.upgrade() {
+                timers.post(move |waits| waits.stop(id));
+            }
             drop(request.lock().take());
         });
     }

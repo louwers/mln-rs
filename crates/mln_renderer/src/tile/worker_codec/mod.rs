@@ -49,7 +49,7 @@ mod worker_side;
 pub use envelope::Encoded;
 pub use host::TileWorkerHost;
 pub(crate) use transport::RemoteJobs;
-pub use transport::{RemoteWorkers, ReplySink, ThreadWorkerInstances, WorkerInstances};
+pub use transport::{Post, RemoteWorkers, ReplySink, ThreadWorkerInstances, WorkerInstances};
 
 thread_local! {
     /// The registry of the enclosing `session` on this thread.

@@ -4,7 +4,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use mln_actor::RunLoop;
 use mln_map::transform::Transform;
 use mln_map_types::{CameraOptions, ConstrainMode, MapDebugOptions, MapMode, TileLodMode, ViewportMode};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
@@ -18,6 +17,7 @@ use mln_tile_id::OverscaledTileID;
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::pool::TaskGroup;
+use mln_util::queue::Queue;
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::tileset::PartialTileset;
@@ -56,13 +56,13 @@ fn layer(json: &serde_json::Value) -> Arc<dyn ErasedEvaluatedLayer> {
 /// `layers`, and returns what the render source reports.
 fn load(tile: Vec<u8>, layers: &[Arc<dyn ErasedEvaluatedLayer>]) -> Outcome {
     let tileset = PartialTileset { tiles: Some(vec!["tiles".to_owned()]), ..Default::default() };
-    let run_loop = RunLoop::new();
+    let run_loop = Queue::new();
     let thread_pool = TaskGroup::new(&crate::tests::pool());
     let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);
     transform.resize(Size::new(512, 512)).unwrap();
     transform.jump_to(&CameraOptions { center: Some(LatLng::default()), zoom: Some(0.0), ..Default::default() });
 
-    let file_source = StubFileSource::on_loop(&run_loop, ResponseType::Asynchronous);
+    let file_source = StubFileSource::on_queue(&run_loop, ResponseType::Asynchronous);
     let tile = Arc::new(tile);
     file_source.set_response(Kind::Tile, move |_resource| {
         let mut response = Response::new();
@@ -73,7 +73,7 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn ErasedEvaluatedLayer>]) -> Outcome {
     let style_source = crate::tests::ready(vector_source("source", None, tileset));
     // A loaded sprite with the icon "v" answers the symbol layer's request,
     // and missing icons stay missing.
-    let mut store = crate::tests::pool_store(&run_loop, &thread_pool);
+    let mut store = crate::tests::pool_store(&thread_pool);
     let mut icon = PremultipliedImage::new(Size::new(1, 1));
     icon.data.fill(255);
     store.images_mut().add_image(Arc::new(
@@ -112,7 +112,7 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn ErasedEvaluatedLayer>]) -> Outcome {
     // fails.
     let deadline = mln_util::time::Instant::now() + Duration::from_secs(30);
     let outcome = loop {
-        run_loop.run_once();
+        run_loop.run_once(&mut ());
         crate::tests::update(&mut store);
         let outcome = store.take_events().into_iter().find_map(|event| match event {
             StoreEvent::Changed => Some(Outcome::Loaded),

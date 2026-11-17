@@ -529,7 +529,7 @@ fn mock_factory() -> ImplFactory {
         |_metadata: &TestMetadata,
          _options: &ResourceOptions,
          _impl_options: &ImplOptions,
-         _: &mln_actor::RunLoop,
+         _: &mln_util::queue::Queue<()>,
          _: &mln_util::pool::Pool| {
             Ok(Box::new(MockMap::new(Rc::new(RefCell::new(Vec::new())), [0, 0, 0, 0])))
         },

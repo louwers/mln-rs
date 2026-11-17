@@ -19,14 +19,14 @@ mod online_file_source;
 mod pmtiles_file_source;
 
 use std::cell::{Cell, RefCell};
-use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 use std::sync::{Arc, mpsc};
+use std::time::Duration;
 
-use mln_actor::{AsyncTask, AsyncTaskSender, RunLoop};
 use mln_util::hash::HashMap;
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
+use mln_util::queue::{Queue, WeakQueue};
 use parking_lot::Mutex;
 
 use crate::Request;
@@ -43,54 +43,109 @@ pub(crate) fn req() -> Req {
 
 type Handler = Rc<RefCell<Box<dyn FnMut(Response)>>>;
 
-/// Runs requests' responses on the test's thread, in the turns of its loop,
-/// for handlers that aren't `Send`. Responses run in the order they arrive,
-/// and none runs after its request drops. Clones share the dispatcher.
+/// The test thread's loop: a queue whose tasks run with the loop's
+/// [`Dispatcher`], so that responses reach handlers that aren't `Send` on
+/// the test's thread. Clones share the loop.
+#[derive(Clone)]
+pub(crate) struct TestLoop {
+    queue: Queue<Dispatcher>,
+    dispatcher: Dispatcher,
+}
+
+impl TestLoop {
+    pub(crate) fn new() -> Self {
+        let queue = Queue::new();
+        let dispatcher = Dispatcher {
+            inner: Rc::new(DispatcherInner {
+                queue: queue.downgrade(),
+                handlers: RefCell::default(),
+                callbacks: RefCell::default(),
+                next_token: Cell::new(0),
+            }),
+        };
+        TestLoop { queue, dispatcher }
+    }
+
+    /// The dispatcher whose responses run in the loop's turns.
+    pub(crate) fn dispatcher(&self) -> Dispatcher {
+        self.dispatcher.clone()
+    }
+
+    /// A handle that other threads post to and stop the loop with.
+    pub(crate) fn handle(&self) -> Queue<Dispatcher> {
+        self.queue.clone()
+    }
+
+    /// Runs the loop until [`stop`](Self::stop).
+    pub(crate) fn run(&self) {
+        self.queue.run(&mut self.dispatcher.clone());
+    }
+
+    /// Runs what waits now, and returns whether anything ran.
+    pub(crate) fn run_once(&self) -> bool {
+        self.queue.run_once(&mut self.dispatcher.clone())
+    }
+
+    pub(crate) fn stop(&self) {
+        self.queue.stop();
+    }
+
+    /// Fails the test with `message` if it still runs after `delay`: a test
+    /// that waits for something that never comes fails instead of hanging.
+    pub(crate) fn fail_after(&self, delay: Duration, message: &'static str) {
+        self.queue.post_after(delay, move |_| panic!("{message}"));
+    }
+}
+
+/// Runs requests' responses on the test's thread, in the turns of its
+/// [`TestLoop`], for handlers that aren't `Send`. Responses run in the order
+/// they arrive, and none runs after its request drops. Clones share the
+/// dispatcher.
 #[derive(Clone)]
 pub(crate) struct Dispatcher {
     inner: Rc<DispatcherInner>,
 }
 
 struct DispatcherInner {
-    /// The responses that arrived, with their requests' tokens.
-    inbox: Arc<Mutex<VecDeque<(u64, Response)>>>,
-    wake: AsyncTaskSender,
-    _task: AsyncTask,
+    queue: WeakQueue<Dispatcher>,
     handlers: RefCell<HashMap<u64, Handler>>,
+    /// The callbacks that [`Dispatcher::callback`] made and that haven't run.
+    callbacks: RefCell<HashMap<u64, Box<dyn FnOnce()>>>,
     next_token: Cell<u64>,
 }
 
 impl Dispatcher {
-    /// A dispatcher whose responses run in the turns of `run_loop`.
-    pub(crate) fn new(run_loop: &RunLoop) -> Self {
-        let inner = Rc::new_cyclic(|inner: &Weak<DispatcherInner>| {
-            let inner = Weak::clone(inner);
-            let task = AsyncTask::new(run_loop, move || {
-                if let Some(inner) = inner.upgrade() {
-                    inner.drain();
-                }
-            });
-            DispatcherInner {
-                inbox: Arc::default(),
-                wake: task.sender(),
-                _task: task,
-                handlers: RefCell::default(),
-                next_token: Cell::new(0),
-            }
-        });
-        Dispatcher { inner }
+    fn next_token(&self) -> u64 {
+        let token = self.inner.next_token.get();
+        self.inner.next_token.set(token + 1);
+        token
     }
-}
 
-impl DispatcherInner {
-    fn drain(&self) {
-        loop {
-            let Some((token, response)) = self.inbox.lock().pop_front() else { return };
-            let handler = self.handlers.borrow().get(&token).cloned();
-            if let Some(handler) = handler {
-                (handler.borrow_mut())(response);
-            }
+    /// Hands `response` to the handler of request `token`, unless the
+    /// request dropped.
+    fn dispatch(&self, token: u64, response: Response) {
+        let handler = self.inner.handlers.borrow().get(&token).cloned();
+        if let Some(handler) = handler {
+            (handler.borrow_mut())(response);
         }
+    }
+
+    /// A `Send` callback that runs `f` on the test's thread, in a turn of
+    /// its loop, when it's called from any thread.
+    pub(crate) fn callback(&self, f: impl FnOnce() + 'static) -> Box<dyn FnOnce() + Send> {
+        let token = self.next_token();
+        self.inner.callbacks.borrow_mut().insert(token, Box::new(f));
+        let queue = self.inner.queue.clone();
+        Box::new(move || {
+            if let Some(queue) = queue.upgrade() {
+                queue.post(move |dispatcher| {
+                    let f = dispatcher.inner.callbacks.borrow_mut().remove(&token);
+                    if let Some(f) = f {
+                        f();
+                    }
+                });
+            }
+        })
     }
 }
 
@@ -98,13 +153,13 @@ impl DispatcherInner {
 /// it keeps alive. Dropping it cancels the request.
 pub(crate) struct LocalRequest {
     token: u64,
-    dispatcher: Rc<DispatcherInner>,
+    dispatcher: Dispatcher,
     _request: Request,
 }
 
 impl Drop for LocalRequest {
     fn drop(&mut self) {
-        let handler = self.dispatcher.handlers.borrow_mut().remove(&self.token);
+        let handler = self.dispatcher.inner.handlers.borrow_mut().remove(&self.token);
         drop(handler);
     }
 }
@@ -118,16 +173,15 @@ pub(crate) trait LocalRequests: FileSource {
         resource: &Resource,
         handler: impl FnMut(Response) + 'static,
     ) -> LocalRequest {
-        let inner = &dispatcher.inner;
-        let token = inner.next_token.get();
-        inner.next_token.set(token + 1);
-        inner.handlers.borrow_mut().insert(token, Rc::new(RefCell::new(Box::new(handler))));
-        let (inbox, wake) = (Arc::clone(&inner.inbox), inner.wake.clone());
+        let token = dispatcher.next_token();
+        dispatcher.inner.handlers.borrow_mut().insert(token, Rc::new(RefCell::new(Box::new(handler))));
+        let queue = dispatcher.inner.queue.clone();
         let request = self.request(resource, move |response| {
-            inbox.lock().push_back((token, response));
-            wake.send();
+            if let Some(queue) = queue.upgrade() {
+                queue.post(move |dispatcher| dispatcher.dispatch(token, response));
+            }
         });
-        LocalRequest { token, dispatcher: Rc::clone(inner), _request: request }
+        LocalRequest { token, dispatcher: dispatcher.clone(), _request: request }
     }
 }
 
@@ -356,32 +410,10 @@ fn mt19937_matches_the_standard() {
     assert_eq!(4_123_659_995, value);
 }
 
-thread_local! {
-    static LOCAL_CALLBACKS: RefCell<HashMap<u64, Box<dyn FnOnce()>>> =
-        RefCell::new(HashMap::default());
-}
-
 /// A pool for a test's file sources.
 pub(crate) fn pool() -> mln_util::pool::Pool {
     mln_util::pool::Pool::new(4).expect("a pool")
 }
 
-/// A `Send` handle for a closure that runs on the calling thread only. The
-/// C++ tests pass callbacks that capture references to `forward`, which runs
-/// them on the calling thread (`Scheduler::bindOnce`); the Rust signature
-/// requires `Send`, so the closure stays here and the handle finds it.
-pub(crate) fn local_callback(f: impl FnOnce() + 'static) -> Box<dyn FnOnce() + Send> {
-    static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    LOCAL_CALLBACKS.with(|callbacks| callbacks.borrow_mut().insert(id, Box::new(f)));
-    let thread = std::thread::current().id();
-    Box::new(move || {
-        assert_eq!(thread, std::thread::current().id(), "local callback called on another thread");
-        let f = LOCAL_CALLBACKS.with(|callbacks| callbacks.borrow_mut().remove(&id));
-        if let Some(f) = f {
-            f();
-        }
-    })
-}
 // Ports test/util/http_timeout.test.cpp (marker `// gtest: Group.Name`).
 mod gtest_http_timeout;

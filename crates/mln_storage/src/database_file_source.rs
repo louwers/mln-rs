@@ -244,23 +244,15 @@ impl<E: 'static> DatabaseFileSource<E> {
         });
     }
 
-    /// Stores a response to `resource`, then runs `then` on `queue`.
+    /// Stores a response to `resource`, then runs `then` on the database
+    /// thread.
     #[cfg(test)]
-    pub(crate) fn put_then(
-        &self,
-        resource: &Resource,
-        response: &Response,
-        queue: &mln_actor::RunLoopHandle,
-        then: Box<dyn FnOnce() + Send>,
-    ) {
-        let queue = queue.downgrade();
+    pub(crate) fn put_then(&self, resource: &Resource, response: &Response, then: Box<dyn FnOnce() + Send>) {
         let resource = resource.clone();
         let response = response.clone();
         self.invoke(move |t| {
             t.db.put(&resource, &response);
-            if let Some(queue) = queue.upgrade() {
-                queue.invoke(then);
-            }
+            then();
         });
     }
 

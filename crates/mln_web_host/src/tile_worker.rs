@@ -46,8 +46,6 @@ thread_local! {
 pub fn serve(port: &web_sys::MessagePort, registry: Arc<Registry>) {
     // The Web Worker's script reports a panic's message from `mlnPanic`.
     crate::set_panic_hook();
-    let scheduler = crate::install_cooperative_scheduler();
-    scheduler.set_waker(Some(pump::waker()));
     let replies = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&replies);
     // A raster tile's reply comes once the browser decoded its image,

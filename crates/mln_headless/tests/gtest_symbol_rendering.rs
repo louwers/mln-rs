@@ -9,7 +9,6 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use mln_actor::RunLoop;
 use mln_headless::{HeadlessFrontend, RenderResult};
 use mln_map::{CameraOptions, Map, MapMode, MapOptions, RenderMode};
 use mln_renderer::Registry;
@@ -89,7 +88,7 @@ fn lat_lng(latitude: f64, longitude: f64) -> LatLng {
 
 struct SymbolRenderingTest {
     _events: Observing,
-    run_loop: RunLoop,
+    run_loop: TestLoop,
     frontend: Rc<RefCell<HeadlessFrontend>>,
     observer: Rc<StubMapObserver>,
     map: Rc<RefCell<Map>>,
@@ -109,11 +108,11 @@ impl SymbolRenderingTest {
     }
 
     fn with_frontend(live: bool, count: usize, spacing: f64, kind: SymbolKind, mode: MapMode) -> Self {
-        let run_loop = RunLoop::new();
+        let run_loop = TestLoop::new();
         let pool = Pool::new(4).unwrap();
         let mut frontend =
-            HeadlessFrontend::new(Size::new(256, 256), 1.0, &run_loop, &pool).expect("a headless frontend");
-        let file_source = StubFileSource::on_loop(&run_loop, ResponseType::Asynchronous);
+            HeadlessFrontend::new(Size::new(256, 256), 1.0, run_loop.queue(), &pool).expect("a headless frontend");
+        let file_source = StubFileSource::on_queue(run_loop.queue(), ResponseType::Asynchronous);
         file_source.set_response(Kind::Glyphs, |_| Some(file_response("test/fixtures/resources/glyphs.pbf")));
         // A style URL never answers: the map keeps the style it has.
         file_source.set_response(Kind::Style, |_| None);
@@ -121,17 +120,16 @@ impl SymbolRenderingTest {
         let mut map = Map::with_file_source(
             file_source,
             MapOptions { map_mode: mode, size: Size::new(256, 256), ..Default::default() },
-            &run_loop,
             &pool,
         )
         .unwrap();
-        frontend.attach(&map);
+        frontend.attach(&mut map);
         map.load_style_json(&colliding_symbols_style(count, spacing, kind));
         map.edit_style(|style| style.apply(Edit::AddImage(marker(kind == SymbolKind::SdfIcon)))).unwrap();
         map.jump_to(&CameraOptions { center: Some(lat_lng(5.0, 5.0)), zoom: Some(4.0), ..Default::default() });
         let map = Rc::new(RefCell::new(map));
         let frontend = Rc::new(RefCell::new(frontend));
-        let events = observer.observe(&map, live.then_some(&frontend));
+        let events = observer.observe(&run_loop, &map, live.then_some(&frontend));
         SymbolRenderingTest { _events: events, run_loop, frontend, observer, map }
     }
 
@@ -195,7 +193,7 @@ fn collision_visibility_updates_existing_drawables() {
 /// Runs the loop until `done` or ten seconds pass, so that a test fails
 /// rather than hangs when hidden drawables never stop drawing or never
 /// draw again.
-fn run_until(run_loop: &RunLoop, done: impl Fn() -> bool) {
+fn run_until(run_loop: &TestLoop, done: impl Fn() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(10);
     while !done() && Instant::now() < deadline {
         if !run_loop.run_once() {

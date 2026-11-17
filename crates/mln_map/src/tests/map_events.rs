@@ -4,23 +4,22 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use mln_actor::RunLoop;
 use mln_renderer::RendererEvent;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Response};
 use mln_style::Edit;
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
+use mln_util::queue::Queue;
 use mln_util::size::Size;
 
 use crate::map_options::UnusedStyleImagePolicy;
 use crate::{CameraChange, CameraChangeMode, CameraChangeSource, CameraOptions, Map, MapEvent, MapMode, MapOptions};
 
-fn map(options: MapOptions, run_loop: &RunLoop) -> Map {
+fn map(options: MapOptions, run_loop: &Queue<()>) -> Map {
     Map::with_file_source(
-        StubFileSource::on_loop(run_loop, ResponseType::Asynchronous),
+        StubFileSource::on_queue(run_loop, ResponseType::Asynchronous),
         options,
-        run_loop,
         &crate::tests::pool(),
     )
     .expect("map")
@@ -35,7 +34,7 @@ const STYLE: &str = r#"{"version": 8, "center": [10, 20], "zoom": 3, "sources": 
 
 #[test]
 fn camera_commands_report_their_changes_in_order() {
-    let run_loop = RunLoop::new();
+    let run_loop = Queue::<()>::new();
     let mut map = map(MapOptions::default(), &run_loop);
     map.drain_events();
 
@@ -51,7 +50,7 @@ fn camera_commands_report_their_changes_in_order() {
 
 #[test]
 fn a_style_load_applies_in_the_call_that_loads_it() {
-    let run_loop = RunLoop::new();
+    let run_loop = Queue::<()>::new();
     let mut map = map(MapOptions::default(), &run_loop);
     let updates = map.update_generation();
     map.load_style_json(STYLE);
@@ -67,7 +66,7 @@ fn a_style_load_applies_in_the_call_that_loads_it() {
 
 #[test]
 fn a_camera_command_after_a_style_load_wins_over_the_style_camera() {
-    let run_loop = RunLoop::new();
+    let run_loop = Queue::<()>::new();
     let mut map = map(MapOptions::default(), &run_loop);
     map.load_style_json(STYLE);
     // The owner has the map handle the load before the command, so the
@@ -97,21 +96,21 @@ fn lowest_jump(map: &mut Map) -> f64 {
 
 #[test]
 fn each_change_to_the_style_projection_reaches_the_transform() {
-    let run_loop = RunLoop::new();
-    let file_source = StubFileSource::on_loop(&run_loop, ResponseType::Asynchronous);
+    let run_loop = Queue::<()>::new();
+    let file_source = StubFileSource::on_queue(&run_loop, ResponseType::Asynchronous);
     file_source.set_response(Kind::Style, |_| {
         let mut response = Response::new();
         response.data = Some(Arc::new(GLOBE_BELOW_3.as_bytes().to_vec()));
         Some(response)
     });
     let options = MapOptions { size: Size::new(512, 1024), ..Default::default() };
-    let mut map = Map::with_file_source(file_source, options, &run_loop, &crate::tests::pool()).expect("map");
+    let mut map = Map::with_file_source(file_source, options, &crate::tests::pool()).expect("map");
     assert!(lowest_jump(&mut map) >= 1.0);
 
     // A style load.
     map.load_style_url("http://style");
     map.process_events();
-    run_loop.run_once();
+    run_loop.run_once(&mut ());
     map.process_events();
     assert!(map.style_document_loaded());
     assert!((lowest_jump(&mut map) + 0.5).abs() < 1e-9);
@@ -132,7 +131,7 @@ fn each_change_to_the_style_projection_reaches_the_transform() {
 
 #[test]
 fn the_waker_runs_when_the_map_has_events() {
-    let run_loop = RunLoop::new();
+    let run_loop = Queue::<()>::new();
     let mut map = map(MapOptions::default(), &run_loop);
     map.drain_events();
     let wakes = Arc::new(AtomicUsize::new(0));
@@ -151,7 +150,7 @@ fn the_waker_runs_when_the_map_has_events() {
 
 #[test]
 fn the_reports_waker_runs_for_reports_only() {
-    let run_loop = RunLoop::new();
+    let run_loop = Queue::<()>::new();
     let mut map = map(MapOptions::default(), &run_loop);
     map.drain_events();
     let wakes = Arc::new(AtomicUsize::new(0));
@@ -171,7 +170,7 @@ fn the_reports_waker_runs_for_reports_only() {
 
 #[test]
 fn missing_images_reach_the_owner() {
-    let run_loop = RunLoop::new();
+    let run_loop = Queue::<()>::new();
     let mut map = map(MapOptions::default(), &run_loop);
     map.load_style_json(STYLE);
     map.edit_style(|style| style.apply(Edit::AddImage(image("present")))).unwrap();
@@ -200,7 +199,7 @@ fn image(id: &str) -> Arc<mln_style::image::Impl> {
 
 #[test]
 fn the_unused_image_policy_decides_what_stays() {
-    let run_loop = RunLoop::new();
+    let run_loop = Queue::<()>::new();
     for (policy, kept) in [(UnusedStyleImagePolicy::Remove, false), (UnusedStyleImagePolicy::Keep, true)] {
         let mut map = map(MapOptions { unused_style_image_policy: policy, ..Default::default() }, &run_loop);
         map.load_style_json(STYLE);
@@ -213,7 +212,7 @@ fn the_unused_image_policy_decides_what_stays() {
 
 #[test]
 fn an_image_that_keeps_itself_outlasts_the_remove_policy() {
-    let run_loop = RunLoop::new();
+    let run_loop = Queue::<()>::new();
     let mut map = map(MapOptions::default(), &run_loop);
     map.load_style_json(STYLE);
     let mut kept = (*image("kept")).clone();
@@ -228,7 +227,7 @@ fn an_image_that_keeps_itself_outlasts_the_remove_policy() {
 
 #[test]
 fn a_still_image_completes_with_a_full_frame() {
-    let run_loop = RunLoop::new();
+    let run_loop = Queue::<()>::new();
     let mut map = map(MapOptions { map_mode: MapMode::Static, ..Default::default() }, &run_loop);
     map.load_style_json(STYLE);
     map.process_events();

@@ -10,17 +10,19 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_actor::RunLoop;
 use mln_gfx::RendererBackend;
 use mln_gfx::rendering_stats::RenderingStats;
 use mln_map::Map;
-use mln_renderer::{Renderer, Stats, UpdateParameters, UpdateReader};
+use mln_renderer::{Renderer, RendererEvent, RendererEvents, Stats, UpdateParameters, UpdateReader};
 use mln_runtime::{BackendType, Device, DeviceOptions, GlApi, LocalTarget};
 use mln_text::GlyphCache;
 use mln_util::error::Error;
+use mln_util::event_queue::Waker;
 use mln_util::image::PremultipliedImage;
 use mln_util::pool::Pool;
+use mln_util::queue::Queue;
 use mln_util::size::Size;
+use parking_lot::Mutex;
 
 /// A still image, and the stats of the renderer that drew it.
 pub struct RenderResult {
@@ -30,10 +32,10 @@ pub struct RenderResult {
 
 /// Renders a map into an offscreen texture on the calling thread.
 ///
-/// The frontend runs on a `RunLoop` of the calling thread, which the maps it
-/// renders run on too, and runs its renderer's background work on a pool. It draws the updates of the map it is attached to
-/// ([`attach`](Self::attach), which [`render`](Self::render) does too)
-/// when its owner asks: [`render`](Self::render) draws until a still image
+/// The frontend runs the queue of the calling thread while it waits for a
+/// still image, and runs its renderer's background work on a pool. It draws
+/// the updates of the map it is attached to ([`attach`](Self::attach), which
+/// [`render`](Self::render) does too) when its owner asks: [`render`](Self::render) draws until a still image
 /// is complete, [`render_update`](Self::render_update) draws an update it
 /// hasn't drawn yet, and [`render_frame`](Self::render_frame) draws the
 /// latest one again. Once the map is gone, `render_update` drops the
@@ -45,10 +47,13 @@ pub struct HeadlessFrontend {
     /// The target's backend, which the renderer draws with.
     backend: Rc<dyn RendererBackend>,
     glyph_cache: Arc<GlyphCache>,
-    /// The loop of the frontend and the maps it renders.
-    run_loop: RunLoop,
+    /// The calling thread's queue, which [`render`](Self::render) runs.
+    queue: Queue<()>,
     /// Where the renderer's background work runs.
     pool: Pool,
+    /// The queue that the attached map's renderer reports to, where the
+    /// renderer's waker asks for an update.
+    reports_to: Arc<Mutex<Option<RendererEvents>>>,
     /// Made when first used, and dropped when the attached map goes.
     renderer: Option<Renderer>,
     /// The stats of the renderer made last, which outlive it.
@@ -89,13 +94,13 @@ impl HeadlessFrontend {
     ///
     /// Fails as [`harness_device`] does, and with the backend's error when
     /// it can't render on the device.
-    pub fn new(size: Size, pixel_ratio: f32, run_loop: &RunLoop, pool: &Pool) -> Result<Self, Error> {
-        Self::with_glyph_cache(size, pixel_ratio, Arc::default(), run_loop, pool)
+    pub fn new(size: Size, pixel_ratio: f32, queue: &Queue<()>, pool: &Pool) -> Result<Self, Error> {
+        Self::with_glyph_cache(size, pixel_ratio, Arc::default(), queue, pool)
     }
 
     /// A 256x256 frontend.
-    pub fn with_pixel_ratio(pixel_ratio: f32, run_loop: &RunLoop, pool: &Pool) -> Result<Self, Error> {
-        Self::new(Size::new(256, 256), pixel_ratio, run_loop, pool)
+    pub fn with_pixel_ratio(pixel_ratio: f32, queue: &Queue<()>, pool: &Pool) -> Result<Self, Error> {
+        Self::new(Size::new(256, 256), pixel_ratio, queue, pool)
     }
 
     /// A frontend whose renderer uses `glyph_cache`. Frontends given the same
@@ -105,10 +110,10 @@ impl HeadlessFrontend {
         size: Size,
         pixel_ratio: f32,
         glyph_cache: Arc<GlyphCache>,
-        run_loop: &RunLoop,
+        queue: &Queue<()>,
         pool: &Pool,
     ) -> Result<Self, Error> {
-        Self::with_device(harness_device()?, size, pixel_ratio, glyph_cache, run_loop, pool)
+        Self::with_device(harness_device()?, size, pixel_ratio, glyph_cache, queue, pool)
     }
 
     /// A frontend that renders on `device`, such as one that other frontends
@@ -120,7 +125,7 @@ impl HeadlessFrontend {
         size: Size,
         pixel_ratio: f32,
         glyph_cache: Arc<GlyphCache>,
-        run_loop: &RunLoop,
+        queue: &Queue<()>,
         pool: &Pool,
     ) -> Result<Self, Error> {
         let target = LocalTarget::offscreen(Some(device), physical_size(size, pixel_ratio))?;
@@ -131,8 +136,9 @@ impl HeadlessFrontend {
             target,
             backend,
             glyph_cache,
-            run_loop: run_loop.clone(),
+            queue: queue.clone(),
             pool: pool.clone(),
+            reports_to: Arc::default(),
             renderer: None,
             stats: None,
             updates: None,
@@ -166,27 +172,50 @@ impl HeadlessFrontend {
     }
 
     /// Renders `map` from now on: the frontend reads the map's updates, and
-    /// its renderer reports to the map. Attaching to the map it renders
-    /// already does nothing.
-    pub fn attach(&mut self, map: &Map) {
+    /// its renderer reports to the map. It sets the map's waker to
+    /// [`waker`](Self::waker), which [`render`](Self::render) needs: an owner
+    /// that sets a waker of its own after must have it wake the queue too.
+    /// Attaching to the map it renders already does nothing.
+    pub fn attach(&mut self, map: &mut Map) {
         let reader = map.update_reader();
         if self.updates.as_ref().is_some_and(|updates| updates.ptr_eq(&reader)) {
             return;
         }
-        self.renderer().set_event_queue(Some(map.renderer_events()));
+        let events = map.renderer_events();
+        *self.reports_to.lock() = Some(events.clone());
+        self.renderer().set_event_queue(Some(events));
+        map.set_waker(Some(self.waker()));
         self.updates = Some(reader);
         self.drawn = 0;
+    }
+
+    /// Wakes the queue that [`render`](Self::render) waits on, from any
+    /// thread.
+    #[must_use]
+    pub fn waker(&self) -> Waker {
+        let queue = self.queue.downgrade();
+        Arc::new(move || {
+            if let Some(queue) = queue.upgrade() {
+                queue.wake();
+            }
+        })
     }
 
     /// The renderer, made on first use.
     pub fn renderer(&mut self) -> &mut Renderer {
         self.renderer.get_or_insert_with(|| {
+            let reports_to = Arc::clone(&self.reports_to);
             let renderer = Renderer::with_glyph_cache(
                 Rc::clone(&self.backend),
                 self.pixel_ratio,
                 None,
                 Arc::clone(&self.glyph_cache),
-                &self.run_loop,
+                Arc::new(move || {
+                    let events = reports_to.lock().clone();
+                    if let Some(events) = events {
+                        events.push(RendererEvent::Invalidate);
+                    }
+                }),
                 &self.pool,
             );
             self.stats = Some(renderer.stats());
@@ -212,12 +241,14 @@ impl HeadlessFrontend {
     }
 
     /// `render(Map&)`: renders a still image, or fails with the map's still
-    /// image error. It runs the frontend's `RunLoop` and draws the map's
-    /// updates until the image is complete. The map handles its renderer's
-    /// events meanwhile, and keeps its own events for its owner.
+    /// image error. It runs the frontend's queue and draws the map's updates
+    /// until the image is complete, and parks on the queue while nothing
+    /// happens, until the map's waker wakes it (see [`attach`](Self::attach)).
+    /// The map handles its renderer's events meanwhile, and keeps its own
+    /// events for its owner.
     pub fn render(&mut self, map: &mut Map) -> Result<RenderResult, Error> {
         // C++ spins on runOnce, which costs a core per renderer while the
-        // workers parse tiles. Sleeping as soon as the loop is idle delays
+        // workers parse tiles. Parking as soon as the queue is idle delays
         // the short waits of a single renderer; spinning briefly keeps them.
         const SPIN: std::time::Duration = std::time::Duration::from_millis(2);
 
@@ -227,7 +258,7 @@ impl HeadlessFrontend {
         map.process_events();
         map.render_still()?;
 
-        let run_loop = self.run_loop.clone();
+        let queue = self.queue.clone();
         let mut idle_since = mln_util::time::Instant::now();
         let image = loop {
             map.process_events();
@@ -238,15 +269,15 @@ impl HeadlessFrontend {
                 break self.target.read_image()?;
             }
             // The map publishes its updates as it handles its events. The
-            // run loop's tasks run after each frame too, which frames that
-            // keep coming would otherwise starve. The loop waits only when
+            // queue's tasks run after each frame too, which frames that keep
+            // coming would otherwise starve. The frontend parks only when
             // neither had anything to do: the map handles a frame's reports
             // first.
             let drew = self.render_update();
-            if run_loop.run_once() || drew {
+            if queue.run_once(&mut ()) || drew {
                 idle_since = mln_util::time::Instant::now();
             } else if idle_since.elapsed() >= SPIN {
-                run_loop.wait_for_work();
+                queue.park();
             }
         };
 

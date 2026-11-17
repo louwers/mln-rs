@@ -3,10 +3,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use mln_actor::RunLoop;
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
 
-use super::{Dispatcher, LocalRequests, local_callback, req, temp_path};
+use super::{LocalRequests, TestLoop, req, temp_path};
 use crate::database_file_source::{Cache, DatabaseFileSource};
 use crate::file_source::FileSource;
 use crate::offline_database::{DatabaseError, OfflineDatabase};
@@ -20,8 +19,8 @@ fn dbfs() -> Arc<DatabaseFileSource> {
 // gtest: DatabaseFileSource.VolatileResource
 #[test]
 fn volatile_resource() {
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
 
     let dbfs = dbfs();
 
@@ -40,8 +39,7 @@ fn volatile_resource() {
     dbfs.put_then(
         &forwarded,
         &response,
-        &run_loop.handle(),
-        local_callback(move || {
+        run_loop.dispatcher().callback(move || {
             let (r1, fs1, res1) = (Rc::clone(&r), Arc::clone(&fs), Rc::clone(&res));
             let request = res.borrow().clone();
             let local1 = local.clone();
@@ -79,8 +77,8 @@ fn volatile_resource() {
 // gtest: DatabaseFileSource.VolatileResourceIsNotStored
 #[test]
 fn volatile_resource_is_not_stored() {
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
 
     let dbfs = dbfs();
 
@@ -163,10 +161,10 @@ impl Drop for RemoveObserver {
     }
 }
 
-fn cached_request(run_loop: &RunLoop, source: &DatabaseFileSource, resource: &Resource) -> Response {
+fn cached_request(run_loop: &TestLoop, source: &DatabaseFileSource, resource: &Resource) -> Response {
     let result: Rc<RefCell<Option<Response>>> = Rc::new(RefCell::new(None));
     let (out, stop) = (Rc::clone(&result), run_loop.clone());
-    let local = Dispatcher::new(run_loop);
+    let local = run_loop.dispatcher();
     let _req = source.request_local(
         &local,
         resource,
@@ -193,7 +191,7 @@ fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
 // gtest: DatabaseFileSource.FailedAccessedFlushWaitsForNextRead
 #[test]
 fn failed_accessed_flush_waits_for_next_read() {
-    let run_loop = RunLoop::new();
+    let run_loop = TestLoop::new();
     let path = temp_path("maintenance.db");
     let resource =
         Resource::with_tile_data(Kind::Unknown, "https://example.com/maintenance", None, LoadingMethod::CacheOnly);
@@ -243,7 +241,7 @@ fn maintain(operation: impl FnOnce(Box<dyn FnOnce(Result<(), DatabaseError>) + S
 // report its errors.
 #[test]
 fn cache_maintenance() {
-    let run_loop = RunLoop::new();
+    let run_loop = TestLoop::new();
     let path = temp_path("cache-maintenance.db");
     let source = DatabaseFileSource::new(&String::from(&path), None);
     let resource =

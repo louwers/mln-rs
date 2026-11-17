@@ -1,14 +1,6 @@
-// Thread-affine objects behind `Send` handles.
-//
-// C++ actors and reply closures reach their target through a raw pointer
-// (`ActorRef<O>` holds `O*`, `scheduleAndReplyValue` captures `this`) that
-// other threads pass around but only the owning thread dereferences, inside
-// a task its scheduler runs. Safe Rust can't send such a pointer, so the
-// owning thread keeps the object in a thread-local registry and other
-// threads carry its key. Resolving a key on any other thread finds nothing.
-//
-// Not a C++ type; it is the mechanism behind `Mailbox` (actor/mailbox.cpp)
-// and `scheduleAndReplyValue` (actor/scheduler.hpp).
+// Thread-affine objects behind `Send` handles: the owning thread keeps the
+// object in a thread-local registry and other threads carry its key.
+// Resolving a key on any other thread finds nothing.
 
 use std::any::Any;
 use std::cell::RefCell;
@@ -25,22 +17,22 @@ thread_local! {
     static OBJECTS: RefCell<HashMap<u64, Rc<dyn Any>>> = RefCell::new(HashMap::default());
 }
 
-pub(crate) fn next_id() -> u64 {
+fn next_id() -> u64 {
     NEXT_ID.fetch_add(1, Ordering::Relaxed)
 }
 
 /// Registers `object` on the current thread under `id`.
-pub(crate) fn insert(id: u64, object: Rc<dyn Any>) {
+fn insert(id: u64, object: Rc<dyn Any>) {
     let _ = OBJECTS.try_with(|objects| objects.borrow_mut().insert(id, object));
 }
 
 /// The object registered under `id` on the current thread.
-pub(crate) fn get(id: u64) -> Option<Rc<dyn Any>> {
+fn get(id: u64) -> Option<Rc<dyn Any>> {
     OBJECTS.try_with(|objects| objects.borrow().get(&id).cloned()).ok().flatten()
 }
 
 /// Unregisters `id` on the current thread and returns its object.
-pub(crate) fn remove(id: u64) -> Option<Rc<dyn Any>> {
+fn remove(id: u64) -> Option<Rc<dyn Any>> {
     OBJECTS.try_with(|objects| objects.borrow_mut().remove(&id)).ok().flatten()
 }
 
@@ -67,7 +59,7 @@ impl<T: 'static> LocalObject<T> {
 
     /// Whether the calling thread is the one that owns the value.
     #[must_use]
-    pub(crate) fn is_home_thread(&self) -> bool {
+    fn is_home_thread(&self) -> bool {
         thread::current().id() == self.thread
     }
 

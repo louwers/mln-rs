@@ -9,11 +9,11 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
 use mln_image::decode_image;
 use mln_map::{Map, MapMode, MapOptions};
 use mln_util::pool::Pool;
+use mln_util::queue::Queue;
 use mln_util::size::Size;
 
 fn render_tests_dir() -> PathBuf {
@@ -28,7 +28,7 @@ fn run(test: &str) -> (f64, f64) {
 }
 
 /// `run` with the frontend `frontend` makes for the size and pixel ratio.
-fn run_on(test: &str, frontend: impl FnOnce(Size, f32, &RunLoop, &Pool) -> HeadlessFrontend) -> (f64, f64) {
+fn run_on(test: &str, frontend: impl FnOnce(Size, f32, &Queue<()>, &Pool) -> HeadlessFrontend) -> (f64, f64) {
     let dir = render_tests_dir().join(test);
     let json = std::fs::read_to_string(dir.join("style.json")).expect("style.json");
     let document: serde_json::Value = serde_json::from_str(&json).expect("json");
@@ -40,13 +40,12 @@ fn run_on(test: &str, frontend: impl FnOnce(Size, f32, &RunLoop, &Pool) -> Headl
     let allowed = test_metadata["allowed"].as_f64().unwrap_or(0.00015);
     let size = Size::new(width, height);
 
-    let run_loop = RunLoop::new();
+    let run_loop = Queue::new();
     let pool = Pool::new(4).unwrap();
     let mut frontend = frontend(size, pixel_ratio, &run_loop, &pool);
     let mut map =
-        Map::new(MapOptions { map_mode: MapMode::Static, size, pixel_ratio, ..Default::default() }, &run_loop, &pool)
-            .unwrap();
-    frontend.attach(&map);
+        Map::new(MapOptions { map_mode: MapMode::Static, size, pixel_ratio, ..Default::default() }, &pool).unwrap();
+    frontend.attach(&mut map);
     map.load_style_json(&json);
     let camera = map.style().get_default_camera();
     map.jump_to(&camera);
@@ -131,7 +130,7 @@ fn background_visibility_visible() {
 #[test]
 fn frontends_on_one_device_render_in_turn() {
     let device = mln_headless::harness_device().expect("device");
-    let on_shared_device = |size, pixel_ratio, run_loop: &RunLoop, pool: &Pool| {
+    let on_shared_device = |size, pixel_ratio, run_loop: &Queue<()>, pool: &Pool| {
         HeadlessFrontend::with_device(device.clone(), size, pixel_ratio, Arc::default(), run_loop, pool)
             .expect("a headless frontend")
     };

@@ -22,7 +22,6 @@ test = false
 
 [dependencies]
 feature.workspace = true
-mln_actor.workspace = true
 mln_gfx.workspace = true
 # The OpenGL backend's renderer name (scene.rs).
 mln_gl.workspace = true

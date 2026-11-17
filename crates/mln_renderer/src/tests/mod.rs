@@ -48,16 +48,20 @@ mod tile_store_test;
 // The VectorTile tests of test/tile/vector_tile.test.cpp.
 mod vector_tile_test;
 
+/// Posts to `queue` what remote tile workers deliver.
+pub(crate) fn post_to(queue: &mln_util::queue::Queue<()>) -> crate::tile::worker_codec::Post {
+    let queue = queue.clone();
+    std::sync::Arc::new(move |task: Box<dyn FnOnce() + Send>| queue.post(move |()| task()))
+}
+
 /// A pool for a test's background work.
 pub(crate) fn pool() -> mln_util::pool::Pool {
     mln_util::pool::Pool::new(4).expect("a pool")
 }
 
 /// Port-only: a tile store whose jobs run on `workers` and which frees and
-/// parses glyphs on `pool`, whose glyph store hears from its engine on
-/// `run_loop`, with no images and no sprite loaded.
+/// parses glyphs on `pool`, with no images and no sprite loaded.
 pub(crate) fn tile_store(
-    run_loop: &mln_actor::RunLoop,
     pool: &mln_util::pool::TaskGroup,
     workers: Box<dyn crate::tile::tile_workers::TileWorkers>,
 ) -> crate::tile::store::TileStore {
@@ -66,8 +70,7 @@ pub(crate) fn tile_store(
         std::sync::Arc::default(),
         pool.clone(),
         crate::text::font_face_engine::default_engine(),
-        run_loop.clone(),
-        std::rc::Rc::new(|| {}),
+        std::sync::Arc::new(|| {}),
     );
     crate::tile::store::TileStore::new(
         workers,
@@ -79,11 +82,8 @@ pub(crate) fn tile_store(
 }
 
 /// Port-only: a tile store whose jobs run on `pool`.
-pub(crate) fn pool_store(
-    run_loop: &mln_actor::RunLoop,
-    pool: &mln_util::pool::TaskGroup,
-) -> crate::tile::store::TileStore {
-    tile_store(run_loop, pool, Box::new(crate::tile::tile_workers::PoolWorkers::new(pool.clone(), 8)))
+pub(crate) fn pool_store(pool: &mln_util::pool::TaskGroup) -> crate::tile::store::TileStore {
+    tile_store(pool, Box::new(crate::tile::tile_workers::PoolWorkers::new(pool.clone(), 8)))
 }
 
 /// Port-only: one update of `store`'s tiles, as the renderer's: gives the

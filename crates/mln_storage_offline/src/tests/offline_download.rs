@@ -3,11 +3,11 @@
 // test/fixtures/offline_download.
 
 use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
 
-use mln_actor::{AsyncTask, LocalObject, RunLoop};
 use mln_renderer::Registry;
 use mln_storage::offline::{
     OfflineRegion, OfflineRegionDefinition, OfflineRegionDownloadState, OfflineRegionMetadata, OfflineRegionObserver,
@@ -22,6 +22,7 @@ use mln_text::glyph::NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK;
 use mln_util::chrono::{Timestamp, now};
 use mln_util::compression::compress;
 use mln_util::geo::{LatLng, LatLngBounds};
+use mln_util::queue::Queue;
 use mln_util::tileset::Scheme;
 use parking_lot::{Mutex, MutexGuard};
 
@@ -140,8 +141,52 @@ fn fixture_response(size: &AtomicU64, path: &str) -> Response {
     result
 }
 
+/// The test thread's loop: a queue whose tasks run with the test's host,
+/// and the closures that [`schedule`](Self::schedule) defers. Clones share
+/// the loop.
+#[derive(Clone)]
+struct TestLoop {
+    queue: Queue<Local>,
+    local: Local,
+}
+
+/// A closure that [`TestLoop::schedule`] defers.
+type Later = Box<dyn FnOnce()>;
+
+/// What the loop's tasks run with, on the test's thread.
+#[derive(Clone)]
+struct Local {
+    host: Rc<RefCell<Host>>,
+    later: Rc<RefCell<VecDeque<Later>>>,
+}
+
+impl TestLoop {
+    fn run(&self) {
+        self.queue.run(&mut self.local.clone());
+    }
+
+    fn run_once(&self) -> bool {
+        self.queue.run_once(&mut self.local.clone())
+    }
+
+    fn stop(&self) {
+        self.queue.stop();
+    }
+
+    /// Runs `f` in a later turn of the loop.
+    fn schedule(&self, f: impl FnOnce() + 'static) {
+        self.local.later.borrow_mut().push_back(Box::new(f));
+        self.queue.post(|local| {
+            let f = local.later.borrow_mut().pop_front();
+            if let Some(f) = f {
+                f();
+            }
+        });
+    }
+}
+
 struct OfflineTest {
-    run_loop: RunLoop,
+    run_loop: TestLoop,
     file_source: Arc<StubFileSource>,
     host: Rc<RefCell<Host>>,
     post: Post,
@@ -154,28 +199,25 @@ impl OfflineTest {
     }
 
     fn with_path(path: &str) -> Self {
-        let run_loop = RunLoop::new();
-        let file_source = StubFileSource::on_loop(&run_loop, ResponseType::Asynchronous);
+        let queue = Queue::new();
+        let file_source = StubFileSource::on_queue(&queue, ResponseType::Asynchronous);
         // The downloads' tasks run on the test's loop, with the host.
-        let slot: Arc<std::sync::OnceLock<LocalObject<RefCell<Host>>>> = Arc::default();
-        let (tasks, handle) = (Arc::clone(&slot), run_loop.handle());
+        let handle = queue.downgrade();
         let post: Post = Arc::new(move |task| {
-            let slot = Arc::clone(&tasks);
-            handle.invoke(move || {
-                let host = slot.get().and_then(LocalObject::get);
-                if let Some(host) = host {
-                    let mut host = host.borrow_mut();
+            if let Some(queue) = handle.upgrade() {
+                queue.post(move |local: &mut Local| {
+                    let mut host = local.host.borrow_mut();
                     let Host { db, downloads } = &mut *host;
                     task(db, downloads);
-                }
-            });
+                });
+            }
         });
         let network: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&file_source);
         let host = Rc::new(RefCell::new(Host {
             db: OfflineDatabase::new(path),
             downloads: Downloads::new(Some(network), Arc::clone(&post), Arc::clone(Registry::with_builtins().style())),
         }));
-        let _ = slot.set(LocalObject::from_rc(Rc::clone(&host)));
+        let run_loop = TestLoop { queue, local: Local { host: Rc::clone(&host), later: Rc::default() } };
         OfflineTest { run_loop, file_source, host, post, size: Arc::default() }
     }
 
@@ -913,22 +955,17 @@ fn interrupt_and_resume() {
 
     let interrupted = Cell::new(false);
     let (stop, weak) = (test.run_loop.clone(), download.downgrade());
-    // `test.loop.schedule([&] { ... })`: a task on the test's RunLoop.
-    let interrupt = Rc::new(RefCell::new(None::<AsyncTask>));
-    let interrupt2 = Rc::clone(&interrupt);
+    // `test.loop.schedule([&] { ... })`: a task on the test's loop.
     let observer = MockObserver {
         status_changed_fn: Some(Box::new(move |status: OfflineRegionStatus| {
             if !interrupted.get() && status.completed_resource_count > 0 {
                 interrupted.set(true);
                 assert!(!status.complete());
-                let run_loop = stop.clone();
-                let (stop, weak) = (stop.clone(), weak.clone());
-                let task = AsyncTask::new(&run_loop, move || {
+                let (run_loop, weak) = (stop.clone(), weak.clone());
+                stop.schedule(move || {
                     weak.set_state(OfflineRegionDownloadState::Inactive);
-                    stop.stop();
+                    run_loop.stop();
                 });
-                task.send();
-                *interrupt2.borrow_mut() = Some(task);
             }
         })),
         ..Default::default()
@@ -955,7 +992,6 @@ fn interrupt_and_resume() {
     download.set_observer(Some(Rc::new(new_observer)));
     download.set_state(OfflineRegionDownloadState::Active);
     test.run_loop.run();
-    drop(interrupt);
 }
 
 // gtest: OfflineDownload.NoFreezingOnCachedTilesAndNewStyle

@@ -1,10 +1,9 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use mln_actor::RunLoop;
 use mln_util::tileset::Scheme;
 
-use super::{Dispatcher, LocalRequests, cpp_path, req, temp_path};
+use super::{LocalRequests, TestLoop, cpp_path, req, temp_path};
 use crate::file_source::FileSource;
 use crate::mbtiles_file_source::MBTilesFileSource;
 use crate::resource::{Kind, LoadingMethod, Resource};
@@ -21,8 +20,8 @@ fn mbtiles_file_source() -> MBTilesFileSource {
 
 /// Requests `resource`, runs the loop until the response and returns it.
 fn request(fs: &MBTilesFileSource, resource: &Resource) -> Response {
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let req = req();
     let result = Rc::new(RefCell::new(None));
     let (r, out, stop) = (Rc::clone(&req), Rc::clone(&result), run_loop.clone());

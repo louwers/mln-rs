@@ -33,7 +33,7 @@ const PHASE_INFO: Record<Phase, { color: string; title: string }> = {
   tasks: {
     color: "#ff9b5e",
     title:
-      "The cooperative scheduler's tasks: glyphs and sprites, and with no tile workers the tiles' parsing and layout",
+      "The pool's tasks: glyphs and sprites, and with no tile workers the tiles' parsing and layout",
   },
 };
 

@@ -22,11 +22,11 @@ use crate::tile::tile::TileKind;
 use crate::tile::tile_workers::TileWorkers;
 
 /// The fixture shared by `RasterTileTest` and `RasterDEMTileTest`
-/// (`test/tile/raster_tile.test.cpp`, `raster_dem_tile.test.cpp`): a loop,
-/// the workers' pool, which the tiles' stores free on, and a pool without
+/// (`test/tile/raster_tile.test.cpp`, `raster_dem_tile.test.cpp`): a queue,
+/// which the remote workers' replies run on, the workers' pool, which the tiles' stores free on, and a pool without
 /// threads, which the test runs itself.
 pub(crate) struct RasterTileTest {
-    pub(crate) run_loop: mln_actor::RunLoop,
+    pub(crate) run_loop: mln_util::queue::Queue<()>,
     pub(crate) thread_pool: TaskGroup,
     pub(crate) local_pool: Pool,
 }
@@ -35,7 +35,7 @@ impl RasterTileTest {
     #[must_use]
     pub(crate) fn new() -> Self {
         RasterTileTest {
-            run_loop: mln_actor::RunLoop::new(),
+            run_loop: mln_util::queue::Queue::new(),
             thread_pool: TaskGroup::new(&crate::tests::pool()),
             local_pool: Pool::local(),
         }
@@ -43,13 +43,13 @@ impl RasterTileTest {
 
     /// Tile `id` of `kind`, whose jobs run on `workers`.
     pub(crate) fn tiles(&self, kind: TileKind, id: OverscaledTileID, workers: Box<dyn TileWorkers>) -> OneTile {
-        let store = crate::tests::tile_store(&self.run_loop, &self.thread_pool, workers);
+        let store = crate::tests::tile_store(&self.thread_pool, workers);
         OneTile::new(store, kind, id, MapMode::Static)
     }
 
     /// Tile 0/0/0 of `kind`, whose jobs run on the thread pool.
     pub(crate) fn pool_tiles(&self, kind: TileKind) -> OneTile {
-        let store = crate::tests::pool_store(&self.run_loop, &self.thread_pool);
+        let store = crate::tests::pool_store(&self.thread_pool);
         OneTile::new(store, kind, OverscaledTileID::from_zxy(0, 0, 0), MapMode::Static)
     }
 
@@ -63,12 +63,12 @@ impl RasterTileTest {
         tiles
     }
 
-    /// Runs the loop and updates `tiles` until the tiles `ids` are all
+    /// Runs the queue and updates `tiles` until the tiles `ids` are all
     /// complete.
     pub(crate) fn settle(&self, tiles: &mut OneTile, ids: &[OverscaledTileID]) {
         let deadline = mln_util::time::Instant::now() + std::time::Duration::from_secs(30);
         loop {
-            self.run_loop.run_once();
+            self.run_loop.run_once(&mut ());
             tiles.update();
             if ids.iter().all(|id| tiles.tile_at(id).is_complete()) {
                 return;
@@ -89,12 +89,12 @@ impl Default for RasterTileTest {
 /// through the worker codec.
 #[must_use]
 pub(crate) fn remote_workers(
-    run_loop: &mln_actor::RunLoop,
+    queue: &mln_util::queue::Queue<()>,
     count: usize,
 ) -> std::rc::Rc<crate::tile::worker_codec::RemoteWorkers> {
     use crate::tile::worker_codec::{RemoteWorkers, ThreadWorkerInstances};
     let registry = crate::Registry::with_builtins();
-    RemoteWorkers::new(&run_loop.handle(), Arc::clone(&registry), |replies| {
+    RemoteWorkers::new(crate::tests::post_to(queue), Arc::clone(&registry), |replies| {
         Box::new(ThreadWorkerInstances::new(count, registry, &replies))
     })
 }

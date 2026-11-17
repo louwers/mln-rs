@@ -2,11 +2,10 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_actor::RunLoop;
 use mln_util::constants::{FILE_PROTOCOL, PMTILES_PROTOCOL};
 use mln_util::tileset::Scheme;
 
-use super::{Dispatcher, LocalRequests, cpp_path, req};
+use super::{LocalRequests, TestLoop, cpp_path, req};
 use crate::file_source::FileSource;
 use crate::loader::Loader;
 use crate::pmtiles_file_source::PMTilesFileSource;
@@ -29,8 +28,8 @@ fn tile(url: &str, z: i8) -> Resource {
 
 /// Requests `resource`, runs the loop until the response and returns it.
 fn request(fs: &PMTilesFileSource, resource: &Resource) -> Response {
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let req = req();
     let result = Rc::new(RefCell::new(None));
     let (r, out, stop) = (Rc::clone(&req), Rc::clone(&result), run_loop.clone());
@@ -143,8 +142,8 @@ fn corrupt_gzip_metadata() {
 // gtest: PMTilesFileSource.RepeatedTileRequest
 #[test]
 fn repeated_tile_request() {
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let queue = local.clone();
     let pmtiles = pmtiles_file_source();
 

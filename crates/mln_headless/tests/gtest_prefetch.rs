@@ -2,7 +2,6 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapMode, MapOptions, TileSettings};
 use mln_storage::Resource;
@@ -33,9 +32,9 @@ fn stoi(s: &str) -> i32 {
 // gtest: Map.PrefetchTiles
 #[test]
 fn prefetch_tiles() {
-    let run_loop = RunLoop::new();
+    let run_loop = TestLoop::new();
     let pool = Pool::new(4).unwrap();
-    let file_source = StubFileSource::on_loop(&run_loop, ResponseType::Asynchronous);
+    let file_source = StubFileSource::on_queue(run_loop.queue(), ResponseType::Asynchronous);
 
     // C++ `emergencyShutoff`: a 10 s timer that fails the test; here every
     // `runLoop.run()` below fails after 10 s (run_with_timeout).
@@ -46,18 +45,18 @@ fn prefetch_tiles() {
         observer.did_finish_loading_map_callback.set(move |()| run_loop.stop());
     }
 
-    let mut frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0, &run_loop, &pool).expect("a headless frontend");
-    let map = Map::with_file_source(
+    let mut frontend =
+        HeadlessFrontend::new(Size::new(512, 512), 1.0, run_loop.queue(), &pool).expect("a headless frontend");
+    let mut map = Map::with_file_source(
         Arc::<StubFileSource>::clone(&file_source),
         MapOptions { map_mode: MapMode::Continuous, size: frontend.size(), ..Default::default() },
-        &run_loop,
         &pool,
     )
     .unwrap();
-    frontend.attach(&map);
+    frontend.attach(&mut map);
     let map = Rc::new(RefCell::new(map));
     let frontend = Rc::new(RefCell::new(frontend));
-    let _events = observer.observe(&map, Some(&frontend));
+    let _events = observer.observe(&run_loop, &map, Some(&frontend));
 
     let tiles: Arc<Mutex<Vec<i32>>> = Arc::default();
 

@@ -2462,7 +2462,6 @@ name = "mln-rs-actor"
 version = "0.0.12"
 dependencies = [
  "mln-rs-util",
- "parking_lot",
 ]
 
 [[package]]
@@ -2470,7 +2469,6 @@ name = "mln-rs-bench"
 version = "0.0.12"
 dependencies = [
  "libc",
- "mln-rs-actor",
  "mln-rs-d3d12",
  "mln-rs-feature",
  "mln-rs-gfx",
@@ -2759,7 +2757,6 @@ dependencies = [
  "geojson",
  "glow",
  "khronos-egl",
- "mln-rs-actor",
  "mln-rs-d3d12",
  "mln-rs-feature",
  "mln-rs-gfx",
@@ -2815,7 +2812,6 @@ version = "0.0.12"
 dependencies = [
  "geo-types",
  "geojson",
- "mln-rs-actor",
  "mln-rs-feature",
  "mln-rs-geometry",
  "mln-rs-map-types",
@@ -2885,7 +2881,6 @@ version = "0.0.12"
 dependencies = [
  "fastrand",
  "geojson",
- "mln-rs-actor",
  "mln-rs-conversion",
  "mln-rs-feature",
  "mln-rs-geometry",
@@ -3043,7 +3038,6 @@ name = "mln-rs-storage-offline"
 version = "0.0.12"
 dependencies = [
  "httpmock",
- "mln-rs-actor",
  "mln-rs-feature",
  "mln-rs-headless",
  "mln-rs-map",
@@ -3283,7 +3277,6 @@ name = "mln-rs-web-host"
 version = "0.0.12"
 dependencies = [
  "js-sys",
- "mln-rs-actor",
  "mln-rs-renderer",
  "mln-rs-text",
  "mln-rs-util",

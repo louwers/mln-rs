@@ -5,7 +5,6 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
 use mln_map::{Map, MapMode, MapOptions};
 use mln_runtime::{BackendType, Device, DeviceOptions};
@@ -13,6 +12,7 @@ use mln_style::layers::{CustomLayerHost, CustomLayerPrerenderParameters, CustomL
 use mln_util::error::ErrorKind;
 use mln_util::image::PremultipliedImage;
 use mln_util::pool::Pool;
+use mln_util::queue::Queue;
 use mln_util::size::Size;
 use parking_lot::Mutex;
 
@@ -71,7 +71,7 @@ impl Calls {
 /// above every layer, on `backend`, and drops the renderer. `None` where the
 /// machine has no device of `backend`, such as no EGL.
 fn render(backend: BackendType, host: Arc<dyn CustomLayerHost>, before: Option<&str>) -> Option<PremultipliedImage> {
-    let run_loop = RunLoop::new();
+    let run_loop = Queue::new();
     let (mut frontend, mut map) = session(backend, host, before, &run_loop)?;
     Some(frontend.render(&mut map).expect("a frame").image)
 }
@@ -83,7 +83,7 @@ fn session(
     backend: BackendType,
     host: Arc<dyn CustomLayerHost>,
     before: Option<&str>,
-    run_loop: &RunLoop,
+    run_loop: &Queue<()>,
 ) -> Option<(HeadlessFrontend, Map)> {
     let size = Size::new(SIDE, SIDE);
     let pool = Pool::new(4).unwrap();
@@ -97,13 +97,10 @@ fn session(
     };
     let mut frontend =
         HeadlessFrontend::with_device(device, size, 1.0, Arc::default(), run_loop, &pool).expect("a frontend");
-    let mut map = Map::new(
-        MapOptions { map_mode: MapMode::Static, size, pixel_ratio: 1.0, ..Default::default() },
-        run_loop,
-        &pool,
-    )
-    .unwrap();
-    frontend.attach(&map);
+    let mut map =
+        Map::new(MapOptions { map_mode: MapMode::Static, size, pixel_ratio: 1.0, ..Default::default() }, &pool)
+            .unwrap();
+    frontend.attach(&mut map);
     map.load_style_json(STYLE);
     map.edit_style(|style| style.add_custom_layer("quad", host, before)).expect("the custom layer");
     Some((frontend, map))
@@ -373,13 +370,12 @@ mod gl {
 
     use glow::HasContext as _;
     use khronos_egl as egl;
-    use mln_actor::RunLoop;
     use mln_headless::HeadlessFrontend;
     use mln_map::Map;
     use mln_style::Edit;
     use mln_style::layers::{CustomLayerPrerenderParameters, CustomLayerRenderParameters};
 
-    use super::{Arc, BackendType, Calls, CustomLayerHost, Mutex, Ordering, check, session};
+    use super::{Arc, BackendType, Calls, CustomLayerHost, Mutex, Ordering, Queue, check, session};
 
     const VERTEX: &str = "#version 300 es
 const vec2 corners[6] = vec2[6](
@@ -474,7 +470,7 @@ void main() { color = vec4(0.0, 1.0, 0.0, 1.0); }
     /// `end`, which can drop the frontend, and checks that the host
     /// deinitialized with the context it drew on current.
     fn check_end(end: impl FnOnce(&mut Option<HeadlessFrontend>, &mut Map)) {
-        let run_loop = RunLoop::new();
+        let run_loop = Queue::new();
         let host = Arc::new(Host::default());
         let Some((frontend, mut map)) = session(BackendType::OpenGL, Arc::<Host>::clone(&host), None, &run_loop) else {
             return;

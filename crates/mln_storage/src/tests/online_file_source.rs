@@ -6,14 +6,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
-use mln_actor::{RunLoop, Timer};
 use mln_test_server::{HttpServer, closed_port_url};
 use mln_util::chrono::{Timestamp, now};
 use mln_util::time::Instant;
 use parking_lot::Mutex;
 
 use super::http_file_source::{LoadState, load_request};
-use super::{Dispatcher, LocalRequests, Req, req};
+use super::{LocalRequests, Req, TestLoop, req};
 use crate::file_source::FileSource;
 use crate::http_header_transform::HttpHeaderTransform;
 use crate::network_status::{NetworkStatus, Status};
@@ -41,10 +40,8 @@ fn data(res: &Response) -> &[u8] {
 /// Fails the test with `message` if it still runs in a minute. A test that
 /// waits for a retry only a network status change starts would otherwise
 /// hang when that retry never comes.
-fn fail_after_a_minute(run_loop: &RunLoop, message: &'static str) -> Timer {
-    let timer = Timer::new(run_loop);
-    timer.start(Duration::from_secs(60), Duration::ZERO, move || panic!("{message}"));
-    timer
+fn fail_after_a_minute(run_loop: &TestLoop, message: &'static str) {
+    run_loop.fail_after(Duration::from_secs(60), message);
 }
 
 /// The seconds since `start`.
@@ -55,8 +52,8 @@ fn seconds_since(start: Instant) -> f64 {
 // gtest: OnlineFileSource.Cancel
 #[test]
 fn cancel() {
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let fs = online_file_source();
 
     drop(fs.request_local(
@@ -72,8 +69,8 @@ fn cancel() {
 #[test]
 fn cancel_multiple() {
     let server = HttpServer::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let fs = online_file_source();
 
     let resource = Resource::new(Kind::Unknown, server.url("/test"));
@@ -104,8 +101,8 @@ fn cancel_multiple() {
 #[test]
 fn temporary_error() {
     let server = HttpServer::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let fs = online_file_source();
 
     // The test bounds the backoff only from below: a loaded machine can
@@ -153,8 +150,8 @@ fn temporary_error() {
 // gtest: OnlineFileSource.ConnectionError
 #[test]
 fn connection_error() {
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let fs = online_file_source();
 
     let start = Instant::now();
@@ -200,8 +197,8 @@ fn connection_error() {
 #[test]
 fn timeout() {
     let server = HttpServer::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let fs = online_file_source();
 
     let counter = Rc::new(Cell::new(0));
@@ -236,8 +233,8 @@ fn timeout() {
 #[test]
 fn retry_delay_on_expired_tile() {
     let server = HttpServer::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let fs = online_file_source();
 
     let counter = Rc::new(Cell::new(0));
@@ -265,8 +262,8 @@ fn retry_delay_on_expired_tile() {
 #[test]
 fn retry_on_clock_skew() {
     let server = HttpServer::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let fs = online_file_source();
 
     let counter = Cell::new(0);
@@ -307,8 +304,8 @@ fn retry_on_clock_skew() {
 #[test]
 fn respect_prior_expires() {
     let server = HttpServer::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let fs = online_file_source();
 
     // Very long expiration time, should never arrive.
@@ -336,8 +333,8 @@ fn respect_prior_expires() {
 #[test]
 fn respect_minimum_update_interval() {
     let server = HttpServer::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let fs = online_file_source();
 
     let start = now();
@@ -368,8 +365,8 @@ fn load() {
     const MAX: i32 = 10000;
 
     let server = HttpServer::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let fs: Rc<dyn FileSource> = online_file_source();
 
     let state = Rc::new(LoadState { reqs: (0..CONCURRENCY).map(|_| req()).collect(), number: Cell::new(1) });
@@ -394,8 +391,8 @@ fn load() {
 #[test]
 fn network_status_change() {
     let server = HttpServer::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let network = Arc::new(NetworkStatus::new());
     let fs = online_file_source_with(&network);
 
@@ -420,8 +417,7 @@ fn network_status_change() {
     ));
 
     // After 50 milliseconds, we're going to trigger a NetworkStatus change.
-    let reachable_timer = Timer::new(&run_loop);
-    reachable_timer.start(Duration::from_millis(50), Duration::ZERO, move || network.reachable());
+    run_loop.handle().post_after(Duration::from_millis(50), move |_| network.reachable());
 
     run_loop.run();
 }
@@ -433,14 +429,14 @@ fn network_status_change() {
 // gtest: OnlineFileSource.NetworkStatusChangePreempt
 #[test]
 fn network_status_change_preempt() {
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let network = Arc::new(NetworkStatus::new());
     let fs = online_file_source_with(&network);
     // Longer than the test runs, so that only the network status change can
     // retry the request.
     fs.set_connection_backoff(Duration::from_secs(3600));
-    let _deadline = fail_after_a_minute(&run_loop, "The network status change didn't retry the request");
+    fail_after_a_minute(&run_loop, "The network status change didn't retry the request");
 
     let counter = Rc::new(Cell::new(0));
 
@@ -481,8 +477,8 @@ fn network_status_change_preempt() {
 #[test]
 fn network_status_online_offline() {
     let server = HttpServer::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let network = Arc::new(NetworkStatus::new());
     let fs = online_file_source_with(&network);
 
@@ -491,10 +487,9 @@ fn network_status_online_offline() {
     assert_eq!(network.get(), Status::Online, "Default status should be Online");
     network.set(Status::Offline);
 
-    let online_timer = Timer::new(&run_loop);
     let online = Arc::clone(&network);
-    online_timer.start(Duration::from_millis(100), Duration::ZERO, move || online.set(Status::Online));
-    let _deadline = fail_after_a_minute(&run_loop, "Going back Online didn't retry the request");
+    run_loop.handle().post_after(Duration::from_millis(100), move |_| online.set(Status::Online));
+    fail_after_a_minute(&run_loop, "Going back Online didn't retry the request");
 
     let req = req();
     let (r, stop) = (Rc::clone(&req), run_loop.clone());
@@ -518,8 +513,8 @@ fn network_status_online_offline() {
 
 fn rate_limit_test(path: &str, expect_retry_after: bool) {
     let server = HttpServer::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let fs = online_file_source();
 
     let stop = run_loop.clone();
@@ -568,8 +563,8 @@ fn rate_limit_default() {
 fn low_high_priority_requests() {
     const NUM_REQUESTS: usize = 3;
     let server = HttpServer::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let network = Arc::new(NetworkStatus::new());
     let fs = online_file_source_with(&network);
     let response_counter = Rc::new(Cell::new(0usize));
@@ -637,8 +632,8 @@ fn low_high_priority_requests() {
 #[test]
 fn low_high_priority_requests_many() {
     let server = HttpServer::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let network = Arc::new(NetworkStatus::new());
     let fs = online_file_source_with(&network);
     let response_counter = Rc::new(Cell::new(0));
@@ -717,8 +712,8 @@ fn low_high_priority_requests_many() {
 #[test]
 fn pending_requests_start_by_order() {
     let server = HttpServer::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let network = Arc::new(NetworkStatus::new());
     let fs = online_file_source_with(&network);
     let answered: Rc<RefCell<Vec<usize>>> = Rc::default();
@@ -768,7 +763,7 @@ fn pending_requests_start_by_order() {
 // gtest: OnlineFileSource.MaximumConcurrentRequests
 #[test]
 fn maximum_concurrent_requests() {
-    let _run_loop = RunLoop::new();
+    let _run_loop = TestLoop::new();
     let fs = online_file_source();
 
     assert_eq!(fs.maximum_concurrent_requests(), 20);
@@ -781,8 +776,8 @@ fn maximum_concurrent_requests() {
 #[test]
 fn request_same_url_multiple_times() {
     let server = HttpServer::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let fs = online_file_source();
 
     let count = Rc::new(Cell::new(0));
@@ -808,8 +803,8 @@ fn request_same_url_multiple_times() {
 // gtest: OnlineFileSource.FailedResourceTransform
 #[test]
 fn failed_resource_transform() {
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let fs = online_file_source();
     fs.set_resource_transform(Some(Arc::new(|_kind: Kind, _url: &str, finished: FinishedCallback| {
         finished(Err(ResourceError::new(Reason::Other, "No credential")));
@@ -837,8 +832,8 @@ fn failed_resource_transform() {
 #[test]
 fn retry_failed_resource_transform() {
     let server = HttpServer::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let network = Arc::new(NetworkStatus::new());
     let fs = online_file_source_with(&network);
 
@@ -888,8 +883,8 @@ fn retry_failed_resource_transform() {
 #[test]
 fn a_header_transform_runs_for_every_attempt() {
     let server = HttpServer::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let fs = online_file_source();
 
     let target = server.url("/temporary-error");

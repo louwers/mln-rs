@@ -15,7 +15,6 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use mln_actor::RunLoop;
 use mln_bench::meter::CountingAllocator;
 use mln_bench::scene::{Mode, Scene};
 use mln_bench::{CaseReport, Context, Environment, Report, cases, compare};
@@ -147,7 +146,6 @@ fn run_cases(options: &Options) -> Result<(), String> {
         scale: options.scale.as_deref().map_or(Ok(1.0), str::parse).map_err(|_| "--scale needs a number")?,
         frames: options.frames.clone(),
     };
-    let _run_loop = RunLoop::new();
     let (gpu, software_gpu) = Scene::new(Size::new(1, 1), Mode::Still).gpu();
     let environment =
         Environment { gpu, software_gpu, os: format!("{} {}", std::env::consts::OS, std::env::consts::ARCH), fixtures };

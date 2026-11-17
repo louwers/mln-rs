@@ -6,7 +6,6 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::time::Duration;
 
-use mln_actor::{ActorRef, Mailbox, RunLoop};
 use mln_gfx::ShaderRegistry;
 use mln_gfx::rendering_stats::{FrameRenderedFeaturesMap, SourceLayerID, merge_layer_features};
 use mln_map_types::{MapMode, TransformState};
@@ -142,12 +141,6 @@ const JOBS_PER_THREAD: usize = 2;
 /// between its own work.
 const JOBS_WITHOUT_THREADS: usize = 8;
 
-/// The target of the mailbox through which a tile worker, on any thread,
-/// asks for an update.
-struct UpdateRequests {
-    events: EventSink,
-}
-
 fn ptr_eq_option<T: ?Sized>(a: Option<&Arc<T>>, b: Option<&Arc<T>>) -> bool {
     match (a, b) {
         (None, None) => true,
@@ -214,8 +207,6 @@ pub(crate) struct RenderOrchestrator {
     filtered_layers_for_source: Vec<Arc<dyn ErasedEvaluatedLayer>>,
 
     thread_pool: TaskGroup,
-    /// The target of the tile store's waker, which asks for an update.
-    _update_requests: Arc<Mailbox>,
 
     global_state: Option<Arc<GlobalStateMap>>,
 
@@ -252,44 +243,31 @@ pub(crate) struct RenderOrchestrator {
 
 impl RenderOrchestrator {
     /// An orchestrator whose background work runs in a group of its own on
-    /// `pool`, which its drop waits for.
+    /// `pool`, which its drop waits for, and whose tiles and glyphs call
+    /// `waker` for an update (see `Renderer::new`).
     pub(crate) fn new(
         background_layer_as_color: bool,
         local_font_family: Option<String>,
         glyph_cache: Arc<GlyphCache>,
         font_face_engine: Arc<dyn crate::text::font_face_engine::FontFaceEngine>,
         registry: Arc<Registry>,
-        run_loop: &RunLoop,
+        waker: Waker,
         pool: &Pool,
     ) -> Self {
         let events = EventSink::default();
         // `imageManager->setObserver(this)`.
         let mut image_store = ImageStore::default();
         image_store.set_observer(Some(Rc::new(OrchestratorImageObserver { events: events.clone() })));
-        // symbols: `glyphManager->setObserver(this)`. A response asks for the
-        // update that takes it in.
-        let wake = {
-            let events = events.clone();
-            Rc::new(move || events.emit(RendererEvent::Invalidate))
-        };
+        // symbols: `glyphManager->setObserver(this)`.
         let thread_pool = TaskGroup::new(pool);
         let mut glyph_store = GlyphStore::new(
             Some(Box::new(DefaultLocalGlyphRasterizer::new(local_font_family))),
             glyph_cache,
             thread_pool.clone(),
             font_face_engine,
-            run_loop.clone(),
-            wake,
+            Arc::clone(&waker),
         );
         glyph_store.set_observer(Some(Rc::new(OrchestratorGlyphObserver { events: events.clone() })));
-        let update_requests =
-            Mailbox::with_target(&run_loop.handle(), Rc::new(UpdateRequests { events: events.clone() }));
-        let waker: Waker = {
-            let requests = ActorRef::<UpdateRequests>::new(&update_requests);
-            Arc::new(move || {
-                requests.invoke(|requests: &UpdateRequests| requests.events.emit(RendererEvent::Invalidate));
-            })
-        };
         let jobs = match pool.threads() {
             0 => JOBS_WITHOUT_THREADS,
             threads => JOBS_PER_THREAD * threads,
@@ -321,7 +299,6 @@ impl RenderOrchestrator {
             ordered_layers: Vec::new(),
             remake_render_layers: false,
             filtered_layers_for_source: Vec::new(),
-            _update_requests: update_requests,
             _wait_for_thread_pool: WaitOnDrop(thread_pool.clone()),
             thread_pool,
             global_state: None,

@@ -3,12 +3,11 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use httpmock::MockServer;
-use mln_actor::RunLoop;
 use mln_test_server::HttpServer;
 use mln_util::chrono::{Timestamp, now};
 use parking_lot::Mutex;
 
-use super::{Dispatcher, LocalRequests, Req, req};
+use super::{Dispatcher, LocalRequests, Req, TestLoop, req};
 use crate::file_source::FileSource;
 use crate::http_file_source::{HTTPFileSource, same_origin};
 use crate::http_header_transform::HttpHeaderTransform;
@@ -27,8 +26,8 @@ fn data(res: &Response) -> &[u8] {
 #[test]
 fn cancel() {
     let server = HttpServer::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let fs = http_file_source();
 
     drop(fs.request_local(
@@ -44,8 +43,8 @@ fn cancel() {
 #[test]
 fn http200() {
     let server = HttpServer::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let fs = http_file_source();
 
     let stop = run_loop.clone();
@@ -70,8 +69,8 @@ fn http200() {
 #[test]
 fn http206() {
     let server = HttpServer::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let fs = http_file_source();
 
     let mut resource = Resource::new(Kind::Unknown, server.url("/test"));
@@ -99,8 +98,8 @@ fn http206() {
 #[test]
 fn http404() {
     let server = HttpServer::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let fs = http_file_source();
 
     let stop = run_loop.clone();
@@ -127,8 +126,8 @@ fn http404() {
 #[test]
 fn http_tile404() {
     let server = HttpServer::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let fs = http_file_source();
 
     let stop = run_loop.clone();
@@ -155,8 +154,8 @@ fn http_tile404() {
 #[test]
 fn http200_empty_data() {
     let server = HttpServer::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let fs = http_file_source();
 
     let stop = run_loop.clone();
@@ -182,8 +181,8 @@ fn http200_empty_data() {
 #[test]
 fn http204() {
     let server = HttpServer::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let fs = http_file_source();
 
     let stop = run_loop.clone();
@@ -210,8 +209,8 @@ fn http204() {
 #[test]
 fn http500() {
     let server = HttpServer::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let fs = http_file_source();
 
     let stop = run_loop.clone();
@@ -238,8 +237,8 @@ fn http500() {
 #[test]
 fn expires_parsing() {
     let server = HttpServer::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let fs = http_file_source();
 
     let stop = run_loop.clone();
@@ -264,8 +263,8 @@ fn expires_parsing() {
 #[test]
 fn cache_control_parsing() {
     let server = HttpServer::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let fs = http_file_source();
 
     let stop = run_loop.clone();
@@ -299,7 +298,7 @@ pub(crate) fn load_request(
     fs: &Rc<dyn FileSource>,
     state: &Rc<LoadState>,
     url: &Rc<dyn Fn(i32) -> String>,
-    run_loop: &RunLoop,
+    run_loop: &TestLoop,
     local: &Dispatcher,
     i: usize,
     max: i32,
@@ -337,8 +336,8 @@ fn load() {
     const MAX: i32 = 10000;
 
     let server = HttpServer::new();
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let fs: Rc<dyn FileSource> = Rc::new(http_file_source());
 
     let state = Rc::new(LoadState { reqs: (0..CONCURRENCY).map(|_| req()).collect(), number: Cell::new(1) });
@@ -366,8 +365,8 @@ fn token_transform(seen: Arc<Mutex<Vec<(Kind, String)>>>) -> HttpHeaderTransform
 
 /// Loads `url` with `fs`, and returns the response.
 fn load_once(fs: &HTTPFileSource, kind: Kind, url: String) -> Response {
-    let run_loop = RunLoop::new();
-    let local = Dispatcher::new(&run_loop);
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
     let result = Rc::new(RefCell::new(None));
     let (r, stop) = (Rc::clone(&result), run_loop.clone());
     let _req = fs.request_local(

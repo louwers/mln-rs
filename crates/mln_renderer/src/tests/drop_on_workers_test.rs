@@ -3,7 +3,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::ThreadId;
 use std::time::Duration;
 
-use mln_actor::RunLoop;
 use mln_util::pool::Pool;
 use parking_lot::Mutex;
 
@@ -24,14 +23,14 @@ impl Drop for Recorder {
     }
 }
 
-fn orchestrator(run_loop: &RunLoop, pool: &Pool) -> RenderOrchestrator {
+fn orchestrator(pool: &Pool) -> RenderOrchestrator {
     RenderOrchestrator::new(
         true,
         None,
         Arc::default(),
         crate::text::font_face_engine::default_engine(),
         crate::Registry::with_builtins(),
-        run_loop,
+        Arc::new(|| {}),
         pool,
     )
 }
@@ -44,8 +43,7 @@ fn recorder() -> (Recorder, Arc<Mutex<Option<ThreadId>>>, Arc<AtomicBool>) {
 
 #[test]
 fn drops_on_a_worker() {
-    let run_loop = RunLoop::new();
-    let orchestrator = orchestrator(&run_loop, &crate::tests::pool());
+    let orchestrator = orchestrator(&crate::tests::pool());
     let (recorder, dropped_on, done) = recorder();
     orchestrator.drop_on_workers(recorder);
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
@@ -61,8 +59,7 @@ fn drops_on_a_worker() {
 /// worker took yet itself.
 #[test]
 fn the_orchestrator_waits_for_what_it_drops_on_workers() {
-    let run_loop = RunLoop::new();
-    let orchestrator = orchestrator(&run_loop, &crate::tests::pool());
+    let orchestrator = orchestrator(&crate::tests::pool());
     let values: Vec<_> = (0..8).map(|_| recorder()).collect();
     let mut done = Vec::new();
     for (recorder, _, value_done) in values {

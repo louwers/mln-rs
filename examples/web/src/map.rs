@@ -111,8 +111,8 @@ pub struct WebMap {
     pixel_ratio: f64,
     /// The page's pointer, wheel and key input, turned into camera moves.
     gestures: GestureRecognizer,
-    /// Milliseconds of the cooperative scheduler's tasks since the last
-    /// frame that drew.
+    /// Milliseconds of the pump's pool tasks since the last frame that
+    /// drew.
     tasks: f64,
     /// What the frames up to the last one that drew spent on each phase
     /// (`frame_timings`).
@@ -348,8 +348,8 @@ impl WebMap {
     /// something new to draw, which it renders in a later task. Returns
     /// whether a frame was rendered since the last animation frame.
     pub fn frame(&mut self, now: f64) -> bool {
-        // The scheduler's tasks that the pump ran since the last frame: with
-        // no tile workers, the tiles' parsing and layout among them.
+        // The pool tasks that the pump ran since the last frame: with no
+        // tile workers, the tiles' parsing and layout among them.
         self.tasks += pump::take_scheduler_time().as_secs_f64() * 1000.0;
         self.gestures.frame(&mut self.map, now);
         // A demand renders the map once the commands sent before it ran.
@@ -384,9 +384,8 @@ impl WebMap {
     /// The milliseconds of work on this thread since the frame that drew
     /// before the last one that drew, up to its end, by phase: the
     /// renderer's frames (updating the sources and layers, placing symbols,
-    /// uploading and encoding), their submission, and the cooperative
-    /// scheduler's tasks (with no tile workers, the tiles' parsing and
-    /// layout).
+    /// uploading and encoding), their submission, and the pump's pool
+    /// tasks (with no tile workers, the tiles' parsing and layout).
     #[must_use]
     pub fn frame_timings(&self) -> Vec<f64> {
         self.phases.to_vec()

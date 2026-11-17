@@ -57,7 +57,7 @@ fn recorder() -> (Arc<Mutex<Vec<CanonicalTileID>>>, TileFunction) {
 
 /// Tiles `ids` of a custom geometry source whose provider is `loader`.
 fn tiles(test: &RasterTileTest, ids: &[OverscaledTileID], loader: Arc<CustomGeometryProvider>) -> OneTile {
-    let store = crate::tests::tile_store(&test.run_loop, &test.thread_pool, Box::new(InlineWorkers));
+    let store = crate::tests::tile_store(&test.thread_pool, Box::new(InlineWorkers));
     let origin = DataOrigin::Custom { loader, fast_pfor_enabled: false };
     OneTile::with_origin(store, TileKind::Geometry, true, origin, ids, mln_map_types::MapMode::Static)
 }
@@ -162,7 +162,7 @@ fn invoke_tile_changed() {
     }]))));
     while !tiles.tile().is_complete() {
         test.local_pool.run_all();
-        test.run_loop.run_once();
+        test.run_loop.run_once(&mut ());
         tiles.update();
     }
     // Once present, the bucket should never "disappear", which would cause

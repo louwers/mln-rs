@@ -11,7 +11,6 @@ use std::sync::Arc;
 
 use feature::{Feature, PropertyMap};
 use geo_types::{Geometry, Point};
-use mln_actor::RunLoop;
 use mln_map_types::MapMode;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
@@ -21,6 +20,7 @@ use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::hash::HashSet;
 use mln_util::image::PremultipliedImage;
 use mln_util::pool::TaskGroup;
+use mln_util::queue::Queue;
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use parking_lot::Mutex;
@@ -152,7 +152,7 @@ pub(super) fn points() -> TileData {
 }
 
 struct Test {
-    run_loop: RunLoop,
+    run_loop: Queue<()>,
     thread_pool: TaskGroup,
     tile: OneTile,
     asked: Rc<Asked>,
@@ -166,10 +166,10 @@ impl Test {
 
     /// A tile whose jobs run on the workers `workers` makes on the test's
     /// loop.
-    fn on(workers: impl FnOnce(&RunLoop) -> Box<dyn TileWorkers>, images: &[&str]) -> Self {
-        let run_loop = RunLoop::new();
+    fn on(workers: impl FnOnce(&Queue<()>) -> Box<dyn TileWorkers>, images: &[&str]) -> Self {
+        let run_loop = Queue::new();
         let thread_pool = TaskGroup::new(&crate::tests::pool());
-        let mut store = tile_store(&run_loop, &thread_pool, workers(&run_loop));
+        let mut store = tile_store(&thread_pool, workers(&run_loop));
         let asked = Rc::new(Asked::default());
         store.images_mut().set_observer(Some(Rc::<Asked>::clone(&asked)));
         for id in images {
@@ -217,7 +217,7 @@ impl Test {
 
 impl Drop for Test {
     fn drop(&mut self) {
-        self.run_loop.run_once();
+        self.run_loop.run_once(&mut ());
         self.thread_pool.wait();
     }
 }
@@ -555,8 +555,8 @@ impl Instances {
     }
 
     /// `RemoteWorkers` over these instances.
-    fn workers(&self, run_loop: &RunLoop) -> Box<dyn TileWorkers> {
-        let workers = RemoteWorkers::new(&run_loop.handle(), Registry::with_builtins(), |sink| {
+    fn workers(&self, run_loop: &Queue<()>) -> Box<dyn TileWorkers> {
+        let workers = RemoteWorkers::new(crate::tests::post_to(run_loop), Registry::with_builtins(), |sink| {
             self.0.borrow_mut().sink = Some(sink);
             Box::new(self.clone())
         });
@@ -615,7 +615,7 @@ impl WorkerInstances for Instances {
 impl Test {
     /// The renderer's update, after the replies and losses the loop got.
     fn update_after(&mut self) -> bool {
-        while self.run_loop.run_once() {}
+        while self.run_loop.run_once(&mut ()) {}
         self.update()
     }
 }
@@ -715,8 +715,8 @@ fn a_newer_generation_supersedes_the_job_in_flight() {
 
 /// A raster tile of `kind`, `x`/0 of zoom 1, and a second one at `x + 1`,
 /// whose jobs run on `workers`.
-fn raster_tiles(run_loop: &RunLoop, pool: &TaskGroup, workers: Box<dyn TileWorkers>, kind: TileKind) -> OneTile {
-    let store = tile_store(run_loop, pool, workers);
+fn raster_tiles(pool: &TaskGroup, workers: Box<dyn TileWorkers>, kind: TileKind) -> OneTile {
+    let store = tile_store(pool, workers);
     let mut tiles = OneTile::new(store, kind, OverscaledTileID::from_zxy(1, 0, 0), MapMode::Static);
     tiles.add(OverscaledTileID::from_zxy(1, 1, 0));
     tiles
@@ -735,10 +735,9 @@ fn raster_size(tiles: &OneTile, x: u32) -> Option<Size> {
 /// its newest data next and never shows the stale image.
 #[test]
 fn raster_decodes_apply_in_any_order() {
-    let run_loop = RunLoop::new();
     let pool = TaskGroup::new(&crate::tests::pool());
     let manual = Manual::default();
-    let mut tiles = raster_tiles(&run_loop, &pool, Box::new(manual.clone()), TileKind::Raster);
+    let mut tiles = raster_tiles(&pool, Box::new(manual.clone()), TileKind::Raster);
     let ids = [OverscaledTileID::from_zxy(1, 0, 0), OverscaledTileID::from_zxy(1, 1, 0)];
     for (id, size) in ids.iter().zip([16, 32]) {
         tiles.set_image(id, Some(png(size, size)));
@@ -775,13 +774,13 @@ fn raster_decodes_apply_in_any_order() {
 /// its data, which it sends again to the worker in its place.
 #[test]
 fn a_worker_lost_during_a_decode() {
-    let run_loop = RunLoop::new();
+    let run_loop = Queue::new();
     let pool = TaskGroup::new(&crate::tests::pool());
     let instances = Instances::new(1);
     let kind = TileKind::Dem(mln_util::tileset::RasterEncoding::Mapbox);
-    let mut tiles = raster_tiles(&run_loop, &pool, instances.workers(&run_loop), kind);
+    let mut tiles = raster_tiles(&pool, instances.workers(&run_loop), kind);
     let update = |tiles: &mut OneTile| {
-        while run_loop.run_once() {}
+        while run_loop.run_once(&mut ()) {}
         tiles.update();
     };
     let id = tiles.id;

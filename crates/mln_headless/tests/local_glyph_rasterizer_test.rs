@@ -8,7 +8,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
 use mln_image::{decode_image, encode_png};
 use mln_map::{Map, MapMode, MapOptions};
@@ -18,6 +17,7 @@ use mln_storage::{FileSource, Kind, Resource, Response};
 use mln_util::geo::EdgeInsets;
 use mln_util::image::PremultipliedImage;
 use mln_util::pool::Pool;
+use mln_util::queue::Queue;
 use mln_util::size::Size;
 
 fn cpp_path(relative: &str) -> PathBuf {
@@ -63,7 +63,7 @@ fn check_image(base: &str, actual: &PremultipliedImage, image_threshold: f64, pi
 }
 
 struct LocalGlyphRasterizerTest {
-    _run_loop: RunLoop,
+    _run_loop: Queue<()>,
     frontend: HeadlessFrontend,
     map: Map,
 }
@@ -75,9 +75,9 @@ impl LocalGlyphRasterizerTest {
     // supported here.
     fn new(font_family: Option<&str>) -> Self {
         assert!(font_family.is_none(), "local font families are not ported");
-        let run_loop = RunLoop::new();
+        let run_loop = Queue::new();
         let pool = Pool::new(4).unwrap();
-        let file_source = StubFileSource::on_loop(&run_loop, ResponseType::Asynchronous);
+        let file_source = StubFileSource::on_queue(&run_loop, ResponseType::Asynchronous);
         file_source.set_response(Kind::Glyphs, |resource: &Resource| {
             assert_eq!(Kind::Glyphs, resource.kind);
             let mut response = Response::new();
@@ -91,14 +91,13 @@ impl LocalGlyphRasterizerTest {
         let mut frontend =
             HeadlessFrontend::new(Size::new(256, 256), 1.0, &run_loop, &pool).expect("a headless frontend");
         // `MapAdapter map{frontend, nullObserver, fileSource, MapOptions()...}`.
-        let map = Map::with_file_source(
+        let mut map = Map::with_file_source(
             file_source,
             MapOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
-            &run_loop,
             &pool,
         )
         .unwrap();
-        frontend.attach(&map);
+        frontend.attach(&mut map);
         LocalGlyphRasterizerTest { _run_loop: run_loop, frontend, map }
     }
 

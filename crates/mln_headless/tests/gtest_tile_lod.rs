@@ -4,7 +4,6 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use geojson::{Feature, Geometry};
-use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapDebugOptions, MapMode, MapOptions, TileSettings};
 use mln_renderer::Registry;
@@ -26,7 +25,7 @@ fn set_tile(map: &mut Map, change: impl FnOnce(&mut TileSettings)) {
 }
 
 struct TileLODTest {
-    _run_loop: RunLoop,
+    _run_loop: TestLoop,
     frontend: HeadlessFrontend,
     map: Map,
     tile_count: Arc<AtomicU32>,
@@ -34,20 +33,20 @@ struct TileLODTest {
 
 impl TileLODTest {
     fn new(camera_options: &CameraOptions) -> Self {
-        let run_loop = RunLoop::new();
+        let run_loop = TestLoop::new();
         let pool = Pool::new(4).unwrap();
-        let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, &run_loop, &pool).expect("a headless frontend");
+        let mut frontend =
+            HeadlessFrontend::with_pixel_ratio(1.0, run_loop.queue(), &pool).expect("a headless frontend");
         let mut map = Map::with_resource_options(
             MapOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
             &ResourceOptions {
                 asset_path: cpp_root().join("test/fixtures/api/assets").to_str().unwrap().to_owned(),
                 ..ResourceOptions::default()
             },
-            &run_loop,
             &pool,
         )
         .unwrap();
-        frontend.attach(&map);
+        frontend.attach(&mut map);
         map.jump_to(camera_options);
 
         map.set_debug(MapDebugOptions::TILE_BORDERS);

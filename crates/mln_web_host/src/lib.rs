@@ -2,10 +2,10 @@
 //! examples/web: wasm32-unknown-unknown without atomics, one instance per
 //! Web Worker, each with its own memory and one thread.
 //!
-//! - `pump`: the instance's work on its own event loop. Its `RunLoop`s and
-//!   the cooperative scheduler wake it, and it runs them in slices of a few
-//!   milliseconds, each a task of its own, so that input, worker replies
-//!   and animation frames get in between.
+//! - `pump`: the instance's work on its own event loop. Its queues and
+//!   pools wake it, and it runs them in slices of a few milliseconds, each a
+//!   task of its own, so that input, worker replies and animation frames
+//!   get in between.
 //! - `tile_workers`: the map side of tile workers in other Web Workers,
 //!   for `mln_renderer`'s `RemoteWorkers`, over a `MessagePort` to each.
 //! - `tile_worker`: the side of a Web Worker that runs tile workers, one
@@ -24,18 +24,7 @@ pub mod shaper;
 pub mod tile_worker;
 pub mod tile_workers;
 
-use std::sync::Arc;
-
-use mln_actor::{CooperativeScheduler, scheduler};
 use wasm_bindgen::JsValue;
-
-/// The instance's cooperative scheduler, installed on the first call. An
-/// instance has no threads, so it must come before any map, file source or
-/// `Thread` exists, which would start threads otherwise.
-#[must_use]
-pub fn install_cooperative_scheduler() -> Arc<CooperativeScheduler> {
-    Arc::clone(scheduler::install_cooperative_once())
-}
 
 /// Logs a panic's message to the console, and leaves it in the global
 /// `mlnPanic`, for the JavaScript that runs the instance: wasm32-unknown-unknown

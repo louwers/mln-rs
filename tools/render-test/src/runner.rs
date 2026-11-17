@@ -12,13 +12,13 @@ use std::time::Duration;
 
 use feature::Value;
 use geometry::Point;
-use mln_actor::RunLoop;
 use mln_image::{decode_image, encode_png};
 use mln_util::feature::Feature;
 use mln_util::geo::LatLng;
 use mln_util::hash::HashMap;
 use mln_util::image::PremultipliedImage;
 use mln_util::pool::Pool;
+use mln_util::queue::Queue;
 use mln_util::size::Size;
 
 use crate::file_source::ProxyFileSource;
@@ -180,10 +180,9 @@ pub trait TestRunnerImpl {
     ) -> Result<bool, MapError> {
         unsupported("removeFeatureState operation (Renderer feature state)")
     }
-    /// The `sleep` operation: run the run loop until a `util::Timer` of
-    /// `duration` fires.
+    /// The `sleep` operation: run the runner's queue for `duration`.
     fn sleep(&mut self, _duration: Duration) -> Result<(), MapError> {
-        unsupported("sleep operation (util::Timer + RunLoop::runOnce)")
+        unsupported("sleep operation")
     }
     fn set_tile_lod_min_radius(&mut self, _value: f64) -> Result<(), MapError> {
         unsupported("Map::setTileLodMinRadius")
@@ -257,7 +256,7 @@ pub enum QueryGeometry {
 /// .withPixelRatio(..).withCrossSourceCollisions(..), resourceOptions)`, plus
 /// `map.setBounds(BoundOptions().withMaxPitch(..))` when `maxPitch` is set.
 pub type ImplFactory = Box<
-    dyn Fn(&TestMetadata, &ResourceOptions, &ImplOptions, &RunLoop, &Pool) -> Result<Box<dyn TestRunnerImpl>, String>,
+    dyn Fn(&TestMetadata, &ResourceOptions, &ImplOptions, &Queue<()>, &Pool) -> Result<Box<dyn TestRunnerImpl>, String>,
 >;
 
 /// Port-only: how the runner's options that C++ does not have set up a map.
@@ -352,9 +351,9 @@ pub(crate) struct TestRunner {
     watchdog: Option<crate::watchdog::Watchdog>,
     /// What the factory sets up the maps with.
     impl_options: ImplOptions,
-    /// The loop of the runner's thread, which its maps run on
-    /// (`mln::util::RunLoop runLoop` in `runRenderTests`).
-    run_loop: RunLoop,
+    /// The queue of the runner's thread, which its frontends run while they
+    /// wait.
+    queue: Queue<()>,
     /// Where the runner's maps run their background work.
     pool: Pool,
 }
@@ -377,7 +376,7 @@ impl TestRunner {
             output_path,
             watchdog: None,
             impl_options: ImplOptions::default(),
-            run_loop: RunLoop::new(),
+            queue: Queue::new(),
             pool: Pool::new(4).expect("the runner's pool"),
         }
     }
@@ -907,7 +906,7 @@ impl TestRunner {
 
         let mut ctx = TestContext::new(metadata);
         // The per-test time limit, stopped when `run` returns.
-        let _watchdog_guard = self.watchdog.as_ref().map(|watchdog| watchdog.arm(&self.run_loop));
+        let _watchdog_guard = self.watchdog.as_ref().map(|watchdog| watchdog.arm(&self.queue));
 
         if !ctx.metadata.ignored_test {
             for operation in get_before_operations(&self.manifest) {
@@ -941,7 +940,7 @@ impl TestRunner {
                 };
                 let resource_options = ResourceOptions { cache_path: self.manifest.get_cache_path().to_string() };
                 let created = catch_unwind(AssertUnwindSafe(|| {
-                    factory(ctx.metadata, &resource_options, &self.impl_options, &self.run_loop, &self.pool)
+                    factory(ctx.metadata, &resource_options, &self.impl_options, &self.queue, &self.pool)
                 }));
                 match created {
                     Ok(Ok(runner_impl)) => {

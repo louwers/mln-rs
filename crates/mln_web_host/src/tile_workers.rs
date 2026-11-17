@@ -13,28 +13,28 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_renderer::Registry;
-use mln_renderer::tile::worker_codec::{Encoded, RemoteWorkers, ReplySink, WorkerInstances};
+use mln_renderer::tile::worker_codec::{Encoded, Post, RemoteWorkers, ReplySink, WorkerInstances};
 use mln_util::host_bytes::HostBytes;
 use mln_util::serialization::payload::Payload;
 use wasm_bindgen::prelude::*;
 
 /// Tile workers in the Web Workers at the other end of `ports` (at least
-/// one), for the renderer on `scheduler`'s `RunLoop`, which handles their
-/// replies (the workers' `ReplySink`). Their jobs name `registry`'s
+/// one), for the renderer whose thread runs what `post` posts, where their
+/// replies are handled (the workers' `ReplySink`). Their jobs name `registry`'s
 /// registrations, so each Web Worker must serve with a registry filled by
 /// the same calls. `on_reply(instance)` is called as
 /// each reply arrives, and `on_fatal(instance, message)` when an instance
 /// panicked. `respawn(instance)` gives a port to a new Web Worker in place
 /// of a lost one, if it can.
 pub fn workers(
-    scheduler: &mln_actor::RunLoopHandle,
+    post: Post,
     ports: Vec<web_sys::MessagePort>,
     registry: Arc<Registry>,
     on_reply: impl Fn(usize) + 'static,
     on_fatal: impl Fn(usize, JsValue) + 'static,
     respawn: impl Fn(usize) -> Option<web_sys::MessagePort> + 'static,
 ) -> Rc<RemoteWorkers> {
-    RemoteWorkers::new(scheduler, registry, move |sink| {
+    RemoteWorkers::new(post, registry, move |sink| {
         let handlers = Rc::new(Handlers { sink, on_reply: Box::new(on_reply), on_fatal: Box::new(on_fatal) });
         Box::new(PortInstances::new(ports, handlers, Box::new(respawn)))
     })

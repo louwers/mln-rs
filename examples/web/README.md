@@ -64,8 +64,8 @@ page (main thread, no wasm)
   `Runtime` and its `Map`, and a `RenderSession` that presents to the canvas.
   The runtime's and the session's work runs in short tasks as it arrives, and
   each animation frame demands a frame when the map has something new to draw.
-- Each worker runs a `CooperativeScheduler` in place of threads, and finished
-  fetches, tile replies and tasks are handled as they arrive
+- Each worker runs its queues and pool tasks in a pump in place of threads, and
+  finished fetches, tile replies and tasks are handled as they arrive
   ([crates/mln_web_host](../../crates/mln_web_host)).
 - The render session sends work to the tile workers as serialized messages over
   MessageChannels, which the runtime connects through a control port that the

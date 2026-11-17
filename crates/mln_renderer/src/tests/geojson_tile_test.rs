@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use feature::Feature;
 use geo_types::Point;
-use mln_actor::RunLoop;
 use mln_map_types::MapMode;
 use mln_style::layer::Layer;
 use mln_style::layer_type::LayerStyle;
@@ -12,6 +11,7 @@ use mln_style::sources::geojson::{Features, GeoJSONData, TileFeatures};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
 use mln_util::pool::TaskGroup;
+use mln_util::queue::Queue;
 
 use crate::Registry;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
@@ -21,13 +21,13 @@ use crate::tile::tile::TileKind;
 use crate::tile::tile_workers::TileWorkers;
 
 struct GeoJSONTileTest {
-    run_loop: RunLoop,
+    run_loop: Queue<()>,
     thread_pool: TaskGroup,
 }
 
 impl GeoJSONTileTest {
     fn new() -> Self {
-        GeoJSONTileTest { run_loop: RunLoop::new(), thread_pool: TaskGroup::new(&crate::tests::pool()) }
+        GeoJSONTileTest { run_loop: Queue::new(), thread_pool: TaskGroup::new(&crate::tests::pool()) }
     }
 
     /// Tiles `ids` of a GeoJSON source of `data`, whose jobs run on
@@ -40,7 +40,7 @@ impl GeoJSONTileTest {
         workers: Box<dyn TileWorkers>,
         synchronous: bool,
     ) -> OneTile {
-        let store = crate::tests::tile_store(&self.run_loop, &self.thread_pool, workers);
+        let store = crate::tests::tile_store(&self.thread_pool, workers);
         let mut tiles =
             OneTile::with_origin(store, TileKind::Geometry, true, DataOrigin::GeoJson(data), ids, MapMode::Continuous);
         let key = tiles.key;
@@ -57,7 +57,7 @@ impl GeoJSONTileTest {
         let deadline = mln_util::time::Instant::now() + std::time::Duration::from_secs(30);
         while !ids.iter().all(|id| tiles.tile_at(id).is_complete()) {
             assert!(mln_util::time::Instant::now() < deadline, "the tiles didn't complete");
-            self.run_loop.run_once();
+            self.run_loop.run_once(&mut ());
             tiles.update();
             std::thread::yield_now();
         }
@@ -138,7 +138,7 @@ fn issue_7648() {
     // flickering.
     while !tiles.tile().is_complete() {
         assert!(tiles.with(|_, tile, _| tile.layer_properties_updated(&layer_properties)));
-        test.run_loop.run_once();
+        test.run_loop.run_once(&mut ());
         tiles.update();
     }
     assert!(tiles.with(|_, tile, _| tile.layer_properties_updated(&layer_properties)));

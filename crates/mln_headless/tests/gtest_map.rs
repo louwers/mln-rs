@@ -14,7 +14,6 @@ use std::time::Duration;
 use feature::Value;
 use geo_types::{LineString, Point};
 use geojson::{GeoJson, Geometry};
-use mln_actor::{RunLoop, Timer};
 use mln_gfx::shaders::shader_source::BuiltIn;
 use mln_headless::HeadlessFrontend;
 use mln_map::{
@@ -319,11 +318,6 @@ fn a_sourceless_style_loaded_after_the_camera_renders() {
     );
 
     let loaded = Rc::new(Cell::new(false));
-    let timeout = Timer::new(&test.run_loop);
-    {
-        let run_loop = test.run_loop.clone();
-        timeout.start(Duration::from_secs(5), Duration::ZERO, move || run_loop.stop());
-    }
     {
         let loaded = Rc::clone(&loaded);
         let run_loop = test.run_loop.clone();
@@ -332,7 +326,7 @@ fn a_sourceless_style_loaded_after_the_camera_renders() {
             run_loop.stop();
         });
     }
-    test.run_loop.run();
+    run_within(&test.run_loop, Duration::from_secs(5));
     test.observer.did_finish_loading_map_callback.clear();
     assert!(loaded.get(), "the map never finished loading");
 
@@ -348,11 +342,6 @@ fn fly_too_slow_to_time_jumps_and_the_map_goes_idle() {
     test.load_json(r#"{"version": 8, "sources": {}, "layers": [{"id": "bg", "type": "background"}]}"#);
     let run_until_idle = || {
         let idle = Rc::new(Cell::new(false));
-        let timeout = Timer::new(&test.run_loop);
-        {
-            let run_loop = test.run_loop.clone();
-            timeout.start(Duration::from_secs(5), Duration::ZERO, move || run_loop.stop());
-        }
         {
             let idle = Rc::clone(&idle);
             let run_loop = test.run_loop.clone();
@@ -361,7 +350,7 @@ fn fly_too_slow_to_time_jumps_and_the_map_goes_idle() {
                 run_loop.stop();
             });
         }
-        test.run_loop.run();
+        run_within(&test.run_loop, Duration::from_secs(5));
         test.observer.did_become_idle_callback.clear();
         idle.get()
     };
@@ -657,7 +646,7 @@ fn main_resource_loader_test(
     cache_path: &str,
     asset_path: &str,
 ) -> (MapTest<Loader>, Arc<DatabaseFileSource>, Arc<NetworkStatus>) {
-    let run_loop = RunLoop::new();
+    let run_loop = TestLoop::new();
     let (file_source, database, status) = loader_with_database(cache_path, asset_path);
     (MapTest::create(run_loop, file_source, 1.0, MapMode::Static), database, status)
 }
@@ -1082,7 +1071,7 @@ fn style_loaded_signal() {
 }
 
 fn online_file_source_test() -> MapTest<OnlineFileSource> {
-    let run_loop = RunLoop::new();
+    let run_loop = TestLoop::new();
     let file_source = Arc::new(OnlineFileSource::new(Arc::new(NetworkStatus::new())));
     MapTest::create(run_loop, file_source, 1.0, MapMode::Static)
 }
@@ -1110,16 +1099,16 @@ fn style_not_found() {
 
     test.map().load_style_url(&server.url("/style-fail-once-404"));
 
-    let timer = Rc::new(Timer::new(&test.run_loop));
+    let timer = Rc::new(LoopTimer::new(&test.run_loop));
 
     // Not found errors should not trigger a retry like other errors.
     test.observer.did_finish_loading_style_callback.set(|()| panic!("Should not retry on not found!"));
 
     {
-        let (timer, run_loop) = (Rc::clone(&timer), test.run_loop.clone());
+        let (timer, run_loop) = (Rc::clone(&timer), test.run_loop.handle());
         test.observer.did_fail_loading_map_callback.set(move |()| {
             let run_loop = run_loop.clone();
-            timer.start(Duration::from_millis(1100), Duration::ZERO, move || run_loop.stop());
+            timer.start(Duration::from_millis(1100), move || run_loop.stop());
         });
     }
 
@@ -1285,28 +1274,28 @@ fn dont_load_unneeded_tiles() {
 #[test]
 #[ignore = "TEST_DISABLED_ON_CI (timing-dependent); see map.test.cpp:994"]
 fn continuous_rendering() {
-    let run_loop = RunLoop::new();
+    let run_loop = TestLoop::new();
     let pool = Pool::new(4).unwrap();
 
-    let did_not_stop = Rc::new(Cell::new(false));
-    let emergency_shutoff = Timer::new(&run_loop);
+    let did_not_stop = Arc::new(AtomicBool::new(false));
+    let emergency_shutoff = LoopTimer::new(&run_loop);
     {
-        let run_loop = run_loop.clone();
-        let did_not_stop = Rc::clone(&did_not_stop);
-        emergency_shutoff.start(Duration::from_secs(10), Duration::ZERO, move || {
+        let run_loop = run_loop.handle();
+        let did_not_stop = Arc::clone(&did_not_stop);
+        emergency_shutoff.start(Duration::from_secs(10), move || {
             run_loop.stop();
-            did_not_stop.set(true);
+            did_not_stop.store(true, Ordering::SeqCst);
         });
     }
 
-    let timer = Rc::new(Timer::new(&run_loop));
+    let timer = Rc::new(LoopTimer::new(&run_loop));
 
-    let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, &run_loop, &pool).expect("a headless frontend");
+    let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, run_loop.queue(), &pool).expect("a headless frontend");
 
     let observer = Rc::new(StubMapObserver::default());
     {
         let timer = Rc::downgrade(&timer);
-        let run_loop = run_loop.clone();
+        let run_loop = run_loop.handle();
         observer.did_finish_rendering_frame_callback.set(move |_| {
             // Start a timer that ends the test one second from now. If we are
             // continuing to render indefinitely, the timer will be constantly
@@ -1314,29 +1303,28 @@ fn continuous_rendering() {
             // will trigger, failing the test.
             if let Some(timer) = timer.upgrade() {
                 let run_loop = run_loop.clone();
-                timer.start(Duration::from_secs(1), Duration::ZERO, move || run_loop.stop());
+                timer.start(Duration::from_secs(1), move || run_loop.stop());
             }
         });
     }
 
-    let map = Map::with_resource_options(
+    let mut map = Map::with_resource_options(
         MapOptions { map_mode: MapMode::Continuous, size: frontend.size(), ..Default::default() },
         &ResourceOptions {
             asset_path: cpp_root().join("test/fixtures/api/assets").to_str().unwrap().to_owned(),
             ..ResourceOptions::default()
         },
-        &run_loop,
         &pool,
     )
     .unwrap();
-    frontend.attach(&map);
+    frontend.attach(&mut map);
     let map = Rc::new(RefCell::new(map));
     let frontend = Rc::new(RefCell::new(frontend));
-    let _events = observer.observe(&map, Some(&frontend));
+    let _events = observer.observe(&run_loop, &map, Some(&frontend));
     map.borrow_mut().load_style_json(&read_file("test/fixtures/api/water.json"));
 
     run_loop.run();
-    assert!(!did_not_stop.get(), "Did not stop rendering");
+    assert!(!did_not_stop.load(Ordering::SeqCst), "Did not stop rendering");
 }
 
 // gtest: Map.NoContentTiles
@@ -2397,19 +2385,19 @@ fn expired_sprite_sheet() {
     // `MapTest<MainResourceLoader, ForwardingHeadlessFrontend>
     // test{":memory:", ".", 1, MapMode::Continuous}`: the frontend's
     // check runs on the update each frame draws.
-    let run_loop = RunLoop::new();
+    let run_loop = TestLoop::new();
     let pool = Pool::new(4).unwrap();
     let (file_source, dbfs, network) = loader_with_database(":memory:", ".");
     let observer = Rc::new(StubMapObserver::default());
-    let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, &run_loop, &pool).expect("a headless frontend");
+    let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, run_loop.queue(), &pool).expect("a headless frontend");
     let options =
         MapOptions { map_mode: MapMode::Continuous, size: frontend.size(), pixel_ratio: 1.0, ..Default::default() };
-    let map = Map::with_file_source(file_source, options, &run_loop, &pool).unwrap();
-    frontend.attach(&map);
+    let mut map = Map::with_file_source(file_source, options, &pool).unwrap();
+    frontend.attach(&mut map);
     let updates = map.update_reader();
     let map = Rc::new(RefCell::new(map));
     let frontend = Rc::new(RefCell::new(frontend));
-    let _events = observer.observe(&map, Some(&frontend));
+    let _events = observer.observe(&run_loop, &map, Some(&frontend));
 
     // The server's own address replaces 127.0.0.1:3000 in the fixtures, as in
     // what it serves.
@@ -2600,8 +2588,8 @@ fn disabled_placed_symbol_data() {
         true
     }
 
-    let run_loop = RunLoop::new();
-    let file_source = StubFileSource::on_loop(&run_loop, ResponseType::Asynchronous);
+    let run_loop = TestLoop::new();
+    let file_source = StubFileSource::on_queue(run_loop.queue(), ResponseType::Asynchronous);
     let test = MapTest::create(run_loop, file_source, 1.0, MapMode::Tile);
     let requests_count = Arc::new(AtomicI32::new(0));
 
@@ -3065,7 +3053,7 @@ fn invalid_utf8_in_tile() {
 fn continuous_map_finishes_loading_when_its_tiles_fail() {
     let _log = FixtureLog::new();
 
-    let run_loop = RunLoop::new();
+    let run_loop = TestLoop::new();
     let file_source = Arc::new(StubFileSource::new(ResponseType::Manual));
     let test = MapTest::create(run_loop, file_source, 1.0, MapMode::Continuous);
     test.file_source
@@ -3114,7 +3102,7 @@ fn continuous_map_finishes_loading_when_its_tiles_fail() {
 fn observe_tile_lifecycle() {
     use TileOperation::*;
 
-    let run_loop = RunLoop::new();
+    let run_loop = TestLoop::new();
     let pool = Pool::new(4).unwrap();
 
     let tile_ops: Rc<RefCell<Vec<(OverscaledTileID, TileOperation)>>> = Rc::default();
@@ -3137,18 +3125,18 @@ fn observe_tile_lifecycle() {
         });
     }
 
-    let mut frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0, &run_loop, &pool).expect("a headless frontend");
+    let mut frontend =
+        HeadlessFrontend::new(Size::new(512, 512), 1.0, run_loop.queue(), &pool).expect("a headless frontend");
     let mut map = Map::with_resource_options(
         MapOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
         &ResourceOptions {
             asset_path: cpp_root().join("test/fixtures/api/assets").to_str().unwrap().to_owned(),
             ..ResourceOptions::default()
         },
-        &run_loop,
         &pool,
     )
     .unwrap();
-    frontend.attach(&map);
+    frontend.attach(&mut map);
     map.load_style_json(&read_file("test/fixtures/api/water.json"));
     let mut layer = Layer::new(Registry::with_builtins().style(), "fill", "landcover", "mapbox").unwrap();
     layer.set_source_layer("landcover");
@@ -3364,7 +3352,7 @@ fn style_update_zoom_dependency() {
 #[test]
 fn globe_hand_off_keeps_tiles() {
     // Crossing the globe's Mercator hand-off must not re-parse the tiles already on screen.
-    let run_loop = RunLoop::new();
+    let run_loop = TestLoop::new();
     let pool = Pool::new(4).unwrap();
     // C++ guards `parsed` with `tileMutex`; the observer is called on this thread.
     let parsed: Rc<RefCell<Vec<OverscaledTileID>>> = Rc::new(RefCell::new(Vec::new()));
@@ -3379,7 +3367,8 @@ fn globe_hand_off_keeps_tiles() {
         });
     }
 
-    let mut frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0, &run_loop, &pool).expect("a headless frontend");
+    let mut frontend =
+        HeadlessFrontend::new(Size::new(512, 512), 1.0, run_loop.queue(), &pool).expect("a headless frontend");
     // C++ runs from the checkout's root; the asset path is relative to it.
     let asset_path = cpp_root().join("test/fixtures/api/assets");
     let mut map = Map::with_file_source(
@@ -3391,7 +3380,6 @@ fn globe_hand_off_keeps_tiles() {
             &pool,
         )),
         MapOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
-        &run_loop,
         &pool,
     )
     .unwrap();
@@ -3442,7 +3430,7 @@ fn water_layers_in(order: [&str; 2]) -> String {
 
 #[test]
 fn a_moved_layer_draws_in_its_new_place_without_a_relayout() {
-    let run_loop = RunLoop::new();
+    let run_loop = TestLoop::new();
     let pool = Pool::new(4).unwrap();
     let parses = Rc::new(Cell::new(0));
     let observer = Rc::new(StubMapObserver::default());
@@ -3454,7 +3442,8 @@ fn a_moved_layer_draws_in_its_new_place_without_a_relayout() {
             }
         });
     }
-    let mut frontend = HeadlessFrontend::new(Size::new(256, 256), 1.0, &run_loop, &pool).expect("a headless frontend");
+    let mut frontend =
+        HeadlessFrontend::new(Size::new(256, 256), 1.0, run_loop.queue(), &pool).expect("a headless frontend");
     let asset_path = cpp_root().join("test/fixtures/api/assets");
     let file_source: Arc<dyn FileSource> = Arc::new(Loader::new(
         &ResourceOptions {
@@ -3471,7 +3460,7 @@ fn a_moved_layer_draws_in_its_new_place_without_a_relayout() {
         result.image
     };
 
-    let mut map = Map::with_file_source(Arc::clone(&file_source), options, &run_loop, &pool).unwrap();
+    let mut map = Map::with_file_source(Arc::clone(&file_source), options, &pool).unwrap();
     map.load_style_json(&water_layers_in(["fill", "line"]));
     map.jump_to(&camera);
     let before = render(&mut map);
@@ -3483,7 +3472,7 @@ fn a_moved_layer_draws_in_its_new_place_without_a_relayout() {
     assert_eq!(0, parses.get(), "moving a layer laid its tiles out again");
     assert_ne!(before, moved);
 
-    let mut reordered = Map::with_file_source(file_source, options, &run_loop, &pool).unwrap();
+    let mut reordered = Map::with_file_source(file_source, options, &pool).unwrap();
     reordered.load_style_json(&water_layers_in(["line", "fill"]));
     reordered.jump_to(&camera);
     assert_eq!(render(&mut reordered), moved);
@@ -3727,7 +3716,7 @@ fn set_bounds_lifts_the_zoom_to_a_minimum_above_the_maximum() {
 fn globe_bounded_source_loads_finer_tiles() {
     // Just below an integer zoom the globe cover asks for the next zoom's tiles nearest the camera; a source with
     // bounds must create them.
-    let run_loop = RunLoop::new();
+    let run_loop = TestLoop::new();
     let pool = Pool::new(4).unwrap();
     // C++ guards `parsed` with `tileMutex`; the observer is called on this thread.
     let parsed: Rc<RefCell<Vec<OverscaledTileID>>> = Rc::new(RefCell::new(Vec::new()));
@@ -3742,7 +3731,8 @@ fn globe_bounded_source_loads_finer_tiles() {
         });
     }
 
-    let mut frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0, &run_loop, &pool).expect("a headless frontend");
+    let mut frontend =
+        HeadlessFrontend::new(Size::new(512, 512), 1.0, run_loop.queue(), &pool).expect("a headless frontend");
     // C++ runs from the checkout's root; the asset path is relative to it.
     let asset_path = cpp_root().join("test/fixtures/api/assets");
     let mut map = Map::with_file_source(
@@ -3754,7 +3744,6 @@ fn globe_bounded_source_loads_finer_tiles() {
             &pool,
         )),
         MapOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
-        &run_loop,
         &pool,
     )
     .unwrap();
@@ -4575,12 +4564,11 @@ fn tile_selection_options_publish_updates() {
         }
     }
 
-    let run_loop = RunLoop::new();
+    let run_loop = TestLoop::new();
     let pool = Pool::new(4).unwrap();
     let mut map = Map::with_file_source(
-        StubFileSource::on_loop(&run_loop, ResponseType::Asynchronous),
+        StubFileSource::on_queue(run_loop.queue(), ResponseType::Asynchronous),
         MapOptions { map_mode: MapMode::Continuous, ..Default::default() },
-        &run_loop,
         &pool,
     )
     .unwrap();
@@ -4834,13 +4822,12 @@ fn color_ramp_renders_current_state_after_unrelated_state_change_color_relief() 
 // returns the error.
 #[test]
 fn empty_size_is_an_error() {
-    let run_loop = RunLoop::new();
+    let run_loop = TestLoop::new();
     let pool = Pool::new(4).unwrap();
     for size in [Size::new(0, 0), Size::new(256, 0), Size::new(0, 256)] {
         let result = Map::with_file_source(
-            StubFileSource::on_loop(&run_loop, ResponseType::Asynchronous),
+            StubFileSource::on_queue(run_loop.queue(), ResponseType::Asynchronous),
             MapOptions { size, ..Default::default() },
-            &run_loop,
             &pool,
         );
         assert_eq!(

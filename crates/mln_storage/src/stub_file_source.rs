@@ -6,6 +6,7 @@
 use std::sync::{Arc, Weak};
 
 use mln_util::hash::HashMap;
+use mln_util::queue::Queue;
 use mln_vec_map::VecMap;
 use parking_lot::Mutex;
 
@@ -69,15 +70,15 @@ impl StubFileSource {
     }
 
     /// A stub whose asynchronous requests wait for polls that run in the
-    /// turns of `run_loop`.
+    /// turns of `queue`.
     #[must_use]
-    pub fn on_loop(run_loop: &mln_actor::RunLoop, type_: ResponseType) -> Arc<Self> {
+    pub fn on_queue<S: 'static>(queue: &Queue<S>, type_: ResponseType) -> Arc<Self> {
         let stub = Arc::new(Self::new(type_));
-        let (weak, queue) = (Arc::downgrade(&stub), run_loop.handle().downgrade());
+        let (weak, queue) = (Arc::downgrade(&stub), queue.downgrade());
         stub.set_waker(Some(Arc::new(move || {
             let weak = Weak::clone(&weak);
             if let Some(queue) = queue.upgrade() {
-                queue.invoke(move || {
+                queue.post(move |_| {
                     if let Some(stub) = weak.upgrade() {
                         stub.poll();
                     }

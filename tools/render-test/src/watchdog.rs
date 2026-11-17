@@ -3,20 +3,19 @@
 // "timed out" instead of blocking the whole run.
 //
 // The map runs on the runner's thread and is not `Send`, so a hung test
-// cannot be stopped from outside. Instead the watchdog thread posts a task
-// to the test thread's RunLoop when the limit passes; the task panics with
-// `TestTimedOut` the next time the loop runs (every wait in the runner and
-// the frontend spins `RunLoop::runOnce`), and the runner's `catch_unwind`
-// around the test turns that into an errored test and drops the map. A
-// test that hangs without running the loop is not caught.
+// cannot be stopped from outside. Instead arming the watchdog posts a task
+// to the test thread's queue for the limit's deadline; the task panics with
+// `TestTimedOut` the next time the queue runs after it (every wait in the
+// runner and the frontend runs the queue, and parks no longer than its next
+// deadline), and the runner's `catch_unwind` around the test turns that into
+// an errored test and drops the map. A test that hangs without running the
+// queue is not caught.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use mln_actor::{RunLoop, RunLoopHandle};
-use parking_lot::{Condvar, Mutex};
+use mln_util::queue::Queue;
 
 /// The panic payload of a test that ran out of time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -31,85 +30,39 @@ impl TestTimedOut {
     }
 }
 
-struct Armed {
-    deadline: Instant,
-    generation: u64,
+/// The per-test limit.
+pub(crate) struct Watchdog {
     limit: Duration,
-    run_loop: RunLoopHandle,
-}
-
-#[derive(Default)]
-struct State {
-    armed: Option<Armed>,
-    shutdown: bool,
-}
-
-struct Shared {
-    state: Mutex<State>,
-    wakeup: Condvar,
     /// The generation of the test that is running; a task posted for an
     /// earlier generation does nothing.
     current: Arc<AtomicU64>,
 }
 
-/// The watchdog thread.
-pub(crate) struct Watchdog {
-    shared: Arc<Shared>,
-    thread: Option<JoinHandle<()>>,
-    limit: Duration,
-}
-
 impl Watchdog {
     #[must_use]
     pub(crate) fn new(limit: Duration) -> Self {
-        let shared = Arc::new(Shared {
-            state: Mutex::new(State::default()),
-            wakeup: Condvar::new(),
-            current: Arc::new(AtomicU64::new(0)),
-        });
-        let thread_shared = Arc::clone(&shared);
-        let thread = std::thread::Builder::new()
-            .name("render-test-watchdog".to_owned())
-            .spawn(move || watch(&thread_shared))
-            .expect("spawn the watchdog thread");
-        Watchdog { shared, thread: Some(thread), limit }
+        Watchdog { limit, current: Arc::new(AtomicU64::new(0)) }
     }
 
-    /// Starts the limit for the test about to run on `run_loop`, this
+    /// Starts the limit for the test about to run on `queue`, this
     /// thread's; the returned guard stops it.
     #[must_use]
-    pub(crate) fn arm(&self, run_loop: &RunLoop) -> WatchdogGuard<'_> {
-        let generation = self.shared.current.fetch_add(1, Ordering::SeqCst) + 1;
-        let mut state = self.shared.state.lock();
-        state.armed = Some(Armed {
-            deadline: Instant::now() + self.limit,
-            generation,
-            limit: self.limit,
-            run_loop: run_loop.handle(),
+    pub(crate) fn arm(&self, queue: &Queue<()>) -> WatchdogGuard<'_> {
+        let generation = self.current.fetch_add(1, Ordering::SeqCst) + 1;
+        let current = Arc::clone(&self.current);
+        let payload = TestTimedOut { limit: self.limit };
+        queue.post_after(self.limit, move |()| {
+            if current.load(Ordering::SeqCst) == generation {
+                // resume_unwind: no panic-hook message; the runner reports it.
+                std::panic::resume_unwind(Box::new(payload));
+            }
         });
-        self.shared.wakeup.notify_all();
         WatchdogGuard { watchdog: self }
     }
 
     fn disarm(&self) {
-        // A task already posted for this test sees a newer generation.
-        self.shared.current.fetch_add(1, Ordering::SeqCst);
-        let mut state = self.shared.state.lock();
-        state.armed = None;
-        self.shared.wakeup.notify_all();
-    }
-}
-
-impl Drop for Watchdog {
-    fn drop(&mut self) {
-        {
-            let mut state = self.shared.state.lock();
-            state.shutdown = true;
-            self.shared.wakeup.notify_all();
-        }
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
-        }
+        // The task posted for this test sees a newer generation.
+        self.current.fetch_add(1, Ordering::SeqCst);
     }
 }
 
@@ -121,35 +74,5 @@ pub(crate) struct WatchdogGuard<'a> {
 impl Drop for WatchdogGuard<'_> {
     fn drop(&mut self) {
         self.watchdog.disarm();
-    }
-}
-
-fn watch(shared: &Shared) {
-    let mut state = shared.state.lock();
-    loop {
-        if state.shutdown {
-            return;
-        }
-        let Some(armed) = &state.armed else {
-            shared.wakeup.wait(&mut state);
-            continue;
-        };
-        let now = Instant::now();
-        if now < armed.deadline {
-            let timeout = armed.deadline - now;
-            shared.wakeup.wait_for(&mut state, timeout);
-            continue;
-        }
-        // Expired: interrupt the test thread at its next RunLoop turn, once.
-        let armed = state.armed.take().expect("armed");
-        let current = Arc::clone(&shared.current);
-        let generation = armed.generation;
-        let payload = TestTimedOut { limit: armed.limit };
-        armed.run_loop.invoke(move || {
-            if current.load(Ordering::SeqCst) == generation {
-                // resume_unwind: no panic-hook message; the runner reports it.
-                std::panic::resume_unwind(Box::new(payload));
-            }
-        });
     }
 }

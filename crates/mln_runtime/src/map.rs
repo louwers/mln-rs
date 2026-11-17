@@ -3,7 +3,6 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, Weak};
 
-use mln_actor::AsyncTask;
 use mln_map::{
     BoundOptions, Camera, CameraCommandId, CameraDelta, CameraOptions, CameraUpdate, FreeCameraOptions, LogicalExtent,
     MapDebugOptions, MapEvent, MapMode, MapSnapshot, ProjectionMode, StyleLoadError, TransitionEnd, TransitionOutcome,
@@ -14,6 +13,7 @@ use mln_style::Edit;
 use mln_style::layers::CustomLayerHost;
 use mln_text::GlyphCache;
 use mln_util::error::{Error, ErrorKind};
+use mln_util::event_queue::Waker;
 use mln_util::geo::LatLngBounds;
 use mln_util::hash::HashMap;
 use mln_util::pool::Pool;
@@ -27,7 +27,7 @@ use crate::feature_state::{FeatureState, FeatureStateSelector};
 use crate::render::{
     Abandoner, AttachOptions, RenderSession, RenderTarget, SessionId, SessionQueue, SessionShared, Worker, worker_post,
 };
-use crate::runtime::{Outbox, Runtime, RuntimeCore, RuntimeShared, async_task};
+use crate::runtime::{CoreQueue, Outbox, Runtime, RuntimeCore, RuntimeShared, post};
 use crate::style::{CallbackSources, GeoJsonUpdates};
 
 /// The ID of a map, unique within its runtime.
@@ -1438,11 +1438,8 @@ pub(crate) struct MapEntry {
     pending_still: Option<PendingStill>,
     /// The render session that draws the map.
     session: Option<SessionLink>,
-    /// Flushes the map after the runtime's loop has run the tasks queued on
-    /// it. The map's waker sends it, and each flush withdraws the send, so
-    /// it is pending while the map has reported something that no flush has
-    /// taken.
-    flush_task: AsyncTask,
+    /// Set while the map has reported something that no flush has taken.
+    flush_pending: FlushFlag,
     /// The camera commands whose change hasn't ended.
     camera_commands: HashMap<CameraCommandId, Resolver<TransitionEnd>>,
     /// The callbacks of the custom sources that commands added.
@@ -1461,6 +1458,41 @@ impl MapEntry {
     }
 }
 
+/// Whether a map reported something that no flush has taken: what its
+/// reports waker sets. Reports that come before the flush they posted runs
+/// share it.
+#[derive(Clone, Default)]
+struct FlushFlag(Arc<AtomicBool>);
+
+impl FlushFlag {
+    /// The map `id`'s reports waker: it sets the flag, and posts a flush to
+    /// `queue` when the flag was clear. The posted flush does nothing once
+    /// another flush took the reports.
+    fn waker(&self, queue: &CoreQueue, id: MapId) -> Waker {
+        let (flag, queue) = (self.clone(), queue.downgrade());
+        Arc::new(move || {
+            if !flag.0.swap(true, Ordering::SeqCst)
+                && let Some(queue) = queue.upgrade()
+            {
+                let flag = flag.clone();
+                post(&queue, move |core, outbox| {
+                    if flag.is_set() {
+                        flush(core, id, outbox);
+                    }
+                });
+            }
+        })
+    }
+
+    fn is_set(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
+
+    fn clear(&self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
 /// Builds the map `id` on the runtime's thread.
 pub(crate) fn create(
     core: &mut RuntimeCore,
@@ -1471,12 +1503,10 @@ pub(crate) fn create(
     outbox: &mut Outbox,
 ) {
     let registry = Arc::clone(core.registry.style());
-    let mut map =
-        match mln_map::Map::with_registry(Arc::clone(core.loader()), options.map, registry, &core.run_loop, &core.pool)
-        {
-            Ok(map) => map,
-            Err(error) => return outbox.resolve(resolver, Err(error)),
-        };
+    let mut map = match mln_map::Map::with_registry(Arc::clone(core.loader()), options.map, registry, &core.pool) {
+        Ok(map) => map,
+        Err(error) => return outbox.resolve(resolver, Err(error)),
+    };
     if let Some(json) = &options.fallback_font_faces {
         if let Err(error) = map.set_fallback_font_faces(json) {
             return outbox.resolve(resolver, Err(error));
@@ -1485,9 +1515,8 @@ pub(crate) fn create(
         map.set_fallback_font_face_list(mln_system_fonts::fallback_font_face_list());
     }
     let _ = published.updates.set(map.update_reader());
-    let flush_task = async_task(&core.run_loop, &core.queue, move |core, outbox| flush(core, id, outbox));
-    let flush_sender = flush_task.sender();
-    map.set_reports_waker(Some(Arc::new(move || flush_sender.send())));
+    let flush_pending = FlushFlag::default();
+    map.set_reports_waker(Some(flush_pending.waker(&core.queue, id)));
     published.applied.store(1, Ordering::SeqCst);
     core.maps.insert(
         id,
@@ -1499,7 +1528,7 @@ pub(crate) fn create(
             pending_style: None,
             pending_still: None,
             session: None,
-            flush_task,
+            flush_pending,
             camera_commands: HashMap::default(),
             callback_sources: CallbackSources::default(),
             geojson_updates: GeoJsonUpdates::default(),
@@ -1525,9 +1554,9 @@ pub(crate) fn apply_command<T>(
     after: impl FnOnce(&MapEntry, T, Applied, &mut Outbox),
 ) {
     // What the runtime's calls change, a flush in the same task takes. What
-    // came since then, the map reported: the report sent the flush task, or
-    // is queued with its waker still on its way.
-    if core.maps.get(&id).is_some_and(|entry| entry.flush_task.is_pending() || entry.core.has_reports()) {
+    // came since then, the map reported: the report posted a flush, or is
+    // queued with its waker still on its way.
+    if core.maps.get(&id).is_some_and(|entry| entry.flush_pending.is_set() || entry.core.has_reports()) {
         flush(core, id, outbox);
     }
     let Some(entry) = core.maps.get_mut(&id) else { return };
@@ -1604,8 +1633,8 @@ fn load_style(
 pub(crate) fn flush(core: &mut RuntimeCore, id: MapId, outbox: &mut Outbox) {
     let Some(entry) = core.maps.get_mut(&id) else { return };
     // The flush takes what the map reported so far, and what it reports from
-    // now on sends the task again.
-    entry.flush_task.cancel();
+    // now on posts another.
+    entry.flush_pending.clear();
     let events = entry.core.drain_events();
     // The sources that left the style, by a command or a style load, let go
     // of what they held before anything reports the change.

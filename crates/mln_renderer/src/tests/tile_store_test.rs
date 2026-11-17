@@ -8,7 +8,6 @@ use std::sync::Arc;
 
 use feature::{Feature, PropertyMap};
 use geo_types::{Geometry, Point};
-use mln_actor::RunLoop;
 use mln_map_types::MapMode;
 use mln_storage::{FileSource, Resource, Responder, Response};
 use mln_tile::TileData;
@@ -84,19 +83,18 @@ fn features(ids: &[u64]) -> TileData {
 }
 
 struct Test {
-    run_loop: RunLoop,
     pool: TaskGroup,
 }
 
 impl Test {
     fn new() -> Self {
-        Test { run_loop: RunLoop::new(), pool: TaskGroup::new(&crate::tests::pool()) }
+        Test { pool: TaskGroup::new(&crate::tests::pool()) }
     }
 
     /// Tile 0/0/0 of a vector tileset whose tiles `file_source` answers,
     /// whose jobs run on `workers`.
     fn tileset_tile(&self, file_source: &Arc<Held>, workers: Box<dyn TileWorkers>) -> OneTile {
-        let store = tile_store(&self.run_loop, &self.pool, workers);
+        let store = tile_store(&self.pool, workers);
         let file_source: Arc<dyn FileSource> = Arc::<Held>::clone(file_source);
         let origin = DataOrigin::Tileset {
             tileset: Tileset { tiles: vec!["tiles".to_owned()], ..Default::default() },
@@ -109,7 +107,7 @@ impl Test {
 
     /// Tile 0/0/0 of a source of its own, whose jobs run on `workers`.
     fn tile(&self, workers: Box<dyn TileWorkers>) -> OneTile {
-        let store = tile_store(&self.run_loop, &self.pool, workers);
+        let store = tile_store(&self.pool, workers);
         OneTile::new(store, TileKind::Geometry, OverscaledTileID::from_zxy(0, 0, 0), MapMode::Static)
     }
 }
@@ -424,7 +422,7 @@ fn style_replaced_mid_load() {
 #[test]
 fn dem_backfill_as_dems_arrive() {
     let test = Test::new();
-    let store = tile_store(&test.run_loop, &test.pool, Box::new(InlineWorkers));
+    let store = tile_store(&test.pool, Box::new(InlineWorkers));
     let (left, right) = (OverscaledTileID::from_zxy(1, 0, 0), OverscaledTileID::from_zxy(1, 1, 0));
     let mut tiles = OneTile::new(store, TileKind::Dem(RasterEncoding::Mapbox), right, MapMode::Static);
     tiles.add(left);
@@ -451,7 +449,7 @@ fn dem_backfill_as_dems_arrive() {
     }
 
     // The world's one tile at zoom 0 is in the first and the last row.
-    let store = tile_store(&test.run_loop, &test.pool, Box::new(InlineWorkers));
+    let store = tile_store(&test.pool, Box::new(InlineWorkers));
     let root = OverscaledTileID::from_zxy(0, 0, 0);
     let mut root_tile = OneTile::new(store, TileKind::Dem(RasterEncoding::Mapbox), root, MapMode::Static);
     root_tile.set_image(&root, Some(png(16, 16)));

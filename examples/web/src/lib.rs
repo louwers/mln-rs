@@ -21,9 +21,9 @@
 //! The page's thread runs no wasm: it only starts the Web Workers and
 //! forwards to the map's.
 //!
-//! An instance has no threads, so `start` installs a `CooperativeScheduler`
-//! before anything else runs, and the instance's tasks run when its Web
-//! Worker runs them.
+//! An instance has no threads, so the instance's work runs in the slices of
+//! its pump (`mln_web_host::pump`) when its Web Worker's event loop runs
+//! them.
 //!
 //! web/main.ts, web/map-worker.ts and web/tile-worker.ts are the page's side.
 
@@ -39,14 +39,13 @@ use mln_runtime::registry::{Registry, RegistryBuilder, register_builtins};
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
 use wasm_bindgen::prelude::*;
 
-/// Runs when an instance starts, in each Web Worker, before any
-/// map or file source exists (they would start threads otherwise).
+/// Runs when an instance starts, in each Web Worker, before any map
+/// exists.
 #[wasm_bindgen(start)]
 fn start() {
     // The Web Worker's script reads a panic's message from `mlnPanic`.
     mln_web_host::set_panic_hook();
     Log::set_observer(Box::new(ConsoleLog));
-    let _ = mln_web_host::install_cooperative_scheduler();
 }
 
 /// The registrations of the map's runtime and of the tile workers, which

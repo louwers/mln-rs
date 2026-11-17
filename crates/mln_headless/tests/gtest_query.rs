@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use feature::{PropertyMap, Value};
 use geojson::{GeoJson, Geometry};
-use mln_actor::RunLoop;
 use mln_map::{CameraOptions, MapMode};
 use mln_renderer::Registry;
 use mln_renderer::query::{FeatureExtensionValue, RenderedQueryOptions, SourceQueryOptions};
@@ -30,8 +29,8 @@ struct QueryTest(MapTest);
 
 impl QueryTest {
     fn new() -> Self {
-        let run_loop = RunLoop::new();
-        let file_source = StubFileSource::on_loop(&run_loop, ResponseType::Asynchronous);
+        let run_loop = TestLoop::new();
+        let file_source = StubFileSource::on_queue(run_loop.queue(), ResponseType::Asynchronous);
         let test = QueryTest(MapTest::create(run_loop, file_source, 1.0, MapMode::Static));
         test.map().load_style_json(&read_file("test/fixtures/api/query_style.json"));
         test.map()

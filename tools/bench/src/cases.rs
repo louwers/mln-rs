@@ -149,7 +149,6 @@ pub fn all() -> Vec<Case> {
     cases.push(Case::new("Runtime/Lifecycle", |cx| runtime_lifecycle(cx, false)));
     cases.push(Case::new("Runtime/Startup", |cx| runtime_lifecycle(cx, true)));
     cases.push(Case::new("Map/FourOnOneRuntime", map_four_on_one_runtime));
-    cases.push(Case::new("Loop/Timers", loop_timers));
     cases.push(Case::new("Command/RoundTrip", command_round_trip));
     cases.push(Case::new("Command/Burst", command_burst));
     cases.push(Case::new("Memory/LeaveZoomRange", memory_leave_zoom_range));
@@ -858,7 +857,7 @@ fn frame_oscillate(cx: &Context, name: &str, path: fn(f64) -> Camera) -> Metrics
     metrics
 }
 
-/// A settled map in slices of 100 ms, the run loop drawing whenever the map
+/// A settled map in slices of 100 ms, the scene drawing whenever the map
 /// asks, as an idle app's: what it costs to do nothing, and how many frames
 /// it draws when nothing changes.
 fn frame_idle(cx: &Context) -> Metrics {
@@ -1423,30 +1422,4 @@ fn geojson_replace(cx: &Context) -> Metrics {
     metrics.lead("ready_ms", median(&ready));
     metrics.other("frames", frames.len() as f64 / longest.len() as f64);
     metrics
-}
-
-/// A loop with 500 running timers, as the online file source's thread has
-/// one per resource a map shows, which waits for the resource to expire:
-/// every timer restarted once, with a turn of the loop before each, as the
-/// loop turns for each response, which restarts its request's timer.
-fn loop_timers(cx: &Context) -> Metrics {
-    const TIMERS: usize = 500;
-    const LATER: Duration = Duration::from_secs(3600);
-    let run_loop = mln_actor::RunLoop::new();
-    let timers: Vec<mln_actor::Timer> = (0..TIMERS).map(|_| mln_actor::Timer::new(&run_loop)).collect();
-    for timer in &timers {
-        timer.start(LATER, Duration::ZERO, || {});
-    }
-    let mut meter = Meter::new();
-    for _ in 0..cx.iterations(10) {
-        meter.start();
-        for timer in &timers {
-            run_loop.invoke(|| {});
-            run_loop.wait_for_work();
-            run_loop.run_once();
-            timer.start(LATER, Duration::ZERO, || {});
-        }
-        meter.stop();
-    }
-    meter.finish()
 }

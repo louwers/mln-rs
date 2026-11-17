@@ -10,7 +10,7 @@ use parking_lot::Mutex;
 
 /// Tells the owner of a queue that the queue has events to take. It runs on
 /// the thread that pushed the event, so it must not take the events itself
-/// there: it schedules the owner to do it, as by sending an `AsyncTask`.
+/// there: it schedules the owner to do it, as by posting to its `Queue`.
 pub type Waker = Arc<dyn Fn() + Send + Sync>;
 
 struct Shared<T> {

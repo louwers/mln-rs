@@ -41,6 +41,7 @@ pub mod pool;
 pub mod premultiply;
 pub mod projection;
 pub mod quaternion;
+pub mod queue;
 pub mod serialization;
 pub mod size;
 pub mod subdivision_granularity;

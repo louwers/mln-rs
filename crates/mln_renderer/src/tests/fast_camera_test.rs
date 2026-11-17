@@ -14,7 +14,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_actor::{LocalObject, RunLoop};
+use mln_actor::LocalObject;
 use mln_map::transform::Transform;
 use mln_map_types::{CameraOptions, ConstrainMode, MapDebugOptions, MapMode, TileLodMode, ViewportMode};
 use mln_storage::{FileSource, Resource, Responder, Response};
@@ -27,6 +27,7 @@ use mln_util::chrono::{Timestamp, now};
 use mln_util::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS;
 use mln_util::geo::LatLng;
 use mln_util::pool::TaskGroup;
+use mln_util::queue::Queue;
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::tileset::PartialTileset;
@@ -163,7 +164,7 @@ impl FileSource for Network {
 /// a raster source of 256-pixel tiles up to zoom 6, as the Liberty style
 /// draws its land and water at low zoom levels.
 struct Scene {
-    run_loop: RunLoop,
+    run_loop: Queue<()>,
     thread_pool: TaskGroup,
     network: Arc<Network>,
     transform: Transform,
@@ -179,7 +180,7 @@ struct Scene {
 
 impl Scene {
     fn new(size: Size) -> Self {
-        let run_loop = RunLoop::new();
+        let run_loop = Queue::new();
         let thread_pool = TaskGroup::new(&crate::tests::pool());
         let network = Arc::new(Network::new());
 
@@ -202,7 +203,7 @@ impl Scene {
         let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);
         transform.resize(size).unwrap();
 
-        let mut store = crate::tests::pool_store(&run_loop, &thread_pool);
+        let mut store = crate::tests::pool_store(&thread_pool);
         Scene {
             vector_render_source: crate::tests::create_render_source(&vector, &mut store),
             raster_render_source: crate::tests::create_render_source(&raster, &mut store),
@@ -271,7 +272,7 @@ impl Scene {
         // anything left to do.
         loop {
             self.thread_pool.wait();
-            let ran = self.run_loop.run_once();
+            let ran = self.run_loop.run_once(&mut ());
             crate::tests::update(&mut self.store);
             let work = self.pyramids().iter().any(|source| source.tiles.values().any(SourceInfo::has_work));
             if !ran && !work && self.store.is_idle() {

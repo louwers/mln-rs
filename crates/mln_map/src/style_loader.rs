@@ -17,7 +17,6 @@
 
 use std::sync::Arc;
 
-use mln_actor::RunLoop;
 use mln_sprite::load_sprite;
 use mln_storage::{Data, FileSource, FileSourceExt, Request, Resource, Response};
 use mln_style::source_type::{Described, ErasedDescription, Load};
@@ -130,7 +129,6 @@ struct SpriteLoad {
 /// loaded for a still image. A source whose load failed isn't loaded.
 pub(crate) struct StyleLoader {
     file_source: Option<Arc<dyn FileSource>>,
-    run_loop: RunLoop,
     jobs: TaskGroup,
     replies: EventQueue<Reply>,
     /// The URL of the style document, or `None` for a style loaded from
@@ -164,20 +162,12 @@ pub(crate) struct StyleLoader {
 impl StyleLoader {
     /// A loader that requests from `file_source` and parses sprites and
     /// describes sources in a group of its own on `pool`, for
-    /// `pixel_ratio`. A reply that arrives wakes `run_loop`.
-    pub(crate) fn new(
-        file_source: Option<Arc<dyn FileSource>>,
-        run_loop: &RunLoop,
-        pool: &Pool,
-        pixel_ratio: f32,
-    ) -> Self {
-        let replies = EventQueue::new();
-        replies.set_waker(Some(Self::waker(run_loop, None)));
+    /// `pixel_ratio`.
+    pub(crate) fn new(file_source: Option<Arc<dyn FileSource>>, pool: &Pool, pixel_ratio: f32) -> Self {
         StyleLoader {
             file_source,
-            run_loop: run_loop.clone(),
             jobs: TaskGroup::new(pool),
-            replies,
+            replies: EventQueue::new(),
             url: None,
             request: None,
             loads: 0,
@@ -208,24 +198,9 @@ impl StyleLoader {
         !self.replies.is_empty()
     }
 
-    /// Sets the waker that runs, after the loop's wake, when a reply
-    /// arrives.
+    /// Sets the waker that runs, on any thread, when a reply arrives.
     pub(crate) fn set_waker(&self, waker: Option<Waker>) {
-        self.replies.set_waker(Some(Self::waker(&self.run_loop, waker)));
-    }
-
-    /// Wakes `run_loop`, whose host may be waiting for it with no waker of
-    /// the map's set, then runs `then`.
-    fn waker(run_loop: &RunLoop, then: Option<Waker>) -> Waker {
-        let run_loop = run_loop.handle().downgrade();
-        Arc::new(move || {
-            if let Some(run_loop) = run_loop.upgrade() {
-                run_loop.wake();
-            }
-            if let Some(then) = &then {
-                then();
-            }
-        })
+        self.replies.set_waker(waker);
     }
 
     /// Loads the style document `json`, parsed against `registry`, and

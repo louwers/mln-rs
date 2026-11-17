@@ -27,7 +27,6 @@ fastrand.workspace = true
 feature.workspace = true
 geojson.workspace = true
 geometry.workspace = true
-mln_actor.workspace = true
 mln_conversion.workspace = true
 mln_gfx.workspace = true
 mln_headless.workspace = true

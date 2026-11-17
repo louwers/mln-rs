@@ -1,8 +1,5 @@
-use std::cell::Cell;
-use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
 use mln_map::{BoundOptions, Map, MapOptions, ProjectionMode};
 use mln_renderer::Registry;
@@ -11,6 +8,8 @@ use mln_storage::{FileSource, FileSourceExt};
 use mln_style::Edit;
 use mln_util::image::PremultipliedImage;
 use mln_util::pool::Pool;
+use mln_util::queue::Queue;
+use mln_util::time::Instant;
 
 use crate::file_source::proxy_loader;
 use crate::metadata::{MapMode, TestMetadata};
@@ -33,8 +32,8 @@ pub(crate) struct Impl {
     /// options' cache path.
     pub(crate) file_source: Option<Arc<dyn FileSource>>,
     pub(crate) map: Map,
-    /// The runner's loop, which the map runs on.
-    run_loop: RunLoop,
+    /// The runner's queue, which the frontend runs while it waits.
+    queue: Queue<()>,
 }
 
 impl Impl {
@@ -44,7 +43,7 @@ impl Impl {
         metadata: &TestMetadata,
         resource_options: &ResourceOptions,
         impl_options: ImplOptions,
-        run_loop: &RunLoop,
+        queue: &Queue<()>,
         pool: &Pool,
     ) -> Result<Impl, String> {
         let resource_options = mln_storage::ResourceOptions {
@@ -53,10 +52,14 @@ impl Impl {
         };
         let registry = Registry::with_builtins();
         let mut frontend =
-            HeadlessFrontend::new(metadata.size, metadata.pixel_ratio, run_loop, pool).map_err(|e| e.to_string())?;
+            HeadlessFrontend::new(metadata.size, metadata.pixel_ratio, queue, pool).map_err(|e| e.to_string())?;
         if impl_options.tile_worker_codec > 0 {
             let count = impl_options.tile_worker_codec;
-            let workers = RemoteWorkers::new(&run_loop.handle(), Arc::clone(&registry), |replies| {
+            let post = {
+                let queue = queue.clone();
+                Arc::new(move |task: Box<dyn FnOnce() + Send>| queue.post(move |()| task()))
+            };
+            let workers = RemoteWorkers::new(post, Arc::clone(&registry), |replies| {
                 Box::new(ThreadWorkerInstances::new(count, Arc::clone(&registry), &replies))
             });
             frontend.renderer().set_tile_workers(&workers);
@@ -72,16 +75,15 @@ impl Impl {
                 ..Default::default()
             },
             Arc::clone(registry.style()),
-            run_loop,
             pool,
         )
         .map_err(|e| e.to_string())?;
-        frontend.attach(&map);
+        frontend.attach(&mut map);
         if let Some(max_pitch) = metadata.max_pitch {
             map.set_bounds(&BoundOptions { max_pitch: Some(f64::from(max_pitch)), ..Default::default() })
                 .map_err(|e| e.to_string())?;
         }
-        Ok(Impl { frontend, file_source: Some(file_source), map, run_loop: run_loop.clone() })
+        Ok(Impl { frontend, file_source: Some(file_source), map, queue: queue.clone() })
     }
 
     /// Changes the map's tile settings.
@@ -356,15 +358,17 @@ impl TestRunnerImpl for Impl {
 
     fn add_image(&mut self, name: &str, image_path: &str, pixel_ratio: f32, sdf: bool) -> Result<(), MapError> {
         // `ctx.getFileSource().request(Resource::image("mapbox://render-tests/" +
-        // imagePath), ...)`, running the run loop until it completes.
+        // imagePath), ...)`, running the queue until it completes.
         let Some(file_source) = &self.file_source else {
             return Err(MapError::LoadFailed);
         };
         let (sender, responses) = std::sync::mpsc::channel();
+        let wake = self.frontend.waker();
         let _req = file_source.request(
             &mln_storage::Resource::image(&format!("mapbox://render-tests/{image_path}")),
             move |response: mln_storage::Response| {
                 let _ = sender.send(response.data);
+                wake();
             },
         );
 
@@ -372,8 +376,9 @@ impl TestRunnerImpl for Impl {
             match responses.try_recv() {
                 Ok(data) => break data,
                 Err(std::sync::mpsc::TryRecvError::Empty) => {
-                    self.run_loop.run_once();
+                    self.queue.run_once(&mut ());
                     self.map.process_events();
+                    self.queue.park();
                 }
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => break None,
             }
@@ -407,29 +412,25 @@ impl TestRunnerImpl for Impl {
     }
 
     fn sleep(&mut self, duration: std::time::Duration) -> Result<(), MapError> {
-        // util::Timer sleepTimer; sleepTimer.start(duration, zero, ...);
-        // while (sleeping) RunLoop::Get()->runOnce();
-        let sleeping = Rc::new(Cell::new(true));
-        let sleep_timer = mln_actor::Timer::new(&self.run_loop);
-        {
-            let sleeping = Rc::clone(&sleeping);
-            sleep_timer.start(duration, std::time::Duration::ZERO, move || sleeping.set(false));
-        }
-        while sleeping.get() {
-            self.run_loop.run_once();
+        // C++ runs the loop until a timer of `duration` fires.
+        let deadline = Instant::now() + duration;
+        while Instant::now() < deadline {
+            self.queue.run_once(&mut ());
             self.map.process_events();
+            self.queue.park_until(Some(deadline));
         }
         Ok(())
     }
 }
 
-/// The factory `TestRunner::run` uses for `maps[key]`, on the runner's loop.
+/// The factory `TestRunner::run` uses for `maps[key]`, on the runner's
+/// queue.
 pub fn factory() -> ImplFactory {
     Box::new(
         |metadata: &TestMetadata,
          resource_options: &ResourceOptions,
          impl_options: &ImplOptions,
-         run_loop: &RunLoop,
-         pool: &Pool| { Ok(Box::new(Impl::new(metadata, resource_options, *impl_options, run_loop, pool)?)) },
+         queue: &Queue<()>,
+         pool: &Pool| { Ok(Box::new(Impl::new(metadata, resource_options, *impl_options, queue, pool)?)) },
     )
 }
