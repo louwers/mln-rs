@@ -9,6 +9,7 @@ use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::rc::Rc;
 
+use block2::RcBlock;
 use mln_mtl::surface_target::{Overlay, OverlayTarget};
 use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
@@ -16,13 +17,14 @@ use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_foundation::NSString;
 use objc2_metal::{
-    MTLBlendFactor, MTLBlendOperation, MTLBuffer, MTLCommandBuffer, MTLCommandEncoder, MTLDevice, MTLIndexType,
-    MTLLibrary, MTLLoadAction, MTLOrigin, MTLPixelFormat, MTLPrimitiveType, MTLRegion, MTLRenderCommandEncoder,
-    MTLRenderPassDescriptor, MTLRenderPipelineDescriptor, MTLRenderPipelineState, MTLResourceOptions,
-    MTLSamplerAddressMode, MTLSamplerDescriptor, MTLSamplerMinMagFilter, MTLSamplerState, MTLScissorRect, MTLSize,
-    MTLStoreAction, MTLTexture, MTLTextureDescriptor, MTLTextureUsage, MTLVertexDescriptor, MTLVertexFormat,
-    MTLVertexStepFunction,
+    MTLBlendFactor, MTLBlendOperation, MTLBuffer, MTLCommandBuffer, MTLCommandEncoder, MTLDevice, MTLDrawable,
+    MTLIndexType, MTLLibrary, MTLLoadAction, MTLOrigin, MTLPixelFormat, MTLPrimitiveType, MTLRegion,
+    MTLRenderCommandEncoder, MTLRenderPassDescriptor, MTLRenderPipelineDescriptor, MTLRenderPipelineState,
+    MTLResourceOptions, MTLSamplerAddressMode, MTLSamplerDescriptor, MTLSamplerMinMagFilter, MTLSamplerState,
+    MTLScissorRect, MTLSize, MTLStoreAction, MTLTexture, MTLTextureDescriptor, MTLTextureUsage, MTLVertexDescriptor,
+    MTLVertexFormat, MTLVertexStepFunction,
 };
+use objc2_quartz_core::CACurrentMediaTime;
 
 use crate::overlay::Paint;
 
@@ -78,6 +80,17 @@ pub(crate) fn metal_overlay(paint: Rc<RefCell<Paint>>) -> Overlay {
     let mut painter: Option<Painter> = None;
     let mut failed = false;
     Box::new(move |target: &OverlayTarget<'_>| {
+        // Every frame, so that the presentations follow the map's frames
+        // whatever the controls do.
+        let shown = paint.borrow().presentations.send(CACurrentMediaTime());
+        let report = RcBlock::new(move |drawable: NonNull<ProtocolObject<dyn MTLDrawable>>| {
+            // SAFETY: the drawable that Metal calls the handler for.
+            let at = unsafe { drawable.as_ref() }.presentedTime();
+            shown.report((at > 0.0).then_some(at));
+        });
+        // SAFETY: a block that Metal copies, and that only reads the drawable
+        // it gets.
+        unsafe { target.drawable.addPresentedHandler(RcBlock::as_ptr(&report)) };
         if failed {
             return;
         }

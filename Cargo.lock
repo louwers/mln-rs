@@ -2572,6 +2572,7 @@ name = "mln-rs-desktop"
 version = "0.0.12"
 dependencies = [
  "ash",
+ "block2 0.6.2",
  "egui",
  "egui-wgpu",
  "egui-winit",
@@ -3770,6 +3771,7 @@ dependencies = [
  "bitflags 2.13.2",
  "block2 0.6.2",
  "objc2 0.6.5",
+ "objc2-core-foundation",
  "objc2-foundation 0.3.2",
  "objc2-io-surface",
 ]

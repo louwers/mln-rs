@@ -38,6 +38,9 @@ pub struct OverlayTarget<'a> {
     /// A command buffer of the overlay's, which the overlay encodes its
     /// passes into, committed after the frame's.
     pub command_buffer: &'a ProtocolObject<dyn MTLCommandBuffer>,
+    /// The drawable that the frame presents, for feedback on its
+    /// presentation, such as `-[MTLDrawable addPresentedHandler:]`.
+    pub drawable: &'a ProtocolObject<dyn CAMetalDrawable>,
     pub texture: &'a ProtocolObject<dyn MTLTexture>,
     /// In physical pixels.
     pub size: Size,
@@ -243,7 +246,13 @@ impl SurfaceTarget {
         if let Some(overlay) = self.overlay.borrow_mut().as_mut() {
             gpu.take_waits_into_next_submit(color);
             let submitted = gpu.submit_native(|command_buffer| {
-                overlay(&OverlayTarget { device: &self.device, command_buffer, texture: &texture, size });
+                overlay(&OverlayTarget {
+                    device: &self.device,
+                    command_buffer,
+                    drawable: &drawable,
+                    texture: &texture,
+                    size,
+                });
             });
             if let Err(error) = submitted {
                 Log::error(Event::Render, format!("Submitting the overlay failed: {error}"));

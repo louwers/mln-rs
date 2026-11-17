@@ -43,14 +43,19 @@ serde_json.workspace = true
 wgpu.workspace = true
 winit.workspace = true
 
-# The Metal backend, the CAMetalLayer it presents to (metal_layer.rs) and the
-# controls drawn on Metal (metal_overlay.rs).
+# The Metal backend, the CAMetalLayer it presents to (metal_layer.rs), the
+# controls drawn on Metal (metal_overlay.rs), and when its frames reach the
+# display (presentation.rs).
 [target.'cfg(target_os = "macos")'.dependencies]
+block2.workspace = true
 mln_mtl.workspace = true
 objc2.workspace = true
 objc2-foundation.workspace = true
-objc2-metal.workspace = true
-objc2-quartz-core.workspace = true
+objc2-metal = { workspace = true, features = [
+  "block2",
+  "objc2-core-foundation",
+] }
+objc2-quartz-core = { workspace = true, features = ["CABase"] }
 raw-window-metal.workspace = true
 
 # The Vulkan backend and the controls drawn on Vulkan (vulkan_overlay.rs).

@@ -7,6 +7,8 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::presentation::Presentations;
+
 /// The controls' last frame, which the overlay paints over each frame of the
 /// map until the next.
 #[derive(Default)]
@@ -18,6 +20,8 @@ pub(crate) struct Paint {
     /// The GPU that the overlay draws on, where only the overlay can name
     /// it: OpenGL's renderer, which its context names.
     pub(crate) renderer: Option<String>,
+    /// When the frames that the overlay drew over reached the display.
+    pub(crate) presentations: Presentations,
 }
 
 impl Paint {

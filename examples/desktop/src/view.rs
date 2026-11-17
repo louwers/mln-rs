@@ -28,10 +28,13 @@
 // the map once it is idle (or at exit), as an offscreen session on the
 // window's device renders it, without the controls; `--quit-after <seconds>`
 // closes the window; the style report prints once the style's layers and the
-// sources that the map didn't load.
+// sources that the map didn't load. On Metal, the frame report, and the
+// gesture test after each step, say how evenly frames reached the display
+// (presentation.rs); a window behind others shows none of them.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -62,6 +65,7 @@ use crate::backend::{self, Kind, WindowSession, WindowSurfaces};
 use crate::host::{Inbox, Message, UserEvent};
 use crate::overlay::Paint;
 use crate::pacing::{Pacing, Ready, Refreshes};
+use crate::presentation::{Cadence, Presentation};
 use crate::settings::Settings;
 use crate::styles::{self, Style};
 use crate::ui::{Action, Controls, Shown};
@@ -250,6 +254,8 @@ pub(crate) fn run(launch: Launch) {
         style: styles::style_for(&style_url),
         next_backend: None,
         frame_report: String::new(),
+        presented: Vec::new(),
+        step_presented: Vec::new(),
         benchmark: args.benchmark,
         pixel_ratio,
         physical_size: size,
@@ -375,6 +381,10 @@ struct View {
     /// The backend the controls asked for, which the next frame switches to.
     next_backend: Option<Kind>,
     frame_report: String,
+    /// The frames that reached the display since the last frame report, and
+    /// since the gesture test's last step.
+    presented: Vec<Presentation>,
+    step_presented: Vec<Presentation>,
 
     benchmark: bool,
     pixel_ratio: f64,
@@ -821,6 +831,15 @@ impl View {
             let fps = f64::from(self.frames) / elapsed;
             self.frame_time /= self.frames as f32;
             self.frame_report = format!("Frame time: {:.2} ms ({fps:.0} fps)", self.frame_time);
+            if let Some(cadence) = Cadence::of(&std::mem::take(&mut self.presented)) {
+                let _ = write!(
+                    self.frame_report,
+                    ", shown every {:.2} ms, {} late, {} dropped",
+                    cadence.interval * 1000.0,
+                    cadence.late,
+                    cadence.dropped,
+                );
+            }
             Log::info(Event::Render, &self.frame_report);
             self.frames = 0;
             self.frame_time = 0.0;
@@ -828,9 +847,15 @@ impl View {
         }
     }
 
-    /// The checks after each frame: the style report, the gesture test, the
-    /// readback and the quit timer.
+    /// The checks after each frame: the frames that reached the display, the
+    /// style report, the gesture test, the readback and the quit timer.
     fn after_frame(&mut self) {
+        let presented = self.paint.borrow().presentations.take();
+        if self.gesture_test.is_some() {
+            self.step_presented.extend_from_slice(&presented);
+        }
+        self.presented.extend(presented);
+
         if self.style_reported {
             self.run_gesture_test();
         }
@@ -969,6 +994,9 @@ impl View {
         test.next_at = Some(now + Duration::from_millis(1500));
         let step = test.step;
         test.step += 1;
+        if let Some(cadence) = Cadence::of(&std::mem::take(&mut self.step_presented)) {
+            Log::info(Event::Render, format!("Gesture test step {}: {cadence}", step.saturating_sub(1)));
+        }
 
         let center = ScreenCoordinate::new(f64::from(self.size.width) / 2.0, f64::from(self.size.height) / 2.0);
         let (cx, cy) = (center.x, center.y);
