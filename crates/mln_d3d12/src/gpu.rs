@@ -994,8 +994,11 @@ impl Gpu for D3d12Gpu {
         let bytes = u64::from(width) * u64::from(height) * u64::from(desc.format.bytes_per_texel().unwrap_or(8));
         let memory = self.memory.texture(self.device.device(), &resource_desc, bytes, rest)?;
         let id = self.insert_texture(memory, format, info, rest)?;
-        if desc.usage.render_target {
-            self.clear_new_target(id, depth)?;
+        if desc.usage.render_target
+            && let Err(error) = self.clear_new_target(id, depth)
+        {
+            self.destroy(ResourceId::Texture(id));
+            return Err(error);
         }
         Ok(id)
     }

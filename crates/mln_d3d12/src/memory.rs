@@ -230,6 +230,27 @@ impl Memory {
             .map_err(allocation_error(name))
     }
 
+    /// A buffer of `desc` placed in `location`, with its address as [`map`]
+    /// gives it. A failed map frees the buffer.
+    fn place_mapped(
+        &mut self,
+        name: &str,
+        location: MemoryLocation,
+        desc: &D3D12_RESOURCE_DESC,
+        state: D3D12_RESOURCE_STATES,
+    ) -> Result<(Resource, *mut u8), GpuError> {
+        let resource = self.place(name, location, desc, state)?;
+        match map(resource.resource(), location) {
+            Ok(mapped) => Ok((resource, mapped)),
+            Err(error) => {
+                if let Err(free) = self.allocator.free_resource(resource) {
+                    Log::error(Event::Render, format!("freeing GPU memory failed: {free}"));
+                }
+                Err(error)
+            }
+        }
+    }
+
     /// `size` bytes of a buffer in `location`, mapped unless only the GPU
     /// reaches it: a slab, or above the largest slab a buffer of its own.
     pub(crate) fn buffer(&mut self, location: MemoryLocation, size: u64) -> Result<BufferMemory, GpuError> {
@@ -244,8 +265,7 @@ impl Memory {
             _ => D3D12_RESOURCE_STATE_COMMON,
         };
         if slab >= SLAB_SIZES {
-            let resource = self.place("buffer", location, &buffer_desc(size), state)?;
-            let mapped = map(resource.resource(), location)?;
+            let (resource, mapped) = self.place_mapped("buffer", location, &buffer_desc(size), state)?;
             return Ok(BufferMemory {
                 resource: resource.resource().clone(),
                 offset: 0,
@@ -256,8 +276,7 @@ impl Memory {
             });
         }
         if self.slabs[index].free[slab].is_empty() {
-            let resource = self.place("slabs", location, &buffer_desc(SLAB_PAGE), state)?;
-            let mapped = map(resource.resource(), location)?;
+            let (resource, mapped) = self.place_mapped("slabs", location, &buffer_desc(SLAB_PAGE), state)?;
             let slabs = &mut self.slabs[index];
             let page = slabs.pages.len();
             slabs.pages.push(Page { resource, mapped });
