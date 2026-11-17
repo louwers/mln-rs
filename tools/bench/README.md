@@ -259,6 +259,16 @@ the GPU it drew on and its backend, whether that GPU is a CPU rasterizer, and
 the fixtures it read. A scenario whose sides ran in different environments gets
 no verdicts.
 
+### In CI
+
+GitHub's runners have no GPU, so CI's two workflows compare on lavapipe, with
+one run per side: only counts get verdicts there. `bench`, run by hand on a
+branch, compares it with a base and fails on a worse verdict. `bench-nightly`
+compares main with main a day earlier and keeps the issue "Nightly benchmarks:
+main got worse": a night with a worse verdict opens it or comments on it, and a
+night without one closes it. Both report through `verdicts.py`, which reads
+`compare --json`.
+
 ## Reading a report
 
 ```text

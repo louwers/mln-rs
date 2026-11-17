@@ -1,0 +1,59 @@
+name: bench
+
+on:
+  workflow_dispatch:
+    inputs:
+      base:
+        description: The Git ref the checkout is compared with
+        default: main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # A branch's benchmarks against a base (`mise run bench:compare`,
+  # tools/bench/README.md), run by hand, every scenario. GitHub's runners
+  # have no GPU, so both sides draw on lavapipe, the CPU rasterizer a server
+  # without one draws on. One run per side, so only counts get verdicts: the
+  # runner's times are noise, and it counts no instructions. A worse verdict
+  # fails the job, and the verdicts are in its summary.
+  compare:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    steps:
+      # The base is checked out in a worktree, so the history comes too.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Install lavapipe
+        uses: ./.github/actions/lavapipe
+
+      # The tools that mise.toml pins, Rust from rust-toolchain.toml among
+      # them, at the versions mise.lock records.
+      - uses: jdx/mise-action@v5
+
+      # Saves from main only, as in ci.yml.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # The fixture snapshot that tools/bench/fixtures.json pins.
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/mln-rs/bench-fixtures
+          key: bench-fixtures-${{ hashFiles('tools/bench/fixtures.json') }}
+
+      - name: Compare
+        env:
+          BASE: ${{ inputs.base }}
+        run: mise run bench:compare "$BASE" -- --json > comparison.json
+
+      - name: Report
+        run: >-
+          python3 -I tools/bench/verdicts.py comparison.json --fail-on-worse >>
+          "$GITHUB_STEP_SUMMARY"
