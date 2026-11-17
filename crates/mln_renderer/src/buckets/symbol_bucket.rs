@@ -14,6 +14,7 @@ use std::sync::{Arc, OnceLock};
 
 use glam::Vec2;
 use mln_gfx::shaders::segment::SegmentBase;
+use mln_style::StyleValue as _;
 use mln_style::expression::EvaluationContext;
 use mln_style::layers::Symbol;
 use mln_style::layers::symbol_layer::SymbolLayerPaintPropertyOverrides;

@@ -15,7 +15,7 @@ use crate::expression::Functions;
 use crate::layer_type::LayerStyle;
 use crate::layers::Line;
 use crate::projection::Projection;
-use crate::property_value::PropertyValue;
+use crate::property_value::{PropertyValue, StyleValue as _};
 use crate::sky::Sky;
 use crate::sources::tileset::vector_source as tileset_vector_source;
 use crate::style::Style;

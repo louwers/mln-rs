@@ -12,7 +12,7 @@ use crate::conversion_impl::make_style_property;
 use crate::expression::EvaluationContext;
 #[cfg(test)]
 use crate::expression::Functions;
-use crate::property_value::PropertyValue;
+use crate::property_value::{PropertyValue, StyleValue as _};
 use crate::style_property::StyleProperty;
 
 /// The style's root `projection` object.

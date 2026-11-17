@@ -15,6 +15,7 @@ use crate::color_ramp_property_value::ColorRampPropertyValue;
 use crate::conversion::{Error, convert_filter, convert_property_value};
 use crate::expression::{Dependency, EvaluationContext, Expr, Functions, GlobalStateMap, ParsingContext, Type};
 use crate::property_expression::PropertyExpression;
+use crate::property_value::StyleValue as _;
 
 fn parse_expression(json: &str, expected: Option<Type>) -> Option<Expr> {
     let document = parse_json(json);

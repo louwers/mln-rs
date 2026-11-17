@@ -6,6 +6,7 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use super::util::parse_json;
 use crate::conversion::{Error, convert_projection};
 use crate::expression::Functions;
+use crate::property_value::StyleValue as _;
 use crate::style_property::Kind;
 
 /// gtest's `FloatingPoint<T>::AlmostEquals` distance: sign-and-magnitude

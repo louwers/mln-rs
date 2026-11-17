@@ -13,15 +13,12 @@ use std::sync::Arc;
 use feature::{Value, ValueObject};
 use mln_conversion::{Convertible, Error};
 
-use crate::color_ramp_property_value::ColorRampPropertyValue;
-use crate::conversion::{Converter, convert_color_ramp_property_value, convert_property_value};
-use crate::conversion_impl::{
-    ValueFactory, make_color_ramp_style_property, make_style_property, make_transition_style_property,
-};
-use crate::expression::{Functions, ValueConverter};
+use crate::conversion::Converter;
+use crate::conversion_impl::make_transition_style_property;
+use crate::expression::Functions;
 use crate::layer::PropertyScope;
 use crate::properties::Transitionable;
-use crate::property_value::PropertyValue;
+use crate::property_value::StyleValue;
 use crate::style_property::{Kind, StyleProperty};
 use crate::transition_options::TransitionOptions;
 
@@ -121,67 +118,6 @@ impl PropertyTable {
         }
         let slot = self.find(name.strip_suffix("-transition")?)?;
         (self.properties[slot].scope == PropertyScope::Paint).then_some((slot, true))
-    }
-}
-
-/// A style value a property holds: a [`PropertyValue`], or a color ramp.
-pub trait StyleValue: Clone + Default + PartialEq + 'static {
-    /// Converts a style JSON value for the property `info`, parsing
-    /// expressions against `functions`.
-    fn convert(value: &Convertible<'_>, info: &PropertyInfo, functions: &Arc<Functions>) -> Result<Self, Error>;
-
-    fn style_property(&self) -> StyleProperty;
-
-    /// Whether the values differ and either may differ by feature.
-    fn has_data_driven_property_difference(&self, other: &Self) -> bool;
-
-    /// Whether both values are constants, and differ.
-    fn constant_differs(&self, other: &Self) -> bool;
-}
-
-impl<T> StyleValue for PropertyValue<T>
-where
-    T: Converter + ValueConverter + ValueFactory + Clone + PartialEq + 'static,
-{
-    fn convert(value: &Convertible<'_>, info: &PropertyInfo, functions: &Arc<Functions>) -> Result<Self, Error> {
-        let mut error = Error::default();
-        convert_property_value::<T>(value, &mut error, info.data_driven, info.tokens, functions).ok_or(error)
-    }
-
-    fn style_property(&self) -> StyleProperty {
-        make_style_property(self)
-    }
-
-    fn has_data_driven_property_difference(&self, other: &Self) -> bool {
-        PropertyValue::has_data_driven_property_difference(self, other)
-    }
-
-    fn constant_differs(&self, other: &Self) -> bool {
-        match (self, other) {
-            (PropertyValue::Constant(a), PropertyValue::Constant(b)) => a != b,
-            _ => false,
-        }
-    }
-}
-
-impl StyleValue for ColorRampPropertyValue {
-    /// A color ramp is always an expression, so `info`'s flags don't apply.
-    fn convert(value: &Convertible<'_>, _info: &PropertyInfo, functions: &Arc<Functions>) -> Result<Self, Error> {
-        let mut error = Error::default();
-        convert_color_ramp_property_value(value, &mut error, functions).ok_or(error)
-    }
-
-    fn style_property(&self) -> StyleProperty {
-        make_color_ramp_style_property(self)
-    }
-
-    fn has_data_driven_property_difference(&self, other: &Self) -> bool {
-        ColorRampPropertyValue::has_data_driven_property_difference(self, other)
-    }
-
-    /// A color ramp is never a constant.
-    fn constant_differs(&self, _other: &Self) -> bool {
-        false
     }
 }
 

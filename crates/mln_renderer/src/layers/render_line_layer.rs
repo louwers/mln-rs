@@ -21,7 +21,7 @@ use mln_style::expression::{Dependency, EvaluationContext, GlobalStateMap, globa
 use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
 use mln_style::layers::Line;
 use mln_style::layers::line_layer_properties::LinePaintProperties;
-use mln_style::{PropertyEvaluationParameters, TransitionParameters};
+use mln_style::{PropertyEvaluationParameters, StyleValue as _, TransitionParameters};
 use mln_style_types::LineCapType;
 use mln_util::Color;
 use mln_util::error::Error;

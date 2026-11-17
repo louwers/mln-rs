@@ -5,9 +5,9 @@
 use std::sync::Arc;
 
 use mln_map_types::MapMode;
-use mln_style::PropertyEvaluationParameters;
 use mln_style::expression::{EvaluationContext, Value};
 use mln_style::layers::{Circle, CircleLayoutProperties};
+use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 use mln_style_types::image::ImagePositions;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature};

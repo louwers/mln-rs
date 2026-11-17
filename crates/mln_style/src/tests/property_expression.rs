@@ -11,7 +11,7 @@ use crate::evaluated::Evaluated;
 use crate::expression::dsl::{get, get_str, image, interpolate, linear, literal, literal_str, number, step, zoom};
 use crate::expression::{Dependency, EvaluationContext, Functions, Image, Value};
 use crate::property_expression::PropertyExpression;
-use crate::property_value::PropertyValue;
+use crate::property_value::{PropertyValue, StyleValue as _};
 use crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
 
 fn one_integer() -> StubGeometryTileFeature {

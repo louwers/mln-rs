@@ -5,6 +5,7 @@ use mln_util::Color;
 use super::util::parse_json;
 use crate::conversion::{Error, convert_light};
 use crate::expression::Functions;
+use crate::property_value::StyleValue as _;
 
 // gtest: StyleConversion.Light
 #[test]

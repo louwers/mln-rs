@@ -1,7 +1,18 @@
+use std::fmt::Debug;
+use std::sync::Arc;
+
+use mln_conversion::{Convertible, Error};
 use mln_vec_map::VecSet;
 
-use crate::expression::Dependency;
+use crate::conversion::{Converter, convert_property_value};
+use crate::conversion_impl::{ValueFactory, make_style_property};
+use crate::evaluated::{Evaluated, Evaluation};
+use crate::expression::{Dependency, Functions, Image, ValueConverter, global_state_refs_intersect};
 use crate::property_expression::PropertyExpression;
+use crate::property_table::PropertyInfo;
+use crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
+use crate::renderer::transition_parameters::GlobalStateChange;
+use crate::style_property::StyleProperty;
 
 /// A style property's value: undefined (the default), a constant or an
 /// expression.
@@ -48,23 +59,12 @@ impl<T> From<PropertyExpression<T>> for PropertyValue<T> {
 }
 
 impl<T> PropertyValue<T> {
-    pub fn is_undefined(&self) -> bool {
-        matches!(self, PropertyValue::Undefined)
-    }
-
     pub fn is_constant(&self) -> bool {
         matches!(self, PropertyValue::Constant(_))
     }
 
     pub fn is_expression(&self) -> bool {
         matches!(self, PropertyValue::Expression(_))
-    }
-
-    pub(crate) fn is_data_driven(&self) -> bool {
-        match self {
-            PropertyValue::Undefined | PropertyValue::Constant(_) => false,
-            PropertyValue::Expression(fn_) => !fn_.is_feature_constant(),
-        }
     }
 
     /// The constant. Panics when the value isn't a constant.
@@ -89,25 +89,127 @@ impl<T> PropertyValue<T> {
             _ => panic!("PropertyValue::as_expression_mut on a non-expression value"),
         }
     }
+}
 
-    pub(crate) fn has_data_driven_property_difference(&self, other: &PropertyValue<T>) -> bool
-    where
-        T: PartialEq,
-    {
-        *self != *other && (self.is_data_driven() || other.is_data_driven())
+/// A style value a property holds: a [`PropertyValue`], or a
+/// [`ColorRampPropertyValue`](crate::color_ramp_property_value::ColorRampPropertyValue).
+pub trait StyleValue: Clone + Default + Debug + PartialEq + 'static {
+    /// What the value evaluates to.
+    type Type: Clone + Debug + Default + ValueConverter;
+
+    /// Converts a style JSON value for the property `info`, parsing
+    /// expressions against `functions`.
+    fn convert(value: &Convertible<'_>, info: &PropertyInfo, functions: &Arc<Functions>) -> Result<Self, Error>;
+
+    fn style_property(&self) -> StyleProperty;
+
+    /// The value for a frame, with `default` for an undefined value.
+    fn evaluate(
+        &self,
+        evaluation: Evaluation<Self::Type>,
+        parameters: &PropertyEvaluationParameters,
+        default: Self::Type,
+    ) -> Evaluated<Self::Type>;
+
+    fn is_undefined(&self) -> bool;
+
+    /// Whether the value may differ by feature.
+    fn is_data_driven(&self) -> bool;
+
+    fn get_dependencies(&self) -> Dependency;
+
+    fn get_global_state_refs(&self) -> Option<&VecSet<String>>;
+
+    /// Whether the values differ and either may differ by feature.
+    fn has_data_driven_property_difference(&self, other: &Self) -> bool {
+        (self.is_data_driven() || other.is_data_driven()) && self != other
     }
 
-    pub(crate) fn get_dependencies(&self) -> Dependency {
+    /// Whether both values are constants, and differ.
+    fn constant_differs(&self, _other: &Self) -> bool {
+        false
+    }
+
+    /// Whether a change of the keys in `changed_keys` transitions the value
+    /// rather than snapping it.
+    fn transitions_on_global_state_change(&self, _changed_keys: Option<&VecSet<String>>) -> bool {
+        false
+    }
+
+    /// Keeps the value reading the global state from before `change`, if it
+    /// transitions on it.
+    fn retain_prior_global_state(&mut self, _change: &GlobalStateChange) {}
+}
+
+impl<T> StyleValue for PropertyValue<T>
+where
+    T: Converter + ValueConverter + ValueFactory + Clone + Debug + Default + PartialEq + 'static,
+{
+    type Type = T;
+
+    fn convert(value: &Convertible<'_>, info: &PropertyInfo, functions: &Arc<Functions>) -> Result<Self, Error> {
+        let mut error = Error::default();
+        convert_property_value::<T>(value, &mut error, info.data_driven, info.tokens, functions).ok_or(error)
+    }
+
+    fn style_property(&self) -> StyleProperty {
+        make_style_property(self)
+    }
+
+    fn evaluate(
+        &self,
+        evaluation: Evaluation<T>,
+        parameters: &PropertyEvaluationParameters,
+        default: T,
+    ) -> Evaluated<T> {
+        evaluation(self, parameters, default)
+    }
+
+    fn is_undefined(&self) -> bool {
+        matches!(self, PropertyValue::Undefined)
+    }
+
+    fn is_data_driven(&self) -> bool {
+        match self {
+            PropertyValue::Undefined | PropertyValue::Constant(_) => false,
+            PropertyValue::Expression(fn_) => !fn_.is_feature_constant(),
+        }
+    }
+
+    fn get_dependencies(&self) -> Dependency {
         match self {
             PropertyValue::Undefined | PropertyValue::Constant(_) => Dependency::NONE,
             PropertyValue::Expression(ex) => ex.get_dependencies(),
         }
     }
 
-    pub(crate) fn get_global_state_refs(&self) -> Option<&VecSet<String>> {
+    fn get_global_state_refs(&self) -> Option<&VecSet<String>> {
         match self {
             PropertyValue::Undefined | PropertyValue::Constant(_) => None,
             PropertyValue::Expression(ex) => ex.get_global_state_refs(),
+        }
+    }
+
+    fn constant_differs(&self, other: &Self) -> bool {
+        match (self, other) {
+            (PropertyValue::Constant(a), PropertyValue::Constant(b)) => a != b,
+            _ => false,
+        }
+    }
+
+    /// A value that reads a changed key transitions unless it differs by
+    /// feature or is a pattern image: images are never interpolated, so a
+    /// transition would only delay the image the tiles are laid out with.
+    fn transitions_on_global_state_change(&self, changed_keys: Option<&VecSet<String>>) -> bool {
+        std::any::TypeId::of::<T>() != std::any::TypeId::of::<Image>()
+            && !self.is_data_driven()
+            && self.get_dependencies().intersects(Dependency::GLOBAL_STATE)
+            && global_state_refs_intersect(self.get_global_state_refs(), changed_keys)
+    }
+
+    fn retain_prior_global_state(&mut self, change: &GlobalStateChange) {
+        if self.is_expression() && self.transitions_on_global_state_change(Some(&change.changed_keys)) {
+            self.as_expression_mut().pin_global_state(Arc::clone(&change.prior_state));
         }
     }
 }

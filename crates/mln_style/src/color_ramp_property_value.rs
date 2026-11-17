@@ -1,14 +1,19 @@
 use std::sync::Arc;
 
+use mln_conversion::{Convertible, Error};
 use mln_expression::value::from_expression_value;
 use mln_util::Color;
 use mln_vec_map::VecSet;
 
+use crate::conversion::convert_color_ramp_property_value;
+use crate::conversion_impl::make_color_ramp_style_property;
 use crate::evaluated::{Evaluated, Evaluation};
-use crate::expression::{Dependency, EvaluationContext, Expr, GlobalStateMap, collect_global_state_refs};
-use crate::properties::PropertyValueLike;
+use crate::expression::{Dependency, EvaluationContext, Expr, Functions, GlobalStateMap, collect_global_state_refs};
+use crate::property_table::PropertyInfo;
+use crate::property_value::StyleValue;
 use crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
 use crate::serialization::optional_expression;
+use crate::style_property::StyleProperty;
 
 /// Special-case implementation of (a subset of) the `PropertyValue<T>`
 /// interface used for building the paint property traits classes for
@@ -62,11 +67,6 @@ impl ColorRampPropertyValue {
     }
 
     #[must_use]
-    pub fn is_undefined(&self) -> bool {
-        self.value.is_none()
-    }
-
-    #[must_use]
     pub fn evaluate_ramp(&self, ramp_evaluation_parameter: f64, global_state: Option<&GlobalStateMap>) -> Color {
         let value = self.value.as_ref().expect("ColorRampPropertyValue::evaluate on an undefined value");
         let result = value.evaluate(
@@ -79,34 +79,25 @@ impl ColorRampPropertyValue {
         from_expression_value::<Color>(&result).unwrap_or_default()
     }
 
-    #[must_use]
-    #[expect(clippy::unused_self, reason = "matches `PropertyValue::has_data_driven_property_difference`")]
-    pub(crate) fn has_data_driven_property_difference(&self, _other: &ColorRampPropertyValue) -> bool {
-        false
-    }
-
     /// The expression of a defined value. Panics when the value is undefined.
     #[must_use]
     pub fn get_expression(&self) -> &Expr {
         self.value.as_deref().expect("ColorRampPropertyValue::get_expression on an undefined value")
     }
-
-    #[must_use]
-    pub fn get_dependencies(&self) -> Dependency {
-        match &self.value {
-            Some(value) => value.dependencies(),
-            None => Dependency::NONE,
-        }
-    }
-
-    #[must_use]
-    pub fn get_global_state_refs(&self) -> Option<&VecSet<String>> {
-        self.global_state_refs.as_deref()
-    }
 }
 
-impl PropertyValueLike for ColorRampPropertyValue {
+impl StyleValue for ColorRampPropertyValue {
     type Type = Color;
+
+    /// A color ramp is always an expression, so `info`'s flags don't apply.
+    fn convert(value: &Convertible<'_>, _info: &PropertyInfo, functions: &Arc<Functions>) -> Result<Self, Error> {
+        let mut error = Error::default();
+        convert_color_ramp_property_value(value, &mut error, functions).ok_or(error)
+    }
+
+    fn style_property(&self) -> StyleProperty {
+        make_color_ramp_style_property(self)
+    }
 
     /// The default: a layer builds its ramp from the expression itself.
     fn evaluate(&self, _: Evaluation<Color>, _: &PropertyEvaluationParameters, default: Color) -> Evaluated<Color> {
@@ -114,7 +105,7 @@ impl PropertyValueLike for ColorRampPropertyValue {
     }
 
     fn is_undefined(&self) -> bool {
-        ColorRampPropertyValue::is_undefined(self)
+        self.value.is_none()
     }
 
     fn is_data_driven(&self) -> bool {
@@ -122,14 +113,13 @@ impl PropertyValueLike for ColorRampPropertyValue {
     }
 
     fn get_dependencies(&self) -> Dependency {
-        ColorRampPropertyValue::get_dependencies(self)
+        match &self.value {
+            Some(value) => value.dependencies(),
+            None => Dependency::NONE,
+        }
     }
 
     fn get_global_state_refs(&self) -> Option<&VecSet<String>> {
-        ColorRampPropertyValue::get_global_state_refs(self)
-    }
-
-    fn has_data_driven_property_difference(&self, _other: &Self) -> bool {
-        false
+        self.global_state_refs.as_deref()
     }
 }

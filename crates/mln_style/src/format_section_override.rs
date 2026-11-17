@@ -10,6 +10,7 @@ use crate::expression::{Dependency, Expr, GlobalStateMap};
 use crate::layers::symbol_layer::SymbolLayerPaintPropertyOverrides;
 use crate::layers::symbol_layer_properties::{SymbolLayoutProperties, SymbolPaintProperties};
 use crate::property_expression::PropertyExpression;
+use crate::property_value::StyleValue as _;
 
 /// A `format-section-override` of the color property `property_name`, whose
 /// value is `default_value` where no section overrides it.

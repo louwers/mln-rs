@@ -5,7 +5,7 @@ use mln_util::{Color, Padding};
 use crate::color_ramp_property_value::ColorRampPropertyValue;
 use crate::expression::value::to_mbgl_value;
 use crate::expression::{Formatted, Image, Value as ExpressionValue};
-use crate::property_value::PropertyValue;
+use crate::property_value::{PropertyValue, StyleValue as _};
 use crate::style_property::{Kind, StyleProperty};
 use crate::transition_options::TransitionOptions;
 

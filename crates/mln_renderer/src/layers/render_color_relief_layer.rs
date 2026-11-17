@@ -34,7 +34,7 @@ use mln_style::expression::{
 use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
 use mln_style::layers::ColorRelief;
 use mln_style::layers::color_relief_layer_properties::ColorReliefPaintProperties;
-use mln_style::{PropertyEvaluationParameters, TransitionParameters};
+use mln_style::{PropertyEvaluationParameters, StyleValue as _, TransitionParameters};
 use mln_style_types::ResamplingType;
 use mln_util::Color;
 use mln_util::hash::{HashMap, HashSet};

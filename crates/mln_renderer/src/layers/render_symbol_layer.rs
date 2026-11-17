@@ -30,7 +30,7 @@ use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
 use mln_style::layers::Symbol;
 use mln_style::layers::symbol_layer::SymbolLayerPaintPropertyOverrides;
 use mln_style::layers::symbol_layer_properties::{SymbolLayoutProperties, SymbolPaintProperties};
-use mln_style::{PropertyEvaluationParameters, TransitionParameters};
+use mln_style::{PropertyEvaluationParameters, StyleValue as _, TransitionParameters};
 use mln_style_types::{
     AlignmentType, IconTextFitType, SymbolPlacementType, TextRotationAlignmentType, TranslateAnchorType,
 };

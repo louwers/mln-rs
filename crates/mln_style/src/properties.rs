@@ -12,97 +12,13 @@ use std::time::Duration;
 use mln_util::constants::DEFAULT_TRANSITION_EASE;
 use mln_util::interpolate::Interpolate;
 use mln_util::time::Instant;
-use mln_vec_map::VecSet;
 
 use crate::evaluated::{Evaluated, Evaluation};
-use crate::expression::{Dependency, Image, ValueConverter, global_state_refs_intersect};
-use crate::property_value::PropertyValue;
+use crate::expression::{Dependency, global_state_refs_intersect};
+use crate::property_value::StyleValue;
 use crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
 use crate::renderer::transition_parameters::{GlobalStateChange, TransitionParameters};
 use crate::transition_options::TransitionOptions;
-
-/// What [`Transitioning`] and [`Transitionable`] need from a style value: a
-/// [`PropertyValue`], or a color ramp.
-pub trait PropertyValueLike: Clone + Default + Debug {
-    type Type: Clone + Debug + Default + ValueConverter;
-
-    /// The value for a frame, with `default` for an undefined value.
-    fn evaluate(
-        &self,
-        evaluation: Evaluation<Self::Type>,
-        parameters: &PropertyEvaluationParameters,
-        default: Self::Type,
-    ) -> Evaluated<Self::Type>;
-    fn is_undefined(&self) -> bool;
-    fn is_data_driven(&self) -> bool;
-    fn get_dependencies(&self) -> Dependency;
-    fn get_global_state_refs(&self) -> Option<&VecSet<String>>;
-    fn has_data_driven_property_difference(&self, other: &Self) -> bool;
-
-    /// Whether a change of the keys in `changed_keys` transitions the value
-    /// rather than snapping it. Color ramps never do: their layers rebuild them.
-    fn transitions_on_global_state_change(&self, _changed_keys: Option<&VecSet<String>>) -> bool {
-        false
-    }
-
-    /// Keeps the value reading the global state from before `change`, if it
-    /// transitions on it.
-    fn retain_prior_global_state(&mut self, _change: &GlobalStateChange) {}
-}
-
-/// Whether the value reads one of the global-state keys in `changed_keys`;
-/// `None` means the keys are unknown, and every reference counts as changed.
-pub(crate) fn reads_global_state<V: PropertyValueLike>(value: &V, changed_keys: Option<&VecSet<String>>) -> bool {
-    value.get_dependencies().intersects(Dependency::GLOBAL_STATE)
-        && global_state_refs_intersect(value.get_global_state_refs(), changed_keys)
-}
-
-impl<T: Clone + Debug + Default + PartialEq + ValueConverter + 'static> PropertyValueLike for PropertyValue<T> {
-    type Type = T;
-
-    fn evaluate(
-        &self,
-        evaluation: Evaluation<T>,
-        parameters: &PropertyEvaluationParameters,
-        default: T,
-    ) -> Evaluated<T> {
-        evaluation(self, parameters, default)
-    }
-
-    fn is_undefined(&self) -> bool {
-        PropertyValue::is_undefined(self)
-    }
-
-    fn is_data_driven(&self) -> bool {
-        PropertyValue::is_data_driven(self)
-    }
-
-    fn get_dependencies(&self) -> Dependency {
-        PropertyValue::get_dependencies(self)
-    }
-
-    fn get_global_state_refs(&self) -> Option<&VecSet<String>> {
-        PropertyValue::get_global_state_refs(self)
-    }
-
-    fn has_data_driven_property_difference(&self, other: &Self) -> bool {
-        PropertyValue::has_data_driven_property_difference(self, other)
-    }
-
-    /// Pattern images are never interpolated, so a transition would only
-    /// delay the image the tiles are laid out with.
-    fn transitions_on_global_state_change(&self, changed_keys: Option<&VecSet<String>>) -> bool {
-        std::any::TypeId::of::<T>() != std::any::TypeId::of::<Image>()
-            && !self.is_data_driven()
-            && reads_global_state(self, changed_keys)
-    }
-
-    fn retain_prior_global_state(&mut self, change: &GlobalStateChange) {
-        if self.is_expression() && self.transitions_on_global_state_change(Some(&change.changed_keys)) {
-            self.as_expression_mut().pin_global_state(std::sync::Arc::clone(&change.prior_state));
-        }
-    }
-}
 
 /// A value, and the values it transitions from.
 #[derive(Clone, Debug, Default)]
@@ -129,7 +45,7 @@ enum Stage {
     Ended,
 }
 
-impl<V: PropertyValueLike> Transitioning<V> {
+impl<V: StyleValue> Transitioning<V> {
     pub(crate) fn new(value: V) -> Self {
         Transitioning { prior: None, start: None, delay: Duration::ZERO, duration: Duration::ZERO, value }
     }
@@ -254,7 +170,7 @@ pub struct Transitionable<V> {
     pub(crate) options: TransitionOptions,
 }
 
-impl<V: PropertyValueLike> Transitionable<V> {
+impl<V: StyleValue> Transitionable<V> {
     #[inline(never)]
     pub(crate) fn transition(&self, params: &TransitionParameters, mut prior: Transitioning<V>) -> Transitioning<V> {
         if let Some(change) = &params.global_state_change {
@@ -355,6 +271,7 @@ macro_rules! properties {
         $(#[$meta])*
         $vis mod $module {
             $($(use $import;)+)?
+            use $crate::property_value::StyleValue as _;
 
             /// The spec's default of each property.
             pub struct Defaults;
@@ -515,6 +432,7 @@ macro_rules! properties {
         $(#[$meta])*
         $vis mod $module {
             $($(use $import;)+)?
+            use $crate::property_value::StyleValue as _;
 
             /// The spec's default of each property.
             pub struct Defaults;
@@ -549,7 +467,6 @@ macro_rules! properties {
                     &self,
                     parameters: &$crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters,
                 ) -> PossiblyEvaluated {
-                    use $crate::properties::PropertyValueLike as _;
                     PossiblyEvaluated {
                         $($field: self.$field.evaluate(
                             $crate::__property_evaluation!($kind),

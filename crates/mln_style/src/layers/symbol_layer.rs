@@ -16,7 +16,7 @@ use crate::layers::symbol_layer_properties::{self, SymbolLayoutProperties, Symbo
 use crate::properties::OverridableSection;
 use crate::property_expression::PropertyExpression;
 use crate::property_table::{PropertyTable, PropertyVisitor};
-use crate::property_value::PropertyValue;
+use crate::property_value::{PropertyValue, StyleValue as _};
 
 /// The `symbol` layer type.
 pub struct Symbol;
