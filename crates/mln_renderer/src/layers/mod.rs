@@ -1,11 +1,6 @@
 //! The render layers and their layer tweakers.
 
 pub(crate) mod collision_layer_tweaker;
-pub(crate) mod color_relief_layer_tweaker; // dem-heatmap
-pub(crate) mod fill_extrusion_layer_tweaker;
-pub(crate) mod hillshade_layer_tweaker; // dem-heatmap
-pub(crate) mod hillshade_prepare_layer_tweaker; // dem-heatmap
-pub(crate) mod line_layer_tweaker;
 pub(crate) mod render_background_layer;
 pub(crate) mod render_circle_layer;
 pub(crate) mod render_color_relief_layer; // dem-heatmap

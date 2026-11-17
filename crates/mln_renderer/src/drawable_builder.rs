@@ -17,10 +17,9 @@ use mln_gfx::vertex_vector::{VertexVector, VertexVectorBasePtr};
 use mln_tile_id::geometry_tile_data::GeometryCoordinates;
 use mln_util::logging::{Event, Log};
 
-use crate::draw::{DrawSegment, Textures, UniqueDrawSegment};
-use crate::drawable::{DrawPriority, Drawable, UniqueDrawable};
+use crate::draw::{DrawSegment, UniqueDrawSegment};
+use crate::drawable::{Drawable, UniqueDrawable};
 use crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker;
-use crate::gfx::texture2d::Texture2DPtr;
 use crate::render_pass::RenderPass;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -51,16 +50,13 @@ pub(crate) struct DrawableBuilder {
     enable_stencil: bool,
     enable_depth: bool,
     is_3d: bool,
-    draw_priority: DrawPriority,
     sub_layer_index: i32,
     depth_type: DepthMaskType,
     shader: Option<ShaderProgramPtr>,
     current_drawable: Option<UniqueDrawable>,
     drawables: Vec<UniqueDrawable>,
-    textures: Textures,
     atlases: Option<Rc<DrawableAtlasesTweaker>>,
     vertex_attrs: Option<VertexAttributeArrayPtr>,
-    instance_attrs: Option<VertexAttributeArrayPtr>,
     origin: Option<Point<f64>>,
     vertices: VertexVector<VT>,
     raw_vertices: Vec<u8>,
@@ -96,16 +92,13 @@ impl DrawableBuilder {
             enable_stencil: false,
             enable_depth: true,
             is_3d: false,
-            draw_priority: 0,
             sub_layer_index: 0,
             depth_type: DepthMaskType::ReadOnly,
             shader: None,
             current_drawable: None,
             drawables: Vec::new(),
-            textures: Default::default(),
             atlases: None,
             vertex_attrs: None,
-            instance_attrs: None,
             origin: None,
             vertices: VertexVector::default(),
             raw_vertices: Vec::new(),
@@ -174,7 +167,6 @@ impl DrawableBuilder {
                 self.current_drawable.take().unwrap_or_else(|| Box::new(Drawable::new(self.drawable_name.clone())));
             drawable.enable_stencil = self.enable_stencil;
             drawable.render_pass = self.render_pass;
-            drawable.draw_priority = self.draw_priority;
             drawable.sub_layer_index = self.sub_layer_index;
             drawable.enable_depth = self.enable_depth;
             drawable.depth_type = self.depth_type;
@@ -182,14 +174,10 @@ impl DrawableBuilder {
             drawable.objects.set_color_mode(&self.color_mode);
             drawable.objects.set_cull_face_mode(self.cull_face_mode);
             drawable.objects.set_shader(self.shader.clone());
-            drawable.objects.textures = self.textures.clone();
             drawable.atlases = self.atlases.clone();
             drawable.origin = self.origin;
             let vertex_attrs = self.vertex_attrs.clone().unwrap_or_else(VertexAttributeArray::new_ptr);
             drawable.objects.set_vertex_attributes(Some(vertex_attrs));
-            if let Some(attrs) = &self.instance_attrs {
-                drawable.objects.instance_attributes = Some(Rc::clone(attrs));
-            }
             self.init(&mut drawable);
             self.origin = None;
             self.current_drawable = Some(drawable);
@@ -239,11 +227,6 @@ impl DrawableBuilder {
         } else {
             Log::warning(Event::Render, format!("drawable {} has no indexes", drawable.objects.name));
         }
-
-        // The next drawable doesn't get this one's textures.
-        for texture in &mut self.textures {
-            *texture = None;
-        }
     }
 
     /// Takes the drawables made so far.
@@ -253,12 +236,6 @@ impl DrawableBuilder {
 
     pub(crate) fn set_render_pass(&mut self, value: RenderPass) {
         self.render_pass = value;
-    }
-    pub(crate) fn set_draw_priority(&mut self, value: DrawPriority) {
-        self.draw_priority = value;
-        if let Some(drawable) = self.current_drawable.as_mut() {
-            drawable.draw_priority = value;
-        }
     }
     pub(crate) fn set_sub_layer_index(&mut self, value: i32) {
         self.sub_layer_index = value;
@@ -297,12 +274,6 @@ impl DrawableBuilder {
     pub(crate) fn set_vertex_attr_id(&mut self, id: usize) {
         self.vertex_attr_id = id;
     }
-    pub(crate) fn set_texture(&mut self, texture: Option<Texture2DPtr>, id: usize) {
-        debug_assert!(id < self.textures.len());
-        if let Some(slot) = self.textures.get_mut(id) {
-            *slot = texture;
-        }
-    }
     /// Sets the tweaker that gives the drawables the symbol atlases'
     /// textures.
     pub(crate) fn set_atlases(&mut self, value: Option<Rc<DrawableAtlasesTweaker>>) {
@@ -310,9 +281,6 @@ impl DrawableBuilder {
     }
     pub(crate) fn set_vertex_attributes(&mut self, attrs: Option<VertexAttributeArrayPtr>) {
         self.vertex_attrs = attrs;
-    }
-    pub(crate) fn set_instance_attributes(&mut self, attrs: Option<VertexAttributeArrayPtr>) {
-        self.instance_attrs = attrs;
     }
 
     /// Takes `count` vertices of `type_` in `data`, or, with no `data`, a

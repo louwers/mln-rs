@@ -7,15 +7,11 @@ use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::types::DepthMaskType;
 use mln_tile_id::OverscaledTileID;
 use mln_util::identity::SimpleIdentity;
-use mln_util::time::{Instant, Instant as Time};
 
 use crate::draw::DrawObjects;
 use crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker;
 use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::layers::collision_layer_tweaker::CollisionDrawableData;
-use crate::layers::color_relief_layer_tweaker::ColorReliefDrawableData;
-use crate::layers::hillshade_prepare_layer_tweaker::HillshadePrepareDrawableData;
-use crate::layers::line_layer_tweaker::LineDrawableData;
 use crate::layers::render_symbol_layer::SymbolDrawableData;
 use crate::paint_parameters::PaintParameters;
 use crate::render_pass::RenderPass;
@@ -26,11 +22,6 @@ pub(crate) type DrawPriority = i64;
 #[derive(Clone, Debug)]
 pub(crate) enum DrawableData {
     Collision(CollisionDrawableData),
-    ColorRelief(ColorReliefDrawableData),
-    HillshadePrepare(HillshadePrepareDrawableData),
-    /// When a hillshade drawable's geometry was made.
-    HillshadeGeometryTime(Time),
-    Line(LineDrawableData),
     Symbol(SymbolDrawableData),
     /// The text lines of a debug overlay drawable.
     DebugText(Vec<String>),
@@ -61,14 +52,10 @@ pub(crate) struct Drawable {
     /// The key of the layer tweaker the drawable was built for, which writes
     /// its buffers (`LayerTweakerBase::key`).
     pub(crate) tweaker: Option<SimpleIdentity>,
-    pub(crate) type_: usize,
     pub(crate) origin: Option<Point<f64>>,
     /// The index of the drawable's entries in the storage buffers of its
     /// layer group, which shaders read as `globalIndex`.
     pub(crate) ubo_index: u32,
-    /// When the drawable was made, to tell whether its geometry is older
-    /// than its layer's.
-    pub(crate) create_time: Instant,
     /// The depth and stencil modes of a 3D drawable, which its layer group
     /// sets before it draws.
     depth_mode_3d: DepthMode,
@@ -102,10 +89,8 @@ impl Drawable {
             data: None,
             atlases: None,
             tweaker: None,
-            type_: 0,
             origin: None,
             ubo_index: 0,
-            create_time: Instant::now(),
             depth_mode_3d: DepthMode::disabled(),
             stencil_mode_3d: StencilMode::default(),
             objects: DrawObjects::new(name),

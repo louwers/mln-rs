@@ -41,7 +41,7 @@ use super::{cast_matrix, refresh_paint_attributes, shared_vertices};
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices, released_indexes};
 use crate::buckets::heatmap_bucket::{HeatmapBinders, HeatmapBucket, HeatmapLayoutVertex};
 use crate::draw::DrawObjects;
-use crate::draw_cache::{FrameDraw, FrameDraws, KeptDraw, LayerDraws};
+use crate::draw_cache::{DrawDepth, FrameDraw, FrameDraws, KeptDraw, LayerDraws};
 use crate::gfx::context::Context;
 use crate::gfx::texture2d::Texture2DPtr;
 use crate::layer_tweaker::{bind_no_projection, get_projection_data, globe_extrude_scale, to_projection_ubo};
@@ -370,7 +370,7 @@ impl RenderHeatmapLayer {
             let Some(cached) = draws.cache_mut::<KeptDraw>(&tile_id) else {
                 continue;
             };
-            let draw = FrameDraw { depth: None, ..FrameDraw::new(Some(tile_id), cached.id) };
+            let draw = FrameDraw { depth: DrawDepth::Off, ..FrameDraw::new(Some(tile_id), cached.id) };
             tile_draws.push((draw, Self::tile_uniforms(&tile_id, binders, paint_parameters)));
         }
 
@@ -500,7 +500,7 @@ impl RenderHeatmapLayer {
             &self.segments,
         );
         let draw = KeptDraw::new(objects);
-        let frame_draw = FrameDraw { depth: None, ..FrameDraw::new(None, draw.id) };
+        let frame_draw = FrameDraw { depth: DrawDepth::Off, ..FrameDraw::new(None, draw.id) };
         draws.set_layer_cache(draw);
 
         let Some(frame) = &mut draws.frame else {

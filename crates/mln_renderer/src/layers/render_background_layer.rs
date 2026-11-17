@@ -31,7 +31,7 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use super::cast_matrix;
 use crate::bucket::NoBucket;
 use crate::draw::{DrawObjects, DrawSegment};
-use crate::draw_cache::{FrameDraw, FrameDraws, KeptDraw, LayerDraws};
+use crate::draw_cache::{DrawDepth, FrameDraw, FrameDraws, KeptDraw, LayerDraws};
 use crate::gfx::context::Context;
 use crate::globe_tile_mesh::raw_globe_tile_mesh;
 use crate::layer_tweaker::{get_projection_data, to_projection_ubo};
@@ -347,7 +347,7 @@ impl RenderLayer for RenderBackgroundLayer {
             }
             let draw = FrameDraw {
                 pass: draw_passes,
-                depth: Some(DepthMaskType::ReadWrite),
+                depth: DrawDepth::Layer { sub_layer: 0, mask: DepthMaskType::ReadWrite },
                 ..FrameDraw::new(Some(*tile_id), cached.id)
             };
             frame_draws.push((draw, Self::uniforms(tile_id, has_pattern, paint_parameters)));

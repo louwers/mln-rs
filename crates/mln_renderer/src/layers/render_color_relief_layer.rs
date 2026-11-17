@@ -1,8 +1,8 @@
 // Differences in mechanics, not in output:
 // - C++ re-applies the vertex attributes and creates new DEM textures for
-//   existing tile drawables every frame; the port rebuilds a tile's
-//   drawables only when the bucket's masked geometry changed, and keeps the
-//   DEM texture per bucket id.
+//   existing tile drawables every frame; the port builds a tile's draw again
+//   only when the bucket's masked geometry changed, and keeps the DEM
+//   texture per bucket id.
 // - The elevation stops texture is created anew when the ramp changes (C++
 //   re-uploads into the same texture; its size may change with the ramp).
 
@@ -13,11 +13,15 @@ use std::sync::Arc;
 use mln_gfx::gpu::TextureFormat;
 use mln_gfx::index_vector::{IndexVectorBase, IndexVectorBasePtr};
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::color_relief_layer_ubo::ColorReliefTilePropsUBO;
+use mln_gfx::shaders::color_relief_layer_ubo::{
+    ColorReliefDrawableUBO, ColorReliefEvaluatedPropsUBO, ColorReliefTilePropsUBO,
+};
+use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
-    ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE, ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE, ID_COLOR_RELIEF_IMAGE_TEXTURE,
-    ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE, ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE,
+    ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE, ID_COLOR_RELIEF_DRAWABLE_UBO, ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE,
+    ID_COLOR_RELIEF_EVALUATED_PROPS_UBO, ID_COLOR_RELIEF_IMAGE_TEXTURE, ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE,
+    ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE, ID_COLOR_RELIEF_TILE_PROPS_UBO, ID_PROJECTION_UBO,
 };
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
@@ -31,9 +35,9 @@ use mln_style::color_ramp_property_value::ColorRampPropertyValue;
 use mln_style::expression::{
     Dependency, EvaluationContext, GlobalStateMap, from_expression_value, global_state_refs_intersect,
 };
-use mln_style::layer_type::LayerStyle;
+use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
 use mln_style::layers::ColorRelief;
-use mln_style::{PropertyEvaluationParameters, StyleValue as _};
+use mln_style::{PropertyEvaluationParameters, StyleValue as _, TransitionParameters};
 use mln_style_types::ResamplingType;
 use mln_util::Color;
 use mln_util::hash::{HashMap, HashSet};
@@ -43,16 +47,15 @@ use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use mln_util::time::Instant;
 
-use super::color_relief_layer_tweaker::{ColorReliefDrawableData, ColorReliefLayerTweaker};
-use super::{shared_vertices, update_tile};
+use super::{cast_matrix, shared_vertices};
 use crate::bucket::NoBucket;
 use crate::buckets::hillshade_bucket::{HillshadeBucket, HillshadeLayoutVertex};
-use crate::draw_cache::LayerDraws;
-use crate::drawable_builder::DrawableBuilder;
+use crate::draw::DrawObjects;
+use crate::draw_cache::{DrawCache, DrawDepth, FrameDraw, FrameDraws, KeptDraw, LayerDraws};
 use crate::gfx::context::Context;
 use crate::gfx::texture2d::Texture2DPtr;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
-use crate::layer_group::LayerGroup;
+use crate::layer_tweaker::to_projection_ubo;
 use crate::layer_type::LayerType;
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
@@ -62,6 +65,30 @@ use crate::render_static_data::RenderStaticData;
 use crate::update_parameters::UpdateParameters;
 
 const COLOR_RELIEF_SHADER_GROUP_NAME: &str = "ColorReliefShader";
+
+/// The pass the layer's draws draw in.
+const RENDER_PASS: RenderPass = RenderPass::Translucent;
+
+/// What the layer keeps of a tile: the draw that colors its bucket's DEM,
+/// with when it was built and the DEM's properties it was built with.
+struct ReliefTile {
+    draw: KeptDraw,
+    built: Instant,
+    tile_props: ColorReliefTilePropsUBO,
+}
+
+impl DrawCache for ReliefTile {
+    fn objects_mut(&mut self, id: SimpleIdentity) -> Option<&mut DrawObjects> {
+        self.draw.objects_mut(id)
+    }
+}
+
+/// A draw's entries in the layer's storage buffers.
+struct ReliefUniforms {
+    drawable: ColorReliefDrawableUBO,
+    tile_props: ColorReliefTilePropsUBO,
+    projection: ProjectionUBO,
+}
 
 impl LayerType for ColorRelief {
     type Layout = NoLayout;
@@ -226,7 +253,7 @@ impl RenderColorReliefLayer {
     }
 }
 
-/// The vertex attributes of a color-relief drawable over `vertices`.
+/// The vertex attributes of a color-relief draw over `vertices`.
 fn color_relief_vertex_attributes(vertices: &VertexVectorBasePtr) -> VertexAttributeArrayPtr {
     let vertex_attrs = VertexAttributeArray::new_ptr();
     {
@@ -317,13 +344,26 @@ impl RenderLayer for RenderColorReliefLayer {
         self.update_tile_entries(params.draws);
     }
 
+    /// Drops the draws, which were built for the previous style's values.
+    fn layer_changed(
+        &mut self,
+        _parameters: &TransitionParameters,
+        _new_layer: &Arc<dyn ErasedLayerStyle>,
+        draws: &mut LayerDraws,
+    ) {
+        self.remove_all_drawables(draws);
+    }
+
+    /// Makes the frame's draws of the layer, those of each of its tiles,
+    /// which it builds for a tile it keeps none of, and writes the layer's
+    /// buffers they read.
     fn update(
         &mut self,
         shaders: &ShaderRegistry,
         context: &Context,
         state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
-        _paint_parameters: &PaintParameters<'_>,
+        paint_parameters: &PaintParameters<'_>,
         draws: &mut LayerDraws,
     ) {
         if self.update_projection_variant(state, draws) {
@@ -336,131 +376,140 @@ impl RenderLayer for RenderColorReliefLayer {
             self.remove_all_drawables(draws);
             return;
         };
+        draws.frame.get_or_insert_with(FrameDraws::new);
 
-        let mut layer_group = draws.group.take().unwrap_or_else(LayerGroup::tiles);
-        'draw: {
-            if self.base.layer_tweaker.is_none() {
-                self.base.layer_tweaker = Some(Box::new(ColorReliefLayerTweaker::new(
-                    self.get_id().to_owned(),
-                    Arc::clone(&self.base.evaluated_properties),
-                )));
-            }
-            let tweaker = self.base.layer_tweaker.as_ref().map(|tweaker| tweaker.base().key);
+        if self.color_relief_shader.is_none() {
+            self.color_relief_shader = shaders.shader(COLOR_RELIEF_SHADER_GROUP_NAME, self.base.projection_variant);
+        }
+        let Some(color_relief_shader) = self.color_relief_shader.clone() else {
+            Log::error(Event::Render, "ColorRelief shader failed to load");
+            self.remove_all_drawables(draws);
+            return;
+        };
+        if (RENDER_PASS.underlying_type() & self.base.evaluated_properties.render_passes()) == 0 {
+            return;
+        }
 
-            if self.color_relief_shader.is_none() {
-                self.color_relief_shader = shaders.shader(COLOR_RELIEF_SHADER_GROUP_NAME, self.base.projection_variant);
+        let static_data_shared_vertices = Rc::clone(
+            self.static_data_shared_vertices
+                .get_or_insert_with(|| shared_vertices(&RenderStaticData::raster_vertices())),
+        );
+        let static_data_indices: IndexVectorBasePtr =
+            Rc::new(RefCell::new(IndexVectorBase::new(RenderStaticData::quad_triangle_indices())));
+        let static_data_segments = RenderStaticData::raster_segments();
+
+        // Update color ramp textures if changed
+        if self.color_ramp_changed {
+            let ramp_changed_texture = context.create_texture_2d();
+            {
+                let mut t = ramp_changed_texture.borrow_mut();
+                // Use RGBA32F instead of R32F for llvmpipe compatibility
+                t.set_format(TextureFormat::Rgba32Float);
+                let data = bytemuck::cast_slice(&self.elevation_stops_data);
+                if let Err(error) = t.upload_data(context, data, Size::new(self.color_ramp_size, 1)) {
+                    Log::error(Event::Render, format!("Uploading the elevation stops failed: {error}"));
+                }
+                t.set_sampler(SamplerState {
+                    filter: TextureFilterType::Nearest,
+                    wrap_u: TextureWrapType::Clamp,
+                    wrap_v: TextureWrapType::Clamp,
+                    ..Default::default()
+                });
             }
-            let Some(color_relief_shader) = self.color_relief_shader.clone() else {
-                Log::error(Event::Render, "ColorRelief shader failed to load");
-                layer_group.clear_drawables();
-                break 'draw;
+            self.elevation_stops_texture = Some(ramp_changed_texture);
+
+            let color_stops_texture =
+                Rc::clone(self.color_stops_texture.get_or_insert_with(|| context.create_texture_2d()));
+            {
+                let mut t = color_stops_texture.borrow_mut();
+                t.set_image(Some(Rc::new(self.color_stops.clone())));
+                t.set_sampler(SamplerState {
+                    filter: TextureFilterType::Linear,
+                    wrap_u: TextureWrapType::Clamp,
+                    wrap_v: TextureWrapType::Clamp,
+                    ..Default::default()
+                });
+            }
+
+            self.color_ramp_changed = false;
+        }
+
+        // Skip rendering if color ramp textures aren't ready
+        let (Some(elevation_stops_texture), Some(color_stops_texture)) =
+            (self.elevation_stops_texture.clone(), self.color_stops_texture.clone())
+        else {
+            return;
+        };
+
+        // Drop the DEM textures of buckets that are no longer rendered.
+        let live_buckets: HashSet<SimpleIdentity> =
+            render_tiles.iter().filter_map(|tile| tile.get_bucket(&*self.base.style).map(|b| b.get_id())).collect();
+        self.dem_textures.retain(|id, _| live_buckets.contains(id));
+
+        let dem_sampler = SamplerState {
+            filter: match *self.values.evaluated.paint.resampling.uniform() {
+                ResamplingType::Linear => TextureFilterType::Linear,
+                ResamplingType::Nearest => TextureFilterType::Nearest,
+            },
+            wrap_u: TextureWrapType::Clamp,
+            wrap_v: TextureWrapType::Clamp,
+            ..Default::default()
+        };
+
+        let mut frame_draws: Vec<(FrameDraw, ReliefUniforms)> = Vec::new();
+        for tile in render_tiles.iter() {
+            let tile_id = *tile.get_overscaled_tile_id();
+
+            let bucket_ptr = tile.get_bucket(&*self.base.style).filter(|b| b.has_data()).cloned();
+            let Some(bucket) = bucket_ptr.as_deref().and_then(|bucket| bucket.downcast_ref::<HillshadeBucket>()) else {
+                draws.drop_cache(&tile_id);
+                continue;
             };
+            let bucket_id = bucket.base.bucket_id;
 
-            let render_pass = RenderPass::Translucent;
-            if (render_pass.underlying_type() & self.base.evaluated_properties.render_passes()) == 0 {
-                break 'draw;
+            if draws.bucket(&tile_id).is_some_and(|prev| prev != bucket_id) {
+                // The tile's draw was built from another bucket.
+                draws.drop_cache(&tile_id);
             }
+            draws.set_bucket(&tile_id, bucket_id);
 
-            layer_group.remove_drawables_if(|drawable| drawable.tile_id.is_some_and(|id| !draws.has_tile(&id)));
-
-            if self.static_data_shared_vertices.is_none() {
-                self.static_data_shared_vertices = Some(shared_vertices(&RenderStaticData::raster_vertices()));
-            }
-            let static_data_shared_vertices = self.static_data_shared_vertices.clone().expect("static vertices");
-            let static_data_indices: IndexVectorBasePtr =
-                Rc::new(RefCell::new(IndexVectorBase::new(RenderStaticData::quad_triangle_indices())));
-            let static_data_segments = RenderStaticData::raster_segments();
-
-            // Update color ramp textures if changed
-            if self.color_ramp_changed {
-                let ramp_changed_texture = context.create_texture_2d();
-                {
-                    let mut t = ramp_changed_texture.borrow_mut();
-                    // Use RGBA32F instead of R32F for llvmpipe compatibility
-                    t.set_format(TextureFormat::Rgba32Float);
-                    let data = bytemuck::cast_slice(&self.elevation_stops_data);
-                    if let Err(error) = t.upload_data(context, data, Size::new(self.color_ramp_size, 1)) {
-                        Log::error(Event::Render, format!("Uploading the elevation stops failed: {error}"));
+            let geometry = bucket.geometry();
+            let geometry_time = geometry.last_modified;
+            let dem_data = bucket.get_dem_data();
+            if dem_data.get_image().valid() {
+                let tile_props = ColorReliefTilePropsUBO {
+                    unpack: dem_data.get_unpack_vector(),
+                    // Use stride (dim + 2) for dimension, as the texture
+                    // includes a 1-pixel border
+                    dimension: [dem_data.stride as f32, dem_data.stride as f32],
+                    color_ramp_size: self.color_ramp_size as i32,
+                    pad_tile0: 0.0,
+                };
+                let generation = bucket.render_target_generation();
+                let dem_texture = match self.dem_textures.get(&bucket_id) {
+                    Some((texture, made_at)) if *made_at == generation => Rc::clone(texture),
+                    _ => {
+                        let texture = context.create_texture_2d();
+                        texture.borrow_mut().set_image(Some(Rc::new(dem_data.get_image().clone())));
+                        self.dem_textures.insert(bucket_id, (Rc::clone(&texture), generation));
+                        texture
                     }
-                    t.set_sampler(SamplerState {
-                        filter: TextureFilterType::Nearest,
-                        wrap_u: TextureWrapType::Clamp,
-                        wrap_v: TextureWrapType::Clamp,
-                        ..Default::default()
-                    });
-                }
-                self.elevation_stops_texture = Some(ramp_changed_texture);
-
-                let color_stops_texture =
-                    Rc::clone(self.color_stops_texture.get_or_insert_with(|| context.create_texture_2d()));
-                {
-                    let mut t = color_stops_texture.borrow_mut();
-                    t.set_image(Some(Rc::new(self.color_stops.clone())));
-                    t.set_sampler(SamplerState {
-                        filter: TextureFilterType::Linear,
-                        wrap_u: TextureWrapType::Clamp,
-                        wrap_v: TextureWrapType::Clamp,
-                        ..Default::default()
-                    });
-                }
-
-                self.color_ramp_changed = false;
-            }
-
-            // Skip rendering if color ramp textures aren't ready
-            let (Some(elevation_stops_texture), Some(color_stops_texture)) =
-                (self.elevation_stops_texture.clone(), self.color_stops_texture.clone())
-            else {
-                break 'draw;
-            };
-
-            // Drop the DEM textures of buckets that are no longer rendered.
-            let live_buckets: HashSet<SimpleIdentity> =
-                render_tiles.iter().filter_map(|tile| tile.get_bucket(&*self.base.style).map(|b| b.get_id())).collect();
-            self.dem_textures.retain(|id, _| live_buckets.contains(id));
-
-            let evaluated = &self.values.evaluated.paint;
-            let dem_sampler = SamplerState {
-                filter: match *evaluated.resampling.uniform() {
-                    ResamplingType::Linear => TextureFilterType::Linear,
-                    ResamplingType::Nearest => TextureFilterType::Nearest,
-                },
-                wrap_u: TextureWrapType::Clamp,
-                wrap_v: TextureWrapType::Clamp,
-                ..Default::default()
-            };
-
-            for tile in render_tiles.iter() {
-                let tile_id = *tile.get_overscaled_tile_id();
-
-                let style = Arc::clone(&self.base.style);
-                let bucket_ptr = tile.get_bucket(&*style).filter(|b| b.has_data()).cloned();
-                let Some(bucket_ptr) = bucket_ptr else {
-                    layer_group.remove_drawables(render_pass, &tile_id);
-                    continue;
                 };
-                let Some(bucket) = (*bucket_ptr).downcast_ref::<HillshadeBucket>() else {
-                    layer_group.remove_drawables(render_pass, &tile_id);
-                    continue;
-                };
-                let bucket_id = bucket.base.bucket_id;
+                dem_texture.borrow_mut().set_sampler(dem_sampler);
 
-                let prev_bucket_id = draws.bucket(&tile_id);
-                if prev_bucket_id.is_some_and(|prev| prev != bucket_id) {
-                    layer_group.remove_drawables(render_pass, &tile_id);
+                if draws.cache_mut::<ReliefTile>(&tile_id).is_some_and(|cached| cached.built < geometry_time) {
+                    // The masked geometry changed (see the file comment).
+                    draws.drop_cache(&tile_id);
                 }
-                draws.set_bucket(&tile_id, bucket_id);
-
-                // Set up tile drawable
-                let (vertices, vertex_count, indices, segments, geometry_time): (
-                    VertexVectorBasePtr,
-                    usize,
-                    IndexVectorBasePtr,
-                    Vec<SegmentBase>,
-                    Instant,
-                ) = {
-                    let geometry = bucket.geometry();
-                    if self.base.projection_variant == ProjectionVariant::Globe {
+                if draws.cache_mut::<ReliefTile>(&tile_id).is_none() {
+                    // The tile's geometry: the globe's mesh of its mask, the
+                    // mask's geometry, or the whole tile's quad.
+                    let (vertices, vertex_count, indices, segments): (
+                        VertexVectorBasePtr,
+                        usize,
+                        IndexVectorBasePtr,
+                        Vec<SegmentBase>,
+                    ) = if self.base.projection_variant == ProjectionVariant::Globe {
                         let globe_mesh =
                             self.globe_meshes.get(&tile_id.canonical, &geometry.mask, HillshadeBucket::layout_vertex);
                         let vertices: VertexVectorBasePtr = Rc::<
@@ -471,7 +520,6 @@ impl RenderLayer for RenderColorReliefLayer {
                             globe_mesh.vertices.elements(),
                             Rc::clone(&globe_mesh.indices),
                             globe_mesh.segments.iter().map(SegmentBase::copy).collect(),
-                            geometry.last_modified,
                         )
                     } else if !geometry.vertices.is_empty()
                         && !geometry.indices.is_empty()
@@ -482,7 +530,6 @@ impl RenderLayer for RenderColorReliefLayer {
                             geometry.vertices.len(),
                             Rc::new(RefCell::new(IndexVectorBase::new(geometry.indices.clone()))),
                             geometry.segments.iter().map(SegmentBase::copy).collect(),
-                            geometry.last_modified,
                         )
                     } else {
                         (
@@ -490,102 +537,72 @@ impl RenderLayer for RenderColorReliefLayer {
                             4,
                             Rc::clone(&static_data_indices),
                             static_data_segments.iter().map(SegmentBase::copy).collect(),
-                            geometry.last_modified,
                         )
-                    }
-                };
-
-                // The DEM texture and tile properties
-                let (dem_image, tile_props_ubo) = {
-                    let dem_data = bucket.get_dem_data();
-                    if !dem_data.get_image().valid() {
-                        Log::warning(Event::Render, "ColorRelief: DEM image not valid for tile");
-                        continue; // Skip this tile if DEM data is not ready
-                    }
-                    let unpack_vector = dem_data.get_unpack_vector();
-                    (
-                        dem_data.get_image().clone(),
-                        ColorReliefTilePropsUBO {
-                            unpack: unpack_vector,
-                            // Use stride (dim + 2) for dimension, as the
-                            // texture includes a 1-pixel border
-                            dimension: [dem_data.stride as f32, dem_data.stride as f32],
-                            color_ramp_size: self.color_ramp_size as i32,
-                            pad_tile0: 0.0,
-                        },
-                    )
-                };
-                let generation = bucket.render_target_generation();
-                let dem_texture = match self.dem_textures.get(&bucket_id) {
-                    Some((texture, made_at)) if *made_at == generation => Rc::clone(texture),
-                    _ => {
-                        let texture = context.create_texture_2d();
-                        texture.borrow_mut().set_image(Some(Rc::new(dem_image)));
-                        self.dem_textures.insert(bucket_id, (Rc::clone(&texture), generation));
-                        texture
-                    }
-                };
-                dem_texture.borrow_mut().set_sampler(dem_sampler);
-
-                let update_existing = |drawable: &mut crate::drawable::Drawable| {
-                    if drawable.tweaker != tweaker {
-                        return false;
-                    }
-                    // The masked geometry changed: rebuild (see the file comment).
-                    if drawable.create_time < geometry_time {
-                        return false;
-                    }
-
-                    // Update textures
-                    drawable.objects.set_texture(Some(Rc::clone(&dem_texture)), ID_COLOR_RELIEF_IMAGE_TEXTURE);
-                    drawable.objects.set_texture(
+                    };
+                    let mut objects = DrawObjects::new(String::new());
+                    objects.set_color_mode(&ColorMode::alpha_blended());
+                    objects.set_cull_face_mode(CullFaceMode::disabled());
+                    objects.set_shader(Some(Rc::clone(&color_relief_shader)));
+                    let vertex_count = if segments.is_empty() { 0 } else { vertex_count };
+                    objects.update_vertex_attributes(
+                        Some(color_relief_vertex_attributes(&vertices)),
+                        vertex_count,
+                        DrawMode::Triangles(),
+                        Some(indices),
+                        &segments,
+                    );
+                    let cached = ReliefTile { draw: KeptDraw::new(objects), built: Instant::now(), tile_props };
+                    draws.set_cache(&tile_id, cached);
+                }
+                if let Some(cached) = draws.cache_mut::<ReliefTile>(&tile_id) {
+                    let objects = &mut cached.draw.objects;
+                    objects.set_texture(Some(dem_texture), ID_COLOR_RELIEF_IMAGE_TEXTURE);
+                    objects.set_texture(
                         Some(Rc::clone(&elevation_stops_texture)),
                         ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE,
                     );
-                    drawable
-                        .objects
-                        .set_texture(Some(Rc::clone(&color_stops_texture)), ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE);
-
-                    true
-                };
-
-                if update_tile(&mut layer_group, render_pass, &tile_id, update_existing) {
-                    continue;
+                    objects.set_texture(Some(Rc::clone(&color_stops_texture)), ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE);
                 }
-
-                let mut builder = DrawableBuilder::boxed();
-                builder.set_shader(Some(Rc::clone(&color_relief_shader)));
-                builder.set_enable_depth(false);
-                builder.set_color_mode(&ColorMode::alpha_blended());
-                builder.set_cull_face_mode(CullFaceMode::disabled());
-                builder.set_render_pass(render_pass);
-                builder.set_vertex_attributes(Some(color_relief_vertex_attributes(&vertices)));
-                builder.set_raw_vertices(Vec::new(), vertex_count, AttributeDataType::Short2);
-                builder.set_segments_shared(DrawMode::Triangles(), Some(Rc::clone(&indices)), &segments);
-
-                builder.set_texture(Some(dem_texture), ID_COLOR_RELIEF_IMAGE_TEXTURE);
-
-                // Bind color ramp textures
-                builder.set_texture(Some(Rc::clone(&elevation_stops_texture)), ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE);
-                builder.set_texture(Some(Rc::clone(&color_stops_texture)), ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE);
-
-                builder.flush();
-
-                let tile_layer_group = &mut layer_group;
-                for mut drawable in builder.clear_drawables() {
-                    drawable.tile_id = Some(tile_id);
-                    drawable.tweaker = tweaker;
-
-                    // Store tile props in drawable data for use by the tweaker
-                    // (for consolidated backends)
-                    drawable.data = Some(crate::drawable::DrawableData::ColorRelief(ColorReliefDrawableData {
-                        tile_props: tile_props_ubo,
-                    }));
-
-                    tile_layer_group.add_tile_drawable(render_pass, &tile_id, drawable);
-                }
+            } else {
+                // The tile's draw, if it has one, draws as it was.
+                Log::warning(Event::Render, "ColorRelief: DEM image not valid for tile");
             }
+
+            let Some(cached) = draws.cache_mut::<ReliefTile>(&tile_id) else {
+                continue;
+            };
+            let projection = paint_parameters.projection_data_for_tile(&tile_id.to_unwrapped(), false);
+            let uniforms = ReliefUniforms {
+                drawable: ColorReliefDrawableUBO { matrix: cast_matrix(&projection.fallback_matrix) },
+                tile_props: cached.tile_props,
+                projection: to_projection_ubo(&projection),
+            };
+            let draw = FrameDraw { depth: DrawDepth::Off, ..FrameDraw::new(Some(tile_id), cached.draw.id) };
+            frame_draws.push((draw, uniforms));
         }
-        draws.group = Some(layer_group);
+
+        frame_draws.sort_by_key(|(draw, _)| draw.order());
+        let Some(frame) = &mut draws.frame else {
+            return;
+        };
+        if !frame_draws.is_empty() {
+            let props = ColorReliefEvaluatedPropsUBO {
+                opacity: *self.values.evaluated.paint.color_relief_opacity.uniform(),
+                pad_eval0: 0.0,
+                pad_eval1: 0.0,
+                pad_eval2: 0.0,
+            };
+            let buffers = &mut frame.uniform_buffers;
+            buffers.create_or_update_pod(ID_COLOR_RELIEF_EVALUATED_PROPS_UBO, &props, context);
+            let drawables: Vec<ColorReliefDrawableUBO> =
+                frame_draws.iter().map(|(_, uniforms)| uniforms.drawable).collect();
+            buffers.write_storage(ID_COLOR_RELIEF_DRAWABLE_UBO, bytemuck::cast_slice(&drawables), context);
+            let tile_props: Vec<ColorReliefTilePropsUBO> =
+                frame_draws.iter().map(|(_, uniforms)| uniforms.tile_props).collect();
+            buffers.write_storage(ID_COLOR_RELIEF_TILE_PROPS_UBO, bytemuck::cast_slice(&tile_props), context);
+            let projections: Vec<ProjectionUBO> = frame_draws.iter().map(|(_, uniforms)| uniforms.projection).collect();
+            buffers.write_storage(ID_PROJECTION_UBO, bytemuck::cast_slice(&projections), context);
+        }
+        frame.draws = frame_draws.into_iter().map(|(draw, _)| draw).collect();
     }
 }

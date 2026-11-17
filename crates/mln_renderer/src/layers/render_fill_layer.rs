@@ -39,7 +39,7 @@ use crate::bucket::Bucket;
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::fill_bucket::{FillBinders, FillBucket, FillLayoutVertex};
 use crate::draw::DrawObjects;
-use crate::draw_cache::{DrawCache, FrameDraw, FrameDraws, LayerDraws};
+use crate::draw_cache::{DrawCache, DrawDepth, FrameDraw, FrameDraws, LayerDraws};
 use crate::gfx::context::Context;
 use crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker;
 use crate::layer_composite::Composite;
@@ -737,8 +737,7 @@ impl RenderLayer for RenderFillLayer {
                 let uniforms = self.uniforms(tile, bucket, binders, cached.pattern, draw, outline, paint_parameters);
                 let tile_draw = FrameDraw {
                     pass: RENDER_PASS,
-                    sub_layer: draw.sub_layer,
-                    depth: Some(draw.depth),
+                    depth: DrawDepth::Layer { sub_layer: draw.sub_layer, mask: draw.depth },
                     clip: true,
                     atlases: cached.atlases.clone(),
                     ..FrameDraw::new(Some(tile_id), draw.id)

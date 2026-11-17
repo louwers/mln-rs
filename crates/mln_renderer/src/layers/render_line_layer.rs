@@ -1,44 +1,52 @@
+// Where the line shaders read the expression UBO (`Caps::line_expressions`),
+// it is all zeros and no property is marked as evaluated on the GPU, as in
+// C++ with GPU expressions off (its default).
+
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_gfx::gpu::TextureFormat;
 use mln_gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
-use mln_gfx::shaders::shader_defines::{
-    ID_LINE_COLOR_VERTEX_ATTRIBUTE, ID_LINE_DASH_TEXTURE, ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_IMAGE_TEXTURE,
-    ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE,
+use mln_gfx::shaders::layer_ubo::ProjectionUBO;
+use mln_gfx::shaders::line_layer_ubo::{
+    LINE_EXPRESSION_UBO_SIZE, LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineGradientDrawableUBO,
+    LinePatternDrawableUBO, LinePatternTilePropsUBO, LineSDFDrawableUBO, LineSDFTilePropsUBO, LineTilePropsUnionUBO,
+    line_expression_mask,
 };
-use mln_gfx::shaders::shader_program::ShaderProgramPtr;
+use mln_gfx::shaders::shader_defines::{
+    ID_LINE_COLOR_VERTEX_ATTRIBUTE, ID_LINE_DASH_TEXTURE, ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_DRAWABLE_UBO,
+    ID_LINE_EVALUATED_PROPS_UBO, ID_LINE_EXPRESSION_UBO, ID_LINE_IMAGE_TEXTURE, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE,
+    ID_LINE_TILE_PROPS_UBO, ID_PROJECTION_UBO,
+};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
-use mln_gfx::{
-    AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode, ShaderRegistry, VertexAttributeArray,
-    VertexAttributeArrayPtr,
-};
+use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode, ShaderRegistry, VertexAttributeArray};
 use mln_map_types::TransformState;
 use mln_style::expression::{Dependency, EvaluationContext, GlobalStateMap, global_state_refs_intersect};
-use mln_style::layer_type::LayerStyle;
+use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
 use mln_style::layers::Line;
 use mln_style::layers::line_layer_properties::LinePaintProperties;
-use mln_style::{PropertyEvaluationParameters, StyleValue as _};
-use mln_style_types::LineCapType;
+use mln_style::{PropertyEvaluationParameters, StyleValue as _, TransitionParameters};
+use mln_style_types::{AlignmentType, LineCapType};
 use mln_util::Color;
 use mln_util::error::Error;
+use mln_util::identity::SimpleIdentity;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
-use super::line_layer_tweaker::{LineDrawableData, LineLayerTweaker, LineType};
-use super::{refresh_paint_attributes, update_tile};
-use crate::bucket_geometry::{BucketGeometry, bucket_indexes, bucket_vertices, paint_vertices};
+use super::{cast_matrix, refresh_paint_attributes};
+use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::line_bucket::{LineBinders, LineBucket, LineLayoutVertex};
-use crate::draw_cache::LayerDraws;
-use crate::drawable_builder::{DrawableBuilder, UniqueDrawableBuilder};
+use crate::draw::DrawObjects;
+use crate::draw_cache::{DrawCache, FrameDraw, FrameDraws, LayerDraws};
 use crate::gfx::context::Context;
+use crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker;
 use crate::gfx::texture2d::Texture2DPtr;
 use crate::layer_composite::Composite;
-use crate::layer_group::LayerGroup;
+use crate::layer_tweaker::{get_projection_data, to_projection_ubo};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::pattern_layout::{LineLayoutSpec, PatternLayout, uses_pattern};
@@ -47,7 +55,65 @@ use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
 use crate::render_layer::{LayerPrepareParameters, LayerValues, RenderLayer, RenderLayerBase, TypedLayer};
 use crate::render_pass::RenderPass;
+use crate::render_tile::RenderTile;
 use crate::update_parameters::UpdateParameters;
+
+/// What a line draws: its shader and the uniforms it reads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LineType {
+    Simple,
+    Gradient,
+    Pattern,
+    /// Dashes.
+    Sdf,
+    /// Dashes over a gradient.
+    GradientSdf,
+}
+
+/// What the layer keeps of a tile: the draw of its bucket's lines, as it was
+/// built for the bucket.
+struct LineTile {
+    /// The id of the draw's GPU objects, made with them.
+    id: SimpleIdentity,
+    objects: DrawObjects,
+    line_type: LineType,
+    /// The passes the draw draws in.
+    pass: RenderPass,
+    /// The ends of the dashes of the bucket, which pick its pattern in the
+    /// line atlas.
+    dash_cap: LinePatternCap,
+    /// Gives a pattern draw the texture of the tile's icon atlas.
+    atlases: Option<Rc<DrawableAtlasesTweaker>>,
+}
+
+impl DrawCache for LineTile {
+    fn objects_mut(&mut self, id: SimpleIdentity) -> Option<&mut DrawObjects> {
+        (self.id == id).then_some(&mut self.objects)
+    }
+}
+
+/// A draw's entries in the layer's storage buffers.
+struct LineUniforms {
+    drawable: LineDrawableUnionUBO,
+    tile_props: LineTilePropsUnionUBO,
+    projection: ProjectionUBO,
+}
+
+/// Where a dash draw samples its patterns. Where the dash array differs by
+/// feature, the shaders divide the scales' x and the gamma by each pattern's
+/// length.
+struct SdfPatterns {
+    patternscale_a: [f32; 2],
+    patternscale_b: [f32; 2],
+    tex_y_a: f32,
+    tex_y_b: f32,
+    atlas_height: f32,
+    sdfgamma: f32,
+}
+
+fn cast_tlbr(a: [u16; 4]) -> [f32; 4] {
+    a.map(f32::from)
+}
 
 /// The ends of a bucket's dashes. A dash pattern is shared by the whole
 /// bucket, so a `line-cap` that varies by feature gets square dashes, as in
@@ -479,17 +545,30 @@ impl RenderLayer for RenderLineLayer {
         }
     }
 
+    /// Drops the draws, which were built for the previous style's values.
+    fn layer_changed(
+        &mut self,
+        _parameters: &TransitionParameters,
+        _new_layer: &Arc<dyn ErasedLayerStyle>,
+        draws: &mut LayerDraws,
+    ) {
+        self.remove_all_drawables(draws);
+    }
+
+    /// Makes the frame's draws of the layer, those of each of its tiles,
+    /// which it builds for a tile it keeps none of, and writes the layer's
+    /// buffers they read.
     fn update(
         &mut self,
         shaders: &ShaderRegistry,
         context: &Context,
         state: &TransformState,
         _parameters: &Arc<UpdateParameters>,
-        _paint_parameters: &PaintParameters<'_>,
+        paint_parameters: &PaintParameters<'_>,
         draws: &mut LayerDraws,
     ) {
         if std::mem::take(&mut self.color_ramp_changed) {
-            // delete all gradient drawables
+            // The gradients' draws read the old ramp's texture.
             draws.clear_drawables();
         }
         self.update_projection_variant(state, draws);
@@ -499,359 +578,435 @@ impl RenderLayer for RenderLineLayer {
             return;
         };
 
-        let mut layer_group = draws.group.take().unwrap_or_else(LayerGroup::tiles);
-        {
-            if self.base.layer_tweaker.is_none() {
-                self.base.layer_tweaker = Some(Box::new(LineLayerTweaker::new(
-                    self.get_id().to_owned(),
-                    Arc::clone(&self.base.evaluated_properties),
-                )));
+        let frame = draws.frame.get_or_insert_with(FrameDraws::new);
+        let paint = &self.values.evaluated.paint;
+        frame.composite = Composite::of(*paint.line_layer_opacity.uniform(), *paint.line_layer_blend.uniform());
+        frame.stencil_tiles = Some(Rc::new(render_tiles.iter().map(|tile| tile.id).collect()));
+
+        let render_pass =
+            RenderPass(self.base.evaluated_properties.render_passes() & !RenderPass::Opaque.underlying_type());
+        let mut frame_draws: Vec<(FrameDraw, LineUniforms)> = Vec::new();
+        for tile in render_tiles.iter() {
+            let tile_id = *tile.get_overscaled_tile_id();
+
+            let Some(render_data) = super::render_data_for_pass(tile, &*self.base.style, render_pass) else {
+                draws.drop_cache(&tile_id);
+                continue;
+            };
+            let Some(bucket) = render_data.bucket::<Line>() else {
+                continue;
+            };
+            if bucket.triangles.is_empty() {
+                draws.drop_cache(&tile_id);
+                continue;
             }
+            let Some(binders_lock) = bucket.paint_property_binders.get(self.get_id()) else {
+                continue;
+            };
+            let binders = &*binders_lock.read();
+            let Some(evaluated) = render_data.layer::<Line>().map(|layer| &layer.paint) else {
+                continue;
+            };
 
-            let render_pass =
-                RenderPass(self.base.evaluated_properties.render_passes() & !RenderPass::Opaque.underlying_type());
-
+            if draws.bucket(&tile_id).is_some_and(|prev| prev != bucket.base.bucket_id)
+                || draws.cache_mut::<LineTile>(&tile_id).is_some_and(|cached| cached.pass != render_pass)
             {
-                let tile_layer_group = &mut layer_group;
-                let paint = &self.values.evaluated.paint;
-                tile_layer_group.composite =
-                    Composite::of(*paint.line_layer_opacity.uniform(), *paint.line_layer_blend.uniform());
-                let passes = self.base.passes;
-                // If the render pass has changed or the tile has dropped out of
-                // the cover set, remove it.
-                tile_layer_group.remove_drawables_if(|drawable| {
-                    drawable.render_pass != passes || drawable.tile_id.is_some_and(|id| !draws.has_tile(&id))
-                });
+                // The tile's draw was built from another bucket, or for other
+                // passes.
+                draws.drop_cache(&tile_id);
+            }
+            draws.set_bucket(&tile_id, bucket.base.bucket_id);
 
-                tile_layer_group.stencil_tiles = Some(Rc::new(render_tiles.iter().map(|tile| tile.id).collect()));
+            // The draw's attributes point into the bucket's shared vectors,
+            // which upload again when they change.
+            let changes = draws.take_changes(&tile_id);
+            if let Some(cached) = draws.cache_mut::<LineTile>(&tile_id) {
+                refresh_paint_attributes(&mut cached.objects, changes, |attrs| {
+                    let geometry = tile.get_bucket_geometry();
+                    let buffer = &binders.interleaved_vertex_buffer;
+                    let paint = paint_vertices(geometry, bucket, buffer, binders.depends_on_feature_state());
+                    read_line_attributes(attrs, binders, &paint, evaluated, &mut Default::default());
+                });
+            } else if let Some(built) = self.build_tile(shaders, context, tile, bucket, binders, evaluated, render_pass)
+            {
+                draws.set_cache(&tile_id, built);
             }
 
-            let create_line_builder = |shader: ShaderProgramPtr| -> UniqueDrawableBuilder {
-                let mut builder = DrawableBuilder::boxed();
-                builder.set_shader(Some(shader));
-                builder.set_render_pass(render_pass);
-                builder.set_sub_layer_index(0);
-                builder.set_depth_type(DepthMaskType::ReadOnly);
-                builder.set_color_mode(&if render_pass == RenderPass::Translucent {
-                    ColorMode::alpha_blended()
-                } else {
-                    ColorMode::unblended()
+            let Some(cached) = draws.cache_mut::<LineTile>(&tile_id) else {
+                continue;
+            };
+            if let Some(uniforms) = self.uniforms(tile, binders, cached, paint_parameters) {
+                let draw = FrameDraw {
+                    pass: cached.pass,
+                    clip: true,
+                    atlases: cached.atlases.clone(),
+                    ..FrameDraw::new(Some(tile_id), cached.id)
+                };
+                frame_draws.push((draw, uniforms));
+            }
+        }
+
+        frame_draws.sort_by_key(|(draw, _)| draw.order());
+        let Some(frame) = &mut draws.frame else {
+            return;
+        };
+        if !frame_draws.is_empty() {
+            self.write_uniforms(frame, &frame_draws, context);
+        }
+        frame.draws = frame_draws.into_iter().map(|(draw, _)| draw).collect();
+    }
+}
+
+impl RenderLineLayer {
+    /// The draw of `tile`'s `bucket`, laid out with `evaluated`, in `pass`,
+    /// if the layer has what it draws with.
+    #[expect(clippy::too_many_arguments, reason = "the tile, its bucket and values, and what draws them")]
+    fn build_tile(
+        &mut self,
+        shaders: &ShaderRegistry,
+        context: &Context,
+        tile: &RenderTile,
+        bucket: &LineBucket,
+        binders: &LineBinders,
+        evaluated: &LinePaintProperties::PossiblyEvaluated,
+        pass: RenderPass,
+    ) -> Option<LineTile> {
+        let geometry = tile.get_bucket_geometry();
+        let buffer = &binders.interleaved_vertex_buffer;
+        let paint = paint_vertices(geometry, bucket, buffer, binders.depends_on_feature_state());
+        let mut properties_as_uniforms = StringIDSetsPair::default();
+        let mut attrs = VertexAttributeArray::new();
+        read_line_attributes(&mut attrs, binders, &paint, evaluated, &mut properties_as_uniforms);
+
+        let has_dasharray =
+            !evaluated.line_dasharray.is_constant() || !evaluated.line_dasharray.faded().from.is_empty();
+        // A constant dash array's texture comes from the line atlas, with the
+        // draw's uniforms.
+        let dash_texture =
+            if evaluated.line_dasharray.is_constant() { None } else { Some(dash_atlas_texture(context, binders)?) };
+        let has_gradient = !self.values.unevaluated.line_gradient.get_value().is_undefined();
+
+        let mut textures: [(Option<Texture2DPtr>, usize); 2] = Default::default();
+        let mut atlases = None;
+        let (line_type, group, name) = if has_dasharray && has_gradient {
+            let ramp = self.color_ramp_texture(context)?;
+            textures = [(Some(ramp), ID_LINE_IMAGE_TEXTURE), (dash_texture, ID_LINE_DASH_TEXTURE)];
+            (LineType::GradientSdf, &mut self.line_gradient_sdf_shader_group, "LineGradientSDFShader")
+        } else if has_dasharray {
+            textures[0] = (dash_texture, ID_LINE_IMAGE_TEXTURE);
+            (LineType::Sdf, &mut self.line_sdf_shader_group, "LineSDFShader")
+        } else if !self.values.unevaluated.line_pattern.is_undefined() {
+            let icons = tile.get_atlas_textures().filter(|atlases| atlases.icon().is_some())?;
+            atlases = Some(Rc::new(DrawableAtlasesTweaker::new(
+                Some(Rc::clone(icons)),
+                None,
+                Some(ID_LINE_IMAGE_TEXTURE),
+                /*is_text*/ false,
+                /*sdf_icons*/ true, // to force linear filter
+                AlignmentType::Auto,
+                /*icon_scaled*/ false,
+                /*text_size_is_zoom_constant*/ false,
+            )));
+            (LineType::Pattern, &mut self.line_pattern_shader_group, "LinePatternShader")
+        } else if has_gradient {
+            let ramp = self.color_ramp_texture(context)?;
+            textures[0] = (Some(ramp), ID_LINE_IMAGE_TEXTURE);
+            (LineType::Gradient, &mut self.line_gradient_shader_group, "LineGradientShader")
+        } else {
+            (LineType::Simple, &mut self.line_shader_group, "LineShader")
+        };
+        if group.is_none() {
+            *group = shaders.shader_group(name);
+        }
+        let shader = group.as_ref()?.shader(&properties_as_uniforms, self.base.projection_variant);
+
+        let shared = bucket_vertices(geometry, bucket, &bucket.vertices);
+        let stride = size_of::<LineLayoutVertex>() as u32;
+        if let Some(attr) = attrs.set(ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
+            // offsetof(LineLayoutVertex, a1)
+            attr.set_shared_raw_data(Some(Rc::clone(&shared)), 0, 0, stride, AttributeDataType::Short2);
+        }
+        if let Some(attr) = attrs.set(ID_LINE_DATA_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
+            // offsetof(LineLayoutVertex, a2)
+            attr.set_shared_raw_data(Some(shared), 4, 0, stride, AttributeDataType::UByte4);
+        }
+
+        let mut objects = DrawObjects::new(String::new());
+        objects.set_color_mode(&if pass == RenderPass::Translucent {
+            ColorMode::alpha_blended()
+        } else {
+            ColorMode::unblended()
+        });
+        objects.set_cull_face_mode(CullFaceMode::disabled());
+        objects.set_shader(Some(shader));
+        for (texture, id) in textures {
+            if texture.is_some() {
+                objects.set_texture(texture, id);
+            }
+        }
+        let vertex_count = if bucket.segments.is_empty() { 0 } else { bucket.vertices.len() };
+        objects.update_vertex_attributes(
+            Some(Rc::new(RefCell::new(attrs))),
+            vertex_count,
+            DrawMode::Triangles(),
+            Some(bucket_indexes(geometry, bucket, &bucket.triangles)),
+            &bucket.segments,
+        );
+        if let Some(atlases) = &atlases {
+            atlases.init(&mut objects);
+        }
+        Some(LineTile {
+            id: SimpleIdentity::new(),
+            objects,
+            line_type,
+            pass,
+            dash_cap: dash_pattern_cap(bucket),
+            atlases,
+        })
+    }
+
+    /// The texture of the color ramp, which every gradient of the layer
+    /// shares, if the ramp is valid.
+    fn color_ramp_texture(&mut self, context: &Context) -> Option<Texture2DPtr> {
+        if self.color_ramp_texture_2d.is_none() && self.color_ramp.valid() {
+            let texture = context.create_texture_2d();
+            {
+                let mut t = texture.borrow_mut();
+                t.set_image(Some(Rc::clone(&self.color_ramp)));
+                t.set_sampler(SamplerState {
+                    filter: TextureFilterType::Linear,
+                    wrap_u: TextureWrapType::Clamp,
+                    wrap_v: TextureWrapType::Clamp,
+                    ..Default::default()
                 });
-                builder.set_cull_face_mode(CullFaceMode::disabled());
-                builder.set_enable_stencil(true);
-                builder
-            };
+            }
+            self.color_ramp_texture_2d = Some(texture);
+        }
+        self.color_ramp_texture_2d.clone()
+    }
 
-            let add_attributes = |builder: &mut DrawableBuilder,
-                                  geometry: Option<&BucketGeometry>,
-                                  bucket: &LineBucket,
-                                  vertex_attrs: VertexAttributeArrayPtr| {
-                let vertex_count = bucket.vertices.len();
-                builder.set_raw_vertices(Vec::new(), vertex_count, AttributeDataType::Short4);
+    /// The entries in the layer's storage buffers of `cached`, the draw of
+    /// `tile`, whose bucket's binders are `binders`: its matrix, the
+    /// interpolation of the layer's values, and where its patterns are. A
+    /// dashed draw of the line atlas's pattern takes the atlas's texture
+    /// here; `None` where it has none yet, and doesn't draw.
+    fn uniforms(
+        &self,
+        tile: &RenderTile,
+        binders: &LineBinders,
+        cached: &mut LineTile,
+        parameters: &PaintParameters<'_>,
+    ) -> Option<LineUniforms> {
+        const NEAR_CLIPPED: bool = false;
+        const IN_VIEWPORT_PIXEL_UNITS: bool = false; // from RenderTile::translatedMatrix
+        let layer = &*self.values.evaluated;
+        let evaluated = &layer.paint;
+        let crossfade = layer.crossfade;
+        let state = parameters.state;
+        let zoom = state.get_zoom() as f32;
+        let int_zoom = state.get_integer_zoom();
+        let pixel_scale = state.get_projection().pixel_scale(state) as f32;
+        let tile_id = tile.get_overscaled_tile_id().to_unwrapped();
 
-                let shared = bucket_vertices(geometry, bucket, &bucket.vertices);
-                if let Some(attr) = vertex_attrs.borrow_mut().set(
-                    ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE,
-                    -1,
-                    AttributeDataType::Invalid,
-                    0,
-                ) {
-                    attr.set_shared_raw_data(
-                        Some(Rc::clone(&shared)),
-                        0, // offsetof(LineLayoutVertex, a1)
-                        /*vertexOffset=*/ 0,
-                        size_of::<LineLayoutVertex>() as u32,
-                        AttributeDataType::Short2,
-                    );
-                }
+        let projection = get_projection_data(
+            &tile_id,
+            parameters,
+            *evaluated.line_translate.uniform(),
+            *evaluated.line_translate_anchor.uniform(),
+            NEAR_CLIPPED,
+            IN_VIEWPORT_PIXEL_UNITS,
+            None,
+            false,
+        );
+        let matrix = cast_matrix(&projection.fallback_matrix);
+        let mut uniforms = LineUniforms {
+            drawable: LineDrawableUnionUBO::default(),
+            tile_props: LineTilePropsUnionUBO::default(),
+            projection: to_projection_ubo(&projection),
+        };
+        let ratio = pixel_scale / tile_id.pixels_to_tile_units(1.0, zoom);
 
-                if let Some(attr) =
-                    vertex_attrs.borrow_mut().set(ID_LINE_DATA_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0)
-                {
-                    attr.set_shared_raw_data(
-                        Some(shared),
-                        4, // offsetof(LineLayoutVertex, a2)
-                        /*vertexOffset=*/ 0,
-                        size_of::<LineLayoutVertex>() as u32,
-                        AttributeDataType::UByte4,
-                    );
-                }
-
-                builder.set_vertex_attributes(Some(vertex_attrs));
-            };
-
-            let set_segments =
-                |builder: &mut DrawableBuilder, geometry: Option<&BucketGeometry>, bucket: &LineBucket| {
-                    builder.set_segments_shared(
-                        DrawMode::Triangles(),
-                        Some(bucket_indexes(geometry, bucket, &bucket.triangles)),
-                        &bucket.segments,
-                    );
-                };
-
-            let tweaker = self.base.layer_tweaker.as_ref().map(|tweaker| tweaker.base().key);
-            let layer_id = self.get_id().to_owned();
-            let mut properties_as_uniforms: StringIDSetsPair = Default::default();
-            for tile in render_tiles.iter() {
-                let tile_id = *tile.get_overscaled_tile_id();
-
-                let style = Arc::clone(&self.base.style);
-                let Some(render_data) = super::render_data_for_pass(tile, &*style, render_pass) else {
-                    layer_group.remove_drawables(render_pass, &tile_id);
-                    continue;
-                };
-
-                let Some(bucket) = render_data.bucket::<Line>() else {
-                    continue;
-                };
-                if bucket.triangles.is_empty() {
-                    layer_group.remove_drawables(render_pass, &tile_id);
-                    continue;
-                }
-
-                let Some(binders_lock) = bucket.paint_property_binders.get(&layer_id) else {
-                    continue;
-                };
-                let binders_guard = binders_lock.read();
-                let paint_property_binders = &*binders_guard;
-                let geometry = tile.get_bucket_geometry();
-                let paint = || {
-                    paint_vertices(
-                        geometry,
-                        bucket,
-                        &paint_property_binders.interleaved_vertex_buffer,
-                        paint_property_binders.depends_on_feature_state(),
-                    )
-                };
-                let Some(evaluated) = render_data.layer::<Line>().map(|layer| &layer.paint) else {
-                    continue;
-                };
-
-                let prev_bucket_id = draws.bucket(&tile_id);
-                if prev_bucket_id.is_some_and(|prev| prev != bucket.base.bucket_id) {
-                    // This tile was previously set up from a different bucket,
-                    // drop and re-create any drawables for it.
-                    layer_group.remove_drawables(render_pass, &tile_id);
-                }
-                draws.set_bucket(&tile_id, bucket.base.bucket_id);
-
-                let changes = draws.take_changes(&tile_id);
-                let update_existing = |drawable: &mut crate::drawable::Drawable| {
-                    // A drawable produced on a previous style/bucket should not be updated.
-                    let current = drawable.tweaker == tweaker;
-                    if current {
-                        refresh_paint_attributes(&mut drawable.objects, changes, |attrs| {
-                            read_line_attributes(
-                                attrs,
-                                paint_property_binders,
-                                &paint(),
-                                evaluated,
-                                &mut Default::default(),
-                            );
-                        });
-                    }
-                    current
-                };
-                if update_tile(&mut layer_group, render_pass, &tile_id, update_existing) {
-                    continue;
-                }
-
-                let cap_type = dash_pattern_cap(bucket);
-                let mut add_drawable = |mut drawable: crate::drawable::UniqueDrawable, type_: LineType| {
-                    drawable.tile_id = Some(tile_id);
-                    drawable.type_ = type_ as usize;
-                    drawable.tweaker = tweaker;
-
-                    drawable.data =
-                        Some(crate::drawable::DrawableData::Line(LineDrawableData { line_pattern_cap: cap_type }));
-
-                    let tile_layer_group = &mut layer_group;
-                    tile_layer_group.add_tile_drawable(render_pass, &tile_id, drawable);
-                };
-
-                properties_as_uniforms.0.clear();
-                properties_as_uniforms.1.clear();
-
-                let vertex_attrs = VertexAttributeArray::new_ptr();
-                read_line_attributes(
-                    &mut vertex_attrs.borrow_mut(),
-                    paint_property_binders,
-                    &paint(),
-                    evaluated,
-                    &mut properties_as_uniforms,
-                );
-
-                let has_dasharray =
-                    !evaluated.line_dasharray.is_constant() || !evaluated.line_dasharray.faded().from.is_empty();
-                // A constant dash array's texture comes from the line atlas, in
-                // the tweaker.
-                let dash_texture = if evaluated.line_dasharray.is_constant() {
-                    None
+        match cached.line_type {
+            LineType::Simple => uniforms.drawable.set(&LineDrawableUBO {
+                matrix,
+                ratio,
+                color_t: binders.line_color.interpolation_factor(zoom),
+                blur_t: binders.line_blur.interpolation_factor(zoom),
+                opacity_t: binders.line_opacity.interpolation_factor(zoom),
+                gapwidth_t: binders.line_gap_width.interpolation_factor(zoom),
+                offset_t: binders.line_offset.interpolation_factor(zoom),
+                width_t: binders.line_width.interpolation_factor(zoom),
+                pad1: 0.0,
+            }),
+            LineType::Gradient => uniforms.drawable.set(&LineGradientDrawableUBO {
+                matrix,
+                ratio,
+                blur_t: binders.line_blur.interpolation_factor(zoom),
+                opacity_t: binders.line_opacity.interpolation_factor(zoom),
+                gapwidth_t: binders.line_gap_width.interpolation_factor(zoom),
+                offset_t: binders.line_offset.interpolation_factor(zoom),
+                width_t: binders.line_width.interpolation_factor(zoom),
+                pad1: 0.0,
+                pad2: 0.0,
+            }),
+            LineType::Pattern => {
+                let texture = cached.objects.textures[ID_LINE_IMAGE_TEXTURE].as_ref();
+                let texture_size = texture.map_or(Size::new(0, 0), |texture| texture.borrow().size());
+                uniforms.drawable.set(&LinePatternDrawableUBO {
+                    matrix,
+                    ratio,
+                    blur_t: binders.line_blur.interpolation_factor(zoom),
+                    opacity_t: binders.line_opacity.interpolation_factor(zoom),
+                    gapwidth_t: binders.line_gap_width.interpolation_factor(zoom),
+                    offset_t: binders.line_offset.interpolation_factor(zoom),
+                    width_t: binders.line_width.interpolation_factor(zoom),
+                    pattern_from_t: binders.line_pattern.interpolation_factor(zoom).0,
+                    pattern_to_t: binders.line_pattern.interpolation_factor(zoom).1,
+                    floorwidth_t: binders.line_floor_width.interpolation_factor(zoom),
+                    pad1: 0.0,
+                    pad2: 0.0,
+                    pad3: 0.0,
+                });
+                let pattern = evaluated.line_pattern.faded();
+                let tlbr = |id: &str| tile.get_pattern(id).map_or([0.0; 4], |position| cast_tlbr(position.tlbr()));
+                uniforms.tile_props.set(&LinePatternTilePropsUBO {
+                    pattern_from: tlbr(pattern.from.id()),
+                    pattern_to: tlbr(pattern.to.id()),
+                    scale: [
+                        parameters.pixel_ratio,
+                        1.0 / tile_id.pixels_to_tile_units(1.0, f32::from(int_zoom)),
+                        crossfade.from_scale,
+                        crossfade.to_scale,
+                    ],
+                    texsize: [texture_size.width as f32, texture_size.height as f32],
+                    fade: crossfade.t,
+                    pad1: 0.0,
+                });
+            }
+            LineType::Sdf | LineType::GradientSdf => {
+                // The gradient keeps its ramp in the image slot, so the dash
+                // pattern takes the second.
+                let dash_texture_id = if cached.line_type == LineType::GradientSdf {
+                    ID_LINE_DASH_TEXTURE
                 } else {
-                    match dash_atlas_texture(context, paint_property_binders) {
-                        Some(texture) => Some(texture),
-                        None => continue,
-                    }
+                    ID_LINE_IMAGE_TEXTURE
                 };
-                let has_gradient = !self.values.unevaluated.line_gradient.get_value().is_undefined();
-
-                // The ramp texture is shared by every tile of the layer.
-                let ensure_color_ramp_texture =
-                    |texture_2d: &mut Option<Texture2DPtr>, color_ramp: &Rc<PremultipliedImage>| {
-                        if texture_2d.is_none() && color_ramp.valid() {
-                            let texture = context.create_texture_2d();
-                            {
-                                let mut t = texture.borrow_mut();
-                                t.set_image(Some(Rc::clone(color_ramp)));
-                                t.set_sampler(SamplerState {
-                                    filter: TextureFilterType::Linear,
-                                    wrap_u: TextureWrapType::Clamp,
-                                    wrap_v: TextureWrapType::Clamp,
-                                    ..Default::default()
-                                });
-                            }
-                            *texture_2d = Some(texture);
-                        }
-                    };
-
-                if has_dasharray && has_gradient {
-                    // dash array over a gradient
-                    if self.line_gradient_sdf_shader_group.is_none() {
-                        self.line_gradient_sdf_shader_group = shaders.shader_group("LineGradientSDFShader");
-                    }
-                    let Some(group) = self.line_gradient_sdf_shader_group.clone() else {
-                        continue;
-                    };
-                    let shader = group.shader(&properties_as_uniforms, self.base.projection_variant);
-
-                    let mut builder = create_line_builder(shader);
-
-                    // vertices and attributes
-                    add_attributes(builder.as_mut(), geometry, bucket, vertex_attrs);
-
-                    ensure_color_ramp_texture(&mut self.color_ramp_texture_2d, &self.color_ramp);
-                    if let Some(texture) = &self.color_ramp_texture_2d {
-                        builder.set_texture(Some(Rc::clone(texture)), ID_LINE_IMAGE_TEXTURE);
-                        if let Some(dash_texture) = dash_texture {
-                            builder.set_texture(Some(dash_texture), ID_LINE_DASH_TEXTURE);
-                        }
-
-                        set_segments(builder.as_mut(), geometry, bucket);
-
-                        builder.flush();
-                        for drawable in builder.clear_drawables() {
-                            add_drawable(drawable, LineType::GradientSdf);
-                        }
-                    }
-                } else if has_dasharray {
-                    // dash array line (SDF)
-                    if self.line_sdf_shader_group.is_none() {
-                        self.line_sdf_shader_group = shaders.shader_group("LineSDFShader");
-                    }
-                    let Some(group) = self.line_sdf_shader_group.clone() else {
-                        continue;
-                    };
-                    let shader = group.shader(&properties_as_uniforms, self.base.projection_variant);
-
-                    let mut builder = create_line_builder(shader);
-
-                    // vertices, attributes and segments
-                    add_attributes(builder.as_mut(), geometry, bucket, vertex_attrs);
-                    if let Some(dash_texture) = dash_texture {
-                        builder.set_texture(Some(dash_texture), ID_LINE_IMAGE_TEXTURE);
-                    }
-                    set_segments(builder.as_mut(), geometry, bucket);
-
-                    builder.flush();
-                    for drawable in builder.clear_drawables() {
-                        add_drawable(drawable, LineType::Sdf);
-                    }
-                } else if !self.values.unevaluated.line_pattern.is_undefined() {
-                    // pattern line (conformance)
-                    if self.line_pattern_shader_group.is_none() {
-                        self.line_pattern_shader_group = shaders.shader_group("LinePatternShader");
-                    }
-                    let Some(group) = self.line_pattern_shader_group.clone() else {
-                        continue;
-                    };
-                    let shader = group.shader(&properties_as_uniforms, self.base.projection_variant);
-
-                    let mut builder = create_line_builder(shader);
-
-                    // vertices and attributes
-                    add_attributes(builder.as_mut(), geometry, bucket, vertex_attrs);
-
-                    // texture
-                    if let Some(atlases) = tile.get_atlas_textures().filter(|a| a.icon().is_some()) {
-                        let icon_tweaker = Rc::new(crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker::new(
-                            Some(Rc::clone(atlases)),
-                            None,
-                            Some(ID_LINE_IMAGE_TEXTURE),
-                            /*is_text*/ false,
-                            /*sdf_icons*/ true, // to force linear filter
-                            /*rotation_alignment*/ mln_style_types::AlignmentType::Auto,
-                            /*icon_scaled*/ false,
-                            /*text_size_is_zoom_constant*/ false,
-                        ));
-
-                        builder.set_atlases(Some(icon_tweaker));
-
-                        set_segments(builder.as_mut(), geometry, bucket);
-
-                        builder.flush();
-                        for drawable in builder.clear_drawables() {
-                            add_drawable(drawable, LineType::Pattern);
-                        }
-                    }
-                } else if has_gradient {
-                    // gradient line
-                    if self.line_gradient_shader_group.is_none() {
-                        self.line_gradient_shader_group = shaders.shader_group("LineGradientShader");
-                    }
-                    let Some(group) = self.line_gradient_shader_group.clone() else {
-                        continue;
-                    };
-                    let shader = group.shader(&properties_as_uniforms, self.base.projection_variant);
-
-                    let mut builder = create_line_builder(shader);
-
-                    // vertices and attributes
-                    add_attributes(builder.as_mut(), geometry, bucket, vertex_attrs);
-
-                    ensure_color_ramp_texture(&mut self.color_ramp_texture_2d, &self.color_ramp);
-                    if let Some(texture) = &self.color_ramp_texture_2d {
-                        builder.set_texture(Some(Rc::clone(texture)), ID_LINE_IMAGE_TEXTURE);
-
-                        set_segments(builder.as_mut(), geometry, bucket);
-
-                        builder.flush();
-                        for drawable in builder.clear_drawables() {
-                            add_drawable(drawable, LineType::Gradient);
-                        }
+                let tile_ratio = |scale: f32| 1.0 / tile_id.pixels_to_tile_units(scale, f32::from(int_zoom));
+                let sdf = if let Some(atlas) = binders.line_dasharray.atlas() {
+                    // Per-feature patterns don't fade from the zoom before:
+                    // both samples are of this zoom's pattern, at the
+                    // cross-fade's two scales.
+                    let atlas_size = atlas.image().size;
+                    let min_scale = crossfade.from_scale.min(crossfade.to_scale);
+                    SdfPatterns {
+                        patternscale_a: [tile_ratio(crossfade.from_scale), 0.0],
+                        patternscale_b: [tile_ratio(crossfade.to_scale), 0.0],
+                        tex_y_a: 0.0,
+                        tex_y_b: 0.0,
+                        atlas_height: atlas_size.height as f32,
+                        sdfgamma: atlas_size.width as f32 / (min_scale * 256.0 * parameters.pixel_ratio) / 2.0,
                     }
                 } else {
-                    // simple line
-                    if self.line_shader_group.is_none() {
-                        self.line_shader_group = shaders.shader_group("LineShader");
+                    let mut line_atlas = parameters.line_atlas.borrow_mut();
+                    let dasharray = evaluated.line_dasharray.faded();
+                    let dash_pattern =
+                        line_atlas.get_dash_pattern_texture(dasharray.from, dasharray.to, cached.dash_cap);
+                    if cached.objects.textures[dash_texture_id].is_none() {
+                        cached.objects.set_texture(Some(dash_pattern.get_texture()?), dash_texture_id);
                     }
-                    let Some(group) = self.line_shader_group.clone() else {
-                        continue;
-                    };
-                    let shader = group.shader(&properties_as_uniforms, self.base.projection_variant);
 
-                    let mut builder = create_line_builder(shader);
-
-                    // vertices, attributes and segments
-                    add_attributes(builder.as_mut(), geometry, bucket, vertex_attrs);
-                    set_segments(builder.as_mut(), geometry, bucket);
-
-                    builder.flush();
-                    for drawable in builder.clear_drawables() {
-                        add_drawable(drawable, LineType::Simple);
+                    let pos_a = dash_pattern.get_from();
+                    let pos_b = dash_pattern.get_to();
+                    let width_a = pos_a.width * crossfade.from_scale;
+                    let width_b = pos_b.width * crossfade.to_scale;
+                    // std::min(widthA, widthB)
+                    let min_width = if width_b < width_a { width_b } else { width_a };
+                    SdfPatterns {
+                        patternscale_a: [tile_ratio(width_a), -pos_a.height / 2.0],
+                        patternscale_b: [tile_ratio(width_b), -pos_b.height / 2.0],
+                        tex_y_a: pos_a.y,
+                        tex_y_b: pos_b.y,
+                        atlas_height: 0.0,
+                        sdfgamma: dash_pattern.get_size().width as f32
+                            / (min_width * 256.0 * parameters.pixel_ratio)
+                            / 2.0,
                     }
+                };
+
+                uniforms.drawable.set(&LineSDFDrawableUBO {
+                    matrix,
+                    patternscale_a: sdf.patternscale_a,
+                    patternscale_b: sdf.patternscale_b,
+                    tex_y_a: sdf.tex_y_a,
+                    tex_y_b: sdf.tex_y_b,
+                    ratio,
+                    color_t: binders.line_color.interpolation_factor(zoom),
+                    blur_t: binders.line_blur.interpolation_factor(zoom),
+                    opacity_t: binders.line_opacity.interpolation_factor(zoom),
+                    gapwidth_t: binders.line_gap_width.interpolation_factor(zoom),
+                    offset_t: binders.line_offset.interpolation_factor(zoom),
+                    width_t: binders.line_width.interpolation_factor(zoom),
+                    floorwidth_t: binders.line_floor_width.interpolation_factor(zoom),
+                    atlas_height: sdf.atlas_height,
+                    pad2: 0.0,
+                });
+                uniforms.tile_props.set(&LineSDFTilePropsUBO {
+                    sdfgamma: sdf.sdfgamma,
+                    mix: crossfade.t,
+                    pad1: 0.0,
+                    pad2: 0.0,
+                });
+            }
+        }
+        Some(uniforms)
+    }
+
+    /// Writes the layer's buffers of `draws`, the frame's in drawing order,
+    /// to `frame`'s.
+    fn write_uniforms(&self, frame: &mut FrameDraws, draws: &[(FrameDraw, LineUniforms)], context: &Context) {
+        use line_expression_mask::{BLUR, COLOR, FLOOR_WIDTH, GAP_WIDTH, NONE, OFFSET, OPACITY, WIDTH};
+        let evaluated = &self.values.evaluated.paint;
+        let gpu_expressions = context.caps().line_expressions;
+        // Where the shaders read the expression UBO, the mask marks the
+        // properties evaluated on the GPU (none, see the top of the file);
+        // elsewhere, the constant ones.
+        let mut expression_mask = NONE;
+        if !gpu_expressions {
+            for (constant, bit) in [
+                (evaluated.line_color.is_constant(), COLOR),
+                (evaluated.line_blur.is_constant(), BLUR),
+                (evaluated.line_opacity.is_constant(), OPACITY),
+                (evaluated.line_gap_width.is_constant(), GAP_WIDTH),
+                (evaluated.line_offset.is_constant(), OFFSET),
+                (evaluated.line_width.is_constant(), WIDTH),
+                (evaluated.line_floor_width.is_constant(), FLOOR_WIDTH),
+            ] {
+                if constant {
+                    expression_mask |= bit;
                 }
             }
         }
-        draws.group = Some(layer_group);
+        let props = LineEvaluatedPropsUBO {
+            color: evaluated.line_color.constant_or(&LinePaintProperties::Defaults::line_color()).to_float_array(),
+            blur: evaluated.line_blur.constant_or(&LinePaintProperties::Defaults::line_blur()),
+            opacity: evaluated.line_opacity.constant_or(&LinePaintProperties::Defaults::line_opacity()),
+            gapwidth: evaluated.line_gap_width.constant_or(&LinePaintProperties::Defaults::line_gap_width()),
+            offset: evaluated.line_offset.constant_or(&LinePaintProperties::Defaults::line_offset()),
+            width: evaluated.line_width.constant_or(&LinePaintProperties::Defaults::line_width()),
+            floorwidth: evaluated.line_floor_width.constant_or(&LinePaintProperties::Defaults::line_floor_width()),
+            expression_mask,
+            pad1: 0.0,
+        };
+        let buffers = &mut frame.uniform_buffers;
+        buffers.create_or_update_pod(ID_LINE_EVALUATED_PROPS_UBO, &props, context);
+        if gpu_expressions && buffers.get(ID_LINE_EXPRESSION_UBO).is_none() {
+            buffers.set(ID_LINE_EXPRESSION_UBO, context.create_uniform_buffer(&[0; LINE_EXPRESSION_UBO_SIZE]));
+        }
+        let drawables: Vec<LineDrawableUnionUBO> = draws.iter().map(|(_, uniforms)| uniforms.drawable).collect();
+        buffers.write_storage(ID_LINE_DRAWABLE_UBO, bytemuck::cast_slice(&drawables), context);
+        let tile_props: Vec<LineTilePropsUnionUBO> = draws.iter().map(|(_, uniforms)| uniforms.tile_props).collect();
+        buffers.write_storage(ID_LINE_TILE_PROPS_UBO, bytemuck::cast_slice(&tile_props), context);
+        let projections: Vec<ProjectionUBO> = draws.iter().map(|(_, uniforms)| uniforms.projection).collect();
+        buffers.write_storage(ID_PROJECTION_UBO, bytemuck::cast_slice(&projections), context);
     }
 }

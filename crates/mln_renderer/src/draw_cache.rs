@@ -128,6 +128,19 @@ struct TileEntry {
     cache: Option<Box<dyn DrawCache>>,
 }
 
+/// How a draw tests and writes depth.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DrawDepth {
+    /// It draws without a depth test.
+    Off,
+    /// It tests the depth of a sub-layer of the layer's depth, and writes it
+    /// as `mask` says.
+    Layer { sub_layer: u8, mask: DepthMaskType },
+    /// It tests and writes the depth range of 3D geometry, which the 3D draws
+    /// of all layers share.
+    Volume,
+}
+
 /// One draw of a layer's frame: the cached GPU objects it binds, and the
 /// state it draws them with. Its uniform values are the entries at its index
 /// in the layer's storage buffers.
@@ -140,12 +153,10 @@ pub(crate) struct FrameDraw {
     pub(crate) priority: DrawPriority,
     /// The passes the draw draws in.
     pub(crate) pass: RenderPass,
-    /// The sub-layer of the layer's depth the draw tests and writes at.
-    pub(crate) sub_layer: u8,
-    /// How the draw writes the depth it tests, `None` where it draws without
-    /// a depth test.
-    pub(crate) depth: Option<DepthMaskType>,
-    /// Whether the draw clips to the mask of its tile.
+    pub(crate) depth: DrawDepth,
+    /// Whether the draw clips: a draw at the layer's depth to the mask of
+    /// its tile, a 3D one to where none of the layer's 3D draws of the pass
+    /// drew before it, so no pixel blends twice.
     pub(crate) clip: bool,
     /// Gives the draw the textures of its tile's atlases before it draws.
     pub(crate) atlases: Option<Rc<DrawableAtlasesTweaker>>,
@@ -162,8 +173,7 @@ impl FrameDraw {
             id,
             priority: 0,
             pass: RenderPass::Translucent,
-            sub_layer: 0,
-            depth: Some(DepthMaskType::ReadOnly),
+            depth: DrawDepth::Layer { sub_layer: 0, mask: DepthMaskType::ReadOnly },
             clip: false,
             atlases: None,
         }
@@ -361,7 +371,7 @@ impl LayerDraws {
     /// Uploads the GPU objects of the frame's draws.
     fn upload_frame(&mut self, context: &Context) {
         let Some(frame) = &self.frame else { return };
-        let caches = &mut Caches { tiles: &mut self.tiles, layer: &mut self.layer_cache };
+        let caches = &mut Caches::Layer { tiles: &mut self.tiles, layer: &mut self.layer_cache };
         upload_draws(frame, caches, context);
     }
 
@@ -373,7 +383,7 @@ impl LayerDraws {
         if frame.draws.is_empty() || parameters.pass_target().is_none() {
             return;
         }
-        let caches = &mut Caches { tiles: &mut self.tiles, layer: &mut self.layer_cache };
+        let caches = &mut Caches::Layer { tiles: &mut self.tiles, layer: &mut self.layer_cache };
         if frame.composite.is_some() && parameters.pass == RenderPass::Translucent {
             parameters.draw_composited(gpu, frame.id, |gpu, parameters| render_draws(frame, caches, gpu, parameters));
         } else {
@@ -382,24 +392,51 @@ impl LayerDraws {
     }
 
     fn caches(&mut self) -> Caches<'_> {
-        Caches { tiles: &mut self.tiles, layer: &mut self.layer_cache }
+        Caches::Layer { tiles: &mut self.tiles, layer: &mut self.layer_cache }
     }
 }
 
-/// The caches of a layer's draws, which hold the draws' GPU objects.
-struct Caches<'a> {
-    tiles: &'a mut HashMap<OverscaledTileID, TileEntry>,
-    layer: &'a mut Option<Box<dyn DrawCache>>,
+impl FrameDraws {
+    /// Uploads the GPU objects of the draws, all of which `cache` holds, in
+    /// drawing order, and destroys the buffers each upload replaced.
+    pub(crate) fn upload_from(&self, cache: &mut dyn DrawCache, context: &Context) {
+        upload_draws(self, &mut Caches::One(cache), context);
+    }
+
+    /// Draws the draws of the pass, all of whose GPU objects `cache` holds,
+    /// into the open pass of `gpu`, the context's.
+    pub(crate) fn render_from(
+        &self,
+        cache: &mut dyn DrawCache,
+        gpu: &mut dyn Gpu,
+        parameters: &mut PaintParameters<'_>,
+    ) {
+        if !self.draws.is_empty() && parameters.pass_target().is_some() {
+            render_draws(self, &mut Caches::One(cache), gpu, parameters);
+        }
+    }
+}
+
+/// The caches that hold the GPU objects of draws: a layer's, or one of its
+/// own.
+enum Caches<'a> {
+    /// The caches of a layer's tiles and of the layer.
+    Layer { tiles: &'a mut HashMap<OverscaledTileID, TileEntry>, layer: &'a mut Option<Box<dyn DrawCache>> },
+    /// One cache, which holds the GPU objects of every draw.
+    One(&'a mut dyn DrawCache),
 }
 
 impl Caches<'_> {
     /// The GPU objects of `draw` in its cache.
     fn objects_mut(&mut self, draw: &FrameDraw) -> Option<&mut DrawObjects> {
-        let cache = match draw.tile {
-            Some(tile) => self.tiles.get_mut(&tile)?.cache.as_mut(),
-            None => self.layer.as_mut(),
+        let cache = match self {
+            Caches::Layer { tiles, layer } => match draw.tile {
+                Some(tile) => tiles.get_mut(&tile)?.cache.as_deref_mut()?,
+                None => layer.as_deref_mut()?,
+            },
+            Caches::One(cache) => &mut **cache,
         };
-        cache?.objects_mut(draw.id)
+        cache.objects_mut(draw.id)
     }
 }
 
@@ -414,15 +451,24 @@ fn upload_draws(frame: &FrameDraws, caches: &mut Caches<'_>, context: &Context) 
     }
 }
 
-/// Draws `frame`'s draws of the pass, those that clip each clipped to its
-/// tile's mask, which this draws first.
+/// Draws `frame`'s draws of the pass. Where none of them is 3D, those that
+/// clip clip each to its tile's mask, which this draws first; 3D draws that
+/// clip share one stencil value of their own.
 fn render_draws(frame: &FrameDraws, caches: &mut Caches<'_>, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-    if let Some(stencil_tiles) = frame.stencil_tiles.as_ref().filter(|tiles| !tiles.is_empty()) {
-        parameters.render_tile_clipping_masks(gpu, stencil_tiles);
-    }
     let pass = parameters.pass.underlying_type();
+    let in_pass = |draw: &&FrameDraw| draw.pass.underlying_type() & pass != 0;
+    let mut volumes = frame.draws.iter().filter(in_pass).filter(|draw| draw.depth == DrawDepth::Volume).peekable();
+    let (volume_depth, volume_stencil) = if volumes.peek().is_some() {
+        let stencil = volumes.any(|draw| draw.clip).then(|| parameters.stencil_mode_for_3d(gpu));
+        (parameters.depth_mode_for_3d(DepthMaskType::ReadWrite), stencil)
+    } else {
+        if let Some(stencil_tiles) = frame.stencil_tiles.as_ref().filter(|tiles| !tiles.is_empty()) {
+            parameters.render_tile_clipping_masks(gpu, stencil_tiles);
+        }
+        (DepthMode::disabled(), None)
+    };
     for (index, draw) in frame.draws.iter().enumerate() {
-        if draw.pass.underlying_type() & pass == 0 {
+        if !in_pass(&draw) {
             continue;
         }
         let Some(objects) = caches.objects_mut(draw) else {
@@ -432,12 +478,18 @@ fn render_draws(frame: &FrameDraws, caches: &mut Caches<'_>, gpu: &mut dyn Gpu, 
         if let Some(atlases) = &draw.atlases {
             atlases.execute(objects, parameters);
         }
-        let depth = draw
-            .depth
-            .map_or_else(DepthMode::disabled, |mask| parameters.depth_mode_for_sublayer(draw.sub_layer, mask));
-        let stencil = match draw.tile.filter(|_| draw.clip) {
+        let tile_stencil = || match draw.tile.filter(|_| draw.clip) {
             Some(tile) => parameters.stencil_mode_for_clipping(&tile.to_unwrapped()),
             None => StencilMode::disabled(),
+        };
+        let (depth, stencil) = match draw.depth {
+            DrawDepth::Off => (DepthMode::disabled(), tile_stencil()),
+            DrawDepth::Layer { sub_layer, mask } => {
+                (parameters.depth_mode_for_sublayer(sub_layer, mask), tile_stencil())
+            }
+            DrawDepth::Volume => {
+                (volume_depth, volume_stencil.filter(|_| draw.clip).unwrap_or_else(StencilMode::disabled))
+            }
         };
         objects.draw(gpu, parameters, Some(&frame.uniform_buffers), depth, stencil, index as u32);
     }
