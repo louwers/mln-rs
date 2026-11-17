@@ -135,10 +135,12 @@ impl EventLog {
         self.shared.0.lock().clone()
     }
 
-    /// Waits until the events hold an event that `wanted` accepts.
+    /// Waits until the events hold an event that `wanted` accepts, or gives
+    /// `None` after [`COMPLETION_TIMEOUT`]. An event can wait on what a
+    /// command waits on, such as the network, so it gets as long.
     pub(crate) fn wait_for(&self, mut wanted: impl FnMut(&RuntimeEvent) -> bool) -> Option<RuntimeEvent> {
         let (events, changed) = &*self.shared;
-        let deadline = Instant::now() + TIMEOUT;
+        let deadline = Instant::now() + COMPLETION_TIMEOUT;
         let mut events = events.lock();
         loop {
             if let Some(event) = events.iter().find(|event| wanted(event)) {
