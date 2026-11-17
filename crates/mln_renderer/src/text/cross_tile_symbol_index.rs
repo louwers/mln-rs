@@ -6,7 +6,7 @@
 // guards) and the render-thread id.
 
 use std::cell::Cell;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::num::NonZeroU32;
 use std::rc::Rc;
 
@@ -37,12 +37,26 @@ impl IndexedSymbolInstance {
     }
 }
 
+/// An indexed symbol and where its key is in its index's `keys`.
+#[derive(Clone, Copy, Debug)]
+struct IndexedSymbol {
+    key_start: u32,
+    key_len: u32,
+    instance: IndexedSymbolInstance,
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct TileLayerIndex {
     pub(crate) coord: OverscaledTileID,
     pub(crate) bucket_instance_id: u32,
     pub(crate) bucket_leader_id: String,
-    pub(crate) indexed_symbol_instances: BTreeMap<Vec<u16>, Vec<IndexedSymbolInstance>>,
+    /// The keys of `symbols`, end to end. The render thread builds an index
+    /// each time it adds a bucket, so the keys share one allocation rather
+    /// than taking one each.
+    keys: Vec<u16>,
+    /// The bucket's symbols that have a cross-tile id, sorted by key, and in
+    /// the bucket's order among equal keys.
+    symbols: Vec<IndexedSymbol>,
 }
 
 impl TileLayerIndex {
@@ -54,19 +68,33 @@ impl TileLayerIndex {
         bucket_leader_id: String,
     ) -> Self {
         let mut index =
-            TileLayerIndex { coord, bucket_instance_id, bucket_leader_id, indexed_symbol_instances: BTreeMap::new() };
-        for symbol_instance in symbol_instances {
+            TileLayerIndex { coord, bucket_instance_id, bucket_leader_id, keys: Vec::new(), symbols: Vec::new() };
+        let indexed = || symbol_instances.iter().filter(|symbol_instance| symbol_instance.cross_tile_id().is_some());
+        index.keys.reserve_exact(indexed().map(|symbol_instance| symbol_instance.get_key().len()).sum());
+        index.symbols.reserve_exact(indexed().count());
+        for symbol_instance in indexed() {
             let Some(cross_tile_id) = symbol_instance.cross_tile_id() else {
                 continue;
             };
-            let scaled = index.get_scaled_coordinates(symbol_instance, &coord);
-            index
-                .indexed_symbol_instances
-                .entry(symbol_instance.get_key().to_vec())
-                .or_default()
-                .push(IndexedSymbolInstance::new(cross_tile_id, scaled));
+            let key = symbol_instance.get_key();
+            index.symbols.push(IndexedSymbol {
+                key_start: index.keys.len() as u32,
+                key_len: key.len() as u32,
+                instance: IndexedSymbolInstance::new(cross_tile_id, index.get_scaled_coordinates(symbol_instance, &coord)),
+            });
+            index.keys.extend_from_slice(key);
         }
+        // A stable sort, so symbols with one key stay in the bucket's order.
+        let keys = &index.keys;
+        index.symbols.sort_by(|a, b| key_of(keys, a).cmp(key_of(keys, b)));
         index
+    }
+
+    /// The indexed symbols with `key`, in their bucket's order.
+    fn symbols_with_key(&self, key: &[u16]) -> &[IndexedSymbol] {
+        let start = self.symbols.partition_point(|symbol| key_of(&self.keys, symbol) < key);
+        let len = self.symbols[start..].partition_point(|symbol| key_of(&self.keys, symbol) == key);
+        &self.symbols[start..][..len]
     }
 
     #[must_use]
@@ -111,14 +139,15 @@ impl TileLayerIndex {
                 continue;
             }
 
-            let Some(indexed) = self.indexed_symbol_instances.get(symbol_instance.get_key()) else {
+            let indexed = self.symbols_with_key(symbol_instance.get_key());
+            if indexed.is_empty() {
                 // No symbol with this key in this bucket
                 continue;
-            };
+            }
 
             let scaled_symbol_coord = self.get_scaled_coordinates(symbol_instance, new_coord);
 
-            for this_tile_symbol in indexed {
+            for this_tile_symbol in indexed.iter().map(|symbol| &symbol.instance) {
                 // Return any symbol with the same keys whose coordinates are within
                 // 1 grid unit. (with a 4px grid, this covers a 12px by 12px area)
                 if ((this_tile_symbol.coord.x - scaled_symbol_coord.x).abs() as f32) <= tolerance
@@ -136,6 +165,11 @@ impl TileLayerIndex {
             }
         }
     }
+}
+
+/// The key of `symbol`, in its index's `keys`.
+fn key_of<'a>(keys: &'a [u16], symbol: &IndexedSymbol) -> &'a [u16] {
+    &keys[symbol.key_start as usize..][..symbol.key_len as usize]
 }
 
 /// Whether `point`, `elevation` meters above the ground, is in or near the
@@ -159,10 +193,8 @@ fn remove_bucket_cross_tile_ids(
     zoom: u8,
     removed_bucket: &TileLayerIndex,
 ) {
-    for indexed in removed_bucket.indexed_symbol_instances.values() {
-        for indexed_symbol_instance in indexed {
-            used_cross_tile_ids.entry(zoom).or_default().remove(&indexed_symbol_instance.cross_tile_id);
-        }
+    for symbol in &removed_bucket.symbols {
+        used_cross_tile_ids.entry(zoom).or_default().remove(&symbol.instance.cross_tile_id);
     }
 }
 
