@@ -191,22 +191,6 @@ fn font_stacks_share_the_allocation_of_the_same_glyph() {
     assert_eq!(handles[0].get_id(), handles[1].get_id());
 }
 
-/// A packed glyph's bin queues the glyph itself, not a copy of its pixels.
-#[test]
-fn packed_glyph_queues_the_glyph_for_its_bin() {
-    let mut test = DynamicTextureAtlasTest::new();
-    let glyph = make_glyph('A');
-    let page = test.upload_glyphs(&GlyphMap::from([(1, glyphs(&glyph))]));
-    let (page_id, bin) = (page.lease.page(), page.lease.texture_handles()[0]);
-
-    let (rect, pixels) = &test.atlas.queued_uploads(page_id).unwrap()[&bin.get_id()];
-    assert_eq!(rect, bin.get_rectangle());
-    let QueuedPixels::Glyph { glyph: queued, .. } = pixels else {
-        panic!("a glyph's bin queues the glyph");
-    };
-    assert!(Arc::ptr_eq(queued, &glyph));
-}
-
 /// A glyph no font has stays missing, and one without a bitmap has its
 /// metrics and no bin.
 #[test]

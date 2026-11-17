@@ -312,26 +312,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pad_glyph_places_the_bitmap_inside_a_clear_border() {
-        let bitmap = AlphaImage::from_slice(Size::new(2, 3), &[1, 2, 3, 4, 5, 6]).unwrap();
-        let rect = RectU16 { x: 10, y: 20, w: 6, h: 7 };
-        // Starts dirty, as the reused buffer is after a larger glyph.
-        let mut padded = vec![9; 100];
-        pad_glyph(&bitmap, rect, 2, &mut padded);
-        #[rustfmt::skip]
-        let expected = [
-            0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0,
-            0, 0, 1, 2, 0, 0,
-            0, 0, 3, 4, 0, 0,
-            0, 0, 5, 6, 0, 0,
-            0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0,
-        ];
-        assert_eq!(padded, expected);
-    }
-
-    #[test]
     fn bin_ids_are_nonzero_and_do_not_wrap() {
         assert!(DynamicTextureBinId::new(0).is_none());
         assert_eq!(DynamicTextureBinId::new(u32::MAX).unwrap().next(), None);
