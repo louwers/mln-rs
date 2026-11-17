@@ -1217,16 +1217,8 @@ impl Gpu for MetalGpu {
 
     fn write_buffer(&mut self, buffer: BufferId, offset: u64, data: &[u8]) -> Result<(), GpuError> {
         let to = &self.buffers.get(buffer).ok_or(GpuError::UnknownId("buffer"))?.buffer;
+        validation::check_write(offset, data.len(), to.length() as u64)?;
         let (offset, size) = (offset as usize, data.len());
-        if !offset.is_multiple_of(4) || !size.is_multiple_of(4) {
-            return Err(GpuError::Invalid(format!("a write of {size} bytes at {offset}, not multiples of 4")));
-        }
-        if offset.checked_add(size).is_none_or(|end| end > to.length()) {
-            return Err(GpuError::Invalid(format!(
-                "a write of {size} bytes at {offset} to a buffer of {}",
-                to.length()
-            )));
-        }
         if size > 0 {
             let to = to.clone();
             let from = self.uploads.push(data);

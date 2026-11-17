@@ -903,13 +903,8 @@ impl Gpu for D3d12Gpu {
 
     fn write_buffer(&mut self, buffer: BufferId, offset: u64, data: &[u8]) -> Result<(), GpuError> {
         let entry = self.buffers.get(buffer).ok_or(GpuError::UnknownId("buffer"))?;
+        validation::check_write(offset, data.len(), entry.size)?;
         let length = data.len() as u64;
-        if !offset.is_multiple_of(4) || !length.is_multiple_of(4) || offset + length > entry.size {
-            return Err(GpuError::Invalid(format!(
-                "a write of {length} bytes at {offset} to a buffer of {}",
-                entry.size
-            )));
-        }
         if data.is_empty() {
             return Ok(());
         }

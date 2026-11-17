@@ -553,10 +553,8 @@ impl Gpu for WebGpu {
 
     fn write_buffer(&mut self, buffer: BufferId, offset: u64, data: &[u8]) -> Result<(), GpuError> {
         let entry = self.buffers.get_mut(buffer).ok_or(GpuError::UnknownId("buffer"))?;
+        validation::check_write(offset, data.len(), entry.size)?;
         let end = offset + data.len() as u64;
-        if end > entry.size {
-            return Err(GpuError::Invalid(format!("a write to bytes {offset}..{end} of a buffer of {}", entry.size)));
-        }
         // Where the rest of a buffer in a page still holds its zeros, they
         // can be written with the data, so that the copy joins the next
         // buffer's.

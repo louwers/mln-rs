@@ -5,8 +5,9 @@
 //! `create_geometry`, with what it knows of the resources they name, and
 //! keeps what they return. A draw then needs only [`check_draw`]'s
 //! comparisons of what the pipeline, bindings and geometry it names were
-//! made for. [`check_pass`] checks a pass's attachments in `begin_pass`, and
-//! [`check_readback`] a readback in `read_texture`.
+//! made for. [`check_pass`] checks a pass's attachments in `begin_pass`,
+//! [`check_readback`] a readback in `read_texture`, and [`check_write`] a
+//! write in `write_buffer`.
 
 use mln_util::hash::HashMap;
 use mln_util::size::Size;
@@ -140,6 +141,20 @@ fn same_id(a: &BindGroupEntry, b: &BindGroupEntry) -> bool {
         | (BindGroupEntry::Texture { id: a, .. }, BindGroupEntry::Texture { id: b, .. }) => a == b,
         _ => false,
     }
+}
+
+/// Checks a [`write_buffer`](super::Gpu::write_buffer) of `len` bytes at
+/// `offset` into a buffer of `size` bytes: that `offset` and `len` are
+/// multiples of 4, and that the bytes end inside the buffer.
+pub fn check_write(offset: u64, len: usize, size: u64) -> Result<(), GpuError> {
+    let len = len as u64;
+    if !offset.is_multiple_of(4) || !len.is_multiple_of(4) {
+        return Err(GpuError::Invalid(format!("a write of {len} bytes at {offset}, not multiples of 4")));
+    }
+    if offset.checked_add(len).is_none_or(|end| end > size) {
+        return Err(GpuError::Invalid(format!("a write of {len} bytes at {offset} to a buffer of {size}")));
+    }
+    Ok(())
 }
 
 /// How much of its buffers geometry holds.
@@ -506,6 +521,16 @@ mod tests {
         assert!(check_pass(&pass(None, None), &texture).is_err(), "no attachments");
         assert!(check_pass(&pass(Some(attachment(color)), Some(depth(small))), &texture).is_err(), "sizes");
         assert!(check_pass(&pass(Some(attachment(small)), None), &texture).is_err(), "depth as color");
+    }
+
+    #[test]
+    fn writes_reach_whole_words_inside_their_buffer() {
+        assert!(check_write(4, 8, 12).is_ok());
+        assert!(check_write(12, 0, 12).is_ok(), "empty, at the end");
+        assert!(matches!(check_write(2, 8, 12), Err(GpuError::Invalid(_))), "an unaligned offset");
+        assert!(matches!(check_write(0, 6, 12), Err(GpuError::Invalid(_))), "an unaligned length");
+        assert!(matches!(check_write(8, 8, 12), Err(GpuError::Invalid(_))), "past the end");
+        assert!(matches!(check_write(u64::MAX - 3, 4, 12), Err(GpuError::Invalid(_))), "past u64::MAX");
     }
 
     #[test]

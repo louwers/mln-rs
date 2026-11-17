@@ -1159,10 +1159,8 @@ impl Gpu for GlGpu {
 
     fn write_buffer(&mut self, buffer: BufferId, offset: u64, data: &[u8]) -> Result<(), GpuError> {
         let entry = self.buffers.get(buffer).ok_or(GpuError::UnknownId("buffer"))?;
+        validation::check_write(offset, data.len(), entry.size)?;
         let end = offset + data.len() as u64;
-        if end > entry.size {
-            return Err(GpuError::Invalid(format!("a write to bytes {offset}..{end} of a buffer of {}", entry.size)));
-        }
         if let Some(elements) = &entry.native.elements {
             let mut bytes = elements.data.take();
             bytes[offset as usize..end as usize].copy_from_slice(data);

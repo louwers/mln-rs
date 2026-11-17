@@ -254,6 +254,12 @@ pub fn invalid_calls(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     let no_attachments = PassDesc { color: None, ..frame.pass() };
     assert!(invalid(&gpu.begin_pass(&no_attachments)), "a pass without attachments");
 
+    // Writes to a buffer start and end at multiples of 4 bytes, inside it.
+    // Each of these would collapse the quad.
+    assert!(invalid(&gpu.write_buffer(frame.quad, 2, &[0; 12])), "a write at an unaligned offset");
+    assert!(invalid(&gpu.write_buffer(frame.quad, 0, &[0; 14])), "a write of an unaligned length");
+    assert!(invalid(&gpu.write_buffer(frame.quad, u64::MAX - 3, &[0; 4])), "a write past u64::MAX");
+
     // Writes reach a sampled texture inside it, with a texel for each of the
     // region's.
     let sampled = gpu.create_texture(&TextureDesc {
