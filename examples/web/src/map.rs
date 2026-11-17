@@ -14,7 +14,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use mln_actor::LocalObject;
 use mln_gestures::{Button, GestureRecognizer, Input, Key, Modifiers, PointerKind, WheelDelta};
 use mln_map::{AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, MapEvent};
 use mln_runtime::{
@@ -35,7 +34,7 @@ use crate::js_error;
 /// Hands this instance's fetches the responses its Web Worker fetched ahead
 /// (web/map-worker.ts): `take(url)` returns a promise of the response
 /// fetched for exactly `url`, once, or undefined
-/// (`Runtime::set_fetch_preloads`).
+/// (`RuntimeOptions::fetch_preloads`).
 #[wasm_bindgen]
 pub fn set_preloads(take: js_sys::Function) {
     PRELOADS.with(|preloads| *preloads.borrow_mut() = Some(take));
@@ -44,6 +43,9 @@ pub fn set_preloads(take: js_sys::Function) {
 thread_local! {
     /// What `set_preloads` set, for the runtimes made after.
     static PRELOADS: std::cell::RefCell<Option<js_sys::Function>> = const { std::cell::RefCell::new(None) };
+    /// The `on_frame` of this Web Worker's map, which its session's frame
+    /// wake calls on this thread.
+    static ON_FRAME: std::cell::RefCell<Option<js_sys::Function>> = const { std::cell::RefCell::new(None) };
 }
 
 /// How many phases `WebMap::frame_timings` reports.
@@ -156,8 +158,11 @@ impl WebMap {
         on_frame: js_sys::Function,
     ) -> Result<WebMap, JsValue> {
         shaper::set_loader(load_shaper);
-        let runtime = Runtime::with_registry(&RuntimeOptions::default(), crate::registry()).map_err(js_error)?;
-        sent(runtime.set_fetch_preloads(PRELOADS.with(|preloads| preloads.borrow().clone())));
+        let options = RuntimeOptions {
+            fetch_preloads: PRELOADS.with(|preloads| preloads.borrow().clone()),
+            ..RuntimeOptions::default()
+        };
+        let runtime = Runtime::with_registry(&options, crate::registry()).map_err(js_error)?;
         let reports = Arc::new(Mutex::new(Reports::default()));
         let handler_reports = Arc::clone(&reports);
         sent(runtime.set_event_handler(move |events| handler_reports.lock().handle(events)));
@@ -177,10 +182,11 @@ impl WebMap {
 
         let redraw = Arc::new(AtomicBool::new(true));
         let redraw_wake = Arc::clone(&redraw);
-        let on_frame = LocalObject::new(on_frame);
+        ON_FRAME.with(|slot| *slot.borrow_mut() = Some(on_frame));
         let options = AttachOptions {
-            frame_wake: Some(Arc::new(move || {
-                if let Some(on_frame) = on_frame.get() {
+            frame_wake: Some(Arc::new(|| {
+                let on_frame = ON_FRAME.with(|slot| slot.borrow().clone());
+                if let Some(on_frame) = on_frame {
                     let _ = on_frame.call0(&JsValue::NULL);
                 }
             })),
@@ -350,7 +356,7 @@ impl WebMap {
     pub fn frame(&mut self, now: f64) -> bool {
         // The pool tasks that the pump ran since the last frame: with no
         // tile workers, the tiles' parsing and layout among them.
-        self.tasks += pump::take_scheduler_time().as_secs_f64() * 1000.0;
+        self.tasks += pump::take_pool_time().as_secs_f64() * 1000.0;
         self.gestures.frame(&mut self.map, now);
         // A demand renders the map once the commands sent before it ran.
         let sent_sequence = self.map.sent_sequence();

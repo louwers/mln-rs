@@ -36,7 +36,6 @@ etagere.workspace = true
 feature.workspace = true
 geo-types.workspace = true
 geometry.workspace = true
-mln_actor.workspace = true
 mln_expression.workspace = true
 mln_gfx.workspace = true
 mln_image.workspace = true

@@ -7,6 +7,7 @@ use std::sync::atomic::Ordering;
 use mln_util::error::Error;
 
 use super::session::{Abandoner, RenderSessionState, SessionShared};
+use super::target::SurfaceOverlay;
 use super::worker::{self, Worker};
 use crate::runtime::Outbox;
 
@@ -28,6 +29,9 @@ pub struct DriverWork {
     shared: Arc<SessionShared>,
     /// The session's worker, once the first service built it.
     worker: RefCell<Option<Worker>>,
+    /// The overlay that [`set_overlay`](Self::set_overlay) gave, until a
+    /// service hands it to the worker.
+    overlay: Cell<Option<SurfaceOverlay>>,
     servicing: Cell<bool>,
     finished: Cell<bool>,
 }
@@ -44,7 +48,25 @@ fn ended() -> Error {
 
 impl DriverWork {
     pub(crate) fn new(shared: Arc<SessionShared>) -> DriverWork {
-        DriverWork { shared, worker: RefCell::new(None), servicing: Cell::new(false), finished: Cell::new(false) }
+        DriverWork {
+            shared,
+            worker: RefCell::new(None),
+            overlay: Cell::new(None),
+            servicing: Cell::new(false),
+            finished: Cell::new(false),
+        }
+    }
+
+    /// Draws `overlay` over each frame presented to the next surface that
+    /// the session makes from the next service on: its first, which the
+    /// first service makes, or the one that a later
+    /// [`set_surface`](crate::RenderSession::set_surface) gives it. A
+    /// later call replaces an overlay that no surface took yet. Only the
+    /// backend whose overlay it is draws it: a surface of another backend's
+    /// fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind), as its
+    /// attach or `set_surface` reports.
+    pub fn set_overlay(&self, overlay: SurfaceOverlay) {
+        self.overlay.set(Some(overlay));
     }
 
     /// Runs the session's work that is ready, and returns once none is: the
@@ -87,7 +109,13 @@ impl DriverWork {
             // is empty; work that came just before that runs here too.
             armed.store(false, Ordering::SeqCst);
             let mut worker = self.worker.borrow_mut();
-            worker::build(&self.shared, &mut worker);
+            let mut overlay = self.overlay.take();
+            worker::build(&self.shared, &mut worker, &mut overlay);
+            match worker.as_mut() {
+                Some(worker) if overlay.is_some() => worker.overlay = overlay,
+                Some(_) => {}
+                None => self.overlay.set(overlay),
+            }
             loop {
                 while queue.run_once(&mut worker) {}
                 armed.store(true, Ordering::SeqCst);

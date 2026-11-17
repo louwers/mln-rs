@@ -392,7 +392,7 @@ fn a_header_transform_adds_headers_until_cleared() {
         when.method("GET").path("/after-clear.json").header_missing(TOKEN_HEADER);
         then.status(200).body("after clear");
     });
-    let fs = http_file_source();
+    let mut fs = http_file_source();
     let seen = Arc::new(Mutex::new(Vec::new()));
     fs.set_http_header_transform(token_transform(Arc::clone(&seen)));
 
@@ -430,7 +430,7 @@ fn a_redirect_keeps_headers_only_within_the_origin() {
         when.method("GET").path("/cross-origin.json").header(TOKEN_HEADER, TOKEN_VALUE);
         then.status(302).header("Location", other.url("/elsewhere.json"));
     });
-    let fs = http_file_source();
+    let mut fs = http_file_source();
     fs.set_http_header_transform(token_transform(Arc::default()));
 
     let res = load_once(&fs, Kind::Style, server.url("/same-origin.json"));

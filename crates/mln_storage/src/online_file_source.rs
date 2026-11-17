@@ -253,7 +253,7 @@ struct Core {
 
     online: bool,
     maximum_concurrent_requests: u32,
-    http_file_source: Arc<HTTPFileSource>,
+    http_file_source: HTTPFileSource,
     resource_transform: Option<ResourceTransform>,
     network: Arc<NetworkStatus>,
     /// A [`Message::Reachable`] is on its way.
@@ -354,7 +354,6 @@ impl Core {
     }
 
     /// The earliest deadline that would start a request.
-    #[cfg(not(target_family = "wasm"))]
     fn next_deadline(&mut self) -> Option<Instant> {
         while let Some(Reverse((due, generation, id))) = self.deadlines.peek().copied() {
             if self.requests.get(&id).is_some_and(|req| req.timer == Some(generation)) {
@@ -490,7 +489,7 @@ impl Core {
                 inbox.send(Message::TransferDone { id, generation, response });
             });
             req.transfer = Some((generation, request));
-            self.http_file_source.load(&req.resource, responder);
+            self.http_file_source.start(&req.resource, responder);
         } else {
             let mut response = Response::new();
             response.error = Some(Box::new(ResourceError::new(Reason::Connection, "Online connectivity is disabled.")));
@@ -656,9 +655,6 @@ pub struct OnlineFileSource {
     /// The id of the next request.
     next_request_id: AtomicU64,
     inbox: Inbox,
-    /// The core's, for the fetch preloads.
-    #[cfg(target_family = "wasm")]
-    http_file_source: Arc<HTTPFileSource>,
     _reachability: Subscription,
     #[cfg(not(target_family = "wasm"))]
     thread: Option<std::thread::JoinHandle<()>>,
@@ -676,6 +672,21 @@ impl OnlineCore {
     /// has dropped, after which the core does nothing.
     pub fn run_due(&mut self) -> bool {
         self.0.run_due()
+    }
+
+    /// When a request starts again next: the earliest of their
+    /// revalidations and retries, if any waits.
+    pub fn next_deadline(&mut self) -> Option<Instant> {
+        self.0.next_deadline()
+    }
+
+    /// Sets where the browser's fetch looks for a response that the host
+    /// fetched ahead before it fetches a whole resource: `take(url)`
+    /// returns a promise of the `Response` fetched for exactly `url`, at
+    /// most once for each, or undefined. A promise that rejects is fetched
+    /// again. `None` stops looking.
+    pub fn set_fetch_preloads(&mut self, take: Option<js_sys::Function>) {
+        self.0.http_file_source.set_fetch_preloads(take);
     }
 }
 
@@ -716,7 +727,6 @@ impl OnlineFileSource {
                 }
             })
         };
-        let http_file_source = Arc::new(HTTPFileSource::new());
         let core = Core {
             receiver,
             inbox: inbox.clone(),
@@ -727,7 +737,7 @@ impl OnlineFileSource {
             generation: 0,
             online: true,
             maximum_concurrent_requests: DEFAULT_MAXIMUM_CONCURRENT_REQUESTS,
-            http_file_source: Arc::clone(&http_file_source),
+            http_file_source: HTTPFileSource::new(),
             resource_transform: None,
             network,
             reachable,
@@ -737,8 +747,6 @@ impl OnlineFileSource {
             maximum_concurrent_requests: AtomicU32::new(DEFAULT_MAXIMUM_CONCURRENT_REQUESTS),
             next_request_id: AtomicU64::new(1),
             inbox,
-            #[cfg(target_family = "wasm")]
-            http_file_source,
             _reachability: reachability,
             #[cfg(not(target_family = "wasm"))]
             thread: None,
@@ -769,16 +777,6 @@ impl OnlineFileSource {
     /// them for `None`.
     pub fn set_resource_transform(&self, transform: Option<ResourceTransform>) {
         self.inbox.send(Message::SetResourceTransform(transform));
-    }
-
-    /// Sets where the browser's fetch looks for a response that the host
-    /// fetched ahead before it fetches a whole resource: `take(url)` returns
-    /// a promise of the `Response` fetched for exactly `url`, at most once
-    /// for each, or undefined. A promise that rejects is fetched again. Call
-    /// it on the thread that runs the source's core.
-    #[cfg(target_family = "wasm")]
-    pub fn set_fetch_preloads(&self, take: Option<js_sys::Function>) {
-        self.http_file_source.set_fetch_preloads(take);
     }
 
     /// Sets the headers to add to each transfer.

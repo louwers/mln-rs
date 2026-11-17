@@ -723,7 +723,7 @@ pub(crate) unsafe extern "C" fn mln_gpu_device_wrap_open_gl(
             // SAFETY: the variant that `platform` names, checked above.
             let handle = unsafe { context.data.web_gl.context };
             let context = crate::web::required(handle, "mln_open_gl_context_descriptor.data.web_gl.context")?;
-            *out_device = DEVICES.insert(Device::web_gl(context)?.into())?;
+            *out_device = DEVICES.insert(Device::web_gl(&context)?.into())?;
             return Ok(());
         }
         #[cfg(all(backend_gl, windows))]

@@ -79,6 +79,8 @@ pub(crate) unsafe extern "C" fn mln_runtime_create(
                     asset_path: path(options.asset_path, "mln_runtime_options.asset_path")?,
                     cache_path: path(options.cache_path, "mln_runtime_options.cache_path")?,
                     network_status: Some(Arc::clone(&NETWORK_STATUS)),
+                    #[cfg(target_family = "wasm")]
+                    fetch_preloads: None,
                 }
             }
         };

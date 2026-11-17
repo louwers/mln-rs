@@ -33,7 +33,9 @@ use mln_util::time::Instant;
 use super::frame::{DemandMode, FrameDemand, FrameDisposition, FrameResult};
 use super::local::{LocalTarget, Pending, PendingReads};
 use super::session::{Published, RenderSessionState, SessionShared, WorkId, physical_size};
-use super::target::{BorrowedRing, Device, DeviceLease, Driver, ExportKind, ExportedRing, Surface};
+use super::target::{
+    BorrowedRing, Device, DeviceLease, Driver, ExportKind, ExportedRing, SentSurface, Surface, SurfaceOverlay,
+};
 use crate::completion::Resolver;
 use crate::map::Published as MapPublished;
 use crate::runtime::Outbox;
@@ -177,7 +179,7 @@ pub(crate) fn prepare(shared: &Arc<SessionShared>) -> impl Future<Output = ()> +
 /// What a session renders into, before its thread builds it.
 pub(crate) enum TargetInit {
     Offscreen(Option<Device>),
-    Surface { surface: Surface, device: Option<Device> },
+    Surface { surface: SentSurface, device: Option<Device> },
     Borrowed { ring: BorrowedRing, device: Device, producer: SyncKind },
     Exported { ring: ExportedRing, device: Device, kind: ExportKind, producer: SyncKind },
 }
@@ -212,15 +214,16 @@ impl TargetInit {
 }
 
 /// Builds the session's renderer into `slot`, on the thread that runs the
-/// session's work, before any other work.
-pub(crate) fn build(shared: &Arc<SessionShared>, slot: &mut Option<Worker>) {
+/// session's work, before any other work. The build takes `overlay` for
+/// the session's first surface, if it builds.
+pub(crate) fn build(shared: &Arc<SessionShared>, slot: &mut Option<Worker>, overlay: &mut Option<SurfaceOverlay>) {
     let Some(Ok(init)) = shared.state.lock().init.take().map(<Box<dyn Any + Send>>::downcast::<Init>) else {
         return;
     };
     let _call = shared.enter_call();
     let mut outbox = Outbox::default();
     let gate = shared.gate.lock();
-    let worker = Worker::new(Arc::clone(shared), *init, &mut outbox);
+    let worker = Worker::new(Arc::clone(shared), *init, overlay.take(), &mut outbox);
     *slot = Some(worker);
     drop(gate);
     shared.wait_for_senders();
@@ -248,8 +251,9 @@ impl Gfx {
     /// renderer's, which the renderer makes when it first draws.
     const OBJECTS: u32 = 2;
 
-    /// A renderer on `init`'s target, which reports to `events`.
-    fn new(init: Init, events: &RendererEvents) -> Result<Gfx, Error> {
+    /// A renderer on `init`'s target, which reports to `events`, with
+    /// `overlay` drawn over the frames that a surface target presents.
+    fn new(init: Init, overlay: Option<SurfaceOverlay>, events: &RendererEvents) -> Result<Gfx, Error> {
         let Init {
             target,
             size,
@@ -269,7 +273,7 @@ impl Gfx {
         let size = physical_size(size, pixel_ratio);
         let target = match target {
             TargetInit::Offscreen(device) => LocalTarget::offscreen(device, size)?,
-            TargetInit::Surface { surface, device } => LocalTarget::surface(surface, device, size)?,
+            TargetInit::Surface { surface, device } => LocalTarget::surface(surface.receive()?, overlay, device, size)?,
             TargetInit::Borrowed { ring, device, producer } => LocalTarget::borrowed(device, ring, producer)?,
             TargetInit::Exported { ring, device, kind, producer } => {
                 LocalTarget::exported(device, &ring, kind, size, producer)?
@@ -405,6 +409,9 @@ pub(crate) struct Worker {
     shared: Arc<SessionShared>,
     /// `None` once the session failed to build it, or let go of it.
     gfx: Option<Gfx>,
+    /// What the host draws over the frames presented to the next surface
+    /// that the session makes ([`DriverWork::set_overlay`](super::DriverWork::set_overlay)).
+    pub(crate) overlay: Option<SurfaceOverlay>,
     /// The scale factor that the renderer draws at.
     scale_factor: f64,
     reader: Option<UpdateReader>,
@@ -554,7 +561,7 @@ fn target_lost() -> Error {
 }
 
 impl Worker {
-    fn new(shared: Arc<SessionShared>, init: Init, outbox: &mut Outbox) -> Worker {
+    fn new(shared: Arc<SessionShared>, init: Init, overlay: Option<SurfaceOverlay>, outbox: &mut Outbox) -> Worker {
         let renderer_events = RendererEvents::new();
         let queue = shared.queue.clone();
         renderer_events.set_waker(Some(Arc::new(move || {
@@ -569,7 +576,7 @@ impl Worker {
             TargetInit::Borrowed { ring, .. } => Some(ring.clone()),
             _ => None,
         };
-        let built = attaching.then(|| Gfx::new(init, &renderer_events));
+        let built = attaching.then(|| Gfx::new(init, overlay, &renderer_events));
         let gfx = match built {
             Some(Ok(mut gfx)) => {
                 gfx.renderer.set_event_queue(Some(renderer_events.clone()));
@@ -598,6 +605,7 @@ impl Worker {
         Worker {
             shared,
             gfx,
+            overlay: None,
             scale_factor,
             reader: None,
             map_events: None,
@@ -1591,7 +1599,7 @@ impl Worker {
         self.set_scale_factor(scale_factor)?;
         let gfx = self.gfx.as_mut().ok_or_else(target_lost)?;
         let physical = physical_size(size, scale_factor as f32);
-        let replaced = gfx.target.set_surface(surface, physical);
+        let replaced = gfx.target.set_surface(surface, self.overlay.take(), physical);
         match replaced {
             Ok(true) => gfx.renew_renderer(&self.renderer_events),
             Ok(false) => {}

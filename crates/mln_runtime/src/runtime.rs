@@ -45,6 +45,13 @@ pub struct RuntimeOptions {
     /// The network status that the runtime's network requests follow. `None`
     /// gives the runtime one of its own, which stays online.
     pub network_status: Option<Arc<NetworkStatus>>,
+    /// In the browser, where the browser's fetch looks for a response that
+    /// the host fetched ahead before it fetches a whole resource:
+    /// `take(url)` returns a promise of the `Response` fetched for exactly
+    /// `url`, at most once for each, or undefined. A promise that rejects
+    /// is fetched again. `None` fetches every resource.
+    #[cfg(target_family = "wasm")]
+    pub fetch_preloads: Option<js_sys::Function>,
 }
 
 /// A runtime: a thread of its own that holds maps, and the resource loading,
@@ -315,8 +322,9 @@ pub(crate) struct RuntimeCore {
     database: OnceCell<Arc<RegionDatabase>>,
     /// The library's own network loading, behind the host's provider.
     online: OnceCell<Arc<OnlineFileSource>>,
-    /// What the library's own network loading follows.
-    network_status: Arc<NetworkStatus>,
+    /// What the library's own network loading follows and, in the browser,
+    /// looks in first.
+    network_options: NetworkOptions,
     network: OnceCell<Arc<dyn FileSource>>,
     /// The runtime's thread's work.
     pub(crate) queue: CoreQueue,
@@ -334,10 +342,18 @@ pub(crate) struct RuntimeCore {
     spare_deliveries: Vec<Box<dyn FnOnce()>>,
 }
 
+/// What the library's own network loading of a runtime follows.
+struct NetworkOptions {
+    status: Arc<NetworkStatus>,
+    /// [`RuntimeOptions::fetch_preloads`].
+    #[cfg(target_family = "wasm")]
+    fetch_preloads: Option<js_sys::Function>,
+}
+
 impl RuntimeCore {
     fn new(
         resource_options: ResourceOptions,
-        network_status: Arc<NetworkStatus>,
+        network_options: NetworkOptions,
         queue: CoreQueue,
         queued: Arc<AtomicUsize>,
         registry: Arc<Registry>,
@@ -352,7 +368,7 @@ impl RuntimeCore {
             #[cfg(not(target_family = "wasm"))]
             database: OnceCell::new(),
             online: OnceCell::new(),
-            network_status,
+            network_options,
             network: OnceCell::new(),
             queue,
             registry,
@@ -413,9 +429,12 @@ impl RuntimeCore {
     fn online(&self) -> &Arc<OnlineFileSource> {
         self.online.get_or_init(|| {
             #[cfg(not(target_family = "wasm"))]
-            let online = OnlineFileSource::new(Arc::clone(&self.network_status));
+            let online = OnlineFileSource::new(Arc::clone(&self.network_options.status));
             #[cfg(target_family = "wasm")]
-            let online = crate::web::online(Arc::clone(&self.network_status));
+            let online = crate::web::online(
+                Arc::clone(&self.network_options.status),
+                self.network_options.fetch_preloads.clone(),
+            );
             Arc::new(online)
         })
     }
@@ -525,13 +544,17 @@ impl Runtime {
     /// Fails as [`new`](Self::new) does.
     pub fn with_registry(options: &RuntimeOptions, registry: Arc<Registry>) -> Result<Runtime, Error> {
         let resource_options = resource_options(options)?;
-        let network_status = options.network_status.clone().unwrap_or_default();
+        let network_options = NetworkOptions {
+            status: options.network_status.clone().unwrap_or_default(),
+            #[cfg(target_family = "wasm")]
+            fetch_preloads: options.fetch_preloads.clone(),
+        };
         let queued = Arc::new(AtomicUsize::new(0));
         let queue = CoreQueue::default();
         let pool = runtime_pool()?;
         let (thread, thread_end) = Self::start(
             resource_options,
-            network_status,
+            network_options,
             queue.clone(),
             Arc::clone(&queued),
             Arc::clone(&registry),
@@ -558,7 +581,7 @@ impl Runtime {
     #[cfg(not(target_family = "wasm"))]
     fn start(
         resource_options: ResourceOptions,
-        network_status: Arc<NetworkStatus>,
+        network_options: NetworkOptions,
         queue: CoreQueue,
         queued: Arc<AtomicUsize>,
         registry: Arc<Registry>,
@@ -566,7 +589,7 @@ impl Runtime {
     ) -> Result<(ThreadId, Option<Joined>), Error> {
         let thread = mln_util::thread::spawn("Runtime", move || {
             let mut core =
-                Some(RuntimeCore::new(resource_options, network_status, queue.clone(), queued, registry, pool));
+                Some(RuntimeCore::new(resource_options, network_options, queue.clone(), queued, registry, pool));
             queue.run(&mut core);
             // What comes after the shutdown drops at once, so tasks that hold
             // the queue can't keep it alive.
@@ -585,13 +608,13 @@ impl Runtime {
     #[expect(clippy::unnecessary_wraps, reason = "the threads of other builds can fail to start")]
     fn start(
         resource_options: ResourceOptions,
-        network_status: Arc<NetworkStatus>,
+        network_options: NetworkOptions,
         queue: CoreQueue,
         queued: Arc<AtomicUsize>,
         registry: Arc<Registry>,
         pool: Pool,
     ) -> Result<(ThreadId, Option<Joined>), Error> {
-        let core = RuntimeCore::new(resource_options, network_status, queue.clone(), queued, registry, pool);
+        let core = RuntimeCore::new(resource_options, network_options, queue.clone(), queued, registry, pool);
         let pool = core.pool.clone();
         crate::web::drive(&pool, queue, Some(core));
         Ok((std::thread::current().id(), None))
@@ -759,21 +782,6 @@ impl Runtime {
     pub fn clear_http_header_transform(&self) -> Result<Completion<()>, Error> {
         self.apply(move |core| {
             core.online().set_http_header_transform(HttpHeaderTransform::default());
-            Ok(())
-        })
-    }
-
-    /// Sets where the browser's fetch looks for a response that the host
-    /// fetched ahead before it fetches a whole resource: `take(url)` returns
-    /// a promise of the `Response` fetched for exactly `url`, at most once
-    /// for each, or undefined. A promise that rejects is fetched again.
-    /// `None` stops looking. Call it on the thread that runs the runtime.
-    #[cfg(target_family = "wasm")]
-    pub fn set_fetch_preloads(&self, take: Option<js_sys::Function>) -> Result<Completion<()>, Error> {
-        let take = take.map(mln_actor::LocalObject::new);
-        self.apply(move |core| {
-            let take = take.as_ref().and_then(mln_actor::LocalObject::get).map(|take| (*take).clone());
-            core.online().set_fetch_preloads(take);
             Ok(())
         })
     }

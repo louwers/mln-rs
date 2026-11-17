@@ -9,6 +9,11 @@
 //! its tiles' jobs in Web Workers of the instance's own ([`tile_workers`]),
 //! and shapes font faces with the shaper module
 //! (the runtime's font-face engine) once a style declares them.
+//!
+//! JavaScript values stay on this thread with what owns them: the fetch
+//! preloads with the network loading's core, which the pump runs, and the
+//! canvases that a session's attach and surface changes hand its worker in
+//! the session's side here, until the worker takes them.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -39,30 +44,123 @@ pub(crate) fn drive(pool: &Pool, queue: CoreQueue, mut core: Option<RuntimeCore>
             queue.close();
             drop(core.take());
             drop(tasks.take());
+        } else {
+            wake_for_timed(&queue);
         }
         !stopped
     })
     .detach();
 }
 
-/// The runtime's own network loading, whose core runs in the pump's slices
-/// until the source drops.
-pub(crate) fn online(network: Arc<NetworkStatus>) -> OnlineFileSource {
+/// Asks the pump for a slice once `queue`'s earliest timed task is due.
+fn wake_for_timed<S>(queue: &mln_util::queue::Queue<S>) {
+    if let Some(deadline) = queue.next_deadline() {
+        pump::wake_at(deadline);
+    }
+}
+
+/// The runtime's own network loading, which looks for the host's responses
+/// fetched ahead with `fetch_preloads` first. Its core runs in the pump's
+/// slices until the source drops, and in a slice of its own once a retry
+/// or revalidation is due.
+pub(crate) fn online(network: Arc<NetworkStatus>, fetch_preloads: Option<js_sys::Function>) -> OnlineFileSource {
     let (online, mut core) = OnlineFileSource::local(network, pump::waker());
-    pump::add(move || core.run_due()).detach();
+    core.set_fetch_preloads(fetch_preloads);
+    pump::add(move || {
+        let live = core.run_due();
+        if live && let Some(deadline) = core.next_deadline() {
+            pump::wake_at(deadline);
+        }
+        live
+    })
+    .detach();
     online
 }
 
-/// How a session's queue runs on this thread.
+/// How a core worker session's queue runs on this thread.
 struct SessionLoop {
     run: Box<dyn Fn()>,
     running: Cell<bool>,
 }
 
+/// What this thread holds of a session: how a core worker's queue runs,
+/// which [`run_session_now`] finds by the session's id, and the canvases
+/// that the session's attach and surface changes hand its worker, until it
+/// takes them.
+#[derive(Default)]
+struct SessionSide {
+    run: Option<Rc<SessionLoop>>,
+    canvases: HashMap<u64, wasm_bindgen::JsValue>,
+}
+
+/// The sessions' sides on this thread, by the session's id.
+#[derive(Default)]
+struct Sessions {
+    sides: HashMap<SessionId, SessionSide>,
+    /// The key of the next canvas handed to a session.
+    next_canvas: u64,
+}
+
+impl Sessions {
+    /// Drops `id`'s side once it holds nothing.
+    fn prune(&mut self, id: SessionId) {
+        if self.sides.get(&id).is_some_and(|side| side.run.is_none() && side.canvases.is_empty()) {
+            self.sides.remove(&id);
+        }
+    }
+}
+
 thread_local! {
-    /// The loops of the sessions on core workers, which
-    /// [`run_session_now`] finds by their session's id.
-    static SESSIONS: RefCell<HashMap<SessionId, Rc<SessionLoop>>> = RefCell::new(HashMap::default());
+    static SESSIONS: RefCell<Sessions> = RefCell::default();
+}
+
+/// Runs `f` with the sessions' sides, unless this thread is ending. `f`
+/// must not call out of this module.
+fn with_sessions<R>(f: impl FnOnce(&mut Sessions) -> R) -> Option<R> {
+    SESSIONS.try_with(|sessions| f(&mut sessions.borrow_mut())).ok()
+}
+
+/// A canvas handed to a session's worker: its key in the session's side,
+/// where it waits on this thread until the worker [`take`](Self::take)s it
+/// or this drops.
+pub(crate) struct HandedCanvas {
+    session: SessionId,
+    key: u64,
+}
+
+/// Hands `canvas` to the worker of session `session`, which runs on this
+/// thread.
+pub(crate) fn hand_canvas(session: SessionId, canvas: wasm_bindgen::JsValue) -> HandedCanvas {
+    let key = with_sessions(|sessions| {
+        let key = sessions.next_canvas;
+        sessions.next_canvas += 1;
+        sessions.sides.entry(session).or_default().canvases.insert(key, canvas);
+        key
+    });
+    // A thread that is ending hands nothing over: the key names no canvas.
+    HandedCanvas { session, key: key.unwrap_or(u64::MAX) }
+}
+
+impl HandedCanvas {
+    /// The canvas, unless this thread is ending.
+    pub(crate) fn take(self) -> Option<wasm_bindgen::JsValue> {
+        self.remove()
+    }
+
+    fn remove(&self) -> Option<wasm_bindgen::JsValue> {
+        with_sessions(|sessions| {
+            let canvas = sessions.sides.get_mut(&self.session)?.canvases.remove(&self.key);
+            sessions.prune(self.session);
+            canvas
+        })
+        .flatten()
+    }
+}
+
+impl Drop for HandedCanvas {
+    fn drop(&mut self) {
+        drop(self.remove());
+    }
 }
 
 /// Runs a core worker session in the pump's slices until its `queue`
@@ -70,12 +168,19 @@ thread_local! {
 pub(crate) fn drive_session(id: SessionId, queue: SessionQueue, run: impl Fn() + 'static) {
     queue.set_waker(Some(pump::waker()));
     let session = Rc::new(SessionLoop { run: Box::new(run), running: Cell::new(false) });
-    SESSIONS.with(|sessions| sessions.borrow_mut().insert(id, Rc::clone(&session)));
+    with_sessions(|sessions| sessions.sides.entry(id).or_default().run = Some(Rc::clone(&session)));
     pump::add(move || {
         run_session(&session);
         let stopped = queue.is_stopped();
         if stopped {
-            SESSIONS.with(|sessions| sessions.borrow_mut().remove(&id));
+            with_sessions(|sessions| {
+                if let Some(side) = sessions.sides.get_mut(&id) {
+                    side.run = None;
+                }
+                sessions.prune(id);
+            });
+        } else {
+            wake_for_timed(&queue);
         }
         !stopped
     })
@@ -93,7 +198,7 @@ fn run_session(session: &SessionLoop) {
 /// has yet to start: what a thread that waits for a session's next task
 /// does elsewhere.
 pub(crate) fn run_session_now(id: SessionId) {
-    let session = SESSIONS.with(|sessions| sessions.borrow().get(&id).cloned());
+    let session = with_sessions(|sessions| sessions.sides.get(&id).and_then(|side| side.run.clone())).flatten();
     if let Some(session) = session {
         run_session(&session);
     }
@@ -123,5 +228,5 @@ pub(crate) fn tile_workers(registry: &Arc<Registry>) -> Option<RemoteWorkers> {
             .inspect_err(|error| Log::error(Event::General, format!("No tile worker took {instance}'s place: {error}")))
             .ok()
     };
-    Some(tile_workers::workers(ports, Arc::clone(registry), |_| {}, fatal, respawn))
+    Some(tile_workers::workers(ports, Arc::clone(registry), fatal, respawn))
 }

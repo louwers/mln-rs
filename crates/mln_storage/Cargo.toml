@@ -75,7 +75,6 @@ jni.workspace = true
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 js-sys.workspace = true
-mln_actor.workspace = true
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
 web-sys.workspace = true

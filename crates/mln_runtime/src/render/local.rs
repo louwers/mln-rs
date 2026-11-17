@@ -355,7 +355,7 @@ impl Backend {
             #[cfg(all(feature = "gl", not(target_family = "wasm")))]
             Device::Gl(ref device) => Ok(Backend::Gl(Rc::new(mln_gl::RendererBackend::new(device)?))),
             #[cfg(all(feature = "gl", target_family = "wasm"))]
-            Device::WebGl(_) => {
+            Device::WebGl => {
                 Err(Error::unsupported("WebGL2 renders only into a canvas, with the canvas's own context"))
             }
         }
@@ -459,10 +459,15 @@ impl Backend {
     }
 
     /// A target on the backend that presents to `surface`, at `size`
-    /// pixels. Fails with `Unsupported` when only a backend of the target's
-    /// own can present to it: see [`surface_backend`].
-    fn surface(&self, mut surface: Surface, size: Size) -> Result<Box<dyn Presenting>, Error> {
-        let overlay = surface.take_overlay()?;
+    /// pixels, with `overlay` drawn over its frames. Fails with
+    /// `Unsupported` when only a backend of the target's own can present to
+    /// it: see [`surface_backend`].
+    fn surface(
+        &self,
+        surface: Surface,
+        overlay: Option<SurfaceOverlay>,
+        size: Size,
+    ) -> Result<Box<dyn Presenting>, Error> {
         match (self, surface.kind) {
             #[cfg(feature = "webgpu")]
             (Backend::WebGpu(backend), kind) => {
@@ -590,7 +595,6 @@ fn webgpu_surface(backend: &mln_webgpu::RendererBackend, kind: SurfaceKind) -> R
         #[cfg(target_family = "wasm")]
         SurfaceKind::WebCanvas { canvas, .. } => {
             use wasm_bindgen::JsCast as _;
-            let canvas = canvas.take().map(|canvas| (*canvas).clone()).unwrap_or_default();
             let target = match canvas.dyn_into::<web_sys::OffscreenCanvas>() {
                 Ok(canvas) => wgpu::SurfaceTarget::OffscreenCanvas(canvas),
                 Err(canvas) => wgpu::SurfaceTarget::Canvas(canvas.unchecked_into()),
@@ -612,39 +616,41 @@ fn webgpu_surface(backend: &mln_webgpu::RendererBackend, kind: SurfaceKind) -> R
 }
 
 /// A backend of the target's own on `device` and a target that presents to
-/// `surface`, for the backends whose context or device is made for the
-/// window: Vulkan's, whose instance and device take the window's surface
-/// extensions, and OpenGL ES's, whose context is of the window's display.
-fn surface_backend(device: &Device, surface: Surface, size: Size) -> Result<(Backend, Box<dyn Presenting>), Error> {
-    match (device, &surface.kind) {
+/// `surface` with `overlay` drawn over its frames, for the backends whose
+/// context or device is made for the window: Vulkan's, whose instance and
+/// device take the window's surface extensions, and OpenGL ES's, whose
+/// context is of the window's display.
+fn surface_backend(
+    device: &Device,
+    surface: Surface,
+    overlay: Option<SurfaceOverlay>,
+    size: Size,
+) -> Result<(Backend, Box<dyn Presenting>), Error> {
+    match (device, surface.kind) {
         #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
         (Device::Vulkan(device), SurfaceKind::Window(window)) => {
-            let window = Arc::clone(window);
-            let mut surface = surface;
-            let overlay = vulkan_overlay(surface.take_overlay()?)?;
+            let overlay = vulkan_overlay(overlay)?;
             let (backend, target) = mln_vulkan::SurfaceTarget::with_backend(device, window, size, true)?;
             target.set_overlay(overlay);
             Ok((Backend::Vulkan(backend), Box::new(target)))
         }
         #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
-        (Device::Vulkan(device), SurfaceKind::Vulkan(_)) => {
+        (Device::Vulkan(device), kind @ SurfaceKind::Vulkan(_)) => {
             let backend = Backend::Vulkan(Rc::new(mln_vulkan::RendererBackend::presenting(device)?));
-            let target = backend.surface(surface, size)?;
+            let target = backend.surface(Surface { kind }, overlay, size)?;
             Ok((backend, target))
         }
         #[cfg(all(feature = "gl", not(target_family = "wasm")))]
         (Device::Gl(device), SurfaceKind::Gl(host)) => {
-            if surface.overlay.is_some() {
+            if overlay.is_some() {
                 return Err(Error::unsupported("a host's EGL surface takes no overlay"));
             }
-            let (backend, target) = mln_gl::HostSurfaceTarget::with_backend(device, *host, size)?;
+            let (backend, target) = mln_gl::HostSurfaceTarget::with_backend(device, host, size)?;
             Ok((Backend::Gl(backend), Box::new(target)))
         }
         #[cfg(all(feature = "gl", any(windows, all(unix, not(target_vendor = "apple")))))]
         (Device::Gl(_), SurfaceKind::Window(window)) => {
-            let window = Arc::clone(window);
-            let mut surface = surface;
-            let overlay = overlay_of(surface.take_overlay()?, |overlay| match overlay {
+            let overlay = overlay_of(overlay, |overlay| match overlay {
                 SurfaceOverlay::Gl(overlay) => Ok(overlay),
                 other => Err(other),
             })?;
@@ -653,17 +659,9 @@ fn surface_backend(device: &Device, surface: Surface, size: Size) -> Result<(Bac
             Ok((Backend::Gl(backend), Box::new(target)))
         }
         #[cfg(all(feature = "gl", target_family = "wasm"))]
-        (Device::WebGl(context), SurfaceKind::WebCanvas { canvas, .. }) => {
+        (Device::WebGl, SurfaceKind::WebCanvas { canvas, .. }) => {
             use wasm_bindgen::JsCast as _;
-            let canvas = canvas.take().map(|canvas| (*canvas).clone()).unwrap_or_default();
-            // The host's context renders only into its own canvas.
-            if let Some(context) = context.0.as_ref().and_then(|context| context.get()) {
-                let own =
-                    js_sys::Reflect::get(&context, &wasm_bindgen::JsValue::from_str("canvas")).unwrap_or_default();
-                if !js_sys::Object::is(&own, &canvas) {
-                    return Err(Error::invalid_argument("a WebGL device's sessions present to its context's canvas"));
-                }
-            }
+            // WebGL draws no overlay.
             let canvas = match canvas.dyn_into::<web_sys::OffscreenCanvas>() {
                 Ok(canvas) => mln_gl::WebCanvas::Offscreen(canvas),
                 Err(canvas) => mln_gl::WebCanvas::Element(canvas.unchecked_into()),
@@ -671,9 +669,9 @@ fn surface_backend(device: &Device, surface: Surface, size: Size) -> Result<(Bac
             let (backend, target) = mln_gl::CanvasTarget::with_backend(canvas, size)?;
             Ok((Backend::Gl(backend), Box::new(target)))
         }
-        _ => {
+        (_, kind) => {
             let backend = Backend::new(device)?;
-            let target = backend.surface(surface, size)?;
+            let target = backend.surface(Surface { kind }, overlay, size)?;
             Ok((backend, target))
         }
     }
@@ -717,8 +715,9 @@ impl LocalTarget {
         Ok(LocalTarget { device, backend, frames, window: None })
     }
 
-    /// A target of `size` pixels that presents to `surface`, on `device` or,
-    /// when that is `None`, on the device the surface's kind takes
+    /// A target of `size` pixels that presents to `surface`, with `overlay`
+    /// drawn over its frames, on `device` or, when that is `None`, on the
+    /// device the surface's kind takes
     /// ([`RenderTarget::Surface`](super::RenderTarget::Surface)).
     ///
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
@@ -726,16 +725,21 @@ impl LocalTarget {
     /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) for a window or
     /// surface without an area to present to, such as a minimized window,
     /// with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the device
-    /// can't present to the surface, and with the error of the device or the
-    /// window's surface.
-    pub fn surface(surface: Surface, device: Option<Device>, size: Size) -> Result<LocalTarget, Error> {
+    /// can't present to the surface or draw the overlay, and with the error
+    /// of the device or the window's surface.
+    pub fn surface(
+        surface: Surface,
+        overlay: Option<SurfaceOverlay>,
+        device: Option<Device>,
+        size: Size,
+    ) -> Result<LocalTarget, Error> {
         surface.check_area()?;
         let window = surface.host_window();
         let device = match device {
             Some(device) => device,
             None => default_surface_device(&surface)?,
         };
-        let (backend, target) = surface_backend(&device, surface, size)?;
+        let (backend, target) = surface_backend(&device, surface, overlay, size)?;
         Ok(LocalTarget { device, backend, frames: Frames::Presenting(Some(target)), window })
     }
 
@@ -964,28 +968,34 @@ impl LocalTarget {
         }
     }
 
-    /// Presents to `surface` at `size` pixels from now on, in place of the
-    /// surface the target has, if any: on the same backend where it can
-    /// present to `surface`, and on a new one of the device otherwise, which
-    /// the target then returns true for. A renderer on the old backend has
-    /// to be made again on the new one.
+    /// Presents to `surface` at `size` pixels from now on, with `overlay`
+    /// drawn over its frames, in place of the surface the target has, if
+    /// any: on the same backend where it can present to `surface`, and on a
+    /// new one of the device otherwise, which the target then returns true
+    /// for, and which draws no overlay. A renderer on the old backend has to
+    /// be made again on the new one.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for an
     /// offscreen target or when the device can't present to `surface`, and
     /// as [`surface`](Self::surface) does. The target then keeps what it
     /// had.
-    pub fn set_surface(&mut self, surface: Surface, size: Size) -> Result<bool, Error> {
+    pub fn set_surface(
+        &mut self,
+        surface: Surface,
+        overlay: Option<SurfaceOverlay>,
+        size: Size,
+    ) -> Result<bool, Error> {
         if !matches!(self.frames, Frames::Presenting(_)) {
             return Err(Error::unsupported("only a surface target presents to another surface"));
         }
         surface.check_area()?;
         let window = surface.host_window();
         let retry = surface.clone_window();
-        let (new_backend, target) = match self.backend.surface(surface, size) {
+        let (new_backend, target) = match self.backend.surface(surface, overlay, size) {
             Ok(target) => (false, target),
             Err(error) if error.kind == mln_util::ErrorKind::Unsupported => {
                 let surface = retry.ok_or(error)?;
-                let (backend, target) = surface_backend(&self.device, surface, size)?;
+                let (backend, target) = surface_backend(&self.device, surface, None, size)?;
                 self.backend = backend;
                 (true, target)
             }
@@ -1019,7 +1029,7 @@ fn default_surface_device(surface: &Surface) -> Result<Device, Error> {
         }
         // A WebGPU build asked the browser for a device before the build.
         #[cfg(all(target_family = "wasm", feature = "gl"))]
-        SurfaceKind::WebCanvas { .. } => Ok(Device::WebGl(super::target::WebGlContext::default())),
+        SurfaceKind::WebCanvas { .. } => Ok(Device::WebGl),
         #[cfg(all(target_family = "wasm", not(feature = "gl")))]
         SurfaceKind::WebCanvas { .. } => Err(Error::invalid_state("the browser's WebGPU device isn't there yet")),
     }

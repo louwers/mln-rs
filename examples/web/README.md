@@ -65,7 +65,8 @@ page (main thread, no wasm)
   The runtime's and the session's work runs in short tasks as it arrives, and
   each animation frame demands a frame when the map has something new to draw.
 - Each worker runs its queues and pool tasks in a pump in place of threads, and
-  finished fetches, tile replies and tasks are handled as they arrive
+  finished fetches, tile replies and tasks are handled as they arrive, and
+  retries and revalidations once they're due
   ([crates/mln_web_host](../../crates/mln_web_host)).
 - The render session sends work to the tile workers as serialized messages over
   MessageChannels, which the runtime connects through a control port that the

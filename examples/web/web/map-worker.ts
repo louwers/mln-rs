@@ -148,7 +148,7 @@ addEventListener("unhandledrejection", (event) => fatal("map", event.reason));
 // What the map fetches first, fetched while the module downloads and
 // compiles: the style, then its sources' TileJSON, its sprite and its
 // labels' first glyphs, at the URLs the map asks for them by. The map's
-// fetches take these responses (mln_storage's `set_fetch_preloads`), each
+// fetches take these responses (mln_runtime's `RuntimeOptions::fetch_preloads`), each
 // once, when they ask for the same URL; one never asked for is dropped
 // after a minute. Only absolute http(s) URLs: the map's file source maps
 // the others first.

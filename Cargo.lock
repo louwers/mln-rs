@@ -2460,9 +2460,6 @@ dependencies = [
 [[package]]
 name = "mln-rs-actor"
 version = "0.0.12"
-dependencies = [
- "mln-rs-util",
-]
 
 [[package]]
 name = "mln-rs-bench"
@@ -2913,7 +2910,6 @@ dependencies = [
  "geo-types",
  "geojson",
  "glam",
- "mln-rs-actor",
  "mln-rs-conversion",
  "mln-rs-expression",
  "mln-rs-feature",
@@ -2954,7 +2950,6 @@ dependencies = [
  "js-sys",
  "khronos-egl",
  "libc",
- "mln-rs-actor",
  "mln-rs-conversion",
  "mln-rs-d3d12",
  "mln-rs-feature",
@@ -3011,7 +3006,6 @@ dependencies = [
  "httpmock",
  "jni",
  "js-sys",
- "mln-rs-actor",
  "mln-rs-feature",
  "mln-rs-headless",
  "mln-rs-map",
@@ -3256,7 +3250,6 @@ name = "mln-rs-web"
 version = "0.0.12"
 dependencies = [
  "js-sys",
- "mln-rs-actor",
  "mln-rs-gestures",
  "mln-rs-gfx",
  "mln-rs-gl",

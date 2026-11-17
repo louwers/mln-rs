@@ -21,19 +21,17 @@ use wasm_bindgen::prelude::*;
 /// Tile workers in the Web Workers at the other end of `ports` (at least
 /// one), which listen to their ports once a renderer takes the workers.
 /// Their jobs name `registry`'s registrations, so each Web Worker must serve
-/// with a registry filled by the same calls. `on_reply(instance)` is called
-/// as each reply arrives, and `on_fatal(instance, message)` when an
-/// instance panicked. `respawn(instance)` gives a port to a new Web Worker
-/// in place of a lost one, if it can.
+/// with a registry filled by the same calls. `on_fatal(instance, message)`
+/// is called when an instance panicked. `respawn(instance)` gives a port to
+/// a new Web Worker in place of a lost one, if it can.
 pub fn workers(
     ports: Vec<web_sys::MessagePort>,
     registry: Arc<Registry>,
-    on_reply: impl Fn(usize) + 'static,
     on_fatal: impl Fn(usize, JsValue) + 'static,
     respawn: impl Fn(usize) -> Option<web_sys::MessagePort> + 'static,
 ) -> RemoteWorkers {
     RemoteWorkers::new(registry, move |sink| {
-        let handlers = Rc::new(Handlers { sink, on_reply: Box::new(on_reply), on_fatal: Box::new(on_fatal) });
+        let handlers = Rc::new(Handlers { sink, on_fatal: Box::new(on_fatal) });
         Box::new(PortInstances::new(ports, handlers, Box::new(respawn)))
     })
 }
@@ -45,7 +43,6 @@ const DISCONNECT: JsValue = JsValue::NULL;
 /// What the ports' messages go to.
 struct Handlers {
     sink: ReplySink,
-    on_reply: Box<dyn Fn(usize)>,
     on_fatal: Box<dyn Fn(usize, JsValue)>,
 }
 
@@ -72,7 +69,6 @@ impl Port {
             match data.dyn_into::<js_sys::Array>() {
                 Ok(batch) => {
                     for reply in batch.iter() {
-                        (handlers.on_reply)(instance);
                         handlers.sink.send(instance, decode(&reply.unchecked_into()));
                     }
                 }

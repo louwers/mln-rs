@@ -254,10 +254,11 @@ impl WindowSession {
             Some(device) => device,
             None => Device::with_backend(kind.backend_type(), DeviceOptions::default())?,
         };
-        let surface = surfaces.surface(kind, &device)?.with_overlay(kind.overlay(paint));
+        let surface = surfaces.surface(kind, &device)?;
         let target = RenderTarget::Surface { size, surface, device: Some(device.clone()) };
         let (session, attached) = map.attach(target, attach_options(inbox))?;
         let driver = session.take_driver_work()?;
+        driver.set_overlay(kind.overlay(paint));
         // A session that failed to attach lets go of what it made as its
         // driver work drops.
         serviced(&driver, attached)?;

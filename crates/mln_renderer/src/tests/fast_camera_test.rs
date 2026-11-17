@@ -9,12 +9,9 @@
 //! frames until the view the camera stops at has all its tiles, or the
 //! requests each tile got.
 
-use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_actor::LocalObject;
 use mln_map::transform::Transform;
 use mln_map_types::{CameraOptions, ConstrainMode, MapDebugOptions, MapMode, TileLodMode, ViewportMode};
 use mln_storage::{FileSource, Resource, Responder, Response};
@@ -31,6 +28,7 @@ use mln_util::queue::Queue;
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::tileset::PartialTileset;
+use parking_lot::Mutex;
 
 use crate::Registry;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
@@ -56,14 +54,14 @@ fn read_file(relative: &str) -> Vec<u8> {
 struct Pending {
     tile: String,
     responder: Responder,
-    in_flight_since: Cell<Option<usize>>,
+    in_flight_since: Option<usize>,
 }
 
 /// The open requests, in the order they were made, the frames ended, and
 /// how many requests each tile got.
 #[derive(Default)]
 struct Requests {
-    open: VecDeque<Rc<Pending>>,
+    open: VecDeque<Pending>,
     frame: usize,
     made: BTreeMap<String, usize>,
 }
@@ -71,7 +69,7 @@ struct Requests {
 /// Answers every tile of the vector source with the same vector tile, and
 /// every tile of the raster source with the same image.
 struct Network {
-    requests: LocalObject<RefCell<Requests>>,
+    requests: Mutex<Requests>,
     vector_tile: Arc<Vec<u8>>,
     raster_tile: Arc<Vec<u8>>,
 }
@@ -79,33 +77,28 @@ struct Network {
 impl Network {
     fn new() -> Self {
         Network {
-            requests: LocalObject::new(RefCell::default()),
+            requests: Mutex::default(),
             vector_tile: Arc::new(read_file("test/fixtures/map/issue12432/0-0-0.mvt")),
             raster_tile: Arc::new(read_file("test/fixtures/annotations/emerald.png")),
         }
     }
 
-    fn requests(&self) -> Rc<RefCell<Requests>> {
-        self.requests.get().expect("the network is used on its thread")
-    }
-
     /// Ends a frame: the requests that have been open the longest take the
     /// free slots, and those in flight for `LATENCY` frames are answered.
     fn end_frame(&self) {
-        let answered: VecDeque<Rc<Pending>> = {
-            let requests = self.requests();
-            let mut requests = requests.borrow_mut();
+        // Answered with the lock released: an answer's callback may request
+        // again.
+        let answered: VecDeque<Pending> = {
+            let mut requests = self.requests.lock();
             let frame = requests.frame;
             requests.frame += 1;
             requests.open.retain(|pending| !pending.responder.is_cancelled());
-            for pending in requests.open.iter().take(SLOTS) {
-                if pending.in_flight_since.get().is_none() {
-                    pending.in_flight_since.set(Some(frame));
-                }
+            for pending in requests.open.iter_mut().take(SLOTS) {
+                pending.in_flight_since.get_or_insert(frame);
             }
             let (answered, open) = std::mem::take(&mut requests.open)
                 .into_iter()
-                .partition(|pending| pending.in_flight_since.get().is_some_and(|since| frame + 1 - since >= LATENCY));
+                .partition(|pending| pending.in_flight_since.is_some_and(|since| frame + 1 - since >= LATENCY));
             requests.open = open;
             answered
         };
@@ -124,15 +117,13 @@ impl Network {
 
     /// The tiles of the open requests, oldest first.
     fn open_requests(&self) -> Vec<String> {
-        let requests = self.requests();
-        let requests = requests.borrow();
+        let requests = self.requests.lock();
         requests.open.iter().filter(|pending| !pending.responder.is_cancelled()).map(|p| p.tile.clone()).collect()
     }
 
     /// The tiles requested more than once, and how many times.
     fn requested_again(&self) -> BTreeMap<String, usize> {
-        let requests = self.requests();
-        let requests = requests.borrow();
+        let requests = self.requests.lock();
         requests.made.iter().filter(|(_, count)| **count > 1).map(|(tile, count)| (tile.clone(), *count)).collect()
     }
 }
@@ -147,10 +138,9 @@ impl FileSource for Network {
         if resource.prior_expires.is_some_and(|expires| expires > now()) {
             return;
         }
-        let requests = self.requests();
-        let mut requests = requests.borrow_mut();
+        let mut requests = self.requests.lock();
         *requests.made.entry(tile.clone()).or_default() += 1;
-        requests.open.push_back(Rc::new(Pending { tile, responder, in_flight_since: Cell::new(None) }));
+        requests.open.push_back(Pending { tile, responder, in_flight_since: None });
     }
 
     fn can_request(&self, _resource: &Resource) -> bool {

@@ -16,7 +16,8 @@
 //
 // The transfer itself is an `HttpTransport`, the platform's HTTP stack where
 // it has one: NSURLSession on Apple platforms, HttpURLConnection on Android,
-// the browser's fetch on wasm, ureq elsewhere.
+// ureq elsewhere. In the browser the source calls fetch itself
+// (`fetch_transport`), with the host's preloads, on the thread that owns them.
 //
 // Differences (ureq): ureq sends `Accept-Encoding: gzip` and
 // decodes gzip (curl: "gzip, deflate"); a connection failure's message is
@@ -28,8 +29,8 @@ use std::sync::Arc;
 
 use mln_util::chrono::parse_http_date;
 use mln_util::http_header::{CacheControl, parse_retry_headers};
-use parking_lot::Mutex;
 
+#[cfg(not(target_family = "wasm"))]
 use crate::file_source::FileSource;
 use crate::http_header_transform::{HttpHeaderTransform, HttpHeaders};
 use crate::request::Responder;
@@ -112,13 +113,14 @@ impl TransferRequest {
     }
 }
 
-/// How an `HTTPFileSource` performs its requests.
+/// How an `HTTPFileSource` performs its requests outside the browser, whose
+/// fetch it calls itself.
+#[cfg(not(target_family = "wasm"))]
 pub(crate) trait HttpTransport: Send + Sync {
     /// Starts the transfer of `request` without blocking the caller, and
     /// calls `request.finish` once it is done, from any thread (ureq: one
     /// of its worker threads; `NSURLSession`: its delegate queue;
-    /// `HttpURLConnection`: one of the transport's worker threads; a
-    /// browser's fetch: the event loop). A request
+    /// `HttpURLConnection`: one of the transport's worker threads). A request
     /// dropped without `finish` never answers, as if it had been cancelled.
     fn start(&self, request: TransferRequest);
 }
@@ -253,11 +255,12 @@ fn origin(url: &str) -> Option<(String, String, u16)> {
 
 /// Plain HTTP(S) requests, used by the `OnlineFileSource`.
 pub(crate) struct HTTPFileSource {
+    #[cfg(not(target_family = "wasm"))]
     transport: Arc<dyn HttpTransport>,
     /// The browser's fetch, which is the transport.
     #[cfg(target_family = "wasm")]
-    fetch: Arc<crate::fetch_transport::FetchTransport>,
-    header_transform: Mutex<HttpHeaderTransform>,
+    fetch: crate::fetch_transport::FetchTransport,
+    header_transform: HttpHeaderTransform,
 }
 
 impl HTTPFileSource {
@@ -265,35 +268,46 @@ impl HTTPFileSource {
     #[cfg(not(target_family = "wasm"))]
     #[must_use]
     pub(crate) fn new() -> Self {
-        HTTPFileSource { transport: default_transport(), header_transform: Mutex::new(HttpHeaderTransform::default()) }
+        HTTPFileSource { transport: default_transport(), header_transform: HttpHeaderTransform::default() }
     }
 
     /// An HTTP file source over the browser's fetch.
     #[cfg(target_family = "wasm")]
     #[must_use]
     pub(crate) fn new() -> Self {
-        let fetch = Arc::new(crate::fetch_transport::FetchTransport::default());
-        let transport: Arc<dyn HttpTransport> = Arc::<crate::fetch_transport::FetchTransport>::clone(&fetch);
-        HTTPFileSource { transport, fetch, header_transform: Mutex::new(HttpHeaderTransform::default()) }
+        HTTPFileSource {
+            fetch: crate::fetch_transport::FetchTransport::default(),
+            header_transform: HttpHeaderTransform::default(),
+        }
     }
 
     /// Sets the responses that the host fetched ahead (`FetchTransport`).
     #[cfg(target_family = "wasm")]
-    pub(crate) fn set_fetch_preloads(&self, take: Option<js_sys::Function>) {
+    pub(crate) fn set_fetch_preloads(&mut self, take: Option<js_sys::Function>) {
         self.fetch.set_preloads(take);
     }
 
     /// Sets the headers to add to requests.
-    pub(crate) fn set_http_header_transform(&self, transform: HttpHeaderTransform) {
-        *self.header_transform.lock() = transform;
+    pub(crate) fn set_http_header_transform(&mut self, transform: HttpHeaderTransform) {
+        self.header_transform = transform;
+    }
+
+    /// Starts the transfer of `resource`, whose response goes to
+    /// `responder`, without blocking.
+    pub(crate) fn start(&self, resource: &Resource, responder: Responder) {
+        let headers = self.header_transform.headers(resource.kind, &resource.url);
+        let request = TransferRequest { resource: resource.clone(), headers, responder };
+        #[cfg(not(target_family = "wasm"))]
+        self.transport.start(request);
+        #[cfg(target_family = "wasm")]
+        self.fetch.start(request);
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl FileSource for HTTPFileSource {
     fn load(&self, resource: &Resource, responder: Responder) {
-        let header_transform = self.header_transform.lock().clone();
-        let headers = header_transform.headers(resource.kind, &resource.url);
-        self.transport.start(TransferRequest { resource: resource.clone(), headers, responder });
+        self.start(resource, responder);
     }
 
     fn can_request(&self, _resource: &Resource) -> bool {

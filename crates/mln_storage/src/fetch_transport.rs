@@ -1,6 +1,6 @@
-//! The browser's `fetch` as the `HttpTransport`. The browser's HTTP cache does
-//! the caching. A host can hand it responses it fetched ahead
-//! (`OnlineFileSource::set_fetch_preloads`).
+//! The browser's `fetch`, which the `HTTPFileSource` starts its transfers
+//! with. The browser's HTTP cache does the caching. A host can hand it
+//! responses it fetched ahead (`OnlineCore::set_fetch_preloads`).
 //!
 //! The host's headers (`TransferRequest::headers`) go with the request, which
 //! makes a cross-origin request one that the server must allow in its CORS
@@ -8,12 +8,10 @@
 //! can't drop them when the redirect leaves the origin, so a request with the
 //! host's headers doesn't follow redirects: a redirect fails it.
 
-use mln_actor::LocalObject;
-use parking_lot::Mutex;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
-use crate::http_file_source::{self, HttpTransport, Transfer, TransferRequest};
+use crate::http_file_source::{self, Transfer, TransferRequest};
 use crate::response::{Reason, ResourceError};
 
 #[wasm_bindgen]
@@ -22,9 +20,6 @@ extern "C" {
     #[wasm_bindgen(js_name = fetch)]
     fn global_fetch(request: &web_sys::Request) -> js_sys::Promise;
 }
-
-/// Where the host's responses fetched ahead come from.
-type Preloads = Option<LocalObject<js_sys::Function>>;
 
 /// The response the host fetched ahead for `url`, if it did and it came.
 async fn preloaded(take: Option<js_sys::Function>, url: &str) -> Option<web_sys::Response> {
@@ -35,7 +30,8 @@ async fn preloaded(take: Option<js_sys::Function>, url: &str) -> Option<web_sys:
 
 #[derive(Default)]
 pub(crate) struct FetchTransport {
-    preloads: Mutex<Preloads>,
+    /// Where the host's responses fetched ahead come from.
+    preloads: Option<js_sys::Function>,
 }
 
 impl FetchTransport {
@@ -45,14 +41,14 @@ impl FetchTransport {
     /// each, or undefined. A promise that rejects is fetched again, as if
     /// there had been none. Responses are used as they are, whatever their
     /// status, as a fetch of `url` would have answered.
-    pub(crate) fn set_preloads(&self, take: Option<js_sys::Function>) {
-        *self.preloads.lock() = take.map(LocalObject::new);
+    pub(crate) fn set_preloads(&mut self, take: Option<js_sys::Function>) {
+        self.preloads = take;
     }
-}
 
-impl HttpTransport for FetchTransport {
-    fn start(&self, request: TransferRequest) {
-        let take = self.preloads.lock().as_ref().and_then(LocalObject::get).map(|take| (*take).clone());
+    /// Starts the transfer of `request` in a task of the browser's event
+    /// loop, which calls `request.finish` once it is done.
+    pub(crate) fn start(&self, request: TransferRequest) {
+        let take = self.preloads.clone();
         wasm_bindgen_futures::spawn_local(async move {
             if request.is_cancelled() {
                 return;

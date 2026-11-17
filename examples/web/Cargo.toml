@@ -32,7 +32,6 @@ webgl = ["mln_runtime/gl", "dep:mln_gl"]
 # Only the browser target has anything to build.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys.workspace = true
-mln_actor.workspace = true
 mln_gestures.workspace = true
 # gpu-conformance: the host writes case, which check/check.mjs runs on a
 # backend of the map's kind (src/gpu_check.rs).

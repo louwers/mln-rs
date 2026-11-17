@@ -504,15 +504,17 @@ impl BorrowedRing {
 }
 
 /// What a surface session presents to.
+///
+/// In the browser, a canvas's surface stays on the instance's thread, as
+/// its canvas does.
 pub struct Surface {
     pub(crate) kind: SurfaceKind,
-    /// What the host draws over each frame (see [`Surface::with_overlay`]).
-    pub(crate) overlay: Option<mln_actor::LocalObject<std::cell::Cell<Option<SurfaceOverlay>>>>,
 }
 
 /// What a host draws over each frame that a surface session presents, after
 /// the map and before the frame is presented (and read back): the overlay
-/// of the backend that the session presents with.
+/// of the backend that the session presents with
+/// ([`DriverWork::set_overlay`](crate::DriverWork::set_overlay)).
 pub enum SurfaceOverlay {
     #[cfg(feature = "webgpu")]
     WebGpu(mln_webgpu::Overlay),
@@ -550,8 +552,7 @@ pub(crate) enum SurfaceKind {
     /// the instance's one thread.
     #[cfg(target_family = "wasm")]
     WebCanvas {
-        canvas: mln_actor::LocalObject<wasm_bindgen::JsValue>,
-        #[cfg_attr(not(feature = "webgpu"), expect(dead_code, reason = "only WebGPU configures the canvas's format"))]
+        canvas: wasm_bindgen::JsValue,
         format: Option<CanvasFormat>,
     },
 }
@@ -587,7 +588,7 @@ impl Surface {
     /// [`release_target`](crate::RenderSession::release_target) replaces it,
     /// or the session detaches or is abandoned.
     pub fn window(window: impl Window + 'static) -> Surface {
-        Surface { kind: SurfaceKind::Window(Arc::new(window)), overlay: None }
+        Surface { kind: SurfaceKind::Window(Arc::new(window)) }
     }
 
     /// In the browser, a canvas that the session presents to with its
@@ -612,17 +613,7 @@ impl Surface {
         {
             return Err(Error::invalid_argument("a web canvas is an OffscreenCanvas or an HTMLCanvasElement"));
         }
-        Ok(Surface {
-            kind: SurfaceKind::WebCanvas { canvas: mln_actor::LocalObject::new(canvas), format },
-            overlay: None,
-        })
-    }
-
-    /// In the browser, whether a session without a device presents to the
-    /// surface with WebGPU.
-    #[cfg(target_family = "wasm")]
-    pub(crate) fn presents_with_web_gpu(&self) -> bool {
-        matches!(self.kind, SurfaceKind::WebCanvas { .. }) && cfg!(feature = "webgpu")
+        Ok(Surface { kind: SurfaceKind::WebCanvas { canvas, format } })
     }
 
     /// A `CAMetalLayer`, which a session on Metal presents to. It must
@@ -630,14 +621,14 @@ impl Surface {
     #[cfg(all(feature = "metal", target_vendor = "apple"))]
     #[must_use]
     pub fn metal_layer(layer: mln_mtl::Layer) -> Surface {
-        Surface { kind: SurfaceKind::MetalLayer(layer), overlay: None }
+        Surface { kind: SurfaceKind::MetalLayer(layer) }
     }
 
     /// A surface that the host made with the instance of the WebGPU
     /// [`Device`] that the session renders on.
     #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
     pub fn wgpu(surface: wgpu::Surface<'static>) -> Surface {
-        Surface { kind: SurfaceKind::Wgpu(surface), overlay: None }
+        Surface { kind: SurfaceKind::Wgpu(surface) }
     }
 
     /// The host's `VkSurfaceKHR`, which a session on the Vulkan device
@@ -645,7 +636,7 @@ impl Surface {
     #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
     #[must_use]
     pub fn vulkan(surface: mln_vulkan::HostSurface) -> Surface {
-        Surface { kind: SurfaceKind::Vulkan(surface), overlay: None }
+        Surface { kind: SurfaceKind::Vulkan(surface) }
     }
 
     /// The host's `EGLSurface`, which a session on the OpenGL device that
@@ -653,7 +644,7 @@ impl Surface {
     #[cfg(all(feature = "gl", not(target_family = "wasm")))]
     #[must_use]
     pub fn gl(surface: mln_gl::HostSurface) -> Surface {
-        Surface { kind: SurfaceKind::Gl(surface), overlay: None }
+        Surface { kind: SurfaceKind::Gl(surface) }
     }
 
     /// A composition swap chain that a session on D3D12 makes and presents
@@ -673,28 +664,7 @@ impl Surface {
     #[must_use]
     pub fn d3d12_composition(composition: mln_d3d12::Composition) -> Surface {
         let kind = SurfaceKind::D3d12Composition { composition, thread: std::thread::current().id() };
-        Surface { kind, overlay: None }
-    }
-
-    /// The surface, with `overlay` drawn over each frame that a session
-    /// presents to it. Only a session whose driver is
-    /// [`Driver::CallerThread`] draws it, on the thread that made it, and
-    /// only with the backend whose overlay it is: attaching it with another
-    /// fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind).
-    #[must_use]
-    pub fn with_overlay(self, overlay: SurfaceOverlay) -> Surface {
-        Surface { overlay: Some(mln_actor::LocalObject::new(std::cell::Cell::new(Some(overlay)))), ..self }
-    }
-
-    /// The overlay that [`with_overlay`](Self::with_overlay) gave the
-    /// surface, on the thread that made it. Fails with
-    /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) on another thread.
-    pub(crate) fn take_overlay(&mut self) -> Result<Option<SurfaceOverlay>, Error> {
-        let Some(overlay) = self.overlay.take() else { return Ok(None) };
-        let overlay = overlay
-            .take()
-            .ok_or_else(|| Error::unsupported("a surface's overlay draws only on the thread that made it"))?;
-        Ok(overlay.take())
+        Surface { kind }
     }
 
     /// The backend of the device whose instance or share group a host's
@@ -714,11 +684,9 @@ impl Surface {
     /// backend presents to.
     pub(crate) fn clone_window(&self) -> Option<Surface> {
         match &self.kind {
-            SurfaceKind::Window(window) => {
-                Some(Surface { kind: SurfaceKind::Window(Arc::clone(window)), overlay: None })
-            }
+            SurfaceKind::Window(window) => Some(Surface { kind: SurfaceKind::Window(Arc::clone(window)) }),
             #[cfg(all(feature = "gl", not(target_family = "wasm")))]
-            SurfaceKind::Gl(surface) => Some(Surface { kind: SurfaceKind::Gl(*surface), overlay: None }),
+            SurfaceKind::Gl(surface) => Some(Surface { kind: SurfaceKind::Gl(*surface) }),
             _ => None,
         }
     }
@@ -787,6 +755,72 @@ impl Surface {
     }
 }
 
+/// A surface on its way to the worker of a session, which takes it on the
+/// session's thread.
+///
+/// In the browser, a canvas waits on the instance's thread, in the
+/// session's side there (`crate::web`), and the surface carries its key.
+#[cfg(not(target_family = "wasm"))]
+pub(crate) struct SentSurface(Surface);
+
+/// A surface on its way to the worker of a session, which takes it on the
+/// session's thread.
+///
+/// In the browser, a canvas waits on the instance's thread, in the
+/// session's side there (`crate::web`), and the surface carries its key.
+#[cfg(target_family = "wasm")]
+pub(crate) enum SentSurface {
+    Window(Arc<dyn Window>),
+    WebCanvas { canvas: crate::web::HandedCanvas, format: Option<CanvasFormat> },
+}
+
+impl SentSurface {
+    /// `surface`, on its way to the worker of session `session`.
+    pub(crate) fn new(surface: Surface, session: super::SessionId) -> SentSurface {
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let _ = session;
+            SentSurface(surface)
+        }
+        #[cfg(target_family = "wasm")]
+        match surface.kind {
+            SurfaceKind::Window(window) => SentSurface::Window(window),
+            SurfaceKind::WebCanvas { canvas, format } => {
+                SentSurface::WebCanvas { canvas: crate::web::hand_canvas(session, canvas), format }
+            }
+        }
+    }
+
+    /// The surface, on the session's thread. In the browser, fails with
+    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) when its canvas no
+    /// longer waits there.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        expect(clippy::unnecessary_wraps, reason = "only the browser's canvases wait for their session's thread")
+    )]
+    pub(crate) fn receive(self) -> Result<Surface, Error> {
+        #[cfg(not(target_family = "wasm"))]
+        {
+            Ok(self.0)
+        }
+        #[cfg(target_family = "wasm")]
+        match self {
+            SentSurface::Window(window) => Ok(Surface { kind: SurfaceKind::Window(window) }),
+            SentSurface::WebCanvas { canvas, format } => {
+                let canvas = canvas.take().ok_or_else(|| Error::invalid_state("the surface's canvas is gone"))?;
+                Ok(Surface { kind: SurfaceKind::WebCanvas { canvas, format } })
+            }
+        }
+    }
+
+    /// In the browser, whether a session without a device presents to the
+    /// surface with WebGPU.
+    #[cfg(target_family = "wasm")]
+    pub(crate) fn presents_with_web_gpu(&self) -> bool {
+        matches!(self, SentSurface::WebCanvas { .. }) && cfg!(feature = "webgpu")
+    }
+}
+
 impl std::fmt::Debug for Surface {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Surface").finish_non_exhaustive()
@@ -818,21 +852,9 @@ pub enum Device {
     #[cfg(all(feature = "gl", not(target_family = "wasm")))]
     Gl(mln_gl::Device),
     /// In the browser, WebGL2: each session renders with the context of its
-    /// canvas, which it makes, or the host's ([`Device::web_gl`]).
+    /// canvas, which it makes unless the host made one ([`Device::web_gl`]).
     #[cfg(all(feature = "gl", target_family = "wasm"))]
-    WebGl(WebGlContext),
-}
-
-/// The host's `WebGL2RenderingContext` that a WebGL device is, if any.
-#[cfg(all(feature = "gl", target_family = "wasm"))]
-#[derive(Clone, Default)]
-pub struct WebGlContext(pub(crate) Option<Arc<mln_actor::LocalObject<wasm_bindgen::JsValue>>>);
-
-#[cfg(all(feature = "gl", target_family = "wasm"))]
-impl std::fmt::Debug for WebGlContext {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("WebGlContext").field(&self.0.is_some()).finish()
-    }
+    WebGl,
 }
 
 /// How to create a [`Device`].
@@ -1056,7 +1078,7 @@ impl Device {
             #[cfg(all(feature = "gl", not(target_family = "wasm")))]
             Device::Gl(_) => true,
             #[cfg(all(feature = "gl", target_family = "wasm"))]
-            Device::WebGl(_) => true,
+            Device::WebGl => true,
         }
     }
 
@@ -1148,7 +1170,7 @@ impl Device {
                 mln_gl::Device::with_options(options).map(Device::Gl)
             }
             #[cfg(all(feature = "gl", target_family = "wasm"))]
-            BackendType::OpenGL if adapter.is_none() => Ok(Device::WebGl(WebGlContext::default())),
+            BackendType::OpenGL if adapter.is_none() => Ok(Device::WebGl),
             _ => {
                 let _ = (index, adapter, gl_api, gl_single_context);
                 Err(Error::unsupported(format!("this build has no {backend:?} backend")))
@@ -1412,22 +1434,25 @@ impl Device {
             #[cfg(all(feature = "gl", not(target_family = "wasm")))]
             Device::Gl(_) => BackendType::OpenGL,
             #[cfg(all(feature = "gl", target_family = "wasm"))]
-            Device::WebGl(_) => BackendType::OpenGL,
+            Device::WebGl => BackendType::OpenGL,
         }
     }
 
-    /// In the browser, a WebGL device that is the host's
-    /// `WebGL2RenderingContext`: its sessions present to the context's own
-    /// canvas, and take turns in the context.
+    /// In the browser, a WebGL device for the host's
+    /// `WebGL2RenderingContext`. Its sessions take turns in the context when
+    /// they present to the context's own canvas, which hands them the
+    /// context it has: give them that canvas
+    /// ([`Surface::web_canvas`]). A session on another canvas renders with
+    /// that canvas's context.
     ///
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) when
     /// `context` isn't a `WebGL2RenderingContext`.
     #[cfg(all(feature = "gl", target_family = "wasm"))]
-    pub fn web_gl(context: wasm_bindgen::JsValue) -> Result<Device, Error> {
-        if !wasm_bindgen::JsCast::is_instance_of::<web_sys::WebGl2RenderingContext>(&context) {
+    pub fn web_gl(context: &wasm_bindgen::JsValue) -> Result<Device, Error> {
+        if !wasm_bindgen::JsCast::is_instance_of::<web_sys::WebGl2RenderingContext>(context) {
             return Err(Error::invalid_argument("a WebGL device wraps a WebGL2RenderingContext"));
         }
-        Ok(Device::WebGl(WebGlContext(Some(Arc::new(mln_actor::LocalObject::new(context))))))
+        Ok(Device::WebGl)
     }
 
     /// In the browser, the library's device on the browser's WebGPU, which

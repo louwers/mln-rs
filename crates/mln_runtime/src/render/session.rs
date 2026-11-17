@@ -24,7 +24,7 @@ use super::local::Pending;
 use super::query::RenderedQueryGeometry;
 use super::target::{
     AttachOptions, BorrowedRing, ConsumerSync, Device, DeviceLease, Driver, ExportKind, FrameTexture, GpuSync,
-    RenderTarget, Surface, SyncKind, SyncKinds, Wake,
+    RenderTarget, SentSurface, Surface, SyncKind, SyncKinds, Wake,
 };
 use super::worker::{self, Init, SessionQueue, TargetInit, Worker};
 use crate::completion::{Completion, Home, Resolver};
@@ -758,6 +758,7 @@ fn attach_unlocked<R>(
     then: impl FnOnce(&RenderSession, Completion<()>) -> R,
 ) -> Result<R, Error> {
     static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+    let id = SessionId(NEXT_ID.fetch_add(1, Ordering::Relaxed));
     let mut ring = None;
     let mut export_kind = None;
     let (size, target) = match target {
@@ -768,7 +769,7 @@ fn attach_unlocked<R>(
             }
             surface.check_area()?;
             surface.check_pixel_format(device.as_ref())?;
-            (size, TargetInit::Surface { surface, device })
+            (size, TargetInit::Surface { surface: SentSurface::new(surface, id), device })
         }
         RenderTarget::Borrowed { size, ring: borrowed, device } => {
             let (producer, consumer) = device.borrowed_sync_kinds(&borrowed)?;
@@ -821,7 +822,6 @@ fn attach_unlocked<R>(
             }
         })));
     }
-    let id = SessionId(NEXT_ID.fetch_add(1, Ordering::Relaxed));
     let scale_factor = map.scale_factor();
     let shared = Arc::new(SessionShared {
         id,
@@ -941,7 +941,7 @@ fn start_thread(shared: Arc<SessionShared>) -> Result<(ThreadId, Option<Joined>)
     let thread = mln_util::thread::spawn("RenderSession", move || {
         let queue = shared.queue.clone();
         let mut worker = None;
-        worker::build(&shared, &mut worker);
+        worker::build(&shared, &mut worker, &mut None);
         // The worker holds the session from here on.
         drop(shared);
         queue.run(&mut worker);
@@ -968,7 +968,7 @@ fn start_thread(shared: Arc<SessionShared>) -> Result<(ThreadId, Option<Joined>)
         prepared.await;
         let queue = shared.queue.clone();
         let mut worker = None;
-        worker::build(&shared, &mut worker);
+        worker::build(&shared, &mut worker, &mut None);
         let id = shared.id;
         // The worker holds the session from here on.
         drop(shared);
@@ -1416,8 +1416,9 @@ impl RenderSession {
             return Err(Error::unsupported("an offscreen session keeps its target"));
         }
         surface.check_area()?;
+        let surface = SentSurface::new(surface, self.shared().id);
         self.resize_then(size, None, move |worker, size, scale_factor, outbox| {
-            worker.set_surface(size, scale_factor, surface, outbox).map(|()| None)
+            worker.set_surface(size, scale_factor, surface.receive()?, outbox).map(|()| None)
         })
     }
 
