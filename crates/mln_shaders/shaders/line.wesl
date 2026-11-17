@@ -68,11 +68,13 @@ struct LineVertex {
 // The vertex of `pos_normal` (twice the position, plus the normal's bits) and
 // `data` (the extrusion, direction and distance along the line) for a line of
 // `width` with a gap of `gapwidth`, offset by `offset` to its side, all in
-// pixels. `ratio` is the tile's pixels per tile unit, and `matrix` its
-// Mercator projection.
+// pixels. `ratio` is the tile's pixels per tile unit, and `m0` to `m3` the
+// columns of its Mercator projection, since Adreno's Vulkan compiler crashes
+// on a function that takes a matrix (README.md).
 fn line_vertex(pos_normal: vec2<i32>, data: vec4<u32>, width: f32, gapwidth: f32, offset: f32,
-               ratio: f32, matrix: mat4x4<f32>) -> LineVertex {
+               ratio: f32, m0: vec4<f32>, m1: vec4<f32>, m2: vec4<f32>, m3: vec4<f32>) -> LineVertex {
     var out: LineVertex;
+    let matrix = mat4x4<f32>(m0, m1, m2, m3);
     // The distance over which the line's edge fades out: less on denser
     // displays, against aliasing.
     let antialiasing = 0.5 / paintParams.pixel_ratio;

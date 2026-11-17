@@ -112,6 +112,8 @@ its own convention:
   on WebGPU; sample and load textures through their globals, not function
   parameters, for the crate to tell.
 - naga's GLSL has no `f16` and writes `highp`; use `f32`.
+- Don't pass a matrix to a function: the Vulkan driver of an Adreno 619 crashes
+  making a pipeline from one. Pass its columns (`line::line_vertex`).
 - An alpha-only texture (`A8Unorm`: the glyph atlas, line dash patterns) reads
   its value from alpha on every backend but WebGPU, which has no alpha-only
   format and reads it from red: use `@if(webgpu)`.

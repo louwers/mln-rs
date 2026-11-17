@@ -83,7 +83,8 @@ fn vs_main(in: VertexInput) -> VertexOutput {
         out.dash_width = in.dasharray.z;
     }
 
-    let line = line_vertex(in.pos_normal, in.data, width, gapwidth, offset, drawable.ratio, drawable.matrix);
+    let m = drawable.matrix;
+    let line = line_vertex(in.pos_normal, in.data, width, gapwidth, offset, drawable.ratio, m[0], m[1], m[2], m[3]);
     out.position = line.position;
     out.normal = line.normal;
     out.width2 = line.width2;
