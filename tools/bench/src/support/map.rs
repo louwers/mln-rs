@@ -169,7 +169,7 @@ impl HeadlessMap {
 
     /// A map as [`new`](Self::new) makes, over the fixtures, on a new
     /// frontend of `size`, at `camera`, loading `style`, such as
-    /// [`Fixtures::style`]. Records the frontend's device in `bench`.
+    /// [`Snapshot::style`](mln_bench_workload::Snapshot::style). Records the frontend's device in `bench`.
     pub(crate) fn open(
         bench: &mut Bench,
         fixtures: &Fixtures,
