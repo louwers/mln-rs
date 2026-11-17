@@ -16,14 +16,16 @@ fn testdata(relative: &str) -> String {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join(relative).to_string_lossy().into_owned()
 }
 
-fn map_over(file_source: StubFileSource, options: MapOptions, run_loop: &RunLoop) -> Map {
-    Map::with_file_source(Arc::new(file_source), options, run_loop, &crate::tests::pool()).expect("map")
+fn map_over(file_source: Arc<StubFileSource>, options: MapOptions, run_loop: &RunLoop) -> Map {
+    Map::with_file_source(file_source, options, run_loop, &crate::tests::pool()).expect("map")
 }
 
 /// A map whose style requests `respond` answers.
-fn map_with_style_response(responder: impl Fn(&Resource) -> Option<Response> + 'static) -> (Map, RunLoop) {
+fn map_with_style_response(
+    responder: impl Fn(&Resource) -> Option<Response> + Send + Sync + 'static,
+) -> (Map, RunLoop) {
     let run_loop = RunLoop::new();
-    let file_source = StubFileSource::new(&run_loop, ResponseType::Asynchronous);
+    let file_source = StubFileSource::on_loop(&run_loop, ResponseType::Asynchronous);
     file_source.set_response(Kind::Style, responder);
     (map_over(file_source, MapOptions::default(), &run_loop), run_loop)
 }
@@ -136,7 +138,7 @@ fn load_json_parse_error() {
 #[test]
 fn load_json_cancels_pending_load_url() {
     let run_loop = RunLoop::new();
-    let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Manual));
+    let file_source = Arc::new(StubFileSource::new(ResponseType::Manual));
     file_source.set_response(Kind::Style, |_| Some(style_response(r#"{"version": 8, "name": "Streets"}"#)));
     let mut map = Map::with_file_source(
         Arc::<StubFileSource>::clone(&file_source),
@@ -169,7 +171,7 @@ fn load_json_cancels_pending_load_url() {
 #[test]
 fn public_load_state_does_not_wait_for_resources() {
     let run_loop = RunLoop::new();
-    let mut map = map_over(StubFileSource::new(&run_loop, ResponseType::Manual), MapOptions::default(), &run_loop);
+    let mut map = map_over(Arc::new(StubFileSource::new(ResponseType::Manual)), MapOptions::default(), &run_loop);
     assert!(!map.style_document_loaded());
 
     map.load_style_json(
@@ -228,7 +230,7 @@ fn corrupt_sprite_response() -> Response {
 /// Loads a style whose sprite is at `sprite_path`, and runs the loop until
 /// the sprite loads or fails. Returns the map and that event.
 fn load_sprite(
-    file_source: StubFileSource,
+    file_source: Arc<StubFileSource>,
     sprite_path: &str,
     pixel_ratio: f32,
     run_loop: &RunLoop,
@@ -250,7 +252,7 @@ fn load_sprite(
 
 fn loading_success(sprite_path: &str, expected_images: usize, pixel_ratio: f32) {
     let run_loop = RunLoop::new();
-    let file_source = StubFileSource::new(&run_loop, ResponseType::Asynchronous);
+    let file_source = StubFileSource::on_loop(&run_loop, ResponseType::Asynchronous);
     file_source.set_response(Kind::SpriteImage, successful_response(".png", sprite_path.to_owned(), pixel_ratio));
     file_source.set_response(Kind::SpriteJSON, successful_response(".json", sprite_path.to_owned(), pixel_ratio));
 
@@ -281,11 +283,11 @@ fn loading_success_versatiles_2x() {
 /// The message of the sprite error that loading the default sprite with
 /// these responses ends in.
 fn sprite_error(
-    image: impl Fn(&Resource) -> Option<Response> + 'static,
-    json: impl Fn(&Resource) -> Option<Response> + 'static,
+    image: impl Fn(&Resource) -> Option<Response> + Send + Sync + 'static,
+    json: impl Fn(&Resource) -> Option<Response> + Send + Sync + 'static,
 ) -> String {
     let run_loop = RunLoop::new();
-    let file_source = StubFileSource::new(&run_loop, ResponseType::Asynchronous);
+    let file_source = StubFileSource::on_loop(&run_loop, ResponseType::Asynchronous);
     file_source.set_response(Kind::SpriteImage, image);
     file_source.set_response(Kind::SpriteJSON, json);
     let (map, event) = load_sprite(file_source, &default_sprite_path(), 1.0, &run_loop);
@@ -331,7 +333,7 @@ fn image_loading_corrupted() {
 #[test]
 fn loading_cancel() {
     let run_loop = RunLoop::new();
-    let file_source = StubFileSource::new(&run_loop, ResponseType::Asynchronous);
+    let file_source = StubFileSource::on_loop(&run_loop, ResponseType::Asynchronous);
     let stop = run_loop.handle();
     let end = move |_: &Resource| -> Option<Response> {
         stop.stop();
@@ -399,7 +401,7 @@ fn global_state_property_requires_loaded_style() {
 #[test]
 fn edits_fail_during_a_url_load_and_the_old_version_stays_published() {
     let run_loop = RunLoop::new();
-    let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Manual));
+    let file_source = Arc::new(StubFileSource::new(ResponseType::Manual));
     file_source.set_response(Kind::Style, |_| Some(style_response(REMOTE)));
     let options = MapOptions { map_mode: crate::MapMode::Continuous, ..MapOptions::default() };
     let mut map =

@@ -21,7 +21,7 @@ use crate::{
 
 fn map(options: MapOptions, run_loop: &RunLoop) -> Map {
     Map::with_file_source(
-        Arc::new(StubFileSource::new(run_loop, ResponseType::Asynchronous)),
+        StubFileSource::on_loop(run_loop, ResponseType::Asynchronous),
         options,
         run_loop,
         &crate::tests::pool(),

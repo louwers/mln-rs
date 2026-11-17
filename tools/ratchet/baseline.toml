@@ -39,7 +39,7 @@
 "crates/mln_renderer/src/util/tile_mesh.rs" = 1
 "crates/mln_sprite/src/sprite_parser.rs" = 1
 "crates/mln_storage/src/offline_database.rs" = 3
-"crates/mln_storage/src/stub_file_source.rs" = 2
+"crates/mln_storage/src/stub_file_source.rs" = 1
 "crates/mln_storage/src/ureq_transport.rs" = 1
 "crates/mln_style/src/color_ramp_property_value.rs" = 2
 "crates/mln_style/src/layers/heatmap_layer_properties.rs" = 1
@@ -113,9 +113,6 @@
 "crates/mln_runtime/src/render/driver.rs" = 2
 "crates/mln_runtime/src/render/session.rs" = 9
 "crates/mln_runtime/src/web.rs" = 3
-"crates/mln_storage/src/database_file_source.rs" = 1
-"crates/mln_storage/src/online_file_source.rs" = 37
-"crates/mln_storage/src/stub_file_source.rs" = 15
 "crates/mln_text/src/browser_glyph_rasterizer.rs" = 1
 "crates/mln_util/src/host_bytes.rs" = 3
 "crates/mln_util/src/logging.rs" = 2

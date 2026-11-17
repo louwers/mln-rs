@@ -75,7 +75,7 @@ impl FeatureTrackingTest {
         let run_loop = RunLoop::new();
         let pool = Pool::new(4).unwrap();
         let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, &run_loop, &pool).expect("a headless frontend");
-        let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
+        let file_source = StubFileSource::on_loop(&run_loop, ResponseType::Asynchronous);
         file_source.set_response(Kind::Glyphs, |_| Some(file_response(GLYPH_PATH)));
         let mut map = Map::with_file_source(
             file_source,

@@ -5,8 +5,7 @@
 
 use std::sync::Arc;
 
-use mln_actor::ActorRef;
-use mln_storage::database_file_source::DatabaseWorker;
+use mln_storage::database_file_source::DatabaseSender;
 use mln_storage::offline::{
     OfflineRegion, OfflineRegionDefinition, OfflineRegionDownloadState, OfflineRegionMetadata, OfflineRegionObserver,
     OfflineRegionStatus, OfflineRegions,
@@ -34,12 +33,8 @@ pub fn region_database(
 }
 
 /// Posts a download's task to the database's worker.
-fn post_to(worker: ActorRef<DatabaseWorker<Downloads>>) -> Post {
-    Arc::new(move |task| {
-        worker.invoke(move |worker: &DatabaseWorker<Downloads>| {
-            worker.with(|state| task(&mut state.db, &mut state.extension));
-        });
-    })
+fn post_to(worker: DatabaseSender<Downloads>) -> Post {
+    Arc::new(move |task| worker.invoke(move |worker| task(&mut worker.db, &mut worker.extension)))
 }
 
 /// The region `region_id`, or [`DatabaseError::RegionNotFound`] when the
@@ -131,7 +126,7 @@ pub trait DatabaseFileSourceExt {
 
 impl DatabaseFileSourceExt for RegionDatabase {
     fn list_offline_regions(&self, callback: impl FnOnce(Result<OfflineRegions, DatabaseError>) + Send + 'static) {
-        self.invoke(move |t| callback(t.with(|state| state.db.list_regions())));
+        self.invoke(move |t| callback(t.db.list_regions()));
     }
 
     fn get_offline_region(
@@ -139,7 +134,7 @@ impl DatabaseFileSourceExt for RegionDatabase {
         region_id: i64,
         callback: impl FnOnce(Result<Option<OfflineRegion>, DatabaseError>) + Send + 'static,
     ) {
-        self.invoke(move |t| callback(t.with(|state| state.db.get_region(region_id))));
+        self.invoke(move |t| callback(t.db.get_region(region_id)));
     }
 
     fn create_offline_region(
@@ -149,7 +144,7 @@ impl DatabaseFileSourceExt for RegionDatabase {
         callback: impl FnOnce(Result<OfflineRegion, DatabaseError>) + Send + 'static,
     ) {
         let (definition, metadata) = (definition.clone(), metadata.clone());
-        self.invoke(move |t| callback(t.with(|state| state.db.create_region(&definition, &metadata))));
+        self.invoke(move |t| callback(t.db.create_region(&definition, &metadata)));
     }
 
     fn update_offline_metadata(
@@ -160,11 +155,10 @@ impl DatabaseFileSourceExt for RegionDatabase {
     ) {
         let metadata = metadata.clone();
         self.invoke(move |t| {
-            callback(t.with(|state| {
-                require_region(&mut state.db, region_id)?;
-                state.db.update_metadata(region_id, &metadata)?;
-                require_region(&mut state.db, region_id)
-            }));
+            let result = require_region(&mut t.db, region_id)
+                .and_then(|_| t.db.update_metadata(region_id, &metadata))
+                .and_then(|_| require_region(&mut t.db, region_id));
+            callback(result);
         });
     }
 
@@ -175,10 +169,9 @@ impl DatabaseFileSourceExt for RegionDatabase {
         callback: impl FnOnce(Result<(), DatabaseError>) + Send + 'static,
     ) {
         self.invoke(move |t| {
-            callback(t.with(|state| {
-                let download = state.extension.download(&mut state.db, region_id)?;
+            let download = t.extension.download(&mut t.db, region_id);
+            callback(download.map(|download| {
                 download.set_observer(observer.map(|observer| -> Box<dyn OfflineRegionObserver> { observer }));
-                Ok(())
             }));
         });
     }
@@ -190,10 +183,8 @@ impl DatabaseFileSourceExt for RegionDatabase {
         callback: impl FnOnce(Result<(), DatabaseError>) + Send + 'static,
     ) {
         self.invoke(move |t| {
-            callback(t.with(|state| {
-                state.extension.download(&mut state.db, region_id)?.set_state(download_state);
-                Ok(())
-            }));
+            let download = t.extension.download(&mut t.db, region_id);
+            callback(download.map(|download| download.set_state(download_state)));
         });
     }
 
@@ -203,10 +194,8 @@ impl DatabaseFileSourceExt for RegionDatabase {
         callback: impl FnOnce(Result<OfflineRegionStatus, DatabaseError>) + Send + 'static,
     ) {
         self.invoke(move |t| {
-            callback(t.with(|state| {
-                let download = state.extension.download(&mut state.db, region_id)?;
-                Ok(download.get_status(&mut state.db))
-            }));
+            let download = t.extension.download(&mut t.db, region_id);
+            callback(download.map(|download| download.get_status(&mut t.db)));
         });
     }
 
@@ -216,16 +205,16 @@ impl DatabaseFileSourceExt for RegionDatabase {
         callback: impl FnOnce(Result<OfflineRegions, DatabaseError>) + Send + 'static,
     ) {
         let side_database_path = side_database_path.to_owned();
-        self.invoke(move |t| callback(t.with(|state| state.db.merge_database(&side_database_path))));
+        self.invoke(move |t| callback(t.db.merge_database(&side_database_path)));
     }
 
     fn delete_offline_region(&self, region_id: i64, callback: impl FnOnce(Result<(), DatabaseError>) + Send + 'static) {
         self.invoke(move |t| {
-            callback(t.with(|state| {
-                let region = require_region(&mut state.db, region_id)?;
-                drop(state.extension.remove(region_id));
-                state.db.delete_region(&region).map_or(Ok(()), Err)
-            }));
+            let result = require_region(&mut t.db, region_id).and_then(|region| {
+                drop(t.extension.remove(region_id));
+                t.db.delete_region(&region).map_or(Ok(()), Err)
+            });
+            callback(result);
         });
     }
 
@@ -235,10 +224,9 @@ impl DatabaseFileSourceExt for RegionDatabase {
         callback: impl FnOnce(Result<(), DatabaseError>) + Send + 'static,
     ) {
         self.invoke(move |t| {
-            callback(t.with(|state| {
-                require_region(&mut state.db, region_id)?;
-                state.db.invalidate_region(region_id).map_or(Ok(()), Err)
-            }));
+            let result = require_region(&mut t.db, region_id)
+                .and_then(|_| t.db.invalidate_region(region_id).map_or(Ok(()), Err));
+            callback(result);
         });
     }
 }

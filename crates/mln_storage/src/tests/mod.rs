@@ -24,10 +24,10 @@ use std::path::PathBuf;
 use std::rc::{Rc, Weak};
 use std::sync::{Arc, mpsc};
 
-use mln_actor::{ActorRef, AsyncTask, AsyncTaskSender, RunLoop};
+use mln_actor::{AsyncTask, AsyncTaskSender, RunLoop};
 use mln_util::hash::HashMap;
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
-use parking_lot::{Mutex, MutexGuard};
+use parking_lot::Mutex;
 
 use crate::Request;
 use crate::file_source::{FileSource, FileSourceExt};
@@ -133,26 +133,19 @@ pub(crate) trait LocalRequests: FileSource {
 
 impl<T: FileSource + ?Sized> LocalRequests for T {}
 
-/// Serializes the tests that use process-wide state (`NetworkStatus`, the
-/// log observer): gtest runs one test at a time, the Rust harness runs them
-/// in parallel.
-pub(crate) fn serial() -> MutexGuard<'static, ()> {
-    static LOCK: Mutex<()> = Mutex::new(());
-    LOCK.lock()
-}
-
-/// Holds `actor`'s thread in a message, after the messages already sent to
-/// it, until the returned guard drops. It returns once the thread is held, so
-/// the messages sent meanwhile queue up and run in one go after the drop. Drop
-/// the guard before the actor's `Thread`, whose drop waits for its queue.
-pub(crate) fn pause<O: 'static>(actor: &ActorRef<O>) -> Paused {
+/// Holds a worker's thread in the task that `send` sends it, after the
+/// work already sent to it, until the returned guard drops. It returns once
+/// the thread is held, so the work sent meanwhile queues up and runs in one
+/// go after the drop. Drop the guard before the worker's owner, whose drop
+/// waits for the worker.
+pub(crate) fn pause(send: impl FnOnce(Box<dyn FnOnce() + Send>)) -> Paused {
     let (paused, is_paused) = mpsc::channel();
     let (resume, resumed) = mpsc::channel::<()>();
-    actor.invoke(move |_| {
+    send(Box::new(move || {
         let _ = paused.send(());
         // Returns once `Paused` drops its sender.
         let _ = resumed.recv();
-    });
+    }));
     is_paused.recv().expect("the thread holds");
     Paused { _resume: resume }
 }

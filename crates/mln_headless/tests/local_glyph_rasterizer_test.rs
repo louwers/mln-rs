@@ -77,14 +77,14 @@ impl LocalGlyphRasterizerTest {
         assert!(font_family.is_none(), "local font families are not ported");
         let run_loop = RunLoop::new();
         let pool = Pool::new(4).unwrap();
-        let file_source = StubFileSource::new(&run_loop, ResponseType::Asynchronous);
+        let file_source = StubFileSource::on_loop(&run_loop, ResponseType::Asynchronous);
         file_source.set_response(Kind::Glyphs, |resource: &Resource| {
             assert_eq!(Kind::Glyphs, resource.kind);
             let mut response = Response::new();
             response.data = Some(Arc::new(read_file("test/fixtures/resources/glyphs.pbf")));
             Some(response)
         });
-        let file_source: Arc<dyn FileSource> = Arc::new(file_source);
+        let file_source: Arc<dyn FileSource> = file_source;
 
         // `HeadlessFrontend(1, NoFlush, ContextMode::Unique, fontFamily)`:
         // the default size is 256x256.

@@ -5,17 +5,23 @@ use parking_lot::Mutex;
 
 use crate::asset_file_source::AssetFileSource;
 #[cfg(feature = "sqlite")]
-use crate::database_file_source::{Cache, DatabaseFileSource};
+use crate::database_file_source::Cache;
+#[cfg(all(feature = "sqlite", not(target_family = "wasm")))]
+use crate::database_file_source::DatabaseFileSource;
 use crate::file_source::FileSource;
 use crate::local_file_source::LocalFileSource;
 #[cfg(feature = "sqlite")]
 use crate::mbtiles_file_source::MBTilesFileSource;
+#[cfg(not(target_family = "wasm"))]
+use crate::network_status::NetworkStatus;
+#[cfg(not(target_family = "wasm"))]
 use crate::online_file_source::OnlineFileSource;
 use crate::pmtiles_file_source::PMTilesFileSource;
 use crate::request::{Request, Responder};
 #[cfg(feature = "sqlite")]
 use crate::resource::Priority;
 use crate::resource::{LoadingMethod, Resource};
+#[cfg(not(target_family = "wasm"))]
 use crate::resource_options::ResourceOptions;
 use crate::response::{Reason, ResourceError, Response};
 
@@ -173,11 +179,12 @@ pub struct Loader {
 impl Loader {
     /// A loader for `options`: assets from its asset path, a cache database
     /// at its cache path (when the `sqlite` feature is on), and an
-    /// [`OnlineFileSource`] for the network. It reads files and archives on
-    /// `pool`.
+    /// [`OnlineFileSource`] for the network, with a [`NetworkStatus`] of its
+    /// own, which stays online. It reads files and archives on `pool`.
+    #[cfg(not(target_family = "wasm"))]
     #[must_use]
     pub fn new(options: &ResourceOptions, pool: &Pool) -> Loader {
-        let network: Arc<dyn FileSource> = Arc::new(OnlineFileSource::new());
+        let network: Arc<dyn FileSource> = Arc::new(OnlineFileSource::new(Arc::new(NetworkStatus::new())));
         let builder = Loader::builder(pool).asset_path(&options.asset_path).network(Arc::clone(&network));
         #[cfg(feature = "sqlite")]
         let builder = builder.database(Arc::new(DatabaseFileSource::new(&options.cache_path, Some(network))));

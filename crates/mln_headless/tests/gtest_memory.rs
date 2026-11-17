@@ -1,7 +1,5 @@
 mod support;
 
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_actor::RunLoop;
@@ -14,6 +12,7 @@ use mln_style::Edit;
 use mln_util::hash::HashMap;
 use mln_util::pool::Pool;
 use mln_util::size::Size;
+use parking_lot::Mutex;
 use support::read_bytes;
 
 /// The `MemoryTest` fixture.
@@ -32,14 +31,14 @@ impl MemoryTest {
     fn new() -> Self {
         let run_loop = RunLoop::new();
         let pool = Pool::new(4).unwrap();
-        let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
-        let cache: Rc<RefCell<HashMap<String, Arc<Vec<u8>>>>> = Rc::default();
+        let file_source = StubFileSource::on_loop(&run_loop, ResponseType::Asynchronous);
+        let cache: Arc<Mutex<HashMap<String, Arc<Vec<u8>>>>> = Arc::default();
 
         // `response(path)`: the fixture's bytes, read once.
         let response = move |path: String| -> Option<Response> {
             let data = Arc::clone(
                 cache
-                    .borrow_mut()
+                    .lock()
                     .entry(path.clone())
                     .or_insert_with(|| Arc::new(read_bytes(&format!("test/fixtures/resources/{path}")))),
             );

@@ -118,7 +118,7 @@ fn recycle_map_update_images() {
 
     let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, &run_loop, &pool).expect("a headless frontend");
     let mut map = Map::with_file_source(
-        Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous)),
+        StubFileSource::on_loop(&run_loop, ResponseType::Asynchronous),
         MapOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
         &run_loop,
         &pool,

@@ -17,6 +17,8 @@ use std::sync::Arc;
 use mln_actor::{RunLoop, RunLoopHandle};
 use mln_renderer::Registry;
 use mln_renderer::tile::worker_codec::RemoteWorkers;
+use mln_storage::OnlineFileSource;
+use mln_storage::network_status::NetworkStatus;
 use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
 use mln_util::pool::Pool;
@@ -51,6 +53,14 @@ pub(crate) fn drive(run_loop: &RunLoop, pool: &Pool, queue: CoreQueue, mut core:
         !queue.is_stopped()
     })
     .detach();
+}
+
+/// The runtime's own network loading, whose core runs in the pump's slices
+/// until the source drops.
+pub(crate) fn online(network: Arc<NetworkStatus>) -> OnlineFileSource {
+    let (online, mut core) = OnlineFileSource::local(network, pump::waker());
+    pump::add(move || core.run_due()).detach();
+    online
 }
 
 /// How a session's loop runs on this thread.

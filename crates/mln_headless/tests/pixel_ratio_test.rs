@@ -3,15 +3,15 @@
 
 mod support;
 
-use std::cell::{Cell, RefCell};
-use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use mln_map::MapMode;
 use mln_storage::{Kind, Response};
 use mln_util::ErrorKind;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
+use parking_lot::Mutex;
 use support::*;
 
 const STYLE: &str = r##"{
@@ -73,29 +73,29 @@ fn response(data: Vec<u8>) -> Response {
 /// What the map requested.
 #[derive(Default)]
 struct Requests {
-    tiles: Cell<usize>,
-    sprites: RefCell<Vec<String>>,
+    tiles: AtomicUsize,
+    sprites: Mutex<Vec<String>>,
 }
 
 /// A still map at `pixel_ratio` with the style, answering from the fixtures.
-fn map_test(pixel_ratio: f32) -> (MapTest, Rc<Requests>) {
+fn map_test(pixel_ratio: f32) -> (MapTest, Arc<Requests>) {
     let test = MapTest::with_mode(pixel_ratio, MapMode::Static);
-    let requests = Rc::new(Requests::default());
+    let requests = Arc::new(Requests::default());
     let fs = &test.file_source;
-    let r = Rc::clone(&requests);
+    let r = Arc::clone(&requests);
     fs.set_response(Kind::Tile, move |_| {
-        r.tiles.set(r.tiles.get() + 1);
+        r.tiles.fetch_add(1, Ordering::SeqCst);
         Some(file_response("test/fixtures/map/offline/0-0-0.vector.pbf"))
     });
     fs.set_response(Kind::Glyphs, |_| Some(file_response("test/fixtures/map/offline/glyph.pbf")));
-    let r = Rc::clone(&requests);
+    let r = Arc::clone(&requests);
     fs.set_response(Kind::SpriteJSON, move |resource| {
-        r.sprites.borrow_mut().push(resource.url.clone());
+        r.sprites.lock().push(resource.url.clone());
         Some(response(sprite_json(if resource.url.contains("@2x") { 2 } else { 1 })))
     });
-    let r = Rc::clone(&requests);
+    let r = Arc::clone(&requests);
     fs.set_response(Kind::SpriteImage, move |resource| {
-        r.sprites.borrow_mut().push(resource.url.clone());
+        r.sprites.lock().push(resource.url.clone());
         Some(response(sprite_image(if resource.url.contains("@2x") { 2 } else { 1 })))
     });
     test.load_json(STYLE);
@@ -122,20 +122,20 @@ fn a_map_whose_pixel_ratio_changes_renders_as_one_made_at_that_ratio() {
 
     let (test, requests) = map_test(1.0);
     assert_same(&test.render().image, &made_at_1);
-    assert_eq!(requests.tiles.get(), 1);
-    assert_eq!(*requests.sprites.borrow(), ["http://sprites/sprite.json", "http://sprites/sprite.png"]);
+    assert_eq!(requests.tiles.load(Ordering::SeqCst), 1);
+    assert_eq!(*requests.sprites.lock(), ["http://sprites/sprite.json", "http://sprites/sprite.png"]);
 
     test.map().set_pixel_ratio(2.0).unwrap();
     test.frontend().set_pixel_ratio(2.0);
     assert_same(&test.render().image, &made_at_2);
     // The map kept its tile, and loaded the sprite at the new resolution.
-    assert_eq!(requests.tiles.get(), 1);
-    assert_eq!(requests.sprites.borrow()[2..], ["http://sprites/sprite@2x.json", "http://sprites/sprite@2x.png"]);
+    assert_eq!(requests.tiles.load(Ordering::SeqCst), 1);
+    assert_eq!(requests.sprites.lock()[2..], ["http://sprites/sprite@2x.json", "http://sprites/sprite@2x.png"]);
 
     test.map().set_pixel_ratio(1.0).unwrap();
     test.frontend().set_pixel_ratio(1.0);
     assert_same(&test.render().image, &made_at_1);
-    assert_eq!(requests.tiles.get(), 1);
+    assert_eq!(requests.tiles.load(Ordering::SeqCst), 1);
 }
 
 #[test]
@@ -146,8 +146,8 @@ fn a_ratio_that_picks_the_same_sprite_loads_nothing() {
     test.frontend().set_pixel_ratio(3.0);
     let image = test.render().image;
     assert_eq!(image.size, Size::new(768, 768));
-    assert_eq!(requests.tiles.get(), 1);
-    assert_eq!(requests.sprites.borrow().len(), 2);
+    assert_eq!(requests.tiles.load(Ordering::SeqCst), 1);
+    assert_eq!(requests.sprites.lock().len(), 2);
     assert_eq!(test.map().snapshot().view.extent.scale_factor, 3.0);
 }
 

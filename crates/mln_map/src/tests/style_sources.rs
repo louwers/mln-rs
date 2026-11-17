@@ -24,7 +24,7 @@ use crate::{Map, MapEvent, MapOptions};
 const EMPTY_GEOJSON_SOURCE: &str = r#"{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}"#;
 
 fn loaded_map(run_loop: &RunLoop) -> Map {
-    let file_source = Arc::new(StubFileSource::new(run_loop, ResponseType::Asynchronous));
+    let file_source = StubFileSource::on_loop(run_loop, ResponseType::Asynchronous);
     let mut map = Map::with_file_source(file_source, MapOptions::default(), run_loop, &Pool::local()).expect("map");
     map.load_style_json(r#"{"version":8,"sources":{},"layers":[]}"#);
     map
@@ -107,7 +107,7 @@ fn malformed_sources_are_invalid_arguments() {
 #[test]
 fn a_source_json_needs_a_loaded_style() {
     let run_loop = RunLoop::new();
-    let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
+    let file_source = StubFileSource::on_loop(&run_loop, ResponseType::Asynchronous);
     let mut map = Map::with_file_source(file_source, MapOptions::default(), &run_loop, &Pool::local()).expect("map");
     let error = map.add_source_json("points", EMPTY_GEOJSON_SOURCE).unwrap_err();
     assert_eq!(ErrorKind::InvalidState, error.kind);
@@ -188,7 +188,7 @@ fn source_changes(events: &[MapEvent]) -> Vec<&str> {
 #[test]
 fn loading_fail() {
     let run_loop = RunLoop::new();
-    let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
+    let file_source = StubFileSource::on_loop(&run_loop, ResponseType::Asynchronous);
     file_source.set_response(Kind::Source, |resource| {
         assert_eq!("url", resource.url);
         let mut response = Response::new();
@@ -206,7 +206,7 @@ fn loading_fail() {
 #[test]
 fn a_tilejson_describes_its_source() {
     let run_loop = RunLoop::new();
-    let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
+    let file_source = StubFileSource::on_loop(&run_loop, ResponseType::Asynchronous);
     file_source.set_response(Kind::Source, |_| Some(data_response(br#"{"tiles": ["tiles"], "attribution": "a"}"#)));
     let mut map = map_over(&file_source, &run_loop);
     map.add_source(tileset_vector_source("source", Some("url".to_owned()), PartialTileset::default())).unwrap();
@@ -221,7 +221,7 @@ fn a_tilejson_describes_its_source() {
 #[test]
 fn an_inline_tileset_describes_its_source_at_once() {
     let run_loop = RunLoop::new();
-    let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
+    let file_source = StubFileSource::on_loop(&run_loop, ResponseType::Asynchronous);
     let mut map = map_over(&file_source, &run_loop);
     let tileset = PartialTileset { tiles: Some(vec!["tiles".to_owned()]), ..PartialTileset::default() };
     map.add_source(tileset_vector_source("source", None, tileset)).unwrap();
@@ -234,7 +234,7 @@ fn an_inline_tileset_describes_its_source_at_once() {
 #[test]
 fn geojson_source_url_update() {
     let run_loop = RunLoop::new();
-    let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
+    let file_source = StubFileSource::on_loop(&run_loop, ResponseType::Asynchronous);
     file_source.set_response(Kind::Source, |resource| {
         assert_eq!("http://source-url.ext", resource.url);
         Some(data_response(
@@ -254,7 +254,7 @@ fn geojson_source_url_update() {
 #[test]
 fn geojson_source_data_replaces_building_url_data() {
     let run_loop = RunLoop::new();
-    let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Manual));
+    let file_source = Arc::new(StubFileSource::new(ResponseType::Manual));
     file_source.set_response(Kind::Source, |_| Some(data_response(&geojson_points(1))));
     let mut map = map_over(&file_source, &run_loop);
     map.add_source(geojson_source("source", GeoJSONOptions::default_options())).unwrap();
@@ -280,7 +280,7 @@ fn geojson_source_data_replaces_building_url_data() {
 #[test]
 fn geojson_source_url_replaces_building_url_data() {
     let run_loop = RunLoop::new();
-    let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Manual));
+    let file_source = Arc::new(StubFileSource::new(ResponseType::Manual));
     file_source.set_response(Kind::Source, |resource| {
         Some(data_response(&geojson_points(if resource.url == "old" { 1 } else { 2 })))
     });
@@ -306,7 +306,7 @@ fn geojson_source_url_replaces_building_url_data() {
 #[test]
 fn a_geojson_build_keeps_the_synchronous_update_override() {
     let run_loop = RunLoop::new();
-    let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Manual));
+    let file_source = Arc::new(StubFileSource::new(ResponseType::Manual));
     file_source.set_response(Kind::Source, |_| Some(data_response(&geojson_points(1))));
     let mut map = map_over(&file_source, &run_loop);
     let options = GeoJSONOptions { synchronous_update: true, ..Default::default() };
@@ -329,7 +329,7 @@ fn a_geojson_build_keeps_the_synchronous_update_override() {
 #[test]
 fn image_source_image_update() {
     let run_loop = RunLoop::new();
-    let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
+    let file_source = StubFileSource::on_loop(&run_loop, ResponseType::Asynchronous);
     file_source.set_global_response(|resource| {
         assert_eq!("http://url", resource.url);
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/test/fixtures/image/no_profile.png");

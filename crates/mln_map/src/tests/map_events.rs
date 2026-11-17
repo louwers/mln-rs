@@ -18,7 +18,7 @@ use crate::{CameraChange, CameraChangeMode, CameraChangeSource, CameraOptions, M
 
 fn map(options: MapOptions, run_loop: &RunLoop) -> Map {
     Map::with_file_source(
-        Arc::new(StubFileSource::new(run_loop, ResponseType::Asynchronous)),
+        StubFileSource::on_loop(run_loop, ResponseType::Asynchronous),
         options,
         run_loop,
         &crate::tests::pool(),
@@ -98,14 +98,14 @@ fn lowest_jump(map: &mut Map) -> f64 {
 #[test]
 fn each_change_to_the_style_projection_reaches_the_transform() {
     let run_loop = RunLoop::new();
-    let file_source = StubFileSource::new(&run_loop, ResponseType::Asynchronous);
+    let file_source = StubFileSource::on_loop(&run_loop, ResponseType::Asynchronous);
     file_source.set_response(Kind::Style, |_| {
         let mut response = Response::new();
         response.data = Some(Arc::new(GLOBE_BELOW_3.as_bytes().to_vec()));
         Some(response)
     });
     let options = MapOptions { size: Size::new(512, 1024), ..Default::default() };
-    let mut map = Map::with_file_source(Arc::new(file_source), options, &run_loop, &crate::tests::pool()).expect("map");
+    let mut map = Map::with_file_source(file_source, options, &run_loop, &crate::tests::pool()).expect("map");
     assert!(lowest_jump(&mut map) >= 1.0);
 
     // A style load.

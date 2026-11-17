@@ -527,7 +527,7 @@ impl MapTest<StubFileSource> {
 
     pub(crate) fn with_mode(pixel_ratio: f32, mode: MapMode) -> Self {
         let run_loop = RunLoop::new();
-        let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
+        let file_source = StubFileSource::on_loop(&run_loop, ResponseType::Asynchronous);
         Self::create(run_loop, file_source, pixel_ratio, mode)
     }
 }

@@ -8,7 +8,7 @@ use std::cell::{Cell, RefCell};
 use std::num::NonZeroU16;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use mln_actor::{AsyncTask, RunLoop, Timer};
@@ -266,7 +266,7 @@ impl GlyphStoreTest {
         engine: Arc<dyn FontFaceEngine>,
     ) -> Self {
         let run_loop = RunLoop::new();
-        let file_source = Arc::new(StubFileSource::new(&run_loop, response_type));
+        let file_source = StubFileSource::on_loop(&run_loop, response_type);
         let observer = Rc::new(StubGlyphStoreObserver::default());
         let source: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&file_source);
         let store = Store::new(local_glyph_rasterizer, glyph_cache, engine, source, &run_loop);
@@ -421,10 +421,10 @@ fn loading_fail() {
 
 /// A file source response that fails on the first request (`requests` is 1)
 /// and serves the glyphs.pbf fixture after that.
-fn fails_first_then_glyphs(requests: Rc<Cell<u32>>) -> impl Fn(&Resource) -> Option<Response> {
+fn fails_first_then_glyphs(requests: Arc<AtomicU32>) -> impl Fn(&Resource) -> Option<Response> + Send + Sync {
     move |_: &Resource| {
         let mut response = Response::new();
-        if requests.get() == 1 {
+        if requests.load(Ordering::SeqCst) == 1 {
             response.error = Some(Box::new(ResourceError::new(Reason::NotFound, "Failed by the test case")));
         } else {
             response.data = Some(Arc::new(read_file("test/fixtures/resources/glyphs.pbf")));
@@ -433,10 +433,12 @@ fn fails_first_then_glyphs(requests: Rc<Cell<u32>>) -> impl Fn(&Resource) -> Opt
     }
 }
 
-fn count_requests(test: &GlyphStoreTest) -> Rc<Cell<u32>> {
-    let requests = Rc::new(Cell::new(0));
-    let r = Rc::clone(&requests);
-    *test.observer.glyphs_requested.borrow_mut() = Some(Box::new(move |_, _| r.set(r.get() + 1)));
+fn count_requests(test: &GlyphStoreTest) -> Arc<AtomicU32> {
+    let requests = Arc::new(AtomicU32::new(0));
+    let r = Arc::clone(&requests);
+    *test.observer.glyphs_requested.borrow_mut() = Some(Box::new(move |_, _| {
+        r.fetch_add(1, Ordering::SeqCst);
+    }));
     requests
 }
 
@@ -445,7 +447,7 @@ fn count_requests(test: &GlyphStoreTest) -> Rc<Cell<u32>> {
 fn loading_fail_requests_the_range_again() {
     let mut test = GlyphStoreTest::new();
     let requests = count_requests(&test);
-    test.file_source.set_response(Kind::Glyphs, fails_first_then_glyphs(Rc::clone(&requests)));
+    test.file_source.set_response(Kind::Glyphs, fails_first_then_glyphs(Arc::clone(&requests)));
 
     let answers = Rc::new(Cell::new(0));
     let retry = Rc::new(Timer::new(&test.run_loop));
@@ -476,7 +478,7 @@ fn loading_fail_requests_the_range_again() {
 
     test.run("test/fixtures/resources/glyphs.pbf", dependencies(&['a']));
 
-    assert_eq!(requests.get(), 2);
+    assert_eq!(requests.load(Ordering::SeqCst), 2);
     assert_eq!(answers.get(), 2);
 }
 
@@ -487,18 +489,18 @@ fn loading_fail_requests_the_range_again() {
 fn an_answer_says_a_range_it_needed_failed() {
     let mut test = GlyphStoreTest::new();
     let requests = count_requests(&test);
-    test.file_source.set_response(Kind::Glyphs, fails_first_then_glyphs(Rc::clone(&requests)));
+    test.file_source.set_response(Kind::Glyphs, fails_first_then_glyphs(Arc::clone(&requests)));
     let run_loop = test.run_loop.clone();
     *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |_: GlyphMap| run_loop.stop()));
 
     test.run("test/fixtures/resources/glyphs.pbf", dependencies(&['a']));
     assert!(test.requestor.failed.get());
-    assert_eq!(requests.get(), 1);
+    assert_eq!(requests.load(Ordering::SeqCst), 1);
 
     // A wait that began after the failure requests the range again, which
     // loads.
     test.run("test/fixtures/resources/glyphs.pbf", dependencies(&['a']));
-    assert_eq!(requests.get(), 2);
+    assert_eq!(requests.load(Ordering::SeqCst), 2);
     assert!(!test.requestor.failed.get());
 }
 
@@ -529,7 +531,7 @@ fn a_wait_resolves_a_range_that_failed_during_it_as_missing() {
         assert!(resolved.failed);
         assert!(resolved.glyphs[&font_stack_hash(&test_stack())][&gid('a')].is_none());
     }
-    assert_eq!(requests.get(), 1);
+    assert_eq!(requests.load(Ordering::SeqCst), 1);
 }
 
 // gtest: GlyphManager.LoadingFailStillAnswersWithTheOtherRanges
@@ -670,10 +672,10 @@ fn a_wait_requests_the_font_stacks_evicted_while_it_waits_again() {
 #[test]
 fn a_response_to_an_evicted_range_is_dropped() {
     let test = GlyphStoreTest::with(Box::new(StubLocalGlyphRasterizer), ResponseType::Synchronous);
-    let urls = Rc::new(RefCell::new(Vec::new()));
-    let u = Rc::clone(&urls);
+    let urls = Arc::new(Mutex::new(Vec::new()));
+    let u = Arc::clone(&urls);
     test.file_source.set_response(Kind::Glyphs, move |resource: &Resource| {
-        u.borrow_mut().push(resource.url.clone());
+        u.lock().push(resource.url.clone());
         glyphs_response("test/fixtures/resources/glyphs.pbf")(resource)
     });
 
@@ -684,8 +686,9 @@ fn a_response_to_an_evicted_range_is_dropped() {
 
     test.glyph_store().set_url("new/{fontstack}/{range}.pbf");
     test.get_glyphs(dependencies(&['a']));
-    assert_eq!(urls.borrow().len(), 2, "requested again: {:?}", urls.borrow());
-    assert!(urls.borrow()[1].starts_with("new/"));
+    let urls = urls.lock();
+    assert_eq!(urls.len(), 2, "requested again: {urls:?}");
+    assert!(urls[1].starts_with("new/"));
 }
 
 // gtest: GlyphManager.DoesNotKeepTheRangeGlyphsItDrawsLocally
@@ -709,7 +712,7 @@ fn does_not_keep_the_range_glyphs_it_draws_locally() {
 fn loading_cancel() {
     let mut test = GlyphStoreTest::new();
 
-    let run_loop = test.run_loop.clone();
+    let run_loop = test.run_loop.handle();
     test.file_source.set_response(Kind::Glyphs, move |_: &Resource| {
         run_loop.stop();
         None
@@ -724,21 +727,23 @@ fn loading_cancel() {
 #[test]
 fn load_local_cjk_glyph() {
     let mut test = GlyphStoreTest::new();
-    let glyph_responses = Rc::new(Cell::new(0));
+    let glyph_responses = Arc::new(AtomicI32::new(0));
 
-    let g = Rc::clone(&glyph_responses);
+    let g = Arc::clone(&glyph_responses);
     test.file_source.set_response(Kind::Glyphs, move |_: &Resource| {
-        g.set(g.get() + 1);
+        g.fetch_add(1, Ordering::SeqCst);
         None
     });
 
-    let g = Rc::clone(&glyph_responses);
-    *test.observer.glyphs_loaded.borrow_mut() = Some(Box::new(move |_, _| g.set(g.get() + 1)));
+    let g = Arc::clone(&glyph_responses);
+    *test.observer.glyphs_loaded.borrow_mut() = Some(Box::new(move |_, _| {
+        g.fetch_add(1, Ordering::SeqCst);
+    }));
 
     let available = Rc::new(Cell::new(false));
-    let (a, g, run_loop) = (Rc::clone(&available), Rc::clone(&glyph_responses), test.run_loop.clone());
+    let (a, g, run_loop) = (Rc::clone(&available), Arc::clone(&glyph_responses), test.run_loop.clone());
     *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |glyphs: GlyphMap| {
-        assert_eq!(g.get(), 0); // Local generation should prevent requesting any glyphs
+        assert_eq!(g.load(Ordering::SeqCst), 0); // Local generation should prevent requesting any glyphs
 
         let test_positions = &glyphs[&font_stack_hash(&test_stack())];
 
@@ -771,21 +776,23 @@ fn load_local_cjk_glyph() {
 #[test]
 fn load_local_cjk_symbols() {
     let mut test = GlyphStoreTest::new();
-    let glyph_responses = Rc::new(Cell::new(0));
+    let glyph_responses = Arc::new(AtomicI32::new(0));
 
-    let g = Rc::clone(&glyph_responses);
+    let g = Arc::clone(&glyph_responses);
     test.file_source.set_response(Kind::Glyphs, move |_: &Resource| {
-        g.set(g.get() + 1);
+        g.fetch_add(1, Ordering::SeqCst);
         None
     });
 
-    let g = Rc::clone(&glyph_responses);
-    *test.observer.glyphs_loaded.borrow_mut() = Some(Box::new(move |_, _| g.set(g.get() + 1)));
+    let g = Arc::clone(&glyph_responses);
+    *test.observer.glyphs_loaded.borrow_mut() = Some(Box::new(move |_, _| {
+        g.fetch_add(1, Ordering::SeqCst);
+    }));
 
     let available = Rc::new(Cell::new(false));
-    let (a, g, run_loop) = (Rc::clone(&available), Rc::clone(&glyph_responses), test.run_loop.clone());
+    let (a, g, run_loop) = (Rc::clone(&available), Arc::clone(&glyph_responses), test.run_loop.clone());
     *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |glyphs: GlyphMap| {
-        assert_eq!(g.get(), 0); // Local generation should prevent requesting any glyphs.
+        assert_eq!(g.load(Ordering::SeqCst), 0); // Local generation should prevent requesting any glyphs.
 
         let test_positions = &glyphs[&font_stack_hash(&test_stack())];
 
@@ -808,25 +815,24 @@ fn local_cjk_glyph_prefers_local_rasterization_over_range() {
     // local rasterizer instead of using a glyph from an already-loaded PBF
     // range.
     let mut test = GlyphStoreTest::with(Box::new(KatakanaOnlyLocalGlyphRasterizer), ResponseType::Asynchronous);
-    let first_glyph_response = Rc::new(Cell::new(false));
+    let first_glyph_response = Arc::new(AtomicBool::new(false));
 
-    let f = Rc::clone(&first_glyph_response);
+    let f = Arc::clone(&first_glyph_response);
     test.file_source.set_response(Kind::Glyphs, move |_: &Resource| {
-        f.set(true);
+        f.store(true, Ordering::SeqCst);
         let mut response = Response::new();
         response.data = Some(Arc::new(read_file("test/fixtures/resources/glyphs-12244-12543.pbf")));
         Some(response)
     });
 
     let done = Rc::new(Cell::new(false));
-    let (f, d, run_loop) = (Rc::clone(&first_glyph_response), Rc::clone(&done), test.run_loop.clone());
+    let (f, d, run_loop) = (Arc::clone(&first_glyph_response), Rc::clone(&done), test.run_loop.clone());
     let store = Rc::downgrade(&test.store);
     let requestor = Rc::downgrade(&test.requestor);
     *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |glyphs: GlyphMap| {
         let test_positions = &glyphs[&font_stack_hash(&test_stack())];
 
-        if f.get() {
-            f.set(false);
+        if f.swap(false, Ordering::SeqCst) {
             assert_eq!(test_positions.len(), 1);
             assert!(test_positions.contains_key(&gid('々')));
 
@@ -930,7 +936,7 @@ fn immediate_file_source_failure_requests_the_range_again() {
     let test = GlyphStoreTest::with(Box::new(StubLocalGlyphRasterizer), ResponseType::Synchronous);
     let _log = SquelchLog::new();
     let requests = count_requests(&test);
-    test.file_source.set_response(Kind::Glyphs, fails_first_then_glyphs(Rc::clone(&requests)));
+    test.file_source.set_response(Kind::Glyphs, fails_first_then_glyphs(Arc::clone(&requests)));
 
     let answers = Rc::new(RefCell::new(Vec::new()));
     let a = Rc::clone(&answers);
@@ -948,7 +954,7 @@ fn immediate_file_source_failure_requests_the_range_again() {
     test.store.pool.wait();
     test.run_loop.run_once();
 
-    assert_eq!(requests.get(), 2);
+    assert_eq!(requests.load(Ordering::SeqCst), 2);
     assert_eq!(*answers.borrow(), vec![false, true]);
 }
 

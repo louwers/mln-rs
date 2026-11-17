@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
+use mln_storage::network_status::NetworkStatus;
 use mln_storage::{
     DatabaseFileSource, FileSource, Kind, Loader, LoadingMethod, OnlineFileSource, Request, Resource, ResourceOptions,
     Responder, Response,
@@ -156,7 +157,7 @@ impl FileSource for ProxyFileSource {
 /// database is read-only while offline (`TestRunner::registerProxyFileSource()`).
 #[must_use]
 pub fn proxy_loader(resource_options: &ResourceOptions, pool: &Pool) -> Arc<dyn FileSource> {
-    let network: Arc<dyn FileSource> = Arc::new(OnlineFileSource::new());
+    let network: Arc<dyn FileSource> = Arc::new(OnlineFileSource::new(Arc::new(NetworkStatus::new())));
     let cache_path = &resource_options.cache_path;
     let database = if OFFLINE.load(Ordering::SeqCst) {
         DatabaseFileSource::read_only(cache_path, Some(Arc::clone(&network)))

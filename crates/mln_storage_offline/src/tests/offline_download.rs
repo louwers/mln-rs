@@ -5,6 +5,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
 
 use mln_actor::{AsyncTask, LocalObject, RunLoop};
 use mln_renderer::Registry;
@@ -128,13 +129,13 @@ impl OfflineRegionObserver for MockObserver {
 }
 
 /// `test.response(path)`: the fixture, adding its stored size to `size`.
-fn fixture_response(size: &Cell<u64>, path: &str) -> Response {
+fn fixture_response(size: &AtomicU64, path: &str) -> Response {
     let mut result = Response::new();
     let data = std::fs::read(cpp_path(&format!("test/fixtures/offline_download/{path}")))
         .unwrap_or_else(|e| panic!("Cannot read file {path}: {e}"));
     let uncompressed = data.len() as u64;
     let compressed = compress(&data).unwrap().len() as u64;
-    size.set(size.get() + uncompressed.min(compressed));
+    size.fetch_add(uncompressed.min(compressed), Ordering::SeqCst);
     result.data = Some(Arc::new(data));
     result
 }
@@ -144,7 +145,7 @@ struct OfflineTest {
     file_source: Arc<StubFileSource>,
     host: Rc<RefCell<Host>>,
     post: Post,
-    size: Rc<Cell<u64>>,
+    size: Arc<AtomicU64>,
 }
 
 impl OfflineTest {
@@ -154,7 +155,7 @@ impl OfflineTest {
 
     fn with_path(path: &str) -> Self {
         let run_loop = RunLoop::new();
-        let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
+        let file_source = StubFileSource::on_loop(&run_loop, ResponseType::Asynchronous);
         // The downloads' tasks run on the test's loop, with the host.
         let slot: Arc<std::sync::OnceLock<LocalObject<RefCell<Host>>>> = Arc::default();
         let (tasks, handle) = (Arc::clone(&slot), run_loop.handle());
@@ -175,7 +176,7 @@ impl OfflineTest {
             downloads: Downloads::new(Some(network), Arc::clone(&post), Arc::clone(Registry::with_builtins().style())),
         }));
         let _ = slot.set(LocalObject::from_rc(Rc::clone(&host)));
-        OfflineTest { run_loop, file_source, host, post, size: Rc::new(Cell::new(0)) }
+        OfflineTest { run_loop, file_source, host, post, size: Arc::default() }
     }
 
     fn db(&self) -> std::cell::RefMut<'_, OfflineDatabase> {
@@ -218,13 +219,13 @@ impl OfflineTest {
         fixture_response(&self.size, path)
     }
 
-    fn respond(&self, kind: Kind, f: impl Fn(&Resource) -> Response + 'static) {
+    fn respond(&self, kind: Kind, f: impl Fn(&Resource) -> Response + Send + Sync + 'static) {
         self.file_source.set_response(kind, move |resource| Some(f(resource)));
     }
 
     /// A responder that returns the fixture at `path`.
-    fn respond_with(&self, kind: Kind, path: &'static str, check: impl Fn(&Resource) + 'static) {
-        let size = Rc::clone(&self.size);
+    fn respond_with(&self, kind: Kind, path: &'static str, check: impl Fn(&Resource) + Send + Sync + 'static) {
+        let size = Arc::clone(&self.size);
         self.respond(kind, move |resource| {
             check(resource);
             fixture_response(&size, path)
@@ -327,21 +328,21 @@ fn no_subresources() {
     test.respond_with(Kind::Style, "empty.style.json", expect_style_url);
 
     let expects_inactive_status = Cell::new(false);
-    let (size, stop) = (Rc::clone(&test.size), test.run_loop.clone());
+    let (size, stop) = (Arc::clone(&test.size), test.run_loop.clone());
     let observer = MockObserver {
         status_changed_fn: Some(Box::new(move |status: OfflineRegionStatus| {
             if status.complete() {
                 if expects_inactive_status.get() {
                     assert_eq!(OfflineRegionDownloadState::Inactive, status.download_state);
                     assert_eq!(1, status.completed_resource_count);
-                    assert_eq!(size.get(), status.completed_resource_size);
+                    assert_eq!(size.load(Ordering::SeqCst), status.completed_resource_size);
                     assert!(status.required_resource_count_is_precise);
                     stop.stop();
                 } else {
                     expects_inactive_status.set(true);
                     assert_eq!(OfflineRegionDownloadState::Active, status.download_state);
                     assert_eq!(1, status.completed_resource_count);
-                    assert_eq!(size.get(), status.completed_resource_size);
+                    assert_eq!(size.load(Ordering::SeqCst), status.completed_resource_size);
                     assert!(status.required_resource_count_is_precise);
                 }
             }
@@ -369,13 +370,13 @@ fn inline_source() {
         expect_tile_0_0_0("http://127.0.0.1:3000/{z}-{x}-{y}.vector.pbf"),
     );
 
-    let (size, stop) = (Rc::clone(&test.size), test.run_loop.clone());
+    let (size, stop) = (Arc::clone(&test.size), test.run_loop.clone());
     let observer = MockObserver {
         status_changed_fn: Some(Box::new(move |status: OfflineRegionStatus| {
             if status.complete() {
                 assert_eq!(1, status.completed_tile_count);
                 assert_eq!(2, status.completed_resource_count);
-                assert_eq!(size.get(), status.completed_resource_size);
+                assert_eq!(size.load(Ordering::SeqCst), status.completed_resource_size);
                 assert!(status.required_resource_count_is_precise);
                 stop.stop();
             }
@@ -401,12 +402,12 @@ fn geojson_source() {
         assert_eq!("http://127.0.0.1:3000/geojson.json", resource.url);
     });
 
-    let (size, stop) = (Rc::clone(&test.size), test.run_loop.clone());
+    let (size, stop) = (Arc::clone(&test.size), test.run_loop.clone());
     let observer = MockObserver {
         status_changed_fn: Some(Box::new(move |status: OfflineRegionStatus| {
             if status.complete() {
                 assert_eq!(2, status.completed_resource_count);
-                assert_eq!(size.get(), status.completed_resource_size);
+                assert_eq!(size.load(Ordering::SeqCst), status.completed_resource_size);
                 assert!(status.required_resource_count_is_precise);
                 stop.stop();
             }
@@ -471,7 +472,7 @@ fn activate() {
     test.run_loop.run();
     // 256 glyphs, 2 sprite images, 2 sprite jsons, 1 tile, 1 style, source,
     // image
-    check_completed_and_computed(&download, test.size.get(), 264, completed.get().expect("complete"));
+    check_completed_and_computed(&download, test.size.load(Ordering::SeqCst), 264, completed.get().expect("complete"));
 }
 
 // gtest: OfflineDownload.ExcludeIdeographs
@@ -502,7 +503,12 @@ fn exclude_ideographs() {
     // glyph ranges, 2 sprite images, 2 sprite jsons, 1 tile, 1 style,
     // source, image
     let expected = u64::from(NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK) + 8;
-    check_completed_and_computed(&download, test.size.get(), expected, completed.get().expect("complete"));
+    check_completed_and_computed(
+        &download,
+        test.size.load(Ordering::SeqCst),
+        expected,
+        completed.get().expect("complete"),
+    );
 }
 
 struct FakeRequestEntry {
@@ -601,7 +607,7 @@ fn get_status_style_complete() {
 
     assert_eq!(OfflineRegionDownloadState::Inactive, status.download_state);
     assert_eq!(1, status.completed_resource_count);
-    assert_eq!(test.size.get(), status.completed_resource_size);
+    assert_eq!(test.size.load(Ordering::SeqCst), status.completed_resource_size);
     assert_eq!(263, status.required_resource_count);
     assert_eq!(0, status.completed_tile_count);
     assert_eq!(0, status.required_tile_count);
@@ -626,7 +632,7 @@ fn get_status_style_and_source_complete() {
 
     assert_eq!(OfflineRegionDownloadState::Inactive, status.download_state);
     assert_eq!(2, status.completed_resource_count);
-    assert_eq!(test.size.get(), status.completed_resource_size);
+    assert_eq!(test.size.load(Ordering::SeqCst), status.completed_resource_size);
     assert_eq!(264, status.required_resource_count);
     assert_eq!(0, status.completed_tile_count);
     assert_eq!(1, status.required_tile_count);
@@ -703,9 +709,9 @@ fn request_errors_are_retried() {
     let region = test.create_region().expect("region");
     let download = test.download(region.id, STYLE_URL, true);
 
-    let (file_source, size) = (Arc::downgrade(&test.file_source), Rc::clone(&test.size));
+    let (file_source, size) = (Arc::downgrade(&test.file_source), Arc::clone(&test.size));
     test.respond(Kind::Style, move |_| {
-        let size = Rc::clone(&size);
+        let size = Arc::clone(&size);
         if let Some(file_source) = file_source.upgrade() {
             file_source.set_response(Kind::Style, move |_| Some(fixture_response(&size, "empty.style.json")));
         }
@@ -749,12 +755,12 @@ fn with_previously_existing_tile() {
 
     put_tile(&test, 0, 0, 0);
 
-    let (size, stop) = (Rc::clone(&test.size), test.run_loop.clone());
+    let (size, stop) = (Arc::clone(&test.size), test.run_loop.clone());
     let observer = MockObserver {
         status_changed_fn: Some(Box::new(move |status: OfflineRegionStatus| {
             if status.complete() {
                 assert_eq!(2, status.completed_resource_count);
-                assert_eq!(size.get(), status.completed_resource_size);
+                assert_eq!(size.load(Ordering::SeqCst), status.completed_resource_size);
                 assert!(status.required_resource_count_is_precise);
                 stop.stop();
             }
@@ -1157,22 +1163,22 @@ fn test_refresh_invalidated_region(style_not_modified: bool, tile_not_modified: 
         result
     };
 
-    let style_requests = Rc::new(Cell::new(0));
-    let tile_requests = Rc::new(Cell::new(0));
-    let (requests, style) = (Rc::clone(&style_requests), new_style.clone());
+    let style_requests = Arc::new(AtomicI32::new(0));
+    let tile_requests = Arc::new(AtomicI32::new(0));
+    let (requests, style) = (Arc::clone(&style_requests), new_style.clone());
     test.respond(Kind::Style, move |resource| {
-        requests.set(requests.get() + 1);
+        requests.fetch_add(1, Ordering::SeqCst);
         revalidate(resource, "style-1", style_not_modified, &style, "style-2")
     });
-    let (requests, tile) = (Rc::clone(&tile_requests), new_tile.clone());
+    let (requests, tile) = (Arc::clone(&tile_requests), new_tile.clone());
     test.respond(Kind::Tile, move |resource| {
-        requests.set(requests.get() + 1);
+        requests.fetch_add(1, Ordering::SeqCst);
         revalidate(resource, "tile-1", tile_not_modified, &tile, "tile-2")
     });
     let status = download_until_inactive(&test, region.id, &definition, None);
 
-    assert_eq!(1, style_requests.get());
-    assert_eq!(1, tile_requests.get());
+    assert_eq!(1, style_requests.load(Ordering::SeqCst));
+    assert_eq!(1, tile_requests.load(Ordering::SeqCst));
 
     let style = if style_not_modified { &old_style } else { &new_style };
     let tile = if tile_not_modified { &old_tile } else { &new_tile };
@@ -1237,10 +1243,10 @@ fn revalidates_only_stored_resources_that_must_be_revalidated() {
         }
     }
 
-    let style_requests = Rc::new(Cell::new(0));
-    let requests = Rc::clone(&style_requests);
+    let style_requests = Arc::new(AtomicI32::new(0));
+    let requests = Arc::clone(&style_requests);
     test.respond(Kind::Style, move |resource| {
-        requests.set(requests.get() + 1);
+        requests.fetch_add(1, Ordering::SeqCst);
         assert_eq!(Some("style-1"), resource.prior_etag.as_deref());
         let mut response = Response::new();
         response.not_modified = true;
@@ -1251,9 +1257,9 @@ fn revalidates_only_stored_resources_that_must_be_revalidated() {
 
     let status = download_until_inactive(&test, region.id, &definition, None);
 
-    assert_eq!(1, style_requests.get());
+    assert_eq!(1, style_requests.load(Ordering::SeqCst));
     assert_eq!(6, status.completed_resource_count);
-    assert_eq!(test.size.get(), status.completed_resource_size);
+    assert_eq!(test.size.load(Ordering::SeqCst), status.completed_resource_size);
     assert_eq!(5, status.completed_tile_count);
 }
 
@@ -1285,16 +1291,16 @@ fn refresh_keeps_tiles_that_only_an_earlier_style_listed() {
     let region = test.create_region().expect("region");
     let v1 = "http://127.0.0.1:3000/v1/{z}-{x}-{y}.pbf";
     let v2 = "http://127.0.0.1:3000/v2/{z}-{x}-{y}.pbf";
-    let tile_url = Rc::new(RefCell::new(v1));
-    let current_url = Rc::clone(&tile_url);
-    test.respond(Kind::Style, move |_| with_data(inline_source_style(&current_url.borrow())));
+    let tile_url = Arc::new(Mutex::new(v1));
+    let current_url = Arc::clone(&tile_url);
+    test.respond(Kind::Style, move |_| with_data(inline_source_style(&current_url.lock())));
     test.respond(Kind::Tile, |resource| {
         with_data(format!("tile {}", resource.tile_data.as_ref().unwrap().url_template))
     });
     download_until_inactive(&test, region.id, &world_at_zoom(0.0), None);
 
     // The refreshed style moves the tile to another URL.
-    *tile_url.borrow_mut() = v2;
+    *tile_url.lock() = v2;
     invalidate_region(&test, region.id);
     let download = test.add_download(region.id, world_at_zoom(0.0), Arc::<StubFileSource>::clone(&test.file_source));
     let active = run_until_inactive(&test, &download, None);
@@ -1387,9 +1393,9 @@ fn reports_a_style_with_no_content() {
 struct RefreshedRegion {
     test: OfflineTest,
     region: OfflineRegion,
-    style: Rc<RefCell<Response>>,
-    source: Rc<RefCell<Response>>,
-    tile_requests: Rc<Cell<i32>>,
+    style: Arc<Mutex<Response>>,
+    source: Arc<Mutex<Response>>,
+    tile_requests: Arc<AtomicI32>,
     downloaded: OfflineRegionStatus,
 }
 
@@ -1399,16 +1405,16 @@ impl RefreshedRegion {
     fn new() -> Self {
         let test = OfflineTest::new();
         let region = test.create_region().expect("region");
-        let style = Rc::new(RefCell::new(with_data(TILE_JSON_SOURCE_STYLE)));
-        let source = Rc::new(RefCell::new(with_data(tile_json(REFRESHED_TILE_URL))));
-        let tile_requests = Rc::new(Cell::new(0));
-        let body = Rc::clone(&style);
-        test.respond(Kind::Style, move |_| body.borrow().clone());
-        let body = Rc::clone(&source);
-        test.respond(Kind::Source, move |_| body.borrow().clone());
-        let requests = Rc::clone(&tile_requests);
+        let style = Arc::new(Mutex::new(with_data(TILE_JSON_SOURCE_STYLE)));
+        let source = Arc::new(Mutex::new(with_data(tile_json(REFRESHED_TILE_URL))));
+        let tile_requests = Arc::new(AtomicI32::new(0));
+        let body = Arc::clone(&style);
+        test.respond(Kind::Style, move |_| body.lock().clone());
+        let body = Arc::clone(&source);
+        test.respond(Kind::Source, move |_| body.lock().clone());
+        let requests = Arc::clone(&tile_requests);
         test.respond(Kind::Tile, move |_| {
-            requests.set(requests.get() + 1);
+            requests.fetch_add(1, Ordering::SeqCst);
             with_data("tile")
         });
         let downloaded = download_until_inactive(&test, region.id, &world_at_zoom(0.0), None);
@@ -1428,7 +1434,7 @@ impl RefreshedRegion {
         assert_eq!(self.downloaded.completed_resource_count, status.completed_resource_count);
         assert_eq!(self.downloaded.completed_resource_size, status.completed_resource_size);
         assert_eq!(self.downloaded.completed_tile_count, status.completed_tile_count);
-        assert_eq!(2, self.tile_requests.get());
+        assert_eq!(2, self.tile_requests.load(Ordering::SeqCst));
         let tile = self.test.db().get(&xyz_tile(REFRESHED_TILE_URL, 0, 0, 0)).expect("tile");
         assert!(!tile.must_revalidate);
     }
@@ -1438,7 +1444,7 @@ impl RefreshedRegion {
 #[test]
 fn refresh_continues_from_a_stored_style_that_is_not_found() {
     let refreshed = RefreshedRegion::new();
-    *refreshed.style.borrow_mut() = not_found();
+    *refreshed.style.lock() = not_found();
     refreshed.refresh_keeping_resources(Reason::NotFound);
 }
 
@@ -1446,7 +1452,7 @@ fn refresh_continues_from_a_stored_style_that_is_not_found() {
 #[test]
 fn refresh_continues_from_a_stored_tile_json_that_is_not_found() {
     let refreshed = RefreshedRegion::new();
-    *refreshed.source.borrow_mut() = not_found();
+    *refreshed.source.lock() = not_found();
     refreshed.refresh_keeping_resources(Reason::NotFound);
 }
 
@@ -1454,7 +1460,7 @@ fn refresh_continues_from_a_stored_tile_json_that_is_not_found() {
 #[test]
 fn refresh_continues_from_a_stored_style_when_the_new_one_is_invalid() {
     let refreshed = RefreshedRegion::new();
-    *refreshed.style.borrow_mut() = with_data("not JSON");
+    *refreshed.style.lock() = with_data("not JSON");
     refreshed.refresh_keeping_resources(Reason::Other);
     let style = refreshed.test.db().get(&Resource::style(STYLE_URL)).expect("style");
     assert_eq!(TILE_JSON_SOURCE_STYLE.as_bytes(), style.data.expect("data").as_slice());
@@ -1464,7 +1470,7 @@ fn refresh_continues_from_a_stored_style_when_the_new_one_is_invalid() {
 #[test]
 fn refresh_continues_from_a_stored_tile_json_when_the_new_one_is_invalid() {
     let refreshed = RefreshedRegion::new();
-    *refreshed.source.borrow_mut() = with_data("not JSON");
+    *refreshed.source.lock() = with_data("not JSON");
     refreshed.refresh_keeping_resources(Reason::Other);
 }
 
@@ -1472,7 +1478,7 @@ fn refresh_continues_from_a_stored_tile_json_when_the_new_one_is_invalid() {
 #[test]
 fn refresh_continues_from_a_stored_style_when_the_new_one_has_no_content() {
     let refreshed = RefreshedRegion::new();
-    *refreshed.style.borrow_mut() = no_content();
+    *refreshed.style.lock() = no_content();
     refreshed.refresh_keeping_resources(Reason::Other);
 }
 
@@ -1480,7 +1486,7 @@ fn refresh_continues_from_a_stored_style_when_the_new_one_has_no_content() {
 #[test]
 fn refresh_continues_from_a_stored_tile_json_when_the_new_one_has_no_content() {
     let refreshed = RefreshedRegion::new();
-    *refreshed.source.borrow_mut() = no_content();
+    *refreshed.source.lock() = no_content();
     refreshed.refresh_keeping_resources(Reason::Other);
 }
 
@@ -1488,7 +1494,7 @@ fn refresh_continues_from_a_stored_tile_json_when_the_new_one_has_no_content() {
 #[test]
 fn refresh_continues_from_a_stored_tile_json_when_the_new_one_has_no_tile_urls() {
     let refreshed = RefreshedRegion::new();
-    *refreshed.source.borrow_mut() = with_data(r#"{"tilejson":"2.1.0","tiles":[]}"#);
+    *refreshed.source.lock() = with_data(r#"{"tilejson":"2.1.0","tiles":[]}"#);
     refreshed.refresh_keeping_resources(Reason::Other);
 }
 
@@ -1499,7 +1505,7 @@ fn pausing_from_an_error_stops_the_refresh() {
     let test = &refreshed.test;
     // One request at a time, so that work the pause failed to stop would
     // still be queued when the download resumes.
-    *refreshed.style.borrow_mut() = with_data("not JSON");
+    *refreshed.style.lock() = with_data("not JSON");
 
     // The observer pauses the download when it reports the invalid style.
     let download =
@@ -1516,17 +1522,17 @@ fn pausing_from_an_error_stops_the_refresh() {
     download.set_observer(Some(Rc::new(observer)));
     download.set_state(OfflineRegionDownloadState::Active);
     test.run_loop.run();
-    assert_eq!(1, refreshed.tile_requests.get());
+    assert_eq!(1, refreshed.tile_requests.load(Ordering::SeqCst));
 
     // Resumed with a valid style, the refresh counts each resource once.
-    *refreshed.style.borrow_mut() = with_data(TILE_JSON_SOURCE_STYLE);
+    *refreshed.style.lock() = with_data(TILE_JSON_SOURCE_STYLE);
     let completed = run_until_inactive(test, &download, None);
     let stored = download.get_status();
     assert_eq!(3, completed.completed_resource_count);
     assert_eq!(1, completed.completed_tile_count);
     assert_eq!(completed.completed_resource_count, stored.completed_resource_count);
     assert_eq!(completed.completed_resource_size, stored.completed_resource_size);
-    assert_eq!(2, refreshed.tile_requests.get());
+    assert_eq!(2, refreshed.tile_requests.load(Ordering::SeqCst));
 }
 
 // gtest: OfflineDownload.MissingTileJSONLeavesAPreciseResourceCount

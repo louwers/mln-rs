@@ -31,7 +31,7 @@ struct QueryTest(MapTest);
 impl QueryTest {
     fn new() -> Self {
         let run_loop = RunLoop::new();
-        let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
+        let file_source = StubFileSource::on_loop(&run_loop, ResponseType::Asynchronous);
         let test = QueryTest(MapTest::create(run_loop, file_source, 1.0, MapMode::Static));
         test.map().load_style_json(&read_file("test/fixtures/api/query_style.json"));
         test.map()

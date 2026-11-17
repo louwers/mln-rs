@@ -1,5 +1,4 @@
-// The tests run against the test server (`mln_test_server`). Every test
-// takes `serial()`: `NetworkStatus` is process-wide.
+// The tests run against the test server (`mln_test_server`).
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -10,7 +9,7 @@ use mln_actor::{ActorRef, Mailbox, RunLoop, Timer};
 use mln_test_server::HttpServer;
 use mln_util::chrono::{Timestamp, now};
 
-use super::{Dispatcher, LocalRequests, local_callback, req, serial, temp_path};
+use super::{Dispatcher, LocalRequests, local_callback, req, temp_path};
 use crate::database_file_source::{Cache, DatabaseFileSource};
 use crate::loader::Loader;
 use crate::network_status::{NetworkStatus, Status};
@@ -26,17 +25,20 @@ struct TestSources {
     loader: Rc<Loader>,
     database: Arc<DatabaseFileSource>,
     online: Arc<OnlineFileSource>,
+    /// The online file source's.
+    network: Arc<NetworkStatus>,
 }
 
 impl TestSources {
     fn new() -> Self {
-        let online = Arc::new(OnlineFileSource::new());
+        let network = Arc::new(NetworkStatus::new());
+        let online = Arc::new(OnlineFileSource::new(Arc::clone(&network)));
         let database = Arc::new(DatabaseFileSource::new(":memory:", Some(Arc::<OnlineFileSource>::clone(&online))));
         let loader = Loader::builder(&super::pool())
             .network(Arc::<OnlineFileSource>::clone(&online))
             .database(Arc::<DatabaseFileSource>::clone(&database))
             .build();
-        TestSources { loader: Rc::new(loader), database, online }
+        TestSources { loader: Rc::new(loader), database, online, network }
     }
 }
 
@@ -75,7 +77,6 @@ fn cache_only(url: &str) -> Resource {
 // gtest: MainResourceLoader.CacheResponse
 #[test]
 fn cache_response() {
-    let _serial = serial();
     let file_sources = TestSources::new();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
@@ -131,7 +132,6 @@ fn cache_response() {
 // gtest: MainResourceLoader.VolatileStoragePolicy
 #[test]
 fn volatile_storage_policy() {
-    let _serial = serial();
     let file_sources = TestSources::new();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
@@ -173,7 +173,6 @@ fn volatile_storage_policy() {
 /// Caches the response at `path`, then requests it again so that it is
 /// revalidated with the server; `check` inspects the second response.
 fn cache_revalidate(path: &str, check: fn(&Response)) {
-    let _serial = serial();
     let file_sources = TestSources::new();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
@@ -273,7 +272,6 @@ fn cache_revalidate_modified() {
 // gtest: MainResourceLoader.CacheRevalidateEtag
 #[test]
 fn cache_revalidate_etag() {
-    let _serial = serial();
     let file_sources = TestSources::new();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
@@ -343,7 +341,6 @@ fn cache_revalidate_etag() {
 // gtest: MainResourceLoader.HTTPIssue1369
 #[test]
 fn http_issue_1369() {
-    let _serial = serial();
     let file_sources = TestSources::new();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
@@ -378,7 +375,6 @@ fn http_issue_1369() {
 /// A cached value is returned for a cache-only request whether it has
 /// expired or not.
 fn optional_cached(expires: Timestamp) {
-    let _serial = serial();
     let file_sources = TestSources::new();
     let run_loop = RunLoop::new();
     let local = Dispatcher::new(&run_loop);
@@ -437,7 +433,6 @@ fn optional_expired() {
 // gtest: MainResourceLoader.OptionalNotFound
 #[test]
 fn optional_not_found() {
-    let _serial = serial();
     let file_sources = TestSources::new();
     let run_loop = RunLoop::new();
     let local = Dispatcher::new(&run_loop);
@@ -509,7 +504,6 @@ fn no_cache(resource: &Resource, check: impl Fn(&Response) + 'static) {
 // gtest: MainResourceLoader.NoCacheRefreshEtagNotModified
 #[test]
 fn no_cache_refresh_etag_not_modified() {
-    let _serial = serial();
     let server = HttpServer::new();
     let mut resource = Resource::new(Kind::Unknown, server.url("/revalidate-same"));
     resource.loading_method = LoadingMethod::NetworkOnly;
@@ -533,7 +527,6 @@ fn no_cache_refresh_etag_not_modified() {
 // gtest: MainResourceLoader.NoCacheRefreshEtagModified
 #[test]
 fn no_cache_refresh_etag_modified() {
-    let _serial = serial();
     let server = HttpServer::new();
     let mut resource = Resource::new(Kind::Unknown, server.url("/revalidate-same"));
     resource.loading_method = LoadingMethod::NetworkOnly;
@@ -554,7 +547,6 @@ fn no_cache_refresh_etag_modified() {
 // gtest: MainResourceLoader.NoCacheFull
 #[test]
 fn no_cache_full() {
-    let _serial = serial();
     let server = HttpServer::new();
     let mut resource = Resource::new(Kind::Unknown, server.url("/revalidate-same"));
     resource.loading_method = LoadingMethod::NetworkOnly;
@@ -574,7 +566,6 @@ fn no_cache_full() {
 // gtest: MainResourceLoader.NoCacheRefreshModifiedNotModified
 #[test]
 fn no_cache_refresh_modified_not_modified() {
-    let _serial = serial();
     let server = HttpServer::new();
     let mut resource = Resource::new(Kind::Unknown, server.url("/revalidate-modified"));
     resource.loading_method = LoadingMethod::NetworkOnly;
@@ -598,7 +589,6 @@ fn no_cache_refresh_modified_not_modified() {
 // gtest: MainResourceLoader.NoCacheRefreshModifiedModified
 #[test]
 fn no_cache_refresh_modified_modified() {
-    let _serial = serial();
     let server = HttpServer::new();
     let mut resource = Resource::new(Kind::Unknown, server.url("/revalidate-modified"));
     resource.loading_method = LoadingMethod::NetworkOnly;
@@ -634,7 +624,6 @@ impl TransformActor {
 // gtest: MainResourceLoader.SetResourceTransform
 #[test]
 fn set_resource_transform() {
-    let _serial = serial();
     let file_sources = TestSources::new();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
@@ -695,7 +684,6 @@ fn set_resource_transform() {
 // gtest: MainResourceLoader.SetResourceCachePath
 #[test]
 fn set_resource_cache_path() {
-    let _serial = serial();
     let file_sources = TestSources::new();
     let run_loop = RunLoop::new();
     let _resource_loader = main_resource_loader(&file_sources);
@@ -712,7 +700,6 @@ fn set_resource_cache_path() {
 // gtest: MainResourceLoader.RespondToStaleMustRevalidate
 #[test]
 fn respond_to_stale_must_revalidate() {
-    let _serial = serial();
     let file_sources = TestSources::new();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
@@ -815,7 +802,6 @@ fn respond_to_stale_must_revalidate() {
 // gtest: MainResourceLoader.CachedResourceLowPriority
 #[test]
 fn cached_resource_low_priority() {
-    let _serial = serial();
     let file_sources = TestSources::new();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
@@ -841,7 +827,7 @@ fn cached_resource_low_priority() {
 
     online_fs.set_maximum_concurrent_requests(1);
     let paused = dbfs.pause();
-    NetworkStatus::set(Status::Offline);
+    file_sources.network.set(Status::Offline);
 
     // Ensure that the online requests for new resources are processed first.
     let non_cached0 = Resource::with_tile_data(Kind::Unknown, server.url("/load/0"), None, LoadingMethod::All);
@@ -942,7 +928,7 @@ fn cached_resource_low_priority() {
     // thread in turn to finish what it was sent.
     drop(dbfs.pause());
     drop(online_fs.pause());
-    NetworkStatus::set(Status::Online);
+    file_sources.network.set(Status::Online);
 
     run_loop.run();
 }
@@ -950,7 +936,6 @@ fn cached_resource_low_priority() {
 // gtest: MainResourceLoader.NoDoubleDispatch
 #[test]
 fn no_double_dispatch() {
-    let _serial = serial();
     let file_sources = TestSources::new();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
@@ -1008,7 +993,6 @@ fn no_double_dispatch() {
 // with no loading method that no file source accepts).
 #[test]
 fn unsupported_resource_request() {
-    let _serial = serial();
     let run_loop = RunLoop::new();
     let local = Dispatcher::new(&run_loop);
     let fs = Loader::new(&ResourceOptions::default(), &super::pool());

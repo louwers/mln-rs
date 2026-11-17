@@ -62,7 +62,7 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn ErasedEvaluatedLayer>]) -> Outcome {
     transform.resize(Size::new(512, 512)).unwrap();
     transform.jump_to(&CameraOptions { center: Some(LatLng::default()), zoom: Some(0.0), ..Default::default() });
 
-    let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
+    let file_source = StubFileSource::on_loop(&run_loop, ResponseType::Asynchronous);
     let tile = Arc::new(tile);
     file_source.set_response(Kind::Tile, move |_resource| {
         let mut response = Response::new();

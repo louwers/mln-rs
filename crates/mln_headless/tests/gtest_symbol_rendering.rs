@@ -113,7 +113,7 @@ impl SymbolRenderingTest {
         let pool = Pool::new(4).unwrap();
         let mut frontend =
             HeadlessFrontend::new(Size::new(256, 256), 1.0, &run_loop, &pool).expect("a headless frontend");
-        let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
+        let file_source = StubFileSource::on_loop(&run_loop, ResponseType::Asynchronous);
         file_source.set_response(Kind::Glyphs, |_| Some(file_response("test/fixtures/resources/glyphs.pbf")));
         // A style URL never answers: the map keeps the style it has.
         file_source.set_response(Kind::Style, |_| None);

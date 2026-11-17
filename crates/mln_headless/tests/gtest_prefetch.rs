@@ -10,6 +10,7 @@ use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_util::geo::LatLng;
 use mln_util::pool::Pool;
 use mln_util::size::Size;
+use parking_lot::Mutex;
 
 use crate::support::*;
 
@@ -34,7 +35,7 @@ fn stoi(s: &str) -> i32 {
 fn prefetch_tiles() {
     let run_loop = RunLoop::new();
     let pool = Pool::new(4).unwrap();
-    let file_source = Arc::new(StubFileSource::new(&run_loop, ResponseType::Asynchronous));
+    let file_source = StubFileSource::on_loop(&run_loop, ResponseType::Asynchronous);
 
     // C++ `emergencyShutoff`: a 10 s timer that fails the test; here every
     // `runLoop.run()` below fails after 10 s (run_with_timeout).
@@ -58,14 +59,14 @@ fn prefetch_tiles() {
     let frontend = Rc::new(RefCell::new(frontend));
     let _events = observer.observe(&map, Some(&frontend));
 
-    let tiles: Rc<RefCell<Vec<i32>>> = Rc::new(RefCell::new(Vec::new()));
+    let tiles: Arc<Mutex<Vec<i32>>> = Arc::default();
 
     {
-        let tiles = Rc::clone(&tiles);
-        let tile = Rc::new(read_bytes("test/fixtures/map/prefetch/tile.png"));
+        let tiles = Arc::clone(&tiles);
+        let tile = Arc::new(read_bytes("test/fixtures/map/prefetch/tile.png"));
         file_source.set_global_response(move |res: &Resource| {
             let zoom = stoi(&res.url);
-            tiles.borrow_mut().push(zoom);
+            tiles.lock().push(zoom);
 
             let mut response = mln_storage::Response::new();
             response.data = Some(Arc::new((*tile).clone()));
@@ -74,7 +75,7 @@ fn prefetch_tiles() {
     }
 
     let check_tiles_for_zoom = |map: &RefCell<Map>, zoom: i32, expected: &[i32]| {
-        tiles.borrow_mut().clear();
+        tiles.lock().clear();
 
         {
             let mut map = map.borrow_mut();
@@ -89,7 +90,7 @@ fn prefetch_tiles() {
         }
         run_with_timeout(&run_loop, 10);
 
-        let mut actual = tiles.borrow().clone();
+        let mut actual = tiles.lock().clone();
         assert_eq!(actual.len(), expected.len(), "zoom {zoom}: {actual:?} vs {expected:?}");
         // std::is_permutation
         let mut expected = expected.to_vec();

@@ -1,6 +1,4 @@
 // The tests run against a test server (`mln_test_server`), one per test.
-// The tests that request through the network take `serial()`:
-// `NetworkStatus` is process-wide.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -15,7 +13,7 @@ use mln_util::time::Instant;
 use parking_lot::Mutex;
 
 use super::http_file_source::{LoadState, load_request};
-use super::{Dispatcher, LocalRequests, Req, req, serial};
+use super::{Dispatcher, LocalRequests, Req, req};
 use crate::file_source::FileSource;
 use crate::http_header_transform::HttpHeaderTransform;
 use crate::network_status::{NetworkStatus, Status};
@@ -28,7 +26,12 @@ use crate::response::{Reason, ResourceError, Response};
 const CONNECTION_TIMEOUT: f64 = if cfg!(windows) { 2.0 } else { 0.0 };
 
 fn online_file_source() -> Rc<OnlineFileSource> {
-    Rc::new(OnlineFileSource::new())
+    online_file_source_with(&Arc::new(NetworkStatus::new()))
+}
+
+/// An online file source that follows `network`.
+fn online_file_source_with(network: &Arc<NetworkStatus>) -> Rc<OnlineFileSource> {
+    Rc::new(OnlineFileSource::new(Arc::clone(network)))
 }
 
 fn data(res: &Response) -> &[u8] {
@@ -68,7 +71,6 @@ fn cancel() {
 // gtest: OnlineFileSource.CancelMultiple
 #[test]
 fn cancel_multiple() {
-    let _serial = serial();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
     let local = Dispatcher::new(&run_loop);
@@ -101,7 +103,6 @@ fn cancel_multiple() {
 // gtest: OnlineFileSource.TemporaryError
 #[test]
 fn temporary_error() {
-    let _serial = serial();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
     let local = Dispatcher::new(&run_loop);
@@ -152,7 +153,6 @@ fn temporary_error() {
 // gtest: OnlineFileSource.ConnectionError
 #[test]
 fn connection_error() {
-    let _serial = serial();
     let run_loop = RunLoop::new();
     let local = Dispatcher::new(&run_loop);
     let fs = online_file_source();
@@ -199,7 +199,6 @@ fn connection_error() {
 // gtest: OnlineFileSource.Timeout
 #[test]
 fn timeout() {
-    let _serial = serial();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
     let local = Dispatcher::new(&run_loop);
@@ -236,7 +235,6 @@ fn timeout() {
 // gtest: OnlineFileSource.RetryDelayOnExpiredTile
 #[test]
 fn retry_delay_on_expired_tile() {
-    let _serial = serial();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
     let local = Dispatcher::new(&run_loop);
@@ -266,7 +264,6 @@ fn retry_delay_on_expired_tile() {
 // gtest: OnlineFileSource.RetryOnClockSkew
 #[test]
 fn retry_on_clock_skew() {
-    let _serial = serial();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
     let local = Dispatcher::new(&run_loop);
@@ -309,7 +306,6 @@ fn retry_on_clock_skew() {
 // gtest: OnlineFileSource.RespectPriorExpires
 #[test]
 fn respect_prior_expires() {
-    let _serial = serial();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
     let local = Dispatcher::new(&run_loop);
@@ -339,7 +335,6 @@ fn respect_prior_expires() {
 // gtest: OnlineFileSource.RespectMinimumUpdateInterval
 #[test]
 fn respect_minimum_update_interval() {
-    let _serial = serial();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
     let local = Dispatcher::new(&run_loop);
@@ -372,7 +367,6 @@ fn load() {
     const CONCURRENCY: usize = 50;
     const MAX: i32 = 10000;
 
-    let _serial = serial();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
     let local = Dispatcher::new(&run_loop);
@@ -399,11 +393,11 @@ fn load() {
 // gtest: OnlineFileSource.NetworkStatusChange
 #[test]
 fn network_status_change() {
-    let _serial = serial();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
     let local = Dispatcher::new(&run_loop);
-    let fs = online_file_source();
+    let network = Arc::new(NetworkStatus::new());
+    let fs = online_file_source_with(&network);
 
     let resource = Resource::new(Kind::Unknown, server.url("/delayed"));
 
@@ -427,7 +421,7 @@ fn network_status_change() {
 
     // After 50 milliseconds, we're going to trigger a NetworkStatus change.
     let reachable_timer = Timer::new(&run_loop);
-    reachable_timer.start(Duration::from_millis(50), Duration::ZERO, NetworkStatus::reachable);
+    reachable_timer.start(Duration::from_millis(50), Duration::ZERO, move || network.reachable());
 
     run_loop.run();
 }
@@ -439,10 +433,10 @@ fn network_status_change() {
 // gtest: OnlineFileSource.NetworkStatusChangePreempt
 #[test]
 fn network_status_change_preempt() {
-    let _serial = serial();
     let run_loop = RunLoop::new();
     let local = Dispatcher::new(&run_loop);
-    let fs = online_file_source();
+    let network = Arc::new(NetworkStatus::new());
+    let fs = online_file_source_with(&network);
     // Longer than the test runs, so that only the network status change can
     // retry the request.
     fs.set_connection_backoff(Duration::from_secs(3600));
@@ -470,7 +464,7 @@ fn network_status_change_preempt() {
             if c.get() == 1 {
                 // The request waits out its backoff by now: the failure
                 // reaches this thread after the backoff starts.
-                NetworkStatus::reachable();
+                network.reachable();
             } else {
                 r.borrow_mut().take();
                 stop.stop();
@@ -486,19 +480,20 @@ fn network_status_change_preempt() {
 // gtest: OnlineFileSource.NetworkStatusOnlineOffline
 #[test]
 fn network_status_online_offline() {
-    let _serial = serial();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
     let local = Dispatcher::new(&run_loop);
-    let fs = online_file_source();
+    let network = Arc::new(NetworkStatus::new());
+    let fs = online_file_source_with(&network);
 
     let resource = Resource::new(Kind::Unknown, server.url("/test"));
 
-    assert_eq!(NetworkStatus::get(), Status::Online, "Default status should be Online");
-    NetworkStatus::set(Status::Offline);
+    assert_eq!(network.get(), Status::Online, "Default status should be Online");
+    network.set(Status::Offline);
 
     let online_timer = Timer::new(&run_loop);
-    online_timer.start(Duration::from_millis(100), Duration::ZERO, || NetworkStatus::set(Status::Online));
+    let online = Arc::clone(&network);
+    online_timer.start(Duration::from_millis(100), Duration::ZERO, move || online.set(Status::Online));
     let _deadline = fail_after_a_minute(&run_loop, "Going back Online didn't retry the request");
 
     let req = req();
@@ -512,7 +507,7 @@ fn network_status_online_offline() {
             assert_eq!(None, res.error);
             assert!(res.data.is_some());
 
-            assert_eq!(NetworkStatus::get(), Status::Online, "Triggered before set back to Online");
+            assert_eq!(network.get(), Status::Online, "Triggered before set back to Online");
 
             stop.stop();
         }),
@@ -522,7 +517,6 @@ fn network_status_online_offline() {
 }
 
 fn rate_limit_test(path: &str, expect_retry_after: bool) {
-    let _serial = serial();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
     let local = Dispatcher::new(&run_loop);
@@ -573,14 +567,14 @@ fn rate_limit_default() {
 #[test]
 fn low_high_priority_requests() {
     const NUM_REQUESTS: usize = 3;
-    let _serial = serial();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
     let local = Dispatcher::new(&run_loop);
-    let fs = online_file_source();
+    let network = Arc::new(NetworkStatus::new());
+    let fs = online_file_source_with(&network);
     let response_counter = Rc::new(Cell::new(0usize));
 
-    NetworkStatus::set(Status::Offline);
+    network.set(Status::Offline);
     fs.set_maximum_concurrent_requests(1);
     // After DefaultFileSource was split, OnlineFileSource lives on a separate
     // thread. Pause OnlineFileSource, so that messages are queued for
@@ -634,7 +628,7 @@ fn low_high_priority_requests() {
     // every queued request with the network up. If it saw the switch between
     // two of them, those taken offline would wait for the reachability
     // notification and start after the later ones, low priority included.
-    NetworkStatus::set(Status::Online);
+    network.set(Status::Online);
     drop(paused);
     run_loop.run();
 }
@@ -642,16 +636,16 @@ fn low_high_priority_requests() {
 // gtest: OnlineFileSource.LowHighPriorityRequestsMany
 #[test]
 fn low_high_priority_requests_many() {
-    let _serial = serial();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
     let local = Dispatcher::new(&run_loop);
-    let fs = online_file_source();
+    let network = Arc::new(NetworkStatus::new());
+    let fs = online_file_source_with(&network);
     let response_counter = Rc::new(Cell::new(0));
     let correct_low = Rc::new(Cell::new(0));
     let correct_regular = Rc::new(Cell::new(0));
 
-    NetworkStatus::set(Status::Offline);
+    network.set(Status::Offline);
     fs.set_maximum_concurrent_requests(1);
     let paused = fs.pause();
 
@@ -712,7 +706,7 @@ fn low_high_priority_requests_many() {
     }
 
     // Online before resuming, as in LowHighPriorityRequests.
-    NetworkStatus::set(Status::Online);
+    network.set(Status::Online);
     drop(paused);
     run_loop.run();
 }
@@ -722,14 +716,14 @@ fn low_high_priority_requests_many() {
 /// the request, and one cancelled meanwhile doesn't start.
 #[test]
 fn pending_requests_start_by_order() {
-    let _serial = serial();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
     let local = Dispatcher::new(&run_loop);
-    let fs = online_file_source();
+    let network = Arc::new(NetworkStatus::new());
+    let fs = online_file_source_with(&network);
     let answered: Rc<RefCell<Vec<usize>>> = Rc::default();
 
-    NetworkStatus::set(Status::Offline);
+    network.set(Status::Offline);
     fs.set_maximum_concurrent_requests(1);
     let paused = fs.pause();
 
@@ -765,7 +759,7 @@ fn pending_requests_start_by_order() {
     requests[2] = None;
 
     // Online before resuming, as in LowHighPriorityRequests.
-    NetworkStatus::set(Status::Online);
+    network.set(Status::Online);
     drop(paused);
     run_loop.run();
     assert_eq!(*answered.borrow(), [0, 4, 3, 1]);
@@ -786,7 +780,6 @@ fn maximum_concurrent_requests() {
 // gtest: OnlineFileSource.RequestSameUrlMultipleTimes
 #[test]
 fn request_same_url_multiple_times() {
-    let _serial = serial();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
     let local = Dispatcher::new(&run_loop);
@@ -843,11 +836,11 @@ fn failed_resource_transform() {
 // gtest: OnlineFileSource.RetryFailedResourceTransform
 #[test]
 fn retry_failed_resource_transform() {
-    let _serial = serial();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
     let local = Dispatcher::new(&run_loop);
-    let fs = online_file_source();
+    let network = Arc::new(NetworkStatus::new());
+    let fs = online_file_source_with(&network);
 
     let transforms = Arc::new(AtomicU32::new(0));
     let (delayed, test) = (server.url("/delayed"), server.url("/test"));
@@ -874,7 +867,7 @@ fn retry_failed_resource_transform() {
                     assert_eq!(Reason::Connection, error.reason);
                     assert_eq!("Offline", error.message);
                     // Retry now instead of after the backoff.
-                    NetworkStatus::reachable();
+                    network.reachable();
                 }
                 2 => {
                     assert_eq!(None, res.error);
@@ -894,7 +887,6 @@ fn retry_failed_resource_transform() {
 // runs again for a retry.
 #[test]
 fn a_header_transform_runs_for_every_attempt() {
-    let _serial = serial();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
     let local = Dispatcher::new(&run_loop);

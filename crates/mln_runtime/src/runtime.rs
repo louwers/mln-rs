@@ -12,6 +12,7 @@ use mln_actor::{AsyncTask, RunLoop};
 use mln_renderer::Registry;
 use mln_renderer::text::font_face_engine::FontFaceEngine;
 use mln_storage::http_header_transform::{HttpHeaderTransform, HttpHeaders};
+use mln_storage::network_status::NetworkStatus;
 use mln_storage::resource::Kind;
 use mln_storage::resource_transform::{FinishedCallback, ResourceTransform};
 use mln_storage::{FileSource, Loader, OnlineFileSource, ResourceOptions};
@@ -30,7 +31,8 @@ use crate::offline::Offline;
 use crate::queue::Queue;
 use crate::resources::{CacheDatabaseOperation, ProviderFileSource, ResourceHooks, ResourceProvider};
 
-/// Where a runtime keeps its assets and its cache.
+/// Where a runtime keeps its assets and its cache, and the network status
+/// its requests follow.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RuntimeOptions {
     /// The directory that `asset://` URLs load from. `None` uses the working
@@ -41,6 +43,9 @@ pub struct RuntimeOptions {
     /// regions. Its directory must be writable. `None` keeps the cache in
     /// memory.
     pub cache_path: Option<PathBuf>,
+    /// The network status that the runtime's network requests follow. `None`
+    /// gives the runtime one of its own, which stays online.
+    pub network_status: Option<Arc<NetworkStatus>>,
 }
 
 /// A runtime: a thread of its own that holds maps, and the resource loading,
@@ -327,6 +332,8 @@ pub(crate) struct RuntimeCore {
     database: OnceCell<Arc<RegionDatabase>>,
     /// The library's own network loading, behind the host's provider.
     online: OnceCell<Arc<OnlineFileSource>>,
+    /// What the library's own network loading follows.
+    network_status: Arc<NetworkStatus>,
     network: OnceCell<Arc<dyn FileSource>>,
     /// The runtime's thread's work.
     pub(crate) queue: CoreQueue,
@@ -349,6 +356,7 @@ pub(crate) struct RuntimeCore {
 impl RuntimeCore {
     fn new(
         resource_options: ResourceOptions,
+        network_status: Arc<NetworkStatus>,
         queue: CoreQueue,
         queued: Arc<AtomicUsize>,
         registry: Arc<Registry>,
@@ -364,6 +372,7 @@ impl RuntimeCore {
             #[cfg(not(target_family = "wasm"))]
             database: OnceCell::new(),
             online: OnceCell::new(),
+            network_status,
             network: OnceCell::new(),
             queue,
             registry,
@@ -423,7 +432,13 @@ impl RuntimeCore {
 
     /// The library's own network loading.
     fn online(&self) -> &Arc<OnlineFileSource> {
-        self.online.get_or_init(|| Arc::new(OnlineFileSource::new()))
+        self.online.get_or_init(|| {
+            #[cfg(not(target_family = "wasm"))]
+            let online = OnlineFileSource::new(Arc::clone(&self.network_status));
+            #[cfg(target_family = "wasm")]
+            let online = crate::web::online(Arc::clone(&self.network_status));
+            Arc::new(online)
+        })
     }
 
     /// The runtime's network: the host's resource provider, in front of the
@@ -531,11 +546,18 @@ impl Runtime {
     /// Fails as [`new`](Self::new) does.
     pub fn with_registry(options: &RuntimeOptions, registry: Arc<Registry>) -> Result<Runtime, Error> {
         let resource_options = resource_options(options)?;
+        let network_status = options.network_status.clone().unwrap_or_default();
         let queued = Arc::new(AtomicUsize::new(0));
         let queue = CoreQueue::default();
         let pool = runtime_pool()?;
-        let (thread, thread_end) =
-            Self::start(resource_options, queue.clone(), Arc::clone(&queued), Arc::clone(&registry), pool.clone())?;
+        let (thread, thread_end) = Self::start(
+            resource_options,
+            network_status,
+            queue.clone(),
+            Arc::clone(&queued),
+            Arc::clone(&registry),
+            pool.clone(),
+        )?;
         Ok(Runtime {
             shared: Arc::new(RuntimeShared {
                 queue,
@@ -557,6 +579,7 @@ impl Runtime {
     #[cfg(not(target_family = "wasm"))]
     fn start(
         resource_options: ResourceOptions,
+        network_status: Arc<NetworkStatus>,
         queue: CoreQueue,
         queued: Arc<AtomicUsize>,
         registry: Arc<Registry>,
@@ -564,7 +587,15 @@ impl Runtime {
     ) -> Result<(ThreadId, Option<Joined>), Error> {
         let thread = mln_util::thread::spawn("Runtime", move || {
             let run_loop = RunLoop::new();
-            let mut core = Some(RuntimeCore::new(resource_options, queue.clone(), queued, registry, &run_loop, pool));
+            let mut core = Some(RuntimeCore::new(
+                resource_options,
+                network_status,
+                queue.clone(),
+                queued,
+                registry,
+                &run_loop,
+                pool,
+            ));
             queue.run_until_stopped(&run_loop, &mut core);
             drop(core);
         })
@@ -580,6 +611,7 @@ impl Runtime {
     #[expect(clippy::unnecessary_wraps, reason = "the threads of other builds can fail to start")]
     fn start(
         resource_options: ResourceOptions,
+        network_status: Arc<NetworkStatus>,
         queue: CoreQueue,
         queued: Arc<AtomicUsize>,
         registry: Arc<Registry>,
@@ -587,7 +619,7 @@ impl Runtime {
     ) -> Result<(ThreadId, Option<Joined>), Error> {
         crate::web::install();
         let run_loop = RunLoop::new();
-        let core = RuntimeCore::new(resource_options, queue.clone(), queued, registry, &run_loop, pool);
+        let core = RuntimeCore::new(resource_options, network_status, queue.clone(), queued, registry, &run_loop, pool);
         let pool = core.pool.clone();
         crate::web::drive(&run_loop, &pool, queue, Some(core));
         Ok((std::thread::current().id(), None))

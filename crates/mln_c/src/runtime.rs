@@ -2,7 +2,7 @@
 //! runtime in the process, such as the network status.
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use ::mln_runtime::{CacheDatabaseOperation, MapId, Runtime, RuntimeEvent, RuntimeOptions};
 use mln_storage::network_status::{NetworkStatus, Status};
@@ -36,6 +36,10 @@ pub(crate) struct RuntimeObject {
 
 static RUNTIMES: HandleTable<RuntimeObject> = HandleTable::new(HandleKind::Runtime);
 
+/// The network status of `mln_network_get_status()` and
+/// `mln_network_set_status()`, which every runtime follows.
+static NETWORK_STATUS: LazyLock<Arc<NetworkStatus>> = LazyLock::new(Arc::default);
+
 /// The runtime that `runtime` names.
 pub(crate) fn resolve(runtime: mln_runtime) -> Result<Arc<RuntimeObject>, Error> {
     RUNTIMES.get(runtime)
@@ -65,7 +69,7 @@ pub(crate) unsafe extern "C" fn mln_runtime_create(
 ) -> mln_status {
     export!(out_diagnostic, {
         let options = if options.is_null() {
-            RuntimeOptions::default()
+            RuntimeOptions { network_status: Some(Arc::clone(&NETWORK_STATUS)), ..RuntimeOptions::default() }
         } else {
             // SAFETY: the caller's contract.
             let options = unsafe { abi::read_sized(options) }?;
@@ -74,6 +78,7 @@ pub(crate) unsafe extern "C" fn mln_runtime_create(
                 RuntimeOptions {
                     asset_path: path(options.asset_path, "mln_runtime_options.asset_path")?,
                     cache_path: path(options.cache_path, "mln_runtime_options.cache_path")?,
+                    network_status: Some(Arc::clone(&NETWORK_STATUS)),
                 }
             }
         };
@@ -281,7 +286,7 @@ pub(crate) unsafe extern "C" fn mln_network_get_status(
     out_diagnostic: *mut mln_diagnostic,
 ) -> mln_status {
     export!(out_diagnostic, non_null(out_status), {
-        let status = match NetworkStatus::get() {
+        let status = match NETWORK_STATUS.get() {
             Status::Online => MLN_NETWORK_STATUS_ONLINE,
             Status::Offline => MLN_NETWORK_STATUS_OFFLINE,
         };
@@ -302,7 +307,7 @@ pub(crate) unsafe extern "C" fn mln_network_set_status(
     out_diagnostic: *mut mln_diagnostic,
 ) -> mln_status {
     export!(out_diagnostic, {
-        NetworkStatus::set(match status {
+        NETWORK_STATUS.set(match status {
             MLN_NETWORK_STATUS_ONLINE => Status::Online,
             MLN_NETWORK_STATUS_OFFLINE => Status::Offline,
             _ => return Err(Error::invalid_argument(format!("network status {status} names no status"))),

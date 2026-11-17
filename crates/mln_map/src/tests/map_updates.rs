@@ -19,7 +19,7 @@ use crate::{CameraOptions, ErrorKind, Map, MapOptions, TileSettings, UpdateReade
 fn map(run_loop: &RunLoop) -> Map {
     let options = MapOptions { size: Size::new(256, 256), ..Default::default() };
     Map::with_file_source(
-        Arc::new(StubFileSource::new(run_loop, ResponseType::Asynchronous)),
+        StubFileSource::on_loop(run_loop, ResponseType::Asynchronous),
         options,
         run_loop,
         &crate::tests::pool(),
@@ -194,7 +194,7 @@ fn a_style_load_clears_the_feature_state_that_it_publishes() {
 #[test]
 fn a_url_style_never_publishes_its_sources_with_the_old_feature_state() {
     let run_loop = RunLoop::new();
-    let file_source = StubFileSource::new(&run_loop, ResponseType::Asynchronous);
+    let file_source = StubFileSource::on_loop(&run_loop, ResponseType::Asynchronous);
     file_source.set_response(Kind::Style, |_| {
         let mut response = Response::new();
         let style = r#"{"version":8,"sources":{"points":{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}},"layers":[]}"#;
@@ -202,7 +202,7 @@ fn a_url_style_never_publishes_its_sources_with_the_old_feature_state() {
         Some(response)
     });
     let options = MapOptions { size: Size::new(256, 256), ..Default::default() };
-    let mut map = Map::with_file_source(Arc::new(file_source), options, &run_loop, &crate::tests::pool()).expect("map");
+    let mut map = Map::with_file_source(file_source, options, &run_loop, &crate::tests::pool()).expect("map");
     map.jump_to(&CameraOptions::default());
     map.set_feature_state("points", None, "1", hover(true));
 

@@ -1,10 +1,11 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use geojson::GeoJson;
-use mln_actor::{RunLoop, Timer};
+use mln_actor::RunLoop;
 use mln_map::transform::Transform;
 use mln_map_types::{
     CameraOptions, ConstrainMode, MapDebugOptions, MapMode, TileLodMode, TransformState, ViewportMode,
@@ -45,7 +46,7 @@ struct SourceTest {
     transform: Transform,
     thread_pool: TaskGroup,
     /// Set by `end_handle`'s calls.
-    ended: Rc<std::cell::Cell<bool>>,
+    ended: Arc<AtomicBool>,
 }
 
 /// The tile parameters for `map_mode`, from a transform state the caller
@@ -84,7 +85,7 @@ impl SourceTest {
             run_loop: RunLoop::new(),
             transform,
             thread_pool: TaskGroup::new(&crate::tests::pool()),
-            ended: Rc::default(),
+            ended: Arc::default(),
         }
     }
 
@@ -102,11 +103,11 @@ impl SourceTest {
     }
 
     /// Ends the test; usable from `'static` callbacks.
-    fn end_handle(&self) -> impl Fn() + Clone + 'static {
+    fn end_handle(&self) -> impl Fn() + Clone + Send + Sync + 'static {
         let handle = self.run_loop.handle();
-        let ended = Rc::clone(&self.ended);
+        let ended = Arc::clone(&self.ended);
         move || {
-            ended.set(true);
+            ended.store(true, Ordering::SeqCst);
             handle.stop();
         }
     }
@@ -115,7 +116,7 @@ impl SourceTest {
     /// test ends; `on_event` gets what the store reports.
     fn run_with(&self, store: &mut TileStore, mut on_event: impl FnMut(&mut TileStore, StoreEvent)) {
         let deadline = mln_util::time::Instant::now() + Duration::from_secs(30);
-        while !self.ended.get() {
+        while !self.ended.load(Ordering::SeqCst) {
             assert!(mln_util::time::Instant::now() < deadline, "the test didn't end");
             self.run_loop.run_once();
             crate::tests::update(store);
@@ -258,7 +259,7 @@ fn run_tile_case(
 
 fn tile_empty(kind: Tiled) {
     let test = SourceTest::new();
-    let file_source = Arc::new(StubFileSource::new(&test.run_loop, ResponseType::Asynchronous));
+    let file_source = StubFileSource::on_loop(&test.run_loop, ResponseType::Asynchronous);
     file_source.set_response(Kind::Tile, |_resource| {
         let mut response = Response::new();
         response.no_content = true;
@@ -283,7 +284,7 @@ fn tile_empty(kind: Tiled) {
 
 fn tile_fail(kind: Tiled) {
     let test = SourceTest::new();
-    let file_source = Arc::new(StubFileSource::new(&test.run_loop, ResponseType::Asynchronous));
+    let file_source = StubFileSource::on_loop(&test.run_loop, ResponseType::Asynchronous);
     file_source.set_response(Kind::Tile, |_resource| {
         let mut response = Response::new();
         response.error = Some(Box::new(ResourceError::new(Reason::Other, "Failed by the test case")));
@@ -312,7 +313,7 @@ fn tile_fail(kind: Tiled) {
 
 fn tile_corrupt(kind: Tiled) {
     let test = SourceTest::new();
-    let file_source = Arc::new(StubFileSource::new(&test.run_loop, ResponseType::Asynchronous));
+    let file_source = StubFileSource::on_loop(&test.run_loop, ResponseType::Asynchronous);
     file_source.set_response(Kind::Tile, |_resource| {
         let mut response = Response::new();
         response.data = Some(Arc::new(b"CORRUPTED".to_vec()));
@@ -344,13 +345,13 @@ fn tile_corrupt(kind: Tiled) {
 
 fn tile_cancel(kind: Tiled) {
     let test = SourceTest::new();
-    let file_source = Arc::new(StubFileSource::new(&test.run_loop, ResponseType::Asynchronous));
-    let requested = Rc::new(RefCell::new(false));
+    let file_source = StubFileSource::on_loop(&test.run_loop, ResponseType::Asynchronous);
+    let requested = Arc::new(AtomicBool::new(false));
     {
-        let requested = Rc::clone(&requested);
+        let requested = Arc::clone(&requested);
         let end = test.end_handle();
         file_source.set_response(Kind::Tile, move |_resource| {
-            *requested.borrow_mut() = true;
+            requested.store(true, Ordering::SeqCst);
             end();
             None
         });
@@ -361,7 +362,7 @@ fn tile_cancel(kind: Tiled) {
     *observer.tile_error.borrow_mut() = Some(Box::new(|_, _, _| panic!("Should never be called")));
 
     run_tile_case(&test, kind, file_source, &observer);
-    assert!(*requested.borrow());
+    assert!(requested.load(Ordering::SeqCst));
 }
 
 /// A file source whose tile requests never answer, as tiles in flight: it
@@ -562,7 +563,7 @@ fn tile_attribution(kind: Tiled, attribution: &'static str) {
     let test = SourceTest::new();
     let layers = kind.layers();
 
-    let file_source = Arc::new(StubFileSource::new(&test.run_loop, ResponseType::Asynchronous));
+    let file_source = StubFileSource::on_loop(&test.run_loop, ResponseType::Asynchronous);
     file_source.set_response(Kind::Tile, |_resource| {
         let mut response = Response::new();
         response.no_content = true;
@@ -739,7 +740,7 @@ fn custom_vector_source_set_tile_data() {
 #[test]
 fn empty_tileset() {
     let test = SourceTest::new();
-    let file_source = Arc::new(StubFileSource::new(&test.run_loop, ResponseType::Asynchronous));
+    let file_source = StubFileSource::on_loop(&test.run_loop, ResponseType::Asynchronous);
     let mut source = crate::tests::ready(vector_source("source", None, PartialTileset::default()));
     let mut store = test.store();
     let mut render_source = crate::tests::create_render_source(&source, &mut store);
@@ -771,7 +772,7 @@ fn empty_tileset() {
 fn empty_raster_tilesets_make_no_tiles() {
     for kind in [Tiled::Raster, Tiled::RasterDEM] {
         let test = SourceTest::new();
-        let file_source = Arc::new(StubFileSource::new(&test.run_loop, ResponseType::Asynchronous));
+        let file_source = StubFileSource::on_loop(&test.run_loop, ResponseType::Asynchronous);
         let source = crate::tests::ready(kind.source(None, PartialTileset::default()));
         let mut store = test.store();
         let mut render_source = crate::tests::create_render_source(&source, &mut store);
@@ -913,9 +914,9 @@ fn geojson_source_slices_inline_while_a_background_slice_runs() {
     // Unclustered data slices on the store's pool while the source is
     // asynchronous: a pool that holds its tasks until the test runs them.
     let pool = Pool::local();
-    let queued = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let queued = Arc::new(AtomicBool::new(false));
     let woken = Arc::clone(&queued);
-    pool.set_waker(Some(Arc::new(move || woken.store(true, std::sync::atomic::Ordering::SeqCst))));
+    pool.set_waker(Some(Arc::new(move || woken.store(true, Ordering::SeqCst))));
     let mut source = geojson_source("source", GeoJSONOptions::default_options());
     let geojson = r#"{"type": "Polygon", "coordinates": [[[-10, -10], [10, -10], [10, 10], [-10, 10], [-10, -10]]]}"#
         .parse::<GeoJson>()
@@ -933,7 +934,7 @@ fn geojson_source_slices_inline_while_a_background_slice_runs() {
     };
 
     update(&mut render_source, &mut store, &source);
-    assert!(queued.load(std::sync::atomic::Ordering::SeqCst));
+    assert!(queued.load(Ordering::SeqCst));
     assert!(!render_source.is_loaded(&store));
 
     // The queued slices run in the background while the source turns
@@ -1000,18 +1001,19 @@ impl Drop for FixtureLog {
 fn set_max_parent_overscale_factor() {
     let mut test = SourceTest::new();
     test.transform.jump_to(&CameraOptions { center: Some(LatLng::default()), zoom: Some(8.0), ..Default::default() });
-    let timer = Rc::new(Timer::new(&test.run_loop));
     let log = FixtureLog::new();
 
-    let file_source = Arc::new(StubFileSource::new(&test.run_loop, ResponseType::Asynchronous));
+    let file_source = StubFileSource::on_loop(&test.run_loop, ResponseType::Asynchronous);
     {
-        let timer = Rc::clone(&timer);
         let end = test.end_handle();
         file_source.set_response(Kind::Tile, move |res| {
             let z = res.tile_data.as_ref().unwrap().z;
             if z == 5 {
                 let end = end.clone();
-                timer.start(Duration::from_millis(10), Duration::ZERO, end);
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_millis(10));
+                    end();
+                });
             }
             // No tiles above zoom level 5 should be requested.
             assert!(5 <= i32::from(z), "requested z{z}");
@@ -1057,12 +1059,12 @@ fn raster_dem_tile_rounds_covering_zoom() {
     let mut test = SourceTest::new();
     test.transform.jump_to(&CameraOptions { center: Some(LatLng::default()), zoom: Some(4.6), ..Default::default() });
 
-    let requested_zooms = Rc::new(RefCell::new(Vec::<i8>::new()));
-    let file_source = Arc::new(StubFileSource::new(&test.run_loop, ResponseType::Asynchronous));
+    let requested_zooms = Arc::new(Mutex::new(Vec::<i8>::new()));
+    let file_source = StubFileSource::on_loop(&test.run_loop, ResponseType::Asynchronous);
     {
-        let requested_zooms = Rc::clone(&requested_zooms);
+        let requested_zooms = Arc::clone(&requested_zooms);
         file_source.set_response(Kind::Tile, move |res| {
-            requested_zooms.borrow_mut().push(res.tile_data.as_ref().unwrap().z);
+            requested_zooms.lock().push(res.tile_data.as_ref().unwrap().z);
             let mut response = Response::new();
             response.no_content = true;
             Some(response)
@@ -1091,8 +1093,8 @@ fn raster_dem_tile_rounds_covering_zoom() {
         }
     });
 
-    assert!(!requested_zooms.borrow().is_empty());
-    for &z in requested_zooms.borrow().iter() {
+    assert!(!requested_zooms.lock().is_empty());
+    for &z in requested_zooms.lock().iter() {
         assert_eq!(5, z);
     }
 }
@@ -1102,7 +1104,7 @@ fn raster_dem_tile_rounds_covering_zoom() {
 struct TurningSource {
     test: SourceTest,
     file_source: Arc<StubFileSource>,
-    requests: Rc<RefCell<usize>>,
+    requests: Arc<AtomicUsize>,
     source: Source,
     store: TileStore,
     render_source: Box<dyn RenderSource>,
@@ -1122,12 +1124,12 @@ impl TurningSource {
         let mut test = SourceTest::new();
         test.transform.resize(size).unwrap();
         test.transform.set_projection_definition(&ProjectionDefinition::from_name(projection));
-        let file_source = Arc::new(StubFileSource::new(&test.run_loop, ResponseType::Manual));
-        let requests = Rc::new(RefCell::new(0));
+        let file_source = Arc::new(StubFileSource::new(ResponseType::Manual));
+        let requests = Arc::new(AtomicUsize::new(0));
         {
-            let requests = Rc::clone(&requests);
+            let requests = Arc::clone(&requests);
             file_source.set_response(Kind::Tile, move |_| {
-                *requests.borrow_mut() += 1;
+                requests.fetch_add(1, Ordering::SeqCst);
                 let mut response = Response::new();
                 response.no_content = true;
                 Some(response)
@@ -1300,7 +1302,7 @@ fn globe_base_level_requests() {
     assert_eq!(Vec::<CanonicalTileID>::new(), mercator.tiles_at(1));
     assert_eq!(4, globe.tiles_at(1).len());
     let view = globe.pyramid().cover().count() - 4;
-    assert_eq!(view + 4, *globe.requests.borrow());
+    assert_eq!(view + 4, globe.requests.load(Ordering::SeqCst));
 }
 
 #[test]
@@ -1379,7 +1381,7 @@ fn raster_dem_borders_across_a_world_wrap() {
         zoom: Some(2.0),
         ..Default::default()
     });
-    let file_source = Arc::new(StubFileSource::new(&test.run_loop, ResponseType::Asynchronous));
+    let file_source = StubFileSource::on_loop(&test.run_loop, ResponseType::Asynchronous);
     file_source.set_response(Kind::Tile, |resource| {
         let tile = resource.tile_data.as_ref()?;
         let mut response = Response::new();

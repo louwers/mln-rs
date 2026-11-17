@@ -15,7 +15,9 @@ use mln_renderer::{
     FeatureInfo, LayerFeaturesMap, Registry, RendererEvent, RendererEvents, RenderingStats, SourceLayerID,
     UpdateParameters, UpdateReader, UpdateSlot,
 };
-use mln_storage::{FileSource, Loader, ResourceOptions};
+use mln_storage::FileSource;
+#[cfg(not(target_family = "wasm"))]
+use mln_storage::{Loader, ResourceOptions};
 use mln_style::conversion::{Convertible, convert_source};
 use mln_style::{Edit, Parts, Source, Style, StyleRegistry};
 use mln_style_types::{ProjectionDefinition, ProjectionType};
@@ -122,12 +124,14 @@ impl Map {
     /// runs on `pool`.
     ///
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty `map_options.size`.
+    #[cfg(not(target_family = "wasm"))]
     pub fn new(map_options: MapOptions, run_loop: &RunLoop, pool: &Pool) -> Result<Map, Error> {
         Self::with_resource_options(map_options, &ResourceOptions::default(), run_loop, pool)
     }
 
     /// A map with a [`Loader`] of its own for `resource_options`, on
     /// `run_loop` and `pool`.
+    #[cfg(not(target_family = "wasm"))]
     pub fn with_resource_options(
         map_options: MapOptions,
         resource_options: &ResourceOptions,

@@ -32,7 +32,7 @@ fn wait<T: Send + 'static>(operation: impl FnOnce(Box<dyn FnOnce(T) + Send>)) ->
 fn database_file_source(dir: &TempDir) -> RegionDatabase {
     region_database(
         &dir.path("cache.db"),
-        Some(Arc::new(OnlineFileSource::new())),
+        Some(Arc::new(OnlineFileSource::new(Arc::default()))),
         Arc::clone(Registry::with_builtins().style()),
     )
 }
