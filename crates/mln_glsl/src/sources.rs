@@ -2428,6 +2428,7 @@ pub(crate) const FILL_EXTRUSION_SHADER: GlslShaderSource = GlslShaderSource {
     name: "FillExtrusionShader",
     prelude: FILL_EXTRUSION_SHADER_PRELUDE,
     vertex: r"
+invariant gl_Position;
 
 layout(location = 0) in ivec2 in_position;
 layout(location = 1) in uvec2 in_decimals_ed;
@@ -2574,6 +2575,7 @@ pub(crate) const FILL_EXTRUSION_INSTANCED_SHADER: GlslShaderSource = GlslShaderS
     name: "FillExtrusionInstancedShader",
     prelude: FILL_EXTRUSION_SHADER_PRELUDE,
     vertex: r"
+invariant gl_Position;
 
 layout(location = 0) in ivec2 in_position;
 
@@ -2742,6 +2744,7 @@ pub(crate) const FILL_EXTRUSION_PATTERN_SHADER: GlslShaderSource = GlslShaderSou
     name: "FillExtrusionPatternShader",
     prelude: FILL_EXTRUSION_SHADER_PRELUDE,
     vertex: r"
+invariant gl_Position;
 
 layout(location = 0) in ivec2 in_position;
 layout(location = 1) in uvec2 in_decimals_ed;
@@ -3015,6 +3018,7 @@ pub(crate) const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: GlslShaderSource = Gls
     name: "FillExtrusionPatternInstancedShader",
     prelude: FILL_EXTRUSION_SHADER_PRELUDE,
     vertex: r"
+invariant gl_Position;
 
 layout(location = 0) in ivec2 in_position;
 
