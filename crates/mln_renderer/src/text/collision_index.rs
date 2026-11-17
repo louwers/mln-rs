@@ -85,6 +85,12 @@ impl OverlapMode {
 const VIEWPORT_PADDING_DEFAULT: f32 = 100.0;
 /// Viewport padding must be much larger for static tiles to avoid clipped labels.
 const VIEWPORT_PADDING_FOR_STATIC_TILES: f32 = 1024.0;
+/// A label whose anchor's perspective ratio is below this is never placed.
+/// The ratio is 0.5 + 0.5 × the camera-to-center distance over the anchor's
+/// distance from the camera, so this hides labels more than five times as far
+/// away as the center, which crowd the horizon at high pitch, and labels
+/// behind the camera, whose ratio is below 0.5. As in GL JS.
+const PERSPECTIVE_RATIO_CUTOFF: f32 = 0.6;
 
 fn find_viewport_padding(transform_state: &TransformState, map_mode: MapMode) -> f32 {
     if map_mode == MapMode::Tile {
@@ -357,6 +363,7 @@ impl CollisionIndex {
             );
             projected_boxes.push(projected_collision_box);
             if occluded
+                || projected_point.perspective_ratio < PERSPECTIVE_RATIO_CUTOFF
                 || avoid_edges.as_ref().is_some_and(|edges| !Self::is_inside_tile(&collision_boundaries, edges))
                 || !self.is_inside_grid(&collision_boundaries)
                 || self.collides(overlap_mode, collision_group_predicate, |grid, predicate| {
@@ -398,6 +405,9 @@ impl CollisionIndex {
         let anchor = self.project_and_get_perspective_ratio(tile_projector, tile_unit_anchor_point, 0.0);
         if anchor.occluded {
             return PlacedFeatureResult { placed: false, offscreen: false, occluded: true };
+        }
+        if anchor.perspective_ratio < PERSPECTIVE_RATIO_CUTOFF {
+            return PlacedFeatureResult { placed: false, offscreen: false, occluded: false };
         }
         let projected_anchor = (anchor.perspective_ratio, anchor.signed_distance_from_camera);
 
