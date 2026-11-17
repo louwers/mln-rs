@@ -36,7 +36,7 @@ use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
 use winit::keyboard::{KeyCode, PhysicalKey};
-use winit::window::{Fullscreen, Window, WindowId};
+use winit::window::{Fullscreen, Window, WindowId, WindowLevel};
 
 use crate::Args;
 #[cfg(target_os = "macos")]
@@ -150,6 +150,13 @@ impl Inbox {
     pub(crate) fn wake_for_refresh(&self, refresh: Refresh) {
         *self.refreshed.lock() = Some(refresh);
         self.wake();
+    }
+
+    /// A frame pacer's callback that wakes the render thread at each refresh
+    /// through `inbox`.
+    pub(crate) fn wake_at_refreshes(inbox: &Arc<Inbox>) -> impl Fn(Option<Instant>, Vec<()>) + Send + Sync + 'static {
+        let inbox = Arc::clone(inbox);
+        move |shown_at, _| inbox.wake_for_refresh(Refresh { shown_at })
     }
 
     /// The display's refresh since the last call, if it refreshed.
@@ -316,6 +323,11 @@ impl ApplicationHandler<UserEvent> for Host {
         let mut attributes = Window::default_attributes().with_title("mln-rs").with_inner_size(WINDOW_SIZE);
         if args.fullscreen {
             attributes = attributes.with_fullscreen(Some(Fullscreen::Borderless(None)));
+        }
+        // Over the other windows, so that its frames reach the display, which
+        // the gesture test reports.
+        if args.gesture_test {
+            attributes = attributes.with_window_level(WindowLevel::AlwaysOnTop);
         }
         let window = match event_loop.create_window(attributes) {
             Ok(window) => Arc::new(window),

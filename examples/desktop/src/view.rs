@@ -214,8 +214,7 @@ pub(crate) fn run(launch: Launch) {
     let refreshes = if args.benchmark {
         None
     } else {
-        let woken = Arc::clone(&inbox);
-        match FramePacer::new(None, move |shown_at, _| woken.wake_for_refresh(Refresh { shown_at })) {
+        match FramePacer::new(None, Inbox::wake_at_refreshes(&inbox)) {
             Ok(pacer) => Some(DisplayRefreshes { pacer, inbox: Arc::clone(&inbox) }),
             Err(e) => {
                 Log::info(Event::Render, format!("Pacing frames on a timer: {}", e.message));
