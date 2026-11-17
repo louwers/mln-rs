@@ -1,7 +1,22 @@
 # cargo-nextest's configuration (https://nexte.st/docs/configuration/):
-# `mise run test` and CI's `mise run ci:coverage` run the tests with it.
+# `mise run test` and CI's `mise run ci:test` run the tests with it.
 
 [profile.default]
 # A test that runs for over a minute is reported as slow, and one still running after ten is ended
 # as hung and fails. The slowest tests, the render suites, take a few minutes in CI.
 slow-timeout = { period = "60s", terminate-after = 10 }
+
+# The tests that depend on the backend: the packages whose tests render with the one that
+# MLN_RENDER_BACKEND names, or make devices of each backend under its validation. `mise run
+# ci:test` runs them on each backend after the first, which runs every test. A test in another
+# package that renders runs on the first backend only. The render suite through the worker codec
+# doesn't depend on the backend.
+[profile.backend]
+default-filter = """
+(
+    package(mln-rs-headless) | package(mln-rs-render-test) | package(mln-rs-renderer)
+    | package(mln-rs-storage) | package(mln-rs-storage-offline) | package(mln-rs-runtime)
+    | package(mln-rs-c) | package(mln-rs-gl) | package(mln-rs-vulkan) | package(mln-rs-mtl)
+    | package(mln-rs-d3d12) | package(mln-rs-webgpu)
+) & not test(=render_tests_through_the_codec)
+"""

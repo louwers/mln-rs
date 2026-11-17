@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+#MISE description="Run what CI's linux and macos jobs test, with the coverage in target/llvm-cov/lcov.info"
+#USAGE arg "<backends>..." var=#true help="Backends as MLN_RENDER_BACKEND names them, such as `webgpu vulkan gl`"
+# Every test on the first backend, then nextest's `backend` profile, the tests
+# that depend on the backend (.config/nextest.toml), on each of the others.
+# vulkan runs under Vulkan's validation layer and metal under Metal's API
+# validation, and either aborts on an error. The render suite through the
+# worker codec, which doesn't depend on the platform, runs on Linux only. Every
+# backend runs even when one fails, and each one's render suite reports and
+# images go to target/llvm-cov-target/tmp/<backend>.
+set -euo pipefail
+source tools/dev-shell.sh
+eval "set -- ${usage_backends:-}"
+# As `mise run coverage` does: a pool of profiles per test binary.
+export LLVM_PROFILE_FILE_NAME="${LLVM_PROFILE_FILE_NAME:-mln-rs-%8m.profraw}"
+tmp=target/llvm-cov-target/tmp
+cargo llvm-cov clean --workspace
+rm -rf "$tmp"
+failed=()
+for backend in "$@"; do
+    filter=()
+    profile=backend
+    if [[ $backend == "$1" ]]; then
+        profile=default
+        [[ "$(uname -s)" == Linux ]] || filter=(-E 'not test(=render_tests_through_the_codec)')
+    fi
+    vulkan_validation=0
+    metal_validation=0
+    [[ $backend == vulkan ]] && vulkan_validation=abort
+    [[ $backend == metal ]] && metal_validation=1
+    if ! MLN_RENDER_BACKEND="$backend" NEXTEST_PROFILE="$profile" \
+        MLN_VULKAN_VALIDATION="$vulkan_validation" \
+        MTL_DEBUG_LAYER="$metal_validation" MTL_DEBUG_LAYER_ERROR_MODE=assert \
+        dev_shell cargo llvm-cov nextest --no-report --workspace --no-fail-fast ${filter[@]+"${filter[@]}"}; then
+        failed+=("$backend")
+    fi
+    mkdir -p "$tmp/$backend"
+    for dir in "$tmp"/render_tests*; do
+        [[ -e $dir ]] && mv "$dir" "$tmp/$backend/"
+    done
+done
+mkdir -p target/llvm-cov
+cargo llvm-cov report --workspace --lcov --output-path target/llvm-cov/lcov.info
+if ((${#failed[@]})); then
+    >&2 echo "Tests failed on: ${failed[*]}"
+    exit 1
+fi

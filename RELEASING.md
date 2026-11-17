@@ -107,8 +107,8 @@ at 02:13 UTC and when run by hand, not on every push, since release-plz runs
 cargo-semver-checks on every library that changed since the last release. In a
 fork, it does nothing.
 
-CI (`release-crate` in `ci.yml`, `mise run ci:package`) runs step 2.2 on every
-push and PR. It catches a manifest crates.io would reject.
+CI (`lint` in `ci.yml`, `mise run ci:lint`) runs step 2.2 on every push and PR.
+It catches a manifest crates.io would reject.
 
 ## Locally
 
