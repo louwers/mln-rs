@@ -5,7 +5,6 @@ use std::hint::black_box;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use geojson::GeoJson;
 use mln_actor::scheduler::{Scheduler, Task};
 use mln_style::sources::geojson::{GeoJSONOptions, TileFeatures, create_geojson_data};
 use mln_tile_id::CanonicalTileID;
@@ -59,8 +58,8 @@ fn countries(fixtures: &Fixtures, every: usize) -> Vec<u8> {
 }
 
 /// Every eighth of Natural Earth's countries, their borders at 1:10m, as
-/// the text a GeoJSON source parses: into GeoJSON values, as the source
-/// does before it builds its data.
+/// the text an application gives a GeoJSON source: parsed into GeoJSON
+/// values, as the runtime does before the source builds its data.
 fn parse_small(bench: &mut Bench) {
     parse(bench, SMALL);
 }
@@ -72,8 +71,8 @@ fn parse_large(bench: &mut Bench) {
 
 fn parse(bench: &mut Bench, every: usize) {
     let fixtures = Fixtures::open(bench);
-    let text = countries(&fixtures, every);
-    let geojson = bench.measure(|| serde_json::from_slice::<GeoJson>(black_box(&text)).expect("GeoJSON"));
+    let text = String::from_utf8(countries(&fixtures, every)).expect("UTF-8");
+    let geojson = bench.measure(|| mln_runtime::bench::parse_geojson(black_box(&text)).expect("GeoJSON"));
     drop(black_box(geojson));
     bench.per("kb", (text.len() / 1024) as u64);
 }
@@ -98,7 +97,8 @@ fn cut_large(bench: &mut Bench) {
 fn cut(bench: &mut Bench, every: usize) {
     let fixtures = Fixtures::open(bench);
     let text = countries(&fixtures, every);
-    let geojson: GeoJson = serde_json::from_slice(&text).expect("GeoJSON");
+    let text = String::from_utf8(text).expect("UTF-8");
+    let geojson = mln_runtime::bench::parse_geojson(&text).expect("GeoJSON");
     let options = GeoJSONOptions::default_options();
     let tiles: Vec<CanonicalTileID> = (0..=MAX_ZOOM)
         .flat_map(|z| (0..1u32 << z).flat_map(move |x| (0..1u32 << z).map(move |y| CanonicalTileID::new(z, x, y))))

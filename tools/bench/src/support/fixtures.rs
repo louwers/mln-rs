@@ -72,7 +72,6 @@ impl Fixtures {
     }
 
     /// The directory the snapshot is installed in.
-    #[expect(dead_code, reason = "no scenario reads the directory itself")]
     pub(crate) fn dir(&self) -> &Path {
         &self.dir
     }

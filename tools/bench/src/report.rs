@@ -36,8 +36,10 @@ pub(crate) fn format_value(unit: Unit, value: f64) -> String {
                 (magnitude / 1e6, "M")
             } else if magnitude >= 1e4 {
                 (magnitude / 1e3, "k")
+            } else if magnitude.fract() == 0.0 || magnitude >= 1000.0 {
+                return format!("{sign}{magnitude:.0}");
             } else {
-                return format!("{sign}{magnitude}");
+                return format!("{sign}{}", three_digits(magnitude));
             };
             format!("{sign}{} {suffix}", three_digits(scaled))
         }
@@ -49,7 +51,7 @@ pub(crate) fn format_value(unit: Unit, value: f64) -> String {
             } else if magnitude >= 1024.0 {
                 (magnitude / 1024.0, "KiB")
             } else {
-                return format!("{sign}{magnitude} B");
+                return format!("{sign}{magnitude:.0} B");
             };
             format!("{sign}{} {suffix}", three_digits(scaled))
         }
@@ -122,6 +124,7 @@ mod tests {
         assert_eq!(format_value(Unit::Count, 812_345_678.0), "812 M");
         assert_eq!(format_value(Unit::Count, 12_345.0), "12.3 k");
         assert_eq!(format_value(Unit::Count, 42.0), "42");
+        assert_eq!(format_value(Unit::Count, 23.456), "23.5");
         assert_eq!(format_value(Unit::Bytes, 3.5 * 1024.0 * 1024.0), "3.50 MiB");
         assert_eq!(format_value(Unit::Bytes, -2048.0), "-2.00 KiB");
         assert_eq!(format_value(Unit::Ms, 1.234), "1.23 ms");

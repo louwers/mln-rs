@@ -16,13 +16,13 @@ pub(crate) const SCENARIOS: &[Scenario] = &[
     Scenario {
         name: "micro/runtime/commands/small",
         kind: Kind::Micro,
-        question: "What does a command cost to reach the runtime's thread, sent one per turn of the thread?",
+        question: "What does a command cost through the runtime's queue and a turn of its loop, sent one per turn?",
         run: commands_small,
     },
     Scenario {
         name: "micro/runtime/commands/large",
         kind: Kind::Micro,
-        question: "What does a command cost to reach the runtime's thread, sent 256 per turn of the thread?",
+        question: "What does a command cost through the runtime's queue and a turn of its loop, sent 256 per turn?",
         run: commands_large,
     },
 ];
@@ -38,7 +38,9 @@ type Camera = [f64; 5];
 /// Commands that each carry a camera, sent one at a time, each followed by
 /// a turn of the runtime's thread, as an application that moves the map
 /// once a frame does: each posts its command to the queue and wakes the
-/// thread's loop, and the turn runs the loop, then the command.
+/// thread's loop, and the turn runs the loop, then the command. The queue
+/// and the loop run on the scenario's thread, so waking another thread
+/// isn't part of it.
 fn commands_small(bench: &mut Bench) {
     commands(bench, 1);
 }

@@ -39,6 +39,26 @@ task. The common ones:
   page, and compare it with native renders. `mise run web:dev` serves the page
   from its sources.
 
+## Checking a change
+
+Run the cheapest check that covers the change first, and widen it only as far as
+the change reaches:
+
+- The touched crate's tests: `cargo nextest run -p <package>`, such as
+  `-p mln-rs-renderer`, before the whole suite.
+- The render tests the change affects: from `tools/render-test`, run the runner
+  with your OS and backend's manifest and a regex over the tests' paths, e.g.
+  `cargo run -p mln-rs-render-test -- --manifestPath manifests/macos-wgpu.json --filter "/render-tests/line-dasharray/" --jobs 0 --output <dir>`.
+- `mise run test`, the whole suite, before a pull request.
+- Performance: `mise run bench:compare <ref> -- --filter <scenario>`, judged on
+  its counts from one run per side; the whole set (no filter) for a broad
+  change. Run time rounds (`--rounds <n>`) only when a pull request claims a
+  change in time.
+
+A benchmark scenario answers a lasting question about a stage or an operation
+(tools/bench/README.md); don't add one to prove one pull request's claim. An
+exact expectation, such as "an idle map draws no frames", belongs in a test.
+
 ## Documentation
 
 Describe the code as it is, for a reader who doesn't know its history. Markdown

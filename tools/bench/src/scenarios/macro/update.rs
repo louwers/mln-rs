@@ -154,7 +154,12 @@ fn layers(bench: &mut Bench) {
         }
         map.settle()
     });
-    let added = bench.image.is_some().then(|| map.image());
+    // The image shows the layers added (the map without them is
+    // macro/load/street's), written before the removals so that it holds no
+    // memory while they run.
+    if let Some(path) = &bench.image {
+        map.save_image(path);
+    }
     frames += bench.measure(|| {
         for id in &ids {
             map.map().edit_loaded_style(|style| style.apply(Edit::RemoveLayer(id.clone()))).expect("a layer");
@@ -164,11 +169,6 @@ fn layers(bench: &mut Bench) {
     bench.per("batch", 2);
     bench.count("frames", frames);
     bench.bytes("gpu_buffers", map.gpu_buffer_bytes());
-    // The image shows the layers added: the map without them is
-    // macro/load/street's.
-    if let (Some(path), Some(image)) = (&bench.image, added) {
-        crate::support::map::save_png(&image, path);
-    }
 }
 
 /// The `index`th layer of the overlay that [`layers`] adds: a line, a
@@ -335,7 +335,6 @@ fn feature_state(bench: &mut Bench) {
         |hovered: bool| -> FeatureState { std::iter::once(("hover".to_owned(), Value::Bool(hovered))).collect() };
     let (mut row, mut column) = (ROWS / 2, COLUMNS / 2);
     let mut hovered: Option<String> = None;
-    let incomplete = map.frames_incomplete();
     let tasks = map.background_tasks();
     for _ in 0..FRAMES {
         match random.below(4) {
@@ -356,7 +355,6 @@ fn feature_state(bench: &mut Bench) {
     }
     assert_eq!(map.background_tasks(), tasks, "a hover state that needs background work");
     bench.per("frame", FRAMES as u64);
-    bench.count("frames_incomplete", map.frames_incomplete() - incomplete);
     bench.bytes("gpu_buffers", map.gpu_buffer_bytes());
     if let Some(path) = &bench.image {
         map.save_image(path);

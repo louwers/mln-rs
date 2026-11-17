@@ -24,6 +24,7 @@ const USAGE: &str = "usage:
   mln-bench list [--filter <s>]... [--json]
   mln-bench run [--filter <s>]... [--images <dir>] [--json]
   mln-bench compare <ref> [--filter <s>]... [--rounds <n>] [--threshold <percent>]
+                          [--instructions-threshold <percent>]
                           [--time-threshold <percent>] [--json]
   mln-bench fixtures [--from <dir>]
 
@@ -32,7 +33,11 @@ run and compare run each scenario in a process of its own (mln-bench exec).
 --images writes the last image each scenario drew to <dir>, as PNG files
 named after the scenarios.
 compare builds this checkout's harness against <ref> and compares the two
-(tools/bench/README.md).
+(tools/bench/README.md). A count gets a verdict when it moves by over
+--threshold (0.25% by default), or --instructions-threshold for instructions
+(1%), and by over twice its spread. --rounds runs each side n times, and
+gives the wall time a verdict when a rank test finds a change over
+--time-threshold (2%).
 fixtures installs the snapshot that tools/bench/fixtures.json names, from its
 base URL or from a directory laid out as it is.";
 
@@ -56,6 +61,7 @@ struct Options {
     json: bool,
     rounds: Option<usize>,
     threshold: f64,
+    instructions_threshold: f64,
     time_threshold: f64,
     from: Option<PathBuf>,
     images: Option<PathBuf>,
@@ -69,7 +75,8 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
         filters: Vec::new(),
         json: false,
         rounds: None,
-        threshold: 1.0,
+        threshold: 0.25,
+        instructions_threshold: 1.0,
         time_threshold: 2.0,
         from: None,
         images: None,
@@ -85,6 +92,7 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
             "--json" => options.json = true,
             "--rounds" => options.rounds = Some(value()?.parse().map_err(|_| "--rounds needs a number")?),
             "--threshold" => options.threshold = number(value()?)?,
+            "--instructions-threshold" => options.instructions_threshold = number(value()?)?,
             "--time-threshold" => options.time_threshold = number(value()?)?,
             "--from" => options.from = Some(PathBuf::from(value()?)),
             "--images" => options.images = Some(PathBuf::from(value()?)),
@@ -130,6 +138,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
             if cfg!(debug_assertions) {
                 eprintln!("mln-bench: this build isn't optimized; `mise run bench` builds the benchmark profile");
             }
+            runner::check_build()?;
             let binary = std::env::current_exe().map_err(|error| error.to_string())?;
             if let Some(dir) = &options.images {
                 std::fs::create_dir_all(dir).map_err(|error| format!("{}: {error}", dir.display()))?;
@@ -155,6 +164,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 filters: options.filters,
                 rounds: options.rounds,
                 threshold: options.threshold,
+                instructions_threshold: options.instructions_threshold,
                 time_threshold: options.time_threshold,
             })?;
             if options.json {
@@ -171,7 +181,9 @@ fn run(args: Vec<String>) -> Result<(), String> {
             };
             let manifest = fixtures::Manifest::current();
             let dir = fixtures::install(manifest, &fixtures::cache_root()?, &origin)?;
-            println!("snapshot {} is installed in {}", manifest.snapshot, dir.display());
+            // stderr, so that the JSON of a run that installs the fixtures
+            // first stays alone on stdout.
+            eprintln!("mln-bench: snapshot {} is installed in {}", manifest.snapshot, dir.display());
             Ok(())
         }
         ["exec", name, out] => {

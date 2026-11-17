@@ -22,7 +22,7 @@ pub(crate) enum Kind {
 /// `name` is a path of lowercase segments: the kind, then the pipeline stage
 /// (micro) or the operation (macro), then the case or workload, and a size
 /// last where the scenario runs at two:
-/// `micro/expression/evaluate`, `macro/frame/street`,
+/// `micro/expression/parse/liberty`, `macro/frame/street`,
 /// `micro/geojson/parse/large`.
 pub(crate) struct Scenario {
     pub(crate) name: &'static str,
@@ -37,12 +37,15 @@ pub(crate) struct Scenario {
 }
 
 /// Whether a metric counts work, which repeats across runs, or times it,
-/// which doesn't.
+/// which doesn't; or divides a count by the units of work a scenario did,
+/// which a comparison shows as context only, since its total gets the
+/// verdict.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum MetricKind {
     Count,
     Time,
+    PerUnit,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -73,7 +76,8 @@ pub(crate) struct Metric {
 ///   those live at the end, above what was live when measuring began;
 /// - `wall` and `cpu`: wall-clock time, and the CPU time of every thread.
 ///
-/// Each covers only what runs inside [`Bench::measure`].
+/// Each covers only what runs inside [`Bench::measure`], on every thread of
+/// the process while it runs.
 pub(crate) const STANDARD_METRICS: [&str; 7] =
     ["instructions", "allocations", "allocated", "peak_heap", "retained_heap", "wall", "cpu"];
 
@@ -114,17 +118,18 @@ impl Bench {
 
     /// Runs `work` as a measured part of the scenario: the standard metrics
     /// add up over every part. Setup stays outside, and so does anything a
-    /// scenario does between parts, such as waiting for the GPU to finish a
-    /// frame. The heap metrics count from the live bytes when the first part
-    /// began, so what a scenario allocates in its setup counts in neither.
+    /// scenario does between parts, such as reading back an image. The heap
+    /// metrics count from the live bytes when the first part began, so what
+    /// a scenario allocates in its setup counts in neither, and `peak_heap`
+    /// is the most live at once during any part.
     pub(crate) fn measure<R>(&mut self, work: impl FnOnce() -> R) -> R {
         assert!(!self.measuring, "measure() inside measure()");
         self.measuring = true;
         let heap = meter::heap();
         if self.baseline.is_none() {
             self.baseline = Some(heap.live);
-            meter::reset_peak();
         }
+        meter::reset_peak();
         // The clocks last at the start and first at the end, so that they
         // leave out reading the counters.
         let instructions = meter::instructions();
@@ -141,7 +146,7 @@ impl Bench {
         self.last_instructions = instructions;
         self.allocations += end.allocations - heap.allocations;
         self.allocated += end.allocated - heap.allocated;
-        self.peak_heap = meter::peak() - baseline;
+        self.peak_heap = self.peak_heap.max(meter::peak() - baseline);
         self.retained_heap = end.live - baseline;
         self.wall += wall;
         self.cpu += cpu;
@@ -187,7 +192,7 @@ impl Bench {
     /// Declares that the measured parts did `n` units of the scenario's
     /// work, such as frames or tiles, called `unit`: the run reports
     /// `instructions`, `allocations` and `allocated` per unit too, as
-    /// `<metric>_per_<unit>`.
+    /// `<metric>_per_<unit>`, for context.
     pub(crate) fn per(&mut self, unit: &str, n: u64) {
         assert!(self.per.is_none(), "per() twice");
         assert!(n > 0, "{unit}: no units");
@@ -223,7 +228,12 @@ impl Bench {
             let per_unit: Vec<Metric> = metrics
                 .iter()
                 .filter(|metric| ["instructions", "allocations", "allocated"].contains(&metric.name.as_str()))
-                .map(|metric| count(&format!("{}_per_{unit}", metric.name), metric.unit, (metric.value / n).round()))
+                .map(|metric| Metric {
+                    name: format!("{}_per_{unit}", metric.name),
+                    kind: MetricKind::PerUnit,
+                    unit: metric.unit,
+                    value: metric.value / n,
+                })
                 .collect();
             metrics.extend(per_unit);
         }
@@ -275,7 +285,7 @@ mod tests {
         bench.per("tile", 4);
         let metrics = bench.finish();
         let get = |name: &str| metrics.iter().find(|metric| metric.name == name).unwrap().value;
-        assert_eq!(get("allocated_per_tile"), (get("allocated") / 4.0).round());
-        assert_eq!(get("allocations_per_tile"), (get("allocations") / 4.0).round());
+        assert_eq!(get("allocated_per_tile"), get("allocated") / 4.0);
+        assert_eq!(get("allocations_per_tile"), get("allocations") / 4.0);
     }
 }

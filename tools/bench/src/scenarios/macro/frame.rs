@@ -30,10 +30,11 @@ pub(crate) const SCENARIOS: &[Scenario] = &[
 /// seven times and fades them in and out between placements.
 const FRAMES: usize = 120;
 
-/// The question: what does a frame of central San Francisco at zoom 13.5
-/// cost while the camera turns a full circle, pans around a small circle
-/// and tilts to 10 degrees and back? One measured unit is one frame: its
-/// update, symbol placement, draw calls and the GPU finishing it.
+/// The question: what does a frame of western San Francisco (the Sunset
+/// District) at zoom 13.5 cost while the camera turns a full circle, pans
+/// around a small circle and tilts to 10 degrees and back? One measured
+/// unit is one frame: its update, symbol placement, draw calls and the GPU
+/// finishing it.
 ///
 /// The camera circles the corner where four tiles of zoom 13 meet, and its
 /// view stays inside them; at a steeper tilt it would see more.
@@ -91,7 +92,6 @@ fn frames(bench: &mut Bench, mut map: HeadlessMap, camera: impl Fn(usize) -> Cam
     map.settle();
 
     let drawn = map.frames();
-    let incomplete = map.frames_incomplete();
     let objects = map.gpu_objects_created();
     let tasks = map.background_tasks();
     let mut times = Vec::with_capacity(FRAMES);
@@ -104,7 +104,6 @@ fn frames(bench: &mut Bench, mut map: HeadlessMap, camera: impl Fn(usize) -> Cam
     assert_eq!(map.background_tasks(), tasks, "the path needs tiles it didn't start with");
     assert_eq!(map.frames() - drawn, FRAMES as u64, "one frame per camera");
     bench.per("frame", FRAMES as u64);
-    bench.count("frames_incomplete", map.frames_incomplete() - incomplete);
     bench.bytes("gpu_buffers", map.gpu_buffer_bytes());
     bench.count("gpu_objects", map.gpu_objects_created() - objects);
     bench.percentiles("frame", &times);

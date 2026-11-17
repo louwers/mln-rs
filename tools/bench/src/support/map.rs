@@ -57,7 +57,13 @@ impl Frontend {
         Arc::<Workers>::clone(&self.workers)
     }
 
-    /// The device the frontend draws on.
+    /// The device the frontend draws on, which other maps' render sessions
+    /// can share.
+    pub(crate) fn device(&self) -> Device {
+        self.frontend.device().clone()
+    }
+
+    /// The device the frontend draws on, described.
     pub(crate) fn gpu(&self) -> Gpu {
         let backend = self.frontend.backend();
         #[cfg(target_vendor = "apple")]
@@ -286,13 +292,13 @@ impl HeadlessMap {
     }
 
     /// Replaces the data of the GeoJSON source `id` with the GeoJSON text
-    /// `json`, as an application's update does: parses it, indexes it for
-    /// tiling and gives it to the source. The source's tiles are cut on the
-    /// map's workers, where a GeoJSON source otherwise cuts them on threads
-    /// of its own, so that [`wait_for_workers`](Self::wait_for_workers)
-    /// waits for them too.
+    /// `json`, as an application's update through the runtime does: parses
+    /// it, indexes it for tiling and gives it to the source. The source's
+    /// tiles are cut on the map's workers, where a GeoJSON source otherwise
+    /// cuts them on threads of its own, so that
+    /// [`wait_for_workers`](Self::wait_for_workers) waits for them too.
     pub(crate) fn set_geojson(&mut self, id: &str, json: &str) {
-        let geojson: geojson::GeoJson = serde_json::from_str(json).expect("GeoJSON");
+        let geojson = mln_runtime::bench::parse_geojson(json).expect("GeoJSON");
         let data = create_geojson_data(geojson, self.frontend.workers(), &GeoJSONOptions::default_options())
             .expect("GeoJSON that tiles");
         self.map

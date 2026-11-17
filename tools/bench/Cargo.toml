@@ -19,21 +19,21 @@ path = "src/main.rs"
 # any base's Cargo.lock satisfies them as it stands.
 [dependencies]
 feature = { package = "mln-rs-feature", path = "../../vendor/feature" }
-# The GeoJSON an application gives a source (support/map.rs).
-geojson = "1"
 mln_actor = { package = "mln-rs-actor", path = "../../crates/mln_actor" }
 mln_conversion = { package = "mln-rs-conversion", path = "../../crates/mln_conversion" }
 mln_expression = { package = "mln-rs-expression", path = "../../crates/mln_expression" }
 mln_gfx = { package = "mln-rs-gfx", path = "../../crates/mln_gfx" }
-# The OpenGL backend's renderer name (support/gpu.rs).
+# The OpenGL backend's renderer name (support/map.rs).
 mln_gl = { package = "mln-rs-gl", path = "../../crates/mln_gl" }
 mln_headless = { package = "mln-rs-headless", path = "../../crates/mln_headless" }
 # The PNG files of the scenarios' last images (`mln-bench run --images`).
 mln_image = { package = "mln-rs-image", path = "../../crates/mln_image" }
 mln_map = { package = "mln-rs-map", path = "../../crates/mln_map" }
-# The renderer's internal stages, through its `bench` entry points.
+# The renderer's internal stages, through its `bench` entry points, and the
+# font-face shaper that the packages that render turn on.
 mln_renderer = { package = "mln-rs-renderer", path = "../../crates/mln_renderer", default-features = false, features = [
   "bench",
+  "font-face-shaper",
 ] }
 # The devices of every backend, which MLN_RENDER_BACKEND picks among, and
 # the runtime's internal stages, through its `bench` entry points.

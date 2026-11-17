@@ -10,6 +10,10 @@
 # links without cross-crate LTO, so an edit to one library recompiles that
 # library and its dependents in parallel. Both sides of a comparison build
 # with this profile, so it measures a change in the code, not a profile.
+# Without cross-crate LTO, the compiler inlines less across crates than in
+# a release build, so a change whose effect rests on inlining across crates
+# needs a release build to confirm it.
+#
 # Incremental compilation stays off: it partitions code by what earlier
 # builds did, so the same source could compile to different instructions in
 # two target directories.
@@ -23,3 +27,20 @@ debug = false
 debug-assertions = false
 overflow-checks = false
 panic = "unwind"
+
+# The harness itself compiles as one unit. It holds the scenarios' copies of
+# generic code, such as the JSON parsing of serde_json, and how many units
+# split it depends on the size of every library's code. Split into several,
+# an edit to a library a scenario never calls can change how the compiler
+# inlines the scenario's code, and its instruction count with it, by more
+# than a verdict's threshold.
+[profile.benchmark.package.mln-rs-bench]
+codegen-units = 1
+
+# `mln_bench_fixed_hash` gives the libraries' hash maps a fixed seed
+# (mln_util::hash), so that a scenario hashes the same way in every process:
+# with a seed from the clock, the order of a map's entries changes the work
+# of every run. The harness refuses to run without it, as when a RUSTFLAGS
+# environment variable replaces these flags.
+[build]
+rustflags = ["--cfg", "mln_bench_fixed_hash"]

@@ -6,4 +6,5 @@ args=(fixtures)
 if [[ -n "${usage_from:-}" ]]; then
   args+=(--from "$usage_from")
 fi
-cargo run -q --profile benchmark --config tools/bench/profile.toml -p mln-rs-bench -- "${args[@]}"
+source tools/dev-shell.sh
+dev_shell cargo run -q --profile benchmark --config tools/bench/profile.toml -p mln-rs-bench -- "${args[@]}"

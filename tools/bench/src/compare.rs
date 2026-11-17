@@ -2,18 +2,21 @@
 //! against a Git ref, both sides running this checkout's harness.
 //!
 //! The ref is checked out in a Git worktree under `<target>/bench-compare`,
-//! which the next comparison reuses, with this checkout's `tools/bench` laid
-//! over it. Both sides build with this checkout's toolchain and
-//! `profile.toml`, so they differ only in the libraries. When the harness
-//! doesn't build against the ref, the comparison stops: it never runs the
-//! ref's own harness, whose scenarios may differ from this one's. Every run
-//! reports its harness id (build.rs), and the comparison refuses runs whose
-//! ids differ.
+//! which the next comparison reuses, with this checkout's harness laid over
+//! it: `tools/bench`, and the libraries' `bench` modules, the entry points
+//! that micro scenarios call. Both sides build with this checkout's
+//! toolchain and `profile.toml`, so they differ only in the libraries. When
+//! the harness doesn't build against the ref, the comparison stops: it never
+//! runs the ref's own harness, whose scenarios may differ from this one's.
+//! Every run reports its harness id (build.rs), and the comparison refuses
+//! runs whose ids differ.
 //!
 //! Counts: each side runs once per scenario, and the ref's runs are kept
 //! under `<target>/bench-compare/samples`, by commit, to measure how much a
 //! count moves from run to run (its spread) without running the ref again
 //! next time; the ref runs again only until it has [`SPREAD_RUNS`] of them.
+//! A scenario whose counts get a verdict runs again on this checkout, until
+//! it has [`CONFIRM_RUNS`], and its verdicts come from those runs.
 //! Times: context only, unless `--rounds` asks for interleaved rounds, which
 //! a rank test then judges.
 
@@ -37,12 +40,15 @@ use crate::stats::{holm, mann_whitney, median, range};
 const SPREAD_RUNS: usize = 3;
 /// The base's runs kept for each scenario, the latest.
 const KEPT_RUNS: usize = 8;
+/// This checkout's runs of a scenario whose counts got a verdict from one.
+const CONFIRM_RUNS: usize = 3;
 /// How many times the larger spread of the two sides a count must move by.
 const SPREAD_FACTOR: f64 = 2.0;
 /// A time's verdict needs its Holm-adjusted p-value below this.
 const ALPHA: f64 = 0.05;
-/// The fewest rounds with which the rank test can reach [`ALPHA`].
-const MIN_ROUNDS: usize = 4;
+/// The time that gets a verdict with rounds; a scenario's other times are
+/// context, since they move with it.
+const TESTED_TIME: &str = "wall";
 
 pub(crate) struct Options {
     pub(crate) base: String,
@@ -51,6 +57,9 @@ pub(crate) struct Options {
     pub(crate) rounds: Option<usize>,
     /// The smallest change of a count that gets a verdict, in percent.
     pub(crate) threshold: f64,
+    /// The same for instruction counts, which a change to how the compiler
+    /// lays out code anywhere in the binary can move a little.
+    pub(crate) instructions_threshold: f64,
     /// The smallest change of a time's median that gets a verdict, in
     /// percent.
     pub(crate) time_threshold: f64,
@@ -76,7 +85,8 @@ pub(crate) struct MetricComparison {
     /// A count's spread: the larger range of either side's runs, as a
     /// fraction of the base.
     pub(crate) spread: Option<f64>,
-    /// A time's Holm-adjusted p-value, with rounds.
+    /// The tested time's p-value with rounds, Holm-adjusted over every
+    /// scenario of the comparison.
     pub(crate) p: Option<f64>,
     pub(crate) verdict: Option<Verdict>,
 }
@@ -100,6 +110,7 @@ pub(crate) struct Comparison {
     pub(crate) harness: String,
     pub(crate) rounds: Option<usize>,
     pub(crate) threshold: f64,
+    pub(crate) instructions_threshold: f64,
     pub(crate) time_threshold: f64,
     pub(crate) scenarios: Vec<ScenarioComparison>,
 }
@@ -113,12 +124,19 @@ impl Comparison {
 /// Builds both sides, runs the scenarios `options.filters` selects and
 /// compares them.
 pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
-    if options.rounds.is_some_and(|rounds| rounds < MIN_ROUNDS) {
-        return Err(format!("--rounds needs at least {MIN_ROUNDS}, the fewest with which a time can get a verdict"));
-    }
     let scenarios = scenarios::select(&options.filters);
     if scenarios.is_empty() {
         return Err("no scenario matches the filters".to_owned());
+    }
+    if let Some(rounds) = options.rounds {
+        let needed = min_rounds(scenarios.len());
+        if rounds < needed {
+            return Err(format!(
+                "--rounds {rounds} can't give a time a verdict among {} scenarios: that takes at least {needed} \
+                 rounds, or fewer scenarios (--filter)",
+                scenarios.len()
+            ));
+        }
     }
     // The checkout the comparison runs in, found at run time: a path built
     // into the binary would differ between the sides' builds, and move the
@@ -142,9 +160,10 @@ pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
     prepare_tree(&root, &tree, &commit)?;
     let base = build(&root, &tree.join("Cargo.toml"), Some(&work.join("target"))).map_err(|error| {
         format!(
-            "{error}\n\nThis checkout's harness doesn't build against {} ({}), so there are no verdicts. \
-             A scenario that needs library code the base lacks can't be compared with it: commit that code \
-             with the scenario, then compare later changes with that commit (tools/bench/README.md).",
+            "{error}\n\nThis checkout's harness, with its libraries' bench modules, doesn't build against {} ({}), \
+             so there are no verdicts. A scenario or entry point that needs library code the base lacks can't be \
+             compared with it: commit that code with the scenario, then compare later changes with that commit \
+             (tools/bench/README.md).",
             options.base,
             short(&commit)
         )
@@ -152,13 +171,14 @@ pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
 
     let samples_path = work.join("samples").join(format!("{commit}.json"));
     let mut samples = read_samples(&samples_path);
-    eprintln!("mln-bench: a first run of each macro scenario on each side, not counted");
+    eprintln!("mln-bench: a first run of each scenario on each side, not counted");
     warm_up(&base, &scenarios)?;
     warm_up(&candidate, &scenarios)?;
     let mut comparisons = Vec::new();
     for (index, scenario) in scenarios.iter().enumerate() {
-        let (base_runs, candidate_runs) = run_sides(scenario, index, &base, &candidate, options.rounds)?;
-        let harness = &candidate_runs[0].harness;
+        let (base_runs, mut candidate_runs) = run_sides(scenario, index, &base, &candidate, options.rounds)?;
+        let harness = candidate_runs[0].harness.clone();
+        let harness = &harness;
         if let Some(run) = base_runs.iter().chain(&candidate_runs).find(|run| &run.harness != harness) {
             return Err(format!(
                 "{}: the sides ran different harness builds ({} and {harness}), so there are no verdicts",
@@ -179,7 +199,22 @@ pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
         let excess = kept.len().saturating_sub(KEPT_RUNS);
         kept.drain(..excess);
         write_samples(&samples_path, &samples)?;
-        comparisons.push(compare_scenario(scenario, &base_runs, &base_counts, &candidate_runs, options));
+        let mut comparison = compare_scenario(scenario, &base_runs, &base_counts, &candidate_runs, options);
+        if options.rounds.is_none() && comparison.has_count_verdict() {
+            while candidate_runs.len() < CONFIRM_RUNS {
+                eprintln!("mln-bench: {}: this checkout again, to confirm its verdicts", scenario.name);
+                let run = run_in_process(&candidate, scenario.name, None)?;
+                if &run.harness != harness {
+                    return Err(format!("{}: this checkout's harness changed while it ran", scenario.name));
+                }
+                candidate_runs.push(run);
+            }
+            comparison = compare_scenario(scenario, &base_runs, &base_counts, &candidate_runs, options);
+        }
+        comparisons.push(comparison);
+    }
+    if options.rounds.is_some() {
+        judge_times(&mut comparisons, options);
     }
     Ok(Comparison {
         base: options.base.clone(),
@@ -187,9 +222,46 @@ pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
         harness: env!("MLN_BENCH_HARNESS").to_owned(),
         rounds: options.rounds,
         threshold: options.threshold,
+        instructions_threshold: options.instructions_threshold,
         time_threshold: options.time_threshold,
         scenarios: comparisons,
     })
+}
+
+/// The fewest rounds with which a time can get a verdict when `tests`
+/// scenarios each test one: Holm's adjustment multiplies the smallest
+/// p-value by `tests`, and with n rounds per side the smallest p-value of a
+/// two-sided Mann-Whitney U test is 2 / C(2n, n), when the sides don't
+/// overlap at all.
+fn min_rounds(tests: usize) -> usize {
+    (2..=64)
+        .find(|&n| {
+            let orderings: f64 = (1..=n).map(|i| (n + i) as f64 / i as f64).product();
+            2.0 / orderings * (tests as f64) < ALPHA
+        })
+        .unwrap_or(usize::MAX)
+}
+
+/// Gives the tested time of each scenario of `comparisons` its p-value
+/// Holm-adjusted over all of them, so that the chance of any false verdict
+/// in the comparison stays under [`ALPHA`], and its verdict.
+fn judge_times(comparisons: &mut [ScenarioComparison], options: &Options) {
+    let mut tested: Vec<&mut MetricComparison> = comparisons
+        .iter_mut()
+        .filter(|scenario| scenario.no_verdicts.is_none())
+        .flat_map(|scenario| scenario.metrics.iter_mut())
+        .filter(|metric| metric.kind == MetricKind::Time && metric.p.is_some())
+        .collect();
+    let p_values: Vec<f64> = tested.iter().map(|metric| metric.p.unwrap_or(1.0)).collect();
+    for (metric, p) in tested.iter_mut().zip(holm(&p_values)) {
+        metric.p = Some(p);
+        if let (Some(b), Some(c), Some(change)) = (metric.base, metric.candidate, metric.change)
+            && p < ALPHA
+            && change.abs() > options.time_threshold / 100.0
+        {
+            metric.verdict = Some(if c > b { Verdict::Worse } else { Verdict::Better });
+        }
+    }
 }
 
 /// Runs `scenario` on both sides: once each, or `rounds` times each in
@@ -225,7 +297,8 @@ fn run_sides(
 
 /// The comparison of one scenario's runs: `base_counts` are the base's runs
 /// for its counts, these and kept ones; `base_runs` and `candidate_runs`
-/// this comparison's, for times.
+/// this comparison's, for times. With rounds, the tested time gets its
+/// p-value unadjusted, and [`judge_times`] judges it.
 fn compare_scenario(
     scenario: &Scenario,
     base_runs: &[Run],
@@ -253,7 +326,7 @@ fn compare_scenario(
             }
         }
     }
-    let mut metrics = Vec::new();
+    let mut metrics: Vec<MetricComparison> = Vec::new();
     for (name, kind, unit) in names {
         let base = if kind == MetricKind::Count { values(base_counts, name) } else { values(base_runs, name) };
         let candidate = values(candidate_runs, name);
@@ -276,31 +349,18 @@ fn compare_scenario(
         {
             let spread = range(&base).max(range(&candidate));
             comparison.spread = Some(relative(spread, b));
-            let noise = (options.threshold / 100.0 * b.abs()).max(SPREAD_FACTOR * spread);
+            let threshold =
+                if name.starts_with("instructions") { options.instructions_threshold } else { options.threshold };
+            let noise = (threshold / 100.0 * b.abs()).max(SPREAD_FACTOR * spread);
             if (c - b).abs() > noise {
                 comparison.verdict = Some(if c > b { Verdict::Worse } else { Verdict::Better });
             }
         }
-        metrics.push((comparison, base, candidate));
-    }
-    // Times: a rank test over the rounds, adjusted over the scenario's times.
-    if options.rounds.is_some() {
-        let times: Vec<usize> = (0..metrics.len())
-            .filter(|&i| metrics[i].0.kind == MetricKind::Time && !metrics[i].1.is_empty() && !metrics[i].2.is_empty())
-            .collect();
-        let p_values: Vec<f64> = times.iter().map(|&i| mann_whitney(&metrics[i].1, &metrics[i].2)).collect();
-        for (&i, p) in times.iter().zip(holm(&p_values)) {
-            let comparison = &mut metrics[i].0;
-            comparison.p = Some(p);
-            if let (Some(b), Some(c), Some(change)) = (comparison.base, comparison.candidate, comparison.change)
-                && p < ALPHA
-                && change.abs() > options.time_threshold / 100.0
-            {
-                comparison.verdict = Some(if c > b { Verdict::Worse } else { Verdict::Better });
-            }
+        if options.rounds.is_some() && kind == MetricKind::Time && name == TESTED_TIME {
+            comparison.p = (!base.is_empty() && !candidate.is_empty()).then(|| mann_whitney(&base, &candidate));
         }
+        metrics.push(comparison);
     }
-    let mut metrics: Vec<MetricComparison> = metrics.into_iter().map(|(comparison, ..)| comparison).collect();
     if no_verdicts.is_some() {
         for metric in &mut metrics {
             metric.verdict = None;
@@ -313,6 +373,12 @@ fn compare_scenario(
         base_runs: base_counts.len(),
         candidate_runs: candidate_runs.len(),
         metrics,
+    }
+}
+
+impl ScenarioComparison {
+    fn has_count_verdict(&self) -> bool {
+        self.metrics.iter().any(|metric| metric.kind == MetricKind::Count && metric.verdict.is_some())
     }
 }
 
@@ -340,14 +406,16 @@ pub(crate) fn text(comparison: &Comparison) -> String {
     let _ = writeln!(out, "harness {} on both sides", comparison.harness);
     let _ = writeln!(
         out,
-        "counts: a verdict needs a change over {}% and over {SPREAD_FACTOR}x the larger spread of either side's runs",
-        comparison.threshold
+        "counts: a verdict needs a change over {}% ({}% for instructions) and over {SPREAD_FACTOR}x the larger \
+         spread of either side's runs; per-unit counts are context",
+        comparison.threshold, comparison.instructions_threshold
     );
     match comparison.rounds {
         Some(rounds) => {
             let _ = writeln!(
                 out,
-                "times: {rounds} interleaved rounds; a verdict needs Holm-adjusted Mann-Whitney p < {ALPHA} and a change of the median over {}%",
+                "times: {rounds} interleaved rounds; {TESTED_TIME} gets a verdict when its Mann-Whitney p, \
+                 Holm-adjusted over the scenarios, is under {ALPHA} and its median moves over {}%; other times are context",
                 comparison.time_threshold
             );
         }
@@ -385,7 +453,11 @@ pub(crate) fn text(comparison: &Comparison) -> String {
             let verdict = match metric.verdict {
                 Some(Verdict::Better) => "better",
                 Some(Verdict::Worse) => "WORSE",
-                None if metric.kind == MetricKind::Time && comparison.rounds.is_none() => "(context)",
+                None if metric.kind == MetricKind::PerUnit
+                    || (metric.kind == MetricKind::Time && metric.p.is_none()) =>
+                {
+                    "(context)"
+                }
                 None => "",
             };
             rows.push(vec![
@@ -452,11 +524,18 @@ fn build(root: &Path, manifest: &Path, target_dir: Option<&Path>) -> Result<Path
 }
 
 /// Checks `commit` out at `tree`, a worktree of the checkout's repository,
-/// and lays this checkout's harness over it as a member of its workspace.
+/// and lays this checkout's harness over it: `tools/bench`, as a member of
+/// its workspace, and each library's `bench` module, in place of the
+/// commit's. A file is written only where its contents differ, so that
+/// Cargo builds again only what changed since the last comparison.
 fn prepare_tree(root: &Path, tree: &Path, commit: &str) -> Result<(), String> {
     if tree.join(".git").exists() {
-        git(tree, &["checkout", "-q", "--force", "--detach", commit])?;
-        git(tree, &["clean", "-q", "-d", "--force"])?;
+        // The tree keeps the harness of the last comparison when it has the
+        // commit already.
+        if git(tree, &["rev-parse", "HEAD"]).ok().as_deref() != Some(commit) {
+            git(tree, &["checkout", "-q", "--force", "--detach", commit])?;
+            git(tree, &["clean", "-q", "-d", "--force"])?;
+        }
     } else {
         if tree.exists() {
             std::fs::remove_dir_all(tree).map_err(|error| format!("{}: {error}", tree.display()))?;
@@ -464,15 +543,40 @@ fn prepare_tree(root: &Path, tree: &Path, commit: &str) -> Result<(), String> {
         let path = tree.to_str().ok_or("a path that isn't UTF-8")?;
         git(root, &["worktree", "add", "-q", "--force", "--detach", path, commit])?;
     }
-    let harness = tree.join("tools/bench");
-    if harness.exists() {
-        std::fs::remove_dir_all(&harness).map_err(|error| format!("{}: {error}", harness.display()))?;
+    sync_dir(&root.join("tools/bench"), &tree.join("tools/bench"))?;
+    let modules = bench_modules(root)?;
+    for module in &modules {
+        write_if_changed(&tree.join(module), &read(&root.join(module))?)?;
     }
-    copy_dir(&root.join("tools/bench"), &harness)?;
+    // A module that only the commit has goes back to the commit's.
+    for module in bench_modules(tree)? {
+        if !modules.contains(&module) {
+            let path = module.to_str().ok_or("a path that isn't UTF-8")?.replace('\\', "/");
+            if git(tree, &["checkout", "-q", commit, "--", &path]).is_err() {
+                let path = tree.join(&module);
+                std::fs::remove_file(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+            }
+        }
+    }
     let manifest_path = tree.join("Cargo.toml");
     let manifest = std::fs::read_to_string(&manifest_path).map_err(|error| error.to_string())?;
-    let manifest = with_member(&manifest)?;
-    std::fs::write(&manifest_path, manifest).map_err(|error| error.to_string())
+    write_if_changed(&manifest_path, with_member(&manifest)?.as_bytes())
+}
+
+/// The libraries' `bench` modules in the checkout at `root`, which belong to
+/// the harness: `crates/<library>/src/bench.rs`, relative to `root`.
+fn bench_modules(root: &Path) -> Result<Vec<PathBuf>, String> {
+    let crates = root.join("crates");
+    let mut modules = Vec::new();
+    for entry in std::fs::read_dir(&crates).map_err(|error| format!("{}: {error}", crates.display()))? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let module = Path::new("crates").join(entry.file_name()).join("src/bench.rs");
+        if root.join(&module).is_file() {
+            modules.push(module);
+        }
+    }
+    modules.sort();
+    Ok(modules)
 }
 
 /// The workspace manifest `manifest` with `tools/bench` among its members.
@@ -485,8 +589,11 @@ fn with_member(manifest: &str) -> Result<String, String> {
     Ok(format!("{}\n  \"tools/bench\",{}", &manifest[..at], &manifest[at..]))
 }
 
-fn copy_dir(from: &Path, to: &Path) -> Result<(), String> {
+/// Makes the directory `to` hold what `from` holds, leaving out build
+/// output, and writes only the files whose contents differ.
+fn sync_dir(from: &Path, to: &Path) -> Result<(), String> {
     std::fs::create_dir_all(to).map_err(|error| format!("{}: {error}", to.display()))?;
+    let mut names = Vec::new();
     for entry in std::fs::read_dir(from).map_err(|error| format!("{}: {error}", from.display()))? {
         let entry = entry.map_err(|error| error.to_string())?;
         let path = entry.path();
@@ -494,12 +601,34 @@ fn copy_dir(from: &Path, to: &Path) -> Result<(), String> {
             continue;
         }
         if path.is_dir() {
-            copy_dir(&path, &to.join(entry.file_name()))?;
+            sync_dir(&path, &to.join(entry.file_name()))?;
         } else {
-            std::fs::copy(&path, to.join(entry.file_name())).map_err(|error| format!("{}: {error}", path.display()))?;
+            write_if_changed(&to.join(entry.file_name()), &read(&path)?)?;
         }
+        names.push(entry.file_name());
+    }
+    for entry in std::fs::read_dir(to).map_err(|error| format!("{}: {error}", to.display()))? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        if entry.file_name() == "target" || names.contains(&entry.file_name()) {
+            continue;
+        }
+        let path = entry.path();
+        let removed = if path.is_dir() { std::fs::remove_dir_all(&path) } else { std::fs::remove_file(&path) };
+        removed.map_err(|error| format!("{}: {error}", path.display()))?;
     }
     Ok(())
+}
+
+fn read(path: &Path) -> Result<Vec<u8>, String> {
+    std::fs::read(path).map_err(|error| format!("{}: {error}", path.display()))
+}
+
+/// Writes `contents` to `path` unless it holds them already.
+fn write_if_changed(path: &Path, contents: &[u8]) -> Result<(), String> {
+    if std::fs::read(path).is_ok_and(|current| current == contents) {
+        return Ok(());
+    }
+    std::fs::write(path, contents).map_err(|error| format!("{}: {error}", path.display()))
 }
 
 /// Holds the comparison's lock in `work` until it drops, so that two
@@ -542,25 +671,35 @@ mod tests {
     use crate::scenario::{Kind, Metric};
 
     fn run(instructions: f64, wall: f64) -> Run {
+        run_with(instructions, 1000.0, wall)
+    }
+
+    fn run_with(instructions: f64, allocations: f64, wall: f64) -> Run {
+        let count = |name: &str, kind, value| Metric { name: name.to_owned(), kind, unit: Unit::Count, value };
         Run {
             scenario: "micro/test/case".to_owned(),
             kind: Kind::Micro,
             harness: "h".to_owned(),
             environment: Environment::machine(),
             metrics: vec![
-                Metric {
-                    name: "instructions".to_owned(),
-                    kind: MetricKind::Count,
-                    unit: Unit::Count,
-                    value: instructions,
-                },
+                count("instructions", MetricKind::Count, instructions),
+                count("allocations", MetricKind::Count, allocations),
+                count("allocations_per_tile", MetricKind::PerUnit, allocations / 10.0),
                 Metric { name: "wall".to_owned(), kind: MetricKind::Time, unit: Unit::Ms, value: wall },
+                Metric { name: "cpu".to_owned(), kind: MetricKind::Time, unit: Unit::Ms, value: wall },
             ],
         }
     }
 
     fn options(rounds: Option<usize>) -> Options {
-        Options { base: "main".to_owned(), filters: Vec::new(), rounds, threshold: 1.0, time_threshold: 2.0 }
+        Options {
+            base: "main".to_owned(),
+            filters: Vec::new(),
+            rounds,
+            threshold: 0.25,
+            instructions_threshold: 1.0,
+            time_threshold: 2.0,
+        }
     }
 
     const SCENARIO: Scenario = Scenario { name: "micro/test/case", kind: Kind::Micro, question: "?", run: |_| {} };
@@ -589,14 +728,41 @@ mod tests {
     }
 
     #[test]
+    fn counts_that_repeat_take_a_smaller_threshold_than_instructions() {
+        let base = [run(1000.0, 1.0), run(1000.0, 1.0), run(1000.0, 1.0)];
+        // +0.5% of both: allocations get a verdict, instructions don't, and
+        // per-unit counts are context.
+        let comparison =
+            compare_scenario(&SCENARIO, &base[..1], &base, &[run_with(1005.0, 1005.0, 1.0)], &options(None));
+        assert_eq!(verdict(&comparison, "allocations"), Some(Verdict::Worse));
+        assert_eq!(verdict(&comparison, "instructions"), None);
+        assert_eq!(verdict(&comparison, "allocations_per_tile"), None);
+        assert!(comparison.has_count_verdict());
+    }
+
+    #[test]
     fn a_time_needs_rounds_and_a_significant_change() {
         let base: Vec<Run> = (0..6).map(|i| run(1000.0, 10.0 + f64::from(i) * 0.01)).collect();
         let slower: Vec<Run> = (0..6).map(|i| run(1000.0, 11.0 + f64::from(i) * 0.01)).collect();
-        let comparison = compare_scenario(&SCENARIO, &base, &base, &slower, &options(Some(6)));
-        assert_eq!(verdict(&comparison, "wall"), Some(Verdict::Worse));
         let same: Vec<Run> = (0..6).map(|i| run(1000.0, 10.005 + f64::from(i) * 0.01)).collect();
-        let comparison = compare_scenario(&SCENARIO, &base, &base, &same, &options(Some(6)));
-        assert_eq!(verdict(&comparison, "wall"), None);
+        let options = options(Some(6));
+        let mut comparisons = vec![
+            compare_scenario(&SCENARIO, &base, &base, &slower, &options),
+            compare_scenario(&SCENARIO, &base, &base, &same, &options),
+        ];
+        judge_times(&mut comparisons, &options);
+        assert_eq!(verdict(&comparisons[0], "wall"), Some(Verdict::Worse));
+        // Only wall is tested.
+        assert_eq!(verdict(&comparisons[0], "cpu"), None);
+        assert_eq!(verdict(&comparisons[1], "wall"), None);
+    }
+
+    #[test]
+    fn rounds_grow_with_the_scenarios_tested() {
+        // 2 / C(8, 4) = 0.029 for one scenario; 2 / C(14, 7) x 50 = 0.029.
+        assert_eq!(min_rounds(1), 4);
+        assert_eq!(min_rounds(2), 5);
+        assert_eq!(min_rounds(50), 7);
     }
 
     #[test]

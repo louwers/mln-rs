@@ -45,9 +45,22 @@ pub(crate) fn warm_up(binary: &Path, scenarios: &[&Scenario]) -> Result<(), Stri
     Ok(())
 }
 
+/// Fails unless this binary was built as `profile.toml` builds it, with the
+/// libraries' hash maps seeded alike in every process.
+pub(crate) fn check_build() -> Result<(), String> {
+    if mln_util::hash::SEED_IS_FIXED {
+        Ok(())
+    } else {
+        Err("this build lacks tools/bench/profile.toml's `--cfg mln_bench_fixed_hash`, without which hash maps \
+             hash differently in every run: build with `--config tools/bench/profile.toml`, and without RUSTFLAGS"
+            .to_owned())
+    }
+}
+
 /// Runs `scenario` in this process and writes its [`Run`] to `out`: what the
 /// runner's child process does.
 pub(crate) fn exec(scenario: &Scenario, out: &Path, image: Option<PathBuf>) -> Result<(), String> {
+    check_build()?;
     let mut bench = Bench::new();
     bench.image = image;
     (scenario.run)(&mut bench);

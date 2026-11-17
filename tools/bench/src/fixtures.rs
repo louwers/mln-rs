@@ -53,9 +53,6 @@ pub(crate) struct TileSet {
     /// West, south, east, north: a camera centered here sees only tiles the
     /// archive holds, when its view is at most two tiles across.
     pub(crate) area: [f64; 4],
-    /// The archive's first and last zoom.
-    #[expect(dead_code, reason = "no scenario reads the fixtures")]
-    pub(crate) zooms: [u8; 2],
 }
 
 /// A file of the snapshot.
