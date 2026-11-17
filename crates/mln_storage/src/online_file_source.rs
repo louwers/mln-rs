@@ -1,26 +1,27 @@
-// The requests run in the online core (`Core`), which owns their state and
-// takes messages from a channel: an `OnlineRequest` per caller request,
-// started by a deadline (the first request at once, then revalidation when
-// the response expires, or retries with backoff after errors), queued while
-// `maximum_concurrent_requests` transfers are active (regular priority
-// before low priority, and within a priority by the resource's
-// `RequestOrder`), and performed by the HTTPFileSource. `requests` is keyed
-// by id, so it iterates in id order.
+// The requests run in the online core (`OnlineCore`), which owns their state
+// and runs the tasks of its queue (`OnlineQueue`): an `OnlineRequest` per
+// caller request, started by a deadline (the first request at once, then
+// revalidation when the response expires, or retries with backoff after
+// errors), queued while `maximum_concurrent_requests` transfers are active
+// (regular priority before low priority, and within a priority by the
+// resource's `RequestOrder`), and performed by the HTTPFileSource.
+// `requests` is keyed by id, so it iterates in id order.
 //
 // The resource transform's answers and the transfers' responses come back
-// to the core as messages, from whichever thread sends them, numbered with
-// a generation of their request: an answer whose generation is no longer
-// the one the request waits for is dropped, so a stale one can't end a
-// transfer twice. A deadline is numbered the same way, so restarting or
-// stopping a request's deadline only takes a new number.
+// to the core as tasks, from whichever thread posts them, numbered with a
+// generation of their request: an answer whose generation is no longer the
+// one the request waits for is dropped, so a stale one can't end a transfer
+// twice; they need the number because they may already be on their way
+// when the core moves on. A deadline is a timed task of the core's own
+// queue, which runs on the core's thread, so restarting or stopping a
+// request's deadline, or cancelling the request, cancels that task instead.
 //
 // The core runs on a thread of its own, except in the browser, where the
-// host's pump runs it (`OnlineCore::run_due`).
+// host's pump runs its queue (`OnlineFileSource::local`).
 
-use std::cmp::Reverse;
-use std::collections::{BinaryHeap, VecDeque};
+use std::collections::VecDeque;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
-use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use mln_util::chrono::{Timestamp, now};
@@ -28,6 +29,7 @@ use mln_util::constants::{
     ASSET_PROTOCOL, CLOCK_SKEW_RETRY_TIMEOUT, DEFAULT_MAXIMUM_CONCURRENT_REQUESTS, FILE_PROTOCOL,
 };
 use mln_util::logging::{Event, Log};
+use mln_util::queue::{Queue, TimedTask};
 use mln_util::time::Instant;
 use mln_vec_map::{VecMap, VecSet};
 
@@ -41,60 +43,10 @@ use crate::resource::{Priority, RequestOrder, Resource};
 use crate::resource_transform::{ResourceTransform, TransformResult};
 use crate::response::{Reason, ResourceError, Response};
 
-/// What reaches the core, in the order it was sent.
-enum Message {
-    Request {
-        id: u64,
-        resource: Resource,
-        responder: Responder,
-    },
-    Cancel(u64),
-    /// The resource transform's answer for request `id`.
-    Transformed {
-        id: u64,
-        generation: u64,
-        result: TransformResult,
-    },
-    /// A transfer's response for request `id`.
-    TransferDone {
-        id: u64,
-        generation: u64,
-        response: Response,
-    },
-    /// The network is reachable again.
-    Reachable,
-    SetMaximumConcurrentRequests(u32),
-    SetOnline(bool),
-    SetResourceTransform(Option<ResourceTransform>),
-    SetHttpHeaderTransform(HttpHeaderTransform),
-    #[cfg(test)]
-    Run(Box<dyn FnOnce(&mut Core) + Send>),
-    /// Ends the core, after the messages sent before.
-    Stop,
-}
-
-/// The way into the core: its channel, and what wakes whoever runs it.
-#[derive(Clone)]
-struct Inbox {
-    sender: mpsc::Sender<Message>,
-    wake: Option<Arc<dyn Fn() + Send + Sync>>,
-}
-
-impl Inbox {
-    /// Sends `message`, which the core drops if it has ended.
-    fn send(&self, message: Message) {
-        let _ = self.try_send(message);
-    }
-
-    /// Sends `message`, or gives it back when the core has ended.
-    fn try_send(&self, message: Message) -> Result<(), Box<Message>> {
-        self.sender.send(message).map_err(|mpsc::SendError(message)| Box::new(message))?;
-        if let Some(wake) = &self.wake {
-            wake();
-        }
-        Ok(())
-    }
-}
+/// The queue of an [`OnlineCore`], whose tasks run in the order they were
+/// posted. It stops once its source has dropped, and the queue's owner then
+/// closes it.
+pub type OnlineQueue = Queue<OnlineCore>;
 
 struct OnlineRequest {
     resource: Resource,
@@ -103,8 +55,8 @@ struct OnlineRequest {
     transfer: Option<(u64, Request)>,
     /// The generation of the resource transform's answer it waits for.
     transforming: Option<u64>,
-    /// The generation of the deadline that starts it again, while one runs.
-    timer: Option<u64>,
+    /// The task of the deadline that starts it again, while one runs.
+    timer: Option<TimedTask>,
 
     /// Counts the number of times a response was already expired when
     /// received. We're using this to add a delay when making a new request
@@ -226,12 +178,12 @@ impl OnlineRequest {
     }
 }
 
-/// The online file source's state, which the messages of its channel
-/// change.
-struct Core {
-    receiver: mpsc::Receiver<Message>,
-    /// For the transform's answers and the transfers' responses.
-    inbox: Inbox,
+/// The state of an [`OnlineFileSource`]'s requests, which the tasks of its
+/// [`OnlineQueue`] change on the thread that owns it.
+pub struct OnlineCore {
+    /// For the transform's answers, the transfers' responses and the
+    /// deadlines.
+    queue: OnlineQueue,
     /// The lifetime of a request is:
     ///
     /// 1. Waiting for its deadline (revalidation or retry)
@@ -245,9 +197,6 @@ struct Core {
     requests: VecMap<u64, OnlineRequest>,
     pending_requests: PendingRequests,
     active_requests: VecSet<u64>,
-    /// The requests' deadlines: when each starts again, with the deadline's
-    /// generation, which also orders deadlines that are due at once.
-    deadlines: BinaryHeap<Reverse<(Instant, u64, u64)>>,
     /// The last generation handed out.
     generation: u64,
 
@@ -256,141 +205,63 @@ struct Core {
     http_file_source: HTTPFileSource,
     resource_transform: Option<ResourceTransform>,
     network: Arc<NetworkStatus>,
-    /// A [`Message::Reachable`] is on its way.
+    /// A task that tells the core the network is reachable again is on its
+    /// way.
     reachable: Arc<AtomicBool>,
     /// Replaces the backoff after a connection error, so that a test can
     /// tell the retries it starts apart from the backoff's.
     connection_backoff: Option<Duration>,
 }
 
-impl Core {
+impl OnlineCore {
     fn next_generation(&mut self) -> u64 {
         self.generation += 1;
         self.generation
     }
 
-    /// Handles `message`. Returns `false` for [`Message::Stop`].
-    fn handle(&mut self, message: Message) -> bool {
-        match message {
-            Message::Request { id, resource, responder } => {
-                // A request cancelled before this ran had its cancel run
-                // first, which found nothing to cancel.
-                if !responder.is_cancelled() {
-                    self.request(id, resource, responder);
-                }
-            }
-            Message::Cancel(id) => self.cancel(id),
-            Message::Transformed { id, generation, result } => {
-                if self.requests.get(&id).is_some_and(|req| req.transforming == Some(generation)) {
-                    self.set_transform_result(id, result);
-                }
-            }
-            Message::TransferDone { id, generation, response } => {
-                let in_flight = self.requests.get(&id).and_then(|req| req.transfer.as_ref()).map(|(g, _)| *g);
-                if in_flight == Some(generation) {
-                    self.transfer_done(id, response);
-                }
-            }
-            Message::Reachable => {
-                self.reachable.store(false, Ordering::SeqCst);
-                self.network_is_reachable_again();
-            }
-            Message::SetMaximumConcurrentRequests(maximum) => self.maximum_concurrent_requests = maximum,
-            Message::SetOnline(online) => {
-                self.online = online;
-                if online {
-                    self.network_is_reachable_again();
-                }
-            }
-            Message::SetResourceTransform(transform) => self.resource_transform = transform,
-            Message::SetHttpHeaderTransform(transform) => self.http_file_source.set_http_header_transform(transform),
-            #[cfg(test)]
-            Message::Run(run) => run(self),
-            Message::Stop => return false,
-        }
-        true
-    }
-
-    /// Handles the messages that have arrived, then starts the requests
-    /// whose deadlines are due. Returns `false` once the core has ended.
-    fn run_due(&mut self) -> bool {
-        loop {
-            match self.receiver.try_recv() {
-                Ok(message) => {
-                    if !self.handle(message) {
-                        return false;
-                    }
-                }
-                Err(mpsc::TryRecvError::Empty) => break,
-                Err(mpsc::TryRecvError::Disconnected) => return false,
-            }
-        }
-        self.fire_due();
-        true
-    }
-
-    /// Handles messages and deadlines until the core ends.
-    #[cfg(not(target_family = "wasm"))]
-    fn run(mut self) {
-        loop {
-            self.fire_due();
-            let message = match self.next_deadline() {
-                Some(deadline) => {
-                    match self.receiver.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
-                        Ok(message) => message,
-                        Err(mpsc::RecvTimeoutError::Timeout) => continue,
-                        Err(mpsc::RecvTimeoutError::Disconnected) => return,
-                    }
-                }
-                None => match self.receiver.recv() {
-                    Ok(message) => message,
-                    Err(mpsc::RecvError) => return,
-                },
-            };
-            if !self.handle(message) || !self.run_due() {
-                return;
-            }
+    /// The resource transform's answer for request `id`, which it takes
+    /// unless it no longer waits for answer `generation`.
+    fn transformed(&mut self, id: u64, generation: u64, result: TransformResult) {
+        if self.requests.get(&id).is_some_and(|req| req.transforming == Some(generation)) {
+            self.set_transform_result(id, result);
         }
     }
 
-    /// The earliest deadline that would start a request.
-    fn next_deadline(&mut self) -> Option<Instant> {
-        while let Some(Reverse((due, generation, id))) = self.deadlines.peek().copied() {
-            if self.requests.get(&id).is_some_and(|req| req.timer == Some(generation)) {
-                return Some(due);
-            }
-            self.deadlines.pop();
+    /// A transfer's response for request `id`, which ends its transfer
+    /// unless transfer `generation` is no longer the one in flight.
+    fn transferred(&mut self, id: u64, generation: u64, response: Response) {
+        let in_flight = self.requests.get(&id).and_then(|req| req.transfer.as_ref()).map(|(g, _)| *g);
+        if in_flight == Some(generation) {
+            self.transfer_done(id, response);
         }
-        None
     }
 
-    /// Starts the requests whose deadlines were due when this was called,
-    /// earliest first, and of those due at once, in the order they were set.
-    fn fire_due(&mut self) {
-        let now = Instant::now();
-        let mut due = Vec::new();
-        while let Some(&Reverse((at, generation, id))) = self.deadlines.peek() {
-            if at > now {
-                break;
-            }
-            self.deadlines.pop();
-            due.push((generation, id));
+    /// Starts request `id` again: what its deadline's task does. Cancelling
+    /// or replacing the request's deadline cancels that task, so it runs
+    /// only for the deadline that the request waits for.
+    fn deadline_passed(&mut self, id: u64) {
+        let Some(req) = self.requests.get_mut(&id) else { return };
+        req.timer = None;
+        if req.transform_failed {
+            self.transform(id);
+        } else {
+            self.activate_or_queue_request(id);
         }
-        for (generation, id) in due {
-            let Some(req) = self.requests.get_mut(&id) else { continue };
-            if req.timer != Some(generation) {
-                continue;
-            }
-            req.timer = None;
-            if req.transform_failed {
-                self.transform(id);
-            } else {
-                self.activate_or_queue_request(id);
-            }
+    }
+
+    fn set_online(&mut self, online: bool) {
+        self.online = online;
+        if online {
+            self.network_is_reachable_again();
         }
     }
 
     fn request(&mut self, id: u64, resource: Resource, responder: Responder) {
+        // A request cancelled before this ran had its cancel run first,
+        // which found nothing to cancel.
+        if responder.is_cancelled() {
+            return;
+        }
         self.requests.insert(
             id,
             OnlineRequest {
@@ -423,11 +294,13 @@ impl Core {
         // request.
         req.transforming = Some(generation);
         let (kind, url) = (req.resource.kind, req.resource.url.clone());
-        let inbox = self.inbox.clone();
+        let queue = self.queue.clone();
         transform(
             kind,
             &url,
-            Box::new(move |result: TransformResult| inbox.send(Message::Transformed { id, generation, result })),
+            Box::new(move |result: TransformResult| {
+                queue.post(move |core| core.transformed(id, generation, result));
+            }),
         );
     }
 
@@ -454,15 +327,11 @@ impl Core {
         } else {
             self.pending_requests.remove(id);
         }
-        let req = self.requests.remove(&id);
-        drop(req);
-        // Deadlines of cancelled requests wait in the heap until they are
-        // due; drop them once they outnumber the live ones.
-        if self.deadlines.len() > 2 * self.requests.len() + 64 {
-            let requests = &self.requests;
-            self.deadlines.retain(|Reverse((_, generation, id))| {
-                requests.get(id).is_some_and(|req| req.timer == Some(*generation))
-            });
+        if let Some(req) = self.requests.remove(&id) {
+            if let Some(timer) = req.timer {
+                self.queue.cancel(timer);
+            }
+            drop(req);
         }
     }
 
@@ -483,10 +352,10 @@ impl Core {
 
         if self.online {
             let generation = self.next_generation();
-            let inbox = self.inbox.clone();
+            let queue = self.queue.clone();
             let Some(req) = self.requests.get_mut(&id) else { return };
             let (request, responder) = Request::new(move |response: Response| {
-                inbox.send(Message::TransferDone { id, generation, response });
+                queue.post(move |core| core.transferred(id, generation, response));
             });
             req.transfer = Some((generation, request));
             self.http_file_source.start(&req.resource, responder);
@@ -548,7 +417,6 @@ impl Core {
     /// Requests the resource again after `timeout`, or never for `None`.
     fn schedule(&mut self, id: u64, timeout: Option<Duration>) {
         let in_progress = self.pending_requests.contains(id) || self.active_requests.contains(&id);
-        let generation = self.next_generation();
         let offline = self.network.get() == Status::Offline;
         let Some(req) = self.requests.get_mut(&id) else { return };
         if req.transforming.is_some() || in_progress {
@@ -560,21 +428,22 @@ impl Core {
             return;
         };
 
+        if let Some(timer) = req.timer.take() {
+            self.queue.cancel(timer);
+        }
+
         // Emulate a Connection error when the Offline mode is forced, and
         // don't retry: the request will get re-triggered when the
         // NetworkStatus is set back to Online.
         if offline {
             req.failed_request_reason = Reason::Connection;
             req.failed_requests = 1;
-            req.timer = None;
             return;
         }
 
         // A deadline past what `Instant` can hold never comes.
-        req.timer = None;
         if let Some(due) = Instant::now().checked_add(timeout) {
-            req.timer = Some(generation);
-            self.deadlines.push(Reverse((due, generation, id)));
+            req.timer = Some(self.queue.post_at(due, move |core| core.deadline_passed(id)));
         }
     }
 
@@ -654,39 +523,21 @@ pub struct OnlineFileSource {
     maximum_concurrent_requests: AtomicU32,
     /// The id of the next request.
     next_request_id: AtomicU64,
-    inbox: Inbox,
+    queue: OnlineQueue,
     _reachability: Subscription,
     #[cfg(not(target_family = "wasm"))]
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
-/// The online core of an [`OnlineFileSource`] in the browser, which the
-/// host runs on the source's thread.
-#[cfg(target_family = "wasm")]
-pub struct OnlineCore(Core);
-
 #[cfg(target_family = "wasm")]
 impl OnlineCore {
-    /// Handles what the source sent since the last call, and starts the
-    /// requests whose deadlines are due. Returns `false` once the source
-    /// has dropped, after which the core does nothing.
-    pub fn run_due(&mut self) -> bool {
-        self.0.run_due()
-    }
-
-    /// When a request starts again next: the earliest of their
-    /// revalidations and retries, if any waits.
-    pub fn next_deadline(&mut self) -> Option<Instant> {
-        self.0.next_deadline()
-    }
-
     /// Sets where the browser's fetch looks for a response that the host
     /// fetched ahead before it fetches a whole resource: `take(url)`
     /// returns a promise of the `Response` fetched for exactly `url`, at
     /// most once for each, or undefined. A promise that rejects is fetched
     /// again. `None` stops looking.
     pub fn set_fetch_preloads(&mut self, take: Option<js_sys::Function>) {
-        self.0.http_file_source.set_fetch_preloads(take);
+        self.http_file_source.set_fetch_preloads(take);
     }
 }
 
@@ -696,50 +547,63 @@ impl OnlineFileSource {
     #[cfg(not(target_family = "wasm"))]
     #[must_use]
     pub fn new(network: Arc<NetworkStatus>) -> Self {
-        let (mut source, core) = Self::with_core(network, None);
+        let (mut source, core) = Self::with_core(network);
+        let queue = source.queue.clone();
         // The core, and its HTTP client, are made on the thread.
-        match mln_util::thread::spawn("OnlineFileSource", move || core().run()) {
+        let thread = mln_util::thread::spawn("OnlineFileSource", move || {
+            let mut core = core();
+            queue.run(&mut core);
+            // What comes once the source has dropped, such as a transfer's
+            // late response, drops at once.
+            queue.close();
+            drop(core);
+        });
+        match thread {
             Ok(thread) => source.thread = Some(thread),
-            Err(error) => Log::error(Event::General, format!("The online file source's thread didn't start: {error}")),
+            Err(error) => {
+                source.queue.close();
+                Log::error(Event::General, format!("The online file source's thread didn't start: {error}"));
+            }
         }
         source
     }
 
     /// A source whose requests follow `network` and run in the returned
-    /// core, which the caller runs on this thread: `wake` runs, on any
-    /// thread, whenever the core has work for
-    /// [`run_due`](OnlineCore::run_due).
+    /// core, with the returned queue, which the caller runs on this thread
+    /// with [`Queue::run_once`] until the queue
+    /// [`is_stopped`](Queue::is_stopped), then closes. The queue's waker
+    /// tells the caller when it has tasks, and its
+    /// [`next_deadline`](Queue::next_deadline) when a retry or a
+    /// revalidation is due.
     #[cfg(target_family = "wasm")]
     #[must_use]
-    pub fn local(network: Arc<NetworkStatus>, wake: Arc<dyn Fn() + Send + Sync>) -> (Self, OnlineCore) {
-        let (source, core) = Self::with_core(network, Some(wake));
-        (source, OnlineCore(core()))
+    pub fn local(network: Arc<NetworkStatus>) -> (Self, OnlineQueue, OnlineCore) {
+        let (source, core) = Self::with_core(network);
+        let queue = source.queue.clone();
+        (source, queue, core())
     }
 
     /// The source, and what makes its core.
-    fn with_core(
-        network: Arc<NetworkStatus>,
-        wake: Option<Arc<dyn Fn() + Send + Sync>>,
-    ) -> (Self, impl FnOnce() -> Core + Send + 'static) {
-        let (sender, receiver) = mpsc::channel();
-        let inbox = Inbox { sender, wake };
+    fn with_core(network: Arc<NetworkStatus>) -> (Self, impl FnOnce() -> OnlineCore + Send + 'static) {
+        let queue = OnlineQueue::new();
         let reachable = Arc::new(AtomicBool::new(false));
         let reachability = {
-            let (inbox, reachable) = (inbox.clone(), Arc::clone(&reachable));
+            let (queue, reachable) = (queue.clone(), Arc::clone(&reachable));
             network.subscribe(move || {
                 if !reachable.swap(true, Ordering::SeqCst) {
-                    inbox.send(Message::Reachable);
+                    queue.post(|core| {
+                        core.reachable.store(false, Ordering::SeqCst);
+                        core.network_is_reachable_again();
+                    });
                 }
             })
         };
-        let core_inbox = inbox.clone();
-        let core = move || Core {
-            receiver,
-            inbox: core_inbox,
+        let core_queue = queue.clone();
+        let core = move || OnlineCore {
+            queue: core_queue,
             requests: VecMap::new(),
             pending_requests: PendingRequests::default(),
             active_requests: VecSet::new(),
-            deadlines: BinaryHeap::new(),
             generation: 0,
             online: true,
             maximum_concurrent_requests: DEFAULT_MAXIMUM_CONCURRENT_REQUESTS,
@@ -752,7 +616,7 @@ impl OnlineFileSource {
         let source = OnlineFileSource {
             maximum_concurrent_requests: AtomicU32::new(DEFAULT_MAXIMUM_CONCURRENT_REQUESTS),
             next_request_id: AtomicU64::new(1),
-            inbox,
+            queue,
             _reachability: reachability,
             #[cfg(not(target_family = "wasm"))]
             thread: None,
@@ -769,44 +633,58 @@ impl OnlineFileSource {
     /// Sets the most transfers in flight at once.
     pub fn set_maximum_concurrent_requests(&self, maximum: u32) {
         self.maximum_concurrent_requests.store(maximum, Ordering::Relaxed);
-        self.inbox.send(Message::SetMaximumConcurrentRequests(maximum));
+        self.queue.post(move |core| core.maximum_concurrent_requests = maximum);
     }
 
     /// Takes the source offline or back online. Offline, every transfer
     /// fails with a connection error; back online, the requests that failed
     /// that way retry at once.
     pub fn set_online(&self, online: bool) {
-        self.inbox.send(Message::SetOnline(online));
+        self.queue.post(move |core| core.set_online(online));
     }
 
     /// Rewrites the URLs of requests before they load, or stops rewriting
     /// them for `None`.
     pub fn set_resource_transform(&self, transform: Option<ResourceTransform>) {
-        self.inbox.send(Message::SetResourceTransform(transform));
+        self.queue.post(move |core| core.resource_transform = transform);
     }
 
     /// Sets the headers to add to each transfer.
     pub fn set_http_header_transform(&self, transform: HttpHeaderTransform) {
-        self.inbox.send(Message::SetHttpHeaderTransform(transform));
+        self.queue.post(move |core| core.http_file_source.set_http_header_transform(transform));
     }
 
     /// Holds the core until the guard drops (`crate::tests::pause`).
     #[cfg(test)]
     pub(crate) fn pause(&self) -> crate::tests::Paused {
-        crate::tests::pause(|hold| self.inbox.send(Message::Run(Box::new(move |_| hold()))))
+        crate::tests::pause(|hold| self.queue.post(move |_| hold()))
     }
 
     /// Waits `backoff` to retry a request that failed with a connection
     /// error, in place of the exponential backoff.
     #[cfg(test)]
     pub(crate) fn set_connection_backoff(&self, backoff: Duration) {
-        self.inbox.send(Message::Run(Box::new(move |core| core.connection_backoff = Some(backoff))));
+        self.queue.post(move |core| core.connection_backoff = Some(backoff));
+    }
+
+    /// Whether a thread runs the source's core.
+    #[cfg(not(target_family = "wasm"))]
+    fn is_running(&self) -> bool {
+        self.thread.is_some()
+    }
+
+    /// Whether a thread runs the source's core: in the browser the host's
+    /// does.
+    #[cfg(target_family = "wasm")]
+    #[expect(clippy::unused_self, reason = "the threads of other builds can fail to start")]
+    fn is_running(&self) -> bool {
+        true
     }
 }
 
 impl Drop for OnlineFileSource {
     fn drop(&mut self) {
-        self.inbox.send(Message::Stop);
+        self.queue.stop();
         #[cfg(not(target_family = "wasm"))]
         if let Some(thread) = self.thread.take()
             && thread.thread().id() != std::thread::current().id()
@@ -818,18 +696,18 @@ impl Drop for OnlineFileSource {
 
 impl FileSource for OnlineFileSource {
     fn load(&self, resource: &Resource, responder: Responder) {
-        let id = self.next_request_id.fetch_add(1, Ordering::Relaxed);
-        let inbox = self.inbox.clone();
-        responder.on_cancel(move || inbox.send(Message::Cancel(id)));
-        let request = Message::Request { id, resource: resource.clone(), responder };
-        if let Err(request) = self.inbox.try_send(request)
-            && let Message::Request { responder, .. } = *request
-        {
+        if !self.is_running() {
             let mut response = Response::new();
             response.error =
                 Some(Box::new(ResourceError::new(Reason::Other, "The online file source's thread isn't running.")));
             responder.send(response);
+            return;
         }
+        let id = self.next_request_id.fetch_add(1, Ordering::Relaxed);
+        let queue = self.queue.clone();
+        responder.on_cancel(move || queue.post(move |core| core.cancel(id)));
+        let resource = resource.clone();
+        self.queue.post(move |core| core.request(id, resource, responder));
     }
 
     fn can_request(&self, resource: &Resource) -> bool {
@@ -841,6 +719,8 @@ impl FileSource for OnlineFileSource {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::mpsc;
+
     use mln_test_server::closed_port_url;
     use parking_lot::Mutex;
 
@@ -848,23 +728,33 @@ mod tests {
     use crate::resource::Kind;
     use crate::resource_transform::FinishedCallback;
 
-    /// A core that no thread runs, which the test hands its messages, and
-    /// the source whose drop ends it.
-    fn core(maximum: u32) -> (OnlineFileSource, Core) {
-        let (source, core) = OnlineFileSource::with_core(Arc::new(NetworkStatus::new()), None);
+    /// A core that no thread runs, whose tasks the test runs or calls
+    /// itself, and the source whose drop ends it.
+    fn core(maximum: u32) -> (OnlineFileSource, OnlineCore) {
+        let (source, core) = OnlineFileSource::with_core(Arc::new(NetworkStatus::new()));
         let mut core = core();
         core.maximum_concurrent_requests = maximum;
         (source, core)
     }
 
-    fn request(core: &mut Core, id: u64, url: &str) -> Request {
+    fn request(core: &mut OnlineCore, id: u64, url: &str) -> Request {
         let (request, responder) = Request::new(|_| {});
-        core.handle(Message::Request { id, resource: Resource::new(Kind::Unknown, url), responder });
+        core.request(id, Resource::new(Kind::Unknown, url), responder);
         request
     }
 
+    /// Passes request `id`'s deadline, as the queue does once it's due: it
+    /// takes the deadline's task and runs it. The test calls this rather
+    /// than running the queue, which would also run the responses of the
+    /// transfers that it starts.
+    fn pass_deadline(core: &mut OnlineCore, id: u64) {
+        let timer = core.requests[&id].timer.expect("a deadline");
+        core.queue.cancel(timer);
+        core.deadline_passed(id);
+    }
+
     /// The generation of request `id`'s transfer in flight.
-    fn transfer(core: &Core, id: u64) -> Option<u64> {
+    fn transfer(core: &OnlineCore, id: u64) -> Option<u64> {
         core.requests[&id].transfer.as_ref().map(|(generation, _)| *generation)
     }
 
@@ -877,21 +767,21 @@ mod tests {
         let url = closed_port_url("/stale");
         let _first = request(&mut core, 1, &url);
         let _second = request(&mut core, 2, &url);
-        core.fire_due();
+        pass_deadline(&mut core, 1);
+        pass_deadline(&mut core, 2);
         let first = transfer(&core, 1).expect("the first request's transfer");
         assert!(core.pending_requests.contains(2));
 
-        let done = |generation| Message::TransferDone { id: 1, generation, response: Response::new() };
-        core.handle(done(first + 1000));
+        core.transferred(1, first + 1000, Response::new());
         assert_eq!(Some(first), transfer(&core, 1));
         assert!(core.pending_requests.contains(2));
 
-        core.handle(done(first));
+        core.transferred(1, first, Response::new());
         assert_eq!(None, transfer(&core, 1));
         let second = transfer(&core, 2).expect("the second request's transfer");
         assert_eq!(1, core.active_requests.len());
 
-        core.handle(done(first));
+        core.transferred(1, first, Response::new());
         assert_eq!(Some(second), transfer(&core, 2));
         assert_eq!(1, core.active_requests.len());
         assert!(!core.pending_requests.contains(2));
@@ -909,15 +799,15 @@ mod tests {
         let _request = request(&mut core, 1, original);
         let generation = core.requests[&1].transforming.expect("a transform");
 
-        core.handle(Message::Transformed { id: 1, generation: generation - 1, result: Ok("stale".to_owned()) });
+        core.transformed(1, generation - 1, Ok("stale".to_owned()));
         assert_eq!(Some(generation), core.requests[&1].transforming);
         assert_eq!(original, core.requests[&1].resource.url);
 
         let url = closed_port_url("/transformed");
         let finished = answers.lock().pop().expect("the transform's callback");
         finished(Ok(url.clone()));
-        let answer = core.receiver.try_recv().expect("the transform's answer");
-        core.handle(answer);
+        let queue = core.queue.clone();
+        assert!(queue.run_once(&mut core), "the transform's answer");
         assert_eq!(None, core.requests[&1].transforming);
         assert_eq!(url, core.requests[&1].resource.url);
     }
@@ -930,28 +820,51 @@ mod tests {
         let mut resource = Resource::new(Kind::Tile, closed_port_url("/forever"));
         resource.minimum_update_interval = Duration::MAX;
         let (_request, responder) = Request::new(|_| {});
-        core.handle(Message::Request { id: 1, resource, responder });
-        core.fire_due();
+        core.request(1, resource, responder);
+        pass_deadline(&mut core, 1);
         let generation = transfer(&core, 1).expect("the request's transfer");
 
         let mut response = Response::new();
         response.data = Some(Arc::new(b"tile".to_vec()));
         response.expires = Some(Timestamp::from_secs(now().secs_since_epoch() + 60));
-        core.handle(Message::TransferDone { id: 1, generation, response });
+        core.transferred(1, generation, response);
         assert_eq!(None, core.requests[&1].timer);
-        assert!(core.deadlines.is_empty());
+        assert_eq!(None, core.queue.next_deadline());
+    }
+
+    /// Replacing a request's deadline, or cancelling the request, cancels
+    /// the deadline's task, which leaves the queue.
+    #[test]
+    fn a_replaced_or_cancelled_deadline_leaves_the_queue() {
+        let (_source, mut core) = core(1);
+        core.connection_backoff = Some(Duration::from_secs(3600));
+        let _request = request(&mut core, 1, &closed_port_url("/retry"));
+        pass_deadline(&mut core, 1);
+        let generation = transfer(&core, 1).expect("the request's transfer");
+        let mut response = Response::new();
+        response.error = Some(Box::new(ResourceError::new(Reason::Connection, "refused")));
+        core.transferred(1, generation, response);
+        let retry = core.queue.next_deadline().expect("the retry");
+        assert!(retry > Instant::now() + Duration::from_secs(60));
+
+        core.network_is_reachable_again();
+        let again = core.queue.next_deadline().expect("the retry, at once");
+        assert!(again < retry);
+
+        core.cancel(1);
+        assert_eq!(None, core.queue.next_deadline());
     }
 
     /// The last owner of a source may drop it on the source's own thread.
     #[test]
     fn a_source_dropped_on_its_own_thread_ends() {
         let source = OnlineFileSource::new(Arc::new(NetworkStatus::new()));
-        let inbox = source.inbox.clone();
+        let queue = source.queue.clone();
         let (dropped, done) = mpsc::channel();
-        inbox.send(Message::Run(Box::new(move |_| {
+        queue.post(move |_| {
             drop(source);
             dropped.send(()).unwrap();
-        })));
+        });
         done.recv_timeout(Duration::from_secs(10)).expect("the drop returns");
     }
 

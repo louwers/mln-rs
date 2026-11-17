@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use mln_storage::database_file_source::DatabaseSender;
+use mln_storage::database_file_source::DatabaseQueue;
 use mln_storage::offline::{
     OfflineRegion, OfflineRegionDefinition, OfflineRegionDownloadState, OfflineRegionMetadata, OfflineRegionObserver,
     OfflineRegionStatus, OfflineRegions,
@@ -33,8 +33,8 @@ pub fn region_database(
 }
 
 /// Posts a download's task to the database's worker.
-fn post_to(worker: DatabaseSender<Downloads>) -> Post {
-    Arc::new(move |task| worker.invoke(move |worker| task(&mut worker.db, &mut worker.extension)))
+fn post_to(worker: DatabaseQueue<Downloads>) -> Post {
+    Arc::new(move |task| worker.post(move |worker| task(&mut worker.db, &mut worker.extension)))
 }
 
 /// The region `region_id`, or [`DatabaseError::RegionNotFound`] when the

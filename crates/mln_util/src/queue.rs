@@ -3,19 +3,20 @@
 //! in its turns.
 //!
 //! A task can be posted to run as soon as the owner runs the queue, or once
-//! a deadline passes. A thread of its own runs the queue with
-//! [`Queue::run`], which parks until a task arrives or the next deadline
-//! passes. A host that has its own loop, such as the browser's pump, runs it
-//! with [`Queue::run_once`] instead, and learns of new work through the
-//! queue's waker.
+//! a deadline passes, and a timed task can be cancelled until it runs. A
+//! thread of its own runs the queue with [`Queue::run`], which parks until a
+//! task arrives or the next deadline passes. A host that has its own loop,
+//! such as the browser's pump, runs it with [`Queue::run_once`] instead, and
+//! learns of new work through the queue's waker.
 
-use std::cmp::Ordering as CmpOrdering;
+use std::cmp::Reverse;
 use std::collections::{BinaryHeap, VecDeque};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use parking_lot::{Condvar, Mutex};
 
+use crate::hash::HashMap;
 use crate::time::Instant;
 
 /// A task that runs with the queue's state.
@@ -23,6 +24,10 @@ type Task<S> = Box<dyn FnOnce(&mut S) + Send>;
 
 /// What a queue calls, on the posting thread, when work arrives.
 pub type Waker = Arc<dyn Fn() + Send + Sync>;
+
+/// How many cancelled deadlines the heap keeps, beyond one per waiting timed
+/// task, before it drops them all.
+const CANCELLED_SLACK: usize = 64;
 
 /// A queue of tasks that take `&mut S`, which the thread that runs the queue
 /// owns. Cheap to clone: clones are handles to the same queue.
@@ -41,18 +46,31 @@ pub struct WeakQueue<S> {
     inner: Weak<Inner<S>>,
 }
 
+/// Names a timed task of a [`Queue`], for [`Queue::cancel`]. Each one that
+/// a queue hands out names a task of its own, if any: a timed task that a
+/// closed queue got, or whose deadline never comes, has a key that names
+/// nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct TimedTask(u64);
+
 struct Inner<S> {
     state: Mutex<State<S>>,
-    /// Signalled when a task arrives or the queue is woken.
+    /// Signalled when a task arrives or the queue is woken, or a timed task
+    /// is cancelled.
     signal: Condvar,
     waker: Mutex<Option<Waker>>,
 }
 
 struct State<S> {
     tasks: VecDeque<Entry<S>>,
-    timed: BinaryHeap<Timed<S>>,
-    /// Counts the timed tasks, so that those with the same deadline run in
-    /// the order they were posted.
+    /// The timed tasks that wait, by key.
+    timed: HashMap<u64, Task<S>>,
+    /// The deadlines of the timed tasks, earliest first, and of those due
+    /// at once, the first posted first. A cancelled task's deadline stays
+    /// until it reaches the top, or until the deadlines number more than
+    /// twice the waiting tasks plus [`CANCELLED_SLACK`].
+    deadlines: BinaryHeap<Reverse<(Instant, u64)>>,
+    /// Counts the timed tasks, for their keys.
     posted: u64,
     /// A task arrived or the queue was woken since the owner last parked.
     signalled: bool,
@@ -66,30 +84,27 @@ enum Entry<S> {
     Stop,
 }
 
-struct Timed<S> {
-    deadline: Instant,
-    order: u64,
-    task: Task<S>,
-}
-
-impl<S> PartialEq for Timed<S> {
-    fn eq(&self, other: &Self) -> bool {
-        self.cmp(other) == CmpOrdering::Equal
+impl<S> State<S> {
+    /// The deadline and key of the earliest timed task that waits, after
+    /// dropping the cancelled deadlines before it.
+    fn next_timed(&mut self) -> Option<(Instant, u64)> {
+        while let Some(&Reverse((deadline, key))) = self.deadlines.peek() {
+            if self.timed.contains_key(&key) {
+                return Some((deadline, key));
+            }
+            self.deadlines.pop();
+        }
+        None
     }
-}
 
-impl<S> Eq for Timed<S> {}
-
-impl<S> PartialOrd for Timed<S> {
-    fn partial_cmp(&self, other: &Self) -> Option<CmpOrdering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl<S> Ord for Timed<S> {
-    /// Reversed, so that the heap's greatest entry is the earliest.
-    fn cmp(&self, other: &Self) -> CmpOrdering {
-        (other.deadline, other.order).cmp(&(self.deadline, self.order))
+    /// Takes the earliest timed task whose deadline is `now` or before.
+    fn take_due(&mut self, now: Instant) -> Option<Task<S>> {
+        let (deadline, key) = self.next_timed()?;
+        if deadline > now {
+            return None;
+        }
+        self.deadlines.pop();
+        self.timed.remove(&key)
     }
 }
 
@@ -118,7 +133,8 @@ impl<S> Queue<S> {
             inner: Arc::new(Inner {
                 state: Mutex::new(State {
                     tasks: VecDeque::new(),
-                    timed: BinaryHeap::new(),
+                    timed: HashMap::default(),
+                    deadlines: BinaryHeap::new(),
                     posted: 0,
                     signalled: false,
                     stopped: false,
@@ -136,27 +152,57 @@ impl<S> Queue<S> {
     }
 
     /// Runs `task` on the queue's thread in its first turn once `deadline`
-    /// passed, before the turn's other tasks.
-    pub fn post_at(&self, deadline: Instant, task: impl FnOnce(&mut S) + Send + 'static) {
+    /// passed, before the turn's other tasks, unless it's
+    /// [`cancel`](Self::cancel)led first.
+    pub fn post_at(&self, deadline: Instant, task: impl FnOnce(&mut S) + Send + 'static) -> TimedTask {
         let mut state = self.inner.state.lock();
+        let key = state.posted;
+        state.posted += 1;
         if state.closed {
             drop(state);
             drop(task);
-            return;
+            return TimedTask(key);
         }
-        let order = state.posted;
-        state.posted += 1;
-        state.timed.push(Timed { deadline, order, task: Box::new(task) });
+        state.timed.insert(key, Box::new(task));
+        state.deadlines.push(Reverse((deadline, key)));
         drop(state);
         self.wake();
+        TimedTask(key)
     }
 
     /// [`post_at`](Self::post_at) `delay` from now. A delay past what an
     /// `Instant` can hold never comes.
-    pub fn post_after(&self, delay: Duration, task: impl FnOnce(&mut S) + Send + 'static) {
+    pub fn post_after(&self, delay: Duration, task: impl FnOnce(&mut S) + Send + 'static) -> TimedTask {
         if let Some(deadline) = Instant::now().checked_add(delay) {
-            self.post_at(deadline, task);
+            return self.post_at(deadline, task);
         }
+        let mut state = self.inner.state.lock();
+        state.posted += 1;
+        TimedTask(state.posted - 1)
+    }
+
+    /// Drops the timed task that `task` names, on this thread, unless it
+    /// has begun to run or dropped already: it never runs, and from now on
+    /// [`next_deadline`](Self::next_deadline) and the queue's parking no
+    /// longer wait for it. A host that armed a timeout for its deadline
+    /// before still sees that timeout end.
+    pub fn cancel(&self, task: TimedTask) {
+        let cancelled = {
+            let mut state = self.inner.state.lock();
+            let cancelled = state.timed.remove(&task.0);
+            if state.deadlines.len() > 2 * state.timed.len() + CANCELLED_SLACK {
+                let State { timed, deadlines, .. } = &mut *state;
+                deadlines.retain(|Reverse((_, key))| timed.contains_key(key));
+            }
+            cancelled
+        };
+        if cancelled.is_some() {
+            // A thread that parks until the task's deadline waits for the
+            // next one instead.
+            self.inner.signal.notify_all();
+        }
+        // Outside the lock: a task's drop may post to the queue.
+        drop(cancelled);
     }
 
     /// Calls `waker`, from the posting thread, whenever a task arrives or
@@ -184,10 +230,7 @@ impl<S> Queue<S> {
                 if queue.closed {
                     return ran;
                 }
-                match queue.timed.peek() {
-                    Some(timed) if timed.deadline <= now => queue.timed.pop().map(|timed| timed.task),
-                    _ => None,
-                }
+                queue.take_due(now)
             };
             let Some(task) = task else { break };
             task(state);
@@ -214,14 +257,15 @@ impl<S> Queue<S> {
     /// task's deadline passed.
     #[must_use]
     pub fn has_pending(&self) -> bool {
-        let state = self.inner.state.lock();
-        !state.tasks.is_empty() || state.timed.peek().is_some_and(|timed| timed.deadline <= Instant::now())
+        let mut state = self.inner.state.lock();
+        !state.tasks.is_empty() || state.next_timed().is_some_and(|(deadline, _)| deadline <= Instant::now())
     }
 
-    /// The deadline of the earliest timed task.
+    /// The deadline of the earliest timed task that waits, which a
+    /// cancelled one no longer does.
     #[must_use]
     pub fn next_deadline(&self) -> Option<Instant> {
-        self.inner.state.lock().timed.peek().map(|timed| timed.deadline)
+        self.inner.state.lock().next_timed().map(|(deadline, _)| deadline)
     }
 
     /// Sleeps until a task arrives or the queue is woken, or the next timed
@@ -234,11 +278,12 @@ impl<S> Queue<S> {
     /// [`park`](Self::park), but returns at `deadline` at the latest.
     pub fn park_until(&self, deadline: Option<Instant>) {
         let mut state = self.inner.state.lock();
-        let deadline = match (deadline, state.timed.peek().map(|timed| timed.deadline)) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (a, b) => a.or(b),
-        };
         while !state.signalled {
+            // Again after each wait: a cancel may have taken the earliest.
+            let deadline = match (deadline, state.next_timed().map(|(deadline, _)| deadline)) {
+                (Some(a), Some(b)) => Some(a.min(b)),
+                (a, b) => a.or(b),
+            };
             match deadline {
                 Some(deadline) => {
                     let now = Instant::now();
@@ -294,6 +339,7 @@ impl<S> Queue<S> {
         let (tasks, timed) = {
             let mut state = self.inner.state.lock();
             state.closed = true;
+            state.deadlines.clear();
             (std::mem::take(&mut state.tasks), std::mem::take(&mut state.timed))
         };
         // Outside the lock: a task's drop may post to the queue.
@@ -388,6 +434,86 @@ mod tests {
         assert!(Instant::now() >= now + Duration::from_millis(20));
         queue.run_once(&mut state);
         assert_eq!(state, ["due", "due too", "task", "later"]);
+    }
+
+    #[test]
+    fn a_cancelled_timed_task_drops_and_never_runs() {
+        struct Counted(Arc<AtomicUsize>);
+        impl Drop for Counted {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+        let dropped = Arc::new(AtomicUsize::new(0));
+        let queue = Queue::<Vec<&str>>::new();
+        let now = Instant::now();
+        let counted = Counted(Arc::clone(&dropped));
+        let cancelled = queue.post_at(now, move |state| {
+            drop(counted);
+            state.push("cancelled");
+        });
+        let kept = queue.post_at(now, |state| state.push("kept"));
+        queue.cancel(cancelled);
+        assert_eq!(dropped.load(Ordering::SeqCst), 1, "the cancel drops the task");
+        let mut state = Vec::new();
+        queue.run_once(&mut state);
+        assert_eq!(state, ["kept"]);
+        // A key whose task ran, or that was cancelled, names nothing.
+        queue.cancel(kept);
+        queue.cancel(cancelled);
+        assert!(!queue.run_once(&mut state));
+    }
+
+    #[test]
+    fn next_deadline_and_park_skip_cancelled_tasks() {
+        let queue = Queue::<()>::new();
+        let now = Instant::now();
+        let soon = queue.post_at(now + Duration::from_millis(5), |()| {});
+        let later = now + Duration::from_secs(60);
+        queue.post_at(later, |()| {});
+        assert_eq!(queue.next_deadline(), Some(now + Duration::from_millis(5)));
+        queue.cancel(soon);
+        assert_eq!(queue.next_deadline(), Some(later));
+        assert!(!queue.has_pending());
+        // The posts signalled the queue; the second park waits for the
+        // cancelled task's deadline no more, only for the bound.
+        queue.park();
+        let bound = Instant::now() + Duration::from_millis(30);
+        queue.park_until(Some(bound));
+        assert!(Instant::now() >= bound);
+        assert!(!queue.run_once(&mut ()));
+    }
+
+    /// A parked thread whose earliest timed task is cancelled waits for the
+    /// next one instead.
+    #[test]
+    fn a_cancel_moves_a_parked_threads_deadline() {
+        let queue = Queue::<()>::new();
+        let now = Instant::now();
+        let first = queue.post_at(now + Duration::from_millis(50), |()| {});
+        let parked = queue.clone();
+        let thread = std::thread::spawn(move || {
+            parked.park();
+            parked.park_until(Some(now + Duration::from_millis(200)));
+            Instant::now()
+        });
+        std::thread::sleep(Duration::from_millis(10));
+        queue.cancel(first);
+        assert!(thread.join().unwrap() >= now + Duration::from_millis(200));
+    }
+
+    #[test]
+    fn cancelled_deadlines_stay_bounded_by_the_waiting_tasks() {
+        let queue = Queue::<()>::new();
+        let far = Instant::now() + Duration::from_secs(3600);
+        let kept: Vec<_> = (0..10).map(|_| queue.post_at(far, |()| {})).collect();
+        for _ in 0..10_000 {
+            let task = queue.post_at(far, |()| {});
+            queue.cancel(task);
+        }
+        let state = queue.inner.state.lock();
+        assert_eq!(state.timed.len(), kept.len());
+        assert!(state.deadlines.len() <= 2 * kept.len() + CANCELLED_SLACK + 1);
     }
 
     #[test]

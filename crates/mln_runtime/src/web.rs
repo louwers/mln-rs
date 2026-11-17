@@ -1,8 +1,9 @@
 //! The browser build: everything of a runtime on the one thread of its wasm
 //! instance, as examples/web runs a map.
 //!
-//! The instance has no other threads, so a runtime's queue and pool and each
-//! render session's queue run on the thread that made them, in the slices of
+//! The instance has no other threads, so a runtime's queue and pool, its
+//! network loading's queue and each render session's queue run on the
+//! thread that made them, in the slices of
 //! the instance's pump (`mln_web_host::pump`), which the queues and the pool
 //! wake. Nothing waits: a command runs in a later slice, never inside the
 //! call that sent it. Each session's renderer runs
@@ -60,18 +61,25 @@ fn wake_for_timed<S>(queue: &mln_util::queue::Queue<S>) {
 }
 
 /// The runtime's own network loading, which looks for the host's responses
-/// fetched ahead with `fetch_preloads` first. Its core runs in the pump's
-/// slices until the source drops, and in a slice of its own once a retry
-/// or revalidation is due.
+/// fetched ahead with `fetch_preloads` first. Its core's queue runs in the
+/// pump's slices until the source drops, and in a slice of its own once a
+/// retry or revalidation is due.
 pub(crate) fn online(network: Arc<NetworkStatus>, fetch_preloads: Option<js_sys::Function>) -> OnlineFileSource {
-    let (online, mut core) = OnlineFileSource::local(network, pump::waker());
+    let (online, queue, mut core) = OnlineFileSource::local(network);
     core.set_fetch_preloads(fetch_preloads);
+    queue.set_waker(Some(pump::waker()));
+    let mut core = Some(core);
     pump::add(move || {
-        let live = core.run_due();
-        if live && let Some(deadline) = core.next_deadline() {
-            pump::wake_at(deadline);
+        let Some(state) = &mut core else { return false };
+        queue.run_once(state);
+        let stopped = queue.is_stopped();
+        if stopped {
+            queue.close();
+            drop(core.take());
+        } else {
+            wake_for_timed(&queue);
         }
-        live
+        !stopped
     })
     .detach();
     online

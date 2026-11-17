@@ -1,19 +1,20 @@
 // The database runs on a worker thread of its own ("DatabaseFileSource"),
-// which owns it: requests and operations reach the worker as messages of a
-// channel, and the responses go to the requests' responders.
+// which owns it and runs the tasks of its queue: requests and operations
+// reach the worker as tasks, and the responses go to the requests'
+// responders.
 //
 // The offline region downloads need the style parser, which sits above this
 // crate: mln_storage_offline keeps them in the worker's extension, which the
-// worker owns beside the database, and which sends its own work to the
-// worker through a `DatabaseSender`.
+// worker owns beside the database, and which posts its own work to the
+// worker's queue.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use mln_util::constants::{ASSET_PROTOCOL, FILE_PROTOCOL};
 use mln_util::logging::{Event, Log};
-use mln_util::time::Instant;
+use mln_util::queue::Queue;
 
 use crate::file_source::FileSource;
 use crate::offline_database::{DatabaseError, OfflineDatabase};
@@ -25,38 +26,10 @@ use crate::response::{Reason, ResourceError, Response};
 /// map load share one write.
 const ACCESSED_FLUSH_DELAY: Duration = Duration::from_millis(250);
 
-/// What runs on a database's worker, in the order it was sent.
-type Task<E> = Box<dyn FnOnce(&mut DatabaseWorker<E>) + Send>;
-
-enum Message<E: 'static> {
-    Run(Task<E>),
-    /// A request for the cached response to `resource`.
-    Load {
-        resource: Resource,
-        responder: Responder,
-    },
-    /// Ends the worker, after the messages sent before.
-    Stop,
-}
-
-/// Sends work to a database's worker, which runs it after the work sent
-/// before. Work sent once the database has dropped is dropped.
-pub struct DatabaseSender<E: 'static> {
-    sender: mpsc::Sender<Message<E>>,
-}
-
-impl<E: 'static> Clone for DatabaseSender<E> {
-    fn clone(&self) -> Self {
-        DatabaseSender { sender: self.sender.clone() }
-    }
-}
-
-impl<E: 'static> DatabaseSender<E> {
-    /// Runs `f` on the worker, with what it owns.
-    pub fn invoke(&self, f: impl FnOnce(&mut DatabaseWorker<E>) + Send + 'static) {
-        let _ = self.sender.send(Message::Run(Box::new(f)));
-    }
-}
+/// The queue of a database's worker, whose tasks run on the database's
+/// thread in the order they were posted. Once the database has dropped, the
+/// worker has ended and the queue drops what is posted to it.
+pub type DatabaseQueue<E> = Queue<DatabaseWorker<E>>;
 
 /// What a database's worker owns, on the database's thread: the database,
 /// and what an extension keeps beside it, such as the offline regions'
@@ -65,20 +38,15 @@ pub struct DatabaseWorker<E: 'static> {
     pub db: OfflineDatabase,
     pub extension: E,
     network: Option<Arc<dyn FileSource>>,
-    /// A cache hit left `accessed` timestamps to write. A failed flush
-    /// isn't retried until the next cache hit, so an idle map stays idle.
-    accessed: Arc<AtomicBool>,
-    /// When the `accessed` timestamps are written.
-    flush_due: Option<Instant>,
 }
 
-/// Makes the extension of a database worker, on the worker's thread, from a
-/// sender to the worker and its network.
-type MakeExtension<E> = Box<dyn FnOnce(DatabaseSender<E>, Option<Arc<dyn FileSource>>) -> E + Send>;
+/// Makes the extension of a database worker, on the worker's thread, from
+/// the worker's queue and its network.
+type MakeExtension<E> = Box<dyn FnOnce(DatabaseQueue<E>, Option<Arc<dyn FileSource>>) -> E + Send>;
 
 impl<E: 'static> DatabaseWorker<E> {
     fn new(
-        sender: DatabaseSender<E>,
+        queue: &DatabaseQueue<E>,
         network: Option<Arc<dyn FileSource>>,
         cache_path: &str,
         read_only: bool,
@@ -88,47 +56,22 @@ impl<E: 'static> DatabaseWorker<E> {
         if read_only {
             db.reopen_database_read_only(true);
         }
-        let accessed = Arc::new(AtomicBool::new(false));
-        let hit = Arc::clone(&accessed);
-        db.set_accessed_callback(Box::new(move || hit.store(true, Ordering::Relaxed)));
-        let extension = make(sender, network.clone());
-        DatabaseWorker { db, extension, network, accessed, flush_due: None }
-    }
-
-    /// Runs the worker's messages, and writes the `accessed` timestamps once
-    /// they are due, until the database drops.
-    fn run(mut self, receiver: &mpsc::Receiver<Message<E>>) {
-        loop {
-            let message = match self.flush_due {
-                Some(due) => match receiver.recv_timeout(due.saturating_duration_since(Instant::now())) {
-                    Ok(message) => Some(message),
-                    Err(mpsc::RecvTimeoutError::Timeout) => None,
-                    Err(mpsc::RecvTimeoutError::Disconnected) => return,
-                },
-                None => match receiver.recv() {
-                    Ok(message) => Some(message),
-                    Err(mpsc::RecvError) => return,
-                },
-            };
-            match message {
-                Some(Message::Run(task)) => task(&mut self),
-                Some(Message::Load { resource, responder }) => {
-                    if !responder.is_cancelled() {
-                        self.request(&resource, &responder);
-                    }
-                }
-                Some(Message::Stop) => return,
-                None => {}
+        // A cache hit that leaves `accessed` timestamps to write, while no
+        // write is due, makes one due. A failed write isn't retried until
+        // the next cache hit, so an idle map stays idle.
+        let due = Arc::new(AtomicBool::new(false));
+        let flush = queue.clone();
+        db.set_accessed_callback(Box::new(move || {
+            if !due.swap(true, Ordering::Relaxed) {
+                let due = Arc::clone(&due);
+                flush.post_after(ACCESSED_FLUSH_DELAY, move |worker| {
+                    due.store(false, Ordering::Relaxed);
+                    worker.db.flush_accessed();
+                });
             }
-            if self.flush_due.is_some_and(|due| due <= Instant::now()) {
-                self.flush_due = None;
-                self.accessed.store(false, Ordering::Relaxed);
-                self.db.flush_accessed();
-            }
-            if self.flush_due.is_none() && self.accessed.load(Ordering::Relaxed) {
-                self.flush_due = Some(Instant::now() + ACCESSED_FLUSH_DELAY);
-            }
-        }
+        }));
+        let extension = make(queue.clone(), network.clone());
+        DatabaseWorker { db, extension, network }
     }
 
     /// The network that offline regions download through, if there is one.
@@ -180,7 +123,7 @@ pub trait Cache: FileSource {
 /// drops on the worker's thread. When the worker's thread can't start, the
 /// source logs why, fails each request, and drops the work sent to it.
 pub struct DatabaseFileSource<E: 'static = ()> {
-    sender: DatabaseSender<E>,
+    queue: DatabaseQueue<E>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -203,26 +146,34 @@ impl DatabaseFileSource {
 
 impl<E: 'static> DatabaseFileSource<E> {
     /// A database at `cache_path`, read-only or not, whose worker keeps the
-    /// extension that `make` makes on the worker's thread, from a sender to
-    /// the worker and the database's network.
+    /// extension that `make` makes on the worker's thread, from the
+    /// worker's queue and the database's network.
     #[must_use]
     pub fn with_extension(
         cache_path: &str,
         network: Option<Arc<dyn FileSource>>,
         read_only: bool,
-        make: impl FnOnce(DatabaseSender<E>, Option<Arc<dyn FileSource>>) -> E + Send + 'static,
+        make: impl FnOnce(DatabaseQueue<E>, Option<Arc<dyn FileSource>>) -> E + Send + 'static,
     ) -> Self {
         let cache_path = cache_path.to_owned();
         let make: MakeExtension<E> = Box::new(make);
-        let (sender, receiver) = mpsc::channel();
-        let sender = DatabaseSender { sender };
-        let own = sender.clone();
+        let queue = DatabaseQueue::new();
+        let own = queue.clone();
         let thread = mln_util::thread::spawn("DatabaseFileSource", move || {
-            DatabaseWorker::new(own, network, &cache_path, read_only, make).run(&receiver);
+            let mut worker = DatabaseWorker::new(&own, network, &cache_path, read_only, make);
+            own.run(&mut worker);
+            // What comes once the database has dropped drops at once, so the
+            // handles that the worker's extension holds can't keep the queue
+            // alive.
+            own.close();
+            drop(worker);
         })
         .inspect_err(|error| Log::error(Event::Database, format!("The database's thread didn't start: {error}")))
         .ok();
-        DatabaseFileSource { sender, thread }
+        if thread.is_none() {
+            queue.close();
+        }
+        DatabaseFileSource { queue, thread }
     }
 
     /// Holds the database thread until the guard drops (`crate::tests::pause`).
@@ -295,13 +246,13 @@ impl<E: 'static> DatabaseFileSource<E> {
     /// Runs `f` on the database thread, after the requests and operations
     /// sent before it.
     pub fn invoke(&self, f: impl FnOnce(&mut DatabaseWorker<E>) + Send + 'static) {
-        self.sender.invoke(f);
+        self.queue.post(f);
     }
 }
 
 impl<E: 'static> Drop for DatabaseFileSource<E> {
     fn drop(&mut self) {
-        let _ = self.sender.sender.send(Message::Stop);
+        self.queue.stop();
         if let Some(thread) = self.thread.take()
             && thread.thread().id() != std::thread::current().id()
         {
@@ -325,12 +276,18 @@ impl<E: 'static> Cache for DatabaseFileSource<E> {
 
 impl<E: 'static> FileSource for DatabaseFileSource<E> {
     fn load(&self, resource: &Resource, responder: Responder) {
-        let load = Message::Load { resource: resource.clone(), responder };
-        if let Err(mpsc::SendError(Message::Load { responder, .. })) = self.sender.sender.send(load) {
+        if self.thread.is_none() {
             let mut response = Response::new();
             response.error = Some(Box::new(ResourceError::new(Reason::Other, "The database's thread isn't running.")));
             responder.send(response);
+            return;
         }
+        let resource = resource.clone();
+        self.invoke(move |worker| {
+            if !responder.is_cancelled() {
+                worker.request(&resource, &responder);
+            }
+        });
     }
 
     fn can_request(&self, resource: &Resource) -> bool {
@@ -342,6 +299,8 @@ impl<E: 'static> FileSource for DatabaseFileSource<E> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::mpsc;
+
     use super::*;
 
     #[test]
@@ -361,9 +320,9 @@ mod tests {
     #[test]
     fn a_database_dropped_on_its_own_thread_ends() {
         let database = DatabaseFileSource::new(":memory:", None);
-        let sender = database.sender.clone();
+        let queue = database.queue.clone();
         let (dropped, done) = mpsc::channel();
-        sender.invoke(move |_| {
+        queue.post(move |_| {
             drop(database);
             dropped.send(()).unwrap();
         });
