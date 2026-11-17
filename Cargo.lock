@@ -2504,7 +2504,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-bench"
-version = "0.0.12"
+version = "0.0.13"
 dependencies = [
  "libc",
  "mln-rs-bench-workload",
@@ -2540,7 +2540,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-bench-snapshot"
-version = "0.0.12"
+version = "0.0.13"
 dependencies = [
  "mlt-core",
  "pmtiles",
@@ -2551,7 +2551,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-bench-workload"
-version = "0.0.12"
+version = "0.0.13"
 dependencies = [
  "mln-rs-map",
  "mln-rs-util",
