@@ -647,7 +647,7 @@ impl Renderer {
             // common3DPass
             parameters.pass = RenderPass::Pass3D;
 
-            // drawable3DPass: draw the draw groups, 3D pass
+            // The 3D pass: draw the draw groups.
             debug_assert_eq!(parameters.pass, RenderPass::Pass3D);
             // `depthModeFor3D` uses this, and the 3D pass runs before the opaque pass sets it
             parameters.depth_range_size = 1.0 - ((num_draw_groups + 2) * num_sublayers) as f32 * depth_epsilon;
@@ -661,7 +661,7 @@ impl Renderer {
             }
         }
 
-        // drawableTargetsPass: draw render targets
+        // Draw the render targets.
         // dem-heatmap
         orchestrator.visit_render_layers(|layer, draws| layer.render_targets(&mut parameters, draws));
 
@@ -695,7 +695,7 @@ impl Renderer {
             }
         }
 
-        // drawableSkyPass
+        // The sky.
         if let Some(sky) = orchestrator.sky() {
             parameters.pass = RenderPass::Translucent;
             parameters.depth_range_size = 1.0 - ((num_draw_groups + 2) * num_sublayers) as f32 * depth_epsilon;
@@ -703,7 +703,7 @@ impl Renderer {
             sky.render(&mut *gpu, &mut parameters);
         }
 
-        // drawableOpaquePass
+        // The opaque pass.
         {
             parameters.pass = RenderPass::Opaque;
             parameters.depth_range_size = 1.0 - ((num_draw_groups + 2) * num_sublayers) as f32 * depth_epsilon;
@@ -728,7 +728,7 @@ impl Renderer {
             }
         }
 
-        // drawableTranslucentPass
+        // The translucent pass.
         {
             parameters.pass = RenderPass::Translucent;
             parameters.depth_range_size = 1.0 - ((num_draw_groups + 2) * num_sublayers) as f32 * depth_epsilon;
@@ -747,7 +747,7 @@ impl Renderer {
             }
         }
 
-        // drawableAtmospherePass
+        // The atmosphere.
         if let Some(atmosphere) = orchestrator.atmosphere() {
             parameters.pass = RenderPass::Translucent;
             parameters.depth_range_size = 1.0 - ((num_draw_groups + 2) * num_sublayers) as f32 * depth_epsilon;
@@ -755,7 +755,7 @@ impl Renderer {
             atmosphere.render(&mut *gpu, &mut parameters);
         }
 
-        // drawableDebugOverlays
+        // The debug overlays.
         // Renders debug overlays.
         parameters.current_layer = 0;
         // layers: debug

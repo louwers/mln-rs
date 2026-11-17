@@ -53,8 +53,8 @@ use crate::buckets::symbol_bucket::{
 use crate::draw::{DrawObjects, DrawSegment, copy_shared_attributes};
 use crate::draw_cache::{BucketChanges, DrawCache, DrawDepth, FrameDraw, FrameDraws, KeptDraw, LayerDraws};
 use crate::geometry::feature_index::FeatureIndex;
+use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
-use crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker;
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::symbol_layout::SymbolLayout;
@@ -397,7 +397,7 @@ struct SymbolDraw {
     /// until it shows some.
     visible: bool,
     /// Gives the draw the textures of its tile's atlases.
-    atlases: Rc<DrawableAtlasesTweaker>,
+    atlases: Rc<AtlasBinding>,
 }
 
 /// What tells apart the draws of a tile that read the same attributes: a
@@ -1203,8 +1203,8 @@ impl RenderLayer for RenderSymbolLayer {
         /// The atlases' textures given to one tile's draws.
         #[derive(Default)]
         struct TileAtlases {
-            text: Option<Rc<DrawableAtlasesTweaker>>,
-            icon: Option<Rc<DrawableAtlasesTweaker>>,
+            text: Option<Rc<AtlasBinding>>,
+            icon: Option<Rc<AtlasBinding>>,
         }
 
         self.update_projection_variant(state, draws);
@@ -1506,7 +1506,7 @@ impl RenderLayer for RenderSymbolLayer {
                     tile_atlases.text.get_or_insert_with(|| {
                         let text_size_is_zoom_constant =
                             bucket.text_size_binder.evaluate_for_zoom(current_zoom).is_zoom_constant;
-                        Rc::new(DrawableAtlasesTweaker::new(
+                        Rc::new(AtlasBinding::new(
                             Some(Rc::clone(atlases)),
                             Some(ID_SYMBOL_IMAGE_ICON_TEXTURE),
                             Some(ID_SYMBOL_IMAGE_TEXTURE),
@@ -1520,7 +1520,7 @@ impl RenderLayer for RenderSymbolLayer {
                 } else {
                     tile_atlases.icon.get_or_insert_with(|| {
                         let icon_scaled = bucket_layout.icon_size.constant_or(&1.0) != 1.0 || bucket.icons_need_linear;
-                        Rc::new(DrawableAtlasesTweaker::new(
+                        Rc::new(AtlasBinding::new(
                             Some(Rc::clone(atlases)),
                             Some(ID_SYMBOL_IMAGE_ICON_TEXTURE),
                             Some(ID_SYMBOL_IMAGE_TEXTURE),

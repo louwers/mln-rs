@@ -263,12 +263,12 @@ impl RenderLayer for RenderBackgroundLayer {
         let evaluated = &evaluated_properties.paint;
         let has_pattern = !evaluated.background_pattern.faded().to.empty();
 
-        // TODO: If background is solid, we can skip drawables and rely on the
+        // TODO: If background is solid, we can skip the draws and rely on the
         // clear color
         let draw_passes = self.passes_for(evaluated);
 
         // If the result is transparent or missing, just remove any existing
-        // drawables and stop
+        // draws and stop
         if draw_passes == RenderPass::None {
             self.remove_all_draws(draws);
             return;

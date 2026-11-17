@@ -1,5 +1,5 @@
 //! What the renderer keeps over its backend's `Gpu`: its caps, the caches
-//! its draws share, the buffers every drawable binds, its rendering stats
+//! its draws share, the buffers every draw binds, its rendering stats
 //! and the queue of the resources it dropped. Every method takes `&self`, as the
 //! context is reached from everywhere (`PaintParameters`, render layers,
 //! uploads); the state is in cells.
@@ -99,7 +99,7 @@ impl Context {
         &self.caps
     }
 
-    /// The channel type of a render target's color texture, which drawables
+    /// The channel type of a render target's color texture, which draws
     /// draw into and then sample, for one asked for of `type_`: unsigned
     /// bytes for half floats where the `Gpu` can't draw into them.
     pub(crate) fn render_target_type(&self, type_: TextureChannelDataType) -> TextureChannelDataType {
@@ -234,7 +234,7 @@ impl Context {
         Ok(shader)
     }
 
-    /// The buffers every drawable binds, at the ids they bind at.
+    /// The buffers every draw binds, at the ids they bind at.
     pub(crate) fn global_uniform_buffers(&self) -> Ref<'_, UniformBufferArray> {
         self.global_uniform_buffers.borrow()
     }
@@ -256,9 +256,9 @@ impl Context {
     }
 
     /// A vertex buffer of at least `vertex_count` default values of
-    /// `format`, for an attribute a drawable has no data for: zeros, or ones
+    /// `format`, for an attribute a draw has no data for: zeros, or ones
     /// for `Float2` and `Float4`. The context keeps one per format, grown
-    /// geometrically; a drawable keeps a replaced smaller one alive.
+    /// geometrically; a draw keeps a replaced smaller one alive.
     pub(crate) fn default_vertex_buffer(
         &self,
         format: AttributeDataType,

@@ -42,8 +42,8 @@ use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::line_bucket::{LineBinders, LineBucket, LineLayoutVertex};
 use crate::draw::DrawObjects;
 use crate::draw_cache::{DrawCache, FrameDraw, FrameDraws, LayerDraws};
+use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
-use crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker;
 use crate::gfx::texture2d::Texture2DPtr;
 use crate::layer_composite::Composite;
 use crate::layer_type::{EvaluatedLayer, LayerType};
@@ -83,7 +83,7 @@ struct LineTile {
     /// line atlas.
     dash_cap: LinePatternCap,
     /// Gives a pattern draw the texture of the tile's icon atlas.
-    atlases: Option<Rc<DrawableAtlasesTweaker>>,
+    atlases: Option<Rc<AtlasBinding>>,
 }
 
 impl DrawCache for LineTile {
@@ -690,7 +690,7 @@ impl RenderLineLayer {
             (LineType::Sdf, &mut self.line_sdf_shader_group, "LineSDFShader")
         } else if !self.values.unevaluated.line_pattern.is_undefined() {
             let icons = tile.get_atlas_textures().filter(|atlases| atlases.icon().is_some())?;
-            atlases = Some(Rc::new(DrawableAtlasesTweaker::new(
+            atlases = Some(Rc::new(AtlasBinding::new(
                 Some(Rc::clone(icons)),
                 None,
                 Some(ID_LINE_IMAGE_TEXTURE),

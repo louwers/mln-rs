@@ -39,8 +39,8 @@ use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::fill_bucket::{FillBinders, FillBucket, FillLayoutVertex};
 use crate::draw::{DrawObjects, copy_shared_attributes};
 use crate::draw_cache::{DrawCache, DrawDepth, FrameDraw, FrameDraws, LayerDraws};
+use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
-use crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker;
 use crate::layer_composite::Composite;
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
@@ -122,7 +122,7 @@ struct FillTile {
     /// bucket has any.
     outline: Option<FillDraw>,
     /// Gives the pattern draws the texture of the tile's icon atlas.
-    atlases: Option<Rc<DrawableAtlasesTweaker>>,
+    atlases: Option<Rc<AtlasBinding>>,
 }
 
 impl DrawCache for FillTile {
@@ -224,7 +224,7 @@ impl TileBuilder<'_> {
 
         let atlases = tile.get_atlas_textures().filter(|atlases| self.pattern && atlases.icon().is_some());
         let atlases = atlases.map(|atlases| {
-            Rc::new(DrawableAtlasesTweaker::new(
+            Rc::new(AtlasBinding::new(
                 Some(Rc::clone(atlases)),
                 None,
                 Some(ID_FILL_IMAGE_TEXTURE),

@@ -10,7 +10,7 @@ use crate::tile_render_data::TileAtlasTextures;
 
 /// Gives a draw the textures of its tile's glyph and icon atlases, which
 /// change after the draw is made.
-pub(crate) struct DrawableAtlasesTweaker {
+pub(crate) struct AtlasBinding {
     atlases: Option<Rc<TileAtlasTextures>>,
     icon_texture_id: Option<usize>,
     glyph_texture_id: Option<usize>,
@@ -21,8 +21,8 @@ pub(crate) struct DrawableAtlasesTweaker {
     text_size_is_zoom_constant: bool,
 }
 
-impl DrawableAtlasesTweaker {
-    #[expect(clippy::too_many_arguments, reason = "each argument is a field of the tweaker")]
+impl AtlasBinding {
+    #[expect(clippy::too_many_arguments, reason = "each argument is a field of the binding")]
     #[must_use]
     pub(crate) fn new(
         atlases: Option<Rc<TileAtlasTextures>>,
@@ -35,7 +35,7 @@ impl DrawableAtlasesTweaker {
         text_size_is_zoom_constant: bool,
     ) -> Self {
         debug_assert_ne!(icon_texture_id, glyph_texture_id);
-        DrawableAtlasesTweaker {
+        AtlasBinding {
             atlases,
             icon_texture_id,
             glyph_texture_id,
@@ -84,7 +84,7 @@ impl DrawableAtlasesTweaker {
     }
 }
 
-impl DrawableAtlasesTweaker {
+impl AtlasBinding {
     /// Gives a draw the atlases' textures when it is made.
     pub(crate) fn init(&self, objects: &mut DrawObjects) {
         self.setup_textures(objects, true);
@@ -92,7 +92,7 @@ impl DrawableAtlasesTweaker {
 
     /// Gives the draw the atlases' textures before it draws, filtered as the
     /// frame's view asks.
-    pub(crate) fn execute(&self, objects: &mut DrawObjects, parameters: &PaintParameters<'_>) {
+    pub(crate) fn bind(&self, objects: &mut DrawObjects, parameters: &PaintParameters<'_>) {
         let state = parameters.state;
         let transformed = self.rotation_alignment == AlignmentType::Map || state.get_pitch() != 0.0;
         let linear_filter_for_icons = if self.is_text {

@@ -3,9 +3,9 @@
 //! `uniform_buffer`, `upload`), and the `src/mln/gfx` files that build
 //! bucket geometry, which include the renderer's bucket headers.
 
+pub(crate) mod atlas_binding;
 pub(crate) mod attachment;
 pub(crate) mod context;
-pub(crate) mod drawable_atlases_tweaker;
 pub(crate) mod dynamic_texture;
 pub(crate) mod dynamic_texture_atlas;
 pub(crate) mod fill_generator;

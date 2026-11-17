@@ -1203,8 +1203,7 @@ impl RenderOrchestrator {
         }
     }
 
-    /// The debug overlays, in `DebugType` order (`visitDebugLayerGroups`)
-    /// (layers: debug).
+    /// The debug overlays, in `DebugType` order (layers: debug).
     pub(crate) fn debug_layers(&mut self) -> impl Iterator<Item = &mut DebugLayer> {
         self.debug_layers.values_mut()
     }

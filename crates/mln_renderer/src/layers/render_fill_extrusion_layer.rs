@@ -57,8 +57,8 @@ use crate::buckets::fill_extrusion_bucket::{
 use crate::draw::{DrawObjects, copy_shared_attributes};
 use crate::draw_cache::{DrawCache, DrawDepth, DrawPriority, FrameDraw, FrameDraws, LayerDraws};
 use crate::frame_projection::zero_to_one_clip_z;
+use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
-use crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker;
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::pattern_layout::{PatternLayout, uses_pattern};
@@ -92,7 +92,7 @@ struct ExtrusionDraw {
 struct ExtrusionTile {
     draws: Vec<ExtrusionDraw>,
     /// Gives the pattern draws the texture of the tile's icon atlas.
-    atlases: Option<Rc<DrawableAtlasesTweaker>>,
+    atlases: Option<Rc<AtlasBinding>>,
 }
 
 impl DrawCache for ExtrusionTile {
@@ -660,7 +660,7 @@ impl TileBuilder {
         }
 
         let atlases = tile.get_atlas_textures().filter(|_| self.has_pattern).map(|atlases| {
-            Rc::new(DrawableAtlasesTweaker::new(
+            Rc::new(AtlasBinding::new(
                 Some(Rc::clone(atlases)),
                 None,
                 Some(ID_FILL_EXTRUSION_IMAGE_TEXTURE),

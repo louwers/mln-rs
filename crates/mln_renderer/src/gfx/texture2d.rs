@@ -26,8 +26,8 @@ pub(crate) struct Texture2D {
     released: Rc<Released>,
 }
 
-/// A shared texture, which tweakers mutate through the shared handle (e.g.
-/// its sampler state), hence the `RefCell`.
+/// A shared texture, whose sampler state the draws that bind it change
+/// through the shared handle, hence the `RefCell`.
 pub(crate) type Texture2DPtr = Rc<RefCell<Texture2D>>;
 
 impl Texture2D {

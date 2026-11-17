@@ -59,8 +59,8 @@
 "crates/mln_mtl/src/surface_target.rs" = 13
 "crates/mln_renderer/src/bucket_geometry.rs" = 1
 "crates/mln_renderer/src/draw.rs" = 4
+"crates/mln_renderer/src/gfx/atlas_binding.rs" = 2
 "crates/mln_renderer/src/gfx/context.rs" = 7
-"crates/mln_renderer/src/gfx/drawable_atlases_tweaker.rs" = 2
 "crates/mln_renderer/src/gfx/dynamic_texture.rs" = 2
 "crates/mln_renderer/src/layers/render_background_layer.rs" = 4
 "crates/mln_renderer/src/layers/render_color_relief_layer.rs" = 4

@@ -429,7 +429,7 @@ impl<'a> TileMut<'a> {
         let shown = contents.map(|contents| {
             let mut version = 0;
             if let Some(geometry) = contents.geometry() {
-                // New buckets, which no drawables copied yet.
+                // New buckets, which no draws copied yet.
                 let mut changed = ChangedBuckets::default();
                 geometry.set_feature_state(self.source.feature_state.current_states(), &mut changed);
                 version = self.source.feature_state.version();

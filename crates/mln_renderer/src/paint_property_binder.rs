@@ -919,8 +919,7 @@ macro_rules! paint_property_binders {
 
                 let buffer = &mut self.interleaved_vertex_buffer;
                 buffer.vertex_count += length - buffer.vertex_count;
-                // sharedVertexVector->updateModified(true): the render side
-                // copies the vector when it builds drawables.
+                // The render thread copies the vector when it builds draws.
             }
 
             $($(#[$update_meta])+)?

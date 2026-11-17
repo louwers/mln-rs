@@ -2,8 +2,12 @@
 // `BucketBase`, the virtual interface is the `Bucket` trait. Buckets are
 // built on the worker thread and then shared with the render thread
 // (`std::shared_ptr<Bucket>` in `LayerRenderData`): `BucketPtr = Arc<dyn
-// Bucket>`, `Bucket: Send + Sync`. The render thread only reads them, except
-// `upload` (an atomic flag, as in C++) and the geometry it moves out to draw
+// Bucket>`, `Bucket: Send + Sync`. The render thread shares them too: the
+// layers of a layout group share their bucket, and a tile's contents, the
+// frame's render tiles and symbol placement each hold it. It changes them
+// through `&self`, so what it changes is behind locks and atomics: the
+// values feature state rewrites (`update`), a symbol bucket's placement
+// state, the upload flag, and the geometry it moves out to draw
 // (bucket_geometry.rs).
 
 use std::any::Any;

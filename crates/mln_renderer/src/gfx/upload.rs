@@ -1,4 +1,4 @@
-//! Writes drawables' indexes and vertex attributes to buffers of the
+//! Writes draws' indexes and vertex attributes to buffers of the
 //! backend's [`Gpu`](mln_gfx::gpu::Gpu).
 
 use std::rc::Rc;
@@ -90,7 +90,7 @@ fn attribute_buffer(context: &Context, attribute: &mut VertexAttribute) -> Resul
     Ok(Some(buffer))
 }
 
-/// The binding of an attribute the drawable has, `None` where it has no
+/// The binding of an attribute the draw has, `None` where it has no
 /// data.
 fn attribute_binding(
     context: &Context,
@@ -126,10 +126,10 @@ fn attribute_binding(
     }))
 }
 
-/// The vertex bindings of a drawable, indexed by shader attribute index:
+/// The vertex bindings of a draw, indexed by shader attribute index:
 /// one for each attribute of the shader's `defaults`, read from the
-/// drawable's attribute in `overrides` where it has one. An attribute the
-/// drawable doesn't have, or has no data for, binds no buffer, at the
+/// draw's attribute in `overrides` where it has one. An attribute the
+/// draw doesn't have, or has no data for, binds no buffer, at the
 /// default's type and stride. `force` writes shared vertex data that
 /// appears unchanged (see [`vertex_buffer`]).
 pub(crate) fn build_attribute_bindings(
@@ -167,7 +167,7 @@ pub(crate) fn build_attribute_bindings(
         }
         bindings[index] = Some(binding);
     };
-    // An attribute the drawable has and the shader doesn't read.
+    // An attribute the draw has and the shader doesn't read.
     let unused = |_id: usize, attribute: &mut VertexAttribute| attribute.set_dirty(false);
     defaults.resolve(overrides, resolve, unused);
     result.map(|()| bindings)

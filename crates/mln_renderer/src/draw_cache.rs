@@ -23,8 +23,8 @@ use mln_util::hash::HashMap;
 use mln_util::identity::SimpleIdentity;
 
 use crate::draw::DrawObjects;
+use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
-use crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker;
 use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::layer_composite::Composite;
 use crate::layers::render_custom_layer::CustomLayerDraw;
@@ -161,7 +161,7 @@ pub(crate) struct FrameDraw {
     /// drew before it, so no pixel blends twice.
     pub(crate) clip: bool,
     /// Gives the draw the textures of its tile's atlases before it draws.
-    pub(crate) atlases: Option<Rc<DrawableAtlasesTweaker>>,
+    pub(crate) atlases: Option<Rc<AtlasBinding>>,
 }
 
 impl FrameDraw {
@@ -491,7 +491,7 @@ fn render_draws(frame: &FrameDraws, caches: &mut Caches<'_>, gpu: &mut dyn Gpu, 
             continue;
         };
         if let Some(atlases) = &draw.atlases {
-            atlases.execute(objects, parameters);
+            atlases.bind(objects, parameters);
         }
         let tile_stencil = || match draw.tile.filter(|_| draw.clip) {
             Some(tile) => parameters.stencil_mode_for_clipping(&tile.to_unwrapped()),

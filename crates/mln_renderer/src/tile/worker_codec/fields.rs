@@ -198,7 +198,7 @@ pub(crate) fn encode_buckets(result: &LayoutResult) -> Vec<u8> {
 }
 
 /// A `LayoutResult` crosses as each bucket once, after the layers that
-/// render it (a layer group's layers share their bucket, and their type is
+/// render it (the layers of a layout group share their bucket, and their type is
 /// the bucket's), and the feature index without its data.
 impl Wire for LayoutResult {
     fn write(&self, w: &mut Writer) {
