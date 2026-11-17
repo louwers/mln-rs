@@ -13,10 +13,11 @@ use std::sync::{Arc, Weak};
 use mln_map_types::MapMode;
 use mln_storage::FileSource;
 use mln_style::Source;
+use mln_style::layer_type::SourceKind;
 use mln_style::source_type::{ErasedStyleSourceType, SourceData, SourceTypeEntry, StyleSourceType};
 use mln_style::sources::custom::{CustomGeometryProvider, CustomVectorProvider};
 use mln_style::sources::geojson::GeoJSONData;
-use mln_style::sources::tileset::{RasterDemKind, RasterKind, TilesetKind, TilesetSourceType, VectorKind};
+use mln_style::sources::tileset::{TilesetKind, TilesetSourceType};
 use mln_style::sources::{CustomGeometrySourceType, CustomVectorSourceType, GeoJsonSourceType, ImageSourceType};
 use mln_util::constants;
 use mln_util::error::Error;
@@ -110,33 +111,22 @@ pub(crate) const fn entry<T: SourceType>() -> &'static dyn ErasedSourceType {
 
 // MARK: - Tilesets
 
-/// The tiles of a tileset source type.
-pub(crate) trait TilesetTiles: TilesetKind {
-    const TILE_KIND: TileKind;
-    /// Whether the type's tiles are vector tiles: always the default size,
-    /// in the encoding that the tileset names.
-    const VECTOR: bool;
+/// Whether the tiles of the tileset kind `K` are vector tiles: always the
+/// default size, in the encoding that the tileset names.
+fn is_vector<K: TilesetKind>() -> bool {
+    K::INFO.layer_kind == SourceKind::Geometry
 }
 
-impl TilesetTiles for VectorKind {
-    const TILE_KIND: TileKind = TileKind::Geometry;
-    const VECTOR: bool = true;
-}
-
-impl TilesetTiles for RasterKind {
-    const TILE_KIND: TileKind = TileKind::Raster;
-    const VECTOR: bool = false;
-}
-
-impl TilesetTiles for RasterDemKind {
-    const TILE_KIND: TileKind = TileKind::Dem(RasterEncoding::Mapbox);
-    const VECTOR: bool = false;
-}
-
-impl<K: TilesetTiles> SourceType for TilesetSourceType<K> {
+impl<K: TilesetKind> SourceType for TilesetSourceType<K> {
     fn render_source(source: &Source, store: &mut TileStore) -> Box<dyn RenderSource> {
         let origin = TilesetOrigin::<K> { tileset: None, kind: PhantomData };
-        Box::new(RenderTileSource::new(source.clone(), K::TILE_KIND, false, Box::new(origin), store))
+        let kind = match K::INFO.layer_kind {
+            SourceKind::Raster => TileKind::Raster,
+            // The tileset decides the encoding once it loads.
+            SourceKind::RasterDem => TileKind::Dem(RasterEncoding::Mapbox),
+            SourceKind::Geometry | SourceKind::None => TileKind::Geometry,
+        };
+        Box::new(RenderTileSource::new(source.clone(), kind, false, Box::new(origin), store))
     }
 }
 
@@ -146,7 +136,7 @@ struct TilesetOrigin<K> {
     kind: PhantomData<fn() -> K>,
 }
 
-impl<K: TilesetTiles> TileOrigin for TilesetOrigin<K> {
+impl<K: TilesetKind> TileOrigin for TilesetOrigin<K> {
     fn update(
         &mut self,
         _previous: &Source,
@@ -173,7 +163,7 @@ impl<K: TilesetTiles> TileOrigin for TilesetOrigin<K> {
         // A tileset without tiles makes no tiles, and the source counts as
         // loaded until its tiles are set.
         let tileset = self.tileset.clone().filter(|tileset| !tileset.tiles.is_empty())?;
-        let encoding = if K::VECTOR && tileset.vector_encoding == Some(VectorEncoding::MLT) {
+        let encoding = if is_vector::<K>() && tileset.vector_encoding == Some(VectorEncoding::MLT) {
             // The encoding is decided once, from the first tileset (`isMLT`).
             VectorTileEncoding::Mlt { fast_pfor_enabled: update.fast_pfor_enabled }
         } else {
@@ -193,7 +183,7 @@ impl<K: TilesetTiles> TileOrigin for TilesetOrigin<K> {
         if !current {
             tiles.info.origin = Some(DataOrigin::Tileset { tileset: tileset.clone(), encoding, file_source });
         }
-        let tile_size = if K::VECTOR { constants::TILE_SIZE_I } else { data.options.tile_size };
+        let tile_size = if is_vector::<K>() { constants::TILE_SIZE_I } else { data.options.tile_size };
         Some(Cover { tile_size, zoom_range: tileset.zoom_range, bounds: tileset.bounds })
     }
 
