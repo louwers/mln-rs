@@ -6,7 +6,7 @@
 use std::collections::BTreeSet;
 
 use expression_test::runner::TestRunOutput;
-use expression_test::{find_metrics_dir, print_stats, run};
+use expression_test::{find_metrics_dir, pin_default_locale, print_stats, run};
 
 /// The entries of `expected_failures.txt` that `t` fails: the whole test, or
 /// the inputs that evaluate differently when only inputs do.
@@ -20,6 +20,7 @@ fn failures(t: &TestRunOutput) -> Vec<String> {
 
 #[test]
 fn expression_corpus() {
+    pin_default_locale();
     let metrics = find_metrics_dir().expect("the C++ repository's metrics/integration/expression-tests");
     let stats = run(&metrics, &[], None, false);
     print_stats(&stats);

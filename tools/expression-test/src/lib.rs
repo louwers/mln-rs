@@ -1,12 +1,14 @@
 //! Runs the expression tests (`metrics/integration/expression-tests`) with
 //! the C++ runner's rules.
 
+mod default_locale;
 mod parser;
 pub mod runner;
 mod test_runner_common;
 
 use std::path::{Path, PathBuf};
 
+pub use default_locale::pin_default_locale;
 use parser::{collect_test_paths, parse_expression_ignores, parse_test_data};
 use runner::{TestRunOutput, TestStats, run_expression_test};
 
