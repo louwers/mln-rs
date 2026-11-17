@@ -255,8 +255,12 @@ fn origin(url: &str) -> Option<(String, String, u16)> {
 
 /// Plain HTTP(S) requests, used by the `OnlineFileSource`.
 pub(crate) struct HTTPFileSource {
+    /// The platform's HTTP stack, set up at the first transfer. Setting one
+    /// up isn't free (`NSURLSession` reads the main bundle's directory, ureq
+    /// starts its threads), and many sources never transfer: a host's
+    /// provider or the cache can serve everything.
     #[cfg(not(target_family = "wasm"))]
-    transport: Arc<dyn HttpTransport>,
+    transport: std::sync::OnceLock<Arc<dyn HttpTransport>>,
     /// The browser's fetch, which is the transport.
     #[cfg(target_family = "wasm")]
     fetch: crate::fetch_transport::FetchTransport,
@@ -264,11 +268,12 @@ pub(crate) struct HTTPFileSource {
 }
 
 impl HTTPFileSource {
-    /// An HTTP file source over the platform's HTTP stack.
+    /// An HTTP file source over the platform's HTTP stack, which it sets up
+    /// at its first transfer.
     #[cfg(not(target_family = "wasm"))]
     #[must_use]
     pub(crate) fn new() -> Self {
-        HTTPFileSource { transport: default_transport(), header_transform: HttpHeaderTransform::default() }
+        HTTPFileSource { transport: std::sync::OnceLock::new(), header_transform: HttpHeaderTransform::default() }
     }
 
     /// An HTTP file source over the browser's fetch.
@@ -298,7 +303,7 @@ impl HTTPFileSource {
         let headers = self.header_transform.headers(resource.kind, &resource.url);
         let request = TransferRequest { resource: resource.clone(), headers, responder };
         #[cfg(not(target_family = "wasm"))]
-        self.transport.start(request);
+        self.transport.get_or_init(default_transport).start(request);
         #[cfg(target_family = "wasm")]
         self.fetch.start(request);
     }
