@@ -1,9 +1,10 @@
 // C++ drawables share the bucket's vertex vectors and see placement's
 // changes through them (`updateModified`). Here a draw gets copies of the
 // vectors; when placement, sorting or feature state change the bucket (the
-// changes the tile's entry in the layer's `DrawCaches` collects), `update` replaces just
-// those attributes (opacity, dynamic positions, binders) and the triangle
-// indices of the tile's draws, as C++ `updateTileDrawable` does.
+// changes the tile's entry in the layer's `DrawCaches` collects), `update`
+// replaces just those attributes (opacity, dynamic positions, binders) and
+// the triangle indices of the tile's draws, as C++ `updateTileDrawable`
+// does.
 
 use std::any::Any;
 use std::rc::Rc;

@@ -150,13 +150,17 @@ struct TileEntry<T> {
     bucket: Option<SimpleIdentity>,
     /// What of the bucket's vertex data changed since the draws copied it.
     changes: BucketChanges,
-    /// The layer's cache of the tile's draws.
-    cache: Option<T>,
+    /// The layer's cache of the tile's draws, boxed so that the entries stay
+    /// small to move.
+    cache: Option<Box<T>>,
+    /// Whether the tile is one of those [`DrawCaches::set_tiles`] was last
+    /// given.
+    kept: bool,
 }
 
 impl<T> Default for TileEntry<T> {
     fn default() -> Self {
-        TileEntry { bucket: None, changes: BucketChanges::default(), cache: None }
+        TileEntry { bucket: None, changes: BucketChanges::default(), cache: None, kept: true }
     }
 }
 
@@ -317,8 +321,13 @@ impl<T, L> DrawCaches<T, L> {
     /// entries for: it keeps the entries of those it had, and drops the
     /// others.
     pub(crate) fn set_tiles(&mut self, tiles: impl IntoIterator<Item = OverscaledTileID>) {
-        let mut previous = std::mem::take(&mut self.tiles);
-        self.tiles = tiles.into_iter().map(|id| (id, previous.remove(&id).unwrap_or_default())).collect();
+        for entry in self.tiles.values_mut() {
+            entry.kept = false;
+        }
+        for id in tiles {
+            self.tiles.entry(id).or_default().kept = true;
+        }
+        self.tiles.retain(|_, entry| entry.kept);
     }
 
     /// Drops the entries of the tiles.
@@ -383,20 +392,20 @@ impl<T, L> DrawCaches<T, L> {
     /// The cache of `tile_id`'s draws, if the tile is one of the frame's and
     /// has one.
     pub(crate) fn cache(&self, tile_id: &OverscaledTileID) -> Option<&T> {
-        self.tiles.get(tile_id)?.cache.as_ref()
+        self.tiles.get(tile_id)?.cache.as_deref()
     }
 
     /// The cache of `tile_id`'s draws, if the tile is one of the frame's and
     /// has one.
     pub(crate) fn cache_mut(&mut self, tile_id: &OverscaledTileID) -> Option<&mut T> {
-        self.tiles.get_mut(tile_id)?.cache.as_mut()
+        self.tiles.get_mut(tile_id)?.cache.as_deref_mut()
     }
 
     /// Makes `cache` that of `tile_id`'s draws, if the tile is one of the
     /// frame's, and returns it.
     pub(crate) fn set_cache(&mut self, tile_id: &OverscaledTileID, cache: T) -> Option<&mut T> {
         let entry = self.tiles.get_mut(tile_id)?;
-        Some(entry.cache.insert(cache))
+        Some(entry.cache.insert(Box::new(cache)))
     }
 
     /// Drops the cache of `tile_id`'s draws.
