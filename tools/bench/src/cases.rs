@@ -140,6 +140,7 @@ pub fn all() -> Vec<Case> {
     for (name, data_driven) in [("Frame/Circles", true), ("Frame/Circles/Constant", false)] {
         cases.push(Case::new(name, move |cx| frame_circles(cx, name, data_driven)));
     }
+    cases.push(Case::new("Frame/Raster", frame_raster));
     let basemap_mlt = View { name: "basemap-mlt", style: Style::BasemapMlt, ..basemap_view() };
     let basemap_globe = View { name: "basemap-globe", style: Style::BasemapGlobe, ..basemap_view() };
     for view in views().into_iter().chain([basemap_mlt, basemap_globe]) {
@@ -477,6 +478,77 @@ fn frame_circles(cx: &Context, name: &str, data_driven: bool) -> Metrics {
     }
     if let Some(dir) = &cx.frames {
         write_frame(dir, name, &scene.read_frame());
+    }
+    let (p95, p99) = (percentile(meter.times(), 95.0), percentile(meter.times(), 99.0));
+    let mut metrics = meter.finish();
+    metrics.lead("frame_p95_ms", p95);
+    metrics.lead("frame_p99_ms", p99);
+    metrics
+}
+
+/// The raster layers that `Frame/Raster` stacks.
+const RASTER_LAYERS: usize = 6;
+
+/// Frames of the render suite's zoom-1 satellite tiles under six raster
+/// layers, each at half opacity with its color adjusted, the camera
+/// panning a little each frame: the raster program's GPU cost, every pixel
+/// drawn six times.
+fn frame_raster(cx: &Context) -> Metrics {
+    let mut layers =
+        vec![serde_json::json!({"id": "background", "type": "background", "paint": {"background-color": "#000000"}})];
+    layers.extend((0..RASTER_LAYERS).map(|index| {
+        serde_json::json!({
+            "id": format!("satellite-{index}"),
+            "type": "raster",
+            "source": "satellite",
+            "paint": {
+                "raster-opacity": 0.5,
+                "raster-hue-rotate": 30.0 * index as f64,
+                "raster-saturation": 0.25,
+                "raster-contrast": 0.1,
+                "raster-brightness-min": 0.05,
+                "raster-brightness-max": 0.95,
+                "raster-fade-duration": 0,
+            },
+        })
+    }));
+    let style = serde_json::json!({
+        "version": 8,
+        "sources": {
+            "satellite": {
+                "type": "raster",
+                "tiles": ["local://tiles/{z}-{x}-{y}.satellite.png"],
+                "tileSize": 512,
+                "minzoom": 1,
+                "maxzoom": 1,
+            },
+        },
+        "layers": layers,
+    });
+    let center = |index: usize| {
+        let angle = index as f64 * 0.05;
+        LatLng::new(5.0 * angle.sin(), 5.0 * angle.cos()).expect("a valid center")
+    };
+    let mut scene = Scene::new(BASEMAP_SIZE, Mode::OnDemand);
+    scene.jump(center(0), 1.5);
+    scene.load_json(&style.to_string());
+    scene.settle();
+    for index in 0..30 {
+        scene.jump(center(index), 1.5);
+        scene.pump();
+        scene.render_frame();
+    }
+    scene.settle();
+    let mut meter = Meter::new();
+    for index in 0..cx.iterations(200) {
+        scene.jump(center(index), 1.5);
+        meter.time(|| {
+            scene.pump();
+            scene.render_frame()
+        });
+    }
+    if let Some(dir) = &cx.frames {
+        write_frame(dir, "Frame/Raster", &scene.read_frame());
     }
     let (p95, p99) = (percentile(meter.times(), 95.0), percentile(meter.times(), 99.0));
     let mut metrics = meter.finish();
