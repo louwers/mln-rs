@@ -28,6 +28,9 @@
 #[cfg(not(any(feature = "webgpu", feature = "metal", feature = "vulkan", feature = "gl")))]
 compile_error!("mln_runtime renders with at least one backend: enable `webgpu`, `metal`, `vulkan` or `gl`");
 
+#[cfg(all(feature = "bench", not(target_family = "wasm")))]
+#[doc(hidden)]
+pub mod bench;
 mod camera;
 mod completion;
 mod event;

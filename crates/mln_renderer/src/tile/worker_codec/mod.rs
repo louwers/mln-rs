@@ -46,9 +46,15 @@ mod transport;
 mod worker_side;
 
 pub use envelope::Encoded;
+#[cfg(feature = "bench")]
+pub(crate) use envelope::{read_job_id, read_reply_header};
 pub use host::TileWorkerHost;
+#[cfg(feature = "bench")]
+pub(crate) use map_side::MapCodec;
 pub(crate) use transport::RemoteEvent;
 pub use transport::{RemoteWorkers, ReplySink, ThreadWorkerInstances, WorkerInstances};
+#[cfg(feature = "bench")]
+pub(crate) use worker_side::WorkerCodec;
 
 #[cfg(test)]
 mod tests;

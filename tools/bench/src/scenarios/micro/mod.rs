@@ -3,20 +3,27 @@
 
 pub(crate) mod decode;
 pub(crate) mod expression;
+pub(crate) mod feature_state;
 pub(crate) mod geojson;
 pub(crate) mod layout;
+pub(crate) mod run_loop;
+pub(crate) mod runtime;
 pub(crate) mod style;
+pub(crate) mod symbols;
+pub(crate) mod text;
+pub(crate) mod worker_codec;
 
 use std::sync::Arc;
 
-use mln_style::{Style, StyleRegistry};
+use mln_renderer::bench::{LaidOut, TileLayout};
+use mln_style::{Edit, Style, StyleRegistry};
 use mln_tile::{MltTile, MvtTile, TileData};
 
 use crate::support::fixtures::{Fixtures, Tiles};
 
-/// A street tile that the decode and layout scenarios work on, and how many
-/// times a run works on it: enough that a run counts closely, as a sparse
-/// tile takes little work.
+/// A street tile that the scenarios of tiles work on, and how many times a
+/// run works on it: enough that a run counts closely, as a sparse tile
+/// takes little work.
 #[derive(Clone, Copy)]
 pub(crate) struct StreetTile {
     pub(crate) id: (u8, u32, u32),
@@ -32,7 +39,7 @@ pub(crate) const DENSE: StreetTile = StreetTile { id: (14, 2621, 6332), repeats:
 /// 14/2622/6336, Candlestick Point on the bay's shore, 186 features.
 pub(crate) const SPARSE: StreetTile = StreetTile { id: (14, 2622, 6336), repeats: 100 };
 
-/// The tile `id` of the street tiles: MVT bytes, or MLT for `Tiles::StreetMlt`.
+/// Tile `id` of `tiles`: MVT bytes, or MLT for `Tiles::StreetMlt`.
 pub(crate) fn tile_bytes(fixtures: &Fixtures, tiles: Tiles, (z, x, y): (u8, u32, u32)) -> Arc<Vec<u8>> {
     Arc::new(fixtures.tile(tiles, z, x, y).unwrap_or_else(|| panic!("the fixtures have no tile {z}/{x}/{y}")))
 }
@@ -74,4 +81,104 @@ pub(crate) fn liberty(fixtures: &Fixtures, copies: usize) -> String {
 /// [`liberty`], parsed.
 pub(crate) fn parse_liberty(fixtures: &Fixtures, copies: usize) -> Style {
     Style::from_json(&registry(), &liberty(fixtures, copies), None).expect("Liberty parses")
+}
+
+/// Liberty as a map holds it once it has loaded: [`parse_liberty`], with
+/// the images of its sprite.
+pub(crate) fn loaded_liberty(fixtures: &Fixtures) -> Style {
+    with_sprite(fixtures, parse_liberty(fixtures, 1))
+}
+
+/// `style` with the images of its sprite, as a map's style loader adds them.
+pub(crate) fn with_sprite(fixtures: &Fixtures, mut style: Style) -> Style {
+    let sprite = style.get_sprites().first().expect("Liberty has a sprite").sprite_url.clone();
+    let path = asset_path(&sprite);
+    let png = mln_image::decode_png(&fixtures.read(&format!("{path}.png"))).expect("the sprite's image");
+    let index = fixtures.read(&format!("{path}.json"));
+    let images = mln_sprite::parse_sprite("default", &png, &index).expect("the sprite's index");
+    style.apply(Edit::AddImages(images)).expect("the sprite's images");
+    style
+}
+
+/// A street tile's layout job, as a tile worker gets it, and the tile's
+/// bytes, which each run of the job reads afresh.
+pub(crate) struct StreetLayout {
+    pub(crate) job: TileLayout,
+    bytes: Arc<Vec<u8>>,
+}
+
+impl StreetLayout {
+    /// The layout of the street tile `id` by those of `style`'s layers on
+    /// its vector source whose type `include` accepts, with the glyphs and
+    /// images it needs resolved from the snapshot.
+    pub(crate) fn new(fixtures: &Fixtures, style: &Style, include: impl Fn(&str) -> bool, id: (u8, u32, u32)) -> Self {
+        StreetLayout::shown_at(fixtures, style, include, id, id.0)
+    }
+
+    /// [`StreetLayout::new`] for the tile shown at zoom `zoom`, at or above
+    /// its own, as a map shows the street tiles' highest zoom when it zooms
+    /// in further.
+    pub(crate) fn shown_at(
+        fixtures: &Fixtures,
+        style: &Style,
+        include: impl Fn(&str) -> bool,
+        id: (u8, u32, u32),
+        zoom: u8,
+    ) -> Self {
+        let bytes = tile_bytes(fixtures, Tiles::Street, id);
+        let load = |url: &str| Some(fixtures.read(&asset_path(url)));
+        let job =
+            TileLayout::overscaled(style, "openmaptiles", include, id, zoom, &tile_data(Tiles::Street, &bytes), load)
+                .unwrap_or_else(|error| panic!("{error}"));
+        StreetLayout { job, bytes }
+    }
+
+    /// The tile's data, not yet decoded.
+    pub(crate) fn data(&self) -> TileData {
+        tile_data(Tiles::Street, &self.bytes)
+    }
+
+    /// The tile, laid out.
+    pub(crate) fn run(&self) -> LaidOut {
+        self.job.run(self.data()).unwrap_or_else(|error| panic!("{error}"))
+    }
+}
+
+/// The snapshot's path of an `asset://` URL of the style.
+pub(crate) fn asset_path(url: &str) -> String {
+    let path = url.strip_prefix("asset://").unwrap_or_else(|| panic!("{url} isn't in the snapshot"));
+    percent_decode(path)
+}
+
+/// `text` with each `%XX` turned into the byte it stands for.
+fn percent_decode(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        let hex =
+            bytes.get(index + 1..index + 3).and_then(|hex| u8::from_str_radix(std::str::from_utf8(hex).ok()?, 16).ok());
+        match (bytes[index], hex) {
+            (b'%', Some(byte)) => {
+                decoded.push(byte);
+                index += 3;
+            }
+            (byte, _) => {
+                decoded.push(byte);
+                index += 1;
+            }
+        }
+    }
+    String::from_utf8(decoded).expect("a URL of UTF-8")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn asset_urls_name_snapshot_paths() {
+        assert_eq!(asset_path("asset://glyphs/Noto%20Sans%20Regular/0-255.pbf"), "glyphs/Noto Sans Regular/0-255.pbf");
+        assert_eq!(asset_path("asset://sprites/ofm_f384/ofm"), "sprites/ofm_f384/ofm");
+    }
 }

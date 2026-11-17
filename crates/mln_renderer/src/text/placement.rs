@@ -918,6 +918,12 @@ impl Placement {
         self.commit_time
     }
 
+    /// How many symbols the placement shows, by their text or their icon.
+    #[cfg(feature = "bench")]
+    pub(crate) fn shown(&self) -> usize {
+        self.placements.values().filter(|placement| placement.placed()).count()
+    }
+
     pub(crate) fn place_layers(&mut self, layers: &[&dyn RenderLayer]) {
         if matches!(self.kind, PlacementKind::Tile(_)) {
             self.tile_place_layers(layers);

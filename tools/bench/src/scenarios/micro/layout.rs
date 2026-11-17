@@ -5,14 +5,9 @@
 //! The layout is the renderer's, reached through its `bench` entry points
 //! (`mln_renderer::bench`).
 
-use std::sync::Arc;
-
-use mln_renderer::bench::TileLayout;
-use mln_style::{Edit, Style};
-
-use super::{DENSE, SPARSE, StreetTile, parse_liberty, tile_bytes, tile_data};
+use super::{DENSE, SPARSE, StreetLayout, StreetTile, loaded_liberty};
 use crate::scenario::{Bench, Kind, Scenario};
-use crate::support::fixtures::{Fixtures, Tiles};
+use crate::support::fixtures::Fixtures;
 
 pub(crate) const SCENARIOS: &[Scenario] = &[
     Scenario {
@@ -113,73 +108,11 @@ fn symbol_dense(bench: &mut Bench) {
 
 fn lay_out(bench: &mut Bench, layer_type: &str, tile: StreetTile) {
     let fixtures = Fixtures::open(bench);
-    let style = with_sprite(&fixtures, parse_liberty(&fixtures, 1));
-    let bytes = tile_bytes(&fixtures, Tiles::Street, tile.id);
-    let load = |url: &str| Some(fixtures.read(&asset_path(url)));
-    let layout = TileLayout::new(
-        &style,
-        "openmaptiles",
-        |type_| type_ == layer_type,
-        tile.id,
-        &tile_data(Tiles::Street, &bytes),
-        load,
-    )
-    .unwrap_or_else(|error| panic!("{error}"));
-
+    let layout = StreetLayout::new(&fixtures, &loaded_liberty(&fixtures), |type_| type_ == layer_type, tile.id);
     for _ in 0..tile.repeats {
-        let laid_out = bench.measure(|| layout.run(tile_data(Tiles::Street, &Arc::clone(&bytes))));
+        let laid_out = bench.measure(|| layout.job.run(layout.data()));
         let laid_out = laid_out.unwrap_or_else(|error| panic!("{error}"));
         assert!(laid_out.buckets() > 0, "the tile has features for the {layer_type} layers");
     }
     bench.per("tile", tile.repeats);
-}
-
-/// `style` with the images of its sprite, as a map's style loader adds them.
-fn with_sprite(fixtures: &Fixtures, mut style: Style) -> Style {
-    let sprite = style.get_sprites().first().expect("Liberty has a sprite").sprite_url.clone();
-    let path = asset_path(&sprite);
-    let png = mln_image::decode_png(&fixtures.read(&format!("{path}.png"))).expect("the sprite's image");
-    let index = fixtures.read(&format!("{path}.json"));
-    let images = mln_sprite::parse_sprite("default", &png, &index).expect("the sprite's index");
-    style.apply(Edit::AddImages(images)).expect("the sprite's images");
-    style
-}
-
-/// The snapshot's path of an `asset://` URL of the style.
-fn asset_path(url: &str) -> String {
-    let path = url.strip_prefix("asset://").unwrap_or_else(|| panic!("{url} isn't in the snapshot"));
-    percent_decode(path)
-}
-
-/// `text` with each `%XX` turned into the byte it stands for.
-fn percent_decode(text: &str) -> String {
-    let bytes = text.as_bytes();
-    let mut decoded = Vec::with_capacity(bytes.len());
-    let mut index = 0;
-    while index < bytes.len() {
-        let hex =
-            bytes.get(index + 1..index + 3).and_then(|hex| u8::from_str_radix(std::str::from_utf8(hex).ok()?, 16).ok());
-        match (bytes[index], hex) {
-            (b'%', Some(byte)) => {
-                decoded.push(byte);
-                index += 3;
-            }
-            (byte, _) => {
-                decoded.push(byte);
-                index += 1;
-            }
-        }
-    }
-    String::from_utf8(decoded).expect("a URL of UTF-8")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn asset_urls_name_snapshot_paths() {
-        assert_eq!(asset_path("asset://glyphs/Noto%20Sans%20Regular/0-255.pbf"), "glyphs/Noto Sans Regular/0-255.pbf");
-        assert_eq!(asset_path("asset://sprites/ofm_f384/ofm"), "sprites/ofm_f384/ofm");
-    }
 }

@@ -27,6 +27,9 @@ metal = ["dep:mln_mtl"]
 vulkan = ["dep:mln_vulkan"]
 d3d12 = ["dep:mln_d3d12"]
 gl = ["dep:mln_gl"]
+# `bench`, the entry points to internal stages that the benchmarks
+# (tools/bench) measure. Not API: hidden from the documentation.
+bench = []
 
 [dependencies]
 feature.workspace = true

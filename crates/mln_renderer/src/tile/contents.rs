@@ -62,6 +62,33 @@ impl LayoutResult {
         }
         Some(result)
     }
+
+    /// Brings the buckets' feature state to `states`, for the features of
+    /// the data they were built from; `pattern_positions` are where the
+    /// layout's patterns are in its atlas.
+    pub(crate) fn set_feature_state(&self, states: &LayerFeatureStates, pattern_positions: &ImagePositions) {
+        let Some(layers) = self.feature_index.get_data() else {
+            return;
+        };
+        if states.is_empty() {
+            return;
+        }
+        for (layer_id, render_data) in &self.layer_render_data {
+            let source_layer_id = &render_data.layer.style().base().source_layer;
+            // The worker got the layer from the same data.
+            if let Ok(Some(source_layer)) = layers.layer(source_layer_id) {
+                let Some(feature_states) = states.get(source_layer_id) else {
+                    continue;
+                };
+                if feature_states.is_empty() {
+                    continue;
+                }
+                if render_data.bucket.has_data() {
+                    render_data.bucket.update(feature_states, &source_layer, layer_id, pattern_positions);
+                }
+            }
+        }
+    }
 }
 
 /// The atlas pages a layout draws its glyphs and images from. Dropping it
@@ -218,29 +245,8 @@ impl GeometryContents {
     /// Brings the buckets' feature state to `states`, for the features of
     /// the data they were built from.
     pub(crate) fn set_feature_state(&self, states: &LayerFeatureStates) {
-        let Some(layers) = self.result.feature_index.get_data() else {
-            return;
-        };
-        if states.is_empty() {
-            return;
-        }
         let no_patterns = ImagePositions::default();
-        let pattern_positions = self.pattern_positions().unwrap_or(&no_patterns);
-        for (layer_id, render_data) in &self.result.layer_render_data {
-            let source_layer_id = &render_data.layer.style().base().source_layer;
-            // The worker got the layer from the same data.
-            if let Ok(Some(source_layer)) = layers.layer(source_layer_id) {
-                let Some(feature_states) = states.get(source_layer_id) else {
-                    continue;
-                };
-                if feature_states.is_empty() {
-                    continue;
-                }
-                if render_data.bucket.has_data() {
-                    render_data.bucket.update(feature_states, &source_layer, layer_id, pattern_positions);
-                }
-            }
-        }
+        self.result.set_feature_state(states, self.pattern_positions().unwrap_or(&no_patterns));
     }
 
     /// The largest query radius of `layers`' buckets.

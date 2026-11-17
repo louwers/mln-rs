@@ -191,7 +191,7 @@ impl LayoutResult {
 /// The encoding of a layout's buckets with the layers that render them, as
 /// `LayoutResult` writes them without the tables in the context.
 #[cfg(test)]
-pub(super) fn encode_buckets(result: &LayoutResult) -> Vec<u8> {
+pub(crate) fn encode_buckets(result: &LayoutResult) -> Vec<u8> {
     let mut w = Writer::new();
     result.write_buckets(&mut w);
     w.finish().unwrap()

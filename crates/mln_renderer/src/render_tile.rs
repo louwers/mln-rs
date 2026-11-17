@@ -18,6 +18,7 @@ use mln_util::pool::TaskGroup;
 use crate::bucket::BucketPtr;
 use crate::buckets::debug_bucket::DebugBucket; // layers: debug
 use crate::gfx::context::Context;
+use crate::paint_parameters::TransformParameters;
 use crate::render_layer::LayerRenderData;
 use crate::render_source::SourcePrepareParameters;
 use crate::tile::contents::{Contents, TileRenderData};
@@ -44,12 +45,18 @@ pub(crate) struct RenderTile {
 
 impl RenderTile {
     pub(crate) fn new(id: UnwrappedTileID, tile: &Tile, hold_for_fade: bool) -> Self {
+        RenderTile::of_tile_id(id, tile.id, hold_for_fade)
+    }
+
+    /// The render tile of the tile `tile_id`, drawn as `id`, before it is
+    /// prepared.
+    pub(crate) fn of_tile_id(id: UnwrappedTileID, tile_id: OverscaledTileID, hold_for_fade: bool) -> Self {
         RenderTile {
             id,
             projection: ProjectionData::default(),
             // C++ default-constructs `mat4` (uninitialized); prepare sets it.
             matrix: [0.0; 16],
-            tile_id: tile.id,
+            tile_id,
             tile_hold_for_fade: hold_for_fade,
             render_data: None,
             shared_bucket: None,
@@ -172,8 +179,11 @@ impl RenderTile {
             self.debug_bucket = None;
         }
 
-        // Calculate the standard tile matrix.
-        let transform = parameters.transform;
+        self.set_projection(parameters.transform);
+    }
+
+    /// Sets the tile's projection and its standard matrix for `transform`.
+    pub(crate) fn set_projection(&mut self, transform: &TransformParameters) {
         self.projection = transform.state.get_projection_data_with(&self.id, &transform.proj_matrix);
         self.matrix = self.projection.main_matrix;
     }
