@@ -81,7 +81,7 @@ run = [
 ]
 
 [tasks."ci:lint"]
-description = "Run what CI's lint job runs: `check`, the docs, the browser and 32-bit builds, the minimum Rust, the generated C declarations and the packages"
+description = "Run what CI's lint job runs: `check`, the docs, the browser and 32-bit builds, the minimum Rust and the generated C declarations"
 run = [
   "mise run check",
   "mise run docs",
@@ -89,9 +89,12 @@ run = [
   "mise run check:32bit",
   "mise run test:msrv",
   "mise run generate:c-abi",
-  "mise run package",
   "mise run ci:assert-clean",
 ]
+
+[tasks."ci:package"]
+description = "Run what CI's lint job runs when a change can change the packages"
+run = ["mise run package", "mise run ci:assert-clean"]
 
 [tasks.docs]
 description = "Build the API docs as docs.rs does; `--open` opens them"

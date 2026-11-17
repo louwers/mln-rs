@@ -14,14 +14,16 @@ permissions:
   contents: read
 
 jobs:
-  # Which of the macos and web jobs a pull request needs, from the paths it
-  # changes (`mise run ci:plan`). Pushes to main and manual runs run both.
+  # Which of the macos and web jobs and the packaging a pull request needs,
+  # from what it changes (`mise run ci:plan`). Pushes to main and manual runs
+  # run everything.
   plan:
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
       macos: ${{ steps.plan.outputs.macos }}
       web: ${{ steps.plan.outputs.web }}
+      package: ${{ steps.plan.outputs.package }}
     steps:
       # The pull request's merge commit and its first parent, the base.
       - uses: actions/checkout@v7
@@ -32,18 +34,19 @@ jobs:
       - id: plan
         run: |
           if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
-            git diff --name-only HEAD^1 HEAD | bash mise-tasks/ci/plan >> "$GITHUB_OUTPUT"
+            git diff --name-status HEAD^1 HEAD | bash mise-tasks/ci/plan >> "$GITHUB_OUTPUT"
           else
-            printf 'macos=true\nweb=true\n' >> "$GITHUB_OUTPUT"
+            printf 'macos=true\nweb=true\npackage=true\n' >> "$GITHUB_OUTPUT"
           fi
 
   # The formatters and linters (`mise run check`, hk.pkl), the API docs as
   # docs.rs builds them, clippy for wasm32 and 32-bit x86 Linux, the minimum
-  # Rust that Cargo.toml declares, the C library's generated declarations
-  # against its headers, and each crates.io package built from its packaged
-  # sources with every test target (RELEASING.md). Warnings are errors
-  # (mise.toml denies them in CI).
+  # Rust that Cargo.toml declares and the C library's generated declarations
+  # against its headers. When the plan asks, each crates.io package built from
+  # its packaged sources with every test target (RELEASING.md). Warnings are
+  # errors (mise.toml denies them in CI).
   lint:
+    needs: plan
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
@@ -68,6 +71,10 @@ jobs:
 
       - name: Lint
         run: mise run ci:lint
+
+      - name: Package
+        if: needs.plan.outputs.package == 'true'
+        run: mise run ci:package
 
   # Every test on WebGPU (wgpu on Vulkan), then the tests that depend on the
   # backend on the Vulkan backend, under Vulkan's validation layer, and on the

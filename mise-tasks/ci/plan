@@ -1,20 +1,30 @@
 #!/usr/bin/env bash
-#MISE description="Print which of CI's macos and web jobs a change needs, from its changed paths on stdin"
-# CI's plan job runs this on a pull request's changed paths (`git diff
-# --name-only main... | mise run ci:plan`); pushes to main run every job. A job
-# is skipped when every changed path is one that it doesn't build or test.
+#MISE description="Print which of CI's selected jobs and steps a change needs, from its `git diff --name-status` on stdin"
+# CI's plan job runs this on a pull request's changes (`git diff --name-status
+# main... | mise run ci:plan`); pushes to main run everything. macos and web
+# are skipped when every changed path is one that they don't build or test.
+# Packaging (`mise run package`) runs when a manifest changes or a file is
+# added, deleted or renamed, which can change what a package includes.
 set -euo pipefail
 macos=false
 web=false
-while IFS= read -r path; do
-    case $path in
-        *.md) ;;
-        crates/mln_d3d12/*) ;;
-        crates/mln_mtl/* | examples/desktop/*) macos=true ;;
-        crates/mln_vulkan/* | tools/c-abi-test/* | .github/actions/lavapipe/*) ;;
-        crates/mln_web_host/* | crates/mln_web_shaper/* | examples/web/* | crates/mln_c/web-check/* | mise-tasks/web/* | mise-tasks/c-web/*) web=true ;;
-        *) macos=true web=true ;;
-    esac
+package=false
+while IFS=$'\t' read -r status path rest; do
+    [[ $status == M ]] || package=true
+    for path in "$path" ${rest:+"$rest"}; do
+        case $path in
+            Cargo.lock | Cargo.toml | */Cargo.toml) package=true ;;
+        esac
+        case $path in
+            *.md) ;;
+            crates/mln_d3d12/*) ;;
+            crates/mln_mtl/* | examples/desktop/*) macos=true ;;
+            crates/mln_vulkan/* | tools/c-abi-test/* | .github/actions/lavapipe/*) ;;
+            crates/mln_web_host/* | crates/mln_web_shaper/* | examples/web/* | crates/mln_c/web-check/* | mise-tasks/web/* | mise-tasks/c-web/*) web=true ;;
+            *) macos=true web=true ;;
+        esac
+    done
 done
 echo "macos=$macos"
 echo "web=$web"
+echo "package=$package"
