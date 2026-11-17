@@ -1,15 +1,15 @@
 use mln_conversion::Convertible;
-use mln_style_types::SourceType;
 use mln_util::tileset::{PartialTileset, RasterEncoding, VectorEncoding};
 
 use super::util::parse_json;
 use crate::conversion::Error;
 use crate::conversion::source::convert_source;
 use crate::conversion::tileset::convert_tileset;
+use crate::layer_type::SourceKind;
 use crate::source_type::Source;
 
-fn convert_json(json: &str, source_type: SourceType) -> Result<PartialTileset, String> {
-    convert_tileset(&Convertible::from(&parse_json(json)), source_type)
+fn convert_json(json: &str, tiles: SourceKind) -> Result<PartialTileset, String> {
+    convert_tileset(&Convertible::from(&parse_json(json)), tiles)
 }
 
 fn convert_source_json(json: &str, error: &mut Error, id: &str) -> Option<Source> {
@@ -20,20 +20,20 @@ fn convert_source_json(json: &str, error: &mut Error, id: &str) -> Option<Source
 // gtest: SourceOptions.Basic
 #[test]
 fn basic() {
-    assert_eq!(Ok(PartialTileset::default()), convert_json("{}", SourceType::RasterDEM));
+    assert_eq!(Ok(PartialTileset::default()), convert_json("{}", SourceKind::RasterDem));
 }
 
 // gtest: SourceOptions.ErrorHandling
 #[test]
 fn error_handling() {
-    let error = convert_json(r#"{ "encoding": "this isn't a valid encoding" }"#, SourceType::RasterDEM).unwrap_err();
+    let error = convert_json(r#"{ "encoding": "this isn't a valid encoding" }"#, SourceKind::RasterDem).unwrap_err();
     assert!(error.starts_with("invalid encoding"), "{error}");
 }
 
 // gtest: SourceOptions.TerrariumEncodingParsed
 #[test]
 fn terrarium_encoding_parsed() {
-    let converted = convert_json(r#"{"encoding": "terrarium"}"#, SourceType::RasterDEM).unwrap();
+    let converted = convert_json(r#"{"encoding": "terrarium"}"#, SourceKind::RasterDem).unwrap();
     assert_eq!(converted.raster_encoding, Some(RasterEncoding::Terrarium));
     assert!(converted.vector_encoding.is_none());
 }
@@ -41,14 +41,14 @@ fn terrarium_encoding_parsed() {
 // gtest: SourceOptions.MapboxEncodingParsed
 #[test]
 fn mapbox_encoding_parsed() {
-    let converted = convert_json(r#"{"encoding": "mapbox"}"#, SourceType::RasterDEM).unwrap();
+    let converted = convert_json(r#"{"encoding": "mapbox"}"#, SourceKind::RasterDem).unwrap();
     assert_eq!(converted.raster_encoding, Some(RasterEncoding::Mapbox));
     assert!(converted.vector_encoding.is_none());
 }
 
 #[test]
 fn custom_encoding_parsed() {
-    let dem = |json| convert_json(json, SourceType::RasterDEM);
+    let dem = |json| convert_json(json, SourceKind::RasterDem);
     let converted =
         dem(r#"{"encoding": "custom", "redFactor": 0, "greenFactor": 25.6, "blueFactor": 0.1, "baseShift": 3446.4}"#)
             .unwrap();
@@ -76,7 +76,7 @@ fn custom_encoding_parsed() {
 // gtest: SourceOptions.MVTEncodingParsed
 #[test]
 fn mvt_encoding_parsed() {
-    let converted = convert_json(r#"{"encoding": "mvt"}"#, SourceType::Vector).unwrap();
+    let converted = convert_json(r#"{"encoding": "mvt"}"#, SourceKind::Geometry).unwrap();
     assert_eq!(converted.vector_encoding, Some(VectorEncoding::Mapbox));
     assert!(converted.raster_encoding.is_none());
 }
@@ -84,7 +84,7 @@ fn mvt_encoding_parsed() {
 // gtest: SourceOptions.MLTEncodingParsed
 #[test]
 fn mlt_encoding_parsed() {
-    let converted = convert_json(r#"{"encoding": "mlt"}"#, SourceType::Vector).unwrap();
+    let converted = convert_json(r#"{"encoding": "mlt"}"#, SourceKind::Geometry).unwrap();
     assert_eq!(converted.vector_encoding, Some(VectorEncoding::MLT));
     assert!(converted.raster_encoding.is_none());
 }
@@ -92,15 +92,15 @@ fn mlt_encoding_parsed() {
 // Each source type has its own encodings, and a raster source has none.
 #[test]
 fn encodings_depend_on_the_source_type() {
-    assert!(convert_json(r#"{"encoding": "mlt"}"#, SourceType::RasterDEM).is_err());
-    assert!(convert_json(r#"{"encoding": "terrarium"}"#, SourceType::Vector).is_err());
-    assert_eq!(Ok(PartialTileset::default()), convert_json(r#"{"encoding": "mlt"}"#, SourceType::Raster));
+    assert!(convert_json(r#"{"encoding": "mlt"}"#, SourceKind::RasterDem).is_err());
+    assert!(convert_json(r#"{"encoding": "terrarium"}"#, SourceKind::Geometry).is_err());
+    assert_eq!(Ok(PartialTileset::default()), convert_json(r#"{"encoding": "mlt"}"#, SourceKind::Raster));
 }
 
 // gtest: SourceOptions.ZoomRangeParsed
 #[test]
 fn zoom_range_parsed() {
-    let converted = convert_json(r#"{ "minzoom": 5, "maxzoom": 14 }"#, SourceType::RasterDEM).unwrap();
+    let converted = convert_json(r#"{ "minzoom": 5, "maxzoom": 14 }"#, SourceKind::RasterDem).unwrap();
     assert_eq!(converted.min_zoom, Some(5));
     assert_eq!(converted.max_zoom, Some(14));
     assert!(converted.raster_encoding.is_none());
@@ -110,7 +110,7 @@ fn zoom_range_parsed() {
 // gtest: SourceOptions.ZoomRangeAlongsideEncoding
 #[test]
 fn zoom_range_alongside_encoding() {
-    let converted = convert_json(r#"{ "encoding": "terrarium", "maxzoom": 15 }"#, SourceType::RasterDEM).unwrap();
+    let converted = convert_json(r#"{ "encoding": "terrarium", "maxzoom": 15 }"#, SourceKind::RasterDem).unwrap();
     assert_eq!(converted.raster_encoding, Some(RasterEncoding::Terrarium));
     assert!(converted.min_zoom.is_none());
     assert_eq!(converted.max_zoom, Some(15));
@@ -119,14 +119,14 @@ fn zoom_range_alongside_encoding() {
 // gtest: SourceOptions.InvalidMaxzoomType
 #[test]
 fn invalid_maxzoom_type() {
-    assert_eq!(Err("invalid maxzoom".to_owned()), convert_json(r#"{ "maxzoom": "high" }"#, SourceType::RasterDEM));
+    assert_eq!(Err("invalid maxzoom".to_owned()), convert_json(r#"{ "maxzoom": "high" }"#, SourceKind::RasterDem));
 }
 
 // gtest: SourceOptions.ZoomOutOfRange
 #[test]
 fn zoom_out_of_range() {
-    assert_eq!(Err("invalid minzoom".to_owned()), convert_json(r#"{ "minzoom": -1 }"#, SourceType::RasterDEM));
-    assert_eq!(Err("invalid maxzoom".to_owned()), convert_json(r#"{ "maxzoom": 300 }"#, SourceType::RasterDEM));
+    assert_eq!(Err("invalid minzoom".to_owned()), convert_json(r#"{ "minzoom": -1 }"#, SourceKind::RasterDem));
+    assert_eq!(Err("invalid maxzoom".to_owned()), convert_json(r#"{ "maxzoom": 300 }"#, SourceKind::RasterDem));
 }
 
 // gtest: SourceOptions.RasterDEMSourceWithAnInvalidZoomIsRejected

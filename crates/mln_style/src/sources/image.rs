@@ -6,7 +6,6 @@ use std::sync::Arc;
 use mln_actor::scheduler::Respond;
 use mln_image::decoder;
 use mln_storage::{Data, Resource};
-use mln_style_types::SourceType;
 use mln_util::LatLng;
 use mln_util::image::PremultipliedImage;
 
@@ -30,8 +29,15 @@ pub struct ImageSourceOptions {
 }
 
 impl StyleSourceType for ImageSourceType {
-    const INFO: SourceTypeInfo =
-        SourceTypeInfo { name: "image", layer_kind: SourceKind::Raster, from_json: true, type_: SourceType::Image };
+    // An image source has no tiles, so the tile members say nothing.
+    const INFO: SourceTypeInfo = SourceTypeInfo {
+        name: "image",
+        layer_kind: SourceKind::Raster,
+        from_json: true,
+        round_zoom: false,
+        overscale: false,
+        prefetch: false,
+    };
 
     const DESCRIBES_IN_BACKGROUND: bool = true;
 

@@ -7,13 +7,14 @@ use std::sync::{Arc, Weak};
 use geojson::{GeoJson, GeometryValue};
 use mln_style::expression::Functions;
 use mln_style::image::Impl as StyleImage;
-use mln_style::source_type::SourceData;
+use mln_style::source_type::{SourceData, StyleSourceType};
 use mln_style::sources::custom_geometry_source::{self, TileOptions};
 use mln_style::sources::geojson::{GeoJSONData, GeoJSONDataBuilder};
 use mln_style::sources::image::ImageSourceOptions;
 use mln_style::sources::{
-    CustomGeometrySourceHandle, CustomVectorSourceHandle, GeoJSONOptions, GeoJsonSourceType, ImageSourceType,
-    TileDataFormat, custom_vector_source, geojson_source,
+    CustomGeometrySourceHandle, CustomGeometrySourceType, CustomVectorSourceHandle, CustomVectorSourceType,
+    GeoJSONOptions, GeoJsonSourceType, ImageSourceType, RasterDemSourceType, RasterSourceType, TileDataFormat,
+    VectorSourceType, custom_vector_source, geojson_source,
 };
 use mln_style::{Edit, Source, SourceInstance, TransitionOptions};
 use mln_tile_id::CanonicalTileID;
@@ -384,20 +385,23 @@ fn require_new_source(map: &mln_map::Map, id: &str) -> Result<(), Error> {
     Ok(())
 }
 
-/// The runtime's kind of a source of the type `name`, the one place that
-/// maps source types to [`SourceKind`]. `None` for a type the runtime
-/// doesn't name.
-fn source_kind(name: &str) -> Option<SourceKind> {
-    Some(match name {
-        "vector" => SourceKind::Vector,
-        "raster" => SourceKind::Raster,
-        "raster-dem" => SourceKind::RasterDem,
-        "geojson" => SourceKind::GeoJson,
-        "image" => SourceKind::Image,
-        "custom-geometry" => SourceKind::CustomGeometry,
-        "custom-vector" => SourceKind::CustomVector,
-        _ => return None,
-    })
+impl SourceKind {
+    /// The kind of `source`, from its type, the one place that maps source
+    /// types to kinds. `None` for a type the runtime doesn't name.
+    fn of(source: &Source) -> Option<SourceKind> {
+        let name = source.info().name;
+        [
+            (VectorSourceType::INFO, SourceKind::Vector),
+            (RasterSourceType::INFO, SourceKind::Raster),
+            (RasterDemSourceType::INFO, SourceKind::RasterDem),
+            (GeoJsonSourceType::INFO, SourceKind::GeoJson),
+            (ImageSourceType::INFO, SourceKind::Image),
+            (CustomGeometrySourceType::INFO, SourceKind::CustomGeometry),
+            (CustomVectorSourceType::INFO, SourceKind::CustomVector),
+        ]
+        .into_iter()
+        .find_map(|(info, kind)| (info.name == name).then_some(kind))
+    }
 }
 
 /// The `clusterProperties` of `options` as a JSON object.
@@ -419,7 +423,7 @@ fn cluster_properties_json(options: &GeoJSONOptions) -> Option<String> {
 /// What the API reports about `source`; `None` for a source of a type the
 /// runtime doesn't name.
 fn source_info(source: &Source) -> Option<SourceInfo> {
-    let kind = source_kind(source.info().name)?;
+    let kind = SourceKind::of(source)?;
     let summary = source.data().summary();
     Some(SourceInfo {
         id: source.id().to_owned(),

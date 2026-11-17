@@ -12,7 +12,6 @@ use geo_types::{Coord, Geometry, LineString, Polygon};
 use geometry::Point;
 use mln_map_types::{TileCoordinate, TileLodMode, TransformState, ViewportMode};
 use mln_math::{fmax, fmin};
-use mln_style_types::SourceType;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::bounding_volumes::{AABB, Frustum, IntersectionResult};
 use mln_util::constants;
@@ -266,15 +265,13 @@ impl TileCoverParameters {
     }
 }
 
+/// The zoom level of the tiles, `size` pixels wide, that cover a view at
+/// `zoom`: the nearest level if `round_zoom`, else the level below.
 #[must_use]
-pub fn covering_zoom_level(zoom: f64, type_: SourceType, size: u16) -> i32 {
+pub fn covering_zoom_level(zoom: f64, round_zoom: bool, size: u16) -> i32 {
     let mut zoom = zoom;
     zoom += (constants::TILE_SIZE_D / f64::from(size)).log2();
-    if type_ == SourceType::Raster || type_ == SourceType::RasterDEM {
-        zoom.round() as i32
-    } else {
-        zoom.floor() as i32
-    }
+    if round_zoom { zoom.round() as i32 } else { zoom.floor() as i32 }
 }
 
 /// The globe tile cover: a port of GL JS `coveringTiles` with

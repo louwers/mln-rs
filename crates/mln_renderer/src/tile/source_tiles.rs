@@ -9,7 +9,6 @@ use std::sync::Arc;
 use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, VerticalPerspectiveProjection};
 use mln_style::Source;
 use mln_style::property_value::PropertyValue;
-use mln_style_types::SourceType;
 use mln_tile_id::tile_range::TileRange;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::constants;
@@ -479,8 +478,8 @@ impl SourceTiles {
         let style_source = update.style_source;
         let zoom_range = update.zoom_range;
         let tile_size = update.tile_size;
-        let type_ = style_source.get_type();
-        let overscaled_zoom: i32 = covering_zoom_level(zoom, type_, tile_size);
+        let info = style_source.info();
+        let overscaled_zoom: i32 = covering_zoom_level(zoom, info.round_zoom, tile_size);
         let mut tile_zoom: i32 = overscaled_zoom;
         let mut pan_zoom: i32 = i32::from(zoom_range.max);
 
@@ -499,19 +498,19 @@ impl SourceTiles {
             tile_lod_pitch_threshold: parameters.tile_lod_pitch_threshold,
             tile_lod_mode: parameters.tile_lod_mode,
             requested_zoom: Some(zoom + (constants::TILE_SIZE_D / f64::from(tile_size)).log2()),
-            round_zoom: type_ == SourceType::Raster || type_ == SourceType::RasterDEM,
+            round_zoom: info.round_zoom,
             max_content_elevation: f64::from(self.update_max_content_elevation(update.layers)),
         };
 
         if overscaled_zoom >= i32::from(zoom_range.min) {
             let ideal_zoom: i32 = std::cmp::min(i32::from(zoom_range.max), overscaled_zoom);
 
-            // Make sure we're not reparsing overzoomed raster tiles.
-            if type_ == SourceType::Raster {
+            // Past the highest zoom level, draw that level's tiles larger.
+            if !info.overscale {
                 tile_zoom = ideal_zoom;
             }
 
-            if parameters.mode == MapMode::Continuous && type_ != SourceType::GeoJSON {
+            if parameters.mode == MapMode::Continuous && info.prefetch {
                 // Lower zoom levels show something sooner, for some bandwidth.
                 let prefetch_zoom_delta: u8 = source_prefetch_zoom_delta.unwrap_or(parameters.prefetch_zoom_delta);
                 if prefetch_zoom_delta != 0 {
@@ -536,7 +535,7 @@ impl SourceTiles {
             // prefetched tiles, ahead of them, and is drawn only where the
             // search for a loaded parent reaches it.
             if parameters.mode == MapMode::Continuous
-                && type_ != SourceType::GeoJSON
+                && info.prefetch
                 && keeps_globe_base_level(parameters, zoom_range, tile_zoom, max_parent_tile_overscale_factor)
             {
                 let mut base_tiles =
@@ -545,11 +544,7 @@ impl SourceTiles {
                 base_tiles.append(&mut pan_tiles);
                 pan_tiles = base_tiles;
             }
-            if parameters.mode == MapMode::Tile
-                && type_ != SourceType::Raster
-                && type_ != SourceType::RasterDEM
-                && ideal_tiles.len() > 1
-            {
+            if parameters.mode == MapMode::Tile && !info.round_zoom && ideal_tiles.len() > 1 {
                 Log::warning(
                     Event::General,
                     format!(

@@ -1,13 +1,13 @@
 use mln_conversion::Convertible;
-use mln_style_types::SourceType;
 use mln_util::geo::{LatLng, LatLngBounds};
 use mln_util::tileset::{PartialTileset, Scheme};
 
 use super::util::parse_json;
 use crate::conversion::tileset::convert_tileset;
+use crate::layer_type::SourceKind;
 
 fn convert_json(json: &str) -> Result<PartialTileset, String> {
-    convert_tileset(&Convertible::from(&parse_json(json)), SourceType::Vector)
+    convert_tileset(&Convertible::from(&parse_json(json)), SourceKind::Geometry)
 }
 
 fn ll(lat: f64, lon: f64) -> LatLng {

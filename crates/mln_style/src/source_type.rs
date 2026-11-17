@@ -22,7 +22,6 @@ use std::time::Duration;
 use mln_actor::scheduler::Respond;
 use mln_conversion::{Convertible, Error};
 use mln_storage::{Data, Resource};
-use mln_style_types::SourceType;
 use mln_util::constants;
 use mln_util::logging::{Event, Log};
 use mln_util::tileset::{Tileset, VectorEncoding};
@@ -43,9 +42,19 @@ pub struct SourceTypeInfo {
     pub layer_kind: SourceKind,
     /// Whether style JSON can create a source of the type.
     pub from_json: bool,
-    /// The type as [`SourceType`] names it, which the tile cover, the tile
-    /// pyramid and the offline tile count read.
-    pub type_: SourceType,
+    /// Whether the tiles that cover a view are of the zoom level nearest the
+    /// view's, as for raster tiles, rather than the level below it. A
+    /// render in tile mode then draws every tile of the cover, not only
+    /// the first.
+    pub round_zoom: bool,
+    /// Whether a view past the highest zoom level that has tiles asks for
+    /// overscaled tiles of its own zoom, rather than drawing that level's
+    /// tiles larger.
+    pub overscale: bool,
+    /// Whether, in continuous mode, the map first loads tiles a few zoom
+    /// levels below the view's, and keeps the globe's lowest level loaded,
+    /// so that something shows while the view's tiles load.
+    pub prefetch: bool,
 }
 
 /// What a source reports about itself, whichever its type. A member that
@@ -436,11 +445,6 @@ impl Source {
     #[must_use]
     pub fn source_type(&self) -> &'static dyn ErasedStyleSourceType {
         self.data.source_type()
-    }
-
-    #[must_use]
-    pub fn get_type(&self) -> SourceType {
-        self.info().type_
     }
 
     #[must_use]

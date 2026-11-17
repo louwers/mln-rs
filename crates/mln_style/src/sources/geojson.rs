@@ -8,7 +8,6 @@ use geojson::GeoJson;
 use mln_actor::scheduler::{self, Respond, SchedulerPtr};
 use mln_expression::expression::evaluate_accumulated;
 use mln_storage::{Data, Resource};
-use mln_style_types::SourceType;
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
 use mln_util::error::Error;
@@ -362,7 +361,9 @@ impl StyleSourceType for GeoJsonSourceType {
         name: "geojson",
         layer_kind: SourceKind::Geometry,
         from_json: true,
-        type_: SourceType::GeoJSON,
+        round_zoom: false,
+        overscale: true,
+        prefetch: false,
     };
 
     const DESCRIBES_IN_BACKGROUND: bool = true;

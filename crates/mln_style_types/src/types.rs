@@ -1,23 +1,9 @@
-// Variant order and discriminants follow the C++ enums, except that
-// `SourceType` has no `Video` or `Annotations`: mln-rs has neither source.
+// Variant order and discriminants follow the C++ enums.
 // `TextVariableAnchorType` is an alias of `SymbolAnchorType` as in C++.
 
 use std::str::FromStr;
 
 use mln_util::ParseEnumError;
-
-// TODO: should be in public source.hpp header
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, mln_wire::Wire)]
-#[repr(u8)]
-pub enum SourceType {
-    Vector,
-    Raster,
-    RasterDEM,
-    GeoJSON,
-    Image,
-    CustomVector,
-    CustomMVTVector,
-}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, mln_wire::Wire)]
 #[repr(u8)]
@@ -441,7 +427,6 @@ macro_rules! uninterpolated_enums {
 }
 
 uninterpolated_enums!(
-    SourceType,
     VisibilityType,
     LineCapType,
     LineJoinType,

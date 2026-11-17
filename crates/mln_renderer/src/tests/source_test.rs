@@ -24,7 +24,7 @@ use mln_style::sources::{
     vector_source,
 };
 use mln_style::{Edit, Source, Style};
-use mln_style_types::{ProjectionDefinition, SourceType};
+use mln_style_types::ProjectionDefinition;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
 use mln_util::geo::LatLng;
@@ -226,11 +226,11 @@ impl Tiled {
         }
     }
 
-    fn source_type(self) -> SourceType {
+    fn type_name(self) -> &'static str {
         match self {
-            Tiled::Raster => SourceType::Raster,
-            Tiled::RasterDEM => SourceType::RasterDEM,
-            Tiled::Vector => SourceType::Vector,
+            Tiled::Raster => "raster",
+            Tiled::RasterDEM => "raster-dem",
+            Tiled::Vector => "vector",
         }
     }
 }
@@ -241,13 +241,14 @@ fn tiles_tileset() -> PartialTileset {
 
 /// The shared body of the `<Type>Tile<Case>` tests: a source of `kind`
 /// whose tiles get `tile_response`, a render source observed by `observer`,
-/// one update, then `test.run()`. Returns the render source's type.
+/// one update, then `test.run()`. Returns the name of the render source's
+/// type.
 fn run_tile_case(
     test: &SourceTest,
     kind: Tiled,
     file_source: Arc<StubFileSource>,
     observer: &StubStoreObserver,
-) -> SourceType {
+) -> &'static str {
     let layers = kind.layers();
     let source = crate::tests::ready(kind.source(None, tiles_tileset()));
 
@@ -264,7 +265,7 @@ fn run_tile_case(
     );
 
     test.run_observed(&mut store, observer);
-    render_source.base().style_source.get_type()
+    render_source.base().style_source.info().name
 }
 
 fn tile_empty(kind: Tiled) {
@@ -317,7 +318,7 @@ fn tile_fail(kind: Tiled) {
 
     // C++ checks `source_.baseImpl->type` in the callback; the port's
     // observer gets the source id, so the type is checked here.
-    assert_eq!(kind.source_type(), run_tile_case(&test, kind, file_source, &observer));
+    assert_eq!(kind.type_name(), run_tile_case(&test, kind, file_source, &observer));
     assert!(*failed.borrow());
 }
 
@@ -349,7 +350,7 @@ fn tile_corrupt(kind: Tiled) {
         }));
     }
 
-    assert_eq!(kind.source_type(), run_tile_case(&test, kind, file_source, &observer));
+    assert_eq!(kind.type_name(), run_tile_case(&test, kind, file_source, &observer));
     assert!(*failed.borrow());
 }
 
