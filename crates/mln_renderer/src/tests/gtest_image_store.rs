@@ -2,8 +2,6 @@
 // waits that ask it again (`resolve`), so a C++ requestor is an
 // `ImageWait` here, asked again after each change.
 
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_style_types::image::{ImageDependencies, ImageType, Impl as ImageImpl};
@@ -14,7 +12,8 @@ use mln_util::logging::{Event, EventSeverity, Log, Observer};
 use mln_util::size::Size;
 use parking_lot::Mutex;
 
-use crate::image_store::{ImageStore, ImageStoreObserver, ImageWait};
+use crate::image_store::{ImageStore, ImageWait};
+use crate::renderer_event::RendererEvent;
 
 /// Reads a test fixture from the copy of the C++ files (testdata/).
 fn read_file(relative: &str) -> Vec<u8> {
@@ -78,28 +77,26 @@ fn dependencies(ids: &[&str]) -> ImageDependencies {
     ids.iter().map(|id| (id.to_string(), ImageType::Icon)).collect()
 }
 
-/// Records the images asked for and the images found unused.
+/// The images a store asked for and the images it found unused, from its
+/// events.
 #[derive(Default)]
-struct StubImageStoreObserver {
-    missing: RefCell<Vec<String>>,
-    unused: RefCell<Vec<String>>,
+struct Reported {
+    missing: Vec<String>,
+    unused: Vec<String>,
 }
 
-impl ImageStoreObserver for StubImageStoreObserver {
-    fn on_style_image_missing(&self, id: &str) {
-        self.missing.borrow_mut().push(id.to_owned());
+impl Reported {
+    /// Adds what `store` reported since the last call.
+    fn take(&mut self, store: &mut ImageStore) -> &Self {
+        for event in store.take_events() {
+            match event {
+                RendererEvent::StyleImageMissing(id) => self.missing.push(id),
+                RendererEvent::UnusedStyleImages(ids) => self.unused.extend(ids),
+                _ => {}
+            }
+        }
+        self
     }
-
-    fn on_remove_unused_style_images(&self, unused_image_ids: &[String]) {
-        self.unused.borrow_mut().extend(unused_image_ids.iter().cloned());
-    }
-}
-
-fn store_with_observer() -> (ImageStore, Rc<StubImageStoreObserver>) {
-    let mut store = ImageStore::default();
-    let observer = Rc::new(StubImageStoreObserver::default());
-    store.set_observer(Some(Rc::<StubImageStoreObserver>::clone(&observer)));
-    (store, observer)
 }
 
 /// The icons a resolve answered with, sorted.
@@ -224,33 +221,34 @@ fn notifies_requestor_immediately_if_dependencies_are_satisfied() {
 // gtest: ImageManager.OnStyleImageMissingBeforeSpriteLoaded
 #[test]
 fn on_style_image_missing_before_sprite_loaded() {
-    let (mut store, observer) = store_with_observer();
+    let mut store = ImageStore::default();
+    let mut reported = Reported::default();
     let mut wait = ImageWait::default();
     let mut wants = dependencies(&["pre"]);
 
     store.begin_update();
     assert!(store.resolve(&wants, &mut wait).is_none());
-    assert!(observer.missing.borrow().is_empty());
+    assert_eq!(reported.take(&mut store).missing, Vec::<String>::new());
 
     store.set_loaded(true);
     assert!(store.resolve(&wants, &mut wait).is_none());
-    assert_eq!(*observer.missing.borrow(), ["pre"]);
+    assert_eq!(reported.take(&mut store).missing, ["pre"]);
 
     store.begin_update();
     assert_eq!(icons(&mut store, &wants, &mut wait), Some(Vec::new()));
-    assert_eq!(*observer.missing.borrow(), ["pre"]);
+    assert_eq!(reported.take(&mut store).missing, ["pre"]);
 
-    // A wait for updated dependencies asks the observer again.
+    // A wait for updated dependencies asks the app again.
     wants.insert("post".to_owned(), ImageType::Icon);
     let mut wait = ImageWait::default();
     assert!(store.resolve(&wants, &mut wait).is_none());
-    assert_eq!(*observer.missing.borrow(), ["pre", "post", "pre"]);
+    assert_eq!(reported.take(&mut store).missing, ["pre", "post", "pre"]);
 
     // Another wait in the same update doesn't ask for them again, and waits
     // as long.
     let mut another = ImageWait::default();
     assert!(store.resolve(&wants, &mut another).is_none());
-    assert_eq!(observer.missing.borrow().len(), 3);
+    assert_eq!(reported.take(&mut store).missing.len(), 3);
     store.begin_update();
     assert!(store.resolve(&wants, &mut another).is_some());
 }
@@ -258,32 +256,33 @@ fn on_style_image_missing_before_sprite_loaded() {
 // gtest: ImageManager.OnStyleImageMissingAfterSpriteLoaded
 #[test]
 fn on_style_image_missing_after_sprite_loaded() {
-    let (mut store, observer) = store_with_observer();
+    let mut store = ImageStore::default();
+    let mut reported = Reported::default();
     store.set_loaded(true);
     store.begin_update();
 
     let mut wait = ImageWait::default();
     let wants = dependencies(&["after"]);
     assert!(store.resolve(&wants, &mut wait).is_none());
-    assert_eq!(*observer.missing.borrow(), ["after"]);
+    assert_eq!(reported.take(&mut store).missing, ["after"]);
 
     store.begin_update();
     assert_eq!(icons(&mut store, &wants, &mut wait), Some(Vec::new()));
-    assert_eq!(observer.missing.borrow().len(), 1);
+    assert_eq!(reported.take(&mut store).missing.len(), 1);
 }
 
 /// The app adds the image it is asked for before the next update: the wait
 /// resolves with it.
 #[test]
 fn an_image_added_for_a_missing_image_event_resolves_the_wait() {
-    let (mut store, observer) = store_with_observer();
+    let mut store = ImageStore::default();
     store.set_loaded(true);
     store.begin_update();
 
     let mut wait = ImageWait::default();
     let wants = dependencies(&["late"]);
     assert!(store.resolve(&wants, &mut wait).is_none());
-    assert_eq!(*observer.missing.borrow(), ["late"]);
+    assert_eq!(Reported::default().take(&mut store).missing, ["late"]);
 
     store.add_image(make_image("late", Size::new(16, 16), 1.0, false));
     store.begin_update();
@@ -293,7 +292,7 @@ fn an_image_added_for_a_missing_image_event_resolves_the_wait() {
 // gtest: ImageManager.RemoveUnusedStyleImages
 #[test]
 fn remove_unused_style_images() {
-    let (mut store, observer) = store_with_observer();
+    let mut store = ImageStore::default();
     store.set_loaded(true);
     store.add_image(make_image("sprite", Size::new(16, 16), 1.0, false));
 
@@ -307,30 +306,30 @@ fn remove_unused_style_images() {
             }
         }
     };
-    let unused = |store: &ImageStore, used: &[&str]| {
-        observer.unused.borrow_mut().clear();
+    let unused = |store: &mut ImageStore, used: &[&str]| {
+        store.take_events();
         let used: HashSet<String> = used.iter().map(|id| (*id).to_owned()).collect();
         store.reduce_memory_use(&used);
-        let mut unused = observer.unused.borrow().clone();
+        let mut unused = Reported::default().take(store).unused.clone();
         unused.sort();
         unused
     };
 
     request(&mut store, &["missing"], 16);
     assert!(!store.exceeds_cache_size_limit());
-    assert_eq!(unused(&store, &["missing"]), Vec::<String>::new());
-    assert_eq!(unused(&store, &[]), ["missing"], "the sprite's images aren't requested ones");
+    assert_eq!(unused(&mut store, &["missing"]), Vec::<String>::new());
+    assert_eq!(unused(&mut store, &[]), ["missing"], "the sprite's images aren't requested ones");
     store.remove_image("missing");
 
     request(&mut store, &["1024px"], 1024);
     assert!(store.exceeds_cache_size_limit());
-    assert_eq!(unused(&store, &[]), ["1024px"]);
+    assert_eq!(unused(&mut store, &[]), ["1024px"]);
     store.remove_image("1024px");
     assert!(!store.exceeds_cache_size_limit());
 
     request(&mut store, &["missing", "1024px"], 16);
-    assert_eq!(unused(&store, &["missing", "1024px"]), Vec::<String>::new());
-    assert_eq!(unused(&store, &["missing"]), ["1024px"]);
+    assert_eq!(unused(&mut store, &["missing", "1024px"]), Vec::<String>::new());
+    assert_eq!(unused(&mut store, &["missing"]), ["1024px"]);
 }
 
 // gtest: ImageManager.MixedDependenciesRetainProvidedImages
@@ -343,7 +342,8 @@ fn mixed_dependencies_retain_provided_images() {
             > DEFAULT_ON_DEMAND_IMAGES_CACHE_SIZE
     );
 
-    let (mut store, observer) = store_with_observer();
+    let mut store = ImageStore::default();
+    let mut reported = Reported::default();
     store.set_loaded(true);
     store.add_image(make_image("sprite", Size::new(16, 16), 1.0, false));
     let mut wants = dependencies(&["sprite"]);
@@ -353,11 +353,11 @@ fn mixed_dependencies_retain_provided_images() {
 
     // One wait: asks for the missing images, which the app adds, and
     // resolves with all of them in the next update.
-    let request = |store: &mut ImageStore, wants: &ImageDependencies| {
+    let request = |store: &mut ImageStore, reported: &mut Reported, wants: &ImageDependencies| {
         store.begin_update();
         let mut wait = ImageWait::default();
         if store.resolve(wants, &mut wait).is_none() {
-            for id in observer.missing.borrow().iter() {
+            for id in &reported.take(store).missing {
                 if store.get_image(id).is_none() {
                     store.add_image(make_image(id, Size::new(ON_DEMAND_IMAGE_SIDE, ON_DEMAND_IMAGE_SIDE), 3.0, false));
                 }
@@ -369,29 +369,29 @@ fn mixed_dependencies_retain_provided_images() {
     };
     let used = |wants: &ImageDependencies| wants.keys().cloned().collect::<HashSet<String>>();
 
-    request(&mut store, &wants);
-    assert_eq!(observer.missing.borrow().len(), 6);
+    request(&mut store, &mut reported, &wants);
+    assert_eq!(reported.take(&mut store).missing.len(), 6);
     store.reduce_memory_use(&used(&wants));
-    assert!(observer.unused.borrow().is_empty());
+    assert_eq!(reported.take(&mut store).unused, Vec::<String>::new());
 
-    request(&mut store, &wants);
-    assert_eq!(observer.missing.borrow().len(), 6);
+    request(&mut store, &mut reported, &wants);
+    assert_eq!(reported.take(&mut store).missing.len(), 6);
 
     for i in 0..ON_DEMAND_IMAGE_COUNT {
         wants.insert(format!("b{i}"), ImageType::Icon);
     }
     for _round in 0..2 {
-        request(&mut store, &wants);
+        request(&mut store, &mut reported, &wants);
         assert!(store.exceeds_cache_size_limit());
         store.reduce_memory_use(&used(&wants));
-        assert!(observer.unused.borrow().is_empty());
-        assert_eq!(observer.missing.borrow().len(), 12);
+        assert_eq!(reported.take(&mut store).unused, Vec::<String>::new());
+        assert_eq!(reported.missing.len(), 12);
     }
 
     // No tile uses them any more.
     store.reduce_memory_use(&HashSet::default());
-    assert_eq!(observer.unused.borrow().len(), 12);
-    assert!(!observer.unused.borrow().contains(&"sprite".to_owned()));
+    assert_eq!(reported.take(&mut store).unused.len(), 12);
+    assert!(!reported.unused.contains(&"sprite".to_owned()));
 }
 
 /// Removing an image and adding one change the store's revision, so the

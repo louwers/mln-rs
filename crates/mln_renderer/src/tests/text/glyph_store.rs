@@ -35,8 +35,9 @@ use parking_lot::Mutex;
 
 use super::glyph_store_bitmaps::{SDF_BITMAP, STUB_BITMAP};
 use super::{SquelchLog, read_file};
+use crate::renderer_event::RendererEvent;
 use crate::text::font_face_engine::{FontFaceEngine, FontFaceShaper};
-use crate::text::glyph_store::{GlyphStore, GlyphStoreObserver, GlyphWait, HBShapeResults};
+use crate::text::glyph_store::{GlyphStore, GlyphWait, HBShapeResults};
 use crate::tile::inbox::{Inbox, TileEvent};
 
 fn stub_glyph(glyph_id: GlyphID) -> Glyph {
@@ -94,22 +95,26 @@ struct StubGlyphStoreObserver {
     glyphs_requested: RefCell<Option<RequestedFn>>,
 }
 
-impl GlyphStoreObserver for StubGlyphStoreObserver {
-    fn on_glyphs_loaded(&self, font_stack: &FontStack, range: GlyphRange) {
-        if let Some(f) = self.glyphs_loaded.borrow_mut().as_mut() {
-            f(font_stack, &range);
-        }
-    }
-
-    fn on_glyphs_error(&self, font_stack: &FontStack, range: GlyphRange, error: Error) {
-        if let Some(f) = self.glyphs_error.borrow_mut().as_mut() {
-            f(font_stack, &range, error);
-        }
-    }
-
-    fn on_glyphs_requested(&self, font_stack: &FontStack, range: GlyphRange) {
-        if let Some(f) = self.glyphs_requested.borrow_mut().as_mut() {
-            f(font_stack, &range);
+impl StubGlyphStoreObserver {
+    /// Calls the callback of a glyph event of the store.
+    fn report(&self, event: RendererEvent) {
+        match event {
+            RendererEvent::GlyphsLoaded { font_stack, range } => {
+                if let Some(f) = self.glyphs_loaded.borrow_mut().as_mut() {
+                    f(&font_stack, &range);
+                }
+            }
+            RendererEvent::GlyphsError { font_stack, range, error } => {
+                if let Some(f) = self.glyphs_error.borrow_mut().as_mut() {
+                    f(&font_stack, &range, error);
+                }
+            }
+            RendererEvent::GlyphsRequested { font_stack, range } => {
+                if let Some(f) = self.glyphs_requested.borrow_mut().as_mut() {
+                    f(&font_stack, &range);
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -142,9 +147,11 @@ struct Local {
     requestor: Weak<StubGlyphRequestor>,
 }
 
-/// A store and the waits of its requestors, which it answers when it wakes.
+/// A store and the waits of its requestors, which it answers when it wakes,
+/// and the observer it reports its events to after each call.
 struct Store {
     store: RefCell<GlyphStore>,
+    observer: Rc<StubGlyphStoreObserver>,
     /// Where the responses arrive.
     inbox: Inbox,
     /// Where the store parses glyph PBFs.
@@ -161,6 +168,7 @@ impl Store {
         glyph_cache: Arc<GlyphCache>,
         engine: Arc<dyn FontFaceEngine>,
         file_source: Arc<dyn FileSource>,
+        observer: Rc<StubGlyphStoreObserver>,
         run_loop: &Queue<Local>,
     ) -> Rc<Store> {
         let (woken, queue) = (Arc::new(AtomicBool::new(false)), run_loop.downgrade());
@@ -175,6 +183,7 @@ impl Store {
                     if let Some(this) = local.store.upgrade() {
                         this.take_responses();
                         this.store.borrow_mut().update();
+                        this.report();
                         this.answer();
                     }
                 });
@@ -183,7 +192,15 @@ impl Store {
         let pool = TaskGroup::new(&Pool::new(4));
         let store = GlyphStore::new(Some(local_glyph_rasterizer), glyph_cache, pool.clone(), engine, Arc::clone(&wake));
         let inbox = Inbox::new(wake);
-        Rc::new(Store { store: RefCell::new(store), inbox, pool, file_source, waits: RefCell::default() })
+        Rc::new(Store { store: RefCell::new(store), observer, inbox, pool, file_source, waits: RefCell::default() })
+    }
+
+    /// Reports what the store reported since the last call to the observer.
+    fn report(&self) {
+        let events = self.store.borrow_mut().take_events();
+        for event in events {
+            self.observer.report(event);
+        }
     }
 
     /// Asks for `dependencies` for `requestor`, which gets them once the
@@ -204,6 +221,7 @@ impl Store {
                 self.store.borrow_mut().take_response(&font_stack, range, id, result);
             }
         }
+        self.report();
     }
 
     /// Answers the waits the store can answer now.
@@ -222,6 +240,7 @@ impl Store {
                 None => self.waits.borrow_mut().push(wait),
             }
         }
+        self.report();
         for (requestor, resolved) in answered {
             *requestor.shaping.borrow_mut() = Some(resolved.shaping);
             requestor.failed.set(resolved.failed);
@@ -275,8 +294,14 @@ impl GlyphStoreTest {
         let file_source = StubFileSource::on_queue(&run_loop, response_type);
         let observer = Rc::new(StubGlyphStoreObserver::default());
         let source: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&file_source);
-        let store = Store::new(local_glyph_rasterizer, glyph_cache, engine, source, &run_loop);
-        store.store.borrow_mut().set_observer(Some(Rc::<StubGlyphStoreObserver>::clone(&observer)));
+        let store = Store::new(
+            local_glyph_rasterizer,
+            glyph_cache,
+            engine,
+            source,
+            Rc::<StubGlyphStoreObserver>::clone(&observer),
+            &run_loop,
+        );
         GlyphStoreTest {
             file_source,
             observer,
@@ -430,12 +455,13 @@ fn loading_fail() {
     assert!(called.get());
 }
 
-/// A file source response that fails on the first request (`requests` is 1)
-/// and serves the glyphs.pbf fixture after that.
-fn fails_first_then_glyphs(requests: Arc<AtomicU32>) -> impl Fn(&Resource) -> Option<Response> + Send + Sync {
+/// A file source response that fails on the first request and serves the
+/// glyphs.pbf fixture after that.
+fn fails_first_then_glyphs() -> impl Fn(&Resource) -> Option<Response> + Send + Sync {
+    let loads = AtomicU32::new(0);
     move |_: &Resource| {
         let mut response = Response::new();
-        if requests.load(Ordering::SeqCst) == 1 {
+        if loads.fetch_add(1, Ordering::SeqCst) == 0 {
             response.error = Some(Box::new(ResourceError::new(Reason::NotFound, "Failed by the test case")));
         } else {
             response.data = Some(Arc::new(read_file("test/fixtures/resources/glyphs.pbf")));
@@ -458,7 +484,7 @@ fn count_requests(test: &GlyphStoreTest) -> Arc<AtomicU32> {
 fn loading_fail_requests_the_range_again() {
     let mut test = GlyphStoreTest::new();
     let requests = count_requests(&test);
-    test.file_source.set_response(Kind::Glyphs, fails_first_then_glyphs(Arc::clone(&requests)));
+    test.file_source.set_response(Kind::Glyphs, fails_first_then_glyphs());
 
     let answers = Rc::new(Cell::new(0));
     let (n, run_loop) = (Rc::clone(&answers), test.run_loop.clone());
@@ -494,7 +520,7 @@ fn loading_fail_requests_the_range_again() {
 fn an_answer_says_a_range_it_needed_failed() {
     let mut test = GlyphStoreTest::new();
     let requests = count_requests(&test);
-    test.file_source.set_response(Kind::Glyphs, fails_first_then_glyphs(Arc::clone(&requests)));
+    test.file_source.set_response(Kind::Glyphs, fails_first_then_glyphs());
     let run_loop = test.run_loop.clone();
     *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |_: GlyphMap| run_loop.stop()));
 
@@ -939,7 +965,7 @@ fn immediate_file_source_failure_requests_the_range_again() {
     let test = GlyphStoreTest::with(Box::new(StubLocalGlyphRasterizer), ResponseType::Synchronous);
     let _log = SquelchLog::new();
     let requests = count_requests(&test);
-    test.file_source.set_response(Kind::Glyphs, fails_first_then_glyphs(Arc::clone(&requests)));
+    test.file_source.set_response(Kind::Glyphs, fails_first_then_glyphs());
 
     let answers = Rc::new(RefCell::new(Vec::new()));
     let a = Rc::clone(&answers);

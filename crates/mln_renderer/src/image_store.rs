@@ -4,7 +4,6 @@
 // loaded is asked for with `styleimagemissing`, and resolves as missing in
 // the next update, once the app has had its frame to add it.
 
-use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_style_types::image::{ImageDependencies, ImageMap, ImageType, Impl as ImageImpl};
@@ -13,13 +12,7 @@ use mln_util::hash::HashSet;
 use mln_util::logging::{Event, Log};
 use mln_vec_map::{VecMap, VecSet};
 
-pub(crate) trait ImageStoreObserver {
-    fn on_style_image_missing(&self, _id: &str) {}
-    fn on_remove_unused_style_images(&self, _ids: &[String]) {}
-}
-
-struct NullObserver;
-impl ImageStoreObserver for NullObserver {}
+use crate::renderer_event::RendererEvent;
 
 /// One wait for images, across the resolves it takes.
 #[derive(Clone, Copy, Debug, Default)]
@@ -54,7 +47,9 @@ pub(crate) struct ImageStore {
     /// Whether this update asked for an image.
     asked_this_update: bool,
     revision: u64,
-    observer: Rc<dyn ImageStoreObserver>,
+    /// What the store reported since the last `take_events`: the images it
+    /// asked the app for and the ones it asks the app to remove.
+    events: Vec<RendererEvent>,
 }
 
 impl Default for ImageStore {
@@ -69,14 +64,15 @@ impl Default for ImageStore {
             update: 0,
             asked_this_update: false,
             revision: 0,
-            observer: Rc::new(NullObserver),
+            events: Vec::new(),
         }
     }
 }
 
 impl ImageStore {
-    pub(crate) fn set_observer(&mut self, observer: Option<Rc<dyn ImageStoreObserver>>) {
-        self.observer = observer.unwrap_or_else(|| Rc::new(NullObserver));
+    /// What the store reported since the last call, oldest first.
+    pub(crate) fn take_events(&mut self) -> Vec<RendererEvent> {
+        std::mem::take(&mut self.events)
     }
 
     /// Changes whenever a resolve that waited could now give another answer.
@@ -176,7 +172,7 @@ impl ImageStore {
                         self.requested.insert(id.clone());
                         // Once per update, however many tiles miss it.
                         if self.asked.insert(id.clone(), self.update) != Some(self.update) {
-                            self.observer.on_style_image_missing(id);
+                            self.events.push(RendererEvent::StyleImageMissing(id.clone()));
                         }
                     }
                     wait.asked = Some(self.update);
@@ -199,13 +195,13 @@ impl ImageStore {
         Some(resolved)
     }
 
-    /// Asks the observer to remove the requested images that the app added
-    /// and that no tile uses: none of `used`.
-    pub(crate) fn reduce_memory_use(&self, used: &HashSet<String>) {
+    /// Asks the app to remove the requested images that it added and that
+    /// no tile uses: none of `used`.
+    pub(crate) fn reduce_memory_use(&mut self, used: &HashSet<String>) {
         let unused: Vec<String> =
             self.requested.iter().filter(|id| self.images.contains_key(*id) && !used.contains(*id)).cloned().collect();
         if !unused.is_empty() {
-            self.observer.on_remove_unused_style_images(&unused);
+            self.events.push(RendererEvent::UnusedStyleImages(unused));
         }
     }
 

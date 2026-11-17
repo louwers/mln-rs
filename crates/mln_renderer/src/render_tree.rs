@@ -81,15 +81,15 @@ impl RenderTreeParameters {
     }
 }
 
+/// What a frame draws, which its update and prepare made for its encode.
 pub(crate) struct RenderTree {
     parameters: Box<RenderTreeParameters>,
-    pub(crate) layer_render_items: VecMap<u32, LayerRenderItem>,
+    layer_render_items: VecMap<u32, LayerRenderItem>,
     source_render_items: Vec<Box<dyn RenderItem>>,
-    // symbols:
-    layers_need_placement: Vec<RenderLayerPtr>,
-    layers_following_placement: Vec<RenderLayerPtr>,
-    update_symbol_opacities: bool,
+    /// When the frame's update started.
     start_time: mln_util::time::Instant,
+    /// When the frame started placing symbols.
+    symbols_start: mln_util::time::Instant,
 }
 
 impl RenderTree {
@@ -98,43 +98,15 @@ impl RenderTree {
         layer_render_items: VecMap<u32, LayerRenderItem>,
         source_render_items: Vec<Box<dyn RenderItem>>,
         start_time: mln_util::time::Instant,
+        symbols_start: mln_util::time::Instant,
     ) -> Self {
-        RenderTree {
-            parameters,
-            layer_render_items,
-            source_render_items,
-            layers_need_placement: Vec::new(),
-            layers_following_placement: Vec::new(),
-            update_symbol_opacities: false,
-            start_time,
-        }
+        RenderTree { parameters, layer_render_items, source_render_items, start_time, symbols_start }
     }
 
-    /// symbols: the placement half of the C++ `RenderTreeImpl` constructor.
-    pub(crate) fn set_placement(
-        &mut self,
-        layers_need_placement: Vec<RenderLayerPtr>,
-        layers_following_placement: Vec<RenderLayerPtr>,
-        update_symbol_opacities: bool,
-    ) {
-        self.layers_need_placement = layers_need_placement;
-        self.layers_following_placement = layers_following_placement;
-        self.update_symbol_opacities = update_symbol_opacities;
-    }
-
-    /// Updates the symbol buckets of the layers that need placement, then the
-    /// positions of the layers that draw buckets other layers place.
-    pub(crate) fn prepare(&mut self, placement: &crate::text::placement::Placement) {
-        for layer in self.layers_need_placement.iter().rev() {
-            placement.update_layer_buckets(
-                &*layer.borrow(),
-                &self.parameters.transform_params.state,
-                self.update_symbol_opacities,
-            );
-        }
-        for layer in &self.layers_following_placement {
-            placement.update_follower_buckets(&*layer.borrow(), &self.parameters.transform_params.state);
-        }
+    /// When the frame started placing symbols.
+    #[must_use]
+    pub(crate) fn symbols_start(&self) -> mln_util::time::Instant {
+        self.symbols_start
     }
 
     #[must_use]

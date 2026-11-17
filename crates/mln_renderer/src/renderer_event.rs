@@ -3,8 +3,6 @@
 //! into the map's [`RendererEvents`] queue, and the map handles them when it
 //! drains the queue.
 
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::sync::Arc;
 
 pub use mln_gfx::rendering_stats::RenderingStats;
@@ -89,20 +87,3 @@ const _: () = {
     const fn assert_send<T: Send>() {}
     assert_send::<RendererEvent>();
 };
-
-/// The queue that the renderer's parts push to, once the renderer has one.
-#[derive(Clone, Default)]
-pub(crate) struct EventSink(Rc<RefCell<Option<RendererEvents>>>);
-
-impl EventSink {
-    pub(crate) fn set(&self, events: Option<RendererEvents>) {
-        *self.0.borrow_mut() = events;
-    }
-
-    pub(crate) fn emit(&self, event: RendererEvent) {
-        let events = self.0.borrow().clone();
-        if let Some(events) = events {
-            events.push(event);
-        }
-    }
-}

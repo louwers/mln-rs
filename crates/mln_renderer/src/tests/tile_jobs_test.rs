@@ -12,6 +12,8 @@ use std::sync::Arc;
 use feature::{Feature, PropertyMap};
 use geo_types::{Geometry, Point};
 use mln_map_types::MapMode;
+use mln_storage::FileSource;
+use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
 use mln_style_types::image::Impl as ImageImpl;
@@ -20,6 +22,7 @@ use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::hash::HashSet;
 use mln_util::image::PremultipliedImage;
 use mln_util::pool::TaskGroup;
+use mln_util::queue::Queue;
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use parking_lot::Mutex;
@@ -27,9 +30,9 @@ use serde_json::json;
 
 use crate::Registry;
 use crate::gfx::dynamic_texture::DynamicTextureBinId;
-use crate::image_store::ImageStoreObserver;
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layout::tile_layout::LayoutParams;
+use crate::renderer_event::RendererEvent;
 use crate::tests::tile::png;
 use crate::tests::{OneTile, style, tile_store};
 use crate::tile::contents::Contents;
@@ -97,16 +100,6 @@ impl TileWorkers for Manual {
     }
 }
 
-/// Counts the images the store asks the app for.
-#[derive(Default)]
-struct Asked(RefCell<Vec<String>>);
-
-impl ImageStoreObserver for Asked {
-    fn on_style_image_missing(&self, id: &str) {
-        self.0.borrow_mut().push(id.to_owned());
-    }
-}
-
 pub(super) fn image(id: &str) -> Arc<ImageImpl> {
     Arc::new(
         ImageImpl::new(
@@ -153,7 +146,10 @@ pub(super) fn points() -> TileData {
 struct Test {
     thread_pool: TaskGroup,
     tile: OneTile,
-    asked: Rc<Asked>,
+    /// The images the store asked the app for.
+    asked: Vec<String>,
+    /// What the glyph and image stores reported, in order.
+    resource_events: Vec<RendererEvent>,
 }
 
 impl Test {
@@ -161,20 +157,25 @@ impl Test {
     fn new(workers: Box<dyn TileWorkers>, images: &[&str]) -> Self {
         let thread_pool = TaskGroup::new(&crate::tests::pool());
         let mut store = tile_store(&thread_pool, workers);
-        let asked = Rc::new(Asked::default());
-        store.images_mut().set_observer(Some(Rc::<Asked>::clone(&asked)));
         for id in images {
             store.images_mut().add_image(image(id));
         }
         store.images_mut().set_loaded(true);
         let id = OverscaledTileID::new(0, 0, CanonicalTileID::new(0, 0, 0));
         let tile = OneTile::new(store, TileKind::Geometry, id, MapMode::Static);
-        Test { thread_pool, tile, asked }
+        Test { thread_pool, tile, asked: Vec::new(), resource_events: Vec::new() }
     }
 
     /// The renderer's update.
     fn update(&mut self) -> bool {
-        self.tile.update()
+        let updated = self.tile.update();
+        for event in self.tile.store.take_resource_events() {
+            if let RendererEvent::StyleImageMissing(id) = &event {
+                self.asked.push(id.clone());
+            }
+            self.resource_events.push(event);
+        }
+        updated
     }
 
     /// A tile with `layers`, whose data arrived.
@@ -423,6 +424,37 @@ fn an_answer_holds_its_bins_while_its_layout_runs_and_shows() {
     assert_eq!(test.tile.store.atlas().page_count(), 0, "nothing holds the bin");
 }
 
+/// A tile that waits for both glyphs and a missing image reports the glyph
+/// range it requests, then the image it asks the app for: the order the
+/// stores were asked in.
+#[test]
+fn glyph_and_image_events_keep_their_order() {
+    let manual = Manual::default();
+    let mut test = Test::new(Box::new(manual.clone()), &[]);
+    let run_loop: Queue<()> = Queue::new();
+    let file_source: Arc<dyn FileSource> = StubFileSource::on_queue(&run_loop, ResponseType::Asynchronous);
+    test.tile.store.set_file_source(Some(file_source));
+    test.load(&[layer(json!({
+        "id": "labels",
+        "type": "symbol",
+        "layout": {"text-field": "a", "icon-image": "missing"}
+    }))]);
+    test.update();
+    manual.run();
+    test.update();
+
+    let kinds: Vec<&str> = test
+        .resource_events
+        .iter()
+        .filter_map(|event| match event {
+            RendererEvent::GlyphsRequested { .. } => Some("glyphs"),
+            RendererEvent::StyleImageMissing(_) => Some("image"),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(kinds, ["glyphs", "image"]);
+}
+
 /// The stores resolve only when they have something new: a tile that waits
 /// for a missing image asks the app for it once, and resumes knowing it
 /// missing in the next update.
@@ -434,7 +466,7 @@ fn a_missing_image_resolves_as_missing_in_the_next_update() {
     test.update();
     manual.run();
     test.update();
-    assert_eq!(*test.asked.0.borrow(), ["missing"]);
+    assert_eq!(test.asked, ["missing"]);
     assert_eq!(manual.submitted(), 1, "the app has an update to add it");
 
     test.update();
@@ -443,7 +475,7 @@ fn a_missing_image_resolves_as_missing_in_the_next_update() {
         panic!("not a layout job");
     };
     assert!(job.resolved.missing_images.contains("missing"));
-    assert_eq!(test.asked.0.borrow().len(), 1);
+    assert_eq!(test.asked.len(), 1);
     manual.reply(InlineWorkers::run(resume));
     test.update();
     assert!(test.shows_layout());

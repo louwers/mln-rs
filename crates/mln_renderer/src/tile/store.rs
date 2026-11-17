@@ -21,6 +21,7 @@ use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::image_store::ImageStore;
 use crate::layout::tile_layout::{LayoutParams, Resolved};
 use crate::render_orchestrator::drop_on_workers;
+use crate::renderer_event::RendererEvent;
 use crate::source_state::SourceFeatureState;
 use crate::text::glyph_store::GlyphStore;
 use crate::tile::contents::{Answer, TileAtlases};
@@ -60,6 +61,8 @@ pub(crate) struct StoreContext {
     /// Where glyphs load from.
     pub(crate) file_source: Option<Arc<dyn FileSource>>,
     events: Vec<StoreEvent>,
+    /// What the glyph and image stores reported, in the order they did.
+    resource_events: Vec<RendererEvent>,
 }
 
 impl StoreContext {
@@ -75,6 +78,13 @@ impl StoreContext {
         self.events.push(StoreEvent::Action { op, tile, source: source.to_owned() });
     }
 
+    /// Takes what the glyph and image stores reported, after a call to one
+    /// of them, so that their events keep the order they happened in.
+    fn collect_resource_events(&mut self) {
+        self.resource_events.extend(self.glyphs.take_events());
+        self.resource_events.extend(self.images.take_events());
+    }
+
     /// The resume of `waiting`'s job, once the stores have all it needs or
     /// know them missing: packed into the atlas.
     pub(crate) fn resolve(&mut self, waiting: &mut Waiting) -> Option<Resume> {
@@ -84,7 +94,9 @@ impl StoreContext {
             return None;
         }
         let glyphs = self.glyphs.resolve(&needs.glyphs, &mut wait.glyphs, self.file_source.as_ref(), &self.inbox);
+        self.collect_resource_events();
         let images = self.images.resolve(&needs.images, &mut wait.images);
+        self.collect_resource_events();
         let (Some(glyphs), Some(images)) = (glyphs, images) else {
             wait.revisions = Some((self.glyphs.revision(), self.images.revision()));
             return None;
@@ -215,6 +227,7 @@ impl TileStore {
             pool,
             file_source: None,
             events: Vec::new(),
+            resource_events: Vec::new(),
         };
         TileStore { sources: HashMap::default(), order: Vec::new(), next_source: 0, cache_enabled: true, inbox, ctx }
     }
@@ -296,9 +309,17 @@ impl TileStore {
         std::mem::take(&mut self.ctx.events)
     }
 
+    /// What the glyph and image stores reported since the last call, oldest
+    /// first.
+    pub(crate) fn take_resource_events(&mut self) -> Vec<RendererEvent> {
+        self.ctx.collect_resource_events();
+        std::mem::take(&mut self.ctx.resource_events)
+    }
+
     /// Takes in what arrived for the tiles.
     pub(crate) fn receive(&mut self) {
         self.ctx.glyphs.update();
+        self.ctx.collect_resource_events();
         while let Some(event) = self.inbox.next() {
             self.take(event);
         }
@@ -345,6 +366,7 @@ impl TileStore {
             }
             TileEvent::Glyphs { font_stack, range, id, result } => {
                 self.ctx.glyphs.take_response(&font_stack, range, id, result);
+                self.ctx.collect_resource_events();
             }
         }
     }

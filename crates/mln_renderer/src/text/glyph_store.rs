@@ -47,6 +47,7 @@ use mln_util::tiny_sdf::transform_raster_to_sdf;
 use mln_vec_map::{VecMap, VecSet};
 use parking_lot::Mutex;
 
+use crate::renderer_event::RendererEvent;
 use crate::text::font_face_engine::{FontFaceEngine, FontFaceShaper};
 use crate::tile::inbox::{InboxSender, TileEvent, Waker};
 
@@ -69,15 +70,6 @@ pub(crate) enum GlyphData {
 /// The answer to a glyph range's request: `None` for a response without
 /// content.
 pub(crate) type GlyphResult = Result<Option<GlyphData>, Error>;
-
-pub(crate) trait GlyphStoreObserver {
-    fn on_glyphs_loaded(&self, _font_stack: &FontStack, _range: GlyphRange) {}
-    fn on_glyphs_error(&self, _font_stack: &FontStack, _range: GlyphRange, _error: Error) {}
-    fn on_glyphs_requested(&self, _font_stack: &FontStack, _range: GlyphRange) {}
-}
-
-struct NullObserver;
-impl GlyphStoreObserver for NullObserver {}
 
 /// Where a glyph range is.
 enum RangeState {
@@ -154,7 +146,9 @@ pub(crate) struct ResolvedGlyphs {
 pub(crate) struct GlyphStore {
     glyph_url: String,
     entries: HashMap<FontStack, Entry>,
-    observer: Rc<dyn GlyphStoreObserver>,
+    /// What the store reported since the last `take_events`: the ranges it
+    /// requested, loaded or failed to load.
+    events: Vec<RendererEvent>,
     local_glyph_rasterizer: Box<dyn LocalGlyphRasterizer>,
     glyph_cache: Arc<GlyphCache>,
     /// Where glyph PBFs are parsed.
@@ -199,7 +193,7 @@ impl GlyphStore {
         GlyphStore {
             glyph_url: String::new(),
             entries: HashMap::default(),
-            observer: Rc::new(NullObserver),
+            events: Vec::new(),
             local_glyph_rasterizer,
             glyph_cache,
             pool,
@@ -222,8 +216,9 @@ impl GlyphStore {
         }
     }
 
-    pub(crate) fn set_observer(&mut self, observer: Option<Rc<dyn GlyphStoreObserver>>) {
-        self.observer = observer.unwrap_or_else(|| Rc::new(NullObserver));
+    /// What the store reported since the last call, oldest first.
+    pub(crate) fn take_events(&mut self) -> Vec<RendererEvent> {
+        std::mem::take(&mut self.events)
     }
 
     /// Changes whenever a resolve that waited could now give another answer.
@@ -379,7 +374,7 @@ impl GlyphStore {
         if let Some(data) = self.get_font_face_data(range.type_) {
             // A face that holds its font file needs no request.
             self.set_range(font_stack, range, RangeState::Loading { id, request: None });
-            self.observer.on_glyphs_requested(font_stack, range);
+            self.events.push(RendererEvent::GlyphsRequested { font_stack: font_stack.clone(), range });
             self.process_data(Ok(Some(GlyphData::Font(data))), font_stack, range, id);
             return;
         }
@@ -395,7 +390,7 @@ impl GlyphStore {
             Resource::font_face(&url)
         };
 
-        self.observer.on_glyphs_requested(font_stack, range);
+        self.events.push(RendererEvent::GlyphsRequested { font_stack: font_stack.clone(), range });
 
         let inbox = inbox.clone();
         let callback_font_stack = font_stack.clone();
@@ -467,10 +462,27 @@ impl GlyphStore {
         if let Some(error) = error {
             self.failures += 1;
             self.set_range(font_stack, range, RangeState::Failed { at: self.failures });
-            self.observer.on_glyphs_error(font_stack, range, error);
+            let range_name = if range.type_ == GlyphIDType::FontPBF {
+                format!("{}-{}", range.first, range.second)
+            } else {
+                format!("{}(font file)", range.type_.id())
+            };
+            Log::error(
+                Event::Style,
+                format!(
+                    "Failed to load glyph range {range_name} for font stack {}:( {error})",
+                    mln_util::font_stack::font_stack_to_string(font_stack)
+                ),
+            );
+            self.events.push(RendererEvent::GlyphsError {
+                font_stack: font_stack.clone(),
+                range,
+                error: error.clone(),
+            });
+            self.events.push(RendererEvent::ResourceError(error));
         } else {
             self.set_range(font_stack, range, RangeState::Loaded(range_glyphs));
-            self.observer.on_glyphs_loaded(font_stack, range);
+            self.events.push(RendererEvent::GlyphsLoaded { font_stack: font_stack.clone(), range });
         }
     }
 

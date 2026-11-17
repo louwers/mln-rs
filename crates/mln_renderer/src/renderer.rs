@@ -86,6 +86,8 @@ pub struct Renderer {
     /// Where the last frame drew the map.
     frame_projection: Option<FrameProjection>,
     timings: RenderTimings,
+    /// Where the renderer reports its events, once the host gives it one.
+    events: Option<RendererEvents>,
 }
 
 impl Renderer {
@@ -162,6 +164,7 @@ impl Renderer {
             frame_count: 0,
             frame_projection: None,
             timings: RenderTimings::default(),
+            events: None,
         }
     }
 
@@ -201,12 +204,21 @@ impl Renderer {
     /// doesn't wait for the next frame to start.
     pub fn receive_tiles(&mut self) {
         self.orchestrator.receive_tiles();
+        self.report_orchestrator_events();
     }
 
     /// Sets the queue the renderer pushes its events to: the map's, which
     /// the map's frontend passes on.
     pub fn set_event_queue(&mut self, events: Option<RendererEvents>) {
-        self.orchestrator.set_event_queue(events);
+        self.events = events;
+    }
+
+    /// Pushes what the orchestrator reported since the last call to the
+    /// renderer's event queue, or drops it when there is no queue.
+    fn report_orchestrator_events(&mut self) {
+        for event in self.orchestrator.take_events() {
+            emit(self.events.as_ref(), event);
+        }
     }
 
     /// Draws `update_parameters` into a frame of `target`, which must be
@@ -220,11 +232,13 @@ impl Renderer {
         let backend = Rc::clone(&self.backend);
         let _hold = backend.hold();
         let start = Instant::now();
-        let mut render_tree = self.orchestrator.create_render_tree(update_parameters)?;
-        render_tree.prepare(self.orchestrator.placement());
+        let frame_layers = self.orchestrator.update(update_parameters);
+        let render_tree = frame_layers.map(|layers| self.orchestrator.prepare(update_parameters, layers));
+        self.report_orchestrator_events();
+        let render_tree = render_tree?;
         let prepared = Instant::now();
-        let placement = self.orchestrator.symbol_placement_start.unwrap_or(prepared).max(start);
-        let handoff = self.render_frame(&render_tree, update_parameters, target);
+        let placement = render_tree.symbols_start().max(start);
+        let handoff = self.encode(&render_tree, update_parameters, target);
         if handoff.is_some() {
             self.timings.sources = placement - start;
             self.timings.symbols = prepared - placement;
@@ -260,7 +274,9 @@ impl Renderer {
         geometry: &[mln_util::geo::ScreenCoordinate],
         options: &crate::query::RenderedQueryOptions,
     ) -> Result<Vec<mln_util::feature::Feature>, mln_util::error::Error> {
-        self.orchestrator.query_rendered_features(geometry, options)
+        let features = self.orchestrator.query_rendered_features(geometry, options);
+        self.report_orchestrator_events();
+        features
     }
 
     pub fn query_rendered_features_at_point(
@@ -268,7 +284,7 @@ impl Renderer {
         point: &mln_util::geo::ScreenCoordinate,
         options: &crate::query::RenderedQueryOptions,
     ) -> Result<Vec<mln_util::feature::Feature>, mln_util::error::Error> {
-        self.orchestrator.query_rendered_features(&[*point], options)
+        self.query_rendered_features(&[*point], options)
     }
 
     pub fn query_rendered_features_in_box(
@@ -278,7 +294,7 @@ impl Renderer {
         options: &crate::query::RenderedQueryOptions,
     ) -> Result<Vec<mln_util::feature::Feature>, mln_util::error::Error> {
         use mln_util::geo::ScreenCoordinate;
-        self.orchestrator.query_rendered_features(
+        self.query_rendered_features(
             &[*min, ScreenCoordinate::new(max.x, min.y), *max, ScreenCoordinate::new(min.x, max.y), *min],
             options,
         )
@@ -289,7 +305,9 @@ impl Renderer {
         source_id: &str,
         options: &crate::query::SourceQueryOptions,
     ) -> Result<Vec<mln_util::feature::Feature>, mln_util::error::Error> {
-        self.orchestrator.query_source_features(source_id, options)
+        let features = self.orchestrator.query_source_features(source_id, options);
+        self.report_orchestrator_events();
+        features
     }
 
     /// Queries a feature extension: for a GeoJSON source with `cluster` on,
@@ -383,12 +401,14 @@ impl Renderer {
     /// its work finishes before the app goes to the background, and lets go
     /// of what the orchestrator caches.
     pub fn reduce_memory_use(&mut self) {
-        let _hold = self.backend.hold();
+        let backend = Rc::clone(&self.backend);
+        let _hold = backend.hold();
         self.context.destroy_released();
         if let Err(error) = self.context.gpu().flush(true) {
             Log::error(Event::Render, format!("Waiting for the GPU failed: {error}"));
         }
         self.orchestrator.reduce_memory_use();
+        self.report_orchestrator_events();
     }
 
     /// The rendering stats, which count the renderer's resources until it
@@ -411,9 +431,9 @@ impl Renderer {
         self.orchestrator.clear_data();
     }
 
-    /// Draws a frame of `render_tree` into `target`, unless the target has
-    /// nothing to draw into now.
-    fn render_frame(
+    /// The last phase of a frame: draws `render_tree` into `target`, unless
+    /// the target has nothing to draw into now.
+    fn encode(
         &mut self,
         render_tree: &RenderTree,
         update_parameters: &Arc<UpdateParameters>,
@@ -441,10 +461,10 @@ impl Renderer {
         let renderable_size = image.size;
 
         if self.render_state == RenderState::Never {
-            self.orchestrator.emit(RendererEvent::RenderMapStarted);
+            emit(self.events.as_ref(), RendererEvent::RenderMapStarted);
         }
 
-        self.orchestrator.emit(RendererEvent::RenderFrameStarted);
+        emit(self.events.as_ref(), RendererEvent::RenderFrameStarted);
 
         let state = &render_tree_parameters.transform_params.state;
         let frustum_offset = state.get_frustum_offset();
@@ -461,7 +481,7 @@ impl Renderer {
         };
 
         let static_data: &RenderStaticData = static_data;
-        let orchestrator = &mut self.orchestrator;
+        let orchestrator = &mut *self.orchestrator;
 
         let mut parameters = PaintParameters::new(
             context,
@@ -817,28 +837,38 @@ impl Renderer {
         self.timings.upload = (uploaded - start) + (layers_uploaded - layers_updated);
         self.timings.draw = submitted - layers_uploaded;
 
-        self.orchestrator.emit(RendererEvent::RenderFrameFinished {
-            mode: if render_tree_parameters.loaded { RenderMode::Full } else { RenderMode::Partial },
-            needs_repaint: render_tree_parameters.needs_repaint,
-            placement_changed: render_tree_parameters.placement_changed,
-            still_image_request_id: if update_parameters.still_image_request {
-                update_parameters.still_image_request_id
-            } else {
-                0
+        emit(
+            self.events.as_ref(),
+            RendererEvent::RenderFrameFinished {
+                mode: if render_tree_parameters.loaded { RenderMode::Full } else { RenderMode::Partial },
+                needs_repaint: render_tree_parameters.needs_repaint,
+                placement_changed: render_tree_parameters.placement_changed,
+                still_image_request_id: if update_parameters.still_image_request {
+                    update_parameters.still_image_request_id
+                } else {
+                    0
+                },
+                stats,
             },
-            stats,
-        });
+        );
 
         if !render_tree_parameters.loaded {
             self.render_state = RenderState::Partial;
         } else if self.render_state != RenderState::Fully {
             self.render_state = RenderState::Fully;
-            self.orchestrator.emit(RendererEvent::RenderMapFinished);
+            emit(self.events.as_ref(), RendererEvent::RenderMapFinished);
         }
 
         self.frame_count += 1;
         self.frame_projection = Some(frame_projection);
         Some(handoff)
+    }
+}
+
+/// Pushes `event` to `events`, the renderer's event queue, if it has one.
+fn emit(events: Option<&RendererEvents>, event: RendererEvent) {
+    if let Some(events) = events {
+        events.push(event);
     }
 }
 
