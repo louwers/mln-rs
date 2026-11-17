@@ -183,10 +183,8 @@ impl Snapshot {
             "paint": { "hillshade-exaggeration": 0.5, "hillshade-shadow-color": "#473B24" },
         });
         let layers = style["layers"].as_array_mut().expect("a style's layers");
-        let roads = layers
-            .iter()
-            .position(|layer| layer["source-layer"] == "transportation")
-            .expect("Liberty draws roads");
+        let roads =
+            layers.iter().position(|layer| layer["source-layer"] == "transportation").expect("Liberty draws roads");
         layers.splice(roads..roads, [relief, hillshade]);
         style.to_string()
     }

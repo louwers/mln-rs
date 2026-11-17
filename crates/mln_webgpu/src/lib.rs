@@ -6,6 +6,9 @@
 //! [`OffscreenTarget`], a [`SurfaceTarget`] or a [`BorrowedTarget`] built on
 //! it.
 
+#[cfg(feature = "bench")]
+#[doc(hidden)]
+pub mod bench;
 mod borrowed_target;
 mod custom_layer;
 mod device;

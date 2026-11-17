@@ -4,6 +4,7 @@
 //! scenario draws and what each has loaded are the same on every run and
 //! every machine.
 
+use std::cell::Cell;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -18,6 +19,7 @@ use mln_style::sources::geojson::{GeoJSONOptions, GeoJsonSourceType, create_geoj
 use mln_util::pool::Pool;
 use mln_util::queue::Queue;
 use mln_util::size::Size;
+use mln_webgpu::bench::PipelineStatistics;
 
 use super::fixtures::Fixtures;
 use crate::environment::Gpu;
@@ -44,6 +46,9 @@ pub(crate) struct Frontend {
     pool: Pool,
     /// The times work arrived at the pool while none was queued.
     arrivals: Arc<AtomicU64>,
+    /// What the GPU's pipeline has run for the frames so far, where the
+    /// device counts it.
+    pipeline: Cell<Option<PipelineStatistics>>,
     frontend: HeadlessFrontend,
 }
 
@@ -59,7 +64,7 @@ impl Frontend {
             counter.fetch_add(1, Ordering::Relaxed);
         })));
         let frontend = HeadlessFrontend::new(size, 1.0, &queue, &pool).expect("a headless frontend");
-        Frontend { queue, pool, arrivals, frontend }
+        Frontend { queue, pool, arrivals, pipeline: Cell::new(None), frontend }
     }
 
     /// The pool a file source for the map should run its reads on, so that
@@ -124,6 +129,14 @@ impl Frontend {
             return;
         };
         device.device().poll(wgpu::PollType::wait_indefinitely()).expect("the GPU finishes the frame");
+        if let Some(ran) = mln_webgpu::bench::take_pipeline_statistics() {
+            let total = self.pipeline.get().unwrap_or_default();
+            self.pipeline.set(Some(PipelineStatistics {
+                vertex_shader_invocations: total.vertex_shader_invocations + ran.vertex_shader_invocations,
+                primitives: total.primitives + ran.primitives,
+                fragment_shader_invocations: total.fragment_shader_invocations + ran.fragment_shader_invocations,
+            }));
+        }
     }
 }
 
@@ -193,6 +206,26 @@ impl HeadlessMap {
 
     pub(crate) fn jump(&mut self, camera: &CameraOptions) {
         self.map.jump_to(camera);
+    }
+
+    /// What the GPU's pipeline has run for the map's frames so far, where
+    /// the device counts it: on WebGPU on Vulkan or D3D12.
+    pub(crate) fn pipeline_statistics(&self) -> Option<PipelineStatistics> {
+        self.frontend.pipeline.get()
+    }
+
+    /// Declares in `bench` what the GPU's pipeline ran since it ran `since`,
+    /// where the device counts it: `gpu_vertex_shader_invocations`,
+    /// `gpu_primitives` (those its clipper passed on) and
+    /// `gpu_fragment_shader_invocations`.
+    pub(crate) fn count_pipeline(&self, bench: &mut Bench, since: Option<PipelineStatistics>) {
+        let (Some(now), Some(since)) = (self.pipeline_statistics(), since) else { return };
+        bench.count("gpu_vertex_shader_invocations", now.vertex_shader_invocations - since.vertex_shader_invocations);
+        bench.count("gpu_primitives", now.primitives - since.primitives);
+        bench.count(
+            "gpu_fragment_shader_invocations",
+            now.fragment_shader_invocations - since.fragment_shader_invocations,
+        );
     }
 
     /// How many times background work has arrived at the map's idle pool

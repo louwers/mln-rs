@@ -18,6 +18,7 @@ pub(crate) fn all() -> impl Iterator<Item = &'static Scenario> {
         micro::feature_state::SCENARIOS,
         micro::worker_codec::SCENARIOS,
         micro::queue::SCENARIOS,
+        micro::draw::SCENARIOS,
         r#macro::load::SCENARIOS,
         r#macro::frame::SCENARIOS,
         r#macro::navigate::SCENARIOS,

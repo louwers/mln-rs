@@ -102,6 +102,9 @@ struct Readback {
 /// The pass draws record into, and what the draws so far set on it.
 struct OpenPass {
     pass: wgpu::RenderPass<'static>,
+    /// Whether a pipeline statistics query counts the pass's work.
+    #[cfg(feature = "bench")]
+    counted: bool,
     target: PassTarget,
     /// The wgpu formats of its attachments, which a custom layer's pass
     /// tells.
@@ -175,6 +178,10 @@ pub struct WebGpu {
     /// The commands recorded since the last flush.
     encoder: Option<wgpu::CommandEncoder>,
     pass: Option<OpenPass>,
+    /// The pipeline statistics queries of each pass, where the device has
+    /// them.
+    #[cfg(feature = "bench")]
+    statistics: Option<crate::bench::Queries>,
 }
 
 impl WebGpu {
@@ -217,6 +224,8 @@ impl WebGpu {
             geometries: SlotMap::with_key(),
             readbacks: SlotMap::with_key(),
             spare_readback: None,
+            #[cfg(feature = "bench")]
+            statistics: crate::bench::Queries::new(device.device()),
             encoder: None,
             pass: None,
         }
@@ -249,11 +258,19 @@ impl WebGpu {
             self.device.device().create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("frame") })
         });
         then(&mut encoder);
+        #[cfg(feature = "bench")]
+        let statistics =
+            self.statistics.as_mut().and_then(|queries| queries.resolve(self.device.device(), &mut encoder));
         // wgpu reports what it rejects in the passes when they finish. The
         // writes stay for the next flush.
         let command_buffer = self.validated("flush", |_| encoder.finish())?;
         let writes = self.writes.encode(self.device.device(), self.device.queue());
-        Ok(self.device.queue().submit(writes.into_iter().chain([command_buffer])))
+        let submission = self.device.queue().submit(writes.into_iter().chain([command_buffer]));
+        #[cfg(feature = "bench")]
+        if let Some(statistics) = statistics {
+            crate::bench::Queries::read_back(statistics);
+        }
+        Ok(submission)
     }
 
     fn info(&self) -> (impl Fn(BufferId) -> Option<BufferInfo> + '_, impl Fn(TextureId) -> Option<TextureInfo> + '_) {
@@ -842,8 +859,13 @@ impl Gpu for WebGpu {
             let (_, texture) = self.info();
             validation::check_pass(desc, &texture)?
         };
-        let (pass, color_format, depth_stencil_format) = self.begin_render_pass(desc)?;
+        #[cfg_attr(not(feature = "bench"), expect(unused_mut, reason = "only the benchmarks' builds count the pass"))]
+        let (mut pass, color_format, depth_stencil_format) = self.begin_render_pass(desc)?;
+        #[cfg(feature = "bench")]
+        let counted = self.statistics.as_mut().is_some_and(|queries| queries.begin(&mut pass));
         self.pass = Some(OpenPass {
+            #[cfg(feature = "bench")]
+            counted,
             pass,
             target,
             color_format,
@@ -965,7 +987,14 @@ impl Gpu for WebGpu {
     }
 
     fn end_pass(&mut self) -> Result<(), GpuError> {
-        self.pass.take().map(drop).ok_or_else(|| Self::no_pass("the end of a pass"))
+        #[cfg_attr(not(feature = "bench"), expect(unused_mut, reason = "only the benchmarks' builds count the pass"))]
+        let mut open = self.pass.take().ok_or_else(|| Self::no_pass("the end of a pass"))?;
+        #[cfg(feature = "bench")]
+        if open.counted {
+            crate::bench::Queries::end(&mut open.pass);
+        }
+        drop(open);
+        Ok(())
     }
 
     fn flush(&mut self, wait: bool) -> Result<(), GpuError> {

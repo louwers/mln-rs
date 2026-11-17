@@ -107,6 +107,7 @@ fn frames(bench: &mut Bench, mut map: HeadlessMap, camera: impl Fn(usize) -> Cam
     let drawn = map.frames();
     let objects = map.gpu_objects_created();
     let work = map.background_work();
+    let pipeline = map.pipeline_statistics();
     for frame in 0..FRAMES {
         map.jump(&camera(frame));
         bench.measure(|| {
@@ -115,6 +116,7 @@ fn frames(bench: &mut Bench, mut map: HeadlessMap, camera: impl Fn(usize) -> Cam
         });
     }
     bench.count("background_work", map.background_work() - work);
+    map.count_pipeline(bench, pipeline);
     assert_eq!(map.frames() - drawn, FRAMES as u64, "one frame per camera");
     bench.per_part("frame");
     bench.bytes("gpu_buffers", map.gpu_buffer_bytes());

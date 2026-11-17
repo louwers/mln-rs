@@ -2528,6 +2528,7 @@ dependencies = [
  "mln-rs-tile-id",
  "mln-rs-util",
  "mln-rs-vulkan",
+ "mln-rs-webgpu",
  "parking_lot",
  "pmtiles",
  "serde",

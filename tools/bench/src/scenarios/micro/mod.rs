@@ -1,7 +1,8 @@
-//! One scenario per pipeline stage: a function over data, with no map, GPU
-//! or threads.
+//! One scenario per pipeline stage, alone: a function over data, with no
+//! map, GPU or threads, or for drawing, one layer type over loaded data.
 
 pub(crate) mod decode;
+pub(crate) mod draw;
 pub(crate) mod expression;
 pub(crate) mod feature_state;
 pub(crate) mod geojson;

@@ -334,7 +334,9 @@ fn fetch_terrain(downloads: &Path) -> Result<BTreeMap<TileId, Vec<u8>>, String> 
     let coords = TERRAIN.tiles();
     let fetches: Vec<Download> = coords
         .iter()
-        .map(|coord| Download::new(downloads, format!("{TERRAIN_TILES}/{}/{}/{}.webp", coord.z(), coord.x(), coord.y())))
+        .map(|coord| {
+            Download::new(downloads, format!("{TERRAIN_TILES}/{}/{}/{}.webp", coord.z(), coord.x(), coord.y()))
+        })
         .collect();
     eprintln!("mln-bench-snapshot: {} tiles for {}", coords.len(), TERRAIN.name);
     let found = fetch::fetch(&fetches.iter().collect::<Vec<_>>())?;

@@ -61,6 +61,10 @@ mln_text = { package = "mln-rs-text", path = "../../crates/mln_text" }
 mln_tile = { package = "mln-rs-tile", path = "../../crates/mln_tile" }
 mln_tile_id = { package = "mln-rs-tile-id", path = "../../crates/mln_tile_id" }
 mln_util = { package = "mln-rs-util", path = "../../crates/mln_util" }
+# What the GPU's pipeline ran, where the device counts it (support/map.rs).
+mln_webgpu = { package = "mln-rs-webgpu", path = "../../crates/mln_webgpu", features = [
+  "bench",
+] }
 # The latency file source's held answers (support/latency.rs).
 parking_lot = "0.12"
 # Single tiles of the fixtures' archives (support/fixtures.rs).

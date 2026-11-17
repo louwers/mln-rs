@@ -15,6 +15,11 @@ name = "mln_webgpu"
 # The doc comments have no examples to run.
 doctest = false
 
+[features]
+# `bench`, how much work the GPU's pipeline ran, which the benchmarks
+# (tools/bench) count. Not API: hidden from the documentation.
+bench = []
+
 [dependencies]
 mln_gfx.workspace = true
 mln_util.workspace = true
