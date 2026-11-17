@@ -98,9 +98,11 @@ pub(crate) struct Queries {
 }
 
 impl Queries {
-    /// The queries of `device`, if it has pipeline statistics.
+    /// The queries of `device`, if the process counts and the device has
+    /// pipeline statistics: a host's own device may have them without the
+    /// process counting.
     pub(crate) fn new(device: &wgpu::Device) -> Option<Queries> {
-        if !device.features().contains(wgpu::Features::PIPELINE_STATISTICS_QUERY) {
+        if !counting() || !device.features().contains(wgpu::Features::PIPELINE_STATISTICS_QUERY) {
             return None;
         }
         COUNTED.lock().get_or_insert_with(Counted::default);
