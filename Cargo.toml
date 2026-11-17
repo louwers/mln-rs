@@ -191,8 +191,6 @@ pmtiles = { version = "0.28.1", default-features = false }
 # std's SipHash, and seeded per process, so keys from styles and tiles can't
 # be crafted to collide. hashbrown already depends on it.
 foldhash = { version = "0.2.0" }
-# A style's layers in drawing order, found by id (mln_style's LayerList).
-# serde_json's `preserve_order` already depends on it.
 # Locks without poisoning: a panic while a lock is held doesn't make every
 # later lock panic. wgpu already depends on it.
 parking_lot = { version = "0.12.5" }
