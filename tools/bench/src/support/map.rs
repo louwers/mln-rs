@@ -2,12 +2,14 @@
 //! whose frames the scenario asks for one at a time: no display clock and no
 //! sleeping, so the frames a scenario draws are the same on every machine.
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapEvent, MapMode, MapOptions, RenderFrameStatus, RenderMode};
 use mln_runtime::Device;
+use mln_storage::FileSource;
 use mln_util::size::Size;
 
 use crate::environment::Gpu;
@@ -29,10 +31,26 @@ impl HeadlessMap {
     /// A continuous map of `size` without a style, on the GPU device the
     /// headless frontend picks (`MLN_RENDER_BACKEND`, WebGPU by default).
     pub(crate) fn new(size: Size) -> HeadlessMap {
+        HeadlessMap::build(size, None)
+    }
+
+    /// A map as [`HeadlessMap::new`] makes, whose resources come from
+    /// `file_source`, such as the fixtures'
+    /// ([`Fixtures::file_source`](super::fixtures::Fixtures::file_source)).
+    #[expect(dead_code, reason = "no scenario reads the fixtures")]
+    pub(crate) fn with_file_source(size: Size, file_source: Arc<dyn FileSource>) -> HeadlessMap {
+        HeadlessMap::build(size, Some(file_source))
+    }
+
+    fn build(size: Size, file_source: Option<Arc<dyn FileSource>>) -> HeadlessMap {
         let run_loop = RunLoop::new();
         let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop).expect("a headless frontend");
         let options = MapOptions { map_mode: MapMode::Continuous, size, pixel_ratio: 1.0, ..Default::default() };
-        let map = Map::new(options, &run_loop).expect("a map");
+        let map = match file_source {
+            Some(file_source) => Map::with_file_source(file_source, options, &run_loop),
+            None => Map::new(options, &run_loop),
+        }
+        .expect("a map");
         frontend.attach(&map);
         HeadlessMap { run_loop, frontend, map, frames: 0, last_frame: None }
     }

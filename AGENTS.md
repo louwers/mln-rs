@@ -33,7 +33,8 @@ task. The common ones:
   pre-commit hook that fixes the staged files, if you want one.
 - `CI=true mise run ci:lint`: CI's lint job, warnings as errors.
 - `mise run bench`, `mise run bench:compare <ref>`: the benchmarks, and this
-  checkout's against another commit (tools/bench/README.md).
+  checkout's against another commit (tools/bench/README.md). They install the
+  benchmarks' map data first, once per user (`mise run bench:fixtures`).
 - `mise run web:build`, `mise run web:check`: build the browser build and its
   page, and compare it with native renders. `mise run web:dev` serves the page
   from its sources.

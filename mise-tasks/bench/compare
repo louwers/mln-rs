@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 #MISE description="Compare the benchmarks of this checkout, uncommitted changes included, with another commit (tools/bench/README.md)"
+#MISE depends=["bench:fixtures"]
 #USAGE arg "[base]" default="main" help="The Git ref to compare with"
 #USAGE arg "[args]..." var=#true help="Arguments to `mln-bench compare`, such as `--filter` or `--rounds`"
 set -euo pipefail

@@ -25,12 +25,66 @@ mise run bench                         # every scenario
 mise run bench -- --filter micro/      # those whose names contain micro/
 mise run bench:list                    # the scenarios and their questions
 mise run bench:compare main            # this checkout against main
+mise run bench:fixtures                # install the map data, once
 ```
 
 `mise run bench` builds with the `benchmark` profile (`profile.toml`) and runs
-`mln-bench run`; `--json` prints the runs as JSON. The headless frontend draws
-on WebGPU unless `MLN_RENDER_BACKEND` names another backend (`metal`, `vulkan`,
-`d3d12`, `gl`).
+`mln-bench run`, after `mise run bench:fixtures`; `--json` prints the runs as
+JSON. The headless frontend draws on WebGPU unless `MLN_RENDER_BACKEND` names
+another backend (`metal`, `vulkan`, `d3d12`, `gl`).
+
+## Fixtures
+
+Scenarios read map data from a snapshot that never changes and never touches the
+network: [`fixtures.json`](fixtures.json) names each file with its size and
+SHA-256, where the snapshot is published, and the data's sources, licenses and
+attribution. It holds:
+
+- `tiles/street.pmtiles`: OpenFreeMap's vector tiles (OpenMapTiles schema) of
+  central San Francisco, zooms 0 to 14; `tiles/street-mlt.pmtiles`, the same
+  tiles as MLT.
+- `tiles/world.pmtiles`: the whole world, zooms 0 to 4, for the globe.
+- `tiles/cjk.pmtiles`: central Tokyo, zooms 0 to 14, its names in Japanese
+  script.
+- `styles/liberty.json`: OpenFreeMap's Liberty style, its URLs turned into
+  `asset://` URLs of the snapshot (and any layer it can't draw from the snapshot
+  removed, as the manifest's `style_changes` says), with its sprite and the
+  glyph ranges the tiles' labels need.
+- `fonts/`: Noto Sans and Noto Sans JP, for text scenarios that read a font.
+- `geojson/ne_10m_admin_0_countries.geojson`: Natural Earth's countries.
+
+Each tile set comes with its area in the manifest: a camera centered in it sees
+only tiles of the set when its view is at most two tiles across, and a map
+requests no tile outside the archive's bounds, so no frame waits for a tile the
+set lacks.
+
+`mise run bench:fixtures` installs the snapshot from its base URL in a cache
+that every checkout of the user shares, `mln-rs/bench-fixtures/<manifest hash>`
+in `~/Library/Caches` (macOS), `$XDG_CACHE_HOME` or `~/.cache` (Linux) or
+`%LOCALAPPDATA%` (Windows); `MLN_BENCH_FIXTURES` names another directory. It
+downloads into a temporary directory beside that one, checks every file, and
+renames it into place, so a session sees the snapshot complete or not at all,
+and nothing changes it afterwards. `--from <dir>` installs from a directory laid
+out as the base URL is.
+
+A scenario opens it with `support::fixtures::Fixtures::open(bench)`, which
+records the manifest's hash in the run's environment, so runs on different
+fixtures get no verdicts against each other. A scenario fails, naming the
+command, when the snapshot isn't installed. Data an application would supply,
+such as features to add, is generated in code from a fixed seed instead.
+
+### A new snapshot
+
+`mise run bench:snapshot <id>` (`tools/bench-snapshot`) fetches the pinned
+OpenFreeMap planet build, the style, its sprite and glyphs, the font files and
+the GeoJSON, at most 8 requests at once; writes the archives, the street tiles
+as MLT and the style; checks that the tiles hold the style's layers and read
+back from the archives; stages the snapshot in
+`target/bench-fixtures-upload/<id>/`, laid out as it is published; and points
+`fixtures.json` at it. Before publishing it, install it with
+`mise run bench:fixtures --from target/bench-fixtures-upload/<id>` and run the
+scenarios that read it. A published snapshot never changes: a new one gets a new
+id.
 
 ## Metrics
 
@@ -141,4 +195,5 @@ fn evaluate(bench: &mut Bench) {
 leave waits between frames out. `count`, `bytes`, `time` and `percentiles`
 declare the scenario's own metrics. A macro scenario sets `bench.gpu` to the
 device it drew on. What more than one scenario uses goes in `src/support/`: the
-headless map (`support::map`) and seeded data (`support::random`).
+headless map (`support::map`), the fixtures (`support::fixtures`) and seeded
+data (`support::random`).

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 #MISE description="Run the benchmarks, each scenario in a process of its own (tools/bench/README.md)"
+#MISE depends=["bench:fixtures"]
 #USAGE arg "[args]..." var=#true help="Arguments to `mln-bench run`, such as `--filter micro/` or `--json`"
 set -euo pipefail
 source tools/dev-shell.sh

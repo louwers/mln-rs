@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+#MISE description="Install the benchmarks' fixture snapshot in the per-user cache, once (tools/bench/README.md)"
+#USAGE flag "--from <dir>" help="Install from a directory laid out as the snapshot's base URL is, such as one `mise run bench:snapshot` staged"
+set -euo pipefail
+args=(fixtures)
+if [[ -n "${usage_from:-}" ]]; then
+  args+=(--from "$usage_from")
+fi
+cargo run -q --profile benchmark --config tools/bench/profile.toml -p mln-rs-bench -- "${args[@]}"

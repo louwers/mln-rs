@@ -1,0 +1,27 @@
+[package]
+name = "mln-rs-bench-snapshot"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+# Builds the benchmarks' fixture snapshot (`mise run bench:snapshot`); never
+# released.
+publish = false
+
+[[bin]]
+name = "mln-bench-snapshot"
+path = "src/main.rs"
+
+[dependencies]
+# The street tiles as MLT, and the tiles' layers and label text.
+mlt-core.workspace = true
+# Writes the snapshot's archives, and reads them back to check them.
+pmtiles = { workspace = true, features = ["write"] }
+serde_json.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

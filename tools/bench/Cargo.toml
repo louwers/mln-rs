@@ -31,10 +31,17 @@ mln_map = { package = "mln-rs-map", path = "../../crates/mln_map" }
 mln_runtime = { package = "mln-rs-runtime", path = "../../crates/mln_runtime", features = [
   "default",
 ] }
+# The file source that reads the fixtures (support/fixtures.rs).
+mln_storage = { package = "mln-rs-storage", path = "../../crates/mln_storage" }
 mln_util = { package = "mln-rs-util", path = "../../crates/mln_util" }
+# Single tiles of the fixtures' archives (support/fixtures.rs).
+pmtiles = { version = "0.28", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# The file each scenario's process writes its report to.
+# The fixtures' checksums (fixtures.rs).
+sha2 = "0.11"
+# The file each scenario's process writes its report to, and the directory
+# the fixtures are installed through.
 tempfile = "3"
 # The WebGPU adapter's description, and the wait for its queue.
 wgpu = { version = "30", default-features = false }

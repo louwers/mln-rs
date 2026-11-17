@@ -41,6 +41,8 @@
     // Generated code stays as its generator writes it, and the changelog as
     // release-plz writes it (release-plz.toml).
     "CHANGELOG.md",
+    // The fixtures' manifest, whose hash names the directory they install in.
+    "tools/bench/fixtures.json",
     "crates/mln_c/src/generated/**",
     "crates/mln_style/src/layers/*_layer_properties.rs",
     "crates/mln_style/src/light_properties.rs",

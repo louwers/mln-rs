@@ -93,6 +93,9 @@ pub(crate) struct Bench {
     cpu: Duration,
     own: Vec<Metric>,
     pub(crate) gpu: Option<Gpu>,
+    /// The hash of the fixture manifest the scenario read, which
+    /// `support::fixtures::Fixtures::open` sets.
+    pub(crate) fixtures: Option<String>,
 }
 
 impl Bench {

@@ -1,0 +1,2700 @@
+{
+  "snapshot": "2026-11-17",
+  "base_url": "https://mlc-data.sargunv.dev/benchmark-fixtures/2026-11-17/",
+  "description": "The benchmarks' map data: OpenFreeMap's OpenMapTiles vector tiles of central San Francisco (street, and street-mlt as MLT), of the whole world to zoom 4 (world) and of central Tokyo (cjk), each a PMTiles archive; OpenFreeMap's Liberty style pointed at them, with its sprite and the glyph ranges the tiles' labels need; Noto Sans font files; and Natural Earth's countries as GeoJSON. tools/bench-snapshot built it.",
+  "attribution": "OpenFreeMap © OpenMapTiles Data from OpenStreetMap",
+  "sources": [
+    {
+      "files": [
+        "tiles/street.pmtiles",
+        "tiles/street-mlt.pmtiles",
+        "tiles/world.pmtiles",
+        "tiles/cjk.pmtiles"
+      ],
+      "origin": "OpenFreeMap's planet build https://tiles.openfreemap.org/planet/20261115_080022_pt, in the OpenMapTiles schema; street-mlt holds the street tiles re-encoded as MLT",
+      "license": "Map data © OpenStreetMap contributors, under the Open Database License 1.0 (https://www.openstreetmap.org/copyright). OpenMapTiles' schema and design are under CC BY 4.0 (https://github.com/openmaptiles/openmaptiles/blob/master/LICENSE.md).",
+      "attribution": "OpenFreeMap © OpenMapTiles Data from OpenStreetMap"
+    },
+    {
+      "files": [
+        "styles/liberty.json",
+        "styles/LICENSE.md"
+      ],
+      "origin": "OpenFreeMap's Liberty style, https://tiles.openfreemap.org/styles/liberty, changed as style_changes says",
+      "license": "MIT (OpenFreeMap styles), from OSM Liberty and OSM Bright: code under the BSD 3-Clause License, design under CC BY 4.0; styles/LICENSE.md has the terms."
+    },
+    {
+      "files": [
+        "sprites/"
+      ],
+      "origin": "The style's sprite, https://tiles.openfreemap.org/sprites/ofm_f384/ofm",
+      "license": "The Maki icons, CC0 1.0; the right arrow from Wikimedia Commons, public domain (styles/LICENSE.md)."
+    },
+    {
+      "files": [
+        "glyphs/"
+      ],
+      "origin": "OpenFreeMap's glyph ranges of Noto Sans, https://tiles.openfreemap.org/fonts",
+      "license": "SIL Open Font License 1.1 (fonts/NotoSans-LICENSE.txt)."
+    },
+    {
+      "files": [
+        "fonts/"
+      ],
+      "origin": "Noto Sans (notofonts/notofonts.github.io) and Noto Sans JP (notofonts/noto-cjk, Sans2.004)",
+      "license": "SIL Open Font License 1.1 (fonts/NotoSans-LICENSE.txt, fonts/NotoSansJP-LICENSE.txt)."
+    },
+    {
+      "files": [
+        "geojson/ne_10m_admin_0_countries.geojson"
+      ],
+      "origin": "Natural Earth v5.1.2, Admin 0 – Countries at 1:10m (nvkelso/natural-earth-vector)",
+      "license": "Public domain (https://www.naturalearthdata.com/about/terms-of-use/)."
+    }
+  ],
+  "style_changes": [
+    "Removed the raster source `ne2_shaded` (https://tiles.openfreemap.org/natural_earth/ne2sr/{z}/{x}/{y}.png) and the layers that draw it (`natural_earth`): the snapshot holds vector tiles only, and the renderer decides when to rebuild a raster tile's drawables by wall-clock timestamps, so a frame with raster layers could do different work from run to run."
+  ],
+  "tile_sets": {
+    "street": {
+      "archive": "tiles/street.pmtiles",
+      "encoding": "mvt",
+      "description": "OpenMapTiles vector tiles of central San Francisco, zooms 0 to 14",
+      "area": [
+        -122.515,
+        37.705,
+        -122.355,
+        37.815
+      ],
+      "bounds": [
+        -122.54150390625,
+        37.683820326693805,
+        -122.32177734375,
+        37.84015683604134
+      ],
+      "zooms": [
+        0,
+        14
+      ],
+      "tiles": 250
+    },
+    "world": {
+      "archive": "tiles/world.pmtiles",
+      "encoding": "mvt",
+      "description": "OpenMapTiles vector tiles of the whole world, zooms 0 to 4",
+      "area": [
+        -180.0,
+        -85.05112877980659,
+        180.0,
+        85.05112877980659
+      ],
+      "bounds": [
+        -180.0,
+        -85.0511287798066,
+        180.0,
+        85.0511287798066
+      ],
+      "zooms": [
+        0,
+        4
+      ],
+      "tiles": 341
+    },
+    "cjk": {
+      "archive": "tiles/cjk.pmtiles",
+      "encoding": "mvt",
+      "description": "OpenMapTiles vector tiles of central Tokyo, zooms 0 to 14, with names in Japanese script",
+      "area": [
+        139.74,
+        35.665,
+        139.79,
+        35.7
+      ],
+      "bounds": [
+        139.7021484375,
+        35.63944106897394,
+        139.81201171875,
+        35.728677044851686
+      ],
+      "zooms": [
+        0,
+        14
+      ],
+      "tiles": 149
+    },
+    "street-mlt": {
+      "archive": "tiles/street-mlt.pmtiles",
+      "encoding": "mlt",
+      "description": "OpenMapTiles vector tiles of central San Francisco, zooms 0 to 14",
+      "area": [
+        -122.515,
+        37.705,
+        -122.355,
+        37.815
+      ],
+      "bounds": [
+        -122.54150390625,
+        37.683820326693805,
+        -122.32177734375,
+        37.84015683604134
+      ],
+      "zooms": [
+        0,
+        14
+      ],
+      "tiles": 250
+    }
+  },
+  "files": [
+    {
+      "path": "fonts/NotoSans-LICENSE.txt",
+      "size": 4374,
+      "sha256": "f2095b08bed08b23a6fe26112fcd679a2bee3f002eef077eb05d215ed1051bd8"
+    },
+    {
+      "path": "fonts/NotoSans-Regular.ttf",
+      "size": 621572,
+      "sha256": "478c558ea716033cd60c03438f628dfa75694dcf6b5f6d505a2f05fd2b4f3823"
+    },
+    {
+      "path": "fonts/NotoSansJP-LICENSE.txt",
+      "size": 4301,
+      "sha256": "6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2"
+    },
+    {
+      "path": "fonts/NotoSansJP-Regular.otf",
+      "size": 4533028,
+      "sha256": "dff723ba59d57d136764a04b9b2d03205544f7cd785a711442d6d2d085ac5073"
+    },
+    {
+      "path": "geojson/ne_10m_admin_0_countries.geojson",
+      "size": 13287234,
+      "sha256": "239eec57ac17f100a11e2536cffc56752c318b50ae765b0918ff7aab4ce8f255"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/0-255.pbf",
+      "size": 81170,
+      "sha256": "f60ce4cb899455c2203bd8293b550394ade53ffce8032bf9cc7f59255e49259c"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/1024-1279.pbf",
+      "size": 135287,
+      "sha256": "f0ab5cecbf1b1d04e8d38c7d64451a20b5707ab1fc8aa8dbbc1b660905cd4142"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/11008-11263.pbf",
+      "size": 3275,
+      "sha256": "b95d6e5118ce9c0336b0bb394b8120bff9e46336f30d9bbec264d92a05ae40ad"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/11264-11519.pbf",
+      "size": 10963,
+      "sha256": "9a6df0f7419f916337230298c2e46264075060a445205834a7be57e41c81a958"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/11520-11775.pbf",
+      "size": 70860,
+      "sha256": "6bf57a70928ed201a01fe50e616961897bc3428de25a2d34916ff8f69d4d342b"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/11776-12031.pbf",
+      "size": 76775,
+      "sha256": "cf0609590ec2fba14b8a353049732fbb2d4278b8be573537cd0c05dd28a8f5c1"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/12032-12287.pbf",
+      "size": 172061,
+      "sha256": "f7bdfae2d2e62a643d764609875a89d8afcfbb17110b4b2b23c2d7c252e5855b"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/12288-12543.pbf",
+      "size": 156393,
+      "sha256": "1ad9939329b3d4c227a3dfce8f5a6740e75c3d678fc75ba8186cca5c20fe169f"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/1280-1535.pbf",
+      "size": 83785,
+      "sha256": "4e509159894445662d970e1769facbeb68e8aa56bbf19f62a43096f6fdb5627e"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/12800-13055.pbf",
+      "size": 202776,
+      "sha256": "34b0522beb2ae0332c9abdd3ce05f1b50fcb57e374b7944a6c2dd94b59aeaeb5"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/13312-13567.pbf",
+      "size": 206292,
+      "sha256": "af25bbb5b078954b4e9d460387c49c191f8046df0c6eaec4a5d31ba10096e414"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/1536-1791.pbf",
+      "size": 102128,
+      "sha256": "ddce73e051bd2e32b1441e15a8184909e6f7279d5b5e3ca29e9501f9d6e9d90d"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/15872-16127.pbf",
+      "size": 207094,
+      "sha256": "820e0c2972041d7dd78f3bd5c9df57cb6ef4d2cf4d57831e35d4251f1494ed45"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/1792-2047.pbf",
+      "size": 27256,
+      "sha256": "4d1791ea1bef77887d5f8081ce2ee33fe9ee818d7977f59272e3ae260c7669aa"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/19968-20223.pbf",
+      "size": 198477,
+      "sha256": "185cd7e4ad5094eb88113300ef6ff788960ddedd446fc92f63b43c244b9cff13"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/20224-20479.pbf",
+      "size": 212765,
+      "sha256": "186bb704c71edd1147dd2d9ceabd729e55ddf810145991830bac1a1e47880cab"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/20480-20735.pbf",
+      "size": 212535,
+      "sha256": "77d5f13360dcca6dbbca812484b6302e2ab0a0834d4ce8de5b904beb5ff50b79"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/20736-20991.pbf",
+      "size": 204929,
+      "sha256": "49f791979ac4b2d0619e89ccdd1ab36a556d5d8c61d7b44b272a3eff9f518fb7"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/20992-21247.pbf",
+      "size": 203430,
+      "sha256": "58ab72accd633f2933e626e6f606f79c5771a0a654dd3f56676fad68b00e9d1f"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/21248-21503.pbf",
+      "size": 199087,
+      "sha256": "1ac478deb60f3d32cd82ae2ae35672fefc1c77612de91a7eab12f89335937d3b"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/21504-21759.pbf",
+      "size": 199226,
+      "sha256": "03b549daeeffbef29d77037afb1000b10c5833f6778338b31734c681173634c1"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/21760-22015.pbf",
+      "size": 200961,
+      "sha256": "dd1de70debe6fcd421aa21ff70bad226b1b255910efe01aaebc00e5e24b421fd"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/22016-22271.pbf",
+      "size": 198798,
+      "sha256": "3908ffc4b6e1225313cc0b0c2b3a06e8a867059ddb5755b07c8f004fe8bfc842"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/22272-22527.pbf",
+      "size": 204089,
+      "sha256": "d9ac8c4daec70c0ff95f1e6e7ebe7ff8cabf9c4d670d23ab87b7324362ada0a7"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/22528-22783.pbf",
+      "size": 206535,
+      "sha256": "506cc1452dc629824e7a6bd1d25deb336328a48000486ef0bd242fcd18049631"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/22784-23039.pbf",
+      "size": 207518,
+      "sha256": "02d9dd88af2dfd714d280da8fd6ed26fe6852bc77f28bab49d32ea1450729334"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/2304-2559.pbf",
+      "size": 107528,
+      "sha256": "7ad6a9d4b4d9edc5ce6abdffa1fa23f6ef0490be4896ca8ada3febb3673e2ca9"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/23040-23295.pbf",
+      "size": 207850,
+      "sha256": "47727ecba871b21b55288d7464ba61bf3fba3dab4bcadf95cb62703f2867fbb9"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/23296-23551.pbf",
+      "size": 208073,
+      "sha256": "55e43b498146ede9dbea7e187a3bcbf6a8961d6c6570799bb386d70de7e8c2da"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/23552-23807.pbf",
+      "size": 203528,
+      "sha256": "1c21cfd0d3382b9851fbdb51f8085a5fdde2152593a616323b3c82ad37092a80"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/23808-24063.pbf",
+      "size": 205187,
+      "sha256": "8d23b5387123dc61bb65fbf4b374a9cf5b88ec7f65c8d34fd7a634b9a2139153"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/24064-24319.pbf",
+      "size": 208109,
+      "sha256": "4058bcd8303a9ab5361b84102f1f1efeba5d8d97b831bf9ed8484437a820d97d"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/24320-24575.pbf",
+      "size": 207131,
+      "sha256": "f89670bc296d4e9573f28416e7524754e45e934210d83c28d52e12a381f97715"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/24576-24831.pbf",
+      "size": 209092,
+      "sha256": "73d8a029f5d40e40bdbddad2e8aaeeacca5dd7e09a46c84414e8f518be615a0e"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/24832-25087.pbf",
+      "size": 208639,
+      "sha256": "9aef9a0232f35514afb0b4d0c685c415c9d7a7f59a990fa530fea300a57d8f78"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/25088-25343.pbf",
+      "size": 206944,
+      "sha256": "b2546e2a34804b923caf62072883fd7347fc9d0a1a7831fc5b7a1fcad9ef7a4e"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/25344-25599.pbf",
+      "size": 207682,
+      "sha256": "4a62ef8399a20415f1200a25d5242177f0745e050c75bca5a328f621ea896448"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/256-511.pbf",
+      "size": 134545,
+      "sha256": "77c830f114b84a58f8829ca1eac4627a6a688bbce4bdb6a04de00f98fa74bb52"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/25600-25855.pbf",
+      "size": 208473,
+      "sha256": "a1c4a070da164f08d440c0567256f708019484b19b29dac8c71cd89764295632"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/25856-26111.pbf",
+      "size": 208376,
+      "sha256": "bcb52ba842a6453e2e86cb7dcd017cdadaf6d779e0d05f8fc947fa818762a3f5"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/26112-26367.pbf",
+      "size": 199920,
+      "sha256": "58b373a894ebb7a36714ba0052811ab7abd1a81a086451973a05786d26f5504d"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/26368-26623.pbf",
+      "size": 207491,
+      "sha256": "3f29c4ff254baacb4c9c67299bfe1dd3ff39e6754274ba6662214747e035ccf4"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/26624-26879.pbf",
+      "size": 209590,
+      "sha256": "4ed31299234ff817a32b8bcc3665a4d31810383fd5c46c0f14539b1e4eedc777"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/26880-27135.pbf",
+      "size": 209961,
+      "sha256": "5bb146d6649f88156d66ca640957d0129e272d1f8a2e285d3692ba319c1c2e9d"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/27136-27391.pbf",
+      "size": 211227,
+      "sha256": "fe73f54e9c05f04a251bdd4b25725d609c338463dcd343b5751d72cbe94faa8b"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/27392-27647.pbf",
+      "size": 209062,
+      "sha256": "2631b516495adff74af490da39f1b1f8a86f77875f3862f50246cc9e93cd358e"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/27648-27903.pbf",
+      "size": 206594,
+      "sha256": "79f8e619f802f53c9dde27bd0f02e52b6037cbb375b53acf31583b5d8a3f451c"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/27904-28159.pbf",
+      "size": 207456,
+      "sha256": "98c9952f7d368277b289c874abe059c4c9497ca85d313d9438cfb4195e2d6e22"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/2816-3071.pbf",
+      "size": 98272,
+      "sha256": "8fc7258b50aa6ed0485e2ccf92a9c50d536593d374c0803f88b6099b8277641a"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/28160-28415.pbf",
+      "size": 208082,
+      "sha256": "46291ceeac29a5f08f5f1cde4f0e09a26a467594e50dab15a637dca6ca515204"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/28416-28671.pbf",
+      "size": 207993,
+      "sha256": "bb5fcc2d802e569652adc6d31006b83890f265215063fe55d4b3e066f3d4b940"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/28672-28927.pbf",
+      "size": 207183,
+      "sha256": "779da9fad3cf46e46970b0a88db4e5116b4a5667ae7b2a057cb500040a790915"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/28928-29183.pbf",
+      "size": 207546,
+      "sha256": "3e7a9bbb46bec19d1bf5395752be0fbdefd72e5548cd0952d1202b898e145e83"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/29184-29439.pbf",
+      "size": 207775,
+      "sha256": "e9090734cbf49017f1c042762ffcb9fc769883f961612a963aee26cf5b83e158"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/29440-29695.pbf",
+      "size": 207353,
+      "sha256": "cdceeae88a66e2bc3a8380cfc67ecf967fd541ab21ef1598808ad00718e9f32d"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/29696-29951.pbf",
+      "size": 206923,
+      "sha256": "b88d4af00ab4ae6649f26490c7c41fa1386d1f16f1c1ed3a1488aa71fb83de2b"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/29952-30207.pbf",
+      "size": 206663,
+      "sha256": "e76042d5923b502a60767235a677f8863f006554517a6086a829f3e4cb56400f"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/30208-30463.pbf",
+      "size": 207858,
+      "sha256": "578870e0352a68c40a6722926759357d9d0061eeeb1bda495824b6ecb20e3f3b"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/30464-30719.pbf",
+      "size": 202834,
+      "sha256": "23233fe909952e558dd29dd5e874f57bb857e4d596316c7c3e3c84d2ef6420c9"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/30720-30975.pbf",
+      "size": 209226,
+      "sha256": "f8559faf775316df1e7a5380fe4bd08e5caa326134b12a31dc6881333baee5db"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/30976-31231.pbf",
+      "size": 209479,
+      "sha256": "bec2d957d491b12ead8a16e0c521e2c489d1a9374ae76f3182c153cbfa9bf7ba"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/31232-31487.pbf",
+      "size": 209835,
+      "sha256": "115997a1626336cd1f7e3084b694fd18853d8278961f5e94e1a882fa4da401e0"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/31488-31743.pbf",
+      "size": 213209,
+      "sha256": "e54e360efd43ae7ca0f835ae49d8d84075c86fc88415c51e073aff11e97101d8"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/31744-31999.pbf",
+      "size": 210256,
+      "sha256": "18b2147e6bba3fe6f4e597bffe8d9cc5894627e6d74c4382533242197cac6de0"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/32000-32255.pbf",
+      "size": 208445,
+      "sha256": "2fa29f9aeda861be3094c3551f20676f949fef8d222c27985cdd989b94640104"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/32256-32511.pbf",
+      "size": 208315,
+      "sha256": "a3575bf1567aa3b675ba7c5b274e893970348ea36ec0ca85e1c84481352ca64a"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/32512-32767.pbf",
+      "size": 205457,
+      "sha256": "9c0aef8932ec64a52ca132a7fadcbfbefb026d114193cb56798bc94cf5678955"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/32768-33023.pbf",
+      "size": 205897,
+      "sha256": "712325b09231cae82c6a6e91d68dcfb94c2513852291d26e26ced564b30a8218"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/33024-33279.pbf",
+      "size": 206426,
+      "sha256": "773ddcb7918ab0288c9713106c07ef3766ba3f4e980f1c2e25c8f21699e584f4"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/3328-3583.pbf",
+      "size": 53048,
+      "sha256": "0413b093c65466ddde6d2445d3938dda4a63042f8bbbbc3ab5679e59ef9dab86"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/33280-33535.pbf",
+      "size": 206588,
+      "sha256": "1a4eabcfc35698a865d926402136f99f07fe4bf4f2bf49abf257adb8cb989ba2"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/33536-33791.pbf",
+      "size": 206672,
+      "sha256": "1bea2d153f61ab1ddea87d8d21362403cedd87491dd39a1d310e7c4d1c4ef299"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/33792-34047.pbf",
+      "size": 206643,
+      "sha256": "d6d11354647052a5f8bbe6a7cb1c58966491c9e47b954a78a21cb9ee08fa33c6"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/34048-34303.pbf",
+      "size": 206952,
+      "sha256": "b8c83d57362346bce3826276f34d0f18434a3a7852a88d8453dc1caf15ba9943"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/34304-34559.pbf",
+      "size": 207146,
+      "sha256": "205a205e1755cef9c1a6a689fadc2c82bf5c6b35495b03bf19ca625d36f65404"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/34560-34815.pbf",
+      "size": 207320,
+      "sha256": "54b928c9b5f9da444cff32870cb195dc72a44bfe591dfc4c7e645e6552433a15"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/34816-35071.pbf",
+      "size": 210213,
+      "sha256": "e252df2ed28e2303710461d8a94fd816f423e47012d52bcc4b4a439faf769cdc"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/35072-35327.pbf",
+      "size": 210197,
+      "sha256": "68c0141318735de4bcac1e5a8b483a77e513fb7950df587ce76a0c16fd8f6526"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/35328-35583.pbf",
+      "size": 207236,
+      "sha256": "4904bae2befc6183667ccbe67fa31d546fd875cffc11b363cc13d4d35c647ef9"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/35584-35839.pbf",
+      "size": 207434,
+      "sha256": "19ff4a118af6fa424d458d8efe2a671e791b57faeeded4e60827ac9781683b77"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/3584-3839.pbf",
+      "size": 58727,
+      "sha256": "37b3e94dd07852ff3524306d70cc5c593854d79094b960a088a866e9c2159127"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/35840-36095.pbf",
+      "size": 208373,
+      "sha256": "40121bc6a3806c8464ccd3dbc8c1f27f6aded1fde88495f579cc1baeac705b2e"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/36096-36351.pbf",
+      "size": 208608,
+      "sha256": "39ebb522880ea5304f94efdc28ce914b9387f875f707d873cfb9c8d82ed5b900"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/36352-36607.pbf",
+      "size": 207905,
+      "sha256": "15b7c16355f902891e9dafb2bb916bef7d5a69655d31d2a35289c432df83d922"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/36608-36863.pbf",
+      "size": 209449,
+      "sha256": "a369eab7c281ac65657c6a68d4b8ac277a59d08386fad17256aa3323bec87df4"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/36864-37119.pbf",
+      "size": 209651,
+      "sha256": "e8d90e25ba1e32e45d85b1da5582f9801a33c9a82772d3c5dede74eff8ad1de5"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/37120-37375.pbf",
+      "size": 206808,
+      "sha256": "533d6f21e2010ed794f8cfa7ed72d904e8ae9be1aa2f8aa47a7e38d548e836d5"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/37376-37631.pbf",
+      "size": 209917,
+      "sha256": "39e08c844bc6bde3ae06a2e25cd91626a027ada6543e44ce1f2fcd5676548a61"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/37632-37887.pbf",
+      "size": 210108,
+      "sha256": "58297e44fe14026c8467bff8cec05beb690a92af9bb1b6a7722da4de7747f0c5"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/37888-38143.pbf",
+      "size": 208947,
+      "sha256": "e9ad7d99eda6fe4faa39b51f114ac738d68a89aef14181ddcb8be82ebfdd4e61"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/38144-38399.pbf",
+      "size": 199789,
+      "sha256": "193c27eb9ef3180e5a0bb664400dfa69395ecad2e4aee317495a56cf796d8b6c"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/3840-4095.pbf",
+      "size": 108377,
+      "sha256": "2963b554a615eaa7cee09f5aca5a0513f71156010e1ad2caf519bbe7fd628c36"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/38400-38655.pbf",
+      "size": 201212,
+      "sha256": "b8ebcf899f75773c31982e0531a08da35a05c25ed112aa282f111aed95d746b2"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/38656-38911.pbf",
+      "size": 207091,
+      "sha256": "59ec6a87d204fbdedafdfddc2ecee0c81a06b4a32f75407d7c2fdac3a74a4f90"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/38912-39167.pbf",
+      "size": 209354,
+      "sha256": "e5af2fb2fe3d9261e959be311d422db00503b8ff4ae6c1b55e629a6d19dbc8f5"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/39168-39423.pbf",
+      "size": 211844,
+      "sha256": "4ad7d0d230a0dff86d224ffd52179cf0fec863d2c54ab516c028646b882d7f9b"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/39424-39679.pbf",
+      "size": 207343,
+      "sha256": "0ba6920b5b758efb1852bdcd5745db1b015426dc9cdccacdf3777099eb074c2a"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/39680-39935.pbf",
+      "size": 208340,
+      "sha256": "d14607bc262ed60daf6262321bf93b30a9b56c15da918010396cabb339345cf3"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/39936-40191.pbf",
+      "size": 208219,
+      "sha256": "e454ae4b9f0ac2e7d61690853c0fd340b2c0a3eb638fd9625f93b78bad60f272"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/40192-40447.pbf",
+      "size": 207993,
+      "sha256": "fcf7dbc33bbdc5059b573ccbb7d69b047e15d5b2ced787ce6c6e00732b47a5e4"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/40448-40703.pbf",
+      "size": 209487,
+      "sha256": "6f1632b3794409ef703bba18f1440087f7846ab64ea55b34ac674b6aa80a286c"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/40704-40959.pbf",
+      "size": 167598,
+      "sha256": "b1d0ecb74b5c582df0184614e4126640bd92dac8c376970de90f2c176849d484"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/4096-4351.pbf",
+      "size": 130310,
+      "sha256": "23a87dfef6047d32102973aaf736fa4203eb66cbc3c4f46871a80d410efe2ef3"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/40960-41215.pbf",
+      "size": 567,
+      "sha256": "799f79bf93936c7a85d76278bdcec79d818f26cf17977aaf4225d4af2339af46"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/41728-41983.pbf",
+      "size": 567,
+      "sha256": "d163598e493a81d04c4a666c02550904667c1d334dc1a855cfc88786ca39245e"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/44032-44287.pbf",
+      "size": 188648,
+      "sha256": "ccf845f10ca1600028328b4ceda824644ada24c18c6cde06385a98b4499308ef"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/44288-44543.pbf",
+      "size": 186936,
+      "sha256": "fdec657ea200836e5c73722f821f024463aaf55ccd1f986a1471f03d346a1a90"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/44544-44799.pbf",
+      "size": 187896,
+      "sha256": "ed29ca4f61cdbccc32f4d624c71cf9fec24c1de14b1d5ef30a0e2bd217140012"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/45056-45311.pbf",
+      "size": 184759,
+      "sha256": "7ac8f08a1aa8ea731265be88009da824af2e7c4dd53467c817680dd1730b53fc"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/45568-45823.pbf",
+      "size": 186520,
+      "sha256": "d6fab8a3d62210729f186075039f84e3877f4ae020b550a13178c5b90e148c49"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/45824-46079.pbf",
+      "size": 182778,
+      "sha256": "f25f92a4cf1a0bb4a137927abee307fa619eb4e1f46e4e737da4d9284282045e"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/4608-4863.pbf",
+      "size": 136131,
+      "sha256": "031fb63730ba574e0b3f22b5391da04703af4b72818c789ccc99086db329dba2"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/46080-46335.pbf",
+      "size": 187175,
+      "sha256": "935259f4d011db277993a0ad3586180f94ee9a243ffa8fbb54f7239ecec1de38"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/46848-47103.pbf",
+      "size": 184002,
+      "sha256": "81c1df3e0883fe8593054a2acdf1c0a68b31b6886409dbed9b1a87e33d5b840f"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/47104-47359.pbf",
+      "size": 184902,
+      "sha256": "bc5ba4f58dc73c275393c939224e53d20330acfcd6ab1d88e2972f753a64ca2a"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/47360-47615.pbf",
+      "size": 184864,
+      "sha256": "3f500694fa006358ec3dee584aa0d42373fa65591e5e3b683e1040d3edadca59"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/47616-47871.pbf",
+      "size": 183674,
+      "sha256": "6c292d85c2c31b56591d49d2d60be6d6dd48a572337e759be69ca333ac6320ce"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/47872-48127.pbf",
+      "size": 186581,
+      "sha256": "b54a5e09e3e2ee0479efa186581486c7a57bc3e082c2f18f17a73319a83ebc07"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/48128-48383.pbf",
+      "size": 181154,
+      "sha256": "abb6a41bae5d0fff5471a7c98e55f1547faee56fae69b79752b253c69ac6ccb2"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/48384-48639.pbf",
+      "size": 188326,
+      "sha256": "57be77654c71f67c8734ecacfbb5d4b6fabc4616d2e0fb214aa84d9f5860f27f"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/4864-5119.pbf",
+      "size": 81716,
+      "sha256": "d274852473386a9e4b66fb32a5696fe34a36a02d59d102655cbe58f2330460b3"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/48640-48895.pbf",
+      "size": 187764,
+      "sha256": "47c1c7df1e2c8e960861a695544520d935942ab23b69f02a17190694998a509f"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/49152-49407.pbf",
+      "size": 189225,
+      "sha256": "c69d36f002dd634977da8b897450f51bbc9330f91df3826868bc68264b58b94b"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/49408-49663.pbf",
+      "size": 188182,
+      "sha256": "266a39f75348d485d9d090c504b2ba32763262f012d080864be5848862ccfd3a"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/49664-49919.pbf",
+      "size": 188600,
+      "sha256": "4473d67790457fb2c2c78d246529e2c8cafdb3e8b04f1d0e7c28cd5eaebcd06a"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/50432-50687.pbf",
+      "size": 188376,
+      "sha256": "2e11dac2e4b06840b2320794169760274d6626b3e205f9f8cb0a9107e7e60288"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/50688-50943.pbf",
+      "size": 189353,
+      "sha256": "770fa3f68ffb8d5fb976f69e952127b510e88bcaf95748543f837981b7e55ea0"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/50944-51199.pbf",
+      "size": 187980,
+      "sha256": "0b05af5c24cae5f56746b2a81fe3349ca9cc388391ab97897ee27afc6baa89c2"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/512-767.pbf",
+      "size": 101458,
+      "sha256": "c0f1fee1a46851224f1c962c6f3d35bd450122125ed18870f39e82d0b962a545"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/5120-5375.pbf",
+      "size": 565,
+      "sha256": "31afc3659ff9f96b2f1f347e9e6be8d715578de859efa8a9cdd82a1cc958a690"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/51200-51455.pbf",
+      "size": 187472,
+      "sha256": "561c8a9174ea002566923f23866be0a8a1d03415e22360a1483153b0202d8991"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/51456-51711.pbf",
+      "size": 187424,
+      "sha256": "002d6f4d4bf80c2e3b632fdad09bf967354fb31c965b49d5c328888cf3f2be2a"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/52224-52479.pbf",
+      "size": 188413,
+      "sha256": "880f87408b11f94b2d3009e9ead040ee4c3da7d2ed37438f6854d2614e5ca3b6"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/52480-52735.pbf",
+      "size": 189203,
+      "sha256": "edb7892c81bc1085fee57de90f8ed372887870305da0f0f464be7058d17f2034"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/52736-52991.pbf",
+      "size": 188696,
+      "sha256": "b7c723f38ab5ac396227cfa3e438d1f40241c7a767bc99d7f92bd02f3a0e5899"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/53248-53503.pbf",
+      "size": 184781,
+      "sha256": "991bd5cf4a8c77d18716980b5dc2faba9add433c1f4b7cd3fb86ba6ed4728950"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/5376-5631.pbf",
+      "size": 565,
+      "sha256": "ed475c293e783dc0834e53d357496c56fdaeb3056446892e72a675ae889eb50d"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/53760-54015.pbf",
+      "size": 185656,
+      "sha256": "0b568998e8de7bdb966bd4395a2901f1a04ffd92b207eb26dda16ee5d722f31e"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/54016-54271.pbf",
+      "size": 187750,
+      "sha256": "27f69af7159c1c4a007c0ec35ae91eed44478bdc24eb9edba44090e586b1eb22"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/54528-54783.pbf",
+      "size": 187707,
+      "sha256": "4ce6075a54aef186011daf295fa40e1727fa56585e7adadda42ca7da8bde4123"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/54784-55039.pbf",
+      "size": 188922,
+      "sha256": "97b836751084f7f78aea5bec996603cb9e5e7fbd1ea778d46697f5b8afe6d072"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/55040-55295.pbf",
+      "size": 157189,
+      "sha256": "5d6c7b2f2ea6601500883114c2354afcc110473ada36fd6adf85eb81315591c7"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/55296-55551.pbf",
+      "size": 567,
+      "sha256": "8a9168de12b0cde4af1c0e12cbcc4da388a2e793e8569b45d275382d1f94c6d1"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/56064-56319.pbf",
+      "size": 567,
+      "sha256": "9b56a5817c86445c3cf7011a64cddae1a2ddd83064b9fd82d7ee1cb66e64aedc"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/56320-56575.pbf",
+      "size": 567,
+      "sha256": "34b1c47b44497cd3247f422fc1175c3f12ba101928b5e28be0dc765f4f3b874e"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/56576-56831.pbf",
+      "size": 567,
+      "sha256": "ffa578f3740fb477167a75c1507dad9687be14d5e06bf953e3b3d81569ca1e69"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/57088-57343.pbf",
+      "size": 567,
+      "sha256": "80f999de581c9f632ad1c9b0615628c286b97e2723c0e95e019e917be123463d"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/5888-6143.pbf",
+      "size": 43014,
+      "sha256": "8577a2773f762bd490035cddd13965ec14ab12f96689af1f0c91c26cb4c49d52"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/6144-6399.pbf",
+      "size": 78426,
+      "sha256": "cdac6ae85ff6a5712de64a1001c173eef363881060cb7d629f52df945ba801c1"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/64000-64255.pbf",
+      "size": 88258,
+      "sha256": "f883d16bc8a2f8f703963a7739f150fc06037789e1c1c7991bbbcba8fee650ce"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/64256-64511.pbf",
+      "size": 99845,
+      "sha256": "8c2909ef9d083b70c359fdda661ec854c1543aabc11f6770898009d26d2053da"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/64512-64767.pbf",
+      "size": 196164,
+      "sha256": "aa29ada46b37f802b8bcd863960fbb34d6a4d2d235ec9b1ce2c41f5f011d9c59"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/64768-65023.pbf",
+      "size": 220979,
+      "sha256": "dd7fa6f415c214f2ee2a08216749214b0723d67bb0709cb3d8dc3a3bd43009af"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/65024-65279.pbf",
+      "size": 83492,
+      "sha256": "f85c0c4160e8766ad18ec6712aab38b7e30c11a6f63734b656e3c7cc0e4407f0"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/65280-65535.pbf",
+      "size": 93105,
+      "sha256": "9faf5847a5df1bc2a78f600ae841fa4c2eaf6059b836399a45e95ebdd7c16755"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/7168-7423.pbf",
+      "size": 12276,
+      "sha256": "296915f119ebbed976dfdb5b1df6065f98dc618bac69034d6d2b833d164547c2"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/768-1023.pbf",
+      "size": 78937,
+      "sha256": "3c7ea7f7b52a97c75bfc123a303badd4fd7c5eaa1bfe66ebaba38cf3fce16ee7"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/7680-7935.pbf",
+      "size": 139322,
+      "sha256": "abe63a2773dd655bfbcd400b431add586e3da5e6e4801b74774e4a089a56dc29"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/8192-8447.pbf",
+      "size": 35678,
+      "sha256": "f31c3c9dcacbd7f9760462c0af5017d9c9f2a9543ab4938476f7a13ffabf0acf"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/8448-8703.pbf",
+      "size": 44216,
+      "sha256": "4ae71fe9df8ddbce5fa437d5d9db6846cdd0fa3dd11d2aff621b62f6a14f4701"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/8704-8959.pbf",
+      "size": 41607,
+      "sha256": "19bd9837e589775cee63768618a36e354899ee3ff88c3446823c8fee1833660b"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/9216-9471.pbf",
+      "size": 126506,
+      "sha256": "b72e08929b930947eaacd8d6760bdc580553b278d1d6b841f887dfff40532357"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/9472-9727.pbf",
+      "size": 110922,
+      "sha256": "5bb4a9e9e593ecb7f855b56394dd298e60e4709b85e8ff199bed537a3337d63e"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/9728-9983.pbf",
+      "size": 34829,
+      "sha256": "255e60b6d4b033331e772f07bafb4f8721fe9481becb9f95de548bc7d4ce548a"
+    },
+    {
+      "path": "glyphs/Noto Sans Bold/9984-10239.pbf",
+      "size": 14359,
+      "sha256": "156c0b113a712dff5af8d781b09df257cd56b4ed5b98e53ed4b9e8b9decc0364"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/0-255.pbf",
+      "size": 79907,
+      "sha256": "ae9c8894b4d2b6297da76a2e875685046f1f037f1a571ae006160a5540406086"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/1024-1279.pbf",
+      "size": 127434,
+      "sha256": "de4d66d14fc94ea09e2c4f7f61a8b63a88beb0ed9a493136aa1c7e770a85bd6b"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/11008-11263.pbf",
+      "size": 3334,
+      "sha256": "9e70609851e46be6ac789112946a08006b27144cc686ed996f41d676e55e229d"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/11264-11519.pbf",
+      "size": 10649,
+      "sha256": "0a114bba4697306fa3f117d3030eba78cf754c24a23dfeda0d3c8f4edae1ff6d"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/11520-11775.pbf",
+      "size": 66618,
+      "sha256": "d07115794e20746cca5727f0d7578016544f3f05f500497e221c301b228ee15b"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/11776-12031.pbf",
+      "size": 73736,
+      "sha256": "bae7e99bb1f75c2eeba81351042ea8504b811ca5ce4fb5fd0bf916c4c112e341"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/12032-12287.pbf",
+      "size": 167695,
+      "sha256": "28458e419724bbae83e3cb78ef62696da31593c97a2d2f2961fc5f50ce2235d6"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/12288-12543.pbf",
+      "size": 147461,
+      "sha256": "bff5e9355429f3c9a2fcb7c5a41dbb936317a919bfe61fcf43383208d3b34986"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/1280-1535.pbf",
+      "size": 77333,
+      "sha256": "14a0f68d5bc649c990428eeff1e5e1f122d6cc358eaee5042fddf50fcbbcbceb"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/12800-13055.pbf",
+      "size": 202641,
+      "sha256": "fb5c6a8a8076ebfcf07c895604691c27943705034f8defe1ce5f5e9a87b01bbc"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/13312-13567.pbf",
+      "size": 200495,
+      "sha256": "8da8a50beef2024144bedb5a35458c024d330e423494ec83b4d7841b8734be0e"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/1536-1791.pbf",
+      "size": 96132,
+      "sha256": "31586f948723b4dbe2e22a2e7a7996b6323efbe21a37680930e0857fd6a3e305"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/15872-16127.pbf",
+      "size": 203490,
+      "sha256": "3ec08f311cd64d08c9d886679fc52a6719c34e35b1be0e10c4fd9b0e9dad152e"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/1792-2047.pbf",
+      "size": 25427,
+      "sha256": "7f0d7bc4ba1b658cbb5e340b925cdcb8890713491fa383f8f506ba8169cdb754"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/19968-20223.pbf",
+      "size": 192357,
+      "sha256": "77a2b3800054248b93c433f2f7bd32e87de99625e454334b30b84c9084861427"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/20224-20479.pbf",
+      "size": 206423,
+      "sha256": "2aa2b0f2bfa130ac02b89ae576f836670db810a4c39ef71b11062588facb7bf7"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/20480-20735.pbf",
+      "size": 206395,
+      "sha256": "cc1d6ae6c8a2ec0dfa6e324aee8a123067059a54317893a55b1b9f79a2554be4"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/20736-20991.pbf",
+      "size": 200016,
+      "sha256": "afc841aff1e90a25162c348ce8e8010e31ff7c8f28583e715effea4cfad98d30"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/20992-21247.pbf",
+      "size": 198854,
+      "sha256": "99fd86b0d5bfda77c524d3f43f45265af770581e80865ec3b3f3dc2234e7c45f"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/21248-21503.pbf",
+      "size": 194786,
+      "sha256": "05d48b29e22dde42c29bb3b2204a2958d8091673cd5bbc3b8b4b1f03e0aea655"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/21504-21759.pbf",
+      "size": 195476,
+      "sha256": "b2d2f29e9d10b5656be77cdbd8197cdcf657747ff181b247d1936d4c66a854a5"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/21760-22015.pbf",
+      "size": 196747,
+      "sha256": "87b86cfd7218fe4d970bef61cfd0d4f964dfa6cdb677a877fafc22ab96612567"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/22016-22271.pbf",
+      "size": 195371,
+      "sha256": "257b05739e4aaf5cdad42cb3f7b61ac3c76caf512d1622ff052c9a7b6bca4584"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/22272-22527.pbf",
+      "size": 200782,
+      "sha256": "d05b2bc62cedb91fe08366d93528b85c91ade47058675f0132338229d4c6cd4d"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/22528-22783.pbf",
+      "size": 202931,
+      "sha256": "4fbdaeda958cc8fc22c8d7383d32c4cced2ad6631ffc1ed65a690d2ff502be15"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/22784-23039.pbf",
+      "size": 204969,
+      "sha256": "51f3e043d959c9e4d197073a2e30b623c84709fb406b6dc00c79583b6bbe83a5"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/2304-2559.pbf",
+      "size": 100477,
+      "sha256": "0ce0d9343094b4eac6d714b564125b2034853ede23da3da2ed1efd3d0ff92635"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/23040-23295.pbf",
+      "size": 205584,
+      "sha256": "044986cc7d859c1cf6c448c3fefa4c41051e0db0ed921a99ceec022ec5ab0209"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/23296-23551.pbf",
+      "size": 202278,
+      "sha256": "63d241fb6f5b54df82694af49eb04f295ca40ab2f7fc268214514c97758fae6c"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/23552-23807.pbf",
+      "size": 198189,
+      "sha256": "5b791cc7b7f3b6edef0cabc861bdefd7b8995fa8976c0b4a1c110b15e72dabbc"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/23808-24063.pbf",
+      "size": 199145,
+      "sha256": "fffc2093afe88fe35b1dda0869fe1aa225df1f384c72e7e718bb7cdb8c1faf0a"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/24064-24319.pbf",
+      "size": 202649,
+      "sha256": "d58801e06858869d45ce38903f7f26a1f93fe40af9c0aa74bc7a183e57b0fc42"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/24320-24575.pbf",
+      "size": 202734,
+      "sha256": "1aa92fe75136558e7c499bbe951ef8132dd7315feb3198c878486bf19a468c1e"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/24576-24831.pbf",
+      "size": 203857,
+      "sha256": "9c309f1c4f347bc539372b6e1d691b1079e97413b33e4eb28c3da8995e2d53c6"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/24832-25087.pbf",
+      "size": 204113,
+      "sha256": "54999cbba454c0c27dcad6cd5511bd84b6b82368ce95655d10695a1f32802b52"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/25088-25343.pbf",
+      "size": 204411,
+      "sha256": "44af3d193bd354faec490150c5f9d41a7f27bfc22453edd2cc77b8e7230fe689"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/25344-25599.pbf",
+      "size": 205527,
+      "sha256": "f098066d10271dee62c45292c0e6a21586d6ad6e9465024a0c4e0e318e71d2a3"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/256-511.pbf",
+      "size": 132406,
+      "sha256": "82be737a8568cc3ef2beaa3f137d8698740ffef1b880076f21c2796c9e0c8c00"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/25600-25855.pbf",
+      "size": 205947,
+      "sha256": "37e36e22f6696d0cd2bd0199e1689d9f924e7e7221d5295f3fa09b79e3457a16"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/25856-26111.pbf",
+      "size": 203967,
+      "sha256": "9c7c60e890b6ab52bf5c196b4cb795d339953563acb8cf71f3dc8e19225737cd"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/26112-26367.pbf",
+      "size": 195891,
+      "sha256": "41feb637792d9dcccc73a3f2b134bd767233f8c9725e3adbf1dd9e7ab93994c0"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/26368-26623.pbf",
+      "size": 204359,
+      "sha256": "da03606aee57966a7c222a3b8bda75e6c28632e9f09af92a55f53c06ea8937d9"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/26624-26879.pbf",
+      "size": 205499,
+      "sha256": "ea2ed29ae19f14fcd09d1fa8b3c9799e27d7708c7ff5a2ec68bd72d5b39b451f"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/26880-27135.pbf",
+      "size": 205751,
+      "sha256": "a23f37edbb54a8e755975126bc5415b64b3f850ea969c6a8c0eec6f28c75cb10"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/27136-27391.pbf",
+      "size": 205919,
+      "sha256": "7899d6b14dc04e783c482c26d26f2e736ad702ceeea5eb80b0c676915077bec0"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/27392-27647.pbf",
+      "size": 203889,
+      "sha256": "5ef02a901ee7b14878c92c73be199f86f4a25bc24f9d2049d4d3370d6e646ab4"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/27648-27903.pbf",
+      "size": 203878,
+      "sha256": "d9b8587cba637d5aafe89c7c67c96b674e5833dd4c036c6616d96fd3216ba270"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/27904-28159.pbf",
+      "size": 204716,
+      "sha256": "21c53bd9b538566d97ce9a5c023491bb70b2c0511d9a41ef8824f8406d1fedfd"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/2816-3071.pbf",
+      "size": 89734,
+      "sha256": "ad4367e8f9b624aa15d886272cb18c05a1eb29baccc7681ba2c8d8916c75f591"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/28160-28415.pbf",
+      "size": 204995,
+      "sha256": "6c02a51d9317f2d9e521a89e1c57e3af38e0e810321d922fb811e1519a9f3f48"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/28416-28671.pbf",
+      "size": 205276,
+      "sha256": "e813b8f00b907a19e4a79c05c6b5bbd264d612051442a92d65f8c83f53326cb1"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/28672-28927.pbf",
+      "size": 204967,
+      "sha256": "daaa97a2f16cbe44f7732989930ad40f5bfc45b59f1f0e5a2613ad84f7e11822"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/28928-29183.pbf",
+      "size": 204943,
+      "sha256": "4bccc315f4ffe87c60bda6c1fdbf1440bd9c88ff1ac331d509b5b08882f0b9cf"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/29184-29439.pbf",
+      "size": 203953,
+      "sha256": "e6753736eef3c27a53d56d25051a8c2c74e9c39489acfa31dcf08c2c23004d59"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/29440-29695.pbf",
+      "size": 203437,
+      "sha256": "a9650a62284cada636346dbab2e9f0f9e0418bb7ab79138cd0a83dc977a4e121"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/29696-29951.pbf",
+      "size": 203245,
+      "sha256": "70b3eb2222309051f3385aa33f7576701a66f561ed164530911175946ab8fab5"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/29952-30207.pbf",
+      "size": 201491,
+      "sha256": "545f94ec5993be53434f8786fd428aed2d471b814e215a3b5bbc32de0f125d0d"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/30208-30463.pbf",
+      "size": 201912,
+      "sha256": "c6841d568901d1a147e031413039c63eb85bed4d0fd83d15d81052286c68e501"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/30464-30719.pbf",
+      "size": 197226,
+      "sha256": "51f763a955d57cd31adb8deb878e011aaf6db310cd78495521d8fcb49af6f4f1"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/30720-30975.pbf",
+      "size": 202965,
+      "sha256": "1594dff21abd638b527eb6349eb93650bd07d96625aad3a36398a7db66c6ed30"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/30976-31231.pbf",
+      "size": 204525,
+      "sha256": "ba2ad7ccc7a3b693806575a6770e67b0c92b13c4df7dfa1826cd2a44744a6826"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/31232-31487.pbf",
+      "size": 203881,
+      "sha256": "4e5d1a73faf1d08b7ebc4244c1b1133f8489d532ef2f50d8238c3c94136c9eb2"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/31488-31743.pbf",
+      "size": 205471,
+      "sha256": "23d902ad8c5d4acd3c54f69dd972276be6b4a2bda3511dec2b0a6c35c859428c"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/31744-31999.pbf",
+      "size": 205369,
+      "sha256": "99ae9658b0a2c5f1ccb3baa92563150a834e3b8fc0e2b7751eb9811939647f3a"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/32000-32255.pbf",
+      "size": 204466,
+      "sha256": "d32c981bd937f6ac1f9530ba1009d3fb6a6e0d320a9eff3608695da31262db20"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/32256-32511.pbf",
+      "size": 204618,
+      "sha256": "d002f04897e5026ea0026f98b7e75f132e85c6060e69227644eda510478a8d85"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/32512-32767.pbf",
+      "size": 200303,
+      "sha256": "30335393bc06c09b1249a8be0970729052b2bf16dab5a41672bd7a5ac73764b3"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/32768-33023.pbf",
+      "size": 203054,
+      "sha256": "78a9004921e0f7b42aaa4ff62405d7a4919b853558c16edb72eb0b0b5b51179d"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/33024-33279.pbf",
+      "size": 203557,
+      "sha256": "8abd017a25a5cfcfcdeb3022f7b052cd63dbfad8fd1c8da35a4bc082d3a58a24"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/3328-3583.pbf",
+      "size": 50510,
+      "sha256": "4bcd8beaba1401ccbb8ce4a343ac25dfe593dbff8b2150747ad0e8bd3976d613"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/33280-33535.pbf",
+      "size": 203146,
+      "sha256": "2328c179966b4ed75f6af4c9b999380202893112062e2f9c28d4c005c4d3954e"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/33536-33791.pbf",
+      "size": 203912,
+      "sha256": "43b11d87349fda5860fd8da46306785579cd6d9b6227701596b927da889a69ea"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/33792-34047.pbf",
+      "size": 204214,
+      "sha256": "9e7a94811c604f393c24203d26e56f06dfc62525e2a76c7d9360cbbeb2ef8869"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/34048-34303.pbf",
+      "size": 204967,
+      "sha256": "4a7f0817a5b08fa32e8db050285ec90b429db2c7f58ecef2c3658ba233ea8779"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/34304-34559.pbf",
+      "size": 204129,
+      "sha256": "0c818bcdb3e9f1992221dfcd2ab6dec4ef4e0703ac4784ca6d0d86aacc86f369"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/34560-34815.pbf",
+      "size": 204664,
+      "sha256": "6ac519a881ca258b0b94b1b19b24788046bcf28f5e85d5191e928b9b871fee7b"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/34816-35071.pbf",
+      "size": 205443,
+      "sha256": "fc65b55216e08e86843a928c6c3afaacbe13b3abd10b340f6e7dafafefeaac34"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/35072-35327.pbf",
+      "size": 204324,
+      "sha256": "5bfcbf63c0914107f14cf3379917d970749ce2c54c9655535fd52a393f163d26"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/35328-35583.pbf",
+      "size": 204970,
+      "sha256": "dd11dbec96b9a33f18a3264f0e5bd911ea0869565abb00518f92d64274ec5615"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/35584-35839.pbf",
+      "size": 204505,
+      "sha256": "4863ba143b014fdaad4a119b7385bb96288f99994d168e4b0a7c4f771d7abf2c"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/3584-3839.pbf",
+      "size": 54924,
+      "sha256": "71d48c9c50e5b9f18ca411c30c2dc94c6fa08ae5c4e1e93249ac11812865b26f"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/35840-36095.pbf",
+      "size": 203740,
+      "sha256": "081fef1962f7b9adc4454ae128c94d02874c36869e563218220b1512ff1835f9"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/36096-36351.pbf",
+      "size": 203996,
+      "sha256": "42ff1f374f6816dc0a827deef8b87f9c7dc3f2cb3d3e47c8d0d4540d1619aad8"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/36352-36607.pbf",
+      "size": 204249,
+      "sha256": "95cf3c10969dcf09669250b9f409f4ed080e513fab5ccca22b383074f8aaf416"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/36608-36863.pbf",
+      "size": 205640,
+      "sha256": "31ed89fb550b3d3bcb5e26d0ba48303519feb0f5fcd5e6691b7c85cd07f52896"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/36864-37119.pbf",
+      "size": 204670,
+      "sha256": "68c41f0f4d20b57135ca05abda93121e47e8ec8772f9506e46f48ee3076581fd"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/37120-37375.pbf",
+      "size": 203527,
+      "sha256": "56e48f65b1b31ae06e1f8f95f2952beeedea8f2f83f182cd84019b426f0a6171"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/37376-37631.pbf",
+      "size": 204127,
+      "sha256": "ce472bc58257ec3dc802d6b6e7783f68ae80b253d2dedf4435c1909db4c127b8"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/37632-37887.pbf",
+      "size": 204911,
+      "sha256": "51c9bd5b6f14e2faf213735ba10d9f5a9cb7688d28eae8cdd79f238055c176ab"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/37888-38143.pbf",
+      "size": 204781,
+      "sha256": "61b69c97f38c7cab5e9b505d693d2c70aa0deb039085d83574cc55d19d17736b"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/38144-38399.pbf",
+      "size": 196048,
+      "sha256": "3490264e0bcf337f0c9967daff5615aeff2c062be99154ac1ed9afd31e393f19"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/3840-4095.pbf",
+      "size": 101088,
+      "sha256": "01778f1f6bce3a7085a59dec52056d78891b77ff73f2e3deb8fa45cd0a676e98"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/38400-38655.pbf",
+      "size": 197642,
+      "sha256": "d53c74498c787a24a52e77b0840500822944290b975a8e9b24826966ef0a023c"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/38656-38911.pbf",
+      "size": 202211,
+      "sha256": "c2490ccb0b9f762543fbec5e0dd7b83240fc549939455ab61aaa1f16881caaff"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/38912-39167.pbf",
+      "size": 203186,
+      "sha256": "55f60c4bf150a13a2eefb232864b9844e6343e048773e6115abd2874dc4ad182"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/39168-39423.pbf",
+      "size": 204344,
+      "sha256": "1ec69136f1083befa10179b08b0b3e17a3dc76a073b72298fa2851f9a6ac6c88"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/39424-39679.pbf",
+      "size": 203471,
+      "sha256": "1b013ca49dfe8e3a7d0bc3d10c54a3fde8456b44cb45b4c96343da2809a16de5"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/39680-39935.pbf",
+      "size": 204744,
+      "sha256": "5d4551994747500dc93afca5125c72d98a4ed990147d2e0586d89b44b8ce065a"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/39936-40191.pbf",
+      "size": 204859,
+      "sha256": "ee820b4e80f4e82cbb8dafa8ebfb4fe9a59b89f3b80f093398896c427ea786e7"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/40192-40447.pbf",
+      "size": 205474,
+      "sha256": "d8dd01216479bca20dcce3f4b21415c6b7b34ed2781722cf5e1f713f0c11bd12"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/40448-40703.pbf",
+      "size": 203859,
+      "sha256": "d3acff35983cdd37c32998d207d05c67de167407db3b7a4df51076b6a5bd2983"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/40704-40959.pbf",
+      "size": 164355,
+      "sha256": "23cfe4125ed33dd94b0ceed5008f325db9804308bb17aa73ac533d74aec03530"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/4096-4351.pbf",
+      "size": 126417,
+      "sha256": "16c7d15750d53f661c253523e6ceec28a59806e621a0422d00f12e0297ef4d67"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/40960-41215.pbf",
+      "size": 626,
+      "sha256": "847fb1b570b2df1e2d00d65f3e5fa8be21291ea8a826b522fb5d41aa662e21a2"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/41728-41983.pbf",
+      "size": 626,
+      "sha256": "fa2de4e363ea60f25f3b73c6fa18cb894a48ec0a35031489168e938a3ae1f095"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/44032-44287.pbf",
+      "size": 181606,
+      "sha256": "05a51655e37a1269d4d76dd1aad92e8b7ba83e01986de6ccad1694e3e4bf0a13"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/44288-44543.pbf",
+      "size": 183332,
+      "sha256": "70dd756093925e79813ebe78678638aa98f15743cff170c7cc38209660e570a5"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/44544-44799.pbf",
+      "size": 184332,
+      "sha256": "4c38b42ee8c1ccce469bcf918153815379b99f5a1ac6f821039bfddeb277f418"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/45056-45311.pbf",
+      "size": 181389,
+      "sha256": "a504fcffa7f0a81a41dffc7b82b12693446c6b0aca443a2fe46fd768160eb7f9"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/45568-45823.pbf",
+      "size": 181897,
+      "sha256": "6ed184de3cf64cd3111fb86d013b0f18bf9fcc9f9c885cd0aefd7c553fdeb6b9"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/45824-46079.pbf",
+      "size": 179607,
+      "sha256": "ed08da0ac95e28226db59b840af668a39423b79e02c5e00c2d2e74b3a2088bc1"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/4608-4863.pbf",
+      "size": 125724,
+      "sha256": "efe190ac314475690d38006145ad91cdcc4ea352f8c48ab1ed60275698a4f612"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/46080-46335.pbf",
+      "size": 183734,
+      "sha256": "907a769d16a31dc2fabdd23f8a10d0ebb8933bfbf40c4422953943f4e8d2bf04"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/46848-47103.pbf",
+      "size": 180401,
+      "sha256": "79fda656bc9d87efd02665df463d7d5fc6fe5e06c51576eae3db22b9697d0c67"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/47104-47359.pbf",
+      "size": 182056,
+      "sha256": "3648fe3f35d11b09cb85aec7477f32564788df3c75d951ed1ac7b547106cfe60"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/47360-47615.pbf",
+      "size": 181637,
+      "sha256": "6fbc3ac59713b654c22d2712d83532f2fec3f52704f0dac973ca15657a65409d"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/47616-47871.pbf",
+      "size": 180724,
+      "sha256": "e927beb4792b6759e14973b2b47d018d7c70927f84764fde783ac706f5fc7c31"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/47872-48127.pbf",
+      "size": 183065,
+      "sha256": "b1bc3d8732d5fda70e4c9b6015f0f2c3ad05e26d54a23310a80c8b6c523ae639"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/48128-48383.pbf",
+      "size": 177948,
+      "sha256": "6a9c36552a58f9d2c7fccf070924efc6d37c4b93b404132fecf1026d4d492f31"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/48384-48639.pbf",
+      "size": 185517,
+      "sha256": "f6525cefe87eddc4ef67fd32ba3fd5ca5d0f74270f8ef0aab3201e9ac5b6904e"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/4864-5119.pbf",
+      "size": 73522,
+      "sha256": "bb00cd697bc28c820302547bac5034df6c9a134e227741a128922b80520b3329"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/48640-48895.pbf",
+      "size": 181036,
+      "sha256": "dce78c75ec269223ae9549e41c7f49abb786231c360d8b010fcdc247d7d20a7c"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/49152-49407.pbf",
+      "size": 184379,
+      "sha256": "265e4cd9032ce5cb4404f72c8f2dc34b79e7871f2eca0c07d88a560f97fd0645"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/49408-49663.pbf",
+      "size": 184300,
+      "sha256": "64bb267fb062f5538c6cc5db0802cbb544e4851090701023dec4c832c02ad03a"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/49664-49919.pbf",
+      "size": 184306,
+      "sha256": "db9a3e3652c20517fcf6ea66a0fb3405bf04b48da536a6fab63dd583563651a0"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/50432-50687.pbf",
+      "size": 181327,
+      "sha256": "d5bd3e1439995b2e268350cb35858a99c5d964568c12b47010805b9db39dfb2e"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/50688-50943.pbf",
+      "size": 185105,
+      "sha256": "5317df310e5f63ad0659d160d7ac0dcd15c69b0c0df2cbfba2b0f74c78aacff0"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/50944-51199.pbf",
+      "size": 184299,
+      "sha256": "8836dec3aec666bb80e36bc5cc94340491afc66a4f09e3eb09ae3870f78e15ea"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/512-767.pbf",
+      "size": 97447,
+      "sha256": "a7faf853b1a74e21a91cf895e104fc63b53ae5a0ae7bcf1e552b95d48c664310"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/5120-5375.pbf",
+      "size": 624,
+      "sha256": "7c6d891de9f4f4c3c6fd4c77a185b3ce07b0a7a2ce5326d00e666b52bd28365c"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/51200-51455.pbf",
+      "size": 184159,
+      "sha256": "04a5daef3f9250dd6100848b1ee2040f347fd3d659ea12cbdc32ae86ad0ffb95"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/51456-51711.pbf",
+      "size": 183554,
+      "sha256": "ac435481dd6da100989fa26d0fc8bda9dc66b4b64ed4afda9dc5929d7e3f3165"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/52224-52479.pbf",
+      "size": 184691,
+      "sha256": "21f711fe383e272347cac1a096cbd9c346aff466bd221f78d8eb79ed733a6aa9"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/52480-52735.pbf",
+      "size": 186674,
+      "sha256": "71ad53453d1300a9c9899b319fcaa75a6f2faeb87addd8e1660236c997faf7cf"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/52736-52991.pbf",
+      "size": 185085,
+      "sha256": "9871a3148d9fd0ccd8f7bf8dd10e63a08fc9ccc926429ca42de0c0c969119aa9"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/53248-53503.pbf",
+      "size": 181753,
+      "sha256": "19c8261c59c77142e53ab6f94af1a1ffc86db87bd7835ca78c598b5eab2c7ff7"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/5376-5631.pbf",
+      "size": 624,
+      "sha256": "3ec74750c501d0c28cf74248bb711d1a34c6a3ddeb5f57413b08f8390d003f17"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/53760-54015.pbf",
+      "size": 182587,
+      "sha256": "ae50694fee8bcaeebeec19c79021d7084a1de5935c1b9f2387ab07c0000f11cb"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/54016-54271.pbf",
+      "size": 184576,
+      "sha256": "9ea707cfcdda44d4dd3470f9734dcf383640fbca450ce633d12fb9795f76739c"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/54528-54783.pbf",
+      "size": 184576,
+      "sha256": "585ab7f1a38993eda4ea9d3f2c7e7f73c47dcb3f2212b0e7a0d20d994c51d179"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/54784-55039.pbf",
+      "size": 186391,
+      "sha256": "b302f208f0838a4f765346312f21a7cee947d595004bc2b990451d2c3695ab0d"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/55040-55295.pbf",
+      "size": 152210,
+      "sha256": "9ffdd212b5e97f7fa5a8f83d640d2589d142882e66dc3bbf868d0ea5b7269e89"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/55296-55551.pbf",
+      "size": 626,
+      "sha256": "6be812adfcb94bd192bc59c2a54a3c1b86b277d9c6d19ae035a6b13da439f5b8"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/56064-56319.pbf",
+      "size": 626,
+      "sha256": "e85094ea92f99a81ac6c279efa0a1f5aca75737990723cdf3cd07b9e5936aeb6"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/56320-56575.pbf",
+      "size": 626,
+      "sha256": "7a1222d7922b719c46fbd85bc62efbf4066d0e461d79e1acc5f07a444aef8cdd"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/56576-56831.pbf",
+      "size": 626,
+      "sha256": "dfe5099e907d9d91ab005e5aec59883c767f82f39116df7878e4f4d61094f0d8"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/57088-57343.pbf",
+      "size": 626,
+      "sha256": "f9088b94886e789a010f085b17bcb9327d1e76d481fb5ca8fe7ec550a49d346f"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/5888-6143.pbf",
+      "size": 42294,
+      "sha256": "c62bb33c0206c019b901f97b91f6b8dd01a83816c3b7553be7fcc6b19140b03f"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/6144-6399.pbf",
+      "size": 78485,
+      "sha256": "3f43b87c5a0de8c722d7d4835f1eab8b94a5035688951a2c30a537bdaa22b9ce"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/64000-64255.pbf",
+      "size": 86672,
+      "sha256": "a1a4eac8d8834b9c649d166c8d0a8fdee7ae5f68709603a3d4ec22894f5a3206"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/64256-64511.pbf",
+      "size": 93647,
+      "sha256": "aae0571239d3d9fd1539066360a9d5bce85bc4022b1f16182e6ff93b9ee8de10"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/64512-64767.pbf",
+      "size": 182449,
+      "sha256": "f37809ebdbf39980227d2a6f035b00a53518ae0cc46f924ff6d31c06dc40cbf4"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/64768-65023.pbf",
+      "size": 206080,
+      "sha256": "558226071cabb73990d66a6cb7bba1c1136e9b0047766288e9f09d8844d15386"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/65024-65279.pbf",
+      "size": 77878,
+      "sha256": "b3aa05cb4d1cd8fee0a391fbecbd7772adae37ae05eb8ff50aba4e1305d33a2f"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/65280-65535.pbf",
+      "size": 88108,
+      "sha256": "67c81d71e648ea8b11c7b2103d866b5272d3e5ee5cbf2b2f1f5849833b44d441"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/7168-7423.pbf",
+      "size": 11438,
+      "sha256": "60bc6b87826b0774212c053ab2dbb3068491171a4d12a8d8bd374c98b5fc6405"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/768-1023.pbf",
+      "size": 75983,
+      "sha256": "1d818e823729580b3f6185748b79ae50e73da5eb5bc753e82eb22acca17d817c"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/7680-7935.pbf",
+      "size": 135515,
+      "sha256": "200d1c91ac1cf3201331b31bc498588ba0d5ee35e5ec5513d6dd23eaa3a1d5aa"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/8192-8447.pbf",
+      "size": 34787,
+      "sha256": "da51f9be11f7bddc1c5ea052c1305eb9440790ad7cb79bf27e57f7a04c952427"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/8448-8703.pbf",
+      "size": 42052,
+      "sha256": "e3b294c87693421d1710f4f846d842da6cf042be3e3ec77c20a8b77fc33bc49d"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/8704-8959.pbf",
+      "size": 40867,
+      "sha256": "098a5b154c2298f0a0c8cf2b8178d86ae86da5095c17a259140b79cfda8264c3"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/9216-9471.pbf",
+      "size": 125798,
+      "sha256": "da779a29ac328f0e84c2101d83f462b8d8ca1eaba572ebbe1aebab0cc1a2e7c8"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/9472-9727.pbf",
+      "size": 110958,
+      "sha256": "77da41f8ebc68a6aad0836fff6be89bf56c03e52cd849565f0ef9de8d00ee492"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/9728-9983.pbf",
+      "size": 34682,
+      "sha256": "6de5f15a556b6c21c008c3dceea912ca3fa2f0b62bca5212631dfd94187499ff"
+    },
+    {
+      "path": "glyphs/Noto Sans Italic/9984-10239.pbf",
+      "size": 14395,
+      "sha256": "9e194c96514ca2f1e7d06a9698d2c8352cc4c9780e5d456859f541c2da51d21d"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/0-255.pbf",
+      "size": 76580,
+      "sha256": "ef1f38a3f1978591e846e9eaddf8a54f7047f546fc6aaed7872cc53151a5de78"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/1024-1279.pbf",
+      "size": 125222,
+      "sha256": "834adb7f3ea9944ea530214841ee098e5482e85180f14df85036939261e0ffbb"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/11008-11263.pbf",
+      "size": 3335,
+      "sha256": "7a326ef58773f48f57a5af3c3681dd17c2f7f1603fac82e34a2639a7b5726719"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/11264-11519.pbf",
+      "size": 10453,
+      "sha256": "5fef3fa21327b0a38e8f650fd3e6edd26aa7e11ac32a39915da7115e9d9366b2"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/11520-11775.pbf",
+      "size": 66619,
+      "sha256": "69b80c3d3699d8a6b706f2d600d4b2d34a97ec2068301e50a6e2e2b8e965fc3c"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/11776-12031.pbf",
+      "size": 73737,
+      "sha256": "3170127815670b54e6ebecd89a451b1b72aa3d3b4aee3dcf3c32d7d6dc20f966"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/12032-12287.pbf",
+      "size": 167696,
+      "sha256": "f397dab640d90fc68a466ccb52b30e04995755643be3cc73c241dd585d9b6398"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/12288-12543.pbf",
+      "size": 147462,
+      "sha256": "6bbe541b57b43364b5b707686bd992898469e5d6f66e7be31828b2d2e6f5c4f7"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/1280-1535.pbf",
+      "size": 77856,
+      "sha256": "0f4f3f76dd76836efbcdf3c35219449aa46defb1d3e8e0f9b51153a539e64454"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/12800-13055.pbf",
+      "size": 202642,
+      "sha256": "dc00c6b7ccac53046099028fa3356fad43470cf78cf618fb48abfd8e552baaa8"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/13312-13567.pbf",
+      "size": 200496,
+      "sha256": "e75575b3591f4c5e39ac0283787c234e986445773e317069bbac03d9d8ba0d23"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/1536-1791.pbf",
+      "size": 96133,
+      "sha256": "50d81369a7ec80d4a77efa83e63bbb250ec3337f997a39f5e17c76ae7ab74ae8"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/15872-16127.pbf",
+      "size": 203491,
+      "sha256": "907f1bc56501fc741e8b224a3ab687d9fd064bc7d27b032f41ebf3de1e4445ca"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/1792-2047.pbf",
+      "size": 25428,
+      "sha256": "3ca76bcee53478a4031c82e34d084f6c39d0bbbb2c80cbeecec604e113bdeabd"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/19968-20223.pbf",
+      "size": 192358,
+      "sha256": "e1c87b549df7bb07b0bb19b52e379b10054872dcec5a86d824440371534060a4"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/20224-20479.pbf",
+      "size": 206424,
+      "sha256": "af4b2222a8e7e63866df86782833f5a51315258dff00090b04d4f213ae1ac8ac"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/20480-20735.pbf",
+      "size": 206396,
+      "sha256": "3374ab23080bc94a8675f423df7f32ccc93ce7de765e1417e46726b87cd9590b"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/20736-20991.pbf",
+      "size": 200017,
+      "sha256": "72e118b13767b513b4038fc9cc3844acfc77bc18f4e6581a5f03c447ddd68522"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/20992-21247.pbf",
+      "size": 198855,
+      "sha256": "8dc93d4b7a35972427fc641e847f2b4522b6b1eaa58b909e6f2bd5d8fd867163"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/21248-21503.pbf",
+      "size": 194787,
+      "sha256": "a98e1d6ea9b7e92ba58baea665ce1972d3c88f46f79510ca0f628ce79c73f303"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/21504-21759.pbf",
+      "size": 195477,
+      "sha256": "8554c2a16e8f4253a0df81a3a5044ff9d409e883a59b18e9369cc5f817ee30ba"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/21760-22015.pbf",
+      "size": 196748,
+      "sha256": "b48f04f782e4d6f55c21bd633a404f6af3324dbe1906eadd3049d4ea1611d006"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/22016-22271.pbf",
+      "size": 195372,
+      "sha256": "4fc5010bffb70bc72782b12f1255332c35ed339866adc6a7219a4963f9deb9b9"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/22272-22527.pbf",
+      "size": 200783,
+      "sha256": "ab6358c7b33eb550d8a8a455f13599e4b8f0df3ef61da41bbb3e506941d9f8a5"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/22528-22783.pbf",
+      "size": 202932,
+      "sha256": "69acec4d8aa09e94e2eb45fdfbf3d893977e94a1f43a6c1d477d2c0de1fe9eb4"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/22784-23039.pbf",
+      "size": 204970,
+      "sha256": "d360c6ab260caeb374b38bead3b0235390f39d1900648c288803a568789b873f"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/2304-2559.pbf",
+      "size": 100478,
+      "sha256": "ffd4493751f2860e8e9749c80015e0b33b64124144ead3b5ee64d34789809129"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/23040-23295.pbf",
+      "size": 205585,
+      "sha256": "3373149a2e4520c4f715be94aca3f1b76bfc8ac1758256adf21d9a6b2def896a"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/23296-23551.pbf",
+      "size": 202279,
+      "sha256": "ee40e22db97c98e6608d66601e24bcd831a5dcbc13a1ad6f093279c0bd3b3e46"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/23552-23807.pbf",
+      "size": 198190,
+      "sha256": "2e9cdf17173ba2b75230ce4d3e1b3f44d6d30c7dd0a8719e976346213e2a91af"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/23808-24063.pbf",
+      "size": 199146,
+      "sha256": "768c26aded33a823118ec7e98bc6932d8f938711a8cbc7b1937b7f6579310a2e"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/24064-24319.pbf",
+      "size": 202650,
+      "sha256": "248e52d8771a7075952d57206157cd637599e3985344ce47c8a9f1a87ba8b9be"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/24320-24575.pbf",
+      "size": 202735,
+      "sha256": "990aa9e98d4f650378ff0e7ac920796019cd1d09882a9842ec3baaa69bd2b34f"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/24576-24831.pbf",
+      "size": 203858,
+      "sha256": "bc4948387e5e6f7b3b932c2288b34876b564b80a192cef3356463b25d0199e56"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/24832-25087.pbf",
+      "size": 204114,
+      "sha256": "b1fd7a8f4a3137dda88a83bf514f3e8900bb25b5c57fac5a0a3a8a83e047e673"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/25088-25343.pbf",
+      "size": 204412,
+      "sha256": "aacebabcf4a04fdea8135a0dbbabbf1bc406202527778c16082a4e40c32c72e1"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/25344-25599.pbf",
+      "size": 205528,
+      "sha256": "429e3909d67275b4152c256e4a9331a2b3c0421ed0200392453ad34fbe51767a"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/256-511.pbf",
+      "size": 127219,
+      "sha256": "992557f9e2574cfb9a75e16c7b52832578849772b7c9a6e480d6213fb008fe5d"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/25600-25855.pbf",
+      "size": 205948,
+      "sha256": "6af02c7443d06da67f438a63652b00b1346ddbdb91bd6e4079be4c187add4ca1"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/25856-26111.pbf",
+      "size": 203968,
+      "sha256": "7b765282e0cf4705fc416da6b7178495cd0e32a86f9dc81480beb7ab628a19b3"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/26112-26367.pbf",
+      "size": 195892,
+      "sha256": "33bfd9858fdcb9c7eb64a5706bdc8b843cca489d86680fd23e4e9e20a0cad364"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/26368-26623.pbf",
+      "size": 204360,
+      "sha256": "17fac159b78addf7b62f7e8bf516f861a1d44d017d0da69c2b11260226902320"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/26624-26879.pbf",
+      "size": 205500,
+      "sha256": "7c96e8dcd08c9bdb5d5959a5e84630b1e5f1d29800a0ba9b062c77e2b9bbb12c"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/26880-27135.pbf",
+      "size": 205752,
+      "sha256": "75bdba64066816c368241a82a72a66003813997bc36750323b84c665b2afe570"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/27136-27391.pbf",
+      "size": 205920,
+      "sha256": "5a0cb996db7af1cbace0e3de360f50315afd16914d6db350a3ad61b6d292a9aa"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/27392-27647.pbf",
+      "size": 203890,
+      "sha256": "d91184161f6145935e75050d0b3c54d243bee03946c7761a2939daad309a790b"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/27648-27903.pbf",
+      "size": 203879,
+      "sha256": "7e85534f046e97a2781a8964d65642270267a075f6697cfb12a37dee45b66ebf"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/27904-28159.pbf",
+      "size": 204717,
+      "sha256": "b11207478fa1f485491988b6a3f8d4365cdc10bd47a681a946b4b0647d2a6317"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/2816-3071.pbf",
+      "size": 89735,
+      "sha256": "00d71ea66156169cc123f7f0b96648ca73e9b685d28c61ee9d0434d3d47810a5"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/28160-28415.pbf",
+      "size": 204996,
+      "sha256": "59a3e78873654bff6e7f5745549c82af33cf1f1e694fa0f1d50c7257745ce45c"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/28416-28671.pbf",
+      "size": 205277,
+      "sha256": "16d68eb0b0d938e32511e7025441f711dd996fd4bb45910b60bfb593c058557c"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/28672-28927.pbf",
+      "size": 204968,
+      "sha256": "c4f72eb186dd35bfd0fbe2c11d16d2ad8751b7129d8a30f17135df51f481333b"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/28928-29183.pbf",
+      "size": 204944,
+      "sha256": "eed2063394e26dd51b37ea4245e34ba14cf1d5713d76518e4c6ebb8d9c646ae3"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/29184-29439.pbf",
+      "size": 203954,
+      "sha256": "8234d9cccbc016a35d4c9a4c5dd24091cd7de7f12da9ced531cf3590030400fe"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/29440-29695.pbf",
+      "size": 203438,
+      "sha256": "884b6776c23f8c9b9a21e0e0105287a9ea25890dd0b1e110d27c76f54d7d091f"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/29696-29951.pbf",
+      "size": 203246,
+      "sha256": "cd5b0a1a1762028ef76e74ca8798b806950f3e91d0a672de2c33b89d2f8cb352"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/29952-30207.pbf",
+      "size": 201492,
+      "sha256": "c3a38be840ae1e801c9216c5c8df3d962a8409c866763613e5ba833afbef61c1"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/30208-30463.pbf",
+      "size": 201913,
+      "sha256": "6b16f48d78a48b6cbe7a8076be489797f9860e346d017b979897be878dff3e32"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/30464-30719.pbf",
+      "size": 197227,
+      "sha256": "2adf8c9db14a55921db1469d8c043675048614ba8542a3f94c0155adf9e82c26"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/30720-30975.pbf",
+      "size": 202966,
+      "sha256": "811d3af54f808fb5e0270ec298bfca0727e0e76f75366a9606e87d0764efeb5d"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/30976-31231.pbf",
+      "size": 204526,
+      "sha256": "bab42360ea766f871913dd2f9c6bf9e31eb55610b6c9ff043f17a45f8e7da408"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/31232-31487.pbf",
+      "size": 203882,
+      "sha256": "4dd2c5ae63ac532c74d948c5a98d124b81168d44dde01cba416e82fd79312cad"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/31488-31743.pbf",
+      "size": 205472,
+      "sha256": "1c79013fbad52a0e4dcfbdcd9a3369a2b1a68336921ab98b743a208a4f168af4"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/31744-31999.pbf",
+      "size": 205370,
+      "sha256": "d358a3a73944e134fdffe8cc2ccfb6acd11cd566321bab8832ec8933894d2064"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/32000-32255.pbf",
+      "size": 204467,
+      "sha256": "16bf10af0696f7c7ba613a7a9356b3adc8a013923ccfd5b5b2e3274b0910ea38"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/32256-32511.pbf",
+      "size": 204619,
+      "sha256": "412d3e5772ff1005c159ae612cc5bceab6f3cc83c233b36e7e5f3604fe4288e4"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/32512-32767.pbf",
+      "size": 200304,
+      "sha256": "142a45e278bd1a9d2adfb0b79ffdcfe04d40ad30db99ff0446003222f6869d6f"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/32768-33023.pbf",
+      "size": 203055,
+      "sha256": "905a016e83e007cc3d44a1bfc02f06dd3205da666151dc90647234d7ee37eed0"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/33024-33279.pbf",
+      "size": 203558,
+      "sha256": "5c4d5e8ba4587e3cae4e9de98c649f175b0618769e5c3cdfe2e4089f56bd28f9"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/3328-3583.pbf",
+      "size": 50511,
+      "sha256": "8e3b3992f650816ed003199991f1f72e7713c8f07535ac9912c78882fb6c1170"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/33280-33535.pbf",
+      "size": 203147,
+      "sha256": "cc8060d81eac6e83737f6581aac5fc8f2f0f3fe13443b93b3a14d5ddbf5755a1"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/33536-33791.pbf",
+      "size": 203913,
+      "sha256": "7ec80465647b88df0ca474db81052c561354bfcebe437f6462c529dc896c9f91"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/33792-34047.pbf",
+      "size": 204215,
+      "sha256": "b5253526d052665953110bb0af3ef00255b5a43f1355fcdebc56d3c849749987"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/34048-34303.pbf",
+      "size": 204968,
+      "sha256": "4ebff7e72001313169cfe019b341dd4d733f3c3e2ebf3b62d81d32ff6a31e497"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/34304-34559.pbf",
+      "size": 204130,
+      "sha256": "211cb09a6d079615129ad4eded30a77677ec27d7b6d220f3e951b3ace686cb3d"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/34560-34815.pbf",
+      "size": 204665,
+      "sha256": "4303f04eea2e69dcf7b0a70d820c9fd198888ab6596ecc06e49cc888ca784946"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/34816-35071.pbf",
+      "size": 205444,
+      "sha256": "339915b6ff8e3230c8c16bdf527d7277260a6ca4aed64a8e32f710cbd4e8c08c"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/35072-35327.pbf",
+      "size": 204325,
+      "sha256": "dedcbc2904f5c053646b8374ae9dd7e505cad575240a650b95b3bb49f63ff5b7"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/35328-35583.pbf",
+      "size": 204971,
+      "sha256": "bef9e756ccb91485f01bab5c91b254bca8c853ab8662c202f47176706fac7dbb"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/35584-35839.pbf",
+      "size": 204506,
+      "sha256": "d30ea6aff32a6b029042d595b819e22f26623d517163df48e6529aaad705612d"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/3584-3839.pbf",
+      "size": 54925,
+      "sha256": "161ede5132456f9f640ad783ca23ac5c5923bb88672da41a49ac336519b4e529"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/35840-36095.pbf",
+      "size": 203741,
+      "sha256": "8308df86f919ab94280c2995a9d6e562a50ce363e1914a26de3401bdd433120d"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/36096-36351.pbf",
+      "size": 203997,
+      "sha256": "144da779372afa0b0c792e39afbcf96a0063fcaaf22652fc221948806229ea7f"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/36352-36607.pbf",
+      "size": 204250,
+      "sha256": "e4bacbac9f8f3f0f6a073e8f202d508dd37af5f5a9bdc1c641fa970214125457"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/36608-36863.pbf",
+      "size": 205641,
+      "sha256": "7804586daeeefc80bdb85cf020ce5e69a9ae2ebc06906f5133f1f1366d767384"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/36864-37119.pbf",
+      "size": 204671,
+      "sha256": "082e801cbac4b23a9afd5440022ef3cea7c5f4dbd003d6b2151b196e9f9d1605"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/37120-37375.pbf",
+      "size": 203528,
+      "sha256": "71fa8b6daa99993c57f3827f343100b1bd23fd4163186801ab866e2995ecf148"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/37376-37631.pbf",
+      "size": 204128,
+      "sha256": "5c02f04c51cec4b568186db0e410c1986c5a2c6b6155a4335af95b60d6a417bf"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/37632-37887.pbf",
+      "size": 204912,
+      "sha256": "cfbc91378946d24a4e0dfee343f1ac0dd3f6dbfafbaa39238d6282585fed0c9b"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/37888-38143.pbf",
+      "size": 204782,
+      "sha256": "e9e478fb2ce718f67b550d763ec34f8237c7990a115b19619a2857abd7c545d6"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/38144-38399.pbf",
+      "size": 196049,
+      "sha256": "f3a3b70e3136702faef0f38920763d9add8ae4044a2ebb1aa044cc956b4df83a"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/3840-4095.pbf",
+      "size": 101089,
+      "sha256": "a372cab4e82f43b0b0ec1cfb30bb94e7ef7716a5d769159564a4c43b66baa862"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/38400-38655.pbf",
+      "size": 197643,
+      "sha256": "f04454545b95ecfddb2d7e9f03e14f933d04305b5902837f94b7c959354086c6"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/38656-38911.pbf",
+      "size": 202212,
+      "sha256": "e96e97e3e363bcbfb7c5942675abee2c3d6b68868838df30dbc5bf9b524897ed"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/38912-39167.pbf",
+      "size": 203187,
+      "sha256": "44e06bb22bb8108d7fc29bedd9d43324233076dbc4393f6a48d2c9ee74d70cfb"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/39168-39423.pbf",
+      "size": 204345,
+      "sha256": "d8ba91d7cccfeb27042186eada0567ce39d9a03d6197c28e5977b7d700c8a77c"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/39424-39679.pbf",
+      "size": 203472,
+      "sha256": "b9274c7f5af594be626ee086e0699560b6f7c250e7e68438092cd0f0824cc9ee"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/39680-39935.pbf",
+      "size": 204745,
+      "sha256": "0453bc6d0c9db6b97b6c793c07abe6fa54abbe2aaf3f9c4b81c27e8c77ff5191"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/39936-40191.pbf",
+      "size": 204860,
+      "sha256": "ee9ff2750cd9d1807d6259003b055088d94c409e786697ca015d32d3788c5850"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/40192-40447.pbf",
+      "size": 205475,
+      "sha256": "7f21626cc7e395fbae16e5fdbee33a3be13bd3f4275a989f24af1bf4ab729641"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/40448-40703.pbf",
+      "size": 203860,
+      "sha256": "53bb75f1bf3bf6ed6a4fcfd067e15593f9be53d32a56fc75cb167b379c4eebfd"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/40704-40959.pbf",
+      "size": 164356,
+      "sha256": "5b0c42f5db6e9e6f4f02c8e648966dd9222f032a5590a7bbbd46e40d35d93d67"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/4096-4351.pbf",
+      "size": 126418,
+      "sha256": "aeb80cf9bd04db8b8efbdf9a106053503ccfb8817c6a4813f1e2a9a9854eae6d"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/40960-41215.pbf",
+      "size": 627,
+      "sha256": "e0ad8b1dfb37d8bbd4e5f2f131bbbfce8847b7402d54be0d9b58559efd08f284"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/41728-41983.pbf",
+      "size": 627,
+      "sha256": "a22aadffcdd037fbb6a10da666ef17a6fa7e00ab54066275e8c99904994cc665"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/44032-44287.pbf",
+      "size": 181607,
+      "sha256": "6d5ea95c2fbd352a0a81b9ad4f4bea434589667ab430dfee7297ac490a2f88fc"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/44288-44543.pbf",
+      "size": 183333,
+      "sha256": "a897c931db7013dc0269f181e71165c8d137515f8532156a187cd9bcc4dd699e"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/44544-44799.pbf",
+      "size": 184333,
+      "sha256": "6a1c2d9936c364d5bc4dc518cbf033f15fd25f5c131c0314577a202ca3ad75a9"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/45056-45311.pbf",
+      "size": 181390,
+      "sha256": "67251207f0c6782d8e21391a8de584e5d15ac8e919207b53ae39a2cd0dce161e"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/45568-45823.pbf",
+      "size": 181898,
+      "sha256": "ee829ee46d3a9369917909c37107a64528f5484be7516bd6df3d127c69de5d28"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/45824-46079.pbf",
+      "size": 179608,
+      "sha256": "c7ab92e4d51ba65cd85d190981fe362b87fc4e6714491335cc8d248c617512d3"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/4608-4863.pbf",
+      "size": 125725,
+      "sha256": "0238b46c53798367facebb2e38e9a8454ded2edfb6c3a9e2db8242f9750011d6"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/46080-46335.pbf",
+      "size": 183735,
+      "sha256": "e2dd1f4006c230a01497a95d4f713cc62bb5e81a34fb9e0ca64814bbf1763c12"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/46848-47103.pbf",
+      "size": 180402,
+      "sha256": "1e84f61632c7241da217d98e01ccb007d8f506de5bac5d61d1cacf4493c470e2"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/47104-47359.pbf",
+      "size": 182057,
+      "sha256": "f2544ffa132875c6adfe888abcf1642e6aae10e4b8aff9fb75f8ad67b503a1dd"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/47360-47615.pbf",
+      "size": 181638,
+      "sha256": "710a693875b82020d0fe02de07c6e05f80a660d49544a551ca9f25d11f9665df"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/47616-47871.pbf",
+      "size": 180725,
+      "sha256": "e3c3670df7083b4a217a0e3ef3a80cf173f922f2f05edafc2c672e8c9e996887"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/47872-48127.pbf",
+      "size": 183066,
+      "sha256": "47cdfd21e50604b4d7b5e1651242bed6b1bd1ad9a9105277a8436ec20686e597"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/48128-48383.pbf",
+      "size": 177949,
+      "sha256": "4d8da55f191401b1abefd8ff11079b6f8348a1bdfdf923c2b72c4e2a87f6a445"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/48384-48639.pbf",
+      "size": 185518,
+      "sha256": "744b259351e615aacd2c54d45d9892532e6b68346467b12d8fc745994d2ea32c"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/4864-5119.pbf",
+      "size": 73523,
+      "sha256": "46fdc7f4c20b5260a140a0b3a391968f3e4eaecda06e9075f05ab1e0dcd08569"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/48640-48895.pbf",
+      "size": 181037,
+      "sha256": "cf7cf0a9faeb4c2c35d5922d5c4a09a23a9443a4de3b5d9d25dac6afef843e7e"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/49152-49407.pbf",
+      "size": 184380,
+      "sha256": "5033d5e92336542eb92ea384f45e7474bd32d88f566a9630115c9ead204dc3fb"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/49408-49663.pbf",
+      "size": 184301,
+      "sha256": "d0dee0e512dfcc4cefe1712dc88f5e29bbe3152662dc41797f6c6201f5e00e9c"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/49664-49919.pbf",
+      "size": 184307,
+      "sha256": "1f7f85232ccef89c320500e88b3b7be36157e50c9bcddf29e3d012620ff5f94a"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/50432-50687.pbf",
+      "size": 181328,
+      "sha256": "3bb259c713b1e3358441000a512b2d0ae74510f41d3e308f0d9969640199e508"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/50688-50943.pbf",
+      "size": 185106,
+      "sha256": "ad728e91be3477365c50ccb7360f295833eebc94d1ab11d4143587b9bdb59cb1"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/50944-51199.pbf",
+      "size": 184300,
+      "sha256": "67ae541e0c5756aa3c27ec1033723d75cb2334554a954810a283b651bc591787"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/512-767.pbf",
+      "size": 95728,
+      "sha256": "a4c5cdf9623cb0bf7e9c6b0e8be4bf38b524bc29819dd2276c8ca63d5e43dd21"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/5120-5375.pbf",
+      "size": 625,
+      "sha256": "06b3028cc4418e4e4df0d12d80588bf6fa23b543cb4fbe5eb33edcaa5c30f6fb"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/51200-51455.pbf",
+      "size": 184160,
+      "sha256": "268ec37185b1e5bd7b760a2d15a85a267bd7e1a138962f34795b1b21158bc5fe"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/51456-51711.pbf",
+      "size": 183555,
+      "sha256": "0b42e00795cfbd574f2cf20b6bf7f8743379886cea9943bddb9504e82a69eeac"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/52224-52479.pbf",
+      "size": 184692,
+      "sha256": "59cfcd1776c164353724cde40ffddf5e7504e91b4c70b972529edcc66993c268"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/52480-52735.pbf",
+      "size": 186675,
+      "sha256": "690bc35567ae974d1b656aaa3885e79432e87ca1759b72868e0bd86d33479f3c"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/52736-52991.pbf",
+      "size": 185086,
+      "sha256": "af6230e3dd52318165ff6dff16b9c777a32d49de7dc089376f8cd1518c032767"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/53248-53503.pbf",
+      "size": 181754,
+      "sha256": "69fb43fbc8f64f616d76375daf9109ce2b086a77864334a03972a1c7f96ec312"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/5376-5631.pbf",
+      "size": 625,
+      "sha256": "63ee2bf53eae2bbba77619ee9536295f1c3c10ccd414ab82073163ef40f581da"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/53760-54015.pbf",
+      "size": 182588,
+      "sha256": "a7ffe9842f0f7f23ac01332e63e85b3f2dd50d6b436aac57c8b661830a39c4e8"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/54016-54271.pbf",
+      "size": 184577,
+      "sha256": "444ca7fe6352cab126ee3e18faed4e387713fd3bd622dc8c7cb376a43a16da64"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/54528-54783.pbf",
+      "size": 184577,
+      "sha256": "ae0a683fc6fd377c177f2167829c95f9745a24eabdafaaf8e428c292644f3945"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/54784-55039.pbf",
+      "size": 186392,
+      "sha256": "1a72fc4931bf5792df3fa486094a9b41e82ebd05a13b06f40c93432dfe46579b"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/55040-55295.pbf",
+      "size": 152211,
+      "sha256": "cdbe6c2a2acfa333d40f9a807709215938114052f56d355730bd5539fa11465f"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/55296-55551.pbf",
+      "size": 627,
+      "sha256": "e4a855578f5f6e15e2a16b122dcab7a817b32fedfa74e5b981703fea4c2734b5"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/56064-56319.pbf",
+      "size": 627,
+      "sha256": "d35cc67523aba9883356e852c24bb07d2afe560c10025b39c35d23c9eef5339f"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/56320-56575.pbf",
+      "size": 627,
+      "sha256": "6264843b79b279d868590b360048a49374740e344c0da656c5776a29370ec78d"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/56576-56831.pbf",
+      "size": 627,
+      "sha256": "98025bf2e9917a276439328ec42eefc284be666ba0462647254dc833360c59ec"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/57088-57343.pbf",
+      "size": 627,
+      "sha256": "1c2d188bd646c868f19a54cd3cedd3c262a898081258f06cad1f3e1706c01ada"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/5888-6143.pbf",
+      "size": 42295,
+      "sha256": "61af686900ae6952d98deb0de38164d9708ac54b13bf66906a8237fc0ebfa4b2"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/6144-6399.pbf",
+      "size": 78486,
+      "sha256": "ee7ca2adbf300171953353a0169146454b0e46af8d0234db24fc30478b7b3bc5"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/64000-64255.pbf",
+      "size": 86673,
+      "sha256": "c7f8dae8dba2e8cb19834793b564ddb43c1f63d0da75f7bcd3f944d577236156"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/64256-64511.pbf",
+      "size": 92538,
+      "sha256": "45dac0159019fe4a6d5cb7e510c12cbb13344ebe9472b13dc5d8e2b1fd1095de"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/64512-64767.pbf",
+      "size": 182450,
+      "sha256": "3c7e0770e5338ce29d22b37eb2ff3e3e8fa78d97b5879483ca597d9364ae946a"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/64768-65023.pbf",
+      "size": 206081,
+      "sha256": "b068cca7b2e41785986c1e39fde66616569fc8c3b5fd020dd3a32b91ce8d3299"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/65024-65279.pbf",
+      "size": 77890,
+      "sha256": "9c68b6cdeb252da3a7af7baca5c225594911a7972bb47f123d458d07e32a7782"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/65280-65535.pbf",
+      "size": 88109,
+      "sha256": "e39025c183136637d2ad76494ab682df1aa7c0a0c9a18d3ebb4843157dd2e2e9"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/7168-7423.pbf",
+      "size": 11439,
+      "sha256": "262e2da78132e30c28661f5d45f531ac213e76d338484fd1043864439b1858d5"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/768-1023.pbf",
+      "size": 74752,
+      "sha256": "6e27cdd6edce5b11c469a24b333ecefc0d4b082491b71d6924ce0be6eeba71c3"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/7680-7935.pbf",
+      "size": 130591,
+      "sha256": "21672116227dc22128cb43a58ae19d4bc5ebb5d7d321600317d2df828dced514"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/8192-8447.pbf",
+      "size": 34070,
+      "sha256": "f061e5b4e42e5925228534d8822b423a029569263db09f5ce44573600d45295f"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/8448-8703.pbf",
+      "size": 42129,
+      "sha256": "9e333bdeee3c44c429fb7f6911b3c1602a69402d541908832282d5eb3a467003"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/8704-8959.pbf",
+      "size": 40857,
+      "sha256": "5d3487a5bc60e2a68545c4b7aadcd12664559f1d7b6962f760ca98a1b39a5104"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/9216-9471.pbf",
+      "size": 125799,
+      "sha256": "678371e9b6db7ad3453c7c35842f6cfa1e304accb5e2428e86b3c67fc42f6a42"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/9472-9727.pbf",
+      "size": 110982,
+      "sha256": "ca910fd782bf73975f26e6b6547731aefdc3e5f747adf36d672b8bde340e0fd1"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/9728-9983.pbf",
+      "size": 34683,
+      "sha256": "38cdd944ad56e8da5c86aa8e97e365c79a351145602023aa5fd2917f8877bed1"
+    },
+    {
+      "path": "glyphs/Noto Sans Regular/9984-10239.pbf",
+      "size": 14396,
+      "sha256": "74dcdf3f3e13f04f52af9ec232b0a94ce600842e44bf818bbfa30de219fd047a"
+    },
+    {
+      "path": "sprites/ofm_f384/ofm.json",
+      "size": 27737,
+      "sha256": "73e75e58d8c7bb62cc25d9d150660500552f4d04f6eac5efa4e236076773c356"
+    },
+    {
+      "path": "sprites/ofm_f384/ofm.png",
+      "size": 49454,
+      "sha256": "8996a519d218dc5f98015267709dae272a77bb74ef0ecc5a0992dcf276c1be4c"
+    },
+    {
+      "path": "sprites/ofm_f384/ofm@2x.json",
+      "size": 27822,
+      "sha256": "82a4aaeed2c5ce6e98553915754dbe394ee66fd9a2aacc4318d25cdd74e8730b"
+    },
+    {
+      "path": "sprites/ofm_f384/ofm@2x.png",
+      "size": 118872,
+      "sha256": "3793faf7dc47960636e4b6b1039978fa6925e6c90a7cb49ef23b37e153635c9b"
+    },
+    {
+      "path": "styles/LICENSE.md",
+      "size": 4118,
+      "sha256": "d1754e5d291e4e8b9b0047ddba0a6ec75e1046ccd61a02c2cea3dac58f3fe355"
+    },
+    {
+      "path": "styles/liberty.json",
+      "size": 105362,
+      "sha256": "0021b8a640e0d9a194cfcc728744dd189b8e367fbbe8b65324b011378cf774f7"
+    },
+    {
+      "path": "tiles/cjk.pmtiles",
+      "size": 26488260,
+      "sha256": "16ff4dd307cdbc27109f3c5ea0f15c862deb2291b7b7263b69ad3b0d3add535b"
+    },
+    {
+      "path": "tiles/street-mlt.pmtiles",
+      "size": 32252039,
+      "sha256": "54f0fe2f6366401c2a14025a68e5f5605ab45d91059773aec56717f814321f5d"
+    },
+    {
+      "path": "tiles/street.pmtiles",
+      "size": 20865019,
+      "sha256": "45794f80443aeb9c89fae90ad2068ad29984825c75456e2e715a0854342f9140"
+    },
+    {
+      "path": "tiles/world.pmtiles",
+      "size": 29881127,
+      "sha256": "66258f6e0fad0b165967e3ca77f716573c16983c614713c5075543452df71f71"
+    }
+  ]
+}

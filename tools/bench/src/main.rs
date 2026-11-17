@@ -2,6 +2,7 @@
 
 mod compare;
 mod environment;
+mod fixtures;
 mod meter;
 mod report;
 mod runner;
@@ -23,11 +24,14 @@ const USAGE: &str = "usage:
   mln-bench run [--filter <s>]... [--json]
   mln-bench compare <ref> [--filter <s>]... [--rounds <n>] [--threshold <percent>]
                           [--time-threshold <percent>] [--json]
+  mln-bench fixtures [--from <dir>]
 
 --filter keeps the scenarios whose names contain one of the strings.
 run and compare run each scenario in a process of its own (mln-bench exec).
 compare builds this checkout's harness against <ref> and compares the two
-(tools/bench/README.md).";
+(tools/bench/README.md).
+fixtures installs the snapshot that tools/bench/fixtures.json names, from its
+base URL or from a directory laid out as it is.";
 
 fn main() -> ExitCode {
     // Before any thread starts, so that the counters count them all.
@@ -47,6 +51,7 @@ struct Options {
     rounds: Option<usize>,
     threshold: f64,
     time_threshold: f64,
+    from: Option<PathBuf>,
     positional: Vec<String>,
 }
 
@@ -57,6 +62,7 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
         rounds: None,
         threshold: 1.0,
         time_threshold: 2.0,
+        from: None,
         positional: Vec::new(),
     };
     let mut args = args.into_iter();
@@ -69,6 +75,7 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
             "--rounds" => options.rounds = Some(value()?.parse().map_err(|_| "--rounds needs a number")?),
             "--threshold" => options.threshold = number(value()?)?,
             "--time-threshold" => options.time_threshold = number(value()?)?,
+            "--from" => options.from = Some(PathBuf::from(value()?)),
             "-h" | "--help" => return Err(USAGE.to_owned()),
             _ if arg.starts_with('-') => return Err(format!("unknown option {arg}\n\n{USAGE}")),
             _ => options.positional.push(arg),
@@ -136,6 +143,16 @@ fn run(args: Vec<String>) -> Result<(), String> {
             } else {
                 print!("{}", compare::text(&comparison));
             }
+            Ok(())
+        }
+        ["fixtures"] => {
+            let origin = match &options.from {
+                Some(dir) => fixtures::Origin::Dir(dir),
+                None => fixtures::Origin::Url,
+            };
+            let manifest = fixtures::Manifest::current();
+            let dir = fixtures::install(manifest, &fixtures::cache_root()?, &origin)?;
+            println!("snapshot {} is installed in {}", manifest.snapshot, dir.display());
             Ok(())
         }
         ["exec", name, out] => {

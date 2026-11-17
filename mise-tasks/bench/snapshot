@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Build a new fixture snapshot for the benchmarks from public map data, and point tools/bench/fixtures.json at it (tools/bench/README.md)"
+#USAGE arg "<id>" help="The new snapshot's id, such as today's date: the last segment of its base URL"
+set -euo pipefail
+cargo run -q --profile benchmark --config tools/bench/profile.toml -p mln-rs-bench-snapshot -- "$usage_id"

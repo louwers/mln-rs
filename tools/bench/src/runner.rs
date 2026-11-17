@@ -35,12 +35,13 @@ pub(crate) fn exec(scenario: &Scenario, out: &Path) -> Result<(), String> {
     let mut bench = Bench::new();
     (scenario.run)(&mut bench);
     let gpu = bench.gpu.take();
+    let fixtures = bench.fixtures.take();
     let metrics = bench.finish();
     let run = Run {
         scenario: scenario.name.to_owned(),
         kind: scenario.kind,
         harness: env!("MLN_BENCH_HARNESS").to_owned(),
-        environment: Environment { gpu, ..Environment::machine() },
+        environment: Environment { gpu, fixtures, ..Environment::machine() },
         metrics,
     };
     let json = serde_json::to_string(&run).map_err(|error| error.to_string())?;
