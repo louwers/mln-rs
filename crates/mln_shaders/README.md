@@ -107,6 +107,10 @@ its own convention:
 - An alpha-only texture (`A8Unorm`: the glyph atlas, line dash patterns) reads
   its value from alpha on every backend but WebGPU, which has no alpha-only
   format and reads it from red: use `@if(webgpu)`.
-- Metal's line shaders evaluate GPU expressions (`Caps::line_expressions`),
-  whose expression mask means the opposite of the other backends'. A WESL line
-  program needs Metal's caps to match it.
+- The line programs pick a property's value by its `HAS_UNIFORM_u_<name>` flag.
+  `LineEvaluatedPropsUBO`'s expression mask means the opposite where
+  `Caps::line_expressions` is set (Metal) than elsewhere, so don't read it.
+- A layer's per-drawable buffer holds elements of the size of its layer's
+  largest, such as `LineDrawableUnionUBO`: pad the program's struct to it
+  `@if(!gl)`, as OpenGL binds the draw's element alone, as a block of the UBO's
+  size.
