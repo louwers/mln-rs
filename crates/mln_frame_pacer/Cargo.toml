@@ -25,6 +25,7 @@ objc2.workspace = true
 objc2-core-foundation = { workspace = true, features = ["CFRunLoop"] }
 objc2-foundation = { workspace = true, features = ["NSRunLoop"] }
 objc2-quartz-core = { workspace = true, features = [
+  "CABase",
   "CADisplayLink",
   "CAFrameRateRange",
 ] }

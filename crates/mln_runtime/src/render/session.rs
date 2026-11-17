@@ -16,6 +16,7 @@ use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use mln_util::thread::Joined;
+use mln_util::time::Instant;
 use parking_lot::Mutex;
 
 use super::driver::DriverWork;
@@ -1223,9 +1224,10 @@ impl RenderSession {
 
     /// Asks the session to render a frame, which shows the map commands sent
     /// before the call, except the changes that an open command group holds
-    /// back, and the map's animations as they are at the call: demand each
-    /// frame at the display's pace. A demand sent while the session attaches
-    /// waits for it.
+    /// back, and the map's animations as they are at the demand's
+    /// [`shown_at`](FrameDemand::shown_at), or at the call: demand each frame
+    /// at the display's pace. A demand sent while the session attaches waits
+    /// for it.
     ///
     /// Every demand finishes with one [`FrameResult`] that carries its token.
     /// A demand that isn't [`DemandMode::Force`](super::DemandMode::Force)
@@ -1244,8 +1246,9 @@ impl RenderSession {
                     "every texture of the ring is quarantined: give the session new textures",
                 ));
             }
+            let time = demand.shown_at.unwrap_or_else(Instant::now);
             let (sequence, sample) =
-                state.map.as_ref().map_or((0, 0), |map| (map.sent_sequence(), map.frame_demanded()));
+                state.map.as_ref().map_or((0, 0), |map| (map.sent_sequence(), map.frame_demanded(time)));
             state.redraw_armed = true;
             worker::post(&shared.queue, move |worker, outbox| worker.demand(demand, sequence, sample, outbox));
             Ok(())

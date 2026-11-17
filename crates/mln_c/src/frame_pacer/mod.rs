@@ -31,9 +31,9 @@ pub(crate) mod apple;
 pub(crate) mod ohos;
 
 use std::sync::{Arc, OnceLock, Weak};
-use std::time::Duration;
 
 use ::mln_frame_pacer::{FramePacer, Limit};
+use mln_util::time::Instant;
 use parking_lot::Mutex;
 
 use crate::abi::{self, Fields};
@@ -139,9 +139,10 @@ pub(crate) unsafe extern "C" fn mln_frame_pacer_set_options(
     })
 }
 
-/// The callback of a [`Pacer`]'s [`FramePacer`], with the sessions that
+/// The callback of a [`Pacer`]'s [`FramePacer`], with when the display shows
+/// a frame drawn for the refresh, if the source knows, and the sessions that
 /// waited for the refresh.
-pub(crate) type OnRefresh = Box<dyn Fn(Duration, Vec<mln_render_session>) + Send + Sync>;
+pub(crate) type OnRefresh = Box<dyn Fn(Option<Instant>, Vec<mln_render_session>) + Send + Sync>;
 
 /// What `mln_frame_pacer_create()` does on each platform with a source:
 /// checks `options` and `out_pacer`, builds the platform's [`FramePacer`]
@@ -163,10 +164,10 @@ pub(crate) unsafe fn create(
     let out_pacer = unsafe { handles::out_handle(out_pacer, "out_pacer") }?;
     let pacer: Arc<OnceLock<Weak<Pacer>>> = Arc::default();
     let refreshes = Arc::clone(&pacer);
-    let on_refresh: OnRefresh = Box::new(move |_, sessions| {
+    let on_refresh: OnRefresh = Box::new(move |shown_at, sessions| {
         if let Some(pacer) = refreshes.get().and_then(Weak::upgrade) {
             for session in sessions {
-                render_session::demand_paced(session, &pacer);
+                render_session::demand_paced(session, &pacer, shown_at);
             }
         }
     });

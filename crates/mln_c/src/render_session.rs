@@ -15,6 +15,7 @@ use ::mln_runtime::{
 use mln_util::ErrorKind;
 use mln_util::hash::HashMap;
 use mln_util::size::Size;
+use mln_util::time::Instant;
 use parking_lot::Mutex;
 
 use crate::abi::{self, Fields};
@@ -387,14 +388,15 @@ pub(crate) unsafe extern "C" fn mln_render_session_demand_frame(
 }
 
 /// The demand that `pacer` makes at a display refresh: a frame without flags
-/// and with token 0, when `pacer` paces `session` and its map has something
-/// new to draw. A session that has gone or failed since it asked refuses it.
-pub(crate) fn demand_paced(session: mln_render_session, pacer: &Pacer) {
+/// and with token 0, which the display shows at `shown_at` if the pacer
+/// knows, when `pacer` paces `session` and its map has something new to
+/// draw. A session that has gone or failed since it asked refuses it.
+pub(crate) fn demand_paced(session: mln_render_session, pacer: &Pacer, shown_at: Option<Instant>) {
     let Ok(object) = resolve(session) else {
         return;
     };
     if object.pacing.as_ref().is_some_and(|pacing| pacing.take_redraw(pacer)) {
-        let _ = object.session.demand_frame(FrameDemand::new(DemandMode::IfChanged, 0));
+        let _ = object.session.demand_frame(FrameDemand::new(DemandMode::IfChanged, 0).shown_at(shown_at));
     }
 }
 

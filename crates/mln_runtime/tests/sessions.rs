@@ -306,6 +306,32 @@ fn a_demand_shows_the_animations_as_of_its_call() {
     );
 }
 
+// A display link knows when the display shows the frame of each refresh: a
+// demand for that time has the frame's animations sample at it, rather than
+// as the demand is made, which would vary from frame to frame.
+#[test]
+fn a_demand_shows_the_animations_as_of_its_display_time() {
+    let runtime = runtime();
+    let map = red_map(&runtime);
+    let session = attach(&map);
+    render_until_idle(&map, &session);
+
+    let duration = std::time::Duration::from_secs(5);
+    let _ease = start_ease(&map, 100.0, duration);
+    let shown_at = |delay: u64| mln_util::time::Instant::now() + std::time::Duration::from_millis(delay);
+    let first_at = shown_at(25);
+    session.demand_frame(FrameDemand::new(DemandMode::IfChanged, 1).shown_at(Some(first_at))).unwrap();
+    let first = take_one(&session);
+    let second_at = first_at + std::time::Duration::from_millis(300);
+    session.demand_frame(FrameDemand::new(DemandMode::IfChanged, 2).shown_at(Some(second_at))).unwrap();
+    let second = take_one(&session);
+
+    let moved = eased_for(longitude(&second) - longitude(&first), 100.0, duration);
+    let slack = duration / 1000;
+    let expected = second_at - first_at;
+    assert!(moved.abs_diff(expected) <= slack, "the camera moved by {moved:?} between frames shown {expected:?} apart");
+}
+
 // Every demand sets the map's frame clock, a still frame's too: a camera
 // command starts from the latest frame, not from the last frame of an
 // animation that ended since, which would show it under way at once.

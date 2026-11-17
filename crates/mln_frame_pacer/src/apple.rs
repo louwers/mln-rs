@@ -16,6 +16,7 @@ pub(crate) mod display_link {
     use std::time::Duration;
 
     use mln_util::Error;
+    use mln_util::time::Instant;
     use objc2::rc::{Retained, autoreleasepool};
     use objc2::runtime::NSObject;
     use objc2::{AllocAnyThread, DefinedClass, define_class, msg_send, sel};
@@ -23,7 +24,7 @@ pub(crate) mod display_link {
         CFRetained, CFRunLoop, CFRunLoopSource, CFRunLoopSourceContext, kCFRunLoopDefaultMode,
     };
     use objc2_foundation::{NSDefaultRunLoopMode, NSRunLoop};
-    use objc2_quartz_core::{CADisplayLink, CAFrameRateRange, CAFrameRateRangeDefault};
+    use objc2_quartz_core::{CACurrentMediaTime, CADisplayLink, CAFrameRateRange, CAFrameRateRangeDefault};
     use parking_lot::Mutex;
 
     use crate::{Limit, VsyncSource, Vsyncs};
@@ -211,9 +212,11 @@ pub(crate) mod display_link {
                 // A paused link calls back no more until the pacer schedules
                 // another refresh.
                 link.setPaused(true);
-                // The timestamp is in seconds on the host's monotonic clock.
+                // The timestamps are in seconds on the host's media clock.
                 let time = Duration::try_from_secs_f64(link.timestamp()).unwrap_or_default();
-                self.ivars().vsync(time);
+                let until_shown = link.targetTimestamp() - CACurrentMediaTime();
+                let shown_at = Instant::now() + Duration::try_from_secs_f64(until_shown).unwrap_or_default();
+                self.ivars().vsync_shown_at(time, shown_at);
             }
         }
     );

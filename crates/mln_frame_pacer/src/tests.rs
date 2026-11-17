@@ -1,6 +1,8 @@
 //! The throttle's grid, and the pacer's requests and limits with a fake
 //! source that the tests refresh.
 
+use mln_util::time::Instant;
+
 use super::*;
 
 // MARK: - Limit
@@ -217,6 +219,26 @@ fn a_request_from_the_callback_waits_for_the_next_refresh() {
     display.refresh(at(1033));
     assert_eq!(*calls.lock(), [vec![1], vec![2]]);
     assert_eq!(display.scheduled(), 0);
+}
+
+#[test]
+fn a_callback_gets_when_the_display_shows_its_refreshs_frame() {
+    let display = Arc::new(FakeDisplay::default());
+    let shown = Arc::new(Mutex::new(Vec::new()));
+    let reported = Arc::clone(&shown);
+    let source = |vsyncs: Vsyncs, _: Option<Limit>| {
+        let _ = display.vsyncs.set(vsyncs);
+        Ok::<_, Error>(FakeSource(Arc::clone(&display)))
+    };
+    let pacer =
+        FramePacer::with_source(None, move |shown_at, _: Vec<u32>| reported.lock().push(shown_at), source).unwrap();
+    let target = Instant::now() + Duration::from_millis(25);
+    pacer.request(1);
+    *display.scheduled.lock() -= 1;
+    display.vsyncs.get().unwrap().vsync_shown_at(Duration::from_secs(1), target);
+    pacer.request(1);
+    display.refresh(Duration::from_secs(2));
+    assert_eq!(*shown.lock(), [Some(target), None]);
 }
 
 #[test]

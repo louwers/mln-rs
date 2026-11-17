@@ -11,6 +11,7 @@ use std::sync::{Arc, OnceLock, Weak};
 use std::time::Duration;
 
 use mln_util::Error;
+use mln_util::time::Instant;
 use parking_lot::Mutex;
 
 #[cfg_attr(
@@ -132,31 +133,43 @@ impl Vsyncs {
     /// callback on this thread before it returns, when the refresh is one
     /// that it calls back at.
     pub fn vsync(&self, time: Duration) {
+        self.report(time, None);
+    }
+
+    /// Reports a refresh at `time` on a monotonic clock, as
+    /// [`vsync`](Self::vsync) does, for which the display shows a frame at
+    /// `shown_at`.
+    pub fn vsync_shown_at(&self, time: Duration, shown_at: Instant) {
+        self.report(time, Some(shown_at));
+    }
+
+    fn report(&self, time: Duration, shown_at: Option<Instant>) {
         if let Some(pacer) = self.0.get().and_then(Weak::upgrade) {
-            pacer.on_vsync(time);
+            pacer.on_vsync(time, shown_at);
         }
     }
 }
 
 /// A pacer, as its [`Vsyncs`] reach it.
 trait Refreshes: Send + Sync {
-    fn on_vsync(&self, time: Duration);
+    fn on_vsync(&self, time: Duration, shown_at: Option<Instant>);
 }
 
 // MARK: - Pacer
 
 /// Calls back at the first refresh that its limit allows after a
 /// [`request`](Self::request), with the waiters that asked since the last
-/// callback, each once. The callback gets the refresh's time on the source's
-/// monotonic clock, and runs on the source's thread, holding none of the
-/// pacer's locks. Dropping the pacer drops its source, which stops.
+/// callback, each once. The callback gets when the display shows a frame
+/// drawn for the refresh, where the source knows, and runs on the source's
+/// thread, holding none of the pacer's locks. Dropping the pacer drops its
+/// source, which stops.
 pub struct FramePacer<T = ()> {
     state: Mutex<PacerState<T>>,
     /// Held while the limit changes, so that the source ends with the
     /// throttle's limit.
     limit_lock: Mutex<()>,
     source: Box<dyn VsyncSource>,
-    on_refresh: Box<dyn Fn(Duration, Vec<T>) + Send + Sync>,
+    on_refresh: Box<dyn Fn(Option<Instant>, Vec<T>) + Send + Sync>,
 }
 
 struct PacerState<T> {
@@ -177,7 +190,7 @@ impl<T: PartialEq + Send + 'static> FramePacer<T> {
     /// [`ErrorKind::Native`](mln_util::ErrorKind) without a display.
     pub fn new(
         limit: Option<Limit>,
-        on_refresh: impl Fn(Duration, Vec<T>) + Send + Sync + 'static,
+        on_refresh: impl Fn(Option<Instant>, Vec<T>) + Send + Sync + 'static,
     ) -> Result<Arc<Self>, Error> {
         #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
         {
@@ -194,7 +207,7 @@ impl<T: PartialEq + Send + 'static> FramePacer<T> {
     /// refreshes and the limit.
     pub fn with_source<S: VsyncSource + 'static, E>(
         limit: Option<Limit>,
-        on_refresh: impl Fn(Duration, Vec<T>) + Send + Sync + 'static,
+        on_refresh: impl Fn(Option<Instant>, Vec<T>) + Send + Sync + 'static,
         source: impl FnOnce(Vsyncs, Option<Limit>) -> Result<S, E>,
     ) -> Result<Arc<Self>, E> {
         let vsyncs = Vsyncs::default();
@@ -251,7 +264,7 @@ impl<T: Clone> FramePacer<T> {
 }
 
 impl<T: Send + 'static> Refreshes for FramePacer<T> {
-    fn on_vsync(&self, time: Duration) {
+    fn on_vsync(&self, time: Duration, shown_at: Option<Instant>) {
         let due = {
             let mut state = self.state.lock();
             if state.waiting.is_empty() {
@@ -266,7 +279,7 @@ impl<T: Send + 'static> Refreshes for FramePacer<T> {
             }
         };
         match due {
-            Some(waiters) => (self.on_refresh)(time, waiters),
+            Some(waiters) => (self.on_refresh)(shown_at, waiters),
             // Waits for the next refresh.
             None => self.source.schedule(),
         }

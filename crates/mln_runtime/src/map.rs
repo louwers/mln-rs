@@ -836,15 +836,15 @@ impl Map {
         );
     }
 
-    /// For a frame demanded now: sets the map's frame clock, which its
-    /// animations sample at and its camera commands start from, and while
-    /// an animation runs, has the map sample it at this time. Returns the
-    /// sample that the frame waits for, or 0 for none. The demands that ask
-    /// before the runtime's thread takes a sample share it.
-    pub(crate) fn frame_demanded(&self) -> u64 {
+    /// For a frame demanded now that samples at `time`: sets the map's frame
+    /// clock, which its animations sample at and its camera commands start
+    /// from, and while an animation runs, has the map sample it at that
+    /// time. Returns the sample that the frame waits for, or 0 for none. The
+    /// demands that ask before the runtime's thread takes a sample share it.
+    pub(crate) fn frame_demanded(&self, time: Instant) -> u64 {
         let published = &self.shared.published;
         if let Some(clock) = published.frame_clock.get() {
-            clock.set(Some(Instant::now()));
+            clock.set(Some(time));
         }
         // A still map has nothing to sample, and its frames don't wait for
         // the runtime's thread.

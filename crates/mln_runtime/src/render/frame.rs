@@ -2,6 +2,7 @@
 
 use mln_map::{MapView, RenderMode};
 use mln_renderer::FrameProjection;
+use mln_util::time::Instant;
 
 /// When a demand draws a frame.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -23,12 +24,23 @@ pub struct FrameDemand {
     pub mode: DemandMode,
     /// A value of the host's choice that the demand's result carries.
     pub token: u64,
+    /// When the display shows the frame, as a display link's target
+    /// timestamp gives it: the frame's animations sample at it, so that the
+    /// display shows them at evenly spaced times. `None` samples them as
+    /// the demand is made.
+    pub shown_at: Option<Instant>,
 }
 
 impl FrameDemand {
     #[must_use]
     pub fn new(mode: DemandMode, token: u64) -> Self {
-        FrameDemand { mode, token }
+        FrameDemand { mode, token, shown_at: None }
+    }
+
+    /// The demand, for a frame that the display shows at `shown_at`.
+    #[must_use]
+    pub fn shown_at(self, shown_at: Option<Instant>) -> Self {
+        FrameDemand { shown_at, ..self }
     }
 }
 

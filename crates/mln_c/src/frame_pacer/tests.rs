@@ -3,7 +3,7 @@
 //! of its own source.
 
 use core::ffi::c_void;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use ::mln_frame_pacer::{VsyncSource, Vsyncs};
 use parking_lot::{Condvar, Mutex};

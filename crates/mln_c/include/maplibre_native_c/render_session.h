@@ -290,7 +290,8 @@ MLN_API mln_status mln_render_session_get_failure(
  * changes that an open command group holds back, and the map's camera
  * animations as they are at the time of the call. Demand each frame when the
  * display is ready for it, so that animations move evenly. A frame pacer does
- * that for you.
+ * that for you, and where the platform reports when the display shows each
+ * frame, its frames show the animations as they are then.
  *
  * You can call it once the attach call returns. While the attach runs, the
  * demand waits for it to complete. Every demand finishes with one frame result
