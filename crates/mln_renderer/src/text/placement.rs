@@ -856,13 +856,20 @@ impl Placement {
         prev_placement: Option<Rc<Placement>>,
         kind: PlacementKind,
     ) -> Self {
-        if let Some(prev) = &prev_placement {
-            // Only hold on to one placement back
-            *prev.prev_placement.borrow_mut() = None;
-        }
+        // Only hold on to one placement back. The one before it is done
+        // with its collision index, unless something else still holds it.
+        let previous_collision_index = prev_placement
+            .as_ref()
+            .and_then(|prev| prev.prev_placement.borrow_mut().take())
+            .and_then(|placement| Rc::try_unwrap(placement).ok())
+            .map(|placement| placement.collision_index);
         Placement {
             kind,
-            collision_index: CollisionIndex::new(&update_parameters.transform_state, update_parameters.mode),
+            collision_index: CollisionIndex::reusing(
+                &update_parameters.transform_state,
+                update_parameters.mode,
+                previous_collision_index,
+            ),
             transition_options: update_parameters.style.get_transition_options(),
             fade_start_time: None,
             commit_time: update_parameters.time_point,

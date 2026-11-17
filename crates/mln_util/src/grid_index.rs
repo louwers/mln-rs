@@ -49,6 +49,7 @@ pub type BCircle = Circle<f32>;
 pub struct GridIndex<T> {
     width: f32,
     height: f32,
+    cell_size: u32,
 
     estimated_elements_per_cell: usize,
 
@@ -79,6 +80,7 @@ impl<T: Clone> GridIndex<T> {
         GridIndex {
             width,
             height,
+            cell_size,
             estimated_elements_per_cell: 0,
             x_cell_count,
             y_cell_count,
@@ -88,6 +90,23 @@ impl<T: Clone> GridIndex<T> {
             circle_elements: Vec::new(),
             box_cells: vec![Vec::new(); x_cell_count * y_cell_count],
             circle_cells: vec![Vec::new(); x_cell_count * y_cell_count],
+        }
+    }
+
+    /// Empties the index and sizes it as [`new`](Self::new) does. It keeps
+    /// its allocations when the size and cell size are the ones it had.
+    pub fn reset(&mut self, width: f32, height: f32, cell_size: u32) {
+        if width.to_bits() != self.width.to_bits()
+            || height.to_bits() != self.height.to_bits()
+            || cell_size != self.cell_size
+        {
+            *self = GridIndex::new(width, height, cell_size);
+            return;
+        }
+        self.box_elements.clear();
+        self.circle_elements.clear();
+        for cell in self.box_cells.iter_mut().chain(&mut self.circle_cells) {
+            cell.clear();
         }
     }
 
@@ -416,6 +435,25 @@ mod tests {
         assert_eq!(grid.query(&bbox(40.0, 40.0, 100.0, 100.0)), Vec::<i16>::new());
         assert_eq!(grid.query(&bbox(-6.0, 0.0, 3.0, 100.0)), vec![2]);
         assert_eq!(grid.query(&bbox(-1000.0, -1000.0, 1000.0, 1000.0)), vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn reset_empties_the_index() {
+        let mut grid: GridIndex<i16> = GridIndex::new(100.0, 100.0, 10);
+        grid.insert(0, &bbox(4.0, 10.0, 6.0, 30.0));
+        grid.insert_circle(1, &bcircle(50.0, 50.0, 5.0));
+        let everything = bbox(-1000.0, -1000.0, 1000.0, 1000.0);
+
+        grid.reset(100.0, 100.0, 10);
+        assert!(grid.empty());
+        assert_eq!(grid.query(&everything), Vec::<i16>::new());
+        grid.insert(2, &bbox(4.0, 10.0, 6.0, 30.0));
+        assert_eq!(grid.query(&everything), vec![2]);
+
+        grid.reset(200.0, 50.0, 10);
+        assert!(grid.empty());
+        grid.insert(3, &bbox(150.0, 10.0, 160.0, 20.0));
+        assert_eq!(grid.query(&bbox(155.0, 15.0, 156.0, 16.0)), vec![3]);
     }
 
     // gtest: GridIndex.DuplicateKeys

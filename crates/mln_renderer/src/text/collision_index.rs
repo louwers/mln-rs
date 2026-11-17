@@ -147,20 +147,42 @@ pub(crate) struct CollisionIndex {
 
 impl CollisionIndex {
     pub(crate) fn new(transform_state: &TransformState, map_mode: MapMode) -> Self {
+        CollisionIndex::reusing(transform_state, map_mode, None)
+    }
+
+    /// An empty collision index, as [`new`](Self::new) makes, that reuses
+    /// the grids of `previous`, an index placement no longer reads.
+    /// Placement makes one for every placement, and the grids' cells keep
+    /// their allocations while the viewport keeps its size.
+    pub(crate) fn reusing(
+        transform_state: &TransformState,
+        map_mode: MapMode,
+        previous: Option<CollisionIndex>,
+    ) -> Self {
         let viewport_padding = find_viewport_padding(transform_state, map_mode);
         let size = transform_state.get_size();
         // `width + 2 * viewportPadding`: uint32_t + float.
         let width = size.width as f32;
         let height = size.height as f32;
+        let grid_width = width + 2.0 * viewport_padding;
+        let grid_height = height + 2.0 * viewport_padding;
+        let reset = |mut grid: CollisionGrid| {
+            grid.reset(grid_width, grid_height, 25);
+            grid
+        };
+        let (collision_grid, ignored_grid) = match previous {
+            Some(previous) => (reset(previous.collision_grid), reset(previous.ignored_grid)),
+            None => (CollisionGrid::new(grid_width, grid_height, 25), CollisionGrid::new(grid_width, grid_height, 25)),
+        };
         CollisionIndex {
             transform_state: transform_state.clone(),
             viewport_padding,
-            collision_grid: CollisionGrid::new(width + 2.0 * viewport_padding, height + 2.0 * viewport_padding, 25),
-            ignored_grid: CollisionGrid::new(width + 2.0 * viewport_padding, height + 2.0 * viewport_padding, 25),
+            collision_grid,
+            ignored_grid,
             screen_right_boundary: width + viewport_padding,
             screen_bottom_boundary: height + viewport_padding,
-            grid_right_boundary: width + 2.0 * viewport_padding,
-            grid_bottom_boundary: height + 2.0 * viewport_padding,
+            grid_right_boundary: grid_width,
+            grid_bottom_boundary: grid_height,
             pitch_factor: (transform_state.get_pitch().cos()
                 * f64::from(transform_state.get_camera_to_center_distance())) as f32,
         }
