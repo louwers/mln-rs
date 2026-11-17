@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="List the benchmark scenarios and the question each answers"
+#USAGE arg "[args]..." var=#true help="Arguments to `mln-bench list`, such as `--filter` or `--json`"
+set -euo pipefail
+eval "set -- ${usage_args:-}"
+cargo run -q --profile benchmark --config tools/bench/profile.toml -p mln-rs-bench -- list "$@"

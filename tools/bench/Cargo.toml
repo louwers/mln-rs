@@ -1,0 +1,58 @@
+[package]
+name = "mln-rs-bench"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+# The benchmarks (README.md); never released.
+publish = false
+
+[[bin]]
+name = "mln-bench"
+path = "src/main.rs"
+
+# `mln-bench compare` builds this package inside the base's workspace too, so
+# it names its dependencies itself instead of through the workspace's table:
+# the libraries by path, and other crates by requirements loose enough that
+# any base's Cargo.lock satisfies them as it stands.
+[dependencies]
+feature = { package = "mln-rs-feature", path = "../../vendor/feature" }
+mln_actor = { package = "mln-rs-actor", path = "../../crates/mln_actor" }
+mln_conversion = { package = "mln-rs-conversion", path = "../../crates/mln_conversion" }
+mln_expression = { package = "mln-rs-expression", path = "../../crates/mln_expression" }
+mln_gfx = { package = "mln-rs-gfx", path = "../../crates/mln_gfx" }
+# The OpenGL backend's renderer name (support/gpu.rs).
+mln_gl = { package = "mln-rs-gl", path = "../../crates/mln_gl" }
+mln_headless = { package = "mln-rs-headless", path = "../../crates/mln_headless" }
+mln_map = { package = "mln-rs-map", path = "../../crates/mln_map" }
+# The devices of every backend, which MLN_RENDER_BACKEND picks among.
+mln_runtime = { package = "mln-rs-runtime", path = "../../crates/mln_runtime", features = [
+  "default",
+] }
+mln_util = { package = "mln-rs-util", path = "../../crates/mln_util" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# The file each scenario's process writes its report to.
+tempfile = "3"
+# The WebGPU adapter's description, and the wait for its queue.
+wgpu = { version = "30", default-features = false }
+
+[target.'cfg(not(any(target_vendor = "apple", target_family = "wasm")))'.dependencies]
+mln_vulkan = { package = "mln-rs-vulkan", path = "../../crates/mln_vulkan" }
+
+# The instruction counters and the process's CPU time (meter.rs), and the
+# machine's description (environment.rs).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+mln_d3d12 = { package = "mln-rs-d3d12", path = "../../crates/mln_d3d12" }
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_System_Threading",
+] }
+
+[lints]
+workspace = true

@@ -1,0 +1,25 @@
+# The Cargo profile the benchmarks build with, as a Cargo config file that
+# every build of mln-bench passes with `--config`: `mise run bench` builds
+# this checkout's harness with it, and `mln-bench compare` builds both sides
+# with this one file, so a base whose own manifest lacks the profile, or
+# defines it differently, still builds the same way.
+#
+# Not the release profile: its fat LTO over one codegen unit links the whole
+# program again after any change, which takes minutes, and a comparison
+# rebuilds after every edit. Here each crate is optimized as in release but
+# links without cross-crate LTO, so an edit to one library recompiles that
+# library and its dependents in parallel. Both sides of a comparison build
+# with this profile, so it measures a change in the code, not a profile.
+# Incremental compilation stays off: it partitions code by what earlier
+# builds did, so the same source could compile to different instructions in
+# two target directories.
+[profile.benchmark]
+inherits = "release"
+opt-level = 3
+lto = false
+codegen-units = 16
+incremental = false
+debug = false
+debug-assertions = false
+overflow-checks = false
+panic = "unwind"

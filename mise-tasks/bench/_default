@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="Run the benchmarks, each scenario in a process of its own (tools/bench/README.md)"
+#USAGE arg "[args]..." var=#true help="Arguments to `mln-bench run`, such as `--filter micro/` or `--json`"
+set -euo pipefail
+source tools/dev-shell.sh
+eval "set -- ${usage_args:-}"
+dev_shell cargo run -q --profile benchmark --config tools/bench/profile.toml -p mln-rs-bench -- run "$@"
