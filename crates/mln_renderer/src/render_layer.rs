@@ -11,7 +11,7 @@ use mln_gfx::ShaderRegistry;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_map_types::{TileProjector, TransformState};
 use mln_style::expression::Dependency;
-use mln_style::layer_type::{ErasedLayerStyle, LayerStyle, StyleLayerType};
+use mln_style::layer_type::{ErasedLayerStyle, LayerStyle, PaintSet};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_style_types::{TranslateAnchorType, VisibilityType};
 use mln_tile_id::OverscaledTileID;
@@ -23,7 +23,7 @@ use crate::bucket::BucketPtr;
 use crate::gfx::context::Context;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::LayerTweaker;
-use crate::layer_type::ErasedEvaluatedLayer;
+use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType};
 use crate::line_atlas::LineAtlas;
 use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;
@@ -37,6 +37,20 @@ pub(crate) struct LayerRenderData {
     pub(crate) bucket: BucketPtr,
     /// The values of the layer that the bucket was laid out with.
     pub(crate) layer: Arc<dyn ErasedEvaluatedLayer>,
+}
+
+impl LayerRenderData {
+    /// The bucket, as a bucket of a `T` layer, or `None` for another type's.
+    pub(crate) fn bucket<T: LayerType>(&self) -> Option<&T::Bucket> {
+        (*self.bucket).downcast_ref()
+    }
+
+    /// The values the bucket was laid out with, as a `T` layer's, or `None`
+    /// for another type's.
+    pub(crate) fn layer<T: LayerType>(&self) -> Option<&EvaluatedLayer<T>> {
+        let any: &dyn std::any::Any = &*self.layer;
+        any.downcast_ref()
+    }
 }
 
 // symbols: `BucketPlacementData`. C++ holds `reference_wrapper`s to the
@@ -58,7 +72,7 @@ impl Default for SymbolTranslate {
 
 #[derive(Clone)]
 pub(crate) struct BucketPlacementData {
-    pub(crate) bucket: BucketPtr,
+    pub(crate) bucket: Arc<crate::buckets::symbol_bucket::SymbolBucket>,
     /// The `RenderTile` (`tile`): `tile_owner[tile_index]`.
     pub(crate) tile_owner: Rc<Vec<RenderTile>>,
     pub(crate) tile_index: usize,
@@ -76,8 +90,6 @@ impl BucketPlacementData {
         &self.tile_owner[self.tile_index]
     }
 }
-
-pub(crate) type LayerPlacementData = Vec<BucketPlacementData>;
 
 pub(crate) struct LayerPrepareParameters<'a> {
     pub(crate) source: Option<&'a dyn RenderSource>,
@@ -110,10 +122,6 @@ pub(crate) struct RenderLayerBase {
     /// bucket from which they were built (C++ `TinyUnorderedMap`; only
     /// looked up).
     pub(crate) render_tile_ids: HashMap<OverscaledTileID, Option<SimpleIdentity>>,
-    // symbols: `placementData`.
-    pub(crate) placement_data: LayerPlacementData,
-    // symbols: `followerData`.
-    pub(crate) follower_data: LayerPlacementData,
     /// The projection variant this layer's drawables are built with.
     pub(crate) projection_variant: ProjectionVariant,
 }
@@ -132,31 +140,139 @@ impl RenderLayerBase {
             render_tiles: None,
             render_tiles_owner: Rc::new(Vec::new()),
             render_tile_ids: HashMap::default(),
-            placement_data: Vec::new(), // symbols
-            follower_data: Vec::new(),  // symbols
             projection_variant: ProjectionVariant::Mercator,
         }
     }
 }
 
-pub(crate) trait RenderLayer {
+/// A layer's values of its type `T`: its style, its paint values in
+/// transition, and their evaluation for the last frame.
+pub(crate) struct LayerValues<T: LayerType> {
+    pub(crate) style: Arc<LayerStyle<T>>,
+    pub(crate) unevaluated: <T::PaintProperties as PaintSet>::Unevaluated,
+    pub(crate) evaluated: Arc<EvaluatedLayer<T>>,
+}
+
+impl<T: LayerType> LayerValues<T> {
+    /// The values of the layer `style`, before any transition, and the base
+    /// of a render layer that holds them.
+    pub(crate) fn new(style: Arc<LayerStyle<T>>) -> (RenderLayerBase, Self) {
+        let unevaluated = style.paint.untransitioned();
+        let evaluated = Arc::new(EvaluatedLayer::new(Arc::clone(&style)));
+        let mut base = RenderLayerBase::new(Arc::<EvaluatedLayer<T>>::clone(&evaluated));
+        base.style_dependencies = T::PaintProperties::dependencies(&unevaluated);
+        (base, LayerValues { style, unevaluated, evaluated })
+    }
+
+    /// The paint values evaluated for a frame, copying from the last
+    /// evaluation each value that can't have changed, with the frame's
+    /// cross-fade for a type that has one and no render passes.
+    pub(crate) fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) -> EvaluatedLayer<T> {
+        let paint =
+            T::PaintProperties::evaluate_with_previous(&mut self.unevaluated, parameters, &self.evaluated.paint);
+        let mut evaluated = EvaluatedLayer::with_paint(Arc::clone(&self.style), paint);
+        if T::CROSSFADES {
+            evaluated.crossfade = parameters.get_crossfade_parameters();
+        }
+        evaluated
+    }
+
+    /// Makes `evaluated` the layer's values, drawing in `base`'s passes,
+    /// and gives them to the layer's tweaker.
+    pub(crate) fn set_evaluated(&mut self, base: &mut RenderLayerBase, mut evaluated: EvaluatedLayer<T>) {
+        evaluated.render_passes = base.passes.underlying_type();
+        self.evaluated = Arc::new(evaluated);
+        base.evaluated_properties = Arc::<EvaluatedLayer<T>>::clone(&self.evaluated);
+        if let Some(layer_tweaker) = &mut base.layer_tweaker {
+            layer_tweaker.update_properties(Arc::clone(&base.evaluated_properties));
+        }
+    }
+}
+
+/// A render layer whose values are of the layer type `Type`. Its base and
+/// values give it [`LayerParts`].
+pub(crate) trait TypedLayer {
+    type Type: LayerType;
+
+    fn parts(&self) -> (&RenderLayerBase, &LayerValues<Self::Type>);
+    fn parts_mut(&mut self) -> (&mut RenderLayerBase, &mut LayerValues<Self::Type>);
+}
+
+/// What a render layer holds whatever its type: its base, and its values,
+/// which this transitions without knowing their type.
+pub(crate) trait LayerParts {
     fn base(&self) -> &RenderLayerBase;
     fn base_mut(&mut self) -> &mut RenderLayerBase;
 
+    /// Makes `style`, the changed style of the layer, the layer's, if it is
+    /// a layer of its type.
+    fn set_style(&mut self, style: &Arc<dyn ErasedLayerStyle>);
+
+    /// Transitions the layer's paint values to those of its style.
+    fn transition_values(&mut self, parameters: &TransitionParameters);
+
+    /// Whether a paint value of the layer is still in transition.
+    fn values_in_transition(&self) -> bool;
+
+    /// Whether the layer's evaluation is in a cross-fade.
+    fn values_crossfading(&self) -> bool;
+}
+
+impl<L: TypedLayer> LayerParts for L {
+    fn base(&self) -> &RenderLayerBase {
+        self.parts().0
+    }
+
+    fn base_mut(&mut self) -> &mut RenderLayerBase {
+        self.parts_mut().0
+    }
+
+    fn set_style(&mut self, style: &Arc<dyn ErasedLayerStyle>) {
+        let (base, values) = self.parts_mut();
+        if let Some(recovered) = LayerStyle::recover(style) {
+            values.style = recovered;
+            base.style = Arc::clone(style);
+        }
+    }
+
+    fn transition_values(&mut self, parameters: &TransitionParameters) {
+        let (base, values) = self.parts_mut();
+        let prior = std::mem::take(&mut values.unevaluated);
+        values.unevaluated = values.style.paint.transitioned(parameters, prior);
+        base.style_dependencies =
+            <L::Type as mln_style::layer_type::StyleLayerType>::PaintProperties::dependencies(&values.unevaluated);
+    }
+
+    fn values_in_transition(&self) -> bool {
+        <L::Type as mln_style::layer_type::StyleLayerType>::PaintProperties::has_transition(&self.parts().1.unevaluated)
+    }
+
+    fn values_crossfading(&self) -> bool {
+        L::Type::CROSSFADES && self.parts().1.evaluated.crossfade.t != 1.0
+    }
+}
+
+pub(crate) trait RenderLayer: LayerParts {
     /// Begin transitions for any properties that have changed since the last
     /// frame.
-    fn transition(&mut self, parameters: &TransitionParameters);
+    fn transition(&mut self, parameters: &TransitionParameters) {
+        self.transition_values(parameters);
+    }
 
     /// Fully evaluate possibly-transitioning paint properties based on a
     /// zoom and some evaluated layout properties.
     fn evaluate(&mut self, parameters: &PropertyEvaluationParameters);
 
     /// Returns true if any paint properties have active transitions.
-    fn has_transition(&self) -> bool;
+    fn has_transition(&self) -> bool {
+        self.values_in_transition()
+    }
 
     /// Returns true if the layer has a pattern property and is actively
     /// crossfading.
-    fn has_crossfade(&self) -> bool;
+    fn has_crossfade(&self) -> bool {
+        self.values_crossfading()
+    }
 
     /// Returns true if layer writes to depth buffer by drawing using
     /// `PaintParameters::depthModeFor3D()`.
@@ -348,24 +464,27 @@ pub(crate) trait RenderLayer {
     }
 
     /// Makes `style`, the changed style of the layer, the layer's, and
-    /// transitions to it. Through [`set_style`], a style of another type
-    /// leaves the layer's.
-    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>);
+    /// transitions to it. A style of another type leaves the layer's.
+    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>) {
+        self.set_style(style);
+        self.transition(parameters);
+    }
 
     /// Returns true if the layer has to be placed.
     fn needs_placement(&self) -> bool {
-        self.base().style.info().cross_tile_index && !self.base().placement_data.is_empty()
+        !self.get_placement_data().is_empty()
     }
 
-    // symbols: `getPlacementData()`.
-    fn get_placement_data(&self) -> &LayerPlacementData {
-        &self.base().placement_data
+    /// symbols: the buckets the layer places, which only a symbol layer
+    /// has.
+    fn get_placement_data(&self) -> &[BucketPlacementData] {
+        &[]
     }
 
-    /// symbols: `getFollowerData()`: buckets that another layer places and
-    /// this layer draws, at its own translation.
-    fn get_follower_data(&self) -> &LayerPlacementData {
-        &self.base().follower_data
+    /// symbols: the buckets that another layer places and this layer draws,
+    /// at its own translation.
+    fn get_follower_data(&self) -> &[BucketPlacementData] {
+        &[]
     }
 
     /// Checks whether this layer needs to be rendered in the given render
@@ -414,19 +533,6 @@ pub(crate) trait RenderLayer {
     }
 }
 
-/// Makes `style` the style of the render layer whose members are `base` and
-/// whose style is `typed`, if it is a `T` layer's.
-pub(crate) fn set_style<T: StyleLayerType>(
-    base: &mut RenderLayerBase,
-    typed: &mut Arc<LayerStyle<T>>,
-    style: &Arc<dyn ErasedLayerStyle>,
-) {
-    if let Some(recovered) = LayerStyle::recover(style) {
-        *typed = recovered;
-        base.style = Arc::clone(style);
-    }
-}
-
 /// The default `RenderLayer::mark_layer_renderable`, callable from
 /// overrides: sets the renderable flag, and releases the render data of a
 /// layer that stops rendering.
@@ -459,7 +565,6 @@ pub(crate) fn release_render_data_base<L: RenderLayer + ?Sized>(layer: &mut L) {
     base.render_tiles = None;
     base.render_tiles_owner = Rc::new(Vec::new());
     base.render_tile_ids.clear();
-    base.placement_data.clear();
 }
 
 /// The default `RenderLayer::prepare(params)`, callable from overrides (C++

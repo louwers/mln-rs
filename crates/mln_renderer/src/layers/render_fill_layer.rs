@@ -14,10 +14,10 @@ use mln_gfx::{
     VertexAttributeArrayPtr,
 };
 use mln_map_types::TransformState;
-use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
+use mln_style::PropertyEvaluationParameters;
+use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Fill;
 use mln_style::layers::fill_layer_properties::FillPaintProperties;
-use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_util::Color;
 use mln_util::error::Error;
 
@@ -29,12 +29,12 @@ use crate::drawable_builder::{DrawableBuilder, UniqueDrawableBuilder};
 use crate::gfx::context::Context;
 use crate::layer_composite::Composite;
 use crate::layer_group::LayerGroup;
-use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
+use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::pattern_layout::{FillLayoutSpec, PatternLayout, uses_pattern};
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
-use crate::render_layer::{RenderLayer, RenderLayerBase, set_style};
+use crate::render_layer::{LayerValues, RenderLayer, RenderLayerBase, TypedLayer};
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::update_parameters::UpdateParameters;
@@ -134,6 +134,7 @@ fn read_fill_attributes(
 impl LayerType for Fill {
     type Layout = PatternLayout<FillLayoutSpec>;
     type Bucket = FillBucket;
+    const CROSSFADES: bool = true;
 
     /// Whether a layer of the group has a pattern.
     fn layout_can_need_dependencies(group: &[Arc<EvaluatedLayer<Fill>>]) -> bool {
@@ -160,9 +161,7 @@ impl LayerType for Fill {
 
 pub(crate) struct RenderFillLayer {
     base: RenderLayerBase,
-    style: Arc<LayerStyle<Fill>>,
-    // Paint properties
-    unevaluated: FillPaintProperties::Unevaluated,
+    values: LayerValues<Fill>,
 
     fill_shader_group: Option<ShaderGroupPtr>,
     /// The outline shaders: the line ones, or the instanced ones on a
@@ -178,14 +177,10 @@ pub(crate) struct RenderFillLayer {
 
 impl RenderFillLayer {
     pub(crate) fn new(impl_: Arc<LayerStyle<Fill>>) -> Self {
-        let unevaluated = impl_.paint.untransitioned();
-        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Fill>::new(Arc::clone(&impl_)));
-        let mut base = RenderLayerBase::new(properties);
-        base.style_dependencies = unevaluated.get_dependencies();
+        let (base, values) = LayerValues::new(impl_);
         RenderFillLayer {
             base,
-            style: impl_,
-            unevaluated,
+            values,
             fill_shader_group: None,
             outline_shader_group: None,
             pattern_shader_group: None,
@@ -196,38 +191,24 @@ impl RenderFillLayer {
     }
 }
 
+impl TypedLayer for RenderFillLayer {
+    type Type = Fill;
+
+    fn parts(&self) -> (&RenderLayerBase, &LayerValues<Fill>) {
+        (&self.base, &self.values)
+    }
+
+    fn parts_mut(&mut self) -> (&mut RenderLayerBase, &mut LayerValues<Fill>) {
+        (&mut self.base, &mut self.values)
+    }
+}
+
 impl RenderLayer for RenderFillLayer {
-    fn base(&self) -> &RenderLayerBase {
-        &self.base
-    }
-
-    fn base_mut(&mut self) -> &mut RenderLayerBase {
-        &mut self.base
-    }
-
-    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>) {
-        set_style(&mut self.base, &mut self.style, style);
-        self.transition(parameters);
-    }
-
-    fn transition(&mut self, parameters: &TransitionParameters) {
-        let prior = std::mem::take(&mut self.unevaluated);
-        self.unevaluated = self.style.paint.transitioned(parameters, prior);
-        self.base.style_dependencies = self.unevaluated.get_dependencies();
-    }
-
     fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
-        let previous_evaluated = evaluated::<Fill>(&self.base.evaluated_properties).paint.clone();
-        let mut properties = EvaluatedLayer::<Fill> {
-            crossfade: parameters.get_crossfade_parameters(),
-            ..EvaluatedLayer::with_paint(
-                Arc::clone(&self.style),
-                self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
-            )
-        };
+        let mut properties = self.values.evaluate(parameters);
         let evaluated = &mut properties.paint;
 
-        if self.unevaluated.fill_outline_color.is_undefined() {
+        if self.values.unevaluated.fill_outline_color.is_undefined() {
             evaluated.fill_outline_color = evaluated.fill_color.clone();
         }
 
@@ -235,27 +216,14 @@ impl RenderLayer for RenderFillLayer {
             if *evaluated.fill_layer_opacity.uniform() > 0.0 { RenderPass::Translucent } else { RenderPass::None };
 
         if self.base.passes != RenderPass::None
-            && self.unevaluated.fill_pattern.is_undefined()
+            && self.values.unevaluated.fill_pattern.is_undefined()
             && evaluated.fill_color.constant_or(&Color::default()).a >= 1.0
             && evaluated.fill_opacity.constant_or(&0.0) >= 1.0
         {
             // Supply both - evaluated based on opaquePassCutoff in render().
             self.base.passes |= RenderPass::Opaque;
         }
-        properties.render_passes = self.base.passes.underlying_type();
-        self.base.evaluated_properties = Arc::new(properties);
-
-        if let Some(layer_tweaker) = &mut self.base.layer_tweaker {
-            layer_tweaker.update_properties(Arc::clone(&self.base.evaluated_properties));
-        }
-    }
-
-    fn has_transition(&self) -> bool {
-        self.unevaluated.has_transition()
-    }
-
-    fn has_crossfade(&self) -> bool {
-        evaluated::<Fill>(&self.base.evaluated_properties).crossfade.t != 1.0
+        self.values.set_evaluated(&mut self.base, properties);
     }
 
     // query
@@ -270,7 +238,7 @@ impl RenderLayer for RenderFillLayer {
         _projector: &mln_map_types::TileProjector<'_>,
         _feature_state: &mln_style::expression::expression::FeatureState,
     ) -> bool {
-        let evaluated = &evaluated::<Fill>(&self.base.evaluated_properties).paint;
+        let evaluated = &self.values.evaluated.paint;
         let translated_query_geometry = crate::geometry::feature_index::FeatureIndex::translate_query_geometry(
             query_geometry,
             *evaluated.fill_translate.uniform(),
@@ -352,7 +320,7 @@ impl RenderLayer for RenderFillLayer {
         // The layer's group, which this fills, and puts back when it's done.
         let mut layer_group = self.base.layer_group.take().unwrap_or_else(LayerGroup::tiles);
         {
-            let paint = &evaluated::<Fill>(&self.base.evaluated_properties).paint;
+            let paint = &self.values.evaluated.paint;
             layer_group.composite =
                 Composite::of(*paint.fill_layer_opacity.uniform(), *paint.fill_layer_blend.uniform());
             let base = &self.base;
@@ -394,7 +362,7 @@ impl RenderLayer for RenderFillLayer {
                 continue;
             };
 
-            let Some(bucket) = (*render_data.bucket).downcast_ref::<FillBucket>() else {
+            let Some(bucket) = render_data.bucket::<Fill>() else {
                 continue;
             };
             let Some(binders_lock) = bucket.paint_property_binders.get(self.get_id()) else {
@@ -411,7 +379,9 @@ impl RenderLayer for RenderFillLayer {
             }
             self.set_render_tile_bucket_id(&tile_id, bucket.base.bucket_id);
 
-            let evaluated = &evaluated::<Fill>(&render_data.layer).paint;
+            let Some(evaluated) = render_data.layer::<Fill>().map(|layer| &layer.paint) else {
+                continue;
+            };
             let geometry = tile.get_bucket_geometry();
             let paint_of = || {
                 paint_vertices(geometry, bucket, &binders.interleaved_vertex_buffer, binders.depends_on_feature_state())
@@ -456,7 +426,8 @@ impl RenderLayer for RenderFillLayer {
             // Outline always occurs in translucent pass, defaults to fill
             // color. Outline does not default to fill in the pattern case
             let do_outline = *evaluated.fill_antialias.uniform()
-                && (self.unevaluated.fill_pattern.is_undefined() || self.unevaluated.fill_outline_color.is_undefined());
+                && (self.values.unevaluated.fill_pattern.is_undefined()
+                    || self.values.unevaluated.fill_outline_color.is_undefined());
 
             let fill_vertex_count = bucket.vertices.len();
 
@@ -521,7 +492,7 @@ impl RenderLayer for RenderFillLayer {
                 }
             };
 
-            if self.unevaluated.fill_pattern.is_undefined() {
+            if self.values.unevaluated.fill_pattern.is_undefined() {
                 // Simple fill
                 let fill_shader = fill_shader_group.shader(&properties_as_uniforms, self.base.projection_variant);
 
@@ -549,7 +520,11 @@ impl RenderLayer for RenderFillLayer {
                     let mut builder = DrawableBuilder::boxed();
                     common_init(builder.as_mut());
                     builder.set_depth_type(DepthMaskType::ReadOnly);
-                    builder.set_sub_layer_index(if self.unevaluated.fill_outline_color.is_undefined() { 2 } else { 0 });
+                    builder.set_sub_layer_index(if self.values.unevaluated.fill_outline_color.is_undefined() {
+                        2
+                    } else {
+                        0
+                    });
                     builder.set_color_mode(&ColorMode::alpha_blended());
                     builder.set_render_pass(RenderPass::Translucent);
                     outline_builder = Some(builder);

@@ -16,7 +16,6 @@ use mln_util::constants::EXTENT;
 use mln_util::hash::HashSet;
 use mln_vec_map::{VecMap, VecSet};
 
-use crate::bucket::Bucket;
 use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::layout::symbol_instance::{SymbolInstance, SymbolInstancePools};
 use crate::render_layer::RenderLayer;
@@ -402,13 +401,8 @@ impl CrossTileSymbolIndex {
 
         for item in layer.get_placement_data() {
             let render_tile = item.tile();
-            let pair = register_at_cross_tile_index(
-                &*item.bucket,
-                layer_index,
-                render_tile,
-                state,
-                &mut self.max_cross_tile_id,
-            );
+            let pair =
+                item.bucket.register_at_cross_tile_index(layer_index, render_tile, state, &mut self.max_cross_tile_id);
             debug_assert!(pair.0 != 0);
             result.buckets_added |= pair.1;
             current_bucket_ids.insert(pair.0);
@@ -425,21 +419,6 @@ impl CrossTileSymbolIndex {
 
     pub(crate) fn reset(&mut self) {
         self.layer_indexes.clear();
-    }
-}
-
-/// Registers `bucket` at the cross-tile index. Only symbol buckets register;
-/// other buckets return `(0, false)`.
-pub(crate) fn register_at_cross_tile_index(
-    bucket: &dyn Bucket,
-    index: &mut CrossTileSymbolLayerIndex,
-    render_tile: &RenderTile,
-    state: &TransformState,
-    max_cross_tile_id: &mut u32,
-) -> (u32, bool) {
-    match bucket.downcast_ref::<SymbolBucket>() {
-        Some(symbol_bucket) => symbol_bucket.register_at_cross_tile_index(index, render_tile, state, max_cross_tile_id),
-        None => (0, false),
     }
 }
 

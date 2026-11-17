@@ -62,6 +62,10 @@ pub(crate) trait LayerType: StyleLayerType {
         0.0
     }
 
+    /// Whether the type has cross-faded properties, whose evaluation takes
+    /// the frame's cross-fade.
+    const CROSSFADES: bool = false;
+
     fn render_layer(style: Arc<LayerStyle<Self>>) -> Box<dyn RenderLayer>;
 }
 

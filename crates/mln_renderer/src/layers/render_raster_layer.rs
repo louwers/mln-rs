@@ -29,10 +29,9 @@ use mln_gfx::{
     VertexAttributeArray,
 };
 use mln_map_types::TransformState;
-use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
+use mln_style::PropertyEvaluationParameters;
+use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Raster;
-use mln_style::layers::raster_layer_properties::RasterPaintProperties;
-use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_style_types::{RasterResamplingType, ResamplingType};
 use mln_tile_id::OverscaledTileID;
 use mln_util::hash::HashMap;
@@ -49,10 +48,10 @@ use crate::gfx::texture2d::Texture2DPtr;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_composite::Composite;
 use crate::layer_group::LayerGroup;
-use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
+use crate::layer_type::LayerType;
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase, set_style};
+use crate::render_layer::{LayerPrepareParameters, LayerValues, RenderLayer, RenderLayerBase, TypedLayer};
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::sources::render_image_source::ImageSourceRenderData;
@@ -69,9 +68,7 @@ impl LayerType for Raster {
 
 pub(crate) struct RenderRasterLayer {
     base: RenderLayerBase,
-    style: Arc<LayerStyle<Raster>>,
-    // Paint properties
-    unevaluated: RasterPaintProperties::Unevaluated,
+    values: LayerValues<Raster>,
 
     raster_shader: Option<ShaderProgramPtr>,
 
@@ -91,14 +88,10 @@ pub(crate) struct RenderRasterLayer {
 
 impl RenderRasterLayer {
     pub(crate) fn new(impl_: Arc<LayerStyle<Raster>>) -> Self {
-        let unevaluated = impl_.paint.untransitioned();
-        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Raster>::new(Arc::clone(&impl_)));
-        let mut base = RenderLayerBase::new(properties);
-        base.style_dependencies = unevaluated.get_dependencies();
+        let (base, values) = LayerValues::new(impl_);
         RenderRasterLayer {
             base,
-            style: impl_,
-            unevaluated,
+            values,
             raster_shader: None,
             static_data_vertices: None,
             static_data_indices: None,
@@ -131,14 +124,14 @@ impl RenderRasterLayer {
     /// How the layer's drawables composite onto the frame: as one surface,
     /// for a `raster-layer-blend` other than `normal`.
     fn composite(&self) -> Option<Composite> {
-        let paint = &evaluated::<Raster>(&self.base.evaluated_properties).paint;
+        let paint = &self.values.evaluated.paint;
         Composite::of(1.0, *paint.raster_layer_blend.uniform())
     }
 
     /// The sampler of the layer's tile textures for the evaluated
     /// properties.
     fn sampler_state(&self) -> SamplerState {
-        let evaluated = &evaluated::<Raster>(&self.base.evaluated_properties).paint;
+        let evaluated = &self.values.evaluated.paint;
         // GL JS draws Nearest when either property asks for it.
         let nearest = *evaluated.raster_resampling.uniform() == RasterResamplingType::Nearest
             || *evaluated.resampling.uniform() == ResamplingType::Nearest;
@@ -247,49 +240,25 @@ fn raster_vertex_attributes(vertices: &VertexVectorBasePtr) -> VertexAttributeAr
     vertex_attrs
 }
 
+impl TypedLayer for RenderRasterLayer {
+    type Type = Raster;
+
+    fn parts(&self) -> (&RenderLayerBase, &LayerValues<Raster>) {
+        (&self.base, &self.values)
+    }
+
+    fn parts_mut(&mut self) -> (&mut RenderLayerBase, &mut LayerValues<Raster>) {
+        (&mut self.base, &mut self.values)
+    }
+}
+
 impl RenderLayer for RenderRasterLayer {
-    fn base(&self) -> &RenderLayerBase {
-        &self.base
-    }
-
-    fn base_mut(&mut self) -> &mut RenderLayerBase {
-        &mut self.base
-    }
-
-    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>) {
-        set_style(&mut self.base, &mut self.style, style);
-        self.transition(parameters);
-    }
-
-    fn transition(&mut self, parameters: &TransitionParameters) {
-        let prior = std::mem::take(&mut self.unevaluated);
-        self.unevaluated = self.style.paint.transitioned(parameters, prior);
-        self.base.style_dependencies = self.unevaluated.get_dependencies();
-    }
-
     fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
-        let previous_evaluated = evaluated::<Raster>(&self.base.evaluated_properties).paint.clone();
-        let mut properties = EvaluatedLayer::<Raster>::with_paint(
-            Arc::clone(&self.style),
-            self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
-        );
+        let properties = self.values.evaluate(parameters);
 
         self.base.passes =
             if *properties.paint.raster_opacity.uniform() > 0.0 { RenderPass::Translucent } else { RenderPass::None };
-        properties.render_passes = self.base.passes.underlying_type();
-        self.base.evaluated_properties = Arc::new(properties);
-
-        if let Some(layer_tweaker) = &mut self.base.layer_tweaker {
-            layer_tweaker.update_properties(Arc::clone(&self.base.evaluated_properties));
-        }
-    }
-
-    fn has_transition(&self) -> bool {
-        self.unevaluated.has_transition()
-    }
-
-    fn has_crossfade(&self) -> bool {
-        false
+        self.values.set_evaluated(&mut self.base, properties);
     }
 
     fn prepare(&mut self, params: &mut LayerPrepareParameters<'_>) {

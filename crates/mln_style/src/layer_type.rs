@@ -22,6 +22,8 @@ use crate::filter::Filter;
 use crate::layer::FontStack;
 use crate::property_table::{self, OwnerSlot, Properties, PropertyTable, PropertyVisitor, SetPropertyError};
 use crate::property_value::PropertyValue;
+use crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
+use crate::renderer::transition_parameters::TransitionParameters;
 use crate::serialization::optional_expression;
 use crate::style_property::StyleProperty;
 
@@ -69,6 +71,30 @@ pub trait PaintSet: Clone + Default + PartialEq + std::fmt::Debug + Wire + Send 
     /// data-driven one can still differ by feature.
     type Evaluated: Clone + Default + std::fmt::Debug + Wire + Send + Sync + 'static;
 
+    /// The set's values in transition from earlier values, which evaluate
+    /// to [`Evaluated`](Self::Evaluated) for a frame.
+    type Unevaluated: Clone + Default + std::fmt::Debug + Send + Sync + 'static;
+
+    /// The set's values, with nothing to transition from.
+    fn untransitioned(&self) -> Self::Unevaluated;
+
+    /// The set's values, in transition from `prior`.
+    fn transitioned(&self, parameters: &TransitionParameters, prior: Self::Unevaluated) -> Self::Unevaluated;
+
+    /// Evaluates `unevaluated` for a frame, copying from `previous`, the
+    /// last frame's, each value that can't have changed.
+    fn evaluate_with_previous(
+        unevaluated: &mut Self::Unevaluated,
+        parameters: &PropertyEvaluationParameters,
+        previous: &Self::Evaluated,
+    ) -> Self::Evaluated;
+
+    /// Whether a value of `unevaluated` is still in transition.
+    fn has_transition(unevaluated: &Self::Unevaluated) -> bool;
+
+    /// The combined dependencies of the values of `unevaluated`.
+    fn dependencies(unevaluated: &Self::Unevaluated) -> Dependency;
+
     /// The combined dependencies of the values in `evaluated` that still
     /// differ by feature.
     fn evaluated_dependencies(evaluated: &Self::Evaluated) -> Dependency;
@@ -104,6 +130,31 @@ impl LayoutSet for NoProperties {
 
 impl PaintSet for NoProperties {
     type Evaluated = NoProperties;
+    type Unevaluated = NoProperties;
+
+    fn untransitioned(&self) -> NoProperties {
+        NoProperties
+    }
+
+    fn transitioned(&self, _parameters: &TransitionParameters, _prior: NoProperties) -> NoProperties {
+        NoProperties
+    }
+
+    fn evaluate_with_previous(
+        _unevaluated: &mut NoProperties,
+        _parameters: &PropertyEvaluationParameters,
+        _previous: &NoProperties,
+    ) -> NoProperties {
+        NoProperties
+    }
+
+    fn has_transition(_unevaluated: &NoProperties) -> bool {
+        false
+    }
+
+    fn dependencies(_unevaluated: &NoProperties) -> Dependency {
+        Dependency::NONE
+    }
 
     fn evaluated_dependencies(_evaluated: &NoProperties) -> Dependency {
         Dependency::NONE

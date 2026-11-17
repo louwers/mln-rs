@@ -26,7 +26,7 @@
 "crates/mln_renderer/src/sources/render_image_source.rs" = 1
 "crates/mln_renderer/src/text/collision_feature.rs" = 2
 "crates/mln_renderer/src/text/collision_index.rs" = 2
-"crates/mln_renderer/src/text/placement.rs" = 8
+"crates/mln_renderer/src/text/placement.rs" = 6
 "crates/mln_renderer/src/util/subdivision.rs" = 2
 "crates/mln_renderer/src/util/tile_cover.rs" = 2
 "crates/mln_renderer/src/util/tile_mesh.rs" = 1

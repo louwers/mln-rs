@@ -164,3 +164,9 @@ impl dyn Bucket {
         any.downcast_ref()
     }
 }
+
+/// `bucket` as a `B`, the same allocation, or `None` if it is another type.
+pub(crate) fn recover<B: Bucket>(bucket: &BucketPtr) -> Option<Arc<B>> {
+    let any: Arc<dyn Any + Send + Sync> = Arc::<dyn Bucket>::clone(bucket);
+    any.downcast().ok()
+}

@@ -27,10 +27,10 @@ use mln_util::logging::{Event, Log};
 use crate::bucket::NoBucket;
 use crate::gfx::context::Context;
 use crate::layer_group::{LayerGroup, LayerGroupKind};
-use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType};
+use crate::layer_type::LayerType;
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase, set_style};
+use crate::render_layer::{LayerParts, LayerPrepareParameters, LayerValues, RenderLayer, RenderLayerBase, TypedLayer};
 use crate::render_pass::RenderPass;
 use crate::update_parameters::UpdateParameters;
 
@@ -88,19 +88,18 @@ impl LayerType for Custom {
 
 pub(crate) struct RenderCustomLayer {
     base: RenderLayerBase,
-    style: Arc<LayerStyle<Custom>>,
+    values: LayerValues<Custom>,
     shared: Rc<Shared>,
 }
 
 impl RenderCustomLayer {
     pub(crate) fn new(impl_: Arc<LayerStyle<Custom>>) -> Self {
         let host = impl_.host();
-        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Custom>::new(Arc::clone(&impl_)));
-        let mut base = RenderLayerBase::new(properties);
+        let (mut base, values) = LayerValues::new(impl_);
         base.passes = RenderPass::Translucent;
         RenderCustomLayer {
             base,
-            style: impl_,
+            values,
             shared: Rc::new(Shared {
                 host: RefCell::new(host),
                 frame: Cell::new(None),
@@ -122,40 +121,34 @@ impl Drop for RenderCustomLayer {
     }
 }
 
+impl TypedLayer for RenderCustomLayer {
+    type Type = Custom;
+
+    fn parts(&self) -> (&RenderLayerBase, &LayerValues<Custom>) {
+        (&self.base, &self.values)
+    }
+
+    fn parts_mut(&mut self) -> (&mut RenderLayerBase, &mut LayerValues<Custom>) {
+        (&mut self.base, &mut self.values)
+    }
+}
+
 impl RenderLayer for RenderCustomLayer {
-    fn base(&self) -> &RenderLayerBase {
-        &self.base
-    }
-
-    fn base_mut(&mut self) -> &mut RenderLayerBase {
-        &mut self.base
-    }
-
     /// A new host for the same layer ID is a new layer to the host: the old
     /// one hears that the renderer stopped.
     fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>) {
-        set_style(&mut self.base, &mut self.style, style);
-        let same = self.shared.host.borrow().as_ref().is_some_and(|host| self.style.has_host(host));
+        self.set_style(style);
+        let same = self.shared.host.borrow().as_ref().is_some_and(|host| self.values.style.has_host(host));
         if !same {
             self.shared.end(false);
-            *self.shared.host.borrow_mut() = self.style.host();
+            *self.shared.host.borrow_mut() = self.values.style.host();
         }
         self.transition(parameters);
     }
 
-    fn transition(&mut self, _parameters: &TransitionParameters) {}
-
     /// The layer has no properties: `baseImpl` never changes for it.
     fn evaluate(&mut self, _parameters: &PropertyEvaluationParameters) {
         self.base.passes = RenderPass::Translucent;
-    }
-
-    fn has_transition(&self) -> bool {
-        false
-    }
-
-    fn has_crossfade(&self) -> bool {
-        false
     }
 
     fn prepare(&mut self, _parameters: &mut LayerPrepareParameters<'_>) {}

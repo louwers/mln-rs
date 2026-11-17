@@ -30,7 +30,6 @@ use mln_gfx::{
 use mln_map_types::TransformState;
 use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
 use mln_style::layers::Hillshade;
-use mln_style::layers::hillshade_layer_properties::HillshadePaintProperties;
 use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_style_types::ResamplingType;
 use mln_util::constants;
@@ -49,10 +48,10 @@ use crate::gfx::context::Context;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::LayerTweaker;
-use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
+use crate::layer_type::LayerType;
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase, set_style};
+use crate::render_layer::{LayerPrepareParameters, LayerValues, RenderLayer, RenderLayerBase, TypedLayer};
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_target::RenderTarget;
@@ -72,9 +71,7 @@ impl LayerType for Hillshade {
 
 pub(crate) struct RenderHillshadeLayer {
     base: RenderLayerBase,
-    style: Arc<LayerStyle<Hillshade>>,
-    // Paint properties
-    unevaluated: HillshadePaintProperties::Unevaluated,
+    values: LayerValues<Hillshade>,
     maxzoom: u8,
 
     hillshade_prepare_shader: Option<ShaderProgramPtr>,
@@ -94,14 +91,10 @@ pub(crate) struct RenderHillshadeLayer {
 
 impl RenderHillshadeLayer {
     pub(crate) fn new(impl_: Arc<LayerStyle<Hillshade>>) -> Self {
-        let unevaluated = impl_.paint.untransitioned();
-        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Hillshade>::new(Arc::clone(&impl_)));
-        let mut base = RenderLayerBase::new(properties);
-        base.style_dependencies = unevaluated.get_dependencies();
+        let (base, values) = LayerValues::new(impl_);
         RenderHillshadeLayer {
             base,
-            style: impl_,
-            unevaluated,
+            values,
             maxzoom: constants::TERRAIN_RGB_MAXZOOM,
             hillshade_prepare_shader: None,
             hillshade_shader: None,
@@ -142,26 +135,19 @@ fn hillshade_vertex_attributes(vertices: &VertexVectorBasePtr) -> VertexAttribut
     vertex_attrs
 }
 
+impl TypedLayer for RenderHillshadeLayer {
+    type Type = Hillshade;
+
+    fn parts(&self) -> (&RenderLayerBase, &LayerValues<Hillshade>) {
+        (&self.base, &self.values)
+    }
+
+    fn parts_mut(&mut self) -> (&mut RenderLayerBase, &mut LayerValues<Hillshade>) {
+        (&mut self.base, &mut self.values)
+    }
+}
+
 impl RenderLayer for RenderHillshadeLayer {
-    fn base(&self) -> &RenderLayerBase {
-        &self.base
-    }
-
-    fn base_mut(&mut self) -> &mut RenderLayerBase {
-        &mut self.base
-    }
-
-    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>) {
-        set_style(&mut self.base, &mut self.style, style);
-        self.transition(parameters);
-    }
-
-    fn transition(&mut self, parameters: &TransitionParameters) {
-        let prior = std::mem::take(&mut self.unevaluated);
-        self.unevaluated = self.style.paint.transitioned(parameters, prior);
-        self.base.style_dependencies = self.unevaluated.get_dependencies();
-    }
-
     fn layer_changed(&mut self, _parameters: &TransitionParameters, _new_layer: &Arc<dyn ErasedLayerStyle>) {
         // RenderLayer::layerChanged
         self.base.layer_tweaker = None;
@@ -169,33 +155,17 @@ impl RenderLayer for RenderHillshadeLayer {
     }
 
     fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
-        let previous_evaluated = evaluated::<Hillshade>(&self.base.evaluated_properties).paint.clone();
-        let mut properties = EvaluatedLayer::<Hillshade>::with_paint(
-            Arc::clone(&self.style),
-            self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
-        );
+        let properties = self.values.evaluate(parameters);
 
         self.base.passes = if *properties.paint.hillshade_exaggeration.uniform() > 0.0 {
             RenderPass::Translucent | RenderPass::Pass3D
         } else {
             RenderPass::None
         };
-        properties.render_passes = self.base.passes.underlying_type();
-        self.base.evaluated_properties = Arc::new(properties);
-        if let Some(layer_tweaker) = &mut self.base.layer_tweaker {
-            layer_tweaker.update_properties(Arc::clone(&self.base.evaluated_properties));
-        }
+        self.values.set_evaluated(&mut self.base, properties);
         if let Some(prepare_layer_tweaker) = &mut self.prepare_layer_tweaker {
             prepare_layer_tweaker.update_properties(Arc::clone(&self.base.evaluated_properties));
         }
-    }
-
-    fn has_transition(&self) -> bool {
-        self.unevaluated.has_transition()
-    }
-
-    fn has_crossfade(&self) -> bool {
-        false
     }
 
     fn prepare(&mut self, params: &mut LayerPrepareParameters<'_>) {
@@ -310,7 +280,7 @@ impl RenderLayer for RenderHillshadeLayer {
 
             // `resampling` filters the prepared texture the tile drawable
             // samples; the prepare pass reads the DEM with Nearest regardless.
-            let evaluated = &evaluated::<Hillshade>(&self.base.evaluated_properties).paint;
+            let evaluated = &self.values.evaluated.paint;
             let resampling_filter = match *evaluated.resampling.uniform() {
                 ResamplingType::Linear => TextureFilterType::Linear,
                 ResamplingType::Nearest => TextureFilterType::Nearest,

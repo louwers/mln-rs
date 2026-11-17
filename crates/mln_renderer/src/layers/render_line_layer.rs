@@ -18,10 +18,10 @@ use mln_gfx::{
 };
 use mln_map_types::TransformState;
 use mln_style::expression::{Dependency, EvaluationContext, GlobalStateMap, global_state_refs_intersect};
-use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
+use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Line;
 use mln_style::layers::line_layer_properties::LinePaintProperties;
-use mln_style::{PropertyEvaluationParameters, StyleValue as _, TransitionParameters};
+use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 use mln_style_types::LineCapType;
 use mln_util::Color;
 use mln_util::error::Error;
@@ -38,13 +38,13 @@ use crate::gfx::context::Context;
 use crate::gfx::texture2d::Texture2DPtr;
 use crate::layer_composite::Composite;
 use crate::layer_group::LayerGroup;
-use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
+use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::pattern_layout::{LineLayoutSpec, PatternLayout, uses_pattern};
 use crate::line_atlas::LinePatternCap;
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
-use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase, set_style};
+use crate::render_layer::{LayerPrepareParameters, LayerValues, RenderLayer, RenderLayerBase, TypedLayer};
 use crate::render_pass::RenderPass;
 use crate::update_parameters::UpdateParameters;
 
@@ -209,6 +209,7 @@ fn dash_atlas_texture(context: &Context, binders: &LineBinders) -> Option<Textur
 impl LayerType for Line {
     type Layout = PatternLayout<LineLayoutSpec>;
     type Bucket = LineBucket;
+    const CROSSFADES: bool = true;
 
     /// Whether a layer of the group has a pattern.
     fn layout_can_need_dependencies(group: &[Arc<EvaluatedLayer<Line>>]) -> bool {
@@ -234,9 +235,7 @@ impl LayerType for Line {
 
 pub(crate) struct RenderLineLayer {
     base: RenderLayerBase,
-    style: Arc<LayerStyle<Line>>,
-    // Paint properties
-    unevaluated: LinePaintProperties::Unevaluated,
+    values: LayerValues<Line>,
 
     color_ramp: Rc<PremultipliedImage>,
     /// The global-state snapshot used to generate the cached color ramp and
@@ -254,14 +253,10 @@ pub(crate) struct RenderLineLayer {
 
 impl RenderLineLayer {
     pub(crate) fn new(impl_: Arc<LayerStyle<Line>>) -> Self {
-        let unevaluated = impl_.paint.untransitioned();
-        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Line>::new(Arc::clone(&impl_)));
-        let mut base = RenderLayerBase::new(properties);
-        base.style_dependencies = unevaluated.get_dependencies();
+        let (base, values) = LayerValues::new(impl_);
         RenderLineLayer {
             base,
-            style: impl_,
-            unevaluated,
+            values,
             color_ramp: Rc::new(PremultipliedImage::new(Size::new(256, 1))),
             color_ramp_global_state: None,
             color_ramp_texture_2d: None,
@@ -274,7 +269,7 @@ impl RenderLineLayer {
     }
 
     fn update_color_ramp(&mut self) {
-        let color_value = self.unevaluated.line_gradient.get_value().clone();
+        let color_value = self.values.unevaluated.line_gradient.get_value().clone();
         let mut image = (*self.color_ramp).clone();
         if !apply_color_ramp(&color_value, &mut image, self.color_ramp_global_state.as_deref()) {
             return;
@@ -300,7 +295,7 @@ impl RenderLineLayer {
         zoom: f32,
         feature_state: &mln_style::expression::expression::FeatureState,
     ) -> f32 {
-        let evaluated = &evaluated::<Line>(&self.base.evaluated_properties).paint;
+        let evaluated = &self.values.evaluated.paint;
         let line_width = evaluated.line_width.evaluate(&EvaluationContext::with_zoom_feature_state(
             zoom,
             Some(feature),
@@ -356,26 +351,19 @@ fn offset_line(
     new_rings
 }
 
+impl TypedLayer for RenderLineLayer {
+    type Type = Line;
+
+    fn parts(&self) -> (&RenderLayerBase, &LayerValues<Line>) {
+        (&self.base, &self.values)
+    }
+
+    fn parts_mut(&mut self) -> (&mut RenderLayerBase, &mut LayerValues<Line>) {
+        (&mut self.base, &mut self.values)
+    }
+}
+
 impl RenderLayer for RenderLineLayer {
-    fn base(&self) -> &RenderLayerBase {
-        &self.base
-    }
-
-    fn base_mut(&mut self) -> &mut RenderLayerBase {
-        &mut self.base
-    }
-
-    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>) {
-        set_style(&mut self.base, &mut self.style, style);
-        self.transition(parameters);
-    }
-
-    fn transition(&mut self, parameters: &TransitionParameters) {
-        let prior = std::mem::take(&mut self.unevaluated);
-        self.unevaluated = self.style.paint.transitioned(parameters, prior);
-        self.base.style_dependencies = self.unevaluated.get_dependencies();
-    }
-
     fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
         // Build the ramp here rather than in transition(), which has no global
         // state. A new or changed layer always needs one; otherwise only a
@@ -385,7 +373,7 @@ impl RenderLayer for RenderLineLayer {
             (Some(a), Some(b)) => !Arc::ptr_eq(a, b),
             _ => true,
         };
-        let ramp_value = self.unevaluated.line_gradient.get_value();
+        let ramp_value = self.values.unevaluated.line_gradient.get_value();
         let ramp_affected = parameters.layer_changed
             || (global_state_differs
                 && ramp_value.get_dependencies().intersects(Dependency::GLOBAL_STATE)
@@ -398,14 +386,7 @@ impl RenderLayer for RenderLineLayer {
             self.update_color_ramp();
         }
 
-        let previous_evaluated = evaluated::<Line>(&self.base.evaluated_properties).paint.clone();
-        let mut properties = EvaluatedLayer::<Line> {
-            crossfade: parameters.get_crossfade_parameters(),
-            ..EvaluatedLayer::with_paint(
-                Arc::clone(&self.style),
-                self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
-            )
-        };
+        let properties = self.values.evaluate(parameters);
         let evaluated = &properties.paint;
 
         self.base.passes = if *evaluated.line_layer_opacity.uniform() > 0.0
@@ -417,20 +398,7 @@ impl RenderLayer for RenderLineLayer {
         } else {
             RenderPass::None
         };
-        properties.render_passes = self.base.passes.underlying_type();
-        self.base.evaluated_properties = Arc::new(properties);
-
-        if let Some(layer_tweaker) = &mut self.base.layer_tweaker {
-            layer_tweaker.update_properties(Arc::clone(&self.base.evaluated_properties));
-        }
-    }
-
-    fn has_transition(&self) -> bool {
-        self.unevaluated.has_transition()
-    }
-
-    fn has_crossfade(&self) -> bool {
-        evaluated::<Line>(&self.base.evaluated_properties).crossfade.t != 1.0
+        self.values.set_evaluated(&mut self.base, properties);
     }
 
     // query
@@ -445,7 +413,7 @@ impl RenderLayer for RenderLineLayer {
         _projector: &mln_map_types::TileProjector<'_>,
         feature_state: &mln_style::expression::expression::FeatureState,
     ) -> bool {
-        let evaluated = &evaluated::<Line>(&self.base.evaluated_properties).paint;
+        let evaluated = &self.values.evaluated.paint;
         // Translate query geometry
         let translated_query_geometry = crate::geometry::feature_index::FeatureIndex::translate_query_geometry(
             query_geometry,
@@ -490,12 +458,14 @@ impl RenderLayer for RenderLineLayer {
                 continue;
             };
 
-            let evaluated = &evaluated::<Line>(&render_data.layer).paint;
+            let Some(evaluated) = render_data.layer::<Line>().map(|layer| &layer.paint) else {
+                continue;
+            };
             if evaluated.line_dasharray.faded().from.is_empty() {
                 continue;
             }
 
-            let Some(bucket) = (*render_data.bucket).downcast_ref::<LineBucket>() else {
+            let Some(bucket) = render_data.bucket::<Line>() else {
                 continue;
             };
             let cap = dash_pattern_cap(bucket);
@@ -537,7 +507,7 @@ impl RenderLayer for RenderLineLayer {
 
             {
                 let tile_layer_group = &mut layer_group;
-                let paint = &evaluated::<Line>(&self.base.evaluated_properties).paint;
+                let paint = &self.values.evaluated.paint;
                 tile_layer_group.composite =
                     Composite::of(*paint.line_layer_opacity.uniform(), *paint.line_layer_blend.uniform());
                 let base = &self.base;
@@ -627,7 +597,7 @@ impl RenderLayer for RenderLineLayer {
                     continue;
                 };
 
-                let Some(bucket) = (*render_data.bucket).downcast_ref::<LineBucket>() else {
+                let Some(bucket) = render_data.bucket::<Line>() else {
                     continue;
                 };
                 if bucket.triangles.is_empty() {
@@ -649,7 +619,9 @@ impl RenderLayer for RenderLineLayer {
                         paint_property_binders.depends_on_feature_state(),
                     )
                 };
-                let evaluated = &evaluated::<Line>(&render_data.layer).paint;
+                let Some(evaluated) = render_data.layer::<Line>().map(|layer| &layer.paint) else {
+                    continue;
+                };
 
                 let prev_bucket_id = self.get_render_tile_bucket_id(&tile_id);
                 if prev_bucket_id.is_some_and(|prev| prev != bucket.base.bucket_id) {
@@ -718,7 +690,7 @@ impl RenderLayer for RenderLineLayer {
                         None => continue,
                     }
                 };
-                let has_gradient = !self.unevaluated.line_gradient.get_value().is_undefined();
+                let has_gradient = !self.values.unevaluated.line_gradient.get_value().is_undefined();
 
                 // The ramp texture is shared by every tile of the layer.
                 let ensure_color_ramp_texture =
@@ -791,7 +763,7 @@ impl RenderLayer for RenderLineLayer {
                     for drawable in builder.clear_drawables() {
                         add_drawable(drawable, LineType::Sdf);
                     }
-                } else if !self.unevaluated.line_pattern.is_undefined() {
+                } else if !self.values.unevaluated.line_pattern.is_undefined() {
                     // pattern line (conformance)
                     if self.line_pattern_shader_group.is_none() {
                         self.line_pattern_shader_group = shaders.shader_group("LinePatternShader");

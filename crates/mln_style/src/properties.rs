@@ -342,6 +342,35 @@ macro_rules! properties {
 
             impl $crate::layer_type::PaintSet for Transitionable {
                 type Evaluated = PossiblyEvaluated;
+                type Unevaluated = Unevaluated;
+
+                fn untransitioned(&self) -> Unevaluated {
+                    Transitionable::untransitioned(self)
+                }
+
+                fn transitioned(
+                    &self,
+                    parameters: &$crate::renderer::transition_parameters::TransitionParameters,
+                    prior: Unevaluated,
+                ) -> Unevaluated {
+                    Transitionable::transitioned(self, parameters, prior)
+                }
+
+                fn evaluate_with_previous(
+                    unevaluated: &mut Unevaluated,
+                    parameters: &$crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters,
+                    previous: &PossiblyEvaluated,
+                ) -> PossiblyEvaluated {
+                    unevaluated.evaluate_with_previous(parameters, previous)
+                }
+
+                fn has_transition(unevaluated: &Unevaluated) -> bool {
+                    unevaluated.has_transition()
+                }
+
+                fn dependencies(unevaluated: &Unevaluated) -> $crate::expression::Dependency {
+                    unevaluated.get_dependencies()
+                }
 
                 fn evaluated_dependencies(evaluated: &PossiblyEvaluated) -> $crate::expression::Dependency {
                     evaluated.get_dependencies()

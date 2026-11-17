@@ -31,10 +31,9 @@ use mln_style::color_ramp_property_value::ColorRampPropertyValue;
 use mln_style::expression::{
     Dependency, EvaluationContext, GlobalStateMap, from_expression_value, global_state_refs_intersect,
 };
-use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
+use mln_style::layer_type::LayerStyle;
 use mln_style::layers::ColorRelief;
-use mln_style::layers::color_relief_layer_properties::ColorReliefPaintProperties;
-use mln_style::{PropertyEvaluationParameters, StyleValue as _, TransitionParameters};
+use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 use mln_style_types::ResamplingType;
 use mln_util::Color;
 use mln_util::hash::{HashMap, HashSet};
@@ -53,10 +52,10 @@ use crate::gfx::context::Context;
 use crate::gfx::texture2d::Texture2DPtr;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_group::LayerGroup;
-use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
+use crate::layer_type::LayerType;
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase, set_style};
+use crate::render_layer::{LayerPrepareParameters, LayerValues, RenderLayer, RenderLayerBase, TypedLayer};
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::update_parameters::UpdateParameters;
@@ -74,9 +73,7 @@ impl LayerType for ColorRelief {
 
 pub(crate) struct RenderColorReliefLayer {
     base: RenderLayerBase,
-    style: Arc<LayerStyle<ColorRelief>>,
-    // Paint properties
-    unevaluated: ColorReliefPaintProperties::Unevaluated,
+    values: LayerValues<ColorRelief>,
 
     // Color ramp data
     color_ramp_size: u32,
@@ -107,18 +104,13 @@ pub(crate) struct RenderColorReliefLayer {
 
 impl RenderColorReliefLayer {
     pub(crate) fn new(impl_: Arc<LayerStyle<ColorRelief>>) -> Self {
-        let unevaluated = impl_.paint.untransitioned();
-        let properties: Arc<dyn ErasedEvaluatedLayer> =
-            Arc::new(EvaluatedLayer::<ColorRelief>::new(Arc::clone(&impl_)));
-        let mut base = RenderLayerBase::new(properties);
-        base.style_dependencies = unevaluated.get_dependencies();
+        let (base, values) = LayerValues::new(impl_);
 
         // Initialize color ramp data with RGBA format (4 floats per stop)
         let color_ramp_size = 256;
         let mut layer = RenderColorReliefLayer {
             base,
-            style: impl_,
-            unevaluated,
+            values,
             color_ramp_size,
             color_ramp_changed: true,
             color_ramp_global_state: None,
@@ -140,7 +132,7 @@ impl RenderColorReliefLayer {
 
     fn update_color_ramp(&mut self) {
         // Get the color property value, using default if undefined
-        let mut color_value = self.unevaluated.color_relief_color.get_value().clone();
+        let mut color_value = self.values.unevaluated.color_relief_color.get_value().clone();
         if color_value.is_undefined() {
             color_value = ColorRampPropertyValue::default();
             if color_value.is_undefined() {
@@ -261,26 +253,19 @@ fn color_relief_vertex_attributes(vertices: &VertexVectorBasePtr) -> VertexAttri
     vertex_attrs
 }
 
+impl TypedLayer for RenderColorReliefLayer {
+    type Type = ColorRelief;
+
+    fn parts(&self) -> (&RenderLayerBase, &LayerValues<ColorRelief>) {
+        (&self.base, &self.values)
+    }
+
+    fn parts_mut(&mut self) -> (&mut RenderLayerBase, &mut LayerValues<ColorRelief>) {
+        (&mut self.base, &mut self.values)
+    }
+}
+
 impl RenderLayer for RenderColorReliefLayer {
-    fn base(&self) -> &RenderLayerBase {
-        &self.base
-    }
-
-    fn base_mut(&mut self) -> &mut RenderLayerBase {
-        &mut self.base
-    }
-
-    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>) {
-        set_style(&mut self.base, &mut self.style, style);
-        self.transition(parameters);
-    }
-
-    fn transition(&mut self, parameters: &TransitionParameters) {
-        let prior = std::mem::take(&mut self.unevaluated);
-        self.unevaluated = self.style.paint.transitioned(parameters, prior);
-        self.base.style_dependencies = self.unevaluated.get_dependencies();
-    }
-
     fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
         // Build the ramp here rather than in transition(), which has no global
         // state. A new or changed layer always needs one; otherwise only a
@@ -290,7 +275,7 @@ impl RenderLayer for RenderColorReliefLayer {
             (Some(a), Some(b)) => !Arc::ptr_eq(a, b),
             _ => true,
         };
-        let ramp_value = self.unevaluated.color_relief_color.get_value();
+        let ramp_value = self.values.unevaluated.color_relief_color.get_value();
         let ramp_affected = parameters.layer_changed
             || (global_state_differs
                 && ramp_value.get_dependencies().intersects(Dependency::GLOBAL_STATE)
@@ -303,31 +288,14 @@ impl RenderLayer for RenderColorReliefLayer {
             self.update_color_ramp();
         }
 
-        let previous_evaluated = evaluated::<ColorRelief>(&self.base.evaluated_properties).paint.clone();
-        let mut properties = EvaluatedLayer::<ColorRelief>::with_paint(
-            Arc::clone(&self.style),
-            self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
-        );
+        let properties = self.values.evaluate(parameters);
 
         self.base.passes = if *properties.paint.color_relief_opacity.uniform() > 0.0 {
             RenderPass::Translucent
         } else {
             RenderPass::None
         };
-        properties.render_passes = self.base.passes.underlying_type();
-        self.base.evaluated_properties = Arc::new(properties);
-
-        if let Some(layer_tweaker) = &mut self.base.layer_tweaker {
-            layer_tweaker.update_properties(Arc::clone(&self.base.evaluated_properties));
-        }
-    }
-
-    fn has_transition(&self) -> bool {
-        self.unevaluated.has_transition()
-    }
-
-    fn has_crossfade(&self) -> bool {
-        false
+        self.values.set_evaluated(&mut self.base, properties);
     }
 
     fn release_render_data(&mut self) {
@@ -455,7 +423,7 @@ impl RenderLayer for RenderColorReliefLayer {
                 render_tiles.iter().filter_map(|tile| tile.get_bucket(&*self.base.style).map(|b| b.get_id())).collect();
             self.dem_textures.retain(|id, _| live_buckets.contains(id));
 
-            let evaluated = &evaluated::<ColorRelief>(&self.base.evaluated_properties).paint;
+            let evaluated = &self.values.evaluated.paint;
             let dem_sampler = SamplerState {
                 filter: match *evaluated.resampling.uniform() {
                     ResamplingType::Linear => TextureFilterType::Linear,

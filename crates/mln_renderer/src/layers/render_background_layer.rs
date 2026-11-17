@@ -4,24 +4,24 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::shader_defines::ID_BACKGROUND_POS_VERTEX_ATTRIBUTE;
 use mln_gfx::{AttributeDataType, ColorMode, DepthMaskType, DrawMode, ShaderProgramPtr, ShaderRegistry};
 use mln_map_types::TransformState;
-use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
+use mln_style::PropertyEvaluationParameters;
+use mln_style::layer_type::LayerStyle;
 use mln_style::layers::{Background, BackgroundPaintProperties};
-use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_util::Color;
 use mln_util::range::Range;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
-use super::{background_crossfade, background_layer_properties};
+use super::background_layer_properties;
 use crate::bucket::NoBucket;
 use crate::drawable_builder::DrawableBuilder;
 use crate::gfx::context::Context;
 use crate::globe_tile_mesh::raw_globe_tile_mesh;
 use crate::layer_group::LayerGroup;
-use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType};
+use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layers::background_layer_tweaker::BackgroundLayerTweaker;
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase, set_style};
+use crate::render_layer::{LayerPrepareParameters, LayerValues, RenderLayer, RenderLayerBase, TypedLayer};
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::update_parameters::UpdateParameters;
@@ -42,6 +42,7 @@ fn add_pattern_if_needed(id: &str, params: &LayerPrepareParameters<'_>) {
 impl LayerType for Background {
     type Layout = NoLayout;
     type Bucket = NoBucket;
+    const CROSSFADES: bool = true;
 
     fn render_layer(style: Arc<LayerStyle<Background>>) -> Box<dyn RenderLayer> {
         Box::new(RenderBackgroundLayer::new(style))
@@ -50,19 +51,15 @@ impl LayerType for Background {
 
 pub(crate) struct RenderBackgroundLayer {
     base: RenderLayerBase,
-    style: Arc<LayerStyle<Background>>,
-    unevaluated: BackgroundPaintProperties::Unevaluated,
+    values: LayerValues<Background>,
     plain_shader: Option<ShaderProgramPtr>,
     pattern_shader: Option<ShaderProgramPtr>,
 }
 
 impl RenderBackgroundLayer {
     pub(crate) fn new(impl_: Arc<LayerStyle<Background>>) -> Self {
-        let unevaluated = impl_.paint.untransitioned();
-        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Background>::new(Arc::clone(&impl_)));
-        let mut base = RenderLayerBase::new(properties);
-        base.style_dependencies = unevaluated.get_dependencies();
-        RenderBackgroundLayer { base, style: impl_, unevaluated, plain_shader: None, pattern_shader: None }
+        let (base, values) = LayerValues::new(impl_);
+        RenderBackgroundLayer { base, values, plain_shader: None, pattern_shader: None }
     }
 
     /// The `drawPasses` / `passes` expression shared by `evaluate` and
@@ -70,7 +67,7 @@ impl RenderBackgroundLayer {
     fn passes_for(&self, evaluated: &BackgroundPaintProperties::PossiblyEvaluated) -> RenderPass {
         if *evaluated.background_opacity.uniform() == 0.0 {
             RenderPass::None
-        } else if !self.unevaluated.background_pattern.is_undefined()
+        } else if !self.values.unevaluated.background_pattern.is_undefined()
             || *evaluated.background_opacity.uniform() < 1.0
             || evaluated.background_color.uniform().a < 1.0
         {
@@ -82,50 +79,29 @@ impl RenderBackgroundLayer {
     }
 }
 
+impl TypedLayer for RenderBackgroundLayer {
+    type Type = Background;
+
+    fn parts(&self) -> (&RenderLayerBase, &LayerValues<Background>) {
+        (&self.base, &self.values)
+    }
+
+    fn parts_mut(&mut self) -> (&mut RenderLayerBase, &mut LayerValues<Background>) {
+        (&mut self.base, &mut self.values)
+    }
+}
+
 impl RenderLayer for RenderBackgroundLayer {
-    fn base(&self) -> &RenderLayerBase {
-        &self.base
-    }
-
-    fn base_mut(&mut self) -> &mut RenderLayerBase {
-        &mut self.base
-    }
-
-    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>) {
-        set_style(&mut self.base, &mut self.style, style);
-        self.transition(parameters);
-    }
-
-    fn transition(&mut self, parameters: &TransitionParameters) {
-        let prior = std::mem::take(&mut self.unevaluated);
-        self.unevaluated = self.style.paint.transitioned(parameters, prior);
-        self.base.style_dependencies = self.unevaluated.get_dependencies();
-    }
-
     fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
         let previous_evaluated = background_layer_properties(&self.base.evaluated_properties).clone();
-        let evaluated = self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated);
-        let mut properties = EvaluatedLayer::<Background> {
+        let evaluated = self.values.unevaluated.evaluate_with_previous(parameters, &previous_evaluated);
+        let properties = EvaluatedLayer::<Background> {
             crossfade: parameters.get_crossfade_parameters(),
-            ..EvaluatedLayer::with_paint(Arc::clone(&self.style), evaluated)
+            ..EvaluatedLayer::with_paint(Arc::clone(&self.values.style), evaluated)
         };
 
         self.base.passes = self.passes_for(&properties.paint);
-        properties.render_passes = self.base.passes.underlying_type();
-
-        self.base.evaluated_properties = Arc::new(properties);
-
-        if let Some(layer_tweaker) = &mut self.base.layer_tweaker {
-            layer_tweaker.update_properties(Arc::clone(&self.base.evaluated_properties));
-        }
-    }
-
-    fn has_transition(&self) -> bool {
-        self.unevaluated.has_transition()
-    }
-
-    fn has_crossfade(&self) -> bool {
-        background_crossfade(&self.base.evaluated_properties).t != 1.0
+        self.values.set_evaluated(&mut self.base, properties);
     }
 
     fn get_solid_background(&self) -> Option<Color> {

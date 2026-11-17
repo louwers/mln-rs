@@ -8,11 +8,11 @@ use mln_gfx::{
     AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode, ShaderRegistry, VertexAttributeArray,
 };
 use mln_map_types::{TileProjector, TransformState};
+use mln_style::PropertyEvaluationParameters;
 use mln_style::expression::EvaluationContext;
-use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
+use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Circle;
 use mln_style::layers::circle_layer_properties::CirclePaintProperties;
-use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_util::Color;
 use mln_util::error::Error;
 
@@ -23,12 +23,12 @@ use crate::buckets::circle_bucket::{CircleBinders, CircleBucket, CircleLayoutVer
 use crate::drawable_builder::DrawableBuilder;
 use crate::gfx::context::Context;
 use crate::layer_group::LayerGroup;
-use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
+use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::circle_layout::CircleLayout;
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
-use crate::render_layer::{RenderLayer, RenderLayerBase, set_style};
+use crate::render_layer::{LayerValues, RenderLayer, RenderLayerBase, TypedLayer};
 use crate::render_pass::RenderPass;
 use crate::render_tile::RenderTile;
 use crate::update_parameters::UpdateParameters;
@@ -161,48 +161,32 @@ impl LayerType for Circle {
 
 pub(crate) struct RenderCircleLayer {
     base: RenderLayerBase,
-    style: Arc<LayerStyle<Circle>>,
-    // Paint properties
-    unevaluated: CirclePaintProperties::Unevaluated,
+    values: LayerValues<Circle>,
     circle_shader_group: Option<ShaderGroupPtr>,
 }
 
 impl RenderCircleLayer {
     pub(crate) fn new(impl_: Arc<LayerStyle<Circle>>) -> Self {
-        let unevaluated = impl_.paint.untransitioned();
-        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Circle>::new(Arc::clone(&impl_)));
-        let mut base = RenderLayerBase::new(properties);
-        base.style_dependencies = unevaluated.get_dependencies();
-        RenderCircleLayer { base, style: impl_, unevaluated, circle_shader_group: None }
+        let (base, values) = LayerValues::new(impl_);
+        RenderCircleLayer { base, values, circle_shader_group: None }
+    }
+}
+
+impl TypedLayer for RenderCircleLayer {
+    type Type = Circle;
+
+    fn parts(&self) -> (&RenderLayerBase, &LayerValues<Circle>) {
+        (&self.base, &self.values)
+    }
+
+    fn parts_mut(&mut self) -> (&mut RenderLayerBase, &mut LayerValues<Circle>) {
+        (&mut self.base, &mut self.values)
     }
 }
 
 impl RenderLayer for RenderCircleLayer {
-    fn base(&self) -> &RenderLayerBase {
-        &self.base
-    }
-
-    fn base_mut(&mut self) -> &mut RenderLayerBase {
-        &mut self.base
-    }
-
-    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>) {
-        set_style(&mut self.base, &mut self.style, style);
-        self.transition(parameters);
-    }
-
-    fn transition(&mut self, parameters: &TransitionParameters) {
-        let prior = std::mem::take(&mut self.unevaluated);
-        self.unevaluated = self.style.paint.transitioned(parameters, prior);
-        self.base.style_dependencies = self.unevaluated.get_dependencies();
-    }
-
     fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
-        let previous_evaluated = evaluated::<Circle>(&self.base.evaluated_properties).paint.clone();
-        let mut properties = EvaluatedLayer::<Circle>::with_paint(
-            Arc::clone(&self.style),
-            self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
-        );
+        let properties = self.values.evaluate(parameters);
         let evaluated = &properties.paint;
 
         self.base.passes = if (evaluated.circle_radius.constant_or(&1.0) > 0.0
@@ -216,20 +200,7 @@ impl RenderLayer for RenderCircleLayer {
         } else {
             RenderPass::None
         };
-        properties.render_passes = self.base.passes.underlying_type();
-        self.base.evaluated_properties = Arc::new(properties);
-
-        if let Some(layer_tweaker) = &mut self.base.layer_tweaker {
-            layer_tweaker.update_properties(Arc::clone(&self.base.evaluated_properties));
-        }
-    }
-
-    fn has_transition(&self) -> bool {
-        self.unevaluated.has_transition()
-    }
-
-    fn has_crossfade(&self) -> bool {
-        false
+        self.values.set_evaluated(&mut self.base, properties);
     }
 
     // query
@@ -248,7 +219,7 @@ impl RenderLayer for RenderCircleLayer {
 
         use crate::geometry::feature_index::FeatureIndex;
 
-        let evaluated = &evaluated::<Circle>(&self.base.evaluated_properties).paint;
+        let evaluated = &self.values.evaluated.paint;
         // Translate query geometry
         let translated = FeatureIndex::translate_query_geometry(
             query_geometry,
@@ -389,8 +360,8 @@ impl RenderLayer for RenderCircleLayer {
                 });
             }
 
-            let evaluated_properties = Arc::clone(&self.base.evaluated_properties);
-            let evaluated = &evaluated::<Circle>(&evaluated_properties).paint;
+            let evaluated_properties = Arc::clone(&self.values.evaluated);
+            let evaluated = &evaluated_properties.paint;
             let tweaker = self.base.layer_tweaker.as_ref().map(|tweaker| tweaker.base().key);
             let mut properties_as_uniforms: StringIDSetsPair = Default::default();
 
@@ -404,7 +375,7 @@ impl RenderLayer for RenderCircleLayer {
                     continue;
                 };
 
-                let Some(bucket) = (*render_data.bucket).downcast_ref::<CircleBucket>() else {
+                let Some(bucket) = render_data.bucket::<Circle>() else {
                     continue;
                 };
                 let vertex_count = bucket.vertices.len();

@@ -40,12 +40,12 @@ use crate::gfx::context::Context;
 use crate::gfx::texture2d::Texture2DPtr;
 use crate::layer_group::LayerGroup;
 use crate::layer_tweaker::LayerTweaker;
-use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
+use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::heatmap_layout::HeatmapLayout;
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
-use crate::render_layer::{RenderLayer, RenderLayerBase, set_style};
+use crate::render_layer::{LayerValues, RenderLayer, RenderLayerBase, TypedLayer};
 use crate::render_pass::RenderPass;
 use crate::render_source::RenderTiles;
 use crate::render_static_data::RenderStaticData;
@@ -105,9 +105,7 @@ impl LayerType for Heatmap {
 
 pub(crate) struct RenderHeatmapLayer {
     base: RenderLayerBase,
-    style: Arc<LayerStyle<Heatmap>>,
-    // Paint properties
-    unevaluated: HeatmapPaintProperties::Unevaluated,
+    values: LayerValues<Heatmap>,
     color_ramp: Rc<PremultipliedImage>,
     /// The global-state snapshot used to generate the cached color ramp and
     /// detect when it needs to be rebuilt.
@@ -130,14 +128,10 @@ pub(crate) struct RenderHeatmapLayer {
 
 impl RenderHeatmapLayer {
     pub(crate) fn new(impl_: Arc<LayerStyle<Heatmap>>) -> Self {
-        let unevaluated = impl_.paint.untransitioned();
-        let properties: Arc<dyn ErasedEvaluatedLayer> = Arc::new(EvaluatedLayer::<Heatmap>::new(Arc::clone(&impl_)));
-        let mut base = RenderLayerBase::new(properties);
-        base.style_dependencies = unevaluated.get_dependencies();
+        let (base, values) = LayerValues::new(impl_);
         RenderHeatmapLayer {
             base,
-            style: impl_,
-            unevaluated,
+            values,
             color_ramp: Rc::new(PremultipliedImage::new(Size::new(256, 1))),
             color_ramp_global_state: None,
             segments: Vec::new(),
@@ -150,7 +144,7 @@ impl RenderHeatmapLayer {
     }
 
     fn update_color_ramp(&mut self) {
-        let mut color_value = self.unevaluated.heatmap_color.get_value().clone();
+        let mut color_value = self.values.unevaluated.heatmap_color.get_value().clone();
         if color_value.is_undefined() {
             color_value = default_heatmap_color();
         }
@@ -163,26 +157,19 @@ impl RenderHeatmapLayer {
     }
 }
 
+impl TypedLayer for RenderHeatmapLayer {
+    type Type = Heatmap;
+
+    fn parts(&self) -> (&RenderLayerBase, &LayerValues<Heatmap>) {
+        (&self.base, &self.values)
+    }
+
+    fn parts_mut(&mut self) -> (&mut RenderLayerBase, &mut LayerValues<Heatmap>) {
+        (&mut self.base, &mut self.values)
+    }
+}
+
 impl RenderLayer for RenderHeatmapLayer {
-    fn base(&self) -> &RenderLayerBase {
-        &self.base
-    }
-
-    fn base_mut(&mut self) -> &mut RenderLayerBase {
-        &mut self.base
-    }
-
-    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>) {
-        set_style(&mut self.base, &mut self.style, style);
-        self.transition(parameters);
-    }
-
-    fn transition(&mut self, parameters: &TransitionParameters) {
-        let prior = std::mem::take(&mut self.unevaluated);
-        self.unevaluated = self.style.paint.transitioned(parameters, prior);
-        self.base.style_dependencies = self.unevaluated.get_dependencies();
-    }
-
     fn layer_changed(&mut self, _parameters: &TransitionParameters, _new_layer: &Arc<dyn ErasedLayerStyle>) {
         // RenderLayer::layerChanged
         self.base.layer_tweaker = None;
@@ -198,7 +185,7 @@ impl RenderLayer for RenderHeatmapLayer {
             (Some(a), Some(b)) => !Arc::ptr_eq(a, b),
             _ => true,
         };
-        let ramp_value = self.unevaluated.heatmap_color.get_value();
+        let ramp_value = self.values.unevaluated.heatmap_color.get_value();
         let ramp_affected = parameters.layer_changed
             || (global_state_differs
                 && ramp_value.get_dependencies().intersects(Dependency::GLOBAL_STATE)
@@ -211,34 +198,17 @@ impl RenderLayer for RenderHeatmapLayer {
             self.update_color_ramp();
         }
 
-        let previous_evaluated = evaluated::<Heatmap>(&self.base.evaluated_properties).paint.clone();
-        let mut properties = EvaluatedLayer::<Heatmap>::with_paint(
-            Arc::clone(&self.style),
-            self.unevaluated.evaluate_with_previous(parameters, &previous_evaluated),
-        );
+        let properties = self.values.evaluate(parameters);
 
         self.base.passes = if *properties.paint.heatmap_opacity.uniform() > 0.0 {
             RenderPass::Translucent | RenderPass::Pass3D
         } else {
             RenderPass::None
         };
-        properties.render_passes = self.base.passes.underlying_type();
-        self.base.evaluated_properties = Arc::new(properties);
-
-        if let Some(layer_tweaker) = &mut self.base.layer_tweaker {
-            layer_tweaker.update_properties(Arc::clone(&self.base.evaluated_properties));
-        }
+        self.values.set_evaluated(&mut self.base, properties);
         if let Some(texture_tweaker) = &mut self.texture_tweaker {
             texture_tweaker.update_properties(Arc::clone(&self.base.evaluated_properties));
         }
-    }
-
-    fn has_transition(&self) -> bool {
-        self.unevaluated.has_transition()
-    }
-
-    fn has_crossfade(&self) -> bool {
-        false
     }
 
     fn remove_all_drawables(&mut self) {
@@ -360,8 +330,8 @@ impl RenderHeatmapLayer {
             });
         }
 
-        let evaluated_properties = Arc::clone(&self.base.evaluated_properties);
-        let evaluated = &evaluated::<Heatmap>(&evaluated_properties).paint;
+        let evaluated_properties = Arc::clone(&self.values.evaluated);
+        let evaluated = &evaluated_properties.paint;
         let mut properties_as_uniforms: StringIDSetsPair = Default::default();
 
         let mut heatmap_shader: Option<ShaderProgramPtr> = None;
@@ -375,7 +345,7 @@ impl RenderHeatmapLayer {
                 continue;
             };
 
-            let Some(bucket) = (*render_data.bucket).downcast_ref::<HeatmapBucket>() else {
+            let Some(bucket) = render_data.bucket::<Heatmap>() else {
                 continue;
             };
             let vertex_count = bucket.vertices.len();
