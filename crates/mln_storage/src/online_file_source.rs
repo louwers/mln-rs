@@ -697,7 +697,8 @@ impl OnlineFileSource {
     #[must_use]
     pub fn new(network: Arc<NetworkStatus>) -> Self {
         let (mut source, core) = Self::with_core(network, None);
-        match mln_util::thread::spawn("OnlineFileSource", move || core.run()) {
+        // The core, and its HTTP client, are made on the thread.
+        match mln_util::thread::spawn("OnlineFileSource", move || core().run()) {
             Ok(thread) => source.thread = Some(thread),
             Err(error) => Log::error(Event::General, format!("The online file source's thread didn't start: {error}")),
         }
@@ -712,10 +713,14 @@ impl OnlineFileSource {
     #[must_use]
     pub fn local(network: Arc<NetworkStatus>, wake: Arc<dyn Fn() + Send + Sync>) -> (Self, OnlineCore) {
         let (source, core) = Self::with_core(network, Some(wake));
-        (source, OnlineCore(core))
+        (source, OnlineCore(core()))
     }
 
-    fn with_core(network: Arc<NetworkStatus>, wake: Option<Arc<dyn Fn() + Send + Sync>>) -> (Self, Core) {
+    /// The source, and what makes its core.
+    fn with_core(
+        network: Arc<NetworkStatus>,
+        wake: Option<Arc<dyn Fn() + Send + Sync>>,
+    ) -> (Self, impl FnOnce() -> Core + Send + 'static) {
         let (sender, receiver) = mpsc::channel();
         let inbox = Inbox { sender, wake };
         let reachable = Arc::new(AtomicBool::new(false));
@@ -727,9 +732,10 @@ impl OnlineFileSource {
                 }
             })
         };
-        let core = Core {
+        let core_inbox = inbox.clone();
+        let core = move || Core {
             receiver,
-            inbox: inbox.clone(),
+            inbox: core_inbox,
             requests: VecMap::new(),
             pending_requests: PendingRequests::default(),
             active_requests: VecSet::new(),
@@ -845,7 +851,8 @@ mod tests {
     /// A core that no thread runs, which the test hands its messages, and
     /// the source whose drop ends it.
     fn core(maximum: u32) -> (OnlineFileSource, Core) {
-        let (source, mut core) = OnlineFileSource::with_core(Arc::new(NetworkStatus::new()), None);
+        let (source, core) = OnlineFileSource::with_core(Arc::new(NetworkStatus::new()), None);
+        let mut core = core();
         core.maximum_concurrent_requests = maximum;
         (source, core)
     }
