@@ -336,8 +336,8 @@ pub(crate) struct Buffer {
     pub(crate) dynamic_attribute_data: Vec<SymbolDynamicLayoutVertex>,
     /// Positions for each layer that shares the bucket at another
     /// translation than its leader's. A layer keeps them for the bucket's
-    /// life: drawables moved back to the shared positions would keep
-    /// bindings to these. Placement makes them once the bucket is on the
+    /// life: draws moved back to the shared positions would keep bindings
+    /// to these. Placement makes them once the bucket is on the
     /// map side, so they don't cross with it from a worker.
     #[wire(skip)]
     pub(crate) layer_dynamic_attribute_data: BTreeMap<String, Vec<SymbolDynamicLayoutVertex>>,
@@ -349,7 +349,7 @@ pub(crate) struct Buffer {
     pub(crate) segments: Vec<SegmentBase>,
     pub(crate) placed_symbols: Vec<PlacedSymbol>,
     pub(crate) pools: PlacedSymbolPools,
-    /// Bumped by `updateModified` (the drawables re-read changed vectors).
+    /// Bumped by `updateModified` (the draws re-read changed vectors).
     pub(crate) modified: u64,
 }
 
@@ -414,7 +414,7 @@ impl Buffer {
         range.iter().any(|vertex| vertex.a1[0] != 0.0)
     }
 
-    /// Whether the drawable of `segment` (one segment, or `None` for the
+    /// Whether the draw of `segment` (one segment, or `None` for the
     /// whole buffer) has any vertex that can draw.
     pub(crate) fn segment_has_visible_vertices(&self, segment: Option<usize>) -> bool {
         match segment {

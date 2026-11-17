@@ -35,9 +35,9 @@ use mln_style::color_ramp_property_value::ColorRampPropertyValue;
 use mln_style::expression::{
     Dependency, EvaluationContext, GlobalStateMap, from_expression_value, global_state_refs_intersect,
 };
-use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
+use mln_style::layer_type::LayerStyle;
 use mln_style::layers::ColorRelief;
-use mln_style::{PropertyEvaluationParameters, StyleValue as _, TransitionParameters};
+use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 use mln_style_types::ResamplingType;
 use mln_util::Color;
 use mln_util::hash::{HashMap, HashSet};
@@ -55,13 +55,13 @@ use crate::draw_cache::{DrawCache, DrawDepth, FrameDraw, FrameDraws, KeptDraw, L
 use crate::gfx::context::Context;
 use crate::gfx::texture2d::Texture2DPtr;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
-use crate::layer_tweaker::to_projection_ubo;
 use crate::layer_type::LayerType;
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{LayerPrepareParameters, LayerValues, RenderLayer, RenderLayerBase, TypedLayer};
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
+use crate::tile_matrix::to_projection_ubo;
 use crate::update_parameters::UpdateParameters;
 
 const COLOR_RELIEF_SHADER_GROUP_NAME: &str = "ColorReliefShader";
@@ -344,16 +344,6 @@ impl RenderLayer for RenderColorReliefLayer {
         self.update_tile_entries(params.draws);
     }
 
-    /// Drops the draws, which were built for the previous style's values.
-    fn layer_changed(
-        &mut self,
-        _parameters: &TransitionParameters,
-        _new_layer: &Arc<dyn ErasedLayerStyle>,
-        draws: &mut LayerDraws,
-    ) {
-        self.remove_all_drawables(draws);
-    }
-
     /// Makes the frame's draws of the layer, those of each of its tiles,
     /// which it builds for a tile it keeps none of, and writes the layer's
     /// buffers they read.
@@ -373,7 +363,7 @@ impl RenderLayer for RenderColorReliefLayer {
             }
         }
         let Some(render_tiles) = self.base.render_tiles.clone().filter(|t| !t.is_empty()) else {
-            self.remove_all_drawables(draws);
+            self.remove_all_draws(draws);
             return;
         };
         draws.frame.get_or_insert_with(FrameDraws::new);
@@ -383,7 +373,7 @@ impl RenderLayer for RenderColorReliefLayer {
         }
         let Some(color_relief_shader) = self.color_relief_shader.clone() else {
             Log::error(Event::Render, "ColorRelief shader failed to load");
-            self.remove_all_drawables(draws);
+            self.remove_all_draws(draws);
             return;
         };
         if (RENDER_PASS.underlying_type() & self.base.evaluated_properties.render_passes()) == 0 {

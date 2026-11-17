@@ -10,17 +10,25 @@ use std::sync::Arc;
 
 use geometry::Point;
 use glam::Vec2;
-use mln_gfx::polyline_generator::PolylineGeneratorOptions;
+use mln_gfx::gpu::Gpu;
+use mln_gfx::index_vector::IndexVectorBase;
+use mln_gfx::polyline_generator::{PolylineGenerator, PolylineGeneratorOptions};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shader_group::StringIDSetsPair;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::line_layer_ubo::{LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO};
-use mln_gfx::shaders::shader_defines::{
-    ID_LINE_BLUR_VERTEX_ATTRIBUTE, ID_LINE_COLOR_VERTEX_ATTRIBUTE, ID_LINE_DRAWABLE_UBO, ID_LINE_EVALUATED_PROPS_UBO,
-    ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_OFFSET_VERTEX_ATTRIBUTE, ID_LINE_OPACITY_VERTEX_ATTRIBUTE,
-    ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
+use mln_gfx::shaders::line_layer_ubo::{
+    LINE_EXPRESSION_UBO_SIZE, LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO, line_expression_mask,
 };
-use mln_gfx::{ColorMode, CullFaceMode};
+use mln_gfx::shaders::segment::SegmentBase;
+use mln_gfx::shaders::shader_defines::{
+    ID_LINE_BLUR_VERTEX_ATTRIBUTE, ID_LINE_COLOR_VERTEX_ATTRIBUTE, ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_DRAWABLE_UBO,
+    ID_LINE_EVALUATED_PROPS_UBO, ID_LINE_EXPRESSION_UBO, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE,
+    ID_LINE_OFFSET_VERTEX_ATTRIBUTE, ID_LINE_OPACITY_VERTEX_ATTRIBUTE, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE,
+    ID_LINE_WIDTH_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO,
+};
+use mln_gfx::shaders::shader_program::ShaderProgramPtr;
+use mln_gfx::vertex_vector::{VertexVector, VertexVectorBasePtr};
+use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode, VertexAttributeArray};
 use mln_map_types::MapDebugOptions;
 use mln_style::Source;
 use mln_style_types::{LineCapType, LineJoinType, TranslateAnchorType};
@@ -31,28 +39,27 @@ use mln_util::constants::EXTENT;
 use mln_util::error::Error;
 use mln_util::geometry::FeatureType;
 use mln_util::hash::HashSet;
+use mln_util::identity::SimpleIdentity;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
-use crate::drawable::Drawable;
-use crate::drawable_builder::{DrawableBuilder, UniqueDrawableBuilder};
+use crate::buckets::line_bucket::{LineBucket, LineLayoutVertex};
+use crate::draw::DrawObjects;
+use crate::draw_cache::{DrawCache, DrawDepth, FrameDraw, FrameDraws, KeptDraw};
 use crate::gfx::context::Context;
-use crate::gfx::uniform_buffer::UniformBufferPtr;
-use crate::layer_group::LayerGroup;
-// layers: debug
-use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
 use crate::layer_type::ErasedEvaluatedLayer;
-use crate::layers::{LayerTiles, cast_matrix};
+use crate::layers::cast_matrix;
 use crate::paint_parameters::PaintParameters;
 use crate::query::FeatureExtensionValue;
-use crate::render_pass::RenderPass;
 use crate::render_source::{RenderSource, RenderSourceBase, RenderTiles, SourcePrepareParameters};
 use crate::render_tile::RenderTile;
-use crate::render_tree::{DebugLayerGroupMap, DebugType, RenderItem, debug_layer_group};
+use crate::render_tree::{DebugLayers, DebugType, RenderItem, debug_layer};
 use crate::source_type::{OriginUpdate, TileOrigin};
 use crate::tile::job::SourceKey;
 use crate::tile::source_tiles::{CoverUpdate, SourceTiles};
 use crate::tile::store::TileStore;
 use crate::tile::tile::TileKind;
+// layers: debug
+use crate::tile_matrix::{get_projection_data, to_projection_ubo};
 use crate::tile_parameters::TileParameters;
 use crate::util::subdivision::subdivide_vertex_line;
 
@@ -68,10 +75,10 @@ impl TileSourceRenderItem {
     }
 }
 
-/// The line properties of a debug layer group's polylines: red tile
-/// borders, and black text over a white outline (layers: debug).
+/// The line properties of a debug overlay's polylines: red tile borders, and
+/// black text over a white outline (layers: debug).
 #[must_use]
-pub(crate) fn debug_line_properties(type_: DebugType) -> LineEvaluatedPropsUBO {
+fn debug_line_properties(type_: DebugType) -> LineEvaluatedPropsUBO {
     let (color, width) = match type_ {
         DebugType::TextOutline => (Color::white(), 4.0),
         DebugType::Text => (Color::black(), 2.0),
@@ -85,9 +92,63 @@ pub(crate) fn debug_line_properties(type_: DebugType) -> LineEvaluatedPropsUBO {
         offset: 0.0,
         width,
         floorwidth: 0.0,
-        pad0: 0.0,
+        expression_mask: line_expression_mask::NONE,
         pad1: 0.0,
     }
+}
+
+/// The GPU objects of `lines`, as polylines of `options` drawn with `shader`,
+/// named `name`; `None` where they have no vertices.
+fn polyline_objects(
+    name: &str,
+    shader: &ShaderProgramPtr,
+    lines: &[GeometryCoordinates],
+    options: &PolylineGeneratorOptions,
+) -> Option<DrawObjects> {
+    let mut vertices: Vec<LineLayoutVertex> = Vec::new();
+    let mut segments: Vec<SegmentBase> = Vec::new();
+    let mut indexes: Vec<u16> = Vec::new();
+    for line in lines {
+        let mut generator = PolylineGenerator::new(
+            &mut vertices,
+            LineBucket::layout_vertex,
+            &mut segments,
+            &SegmentBase::new,
+            |segment: &mut SegmentBase| segment,
+            &mut indexes,
+        );
+        generator.generate(line, options);
+    }
+    if vertices.is_empty() {
+        return None;
+    }
+
+    let vertex_count = vertices.len();
+    let stride = size_of::<LineLayoutVertex>() as u32;
+    let shared: VertexVectorBasePtr = Rc::new(VertexVector::from_vec(vertices));
+    let mut attrs = VertexAttributeArray::new();
+    // The position and normal, then the extrusion data (offsetof(LineLayoutVertex, a2)).
+    for (id, offset, data_type) in [
+        (ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, 0, AttributeDataType::Short2),
+        (ID_LINE_DATA_VERTEX_ATTRIBUTE, 4, AttributeDataType::UByte4),
+    ] {
+        if let Some(attr) = attrs.set(id, -1, AttributeDataType::Invalid, 0) {
+            attr.set_shared_raw_data(Some(Rc::clone(&shared)), offset, 0, stride, data_type);
+        }
+    }
+
+    let mut objects = DrawObjects::new(name.to_owned());
+    objects.set_color_mode(&ColorMode::alpha_blended());
+    objects.set_cull_face_mode(CullFaceMode::disabled());
+    objects.set_shader(Some(Rc::clone(shader)));
+    objects.update_vertex_attributes(
+        Some(Rc::new(RefCell::new(attrs))),
+        vertex_count,
+        DrawMode::Triangles(),
+        Some(Rc::new(RefCell::new(IndexVectorBase::new(indexes)))),
+        &segments,
+    );
+    Some(objects)
 }
 
 impl RenderItem for TileSourceRenderItem {
@@ -102,22 +163,20 @@ impl RenderItem for TileSourceRenderItem {
     // C++ draws the text with the DebugShader as line primitives of 2 and 4
     // pixels. WebGPU draws line primitives one pixel wide, so the text is
     // polylines, like the tile borders (MLN_ENABLE_POLYLINE_DRAWABLES).
-    fn update_debug_drawables(&self, debug_layer_groups: &mut DebugLayerGroupMap, parameters: &PaintParameters<'_>) {
+    fn update_debug_draws(&self, debug_layers: &mut DebugLayers, parameters: &PaintParameters<'_>) {
         if !parameters
             .debug_options
             .contains(MapDebugOptions::TIMESTAMPS | MapDebugOptions::PARSE_STATUS | MapDebugOptions::TILE_BORDERS)
         {
-            debug_layer_groups.clear();
+            debug_layers.clear();
             return;
         }
 
-        let render_pass = RenderPass::Translucent;
         let shaders = &*parameters.static_data.shaders;
-        let drawable_name = format!("debug-{}", self.name);
+        let name = format!("debug-{}", self.name);
         let globe = parameters.state.is_globe_rendering();
         let projection_variant = if globe { ProjectionVariant::Globe } else { ProjectionVariant::Mercator };
 
-        // initialize polyline builder
         let Some(polyline_shader) = shaders.shader_group("LineShader").map(|shader_group| {
             let properties_as_uniforms: StringIDSetsPair = (
                 ["a_color", "a_blur", "a_opacity", "a_gapwidth", "a_offset", "a_width"]
@@ -140,55 +199,17 @@ impl RenderItem for TileSourceRenderItem {
             return;
         };
 
-        let mut polyline_builder: Option<UniqueDrawableBuilder> = None;
-        // Builds one drawable of `lines` for the tile and adds it to the group.
-        let mut add_polyline_drawable =
-            |tile_layer_group: &mut LayerGroup,
-             tile_id: OverscaledTileID,
-             lines: &[GeometryCoordinates],
-             options: &PolylineGeneratorOptions,
-             data: Option<crate::drawable::DrawableData>| {
-                let builder = polyline_builder.get_or_insert_with(|| {
-                    let mut builder = DrawableBuilder::boxed();
-                    builder.set_shader(Some(Rc::clone(&polyline_shader)));
-                    builder.set_render_pass(render_pass);
-                    builder.set_enable_depth(false);
-                    builder.set_color_mode(&ColorMode::alpha_blended());
-                    builder.set_cull_face_mode(CullFaceMode::disabled());
-                    builder.set_vertex_attr_id(ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE);
-                    builder.set_drawable_name(drawable_name.clone());
-                    builder
-                });
-                for line in lines {
-                    builder.add_polyline(line, options);
-                }
-
-                // finish
-                builder.flush();
-                let mut data = data;
-                for mut drawable in builder.clear_drawables() {
-                    drawable.tile_id = Some(tile_id);
-                    drawable.data = data.take();
-                    tile_layer_group.add_tile_drawable(render_pass, &tile_id, drawable);
-                }
-            };
-
-        // add or get the layer group for a debug type
-
-        // build a set of tiles to cover
+        // The tiles to cover, whose draws stay where they were built with
+        // the same shader: one of the other projection keeps its shader.
         let new_tiles: HashSet<OverscaledTileID> =
             self.render_tiles.iter().map(|tile| *tile.get_overscaled_tile_id()).collect();
-        // erase drawables that are not in the current tile set, and those
-        // built for the other projection, which keep its shader
-        let remove_stale = |tile_layer_group: &mut LayerGroup| {
-            tile_layer_group.remove_drawables_if(|drawable| {
-                let same_shader = drawable
-                    .objects
-                    .shader()
-                    .is_some_and(|shader| std::ptr::addr_eq(Rc::as_ptr(shader), Rc::as_ptr(&polyline_shader)));
-                drawable.objects.name == drawable_name
-                    && (!drawable.tile_id.is_some_and(|id| new_tiles.contains(&id)) || !same_shader)
-            });
+        let keep = |draw: &DebugDraw| {
+            let same_shader = draw
+                .draw
+                .objects
+                .shader()
+                .is_some_and(|shader| std::ptr::addr_eq(Rc::as_ptr(shader), Rc::as_ptr(&polyline_shader)));
+            draw.draw.objects.name != name || (new_tiles.contains(&draw.tile) && same_shader)
         };
 
         // Timestamps or Parse Status
@@ -200,49 +221,41 @@ impl RenderItem for TileSourceRenderItem {
                 ..Default::default()
             };
             for type_ in [DebugType::TextOutline, DebugType::Text] {
-                let tile_layer_group = debug_layer_group(debug_layer_groups, type_);
-                remove_stale(tile_layer_group);
+                let layer = debug_layer(debug_layers, type_);
+                layer.draws.0.retain(keep);
 
-                // add new drawables and replace those whose text changed
+                // add new draws and replace those whose text changed
                 for tile in self.render_tiles.iter() {
                     let tile_id = *tile.get_overscaled_tile_id();
                     let Some(debug_bucket) = &tile.debug_bucket else {
                         continue;
                     };
-                    let shows_text = |drawable: &mut Drawable| matches!(&drawable.data, Some(crate::drawable::DrawableData::DebugText(text)) if *text == debug_bucket.text);
-                    let mut current = false;
-                    tile_layer_group.visit_drawables_for(render_pass, &tile_id, |drawable| {
-                        current |= drawable.objects.name == drawable_name && shows_text(drawable);
-                    });
-                    if current {
+                    let of_tile = |draw: &DebugDraw| draw.draw.objects.name == name && draw.tile == tile_id;
+                    if layer.draws.0.iter().any(|draw| of_tile(draw) && draw.text.as_ref() == Some(&debug_bucket.text))
+                    {
                         continue;
                     }
-                    tile_layer_group.remove_drawables_if(|drawable| {
-                        drawable.objects.name == drawable_name && drawable.tile_id == Some(tile_id)
-                    });
-                    if tile.get_needs_rendering() && !debug_bucket.strokes.is_empty() {
-                        add_polyline_drawable(
-                            tile_layer_group,
-                            tile_id,
-                            &debug_bucket.strokes,
-                            &text_options,
-                            Some(crate::drawable::DrawableData::DebugText(debug_bucket.text.clone())),
-                        );
+                    layer.draws.0.retain(|draw| !of_tile(draw));
+                    if tile.get_needs_rendering()
+                        && let Some(objects) =
+                            polyline_objects(&name, &polyline_shader, &debug_bucket.strokes, &text_options)
+                    {
+                        layer.add(tile_id, Some(debug_bucket.text.clone()), objects);
                     }
                 }
             }
         } else {
-            // tile texts are not required, erase layer groups
-            debug_layer_groups.remove(&DebugType::TextOutline);
-            debug_layer_groups.remove(&DebugType::Text);
+            // tile texts are not required, erase their overlays
+            debug_layers.remove(&DebugType::TextOutline);
+            debug_layers.remove(&DebugType::Text);
         }
 
         // Tile Borders
         if parameters.debug_options.contains(MapDebugOptions::TILE_BORDERS) {
-            let tile_layer_group = debug_layer_group(debug_layer_groups, DebugType::Border);
-            remove_stale(tile_layer_group);
+            let layer = debug_layer(debug_layers, DebugType::Border);
+            layer.draws.0.retain(keep);
 
-            // add new drawables
+            // add new draws
             let extent = EXTENT as i16;
             let tile_border: GeometryCoordinates = vec![
                 Point::new(0, 0),
@@ -260,90 +273,99 @@ impl RenderItem for TileSourceRenderItem {
                 if tile.debug_bucket.is_none() || !tile.get_needs_rendering() {
                     continue;
                 }
-                let mut drawn = false;
-                tile_layer_group.visit_drawables_for(render_pass, &tile_id, |drawable| {
-                    drawn |= drawable.objects.name == drawable_name;
-                });
-                if !drawn {
-                    let border = if globe {
-                        let z = tile_id.canonical.z;
-                        globe_borders.entry(z).or_insert_with(|| {
-                            let steps = SubdivisionGranularitySetting::globe().tile.get_granularity_for_zoom_level(z);
-                            subdivide_vertex_line(&tile_border, steps, false)
-                        })
-                    } else {
-                        &tile_border
-                    };
-                    add_polyline_drawable(
-                        tile_layer_group,
-                        tile_id,
-                        std::slice::from_ref(border),
-                        &border_options,
-                        None,
-                    );
+                if layer.draws.0.iter().any(|draw| draw.draw.objects.name == name && draw.tile == tile_id) {
+                    continue;
+                }
+                let border = if globe {
+                    let z = tile_id.canonical.z;
+                    globe_borders.entry(z).or_insert_with(|| {
+                        let steps = SubdivisionGranularitySetting::globe().tile.get_granularity_for_zoom_level(z);
+                        subdivide_vertex_line(&tile_border, steps, false)
+                    })
+                } else {
+                    &tile_border
+                };
+                if let Some(objects) =
+                    polyline_objects(&name, &polyline_shader, std::slice::from_ref(border), &border_options)
+                {
+                    layer.add(tile_id, None, objects);
                 }
             }
         } else {
-            // if tile borders are not required, erase layer group
-            debug_layer_groups.remove(&DebugType::Border);
+            // if tile borders are not required, erase their overlay
+            debug_layers.remove(&DebugType::Border);
         }
     }
 }
 
 // layers: debug --------------------------------------------------------------
 
-/// Sets the uniforms of a debug layer group's polylines.
-pub(crate) struct PolylineLayerTweaker {
-    base: LayerTweakerBase,
-    props_ubo: LineEvaluatedPropsUBO,
-    /// `MLN_UBO_CONSOLIDATION`
-    drawable_uniform_buffer: Option<UniformBufferPtr>,
+/// A draw of a debug overlay: polylines over a tile of a source, which the
+/// draw's GPU objects are named after.
+struct DebugDraw {
+    tile: OverscaledTileID,
+    /// The lines of text the polylines spell, of a text overlay.
+    text: Option<Vec<String>>,
+    draw: KeptDraw,
 }
 
-impl PolylineLayerTweaker {
+/// The draws of a debug overlay, in the order they were made, which is the
+/// order they draw in.
+#[derive(Default)]
+struct DebugDraws(Vec<DebugDraw>);
+
+impl DrawCache for DebugDraws {
+    fn objects_mut(&mut self, id: SimpleIdentity) -> Option<&mut DrawObjects> {
+        self.0.iter_mut().find(|draw| draw.draw.id == id).map(|draw| &mut draw.draw.objects)
+    }
+}
+
+/// A debug overlay: polylines over the tiles of the sources, in the color
+/// and width of its type (layers: debug).
+pub(crate) struct DebugLayer {
+    properties: LineEvaluatedPropsUBO,
+    draws: DebugDraws,
+    /// The frame's draws, with the buffers they read.
+    frame: FrameDraws,
+}
+
+impl DebugLayer {
     #[must_use]
-    pub(crate) fn new(properties: LineEvaluatedPropsUBO) -> Self {
-        PolylineLayerTweaker {
-            base: LayerTweakerBase::new("debug-polyline".to_owned(), None),
-            props_ubo: properties,
-            drawable_uniform_buffer: None,
-        }
-    }
-}
-
-impl LayerTweaker for PolylineLayerTweaker {
-    fn base(&self) -> &LayerTweakerBase {
-        &self.base
+    pub(crate) fn new(type_: DebugType) -> Self {
+        DebugLayer { properties: debug_line_properties(type_), draws: DebugDraws::default(), frame: FrameDraws::new() }
     }
 
-    fn base_mut(&mut self) -> &mut LayerTweakerBase {
-        &mut self.base
+    /// Adds a draw of `objects` over `tile_id`, spelling `text`.
+    fn add(&mut self, tile_id: OverscaledTileID, text: Option<Vec<String>>, objects: DrawObjects) {
+        self.draws.0.push(DebugDraw { tile: tile_id, text, draw: KeptDraw::new(objects) });
     }
 
-    fn execute(&mut self, layer_group: &mut LayerGroup, _tiles: &LayerTiles<'_>, parameters: &PaintParameters<'_>) {
+    /// Makes the frame's draws of the overlay, and writes the buffers they
+    /// read.
+    pub(crate) fn prepare(&mut self, parameters: &PaintParameters<'_>) {
         let context = parameters.context;
-        if layer_group.empty() {
+        self.frame.draws.clear();
+        if self.draws.0.is_empty() {
             return;
         }
 
-        layer_group.mutable_uniform_buffers().create_or_update_pod(
-            ID_LINE_EVALUATED_PROPS_UBO,
-            &self.props_ubo,
-            context,
-        );
+        let buffers = &mut self.frame.uniform_buffers;
+        buffers.create_or_update_pod(ID_LINE_EVALUATED_PROPS_UBO, &self.properties, context);
+        // We would need to set up `idLineExpressionUBO` if the expression
+        // mask isn't empty
+        debug_assert_eq!(self.properties.expression_mask, line_expression_mask::NONE);
+        // No GPU expressions; only line shaders of `Caps::line_expressions`
+        // read it.
+        if context.caps().line_expressions && buffers.get(ID_LINE_EXPRESSION_UBO).is_none() {
+            buffers.set(ID_LINE_EXPRESSION_UBO, context.create_uniform_buffer(&[0; LINE_EXPRESSION_UBO_SIZE]));
+        }
 
-        let mut i: u32 = 0;
-        let mut drawable_ubo_vector = vec![LineDrawableUnionUBO::default(); layer_group.drawable_count()];
-        let mut projection_ubo_vector = vec![ProjectionUBO::default(); layer_group.drawable_count()];
-        layer_group.visit_drawables(|drawable| {
-            let Some(tile_id) = drawable.tile_id else {
-                return;
-            };
-
-            let tile_id = tile_id.to_unwrapped();
-            let zoom = parameters.state.get_zoom();
+        let zoom = parameters.state.get_zoom();
+        let mut drawable_ubos = Vec::with_capacity(self.draws.0.len());
+        let mut projection_ubos: Vec<ProjectionUBO> = Vec::with_capacity(self.draws.0.len());
+        for draw in &self.draws.0 {
+            let tile_id = draw.tile.to_unwrapped();
             // C++ also computes an unused `tileMatrix` (state.matrixFor).
-
             let projection = get_projection_data(
                 &tile_id,
                 parameters,
@@ -351,14 +373,13 @@ impl LayerTweaker for PolylineLayerTweaker {
                 TranslateAnchorType::Viewport,
                 false,
                 false,
-                drawable.origin,
+                None,
                 false,
             );
-            let matrix = projection.fallback_matrix;
-            projection_ubo_vector[i as usize] = to_projection_ubo(&projection);
-
-            drawable_ubo_vector[i as usize].set(&LineDrawableUBO {
-                matrix: cast_matrix(&matrix),
+            projection_ubos.push(to_projection_ubo(&projection));
+            let mut drawable_ubo = LineDrawableUnionUBO::default();
+            drawable_ubo.set(&LineDrawableUBO {
+                matrix: cast_matrix(&projection.fallback_matrix),
                 ratio: 1.0 / tile_id.pixels_to_tile_units(1.0, zoom as f32),
                 color_t: 0.0,
                 blur_t: 0.0,
@@ -368,15 +389,22 @@ impl LayerTweaker for PolylineLayerTweaker {
                 width_t: 0.0,
                 pad1: 0.0,
             });
+            drawable_ubos.push(drawable_ubo);
+            self.frame.draws.push(FrameDraw { depth: DrawDepth::Off, ..FrameDraw::new(None, draw.draw.id) });
+        }
+        let buffers = &mut self.frame.uniform_buffers;
+        buffers.write_storage(ID_LINE_DRAWABLE_UBO, bytemuck::cast_slice(&drawable_ubos), context);
+        buffers.write_storage(ID_PROJECTION_UBO, bytemuck::cast_slice(&projection_ubos), context);
+    }
 
-            drawable.ubo_index = i;
-            i += 1;
-        });
+    /// Uploads the GPU objects of the overlay's draws.
+    pub(crate) fn upload(&mut self, context: &Context) {
+        self.frame.upload_from(&mut self.draws, context);
+    }
 
-        let bytes: &[u8] = bytemuck::cast_slice(&drawable_ubo_vector);
-        context.write_storage_buffer(&mut self.drawable_uniform_buffer, bytes);
-        layer_group.mutable_uniform_buffers().set(ID_LINE_DRAWABLE_UBO, self.drawable_uniform_buffer.clone());
-        self.base.upload_projection_ubos(layer_group.mutable_uniform_buffers(), &projection_ubo_vector, context);
+    /// Draws the overlay into the open pass of `gpu`, the context's.
+    pub(crate) fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        self.frame.render_from(&mut self.draws, gpu, parameters);
     }
 }
 

@@ -75,7 +75,7 @@ pub enum RendererEvent {
         id: OverscaledTileID,
         source_id: String,
     },
-    /// A layer or a drawable failed to render.
+    /// A layer or a draw failed to render.
     RenderError(Error),
 }
 

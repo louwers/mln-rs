@@ -183,19 +183,6 @@ impl std::fmt::Debug for dyn ErasedEvaluatedLayer {
     }
 }
 
-/// `layer` as a `T` layer's values.
-///
-/// # Panics
-///
-/// If `layer` is another type's.
-pub(crate) fn evaluated<T: LayerType>(layer: &Arc<dyn ErasedEvaluatedLayer>) -> &EvaluatedLayer<T> {
-    let any: &dyn Any = &**layer;
-    match any.downcast_ref() {
-        Some(layer) => layer,
-        None => panic!("the evaluated values of a {} layer, not a {} layer", layer.style().info().name, T::INFO.name),
-    }
-}
-
 /// A layer type that the renderer draws, whichever it is.
 pub(crate) trait ErasedLayerType: ErasedStyleLayerType {
     /// The render layer that draws the layer `style`, or `None` if `style`
@@ -357,26 +344,13 @@ mod tests {
     }
 
     #[test]
-    fn evaluated_gets_the_values_of_their_type() {
-        let layer = background();
-        let layer = evaluated::<Background>(&layer);
-        assert_eq!(*layer.paint.background_color.uniform(), Color::new(0.25, 0.5, 0.75, 1.0));
-        assert_eq!(*layer.paint.background_opacity.uniform(), 0.5);
-        assert_eq!(layer.crossfade.t, 0.25);
-    }
-
-    #[test]
-    #[should_panic(expected = "background layer, not a circle layer")]
-    fn evaluated_panics_for_another_type() {
-        let layer = background();
-        let _ = evaluated::<Circle>(&layer);
-    }
-
-    #[test]
     fn recover_keeps_the_allocation() {
         let layer = background();
         let recovered = EvaluatedLayer::<Background>::recover(&layer).unwrap();
         assert!(std::ptr::addr_eq(Arc::as_ptr(&recovered), Arc::as_ptr(&layer)));
+        assert_eq!(*recovered.paint.background_color.uniform(), Color::new(0.25, 0.5, 0.75, 1.0));
+        assert_eq!(*recovered.paint.background_opacity.uniform(), 0.5);
+        assert_eq!(recovered.crossfade.t, 0.25);
         assert!(EvaluatedLayer::<Circle>::recover(&layer).is_none());
     }
 

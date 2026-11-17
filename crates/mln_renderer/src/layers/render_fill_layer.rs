@@ -23,10 +23,10 @@ use mln_gfx::{
     VertexAttributeArrayPtr,
 };
 use mln_map_types::TransformState;
-use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
+use mln_style::PropertyEvaluationParameters;
+use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Fill;
 use mln_style::layers::fill_layer_properties::FillPaintProperties;
-use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_style_types::AlignmentType;
 use mln_util::Color;
 use mln_util::constants::TILE_SIZE_D;
@@ -43,7 +43,6 @@ use crate::draw_cache::{DrawCache, DrawDepth, FrameDraw, FrameDraws, LayerDraws}
 use crate::gfx::context::Context;
 use crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker;
 use crate::layer_composite::Composite;
-use crate::layer_tweaker::{get_projection_data, to_projection_ubo};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::pattern_layout::{FillLayoutSpec, PatternLayout, uses_pattern};
@@ -53,6 +52,7 @@ use crate::render_layer::{LayerValues, RenderLayer, RenderLayerBase, TypedLayer}
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_tile::RenderTile;
+use crate::tile_matrix::{get_projection_data, to_projection_ubo};
 use crate::update_parameters::UpdateParameters;
 
 const FILL_SHADER_NAME: &str = "FillShader";
@@ -567,16 +567,6 @@ impl RenderLayer for RenderFillLayer {
         self.values.set_evaluated(&mut self.base, properties);
     }
 
-    /// Drops the draws, which were built for the previous style's values.
-    fn layer_changed(
-        &mut self,
-        _parameters: &TransitionParameters,
-        _new_layer: &Arc<dyn ErasedLayerStyle>,
-        draws: &mut LayerDraws,
-    ) {
-        self.remove_all_drawables(draws);
-    }
-
     // query
     fn query_intersects_feature(
         &self,
@@ -617,7 +607,7 @@ impl RenderLayer for RenderFillLayer {
         draws: &mut LayerDraws,
     ) {
         let Some(render_tiles) = self.base.render_tiles.clone().filter(|t| !t.is_empty()) else {
-            self.remove_all_drawables(draws);
+            self.remove_all_draws(draws);
             return;
         };
 
@@ -648,7 +638,7 @@ impl RenderLayer for RenderFillLayer {
             self.pattern_shader_group.clone(),
             self.outline_pattern_shader_group.clone(),
         ) else {
-            self.remove_all_drawables(draws);
+            self.remove_all_draws(draws);
             return;
         };
 

@@ -30,9 +30,9 @@ use mln_gfx::{
     AttributeDataType, ColorMode, CullFaceMode, DrawMode, ShaderProgramPtr, ShaderRegistry, VertexAttributeArray,
 };
 use mln_map_types::TransformState;
-use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
+use mln_style::PropertyEvaluationParameters;
+use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Raster;
-use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_style_types::{RasterResamplingType, ResamplingType, TranslateAnchorType};
 use mln_tile_id::UnwrappedTileID;
 use mln_util::hash::HashMap;
@@ -48,7 +48,6 @@ use crate::gfx::context::Context;
 use crate::gfx::texture2d::Texture2DPtr;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_composite::Composite;
-use crate::layer_tweaker::{get_projection_data, to_projection_ubo};
 use crate::layer_type::LayerType;
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
@@ -56,6 +55,7 @@ use crate::render_layer::{LayerPrepareParameters, LayerValues, RenderLayer, Rend
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::sources::render_image_source::ImageSourceRenderData;
+use crate::tile_matrix::{get_projection_data, to_projection_ubo};
 use crate::update_parameters::UpdateParameters;
 
 /// What the layer keeps of a tile: its draw, and when the draw was built.
@@ -368,16 +368,6 @@ impl RenderLayer for RenderRasterLayer {
         self.update_tile_entries(params.draws);
     }
 
-    /// Drops the draws, which were built for the previous style's values.
-    fn layer_changed(
-        &mut self,
-        _parameters: &TransitionParameters,
-        _new_layer: &Arc<dyn ErasedLayerStyle>,
-        draws: &mut LayerDraws,
-    ) {
-        self.remove_all_drawables(draws);
-    }
-
     fn release_render_data(&mut self, draws: &mut LayerDraws) {
         crate::render_layer::release_render_data_base(self, draws);
         self.textures.clear();
@@ -406,7 +396,7 @@ impl RenderLayer for RenderRasterLayer {
         let render_tiles = self.base.render_tiles.clone().filter(|t| !t.is_empty());
         let image_data = self.image_data.clone();
         if render_tiles.is_none() && image_data.is_none() {
-            draws.clear_drawables();
+            draws.clear_draws();
             self.textures.clear();
             return;
         }

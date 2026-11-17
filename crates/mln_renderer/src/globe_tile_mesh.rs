@@ -118,8 +118,8 @@ impl<V: bytemuck::Pod> GlobeTileMeshCache<V> {
     ) -> &GlobeTileMesh<V> {
         let key = (canonical.z, canonical.y == 0, canonical.y == (1u32 << canonical.z) - 1, mask.clone());
         // Tiles that are loading go through many masks; the one used longest
-        // ago makes room, so the meshes every frame draws stay. The drawables
-        // share the meshes' buffers, so they keep theirs.
+        // ago makes room, so the meshes every frame draws stay. The draws share
+        // the meshes' buffers, so they keep theirs.
         if !self.meshes.contains_key(&key)
             && self.meshes.len() >= Self::MAX_MESHES
             && let Some(oldest) = self.meshes.iter().min_by_key(|(_, entry)| entry.last_use).map(|(key, _)| key.clone())
@@ -146,7 +146,7 @@ impl<V: bytemuck::Pod> GlobeTileMeshCache<V> {
     }
 }
 
-/// The same grid as raw `Short2` positions, for drawables built from raw
+/// The same grid as raw `Short2` positions, for draws built from raw
 /// vertex bytes.
 #[derive(Debug, Default)]
 pub(crate) struct RawGlobeTileMesh {

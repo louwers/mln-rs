@@ -36,10 +36,10 @@ use mln_gfx::{
 };
 use mln_map_types::TransformState;
 use mln_math::deg2radf;
-use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
+use mln_style::PropertyEvaluationParameters;
+use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Hillshade;
 use mln_style::layers::hillshade_layer_properties::HillshadePaintProperties;
-use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_style_types::{HillshadeIlluminationAnchorType, HillshadeMethodType, ResamplingType, TranslateAnchorType};
 use mln_tile_id::UnwrappedTileID;
 use mln_util::Color;
@@ -59,7 +59,6 @@ use crate::draw_cache::{DrawCache, DrawDepth, FrameDraw, FrameDraws, KeptDraw, L
 use crate::geometry::dem_data::get_unpack_vector;
 use crate::gfx::context::Context;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
-use crate::layer_tweaker::{bind_no_projection, get_projection_data, to_projection_ubo};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
@@ -67,6 +66,7 @@ use crate::render_layer::{LayerPrepareParameters, LayerValues, RenderLayer, Rend
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_target::RenderTarget;
+use crate::tile_matrix::{bind_no_projection, get_projection_data, to_projection_ubo};
 use crate::update_parameters::UpdateParameters;
 
 const HILLSHADE_PREPARE_SHADER_GROUP_NAME: &str = "HillshadePrepareShader";
@@ -294,17 +294,6 @@ impl TypedLayer for RenderHillshadeLayer {
 }
 
 impl RenderLayer for RenderHillshadeLayer {
-    /// Drops the tiles' draws, which were built for the previous style's
-    /// values.
-    fn layer_changed(
-        &mut self,
-        _parameters: &TransitionParameters,
-        _new_layer: &Arc<dyn ErasedLayerStyle>,
-        draws: &mut LayerDraws,
-    ) {
-        self.remove_all_drawables(draws);
-    }
-
     fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
         let properties = self.values.evaluate(parameters);
 
@@ -374,7 +363,7 @@ impl RenderLayer for RenderHillshadeLayer {
             }
         }
         let Some(render_tiles) = self.base.render_tiles.clone().filter(|t| !t.is_empty()) else {
-            self.remove_all_drawables(draws);
+            self.remove_all_draws(draws);
             return;
         };
         draws.frame.get_or_insert_with(FrameDraws::new);
@@ -389,7 +378,7 @@ impl RenderLayer for RenderHillshadeLayer {
         let (Some(hillshade_prepare_shader), Some(hillshade_shader)) =
             (self.hillshade_prepare_shader.clone(), self.hillshade_shader.clone())
         else {
-            self.remove_all_drawables(draws);
+            self.remove_all_draws(draws);
             return;
         };
         if (RENDER_PASS.underlying_type() & self.base.evaluated_properties.render_passes()) == 0 {

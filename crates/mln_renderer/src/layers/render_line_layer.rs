@@ -25,10 +25,10 @@ use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode, ShaderRegistry, VertexAttributeArray};
 use mln_map_types::TransformState;
 use mln_style::expression::{Dependency, EvaluationContext, GlobalStateMap, global_state_refs_intersect};
-use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
+use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Line;
 use mln_style::layers::line_layer_properties::LinePaintProperties;
-use mln_style::{PropertyEvaluationParameters, StyleValue as _, TransitionParameters};
+use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 use mln_style_types::{AlignmentType, LineCapType};
 use mln_util::Color;
 use mln_util::error::Error;
@@ -46,7 +46,6 @@ use crate::gfx::context::Context;
 use crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker;
 use crate::gfx::texture2d::Texture2DPtr;
 use crate::layer_composite::Composite;
-use crate::layer_tweaker::{get_projection_data, to_projection_ubo};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::pattern_layout::{LineLayoutSpec, PatternLayout, uses_pattern};
@@ -56,6 +55,7 @@ use crate::paint_property_binder::read_data_driven_paint_property;
 use crate::render_layer::{LayerPrepareParameters, LayerValues, RenderLayer, RenderLayerBase, TypedLayer};
 use crate::render_pass::RenderPass;
 use crate::render_tile::RenderTile;
+use crate::tile_matrix::{get_projection_data, to_projection_ubo};
 use crate::update_parameters::UpdateParameters;
 
 /// What a line draws: its shader and the uniforms it reads.
@@ -309,7 +309,7 @@ pub(crate) struct RenderLineLayer {
     /// detect when it needs to be rebuilt.
     color_ramp_global_state: Option<Arc<GlobalStateMap>>,
     color_ramp_texture_2d: Option<Texture2DPtr>,
-    /// Whether the color ramp changed since the drawables that read it were
+    /// Whether the color ramp changed since the draws that read it were
     /// built, which the next update drops.
     color_ramp_changed: bool,
 
@@ -545,16 +545,6 @@ impl RenderLayer for RenderLineLayer {
         }
     }
 
-    /// Drops the draws, which were built for the previous style's values.
-    fn layer_changed(
-        &mut self,
-        _parameters: &TransitionParameters,
-        _new_layer: &Arc<dyn ErasedLayerStyle>,
-        draws: &mut LayerDraws,
-    ) {
-        self.remove_all_drawables(draws);
-    }
-
     /// Makes the frame's draws of the layer, those of each of its tiles,
     /// which it builds for a tile it keeps none of, and writes the layer's
     /// buffers they read.
@@ -569,12 +559,12 @@ impl RenderLayer for RenderLineLayer {
     ) {
         if std::mem::take(&mut self.color_ramp_changed) {
             // The gradients' draws read the old ramp's texture.
-            draws.clear_drawables();
+            draws.clear_draws();
         }
         self.update_projection_variant(state, draws);
 
         let Some(render_tiles) = self.base.render_tiles.clone().filter(|t| !t.is_empty()) else {
-            self.remove_all_drawables(draws);
+            self.remove_all_draws(draws);
             return;
         };
 

@@ -18,9 +18,9 @@ use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode, ShaderProgramPtr, ShaderRegistry};
 use mln_map_types::TransformState;
-use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
+use mln_style::PropertyEvaluationParameters;
+use mln_style::layer_type::LayerStyle;
 use mln_style::layers::{Background, BackgroundPaintProperties};
-use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_style_types::TranslateAnchorType;
 use mln_tile_id::OverscaledTileID;
 use mln_util::Color;
@@ -34,13 +34,13 @@ use crate::draw::{DrawObjects, DrawSegment};
 use crate::draw_cache::{DrawDepth, FrameDraw, FrameDraws, KeptDraw, LayerDraws};
 use crate::gfx::context::Context;
 use crate::globe_tile_mesh::raw_globe_tile_mesh;
-use crate::layer_tweaker::{get_projection_data, to_projection_ubo};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{LayerPrepareParameters, LayerValues, RenderLayer, RenderLayerBase, TypedLayer};
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
+use crate::tile_matrix::{get_projection_data, to_projection_ubo};
 use crate::update_parameters::UpdateParameters;
 use crate::util::tile_cover::{TileCoverParameters, tile_cover};
 
@@ -198,16 +198,6 @@ impl RenderLayer for RenderBackgroundLayer {
         self.values.set_evaluated(&mut self.base, properties);
     }
 
-    /// Drops the draws, which were built for the previous style's values.
-    fn layer_changed(
-        &mut self,
-        _parameters: &TransitionParameters,
-        _new_layer: &Arc<dyn ErasedLayerStyle>,
-        draws: &mut LayerDraws,
-    ) {
-        self.remove_all_drawables(draws);
-    }
-
     fn get_solid_background(&self) -> Option<Color> {
         let evaluated = &self.values.evaluated.paint;
         if !evaluated.background_pattern.faded().from.empty() || *evaluated.background_opacity.uniform() <= 0.0 {
@@ -261,7 +251,7 @@ impl RenderLayer for RenderBackgroundLayer {
         // The layer has no render tiles: it draws the tiles that cover the
         // view.
         if tile_cover.is_empty() {
-            self.remove_all_drawables(draws);
+            self.remove_all_draws(draws);
             return;
         }
 
@@ -276,7 +266,7 @@ impl RenderLayer for RenderBackgroundLayer {
         // If the result is transparent or missing, just remove any existing
         // drawables and stop
         if draw_passes == RenderPass::None {
-            self.remove_all_drawables(draws);
+            self.remove_all_draws(draws);
             return;
         }
         draws.frame.get_or_insert_with(FrameDraws::new);
@@ -286,7 +276,7 @@ impl RenderLayer for RenderBackgroundLayer {
             self.pattern_shader = None;
         }
         if self.draws_built_for != Some((draw_passes, has_pattern)) {
-            self.remove_all_drawables(draws);
+            self.remove_all_draws(draws);
             self.draws_built_for = Some((draw_passes, has_pattern));
         }
 
@@ -297,7 +287,7 @@ impl RenderLayer for RenderBackgroundLayer {
             self.pattern_shader = shaders.shader(BACKGROUND_PATTERN_SHADER_NAME, self.base.projection_variant);
         }
         let Some(shader) = (if has_pattern { self.pattern_shader.clone() } else { self.plain_shader.clone() }) else {
-            self.remove_all_drawables(draws);
+            self.remove_all_draws(draws);
             return;
         };
 

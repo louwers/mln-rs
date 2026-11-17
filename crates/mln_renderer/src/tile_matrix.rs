@@ -1,8 +1,5 @@
-// C++ `LayerTweaker` is an abstract class with data members: the data is
-// `LayerTweakerBase`, the virtual `execute` is the `LayerTweaker` trait. The
-// render layer owns its tweakers and runs them on its layer groups.
-
-use std::sync::Arc;
+//! The matrices and projections of a layer's draws of a tile, which their
+//! uniforms hold.
 
 use geometry::Point;
 use glam::Vec2;
@@ -12,56 +9,15 @@ use mln_map_types::{ProjectionData, TransformState};
 use mln_style_types::TranslateAnchorType;
 use mln_tile_id::UnwrappedTileID;
 use mln_util::constants::{EXTENT, M2PI};
-use mln_util::identity::SimpleIdentity;
 use mln_util::mat4::{Mat4, matrix};
 
 use crate::gfx::context::Context;
-use crate::gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr};
-use crate::layer_group::LayerGroup;
-use crate::layer_type::ErasedEvaluatedLayer;
-use crate::layers::{LayerTiles, cast_matrix};
+use crate::gfx::uniform_buffer::UniformBufferArray;
+use crate::layers::cast_matrix;
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::render_tile::RenderTile;
 
-/// The data members of `LayerTweaker`.
-pub(crate) struct LayerTweakerBase {
-    pub(crate) id: String,
-    /// Tells this tweaker from the layer's earlier ones: a drawable keeps
-    /// the key of the tweaker it was built for, which sets its uniforms.
-    pub(crate) key: SimpleIdentity,
-    /// The evaluated values of the layer the tweaker sets the uniforms of,
-    /// if it is a style layer.
-    pub(crate) evaluated_properties: Option<Arc<dyn ErasedEvaluatedLayer>>,
-    pub(crate) properties_updated: bool,
-    pub(crate) projection_uniform_buffer: Option<UniformBufferPtr>,
-}
-
-impl LayerTweakerBase {
-    pub(crate) fn new(id: String, properties: Option<Arc<dyn ErasedEvaluatedLayer>>) -> Self {
-        LayerTweakerBase {
-            id,
-            key: SimpleIdentity::new(),
-            evaluated_properties: properties,
-            properties_updated: true,
-            projection_uniform_buffer: None,
-        }
-    }
-
-    /// Uploads the per-drawable projection blocks of this layer, indexed like
-    /// the drawable UBO array.
-    pub(crate) fn upload_projection_ubos(
-        &mut self,
-        layer_uniforms: &mut UniformBufferArray,
-        ubos: &[ProjectionUBO],
-        context: &Context,
-    ) {
-        let bytes: &[u8] = bytemuck::cast_slice(ubos);
-        context.write_storage_buffer(&mut self.projection_uniform_buffer, bytes);
-        layer_uniforms.set(ID_PROJECTION_UBO, self.projection_uniform_buffer.clone());
-    }
-}
-
-/// Gives `layer_uniforms`, of a layer whose drawables draw without a
+/// Gives `layer_uniforms`, of a layer whose draws draw without a
 /// projection, a projection block of zeros if they have none. GL's programs
 /// declare the block whether they read it or not, so a draw binds it all the
 /// same.
@@ -69,22 +25,6 @@ pub(crate) fn bind_no_projection(layer_uniforms: &mut UniformBufferArray, contex
     if layer_uniforms.get(ID_PROJECTION_UBO).is_none() {
         layer_uniforms
             .set(ID_PROJECTION_UBO, context.create_storage_buffer(bytemuck::bytes_of(&ProjectionUBO::default())));
-    }
-}
-
-/// Base class for layer tweakers, which manipulate layer group per frame.
-pub(crate) trait LayerTweaker {
-    fn base(&self) -> &LayerTweakerBase;
-    fn base_mut(&mut self) -> &mut LayerTweakerBase;
-
-    /// Sets the uniforms of `layer_group`'s drawables, which draw the
-    /// layer's `tiles`.
-    fn execute(&mut self, layer_group: &mut LayerGroup, tiles: &LayerTiles<'_>, parameters: &PaintParameters<'_>);
-
-    fn update_properties(&mut self, new_props: Arc<dyn ErasedEvaluatedLayer>) {
-        let base = self.base_mut();
-        base.evaluated_properties = Some(new_props);
-        base.properties_updated = true;
     }
 }
 
@@ -148,7 +88,7 @@ pub(crate) fn get_projection_data(
         let translate = RenderTile::tile_unit_translation(tile_id, translation, anchor, parameters.state);
         data.translate = [f64::from(translate[0]), f64::from(translate[1])];
     }
-    // MLN_GLOBE_DEPTH_OFFSET_IN_SHADER is off, as on OpenGL: a drawable's
+    // MLN_GLOBE_DEPTH_OFFSET_IN_SHADER is off, as on OpenGL: a draw's
     // depth range keeps the layers apart, so the shader's depth shift stays 0.
     data
 }

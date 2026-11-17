@@ -24,7 +24,7 @@ use super::worker_side::WorkerCodec;
 use super::{Encoded, TileWorkerHost, envelope, fields};
 use crate::Registry;
 use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
-use crate::layer_type::{ErasedEvaluatedLayer, evaluated};
+use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::layout::tile_layout::{Dependencies, LayoutParams, Resolved};
 use crate::text::glyph_store::HBShapeResults;
 use crate::tile::contents::LayoutResult;
@@ -491,7 +491,7 @@ fn properties_cross_while_a_paint_property_transitions() {
     render_layer.restyle(&TransitionParameters::new(Some(start), transition), convert(&constant).style());
     render_layer.evaluate(&at(start + Duration::from_millis(100)));
     let transitioning = Arc::clone(&render_layer.base().evaluated_properties);
-    assert!(!evaluated::<Fill>(&transitioning).paint.fill_color.is_constant());
+    assert!(!EvaluatedLayer::<Fill>::recover(&transitioning).unwrap().paint.fill_color.is_constant());
 
     let mut codec = ThroughCodec::new();
     let style = style(std::slice::from_ref(&transitioning));

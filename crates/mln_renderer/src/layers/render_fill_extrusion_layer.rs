@@ -35,12 +35,12 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::shaders::shader_program::ShaderProgramPtr;
 use mln_gfx::vertex_attribute::{VertexAttributeArray, VertexAttributeArrayPtr};
 use mln_gfx::vertex_vector::{VertexVector, VertexVectorBasePtr};
-use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode, ShaderRegistry};
+use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode, ShaderRegistry};
 use mln_map_types::TransformState;
-use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
+use mln_style::PropertyEvaluationParameters;
+use mln_style::layer_type::LayerStyle;
 use mln_style::layers::FillExtrusion;
 use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionPaintProperties;
-use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_style_types::AlignmentType;
 use mln_util::constants::TILE_SIZE_D;
 use mln_util::error::Error;
@@ -55,12 +55,10 @@ use crate::buckets::fill_extrusion_bucket::{
     FillExtrusionStaticVertex, FillExtrusionWallVertex,
 };
 use crate::draw::DrawObjects;
-use crate::draw_cache::{DrawCache, DrawDepth, FrameDraw, FrameDraws, LayerDraws};
-use crate::drawable::DrawPriority;
+use crate::draw_cache::{DrawCache, DrawDepth, DrawPriority, FrameDraw, FrameDraws, LayerDraws};
 use crate::frame_projection::zero_to_one_clip_z;
 use crate::gfx::context::Context;
 use crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker;
-use crate::layer_tweaker::{get_projection_data, to_projection_ubo};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::pattern_layout::{PatternLayout, uses_pattern};
@@ -70,6 +68,7 @@ use crate::render_layer::{LayerValues, RenderLayer, RenderLayerBase, TypedLayer}
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_tile::RenderTile;
+use crate::tile_matrix::{get_projection_data, to_projection_ubo};
 use crate::update_parameters::UpdateParameters;
 
 /// The pass the layer's draws draw in.
@@ -402,16 +401,6 @@ impl RenderLayer for RenderFillExtrusionLayer {
         )
     }
 
-    /// Drops the draws, which were built for the previous style's values.
-    fn layer_changed(
-        &mut self,
-        _parameters: &TransitionParameters,
-        _new_layer: &Arc<dyn ErasedLayerStyle>,
-        draws: &mut LayerDraws,
-    ) {
-        self.remove_all_drawables(draws);
-    }
-
     /// Makes the frame's draws of the layer, those of each of its tiles,
     /// which it builds for a tile it keeps none of, and writes the layer's
     /// buffers they read.
@@ -429,7 +418,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
         let render_tiles = match self.base.render_tiles.clone() {
             Some(tiles) if !tiles.is_empty() && self.base.passes != RenderPass::None => tiles,
             _ => {
-                self.remove_all_drawables(draws);
+                self.remove_all_draws(draws);
                 return;
             }
         };
@@ -461,7 +450,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
             (self.fill_extrusion_group.clone(), self.fill_extrusion_wall_group.clone())
         };
         let (Some(shaders), Some(wall_shaders)) = (shader_group, wall_shader_group) else {
-            self.remove_all_drawables(draws);
+            self.remove_all_draws(draws);
             return;
         };
 
@@ -524,7 +513,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
                 let frame_draw = FrameDraw {
                     priority: draw.priority,
                     pass: RENDER_PASS,
-                    depth: DrawDepth::Volume,
+                    depth: DrawDepth::Volume { mask: DepthMaskType::ReadWrite },
                     clip: draw.clip,
                     atlases: cached.atlases.clone(),
                     ..FrameDraw::new(Some(tile_id), draw.id)

@@ -13,11 +13,11 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode, ShaderRegistry, VertexAttributeArray};
 use mln_map_types::{TileProjector, TransformState};
+use mln_style::PropertyEvaluationParameters;
 use mln_style::expression::EvaluationContext;
-use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
+use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Circle;
 use mln_style::layers::circle_layer_properties::CirclePaintProperties;
-use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_style_types::{AlignmentType, CirclePitchScaleType};
 use mln_tile_id::OverscaledTileID;
 use mln_util::Color;
@@ -29,7 +29,6 @@ use crate::buckets::circle_bucket::{CircleBinders, CircleBucket, CircleLayoutVer
 use crate::draw::DrawObjects;
 use crate::draw_cache::{FrameDraw, FrameDraws, KeptDraw, LayerDraws};
 use crate::gfx::context::Context;
-use crate::layer_tweaker::{get_projection_data, globe_extrude_scale, to_projection_ubo};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::circle_layout::CircleLayout;
 use crate::layout::layout::{LayoutParameters, SourceLayer};
@@ -38,6 +37,7 @@ use crate::paint_property_binder::read_data_driven_paint_property;
 use crate::render_layer::{LayerValues, RenderLayer, RenderLayerBase, TypedLayer};
 use crate::render_pass::RenderPass;
 use crate::render_tile::RenderTile;
+use crate::tile_matrix::{get_projection_data, globe_extrude_scale, to_projection_ubo};
 use crate::update_parameters::UpdateParameters;
 
 const CIRCLE_SHADER_GROUP_NAME: &str = "CircleShader";
@@ -403,16 +403,6 @@ impl RenderLayer for RenderCircleLayer {
         false
     }
 
-    /// Drops the draws, which were built for the previous style's values.
-    fn layer_changed(
-        &mut self,
-        _parameters: &TransitionParameters,
-        _new_layer: &Arc<dyn ErasedLayerStyle>,
-        draws: &mut LayerDraws,
-    ) {
-        self.remove_all_drawables(draws);
-    }
-
     /// Makes the frame's draws of the layer, one of each of its tiles, which
     /// it builds for a tile it keeps none of, and writes the layer's buffers
     /// they read.
@@ -428,7 +418,7 @@ impl RenderLayer for RenderCircleLayer {
         self.update_projection_variant(state, draws);
 
         let Some(render_tiles) = self.base.render_tiles.clone().filter(|t| !t.is_empty()) else {
-            self.remove_all_drawables(draws);
+            self.remove_all_draws(draws);
             return;
         };
         draws.frame.get_or_insert_with(FrameDraws::new);
@@ -437,7 +427,7 @@ impl RenderLayer for RenderCircleLayer {
             self.circle_shader_group = shaders.shader_group(CIRCLE_SHADER_GROUP_NAME);
         }
         let Some(circle_shader_group) = self.circle_shader_group.clone() else {
-            self.remove_all_drawables(draws);
+            self.remove_all_draws(draws);
             return;
         };
         if (RENDER_PASS.underlying_type() & self.base.evaluated_properties.render_passes()) == 0 {

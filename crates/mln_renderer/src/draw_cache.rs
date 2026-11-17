@@ -5,11 +5,10 @@
 //! to the layer's calls. Each tile's entry says which bucket the tile's draws
 //! were built from, and what of that bucket's vertex data changed since, as
 //! the frame's prepare reports it. A layer keeps the GPU objects of its
-//! draws either in drawables of its layer group, or in caches of state of its
-//! own type ([`DrawCache`]): one in each tile's entry, and one of the layer's
-//! draws that no tile holds. Such a layer's update returns the frame's draws
-//! as values ([`FrameDraw`]), which the frame's encode issues
-//! ([`DrawGroup`]).
+//! draws in caches of state of its own type ([`DrawCache`]): one in each
+//! tile's entry, and one of the layer's draws that no tile holds. Its update
+//! returns the frame's draws as values ([`FrameDraw`]), which the frame's
+//! encode issues ([`DrawGroup`]).
 
 use std::any::Any;
 use std::ops::BitOrAssign;
@@ -24,16 +23,19 @@ use mln_util::hash::HashMap;
 use mln_util::identity::SimpleIdentity;
 
 use crate::draw::DrawObjects;
-use crate::drawable::DrawPriority;
 use crate::gfx::context::Context;
 use crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker;
 use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::layer_composite::Composite;
-use crate::layer_group::LayerGroup;
+use crate::layers::render_custom_layer::CustomLayerDraw;
 use crate::paint_parameters::PaintParameters;
 use crate::render_pass::RenderPass;
 
-/// What of a bucket's vertex data changed since a tile's drawables copied it.
+/// The order of a layer's draws that its draws' ids don't give: lower
+/// priorities draw first.
+pub(crate) type DrawPriority = i64;
+
+/// What of a bucket's vertex data changed since a tile's draws copied it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct BucketChanges {
     /// The values of the paint properties that read feature state.
@@ -136,9 +138,9 @@ pub(crate) enum DrawDepth {
     /// It tests the depth of a sub-layer of the layer's depth, and writes it
     /// as `mask` says.
     Layer { sub_layer: u8, mask: DepthMaskType },
-    /// It tests and writes the depth range of 3D geometry, which the 3D draws
-    /// of all layers share.
-    Volume,
+    /// It tests the depth range of 3D geometry, which the 3D draws of all
+    /// layers share, and writes it as `mask` says.
+    Volume { mask: DepthMaskType },
 }
 
 /// One draw of a layer's frame: the cached GPU objects it binds, and the
@@ -219,22 +221,22 @@ impl FrameDraws {
     }
 }
 
-/// What the renderer keeps of a layer's drawing between frames: the group of
-/// its drawables or its draws of the frame, and an entry for each of the
-/// frame's tiles it draws.
+/// What the renderer keeps of a layer's drawing between frames: its draws of
+/// the frame, an entry for each of the frame's tiles it draws, and the draws
+/// it draws over its own.
 #[derive(Default)]
 pub(crate) struct LayerDraws {
-    /// The group of the layer's drawables, which draws while the layer is
-    /// renderable.
-    pub(crate) group: Option<LayerGroup>,
-    /// The layer's draws of the frame, of a layer whose update returns them,
-    /// from its first update with tiles to draw. While the layer is
-    /// renderable, they take a place in the layers' order and depth, even
-    /// when there are none.
+    /// The layer's draws of the frame, from its first update with tiles to
+    /// draw. While the layer is renderable, they take a place in the layers'
+    /// order and depth, even when there are none.
     pub(crate) frame: Option<FrameDraws>,
     tiles: HashMap<OverscaledTileID, TileEntry>,
     /// The layer type's draws that no tile holds.
     layer_cache: Option<Box<dyn DrawCache>>,
+    /// The draws the layer draws over its own, which take a place of their
+    /// own in the layers' order, after the layer's, and have entries for the
+    /// same tiles.
+    overlay: Option<Box<LayerDraws>>,
 }
 
 impl LayerDraws {
@@ -244,27 +246,34 @@ impl LayerDraws {
     pub(crate) fn set_tiles(&mut self, tiles: impl IntoIterator<Item = OverscaledTileID>) {
         let mut previous = std::mem::take(&mut self.tiles);
         self.tiles = tiles.into_iter().map(|id| (id, previous.remove(&id).unwrap_or_default())).collect();
+        if let Some(overlay) = &mut self.overlay {
+            overlay.set_tiles(self.tiles.keys().copied());
+        }
     }
 
     /// Drops the entries of the tiles.
     pub(crate) fn clear_tiles(&mut self) {
         self.tiles.clear();
+        if let Some(overlay) = &mut self.overlay {
+            overlay.clear_tiles();
+        }
     }
 
     /// Whether `tile_id` is one of the frame's tiles of the layer.
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn has_tile(&self, tile_id: &OverscaledTileID) -> bool {
         self.tiles.contains_key(tile_id)
     }
 
-    /// The bucket the drawables of `tile_id` were built from, if the tile is
-    /// one of the frame's and they were.
+    /// The bucket the draws of `tile_id` were built from, if the tile is one
+    /// of the frame's and they were.
     #[must_use]
     pub(crate) fn bucket(&self, tile_id: &OverscaledTileID) -> Option<SimpleIdentity> {
         self.tiles.get(tile_id).and_then(|entry| entry.bucket)
     }
 
-    /// Records that the drawables of `tile_id` are built from `bucket`, which
+    /// Records that the draws of `tile_id` are built from `bucket`, which
     /// drops the changes of the bucket they were built from before. Returns
     /// whether that changed it; a tile that isn't one of the frame's takes no
     /// bucket.
@@ -279,14 +288,14 @@ impl LayerDraws {
         }
     }
 
-    /// What of the bucket of `tile_id` changed since its drawables last
-    /// copied it, which they are about to copy again.
+    /// What of the bucket of `tile_id` changed since its draws last copied
+    /// it, which they are about to copy again.
     pub(crate) fn take_changes(&mut self, tile_id: &OverscaledTileID) -> BucketChanges {
         self.tiles.get_mut(tile_id).map(|entry| std::mem::take(&mut entry.changes)).unwrap_or_default()
     }
 
-    /// Adds `changed` to the changes of the tiles whose drawables were built
-    /// from a bucket in it.
+    /// Adds `changed` to the changes of the tiles whose draws were built from
+    /// a bucket in it.
     pub(crate) fn mark_changed(&mut self, changed: &ChangedBuckets) {
         for entry in self.tiles.values_mut() {
             if let Some(changes) = entry.bucket.and_then(|bucket| changed.get(bucket)) {
@@ -295,15 +304,15 @@ impl LayerDraws {
         }
     }
 
-    /// Moves the tiles' entries and drawables to the tiles `wrap_delta`
+    /// Moves the tiles' entries and their draws to the tiles `wrap_delta`
     /// world copies east of theirs.
     pub(crate) fn shift_wraps(&mut self, wrap_delta: i16) {
         self.tiles = std::mem::take(&mut self.tiles)
             .into_iter()
             .map(|(id, entry)| (id.unwrap_to(id.wrap.wrapping_add(wrap_delta)), entry))
             .collect();
-        if let Some(group) = &mut self.group {
-            group.shift_wraps(wrap_delta);
+        if let Some(overlay) = &mut self.overlay {
+            overlay.shift_wraps(wrap_delta);
         }
     }
 
@@ -339,12 +348,26 @@ impl LayerDraws {
         self.layer_cache = None;
     }
 
-    /// Removes the drawables, the draws of the frame and the caches of them.
-    /// The tiles' entries stay.
-    pub(crate) fn clear_drawables(&mut self) {
-        if let Some(group) = &mut self.group {
-            group.clear_drawables();
-        }
+    /// The draws the layer draws over its own, if it has made them.
+    pub(crate) fn overlay(&mut self) -> Option<&mut LayerDraws> {
+        self.overlay.as_deref_mut()
+    }
+
+    /// The draws the layer draws over its own, which this makes, with
+    /// entries for the layer's tiles and a place in the layers' order, the
+    /// first time it is asked for. They keep the place from then on.
+    pub(crate) fn make_overlay(&mut self) -> &mut LayerDraws {
+        let tiles = &self.tiles;
+        self.overlay.get_or_insert_with(|| {
+            let mut overlay = LayerDraws { frame: Some(FrameDraws::new()), ..LayerDraws::default() };
+            overlay.set_tiles(tiles.keys().copied());
+            Box::new(overlay)
+        })
+    }
+
+    /// Removes the draws of the frame and the caches of them, the overlay's
+    /// with them. The tiles' entries stay.
+    pub(crate) fn clear_draws(&mut self) {
         if let Some(frame) = &mut self.frame {
             frame.draws.clear();
         }
@@ -352,6 +375,9 @@ impl LayerDraws {
             entry.cache = None;
         }
         self.layer_cache = None;
+        if let Some(overlay) = &mut self.overlay {
+            overlay.clear_draws();
+        }
     }
 
     /// Uploads the GPU objects of `draws`, draws of the layer's caches, in
@@ -368,26 +394,15 @@ impl LayerDraws {
         }
     }
 
-    /// Uploads the GPU objects of the frame's draws.
-    fn upload_frame(&mut self, context: &Context) {
-        let Some(frame) = &self.frame else { return };
-        let caches = &mut Caches::Layer { tiles: &mut self.tiles, layer: &mut self.layer_cache };
-        upload_draws(frame, caches, context);
-    }
-
-    /// Draws the frame's draws of the pass into the open pass of `gpu`, the
-    /// context's: into the layer composite's texture in the translucent pass
-    /// of a layer that composites, and onto the frame otherwise.
-    fn render_frame(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        let Some(frame) = &self.frame else { return };
-        if frame.draws.is_empty() || parameters.pass_target().is_none() {
-            return;
+    /// Adds what the frame draws of the layer to `groups`, in drawing order:
+    /// its draws of the frame, then those of its overlay.
+    pub(crate) fn draw_groups<'a>(&'a mut self, groups: &mut Vec<DrawGroup<'a>>) {
+        let LayerDraws { frame, tiles, layer_cache, overlay } = self;
+        if let Some(frame) = frame {
+            groups.push(DrawGroup(GroupKind::Draws { frame, caches: Caches::Layer { tiles, layer: layer_cache } }));
         }
-        let caches = &mut Caches::Layer { tiles: &mut self.tiles, layer: &mut self.layer_cache };
-        if frame.composite.is_some() && parameters.pass == RenderPass::Translucent {
-            parameters.draw_composited(gpu, frame.id, |gpu, parameters| render_draws(frame, caches, gpu, parameters));
-        } else {
-            render_draws(frame, caches, gpu, parameters);
+        if let Some(overlay) = overlay {
+            overlay.draw_groups(groups);
         }
     }
 
@@ -457,15 +472,15 @@ fn upload_draws(frame: &FrameDraws, caches: &mut Caches<'_>, context: &Context) 
 fn render_draws(frame: &FrameDraws, caches: &mut Caches<'_>, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
     let pass = parameters.pass.underlying_type();
     let in_pass = |draw: &&FrameDraw| draw.pass.underlying_type() & pass != 0;
-    let mut volumes = frame.draws.iter().filter(in_pass).filter(|draw| draw.depth == DrawDepth::Volume).peekable();
-    let (volume_depth, volume_stencil) = if volumes.peek().is_some() {
-        let stencil = volumes.any(|draw| draw.clip).then(|| parameters.stencil_mode_for_3d(gpu));
-        (parameters.depth_mode_for_3d(DepthMaskType::ReadWrite), stencil)
+    let is_volume = |draw: &&FrameDraw| matches!(draw.depth, DrawDepth::Volume { .. });
+    let volume_stencil = if frame.draws.iter().filter(in_pass).any(|draw| is_volume(&draw)) {
+        let clips = frame.draws.iter().filter(in_pass).filter(is_volume).any(|draw| draw.clip);
+        clips.then(|| parameters.stencil_mode_for_3d(gpu))
     } else {
         if let Some(stencil_tiles) = frame.stencil_tiles.as_ref().filter(|tiles| !tiles.is_empty()) {
             parameters.render_tile_clipping_masks(gpu, stencil_tiles);
         }
-        (DepthMode::disabled(), None)
+        None
     };
     for (index, draw) in frame.draws.iter().enumerate() {
         if !in_pass(&draw) {
@@ -487,9 +502,10 @@ fn render_draws(frame: &FrameDraws, caches: &mut Caches<'_>, gpu: &mut dyn Gpu, 
             DrawDepth::Layer { sub_layer, mask } => {
                 (parameters.depth_mode_for_sublayer(sub_layer, mask), tile_stencil())
             }
-            DrawDepth::Volume => {
-                (volume_depth, volume_stencil.filter(|_| draw.clip).unwrap_or_else(StencilMode::disabled))
-            }
+            DrawDepth::Volume { mask } => (
+                parameters.depth_mode_for_3d(mask),
+                volume_stencil.filter(|_| draw.clip).unwrap_or_else(StencilMode::disabled),
+            ),
         };
         objects.draw(gpu, parameters, Some(&frame.uniform_buffers), depth, stencil, index as u32);
     }
@@ -497,48 +513,61 @@ fn render_draws(frame: &FrameDraws, caches: &mut Caches<'_>, gpu: &mut dyn Gpu, 
 
 /// What the frame draws of a layer, in one place in the layers' order and
 /// depth.
-pub(crate) enum DrawGroup<'a> {
-    /// A layer group of drawables.
-    Drawables(&'a mut LayerGroup),
+pub(crate) struct DrawGroup<'a>(GroupKind<'a>);
+
+enum GroupKind<'a> {
     /// A layer's draws of the frame, with the caches that hold their GPU
     /// objects.
-    Draws(&'a mut LayerDraws),
+    Draws { frame: &'a FrameDraws, caches: Caches<'a> },
+    /// A custom layer, whose host draws with objects of its own.
+    Custom(&'a CustomLayerDraw),
 }
 
 impl<'a> DrawGroup<'a> {
-    /// What the frame draws of the layer `draws` keeps, if it draws.
+    /// What the frame draws of a custom layer: what its host draws.
     #[must_use]
-    pub(crate) fn of(draws: &'a mut LayerDraws) -> Option<DrawGroup<'a>> {
-        if draws.frame.is_some() {
-            Some(DrawGroup::Draws(draws))
-        } else {
-            draws.group.as_mut().map(DrawGroup::Drawables)
-        }
+    pub(crate) fn custom(draw: &'a CustomLayerDraw) -> DrawGroup<'a> {
+        DrawGroup(GroupKind::Custom(draw))
     }
 
     /// Uploads what the group draws, before the frame draws it.
     pub(crate) fn upload(&mut self, context: &Context) {
-        match self {
-            DrawGroup::Drawables(group) => group.upload(context),
-            DrawGroup::Draws(draws) => draws.upload_frame(context),
+        if let GroupKind::Draws { frame, caches } = &mut self.0 {
+            upload_draws(frame, caches, context);
         }
     }
 
     /// Draws the group's draws of the pass into the open pass of `gpu`, the
-    /// context's.
+    /// context's: a layer's into the layer composite's texture in the
+    /// translucent pass of a layer that composites, and onto the frame
+    /// otherwise.
     pub(crate) fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        match self {
-            DrawGroup::Drawables(group) => group.render(gpu, parameters),
-            DrawGroup::Draws(draws) => draws.render_frame(gpu, parameters),
+        if parameters.pass_target().is_none() {
+            return;
+        }
+        match &mut self.0 {
+            GroupKind::Draws { frame, caches } => {
+                if frame.draws.is_empty() {
+                    return;
+                }
+                if frame.composite.is_some() && parameters.pass == RenderPass::Translucent {
+                    parameters.draw_composited(gpu, frame.id, |gpu, parameters| {
+                        render_draws(frame, caches, gpu, parameters);
+                    });
+                } else {
+                    render_draws(frame, caches, gpu, parameters);
+                }
+            }
+            GroupKind::Custom(custom) => custom.render(gpu, parameters),
         }
     }
 
     /// The tiles whose masks the stencil buffer holds when the group draws.
     #[must_use]
     pub(crate) fn stencil_tiles(&self) -> Option<&Rc<Vec<UnwrappedTileID>>> {
-        match self {
-            DrawGroup::Drawables(group) => group.stencil_tiles.as_ref(),
-            DrawGroup::Draws(draws) => draws.frame.as_ref()?.stencil_tiles.as_ref(),
+        match &self.0 {
+            GroupKind::Draws { frame, .. } => frame.stencil_tiles.as_ref(),
+            GroupKind::Custom(_) => None,
         }
     }
 
@@ -546,14 +575,11 @@ impl<'a> DrawGroup<'a> {
     /// apart in the layer composite, if it draws anything and composites.
     #[must_use]
     pub(crate) fn composite(&self) -> Option<(SimpleIdentity, Composite)> {
-        match self {
-            DrawGroup::Drawables(group) => {
-                group.composite.filter(|_| group.enabled && !group.empty()).map(|composite| (group.id, composite))
-            }
-            DrawGroup::Draws(draws) => {
-                let frame = draws.frame.as_ref()?;
+        match &self.0 {
+            GroupKind::Draws { frame, .. } => {
                 frame.composite.filter(|_| !frame.draws.is_empty()).map(|composite| (frame.id, composite))
             }
+            GroupKind::Custom(_) => None,
         }
     }
 }
@@ -563,11 +589,11 @@ mod tests {
     use mln_tile_id::OverscaledTileID;
     use mln_util::identity::SimpleIdentity;
 
-    use super::{BucketChanges, ChangedBuckets, DrawCache, LayerDraws};
+    use super::{BucketChanges, ChangedBuckets, DrawCache, FrameDraws, LayerDraws};
     use crate::draw::DrawObjects;
 
-    /// A tile's changes are those of the bucket its drawables were built
-    /// from, until the drawables take them; a tile that leaves the frame
+    /// A tile's changes are those of the bucket its draws were built from,
+    /// until the draws take them; a tile that leaves the frame
     /// takes its entry with it.
     #[test]
     fn changes_follow_the_tiles_bucket() {
@@ -604,8 +630,7 @@ mod tests {
     }
 
     /// A tile's cache of its draws moves with the tile across a wrap jump,
-    /// and goes when the tile leaves the frame or the drawables are
-    /// cleared.
+    /// and goes when the tile leaves the frame or the draws are cleared.
     #[test]
     fn caches_follow_their_tiles() {
         let (tile, other) = (OverscaledTileID::with_zxy(1, 0, 1, 1, 0), OverscaledTileID::with_zxy(1, 0, 1, 0, 0));
@@ -624,8 +649,34 @@ mod tests {
         draws.set_tiles([moved, other]);
         assert!(draws.cache_mut::<Cache>(&other).is_none());
 
-        draws.clear_drawables();
+        draws.clear_draws();
         assert!(draws.has_tile(&moved));
         assert!(draws.cache_mut::<Cache>(&moved).is_none());
+    }
+
+    /// The overlay has entries for the layer's tiles, which follow the
+    /// layer's, and takes a place in the layers' order after the layer's.
+    #[test]
+    fn the_overlay_follows_the_layers_tiles() {
+        let (tile, other) = (OverscaledTileID::with_zxy(1, 0, 1, 1, 0), OverscaledTileID::with_zxy(1, 0, 1, 0, 0));
+        let id = SimpleIdentity::new();
+        let mut draws = LayerDraws { frame: Some(FrameDraws::new()), ..LayerDraws::default() };
+        draws.set_tiles([tile]);
+        assert!(draws.overlay().is_none());
+        assert!(draws.make_overlay().has_tile(&tile));
+        draws.make_overlay().set_cache(&tile, Cache(id, DrawObjects::new(String::new())));
+        let mut groups = Vec::new();
+        draws.draw_groups(&mut groups);
+        assert_eq!(2, groups.len());
+        drop(groups);
+
+        draws.set_tiles([tile, other]);
+        assert!(draws.make_overlay().has_tile(&other));
+        draws.shift_wraps(-1);
+        assert!(draws.make_overlay().cache_mut::<Cache>(&tile.unwrap_to(-1)).is_some());
+        draws.clear_draws();
+        assert!(draws.make_overlay().cache_mut::<Cache>(&tile.unwrap_to(-1)).is_none());
+        draws.clear_tiles();
+        assert!(!draws.make_overlay().has_tile(&other.unwrap_to(-1)));
     }
 }

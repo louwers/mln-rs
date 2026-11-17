@@ -1,6 +1,6 @@
 // As in circle_bucket.rs, the vertex/index vectors are plain `Vec`s (the
 // bucket is built on the worker thread and shared with `Arc`); the render
-// layer copies them into the shared gfx vectors its drawables reference.
+// layer copies them into the shared gfx vectors its draws reference.
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;

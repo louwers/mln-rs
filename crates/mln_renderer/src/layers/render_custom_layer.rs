@@ -1,11 +1,11 @@
 // How a custom layer differs from the others:
-// - The host's prerender runs in a step of its own after the layer groups
+// - The host's prerender runs in a step of its own after the layers' draws
 //   upload (`RenderLayer::prerender`), not in `update`, so it gets the frame's
-//   final projection, whose depth range depends on how many layer groups the
+//   final projection, whose depth range depends on how many draw groups the
 //   frame has.
-// - The layer group is of a kind of its own, whose `render` lends the
-//   frame's pass to the host (`PaintParameters::lend_pass`, through
-//   `Gpu::lend`).
+// - What it draws is a draw group of its own (`DrawGroup::custom`), whose
+//   `render` lends the frame's pass to the host
+//   (`PaintParameters::lend_pass`, through `Gpu::lend`).
 // - A host that drew is told the renderer stopped once the layer leaves it,
 //   after the GPU finished the host's work (`Gpu::flush`), or that
 //   its graphics objects are lost (`Renderer::lose_custom_layers`).
@@ -25,9 +25,8 @@ use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_util::logging::{Event, Log};
 
 use crate::bucket::NoBucket;
-use crate::draw_cache::LayerDraws;
+use crate::draw_cache::{DrawGroup, LayerDraws};
 use crate::gfx::context::Context;
-use crate::layer_group::{LayerGroup, LayerGroupKind};
 use crate::layer_type::LayerType;
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
@@ -35,7 +34,7 @@ use crate::render_layer::{LayerParts, LayerPrepareParameters, LayerValues, Rende
 use crate::render_pass::RenderPass;
 use crate::update_parameters::UpdateParameters;
 
-/// What the render layer and its drawable share: the host, while the
+/// What the render layer and what it draws share: the host, while the
 /// renderer draws through it, and the frame it prerendered for.
 struct Shared {
     host: RefCell<Option<Arc<dyn CustomLayerHost>>>,
@@ -91,6 +90,8 @@ pub(crate) struct RenderCustomLayer {
     base: RenderLayerBase,
     values: LayerValues<Custom>,
     shared: Rc<Shared>,
+    /// What the layer draws, from its first update.
+    draw: Option<CustomLayerDraw>,
 }
 
 impl RenderCustomLayer {
@@ -107,6 +108,7 @@ impl RenderCustomLayer {
                 used: Cell::new(false),
                 backend: RefCell::new(None),
             }),
+            draw: None,
         }
     }
 
@@ -161,11 +163,16 @@ impl RenderLayer for RenderCustomLayer {
         _state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
-        draws: &mut LayerDraws,
+        _draws: &mut LayerDraws,
     ) {
-        if draws.group.is_none() {
-            let kind = LayerGroupKind::Custom(CustomLayerDraw { shared: Rc::clone(&self.shared) });
-            draws.group = Some(LayerGroup::new(kind));
+        if self.draw.is_none() {
+            self.draw = Some(CustomLayerDraw { shared: Rc::clone(&self.shared) });
+        }
+    }
+
+    fn draw_groups<'a>(&'a mut self, _draws: &'a mut LayerDraws, groups: &mut Vec<DrawGroup<'a>>) {
+        if let Some(draw) = self.draw.as_ref().filter(|_| self.base.is_renderable) {
+            groups.push(DrawGroup::custom(draw));
         }
     }
 
@@ -190,8 +197,8 @@ impl RenderLayer for RenderCustomLayer {
     }
 }
 
-/// What a custom layer's layer group draws: in the translucent pass, it
-/// lends the live pass to the host.
+/// What a custom layer draws: in the translucent pass, it lends the live pass
+/// to the host.
 pub(crate) struct CustomLayerDraw {
     shared: Rc<Shared>,
 }

@@ -4,10 +4,10 @@ use std::sync::Arc;
 
 use feature::{Identifier, PropertyMap, Value};
 use geometry::Point;
+use mln_gfx::DrawMode;
 use mln_gfx::renderer_backend::RendererBackend;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::vertex_vector::{VertexVector, VertexVectorBasePtr};
-use mln_gfx::{AttributeDataType, DrawMode};
 use mln_map_types::MapMode;
 use mln_style::PropertyEvaluationParameters;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
@@ -40,7 +40,7 @@ use crate::buckets::fill_extrusion_bucket::FillExtrusionBucket;
 use crate::buckets::line_bucket::{LineBucket, LineLayoutVertex};
 use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
 use crate::buckets::symbol_bucket::SymbolBucket;
-use crate::drawable_builder::DrawableBuilder;
+use crate::draw::DrawObjects;
 use crate::gfx::context::Context;
 use crate::gfx::upload::{upload_indexes, vertex_buffer};
 use crate::layer_type::EvaluatedLayer;
@@ -368,16 +368,12 @@ fn line_bucket_drawables_build_from_freed_indexes() {
     upload_indexes(context, &mut triangles.borrow_mut()).expect("uploads");
     assert_eq!(*triangles.borrow().vector(), Vec::<u16>::new());
 
-    // A layer that rebuilds its drawables for the tile builds the segments
-    // from the counts.
-    let mut builder = DrawableBuilder::boxed();
-    builder.set_raw_vertices(vec![0; vertex_count * 4], vertex_count, AttributeDataType::Short2);
-    builder.set_segments_shared(
-        DrawMode::Triangles(),
-        Some(geometry.indexes(&bucket, &bucket.triangles)),
-        &bucket.segments,
-    );
-    assert_eq!(builder.cur_vertex_count(), vertex_count);
+    // A layer that rebuilds its draws of the tile builds the segments from
+    // the counts.
+    let indexes = geometry.indexes(&bucket, &bucket.triangles);
+    assert_eq!(indexes.borrow().elements(), index_count);
+    let mut objects = DrawObjects::new(String::new());
+    objects.update_vertex_attributes(None, vertex_count, DrawMode::Triangles(), Some(indexes), &bucket.segments);
     assert_eq!(triangles.borrow().elements(), index_count);
 }
 

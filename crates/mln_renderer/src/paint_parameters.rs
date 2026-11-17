@@ -60,7 +60,7 @@ impl TransformParameters {
     }
 }
 
-/// A pass of the backend's `Gpu` that drawables draw into, and its
+/// A pass of the backend's `Gpu` that draws draw into, and its
 /// attachments' size and formats.
 #[derive(Clone, Copy)]
 pub(crate) struct OpenPass {
@@ -93,7 +93,7 @@ impl OpenPass {
 
 pub(crate) struct PaintParameters<'a> {
     pub(crate) context: &'a Context,
-    /// The pass of the backend's `Gpu` that drawables draw into, while one
+    /// The pass of the backend's `Gpu` that draws draw into, while one
     /// is open.
     open_pass: Cell<Option<OpenPass>>,
 
@@ -115,7 +115,7 @@ pub(crate) struct PaintParameters<'a> {
     pub(crate) renderable_size: Size,
     pub(crate) pixels_to_gl_units: [f32; 2],
 
-    /// The masks of the tiles that the frame's layer groups can clip to.
+    /// The masks of the tiles that the frame's draw groups can clip to.
     pub(crate) clip_masks: ClipMasks,
     /// What the frame's layers drawn as a whole draw into and composite with.
     pub(crate) layer_composite: LayerComposite,
@@ -184,13 +184,13 @@ impl<'a> PaintParameters<'a> {
         }
     }
 
-    /// The size and formats of the attachments that drawables draw into
+    /// The size and formats of the attachments that draws draw into
     /// now, `None` outside a pass.
     pub(crate) fn pass_target(&self) -> Option<(Size, TargetFormats)> {
         self.open_pass.get().map(|pass| (pass.size, pass.targets))
     }
 
-    /// Begins `pass` on `gpu`, the context's, which drawables then draw
+    /// Begins `pass` on `gpu`, the context's, which draws then draw
     /// into.
     pub(crate) fn begin_pass(&self, gpu: &mut dyn Gpu, pass: OpenPass) -> Result<(), GpuError> {
         gpu.begin_pass(&pass.desc())?;
@@ -220,7 +220,7 @@ impl<'a> PaintParameters<'a> {
 
     /// Runs `draw` into the layer composite's texture, rather than into the
     /// pass begun on `gpu`, the context's, and then composites the texture
-    /// onto that pass as the layer group `group` asks. Runs `draw` into the
+    /// onto that pass as the draw group `group` asks. Runs `draw` into the
     /// pass begun where the frame doesn't composite `group`.
     ///
     /// `draw` starts with the texture's stencil clear, and the pass begun
@@ -422,24 +422,5 @@ impl<'a> PaintParameters<'a> {
             depth_fail: StencilOpType::Keep,
             pass: StencilOpType::Replace,
         }
-    }
-
-    /// Give each drawable a 3D stencil mode of its own, clearing the stencil
-    /// buffer first if they would not all fit, so no value handed out before
-    /// the clear is drawn after it. Returns false, handing out none, when
-    /// there are more drawables than the buffer holds values: the caller then
-    /// takes each one's value with `stencil_mode_for_3d` as it draws it, so a
-    /// clear falls between two draws.
-    pub(crate) fn stencil_modes_for_3d(&mut self, gpu: &mut dyn Gpu, modes: &mut [StencilMode]) -> bool {
-        if modes.len() >= Self::MAX_STENCIL_VALUE as usize {
-            return false;
-        }
-        if self.next_stencil_id as usize + modes.len() > Self::MAX_STENCIL_VALUE as usize {
-            self.clear_stencil(gpu);
-        }
-        for mode in modes.iter_mut() {
-            *mode = self.stencil_mode_for_3d(gpu);
-        }
-        true
     }
 }

@@ -87,7 +87,7 @@ impl Mesh {
     }
 }
 
-/// The tile clipping masks: for each tile that the frame's layer groups can
+/// The tile clipping masks: for each tile that the frame's draw groups can
 /// clip to, a mesh of the clipping mask shader that writes a stencil value
 /// over the tile and nothing else.
 #[derive(Default)]

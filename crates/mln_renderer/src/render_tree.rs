@@ -8,11 +8,10 @@ use mln_util::Color;
 use mln_vec_map::VecMap;
 
 use crate::gfx::context::Context; // layers: debug
-use crate::layer_group::LayerGroup;
 use crate::paint_parameters::{PaintParameters, TransformParameters};
-use crate::sources::render_tile_source::{PolylineLayerTweaker, debug_line_properties};
+use crate::sources::render_tile_source::DebugLayer;
 
-/// The kinds of debug drawables (layers: debug).
+/// The kinds of debug overlays (layers: debug).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum DebugType {
     TextOutline,
@@ -20,35 +19,22 @@ pub(crate) enum DebugType {
     Border,
 }
 
-/// A debug overlay's layer group, with the tweaker that sets its uniforms
-/// (layers: debug).
-pub(crate) struct DebugLayer {
-    pub(crate) group: LayerGroup,
-    pub(crate) tweaker: PolylineLayerTweaker,
-}
-
-impl DebugLayer {
-    pub(crate) fn new(type_: DebugType) -> Self {
-        DebugLayer { group: LayerGroup::tiles(), tweaker: PolylineLayerTweaker::new(debug_line_properties(type_)) }
-    }
-}
-
 /// The debug overlays, by debug type (layers: debug).
-pub(crate) type DebugLayerGroupMap = VecMap<DebugType, DebugLayer>;
+pub(crate) type DebugLayers = VecMap<DebugType, DebugLayer>;
 
-/// The layer group of the debug overlay `type_` in `debug_layer_groups`,
-/// made if it isn't there (layers: debug).
-pub(crate) fn debug_layer_group(debug_layer_groups: &mut DebugLayerGroupMap, type_: DebugType) -> &mut LayerGroup {
-    &mut debug_layer_groups.entry(type_).or_insert_with(|| DebugLayer::new(type_)).group
+/// The debug overlay `type_` in `debug_layers`, made if it isn't there
+/// (layers: debug).
+pub(crate) fn debug_layer(debug_layers: &mut DebugLayers, type_: DebugType) -> &mut DebugLayer {
+    debug_layers.entry(type_).or_insert_with(|| DebugLayer::new(type_))
 }
 
 /// The render item of a source. The layer render items are the concrete
 /// `LayerRenderItem`.
 pub(crate) trait RenderItem {
     fn upload(&self, context: &Context);
-    /// Updates the item's debug drawables; a no-op for the items that have
-    /// none (the image source) (layers: debug).
-    fn update_debug_drawables(&self, _debug_layer_groups: &mut DebugLayerGroupMap, _parameters: &PaintParameters<'_>) {}
+    /// Updates the item's draws of the debug overlays; a no-op for the items
+    /// that have none (the image source) (layers: debug).
+    fn update_debug_draws(&self, _debug_layers: &mut DebugLayers, _parameters: &PaintParameters<'_>) {}
 }
 
 /// A layer the frame draws, by its index in the orchestrator's layers.

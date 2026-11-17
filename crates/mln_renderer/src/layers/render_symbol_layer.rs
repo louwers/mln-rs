@@ -1,29 +1,35 @@
 // C++ drawables share the bucket's vertex vectors and see placement's
-// changes through them (`updateModified`). Here a drawable gets copies of
-// the vectors; when placement, sorting or feature state change the bucket
-// (the changes the tile's entry in `LayerDraws` collects), `update`
-// replaces just those attributes (opacity, dynamic positions, binders) and
-// the triangle indices of the tile's existing drawables, as C++
-// `updateTileDrawable` does.
+// changes through them (`updateModified`). Here a draw gets copies of the
+// vectors; when placement, sorting or feature state change the bucket (the
+// changes the tile's entry in `LayerDraws` collects), `update` replaces just
+// those attributes (opacity, dynamic positions, binders) and the triangle
+// indices of the tile's draws, as C++ `updateTileDrawable` does.
 
 use std::any::Any;
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
+use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::{
-    ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE, ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE,
+    ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE, ID_COLLISION_DRAWABLE_UBO, ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE,
     ID_COLLISION_HEIGHT_OFFSET_VERTEX_ATTRIBUTE, ID_COLLISION_PLACED_VERTEX_ATTRIBUTE,
-    ID_COLLISION_POS_VERTEX_ATTRIBUTE, ID_COLLISION_SHIFT_VERTEX_ATTRIBUTE, ID_SYMBOL_DATA_ATTRIBUTE,
-    ID_SYMBOL_FADE_OPACITY_ATTRIBUTE, ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE, ID_SYMBOL_IMAGE_ICON_TEXTURE,
-    ID_SYMBOL_IMAGE_TEXTURE, ID_SYMBOL_OPACITY_ATTRIBUTE, ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE,
-    ID_SYMBOL_POS_OFFSET_ATTRIBUTE, ID_SYMBOL_PROJECTED_POS_ATTRIBUTE, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE,
+    ID_COLLISION_POS_VERTEX_ATTRIBUTE, ID_COLLISION_PROJECTION_UBO, ID_COLLISION_SHIFT_VERTEX_ATTRIBUTE,
+    ID_COLLISION_TILE_PROPS_UBO, ID_PROJECTION_UBO, ID_SYMBOL_DATA_ATTRIBUTE, ID_SYMBOL_DRAWABLE_UBO,
+    ID_SYMBOL_EVALUATED_PROPS_UBO, ID_SYMBOL_FADE_OPACITY_ATTRIBUTE, ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE,
+    ID_SYMBOL_IMAGE_ICON_TEXTURE, ID_SYMBOL_IMAGE_TEXTURE, ID_SYMBOL_OPACITY_ATTRIBUTE,
+    ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE, ID_SYMBOL_POS_OFFSET_ATTRIBUTE, ID_SYMBOL_PROJECTED_POS_ATTRIBUTE,
+    ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE, ID_SYMBOL_TILE_PROPS_UBO,
+};
+use mln_gfx::shaders::symbol_layer_ubo::{
+    CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
 };
 use mln_gfx::vertex_attribute::VertexAttributeArray;
 use mln_gfx::vertex_vector::VertexVector;
-use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode, ShaderRegistry};
-use mln_map_types::TransformState;
+use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode, ShaderRegistry};
+use mln_map_types::{Projection, ProjectionData, TransformState};
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Symbol;
 use mln_style::layers::symbol_layer::SymbolLayerPaintPropertyOverrides;
@@ -37,25 +43,23 @@ use mln_util::Color;
 use mln_util::constants::EXTENT;
 use mln_util::error::Error;
 use mln_util::hash::HashMap;
+use mln_util::identity::SimpleIdentity;
 use mln_util::mat4::{Mat4, matrix};
 
-use super::collision_layer_tweaker::{CollisionDrawableData, CollisionLayerTweaker};
-use super::symbol_layer_tweaker::SymbolLayerTweaker;
-use super::{LayerTiles, shared_vertices, update_tile};
+use super::{cast_matrix, shared_vertices};
 use crate::bucket_geometry::{BucketGeometry, bucket_vertices, paint_vertices, released_indexes};
 use crate::buckets::symbol_bucket::{
     Buffer, CollisionBoxDynamicVertex, CollisionBoxLayoutVertex, CollisionBuffer, PaintProperties, SymbolBucket,
 };
-use crate::draw_cache::{BucketChanges, DrawGroup, LayerDraws};
-use crate::drawable_builder::DrawableBuilder;
+use crate::draw::{DrawObjects, DrawSegment};
+use crate::draw_cache::{BucketChanges, DrawCache, DrawDepth, FrameDraw, FrameDraws, KeptDraw, LayerDraws};
 use crate::geometry::feature_index::FeatureIndex;
 use crate::gfx::context::Context;
 use crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker;
-use crate::layer_group::LayerGroup;
-use crate::layer_tweaker::LayerTweaker;
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::symbol_layout::SymbolLayout;
+use crate::layout::symbol_projection::{get_gl_coord_matrix, get_label_plane_matrix};
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
 use crate::render_layer::{
@@ -63,6 +67,7 @@ use crate::render_layer::{
 };
 use crate::render_pass::RenderPass;
 use crate::render_tile::RenderTile;
+use crate::tile_matrix::{get_projection_data, to_projection_ubo};
 use crate::update_parameters::UpdateParameters;
 
 const SYMBOL_ICON_SHADER_NAME: &str = "SymbolIconShader";
@@ -87,19 +92,20 @@ pub(crate) struct SymbolPropertyValues {
     pub(crate) translate_anchor: TranslateAnchorType,
 }
 
+/// What a symbol draw draws, which its uniforms read.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct SymbolDrawableData {
-    pub(crate) is_halo: bool,
-    pub(crate) bucket_variable_placement: bool,
-    pub(crate) symbol_type: SymbolType,
-    pub(crate) pitch_alignment: AlignmentType,
-    pub(crate) rotation_alignment: AlignmentType,
-    pub(crate) along_line: bool,
-    pub(crate) text_fit: IconTextFitType,
-    pub(crate) is_offset: bool,
-    /// The bucket segment the drawable draws (`sortFeaturesByKey`), or all
-    /// of them.
-    pub(crate) segment: Option<usize>,
+struct SymbolDrawData {
+    is_halo: bool,
+    bucket_variable_placement: bool,
+    symbol_type: SymbolType,
+    pitch_alignment: AlignmentType,
+    rotation_alignment: AlignmentType,
+    along_line: bool,
+    text_fit: IconTextFitType,
+    is_offset: bool,
+    /// The bucket segment the draw draws (`sortFeaturesByKey`), or all of
+    /// them.
+    segment: Option<usize>,
 }
 
 #[must_use]
@@ -379,11 +385,74 @@ fn set_placed_attribute<V: bytemuck::Pod>(
     }
 }
 
-/// Replaces the attributes (and indices) of an existing drawable that
-/// placement, sorting or feature state changed. Halo and fill drawables share
-/// their attribute array, which is refreshed once (`refreshed_attributes`).
-fn update_tile_drawable(
-    drawable: &mut crate::drawable::Drawable,
+/// A draw the layer keeps of a tile: the halo or the fill of the text or the
+/// icons of one of the bucket's buffers, or of one of its segments.
+struct SymbolDraw {
+    /// The id of the draw's GPU objects, made with them.
+    id: SimpleIdentity,
+    objects: DrawObjects,
+    data: SymbolDrawData,
+    /// Whether placement shows any of the draw's symbols. A draw that shows
+    /// none doesn't draw, and doesn't copy the bucket's attributes again
+    /// until it shows some.
+    visible: bool,
+    /// Gives the draw the textures of its tile's atlases.
+    atlases: Rc<DrawableAtlasesTweaker>,
+}
+
+/// What the layer keeps of a tile: its draws, as they were built for the
+/// tile's bucket.
+#[derive(Default)]
+struct SymbolTile {
+    draws: Vec<SymbolDraw>,
+}
+
+impl DrawCache for SymbolTile {
+    fn objects_mut(&mut self, id: SimpleIdentity) -> Option<&mut DrawObjects> {
+        self.draws.iter_mut().find(|draw| draw.id == id).map(|draw| &mut draw.objects)
+    }
+}
+
+/// A draw of a tile's collision boxes or circles, with the translation of
+/// the symbols they belong to.
+struct CollisionDraw {
+    draw: KeptDraw,
+    translate: [f32; 2],
+    translate_anchor: TranslateAnchorType,
+}
+
+/// The collision boxes and circles of a tile's text and icons, which the
+/// layer draws over its symbols for debugging.
+struct CollisionTile {
+    draws: Vec<CollisionDraw>,
+}
+
+impl DrawCache for CollisionTile {
+    fn objects_mut(&mut self, id: SimpleIdentity) -> Option<&mut DrawObjects> {
+        self.draws.iter_mut().find(|draw| draw.draw.id == id).map(|draw| &mut draw.draw.objects)
+    }
+}
+
+/// A draw's entries in the layer's storage buffers.
+struct SymbolUniforms {
+    drawable: SymbolDrawableUBO,
+    tile_props: SymbolTilePropsUBO,
+    projection: ProjectionUBO,
+}
+
+/// The size of the texture `objects` binds at `texture_id`, zero for none.
+fn texture_size(objects: &DrawObjects, texture_id: usize) -> [f32; 2] {
+    objects.textures[texture_id].as_ref().map_or([0.0, 0.0], |texture| {
+        let size = texture.borrow().size();
+        [size.width as f32, size.height as f32]
+    })
+}
+
+/// Copies again what placement, sorting or feature state changed of the
+/// bucket into a draw of it: its attributes, of which a halo and a fill draw
+/// share one array, copied once (`refreshed_attributes`), and its triangles.
+fn refresh_draw(
+    draw: &mut SymbolDraw,
     geometry: Option<&BucketGeometry>,
     bucket: &SymbolBucket,
     layer_id: &str,
@@ -391,21 +460,14 @@ fn update_tile_drawable(
     refresh: BucketChanges,
     refreshed_attributes: &mut Vec<*const ()>,
 ) {
-    let Some(crate::drawable::DrawableData::Symbol(draw_data)) = &drawable.data else {
-        return;
-    };
-    let mut draw_data = *draw_data;
-    let is_text = draw_data.symbol_type == SymbolType::Text;
-    let sdf_icons = draw_data.symbol_type == SymbolType::IconSDF;
+    let is_text = draw.data.symbol_type == SymbolType::Text;
+    let sdf_icons = draw.data.symbol_type == SymbolType::IconSDF;
 
     let state = bucket.state();
 
     // This property can be set after the initial appearance of the tile, as
     // part of the layout process.
-    if draw_data.bucket_variable_placement != state.has_variable_placement {
-        draw_data.bucket_variable_placement = state.has_variable_placement;
-        drawable.data = Some(crate::drawable::DrawableData::Symbol(draw_data));
-    }
+    draw.data.bucket_variable_placement = state.has_variable_placement;
 
     let buffer = if is_text {
         &state.text
@@ -415,23 +477,20 @@ fn update_tile_drawable(
         &state.icon
     };
 
-    // A drawable whose symbols are all hidden by placement draws nothing.
-    // Its attributes aren't refreshed while it is disabled, so it refreshes
-    // all of them when placement shows it again.
-    let was_enabled = drawable.enabled;
+    let was_visible = draw.visible;
     if refresh.opacity || refresh.sort {
-        drawable.enabled = buffer.segment_has_visible_vertices(draw_data.segment);
+        draw.visible = buffer.segment_has_visible_vertices(draw.data.segment);
     }
-    if !drawable.enabled {
+    if !draw.visible {
         return;
     }
-    let refresh = if was_enabled { refresh } else { BucketChanges::ALL };
+    let refresh = if was_visible { refresh } else { BucketChanges::ALL };
 
     if !refresh.any() {
         return;
     }
 
-    if let Some(attrs) = drawable.objects.vertex_attributes.clone() {
+    if let Some(attrs) = draw.objects.vertex_attributes.clone() {
         let key = Rc::as_ptr(&attrs).cast::<()>();
         if !refreshed_attributes.contains(&key) {
             refreshed_attributes.push(key);
@@ -461,14 +520,12 @@ fn update_tile_drawable(
     }
 
     if refresh.sort && !buffer.triangles.is_empty() {
-        let segments: Vec<crate::draw::UniqueDrawSegment> = match draw_data.segment {
-            Some(i) => buffer.segments.get(i).map(|s| vec![s]).unwrap_or_default(),
-            None => buffer.segments.iter().collect(),
-        }
-        .into_iter()
-        .map(|segment| Box::new(crate::draw::DrawSegment::new(DrawMode::Triangles(), segment.copy())))
-        .collect();
-        drawable.objects.set_index_data(Some(released_indexes(&buffer.triangles)), segments);
+        let segments = match draw.data.segment {
+            Some(i) => buffer.segments.get(i..=i).unwrap_or_default(),
+            None => &buffer.segments,
+        };
+        let segments = segments.iter().map(|segment| Box::new(DrawSegment::new(DrawMode::Triangles(), segment.copy())));
+        draw.objects.set_index_data(Some(released_indexes(&buffer.triangles)), segments.collect());
     }
 }
 
@@ -546,10 +603,8 @@ pub(crate) struct RenderSymbolLayer {
 
     collision_box_group: Option<ShaderGroupPtr>,
     collision_circle_group: Option<ShaderGroupPtr>,
-    /// The group of the collision boxes and circles, drawn for debugging,
-    /// which draws after the layer's group.
-    collision_tile_layer_group: Option<LayerGroup>,
-    collision_layer_tweaker: Option<Box<dyn LayerTweaker>>,
+    /// The passes the layer's draws were built for.
+    draws_passes: RenderPass,
 }
 
 impl RenderSymbolLayer {
@@ -658,42 +713,48 @@ impl RenderSymbolLayer {
             symbol_text_and_icon_group: None,
             collision_box_group: None,
             collision_circle_group: None,
-            collision_tile_layer_group: None,
-            collision_layer_tweaker: None,
+            draws_passes: RenderPass::None,
         }
     }
 
-    /// Removes the tile's collision drawables.
-    fn remove_collision_tile(&mut self, render_pass: RenderPass, tile_id: &OverscaledTileID) {
-        if let Some(group) = &mut self.collision_tile_layer_group {
-            group.remove_drawables(render_pass, tile_id);
+    /// Builds the tile's collision draws anew, in the overlay of `draws`,
+    /// which this makes for the first tile that has collision boxes or
+    /// circles.
+    fn rebuild_collision(
+        &self,
+        draws: &mut LayerDraws,
+        tile_id: &OverscaledTileID,
+        bucket: &SymbolBucket,
+        evaluated: &SymbolPaintProperties::PossiblyEvaluated,
+    ) {
+        let mut collision = Vec::new();
+        let mut has_collision = false;
+        for is_text in [false, true] {
+            has_collision |= self.add_collision_draws(&mut collision, bucket, evaluated, is_text);
+        }
+        if has_collision {
+            draws.make_overlay().set_cache(tile_id, CollisionTile { draws: collision });
+        } else if let Some(overlay) = draws.overlay() {
+            overlay.drop_cache(tile_id);
         }
     }
 
-    /// Adds the collision box and circle drawables of the tile's text or
-    /// icons.
-    fn add_collision_drawables(
-        &mut self,
-        passes: RenderPass,
-        tile_id: OverscaledTileID,
+    /// Adds the draws of the collision boxes and circles of the bucket's
+    /// text or icons to `collision`. Returns whether it has any.
+    fn add_collision_draws(
+        &self,
+        collision: &mut Vec<CollisionDraw>,
         bucket: &SymbolBucket,
         evaluated: &SymbolPaintProperties::PossiblyEvaluated,
         is_text: bool,
-    ) {
+    ) -> bool {
         let (has_collision_box, has_collision_circle) = if is_text {
             (bucket.has_text_collision_box_data(), bucket.has_text_collision_circle_data())
         } else {
             (bucket.has_icon_collision_box_data(), bucket.has_icon_collision_circle_data())
         };
         if !has_collision_box && !has_collision_circle {
-            return;
-        }
-
-        if self.collision_layer_tweaker.is_none() {
-            self.collision_layer_tweaker = Some(Box::new(CollisionLayerTweaker::new(
-                self.get_id().to_owned(),
-                Arc::clone(&self.base.evaluated_properties),
-            )));
+            return false;
         }
 
         let values = if is_text {
@@ -702,27 +763,30 @@ impl RenderSymbolLayer {
             icon_property_values(evaluated, &bucket.layout)
         };
         let suffix = if is_text { "text/" } else { "icon/" };
-        let layer_collision_prefix = format!("{}-collision/", self.get_id());
-
-        let mut collision_builder = DrawableBuilder::boxed();
-        collision_builder.set_sub_layer_index(0);
-        collision_builder.set_enable_depth(false);
-        collision_builder.set_render_pass(passes);
-        collision_builder.set_cull_face_mode(CullFaceMode::disabled());
-        collision_builder.set_color_mode(&ColorMode::alpha_blended());
-
         let state = bucket.state();
         let mut add = |buffer: &CollisionBuffer, group: &Option<ShaderGroupPtr>, mode: DrawMode, name: &str| {
             let Some(group) = group else {
                 return;
             };
-            let shader = group.shader(&Default::default(), self.base.projection_variant);
-            collision_builder.set_drawable_name(format!("{layer_collision_prefix}{suffix}{name}"));
-            collision_builder.set_shader(Some(shader));
-            collision_builder.set_raw_vertices(Vec::new(), buffer.vertices.len(), AttributeDataType::Short2);
-            collision_builder.set_vertex_attributes(Some(get_collision_vertex_attributes(buffer)));
-            collision_builder.set_segments_shared(mode, Some(released_indexes(&buffer.indices)), &buffer.segments);
-            collision_builder.flush();
+            if buffer.vertices.is_empty() || buffer.indices.is_empty() {
+                return;
+            }
+            let mut objects = DrawObjects::new(format!("{}-collision/{suffix}{name}", self.get_id()));
+            objects.set_color_mode(&ColorMode::alpha_blended());
+            objects.set_cull_face_mode(CullFaceMode::disabled());
+            objects.set_shader(Some(group.shader(&Default::default(), self.base.projection_variant)));
+            objects.update_vertex_attributes(
+                Some(get_collision_vertex_attributes(buffer)),
+                buffer.vertices.len(),
+                mode,
+                Some(released_indexes(&buffer.indices)),
+                &buffer.segments,
+            );
+            collision.push(CollisionDraw {
+                draw: KeptDraw::new(objects),
+                translate: values.translate,
+                translate_anchor: values.translate_anchor,
+            });
         };
 
         if has_collision_box {
@@ -737,21 +801,266 @@ impl RenderSymbolLayer {
                 add(collision_circle, &self.collision_circle_group, DrawMode::Triangles(), "circle");
             }
         }
-        drop(state);
+        true
+    }
 
-        // add drawables to layer group
-        let tweaker = self.collision_layer_tweaker.as_ref().map(|tweaker| tweaker.base().key);
-        let tile_group = self.collision_tile_layer_group.get_or_insert_with(LayerGroup::tiles);
-        for mut drawable in collision_builder.clear_drawables() {
-            drawable.tile_id = Some(tile_id);
-            drawable.tweaker = tweaker;
-            drawable.data = Some(crate::drawable::DrawableData::Collision(CollisionDrawableData {
-                translate: values.translate,
-                translate_anchor: values.translate_anchor,
-            }));
-            tile_group.add_tile_drawable(passes, &tile_id, drawable);
+    /// The entries in the layer's storage buffers of `draw`, of the tile
+    /// `tile_id` and its `bucket`.
+    fn uniforms(
+        &self,
+        tile_id: &OverscaledTileID,
+        bucket: &SymbolBucket,
+        draw: &SymbolDraw,
+        parameters: &PaintParameters<'_>,
+    ) -> Option<SymbolUniforms> {
+        let state = parameters.state;
+        let layer = &*self.values.evaluated;
+        let evaluated = &layer.paint;
+        let zoom = state.get_zoom() as f32;
+        let paint_properties = bucket.paint_properties.get(self.get_id())?.read();
+
+        let data = &draw.data;
+        let tile_id = tile_id.to_unwrapped();
+        let is_text = data.symbol_type == SymbolType::Text;
+        let screen_space_prop = &layer.style.layout.symbol_screen_space;
+        let is_screen_space = if screen_space_prop.is_constant() {
+            *screen_space_prop.as_constant()
+        } else {
+            SymbolLayoutProperties::Defaults::symbol_screen_space()
+        };
+
+        let translate = if is_text { &evaluated.text_translate } else { &evaluated.icon_translate };
+        let anchor = if is_text { &evaluated.text_translate_anchor } else { &evaluated.icon_translate_anchor };
+        let mut projection: ProjectionData = if is_screen_space {
+            Projection::Mercator.get_projection_data(state, &tile_id, &get_screen_matrix(*translate.uniform()))
+        } else {
+            const NEAR_CLIPPED: bool = false;
+            const IN_VIEWPORT_PIXEL_UNITS: bool = false;
+            get_projection_data(
+                &tile_id,
+                parameters,
+                [0.0, 0.0],
+                *anchor.uniform(),
+                NEAR_CLIPPED,
+                IN_VIEWPORT_PIXEL_UNITS,
+                None,
+                false,
+            )
+        };
+        // The translation stays out of the matrices on every projection: the
+        // shader adds it to point anchors, and placement to the positions it
+        // lays out (variable anchors, line labels), so it applies once.
+        let tile_translation: [f32; 2] = if is_screen_space {
+            [0.0, 0.0]
+        } else {
+            RenderTile::tile_unit_translation(&tile_id, *translate.uniform(), *anchor.uniform(), state)
+        };
+        projection.translate = [0.0, 0.0];
+        let matrix = projection.fallback_matrix;
+
+        // from symbol_program, makeValues
+        let pixels_to_tile_units = tile_id.pixels_to_tile_units(1.0, zoom);
+        let pitch_with_map = data.pitch_alignment == AlignmentType::Map;
+        let rotate_with_map = data.rotation_alignment == AlignmentType::Map;
+        let along_line = data.along_line;
+        let has_variable_placement =
+            data.bucket_variable_placement && (is_text || data.text_fit != IconTextFitType::None);
+        let label_plane_matrix = if along_line || has_variable_placement {
+            let mut m: Mat4 = [0.0; 16];
+            matrix::identity(&mut m);
+            m
+        } else {
+            get_label_plane_matrix(pitch_with_map, rotate_with_map, state, pixels_to_tile_units)
+        };
+        let gl_coord_matrix = get_gl_coord_matrix(pitch_with_map, rotate_with_map, state, pixels_to_tile_units);
+        let gamma_scale =
+            if pitch_with_map { (state.get_pitch().cos() as f32) * state.get_camera_to_center_distance() } else { 1.0 };
+
+        // Line label rotation happens in `updateLineLabels` /
+        // `reprojectLineLabels`. Pitched point labels are automatically
+        // rotated by the label plane matrix projection. Unpitched point
+        // labels need to have their rotation applied after projection.
+        let rotate_in_shader = rotate_with_map && !pitch_with_map && !along_line;
+
+        let size_binder = if is_text { &bucket.text_size_binder } else { &bucket.icon_size_binder };
+        let size = size_binder.evaluate_for_zoom(zoom);
+
+        let (fill_color_t, halo_color_t, opacity_t, halo_width_t, halo_blur_t) = if is_text {
+            let b = &paint_properties.text_binders;
+            (
+                b.text_color.interpolation_factor(zoom),
+                b.text_halo_color.interpolation_factor(zoom),
+                b.text_opacity.interpolation_factor(zoom),
+                b.text_halo_width.interpolation_factor(zoom),
+                b.text_halo_blur.interpolation_factor(zoom),
+            )
+        } else {
+            let b = &paint_properties.icon_binders;
+            (
+                b.icon_color.interpolation_factor(zoom),
+                b.icon_halo_color.interpolation_factor(zoom),
+                b.icon_opacity.interpolation_factor(zoom),
+                b.icon_halo_width.interpolation_factor(zoom),
+                b.icon_halo_blur.interpolation_factor(zoom),
+            )
+        };
+
+        Some(SymbolUniforms {
+            drawable: SymbolDrawableUBO {
+                matrix: cast_matrix(&matrix),
+                label_plane_matrix: cast_matrix(&label_plane_matrix),
+                coord_matrix: cast_matrix(&gl_coord_matrix),
+                texsize: texture_size(&draw.objects, ID_SYMBOL_IMAGE_TEXTURE),
+                texsize_icon: texture_size(&draw.objects, ID_SYMBOL_IMAGE_ICON_TEXTURE),
+                is_text_prop: i32::from(is_text),
+                rotate_symbol: i32::from(rotate_in_shader),
+                pitch_with_map: i32::from(pitch_with_map),
+                is_size_zoom_constant: i32::from(size.is_zoom_constant),
+                is_size_feature_constant: i32::from(size.is_feature_constant),
+                is_offset: i32::from(data.is_offset),
+                size_t: size.size_t,
+                size: size.size,
+                fill_color_t,
+                halo_color_t,
+                opacity_t,
+                halo_width_t,
+                halo_blur_t,
+                is_along_line: i32::from(along_line),
+                is_variable_anchor: i32::from(has_variable_placement),
+                pitched_scale: state.get_projection().circle_radius_correction(state) as f32,
+                translation: tile_translation,
+                pad1: 0.0,
+                pad2: 0.0,
+            },
+            tile_props: SymbolTilePropsUBO {
+                is_text: i32::from(is_text),
+                is_halo: i32::from(data.is_halo),
+                gamma_scale,
+                pad1: 0.0,
+            },
+            projection: to_projection_ubo(&projection),
+        })
+    }
+
+    /// Makes the frame's draws of the layer's draws of `tiles` that show any
+    /// symbols, in `passes`, and of their collision boxes and circles, and
+    /// writes the buffers they read.
+    fn make_frame_draws<'a>(
+        &self,
+        tiles: impl Iterator<Item = &'a RenderTile>,
+        passes: RenderPass,
+        paint_parameters: &PaintParameters<'_>,
+        context: &Context,
+        draws: &mut LayerDraws,
+    ) {
+        let mut frame_draws: Vec<(FrameDraw, SymbolUniforms)> = Vec::new();
+        let mut collision_draws: Vec<FrameDraw> = Vec::new();
+        for tile in tiles {
+            let tile_id = *tile.get_overscaled_tile_id();
+            if let Some(cached) = draws.cache_mut::<SymbolTile>(&tile_id) {
+                let bucket = tile.get_layer_render_data(&*self.base.style).and_then(|data| data.bucket::<Symbol>());
+                debug_assert!(bucket.is_some() || cached.draws.is_empty());
+                for draw in cached.draws.iter().filter(|draw| draw.visible) {
+                    let Some(uniforms) =
+                        bucket.and_then(|bucket| self.uniforms(&tile_id, bucket, draw, paint_parameters))
+                    else {
+                        continue;
+                    };
+                    let frame_draw = FrameDraw {
+                        pass: passes,
+                        atlases: Some(Rc::clone(&draw.atlases)),
+                        ..FrameDraw::new(Some(tile_id), draw.id)
+                    };
+                    frame_draws.push((frame_draw, uniforms));
+                }
+            }
+            if let Some(cached) = draws.overlay().and_then(|overlay| overlay.cache_mut::<CollisionTile>(&tile_id)) {
+                for draw in &mut cached.draws {
+                    write_collision_uniforms(draw, &tile_id, paint_parameters);
+                    let frame_draw = FrameDraw {
+                        pass: passes,
+                        depth: DrawDepth::Off,
+                        ..FrameDraw::new(Some(tile_id), draw.draw.id)
+                    };
+                    collision_draws.push(frame_draw);
+                }
+            }
+        }
+
+        frame_draws.sort_by_key(|(draw, _)| draw.order());
+        if let Some(frame) = &mut draws.frame {
+            if !frame_draws.is_empty() {
+                self.write_uniforms(frame, &frame_draws, context);
+            }
+            frame.draws = frame_draws.into_iter().map(|(draw, _)| draw).collect();
+        }
+        if let Some(frame) = draws.overlay().and_then(|overlay| overlay.frame.as_mut()) {
+            collision_draws.sort_by_key(FrameDraw::order);
+            frame.draws = collision_draws;
         }
     }
+
+    /// Writes the layer's buffers of `draws`, the frame's in drawing order,
+    /// to `frame`'s.
+    fn write_uniforms(&self, frame: &mut FrameDraws, draws: &[(FrameDraw, SymbolUniforms)], context: &Context) {
+        let evaluated = &self.values.evaluated.paint;
+        let props = SymbolEvaluatedPropsUBO {
+            text_fill_color: evaluated.text_color.uniform().to_float_array(),
+            text_halo_color: evaluated.text_halo_color.uniform().to_float_array(),
+            text_opacity: *evaluated.text_opacity.uniform(),
+            text_halo_width: *evaluated.text_halo_width.uniform(),
+            text_halo_blur: *evaluated.text_halo_blur.uniform(),
+            pad1: 0.0,
+            icon_fill_color: evaluated.icon_color.uniform().to_float_array(),
+            icon_halo_color: evaluated.icon_halo_color.uniform().to_float_array(),
+            icon_opacity: *evaluated.icon_opacity.uniform(),
+            icon_halo_width: *evaluated.icon_halo_width.uniform(),
+            icon_halo_blur: *evaluated.icon_halo_blur.uniform(),
+            pad2: 0.0,
+        };
+        let buffers = &mut frame.uniform_buffers;
+        buffers.create_or_update_pod(ID_SYMBOL_EVALUATED_PROPS_UBO, &props, context);
+        let drawables: Vec<SymbolDrawableUBO> = draws.iter().map(|(_, uniforms)| uniforms.drawable).collect();
+        buffers.write_storage(ID_SYMBOL_DRAWABLE_UBO, bytemuck::cast_slice(&drawables), context);
+        let tile_props: Vec<SymbolTilePropsUBO> = draws.iter().map(|(_, uniforms)| uniforms.tile_props).collect();
+        buffers.write_storage(ID_SYMBOL_TILE_PROPS_UBO, bytemuck::cast_slice(&tile_props), context);
+        let projections: Vec<ProjectionUBO> = draws.iter().map(|(_, uniforms)| uniforms.projection).collect();
+        buffers.write_storage(ID_PROJECTION_UBO, bytemuck::cast_slice(&projections), context);
+    }
+}
+
+/// Writes the buffers of a collision draw of the tile `tile_id`: its matrix,
+/// and the scale of its boxes' and circles' extrusions.
+fn write_collision_uniforms(draw: &mut CollisionDraw, tile_id: &OverscaledTileID, parameters: &PaintParameters<'_>) {
+    const NEAR_CLIPPED: bool = false;
+    const IN_VIEWPORT_PIXEL_UNITS: bool = false;
+    let context = parameters.context;
+    let unwrapped = tile_id.to_unwrapped();
+    let projection = get_projection_data(
+        &unwrapped,
+        parameters,
+        draw.translate,
+        draw.translate_anchor,
+        NEAR_CLIPPED,
+        IN_VIEWPORT_PIXEL_UNITS,
+        None,
+        false,
+    );
+
+    let zoom = parameters.state.get_zoom();
+    let pixel_ratio = unwrapped.pixels_to_tile_units(1.0, zoom as f32);
+    let scale = 2f64.powf(zoom - f64::from(tile_id.overscaled_z)) as f32;
+    let extrude_scale = [
+        parameters.pixels_to_gl_units[0] / (pixel_ratio * scale),
+        parameters.pixels_to_gl_units[1] / (pixel_ratio * scale),
+    ];
+    let drawable_ubo = CollisionDrawableUBO { matrix: cast_matrix(&projection.fallback_matrix) };
+    let tile_props_ubo =
+        CollisionTilePropsUBO { extrude_scale, overscale_factor: tile_id.overscale_factor() as f32, pad1: 0.0 };
+    let buffers = draw.draw.objects.mutable_uniform_buffers();
+    buffers.create_or_update_pod(ID_COLLISION_DRAWABLE_UBO, &drawable_ubo, context);
+    buffers.create_or_update_pod(ID_COLLISION_TILE_PROPS_UBO, &tile_props_ubo, context);
+    buffers.create_or_update_pod(ID_COLLISION_PROJECTION_UBO, &to_projection_ubo(&projection), context);
 }
 
 fn get_collision_vertex_attributes(buffer: &CollisionBuffer) -> mln_gfx::vertex_attribute::VertexAttributeArrayPtr {
@@ -826,28 +1135,6 @@ impl RenderLayer for RenderSymbolLayer {
         self.values.set_evaluated(&mut self.base, properties);
     }
 
-    fn tweak(&mut self, parameters: &PaintParameters<'_>, draws: &mut LayerDraws) {
-        if !self.base.is_renderable {
-            return;
-        }
-        let base = &mut self.base;
-        let tiles = LayerTiles::new(&*base.style, base.render_tiles.as_ref());
-        if let (Some(tweaker), Some(group)) = (&mut base.layer_tweaker, &mut draws.group) {
-            tweaker.execute(group, &tiles, parameters);
-        }
-        if let (Some(tweaker), Some(group)) = (&mut self.collision_layer_tweaker, &mut self.collision_tile_layer_group)
-        {
-            tweaker.execute(group, &tiles, parameters);
-        }
-    }
-
-    fn layer_groups<'a>(&'a mut self, draws: &'a mut LayerDraws, groups: &mut Vec<DrawGroup<'a>>) {
-        if self.base.is_renderable {
-            let layer_groups = [&mut draws.group, &mut self.collision_tile_layer_group].into_iter().flatten();
-            groups.extend(layer_groups.map(DrawGroup::Drawables));
-        }
-    }
-
     fn get_placement_data(&self) -> &[BucketPlacementData] {
         &self.placement_data
     }
@@ -859,20 +1146,6 @@ impl RenderLayer for RenderSymbolLayer {
     fn release_render_data(&mut self, draws: &mut LayerDraws) {
         crate::render_layer::release_render_data_base(self, draws);
         self.placement_data.clear();
-    }
-
-    fn remove_all_drawables(&mut self, draws: &mut LayerDraws) {
-        draws.clear_drawables();
-        if let Some(group) = &mut self.collision_tile_layer_group {
-            group.clear_drawables();
-        }
-    }
-
-    fn handle_wrap_jump(&mut self, wrap_delta: i16, draws: &mut LayerDraws) {
-        draws.shift_wraps(wrap_delta);
-        if let Some(group) = &mut self.collision_tile_layer_group {
-            group.shift_wraps(wrap_delta);
-        }
     }
 
     fn prepare(&mut self, params: &mut LayerPrepareParameters<'_>) {
@@ -911,43 +1184,41 @@ impl RenderLayer for RenderSymbolLayer {
         }
     }
 
+    /// Makes the frame's draws of the layer: those of each of its tiles,
+    /// which it builds for a tile it keeps none of and refreshes where the
+    /// tile's bucket changed, and the collision boxes and circles it draws
+    /// over them, and writes the buffers they read.
     fn update(
         &mut self,
         shaders: &ShaderRegistry,
-        _context: &Context,
+        context: &Context,
         state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
-        _paint_parameters: &PaintParameters<'_>,
+        paint_parameters: &PaintParameters<'_>,
         draws: &mut LayerDraws,
     ) {
-        /// The tweakers built for one tile.
+        /// The atlases' textures given to one tile's draws.
         #[derive(Default)]
-        struct TileInfo {
-            text_tweaker: Option<Rc<DrawableAtlasesTweaker>>,
-            icon_tweaker: Option<Rc<DrawableAtlasesTweaker>>,
+        struct TileAtlases {
+            text: Option<Rc<DrawableAtlasesTweaker>>,
+            icon: Option<Rc<DrawableAtlasesTweaker>>,
         }
 
         self.update_projection_variant(state, draws);
         let passes = self.base.passes;
         let Some(render_tiles) = self.base.render_tiles.clone().filter(|t| !t.is_empty()) else {
-            self.remove_all_drawables(draws);
+            self.remove_all_draws(draws);
             return;
         };
         if passes == RenderPass::None {
-            self.remove_all_drawables(draws);
+            self.remove_all_draws(draws);
             return;
         }
-
-        // Set up a layer group, which this fills, and puts back when it's
-        // done.
-        let mut layer_group = draws.group.take().unwrap_or_else(LayerGroup::tiles);
-
-        if self.base.layer_tweaker.is_none() {
-            self.base.layer_tweaker = Some(Box::new(SymbolLayerTweaker::new(
-                self.get_id().to_owned(),
-                Arc::clone(&self.base.evaluated_properties),
-            )));
+        if passes != self.draws_passes {
+            self.remove_all_draws(draws);
+            self.draws_passes = passes;
         }
+        draws.frame.get_or_insert_with(FrameDraws::new);
 
         if self.symbol_icon_group.is_none() {
             self.symbol_icon_group = shaders.shader_group(SYMBOL_ICON_SHADER_NAME);
@@ -963,17 +1234,6 @@ impl RenderLayer for RenderSymbolLayer {
         }
         if self.collision_circle_group.is_none() {
             self.collision_circle_group = shaders.shader_group("CollisionCircleShader");
-        }
-
-        // remove drawables that are dropped out of scope: if the render pass
-        // has changed or the tile has dropped out of the cover set, remove
-        // it.
-        let dropped = |drawable: &mut crate::drawable::Drawable| {
-            drawable.render_pass != passes || drawable.tile_id.is_some_and(|id| !draws.has_tile(&id))
-        };
-        layer_group.remove_drawables_if(dropped);
-        if let Some(collision_group) = &mut self.collision_tile_layer_group {
-            collision_group.remove_drawables_if(dropped);
         }
 
         let layout = &self.values.style.layout;
@@ -993,7 +1253,7 @@ impl RenderLayer for RenderSymbolLayer {
 
         let current_zoom = state.get_zoom() as f32;
         let layer_prefix = format!("{}/", self.get_id());
-        let tweaker = self.base.layer_tweaker.as_ref().map(|tweaker| tweaker.base().key);
+        let style = Arc::clone(&self.base.style);
 
         let mut renderable_segments: Vec<SegmentGroup> = Vec::new();
 
@@ -1001,26 +1261,27 @@ impl RenderLayer for RenderSymbolLayer {
         for (tile_index, tile) in tiles.iter().enumerate() {
             let tile_id = *tile.get_overscaled_tile_id();
 
-            let style = Arc::clone(&self.base.style);
             let render_data = super::render_data_for_pass(tile, &*style, passes);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
-                layer_group.remove_drawables(passes, &tile_id);
-                self.remove_collision_tile(passes, &tile_id);
+                draws.drop_cache(&tile_id);
+                if let Some(overlay) = draws.overlay() {
+                    overlay.drop_cache(&tile_id);
+                }
                 continue;
             };
             let Some(bucket) = render_data.bucket::<Symbol>() else {
                 continue;
             };
 
-            let prev_bucket_id = draws.bucket(&tile_id);
-            if prev_bucket_id.is_some_and(|prev| prev != bucket.base.bucket_id) {
-                // This tile was previously set up from a different bucket,
-                // drop and re-create any drawables for it.
-                layer_group.remove_drawables(passes, &tile_id);
-                self.remove_collision_tile(passes, &tile_id);
+            if draws.bucket(&tile_id).is_some_and(|prev| prev != bucket.base.bucket_id) {
+                // The tile's draws were built from another bucket.
+                draws.drop_cache(&tile_id);
+                if let Some(overlay) = draws.overlay() {
+                    overlay.drop_cache(&tile_id);
+                }
             }
             draws.set_bucket(&tile_id, bucket.base.bucket_id);
-            // What changed since the drawables were built or last refreshed.
+            // What changed since the draws were built or last refreshed.
             let refresh = draws.take_changes(&tile_id);
 
             debug_assert!(bucket.paint_properties.contains_key(self.get_id()));
@@ -1032,31 +1293,14 @@ impl RenderLayer for RenderSymbolLayer {
                 continue;
             };
 
-            // If we already have drawables for this tile, update them.
-            let layer_id = self.get_id().to_owned();
-            let mut refreshed_attributes: Vec<*const ()> = Vec::new();
-            let update_existing = |drawable: &mut crate::drawable::Drawable| {
-                if drawable.tweaker != tweaker {
-                    // This drawable was produced on a previous style/bucket,
-                    // and should not be updated.
-                    return false;
+            // A tile the layer keeps draws of refreshes them.
+            if let Some(cached) = draws.cache_mut::<SymbolTile>(&tile_id).filter(|cached| !cached.draws.is_empty()) {
+                let mut refreshed_attributes: Vec<*const ()> = Vec::new();
+                for draw in &mut cached.draws {
+                    let geometry = tile.get_bucket_geometry();
+                    refresh_draw(draw, geometry, bucket, self.get_id(), evaluated, refresh, &mut refreshed_attributes);
                 }
-                update_tile_drawable(
-                    drawable,
-                    tile.get_bucket_geometry(),
-                    bucket,
-                    &layer_id,
-                    evaluated,
-                    refresh,
-                    &mut refreshed_attributes,
-                );
-                true
-            };
-            if update_tile(&mut layer_group, passes, &tile_id, update_existing) {
-                // re-create collision drawables
-                self.remove_collision_tile(passes, &tile_id);
-                self.add_collision_drawables(passes, tile_id, bucket, evaluated, false);
-                self.add_collision_drawables(passes, tile_id, bucket, evaluated, true);
+                self.rebuild_collision(draws, &tile_id, bucket, evaluated);
                 continue;
             }
 
@@ -1114,8 +1358,7 @@ impl RenderLayer for RenderSymbolLayer {
             }
 
             drop(state_guard);
-            self.add_collision_drawables(passes, tile_id, bucket, evaluated, false);
-            self.add_collision_drawables(passes, tile_id, bucket, evaluated, true);
+            self.rebuild_collision(draws, &tile_id, bucket, evaluated);
         }
 
         // std::multiset<SegmentGroup>: a stable sort keeps equal elements in
@@ -1130,12 +1373,15 @@ impl RenderLayer for RenderSymbolLayer {
             }
         });
 
-        // We'll be processing renderables across tiles, potentially
-        // out-of-order, so keep track of some things by tile ID so we don't
-        // have to re-build them multiple times.
-        let mut tile_cache: HashMap<UnwrappedTileID, TileInfo> = HashMap::default();
-        let mut builder: Option<crate::drawable_builder::UniqueDrawableBuilder> = None;
+        // Renderables come across tiles, out of order, so the atlases' textures
+        // given to a tile's draws are kept by tile.
+        let mut tile_atlases: HashMap<UnwrappedTileID, TileAtlases> = HashMap::default();
         let mut properties_as_uniforms: StringIDSetsPair = Default::default();
+        let color_mode = if (passes.underlying_type() & RenderPass::Translucent.underlying_type()) != 0 {
+            ColorMode::alpha_blended()
+        } else {
+            ColorMode::unblended()
+        };
 
         for group in &renderable_segments {
             let is_text = group.type_ == SymbolType::Text;
@@ -1143,7 +1389,6 @@ impl RenderLayer for RenderSymbolLayer {
 
             let tile = tiles[group.tile_index];
             let tile_id = tile.id.overscale_to(group.overscaled_z);
-            let style = Arc::clone(&self.base.style);
             let Some(render_data) = super::render_data_for_pass(tile, &*style, passes) else {
                 continue;
             };
@@ -1184,12 +1429,10 @@ impl RenderLayer for RenderSymbolLayer {
                 continue;
             };
 
-            let tile_info = tile_cache.entry(tile.id).or_default();
-
             properties_as_uniforms.0.clear();
             properties_as_uniforms.1.clear();
 
-            let vertex_attribs = VertexAttributeArray::new_ptr();
+            let mut vertex_attribs = VertexAttributeArray::new();
             update_tile_attributes(
                 tile.get_bucket_geometry(),
                 bucket,
@@ -1198,9 +1441,11 @@ impl RenderLayer for RenderSymbolLayer {
                 is_text,
                 &bucket_paint_properties,
                 evaluated,
-                &mut vertex_attribs.borrow_mut(),
+                &mut vertex_attribs,
                 &mut properties_as_uniforms,
             );
+            // The halo and the fill read the same attributes.
+            let vertex_attribs = Rc::new(RefCell::new(vertex_attribs));
 
             let text_halo = evaluated.text_halo_color.constant_or(&Color::black()).a > 0.0
                 && evaluated.text_halo_width.constant_or(&1.0) != 0.0;
@@ -1210,93 +1455,81 @@ impl RenderLayer for RenderSymbolLayer {
                 && evaluated.icon_halo_width.constant_or(&1.0) != 0.0;
             let icon_fill = evaluated.icon_color.constant_or(&Color::black()).a > 0.0;
 
-            if let Some(builder) = builder.as_mut() {
-                builder.set_atlases(None);
-            }
+            // The shaders, halo first, and the names of the draws.
+            let shader_groups = if is_text {
+                let shader_group =
+                    if bucket.icons_in_text { &self.symbol_text_and_icon_group } else { &self.symbol_sdf_group };
+                vec![(shader_group, true, "halo", text_halo), (shader_group, false, "fill", text_fill)]
+            } else if sdf_icons {
+                vec![
+                    (&self.symbol_sdf_group, true, "halo", icon_halo),
+                    (&self.symbol_sdf_group, false, "fill", icon_fill),
+                ]
+            } else {
+                vec![(&self.symbol_icon_group, false, "icon", true)]
+            };
 
-            let mut draw = |shader_group: &Option<ShaderGroupPtr>, is_halo: bool, suffix: &str| {
+            let segments = match group.segment {
+                Some(i) => std::slice::from_ref(&buffer.segments[i]),
+                None => &buffer.segments,
+            };
+            for (shader_group, is_halo, suffix, _) in shader_groups.into_iter().filter(|(_, _, _, drawn)| *drawn) {
                 let Some(shader_group) = shader_group else {
-                    return;
+                    continue;
                 };
 
-                // We can use the same tweakers for all the segments in a tile
-                if is_text && tile_info.text_tweaker.is_none() {
-                    let text_size_is_zoom_constant =
-                        bucket.text_size_binder.evaluate_for_zoom(current_zoom).is_zoom_constant;
-                    tile_info.text_tweaker = Some(Rc::new(DrawableAtlasesTweaker::new(
-                        Some(Rc::clone(atlases)),
-                        Some(ID_SYMBOL_IMAGE_ICON_TEXTURE),
-                        Some(ID_SYMBOL_IMAGE_TEXTURE),
-                        is_text,
-                        false,
-                        values.rotation_alignment,
-                        false,
-                        text_size_is_zoom_constant,
-                    )));
-                }
-                if !is_text && tile_info.icon_tweaker.is_none() {
-                    let icon_scaled = bucket_layout.icon_size.constant_or(&1.0) != 1.0 || bucket.icons_need_linear;
-                    tile_info.icon_tweaker = Some(Rc::new(DrawableAtlasesTweaker::new(
-                        Some(Rc::clone(atlases)),
-                        Some(ID_SYMBOL_IMAGE_ICON_TEXTURE),
-                        Some(ID_SYMBOL_IMAGE_TEXTURE),
-                        is_text,
-                        sdf_icons,
-                        values.rotation_alignment,
-                        icon_scaled,
-                        false,
-                    )));
-                }
-
-                let builder = builder.get_or_insert_with(|| {
-                    let mut builder = DrawableBuilder::boxed();
-                    builder.set_sub_layer_index(0);
-                    builder.set_render_pass(passes);
-                    builder.set_cull_face_mode(CullFaceMode::disabled());
-                    builder.set_depth_type(DepthMaskType::ReadOnly);
-                    builder.set_color_mode(&if (passes.underlying_type() & RenderPass::Translucent.underlying_type())
-                        != 0
-                    {
-                        ColorMode::alpha_blended()
-                    } else {
-                        ColorMode::unblended()
-                    });
-                    builder
-                });
-
-                let shader = shader_group.shader(&properties_as_uniforms, symbol_projection_variant);
-                builder.set_shader(Some(shader));
-
-                builder.set_atlases(if is_text {
-                    tile_info.text_tweaker.clone()
+                // The draws of a tile share the atlases' textures.
+                let tile_atlases = tile_atlases.entry(tile.id).or_default();
+                let draw_atlases = if is_text {
+                    tile_atlases.text.get_or_insert_with(|| {
+                        let text_size_is_zoom_constant =
+                            bucket.text_size_binder.evaluate_for_zoom(current_zoom).is_zoom_constant;
+                        Rc::new(DrawableAtlasesTweaker::new(
+                            Some(Rc::clone(atlases)),
+                            Some(ID_SYMBOL_IMAGE_ICON_TEXTURE),
+                            Some(ID_SYMBOL_IMAGE_TEXTURE),
+                            is_text,
+                            false,
+                            values.rotation_alignment,
+                            false,
+                            text_size_is_zoom_constant,
+                        ))
+                    })
                 } else {
-                    tile_info.icon_tweaker.clone()
-                });
-                builder.set_drawable_name(format!("{layer_prefix}{suffix}"));
-                builder.set_vertex_attributes(Some(Rc::clone(&vertex_attribs)));
+                    tile_atlases.icon.get_or_insert_with(|| {
+                        let icon_scaled = bucket_layout.icon_size.constant_or(&1.0) != 1.0 || bucket.icons_need_linear;
+                        Rc::new(DrawableAtlasesTweaker::new(
+                            Some(Rc::clone(atlases)),
+                            Some(ID_SYMBOL_IMAGE_ICON_TEXTURE),
+                            Some(ID_SYMBOL_IMAGE_TEXTURE),
+                            is_text,
+                            sdf_icons,
+                            values.rotation_alignment,
+                            icon_scaled,
+                            false,
+                        ))
+                    })
+                };
 
-                builder.set_raw_vertices(Vec::new(), buffer.attribute_data.len(), AttributeDataType::Short4);
+                let mut objects = DrawObjects::new(format!("{layer_prefix}{suffix}"));
+                objects.set_color_mode(&color_mode);
+                objects.set_cull_face_mode(CullFaceMode::disabled());
+                objects.set_shader(Some(shader_group.shader(&properties_as_uniforms, symbol_projection_variant)));
+                objects.update_vertex_attributes(
+                    Some(Rc::clone(&vertex_attribs)),
+                    buffer.attribute_data.len(),
+                    DrawMode::Triangles(),
+                    Some(released_indexes(&buffer.triangles)),
+                    segments,
+                );
+                draw_atlases.init(&mut objects);
 
-                let triangle_indices = Some(released_indexes(&buffer.triangles));
-                match group.segment {
-                    Some(i) => builder.set_segments_shared(
-                        DrawMode::Triangles(),
-                        triangle_indices,
-                        std::slice::from_ref(&buffer.segments[i]),
-                    ),
-                    None => builder.set_segments_shared(DrawMode::Triangles(), triangle_indices, &buffer.segments),
-                }
-
-                builder.flush();
-
-                for mut drawable in builder.clear_drawables() {
-                    drawable.tile_id = Some(tile_id);
-                    drawable.tweaker = tweaker;
-
-                    let has_variable_placement = state_guard.has_variable_placement;
-                    drawable.data = Some(crate::drawable::DrawableData::Symbol(SymbolDrawableData {
+                let draw = SymbolDraw {
+                    id: SimpleIdentity::new(),
+                    objects,
+                    data: SymbolDrawData {
                         is_halo,
-                        bucket_variable_placement: has_variable_placement,
+                        bucket_variable_placement: state_guard.has_variable_placement,
                         symbol_type: group.type_,
                         pitch_alignment: values.pitch_alignment,
                         rotation_alignment: values.rotation_alignment,
@@ -1304,41 +1537,19 @@ impl RenderLayer for RenderSymbolLayer {
                         text_fit: *bucket_layout.icon_text_fit.uniform(),
                         is_offset,
                         segment: group.segment,
-                    }));
-                    drawable.enabled = visible;
-
-                    layer_group.add_tile_drawable(passes, &tile_id, drawable);
+                    },
+                    visible,
+                    atlases: Rc::clone(draw_atlases),
+                };
+                if draws.cache_mut::<SymbolTile>(&tile_id).is_none() {
+                    draws.set_cache(&tile_id, SymbolTile::default());
                 }
-            };
-
-            if is_text {
-                if bucket.icons_in_text {
-                    if text_halo {
-                        draw(&self.symbol_text_and_icon_group, true, "halo");
-                    }
-                    if text_fill {
-                        draw(&self.symbol_text_and_icon_group, false, "fill");
-                    }
-                } else {
-                    if text_halo {
-                        draw(&self.symbol_sdf_group, true, "halo");
-                    }
-                    if text_fill {
-                        draw(&self.symbol_sdf_group, false, "fill");
-                    }
+                if let Some(cached) = draws.cache_mut::<SymbolTile>(&tile_id) {
+                    cached.draws.push(draw);
                 }
-            } else if sdf_icons {
-                // icons
-                if icon_halo {
-                    draw(&self.symbol_sdf_group, true, "halo");
-                }
-                if icon_fill {
-                    draw(&self.symbol_sdf_group, false, "fill");
-                }
-            } else {
-                draw(&self.symbol_icon_group, false, "icon");
             }
         }
-        draws.group = Some(layer_group);
+
+        self.make_frame_draws(render_tiles.iter(), passes, paint_parameters, context, draws);
     }
 }

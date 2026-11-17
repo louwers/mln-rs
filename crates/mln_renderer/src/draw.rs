@@ -48,13 +48,6 @@ impl DrawSegment {
     pub(crate) fn new(mode: DrawMode, segment: SegmentBase) -> Self {
         DrawSegment { mode, segment }
     }
-    #[must_use]
-    pub(crate) fn mode(&self) -> &DrawMode {
-        &self.mode
-    }
-    pub(crate) fn segment_mut(&mut self) -> &mut SegmentBase {
-        &mut self.segment
-    }
 }
 
 pub(crate) type UniqueDrawSegment = Box<DrawSegment>;
@@ -158,23 +151,23 @@ impl DrawObjects {
     /// changed since the last upload.
     pub(crate) fn upload(&mut self, context: &Context) {
         if let Err(error) = self.upload_in(context) {
-            Log::error(Event::Render, format!("Uploading drawable {} failed: {error}", self.name));
+            Log::error(Event::Render, format!("Uploading draw {} failed: {error}", self.name));
         }
     }
 
     fn upload_in(&mut self, context: &Context) -> Result<(), GpuError> {
         let Some(shader) = self.shader.clone() else {
-            debug_assert!(false, "drawable {} has no shader", self.name);
+            debug_assert!(false, "draw {} has no shader", self.name);
             return Ok(());
         };
         let Some(indexes) = self.indexes.clone() else {
-            debug_assert!(false, "drawable {} has no indexes", self.name);
+            debug_assert!(false, "draw {} has no indexes", self.name);
             return Ok(());
         };
         {
             let mut indexes = indexes.borrow_mut();
             if indexes.empty() && (indexes.get_buffer().is_none() || indexes.get_dirty()) {
-                debug_assert!(false, "drawable {} has no index data", self.name);
+                debug_assert!(false, "draw {} has no index data", self.name);
                 return Ok(());
             }
             upload::upload_indexes(context, &mut indexes)?;
@@ -241,7 +234,7 @@ impl DrawObjects {
     ) {
         if let Err(error) = self.draw_in(gpu, parameters, layer, depth_mode, stencil_mode, global_index) {
             let shader = self.shader.as_ref().map_or("no shader", |shader| shader.name());
-            Log::warning(Event::Render, format!("Drawing drawable {} of {shader} failed: {error}", self.name));
+            Log::warning(Event::Render, format!("Drawing draw {} of {shader} failed: {error}", self.name));
         }
     }
 
@@ -255,7 +248,7 @@ impl DrawObjects {
         global_index: u32,
     ) -> Result<(), GpuError> {
         let Some(shader) = self.shader.clone() else {
-            debug_assert!(false, "drawable {} has no shader", self.name);
+            debug_assert!(false, "draw {} has no shader", self.name);
             return Ok(());
         };
         let Some((size, targets)) = parameters.pass_target() else {
@@ -264,7 +257,7 @@ impl DrawObjects {
         let context = parameters.context;
         let Some(index_buffer) = self.indexes.as_ref().and_then(|indexes| {
             let indexes = indexes.borrow();
-            debug_assert!(!indexes.get_dirty(), "drawable {} draws indexes it didn't upload", self.name);
+            debug_assert!(!indexes.get_dirty(), "draw {} draws indexes it didn't upload", self.name);
             indexes.get_buffer().filter(|_| !indexes.get_dirty()).map(|buffer| buffer.id())
         }) else {
             return Ok(());
@@ -446,7 +439,7 @@ impl DrawObjects {
         let attrs = Rc::clone(self.vertex_attributes.get_or_insert_with(VertexAttributeArray::new_ptr));
         let mut attrs = attrs.borrow_mut();
         let Some(attribute) = attrs.set(self.vertex_attr_id, -1, data_type, 0) else {
-            debug_assert!(false, "drawable {} has no vertex attribute {}", self.name, self.vertex_attr_id);
+            debug_assert!(false, "draw {} has no vertex attribute {}", self.name, self.vertex_attr_id);
             return;
         };
         attribute.set_raw_data(data);

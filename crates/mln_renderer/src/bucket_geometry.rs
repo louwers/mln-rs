@@ -7,9 +7,9 @@
 // shared with the worker threads, so they hold plain vectors (`GeometryVec`),
 // and the render thread keeps the gfx vectors made from them, per tile, in a
 // `BucketGeometry`. A vector moves into its gfx vector the first time a layer
-// draws it, so the bucket and the drawables don't each keep a copy. The gfx
+// draws it, so the bucket and the draws don't each keep a copy. The gfx
 // vector is released, so it frees the data once it is uploaded, and the
-// drawables a layer builds again for the same bucket reuse its buffer.
+// draws a layer builds again for the same bucket reuse its buffer.
 // Vertices that a layer makes of a bucket's vector are kept there too, made
 // before the vector moves.
 //
@@ -275,7 +275,7 @@ pub(crate) fn derived_vertices<V: bytemuck::Pod>(
     }
 }
 
-/// A released gfx vertex vector holding a copy of `vertices`: drawables
+/// A released gfx vertex vector holding a copy of `vertices`: draws
 /// replace such vectors instead of modifying them, so they free their CPU
 /// copy once uploaded.
 pub(crate) fn released_vertices<V: bytemuck::Pod>(vertices: &[V]) -> VertexVectorBasePtr {
@@ -316,8 +316,8 @@ pub(crate) fn bucket_indexes(
 }
 
 /// The shared vertex vector of a layer's data-driven paint values. Values
-/// that feature state rewrites stay in the bucket, and the drawables get a
-/// copy each time they change.
+/// that feature state rewrites stay in the bucket, and the draws get a copy
+/// each time they change.
 pub(crate) fn paint_vertices(
     geometry: Option<&BucketGeometry>,
     bucket: &dyn Bucket,

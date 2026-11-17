@@ -1,13 +1,18 @@
+use std::cell::RefCell;
 use std::f64::consts::PI;
+use std::rc::Rc;
 
 use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
+use mln_gfx::gpu::Gpu;
+use mln_gfx::index_vector::IndexVectorBase;
 use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
     ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE, ID_ATMOSPHERE_PROPS_UBO, ID_SKY_POS_VERTEX_ATTRIBUTE, ID_SKY_PROPS_UBO,
 };
 use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
-use mln_gfx::{DepthMaskType, ShaderProgramPtr, ShaderRegistry};
+use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode, ShaderProgramPtr, ShaderRegistry};
 use mln_map_types::TransformState;
 use mln_style_types::LightAnchorType;
 use mln_util::Color;
@@ -16,44 +21,54 @@ use mln_util::mat4::{Mat4, matrix};
 use mln_util::size::Size;
 use mln_util::vectors::Vec4;
 
-use crate::drawable_builder::DrawableBuilder;
+use crate::draw::{DrawObjects, DrawSegment};
+use crate::draw_cache::{DrawDepth, FrameDraw, FrameDraws, KeptDraw};
 use crate::gfx::context::Context;
-use crate::layer_group::LayerGroup;
-use crate::layer_tweaker::bind_no_projection;
+use crate::paint_parameters::PaintParameters;
 use crate::render_light::EvaluatedLight;
-use crate::render_pass::RenderPass;
 use crate::render_sky::EvaluatedSky;
+use crate::render_static_data::RenderStaticData;
+use crate::tile_matrix::bind_no_projection;
 
 const SKY_SHADER_NAME: &str = "SkyShader";
 const ATMOSPHERE_SHADER_NAME: &str = "AtmosphereShader";
 
-fn make_fullscreen_layer_group(
-    shader: Option<&ShaderProgramPtr>,
-    vertex_attribute: usize,
-    is_3d: bool,
-    depth_mask: DepthMaskType,
-) -> Option<LayerGroup> {
-    let shader = shader?;
+/// A draw over the whole view, with the buffers it binds.
+pub(crate) struct FullscreenDraw {
+    draw: KeptDraw,
+    frame: FrameDraws,
+}
 
-    let mut layer_group = LayerGroup::plain();
-
-    let mut builder = DrawableBuilder::boxed();
-    builder.set_shader(Some(std::rc::Rc::clone(shader)));
-    builder.set_render_pass(RenderPass::Translucent);
-    builder.set_is_3d(is_3d);
-    builder.set_depth_type(depth_mask);
-    builder.set_enable_depth(true);
-    builder.set_enable_stencil(false);
-    builder.set_color_mode(&ColorMode::alpha_blended());
-    builder.set_cull_face_mode(CullFaceMode::disabled());
-    builder.set_vertex_attr_id(vertex_attribute);
-    builder.add_quad(-1, -1, 1, 1);
-    builder.flush();
-
-    for drawable in builder.clear_drawables() {
-        layer_group.add_drawable(drawable);
+impl FullscreenDraw {
+    /// A draw of `shader`, which reads the view's corners as the vertex
+    /// attribute `vertex_attribute`, in the translucent pass at `depth`.
+    fn new(shader: &ShaderProgramPtr, vertex_attribute: usize, depth: DrawDepth) -> FullscreenDraw {
+        let mut objects = DrawObjects::new(String::new());
+        objects.set_color_mode(&ColorMode::alpha_blended());
+        objects.set_cull_face_mode(CullFaceMode::disabled());
+        objects.set_shader(Some(Rc::clone(shader)));
+        objects.set_vertex_attr_id(vertex_attribute);
+        let corners: [[i16; 2]; 4] = [[-1, -1], [1, -1], [-1, 1], [1, 1]];
+        objects.set_vertices(bytemuck::cast_slice(&corners).to_vec(), corners.len(), AttributeDataType::Short2);
+        let indexes = IndexVectorBase::new(RenderStaticData::quad_triangle_indices());
+        let segment = DrawSegment::new(DrawMode::Triangles(), SegmentBase::with_lengths(0, 0, 4, 6));
+        objects.set_index_data(Some(Rc::new(RefCell::new(indexes))), vec![Box::new(segment)]);
+        let draw = KeptDraw::new(objects);
+        let mut frame = FrameDraws::new();
+        frame.draws.push(FrameDraw { depth, ..FrameDraw::new(None, draw.id) });
+        FullscreenDraw { draw, frame }
     }
-    Some(layer_group)
+
+    /// Uploads the draw's GPU objects, before the frame draws it.
+    pub(crate) fn upload(&mut self, context: &Context) {
+        self.frame.upload_from(&mut self.draw, context);
+    }
+
+    /// Draws into the open pass of `gpu`, the context's, in the translucent
+    /// pass.
+    pub(crate) fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        self.frame.render_from(&mut self.draw, gpu, parameters);
+    }
 }
 
 /// The direction of the sun in the globe's frame, where the atmosphere traces
@@ -98,8 +113,8 @@ fn color_components(color: &Color) -> [f32; 4] {
 /// after them, against the globe depth prepass, so the planet correctly occludes it.
 #[derive(Default)]
 pub(crate) struct SkyPass {
-    sky_layer_group: Option<LayerGroup>,
-    atmosphere_layer_group: Option<LayerGroup>,
+    sky: Option<FullscreenDraw>,
+    atmosphere: Option<FullscreenDraw>,
     sky_shader: Option<ShaderProgramPtr>,
     atmosphere_shader: Option<ShaderProgramPtr>,
 }
@@ -120,12 +135,8 @@ impl SkyPass {
         light: &EvaluatedLight,
     ) {
         let Some(evaluated) = evaluated.filter(|_| !viewport_size.is_empty()) else {
-            if let Some(sky_layer_group) = &mut self.sky_layer_group {
-                sky_layer_group.clear_drawables();
-            }
-            if let Some(atmosphere_layer_group) = &mut self.atmosphere_layer_group {
-                atmosphere_layer_group.clear_drawables();
-            }
+            self.sky = None;
+            self.atmosphere = None;
             return;
         };
 
@@ -134,16 +145,15 @@ impl SkyPass {
             if self.sky_shader.is_none() {
                 self.sky_shader = shaders.shader(SKY_SHADER_NAME, ProjectionVariant::Mercator);
             }
-            if self.sky_layer_group.as_ref().is_none_or(LayerGroup::empty) {
-                self.sky_layer_group = make_fullscreen_layer_group(
-                    self.sky_shader.as_ref(),
-                    ID_SKY_POS_VERTEX_ATTRIBUTE,
-                    false,
-                    DepthMaskType::ReadWrite,
-                );
+            if self.sky.is_none() {
+                let depth = DrawDepth::Layer { sub_layer: 0, mask: DepthMaskType::ReadWrite };
+                self.sky = self
+                    .sky_shader
+                    .as_ref()
+                    .map(|shader| FullscreenDraw::new(shader, ID_SKY_POS_VERTEX_ATTRIBUTE, depth));
             }
 
-            if let Some(sky_layer_group) = &mut self.sky_layer_group {
+            if let Some(sky) = &mut self.sky {
                 let horizon_distance = state.get_mercator_horizon() * f64::from(pixel_ratio);
                 let roll = state.get_roll();
                 let normal = [(-roll.sin()) as f32, roll.cos() as f32];
@@ -161,34 +171,31 @@ impl SkyPass {
                     sky_horizon_blend: *evaluated.sky_horizon_blend.uniform() * viewport_size.height as f32 * 0.5,
                     sky_blend: projection_transition as f32,
                 };
-                let group = sky_layer_group;
-                group.mutable_uniform_buffers().create_or_update_pod(ID_SKY_PROPS_UBO, &props, context);
-                bind_no_projection(group.mutable_uniform_buffers(), context);
+                let buffers = &mut sky.frame.uniform_buffers;
+                buffers.create_or_update_pod(ID_SKY_PROPS_UBO, &props, context);
+                bind_no_projection(buffers, context);
             }
-        } else if let Some(sky_layer_group) = &mut self.sky_layer_group {
-            sky_layer_group.clear_drawables();
+        } else {
+            self.sky = None;
         }
 
         let atmosphere_blend = *evaluated.sky_atmosphere_blend.uniform() * projection_transition as f32;
         if !state.is_globe_rendering() || atmosphere_blend <= 0.0 {
-            if let Some(atmosphere_layer_group) = &mut self.atmosphere_layer_group {
-                atmosphere_layer_group.clear_drawables();
-            }
+            self.atmosphere = None;
             return;
         }
 
         if self.atmosphere_shader.is_none() {
             self.atmosphere_shader = shaders.shader(ATMOSPHERE_SHADER_NAME, ProjectionVariant::Globe);
         }
-        if self.atmosphere_layer_group.as_ref().is_none_or(LayerGroup::empty) {
-            self.atmosphere_layer_group = make_fullscreen_layer_group(
-                self.atmosphere_shader.as_ref(),
-                ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE,
-                true,
-                DepthMaskType::ReadOnly,
-            );
+        if self.atmosphere.is_none() {
+            let depth = DrawDepth::Volume { mask: DepthMaskType::ReadOnly };
+            self.atmosphere = self
+                .atmosphere_shader
+                .as_ref()
+                .map(|shader| FullscreenDraw::new(shader, ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE, depth));
         }
-        let Some(atmosphere_layer_group) = &mut self.atmosphere_layer_group else {
+        let Some(atmosphere) = &mut self.atmosphere else {
             return;
         };
 
@@ -198,24 +205,27 @@ impl SkyPass {
             camera_position: [camera[0] as f32, camera[1] as f32, camera[2] as f32, 0.0],
             sun_position: sun_position(light, state, atmosphere_blend),
         };
-        let group = atmosphere_layer_group;
-        group.mutable_uniform_buffers().create_or_update_pod(ID_ATMOSPHERE_PROPS_UBO, &props, context);
-        bind_no_projection(group.mutable_uniform_buffers(), context);
+        let buffers = &mut atmosphere.frame.uniform_buffers;
+        buffers.create_or_update_pod(ID_ATMOSPHERE_PROPS_UBO, &props, context);
+        bind_no_projection(buffers, context);
     }
 
+    /// The planar sky, which draws before the layers, if the frame draws it.
     #[must_use]
-    pub(crate) fn sky_layer_group(&mut self) -> Option<&mut LayerGroup> {
-        self.sky_layer_group.as_mut()
+    pub(crate) fn sky(&mut self) -> Option<&mut FullscreenDraw> {
+        self.sky.as_mut()
     }
 
+    /// The globe's atmosphere, which draws after the layers, if the frame
+    /// draws it.
     #[must_use]
-    pub(crate) fn atmosphere_layer_group(&mut self) -> Option<&mut LayerGroup> {
-        self.atmosphere_layer_group.as_mut()
+    pub(crate) fn atmosphere(&mut self) -> Option<&mut FullscreenDraw> {
+        self.atmosphere.as_mut()
     }
 
     #[must_use]
     pub(crate) fn has_atmosphere(&self) -> bool {
-        self.atmosphere_layer_group.as_ref().is_some_and(|group| !group.empty())
+        self.atmosphere.is_some()
     }
 }
 

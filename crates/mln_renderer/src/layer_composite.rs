@@ -72,7 +72,7 @@ fn layout() -> VertexBufferLayout {
     }
 }
 
-/// How a layer group's drawables composite onto the frame, after they draw
+/// How a draw group's draws composite onto the frame, after they draw
 /// into a texture of their own.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Composite {
@@ -172,7 +172,7 @@ pub(crate) struct LayerComposite {
     target: Option<Target>,
     frame: Option<FrameCopy>,
     quad: Option<Quad>,
-    /// The layer groups composited in the frame, by id, in the order of their
+    /// The draw groups composited in the frame, by id, in the order of their
     /// slots of `uniforms`.
     groups: Vec<(SimpleIdentity, Composite)>,
     /// Each group's `LayerCompositeUBO`, at an offset the GPU can bind, and
@@ -191,7 +191,7 @@ pub(crate) struct LayerComposite {
 }
 
 impl LayerComposite {
-    /// Makes what the frame composites `groups` with, each a layer group and
+    /// Makes what the frame composites `groups` with, each a draw group and
     /// how it composites, onto a frame of `size` whose color is of `format`,
     /// and drops it where there are none. With `overdraw`, the overdraw
     /// inspector's, every group blends as `normal`, and without `format` so
@@ -296,7 +296,7 @@ impl LayerComposite {
     }
 
     /// The pass that copies the frame's texture into the backdrop before the
-    /// layer group `group` composites: `None` where it doesn't blend in the
+    /// draw group `group` composites: `None` where it doesn't blend in the
     /// shader.
     #[must_use]
     pub(crate) fn backdrop_pass(&self, group: SimpleIdentity) -> Option<OpenPass> {
@@ -315,7 +315,7 @@ impl LayerComposite {
         })
     }
 
-    /// Whether the layer group `group` draws into the texture in this frame.
+    /// Whether the draw group `group` draws into the texture in this frame.
     #[must_use]
     pub(crate) fn composites(&self, group: SimpleIdentity) -> bool {
         self.target.is_some() && self.groups.iter().any(|(id, _)| *id == group)
@@ -342,7 +342,7 @@ impl LayerComposite {
         })
     }
 
-    /// Composites the texture onto the open pass, as the layer group `group`
+    /// Composites the texture onto the open pass, as the draw group `group`
     /// does, at the depth of the current layer: layers above that drew into
     /// the depth buffer hide it.
     pub(crate) fn draw(&mut self, gpu: &mut dyn Gpu, parameters: &PaintParameters<'_>, group: SimpleIdentity) {

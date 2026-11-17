@@ -1,39 +1,56 @@
 // The `MLN_UBO_CONSOLIDATION` path, as for the WebGPU backend: the projection
-// blocks live in one layer-level array, so the `GlobeDepthTweaker` the other
-// backends use is not ported.
+// blocks live in one array of the pass's, so the `GlobeDepthTweaker` the
+// other backends use is not ported.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
+use std::rc::Rc;
 
 use mln_gfx::cull_face_mode::CullFaceMode;
+use mln_gfx::gpu::Gpu;
+use mln_gfx::index_vector::IndexVectorBase;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::{ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO};
 use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode, ShaderProgramPtr, ShaderRegistry};
 use mln_map_types::TransformState;
 use mln_tile_id::OverscaledTileID;
+use mln_util::identity::SimpleIdentity;
 use mln_util::range::Range;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
-use crate::drawable_builder::DrawableBuilder;
+use crate::draw::{DrawObjects, DrawSegment};
+use crate::draw_cache::{DrawCache, DrawDepth, FrameDraw, FrameDraws};
 use crate::gfx::context::Context;
-use crate::gfx::uniform_buffer::UniformBufferPtr;
 use crate::globe_tile_mesh::{RawGlobeTileMesh, raw_globe_tile_mesh};
-use crate::layer_group::LayerGroup;
-use crate::layer_tweaker::to_projection_ubo;
-use crate::render_pass::RenderPass;
+use crate::paint_parameters::PaintParameters;
+use crate::tile_matrix::to_projection_ubo;
 use crate::update_parameters::UpdateParameters;
 use crate::util::tile_cover::{TileCoverParameters, tile_cover};
 
 const GLOBE_DEPTH_SHADER_NAME: &str = "GlobeDepthShader";
+
+/// The planet's draws, one of each tile of the cover, by the id of their GPU
+/// objects, which is the order they draw in.
+#[derive(Default)]
+struct TileDraws(BTreeMap<SimpleIdentity, (OverscaledTileID, DrawObjects)>);
+
+impl DrawCache for TileDraws {
+    fn objects_mut(&mut self, id: SimpleIdentity) -> Option<&mut DrawObjects> {
+        self.0.get_mut(&id).map(|(_, objects)| objects)
+    }
+}
 
 /// Writes the planet into the depth buffer ahead of the translucent pass, so
 /// that 3D geometry behind the horizon is hidden by the globe the way the 2D
 /// layers are by their clip Z.
 #[derive(Default)]
 pub(crate) struct GlobeDepthPass {
-    layer_group: Option<LayerGroup>,
+    tiles: TileDraws,
+    /// The frame's draws of the tiles, from the first frame that draws the
+    /// planet.
+    frame: Option<FrameDraws>,
     shader: Option<ShaderProgramPtr>,
-    projection_uniform_buffer: Option<UniformBufferPtr>,
     meshes: BTreeMap<(u8, bool, bool), RawGlobeTileMesh>,
 }
 
@@ -49,8 +66,9 @@ impl GlobeDepthPass {
         needed: bool,
     ) {
         if !state.is_globe_rendering() || !needed {
-            if let Some(layer_group) = &mut self.layer_group {
-                layer_group.clear_drawables();
+            self.tiles.0.clear();
+            if let Some(frame) = &mut self.frame {
+                frame.draws.clear();
             }
             if !state.is_globe_rendering() {
                 self.meshes.clear();
@@ -61,10 +79,10 @@ impl GlobeDepthPass {
         if self.shader.is_none() {
             self.shader = shaders.shader(GLOBE_DEPTH_SHADER_NAME, ProjectionVariant::Globe);
         }
-        if self.shader.is_none() {
+        let Some(shader) = self.shader.clone() else {
             return;
-        }
-        let tile_layer_group = self.layer_group.get_or_insert_with(LayerGroup::tiles);
+        };
+        let frame = self.frame.get_or_insert_with(FrameDraws::new);
 
         let zoom = state.get_integer_zoom();
         let tile_cover = tile_cover(
@@ -84,28 +102,10 @@ impl GlobeDepthPass {
         );
 
         let covered: BTreeSet<OverscaledTileID> = tile_cover.iter().copied().collect();
-        tile_layer_group
-            .remove_drawables_if(|drawable| drawable.tile_id.is_some_and(|tile_id| !covered.contains(&tile_id)));
+        self.tiles.0.retain(|_, (tile_id, _)| covered.contains(tile_id));
+        let drawn: BTreeSet<OverscaledTileID> = self.tiles.0.values().map(|(tile_id, _)| *tile_id).collect();
 
-        let mut builder: Option<crate::drawable_builder::UniqueDrawableBuilder> = None;
-        for tile_id in &tile_cover {
-            if tile_layer_group.drawable_count_for(RenderPass::Translucent, tile_id) > 0 {
-                continue;
-            }
-            let builder = builder.get_or_insert_with(|| {
-                let mut builder = DrawableBuilder::boxed();
-                builder.set_shader(self.shader.clone());
-                builder.set_render_pass(RenderPass::Translucent);
-                builder.set_is_3d(true);
-                builder.set_enable_depth(true);
-                builder.set_depth_type(DepthMaskType::ReadWrite);
-                // The far hemisphere is clockwise on screen on every backend,
-                // Vulkan included, since its shaders flip Y.
-                builder.set_cull_face_mode(CullFaceMode::back_ccw());
-                builder.set_vertex_attr_id(ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE);
-                builder
-            });
-
+        for tile_id in tile_cover.iter().filter(|tile_id| !drawn.contains(tile_id)) {
             // The grid depends only on the zoom and whether the tile touches
             // a pole.
             let canonical = &tile_id.canonical;
@@ -114,35 +114,47 @@ impl GlobeDepthPass {
                 .meshes
                 .entry(key)
                 .or_insert_with(|| raw_globe_tile_mesh(canonical, true, SubdivisionGranularitySetting::globe().tile));
-            builder.set_raw_vertices(mesh.vertices.clone(), mesh.vertex_count, AttributeDataType::Short2);
-            builder.set_segments(DrawMode::Triangles(), mesh.indices.clone(), &mesh.segments);
-            builder.flush();
 
-            for mut drawable in builder.clear_drawables() {
-                drawable.tile_id = Some(*tile_id);
-                tile_layer_group.add_tile_drawable(RenderPass::Translucent, tile_id, drawable);
-            }
+            let mut objects = DrawObjects::new(String::new());
+            // The far hemisphere is clockwise on screen on every backend,
+            // Vulkan included, since its shaders flip Y.
+            objects.set_cull_face_mode(CullFaceMode::back_ccw());
+            objects.set_shader(Some(Rc::clone(&shader)));
+            objects.set_vertex_attr_id(ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE);
+            objects.set_vertices(mesh.vertices.clone(), mesh.vertex_count, AttributeDataType::Short2);
+            let segments =
+                mesh.segments.iter().map(|segment| Box::new(DrawSegment::new(DrawMode::Triangles(), segment.copy())));
+            let indexes = Rc::new(RefCell::new(IndexVectorBase::new(mesh.indices.clone())));
+            objects.set_index_data(Some(indexes), segments.collect());
+            self.tiles.0.insert(SimpleIdentity::new(), (*tile_id, objects));
         }
 
-        // The projection blocks live in one layer-level array, indexed like
-        // the other consolidated UBOs.
-        let mut projection_ubos: Vec<ProjectionUBO> = Vec::with_capacity(tile_layer_group.drawable_count());
-        tile_layer_group.visit_drawables(|drawable| {
-            let Some(tile_id) = drawable.tile_id else {
-                return;
-            };
-            drawable.ubo_index = projection_ubos.len() as u32;
+        // The projection blocks live in one array, indexed like the draws.
+        let mut projection_ubos: Vec<ProjectionUBO> = Vec::with_capacity(self.tiles.0.len());
+        frame.draws.clear();
+        for (&id, (tile_id, _)) in &self.tiles.0 {
             projection_ubos.push(to_projection_ubo(&state.get_projection_data(&tile_id.to_unwrapped())));
-        });
+            let depth = DrawDepth::Volume { mask: DepthMaskType::ReadWrite };
+            frame.draws.push(FrameDraw { depth, ..FrameDraw::new(None, id) });
+        }
         if !projection_ubos.is_empty() {
-            let bytes: &[u8] = bytemuck::cast_slice(&projection_ubos);
-            context.write_storage_buffer(&mut self.projection_uniform_buffer, bytes);
-            tile_layer_group.mutable_uniform_buffers().set(ID_PROJECTION_UBO, self.projection_uniform_buffer.clone());
+            frame.uniform_buffers.write_storage(ID_PROJECTION_UBO, bytemuck::cast_slice(&projection_ubos), context);
         }
     }
 
-    #[must_use]
-    pub(crate) fn layer_group(&mut self) -> Option<&mut LayerGroup> {
-        self.layer_group.as_mut()
+    /// Uploads the GPU objects of the planet's draws, before the frame draws
+    /// them.
+    pub(crate) fn upload(&mut self, context: &Context) {
+        if let Some(frame) = &self.frame {
+            frame.upload_from(&mut self.tiles, context);
+        }
+    }
+
+    /// Draws the planet's depth into the open pass of `gpu`, the context's,
+    /// in the translucent pass.
+    pub(crate) fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        if let Some(frame) = &self.frame {
+            frame.render_from(&mut self.tiles, gpu, parameters);
+        }
     }
 }

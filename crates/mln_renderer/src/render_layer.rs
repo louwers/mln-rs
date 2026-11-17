@@ -1,8 +1,7 @@
 // C++ `RenderLayer` is an abstract class with data members; the data is
 // `RenderLayerBase` and the virtual interface is the `RenderLayer` trait.
 // The orchestrator owns the render layers, in the style's order, with what
-// it keeps of each one's drawing (`LayerDraws`); a render layer owns its
-// tweakers and the layer groups of its own.
+// it keeps of each one's drawing (`LayerDraws`).
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -20,9 +19,7 @@ use mln_util::Color;
 use crate::bucket::BucketPtr;
 use crate::draw_cache::{DrawGroup, LayerDraws};
 use crate::gfx::context::Context;
-use crate::layer_tweaker::LayerTweaker;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType};
-use crate::layers::LayerTiles;
 use crate::line_atlas::LineAtlas;
 use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;
@@ -107,8 +104,6 @@ pub(crate) struct RenderLayerBase {
     pub(crate) style: Arc<dyn ErasedLayerStyle>,
 
     pub(crate) passes: RenderPass,
-    /// Sets the uniforms of the layer's drawables each frame.
-    pub(crate) layer_tweaker: Option<Box<dyn LayerTweaker>>,
     pub(crate) style_dependencies: Dependency,
     /// Whether the frame draws the layer.
     pub(crate) is_renderable: bool,
@@ -117,7 +112,7 @@ pub(crate) struct RenderLayerBase {
     pub(crate) render_tiles: Option<RenderTiles>,
     /// Retains ownership of tiles
     pub(crate) render_tiles_owner: Rc<Vec<RenderTile>>,
-    /// The projection variant this layer's drawables are built with.
+    /// The projection variant this layer's draws are built with.
     pub(crate) projection_variant: ProjectionVariant,
 }
 
@@ -128,7 +123,6 @@ impl RenderLayerBase {
             evaluated_properties: properties,
             style,
             passes: RenderPass::None,
-            layer_tweaker: None,
             style_dependencies: Dependency::NONE,
             is_renderable: false,
             render_tiles: None,
@@ -170,15 +164,11 @@ impl<T: LayerType> LayerValues<T> {
         evaluated
     }
 
-    /// Makes `evaluated` the layer's values, drawing in `base`'s passes,
-    /// and gives them to the layer's tweaker.
+    /// Makes `evaluated` the layer's values, drawing in `base`'s passes.
     pub(crate) fn set_evaluated(&mut self, base: &mut RenderLayerBase, mut evaluated: EvaluatedLayer<T>) {
         evaluated.render_passes = base.passes.underlying_type();
         self.evaluated = Arc::new(evaluated);
         base.evaluated_properties = Arc::<EvaluatedLayer<T>>::clone(&self.evaluated);
-        if let Some(layer_tweaker) = &mut base.layer_tweaker {
-            layer_tweaker.update_properties(Arc::clone(&base.evaluated_properties));
-        }
     }
 }
 
@@ -289,8 +279,9 @@ pub(crate) trait RenderLayer: LayerParts {
         None
     }
 
-    /// Brings the layer's drawables in `draws` up to date with the frame's
-    /// tiles.
+    /// Makes the layer's draws of the frame in `draws`, from the frame's
+    /// tiles and what `draws` keeps of them, with the values of their
+    /// uniforms.
     fn update(
         &mut self,
         _shaders: &ShaderRegistry,
@@ -302,24 +293,11 @@ pub(crate) trait RenderLayer: LayerParts {
     ) {
     }
 
-    /// Runs the layer's tweakers on its layer groups that draw, before they
-    /// upload.
-    fn tweak(&mut self, parameters: &PaintParameters<'_>, draws: &mut LayerDraws) {
-        let base = self.base_mut();
-        if base.is_renderable
-            && let (Some(tweaker), Some(group)) = (&mut base.layer_tweaker, &mut draws.group)
-        {
-            tweaker.execute(group, &LayerTiles::new(&*base.style, base.render_tiles.as_ref()), parameters);
-        }
-    }
-
-    /// Adds what the frame draws of the layer, its own groups and what
-    /// `draws` keeps, to `groups`, in drawing order.
-    fn layer_groups<'a>(&'a mut self, draws: &'a mut LayerDraws, groups: &mut Vec<DrawGroup<'a>>) {
-        if self.base().is_renderable
-            && let Some(group) = DrawGroup::of(draws)
-        {
-            groups.push(group);
+    /// Adds what the frame draws of the layer, of `draws`, to `groups`, in
+    /// drawing order.
+    fn draw_groups<'a>(&'a mut self, draws: &'a mut LayerDraws, groups: &mut Vec<DrawGroup<'a>>) {
+        if self.base().is_renderable {
+            draws.draw_groups(groups);
         }
     }
 
@@ -331,7 +309,7 @@ pub(crate) trait RenderLayer: LayerParts {
     /// sample them, with what the renderer keeps of its drawing.
     fn render_targets(&mut self, _parameters: &mut PaintParameters<'_>, _draws: &mut LayerDraws) {}
 
-    /// Runs a custom layer's prerender, after the layer groups upload and
+    /// Runs a custom layer's prerender, after the layers' draws upload and
     /// before the frame's first pass, which draws into `target`.
     fn prerender(&mut self, _parameters: &PaintParameters<'_>) {}
 
@@ -340,22 +318,16 @@ pub(crate) trait RenderLayer: LayerParts {
     fn lose_context(&mut self) {}
 
     /// Called when the style layer is replaced (same ID and type), and the
-    /// render layer is reused, with what the renderer keeps of its drawing.
+    /// render layer is reused, with what the renderer keeps of its drawing:
+    /// drops the draws, which were built for the previous style's values.
+    /// The next update builds them again from the tiles' buckets.
     fn layer_changed(
         &mut self,
         _parameters: &TransitionParameters,
         _new_layer: &Arc<dyn ErasedLayerStyle>,
-        _draws: &mut LayerDraws,
+        draws: &mut LayerDraws,
     ) {
-        // When a layer changes, the bucket won't be replaced until the new
-        // source(s) load. If we remove the drawables here, they will just be
-        // re-created based on the current data.
-
-        // Detach the layer tweaker, if any. This keeps the existing tiles
-        // up-to-date with the most recent evaluated properties, while a new
-        // one will be created along with new drawables when tiles are loaded
-        // and new buckets are available.
-        self.base_mut().layer_tweaker = None;
+        self.remove_all_draws(draws);
     }
 
     /// Called when the layer is included or excluded from rendering.
@@ -363,7 +335,7 @@ pub(crate) trait RenderLayer: LayerParts {
         mark_layer_renderable_base(self, will_render, draws);
     }
 
-    /// Drops what the last `prepare` and `update` built: the drawables, and
+    /// Drops what the last `prepare` and `update` built: the draws, and
     /// the tiles and placement data that keep the tiles' buckets alive.
     /// Called when the layer stops rendering, since neither runs again until
     /// it renders, and they then rebuild everything from the source's tiles.
@@ -371,15 +343,15 @@ pub(crate) trait RenderLayer: LayerParts {
         release_render_data_base(self, draws);
     }
 
-    /// Removes the layer's drawables, its own and those of `draws`.
-    fn remove_all_drawables(&mut self, draws: &mut LayerDraws) {
-        draws.clear_drawables();
+    /// Removes the layer's draws, its own and those of `draws`.
+    fn remove_all_draws(&mut self, draws: &mut LayerDraws) {
+        draws.clear_draws();
     }
 
     /// Moves what the layer keeps for each tile to the tile `wrap_delta`
     /// world copies east of it: the tiles are the same ones under new ids
     /// once the map's center has crossed the antimeridian, and their
-    /// drawables stay rather than being built again.
+    /// draws stay rather than being built again.
     fn handle_wrap_jump(&mut self, wrap_delta: i16, draws: &mut LayerDraws) {
         draws.shift_wraps(wrap_delta);
     }
@@ -387,14 +359,14 @@ pub(crate) trait RenderLayer: LayerParts {
     // Non-virtual members of the C++ class.
 
     /// Picks the shader variant for the state's projection; returns true and
-    /// drops the drawables when it changed.
+    /// drops the draws when it changed.
     fn update_projection_variant(&mut self, state: &TransformState, draws: &mut LayerDraws) -> bool {
         let variant = if state.is_globe_rendering() { ProjectionVariant::Globe } else { ProjectionVariant::Mercator };
         if variant == self.base().projection_variant {
             return false;
         }
         self.base_mut().projection_variant = variant;
-        self.remove_all_drawables(draws);
+        self.remove_all_draws(draws);
         true
     }
 
@@ -507,7 +479,7 @@ pub(crate) fn mark_layer_renderable_base<L: RenderLayer + ?Sized>(
 
 /// The default `RenderLayer::release_render_data`, callable from overrides.
 pub(crate) fn release_render_data_base<L: RenderLayer + ?Sized>(layer: &mut L, draws: &mut LayerDraws) {
-    layer.remove_all_drawables(draws);
+    layer.remove_all_draws(draws);
     let base = layer.base_mut();
     base.render_tiles = None;
     base.render_tiles_owner = Rc::new(Vec::new());

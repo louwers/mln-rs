@@ -30,18 +30,18 @@ use mln_vec_map::{VecMap, VecSet};
 use crate::Registry;
 use crate::draw_cache::{ChangedBuckets, DrawGroup, LayerDraws};
 use crate::gfx::context::Context;
+use crate::globe_depth_pass::GlobeDepthPass;
 use crate::image_store::ImageStore;
-use crate::layer_group::LayerGroup;
-use crate::layer_tweaker::LayerTweaker;
 use crate::layer_type::ErasedEvaluatedLayer;
-use crate::layers::LayerTiles;
 use crate::line_atlas::LineAtlas;
 use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;
 use crate::render_layer::{LayerPrepareParameters, RenderLayer};
 use crate::render_source::{self, RenderSource, SourcePrepareParameters};
-use crate::render_tree::{LayerRenderItem, RenderItem, RenderTree, RenderTreeParameters};
+use crate::render_tree::{DebugLayers, LayerRenderItem, RenderItem, RenderTree, RenderTreeParameters};
 use crate::renderer_event::RendererEvent;
+use crate::sky_pass::FullscreenDraw;
+use crate::sources::render_tile_source::DebugLayer;
 use crate::text::glyph_store::GlyphStore;
 use crate::text::placement::Placement;
 use crate::tile::inbox::Waker;
@@ -185,13 +185,13 @@ pub(crate) struct RenderOrchestrator {
     global_state: Option<Arc<GlobalStateMap>>,
 
     /// The debug overlays (layers: debug).
-    debug_layer_groups: crate::render_tree::DebugLayerGroupMap,
+    debug_layers: DebugLayers,
 
-    globe_depth_pass: crate::globe_depth_pass::GlobeDepthPass,
+    globe_depth_pass: GlobeDepthPass,
     sky_pass: crate::sky_pass::SkyPass,
 
     /// Last, so that it drops after the fields above: the render layers,
-    /// layer groups and placement hold render tiles, whose layouts free
+    /// their draws and placement hold render tiles, whose layouts free
     /// their data on the thread pool (`drop_on_workers`).
     _wait_for_thread_pool: WaitOnDrop,
 }
@@ -253,9 +253,9 @@ impl RenderOrchestrator {
             _wait_for_thread_pool: WaitOnDrop(thread_pool.clone()),
             thread_pool,
             global_state: None,
-            globe_depth_pass: crate::globe_depth_pass::GlobeDepthPass::default(),
+            globe_depth_pass: GlobeDepthPass::default(),
             sky_pass: crate::sky_pass::SkyPass::default(),
-            debug_layer_groups: VecMap::new(), // layers: debug
+            debug_layers: VecMap::new(), // layers: debug
         }
     }
 
@@ -369,7 +369,7 @@ impl RenderOrchestrator {
 
         // The sources' tiles are in other world copies once the center has
         // crossed the antimeridian (`SourceTiles::handle_wrap_jump`), and
-        // the layers' drawables go with them.
+        // the layers' draws go with them.
         let longitude =
             update_parameters.transform_state.get_lat_lng(mln_util::geo::WrapMode::Unwrapped).longitude() as f32;
         let wrap_delta = ((longitude - self.longitude) / 360.0).round() as i16;
@@ -404,7 +404,7 @@ impl RenderOrchestrator {
         let FrameLayers { mut parameters, layer_render_items, start_time } = frame_layers;
 
         // The buckets whose vertex data the frame's feature state and symbol
-        // placement change, which the drawables that copied it copy again.
+        // placement change, which the draws that copied it copy again.
         let mut changed_buckets = ChangedBuckets::default();
 
         // Update all matrices and generate data that we should upload to the
@@ -1097,7 +1097,7 @@ impl RenderOrchestrator {
         self.style = None;
         self.sources_by_id.clear();
 
-        self.debug_layer_groups.clear(); // layers: debug
+        self.debug_layers.clear(); // layers: debug
         self.render_sources.clear();
         self.tile_store.clear();
         self.layers.clear();
@@ -1118,14 +1118,14 @@ impl RenderOrchestrator {
     }
 
     /// Drops what holds the renderer's shaders: the render layers, the sky
-    /// and globe depth passes, and the debug drawables. The next update
+    /// and globe depth passes, and the debug overlays. The next update
     /// makes them again, from the shaders the renderer has then. The
     /// sources keep their tiles, and the tiles their layout.
     pub(crate) fn release_shaders(&mut self) {
         self.remake_render_layers = true;
-        self.debug_layer_groups.clear(); // layers: debug
+        self.debug_layers.clear(); // layers: debug
         self.sky_pass = crate::sky_pass::SkyPass::default();
-        self.globe_depth_pass = crate::globe_depth_pass::GlobeDepthPass::default();
+        self.globe_depth_pass = GlobeDepthPass::default();
     }
 
     /// Makes the atlas's GPU textures and uploads what its pages queued.
@@ -1177,42 +1177,34 @@ impl RenderOrchestrator {
     }
 
     /// What the frame draws of the layers that draw, in drawing order.
-    pub(crate) fn layer_groups(&mut self) -> Vec<DrawGroup<'_>> {
+    pub(crate) fn draw_groups(&mut self) -> Vec<DrawGroup<'_>> {
         let mut groups = Vec::new();
         for (layer, draws) in self.layers.iter_mut().zip(&mut self.draws) {
-            layer.layer_groups(draws, &mut groups);
+            layer.draw_groups(draws, &mut groups);
         }
         groups
     }
 
     /// The number of the layers' groups that draw.
-    pub(crate) fn num_layer_groups(&mut self) -> usize {
-        self.layer_groups().len()
+    pub(crate) fn num_draw_groups(&mut self) -> usize {
+        self.draw_groups().len()
     }
 
-    /// Updates the debug layer groups (layers: debug).
-    pub(crate) fn update_debug_layer_groups(&mut self, render_tree: &RenderTree, parameters: &PaintParameters<'_>) {
+    /// Updates the debug overlays' draws from the sources' tiles, and makes
+    /// their draws of the frame (layers: debug).
+    pub(crate) fn update_debug_layers(&mut self, render_tree: &RenderTree, parameters: &PaintParameters<'_>) {
         for item in render_tree.get_source_render_items() {
-            item.update_debug_drawables(&mut self.debug_layer_groups, parameters);
+            item.update_debug_draws(&mut self.debug_layers, parameters);
+        }
+        for debug in self.debug_layers.values_mut() {
+            debug.prepare(parameters);
         }
     }
 
-    /// The debug layer groups, in `DebugType` order (`visitDebugLayerGroups`)
+    /// The debug overlays, in `DebugType` order (`visitDebugLayerGroups`)
     /// (layers: debug).
-    pub(crate) fn debug_layer_groups(&mut self) -> impl Iterator<Item = &mut LayerGroup> {
-        self.debug_layer_groups.values_mut().map(|debug| &mut debug.group)
-    }
-
-    /// Runs the tweakers of the layers' groups that draw, and of the debug
-    /// layer groups, before the groups upload.
-    pub(crate) fn tweak(&mut self, parameters: &PaintParameters<'_>) {
-        for (layer, draws) in self.layers.iter_mut().zip(&mut self.draws) {
-            layer.tweak(parameters, draws);
-        }
-        // layers: debug
-        for debug in self.debug_layer_groups.values_mut() {
-            debug.tweaker.execute(&mut debug.group, &LayerTiles::none(), parameters);
-        }
+    pub(crate) fn debug_layers(&mut self) -> impl Iterator<Item = &mut DebugLayer> {
+        self.debug_layers.values_mut()
     }
 
     /// Visits every render layer, with what the renderer keeps of its
@@ -1223,7 +1215,7 @@ impl RenderOrchestrator {
         }
     }
 
-    /// Updates the drawables of the layers the frame draws, and the sky and
+    /// Makes the draws of the layers the frame draws, and of the sky and
     /// globe depth passes.
     pub(crate) fn update_layers(
         &mut self,
@@ -1274,16 +1266,20 @@ impl RenderOrchestrator {
         &mut *self.layers[index]
     }
 
-    pub(crate) fn sky_layer_group(&mut self) -> Option<&mut LayerGroup> {
-        self.sky_pass.sky_layer_group()
+    /// The planar sky, which draws before the layers, if the frame draws it.
+    pub(crate) fn sky(&mut self) -> Option<&mut FullscreenDraw> {
+        self.sky_pass.sky()
     }
 
-    pub(crate) fn atmosphere_layer_group(&mut self) -> Option<&mut LayerGroup> {
-        self.sky_pass.atmosphere_layer_group()
+    /// The globe's atmosphere, which draws after the layers, if the frame
+    /// draws it.
+    pub(crate) fn atmosphere(&mut self) -> Option<&mut FullscreenDraw> {
+        self.sky_pass.atmosphere()
     }
 
-    pub(crate) fn globe_depth_layer_group(&mut self) -> Option<&mut LayerGroup> {
-        self.globe_depth_pass.layer_group()
+    /// The pass that draws the planet's depth.
+    pub(crate) fn globe_depth(&mut self) -> &mut GlobeDepthPass {
+        &mut self.globe_depth_pass
     }
 
     // query

@@ -25,10 +25,10 @@ use mln_gfx::{
 };
 use mln_map_types::TransformState;
 use mln_style::expression::{Dependency, GlobalStateMap, global_state_refs_intersect};
-use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
+use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Heatmap;
 use mln_style::layers::heatmap_layer_properties::{HeatmapPaintProperties, default_heatmap_color};
-use mln_style::{PropertyEvaluationParameters, StyleValue as _, TransitionParameters};
+use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 use mln_style_types::TranslateAnchorType;
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
@@ -44,7 +44,6 @@ use crate::draw::DrawObjects;
 use crate::draw_cache::{DrawDepth, FrameDraw, FrameDraws, KeptDraw, LayerDraws};
 use crate::gfx::context::Context;
 use crate::gfx::texture2d::Texture2DPtr;
-use crate::layer_tweaker::{bind_no_projection, get_projection_data, globe_extrude_scale, to_projection_ubo};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::heatmap_layout::HeatmapLayout;
 use crate::layout::layout::{LayoutParameters, SourceLayer};
@@ -55,6 +54,7 @@ use crate::render_pass::RenderPass;
 use crate::render_source::RenderTiles;
 use crate::render_static_data::RenderStaticData;
 use crate::render_target::RenderTarget;
+use crate::tile_matrix::{bind_no_projection, get_projection_data, globe_extrude_scale, to_projection_ubo};
 use crate::update_parameters::UpdateParameters;
 
 fn read_heatmap_attributes(
@@ -183,16 +183,6 @@ impl TypedLayer for RenderHeatmapLayer {
 }
 
 impl RenderLayer for RenderHeatmapLayer {
-    /// Drops the draws, which were built for the previous style's values.
-    fn layer_changed(
-        &mut self,
-        _parameters: &TransitionParameters,
-        _new_layer: &Arc<dyn ErasedLayerStyle>,
-        draws: &mut LayerDraws,
-    ) {
-        self.remove_all_drawables(draws);
-    }
-
     fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
         // Build the ramp here rather than in transition(), which has no global
         // state. A new or changed layer always needs one; otherwise only a
@@ -225,8 +215,8 @@ impl RenderLayer for RenderHeatmapLayer {
         self.values.set_evaluated(&mut self.base, properties);
     }
 
-    fn remove_all_drawables(&mut self, draws: &mut LayerDraws) {
-        draws.clear_drawables();
+    fn remove_all_draws(&mut self, draws: &mut LayerDraws) {
+        draws.clear_draws();
         self.target_draws.draws.clear();
     }
 
@@ -259,7 +249,7 @@ impl RenderLayer for RenderHeatmapLayer {
     ) {
         self.update_projection_variant(state, draws);
         let Some(render_tiles) = self.base.render_tiles.clone().filter(|t| !t.is_empty()) else {
-            self.remove_all_drawables(draws);
+            self.remove_all_draws(draws);
             return;
         };
 
@@ -292,7 +282,7 @@ impl RenderHeatmapLayer {
             self.heatmap_shader_group = shaders.shader_group(HEATMAP_SHADER_GROUP_NAME);
         }
         let Some(heatmap_shader_group) = self.heatmap_shader_group.clone() else {
-            self.remove_all_drawables(draws);
+            self.remove_all_draws(draws);
             return false;
         };
         if (RENDER_PASS.underlying_type() & self.base.evaluated_properties.render_passes()) == 0 {
@@ -452,7 +442,7 @@ impl RenderHeatmapLayer {
                 shaders.shader(HEATMAP_TEXTURE_SHADER_GROUP_NAME, ProjectionVariant::Mercator);
         }
         let Some(heatmap_texture_shader) = self.heatmap_texture_shader.clone() else {
-            self.remove_all_drawables(draws);
+            self.remove_all_draws(draws);
             return;
         };
 
