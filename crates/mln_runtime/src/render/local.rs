@@ -483,7 +483,11 @@ impl Backend {
                 #[cfg(not(target_family = "wasm"))]
                 let format = None;
                 let target = webgpu_surface(backend, kind)?;
-                let options = mln_webgpu::SurfaceOptions { format, ..mln_webgpu::SurfaceOptions::default() };
+                let options = mln_webgpu::SurfaceOptions {
+                    cap_frame_rate: surface.cap_frame_rate,
+                    format,
+                    ..mln_webgpu::SurfaceOptions::default()
+                };
                 let target = mln_webgpu::SurfaceTarget::new(Rc::clone(backend), target, size, options)?;
                 target.set_overlay(overlay_of(overlay, |overlay| match overlay {
                     SurfaceOverlay::WebGpu(overlay) => Ok(overlay),
@@ -493,7 +497,7 @@ impl Backend {
             }
             #[cfg(all(feature = "metal", target_vendor = "apple"))]
             (Backend::Metal(backend), SurfaceKind::MetalLayer(layer)) => {
-                let target = mln_mtl::SurfaceTarget::new(backend, layer, size, true);
+                let target = mln_mtl::SurfaceTarget::new(backend, layer, size, surface.cap_frame_rate);
                 target.set_overlay(overlay_of(overlay, |overlay| match overlay {
                     SurfaceOverlay::Metal(overlay) => Ok(overlay),
                     other => Err(other),
@@ -502,13 +506,14 @@ impl Backend {
             }
             #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
             (Backend::Vulkan(backend), SurfaceKind::Window(window)) => {
-                let target = mln_vulkan::SurfaceTarget::new(Rc::clone(backend), window, size, true)?;
+                let target = mln_vulkan::SurfaceTarget::new(Rc::clone(backend), window, size, surface.cap_frame_rate)?;
                 target.set_overlay(vulkan_overlay(overlay)?);
                 Ok(Box::new(target))
             }
             #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
-            (Backend::Vulkan(backend), SurfaceKind::Vulkan(surface)) => {
-                let target = mln_vulkan::SurfaceTarget::on_host_surface(Rc::clone(backend), surface, size, true)?;
+            (Backend::Vulkan(backend), SurfaceKind::Vulkan(host)) => {
+                let target =
+                    mln_vulkan::SurfaceTarget::on_host_surface(Rc::clone(backend), host, size, surface.cap_frame_rate)?;
                 target.set_overlay(vulkan_overlay(overlay)?);
                 Ok(Box::new(target))
             }
@@ -626,18 +631,19 @@ fn surface_backend(
     overlay: Option<SurfaceOverlay>,
     size: Size,
 ) -> Result<(Backend, Box<dyn Presenting>), Error> {
+    let cap_frame_rate = surface.cap_frame_rate;
     match (device, surface.kind) {
         #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
         (Device::Vulkan(device), SurfaceKind::Window(window)) => {
             let overlay = vulkan_overlay(overlay)?;
-            let (backend, target) = mln_vulkan::SurfaceTarget::with_backend(device, window, size, true)?;
+            let (backend, target) = mln_vulkan::SurfaceTarget::with_backend(device, window, size, cap_frame_rate)?;
             target.set_overlay(overlay);
             Ok((Backend::Vulkan(backend), Box::new(target)))
         }
         #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
         (Device::Vulkan(device), kind @ SurfaceKind::Vulkan(_)) => {
             let backend = Backend::Vulkan(Rc::new(mln_vulkan::RendererBackend::presenting(device)?));
-            let target = backend.surface(Surface { kind }, overlay, size)?;
+            let target = backend.surface(Surface { kind, cap_frame_rate }, overlay, size)?;
             Ok((backend, target))
         }
         #[cfg(all(feature = "gl", not(target_family = "wasm")))]
@@ -654,7 +660,7 @@ fn surface_backend(
                 SurfaceOverlay::Gl(overlay) => Ok(overlay),
                 other => Err(other),
             })?;
-            let (backend, target) = mln_gl::SurfaceTarget::with_backend(window, size, true)?;
+            let (backend, target) = mln_gl::SurfaceTarget::with_backend(window, size, cap_frame_rate)?;
             target.set_overlay(overlay);
             Ok((Backend::Gl(backend), Box::new(target)))
         }
@@ -671,7 +677,7 @@ fn surface_backend(
         }
         (_, kind) => {
             let backend = Backend::new(device)?;
-            let target = backend.surface(Surface { kind }, overlay, size)?;
+            let target = backend.surface(Surface { kind, cap_frame_rate }, overlay, size)?;
             Ok((backend, target))
         }
     }

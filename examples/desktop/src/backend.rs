@@ -161,6 +161,9 @@ pub(crate) struct WindowSurfaces {
     pub(crate) proxy: winit::event_loop::EventLoopProxy<crate::host::UserEvent>,
     #[cfg(not(target_os = "macos"))]
     pub(crate) window: SessionWindow,
+    /// Whether the sessions present a frame per refresh of the display:
+    /// off in benchmark mode, which measures frame times.
+    pub(crate) cap_frame_rate: bool,
 }
 
 impl WindowSurfaces {
@@ -254,7 +257,10 @@ impl WindowSession {
             Some(device) => device,
             None => Device::with_backend(kind.backend_type(), DeviceOptions::default())?,
         };
-        let surface = surfaces.surface(kind, &device)?;
+        let mut surface = surfaces.surface(kind, &device)?;
+        if !surfaces.cap_frame_rate {
+            surface = surface.without_frame_rate_cap();
+        }
         let target = RenderTarget::Surface { size, surface, device: Some(device.clone()) };
         let (session, attached) = map.attach(target, attach_options(inbox))?;
         let driver = session.take_driver_work()?;
