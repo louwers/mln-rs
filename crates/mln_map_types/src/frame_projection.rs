@@ -3,16 +3,8 @@
 //! (`mln_renderer::frame_projection`); it lives here so that the style's
 //! custom layers, which get it with each frame, can name it.
 
+pub use mln_util::mat4::ClipDepthRange;
 use mln_util::mat4::Mat4;
-
-/// How a graphics API's clip space holds depth.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum ClipDepthRange {
-    /// Clip z from 0 to w: Metal, Vulkan, D3D12 and WebGPU.
-    ZeroToOne,
-    /// Clip z from -w to w: OpenGL.
-    NegativeOneToOne,
-}
 
 /// Where a frame drew the map, and the depth its 3D layers wrote there.
 #[derive(Clone, Copy, Debug, PartialEq)]

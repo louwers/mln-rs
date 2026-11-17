@@ -14,11 +14,11 @@ use mln_gfx::gpu::validation::{
     TextureInfo,
 };
 use mln_gfx::gpu::{
-    BindGroupEntry, BindingsDesc, BindingsId, BufferDesc, BufferId, BufferUsage, Caps, ClipDepth, DepthState, Draw,
-    DynamicState, FixedState, GeometryDesc, GeometryId, Gpu, GpuError, LoadOp, PassDesc, PipelineDesc, PipelineId,
-    ReadbackId, ResourceId, SamplerId, ShaderId, ShaderKey, SlotMap, StencilState, TargetFormats, TextureDesc,
-    TextureFormat, TextureId, TextureRegion, TextureUsage, VertexAttribute as GpuVertexAttribute, VertexBufferLayout,
-    VertexStep,
+    BindGroupEntry, BindingsDesc, BindingsId, BufferDesc, BufferId, BufferUsage, Caps, ClipDepthRange, DepthState,
+    Draw, DynamicState, FixedState, GeometryDesc, GeometryId, Gpu, GpuError, LoadOp, PassDesc, PipelineDesc,
+    PipelineId, ReadbackId, ResourceId, SamplerId, ShaderId, ShaderKey, SlotMap, StencilState, TargetFormats,
+    TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage, VertexAttribute as GpuVertexAttribute,
+    VertexBufferLayout, VertexStep,
 };
 use mln_gfx::shaders::shader_defines::ID_GLOBAL_UBO_INDEX;
 use mln_gfx::stencil_mode::StencilMode;
@@ -344,7 +344,7 @@ impl MetalGpu {
             buffer_offset_alignment: BUFFER_OFFSET_ALIGNMENT,
             max_texture_size: if modern { 16384 } else { 8192 },
             half_float_render_targets: true,
-            clip_depth: ClipDepth::ZeroToOne,
+            clip_depth: ClipDepthRange::ZeroToOne,
             render_target_depth: None,
             clear_stencil_with_pass: false,
             line_expressions: true,

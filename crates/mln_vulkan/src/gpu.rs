@@ -15,10 +15,10 @@ use mln_gfx::gpu::validation::{
     TextureInfo as Info,
 };
 use mln_gfx::gpu::{
-    BindGroupEntry, BindingsDesc, BindingsId, BufferDesc, BufferId, BufferUsage, Caps, ClipDepth, Draw, DynamicState,
-    GeometryDesc, GeometryId, Gpu, GpuError, LoadOp, PassDesc, PipelineDesc, PipelineId, ReadbackId, ResourceId,
-    SamplerId, ShaderId, ShaderKey, SlotMap, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureRegion,
-    TextureUsage, VertexStep,
+    BindGroupEntry, BindingsDesc, BindingsId, BufferDesc, BufferId, BufferUsage, Caps, ClipDepthRange, Draw,
+    DynamicState, GeometryDesc, GeometryId, Gpu, GpuError, LoadOp, PassDesc, PipelineDesc, PipelineId, ReadbackId,
+    ResourceId, SamplerId, ShaderId, ShaderKey, SlotMap, TargetFormats, TextureDesc, TextureFormat, TextureId,
+    TextureRegion, TextureUsage, VertexStep,
 };
 use mln_gfx::shaders::shader_defines::{DRAWABLE_RESERVED_UBO_COUNT, LAYER_SSBO_START_ID};
 use mln_gfx::texture2d::SamplerState;
@@ -678,7 +678,7 @@ impl VulkanGpu {
                 .max(limits.min_storage_buffer_offset_alignment) as u32,
             max_texture_size: limits.max_image_dimension2_d,
             half_float_render_targets: true,
-            clip_depth: ClipDepth::ZeroToOne,
+            clip_depth: ClipDepthRange::ZeroToOne,
             render_target_depth: None,
             clear_stencil_with_pass: true,
             line_expressions: false,

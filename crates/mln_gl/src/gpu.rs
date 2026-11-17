@@ -14,10 +14,10 @@ use mln_gfx::gpu::validation::{
     TextureInfo,
 };
 use mln_gfx::gpu::{
-    BindGroupEntry, BindingsDesc, BindingsId, BufferDesc, BufferId, BufferUsage, Caps, ClipDepth, DepthState, Draw,
-    DynamicState, FixedState, GeometryDesc, GeometryId, Gpu, GpuError, Id, IdData, LoadOp, PassDesc, PipelineDesc,
-    PipelineId, ReadbackId, ResourceId, SamplerId, ShaderId, ShaderKey, SlotMap, StencilState, TextureDesc,
-    TextureFormat, TextureId, TextureRegion, TextureUsage, VertexBufferLayout, VertexStep,
+    BindGroupEntry, BindingsDesc, BindingsId, BufferDesc, BufferId, BufferUsage, Caps, ClipDepthRange, DepthState,
+    Draw, DynamicState, FixedState, GeometryDesc, GeometryId, Gpu, GpuError, Id, IdData, LoadOp, PassDesc,
+    PipelineDesc, PipelineId, ReadbackId, ResourceId, SamplerId, ShaderId, ShaderKey, SlotMap, StencilState,
+    TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage, VertexBufferLayout, VertexStep,
 };
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::{MAX_ACTIVE_TEXTURE_UNITS, SamplerState};
@@ -576,7 +576,7 @@ impl GlGpu {
                 buffer_offset_alignment: alignment.max(1) as u32,
                 max_texture_size: max_texture_size.max(0) as u32,
                 half_float_render_targets,
-                clip_depth: ClipDepth::NegativeOneToOne,
+                clip_depth: ClipDepthRange::NegativeOneToOne,
                 render_target_depth: None,
                 clear_stencil_with_pass: false,
                 line_expressions: false,

@@ -26,6 +26,7 @@ use std::any::Any;
 use std::sync::Arc;
 
 use mln_util::Color;
+pub use mln_util::mat4::ClipDepthRange;
 use mln_util::size::Size;
 
 pub use self::ids::{
@@ -59,15 +60,6 @@ pub enum GpuError {
     Invalid(String),
 }
 
-/// The clip-space depth range of a backend's API.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ClipDepth {
-    /// Clip z over w from 0 to 1: Metal, Vulkan, D3D12 and WebGPU.
-    ZeroToOne,
-    /// Clip z over w from -1 to 1: OpenGL.
-    NegativeOneToOne,
-}
-
 /// What a backend's device allows, and how the renderer draws on it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Caps {
@@ -77,7 +69,7 @@ pub struct Caps {
     pub max_texture_size: u32,
     /// Whether passes draw into textures of `Rgba16Float`.
     pub half_float_render_targets: bool,
-    pub clip_depth: ClipDepth,
+    pub clip_depth: ClipDepthRange,
     /// The format of the depth attachment of the passes that draw into a
     /// render target's texture, `None` for passes without one.
     pub render_target_depth: Option<TextureFormat>,

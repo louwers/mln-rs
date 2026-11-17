@@ -12,9 +12,9 @@ use mln_gfx::gpu::validation::{
     TextureInfo,
 };
 use mln_gfx::gpu::{
-    BindGroupEntry, BindingsDesc, BindingsId, BufferDesc, BufferId, BufferUsage, Caps, ClipDepth, Draw, DynamicState,
-    GeometryDesc, GeometryId, Gpu, GpuError, LoadOp, PassDesc, PipelineDesc, PipelineId, ReadbackId, ResourceId,
-    SamplerId, Scissor, ShaderId, ShaderKey, SlotMap, TextureDesc, TextureFormat, TextureId, TextureRegion,
+    BindGroupEntry, BindingsDesc, BindingsId, BufferDesc, BufferId, BufferUsage, Caps, ClipDepthRange, Draw,
+    DynamicState, GeometryDesc, GeometryId, Gpu, GpuError, LoadOp, PassDesc, PipelineDesc, PipelineId, ReadbackId,
+    ResourceId, SamplerId, Scissor, ShaderId, ShaderKey, SlotMap, TextureDesc, TextureFormat, TextureId, TextureRegion,
     TextureUsage, VertexStep,
 };
 use mln_gfx::shaders::shader_defines::{DRAWABLE_RESERVED_UBO_COUNT, LAYER_SSBO_START_ID};
@@ -416,7 +416,7 @@ impl D3d12Gpu {
             buffer_offset_alignment: BUFFER_ALIGNMENT as u32,
             max_texture_size: MAX_TEXTURE_SIZE,
             half_float_render_targets: true,
-            clip_depth: ClipDepth::ZeroToOne,
+            clip_depth: ClipDepthRange::ZeroToOne,
             render_target_depth: None,
             clear_stencil_with_pass: true,
             line_expressions: false,

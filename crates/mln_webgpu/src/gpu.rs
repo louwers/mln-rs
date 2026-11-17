@@ -9,9 +9,9 @@ use mln_gfx::gpu::validation::{
     TextureInfo,
 };
 use mln_gfx::gpu::{
-    BindGroupEntry, BindingsDesc, BindingsId, BufferDesc, BufferId, BufferUsage, Caps, ClipDepth, Draw, DynamicState,
-    GeometryDesc, GeometryId, Gpu, GpuError, LoadOp, PassDesc, PipelineDesc, PipelineId, ReadbackId, ResourceId,
-    SamplerId, Scissor, ShaderId, ShaderKey, SlotMap, TextureDesc, TextureFormat, TextureId, TextureRegion,
+    BindGroupEntry, BindingsDesc, BindingsId, BufferDesc, BufferId, BufferUsage, Caps, ClipDepthRange, Draw,
+    DynamicState, GeometryDesc, GeometryId, Gpu, GpuError, LoadOp, PassDesc, PipelineDesc, PipelineId, ReadbackId,
+    ResourceId, SamplerId, Scissor, ShaderId, ShaderKey, SlotMap, TextureDesc, TextureFormat, TextureId, TextureRegion,
     TextureUsage,
 };
 use mln_gfx::texture2d::SamplerState;
@@ -193,7 +193,7 @@ impl WebGpu {
                 .max(limits.min_storage_buffer_offset_alignment),
             max_texture_size: limits.max_texture_dimension_2d,
             half_float_render_targets: true,
-            clip_depth: ClipDepth::ZeroToOne,
+            clip_depth: ClipDepthRange::ZeroToOne,
             render_target_depth: Some(TextureFormat::Depth32Float),
             clear_stencil_with_pass: false,
             line_expressions: false,

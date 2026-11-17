@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use mln_gfx::gpu::ClipDepth;
 use mln_gfx::shaders::fill_extrusion_layer_ubo::{
     FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO,
 };
@@ -11,6 +10,7 @@ use mln_gfx::shaders::shader_defines::{
 };
 use mln_style::layers::{FillExtrusion, FillExtrusionPaintProperties};
 use mln_util::constants::TILE_SIZE_D;
+use mln_util::mat4::ClipDepthRange;
 use mln_util::size::Size;
 
 use super::{DrawableRenderTile, cast_matrix, check_tweak_drawable_ptr, slot_bucket};
@@ -107,7 +107,7 @@ impl LayerTweaker for FillExtrusionLayerTweaker {
         // A backend whose clip depth runs from -1 writes the depth of one
         // whose runs from 0 (`frame_projection`). The globe projects in its
         // shaders.
-        let zero_to_one = context.caps().clip_depth == ClipDepth::NegativeOneToOne && !state.is_globe_rendering();
+        let zero_to_one = context.caps().clip_depth == ClipDepthRange::NegativeOneToOne && !state.is_globe_rendering();
         let self_ptr: *const Self = self;
         layer_group.visit_drawables(|drawable| {
             const IN_VIEWPORT_PIXEL_UNITS: bool = false; // from RenderTile::translatedMatrix
