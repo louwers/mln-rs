@@ -2509,10 +2509,6 @@ highp vec4 pattern_to = u_pattern_to;
     vec2 pattern_tl_b = pattern_to.xy;
     vec2 pattern_br_b = pattern_to.zw;
 
-    if (u_texsize.x < 1.0 || u_texsize.y < 1.0) {
-        discard;
-    }
-
     vec2 imagecoord = mod(v_pos_a, 1.0);
     highp vec2 pos = atlas_pos(pattern_tl_a / u_texsize, (pattern_br_a - pattern_tl_a) / u_texsize * imagecoord);
     vec4 color1 = texture(u_image, pos);

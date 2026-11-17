@@ -186,6 +186,9 @@ impl LayerTweaker for FillLayerTweaker {
                     });
                 }
                 Some(FillVariant::FillPattern | FillVariant::FillOutlinePattern) => {
+                    // A pattern has nothing to sample before its tile has an
+                    // atlas, and the shaders divide by the atlas size.
+                    drawable.enabled = texture_size.width > 0 && texture_size.height > 0;
                     ubo.set_fill_pattern(&FillPatternDrawableUBO {
                         matrix: cast_matrix(&matrix),
                         pixel_coord_upper: [(pixel_x >> 16) as f32, (pixel_y >> 16) as f32],
