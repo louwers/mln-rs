@@ -38,7 +38,7 @@ use icu_provider::marker::ErasedMarker;
 use icu_provider::prelude::*;
 use writeable::Writeable;
 
-use super::{FractionDigits, Sensitivity, Style, Unit};
+use super::{FractionDigits, Sensitivity, Style, Unit, default_locale_override};
 
 /// The POSIX locale category whose environment variable names the default
 /// locale of an expression.
@@ -58,7 +58,8 @@ impl Category {
         }
     }
 
-    /// The default locale, which the environment fixes for the process.
+    /// The default locale, fixed for the process on first use: the one
+    /// `set_default_locale` set, else the environment's.
     fn default_locale(self) -> &'static Locale {
         static COLLATE: OnceLock<Locale> = OnceLock::new();
         static NUMERIC: OnceLock<Locale> = OnceLock::new();
@@ -66,7 +67,11 @@ impl Category {
             Category::Collate => &COLLATE,
             Category::Numeric => &NUMERIC,
         };
-        cell.get_or_init(|| environment_locale(self.variable(), |name| std::env::var(name).ok()))
+        cell.get_or_init(|| {
+            default_locale_override()
+                .and_then(supported_locale)
+                .unwrap_or_else(|| environment_locale(self.variable(), |name| std::env::var(name).ok()))
+        })
     }
 }
 

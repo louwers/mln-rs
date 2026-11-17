@@ -12,8 +12,8 @@
 //! Each backend provides a `Collator` and `format_number` with the same
 //! contract, documented on the backend where it falls short:
 //!
-//! - An empty, malformed or unsupported language tag takes the platform's
-//!   default locale.
+//! - An empty, malformed or unsupported language tag takes the default
+//!   locale: the platform's, unless [`set_default_locale`] replaced it.
 //! - A collator compares at the strength the sensitivity selects: base
 //!   letters only, then diacritics, then case.
 //! - The `co` (collation type), `kf` (case first) and `kn` (numeric) Unicode
@@ -25,6 +25,8 @@
 //!   the locale's currency pattern and symbol, and the currency's digits
 //!   unless the limits override them. With a unit, it takes the locale's
 //!   short pattern for the unit, as `Intl.NumberFormat` does by default.
+
+use std::sync::OnceLock;
 
 #[cfg(target_os = "android")]
 mod android;
@@ -47,6 +49,27 @@ pub(crate) use icu4x::{Collator, format_number};
 pub(crate) use unit::Unit;
 #[cfg(target_family = "wasm")]
 pub(crate) use web::{Collator, format_number};
+
+static DEFAULT_LOCALE: OnceLock<String> = OnceLock::new();
+
+/// Makes the locale that a BCP 47 language tag names the default locale, in
+/// place of the platform's, for the rest of the process. Call it before
+/// parsing an expression: parsing evaluates constant expressions, and a
+/// backend may keep the default it first read. A tag whose language the
+/// platform has no data for leaves the platform's default in place.
+///
+/// # Errors
+///
+/// When the default locale was set to another tag before.
+pub fn set_default_locale(tag: &str) -> Result<(), String> {
+    let set = DEFAULT_LOCALE.get_or_init(|| tag.to_owned());
+    if set == tag { Ok(()) } else { Err(format!("The default locale is {set} already")) }
+}
+
+/// The tag that [`set_default_locale`] set.
+fn default_locale_override() -> Option<&'static str> {
+    DEFAULT_LOCALE.get().map(String::as_str)
+}
 
 /// What a collator tells apart beyond base letters.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

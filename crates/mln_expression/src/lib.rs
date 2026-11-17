@@ -63,6 +63,9 @@ pub use image::Image;
 pub use interpolate::Interpolate;
 pub use interpolator::Interpolator;
 pub use is_expression::is_expression;
+// For the test runners, whose expectations assume a default locale.
+#[doc(hidden)]
+pub use locale::set_default_locale;
 pub use parsing_context::{ParseResult, ParsingContext, TypeAnnotationOption};
 pub use step::Step;
 pub use stops::Stops;

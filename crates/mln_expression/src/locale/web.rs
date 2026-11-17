@@ -21,7 +21,7 @@ use mln_util::hash::HashMap;
 use wasm_bindgen::prelude::*;
 
 use super::keywords::CollationKeywords;
-use super::{FractionDigits, Sensitivity, Style, Unit};
+use super::{FractionDigits, Sensitivity, Style, Unit, default_locale_override};
 
 mod intl {
     use js_sys::Object;
@@ -77,12 +77,14 @@ fn set(object: &Object, key: &str, value: impl Into<JsValue>) {
     let _ = Reflect::set(object, &JsValue::from_str(key), &value.into());
 }
 
-/// Makes an `Intl` object for a language tag, or for the browser's default
-/// locale when `Intl` rejects the tag.
+/// Makes an `Intl` object for a language tag, or for the default locale when
+/// the tag is empty or `Intl` rejects it.
 fn construct<T>(tag: &str, options: &Object, new: fn(&JsValue, &Object) -> Result<T, JsValue>) -> Result<T, String> {
-    let requested = if tag.is_empty() { JsValue::UNDEFINED } else { JsValue::from_str(tag) };
-    new(&requested, options)
-        .or_else(|_| new(&JsValue::UNDEFINED, options))
+    [tag, default_locale_override().unwrap_or_default()]
+        .into_iter()
+        .filter(|tag| !tag.is_empty())
+        .find_map(|tag| new(&JsValue::from_str(tag), options).ok())
+        .map_or_else(|| new(&JsValue::UNDEFINED, options), Ok)
         .map_err(|error| error.as_string().unwrap_or_else(|| format!("{error:?}")))
 }
 

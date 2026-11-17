@@ -1,7 +1,6 @@
-use expression_test::{find_metrics_dir, pin_default_locale, print_stats, run};
+use expression_test::{find_metrics_dir, print_stats, run};
 
 fn main() {
-    pin_default_locale();
     let mut args = std::env::args().skip(1);
     let mut names = Vec::new();
     let mut filter = None;

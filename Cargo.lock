@@ -2654,8 +2654,6 @@ dependencies = [
  "mln-rs-tile-id",
  "mln-rs-util",
  "mln-rs-vec-map",
- "objc2 0.6.5",
- "objc2-foundation 0.3.2",
  "serde_json",
 ]
 
@@ -2878,6 +2876,7 @@ dependencies = [
  "fastrand",
  "geojson",
  "mln-rs-conversion",
+ "mln-rs-expression",
  "mln-rs-feature",
  "mln-rs-geometry",
  "mln-rs-gfx",

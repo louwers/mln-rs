@@ -29,7 +29,7 @@ use objc2::runtime::AnyObject;
 use objc2_foundation::{NSLocale, NSRange, NSString, NSStringCompareOptions};
 
 use super::keywords::CollationKeywords;
-use super::{FractionDigits, Sensitivity, Style, Unit};
+use super::{FractionDigits, Sensitivity, Style, Unit, default_locale_override};
 
 /// The language of an ICU locale identifier or a language tag.
 fn language_of(identifier: &str) -> &str {
@@ -49,16 +49,21 @@ fn available_languages() -> &'static HashSet<String> {
 }
 
 /// The locale a BCP 47 tag names, with its Unicode extensions as keywords,
-/// or the current locale when the tag is empty or its language has no data.
-fn resolve_locale(tag: &str) -> Retained<NSLocale> {
-    if !tag.is_empty() {
-        let identifier = NSLocale::canonicalLocaleIdentifierFromString(&NSString::from_str(tag));
-        let locale = NSLocale::localeWithLocaleIdentifier(&identifier);
-        if available_languages().contains(&locale.languageCode().to_string()) {
-            return locale;
-        }
+/// unless the tag is empty or its language has no data.
+fn named_locale(tag: &str) -> Option<Retained<NSLocale>> {
+    if tag.is_empty() {
+        return None;
     }
-    NSLocale::currentLocale()
+    let identifier = NSLocale::canonicalLocaleIdentifierFromString(&NSString::from_str(tag));
+    let locale = NSLocale::localeWithLocaleIdentifier(&identifier);
+    available_languages().contains(&locale.languageCode().to_string()).then_some(locale)
+}
+
+/// The locale a BCP 47 tag names, or the default locale when it names none.
+fn resolve_locale(tag: &str) -> Retained<NSLocale> {
+    named_locale(tag)
+        .or_else(|| default_locale_override().and_then(named_locale))
+        .unwrap_or_else(NSLocale::currentLocale)
 }
 
 /// A locale's language, script and region as a language tag, without its

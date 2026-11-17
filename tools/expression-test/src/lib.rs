@@ -1,14 +1,12 @@
 //! Runs the expression tests (`metrics/integration/expression-tests`) with
 //! the C++ runner's rules.
 
-mod default_locale;
 mod parser;
 pub mod runner;
 mod test_runner_common;
 
 use std::path::{Path, PathBuf};
 
-pub use default_locale::pin_default_locale;
 use parser::{collect_test_paths, parse_expression_ignores, parse_test_data};
 use runner::{TestRunOutput, TestStats, run_expression_test};
 
@@ -21,9 +19,15 @@ pub fn find_metrics_dir() -> Option<PathBuf> {
 }
 
 /// Runs the tests (the loop of expression-test/main.cpp). `verbose` prints
-/// each result like the C++ runner.
+/// each result like the C++ runner. The tests expect `en-US` of an expression
+/// that names no locale, so that becomes the process's default locale.
+///
+/// # Panics
+///
+/// When the process's default locale was set to another before.
 #[must_use]
 pub fn run(metrics: &Path, test_names: &[String], filter: Option<&str>, verbose: bool) -> TestStats {
+    mln_expression::set_default_locale("en-US").expect("the default locale");
     let root_path = metrics.join("integration/expression-tests");
     let test_paths = collect_test_paths(&root_path, test_names, filter);
     let ignores = parse_expression_ignores(&metrics.join("ignores/platform-all.json"));

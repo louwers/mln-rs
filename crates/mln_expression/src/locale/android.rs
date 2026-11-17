@@ -30,7 +30,7 @@ use mln_util::hash::HashSet;
 use parking_lot::Mutex;
 
 use super::keywords::CollationKeywords;
-use super::{FractionDigits, Sensitivity, Style, Unit};
+use super::{FractionDigits, Sensitivity, Style, Unit, default_locale_override};
 
 /// The first API level with `android.icu.number.NumberFormatter`.
 const NUMBER_FORMATTER_LEVEL: i32 = 30;
@@ -124,14 +124,21 @@ fn available_languages(env: &mut Env<'_>) -> Result<&'static HashSet<String>, Jn
     Ok(LANGUAGES.get_or_init(|| languages))
 }
 
-/// The locale a BCP 47 tag names, with its Unicode extensions, or the
-/// default locale when the tag is empty or malformed or its language has no
-/// data.
+/// The locale a BCP 47 tag names, with its Unicode extensions, unless the tag
+/// is empty or malformed or its language has no data.
+fn named_locale<'local>(env: &mut Env<'local>, tag: &str) -> Result<Option<JObject<'local>>, JniError> {
+    if tag.is_empty() {
+        return Ok(None);
+    }
+    let locale = for_language_tag(env, tag)?;
+    let language = language(env, &locale)?;
+    Ok((!language.is_empty() && available_languages(env)?.contains(&language)).then_some(locale))
+}
+
+/// The locale a BCP 47 tag names, or the default locale when it names none.
 fn resolve_locale<'local>(env: &mut Env<'local>, tag: &str) -> Result<JObject<'local>, JniError> {
-    if !tag.is_empty() {
-        let locale = for_language_tag(env, tag)?;
-        let language = language(env, &locale)?;
-        if !language.is_empty() && available_languages(env)?.contains(&language) {
+    for tag in [Some(tag), default_locale_override()].into_iter().flatten() {
+        if let Some(locale) = named_locale(env, tag)? {
             return Ok(locale);
         }
     }
