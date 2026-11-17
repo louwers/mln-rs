@@ -20,8 +20,8 @@ doctest = false
 [target.'cfg(windows)'.dependencies]
 mln_gfx.workspace = true
 mln_glsl.workspace = true
+mln_shaders = { workspace = true, features = ["hlsl"] }
 gpu-allocator = { workspace = true, features = ["d3d12"] }
-naga = { workspace = true, features = ["hlsl-out"] }
 mln_util.workspace = true
 parking_lot.workspace = true
 windows = { workspace = true, features = [

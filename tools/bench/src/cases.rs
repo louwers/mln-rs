@@ -137,6 +137,9 @@ pub fn all() -> Vec<Case> {
     }
     cases.push(Case::new("Frame/Globe", frame_globe));
     cases.push(Case::new("Frame/CrossAntimeridian", frame_cross_antimeridian));
+    for (name, data_driven) in [("Frame/Circles", true), ("Frame/Circles/Constant", false)] {
+        cases.push(Case::new(name, move |cx| frame_circles(cx, name, data_driven)));
+    }
     let basemap_mlt = View { name: "basemap-mlt", style: Style::BasemapMlt, ..basemap_view() };
     let basemap_globe = View { name: "basemap-globe", style: Style::BasemapGlobe, ..basemap_view() };
     for view in views().into_iter().chain([basemap_mlt, basemap_globe]) {
@@ -397,6 +400,83 @@ fn frame_feature_state_hover(cx: &Context) -> Metrics {
     }
     if let Some(dir) = &cx.frames {
         write_frame(dir, "Frame/FeatureStateHover", &scene.read_frame());
+    }
+    let (p95, p99) = (percentile(meter.times(), 95.0), percentile(meter.times(), 99.0));
+    let mut metrics = meter.finish();
+    metrics.lead("frame_p95_ms", p95);
+    metrics.lead("frame_p99_ms", p99);
+    metrics
+}
+
+/// Frames of 200,000 stroked, blurred circles that overlap, the camera
+/// panning a little each frame: the circle program's GPU cost, with its
+/// color, radius and opacity read per vertex (`data_driven`) or from the
+/// layer's uniforms.
+fn frame_circles(cx: &Context, name: &str, data_driven: bool) -> Metrics {
+    const POINTS: usize = 200_000;
+    let features: Vec<serde_json::Value> = (0..POINTS)
+        .map(|index| {
+            let (x, y) = (index % 500, index / 500);
+            serde_json::json!({
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [-2.75 + x as f64 * 0.011, -2.1 + y as f64 * 0.0105]},
+                "properties": {"v": (index % 97) as f64 / 97.0},
+            })
+        })
+        .collect();
+    let (color, radius, opacity) = if data_driven {
+        (
+            serde_json::json!(["interpolate", ["linear"], ["get", "v"], 0, "#3887be", 1, "#e55e5e"]),
+            serde_json::json!(["+", 6, ["*", 6, ["get", "v"]]]),
+            serde_json::json!(["+", 0.5, ["*", 0.5, ["get", "v"]]]),
+        )
+    } else {
+        (serde_json::json!("#3887be"), serde_json::json!(9), serde_json::json!(0.8))
+    };
+    let style = serde_json::json!({
+        "version": 8,
+        "sources": {"points": {"type": "geojson", "data": {"type": "FeatureCollection", "features": features}}},
+        "layers": [
+            {"id": "background", "type": "background", "paint": {"background-color": "#ffffff"}},
+            {
+                "id": "points",
+                "type": "circle",
+                "source": "points",
+                "paint": {
+                    "circle-radius": radius,
+                    "circle-color": color,
+                    "circle-opacity": opacity,
+                    "circle-blur": 0.3,
+                    "circle-stroke-width": 2,
+                    "circle-stroke-color": "#222222",
+                },
+            },
+        ],
+    });
+    let center = |index: usize| {
+        let angle = index as f64 * 0.05;
+        LatLng::new(0.05 * angle.sin(), 0.05 * angle.cos()).expect("a valid center")
+    };
+    let mut scene = Scene::new(BASEMAP_SIZE, Mode::OnDemand);
+    scene.jump(center(0), 7.0);
+    scene.load_json(&style.to_string());
+    scene.settle();
+    for index in 0..30 {
+        scene.jump(center(index), 7.0);
+        scene.pump();
+        scene.render_frame();
+    }
+    scene.settle();
+    let mut meter = Meter::new();
+    for index in 0..cx.iterations(200) {
+        scene.jump(center(index), 7.0);
+        meter.time(|| {
+            scene.pump();
+            scene.render_frame()
+        });
+    }
+    if let Some(dir) = &cx.frames {
+        write_frame(dir, name, &scene.read_frame());
     }
     let (p95, p99) = (percentile(meter.times(), 95.0), percentile(meter.times(), 99.0));
     let mut metrics = meter.finish();

@@ -16,7 +16,6 @@
 #![cfg(not(any(target_vendor = "apple", target_family = "wasm")))]
 
 mod front_end;
-pub mod layout;
 mod program;
 /// MapLibre Native's Vulkan GLSL, written for naga's GLSL front end.
 #[rustfmt::skip]
@@ -25,6 +24,7 @@ mod sources;
 pub mod variants;
 
 pub use front_end::{Module, ResourceUse, Stage};
+pub use mln_shaders::layout;
 pub use program::{AttributeInfo, PROGRAMS, ShaderSource, TextureInfo, shader_source};
 
 #[cfg(test)]

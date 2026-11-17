@@ -28,6 +28,7 @@ use mln_gfx::types::{
     StencilFunctionType, StencilOpType, TextureFilterType, TextureWrapType,
 };
 use mln_gfx::vertex_attribute::VertexAttribute;
+use mln_shaders::msl::{SIZES_BUFFER_SIZE, SIZES_BUFFER_SLOT};
 use mln_util::hash::HashMap;
 use mln_util::size::Size;
 use objc2::Message;
@@ -106,6 +107,11 @@ struct Shader {
     vertex: MTLFunctionPtr,
     fragment: Option<MTLFunctionPtr>,
     table: Option<ShaderTable>,
+    /// Whether the functions are a program of `mln_shaders`, whose
+    /// attributes and textures are at their ids rather than at their indexes
+    /// in the tables, and which reads buffer sizes
+    /// (`mln_shaders::msl::SIZES_BUFFER_SLOT`).
+    wesl: bool,
 }
 
 /// Where a shader's functions read what they read, and what the checks
@@ -120,6 +126,9 @@ struct ShaderTable {
 enum Resource {
     /// `globalIndex`, set with `setVertexBytes`.
     GlobalIndex,
+    /// The buffer sizes of a program of `mln_shaders`, which it never reads,
+    /// set with `setVertexBytes`.
+    BufferSizes,
     /// The buffer at a uniform or storage buffer id.
     Buffer(u32),
     /// The texture at a texture id.
@@ -161,6 +170,8 @@ struct Bindings {
     samplers: Vec<(Slot, MTLSamplerStatePtr)>,
     /// Where the functions read `globalIndex`.
     global_index: Vec<Slot>,
+    /// Where the functions read buffer sizes.
+    buffer_sizes: Vec<Slot>,
     tags: BindingsTags,
 }
 
@@ -651,7 +662,8 @@ impl MetalGpu {
         let device = self.device.device().clone();
         let shader = self.shaders.get(desc.shader).ok_or(GpuError::UnknownId("shader"))?;
         let name = shader.source.name;
-        let (vertex_descriptor, vertex_buffer_indices) = vertex_descriptor(shader.source, desc.vertex_buffers)?;
+        let (vertex_descriptor, vertex_buffer_indices) =
+            vertex_descriptor(shader.source, desc.vertex_buffers, shader.wesl)?;
 
         let descriptor = MTLRenderPipelineDescriptor::new();
         descriptor.setLabel(Some(&NSString::from_str(name)));
@@ -680,7 +692,7 @@ impl MetalGpu {
         let reflection =
             reflection.ok_or_else(|| GpuError::Invalid(format!("{name}: Metal gave no pipeline reflection")))?;
         if shader.table.is_none() {
-            let (bindings, reads) = shader_bindings(&reflection, shader.source, &vertex_buffer_indices)?;
+            let (bindings, reads) = shader_bindings(&reflection, shader.source, &vertex_buffer_indices, shader.wesl)?;
             if let Some(shader) = self.shaders.get_mut(desc.shader) {
                 shader.table = Some(ShaderTable { bindings, reads });
             }
@@ -796,7 +808,10 @@ fn new_metal_buffer(
 fn vertex_descriptor(
     source: &ShaderSource,
     layouts: &[VertexBufferLayout],
+    wesl: bool,
 ) -> Result<(MTLVertexDescriptorPtr, Vec<Option<usize>>), GpuError> {
+    // A program of `mln_shaders` reads its buffer sizes from the last slot.
+    let max_buffers = if wesl { usize::from(SIZES_BUFFER_SLOT) } else { MAX_BUFFERS };
     let descriptor = MTLVertexDescriptor::vertexDescriptor();
     let first = first_vertex_buffer(source);
     let mut buffer_indices: Vec<Option<usize>> = Vec::with_capacity(layouts.len());
@@ -809,7 +824,7 @@ fn vertex_descriptor(
             VertexStep::Vertex => source.attributes,
             VertexStep::Instance => source.instance_attributes,
         };
-        let buffer_index = first.map(|first| first + slot).filter(|&index| index < MAX_BUFFERS).ok_or_else(|| {
+        let buffer_index = first.map(|first| first + slot).filter(|&index| index < max_buffers).ok_or_else(|| {
             GpuError::Unsupported(format!("{}: vertex buffer slot {slot} past Metal's buffer indexes", source.name))
         })?;
         for attribute in &layout.attributes {
@@ -821,7 +836,8 @@ fn vertex_descriptor(
             // SAFETY: the shaders' attribute indexes are below Metal's 31,
             // and the buffer index below MAX_BUFFERS.
             unsafe {
-                let descriptor = descriptor.attributes().objectAtIndexedSubscript(info.index);
+                let descriptor =
+                    descriptor.attributes().objectAtIndexedSubscript(if wesl { info.id } else { info.index });
                 descriptor.setFormat(format);
                 descriptor.setOffset(attribute.offset as usize);
                 descriptor.setBufferIndex(buffer_index);
@@ -859,6 +875,7 @@ fn shader_bindings(
     reflection: &MTLRenderPipelineReflection,
     source: &ShaderSource,
     vertex_buffer_indices: &[Option<usize>],
+    wesl: bool,
 ) -> Result<(Vec<Binding>, Vec<ShaderBinding>), GpuError> {
     let first_vertex_buffer = first_vertex_buffer(source);
     let mut bindings: Vec<Binding> = Vec::new();
@@ -870,6 +887,10 @@ fn shader_bindings(
             }
             let index = binding.index();
             let texture_id = || {
+                // A program of `mln_shaders` binds a texture at its id.
+                if wesl {
+                    return Ok(index as u32);
+                }
                 source
                     .textures
                     .iter()
@@ -880,6 +901,7 @@ fn shader_bindings(
                     })
             };
             let resource = match binding.r#type() {
+                MTLBindingType::Buffer if wesl && index == usize::from(SIZES_BUFFER_SLOT) => Resource::BufferSizes,
                 // An argument of the vertex function, not its `[[stage_in]]`.
                 MTLBindingType::Buffer
                     if vertex && binding.isArgument() && first_vertex_buffer.is_some_and(|first| index >= first) =>
@@ -897,7 +919,7 @@ fn shader_bindings(
                 _ => continue,
             };
             let read = match resource {
-                Resource::GlobalIndex => None,
+                Resource::GlobalIndex | Resource::BufferSizes => None,
                 Resource::Buffer(id) => {
                     // SAFETY: Metal reflects a buffer binding as an
                     // MTLBufferBinding, which ProtocolObject wraps alike.
@@ -1299,6 +1321,22 @@ impl Gpu for MetalGpu {
     fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError> {
         let source = shader_source(key.program())
             .ok_or_else(|| GpuError::Unsupported(format!("no MSL for {:?}", key.program())))?;
+        if let Some(program) = mln_shaders::program_of(key, mln_shaders::Target::Metal) {
+            let invalid = |error: String| GpuError::Invalid(format!("{}: {error}", source.name));
+            let program = program.map_err(invalid)?;
+            let msl = program.msl().map_err(invalid)?;
+            let (vertex, fragment) = autoreleasepool(|_| {
+                compile(
+                    self.device.device(),
+                    source.name,
+                    &msl.source,
+                    msl.entry_point(mln_shaders::Stage::Vertex),
+                    msl.entry_point(mln_shaders::Stage::Fragment),
+                    [],
+                )
+            })?;
+            return Ok(self.shaders.insert(Shader { source, vertex, fragment, table: None, wesl: true }));
+        }
         let (vertex, fragment) = autoreleasepool(|_| {
             compile(
                 self.device.device(),
@@ -1309,7 +1347,7 @@ impl Gpu for MetalGpu {
                 key.define_values(),
             )
         })?;
-        Ok(self.shaders.insert(Shader { source, vertex, fragment, table: None }))
+        Ok(self.shaders.insert(Shader { source, vertex, fragment, table: None, wesl: false }))
     }
 
     fn create_pipeline(&mut self, desc: &PipelineDesc<'_>) -> Result<PipelineId, GpuError> {
@@ -1348,12 +1386,14 @@ impl Gpu for MetalGpu {
             textures: Vec::new(),
             samplers: Vec::new(),
             global_index: Vec::new(),
+            buffer_sizes: Vec::new(),
             tags: BindingsTags { shader: desc.shader, elements },
         };
         for binding in &table.bindings {
             let slot = Slot { index: binding.index, vertex: binding.vertex, fragment: binding.fragment };
             match binding.resource {
                 Resource::GlobalIndex => bindings.global_index.push(slot),
+                Resource::BufferSizes => bindings.buffer_sizes.push(slot),
                 Resource::Buffer(id) => {
                     let (buffer, offset) = desc
                         .entries
@@ -1383,14 +1423,15 @@ impl Gpu for MetalGpu {
     }
 
     fn create_geometry(&mut self, desc: &GeometryDesc<'_>) -> Result<GeometryId, GpuError> {
-        let source = self.shaders.get(desc.shader).ok_or(GpuError::UnknownId("shader"))?.source;
+        let shader = self.shaders.get(desc.shader).ok_or(GpuError::UnknownId("shader"))?;
+        let (source, wesl) = (shader.source, shader.wesl);
         let ranges = {
             let buffer =
                 |id| self.buffers.get(id).map(|buffer: &Buffer| BufferInfo { usage: buffer.usage, size: buffer.size });
             let lookup = Lookup { buffer: &buffer, texture: &|_| None, sampler: &|_| false };
             validation::check_geometry(desc, &lookup)?
         };
-        let (_, indices) = vertex_descriptor(source, desc.layouts)?;
+        let (_, indices) = vertex_descriptor(source, desc.layouts, wesl)?;
         let native = |id| self.buffers.get(id).map(|buffer| buffer.buffer.clone()).ok_or(GpuError::UnknownId("buffer"));
         let mut vertex_buffers = Vec::with_capacity(desc.vertex_buffers.len());
         for (&(buffer, offset), index) in desc.vertex_buffers.iter().zip(indices) {
@@ -1505,6 +1546,21 @@ impl Gpu for MetalGpu {
                     }
                     if slot.fragment {
                         encoder.setFragmentSamplerState_atIndex(Some(sampler), slot.index);
+                    }
+                }
+            }
+            // Zeros: the programs never read the sizes.
+            let sizes = [0u8; SIZES_BUFFER_SIZE];
+            let bytes = NonNull::from(&sizes).cast();
+            for slot in &bindings.buffer_sizes {
+                // SAFETY: `bytes` points at `SIZES_BUFFER_SIZE` bytes, which
+                // Metal copies.
+                unsafe {
+                    if slot.vertex {
+                        encoder.setVertexBytes_length_atIndex(bytes, SIZES_BUFFER_SIZE, slot.index);
+                    }
+                    if slot.fragment {
+                        encoder.setFragmentBytes_length_atIndex(bytes, SIZES_BUFFER_SIZE, slot.index);
                     }
                 }
             }

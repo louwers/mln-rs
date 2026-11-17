@@ -1,5 +1,6 @@
-//! The Vulkan shaders: `mln_glsl`'s GLSL, which naga writes as SPIR-V when a
-//! program is first used.
+//! The Vulkan shaders of the programs that `mln_shaders` has no WESL for:
+//! `mln_glsl`'s GLSL, which naga writes as SPIR-V when a program is first
+//! used.
 
 use std::sync::Arc;
 

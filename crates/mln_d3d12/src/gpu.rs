@@ -1067,7 +1067,7 @@ impl Gpu for D3d12Gpu {
 
     fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError> {
         let program = self.compiler.compile(key)?;
-        let source_textures = mln_glsl::shader_source(key.program()).map_or(&[][..], |source| source.textures);
+        let source_textures = &program.textures;
         let mut reads: Vec<ShaderBinding> = Vec::new();
         let mut buffers = Vec::new();
         let mut textures = Vec::new();
@@ -1667,11 +1667,11 @@ fn create_pipeline_state(
         for attribute in &layout.attributes {
             let format = conv::vertex_format(attribute.format)
                 .ok_or_else(|| GpuError::Unsupported(format!("vertex attribute format {:?}", attribute.format)))?;
-            let location = table
+            let info = table
                 .iter()
                 .find(|info| info.id == attribute.id as usize)
-                .ok_or_else(|| GpuError::Invalid(format!("{} has no attribute {}", program.name, attribute.id)))?
-                .index;
+                .ok_or_else(|| GpuError::Invalid(format!("{} has no attribute {}", program.name, attribute.id)))?;
+            let location = if program.location_is_id { info.id } else { info.index };
             elements.push(D3D12_INPUT_ELEMENT_DESC {
                 // naga's HLSL names a vertex input of location N `LOC`N.
                 SemanticName: s!("LOC"),

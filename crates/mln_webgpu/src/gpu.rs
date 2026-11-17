@@ -472,18 +472,20 @@ fn shader_bindings(shader: &ShaderProgram) -> Result<Vec<ShaderBinding>, GpuErro
         for info in shader.binding_infos(group) {
             let binding = match info.type_ {
                 BindingType::UniformBuffer | BindingType::ReadOnlyStorageBuffer | BindingType::StorageBuffer => {
-                    ShaderBinding::Buffer { id: info.binding, min_size: shader.buffer_size(group, info.binding) }
+                    ShaderBinding::Buffer {
+                        id: info.id.unwrap_or(info.binding),
+                        min_size: shader.buffer_size(group, info.binding),
+                    }
                 }
                 BindingType::Sampler | BindingType::Texture | BindingType::UnfilterableTexture => {
-                    let sampler = info.type_ == BindingType::Sampler;
-                    let id = shader.texture_at(info.binding, sampler).ok_or_else(|| {
+                    let id = info.id.ok_or_else(|| {
                         GpuError::Invalid(format!(
                             "{} reads binding {} with no texture id",
                             shader.name(),
                             info.binding
                         ))
                     })?;
-                    ShaderBinding::Texture { id: id as u32 }
+                    ShaderBinding::Texture { id }
                 }
             };
             if !bindings.contains(&binding) {
@@ -741,7 +743,7 @@ impl Gpu for WebGpu {
                             .entries
                             .iter()
                             .find_map(|entry| match *entry {
-                                BindGroupEntry::Buffer { id, buffer, offset, size } if id == info.binding => {
+                                BindGroupEntry::Buffer { id, buffer, offset, size } if Some(id) == info.id => {
                                     Some((buffer, offset, size))
                                 }
                                 _ => None,
@@ -756,7 +758,7 @@ impl Gpu for WebGpu {
                     }
                     BindingType::Sampler | BindingType::Texture | BindingType::UnfilterableTexture => {
                         let sampler = info.type_ == BindingType::Sampler;
-                        let texture_id = program.texture_at(info.binding, sampler).ok_or_else(missing)? as u32;
+                        let texture_id = info.id.ok_or_else(missing)?;
                         let (texture, texture_sampler) = desc
                             .entries
                             .iter()

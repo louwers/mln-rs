@@ -24,6 +24,7 @@ mln_gfx.workspace = true
 mln_tile_id.workspace = true
 mln_util.workspace = true
 mln_glsl.workspace = true
+mln_shaders = { workspace = true, features = ["spirv"] }
 naga = { workspace = true, features = ["spv-out"] }
 parking_lot.workspace = true
 

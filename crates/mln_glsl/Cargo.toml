@@ -18,7 +18,8 @@ doctest = false
 # The crate is empty on Apple platforms and in the browser build.
 [target.'cfg(not(any(target_vendor = "apple", target_family = "wasm")))'.dependencies]
 mln_gfx.workspace = true
-naga.workspace = true
+mln_shaders.workspace = true
+naga = { workspace = true, features = ["glsl-in"] }
 
 [features]
 # `variants`, the sets of defines that the backends' tests compile each

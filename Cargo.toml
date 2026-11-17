@@ -66,6 +66,7 @@ mln_renderer = { package = "mln-rs-renderer", path = "crates/mln_renderer", vers
 # Without its backends (its default features) unless a package asks for
 # them, so that a browser build of mln_c carries one.
 mln_runtime = { package = "mln-rs-runtime", path = "crates/mln_runtime", version = "=0.0.12", default-features = false }
+mln_shaders = { package = "mln-rs-shaders", path = "crates/mln_shaders", version = "=0.0.12" }
 mln_sprite = { package = "mln-rs-sprite", path = "crates/mln_sprite", version = "=0.0.12" }
 # Without SQLite (its `sqlite` feature) unless a package asks for it, so
 # that examples/web leaves it out.
@@ -407,11 +408,13 @@ gpu-allocator = { version = "0.28.0", default-features = false, features = [
   "std",
   "vulkan",
 ] }
-# The GLSL front end of the Vulkan and D3D12 backends' shaders
-# (crates/mln_glsl), whose back ends turn on their own features: SPIR-V for
-# Vulkan and HLSL for D3D12. The GLSL front end needs a module that only
-# `wgsl-in` or `spv-in` builds.
-naga = { version = "30.0.1", features = ["glsl-in", "wgsl-in"] }
+# The WGSL front end that crates/mln_shaders parses its linked programs with,
+# whose back ends each backend turns on: SPIR-V for Vulkan, HLSL for D3D12,
+# MSL for Metal and GLSL for OpenGL. crates/mln_glsl adds the GLSL front end,
+# which needs a module that only `wgsl-in` or `spv-in` builds.
+naga = { version = "30.0.1", features = ["wgsl-in"] }
+# Links crates/mln_shaders' WESL into WGSL.
+wesl = { version = "0.6.0", default-features = false }
 # examples/desktop: the CAMetalLayer of the window's view on macOS.
 raw-window-metal = { version = "1.1.0" }
 # examples/desktop's window and input. On Linux it loads the X11 and Wayland

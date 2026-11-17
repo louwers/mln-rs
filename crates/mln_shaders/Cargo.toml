@@ -1,0 +1,42 @@
+[package]
+name = "mln-rs-shaders"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+include = ["/build.rs", "/src", "/shaders", "/README.md", "/LICENSE*"]
+publish = false
+
+[lib]
+name = "mln_shaders"
+doctest = false
+
+[dependencies]
+mln_gfx.workspace = true
+mln_util.workspace = true
+naga.workspace = true
+parking_lot.workspace = true
+wesl.workspace = true
+
+[dev-dependencies]
+# The tests write every target's language.
+naga = { workspace = true, features = [
+  "glsl-out",
+  "hlsl-out",
+  "msl-out",
+  "spv-out",
+] }
+
+[features]
+# The writers of each backend's language, by naga.
+glsl = ["naga/glsl-out"]
+hlsl = ["naga/hlsl-out"]
+msl = ["naga/msl-out"]
+spirv = ["naga/spv-out"]
+
+[lints]
+workspace = true

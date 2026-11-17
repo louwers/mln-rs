@@ -1,7 +1,7 @@
-//! WGSL programs and their pipelines. Shader modules and pipelines are
-//! created inside a validation error scope, so that a WGSL compile error or a
-//! rejected pipeline is an `Err`. On a browser's WebGPU the scope is skipped
-//! (see [`validated`]).
+//! WGSL programs, from `mln_shaders` or the hand-written sources, and their
+//! pipelines. Shader modules and pipelines are created inside a validation
+//! error scope, so that a WGSL compile error or a rejected pipeline is an
+//! `Err`. On a browser's WebGPU the scope is skipped (see [`validated`]).
 
 use std::borrow::Cow;
 
@@ -38,6 +38,10 @@ pub(crate) struct BindingInfo {
     pub(crate) binding: u32,
     pub(crate) type_: BindingType,
     pub(crate) visibility: wgpu::ShaderStages,
+    /// The renderer's id of the buffer, or of the texture a texture or
+    /// sampler binding takes; `None` for a texture the program's table has
+    /// no id for.
+    pub(crate) id: Option<u32>,
 }
 
 /// Runs `create` inside a validation error scope and returns the error the
@@ -252,6 +256,8 @@ pub(crate) struct ShaderProgram {
     device: wgpu::Device,
     vertex_shader_module: wgpu::ShaderModule,
     fragment_shader_module: wgpu::ShaderModule,
+    /// The names of the vertex and fragment entry points.
+    entry_points: [&'static str; 2],
     bind_group_layouts: Vec<wgpu::BindGroupLayout>,
     bind_group_order: Vec<u32>,
     /// The group that holds only `globalIndex` (see
@@ -261,7 +267,9 @@ pub(crate) struct ShaderProgram {
     /// The shader locations of the per-vertex and per-instance inputs.
     attributes: &'static [AttributeInfo],
     instance_attributes: &'static [AttributeInfo],
-    textures: &'static [TextureInfo],
+    /// Whether an input's location is its id, as in the programs of
+    /// `mln_shaders`, rather than its index in the tables.
+    location_is_id: bool,
     bindings_per_group: Vec<Vec<BindingInfo>>,
     /// The bytes of each buffer the sources read (`buffer_sizes`).
     buffer_sizes: Vec<((u32, u32), u64)>,
@@ -310,6 +318,28 @@ impl ShaderProgram {
         let mut binding_infos = Vec::new();
         analyze_shader_bindings(&mut binding_infos, vertex_source, wgpu::ShaderStages::VERTEX);
         analyze_shader_bindings(&mut binding_infos, fragment_source, wgpu::ShaderStages::FRAGMENT);
+        for info in &mut binding_infos {
+            info.id = match info.type_ {
+                BindingType::UniformBuffer | BindingType::ReadOnlyStorageBuffer | BindingType::StorageBuffer => {
+                    Some(info.binding)
+                }
+                BindingType::Sampler => texture_at(source.textures, info.binding, true),
+                BindingType::Texture | BindingType::UnfilterableTexture => {
+                    texture_at(source.textures, info.binding, false)
+                }
+            };
+        }
+        // Sources that declare no binding get a group 0 with a uniform buffer
+        // at binding 0.
+        if binding_infos.is_empty() {
+            binding_infos.push(BindingInfo {
+                group: 0,
+                binding: 0,
+                type_: BindingType::UniformBuffer,
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                id: Some(0),
+            });
+        }
         let groups = BindGroups::new(device, binding_infos, index_group, index_layout);
         let layouts: Vec<Option<&wgpu::BindGroupLayout>> = groups.layouts.iter().map(Some).collect();
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -323,15 +353,86 @@ impl ShaderProgram {
             device: device.clone(),
             vertex_shader_module,
             fragment_shader_module,
+            entry_points: ["main", "main"],
             bind_group_layouts: groups.layouts,
             bind_group_order: groups.order,
             index_group,
             pipeline_layout,
             attributes: source.attributes,
             instance_attributes: source.instance_attributes,
-            textures: source.textures,
+            location_is_id: false,
             bindings_per_group: groups.bindings,
             buffer_sizes: buffer_sizes(&[vertex_source, fragment_source]),
+        })
+    }
+
+    /// The program of `source` from `program`, its WGSL linked by
+    /// `mln_shaders`: one module with both entry points, whose bindings,
+    /// group of the draw's index and buffer sizes `program` reports.
+    pub(crate) fn from_wesl(
+        device: &wgpu::Device,
+        index_layout: &wgpu::BindGroupLayout,
+        program: &mln_shaders::Program,
+        source: &ShaderSource,
+    ) -> Result<Self, GpuError> {
+        use mln_shaders::{ResourceKind, Stage};
+
+        let name = source.name;
+        let module = validated(device, || {
+            device
+                .create_shader_module(wgpu::ShaderModuleDescriptor { label: Some(name), source: wesl_source(program) })
+        })
+        .map_err(|error| GpuError::Invalid(format!("shader {name}: {error}")))?;
+        let binding_infos = program
+            .resources
+            .iter()
+            .map(|resource| {
+                let mut visibility = wgpu::ShaderStages::empty();
+                visibility.set(wgpu::ShaderStages::VERTEX, resource.vertex);
+                visibility.set(wgpu::ShaderStages::FRAGMENT, resource.fragment);
+                BindingInfo {
+                    group: resource.binding.group,
+                    binding: resource.binding.binding,
+                    type_: match resource.kind {
+                        ResourceKind::UniformBuffer => BindingType::UniformBuffer,
+                        ResourceKind::StorageBuffer => BindingType::ReadOnlyStorageBuffer,
+                        ResourceKind::Texture { filterable: true } => BindingType::Texture,
+                        ResourceKind::Texture { filterable: false } => BindingType::UnfilterableTexture,
+                        ResourceKind::Sampler => BindingType::Sampler,
+                    },
+                    visibility,
+                    id: Some(resource.id),
+                }
+            })
+            .collect();
+        let groups = BindGroups::new(device, binding_infos, program.index_group, index_layout);
+        let layouts: Vec<Option<&wgpu::BindGroupLayout>> = groups.layouts.iter().map(Some).collect();
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some(name),
+            bind_group_layouts: &layouts,
+            immediate_size: 0,
+        });
+        let buffer_sizes = program
+            .resources
+            .iter()
+            .filter(|resource| matches!(resource.kind, ResourceKind::UniformBuffer | ResourceKind::StorageBuffer))
+            .map(|resource| ((resource.binding.group, resource.binding.binding), resource.size))
+            .collect();
+        Ok(ShaderProgram {
+            shader_name: name.to_owned(),
+            device: device.clone(),
+            vertex_shader_module: module.clone(),
+            fragment_shader_module: module,
+            entry_points: [Stage::Vertex.entry_point(), Stage::Fragment.entry_point()],
+            bind_group_layouts: groups.layouts,
+            bind_group_order: groups.order,
+            index_group: program.index_group,
+            pipeline_layout,
+            attributes: source.attributes,
+            instance_attributes: source.instance_attributes,
+            location_is_id: true,
+            bindings_per_group: groups.bindings,
+            buffer_sizes,
         })
     }
 
@@ -370,28 +471,16 @@ impl ShaderProgram {
         &self.shader_name
     }
 
-    /// The lowest texture id whose sampler the shader declares at `binding`
-    /// if `sampler`, else whose texture it declares there: a texture's
-    /// sampler is at its location, and the texture there or at the next
-    /// binding.
-    pub(crate) fn texture_at(&self, binding: u32, sampler: bool) -> Option<usize> {
-        self.textures
-            .iter()
-            .filter(|texture| {
-                let location = texture.index as u32;
-                location == binding || (!sampler && location + 1 == binding)
-            })
-            .map(|texture| texture.id)
-            .min()
-    }
-
     /// The shader location of the input `id` that steps by `step`.
     fn location(&self, step: VertexStep, id: u32) -> Option<u32> {
         let attributes = match step {
             VertexStep::Vertex => self.attributes,
             VertexStep::Instance => self.instance_attributes,
         };
-        attributes.iter().find(|attribute| attribute.id == id as usize).map(|attribute| attribute.index as u32)
+        attributes
+            .iter()
+            .find(|attribute| attribute.id == id as usize)
+            .map(|attribute| if self.location_is_id { id } else { attribute.index as u32 })
     }
 
     /// The pipeline of this program with `state`, reading vertex buffers of
@@ -509,7 +598,7 @@ impl ShaderProgram {
                 layout: Some(&self.pipeline_layout),
                 vertex: wgpu::VertexState {
                     module: &self.vertex_shader_module,
-                    entry_point: Some("main"),
+                    entry_point: Some(self.entry_points[0]),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                     buffers: &buffers,
                 },
@@ -518,7 +607,7 @@ impl ShaderProgram {
                 multisample: wgpu::MultisampleState::default(),
                 fragment: Some(wgpu::FragmentState {
                     module: &self.fragment_shader_module,
-                    entry_point: Some("main"),
+                    entry_point: Some(self.entry_points[1]),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                     targets: &targets,
                 }),
@@ -540,23 +629,12 @@ struct BindGroups {
 
 impl BindGroups {
     /// The groups of `binding_infos`, with `index_layout` for `index_group`.
-    /// Sources that declare no binding get a group 0 with a uniform buffer
-    /// at binding 0.
     fn new(
         device: &wgpu::Device,
-        mut binding_infos: Vec<BindingInfo>,
+        binding_infos: Vec<BindingInfo>,
         index_group: Option<u32>,
         index_layout: &wgpu::BindGroupLayout,
     ) -> BindGroups {
-        if binding_infos.is_empty() {
-            binding_infos.push(BindingInfo {
-                group: 0,
-                binding: 0,
-                type_: BindingType::UniformBuffer,
-                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-            });
-        }
-
         let mut grouped: VecMap<u32, Vec<BindingInfo>> = VecMap::new();
         for info in binding_infos {
             grouped.entry(info.group).or_default().push(info);
@@ -608,6 +686,33 @@ impl BindingType {
             BindingType::UnfilterableTexture => texture(false),
         }
     }
+}
+
+/// The lowest texture id of `textures` whose sampler a shader declares at
+/// `binding` if `sampler`, else whose texture it declares there: a
+/// texture's sampler is at its location, and the texture there or at the
+/// next binding.
+fn texture_at(textures: &[TextureInfo], binding: u32, sampler: bool) -> Option<u32> {
+    textures
+        .iter()
+        .filter(|texture| {
+            let location = texture.index as u32;
+            location == binding || (!sampler && location + 1 == binding)
+        })
+        .map(|texture| texture.id as u32)
+        .min()
+}
+
+/// `program` for wgpu: natively, the module naga parsed already; in a
+/// browser, its WGSL.
+#[cfg(not(target_family = "wasm"))]
+fn wesl_source(program: &mln_shaders::Program) -> wgpu::ShaderSource<'_> {
+    wgpu::ShaderSource::Naga(Cow::Owned(program.module.clone()))
+}
+
+#[cfg(target_family = "wasm")]
+fn wesl_source(program: &mln_shaders::Program) -> wgpu::ShaderSource<'_> {
+    wgpu::ShaderSource::Wgsl(Cow::Borrowed(&program.wgsl))
 }
 
 /// Adds the bindings of the `@group(N) @binding(M) var<...> name: type`
@@ -710,15 +815,16 @@ fn analyze_shader_bindings(binding_infos: &mut Vec<BindingInfo>, source: &str, s
                 existing.type_ = type_;
             }
         } else {
-            binding_infos.push(BindingInfo { group, binding, type_, visibility: stage });
+            binding_infos.push(BindingInfo { group, binding, type_, visibility: stage, id: None });
         }
 
         search_pos = type_end;
     }
 }
 
-/// Compiles the program of `key`: the common prelude, the program's own
-/// prelude and each stage, preprocessed with the key's defines.
+/// Compiles the program of `key`: its WESL, if `mln_shaders` has it, or
+/// else the common prelude, the program's own prelude and each stage,
+/// preprocessed with the key's defines.
 pub(crate) fn compile(
     device: &wgpu::Device,
     index_layout: &wgpu::BindGroupLayout,
@@ -726,6 +832,10 @@ pub(crate) fn compile(
 ) -> Result<ShaderProgram, GpuError> {
     let source = program_source(key.program())
         .ok_or_else(|| GpuError::Unsupported(format!("no WGSL for {:?}", key.program())))?;
+    if let Some(program) = mln_shaders::program_of(key, mln_shaders::Target::WebGpu) {
+        let program = program.map_err(|error| GpuError::Invalid(format!("{}: {error}", source.name)))?;
+        return ShaderProgram::from_wesl(device, index_layout, &program, source);
+    }
     // The common prelude goes through the preprocessor with the program, so
     // its `#ifdef`s see the defines.
     let shader_prelude = source.wgsl.prelude.unwrap_or("");

@@ -20,6 +20,7 @@ doctest = false
 block2.workspace = true
 bytemuck.workspace = true
 mln_gfx.workspace = true
+mln_shaders = { workspace = true, features = ["msl"] }
 mln_tile_id.workspace = true
 mln_util.workspace = true
 objc2.workspace = true
