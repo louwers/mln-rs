@@ -3804,16 +3804,14 @@ void multidirectional_hillshade(vec2 deriv, const HillshadeTilePropsUBO tileProp
     deriv = deriv * tileProps.exaggeration * 2.0;
     vec4 total_color = vec4(0, 0, 0, 0);
 
-    // Access altitude and azimuth from vec4 UBOs
-    float altitudes[4] = float[4](props.altitudes.x, props.altitudes.y, props.altitudes.z, props.altitudes.w);
-    float azimuths[4] = float[4](props.azimuths.x, props.azimuths.y, props.azimuths.z, props.azimuths.w);
-
     int num_lights = min(tileProps.num_lights, 4);
 
     // Iterate through all light sources
     for (int i = 0; i < num_lights; i++) {
-        float altitude = altitudes[i];
-        float azimuth = azimuths[i];
+        // Select the light's altitude and azimuth from the vec4 UBOs: a local
+        // array indexed by the loop can live in scratch memory.
+        float altitude = i == 0 ? props.altitudes.x : i == 1 ? props.altitudes.y : i == 2 ? props.altitudes.z : props.altitudes.w;
+        float azimuth = i == 0 ? props.azimuths.x : i == 1 ? props.azimuths.y : i == 2 ? props.azimuths.z : props.azimuths.w;
 
         float cos_alt = cos(altitude);
         float sin_alt = sin(altitude);
