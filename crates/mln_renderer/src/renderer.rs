@@ -221,7 +221,7 @@ impl Renderer {
         let _hold = backend.hold();
         let start = Instant::now();
         let mut render_tree = self.orchestrator.create_render_tree(update_parameters)?;
-        render_tree.prepare();
+        render_tree.prepare(self.orchestrator.placement());
         let prepared = Instant::now();
         let placement = self.orchestrator.symbol_placement_start.unwrap_or(prepared).max(start);
         let handoff = self.render_frame(&render_tree, update_parameters, target);

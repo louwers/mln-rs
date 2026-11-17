@@ -452,8 +452,7 @@ impl PlacementContext {
 }
 
 pub(crate) struct PlacementController {
-    empty_placement: Rc<Placement>,
-    placement: Rc<Placement>,
+    placement: Placement,
     stale: bool,
 }
 
@@ -466,25 +465,33 @@ impl Default for PlacementController {
 impl PlacementController {
     #[must_use]
     pub(crate) fn new() -> Self {
-        let empty_placement = Rc::new(Placement::new_default());
-        PlacementController { placement: Rc::clone(&empty_placement), empty_placement, stale: false }
+        PlacementController { placement: Placement::new_default(), stale: false }
     }
 
-    pub(crate) fn set_placement(&mut self, placement: Rc<Placement>) {
+    pub(crate) fn set_placement(&mut self, placement: Placement) {
         self.placement = placement;
         self.stale = false;
+    }
+
+    /// Takes the current placement, for the next one to place against,
+    /// leaving the empty placement.
+    pub(crate) fn take_placement(&mut self) -> Placement {
+        std::mem::replace(&mut self.placement, Placement::new_default())
     }
 
     /// Resets to the empty placement; returns whether a committed placement
     /// was discarded.
     pub(crate) fn reset(&mut self) -> bool {
-        let changed = !Rc::ptr_eq(&self.placement, &self.empty_placement);
-        self.set_placement(Rc::clone(&self.empty_placement));
+        let changed = self.placement.update_parameters.is_some();
+        if changed {
+            self.placement = Placement::new_default();
+        }
+        self.stale = false;
         changed
     }
 
     #[must_use]
-    pub(crate) fn get_placement(&self) -> &Rc<Placement> {
+    pub(crate) fn get_placement(&self) -> &Placement {
         &self.placement
     }
 
@@ -594,7 +601,12 @@ pub(crate) struct Placement {
 
     retained_query_data: HashMap<u32, RetainedQueryData>,
     collision_groups: CollisionGroups,
-    prev_placement: RefCell<Option<Rc<Placement>>>,
+    /// The placement this one replaces, which it reads while it places and
+    /// drops when it commits.
+    prev_placement: Option<Box<Placement>>,
+    /// The collision index of the placement this one replaced, which its
+    /// commit no longer reads; the next placement reuses its grids.
+    spare_collision_index: Option<CollisionIndex>,
     show_collision_boxes: bool,
 
     // Cache being used by placeSymbol()
@@ -843,7 +855,8 @@ impl Placement {
             placed_orientations: HashMap::default(),
             retained_query_data: HashMap::default(),
             collision_groups: CollisionGroups::new(true),
-            prev_placement: RefCell::new(None),
+            prev_placement: None,
+            spare_collision_index: None,
             show_collision_boxes: false,
             text_boxes: Vec::new(),
             icon_boxes: Vec::new(),
@@ -851,18 +864,9 @@ impl Placement {
         }
     }
 
-    fn new(
-        update_parameters: Arc<UpdateParameters>,
-        prev_placement: Option<Rc<Placement>>,
-        kind: PlacementKind,
-    ) -> Self {
-        // Only hold on to one placement back. The one before it is done
-        // with its collision index, unless something else still holds it.
-        let previous_collision_index = prev_placement
-            .as_ref()
-            .and_then(|prev| prev.prev_placement.borrow_mut().take())
-            .and_then(|placement| Rc::try_unwrap(placement).ok())
-            .map(|placement| placement.collision_index);
+    fn new(update_parameters: Arc<UpdateParameters>, prev_placement: Option<Placement>, kind: PlacementKind) -> Self {
+        let mut prev_placement = prev_placement;
+        let previous_collision_index = prev_placement.as_mut().and_then(|prev| prev.spare_collision_index.take());
         Placement {
             kind,
             collision_index: CollisionIndex::reusing(
@@ -881,7 +885,8 @@ impl Placement {
             placed_orientations: HashMap::default(),
             retained_query_data: HashMap::default(),
             collision_groups: CollisionGroups::new(update_parameters.cross_source_collisions),
-            prev_placement: RefCell::new(prev_placement),
+            prev_placement: prev_placement.map(Box::new),
+            spare_collision_index: None,
             show_collision_boxes: update_parameters.debug_options.contains(MapDebugOptions::COLLISION),
             text_boxes: Vec::new(),
             icon_boxes: Vec::new(),
@@ -892,7 +897,7 @@ impl Placement {
 
     /// A new placement, from the given update parameters and the previous
     /// placement. In Continuous map mode, `prev_placement` must be provided.
-    pub(crate) fn create(update_parameters: Arc<UpdateParameters>, prev_placement: Option<Rc<Placement>>) -> Placement {
+    pub(crate) fn create(update_parameters: Arc<UpdateParameters>, prev_placement: Option<Placement>) -> Placement {
         match update_parameters.mode {
             MapMode::Continuous => {
                 debug_assert!(prev_placement.is_some());
@@ -903,8 +908,8 @@ impl Placement {
         }
     }
 
-    fn get_prev_placement(&self) -> Option<Rc<Placement>> {
-        self.prev_placement.borrow().clone()
+    fn get_prev_placement(&self) -> Option<&Placement> {
+        self.prev_placement.as_deref()
     }
 
     fn is_tilted_view(&self) -> bool {
@@ -1041,10 +1046,10 @@ impl Placement {
             let update_previous_orientation_if_not_placed = |this: &mut Placement, is_placed: bool| {
                 if bucket.allow_vertical_placement
                     && !is_placed
-                    && let Some(prev) = this.get_prev_placement()
-                    && let Some(prev_orientation) = prev.placed_orientations.get(&cross_tile_id)
+                    && let Some(prev_orientation) =
+                        this.get_prev_placement().and_then(|prev| prev.placed_orientations.get(&cross_tile_id)).copied()
                 {
-                    this.placed_orientations.insert(cross_tile_id, *prev_orientation);
+                    this.placed_orientations.insert(cross_tile_id, prev_orientation);
                 }
             };
 
@@ -1199,10 +1204,10 @@ impl Placement {
                 // If we didn't get placed, we still need to copy our position from
                 // the last placement for fade animations
                 if !place_text
-                    && let Some(prev) = self.get_prev_placement()
-                    && let Some(prev_offset) = prev.variable_offsets.get(&cross_tile_id)
+                    && let Some(prev_offset) =
+                        self.get_prev_placement().and_then(|prev| prev.variable_offsets.get(&cross_tile_id)).copied()
                 {
-                    self.variable_offsets.insert(cross_tile_id, *prev_offset);
+                    self.variable_offsets.insert(cross_tile_id, prev_offset);
                 }
             }
         }
@@ -1524,7 +1529,7 @@ impl Placement {
 
     fn continuous_commit(&mut self) {
         let mut placement_changed = false;
-        let Some(prev) = self.get_prev_placement() else {
+        let Some(prev) = self.prev_placement.take() else {
             debug_assert!(false);
             return;
         };
@@ -1583,6 +1588,7 @@ impl Placement {
         }
 
         self.fade_start_time = if placement_changed { self.commit_time } else { prev.fade_start_time };
+        self.spare_collision_index = Some(prev.collision_index);
     }
 
     fn static_commit(&mut self) {

@@ -88,7 +88,6 @@ pub(crate) struct RenderTree {
     // symbols:
     layers_need_placement: Vec<RenderLayerPtr>,
     layers_following_placement: Vec<RenderLayerPtr>,
-    placement: Option<std::rc::Rc<crate::text::placement::Placement>>,
     update_symbol_opacities: bool,
     start_time: mln_util::time::Instant,
 }
@@ -106,7 +105,6 @@ impl RenderTree {
             source_render_items,
             layers_need_placement: Vec::new(),
             layers_following_placement: Vec::new(),
-            placement: None,
             update_symbol_opacities: false,
             start_time,
         }
@@ -117,21 +115,16 @@ impl RenderTree {
         &mut self,
         layers_need_placement: Vec<RenderLayerPtr>,
         layers_following_placement: Vec<RenderLayerPtr>,
-        placement: std::rc::Rc<crate::text::placement::Placement>,
         update_symbol_opacities: bool,
     ) {
         self.layers_need_placement = layers_need_placement;
         self.layers_following_placement = layers_following_placement;
-        self.placement = Some(placement);
         self.update_symbol_opacities = update_symbol_opacities;
     }
 
     /// Updates the symbol buckets of the layers that need placement, then the
     /// positions of the layers that draw buckets other layers place.
-    pub(crate) fn prepare(&mut self) {
-        let Some(placement) = &self.placement else {
-            return;
-        };
+    pub(crate) fn prepare(&mut self, placement: &crate::text::placement::Placement) {
         for layer in self.layers_need_placement.iter().rev() {
             placement.update_layer_buckets(
                 &*layer.borrow(),

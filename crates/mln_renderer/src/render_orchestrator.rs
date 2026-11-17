@@ -43,7 +43,6 @@ use crate::render_source::{self, RenderSource, SourcePrepareParameters};
 use crate::render_tree::{DebugType, LayerRenderItem, RenderItem, RenderTree, RenderTreeParameters};
 use crate::renderer_event::{EventSink, RendererEvent, RendererEvents};
 use crate::sources::render_tile_source::{PolylineLayerTweaker, debug_line_properties}; // layers: debug
-use crate::text::cross_tile_symbol_index::AddLayerResult;
 use crate::text::glyph_store::{GlyphStore, GlyphStoreObserver};
 use crate::text::placement::Placement;
 use crate::tile::inbox::Waker;
@@ -900,8 +899,8 @@ impl RenderOrchestrator {
             let result = self.cross_tile_symbol_index.add_layer(&*layer, longitude, &update_parameters.transform_state);
             if is_map_mode_continuous {
                 used_symbol_layers.insert(layer.get_id().to_owned());
-                symbol_buckets_added = symbol_buckets_added || result.contains(AddLayerResult::BUCKETS_ADDED);
-                symbol_buckets_changed = symbol_buckets_changed || result != AddLayerResult::NO_CHANGES;
+                symbol_buckets_added |= result.buckets_added;
+                symbol_buckets_changed |= result.buckets_added || result.buckets_removed;
             }
         }
 
@@ -937,12 +936,10 @@ impl RenderOrchestrator {
             );
             symbol_buckets_changed |= render_tree_parameters.placement_changed;
             if render_tree_parameters.placement_changed {
-                let mut placement = Placement::create(
-                    Arc::clone(update_parameters),
-                    Some(Rc::clone(self.placement_controller.get_placement())),
-                );
+                let prev = self.placement_controller.take_placement();
+                let mut placement = Placement::create(Arc::clone(update_parameters), Some(prev));
                 placement.place_layers(&layers_need_placement);
-                self.placement_controller.set_placement(Rc::new(placement));
+                self.placement_controller.set_placement(placement);
                 self.cross_tile_symbol_index.prune_unused_layers(&used_symbol_layers);
                 self.tile_store.update_fading_tiles();
             } else {
@@ -958,7 +955,7 @@ impl RenderOrchestrator {
                 let mut placement = Placement::create(Arc::clone(update_parameters), None);
                 placement.collect_placed_symbol_data(self.placed_symbol_data_collected);
                 placement.place_layers(&layers_need_placement);
-                self.placement_controller.set_placement(Rc::new(placement));
+                self.placement_controller.set_placement(placement);
             }
             self.cross_tile_symbol_index.reset();
             render_tree_parameters.symbol_fade_change = 1.0;
@@ -984,13 +981,13 @@ impl RenderOrchestrator {
             RenderTree::new(render_tree_parameters, layer_render_items, source_render_items, start_time);
         // symbols: layersNeedPlacement, layersFollowingPlacement, placement,
         // updateSymbolOpacities.
-        render_tree.set_placement(
-            layers_need_placement,
-            layers_following_placement,
-            Rc::clone(self.placement_controller.get_placement()),
-            symbol_buckets_changed,
-        );
+        render_tree.set_placement(layers_need_placement, layers_following_placement, symbol_buckets_changed);
         Some(render_tree)
+    }
+
+    /// The current symbol placement.
+    pub(crate) fn placement(&self) -> &Placement {
+        self.placement_controller.get_placement()
     }
 
     pub(crate) fn has_transitions(&self, time_point: Option<Instant>) -> bool {
