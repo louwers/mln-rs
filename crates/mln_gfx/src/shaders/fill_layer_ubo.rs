@@ -145,9 +145,6 @@ impl FillDrawableUnionUBO {
     pub fn set_fill_pattern(&mut self, ubo: &FillPatternDrawableUBO) {
         self.write(ubo);
     }
-    pub fn set_fill_outline_triangulated(&mut self, ubo: &FillOutlineTriangulatedDrawableUBO) {
-        self.write(ubo);
-    }
 }
 
 /// Any fill per-tile uniform block, for consolidated UBOs (48 bytes).

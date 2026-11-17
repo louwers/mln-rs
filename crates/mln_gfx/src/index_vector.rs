@@ -101,11 +101,6 @@ impl IndexVectorBase {
             self.free_raw_data();
         }
     }
-    pub fn at_mut(&mut self, n: usize) -> &mut u16 {
-        debug_assert!(!self.released);
-        self.dirty = true;
-        &mut self.v[n]
-    }
     /// The element count, which stays when the CPU copy is freed.
     #[must_use]
     pub fn elements(&self) -> usize {

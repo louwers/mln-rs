@@ -59,5 +59,5 @@ pub use shader_registry::ShaderRegistry;
 pub use shaders::shader_program::{ShaderProgram, ShaderProgramPtr};
 pub use stencil_mode::StencilMode;
 pub use types::DepthMaskType;
-pub use vertex_attribute::{VertexAttribute, VertexAttributeArray, VertexAttributeArrayPtr};
+pub use vertex_attribute::{VertexAttribute, VertexAttributeArray};
 pub use window::Window;

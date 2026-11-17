@@ -1,8 +1,7 @@
 // The WebGPU subclasses (include/mln/webgpu/vertex_attribute.hpp) add no
 // data, so `create()`/`copy()` are not virtual here.
 
-use std::cell::{Cell, RefCell};
-use std::rc::Rc;
+use std::cell::Cell;
 
 use mln_util::time::Instant;
 
@@ -159,19 +158,10 @@ pub struct VertexAttributeArray {
     attrs: [Option<UniqueVertexAttribute>; MAX_ATTRIBUTE_COUNT_PER_SHADER],
 }
 
-/// A shared attribute array. Drawables, builders and uploads mutate it
-/// through the shared handle.
-pub type VertexAttributeArrayPtr = Rc<RefCell<VertexAttributeArray>>;
-
 impl VertexAttributeArray {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
-    }
-
-    #[must_use]
-    pub fn new_ptr() -> VertexAttributeArrayPtr {
-        Rc::new(RefCell::new(Self::new()))
     }
 
     #[must_use]
@@ -209,12 +199,6 @@ impl VertexAttributeArray {
     #[must_use]
     pub fn is_modified_after(&self, time: Instant) -> bool {
         self.attrs.iter().any(|attr| attr.as_ref().is_some_and(|a| a.is_modified_after(time)))
-    }
-
-    pub fn visit_attributes(&self, mut f: impl FnMut(&VertexAttribute)) {
-        for attr in self.attrs.iter().flatten() {
-            f(attr);
-        }
     }
 
     /// For each id, calls `found(id, default, override)` when this array has
