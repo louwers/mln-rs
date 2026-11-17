@@ -48,7 +48,9 @@ use crate::layout::clip_lines::clip_lines;
 use crate::layout::layout::{BuildParams, Layout, LayoutParameters, SourceLayer, layers_by_id};
 use crate::layout::merge_lines::merge_lines;
 use crate::layout::symbol_feature::SymbolFeature;
-use crate::layout::symbol_instance::{ShapedTextOrientations, SymbolContent, SymbolInstance, SymbolInstanceSharedData};
+use crate::layout::symbol_instance::{
+    ShapedTextOrientations, SymbolContent, SymbolInstance, SymbolInstancePools, SymbolInstanceSharedData,
+};
 use crate::layout::tile_layout::Resolved;
 use crate::text::collision_index::OverlapMode;
 use crate::text::get_anchors::{get_anchors, get_center_anchor};
@@ -296,6 +298,7 @@ pub(crate) struct SymbolLayout {
     /// for each symbol it places.
     pub(crate) bucket_leader_id: Arc<str>,
     pub(crate) symbol_instances: Vec<SymbolInstance>,
+    symbol_instance_pools: SymbolInstancePools,
     pub(crate) sort_key_ranges: Vec<SortKeyRange>,
 
     compare_text: VecMap<Vec<u16>, Vec<Anchor>>,
@@ -360,6 +363,7 @@ impl SymbolLayout {
             layer_paint_properties: VecMap::new(),
             bucket_leader_id: Arc::from(leader.id.as_str()),
             symbol_instances: Vec::new(),
+            symbol_instance_pools: SymbolInstancePools::default(),
             sort_key_ranges: Vec::new(),
             compare_text: VecMap::new(),
             source_layer_name: Arc::from(source_layer.name.as_str()),
@@ -853,7 +857,7 @@ impl SymbolLayout {
             }
         }
 
-        let key: Vec<u16> = feature.formatted_text.as_ref().map(|t| t.raw_text().to_vec()).unwrap_or_default();
+        let key: &[u16] = feature.formatted_text.as_ref().map_or(&[], |text| text.raw_text());
 
         let allow_vertical_placement = self.allow_vertical_placement;
         let create_symbol_instance_shared_data = |line: GeometryCoordinates| {
@@ -906,7 +910,7 @@ impl SymbolLayout {
                         &indexed_feature,
                         layout_feature_index,
                         feature.index,
-                        key.clone(),
+                        key,
                         overscaling,
                         icon_rotation,
                         text_rotation,
@@ -914,6 +918,7 @@ impl SymbolLayout {
                         allow_vertical_placement,
                         icon_type,
                         height_offset,
+                        &mut this.symbol_instance_pools,
                     ));
 
                     if sort_features_by_key {
@@ -1333,6 +1338,7 @@ impl SymbolLayout {
         }
 
         let instances = std::mem::take(&mut state.symbol_instances);
+        let pools = std::mem::take(&mut state.symbol_instance_pools);
         for symbol_instance in &instances {
             let mut populate_collision_box = |feature: &crate::text::collision_feature::CollisionFeature,
                                               is_text: bool| {
@@ -1348,7 +1354,7 @@ impl SymbolLayout {
                     state.icon_collision_box.get_or_insert_with(Default::default)
                 };
 
-                for b in &feature.boxes {
+                for b in pools.boxes(feature) {
                     const VERTEX_LENGTH: usize = 4;
                     let anchor = b.anchor;
 
@@ -1412,6 +1418,7 @@ impl SymbolLayout {
             populate_collision_box(symbol_instance.get_icon_collision_feature(), false);
         }
         state.symbol_instances = instances;
+        state.symbol_instance_pools = pools;
     }
 
     fn has_symbol_instances_in(state: &SymbolBucketState) -> bool {
@@ -1826,6 +1833,7 @@ impl SymbolLayout {
             self.sort_features_by_y,
             self.bucket_leader_id.to_string(),
             std::mem::take(&mut self.symbol_instances),
+            std::mem::take(&mut self.symbol_instance_pools),
             std::mem::take(&mut self.sort_key_ranges),
             self.tile_pixel_ratio,
             self.allow_vertical_placement,

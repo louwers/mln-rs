@@ -15,6 +15,7 @@ use mln_util::grid_index::{BBox, BCircle};
 
 use crate::geometry::anchor::Anchor;
 use crate::geometry::feature_index::IndexedSubfeature;
+use crate::util::pool::PoolRange;
 
 /// The distance from `a` to `b` as C++ computes it: an `f64` square root of
 /// the integer sum, narrowed to `f32`.
@@ -147,7 +148,8 @@ impl CollisionBox {
 
 #[derive(Clone, Debug, mln_wire::Wire)]
 pub(crate) struct CollisionFeature {
-    pub(crate) boxes: Vec<CollisionBox>,
+    /// The feature's boxes, in its bucket's `SymbolInstancePools`.
+    pub(crate) boxes: PoolRange,
     pub(crate) indexed_feature: IndexedSubfeature,
     pub(crate) along_line: bool,
 }
@@ -169,13 +171,15 @@ impl CollisionFeature {
         indexed_feature: &IndexedSubfeature,
         overscaling: f32,
         rotate: f32,
+        boxes: &mut Vec<CollisionBox>,
     ) -> Self {
         let mut feature = CollisionFeature {
-            boxes: Vec::new(),
+            boxes: PoolRange::at_end(boxes),
             indexed_feature: indexed_feature.clone(),
             along_line: placement != SymbolPlacementType::Point,
         };
         feature.initialize(
+            boxes,
             line,
             anchor,
             shaped_text.top,
@@ -200,6 +204,10 @@ impl CollisionFeature {
     /// enough" to square that having incorrect rotation alignment doesn't throw
     /// off collision detection too much. See:
     /// <https://github.com/mapbox/mapbox-gl-js/issues/4861>
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the line, anchor and shaped icon, the box scale, padding, feature and rotation, and the pool"
+    )]
     #[must_use]
     pub(crate) fn new_icon(
         line: &GeometryCoordinates,
@@ -209,9 +217,13 @@ impl CollisionFeature {
         padding: &Padding,
         indexed_feature: &IndexedSubfeature,
         rotate: f32,
+        boxes: &mut Vec<CollisionBox>,
     ) -> Self {
-        let mut feature =
-            CollisionFeature { boxes: Vec::new(), indexed_feature: indexed_feature.clone(), along_line: false };
+        let mut feature = CollisionFeature {
+            boxes: PoolRange::at_end(boxes),
+            indexed_feature: indexed_feature.clone(),
+            along_line: false,
+        };
         if let Some(shaped_icon) = shaped_icon {
             let image = shaped_icon.image();
             let mut icon = shaped_icon.clone();
@@ -219,6 +231,7 @@ impl CollisionFeature {
                 icon = shaped_icon.apply_text_fit();
             }
             feature.initialize(
+                boxes,
                 line,
                 anchor,
                 icon.top(),
@@ -232,17 +245,20 @@ impl CollisionFeature {
                 rotate,
             );
         } else {
-            feature.initialize(line, anchor, 0.0, 0.0, 0.0, 0.0, None, box_scale, padding, 1.0, rotate);
+            feature.initialize(boxes, line, anchor, 0.0, 0.0, 0.0, 0.0, None, box_scale, padding, 1.0, rotate);
         }
         feature
     }
 
     #[expect(
         clippy::too_many_arguments,
-        reason = "the line, anchor and box edges, and the paddings, scales and rotation of the boxes"
+        reason = "the pool, line, anchor and box edges, and the paddings, scales and rotation of the boxes"
     )]
+    /// Appends the feature's boxes to `boxes`, the pool its range is at the
+    /// end of.
     fn initialize(
         &mut self,
+        boxes: &mut Vec<CollisionBox>,
         line: &GeometryCoordinates,
         anchor: &Anchor,
         top: f32,
@@ -285,7 +301,15 @@ impl CollisionFeature {
 
             // `convertPoint<int16_t>(anchor.point)`.
             let mut anchor_point = GeometryCoordinate::new(anchor.point.x as i16, anchor.point.y as i16);
-            self.bboxify_label(line, &mut anchor_point, anchor.segment.unwrap_or(0), length, height, overscaling);
+            self.bboxify_label(
+                boxes,
+                line,
+                &mut anchor_point,
+                anchor.segment.unwrap_or(0),
+                length,
+                height,
+                overscaling,
+            );
         } else if rotate != 0.0 {
             // Account for *-rotate in point collision boxes
             // Doesn't account for icon-text-fit
@@ -305,14 +329,19 @@ impl CollisionFeature {
             let y_min = min4([tl.y, tr.y, bl.y, br.y]);
             let y_max = max4([tl.y, tr.y, bl.y, br.y]);
 
-            self.boxes.push(CollisionBox::new(anchor.point, x_min, y_min, x_max, y_max, 0.0));
+            self.boxes.push(boxes, CollisionBox::new(anchor.point, x_min, y_min, x_max, y_max, 0.0));
         } else {
-            self.boxes.push(CollisionBox::new(anchor.point, x1, y1, x2, y2, 0.0));
+            self.boxes.push(boxes, CollisionBox::new(anchor.point, x1, y1, x2, y2, 0.0));
         }
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the pool, the line and the anchor on it, and the label's length, box size and overscaling"
+    )]
     fn bboxify_label(
         &mut self,
+        boxes: &mut Vec<CollisionBox>,
         line: &GeometryCoordinates,
         anchor_point: &mut GeometryCoordinate,
         segment: usize,
@@ -422,14 +451,17 @@ impl CollisionFeature {
                 (box_distance_to_anchor - first_box_offset) * 0.8f32
             };
 
-            self.boxes.push(CollisionBox::new(
-                box_anchor,
-                -box_size / 2.0,
-                -box_size / 2.0,
-                box_size / 2.0,
-                box_size / 2.0,
-                padded_anchor_distance,
-            ));
+            self.boxes.push(
+                boxes,
+                CollisionBox::new(
+                    box_anchor,
+                    -box_size / 2.0,
+                    -box_size / 2.0,
+                    box_size / 2.0,
+                    box_size / 2.0,
+                    padded_anchor_distance,
+                ),
+            );
         }
     }
 }

@@ -45,6 +45,7 @@ use crate::gfx::context::Context;
 use crate::gfx::upload::{upload_indexes, vertex_buffer};
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::pattern_layout::PatternLayerMap;
+use crate::layout::symbol_instance::SymbolInstancePools;
 use crate::tile_mask::TileMask;
 
 struct StubGeometryTileFeature {
@@ -400,6 +401,7 @@ fn symbol_bucket() {
         sort_features_by_y,
         bucket_leader_id,
         symbol_instances,
+        SymbolInstancePools::default(),
         symbol_ranges,
         1.0,
         false,

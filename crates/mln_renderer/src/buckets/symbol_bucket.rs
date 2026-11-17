@@ -36,7 +36,7 @@ use crate::bucket::{Bucket, BucketBase, FeatureStates};
 use crate::bucket_geometry::GeometryVec;
 use crate::gfx::context::Context;
 use crate::layer_type::EvaluatedLayer;
-use crate::layout::symbol_instance::SymbolInstance;
+use crate::layout::symbol_instance::{SymbolInstance, SymbolInstancePools};
 use crate::paint_property_binder::PaintPropertyBinder;
 use crate::util::pool::PoolRange;
 
@@ -463,6 +463,7 @@ pub(crate) struct SymbolBucketState {
     pub(crate) dynamic_icon_translation: Vec2,
 
     pub(crate) symbol_instances: Vec<SymbolInstance>,
+    pub(crate) symbol_instance_pools: SymbolInstancePools,
 
     pub(crate) text: Buffer,
     pub(crate) icon: Buffer,
@@ -562,6 +563,7 @@ impl SymbolBucket {
         sort_features_by_y: bool,
         bucket_name: String,
         symbol_instances: Vec<SymbolInstance>,
+        symbol_instance_pools: SymbolInstancePools,
         sort_key_ranges: Vec<SortKeyRange>,
         tile_pixel_ratio: f32,
         allow_vertical_placement: bool,
@@ -603,7 +605,12 @@ impl SymbolBucket {
             dynamic_version: AtomicU32::new(0),
             sort_version: AtomicU32::new(0),
             binder_version: AtomicU32::new(0),
-            state: Mutex::new(SymbolBucketState { sorted_angle: f32::MAX, symbol_instances, ..Default::default() }),
+            state: Mutex::new(SymbolBucketState {
+                sorted_angle: f32::MAX,
+                symbol_instances,
+                symbol_instance_pools,
+                ..Default::default()
+            }),
         }
     }
 

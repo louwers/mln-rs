@@ -18,7 +18,7 @@ use mln_vec_map::{VecMap, VecSet};
 
 use crate::bucket::Bucket;
 use crate::buckets::symbol_bucket::SymbolBucket;
-use crate::layout::symbol_instance::SymbolInstance;
+use crate::layout::symbol_instance::{SymbolInstance, SymbolInstancePools};
 use crate::render_layer::RenderLayer;
 use crate::render_tile::RenderTile;
 
@@ -62,19 +62,20 @@ impl TileLayerIndex {
     pub(crate) fn new(
         coord: OverscaledTileID,
         symbol_instances: &[SymbolInstance],
+        pools: &SymbolInstancePools,
         bucket_instance_id: u32,
         bucket_leader_id: String,
     ) -> Self {
         let mut index =
             TileLayerIndex { coord, bucket_instance_id, bucket_leader_id, keys: Vec::new(), symbols: Vec::new() };
         let indexed = || symbol_instances.iter().filter(|symbol_instance| symbol_instance.cross_tile_id().is_some());
-        index.keys.reserve_exact(indexed().map(|symbol_instance| symbol_instance.get_key().len()).sum());
+        index.keys.reserve_exact(indexed().map(|symbol_instance| pools.key(symbol_instance).len()).sum());
         index.symbols.reserve_exact(indexed().count());
         for symbol_instance in indexed() {
             let Some(cross_tile_id) = symbol_instance.cross_tile_id() else {
                 continue;
             };
-            let key = symbol_instance.get_key();
+            let key = pools.key(symbol_instance);
             index.symbols.push(IndexedSymbol {
                 key_start: index.keys.len() as u32,
                 key_len: key.len() as u32,
@@ -119,6 +120,7 @@ impl TileLayerIndex {
     pub(crate) fn find_matches(
         &self,
         symbol_instances: &mut [SymbolInstance],
+        pools: &SymbolInstancePools,
         pending: &mut [bool],
         bucket_leader_id: &str,
         new_coord: &OverscaledTileID,
@@ -140,7 +142,7 @@ impl TileLayerIndex {
                 continue;
             }
 
-            let indexed = self.symbols_with_key(symbol_instance.get_key());
+            let indexed = self.symbols_with_key(pools.key(symbol_instance));
             if indexed.is_empty() {
                 // No symbol with this key in this bucket
                 continue;
@@ -304,6 +306,7 @@ impl CrossTileSymbolLayerIndex {
                     if child_index.coord.is_child_of(tile_id) {
                         child_index.find_matches(
                             &mut state.symbol_instances,
+                            &state.symbol_instance_pools,
                             &mut pending,
                             &bucket.bucket_leader_id,
                             tile_id,
@@ -316,6 +319,7 @@ impl CrossTileSymbolLayerIndex {
                 if let Some(parent_index) = zoom_indexes.get(&parent_tile_id) {
                     parent_index.find_matches(
                         &mut state.symbol_instances,
+                        &state.symbol_instance_pools,
                         &mut pending,
                         &bucket.bucket_leader_id,
                         tile_id,
@@ -346,6 +350,7 @@ impl CrossTileSymbolLayerIndex {
             TileLayerIndex::new(
                 *tile_id,
                 &state.symbol_instances,
+                &state.symbol_instance_pools,
                 bucket.bucket_instance_id,
                 bucket.bucket_leader_id.clone(),
             ),
@@ -478,7 +483,7 @@ mod tests {
     use crate::layout::symbol_instance::{ShapedTextOrientations, SymbolContent, SymbolInstanceSharedData};
     use crate::text::collision_index::OverlapMode;
 
-    fn make_symbol_instance(x: f32, y: f32, key: &str) -> SymbolInstance {
+    fn make_symbol_instance(x: f32, y: f32, key: &str, pools: &mut SymbolInstancePools) -> SymbolInstance {
         let line = GeometryCoordinates::new();
         let image_map = ImagePositions::default();
         let shaping = ShapedTextOrientations::default();
@@ -530,7 +535,7 @@ mod tests {
             &subfeature,
             0,
             0,
-            key.encode_utf16().collect(),
+            &key.encode_utf16().collect::<Vec<u16>>(),
             0.0,
             0.0,
             0.0,
@@ -538,10 +543,14 @@ mod tests {
             false,
             SymbolContent::IconSDF,
             0.0,
+            pools,
         )
     }
 
-    fn make_bucket(instances: Vec<SymbolInstance>, bucket_instance_id: u32) -> SymbolBucket {
+    /// A bucket of symbols at `(x, y)` with the text `key`.
+    fn make_bucket(symbols: Vec<(f32, f32, &str)>, bucket_instance_id: u32) -> SymbolBucket {
+        let mut pools = SymbolInstancePools::default();
+        let instances = symbols.into_iter().map(|(x, y, key)| make_symbol_instance(x, y, key, &mut pools)).collect();
         let layout = Arc::new(SymbolLayoutProperties::PossiblyEvaluated::default());
         let ranges: Vec<SortKeyRange> = Vec::new();
         let mut bucket = SymbolBucket::new(
@@ -554,6 +563,7 @@ mod tests {
             false,
             "test".to_owned(),
             instances,
+            pools,
             ranges,
             1.0,
             false,
@@ -594,10 +604,8 @@ mod tests {
 
         let main_id = OverscaledTileID::with_zxy(6, 0, 6, 8, 8);
         max_bucket_instance_id += 1;
-        let main_bucket = make_bucket(
-            vec![make_symbol_instance(1000.0, 1000.0, "Detroit"), make_symbol_instance(2000.0, 2000.0, "Toronto")],
-            max_bucket_instance_id,
-        );
+        let main_bucket =
+            make_bucket(vec![(1000.0, 1000.0, "Detroit"), (2000.0, 2000.0, "Toronto")], max_bucket_instance_id);
         index.add_bucket(
             &main_id,
             &TileProjector::new(&any_camera, &main_id.to_unwrapped()),
@@ -613,10 +621,10 @@ mod tests {
         max_bucket_instance_id += 1;
         let child_bucket = make_bucket(
             vec![
-                make_symbol_instance(2000.0, 2000.0, "Detroit"),
-                make_symbol_instance(2000.0, 2000.0, "Windsor"),
-                make_symbol_instance(3000.0, 3000.0, "Toronto"),
-                make_symbol_instance(4001.0, 4001.0, "Toronto"),
+                (2000.0, 2000.0, "Detroit"),
+                (2000.0, 2000.0, "Windsor"),
+                (3000.0, 3000.0, "Toronto"),
+                (4001.0, 4001.0, "Toronto"),
             ],
             max_bucket_instance_id,
         );
@@ -638,7 +646,7 @@ mod tests {
 
         let parent_id = OverscaledTileID::with_zxy(5, 0, 5, 4, 4);
         max_bucket_instance_id += 1;
-        let parent_bucket = make_bucket(vec![make_symbol_instance(500.0, 500.0, "Detroit")], max_bucket_instance_id);
+        let parent_bucket = make_bucket(vec![(500.0, 500.0, "Detroit")], max_bucket_instance_id);
         index.add_bucket(
             &parent_id,
             &TileProjector::new(&any_camera, &parent_id.to_unwrapped()),
@@ -656,10 +664,8 @@ mod tests {
         // grandchild
         let grandchild_id = OverscaledTileID::with_zxy(8, 0, 8, 32, 32);
         max_bucket_instance_id += 1;
-        let grandchild_bucket = make_bucket(
-            vec![make_symbol_instance(4000.0, 4000.0, "Detroit"), make_symbol_instance(4000.0, 4000.0, "Windsor")],
-            max_bucket_instance_id,
-        );
+        let grandchild_bucket =
+            make_bucket(vec![(4000.0, 4000.0, "Detroit"), (4000.0, 4000.0, "Windsor")], max_bucket_instance_id);
         index.add_bucket(
             &grandchild_id,
             &TileProjector::new(&any_camera, &grandchild_id.to_unwrapped()),
@@ -682,10 +688,7 @@ mod tests {
         let mut index = CrossTileSymbolLayerIndex::new();
         let mut max_cross_tile_id = 0;
 
-        let bucket = make_bucket(
-            vec![make_symbol_instance(1000.0, 1000.0, "Detroit"), make_symbol_instance(2000.0, 2000.0, "Toronto")],
-            1,
-        );
+        let bucket = make_bucket(vec![(1000.0, 1000.0, "Detroit"), (2000.0, 2000.0, "Toronto")], 1);
 
         let id = OverscaledTileID::with_zxy(0, 0, 0, 0, 0);
         assert!(index.add_bucket(
@@ -718,10 +721,10 @@ mod tests {
         let mut max_cross_tile_id = 0;
 
         let main_id = OverscaledTileID::with_zxy(6, 0, 6, 8, 8);
-        let main_bucket = make_bucket(vec![make_symbol_instance(1000.0, 1000.0, "Detroit")], 1);
+        let main_bucket = make_bucket(vec![(1000.0, 1000.0, "Detroit")], 1);
 
         let child_id = OverscaledTileID::with_zxy(7, 0, 7, 16, 16);
-        let child_bucket = make_bucket(vec![make_symbol_instance(2000.0, 2000.0, "Detroit")], 2);
+        let child_bucket = make_bucket(vec![(2000.0, 2000.0, "Detroit")], 2);
 
         // assigns a new id
         index.add_bucket(
@@ -765,8 +768,8 @@ mod tests {
         let main_id = OverscaledTileID::with_zxy(6, 0, 6, 8, 8);
         let main_bucket = make_bucket(
             vec![
-                make_symbol_instance(1000.0, 1000.0, ""), // A
-                make_symbol_instance(1000.0, 1000.0, ""), // B
+                (1000.0, 1000.0, ""), // A
+                (1000.0, 1000.0, ""), // B
             ],
             1,
         );
@@ -774,9 +777,9 @@ mod tests {
         let child_id = OverscaledTileID::with_zxy(7, 0, 7, 16, 16);
         let child_bucket = make_bucket(
             vec![
-                make_symbol_instance(2000.0, 2000.0, ""), // A'
-                make_symbol_instance(2000.0, 2000.0, ""), // B'
-                make_symbol_instance(2000.0, 2000.0, ""), // C'
+                (2000.0, 2000.0, ""), // A'
+                (2000.0, 2000.0, ""), // B'
+                (2000.0, 2000.0, ""), // C'
             ],
             2,
         );
@@ -813,17 +816,17 @@ mod tests {
         let tile_id = OverscaledTileID::with_zxy(6, 0, 6, 8, 8);
         let first_bucket = make_bucket(
             vec![
-                make_symbol_instance(1000.0, 1000.0, ""), // A
-                make_symbol_instance(1000.0, 1000.0, ""), // B
+                (1000.0, 1000.0, ""), // A
+                (1000.0, 1000.0, ""), // B
             ],
             1,
         );
 
         let second_bucket = make_bucket(
             vec![
-                make_symbol_instance(1000.0, 1000.0, ""), // A'
-                make_symbol_instance(1000.0, 1000.0, ""), // B'
-                make_symbol_instance(1000.0, 1000.0, ""), // C'
+                (1000.0, 1000.0, ""), // A'
+                (1000.0, 1000.0, ""), // B'
+                (1000.0, 1000.0, ""), // C'
             ],
             2,
         );
@@ -855,10 +858,7 @@ mod tests {
         let mut max_cross_tile_id = 0;
 
         let tile_id = OverscaledTileID::with_zxy(7, 0, 6, 18, 24);
-        let symbol_bucket = make_bucket(
-            vec![make_symbol_instance(1000.0, 1000.0, "Washington"), make_symbol_instance(2000.0, 2000.0, "Richmond")],
-            1,
-        );
+        let symbol_bucket = make_bucket(vec![(1000.0, 1000.0, "Washington"), (2000.0, 2000.0, "Richmond")], 1);
         let away = camera_at(60.0, 25.0, 7.0, globe);
         index.add_bucket(
             &tile_id,

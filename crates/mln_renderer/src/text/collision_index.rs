@@ -18,6 +18,7 @@ use mln_util::vectors::Vec4;
 
 use crate::buckets::symbol_bucket::{PlacedSymbol, PlacedSymbolPools};
 use crate::geometry::feature_index::IndexedSubfeature;
+use crate::layout::symbol_instance::SymbolInstancePools;
 use crate::layout::symbol_projection::{
     LabelPlaneProjector, LineProjectionCache, TileDistance, get_tile_skew_vectors, place_first_and_last_glyph,
 };
@@ -312,6 +313,7 @@ impl CollisionIndex {
     pub(crate) fn place_feature(
         &self,
         feature: &CollisionFeature,
+        instance_pools: &SymbolInstancePools,
         shift: Option<Vec2>,
         translation: Vec2,
         tile_projector: &TileProjector<'_>,
@@ -333,6 +335,7 @@ impl CollisionIndex {
         if feature.along_line {
             self.place_line_feature(
                 feature,
+                instance_pools,
                 translation,
                 tile_projector,
                 label_plane,
@@ -349,7 +352,7 @@ impl CollisionIndex {
                 projected_boxes,
             )
         } else {
-            let box_ = &feature.boxes[0];
+            let box_ = &instance_pools.boxes(feature)[0];
             let elevation = symbol.height_offset;
             let projected_point =
                 self.project_and_get_perspective_ratio(tile_projector, box_.anchor + translation, elevation);
@@ -408,6 +411,7 @@ impl CollisionIndex {
     fn place_line_feature(
         &self,
         feature: &CollisionFeature,
+        instance_pools: &SymbolInstancePools,
         translation: Vec2,
         tile_projector: &TileProjector<'_>,
         label_plane: &LabelPlaneProjector<'_>,
@@ -499,9 +503,9 @@ impl CollisionIndex {
         }
 
         let mut previous_circle_placed = false;
-        projected_boxes.resize(feature.boxes.len(), ProjectedCollisionBox::default());
-        for i in 0..feature.boxes.len() {
-            let circle = &feature.boxes[i];
+        let boxes = instance_pools.boxes(feature);
+        projected_boxes.resize(boxes.len(), ProjectedCollisionBox::default());
+        for (i, circle) in boxes.iter().enumerate() {
             let box_signed_distance_from_anchor = circle.signed_distance_from_anchor;
             if first_and_last_glyph.is_none()
                 || (box_signed_distance_from_anchor < -first_tile_distance)
@@ -533,21 +537,17 @@ impl CollisionIndex {
                 //  performance win, and the small gaps introduced don't make a very
                 //  noticeable difference.
                 let placed_too_densely = radius * radius * 2.0 > dx * dx + dy * dy;
-                if placed_too_densely {
-                    let at_least_one_more_circle = (i + 1) < feature.boxes.len();
-                    if at_least_one_more_circle {
-                        let next_circle = &feature.boxes[i + 1];
-                        let next_box_distance_from_anchor = next_circle.signed_distance_from_anchor;
-                        if (next_box_distance_from_anchor > -first_tile_distance)
-                            && (next_box_distance_from_anchor < last_tile_distance)
-                        {
-                            // Hide significantly overlapping circles, unless this
-                            // is the last one we can use, in which case we want to
-                            // keep it in place even if it's tightly packed with the
-                            // one before it.
-                            previous_circle_placed = false;
-                            continue;
-                        }
+                if placed_too_densely && let Some(next_circle) = boxes.get(i + 1) {
+                    let next_box_distance_from_anchor = next_circle.signed_distance_from_anchor;
+                    if (next_box_distance_from_anchor > -first_tile_distance)
+                        && (next_box_distance_from_anchor < last_tile_distance)
+                    {
+                        // Hide significantly overlapping circles, unless this
+                        // is the last one we can use, in which case we want to
+                        // keep it in place even if it's tightly packed with the
+                        // one before it.
+                        previous_circle_placed = false;
+                        continue;
                     }
                 }
             }
@@ -920,10 +920,11 @@ mod tests {
     use mln_util::size::Size;
 
     use super::*;
+    use crate::util::pool::PoolRange;
 
     fn feature(index: usize) -> CollisionFeature {
         CollisionFeature {
-            boxes: Vec::new(),
+            boxes: PoolRange::default(),
             indexed_feature: IndexedSubfeature {
                 index,
                 source_layer_name: Arc::from(""),

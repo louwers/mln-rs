@@ -51,7 +51,7 @@ use crate::buckets::symbol_bucket::{
     ZoomEvaluatedSize, get_sorted_symbols,
 };
 use crate::geometry::feature_index::{FeatureIndex, IndexedSubfeature};
-use crate::layout::symbol_instance::SymbolInstance;
+use crate::layout::symbol_instance::{SymbolInstance, SymbolInstancePools};
 use crate::layout::symbol_projection::{
     LabelPlaneProjector, add_dynamic_attributes, evaluate_size_for_feature, get_tile_skew_vectors, hide_glyphs,
     reproject_line_labels,
@@ -1060,6 +1060,7 @@ impl Placement {
                         this.text_boxes.clear();
                         let placed_feature = this.collision_index.place_feature(
                             collision_feature,
+                            &state.symbol_instance_pools,
                             None,
                             ctx.text_translation,
                             tile_projector,
@@ -1152,6 +1153,7 @@ impl Placement {
                             symbol_instance,
                             ctx,
                             projectors,
+                            &state.symbol_instance_pools,
                             placed_symbol,
                             &state.text.pools,
                             font_size,
@@ -1229,6 +1231,7 @@ impl Placement {
             let place_icon_feature = |this: &mut Placement, collision_feature: &CollisionFeature| {
                 this.collision_index.place_feature(
                     collision_feature,
+                    &state.symbol_instance_pools,
                     icon_shift,
                     ctx.icon_translation,
                     tile_projector,
@@ -1333,7 +1336,15 @@ impl Placement {
         self.placements.entry(cross_tile_id).or_insert(result);
         let text_boxes = std::mem::take(&mut self.text_boxes);
         let icon_boxes = std::mem::take(&mut self.icon_boxes);
-        self.new_symbol_placed(symbol_instance, ctx, result, ctx.placement_type, &text_boxes, &icon_boxes);
+        self.new_symbol_placed(
+            symbol_instance,
+            &state.symbol_instance_pools,
+            ctx,
+            result,
+            ctx.placement_type,
+            &text_boxes,
+            &icon_boxes,
+        );
         self.text_boxes = text_boxes;
         self.icon_boxes = icon_boxes;
         result
@@ -1352,6 +1363,7 @@ impl Placement {
         symbol_instance: &SymbolInstance,
         ctx: &PlacementContext,
         projectors: &PlacementProjectors<'_>,
+        instance_pools: &SymbolInstancePools,
         placed_symbol: &PlacedSymbol,
         pools: &PlacedSymbolPools,
         font_size: f32,
@@ -1361,7 +1373,7 @@ impl Placement {
         shift: &Cell<Vec2>,
     ) -> PlacedFeatureResult {
         let bucket = ctx.get_bucket();
-        let text_box = &text_collision_feature.boxes[0];
+        let text_box = &instance_pools.boxes(text_collision_feature)[0];
         let width = text_box.x2 - text_box.x1;
         let height = text_box.y2 - text_box.y1;
         let text_box_scale = symbol_instance.get_text_box_scale();
@@ -1413,6 +1425,7 @@ impl Placement {
 
             placed_feature = self.collision_index.place_feature(
                 text_collision_feature,
+                instance_pools,
                 Some(shift.get()),
                 ctx.text_translation,
                 &projectors.tile_projector,
@@ -1434,6 +1447,7 @@ impl Placement {
             if do_variable_icon_placement {
                 let placed_icon_feature = self.collision_index.place_feature(
                     icon_collision_feature,
+                    instance_pools,
                     Some(shift.get()),
                     ctx.icon_translation,
                     &projectors.tile_projector,
@@ -2288,9 +2302,14 @@ impl Placement {
     }
 
     /// The virtual `newSymbolPlaced(...)` (only `TilePlacement` overrides it).
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the symbol and its pools, the placement and its context and type, and the projected boxes"
+    )]
     fn new_symbol_placed(
         &mut self,
         symbol: &SymbolInstance,
+        instance_pools: &SymbolInstancePools,
         ctx: &PlacementContext,
         placement: JointPlacement,
         placement_type: SymbolPlacementType,
@@ -2319,7 +2338,7 @@ impl Placement {
             icon_collision_box = Some(*box_.box_());
         }
         let symbol_data = PlacedSymbolData {
-            key: symbol.get_key().to_vec(),
+            key: instance_pools.key(symbol).to_vec(),
             text_collision_box,
             icon_collision_box,
             text_placed: placement.text,
@@ -2578,6 +2597,7 @@ impl Placement {
         let rotate_text_with_map = ctx.rotate_text_with_map;
         let variable_icon_placement = ctx.has_icon_text_fit && ctx.icon_overlap_mode == OverlapMode::Never;
         let bearing = ctx.bearing as f32;
+        let instance_pools = &state.symbol_instance_pools;
         let symbol_intersects_tile_edges = |symbol: &SymbolInstance| -> IntersectStatus {
             let mut result = IntersectStatus::default();
             let mut variable_anchor: Option<SymbolAnchorType> = None;
@@ -2588,7 +2608,7 @@ impl Placement {
                 variable_anchor = offsets.iter().next().map(|pair| pair.anchor_type);
             }
 
-            if let Some(text_collision_box) = symbol.get_text_collision_feature().boxes.first() {
+            if let Some(text_collision_box) = instance_pools.boxes(symbol.get_text_collision_feature()).first() {
                 let mut offset = Vec2::ZERO;
                 if let Some(variable_anchor) = variable_anchor
                     && let Some(text_variable_anchor_offset) = &text_variable_anchor_offset
@@ -2612,7 +2632,7 @@ impl Placement {
                 result = collision_box_intersects_tile_edges(text_collision_box, offset);
             }
 
-            if let Some(icon_collision_box) = symbol.get_icon_collision_feature().boxes.first() {
+            if let Some(icon_collision_box) = instance_pools.boxes(symbol.get_icon_collision_feature()).first() {
                 let mut offset = Vec2::ZERO;
                 if let Some(variable_anchor) = variable_anchor
                     && variable_icon_placement

@@ -12,11 +12,32 @@ use mln_text::glyph::{Shaping, WritingModeType};
 use mln_text::shaping::PositionedIcon;
 use mln_tile_id::geometry_tile_data::GeometryCoordinates;
 use mln_util::Padding;
+use mln_util::serialization::payload::pod;
 
 use crate::geometry::anchor::Anchor;
 use crate::geometry::feature_index::IndexedSubfeature;
-use crate::text::collision_feature::CollisionFeature;
+use crate::text::collision_feature::{CollisionBox, CollisionFeature};
 use crate::text::quads::{SymbolQuads, get_glyph_quads, get_icon_quads};
+use crate::util::pool::PoolRange;
+
+/// The collision boxes and keys of a bucket's symbol instances, which they
+/// hold ranges of.
+#[derive(Debug, Default, mln_wire::Wire)]
+pub(crate) struct SymbolInstancePools {
+    pub(crate) collision_boxes: Vec<CollisionBox>,
+    #[wire(with = "pod")]
+    pub(crate) keys: Vec<u16>,
+}
+
+impl SymbolInstancePools {
+    pub(crate) fn boxes(&self, feature: &CollisionFeature) -> &[CollisionBox] {
+        feature.boxes.of(&self.collision_boxes)
+    }
+
+    pub(crate) fn key(&self, symbol_instance: &SymbolInstance) -> &[u16] {
+        symbol_instance.key.of(&self.keys)
+    }
+}
 
 /// Bit flags for what a symbol contains: text, an RGBA icon, an SDF icon.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, mln_wire::Wire)]
@@ -199,7 +220,9 @@ pub(crate) struct SymbolInstance {
     data_feature_index: usize,
     text_offset: [f32; 2],
     icon_offset: [f32; 2],
-    key: Vec<u16>,
+    /// The symbol's text, which the cross-tile index matches symbols by, in
+    /// its bucket's `SymbolInstancePools`.
+    key: PoolRange,
     pub(crate) placed_right_text_index: Option<usize>,
     pub(crate) placed_center_text_index: Option<usize>,
     pub(crate) placed_left_text_index: Option<usize>,
@@ -237,7 +260,7 @@ impl SymbolInstance {
         indexed_feature: &IndexedSubfeature,
         layout_feature_index: usize,
         data_feature_index: usize,
-        key: Vec<u16>,
+        key: &[u16],
         overscaling: f32,
         icon_rotation: f32,
         text_rotation: f32,
@@ -245,6 +268,7 @@ impl SymbolInstance {
         allow_vertical_placement: bool,
         icon_type: SymbolContent,
         height_offset: f32,
+        pools: &mut SymbolInstancePools,
     ) -> Self {
         // Create the collision features that will be used to check whether
         // this symbol instance can be placed As a collision approximation, we
@@ -260,6 +284,7 @@ impl SymbolInstance {
             indexed_feature,
             overscaling,
             text_rotation,
+            &mut pools.collision_boxes,
         );
         let icon_collision_feature = CollisionFeature::new_icon(
             &shared_data.line,
@@ -269,6 +294,7 @@ impl SymbolInstance {
             &icon_padding,
             indexed_feature,
             icon_rotation,
+            &mut pools.collision_boxes,
         );
         let mut symbol_content = icon_type;
         // 'hasText' depends on finding at least one glyph in the shaping
@@ -290,6 +316,7 @@ impl SymbolInstance {
                 indexed_feature,
                 overscaling,
                 text_rotation + vertical_point_label_angle,
+                &mut pools.collision_boxes,
             ));
             if vertically_shaped_icon.is_some() {
                 vertical_icon_collision_feature = Some(CollisionFeature::new_icon(
@@ -300,6 +327,7 @@ impl SymbolInstance {
                     &icon_padding,
                     indexed_feature,
                     icon_rotation + vertical_point_label_angle,
+                    &mut pools.collision_boxes,
                 ));
             }
         }
@@ -339,7 +367,7 @@ impl SymbolInstance {
             data_feature_index,
             text_offset,
             icon_offset,
-            key,
+            key: PoolRange::extend(&mut pools.keys, key.iter().copied()),
             placed_right_text_index: None,
             placed_center_text_index: None,
             placed_left_text_index: None,
@@ -481,10 +509,6 @@ impl SymbolInstance {
     #[must_use]
     pub(crate) fn height_offset(&self) -> f32 {
         self.height_offset
-    }
-    #[must_use]
-    pub(crate) fn get_key(&self) -> &[u16] {
-        &self.key
     }
     #[must_use]
     pub(crate) fn get_text_box_scale(&self) -> f32 {

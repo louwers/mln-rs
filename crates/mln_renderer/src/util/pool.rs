@@ -42,6 +42,10 @@ impl PoolRange {
         self.len as usize
     }
 
+    pub(crate) fn is_empty(self) -> bool {
+        self.len == 0
+    }
+
     /// This range's items of `pool`.
     pub(crate) fn of<T>(self, pool: &[T]) -> &[T] {
         debug_assert!(self.start as usize + self.len as usize <= pool.len());
