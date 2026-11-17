@@ -80,7 +80,10 @@ impl TileLayerIndex {
             index.symbols.push(IndexedSymbol {
                 key_start: index.keys.len() as u32,
                 key_len: key.len() as u32,
-                instance: IndexedSymbolInstance::new(cross_tile_id, index.get_scaled_coordinates(symbol_instance, &coord)),
+                instance: IndexedSymbolInstance::new(
+                    cross_tile_id,
+                    index.get_scaled_coordinates(symbol_instance, &coord),
+                ),
             });
             index.keys.extend_from_slice(key);
         }
