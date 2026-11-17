@@ -16,7 +16,7 @@ core.
 **[Browser demo](https://louwers.github.io/mln-rs/)** (uses WebGPU on supported
 browsers, otherwise WebGL2).
 
-## Getting started
+## Getting Started
 
 You need [rustup](https://rustup.rs) and [mise](https://mise.jdx.dev), which
 installs the other tools and runs the dev tasks:
