@@ -7,7 +7,6 @@ use geometry::Point;
 use mln_gfx::renderer_backend::RendererBackend;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::vertex_vector::{VertexVector, VertexVectorBasePtr};
-use mln_gfx::{DrawMode, VertexAttributeArray};
 use mln_map_types::MapMode;
 use mln_style::PropertyEvaluationParameters;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
@@ -40,7 +39,6 @@ use crate::buckets::fill_extrusion_bucket::FillExtrusionBucket;
 use crate::buckets::line_bucket::{LineBucket, LineLayoutVertex};
 use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
 use crate::buckets::symbol_bucket::SymbolBucket;
-use crate::draw::DrawObjects;
 use crate::gfx::context::Context;
 use crate::gfx::upload::{upload_indexes, vertex_buffer};
 use crate::layer_type::EvaluatedLayer;
@@ -362,7 +360,6 @@ fn line_bucket_drawables_build_from_freed_indexes() {
     // An earlier drawable put the indexes in a buffer, which frees their CPU
     // copy.
     let geometry = BucketGeometry::default();
-    let vertex_count = bucket.vertices.len();
     let index_count = bucket.triangles.len();
     let triangles = geometry.indexes(&bucket, &bucket.triangles);
     upload_indexes(context, &mut triangles.borrow_mut()).expect("uploads");
@@ -372,14 +369,6 @@ fn line_bucket_drawables_build_from_freed_indexes() {
     // the counts.
     let indexes = geometry.indexes(&bucket, &bucket.triangles);
     assert_eq!(indexes.borrow().elements(), index_count);
-    let mut objects = DrawObjects::new(String::new());
-    objects.update_vertex_attributes(
-        VertexAttributeArray::new(),
-        vertex_count,
-        DrawMode::Triangles(),
-        Some(indexes),
-        &bucket.segments,
-    );
     assert_eq!(triangles.borrow().elements(), index_count);
 }
 

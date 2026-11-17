@@ -38,13 +38,12 @@ use mln_util::Color;
 use mln_util::constants::EXTENT;
 use mln_util::error::Error;
 use mln_util::geometry::FeatureType;
-use mln_util::hash::HashSet;
-use mln_util::identity::SimpleIdentity;
+use mln_util::hash::{HashMap, HashSet};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use crate::buckets::line_bucket::{LineBucket, LineLayoutVertex};
-use crate::draw::DrawObjects;
-use crate::draw_cache::{DrawCache, DrawDepth, FrameDraw, FrameDraws, KeptDraw};
+use crate::draw::{DrawGeometry, DrawObjects};
+use crate::draw_cache::{DrawCaches, DrawDepth, DrawSlots, FrameDraw, FrameDraws, KeptDraw};
 use crate::gfx::context::Context;
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layers::cast_matrix;
@@ -137,18 +136,20 @@ fn polyline_objects(
         }
     }
 
-    let mut objects = DrawObjects::new(name.to_owned());
-    objects.set_color_mode(&ColorMode::alpha_blended());
-    objects.set_cull_face_mode(CullFaceMode::disabled());
-    objects.set_shader(Some(Rc::clone(shader)));
-    objects.update_vertex_attributes(
-        attrs,
+    let geometry = DrawGeometry {
+        vertices: attrs,
         vertex_count,
-        DrawMode::Triangles(),
-        Some(Rc::new(RefCell::new(IndexVectorBase::new(indexes)))),
-        &segments,
-    );
-    Some(objects)
+        mode: DrawMode::Triangles(),
+        indexes: Rc::new(RefCell::new(IndexVectorBase::new(indexes))),
+        segments,
+    };
+    Some(DrawObjects::new(
+        name.to_owned(),
+        Rc::clone(shader),
+        ColorMode::alpha_blended(),
+        CullFaceMode::disabled(),
+        geometry,
+    ))
 }
 
 impl RenderItem for TileSourceRenderItem {
@@ -204,11 +205,7 @@ impl RenderItem for TileSourceRenderItem {
         let new_tiles: HashSet<OverscaledTileID> =
             self.render_tiles.iter().map(|tile| *tile.get_overscaled_tile_id()).collect();
         let keep = |draw: &DebugDraw| {
-            let same_shader = draw
-                .draw
-                .objects
-                .shader()
-                .is_some_and(|shader| std::ptr::addr_eq(Rc::as_ptr(shader), Rc::as_ptr(&polyline_shader)));
+            let same_shader = std::ptr::addr_eq(Rc::as_ptr(draw.draw.objects.shader()), Rc::as_ptr(&polyline_shader));
             draw.draw.objects.name != name || (new_tiles.contains(&draw.tile) && same_shader)
         };
 
@@ -222,27 +219,32 @@ impl RenderItem for TileSourceRenderItem {
             };
             for type_ in [DebugType::TextOutline, DebugType::Text] {
                 let layer = debug_layer(debug_layers, type_);
-                layer.draws.0.retain(keep);
+                layer.draws().retain(keep);
 
                 // add new draws and replace those whose text changed
+                let mut of_tiles = layer.draws_named(&name);
+                let mut replaced = Vec::new();
                 for tile in self.render_tiles.iter() {
                     let tile_id = *tile.get_overscaled_tile_id();
                     let Some(debug_bucket) = &tile.debug_bucket else {
                         continue;
                     };
-                    let of_tile = |draw: &DebugDraw| draw.draw.objects.name == name && draw.tile == tile_id;
-                    if layer.draws.0.iter().any(|draw| of_tile(draw) && draw.text.as_ref() == Some(&debug_bucket.text))
-                    {
-                        continue;
+                    if let Some(index) = of_tiles.remove(&tile_id) {
+                        if layer.draws()[index].text.as_ref() == Some(&debug_bucket.text) {
+                            of_tiles.insert(tile_id, index);
+                            continue;
+                        }
+                        replaced.push(index);
                     }
-                    layer.draws.0.retain(|draw| !of_tile(draw));
                     if tile.get_needs_rendering()
                         && let Some(objects) =
                             polyline_objects(&name, &polyline_shader, &debug_bucket.strokes, &text_options)
                     {
+                        of_tiles.insert(tile_id, layer.draws().len());
                         layer.add(tile_id, Some(debug_bucket.text.clone()), objects);
                     }
                 }
+                layer.remove(&replaced);
             }
         } else {
             // tile texts are not required, erase their overlays
@@ -253,7 +255,8 @@ impl RenderItem for TileSourceRenderItem {
         // Tile Borders
         if parameters.debug_options.contains(MapDebugOptions::TILE_BORDERS) {
             let layer = debug_layer(debug_layers, DebugType::Border);
-            layer.draws.0.retain(keep);
+            layer.draws().retain(keep);
+            let mut of_tiles = layer.draws_named(&name);
 
             // add new draws
             let extent = EXTENT as i16;
@@ -273,7 +276,7 @@ impl RenderItem for TileSourceRenderItem {
                 if tile.debug_bucket.is_none() || !tile.get_needs_rendering() {
                     continue;
                 }
-                if layer.draws.0.iter().any(|draw| draw.draw.objects.name == name && draw.tile == tile_id) {
+                if of_tiles.contains_key(&tile_id) {
                     continue;
                 }
                 let border = if globe {
@@ -288,6 +291,7 @@ impl RenderItem for TileSourceRenderItem {
                 if let Some(objects) =
                     polyline_objects(&name, &polyline_shader, std::slice::from_ref(border), &border_options)
                 {
+                    of_tiles.insert(tile_id, layer.draws().len());
                     layer.add(tile_id, None, objects);
                 }
             }
@@ -310,13 +314,13 @@ struct DebugDraw {
 }
 
 /// The draws of a debug overlay, in the order they were made, which is the
-/// order they draw in.
+/// order they draw in, each in the slot of its index.
 #[derive(Default)]
 struct DebugDraws(Vec<DebugDraw>);
 
-impl DrawCache for DebugDraws {
-    fn objects_mut(&mut self, id: SimpleIdentity) -> Option<&mut DrawObjects> {
-        self.0.iter_mut().find(|draw| draw.draw.id == id).map(|draw| &mut draw.draw.objects)
+impl DrawSlots for DebugDraws {
+    fn slot_mut(&mut self, slot: u32) -> Option<&mut DrawObjects> {
+        self.0.get_mut(slot as usize).map(|draw| &mut draw.draw.objects)
     }
 }
 
@@ -324,7 +328,7 @@ impl DrawCache for DebugDraws {
 /// and width of its type (layers: debug).
 pub(crate) struct DebugLayer {
     properties: LineEvaluatedPropsUBO,
-    draws: DebugDraws,
+    caches: DrawCaches<(), DebugDraws>,
     /// The frame's draws, with the buffers they read.
     frame: FrameDraws,
 }
@@ -332,12 +336,41 @@ pub(crate) struct DebugLayer {
 impl DebugLayer {
     #[must_use]
     pub(crate) fn new(type_: DebugType) -> Self {
-        DebugLayer { properties: debug_line_properties(type_), draws: DebugDraws::default(), frame: FrameDraws::new() }
+        DebugLayer { properties: debug_line_properties(type_), caches: DrawCaches::default(), frame: FrameDraws::new() }
+    }
+
+    /// The overlay's draws, in drawing order.
+    fn draws(&mut self) -> &mut Vec<DebugDraw> {
+        &mut self.caches.layer_cache_mut().0
+    }
+
+    /// The indexes of the draws named `name`, those of a source, by their
+    /// tile.
+    fn draws_named(&mut self, name: &str) -> HashMap<OverscaledTileID, usize> {
+        let draws = self.draws().iter().enumerate();
+        draws.filter(|(_, draw)| draw.draw.objects.name == name).map(|(index, draw)| (draw.tile, index)).collect()
+    }
+
+    /// Removes the draws at `indexes`, and keeps the others in order.
+    fn remove(&mut self, indexes: &[usize]) {
+        if indexes.is_empty() {
+            return;
+        }
+        let draws = self.draws();
+        let mut removed = vec![false; draws.len()];
+        for &index in indexes {
+            removed[index] = true;
+        }
+        let mut index = 0;
+        draws.retain(|_| {
+            index += 1;
+            !removed[index - 1]
+        });
     }
 
     /// Adds a draw of `objects` over `tile_id`, spelling `text`.
     fn add(&mut self, tile_id: OverscaledTileID, text: Option<Vec<String>>, objects: DrawObjects) {
-        self.draws.0.push(DebugDraw { tile: tile_id, text, draw: KeptDraw::new(objects) });
+        self.draws().push(DebugDraw { tile: tile_id, text, draw: KeptDraw::new(objects) });
     }
 
     /// Makes the frame's draws of the overlay, and writes the buffers they
@@ -345,7 +378,8 @@ impl DebugLayer {
     pub(crate) fn prepare(&mut self, parameters: &PaintParameters<'_>) {
         let context = parameters.context;
         self.frame.draws.clear();
-        if self.draws.0.is_empty() {
+        let draws = &self.caches.layer_cache_mut().0;
+        if draws.is_empty() {
             return;
         }
 
@@ -361,9 +395,9 @@ impl DebugLayer {
         }
 
         let zoom = parameters.state.get_zoom();
-        let mut drawable_ubos = Vec::with_capacity(self.draws.0.len());
-        let mut projection_ubos: Vec<ProjectionUBO> = Vec::with_capacity(self.draws.0.len());
-        for draw in &self.draws.0 {
+        let mut drawable_ubos = Vec::with_capacity(draws.len());
+        let mut projection_ubos: Vec<ProjectionUBO> = Vec::with_capacity(draws.len());
+        for (slot, draw) in draws.iter().enumerate() {
             let tile_id = draw.tile.to_unwrapped();
             // C++ also computes an unused `tileMatrix` (state.matrixFor).
             let projection = get_projection_data(
@@ -390,7 +424,8 @@ impl DebugLayer {
                 pad1: 0.0,
             });
             drawable_ubos.push(drawable_ubo);
-            self.frame.draws.push(FrameDraw { depth: DrawDepth::Off, ..FrameDraw::new(None, draw.draw.id) });
+            let frame_draw = FrameDraw::new(None, slot as u32, draw.draw.id);
+            self.frame.draws.push(FrameDraw { depth: DrawDepth::Off, ..frame_draw });
         }
         let buffers = &mut self.frame.uniform_buffers;
         buffers.write_storage(ID_LINE_DRAWABLE_UBO, bytemuck::cast_slice(&drawable_ubos), context);
@@ -399,12 +434,12 @@ impl DebugLayer {
 
     /// Uploads the GPU objects of the overlay's draws.
     pub(crate) fn upload(&mut self, context: &Context) {
-        self.frame.upload_from(&mut self.draws, context);
+        self.caches.upload(&self.frame, context);
     }
 
     /// Draws the overlay into the open pass of `gpu`, the context's.
     pub(crate) fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        self.frame.render_from(&mut self.draws, gpu, parameters);
+        self.caches.render(&self.frame, gpu, parameters);
     }
 }
 

@@ -4,12 +4,13 @@ use geometry::Point;
 use mln_gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
 use mln_gfx::shaders::circle_layer_ubo::{CircleDrawableUBO, CircleEvaluatedPropsUBO};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
+use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
     ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE, ID_CIRCLE_DRAWABLE_UBO, ID_CIRCLE_EVALUATED_PROPS_UBO,
     ID_CIRCLE_POS_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO,
 };
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
-use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode, ShaderRegistry, VertexAttributeArray};
+use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode, VertexAttributeArray};
 use mln_map_types::{TileProjector, TransformState};
 use mln_style::PropertyEvaluationParameters;
 use mln_style::expression::EvaluationContext;
@@ -24,8 +25,8 @@ use mln_util::error::Error;
 use super::{cast_matrix, refresh_paint_attributes};
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::circle_bucket::{CircleBinders, CircleBucket, CircleLayoutVertex};
-use crate::draw::DrawObjects;
-use crate::draw_cache::{FrameDraw, FrameDraws, KeptDraw, LayerDraws};
+use crate::draw::{DrawGeometry, DrawObjects};
+use crate::draw_cache::{DrawCaches, FrameDraw, FrameDraws, KeptDraw};
 use crate::gfx::context::Context;
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::circle_layout::CircleLayout;
@@ -170,13 +171,14 @@ impl LayerType for Circle {
 pub(crate) struct RenderCircleLayer {
     base: RenderLayerBase,
     values: LayerValues<Circle>,
+    caches: DrawCaches<KeptDraw>,
     circle_shader_group: Option<ShaderGroupPtr>,
 }
 
 impl RenderCircleLayer {
     pub(crate) fn new(impl_: Arc<LayerStyle<Circle>>) -> Self {
         let (base, values) = LayerValues::new(impl_);
-        RenderCircleLayer { base, values, circle_shader_group: None }
+        RenderCircleLayer { base, values, caches: DrawCaches::default(), circle_shader_group: None }
     }
 
     /// The entries in the layer's storage buffers of the draw of `tile_id`,
@@ -263,6 +265,8 @@ struct CircleUniforms {
 
 impl TypedLayer for RenderCircleLayer {
     type Type = Circle;
+    type Tile = KeptDraw;
+    type Shared = ();
 
     fn parts(&self) -> (&RenderLayerBase, &LayerValues<Circle>) {
         (&self.base, &self.values)
@@ -270,6 +274,10 @@ impl TypedLayer for RenderCircleLayer {
 
     fn parts_mut(&mut self) -> (&mut RenderLayerBase, &mut LayerValues<Circle>) {
         (&mut self.base, &mut self.values)
+    }
+
+    fn caches_mut(&mut self) -> (&mut RenderLayerBase, &mut DrawCaches<KeptDraw>) {
+        (&mut self.base, &mut self.caches)
     }
 }
 
@@ -406,27 +414,25 @@ impl RenderLayer for RenderCircleLayer {
     /// they read.
     fn update(
         &mut self,
-        shaders: &ShaderRegistry,
-        context: &Context,
-        state: &TransformState,
-        _update_parameters: &Arc<UpdateParameters>,
         paint_parameters: &PaintParameters<'_>,
+        _update_parameters: &UpdateParameters,
         tiles: Option<LayerTiles<'_>>,
-        draws: &mut LayerDraws,
     ) {
-        self.update_projection_variant(state, draws);
+        let (shaders, context, state) =
+            (&paint_parameters.static_data.shaders, paint_parameters.context, paint_parameters.state);
+        self.update_projection_variant(state);
 
         let Some(render_tiles) = tiles.filter(|tiles| !tiles.is_empty()) else {
-            self.remove_all_draws(draws);
+            self.remove_all_draws();
             return;
         };
-        draws.frame.get_or_insert_with(FrameDraws::new);
+        self.base.frame.get_or_insert_with(FrameDraws::new);
 
         if self.circle_shader_group.is_none() {
             self.circle_shader_group = shaders.shader_group(CIRCLE_SHADER_GROUP_NAME);
         }
         let Some(circle_shader_group) = self.circle_shader_group.clone() else {
-            self.remove_all_draws(draws);
+            self.remove_all_draws();
             return;
         };
         if (RENDER_PASS.underlying_type() & self.base.evaluated_properties.render_passes()) == 0 {
@@ -441,7 +447,7 @@ impl RenderLayer for RenderCircleLayer {
 
             let render_data = super::render_data_for_pass(tile, &*self.base.style, RENDER_PASS);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
-                draws.drop_cache(&tile_id);
+                self.caches.drop_cache(&tile_id);
                 continue;
             };
             let Some(bucket) = render_data.bucket::<Circle>() else {
@@ -456,16 +462,16 @@ impl RenderLayer for RenderCircleLayer {
                 paint_vertices(geometry, bucket, &binders.interleaved_vertex_buffer, binders.depends_on_feature_state())
             };
 
-            if draws.bucket(&tile_id).is_some_and(|prev| prev != bucket.base.bucket_id) {
+            if self.caches.bucket(&tile_id).is_some_and(|prev| prev != bucket.base.bucket_id) {
                 // The tile's draw was built from another bucket.
-                draws.drop_cache(&tile_id);
+                self.caches.drop_cache(&tile_id);
             }
-            draws.set_bucket(&tile_id, bucket.base.bucket_id);
+            self.caches.set_bucket(&tile_id, bucket.base.bucket_id);
 
             // The draw's attributes point into the bucket's shared vectors,
             // which upload again when they change.
-            let changes = draws.take_changes(&tile_id);
-            if let Some(cached) = draws.cache_mut::<KeptDraw>(&tile_id) {
+            let changes = self.caches.take_changes(&tile_id);
+            if let Some(cached) = self.caches.cache_mut(&tile_id) {
                 refresh_paint_attributes(&mut cached.objects, changes, |attrs| {
                     read_circle_attributes(attrs, binders, &paint(), evaluated, &mut Default::default());
                 });
@@ -482,37 +488,37 @@ impl RenderLayer for RenderCircleLayer {
                         AttributeDataType::Short2,
                     );
                 }
-                let mut objects = DrawObjects::new(String::new());
-                objects.set_color_mode(&ColorMode::alpha_blended());
-                objects.set_cull_face_mode(CullFaceMode::disabled());
-                objects.set_shader(Some(
-                    circle_shader_group.shader(&properties_as_uniforms, self.base.projection_variant),
-                ));
                 let vertex_count = if bucket.segments.is_empty() { 0 } else { bucket.vertices.len() };
-                objects.update_vertex_attributes(
-                    attrs,
-                    vertex_count,
-                    DrawMode::Triangles(),
-                    Some(bucket_indexes(geometry, bucket, &bucket.triangles)),
-                    &bucket.segments,
+                let objects = DrawObjects::new(
+                    String::new(),
+                    circle_shader_group.shader(&properties_as_uniforms, self.base.projection_variant),
+                    ColorMode::alpha_blended(),
+                    CullFaceMode::disabled(),
+                    DrawGeometry {
+                        vertices: attrs,
+                        vertex_count,
+                        mode: DrawMode::Triangles(),
+                        indexes: bucket_indexes(geometry, bucket, &bucket.triangles),
+                        segments: bucket.segments.iter().map(SegmentBase::copy).collect(),
+                    },
                 );
-                draws.set_cache(&tile_id, KeptDraw::new(objects));
+                self.caches.set_cache(&tile_id, KeptDraw::new(objects));
             }
 
-            let Some(cached) = draws.cache_mut::<KeptDraw>(&tile_id) else {
+            let Some(draw) = self.caches.cache_mut(&tile_id).map(|cached| cached.frame_draw(Some(tile_id))) else {
                 continue;
             };
-            let uniforms = self.uniforms(&tile_id, binders, paint_parameters);
-            frame_draws.push((FrameDraw::new(Some(tile_id), cached.id), uniforms));
+            frame_draws.push((draw, self.uniforms(&tile_id, binders, paint_parameters)));
         }
 
         frame_draws.sort_by_key(|(draw, _)| draw.order());
-        let Some(frame) = &mut draws.frame else {
+        let Some(mut frame) = self.base.frame.take() else {
             return;
         };
         if !frame_draws.is_empty() {
-            self.write_uniforms(frame, &frame_draws, context);
+            self.write_uniforms(&mut frame, &frame_draws, context);
         }
         frame.draws = frame_draws.into_iter().map(|(draw, _)| draw).collect();
+        self.base.frame = Some(frame);
     }
 }

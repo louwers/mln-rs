@@ -81,13 +81,3 @@ impl ShaderProgram {
         self.info.textures
     }
 }
-
-/// Whether `a` and `b` are the same program handle, or both none.
-#[must_use]
-pub fn same_shader(a: &Option<ShaderProgramPtr>, b: &Option<ShaderProgramPtr>) -> bool {
-    match (a, b) {
-        (Some(a), Some(b)) => Rc::ptr_eq(a, b),
-        (None, None) => true,
-        _ => false,
-    }
-}

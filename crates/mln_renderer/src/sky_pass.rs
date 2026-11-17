@@ -21,8 +21,8 @@ use mln_util::mat4::{Mat4, matrix};
 use mln_util::size::Size;
 use mln_util::vectors::Vec4;
 
-use crate::draw::{DrawObjects, DrawSegment};
-use crate::draw_cache::{DrawDepth, FrameDraw, FrameDraws, KeptDraw};
+use crate::draw::{DrawGeometry, DrawObjects, raw_vertices};
+use crate::draw_cache::{DrawCaches, DrawDepth, FrameDraw, FrameDraws, KeptDraw};
 use crate::gfx::context::Context;
 use crate::paint_parameters::PaintParameters;
 use crate::render_light::EvaluatedLight;
@@ -35,7 +35,7 @@ const ATMOSPHERE_SHADER_NAME: &str = "AtmosphereShader";
 
 /// A draw over the whole view, with the buffers it binds.
 pub(crate) struct FullscreenDraw {
-    draw: KeptDraw,
+    caches: DrawCaches<(), KeptDraw>,
     frame: FrameDraws,
 }
 
@@ -43,31 +43,38 @@ impl FullscreenDraw {
     /// A draw of `shader`, which reads the view's corners as the vertex
     /// attribute `vertex_attribute`, in the translucent pass at `depth`.
     fn new(shader: &ShaderProgramPtr, vertex_attribute: usize, depth: DrawDepth) -> FullscreenDraw {
-        let mut objects = DrawObjects::new(String::new());
-        objects.set_color_mode(&ColorMode::alpha_blended());
-        objects.set_cull_face_mode(CullFaceMode::disabled());
-        objects.set_shader(Some(Rc::clone(shader)));
-        objects.set_vertex_attr_id(vertex_attribute);
         let corners: [[i16; 2]; 4] = [[-1, -1], [1, -1], [-1, 1], [1, 1]];
-        objects.set_vertices(bytemuck::cast_slice(&corners).to_vec(), corners.len(), AttributeDataType::Short2);
+        let vertices = bytemuck::cast_slice(&corners).to_vec();
         let indexes = IndexVectorBase::new(RenderStaticData::quad_triangle_indices());
-        let segment = DrawSegment::new(DrawMode::Triangles(), SegmentBase::with_lengths(0, 0, 4, 6));
-        objects.set_index_data(Some(Rc::new(RefCell::new(indexes))), vec![Box::new(segment)]);
+        let geometry = DrawGeometry {
+            vertices: raw_vertices(vertex_attribute, vertices, corners.len(), AttributeDataType::Short2),
+            vertex_count: corners.len(),
+            mode: DrawMode::Triangles(),
+            indexes: Rc::new(RefCell::new(indexes)),
+            segments: vec![SegmentBase::with_lengths(0, 0, 4, 6)],
+        };
+        let objects = DrawObjects::new(
+            String::new(),
+            Rc::clone(shader),
+            ColorMode::alpha_blended(),
+            CullFaceMode::disabled(),
+            geometry,
+        );
         let draw = KeptDraw::new(objects);
         let mut frame = FrameDraws::new();
-        frame.draws.push(FrameDraw { depth, ..FrameDraw::new(None, draw.id) });
-        FullscreenDraw { draw, frame }
+        frame.draws.push(FrameDraw { depth, ..draw.frame_draw(None) });
+        FullscreenDraw { caches: DrawCaches::of_layer(draw), frame }
     }
 
     /// Uploads the draw's GPU objects, before the frame draws it.
     pub(crate) fn upload(&mut self, context: &Context) {
-        self.frame.upload_from(&mut self.draw, context);
+        self.caches.upload(&self.frame, context);
     }
 
     /// Draws into the open pass of `gpu`, the context's, in the translucent
     /// pass.
     pub(crate) fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        self.frame.render_from(&mut self.draw, gpu, parameters);
+        self.caches.render(&self.frame, gpu, parameters);
     }
 }
 

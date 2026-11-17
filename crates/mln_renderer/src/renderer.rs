@@ -395,7 +395,7 @@ impl Renderer {
     /// objects are lost, so that they forget theirs, and lets go of them.
     /// Call it before the renderer goes when its device or target went first.
     pub fn lose_custom_layers(&mut self) {
-        self.orchestrator.visit_render_layers(|layer, _| layer.lose_context());
+        self.orchestrator.visit_render_layers(|layer| layer.lose_context());
     }
 
     /// Destroys what the renderer released and waits for the GPU, so that
@@ -514,14 +514,7 @@ impl Renderer {
         // - DRAW UPDATE ---------------------------------------------------
         // Makes the layers' draws of the frame
         let uploaded = Instant::now();
-        orchestrator.update_layers(
-            &static_data.shaders,
-            context,
-            &render_tree_parameters.transform_params.state,
-            update_parameters,
-            &parameters,
-            render_tree,
-        );
+        orchestrator.update_layers(update_parameters, &parameters, render_tree);
 
         let layers_updated = Instant::now();
 
@@ -532,9 +525,7 @@ impl Renderer {
         context.destroy_released();
 
         // Give the layers a chance to upload
-        for mut group in orchestrator.draw_groups() {
-            group.upload(context);
-        }
+        orchestrator.upload_draw_groups(context);
         orchestrator.globe_depth().upload(context);
         if let Some(sky) = orchestrator.sky() {
             sky.upload(context);
@@ -545,7 +536,7 @@ impl Renderer {
 
         // Give the render targets a chance to upload
         // dem-heatmap
-        orchestrator.visit_render_layers(|layer, draws| layer.upload_render_targets(context, draws));
+        orchestrator.visit_render_layers(|layer| layer.upload_render_targets(context));
 
         // Upload the debug overlays
         // layers: debug
@@ -584,7 +575,7 @@ impl Renderer {
 
         // The draw groups drawn as a whole, each into the layer composite's
         // texture and then onto the frame.
-        let composited: Vec<_> = orchestrator.draw_groups().iter().filter_map(DrawGroup::composite).collect();
+        let composited: Vec<_> = orchestrator.draw_groups().filter_map(DrawGroup::composite).collect();
         self.layer_composite.update(
             context,
             &static_data.shaders,
@@ -653,17 +644,12 @@ impl Renderer {
             parameters.depth_range_size = 1.0 - ((num_draw_groups + 2) * num_sublayers) as f32 * depth_epsilon;
             parameters.current_layer = (num_draw_groups as u32).wrapping_sub(1);
             let mut gpu = context.gpu();
-            for mut group in orchestrator.draw_groups() {
-                group.render(&mut *gpu, &mut parameters);
-                if parameters.current_layer > 0 {
-                    parameters.current_layer -= 1;
-                }
-            }
+            orchestrator.render_draw_groups(&mut *gpu, &mut parameters, false);
         }
 
         // Draw the render targets.
         // dem-heatmap
-        orchestrator.visit_render_layers(|layer, draws| layer.render_targets(&mut parameters, draws));
+        orchestrator.visit_render_layers(|layer| layer.render_targets(&mut parameters));
 
         let mut gpu = context.gpu();
         // commonClearPass
@@ -713,18 +699,10 @@ impl Renderer {
             // are painted bottom to top.
             if render_tree_parameters.transform_params.state.is_globe_rendering() {
                 parameters.current_layer = (num_draw_groups as u32).wrapping_sub(1);
-                for mut group in orchestrator.draw_groups() {
-                    group.render(&mut *gpu, &mut parameters);
-                    if parameters.current_layer > 0 {
-                        parameters.current_layer -= 1;
-                    }
-                }
+                orchestrator.render_draw_groups(&mut *gpu, &mut parameters, false);
             } else {
                 parameters.current_layer = 0;
-                for mut group in orchestrator.draw_groups().into_iter().rev() {
-                    group.render(&mut *gpu, &mut parameters);
-                    parameters.current_layer += 1;
-                }
+                orchestrator.render_draw_groups(&mut *gpu, &mut parameters, true);
             }
         }
 
@@ -739,12 +717,7 @@ impl Renderer {
 
             // draw the draw groups, translucent pass
             parameters.current_layer = (num_draw_groups as u32).wrapping_sub(1);
-            for mut group in orchestrator.draw_groups() {
-                group.render(&mut *gpu, &mut parameters);
-                if parameters.current_layer > 0 {
-                    parameters.current_layer -= 1;
-                }
-            }
+            orchestrator.render_draw_groups(&mut *gpu, &mut parameters, false);
         }
 
         // The atmosphere.

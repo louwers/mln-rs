@@ -18,9 +18,7 @@ use mln_gfx::shaders::shader_defines::{
 };
 use mln_gfx::shaders::shader_program::ShaderProgramPtr;
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
-use mln_gfx::{
-    AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode, ShaderRegistry, VertexAttributeArray,
-};
+use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode, VertexAttributeArray};
 use mln_map_types::TransformState;
 use mln_style::PropertyEvaluationParameters;
 use mln_style::layer_type::LayerStyle;
@@ -37,8 +35,8 @@ use super::{cast_matrix, refresh_paint_attributes, shared_vertices};
 use crate::bucket::Bucket;
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::fill_bucket::{FillBinders, FillBucket, FillLayoutVertex};
-use crate::draw::{DrawObjects, copy_shared_attributes};
-use crate::draw_cache::{DrawCache, DrawDepth, FrameDraw, FrameDraws, LayerDraws};
+use crate::draw::{DrawGeometry, DrawObjects, copy_shared_attributes};
+use crate::draw_cache::{DrawCaches, DrawDepth, DrawSlots, FrameDraw, FrameDraws};
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
 use crate::layer_composite::Composite;
@@ -85,35 +83,37 @@ struct FillDraw {
 }
 
 impl FillDraw {
-    /// A draw of `shader` with the layer's color and cull modes, and no
-    /// geometry yet.
-    fn new(shader: ShaderProgramPtr, sub_layer: u8, depth: DepthMaskType) -> FillDraw {
-        let mut objects = DrawObjects::new(String::new());
-        objects.set_color_mode(&ColorMode::alpha_blended());
-        objects.set_cull_face_mode(CullFaceMode::disabled());
-        objects.set_shader(Some(shader));
+    /// A draw of `geometry` with `shader` and the layer's color and cull
+    /// modes.
+    fn new(shader: ShaderProgramPtr, sub_layer: u8, depth: DepthMaskType, geometry: DrawGeometry) -> FillDraw {
+        let objects =
+            DrawObjects::new(String::new(), shader, ColorMode::alpha_blended(), CullFaceMode::disabled(), geometry);
         FillDraw { id: SimpleIdentity::new(), objects, sub_layer, depth }
     }
+}
 
-    /// Gives the draw `vertex_count` vertices in `vertices`, and the
-    /// `segments` of `indexes` it draws as `mode`; with no segments, it draws
-    /// nothing and has no vertices.
-    fn set_geometry(
-        &mut self,
-        vertices: VertexAttributeArray,
-        vertex_count: usize,
-        mode: DrawMode,
-        indexes: IndexVectorBasePtr,
-        segments: &[SegmentBase],
-    ) {
-        let vertex_count = if segments.is_empty() { 0 } else { vertex_count };
-        self.objects.update_vertex_attributes(vertices, vertex_count, mode, Some(indexes), segments);
+/// The geometry of `vertex_count` vertices in `vertices`, and the `segments`
+/// of `indexes` drawn as `mode`; with no segments, it draws nothing and has
+/// no vertices.
+fn fill_geometry(
+    vertices: VertexAttributeArray,
+    vertex_count: usize,
+    mode: DrawMode,
+    indexes: IndexVectorBasePtr,
+    segments: &[SegmentBase],
+) -> DrawGeometry {
+    DrawGeometry {
+        vertices,
+        vertex_count: if segments.is_empty() { 0 } else { vertex_count },
+        mode,
+        indexes,
+        segments: segments.iter().map(SegmentBase::copy).collect(),
     }
 }
 
 /// What the layer keeps of a tile: its fill and its outline, as they were
 /// built for the tile's bucket.
-struct FillTile {
+pub(crate) struct FillTile {
     /// Whether the draws fill with the layer's pattern.
     pattern: bool,
     /// The fill of the bucket's triangles, if it has any.
@@ -125,13 +125,15 @@ struct FillTile {
     atlases: Option<Rc<AtlasBinding>>,
 }
 
-impl DrawCache for FillTile {
-    fn objects_mut(&mut self, id: SimpleIdentity) -> Option<&mut DrawObjects> {
-        [&mut self.fill, &mut self.outline]
-            .into_iter()
-            .flatten()
-            .find(|draw| draw.id == id)
-            .map(|draw| &mut draw.objects)
+/// The fill in slot 0, the outline in slot 1.
+impl DrawSlots for FillTile {
+    fn slot_mut(&mut self, slot: u32) -> Option<&mut DrawObjects> {
+        let draw = match slot {
+            0 => &mut self.fill,
+            1 => &mut self.outline,
+            _ => return None,
+        };
+        draw.as_mut().map(|draw| &mut draw.objects)
     }
 }
 
@@ -237,22 +239,20 @@ impl TileBuilder<'_> {
         });
 
         let mut fill = (!bucket.triangles.is_empty()).then(|| {
-            let mut draw = FillDraw::new(fill_shader, 1, fill_depth);
             // The fill and a line outline read the same attributes.
-            draw.set_geometry(
+            let fill_geometry = fill_geometry(
                 copy_shared_attributes(&vertex_attrs),
                 fill_vertex_count,
                 DrawMode::Triangles(),
                 bucket_indexes(geometry, bucket, &bucket.triangles),
                 &bucket.triangle_segments,
             );
-            draw
+            FillDraw::new(fill_shader, 1, fill_depth, fill_geometry)
         });
 
         // The bucket's lines, or an instance of the quad for each vertex,
         // from it to its outline end.
         let mut outline = outline_shader.filter(|_| !bucket.basic_lines.is_empty()).map(|shader| {
-            let mut draw = FillDraw::new(shader, outline_sub_layer, DepthMaskType::ReadOnly);
             if let Some(quad) = self.outline_quad {
                 let stride = size_of::<FillLayoutVertex>() as u32;
                 let mut instance_attrs = VertexAttributeArray::new();
@@ -266,24 +266,26 @@ impl TileBuilder<'_> {
                         attr.set_shared_raw_data(Some(ends), 0, 0, stride, AttributeDataType::Short2);
                     }
                 }
-                draw.objects.instance_attributes = Some(instance_attrs);
-                draw.set_geometry(
+                let quad_geometry = fill_geometry(
                     copy_shared_attributes(&quad.attributes),
                     quad.vertices.get_raw_count(),
                     DrawMode::Triangles(),
                     Rc::clone(&quad.indexes),
                     &[RenderStaticData::fill_outline_segment(fill_vertex_count)],
                 );
+                let mut draw = FillDraw::new(shader, outline_sub_layer, DepthMaskType::ReadOnly, quad_geometry);
+                draw.objects.instance_attributes = Some(instance_attrs);
+                draw
             } else {
-                draw.set_geometry(
+                let line_geometry = fill_geometry(
                     copy_shared_attributes(&vertex_attrs),
                     fill_vertex_count,
                     DrawMode::Lines(LINE_WIDTH),
                     bucket_indexes(geometry, bucket, &bucket.basic_lines),
                     &bucket.basic_line_segments,
                 );
+                FillDraw::new(shader, outline_sub_layer, DepthMaskType::ReadOnly, line_geometry)
             }
-            draw
         });
 
         if let Some(atlases) = &atlases {
@@ -377,6 +379,7 @@ impl LayerType for Fill {
 pub(crate) struct RenderFillLayer {
     base: RenderLayerBase,
     values: LayerValues<Fill>,
+    caches: DrawCaches<FillTile>,
 
     fill_shader_group: Option<ShaderGroupPtr>,
     /// The outline shaders: the line ones, or the instanced ones on a
@@ -396,6 +399,7 @@ impl RenderFillLayer {
         RenderFillLayer {
             base,
             values,
+            caches: DrawCaches::default(),
             fill_shader_group: None,
             outline_shader_group: None,
             pattern_shader_group: None,
@@ -532,6 +536,8 @@ impl RenderFillLayer {
 
 impl TypedLayer for RenderFillLayer {
     type Type = Fill;
+    type Tile = FillTile;
+    type Shared = ();
 
     fn parts(&self) -> (&RenderLayerBase, &LayerValues<Fill>) {
         (&self.base, &self.values)
@@ -539,6 +545,10 @@ impl TypedLayer for RenderFillLayer {
 
     fn parts_mut(&mut self) -> (&mut RenderLayerBase, &mut LayerValues<Fill>) {
         (&mut self.base, &mut self.values)
+    }
+
+    fn caches_mut(&mut self) -> (&mut RenderLayerBase, &mut DrawCaches<FillTile>) {
+        (&mut self.base, &mut self.caches)
     }
 }
 
@@ -597,20 +607,18 @@ impl RenderLayer for RenderFillLayer {
     /// buffers they read.
     fn update(
         &mut self,
-        shaders: &ShaderRegistry,
-        context: &Context,
-        state: &TransformState,
-        _update_parameters: &Arc<UpdateParameters>,
         paint_parameters: &PaintParameters<'_>,
+        _update_parameters: &UpdateParameters,
         tiles: Option<LayerTiles<'_>>,
-        draws: &mut LayerDraws,
     ) {
+        let (shaders, context, state) =
+            (&paint_parameters.static_data.shaders, paint_parameters.context, paint_parameters.state);
         let Some(render_tiles) = tiles.filter(|tiles| !tiles.is_empty()) else {
-            self.remove_all_draws(draws);
+            self.remove_all_draws();
             return;
         };
 
-        self.update_projection_variant(state, draws);
+        self.update_projection_variant(state);
 
         if self.fill_shader_group.is_none() {
             self.fill_shader_group = shaders.shader_group(FILL_SHADER_NAME);
@@ -637,11 +645,11 @@ impl RenderLayer for RenderFillLayer {
             self.pattern_shader_group.clone(),
             self.outline_pattern_shader_group.clone(),
         ) else {
-            self.remove_all_draws(draws);
+            self.remove_all_draws();
             return;
         };
 
-        let frame = draws.frame.get_or_insert_with(FrameDraws::new);
+        let frame = self.base.frame.get_or_insert_with(FrameDraws::new);
         let paint = &self.values.evaluated.paint;
         frame.composite = Composite::of(*paint.fill_layer_opacity.uniform(), *paint.fill_layer_blend.uniform());
         frame.stencil_tiles = Some(Rc::new(render_tiles.iter().map(|tile| tile.id).collect()));
@@ -680,7 +688,7 @@ impl RenderLayer for RenderFillLayer {
 
             let render_data = super::render_data_for_pass(tile, &*self.base.style, RENDER_PASS);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
-                draws.drop_cache(&tile_id);
+                self.caches.drop_cache(&tile_id);
                 continue;
             };
             let Some(bucket) = render_data.bucket::<Fill>() else {
@@ -691,11 +699,11 @@ impl RenderLayer for RenderFillLayer {
             };
             let binders = &*binders_lock.read();
 
-            if draws.bucket(&tile_id).is_some_and(|prev| prev != bucket.base.bucket_id) {
+            if self.caches.bucket(&tile_id).is_some_and(|prev| prev != bucket.base.bucket_id) {
                 // The tile's draws were built from another bucket.
-                draws.drop_cache(&tile_id);
+                self.caches.drop_cache(&tile_id);
             }
-            draws.set_bucket(&tile_id, bucket.base.bucket_id);
+            self.caches.set_bucket(&tile_id, bucket.base.bucket_id);
 
             let Some(evaluated) = render_data.layer::<Fill>().map(|layer| &layer.paint) else {
                 continue;
@@ -703,8 +711,8 @@ impl RenderLayer for RenderFillLayer {
 
             // The draws' attributes point into the bucket's shared vectors,
             // which upload again when they change.
-            let changes = draws.take_changes(&tile_id);
-            if let Some(cached) = draws.cache_mut::<FillTile>(&tile_id) {
+            let changes = self.caches.take_changes(&tile_id);
+            if let Some(cached) = self.caches.cache_mut(&tile_id) {
                 let geometry = tile.get_bucket_geometry();
                 let refresh = |attrs: &mut VertexAttributeArray| {
                     let buffer = &binders.interleaved_vertex_buffer;
@@ -725,34 +733,37 @@ impl RenderLayer for RenderFillLayer {
                     }
                 }
             } else if let Some(built) = builder.build(tile, bucket, binders, evaluated) {
-                draws.set_cache(&tile_id, built);
+                self.caches.set_cache(&tile_id, built);
             }
 
-            let Some(cached) = draws.cache_mut::<FillTile>(&tile_id) else {
+            let Some(cached) = self.caches.cache(&tile_id) else {
                 continue;
             };
             let tile_draws = [(&cached.fill, false), (&cached.outline, true)];
-            for (draw, outline) in tile_draws.into_iter().filter_map(|(draw, outline)| Some((draw.as_ref()?, outline)))
-            {
+            for (slot, (draw, outline)) in tile_draws.into_iter().enumerate() {
+                let Some(draw) = draw else {
+                    continue;
+                };
                 let uniforms = self.uniforms(tile, bucket, binders, cached.pattern, draw, outline, paint_parameters);
                 let tile_draw = FrameDraw {
                     pass: RENDER_PASS,
                     depth: DrawDepth::Layer { sub_layer: draw.sub_layer, mask: draw.depth },
                     clip: true,
                     atlases: cached.atlases.clone(),
-                    ..FrameDraw::new(Some(tile_id), draw.id)
+                    ..FrameDraw::new(Some(tile_id), slot as u32, draw.id)
                 };
                 frame_draws.push((tile_draw, uniforms));
             }
         }
 
         frame_draws.sort_by_key(|(draw, _)| draw.order());
-        let Some(frame) = &mut draws.frame else {
+        let Some(mut frame) = self.base.frame.take() else {
             return;
         };
         if !frame_draws.is_empty() {
-            self.write_uniforms(frame, &frame_draws, context);
+            self.write_uniforms(&mut frame, &frame_draws, context);
         }
         frame.draws = frame_draws.into_iter().map(|(draw, _)| draw).collect();
+        self.base.frame = Some(frame);
     }
 }

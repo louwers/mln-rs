@@ -48,9 +48,6 @@ impl AtlasBinding {
     }
 
     fn setup_textures(&self, objects: &mut DrawObjects, linear_filter_for_icons: bool) {
-        let Some(shader) = objects.shader().cloned() else {
-            return;
-        };
         let (Some(glyph_texture_id), Some(atlases)) = (self.glyph_texture_id, &self.atlases) else {
             return;
         };
@@ -73,13 +70,13 @@ impl AtlasBinding {
             });
         }
         if let Some(icon_texture_id) = self.icon_texture_id
-            && shader.samples(icon_texture_id)
+            && objects.shader().samples(icon_texture_id)
         {
             debug_assert_ne!(glyph_texture_id, icon_texture_id);
-            objects.set_texture(glyph, glyph_texture_id);
-            objects.set_texture(icon, icon_texture_id);
+            objects.textures[glyph_texture_id] = glyph;
+            objects.textures[icon_texture_id] = icon;
         } else {
-            objects.set_texture(if self.is_text { glyph } else { icon }, glyph_texture_id);
+            objects.textures[glyph_texture_id] = if self.is_text { glyph } else { icon };
         }
     }
 }

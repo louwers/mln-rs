@@ -16,8 +16,7 @@ use mln_gfx::shaders::shader_defines::{
 };
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
-use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode, ShaderProgramPtr, ShaderRegistry};
-use mln_map_types::TransformState;
+use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode, ShaderProgramPtr};
 use mln_style::PropertyEvaluationParameters;
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::{Background, BackgroundPaintProperties};
@@ -30,9 +29,8 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use super::cast_matrix;
 use crate::bucket::NoBucket;
-use crate::draw::{DrawObjects, DrawSegment};
-use crate::draw_cache::{DrawDepth, FrameDraw, FrameDraws, KeptDraw, LayerDraws};
-use crate::gfx::context::Context;
+use crate::draw::{DrawGeometry, DrawObjects, raw_vertices};
+use crate::draw_cache::{DrawCaches, DrawDepth, FrameDraw, FrameDraws, KeptDraw};
 use crate::globe_tile_mesh::raw_globe_tile_mesh;
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
@@ -69,6 +67,7 @@ impl LayerType for Background {
 pub(crate) struct RenderBackgroundLayer {
     base: RenderLayerBase,
     values: LayerValues<Background>,
+    caches: DrawCaches<KeptDraw>,
     plain_shader: Option<ShaderProgramPtr>,
     pattern_shader: Option<ShaderProgramPtr>,
     /// The passes the tiles' draws were built for, and whether with a
@@ -79,21 +78,19 @@ pub(crate) struct RenderBackgroundLayer {
 impl RenderBackgroundLayer {
     pub(crate) fn new(impl_: Arc<LayerStyle<Background>>) -> Self {
         let (base, values) = LayerValues::new(impl_);
-        RenderBackgroundLayer { base, values, plain_shader: None, pattern_shader: None, draws_built_for: None }
+        RenderBackgroundLayer {
+            base,
+            values,
+            caches: DrawCaches::default(),
+            plain_shader: None,
+            pattern_shader: None,
+            draws_built_for: None,
+        }
     }
 
     /// The GPU objects of the draw of the tile `tile_id`, with `shader`, in
     /// `passes`.
     fn build_tile(&self, tile_id: &OverscaledTileID, shader: ShaderProgramPtr, passes: RenderPass) -> DrawObjects {
-        let mut objects = DrawObjects::new(String::new());
-        objects.set_color_mode(&if passes == RenderPass::Translucent {
-            ColorMode::alpha_blended()
-        } else {
-            ColorMode::unblended()
-        });
-        objects.set_cull_face_mode(CullFaceMode::disabled());
-        objects.set_shader(Some(shader));
-        objects.set_vertex_attr_id(ID_BACKGROUND_POS_VERTEX_ATTRIBUTE);
         let (vertices, vertex_count, indexes, segments) = if self.base.projection_variant == ProjectionVariant::Globe {
             // The background is not depth tested, so it needs no tile border.
             let mesh = raw_globe_tile_mesh(&tile_id.canonical, false, SubdivisionGranularitySetting::globe().tile);
@@ -104,12 +101,21 @@ impl RenderBackgroundLayer {
             let bytes = bytemuck::cast_slice(&vertices).to_vec();
             (bytes, count, RenderStaticData::quad_triangle_indices(), RenderStaticData::tile_triangle_segments())
         };
-        objects.set_vertices(vertices, vertex_count, AttributeDataType::Short2);
-        let segments = segments
-            .iter()
-            .map(|segment: &SegmentBase| Box::new(DrawSegment::new(DrawMode::Triangles(), segment.copy())));
-        objects.set_index_data(Some(Rc::new(RefCell::new(IndexVectorBase::new(indexes)))), segments.collect());
-        objects
+        let geometry = DrawGeometry {
+            vertices: raw_vertices(
+                ID_BACKGROUND_POS_VERTEX_ATTRIBUTE,
+                vertices,
+                vertex_count,
+                AttributeDataType::Short2,
+            ),
+            vertex_count,
+            mode: DrawMode::Triangles(),
+            indexes: Rc::new(RefCell::new(IndexVectorBase::new(indexes))),
+            segments: segments.iter().map(SegmentBase::copy).collect(),
+        };
+        let color_mode =
+            if passes == RenderPass::Translucent { ColorMode::alpha_blended() } else { ColorMode::unblended() };
+        DrawObjects::new(String::new(), shader, color_mode, CullFaceMode::disabled(), geometry)
     }
 
     /// The entries in the layer's storage buffers of the draw of `tile_id`.
@@ -175,6 +181,8 @@ impl RenderBackgroundLayer {
 
 impl TypedLayer for RenderBackgroundLayer {
     type Type = Background;
+    type Tile = KeptDraw;
+    type Shared = ();
 
     fn parts(&self) -> (&RenderLayerBase, &LayerValues<Background>) {
         (&self.base, &self.values)
@@ -182,6 +190,10 @@ impl TypedLayer for RenderBackgroundLayer {
 
     fn parts_mut(&mut self) -> (&mut RenderLayerBase, &mut LayerValues<Background>) {
         (&mut self.base, &mut self.values)
+    }
+
+    fn caches_mut(&mut self) -> (&mut RenderLayerBase, &mut DrawCaches<KeptDraw>) {
+        (&mut self.base, &mut self.caches)
     }
 }
 
@@ -209,7 +221,7 @@ impl RenderLayer for RenderBackgroundLayer {
 
     /// Adds the layer's pattern to the pattern atlas. The layer draws
     /// the tiles that cover the view, not its source's.
-    fn prepare(&mut self, parameters: &mut LayerPrepareParameters<'_>) -> Option<Vec<usize>> {
+    fn prepare(&mut self, parameters: &LayerPrepareParameters<'_>) -> Option<Vec<usize>> {
         let evaluated = &self.values.evaluated.paint;
         if !evaluated.background_pattern.faded().to.empty() {
             // Ensures that the pattern bitmap gets copied to atlas bitmap.
@@ -226,14 +238,12 @@ impl RenderLayer for RenderBackgroundLayer {
     /// layer's buffers they read.
     fn update(
         &mut self,
-        shaders: &ShaderRegistry,
-        context: &Context,
-        state: &TransformState,
-        update_parameters: &Arc<UpdateParameters>,
         paint_parameters: &PaintParameters<'_>,
+        update_parameters: &UpdateParameters,
         _tiles: Option<LayerTiles<'_>>,
-        draws: &mut LayerDraws,
     ) {
+        let (shaders, context, state) =
+            (&paint_parameters.static_data.shaders, paint_parameters.context, paint_parameters.state);
         let zoom = state.get_integer_zoom();
         let zoom_range = Range::new(0u8, zoom);
         let tile_cover = tile_cover(
@@ -255,7 +265,7 @@ impl RenderLayer for RenderBackgroundLayer {
         // The layer has no render tiles: it draws the tiles that cover the
         // view.
         if tile_cover.is_empty() {
-            self.remove_all_draws(draws);
+            self.remove_all_draws();
             return;
         }
 
@@ -270,17 +280,17 @@ impl RenderLayer for RenderBackgroundLayer {
         // If the result is transparent or missing, just remove any existing
         // draws and stop
         if draw_passes == RenderPass::None {
-            self.remove_all_draws(draws);
+            self.remove_all_draws();
             return;
         }
-        draws.frame.get_or_insert_with(FrameDraws::new);
+        self.base.frame.get_or_insert_with(FrameDraws::new);
 
-        if self.update_projection_variant(state, draws) {
+        if self.update_projection_variant(state) {
             self.plain_shader = None;
             self.pattern_shader = None;
         }
         if self.draws_built_for != Some((draw_passes, has_pattern)) {
-            self.remove_all_draws(draws);
+            self.remove_all_draws();
             self.draws_built_for = Some((draw_passes, has_pattern));
         }
 
@@ -291,15 +301,15 @@ impl RenderLayer for RenderBackgroundLayer {
             self.pattern_shader = shaders.shader(BACKGROUND_PATTERN_SHADER_NAME, self.base.projection_variant);
         }
         let Some(shader) = (if has_pattern { self.pattern_shader.clone() } else { self.plain_shader.clone() }) else {
-            self.remove_all_draws(draws);
+            self.remove_all_draws();
             return;
         };
 
-        draws.set_tiles(tile_cover.iter().copied());
+        self.caches.set_tiles(tile_cover.iter().copied());
         for tile_id in &tile_cover {
-            if draws.cache_mut::<KeptDraw>(tile_id).is_none() {
+            if self.caches.cache_mut(tile_id).is_none() {
                 let objects = self.build_tile(tile_id, Rc::clone(&shader), draw_passes);
-                draws.set_cache(tile_id, KeptDraw::new(objects));
+                self.caches.set_cache(tile_id, KeptDraw::new(objects));
             }
         }
 
@@ -311,7 +321,7 @@ impl RenderLayer for RenderBackgroundLayer {
                 (pattern_atlas.get_pattern(faded.from.id()), pattern_atlas.get_pattern(faded.to.id()))
             else {
                 // The pattern isn't valid: the layer draws nothing.
-                if let Some(frame) = &mut draws.frame {
+                if let Some(frame) = &mut self.base.frame {
                     frame.draws.clear();
                 }
                 return;
@@ -333,22 +343,22 @@ impl RenderLayer for RenderBackgroundLayer {
 
         let mut frame_draws = Vec::new();
         for tile_id in &tile_cover {
-            let Some(cached) = draws.cache_mut::<KeptDraw>(tile_id) else {
+            let Some(cached) = self.caches.cache_mut(tile_id) else {
                 continue;
             };
             if let Some(texture) = &pattern_texture {
-                cached.objects.set_texture(Some(Rc::clone(texture)), ID_BACKGROUND_IMAGE_TEXTURE);
+                cached.objects.textures[ID_BACKGROUND_IMAGE_TEXTURE] = Some(Rc::clone(texture));
             }
             let draw = FrameDraw {
                 pass: draw_passes,
                 depth: DrawDepth::Layer { sub_layer: 0, mask: DepthMaskType::ReadWrite },
-                ..FrameDraw::new(Some(*tile_id), cached.id)
+                ..cached.frame_draw(Some(*tile_id))
             };
             frame_draws.push((draw, Self::uniforms(tile_id, has_pattern, paint_parameters)));
         }
         frame_draws.sort_by_key(|(draw, _)| draw.order());
 
-        let Some(frame) = &mut draws.frame else {
+        let Some(frame) = &mut self.base.frame else {
             return;
         };
         if !frame_draws.is_empty() {

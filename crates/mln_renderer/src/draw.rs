@@ -18,7 +18,7 @@ use mln_gfx::gpu::{
 use mln_gfx::index_vector::IndexVectorBasePtr;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{MAX_TEXTURE_COUNT_PER_SHADER, MAX_UBO_COUNT_PER_SHADER};
-use mln_gfx::shaders::shader_program::{ShaderProgram, ShaderProgramPtr, same_shader};
+use mln_gfx::shaders::shader_program::{ShaderProgram, ShaderProgramPtr};
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::vertex_attribute::{VertexAttribute, VertexAttributeArray};
 use mln_util::logging::{Event, Log};
@@ -37,20 +37,40 @@ pub(crate) type Textures = [Option<Texture2DPtr>; MAX_TEXTURE_COUNT_PER_SHADER];
 /// The most vertex buffers a draw binds, WebGPU's default limit.
 const MAX_VERTEX_BUFFERS: usize = 8;
 
-#[derive(Debug)]
-pub(crate) struct DrawSegment {
-    mode: DrawMode,
-    segment: SegmentBase,
+/// What a draw draws: its vertices, and the primitives its segments draw of
+/// them.
+pub(crate) struct DrawGeometry {
+    /// The vertex attributes, by attribute id.
+    pub(crate) vertices: VertexAttributeArray,
+    /// How many vertices the attributes hold, which an attribute the
+    /// shader reads and the draw lacks gets default values for.
+    pub(crate) vertex_count: usize,
+    /// The primitive the segments draw.
+    pub(crate) mode: DrawMode,
+    pub(crate) indexes: IndexVectorBasePtr,
+    /// The ranges of the indexes and vertices each draw call draws.
+    pub(crate) segments: Vec<SegmentBase>,
 }
 
-impl DrawSegment {
-    #[must_use]
-    pub(crate) fn new(mode: DrawMode, segment: SegmentBase) -> Self {
-        DrawSegment { mode, segment }
+/// `count` vertices of `data_type` in `data` as the vertex attribute `id`,
+/// none where there are no vertices.
+#[must_use]
+pub(crate) fn raw_vertices(
+    id: usize,
+    data: Vec<u8>,
+    count: usize,
+    data_type: AttributeDataType,
+) -> VertexAttributeArray {
+    let mut attributes = VertexAttributeArray::new();
+    if count == 0 || data_type == AttributeDataType::Invalid || data.is_empty() {
+        return attributes;
     }
+    if let Some(attribute) = attributes.set(id, -1, data_type, 0) {
+        attribute.set_raw_data(data);
+        attribute.set_stride(VertexAttribute::get_stride_of(data_type));
+    }
+    attributes
 }
-
-pub(crate) type UniqueDrawSegment = Box<DrawSegment>;
 
 /// A vertex buffer a draw binds, and how its pipeline reads it.
 struct VertexSlot {
@@ -86,24 +106,30 @@ struct PipelineVariant {
 /// when what they are made of changes.
 pub(crate) struct DrawObjects {
     pub(crate) name: String,
-    shader: Option<ShaderProgramPtr>,
+    shader: ShaderProgramPtr,
     pub(crate) vertex_attributes: VertexAttributeArray,
+    /// The attributes of each instance, for a draw of instances.
     pub(crate) instance_attributes: Option<VertexAttributeArray>,
-    pub(crate) attribute_update_time: Option<Instant>,
+    /// When the attributes last uploaded, `None` until they upload, which
+    /// binds them all again.
+    attribute_update_time: Option<Instant>,
+    /// The textures it binds, by texture id.
     pub(crate) textures: Textures,
+    /// The draw's own uniform and storage buffers, by id, which win over
+    /// its layer's and the frame's.
+    pub(crate) uniform_buffers: UniformBufferArray,
     color_mode: ColorMode,
     cull_face_mode: CullFaceMode,
 
-    segments: Vec<UniqueDrawSegment>,
-    indexes: Option<IndexVectorBasePtr>,
+    mode: DrawMode,
+    segments: Vec<SegmentBase>,
+    indexes: IndexVectorBasePtr,
     vertex_count: usize,
-    vertex_attr_id: usize,
     attribute_bindings: AttributeBindingArray,
     instance_bindings: AttributeBindingArray,
     /// The vertex buffers of the bindings, `None` until a draw after either
     /// changes computes them.
     vertex_slots: Option<Vec<VertexSlot>>,
-    uniform_buffers: UniformBufferArray,
     /// The context's shader of the draw's, once it drew.
     shader_id: Option<ShaderId>,
     /// The pipelines it drew with, for its shader, `pipeline_layouts`, color
@@ -120,25 +146,35 @@ pub(crate) struct DrawObjects {
 }
 
 impl DrawObjects {
+    /// The objects of a draw named `name` of `geometry` with `shader`, in
+    /// `color_mode` and `cull_face_mode`, without textures, instances or
+    /// buffers of its own.
     #[must_use]
-    pub(crate) fn new(name: String) -> Self {
+    pub(crate) fn new(
+        name: String,
+        shader: ShaderProgramPtr,
+        color_mode: ColorMode,
+        cull_face_mode: CullFaceMode,
+        geometry: DrawGeometry,
+    ) -> Self {
+        let DrawGeometry { vertices, vertex_count, mode, indexes, segments } = geometry;
         DrawObjects {
             name,
-            shader: None,
-            vertex_attributes: VertexAttributeArray::new(),
+            shader,
+            vertex_attributes: vertices,
             instance_attributes: None,
             attribute_update_time: None,
             textures: Default::default(),
-            color_mode: ColorMode::disabled(),
-            cull_face_mode: CullFaceMode::disabled(),
-            segments: Vec::new(),
-            indexes: None,
-            vertex_count: 0,
-            vertex_attr_id: 0,
+            uniform_buffers: UniformBufferArray::new(),
+            color_mode,
+            cull_face_mode,
+            mode,
+            segments,
+            indexes,
+            vertex_count,
             attribute_bindings: Vec::new(),
             instance_bindings: Vec::new(),
             vertex_slots: None,
-            uniform_buffers: UniformBufferArray::new(),
             shader_id: None,
             pipelines: Vec::new(),
             pipeline_layouts: Vec::new(),
@@ -156,16 +192,9 @@ impl DrawObjects {
     }
 
     fn upload_in(&mut self, context: &Context) -> Result<(), GpuError> {
-        let Some(shader) = self.shader.clone() else {
-            debug_assert!(false, "draw {} has no shader", self.name);
-            return Ok(());
-        };
-        let Some(indexes) = self.indexes.clone() else {
-            debug_assert!(false, "draw {} has no indexes", self.name);
-            return Ok(());
-        };
+        let shader = Rc::clone(&self.shader);
         {
-            let mut indexes = indexes.borrow_mut();
+            let mut indexes = self.indexes.borrow_mut();
             if indexes.empty() && (indexes.get_buffer().is_none() || indexes.get_dirty()) {
                 debug_assert!(false, "draw {} has no index data", self.name);
                 return Ok(());
@@ -224,7 +253,7 @@ impl DrawObjects {
         global_index: u32,
     ) {
         if let Err(error) = self.draw_in(gpu, parameters, layer, depth_mode, stencil_mode, global_index) {
-            let shader = self.shader.as_ref().map_or("no shader", |shader| shader.name());
+            let shader = self.shader.name();
             Log::warning(Event::Render, format!("Drawing draw {} of {shader} failed: {error}", self.name));
         }
     }
@@ -238,16 +267,13 @@ impl DrawObjects {
         stencil_mode: StencilMode,
         global_index: u32,
     ) -> Result<(), GpuError> {
-        let Some(shader) = self.shader.clone() else {
-            debug_assert!(false, "draw {} has no shader", self.name);
-            return Ok(());
-        };
+        let shader = Rc::clone(&self.shader);
         let Some((size, targets)) = parameters.pass_target() else {
             return Ok(());
         };
         let context = parameters.context;
-        let Some(index_buffer) = self.indexes.as_ref().and_then(|indexes| {
-            let indexes = indexes.borrow();
+        let Some(index_buffer) = ({
+            let indexes = self.indexes.borrow();
             debug_assert!(!indexes.get_dirty(), "draw {} draws indexes it didn't upload", self.name);
             indexes.get_buffer().filter(|_| !indexes.get_dirty()).map(|buffer| buffer.id())
         }) else {
@@ -299,8 +325,8 @@ impl DrawObjects {
         let depth = DepthState::from(&depth_mode);
         let stencil = StencilState::from(&stencil_mode);
         let mut draws = 0;
+        let mode = self.mode;
         for segment in &self.segments {
-            let (mode, segment) = (segment.mode, &segment.segment);
             if segment.index_length == 0 {
                 continue;
             }
@@ -405,90 +431,27 @@ impl DrawObjects {
         self.geometry = None;
     }
 
-    /// Replaces the vertex attributes, vertex count, indexes and segments.
-    pub(crate) fn update_vertex_attributes(
-        &mut self,
-        vertices: VertexAttributeArray,
-        vertex_count: usize,
-        mode: DrawMode,
-        indexes: Option<IndexVectorBasePtr>,
-        segments: &[SegmentBase],
-    ) {
-        self.set_vertex_attributes(vertices);
+    /// Replaces the geometry, whose attributes the next upload binds again
+    /// even where they appear unchanged.
+    pub(crate) fn replace_geometry(&mut self, geometry: DrawGeometry) {
+        let DrawGeometry { vertices, vertex_count, mode, indexes, segments } = geometry;
+        self.vertex_attributes = vertices;
+        self.attribute_update_time = None;
         self.vertex_count = vertex_count;
-        let segments = segments.iter().map(|segment| Box::new(DrawSegment::new(mode, segment.copy()))).collect();
-        self.set_index_data(indexes, segments);
-    }
-
-    /// Takes `data`, `count` vertices of `data_type`, as the attribute the
-    /// builder named the vertex attribute.
-    pub(crate) fn set_vertices(&mut self, data: Vec<u8>, count: usize, data_type: AttributeDataType) {
-        self.vertex_count = count;
-        if count == 0 || data_type == AttributeDataType::Invalid || data.is_empty() {
-            return;
-        }
-        let Some(attribute) = self.vertex_attributes.set(self.vertex_attr_id, -1, data_type, 0) else {
-            debug_assert!(false, "draw {} has no vertex attribute {}", self.name, self.vertex_attr_id);
-            return;
-        };
-        attribute.set_raw_data(data);
-        attribute.set_stride(VertexAttribute::get_stride_of(data_type));
-    }
-
-    pub(crate) fn set_vertex_attr_id(&mut self, id: usize) {
-        self.vertex_attr_id = id;
-    }
-
-    /// Sets the shared indexes and the segments drawn from them.
-    pub(crate) fn set_index_data(&mut self, indexes: Option<IndexVectorBasePtr>, segments: Vec<UniqueDrawSegment>) {
+        self.mode = mode;
         self.indexes = indexes;
         self.segments = segments;
     }
 
-    /// The draw's own uniform and storage buffers, by id.
-    pub(crate) fn mutable_uniform_buffers(&mut self) -> &mut UniformBufferArray {
-        &mut self.uniform_buffers
+    /// Replaces the indexes and the segments drawn from them.
+    pub(crate) fn replace_indexes(&mut self, indexes: IndexVectorBasePtr, segments: Vec<SegmentBase>) {
+        self.indexes = indexes;
+        self.segments = segments;
     }
 
     #[must_use]
-    pub(crate) fn shader(&self) -> Option<&ShaderProgramPtr> {
-        self.shader.as_ref()
-    }
-
-    pub(crate) fn set_shader(&mut self, value: Option<ShaderProgramPtr>) {
-        if !same_shader(&self.shader, &value) {
-            self.shader = value;
-            self.shader_id = None;
-            self.bindings = None;
-            self.pipelines.clear();
-            self.pipeline_layouts.clear();
-            self.forget_vertex_slots();
-        }
-    }
-
-    pub(crate) fn set_color_mode(&mut self, value: &ColorMode) {
-        self.color_mode = *value;
-        self.pipelines.clear();
-    }
-
-    pub(crate) fn set_cull_face_mode(&mut self, value: CullFaceMode) {
-        self.cull_face_mode = value;
-        self.pipelines.clear();
-    }
-
-    /// Attaches `texture` at texture id `id`.
-    pub(crate) fn set_texture(&mut self, texture: Option<Texture2DPtr>, id: usize) {
-        debug_assert!(id < self.textures.len());
-        if let Some(slot) = self.textures.get_mut(id) {
-            *slot = texture;
-        }
-    }
-
-    /// Replaces the vertex attributes, which the next upload binds again
-    /// even where they appear unchanged.
-    pub(crate) fn set_vertex_attributes(&mut self, value: VertexAttributeArray) {
-        self.vertex_attributes = value;
-        self.attribute_update_time = None;
+    pub(crate) fn shader(&self) -> &ShaderProgramPtr {
+        &self.shader
     }
 }
 
