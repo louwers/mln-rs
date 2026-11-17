@@ -120,7 +120,7 @@ impl FileSource for ProxyFileSource {
         let number = track(&transformed.url);
         let logged = transformed.clone();
         let outer = responder.clone();
-        let (request, inner) = Request::direct(move |response: Response| {
+        let (request, inner) = Request::new(move |response: Response| {
             answered(number);
             if logged.loading_method == LoadingMethod::CacheOnly && response.no_content {
                 match (&logged.tile_data, logged.kind) {

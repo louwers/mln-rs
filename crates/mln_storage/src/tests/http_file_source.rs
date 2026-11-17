@@ -8,8 +8,8 @@ use mln_test_server::HttpServer;
 use mln_util::chrono::{Timestamp, now};
 use parking_lot::Mutex;
 
-use super::{Req, req};
-use crate::file_source::{FileSource, FileSourceExt};
+use super::{Dispatcher, LocalRequests, Req, req};
+use crate::file_source::FileSource;
 use crate::http_file_source::{HTTPFileSource, same_origin};
 use crate::http_header_transform::HttpHeaderTransform;
 use crate::resource::{Kind, Resource};
@@ -28,10 +28,11 @@ fn data(res: &Response) -> &[u8] {
 fn cancel() {
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let fs = http_file_source();
 
-    drop(fs.request(
-        &run_loop.handle(),
+    drop(fs.request_local(
+        &local,
         &Resource::new(Kind::Unknown, server.url("/test")),
         Box::new(|_: Response| panic!("Callback should not be called")),
     ));
@@ -44,11 +45,12 @@ fn cancel() {
 fn http200() {
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let fs = http_file_source();
 
     let stop = run_loop.clone();
-    let _req = fs.request(
-        &run_loop.handle(),
+    let _req = fs.request_local(
+        &local,
         &Resource::new(Kind::Unknown, server.url("/test")),
         Box::new(move |res: Response| {
             assert_eq!(None, res.error);
@@ -69,14 +71,15 @@ fn http200() {
 fn http206() {
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let fs = http_file_source();
 
     let mut resource = Resource::new(Kind::Unknown, server.url("/test"));
     resource.data_range = Some((3, 8));
 
     let stop = run_loop.clone();
-    let _req = fs.request(
-        &run_loop.handle(),
+    let _req = fs.request_local(
+        &local,
         &resource,
         Box::new(move |res: Response| {
             assert_eq!(None, res.error);
@@ -97,11 +100,12 @@ fn http206() {
 fn http404() {
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let fs = http_file_source();
 
     let stop = run_loop.clone();
-    let _req = fs.request(
-        &run_loop.handle(),
+    let _req = fs.request_local(
+        &local,
         &Resource::new(Kind::Unknown, server.url("/doesnotexist")),
         Box::new(move |res: Response| {
             let error = res.error.as_ref().expect("error");
@@ -124,11 +128,12 @@ fn http404() {
 fn http_tile404() {
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let fs = http_file_source();
 
     let stop = run_loop.clone();
-    let _req = fs.request(
-        &run_loop.handle(),
+    let _req = fs.request_local(
+        &local,
         &Resource::new(Kind::Tile, server.url("/doesnotexist")),
         Box::new(move |res: Response| {
             assert!(res.no_content);
@@ -151,11 +156,12 @@ fn http_tile404() {
 fn http200_empty_data() {
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let fs = http_file_source();
 
     let stop = run_loop.clone();
-    let _req = fs.request(
-        &run_loop.handle(),
+    let _req = fs.request_local(
+        &local,
         &Resource::new(Kind::Unknown, server.url("/empty-data")),
         Box::new(move |res: Response| {
             assert!(!res.no_content);
@@ -177,11 +183,12 @@ fn http200_empty_data() {
 fn http204() {
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let fs = http_file_source();
 
     let stop = run_loop.clone();
-    let _req = fs.request(
-        &run_loop.handle(),
+    let _req = fs.request_local(
+        &local,
         &Resource::new(Kind::Unknown, server.url("/no-content")),
         Box::new(move |res: Response| {
             assert!(res.no_content);
@@ -204,11 +211,12 @@ fn http204() {
 fn http500() {
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let fs = http_file_source();
 
     let stop = run_loop.clone();
-    let _req = fs.request(
-        &run_loop.handle(),
+    let _req = fs.request_local(
+        &local,
         &Resource::new(Kind::Unknown, server.url("/permanent-error")),
         Box::new(move |res: Response| {
             let error = res.error.as_ref().expect("error");
@@ -231,11 +239,12 @@ fn http500() {
 fn expires_parsing() {
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let fs = http_file_source();
 
     let stop = run_loop.clone();
-    let _req = fs.request(
-        &run_loop.handle(),
+    let _req = fs.request_local(
+        &local,
         &Resource::new(Kind::Unknown, server.url("/test?modified=1420794326&expires=1420797926&etag=foo")),
         Box::new(move |res: Response| {
             assert_eq!(None, res.error);
@@ -256,11 +265,12 @@ fn expires_parsing() {
 fn cache_control_parsing() {
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let fs = http_file_source();
 
     let stop = run_loop.clone();
-    let _req = fs.request(
-        &run_loop.handle(),
+    let _req = fs.request_local(
+        &local,
         &Resource::new(Kind::Unknown, server.url("/test?cachecontrol=max-age=120")),
         Box::new(move |res: Response| {
             assert_eq!(None, res.error);
@@ -290,14 +300,16 @@ pub(crate) fn load_request(
     state: &Rc<LoadState>,
     url: &Rc<dyn Fn(i32) -> String>,
     run_loop: &RunLoop,
+    local: &Dispatcher,
     i: usize,
     max: i32,
 ) {
     let current = state.number.get();
     state.number.set(current + 1);
-    let (fs2, state2, url2, run_loop2) = (Rc::clone(fs), Rc::clone(state), Rc::clone(url), run_loop.clone());
-    let request = fs.request(
-        &run_loop.handle(),
+    let (fs2, state2, url2, run_loop2, local2) =
+        (Rc::clone(fs), Rc::clone(state), Rc::clone(url), run_loop.clone(), local.clone());
+    let request = fs.request_local(
+        local,
         &Resource::new(Kind::Unknown, url(current)),
         Box::new(move |res: Response| {
             state2.reqs[i].borrow_mut().take();
@@ -309,7 +321,7 @@ pub(crate) fn load_request(
             assert!(res.etag.is_none());
 
             if state2.number.get() <= max {
-                load_request(&fs2, &state2, &url2, &run_loop2, i, max);
+                load_request(&fs2, &state2, &url2, &run_loop2, &local2, i, max);
             } else if current == max {
                 run_loop2.stop();
             }
@@ -326,6 +338,7 @@ fn load() {
 
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let fs: Rc<dyn FileSource> = Rc::new(http_file_source());
 
     let state = Rc::new(LoadState { reqs: (0..CONCURRENCY).map(|_| req()).collect(), number: Cell::new(1) });
@@ -333,7 +346,7 @@ fn load() {
     let url: Rc<dyn Fn(i32) -> String> = Rc::new(move |n| format!("{base}{n}"));
 
     for i in 0..CONCURRENCY {
-        load_request(&fs, &state, &url, &run_loop, i, MAX);
+        load_request(&fs, &state, &url, &run_loop, &local, i, MAX);
     }
 
     run_loop.run();
@@ -354,10 +367,11 @@ fn token_transform(seen: Arc<Mutex<Vec<(Kind, String)>>>) -> HttpHeaderTransform
 /// Loads `url` with `fs`, and returns the response.
 fn load_once(fs: &HTTPFileSource, kind: Kind, url: String) -> Response {
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let result = Rc::new(RefCell::new(None));
     let (r, stop) = (Rc::clone(&result), run_loop.clone());
-    let _req = fs.request(
-        &run_loop.handle(),
+    let _req = fs.request_local(
+        &local,
         &Resource::new(kind, url),
         Box::new(move |res: Response| {
             *r.borrow_mut() = Some(res);

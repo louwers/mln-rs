@@ -92,7 +92,7 @@ impl TransferRequest {
     /// Finishes the request with the transfer's result (a transfer that
     /// failed before a response, such as a connection error, is an `Err`):
     /// builds the response, as the header callback and
-    /// `handleResult(CURLcode)` do, and hands it to the requesting thread,
+    /// `handleResult(CURLcode)` do, and sends it to the request's callback,
     /// unless the request was dropped. Any thread may call it.
     pub(crate) fn finish(self, transfer: Result<Transfer, Box<ResourceError>>) {
         self.responder.on_cancel(|| {});
@@ -107,7 +107,7 @@ impl TransferRequest {
     /// A request for `resource` whose response goes nowhere, until the
     /// returned request drops (tests).
     pub(crate) fn unanswered(resource: Resource) -> (TransferRequest, crate::request::Request) {
-        let (request, responder) = crate::request::Request::direct(|_| {});
+        let (request, responder) = crate::request::Request::new(|_| {});
         (TransferRequest { resource, headers: HttpHeaders::new(), responder }, request)
     }
 }

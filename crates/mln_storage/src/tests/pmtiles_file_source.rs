@@ -6,8 +6,8 @@ use mln_actor::RunLoop;
 use mln_util::constants::{FILE_PROTOCOL, PMTILES_PROTOCOL};
 use mln_util::tileset::Scheme;
 
-use super::{cpp_path, req};
-use crate::file_source::{FileSource, FileSourceExt};
+use super::{Dispatcher, LocalRequests, cpp_path, req};
+use crate::file_source::FileSource;
 use crate::loader::Loader;
 use crate::pmtiles_file_source::PMTilesFileSource;
 use crate::resource::{Kind, LoadingMethod, Resource};
@@ -30,11 +30,12 @@ fn tile(url: &str, z: i8) -> Resource {
 /// Requests `resource`, runs the loop until the response and returns it.
 fn request(fs: &PMTilesFileSource, resource: &Resource) -> Response {
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let req = req();
     let result = Rc::new(RefCell::new(None));
     let (r, out, stop) = (Rc::clone(&req), Rc::clone(&result), run_loop.clone());
-    *req.borrow_mut() = Some(fs.request(
-        &run_loop.handle(),
+    *req.borrow_mut() = Some(fs.request_local(
+        &local,
         resource,
         Box::new(move |res: Response| {
             r.borrow_mut().take();
@@ -143,15 +144,16 @@ fn corrupt_gzip_metadata() {
 #[test]
 fn repeated_tile_request() {
     let run_loop = RunLoop::new();
-    let queue = run_loop.handle();
+    let local = Dispatcher::new(&run_loop);
+    let queue = local.clone();
     let pmtiles = pmtiles_file_source();
 
     let req1 = req();
     let req2 = req();
 
     let (r1, r2, fs, stop) = (Rc::clone(&req1), Rc::clone(&req2), Rc::clone(&pmtiles), run_loop.clone());
-    *req1.borrow_mut() = Some(pmtiles.request(
-        &run_loop.handle(),
+    *req1.borrow_mut() = Some(pmtiles.request_local(
+        &local,
         &tile(&to_absolute_url("geography-class-png.pmtiles"), 0),
         Box::new(move |res1: Response| {
             r1.borrow_mut().take();
@@ -159,7 +161,7 @@ fn repeated_tile_request() {
             let first_size = res1.data.as_ref().expect("data").len();
 
             let (r2c, stop) = (Rc::clone(&r2), stop.clone());
-            *r2.borrow_mut() = Some(fs.request(
+            *r2.borrow_mut() = Some(fs.request_local(
                 &queue,
                 &tile(&to_absolute_url("geography-class-png.pmtiles"), 0),
                 Box::new(move |res2: Response| {

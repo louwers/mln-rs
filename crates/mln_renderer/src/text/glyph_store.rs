@@ -411,7 +411,7 @@ impl GlyphStore {
         // Only the first answer applies: the range is no longer loading once
         // it has one. A revalidation's not-modified isn't an answer.
         let mut answered = false;
-        let (req, responder) = Request::direct(move |response: Response| {
+        let (req, responder) = Request::new(move |response: Response| {
             if response.not_modified || std::mem::replace(&mut answered, true) {
                 return;
             }

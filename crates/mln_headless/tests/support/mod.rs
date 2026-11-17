@@ -24,7 +24,7 @@ use std::path::PathBuf;
 use std::rc::{Rc, Weak};
 use std::sync::{Arc, OnceLock};
 
-use mln_actor::{AsyncTask, LocalObject, RunLoop, Timer};
+use mln_actor::{AsyncTask, RunLoop, Timer};
 use mln_headless::{HeadlessFrontend, RenderResult};
 use mln_map::{Map, MapEvent, MapMode, MapOptions, RenderFrameStatus};
 use mln_renderer::{FontStack, GlyphRange, OverscaledTileID, TileOperation, UpdateReader};
@@ -38,7 +38,7 @@ use mln_util::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, EventSeverity, Log};
 use mln_util::pool::Pool;
-use parking_lot::Mutex;
+use parking_lot::{Mutex, MutexGuard};
 
 // MARK: - Fixtures
 
@@ -358,40 +358,35 @@ struct FakeRequestEntry {
     responder: Responder,
 }
 
-type FakeRequests = RefCell<Vec<FakeRequestEntry>>;
-
 /// Records the requests made; the test responds to them.
 pub(crate) struct FakeFileSource {
-    requests: LocalObject<FakeRequests>,
+    requests: Mutex<Vec<FakeRequestEntry>>,
 }
 
 impl FakeFileSource {
     pub(crate) fn new() -> Self {
-        FakeFileSource { requests: LocalObject::new(RefCell::new(Vec::new())) }
+        FakeFileSource { requests: Mutex::new(Vec::new()) }
     }
 
     /// The requests that weren't cancelled.
-    fn list(&self) -> Rc<FakeRequests> {
-        let list = self.requests.get().expect("FakeFileSource used from another thread");
-        list.borrow_mut().retain(|entry| !entry.responder.is_cancelled());
+    fn list(&self) -> MutexGuard<'_, Vec<FakeRequestEntry>> {
+        let mut list = self.requests.lock();
+        list.retain(|entry| !entry.responder.is_cancelled());
         list
     }
 
     pub(crate) fn requests_len(&self) -> usize {
-        self.list().borrow().len()
+        self.list().len()
     }
 
     /// `respond(kind, response)`: answers the first pending request of that
     /// kind; returns whether there was one.
     pub(crate) fn respond(&self, kind: Kind, response: &Response) -> bool {
-        let responder = {
-            let list = self.list();
-            let list = list.borrow();
-            list.iter().find(|entry| entry.resource.kind == kind).map(|entry| entry.responder.clone())
-        };
+        let responder =
+            self.list().iter().find(|entry| entry.resource.kind == kind).map(|entry| entry.responder.clone());
         match responder {
             Some(responder) => {
-                responder.send_now(response.clone());
+                responder.send(response.clone());
                 true
             }
             None => false,
@@ -407,7 +402,7 @@ impl Default for FakeFileSource {
 
 impl FileSource for FakeFileSource {
     fn load(&self, resource: &Resource, responder: Responder) {
-        self.list().borrow_mut().push(FakeRequestEntry { resource: resource.clone(), responder });
+        self.list().push(FakeRequestEntry { resource: resource.clone(), responder });
     }
 
     fn can_request(&self, _resource: &Resource) -> bool {

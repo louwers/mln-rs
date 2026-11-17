@@ -88,7 +88,7 @@ struct State {
 impl State {
     /// Requests `resource` for `task`, in place of its sub-request before.
     fn request(&self, req: &Task, resource: &Resource, callback: impl FnMut(Response) + Send + 'static) {
-        let (request, responder) = Request::direct(callback);
+        let (request, responder) = Request::new(callback);
         let previous = req.lock().replace(request);
         drop(previous);
         self.file_source.load(resource, responder);

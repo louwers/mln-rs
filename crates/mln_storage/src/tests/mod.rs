@@ -18,23 +18,120 @@ mod offline_database;
 mod online_file_source;
 mod pmtiles_file_source;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::sync::{Arc, mpsc};
 
-use mln_actor::ActorRef;
+use mln_actor::{ActorRef, AsyncTask, AsyncTaskSender, RunLoop};
+use mln_util::hash::HashMap;
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
 use parking_lot::{Mutex, MutexGuard};
 
 use crate::Request;
+use crate::file_source::{FileSource, FileSourceExt};
+use crate::resource::Resource;
+use crate::response::Response;
 
-/// A request that its own callback can drop.
-pub(crate) type Req = Rc<RefCell<Option<Request>>>;
+/// A request that its own handler can drop.
+pub(crate) type Req = Rc<RefCell<Option<LocalRequest>>>;
 
 pub(crate) fn req() -> Req {
     Rc::new(RefCell::new(None))
 }
+
+type Handler = Rc<RefCell<Box<dyn FnMut(Response)>>>;
+
+/// Runs requests' responses on the test's thread, in the turns of its loop,
+/// for handlers that aren't `Send`. Responses run in the order they arrive,
+/// and none runs after its request drops. Clones share the dispatcher.
+#[derive(Clone)]
+pub(crate) struct Dispatcher {
+    inner: Rc<DispatcherInner>,
+}
+
+struct DispatcherInner {
+    /// The responses that arrived, with their requests' tokens.
+    inbox: Arc<Mutex<VecDeque<(u64, Response)>>>,
+    wake: AsyncTaskSender,
+    _task: AsyncTask,
+    handlers: RefCell<HashMap<u64, Handler>>,
+    next_token: Cell<u64>,
+}
+
+impl Dispatcher {
+    /// A dispatcher whose responses run in the turns of `run_loop`.
+    pub(crate) fn new(run_loop: &RunLoop) -> Self {
+        let inner = Rc::new_cyclic(|inner: &Weak<DispatcherInner>| {
+            let inner = Weak::clone(inner);
+            let task = AsyncTask::new(run_loop, move || {
+                if let Some(inner) = inner.upgrade() {
+                    inner.drain();
+                }
+            });
+            DispatcherInner {
+                inbox: Arc::default(),
+                wake: task.sender(),
+                _task: task,
+                handlers: RefCell::default(),
+                next_token: Cell::new(0),
+            }
+        });
+        Dispatcher { inner }
+    }
+}
+
+impl DispatcherInner {
+    fn drain(&self) {
+        loop {
+            let Some((token, response)) = self.inbox.lock().pop_front() else { return };
+            let handler = self.handlers.borrow().get(&token).cloned();
+            if let Some(handler) = handler {
+                (handler.borrow_mut())(response);
+            }
+        }
+    }
+}
+
+/// A request whose responses a [`Dispatcher`] hands to its handler, which
+/// it keeps alive. Dropping it cancels the request.
+pub(crate) struct LocalRequest {
+    token: u64,
+    dispatcher: Rc<DispatcherInner>,
+    _request: Request,
+}
+
+impl Drop for LocalRequest {
+    fn drop(&mut self) {
+        let handler = self.dispatcher.handlers.borrow_mut().remove(&self.token);
+        drop(handler);
+    }
+}
+
+/// Requests whose handlers run on the test's thread.
+pub(crate) trait LocalRequests: FileSource {
+    /// Requests `resource`; `dispatcher` hands the responses to `handler`.
+    fn request_local(
+        &self,
+        dispatcher: &Dispatcher,
+        resource: &Resource,
+        handler: impl FnMut(Response) + 'static,
+    ) -> LocalRequest {
+        let inner = &dispatcher.inner;
+        let token = inner.next_token.get();
+        inner.next_token.set(token + 1);
+        inner.handlers.borrow_mut().insert(token, Rc::new(RefCell::new(Box::new(handler))));
+        let (inbox, wake) = (Arc::clone(&inner.inbox), inner.wake.clone());
+        let request = self.request(resource, move |response| {
+            inbox.lock().push_back((token, response));
+            wake.send();
+        });
+        LocalRequest { token, dispatcher: Rc::clone(inner), _request: request }
+    }
+}
+
+impl<T: FileSource + ?Sized> LocalRequests for T {}
 
 /// Serializes the tests that use process-wide state (`NetworkStatus`, the
 /// log observer): gtest runs one test at a time, the Rust harness runs them
@@ -267,8 +364,8 @@ fn mt19937_matches_the_standard() {
 }
 
 thread_local! {
-    static LOCAL_CALLBACKS: RefCell<mln_util::hash::HashMap<u64, Box<dyn FnOnce()>>> =
-        RefCell::new(mln_util::hash::HashMap::default());
+    static LOCAL_CALLBACKS: RefCell<HashMap<u64, Box<dyn FnOnce()>>> =
+        RefCell::new(HashMap::default());
 }
 
 /// A pool for a test's file sources.

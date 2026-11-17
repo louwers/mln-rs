@@ -360,29 +360,25 @@ impl TestRunnerImpl for Impl {
         let Some(file_source) = &self.file_source else {
             return Err(MapError::LoadFailed);
         };
-        let maybe_image: Rc<std::cell::RefCell<Option<Vec<u8>>>> = Rc::default();
-        let request_completed = Rc::new(Cell::new(false));
-        let _req = {
-            let maybe_image = Rc::clone(&maybe_image);
-            let request_completed = Rc::clone(&request_completed);
-            file_source.request(
-                &self.run_loop.handle(),
-                &mln_storage::Resource::image(&format!("mapbox://render-tests/{image_path}")),
-                Box::new(move |response: mln_storage::Response| {
-                    if let Some(data) = &response.data {
-                        *maybe_image.borrow_mut() = Some(data.to_vec());
-                    }
-                    request_completed.set(true);
-                }),
-            )
+        let (sender, responses) = std::sync::mpsc::channel();
+        let _req = file_source.request(
+            &mln_storage::Resource::image(&format!("mapbox://render-tests/{image_path}")),
+            move |response: mln_storage::Response| {
+                let _ = sender.send(response.data);
+            },
+        );
+
+        let data = loop {
+            match responses.try_recv() {
+                Ok(data) => break data,
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    self.run_loop.run_once();
+                    self.map.process_events();
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => break None,
+            }
         };
-
-        while !request_completed.get() {
-            self.run_loop.run_once();
-            self.map.process_events();
-        }
-
-        let Some(bytes) = maybe_image.borrow_mut().take() else {
+        let Some(bytes) = data else {
             return Err(MapError::LoadFailed);
         };
 

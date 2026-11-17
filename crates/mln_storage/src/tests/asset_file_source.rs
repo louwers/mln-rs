@@ -1,12 +1,12 @@
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
-use mln_actor::{RunLoop, RunLoopHandle, Thread};
+use mln_actor::RunLoop;
 use parking_lot::Mutex;
 
-use super::{cpp_path, req};
+use super::{Dispatcher, LocalRequests, cpp_path, req};
 use crate::asset_file_source::AssetFileSource;
 use crate::file_source::{FileSource, FileSourceExt};
 use crate::request::Request;
@@ -20,11 +20,12 @@ fn asset_file_source() -> AssetFileSource {
 /// Requests `resource`, runs the loop until the response and returns it.
 fn request(fs: &AssetFileSource, resource: &Resource) -> Response {
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let req = req();
     let result = Rc::new(RefCell::new(None));
     let (r, out, stop) = (Rc::clone(&req), Rc::clone(&result), run_loop.clone());
-    *req.borrow_mut() = Some(fs.request(
-        &run_loop.handle(),
+    *req.borrow_mut() = Some(fs.request_local(
+        &local,
         resource,
         Box::new(move |res: Response| {
             r.borrow_mut().take();
@@ -41,70 +42,36 @@ fn data(res: &Response) -> &[u8] {
     res.data.as_deref().map(Vec::as_slice).expect("data")
 }
 
-/// The state of a `TestWorker`'s request chain.
+/// A chain of requests for an asset, each made by the callback of the one
+/// before.
 struct WorkerChain {
     fs: Arc<AssetFileSource>,
-    queue: RunLoopHandle,
-    num_requests: Cell<u32>,
-    request: RefCell<Option<Request>>,
-    end_callback: Box<dyn Fn()>,
+    num_requests: AtomicU32,
+    request: Mutex<Option<Request>>,
+    end_callback: Box<dyn Fn() + Send + Sync>,
     failures: Arc<Mutex<Vec<String>>>,
 }
 
 impl WorkerChain {
-    fn request(self: &Rc<Self>) {
+    fn request(self: &Arc<Self>) {
         let asset = "asset://nonempty";
-        let this = Rc::clone(self);
-        let request = self.fs.request(
-            &self.queue,
-            &Resource::new(Kind::Unknown, asset),
-            Box::new(move |res: Response| {
-                // EXPECT_*: record, keep going.
-                if res.error.is_some() || res.data.as_deref().map(Vec::as_slice) != Some(b"content is here\n") {
-                    this.failures.lock().push(format!("{res:?}"));
-                }
+        let this = Arc::clone(self);
+        // Held while the request starts, so that its callback's next
+        // request takes its place only after it is stored.
+        let mut slot = self.request.lock();
+        *slot = Some(self.fs.request(&Resource::new(Kind::Unknown, asset), move |res: Response| {
+            // EXPECT_*: record, keep going.
+            if res.error.is_some() || res.data.as_deref().map(Vec::as_slice) != Some(b"content is here\n") {
+                this.failures.lock().push(format!("{res:?}"));
+            }
 
-                let remaining = this.num_requests.get() - 1;
-                this.num_requests.set(remaining);
-                if remaining == 0 {
-                    (this.end_callback)();
-                    this.request.borrow_mut().take();
-                } else {
-                    this.request();
-                }
-            }),
-        );
-        *self.request.borrow_mut() = Some(request);
-    }
-}
-
-struct TestWorker {
-    fs: Arc<AssetFileSource>,
-    queue: RunLoopHandle,
-    chain: RefCell<Option<Rc<WorkerChain>>>,
-}
-
-impl TestWorker {
-    fn run(&self, end_callback: Box<dyn Fn() + Send>, failures: Arc<Mutex<Vec<String>>>) {
-        let chain = Rc::new(WorkerChain {
-            fs: Arc::clone(&self.fs),
-            queue: self.queue.clone(),
-            num_requests: Cell::new(1000),
-            request: RefCell::new(None),
-            end_callback,
-            failures,
-        });
-        chain.request();
-        *self.chain.borrow_mut() = Some(chain);
-    }
-}
-
-impl Drop for TestWorker {
-    fn drop(&mut self) {
-        // Break the chain's request -> callback -> chain cycle.
-        if let Some(chain) = self.chain.borrow_mut().take() {
-            chain.request.borrow_mut().take();
-        }
+            if this.num_requests.fetch_sub(1, Ordering::SeqCst) == 1 {
+                (this.end_callback)();
+                drop(this.request.lock().take());
+            } else {
+                this.request();
+            }
+        }));
     }
 }
 
@@ -122,29 +89,27 @@ fn load() {
     let mut threads = Vec::new();
 
     for _ in 0..num_threads {
-        let worker_fs = Arc::clone(&fs);
-        let thread = Thread::new("Test", move |_, run_loop| TestWorker {
-            fs: worker_fs,
-            queue: run_loop.handle(),
-            chain: RefCell::new(None),
+        let (completed, stop) = (Arc::clone(&completed), run_loop.handle());
+        let chain = Arc::new(WorkerChain {
+            fs: Arc::clone(&fs),
+            num_requests: AtomicU32::new(1000),
+            request: Mutex::new(None),
+            end_callback: Box::new(move || {
+                if completed.fetch_sub(1, Ordering::SeqCst) == 1 {
+                    stop.stop();
+                }
+            }),
+            failures: Arc::clone(&failures),
         });
-
-        let (completed, stop, failures) = (Arc::clone(&completed), run_loop.handle(), Arc::clone(&failures));
-        thread.actor().invoke(move |worker: &TestWorker| {
-            worker.run(
-                Box::new(move || {
-                    if completed.fetch_sub(1, Ordering::SeqCst) == 1 {
-                        stop.stop();
-                    }
-                }),
-                failures,
-            );
-        });
-        threads.push(thread);
+        // Each chain starts on a thread of its own, and goes on on the
+        // threads that answer it.
+        threads.push(std::thread::spawn(move || chain.request()));
     }
 
+    for thread in threads {
+        thread.join().unwrap();
+    }
     run_loop.run();
-    drop(threads);
     assert!(failures.lock().is_empty(), "{:?}", failures.lock().first());
 }
 

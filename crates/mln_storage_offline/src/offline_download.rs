@@ -646,7 +646,7 @@ impl OfflineDownload {
 
         let request = self.next_request();
         let (region, post) = (self.id, Arc::clone(&self.post));
-        let (handle, responder) = Request::direct(move |response: Response| {
+        let (handle, responder) = Request::new(move |response: Response| {
             post(Box::new(move |db, downloads| downloads.on_response(db, region, request, response)));
         });
         self.requests.insert(request, Pending::Loading { _request: handle, resource, then, stale });

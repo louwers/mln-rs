@@ -592,26 +592,26 @@ fn tile_attribution(kind: Tiled, attribution: &'static str) {
 
     // The map's loader fetches the TileJSON and describes it.
     let mln_style::source_type::Load::Fetch(resource) = source.data().plan_load() else { panic!("a TileJSON") };
-    let described = Rc::new(RefCell::new(None));
-    {
-        let (described, end) = (Rc::clone(&described), test.end_handle());
-        let request_source = source.clone();
-        let _request = file_source.request(
-            &test.run_loop.handle(),
-            &resource,
-            Box::new(move |response: Response| {
-                let (sender, receiver) = std::sync::mpsc::channel();
-                request_source.data().describe_job(response.data)(Box::new(move |result| {
-                    let _ = sender.send(result);
-                }));
-                let description = receiver.recv().unwrap().unwrap();
-                *described.borrow_mut() = request_source.with_description(description);
-                end();
-            }),
-        );
-        test.run_with(&mut store, |_, _| {});
-    }
-    let described = described.take().expect("a description");
+    let (sender, responses) = std::sync::mpsc::channel();
+    let _request = file_source.request(&resource, move |response: Response| {
+        let _ = sender.send(response);
+    });
+    // The stub answers in the turns of the test's loop.
+    let deadline = mln_util::time::Instant::now() + Duration::from_secs(30);
+    let response = loop {
+        if let Ok(response) = responses.try_recv() {
+            break response;
+        }
+        assert!(mln_util::time::Instant::now() < deadline, "the TileJSON didn't load");
+        test.run_loop.run_once();
+        crate::tests::update(&mut store);
+        std::thread::yield_now();
+    };
+    let (sender, receiver) = std::sync::mpsc::channel();
+    source.data().describe_job(response.data)(Box::new(move |result| {
+        let _ = sender.send(result);
+    }));
+    let described = source.with_description(receiver.recv().unwrap().unwrap()).expect("a description");
     assert_eq!(Some(attribution.to_owned()), described.data().attribution());
     assert!(described.metadata_changed_from(&source));
 }

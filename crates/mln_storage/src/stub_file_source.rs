@@ -1,8 +1,8 @@
 // The asynchronous mode polls the pending requests from an AsyncTask on the
 // stub's RunLoop, re-armed every millisecond while requests are pending.
 // The stub lives on the thread that created it; requests must come from that
-// thread, and it answers them with `Responder::send_now`. A cancelled request
-// leaves `pending` at the next poll.
+// thread, and it answers them there. A cancelled request leaves `pending` at
+// the next poll.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -115,7 +115,7 @@ impl StubFileSource {
                 continue;
             }
             if let Some(res) = answer(&resource) {
-                responder.send_now(res);
+                responder.send(res);
             }
         }
     }
@@ -145,7 +145,7 @@ impl StubFileSource {
                 if res.error.is_none() {
                     state.borrow_mut().pending.remove(&id);
                 }
-                responder.send_now(res);
+                responder.send(res);
             }
         }
         state.borrow_mut().pending.retain(|_, (_, _, responder)| !responder.is_cancelled());
@@ -169,7 +169,7 @@ impl FileSource for StubFileSource {
         match self.type_ {
             ResponseType::Synchronous => {
                 if let Some(res) = answer(resource) {
-                    responder.send_now(res);
+                    responder.send(res);
                 }
             }
             ResponseType::Asynchronous | ResponseType::Manual => {

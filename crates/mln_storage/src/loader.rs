@@ -107,7 +107,7 @@ impl Sources {
             return;
         }
         let (sources, stored, responder) = (Arc::downgrade(self), res.clone(), responder.clone());
-        let (request, network_responder) = Request::direct(move |response: Response| {
+        let (request, network_responder) = Request::new(move |response: Response| {
             if let Some(sources) = sources.upgrade() {
                 sources.store(&stored, &response);
             }
@@ -128,7 +128,7 @@ impl Sources {
         responder.on_cancel(move || drop(cancelled.lock().take()));
 
         let (sources, resource_copy, chain) = (Arc::downgrade(self), resource.clone(), Arc::clone(&task));
-        let (request, database_responder) = Request::direct(move |response: Response| {
+        let (request, database_responder) = Request::new(move |response: Response| {
             let Some(sources) = sources.upgrade() else { return };
             let mut res = resource_copy.clone();
 

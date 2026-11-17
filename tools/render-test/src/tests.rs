@@ -706,7 +706,6 @@ fn pending_requests_leave_when_answered_or_cancelled() {
             true
         }
     }
-    let run_loop = mln_actor::RunLoop::new();
     let is_pending = |url: &str| ProxyFileSource::pending_requests().iter().any(|(pending, _)| pending == url);
 
     let number = track("http://tiles/answered.mvt");
@@ -715,7 +714,7 @@ fn pending_requests_leave_when_answered_or_cancelled() {
     assert!(!is_pending("http://tiles/answered.mvt"));
 
     let proxy = ProxyFileSource { default_resource_loader: std::sync::Arc::new(Unanswered) };
-    let request = proxy.request(&run_loop.handle(), &Resource::style("http://tiles/cancelled.mvt"), |_| {});
+    let request = proxy.request(&Resource::style("http://tiles/cancelled.mvt"), |_| {});
     assert!(is_pending("http://tiles/cancelled.mvt"));
     drop(request);
     assert!(!is_pending("http://tiles/cancelled.mvt"));

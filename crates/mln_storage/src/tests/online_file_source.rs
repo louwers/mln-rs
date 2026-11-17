@@ -15,8 +15,8 @@ use mln_util::time::Instant;
 use parking_lot::Mutex;
 
 use super::http_file_source::{LoadState, load_request};
-use super::{Req, req, serial};
-use crate::file_source::{FileSource, FileSourceExt};
+use super::{Dispatcher, LocalRequests, Req, req, serial};
+use crate::file_source::FileSource;
 use crate::http_header_transform::HttpHeaderTransform;
 use crate::network_status::{NetworkStatus, Status};
 use crate::online_file_source::OnlineFileSource;
@@ -53,10 +53,11 @@ fn seconds_since(start: Instant) -> f64 {
 #[test]
 fn cancel() {
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let fs = online_file_source();
 
-    drop(fs.request(
-        &run_loop.handle(),
+    drop(fs.request_local(
+        &local,
         &Resource::new(Kind::Unknown, "http://127.0.0.1:3000/test"),
         Box::new(|_: Response| panic!("Callback should not be called")),
     ));
@@ -70,16 +71,16 @@ fn cancel_multiple() {
     let _serial = serial();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let fs = online_file_source();
 
     let resource = Resource::new(Kind::Unknown, server.url("/test"));
 
-    let req2 =
-        fs.request(&run_loop.handle(), &resource, Box::new(|_: Response| panic!("Callback should not be called")));
+    let req2 = fs.request_local(&local, &resource, Box::new(|_: Response| panic!("Callback should not be called")));
     let req = req();
     let (r, stop) = (Rc::clone(&req), run_loop.clone());
-    *req.borrow_mut() = Some(fs.request(
-        &run_loop.handle(),
+    *req.borrow_mut() = Some(fs.request_local(
+        &local,
         &resource,
         Box::new(move |res: Response| {
             r.borrow_mut().take();
@@ -103,6 +104,7 @@ fn temporary_error() {
     let _serial = serial();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let fs = online_file_source();
 
     // The test bounds the backoff only from below: a loaded machine can
@@ -111,8 +113,8 @@ fn temporary_error() {
     let counter = Cell::new(0);
 
     let stop = run_loop.clone();
-    let _req = fs.request(
-        &run_loop.handle(),
+    let _req = fs.request_local(
+        &local,
         &Resource::new(Kind::Unknown, server.url("/temporary-error")),
         Box::new(move |res: Response| {
             let n = counter.get();
@@ -152,6 +154,7 @@ fn temporary_error() {
 fn connection_error() {
     let _serial = serial();
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let fs = online_file_source();
 
     let start = Instant::now();
@@ -166,8 +169,8 @@ fn connection_error() {
 
     let req = req();
     let (r, stop) = (Rc::clone(&req), run_loop.clone());
-    *req.borrow_mut() = Some(fs.request(
-        &run_loop.handle(),
+    *req.borrow_mut() = Some(fs.request_local(
+        &local,
         &Resource::new(Kind::Unknown, closed_port_url("/")),
         Box::new(move |res: Response| {
             let duration = seconds_since(start);
@@ -199,6 +202,7 @@ fn timeout() {
     let _serial = serial();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let fs = online_file_source();
 
     let counter = Rc::new(Cell::new(0));
@@ -206,8 +210,8 @@ fn timeout() {
     let resource = Resource::new(Kind::Unknown, server.url("/test?cachecontrol=max-age=1"));
     let req = req();
     let (r, stop, c) = (Rc::clone(&req), run_loop.clone(), Rc::clone(&counter));
-    *req.borrow_mut() = Some(fs.request(
-        &run_loop.handle(),
+    *req.borrow_mut() = Some(fs.request_local(
+        &local,
         &resource,
         Box::new(move |res: Response| {
             c.set(c.get() + 1);
@@ -235,14 +239,15 @@ fn retry_delay_on_expired_tile() {
     let _serial = serial();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let fs = online_file_source();
 
     let counter = Rc::new(Cell::new(0));
 
     let resource = Resource::new(Kind::Unknown, server.url("/test?expires=10000"));
     let (stop, c) = (run_loop.clone(), Rc::clone(&counter));
-    let _req = fs.request(
-        &run_loop.handle(),
+    let _req = fs.request_local(
+        &local,
         &resource,
         Box::new(move |res: Response| {
             c.set(c.get() + 1);
@@ -264,14 +269,15 @@ fn retry_on_clock_skew() {
     let _serial = serial();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let fs = online_file_source();
 
     let counter = Cell::new(0);
 
     let resource = Resource::new(Kind::Unknown, server.url("/clockskew"));
     let stop = run_loop.clone();
-    let _req1 = fs.request(
-        &run_loop.handle(),
+    let _req1 = fs.request_local(
+        &local,
         &resource,
         Box::new(move |res: Response| {
             assert!(!res.must_revalidate);
@@ -306,25 +312,26 @@ fn respect_prior_expires() {
     let _serial = serial();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let fs = online_file_source();
 
     // Very long expiration time, should never arrive.
     let mut resource1 = Resource::new(Kind::Unknown, server.url("/test"));
     resource1.prior_expires = Some(Timestamp::from_secs(now().secs_since_epoch() + 100_000));
 
-    let _req1 = fs.request(&run_loop.handle(), &resource1, Box::new(|_: Response| panic!("Should never be called")));
+    let _req1 = fs.request_local(&local, &resource1, Box::new(|_: Response| panic!("Should never be called")));
 
     // No expiration time, should be requested immediately.
     let resource2 = Resource::new(Kind::Unknown, server.url("/test"));
 
     let stop = run_loop.clone();
-    let _req2 = fs.request(&run_loop.handle(), &resource2, Box::new(move |_: Response| stop.stop()));
+    let _req2 = fs.request_local(&local, &resource2, Box::new(move |_: Response| stop.stop()));
 
     // Very long expiration time, should never arrive.
     let mut resource3 = Resource::new(Kind::Unknown, server.url("/test"));
     resource3.prior_expires = Some(Timestamp::from_secs(now().secs_since_epoch() + 100_000));
 
-    let _req3 = fs.request(&run_loop.handle(), &resource3, Box::new(|_: Response| panic!("Should never be called")));
+    let _req3 = fs.request_local(&local, &resource3, Box::new(|_: Response| panic!("Should never be called")));
 
     run_loop.run();
 }
@@ -335,6 +342,7 @@ fn respect_minimum_update_interval() {
     let _serial = serial();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let fs = online_file_source();
 
     let start = now();
@@ -345,8 +353,8 @@ fn respect_minimum_update_interval() {
 
     let minimum_update_interval = resource.minimum_update_interval;
     let stop = run_loop.clone();
-    let _req = fs.request(
-        &run_loop.handle(),
+    let _req = fs.request_local(
+        &local,
         &resource,
         Box::new(move |_: Response| {
             let wait = Duration::from_secs((now().secs_since_epoch() - start.secs_since_epoch()) as u64);
@@ -367,6 +375,7 @@ fn load() {
     let _serial = serial();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let fs: Rc<dyn FileSource> = online_file_source();
 
     let state = Rc::new(LoadState { reqs: (0..CONCURRENCY).map(|_| req()).collect(), number: Cell::new(1) });
@@ -374,7 +383,7 @@ fn load() {
     let url: Rc<dyn Fn(i32) -> String> = Rc::new(move |n| format!("{base}{n}"));
 
     for i in 0..CONCURRENCY {
-        load_request(&fs, &state, &url, &run_loop, i, MAX);
+        load_request(&fs, &state, &url, &run_loop, &local, i, MAX);
     }
 
     run_loop.run();
@@ -393,6 +402,7 @@ fn network_status_change() {
     let _serial = serial();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let fs = online_file_source();
 
     let resource = Resource::new(Kind::Unknown, server.url("/delayed"));
@@ -400,8 +410,8 @@ fn network_status_change() {
     // This request takes 200 milliseconds to answer.
     let req = req();
     let (r, stop) = (Rc::clone(&req), run_loop.clone());
-    *req.borrow_mut() = Some(fs.request(
-        &run_loop.handle(),
+    *req.borrow_mut() = Some(fs.request_local(
+        &local,
         &resource,
         Box::new(move |res: Response| {
             r.borrow_mut().take();
@@ -431,6 +441,7 @@ fn network_status_change() {
 fn network_status_change_preempt() {
     let _serial = serial();
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let fs = online_file_source();
     // Longer than the test runs, so that only the network status change can
     // retry the request.
@@ -443,8 +454,8 @@ fn network_status_change_preempt() {
 
     let req = req();
     let (r, stop, c) = (Rc::clone(&req), run_loop.clone(), Rc::clone(&counter));
-    *req.borrow_mut() = Some(fs.request(
-        &run_loop.handle(),
+    *req.borrow_mut() = Some(fs.request_local(
+        &local,
         &resource,
         Box::new(move |res: Response| {
             let error = res.error.as_ref().expect("error");
@@ -478,6 +489,7 @@ fn network_status_online_offline() {
     let _serial = serial();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let fs = online_file_source();
 
     let resource = Resource::new(Kind::Unknown, server.url("/test"));
@@ -491,8 +503,8 @@ fn network_status_online_offline() {
 
     let req = req();
     let (r, stop) = (Rc::clone(&req), run_loop.clone());
-    *req.borrow_mut() = Some(fs.request(
-        &run_loop.handle(),
+    *req.borrow_mut() = Some(fs.request_local(
+        &local,
         &resource,
         Box::new(move |res: Response| {
             r.borrow_mut().take();
@@ -513,14 +525,15 @@ fn rate_limit_test(path: &str, expect_retry_after: bool) {
     let _serial = serial();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let fs = online_file_source();
 
     let stop = run_loop.clone();
     // The reset time has whole seconds, so it can pass before the response
     // arrives; it's only certain to be after the request was made.
     let requested_at = now();
-    let _req = fs.request(
-        &run_loop.handle(),
+    let _req = fs.request_local(
+        &local,
         &Resource::new(Kind::Unknown, server.url(path)),
         Box::new(move |res: Response| {
             let error = res.error.as_ref().expect("error");
@@ -563,6 +576,7 @@ fn low_high_priority_requests() {
     let _serial = serial();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let fs = online_file_source();
     let response_counter = Rc::new(Cell::new(0usize));
 
@@ -577,8 +591,8 @@ fn low_high_priority_requests() {
     let regular1 = Resource::new(Kind::Unknown, server.url("/load/1"));
     let req_0 = req();
     let (r, c) = (Rc::clone(&req_0), Rc::clone(&response_counter));
-    *req_0.borrow_mut() = Some(fs.request(
-        &run_loop.handle(),
+    *req_0.borrow_mut() = Some(fs.request_local(
+        &local,
         &regular1,
         Box::new(move |_: Response| {
             c.set(c.get() + 1);
@@ -591,8 +605,8 @@ fn low_high_priority_requests() {
     low_prio.set_priority(Priority::Low);
     let req_1 = req();
     let (r, c, stop) = (Rc::clone(&req_1), Rc::clone(&response_counter), run_loop.clone());
-    *req_1.borrow_mut() = Some(fs.request(
-        &run_loop.handle(),
+    *req_1.borrow_mut() = Some(fs.request_local(
+        &local,
         &low_prio,
         Box::new(move |_: Response| {
             c.set(c.get() + 1);
@@ -607,8 +621,8 @@ fn low_high_priority_requests() {
     let regular2 = Resource::new(Kind::Unknown, server.url("/load/3"));
     let req_2 = req();
     let (r, c) = (Rc::clone(&req_2), Rc::clone(&response_counter));
-    *req_2.borrow_mut() = Some(fs.request(
-        &run_loop.handle(),
+    *req_2.borrow_mut() = Some(fs.request_local(
+        &local,
         &regular2,
         Box::new(move |_: Response| {
             c.set(c.get() + 1);
@@ -631,6 +645,7 @@ fn low_high_priority_requests_many() {
     let _serial = serial();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let fs = online_file_source();
     let response_counter = Rc::new(Cell::new(0));
     let correct_low = Rc::new(Cell::new(0));
@@ -646,8 +661,8 @@ fn low_high_priority_requests_many() {
         let r = req();
         if num_reqs % 2 == 0 {
             let (counter, correct_regular) = (Rc::clone(&response_counter), Rc::clone(&correct_regular));
-            *r.borrow_mut() = Some(fs.request(
-                &run_loop.handle(),
+            *r.borrow_mut() = Some(fs.request_local(
+                &local,
                 &Resource::new(Kind::Unknown, server.url(&format!("/load/{num_reqs}"))),
                 Box::new(move |_: Response| {
                     counter.set(counter.get() + 1);
@@ -669,8 +684,8 @@ fn low_high_priority_requests_many() {
                 run_loop.clone(),
                 Rc::clone(&collector),
             );
-            *r.borrow_mut() = Some(fs.request(
-                &run_loop.handle(),
+            *r.borrow_mut() = Some(fs.request_local(
+                &local,
                 &resource,
                 Box::new(move |_: Response| {
                     counter.set(counter.get() + 1);
@@ -710,6 +725,7 @@ fn pending_requests_start_by_order() {
     let _serial = serial();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let fs = online_file_source();
     let answered: Rc<RefCell<Vec<usize>>> = Rc::default();
 
@@ -726,13 +742,13 @@ fn pending_requests_start_by_order() {
             resource
         })
         .collect();
-    let mut requests: Vec<Option<crate::Request>> = resources
+    let mut requests: Vec<Option<super::LocalRequest>> = resources
         .iter()
         .enumerate()
         .map(|(index, resource)| {
             let (answered, stop) = (Rc::clone(&answered), run_loop.clone());
-            Some(fs.request(
-                &run_loop.handle(),
+            Some(fs.request_local(
+                &local,
                 resource,
                 Box::new(move |_: Response| {
                     answered.borrow_mut().push(index);
@@ -773,6 +789,7 @@ fn request_same_url_multiple_times() {
     let _serial = serial();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let fs = online_file_source();
 
     let count = Rc::new(Cell::new(0));
@@ -780,8 +797,8 @@ fn request_same_url_multiple_times() {
 
     for _ in 0..100 {
         let (count, stop) = (Rc::clone(&count), run_loop.clone());
-        requests.push(fs.request(
-            &run_loop.handle(),
+        requests.push(fs.request_local(
+            &local,
             &Resource::new(Kind::Unknown, server.url("/load")),
             Box::new(move |_: Response| {
                 count.set(count.get() + 1);
@@ -799,14 +816,15 @@ fn request_same_url_multiple_times() {
 #[test]
 fn failed_resource_transform() {
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let fs = online_file_source();
     fs.set_resource_transform(Some(Arc::new(|_kind: Kind, _url: &str, finished: FinishedCallback| {
         finished(Err(ResourceError::new(Reason::Other, "No credential")));
     })));
 
     let stop = run_loop.clone();
-    let _req = fs.request(
-        &run_loop.handle(),
+    let _req = fs.request_local(
+        &local,
         &Resource::new(Kind::Unknown, "http://127.0.0.1:3000/test"),
         Box::new(move |res: Response| {
             let error = res.error.as_ref().expect("error");
@@ -828,6 +846,7 @@ fn retry_failed_resource_transform() {
     let _serial = serial();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let fs = online_file_source();
 
     let transforms = Arc::new(AtomicU32::new(0));
@@ -844,8 +863,8 @@ fn retry_failed_resource_transform() {
 
     let responses = Rc::new(Cell::new(0));
     let stop = run_loop.clone();
-    let _req = fs.request(
-        &run_loop.handle(),
+    let _req = fs.request_local(
+        &local,
         &Resource::new(Kind::Unknown, server.url("/delayed")),
         Box::new(move |res: Response| {
             responses.set(responses.get() + 1);
@@ -878,6 +897,7 @@ fn a_header_transform_runs_for_every_attempt() {
     let _serial = serial();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let fs = online_file_source();
 
     let target = server.url("/temporary-error");
@@ -894,8 +914,8 @@ fn a_header_transform_runs_for_every_attempt() {
 
     let responses = Rc::new(Cell::new(0));
     let stop = run_loop.clone();
-    let _req = fs.request(
-        &run_loop.handle(),
+    let _req = fs.request_local(
+        &local,
         &Resource::new(Kind::Source, "localhost://temporary-error"),
         Box::new(move |res: Response| {
             responses.set(responses.get() + 1);

@@ -1,32 +1,22 @@
 //! A request for a resource, and the file source's side of it.
 
-use std::cell::RefCell;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use mln_actor::{LocalObject, RunLoopHandle, WeakRunLoopHandle};
 use parking_lot::Mutex;
 
 use crate::response::Response;
 
-/// Receives a request's responses on the thread that made the request, so it
-/// need not be `Send`.
-pub type Callback = Box<dyn FnMut(Response) + 'static>;
+/// Receives a request's responses, on the thread that sends each one.
+pub type Callback = Box<dyn FnMut(Response) + Send + 'static>;
 
-/// The requesting thread's queue, which a request doesn't keep alive.
-type WeakQueue = WeakRunLoopHandle;
-
-/// The callback of a request that answers on the sending thread.
-type DirectCallback = Arc<Mutex<Box<dyn FnMut(Response) + Send>>>;
-
-/// A request for a resource. Dropping it cancels the request: its callback
-/// doesn't run after that, and the file source stops what work it can.
+/// A request for a resource. Dropping it cancels the request: the file
+/// source stops what work it can, and no response reaches the callback
+/// after the drop. The drop doesn't wait for a call that began before it,
+/// on the responder's thread, so a callback may drop its own request.
 #[must_use = "dropping a request cancels it"]
 pub struct Request {
     shared: Arc<Shared>,
-    /// The callback on the requesting thread, which the drop removes, and
-    /// that thread's queue.
-    slot: Option<(Arc<LocalObject<Slot>>, WeakQueue)>,
 }
 
 /// The file source's side of a [`Request`]: where it sends the responses,
@@ -37,50 +27,31 @@ pub struct Request {
 #[derive(Clone)]
 pub struct Responder {
     shared: Arc<Shared>,
-    deliver: Deliver,
 }
 
-#[derive(Clone)]
-enum Deliver {
-    /// In a task on the requesting thread's queue.
-    Queued { queue: WeakQueue, slot: Arc<LocalObject<Slot>> },
-    /// On the sending thread.
-    Direct(DirectCallback),
-}
-
-/// The callback of a queued request, on the requesting thread.
-struct Slot(RefCell<Callback>);
-
-impl Slot {
-    /// Runs the callback, unless the request was cancelled, or the callback
-    /// runs already: then it runs once that call returns, in a task of
-    /// `queue`.
-    fn call(shared: &Arc<Shared>, slot: &Arc<LocalObject<Slot>>, queue: &WeakQueue, response: Response) {
-        if shared.cancelled.load(Ordering::SeqCst) {
-            return;
-        }
-        let Some(target) = slot.get() else { return };
-        let Ok(mut callback) = target.0.try_borrow_mut() else {
-            Self::queue(shared, slot, queue, response);
-            return;
-        };
-        callback(response);
-    }
-
-    fn queue(shared: &Arc<Shared>, slot: &Arc<LocalObject<Slot>>, queue: &WeakQueue, response: Response) {
-        let Some(scheduler) = queue.upgrade() else { return };
-        let (shared, slot, weak) = (Arc::clone(shared), Arc::clone(slot), queue.clone());
-        scheduler.invoke(move || Slot::call(&shared, &slot, &weak, response));
-    }
-}
-
-#[derive(Default)]
 struct Shared {
     cancelled: AtomicBool,
+    /// The first response ends the request.
+    once: bool,
     on_cancel: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    /// `None` once the request dropped while no response was being sent.
+    callback: Mutex<Option<Callback>>,
 }
 
 impl Shared {
+    fn new(callback: Callback, once: bool) -> Arc<Self> {
+        Arc::new(Shared {
+            cancelled: AtomicBool::new(false),
+            once,
+            on_cancel: Mutex::new(None),
+            callback: Mutex::new(Some(callback)),
+        })
+    }
+
+    fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::SeqCst)
+    }
+
     fn cancel(&self) {
         self.cancelled.store(true, Ordering::SeqCst);
         let on_cancel = self.on_cancel.lock().take();
@@ -91,85 +62,65 @@ impl Shared {
 }
 
 impl Request {
-    /// A request whose responses `callback` receives on the thread that runs
-    /// `queue`, which must be this thread.
-    pub fn new(queue: &RunLoopHandle, callback: impl FnMut(Response) + 'static) -> (Request, Responder) {
-        let slot = Arc::new(LocalObject::new(Slot(RefCell::new(Box::new(callback)))));
-        let shared = Arc::new(Shared::default());
-        let deliver = Deliver::Queued { queue: queue.downgrade(), slot: Arc::clone(&slot) };
-        (Request { shared: Arc::clone(&shared), slot: Some((slot, queue.downgrade())) }, Responder { shared, deliver })
-    }
-
     /// A request whose responses `callback` receives on the thread that sends
-    /// them, for work that continues wherever its responses arrive.
-    pub fn direct(callback: impl FnMut(Response) + Send + 'static) -> (Request, Responder) {
-        let shared = Arc::new(Shared::default());
-        let deliver = Deliver::Direct(Arc::new(Mutex::new(Box::new(callback))));
-        (Request { shared: Arc::clone(&shared), slot: None }, Responder { shared, deliver })
+    /// each one.
+    pub fn new(callback: impl FnMut(Response) + Send + 'static) -> (Request, Responder) {
+        let shared = Shared::new(Box::new(callback), false);
+        (Request { shared: Arc::clone(&shared) }, Responder { shared })
     }
 
     /// A request for one response, which `callback` receives on the thread
     /// that sends it. The request ends with it: the file source sees it
     /// cancelled and sends nothing more, though its cancel hook runs only
     /// when the request drops.
-    pub fn direct_once(callback: impl FnOnce(Response) + Send + 'static) -> (Request, Responder) {
-        let shared = Arc::new(Shared::default());
-        let answered = Arc::clone(&shared);
+    pub fn once(callback: impl FnOnce(Response) + Send + 'static) -> (Request, Responder) {
         let mut callback = Some(callback);
-        let deliver = Deliver::Direct(Arc::new(Mutex::new(Box::new(move |response| {
-            if let Some(callback) = callback.take() {
-                answered.cancelled.store(true, Ordering::SeqCst);
-                callback(response);
-            }
-        }))));
-        (Request { shared: Arc::clone(&shared), slot: None }, Responder { shared, deliver })
+        let shared = Shared::new(
+            Box::new(move |response| {
+                if let Some(callback) = callback.take() {
+                    callback(response);
+                }
+            }),
+            true,
+        );
+        (Request { shared: Arc::clone(&shared) }, Responder { shared })
     }
 }
 
 impl Drop for Request {
     fn drop(&mut self) {
         self.shared.cancel();
-        if let Some((slot, queue)) = self.slot.take() {
-            // Dropped on another thread, the callback goes on its own.
-            if slot.take().is_none()
-                && let Some(queue) = queue.upgrade()
-            {
-                queue.invoke(move || drop(slot.take()));
-            }
-        }
+        // While a response is being sent, its callback goes when the
+        // responders drop, rather than the drop waiting for it.
+        let callback = self.shared.callback.try_lock().and_then(|mut callback| callback.take());
+        drop(callback);
     }
 }
 
 impl Responder {
-    /// Sends a response. It does nothing once the requester cancelled.
+    /// Sends a response to the callback, on this thread. It does nothing
+    /// once the requester cancelled.
     pub fn send(&self, response: Response) {
         if self.is_cancelled() {
             return;
         }
-        match &self.deliver {
-            Deliver::Queued { queue, slot } => Slot::queue(&self.shared, slot, queue, response),
-            Deliver::Direct(callback) => (callback.lock())(response),
-        }
-    }
-
-    /// Sends a response, and on the requesting thread, runs the callback
-    /// before it returns: for a file source that runs on the requesting
-    /// thread, such as a test's. Elsewhere, and while the callback runs
-    /// already, it's [`send`](Self::send).
-    pub fn send_now(&self, response: Response) {
+        let mut callback = self.shared.callback.lock();
+        // The request may have dropped while this waited for the lock.
         if self.is_cancelled() {
             return;
         }
-        match &self.deliver {
-            Deliver::Queued { queue, slot } => Slot::call(&self.shared, slot, queue, response),
-            Deliver::Direct(callback) => (callback.lock())(response),
+        if self.shared.once {
+            self.shared.cancelled.store(true, Ordering::SeqCst);
+        }
+        if let Some(callback) = callback.as_mut() {
+            callback(response);
         }
     }
 
     /// Whether the requester cancelled the request.
     #[must_use]
     pub fn is_cancelled(&self) -> bool {
-        self.shared.cancelled.load(Ordering::SeqCst)
+        self.shared.is_cancelled()
     }
 
     /// Runs `on_cancel` when the requester cancels the request, on the thread
@@ -188,41 +139,55 @@ impl Responder {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
-    use std::rc::Rc;
-
-    use mln_actor::RunLoop;
+    use std::sync::atomic::AtomicUsize;
 
     use super::*;
 
-    /// A request dropped on another thread still cancels the responses that
-    /// were queued before the drop.
-    #[test]
-    fn a_request_dropped_elsewhere_runs_no_queued_response() {
-        let run_loop = RunLoop::new();
-        let ran = Rc::new(Cell::new(false));
-        let callback_ran = Rc::clone(&ran);
-        let (request, responder) = Request::new(&run_loop.handle(), move |_| callback_ran.set(true));
-        responder.send(Response::new());
-        std::thread::spawn(move || drop(request)).join().unwrap();
-        while run_loop.run_once() {}
-        assert!(!ran.get());
+    fn counter() -> (Arc<AtomicUsize>, impl FnMut(Response) + Send + 'static) {
+        let count = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&count);
+        (count, move |_| {
+            counted.fetch_add(1, Ordering::SeqCst);
+        })
     }
 
     /// A request for one response ends at it: the responder sees it
     /// cancelled, and a second response goes nowhere.
     #[test]
-    fn a_direct_once_request_ends_at_its_response() {
-        let responses = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let counted = Arc::clone(&responses);
-        let (request, responder) = Request::direct_once(move |_| {
-            counted.fetch_add(1, Ordering::SeqCst);
-        });
+    fn a_once_request_ends_at_its_response() {
+        let (responses, callback) = counter();
+        let (request, responder) = Request::once(callback);
         assert!(!responder.is_cancelled());
         responder.send(Response::new());
         assert!(responder.is_cancelled());
         responder.send(Response::new());
         assert_eq!(responses.load(Ordering::SeqCst), 1);
         drop(request);
+    }
+
+    /// No response reaches the callback after the request drops, and the
+    /// drop releases the callback without waiting for the responders.
+    #[test]
+    fn a_dropped_request_answers_nothing_more() {
+        let (responses, callback) = counter();
+        let (request, responder) = Request::new(callback);
+        responder.send(Response::new());
+        drop(request);
+        responder.send(Response::new());
+        assert_eq!(responses.load(Ordering::SeqCst), 1);
+        assert_eq!(Arc::strong_count(&responses), 1, "the callback went with the request");
+    }
+
+    /// A callback may drop its own request, which cancels it without
+    /// waiting for the call that drops it.
+    #[test]
+    fn a_callback_drops_its_own_request() {
+        let slot: Arc<Mutex<Option<Request>>> = Arc::default();
+        let held = Arc::clone(&slot);
+        let (request, responder) = Request::new(move |_| drop(held.lock().take()));
+        *slot.lock() = Some(request);
+        responder.send(Response::new());
+        assert!(responder.is_cancelled());
+        assert!(slot.lock().is_none());
     }
 }

@@ -7,8 +7,10 @@
 // HTTPFileSource. Every request has an id, so `all_requests` and
 // `active_requests` iterate in id order.
 //
-// `OnlineFileRequest::actor()` (the transformed URL's way back) is a mailbox
-// on the online thread whose target finds the request by id.
+// `OnlineFileRequest::actor()` is a mailbox on the online thread whose target
+// finds the request by id: the way back for the transformed URL and for the
+// transfers' responses, which arrive on the HTTP source's threads. Closing it
+// with the request drops what the transform or a transfer sends later.
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -41,8 +43,13 @@ struct OnlineFileRequest {
     resource: RefCell<Resource>,
     /// The transfer in flight.
     request: RefCell<Option<Request>>,
+    /// Counts the transfers, so that a response to one that ended is
+    /// dropped.
+    transfers: Cell<u64>,
+    /// The number of the transfer in flight.
+    in_flight: Cell<Option<u64>>,
     timer: Timer,
-    /// The source's thread's queue, where the resource transform answers.
+    /// The source's thread's queue, where the mailbox's messages run.
     queue: RunLoopHandle,
     responder: Responder,
 
@@ -64,7 +71,7 @@ struct OnlineFileRequest {
     /// transform again instead of loading the original URL.
     transform_failed: Cell<bool>,
 
-    /// Lazily created for the `ResourceTransform`'s reply (`actor()`).
+    /// Created at the first transfer or transform (`actor()`).
     mailbox: RefCell<Option<Arc<Mailbox>>>,
 }
 
@@ -80,6 +87,17 @@ impl OnlineFileRequestRef {
             && let Some(req) = state.get(self.id)
         {
             req.set_transform_result(result);
+        }
+    }
+
+    /// Ends transfer number `transfer` with `response`, unless it ended
+    /// already.
+    fn transfer_done(&self, transfer: u64, response: Response) {
+        if let Some(state) = self.state.upgrade()
+            && let Some(req) = state.get(self.id)
+            && req.in_flight.get() == Some(transfer)
+        {
+            state.transfer_done(self.id, response);
         }
     }
 }
@@ -155,7 +173,7 @@ struct ThreadState {
     online: Cell<bool>,
     maximum_concurrent_requests: Cell<u32>,
     http_file_source: HTTPFileSource,
-    /// This thread's loop, which the transfers answer on.
+    /// This thread's loop, which runs the requests' timers and mailboxes.
     run_loop: RunLoop,
     queue: RunLoopHandle,
     resource_transform: RefCell<Option<ResourceTransform>>,
@@ -274,34 +292,38 @@ impl ThreadState {
     }
 
     fn activate_request(self: &Rc<Self>, req: &Rc<OnlineFileRequest>) {
-        let weak = Rc::downgrade(self);
-        let id = req.id;
-        let callback = move |response: Response| {
-            let Some(this) = weak.upgrade() else {
-                return;
-            };
-            this.active_requests.borrow_mut().remove(&id);
-            if let Some(req) = this.get(id) {
-                // The transfer is done; dropping its request is a no-op.
-                let finished = req.request.borrow_mut().take();
-                drop(finished);
-                req.completed(response);
-            }
-            this.activate_pending_request();
-        };
-
         self.active_requests.borrow_mut().insert(req.id);
 
         if self.online.get() {
             let resource = req.resource.borrow().clone();
-            let (request, responder) = Request::new(&self.queue, callback);
+            let transfer = req.transfers.get() + 1;
+            req.transfers.set(transfer);
+            let actor = req.actor();
+            let (request, responder) = Request::new(move |response: Response| {
+                actor.invoke(move |req: &OnlineFileRequestRef| req.transfer_done(transfer, response));
+            });
+            req.in_flight.set(Some(transfer));
             *req.request.borrow_mut() = Some(request);
             self.http_file_source.load(&resource, responder);
         } else {
             let mut response = Response::new();
             response.error = Some(Box::new(ResourceError::new(Reason::Connection, "Online connectivity is disabled.")));
-            callback(response);
+            self.transfer_done(req.id, response);
         }
+    }
+
+    /// Ends request `id`'s transfer with `response`, and starts a pending
+    /// request in its place.
+    fn transfer_done(self: &Rc<Self>, id: u64, response: Response) {
+        self.active_requests.borrow_mut().remove(&id);
+        if let Some(req) = self.get(id) {
+            // The transfer is done; dropping its request is a no-op.
+            req.in_flight.set(None);
+            let finished = req.request.borrow_mut().take();
+            drop(finished);
+            req.completed(response);
+        }
+        self.activate_pending_request();
     }
 
     fn activate_pending_request(self: &Rc<Self>) {
@@ -354,8 +376,6 @@ impl OnlineFileRequest {
 
     fn actor(&self) -> ActorRef<OnlineFileRequestRef> {
         let mut mailbox = self.mailbox.borrow_mut();
-        // Lazy constructed because this can be costly and the
-        // ResourceTransform is not used by many apps.
         let mailbox = mailbox.get_or_insert_with(|| {
             let target = Rc::new(OnlineFileRequestRef { state: Weak::clone(&self.state), id: self.id });
             Mailbox::with_target(&self.queue, target)
@@ -538,6 +558,8 @@ impl OnlineFileSourceThread {
             state: Rc::downgrade(&self.state),
             resource: RefCell::new(resource),
             request: RefCell::new(None),
+            transfers: Cell::new(0),
+            in_flight: Cell::new(None),
             timer: Timer::new(&self.state.run_loop),
             queue: self.state.queue.clone(),
             responder,

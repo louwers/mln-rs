@@ -10,9 +10,8 @@ use mln_actor::{ActorRef, Mailbox, RunLoop, Timer};
 use mln_test_server::HttpServer;
 use mln_util::chrono::{Timestamp, now};
 
-use super::{local_callback, req, serial, temp_path};
+use super::{Dispatcher, LocalRequests, local_callback, req, serial, temp_path};
 use crate::database_file_source::{Cache, DatabaseFileSource};
-use crate::file_source::FileSourceExt;
 use crate::loader::Loader;
 use crate::network_status::{NetworkStatus, Status};
 use crate::online_file_source::OnlineFileSource;
@@ -80,7 +79,8 @@ fn cache_response() {
     let file_sources = TestSources::new();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
-    let queue = run_loop.handle();
+    let local = Dispatcher::new(&run_loop);
+    let queue = local.clone();
     let fs = main_resource_loader(&file_sources);
 
     let resource = Resource::new(Kind::Unknown, server.url("/cache"));
@@ -90,8 +90,8 @@ fn cache_response() {
 
     let (r1, r2, fs2, stop) = (Rc::clone(&req1), Rc::clone(&req2), Rc::clone(&fs), run_loop.clone());
     let res2_resource = resource.clone();
-    *req1.borrow_mut() = Some(fs.request(
-        &run_loop.handle(),
+    *req1.borrow_mut() = Some(fs.request_local(
+        &local,
         &resource,
         Box::new(move |res: Response| {
             r1.borrow_mut().take();
@@ -107,7 +107,7 @@ fn cache_response() {
             // request. If we'd go to the server again, we'd get different
             // values.
             let (r2c, stop) = (Rc::clone(&r2), stop.clone());
-            *r2.borrow_mut() = Some(fs2.request(
+            *r2.borrow_mut() = Some(fs2.request_local(
                 &queue,
                 &res2_resource,
                 Box::new(move |res2: Response| {
@@ -135,7 +135,8 @@ fn volatile_storage_policy() {
     let file_sources = TestSources::new();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
-    let queue = run_loop.handle();
+    let local = Dispatcher::new(&run_loop);
+    let queue = local.clone();
     let fs = main_resource_loader(&file_sources);
 
     let mut resource = Resource::new(Kind::Unknown, server.url("/cache"));
@@ -143,8 +144,8 @@ fn volatile_storage_policy() {
 
     let req = req();
     let (r, fs2, stop, resource2) = (Rc::clone(&req), Rc::clone(&fs), run_loop.clone(), resource.clone());
-    *req.borrow_mut() = Some(fs.request(
-        &run_loop.handle(),
+    *req.borrow_mut() = Some(fs.request_local(
+        &local,
         &resource,
         Box::new(move |res1: Response| {
             assert_eq!(None, res1.error);
@@ -153,7 +154,7 @@ fn volatile_storage_policy() {
             // Volatile resources are not stored in cache, so we always get
             // new data from the server ("Response N+1").
             let (rc, stop) = (Rc::clone(&r), stop.clone());
-            *r.borrow_mut() = Some(fs2.request(
+            *r.borrow_mut() = Some(fs2.request_local(
                 &queue,
                 &resource2,
                 Box::new(move |res2: Response| {
@@ -176,7 +177,8 @@ fn cache_revalidate(path: &str, check: fn(&Response)) {
     let file_sources = TestSources::new();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
-    let queue = run_loop.handle();
+    let local = Dispatcher::new(&run_loop);
+    let queue = local.clone();
     let fs = main_resource_loader(&file_sources);
 
     let revalidate = Resource::new(Kind::Unknown, server.url(path));
@@ -187,8 +189,8 @@ fn cache_revalidate(path: &str, check: fn(&Response)) {
     let (r1, r2, fs2, stop, revalidate2) =
         (Rc::clone(&req1), Rc::clone(&req2), Rc::clone(&fs), run_loop.clone(), revalidate.clone());
     // First request causes the response to get cached.
-    *req1.borrow_mut() = Some(fs.request(
-        &run_loop.handle(),
+    *req1.borrow_mut() = Some(fs.request_local(
+        &local,
         &revalidate,
         Box::new(move |res: Response| {
             r1.borrow_mut().take();
@@ -207,7 +209,7 @@ fn cache_revalidate(path: &str, check: fn(&Response)) {
             // from the revalided response because the latter has an
             // expiration date, while the cached response doesn't.
             let (r2c, stop, got_response) = (Rc::clone(&r2), stop.clone(), Rc::clone(&got_response));
-            *r2.borrow_mut() = Some(fs2.request(
+            *r2.borrow_mut() = Some(fs2.request_local(
                 &queue,
                 &revalidate2,
                 Box::new(move |res2: Response| {
@@ -275,7 +277,8 @@ fn cache_revalidate_etag() {
     let file_sources = TestSources::new();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
-    let queue = run_loop.handle();
+    let local = Dispatcher::new(&run_loop);
+    let queue = local.clone();
     let fs = main_resource_loader(&file_sources);
 
     let revalidate_etag = Resource::new(Kind::Unknown, server.url("/revalidate-etag"));
@@ -285,8 +288,8 @@ fn cache_revalidate_etag() {
     let (r1, r2, fs2, stop, revalidate2) =
         (Rc::clone(&req1), Rc::clone(&req2), Rc::clone(&fs), run_loop.clone(), revalidate_etag.clone());
     // First request causes the response to get cached.
-    *req1.borrow_mut() = Some(fs.request(
-        &run_loop.handle(),
+    *req1.borrow_mut() = Some(fs.request_local(
+        &local,
         &revalidate_etag,
         Box::new(move |res: Response| {
             r1.borrow_mut().take();
@@ -301,7 +304,7 @@ fn cache_revalidate_etag() {
             // Second request does not return the cached response, since it
             // had Cache-Control: must-revalidate set.
             let (r2c, stop) = (Rc::clone(&r2), stop.clone());
-            *r2.borrow_mut() = Some(fs2.request(
+            *r2.borrow_mut() = Some(fs2.request_local(
                 &queue,
                 &revalidate2,
                 Box::new(move |res2: Response| {
@@ -344,20 +347,18 @@ fn http_issue_1369() {
     let file_sources = TestSources::new();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let fs = main_resource_loader(&file_sources);
 
     let resource = Resource::new(Kind::Unknown, server.url("/test"));
 
     let req = req();
-    *req.borrow_mut() = Some(fs.request(
-        &run_loop.handle(),
-        &resource,
-        Box::new(|_: Response| panic!("Callback should not be called")),
-    ));
+    *req.borrow_mut() =
+        Some(fs.request_local(&local, &resource, Box::new(|_: Response| panic!("Callback should not be called"))));
     req.borrow_mut().take();
     let (r, stop) = (Rc::clone(&req), run_loop.clone());
-    *req.borrow_mut() = Some(fs.request(
-        &run_loop.handle(),
+    *req.borrow_mut() = Some(fs.request_local(
+        &local,
         &resource,
         Box::new(move |res: Response| {
             r.borrow_mut().take();
@@ -380,7 +381,8 @@ fn optional_cached(expires: Timestamp) {
     let _serial = serial();
     let file_sources = TestSources::new();
     let run_loop = RunLoop::new();
-    let queue = run_loop.handle();
+    let local = Dispatcher::new(&run_loop);
+    let queue = local.clone();
     let fs = main_resource_loader(&file_sources);
 
     let optional_resource = cache_only("http://127.0.0.1:3000/test");
@@ -399,7 +401,7 @@ fn optional_cached(expires: Timestamp) {
         &run_loop.handle(),
         local_callback(move || {
             let rc = Rc::clone(&r);
-            *r.borrow_mut() = Some(fs2.request(
+            *r.borrow_mut() = Some(fs2.request_local(
                 &queue,
                 &resource2,
                 Box::new(move |res: Response| {
@@ -438,14 +440,15 @@ fn optional_not_found() {
     let _serial = serial();
     let file_sources = TestSources::new();
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let fs = main_resource_loader(&file_sources);
 
     let optional_resource = cache_only("http://127.0.0.1:3000/test");
 
     let req = req();
     let (r, stop) = (Rc::clone(&req), run_loop.clone());
-    *req.borrow_mut() = Some(fs.request(
-        &run_loop.handle(),
+    *req.borrow_mut() = Some(fs.request_local(
+        &local,
         &optional_resource,
         Box::new(move |res: Response| {
             r.borrow_mut().take();
@@ -469,7 +472,8 @@ fn optional_not_found() {
 fn no_cache(resource: &Resource, check: impl Fn(&Response) + 'static) {
     let file_sources = TestSources::new();
     let run_loop = RunLoop::new();
-    let queue = run_loop.handle();
+    let local = Dispatcher::new(&run_loop);
+    let queue = local.clone();
     let fs = main_resource_loader(&file_sources);
 
     let mut response = Response::new();
@@ -484,7 +488,7 @@ fn no_cache(resource: &Resource, check: impl Fn(&Response) + 'static) {
         &run_loop.handle(),
         local_callback(move || {
             let rc = Rc::clone(&r);
-            *r.borrow_mut() = Some(fs2.request(
+            *r.borrow_mut() = Some(fs2.request_local(
                 &queue,
                 &resource2,
                 Box::new(move |res: Response| {
@@ -634,6 +638,7 @@ fn set_resource_transform() {
     let file_sources = TestSources::new();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let resource_loader = main_resource_loader(&file_sources);
     let onlinefs = online_file_source(&file_sources);
 
@@ -657,8 +662,8 @@ fn set_resource_transform() {
         assert!(res.etag.is_none());
     };
     let (r, stop) = (Rc::clone(&req), run_loop.clone());
-    *req.borrow_mut() = Some(resource_loader.request(
-        &run_loop.handle(),
+    *req.borrow_mut() = Some(resource_loader.request_local(
+        &local,
         &resource1,
         Box::new(move |res: Response| {
             r.borrow_mut().take();
@@ -673,8 +678,8 @@ fn set_resource_transform() {
     let resource2 = Resource::new(Kind::Unknown, server.url("/test"));
 
     let (r, stop) = (Rc::clone(&req), run_loop.clone());
-    *req.borrow_mut() = Some(resource_loader.request(
-        &run_loop.handle(),
+    *req.borrow_mut() = Some(resource_loader.request_local(
+        &local,
         &resource2,
         Box::new(move |res: Response| {
             r.borrow_mut().take();
@@ -711,7 +716,8 @@ fn respond_to_stale_must_revalidate() {
     let file_sources = TestSources::new();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
-    let queue = run_loop.handle();
+    let local = Dispatcher::new(&run_loop);
+    let queue = local.clone();
     let fs = main_resource_loader(&file_sources);
 
     let resource = Rc::new(RefCell::new(Resource::new(Kind::Unknown, server.url("/revalidate-same"))));
@@ -736,7 +742,7 @@ fn respond_to_stale_must_revalidate() {
         local_callback(move || {
             let rc = Rc::clone(&r);
             let request = resource2.borrow().clone();
-            *r.borrow_mut() = Some(fs2.request(
+            *r.borrow_mut() = Some(fs2.request_local(
                 &queue,
                 &request,
                 Box::new(move |res: Response| {
@@ -774,8 +780,8 @@ fn respond_to_stale_must_revalidate() {
 
     let (r, stop) = (Rc::clone(&req), run_loop.clone());
     let request = resource.borrow().clone();
-    *req.borrow_mut() = Some(fs.request(
-        &run_loop.handle(),
+    *req.borrow_mut() = Some(fs.request_local(
+        &local,
         &request,
         Box::new(move |res: Response| {
             r.borrow_mut().take();
@@ -813,6 +819,7 @@ fn cached_resource_low_priority() {
     let file_sources = TestSources::new();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let fs = main_resource_loader(&file_sources);
 
     let mut response = Response::new();
@@ -840,8 +847,8 @@ fn cached_resource_low_priority() {
     let non_cached0 = Resource::with_tile_data(Kind::Unknown, server.url("/load/0"), None, LoadingMethod::All);
     let req0 = req();
     let (r, counter) = (Rc::clone(&req0), Rc::clone(&online_response_counter));
-    *req0.borrow_mut() = Some(fs.request(
-        &run_loop.handle(),
+    *req0.borrow_mut() = Some(fs.request_local(
+        &local,
         &non_cached0,
         Box::new(move |res: Response| {
             r.borrow_mut().take();
@@ -853,8 +860,8 @@ fn cached_resource_low_priority() {
     let non_cached1 = Resource::with_tile_data(Kind::Unknown, server.url("/load/1"), None, LoadingMethod::All);
     let req1 = req();
     let (r, counter) = (Rc::clone(&req1), Rc::clone(&online_response_counter));
-    *req1.borrow_mut() = Some(fs.request(
-        &run_loop.handle(),
+    *req1.borrow_mut() = Some(fs.request_local(
+        &local,
         &non_cached1,
         Box::new(move |res: Response| {
             counter.set(counter.get() + 1);
@@ -868,8 +875,8 @@ fn cached_resource_low_priority() {
     let req3 = req();
     let (r, counter, received) =
         (Rc::clone(&req3), Rc::clone(&online_response_counter), Rc::clone(&req3_cached_response_received));
-    *req3.borrow_mut() = Some(fs.request(
-        &run_loop.handle(),
+    *req3.borrow_mut() = Some(fs.request_local(
+        &local,
         &resource1,
         Box::new(move |res: Response| {
             // Offline callback is received first
@@ -893,8 +900,8 @@ fn cached_resource_low_priority() {
         Rc::clone(&req4_cached_response_received),
         run_loop.clone(),
     );
-    *req4.borrow_mut() = Some(fs.request(
-        &run_loop.handle(),
+    *req4.borrow_mut() = Some(fs.request_local(
+        &local,
         &resource2,
         Box::new(move |res: Response| {
             // Offline callback is received first
@@ -914,8 +921,8 @@ fn cached_resource_low_priority() {
     let non_cached2 = Resource::with_tile_data(Kind::Unknown, server.url("/load/2"), None, LoadingMethod::All);
     let req2 = req();
     let (r, counter) = (Rc::clone(&req2), Rc::clone(&online_response_counter));
-    *req2.borrow_mut() = Some(fs.request(
-        &run_loop.handle(),
+    *req2.borrow_mut() = Some(fs.request_local(
+        &local,
         &non_cached2,
         Box::new(move |res: Response| {
             counter.set(counter.get() + 1);
@@ -947,7 +954,8 @@ fn no_double_dispatch() {
     let file_sources = TestSources::new();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
-    let queue = run_loop.handle();
+    let local = Dispatcher::new(&run_loop);
+    let queue = local.clone();
     let fs = main_resource_loader(&file_sources);
 
     let resource = Resource::new(Kind::Unknown, server.url("/revalidate-same"));
@@ -968,7 +976,7 @@ fn no_double_dispatch() {
         &response,
         &run_loop.handle(),
         local_callback(move || {
-            *r.borrow_mut() = Some(fs2.request(
+            *r.borrow_mut() = Some(fs2.request_local(
                 &queue,
                 &resource2,
                 Box::new(move |res: Response| {
@@ -1002,12 +1010,13 @@ fn no_double_dispatch() {
 fn unsupported_resource_request() {
     let _serial = serial();
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
     let fs = Loader::new(&ResourceOptions::default(), &super::pool());
     let resource = Resource::with_tile_data(Kind::Unknown, "http://example.com/x.json", None, LoadingMethod::None);
     let result: Rc<RefCell<Option<Response>>> = Rc::new(RefCell::new(None));
     let (out, stop) = (Rc::clone(&result), run_loop.clone());
-    let _req = fs.request(
-        &run_loop.handle(),
+    let _req = fs.request_local(
+        &local,
         &resource,
         Box::new(move |res: Response| {
             *out.borrow_mut() = Some(res);

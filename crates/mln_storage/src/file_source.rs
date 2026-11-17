@@ -1,5 +1,3 @@
-use mln_actor::RunLoopHandle;
-
 use crate::request::{Request, Responder};
 use crate::resource::Resource;
 use crate::response::Response;
@@ -25,10 +23,10 @@ pub trait FileSource: Send + Sync {
 
 /// Requests through a [`FileSource`].
 pub trait FileSourceExt: FileSource {
-    /// Requests `resource`. `callback` receives the responses in tasks of
-    /// `queue`, which must run on this thread, until the request drops.
-    fn request(&self, queue: &RunLoopHandle, resource: &Resource, callback: impl FnMut(Response) + 'static) -> Request {
-        let (request, responder) = Request::new(queue, callback);
+    /// Requests `resource`. `callback` receives the responses on the
+    /// threads that send them (see [`Request`]), until the request drops.
+    fn request(&self, resource: &Resource, callback: impl FnMut(Response) + Send + 'static) -> Request {
+        let (request, responder) = Request::new(callback);
         self.load(resource, responder);
         request
     }

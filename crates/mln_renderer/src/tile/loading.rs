@@ -272,7 +272,7 @@ impl SourceInfo {
         let key = TileKey { source: self.key, id: tile.id };
         // One response per request: a reload is a new request.
         let (request, responder) =
-            Request::direct_once(move |response| inbox.send(TileEvent::Response { tile: key, load, response }));
+            Request::once(move |response| inbox.send(TileEvent::Response { tile: key, load, response }));
         file_source.load(&tileset.resource, responder);
         begin_load(tile, load, Some(request));
     }

@@ -22,6 +22,7 @@ use mln_util::chrono::{Timestamp, now};
 use mln_util::compression::compress;
 use mln_util::geo::{LatLng, LatLngBounds};
 use mln_util::tileset::Scheme;
+use parking_lot::{Mutex, MutexGuard};
 
 use super::cpp_path;
 use crate::offline_download::{Downloads, OfflineDownload, Post};
@@ -509,34 +510,29 @@ struct FakeRequestEntry {
     responder: Responder,
 }
 
-/// Records the requests; `respond` answers the first of a kind. Requests
-/// come from the thread that created it.
+/// Records the requests; `respond` answers the first of a kind.
 struct FakeOnlineFileSource {
-    requests: LocalObject<RefCell<Vec<FakeRequestEntry>>>,
+    requests: Mutex<Vec<FakeRequestEntry>>,
 }
 
 impl FakeOnlineFileSource {
     fn new() -> Self {
-        FakeOnlineFileSource { requests: LocalObject::new(RefCell::new(Vec::new())) }
+        FakeOnlineFileSource { requests: Mutex::new(Vec::new()) }
     }
 
     /// The requests that weren't cancelled.
-    fn requests(&self) -> Rc<RefCell<Vec<FakeRequestEntry>>> {
-        let requests = self.requests.get().expect("FakeOnlineFileSource used from another thread");
-        requests.borrow_mut().retain(|entry| !entry.responder.is_cancelled());
+    fn requests(&self) -> MutexGuard<'_, Vec<FakeRequestEntry>> {
+        let mut requests = self.requests.lock();
+        requests.retain(|entry| !entry.responder.is_cancelled());
         requests
     }
 
     fn respond(&self, kind: Kind, response: &Response) -> bool {
-        let responder = self
-            .requests()
-            .borrow()
-            .iter()
-            .find(|entry| entry.resource.kind == kind)
-            .map(|entry| entry.responder.clone());
+        let responder =
+            self.requests().iter().find(|entry| entry.resource.kind == kind).map(|entry| entry.responder.clone());
         let request_found = responder.is_some();
         if let Some(responder) = responder {
-            responder.send_now(response.clone());
+            responder.send(response.clone());
         }
         request_found
     }
@@ -544,7 +540,7 @@ impl FakeOnlineFileSource {
 
 impl FileSource for FakeOnlineFileSource {
     fn load(&self, resource: &Resource, responder: Responder) {
-        self.requests().borrow_mut().push(FakeRequestEntry { resource: resource.clone(), responder });
+        self.requests().push(FakeRequestEntry { resource: resource.clone(), responder });
     }
 
     fn can_request(&self, _resource: &Resource) -> bool {
@@ -565,15 +561,12 @@ fn does_not_flood_the_file_source_with_requests() {
     download.set_state(OfflineRegionDownloadState::Active);
     test.run_loop.run_once();
 
-    assert_eq!(1, file_source.requests().borrow().len());
+    assert_eq!(1, file_source.requests().len());
 
     file_source.respond(Kind::Style, &test.response("style.json"));
     test.run_loop.run_once();
 
-    assert_eq!(
-        mln_util::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS as usize,
-        file_source.requests().borrow().len()
-    );
+    assert_eq!(mln_util::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS as usize, file_source.requests().len());
 }
 
 // gtest: OfflineDownload.GetStatusNoResources

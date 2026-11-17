@@ -108,7 +108,7 @@ impl FileSource for Delayed {
                 return;
             }
             let answer = outer.clone();
-            let (fresh, inner_responder) = Request::direct(move |mut response: Response| {
+            let (fresh, inner_responder) = Request::new(move |mut response: Response| {
                 let expires = mln_util::chrono::now().secs_since_epoch() + FRESH_SECONDS;
                 response.expires = Some(Timestamp::from_secs(expires));
                 answer.send(response);

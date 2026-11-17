@@ -6,9 +6,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use mln_actor::RunLoop;
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
 
-use super::{local_callback, req, temp_path};
+use super::{Dispatcher, LocalRequests, local_callback, req, temp_path};
 use crate::database_file_source::{Cache, DatabaseFileSource};
-use crate::file_source::{FileSource, FileSourceExt};
+use crate::file_source::FileSource;
 use crate::offline_database::{DatabaseError, OfflineDatabase};
 use crate::resource::{Kind, LoadingMethod, Resource, StoragePolicy};
 use crate::response::{Reason, Response};
@@ -21,7 +21,7 @@ fn dbfs() -> Arc<DatabaseFileSource> {
 #[test]
 fn volatile_resource() {
     let run_loop = RunLoop::new();
-    let queue = run_loop.handle();
+    let local = Dispatcher::new(&run_loop);
 
     let dbfs = dbfs();
 
@@ -44,8 +44,9 @@ fn volatile_resource() {
         local_callback(move || {
             let (r1, fs1, res1) = (Rc::clone(&r), Arc::clone(&fs), Rc::clone(&res));
             let request = res.borrow().clone();
-            *r.borrow_mut() = Some(fs.request(
-                &queue,
+            let local1 = local.clone();
+            *r.borrow_mut() = Some(fs.request_local(
+                &local,
                 &request,
                 Box::new(move |res_1: Response| {
                     assert_eq!(None, res_1.error);
@@ -56,8 +57,8 @@ fn volatile_resource() {
                     let r2 = Rc::clone(&r1);
                     let stop = stop.clone();
                     let request = res1.borrow().clone();
-                    *r1.borrow_mut() = Some(fs1.request(
-                        &stop.handle(),
+                    *r1.borrow_mut() = Some(fs1.request_local(
+                        &local1,
                         &request,
                         Box::new(move |res_2: Response| {
                             r2.borrow_mut().take();
@@ -79,6 +80,7 @@ fn volatile_resource() {
 #[test]
 fn volatile_resource_is_not_stored() {
     let run_loop = RunLoop::new();
+    let local = Dispatcher::new(&run_loop);
 
     let dbfs = dbfs();
 
@@ -99,8 +101,8 @@ fn volatile_resource_is_not_stored() {
     let req = req();
     let result: Rc<RefCell<Option<Response>>> = Rc::new(RefCell::new(None));
     let (r, out, stop) = (Rc::clone(&req), Rc::clone(&result), run_loop.clone());
-    *req.borrow_mut() = Some(dbfs.request(
-        &run_loop.handle(),
+    *req.borrow_mut() = Some(dbfs.request_local(
+        &local,
         &resource,
         Box::new(move |res: Response| {
             r.borrow_mut().take();
@@ -164,8 +166,9 @@ impl Drop for RemoveObserver {
 fn cached_request(run_loop: &RunLoop, source: &DatabaseFileSource, resource: &Resource) -> Response {
     let result: Rc<RefCell<Option<Response>>> = Rc::new(RefCell::new(None));
     let (out, stop) = (Rc::clone(&result), run_loop.clone());
-    let _req = source.request(
-        &run_loop.handle(),
+    let local = Dispatcher::new(run_loop);
+    let _req = source.request_local(
+        &local,
         resource,
         Box::new(move |res: Response| {
             *out.borrow_mut() = Some(res);
