@@ -789,7 +789,8 @@ fn new_metal_buffer(
 }
 
 /// The vertex descriptor of `layouts` for `shader`, and the buffer index
-/// each layout's slot binds at, `None` for a slot without attributes.
+/// each layout's slot binds at, `None` for a slot without attributes the
+/// shader reads.
 ///
 /// The slots bind in order from the shader's first vertex buffer, which is
 /// past the indexes of the shader's own buffers. An attribute that the
@@ -801,7 +802,10 @@ fn vertex_descriptor(
     let descriptor = MTLVertexDescriptor::vertexDescriptor();
     let mut buffer_indices: Vec<Option<usize>> = Vec::with_capacity(layouts.len());
     for (slot, layout) in layouts.iter().enumerate() {
-        if layout.attributes.is_empty() {
+        let read =
+            || layout.attributes.iter().filter(|attribute| shader.attributes.iter().any(|&(id, _)| id == attribute.id));
+        // Metal rejects a layout that no attribute reads from.
+        if read().next().is_none() {
             buffer_indices.push(None);
             continue;
         }
@@ -811,9 +815,7 @@ fn vertex_descriptor(
             .ok_or_else(|| {
                 GpuError::Unsupported(format!("{}: vertex buffer slot {slot} past Metal's buffer indexes", shader.name))
             })?;
-        let read =
-            layout.attributes.iter().filter(|attribute| shader.attributes.iter().any(|&(id, _)| id == attribute.id));
-        for attribute in read {
+        for attribute in read() {
             let format = vertex_format(attribute.format)
                 .ok_or_else(|| GpuError::Unsupported(format!("vertex attribute format {:?}", attribute.format)))?;
             // SAFETY: the shaders' attribute indexes are below Metal's 31,
