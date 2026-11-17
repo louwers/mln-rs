@@ -6,5 +6,10 @@ source tools/dev-shell.sh
 eval "set -- ${usage_args:-}"
 [[ $# -gt 0 ]] || set -- --open
 cargo llvm-cov clean --workspace
+# nextest runs each test in a process of its own, and by default each process
+# writes its own profile (the name has its PID): thousands of files and
+# gigabytes for `report` to merge. Without the PID, a binary's processes merge
+# their counts into a pool of 8 files as they exit (LLVM's `%Nm`).
+export LLVM_PROFILE_FILE_NAME="${LLVM_PROFILE_FILE_NAME:-mln-rs-%8m.profraw}"
 dev_shell cargo llvm-cov nextest --no-report --workspace
 cargo llvm-cov report --workspace "$@"
