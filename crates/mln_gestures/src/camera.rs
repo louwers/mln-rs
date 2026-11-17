@@ -2,9 +2,12 @@
 //! camera and sends it the map's camera calls.
 //! `mln_runtime::Map` implements it.
 
+use std::sync::Arc;
+
 use mln_map::{CameraDelta, CameraOptions, CameraUpdate, TransformState, TransitionEnd};
 use mln_util::LatLng;
 use mln_util::geo::{ScreenCoordinate, WrapMode};
+use parking_lot::Mutex;
 
 /// What the recognizer needs from a camera: to read it, and
 /// the map's two camera calls, which carry each change's gesture
@@ -24,15 +27,27 @@ pub trait GestureCamera {
     /// Applies a gesture's last delta, as `apply_camera_delta` does, and
     /// returns how its command ends: the end of the momentum it starts,
     /// whose speed a press that stops it can carry.
-    fn release(&mut self, delta: &CameraDelta) -> Box<dyn PendingEnd>;
+    fn release(&mut self, delta: &CameraDelta) -> PendingEnd;
     fn update_camera(&mut self, update: &CameraUpdate);
     fn cancel_transitions_with_id(&mut self, transition_id: u64);
 }
 
-/// How a camera command ends, once it has.
-pub trait PendingEnd: std::fmt::Debug {
+/// Where a camera command's end arrives: the camera keeps a clone and sets
+/// it when the command ends, and the recognizer takes it. A command that
+/// fails leaves it empty.
+#[derive(Clone, Debug, Default)]
+pub struct PendingEnd(Arc<Mutex<Option<TransitionEnd>>>);
+
+impl PendingEnd {
+    pub fn set(&self, end: TransitionEnd) {
+        *self.0.lock() = Some(end);
+    }
+
     /// The command's end, once it has come; `None` before.
-    fn take(&mut self) -> Option<TransitionEnd>;
+    #[must_use]
+    pub fn take(&self) -> Option<TransitionEnd> {
+        self.0.lock().take()
+    }
 }
 
 /// The least and greatest zoom that `state` may take at `latitude`: on the

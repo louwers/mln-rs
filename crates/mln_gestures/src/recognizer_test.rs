@@ -4,13 +4,11 @@
 // hour ahead of `Instant::now()`, so its frame time never goes stale. The
 // rig's camera is a bare transform (`TestCamera`), which needs no renderer.
 
-use std::cell::RefCell;
 use std::ops::{Deref, DerefMut};
-use std::rc::Rc;
 use std::time::Duration;
 
 use mln_map::transform::{CameraCommandId, Transform, TransformEvent};
-use mln_map::{CameraChangeSource, ConstrainMode, MomentumSnap, TransitionEnd, ViewportMode};
+use mln_map::{CameraChangeSource, ConstrainMode, MomentumSnap, ViewportMode};
 use mln_style_types::ProjectionDefinition;
 use mln_util::LatLng;
 use mln_util::geo::LatLngBounds;
@@ -20,12 +18,12 @@ use mln_util::time::Instant;
 
 use super::*;
 
-/// A transform as the recognizer's camera. It keeps the ends of its commands
-/// for the releases' [`PendingEnd`]s, and the source of each camera change
-/// that started.
+/// A transform as the recognizer's camera. It sets its releases' commands'
+/// ends, and keeps the source of each camera change that started.
 struct TestCamera {
     transform: Transform,
-    ends: Rc<RefCell<HashMap<CameraCommandId, TransitionEnd>>>,
+    /// Where the end of each release's command goes, until it ends.
+    ends: HashMap<CameraCommandId, PendingEnd>,
     sources: Vec<CameraChangeSource>,
 }
 
@@ -35,7 +33,9 @@ impl TestCamera {
         for event in self.transform.drain_events() {
             match event {
                 TransformEvent::CommandEnded(end) => {
-                    self.ends.borrow_mut().insert(end.command, end.end);
+                    if let Some(pending) = self.ends.remove(&end.command) {
+                        pending.set(end.end);
+                    }
                 }
                 TransformEvent::CameraWillChange(change) => self.sources.push(change.source),
                 _ => {}
@@ -55,18 +55,6 @@ impl Deref for TestCamera {
 impl DerefMut for TestCamera {
     fn deref_mut(&mut self) -> &mut Transform {
         &mut self.transform
-    }
-}
-
-#[derive(Debug)]
-struct TestEnd {
-    command: CameraCommandId,
-    ends: Rc<RefCell<HashMap<CameraCommandId, TransitionEnd>>>,
-}
-
-impl PendingEnd for TestEnd {
-    fn take(&mut self) -> Option<TransitionEnd> {
-        self.ends.borrow_mut().remove(&self.command)
     }
 }
 
@@ -95,10 +83,12 @@ impl GestureCamera for TestCamera {
         self.take_events();
     }
 
-    fn release(&mut self, delta: &CameraDelta) -> Box<dyn PendingEnd> {
+    fn release(&mut self, delta: &CameraDelta) -> PendingEnd {
         let command = self.transform.apply_camera_delta(delta).expect("a valid delta");
+        let end = PendingEnd::default();
+        self.ends.insert(command, end.clone());
         self.take_events();
-        Box::new(TestEnd { command, ends: Rc::clone(&self.ends) })
+        end
     }
 
     fn update_camera(&mut self, update: &CameraUpdate) {
@@ -150,7 +140,7 @@ impl Rig {
         let mut camera = transform();
         camera.set_frame_time(Some(time));
         camera.drain_events().for_each(drop);
-        let camera = TestCamera { transform: camera, ends: Rc::default(), sources: Vec::new() };
+        let camera = TestCamera { transform: camera, ends: HashMap::default(), sources: Vec::new() };
         Rig { camera, input: GestureRecognizer::new(*options), now: 1000.0, time }
     }
 

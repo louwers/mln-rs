@@ -438,10 +438,10 @@ pub struct GestureRecognizer {
     begun: bool,
     /// The end of the recognizer's last release, whose glide a press may
     /// stop.
-    release_end: Option<Box<dyn PendingEnd>>,
+    release_end: Option<PendingEnd>,
     /// The end of the glide that this gesture's press stopped, whose speed
     /// its release carries (`carry_caught_glide`) if the press cancelled it.
-    caught_glide: Option<Box<dyn PendingEnd>>,
+    caught_glide: Option<PendingEnd>,
     /// The last tap, for double taps: where and when.
     last_tap: Option<(V2, f64, PointerKind)>,
     scroll: Option<Scroll>,
@@ -608,7 +608,7 @@ impl GestureRecognizer {
         self.begun = true;
         // Only a glide still running can be caught: one that has ended, as
         // when a command cancelled it, carries nothing.
-        self.caught_glide = self.release_end.take().and_then(|mut end| end.take().is_none().then_some(end));
+        self.caught_glide = self.release_end.take().filter(|end| end.take().is_none());
         let phase = if self.options.interrupt_animations {
             GesturePhase::Begin
         } else {
@@ -987,7 +987,7 @@ impl GestureRecognizer {
         let caught_glide = self
             .caught_glide
             .take()
-            .and_then(|mut end| end.take())
+            .and_then(|end| end.take())
             .filter(|end| self.options.carry_caught_glide && end.outcome == TransitionOutcome::Cancelled)
             .map(|end| end.velocity);
         match finish {
