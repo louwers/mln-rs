@@ -7,7 +7,7 @@ use mln_vec_map::VecSet;
 use crate::conversion::{Converter, convert_property_value};
 use crate::conversion_impl::{ValueFactory, make_style_property};
 use crate::evaluated::{Evaluated, Evaluation};
-use crate::expression::{Dependency, Functions, Image, ValueConverter, global_state_refs_intersect};
+use crate::expression::{Dependency, Functions, Type, ValueConverter, global_state_refs_intersect};
 use crate::property_expression::PropertyExpression;
 use crate::property_table::PropertyInfo;
 use crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
@@ -201,7 +201,7 @@ where
     /// feature or is a pattern image: images are never interpolated, so a
     /// transition would only delay the image the tiles are laid out with.
     fn transitions_on_global_state_change(&self, changed_keys: Option<&VecSet<String>>) -> bool {
-        std::any::TypeId::of::<T>() != std::any::TypeId::of::<Image>()
+        T::expression_type() != Type::Image
             && !self.is_data_driven()
             && self.get_dependencies().intersects(Dependency::GLOBAL_STATE)
             && global_state_refs_intersect(self.get_global_state_refs(), changed_keys)
