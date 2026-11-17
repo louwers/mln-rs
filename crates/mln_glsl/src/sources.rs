@@ -3416,7 +3416,9 @@ layout(set = LAYER_SET_INDEX, binding = idHeatmapEvaluatedPropsUBO) uniform Heat
     float pad1;
 } props;
 
+#if !defined(HAS_UNIFORM_u_weight)
 layout(location = 0) out float frag_weight;
+#endif
 layout(location = 1) out vec2 frag_extrude;
 
 void main() {
@@ -3468,7 +3470,9 @@ void main() {
     gl_Position = drawable.matrix * vec4(floor(in_position * 0.5) + scaled_extrude, 0, 1);
 #endif
 
+#if !defined(HAS_UNIFORM_u_weight)
     frag_weight = weight;
+#endif
     frag_extrude = extrude;
 }
 "#,
@@ -3477,7 +3481,9 @@ void main() {
 // Gaussian kernel coefficient: 1 / sqrt(2 * PI)
 #define GAUSS_COEF 0.3989422804014327
 
+#if !defined(HAS_UNIFORM_u_weight)
 layout(location = 0) in float frag_weight;
+#endif
 layout(location = 1) in vec2 frag_extrude;
 
 layout(location = 0) out vec4 out_color;
@@ -3498,7 +3504,12 @@ void main() {
 
     // Kernel density estimation with a Gaussian kernel of size 5x5
     const float d = -0.5 * 3.0 * 3.0 * dot(frag_extrude, frag_extrude);
-    const float val = frag_weight * props.intensity * GAUSS_COEF * exp(d);
+#if defined(HAS_UNIFORM_u_weight)
+    const float weight = props.weight;
+#else
+    const float weight = frag_weight;
+#endif
+    const float val = weight * props.intensity * GAUSS_COEF * exp(d);
 
     out_color = vec4(val, 1.0, 1.0, 1.0);
 }

@@ -2628,7 +2628,9 @@ struct VertexInput {
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
+#ifndef HAS_UNIFORM_u_weight
     @location(0) weight: f32,
+#endif
     @location(1) extrude: vec2<f32>,
 };
 
@@ -2694,7 +2696,9 @@ fn main(in: VertexInput) -> VertexOutput {
 #else
     out.position = drawable.matrix * vec4<f32>(base + scaled_extrude, 0.0, 1.0);
 #endif
+#ifndef HAS_UNIFORM_u_weight
     out.weight = weight;
+#endif
     out.extrude = extrude;
 
     return out;
@@ -2704,7 +2708,9 @@ fn main(in: VertexInput) -> VertexOutput {
     fragment: Some(
         r"
 struct FragmentInput {
+#ifndef HAS_UNIFORM_u_weight
     @location(0) weight: f32,
+#endif
     @location(1) extrude: vec2<f32>,
 };
 
@@ -2725,7 +2731,12 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return vec4<f32>(1.0, 1.0, 1.0, 1.0);
 #else
     let d = -0.5 * 3.0 * 3.0 * dot(in.extrude, in.extrude);
-    let val = in.weight * props.intensity * GAUSS_COEF * exp(d);
+#ifdef HAS_UNIFORM_u_weight
+    let weight = props.weight;
+#else
+    let weight = in.weight;
+#endif
+    let val = weight * props.intensity * GAUSS_COEF * exp(d);
     return vec4<f32>(val, 1.0, 1.0, 1.0);
 #endif
 }
