@@ -5082,6 +5082,17 @@ opacity = unpack_mix_vec2(a_opacity, u_opacity_t);
 lowp float opacity = u_opacity;
 #endif
 
+    vec2 fade_opacity = unpack_opacity(a_fade_opacity);
+    float fade_change = fade_opacity[1] > 0.5 ? u_symbol_fade_change : -u_symbol_fade_change;
+    v_fade_opacity = max(0.0, min(1.0, fade_opacity[0] + fade_change));
+
+    // A quad that draws nothing goes to one point off screen, so it's never
+    // rasterized. All four vertices of a quad share its fade and opacity.
+    if (v_fade_opacity == 0.0 || opacity == 0.0) {
+        gl_Position = vec4(-2.0, -2.0, -2.0, 1.0);
+        return;
+    }
+
     vec2 a_pos = a_pos_offset.xy;
     vec2 a_offset = a_pos_offset.zw;
 
@@ -5173,9 +5184,6 @@ lowp float opacity = u_opacity;
 
     v_tex = (a_tex - a_tex_origin) / u_texsize;
     v_tex_origin = a_tex_origin / u_texsize;
-    vec2 fade_opacity = unpack_opacity(a_fade_opacity);
-    float fade_change = fade_opacity[1] > 0.5 ? u_symbol_fade_change : -u_symbol_fade_change;
-    v_fade_opacity = max(0.0, min(1.0, fade_opacity[0] + fade_change));
 }
 ",
     fragment: r"uniform sampler2D u_texture;
@@ -5362,6 +5370,17 @@ halo_blur = unpack_mix_vec2(a_halo_blur, u_halo_blur_t);
 lowp float halo_blur = u_halo_blur;
 #endif
 
+    vec2 fade_opacity = unpack_opacity(a_fade_opacity);
+    float fade_change = fade_opacity[1] > 0.5 ? u_symbol_fade_change : -u_symbol_fade_change;
+    float interpolated_fade_opacity = max(0.0, min(1.0, fade_opacity[0] + fade_change));
+
+    // A quad that draws nothing goes to one point off screen, so it's never
+    // rasterized. All four vertices of a quad share its fade and opacity.
+    if (interpolated_fade_opacity == 0.0 || opacity == 0.0) {
+        gl_Position = vec4(-2.0, -2.0, -2.0, 1.0);
+        return;
+    }
+
     vec2 a_pos = a_pos_offset.xy;
     vec2 a_offset = a_pos_offset.zw;
 
@@ -5457,10 +5476,6 @@ lowp float halo_blur = u_halo_blur;
         gl_Position = projectTileWithElevation(gl_Position.xy, gl_Position.z);
     }
     float gamma_scale = gl_Position.w;
-
-    vec2 fade_opacity = unpack_opacity(a_fade_opacity);
-    float fade_change = fade_opacity[1] > 0.5 ? u_symbol_fade_change : -u_symbol_fade_change;
-    float interpolated_fade_opacity = max(0.0, min(1.0, fade_opacity[0] + fade_change));
 
     v_data0 = (a_tex - a_tex_origin) / u_texsize;
     v_tex_origin = a_tex_origin / u_texsize;
@@ -5707,6 +5722,17 @@ halo_blur = unpack_mix_vec2(a_halo_blur, u_halo_blur_t);
 lowp float halo_blur = u_halo_blur;
 #endif
 
+    vec2 fade_opacity = unpack_opacity(a_fade_opacity);
+    float fade_change = fade_opacity[1] > 0.5 ? u_symbol_fade_change : -u_symbol_fade_change;
+    float interpolated_fade_opacity = max(0.0, min(1.0, fade_opacity[0] + fade_change));
+
+    // A quad that draws nothing goes to one point off screen, so it's never
+    // rasterized. All four vertices of a quad share its fade and opacity.
+    if (interpolated_fade_opacity == 0.0 || opacity == 0.0) {
+        gl_Position = vec4(-2.0, -2.0, -2.0, 1.0);
+        return;
+    }
+
     vec2 a_pos = a_pos_offset.xy;
     vec2 a_offset = a_pos_offset.zw;
 
@@ -5802,10 +5828,6 @@ lowp float halo_blur = u_halo_blur;
         gl_Position = projectTileWithElevation(gl_Position.xy, gl_Position.z);
     }
     float gamma_scale = gl_Position.w;
-
-    vec2 fade_opacity = unpack_opacity(a_fade_opacity);
-    float fade_change = fade_opacity[1] > 0.5 ? u_symbol_fade_change : -u_symbol_fade_change;
-    float interpolated_fade_opacity = max(0.0, min(1.0, fade_opacity[0] + fade_change));
 
     v_data0.xy = (a_tex - a_tex_origin) / u_texsize;
     v_data0.zw = (a_tex - a_tex_origin) / u_texsize_icon;

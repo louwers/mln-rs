@@ -5955,6 +5955,21 @@ void main() {
     const SymbolDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
     const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
 
+    const vec2 raw_fade_opacity = unpack_opacity(in_fade_opacity);
+    const float fade_change = raw_fade_opacity[1] > 0.5 ? paintParams.symbol_fade_change : -paintParams.symbol_fade_change;
+    const float fade_opacity = max(0.0, min(1.0, raw_fade_opacity[0] + fade_change));
+#if defined(HAS_UNIFORM_u_opacity)
+    const float visibility = fade_opacity;
+#else
+    const float visibility = unpack_mix_float(in_opacity, drawable.opacity_t) * fade_opacity;
+#endif
+    // A quad that draws nothing goes to one point off screen, so it's never
+    // rasterized. All four vertices of a quad share its fade and opacity.
+    if (visibility == 0.0) {
+        gl_Position = vec4(-2.0, -2.0, -2.0, 1.0);
+        return;
+    }
+
     const vec2 a_pos = in_pos_offset.xy;
     const vec2 a_offset = in_pos_offset.zw;
 
@@ -6044,19 +6059,11 @@ void main() {
         gl_Position = projectTileWithElevation(gl_Position.xy, gl_Position.z, projection);
     }
 
-    const vec2 raw_fade_opacity = unpack_opacity(in_fade_opacity);
-    const float fade_change = raw_fade_opacity[1] > 0.5 ? paintParams.symbol_fade_change : -paintParams.symbol_fade_change;
-    const float fade_opacity = max(0.0, min(1.0, raw_fade_opacity[0] + fade_change));
-
     const vec2 tex_origin = vec2(in_tex_origin);
     frag_tex = (a_tex - tex_origin) / drawable.texsize;
     frag_tex_origin = tex_origin / drawable.texsize;
 
-#if defined(HAS_UNIFORM_u_opacity)
-    frag_opacity = fade_opacity;
-#else
-    frag_opacity = unpack_mix_float(in_opacity, drawable.opacity_t) * fade_opacity;
-#endif
+    frag_opacity = visibility;
 }
 ",
     fragment: r"
@@ -6238,6 +6245,22 @@ void main() {
     const SymbolDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
     const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
 
+    const vec2 raw_fade_opacity = unpack_opacity(in_fade_opacity);
+    const float fade_change = raw_fade_opacity[1] > 0.5 ? paintParams.symbol_fade_change : -paintParams.symbol_fade_change;
+    const float fade_opacity = max(0.0, min(1.0, raw_fade_opacity[0] + fade_change));
+#if defined(HAS_UNIFORM_u_opacity)
+    const float visibility = fade_opacity;
+#else
+    const float opacity = unpack_mix_float(in_opacity, drawable.opacity_t);
+    const float visibility = min(fade_opacity, opacity);
+#endif
+    // A quad that draws nothing goes to one point off screen, so it's never
+    // rasterized. All four vertices of a quad share its fade and opacity.
+    if (visibility == 0.0) {
+        gl_Position = vec4(-2.0, -2.0, -2.0, 1.0);
+        return;
+    }
+
     const vec2 a_pos = in_pos_offset.xy;
     const vec2 a_offset = in_pos_offset.zw;
 
@@ -6332,13 +6355,10 @@ void main() {
         gl_Position = projectTileWithElevation(gl_Position.xy, gl_Position.z, projection);
     }
 
-    const vec2 raw_fade_opacity = unpack_opacity(in_fade_opacity);
-    const float fade_change = raw_fade_opacity[1] > 0.5 ? paintParams.symbol_fade_change : -paintParams.symbol_fade_change;
-
     const vec2 tex_origin = vec2(in_tex_origin);
     frag_tex = (a_tex - tex_origin) / drawable.texsize;
     frag_tex_origin = tex_origin / drawable.texsize;
-    frag_fade_opacity = max(0.0, min(1.0, raw_fade_opacity[0] + fade_change));
+    frag_fade_opacity = fade_opacity;
     frag_font_scale = fontScale;
     frag_gamma_scale = gl_Position.w;
 
@@ -6355,7 +6375,7 @@ void main() {
     frag_halo_blur = unpack_mix_float(in_halo_blur, drawable.halo_blur_t);
 #endif
 #if !defined(HAS_UNIFORM_u_opacity)
-    frag_opacity = unpack_mix_float(in_opacity, drawable.opacity_t);
+    frag_opacity = opacity;
 #endif
 }
 ",
@@ -6604,6 +6624,22 @@ void main() {
     const SymbolDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
     const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
 
+    const vec2 raw_fade_opacity = unpack_opacity(in_fade_opacity);
+    const float fade_change = raw_fade_opacity[1] > 0.5 ? paintParams.symbol_fade_change : -paintParams.symbol_fade_change;
+    const float fade_opacity = max(0.0, min(1.0, raw_fade_opacity[0] + fade_change));
+#if defined(HAS_UNIFORM_u_opacity)
+    const float visibility = fade_opacity;
+#else
+    const float opacity = unpack_mix_float(in_opacity, drawable.opacity_t);
+    const float visibility = min(fade_opacity, opacity);
+#endif
+    // A quad that draws nothing goes to one point off screen, so it's never
+    // rasterized. All four vertices of a quad share its fade and opacity.
+    if (visibility == 0.0) {
+        gl_Position = vec4(-2.0, -2.0, -2.0, 1.0);
+        return;
+    }
+
     const vec2 a_pos = in_pos_offset.xy;
     const vec2 a_offset = in_pos_offset.zw;
 
@@ -6698,9 +6734,6 @@ void main() {
         gl_Position = projectTileWithElevation(gl_Position.xy, gl_Position.z, projection);
     }
 
-    const vec2 raw_fade_opacity = unpack_opacity(in_fade_opacity);
-    const float fade_change = raw_fade_opacity[1] > 0.5 ? paintParams.symbol_fade_change : -paintParams.symbol_fade_change;
-
     const bool is_icon = (is_sdf == ICON);
 	frag_is_icon = int(is_icon);
 
@@ -6708,7 +6741,7 @@ void main() {
     const vec2 tex_origin = vec2(in_tex_origin);
     frag_tex = (a_tex - tex_origin) / texsize;
     frag_tex_origin = tex_origin / texsize;
-    frag_fade_opacity = max(0.0, min(1.0, raw_fade_opacity[0] + fade_change));
+    frag_fade_opacity = fade_opacity;
     frag_font_scale = fontScale;
     frag_gamma_scale = gl_Position.w;
 
@@ -6725,7 +6758,7 @@ void main() {
     frag_halo_blur = unpack_mix_float(in_halo_blur, drawable.halo_blur_t);
 #endif
 #if !defined(HAS_UNIFORM_u_opacity)
-    frag_opacity = unpack_mix_float(in_opacity, drawable.opacity_t);
+    frag_opacity = opacity;
 #endif
 }
 ",

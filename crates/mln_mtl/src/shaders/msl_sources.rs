@@ -7024,10 +7024,16 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 fade_opacity = unpack_opacity(vertx.fade_opacity);
     const float fade_change = (fade_opacity[1] > 0.5) ? paintParams.symbol_fade_change : -paintParams.symbol_fade_change;
     const half fo = half(max(0.0, min(1.0, fade_opacity[0] + fade_change)));
+#if defined(HAS_UNIFORM_u_opacity)
+    const half visibility = fo;
+#else
+    const half opacity = half(unpack_mix_float(vertx.opacity, drawable.opacity_t));
+    const half visibility = min(fo, opacity);
+#endif
 
     // This will check to see if the opacity is zero and push the triangle offscreen if it is
     // so the GPU will cull the vertex and never send it to the fragment shader
-    if (fo == 0.0) {
+    if (visibility == 0.0) {
         return {
             .position     = float4(c_offscreen_degenerate_triangle_location,
                                    c_offscreen_degenerate_triangle_location,
@@ -7144,7 +7150,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         .fontScale    = half(fontScale),
         .fade_opacity = fo,
 #if !defined(HAS_UNIFORM_u_opacity)
-        .opacity      = half(unpack_mix_float(vertx.opacity, drawable.opacity_t)),
+        .opacity      = opacity,
 #endif
 #if !defined(HAS_UNIFORM_u_halo_width)
         .halo_width   = half(unpack_mix_float(vertx.halo_width, drawable.halo_width_t)),
@@ -7369,10 +7375,16 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 fade_opacity = unpack_opacity(vertx.fade_opacity);
     const float fade_change = (fade_opacity[1] > 0.5) ? paintParams.symbol_fade_change : -paintParams.symbol_fade_change;
     const half fo = half(max(0.0, min(1.0, fade_opacity[0] + fade_change)));
+#if defined(HAS_UNIFORM_u_opacity)
+    const half visibility = fo;
+#else
+    const half opacity = half(unpack_mix_float(vertx.opacity, drawable.opacity_t));
+    const half visibility = min(fo, opacity);
+#endif
 
     // This will check to see if the opacity is zero and push the triangle offscreen if it is
     // so the GPU will cull the vertex and never send it to the fragment shader
-    if (fo == 0.0) {
+    if (visibility == 0.0) {
         return {
             .position     = float4(c_offscreen_degenerate_triangle_location,
                                    c_offscreen_degenerate_triangle_location,
@@ -7490,7 +7502,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         .tex          = (a_tex - tex_origin) / texsize,
         .tex_origin   = tex_origin / texsize,
 #if !defined(HAS_UNIFORM_u_opacity)
-        .opacity      = half(unpack_mix_float(vertx.opacity, drawable.opacity_t)),
+        .opacity      = opacity,
 #endif
 #if !defined(HAS_UNIFORM_u_halo_width)
         .halo_width   = half(unpack_mix_float(vertx.halo_width, drawable.halo_width_t)),

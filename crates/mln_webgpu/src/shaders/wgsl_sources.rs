@@ -5423,8 +5423,15 @@ fn main(in: VertexInput) -> VertexOutput {
     let fade_change = select(-paintParams.symbol_fade_change, paintParams.symbol_fade_change, fade_opacity.y > 0.5);
     let fo = max(0.0, min(1.0, fade_opacity.x + fade_change));
 
+#ifdef HAS_UNIFORM_u_opacity
+    let visibility = fo;
+#else
+    let opacity = unpack_mix_float(in.opacity, drawable.opacity_t);
+    let visibility = min(fo, opacity);
+#endif
+
     // Cull vertices with zero opacity
-    if (fo == 0.0) {
+    if (visibility == 0.0) {
         out.position = vec4<f32>(c_offscreen_degenerate_triangle_location,
                                  c_offscreen_degenerate_triangle_location,
                                  c_offscreen_degenerate_triangle_location, 1.0);
@@ -5541,7 +5548,7 @@ fn main(in: VertexInput) -> VertexOutput {
     out.halo_blur = unpack_mix_float(in.halo_blur, drawable.halo_blur_t);
 #endif
 #ifndef HAS_UNIFORM_u_opacity
-    out.opacity = unpack_mix_float(in.opacity, drawable.opacity_t);
+    out.opacity = opacity;
 #endif
 
     return out;
@@ -5797,8 +5804,15 @@ fn main(in: VertexInput) -> VertexOutput {
     let fade_change = select(-paintParams.symbol_fade_change, paintParams.symbol_fade_change, fade_opacity.y > 0.5);
     let fo = max(0.0, min(1.0, fade_opacity.x + fade_change));
 
+#ifdef HAS_UNIFORM_u_opacity
+    let visibility = fo;
+#else
+    let opacity = unpack_mix_float(in.opacity, drawable.opacity_t);
+    let visibility = min(fo, opacity);
+#endif
+
     // Cull vertices with zero opacity
-    if (fo == 0.0) {
+    if (visibility == 0.0) {
         out.position = vec4<f32>(c_offscreen_degenerate_triangle_location,
                                  c_offscreen_degenerate_triangle_location,
                                  c_offscreen_degenerate_triangle_location, 1.0);
@@ -5914,7 +5928,7 @@ fn main(in: VertexInput) -> VertexOutput {
     out.halo_color = unpack_mix_color(in.halo_color, drawable.halo_color_t);
 #endif
 #ifndef HAS_UNIFORM_u_opacity
-    out.opacity = unpack_mix_float(in.opacity, drawable.opacity_t);
+    out.opacity = opacity;
 #endif
 #ifndef HAS_UNIFORM_u_halo_width
     out.halo_width = unpack_mix_float(in.halo_width, drawable.halo_width_t);
