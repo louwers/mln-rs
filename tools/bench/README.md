@@ -39,7 +39,7 @@ mise run bench:fixtures                # install the map data, once
 
 `mise run bench` builds with the `benchmark` profile (`profile.toml`) and runs
 `mln-bench run`, after `mise run bench:fixtures`; `--json` prints the runs as
-JSON, and `--images <dir>` writes the last image each macro scenario drew to a
+JSON, and `--images <dir>` writes the last image each drawing scenario drew to a
 PNG file there.
 
 Macro scenarios draw on the device the tests draw on: WebGPU, unless
