@@ -128,6 +128,14 @@ impl Windows {
     }
 }
 
+/// A buffer that some window doesn't hold the contents of.
+enum Stale {
+    Live(BufferId),
+    /// A destroyed buffer that bindings still read, which stays until every
+    /// window holds its contents or nothing else holds its native.
+    Destroyed(Buffer),
+}
+
 /// A texture's image: one this backend made, or one it imported, which
 /// stays the caller's.
 enum Image {
@@ -462,7 +470,7 @@ pub struct VulkanGpu {
     /// The serial of the batch whose window is ready, and its window.
     window: (u64, usize),
     /// The buffers that some window doesn't hold the contents of.
-    stale: Vec<BufferId>,
+    stale: Vec<Stale>,
     /// The commands of the writes since the last flush.
     uploads: Option<vk::CommandBuffer>,
     /// A number that changes at each barrier between writes in `uploads`,
@@ -802,6 +810,12 @@ impl VulkanGpu {
         }))
     }
 
+    /// The destroyed buffers that wait for their windows to be current.
+    #[cfg(test)]
+    pub(crate) fn destroyed_stale_count(&self) -> usize {
+        self.stale.iter().filter(|stale| matches!(stale, Stale::Destroyed(_))).count()
+    }
+
     /// `texture`, as an import of its image would describe it.
     #[cfg(test)]
     pub(crate) fn as_imported(&self, texture: TextureId) -> Option<ImportedImage> {
@@ -1041,8 +1055,13 @@ impl VulkanGpu {
         let window = (serial % count) as usize;
         let all = (1 << self.window_count) - 1;
         let buffers = &mut self.buffers;
-        self.stale.retain(|&id| {
-            let Some(Buffer { native, windows: Some(windows), .. }) = buffers.get_mut(id) else { return false };
+        self.stale.retain_mut(|stale| {
+            let buffer = match stale {
+                Stale::Live(id) => buffers.get_mut(*id),
+                Stale::Destroyed(buffer) if Rc::strong_count(&buffer.native) > 1 => Some(buffer),
+                Stale::Destroyed(_) => None,
+            };
+            let Some(Buffer { native, windows: Some(windows), .. }) = buffer else { return false };
             if windows.current & (1 << window) == 0 {
                 windows.copy(native, window, 0, windows.contents.len());
                 windows.current |= 1 << window;
@@ -1056,6 +1075,9 @@ impl VulkanGpu {
     /// Takes back what the finished submits used, and destroys what waited
     /// for them.
     fn collect_garbage(&mut self) {
+        // A destroyed buffer that nothing else holds needs its windows no
+        // more, and its native goes to the garbage.
+        self.stale.retain(|stale| !matches!(stale, Stale::Destroyed(buffer) if Rc::strong_count(&buffer.native) == 1));
         // SAFETY: the fences are this backend's.
         let backend = Rc::clone(&self.backend);
         let signaled = |fence| unsafe { backend.get_device().get_fence_status(fence) }.unwrap_or(false);
@@ -2009,7 +2031,7 @@ impl Gpu for VulkanGpu {
                 if windows.current & (1 << window) != 0 { (start, end) } else { (0, windows.contents.len()) };
             windows.copy(native, window, start, end);
             if windows.current == all {
-                self.stale.push(buffer);
+                self.stale.push(Stale::Live(buffer));
             }
             windows.current = 1 << window;
             return Ok(());
@@ -2310,7 +2332,16 @@ impl Gpu for VulkanGpu {
     /// it goes once the submits that may use it have finished.
     fn destroy(&mut self, resource: ResourceId) {
         match resource {
-            ResourceId::Buffer(id) => drop(self.buffers.remove(id)),
+            ResourceId::Buffer(id) => {
+                let Some(buffer) = self.buffers.remove(id) else { return };
+                // Bindings that still hold it read each window in turn, so
+                // `open_window` keeps bringing them up to date.
+                let all = (1 << self.window_count) - 1;
+                let stale = buffer.windows.as_ref().is_some_and(|windows| windows.current != all);
+                if stale && Rc::strong_count(&buffer.native) > 1 {
+                    self.stale.push(Stale::Destroyed(buffer));
+                }
+            }
             ResourceId::Texture(id) => {
                 if self.textures.remove(id).is_none() {
                     return;
@@ -2654,6 +2685,7 @@ impl Drop for VulkanGpu {
         self.bindings.clear();
         self.geometries.clear();
         self.buffers.clear();
+        self.stale.clear();
         self.textures.clear();
         self.samplers.clear();
         for (_, Readback { staging, .. }) in self.readbacks.drain() {
