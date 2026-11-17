@@ -12,7 +12,7 @@ use mln_style::expression::dsl::{eq, get_str, gt, id, literal, literal_str, ne, 
 use mln_style::expression::expression::FeatureState;
 use mln_style::expression::{Functions, Value as ExpressionValue};
 use mln_style::filter::Filter;
-use mln_style::sources::geojson::GeoJSONOptions;
+use mln_style::sources::geojson::{GeoJSONOptions, GeoJsonSourceType};
 use mln_style::{Edit, Layer};
 use mln_util::ErrorKind;
 use mln_util::feature::Feature;
@@ -573,7 +573,7 @@ fn get_top_cluster_feature(test: &QueryTest) -> Vec<Feature> {
 
     test.map().jump_to(&CameraOptions { center: Some(coordinate), zoom: Some(0.0), ..Default::default() });
     test.map().add_source(source).unwrap();
-    let url = Edit::SetGeoJsonUrl { id: "cluster_source".to_owned(), url: "http://url".to_owned() };
+    let url = GeoJsonSourceType::set_url("cluster_source", "http://url");
     test.map().edit_style(|style| style.apply(url)).unwrap();
     test.map().edit_style(|style| style.apply(Edit::AddLayer { layer: cluster_layer, before: None })).unwrap();
     test.0.run_loop.run_once();

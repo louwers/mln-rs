@@ -15,14 +15,16 @@ use mln_storage::{FileSource, FileSourceExt, Kind, RequestOrder, Resource, Respo
 use mln_style::layer::Layer;
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::{Circle, Hillshade, Line, Raster};
+use mln_style::source_type::SourceData;
 use mln_style::sources::custom_geometry_source::{self, Options as CustomGeometrySourceOptions};
 use mln_style::sources::custom_vector_source::{self, Options as CustomVectorSourceOptions, TileDataFormat};
-use mln_style::sources::geojson::{GeoJSONOptions, create_geojson_data, geojson_source};
+use mln_style::sources::geojson::{GeoJSONOptions, GeoJsonSourceType, create_geojson_data, geojson_source};
 use mln_style::sources::{
-    CustomGeometrySourceHandle, CustomVectorSourceHandle, raster_dem_source, raster_source, vector_source,
+    CustomGeometrySourceHandle, CustomVectorSourceHandle, VectorSourceType, raster_dem_source, raster_source,
+    vector_source,
 };
 use mln_style::{Edit, Source, Style};
-use mln_style_types::{ProjectionDefinition, SourceType};
+use mln_style_types::ProjectionDefinition;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
 use mln_util::geo::LatLng;
@@ -31,7 +33,7 @@ use mln_util::pool::{Pool, TaskGroup};
 use mln_util::queue::Queue;
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
-use mln_util::tileset::PartialTileset;
+use mln_util::tileset::{PartialTileset, Tileset};
 use parking_lot::Mutex;
 
 use crate::Registry;
@@ -176,6 +178,15 @@ fn edited(source: &Source, edit: Edit) -> Source {
     style.get_source(source.id()).unwrap().clone()
 }
 
+/// `source`, a vector source with a loaded tileset, with `tiles` as that
+/// tileset's tile URLs.
+fn with_tiles(source: &Source, tiles: &[&str]) -> Source {
+    let data = SourceData::<VectorSourceType>::recover(source).expect("a vector source");
+    let tileset = data.description.clone().expect("a loaded tileset");
+    let tileset = Tileset { tiles: tiles.iter().map(|&tile| tile.to_owned()).collect(), ..tileset };
+    source.with_data(SourceData::<VectorSourceType> { description: Some(tileset), ..data.clone() })
+}
+
 /// The three tiled source types the C++ tests repeat each case for.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Tiled {
@@ -216,11 +227,11 @@ impl Tiled {
         }
     }
 
-    fn source_type(self) -> SourceType {
+    fn type_name(self) -> &'static str {
         match self {
-            Tiled::Raster => SourceType::Raster,
-            Tiled::RasterDEM => SourceType::RasterDEM,
-            Tiled::Vector => SourceType::Vector,
+            Tiled::Raster => "raster",
+            Tiled::RasterDEM => "raster-dem",
+            Tiled::Vector => "vector",
         }
     }
 }
@@ -231,13 +242,14 @@ fn tiles_tileset() -> PartialTileset {
 
 /// The shared body of the `<Type>Tile<Case>` tests: a source of `kind`
 /// whose tiles get `tile_response`, a render source observed by `observer`,
-/// one update, then `test.run()`. Returns the render source's type.
+/// one update, then `test.run()`. Returns the name of the render source's
+/// type.
 fn run_tile_case(
     test: &SourceTest,
     kind: Tiled,
     file_source: Arc<StubFileSource>,
     observer: &StubStoreObserver,
-) -> SourceType {
+) -> &'static str {
     let layers = kind.layers();
     let source = crate::tests::ready(kind.source(None, tiles_tileset()));
 
@@ -254,7 +266,7 @@ fn run_tile_case(
     );
 
     test.run_observed(&mut store, observer);
-    render_source.base().style_source.get_type()
+    render_source.base().style_source.info().name
 }
 
 fn tile_empty(kind: Tiled) {
@@ -307,7 +319,7 @@ fn tile_fail(kind: Tiled) {
 
     // C++ checks `source_.baseImpl->type` in the callback; the port's
     // observer gets the source id, so the type is checked here.
-    assert_eq!(kind.source_type(), run_tile_case(&test, kind, file_source, &observer));
+    assert_eq!(kind.type_name(), run_tile_case(&test, kind, file_source, &observer));
     assert!(*failed.borrow());
 }
 
@@ -339,7 +351,7 @@ fn tile_corrupt(kind: Tiled) {
         }));
     }
 
-    assert_eq!(kind.source_type(), run_tile_case(&test, kind, file_source, &observer));
+    assert_eq!(kind.type_name(), run_tile_case(&test, kind, file_source, &observer));
     assert!(*failed.borrow());
 }
 
@@ -752,15 +764,15 @@ fn empty_tileset() {
     render_source.update(&mut store, source.clone(), &layers, true, true, &parameters);
     assert!(render_source.is_loaded(&store));
 
-    source = edited(&source, Edit::SetSourceTiles { id: "source".to_owned(), tiles: vec!["tiles".to_owned()] });
+    source = with_tiles(&source, &["tiles"]);
     render_source.update(&mut store, source.clone(), &layers, true, false, &parameters);
     assert!(!render_source.is_loaded(&store));
 
-    source = edited(&source, Edit::SetSourceTiles { id: "source".to_owned(), tiles: Vec::new() });
+    source = with_tiles(&source, &[]);
     render_source.update(&mut store, source.clone(), &layers, true, false, &parameters);
     assert!(render_source.is_loaded(&store));
 
-    source = edited(&source, Edit::SetSourceTiles { id: "source".to_owned(), tiles: vec!["tiles".to_owned()] });
+    source = with_tiles(&source, &["tiles"]);
     render_source.update(&mut store, source.clone(), &layers, true, false, &parameters);
     assert!(!render_source.is_loaded(&store));
 
@@ -800,7 +812,7 @@ fn geojson_source_tiles_after_data_reset() {
         .parse::<GeoJson>()
         .unwrap();
     let geojson_data = create_geojson_data(geojson, &GeoJSONOptions::default_options()).unwrap();
-    source = edited(&source, Edit::SetGeoJsonData { id: "source".to_owned(), data: Some(Arc::clone(&geojson_data)) });
+    source = edited(&source, GeoJsonSourceType::set_data("source", Some(Arc::clone(&geojson_data))));
     let mut store = test.store();
     let mut render_source = crate::tests::create_render_source(&source, &mut store);
 
@@ -814,15 +826,15 @@ fn geojson_source_tiles_after_data_reset() {
     // loaded == false, means that the source contains pending tiles.
     assert!(!render_source.is_loaded(&store));
 
-    source = edited(&source, Edit::SetGeoJsonData { id: "source".to_owned(), data: None });
+    source = edited(&source, GeoJsonSourceType::set_data("source", None));
     render_source.update(&mut store, source.clone(), &layers, true, true, &continuous);
     assert!(!render_source.is_loaded(&store)); // Tiles remain in continuous mode.
 
-    source = edited(&source, Edit::SetGeoJsonData { id: "source".to_owned(), data: Some(geojson_data) });
+    source = edited(&source, GeoJsonSourceType::set_data("source", Some(geojson_data)));
     render_source.update(&mut store, source.clone(), &layers, true, true, &continuous);
     assert!(!render_source.is_loaded(&store));
 
-    source = edited(&source, Edit::SetGeoJsonData { id: "source".to_owned(), data: None });
+    source = edited(&source, GeoJsonSourceType::set_data("source", None));
     render_source.update(&mut store, source.clone(), &layers, true, true, &test.tile_parameters(MapMode::Static));
     assert!(render_source.is_loaded(&store)); // Tiles are reset in static mode.
 }
@@ -865,7 +877,7 @@ impl SynchronousUpdateSource {
             .parse::<GeoJson>()
             .unwrap();
         let data = Some(create_geojson_data(geojson, &self.options).unwrap());
-        self.source = edited(&self.source, Edit::SetGeoJsonData { id: "source".to_owned(), data });
+        self.source = edited(&self.source, GeoJsonSourceType::set_data("source", data));
         let mut parameters = test.tile_parameters(MapMode::Continuous);
         parameters.is_update_synchronous = self.source.data().is_update_synchronous();
         self.render_source.update(&mut self.store, self.source.clone(), &self.layers, true, true, &parameters);
@@ -876,7 +888,7 @@ impl SynchronousUpdateSource {
 
 /// The edit that sets the synchronous update of the GeoJSON source "source".
 fn synchronous_update(synchronous: bool) -> Edit {
-    Edit::SetGeoJsonSynchronous { id: "source".to_owned(), synchronous }
+    GeoJsonSourceType::set_synchronous("source", synchronous)
 }
 
 // gtest: Source.GeoJSONSourceSynchronousUpdateOverrideAppliesToExistingTiles
@@ -922,7 +934,7 @@ fn geojson_source_slices_inline_while_a_background_slice_runs() {
         .parse::<GeoJson>()
         .unwrap();
     let data = create_geojson_data(geojson, &GeoJSONOptions::default_options()).unwrap();
-    source = edited(&source, Edit::SetGeoJsonData { id: "source".to_owned(), data: Some(data) });
+    source = edited(&source, GeoJsonSourceType::set_data("source", Some(data)));
     let mut store = crate::tests::pool_store(&TaskGroup::new(&pool));
     let mut render_source = crate::tests::create_render_source(&source, &mut store);
     let layers = circle_layers();
@@ -1171,10 +1183,29 @@ impl TurningSource {
             zoom: Some(zoom),
             ..Default::default()
         });
+        self.update_rendering(true);
+    }
+
+    /// Updates the source at this camera, as a frame does in which its
+    /// layers are visible, or (with `false`) hidden.
+    fn update_rendering(&mut self, needs_rendering: bool) {
         let file_source: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&self.file_source);
         let mut parameters = self.test.tile_parameters_with(MapMode::Continuous, Some(file_source));
         parameters.prefetch_zoom_delta = self.prefetch_zoom_delta;
-        self.render_source.update(&mut self.store, self.source.clone(), &self.layers, true, false, &parameters);
+        let (store, source, layers) = (&mut self.store, self.source.clone(), &self.layers);
+        self.render_source.update(store, source, layers, needs_rendering, false, &parameters);
+    }
+
+    /// How many tiles the source caches, each checked to wait behind the
+    /// view's: its jobs and its request.
+    fn cached_unwanted(&self) -> usize {
+        let unwanted = crate::tile::tile::TileLoadOrder::UNWANTED;
+        let cached: Vec<_> = self.pyramid().slots().filter(|slot| slot.place().is_cached()).collect();
+        for slot in &cached {
+            assert_eq!(slot.place().order(), unwanted, "tile {}'s jobs", slot.tile.id);
+            assert_eq!(slot.tile.load.request_order(), Some(unwanted.value()), "tile {}'s request", slot.tile.id);
+        }
+        cached.len()
     }
 
     /// Updates the source at this camera until every tile it asks for has
@@ -1202,7 +1233,7 @@ impl TurningSource {
 
     /// The tiles still loading that no rendered tile stands in for.
     fn bare_tiles(&self) -> Vec<OverscaledTileID> {
-        let rendered: Vec<CanonicalTileID> = self.pyramid().rendered().map(|(id, _)| id.canonical).collect();
+        let rendered: Vec<CanonicalTileID> = self.pyramid().rendered().map(|rendered| rendered.id.canonical).collect();
         self.pyramid()
             .cover()
             .filter(|tile| {
@@ -1216,6 +1247,30 @@ impl TurningSource {
     }
 }
 
+/// A tile that enters the cache, whether the view left it or the source's
+/// layers were hidden, waits behind the view's tiles: its jobs, and its
+/// request should it revalidate.
+#[test]
+fn cached_tiles_wait_behind_the_view() {
+    let mut panned = TurningSource::new("mercator", Size::new(512, 512), 0);
+    panned.load(0.0, 3.0);
+    assert_eq!(0, panned.cached_unwanted());
+    // The tiles the view left are held while their symbols fade out, for
+    // two placements.
+    for _ in 0..3 {
+        panned.update(120.0, 3.0);
+        panned.store.update_fading_tiles();
+    }
+    assert!(panned.cached_unwanted() > 0, "the tiles the view left");
+
+    let mut hidden = TurningSource::new("mercator", Size::new(512, 512), 0);
+    hidden.load(0.0, 3.0);
+    let cover = hidden.pyramid().cover().count();
+    hidden.update_rendering(false);
+    assert_eq!(0, hidden.pyramid().cover().count());
+    assert_eq!(cover, hidden.cached_unwanted(), "the hidden source's tiles");
+}
+
 /// A globe turned to its far side before any tile there has loaded draws the
 /// source's first level in their place.
 fn globe_far_side_falls_back_to_the_base_level(size: Size, min_zoom: u8, zoom: f64) {
@@ -1223,13 +1278,16 @@ fn globe_far_side_falls_back_to_the_base_level(size: Size, min_zoom: u8, zoom: f
     turning.prefetch_zoom_delta = 4;
     turning.load(60.0, zoom);
     assert_eq!(1 << (2 * min_zoom), turning.tiles_at(min_zoom).len(), "the whole first level is loaded");
-    assert!(turning.pyramid().rendered().all(|(id, _)| id.canonical.z > min_zoom), "the loaded view draws none of it");
+    assert!(
+        turning.pyramid().rendered().all(|rendered| rendered.id.canonical.z > min_zoom),
+        "the loaded view draws none of it"
+    );
 
     turning.update(240.0, zoom);
     let loading = turning.pyramid().cover().filter(|tile| !tile.is_renderable()).count();
     assert!(loading > 0, "the far side has tiles to load");
     assert_eq!(Vec::<OverscaledTileID>::new(), turning.bare_tiles());
-    assert!(turning.pyramid().rendered().any(|(id, _)| id.canonical.z == min_zoom));
+    assert!(turning.pyramid().rendered().any(|rendered| rendered.id.canonical.z == min_zoom));
 }
 
 #[test]
@@ -1248,7 +1306,7 @@ fn globe_far_side_falls_back_to_zoom_one() {
 fn globe_fallback_crosses_the_antimeridian() {
     let mut turning = TurningSource::new("vertical-perspective", Size::new(512, 512), 0);
     turning.load(90.0, 2.0);
-    assert!(turning.pyramid().rendered().all(|(id, _)| id.canonical.z == 2));
+    assert!(turning.pyramid().rendered().all(|rendered| rendered.id.canonical.z == 2));
 
     turning.update(150.0, 2.0);
     let wraps = |renderable: bool| -> Vec<i16> {
@@ -1263,7 +1321,7 @@ fn globe_fallback_crosses_the_antimeridian() {
     };
     assert_eq!((vec![0], vec![1]), (wraps(true), wraps(false)));
     assert_eq!(Vec::<OverscaledTileID>::new(), turning.bare_tiles());
-    assert_eq!(1, turning.pyramid().rendered().filter(|(id, _)| id.canonical.z == 0).count());
+    assert_eq!(1, turning.pyramid().rendered().filter(|rendered| rendered.id.canonical.z == 0).count());
 }
 
 /// While the globe blends into Mercator, a tile's flat half is placed by its
@@ -1284,7 +1342,7 @@ fn globe_fallback_keeps_to_its_wrap_while_blending_into_mercator() {
     let bare = turning.bare_tiles();
     assert_ne!(Vec::<OverscaledTileID>::new(), bare);
     assert!(bare.iter().all(|id| id.wrap == 1 && id.canonical.z == 2));
-    assert_eq!(0, turning.pyramid().rendered().filter(|(id, _)| id.canonical.z == 0).count());
+    assert_eq!(0, turning.pyramid().rendered().filter(|rendered| rendered.id.canonical.z == 0).count());
 }
 
 /// The first level costs a source that starts at zoom 1 the tiles of it that
@@ -1352,24 +1410,13 @@ fn globe_base_level_is_not_kept_where_it_is_large_or_out_of_reach() {
     assert_eq!(4, out_of_reach.tiles_at(1).len());
 }
 
-/// Port-only: a 16 by 16 DEM image whose pixels differ from their
-/// neighbours and from those of other `seed`s.
-fn dem_png(seed: u32) -> mln_storage::Data {
-    let mut image = mln_util::image::PremultipliedImage::new(Size::new(16, 16));
-    for (i, pixel) in image.data.as_chunks_mut::<4>().0.iter_mut().enumerate() {
-        let i = i as u32;
-        *pixel = [((seed * 37 + i) % 256) as u8, (i * 7 % 256) as u8, ((i * 3 + seed) % 256) as u8, 255];
-    }
-    Arc::new(mln_image::encode_png(&image))
-}
-
 /// Port-only: raster-dem tiles that meet at the antimeridian, in two copies
 /// of the world, backfill each other's borders as neighbours in one copy
 /// do.
 #[test]
 fn raster_dem_borders_across_a_world_wrap() {
+    use crate::tests::tile::dem_png;
     use crate::tile::contents::Contents;
-    use crate::tile::dem::DEMTileNeighbors;
 
     let mut test = SourceTest::new();
     test.transform.jump_to(&CameraOptions {
@@ -1397,7 +1444,7 @@ fn raster_dem_borders_across_a_world_wrap() {
         render_source.update(&mut store, source.clone(), &layers, true, relayout, &parameters);
         relayout = false;
         let key = render_source.tiles().expect("the source's tiles");
-        if store.source(key).is_some_and(|source| !source.tiles.is_empty()) && render_source.is_loaded(&store) {
+        if store.source(key).is_some_and(|source| source.slots().next().is_some()) && render_source.is_loaded(&store) {
             break;
         }
         assert!(mln_util::time::Instant::now() < deadline, "the tiles didn't load");
@@ -1409,12 +1456,12 @@ fn raster_dem_borders_across_a_world_wrap() {
     let source = render_source.tiles().and_then(|key| store.source(key)).expect("the source's tiles");
     let tile = |x| {
         source
-            .tiles
-            .values()
+            .slots()
+            .map(|slot| &slot.tile)
             .find(|tile| tile.id.canonical == CanonicalTileID::new(2, x, 1))
             .unwrap_or_else(|| panic!("no tile 2/{x}/1"))
     };
-    let dem = |tile: &crate::tile::tile::Tile| match tile.contents.as_deref() {
+    let dem = |tile: &crate::tile::tile::Tile| match tile.contents() {
         Some(Contents::Dem(bucket)) => Arc::clone(bucket),
         _ => panic!("a DEM"),
     };
@@ -1422,8 +1469,6 @@ fn raster_dem_borders_across_a_world_wrap() {
     // east of it.
     let (east, west) = (tile(3), tile(0));
     assert_eq!(west.id.wrap, east.id.wrap + 1);
-    assert_eq!(east.dem_neighbors & DEMTileNeighbors::RIGHT, DEMTileNeighbors::RIGHT);
-    assert_eq!(west.dem_neighbors & DEMTileNeighbors::LEFT, DEMTileNeighbors::LEFT);
     let (east, west) = (dem(east), dem(west));
     let (east, west) = (east.get_dem_data(), west.get_dem_data());
     for y in 0..16 {

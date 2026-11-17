@@ -5,7 +5,6 @@
 use std::sync::Arc;
 
 use mln_storage::Data;
-use mln_style_types::SourceType;
 use mln_util::constants;
 use mln_util::range::Range;
 
@@ -78,7 +77,9 @@ impl StyleSourceType for CustomGeometrySourceType {
         name: "custom-geometry",
         layer_kind: SourceKind::Geometry,
         from_json: false,
-        type_: SourceType::CustomVector,
+        round_zoom: false,
+        overscale: true,
+        prefetch: true,
     };
 
     type Options = CustomGeometrySourceOptions;
@@ -118,7 +119,9 @@ impl StyleSourceType for CustomVectorSourceType {
         name: "custom-vector",
         layer_kind: SourceKind::Geometry,
         from_json: false,
-        type_: SourceType::CustomMVTVector,
+        round_zoom: false,
+        overscale: true,
+        prefetch: true,
     };
 
     type Options = CustomVectorSourceOptions;

@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use feature::Value;
 use mln_conversion::{Convertible, Error};
+use mln_util::serialization::shared;
 
 use super::util::{parse_json, style_of};
 use crate::StyleRegistry;
@@ -16,6 +17,7 @@ use crate::expression::Functions;
 use crate::layer::Layer;
 use crate::layer_type::ErasedLayerStyle;
 use crate::layers::FillExtrusion;
+use crate::serialization::SharedLayer;
 
 fn parse(json: &serde_json::Value) -> Layer {
     let mut error = Error::default();
@@ -24,13 +26,13 @@ fn parse(json: &serde_json::Value) -> Layer {
 }
 
 #[derive(mln_wire::Wire)]
-struct Crossing(#[wire(with = "crate::serialization::shared_layer")] Arc<dyn ErasedLayerStyle>);
+struct Crossing(#[wire(with = "shared::ByKey::<SharedLayer>")] Arc<dyn ErasedLayerStyle>);
 
 /// The layer's serialized value, after checking that its style data crosses
 /// to one that encodes the same.
 fn round_trip(layer: &Layer) -> Value {
     let encoded = mln_wire::to_vec(&Crossing(Arc::clone(layer.style()))).unwrap();
-    let decoded: Crossing = crate::decode_with(&StyleRegistry::with_builtins(), || mln_wire::from_slice(&encoded))
+    let decoded: Crossing = mln_wire::from_slice_in(&encoded, &*StyleRegistry::with_builtins())
         .unwrap_or_else(|e| panic!("{:?} doesn't cross: {e}", layer.serialize()));
     assert_eq!(mln_wire::to_vec(&decoded).unwrap(), encoded, "{:?}", layer.serialize());
     layer.serialize()
@@ -236,9 +238,8 @@ fn expressions_cross_as_data() {
             .parse_expression(&Convertible::from(&value), None)
             .unwrap_or_else(|| panic!("{json}: {}", context.get_combined_errors()));
         let encoded = mln_wire::to_vec(&expression).unwrap();
-        let decoded: crate::expression::Expr =
-            crate::decode_with(&StyleRegistry::with_builtins(), || mln_wire::from_slice(&encoded))
-                .unwrap_or_else(|e| panic!("{json} doesn't cross: {e}"));
+        let decoded: crate::expression::Expr = mln_wire::from_slice_in(&encoded, &*StyleRegistry::with_builtins())
+            .unwrap_or_else(|e| panic!("{json} doesn't cross: {e}"));
         assert!(decoded == expression, "{json}");
         assert_eq!(decoded.dependencies(), expression.dependencies(), "{json}");
         assert_eq!(decoded.serialize(), expression.serialize(), "{json}");

@@ -10,12 +10,11 @@
 //!
 //! A compound expression crosses the worker codec as its function's name and
 //! its overload's position, which the reading side resolves against the
-//! [`Functions`] of [`decode_with`].
+//! [`Functions`] in the reader's context (`mln_wire::Context`).
 
 pub(crate) mod builtin;
 
 use std::borrow::Cow;
-use std::cell::Cell;
 use std::sync::{Arc, LazyLock};
 
 use mln_util::Color;
@@ -246,39 +245,25 @@ impl Functions {
     }
 }
 
-thread_local! {
-    /// The functions that compound expressions read on this thread resolve
-    /// against, while a `decode_with` runs.
-    static DECODING: Cell<Option<Arc<Functions>>> = const { Cell::new(None) };
-}
-
-/// Runs `f`, in which reading an [`Expr`] from the worker codec resolves
-/// compound expressions against `functions`. Calls nest: the innermost
-/// one's functions apply, and the outer one's again after it returns.
-pub fn decode_with<R>(functions: &Arc<Functions>, f: impl FnOnce() -> R) -> R {
-    struct Restore(Option<Arc<Functions>>);
-
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            DECODING.set(self.0.take());
-        }
+/// A context in which reading an [`Expr`] from the worker codec resolves
+/// compound expressions against these functions.
+impl mln_wire::Context for &Functions {
+    fn provide<'a>(&'a mut self, request: &mut mln_wire::Request<'a>) {
+        request.give::<Functions>(self);
     }
-
-    let _restore = Restore(DECODING.replace(Some(Arc::clone(functions))));
-    f()
 }
 
-/// The overload `index` of `name` among the functions of the enclosing
-/// [`decode_with`].
-pub(crate) fn decoding_overload(name: &str, index: u8) -> Result<Arc<Overload>, &'static str> {
-    let functions = DECODING.take();
-    let overload = match &functions {
-        None => Err("an expression function outside of a decoding session"),
+/// The overload `index` of `name` among the functions in `r`'s context.
+pub(crate) fn decoding_overload(
+    r: &mut mln_wire::Reader<'_>,
+    name: &str,
+    index: u8,
+) -> Result<Arc<Overload>, &'static str> {
+    match r.context::<Functions>() {
+        None => Err("an expression function without functions to resolve it against"),
         Some(functions) => match functions.get(name) {
             None => Err("unknown expression function"),
             Some(def) => def.overloads.get(usize::from(index)).cloned().ok_or("no such overload of a function"),
         },
-    };
-    DECODING.set(functions);
-    overload
+    }
 }

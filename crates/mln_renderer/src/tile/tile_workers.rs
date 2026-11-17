@@ -266,6 +266,11 @@ impl Jobs {
         Some((lane, false))
     }
 
+    /// Forgets which lane got data `key`, which a worker there lacked.
+    pub(crate) fn forget(&mut self, key: DataKey) {
+        self.hints.remove(&key);
+    }
+
     /// The least loaded lane with room, for a job that carries all it
     /// reads; `None` if no lane has room.
     pub(crate) fn lane(&self) -> Option<Lane> {

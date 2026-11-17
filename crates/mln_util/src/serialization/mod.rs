@@ -9,9 +9,9 @@
 //! - `sorted`: hash maps and sets in key order, so that a value always
 //!   encodes to the same bytes.
 //!
-//! The first two only change how a value is written while a codec has a
-//! session open for the message; otherwise the value is written in full, in
-//! the message.
+//! The first two only change how a value is written when the message is
+//! written with their tables in its context (`mln_wire::Context`); otherwise
+//! the value is written in full, in the message.
 
 pub mod payload;
 pub mod shared;

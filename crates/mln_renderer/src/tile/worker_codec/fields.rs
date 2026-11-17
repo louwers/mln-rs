@@ -5,11 +5,12 @@
 
 use std::sync::Arc;
 
-use mln_util::serialization::shared;
+use mln_style::serialization::{SharedExpression, SharedLayer};
+use mln_util::serialization::shared::{self, ErasedTable, Role, Table};
 use mln_vec_map::VecSet;
-use mln_wire::{Reader, Wire, Writer};
+use mln_wire::{Context, Reader, Request, Wire, Writer};
 
-use super::decoding_layer_type;
+use crate::Registry;
 use crate::bucket::BucketPtr;
 use crate::geometry::feature_index::FeatureIndex;
 use crate::layer_type::ErasedEvaluatedLayer;
@@ -18,16 +19,13 @@ use crate::tile::contents::LayoutResult;
 use crate::tile::job::SourceStyle;
 
 /// The `shared::Kind` of layers' evaluated values: their type's name, then
-/// the values, which the reading side reads as the type that its registry
-/// has by the name.
+/// the values, which the reading side reads as the type that the registry
+/// in its context has by the name.
 pub(crate) struct SharedEvaluatedLayer;
 
 impl shared::Kind for SharedEvaluatedLayer {
     type Value = dyn ErasedEvaluatedLayer;
-    const NAME: &'static str = "evaluated layer";
-}
 
-impl shared::WireKind for SharedEvaluatedLayer {
     fn write(layer: &dyn ErasedEvaluatedLayer, w: &mut Writer) {
         mln_wire::write_str(w, layer.style().info().name);
         layer.write(w);
@@ -35,84 +33,42 @@ impl shared::WireKind for SharedEvaluatedLayer {
 
     fn read(r: &mut Reader<'_>) -> Option<Arc<dyn ErasedEvaluatedLayer>> {
         let name = mln_wire::read_str(r)?;
-        match decoding_layer_type(name) {
+        let layer_type = match r.context::<Registry>() {
+            None => Err("a layer without a registry to resolve its type against"),
+            Some(registry) => registry.layer_type(name).ok_or("unknown layer type"),
+        };
+        match layer_type {
             Ok(layer_type) => layer_type.read_evaluated(r),
             Err(message) => r.fail(message),
         }
     }
 }
 
-/// `#[wire(with)]` for a layer's evaluated values, by key.
-pub(crate) mod evaluated_layer {
-    use super::{Arc, ErasedEvaluatedLayer, Reader, SharedEvaluatedLayer, Writer, shared};
-
-    pub(crate) fn write(layer: &Arc<dyn ErasedEvaluatedLayer>, w: &mut Writer) {
-        shared::write::<SharedEvaluatedLayer>(layer, w);
-    }
-
-    pub(crate) fn read(r: &mut Reader<'_>) -> Option<Arc<dyn ErasedEvaluatedLayer>> {
-        shared::read::<SharedEvaluatedLayer>(r)
-    }
-}
-
-/// `#[wire(with)]` for a source style's layers, each by key.
-pub(crate) mod layers {
-    use super::{Arc, ErasedEvaluatedLayer, Reader, Writer, evaluated_layer};
-
-    pub(crate) fn write(layers: &[Arc<dyn ErasedEvaluatedLayer>], w: &mut Writer) {
-        mln_wire::Wire::write(&layers.len(), w);
-        for layer in layers {
-            evaluated_layer::write(layer, w);
-        }
-    }
-
-    pub(crate) fn read(r: &mut Reader<'_>) -> Option<Vec<Arc<dyn ErasedEvaluatedLayer>>> {
-        let len = r.length()?;
-        let mut layers = Vec::with_capacity(len.min(r.rest().len()));
-        for _ in 0..len {
-            layers.push(evaluated_layer::read(r)?);
-        }
-        Some(layers)
-    }
-}
-
-/// The `shared::Kind` of a source's style: its version, its layers by key,
-/// its global state and font faces.
+/// The `shared::Kind` of a source's style: its version, its layers each by
+/// key, its global state and font faces.
 pub(crate) struct SharedSourceStyle;
 
 impl shared::Kind for SharedSourceStyle {
     type Value = SourceStyle;
-    const NAME: &'static str = "source style";
-}
 
-impl shared::WireKind for SharedSourceStyle {
     fn write(style: &SourceStyle, w: &mut Writer) {
         style.version.write(w);
-        layers::write(&style.layers, w);
+        style.layers.len().write(w);
+        for layer in &style.layers {
+            shared::write::<SharedEvaluatedLayer>(layer, w);
+        }
         style.global_state.write(w);
         style.font_faces.write(w);
     }
 
     fn read(r: &mut Reader<'_>) -> Option<Arc<SourceStyle>> {
-        Some(Arc::new(SourceStyle {
-            version: u64::read(r)?,
-            layers: layers::read(r)?,
-            global_state: Wire::read(r)?,
-            font_faces: Wire::read(r)?,
-        }))
-    }
-}
-
-/// `#[wire(with)]` for a job's source style.
-pub(crate) mod source_style {
-    use super::{Arc, Reader, SharedSourceStyle, SourceStyle, Writer, shared};
-
-    pub(crate) fn write(style: &Arc<SourceStyle>, w: &mut Writer) {
-        shared::write::<SharedSourceStyle>(style, w);
-    }
-
-    pub(crate) fn read(r: &mut Reader<'_>) -> Option<Arc<SourceStyle>> {
-        shared::read::<SharedSourceStyle>(r)
+        let version = u64::read(r)?;
+        let len = r.length()?;
+        let mut layers = Vec::with_capacity(len.min(r.rest().len()));
+        for _ in 0..len {
+            layers.push(shared::read::<SharedEvaluatedLayer>(r)?);
+        }
+        Some(Arc::new(SourceStyle { version, layers, global_state: Wire::read(r)?, font_faces: Wire::read(r)? }))
     }
 }
 
@@ -121,10 +77,7 @@ pub(crate) struct SharedAvailableImages;
 
 impl shared::Kind for SharedAvailableImages {
     type Value = VecSet<String>;
-    const NAME: &'static str = "available images";
-}
 
-impl shared::WireKind for SharedAvailableImages {
     fn write(images: &VecSet<String>, w: &mut Writer) {
         images.write(w);
     }
@@ -134,16 +87,67 @@ impl shared::WireKind for SharedAvailableImages {
     }
 }
 
-/// `#[wire(with)]` for a job's available images.
-pub(crate) mod available_images {
-    use super::{Arc, Reader, SharedAvailableImages, VecSet, Writer, shared};
+/// One side's tables of the values that cross once per worker instance,
+/// one per kind. As a context, it gives out each table.
+pub(crate) struct Tables {
+    source_styles: Table<SharedSourceStyle>,
+    available_images: Table<SharedAvailableImages>,
+    layers: Table<SharedLayer>,
+    evaluated_layers: Table<SharedEvaluatedLayer>,
+    expressions: Table<SharedExpression>,
+}
 
-    pub(crate) fn write(images: &Arc<VecSet<String>>, w: &mut Writer) {
-        shared::write::<SharedAvailableImages>(images, w);
+impl Tables {
+    pub(crate) fn new(role: Role) -> Self {
+        Tables {
+            source_styles: Table::new(role),
+            available_images: Table::new(role),
+            layers: Table::new(role),
+            evaluated_layers: Table::new(role),
+            expressions: Table::new(role),
+        }
     }
 
-    pub(crate) fn read(r: &mut Reader<'_>) -> Option<Arc<VecSet<String>>> {
-        shared::read::<SharedAvailableImages>(r)
+    /// The tables, in the order the lists of keys to forget are in.
+    fn all(&mut self) -> [&mut dyn ErasedTable; 5] {
+        [
+            &mut self.source_styles,
+            &mut self.available_images,
+            &mut self.layers,
+            &mut self.evaluated_layers,
+            &mut self.expressions,
+        ]
+    }
+
+    /// Keeps the keys given while writing a message if it was `sent`, and
+    /// takes them back otherwise, so that a message that wasn't sent
+    /// defines nothing.
+    pub(crate) fn settle(&mut self, sent: bool) {
+        for table in self.all() {
+            if sent { table.commit() } else { table.rollback() }
+        }
+    }
+
+    /// The keys of the values that died on this side, by table, for the
+    /// other side to forget.
+    pub(crate) fn forget_dead(&mut self) -> Vec<Vec<u64>> {
+        self.all().into_iter().map(ErasedTable::forget_dead).collect()
+    }
+
+    /// Drops the copies of the values the other side lists as dead
+    /// (`forget_dead`).
+    pub(crate) fn forget(&mut self, dead: &[Vec<u64>]) {
+        for (table, keys) in self.all().into_iter().zip(dead) {
+            table.forget(keys);
+        }
+    }
+}
+
+impl Context for Tables {
+    fn provide<'a>(&'a mut self, request: &mut Request<'a>) {
+        for table in self.all() {
+            table.provide(request);
+        }
     }
 }
 
@@ -176,7 +180,7 @@ impl LayoutResult {
                 layer_id.write(w);
                 // The layers that render a bucket cross back by key: the map
                 // side gets the properties it sent.
-                evaluated_layer::write(properties, w);
+                shared::write::<SharedEvaluatedLayer>(properties, w);
             }
             // The reader reads the bucket as its layers' type's.
             bucket.write_wire(w);
@@ -185,7 +189,7 @@ impl LayoutResult {
 }
 
 /// The encoding of a layout's buckets with the layers that render them, as
-/// `LayoutResult` writes them outside a codec's session.
+/// `LayoutResult` writes them without the tables in the context.
 #[cfg(test)]
 pub(super) fn encode_buckets(result: &LayoutResult) -> Vec<u8> {
     let mut w = Writer::new();
@@ -209,7 +213,7 @@ impl Wire for LayoutResult {
             let len = r.length()?;
             let mut layers = Vec::with_capacity(len.min(r.rest().len()));
             for _ in 0..len {
-                layers.push((String::read(r)?, evaluated_layer::read(r)?));
+                layers.push((String::read(r)?, shared::read::<SharedEvaluatedLayer>(r)?));
             }
             let Some((_, leader)) = layers.first() else {
                 return r.fail("a bucket that no layer renders");

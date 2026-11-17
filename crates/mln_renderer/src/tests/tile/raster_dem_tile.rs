@@ -9,7 +9,6 @@ use crate::buckets::hillshade_bucket::HillshadeBucket;
 use crate::geometry::dem_data::DEMData;
 use crate::tests::OneTile;
 use crate::tile::contents::Contents;
-use crate::tile::dem::DEMTileNeighbors;
 use crate::tile::job::JobResult;
 use crate::tile::tile::TileKind;
 use crate::tile::tile_workers::InlineWorkers;
@@ -22,7 +21,7 @@ fn tiles(test: &RasterTileTest) -> OneTile {
 
 /// The bucket of the DEM tile `id` shows.
 fn dem(tiles: &OneTile, id: &OverscaledTileID) -> Option<std::sync::Arc<HillshadeBucket>> {
-    match tiles.tile_at(id).contents.as_deref() {
+    match tiles.tile_at(id).contents() {
         Some(Contents::Dem(bucket)) => Some(std::sync::Arc::clone(bucket)),
         _ => None,
     }
@@ -33,10 +32,10 @@ fn dem(tiles: &OneTile, id: &OverscaledTileID) -> Option<std::sync::Arc<Hillshad
 fn set_error() {
     let test = RasterTileTest::new();
     let mut tiles = tiles(&test);
-    tiles.with(|info, tile, ctx| info.load_error(tile, ctx, Error::native("test")));
+    tiles.with(|tile| tile.fail(Error::native("test")));
     let tile = tiles.tile();
     assert!(!tile.is_renderable());
-    assert!(tile.loaded);
+    assert!(tile.is_settled());
     assert!(tile.is_complete());
 }
 
@@ -45,10 +44,10 @@ fn set_error() {
 fn on_error() {
     let test = RasterTileTest::new();
     let mut tiles = tiles(&test);
-    tiles.with(|info, tile, ctx| info.job_error(tile, ctx, Error::native("test")));
+    tiles.with(|tile| tile.fail(Error::native("test")));
     let tile = tiles.tile();
     assert!(!tile.is_renderable());
-    assert!(tile.loaded);
+    assert!(tile.is_settled());
     assert!(tile.is_complete());
 }
 
@@ -58,24 +57,24 @@ fn on_parsed() {
     let test = RasterTileTest::new();
     let mut tiles = tiles(&test);
     let dem = DEMData::new(&PremultipliedImage::new(Size::new(16, 16)), RasterEncoding::Mapbox).expect("DEMData");
-    tiles.with(|info, tile, ctx| info.apply_now(tile, ctx, JobResult::Dem(dem)));
+    tiles.with(|tile| tile.apply_decode_now(JobResult::Dem(dem)));
     assert!(tiles.tile().is_renderable());
-    assert!(tiles.tile().loaded);
+    assert!(tiles.tile().is_settled());
     assert!(tiles.tile().is_complete());
 
     // Make sure that once we've had a renderable tile and then receive
     // erroneous data, we retain the previously rendered data and keep the tile
     // renderable.
-    tiles.with(|info, tile, ctx| info.load_error(tile, ctx, Error::native("Connection offline")));
+    tiles.with(|tile| tile.fail(Error::native("Connection offline")));
     assert!(tiles.tile().is_renderable());
-    assert!(tiles.tile().loaded);
+    assert!(tiles.tile().is_settled());
     assert!(tiles.tile().is_complete());
 
     // Then simulate a parsing failure and make sure that we keep it renderable
     // in this situation as well.
-    tiles.with(|info, tile, ctx| info.job_error(tile, ctx, Error::native("Parse error")));
+    tiles.with(|tile| tile.fail(Error::native("Parse error")));
     assert!(tiles.tile().is_renderable());
-    assert!(tiles.tile().loaded);
+    assert!(tiles.tile().is_settled());
     assert!(tiles.tile().is_complete());
 }
 
@@ -88,7 +87,7 @@ fn on_parsed_empty() {
     let id = tiles.id;
     tiles.set_image(&id, None);
     assert!(tiles.tile().is_renderable());
-    assert!(tiles.tile().loaded);
+    assert!(tiles.tile().is_settled());
     assert!(tiles.tile().is_complete());
 }
 
@@ -137,9 +136,6 @@ fn decode_and_backfill_through_the_codec() {
         assert_eq!((dem.dim, dem.stride, dem.encoding), (16, 18, RasterEncoding::Mapbox));
     }
 
-    let neighbors = tiles.tile_at(&ids[0]).dem_neighbors;
-    assert_eq!(neighbors & DEMTileNeighbors::RIGHT, DEMTileNeighbors::RIGHT);
-    assert_eq!(tiles.tile_at(&ids[1]).dem_neighbors & DEMTileNeighbors::LEFT, DEMTileNeighbors::LEFT);
     let (left, right) = (dem(&tiles, &ids[0]).unwrap(), dem(&tiles, &ids[1]).unwrap());
     for y in 0..16 {
         assert_eq!(left.get_dem_data().get(16, y), right.get_dem_data().get(0, y));

@@ -23,6 +23,7 @@ use mln_util::error::Error;
 use mln_util::hash::HashMap;
 use mln_util::image::PremultipliedImage;
 use mln_util::serialization::payload::shared_bytes;
+use mln_util::serialization::shared;
 use mln_util::tileset::RasterEncoding;
 use mln_util::time::Instant;
 use mln_vec_map::VecSet;
@@ -32,7 +33,7 @@ use crate::geometry::dem_data::DEMData;
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layout::tile_layout::{Dependencies, Discovered, LayoutInput, LayoutParams, Resolved, build, discover};
 use crate::tile::contents::LayoutResult;
-use crate::tile::worker_codec::fields;
+use crate::tile::worker_codec::fields::{SharedAvailableImages, SharedSourceStyle};
 
 /// A source, as the renderer numbers it. Never reused within a renderer, so
 /// a late reply can't match a source that was removed and added again.
@@ -92,12 +93,12 @@ pub(crate) enum Job {
 pub(crate) struct LayoutJob {
     /// The source's style at one version. Crosses once per worker, then by
     /// key; unchanged layers keep their keys.
-    #[wire(with = "fields::source_style")]
+    #[wire(with = "shared::ByKey::<SharedSourceStyle>")]
     pub(crate) style: Arc<SourceStyle>,
     /// The images that exist, which `image` expressions branch on during
     /// discovery. Crosses by key like the style, but isn't part of its
     /// version: adding an image lays out only the tiles that name it.
-    #[wire(with = "fields::available_images")]
+    #[wire(with = "shared::ByKey::<SharedAvailableImages>")]
     pub(crate) available_images: Arc<VecSet<String>>,
     pub(crate) data: DataInput,
     pub(crate) params: LayoutParams,

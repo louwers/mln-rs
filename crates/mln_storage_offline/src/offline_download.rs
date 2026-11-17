@@ -24,7 +24,6 @@ use mln_storage::{FileSource, Kind, LoadingMethod, Request, Resource, Response};
 use mln_style::StyleRegistry;
 use mln_style::parser::Parser;
 use mln_style::source_type::OfflineResources;
-use mln_style_types::SourceType;
 use mln_text::glyph::{
     GLYPH_RANGES_PER_FONT_STACK, GLYPHS_PER_GLYPH_RANGE, GlyphID, NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK,
     get_glyph_range,
@@ -44,15 +43,15 @@ const K_MARK_BATCH_SIZE: usize = 200;
 
 fn covering_zoom_range(
     definition: &OfflineRegionDefinition,
-    type_: SourceType,
+    round_zoom: bool,
     tile_size: u16,
     zoom_range: Range<u8>,
 ) -> Range<u8> {
     // `std::max<double>` / `std::min<double>`.
-    let a = f64::from(covering_zoom_level(definition.min_zoom(), type_, tile_size));
+    let a = f64::from(covering_zoom_level(definition.min_zoom(), round_zoom, tile_size));
     let b = f64::from(zoom_range.min);
     let min_z = if a < b { b } else { a };
-    let a = f64::from(covering_zoom_level(definition.max_zoom(), type_, tile_size));
+    let a = f64::from(covering_zoom_level(definition.max_zoom(), round_zoom, tile_size));
     let b = f64::from(zoom_range.max);
     let max_z = if b < a { b } else { a };
 
@@ -65,12 +64,12 @@ fn covering_zoom_range(
 
 fn tile_cover(
     definition: &OfflineRegionDefinition,
-    type_: SourceType,
+    round_zoom: bool,
     tile_size: u16,
     zoom_range: Range<u8>,
     mut f: impl FnMut(CanonicalTileID),
 ) {
-    let clamped_zoom_range = covering_zoom_range(definition, type_, tile_size, zoom_range);
+    let clamped_zoom_range = covering_zoom_range(definition, round_zoom, tile_size, zoom_range);
 
     for z in clamped_zoom_range.min..=clamped_zoom_range.max {
         let cover = match definition {
@@ -88,8 +87,8 @@ fn tile_cover(
     }
 }
 
-fn tile_count(definition: &OfflineRegionDefinition, type_: SourceType, tile_size: u16, zoom_range: Range<u8>) -> u64 {
-    let clamped_zoom_range = covering_zoom_range(definition, type_, tile_size, zoom_range);
+fn tile_count(definition: &OfflineRegionDefinition, round_zoom: bool, tile_size: u16, zoom_range: Range<u8>) -> u64 {
+    let clamped_zoom_range = covering_zoom_range(definition, round_zoom, tile_size, zoom_range);
 
     let mut result: u64 = 0;
     for z in clamped_zoom_range.min..=clamped_zoom_range.max {
@@ -333,7 +332,7 @@ impl OfflineDownload {
 
         for source in &parser.sources {
             let record = source.clone();
-            let type_ = record.get_type();
+            let round_zoom = record.info().round_zoom;
             let (tileset, tile_size) = match record.data().offline() {
                 OfflineResources::None => continue,
                 OfflineResources::Source { .. } | OfflineResources::Image { .. } => {
@@ -358,7 +357,7 @@ impl OfflineDownload {
                 }
             };
             if let Some(tileset) = tileset.filter(|tileset| !tileset.tiles.is_empty()) {
-                let count = tile_count(&self.definition, type_, tile_size, tileset.zoom_range);
+                let count = tile_count(&self.definition, round_zoom, tile_size, tileset.zoom_range);
                 result.required_tile_count += count;
                 result.required_resource_count += count;
             }
@@ -405,7 +404,7 @@ impl OfflineDownload {
                 if tileset.tiles.is_empty() {
                     return Err("the TileJSON has no tile URLs".to_owned());
                 }
-                self.queue_tiles(source.get_type(), *tile_size, &tileset);
+                self.queue_tiles(source.info().round_zoom, *tile_size, &tileset);
                 if self.required_source_urls.remove(url) && self.required_source_urls.is_empty() {
                     self.status.required_resource_count_is_precise = true;
                 }
@@ -428,7 +427,7 @@ impl OfflineDownload {
             match record.data().offline() {
                 OfflineResources::None => {}
                 OfflineResources::Tiles { tileset, tile_size } => {
-                    self.queue_tiles(record.get_type(), tile_size, &tileset);
+                    self.queue_tiles(record.info().round_zoom, tile_size, &tileset);
                 }
                 OfflineResources::TileJson { url, tile_size } => {
                     self.status.required_resource_count_is_precise = false;
@@ -560,14 +559,14 @@ impl OfflineDownload {
         self.resources_remaining.push_front(resource);
     }
 
-    fn queue_tiles(&mut self, type_: SourceType, tile_size: u16, tileset: &Tileset) {
+    fn queue_tiles(&mut self, round_zoom: bool, tile_size: u16, tileset: &Tileset) {
         // A source without tile URLs has no tiles to download.
         let Some(url_template) = tileset.tiles.first() else {
             return;
         };
         let (status, remaining) = (&mut self.status, &mut self.resources_remaining);
         let pixel_ratio = self.definition.pixel_ratio();
-        tile_cover(&self.definition, type_, tile_size, tileset.zoom_range, |tile: CanonicalTileID| {
+        tile_cover(&self.definition, round_zoom, tile_size, tileset.zoom_range, |tile: CanonicalTileID| {
             status.required_resource_count += 1;
             status.required_tile_count += 1;
 

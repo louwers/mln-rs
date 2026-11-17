@@ -233,7 +233,7 @@ fn set_mlt_tile_data() {
     }
 
     let options = SourceQueryOptions { source_layers: Some(vec!["water".to_owned()]), filter: None };
-    let Some(Contents::Geometry(contents)) = tiles.tile().contents.as_deref() else {
+    let Some(Contents::Geometry(contents)) = tiles.tile().contents() else {
         panic!("a layout");
     };
     let mut result = Vec::new();

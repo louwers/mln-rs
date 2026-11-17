@@ -22,7 +22,7 @@ use crate::filter::Filter;
 use crate::layer::FontStack;
 use crate::property_table::{self, OwnerSlot, Properties, PropertyTable, PropertyVisitor, SetPropertyError};
 use crate::property_value::PropertyValue;
-use crate::serialization::shared_expression;
+use crate::serialization::optional_expression;
 use crate::style_property::StyleProperty;
 
 /// Where a layer type's layers get their data.
@@ -155,7 +155,7 @@ pub struct LayerBase {
     // Backs an expression-valued "visibility" layout value; the evaluated
     // result is kept in `visibility` and re-evaluated by the style whenever
     // the global state changes.
-    #[wire(with = "shared_expression::option")]
+    #[wire(with = "optional_expression")]
     pub(crate) visibility_expression: Option<Arc<Expr>>,
 
     pub id: String,

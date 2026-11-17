@@ -505,9 +505,9 @@ impl RenderSource for RenderTileSource {
         // layers: feature state
         source.coalesce_feature_state();
         let mut tiles: Vec<RenderTile> = Vec::with_capacity(source.rendered_count());
-        for (id, tile) in source.rendered() {
-            let mut render_tile = RenderTile::new(*id, tile);
-            render_tile.prepare(tile, &pool, parameters);
+        for rendered in source.rendered() {
+            let mut render_tile = RenderTile::new(*rendered.id, rendered.tile, rendered.hold_for_fade);
+            render_tile.prepare(rendered.tile, rendered.needs_rendering, &pool, parameters);
             tiles.push(render_tile);
         }
         self.render_tiles = Rc::new(tiles);

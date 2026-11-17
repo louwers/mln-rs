@@ -5,8 +5,7 @@
 //! source has ([`SourceCommon`]) and its type's [`SourceData<T>`], shared as
 //! an `Arc<dyn ErasedSource>`. A [`StyleRegistry`](crate::StyleRegistry)
 //! holds the types as `&'static dyn ErasedStyleSourceType`, by name. An
-//! erased value gets back to its type only through [`SourceData::recover`]
-//! and [`SourceData::recover_arc`].
+//! erased value gets back to its type only through [`SourceData::recover`].
 //!
 //! A source's description is what loading its options finds, such as the
 //! tileset of a TileJSON. The type says how it loads ([`StyleSourceType::load`]
@@ -22,7 +21,6 @@ use std::time::Duration;
 
 use mln_conversion::{Convertible, Error};
 use mln_storage::{Data, Resource};
-use mln_style_types::SourceType;
 use mln_util::constants;
 use mln_util::logging::{Event, Log};
 use mln_util::pool::Respond;
@@ -44,9 +42,19 @@ pub struct SourceTypeInfo {
     pub layer_kind: SourceKind,
     /// Whether style JSON can create a source of the type.
     pub from_json: bool,
-    /// The type as [`SourceType`] names it, which the tile cover, the tile
-    /// pyramid and the offline tile count read.
-    pub type_: SourceType,
+    /// Whether the tiles that cover a view are of the zoom level nearest the
+    /// view's, as for raster tiles, rather than the level below it. A
+    /// render in tile mode then draws every tile of the cover, not only
+    /// the first.
+    pub round_zoom: bool,
+    /// Whether a view past the highest zoom level that has tiles asks for
+    /// overscaled tiles of its own zoom, rather than drawing that level's
+    /// tiles larger.
+    pub overscale: bool,
+    /// Whether, in continuous mode, the map first loads tiles a few zoom
+    /// levels below the view's, and keeps the globe's lowest level loaded,
+    /// so that something shows while the view's tiles load.
+    pub prefetch: bool,
 }
 
 /// What a source reports about itself, whichever its type. A member that
@@ -243,14 +251,6 @@ impl<T: StyleSourceType> SourceData<T> {
         let any: &dyn Any = &*source.data;
         any.downcast_ref()
     }
-
-    /// `source`'s data as a `T` source's, sharing its allocation, or `None`
-    /// for another type's.
-    #[must_use]
-    pub fn recover_arc(source: &Source) -> Option<Arc<Self>> {
-        let any: Arc<dyn Any + Send + Sync> = Arc::<dyn ErasedSource>::clone(&source.data);
-        any.downcast().ok()
-    }
 }
 
 /// A source's data, whichever its type.
@@ -419,15 +419,6 @@ impl Source {
         Some(self.with_erased_data(self.data.with_description(description)?))
     }
 
-    /// This source with its data changed by `f`, or `None` if it isn't a
-    /// `T` source.
-    #[must_use]
-    pub fn map_data<T: StyleSourceType>(&self, f: impl FnOnce(&mut SourceData<T>)) -> Option<Self> {
-        let mut data = SourceData::<T>::recover(self)?.clone();
-        f(&mut data);
-        Some(self.with_data(data))
-    }
-
     /// This source with `common` in place of its common members. Logs a
     /// warning when its overscale factor caps its prefetch delta.
     #[must_use]
@@ -454,11 +445,6 @@ impl Source {
     #[must_use]
     pub fn source_type(&self) -> &'static dyn ErasedStyleSourceType {
         self.data.source_type()
-    }
-
-    #[must_use]
-    pub fn get_type(&self) -> SourceType {
-        self.info().type_
     }
 
     #[must_use]

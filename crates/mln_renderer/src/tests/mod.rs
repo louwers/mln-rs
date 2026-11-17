@@ -141,9 +141,11 @@ impl OneTile {
         let (source, ctx) = tiles.store.source_mut(key).expect("the source");
         source.info.origin = Some(origin);
         for id in ids {
-            let mut tile = source.info.new_tile(*id, params).expect("a tile");
-            source.info.start_load(&mut tile, ctx);
-            source.tiles.insert(*id, tile);
+            let tile = source.info.new_tile(*id, params).expect("a tile");
+            source.insert(tile);
+            source.update(id, ctx, |tile| {
+                tile.start_load();
+            });
         }
         tiles
     }
@@ -154,15 +156,14 @@ impl OneTile {
         id: &mln_tile_id::OverscaledTileID,
         necessity: crate::tile::tile::TileNecessity,
     ) {
-        self.with_at(id, |info, tile, ctx| info.set_necessity(tile, ctx, necessity));
+        self.with_at(id, |tile| tile.set_necessity(necessity));
     }
 
     /// Moves tile `from` to id `to`, as a wrap jump does.
     pub(crate) fn rekey(&mut self, from: &mln_tile_id::OverscaledTileID, to: mln_tile_id::OverscaledTileID) {
-        let (source, _) = self.store.source_mut(self.key).expect("the source");
-        let mut tile = source.tiles.remove(from).expect("the tile");
-        tile.id = to;
-        source.tiles.insert(to, tile);
+        let (source, ctx) = self.store.source_mut(self.key).expect("the source");
+        assert!(source.tile(from).is_some(), "the tile");
+        source.rekey(from, to, ctx);
         if self.id == *from {
             self.id = to;
         }
@@ -184,14 +185,13 @@ impl OneTile {
         let params = self.params();
         let (source, _) = self.store.source_mut(self.key).expect("the source");
         let generation = source.info.next();
-        let tile = crate::tile::tile::Tile::new(
-            id,
-            source.info.kind,
-            generation,
-            crate::tile::loading::TileLoad::GeoJson,
-            params,
-        );
-        source.tiles.insert(id, tile);
+        let load = crate::tile::loading::Load {
+            necessity: crate::tile::tile::TileNecessity::Optional,
+            origin: crate::tile::loading::OriginLoad::GeoJson { load: None },
+        };
+        let pipeline = crate::tile::pipeline::Pipeline::new(source.info.kind, generation, params);
+        let tile = crate::tile::tile::Tile::new(id, load, pipeline);
+        source.insert(tile);
     }
 
     pub(crate) fn tile(&self) -> &crate::tile::tile::Tile {
@@ -200,76 +200,73 @@ impl OneTile {
 
     /// The layout parameters of the tile.
     pub(crate) fn tile_params(&self) -> crate::layout::tile_layout::LayoutParams {
-        self.tile().params
+        self.layout().params
+    }
+
+    /// The layout of the tile, a geometry tile.
+    pub(crate) fn layout(&self) -> &crate::tile::pipeline::Layout {
+        self.tile().pipeline.layout().expect("a geometry tile")
     }
 
     pub(crate) fn tile_at(&self, id: &mln_tile_id::OverscaledTileID) -> &crate::tile::tile::Tile {
-        self.store.source(self.key).and_then(|source| source.tiles.get(id)).expect("the tile")
+        self.store.source(self.key).and_then(|source| source.tile(id)).expect("the tile")
     }
 
-    /// Calls `f` with the tile, its source and the store.
-    pub(crate) fn with<R>(
-        &mut self,
-        f: impl FnOnce(
-            &mut crate::tile::store::SourceInfo,
-            &mut crate::tile::tile::Tile,
-            &mut crate::tile::store::StoreContext,
-        ) -> R,
-    ) -> R {
+    /// Changes the tile through `f`.
+    pub(crate) fn with<R>(&mut self, f: impl FnOnce(&mut crate::tile::tile_mut::TileMut<'_>) -> R) -> R {
         let id = self.id;
         self.with_at(&id, f)
     }
 
-    /// Calls `f` with tile `id`, its source and the store.
+    /// Changes tile `id` through `f`.
     pub(crate) fn with_at<R>(
         &mut self,
         id: &mln_tile_id::OverscaledTileID,
-        f: impl FnOnce(
-            &mut crate::tile::store::SourceInfo,
-            &mut crate::tile::tile::Tile,
-            &mut crate::tile::store::StoreContext,
-        ) -> R,
+        f: impl FnOnce(&mut crate::tile::tile_mut::TileMut<'_>) -> R,
     ) -> R {
         let (source, ctx) = self.store.source_mut(self.key).expect("the source");
-        let tile = source.tiles.get_mut(id).expect("the tile");
-        f(&mut source.info, tile, ctx)
+        source.update(id, ctx, f).expect("the tile")
     }
 
     pub(crate) fn set_style(&mut self, style: &std::sync::Arc<crate::tile::job::SourceStyle>) {
-        self.with(|info, tile, ctx| info.set_style(tile, ctx, style));
+        let params = self.params();
+        self.with(|tile| tile.set_style(style, params.pixel_ratio, params.subdivision_granularity));
     }
 
     /// Gives a geometry tile `data`, as a load of its own.
     pub(crate) fn set_data(&mut self, data: Option<mln_tile::TileData>) {
-        self.with(|info, tile, ctx| {
-            let load = info.next();
-            info.set_data(tile, ctx, load, crate::tile::tile::TileInput::Geometry { data, missing: false }, false);
-        });
+        self.with(|tile| tile.take_input(crate::tile::tile::TileInput::Geometry { data, missing: false }));
     }
 
     /// Gives raster tile `id` the image `data`, as a load of its own.
     pub(crate) fn set_image(&mut self, id: &mln_tile_id::OverscaledTileID, data: Option<mln_storage::Data>) {
-        self.with_at(id, |info, tile, ctx| {
-            let load = info.next();
-            info.set_data(tile, ctx, load, crate::tile::tile::TileInput::Image(data), false);
-        });
+        self.with_at(id, |tile| tile.take_input(crate::tile::tile::TileInput::Image { data, missing: false }));
     }
 
     /// Gives tile `id` no data, as a load that finds the tileset has no
     /// tile there.
     pub(crate) fn set_missing(&mut self, id: &mln_tile_id::OverscaledTileID) {
-        self.with_at(id, |info, tile, ctx| {
-            let load = info.next();
-            let input = match tile.kind {
-                crate::tile::tile::TileKind::Geometry => {
-                    crate::tile::tile::TileInput::Geometry { data: None, missing: true }
-                }
-                crate::tile::tile::TileKind::Raster | crate::tile::tile::TileKind::Dem(_) => {
-                    crate::tile::tile::TileInput::Image(None)
-                }
-            };
-            info.set_data(tile, ctx, load, input, true);
-        });
+        let input = match self.store.source(self.key).expect("the source").info.kind {
+            crate::tile::tile::TileKind::Geometry => {
+                crate::tile::tile::TileInput::Geometry { data: None, missing: true }
+            }
+            crate::tile::tile::TileKind::Raster | crate::tile::tile::TileKind::Dem(_) => {
+                crate::tile::tile::TileInput::Image { data: None, missing: true }
+            }
+        };
+        self.with_at(id, |tile| tile.take_input(input));
+    }
+
+    /// What the store reported its tiles went through since the last call.
+    pub(crate) fn actions(&mut self) -> Vec<crate::tile::tile::TileOperation> {
+        self.store
+            .take_events()
+            .into_iter()
+            .filter_map(|event| match event {
+                crate::tile::store::StoreEvent::Action { op, .. } => Some(op),
+                crate::tile::store::StoreEvent::Changed | crate::tile::store::StoreEvent::Error { .. } => None,
+            })
+            .collect()
     }
 
     /// The errors the store reported since the last call.
@@ -309,7 +306,7 @@ impl OneTile {
 
     /// Whether the tile shows a layout.
     pub(crate) fn shows_layout(&self) -> bool {
-        self.tile().contents.as_deref().and_then(crate::tile::contents::Contents::geometry).is_some()
+        self.tile().contents().and_then(crate::tile::contents::Contents::geometry).is_some()
     }
 
     /// Lets go of the tile, as its source does when it leaves the cache.
@@ -321,9 +318,7 @@ impl OneTile {
     /// Lets go of tile `id`.
     pub(crate) fn drop_tile_at(&mut self, id: &mln_tile_id::OverscaledTileID) {
         let (source, ctx) = self.store.source_mut(self.key).expect("the source");
-        if let Some(tile) = source.tiles.remove(id) {
-            source.info.drop_tile(tile, ctx);
-        }
+        source.release(id, ctx);
     }
 }
 

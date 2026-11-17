@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::serialization::payload::Payload;
-use mln_wire::{Reader, Wire, Writer};
+use mln_wire::{Context, Reader, Wire, Writer};
 
 use crate::tile::job::{JobId, JobTimes, SourceKey, TileKey};
 
@@ -80,9 +80,9 @@ pub(crate) fn read_reply_header(bytes: &[u8]) -> Option<(JobId, JobTimes, &[u8])
     Some((id, JobTimes { discover: time(discover), build: time(build) }, rest))
 }
 
-/// Appends `value`, encoded.
-pub(crate) fn append<T: Wire>(bytes: &mut Vec<u8>, value: &T) -> Result<(), String> {
-    let mut w = Writer::from_vec(std::mem::take(bytes));
+/// Appends `value`, encoded in `context`.
+pub(crate) fn append<T: Wire>(bytes: &mut Vec<u8>, value: &T, mut context: impl Context) -> Result<(), String> {
+    let mut w = Writer::from_vec(std::mem::take(bytes)).with_context(&mut context);
     value.write(&mut w);
     *bytes = w.finish().map_err(|e| format!("can't encode: {e}"))?;
     Ok(())
@@ -98,10 +98,12 @@ pub(crate) fn take<T: Wire>(bytes: &[u8]) -> Result<(T, &[u8]), String> {
     }
 }
 
-/// Decodes a value that fills `bytes`.
-pub(crate) fn decode<T: Wire>(bytes: &[u8]) -> Result<T, String> {
-    match take(bytes)? {
-        (value, []) => Ok(value),
-        (_, rest) => Err(format!("malformed: {} bytes after the end", rest.len())),
+/// Decodes a value that fills `bytes`, in `context`.
+pub(crate) fn decode<T: Wire>(bytes: &[u8], mut context: impl Context) -> Result<T, String> {
+    let mut r = Reader::new(bytes).with_context(&mut context);
+    match T::read(&mut r) {
+        Some(_) if !r.rest().is_empty() => Err(format!("malformed: {} bytes after the end", r.rest().len())),
+        Some(value) => Ok(value),
+        None => Err(format!("malformed: {}", r.error())),
     }
 }

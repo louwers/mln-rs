@@ -120,14 +120,14 @@ fn issue_7648() {
     tiles.settle(&[root()]);
     assert!(tiles.changes() >= 1);
 
-    tiles.with(|info, tile, ctx| info.load_geojson(tile, ctx, &data, false));
+    tiles.with(|tile| tile.load_geojson(&data, false));
     // Once present, the bucket should never "disappear", which would cause
     // flickering.
     while !tiles.tile().is_complete() {
-        assert!(tiles.with(|_, tile, _| tile.layer_properties_updated(&layer_properties)));
+        assert!(tiles.with(|tile| tile.parts().1.layer_properties_updated(&layer_properties)));
         tiles.update();
     }
-    assert!(tiles.with(|_, tile, _| tile.layer_properties_updated(&layer_properties)));
+    assert!(tiles.with(|tile| tile.parts().1.layer_properties_updated(&layer_properties)));
     assert!(tiles.changes() >= 1);
 }
 
@@ -144,20 +144,20 @@ fn issue_9927() {
     tiles.settle(&[root()]);
 
     assert!(tiles.tile().is_renderable());
-    assert!(tiles.with(|_, tile, _| tile.layer_properties_updated(&layer_properties)));
+    assert!(tiles.with(|tile| tile.parts().1.layer_properties_updated(&layer_properties)));
 
     // Make sure that once we've had a renderable tile and then receive
     // erroneous data, we retain the previously rendered data and keep the
     // tile renderable.
-    tiles.with(|info, tile, ctx| info.load_error(tile, ctx, Error::native("Connection offline")));
+    tiles.with(|tile| tile.fail(Error::native("Connection offline")));
     assert!(tiles.tile().is_renderable());
-    assert!(tiles.with(|_, tile, _| tile.layer_properties_updated(&layer_properties)));
+    assert!(tiles.with(|tile| tile.parts().1.layer_properties_updated(&layer_properties)));
 
     // Then simulate a parsing failure and make sure that we keep it
     // renderable in this situation as well.
-    tiles.with(|info, tile, ctx| info.job_error(tile, ctx, Error::native("Parse error")));
+    tiles.with(|tile| tile.fail(Error::native("Parse error")));
     assert!(tiles.tile().is_renderable());
-    assert!(tiles.with(|_, tile, _| tile.layer_properties_updated(&layer_properties)));
+    assert!(tiles.with(|tile| tile.parts().1.layer_properties_updated(&layer_properties)));
 }
 
 /// A circle layer as its render layer evaluates it, which records what the
@@ -179,17 +179,18 @@ fn update_through_the_codec() {
     // Two tiles, so both instances get one.
     let ids = [OverscaledTileID::from_zxy(1, 0, 0), OverscaledTileID::from_zxy(1, 1, 0)];
     let mut tiles = test.tiles(point_data(), &ids, workers, false);
+    let (style, params) = (style(std::slice::from_ref(&layer_properties)), tiles.params());
     for id in &ids {
-        tiles.with_at(id, |info, tile, ctx| info.set_style(tile, ctx, &style(std::slice::from_ref(&layer_properties))));
+        tiles.with_at(id, |tile| tile.set_style(&style, params.pixel_ratio, params.subdivision_granularity));
     }
     tiles.settle(&ids);
     for id in &ids {
         assert!(tiles.tile_at(id).is_renderable());
-        assert!(tiles.with_at(id, |_, tile, _| tile.layer_properties_updated(&layer_properties)));
+        assert!(tiles.with_at(id, |tile| tile.parts().1.layer_properties_updated(&layer_properties)));
     }
 
     let data = point_data();
-    tiles.with_at(&ids[0], |info, tile, ctx| info.load_geojson(tile, ctx, &data, false));
+    tiles.with_at(&ids[0], |tile| tile.load_geojson(&data, false));
     assert!(!tiles.tile_at(&ids[0]).is_complete());
     tiles.settle(&ids[..1]);
     assert!(tiles.tile_at(&ids[0]).is_renderable());

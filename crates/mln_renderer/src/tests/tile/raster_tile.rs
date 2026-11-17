@@ -7,6 +7,7 @@ use mln_util::size::Size;
 
 use super::{RasterTileTest, png};
 use crate::tests::OneTile;
+use crate::tests::tile_jobs_test::Manual;
 use crate::tile::contents::Contents;
 use crate::tile::job::JobResult;
 use crate::tile::tile::TileKind;
@@ -18,7 +19,7 @@ fn tiles(test: &RasterTileTest) -> OneTile {
 
 /// The size of the image tile `id` shows.
 fn image_size(tiles: &OneTile, id: &OverscaledTileID) -> Option<Size> {
-    match tiles.tile_at(id).contents.as_deref() {
+    match tiles.tile_at(id).contents() {
         Some(Contents::Raster(bucket)) => bucket.image.as_ref().map(|image| image.size),
         _ => None,
     }
@@ -29,10 +30,10 @@ fn image_size(tiles: &OneTile, id: &OverscaledTileID) -> Option<Size> {
 fn set_error() {
     let test = RasterTileTest::new();
     let mut tiles = tiles(&test);
-    tiles.with(|info, tile, ctx| info.load_error(tile, ctx, Error::native("test")));
+    tiles.with(|tile| tile.fail(Error::native("test")));
     let tile = tiles.tile();
     assert!(!tile.is_renderable());
-    assert!(tile.loaded);
+    assert!(tile.is_settled());
     assert!(tile.is_complete());
 }
 
@@ -41,10 +42,10 @@ fn set_error() {
 fn on_error() {
     let test = RasterTileTest::new();
     let mut tiles = tiles(&test);
-    tiles.with(|info, tile, ctx| info.job_error(tile, ctx, Error::native("test")));
+    tiles.with(|tile| tile.fail(Error::native("test")));
     let tile = tiles.tile();
     assert!(!tile.is_renderable());
-    assert!(tile.loaded);
+    assert!(tile.is_settled());
     assert!(tile.is_complete());
 }
 
@@ -53,25 +54,24 @@ fn on_error() {
 fn on_parsed() {
     let test = RasterTileTest::new();
     let mut tiles = tiles(&test);
-    tiles
-        .with(|info, tile, ctx| info.apply_now(tile, ctx, JobResult::Raster(PremultipliedImage::new(Size::new(0, 0)))));
+    tiles.with(|tile| tile.apply_decode_now(JobResult::Raster(PremultipliedImage::new(Size::new(0, 0)))));
     assert!(tiles.tile().is_renderable());
-    assert!(tiles.tile().loaded);
+    assert!(tiles.tile().is_settled());
     assert!(tiles.tile().is_complete());
 
     // Make sure that once we've had a renderable tile and then receive
     // erroneous data, we retain the previously rendered data and keep the tile
     // renderable.
-    tiles.with(|info, tile, ctx| info.load_error(tile, ctx, Error::native("Connection offline")));
+    tiles.with(|tile| tile.fail(Error::native("Connection offline")));
     assert!(tiles.tile().is_renderable());
-    assert!(tiles.tile().loaded);
+    assert!(tiles.tile().is_settled());
     assert!(tiles.tile().is_complete());
 
     // Then simulate a parsing failure and make sure that we keep it renderable
     // in this situation as well.
-    tiles.with(|info, tile, ctx| info.job_error(tile, ctx, Error::native("Parse error")));
+    tiles.with(|tile| tile.fail(Error::native("Parse error")));
     assert!(tiles.tile().is_renderable());
-    assert!(tiles.tile().loaded);
+    assert!(tiles.tile().is_settled());
     assert!(tiles.tile().is_complete());
 }
 
@@ -84,7 +84,7 @@ fn on_parsed_empty() {
     let id = tiles.id;
     tiles.set_image(&id, None);
     assert!(tiles.tile().is_renderable());
-    assert!(tiles.tile().loaded);
+    assert!(tiles.tile().is_settled());
     assert!(tiles.tile().is_complete());
 }
 
@@ -105,12 +105,12 @@ fn missing_and_empty() {
     tiles.set_missing(&id);
     tiles.settle(&[id]);
     assert!(!tiles.tile().is_renderable());
-    assert!(tiles.tile().contents.is_none());
+    assert!(tiles.tile().contents().is_none());
 
     tiles.set_image(&id, None);
     tiles.settle(&[id]);
     assert!(tiles.tile().is_renderable());
-    assert!(matches!(tiles.tile().contents.as_deref(), Some(Contents::Empty)));
+    assert!(matches!(tiles.tile().contents(), Some(Contents::Empty)));
 }
 
 // Port-only: raster tiles whose jobs run in worker instances on other threads get their images
@@ -137,4 +137,34 @@ fn decode_through_the_codec() {
     assert_eq!(tiles.errors().len(), 1);
     // It keeps the image it had.
     assert!(tiles.tile_at(&ids[0]).is_renderable());
+}
+
+// Port-only: a load without an image while the tile decodes shows nothing at once, and the decode
+// in flight stays the tile's one job: an image that comes before it replies decodes after.
+#[test]
+fn an_empty_load_during_a_decode_keeps_one_decode_in_flight() {
+    let test = RasterTileTest::new();
+    let manual = Manual::default();
+    let mut tiles = test.tiles(TileKind::Raster, OverscaledTileID::from_zxy(0, 0, 0), Box::new(manual.clone()));
+    let id = tiles.id;
+    tiles.set_image(&id, Some(png(16, 16)));
+    tiles.update();
+    assert_eq!(manual.submitted(), 1);
+    let decode = manual.take();
+
+    tiles.set_image(&id, None);
+    assert!(matches!(tiles.tile().contents(), Some(Contents::Empty)));
+    assert!(tiles.tile().is_complete());
+    tiles.set_image(&id, Some(png(8, 8)));
+    tiles.update();
+    assert_eq!(manual.submitted(), 1, "one decode in flight");
+
+    manual.reply(InlineWorkers::run(decode));
+    tiles.update();
+    assert!(matches!(tiles.tile().contents(), Some(Contents::Empty)), "the stale decode isn't shown");
+    assert_eq!(manual.submitted(), 2);
+    manual.run();
+    tiles.update();
+    assert_eq!(image_size(&tiles, &id), Some(Size::new(8, 8)));
+    assert!(tiles.tile().is_complete());
 }

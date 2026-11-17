@@ -7,8 +7,7 @@ use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Response};
 use mln_style::source_type::SourceData;
 use mln_style::sources::geojson::{GeoJSONOptions, GeoJsonSourceType, geojson_data, geojson_source};
-use mln_style::sources::tileset::tileset_parts;
-use mln_style::sources::{ImageSourceType, image_source, vector_source as tileset_vector_source};
+use mln_style::sources::{ImageSourceType, VectorSourceType, image_source, vector_source as tileset_vector_source};
 use mln_style::{Edit, Layer};
 use mln_tile_id::CanonicalTileID;
 use mln_util::ErrorKind;
@@ -170,7 +169,7 @@ fn feature_count(map: &Map, id: &str) -> usize {
 }
 
 fn set_geojson_url(map: &mut Map, id: &str, url: &str) {
-    let edit = Edit::SetGeoJsonUrl { id: id.to_owned(), url: url.to_owned() };
+    let edit = GeoJsonSourceType::set_url(id, url);
     map.edit_style(|style| style.apply(edit)).unwrap();
 }
 
@@ -225,8 +224,8 @@ fn an_inline_tileset_describes_its_source_at_once() {
     let mut map = map_over(&file_source);
     let tileset = PartialTileset { tiles: Some(vec!["tiles".to_owned()]), ..PartialTileset::default() };
     map.add_source(tileset_vector_source("source", None, tileset)).unwrap();
-    let (_, loaded) = tileset_parts(map.source("source").unwrap()).unwrap();
-    assert_eq!(vec!["tiles".to_owned()], loaded.expect("a tileset").tiles);
+    let data = SourceData::<VectorSourceType>::recover(map.source("source").unwrap()).unwrap();
+    assert_eq!(vec!["tiles".to_owned()], data.description.as_ref().expect("a tileset").tiles);
     assert!(map.style_loaded());
 }
 
@@ -266,7 +265,7 @@ fn geojson_source_data_replaces_building_url_data() {
     let source = map.source("source").unwrap();
     let builder = SourceData::<GeoJsonSourceType>::recover(source).unwrap().options.data_builder();
     let data = builder.build(serde_json::from_slice(&geojson_points(2)).unwrap()).unwrap();
-    let edit = Edit::SetGeoJsonData { id: "source".to_owned(), data: Some(data) };
+    let edit = GeoJsonSourceType::set_data("source", Some(data));
     map.edit_style(|style| style.apply(edit)).unwrap();
     assert!(map.style_loaded());
 
@@ -316,7 +315,7 @@ fn a_geojson_build_keeps_the_synchronous_update_override() {
     map.process_events();
     map.drain_events();
 
-    let edit = Edit::SetGeoJsonSynchronous { id: "source".to_owned(), synchronous: false };
+    let edit = GeoJsonSourceType::set_synchronous("source", false);
     map.edit_style(|style| style.apply(edit)).unwrap();
     assert_eq!(["source"], *source_changes(&map.drain_events()));
 
@@ -337,7 +336,7 @@ fn image_source_image_update() {
     });
     let mut map = map_over(&file_source);
     map.add_source(image_source("source", [LatLng::default(); 4])).unwrap();
-    let edit = Edit::SetImageSourceUrl { id: "source".to_owned(), url: "http://url".to_owned() };
+    let edit = ImageSourceType::set_url("source", "http://url");
     map.edit_style(|style| style.apply(edit)).unwrap();
     run_until(&mut map, &run_loop, Map::style_loaded);
     let image =
@@ -347,7 +346,7 @@ fn image_source_image_update() {
 
     let mut rgba = PremultipliedImage::new(Size::new(2, 1));
     rgba.data.copy_from_slice(&[255, 254, 253, 0, 255, 254, 253, 0]);
-    let edit = Edit::SetImageSourceImage { id: "source".to_owned(), image: rgba };
+    let edit = ImageSourceType::set_image("source", rgba);
     map.edit_style(|style| style.apply(edit)).unwrap();
     assert_eq!(["source"], *source_changes(&map.drain_events()));
     assert_eq!(Size::new(2, 1), image(&map).unwrap().size);

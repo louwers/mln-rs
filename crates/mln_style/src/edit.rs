@@ -5,8 +5,7 @@ use std::sync::Arc;
 
 use feature::Value;
 use mln_style_types::VisibilityType;
-use mln_util::LatLng;
-use mln_util::image::PremultipliedImage;
+use mln_util::error::Error;
 
 use crate::expression::GlobalStateMap;
 use crate::filter::Filter;
@@ -15,8 +14,9 @@ use crate::layer::Layer;
 use crate::light::Light;
 use crate::projection::Projection;
 use crate::sky::Sky;
-use crate::source_type::{Described, ErasedDescription, Source, SourceCommon, SourceInstance};
-use crate::sources::geojson::GeoJSONData;
+use crate::source_type::{
+    Described, ErasedDescription, Source, SourceCommon, SourceData, SourceInstance, StyleSourceType,
+};
 use crate::style::Style;
 use crate::transition_options::TransitionOptions;
 
@@ -104,48 +104,41 @@ pub enum Edit {
         id: String,
         common: SourceCommon,
     },
-    /// Sets the tile URLs of a vector, raster or raster-dem source's loaded
-    /// tileset; a source whose tileset hasn't loaded keeps none.
-    SetSourceTiles {
+    /// Changes the data of the source `id` as `update` says. A source type
+    /// makes the updates its sources take, such as
+    /// [`GeoJsonSourceType::set_url`](crate::sources::GeoJsonSourceType::set_url);
+    /// [`Edit::update_source`] makes one from a change to a source's data.
+    UpdateSource {
         id: String,
-        tiles: Vec<String>,
+        update: SourceUpdate,
     },
-    /// Makes a GeoJSON source load its data from `url`. Its data stays
-    /// until the URL's arrives.
-    SetGeoJsonUrl {
-        id: String,
-        url: String,
-    },
-    /// Replaces a GeoJSON source's data, which it no longer loads from a
-    /// URL.
-    SetGeoJsonData {
-        id: String,
-        data: Option<Arc<dyn GeoJSONData>>,
-    },
-    /// Sets whether a GeoJSON source's tiles lay out in the call that asks
-    /// for them, in place of its `synchronous_update` option.
-    SetGeoJsonSynchronous {
-        id: String,
-        synchronous: bool,
-    },
-    /// Makes an image source load its image from `url`. Its image stays
-    /// until the URL's arrives.
-    SetImageSourceUrl {
-        id: String,
-        url: String,
-    },
-    /// Replaces an image source's image, which it no longer loads from a
-    /// URL.
-    SetImageSourceImage {
-        id: String,
-        image: PremultipliedImage,
-    },
-    /// Moves an image source's corners: top left, top right, bottom right,
-    /// bottom left.
-    SetImageSourceCoordinates {
-        id: String,
-        coordinates: [LatLng; 4],
-    },
+}
+
+/// What [`Edit::UpdateSource`] does to a source: it returns the source with
+/// new data, made by [`Source::with_data`], or `None` if it changes nothing,
+/// or fails, as for a source of a type it doesn't update.
+pub type SourceUpdate = Box<dyn FnOnce(&Source) -> Result<Option<Source>, Error> + Send>;
+
+impl Edit {
+    /// The edit that changes the data of the source `id`, a `T` source:
+    /// `change` changes a copy of the data and returns whether it changed
+    /// anything. It fails with `InvalidArgument` for a source of another
+    /// type, which isn't `kind`, as in `source "water" is not a GeoJSON
+    /// source`.
+    pub fn update_source<T: StyleSourceType>(
+        id: impl Into<String>,
+        kind: &'static str,
+        change: impl FnOnce(&mut SourceData<T>) -> bool + Send + 'static,
+    ) -> Edit {
+        let update = move |source: &Source| {
+            let Some(data) = SourceData::<T>::recover(source) else {
+                return Err(Error::invalid_argument(format!("source \"{}\" is not {kind}", source.id())));
+            };
+            let mut data = data.clone();
+            Ok(change(&mut data).then(|| source.with_data(data)))
+        };
+        Edit::UpdateSource { id: id.into(), update: Box::new(update) }
+    }
 }
 
 /// The parts of a style that differ between two versions.

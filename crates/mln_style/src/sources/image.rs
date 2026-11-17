@@ -5,11 +5,11 @@ use std::sync::Arc;
 
 use mln_image::decoder;
 use mln_storage::{Data, Resource};
-use mln_style_types::SourceType;
 use mln_util::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::pool::Respond;
 
+use crate::Edit;
 use crate::conversion::{Convertible, Error};
 use crate::expression::Functions;
 use crate::layer_type::SourceKind;
@@ -30,8 +30,15 @@ pub struct ImageSourceOptions {
 }
 
 impl StyleSourceType for ImageSourceType {
-    const INFO: SourceTypeInfo =
-        SourceTypeInfo { name: "image", layer_kind: SourceKind::Raster, from_json: true, type_: SourceType::Image };
+    // An image source has no tiles, so the tile members say nothing.
+    const INFO: SourceTypeInfo = SourceTypeInfo {
+        name: "image",
+        layer_kind: SourceKind::Raster,
+        from_json: true,
+        round_zoom: false,
+        overscale: false,
+        prefetch: false,
+    };
 
     const DESCRIBES_IN_BACKGROUND: bool = true;
 
@@ -75,6 +82,39 @@ impl StyleSourceType for ImageSourceType {
             Some(url) => OfflineResources::Image { url: url.clone() },
             None => OfflineResources::None,
         }
+    }
+}
+
+impl ImageSourceType {
+    /// The edit that makes the image source `id` load its image from `url`.
+    /// Its image stays until the URL's arrives.
+    pub fn set_url(id: impl Into<String>, url: impl Into<String>) -> Edit {
+        let url = url.into();
+        Edit::update_source::<Self>(id, "an image source", |data| {
+            data.options.url = Some(url);
+            data.load += 1;
+            true
+        })
+    }
+
+    /// The edit that replaces the image of the image source `id`, which no
+    /// longer loads it from a URL.
+    pub fn set_image(id: impl Into<String>, image: PremultipliedImage) -> Edit {
+        Edit::update_source::<Self>(id, "an image source", |data| {
+            data.options.url = None;
+            data.description = Some(Arc::new(image));
+            data.load += 1;
+            true
+        })
+    }
+
+    /// The edit that moves the corners of the image source `id`: top left,
+    /// top right, bottom right, bottom left.
+    pub fn set_coordinates(id: impl Into<String>, coordinates: [LatLng; 4]) -> Edit {
+        Edit::update_source::<Self>(id, "an image source", move |data| {
+            data.options.coordinates = coordinates;
+            true
+        })
     }
 }
 

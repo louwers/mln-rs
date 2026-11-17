@@ -110,8 +110,6 @@
 "crates/mln_text/src/browser_glyph_rasterizer.rs" = 1
 "crates/mln_util/src/host_bytes.rs" = 3
 "crates/mln_util/src/logging.rs" = 2
-"crates/mln_util/src/serialization/payload.rs" = 6
-"crates/mln_util/src/serialization/shared.rs" = 3
 "crates/mln_vulkan/src/borrowed_target.rs" = 15
 "crates/mln_vulkan/src/exported_target.rs" = 8
 "crates/mln_vulkan/src/renderer_backend.rs" = 4

@@ -77,7 +77,7 @@ pub(crate) fn set_geojson(map: &mut Map, id: &str, geojson: geojson::GeoJson) {
     let source = map.source(id).expect("the source");
     let builder = SourceData::<GeoJsonSourceType>::recover(source).expect("a GeoJSON source").options.data_builder();
     let data = builder.build(geojson).expect("GeoJSON data");
-    let edit = mln_style::Edit::SetGeoJsonData { id: id.to_owned(), data: Some(data) };
+    let edit = GeoJsonSourceType::set_data(id, Some(data));
     map.edit_style(|style| style.apply(edit)).expect("a GeoJSON source");
 }
 

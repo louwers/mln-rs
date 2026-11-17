@@ -34,9 +34,9 @@ impl Drop for VectorTileTest {
 fn set_error() {
     let test = VectorTileTest::new();
     let mut tiles = test.mvt_tile();
-    tiles.with(|info, tile, ctx| info.load_error(tile, ctx, Error::native("test")));
+    tiles.with(|tile| tile.fail(Error::native("test")));
     assert!(!tiles.tile().is_renderable());
-    assert!(tiles.tile().loaded);
+    assert!(tiles.tile().is_settled());
     assert!(tiles.tile().is_complete());
 }
 
@@ -45,9 +45,9 @@ fn set_error() {
 fn on_error() {
     let test = VectorTileTest::new();
     let mut tiles = test.mvt_tile();
-    tiles.with(|info, tile, ctx| info.job_error(tile, ctx, Error::native("test")));
+    tiles.with(|tile| tile.fail(Error::native("test")));
     assert!(!tiles.tile().is_renderable());
-    assert!(tiles.tile().loaded);
+    assert!(tiles.tile().is_settled());
     assert!(tiles.tile().is_complete());
 }
 

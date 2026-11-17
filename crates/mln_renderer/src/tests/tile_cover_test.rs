@@ -4,7 +4,7 @@
 use geo_types::{Geometry, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use mln_map::transform::Transform;
 use mln_map_types::{CameraOptions, ConstrainMode, TileLodMode, ViewportMode};
-use mln_style_types::{ProjectionDefinition, SourceType};
+use mln_style_types::ProjectionDefinition;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID, UnwrappedTileID};
 use mln_util::constants;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, WrapMode};
@@ -696,12 +696,10 @@ mod tile_cover {
     // gtest: TileCover.CoveringZoomLevelRoundsForRasterSources
     #[test]
     fn covering_zoom_level_rounds_for_raster_sources() {
-        assert_eq!(4, covering_zoom_level(4.6, SourceType::Vector, constants::TILE_SIZE_I));
-        assert_eq!(4, covering_zoom_level(4.6, SourceType::GeoJSON, constants::TILE_SIZE_I));
-        assert_eq!(5, covering_zoom_level(4.6, SourceType::Raster, constants::TILE_SIZE_I));
-        assert_eq!(5, covering_zoom_level(4.6, SourceType::RasterDEM, constants::TILE_SIZE_I));
-        assert_eq!(4, covering_zoom_level(4.4, SourceType::RasterDEM, constants::TILE_SIZE_I));
-        assert_eq!(6, covering_zoom_level(4.6, SourceType::RasterDEM, 256));
+        assert_eq!(4, covering_zoom_level(4.6, false, constants::TILE_SIZE_I));
+        assert_eq!(5, covering_zoom_level(4.6, true, constants::TILE_SIZE_I));
+        assert_eq!(4, covering_zoom_level(4.4, true, constants::TILE_SIZE_I));
+        assert_eq!(6, covering_zoom_level(4.6, true, 256));
     }
 
     // DISABLED_FuzzPoly and DISABLED_FuzzLine loop forever in C++ (manual
@@ -861,7 +859,7 @@ mod tile_cover {
             pitch: f64,
             tile_size: u16,
             max_zoom: u8,
-            type_: SourceType,
+            raster: bool,
             expected: Vec<CanonicalTileID>,
         }
         let cases = vec![
@@ -871,7 +869,7 @@ mod tile_cover {
                 pitch: 60.0,
                 tile_size: 512,
                 max_zoom: 8,
-                type_: SourceType::Vector,
+                raster: false,
                 expected: vec![cn(8, 135, 113), cn(8, 134, 113), cn(8, 134, 112)],
             },
             Case {
@@ -880,7 +878,7 @@ mod tile_cover {
                 pitch: 75.0,
                 tile_size: 512,
                 max_zoom: 8,
-                type_: SourceType::Vector,
+                raster: false,
                 expected: vec![cn(8, 135, 113), cn(8, 134, 113), cn(8, 135, 112), cn(8, 134, 112), cn(5, 16, 13)],
             },
             Case {
@@ -889,7 +887,7 @@ mod tile_cover {
                 pitch: 60.0,
                 tile_size: 512,
                 max_zoom: 4,
-                type_: SourceType::Vector,
+                raster: false,
                 expected: vec![cn(4, 8, 7), cn(4, 8, 6)],
             },
             Case {
@@ -898,7 +896,7 @@ mod tile_cover {
                 pitch: 60.0,
                 tile_size: 256,
                 max_zoom: 22,
-                type_: SourceType::Raster,
+                raster: true,
                 expected: vec![
                     cn(7, 67, 56),
                     cn(7, 67, 57),
@@ -930,7 +928,7 @@ mod tile_cover {
                 pitch: 60.0,
                 tile_size: 256,
                 max_zoom: 22,
-                type_: SourceType::Raster,
+                raster: true,
                 expected: vec![
                     cn(6, 33, 28),
                     cn(6, 34, 28),
@@ -958,17 +956,16 @@ mod tile_cover {
             let mut transform = new_transform();
             set_up_globe(&mut transform, Size::new(512, 512), ll(20.0, 10.0), c.zoom, c.pitch, 0.0);
             // As TilePyramid asks for them.
-            let covering_zoom: i32 = covering_zoom_level(c.zoom, c.type_, c.tile_size);
+            let covering_zoom: i32 = covering_zoom_level(c.zoom, c.raster, c.tile_size);
             let ideal_zoom = std::cmp::min(i32::from(c.max_zoom), covering_zoom) as u8;
-            let raster = c.type_ == SourceType::Raster;
             let mut parameters = TileCoverParameters::new(transform.get_state().clone());
             parameters.requested_zoom = Some(c.zoom + (512.0 / f64::from(c.tile_size)).log2());
-            parameters.round_zoom = raster;
+            parameters.round_zoom = c.raster;
             let tiles = tile_cover(
                 &parameters,
                 ideal_zoom,
                 Range::new(0, c.max_zoom),
-                Some(if raster { ideal_zoom } else { covering_zoom as u8 }),
+                Some(if c.raster { ideal_zoom } else { covering_zoom as u8 }),
             );
             let mut canonical = Vec::new();
             for tile in &tiles {

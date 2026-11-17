@@ -8,7 +8,7 @@ use crate::evaluated::{Evaluated, Evaluation};
 use crate::expression::{Dependency, EvaluationContext, Expr, GlobalStateMap, collect_global_state_refs};
 use crate::properties::PropertyValueLike;
 use crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
-use crate::serialization::shared_expression;
+use crate::serialization::optional_expression;
 
 /// Special-case implementation of (a subset of) the `PropertyValue<T>`
 /// interface used for building the paint property traits classes for
@@ -39,11 +39,11 @@ impl PartialEq for ColorRampPropertyValue {
 
 impl mln_wire::Wire for ColorRampPropertyValue {
     fn write(&self, w: &mut mln_wire::Writer) {
-        shared_expression::option::write(&self.value, w);
+        optional_expression::write(&self.value, w);
     }
 
     fn read(r: &mut mln_wire::Reader<'_>) -> Option<Self> {
-        shared_expression::option::read(r).map(ColorRampPropertyValue::new)
+        optional_expression::read(r).map(ColorRampPropertyValue::new)
     }
 }
 

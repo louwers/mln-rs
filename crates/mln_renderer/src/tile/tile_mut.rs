@@ -1,0 +1,714 @@
+//! A tile's transitions. [`TileMut`] is the one place that settles a tile,
+//! submits its jobs, replaces what it shows, and reports its actions: a
+//! `StartParse` when it becomes pending, an `EndParse` when contents install
+//! (after a `StartParse` if none was reported), and a `Cancelled` when a
+//! pending tile is reset or let go of.
+
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use mln_storage::response::Reason;
+use mln_storage::{Request, Response};
+use mln_style::custom_tile_loader::SubscriberKey;
+use mln_style::sources::geojson::GeoJSONData;
+use mln_util::error::Error;
+use mln_util::hash::HashSet;
+use mln_util::logging::{Event, Log};
+use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
+use mln_vec_map::VecSet;
+
+use crate::buckets::hillshade_bucket::HillshadeBucket;
+use crate::buckets::raster_bucket::RasterBucket;
+use crate::layout::tile_layout::{Dependencies, LayoutParams};
+use crate::render_orchestrator::drop_on_workers;
+use crate::tile::contents::{Contents, GeometryContents, release};
+use crate::tile::inbox::{SourceData, TileEvent};
+use crate::tile::job::{DataInput, DataKey, Job, JobId, JobResult, LayoutJob, LayoutOutput, Run, SourceStyle};
+use crate::tile::loading::{self, CustomLoad, CustomLoader, DataOrigin, Fetch, Method, OriginLoad};
+use crate::tile::pipeline::{
+    DecodeWork, DependencyWait, InFlight, Layout, LayoutData, LayoutWork, Pipeline, Resume, Running, Waiting,
+    outdated_by,
+};
+use crate::tile::store::{SourceInfo, StoreContext};
+use crate::tile::tile::{Shown, Tile, TileInput, TileNecessity, TileOperation, TileUpdateParameters};
+use crate::tile::tile_workers::{InlineWorkers, Lane, ReplyBody};
+
+/// A tile, its source and the store, borrowed for a transition.
+pub(crate) struct TileMut<'a> {
+    source: &'a mut SourceInfo,
+    tile: &'a mut Tile,
+    store: &'a mut StoreContext,
+    /// Whether the tile was pending when its parse events last said so.
+    reported: bool,
+    /// The tile showed new contents.
+    pub(super) installed: bool,
+}
+
+impl<'a> TileMut<'a> {
+    /// Runs `f` on `tile`, then reports `StartParse` if `f` left it pending.
+    /// Returns `f`'s result and whether the tile showed new contents.
+    pub(super) fn with<R>(
+        source: &'a mut SourceInfo,
+        tile: &'a mut Tile,
+        store: &'a mut StoreContext,
+        f: impl FnOnce(&mut TileMut<'a>) -> R,
+    ) -> (R, bool) {
+        let reported = tile.is_pending();
+        let mut tile = TileMut { source, tile, store, reported, installed: false };
+        let result = f(&mut tile);
+        tile.report();
+        (result, tile.installed)
+    }
+
+    pub(crate) fn tile(&self) -> &Tile {
+        self.tile
+    }
+
+    #[cfg(test)]
+    pub(crate) fn parts(&mut self) -> (&mut SourceInfo, &mut Tile) {
+        (self.source, self.tile)
+    }
+
+    /// Starts a new tile's load; a custom source's waits until the tile is
+    /// required.
+    pub(crate) fn start_load(&mut self) {
+        match &self.source.origin {
+            Some(DataOrigin::Tileset { file_source: None, .. }) => self.fail(Error::native("Can't load tile.")),
+            // The first request only looks in the cache, even for a required
+            // tile, so that it can go on if the tile becomes optional.
+            Some(DataOrigin::Tileset { file_source: Some(file_source), .. }) => {
+                if file_source.supports_cache_only() {
+                    self.request(Method::Cache);
+                }
+            }
+            Some(DataOrigin::GeoJson(data)) => {
+                let data = Arc::clone(data);
+                self.load_geojson(&data, false);
+            }
+            Some(DataOrigin::Custom { .. }) | None => {}
+        }
+    }
+
+    /// A required tile loads from the network or its custom loader; an
+    /// optional one stops, unless it is a custom tile that is renderable.
+    pub(crate) fn set_necessity(&mut self, necessity: TileNecessity) {
+        let unchanged = std::mem::replace(&mut self.tile.load.necessity, necessity) == necessity;
+        let required = necessity == TileNecessity::Required;
+        let renderable = self.tile.is_renderable();
+        match &mut self.tile.load.origin {
+            OriginLoad::Tileset(tileset) if !unchanged => {
+                if required {
+                    if tileset.is_idle() {
+                        self.request(Method::Network);
+                    }
+                } else if matches!(tileset.fetch, Fetch::Network { .. }) {
+                    // Only a network-only request is aborted.
+                    tileset.fetch = Fetch::Idle;
+                }
+            }
+            // Fetching a custom tile's data is assumed to be expensive: only
+            // required tiles fetch.
+            OriginLoad::Custom(custom) if !unchanged || !matches!(custom, CustomLoad::Subscribed(_)) => {
+                match (required, *custom) {
+                    (true, CustomLoad::Subscribed(key)) => self.fetch(key),
+                    (true, CustomLoad::Stale(_) | CustomLoad::Unsubscribed) => {
+                        if matches!(self.source.origin, Some(DataOrigin::Custom { .. })) {
+                            let key = self.source.next();
+                            *custom = CustomLoad::Subscribed(key);
+                            self.fetch(key);
+                        }
+                    }
+                    (false, CustomLoad::Subscribed(key) | CustomLoad::Stale(key)) if !renderable => {
+                        if let Some((loader, _)) = self.custom_loader() {
+                            loader.cancel(self.tile.id, key);
+                        }
+                    }
+                    (false, _) => {}
+                }
+            }
+            OriginLoad::Tileset(_) | OriginLoad::Custom(_) | OriginLoad::GeoJson { .. } => {}
+        }
+    }
+
+    /// A network request under way is made again with the new parameters.
+    pub(crate) fn set_update_parameters(&mut self, parameters: TileUpdateParameters) {
+        let OriginLoad::Tileset(tileset) = &mut self.tile.load.origin else {
+            return;
+        };
+        if std::mem::replace(&mut tileset.update_parameters, parameters) != parameters
+            && matches!(tileset.fetch, Fetch::Network { .. })
+        {
+            tileset.fetch = Fetch::Idle;
+            self.request(Method::Network);
+        }
+    }
+
+    /// Requests a required tile whose last response was an error again.
+    pub(crate) fn retry_failed_load(&mut self) {
+        if let OriginLoad::Tileset(tileset) = &mut self.tile.load.origin
+            && self.tile.load.necessity == TileNecessity::Required
+            && matches!(tileset.fetch, Fetch::Failed)
+        {
+            tileset.fetch = Fetch::Idle;
+            self.tile.settled = false;
+            self.request(Method::Network);
+        }
+    }
+
+    /// Applies the response to request `load`, if the tile waits for it.
+    pub(crate) fn apply_response(&mut self, load: u64, res: &Response) {
+        let OriginLoad::Tileset(tileset) = &mut self.tile.load.origin else {
+            return;
+        };
+        let method = match tileset.fetch {
+            Fetch::Cache { load: current, .. } if current == load => Method::Cache,
+            Fetch::Network { load: current, .. } if current == load => Method::Network,
+            Fetch::Idle | Fetch::Failed | Fetch::Cache { .. } | Fetch::Network { .. } => return,
+        };
+        tileset.fetch = Fetch::Idle;
+        if method == Method::Network {
+            self.take_response(method, res);
+            return;
+        }
+        tileset.cache_answered = true;
+        // A cache-only request that found nothing isn't an error. It can
+        // still bring expired data that Cache-Control forbids using, which
+        // the network request revalidates.
+        let not_found = res.error.as_ref().is_some_and(|e| e.reason == Reason::NotFound);
+        if not_found {
+            let resource = &mut tileset.resource;
+            resource.prior_modified = res.modified;
+            resource.prior_expires = res.expires;
+            resource.prior_etag = res.etag.clone();
+            resource.prior_data = res.data.clone();
+        }
+        self.store.changed();
+        if !not_found {
+            self.take_response(method, res);
+        }
+        if self.tile.load.necessity == TileNecessity::Required
+            && matches!(&self.tile.load.origin, OriginLoad::Tileset(tileset) if tileset.is_idle())
+        {
+            self.request(Method::Network);
+        }
+    }
+
+    /// Applies what a GeoJSON or custom source gave load `load`, if current.
+    pub(crate) fn apply_source_data(&mut self, load: u64, data: SourceData) {
+        if !self.tile.load.accepts(load) {
+            return;
+        }
+        match data {
+            SourceData::Data(data) => self.take_input(TileInput::Geometry { data, missing: false }),
+            SourceData::Error(error) => self.fail(error),
+            SourceData::Stale => {
+                if let OriginLoad::Custom(custom) = &mut self.tile.load.origin {
+                    if let CustomLoad::Subscribed(key) = *custom {
+                        *custom = CustomLoad::Stale(key);
+                    }
+                    self.store.changed();
+                }
+            }
+        }
+    }
+
+    /// With `relayout`, the tile first drops its data and style.
+    pub(crate) fn load_geojson(&mut self, data: &Arc<dyn GeoJSONData>, relayout: bool) {
+        if relayout {
+            self.reset();
+        }
+        let load = self.source.next();
+        if let OriginLoad::GeoJson { load: current } = &mut self.tile.load.origin {
+            *current = Some(load);
+        }
+        let key = self.source.tile_key(self.tile);
+        if let Some(data) = loading::get_geojson_tile(
+            data,
+            key,
+            load,
+            &self.store.inbox,
+            (!self.source.synchronous).then(|| self.store.pool.pool()),
+        ) {
+            self.take_input(TileInput::Geometry { data: Some(data), missing: false });
+        }
+    }
+
+    /// Takes in what a load delivered. A raster tile without an image shows
+    /// nothing at once, renderable unless `missing`.
+    pub(crate) fn take_input(&mut self, input: TileInput) {
+        match input {
+            TileInput::Geometry { data, missing } => {
+                let key = DataKey { source: self.source.key, tile: self.tile.id.canonical, load: self.source.next() };
+                self.change_layout(|layout| layout.data = Some(LayoutData { key, data, missing }));
+            }
+            TileInput::Image { data, missing } => {
+                let Pipeline::Decode(decode) = &mut self.tile.pipeline else {
+                    return;
+                };
+                let has_image = data.is_some();
+                decode.generation = self.source.next();
+                decode.work = match std::mem::replace(&mut decode.work, DecodeWork::Current) {
+                    // A decode in flight goes on, stale, until it replies.
+                    DecodeWork::Running { job, .. } => {
+                        job.superseded.store(true, Ordering::Relaxed);
+                        DecodeWork::Running { job, image: data }
+                    }
+                    DecodeWork::Current | DecodeWork::Queued(_) => data.map_or(DecodeWork::Current, DecodeWork::Queued),
+                };
+                if !has_image {
+                    self.install((!missing).then_some(Contents::Empty));
+                }
+            }
+        }
+        // A request that follows, such as for the network after the cache's
+        // data, comes after the parse it starts.
+        self.report();
+    }
+
+    /// The tile couldn't load or lay out: it keeps what it shows.
+    pub(crate) fn fail(&mut self, error: Error) {
+        self.tile.settled = true;
+        self.action(TileOperation::Error);
+        self.store.error(&self.source.id, self.tile.id, error);
+    }
+
+    pub(crate) fn set_style(
+        &mut self,
+        style: &Arc<SourceStyle>,
+        pixel_ratio: f32,
+        granularity: SubdivisionGranularitySetting,
+    ) {
+        self.change_layout(|layout| {
+            layout.style = Some(Arc::clone(style));
+            layout.params.pixel_ratio = pixel_ratio;
+            layout.params.subdivision_granularity = granularity;
+        });
+    }
+
+    pub(crate) fn set_show_collision_boxes(&mut self, show: bool) {
+        if self.tile.pipeline.layout().is_some_and(|layout| layout.params.show_collision_boxes != show) {
+            self.change_layout(|layout| layout.params.show_collision_boxes = show);
+        }
+    }
+
+    /// Lays the tile out again if the images in `changed` touch what it shows
+    /// or its work. A first try's reply tells for itself.
+    pub(crate) fn images_changed(&mut self, changed: &HashSet<String>, available: &VecSet<String>) {
+        let names = |deps: &Dependencies| deps.images.keys().any(|id| changed.contains(id));
+        let shown = self.tile.contents().and_then(Contents::geometry).is_some_and(|contents| names(&contents.deps));
+        let work = self.tile.pipeline.layout().is_some_and(|layout| match &layout.work {
+            LayoutWork::Running(Running { known: Some(known), .. }) | LayoutWork::Ready(Resume { known, .. }) => {
+                names(known)
+            }
+            LayoutWork::Waiting(Waiting { needs, .. }) => {
+                needs.unavailable_images.iter().any(|id| changed.contains(id) && available.contains(id))
+                    || needs.images.keys().any(|id| changed.contains(id) && !available.contains(id))
+            }
+            LayoutWork::Running(_) | LayoutWork::Current | LayoutWork::Outdated => false,
+        });
+        if shown || work {
+            self.relayout();
+        }
+    }
+
+    /// Lays the tile out again if it lacked glyphs of a range that failed.
+    pub(crate) fn retry_failed_glyphs(&mut self) {
+        let running = self.tile.pipeline.layout().is_some_and(|layout| match &layout.work {
+            LayoutWork::Running(Running { answer, .. }) | LayoutWork::Ready(Resume { answer, .. }) => {
+                answer.glyphs_failed
+            }
+            LayoutWork::Current | LayoutWork::Outdated | LayoutWork::Waiting(_) => false,
+        });
+        let shown =
+            self.tile.contents().and_then(Contents::geometry).is_some_and(|contents| contents.answer.glyphs_failed);
+        if running || shown {
+            self.relayout();
+        }
+    }
+
+    /// Resolves the dependencies the tile waits for, and starts its next job.
+    pub(crate) fn drive(&mut self) {
+        if let Pipeline::Layout(layout) = &mut self.tile.pipeline
+            && let LayoutWork::Waiting(waiting) = &mut layout.work
+            && let Some(resume) = self.store.resolve(waiting)
+        {
+            layout.work = LayoutWork::Ready(resume);
+        }
+        if self.source.synchronous {
+            self.run_inline();
+        } else if let Some((lane, run)) = self.next_job(false) {
+            self.store.jobs.submit(lane, run, &self.store.inbox);
+        }
+    }
+
+    pub(crate) fn apply_reply(&mut self, lane: Lane, id: JobId, body: ReplyBody) {
+        if id.generation != self.tile.pipeline.generation() {
+            // The work goes on with the current generation.
+            match &mut self.tile.pipeline {
+                Pipeline::Layout(layout) => layout.work = LayoutWork::Outdated,
+                Pipeline::Decode(decode) => decode.requeue(),
+            }
+            drop_on_workers(&self.store.pool, body);
+        } else if let Some(result) = self.store.jobs.decode(lane, body) {
+            self.apply_result(id, result);
+        }
+        // Else a reply of a worker lost since: the loss, which comes next,
+        // runs the job again.
+    }
+
+    /// The worker of `lane` is gone: the work it held starts again.
+    pub(crate) fn lane_lost(&mut self, lane: Lane) {
+        if self.tile.pipeline.lane() != Some(lane) {
+            return;
+        }
+        let generation = self.source.next();
+        match &mut self.tile.pipeline {
+            Pipeline::Layout(layout) => {
+                layout.bump(generation);
+                layout.work = LayoutWork::Outdated;
+            }
+            Pipeline::Decode(decode) => {
+                decode.generation = generation;
+                decode.requeue();
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn apply_decode_now(&mut self, result: JobResult) {
+        let id = JobId { tile: self.source.tile_key(self.tile), generation: self.tile.pipeline.generation() };
+        assert!(matches!(self.tile.pipeline, Pipeline::Decode(_)), "a raster or raster-dem tile");
+        self.apply_result(id, result);
+    }
+
+    fn action(&mut self, op: TileOperation) {
+        self.store.action(&self.source.id, self.tile.id, op);
+    }
+
+    /// Emits `StartParse` if the tile became pending since it last said so.
+    fn report(&mut self) {
+        let pending = self.tile.is_pending();
+        if pending && !self.reported {
+            self.action(TileOperation::StartParse);
+        }
+        self.reported = pending;
+    }
+
+    /// Shows `contents`, with the source's feature state applied.
+    fn install(&mut self, contents: Option<Contents>) {
+        let shown = contents.map(|contents| {
+            let mut version = 0;
+            if let Some(geometry) = contents.geometry() {
+                geometry.set_feature_state(self.source.feature_state.current_states());
+                version = self.source.feature_state.version();
+            }
+            Shown::new(contents, version)
+        });
+        if let Some(old) = std::mem::replace(&mut self.tile.shown, shown) {
+            release(old.contents, &self.store.pool);
+        }
+        self.tile.settled = true;
+        // A parse nothing reported, such as of a raster tile without an
+        // image, starts and ends at once.
+        if !self.reported {
+            self.action(TileOperation::StartParse);
+        }
+        self.action(TileOperation::EndParse);
+        self.reported = self.tile.is_pending();
+        self.installed = true;
+        self.store.changed();
+    }
+
+    /// Drops the tile's data and style, and leaves it waiting for new ones.
+    fn reset(&mut self) {
+        if self.tile.is_pending() {
+            self.action(TileOperation::Cancelled);
+        }
+        self.reported = false;
+        self.tile.settled = false;
+        let generation = self.source.next();
+        if let Pipeline::Layout(layout) = &mut self.tile.pipeline {
+            layout.data = None;
+            layout.style = None;
+            layout.bump(generation);
+        }
+    }
+
+    /// Changes a geometry tile's layout through `f`, at a new generation.
+    fn change_layout(&mut self, f: impl FnOnce(&mut Layout)) {
+        if let Pipeline::Layout(layout) = &mut self.tile.pipeline {
+            f(layout);
+            layout.bump(self.source.next());
+            if self.source.synchronous {
+                self.run_inline();
+            }
+        }
+    }
+
+    /// Lays the tile out again, without the answer of the layout it shows.
+    fn relayout(&mut self) {
+        if let Some(shown) = &mut self.tile.shown {
+            shown.answer_outdated = true;
+        }
+        self.change_layout(|_| {});
+    }
+
+    /// Runs the tile's jobs here until it shows contents or waits.
+    fn run_inline(&mut self) {
+        loop {
+            self.report();
+            let Some((_, run)) = self.next_job(true) else {
+                break;
+            };
+            let reply = InlineWorkers::run(run);
+            self.apply_result(reply.id, reply.result);
+        }
+    }
+
+    /// Puts the tile's next job in flight, if it has one and a lane has room.
+    fn next_job(&mut self, inline: bool) -> Option<(Lane, Run)> {
+        let tile = self.source.tile_key(self.tile);
+        let superseded = Arc::new(AtomicBool::new(false));
+        let in_flight = |id, lane| InFlight { id, lane, superseded: Arc::clone(&superseded) };
+        let (lane, id, job) = match &mut self.tile.pipeline {
+            Pipeline::Layout(layout) => {
+                let layout: &mut Layout = layout;
+                let (Some(data), Some(style)) = (&layout.data, &layout.style) else {
+                    return None;
+                };
+                if !matches!(layout.work, LayoutWork::Outdated | LayoutWork::Ready(_)) {
+                    return None;
+                }
+                let (lane, cached) =
+                    if inline { (Lane(0), false) } else { self.store.jobs.place(data.key, data.data.is_none())? };
+                let shown = self.tile.shown.as_ref();
+                let (known, answer, images) = match std::mem::replace(&mut layout.work, LayoutWork::Outdated) {
+                    LayoutWork::Ready(Resume { known, answer, images, .. }) => (Some(known), answer, images),
+                    // A first try starts with the answer the tile shows,
+                    // unless it is outdated.
+                    LayoutWork::Current | LayoutWork::Outdated | LayoutWork::Running(_) | LayoutWork::Waiting(_) => {
+                        let answer = shown
+                            .filter(|shown| !shown.answer_outdated)
+                            .and_then(|shown| shown.contents.geometry())
+                            .map(|contents| contents.answer.clone())
+                            .unwrap_or_default();
+                        (None, answer, Arc::clone(self.store.images.available_images()))
+                    }
+                };
+                let input = if cached {
+                    DataInput::Cached(data.key)
+                } else {
+                    DataInput::Full { key: data.key, data: data.data.clone() }
+                };
+                let job = Job::Layout(LayoutJob {
+                    style: Arc::clone(style),
+                    available_images: Arc::clone(&images),
+                    data: input,
+                    params: LayoutParams { first_load: shown.is_none(), ..layout.params },
+                    resolved: Arc::clone(&answer.resolved),
+                });
+                let id = JobId { tile, generation: layout.generation };
+                layout.work = LayoutWork::Running(Running { job: in_flight(id, lane), known, answer, images });
+                (lane, id, job)
+            }
+            Pipeline::Decode(decode) => {
+                let DecodeWork::Queued(image) = &decode.work else {
+                    return None;
+                };
+                let lane = if inline { Lane(0) } else { self.store.jobs.lane()? };
+                let image = Arc::clone(image);
+                let data = Arc::clone(&image);
+                let job = match decode.dem {
+                    Some(encoding) => Job::Dem { data, encoding },
+                    None => Job::Raster { data },
+                };
+                let id = JobId { tile, generation: decode.generation };
+                decode.work = DecodeWork::Running { job: in_flight(id, lane), image: Some(image) };
+                (lane, id, job)
+            }
+        };
+        Some((lane, Run { id, job, superseded }))
+    }
+
+    /// Applies `result`, the reply to job `id` of the current generation.
+    fn apply_result(&mut self, id: JobId, result: JobResult) {
+        debug_assert_eq!(id.generation, self.tile.pipeline.generation(), "a reply of the current generation");
+        let layout = match &mut self.tile.pipeline {
+            Pipeline::Layout(layout) => layout,
+            Pipeline::Decode(decode) => {
+                decode.work = DecodeWork::Current;
+                return match result {
+                    JobResult::Raster(image) => {
+                        self.install(Some(Contents::Raster(Arc::new(RasterBucket::new(image)))));
+                    }
+                    JobResult::Dem(dem) => {
+                        self.install(Some(Contents::Dem(Arc::new(HillshadeBucket::with_dem_data(dem)))));
+                    }
+                    JobResult::Failed(error) => self.fail(error),
+                    JobResult::Laid(_) | JobResult::NeedsDeps(_) | JobResult::NeedsData => {
+                        self.fail(Error::native("a raster tile's decode answered as a layout"));
+                    }
+                };
+            }
+        };
+        let Running { job, known, answer, images } = match std::mem::replace(&mut layout.work, LayoutWork::Outdated) {
+            LayoutWork::Running(running) => running,
+            work => {
+                layout.work = work;
+                return;
+            }
+        };
+        let available = self.store.images.available_images();
+        if !Arc::ptr_eq(&images, available) && outdated_by(&result, &images, available) {
+            // The reply branched on an image that came or went since: the
+            // tile lays out again, without the answer it shows.
+            drop_on_workers(&self.store.pool, result);
+            layout.bump(self.source.next());
+            if let Some(shown) = &mut self.tile.shown {
+                shown.answer_outdated = true;
+            }
+            return;
+        }
+        match result {
+            JobResult::Laid(LayoutOutput { mut result, deps }) => {
+                layout.work = LayoutWork::Current;
+                // A first try's answer may be the layout before's, which can
+                // hold more than this one uses.
+                let answer = if known.is_none() {
+                    answer.trimmed(&deps, &mut self.store.atlas).unwrap_or(answer)
+                } else {
+                    answer
+                };
+                let (data, missing) =
+                    layout.data.as_ref().map_or((None, false), |data| (data.data.clone(), data.missing));
+                // The index crossed without its data, or with the tile's.
+                if let Some(feature_index) = Arc::get_mut(&mut result.feature_index) {
+                    feature_index.set_data(data);
+                }
+                self.install(Some(Contents::Geometry(GeometryContents::new(result, missing, answer, deps))));
+            }
+            JobResult::NeedsDeps(needs) if known.is_none() => {
+                let wait = DependencyWait::default();
+                layout.work = LayoutWork::Waiting(Waiting { lane: job.lane, needs, wait, images });
+            }
+            JobResult::NeedsData => {
+                // A resume keeps its answer and generation; a first try runs
+                // again with the images as they are then.
+                layout.work = match known {
+                    Some(known) => LayoutWork::Ready(Resume { lane: None, known, answer, images }),
+                    None => LayoutWork::Outdated,
+                };
+                if let Some(data) = &layout.data {
+                    self.store.jobs.forget(data.key);
+                }
+            }
+            JobResult::NeedsDeps(_) => {
+                layout.work = LayoutWork::Current;
+                Log::error(
+                    Event::General,
+                    format!("Tile {} asked again for the dependencies it was given", job.id.tile.id),
+                );
+                self.fail(Error::native("a layout asked again for the dependencies it was given"));
+            }
+            JobResult::Failed(error) => {
+                layout.work = LayoutWork::Current;
+                self.fail(error);
+            }
+            JobResult::Raster(_) | JobResult::Dem(_) => {
+                layout.work = LayoutWork::Current;
+                self.fail(Error::native("a geometry tile's layout answered as a decode"));
+            }
+        }
+    }
+
+    fn request(&mut self, method: Method) {
+        let Some(file_source) = self.source.file_source() else {
+            self.fail(Error::native("Can't load tile."));
+            return;
+        };
+        self.action(match method {
+            Method::Cache => TileOperation::RequestedFromCache,
+            Method::Network => TileOperation::RequestedFromNetwork,
+        });
+        let load = self.source.next();
+        let key = self.source.tile_key(self.tile);
+        let OriginLoad::Tileset(tileset) = &mut self.tile.load.origin else {
+            return;
+        };
+        let inbox = self.store.inbox.clone();
+        // One response per request: a reload is a new request.
+        let (request, responder) =
+            Request::once(move |response| inbox.send(TileEvent::Response { tile: key, load, response }));
+        file_source.load(tileset.resource_for(method), responder);
+        debug_assert!(tileset.is_idle(), "one request at a time");
+        tileset.fetch = match method {
+            Method::Cache => Fetch::Cache { load, request },
+            Method::Network => Fetch::Network { load, request },
+        };
+    }
+
+    fn take_response(&mut self, method: Method, res: &Response) {
+        let OriginLoad::Tileset(tileset) = &mut self.tile.load.origin else {
+            return;
+        };
+        if let Some(error) = &res.error
+            && error.reason != Reason::NotFound
+        {
+            tileset.fetch = Fetch::Failed;
+            self.fail(Error::native(error.message.clone()));
+            return;
+        }
+        let resource = &mut tileset.resource;
+        if !res.not_modified {
+            resource.prior_modified = res.modified;
+            resource.prior_etag = res.etag.clone();
+        }
+        resource.prior_expires = res.expires;
+        (tileset.modified, tileset.expires) = (res.modified, res.expires);
+        self.action(match method {
+            Method::Network => TileOperation::LoadFromNetwork,
+            Method::Cache => TileOperation::LoadFromCache,
+        });
+        if res.not_modified {
+            // The tile keeps its data: it has done what it can, unless work
+            // on that data is under way, which settles it as it ends.
+            if !self.tile.pipeline.is_pending(true) {
+                self.tile.settled = true;
+            }
+        } else if let Some(origin) = &self.source.origin {
+            let input = origin.input(self.source.kind, res);
+            self.take_input(input);
+        }
+    }
+
+    fn custom_loader(&self) -> Option<(Arc<dyn CustomLoader>, bool)> {
+        match &self.source.origin {
+            Some(DataOrigin::Custom { loader, fast_pfor_enabled }) => Some((Arc::clone(loader), *fast_pfor_enabled)),
+            Some(DataOrigin::Tileset { .. } | DataOrigin::GeoJson(_)) | None => None,
+        }
+    }
+
+    fn fetch(&mut self, key: SubscriberKey) {
+        if let Some((loader, fast_pfor_enabled)) = self.custom_loader() {
+            let tile_key = self.source.tile_key(self.tile);
+            loader.fetch(self.tile.id, key, tile_key, &self.store.inbox, fast_pfor_enabled);
+        }
+    }
+}
+
+/// Lets go of `tile`: its job needn't run, its custom loader forgets it, its
+/// request drops and its contents are freed.
+pub(crate) fn retire(source: &SourceInfo, mut tile: Tile, store: &mut StoreContext) {
+    if tile.is_pending() {
+        store.action(&source.id, tile.id, TileOperation::Cancelled);
+    }
+    if let Some(job) = tile.pipeline.in_flight() {
+        job.superseded.store(true, Ordering::Relaxed);
+    }
+    if let (Some(key), Some(DataOrigin::Custom { loader, .. })) = (tile.load.subscription(), &source.origin) {
+        loader.remove(tile.id, key);
+    }
+    if let Some(shown) = tile.shown.take() {
+        release(shown.contents, &store.pool);
+    }
+}

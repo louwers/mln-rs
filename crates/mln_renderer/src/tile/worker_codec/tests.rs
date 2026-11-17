@@ -218,7 +218,7 @@ impl ThroughCodec {
 }
 
 /// What of a layout tells it apart: the encodings of its buckets and feature
-/// index outside a codec's session, with every value in full.
+/// index without a codec's context, with every value in full.
 fn comparable(result: &LayoutResult) -> [Vec<u8>; 2] {
     [fields::encode_buckets(result), result.feature_index.encode_grid()]
 }
@@ -524,8 +524,9 @@ fn layouts_have_the_layers_they_answer() {
     }
 }
 
-/// The keys of each table that a job's frame tells the worker to forget.
-fn forgotten(request: &[u8]) -> Vec<(String, Vec<u64>)> {
+/// The keys of each table that a job's frame tells the worker to forget, in
+/// the order of `Tables::all`.
+fn forgotten(request: &[u8]) -> Vec<Vec<u64>> {
     let (_, body) = envelope::read_job_id(request).unwrap();
     envelope::take(body).unwrap().0
 }
@@ -553,13 +554,15 @@ fn styles_and_layers_are_defined_once() {
     assert!(third.len() < first.len() / 2 && third.len() > second.len());
 
     // Once nothing holds the line layer, the instance forgets it, its
-    // expression, its properties as evaluated twice, and both styles.
+    // expression, its properties as evaluated twice, both styles, and the
+    // last job's set of images (each job here has its own).
     drop((first_style, again));
     let fill_only = style(&layers[..1]);
     drop(layers);
     let forget = forgotten(&map.encode_run(&job(&fill_only, data_input(&data), Resolved::default())).unwrap());
-    let count = |table: &str| forget.iter().find(|(name, _)| name == table).map_or(0, |(_, keys)| keys.len());
-    assert_eq!((count("source style"), count("layer"), count("expression"), count("evaluated layer")), (2, 1, 1, 2));
+    let counts: Vec<usize> = forget.iter().map(Vec::len).collect();
+    // Source styles, sets of images, layers, evaluated layers, expressions.
+    assert_eq!(counts, [2, 1, 1, 2, 1]);
 }
 
 fn data_input(data: &DataInput) -> DataInput {
@@ -800,7 +803,7 @@ fn malformed_dems_fail() {
     ];
     for (dim, stride, image) in dems {
         let mut bytes = Vec::new();
-        envelope::append(&mut bytes, &Malformed::Dem(dim, stride, RasterEncoding::Mapbox, image)).unwrap();
+        envelope::append(&mut bytes, &Malformed::Dem(dim, stride, RasterEncoding::Mapbox, image), ()).unwrap();
         let JobResult::Failed(_) = MapCodec::new(Registry::with_builtins()).decode_result(Encoded::from(bytes)) else {
             panic!("dim {dim}, stride {stride}: not a failure");
         };
