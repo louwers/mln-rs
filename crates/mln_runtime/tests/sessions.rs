@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::channel;
 
-use mln_map::{CameraOptions, CameraUpdate, MapEvent, MapMode, TileOperation};
+use mln_map::{AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, MapEvent, MapMode, TileOperation};
 use mln_runtime::{
     AttachOptions, DemandMode, Device, DeviceOptions, Driver, ErrorKind, FrameDemand, FrameDisposition, FrameResult,
     LogicalExtent, Map, MapOptions, RenderSession, RenderSessionState, RenderTarget, RenderedQueryGeometry,
@@ -19,6 +19,7 @@ use mln_runtime::{
 use mln_storage::resource::Kind;
 use mln_storage::response::Reason;
 use mln_storage::{ResourceError, Response};
+use mln_util::UnitBezier;
 use mln_util::chrono::Timestamp;
 use mln_util::geo::{LatLng, ScreenCoordinate};
 use mln_util::size::Size;
@@ -226,6 +227,76 @@ fn a_demand_shows_the_commands_sent_before_it() {
     assert_eq!(FrameDisposition::Rendered, result.disposition);
     assert!(result.map_update_generation >= applied.render_update_generation);
     assert_eq!(3.0, result.view.unwrap().camera.zoom);
+}
+
+// A host demands each frame at its display's pace, so the camera moves
+// evenly only when each frame samples the animation at its demand, not when
+// the runtime's thread last updated the map after a frame.
+#[test]
+fn a_demand_shows_the_animations_as_of_its_call() {
+    let runtime = runtime();
+    let map = red_map(&runtime);
+    let session = attach(&map);
+    render_until_idle(&map, &session);
+
+    // 100° of longitude over 5 s, linearly: 20° a second.
+    let duration = std::time::Duration::from_secs(5);
+    let ease = map.update_camera(CameraUpdate {
+        mode: CameraUpdateMode::Ease,
+        camera: CameraOptions { center: Some(LatLng::new(0.0, 100.0).unwrap()), ..Default::default() },
+        animation: AnimationOptions {
+            duration: Some(duration),
+            easing: Some(UnitBezier::new(0.0, 0.0, 1.0, 1.0)),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    // Started before the first frame, which would otherwise show its start.
+    wait(map.camera());
+    let frame = |token| {
+        let before = std::time::Instant::now();
+        demand(&session, DemandMode::IfChanged, token);
+        let after = std::time::Instant::now();
+        let result = take_one(&session);
+        assert_eq!(FrameDisposition::Rendered, result.disposition);
+        (before, after, result.view.unwrap().camera.center.longitude())
+    };
+    let (first_before, first_after, first) = frame(1);
+    // The first frame's report updates the map on the runtime's thread
+    // meanwhile.
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    let (second_before, second_after, second) = frame(2);
+
+    let moved = std::time::Duration::from_secs_f64((second - first) / 100.0 * duration.as_secs_f64());
+    // The map solves the easing curve to a thousandth of the duration.
+    let slack = duration / 1000;
+    assert!(
+        second_before - first_after <= moved + slack && moved <= second_after - first_before + slack,
+        "the camera moved by {moved:?} ({first}° to {second}°) between frames demanded {:?} to {:?} apart",
+        second_before - first_after,
+        second_after - first_before,
+    );
+
+    wait(map.cancel_camera_transitions());
+    drop(ease);
+}
+
+// The frame clock reaches the map through the runtime's thread, which a
+// still map's frames don't wait for.
+#[test]
+fn a_demand_on_a_still_map_does_not_wait_for_the_runtimes_thread() {
+    let runtime = runtime();
+    let map = red_map(&runtime);
+    let other = red_map(&runtime);
+    let session = attach(&map);
+    render_until_idle(&map, &session);
+
+    let open = hold_runtime(&other);
+    demand(&session, DemandMode::Force, 651);
+    let result = take_one(&session);
+    drop(open);
+    assert_eq!(651, result.token.unwrap());
+    assert_eq!(FrameDisposition::Rendered, result.disposition);
 }
 
 #[test]

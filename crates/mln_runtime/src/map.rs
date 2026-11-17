@@ -18,6 +18,7 @@ use mln_util::geo::LatLngBounds;
 use mln_util::hash::HashMap;
 use mln_util::pool::Pool;
 use mln_util::size::Size;
+use mln_util::time::Instant;
 use parking_lot::Mutex;
 
 use crate::camera::{self, CameraFitArea, CameraFitOptions, CameraFitUpdate, TileOptions, ViewportOptions};
@@ -809,6 +810,31 @@ impl Map {
             },
             |then| worker_post(&session_queue, then),
         );
+    }
+
+    /// Puts the map on the frame clock of a frame demanded now: a command
+    /// samples its animations at this time, and starts later ones from it,
+    /// as [`mln_map::Map::set_frame_time`] does.
+    pub(crate) fn sample_animations_for_frame(&self) {
+        if self.shared.mode != MapMode::Continuous {
+            return;
+        }
+        // The demand waits for the command. A still map without commands on
+        // their way has nothing to sample, and its frames don't wait for the
+        // runtime's thread.
+        let animating = self.shared.published.snapshot.lock().is_some_and(|snapshot| snapshot.transition_in_progress);
+        if !animating && self.sent_sequence() == self.applied_sequence() {
+            return;
+        }
+        let time = Instant::now();
+        // A map released meanwhile has no animations to sample.
+        let _ = self.shared.send(Some(|_| {}), move |core, outbox, id, sequence, resolver| {
+            let sample = move |entry: &mut MapEntry, _: &mut Outbox| {
+                entry.core.set_frame_time(Some(time));
+                Ok(())
+            };
+            run_command(core, id, sequence, sample, |(), _| (), resolver, outbox);
+        });
     }
 
     /// Sends a command that resizes the map to `size` at `scale_factor`,
