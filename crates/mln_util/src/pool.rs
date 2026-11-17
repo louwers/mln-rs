@@ -14,6 +14,9 @@ use std::thread::ThreadId;
 
 use parking_lot::{Condvar, Mutex};
 
+#[cfg(not(target_family = "wasm"))]
+use crate::logging::{Event, Log};
+#[cfg(not(target_family = "wasm"))]
 use crate::thread::Joined;
 use crate::time::Instant;
 
@@ -28,9 +31,11 @@ pub type Waker = Arc<dyn Fn() + Send + Sync>;
 pub type Respond<R> = Box<dyn FnOnce(R) + Send>;
 
 /// Runs background work on worker threads, or, without threads, on the
-/// thread that runs it. Cheap to clone: clones share the pool. Its threads
-/// end once the last clone and the last [`TaskGroup`] of it drop, dropping
-/// the tasks still queued.
+/// thread that runs it. Cheap to clone: clones share the pool. A worker
+/// starts when a task arrives while every running worker is busy, up to the
+/// pool's thread count, so a pool that runs nothing starts no threads. Its
+/// threads end once the last clone and the last [`TaskGroup`] of it drop,
+/// dropping the tasks still queued.
 #[derive(Clone)]
 pub struct Pool {
     workers: Arc<Workers>,
@@ -48,8 +53,6 @@ pub struct TaskGroup {
 /// The pool's threads, which stop when this drops.
 struct Workers {
     shared: Arc<Shared>,
-    threads: Vec<Joined>,
-    ids: Vec<ThreadId>,
 }
 
 struct Shared {
@@ -59,6 +62,17 @@ struct Shared {
     /// The pool's own lane, for [`Pool::spawn`].
     lane: Arc<Lane>,
     waker: Mutex<Option<Waker>>,
+    /// The most worker threads the pool starts: none for a local pool.
+    max_threads: usize,
+    /// The workers started so far.
+    threads: Mutex<Threads>,
+}
+
+#[derive(Default)]
+struct Threads {
+    #[cfg(not(target_family = "wasm"))]
+    joined: Vec<Joined>,
+    ids: Vec<ThreadId>,
 }
 
 /// The lanes with queued tasks, each once, in the order the workers visit
@@ -66,6 +80,10 @@ struct Shared {
 #[derive(Default)]
 struct Ring {
     lanes: VecDeque<Arc<Lane>>,
+    /// The workers started, or starting.
+    started: usize,
+    /// The workers waiting for a task.
+    idle: usize,
     stopped: bool,
 }
 
@@ -86,36 +104,26 @@ struct LaneState {
 }
 
 impl Pool {
-    /// A pool of `threads` worker threads.
-    ///
-    /// # Errors
-    ///
-    /// Fails when the operating system can't start a thread.
+    /// A pool of up to `threads` worker threads, which start as tasks
+    /// arrive.
     #[cfg(not(target_family = "wasm"))]
-    pub fn new(threads: usize) -> std::io::Result<Pool> {
-        let shared = Arc::new(Shared::new());
-        let mut workers = Workers { shared: Arc::clone(&shared), threads: Vec::new(), ids: Vec::new() };
-        for index in 0..threads {
-            let shared = Arc::clone(&shared);
-            let thread = crate::thread::spawn(format!("Worker {}", index + 1), move || shared.work())?;
-            workers.ids.push(thread.thread().id());
-            workers.threads.push(Joined::new(thread));
-        }
-        Ok(Pool { workers: Arc::new(workers) })
+    #[must_use]
+    pub fn new(threads: usize) -> Pool {
+        Pool { workers: Arc::new(Workers { shared: Arc::new(Shared::new(threads)) }) }
     }
 
     /// A pool without threads, whose tasks run when [`run_until`](Self::run_until)
     /// runs them, on one thread.
     #[must_use]
     pub fn local() -> Pool {
-        let shared = Arc::new(Shared::new());
-        Pool { workers: Arc::new(Workers { shared, threads: Vec::new(), ids: Vec::new() }) }
+        Pool { workers: Arc::new(Workers { shared: Arc::new(Shared::new(0)) }) }
     }
 
-    /// The pool's worker threads: none for a [`local`](Self::local) pool.
+    /// The most worker threads the pool runs: none for a
+    /// [`local`](Self::local) pool.
     #[must_use]
     pub fn threads(&self) -> usize {
-        self.workers.threads.len()
+        self.workers.shared.max_threads
     }
 
     /// Runs `task` on the pool, in its own lane.
@@ -154,7 +162,7 @@ impl Pool {
 
     /// Whether this thread is one of the pool's workers.
     fn is_worker(&self) -> bool {
-        self.workers.ids.contains(&std::thread::current().id())
+        self.workers.shared.threads.lock().ids.contains(&std::thread::current().id())
     }
 }
 
@@ -221,26 +229,38 @@ impl std::fmt::Debug for TaskGroup {
 }
 
 impl Shared {
-    fn new() -> Shared {
-        Shared { ring: Mutex::default(), work: Condvar::new(), lane: Arc::default(), waker: Mutex::new(None) }
+    fn new(max_threads: usize) -> Shared {
+        Shared {
+            ring: Mutex::default(),
+            work: Condvar::new(),
+            lane: Arc::default(),
+            waker: Mutex::new(None),
+            max_threads,
+            threads: Mutex::default(),
+        }
     }
 
-    fn push(&self, lane: &Arc<Lane>, task: Task) {
+    fn push(self: &Arc<Self>, lane: &Arc<Lane>, task: Task) {
         let joins = {
             let mut state = lane.state.lock();
             state.tasks.push_back(task);
             !std::mem::replace(&mut state.queued, true)
         };
-        if !joins {
-            return;
-        }
-        let was_idle = {
+        let (was_idle, start) = {
             let mut ring = self.ring.lock();
-            let was_idle = ring.lanes.is_empty();
-            ring.lanes.push_back(Arc::clone(lane));
-            self.work.notify_one();
-            was_idle
+            let was_idle = joins && ring.lanes.is_empty();
+            if joins {
+                ring.lanes.push_back(Arc::clone(lane));
+                self.work.notify_one();
+            }
+            // Every worker is busy: another starts, if the pool may run one.
+            let start = ring.idle == 0 && !ring.stopped && ring.started < self.max_threads;
+            ring.started += usize::from(start);
+            (was_idle, start)
         };
+        if start {
+            self.start_worker();
+        }
         if was_idle {
             let waker = self.waker.lock().clone();
             if let Some(waker) = waker {
@@ -272,6 +292,28 @@ impl Shared {
         None
     }
 
+    /// Starts the worker that `push` counted started.
+    #[cfg_attr(target_family = "wasm", expect(clippy::unused_self, reason = "the browser's pools start no threads"))]
+    fn start_worker(self: &Arc<Self>) {
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let mut threads = self.threads.lock();
+            let shared = Arc::clone(self);
+            match crate::thread::spawn(format!("Worker {}", threads.ids.len() + 1), move || shared.work()) {
+                Ok(thread) => {
+                    threads.ids.push(thread.thread().id());
+                    threads.joined.push(Joined::new(thread));
+                }
+                // The running workers take the tasks; without any, they
+                // wait for a later task to start one.
+                Err(error) => {
+                    self.ring.lock().started -= 1;
+                    Log::error(Event::General, format!("can't start a pool worker: {error}"));
+                }
+            }
+        }
+    }
+
     /// A worker's loop, until the pool stops.
     #[cfg(not(target_family = "wasm"))]
     fn work(&self) {
@@ -285,7 +327,9 @@ impl Shared {
                     if let Some(next) = self.next(&mut ring) {
                         break next;
                     }
+                    ring.idle += 1;
                     self.work.wait(&mut ring);
+                    ring.idle -= 1;
                 }
             };
             let (lane, task) = next;
@@ -318,7 +362,9 @@ impl Drop for Workers {
     fn drop(&mut self) {
         self.shared.ring.lock().stopped = true;
         self.shared.work.notify_all();
-        self.threads.clear();
+        // Joined outside the lock, which a task that spawns takes.
+        let threads = std::mem::take(&mut *self.shared.threads.lock());
+        drop(threads);
         // The tasks left, dropped here rather than with the last worker.
         let lanes = std::mem::take(&mut self.shared.ring.lock().lanes);
         let tasks: Vec<VecDeque<Task>> =
@@ -337,7 +383,7 @@ mod tests {
 
     #[test]
     fn a_group_waits_for_its_tasks() {
-        let pool = Pool::new(4).unwrap();
+        let pool = Pool::new(4);
         let group = TaskGroup::new(&pool);
         let count = Arc::new(AtomicUsize::new(0));
         for _ in 0..50 {
@@ -352,8 +398,37 @@ mod tests {
     }
 
     #[test]
+    fn workers_start_as_tasks_arrive_up_to_the_limit() {
+        let pool = Pool::new(3);
+        let started = || pool.workers.shared.threads.lock().ids.len();
+        assert_eq!(started(), 0);
+        let group = TaskGroup::new(&pool);
+        let gate = Arc::new((Mutex::new(false), Condvar::new()));
+        let (running, run) = mpsc::channel();
+        for _ in 0..5 {
+            let (gate, running) = (Arc::clone(&gate), running.clone());
+            group.spawn(move || {
+                running.send(()).unwrap();
+                let (open, opened) = &*gate;
+                let mut open = open.lock();
+                while !*open {
+                    opened.wait(&mut open);
+                }
+            });
+        }
+        for _ in 0..3 {
+            run.recv_timeout(Duration::from_secs(10)).unwrap();
+        }
+        assert_eq!(started(), 3);
+        *gate.0.lock() = true;
+        gate.1.notify_all();
+        group.wait();
+        assert_eq!(started(), 3);
+    }
+
+    #[test]
     fn a_group_waits_for_the_tasks_its_tasks_spawn() {
-        let pool = Pool::new(2).unwrap();
+        let pool = Pool::new(2);
         let group = TaskGroup::new(&pool);
         let count = Arc::new(AtomicUsize::new(0));
         let (inner, counter) = (group.clone(), Arc::clone(&count));
@@ -370,7 +445,7 @@ mod tests {
 
     #[test]
     fn a_wait_runs_queued_tasks_on_the_waiting_thread() {
-        let pool = Pool::new(1).unwrap();
+        let pool = Pool::new(1);
         let group = TaskGroup::new(&pool);
         let (blocked, block) = mpsc::channel::<()>();
         let (started, start) = mpsc::channel::<()>();
@@ -453,7 +528,7 @@ mod tests {
 
     #[test]
     fn a_task_that_panics_still_ends() {
-        let pool = Pool::new(1).unwrap();
+        let pool = Pool::new(1);
         let group = TaskGroup::new(&pool);
         group.spawn(|| panic!("a task panicked"));
         let (done, finished) = mpsc::channel();
@@ -481,7 +556,7 @@ mod tests {
     /// The last owner of a pool may be one of its own tasks.
     #[test]
     fn a_pool_dropped_by_its_own_task_stops() {
-        let pool = Arc::new(Mutex::new(Some(Pool::new(2).unwrap())));
+        let pool = Arc::new(Mutex::new(Some(Pool::new(2))));
         let (done, dropped) = mpsc::channel();
         let owner = Arc::clone(&pool);
         let spawner = pool.lock().clone().unwrap();
@@ -496,7 +571,7 @@ mod tests {
 
     #[test]
     fn a_wait_from_a_worker_panics() {
-        let pool = Pool::new(1).unwrap();
+        let pool = Pool::new(1);
         let group = TaskGroup::new(&pool);
         let (result, outcome) = mpsc::channel();
         let inner = group.clone();

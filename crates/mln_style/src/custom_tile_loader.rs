@@ -415,7 +415,7 @@ mod tests {
     // and a fetch that answers from inside itself doesn't deadlock.
     #[test]
     fn host_calls_run_off_the_calling_thread_in_order_and_may_reenter() {
-        let pool = Pool::new(4).unwrap();
+        let pool = Pool::new(4);
         let fetches: Arc<Mutex<Vec<(ThreadId, CanonicalTileID)>>> = Arc::default();
         let provider_cell: Arc<OnceLock<Weak<CustomProvider<u32>>>> = Arc::default();
         let fetch: TileFunction = {

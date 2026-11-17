@@ -18,7 +18,6 @@ use std::process::ExitCode;
 use mln_bench::meter::CountingAllocator;
 use mln_bench::scene::{Mode, Scene};
 use mln_bench::{CaseReport, Context, Environment, Report, cases, compare};
-use mln_util::pool::Pool;
 use mln_util::size::Size;
 
 #[global_allocator]
@@ -146,9 +145,8 @@ fn run_cases(options: &Options) -> Result<(), String> {
         fixtures: options.fixtures.canonicalize().map_err(|e| format!("{}: {e}", options.fixtures.display()))?,
         scale: options.scale.as_deref().map_or(Ok(1.0), str::parse).map_err(|_| "--scale needs a number")?,
         frames: options.frames.clone(),
-        pool: Pool::new(4).map_err(|e| format!("the scenes' pool: {e}"))?,
     };
-    let (gpu, software_gpu) = Scene::new(Size::new(1, 1), Mode::Still, &cx.pool).gpu();
+    let (gpu, software_gpu) = Scene::new(Size::new(1, 1), Mode::Still).gpu();
     let environment =
         Environment { gpu, software_gpu, os: format!("{} {}", std::env::consts::OS, std::env::consts::ARCH), fixtures };
     if software_gpu {

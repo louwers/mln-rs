@@ -50,7 +50,7 @@ mod vector_tile_test;
 
 /// A pool for a test's background work.
 pub(crate) fn pool() -> mln_util::pool::Pool {
-    mln_util::pool::Pool::new(4).expect("a pool")
+    mln_util::pool::Pool::new(4)
 }
 
 /// Port-only: a tile store whose jobs run on `workers` and which frees and

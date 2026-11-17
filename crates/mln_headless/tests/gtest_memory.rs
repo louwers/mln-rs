@@ -29,7 +29,7 @@ fn get_type(res: &Resource) -> &'static str {
 impl MemoryTest {
     fn new() -> Self {
         let run_loop = TestLoop::new();
-        let pool = Pool::new(4).unwrap();
+        let pool = Pool::new(4);
         let file_source = StubFileSource::on_queue(run_loop.queue(), ResponseType::Asynchronous);
         let cache: Arc<Mutex<HashMap<String, Arc<Vec<u8>>>>> = Arc::default();
 

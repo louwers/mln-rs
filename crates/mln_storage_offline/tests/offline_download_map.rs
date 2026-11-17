@@ -55,7 +55,7 @@ impl<F: Fn(OfflineRegionStatus)> OfflineRegionObserver for StatusObserver<F> {
 fn resource_offline_usage_unset() {
     // `OfflineTest test{filename_test_fs}`.
     let run_loop = Queue::new();
-    let pool = Pool::new(4).unwrap();
+    let pool = Pool::new(4);
     let file_source = StubFileSource::on_queue(&run_loop, ResponseType::Asynchronous);
     // A database of this run's own, which goes when the test ends.
     let dir = tempfile::tempdir().unwrap();

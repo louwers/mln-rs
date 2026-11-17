@@ -221,22 +221,21 @@ fn font_face_engine() -> Arc<dyn FontFaceEngine> {
     Arc::new(mln_web_host::shaper::ShaperModuleEngine)
 }
 
-/// The worker threads of a runtime's pool.
+/// The most worker threads of a runtime's pool.
 #[cfg(not(target_family = "wasm"))]
 const POOL_THREADS: usize = 4;
 
 /// The pool of a new runtime.
 #[cfg(not(target_family = "wasm"))]
-fn runtime_pool() -> Result<Pool, Error> {
-    Pool::new(POOL_THREADS).map_err(|error| Error::native(format!("can't start the runtime's pool: {error}")))
+fn runtime_pool() -> Pool {
+    Pool::new(POOL_THREADS)
 }
 
 /// The pool of a new runtime: in the browser, one without threads, which
 /// the instance's pump runs.
 #[cfg(target_family = "wasm")]
-#[expect(clippy::unnecessary_wraps, reason = "the threads of other builds can fail to start")]
-fn runtime_pool() -> Result<Pool, Error> {
-    Ok(Pool::local())
+fn runtime_pool() -> Pool {
+    Pool::local()
 }
 
 fn released() -> Error {
@@ -551,7 +550,7 @@ impl Runtime {
         };
         let queued = Arc::new(AtomicUsize::new(0));
         let queue = CoreQueue::default();
-        let pool = runtime_pool()?;
+        let pool = runtime_pool();
         let (thread, thread_end) = Self::start(
             resource_options,
             network_options,

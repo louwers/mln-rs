@@ -377,7 +377,7 @@ impl TestRunner {
             watchdog: None,
             impl_options: ImplOptions::default(),
             queue: Queue::new(),
-            pool: Pool::new(4).expect("the runner's pool"),
+            pool: Pool::new(4),
         }
     }
 

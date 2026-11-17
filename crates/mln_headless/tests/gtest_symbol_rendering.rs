@@ -109,7 +109,7 @@ impl SymbolRenderingTest {
 
     fn with_frontend(live: bool, count: usize, spacing: f64, kind: SymbolKind, mode: MapMode) -> Self {
         let run_loop = TestLoop::new();
-        let pool = Pool::new(4).unwrap();
+        let pool = Pool::new(4);
         let mut frontend =
             HeadlessFrontend::new(Size::new(256, 256), 1.0, run_loop.queue(), &pool).expect("a headless frontend");
         let file_source = StubFileSource::on_queue(run_loop.queue(), ResponseType::Asynchronous);

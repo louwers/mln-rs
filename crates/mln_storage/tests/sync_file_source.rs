@@ -53,7 +53,7 @@ impl FileSource for SyncFileSource {
 #[test]
 fn load_sync_render() {
     let queue = Queue::new();
-    let pool = Pool::new(4).unwrap();
+    let pool = Pool::new(4);
     let fs = Arc::new(SyncFileSource::default());
     fs.add("maptiler://maps/streets", read_file("test/fixtures/resources/source_vector.json"));
     fs.add("maptiler://sprites/streets/sprite", read_file("test/fixtures/resources/sprite.png"));

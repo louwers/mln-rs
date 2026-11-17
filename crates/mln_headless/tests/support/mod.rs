@@ -657,7 +657,7 @@ impl<FS: FileSource + 'static> MapTest<FS> {
     /// .withSize(frontend.getSize()).withPixelRatio(pixelRatio))`.
     pub(crate) fn create(run_loop: TestLoop, file_source: Arc<FS>, pixel_ratio: f32, mode: MapMode) -> Self {
         let observer = Rc::new(StubMapObserver::default());
-        let pool = Pool::new(4).unwrap();
+        let pool = Pool::new(4);
         let mut frontend =
             HeadlessFrontend::with_pixel_ratio(pixel_ratio, run_loop.queue(), &pool).expect("a headless frontend");
         let options = MapOptions { map_mode: mode, size: frontend.size(), pixel_ratio, ..Default::default() };

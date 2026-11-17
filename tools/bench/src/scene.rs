@@ -245,6 +245,20 @@ impl Observer {
     }
 }
 
+/// The pool of the scenes, which the scenes alive at once share as a
+/// host's maps share their runtime's. It ends with the last of them, as a
+/// runtime's ends with the runtime, so that a case doesn't start with what
+/// an earlier case left on its workers.
+fn shared_pool() -> Arc<Pool> {
+    static SHARED: Mutex<Weak<Pool>> = Mutex::new(Weak::new());
+    let mut shared = SHARED.lock();
+    shared.upgrade().unwrap_or_else(|| {
+        let pool = Arc::new(Pool::new(4));
+        *shared = Arc::downgrade(&pool);
+        pool
+    })
+}
+
 /// The file source of the scenes over `resource_options`' cache database:
 /// the render suite's proxy, with the tile latency of [`crate::latency`].
 /// The scenes alive at once share it, as a host's maps share their runtime's.
@@ -273,18 +287,20 @@ pub struct Scene {
     /// The queue of the scene's thread, which the scene and its frontend
     /// run while they wait.
     queue: Queue<()>,
+    /// Keeps the scenes' pool while the scene lives.
+    _pool: Arc<Pool>,
 }
 
 impl Scene {
-    /// A map without a style, whose background work runs on `pool`; its GPU
-    /// device is ready. Its renderer has a glyph cache of its own.
+    /// A map without a style; its GPU device is ready. Its renderer has a
+    /// glyph cache of its own.
     #[must_use]
-    pub fn new(size: Size, mode: Mode, pool: &Pool) -> Scene {
-        Scene::with_glyph_cache(size, mode, Arc::default(), pool)
+    pub fn new(size: Size, mode: Mode) -> Scene {
+        Scene::with_glyph_cache(size, mode, Arc::default())
     }
 
     /// A map whose renderer shares `glyph_cache`.
-    pub(crate) fn with_glyph_cache(size: Size, mode: Mode, glyph_cache: Arc<GlyphCache>, pool: &Pool) -> Scene {
+    pub(crate) fn with_glyph_cache(size: Size, mode: Mode, glyph_cache: Arc<GlyphCache>) -> Scene {
         // MLN_BENCH_CACHE_DB names the render suite's cache database where
         // the binary runs without its checkout, as on an Android device.
         let cache = std::env::var_os("MLN_BENCH_CACHE_DB").map_or_else(
@@ -294,14 +310,22 @@ impl Scene {
         let resource_options =
             ResourceOptions { cache_path: cache.display().to_string(), ..ResourceOptions::default() };
         let queue = Queue::new();
+        let pool = shared_pool();
         let mut frontend =
-            HeadlessFrontend::with_glyph_cache(size, 1.0, glyph_cache, &queue, pool).expect("a headless frontend");
-        let file_source = shared_file_source(&resource_options, pool);
+            HeadlessFrontend::with_glyph_cache(size, 1.0, glyph_cache, &queue, &pool).expect("a headless frontend");
+        let file_source = shared_file_source(&resource_options, &pool);
         let map_mode = if mode == Mode::Still { MapMode::Static } else { MapMode::Continuous };
         let options = MapOptions { map_mode, size, pixel_ratio: 1.0, ..Default::default() };
-        let mut map = Map::with_file_source(file_source, options, pool).expect("the map");
+        let mut map = Map::with_file_source(file_source, options, &pool).expect("the map");
         frontend.attach(&mut map);
-        Scene { frontend, draws_updates: mode != Mode::OnDemand, map, observer: Observer::default(), queue }
+        Scene {
+            frontend,
+            draws_updates: mode != Mode::OnDemand,
+            map,
+            observer: Observer::default(),
+            queue,
+            _pool: pool,
+        }
     }
 
     /// Starts loading a style; it loads while the scene renders.

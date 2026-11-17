@@ -33,7 +33,7 @@ fn stoi(s: &str) -> i32 {
 #[test]
 fn prefetch_tiles() {
     let run_loop = TestLoop::new();
-    let pool = Pool::new(4).unwrap();
+    let pool = Pool::new(4);
     let file_source = StubFileSource::on_queue(run_loop.queue(), ResponseType::Asynchronous);
 
     // C++ `emergencyShutoff`: a 10 s timer that fails the test; here every

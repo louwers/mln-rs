@@ -41,7 +41,7 @@ fn run_on(test: &str, frontend: impl FnOnce(Size, f32, &Queue<()>, &Pool) -> Hea
     let size = Size::new(width, height);
 
     let run_loop = Queue::new();
-    let pool = Pool::new(4).unwrap();
+    let pool = Pool::new(4);
     let mut frontend = frontend(size, pixel_ratio, &run_loop, &pool);
     let mut map =
         Map::new(MapOptions { map_mode: MapMode::Static, size, pixel_ratio, ..Default::default() }, &pool).unwrap();

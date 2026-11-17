@@ -66,7 +66,7 @@ enum Style {
 
 impl View {
     fn scene(&self, cx: &Context, mode: Mode) -> Scene {
-        let mut scene = Scene::new(self.size, mode, &cx.pool);
+        let mut scene = Scene::new(self.size, mode);
         scene.jump(self.center, self.zoom);
         self.load(cx, &mut scene);
         scene
@@ -206,7 +206,7 @@ fn still_colliding_icons(cx: &Context, name: &str, icons: usize, overlap: bool) 
         features.join(",")
     );
     let center = LatLng::new(5.0, 5.0).expect("a center");
-    let mut scene = Scene::new(Size::new(256, 256), Mode::Still, &cx.pool);
+    let mut scene = Scene::new(Size::new(256, 256), Mode::Still);
     scene.jump(center, 4.0);
     scene.load_json(&style);
     scene.add_image("marker", PremultipliedImage::from_vec(Size::new(16, 16), vec![255; 16 * 16 * 4]));
@@ -237,7 +237,7 @@ fn load_style(cx: &Context, view: &View) -> Metrics {
     let mut meter = Meter::new();
     let mut last = None;
     for _ in 0..cx.iterations(10) {
-        let mut scene = Scene::new(view.size, Mode::Still, &cx.pool);
+        let mut scene = Scene::new(view.size, Mode::Still);
         scene.jump(view.center, view.zoom);
         meter.start();
         view.load(cx, &mut scene);
@@ -291,7 +291,7 @@ fn concurrent(cx: &Context, name: &str, views: &[View], shared: bool) -> Metrics
                     let (ready, glyph_cache) = (&ready, glyph_cache.clone());
                     scope.spawn(move || {
                         let mut scene =
-                            Scene::with_glyph_cache(view.size, Mode::Still, glyph_cache.unwrap_or_default(), &cx.pool);
+                            Scene::with_glyph_cache(view.size, Mode::Still, glyph_cache.unwrap_or_default());
                         scene.jump(view.center, view.zoom);
                         ready.wait();
                         view.load(cx, &mut scene);
@@ -314,7 +314,7 @@ fn concurrent(cx: &Context, name: &str, views: &[View], shared: bool) -> Metrics
 }
 
 fn basemap(cx: &Context, mode: Mode) -> Scene {
-    let mut scene = Scene::new(BASEMAP_SIZE, mode, &cx.pool);
+    let mut scene = Scene::new(BASEMAP_SIZE, mode);
     scene.jump(basemap_center(), BASEMAP_ZOOM);
     scene.load_json(&basemap_style(&cx.fixtures));
     scene
@@ -373,7 +373,7 @@ fn frame_feature_state_hover(cx: &Context) -> Metrics {
     let buildings = layers.iter_mut().find(|layer| layer["id"] == "buildings").expect("the buildings layer");
     buildings["paint"]["fill-color"] =
         serde_json::json!(["case", ["boolean", ["feature-state", "selected"], false], "#c9a28f", "#d9d0c9"]);
-    let mut scene = Scene::new(BASEMAP_SIZE, Mode::OnDemand, &cx.pool);
+    let mut scene = Scene::new(BASEMAP_SIZE, Mode::OnDemand);
     scene.jump(basemap_center(), BASEMAP_ZOOM);
     scene.load_json(&style.to_string());
     scene.settle();
@@ -436,7 +436,7 @@ fn frame_map_feature_state_hover(cx: &Context) -> Metrics {
             },
         ],
     });
-    let mut scene = Scene::new(BASEMAP_SIZE, Mode::OnDemand, &cx.pool);
+    let mut scene = Scene::new(BASEMAP_SIZE, Mode::OnDemand);
     scene.jump(LatLng::new(0.0, 0.0).expect("a valid center"), 7.0);
     scene.load_json(&style.to_string());
     scene.settle();
@@ -489,7 +489,7 @@ fn frame_feature_state(cx: &Context) -> Metrics {
             "paint": {"line-color": selected("#e55e5e", "rgba(0, 0, 0, 0)"), "line-width": 6},
         }),
     );
-    let mut scene = Scene::new(BASEMAP_SIZE, Mode::OnDemand, &cx.pool);
+    let mut scene = Scene::new(BASEMAP_SIZE, Mode::OnDemand);
     scene.jump(basemap_center(), BASEMAP_ZOOM);
     scene.load_json(&style.to_string());
     scene.settle();
@@ -581,7 +581,7 @@ fn frame_extrusions(cx: &Context, name: &str, data_driven: bool) -> Metrics {
     let nudge = |scene: &mut Scene, i: usize| {
         scene.jump_pitched(basemap_center(), BASEMAP_ZOOM + 0.5 + 0.001 * (i % 2) as f64, 30.0, 50.0);
     };
-    let mut scene = Scene::new(BASEMAP_SIZE, Mode::OnDemand, &cx.pool);
+    let mut scene = Scene::new(BASEMAP_SIZE, Mode::OnDemand);
     nudge(&mut scene, 0);
     scene.load_json(&extrusions_style(&cx.fixtures, data_driven));
     scene.settle();
@@ -656,7 +656,7 @@ fn planet_turn(scene: &mut Scene, step: usize) {
 /// it, over tiles an untimed turn loaded. Its labels turn past the horizon,
 /// and its tiles are meshes bent onto the sphere.
 fn frame_globe(cx: &Context) -> Metrics {
-    let mut scene = Scene::new(BASEMAP_SIZE, Mode::OnDemand, &cx.pool);
+    let mut scene = Scene::new(BASEMAP_SIZE, Mode::OnDemand);
     planet_turn(&mut scene, 0);
     scene.load_json(&planet_style(&cx.fixtures));
     scene.settle();
@@ -888,7 +888,7 @@ fn frame_settle_without_symbols(cx: &Context) -> Metrics {
     let mut style: serde_json::Value =
         serde_json::from_str(&basemap_style(&cx.fixtures)).expect("the basemap style is JSON");
     style["layers"].as_array_mut().expect("the style has layers").retain(|layer| layer["type"] != "symbol");
-    let mut scene = Scene::new(BASEMAP_SIZE, Mode::Driven, &cx.pool);
+    let mut scene = Scene::new(BASEMAP_SIZE, Mode::Driven);
     scene.jump(basemap_center(), BASEMAP_ZOOM);
     scene.load_json(&style.to_string());
     // Until a frame after `before` finishes without asking for another.
@@ -950,7 +950,7 @@ fn frame_add_images(cx: &Context) -> Metrics {
         let pixel = [(n * 5) as u8, 0, 255 - (n * 5) as u8, 255];
         PremultipliedImage::from_vec(Size::new(24, 24), pixel.repeat(24 * 24))
     };
-    let mut scene = Scene::new(BASEMAP_SIZE, Mode::OnDemand, &cx.pool);
+    let mut scene = Scene::new(BASEMAP_SIZE, Mode::OnDemand);
     scene.jump(basemap_center(), BASEMAP_ZOOM);
     let mut meter = Meter::new();
     let mut frames = Vec::new();
@@ -1057,8 +1057,8 @@ fn partitioned_view(style: String) -> runtime_scene::View {
 }
 
 /// A scene showing `partitioned_style`'s 100 points.
-fn partitioned_scene(cx: &Context, mode: Mode) -> Scene {
-    let mut scene = Scene::new(PARTITIONED_SIZE, mode, &cx.pool);
+fn partitioned_scene(mode: Mode) -> Scene {
+    let mut scene = Scene::new(PARTITIONED_SIZE, mode);
     scene.jump(partitioned_center(), PARTITIONED_ZOOM);
     scene
 }
@@ -1297,7 +1297,7 @@ const OVERLAY_LAYER: &str =
 /// change lays out the source's tiles again with all of their layers.
 /// `frames` is the frames drawn per change.
 fn style_add_layer(cx: &Context) -> Metrics {
-    let mut scene = partitioned_scene(cx, Mode::OnDemand);
+    let mut scene = partitioned_scene(Mode::OnDemand);
     scene.load_json(&partitioned_style(600, 0));
     scene.settle();
     let mut meter = Meter::new();

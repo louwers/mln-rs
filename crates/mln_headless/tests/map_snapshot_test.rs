@@ -9,7 +9,7 @@ use mln_util::size::Size;
 #[test]
 fn a_rendered_still_shows_in_the_snapshot() {
     let run_loop = Queue::new();
-    let pool = Pool::new(4).unwrap();
+    let pool = Pool::new(4);
     let size = Size::new(64, 64);
     let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop, &pool).expect("a headless frontend");
     let mut map = Map::new(MapOptions { map_mode: MapMode::Static, size, ..Default::default() }, &pool).unwrap();

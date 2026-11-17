@@ -72,7 +72,7 @@ impl FeatureTrackingTest {
 
     fn with_geojson(geojson: &str, camera: CameraOptions) -> Self {
         let run_loop = TestLoop::new();
-        let pool = Pool::new(4).unwrap();
+        let pool = Pool::new(4);
         let mut frontend =
             HeadlessFrontend::with_pixel_ratio(1.0, run_loop.queue(), &pool).expect("a headless frontend");
         let file_source = StubFileSource::on_queue(run_loop.queue(), ResponseType::Asynchronous);

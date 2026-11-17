@@ -628,7 +628,7 @@ fn loader_with_database(
     cache_path: &str,
     asset_path: &str,
 ) -> (Arc<Loader>, Arc<DatabaseFileSource>, Arc<NetworkStatus>) {
-    let pool = Pool::new(4).unwrap();
+    let pool = Pool::new(4);
     let status = Arc::new(NetworkStatus::new());
     let network: Arc<dyn FileSource> = Arc::new(OnlineFileSource::new(Arc::clone(&status)));
     let database = Arc::new(DatabaseFileSource::new(cache_path, Some(Arc::clone(&network))));
@@ -1275,7 +1275,7 @@ fn dont_load_unneeded_tiles() {
 #[ignore = "TEST_DISABLED_ON_CI (timing-dependent); see map.test.cpp:994"]
 fn continuous_rendering() {
     let run_loop = TestLoop::new();
-    let pool = Pool::new(4).unwrap();
+    let pool = Pool::new(4);
 
     let did_not_stop = Arc::new(AtomicBool::new(false));
     let emergency_shutoff = LoopTimer::new(&run_loop);
@@ -2386,7 +2386,7 @@ fn expired_sprite_sheet() {
     // test{":memory:", ".", 1, MapMode::Continuous}`: the frontend's
     // check runs on the update each frame draws.
     let run_loop = TestLoop::new();
-    let pool = Pool::new(4).unwrap();
+    let pool = Pool::new(4);
     let (file_source, dbfs, network) = loader_with_database(":memory:", ".");
     let observer = Rc::new(StubMapObserver::default());
     let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, run_loop.queue(), &pool).expect("a headless frontend");
@@ -3103,7 +3103,7 @@ fn observe_tile_lifecycle() {
     use TileOperation::*;
 
     let run_loop = TestLoop::new();
-    let pool = Pool::new(4).unwrap();
+    let pool = Pool::new(4);
 
     let tile_ops: Rc<RefCell<Vec<(OverscaledTileID, TileOperation)>>> = Rc::default();
     // We expect to see a valid lifecycle for every tile in this list.
@@ -3353,7 +3353,7 @@ fn style_update_zoom_dependency() {
 fn globe_hand_off_keeps_tiles() {
     // Crossing the globe's Mercator hand-off must not re-parse the tiles already on screen.
     let run_loop = TestLoop::new();
-    let pool = Pool::new(4).unwrap();
+    let pool = Pool::new(4);
     // C++ guards `parsed` with `tileMutex`; the observer is called on this thread.
     let parsed: Rc<RefCell<Vec<OverscaledTileID>>> = Rc::new(RefCell::new(Vec::new()));
     let observer = Rc::new(StubMapObserver::default());
@@ -3431,7 +3431,7 @@ fn water_layers_in(order: [&str; 2]) -> String {
 #[test]
 fn a_moved_layer_draws_in_its_new_place_without_a_relayout() {
     let run_loop = TestLoop::new();
-    let pool = Pool::new(4).unwrap();
+    let pool = Pool::new(4);
     let parses = Rc::new(Cell::new(0));
     let observer = Rc::new(StubMapObserver::default());
     {
@@ -3717,7 +3717,7 @@ fn globe_bounded_source_loads_finer_tiles() {
     // Just below an integer zoom the globe cover asks for the next zoom's tiles nearest the camera; a source with
     // bounds must create them.
     let run_loop = TestLoop::new();
-    let pool = Pool::new(4).unwrap();
+    let pool = Pool::new(4);
     // C++ guards `parsed` with `tileMutex`; the observer is called on this thread.
     let parsed: Rc<RefCell<Vec<OverscaledTileID>>> = Rc::new(RefCell::new(Vec::new()));
     let observer = Rc::new(StubMapObserver::default());
@@ -4565,7 +4565,7 @@ fn tile_selection_options_publish_updates() {
     }
 
     let run_loop = TestLoop::new();
-    let pool = Pool::new(4).unwrap();
+    let pool = Pool::new(4);
     let mut map = Map::with_file_source(
         StubFileSource::on_queue(run_loop.queue(), ResponseType::Asynchronous),
         MapOptions { map_mode: MapMode::Continuous, ..Default::default() },
@@ -4823,7 +4823,7 @@ fn color_ramp_renders_current_state_after_unrelated_state_change_color_relief() 
 #[test]
 fn empty_size_is_an_error() {
     let run_loop = TestLoop::new();
-    let pool = Pool::new(4).unwrap();
+    let pool = Pool::new(4);
     for size in [Size::new(0, 0), Size::new(256, 0), Size::new(0, 256)] {
         let result = Map::with_file_source(
             StubFileSource::on_queue(run_loop.queue(), ResponseType::Asynchronous),

@@ -43,7 +43,7 @@ pub fn set(layer: &mut Layer, name: &str, value: &serde_json::Value) {
 #[test]
 fn grid() {
     let run_loop = TestLoop::new();
-    let pool = Pool::new(4).unwrap();
+    let pool = Pool::new(4);
 
     let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, run_loop.queue(), &pool).expect("a headless frontend");
     let mut map = Map::with_resource_options(
@@ -112,7 +112,7 @@ fn grid() {
 #[test]
 fn recycle_map_update_images() {
     let run_loop = TestLoop::new();
-    let pool = Pool::new(4).unwrap();
+    let pool = Pool::new(4);
 
     let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, run_loop.queue(), &pool).expect("a headless frontend");
     let mut map = Map::with_file_source(

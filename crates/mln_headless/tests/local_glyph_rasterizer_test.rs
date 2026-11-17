@@ -76,7 +76,7 @@ impl LocalGlyphRasterizerTest {
     fn new(font_family: Option<&str>) -> Self {
         assert!(font_family.is_none(), "local font families are not ported");
         let run_loop = Queue::new();
-        let pool = Pool::new(4).unwrap();
+        let pool = Pool::new(4);
         let file_source = StubFileSource::on_queue(&run_loop, ResponseType::Asynchronous);
         file_source.set_response(Kind::Glyphs, |resource: &Resource| {
             assert_eq!(Kind::Glyphs, resource.kind);

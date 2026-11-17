@@ -34,7 +34,7 @@ struct TileLODTest {
 impl TileLODTest {
     fn new(camera_options: &CameraOptions) -> Self {
         let run_loop = TestLoop::new();
-        let pool = Pool::new(4).unwrap();
+        let pool = Pool::new(4);
         let mut frontend =
             HeadlessFrontend::with_pixel_ratio(1.0, run_loop.queue(), &pool).expect("a headless frontend");
         let mut map = Map::with_resource_options(

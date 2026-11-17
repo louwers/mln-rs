@@ -86,7 +86,7 @@ fn session(
     run_loop: &Queue<()>,
 ) -> Option<(HeadlessFrontend, Map)> {
     let size = Size::new(SIDE, SIDE);
-    let pool = Pool::new(4).unwrap();
+    let pool = Pool::new(4);
     let device = match Device::with_backend(backend, DeviceOptions::default()) {
         Ok(device) => device,
         Err(error) if error.kind == ErrorKind::Unsupported => {

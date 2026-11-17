@@ -180,7 +180,7 @@ impl Store {
                 });
             }
         });
-        let pool = TaskGroup::new(&Pool::new(4).expect("a pool"));
+        let pool = TaskGroup::new(&Pool::new(4));
         let store = GlyphStore::new(Some(local_glyph_rasterizer), glyph_cache, pool.clone(), engine, Arc::clone(&wake));
         let inbox = Inbox::new(wake);
         Rc::new(Store { store: RefCell::new(store), inbox, pool, file_source, waits: RefCell::default() })
