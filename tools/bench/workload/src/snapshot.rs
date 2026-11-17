@@ -17,6 +17,9 @@ pub enum Tiles {
     World,
     /// Central Tokyo, zooms 0 to 14, its names in Japanese script.
     Cjk,
+    /// The world to zoom 4, with central San Francisco and central Tokyo to
+    /// zoom 14, for a flight from one city to the other.
+    Flight,
     /// Elevation of central San Francisco, zooms 0 to 12: Terrarium-encoded
     /// WebP images of 512 pixels.
     Terrain,
@@ -31,6 +34,7 @@ impl Tiles {
             Tiles::StreetMlt => "street-mlt",
             Tiles::World => "world",
             Tiles::Cjk => "cjk",
+            Tiles::Flight => "flight",
             Tiles::Terrain => "terrain",
         }
     }

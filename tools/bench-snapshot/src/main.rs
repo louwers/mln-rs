@@ -21,7 +21,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::fetch::{Download, Found, encode_segment};
-use crate::tiles::{CJK, Encoding, STREET, TERRAIN, TileSet, WORLD};
+use crate::tiles::{CJK, Encoding, FLIGHT, STREET, TERRAIN, TileSet, WORLD};
 
 /// The OpenFreeMap planet build the tiles come from. The TileJSON at
 /// `https://tiles.openfreemap.org/planet` names the build it serves now by a
@@ -219,6 +219,7 @@ fn build(id: &str) -> Result<(), String> {
         create_parent(&target)?;
         std::fs::copy(download, &target).map_err(|error| format!("{}: {error}", target.display()))?;
     }
+    with_depths(&out.join(EARTHQUAKES.path))?;
 
     // The archives, and the street tiles again as MLT.
     let mut tile_sets = serde_json::Map::new();
@@ -227,6 +228,11 @@ fn build(id: &str) -> Result<(), String> {
         write_archive(out, &path, set, Encoding::Mvt, tiles, &tilejson)?;
         tile_sets.insert(set.name.to_owned(), tile_set_entry(set, &path, Encoding::Mvt, tiles));
     }
+    let flight: BTreeMap<TileId, Vec<u8>> =
+        sets.iter().flat_map(|(_, tiles)| tiles.iter().map(|(&id, data)| (id, data.clone()))).collect();
+    let path = format!("tiles/{}.pmtiles", FLIGHT.name);
+    write_archive(out, &path, &FLIGHT, Encoding::Mvt, &flight, &tilejson)?;
+    tile_sets.insert(FLIGHT.name.to_owned(), tile_set_entry(&FLIGHT, &path, Encoding::Mvt, &flight));
     let street = &sets[0].1;
     eprintln!("mln-bench-snapshot: encoding {} street tiles as MLT", street.len());
     let mlt = encode_all(street)?;
@@ -269,8 +275,8 @@ fn build(id: &str) -> Result<(), String> {
         "snapshot": id,
         "base_url": format!("{BASE_URL}{id}/"),
         "description": "The benchmarks' map data: OpenFreeMap's OpenMapTiles vector tiles of central San \
-            Francisco (street, and street-mlt as MLT), of the whole world to zoom 4 (world) and of central \
-            Tokyo (cjk), and Mapterhorn's terrain tiles of central San Francisco (terrain), each a PMTiles \
+            Francisco (street, and street-mlt as MLT), of the whole world to zoom 4 (world), of central \
+            Tokyo (cjk) and of all three in one (flight), and Mapterhorn's terrain tiles of central San Francisco (terrain), each a PMTiles \
             archive; OpenFreeMap's Liberty style pointed at them, with its sprite and the glyph ranges the \
             tiles' labels need; Noto Sans font files; and as GeoJSON, Natural Earth's countries and the USGS's \
             earthquakes of October 2026. tools/bench-snapshot built it.",
@@ -326,6 +332,23 @@ fn read_json(path: &Path) -> Result<Value, String> {
 fn create_parent(path: &Path) -> Result<(), String> {
     let parent = path.parent().expect("a file's directory");
     std::fs::create_dir_all(parent).map_err(|error| format!("{}: {error}", parent.display()))
+}
+
+/// Copies each earthquake's depth, the third coordinate of its point, into
+/// its `depth` property, which a style's expressions can read, as an
+/// application that colours earthquakes by depth does.
+fn with_depths(path: &Path) -> Result<(), String> {
+    let mut collection = read_json(path)?;
+    let features = collection["features"].as_array_mut().ok_or("the earthquakes aren't a feature collection")?;
+    for feature in features {
+        let depth = feature["geometry"]["coordinates"][2].clone();
+        if !depth.is_number() {
+            return Err(format!("an earthquake without a depth: {}", feature["id"]));
+        }
+        feature["properties"]["depth"] = depth;
+    }
+    let text = serde_json::to_string(&collection).expect("GeoJSON serializes");
+    std::fs::write(path, text).map_err(|error| format!("{}: {error}", path.display()))
 }
 
 /// The terrain tiles over [`TERRAIN`]'s area. A tile Mapterhorn lacks, as
@@ -524,7 +547,13 @@ fn hex(bytes: &[u8]) -> String {
 fn sources(sprite_url: &str) -> Value {
     json!([
         {
-            "files": ["tiles/street.pmtiles", "tiles/street-mlt.pmtiles", "tiles/world.pmtiles", "tiles/cjk.pmtiles"],
+            "files": [
+                "tiles/street.pmtiles",
+                "tiles/street-mlt.pmtiles",
+                "tiles/world.pmtiles",
+                "tiles/cjk.pmtiles",
+                "tiles/flight.pmtiles",
+            ],
             "origin": format!("OpenFreeMap's planet build {PLANET}, in the OpenMapTiles schema; street-mlt holds the street tiles re-encoded as MLT"),
             "license": "Map data © OpenStreetMap contributors, under the Open Database License 1.0 \
                 (https://www.openstreetmap.org/copyright). OpenMapTiles' schema and design are under CC BY 4.0 \
@@ -570,7 +599,11 @@ fn sources(sprite_url: &str) -> Value {
         },
         {
             "files": [EARTHQUAKES.path],
-            "origin": format!("The USGS's earthquake catalog, {}, as served when the snapshot was built", EARTHQUAKES.url),
+            "origin": format!(
+                "The USGS's earthquake catalog, {}, as served when the snapshot was built, with each event's depth \
+                 (its point's third coordinate) copied into its depth property",
+                EARTHQUAKES.url
+            ),
             "license": "Public domain (U.S. Government Work, https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits).",
             "attribution": "U.S. Geological Survey",
         },

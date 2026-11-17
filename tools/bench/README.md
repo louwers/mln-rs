@@ -125,6 +125,8 @@ its sizes are the ones it uses.
 | `macro/frame/earthquakes`               | What does a frame of a map of earthquakes cost, a heatmap that gives way to circles, while the camera zooms in and out over loaded tiles?  |
 | `macro/frame/terrain`                   | What does a frame of a city's hills cost, tinted by elevation and hillshaded, while the camera circles, turns and tilts over loaded tiles? |
 | `macro/navigate/street`                 | What does a flight into a city's streets and back out cost, with tiles arriving while it flies?                                            |
+| `macro/navigate/fly`                    | What does a flight from one city's streets, out over an ocean and into another city's streets, cost, with tiles arriving while it flies?   |
+| `macro/navigate/zoom`                   | What does zooming from a city's streets out to the world and back in cost, with tiles arriving while it zooms?                             |
 | `macro/update/geojson`                  | What does replacing a GeoJSON source's data cost, until the map shows the new data?                                                        |
 | `macro/update/layers`                   | What does adding a batch of layers to a city's map, then removing them, cost until the map shows each?                                     |
 | `macro/update/paint`                    | What does setting a layer's paint property cost, until the map shows the new value?                                                        |
@@ -162,6 +164,8 @@ attribution. It holds:
 - `tiles/world.pmtiles`: the whole world, zooms 0 to 4, for the globe.
 - `tiles/cjk.pmtiles`: central Tokyo, zooms 0 to 14, its names in Japanese
   script.
+- `tiles/flight.pmtiles`: the world's tiles to zoom 4 with San Francisco's and
+  Tokyo's to 14, in one archive, for a flight from one city to the other.
 - `styles/liberty.json`: OpenFreeMap's Liberty style, its URLs turned into
   `asset://` URLs of the snapshot (and any layer it can't draw from the snapshot
   removed, as the manifest's `style_changes` says), with its sprite and the

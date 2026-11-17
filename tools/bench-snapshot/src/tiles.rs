@@ -42,6 +42,17 @@ pub(crate) const TERRAIN: TileSet = TileSet {
     description: "Mapterhorn's terrain tiles of central San Francisco, Terrarium-encoded WebP of 512 pixels, zooms 0 to 12",
 };
 
+/// The world's tiles to zoom 4 with San Francisco's and Tokyo's to 14, in
+/// one archive, for a flight from one city to the other. Its tiles are
+/// those of [`STREET`], [`WORLD`] and [`CJK`]; it has none of its own.
+pub(crate) const FLIGHT: TileSet = TileSet {
+    name: "flight",
+    area: WORLD.area,
+    max_zoom: 14,
+    description: "OpenMapTiles vector tiles of the whole world, zooms 0 to 4, and of central San Francisco and \
+        central Tokyo, zooms 0 to 14, for a flight from one city to the other",
+};
+
 /// Central Tokyo, whose names are in Japanese script.
 pub(crate) const CJK: TileSet = TileSet {
     name: "cjk",

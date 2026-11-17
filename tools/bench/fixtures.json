@@ -1,7 +1,7 @@
 {
-  "snapshot": "2026-11-17b",
-  "base_url": "https://mlc-data.sargunv.dev/benchmark-fixtures/2026-11-17b/",
-  "description": "The benchmarks' map data: OpenFreeMap's OpenMapTiles vector tiles of central San Francisco (street, and street-mlt as MLT), of the whole world to zoom 4 (world) and of central Tokyo (cjk), and Mapterhorn's terrain tiles of central San Francisco (terrain), each a PMTiles archive; OpenFreeMap's Liberty style pointed at them, with its sprite and the glyph ranges the tiles' labels need; Noto Sans font files; and as GeoJSON, Natural Earth's countries and the USGS's earthquakes of October 2026. tools/bench-snapshot built it.",
+  "snapshot": "2026-11-17c",
+  "base_url": "https://mlc-data.sargunv.dev/benchmark-fixtures/2026-11-17c/",
+  "description": "The benchmarks' map data: OpenFreeMap's OpenMapTiles vector tiles of central San Francisco (street, and street-mlt as MLT), of the whole world to zoom 4 (world), of central Tokyo (cjk) and of all three in one (flight), and Mapterhorn's terrain tiles of central San Francisco (terrain), each a PMTiles archive; OpenFreeMap's Liberty style pointed at them, with its sprite and the glyph ranges the tiles' labels need; Noto Sans font files; and as GeoJSON, Natural Earth's countries and the USGS's earthquakes of October 2026. tools/bench-snapshot built it.",
   "attribution": "OpenFreeMap © OpenMapTiles Data from OpenStreetMap",
   "sources": [
     {
@@ -9,7 +9,8 @@
         "tiles/street.pmtiles",
         "tiles/street-mlt.pmtiles",
         "tiles/world.pmtiles",
-        "tiles/cjk.pmtiles"
+        "tiles/cjk.pmtiles",
+        "tiles/flight.pmtiles"
       ],
       "origin": "OpenFreeMap's planet build https://tiles.openfreemap.org/planet/20261115_080022_pt, in the OpenMapTiles schema; street-mlt holds the street tiles re-encoded as MLT",
       "license": "Map data © OpenStreetMap contributors, under the Open Database License 1.0 (https://www.openstreetmap.org/copyright). OpenMapTiles' schema and design are under CC BY 4.0 (https://github.com/openmaptiles/openmaptiles/blob/master/LICENSE.md).",
@@ -63,7 +64,7 @@
       "files": [
         "geojson/earthquakes-2026-10.geojson"
       ],
-      "origin": "The USGS's earthquake catalog, https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=2026-10-01&endtime=2026-11-01&orderby=time-asc, as served when the snapshot was built",
+      "origin": "The USGS's earthquake catalog, https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=2026-10-01&endtime=2026-11-01&orderby=time-asc, as served when the snapshot was built, with each event's depth (its point's third coordinate) copied into its depth property",
       "license": "Public domain (U.S. Government Work, https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits).",
       "attribution": "U.S. Geological Survey"
     }
@@ -138,6 +139,28 @@
       ],
       "tiles": 149
     },
+    "flight": {
+      "archive": "tiles/flight.pmtiles",
+      "encoding": "mvt",
+      "description": "OpenMapTiles vector tiles of the whole world, zooms 0 to 4, and of central San Francisco and central Tokyo, zooms 0 to 14, for a flight from one city to the other",
+      "area": [
+        -180.0,
+        -85.05112877980659,
+        180.0,
+        85.05112877980659
+      ],
+      "bounds": [
+        -180.0,
+        -85.0511287798066,
+        180.0,
+        85.0511287798066
+      ],
+      "zooms": [
+        0,
+        14
+      ],
+      "tiles": 685
+    },
     "street-mlt": {
       "archive": "tiles/street-mlt.pmtiles",
       "encoding": "mlt",
@@ -206,8 +229,8 @@
     },
     {
       "path": "geojson/earthquakes-2026-10.geojson",
-      "size": 8114378,
-      "sha256": "338ec2f3a19d57bcced8ab441441123a2f0cb3cb7015a1e640155094fe40d72f"
+      "size": 8262725,
+      "sha256": "52a9a1895b7310545baca2ddeaf8b133cf24a61b060b06bb6714898468b4d18f"
     },
     {
       "path": "geojson/ne_10m_admin_0_countries.geojson",
@@ -2723,6 +2746,11 @@
       "path": "tiles/cjk.pmtiles",
       "size": 26488260,
       "sha256": "16ff4dd307cdbc27109f3c5ea0f15c862deb2291b7b7263b69ad3b0d3add535b"
+    },
+    {
+      "path": "tiles/flight.pmtiles",
+      "size": 64727625,
+      "sha256": "d8584db9ddbdb7e4427fc8cb238ee5d190d2c26aea12e12692c3c972487993db"
     },
     {
       "path": "tiles/street-mlt.pmtiles",
