@@ -25,7 +25,8 @@ use crate::query::SourceQueryOptions;
 use crate::tests::OneTile;
 use crate::tile::contents::Contents;
 use crate::tile::loading::DataOrigin;
-use crate::tile::tile::{TileKind, TileNecessity};
+use crate::tile::store::StoreEvent;
+use crate::tile::tile::{TileKind, TileNecessity, TileOperation};
 use crate::tile::tile_workers::InlineWorkers;
 
 /// The provider, whose strand runs on the test's run loop.
@@ -143,6 +144,32 @@ fn invalidate_failed_tile() {
     assert_eq!(fetches.load(Ordering::SeqCst), 2);
 }
 
+// Port-only: a tile whose provider reports an error reports it as a tile action, before the error
+// itself, as a tile whose request or layout fails does.
+#[test]
+fn a_tile_error_is_an_error_action() {
+    let test = RasterTileTest::new();
+    let loader = loader(&test.run_loop, Some(Arc::new(|_: &CanonicalTileID| {})), None);
+    let mut tiles = tiles(&test, &[root()], Arc::clone(&loader));
+    tiles.set_necessity(&root(), TileNecessity::Required);
+    test.run_loop.wait_for_empty();
+    tiles.store.take_events();
+
+    loader.set_tile_error(CanonicalTileID::new(0, 0, 0), Error::native("failed"));
+    test.run_loop.wait_for_empty();
+    tiles.store.receive();
+    let events = tiles.store.take_events();
+    assert!(
+        matches!(
+            events.as_slice(),
+            [StoreEvent::Action { op: TileOperation::Error, .. }, StoreEvent::Error { error, .. }]
+                if error.to_string() == "failed"
+        ),
+        "{events:?}"
+    );
+    assert!(tiles.tile().is_complete());
+}
+
 // gtest: CustomGeometryTile.InvokeTileChanged
 #[test]
 fn invoke_tile_changed() {
@@ -167,7 +194,7 @@ fn invoke_tile_changed() {
     }
     // Once present, the bucket should never "disappear", which would cause
     // flickering.
-    assert!(tiles.with(|_, tile, _| tile.layer_properties_updated(&layer_properties)));
+    assert!(tiles.with(|tile| tile.layer_properties_updated(&layer_properties)));
 
     let Some(Contents::Geometry(contents)) = tiles.tile().contents() else {
         panic!("a layout");

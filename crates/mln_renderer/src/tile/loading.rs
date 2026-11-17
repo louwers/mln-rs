@@ -4,6 +4,9 @@
 //! responses arrive in the store's inbox naming it, from whatever thread
 //! answers; the store applies one only while the tile still waits for that
 //! load.
+//!
+//! A tile's [`Load`] is plain state: its methods say what a change means
+//! for the load, and the tile's transitions (`tile/tile_mut.rs`) carry it out.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,8 +25,7 @@ use parking_lot::Mutex;
 
 use crate::tile::inbox::{InboxSender, SourceData, TileEvent};
 use crate::tile::job::TileKey;
-use crate::tile::store::{SourceInfo, StoreContext};
-use crate::tile::tile::{Tile, TileInput, TileKind, TileLoadOrder, TileNecessity, TileOperation, TileUpdateParameters};
+use crate::tile::tile::{TileInput, TileKind, TileLoadOrder, TileNecessity, TileUpdateParameters};
 
 /// The tile data encoding of a vector tileset's tiles (raster tiles ignore
 /// it).
@@ -277,10 +279,6 @@ pub(crate) enum Taken {
     Data,
 }
 
-fn cant_load_tile_error() -> Error {
-    Error::native("Can't load tile.")
-}
-
 impl Load {
     /// The load of a new tile `id` of a source with `origin`, whose pixel
     /// ratio is `pixel_ratio`.
@@ -426,7 +424,7 @@ impl Load {
 
     /// Whether the tile's last response was an error and it is required: it
     /// asks again, and forgets the error.
-    fn retry_failed(&mut self) -> bool {
+    pub(crate) fn retry_failed(&mut self) -> bool {
         let required = self.necessity == TileNecessity::Required;
         match &mut self.origin {
             OriginLoad::Tileset(tileset) if required && matches!(tileset.fetch, Fetch::Failed) => {
@@ -438,9 +436,36 @@ impl Load {
     }
 
     /// Whether a required tileset tile has no request under way.
-    fn wants_network(&self) -> bool {
+    pub(crate) fn wants_network(&self) -> bool {
         self.necessity == TileNecessity::Required
             && matches!(&self.origin, OriginLoad::Tileset(tileset) if tileset.is_idle())
+    }
+
+    /// A custom tile subscribes to its loader under `key`.
+    pub(crate) fn subscribe(&mut self, key: SubscriberKey) {
+        if let OriginLoad::Custom(custom) = &mut self.origin {
+            *custom = CustomLoad::Subscribed(key);
+        }
+    }
+
+    /// The loader said a custom tile's data went stale. Returns whether the
+    /// tile is a custom one.
+    pub(crate) fn mark_stale(&mut self) -> bool {
+        let OriginLoad::Custom(custom) = &mut self.origin else {
+            return false;
+        };
+        if let CustomLoad::Subscribed(key) = *custom {
+            *custom = CustomLoad::Stale(key);
+        }
+        true
+    }
+
+    /// A GeoJSON tile asks its data for load `load`, whose data applies from
+    /// now on instead of any earlier load's.
+    pub(crate) fn start_geojson(&mut self, load: u64) {
+        if let OriginLoad::GeoJson { load: current } = &mut self.origin {
+            *current = Some(load);
+        }
     }
 }
 
@@ -448,7 +473,7 @@ impl TilesetLoad {
     /// The resource to request with `method`. Instead of a request that
     /// loads from both, a cache-only request comes first, and then a
     /// network-only one.
-    fn resource_for(&mut self, method: Method) -> &Resource {
+    pub(crate) fn resource_for(&mut self, method: Method) -> &Resource {
         let resource = &mut self.resource;
         match method {
             Method::Cache => resource.loading_method = LoadingMethod::CacheOnly,
@@ -463,7 +488,7 @@ impl TilesetLoad {
     }
 
     /// Records that `request`, with `method`, answers as load `load`.
-    fn begin(&mut self, method: Method, load: u64, request: Request) {
+    pub(crate) fn begin(&mut self, method: Method, load: u64, request: Request) {
         debug_assert!(self.is_idle(), "one request at a time");
         self.fetch = match method {
             Method::Cache => Fetch::Cache { load, request },
@@ -472,20 +497,24 @@ impl TilesetLoad {
     }
 
     /// Takes the answer to request `load`: the method it was made with, or
-    /// `None` if the tile doesn't wait for it.
-    fn answer(&mut self, load: u64) -> Option<Method> {
+    /// `None` if the tile doesn't wait for it. A cache-only request's answer
+    /// is recorded (`Load::has_tried_cache`).
+    pub(crate) fn answer(&mut self, load: u64) -> Option<Method> {
         let method = match &self.fetch {
             Fetch::Cache { load: current, .. } if *current == load => Method::Cache,
             Fetch::Network { load: current, .. } if *current == load => Method::Network,
             Fetch::Idle | Fetch::Failed | Fetch::Cache { .. } | Fetch::Network { .. } => return None,
         };
         self.fetch = Fetch::Idle;
+        if method == Method::Cache {
+            self.cache_answered = true;
+        }
         Some(method)
     }
 
     /// Keeps what a cache-only response that found nothing usable had, for
     /// the conditional network request.
-    fn keep_prior(&mut self, res: &Response) {
+    pub(crate) fn keep_prior(&mut self, res: &Response) {
         let resource = &mut self.resource;
         resource.prior_modified = res.modified;
         resource.prior_expires = res.expires;
@@ -495,7 +524,7 @@ impl TilesetLoad {
 
     /// Takes in an answered response: an error, other than not found,
     /// fails the load; anything else keeps its validators and freshness.
-    fn take(&mut self, res: &Response) -> Taken {
+    pub(crate) fn take(&mut self, res: &Response) -> Taken {
         if let Some(error) = &res.error
             && error.reason != Reason::NotFound
         {
@@ -517,7 +546,7 @@ impl TilesetLoad {
 
     /// Sets the parameters of the network requests. Returns whether a
     /// network request under way was cancelled, to be made again with them.
-    fn set_update_parameters(&mut self, parameters: TileUpdateParameters) -> bool {
+    pub(crate) fn set_update_parameters(&mut self, parameters: TileUpdateParameters) -> bool {
         if self.update_parameters == parameters {
             return false;
         }
@@ -540,262 +569,36 @@ impl TilesetLoad {
     }
 }
 
-impl SourceInfo {
-    /// Starts a new tile's load: from the cache, for a tileset's tile; from
-    /// the data, for a GeoJSON source's; nothing until it is required, for
-    /// a custom source's.
-    pub(crate) fn start_load(&mut self, tile: &mut Tile, ctx: &mut StoreContext) {
-        match &self.origin {
-            Some(DataOrigin::Tileset { file_source, .. }) => {
-                let Some(file_source) = file_source.clone() else {
-                    self.load_error(tile, ctx, cant_load_tile_error());
-                    return;
-                };
-                // When supported, the first request is always optional, even
-                // if the tile is required. That way, the first optional
-                // request can continue to load when the tile is later
-                // changed from required to optional.
-                if file_source.supports_cache_only() {
-                    self.request(tile, ctx, Method::Cache);
-                }
+/// Asks GeoJSON `data` for tile `tile`'s features, as load `load`, on this
+/// thread if `synchronous`. Returns them if they answer before this
+/// returns; if they answer later, on whatever thread, they go to `inbox`.
+pub(crate) fn get_geojson_tile(
+    data: &Arc<dyn GeoJSONData>,
+    tile: TileKey,
+    load: u64,
+    inbox: &InboxSender,
+    synchronous: bool,
+) -> Option<TileData> {
+    let slot: Arc<Mutex<Answered>> = Arc::default();
+    let callback_slot = Arc::clone(&slot);
+    let inbox = inbox.clone();
+    data.get_tile(
+        &tile.id.canonical,
+        Box::new(move |features: TileFeatures| {
+            let data = TileData::Features(Arc::new(features));
+            let mut slot = callback_slot.lock();
+            if matches!(*slot, Answered::Later) {
+                drop(slot);
+                inbox.send(TileEvent::Data { tile, load, data: SourceData::Data(Some(data)) });
+            } else {
+                *slot = Answered::Now(data);
             }
-            Some(DataOrigin::GeoJson(data)) => {
-                let data = Arc::clone(data);
-                self.load_geojson(tile, ctx, &data, false);
-            }
-            Some(DataOrigin::Custom { .. }) | None => {}
-        }
-    }
-
-    fn file_source(&self) -> Option<Arc<dyn FileSource>> {
-        match &self.origin {
-            Some(DataOrigin::Tileset { file_source, .. }) => file_source.clone(),
-            Some(DataOrigin::GeoJson(_) | DataOrigin::Custom { .. }) | None => None,
-        }
-    }
-
-    /// Requests `tile`'s resource with `method`, as a new load whose
-    /// response goes to the inbox.
-    fn request(&mut self, tile: &mut Tile, ctx: &mut StoreContext, method: Method) {
-        let Some(file_source) = self.file_source() else {
-            self.load_error(tile, ctx, cant_load_tile_error());
-            return;
-        };
-        let op = match method {
-            Method::Cache => TileOperation::RequestedFromCache,
-            Method::Network => TileOperation::RequestedFromNetwork,
-        };
-        self.action(tile, ctx, op);
-        let load = self.next();
-        let OriginLoad::Tileset(tileset) = &mut tile.load.origin else {
-            return;
-        };
-        let inbox = ctx.inbox.clone();
-        let key = TileKey { source: self.key, id: tile.id };
-        // One response per request: a reload is a new request.
-        let (request, responder) =
-            Request::direct_once(move |response| inbox.send(TileEvent::Response { tile: key, load, response }));
-        file_source.load(tileset.resource_for(method), responder);
-        tileset.begin(method, load, request);
-    }
-
-    /// Applies the response to `tile`'s request `load`; one to another
-    /// request does nothing.
-    pub(crate) fn apply_response(&mut self, tile: &mut Tile, ctx: &mut StoreContext, load: u64, res: &Response) {
-        let OriginLoad::Tileset(tileset) = &mut tile.load.origin else {
-            return;
-        };
-        let Some(method) = tileset.answer(load) else {
-            return;
-        };
-        if method == Method::Network {
-            self.loaded_data(tile, ctx, res, method);
-            return;
-        }
-
-        tileset.cache_answered = true;
-        // When the cache-only request could not be satisfied, don't treat it
-        // as an error. A cache lookup could still return data, _and_ an
-        // error, in particular when we were able to find the data, but it is
-        // expired and the Cache-Control headers indicated that we aren't
-        // allowed to use expired responses. In this case, we still get the
-        // data which we can use in our conditional network request.
-        let not_found = res.error.as_ref().is_some_and(|e| e.reason == Reason::NotFound);
-        if not_found {
-            tileset.keep_prior(res);
-        }
-        ctx.changed();
-        if !not_found {
-            self.loaded_data(tile, ctx, res, method);
-        }
-        if tile.load.wants_network() {
-            self.request(tile, ctx, Method::Network);
-        }
-    }
-
-    fn loaded_data(&mut self, tile: &mut Tile, ctx: &mut StoreContext, res: &Response, method: Method) {
-        let OriginLoad::Tileset(tileset) = &mut tile.load.origin else {
-            return;
-        };
-        let taken = tileset.take(res);
-        let loaded = match method {
-            Method::Network => TileOperation::LoadFromNetwork,
-            Method::Cache => TileOperation::LoadFromCache,
-        };
-        match taken {
-            Taken::Failed(error) => {
-                self.load_error(tile, ctx, error);
-                self.action(tile, ctx, TileOperation::Error);
-                return;
-            }
-            // A `not_modified` response leaves the tile with the data it has.
-            Taken::NotModified => {
-                self.action(tile, ctx, loaded);
-                return;
-            }
-            Taken::Data => self.action(tile, ctx, loaded),
-        }
-        let Some(origin) = &self.origin else {
-            return;
-        };
-        let input = origin.input(self.kind, res);
-        self.set_data(tile, ctx, input);
-    }
-
-    /// The tile couldn't load: it keeps what data it had, and is done
-    /// loading.
-    pub(crate) fn load_error(&mut self, tile: &mut Tile, ctx: &mut StoreContext, error: Error) {
-        tile.loaded = true;
-        ctx.error(&self.id, tile.id, error);
-    }
-
-    /// Sets how much `tile` is needed, and carries out what that asks of
-    /// its origin (`Load::set_necessity`).
-    pub(crate) fn set_necessity(&mut self, tile: &mut Tile, ctx: &mut StoreContext, necessity: TileNecessity) {
-        let step = tile.load.set_necessity(necessity, tile.is_renderable());
-        if step == NecessityStep::RequestNetwork {
-            self.request(tile, ctx, Method::Network);
-            return;
-        }
-        let Some(DataOrigin::Custom { loader, fast_pfor_enabled }) = &self.origin else {
-            return;
-        };
-        let (loader, fast_pfor_enabled) = (Arc::clone(loader), *fast_pfor_enabled);
-        let key = match step {
-            NecessityStep::Nothing | NecessityStep::RequestNetwork => return,
-            NecessityStep::Cancel(key) => {
-                loader.cancel(tile.id, key);
-                return;
-            }
-            NecessityStep::Fetch(key) => key,
-            NecessityStep::Subscribe => {
-                let key = self.next();
-                if let OriginLoad::Custom(custom) = &mut tile.load.origin {
-                    *custom = CustomLoad::Subscribed(key);
-                }
-                key
-            }
-        };
-        let tile_key = TileKey { source: self.key, id: tile.id };
-        loader.fetch(tile.id, key, tile_key, &ctx.inbox, fast_pfor_enabled);
-    }
-
-    pub(crate) fn set_update_parameters(
-        &mut self,
-        tile: &mut Tile,
-        ctx: &mut StoreContext,
-        parameters: &TileUpdateParameters,
-    ) {
-        let OriginLoad::Tileset(tileset) = &mut tile.load.origin else {
-            return;
-        };
-        // A network request under way is made again with the parameters.
-        if tileset.set_update_parameters(*parameters) {
-            self.request(tile, ctx, Method::Network);
-        }
-    }
-
-    /// Requests a required tile whose last response was an error again, and
-    /// makes it wait for the answer.
-    pub(crate) fn retry_failed_load(&mut self, tile: &mut Tile, ctx: &mut StoreContext) {
-        if !tile.load.retry_failed() {
-            return;
-        }
-        tile.loaded = false;
-        self.request(tile, ctx, Method::Network);
-    }
-
-    /// Loads `tile` from GeoJSON `data`. With `relayout`, the tile drops its
-    /// data and style first, and is pending again once it has new ones. A
-    /// tile of a source with synchronous updates, or whose data answers at
-    /// once, takes the data now.
-    pub(crate) fn load_geojson(
-        &mut self,
-        tile: &mut Tile,
-        ctx: &mut StoreContext,
-        data: &Arc<dyn GeoJSONData>,
-        relayout: bool,
-    ) {
-        if relayout {
-            self.reset(tile, ctx);
-        }
-        let load = self.next();
-        if let OriginLoad::GeoJson { load: current } = &mut tile.load.origin {
-            *current = Some(load);
-        }
-        // The data answers here, or later on another thread: the answer goes
-        // to the tile now, or to the inbox.
-        let slot: Arc<Mutex<Answered>> = Arc::default();
-        let callback_slot = Arc::clone(&slot);
-        let inbox = ctx.inbox.clone();
-        let key = TileKey { source: self.key, id: tile.id };
-        data.get_tile(
-            &tile.id.canonical,
-            Box::new(move |features: TileFeatures| {
-                let data = TileData::Features(Arc::new(features));
-                let mut slot = callback_slot.lock();
-                if matches!(*slot, Answered::Later) {
-                    drop(slot);
-                    inbox.send(TileEvent::Data { tile: key, load, data: SourceData::Data(Some(data)) });
-                } else {
-                    *slot = Answered::Now(data);
-                }
-            }),
-            self.synchronous,
-        );
-        let answered = std::mem::replace(&mut *slot.lock(), Answered::Later);
-        if let Answered::Now(data) = answered {
-            self.set_data(tile, ctx, TileInput::Geometry { data: Some(data), missing: false });
-        }
-    }
-
-    /// Applies what a GeoJSON or custom source gave `tile` for load `load`;
-    /// what it gave another load does nothing.
-    pub(crate) fn apply_source_data(&mut self, tile: &mut Tile, ctx: &mut StoreContext, load: u64, data: SourceData) {
-        if !tile.load.accepts(load) {
-            return;
-        }
-        match data {
-            SourceData::Data(data) => {
-                self.set_data(tile, ctx, TileInput::Geometry { data, missing: false });
-            }
-            SourceData::Error(error) => self.load_error(tile, ctx, error),
-            SourceData::Stale => {
-                if let OriginLoad::Custom(custom) = &mut tile.load.origin {
-                    if let CustomLoad::Subscribed(key) = *custom {
-                        *custom = CustomLoad::Stale(key);
-                    }
-                    ctx.changed();
-                }
-            }
-        }
-    }
-
-    /// Lets go of `tile`'s loads: a custom loader forgets it.
-    pub(crate) fn abandon_load(&self, tile: &Tile) {
-        if let (Some(key), Some(DataOrigin::Custom { loader, .. })) = (tile.load.subscription(), &self.origin) {
-            loader.remove(tile.id, key);
-        }
+        }),
+        synchronous,
+    );
+    match std::mem::replace(&mut *slot.lock(), Answered::Later) {
+        Answered::Now(data) => Some(data),
+        Answered::Pending | Answered::Later => None,
     }
 }
 

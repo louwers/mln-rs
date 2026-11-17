@@ -10,7 +10,7 @@ use crate::tests::OneTile;
 use crate::tests::tile_jobs_test::Manual;
 use crate::tile::contents::Contents;
 use crate::tile::job::JobResult;
-use crate::tile::tile::TileKind;
+use crate::tile::tile::{TileKind, TileOperation};
 use crate::tile::tile_workers::InlineWorkers;
 
 fn tiles(test: &RasterTileTest) -> OneTile {
@@ -30,10 +30,10 @@ fn image_size(tiles: &OneTile, id: &OverscaledTileID) -> Option<Size> {
 fn set_error() {
     let test = RasterTileTest::new();
     let mut tiles = tiles(&test);
-    tiles.with(|info, tile, ctx| info.load_error(tile, ctx, Error::native("test")));
+    tiles.with(|tile| tile.fail(Error::native("test")));
     let tile = tiles.tile();
     assert!(!tile.is_renderable());
-    assert!(tile.loaded);
+    assert!(tile.is_settled());
     assert!(tile.is_complete());
 }
 
@@ -42,10 +42,10 @@ fn set_error() {
 fn on_error() {
     let test = RasterTileTest::new();
     let mut tiles = tiles(&test);
-    tiles.with(|info, tile, ctx| info.job_error(tile, ctx, Error::native("test")));
+    tiles.with(|tile| tile.fail(Error::native("test")));
     let tile = tiles.tile();
     assert!(!tile.is_renderable());
-    assert!(tile.loaded);
+    assert!(tile.is_settled());
     assert!(tile.is_complete());
 }
 
@@ -54,25 +54,24 @@ fn on_error() {
 fn on_parsed() {
     let test = RasterTileTest::new();
     let mut tiles = tiles(&test);
-    tiles
-        .with(|info, tile, ctx| info.apply_now(tile, ctx, JobResult::Raster(PremultipliedImage::new(Size::new(0, 0)))));
+    tiles.with(|tile| tile.apply_now(JobResult::Raster(PremultipliedImage::new(Size::new(0, 0)))));
     assert!(tiles.tile().is_renderable());
-    assert!(tiles.tile().loaded);
+    assert!(tiles.tile().is_settled());
     assert!(tiles.tile().is_complete());
 
     // Make sure that once we've had a renderable tile and then receive
     // erroneous data, we retain the previously rendered data and keep the tile
     // renderable.
-    tiles.with(|info, tile, ctx| info.load_error(tile, ctx, Error::native("Connection offline")));
+    tiles.with(|tile| tile.fail(Error::native("Connection offline")));
     assert!(tiles.tile().is_renderable());
-    assert!(tiles.tile().loaded);
+    assert!(tiles.tile().is_settled());
     assert!(tiles.tile().is_complete());
 
     // Then simulate a parsing failure and make sure that we keep it renderable
     // in this situation as well.
-    tiles.with(|info, tile, ctx| info.job_error(tile, ctx, Error::native("Parse error")));
+    tiles.with(|tile| tile.fail(Error::native("Parse error")));
     assert!(tiles.tile().is_renderable());
-    assert!(tiles.tile().loaded);
+    assert!(tiles.tile().is_settled());
     assert!(tiles.tile().is_complete());
 }
 
@@ -85,7 +84,7 @@ fn on_parsed_empty() {
     let id = tiles.id;
     tiles.set_image(&id, None);
     assert!(tiles.tile().is_renderable());
-    assert!(tiles.tile().loaded);
+    assert!(tiles.tile().is_settled());
     assert!(tiles.tile().is_complete());
 }
 
@@ -168,4 +167,14 @@ fn an_empty_load_during_a_decode_keeps_one_decode_in_flight() {
     tiles.update();
     assert_eq!(image_size(&tiles, &id), Some(Size::new(8, 8)));
     assert!(tiles.tile().is_complete());
+}
+
+// Port-only: a load without an image parses at once, as in C++: its parse starts and ends together.
+#[test]
+fn an_empty_load_starts_and_ends_its_parse() {
+    let test = RasterTileTest::new();
+    let mut tiles = tiles(&test);
+    let id = tiles.id;
+    tiles.set_image(&id, None);
+    assert_eq!(tiles.actions(), [TileOperation::StartParse, TileOperation::EndParse]);
 }

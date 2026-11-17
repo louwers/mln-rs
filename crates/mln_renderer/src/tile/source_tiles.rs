@@ -32,10 +32,10 @@ use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layout::tile_layout::LayoutParams;
 use crate::tile::contents::Contents;
 use crate::tile::dem;
-use crate::tile::job::{JobId, SourceStyle};
+use crate::tile::job::SourceStyle;
 use crate::tile::store::{SourceInfo, StoreContext};
 use crate::tile::tile::{FadeState, Tile, TileKind, TileLoadOrder, TileNecessity, TileUpdateParameters};
-use crate::tile::tile_workers::{Lane, ReplyBody};
+use crate::tile::tile_mut::{TileMut, retire};
 use crate::tile_parameters::TileParameters;
 use crate::util::tile_cover::{TileCoverParameters, covering_zoom_level, globe_level_cover, tile_cover};
 
@@ -276,7 +276,6 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
         if found {
             return Some(*id);
         }
-        let info = &mut self.source.info;
         let params = LayoutParams {
             mode: parameters.mode,
             pixel_ratio: parameters.pixel_ratio,
@@ -285,44 +284,43 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
             first_load: true,
             capture_rendered_features: parameters.capture_rendered_features,
         };
-        let mut tile = info.new_tile(*id, params)?;
-        info.start_load(&mut tile, self.ctx);
-        info.set_style(&mut tile, self.ctx, self.style, parameters.pixel_ratio, parameters.subdivision_granularity);
-        self.source.insert(tile);
-        Some(*id)
+        self.source.insert_new(*id, params, self.ctx, self.style).then_some(*id)
     }
 
     fn retain_tile(&mut self, key: &OverscaledTileID, necessity: TileNecessity) {
-        let SourceTiles { info, tiles, .. } = &mut *self.source;
-        let Some(Slot { tile, place }) = tiles.get_mut(key) else {
+        if self.tile(key).is_none() {
             return;
-        };
-        if self.retain.insert(tile.id) {
+        }
+        let ctx = &mut *self.ctx;
+        if self.retain.insert(*key) {
             let update_parameters = TileUpdateParameters {
                 minimum_update_interval: self.minimum_update_interval,
                 is_volatile: self.is_volatile,
             };
-            info.set_update_parameters(tile, self.ctx, &update_parameters);
+            self.source.update(key, ctx, |tile| tile.set_update_parameters(update_parameters));
             // The pan pass comes first, so a tile of both covers loads with
             // the coarse ones.
             let order =
                 if self.render { TileLoadOrder::ideal(self.pass_rank) } else { TileLoadOrder::coarse(self.pass_rank) };
             self.pass_rank += 1;
-            if let Place::Cover { order: current } = place {
-                *current = order;
-                tile.load.set_order(order);
-            }
-            info.set_necessity(tile, self.ctx, necessity);
+            self.source.set_cover_order(key, order);
+            self.source.update(key, ctx, |tile| tile.set_necessity(necessity));
         }
 
         // A new pixel ratio lays the tile out again, without the relayout
         // that drops the cached tiles.
         let parameters = self.update.parameters;
-        let pixel_ratio_changed =
-            tile.pipeline.layout().is_some_and(|layout| layout.params().pixel_ratio != parameters.pixel_ratio);
-        if self.needs_relayout || pixel_ratio_changed {
-            info.set_style(tile, self.ctx, self.style, parameters.pixel_ratio, parameters.subdivision_granularity);
-        }
+        let (style, needs_relayout) = (self.style, self.needs_relayout);
+        self.source.update(key, ctx, |tile| {
+            let pixel_ratio_changed = tile
+                .tile()
+                .pipeline
+                .layout()
+                .is_some_and(|layout| layout.params().pixel_ratio != parameters.pixel_ratio);
+            if needs_relayout || pixel_ratio_changed {
+                tile.set_style(style, parameters.pixel_ratio, parameters.subdivision_granularity);
+            }
+        });
     }
 
     fn render_tile(&mut self, id: &UnwrappedTileID, key: &OverscaledTileID) {
@@ -355,7 +353,7 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
     }
 
     fn is_loaded(&self, key: &OverscaledTileID) -> bool {
-        self.tile(key).is_some_and(|tile| tile.loaded)
+        self.tile(key).is_some_and(Tile::is_settled)
     }
 }
 
@@ -397,65 +395,87 @@ impl SourceTiles {
         self.tiles.insert(tile.id, Slot { tile, place });
     }
 
+    /// Adds a new tile `id` to the cover, which starts loading and lays out
+    /// with `params` and `style`. Returns whether the source has an origin
+    /// to make tiles from.
+    fn insert_new(
+        &mut self,
+        id: OverscaledTileID,
+        params: LayoutParams,
+        store: &mut StoreContext,
+        style: &Arc<SourceStyle>,
+    ) -> bool {
+        let Some(tile) = self.info.new_tile(id, params) else {
+            return false;
+        };
+        self.insert(tile);
+        self.update(&id, store, |tile| {
+            tile.start_load();
+            tile.set_style(style, params.pixel_ratio, params.subdivision_granularity);
+        });
+        true
+    }
+
+    /// Ranks cover tile `id` `order` among the tiles the cover retained.
+    fn set_cover_order(&mut self, id: &OverscaledTileID, order: TileLoadOrder) {
+        if let Some(Slot { tile, place: Place::Cover { order: current } }) = self.tiles.get_mut(id) {
+            *current = order;
+            tile.load.set_order(order);
+        }
+    }
+
     /// Whether every tile of the cover is complete.
     #[must_use]
     pub(crate) fn is_loaded(&self) -> bool {
         self.cover().all(Tile::is_complete)
     }
 
-    /// Calls `f` with each tile whose slot `filter` picks, in id order.
+    /// Changes each tile whose slot `filter` picks through `f`, in id order
+    /// (as `update` does).
     pub(crate) fn update_each(
         &mut self,
-        ctx: &mut StoreContext,
+        store: &mut StoreContext,
         filter: impl Fn(&Slot) -> bool,
-        mut f: impl FnMut(&mut SourceInfo, &mut Tile, &mut StoreContext),
+        mut f: impl FnMut(&mut TileMut<'_>),
     ) {
         let SourceTiles { info, tiles, .. } = self;
+        let mut installed = Vec::new();
         for slot in tiles.values_mut().filter(|slot| filter(slot)) {
-            f(info, &mut slot.tile, ctx);
+            let mut tile = TileMut::new(info, &mut slot.tile, store);
+            f(&mut tile);
+            if tile.installed() {
+                installed.push(slot.tile.id);
+            }
+        }
+        for id in installed {
+            self.contents_installed(&id);
         }
     }
 
-    /// Calls `f` with tile `id`, if the source has it, and returns what it
-    /// returns.
+    /// Changes tile `id`, if the source has it, through `f`, and returns
+    /// what `f` returns. This is the only way to change a tile. A DEM tile
+    /// that shows new contents takes its borders from its neighbours, and
+    /// gives them its own.
     pub(crate) fn update<R>(
         &mut self,
         id: &OverscaledTileID,
-        ctx: &mut StoreContext,
-        f: impl FnOnce(&mut SourceInfo, &mut Tile, &mut StoreContext) -> R,
+        store: &mut StoreContext,
+        f: impl FnOnce(&mut TileMut<'_>) -> R,
     ) -> Option<R> {
         let SourceTiles { info, tiles, .. } = self;
         let slot = tiles.get_mut(id)?;
-        Some(f(info, &mut slot.tile, ctx))
-    }
-
-    /// Applies the reply to job `job` of tile `id`. A DEM that arrives
-    /// takes its borders from its neighbours, and gives them its own.
-    pub(crate) fn apply_reply(
-        &mut self,
-        id: &OverscaledTileID,
-        ctx: &mut StoreContext,
-        lane: Lane,
-        job: JobId,
-        body: ReplyBody,
-    ) {
-        let installed = self.update(id, ctx, |info, tile, ctx| info.apply_reply(tile, ctx, lane, job, body));
-        if installed == Some(true) && matches!(self.info.kind, TileKind::Dem(_)) {
-            self.backfill_dem(id);
+        let mut tile = TileMut::new(info, &mut slot.tile, store);
+        let result = f(&mut tile);
+        if tile.installed() {
+            self.contents_installed(id);
         }
+        Some(result)
     }
 
-    /// Moves tile `id`'s work on (`SourceInfo::drive`).
-    pub(crate) fn drive(&mut self, id: &OverscaledTileID, ctx: &mut StoreContext) -> bool {
-        self.update(id, ctx, SourceInfo::drive).unwrap_or(false)
-    }
-
-    /// The worker of `lane` is gone: the tiles whose work it had start it
-    /// again.
-    pub(crate) fn lane_lost(&mut self, lane: Lane) {
-        let SourceTiles { info, tiles, .. } = self;
-        for slot in tiles.values_mut() {
-            info.lane_lost(&mut slot.tile, lane);
+    /// Tile `id` shows new contents.
+    fn contents_installed(&self, id: &OverscaledTileID) {
+        if matches!(self.info.kind, TileKind::Dem(_)) {
+            self.backfill_dem(id);
         }
     }
 
@@ -745,7 +765,7 @@ impl SourceTiles {
         self.update_each(
             ctx,
             |slot| !slot.place.is_cached(),
-            |info, tile, ctx| info.set_show_collision_boxes(tile, ctx, show_collision_boxes),
+            |tile| tile.set_show_collision_boxes(show_collision_boxes),
         );
 
         // Initialize renderable tiles and update the contained layer render
@@ -809,13 +829,13 @@ impl SourceTiles {
     }
 
     fn set_necessity(&mut self, id: &OverscaledTileID, ctx: &mut StoreContext, necessity: TileNecessity) {
-        self.update(id, ctx, |info, tile, ctx| info.set_necessity(tile, ctx, necessity));
+        self.update(id, ctx, |tile| tile.set_necessity(necessity));
     }
 
     /// Lets go of tile `id`.
     pub(crate) fn release(&mut self, id: &OverscaledTileID, ctx: &mut StoreContext) {
         if let Some(slot) = self.tiles.remove(id) {
-            self.info.drop_tile(slot.tile, ctx);
+            retire(&self.info, slot.tile, ctx);
         }
     }
 
@@ -1318,7 +1338,7 @@ impl SourceTiles {
                 Some(existing) if existing.place.is_cached() => self.release(&id, ctx),
                 // `emplace` keeps the first tile with an id.
                 Some(_) => {
-                    self.info.drop_tile(slot.tile, ctx);
+                    retire(&self.info, slot.tile, ctx);
                     continue;
                 }
                 None => {}
@@ -1341,11 +1361,6 @@ impl SourceTiles {
 
     pub(crate) fn reduce_memory_use(&mut self, ctx: &mut StoreContext) {
         self.cache_clear(ctx);
-    }
-
-    /// Requests the cover's tiles whose load failed again.
-    pub(crate) fn retry_failed_tiles(&mut self, ctx: &mut StoreContext) {
-        self.update_each(ctx, |slot| !slot.place.is_cached(), SourceInfo::retry_failed_load);
     }
 
     pub(crate) fn dump_debug_logs(&self) {
@@ -1384,7 +1399,7 @@ impl SourceTiles {
         self.max_content_elevation = 0.0;
         self.rendered.clear();
         for (_, slot) in std::mem::take(&mut self.tiles) {
-            self.info.drop_tile(slot.tile, ctx);
+            retire(&self.info, slot.tile, ctx);
         }
     }
 

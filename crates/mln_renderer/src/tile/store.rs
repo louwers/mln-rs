@@ -27,8 +27,6 @@ use mln_storage::FileSource;
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
 use mln_util::hash::{HashMap, HashSet};
-use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
-use mln_vec_map::VecSet;
 
 use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::image_store::ImageStore;
@@ -36,14 +34,14 @@ use crate::layout::tile_layout::{LayoutParams, Resolved};
 use crate::render_orchestrator::drop_on_workers;
 use crate::source_state::SourceFeatureState;
 use crate::text::glyph_store::GlyphStore;
-use crate::tile::contents::{Answer, Contents, GeometryContents, TileAtlases, release};
+use crate::tile::contents::{Answer, Contents, TileAtlases, release};
 use crate::tile::inbox::{Inbox, InboxSender, TileEvent, Waker};
-use crate::tile::job::{DataKey, JobId, JobResult, LayoutOutput, Run, SourceKey, SourceStyle, TileKey};
+use crate::tile::job::{Run, SourceKey, TileKey};
 use crate::tile::loading::{DataOrigin, Load};
-use crate::tile::pipeline::{DecodeStep, Layout, LayoutData, LayoutStep, Pipeline, Resume, Running, Waiting};
-use crate::tile::source_tiles::SourceTiles;
-use crate::tile::tile::{Shown, Tile, TileInput, TileKind, TileLoadOrder, TileOperation};
-use crate::tile::tile_workers::{InlineWorkers, Jobs, Lane, ReplyBody, TileWorkers};
+use crate::tile::pipeline::{Pipeline, Resume, Waiting};
+use crate::tile::source_tiles::{Slot, SourceTiles};
+use crate::tile::tile::{Tile, TileKind, TileLoadOrder, TileOperation};
+use crate::tile::tile_workers::{Jobs, Lane, TileWorkers};
 
 /// What the store reports to the renderer.
 #[derive(Debug)]
@@ -79,18 +77,26 @@ impl StoreContext {
         self.events.push(StoreEvent::Error { source: source.to_owned(), tile, error });
     }
 
-    /// Replaces what `tile` shows with `shown`, freeing the old contents.
-    fn show(&self, tile: &mut Tile, shown: Option<Shown>) {
-        if let Some(old) = std::mem::replace(&mut tile.shown, shown) {
-            release(old.contents, &self.pool);
-        }
+    /// Reports that tile `tile` of source `source` went through `op`.
+    pub(crate) fn action(&mut self, source: &str, tile: OverscaledTileID, op: TileOperation) {
+        self.events.push(StoreEvent::Action { op, tile, source: source.to_owned() });
+    }
+
+    /// Frees contents a tile no longer shows.
+    pub(crate) fn release(&self, contents: Rc<Contents>) {
+        release(contents, &self.pool);
+    }
+
+    /// Runs `run` on the workers of `lane`.
+    pub(crate) fn submit(&mut self, lane: Lane, run: Run) {
+        self.jobs.submit(lane, run, &self.inbox);
     }
 
     /// Resolves the dependencies `waiting` needs once the stores have them
     /// all or know them missing, packing them into the atlas: the resume of
     /// its job. `None` while the stores lack some, or haven't changed since
     /// the last try.
-    fn resolve(&mut self, waiting: &mut Waiting) -> Option<Resume> {
+    pub(crate) fn resolve(&mut self, waiting: &mut Waiting) -> Option<Resume> {
         let Waiting { lane, needs, wait, images: seen } = waiting;
         let revisions = (self.glyphs.revision(), self.images.revision());
         if wait.revisions == Some(revisions) {
@@ -149,14 +155,6 @@ pub(crate) struct SourceInfo {
     pub(crate) feature_state: SourceFeatureState,
 }
 
-/// What applying a reply did.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Applied {
-    Nothing,
-    /// The tile shows new contents.
-    Installed,
-}
-
 impl SourceInfo {
     pub(crate) fn new(key: SourceKey, id: String, kind: TileKind, single_layer: bool) -> Self {
         SourceInfo {
@@ -177,367 +175,25 @@ impl SourceInfo {
         self.counter
     }
 
-    pub(crate) fn action(&self, tile: &Tile, ctx: &mut StoreContext, op: TileOperation) {
-        ctx.events.push(StoreEvent::Action { op, tile: tile.id, source: self.id.clone() });
-    }
-
     /// A new tile `id`, which lays out with `params`. Its load starts with
-    /// `start_load`.
+    /// `TileMut::start_load`.
     pub(crate) fn new_tile(&mut self, id: OverscaledTileID, params: LayoutParams) -> Option<Tile> {
         let load = Load::new(self.origin.as_ref()?, &id, params.pixel_ratio);
         let generation = self.next();
         Some(Tile::new(id, load, Pipeline::new(self.kind, generation, params)))
     }
 
+    /// The file source a tileset's tiles load through.
+    pub(crate) fn file_source(&self) -> Option<Arc<dyn FileSource>> {
+        match &self.origin {
+            Some(DataOrigin::Tileset { file_source, .. }) => file_source.clone(),
+            Some(DataOrigin::GeoJson(_) | DataOrigin::Custom { .. }) | None => None,
+        }
+    }
+
     /// The key of `tile` in the store's messages.
-    fn tile_key(&self, tile: &Tile) -> TileKey {
+    pub(crate) fn tile_key(&self, tile: &Tile) -> TileKey {
         TileKey { source: self.key, id: tile.id }
-    }
-
-    /// Changes an input of a geometry `tile`'s layout through `f`, at a new
-    /// generation; reports the start of a parse if the tile has work again.
-    /// Returns whether the tile lays out.
-    fn change(&mut self, tile: &mut Tile, ctx: &mut StoreContext, f: impl FnOnce(&mut Layout, u64)) -> bool {
-        let pending = tile.is_pending();
-        let generation = self.next();
-        let Some(layout) = tile.pipeline.layout_mut() else {
-            return false;
-        };
-        f(layout, generation);
-        if !pending && tile.is_pending() {
-            self.action(tile, ctx, TileOperation::StartParse);
-        }
-        true
-    }
-
-    /// Takes in what a load of `tile` delivered. A raster tile without an
-    /// image shows nothing in its place at once, renderable unless
-    /// `missing`.
-    pub(crate) fn set_data(&mut self, tile: &mut Tile, ctx: &mut StoreContext, input: TileInput) {
-        match input {
-            TileInput::Geometry { data, missing } => {
-                let key = DataKey { source: self.key, tile: tile.id.canonical, load: self.next() };
-                if self.change(tile, ctx, |layout, generation| {
-                    layout.set_data(LayoutData { key, data, missing }, generation);
-                }) {
-                    self.advance(tile, ctx);
-                }
-            }
-            TileInput::Image { data, missing } => {
-                let pending = tile.is_pending();
-                let has_image = data.is_some();
-                let generation = self.next();
-                let Pipeline::Decode(decode) = &mut tile.pipeline else {
-                    return;
-                };
-                decode.set_image(data, generation);
-                if !pending {
-                    self.action(tile, ctx, TileOperation::StartParse);
-                }
-                if !has_image {
-                    self.install(tile, ctx, (!missing).then_some(Contents::Empty));
-                }
-            }
-        }
-    }
-
-    /// Lays `tile` out with `style`, for `pixel_ratio` and `granularity`.
-    pub(crate) fn set_style(
-        &mut self,
-        tile: &mut Tile,
-        ctx: &mut StoreContext,
-        style: &Arc<SourceStyle>,
-        pixel_ratio: f32,
-        granularity: SubdivisionGranularitySetting,
-    ) {
-        if self.change(tile, ctx, |layout, generation| {
-            layout.set_style(Arc::clone(style), pixel_ratio, granularity, generation);
-        }) {
-            self.advance(tile, ctx);
-        }
-    }
-
-    pub(crate) fn set_show_collision_boxes(&mut self, tile: &mut Tile, ctx: &mut StoreContext, show: bool) {
-        if tile.pipeline.layout().is_none_or(|layout| layout.params().show_collision_boxes == show) {
-            return;
-        }
-        if self.change(tile, ctx, |layout, generation| layout.set_show_collision_boxes(show, generation)) {
-            self.advance(tile, ctx);
-        }
-    }
-
-    /// Drops `tile`'s data and style, and leaves it waiting for new ones.
-    pub(crate) fn reset(&mut self, tile: &mut Tile, ctx: &mut StoreContext) {
-        // A parse in progress is cancelled.
-        if tile.is_pending() {
-            self.action(tile, ctx, TileOperation::Cancelled);
-        }
-        // An unloaded tile signals no completion until it has data again.
-        tile.loaded = false;
-        let generation = self.next();
-        if let Some(layout) = tile.pipeline.layout_mut() {
-            layout.reset(generation);
-        }
-    }
-
-    /// Lays `tile` out again, with its data and style, for glyphs or images
-    /// that changed: without the answer the layout it shows had.
-    fn relayout(&mut self, tile: &mut Tile, ctx: &mut StoreContext) {
-        if let Some(shown) = &mut tile.shown {
-            shown.answer_outdated = true;
-        }
-        if self.change(tile, ctx, Layout::bump) {
-            self.advance(tile, ctx);
-        }
-    }
-
-    /// Takes in a change of images: the ones in `changed` were added,
-    /// removed or resized, and `available` exist now. Lays `tile` out again
-    /// if the images it shows name one of `changed`, or if its work does
-    /// (`Layout::touches_images`).
-    pub(crate) fn images_changed(
-        &mut self,
-        tile: &mut Tile,
-        ctx: &mut StoreContext,
-        changed: &HashSet<String>,
-        available: &VecSet<String>,
-    ) {
-        let shown = tile
-            .contents()
-            .and_then(Contents::geometry)
-            .is_some_and(|contents| contents.deps.images.keys().any(|id| changed.contains(id)));
-        let work = tile.pipeline.layout().is_some_and(|layout| layout.touches_images(changed, available));
-        if shown || work {
-            self.relayout(tile, ctx);
-        }
-    }
-
-    /// Lays `tile` out again if its layout, or the one it runs, lacked
-    /// glyphs of a range that failed to load, which asks for the range
-    /// again.
-    pub(crate) fn retry_failed_glyphs(&mut self, tile: &mut Tile, ctx: &mut StoreContext) {
-        let running = tile.pipeline.layout().is_some_and(Layout::lacks_failed_glyphs);
-        let shown = tile.contents().and_then(Contents::geometry).is_some_and(|contents| contents.answer.glyphs_failed);
-        if running || shown {
-            self.relayout(tile, ctx);
-        }
-    }
-
-    /// Lets go of `tile`, which leaves its source: a job in flight needn't
-    /// run, its request is cancelled, and its contents are freed.
-    pub(crate) fn drop_tile(&self, mut tile: Tile, ctx: &mut StoreContext) {
-        // This tile never finished loading or was abandoned.
-        if tile.is_pending() {
-            self.action(&tile, ctx, TileOperation::Cancelled);
-        }
-        if let Some(job) = tile.pipeline.in_flight() {
-            job.superseded.store(true, std::sync::atomic::Ordering::Relaxed);
-        }
-        self.abandon_load(&tile);
-        ctx.show(&mut tile, None);
-    }
-
-    /// Runs a synchronous source's ready jobs at once.
-    fn advance(&mut self, tile: &mut Tile, ctx: &mut StoreContext) -> bool {
-        self.synchronous && self.run_inline(tile, ctx)
-    }
-
-    /// Moves `tile`'s work on: resolves the dependencies it waits for, once
-    /// the stores have them all or know them missing, and starts its next
-    /// job if a lane has room, or at once for a synchronous source. Returns
-    /// whether the tile shows new contents.
-    pub(crate) fn drive(&mut self, tile: &mut Tile, ctx: &mut StoreContext) -> bool {
-        if let Some(layout) = tile.pipeline.layout_mut() {
-            layout.resolve(|waiting| ctx.resolve(waiting));
-        }
-        if self.synchronous {
-            return self.run_inline(tile, ctx);
-        }
-        if let Some((lane, run)) = self.next_job(tile, ctx, false) {
-            ctx.jobs.submit(lane, run, &ctx.inbox);
-        }
-        false
-    }
-
-    /// Runs `tile`'s jobs on this thread until one waits for dependencies or
-    /// the tile shows its contents. Returns whether it does.
-    fn run_inline(&mut self, tile: &mut Tile, ctx: &mut StoreContext) -> bool {
-        let mut installed = false;
-        while let Some((_, run)) = self.next_job(tile, ctx, true) {
-            let reply = InlineWorkers::run(run);
-            installed |= self.apply_result(tile, ctx, reply.id, reply.result) == Applied::Installed;
-        }
-        installed
-    }
-
-    /// Puts `tile`'s next job in flight, and returns it with its lane;
-    /// `None` if the tile has no job to run, lacks its data or style, or no
-    /// lane has room. `inline` runs it on this thread.
-    fn next_job(&mut self, tile: &mut Tile, ctx: &mut StoreContext, inline: bool) -> Option<(Lane, Run)> {
-        let key = self.tile_key(tile);
-        match &mut tile.pipeline {
-            Pipeline::Layout(layout) => {
-                let images = ctx.images.available_images();
-                let jobs = &mut ctx.jobs;
-                layout.next_job(key, tile.shown.as_ref(), images, |data, full| {
-                    if inline { Some((Lane(0), false)) } else { jobs.place(data, full) }
-                })
-            }
-            Pipeline::Decode(decode) => {
-                decode.next_job(key, self.kind, || if inline { Some(Lane(0)) } else { ctx.jobs.lane() })
-            }
-        }
-    }
-
-    /// Applies the reply to job `id` of `tile`, which runs it. Returns
-    /// whether the tile shows new contents.
-    pub(crate) fn apply_reply(
-        &mut self,
-        tile: &mut Tile,
-        ctx: &mut StoreContext,
-        lane: Lane,
-        id: JobId,
-        body: ReplyBody,
-    ) -> bool {
-        if id.generation != tile.pipeline.generation() {
-            // The tile lays out or decodes its newest generation instead.
-            tile.pipeline.stale_replied();
-            drop_on_workers(&ctx.pool, body);
-            return false;
-        }
-        // A reply of a worker lost since: the loss, which comes next, runs
-        // the job again.
-        let Some(result) = ctx.jobs.decode(lane, body) else {
-            return false;
-        };
-        self.apply_result(tile, ctx, id, result) == Applied::Installed
-    }
-
-    /// Applies `result`, the reply to `tile`'s job `id`, which is in flight.
-    fn apply_result(&mut self, tile: &mut Tile, ctx: &mut StoreContext, id: JobId, result: JobResult) -> Applied {
-        match &mut tile.pipeline {
-            Pipeline::Decode(decode) => match decode.apply(id, result) {
-                DecodeStep::Stale => Applied::Nothing,
-                DecodeStep::Show(contents) => {
-                    self.install(tile, ctx, Some(contents));
-                    Applied::Installed
-                }
-                DecodeStep::Failed(error) => {
-                    self.job_error(tile, ctx, error);
-                    Applied::Nothing
-                }
-            },
-            Pipeline::Layout(layout) => {
-                let Some(running) = layout.take_running() else {
-                    return Applied::Nothing;
-                };
-                self.apply_layout(tile, ctx, running, result)
-            }
-        }
-    }
-
-    /// Applies `result`, the reply to `running`, `tile`'s layout job.
-    fn apply_layout(
-        &mut self,
-        tile: &mut Tile,
-        ctx: &mut StoreContext,
-        running: Running,
-        result: JobResult,
-    ) -> Applied {
-        let Some(layout) = tile.pipeline.layout_mut() else {
-            return Applied::Nothing;
-        };
-        match layout.apply(running, result, ctx.images.available_images()) {
-            LayoutStep::Show { output, answer, first_try } => {
-                // A resume's answer is what it asked for; a first try's may be
-                // the layout before's, which can hold more.
-                let answer =
-                    if first_try { answer.trimmed(&output.deps, &mut ctx.atlas).unwrap_or(answer) } else { answer };
-                let LayoutOutput { mut result, deps } = output;
-                let (data, missing) = layout.data().map_or((None, false), |data| (data.data.clone(), data.missing));
-                // The index crossed without its data, or with the data it was
-                // built from, which is the tile's.
-                if let Some(feature_index) = Arc::get_mut(&mut result.feature_index) {
-                    feature_index.set_data(data);
-                }
-                let contents = GeometryContents::new(result, missing, answer, deps);
-                self.install(tile, ctx, Some(Contents::Geometry(contents)));
-                Applied::Installed
-            }
-            LayoutStep::Wait => Applied::Nothing,
-            LayoutStep::Resend(key) => {
-                // The lane that last got the data lost it: the next job
-                // carries it.
-                ctx.jobs.forget(key);
-                Applied::Nothing
-            }
-            LayoutStep::Outdated { images_moved, result } => {
-                if images_moved {
-                    let generation = self.next();
-                    if let Some(layout) = tile.pipeline.layout_mut() {
-                        layout.bump(generation);
-                    }
-                    if let Some(shown) = &mut tile.shown {
-                        shown.answer_outdated = true;
-                    }
-                }
-                drop_on_workers(&ctx.pool, result);
-                Applied::Nothing
-            }
-            LayoutStep::Failed(error) => {
-                self.job_error(tile, ctx, error);
-                Applied::Nothing
-            }
-        }
-    }
-
-    /// Shows `contents`, or nothing, as the tile's newest: geometry contents
-    /// with the source's feature state applied.
-    fn install(&self, tile: &mut Tile, ctx: &mut StoreContext, contents: Option<Contents>) {
-        let shown = contents.map(|contents| {
-            let mut version = 0;
-            if let Some(geometry) = contents.geometry() {
-                geometry.set_feature_state(self.feature_state.current_states());
-                version = self.feature_state.version();
-            }
-            Shown::new(contents, version)
-        });
-        ctx.show(tile, shown);
-        tile.loaded = true;
-        self.action(tile, ctx, TileOperation::EndParse);
-        ctx.changed();
-    }
-
-    /// Applies `result` as the reply to `tile`'s job of its current
-    /// generation.
-    #[cfg(test)]
-    pub(crate) fn apply_now(&mut self, tile: &mut Tile, ctx: &mut StoreContext, result: JobResult) -> bool {
-        let key = self.tile_key(tile);
-        let id = JobId { tile: key, generation: tile.pipeline.generation() };
-        let applied = match &mut tile.pipeline {
-            Pipeline::Layout(layout) => {
-                let running = layout.run_now(key, Arc::clone(ctx.images.available_images()));
-                self.apply_layout(tile, ctx, running, result)
-            }
-            Pipeline::Decode(_) => self.apply_result(tile, ctx, id, result),
-        };
-        applied == Applied::Installed
-    }
-
-    /// `tile`'s job failed: it keeps what it shows.
-    pub(crate) fn job_error(&self, tile: &mut Tile, ctx: &mut StoreContext, error: Error) {
-        tile.loaded = true;
-        self.action(tile, ctx, TileOperation::Error);
-        ctx.error(&self.id, tile.id, error);
-    }
-
-    /// The worker of `lane` is gone: `tile`'s job there, or the state its
-    /// worker kept for it, goes, and its work starts again.
-    pub(crate) fn lane_lost(&mut self, tile: &mut Tile, lane: Lane) {
-        if tile.pipeline.lane() == Some(lane) {
-            let generation = self.next();
-            tile.pipeline.lane_lost(generation);
-        }
     }
 }
 
@@ -625,10 +281,15 @@ impl TileStore {
     pub(crate) fn set_workers(&mut self, workers: Box<dyn TileWorkers>) {
         self.ctx.jobs.set_workers(workers);
         for source in self.sources.values_mut() {
-            let lanes: Vec<Lane> = source.slots().filter_map(|slot| slot.tile.pipeline.lane()).collect();
-            for lane in lanes {
-                source.lane_lost(lane);
-            }
+            source.update_each(
+                &mut self.ctx,
+                |slot| slot.tile.pipeline.lane().is_some(),
+                |tile| {
+                    if let Some(lane) = tile.tile().pipeline.lane() {
+                        tile.lane_lost(lane);
+                    }
+                },
+            );
         }
     }
 
@@ -683,16 +344,12 @@ impl TileStore {
                 TileEvent::Response { tile, load, response } => {
                     let awaits = |tile: &Tile| tile.load.awaits_response(load);
                     if let Some((source, tile)) = find(&mut self.sources, tile, awaits) {
-                        source.update(&tile, &mut self.ctx, |info, tile, ctx| {
-                            info.apply_response(tile, ctx, load, &response);
-                        });
+                        source.update(&tile, &mut self.ctx, |tile| tile.apply_response(load, &response));
                     }
                 }
                 TileEvent::Data { tile, load, data } => {
                     if let Some((source, tile)) = find(&mut self.sources, tile, |tile| tile.load.accepts(load)) {
-                        source.update(&tile, &mut self.ctx, |info, tile, ctx| {
-                            info.apply_source_data(tile, ctx, load, data);
-                        });
+                        source.update(&tile, &mut self.ctx, |tile| tile.apply_source_data(load, data));
                     }
                 }
                 TileEvent::Reply { lane, id, body, times } => {
@@ -702,14 +359,17 @@ impl TileStore {
                     }
                     let running = |tile: &Tile| tile.pipeline.in_flight().is_some_and(|job| job.id == id);
                     match find(&mut self.sources, id.tile, running) {
-                        Some((source, tile)) => source.apply_reply(&tile, &mut self.ctx, lane, id, body),
+                        Some((source, tile)) => {
+                            source.update(&tile, &mut self.ctx, |tile| tile.apply_reply(lane, id, body));
+                        }
                         None => drop_on_workers(&self.ctx.pool, body),
                     }
                 }
                 TileEvent::LaneLost(lane) => {
                     self.ctx.jobs.lost(lane);
                     for source in self.sources.values_mut() {
-                        source.lane_lost(lane);
+                        let holds = |slot: &Slot| slot.tile.pipeline.lane() == Some(lane);
+                        source.update_each(&mut self.ctx, holds, |tile| tile.lane_lost(lane));
                     }
                 }
                 TileEvent::Glyphs { font_stack, range, id, result } => {
@@ -741,7 +401,12 @@ impl TileStore {
             let Some(source) = self.sources.get_mut(&self.order[index]) else {
                 continue;
             };
-            laid_out |= source.drive(&id, &mut self.ctx);
+            laid_out |= source
+                .update(&id, &mut self.ctx, |tile| {
+                    tile.drive();
+                    tile.installed()
+                })
+                .unwrap_or(false);
         }
         laid_out
     }
@@ -752,11 +417,7 @@ impl TileStore {
         let available = Arc::clone(self.ctx.images.available_images());
         for key in &self.order {
             if let Some(source) = self.sources.get_mut(key) {
-                source.update_each(
-                    &mut self.ctx,
-                    |_| true,
-                    |info, tile, ctx| info.images_changed(tile, ctx, changed, &available),
-                );
+                source.update_each(&mut self.ctx, |_| true, |tile| tile.images_changed(changed, &available));
             }
         }
     }
@@ -767,8 +428,22 @@ impl TileStore {
     pub(crate) fn retry_failed(&mut self) {
         for key in &self.order {
             if let Some(source) = self.sources.get_mut(key) {
-                source.update_each(&mut self.ctx, |_| true, SourceInfo::retry_failed_glyphs);
-                source.retry_failed_tiles(&mut self.ctx);
+                // Closures rather than the methods' paths: those name one
+                // lifetime of `TileMut`, and `update_each` lends any.
+                source.update_each(
+                    &mut self.ctx,
+                    |_| true,
+                    |tile| {
+                        tile.retry_failed_glyphs();
+                    },
+                );
+                source.update_each(
+                    &mut self.ctx,
+                    |slot| !slot.place.is_cached(),
+                    |tile| {
+                        tile.retry_failed_load();
+                    },
+                );
             }
         }
     }

@@ -196,14 +196,15 @@ pub(crate) struct Tile {
     pub(crate) pipeline: Pipeline,
     /// What the tile draws.
     pub(crate) shown: Option<Shown>,
-    /// The tile has had a response, a layout or an error since it last
-    /// started loading: it has exhausted what it can do for now.
-    pub(crate) loaded: bool,
+    /// The tile has shown contents or failed since it last started
+    /// loading: it has done what it can for now. Only its transitions
+    /// (`TileMut`) write it.
+    pub(super) settled: bool,
 }
 
 impl Tile {
     pub(crate) fn new(id: OverscaledTileID, load: Load, pipeline: Pipeline) -> Self {
-        Tile { id, load, pipeline, shown: None, loaded: false }
+        Tile { id, load, pipeline, shown: None, settled: false }
     }
 
     /// What the tile draws.
@@ -218,10 +219,16 @@ impl Tile {
         self.contents().is_some_and(Contents::is_renderable)
     }
 
+    /// Whether the tile has shown contents or failed since it last started
+    /// loading: whether it has done what it can for now.
+    pub(crate) fn is_settled(&self) -> bool {
+        self.settled
+    }
+
     /// Whether the tile has work under way or to start: a job in flight or
     /// waiting, or one to run for the data it has.
     pub(crate) fn is_pending(&self) -> bool {
-        self.pipeline.is_pending(self.loaded)
+        self.pipeline.is_pending(self.settled)
     }
 
     /// "Completion" of a tile means that we have attempted to load it, and
@@ -230,7 +237,7 @@ impl Tile {
     /// rendered, but merely that we have exhausted all options to get this
     /// tile to a renderable state.
     pub(crate) fn is_complete(&self) -> bool {
-        self.loaded && !self.is_pending()
+        self.settled && !self.is_pending()
     }
 
     /// Whether the tile has a job it can submit, or dependencies to resolve.
@@ -279,6 +286,6 @@ impl Tile {
         Log::info(Event::General, format!("Tile::id: {}", self.id));
         Log::info(Event::General, format!("Tile::renderable: {}", yes(self.is_renderable())));
         Log::info(Event::General, format!("Tile::complete: {}", yes(self.is_complete())));
-        Log::info(Event::General, format!("Tile::loaded: {}", yes(self.loaded)));
+        Log::info(Event::General, format!("Tile::loaded: {}", yes(self.settled)));
     }
 }

@@ -10,6 +10,7 @@ use feature::{Feature, PropertyMap};
 use geo_types::{Geometry, Point};
 use mln_actor::{RunLoop, TaggedScheduler, scheduler};
 use mln_map_types::MapMode;
+use mln_storage::response::{Reason, ResourceError};
 use mln_storage::{FileSource, Resource, Responder, Response};
 use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
@@ -29,7 +30,7 @@ use crate::tile::inbox::{SourceData, TileEvent};
 use crate::tile::job::{DataInput, Job, Run, TileKey};
 use crate::tile::loading::{DataOrigin, OriginLoad, VectorTileEncoding};
 use crate::tile::pipeline::LayoutWork;
-use crate::tile::tile::{TileKind, TileNecessity};
+use crate::tile::tile::{TileKind, TileNecessity, TileOperation};
 use crate::tile::tile_workers::{InlineWorkers, TileWorkers};
 
 /// A file source whose requests wait until the test answers them.
@@ -137,7 +138,8 @@ fn requesting_network(tile: &OneTile, pending: bool) -> bool {
 /// Starts a load of `tile`, as a GeoJSON source's `setData` does, and
 /// returns it.
 fn start_geojson_load(tile: &mut OneTile) -> u64 {
-    tile.with(|info, tile, _| {
+    tile.with(|tile| {
+        let (info, tile) = tile.parts();
         let load = info.next();
         tile.load.origin = OriginLoad::GeoJson { load: Some(load) };
         load
@@ -323,7 +325,8 @@ fn queries_and_feature_state_read_the_shown_contents() {
     let shown_version = |tile: &OneTile| tile.tile().shown.as_ref().expect("contents").feature_state_version;
     // Not rendered, so the coalesce left it.
     assert_eq!(shown_version(&tile), 0);
-    tile.with(|info, tile, _| {
+    tile.with(|tile| {
+        let (info, tile) = tile.parts();
         info.feature_state.coalesce_changes(tile.shown.as_mut());
     });
     assert_eq!(shown_version(&tile), version);
@@ -411,9 +414,11 @@ fn style_replaced_mid_load() {
         encoding: VectorTileEncoding::Mvt,
         file_source: Some(file_source_dyn),
     });
-    let mut new_tile = source.info.new_tile(id, params).expect("a tile");
-    source.info.start_load(&mut new_tile, ctx);
+    let new_tile = source.info.new_tile(id, params).expect("a tile");
     source.insert(new_tile);
+    source.update(&id, ctx, |tile| {
+        tile.start_load();
+    });
     tile.key = new_key;
     tile.set_style(&style(&layers));
 
@@ -576,4 +581,33 @@ fn a_relayout_keeps_only_the_bins_it_uses() {
     tile.update();
     assert_eq!(manual.submitted(), 3, "the relayout took one job");
     assert_eq!(icons(&tile), (vec!["a".to_owned()], 1));
+}
+
+/// A required tile whose load failed starts parsing again when it is
+/// retried: its parse events say `StartParse` once its new request is made,
+/// and `EndParse` once its layout shows.
+#[test]
+fn a_retried_load_starts_parsing_again() {
+    use TileOperation::{EndParse, Error, LoadFromNetwork, RequestedFromNetwork, StartParse};
+
+    let test = Test::new();
+    let file_source = Arc::new(Held::default());
+    let mut tile = test.tileset_tile(&file_source, Box::new(InlineWorkers));
+    let id = tile.id;
+    tile.set_style(&style(&[water_layer("water", "red")]));
+    tile.set_necessity(&id, TileNecessity::Required);
+    let mut failed = Response::new();
+    failed.error = Some(Box::new(ResourceError::new(Reason::Connection, "offline")));
+    file_source.respond(failed);
+    tile.update();
+    assert_eq!(tile.actions(), [StartParse, RequestedFromNetwork, Error]);
+    assert!(tile.tile().is_complete() && !tile.tile().is_pending());
+
+    tile.store.retry_failed();
+    assert_eq!(tile.actions(), [RequestedFromNetwork, StartParse]);
+    file_source.respond(water());
+    tile.update();
+    tile.update();
+    assert_eq!(tile.actions(), [LoadFromNetwork, EndParse]);
+    assert!(tile.shows_layout() && tile.tile().is_complete());
 }

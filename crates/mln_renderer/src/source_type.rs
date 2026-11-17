@@ -269,7 +269,7 @@ impl TileOrigin for GeoJsonOrigin {
                 tiles.update_each(
                     ctx,
                     |slot| !slot.place.is_cached() && slot.tile.id.canonical.z <= max_z,
-                    |info, tile, ctx| info.load_geojson(tile, ctx, data, update.needs_relayout),
+                    |tile| tile.load_geojson(data, update.needs_relayout),
                 );
             }
         }
