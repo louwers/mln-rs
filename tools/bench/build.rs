@@ -5,6 +5,7 @@
 //! only between two runs whose harness ids match, so that both sides ran the
 //! same scenario code built the same way.
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 fn main() {
@@ -34,6 +35,33 @@ fn main() {
     let version = std::process::Command::new(rustc).arg("-vV").output().expect("rustc -vV").stdout;
     hash.write(&version);
     println!("cargo::rustc-env=MLN_BENCH_HARNESS={:016x}", hash.0);
+    layout_probe();
+}
+
+/// With the `layout-probe` feature, writes `layout_probe.rs` to `OUT_DIR`: a
+/// function of many arms that the binary keeps but never calls, so that the
+/// code after it lies at other addresses than without the feature. The
+/// instructions a scenario retires can change with where its code lies,
+/// and `mln-bench compare` measures by how much with this build of the base.
+fn layout_probe() {
+    if std::env::var_os("CARGO_FEATURE_LAYOUT_PROBE").is_none() {
+        return;
+    }
+    let mut code = String::from(
+        "/// Never called (build.rs).\n#[inline(never)]\npub(crate) fn layout_probe(x: u64) -> u64 {\n    match x % 512 {\n",
+    );
+    for arm in 0..512u64 {
+        // black_box keeps each arm's code, which a table would replace.
+        let _ = writeln!(
+            code,
+            "        {arm} => std::hint::black_box(x.wrapping_mul({})).wrapping_add({}),",
+            2 * arm + 3,
+            arm + 1
+        );
+    }
+    code.push_str("        _ => 0,\n    }\n}\n");
+    let out = PathBuf::from(std::env::var_os("OUT_DIR").expect("OUT_DIR"));
+    std::fs::write(out.join("layout_probe.rs"), code).expect("the layout probe");
 }
 
 /// Adds the file `relative` of `root`, by its path and contents.

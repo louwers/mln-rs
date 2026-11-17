@@ -13,6 +13,11 @@ publish = false
 name = "mln-bench"
 path = "src/main.rs"
 
+[features]
+# More code in the harness, which no scenario runs, so that the code of the
+# rest lies at other addresses (build.rs, `mln-bench compare`).
+layout-probe = []
+
 # `mln-bench compare` builds this package inside the base's workspace too, so
 # it names its dependencies itself instead of through the workspace's table:
 # the libraries by path, and other crates by requirements loose enough that

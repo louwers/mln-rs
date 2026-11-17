@@ -190,11 +190,12 @@ work, such as a frame or a tile, also reports `instructions`, `allocations` and
 
 How closely a count repeats depends on what it counts. Allocations and bytes
 repeat exactly in most scenarios. Instructions move by a few hundredths of a
-percent between runs, and by up to a few tenths when the compiler lays code out
-differently after an edit elsewhere. Counts that depend on how several threads
-interleave, such as the peak heap while workers lay tiles out in parallel, or
-every count of `macro/load/runtime`, move by more. Times depend on the machine
-and its load.
+percent between runs of one binary, but also with where the binary's code lies,
+which an edit anywhere can change: by a few tenths of a percent in most
+scenarios, and by a few percent in some. Counts that depend on how several
+threads interleave, such as the peak heap while workers lay tiles out in
+parallel, or every count of `macro/load/runtime`, move by more. Times depend on
+the machine and its load.
 
 ## Comparing
 
@@ -220,13 +221,17 @@ first, then compare the change you want to measure with that commit
 Each side runs once per scenario by default. The ref's runs are kept in
 `target/bench-compare/samples`, by commit, and the ref runs again only until it
 has three: the first comparison with a commit costs two extra runs per scenario,
-later ones none. A count's spread is the larger range of either side's runs. A
-count gets a verdict when this checkout's median moves from the ref's by more
-than twice its spread and by more than a threshold: `--threshold` (0.25% by
-default), or `--instructions-threshold` (1%) for instructions, which code layout
-moves a little. A scenario whose counts get a verdict runs twice more on this
-checkout, and the verdicts come from all three runs. Per-unit counts get no
-verdicts of their own.
+later ones none. The ref is also built a second time with the harness's
+`layout-probe` feature, which adds code that never runs and so moves the rest,
+and each scenario runs once on that build.
+
+A count's spread is the larger range of either side's runs; for instructions,
+also how far the layout probe moved them. A count gets a verdict when this
+checkout's median moves from the ref's by more than twice its spread and by more
+than a threshold: `--threshold` (0.25% by default), or
+`--instructions-threshold` (1%) for instructions. A scenario whose counts get a
+verdict runs twice more on this checkout, and the verdicts come from all three
+runs. Per-unit counts get no verdicts of their own.
 
 ### Times
 
@@ -350,7 +355,8 @@ run. The runner and the build see to it:
   (`profile.toml`), where they otherwise seed each process from the clock.
 - The harness compiles as one codegen unit, so that how the compiler splits and
   inlines the scenarios' code doesn't change with the size of libraries they
-  don't call.
+  don't call. Where the code lies still moves instructions, which a comparison
+  measures with its layout probe instead.
 - The first process of a newly built binary to run some code does more work than
   later ones: on macOS the system checks each page of the binary's code the
   first time a process reads it, and caches the GPU code it compiles for each

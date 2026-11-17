@@ -17,6 +17,11 @@ use std::process::ExitCode;
 
 use meter::CountingAllocator;
 
+#[cfg(feature = "layout-probe")]
+mod layout_probe {
+    include!(concat!(env!("OUT_DIR"), "/layout_probe.rs"));
+}
+
 #[global_allocator]
 static ALLOCATOR: CountingAllocator = CountingAllocator;
 
@@ -42,6 +47,12 @@ fixtures installs the snapshot that tools/bench/fixtures.json names, from its
 base URL or from a directory laid out as it is.";
 
 fn main() -> ExitCode {
+    // Kept in the binary, never called.
+    #[cfg(feature = "layout-probe")]
+    {
+        let probe: fn(u64) -> u64 = layout_probe::layout_probe;
+        std::hint::black_box(probe);
+    }
     if std::env::args().nth(1).as_deref() == Some("exec") {
         aslr::fix();
     }

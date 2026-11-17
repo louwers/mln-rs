@@ -16,7 +16,12 @@
 //! count moves from run to run (its spread) without running the ref again
 //! next time; the ref runs again only until it has [`SPREAD_RUNS`] of them.
 //! A scenario whose counts get a verdict runs again on this checkout, until
-//! it has [`CONFIRM_RUNS`], and its verdicts come from those runs.
+//! it has [`CONFIRM_RUNS`], and its verdicts come from those runs. The
+//! instructions a scenario retires also move with where the compiler and
+//! linker put its code, which any edit to the binary can change: the ref is
+//! built a second time with the harness's `layout-probe` feature, which only
+//! moves code, and how far each scenario's instructions move there counts
+//! in their spread.
 //! Times: context only, unless `--rounds` asks for interleaved rounds, which
 //! a rank test then judges.
 
@@ -82,8 +87,9 @@ pub(crate) struct MetricComparison {
     pub(crate) candidate: Option<f64>,
     /// The candidate's change from the base, as a fraction of the base.
     pub(crate) change: Option<f64>,
-    /// A count's spread: the larger range of either side's runs, as a
-    /// fraction of the base.
+    /// A count's spread, as a fraction of the base: the larger range of
+    /// either side's runs, or for instructions how far they moved in the
+    /// ref's layout probe, if that is larger.
     pub(crate) spread: Option<f64>,
     /// The tested time's p-value with rounds, Holm-adjusted over every
     /// scenario of the comparison.
@@ -148,7 +154,7 @@ pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
     let commit = git(&root, &["rev-parse", "--verify", &format!("{}^{{commit}}", options.base)])?;
 
     eprintln!("mln-bench: building this checkout");
-    let candidate = build(&root, &root.join("Cargo.toml"), None)?;
+    let candidate = build(&root, &root.join("Cargo.toml"), None, None)?;
     // <target>/benchmark/mln-bench: the comparison works in <target>.
     let target = candidate.parent().and_then(Path::parent).ok_or("the binary's target directory")?;
     let work = target.join("bench-compare");
@@ -158,7 +164,8 @@ pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
     eprintln!("mln-bench: building {} ({}) with this checkout's harness", options.base, short(&commit));
     let tree = work.join("tree");
     prepare_tree(&root, &tree, &commit)?;
-    let base = build(&root, &tree.join("Cargo.toml"), Some(&work.join("target"))).map_err(|error| {
+    let base_target = work.join("target");
+    let base = build(&root, &tree.join("Cargo.toml"), Some(&base_target), None).map_err(|error| {
         format!(
             "{error}\n\nThis checkout's harness, with its libraries' bench modules, doesn't build against {} ({}), \
              so there are no verdicts. A scenario or entry point that needs library code the base lacks can't be \
@@ -168,12 +175,35 @@ pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
             short(&commit)
         )
     })?;
+    // Both builds of the ref link to the same path, so each is copied out.
+    let base = keep_binary(&base, &work.join("bin/base"))?;
+    eprintln!("mln-bench: building {} ({}) again, with its code at other addresses", options.base, short(&commit));
+    let probe = build(&root, &tree.join("Cargo.toml"), Some(&base_target), Some("layout-probe"))?;
+    let probe = keep_binary(&probe, &work.join("bin/probe"))?;
 
     let samples_path = work.join("samples").join(format!("{commit}.json"));
     let mut samples = read_samples(&samples_path);
     eprintln!("mln-bench: a first run of each scenario on each side, not counted");
     warm_up(&base, &scenarios)?;
     warm_up(&candidate, &scenarios)?;
+    let probe_key = |scenario: &Scenario| format!("{} (layout probe)", scenario.name);
+    let unprobed: Vec<&Scenario> = scenarios
+        .iter()
+        .copied()
+        .filter(|scenario| {
+            samples
+                .get(&probe_key(scenario))
+                .is_none_or(|runs| !runs.iter().any(|run| run.harness == env!("MLN_BENCH_HARNESS")))
+        })
+        .collect();
+    if !unprobed.is_empty() {
+        eprintln!("mln-bench: the ref's layout probe, once per scenario");
+        warm_up(&probe, &unprobed)?;
+        for scenario in &unprobed {
+            let run = run_in_process(&probe, scenario.name, None)?;
+            samples.insert(probe_key(scenario), vec![run]);
+        }
+    }
     let mut comparisons = Vec::new();
     for (index, scenario) in scenarios.iter().enumerate() {
         let (base_runs, mut candidate_runs) = run_sides(scenario, index, &base, &candidate, options.rounds)?;
@@ -198,8 +228,16 @@ pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
         kept.extend(base_counts[base_counts.len() - fresh..].iter().cloned());
         let excess = kept.len().saturating_sub(KEPT_RUNS);
         kept.drain(..excess);
+        let probed: Vec<Run> = samples
+            .get(&probe_key(scenario))
+            .into_iter()
+            .flatten()
+            .filter(|run| &run.harness == harness && &run.environment == environment)
+            .cloned()
+            .collect();
         write_samples(&samples_path, &samples)?;
-        let mut comparison = compare_scenario(scenario, &base_runs, &base_counts, &candidate_runs, options);
+        let base = Base { runs: &base_runs, counts: &base_counts, probe: &probed };
+        let mut comparison = compare_scenario(scenario, &base, &candidate_runs, options);
         if options.rounds.is_none() && comparison.has_count_verdict() {
             while candidate_runs.len() < CONFIRM_RUNS {
                 eprintln!("mln-bench: {}: this checkout again, to confirm its verdicts", scenario.name);
@@ -209,7 +247,7 @@ pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
                 }
                 candidate_runs.push(run);
             }
-            comparison = compare_scenario(scenario, &base_runs, &base_counts, &candidate_runs, options);
+            comparison = compare_scenario(scenario, &base, &candidate_runs, options);
         }
         comparisons.push(comparison);
     }
@@ -295,17 +333,27 @@ fn run_sides(
     Ok((base_runs, candidate_runs))
 }
 
-/// The comparison of one scenario's runs: `base_counts` are the base's runs
-/// for its counts, these and kept ones; `base_runs` and `candidate_runs`
-/// this comparison's, for times. With rounds, the tested time gets its
-/// p-value unadjusted, and [`judge_times`] judges it.
+/// The base's runs of one scenario.
+struct Base<'a> {
+    /// This comparison's, for times.
+    runs: &'a [Run],
+    /// These and kept ones, for counts.
+    counts: &'a [Run],
+    /// The layout probe's, for how far instructions move with where the
+    /// code lies.
+    probe: &'a [Run],
+}
+
+/// The comparison of one scenario's runs: `base`'s and `candidate_runs`,
+/// this comparison's. With rounds, the tested time gets its p-value
+/// unadjusted, and [`judge_times`] judges it.
 fn compare_scenario(
     scenario: &Scenario,
-    base_runs: &[Run],
-    base_counts: &[Run],
+    base_side: &Base<'_>,
     candidate_runs: &[Run],
     options: &Options,
 ) -> ScenarioComparison {
+    let (base_runs, base_counts) = (base_side.runs, base_side.counts);
     let environment = candidate_runs[0].environment.clone();
     let mut no_verdicts = None;
     if let Some(run) = base_runs.iter().chain(candidate_runs).find(|run| run.environment != environment) {
@@ -347,7 +395,11 @@ fn compare_scenario(
         if let (Some(b), Some(c)) = (base_median, candidate_median)
             && kind == MetricKind::Count
         {
-            let spread = range(&base).max(range(&candidate));
+            let mut spread = range(&base).max(range(&candidate));
+            let probe = values(base_side.probe, name);
+            if name.starts_with("instructions") && !probe.is_empty() {
+                spread = spread.max((median(&probe) - b).abs());
+            }
             comparison.spread = Some(relative(spread, b));
             let threshold =
                 if name.starts_with("instructions") { options.instructions_threshold } else { options.threshold };
@@ -490,9 +542,9 @@ fn short(commit: &str) -> &str {
 }
 
 /// Builds the harness of the workspace `manifest` with the benchmark profile
-/// of this checkout, with this checkout's toolchain, and returns the
-/// binary.
-fn build(root: &Path, manifest: &Path, target_dir: Option<&Path>) -> Result<PathBuf, String> {
+/// of this checkout, with this checkout's toolchain, and the harness's
+/// `features`, and returns the binary.
+fn build(root: &Path, manifest: &Path, target_dir: Option<&Path>, features: Option<&str>) -> Result<PathBuf, String> {
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| OsString::from("cargo"));
     let mut command = Command::new(cargo);
     // The checkout's directory, whose rust-toolchain.toml rustup reads.
@@ -505,6 +557,9 @@ fn build(root: &Path, manifest: &Path, target_dir: Option<&Path>) -> Result<Path
         .arg(manifest);
     if let Some(dir) = target_dir {
         command.arg("--target-dir").arg(dir);
+    }
+    if let Some(features) = features {
+        command.args(["--features", features]);
     }
     let output = command
         .stdin(Stdio::null())
@@ -521,6 +576,18 @@ fn build(root: &Path, manifest: &Path, target_dir: Option<&Path>) -> Result<Path
         .filter(|message| message["reason"] == "compiler-artifact" && message["target"]["name"] == "mln-bench")
         .find_map(|message| message["executable"].as_str().map(PathBuf::from))
         .ok_or_else(|| format!("building {} gave no mln-bench binary", manifest.display()))
+}
+
+/// Copies the binary `built` to `kept`, unless it holds the same already,
+/// and returns `kept`.
+fn keep_binary(built: &Path, kept: &Path) -> Result<PathBuf, String> {
+    if let Some(dir) = kept.parent() {
+        std::fs::create_dir_all(dir).map_err(|error| format!("{}: {error}", dir.display()))?;
+    }
+    write_if_changed(kept, &read(built)?)?;
+    let permissions = std::fs::metadata(built).map_err(|error| format!("{}: {error}", built.display()))?.permissions();
+    std::fs::set_permissions(kept, permissions).map_err(|error| format!("{}: {error}", kept.display()))?;
+    Ok(kept.to_owned())
 }
 
 /// Checks `commit` out at `tree`, a worktree of the checkout's repository,
@@ -712,19 +779,60 @@ mod tests {
     fn a_count_needs_the_threshold_and_twice_the_spread() {
         let base = [run(1000.0, 1.0), run(1001.0, 1.0), run(1002.0, 1.0)];
         // +2%: over 1% and over twice the spread of 2.
-        let comparison = compare_scenario(&SCENARIO, &base[..1], &base, &[run(1021.0, 5.0)], &options(None));
+        let comparison = compare_scenario(
+            &SCENARIO,
+            &Base { runs: &base[..1], counts: &base, probe: &[] },
+            &[run(1021.0, 5.0)],
+            &options(None),
+        );
         assert_eq!(verdict(&comparison, "instructions"), Some(Verdict::Worse));
         // Times are context without rounds.
         assert_eq!(verdict(&comparison, "wall"), None);
         // +0.5%: under the threshold.
-        let comparison = compare_scenario(&SCENARIO, &base[..1], &base, &[run(1006.0, 1.0)], &options(None));
+        let comparison = compare_scenario(
+            &SCENARIO,
+            &Base { runs: &base[..1], counts: &base, probe: &[] },
+            &[run(1006.0, 1.0)],
+            &options(None),
+        );
         assert_eq!(verdict(&comparison, "instructions"), None);
         // A spread of 30 hides a change of 50.
         let noisy = [run(1000.0, 1.0), run(1015.0, 1.0), run(1030.0, 1.0)];
-        let comparison = compare_scenario(&SCENARIO, &noisy[..1], &noisy, &[run(1065.0, 1.0)], &options(None));
+        let comparison = compare_scenario(
+            &SCENARIO,
+            &Base { runs: &noisy[..1], counts: &noisy, probe: &[] },
+            &[run(1065.0, 1.0)],
+            &options(None),
+        );
         assert_eq!(verdict(&comparison, "instructions"), None);
-        let comparison = compare_scenario(&SCENARIO, &noisy[..1], &noisy, &[run(900.0, 1.0)], &options(None));
+        let comparison = compare_scenario(
+            &SCENARIO,
+            &Base { runs: &noisy[..1], counts: &noisy, probe: &[] },
+            &[run(900.0, 1.0)],
+            &options(None),
+        );
         assert_eq!(verdict(&comparison, "instructions"), Some(Verdict::Better));
+    }
+
+    #[test]
+    fn instructions_take_the_layout_probe_as_spread() {
+        let base = [run(1000.0, 1.0), run(1000.0, 1.0), run(1000.0, 1.0)];
+        // +2%, where moving the ref's code moved the count by 3%.
+        let candidate = [run(1020.0, 1.0)];
+        let comparison = compare_scenario(
+            &SCENARIO,
+            &Base { runs: &base[..1], counts: &base, probe: &[run(1030.0, 1.0)] },
+            &candidate,
+            &options(None),
+        );
+        assert_eq!(verdict(&comparison, "instructions"), None);
+        let comparison = compare_scenario(
+            &SCENARIO,
+            &Base { runs: &base[..1], counts: &base, probe: &[] },
+            &candidate,
+            &options(None),
+        );
+        assert_eq!(verdict(&comparison, "instructions"), Some(Verdict::Worse));
     }
 
     #[test]
@@ -732,8 +840,12 @@ mod tests {
         let base = [run(1000.0, 1.0), run(1000.0, 1.0), run(1000.0, 1.0)];
         // +0.5% of both: allocations get a verdict, instructions don't, and
         // per-unit counts are context.
-        let comparison =
-            compare_scenario(&SCENARIO, &base[..1], &base, &[run_with(1005.0, 1005.0, 1.0)], &options(None));
+        let comparison = compare_scenario(
+            &SCENARIO,
+            &Base { runs: &base[..1], counts: &base, probe: &[] },
+            &[run_with(1005.0, 1005.0, 1.0)],
+            &options(None),
+        );
         assert_eq!(verdict(&comparison, "allocations"), Some(Verdict::Worse));
         assert_eq!(verdict(&comparison, "instructions"), None);
         assert_eq!(verdict(&comparison, "allocations_per_tile"), None);
@@ -747,8 +859,8 @@ mod tests {
         let same: Vec<Run> = (0..6).map(|i| run(1000.0, 10.005 + f64::from(i) * 0.01)).collect();
         let options = options(Some(6));
         let mut comparisons = vec![
-            compare_scenario(&SCENARIO, &base, &base, &slower, &options),
-            compare_scenario(&SCENARIO, &base, &base, &same, &options),
+            compare_scenario(&SCENARIO, &Base { runs: &base, counts: &base, probe: &[] }, &slower, &options),
+            compare_scenario(&SCENARIO, &Base { runs: &base, counts: &base, probe: &[] }, &same, &options),
         ];
         judge_times(&mut comparisons, &options);
         assert_eq!(verdict(&comparisons[0], "wall"), Some(Verdict::Worse));
@@ -770,7 +882,12 @@ mod tests {
         let base = [run(1000.0, 1.0), run(1000.0, 1.0), run(1000.0, 1.0)];
         let mut other = run(2000.0, 1.0);
         other.environment.cpu = "another".to_owned();
-        let comparison = compare_scenario(&SCENARIO, &base[..1], &base, &[other], &options(None));
+        let comparison = compare_scenario(
+            &SCENARIO,
+            &Base { runs: &base[..1], counts: &base, probe: &[] },
+            &[other],
+            &options(None),
+        );
         assert!(comparison.no_verdicts.is_some());
         assert_eq!(verdict(&comparison, "instructions"), None);
     }
