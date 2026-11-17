@@ -806,7 +806,11 @@ void main() {
     if (a_pos.y > 32766.5) v_pos.y = 1.0;
 }
 ",
-    fragment: r"layout(std140) uniform ColorReliefDrawableUBO {
+    fragment: r"#ifdef GL_ES
+precision highp float;
+#endif
+
+layout(std140) uniform ColorReliefDrawableUBO {
     highp mat4 u_matrix;
 };
 
@@ -917,7 +921,7 @@ void main() {
 
 uniform sampler2D u_overlay;
 
-in vec2 v_uv;
+in highp vec2 v_uv;
 
 void main() {
     vec4 overlay_color = texture(u_overlay, v_uv);
@@ -1139,42 +1143,42 @@ layout (std140) uniform FillExtrusionPropsUBO {
 };
 
 #ifndef HAS_UNIFORM_u_base
-layout (location = 3) in lowp vec2 a_base;
-out lowp float base;
+layout (location = 3) in highp vec2 a_base;
+out highp float base;
 #endif
 #ifndef HAS_UNIFORM_u_height
-layout (location = 4) in lowp vec2 a_height;
-out lowp float height;
+layout (location = 4) in highp vec2 a_height;
+out highp float height;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_from
-layout (location = 5) in mediump vec4 a_pattern_from;
-flat out mediump vec4 pattern_from;
+layout (location = 5) in highp vec4 a_pattern_from;
+flat out highp vec4 pattern_from;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_to
-layout (location = 6) in mediump vec4 a_pattern_to;
-flat out mediump vec4 pattern_to;
+layout (location = 6) in highp vec4 a_pattern_to;
+flat out highp vec4 pattern_to;
 #endif
 
 void main() {
     #ifndef HAS_UNIFORM_u_base
 base = unpack_mix_vec2(a_base, u_base_t);
 #else
-lowp float base = u_base;
+highp float base = u_base;
 #endif
     #ifndef HAS_UNIFORM_u_height
 height = unpack_mix_vec2(a_height, u_height_t);
 #else
-lowp float height = u_height;
+highp float height = u_height;
 #endif
     #ifndef HAS_UNIFORM_u_pattern_from
 pattern_from = a_pattern_from;
 #else
-mediump vec4 pattern_from = u_pattern_from;
+highp vec4 pattern_from = u_pattern_from;
 #endif
     #ifndef HAS_UNIFORM_u_pattern_to
 pattern_to = a_pattern_to;
 #else
-mediump vec4 pattern_to = u_pattern_to;
+highp vec4 pattern_to = u_pattern_to;
 #endif
 
     vec2 pattern_tl_a = pattern_from.xy;
@@ -1266,30 +1270,30 @@ layout (std140) uniform FillExtrusionPropsUBO {
 uniform sampler2D u_image;
 
 #ifndef HAS_UNIFORM_u_base
-in lowp float base;
+in highp float base;
 #endif
 #ifndef HAS_UNIFORM_u_height
-in lowp float height;
+in highp float height;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_from
-flat in mediump vec4 pattern_from;
+flat in highp vec4 pattern_from;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_to
-flat in mediump vec4 pattern_to;
+flat in highp vec4 pattern_to;
 #endif
 
 void main() {
     #ifdef HAS_UNIFORM_u_base
-lowp float base = u_base;
+highp float base = u_base;
 #endif
     #ifdef HAS_UNIFORM_u_height
-lowp float height = u_height;
+highp float height = u_height;
 #endif
     #ifdef HAS_UNIFORM_u_pattern_from
-mediump vec4 pattern_from = u_pattern_from;
+highp vec4 pattern_from = u_pattern_from;
 #endif
     #ifdef HAS_UNIFORM_u_pattern_to
-mediump vec4 pattern_to = u_pattern_to;
+highp vec4 pattern_to = u_pattern_to;
 #endif
 
     vec2 pattern_tl_a = pattern_from.xy;
@@ -1378,42 +1382,42 @@ layout (std140) uniform FillExtrusionPropsUBO {
 };
 
 #ifndef HAS_UNIFORM_u_base
-layout (location = 3) in lowp vec2 a_base;
-out lowp float base;
+layout (location = 3) in highp vec2 a_base;
+out highp float base;
 #endif
 #ifndef HAS_UNIFORM_u_height
-layout (location = 4) in lowp vec2 a_height;
-out lowp float height;
+layout (location = 4) in highp vec2 a_height;
+out highp float height;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_from
-layout (location = 5) in mediump vec4 a_pattern_from;
-flat out mediump vec4 pattern_from;
+layout (location = 5) in highp vec4 a_pattern_from;
+flat out highp vec4 pattern_from;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_to
-layout (location = 6) in mediump vec4 a_pattern_to;
-flat out mediump vec4 pattern_to;
+layout (location = 6) in highp vec4 a_pattern_to;
+flat out highp vec4 pattern_to;
 #endif
 
 void main() {
     #ifndef HAS_UNIFORM_u_base
 base = unpack_mix_vec2(a_base, u_base_t);
 #else
-lowp float base = u_base;
+highp float base = u_base;
 #endif
     #ifndef HAS_UNIFORM_u_height
 height = unpack_mix_vec2(a_height, u_height_t);
 #else
-lowp float height = u_height;
+highp float height = u_height;
 #endif
     #ifndef HAS_UNIFORM_u_pattern_from
 pattern_from = a_pattern_from;
 #else
-mediump vec4 pattern_from = u_pattern_from;
+highp vec4 pattern_from = u_pattern_from;
 #endif
     #ifndef HAS_UNIFORM_u_pattern_to
 pattern_to = a_pattern_to;
 #else
-mediump vec4 pattern_to = u_pattern_to;
+highp vec4 pattern_to = u_pattern_to;
 #endif
 
     vec2 pattern_tl_a = pattern_from.xy;
@@ -1499,30 +1503,30 @@ layout (std140) uniform FillExtrusionPropsUBO {
 uniform sampler2D u_image;
 
 #ifndef HAS_UNIFORM_u_base
-in lowp float base;
+in highp float base;
 #endif
 #ifndef HAS_UNIFORM_u_height
-in lowp float height;
+in highp float height;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_from
-flat in mediump vec4 pattern_from;
+flat in highp vec4 pattern_from;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_to
-flat in mediump vec4 pattern_to;
+flat in highp vec4 pattern_to;
 #endif
 
 void main() {
     #ifdef HAS_UNIFORM_u_base
-lowp float base = u_base;
+highp float base = u_base;
 #endif
     #ifdef HAS_UNIFORM_u_height
-lowp float height = u_height;
+highp float height = u_height;
 #endif
     #ifdef HAS_UNIFORM_u_pattern_from
-mediump vec4 pattern_from = u_pattern_from;
+highp vec4 pattern_from = u_pattern_from;
 #endif
     #ifdef HAS_UNIFORM_u_pattern_to
-mediump vec4 pattern_to = u_pattern_to;
+highp vec4 pattern_to = u_pattern_to;
 #endif
 
     vec2 pattern_tl_a = pattern_from.xy;
@@ -1742,12 +1746,12 @@ layout (location = 2) in lowp vec2 a_opacity;
 out lowp float opacity;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_from
-layout (location = 3) in lowp vec4 a_pattern_from;
-flat out lowp vec4 pattern_from;
+layout (location = 3) in highp vec4 a_pattern_from;
+flat out highp vec4 pattern_from;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_to
-layout (location = 4) in lowp vec4 a_pattern_to;
-flat out lowp vec4 pattern_to;
+layout (location = 4) in highp vec4 a_pattern_to;
+flat out highp vec4 pattern_to;
 #endif
 
 void main() {
@@ -1764,12 +1768,12 @@ lowp float opacity = u_opacity;
     #ifndef HAS_UNIFORM_u_pattern_from
 pattern_from = a_pattern_from;
 #else
-mediump vec4 pattern_from = u_pattern_from;
+highp vec4 pattern_from = u_pattern_from;
 #endif
     #ifndef HAS_UNIFORM_u_pattern_to
 pattern_to = a_pattern_to;
 #else
-mediump vec4 pattern_to = u_pattern_to;
+highp vec4 pattern_to = u_pattern_to;
 #endif
 
     vec2 pattern_tl_a = pattern_from.xy;
@@ -1827,10 +1831,10 @@ in highp vec4 color;
 in lowp float opacity;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_from
-flat in lowp vec4 pattern_from;
+flat in highp vec4 pattern_from;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_to
-flat in lowp vec4 pattern_to;
+flat in highp vec4 pattern_to;
 #endif
 
 void main() {
@@ -1841,10 +1845,10 @@ highp vec4 color = u_color;
 lowp float opacity = u_opacity;
 #endif
     #ifdef HAS_UNIFORM_u_pattern_from
-mediump vec4 pattern_from = u_pattern_from;
+highp vec4 pattern_from = u_pattern_from;
 #endif
     #ifdef HAS_UNIFORM_u_pattern_to
-mediump vec4 pattern_to = u_pattern_to;
+highp vec4 pattern_to = u_pattern_to;
 #endif
 
     vec2 pattern_tl_a = pattern_from.xy;
@@ -1953,7 +1957,7 @@ lowp float opacity = u_opacity;
     highp float u_to_scale;
 };
 
-in vec2 v_pos;
+in highp vec2 v_pos;
 
 #ifndef HAS_UNIFORM_u_outline_color
 in highp vec4 outline_color;
@@ -2174,12 +2178,12 @@ layout (location = 2) in lowp vec2 a_opacity;
 out lowp float opacity;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_from
-layout (location = 3) in lowp vec4 a_pattern_from;
-flat out lowp vec4 pattern_from;
+layout (location = 3) in highp vec4 a_pattern_from;
+flat out highp vec4 pattern_from;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_to
-layout (location = 4) in lowp vec4 a_pattern_to;
-flat out lowp vec4 pattern_to;
+layout (location = 4) in highp vec4 a_pattern_to;
+flat out highp vec4 pattern_to;
 #endif
 ",
         outline_corner!(),
@@ -2198,12 +2202,12 @@ lowp float opacity = u_opacity;
     #ifndef HAS_UNIFORM_u_pattern_from
 pattern_from = a_pattern_from;
 #else
-mediump vec4 pattern_from = u_pattern_from;
+highp vec4 pattern_from = u_pattern_from;
 #endif
     #ifndef HAS_UNIFORM_u_pattern_to
 pattern_to = a_pattern_to;
 #else
-mediump vec4 pattern_to = u_pattern_to;
+highp vec4 pattern_to = u_pattern_to;
 #endif
 
     vec2 display_size_a = (pattern_from.zw - pattern_from.xy) / u_pixel_ratio;
@@ -2397,12 +2401,12 @@ layout (location = 2) in lowp vec2 a_opacity;
 out lowp float opacity;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_from
-layout (location = 3) in lowp vec4 a_pattern_from;
-flat out lowp vec4 pattern_from;
+layout (location = 3) in highp vec4 a_pattern_from;
+flat out highp vec4 pattern_from;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_to
-layout (location = 4) in lowp vec4 a_pattern_to;
-flat out lowp vec4 pattern_to;
+layout (location = 4) in highp vec4 a_pattern_to;
+flat out highp vec4 pattern_to;
 #endif
 
 void main() {
@@ -2419,12 +2423,12 @@ lowp float opacity = u_opacity;
     #ifndef HAS_UNIFORM_u_pattern_from
 pattern_from = a_pattern_from;
 #else
-mediump vec4 pattern_from = u_pattern_from;
+highp vec4 pattern_from = u_pattern_from;
 #endif
     #ifndef HAS_UNIFORM_u_pattern_to
 pattern_to = a_pattern_to;
 #else
-mediump vec4 pattern_to = u_pattern_to;
+highp vec4 pattern_to = u_pattern_to;
 #endif
 
     vec2 pattern_tl_a = pattern_from.xy;
@@ -2478,10 +2482,10 @@ in highp vec4 color;
 in lowp float opacity;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_from
-flat in lowp vec4 pattern_from;
+flat in highp vec4 pattern_from;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_to
-flat in lowp vec4 pattern_to;
+flat in highp vec4 pattern_to;
 #endif
 
 void main() {
@@ -2492,10 +2496,10 @@ highp vec4 color = u_color;
 lowp float opacity = u_opacity;
 #endif
     #ifdef HAS_UNIFORM_u_pattern_from
-mediump vec4 pattern_from = u_pattern_from;
+highp vec4 pattern_from = u_pattern_from;
 #endif
     #ifdef HAS_UNIFORM_u_pattern_to
-mediump vec4 pattern_to = u_pattern_to;
+highp vec4 pattern_to = u_pattern_to;
 #endif
 
     vec2 pattern_tl_a = pattern_from.xy;
@@ -2849,7 +2853,7 @@ void main() {
     v_pos.y = 1.0 - a_pos.y;
 }
 ",
-    fragment: r"in vec2 v_pos;
+    fragment: r"in highp vec2 v_pos;
 uniform sampler2D u_image;
 uniform sampler2D u_color_ramp;
 
@@ -3262,7 +3266,7 @@ out lowp float opacity;
 layout (location = 4) in mediump vec2 a_gapwidth;
 #endif
 #ifndef HAS_UNIFORM_u_offset
-layout (location = 5) in lowp vec2 a_offset;
+layout (location = 5) in mediump vec2 a_offset;
 #endif
 #ifndef HAS_UNIFORM_u_width
 layout (location = 6) in mediump vec2 a_width;
@@ -3298,7 +3302,7 @@ mediump float gapwidth = unpack_mix_vec2(a_gapwidth, u_gapwidth_t);
 mediump float gapwidth = u_gapwidth;
 #endif
     #ifndef HAS_UNIFORM_u_offset
-lowp float offset = unpack_mix_vec2(a_offset, u_offset_t);
+mediump float offset = unpack_mix_vec2(a_offset, u_offset_t);
 #else
 lowp float offset = u_offset;
 #endif
@@ -3764,8 +3768,8 @@ layout (std140) uniform LinePatternDrawableUBO {
 };
 
 layout (std140) uniform LinePatternTilePropsUBO {
-    lowp vec4 u_pattern_from;
-    lowp vec4 u_pattern_to;
+    highp vec4 u_pattern_from;
+    highp vec4 u_pattern_to;
     mediump vec4 u_scale;
     highp vec2 u_texsize;
     highp float u_fade;
@@ -3808,12 +3812,12 @@ layout (location = 5) in mediump vec2 a_gapwidth;
 layout (location = 6) in mediump vec2 a_width;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_from
-layout (location = 7) in lowp vec4 a_pattern_from;
-flat out lowp vec4 pattern_from;
+layout (location = 7) in highp vec4 a_pattern_from;
+flat out highp vec4 pattern_from;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_to
-layout (location = 8) in lowp vec4 a_pattern_to;
-flat out lowp vec4 pattern_to;
+layout (location = 8) in highp vec4 a_pattern_to;
+flat out highp vec4 pattern_to;
 #endif
 
 #ifdef PROJECTION_GLOBE
@@ -3849,12 +3853,12 @@ mediump float width = u_width;
     #ifndef HAS_UNIFORM_u_pattern_from
 pattern_from = a_pattern_from;
 #else
-mediump vec4 pattern_from = u_pattern_from;
+highp vec4 pattern_from = u_pattern_from;
 #endif
     #ifndef HAS_UNIFORM_u_pattern_to
 pattern_to = a_pattern_to;
 #else
-mediump vec4 pattern_to = u_pattern_to;
+highp vec4 pattern_to = u_pattern_to;
 #endif
 
 #ifndef HAS_UNIFORM_u_width
@@ -3927,8 +3931,8 @@ precision highp float;
 #endif
 
 layout (std140) uniform LinePatternTilePropsUBO {
-    lowp vec4 u_pattern_from;
-    lowp vec4 u_pattern_to;
+    highp vec4 u_pattern_from;
+    highp vec4 u_pattern_to;
     mediump vec4 u_scale;
     highp vec2 u_texsize;
     highp float u_fade;
@@ -3956,10 +3960,10 @@ in float v_gamma_scale;
 in float v_floorwidth;
 
 #ifndef HAS_UNIFORM_u_pattern_from
-flat in lowp vec4 pattern_from;
+flat in highp vec4 pattern_from;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_to
-flat in lowp vec4 pattern_to;
+flat in highp vec4 pattern_to;
 #endif
 #ifndef HAS_UNIFORM_u_blur
 in lowp float blur;
@@ -3979,10 +3983,10 @@ void main() {
     }
 #endif
     #ifdef HAS_UNIFORM_u_pattern_from
-mediump vec4 pattern_from = u_pattern_from;
+highp vec4 pattern_from = u_pattern_from;
 #endif
     #ifdef HAS_UNIFORM_u_pattern_to
-mediump vec4 pattern_to = u_pattern_to;
+highp vec4 pattern_to = u_pattern_to;
 #endif
 
     #ifdef HAS_UNIFORM_u_blur
@@ -4277,8 +4281,8 @@ uniform sampler2D u_image;
 
 in vec2 v_normal;
 in vec2 v_width2;
-in vec2 v_tex_a;
-in vec2 v_tex_b;
+in highp vec2 v_tex_a;
+in highp vec2 v_tex_b;
 in float v_gamma_scale;
 
 #ifndef HAS_UNIFORM_u_color
@@ -4820,7 +4824,11 @@ float projectLineThickness(float tileY) {
 #endif
 ",
     fragment: r"#ifdef GL_ES
+#ifdef HIGHP_FRAGMENT
+precision highp float;
+#else
 precision mediump float;
+#endif
 #else
 
 #if !defined(lowp)
@@ -4910,8 +4918,8 @@ void main() {
 uniform sampler2D u_image0;
 uniform sampler2D u_image1;
 
-in vec2 v_pos0;
-in vec2 v_pos1;
+in highp vec2 v_pos0;
+in highp vec2 v_pos1;
 
 void main() {
 
@@ -4964,7 +4972,11 @@ void main() {
     gl_Position = vec4(a_pos, 1.0, 1.0);
 }
 ",
-    fragment: r"in vec2 v_pos;
+    fragment: r"#ifdef GL_ES
+precision highp float;
+#endif
+
+in vec2 v_pos;
 
 layout(std140) uniform SkyPropsUBO {
     vec4 sky_color;

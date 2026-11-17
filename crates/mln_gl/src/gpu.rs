@@ -789,15 +789,17 @@ impl GlGpu {
         self.current(|gpu| unsafe { gpu.context.gl().delete_sync(fence) });
     }
 
-    /// The program of a shader of `key`.
+    /// The program of a shader of `key`, whose fragment shader defaults to
+    /// highp if `highp_fragment`, as [`compile`](Self::compile)'s does.
     #[cfg(test)]
-    pub(crate) fn program(&mut self, key: &ShaderKey) -> Result<Rc<Program>, GpuError> {
-        let shader = self.create_shader(key)?;
-        self.shaders.get(shader).cloned().ok_or(GpuError::UnknownId("shader"))
+    pub(crate) fn program(&mut self, key: &ShaderKey, highp_fragment: bool) -> Result<Program, GpuError> {
+        self.current(|gpu| gpu.compile(key, highp_fragment))
     }
 
-    /// Compiles and links the program of `key`.
-    fn compile(&self, key: &ShaderKey) -> Result<Program, GpuError> {
+    /// Compiles and links the program of `key`. On OpenGL ES, its fragment
+    /// shader defaults to highp floats if `highp_fragment`, and to mediump
+    /// otherwise.
+    fn compile(&self, key: &ShaderKey, highp_fragment: bool) -> Result<Program, GpuError> {
         let source = shader_source(key.program())
             .ok_or_else(|| GpuError::Unsupported(format!("no GLSL for {:?}", key.program())))?;
         let name = source.name;
@@ -808,12 +810,13 @@ impl GlGpu {
         let version = if self.desktop { "#version 330 core\n" } else { "#version 300 es\n" };
         let defines: String =
             key.define_values().flat_map(|(name, value)| ["#define ", name, " ", value, "\n"]).collect();
+        let fragment_defines = if highp_fragment { "#define HIGHP_FRAGMENT\n" } else { "" };
         let gl = self.context.gl();
-        let shader = |stage, prelude, glsl| {
+        let shader = |stage, stage_defines, prelude, glsl| {
             // SAFETY: the shader is new, and deleted if it doesn't compile.
             unsafe {
                 let shader = gl.create_shader(stage).map_err(GpuError::Invalid)?;
-                gl.shader_source(shader, &[version, &defines, prelude, glsl].concat());
+                gl.shader_source(shader, &[version, &defines, stage_defines, prelude, glsl].concat());
                 gl.compile_shader(shader);
                 if gl.get_shader_compile_status(shader) {
                     return Ok(shader);
@@ -823,8 +826,8 @@ impl GlGpu {
                 Err(GpuError::Invalid(format!("{name} doesn't compile: {log}")))
             }
         };
-        let vertex: ShaderID = shader(glow::VERTEX_SHADER, PRELUDE.vertex, source.glsl.vertex)?;
-        let fragment = match shader(glow::FRAGMENT_SHADER, PRELUDE.fragment, source.glsl.fragment) {
+        let vertex: ShaderID = shader(glow::VERTEX_SHADER, "", PRELUDE.vertex, source.glsl.vertex)?;
+        let fragment = match shader(glow::FRAGMENT_SHADER, fragment_defines, PRELUDE.fragment, source.glsl.fragment) {
             Ok(fragment) => fragment,
             Err(error) => {
                 // SAFETY: the shader is alive and no program has it.
@@ -1368,7 +1371,10 @@ impl Gpu for GlGpu {
     }
 
     fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError> {
-        let program = self.current(|gpu| gpu.compile(key))?;
+        // Mesa's CPU rasterizers lower mediump to half floats, which cost
+        // them more instructions than highp.
+        let highp_fragment = self.caps.cpu_rasterizer;
+        let program = self.current(|gpu| gpu.compile(key, highp_fragment))?;
         Ok(self.shaders.insert(Rc::new(program)))
     }
 

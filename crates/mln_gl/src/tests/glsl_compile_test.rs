@@ -144,10 +144,15 @@ fn every_program_links_and_matches_its_tables(backend: &RendererBackend) {
             for (i, property_set) in property_sets.iter().enumerate() {
                 let what = format!("{} ({variant:?}, {})", source.name, ["attributes", "uniforms"][i]);
                 let shader = group.shader(property_set, variant);
-                let program = backend
-                    .gpu()
-                    .program(shader.key())
-                    .unwrap_or_else(|error| panic!("{what} failed to compile or link: {error}"));
+                // Fragment shaders default to mediump on a GPU and to highp
+                // on a CPU rasterizer, so both must link wherever this runs.
+                let compile = |highp_fragment| {
+                    backend.gpu().program(shader.key(), highp_fragment).unwrap_or_else(|error| {
+                        panic!("{what} failed to compile or link with highp_fragment {highp_fragment}: {error}")
+                    })
+                };
+                compile(true);
+                let program = compile(false);
                 programs += 1;
 
                 for block in &program.blocks {
