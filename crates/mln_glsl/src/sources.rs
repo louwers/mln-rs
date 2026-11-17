@@ -4643,7 +4643,9 @@ layout(location = 6) flat out vec4 frag_pattern_from;
 #if !defined(HAS_UNIFORM_u_pattern_to)
 layout(location = 7) flat out vec4 frag_pattern_to;
 #endif
+#if !defined(HAS_UNIFORM_u_width)
 layout(location = 8) out float frag_floorwidth;
+#endif
 
 #ifdef PROJECTION_GLOBE
 layout(location = 9) out float frag_tile_x;
@@ -4687,8 +4689,6 @@ void main() {
 #endif
 #ifndef HAS_UNIFORM_u_width
     frag_floorwidth = unpack_mix_float(in_width, drawable.floorwidth_t);
-#else
-    frag_floorwidth = props.floorwidth;
 #endif
 
     // the distance over which the line edge fades out.
@@ -4768,7 +4768,9 @@ layout(location = 6) flat in vec4 frag_pattern_from;
 #if !defined(HAS_UNIFORM_u_pattern_to)
 layout(location = 7) flat in vec4 frag_pattern_to;
 #endif
+#if !defined(HAS_UNIFORM_u_width)
 layout(location = 8) in float frag_floorwidth;
+#endif
 
 layout(location = 0) out vec4 out_color;
 
@@ -4862,8 +4864,13 @@ void main() {
     const vec2 pattern_size_a = vec2(display_size_a.x * fromScale / tileZoomRatio, display_size_a.y);
     const vec2 pattern_size_b = vec2(display_size_b.x * toScale / tileZoomRatio, display_size_b.y);
 
-    const float aspect_a = display_size_a.y / frag_floorwidth;
-    const float aspect_b = display_size_b.y / frag_floorwidth;
+#if defined(HAS_UNIFORM_u_width)
+    const float floorwidth = props.floorwidth;
+#else
+    const float floorwidth = frag_floorwidth;
+#endif
+    const float aspect_a = display_size_a.y / floorwidth;
+    const float aspect_b = display_size_b.y / floorwidth;
 
     // Calculate the distance of the pixel from the line in pixels.
     const float dist = length(frag_normal) * frag_width2.x;

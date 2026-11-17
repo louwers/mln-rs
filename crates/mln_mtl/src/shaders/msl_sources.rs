@@ -5435,7 +5435,9 @@ struct FragmentStage {
 #if !defined(HAS_UNIFORM_u_pattern_to)
     float4 pattern_to [[flat]];
 #endif
+#if !defined(HAS_UNIFORM_u_width)
     float floorwidth;
+#endif
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
@@ -5469,10 +5471,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const auto width    = unpack_mix_float(vertx.width, drawable.width_t);
 #endif
 
-#if defined(HAS_UNIFORM_u_width)
-    const auto exprFloorWidth = (props.expressionMask & LineExpressionMask::FloorWidth);
-    const auto floorwidth = exprFloorWidth ? expr.floorwidth.eval(paintParams.map_zoom) : props.floorwidth;
-#else
+#if !defined(HAS_UNIFORM_u_width)
     const auto floorwidth = unpack_mix_float(vertx.width, drawable.floorwidth_t);
 #endif
 
@@ -5544,7 +5543,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 #if !defined(HAS_UNIFORM_u_pattern_to)
         .pattern_to   = float4(vertx.pattern_to),
 #endif
+#if !defined(HAS_UNIFORM_u_width)
         .floorwidth   = floorwidth,
+#endif
     };
 }
 
@@ -5611,8 +5612,14 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     const float2 pattern_size_a = float2(display_size_a.x * fromScale / tileZoomRatio, display_size_a.y);
     const float2 pattern_size_b = float2(display_size_b.x * toScale / tileZoomRatio, display_size_b.y);
 
-    const float aspect_a = display_size_a.y / in.floorwidth;
-    const float aspect_b = display_size_b.y / in.floorwidth;
+#if defined(HAS_UNIFORM_u_width)
+    const auto exprFloorWidth = (props.expressionMask & LineExpressionMask::FloorWidth);
+    const float floorwidth = exprFloorWidth ? expr.floorwidth.eval(paintParams.map_zoom) : props.floorwidth;
+#else
+    const float floorwidth = in.floorwidth;
+#endif
+    const float aspect_a = display_size_a.y / floorwidth;
+    const float aspect_b = display_size_b.y / floorwidth;
 
     // Calculate the distance of the pixel from the line in pixels.
     const float dist = length(in.normal) * in.width2.x;
