@@ -1,7 +1,6 @@
 //! GeoJSON sources: features from GeoJSON data that the style or the API
 //! gives, or that the source's URL points to, cut into tiles or clustered.
 
-use std::collections::VecDeque;
 use std::sync::{Arc, OnceLock};
 
 use feature::{Feature, PropertyMap, Value};
@@ -13,7 +12,7 @@ use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
 use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
-use mln_util::pool::{Pool, Respond};
+use mln_util::pool::{Pool, Respond, TaskGroup};
 use mln_util::range::Range;
 use mln_vec_map::VecMap;
 use parking_lot::Mutex;
@@ -40,58 +39,15 @@ fn geojsonvt_tile_features(vt: &Mutex<geojson_vt::GeoJSONVT>, id: &CanonicalTile
     }
 }
 
+/// A `GeoJSONVT`'s tiles, which it cuts on the calling thread, or, given a
+/// pool, one at a time and in the order asked, so that one source never
+/// holds more than one of the pool's threads.
 struct GeoJSONVTData {
-    slicer: Arc<Slicer>,
-}
-
-/// Cuts a `GeoJSONVT`'s tiles, one at a time and in the order asked: on the
-/// calling thread, or in one pool job at a time that runs the queued
-/// requests, so that the requests for one source never hold more than one
-/// of the pool's threads.
-struct Slicer {
-    vt: Mutex<geojson_vt::GeoJSONVT>,
-    queue: Mutex<SliceQueue>,
-}
-
-/// Where a tile's features go.
-type TileCallback = Box<dyn FnOnce(TileFeatures) + Send>;
-
-#[derive(Default)]
-struct SliceQueue {
-    requests: VecDeque<(CanonicalTileID, TileCallback)>,
-    /// Whether a pool job is running the requests.
-    draining: bool,
-}
-
-impl Slicer {
-    /// Queues a request, and starts a job on `pool` that runs the queue
-    /// unless one runs.
-    fn enqueue(self: &Arc<Self>, pool: &Pool, id: CanonicalTileID, callback: TileCallback) {
-        let start = {
-            let mut queue = self.queue.lock();
-            queue.requests.push_back((id, callback));
-            !std::mem::replace(&mut queue.draining, true)
-        };
-        if start {
-            let slicer = Arc::clone(self);
-            pool.spawn(move || slicer.drain());
-        }
-    }
-
-    /// Runs the queued requests in order until the queue is empty.
-    fn drain(&self) {
-        loop {
-            let (id, callback) = {
-                let mut queue = self.queue.lock();
-                let Some(request) = queue.requests.pop_front() else {
-                    queue.draining = false;
-                    return;
-                };
-                request
-            };
-            callback(geojsonvt_tile_features(&self.vt, &id));
-        }
-    }
+    vt: Arc<Mutex<geojson_vt::GeoJSONVT>>,
+    /// Where the tiles asked for with a pool are cut: a serial group on the
+    /// first pool given, kept while the data lives. The data is made when
+    /// the style is parsed, before any renderer gives it a pool.
+    slices: OnceLock<TaskGroup>,
 }
 
 impl std::fmt::Debug for GeoJSONVTData {
@@ -103,8 +59,13 @@ impl std::fmt::Debug for GeoJSONVTData {
 impl GeoJSONData for GeoJSONVTData {
     fn get_tile(&self, id: &CanonicalTileID, callback: Box<dyn FnOnce(TileFeatures) + Send>, pool: Option<&Pool>) {
         match pool {
-            Some(pool) => self.slicer.enqueue(pool, *id, callback),
-            None => callback(geojsonvt_tile_features(&self.slicer.vt, id)),
+            Some(pool) => {
+                let (vt, id) = (Arc::clone(&self.vt), *id);
+                self.slices.get_or_init(|| TaskGroup::serial(pool)).spawn(move || {
+                    callback(geojsonvt_tile_features(&vt, &id));
+                });
+            }
+            None => callback(geojsonvt_tile_features(&self.vt, id)),
         }
     }
 
@@ -213,8 +174,8 @@ fn create(features: Features, collection: bool, options: &Arc<GeoJSONOptions>) -
         },
         ..Default::default()
     };
-    let vt = Mutex::new(geojson_vt::GeoJSONVT::new(&features, vt_options));
-    Ok(Arc::new(GeoJSONVTData { slicer: Arc::new(Slicer { vt, queue: Mutex::default() }) }))
+    let vt = Arc::new(Mutex::new(geojson_vt::GeoJSONVT::new(&features, vt_options)));
+    Ok(Arc::new(GeoJSONVTData { vt, slices: OnceLock::new() }))
 }
 
 pub(crate) type ClusterExpression = (Arc<Expr>, Arc<Expr>);
@@ -298,8 +259,9 @@ pub type Features = Vec<Feature<f64>>;
 
 pub trait GeoJSONData: Send + Sync {
     /// Gets the features of tile `id`. `callback` runs either right away,
-    /// on the calling thread, or later on `pool`, for data that cuts its
-    /// tiles there; without a pool, always right away.
+    /// on the calling thread, or later on a pool, for data that cuts its
+    /// tiles there: the first `pool` it was given, which it keeps. Without a
+    /// pool, always right away.
     fn get_tile(&self, id: &CanonicalTileID, callback: Box<dyn FnOnce(TileFeatures) + Send>, pool: Option<&Pool>);
 
     // SuperclusterData: data that isn't clustered has no clusters, and

@@ -473,7 +473,7 @@ fn data_from_the_inbox_starts_a_job_at_once() {
         load
     });
     let inbox = tile.store.inbox().clone();
-    // From another thread, as a GeoJSON source's slicer answers.
+    // From another thread, as a GeoJSON source's tiles cut on a pool answer.
     std::thread::spawn(move || {
         let data = SourceData::Data(Some(features(&[1])));
         inbox.send(TileEvent::Data { tile: TileKey { source: key, id }, load, data });

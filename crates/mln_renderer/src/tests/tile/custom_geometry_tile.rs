@@ -1,5 +1,5 @@
 // C++ calls a CustomTileLoader directly and reaches it from the tiles
-// through a mailbox on the test's run loop. Here the provider's strand runs
+// through a mailbox on the test's run loop. Here the provider's calls run
 // on a pool without threads, so the test's calls run when the test runs the
 // pool, and what the provider sends the tiles waits in their store's inbox.
 
@@ -27,7 +27,7 @@ use crate::tile::loading::DataOrigin;
 use crate::tile::tile::{TileKind, TileNecessity};
 use crate::tile::tile_workers::InlineWorkers;
 
-/// The provider, whose strand runs on `pool`.
+/// The provider, whose calls run on `pool`.
 fn loader(
     pool: &mln_util::pool::Pool,
     fetch: Option<TileFunction>,

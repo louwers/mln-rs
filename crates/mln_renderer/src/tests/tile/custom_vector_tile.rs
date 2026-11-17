@@ -1,4 +1,4 @@
-// As in custom_geometry_tile.rs, the provider's strand runs on the test's
+// As in custom_geometry_tile.rs, the provider's calls run on the test's
 // local pool.
 
 use std::sync::Arc;
@@ -24,7 +24,7 @@ use crate::tile::loading::DataOrigin;
 use crate::tile::tile::{TileKind, TileNecessity};
 use crate::tile::tile_workers::InlineWorkers;
 
-/// The provider, whose strand runs on `pool`.
+/// The provider, whose calls run on `pool`.
 fn loader(
     pool: &mln_util::pool::Pool,
     fetch: Option<TileFunction>,
