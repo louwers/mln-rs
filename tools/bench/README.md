@@ -143,6 +143,20 @@ attribution. It holds:
   Sans.
 - `geojson/ne_10m_admin_0_countries.geojson`: Natural Earth's countries.
 
+### Attribution and licenses
+
+- Tiles: © [OpenStreetMap](https://www.openstreetmap.org/copyright)
+  contributors, under the Open Database License 1.0, in the
+  [OpenMapTiles](https://openmaptiles.org/) schema (CC BY 4.0), from
+  [OpenFreeMap](https://openfreemap.org/)'s planet build. The MLT tiles are the
+  same data, re-encoded.
+- Style: OpenFreeMap's Liberty, MIT, from OSM Liberty and OSM Bright (code BSD
+  3-Clause, design CC BY 4.0); its sprite's icons are Maki (CC0 1.0) and public
+  domain. `styles/LICENSE.md` in the snapshot has the terms.
+- Fonts and glyphs: Noto Sans and Noto Sans JP, SIL Open Font License 1.1, with
+  their license files under `fonts/`.
+- Countries: [Natural Earth](https://www.naturalearthdata.com/), public domain.
+
 Each tile set comes with its area in the manifest: a camera centered in it sees
 only tiles of the set when its view is at most two tiles across, and a map
 requests no tile outside the archive's bounds, so no frame waits for a tile the
