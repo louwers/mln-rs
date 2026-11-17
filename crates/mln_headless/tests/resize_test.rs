@@ -54,7 +54,6 @@ fn assert_same(actual: &PremultipliedImage, expected: &PremultipliedImage) {
 #[test]
 fn a_heatmap_whose_map_is_resized_renders_as_one_made_at_that_size() {
     let sizes = [Size::new(256, 256), Size::new(512, 384), Size::new(160, 200)];
-    // One map at a time: each has the thread's run loop.
     let made_at: Vec<_> = sizes.iter().map(|&size| map_test(size).render().image).collect();
 
     let test = map_test(sizes[0]);

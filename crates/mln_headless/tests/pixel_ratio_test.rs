@@ -116,7 +116,6 @@ fn render_made_at(pixel_ratio: f32) -> PremultipliedImage {
 
 #[test]
 fn a_map_whose_pixel_ratio_changes_renders_as_one_made_at_that_ratio() {
-    // One map at a time: each has the thread's run loop.
     let made_at_1 = render_made_at(1.0);
     let made_at_2 = render_made_at(2.0);
 
