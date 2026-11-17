@@ -122,7 +122,7 @@ its sizes are the ones it uses.
 | `macro/frame/street`                    | What does a frame of a city's streets cost while the camera pans, turns and tilts over loaded tiles?                                       |
 | `macro/frame/globe`                     | What does a frame of the globe cost while it turns and tilts over loaded tiles?                                                            |
 | `macro/frame/antimeridian`              | What does a frame of the world on a flat map cost while the view crosses the antimeridian over loaded tiles?                               |
-| `macro/frame/earthquakes`               | What does a frame of a map of earthquakes cost, a heatmap that gives way to circles, while the camera zooms in and out over loaded tiles?  |
+| `macro/frame/earthquakes`               | What does a frame of a map of earthquakes cost, a heatmap that gives way to circles, while the camera circles and zooms in and out?        |
 | `macro/frame/terrain`                   | What does a frame of a city's hills cost, tinted by elevation and hillshaded, while the camera circles, turns and tilts over loaded tiles? |
 | `macro/navigate/street`                 | What does a flight into a city's streets and back out cost, with tiles arriving while it flies?                                            |
 | `macro/navigate/fly`                    | What does a flight from one city's streets, out over an ocean and into another city's streets, cost, with tiles arriving while it flies?   |

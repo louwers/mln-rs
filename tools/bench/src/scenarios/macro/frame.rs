@@ -31,7 +31,7 @@ pub(crate) const SCENARIOS: &[Scenario] = &[
     Scenario {
         name: "macro/frame/earthquakes",
         kind: Kind::Macro,
-        question: "What does a frame of a map of earthquakes cost, a heatmap that gives way to circles, while the camera zooms in and out over loaded tiles?",
+        question: "What does a frame of a map of earthquakes cost, a heatmap that gives way to circles, while the camera circles and zooms in and out?",
         run: earthquakes,
     },
     Scenario {
@@ -68,7 +68,9 @@ fn antimeridian(bench: &mut Bench) {
 /// The question: what does a frame of a month's earthquakes over the world
 /// cost, a heatmap and a circle for each over Liberty, while the camera
 /// circles central Japan zooming in and out ([`Path::Earthquakes`])? One
-/// measured unit is one frame.
+/// measured unit is one frame. Tiles keep leaving the view and coming back
+/// along this path, and the map lays a tile out again when it comes back, so
+/// most frames start background work, which counts in them.
 fn earthquakes(bench: &mut Bench) {
     path(bench, Path::Earthquakes);
 }
