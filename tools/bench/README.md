@@ -316,9 +316,18 @@ none.
 
 A scenario answers one lasting question about one stage or operation, not one
 pull request's claim; an exact expectation, such as that an idle map draws no
-frames, belongs in a test. Add it to the module of its stage
-(`src/scenarios/micro/`) or operation (`src/scenarios/macro/`), and its module's
-`SCENARIOS` to `scenarios::all`:
+frames, belongs in a test.
+
+A macro scenario measures what a user pays for: Liberty over the fixtures, as an
+application shows it, and all the work the operation causes, such as tiles
+loading, layout, symbol placement and fades. An application's own sources and
+layers go on top of Liberty, as `macro/update` adds them. A scenario that swaps
+in a narrower style, or leaves out work the operation causes so as to isolate
+one stage, measures a stage, not what a user feels: ask that question in a micro
+scenario instead.
+
+Add it to the module of its stage (`src/scenarios/micro/`) or operation
+(`src/scenarios/macro/`), and its module's `SCENARIOS` to `scenarios::all`:
 
 ```rust
 pub(crate) const SCENARIOS: &[Scenario] = &[Scenario {
