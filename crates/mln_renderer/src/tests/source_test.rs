@@ -1188,10 +1188,29 @@ impl TurningSource {
             zoom: Some(zoom),
             ..Default::default()
         });
+        self.update_rendering(true);
+    }
+
+    /// Updates the source at this camera, as a frame does in which its
+    /// layers are visible, or (with `false`) hidden.
+    fn update_rendering(&mut self, needs_rendering: bool) {
         let file_source: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&self.file_source);
         let mut parameters = self.test.tile_parameters_with(MapMode::Continuous, Some(file_source));
         parameters.prefetch_zoom_delta = self.prefetch_zoom_delta;
-        self.render_source.update(&mut self.store, self.source.clone(), &self.layers, true, false, &parameters);
+        let (store, source, layers) = (&mut self.store, self.source.clone(), &self.layers);
+        self.render_source.update(store, source, layers, needs_rendering, false, &parameters);
+    }
+
+    /// How many tiles the source caches, each checked to wait behind the
+    /// view's: its jobs and its request.
+    fn cached_unwanted(&self) -> usize {
+        let unwanted = crate::tile::tile::TileLoadOrder::UNWANTED;
+        let cached: Vec<_> = self.pyramid().slots().filter(|slot| slot.place.is_cached()).collect();
+        for slot in &cached {
+            assert_eq!(slot.place.order(), unwanted, "tile {}'s jobs", slot.tile.id);
+            assert_eq!(slot.tile.load.request_order(), Some(unwanted.value()), "tile {}'s request", slot.tile.id);
+        }
+        cached.len()
     }
 
     /// Updates the source at this camera until every tile it asks for has
@@ -1219,7 +1238,7 @@ impl TurningSource {
 
     /// The tiles still loading that no rendered tile stands in for.
     fn bare_tiles(&self) -> Vec<OverscaledTileID> {
-        let rendered: Vec<CanonicalTileID> = self.pyramid().rendered().map(|(id, _)| id.canonical).collect();
+        let rendered: Vec<CanonicalTileID> = self.pyramid().rendered().map(|rendered| rendered.id.canonical).collect();
         self.pyramid()
             .cover()
             .filter(|tile| {
@@ -1233,6 +1252,30 @@ impl TurningSource {
     }
 }
 
+/// A tile that enters the cache, whether the view left it or the source's
+/// layers were hidden, waits behind the view's tiles: its jobs, and its
+/// request should it revalidate.
+#[test]
+fn cached_tiles_wait_behind_the_view() {
+    let mut panned = TurningSource::new("mercator", Size::new(512, 512), 0);
+    panned.load(0.0, 3.0);
+    assert_eq!(0, panned.cached_unwanted());
+    // The tiles the view left are held while their symbols fade out, for
+    // two placements.
+    for _ in 0..3 {
+        panned.update(120.0, 3.0);
+        panned.store.update_fading_tiles();
+    }
+    assert!(panned.cached_unwanted() > 0, "the tiles the view left");
+
+    let mut hidden = TurningSource::new("mercator", Size::new(512, 512), 0);
+    hidden.load(0.0, 3.0);
+    let cover = hidden.pyramid().cover().count();
+    hidden.update_rendering(false);
+    assert_eq!(0, hidden.pyramid().cover().count());
+    assert_eq!(cover, hidden.cached_unwanted(), "the hidden source's tiles");
+}
+
 /// A globe turned to its far side before any tile there has loaded draws the
 /// source's first level in their place.
 fn globe_far_side_falls_back_to_the_base_level(size: Size, min_zoom: u8, zoom: f64) {
@@ -1240,13 +1283,16 @@ fn globe_far_side_falls_back_to_the_base_level(size: Size, min_zoom: u8, zoom: f
     turning.prefetch_zoom_delta = 4;
     turning.load(60.0, zoom);
     assert_eq!(1 << (2 * min_zoom), turning.tiles_at(min_zoom).len(), "the whole first level is loaded");
-    assert!(turning.pyramid().rendered().all(|(id, _)| id.canonical.z > min_zoom), "the loaded view draws none of it");
+    assert!(
+        turning.pyramid().rendered().all(|rendered| rendered.id.canonical.z > min_zoom),
+        "the loaded view draws none of it"
+    );
 
     turning.update(240.0, zoom);
     let loading = turning.pyramid().cover().filter(|tile| !tile.is_renderable()).count();
     assert!(loading > 0, "the far side has tiles to load");
     assert_eq!(Vec::<OverscaledTileID>::new(), turning.bare_tiles());
-    assert!(turning.pyramid().rendered().any(|(id, _)| id.canonical.z == min_zoom));
+    assert!(turning.pyramid().rendered().any(|rendered| rendered.id.canonical.z == min_zoom));
 }
 
 #[test]
@@ -1265,7 +1311,7 @@ fn globe_far_side_falls_back_to_zoom_one() {
 fn globe_fallback_crosses_the_antimeridian() {
     let mut turning = TurningSource::new("vertical-perspective", Size::new(512, 512), 0);
     turning.load(90.0, 2.0);
-    assert!(turning.pyramid().rendered().all(|(id, _)| id.canonical.z == 2));
+    assert!(turning.pyramid().rendered().all(|rendered| rendered.id.canonical.z == 2));
 
     turning.update(150.0, 2.0);
     let wraps = |renderable: bool| -> Vec<i16> {
@@ -1280,7 +1326,7 @@ fn globe_fallback_crosses_the_antimeridian() {
     };
     assert_eq!((vec![0], vec![1]), (wraps(true), wraps(false)));
     assert_eq!(Vec::<OverscaledTileID>::new(), turning.bare_tiles());
-    assert_eq!(1, turning.pyramid().rendered().filter(|(id, _)| id.canonical.z == 0).count());
+    assert_eq!(1, turning.pyramid().rendered().filter(|rendered| rendered.id.canonical.z == 0).count());
 }
 
 /// While the globe blends into Mercator, a tile's flat half is placed by its
@@ -1301,7 +1347,7 @@ fn globe_fallback_keeps_to_its_wrap_while_blending_into_mercator() {
     let bare = turning.bare_tiles();
     assert_ne!(Vec::<OverscaledTileID>::new(), bare);
     assert!(bare.iter().all(|id| id.wrap == 1 && id.canonical.z == 2));
-    assert_eq!(0, turning.pyramid().rendered().filter(|(id, _)| id.canonical.z == 0).count());
+    assert_eq!(0, turning.pyramid().rendered().filter(|rendered| rendered.id.canonical.z == 0).count());
 }
 
 /// The first level costs a source that starts at zoom 1 the tiles of it that
@@ -1414,7 +1460,7 @@ fn raster_dem_borders_across_a_world_wrap() {
         render_source.update(&mut store, source.clone(), &layers, true, relayout, &parameters);
         relayout = false;
         let key = render_source.tiles().expect("the source's tiles");
-        if store.source(key).is_some_and(|source| !source.tiles.is_empty()) && render_source.is_loaded(&store) {
+        if store.source(key).is_some_and(|source| source.slots().next().is_some()) && render_source.is_loaded(&store) {
             break;
         }
         assert!(mln_util::time::Instant::now() < deadline, "the tiles didn't load");
@@ -1426,8 +1472,8 @@ fn raster_dem_borders_across_a_world_wrap() {
     let source = render_source.tiles().and_then(|key| store.source(key)).expect("the source's tiles");
     let tile = |x| {
         source
-            .tiles
-            .values()
+            .slots()
+            .map(|slot| &slot.tile)
             .find(|tile| tile.id.canonical == CanonicalTileID::new(2, x, 1))
             .unwrap_or_else(|| panic!("no tile 2/{x}/1"))
     };

@@ -27,8 +27,8 @@ use crate::tile::contents::Contents;
 use crate::tile::dem::DEMTileNeighbors;
 use crate::tile::inbox::{SourceData, TileEvent};
 use crate::tile::job::{DataInput, Job, Run, TileKey};
-use crate::tile::loading::{DataOrigin, VectorTileEncoding};
-use crate::tile::tile::{DataState, TileKind, TileNecessity, WorkState};
+use crate::tile::loading::{DataOrigin, OriginLoad, VectorTileEncoding};
+use crate::tile::tile::{TileKind, TileNecessity, WorkState};
 use crate::tile::tile_workers::{InlineWorkers, TileWorkers};
 
 /// A file source whose requests wait until the test answers them.
@@ -123,6 +123,26 @@ impl Drop for Test {
     }
 }
 
+/// Whether `tile`'s tileset load waits for a network-only request, or (with
+/// `false`) for no request at all.
+fn requesting_network(tile: &OneTile, pending: bool) -> bool {
+    match &tile.tile().load.origin {
+        OriginLoad::Tileset(tileset) if pending => tileset.network_pending(),
+        OriginLoad::Tileset(tileset) => tileset.is_idle(),
+        OriginLoad::GeoJson { .. } | OriginLoad::Custom(_) => false,
+    }
+}
+
+/// Starts a load of `tile`, as a GeoJSON source's `setData` does, and
+/// returns it.
+fn start_geojson_load(tile: &mut OneTile) -> u64 {
+    tile.with(|info, tile, _| {
+        let load = info.next();
+        tile.load.origin = OriginLoad::GeoJson { load: Some(load) };
+        load
+    })
+}
+
 /// The style of a layout job.
 fn job_style(run: &Run) -> &Arc<crate::tile::job::SourceStyle> {
     match &run.job {
@@ -172,21 +192,21 @@ fn a_not_modified_reload_keeps_the_data() {
     manual.run();
     tile.update();
     assert!(tile.tile().is_complete());
-    let key = tile.tile().data.current().expect("data").key;
+    let key = tile.tile().data.as_ref().expect("data").key;
     let shown = std::rc::Rc::clone(tile.tile().contents.as_ref().expect("contents"));
 
     // Required again, the tile revalidates its data.
     tile.set_necessity(&id, TileNecessity::Optional);
     tile.set_necessity(&id, TileNecessity::Required);
     assert_eq!(file_source.pending(), 1);
-    assert!(matches!(tile.tile().data, DataState::Loading { .. }));
+    assert!(requesting_network(&tile, true));
     assert!(tile.tile().is_complete(), "a reload keeps the tile complete");
     let mut response = Response::new();
     response.not_modified = true;
     file_source.respond(response);
     tile.update();
-    assert!(matches!(tile.tile().data, DataState::Loaded { .. }));
-    assert_eq!(tile.tile().data.current().expect("data").key, key, "the same data");
+    assert!(requesting_network(&tile, false));
+    assert_eq!(tile.tile().data.as_ref().expect("data").key, key, "the same data");
     assert_eq!(manual.submitted(), 1, "nothing to lay out again");
     assert!(std::rc::Rc::ptr_eq(tile.tile().contents.as_ref().expect("contents"), &shown));
     assert!(tile.tile().is_complete());
@@ -247,11 +267,9 @@ fn a_tile_leaving_the_cover_while_waiting_then_edited_then_revived() {
     tile.update();
     assert!(matches!(tile.tile().work, WorkState::Waiting(_)));
 
-    tile.with(|_, tile, _| tile.cached = true);
     let edited = style(&[icons(&json!("late"), 2.0)]);
     tile.set_style(&edited);
     assert!(matches!(tile.tile().work, WorkState::Outdated), "the wait is gone");
-    tile.with(|_, tile, _| tile.cached = false);
     tile.store.images_mut().add_image(super::tile_jobs_test::image("late"));
     tile.store.images_mut().set_loaded(true);
     tile.update();
@@ -325,19 +343,11 @@ fn source_data_racing_eviction() {
     let key = tile.key;
     tile.set_style(&style(&[layer(json!({"id": "dots", "type": "circle"}))]));
     // A load under way, as a GeoJSON source's `setData` starts.
-    let old_load = tile.with(|info, tile, _| {
-        let load = info.next();
-        tile.data = DataState::Loading { load, request: None, current: None };
-        load
-    });
+    let old_load = start_geojson_load(&mut tile);
     tile.drop_tile();
     tile.add(id);
     tile.set_style(&style(&[layer(json!({"id": "dots", "type": "circle"}))]));
-    let new_load = tile.with(|info, tile, _| {
-        let load = info.next();
-        tile.data = DataState::Loading { load, request: None, current: None };
-        load
-    });
+    let new_load = start_geojson_load(&mut tile);
 
     let inbox = tile.store.inbox().clone();
     let event = |load, ids: &[u64]| TileEvent::Data {
@@ -347,14 +357,14 @@ fn source_data_racing_eviction() {
     };
     inbox.send(event(old_load, &[1]));
     tile.update();
-    assert!(tile.tile().data.current().is_none(), "the old tile's data goes nowhere");
+    assert!(tile.tile().data.is_none(), "the old tile's data goes nowhere");
     inbox.send(TileEvent::Data { tile: TileKey { source: key, id }, load: old_load, data: SourceData::Stale });
     inbox.send(event(new_load, &[2]));
     // One update starts the layout, whose reply the next takes in.
     tile.update();
     tile.update();
     assert!(tile.shows_layout());
-    let Some(data) = tile.tile().data.current().and_then(|loaded| loaded.data().cloned()) else {
+    let Some(data) = tile.tile().data.as_ref().and_then(|loaded| loaded.data().cloned()) else {
         panic!("data");
     };
     let TileData::Features(features) = data else {
@@ -401,7 +411,7 @@ fn style_replaced_mid_load() {
     });
     let mut new_tile = source.info.new_tile(id, params).expect("a tile");
     source.info.start_load(&mut new_tile, ctx);
-    source.tiles.insert(id, new_tile);
+    source.insert(new_tile);
     tile.key = new_key;
     tile.set_style(&style(&layers));
 
@@ -410,7 +420,7 @@ fn style_replaced_mid_load() {
     tile.store.inbox().send(TileEvent::Response { tile: TileKey { source: old_key, id }, load: 1, response: water() });
     tile.update();
     assert!(tile.store.source(old_key).is_none());
-    assert!(tile.tile().contents.is_none() && matches!(tile.tile().data, DataState::Unrequested));
+    assert!(tile.tile().contents.is_none() && tile.tile().data.is_none() && requesting_network(&tile, false));
     assert_eq!(manual.submitted(), 1, "nothing for the new tile yet");
 
     tile.set_necessity(&id, TileNecessity::Required);
@@ -472,11 +482,7 @@ fn data_from_the_inbox_starts_a_job_at_once() {
     let mut tile = test.tile(Box::new(manual.clone()));
     let (id, key) = (tile.id, tile.key);
     tile.set_style(&style(&[layer(json!({"id": "dots", "type": "circle"}))]));
-    let load = tile.with(|info, tile, _| {
-        let load = info.next();
-        tile.data = DataState::Loading { load, request: None, current: None };
-        load
-    });
+    let load = start_geojson_load(&mut tile);
     let inbox = tile.store.inbox().clone();
     // From another thread, as a GeoJSON source's slicer answers.
     std::thread::spawn(move || {

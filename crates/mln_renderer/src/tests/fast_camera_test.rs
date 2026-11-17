@@ -273,7 +273,7 @@ impl Scene {
             self.thread_pool.wait_for_empty();
             let ran = self.run_loop.run_once();
             crate::tests::update(&mut self.store);
-            let work = self.pyramids().iter().any(|source| source.tiles.values().any(SourceInfo::has_work));
+            let work = self.pyramids().iter().any(|source| source.slots().any(|slot| SourceInfo::has_work(&slot.tile)));
             if !ran && !work && self.store.is_idle() {
                 break;
             }
@@ -307,7 +307,7 @@ impl Scene {
 
     /// The world copies that the vector source draws.
     fn vector_wraps(&self) -> BTreeSet<i16> {
-        self.pyramids()[0].rendered().map(|(id, _)| id.wrap).collect()
+        self.pyramids()[0].rendered().map(|rendered| rendered.id.wrap).collect()
     }
 }
 

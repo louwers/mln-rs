@@ -1,7 +1,8 @@
 // C++ `RenderTile` keeps a `Tile&`. A Rust RenderTile cannot borrow the tile
 // out of the tile store for the frame, so it copies what it reads from the
-// tile (its id and hold-for-fade state) when it is created and prepared, and
-// shares the tile's contents; the store changes them only between frames.
+// tile and its render entry (its id, hold-for-fade state and whether it
+// draws a visible layer) when it is created and prepared, and shares the
+// tile's contents; the store changes them only between frames.
 
 use std::rc::Rc;
 
@@ -42,14 +43,16 @@ pub(crate) struct RenderTile {
 }
 
 impl RenderTile {
-    pub(crate) fn new(id: UnwrappedTileID, tile: &Tile) -> Self {
+    /// The render tile of `tile` under `id`, which `hold_for_fade` keeps in
+    /// the render tree only so that its symbols fade out.
+    pub(crate) fn new(id: UnwrappedTileID, tile: &Tile, hold_for_fade: bool) -> Self {
         RenderTile {
             id,
             projection: ProjectionData::default(),
             // C++ default-constructs `mat4` (uninitialized); prepare sets it.
             matrix: [0.0; 16],
             tile_id: tile.id,
-            tile_hold_for_fade: tile.hold_for_fade(),
+            tile_hold_for_fade: hold_for_fade,
             render_data: None,
             shared_bucket: None,
             needs_rendering: false,
@@ -131,13 +134,21 @@ impl RenderTile {
     }
 
     /// Prepares the render tile for drawing; `tile` is the tile it was
-    /// created for, whose contents the last reference frees on `pool`.
-    pub(crate) fn prepare(&mut self, tile: &Tile, pool: &TaggedScheduler, parameters: &SourcePrepareParameters<'_>) {
+    /// created for, whose contents the last reference frees on `pool`, and
+    /// `needs_rendering` whether it draws a visible layer.
+    pub(crate) fn prepare(
+        &mut self,
+        tile: &Tile,
+        needs_rendering: bool,
+        pool: &TaggedScheduler,
+        parameters: &SourcePrepareParameters<'_>,
+    ) {
         self.shared_bucket = tile.contents.as_deref().and_then(Contents::shared_bucket);
         self.render_data =
             tile.contents.as_ref().map(|contents| TileRenderData::new(Rc::clone(contents), pool.clone()));
 
-        self.needs_rendering = tile.used_by_rendered_layers;
+        self.needs_rendering = needs_rendering;
+        let (modified, expires) = tile.load.freshness();
 
         // layers: debug
         let needs_debug_bucket = match &self.debug_bucket {
@@ -145,8 +156,8 @@ impl RenderTile {
             Some(debug_bucket) => {
                 debug_bucket.renderable != tile.is_renderable()
                     || debug_bucket.complete != tile.is_complete()
-                    || debug_bucket.modified != tile.modified
-                    || debug_bucket.expires != tile.expires
+                    || debug_bucket.modified != modified
+                    || debug_bucket.expires != expires
                     || debug_bucket.debug_mode != parameters.debug_options
             }
         };
@@ -155,8 +166,8 @@ impl RenderTile {
                 &tile.id,
                 tile.is_renderable(),
                 tile.is_complete(),
-                tile.modified,
-                tile.expires,
+                modified,
+                expires,
                 parameters.debug_options,
                 &parameters.source_name,
             )));

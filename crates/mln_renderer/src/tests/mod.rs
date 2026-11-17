@@ -144,7 +144,7 @@ impl OneTile {
         for id in ids {
             let mut tile = source.info.new_tile(*id, params).expect("a tile");
             source.info.start_load(&mut tile, ctx);
-            source.tiles.insert(*id, tile);
+            source.insert(tile);
         }
         tiles
     }
@@ -160,10 +160,9 @@ impl OneTile {
 
     /// Moves tile `from` to id `to`, as a wrap jump does.
     pub(crate) fn rekey(&mut self, from: &mln_tile_id::OverscaledTileID, to: mln_tile_id::OverscaledTileID) {
-        let (source, _) = self.store.source_mut(self.key).expect("the source");
-        let mut tile = source.tiles.remove(from).expect("the tile");
-        tile.id = to;
-        source.tiles.insert(to, tile);
+        let (source, ctx) = self.store.source_mut(self.key).expect("the source");
+        assert!(source.tile(from).is_some(), "the tile");
+        source.rekey(from, to, ctx);
         if self.id == *from {
             self.id = to;
         }
@@ -185,14 +184,12 @@ impl OneTile {
         let params = self.params();
         let (source, _) = self.store.source_mut(self.key).expect("the source");
         let generation = source.info.next();
-        let tile = crate::tile::tile::Tile::new(
-            id,
-            source.info.kind,
-            generation,
-            crate::tile::loading::TileLoad::GeoJson,
-            params,
-        );
-        source.tiles.insert(id, tile);
+        let load = crate::tile::loading::Load {
+            necessity: crate::tile::tile::TileNecessity::Optional,
+            origin: crate::tile::loading::OriginLoad::GeoJson { load: None },
+        };
+        let tile = crate::tile::tile::Tile::new(id, source.info.kind, generation, load, params);
+        source.insert(tile);
     }
 
     pub(crate) fn tile(&self) -> &crate::tile::tile::Tile {
@@ -205,7 +202,7 @@ impl OneTile {
     }
 
     pub(crate) fn tile_at(&self, id: &mln_tile_id::OverscaledTileID) -> &crate::tile::tile::Tile {
-        self.store.source(self.key).and_then(|source| source.tiles.get(id)).expect("the tile")
+        self.store.source(self.key).and_then(|source| source.tile(id)).expect("the tile")
     }
 
     /// Calls `f` with the tile, its source and the store.
@@ -232,8 +229,7 @@ impl OneTile {
         ) -> R,
     ) -> R {
         let (source, ctx) = self.store.source_mut(self.key).expect("the source");
-        let tile = source.tiles.get_mut(id).expect("the tile");
-        f(&mut source.info, tile, ctx)
+        source.update(id, ctx, f).expect("the tile")
     }
 
     pub(crate) fn set_style(&mut self, style: &std::sync::Arc<crate::tile::job::SourceStyle>) {
@@ -243,16 +239,14 @@ impl OneTile {
     /// Gives a geometry tile `data`, as a load of its own.
     pub(crate) fn set_data(&mut self, data: Option<mln_tile::TileData>) {
         self.with(|info, tile, ctx| {
-            let load = info.next();
-            info.set_data(tile, ctx, load, crate::tile::tile::TileInput::Geometry { data, missing: false }, false);
+            info.set_data(tile, ctx, crate::tile::tile::TileInput::Geometry { data, missing: false }, false);
         });
     }
 
     /// Gives raster tile `id` the image `data`, as a load of its own.
     pub(crate) fn set_image(&mut self, id: &mln_tile_id::OverscaledTileID, data: Option<mln_storage::Data>) {
         self.with_at(id, |info, tile, ctx| {
-            let load = info.next();
-            info.set_data(tile, ctx, load, crate::tile::tile::TileInput::Image(data), false);
+            info.set_data(tile, ctx, crate::tile::tile::TileInput::Image(data), false);
         });
     }
 
@@ -260,7 +254,6 @@ impl OneTile {
     /// tile there.
     pub(crate) fn set_missing(&mut self, id: &mln_tile_id::OverscaledTileID) {
         self.with_at(id, |info, tile, ctx| {
-            let load = info.next();
             let input = match tile.kind {
                 crate::tile::tile::TileKind::Geometry => {
                     crate::tile::tile::TileInput::Geometry { data: None, missing: true }
@@ -269,7 +262,7 @@ impl OneTile {
                     crate::tile::tile::TileInput::Image(None)
                 }
             };
-            info.set_data(tile, ctx, load, input, true);
+            info.set_data(tile, ctx, input, true);
         });
     }
 
@@ -304,9 +297,7 @@ impl OneTile {
     /// Lets go of tile `id`.
     pub(crate) fn drop_tile_at(&mut self, id: &mln_tile_id::OverscaledTileID) {
         let (source, ctx) = self.store.source_mut(self.key).expect("the source");
-        if let Some(tile) = source.tiles.remove(id) {
-            source.info.drop_tile(tile, ctx);
-        }
+        source.release(id, ctx);
     }
 }
 

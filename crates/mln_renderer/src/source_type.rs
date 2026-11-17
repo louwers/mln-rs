@@ -266,10 +266,11 @@ impl TileOrigin for GeoJsonOrigin {
             } else if let Some(data) = &data {
                 tiles.reduce_memory_use(ctx);
                 let max_z = source.options.get_zoom_range().max;
-                let SourceTiles { info, tiles, .. } = tiles;
-                for tile in tiles.values_mut().filter(|tile| !tile.cached && tile.id.canonical.z <= max_z) {
-                    info.load_geojson(tile, ctx, data, update.needs_relayout);
-                }
+                tiles.update_each(
+                    ctx,
+                    |slot| !slot.place.is_cached() && slot.tile.id.canonical.z <= max_z,
+                    |info, tile, ctx| info.load_geojson(tile, ctx, data, update.needs_relayout),
+                );
             }
         }
         data?;

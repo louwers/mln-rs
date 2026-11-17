@@ -44,10 +44,10 @@ use crate::tile::inbox::{Inbox, InboxSender, TileEvent, Waker};
 use crate::tile::job::{
     DataInput, DataKey, Job, JobId, JobResult, LayoutJob, LayoutOutput, Run, SourceKey, SourceStyle, TileKey,
 };
-use crate::tile::loading::{DataOrigin, TileLoad};
+use crate::tile::loading::{DataOrigin, Load};
 use crate::tile::source_tiles::SourceTiles;
 use crate::tile::tile::{
-    DataState, DependencyWait, Loaded, Next, Running, Tile, TileInput, TileKind, TileOperation, Waiting, WorkState,
+    DependencyWait, Loaded, Next, Running, Tile, TileInput, TileKind, TileLoadOrder, TileOperation, Waiting, WorkState,
 };
 use crate::tile::tile_workers::{InlineWorkers, Jobs, Lane, ReplyBody, TileWorkers};
 
@@ -163,7 +163,7 @@ impl SourceInfo {
     /// A new tile `id`, which lays out with `params`. Its load starts with
     /// `start_load`.
     pub(crate) fn new_tile(&mut self, id: OverscaledTileID, params: LayoutParams) -> Option<Tile> {
-        let load = TileLoad::new(self.origin.as_ref()?, &id, params.pixel_ratio);
+        let load = Load::new(self.origin.as_ref()?, &id, params.pixel_ratio);
         let generation = self.next();
         Some(Tile::new(id, self.kind, generation, load, params))
     }
@@ -180,21 +180,14 @@ impl SourceInfo {
         }
     }
 
-    /// Takes in the data of `tile`'s load `load`. A raster tile without
-    /// data shows nothing in its place at once, renderable unless `missing`.
-    pub(crate) fn set_data(
-        &mut self,
-        tile: &mut Tile,
-        ctx: &mut StoreContext,
-        load: u64,
-        input: TileInput,
-        missing: bool,
-    ) {
+    /// Takes in the data of a load of `tile`. A raster tile without data
+    /// shows nothing in its place at once, renderable unless `missing`.
+    pub(crate) fn set_data(&mut self, tile: &mut Tile, ctx: &mut StoreContext, input: TileInput, missing: bool) {
         let key = DataKey { source: self.key, tile: tile.id.canonical, load: self.next() };
         match self.kind {
             TileKind::Geometry => {
                 self.change(tile, ctx, |tile| {
-                    tile.data = DataState::Loaded { load, data: Loaded { key, input } };
+                    tile.data = Some(Loaded { key, input });
                     tile.full = false;
                 });
                 self.advance(tile, ctx);
@@ -202,7 +195,7 @@ impl SourceInfo {
             TileKind::Raster | TileKind::Dem(_) => {
                 let has_data = matches!(input, TileInput::Image(Some(_)));
                 let pending = tile.is_pending();
-                tile.data = DataState::Loaded { load, data: Loaded { key, input } };
+                tile.data = Some(Loaded { key, input });
                 let generation = self.next();
                 tile.bump(generation);
                 if !pending {
@@ -247,7 +240,7 @@ impl SourceInfo {
         // An unloaded tile signals no completion until it has data again.
         tile.loaded = false;
         let generation = self.next();
-        tile.data.take_current();
+        tile.data = None;
         tile.style = None;
         tile.bump(generation);
     }
@@ -334,7 +327,7 @@ impl SourceInfo {
         match tile.work {
             WorkState::Waiting(_) => true,
             // A tile that has yet to get its data has nothing to submit.
-            WorkState::Outdated | WorkState::Ready(_) => tile.data.current().is_some() && tile.is_pending(),
+            WorkState::Outdated | WorkState::Ready(_) => tile.data.is_some() && tile.is_pending(),
             WorkState::Current | WorkState::Running(_) => false,
         }
     }
@@ -378,7 +371,7 @@ impl SourceInfo {
         let id = JobId { tile: TileKey { source: self.key, id: tile.id }, generation: tile.generation };
         if tile.kind != TileKind::Geometry {
             let (WorkState::Outdated, Some(Loaded { input: TileInput::Image(Some(data)), .. })) =
-                (&tile.work, tile.data.current())
+                (&tile.work, &tile.data)
             else {
                 return None;
             };
@@ -394,7 +387,7 @@ impl SourceInfo {
             return Some((run, running));
         }
 
-        let (Some(loaded), Some(style)) = (tile.data.current(), &tile.style) else {
+        let (Some(loaded), Some(style)) = (&tile.data, &tile.style) else {
             return None;
         };
         let shown = tile.contents.as_deref().and_then(Contents::geometry);
@@ -594,7 +587,7 @@ impl SourceInfo {
             return Applied::Nothing;
         }
         tile.work = WorkState::Current;
-        if let Some(Loaded { input: TileInput::Image(data), .. }) = tile.data.current_mut() {
+        if let Some(Loaded { input: TileInput::Image(data), .. }) = &mut tile.data {
             *data = None;
         }
         let contents = match result {
@@ -625,7 +618,7 @@ impl SourceInfo {
     /// the data it was built from and the source's feature state applied.
     fn install(&mut self, tile: &mut Tile, ctx: &mut StoreContext, output: LayoutOutput, answer: Answer) {
         let LayoutOutput { mut result, deps } = output;
-        let Some(loaded) = tile.data.current() else {
+        let Some(loaded) = &tile.data else {
             return;
         };
         // The index crossed without its data, or with the data it was built
@@ -686,10 +679,10 @@ fn find(
     is: impl Fn(&Tile) -> bool,
 ) -> Option<(&mut SourceTiles, OverscaledTileID)> {
     let source = sources.get_mut(&key.source)?;
-    if source.tiles.get(&key.id).is_some_and(&is) {
+    if source.tile(&key.id).is_some_and(&is) {
         return Some((source, key.id));
     }
-    let id = source.tiles.values().find(|tile| is(tile))?.id;
+    let id = source.slots().find(|slot| is(&slot.tile))?.tile.id;
     Some((source, id))
 }
 
@@ -762,7 +755,7 @@ impl TileStore {
     pub(crate) fn set_workers(&mut self, workers: Box<dyn TileWorkers>) {
         self.ctx.jobs.set_workers(workers);
         for source in self.sources.values_mut() {
-            let lanes: Vec<Lane> = source.tiles.values().filter_map(|tile| tile.work.lane()).collect();
+            let lanes: Vec<Lane> = source.slots().filter_map(|slot| slot.tile.work.lane()).collect();
             for lane in lanes {
                 source.lane_lost(lane);
             }
@@ -818,15 +811,16 @@ impl TileStore {
         while let Some(event) = self.inbox.next() {
             match event {
                 TileEvent::Response { tile, load, response } => {
-                    if let Some((source, tile)) = find(&mut self.sources, tile, |tile| tile.data.load() == Some(load)) {
-                        source.with_tile(&tile, &mut self.ctx, |info, tile, ctx| {
-                            info.apply_response(tile, ctx, load, response);
+                    let awaits = |tile: &Tile| tile.load.awaits_response(load);
+                    if let Some((source, tile)) = find(&mut self.sources, tile, awaits) {
+                        source.update(&tile, &mut self.ctx, |info, tile, ctx| {
+                            info.apply_response(tile, ctx, load, &response);
                         });
                     }
                 }
                 TileEvent::Data { tile, load, data } => {
-                    if let Some((source, tile)) = find(&mut self.sources, tile, |tile| tile.data.load() == Some(load)) {
-                        source.with_tile(&tile, &mut self.ctx, |info, tile, ctx| {
+                    if let Some((source, tile)) = find(&mut self.sources, tile, |tile| tile.load.accepts(load)) {
+                        source.update(&tile, &mut self.ctx, |info, tile, ctx| {
                             info.apply_source_data(tile, ctx, load, data);
                         });
                     }
@@ -860,15 +854,14 @@ impl TileStore {
     /// view's first, while the workers have room. Returns whether a tile of
     /// a source with synchronous updates laid out.
     pub(crate) fn drive(&mut self) -> bool {
-        let mut tiles: Vec<(crate::tile::tile::TileLoadOrder, usize, OverscaledTileID)> = Vec::new();
+        let mut tiles: Vec<(TileLoadOrder, usize, OverscaledTileID)> = Vec::new();
         for (index, key) in self.order.iter().enumerate() {
             if let Some(source) = self.sources.get(key) {
                 tiles.extend(
                     source
-                        .tiles
-                        .values()
-                        .filter(|tile| SourceInfo::has_work(tile))
-                        .map(|tile| (tile.load_order, index, tile.id)),
+                        .slots()
+                        .filter(|slot| SourceInfo::has_work(&slot.tile))
+                        .map(|slot| (slot.place.order(), index, slot.tile.id)),
                 );
             }
         }
@@ -889,9 +882,11 @@ impl TileStore {
         let available = Arc::clone(self.ctx.images.available_images());
         for key in &self.order {
             if let Some(source) = self.sources.get_mut(key) {
-                source.for_each_tile_mut(&mut self.ctx, |info, tile, ctx| {
-                    info.images_changed(tile, ctx, changed, &available);
-                });
+                source.update_each(
+                    &mut self.ctx,
+                    |_| true,
+                    |info, tile, ctx| info.images_changed(tile, ctx, changed, &available),
+                );
             }
         }
     }
@@ -902,7 +897,7 @@ impl TileStore {
     pub(crate) fn retry_failed(&mut self) {
         for key in &self.order {
             if let Some(source) = self.sources.get_mut(key) {
-                source.for_each_tile_mut(&mut self.ctx, SourceInfo::retry_failed_glyphs);
+                source.update_each(&mut self.ctx, |_| true, SourceInfo::retry_failed_glyphs);
                 source.retry_failed_tiles(&mut self.ctx);
             }
         }
@@ -912,8 +907,8 @@ impl TileStore {
     pub(crate) fn images_used(&self) -> HashSet<String> {
         let mut used = HashSet::default();
         for source in self.sources.values() {
-            for tile in source.tiles.values() {
-                SourceInfo::for_each_dependencies(tile, |deps| used.extend(deps.images.keys().cloned()));
+            for slot in source.slots() {
+                SourceInfo::for_each_dependencies(&slot.tile, |deps| used.extend(deps.images.keys().cloned()));
             }
         }
         used
