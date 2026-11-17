@@ -2871,7 +2871,7 @@ void main() {
     fragColor = color * u_opacity;
 
 #ifdef OVERDRAW_INSPECTOR
-    fragColor = vec4(0.0);
+    fragColor = vec4(1.0);
 #endif
 }
 ",
