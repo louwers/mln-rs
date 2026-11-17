@@ -108,6 +108,8 @@ pub(crate) struct Inbox {
     arrived: Condvar,
     /// The map has something new to draw.
     redraw: AtomicBool,
+    /// The display refreshed since the render thread asked its frame pacer.
+    refreshed: AtomicBool,
 }
 
 #[derive(Default)]
@@ -141,6 +143,17 @@ impl Inbox {
     /// Whether the map has had something new to draw since the last call.
     pub(crate) fn take_redraw(&self) -> bool {
         self.redraw.swap(false, Ordering::SeqCst)
+    }
+
+    /// Wakes the render thread at a display refresh, to draw a frame.
+    pub(crate) fn wake_for_refresh(&self) {
+        self.refreshed.store(true, Ordering::SeqCst);
+        self.wake();
+    }
+
+    /// Whether the display refreshed since the last call.
+    pub(crate) fn take_refresh(&self) -> bool {
+        self.refreshed.swap(false, Ordering::SeqCst)
     }
 
     pub(crate) fn is_empty(&self) -> bool {

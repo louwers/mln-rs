@@ -10,9 +10,11 @@
 // The thread sleeps until it has work: a message from the window (host.rs)
 // or the runtime, a wake from the render session, or a deadline. Each frame
 // takes the messages that came since the last, and the session's frame waits
-// for the surface's next texture. Frames come at most once per refresh of the
-// display the window opened on, or as fast as the surface takes them in
-// benchmark mode.
+// for the surface's next texture. Frames start at the display's refreshes,
+// which a frame pacer (mln_frame_pacer) reports where the platform has one,
+// so that animations sample evenly spaced times; elsewhere they come at most
+// once per refresh interval of the display the window opened on. In
+// benchmark mode they come as fast as the surface takes them.
 //
 // Mouse, touch, wheel, trackpad and the arrow, `+` and `-` keys go to a
 // `GestureRecognizer` (mln_gestures), which moves the map's camera and
@@ -37,6 +39,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use mln_frame_pacer::FramePacer;
 use mln_gestures::{Button, GestureRecognizer, Input, Key, Modifiers, PinchPhase, PointerKind, WheelDelta};
 use mln_map::{
     AnimationOptions, BoundOptions, CameraDelta, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase,
@@ -91,6 +94,9 @@ const DEFAULT_STYLE: &str = "https://tiles.openfreemap.org/styles/liberty";
 
 /// How long a readback waits for its offscreen session to load the map.
 const READBACK_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How long a frame waits for the display's refresh before it draws without.
+const REFRESH_TIMEOUT: Duration = Duration::from_millis(100);
 
 /// What the controls show of the map's style.
 #[derive(Clone, Debug, Default)]
@@ -204,10 +210,23 @@ pub(crate) fn run(launch: Launch) {
         None => std::env::var("MLN_STYLE_URL").unwrap_or_else(|_| DEFAULT_STYLE.to_owned()),
     };
 
+    let pacer = {
+        let inbox = Arc::clone(&inbox);
+        match FramePacer::new(None, move |_| inbox.wake_for_refresh()) {
+            Ok(pacer) => Some(pacer),
+            Err(e) => {
+                Log::info(Event::Render, format!("Pacing frames on a timer: {}", e.message));
+                None
+            }
+        }
+    };
+
     let mut view = View {
         inbox,
         proxy,
         start,
+        pacer,
+        refresh_requested: None,
         frame_interval,
         next_frame_at: Instant::now(),
         runtime,
@@ -298,6 +317,11 @@ struct View {
     inbox: Arc<Inbox>,
     proxy: EventLoopProxy<UserEvent>,
     start: Instant,
+    /// Reports the display's refreshes, where the platform has a pacer.
+    pacer: Option<Arc<FramePacer>>,
+    /// When the frame that waits for a refresh asked the pacer for it.
+    refresh_requested: Option<Instant>,
+    /// Without a pacer, frames come at most this often.
     frame_interval: Duration,
     next_frame_at: Instant,
 
@@ -415,16 +439,43 @@ impl View {
                 self.inbox.wait(self.next_deadline());
                 continue;
             }
-            if !self.benchmark && now < self.next_frame_at {
-                self.inbox.wait(Some(self.next_frame_at));
+            if !self.benchmark && !self.display_ready(now) {
                 continue;
             }
-            self.next_frame_at = now + self.frame_interval;
             self.frame();
         }
         if self.readback_path.is_some() {
             self.read_back();
         }
+    }
+
+    /// Whether the display is ready for the frame that is due: it refreshed
+    /// since the frame asked the pacer, or, without a pacer, a refresh
+    /// interval passed since the last frame. Otherwise waits until it is, or
+    /// until other work comes.
+    fn display_ready(&mut self, now: Instant) -> bool {
+        if let Some(pacer) = &self.pacer {
+            if self.inbox.take_refresh() {
+                self.refresh_requested = None;
+                return true;
+            }
+            // A display that stops refreshing, as one that sleeps does,
+            // doesn't hold the frames back for good.
+            let late = *self.refresh_requested.get_or_insert(now) + REFRESH_TIMEOUT;
+            if now >= late {
+                self.refresh_requested = None;
+                return true;
+            }
+            pacer.request();
+            self.inbox.wait(Some(late));
+            return false;
+        }
+        if now < self.next_frame_at {
+            self.inbox.wait(Some(self.next_frame_at));
+            return false;
+        }
+        self.next_frame_at = now + self.frame_interval;
+        true
     }
 
     /// Runs the render session's work that is ready, and takes its frame

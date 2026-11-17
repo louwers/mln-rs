@@ -25,6 +25,7 @@ egui.workspace = true
 egui-wgpu.workspace = true
 egui_extras.workspace = true
 egui-winit.workspace = true
+mln_frame_pacer.workspace = true
 mln_gestures.workspace = true
 mln_image.workspace = true
 mln_map.workspace = true
