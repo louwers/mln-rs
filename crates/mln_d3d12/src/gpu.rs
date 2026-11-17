@@ -17,10 +17,9 @@ use mln_gfx::gpu::{
     ResourceId, SamplerId, Scissor, ShaderId, ShaderKey, SlotMap, TextureDesc, TextureFormat, TextureId, TextureRegion,
     TextureUsage, VertexStep,
 };
-use mln_gfx::shaders::shader_defines::{DRAWABLE_RESERVED_UBO_COUNT, LAYER_SSBO_START_ID};
 use mln_gfx::texture2d::SamplerState;
-use mln_glsl::TextureInfo as ShaderTexture;
-use mln_glsl::layout::{DescriptorSetType, IMAGE_SAMPLER_START, LAYER_STORAGE_COUNT};
+use mln_shaders::ResourceKind;
+use mln_shaders::layout::{IMAGE_SAMPLER_START, IMAGE_TEXTURE_COUNT};
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::size::Size;
 use windows::Win32::Foundation::{HANDLE, RECT};
@@ -368,38 +367,6 @@ fn beginning(load: LoadOp<D3D12_CLEAR_VALUE>) -> D3D12_RENDER_PASS_BEGINNING_ACC
 /// How a render pass ends with an attachment's contents: it keeps them.
 fn preserve() -> D3D12_RENDER_PASS_ENDING_ACCESS {
     D3D12_RENDER_PASS_ENDING_ACCESS { Type: D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE, ..Default::default() }
-}
-
-/// A resource of a shader's set and binding, by the shaders' ids: the
-/// inverse of `mln_glsl::layout`'s `*_binding` functions.
-enum Resource {
-    Buffer(u32),
-    /// A texture or its sampler, at its index in the table.
-    Texture {
-        id: u32,
-        index: u32,
-    },
-}
-
-fn resource_of(name: &str, textures: &[ShaderTexture], set: u32, binding: u32) -> Result<Resource, GpuError> {
-    let texture = |index: u32| {
-        textures
-            .iter()
-            .find(|texture| texture.index == index as usize)
-            .map(|texture| Resource::Texture { id: texture.id as u32, index })
-            .ok_or_else(|| GpuError::Invalid(format!("{name}: no texture at index {index} of set {set}")))
-    };
-    let start = LAYER_SSBO_START_ID as u32;
-    let storage = LAYER_STORAGE_COUNT as u32;
-    match DescriptorSetType::ALL.get(set as usize) {
-        Some(DescriptorSetType::Global) => Ok(Resource::Buffer(binding)),
-        Some(DescriptorSetType::Layer) if binding < storage => Ok(Resource::Buffer(binding + start)),
-        Some(DescriptorSetType::Layer) => Ok(Resource::Buffer(binding - storage + DRAWABLE_RESERVED_UBO_COUNT as u32)),
-        Some(DescriptorSetType::DrawableUniform) => Ok(Resource::Buffer(binding + start)),
-        Some(DescriptorSetType::DrawableImage) if binding < IMAGE_SAMPLER_START as u32 => texture(binding),
-        Some(DescriptorSetType::DrawableImage) => texture(binding - IMAGE_SAMPLER_START as u32),
-        None => Err(GpuError::Invalid(format!("{name}: no descriptor set {set}"))),
-    }
 }
 
 impl D3d12Gpu {
@@ -1066,20 +1033,17 @@ impl Gpu for D3d12Gpu {
 
     fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError> {
         let program = self.compiler.compile(key)?;
-        let source_textures = &program.textures;
         let mut reads: Vec<ShaderBinding> = Vec::new();
         let mut buffers = Vec::new();
         let mut textures = Vec::new();
         for resource in &program.resources {
-            match resource_of(program.name, source_textures, resource.set, resource.binding)? {
-                Resource::Buffer(id) => {
-                    let (parameter, view) = root_signature::buffer_parameter(resource.set, resource.binding)
-                        .ok_or_else(|| {
-                            GpuError::Invalid(format!(
-                                "{}: no buffer at set {} binding {}",
-                                program.name, resource.set, resource.binding
-                            ))
-                        })?;
+            let (set, binding) = (resource.binding.group, resource.binding.binding);
+            match resource.kind {
+                ResourceKind::UniformBuffer | ResourceKind::StorageBuffer => {
+                    let id = resource.id;
+                    let (parameter, view) = root_signature::buffer_parameter(set, binding).ok_or_else(|| {
+                        GpuError::Invalid(format!("{}: no buffer at set {set} binding {binding}", program.name))
+                    })?;
                     if let Some(ShaderBinding::Buffer { min_size, .. }) = reads
                         .iter_mut()
                         .find(|read| matches!(read, ShaderBinding::Buffer { id: read_id, .. } if *read_id == id))
@@ -1090,10 +1054,19 @@ impl Gpu for D3d12Gpu {
                         buffers.push((id, parameter, view));
                     }
                 }
-                Resource::Texture { id, index } => {
-                    if !textures.contains(&(id, index)) {
-                        textures.push((id, index));
-                        reads.push(ShaderBinding::Texture { id });
+                // A texture and its sampler are at the index of its id of
+                // the image set's table and of the sampler indices.
+                ResourceKind::Texture { .. } | ResourceKind::Sampler => {
+                    let index = match resource.kind {
+                        ResourceKind::Sampler => binding.checked_sub(IMAGE_SAMPLER_START as u32),
+                        _ => Some(binding),
+                    }
+                    .filter(|&index| index < IMAGE_TEXTURE_COUNT as u32)
+                    .ok_or_else(|| GpuError::Invalid(format!("{}: no texture at binding {binding}", program.name)))?;
+                    let texture = (resource.id, index);
+                    if !textures.contains(&texture) {
+                        textures.push(texture);
+                        reads.push(ShaderBinding::Texture { id: resource.id });
                     }
                 }
             }
@@ -1659,22 +1632,19 @@ fn create_pipeline_state(
 ) -> Result<ID3D12PipelineState, GpuError> {
     let mut elements = Vec::new();
     for (slot, layout) in desc.vertex_buffers.iter().enumerate() {
-        let (table, class, rate) = match layout.step {
-            VertexStep::Vertex => (program.attributes, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0),
-            VertexStep::Instance => (program.instance_attributes, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1),
+        let (class, rate) = match layout.step {
+            VertexStep::Vertex => (D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0),
+            VertexStep::Instance => (D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1),
         };
-        for attribute in &layout.attributes {
+        // An attribute that the program doesn't read isn't described.
+        for attribute in layout.attributes.iter().filter(|attribute| program.attributes.contains(&attribute.id)) {
             let format = conv::vertex_format(attribute.format)
                 .ok_or_else(|| GpuError::Unsupported(format!("vertex attribute format {:?}", attribute.format)))?;
-            let info = table
-                .iter()
-                .find(|info| info.id == attribute.id as usize)
-                .ok_or_else(|| GpuError::Invalid(format!("{} has no attribute {}", program.name, attribute.id)))?;
-            let location = if program.location_is_id { info.id } else { info.index };
             elements.push(D3D12_INPUT_ELEMENT_DESC {
-                // naga's HLSL names a vertex input of location N `LOC`N.
+                // naga's HLSL names a vertex input of location N `LOC`N, and
+                // an attribute's location is its id.
                 SemanticName: s!("LOC"),
-                SemanticIndex: location as u32,
+                SemanticIndex: attribute.id,
                 Format: format,
                 InputSlot: slot as u32,
                 AlignedByteOffset: attribute.offset,

@@ -75,9 +75,8 @@ fn options() -> hlsl::Options {
     }
 }
 
-/// The options of every module with the Vulkan layout's bindings: D3D12's
-/// programs of `mln_shaders` and of its own GLSL alike.
-pub static OPTIONS: LazyLock<hlsl::Options> = LazyLock::new(options);
+/// The options of every module with the Vulkan layout's bindings.
+static OPTIONS: LazyLock<hlsl::Options> = LazyLock::new(options);
 
 /// A stage written as HLSL.
 #[derive(Clone, Debug)]
@@ -88,7 +87,7 @@ pub struct Hlsl {
 }
 
 /// Writes the entry point of `stage` and `name` of `module` as HLSL.
-pub fn write(
+fn write(
     module: &naga::Module,
     info: &naga::valid::ModuleInfo,
     stage: naga::ShaderStage,

@@ -1,6 +1,7 @@
 //! The OpenGL backend: a `mln_gfx::gpu::Gpu` on the `glow` bindings, which
 //! call OpenGL ES 3.0 or desktop OpenGL 3.3 natively and WebGL2 in a
-//! browser, with its shaders and the targets the renderer draws frames into.
+//! browser, and the targets the renderer draws frames into. Its programs are
+//! the GLSL that `mln_shaders` writes.
 //!
 //! - A layer's per-drawable UBOs arrive as one buffer of every drawable's.
 //!   OpenGL ES 3.0 has no storage buffers to index in the shader, so a draw
@@ -8,8 +9,8 @@
 //! - Scissor rectangles arrive with a top-left origin and are flipped here.
 //!
 //! On desktop OpenGL 3.3 or later, of either profile, the backend draws as
-//! on OpenGL ES 3.0 but where the APIs differ: the GLSL compiles as
-//! `#version 330 core`, which every such context takes, alpha textures are
+//! on OpenGL ES 3.0 but where the APIs differ: the programs are GLSL 3.30,
+//! which every such context takes, alpha textures are
 //! red ones with a swizzle, and writes to an sRGB framebuffer are encoded, as
 //! OpenGL ES always encodes them. None of it is EGL's, so a desktop context
 //! of another platform draws through it too.
@@ -33,7 +34,6 @@ mod enums;
 mod frame_image;
 mod gpu;
 mod renderer_backend;
-mod shaders;
 mod state;
 mod types;
 

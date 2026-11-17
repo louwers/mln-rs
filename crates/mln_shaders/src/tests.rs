@@ -1,72 +1,13 @@
-use std::collections::BTreeSet;
+use mln_gfx::shaders::shader_source::BuiltIn;
+use mln_gfx::shaders::{
+    background_layer_ubo as background, circle_layer_ubo as circle, color_relief_layer_ubo as color_relief,
+    fill_extrusion_layer_ubo as fill_extrusion, fill_layer_ubo as fill, heatmap_layer_ubo as heatmap,
+    heatmap_texture_layer_ubo as heatmap_texture, hillshade_layer_ubo as hillshade,
+    hillshade_prepare_layer_ubo as hillshade_prepare, layer_composite_ubo, layer_ubo, line_layer_ubo as line,
+    raster_layer_ubo as raster, sky_ubo, symbol_layer_ubo as symbol,
+};
 
-use crate::{PROGRAMS, ResourceKind, SOURCES, Stage, Target, link};
-
-/// More flags than this, and a program's variants are the flags none, all,
-/// each alone and all but each, not every subset.
-const MAX_EXHAUSTIVE_FLAGS: usize = 10;
-
-/// The module `path` names, the longest prefix of an import's path that is a
-/// module.
-fn imported_module(path: &str) -> Option<&'static str> {
-    let parts: Vec<&str> = path.split("::").collect();
-    (1..=parts.len()).rev().find_map(|len| {
-        let name = parts[..len].join("::");
-        SOURCES.iter().find(|&&(module, _)| module == name).map(|&(module, _)| module)
-    })
-}
-
-/// The feature flags that `module` and the modules it imports test, other
-/// than the targets'.
-fn flags_of(module: &str) -> BTreeSet<String> {
-    let mut flags = BTreeSet::new();
-    let mut pending = vec![module.to_owned()];
-    let mut seen = BTreeSet::new();
-    while let Some(module) = pending.pop() {
-        if !seen.insert(module.clone()) {
-            continue;
-        }
-        let source = SOURCES.iter().find(|&&(name, _)| name == module).map(|&(_, source)| source).expect("a module");
-        for line in source.lines() {
-            if let Some(path) = line.trim_start().strip_prefix("import package::") {
-                let path = path.split(['{', ';']).next().unwrap_or_default().trim_end_matches("::");
-                if let Some(imported) = imported_module(path) {
-                    pending.push(imported.to_owned());
-                }
-            }
-        }
-        let conditions = ["@if(", "@elif("].into_iter().flat_map(|attribute| source.split(attribute).skip(1));
-        for condition in conditions {
-            let condition = condition.split(')').next().unwrap_or_default();
-            for word in condition.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')) {
-                if !word.is_empty() && !matches!(word, "true" | "false") {
-                    flags.insert(word.to_owned());
-                }
-            }
-        }
-    }
-    for target in Target::ALL {
-        flags.remove(target.feature());
-    }
-    flags
-}
-
-/// The sets of flags a program of `flags` is tested with.
-fn variants(flags: &BTreeSet<String>) -> Vec<Vec<String>> {
-    let flags: Vec<&String> = flags.iter().collect();
-    let subset = |mask: u64| -> Vec<String> {
-        flags.iter().enumerate().filter(|&(i, _)| mask & (1 << i) != 0).map(|(_, flag)| (*flag).clone()).collect()
-    };
-    let all = (1u64 << flags.len()) - 1;
-    if flags.len() <= MAX_EXHAUSTIVE_FLAGS {
-        return (0..=all).map(subset).collect();
-    }
-    let mut masks = vec![0, all];
-    for i in 0..flags.len() {
-        masks.extend([1 << i, all & !(1 << i)]);
-    }
-    masks.into_iter().map(subset).collect()
-}
+use crate::{MAX_EXHAUSTIVE_FLAGS, PROGRAMS, ResourceKind, Stage, Target, flags_of, link, variants};
 
 /// Writes `target`'s language for each stage of `module` with `flags`.
 fn write(module: &'static str, target: Target, flags: &[String]) -> Result<(), String> {
@@ -146,8 +87,8 @@ fn every_variant_of_every_program_translates() {
             .map(|target| {
                 scope.spawn(move || {
                     let mut failures = Vec::new();
-                    for &(_, module) in PROGRAMS {
-                        for flags in variants(&flags_of(module)) {
+                    for &(program, module) in PROGRAMS {
+                        for flags in variants(&flags_of(program), MAX_EXHAUSTIVE_FLAGS) {
                             if let Err(error) = write(module, target, &flags) {
                                 failures.push(format!("{module} {target:?} {flags:?}: {error}"));
                             }
@@ -164,11 +105,11 @@ fn every_variant_of_every_program_translates() {
 
 #[test]
 fn circle_has_its_flags() {
-    let flags = flags_of("programs::CircleShader");
+    let flags = flags_of(BuiltIn::CircleShader);
     for flag in ["HAS_UNIFORM_u_color", "PROJECTION_GLOBE", "OVERDRAW_INSPECTOR"] {
-        assert!(flags.contains(flag), "{flags:?}");
+        assert!(flags.iter().any(|f| f == flag), "{flags:?}");
     }
-    assert!(!flags.contains("gl") && !flags.contains("vulkan"), "{flags:?}");
+    assert!(!flags.iter().any(|f| f == "gl" || f == "vulkan"), "{flags:?}");
 }
 
 /// A variant of a program, for reading: `T=<target> D=<flag>,<flag>
@@ -200,4 +141,123 @@ fn print_variant() {
         }
         Target::Vulkan | Target::WebGpu => {}
     }
+}
+
+/// The renderer's UBO structs by name: the bytes of one, and of an element of
+/// the layer's buffer that holds one for each drawable, where the renderer
+/// writes such a buffer.
+const UBOS: &[(&str, usize, usize)] = &[
+    ("GlobalPaintParamsUBO", size_of::<layer_ubo::GlobalPaintParamsUBO>(), 0),
+    ("ProjectionUBO", size_of::<layer_ubo::ProjectionUBO>(), size_of::<layer_ubo::ProjectionUBO>()),
+    ("SkyPropsUBO", size_of::<sky_ubo::SkyPropsUBO>(), 0),
+    ("AtmospherePropsUBO", size_of::<sky_ubo::AtmospherePropsUBO>(), 0),
+    ("BackgroundPropsUBO", size_of::<background::BackgroundPropsUBO>(), 0),
+    ("BackgroundPatternPropsUBO", size_of::<background::BackgroundPatternPropsUBO>(), 0),
+    (
+        "BackgroundPatternDrawableUBO",
+        size_of::<background::BackgroundPatternDrawableUBO>(),
+        size_of::<background::BackgroundDrawableUnionUBO>(),
+    ),
+    ("CircleDrawableUBO", size_of::<circle::CircleDrawableUBO>(), size_of::<circle::CircleDrawableUBO>()),
+    ("CircleEvaluatedPropsUBO", size_of::<circle::CircleEvaluatedPropsUBO>(), 0),
+    ("CollisionDrawableUBO", size_of::<symbol::CollisionDrawableUBO>(), 0),
+    ("CollisionTilePropsUBO", size_of::<symbol::CollisionTilePropsUBO>(), 0),
+    (
+        "ColorReliefTilePropsUBO",
+        size_of::<color_relief::ColorReliefTilePropsUBO>(),
+        size_of::<color_relief::ColorReliefTilePropsUBO>(),
+    ),
+    ("ColorReliefEvaluatedPropsUBO", size_of::<color_relief::ColorReliefEvaluatedPropsUBO>(), 0),
+    // The debug overlay's, which no layer draws.
+    ("DebugUBO", 96, 0),
+    ("FillDrawableUBO", size_of::<fill::FillDrawableUBO>(), size_of::<fill::FillDrawableUnionUBO>()),
+    ("FillOutlineDrawableUBO", size_of::<fill::FillOutlineDrawableUBO>(), size_of::<fill::FillDrawableUnionUBO>()),
+    ("FillPatternDrawableUBO", size_of::<fill::FillPatternDrawableUBO>(), size_of::<fill::FillDrawableUnionUBO>()),
+    (
+        "FillOutlineTriangulatedDrawableUBO",
+        size_of::<fill::FillOutlineTriangulatedDrawableUBO>(),
+        size_of::<fill::FillDrawableUnionUBO>(),
+    ),
+    ("FillPatternTilePropsUBO", size_of::<fill::FillPatternTilePropsUBO>(), size_of::<fill::FillTilePropsUnionUBO>()),
+    ("FillEvaluatedPropsUBO", size_of::<fill::FillEvaluatedPropsUBO>(), 0),
+    (
+        "FillExtrusionDrawableUBO",
+        size_of::<fill_extrusion::FillExtrusionDrawableUBO>(),
+        size_of::<fill_extrusion::FillExtrusionDrawableUBO>(),
+    ),
+    (
+        "FillExtrusionTilePropsUBO",
+        size_of::<fill_extrusion::FillExtrusionTilePropsUBO>(),
+        size_of::<fill_extrusion::FillExtrusionTilePropsUBO>(),
+    ),
+    ("FillExtrusionPropsUBO", size_of::<fill_extrusion::FillExtrusionPropsUBO>(), 0),
+    ("HeatmapDrawableUBO", size_of::<heatmap::HeatmapDrawableUBO>(), size_of::<heatmap::HeatmapDrawableUBO>()),
+    ("HeatmapEvaluatedPropsUBO", size_of::<heatmap::HeatmapEvaluatedPropsUBO>(), 0),
+    ("HeatmapTexturePropsUBO", size_of::<heatmap_texture::HeatmapTexturePropsUBO>(), 0),
+    ("LayerCompositeUBO", size_of::<layer_composite_ubo::LayerCompositeUBO>(), 0),
+    (
+        "HillshadeTilePropsUBO",
+        size_of::<hillshade::HillshadeTilePropsUBO>(),
+        size_of::<hillshade::HillshadeTilePropsUBO>(),
+    ),
+    ("HillshadeEvaluatedPropsUBO", size_of::<hillshade::HillshadeEvaluatedPropsUBO>(), 0),
+    ("HillshadePrepareDrawableUBO", size_of::<hillshade_prepare::HillshadePrepareDrawableUBO>(), 0),
+    ("HillshadePrepareTilePropsUBO", size_of::<hillshade_prepare::HillshadePrepareTilePropsUBO>(), 0),
+    ("LineDrawableUBO", size_of::<line::LineDrawableUBO>(), size_of::<line::LineDrawableUnionUBO>()),
+    ("LineGradientDrawableUBO", size_of::<line::LineGradientDrawableUBO>(), size_of::<line::LineDrawableUnionUBO>()),
+    ("LinePatternDrawableUBO", size_of::<line::LinePatternDrawableUBO>(), size_of::<line::LineDrawableUnionUBO>()),
+    ("LineSDFDrawableUBO", size_of::<line::LineSDFDrawableUBO>(), size_of::<line::LineDrawableUnionUBO>()),
+    ("LinePatternTilePropsUBO", size_of::<line::LinePatternTilePropsUBO>(), size_of::<line::LineTilePropsUnionUBO>()),
+    ("LineSDFTilePropsUBO", size_of::<line::LineSDFTilePropsUBO>(), size_of::<line::LineTilePropsUnionUBO>()),
+    ("LineEvaluatedPropsUBO", size_of::<line::LineEvaluatedPropsUBO>(), 0),
+    ("RasterEvaluatedPropsUBO", size_of::<raster::RasterEvaluatedPropsUBO>(), 0),
+    ("SymbolDrawableUBO", size_of::<symbol::SymbolDrawableUBO>(), size_of::<symbol::SymbolDrawableUBO>()),
+    ("SymbolTilePropsUBO", size_of::<symbol::SymbolTilePropsUBO>(), size_of::<symbol::SymbolTilePropsUBO>()),
+    ("SymbolEvaluatedPropsUBO", size_of::<symbol::SymbolEvaluatedPropsUBO>(), 0),
+];
+
+/// Every buffer of every program is one of the renderer's UBOs: a uniform
+/// buffer of its size, or a storage buffer of the layer's element size,
+/// which a struct smaller than the element pads to.
+#[test]
+fn every_buffer_is_the_renderers() {
+    let mut failures = Vec::new();
+    for &(program, module) in PROGRAMS {
+        let flags = flags_of(program);
+        for target in [Target::WebGpu, Target::Gl] {
+            for flags in [Vec::new(), flags.clone()] {
+                let linked = link(module, target, &flags).expect("links");
+                for resource in &linked.resources {
+                    let storage = match resource.kind {
+                        ResourceKind::UniformBuffer => false,
+                        ResourceKind::StorageBuffer => true,
+                        _ => continue,
+                    };
+                    let mut ty = linked.module.global_variables[resource.handle].ty;
+                    if let naga::TypeInner::Array { base, .. } = linked.module.types[ty].inner {
+                        ty = base;
+                    }
+                    let name = linked.module.types[ty].name.as_deref().unwrap_or_default();
+                    // WESL names a struct after its module's path and its own.
+                    let name = name.rsplit('_').next().unwrap_or_default();
+                    if name == "GlobalIndexUBO" {
+                        continue;
+                    }
+                    let at = format!("{module} {target:?} {}", resource.name);
+                    match UBOS.iter().find(|&&(ubo, _, _)| ubo == name) {
+                        None => failures.push(format!("{at}: {name} is no UBO of the renderer's")),
+                        Some(&(_, _, element)) if storage && resource.size != element as u64 => {
+                            failures.push(format!("{at}: {name} elements of {} bytes, not {element}", resource.size));
+                        }
+                        Some(&(_, size, _)) if !storage && resource.size != size as u64 => {
+                            failures.push(format!("{at}: {name} of {} bytes, not {size}", resource.size));
+                        }
+                        Some(_) => {}
+                    }
+                }
+            }
+        }
+    }
+    failures.dedup();
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

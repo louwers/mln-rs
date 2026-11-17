@@ -6,7 +6,6 @@ use mln_gfx::gpu::conformance::{
     imported_textures, instanced_walls, invalid_calls, readbacks, topologies, transparent_replace, vertex_layouts,
 };
 use mln_gfx::gpu::{BufferUsage, ColorAttachment};
-use mln_gfx::shaders::shader_source::BuiltIn;
 use mln_util::Color;
 use objc2::runtime::NSObjectProtocol as _;
 use objc2::{msg_send, sel};
@@ -18,6 +17,23 @@ use super::*;
 fn clip_mask_and_background_through_gpu() {
     let device = Device::new(None).expect("Metal device");
     clip_mask_and_background(&mut MetalGpu::new(&device)).expect("the frame");
+}
+
+// Every program's MSL compiles, and a pipeline of it reflects its bindings,
+// in the variants of none, all, each alone and all but each of its flags.
+#[test]
+fn every_program_compiles_for_gpu() {
+    let device = Device::new(None).expect("Metal device");
+    let mut gpu = MetalGpu::new(&device);
+    for program in mln_shaders::programs() {
+        for flags in mln_shaders::variants(&mln_shaders::flags_of(program), 0) {
+            let key = ShaderKey::new(program, flags.into_iter().chain(["DEVICE_PIXEL_RATIO=1.0".to_owned()]));
+            let shader = gpu.create_shader(&key).unwrap_or_else(|error| panic!("{key:?}: {error}"));
+            if let Err(error) = gpu.reflect(shader) {
+                panic!("{key:?}: {error}");
+            }
+        }
+    }
 }
 
 #[test]
@@ -76,8 +92,8 @@ fn instanced_walls_through_gpu() {
 
 #[test]
 fn a_vertex_function_reading_where_vertex_buffers_bind_is_rejected() {
-    // Reads buffer 8, where the instanced fill extrusion shader's second
-    // vertex buffer slot binds, directly.
+    // Reads buffer 8, where the shader's first vertex buffer slot binds,
+    // directly.
     const MSL: &str = "
 #include <metal_stdlib>
 using namespace metal;
@@ -90,20 +106,21 @@ fragment half4 fragmentMain() { return half4(1.0); }
 ";
     let device = Device::new(None).expect("Metal device");
     let mut gpu = MetalGpu::new(&device);
-    let program = BuiltIn::FillExtrusionInstancedShader;
     let (vertex, fragment) =
         compile(device.device(), "direct read", MSL, "vertexMain", "fragmentMain", []).expect("the MSL compiles");
-    let source = shader_source(program).expect("the table");
-    let shader = gpu.shaders.insert(Shader { source, vertex, fragment, table: None, wesl: false });
+    let shader = gpu.shaders.insert(Shader {
+        name: "direct read",
+        vertex,
+        fragment,
+        table: None,
+        attributes: vec![(0, AttributeDataType::Short2)],
+        first_vertex_buffer: 8,
+    });
     let unblended = mln_gfx::color_mode::ColorMode::unblended();
     let layouts = [VertexBufferLayout {
         stride: 4,
         step: VertexStep::Vertex,
-        attributes: vec![GpuVertexAttribute {
-            id: mln_gfx::shaders::shader_defines::ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE as u32,
-            format: AttributeDataType::Short2,
-            offset: 0,
-        }],
+        attributes: vec![GpuVertexAttribute { id: 0, format: AttributeDataType::Short2, offset: 0 }],
     }];
     let desc = PipelineDesc {
         shader,

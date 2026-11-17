@@ -2,8 +2,7 @@
 // fill, and where a fragment is in the window, which an outline fades from.
 //
 // The layer's buffer of drawables has elements the size of the largest
-// drawable UBO, FillPatternDrawableUBO; a smaller one is padded to it, but on
-// OpenGL, which binds one element as a block of its UBO's size.
+// drawable UBO, FillPatternDrawableUBO; a smaller one is padded to it.
 
 import package::common::{atlas_pos, get_pattern_pos, glMod2};
 import package::globals::{drawable_index, paintParams};

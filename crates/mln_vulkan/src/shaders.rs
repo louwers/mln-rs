@@ -1,56 +1,30 @@
-//! The Vulkan shaders of the programs that `mln_shaders` has no WESL for:
-//! `mln_glsl`'s GLSL, which naga writes as SPIR-V when a program is first
-//! used.
+//! GLSL compiled to SPIR-V for a host's own shaders, such as an overlay's.
+//! The renderer's programs are `mln_shaders`', which writes their SPIR-V.
 
-use std::sync::Arc;
-
-use mln_glsl::{Module, ResourceUse, Stage};
-use mln_util::hash::HashMap;
+use mln_shaders::Stage;
 use naga::back::spv;
-use parking_lot::Mutex;
+use naga::valid::{Capabilities, ValidationFlags, Validator};
 
-/// Compiles Vulkan GLSL, whose clip space is y-down, to SPIR-V 1.0, with the
-/// entry point `main`.
+/// Compiles a stage of Vulkan GLSL 4.50, whose entry point is `main` and
+/// whose clip space is y-down, to SPIR-V 1.0 with the entry point `main`.
+/// naga's GLSL front end takes no combined image samplers, `bool` members of
+/// buffers, precision qualifiers or samplers as function parameters.
 pub fn compile(stage: Stage, source: &str) -> Result<Vec<u32>, String> {
-    write(stage, &Module::parse(stage, source)?, spv::WriterFlags::empty())
-}
-
-/// A program's stage compiled to SPIR-V.
-pub(crate) struct Compiled {
-    pub(crate) spirv: Vec<u32>,
-    /// The resources the entry point uses.
-    pub(crate) resources: Vec<ResourceUse>,
-}
-
-/// Compiles a `ShaderSource::compose`d stage, whose clip space is y-up, and
-/// finds the resources it uses, once a process: SPIR-V doesn't depend on
-/// the device, and every renderer compiles the same stages.
-pub(crate) fn compile_program(stage: Stage, source: &str) -> Result<Arc<Compiled>, String> {
-    /// A stage's source, and whether the stage is the vertex stage.
-    type Key = (bool, String);
-    static COMPILED: Mutex<Option<HashMap<Key, Arc<Compiled>>>> = Mutex::new(None);
-    let key = (stage == Stage::Vertex, source.to_owned());
-    if let Some(compiled) = COMPILED.lock().get_or_insert_default().get(&key) {
-        return Ok(Arc::clone(compiled));
-    }
-    let module = Module::parse(stage, source)?;
-    let spirv = write(stage, &module, spv::WriterFlags::ADJUST_COORDINATE_SPACE)?;
-    let compiled = Arc::new(Compiled { spirv, resources: module.resources()? });
-    COMPILED.lock().get_or_insert_default().insert(key, Arc::clone(&compiled));
-    Ok(compiled)
-}
-
-fn write(stage: Stage, module: &Module, flags: spv::WriterFlags) -> Result<Vec<u32>, String> {
+    let module = naga::front::glsl::Frontend::default()
+        .parse(&naga::front::glsl::Options::from(stage.naga()), source)
+        .map_err(|errors| errors.emit_to_string(source))?;
+    // Not the uniformity of control flow: it is WGSL's rule for derivatives,
+    // which GLSL doesn't have.
+    let flags = ValidationFlags::all() & !ValidationFlags::CONTROL_FLOW_UNIFORMITY;
+    let info = Validator::new(flags, Capabilities::all()).validate(&module).map_err(|error| format!("{error:?}"))?;
     let options = spv::Options {
         lang_version: (1, 0),
-        // The shaders write no fragment depth.
-        flags: flags | spv::WriterFlags::LABEL_VARYINGS,
+        flags: spv::WriterFlags::LABEL_VARYINGS,
         // No checks added around loops, indexes and integer divisions.
         force_loop_bounding: false,
         emit_int_div_checks: false,
         ..spv::Options::default()
     };
     let pipeline_options = spv::PipelineOptions { shader_stage: stage.naga(), entry_point: "main".to_owned() };
-    spv::write_vec(&module.module, &module.info, &options, Some(&pipeline_options))
-        .map_err(|error| format!("{error:?}"))
+    spv::write_vec(&module, &info, &options, Some(&pipeline_options)).map_err(|error| format!("{error:?}"))
 }

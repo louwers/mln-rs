@@ -3,7 +3,8 @@
 //! Each buffer is in the buffer slot of its id, as the renderer's buffers
 //! bind; each texture is in the texture slot of its id, and its sampler in
 //! the sampler slot of the texture's id. The vertex buffers bind after the
-//! buffers, where the backend's attribute tables put them.
+//! buffers ([`Program::first_vertex_buffer`]), and each attribute is at the
+//! index of its id.
 //!
 //! naga's MSL takes the byte sizes of the buffers that end in an array of any
 //! length from a buffer at [`SIZES_BUFFER_SLOT`], to bound their indexes and
@@ -43,6 +44,18 @@ impl Program {
     /// program's.
     pub fn msl(&self) -> Result<&Msl, String> {
         self.written.msl.get_or_init(|| write(self)).as_ref().map_err(Clone::clone)
+    }
+
+    /// The buffer slot of a Metal program's first vertex buffer: the one
+    /// after its buffers' slots. The others follow it, below
+    /// [`SIZES_BUFFER_SLOT`].
+    #[must_use]
+    pub fn first_vertex_buffer(&self) -> usize {
+        let buffers = self
+            .resources
+            .iter()
+            .filter(|resource| matches!(resource.kind, ResourceKind::UniformBuffer | ResourceKind::StorageBuffer));
+        buffers.map(|resource| resource.id as usize + 1).max().unwrap_or(0)
     }
 }
 

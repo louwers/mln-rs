@@ -1,6 +1,6 @@
 //! The Metal backend: `MetalGpu`, the backend's `mln_gfx::gpu::Gpu`, on the
-//! `objc2-metal` bindings, with its MSL shaders and the targets the renderer
-//! draws frames into.
+//! `objc2-metal` bindings, and the targets the renderer draws frames into.
+//! Its programs are the MSL that `mln_shaders` writes.
 //!
 //! A `RendererBackend` renders on a `Device`, into an `OffscreenTarget`, a
 //! `SurfaceTarget`, a `BorrowedTarget` or an `ExportedTarget` built on it.
@@ -18,7 +18,6 @@ mod gpu;
 mod mtl_fwd;
 mod readback;
 mod renderer_backend;
-mod shaders;
 pub mod surface_target;
 
 pub use borrowed_target::{BorrowedTarget, BorrowedTextures, PendingReads};

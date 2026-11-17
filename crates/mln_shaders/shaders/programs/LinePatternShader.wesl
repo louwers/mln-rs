@@ -29,7 +29,7 @@ struct LinePatternDrawableUBO {
     pad2: f32,
     pad3: f32,
     // To the size of any line program's element (see `line`).
-    @if(!gl) pad4: vec4<f32>,
+    pad4: vec4<f32>,
 };
 
 struct LinePatternTilePropsUBO {

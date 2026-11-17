@@ -22,8 +22,8 @@ struct LineDrawableUBO {
     width_t: f32,
     pad1: f32,
     // To the size of any line program's element (see `line`).
-    @if(!gl) pad2: vec4<f32>,
-    @if(!gl) pad3: vec4<f32>,
+    pad2: vec4<f32>,
+    pad3: vec4<f32>,
 };
 
 // ID_LINE_DRAWABLE_UBO: one element for each drawable of the layer.

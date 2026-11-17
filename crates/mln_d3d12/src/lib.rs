@@ -1,9 +1,8 @@
 //! The D3D12 backend: `D3d12Gpu`, the backend's `mln_gfx::gpu::Gpu`, on the
-//! `windows` crate's bindings, with its shaders and offscreen frames.
+//! `windows` crate's bindings, and its targets.
 //!
-//! Its shaders are `mln_glsl`'s GLSL, which naga writes as HLSL and DXC,
-//! loaded from `dxcompiler.dll` at run time, compiles to DXIL
-//! (`ShaderCompiler`).
+//! Its programs are the HLSL that `mln_shaders` writes, which DXC, loaded
+//! from `dxcompiler.dll` at run time, compiles to DXIL (`ShaderCompiler`).
 //!
 //! A `RendererBackend` renders on a `Device`, which backends on any thread
 //! share, into an `OffscreenTarget`, a `SurfaceTarget`, a `BorrowedTarget`
@@ -35,7 +34,7 @@ pub use exported_target::ExportedTarget;
 pub use gpu::D3d12Gpu;
 /// Frames drawn into textures of the library's and read back.
 pub type OffscreenTarget = mln_gfx::offscreen_target::OffscreenTarget<RendererBackend>;
-pub use mln_glsl::Stage as ShaderStage;
+pub use mln_shaders::Stage as ShaderStage;
 pub use renderer_backend::RendererBackend;
 pub use shaders::{CompiledProgram, ShaderCompiler};
 pub use surface_target::{Composition, Overlay, OverlayTarget, SurfaceTarget};

@@ -15,8 +15,8 @@ struct FillDrawableUBO {
     opacity_t: f32,
     pad1: f32,
     pad2: f32,
-    @if(!gl) pad3: vec4<f32>,
-    @if(!gl) pad4: vec4<f32>,
+    pad3: vec4<f32>,
+    pad4: vec4<f32>,
 };
 
 // ID_FILL_DRAWABLE_UBO: one element for each drawable of the layer.

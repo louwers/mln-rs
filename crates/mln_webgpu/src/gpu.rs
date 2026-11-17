@@ -462,7 +462,7 @@ fn texture_format(format: TextureFormat) -> wgpu::TextureFormat {
 }
 
 /// What `shader` reads from its bindings, by the shaders' ids.
-fn shader_bindings(shader: &ShaderProgram) -> Result<Vec<ShaderBinding>, GpuError> {
+fn shader_bindings(shader: &ShaderProgram) -> Vec<ShaderBinding> {
     let mut bindings = Vec::new();
     for &group in shader.bind_group_order() {
         if Some(group) == shader.index_group() {
@@ -470,21 +470,11 @@ fn shader_bindings(shader: &ShaderProgram) -> Result<Vec<ShaderBinding>, GpuErro
         }
         for info in shader.binding_infos(group) {
             let binding = match info.type_ {
-                BindingType::UniformBuffer | BindingType::ReadOnlyStorageBuffer | BindingType::StorageBuffer => {
-                    ShaderBinding::Buffer {
-                        id: info.id.unwrap_or(info.binding),
-                        min_size: shader.buffer_size(group, info.binding),
-                    }
+                BindingType::UniformBuffer | BindingType::ReadOnlyStorageBuffer => {
+                    ShaderBinding::Buffer { id: info.id, min_size: shader.buffer_size(group, info.binding) }
                 }
                 BindingType::Sampler | BindingType::Texture | BindingType::UnfilterableTexture => {
-                    let id = info.id.ok_or_else(|| {
-                        GpuError::Invalid(format!(
-                            "{} reads binding {} with no texture id",
-                            shader.name(),
-                            info.binding
-                        ))
-                    })?;
-                    ShaderBinding::Texture { id }
+                    ShaderBinding::Texture { id: info.id }
                 }
             };
             if !bindings.contains(&binding) {
@@ -492,7 +482,7 @@ fn shader_bindings(shader: &ShaderProgram) -> Result<Vec<ShaderBinding>, GpuErro
             }
         }
     }
-    Ok(bindings)
+    bindings
 }
 
 /// The format of `format`, `None` for a format the interface has no name
@@ -692,7 +682,7 @@ impl Gpu for WebGpu {
 
     fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError> {
         let program = shader_program::compile(self.device.device(), self.index_table.layout(), key)?;
-        let reads = shader_bindings(&program)?;
+        let reads = shader_bindings(&program);
         Ok(self.shaders.insert(Shader { program, reads }))
     }
 
@@ -737,12 +727,12 @@ impl Gpu for WebGpu {
                     ))
                 };
                 let resource = match info.type_ {
-                    BindingType::UniformBuffer | BindingType::ReadOnlyStorageBuffer | BindingType::StorageBuffer => {
+                    BindingType::UniformBuffer | BindingType::ReadOnlyStorageBuffer => {
                         let (buffer, offset, size) = desc
                             .entries
                             .iter()
                             .find_map(|entry| match *entry {
-                                BindGroupEntry::Buffer { id, buffer, offset, size } if Some(id) == info.id => {
+                                BindGroupEntry::Buffer { id, buffer, offset, size } if id == info.id => {
                                     Some((buffer, offset, size))
                                 }
                                 _ => None,
@@ -757,7 +747,7 @@ impl Gpu for WebGpu {
                     }
                     BindingType::Sampler | BindingType::Texture | BindingType::UnfilterableTexture => {
                         let sampler = info.type_ == BindingType::Sampler;
-                        let texture_id = info.id.ok_or_else(missing)?;
+                        let texture_id = info.id;
                         let (texture, texture_sampler) = desc
                             .entries
                             .iter()

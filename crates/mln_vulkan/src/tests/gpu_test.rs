@@ -11,12 +11,10 @@ use mln_gfx::gpu::{
     BindGroupEntry, BindingsDesc, BufferDesc, BufferUsage, ColorAttachment, Gpu as _, GpuError, LoadOp, PassDesc,
     ShaderKey, TextureDesc, TextureFormat, TextureRegion, TextureUsage, read_texels,
 };
-use mln_gfx::shader_group::GLOBE_DEFINE;
-use mln_gfx::shaders::background_layer_ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
+use mln_gfx::shaders::background_layer_ubo::BackgroundPropsUBO;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::shader_defines::{ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_PROPS_UBO, ID_PROJECTION_UBO};
+use mln_gfx::shaders::shader_defines::{ID_BACKGROUND_PROPS_UBO, ID_PROJECTION_UBO};
 use mln_gfx::shaders::shader_source::BuiltIn;
-use mln_glsl::PROGRAMS;
 use mln_util::Color;
 use mln_util::size::Size;
 
@@ -132,7 +130,6 @@ fn destroyed_stale_buffers_go_with_their_last_bindings() {
     };
     let entries = [
         entry(ID_PROJECTION_UBO, BufferUsage::Storage, size_of::<ProjectionUBO>()),
-        entry(ID_BACKGROUND_DRAWABLE_UBO, BufferUsage::Storage, size_of::<BackgroundDrawableUnionUBO>()),
         entry(ID_BACKGROUND_PROPS_UBO, BufferUsage::Uniform, size_of::<BackgroundPropsUBO>()),
     ];
     let bindings =
@@ -140,27 +137,23 @@ fn destroyed_stale_buffers_go_with_their_last_bindings() {
     for buffer in buffers {
         gpu.destroy(buffer.into());
     }
-    assert_eq!(gpu.destroyed_stale_count(), 3, "while the bindings hold them");
+    assert_eq!(gpu.destroyed_stale_count(), 2, "while the bindings hold them");
     gpu.destroy(bindings.into());
     gpu.flush(true).expect("the flush");
     assert_eq!(gpu.destroyed_stale_count(), 0, "after the bindings go");
 }
 
+// Every program's SPIR-V makes shader modules, in the variants of none,
+// all, each alone and all but each of its flags.
 #[test]
 fn every_program_compiles_for_gpu() {
     let device = Device::new(None).expect("Vulkan device");
     let mut gpu = VulkanGpu::new(&device).expect("VulkanGpu");
-    for &(program, source) in PROGRAMS {
-        let uniforms: Vec<String> =
-            source.uniform_properties().into_iter().map(|name| format!("HAS_UNIFORM_u_{name}")).collect();
-        for globe in [false, true] {
-            let projection = globe.then(|| GLOBE_DEFINE.to_owned());
-            for defines in [Vec::new(), uniforms.clone()] {
-                let pixel_ratio = "DEVICE_PIXEL_RATIO=1.0".to_owned();
-                let key = ShaderKey::new(program, defines.into_iter().chain(projection.clone()).chain([pixel_ratio]));
-                if let Err(error) = gpu.create_shader(&key) {
-                    panic!("{key:?}: {error}");
-                }
+    for program in mln_shaders::programs() {
+        for flags in mln_shaders::variants(&mln_shaders::flags_of(program), 0) {
+            let key = ShaderKey::new(program, flags.into_iter().chain(["DEVICE_PIXEL_RATIO=1.0".to_owned()]));
+            if let Err(error) = gpu.create_shader(&key) {
+                panic!("{key:?}: {error}");
             }
         }
     }

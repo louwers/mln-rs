@@ -9,7 +9,6 @@ repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
 include = ["/build.rs", "/src", "/shaders", "/README.md", "/LICENSE*"]
-publish = false
 
 [lib]
 name = "mln_shaders"

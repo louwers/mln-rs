@@ -4,8 +4,7 @@
 //
 // A layer's per-drawable buffers hold any line program's elements, the size
 // of the largest (`LineDrawableUnionUBO`, `LineTilePropsUnionUBO`): each
-// program pads its element struct to that size, except on OpenGL, which
-// binds the draw's element alone as a block of the struct's own size.
+// program pads its element struct to that size.
 
 import package::common::{LINE_NORMAL_SCALE, MAX_LINE_DISTANCE};
 import package::globals::paintParams;

@@ -7,7 +7,8 @@
 > this crate as `mln_rs::mln_webgpu`.
 
 The WebGPU backend, on the `wgpu` crate, natively and in the browser: its `Gpu`,
-its WGSL shaders, and the targets that frames draw into.
+which draws with the WGSL that mln-rs-shaders links, and the targets that frames
+draw into.
 
 Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering

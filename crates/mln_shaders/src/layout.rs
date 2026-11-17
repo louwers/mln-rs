@@ -10,8 +10,8 @@
 //! - A drawable's uniform buffers are the whole drawable set: symbols aren't
 //!   instanced, and fill extrusions read their instances as vertex inputs.
 //! - A texture and its sampler are two descriptors, the sampler
-//!   `MAX_TEXTURE_COUNT_PER_SHADER` bindings after the texture: naga's GLSL
-//!   front end has separate textures and samplers only.
+//!   `MAX_TEXTURE_COUNT_PER_SHADER` bindings after the texture: WGSL has
+//!   separate textures and samplers only.
 //! - The global set has no platform parameters: swapchains have the identity
 //!   transform.
 

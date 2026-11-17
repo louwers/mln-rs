@@ -6,9 +6,9 @@
 > Depend on [`mln-rs`](https://crates.io/crates/mln-rs) instead: it re-exports
 > this crate as `mln_rs::mln_mtl`.
 
-The Metal backend, through `objc2-metal`: its `Gpu`, its MSL shaders, and the
-targets that frames draw into. It renders on Apple platforms only, and is empty
-elsewhere.
+The Metal backend, through `objc2-metal`: its `Gpu`, which draws with the MSL
+that mln-rs-shaders writes, and the targets that frames draw into. It renders on
+Apple platforms only, and is empty elsewhere.
 
 Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering

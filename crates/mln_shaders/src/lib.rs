@@ -4,8 +4,8 @@
 //!
 //! A program is `shaders/programs/<BuiltIn>.wesl`, named after its
 //! [`BuiltIn`]; the other modules are shared. Its entry points are `vs_main`
-//! and `fs_main` ([`Stage::entry_point`]). A backend uses a program's WESL in
-//! place of its own source for it ([`program_of`]).
+//! and `fs_main` ([`Stage::entry_point`]). A backend gets a program, linked
+//! for it, from [`program_of`].
 //!
 //! # Feature flags
 //!
@@ -37,7 +37,8 @@
 //!   index is 0.
 //! - Metal: the declarations as written; `msl` puts each buffer in the
 //!   buffer slot of its id and each texture and sampler in the slots of the
-//!   texture's id.
+//!   texture's id. The vertex buffers bind after the program's buffers
+//!   (`Program::first_vertex_buffer`).
 //! - WebGPU: every buffer at its id in group 0, the textures and samplers at
 //!   their bindings in the next group, and the draw's index
 //!   (`ID_GLOBAL_UBO_INDEX`) alone in the last ([`Program::index_group`]),
@@ -50,6 +51,7 @@
 
 pub mod layout;
 mod link;
+mod variants;
 
 #[cfg(any(test, feature = "glsl"))]
 pub mod glsl;
@@ -68,11 +70,13 @@ use std::sync::{Arc, LazyLock};
 use mln_gfx::gpu::ShaderKey;
 use mln_gfx::shaders::shader_source::BuiltIn;
 use mln_util::hash::HashMap;
+pub use naga;
 use naga::valid::{Capabilities, ModuleInfo, ValidationFlags, Validator};
 use parking_lot::Mutex;
 
 pub use crate::layout::DescriptorSetType;
 use crate::link::{Declared, DeclaredKind};
+pub use crate::variants::{MAX_EXHAUSTIVE_FLAGS, flags_of, variants};
 
 include!(concat!(env!("OUT_DIR"), "/registry.rs"));
 
@@ -134,7 +138,8 @@ impl Stage {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ResourceKind {
     UniformBuffer,
-    /// A read-only storage buffer.
+    /// A layer's buffer with an element for each drawable: a read-only
+    /// storage buffer, or on OpenGL a uniform block of the draw's element.
     StorageBuffer,
     /// A 2D float texture; not `filterable` if the program only loads its
     /// texels, never samples it.
@@ -157,8 +162,9 @@ pub struct Resource {
     pub id: u32,
     /// Its group and binding in the target's module.
     pub binding: naga::ResourceBinding,
-    /// The bytes of a buffer: of a buffer that ends in an array of any
-    /// length, up to its first element. 0 for a texture or sampler.
+    /// The bytes of a buffer: of a [`ResourceKind::StorageBuffer`], of one
+    /// element, the stride of the layer's buffer. 0 for a texture or
+    /// sampler.
     pub size: u64,
     /// Whether the vertex stage uses it.
     pub vertex: bool,
@@ -184,6 +190,8 @@ pub struct VertexInput {
     pub location: u32,
     /// The kind of its scalars: an integer input reads integers.
     pub scalar: naga::ScalarKind,
+    /// The number of its components, 1 to 4.
+    pub components: u32,
 }
 
 impl VertexInput {
@@ -197,7 +205,7 @@ impl VertexInput {
 /// A program linked for a target and a variant, and validated.
 #[derive(Debug)]
 pub struct Program {
-    /// The program's module in the package (`programs::<BuiltIn>`).
+    /// The program's name, its `BuiltIn`'s.
     pub name: &'static str,
     pub target: Target,
     pub module: naga::Module,
@@ -254,31 +262,24 @@ impl Program {
     }
 }
 
-/// Whether the backends use the WESL of a program that has one, the default;
-/// `MLN_SHADERS=native` makes them use their own sources.
-#[must_use]
-pub fn enabled() -> bool {
-    static ENABLED: LazyLock<bool> =
-        LazyLock::new(|| !std::env::var("MLN_SHADERS").is_ok_and(|value| value == "native"));
-    *ENABLED
-}
-
 /// The module of `program`'s WESL, if it has one.
 #[must_use]
 pub fn module_of(program: BuiltIn) -> Option<&'static str> {
     PROGRAMS.iter().find(|&&(built_in, _)| built_in == program).map(|&(_, module)| module)
 }
 
-/// The program of `key` for `target`, linked once a process, if it has a
-/// WESL source and the backends use it ([`enabled`]).
-#[must_use]
-pub fn program_of(key: &ShaderKey, target: Target) -> Option<Result<Arc<Program>, String>> {
-    if !enabled() {
-        return None;
-    }
-    let module = module_of(key.program())?;
+/// Each program that has a WESL source.
+pub fn programs() -> impl Iterator<Item = BuiltIn> {
+    PROGRAMS.iter().map(|&(program, _)| program)
+}
+
+/// The program of `key` for `target`, linked once a process. Fails for a
+/// program without a WESL source, or one that doesn't link or validate.
+pub fn program_of(key: &ShaderKey, target: Target) -> Result<Arc<Program>, String> {
+    let program = key.program();
+    let module = module_of(program).ok_or_else(|| format!("{program:?} has no WESL source"))?;
     let flags = key.define_values().filter(|(_, value)| value.is_empty()).map(|(name, _)| name);
-    Some(program(module, target, flags))
+    self::program(module, target, flags)
 }
 
 /// The program `module` linked for `target` with the feature flags `flags`
@@ -323,7 +324,7 @@ pub fn link(module: &'static str, target: Target, flags: &[String]) -> Result<Pr
     };
     let entry_points = [entry_point(Stage::Vertex)?, entry_point(Stage::Fragment)?];
     Ok(Program {
-        name: module,
+        name: module.rsplit("::").next().unwrap_or(module),
         target,
         module: parsed,
         info,
@@ -362,13 +363,12 @@ fn resources(
         if !vertex && !fragment {
             continue;
         }
-        let kind = match global.space {
-            naga::AddressSpace::Uniform => ResourceKind::UniformBuffer,
-            naga::AddressSpace::Storage { .. } => ResourceKind::StorageBuffer,
-            _ if resource.kind == DeclaredKind::Texture => {
+        // The kind declared: OpenGL's storage buffers are uniform blocks.
+        let kind = match resource.kind {
+            DeclaredKind::Texture => {
                 ResourceKind::Texture { filterable: sampled.contains(&handle) || !loaded.contains(&handle) }
             }
-            _ => resource.kind.into(),
+            kind => kind.into(),
         };
         let size = match kind {
             ResourceKind::UniformBuffer | ResourceKind::StorageBuffer => u64::from(layouter[global.ty].size),
@@ -421,8 +421,13 @@ fn inputs(module: &naga::Module) -> Result<Vec<VertexInput>, String> {
     let mut inputs = Vec::new();
     let mut add = |binding: &Option<naga::Binding>, ty: naga::Handle<naga::Type>| {
         if let Some(naga::Binding::Location { location, .. }) = *binding {
-            let scalar = module.types[ty].inner.scalar().map_or(naga::ScalarKind::Float, |scalar| scalar.kind);
-            inputs.push(VertexInput { location, scalar });
+            let inner = &module.types[ty].inner;
+            let scalar = inner.scalar().map_or(naga::ScalarKind::Float, |scalar| scalar.kind);
+            let components = match *inner {
+                naga::TypeInner::Vector { size, .. } => size as u32,
+                _ => 1,
+            };
+            inputs.push(VertexInput { location, scalar, components });
         }
     };
     for argument in &entry.function.arguments {

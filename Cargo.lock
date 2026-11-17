@@ -2773,7 +2773,6 @@ version = "0.0.12"
 dependencies = [
  "gpu-allocator",
  "mln-rs-gfx",
- "mln-rs-glsl",
  "mln-rs-shaders",
  "mln-rs-util",
  "parking_lot",
@@ -2946,15 +2945,6 @@ dependencies = [
  "wasm-bindgen",
  "web-sys",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "mln-rs-glsl"
-version = "0.0.12"
-dependencies = [
- "mln-rs-gfx",
- "mln-rs-shaders",
- "naga",
 ]
 
 [[package]]
@@ -3453,7 +3443,6 @@ dependencies = [
  "gpu-allocator",
  "libc",
  "mln-rs-gfx",
- "mln-rs-glsl",
  "mln-rs-shaders",
  "mln-rs-tile-id",
  "mln-rs-util",

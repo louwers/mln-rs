@@ -7,10 +7,10 @@
 > this crate as `mln_rs::mln_d3d12`.
 
 The D3D12 backend: mln-rs's GPU interface on D3D12 through the `windows` crate,
-its shaders, and the targets that frames are drawn into. Its shaders are
-mln-rs-glsl's GLSL, which naga writes as HLSL and DXC compiles at run time, so
-apps that use it ship DXC's `dxcompiler.dll`, 1.8.2502 or later, which signs
-what it compiles; an older one needs `dxil.dll` beside it. It is empty except on
+and the targets that frames are drawn into. Its shaders are the HLSL that
+mln-rs-shaders writes of each program, which DXC compiles at run time, so apps
+that use it ship DXC's `dxcompiler.dll`, 1.8.2502 or later, which signs what it
+compiles; an older one needs `dxil.dll` beside it. It is empty except on
 Windows.
 
 Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the

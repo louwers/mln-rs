@@ -5,7 +5,7 @@
 use mln_gfx::gpu::GpuError;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
-use mln_glsl::layout::IMAGE_TEXTURE_COUNT;
+use mln_shaders::layout::IMAGE_TEXTURE_COUNT;
 use mln_util::hash::HashMap;
 use windows::Win32::Graphics::Direct3D12::{
     D3D12_COMPARISON_FUNC_NEVER, D3D12_CPU_DESCRIPTOR_HANDLE, D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,

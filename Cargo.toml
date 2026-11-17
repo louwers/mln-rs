@@ -53,7 +53,6 @@ mln_expression = { package = "mln-rs-expression", path = "crates/mln_expression"
 mln_gestures = { package = "mln-rs-gestures", path = "crates/mln_gestures", version = "=0.0.12" }
 mln_gfx = { package = "mln-rs-gfx", path = "crates/mln_gfx", version = "=0.0.12" }
 mln_gl = { package = "mln-rs-gl", path = "crates/mln_gl", version = "=0.0.12" }
-mln_glsl = { package = "mln-rs-glsl", path = "crates/mln_glsl", version = "=0.0.12" }
 mln_headless = { package = "mln-rs-headless", path = "crates/mln_headless", version = "=0.0.12" }
 mln_image = { package = "mln-rs-image", path = "crates/mln_image", version = "=0.0.12" }
 mln_map = { package = "mln-rs-map", path = "crates/mln_map", version = "=0.0.12" }
@@ -410,8 +409,9 @@ gpu-allocator = { version = "0.28.0", default-features = false, features = [
 ] }
 # The WGSL front end that crates/mln_shaders parses its linked programs with,
 # whose back ends each backend turns on: SPIR-V for Vulkan, HLSL for D3D12,
-# MSL for Metal and GLSL for OpenGL. crates/mln_glsl adds the GLSL front end,
-# which needs a module that only `wgsl-in` or `spv-in` builds.
+# MSL for Metal and GLSL for OpenGL. crates/mln_vulkan adds the GLSL front end
+# for a host's own shaders, which needs a module that only `wgsl-in` or
+# `spv-in` builds.
 naga = { version = "30.0.1", features = ["wgsl-in"] }
 # Links crates/mln_shaders' WESL into WGSL.
 wesl = { version = "0.6.0", default-features = false }

@@ -13,13 +13,12 @@ struct FillOutlineTriangulatedDrawableUBO {
     pad1: f32,
     pad2: f32,
     pad3: f32,
-    @if(!gl) pad4: vec4<f32>,
-    @if(!gl) pad5: vec4<f32>,
+    pad4: vec4<f32>,
+    pad5: vec4<f32>,
 };
 
-// ID_FILL_DRAWABLE_UBO: one element for each drawable of the layer. The
-// layer's drawables are FillPatternDrawableUBO's size; OpenGL binds one
-// element as a block of this UBO's size.
+// ID_FILL_DRAWABLE_UBO: one element for each drawable of the layer, padded
+// to FillPatternDrawableUBO's size.
 @group(1) @binding(2) var<storage, read> drawableVector: array<FillOutlineTriangulatedDrawableUBO>;
 
 // The locations are the ID_LINE_*_VERTEX_ATTRIBUTE ids.

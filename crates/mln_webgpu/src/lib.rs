@@ -1,6 +1,6 @@
 //! The WebGPU backend, on the `wgpu` crate: [`WebGpu`], the backend's
-//! [`Gpu`](mln_gfx::gpu::Gpu), with its shaders, and the targets the
-//! renderer draws frames into.
+//! [`Gpu`](mln_gfx::gpu::Gpu), which draws with the WGSL that `mln_shaders`
+//! links, and the targets the renderer draws frames into.
 //!
 //! A [`RendererBackend`] renders on a [`Device`], into an
 //! [`OffscreenTarget`], a [`SurfaceTarget`] or a [`BorrowedTarget`] built on

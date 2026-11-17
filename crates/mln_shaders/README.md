@@ -1,5 +1,10 @@
 # mln-rs-shaders
 
+> **Warning: this is an internal crate of
+> [mln-rs](https://crates.io/crates/mln-rs).** It is published only because the
+> other mln-rs crates depend on it, and its API can change in any release
+> without notice. mln-rs doesn't re-export it.
+
 The renderer's shader programs, each written once in
 [WESL](https://wesl-lang.dev) and translated for every backend at run time:
 
@@ -11,9 +16,8 @@ The renderer's shader programs, each written once in
   3.30 (OpenGL, WebGL2) and MSL (Metal); WebGPU takes the WGSL itself.
 
 A backend asks for a program with `program_of(key, target)`, which links each
-variant once a process. While programs move over, a backend falls back to its
-own sources for a program that has no WESL here; `MLN_SHADERS=native` makes the
-backends use their own sources for every program.
+variant once a process and reports the program's resources and vertex inputs,
+from which the backend binds it.
 
 ## Modules
 
@@ -42,8 +46,8 @@ value, such as `DEVICE_PIXEL_RATIO`, is not a flag: read the value from a
 uniform (`paintParams.pixel_ratio`).
 
 A vertex input's `@location` is its attribute's id (`ID_<LAYER>_..._ATTRIBUTE`),
-with the type the WebGPU WGSL gives it: integer inputs (`vec2<i32>` for
-`Short2`) read integers on every backend.
+and its type the attribute's: integer inputs (`vec2<i32>` for `Short2`) read
+integers on every backend. A backend binds only the attributes a variant reads.
 
 A resource's `@group` is its descriptor set, and its `@binding` the renderer's
 id (`mln_gfx::shaders::shader_defines`):
@@ -65,27 +69,25 @@ its own convention:
 | Vulkan  | the `layout` set and binding                                 | image set, texture id; 3 + id         | push constant     |
 | D3D12   | as Vulkan, then space = set, register = binding              | as Vulkan, samplers by index heap     | root constant     |
 | OpenGL  | block at the binding point of its id; arrays are one element | sampler at the texture unit of its id | 0                 |
-| Metal   | buffer slot of its id                                        | texture and sampler slot of its id    | bytes at slot 1   |
+| Metal   | buffer slot of its id; vertex buffers after the last         | texture and sampler slot of its id    | bytes at slot 1   |
 | WebGPU  | group 0, binding id                                          | next group, as written                | last group, alone |
 
 ## Adding a program
 
-1. Write `shaders/programs/<BuiltIn>.wesl`. Start from the program's WebGPU WGSL
-   (`mln_webgpu`'s `wgsl_sources.rs`), but keep the hand-written GL and Vulkan
-   shaders' design where they read a uniform property in the fragment stage
-   rather than passing it as a varying: CPU rasterizers pay for every varying.
-   `CircleShader.wesl` is the model.
+1. Write `shaders/programs/<BuiltIn>.wesl`. Read a uniform property in the
+   fragment stage rather than passing it as a varying: CPU rasterizers pay for
+   every varying. `CircleShader.wesl` is the model.
 2. Import what it needs from the shared modules. Don't edit them unless a helper
    is missing.
-3. Check each backend's table for the program still describes it: the attributes
-   the program reads by id, and, for OpenGL, an entry for each uniform block's
-   id (its element size).
-4. `cargo test -p mln-rs-shaders` links and validates every variant for every
-   target and writes each target's language.
+3. `cargo test -p mln-rs-shaders` links and validates every variant for every
+   target, writes each target's language, and checks each buffer against the
+   renderer's UBO of its name (`tests.rs`, which lists them).
    `T=<target> D=<flags> P=<BuiltIn> cargo test -p mln-rs-shaders print_variant -- --ignored --nocapture`
    prints a variant.
+4. Each backend's `every_program_compiles_for_gpu` test (`every_program_links`
+   on OpenGL) makes the program's variants on its device.
 5. Run the program's render tests on Vulkan, OpenGL and WebGPU
-   (`MLN_RENDER_BACKEND`), and compare against `MLN_SHADERS=native`.
+   (`MLN_RENDER_BACKEND`).
 
 ## Pitfalls
 
@@ -98,8 +100,14 @@ its own convention:
 - An `@if(PROJECTION_GLOBE) import` brings in globe-only helpers.
 - OpenGL, WebGPU, Metal and D3D12 take the clip space the program writes;
   Vulkan's flips Y. A constant that depends on the depth range (OpenGL's -1 to
-  1, the others' 0 to 1) differs between the hand-written shaders: read what
-  they did, and use `@if(gl)` if it must differ.
+  1, the others' 0 to 1) takes `@if(gl)`.
+- On OpenGL, `@builtin(position)` in the fragment stage starts at the window's
+  bottom left (`gl_FragCoord`), and at its top left elsewhere: a program that
+  compares it with a position from the vertex stage converts it `@if(gl)`
+  (`fill::fragment_position`).
+- On OpenGL, a texture that an earlier pass drew into starts at its bottom row:
+  a program that samples one flips v `@if(gl)` (`HeatmapTextureShader`,
+  `HillshadeShader`).
 - A texture that a program only loads texels of (`textureLoad`) is unfilterable
   on WebGPU; sample and load textures through their globals, not function
   parameters, for the crate to tell.
@@ -107,10 +115,9 @@ its own convention:
 - An alpha-only texture (`A8Unorm`: the glyph atlas, line dash patterns) reads
   its value from alpha on every backend but WebGPU, which has no alpha-only
   format and reads it from red: use `@if(webgpu)`.
-- The line programs pick a property's value by its `HAS_UNIFORM_u_<name>` flag.
-  `LineEvaluatedPropsUBO`'s expression mask means the opposite where
-  `Caps::line_expressions` is set (Metal) than elsewhere, so don't read it.
+- A program picks a property's value by its `HAS_UNIFORM_u_<name>` flag, not by
+  an expression mask such as `LineEvaluatedPropsUBO`'s.
 - A layer's per-drawable buffer holds elements of the size of its layer's
-  largest, such as `LineDrawableUnionUBO`: pad the program's struct to it
-  `@if(!gl)`, as OpenGL binds the draw's element alone, as a block of the UBO's
-  size.
+  largest UBO, such as `LineDrawableUnionUBO`: pad the program's struct to it.
+- A program can import another's module: the per-vertex fill extrusion walls
+  wrap the instanced walls' stages.

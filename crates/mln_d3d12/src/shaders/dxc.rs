@@ -4,7 +4,7 @@
 
 use std::ffi::c_void;
 
-use mln_glsl::Stage;
+use mln_shaders::Stage;
 use windows::Win32::Foundation::{FreeLibrary, HMODULE};
 use windows::Win32::Graphics::Direct3D::Dxc::{
     CLSID_DxcCompiler, DXC_ARG_OPTIMIZATION_LEVEL3, DXC_CP_UTF8, DxcBuffer, IDxcBlob, IDxcCompiler3, IDxcResult,

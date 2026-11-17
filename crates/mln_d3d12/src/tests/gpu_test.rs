@@ -4,8 +4,6 @@ use mln_gfx::gpu::conformance::{
     wall_quads,
 };
 use mln_gfx::gpu::{Gpu as _, GpuError, ShaderKey};
-use mln_gfx::shader_group::GLOBE_DEFINE;
-use mln_glsl::PROGRAMS;
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_UNKNOWN};
 
 use crate::{D3d12Gpu, Device};
@@ -100,20 +98,16 @@ fn imported_textures_through_gpu() {
 // Every program compiles for `Gpu`, which maps each binding to a root
 // parameter, with every property per vertex and every property as a
 // uniform, in both projections.
+// Every program compiles to DXIL, in the variants of none, all, each alone
+// and all but each of its flags.
 #[test]
 fn every_program_compiles_for_gpu() {
     let mut gpu = gpu();
-    for &(program, source) in PROGRAMS {
-        let uniforms: Vec<String> =
-            source.uniform_properties().into_iter().map(|name| format!("HAS_UNIFORM_u_{name}")).collect();
-        for globe in [false, true] {
-            let projection = globe.then(|| GLOBE_DEFINE.to_owned());
-            for defines in [Vec::new(), uniforms.clone()] {
-                let pixel_ratio = "DEVICE_PIXEL_RATIO=1.0".to_owned();
-                let key = ShaderKey::new(program, defines.into_iter().chain(projection.clone()).chain([pixel_ratio]));
-                if let Err(error) = gpu.create_shader(&key) {
-                    panic!("{key:?}: {error}");
-                }
+    for program in mln_shaders::programs() {
+        for flags in mln_shaders::variants(&mln_shaders::flags_of(program), 0) {
+            let key = ShaderKey::new(program, flags.into_iter().chain(["DEVICE_PIXEL_RATIO=1.0".to_owned()]));
+            if let Err(error) = gpu.create_shader(&key) {
+                panic!("{key:?}: {error}");
             }
         }
     }
