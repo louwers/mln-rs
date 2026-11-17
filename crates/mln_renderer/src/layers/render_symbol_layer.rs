@@ -47,6 +47,7 @@ use crate::buckets::symbol_bucket::{
     Buffer, CollisionBoxDynamicVertex, CollisionBoxLayoutVertex, CollisionBuffer, PaintProperties, SymbolBucket,
 };
 use crate::drawable_builder::DrawableBuilder;
+use crate::geometry::feature_index::FeatureIndex;
 use crate::gfx::context::Context;
 use crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker;
 use crate::layer_group::LayerGroup;
@@ -588,6 +589,97 @@ pub(crate) struct RenderSymbolLayer {
 }
 
 impl RenderSymbolLayer {
+    /// The translations of the layer's text and of its icons, as its
+    /// evaluated paint properties set them.
+    pub(crate) fn symbol_translates(&self) -> (SymbolTranslate, SymbolTranslate) {
+        let evaluated = &self.values.evaluated.paint;
+        let text_translate = SymbolTranslate {
+            offset: *evaluated.text_translate.uniform(),
+            anchor: *evaluated.text_translate_anchor.uniform(),
+        };
+        let icon_translate = SymbolTranslate {
+            offset: *evaluated.icon_translate.uniform(),
+            anchor: *evaluated.icon_translate_anchor.uniform(),
+        };
+        (text_translate, icon_translate)
+    }
+
+    /// Adds `bucket`, of the tile at `tile_index` of `owner`, to what the
+    /// layer places: when the layer leads the bucket, to its placement data,
+    /// with the tile's feature index, in order of sort key; otherwise to its
+    /// follower data.
+    pub(crate) fn add_placement_data(
+        &mut self,
+        owner: &Rc<Vec<RenderTile>>,
+        tile_index: usize,
+        bucket: Arc<SymbolBucket>,
+        feature_index: impl FnOnce() -> Option<Arc<FeatureIndex>>,
+        (text_translate, icon_translate): (SymbolTranslate, SymbolTranslate),
+    ) {
+        if bucket.bucket_leader_id != self.get_id() {
+            self.follower_data.push(BucketPlacementData {
+                bucket,
+                tile_owner: Rc::clone(owner),
+                tile_index,
+                feature_index: None,
+                source_id: self.base.style.base().source.clone(),
+                sort_key_range: None,
+                text_translate,
+                icon_translate,
+            });
+            return;
+        }
+        // Only place this layer if it's the "group leader" for the bucket
+        let feature_index = feature_index();
+
+        if bucket.sort_key_ranges.is_empty() {
+            self.placement_data.push(BucketPlacementData {
+                bucket,
+                tile_owner: Rc::clone(owner),
+                tile_index,
+                feature_index,
+                source_id: self.base.style.base().source.clone(),
+                sort_key_range: None,
+                text_translate,
+                icon_translate,
+            });
+            return;
+        }
+        for sort_key_range in &bucket.sort_key_ranges {
+            let layer_data = BucketPlacementData {
+                bucket: Arc::clone(&bucket),
+                tile_owner: Rc::clone(owner),
+                tile_index,
+                feature_index: feature_index.clone(),
+                source_id: self.base.style.base().source.clone(),
+                sort_key_range: Some(*sort_key_range),
+                text_translate,
+                icon_translate,
+            };
+            if self
+                .placement_data
+                .last()
+                .is_none_or(|last| last.sort_key_range.is_some_and(|last| last.sort_key <= sort_key_range.sort_key))
+            {
+                // Already in order, as ranges with a constant sort key always are.
+                self.placement_data.push(layer_data);
+                continue;
+            }
+            // std::upper_bound by sort key
+            let sort_position = self.placement_data.partition_point(|lhs| {
+                let key = lhs.sort_key_range.expect("sort key range").sort_key;
+                sort_key_range.sort_key.partial_cmp(&key) != Some(std::cmp::Ordering::Less)
+            });
+            self.placement_data.insert(sort_position, layer_data);
+        }
+    }
+
+    /// Whether the layer places or draws any bucket.
+    #[cfg(feature = "bench")]
+    pub(crate) fn has_placement_data(&self) -> bool {
+        !self.placement_data.is_empty() || !self.follower_data.is_empty()
+    }
+
     pub(crate) fn new(impl_: Arc<LayerStyle<Symbol>>) -> Self {
         let (base, values) = LayerValues::new(impl_);
         RenderSymbolLayer {
@@ -842,16 +934,7 @@ impl RenderLayer for RenderSymbolLayer {
         self.placement_data.clear();
         self.follower_data.clear();
 
-        let evaluated = &self.values.evaluated.paint;
-        let text_translate = SymbolTranslate {
-            offset: *evaluated.text_translate.uniform(),
-            anchor: *evaluated.text_translate_anchor.uniform(),
-        };
-        let icon_translate = SymbolTranslate {
-            offset: *evaluated.icon_translate.uniform(),
-            anchor: *evaluated.icon_translate_anchor.uniform(),
-        };
-
+        let translates = self.symbol_translates();
         let Some(render_tiles) = self.base.render_tiles.clone() else {
             return;
         };
@@ -866,60 +949,7 @@ impl RenderLayer for RenderSymbolLayer {
             let Some(tile_index) = owner.iter().position(|t| std::ptr::eq(t, render_tile)) else {
                 continue;
             };
-            if bucket.bucket_leader_id != self.get_id() {
-                self.follower_data.push(BucketPlacementData {
-                    bucket: Arc::clone(&bucket),
-                    tile_owner: Rc::clone(&owner),
-                    tile_index,
-                    feature_index: None,
-                    source_id: self.base.style.base().source.clone(),
-                    sort_key_range: None,
-                    text_translate,
-                    icon_translate,
-                });
-                continue;
-            }
-            // Only place this layer if it's the "group leader" for the bucket
-            let feature_index = render_tile.get_feature_index();
-
-            if bucket.sort_key_ranges.is_empty() {
-                self.placement_data.push(BucketPlacementData {
-                    bucket: Arc::clone(&bucket),
-                    tile_owner: Rc::clone(&owner),
-                    tile_index,
-                    feature_index,
-                    source_id: self.base.style.base().source.clone(),
-                    sort_key_range: None,
-                    text_translate,
-                    icon_translate,
-                });
-            } else {
-                for sort_key_range in &bucket.sort_key_ranges {
-                    let layer_data = BucketPlacementData {
-                        bucket: Arc::clone(&bucket),
-                        tile_owner: Rc::clone(&owner),
-                        tile_index,
-                        feature_index: feature_index.clone(),
-                        source_id: self.base.style.base().source.clone(),
-                        sort_key_range: Some(*sort_key_range),
-                        text_translate,
-                        icon_translate,
-                    };
-                    if self.placement_data.last().is_none_or(|last| {
-                        last.sort_key_range.is_some_and(|last| last.sort_key <= sort_key_range.sort_key)
-                    }) {
-                        // Already in order, as ranges with a constant sort key always are.
-                        self.placement_data.push(layer_data);
-                        continue;
-                    }
-                    // std::upper_bound by sort key
-                    let sort_position = self.placement_data.partition_point(|lhs| {
-                        let key = lhs.sort_key_range.expect("sort key range").sort_key;
-                        sort_key_range.sort_key.partial_cmp(&key) != Some(std::cmp::Ordering::Less)
-                    });
-                    self.placement_data.insert(sort_position, layer_data);
-                }
-            }
+            self.add_placement_data(&owner, tile_index, bucket, || render_tile.get_feature_index(), translates);
         }
     }
 

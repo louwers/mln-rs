@@ -30,10 +30,10 @@ use crate::Registry;
 use crate::bucket::LayerFeatureStates;
 use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::layer_type::ErasedEvaluatedLayer;
-use crate::layers::render_symbol_layer::{add_placement_data, symbol_translates};
+use crate::layers::render_symbol_layer::RenderSymbolLayer;
 use crate::layout::tile_layout::{Dependencies, LayoutParams, Resolved};
 use crate::paint_parameters::TransformParameters;
-use crate::render_layer::RenderLayerPtr;
+use crate::render_layer::RenderLayer;
 use crate::render_tile::RenderTile;
 use crate::text::cross_tile_symbol_index::CrossTileSymbolIndex;
 use crate::text::glyph_store::HBShapeResults;
@@ -110,8 +110,6 @@ impl TileLayout {
                 .layer_type(layer.info().name)
                 .and_then(|layer_type| layer_type.create_render_layer(layer.style()))
                 .ok_or_else(|| Error::invalid_argument(format!("no render layer for {}", layer.get_id())))?;
-            let render_layer =
-                Rc::get_mut(&mut render_layer).ok_or_else(|| Error::native("a new render layer is shared"))?.get_mut();
             render_layer.evaluate(&parameters);
             layers.push(Arc::clone(&render_layer.base().evaluated_properties));
         }
@@ -205,7 +203,7 @@ pub struct SymbolView {
     update: Arc<UpdateParameters>,
     /// The style's symbol layers that lead a bucket of the tiles, in the
     /// style's order.
-    layers: Vec<RenderLayerPtr>,
+    layers: Vec<RenderSymbolLayer>,
 }
 
 impl SymbolView {
@@ -236,7 +234,6 @@ impl SymbolView {
                 .collect(),
         );
 
-        let registry = Registry::with_builtins();
         let parameters = PropertyEvaluationParameters::new(zoom as f32);
         let mut layers = Vec::new();
         for layer in style.get_layers() {
@@ -244,22 +241,19 @@ impl SymbolView {
             if base.source != source || base.visibility == VisibilityType::None || layer.info().name != "symbol" {
                 continue;
             }
-            let mut render_layer = registry
-                .layer_type(layer.info().name)
-                .and_then(|layer_type| layer_type.create_render_layer(layer.style()))
+            let style = mln_style::layer_type::LayerStyle::<mln_style::layers::Symbol>::recover(layer.style())
                 .ok_or_else(|| Error::invalid_argument(format!("no render layer for {}", layer.get_id())))?;
-            let render_layer_mut =
-                Rc::get_mut(&mut render_layer).ok_or_else(|| Error::native("a new render layer is shared"))?.get_mut();
-            render_layer_mut.evaluate(&parameters);
-            let base = render_layer_mut.base_mut();
+            let mut render_layer = RenderSymbolLayer::new(style);
+            render_layer.evaluate(&parameters);
             // As the layer's prepare adds its tiles' buckets.
-            let translates = symbol_translates(base);
+            let translates = render_layer.symbol_translates();
             for (tile_index, laid_out) in tiles.iter().enumerate() {
                 let Some(render_data) = laid_out.result.layer_render_data.get(layer.get_id()) else { continue };
+                let Some(bucket) = crate::bucket::recover(&render_data.bucket) else { continue };
                 let feature_index = || Some(Arc::clone(&laid_out.result.feature_index));
-                add_placement_data(base, &render_tiles, tile_index, &render_data.bucket, feature_index, translates);
+                render_layer.add_placement_data(&render_tiles, tile_index, bucket, feature_index, translates);
             }
-            if !base.placement_data.is_empty() || !base.follower_data.is_empty() {
+            if render_layer.has_placement_data() {
                 layers.push(render_layer);
             }
         }
@@ -299,8 +293,7 @@ impl SymbolView {
         let longitude = self.update.transform_state.get_lat_lng(mln_util::geo::WrapMode::Unwrapped).longitude() as f32;
         let mut added = 0;
         for layer in self.layers.iter().rev() {
-            let layer = layer.try_borrow().map_err(|_| Error::native("a render layer in use"))?;
-            let result = index.0.add_layer(&*layer, longitude, &self.update.transform_state);
+            let result = index.0.add_layer(layer, longitude, &self.update.transform_state);
             if result.buckets_added {
                 added += 1;
             }
@@ -317,7 +310,8 @@ impl SymbolView {
     pub fn place(&self) -> usize {
         let previous = Placement::new_default();
         let mut placement = Placement::create(Arc::clone(&self.update), Some(previous));
-        placement.place_layers(&self.layers);
+        let layers: Vec<&dyn RenderLayer> = self.layers.iter().map(|layer| -> &dyn RenderLayer { layer }).collect();
+        placement.place_layers(&layers);
         placement.shown()
     }
 }
