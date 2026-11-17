@@ -3,7 +3,7 @@ use std::sync::Arc;
 use mln_conversion::Convertible;
 
 use crate::expression::{Dependency, EvalResult, EvaluationContext, Expr};
-use crate::functions::{Eval, Functions, OverloadSpec, Params, RegisterError, Role, decode_with};
+use crate::functions::{Eval, Functions, OverloadSpec, Params, RegisterError, Role};
 use crate::parsing_context::ParsingContext;
 use crate::type_::Type;
 use crate::value::Value;
@@ -75,13 +75,10 @@ fn a_compound_expression_crosses_by_name() {
     let expression = parse(&functions, r#"["-", ["get", "x"]]"#).unwrap();
     let encoded = mln_wire::to_vec(&expression).unwrap();
 
-    let decoded: Expr = decode_with(&functions, || mln_wire::from_slice(&encoded)).unwrap();
+    let decoded: Expr = mln_wire::from_slice_in(&encoded, &*functions).unwrap();
     assert_eq!(decoded, expression);
     assert_eq!(decoded.dependencies(), expression.dependencies());
 
     assert!(mln_wire::from_slice::<Expr>(&encoded).is_err(), "no functions to resolve against");
-    let empty = Arc::new(Functions::new());
-    assert!(decode_with(&empty, || mln_wire::from_slice::<Expr>(&encoded)).is_err());
-    let nested = decode_with(&empty, || decode_with(&functions, || mln_wire::from_slice::<Expr>(&encoded)));
-    assert!(nested.is_ok(), "the innermost functions apply");
+    assert!(mln_wire::from_slice_in::<Expr>(&encoded, &Functions::new()).is_err());
 }

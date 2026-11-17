@@ -88,7 +88,7 @@ pub(crate) use properties::{
     __possibly_evaluated_methods, __property_data_driven, __property_evaluation, __property_value, properties,
 };
 pub use property_value::PropertyValue;
-pub use registry::{StyleRegistry, decode_with};
+pub use registry::StyleRegistry;
 pub use renderer::property_evaluation_parameters::{CrossfadeParameters, PropertyEvaluationParameters};
 pub use renderer::transition_parameters::{GlobalStateChange, TransitionParameters};
 pub use source_list::SourceList;

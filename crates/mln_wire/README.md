@@ -6,7 +6,8 @@
 > without notice. mln-rs doesn't re-export it.
 
 A compact binary encoding for the values that cross between the wasm instances
-of the browser build: a `Wire` trait over a byte writer and a slice reader, and
+of the browser build: a `Wire` trait over a byte writer and a slice reader, the
+`Context` that values get registries and side tables from, and
 `#[derive(Wire)]`.
 
 Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the

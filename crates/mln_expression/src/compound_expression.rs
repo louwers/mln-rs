@@ -25,7 +25,7 @@ pub(crate) struct CompoundExpression {
 
 /// A compound expression crosses as its function's name, the overload's
 /// position among the name's and its arguments. Reading resolves the name
-/// against the functions of `functions::decode_with`.
+/// against the functions in the reader's context.
 impl mln_wire::Wire for CompoundExpression {
     fn write(&self, w: &mut mln_wire::Writer) {
         mln_wire::write_str(w, &self.overload.name);
@@ -36,7 +36,7 @@ impl mln_wire::Wire for CompoundExpression {
     fn read(r: &mut mln_wire::Reader<'_>) -> Option<Self> {
         let name = mln_wire::read_str(r)?;
         let index = u8::read(r)?;
-        let overload = match decoding_overload(name, index) {
+        let overload = match decoding_overload(r, name, index) {
             Ok(overload) => overload,
             Err(message) => return r.fail(message),
         };

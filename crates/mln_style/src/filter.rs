@@ -4,11 +4,11 @@ use std::sync::{Arc, OnceLock};
 use feature::Value;
 
 use crate::expression::{EvaluationContext, Expr, Value as ExpressionValue, feature_property_keys};
-use crate::serialization::shared_expression;
+use crate::serialization::optional_expression;
 
 #[derive(Clone, Debug, Default, mln_wire::Wire)]
 pub struct Filter {
-    #[wire(with = "shared_expression::option")]
+    #[wire(with = "optional_expression")]
     pub expression: Option<Arc<Expr>>,
     legacy_filter: Option<Value>,
     /// [`Filter::property_keys`], found on first use.

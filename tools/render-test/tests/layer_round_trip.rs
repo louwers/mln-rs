@@ -15,9 +15,11 @@ use mln_style::StyleRegistry;
 use mln_style::conversion::convert_layer;
 use mln_style::layer::Layer;
 use mln_style::layer_type::ErasedLayerStyle;
+use mln_style::serialization::SharedLayer;
+use mln_util::serialization::shared;
 
 #[derive(mln_wire::Wire)]
-struct Crossing(#[wire(with = "mln_style::serialization::shared_layer")] Arc<dyn ErasedLayerStyle>);
+struct Crossing(#[wire(with = "shared::ByKey::<SharedLayer>")] Arc<dyn ErasedLayerStyle>);
 
 fn styles(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in fs::read_dir(dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display())) {
@@ -66,7 +68,7 @@ fn every_layer_crosses() {
     let mut failures = Vec::new();
     for (path, layer) in &layers {
         let encoded = mln_wire::to_vec(&Crossing(Arc::clone(layer.style()))).unwrap();
-        match mln_style::decode_with(&registry, || mln_wire::from_slice::<Crossing>(&encoded)) {
+        match mln_wire::from_slice_in::<Crossing>(&encoded, &*registry) {
             Ok(decoded) => {
                 if mln_wire::to_vec(&decoded).unwrap() != encoded {
                     failures.push(format!("{}: crosses as another layer\n  {:?}", path.display(), layer.serialize()));

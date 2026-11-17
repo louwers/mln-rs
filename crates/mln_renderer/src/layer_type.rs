@@ -15,8 +15,9 @@ use mln_style::expression::Dependency;
 use mln_style::layer_type::{
     ErasedLayerStyle, ErasedStyleLayerType, LayerStyle, LayerTypeEntry, PaintSet, StyleLayerType,
 };
-use mln_style::serialization::shared_layer;
+use mln_style::serialization::SharedLayer;
 use mln_util::error::Error;
+use mln_util::serialization::shared;
 use mln_vec_map::VecSet;
 use mln_wire::{Reader, Wire, Writer};
 use smallvec::SmallVec;
@@ -160,7 +161,7 @@ impl<T: LayerType> ErasedEvaluatedLayer for EvaluatedLayer<T> {
     }
 
     fn write(&self, w: &mut Writer) {
-        shared_layer::write(&self.shared_style(), w);
+        shared::write::<SharedLayer>(&self.shared_style(), w);
         self.paint.write(w);
         self.crossfade.write(w);
         self.render_passes.write(w);
@@ -248,7 +249,7 @@ impl<T: LayerType> ErasedLayerType for LayerTypeEntry<T> {
     }
 
     fn read_evaluated(&self, r: &mut Reader<'_>) -> Option<Arc<dyn ErasedEvaluatedLayer>> {
-        let style = shared_layer::read(r)?;
+        let style = shared::read::<SharedLayer>(r)?;
         let Some(style) = LayerStyle::<T>::recover(&style) else {
             return r.fail("the evaluated values of a layer of another type");
         };

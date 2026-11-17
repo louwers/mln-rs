@@ -1,13 +1,12 @@
 //! The registrations that a style parses against: its expression functions,
 //! its layer types and its source types.
 
-use std::cell::Cell;
 use std::sync::Arc;
 
 use mln_conversion::{Convertible, Error};
 use mln_vec_map::VecMap;
 
-use crate::expression::{Functions, functions};
+use crate::expression::Functions;
 use crate::layer::Layer;
 use crate::layer_type::{ErasedStyleLayerType, SourceKind};
 use crate::source_type::ErasedStyleSourceType;
@@ -144,37 +143,12 @@ impl std::fmt::Debug for StyleRegistry {
     }
 }
 
-thread_local! {
-    /// The registry that layers read on this thread resolve their types
-    /// against, while a `decode_with` runs.
-    static DECODING: Cell<Option<Arc<StyleRegistry>>> = const { Cell::new(None) };
-}
-
-/// Runs `f`, in which layers read with [`mln_wire`] resolve their type's
-/// name against `registry`, and compound expressions their function's
-/// against its functions (as in [`functions::decode_with`]). Writing needs
-/// no registry. Scopes nest: the innermost wins.
-pub fn decode_with<R>(registry: &Arc<StyleRegistry>, f: impl FnOnce() -> R) -> R {
-    struct Restore(Option<Arc<StyleRegistry>>);
-
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            DECODING.set(self.0.take());
-        }
+/// A context in which layers read with [`mln_wire`] resolve their type's
+/// name against this registry, and compound expressions their function's
+/// against its functions.
+impl mln_wire::Context for &StyleRegistry {
+    fn provide<'a>(&'a mut self, request: &mut mln_wire::Request<'a>) {
+        let registry: &'a StyleRegistry = self;
+        request.give(registry).give::<Functions>(registry.functions());
     }
-
-    let _restore = Restore(DECODING.replace(Some(Arc::clone(registry))));
-    functions::decode_with(registry.functions(), f)
-}
-
-/// The layer type named `name` in the registry of the enclosing
-/// [`decode_with`].
-pub(crate) fn decoding_layer_type(name: &str) -> Result<&'static dyn ErasedStyleLayerType, &'static str> {
-    let registry = DECODING.take();
-    let layer_type = match &registry {
-        None => Err("a layer outside of a decoding session"),
-        Some(registry) => registry.layer_type(name).ok_or("unknown layer type"),
-    };
-    DECODING.set(registry);
-    layer_type
 }

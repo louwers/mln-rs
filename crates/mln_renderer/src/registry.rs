@@ -189,6 +189,17 @@ impl Registry {
     }
 }
 
+/// A context in which the values that the worker codec reads resolve the
+/// registrations they name against this registry: layers' evaluated values
+/// their layer type, and as for a [`StyleRegistry`], layers' style data and
+/// compound expressions.
+impl mln_wire::Context for &Registry {
+    fn provide<'a>(&'a mut self, request: &mut mln_wire::Request<'a>) {
+        let registry: &'a Registry = self;
+        request.give(registry).give::<StyleRegistry>(registry.style()).give::<Functions>(registry.functions());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

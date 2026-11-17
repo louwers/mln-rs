@@ -218,7 +218,7 @@ impl ThroughCodec {
 }
 
 /// What of a layout tells it apart: the encodings of its buckets and feature
-/// index outside a codec's session, with every value in full.
+/// index without a codec's context, with every value in full.
 fn comparable(result: &LayoutResult) -> [Vec<u8>; 2] {
     [fields::encode_buckets(result), result.feature_index.encode_grid()]
 }
@@ -800,7 +800,7 @@ fn malformed_dems_fail() {
     ];
     for (dim, stride, image) in dems {
         let mut bytes = Vec::new();
-        envelope::append(&mut bytes, &Malformed::Dem(dim, stride, RasterEncoding::Mapbox, image)).unwrap();
+        envelope::append(&mut bytes, &Malformed::Dem(dim, stride, RasterEncoding::Mapbox, image), ()).unwrap();
         let JobResult::Failed(_) = MapCodec::new(Registry::with_builtins()).decode_result(Encoded::from(bytes)) else {
             panic!("dim {dim}, stride {stride}: not a failure");
         };

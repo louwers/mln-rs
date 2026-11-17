@@ -2,13 +2,14 @@ use std::sync::Arc;
 
 use mln_expression::range::Range;
 use mln_expression::value::from_expression_values;
+use mln_util::serialization::shared;
 use mln_vec_map::VecSet;
 
 use crate::expression::{
     Dependency, EvaluationContext, Expr, GlobalStateMap, Value, ValueConverter, ZoomCurvePtr,
     collect_global_state_refs, find_zoom_curve_checked,
 };
-use crate::serialization::shared_expression;
+use crate::serialization::SharedExpression;
 
 fn collect_global_state_refs_shared(expression: &Expr) -> Option<Arc<VecSet<String>>> {
     if !expression.has(Dependency::GLOBAL_STATE) {
@@ -173,7 +174,7 @@ impl PropertyExpressionBase {
 impl mln_wire::Wire for PropertyExpressionBase {
     #[inline(never)]
     fn write(&self, w: &mut mln_wire::Writer) {
-        shared_expression::write(&self.expression, w);
+        shared::write::<SharedExpression>(&self.expression, w);
         self.captured_global_state.write(w);
         self.use_integer_zoom.write(w);
         self.global_state_pinned.write(w);
@@ -181,7 +182,7 @@ impl mln_wire::Wire for PropertyExpressionBase {
 
     #[inline(never)]
     fn read(r: &mut mln_wire::Reader<'_>) -> Option<Self> {
-        let mut base = PropertyExpressionBase::new(shared_expression::read(r)?);
+        let mut base = PropertyExpressionBase::new(shared::read::<SharedExpression>(r)?);
         base.captured_global_state = mln_wire::Wire::read(r)?;
         base.use_integer_zoom = mln_wire::Wire::read(r)?;
         base.global_state_pinned = mln_wire::Wire::read(r)?;

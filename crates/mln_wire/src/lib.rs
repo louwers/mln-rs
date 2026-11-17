@@ -12,9 +12,14 @@
 //!
 //! `#[derive(Wire)]` writes the impl for a struct or an enum
 //! ([`mln_wire_derive`]).
+//!
+//! A value that needs more than its bytes to cross, such as the registry
+//! that a name resolves against, gets it from the [`Context`] that the
+//! writer or reader was made with.
 
 extern crate self as mln_wire;
 
+use std::any::{Any, TypeId};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
@@ -22,14 +27,120 @@ use std::time::Duration;
 
 pub use mln_wire_derive::Wire;
 
-/// Where values are written: bytes, and the first value that couldn't be.
-#[derive(Default)]
-pub struct Writer {
-    bytes: Vec<u8>,
-    error: Option<String>,
+/// What values need beyond their bytes to cross: the tables of the values
+/// that crossed before, the registry that names resolve against. A value
+/// asks its writer or reader for the part it needs by the part's type
+/// ([`Writer::context`], [`Reader::context`]).
+///
+/// The parts' types belong to the crates that use them, which this crate
+/// can't name, and the writer and reader are concrete types, since trait
+/// objects write and read themselves through them. So a context gives out
+/// its parts by type, and [`Request`] is the one place that erases them.
+///
+/// Contexts combine as tuples, which ask each member in turn.
+pub trait Context {
+    /// Gives `request` the part it asks for, if this context has it.
+    fn provide<'a>(&'a mut self, request: &mut Request<'a>);
 }
 
-impl Writer {
+/// A request for the part of a [`Context`] of one type.
+pub struct Request<'a> {
+    wanted: TypeId,
+    exclusive: bool,
+    found: Option<Part<'a>>,
+}
+
+enum Part<'a> {
+    Shared(&'a dyn Any),
+    Exclusive(&'a mut dyn Any),
+}
+
+impl<'a> Request<'a> {
+    fn new<T: Any>(exclusive: bool) -> Self {
+        Request { wanted: TypeId::of::<T>(), exclusive, found: None }
+    }
+
+    /// Gives `part`, if the request is for a `T` it can share.
+    pub fn give<T: Any>(&mut self, part: &'a T) -> &mut Self {
+        if self.found.is_none() && !self.exclusive && self.wanted == TypeId::of::<T>() {
+            self.found = Some(Part::Shared(part));
+        }
+        self
+    }
+
+    /// Gives `part`, if the request is for a `T`.
+    pub fn give_mut<T: Any>(&mut self, part: &'a mut T) -> &mut Self {
+        if self.found.is_none() && self.wanted == TypeId::of::<T>() {
+            self.found = Some(Part::Exclusive(part));
+        }
+        self
+    }
+
+    fn shared<T: Any>(self) -> Option<&'a T> {
+        match self.found? {
+            Part::Shared(part) => part.downcast_ref(),
+            Part::Exclusive(part) => part.downcast_ref(),
+        }
+    }
+
+    fn exclusive<T: Any>(self) -> Option<&'a mut T> {
+        match self.found? {
+            Part::Shared(_) => None,
+            Part::Exclusive(part) => part.downcast_mut(),
+        }
+    }
+}
+
+/// The part of `cx` of type `T`.
+fn part<'a, T: Any>(cx: Option<&'a mut (dyn Context + '_)>) -> Option<&'a T> {
+    let mut request = Request::new::<T>(false);
+    cx?.provide(&mut request);
+    request.shared()
+}
+
+/// The part of `cx` of type `T`, to change.
+fn part_mut<'a, T: Any>(cx: Option<&'a mut (dyn Context + '_)>) -> Option<&'a mut T> {
+    let mut request = Request::new::<T>(true);
+    cx?.provide(&mut request);
+    request.exclusive()
+}
+
+/// No parts.
+impl Context for () {
+    fn provide<'a>(&'a mut self, _: &mut Request<'a>) {}
+}
+
+impl<C: Context + ?Sized> Context for &mut C {
+    fn provide<'a>(&'a mut self, request: &mut Request<'a>) {
+        (**self).provide(request);
+    }
+}
+
+impl<A: Context, B: Context> Context for (A, B) {
+    fn provide<'a>(&'a mut self, request: &mut Request<'a>) {
+        self.0.provide(request);
+        self.1.provide(request);
+    }
+}
+
+impl<A: Context, B: Context, C: Context> Context for (A, B, C) {
+    fn provide<'a>(&'a mut self, request: &mut Request<'a>) {
+        self.0.provide(request);
+        self.1.provide(request);
+        self.2.provide(request);
+    }
+}
+
+/// Where values are written: bytes, the first value that couldn't be, and
+/// the context they are written in.
+#[derive(Default)]
+pub struct Writer<'cx> {
+    bytes: Vec<u8>,
+    error: Option<String>,
+    context: Option<&'cx mut (dyn Context + 'cx)>,
+}
+
+impl Writer<'_> {
     #[must_use]
     pub fn new() -> Self {
         Writer::default()
@@ -37,13 +148,29 @@ impl Writer {
 
     #[must_use]
     pub fn with_capacity(capacity: usize) -> Self {
-        Writer { bytes: Vec::with_capacity(capacity), error: None }
+        Writer { bytes: Vec::with_capacity(capacity), error: None, context: None }
     }
 
     /// A writer that appends to `bytes`.
     #[must_use]
     pub fn from_vec(bytes: Vec<u8>) -> Self {
-        Writer { bytes, error: None }
+        Writer { bytes, error: None, context: None }
+    }
+
+    /// This writer, writing in `context`.
+    #[must_use]
+    pub fn with_context<'c>(self, context: &'c mut (dyn Context + 'c)) -> Writer<'c> {
+        Writer { bytes: self.bytes, error: self.error, context: Some(context) }
+    }
+
+    /// The context's part of type `T`, if it has one.
+    pub fn context<T: Any>(&mut self) -> Option<&T> {
+        part(self.context.as_deref_mut())
+    }
+
+    /// The context's part of type `T`, to change, if it has one.
+    pub fn context_mut<T: Any>(&mut self) -> Option<&mut T> {
+        part_mut(self.context.as_deref_mut())
     }
 
     #[inline]
@@ -94,10 +221,12 @@ pub trait Wire: Sized {
     fn read(r: &mut Reader<'_>) -> Option<Self>;
 }
 
-/// Reads values from the start of a slice, and keeps why one couldn't be.
+/// Reads values from the start of a slice, in a context, and keeps why one
+/// couldn't be.
 pub struct Reader<'a> {
     bytes: &'a [u8],
     error: Option<&'static str>,
+    context: Option<&'a mut (dyn Context + 'a)>,
 }
 
 const END: &str = "unexpected end of input";
@@ -105,7 +234,23 @@ const END: &str = "unexpected end of input";
 impl<'a> Reader<'a> {
     #[must_use]
     pub fn new(bytes: &'a [u8]) -> Self {
-        Reader { bytes, error: None }
+        Reader { bytes, error: None, context: None }
+    }
+
+    /// This reader, reading in `context`.
+    #[must_use]
+    pub fn with_context(self, context: &'a mut (dyn Context + 'a)) -> Self {
+        Reader { context: Some(context), ..self }
+    }
+
+    /// The context's part of type `T`, if it has one.
+    pub fn context<T: Any>(&mut self) -> Option<&T> {
+        part(self.context.as_deref_mut())
+    }
+
+    /// The context's part of type `T`, to change, if it has one.
+    pub fn context_mut<T: Any>(&mut self) -> Option<&mut T> {
+        part_mut(self.context.as_deref_mut())
     }
 
     /// The bytes not read yet.
@@ -236,9 +381,21 @@ pub fn to_vec<T: Wire>(value: &T) -> Result<Vec<u8>, String> {
     w.finish()
 }
 
+/// `value` encoded in `context`, or why it can't be.
+pub fn to_vec_in<T: Wire>(value: &T, mut context: impl Context) -> Result<Vec<u8>, String> {
+    let mut w = Writer::new().with_context(&mut context);
+    value.write(&mut w);
+    w.finish()
+}
+
 /// The value that fills `bytes`.
 pub fn from_slice<T: Wire>(bytes: &[u8]) -> Result<T, Error> {
-    let mut r = Reader::new(bytes);
+    from_slice_in(bytes, ())
+}
+
+/// The value that fills `bytes`, read in `context`.
+pub fn from_slice_in<T: Wire>(bytes: &[u8], mut context: impl Context) -> Result<T, Error> {
+    let mut r = Reader::new(bytes).with_context(&mut context);
     match T::read(&mut r) {
         Some(_) if !r.rest().is_empty() => Err(Error("bytes after the end")),
         Some(value) => Ok(value),
@@ -812,6 +969,50 @@ mod tests {
             assert!(from_slice::<Shape>(&bytes[..end]).is_err());
         }
         assert_eq!(from_slice::<Shape>(&[9]), Err(Error("unknown variant")));
+    }
+
+    struct Count(u32);
+
+    impl Context for Count {
+        fn provide<'a>(&'a mut self, request: &mut Request<'a>) {
+            request.give_mut(self);
+        }
+    }
+
+    struct Name(&'static str);
+
+    impl Context for &Name {
+        fn provide<'a>(&'a mut self, request: &mut Request<'a>) {
+            request.give::<Name>(self);
+        }
+    }
+
+    /// Reads as how many it is in the context's count.
+    struct Counted(u32);
+
+    impl Wire for Counted {
+        fn write(&self, _: &mut Writer) {}
+        fn read(r: &mut Reader<'_>) -> Option<Self> {
+            let count = r.context_mut::<Count>()?;
+            count.0 += 1;
+            Some(Counted(count.0))
+        }
+    }
+
+    /// Values get the context's parts by type, from any member of a tuple,
+    /// and a shared part only to read.
+    #[test]
+    fn values_ask_the_context_for_their_parts() {
+        let mut count = Count(0);
+        let read: (Counted, Counted) = from_slice_in(&[], (&Name("name"), &mut count)).unwrap();
+        assert_eq!((read.0.0, read.1.0, count.0), (1, 2, 2));
+        assert!(from_slice::<Counted>(&[]).is_err());
+
+        let mut context = (&Name("name"), ());
+        let mut w = Writer::new().with_context(&mut context);
+        assert_eq!(w.context::<Name>().map(|name| name.0), Some("name"));
+        assert!(w.context_mut::<Name>().is_none());
+        assert!(w.context::<Count>().is_none());
     }
 
     #[test]
