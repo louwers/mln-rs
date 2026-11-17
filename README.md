@@ -28,7 +28,6 @@ mise run web:dev   # serve the browser demo at http://localhost:5173/
 mise run test      # every test, including the render suite
 ```
 
-`mise run desktop` builds and opens `examples/desktop`, a windowed map.
 `mise run web:dev` builds `examples/web` to WebAssembly and serves its page with
 live reload; `mise run web:build` only builds it, into `examples/web/dist`. Both
 take `--profile release` for an optimized build.
