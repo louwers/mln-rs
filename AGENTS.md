@@ -25,8 +25,7 @@ the C API.
 ## Dev tool commands
 
 `mise install` installs the tools that mise.toml pins. `mise tasks` lists every
-task. The justfile keeps the tasks' names from before they moved to mise, each
-running its task. The common ones:
+task. The common ones:
 
 - `mise run test`: every test, including the render suite.
 - `mise run check`, `mise run fix`: the formatters and linters (hk.pkl); `fix`
