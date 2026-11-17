@@ -19,6 +19,7 @@ use mln_util::logging::{Event, Log};
 use mln_util::projection::Projection;
 use mln_util::range::Range;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
+use mln_vec_map::VecMap;
 
 use crate::algorithm::update_renderables::{PrefetchedTile, RenderablesContext, update_renderables};
 use crate::algorithm::update_tile_masks::update_tile_masks;
@@ -124,11 +125,11 @@ pub(crate) struct RenderedTile<'a> {
 
 pub(crate) struct SourceTiles {
     pub(crate) info: SourceInfo,
-    tiles: BTreeMap<OverscaledTileID, Slot>,
+    tiles: VecMap<OverscaledTileID, Slot>,
     /// Stamps the tiles that enter the cache.
     cache_clock: u64,
     cache_size: usize,
-    rendered: BTreeMap<UnwrappedTileID, Rendered>,
+    rendered: VecMap<UnwrappedTileID, Rendered>,
     prev_lng: f32,
     fading_tiles: bool,
     cache_enabled: bool,
@@ -191,7 +192,7 @@ impl WantedTiles {
 struct CoverContext<'s, 'a, 'p> {
     source: &'s mut SourceTiles,
     ctx: &'s mut StoreContext,
-    previously_rendered: &'s mut BTreeMap<UnwrappedTileID, Rendered>,
+    previously_rendered: &'s mut VecMap<UnwrappedTileID, Rendered>,
     retain: &'s mut BTreeSet<OverscaledTileID>,
     style: &'s Arc<SourceStyle>,
     update: &'s CoverUpdate<'a, 'p>,
@@ -349,10 +350,10 @@ impl SourceTiles {
     pub(crate) fn new(info: SourceInfo) -> Self {
         SourceTiles {
             info,
-            tiles: BTreeMap::new(),
+            tiles: VecMap::default(),
             cache_clock: 0,
             cache_size: 0,
-            rendered: BTreeMap::new(),
+            rendered: VecMap::default(),
             prev_lng: 0.0,
             fading_tiles: false,
             cache_enabled: true,
@@ -1250,7 +1251,7 @@ impl SourceTiles {
             self.tiles.insert(id, slot);
         }
 
-        let mut new_render_tiles: BTreeMap<UnwrappedTileID, Rendered> = BTreeMap::new();
+        let mut new_render_tiles: VecMap<UnwrappedTileID, Rendered> = VecMap::default();
         for (id, entry) in std::mem::take(&mut self.rendered) {
             let new_id = id.unwrap_to(id.wrap.wrapping_add(wrap_delta));
             let key = key_map.get(&entry.key).copied().unwrap_or(entry.key);
