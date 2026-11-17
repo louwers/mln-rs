@@ -1,18 +1,13 @@
-// Where the line shaders read the expression UBO (`Caps::line_expressions`),
-// it is all zeros and no property is marked as evaluated on the GPU, as in
-// C++ with GPU expressions off (its default).
-
 use std::sync::Arc;
 
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::line_layer_ubo::{
-    LINE_EXPRESSION_UBO_SIZE, LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineGradientDrawableUBO,
-    LinePatternDrawableUBO, LinePatternTilePropsUBO, LineSDFDrawableUBO, LineSDFTilePropsUBO, LineTilePropsUnionUBO,
-    line_expression_mask,
+    LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineGradientDrawableUBO, LinePatternDrawableUBO,
+    LinePatternTilePropsUBO, LineSDFDrawableUBO, LineSDFTilePropsUBO, LineTilePropsUnionUBO, line_expression_mask,
 };
 use mln_gfx::shaders::shader_defines::{
-    ID_LINE_DASH_TEXTURE, ID_LINE_DRAWABLE_UBO, ID_LINE_EVALUATED_PROPS_UBO, ID_LINE_EXPRESSION_UBO,
-    ID_LINE_IMAGE_TEXTURE, ID_LINE_TILE_PROPS_UBO,
+    ID_LINE_DASH_TEXTURE, ID_LINE_DRAWABLE_UBO, ID_LINE_EVALUATED_PROPS_UBO, ID_LINE_IMAGE_TEXTURE,
+    ID_LINE_TILE_PROPS_UBO,
 };
 use mln_style::layers::{Line, LinePaintProperties};
 use mln_util::logging::{Event, Log};
@@ -74,8 +69,6 @@ pub(crate) struct LineLayerTweaker {
     evaluated_props_uniform_buffer: Option<UniformBufferPtr>,
     drawable_uniform_buffer: Option<UniformBufferPtr>,
     tile_props_uniform_buffer: Option<UniformBufferPtr>,
-    /// The `LineExpressionUBO`, where the line shaders read it.
-    expression_uniform_buffer: Option<UniformBufferPtr>,
     expression_mask: u32,
 }
 
@@ -86,7 +79,6 @@ impl LineLayerTweaker {
             evaluated_props_uniform_buffer: None,
             drawable_uniform_buffer: None,
             tile_props_uniform_buffer: None,
-            expression_uniform_buffer: None,
             expression_mask: line_expression_mask::NONE,
         }
     }
@@ -121,35 +113,30 @@ impl LayerTweaker for LineLayerTweaker {
         let state = parameters.state;
         let pixel_scale = state.get_projection().pixel_scale(state) as f32;
 
-        let gpu_expressions = context.caps().line_expressions;
         if self.evaluated_props_uniform_buffer.is_none() || self.base.properties_updated {
             use line_expression_mask::{BLUR, COLOR, FLOOR_WIDTH, GAP_WIDTH, NONE, OFFSET, OPACITY, WIDTH};
+            // The mask marks the constant properties.
             self.expression_mask = NONE;
-            // Where the shaders read the expression UBO, the mask marks the
-            // properties evaluated on the GPU (none, see the top of the
-            // file); elsewhere, the constant ones.
-            if !gpu_expressions {
-                if evaluated.line_color.is_constant() {
-                    self.expression_mask |= COLOR;
-                }
-                if evaluated.line_blur.is_constant() {
-                    self.expression_mask |= BLUR;
-                }
-                if evaluated.line_opacity.is_constant() {
-                    self.expression_mask |= OPACITY;
-                }
-                if evaluated.line_gap_width.is_constant() {
-                    self.expression_mask |= GAP_WIDTH;
-                }
-                if evaluated.line_offset.is_constant() {
-                    self.expression_mask |= OFFSET;
-                }
-                if evaluated.line_width.is_constant() {
-                    self.expression_mask |= WIDTH;
-                }
-                if evaluated.line_floor_width.is_constant() {
-                    self.expression_mask |= FLOOR_WIDTH;
-                }
+            if evaluated.line_color.is_constant() {
+                self.expression_mask |= COLOR;
+            }
+            if evaluated.line_blur.is_constant() {
+                self.expression_mask |= BLUR;
+            }
+            if evaluated.line_opacity.is_constant() {
+                self.expression_mask |= OPACITY;
+            }
+            if evaluated.line_gap_width.is_constant() {
+                self.expression_mask |= GAP_WIDTH;
+            }
+            if evaluated.line_offset.is_constant() {
+                self.expression_mask |= OFFSET;
+            }
+            if evaluated.line_width.is_constant() {
+                self.expression_mask |= WIDTH;
+            }
+            if evaluated.line_floor_width.is_constant() {
+                self.expression_mask |= FLOOR_WIDTH;
             }
 
             let props_ubo = LineEvaluatedPropsUBO {
@@ -169,12 +156,6 @@ impl LayerTweaker for LineLayerTweaker {
         layer_group
             .mutable_uniform_buffers()
             .set(ID_LINE_EVALUATED_PROPS_UBO, self.evaluated_props_uniform_buffer.clone());
-        if gpu_expressions {
-            if self.expression_uniform_buffer.is_none() {
-                self.expression_uniform_buffer = context.create_uniform_buffer(&[0; LINE_EXPRESSION_UBO_SIZE]);
-            }
-            layer_group.mutable_uniform_buffers().set(ID_LINE_EXPRESSION_UBO, self.expression_uniform_buffer.clone());
-        }
 
         let mut i: u32 = 0;
         let count = layer_group.drawable_count();

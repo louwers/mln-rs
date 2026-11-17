@@ -419,7 +419,6 @@ impl D3d12Gpu {
             clip_depth: ClipDepthRange::ZeroToOne,
             render_target_depth: None,
             clear_stencil_with_pass: true,
-            line_expressions: false,
             cpu_rasterizer: device.is_software(),
             max_line_width: 1.0,
         };
