@@ -1195,11 +1195,9 @@ impl Gpu for GlGpu {
         data: &mln_util::host_bytes::HostBytes,
     ) -> Result<(), GpuError> {
         let entry = self.buffers.get(buffer).ok_or(GpuError::UnknownId("buffer"))?;
+        validation::check_write(offset, data.len().next_multiple_of(4), entry.size)?;
         let len = data.len() as u64;
         let end = offset + len.next_multiple_of(4);
-        if end > entry.size {
-            return Err(GpuError::Invalid(format!("a write to bytes {offset}..{end} of a buffer of {}", entry.size)));
-        }
         let (usage, object) = (entry.usage, entry.native.object.get().filter(|_| entry.native.elements.is_none()));
         let (Some(object), Some(array)) = (object, data.array()) else {
             let mut bytes = data.to_pod_vec::<u8>();

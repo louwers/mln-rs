@@ -580,11 +580,8 @@ impl Gpu for WebGpu {
         data: &mln_util::host_bytes::HostBytes,
     ) -> Result<(), GpuError> {
         let entry = self.buffers.get_mut(buffer).ok_or(GpuError::UnknownId("buffer"))?;
+        validation::check_write(offset, data.len().next_multiple_of(4), entry.size)?;
         let len = data.len() as u64;
-        let end = offset + len.next_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT);
-        if end > entry.size {
-            return Err(GpuError::Invalid(format!("a write to bytes {offset}..{end} of a buffer of {}", entry.size)));
-        }
         // A later write past these bytes pads only past them.
         if let Some(written) = &mut entry.written {
             *written = (*written).max(offset + len);
