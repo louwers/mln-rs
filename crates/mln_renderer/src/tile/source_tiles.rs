@@ -872,40 +872,27 @@ impl SourceTiles {
         self.release(id, ctx);
     }
 
-    /// The cached tiles' ids, oldest first.
-    fn cached(&self) -> Vec<OverscaledTileID> {
-        let mut cached: Vec<(u64, OverscaledTileID)> = self
-            .tiles
+    /// The cached tile that entered the cache first.
+    fn oldest_cached(&self) -> Option<OverscaledTileID> {
+        self.tiles
             .values()
             .filter_map(|slot| match slot.place {
                 Place::Cached { since } => Some((since, slot.tile.id)),
                 Place::Cover { .. } => None,
             })
-            .collect();
-        cached.sort_unstable();
-        cached.into_iter().map(|(_, id)| id).collect()
+            .min_by_key(|(since, _)| *since)
+            .map(|(_, id)| id)
     }
 
-    /// Evicts the oldest cached tiles past the cache's size.
+    /// Evicts the oldest cached tiles past the cache's size, scanning the
+    /// slots once per eviction: a trim usually evicts one tile.
     fn cache_trim(&mut self, ctx: &mut StoreContext) {
-        let count = self.tiles.values().filter(|slot| slot.place.is_cached()).count();
-        let excess = count.saturating_sub(self.cache_size);
-        if excess == 0 {
-            return;
-        }
-        let mut cached: Vec<(u64, OverscaledTileID)> = self
-            .tiles
-            .values()
-            .filter_map(|slot| match slot.place {
-                Place::Cached { since } => Some((since, slot.tile.id)),
-                Place::Cover { .. } => None,
-            })
-            .collect();
-        cached.select_nth_unstable(excess - 1);
-        let oldest = &mut cached[..excess];
-        oldest.sort_unstable();
-        for (_, id) in oldest.iter() {
-            self.evict(id, ctx);
+        let mut count = self.tiles.values().filter(|slot| slot.place.is_cached()).count();
+        while count > self.cache_size
+            && let Some(oldest) = self.oldest_cached()
+        {
+            self.evict(&oldest, ctx);
+            count -= 1;
         }
     }
 
@@ -973,7 +960,9 @@ impl SourceTiles {
     }
 
     fn cache_clear(&mut self, ctx: &mut StoreContext) {
-        for id in self.cached() {
+        let cached: Vec<OverscaledTileID> =
+            self.tiles.values().filter(|slot| slot.place.is_cached()).map(|slot| slot.tile.id).collect();
+        for id in cached {
             self.evict(&id, ctx);
         }
     }
