@@ -11,6 +11,7 @@
 
 use std::collections::VecDeque;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::ThreadId;
 
 use parking_lot::{Condvar, Mutex};
@@ -71,6 +72,9 @@ struct Shared {
     max_threads: usize,
     /// The workers started so far.
     threads: Mutex<Threads>,
+    /// Whether the pool stopped. Set under the ring's lock, which the workers
+    /// wait on, and read without it by threads that hold a lane's lock.
+    stopped: AtomicBool,
 }
 
 #[derive(Default)]
@@ -90,7 +94,6 @@ struct Ring {
     started: usize,
     /// The workers waiting for a task.
     idle: usize,
-    stopped: bool,
 }
 
 #[derive(Default)]
@@ -244,7 +247,17 @@ impl TaskGroup {
         let lane = &self.lane;
         let mut state = lane.state.lock();
         loop {
-            if let Some(task) = state.start() {
+            if shared.is_stopped() {
+                // A stopped pool starts no task: those queued drop.
+                let dropped = std::mem::take(&mut state.tasks);
+                drop(state);
+                drop(dropped);
+                state = lane.state.lock();
+                if state.running == 0 || !waits {
+                    return;
+                }
+                lane.ended.wait(&mut state);
+            } else if let Some(task) = state.start() {
                 drop(state);
                 // As on a worker, a task that panics ends as any other.
                 let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| shared.run(lane, task)));
@@ -273,11 +286,12 @@ impl Shared {
             waker: Mutex::new(None),
             max_threads,
             threads: Mutex::default(),
+            stopped: AtomicBool::new(false),
         }
     }
 
     fn push(self: &Arc<Self>, lane: &Arc<Lane>, task: Task) {
-        if self.ring.lock().stopped {
+        if self.is_stopped() {
             return;
         }
         let (joins, startable) = {
@@ -292,7 +306,7 @@ impl Shared {
             let mut ring = self.ring.lock();
             let was_idle = joins && self.enter(&mut ring, lane);
             // Every worker is busy: another starts, if the pool may run one.
-            let start = startable && ring.idle == 0 && !ring.stopped && ring.started < self.max_threads;
+            let start = startable && ring.idle == 0 && !self.is_stopped() && ring.started < self.max_threads;
             ring.started += usize::from(start);
             (was_idle, start)
         };
@@ -325,6 +339,9 @@ impl Shared {
     /// one, which goes to the back if it may start another. The lanes before
     /// it, which may not, leave the ring. Its lane counts it running.
     fn next(&self, ring: &mut Ring) -> Option<(Arc<Lane>, Task)> {
+        if self.is_stopped() {
+            return None;
+        }
         while let Some(lane) = ring.lanes.pop_front() {
             let mut state = lane.state.lock();
             let Some(task) = state.start() else {
@@ -355,12 +372,16 @@ impl Shared {
         impl Drop for Ended<'_> {
             fn drop(&mut self) {
                 let Ended(shared, lane) = *self;
-                let joins = {
+                let (joins, dropped) = {
                     let mut state = lane.state.lock();
                     state.running -= 1;
-                    state.join()
+                    // On a stopped pool, the tasks a serial lane held back
+                    // behind this one drop rather than start.
+                    let dropped = if shared.is_stopped() { std::mem::take(&mut state.tasks) } else { VecDeque::new() };
+                    (state.join(), dropped)
                 };
                 lane.ended.notify_all();
+                drop(dropped);
                 if joins {
                     // The ring's lock is released before the waker, which may
                     // spawn.
@@ -375,12 +396,20 @@ impl Shared {
         task();
     }
 
+    /// Whether the pool stopped.
+    fn is_stopped(&self) -> bool {
+        self.stopped.load(Ordering::SeqCst)
+    }
+
     /// Stops the workers once their tasks return, and waits for them unless
     /// this runs on a library thread (`thread::Joined`), such as one of them.
     /// The tasks waiting in the ring drop, and those spawned later drop at
     /// once.
     fn stop(&self) {
-        self.ring.lock().stopped = true;
+        {
+            let _ring = self.ring.lock();
+            self.stopped.store(true, Ordering::SeqCst);
+        }
         self.work.notify_all();
         // Joined outside the lock, which a task that spawns takes.
         let threads = std::mem::take(&mut *self.threads.lock());
@@ -421,7 +450,7 @@ impl Shared {
             let next = {
                 let mut ring = self.ring.lock();
                 loop {
-                    if ring.stopped {
+                    if self.is_stopped() {
                         return;
                     }
                     if let Some(next) = self.next(&mut ring) {
@@ -790,6 +819,31 @@ mod tests {
         let (later, dropped) = mpsc::channel::<()>();
         pool.spawn(move || later.send(()).unwrap());
         assert!(dropped.recv_timeout(Duration::from_secs(1)).is_err(), "a task ran after the shutdown");
+    }
+
+    #[test]
+    fn a_shut_down_drops_the_tasks_behind_a_running_serial_task() {
+        let pool = Pool::new(1);
+        let group = TaskGroup::serial(&pool);
+        let (started, start) = mpsc::channel();
+        let (release, blocked) = mpsc::channel::<()>();
+        group.spawn(move || {
+            started.send(()).unwrap();
+            let _ = blocked.recv();
+        });
+        start.recv_timeout(Duration::from_secs(10)).unwrap();
+        let ran = Arc::new(AtomicUsize::new(0));
+        let r = Arc::clone(&ran);
+        group.spawn(move || {
+            r.fetch_add(1, Ordering::SeqCst);
+        });
+        // From a library thread, as a runtime's: it doesn't wait for the
+        // running task.
+        let shut = pool.clone();
+        crate::thread::spawn("shut down", move || shut.shut_down()).unwrap().join().unwrap();
+        drop(release);
+        group.wait();
+        assert_eq!(ran.load(Ordering::SeqCst), 0);
     }
 
     #[test]
