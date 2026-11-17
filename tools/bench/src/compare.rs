@@ -23,7 +23,9 @@
 //! moves code, and how far each scenario's instructions move there counts
 //! in their spread.
 //! Times: context only, unless `--rounds` asks for interleaved rounds, which
-//! a rank test then judges.
+//! a rank test then judges. Rounds run alone among the machine's benchmark
+//! runs ([`host::measuring`]), and not while its load is over
+//! `--max-load`.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -38,8 +40,8 @@ use crate::environment::Environment;
 use crate::report::{Run, format_value, table};
 use crate::runner::{run_in_process, warm_up};
 use crate::scenario::{MetricKind, Scenario, Unit};
-use crate::scenarios;
 use crate::stats::{holm, mann_whitney, median, range};
+use crate::{host, scenarios};
 
 /// The base's runs a count's spread needs at least.
 const SPREAD_RUNS: usize = 3;
@@ -68,6 +70,8 @@ pub(crate) struct Options {
     /// The smallest change of a time's median that gets a verdict, in
     /// percent.
     pub(crate) time_threshold: f64,
+    /// The load average over which rounds don't run.
+    pub(crate) max_load: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -118,7 +122,18 @@ pub(crate) struct Comparison {
     pub(crate) threshold: f64,
     pub(crate) instructions_threshold: f64,
     pub(crate) time_threshold: f64,
+    /// With rounds, where the system keeps a load average: the machine's
+    /// before the rounds and after them. The one after counts the rounds'
+    /// own work.
+    pub(crate) load: Option<Load>,
     pub(crate) scenarios: Vec<ScenarioComparison>,
+}
+
+/// The machine's load average around a comparison's rounds.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub(crate) struct Load {
+    pub(crate) before: f64,
+    pub(crate) after: f64,
 }
 
 impl Comparison {
@@ -180,6 +195,18 @@ pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
     eprintln!("mln-bench: building {} ({}) again, with its code at other addresses", options.base, short(&commit));
     let probe = build(&root, &tree.join("Cargo.toml"), Some(&base_target), Some("layout-probe"))?;
     let probe = keep_binary(&probe, &work.join("bin/probe"))?;
+
+    let _measuring = host::measuring(options.rounds.is_some())?;
+    let load_before = options.rounds.and_then(|_| host::load_average());
+    if let Some(load) = load_before
+        && load > options.max_load
+    {
+        return Err(format!(
+            "the machine's load average is {load:.1}, over --max-load {:.1}: times measured now would mislead. \
+             Run the rounds when the machine is quiet, or compare counts without --rounds",
+            options.max_load
+        ));
+    }
 
     let samples_path = work.join("samples").join(format!("{commit}.json"));
     let mut samples = read_samples(&samples_path);
@@ -262,6 +289,7 @@ pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
         threshold: options.threshold,
         instructions_threshold: options.instructions_threshold,
         time_threshold: options.time_threshold,
+        load: load_before.zip(host::load_average()).map(|(before, after)| Load { before, after }),
         scenarios: comparisons,
     })
 }
@@ -474,6 +502,13 @@ pub(crate) fn text(comparison: &Comparison) -> String {
         None => {
             let _ = writeln!(out, "times: context only, from one run per side (--rounds <n> tests them)");
         }
+    }
+    if let Some(load) = comparison.load {
+        let _ = writeln!(
+            out,
+            "load average: {:.1} before the rounds, {:.1} after, which counts the rounds' own work",
+            load.before, load.after
+        );
     }
     let mut environments: Vec<&Environment> = Vec::new();
     for scenario in &comparison.scenarios {
@@ -766,6 +801,7 @@ mod tests {
             threshold: 0.25,
             instructions_threshold: 1.0,
             time_threshold: 2.0,
+            max_load: 4.0,
         }
     }
 

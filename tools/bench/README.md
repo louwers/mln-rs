@@ -242,7 +242,15 @@ when a two-sided Mann-Whitney U test, Holm-adjusted over every scenario
 compared, gives p < 0.05 and the median moves by more than `--time-threshold`
 (2% by default); its other times are context. The fewest rounds that can give a
 verdict grow with the scenarios compared: 4 for one scenario, 7 for all of them.
-Compare times on a quiet machine, and only within one configuration.
+Compare times only within one configuration.
+
+Rounds need a quiet machine, and several sessions often measure on one. Every
+`mln-bench` that measures holds one lock of the user's: runs that judge only
+counts share it and overlap freely, and rounds take it alone, waiting for the
+measurements under way. The lock doesn't cover other sessions' builds and tests,
+so rounds don't start while the machine's load average is over `--max-load` (a
+quarter of its cores by default), and the report shows the load before and after
+them.
 
 ### Environments
 

@@ -4,6 +4,7 @@ mod aslr;
 mod compare;
 mod environment;
 mod fixtures;
+mod host;
 mod meter;
 mod report;
 mod runner;
@@ -30,7 +31,7 @@ const USAGE: &str = "usage:
   mln-bench run [--filter <s>]... [--images <dir>] [--json]
   mln-bench compare <ref> [--filter <s>]... [--rounds <n>] [--threshold <percent>]
                           [--instructions-threshold <percent>]
-                          [--time-threshold <percent>] [--json]
+                          [--time-threshold <percent>] [--max-load <n>] [--json]
   mln-bench fixtures [--from <dir>]
 
 --filter keeps the scenarios whose names contain one of the strings.
@@ -42,7 +43,9 @@ compare builds this checkout's harness against <ref> and compares the two
 --threshold (0.25% by default), or --instructions-threshold for instructions
 (1%), and by over twice its spread. --rounds runs each side n times, and
 gives the wall time a verdict when a rank test finds a change over
---time-threshold (2%).
+--time-threshold (2%). Rounds run alone among the machine's benchmark runs,
+and not at all while its load average is over --max-load (a quarter of its
+cores by default).
 fixtures installs the snapshot that tools/bench/fixtures.json names, from its
 base URL or from a directory laid out as it is.";
 
@@ -74,6 +77,7 @@ struct Options {
     threshold: f64,
     instructions_threshold: f64,
     time_threshold: f64,
+    max_load: Option<f64>,
     from: Option<PathBuf>,
     images: Option<PathBuf>,
     /// exec's: the file the scenario writes its last image to.
@@ -89,6 +93,7 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
         threshold: 0.25,
         instructions_threshold: 1.0,
         time_threshold: 2.0,
+        max_load: None,
         from: None,
         images: None,
         image: None,
@@ -105,6 +110,7 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
             "--threshold" => options.threshold = number(value()?)?,
             "--instructions-threshold" => options.instructions_threshold = number(value()?)?,
             "--time-threshold" => options.time_threshold = number(value()?)?,
+            "--max-load" => options.max_load = Some(number(value()?)?),
             "--from" => options.from = Some(PathBuf::from(value()?)),
             "--images" => options.images = Some(PathBuf::from(value()?)),
             "--image" => options.image = Some(PathBuf::from(value()?)),
@@ -154,6 +160,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
             if let Some(dir) = &options.images {
                 std::fs::create_dir_all(dir).map_err(|error| format!("{}: {error}", dir.display()))?;
             }
+            let _measuring = host::measuring(false)?;
             runner::warm_up(&binary, &selected)?;
             let mut runs = Vec::new();
             for scenario in selected {
@@ -177,6 +184,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 threshold: options.threshold,
                 instructions_threshold: options.instructions_threshold,
                 time_threshold: options.time_threshold,
+                max_load: options.max_load.unwrap_or_else(host::default_max_load),
             })?;
             if options.json {
                 println!("{}", serde_json::to_string_pretty(&comparison).map_err(|error| error.to_string())?);

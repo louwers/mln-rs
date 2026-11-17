@@ -113,6 +113,16 @@ fn cache_root_from(var: impl Fn(&str) -> Option<OsString>) -> Result<PathBuf, St
     if let Some(dir) = var(CACHE_VARIABLE) {
         return Ok(dir.into());
     }
+    Ok(user_cache_from(var)?.join("bench-fixtures"))
+}
+
+/// `mln-rs` in the user's cache directory, which every checkout of the user
+/// shares.
+pub(crate) fn user_cache() -> Result<PathBuf, String> {
+    user_cache_from(|name| std::env::var_os(name).filter(|value| !value.is_empty()))
+}
+
+fn user_cache_from(var: impl Fn(&str) -> Option<OsString>) -> Result<PathBuf, String> {
     let home = || var("HOME").map(PathBuf::from).ok_or("HOME isn't set");
     let cache = if cfg!(target_os = "macos") {
         home()?.join("Library/Caches")
@@ -124,7 +134,7 @@ fn cache_root_from(var: impl Fn(&str) -> Option<OsString>) -> Result<PathBuf, St
             None => home()?.join(".cache"),
         }
     };
-    Ok(cache.join("mln-rs").join("bench-fixtures"))
+    Ok(cache.join("mln-rs"))
 }
 
 /// Where a snapshot's files come from.
