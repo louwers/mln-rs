@@ -10,8 +10,10 @@ mln-rs does for a map larger or smaller, and by how much. One binary,
   such as loading or drawing frames: `macro/<operation>/<workload>`.
 
 A scenario whose cost grows with its input runs at two sizes, named by a last
-segment (`micro/geojson/parse/small`, `.../large`), so that a change in how its
-cost grows shows as a changed ratio between the two.
+segment (`micro/geojson/parse/small` and `.../large`, or `sparse` and `dense`
+for a tile), so that a change in how its cost grows shows as a changed ratio
+between the two. A scenario that repeats a unit of work reports its counts per
+unit too, which are alike at both sizes while the cost grows in proportion.
 
 Each scenario does the same work on every run and every machine: fixed frame
 counts, cameras chosen by frame index, data generated from a fixed seed, and no
@@ -37,24 +39,56 @@ unless `MLN_RENDER_BACKEND` names another backend (`metal`, `vulkan`, `d3d12`,
 
 ## Scenarios
 
-| scenario                     | question                                                                                                | one unit                                                                              |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `micro/expression/evaluate`  | What does evaluating a style's kinds of expressions over features cost?                                 | 12 expressions over 50,000 features                                                   |
-| `macro/load/street`          | What does showing a city's streets from nothing take, until the first complete frame?                   | a load: the map, renderer and workers start; the style, tiles, glyphs and sprite load |
-| `macro/load/globe`           | What does showing the whole world on the globe from nothing take, until the first complete frame?       | a load                                                                                |
-| `macro/load/cjk`             | What does showing a city labelled in Japanese script from nothing take, until the first complete frame? | a load                                                                                |
-| `macro/frame/street`         | What does a frame of a city's streets cost while the camera pans, turns and tilts over loaded tiles?    | a frame: the update, symbol placement, draw calls and the GPU finishing it            |
-| `macro/frame/globe`          | What does a frame of the globe cost while it turns and tilts over loaded tiles?                         | a frame                                                                               |
-| `macro/navigate/street`      | What does a flight into a city's streets and back out cost, with tiles arriving while it flies?         | a frame, with the layout of what arrived for it                                       |
-| `macro/update/geojson`       | What does replacing a GeoJSON source's data cost, until the map shows the new data?                     | an update of 2,000 points: parsed, indexed, tiled, laid out and shown                 |
-| `macro/update/layers`        | What does adding a batch of layers to a city's map, then removing them, cost until the map shows each?  | a batch of 20 layers added or removed, and the tiles laid out again                   |
-| `macro/update/paint`         | What does setting a layer's paint property cost, until the map shows the new value?                     | an edit, and the frames of its transition                                             |
-| `macro/update/feature-state` | What does a frame cost that moves a hover state from one feature to another?                            | a frame that moves the hover state                                                    |
-| `macro/update/images`        | What does adding the images that visible symbols use cost, until the map shows them?                    | 24 images added, and the tiles that use them laid out again                           |
-| `macro/tile-server/street`   | What does a tile server's renderer spend on each new tile of a city, from zoom 7 to 14?                 | a tile: laid out, placed, drawn and read back by a reused renderer                    |
+| scenario                             | question                                                                                                | one unit                                                                              |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `micro/style/parse/small`            | What does parsing a style document of 110 layers cost?                                                  | a parse of Liberty                                                                    |
+| `micro/style/parse/large`            | What does parsing a style document of 440 layers cost?                                                  | a parse of Liberty with its layers four times over                                    |
+| `micro/style/edit/small`             | What do an application's edits to a style of 110 layers cost, each compared with the version before?    | an edit, and the comparison of the two versions                                       |
+| `micro/style/edit/large`             | What do an application's edits to a style of 440 layers cost, each compared with the version before?    | an edit                                                                               |
+| `micro/expression/parse/liberty`     | What does parsing a style's filters and property expressions cost?                                      | one of Liberty's 234 expressions, parsed into its property's type                     |
+| `micro/expression/evaluate/liberty`  | What does evaluating a style's filters and property expressions over a tile's features cost?            | an expression evaluated on a feature                                                  |
+| `micro/decode/mvt/sparse`            | What does decoding a sparse MVT tile cost, its features selected by a style's filters?                  | a tile of 186 features                                                                |
+| `micro/decode/mvt/dense`             | What does decoding a dense MVT tile cost, its features selected by a style's filters?                   | a tile of 6,919 features                                                              |
+| `micro/decode/mlt/sparse`            | What does decoding a sparse MLT tile cost, its features selected by a style's filters?                  | a tile                                                                                |
+| `micro/decode/mlt/dense`             | What does decoding a dense MLT tile cost, its features selected by a style's filters?                   | a tile                                                                                |
+| `micro/geojson/parse/small`          | What does parsing GeoJSON text of 1.5 MB cost?                                                          | a KB of text: 33 countries' borders                                                   |
+| `micro/geojson/parse/large`          | What does parsing GeoJSON text of 13 MB cost?                                                           | a KB of text: 258 countries' borders                                                  |
+| `micro/geojson/cut/small`            | What does cutting the world's tiles of zooms 0 to 4 from 33 countries' borders cost?                    | a KB of the text the data is built from                                               |
+| `micro/geojson/cut/large`            | What does cutting the world's tiles of zooms 0 to 4 from 258 countries' borders cost?                   | a KB of text                                                                          |
+| `micro/layout/fill/sparse`           | What does laying out a sparse tile's fill layers cost?                                                  | a tile laid out by Liberty's 16 fill layers                                           |
+| `micro/layout/fill/dense`            | What does laying out a dense tile's fill layers cost?                                                   | a tile                                                                                |
+| `micro/layout/line/sparse`           | What does laying out a sparse tile's line layers cost?                                                  | a tile laid out by Liberty's 67 line layers                                           |
+| `micro/layout/line/dense`            | What does laying out a dense tile's line layers cost?                                                   | a tile                                                                                |
+| `micro/layout/fill-extrusion/sparse` | What does laying out a sparse tile's extruded buildings cost?                                           | a tile laid out by Liberty's fill-extrusion layer                                     |
+| `micro/layout/fill-extrusion/dense`  | What does laying out a dense tile's extruded buildings cost?                                            | a tile                                                                                |
+| `micro/layout/symbol/sparse`         | What does laying out a sparse tile's labels and icons cost?                                             | a tile laid out by Liberty's 25 symbol layers                                         |
+| `micro/layout/symbol/dense`          | What does laying out a dense tile's labels and icons cost?                                              | a tile                                                                                |
+| `macro/load/street`                  | What does showing a city's streets from nothing take, until the first complete frame?                   | a load: the map, renderer and workers start; the style, tiles, glyphs and sprite load |
+| `macro/load/globe`                   | What does showing the whole world on the globe from nothing take, until the first complete frame?       | a load                                                                                |
+| `macro/load/cjk`                     | What does showing a city labelled in Japanese script from nothing take, until the first complete frame? | a load                                                                                |
+| `macro/frame/street`                 | What does a frame of a city's streets cost while the camera pans, turns and tilts over loaded tiles?    | a frame: the update, symbol placement, draw calls and the GPU finishing it            |
+| `macro/frame/globe`                  | What does a frame of the globe cost while it turns and tilts over loaded tiles?                         | a frame                                                                               |
+| `macro/navigate/street`              | What does a flight into a city's streets and back out cost, with tiles arriving while it flies?         | a frame, with the layout of what arrived for it                                       |
+| `macro/update/geojson`               | What does replacing a GeoJSON source's data cost, until the map shows the new data?                     | an update of 2,000 points: parsed, indexed, tiled, laid out and shown                 |
+| `macro/update/layers`                | What does adding a batch of layers to a city's map, then removing them, cost until the map shows each?  | a batch of 20 layers added or removed, and the tiles laid out again                   |
+| `macro/update/paint`                 | What does setting a layer's paint property cost, until the map shows the new value?                     | an edit, and the frames of its transition                                             |
+| `macro/update/feature-state`         | What does a frame cost that moves a hover state from one feature to another?                            | a frame that moves the hover state                                                    |
+| `macro/update/images`                | What does adding the images that visible symbols use cost, until the map shows them?                    | 24 images added, and the tiles that use them laid out again                           |
+| `macro/tile-server/street`           | What does a tile server's renderer spend on each new tile of a city, from zoom 7 to 14?                 | a tile: laid out, placed, drawn and read back by a reused renderer                    |
 
 `mise run bench:list` prints the questions, and each scenario's doc comment says
 what it runs.
+
+The micro scenarios read what a map over the fixtures reads: Liberty's style
+document, its expressions, and two tiles of zoom 14 from the street tiles, as
+MVT and as MLT: the densest, in San Francisco's South of Market, and a sparse
+one at Candlestick Point on the bay's shore, with every kind of feature but few
+of them. The style and layout scenarios run on the style as Liberty is and with
+its layers four times over, a style of many layers. The GeoJSON scenarios read
+Natural Earth's countries, and every eighth of them for the small size. A layout
+scenario lays the tile out by the style's layers of one type, as a tile worker's
+job does once the tile's glyphs and images are resolved; it reports the tile's
+buckets as its retained heap.
 
 The load scenarios start a map over the fixtures (Liberty over the street, world
 or Tokyo tiles) at 1024 x 768 and end at its first frame with nothing missing;
@@ -200,11 +234,11 @@ with a CPU rasterizer's.
 ## Reading a report
 
 ```text
-micro/expression/evaluate (counts: 3 base runs, 1 of this checkout)
+micro/expression/evaluate/liberty (counts: 3 base runs, 1 of this checkout)
   metric             base      this  change  spread    verdict
-  instructions     1.13 G    1.15 G   +2.2%   0.16%      WORSE
-  allocations       664 k     676 k   +1.8%   0.00%      WORSE
-  wall            56.8 ms   54.9 ms   -3.3%          (context)
+  instructions     1.01 G    1.03 G   +2.2%   0.01%      WORSE
+  allocations       687 k     699 k   +1.8%   0.00%      WORSE
+  wall            39.4 ms   40.6 ms   +3.0%          (context)
 ```
 
 `base` is the ref's median, `this` this checkout's, `change` the difference as a
@@ -221,16 +255,16 @@ module of its stage (`src/scenarios/micro/`) or operation
 
 ```rust
 pub(crate) const SCENARIOS: &[Scenario] = &[Scenario {
-    name: "micro/expression/evaluate",
+    name: "micro/expression/evaluate/liberty",
     kind: Kind::Micro,
-    question: "What does evaluating a style's kinds of expressions over features cost?",
+    question: "What does evaluating a style's filters and property expressions over a tile's features cost?",
     run: evaluate,
 }];
 
 fn evaluate(bench: &mut Bench) {
     let (expressions, features) = setup(); // not measured
     bench.measure(|| evaluate_all(&expressions, &features));
-    bench.count("evaluations", (features.len() * expressions.len()) as u64);
+    bench.per("evaluation", (features.len() * expressions.len()) as u64);
 }
 ```
 
@@ -240,7 +274,21 @@ declare the scenario's own metrics, and `per` the unit of work it repeats. A
 macro scenario sets `bench.gpu` to the device it drew on, and writes its last
 image to `bench.image` when that is set. What more than one scenario uses goes
 in `src/support/`: the headless map (`support::map`), the fixtures
-(`support::fixtures`) and seeded data (`support::random`).
+(`support::fixtures`) and seeded data (`support::random`); what more than one
+micro scenario uses, such as the tiles they read, in `src/scenarios/micro/`.
+
+### Reaching a library's internal stages
+
+A micro scenario calls a stage as a function over data. Where the stage is
+internal to its library, the library has a `bench` feature, off by default, and
+behind it a module `bench` that is hidden from the documentation:
+`mln_renderer::bench::TileLayout` runs a tile's layout job, for instance. The
+harness turns the feature on in its `Cargo.toml`, so builds without the harness
+leave the module out. Each entry point takes and returns the library's public
+types and nothing internal, so that a change to the stage's internals changes
+the entry point, not the scenario, and the harness still builds against older
+commits that have the entry point. A comparison with a commit from before an
+entry point existed doesn't build; compare with a later one.
 
 ### Driving a map
 
@@ -263,7 +311,18 @@ the scenario drives it, so that it does the same work on every run:
   workers, sees each answer arrive the same number of frames after its request
   on every run.
 
-On macOS, the system caches the GPU code it compiles for each binary, so the
-first process of a newly built binary to draw with a shader does 1% to 2% more
-work than later ones. `run` and `compare` therefore run each macro scenario once
-on each binary before they measure, and drop what that run reports.
+### Repeating counts
+
+A count repeats only if the process that counts it does the same work in every
+run, which takes two things of the runner:
+
+- Where the system places a process's code, stack and heap at random, the
+  instructions that copies, comparisons and searches take change with the
+  addresses, from one process to the next. A scenario's process
+  (`mln-bench exec`) therefore runs again at fixed addresses where the system
+  lets it, macOS and Linux (`src/aslr.rs`).
+- The first process of a newly built binary to run some code does more work than
+  later ones: on macOS the system checks each page of the binary's code the
+  first time a process reads it, and caches the GPU code it compiles for each
+  binary. `run` and `compare` therefore run each scenario once on each binary
+  before they measure, and drop what that run reports.

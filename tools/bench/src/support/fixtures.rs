@@ -17,7 +17,6 @@ pub(crate) enum Tiles {
     /// Central San Francisco, zooms 0 to 14.
     Street,
     /// The street tiles as MLT.
-    #[expect(dead_code, reason = "no scenario reads the MLT tiles")]
     StreetMlt,
     /// The whole world, zooms 0 to 4.
     World,
@@ -114,7 +113,6 @@ impl Fixtures {
 
     /// The tile `z`/`x`/`y` of `tiles`, decompressed: MVT or MLT bytes as a
     /// tile worker receives them. `None` for a tile the set lacks.
-    #[expect(dead_code, reason = "no scenario reads single tiles")]
     pub(crate) fn tile(&self, tiles: Tiles, z: u8, x: u32, y: u32) -> Option<Vec<u8>> {
         let path = self.path(&self.tile_set(tiles).archive);
         let reader =

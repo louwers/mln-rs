@@ -31,14 +31,24 @@ mln_headless = { package = "mln-rs-headless", path = "../../crates/mln_headless"
 # The PNG files of the scenarios' last images (`mln-bench run --images`).
 mln_image = { package = "mln-rs-image", path = "../../crates/mln_image" }
 mln_map = { package = "mln-rs-map", path = "../../crates/mln_map" }
+# The renderer's internal stages, through its `bench` entry points.
+mln_renderer = { package = "mln-rs-renderer", path = "../../crates/mln_renderer", default-features = false, features = [
+  "bench",
+] }
 # The devices of every backend, which MLN_RENDER_BACKEND picks among.
 mln_runtime = { package = "mln-rs-runtime", path = "../../crates/mln_runtime", features = [
   "default",
 ] }
 # The file source that reads the fixtures (support/fixtures.rs).
 mln_storage = { package = "mln-rs-storage", path = "../../crates/mln_storage" }
-# The edits of the update scenarios.
+# The sprite whose images the layouts of symbols use.
+mln_sprite = { package = "mln-rs-sprite", path = "../../crates/mln_sprite" }
+# The style, and its edits.
 mln_style = { package = "mln-rs-style", path = "../../crates/mln_style" }
+mln_style_types = { package = "mln-rs-style-types", path = "../../crates/mln_style_types" }
+# The tiles that the decode and layout scenarios read.
+mln_tile = { package = "mln-rs-tile", path = "../../crates/mln_tile" }
+mln_tile_id = { package = "mln-rs-tile-id", path = "../../crates/mln_tile_id" }
 mln_util = { package = "mln-rs-util", path = "../../crates/mln_util" }
 # The count of the map's background tasks (support/workers.rs).
 parking_lot = "0.12"

@@ -28,6 +28,9 @@ default = ["font-face-shaper"]
 # module, crates/mln_web_shaper, which its map loads only for styles with font
 # faces.
 font-face-shaper = []
+# `bench`, the entry points to internal stages that the benchmarks
+# (tools/bench) measure. Not API: hidden from the documentation.
+bench = []
 
 [dependencies]
 bytemuck.workspace = true

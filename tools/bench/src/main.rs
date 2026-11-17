@@ -1,5 +1,6 @@
 //! `mln-bench`, the benchmarks of mln-rs (README.md).
 
+mod aslr;
 mod compare;
 mod environment;
 mod fixtures;
@@ -36,6 +37,9 @@ fixtures installs the snapshot that tools/bench/fixtures.json names, from its
 base URL or from a directory laid out as it is.";
 
 fn main() -> ExitCode {
+    if std::env::args().nth(1).as_deref() == Some("exec") {
+        aslr::fix();
+    }
     // Before any thread starts, so that the counters count them all.
     meter::start_counters();
     match run(std::env::args().skip(1).collect()) {

@@ -8,7 +8,11 @@ use crate::scenario::Scenario;
 /// Every scenario, in the order `list` and `run` show them.
 pub(crate) fn all() -> impl Iterator<Item = &'static Scenario> {
     [
+        micro::style::SCENARIOS,
         micro::expression::SCENARIOS,
+        micro::decode::SCENARIOS,
+        micro::geojson::SCENARIOS,
+        micro::layout::SCENARIOS,
         r#macro::load::SCENARIOS,
         r#macro::frame::SCENARIOS,
         r#macro::navigate::SCENARIOS,

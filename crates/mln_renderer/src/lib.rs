@@ -2,6 +2,9 @@
 //! and the orchestrator that turns a style into each frame's render tree.
 
 mod algorithm;
+#[cfg(feature = "bench")]
+#[doc(hidden)]
+pub mod bench;
 pub mod bucket;
 mod bucket_geometry;
 mod bucket_parameters;
