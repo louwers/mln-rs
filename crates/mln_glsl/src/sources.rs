@@ -6509,14 +6509,12 @@ void main() {
 
     const float EDGE_GAMMA = 0.105 / DEVICE_PIXEL_RATIO;
     const float fontGamma = frag_font_scale * tileProps.gamma_scale;
-    const float fillGamma = EDGE_GAMMA / fontGamma;
-    const float haloGamma = (halo_blur * 1.19 / SDF_PX + EDGE_GAMMA) / fontGamma;
-    const float gamma = tileProps.is_halo != 0 ? haloGamma : fillGamma;
-    const float gammaScaled = gamma * frag_gamma_scale;
+    const float haloBlurGamma = tileProps.is_halo != 0 ? halo_blur * 1.19 / SDF_PX : 0.0;
+    const float gammaScaled = (haloBlurGamma + EDGE_GAMMA) / fontGamma * frag_gamma_scale;
     const vec4 color = tileProps.is_halo != 0 ? halo_color : fill_color;
+    // A halo's inner edge sits a gamma outside the fill's.
     const float fillInnerEdge = (256.0 - 64.0) / 256.0;
-    const float haloInnerEdge = fillInnerEdge + haloGamma * frag_gamma_scale;
-    const float innerEdge = tileProps.is_halo != 0 ? haloInnerEdge : fillInnerEdge;
+    const float innerEdge = tileProps.is_halo != 0 ? fillInnerEdge + gammaScaled : fillInnerEdge;
     const float dist = texture(sampler2D(image0_texture, image0_sampler), atlas_pos(frag_tex_origin, frag_tex)).a;
     float alpha = smoothstep(innerEdge - gammaScaled, innerEdge + gammaScaled, dist);
     if (tileProps.is_halo != 0) {
@@ -6903,14 +6901,12 @@ void main() {
 
     const float EDGE_GAMMA = 0.105 / DEVICE_PIXEL_RATIO;
     const float fontGamma = frag_font_scale * tileProps.gamma_scale;
-    const float fillGamma = EDGE_GAMMA / fontGamma;
-    const float haloGamma = (halo_blur * 1.19 / SDF_PX + EDGE_GAMMA) / fontGamma;
-    const float gamma = tileProps.is_halo != 0 ? haloGamma : fillGamma;
-    const float gammaScaled = gamma * frag_gamma_scale;
+    const float haloBlurGamma = tileProps.is_halo != 0 ? halo_blur * 1.19 / SDF_PX : 0.0;
+    const float gammaScaled = (haloBlurGamma + EDGE_GAMMA) / fontGamma * frag_gamma_scale;
     const vec4 color = tileProps.is_halo != 0 ? halo_color : fill_color;
+    // A halo's inner edge sits a gamma outside the fill's.
     const float fillInnerEdge = (256.0 - 64.0) / 256.0;
-    const float haloInnerEdge = fillInnerEdge + haloGamma * frag_gamma_scale;
-    const float innerEdge = tileProps.is_halo != 0 ? haloInnerEdge : fillInnerEdge;
+    const float innerEdge = tileProps.is_halo != 0 ? fillInnerEdge + gammaScaled : fillInnerEdge;
     const float dist = texture(sampler2D(glyph_image_texture, glyph_image_sampler), pos).a;
     float alpha = smoothstep(innerEdge - gammaScaled, innerEdge + gammaScaled, dist);
     if (tileProps.is_halo != 0) {
