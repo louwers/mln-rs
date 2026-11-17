@@ -24,6 +24,12 @@ pub(crate) const SCENARIOS: &[Scenario] = &[
         question: "What does a frame of the globe cost while it turns and tilts over loaded tiles?",
         run: globe,
     },
+    Scenario {
+        name: "macro/frame/antimeridian",
+        kind: Kind::Macro,
+        question: "What does a frame of the world on a flat map cost while the view crosses the antimeridian over loaded tiles?",
+        run: antimeridian,
+    },
 ];
 
 /// The question: what does a frame of western San Francisco at zoom 13.5
@@ -41,6 +47,14 @@ fn globe(bench: &mut Bench) {
     path(bench, Path::Globe);
 }
 
+/// The question: what does a frame of the world on a flat map cost while
+/// its center swings across the antimeridian and back
+/// ([`Path::Antimeridian`]), each crossing moving the tiles in view to other
+/// world copies? One measured unit is one frame.
+fn antimeridian(bench: &mut Bench) {
+    path(bench, Path::Antimeridian);
+}
+
 fn path(bench: &mut Bench, path: Path) {
     let fixtures = Fixtures::open(bench);
     let camera = path.camera(&fixtures);
@@ -49,26 +63,35 @@ fn path(bench: &mut Bench, path: Path) {
     frames(bench, map, camera);
 }
 
-/// Loads the start of the path, then measures one frame at each of its
-/// cameras.
-///
-/// The renderer requests a tile again, and lays it out again, whenever it
-/// comes back into view, so a path over loaded tiles keeps the same tiles in
-/// view throughout. A frame that starts background work fails the scenario.
+/// Loads the path, drawing it once with its tiles loaded before each
+/// frame, then measures one frame at each of its cameras: the frame, and
+/// the background work it starts, such as the layout of a tile that came
+/// back into view, which the frame doesn't wait for, but a frame soon after
+/// shows.
 fn frames(bench: &mut Bench, mut map: HeadlessMap, camera: impl Fn(usize) -> CameraOptions) {
+    map.settle();
+    for frame in 0..FRAMES {
+        map.jump(&camera(frame));
+        map.wait_for_workers();
+        map.draw_frame();
+    }
+    map.jump(&camera(0));
     map.settle();
 
     let drawn = map.frames();
     let objects = map.gpu_objects_created();
-    let tasks = map.background_work();
+    let work = map.background_work();
     let mut times = Vec::with_capacity(FRAMES);
     for frame in 0..FRAMES {
         map.jump(&camera(frame));
         let start = Instant::now();
-        bench.measure(|| map.draw_frame());
+        bench.measure(|| {
+            map.draw_frame();
+            map.wait_for_workers();
+        });
         times.push(start.elapsed());
     }
-    assert_eq!(map.background_work(), tasks, "the path needs tiles it didn't start with");
+    bench.count("background_work", map.background_work() - work);
     assert_eq!(map.frames() - drawn, FRAMES as u64, "one frame per camera");
     bench.per("frame", FRAMES as u64);
     bench.bytes("gpu_buffers", map.gpu_buffer_bytes());

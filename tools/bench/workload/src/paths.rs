@@ -30,15 +30,22 @@ pub enum Path {
     /// The whole globe (zoom 1.5) turning 120 degrees of longitude under the
     /// camera, which turns and tilts to 30 degrees and back.
     Globe,
+    /// The whole world on a flat map at zoom 2, its center on 20 degrees
+    /// north swinging from 140 degrees east across the antimeridian to 140
+    /// degrees west and back: each lap crosses it twice, and each crossing
+    /// moves the tiles in view to other world copies. It ends where it
+    /// starts.
+    Antimeridian,
 }
 
 impl Path {
-    /// The path named `name`: `street` or `globe`.
+    /// The path named `name`: `street`, `globe` or `antimeridian`.
     pub fn parse(name: &str) -> Result<Path, String> {
         match name {
             "street" => Ok(Path::Street),
             "globe" => Ok(Path::Globe),
-            _ => Err(format!("no camera path {name:?}: street or globe")),
+            "antimeridian" => Ok(Path::Antimeridian),
+            _ => Err(format!("no camera path {name:?}: street, globe or antimeridian")),
         }
     }
 
@@ -47,6 +54,7 @@ impl Path {
         match self {
             Path::Street => "street",
             Path::Globe => "globe",
+            Path::Antimeridian => "antimeridian",
         }
     }
 
@@ -56,6 +64,7 @@ impl Path {
         match self {
             Path::Street => snapshot.style(Tiles::Street),
             Path::Globe => snapshot.globe_style(),
+            Path::Antimeridian => snapshot.style(Tiles::World),
         }
     }
 
@@ -66,7 +75,7 @@ impl Path {
                 let (x, y) = tile_at(12, snapshot.area_center(Tiles::Street));
                 tile_center(12, x, y)
             }
-            Path::Globe => LatLng::default(),
+            Path::Globe | Path::Antimeridian => LatLng::default(),
         };
         move |frame| {
             let t = frame as f64 / FRAMES as f64;
@@ -94,6 +103,15 @@ impl Path {
                         zoom: Some(1.5),
                         bearing: Some(30.0 * t),
                         pitch: Some(30.0 * wave),
+                        ..Default::default()
+                    }
+                }
+                Path::Antimeridian => {
+                    let longitude = 180.0 + 40.0 * (std::f64::consts::TAU * t).sin();
+                    let longitude = if longitude >= 180.0 { longitude - 360.0 } else { longitude };
+                    CameraOptions {
+                        center: Some(LatLng::new(20.0, longitude).expect("a center")),
+                        zoom: Some(2.0),
                         ..Default::default()
                     }
                 }
@@ -134,7 +152,7 @@ mod tests {
 
     #[test]
     fn paths_name_themselves() {
-        for path in [Path::Street, Path::Globe] {
+        for path in [Path::Street, Path::Globe, Path::Antimeridian] {
             assert_eq!(Path::parse(path.name()), Ok(path));
         }
         assert!(Path::parse("moon").is_err());
