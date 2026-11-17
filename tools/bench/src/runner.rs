@@ -61,6 +61,8 @@ pub(crate) fn check_build() -> Result<(), String> {
 /// runner's child process does.
 pub(crate) fn exec(scenario: &Scenario, out: &Path, image: Option<PathBuf>) -> Result<(), String> {
     check_build()?;
+    // The GPU's pipeline statistics, of the devices the scenario makes.
+    mln_webgpu::bench::count_pipeline_statistics();
     let mut bench = Bench::new();
     bench.image = image;
     (scenario.run)(&mut bench);

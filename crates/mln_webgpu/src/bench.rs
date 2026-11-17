@@ -1,9 +1,12 @@
 //! How much work the GPU's pipeline ran, for the benchmarks (`tools/bench`)
 //! to count: its vertex and fragment shader invocations and the primitives
-//! that its clipper passed on, summed over every render pass. Counted where
-//! the device has pipeline statistics queries (Vulkan, D3D12), which the
-//! library's device then asks for. Built only with the `bench` feature, and
-//! hidden from the documentation: it isn't API.
+//! that its clipper passed on, summed over every render pass. Counted once a
+//! process calls [`count_pipeline_statistics`], on the devices made after,
+//! where the device has pipeline statistics queries (Vulkan, D3D12), which
+//! the library's device then asks for. A build with the feature in which no
+//! one calls it, such as a workspace's tests, counts nothing. Built only
+//! with the `bench` feature, and hidden from the documentation: it isn't
+//! API.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -28,6 +31,21 @@ const VALUES: u64 = 3;
 /// The passes one submission counts at most; a pass past them goes
 /// uncounted.
 const QUERIES: u32 = 1024;
+
+/// Whether [`count_pipeline_statistics`] was called.
+static COUNTING: AtomicBool = AtomicBool::new(false);
+
+/// Counts the pipeline statistics of the devices made from now on, for
+/// [`take_pipeline_statistics`] to take after each frame, which the caller
+/// must, since what isn't taken stays.
+pub fn count_pipeline_statistics() {
+    COUNTING.store(true, Ordering::Relaxed);
+}
+
+/// Whether the devices made now count their pipeline statistics.
+pub(crate) fn counting() -> bool {
+    COUNTING.load(Ordering::Relaxed)
+}
 
 /// The statistics of submissions that the GPU hasn't finished, and the sum
 /// of those it has and nobody has taken yet. `None` until a device has the
