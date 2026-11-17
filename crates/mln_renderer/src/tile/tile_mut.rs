@@ -108,14 +108,13 @@ impl<'a> TileMut<'a> {
             return;
         };
         self.tile.settled = true;
-        match data {
-            Some(data) => self.change_layout(|layout| layout.data = Some(data)),
+        if let Some(data) = data {
+            self.change_layout(|layout| layout.data = Some(data));
+        } else {
             // A raster or raster-dem tile shows all it will: its parse
             // starts and ends at once.
-            None => {
-                self.action(TileOperation::StartParse);
-                self.action(TileOperation::EndParse);
-            }
+            self.action(TileOperation::StartParse);
+            self.action(TileOperation::EndParse);
         }
     }
 
