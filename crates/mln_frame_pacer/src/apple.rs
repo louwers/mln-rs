@@ -228,34 +228,37 @@ pub(crate) mod display_link {
 
     /// A display link that calls `target`, on the link thread.
     #[cfg(target_os = "macos")]
-    fn display_link(target: &Target) -> Option<Retained<CADisplayLink>> {
+    fn display_link(target: &Target) -> Result<Retained<CADisplayLink>, Error> {
         use objc2::runtime::{AnyClass, AnyObject};
 
-        let screens = AnyClass::get(c"NSScreen")?;
+        let no_display = || Error::native("the system has no display for the pacer to follow");
+        let screens = AnyClass::get(c"NSScreen").ok_or_else(no_display)?;
         // SAFETY: `+[NSScreen screens]`, an array of screens, or nil without
         // a window server.
         let screens: Option<Retained<AnyObject>> = unsafe { msg_send![screens, screens] };
         // SAFETY: `-[NSArray firstObject]`, the main display, the one with
         // the menu bar, or nil.
-        let screen: Option<Retained<AnyObject>> = unsafe { msg_send![&*screens?, firstObject] };
-        let screen = screen?;
+        let screen: Option<Retained<AnyObject>> = unsafe { msg_send![&*screens.ok_or_else(no_display)?, firstObject] };
+        let screen = screen.ok_or_else(no_display)?;
         let selector = sel!(displayLinkWithTarget:selector:);
         // SAFETY: `-[NSObject respondsToSelector:]`. macOS 14 added the
         // method.
         let available: bool = unsafe { msg_send![&*screen, respondsToSelector: selector] };
         if !available {
-            return None;
+            return Err(Error::unsupported("the frame pacer needs macOS 14 or later"));
         }
         // SAFETY: `-[NSScreen displayLinkWithTarget:selector:]`, with a
         // target that implements the selector.
-        unsafe { msg_send![&*screen, displayLinkWithTarget: target, selector: sel!(vsync:)] }
+        let link: Option<Retained<CADisplayLink>> =
+            unsafe { msg_send![&*screen, displayLinkWithTarget: target, selector: sel!(vsync:)] };
+        link.ok_or_else(no_display)
     }
 
     /// A display link that calls `target`, on the link thread.
     #[cfg(not(target_os = "macos"))]
-    fn display_link(target: &Target) -> Option<Retained<CADisplayLink>> {
+    fn display_link(target: &Target) -> Result<Retained<CADisplayLink>, Error> {
         // SAFETY: a target that implements the selector.
-        Some(unsafe { CADisplayLink::displayLinkWithTarget_selector(target, sel!(vsync:)) })
+        Ok(unsafe { CADisplayLink::displayLinkWithTarget_selector(target, sel!(vsync:)) })
     }
 
     /// A pacer's display link.
@@ -276,10 +279,10 @@ pub(crate) mod display_link {
                 }
                 // SAFETY: the link thread's own run loop.
                 unsafe { link.0.addToRunLoop_forMode(&NSRunLoop::currentRunLoop(), NSDefaultRunLoopMode) };
-                Some(link)
+                Ok(link)
             });
             let link =
-                link.flatten().ok_or_else(|| Error::native("the system has no display for the pacer to follow"))?;
+                link.ok_or_else(|| Error::native("the frame pacer's thread failed to make its display link"))??;
             Ok(Self { thread, link })
         }
     }

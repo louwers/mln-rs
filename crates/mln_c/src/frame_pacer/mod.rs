@@ -139,8 +139,9 @@ pub(crate) unsafe extern "C" fn mln_frame_pacer_set_options(
     })
 }
 
-/// The callback of a [`Pacer`]'s [`FramePacer`].
-pub(crate) type OnRefresh = Box<dyn Fn(Duration) + Send + Sync>;
+/// The callback of a [`Pacer`]'s [`FramePacer`], with the sessions that
+/// waited for the refresh.
+pub(crate) type OnRefresh = Box<dyn Fn(Duration, Vec<mln_render_session>) + Send + Sync>;
 
 /// What `mln_frame_pacer_create()` does on each platform with a source:
 /// checks `options` and `out_pacer`, builds the platform's [`FramePacer`]
@@ -154,7 +155,7 @@ pub(crate) type OnRefresh = Box<dyn Fn(Duration) + Send + Sync>;
 pub(crate) unsafe fn create(
     options: *const mln_frame_pacer_options,
     out_pacer: *mut mln_frame_pacer,
-    frames: impl FnOnce(Option<Limit>, OnRefresh) -> Result<Arc<FramePacer>, Error>,
+    frames: impl FnOnce(Option<Limit>, OnRefresh) -> Result<Arc<FramePacer<mln_render_session>>, Error>,
 ) -> Result<(), Error> {
     // SAFETY: the caller's contract.
     let limit = unsafe { limit(options) }?;
@@ -162,12 +163,14 @@ pub(crate) unsafe fn create(
     let out_pacer = unsafe { handles::out_handle(out_pacer, "out_pacer") }?;
     let pacer: Arc<OnceLock<Weak<Pacer>>> = Arc::default();
     let refreshes = Arc::clone(&pacer);
-    let on_refresh: OnRefresh = Box::new(move |_| {
+    let on_refresh: OnRefresh = Box::new(move |_, sessions| {
         if let Some(pacer) = refreshes.get().and_then(Weak::upgrade) {
-            pacer.on_refresh();
+            for session in sessions {
+                render_session::demand_paced(session, &pacer);
+            }
         }
     });
-    let new = Arc::new(Pacer { frames: frames(limit, on_refresh)?, waiting: Mutex::new(Vec::new()) });
+    let new = Arc::new(Pacer { frames: frames(limit, on_refresh)? });
     let _ = pacer.set(Arc::downgrade(&new));
     *out_pacer = PACERS.insert(new)?;
     Ok(())
@@ -224,13 +227,11 @@ fn limit_change(options: &mln_frame_pacer_options) -> Result<LimitChange, Error>
 
 // MARK: - Pacer
 
-/// A frame pacer: the sessions that wait for a refresh, and the
-/// [`FramePacer`] that calls back at the refresh. Dropping it drops the
-/// frame pacer, whose source stops.
+/// A frame pacer: the [`FramePacer`] that the sessions that have something
+/// new to draw wait on, and that demands their frames at the refresh.
+/// Dropping it drops the frame pacer, whose source stops.
 pub(crate) struct Pacer {
-    frames: Arc<FramePacer>,
-    /// The sessions that asked for a frame since the last demands.
-    waiting: Mutex<Vec<mln_render_session>>,
+    frames: Arc<FramePacer<mln_render_session>>,
 }
 
 impl Pacer {
@@ -243,20 +244,7 @@ impl Pacer {
     /// Asks for a frame demand for `session` at the next refresh that the
     /// limit allows.
     fn request(&self, session: mln_render_session) {
-        {
-            let mut waiting = self.waiting.lock();
-            if !waiting.contains(&session) {
-                waiting.push(session);
-            }
-        }
-        self.frames.request();
-    }
-
-    fn on_refresh(&self) {
-        let due = std::mem::take(&mut *self.waiting.lock());
-        for session in due {
-            render_session::demand_paced(session, self);
-        }
+        self.frames.request(session);
     }
 }
 

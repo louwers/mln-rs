@@ -9,7 +9,7 @@
 Paces frames to a display: a `FramePacer` calls back at the display's refreshes,
 at most at a frame rate limit, so that a host draws each frame when the display
 is ready for it. It follows a `CADisplayLink` on Apple platforms, or a source of
-the host's own. The C API's frame pacers and the desktop example use it.
+the host's own.
 
 Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering

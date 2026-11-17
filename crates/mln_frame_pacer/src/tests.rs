@@ -1,8 +1,6 @@
 //! The throttle's grid, and the pacer's requests and limits with a fake
 //! source that the tests refresh.
 
-use std::sync::atomic::{AtomicU32, Ordering};
-
 use super::*;
 
 // MARK: - Limit
@@ -159,45 +157,80 @@ impl FakeDisplay {
     }
 }
 
-/// A pacer on a fake display, and how many times it called back.
-fn fake_pacer(limit: Option<Limit>) -> (Arc<FramePacer>, Arc<FakeDisplay>, Arc<AtomicU32>) {
+type Calls = Arc<Mutex<Vec<Vec<u32>>>>;
+
+/// A pacer on a fake display, and the waiters of each of its callbacks.
+fn fake_pacer(limit: Option<Limit>) -> (Arc<FramePacer<u32>>, Arc<FakeDisplay>, Calls) {
     let display = Arc::new(FakeDisplay::default());
-    let calls = Arc::new(AtomicU32::new(0));
-    let counted = Arc::clone(&calls);
+    let calls = Calls::default();
+    let called = Arc::clone(&calls);
     let source = |vsyncs: Vsyncs, _: Option<Limit>| {
         let _ = display.vsyncs.set(vsyncs);
         Ok::<_, Error>(FakeSource(Arc::clone(&display)))
     };
-    let pacer = FramePacer::with_source(limit, move |_| _ = counted.fetch_add(1, Ordering::SeqCst), source).unwrap();
+    let pacer = FramePacer::with_source(limit, move |_, waiters| called.lock().push(waiters), source).unwrap();
     (pacer, display, calls)
 }
 
 #[test]
 fn requests_share_one_refresh_until_it_comes() {
     let (pacer, display, calls) = fake_pacer(None);
-    pacer.request();
-    pacer.request();
+    pacer.request(1);
+    pacer.request(2);
+    pacer.request(1);
     assert_eq!(display.scheduled(), 1);
+    assert_eq!(pacer.waiting(), [1, 2]);
     display.refresh(Duration::from_secs(1));
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(*calls.lock(), [vec![1, 2]]);
     // Nothing asked for another.
     assert_eq!(display.scheduled(), 0);
-    pacer.request();
+    pacer.request(3);
     assert_eq!(display.scheduled(), 1);
+}
+
+#[test]
+fn a_request_from_the_callback_waits_for_the_next_refresh() {
+    let display = Arc::new(FakeDisplay::default());
+    let calls = Calls::default();
+    let source = |vsyncs: Vsyncs, _: Option<Limit>| {
+        let _ = display.vsyncs.set(vsyncs);
+        Ok::<_, Error>(FakeSource(Arc::clone(&display)))
+    };
+    let pacer: Arc<OnceLock<Weak<FramePacer<u32>>>> = Arc::default();
+    let (callback_pacer, called) = (Arc::clone(&pacer), Arc::clone(&calls));
+    let on_refresh = move |_, waiters: Vec<u32>| {
+        if waiters == [1]
+            && let Some(pacer) = callback_pacer.get().and_then(Weak::upgrade)
+        {
+            pacer.request(2);
+        }
+        called.lock().push(waiters);
+    };
+    let frames = FramePacer::with_source(Limit::new(30), on_refresh, source).unwrap();
+    let _ = pacer.set(Arc::downgrade(&frames));
+    let at = Duration::from_millis;
+    frames.request(1);
+    display.refresh(at(1000));
+    assert_eq!((display.scheduled(), frames.waiting()), (1, vec![2]));
+    // The limit skips the next refresh, and takes the one after.
+    display.refresh(at(1016));
+    display.refresh(at(1033));
+    assert_eq!(*calls.lock(), [vec![1], vec![2]]);
+    assert_eq!(display.scheduled(), 0);
 }
 
 #[test]
 fn a_refresh_that_the_limit_skips_schedules_the_next() {
     let (pacer, display, calls) = fake_pacer(Limit::new(30));
     let at = Duration::from_millis;
-    pacer.request();
+    pacer.request(1);
     display.refresh(at(1000));
-    pacer.request();
+    pacer.request(1);
     display.refresh(at(1016));
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(calls.lock().len(), 1);
     assert_eq!(display.scheduled(), 1);
     display.refresh(at(1033));
-    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert_eq!(calls.lock().len(), 2);
     assert_eq!(display.scheduled(), 0);
 }
 
@@ -205,31 +238,31 @@ fn a_refresh_that_the_limit_skips_schedules_the_next() {
 fn a_new_limit_reaches_the_source_and_the_refresh_on_its_way() {
     let (pacer, display, calls) = fake_pacer(None);
     let at = Duration::from_millis;
-    pacer.request();
+    pacer.request(1);
     display.refresh(at(1000));
-    pacer.request();
+    pacer.request(1);
     pacer.set_limit(Limit::new(10));
     assert_eq!(pacer.limit(), Limit::new(10));
     assert_eq!(*display.limits.lock(), [Limit::new(10)]);
     display.refresh(at(1016));
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(calls.lock().len(), 1);
     display.refresh(at(1100));
-    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert_eq!(calls.lock().len(), 2);
 }
 
 #[test]
 fn a_dropped_pacer_drops_its_source_and_ignores_its_refreshes() {
     let (pacer, display, calls) = fake_pacer(None);
-    pacer.request();
+    pacer.request(1);
     drop(pacer);
     assert!(*display.dropped.lock());
     display.refresh(Duration::from_secs(1));
-    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert!(calls.lock().is_empty());
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "tvos")))]
 #[test]
 fn a_platform_without_a_display_source_makes_no_pacer() {
-    let error = FramePacer::new(None, |_| {}).err().unwrap();
+    let error = FramePacer::<()>::new(None, |_, _| {}).err().unwrap();
     assert_eq!(error.kind, mln_util::ErrorKind::Unsupported);
 }

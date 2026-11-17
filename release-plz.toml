@@ -52,6 +52,7 @@ changelog_include = [
   "mln-rs-d3d12",
   "mln-rs-expression",
   "mln-rs-feature",
+  "mln-rs-frame-pacer",
   "mln-rs-geojson-vt",
   "mln-rs-geometry",
   "mln-rs-gestures",

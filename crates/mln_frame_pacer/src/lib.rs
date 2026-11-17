@@ -125,7 +125,7 @@ pub trait VsyncSource: Send + Sync {
 /// A source that the pacer drops can still report the refreshes it
 /// scheduled, which then go nowhere.
 #[derive(Clone, Default)]
-pub struct Vsyncs(Arc<OnceLock<Weak<FramePacer>>>);
+pub struct Vsyncs(Arc<OnceLock<Weak<dyn Refreshes>>>);
 
 impl Vsyncs {
     /// Reports a refresh at `time` on a monotonic clock. The pacer runs its
@@ -138,40 +138,46 @@ impl Vsyncs {
     }
 }
 
+/// A pacer, as its [`Vsyncs`] reach it.
+trait Refreshes: Send + Sync {
+    fn on_vsync(&self, time: Duration);
+}
+
 // MARK: - Pacer
 
-/// Calls back once at the first refresh that its limit allows after each
-/// [`request`](Self::request): requests made before that refresh share it.
-/// The callback gets the refresh's time on the source's monotonic clock, and
-/// runs on the source's thread, holding none of the pacer's locks. Dropping
-/// the pacer drops its source, which stops.
-pub struct FramePacer {
-    state: Mutex<PacerState>,
+/// Calls back at the first refresh that its limit allows after a
+/// [`request`](Self::request), with the waiters that asked since the last
+/// callback, each once. The callback gets the refresh's time on the source's
+/// monotonic clock, and runs on the source's thread, holding none of the
+/// pacer's locks. Dropping the pacer drops its source, which stops.
+pub struct FramePacer<T = ()> {
+    state: Mutex<PacerState<T>>,
     /// Held while the limit changes, so that the source ends with the
     /// throttle's limit.
     limit_lock: Mutex<()>,
     source: Box<dyn VsyncSource>,
-    on_refresh: Box<dyn Fn(Duration) + Send + Sync>,
+    on_refresh: Box<dyn Fn(Duration, Vec<T>) + Send + Sync>,
 }
 
-struct PacerState {
-    /// Whether a request waits for a refresh.
-    requested: bool,
+struct PacerState<T> {
+    /// The waiters that asked for a refresh since the last callback.
+    waiting: Vec<T>,
     /// Whether the source has a refresh on its way.
     scheduled: bool,
     throttle: Throttle,
 }
 
-impl FramePacer {
+impl<T: PartialEq + Send + 'static> FramePacer<T> {
     /// A pacer on the platform's display: a `CADisplayLink` of the main
     /// display on macOS 14 and later, iOS and tvOS. Its thread runs the
     /// callback.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) elsewhere,
-    /// and with [`ErrorKind::Native`](mln_util::ErrorKind) without a display.
+    /// including on older macOS, and with
+    /// [`ErrorKind::Native`](mln_util::ErrorKind) without a display.
     pub fn new(
         limit: Option<Limit>,
-        on_refresh: impl Fn(Duration) + Send + Sync + 'static,
+        on_refresh: impl Fn(Duration, Vec<T>) + Send + Sync + 'static,
     ) -> Result<Arc<Self>, Error> {
         #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
         {
@@ -188,27 +194,32 @@ impl FramePacer {
     /// refreshes and the limit.
     pub fn with_source<S: VsyncSource + 'static, E>(
         limit: Option<Limit>,
-        on_refresh: impl Fn(Duration) + Send + Sync + 'static,
+        on_refresh: impl Fn(Duration, Vec<T>) + Send + Sync + 'static,
         source: impl FnOnce(Vsyncs, Option<Limit>) -> Result<S, E>,
     ) -> Result<Arc<Self>, E> {
         let vsyncs = Vsyncs::default();
         let source = source(vsyncs.clone(), limit)?;
         let pacer = Arc::new(Self {
-            state: Mutex::new(PacerState { requested: false, scheduled: false, throttle: Throttle::new(limit) }),
+            state: Mutex::new(PacerState { waiting: Vec::new(), scheduled: false, throttle: Throttle::new(limit) }),
             limit_lock: Mutex::new(()),
             source: Box::new(source),
             on_refresh: Box::new(on_refresh),
         });
+        let weak = Arc::downgrade(&pacer);
+        let refreshes: Weak<dyn Refreshes> = weak;
         // A new `Vsyncs` is unset.
-        let _ = vsyncs.0.set(Arc::downgrade(&pacer));
+        let _ = vsyncs.0.set(refreshes);
         Ok(pacer)
     }
 
-    /// Asks for a callback at the next refresh that the limit allows.
-    pub fn request(&self) {
+    /// Asks for a callback for `waiter` at the next refresh that the limit
+    /// allows.
+    pub fn request(&self, waiter: T) {
         {
             let mut state = self.state.lock();
-            state.requested = true;
+            if !state.waiting.contains(&waiter) {
+                state.waiting.push(waiter);
+            }
             if std::mem::replace(&mut state.scheduled, true) {
                 return;
             }
@@ -229,26 +240,35 @@ impl FramePacer {
         self.state.lock().throttle.set_limit(limit);
         self.source.set_limit(limit);
     }
+}
 
+impl<T: Clone> FramePacer<T> {
+    /// The waiters that the next callback is for.
+    #[must_use]
+    pub fn waiting(&self) -> Vec<T> {
+        self.state.lock().waiting.clone()
+    }
+}
+
+impl<T: Send + 'static> Refreshes for FramePacer<T> {
     fn on_vsync(&self, time: Duration) {
         let due = {
             let mut state = self.state.lock();
-            if !state.requested {
+            if state.waiting.is_empty() {
                 state.scheduled = false;
                 return;
             }
-            let due = state.throttle.admit(time);
-            if due {
-                state.requested = false;
+            if state.throttle.admit(time) {
                 state.scheduled = false;
+                Some(std::mem::take(&mut state.waiting))
+            } else {
+                None
             }
-            due
         };
-        if due {
-            (self.on_refresh)(time);
-        } else {
+        match due {
+            Some(waiters) => (self.on_refresh)(time, waiters),
             // Waits for the next refresh.
-            self.source.schedule();
+            None => self.source.schedule(),
         }
     }
 }

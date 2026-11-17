@@ -257,9 +257,9 @@ fn requests_share_one_refresh_until_it_comes() {
     pacer.request(2);
     pacer.request(1);
     assert_eq!(display.scheduled(), 1);
-    assert_eq!(*pacer.waiting.lock(), [1, 2]);
+    assert_eq!(pacer.frames.waiting(), [1, 2]);
     assert!(display.refresh(now()));
-    assert_eq!(*pacer.waiting.lock(), Vec::<u64>::new());
+    assert_eq!(pacer.frames.waiting(), Vec::<u64>::new());
     assert_eq!(display.scheduled(), 0);
 
     pacer.request(3);
@@ -277,9 +277,9 @@ fn a_refresh_that_the_limit_skips_schedules_the_next() {
     assert!(display.refresh(at(1000)));
     pacer.request(1);
     assert!(display.refresh(at(1016)));
-    assert_eq!((display.scheduled(), pacer.waiting.lock().len()), (1, 1));
+    assert_eq!((display.scheduled(), pacer.frames.waiting().len()), (1, 1));
     assert!(display.refresh(at(1033)));
-    assert_eq!((display.scheduled(), pacer.waiting.lock().len()), (0, 0));
+    assert_eq!((display.scheduled(), pacer.frames.waiting().len()), (0, 0));
     mln_frame_pacer_release(handle);
 }
 
@@ -293,23 +293,23 @@ fn a_new_limit_applies_to_the_refresh_on_its_way() {
     assert!(display.refresh(at(1000)));
     pacer.request(1);
     assert!(display.refresh(at(1016)));
-    assert_eq!((display.scheduled(), pacer.waiting.lock().len()), (1, 1));
+    assert_eq!((display.scheduled(), pacer.frames.waiting().len()), (1, 1));
 
     // The higher limit takes the refresh that the old one would skip.
     let faster = pacer_options(MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND, 30);
     assert_eq!(set_options(handle, &raw const faster), MLN_STATUS_OK);
     assert_eq!(display.scheduled(), 1, "the refresh on its way serves the new limit");
     assert!(display.refresh(at(1033)));
-    assert_eq!((display.scheduled(), pacer.waiting.lock().len()), (0, 0));
+    assert_eq!((display.scheduled(), pacer.frames.waiting().len()), (0, 0));
 
     // The lower limit skips the refresh that the old one would take.
     pacer.request(1);
     let slower = pacer_options(MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND, 5);
     assert_eq!(set_options(handle, &raw const slower), MLN_STATUS_OK);
     assert!(display.refresh(at(1066)));
-    assert_eq!((display.scheduled(), pacer.waiting.lock().len()), (1, 1));
+    assert_eq!((display.scheduled(), pacer.frames.waiting().len()), (1, 1));
     assert!(display.refresh(at(1233)));
-    assert_eq!((display.scheduled(), pacer.waiting.lock().len()), (0, 0));
+    assert_eq!((display.scheduled(), pacer.frames.waiting().len()), (0, 0));
     mln_frame_pacer_release(handle);
 }
 
@@ -535,7 +535,7 @@ fn a_demand_answers_what_the_session_had_to_draw() {
     wake();
     assert_eq!(display.scheduled(), 0);
     pacing.set(77, Some(Arc::clone(&pacer)));
-    assert_eq!((display.scheduled(), pacer.waiting.lock().clone()), (1, vec![77]));
+    assert_eq!((display.scheduled(), pacer.frames.waiting()), (1, vec![77]));
     // A host's demand answers it, so the refresh demands nothing.
     pacing.demanded();
     assert!(!pacing.take_redraw(&pacer));
