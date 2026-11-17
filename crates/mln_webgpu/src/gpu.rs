@@ -196,7 +196,6 @@ impl WebGpu {
             clip_depth: ClipDepthRange::ZeroToOne,
             render_target_depth: Some(TextureFormat::Depth32Float),
             clear_stencil_with_pass: false,
-            line_expressions: false,
             cpu_rasterizer: device.adapter_info().device_type == wgpu::DeviceType::Cpu,
             max_line_width: 1.0,
         };
@@ -463,7 +462,7 @@ fn texture_format(format: TextureFormat) -> wgpu::TextureFormat {
 }
 
 /// What `shader` reads from its bindings, by the shaders' ids.
-fn shader_bindings(shader: &ShaderProgram) -> Result<Vec<ShaderBinding>, GpuError> {
+fn shader_bindings(shader: &ShaderProgram) -> Vec<ShaderBinding> {
     let mut bindings = Vec::new();
     for &group in shader.bind_group_order() {
         if Some(group) == shader.index_group() {
@@ -471,19 +470,11 @@ fn shader_bindings(shader: &ShaderProgram) -> Result<Vec<ShaderBinding>, GpuErro
         }
         for info in shader.binding_infos(group) {
             let binding = match info.type_ {
-                BindingType::UniformBuffer | BindingType::ReadOnlyStorageBuffer | BindingType::StorageBuffer => {
-                    ShaderBinding::Buffer { id: info.binding, min_size: shader.buffer_size(group, info.binding) }
+                BindingType::UniformBuffer | BindingType::ReadOnlyStorageBuffer => {
+                    ShaderBinding::Buffer { id: info.id, min_size: shader.buffer_size(group, info.binding) }
                 }
                 BindingType::Sampler | BindingType::Texture | BindingType::UnfilterableTexture => {
-                    let sampler = info.type_ == BindingType::Sampler;
-                    let id = shader.texture_at(info.binding, sampler).ok_or_else(|| {
-                        GpuError::Invalid(format!(
-                            "{} reads binding {} with no texture id",
-                            shader.name(),
-                            info.binding
-                        ))
-                    })?;
-                    ShaderBinding::Texture { id: id as u32 }
+                    ShaderBinding::Texture { id: info.id }
                 }
             };
             if !bindings.contains(&binding) {
@@ -491,7 +482,7 @@ fn shader_bindings(shader: &ShaderProgram) -> Result<Vec<ShaderBinding>, GpuErro
             }
         }
     }
-    Ok(bindings)
+    bindings
 }
 
 /// The format of `format`, `None` for a format the interface has no name
@@ -691,7 +682,7 @@ impl Gpu for WebGpu {
 
     fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError> {
         let program = shader_program::compile(self.device.device(), self.index_table.layout(), key)?;
-        let reads = shader_bindings(&program)?;
+        let reads = shader_bindings(&program);
         Ok(self.shaders.insert(Shader { program, reads }))
     }
 
@@ -736,12 +727,12 @@ impl Gpu for WebGpu {
                     ))
                 };
                 let resource = match info.type_ {
-                    BindingType::UniformBuffer | BindingType::ReadOnlyStorageBuffer | BindingType::StorageBuffer => {
+                    BindingType::UniformBuffer | BindingType::ReadOnlyStorageBuffer => {
                         let (buffer, offset, size) = desc
                             .entries
                             .iter()
                             .find_map(|entry| match *entry {
-                                BindGroupEntry::Buffer { id, buffer, offset, size } if id == info.binding => {
+                                BindGroupEntry::Buffer { id, buffer, offset, size } if id == info.id => {
                                     Some((buffer, offset, size))
                                 }
                                 _ => None,
@@ -756,7 +747,7 @@ impl Gpu for WebGpu {
                     }
                     BindingType::Sampler | BindingType::Texture | BindingType::UnfilterableTexture => {
                         let sampler = info.type_ == BindingType::Sampler;
-                        let texture_id = program.texture_at(info.binding, sampler).ok_or_else(missing)? as u32;
+                        let texture_id = info.id;
                         let (texture, texture_sampler) = desc
                             .entries
                             .iter()

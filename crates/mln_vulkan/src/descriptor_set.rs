@@ -1,9 +1,9 @@
-//! The descriptor set layouts of `mln_glsl::layout`, the pipeline layout
+//! The descriptor set layouts of `mln_shaders::layout`, the pipeline layout
 //! made of them, and the pools the sets are allocated from.
 
 use ash::vk;
 use mln_gfx::shaders::shader_defines::{ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO, ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO};
-use mln_glsl::layout::{
+use mln_shaders::layout::{
     DRAWABLE_UNIFORM_COUNT, DescriptorSetType, GLOBAL_UNIFORM_COUNT, IMAGE_TEXTURE_COUNT, LAYER_STORAGE_COUNT,
     LAYER_UNIFORM_COUNT, image_sampler_binding, image_texture_binding, layer_storage_binding,
 };

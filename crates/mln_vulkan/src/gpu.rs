@@ -3,7 +3,7 @@
 use std::any::Any;
 use std::cell::Cell;
 use std::collections::VecDeque;
-use std::fmt::Write as _;
+use std::ffi::CStr;
 use std::rc::{Rc, Weak};
 
 use ash::vk;
@@ -20,14 +20,12 @@ use mln_gfx::gpu::{
     ResourceId, SamplerId, ShaderId, ShaderKey, SlotMap, TargetFormats, TextureDesc, TextureFormat, TextureId,
     TextureRegion, TextureUsage, VertexStep,
 };
-use mln_gfx::shaders::shader_defines::{DRAWABLE_RESERVED_UBO_COUNT, LAYER_SSBO_START_ID};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{DepthFunctionType, TextureFilterType, TextureWrapType};
-use mln_glsl::layout::{
-    DescriptorSetType, IMAGE_SAMPLER_START, IMAGE_TEXTURE_COUNT, LAYER_STORAGE_COUNT, UBO_INDEX_PUSH_CONSTANT_SIZE,
-    image_sampler_binding, image_texture_binding,
+use mln_shaders::layout::{
+    DescriptorSetType, IMAGE_TEXTURE_COUNT, UBO_INDEX_PUSH_CONSTANT_SIZE, image_sampler_binding, image_texture_binding,
 };
-use mln_glsl::{AttributeInfo, ResourceUse, Stage, TextureInfo, shader_source};
+use mln_shaders::{ResourceKind, Stage};
 use mln_util::hash::HashMap;
 use mln_util::size::Size;
 
@@ -36,7 +34,7 @@ use crate::custom_layer::{CustomLayerEncoder, CustomLayerPass};
 use crate::descriptor_set::{DescriptorPoolGrowable, build_descriptor_set_layout, build_pipeline_layout};
 use crate::device::Device;
 use crate::renderer_backend::BackendImpl;
-use crate::{shaders, vk_state};
+use crate::vk_state;
 
 /// The sets each descriptor pool starts with room for.
 const DESCRIPTOR_POOL_SIZE: u32 = 256;
@@ -258,25 +256,9 @@ pub(crate) struct Shader {
     bindings: [Vec<(u32, Binding)>; DescriptorSetType::COUNT],
     /// What its stages read from its bindings, by the shaders' ids.
     reads: Vec<ShaderBinding>,
-    /// The location of each per-vertex attribute, by id.
-    attributes: &'static [AttributeInfo],
-    /// The location of each per-instance attribute, by id.
-    instance_attributes: &'static [AttributeInfo],
-}
-
-impl Shader {
-    /// The location of the per-vertex or per-instance attribute `id`.
-    fn location(&self, step: VertexStep, id: u32) -> Result<u32, GpuError> {
-        let attributes = match step {
-            VertexStep::Vertex => self.attributes,
-            VertexStep::Instance => self.instance_attributes,
-        };
-        attributes
-            .iter()
-            .find(|attribute| attribute.id == id as usize)
-            .map(|attribute| attribute.index as u32)
-            .ok_or_else(|| GpuError::Invalid(format!("{} has no {step:?} attribute {id}", self.name)))
-    }
+    /// The attributes its vertex stage reads, by id: each at the location
+    /// of its id.
+    attributes: Vec<u32>,
 }
 
 struct Pipeline {
@@ -429,7 +411,7 @@ impl OpenPass {
 /// use it have finished, and nothing holds it.
 ///
 /// Bindings are a descriptor set for each set of the shared pipeline layout
-/// that their shader uses (`mln_glsl::layout`), shared by bindings of the
+/// that their shader uses (`mln_shaders::layout`), shared by bindings of the
 /// same resources. `globalIndex` is a push constant.
 pub struct VulkanGpu {
     backend: Rc<BackendImpl>,
@@ -543,43 +525,31 @@ fn clear_color(color: mln_util::Color) -> vk::ClearValue {
     vk::ClearValue { color: vk::ClearColorValue { float32: [color.r, color.g, color.b, color.a] } }
 }
 
-/// The resource of `binding` in `set` of the shared layout, by the shaders'
-/// ids: the inverse of `mln_glsl::layout`'s `*_binding` functions.
-fn binding_of(
-    name: &str,
-    textures: &[TextureInfo],
-    set: u32,
-    binding: u32,
-) -> Result<(DescriptorSetType, Binding), GpuError> {
-    let texture_id = |index: u32| {
-        textures
-            .iter()
-            .find(|texture| texture.index == index as usize)
-            .map(|texture| texture.id as u32)
-            .ok_or_else(|| GpuError::Invalid(format!("{name}: no texture at index {index} of set {set}")))
-    };
-    let start = LAYER_SSBO_START_ID as u32;
-    let storage = LAYER_STORAGE_COUNT as u32;
-    let resource = match DescriptorSetType::ALL.get(set as usize) {
-        Some(DescriptorSetType::Global) => (DescriptorSetType::Global, Binding::Buffer(binding)),
-        Some(DescriptorSetType::Layer) if binding < storage => {
-            (DescriptorSetType::Layer, Binding::Buffer(binding + start))
-        }
-        Some(DescriptorSetType::Layer) => {
-            (DescriptorSetType::Layer, Binding::Buffer(binding - storage + DRAWABLE_RESERVED_UBO_COUNT as u32))
-        }
-        Some(DescriptorSetType::DrawableUniform) => {
-            (DescriptorSetType::DrawableUniform, Binding::Buffer(binding + start))
-        }
-        Some(DescriptorSetType::DrawableImage) if binding < IMAGE_SAMPLER_START as u32 => {
-            (DescriptorSetType::DrawableImage, Binding::Texture(texture_id(binding)?))
-        }
-        Some(DescriptorSetType::DrawableImage) => {
-            (DescriptorSetType::DrawableImage, Binding::Sampler(texture_id(binding - IMAGE_SAMPLER_START as u32)?))
-        }
-        None => return Err(GpuError::Invalid(format!("{name}: no descriptor set {set}"))),
-    };
-    Ok(resource)
+/// The entry points of every program (`mln_shaders::Stage::entry_point`).
+const ENTRY_POINTS: [&CStr; 2] = [c"vs_main", c"fs_main"];
+
+/// The set, binding, resource and bytes read of each binding of a stage.
+type StageBindings = Vec<(u32, u32, Binding, u64)>;
+
+/// `stage` of `program`, and what it binds: its SPIR-V, and the bindings it
+/// uses.
+fn stage_of(program: &mln_shaders::Program, stage: Stage) -> Result<(&[u32], StageBindings), String> {
+    debug_assert_eq!(ENTRY_POINTS[stage as usize].to_str(), Ok(stage.entry_point()));
+    let spirv = program.spirv(stage)?;
+    let resources = program
+        .resources
+        .iter()
+        .filter(|resource| resource.used_by(stage))
+        .map(|resource| {
+            let binding = match resource.kind {
+                ResourceKind::UniformBuffer | ResourceKind::StorageBuffer => Binding::Buffer(resource.id),
+                ResourceKind::Texture { .. } => Binding::Texture(resource.id),
+                ResourceKind::Sampler => Binding::Sampler(resource.id),
+            };
+            (resource.binding.group, resource.binding.binding, binding, resource.size)
+        })
+        .collect();
+    Ok((spirv, resources))
 }
 
 /// Adds `resource`, which a stage reads `size` bytes of, to what a shader
@@ -681,7 +651,6 @@ impl VulkanGpu {
             clip_depth: ClipDepthRange::ZeroToOne,
             render_target_depth: None,
             clear_stencil_with_pass: true,
-            line_expressions: false,
             cpu_rasterizer: properties.device_type == vk::PhysicalDeviceType::CPU,
             max_line_width: line_widths.map_or(1.0, |(_, max)| max),
         };
@@ -1114,14 +1083,12 @@ impl VulkanGpu {
         }
     }
 
-    /// Compiles the program of `key`.
+    /// Compiles the program of `key` from the SPIR-V `mln_shaders` writes.
     fn compile(&self, key: &ShaderKey) -> Result<Shader, GpuError> {
-        let program = key.program();
-        let source = shader_source(program).ok_or_else(|| GpuError::Unsupported(format!("no GLSL for {program:?}")))?;
-        let mut defines = String::new();
-        for (name, value) in key.define_values() {
-            let _ = writeln!(defines, "#define {name} {value}");
-        }
+        let program = mln_shaders::program_of(key, mln_shaders::Target::Vulkan)
+            .map_err(|error| GpuError::Invalid(format!("{:?}: {error}", key.program())))?;
+        let name = program.name;
+        let invalid = |error: String| GpuError::Invalid(format!("{name}: {error}"));
 
         let mut bindings: [Vec<(u32, Binding)>; DescriptorSetType::COUNT] = Default::default();
         let mut reads: Vec<ShaderBinding> = Vec::new();
@@ -1134,23 +1101,20 @@ impl VulkanGpu {
                 }
             }
         };
-        for stage in [Stage::Vertex, Stage::Fragment] {
-            let composed = source.compose(stage, &defines);
-            let result = shaders::compile_program(stage, &composed)
-                .map_err(|error| GpuError::Invalid(format!("{}: {error}", source.name)))
-                .and_then(|compiled| {
-                    for &ResourceUse { set, binding, size } in &compiled.resources {
-                        let (type_, resource) = binding_of(source.name, source.textures, set, binding)?;
-                        let set_bindings = &mut bindings[type_ as usize];
-                        if !set_bindings.contains(&(binding, resource)) {
-                            set_bindings.push((binding, resource));
-                        }
-                        read(&mut reads, resource, size);
+        for stage in Stage::ALL {
+            let result = stage_of(&program, stage).map_err(invalid).and_then(|(spirv, resources)| {
+                for (set, binding, resource, size) in resources {
+                    let type_ = DescriptorSetType::ALL[set as usize];
+                    let set_bindings = &mut bindings[type_ as usize];
+                    if !set_bindings.contains(&(binding, resource)) {
+                        set_bindings.push((binding, resource));
                     }
-                    let create_info = vk::ShaderModuleCreateInfo::default().code(&compiled.spirv);
-                    // SAFETY: the code is the SPIR-V module naga wrote.
-                    unsafe { self.device().create_shader_module(&create_info, None) }.map_err(vk_error(source.name))
-                });
+                    read(&mut reads, resource, size);
+                }
+                let create_info = vk::ShaderModuleCreateInfo::default().code(spirv);
+                // SAFETY: the code is the SPIR-V module naga wrote.
+                unsafe { self.device().create_shader_module(&create_info, None) }.map_err(vk_error(name))
+            });
             match result {
                 Ok(module) => modules.push(module),
                 Err(error) => {
@@ -1162,16 +1126,15 @@ impl VulkanGpu {
         for set_bindings in &mut bindings {
             set_bindings.sort_unstable_by_key(|&(binding, _)| binding);
         }
-        self.backend.set_debug_name(modules[0], &format!("{}.vert", source.name));
-        self.backend.set_debug_name(modules[1], &format!("{}.frag", source.name));
+        self.backend.set_debug_name(modules[0], &format!("{name}.vert"));
+        self.backend.set_debug_name(modules[1], &format!("{name}.frag"));
         Ok(Shader {
-            name: source.name,
+            name,
             vertex: modules[0],
             fragment: modules[1],
             bindings,
             reads,
-            attributes: source.attributes,
-            instance_attributes: source.instance_attributes,
+            attributes: program.inputs.iter().map(|input| input.location).collect(),
         })
     }
 
@@ -1300,14 +1263,15 @@ impl VulkanGpu {
                     },
                 ),
             );
-            for attribute in &layout.attributes {
+            // An attribute that the variant doesn't read isn't described.
+            for attribute in layout.attributes.iter().filter(|attribute| shader.attributes.contains(&attribute.id)) {
                 let format = vk_state::format(attribute.format);
                 if format == vk::Format::UNDEFINED {
                     return Err(GpuError::Unsupported(format!("vertex attribute format {:?}", attribute.format)));
                 }
                 input_attributes.push(
                     vk::VertexInputAttributeDescription::default()
-                        .location(shader.location(layout.step, attribute.id)?)
+                        .location(attribute.id)
                         .binding(slot as u32)
                         .format(format)
                         .offset(attribute.offset),
@@ -1402,11 +1366,11 @@ impl VulkanGpu {
             vk::PipelineShaderStageCreateInfo::default()
                 .stage(vk::ShaderStageFlags::VERTEX)
                 .module(vertex)
-                .name(c"main"),
+                .name(ENTRY_POINTS[0]),
             vk::PipelineShaderStageCreateInfo::default()
                 .stage(vk::ShaderStageFlags::FRAGMENT)
                 .module(fragment)
-                .name(c"main"),
+                .name(ENTRY_POINTS[1]),
         ];
         let render_pass = self.compatible_render_pass(desc.targets)?;
         let create_info = vk::GraphicsPipelineCreateInfo::default()

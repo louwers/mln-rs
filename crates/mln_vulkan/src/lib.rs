@@ -1,9 +1,8 @@
 //! The Vulkan backend: [`VulkanGpu`], the backend's `mln_gfx::gpu::Gpu`, on
-//! the `ash` bindings, with its shaders and the targets the renderer draws
-//! frames into.
+//! the `ash` bindings, and the targets the renderer draws frames into.
 //!
-//! It allocates memory with gpu-allocator and compiles `mln_glsl`'s GLSL to
-//! SPIR-V with naga.
+//! It allocates memory with gpu-allocator and draws with the SPIR-V that
+//! `mln_shaders` writes of its programs.
 //!
 //! A `RendererBackend` renders on a `Device`, which backends on any thread
 //! share, into an `OffscreenTarget`, a `SurfaceTarget`, a `BorrowedTarget` or
@@ -40,7 +39,7 @@ pub use exported_target::ExportedTarget;
 pub use gpu::{ImportedImage, VulkanGpu};
 /// Frames drawn into textures of the library's and read back.
 pub type OffscreenTarget = mln_gfx::offscreen_target::OffscreenTarget<RendererBackend>;
-pub use mln_glsl::Stage as ShaderStage;
+pub use mln_shaders::Stage as ShaderStage;
 pub use renderer_backend::RendererBackend;
 pub use shaders::compile as compile_glsl;
 pub use surface_target::{HostSurface, Overlay, OverlayTarget, SurfaceTarget};

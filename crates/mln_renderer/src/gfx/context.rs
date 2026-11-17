@@ -132,12 +132,6 @@ impl Context {
         &self.stats
     }
 
-    /// A uniform buffer holding `data`, or `None` if the backend can't make
-    /// one.
-    pub(crate) fn create_uniform_buffer(&self, data: &[u8]) -> Option<UniformBufferPtr> {
-        self.create_buffer(data, false)
-    }
-
     /// A storage buffer holding `data`, or `None` if the backend can't make
     /// one.
     pub(crate) fn create_storage_buffer(&self, data: &[u8]) -> Option<UniformBufferPtr> {

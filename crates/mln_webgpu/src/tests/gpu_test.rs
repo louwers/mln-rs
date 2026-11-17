@@ -3,7 +3,7 @@ use mln_gfx::gpu::conformance::{
     imported_textures, instanced_walls, invalid_calls, readbacks, topologies, transparent_replace, vertex_layouts,
     wall_quads,
 };
-use mln_gfx::gpu::{Gpu, TextureDesc, TextureFormat, TextureRegion, TextureUsage};
+use mln_gfx::gpu::{Gpu, ShaderKey, TextureDesc, TextureFormat, TextureRegion, TextureUsage};
 use mln_util::size::Size;
 
 use crate::{CustomLayerEncoder, CustomLayerPass, Device, WebGpu};
@@ -12,6 +12,22 @@ use crate::{CustomLayerEncoder, CustomLayerPass, Device, WebGpu};
 fn clip_mask_and_background_through_gpu() {
     let device = Device::new(None).expect("WebGPU device");
     clip_mask_and_background(&mut WebGpu::new(&device)).expect("the frame");
+}
+
+// Every program makes a module and bind group layouts, in the variants of
+// none, all, each alone and all but each of its flags.
+#[test]
+fn every_program_compiles_for_gpu() {
+    let device = Device::new(None).expect("WebGPU device");
+    let mut gpu = WebGpu::new(&device);
+    for program in mln_shaders::programs() {
+        for flags in mln_shaders::variants(&mln_shaders::flags_of(program), 0) {
+            let key = ShaderKey::new(program, flags.into_iter().chain(["DEVICE_PIXEL_RATIO=1.0".to_owned()]));
+            if let Err(error) = gpu.create_shader(&key) {
+                panic!("{key:?}: {error}");
+            }
+        }
+    }
 }
 
 #[test]

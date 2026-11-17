@@ -30,8 +30,6 @@ use mln_util::size::Size;
 use crate::custom_layer::{CustomLayerEncoder, CustomLayerPass, lend_context};
 use crate::enums::{self, AttributeFormat};
 use crate::renderer_backend::{Current, GlContext};
-use crate::shaders::glsl_sources::PRELUDE;
-use crate::shaders::shader_source::shader_source;
 use crate::state::State;
 #[cfg(not(target_family = "wasm"))]
 use crate::types::FenceID;
@@ -256,10 +254,10 @@ pub(crate) struct Program {
     /// The ids of the textures it samples. A texture's sampler reads the
     /// texture unit of its id.
     pub(crate) textures: Vec<usize>,
-    /// The location of each per-vertex attribute, by id.
-    pub(crate) vertex_locations: Vec<(u32, u32)>,
-    /// The location of each per-instance attribute, by id.
-    instance_locations: Vec<(u32, u32)>,
+    /// The location of each attribute it reads, by id.
+    pub(crate) locations: Vec<(u32, u32)>,
+    /// The ids of the attributes it reads as integers.
+    integer_attributes: Vec<u32>,
     deleted: Rc<Deleted>,
 }
 
@@ -278,12 +276,8 @@ pub(crate) struct FramebufferTextures {
 }
 
 impl Program {
-    fn location(&self, step: VertexStep, id: u32) -> Option<u32> {
-        let locations = match step {
-            VertexStep::Vertex => &self.vertex_locations,
-            VertexStep::Instance => &self.instance_locations,
-        };
-        locations.iter().find(|&&(attribute, _)| attribute == id).map(|&(_, location)| location)
+    fn location(&self, id: u32) -> Option<u32> {
+        self.locations.iter().find(|&&(attribute, _)| attribute == id).map(|&(_, location)| location)
     }
 }
 
@@ -370,6 +364,8 @@ impl Bindings {
 /// A vertex attribute as `glVertexAttribPointer` takes it.
 struct AttributePointer {
     location: u32,
+    /// Whether the program reads the attribute as integers.
+    integer: bool,
     buffer: BufferID,
     format: AttributeFormat,
     stride: i32,
@@ -579,7 +575,6 @@ impl GlGpu {
                 clip_depth: ClipDepthRange::NegativeOneToOne,
                 render_target_depth: None,
                 clear_stencil_with_pass: false,
-                line_expressions: false,
                 cpu_rasterizer: renderer.contains("llvmpipe") || renderer.contains("softpipe"),
                 max_line_width,
             };
@@ -796,24 +791,23 @@ impl GlGpu {
         self.shaders.get(shader).cloned().ok_or(GpuError::UnknownId("shader"))
     }
 
-    /// Compiles and links the program of `key`.
+    /// Compiles and links the program of `key` from the GLSL `mln_shaders`
+    /// writes.
     fn compile(&self, key: &ShaderKey) -> Result<Program, GpuError> {
-        let source = shader_source(key.program())
-            .ok_or_else(|| GpuError::Unsupported(format!("no GLSL for {:?}", key.program())))?;
-        let name = source.name;
-        // Desktop OpenGL compiles GLSL ES 3.00 only with
-        // `GL_ARB_ES3_compatibility`, and every 3.3 context the GLSL 3.30
-        // that the shaders are as well: what they use of GLSL ES is in it,
-        // and it ignores their precision qualifiers.
-        let version = if self.desktop { "#version 330 core\n" } else { "#version 300 es\n" };
-        let defines: String =
-            key.define_values().flat_map(|(name, value)| ["#define ", name, " ", value, "\n"]).collect();
+        let wesl = mln_shaders::program_of(key, mln_shaders::Target::Gl)
+            .map_err(|error| GpuError::Invalid(format!("{:?}: {error}", key.program())))?;
+        let name = wesl.name;
+        let invalid = |error: String| GpuError::Invalid(format!("{name}: {error}"));
+        let stages = [
+            wesl.glsl(mln_shaders::Stage::Vertex, self.desktop).map_err(invalid)?,
+            wesl.glsl(mln_shaders::Stage::Fragment, self.desktop).map_err(invalid)?,
+        ];
         let gl = self.context.gl();
-        let shader = |stage, prelude, glsl| {
+        let shader = |stage, text: &str| {
             // SAFETY: the shader is new, and deleted if it doesn't compile.
             unsafe {
                 let shader = gl.create_shader(stage).map_err(GpuError::Invalid)?;
-                gl.shader_source(shader, &[version, &defines, prelude, glsl].concat());
+                gl.shader_source(shader, text);
                 gl.compile_shader(shader);
                 if gl.get_shader_compile_status(shader) {
                     return Ok(shader);
@@ -823,8 +817,8 @@ impl GlGpu {
                 Err(GpuError::Invalid(format!("{name} doesn't compile: {log}")))
             }
         };
-        let vertex: ShaderID = shader(glow::VERTEX_SHADER, PRELUDE.vertex, source.glsl.vertex)?;
-        let fragment = match shader(glow::FRAGMENT_SHADER, PRELUDE.fragment, source.glsl.fragment) {
+        let vertex: ShaderID = shader(glow::VERTEX_SHADER, &stages[0].source)?;
+        let fragment = match shader(glow::FRAGMENT_SHADER, &stages[1].source) {
             Ok(fragment) => fragment,
             Err(error) => {
                 // SAFETY: the shader is alive and no program has it.
@@ -855,52 +849,78 @@ impl GlGpu {
             deleted: Rc::clone(&self.deleted),
             name,
             object,
-            blocks: Vec::with_capacity(source.uniform_blocks.len()),
-            textures: Vec::with_capacity(source.textures.len()),
-            vertex_locations: Vec::with_capacity(source.attributes.len()),
-            instance_locations: Vec::with_capacity(source.instance_attributes.len()),
+            blocks: Vec::new(),
+            textures: Vec::new(),
+            locations: Vec::with_capacity(wesl.inputs.len()),
+            integer_attributes: Vec::new(),
         };
-        // SAFETY: the program is alive and linked, and the indexes and names
-        // asked about are the ones it reports or its sources declare.
-        let described = unsafe {
-            let block_count = gl.get_program_parameter_i32(object, glow::ACTIVE_UNIFORM_BLOCKS).max(0) as u32;
-            (0..block_count).try_for_each(|index| {
-                let block_name = gl.get_active_uniform_block_name(object, index);
-                let info = source
-                    .uniform_blocks
-                    .iter()
-                    .find(|info| info.name == block_name)
-                    .ok_or_else(|| GpuError::Invalid(format!("{name}'s uniform block {block_name} has no id")))?;
-                let size = gl.get_active_uniform_block_parameter_i32(object, index, glow::UNIFORM_BLOCK_DATA_SIZE);
-                gl.uniform_block_binding(object, index, info.id as u32);
-                program.blocks.push(Block { id: info.id, size: size.max(0) as usize, element_size: info.element_size });
-                Ok(())
-            })?;
-
-            self.context.state().use_program(gl, Some(object));
-            for info in source.textures {
-                if let Some(location) = gl.get_uniform_location(object, info.name) {
-                    if info.id >= MAX_ACTIVE_TEXTURE_UNITS as usize {
-                        return Err(GpuError::Unsupported(format!("{name} samples texture id {}", info.id)));
-                    }
-                    gl.uniform_1_i32(Some(&location), info.id as i32);
-                    program.textures.push(info.id);
-                }
-            }
-            for (infos, locations) in [
-                (source.attributes, &mut program.vertex_locations),
-                (source.instance_attributes, &mut program.instance_locations),
-            ] {
-                for info in infos {
-                    if let Some(location) = gl.get_attrib_location(object, info.name) {
-                        locations.push((info.id as u32, location));
-                    }
-                }
-            }
-            Ok(())
-        };
+        self.context.state().use_program(gl, Some(object));
         // A program that fails here goes with `program`.
-        described.map(|()| program)
+        self.describe(&mut program, &wesl, stages).map(|()| program)
+    }
+
+    /// Binds the uniform blocks and samplers of `program`, of the GLSL of
+    /// `wesl`'s `stages`, and finds its attributes: each block at the binding
+    /// point of its buffer's id, each sampler at the texture unit of its
+    /// texture's id, and each input at its location, which is its
+    /// attribute's id.
+    fn describe(
+        &self,
+        program: &mut Program,
+        wesl: &mln_shaders::Program,
+        stages: [&mln_shaders::glsl::GlslStage; 2],
+    ) -> Result<(), GpuError> {
+        let (gl, object, name) = (self.context.gl(), program.object, wesl.name);
+        // SAFETY: the program is alive, linked and in use, and the indexes
+        // and names asked about are the ones it reports or its sources
+        // declare.
+        unsafe {
+            let block_count = gl.get_program_parameter_i32(object, glow::ACTIVE_UNIFORM_BLOCKS).max(0) as u32;
+            for index in 0..block_count {
+                let block_name = gl.get_active_uniform_block_name(object, index);
+                let resource = stages
+                    .iter()
+                    .flat_map(|stage| &stage.blocks)
+                    .find(|(block, _)| *block == block_name)
+                    .map(|&(_, resource)| &wesl.resources[resource])
+                    .ok_or_else(|| GpuError::Invalid(format!("{name}'s uniform block {block_name} has no id")))?;
+                let id = resource.id as usize;
+                // A block of a layer's buffer of an element for each drawable
+                // reads the draw's element.
+                let element_size = match resource.kind {
+                    mln_shaders::ResourceKind::StorageBuffer => resource.size as usize,
+                    _ => 0,
+                };
+                let size = gl.get_active_uniform_block_parameter_i32(object, index, glow::UNIFORM_BLOCK_DATA_SIZE);
+                let size = size.max(0) as usize;
+                gl.uniform_block_binding(object, index, id as u32);
+                match program.blocks.iter_mut().find(|block| block.id == id) {
+                    Some(block) => block.size = block.size.max(size),
+                    None => program.blocks.push(Block { id, size, element_size }),
+                }
+            }
+
+            for (sampler, id) in stages.iter().flat_map(|stage| &stage.samplers) {
+                let id = *id as usize;
+                if let Some(location) = gl.get_uniform_location(object, sampler) {
+                    if id >= MAX_ACTIVE_TEXTURE_UNITS as usize {
+                        return Err(GpuError::Unsupported(format!("{name} samples texture id {id}")));
+                    }
+                    gl.uniform_1_i32(Some(&location), id as i32);
+                    if !program.textures.contains(&id) {
+                        program.textures.push(id);
+                    }
+                }
+            }
+            for (input, id) in &stages[0].inputs {
+                let Some(location) = gl.get_attrib_location(object, input) else { continue };
+                program.locations.push((*id, location));
+                if wesl.input(*id).is_some_and(|input| input.is_integer()) {
+                    program.integer_attributes.push(*id);
+                }
+            }
+        }
+        Ok(())
     }
 
     /// The framebuffer of `color` and `depth_stencil`, made on first use,
@@ -995,14 +1015,24 @@ impl GlGpu {
             for pointer in &pointers {
                 gl.enable_vertex_attrib_array(pointer.location);
                 gl.bind_buffer(glow::ARRAY_BUFFER, Some(pointer.buffer));
-                gl.vertex_attrib_pointer_f32(
-                    pointer.location,
-                    pointer.format.components,
-                    pointer.format.type_,
-                    pointer.format.normalized,
-                    pointer.stride,
-                    pointer.offset,
-                );
+                if pointer.integer {
+                    gl.vertex_attrib_pointer_i32(
+                        pointer.location,
+                        pointer.format.components,
+                        pointer.format.type_,
+                        pointer.stride,
+                        pointer.offset,
+                    );
+                } else {
+                    gl.vertex_attrib_pointer_f32(
+                        pointer.location,
+                        pointer.format.components,
+                        pointer.format.type_,
+                        pointer.format.normalized,
+                        pointer.stride,
+                        pointer.offset,
+                    );
+                }
                 gl.vertex_attrib_divisor(pointer.location, pointer.divisor);
             }
         }
@@ -1113,7 +1143,7 @@ fn attribute_pointers(
         };
         for attribute in &layout.attributes {
             // The program reads no such attribute, or optimized it out.
-            let Some(location) = geometry.program.location(layout.step, attribute.id) else {
+            let Some(location) = geometry.program.location(attribute.id) else {
                 continue;
             };
             let format = enums::attribute_format(attribute.format)
@@ -1127,6 +1157,7 @@ fn attribute_pointers(
                 .ok_or_else(|| GpuError::Invalid(format!("vertex attribute {} at offset {start}", attribute.id)))?;
             pointers.push(AttributePointer {
                 location,
+                integer: geometry.program.integer_attributes.contains(&attribute.id),
                 buffer: object,
                 format,
                 stride: layout.stride as i32,
@@ -1374,20 +1405,11 @@ impl Gpu for GlGpu {
 
     fn create_pipeline(&mut self, desc: &PipelineDesc<'_>) -> Result<PipelineId, GpuError> {
         let program = Rc::clone(self.shaders.get(desc.shader).ok_or(GpuError::UnknownId("shader"))?);
-        for (step, locations) in
-            [(VertexStep::Vertex, &program.vertex_locations), (VertexStep::Instance, &program.instance_locations)]
-        {
-            for &(id, _) in locations {
-                let given = desc
-                    .vertex_buffers
-                    .iter()
-                    .any(|layout| layout.step == step && layout.attributes.iter().any(|attribute| attribute.id == id));
-                if !given {
-                    return Err(GpuError::Invalid(format!(
-                        "{} reads attribute {id}, which no buffer gives",
-                        program.name
-                    )));
-                }
+        for &(id, _) in &program.locations {
+            let given =
+                desc.vertex_buffers.iter().any(|layout| layout.attributes.iter().any(|attribute| attribute.id == id));
+            if !given {
+                return Err(GpuError::Invalid(format!("{} reads attribute {id}, which no buffer gives", program.name)));
             }
         }
         let layout = self.layout_tags.tag(desc.shader, desc.vertex_buffers);

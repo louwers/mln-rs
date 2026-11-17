@@ -15,12 +15,12 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shader_group::StringIDSetsPair;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::line_layer_ubo::{
-    LINE_EXPRESSION_UBO_SIZE, LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO, line_expression_mask,
+    LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO, line_expression_mask,
 };
 use mln_gfx::shaders::shader_defines::{
     ID_LINE_BLUR_VERTEX_ATTRIBUTE, ID_LINE_COLOR_VERTEX_ATTRIBUTE, ID_LINE_DRAWABLE_UBO, ID_LINE_EVALUATED_PROPS_UBO,
-    ID_LINE_EXPRESSION_UBO, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_OFFSET_VERTEX_ATTRIBUTE,
-    ID_LINE_OPACITY_VERTEX_ATTRIBUTE, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
+    ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_OFFSET_VERTEX_ATTRIBUTE, ID_LINE_OPACITY_VERTEX_ATTRIBUTE,
+    ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
 };
 use mln_gfx::{ColorMode, CullFaceMode};
 use mln_map_types::MapDebugOptions;
@@ -314,8 +314,6 @@ pub(crate) struct PolylineLayerTweaker {
     props_ubo: LineEvaluatedPropsUBO,
     /// `MLN_UBO_CONSOLIDATION`
     drawable_uniform_buffer: Option<UniformBufferPtr>,
-    /// Port-only: the Metal line shaders' `LineExpressionUBO`.
-    expression_uniform_buffer: Option<UniformBufferPtr>,
 }
 
 impl PolylineLayerTweaker {
@@ -325,7 +323,6 @@ impl PolylineLayerTweaker {
             base: LayerTweakerBase::new("debug-polyline".to_owned(), None),
             props_ubo: properties,
             drawable_uniform_buffer: None,
-            expression_uniform_buffer: None,
         }
     }
 }
@@ -350,14 +347,6 @@ impl LayerTweaker for PolylineLayerTweaker {
         // We would need to set up `idLineExpressionUBO` if the expression
         // mask isn't empty
         debug_assert_eq!(self.props_ubo.expression_mask, line_expression_mask::NONE);
-        // No GPU expressions; only line shaders of `Caps::line_expressions`
-        // read it.
-        if context.caps().line_expressions {
-            if self.expression_uniform_buffer.is_none() {
-                self.expression_uniform_buffer = context.create_uniform_buffer(&[0; LINE_EXPRESSION_UBO_SIZE]);
-            }
-            layer_group.mutable_uniform_buffers().set(ID_LINE_EXPRESSION_UBO, self.expression_uniform_buffer.clone());
-        }
 
         let mut i: u32 = 0;
         let mut drawable_ubo_vector = vec![LineDrawableUnionUBO::default(); layer_group.drawable_count()];

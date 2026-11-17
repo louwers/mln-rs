@@ -1,5 +1,3 @@
-// Compiles every program to SPIR-V in both projection variants.
-mod spirv_test;
 // The window backend on a headless surface (VK_EXT_headless_surface): frames
 // through the swapchain, resizes, the overlay, readback, two frames in
 // flight.

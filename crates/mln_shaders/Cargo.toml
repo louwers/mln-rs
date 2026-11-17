@@ -1,0 +1,52 @@
+[package]
+name = "mln-rs-shaders"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+build = "build/main.rs"
+include = ["/build", "/src", "/shaders", "/README.md", "/LICENSE*"]
+
+[lib]
+name = "mln_shaders"
+doctest = false
+
+[dependencies]
+mln_gfx.workspace = true
+mln_util.workspace = true
+naga = { workspace = true, optional = true }
+parking_lot.workspace = true
+
+[build-dependencies]
+wesl.workspace = true
+wgsl-parse.workspace = true
+
+[dev-dependencies]
+# The tests write every target's language, and link each variant directly
+# to compare.
+naga = { workspace = true, features = [
+  "glsl-out",
+  "hlsl-out",
+  "msl-out",
+  "spv-out",
+  "wgsl-out",
+] }
+wesl.workspace = true
+
+[features]
+# Each embeds its target's programs. All but WebGPU's go through naga, which
+# validates them and writes the backend's language.
+glsl = ["naga", "naga/glsl-out"]
+hlsl = ["naga", "naga/hlsl-out"]
+msl = ["naga", "naga/msl-out"]
+spirv = ["naga", "naga/spv-out"]
+naga = ["dep:naga"]
+# WebGPU's programs: the WGSL as it is, with no naga.
+wgsl = []
+
+[lints]
+workspace = true

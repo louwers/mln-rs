@@ -5,7 +5,7 @@
 //! a draw's samplers as a root SRV. Binding a draw sets GPU addresses only.
 
 use mln_gfx::gpu::GpuError;
-use mln_glsl::layout::DescriptorSetType;
+use mln_shaders::layout::DescriptorSetType;
 use windows::Win32::Graphics::Direct3D::ID3DBlob;
 use windows::Win32::Graphics::Direct3D12::{
     D3D_ROOT_SIGNATURE_VERSION_1, D3D12_DESCRIPTOR_RANGE, D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER,
