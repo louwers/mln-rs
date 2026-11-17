@@ -22,7 +22,6 @@ pub(crate) struct TileParameters<'a> {
     pub(crate) subdivision_granularity: SubdivisionGranularitySetting,
     pub(crate) global_state: Option<Arc<GlobalStateMap>>,
     pub(crate) is_update_synchronous: bool,
-    pub(crate) capture_rendered_features: bool,
     /// The style's font faces, which the tiles' layouts shape text with.
     pub(crate) font_faces: Option<Arc<FontFaces>>,
 }

@@ -26,8 +26,7 @@ pub use mln_map_types::{
     ProjectionMode, TileLodMode, TransformState, TransitionEnd, TransitionOutcome, Viewport, ViewportMode,
 };
 pub use mln_renderer::{
-    FeatureInfo, FrameRenderedFeaturesMap, LayerFeaturesMap, NDCBound, OverscaledTileID, RenderMode, RendererEvents,
-    RenderingStats, SourceLayerID, TileOperation, Update, UpdateReader,
+    OverscaledTileID, RenderMode, RendererEvents, RenderingStats, TileOperation, Update, UpdateReader,
 };
 pub use mln_style::StyleLoadError;
 pub use mln_util::event_queue::Waker;

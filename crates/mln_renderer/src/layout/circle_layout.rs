@@ -15,7 +15,6 @@ use mln_util::constants::EXTENT;
 use mln_util::error::Error;
 use mln_vec_map::VecMap;
 
-use crate::bucket::Bucket;
 use crate::bucket_parameters::BucketParameters;
 use crate::buckets::circle_bucket::CircleBucket;
 use crate::geometry::feature_index::FeatureIndex;
@@ -40,7 +39,6 @@ pub(crate) struct CircleLayout {
     pub(crate) zoom: f32,
     pub(crate) mode: MapMode,
     pub(crate) source_layer_id: String,
-    pub(crate) retain_features_by_id: bool,
 
     /// The source layer the layout gets its features from again (see
     /// layout.rs).
@@ -119,7 +117,6 @@ impl CircleLayout {
             zoom,
             mode: parameters.mode,
             source_layer_id,
-            retain_features_by_id: parameters.retain_features_by_id,
             source_layer,
         })
     }
@@ -222,14 +219,11 @@ impl Layout<Circle> for CircleLayout {
     ) -> Result<Option<CircleBucket>, Error> {
         let source_layer = self.source_layer.layer()?;
         let mut bucket = CircleBucket::new(&self.layer_properties_map, self.mode, self.zoom);
-        bucket.set_retain_features_by_id(self.retain_features_by_id);
-        bucket.reserve_features(self.features.len());
 
         for circle_feature in &self.features {
             let i = circle_feature.i;
             let feature = source_layer.feature(i)?;
             let geometries = feature.geometry()?;
-            let vertex_offset = bucket.vertices.len();
 
             CircleLayout::add_circle(
                 &mut bucket,
@@ -240,13 +234,6 @@ impl Layout<Circle> for CircleLayout {
                 circle_feature.sort_key,
                 &build.canonical,
             );
-
-            if self.retain_features_by_id {
-                let vertex_count = bucket.vertices.len() - vertex_offset;
-                if vertex_count > 0 {
-                    bucket.retain_feature(&feature, vertex_offset, vertex_count);
-                }
-            }
 
             feature_index.insert(&geometries, i, &self.source_layer_id, &self.bucket_leader_id);
         }

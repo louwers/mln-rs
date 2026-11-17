@@ -38,8 +38,6 @@ pub(crate) struct LayoutParams {
     pub(crate) subdivision_granularity: SubdivisionGranularitySetting,
     /// Whether the tile has had no layout yet.
     pub(crate) first_load: bool,
-    /// Whether buckets keep their features by id.
-    pub(crate) capture_rendered_features: bool,
 }
 
 /// What a tile's layout reads, apart from its dependencies.
@@ -63,7 +61,6 @@ impl LayoutInput<'_> {
             mode: self.params.mode,
             pixel_ratio: self.params.pixel_ratio,
             global_state: self.global_state.cloned(),
-            retain_features_by_id: self.params.capture_rendered_features,
             subdivision_granularity: self.params.subdivision_granularity,
         }
     }

@@ -120,7 +120,6 @@ impl OneTile {
             show_collision_boxes: false,
             subdivision_granularity: mln_util::subdivision_granularity::SubdivisionGranularitySetting::none(),
             first_load: true,
-            capture_rendered_features: false,
         }
     }
 

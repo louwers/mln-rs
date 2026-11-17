@@ -46,14 +46,10 @@ use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluat
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::pattern_layout::{LineLayoutSpec, PatternLayout, uses_pattern};
 use crate::line_atlas::LinePatternCap;
-use crate::paint_parameters::{PaintParameters, TransformParameters};
+use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
-use crate::render_layer::{
-    LayerPrepareParameters, RenderLayer, RenderLayerBase, RenderLayerPtr, Stats, capture_retained_features, set_style,
-    vertex_color_alpha, vertex_opacity,
-};
+use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase, RenderLayerPtr, set_style};
 use crate::render_pass::RenderPass;
-use crate::render_tile::RenderTile;
 use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
 
@@ -90,65 +86,6 @@ pub(crate) fn apply_color_ramp(
         i += 4;
     }
     true
-}
-
-/// Captures the tile's rendered features in `stats`, skipping the features
-/// that draw fully transparent.
-fn capture_rendered_features(
-    stats: &mut Stats,
-    bucket: &LineBucket,
-    tile: &RenderTile,
-    binders: &LineBinders,
-    evaluated: &LinePaintProperties::PossiblyEvaluated,
-    state: &TransformState,
-    transform_params: &TransformParameters,
-) {
-    let alpha = &evaluated.line_opacity;
-    let alpha_is_constant = alpha.is_constant();
-    if alpha_is_constant && binders.line_opacity.uniform_value(alpha) == 0.0 {
-        return;
-    }
-
-    let color = &evaluated.line_color;
-    let color_is_constant = color.is_constant();
-    if color_is_constant && binders.line_color.uniform_value(color).a == 0.0 {
-        return;
-    }
-
-    let zoom_fraction = state.get_zoom_fraction();
-    let buffer = &binders.interleaved_vertex_buffer;
-    let vertices = bucket.vertices.data();
-    capture_retained_features(
-        stats,
-        bucket,
-        tile.get_overscaled_tile_id(),
-        state,
-        transform_params,
-        *evaluated.line_translate.uniform(),
-        *evaluated.line_translate_anchor.uniform(),
-        |vertex_offset| {
-            if !alpha_is_constant {
-                let opacity = binders.line_opacity.get_vertex_value(buffer, vertex_offset);
-                if opacity.and_then(|v| vertex_opacity(&v, zoom_fraction)) == Some(0.0) {
-                    return false;
-                }
-            }
-            if !color_is_constant {
-                let color = binders.line_color.get_vertex_value(buffer, vertex_offset);
-                if color.and_then(|v| vertex_color_alpha(&v, zoom_fraction)) == Some(0.0) {
-                    return false;
-                }
-            }
-            true
-        },
-        |view, vertex_offset, vertex_count| {
-            view.tile_space_bound(vertex_count, |i| {
-                // Not considering line width yet
-                let vertex = vertices.get(vertex_offset.checked_add(i)?)?;
-                Some([f64::from(vertex.a1[0]) / 2.0, f64::from(vertex.a1[1]) / 2.0, 0.0])
-            })
-        },
-    );
 }
 
 fn read_line_attributes(
@@ -581,13 +518,12 @@ impl RenderLayer for RenderLineLayer {
         shaders: &ShaderRegistry,
         context: &Context,
         state: &TransformState,
-        parameters: &Arc<UpdateParameters>,
+        _parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
-        render_tree: &RenderTree,
+        _render_tree: &RenderTree,
         changes: &mut UniqueChangeRequestVec,
     ) {
         self.update_projection_variant(state);
-        self.base.stats.rendered_features.clear();
 
         let Some(render_tiles) = self.base.render_tiles.clone().filter(|t| !t.is_empty()) else {
             self.remove_all_drawables();
@@ -723,19 +659,6 @@ impl RenderLayer for RenderLineLayer {
                 )
             };
             let evaluated = &evaluated::<Line>(&render_data.layer).paint;
-
-            if parameters.capture_rendered_features {
-                let params = &render_tree.get_parameters().transform_params;
-                capture_rendered_features(
-                    &mut self.base.stats,
-                    bucket,
-                    tile,
-                    paint_property_binders,
-                    evaluated,
-                    state,
-                    params,
-                );
-            }
 
             let prev_bucket_id = self.get_render_tile_bucket_id(&tile_id);
             if prev_bucket_id.is_some_and(|prev| prev != bucket.base.bucket_id) {

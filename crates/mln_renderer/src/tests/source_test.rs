@@ -73,7 +73,6 @@ fn tile_parameters(
         subdivision_granularity: SubdivisionGranularitySetting::none(),
         global_state: None,
         is_update_synchronous: false,
-        capture_rendered_features: false,
         font_faces: None,
     }
 }

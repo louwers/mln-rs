@@ -15,11 +15,8 @@ use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
 use mln_style::layers::Circle;
 use mln_style::layers::circle_layer_properties::CirclePaintProperties;
 use mln_style::{PropertyEvaluationParameters, TransitionParameters};
-use mln_style_types::{AlignmentType, CirclePitchScaleType};
 use mln_util::Color;
 use mln_util::error::Error;
-use mln_util::mat4::{Mat4, matrix};
-use mln_util::vectors::{Vec2, Vec3, vec2_gl_fmod};
 
 use super::circle_layer_tweaker::CircleLayerTweaker;
 use super::{
@@ -35,197 +32,15 @@ use crate::layer_tweaker::LayerTweakerPtr;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
 use crate::layout::circle_layout::CircleLayout;
 use crate::layout::layout::{LayoutParameters, SourceLayer};
-use crate::paint_parameters::{PaintParameters, TransformParameters};
-use crate::paint_property_binder::{PaintPropertyBinder, read_data_driven_paint_property};
-use crate::render_layer::{
-    CaptureView, RenderLayer, RenderLayerBase, RenderLayerPtr, Stats, capture_retained_features,
-    compute_feature_ndc_bound, set_style, vertex_color_alpha, vertex_opacity,
-};
+use crate::paint_parameters::PaintParameters;
+use crate::paint_property_binder::read_data_driven_paint_property;
+use crate::render_layer::{RenderLayer, RenderLayerBase, RenderLayerPtr, set_style};
 use crate::render_pass::RenderPass;
 use crate::render_tile::RenderTile;
 use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
 
 const CIRCLE_SHADER_GROUP_NAME: &str = "CircleShader";
-
-fn capture_rendered_features(
-    stats: &mut Stats,
-    bucket: &CircleBucket,
-    tile: &RenderTile,
-    binders: &CircleBinders,
-    evaluated: &CirclePaintProperties::PossiblyEvaluated,
-    state: &TransformState,
-    transform_params: &TransformParameters,
-) {
-    let tile_id = tile.get_overscaled_tile_id();
-
-    let alpha = &evaluated.circle_opacity;
-    let stroke_alpha = &evaluated.circle_stroke_opacity;
-    let alpha_is_constant = alpha.is_constant();
-    let stroke_alpha_is_constant = stroke_alpha.is_constant();
-    if alpha_is_constant
-        && stroke_alpha_is_constant
-        && binders.circle_opacity.uniform_value(alpha) == 0.0
-        && binders.circle_stroke_opacity.uniform_value(stroke_alpha) == 0.0
-    {
-        return;
-    }
-
-    let color = &evaluated.circle_color;
-    let stroke_color = &evaluated.circle_stroke_color;
-    let color_is_constant = color.is_constant();
-    let stroke_color_is_constant = stroke_color.is_constant();
-    if color_is_constant
-        && stroke_color_is_constant
-        && binders.circle_color.uniform_value(color).a == 0.0
-        && binders.circle_stroke_color.uniform_value(stroke_color).a == 0.0
-    {
-        return;
-    }
-
-    let zoom = state.get_zoom();
-    let zoom_fraction = state.get_zoom_fraction();
-    let camera_to_center_distance = f64::from(state.get_camera_to_center_distance());
-    let pixels_to_tile_units = tile_id.to_unwrapped().pixels_to_tile_units(1.0, zoom as f32);
-
-    let radius = evaluated.circle_radius.constant_or(&CirclePaintProperties::Defaults::circle_radius());
-    let stroke_width =
-        evaluated.circle_stroke_width.constant_or(&CirclePaintProperties::Defaults::circle_stroke_width());
-    let pitch_with_map = *evaluated.circle_pitch_alignment.uniform() == AlignmentType::Map;
-    let scale_with_map = *evaluated.circle_pitch_scale.uniform() == CirclePitchScaleType::Map;
-    let size = state.get_size();
-    let extrude_scale: Vec2 = if pitch_with_map {
-        [f64::from(pixels_to_tile_units), f64::from(pixels_to_tile_units)]
-    } else {
-        [f64::from(2.0f32 / size.width as f32), f64::from(-2.0f32 / size.height as f32)]
-    };
-    let corner_radius = f64::from(radius + stroke_width);
-    let use_projected_center = !pitch_with_map || !scale_with_map;
-
-    // The position of a circle's quad corner: in view space when the circle
-    // is pitched with the map, else in NDC.
-    let corner_position = |vertex: &CircleLayoutVertex, tile_matrix: &Mat4| -> Vec3 {
-        let pos = [f64::from(vertex.a1[0]), f64::from(vertex.a1[1])];
-        // circle center (view space)
-        let center = [(pos[0] / 2.0).trunc(), (pos[1] / 2.0).trunc()];
-        // corner offset (view space)
-        let extrude = vec2_gl_fmod(&pos, 2.0).map(|v| v * 2.0 - 1.0);
-        // scaled corner offset (view space)
-        let offset = [extrude[0] * extrude_scale[0] * corner_radius, extrude[1] * extrude_scale[1] * corner_radius];
-        // projected center (clip space)
-        let projected_center = if use_projected_center {
-            matrix::transform_mat4_value(&[center[0], center[1], 0.0, 1.0], tile_matrix)
-        } else {
-            [0.0; 4]
-        };
-
-        if pitch_with_map {
-            let clip_scale = if scale_with_map { 1.0 } else { projected_center[3] / camera_to_center_distance };
-            [center[0] + offset[0] * clip_scale, center[1] + offset[1] * clip_scale, 0.0]
-        } else {
-            let clip_scale = if scale_with_map { camera_to_center_distance } else { projected_center[3] };
-            let clip_pos = [
-                projected_center[0] + offset[0] * clip_scale,
-                projected_center[1] + offset[1] * clip_scale,
-                projected_center[2],
-                projected_center[3],
-            ];
-            [clip_pos[0] / clip_pos[3], clip_pos[1] / clip_pos[3], clip_pos[2] / clip_pos[3]]
-        }
-    };
-
-    // The same corners in NDC on the globe: a circle on the viewport keeps its
-    // pixel radius around the projected center, a circle on the map is the
-    // ellipse its east and north radii project to.
-    let globe_corner_position =
-        |vertex: &CircleLayoutVertex, projector: &TileProjector<'_>, translation: &Vec2| -> Vec3 {
-            let pos = [f64::from(vertex.a1[0]), f64::from(vertex.a1[1])];
-            let center = Point::new((pos[0] / 2.0).trunc() + translation[0], (pos[1] / 2.0).trunc() + translation[1]);
-            let projected = projector.project_as_drawn(&center, 0.0);
-            if projected.occluded || projected.signed_distance_from_camera <= 0.0 {
-                // Not drawn; NaN stays out of the bound.
-                return [f64::NAN, f64::NAN, 0.0];
-            }
-            let w = projected.signed_distance_from_camera;
-            let half_extent: Vec2 = if pitch_with_map {
-                let tile_radius = corner_radius
-                    * f64::from(pixels_to_tile_units)
-                    * projector.pitched_text_correction(&center)
-                    * if scale_with_map { 1.0 } else { w / camera_to_center_distance };
-                let east = projector.project_as_drawn(&Point::new(center.x + tile_radius, center.y), 0.0).point;
-                let north = projector.project_as_drawn(&Point::new(center.x, center.y + tile_radius), 0.0).point;
-                let (east, north) = (
-                    [east.x - projected.point.x, east.y - projected.point.y],
-                    [north.x - projected.point.x, north.y - projected.point.y],
-                );
-                [east[0].hypot(north[0]), east[1].hypot(north[1])]
-            } else {
-                let clip_scale = if scale_with_map { camera_to_center_distance } else { w } / w;
-                [
-                    corner_radius * 2.0 / f64::from(size.width) * clip_scale,
-                    corner_radius * 2.0 / f64::from(size.height) * clip_scale,
-                ]
-            };
-            let extrude = vec2_gl_fmod(&pos, 2.0).map(|v| v * 2.0 - 1.0);
-            [projected.point.x + extrude[0] * half_extent[0], projected.point.y + extrude[1] * half_extent[1], 0.0]
-        };
-
-    // The globe's corners are already in NDC.
-    let mut identity: Mat4 = [0.0; 16];
-    matrix::identity(&mut identity);
-
-    let buffer = &binders.interleaved_vertex_buffer;
-    let vertices = bucket.vertices.data();
-    capture_retained_features(
-        stats,
-        bucket,
-        tile_id,
-        state,
-        transform_params,
-        *evaluated.circle_translate.uniform(),
-        *evaluated.circle_translate_anchor.uniform(),
-        |vertex_offset| {
-            if !alpha_is_constant || !stroke_alpha_is_constant {
-                let interpolated = |is_constant: bool, binder: &PaintPropertyBinder<f32>| {
-                    if is_constant {
-                        Some(1.0)
-                    } else {
-                        binder.get_vertex_value(buffer, vertex_offset).and_then(|v| vertex_opacity(&v, zoom_fraction))
-                    }
-                };
-                if interpolated(alpha_is_constant, &binders.circle_opacity) == Some(0.0)
-                    && interpolated(stroke_alpha_is_constant, &binders.circle_stroke_opacity) == Some(0.0)
-                {
-                    return false;
-                }
-            }
-            if !color_is_constant {
-                let alpha = |binder: &PaintPropertyBinder<Color>| {
-                    binder.get_vertex_value(buffer, vertex_offset).and_then(|v| vertex_color_alpha(&v, zoom_fraction))
-                };
-                if alpha(&binders.circle_color) == Some(0.0) && alpha(&binders.circle_stroke_color) == Some(0.0) {
-                    return false;
-                }
-            }
-            true
-        },
-        |view, vertex_offset, vertex_count| {
-            let vertex = |i: usize| vertices.get(vertex_offset.checked_add(i)?);
-            match view {
-                CaptureView::Matrix(tile_matrix) => {
-                    compute_feature_ndc_bound(vertex_count, tile_matrix, !pitch_with_map, |i| {
-                        vertex(i).map(|vertex| corner_position(vertex, tile_matrix))
-                    })
-                }
-                CaptureView::Globe { projector, translation } => {
-                    compute_feature_ndc_bound(vertex_count, &identity, true, |i| {
-                        vertex(i).map(|vertex| globe_corner_position(vertex, projector, translation))
-                    })
-                }
-            }
-        },
-    );
-}
 
 fn read_circle_attributes(
     attrs: &mut VertexAttributeArray,
@@ -540,13 +355,12 @@ impl RenderLayer for RenderCircleLayer {
         shaders: &ShaderRegistry,
         _context: &Context,
         state: &TransformState,
-        update_parameters: &Arc<UpdateParameters>,
+        _update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
-        render_tree: &RenderTree,
+        _render_tree: &RenderTree,
         changes: &mut UniqueChangeRequestVec,
     ) {
         self.update_projection_variant(state);
-        self.base.stats.rendered_features.clear();
 
         let Some(render_tiles) = self.base.render_tiles.clone().filter(|t| !t.is_empty()) else {
             self.remove_all_drawables();
@@ -632,20 +446,6 @@ impl RenderLayer for RenderCircleLayer {
                 self.remove_tile(render_pass, &tile_id);
             }
             self.set_render_tile_bucket_id(&tile_id, bucket.base.bucket_id);
-
-            if update_parameters.capture_rendered_features {
-                let evaluated = &crate::layer_type::evaluated::<Circle>(&render_data.layer).paint;
-                let params = &render_tree.get_parameters().transform_params;
-                capture_rendered_features(
-                    &mut self.base.stats,
-                    bucket,
-                    tile,
-                    paint_property_binders,
-                    evaluated,
-                    state,
-                    params,
-                );
-            }
 
             // If there are already drawables for this tile, update their UBOs
             // and move on to the next tile.

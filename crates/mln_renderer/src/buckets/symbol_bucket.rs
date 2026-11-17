@@ -283,7 +283,6 @@ pub(crate) struct PlacedSymbol {
     pub(crate) angle: f32,
     /// Reference to placed icon, only applicable for text symbols.
     pub(crate) placed_icon_index: Option<usize>,
-    pub(crate) feature_id: Option<String>,
     /// The symbol's `symbol-height-offset`, in meters above the ground.
     pub(crate) height_offset: f32,
 }
@@ -300,7 +299,6 @@ impl PlacedSymbol {
         writing_modes: WritingModeType,
         line: GeometryCoordinates,
         tile_distances: Vec<f32>,
-        feature_id: Option<String>,
         placed_icon_index: Option<usize>,
     ) -> Self {
         PlacedSymbol {
@@ -319,7 +317,6 @@ impl PlacedSymbol {
             placed_orientation: None,
             angle: 0.0,
             placed_icon_index,
-            feature_id,
             height_offset: 0.0,
         }
     }
@@ -826,10 +823,6 @@ pub(crate) fn get_sorted_symbols(symbol_instances: &[SymbolInstance], angle: f32
 impl Bucket for SymbolBucket {
     fn base(&self) -> &BucketBase {
         &self.base
-    }
-
-    fn base_mut(&mut self) -> &mut BucketBase {
-        &mut self.base
     }
 
     fn max_content_elevation(&self) -> f32 {

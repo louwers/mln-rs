@@ -147,9 +147,6 @@ impl Bucket for FillBucket {
     fn base(&self) -> &BucketBase {
         &self.base
     }
-    fn base_mut(&mut self) -> &mut BucketBase {
-        &mut self.base
-    }
 
     fn add_feature(
         &mut self,
@@ -160,17 +157,8 @@ impl Bucket for FillBucket {
         index: usize,
         canonical: &CanonicalTileID,
     ) -> Result<(), Error> {
-        let vertex_offset = self.vertices.len();
-
         self.generate_buffers(geometry, canonical)?;
         self.populate_binders(feature, pattern_positions, pattern_dependencies, index, canonical);
-
-        if self.base.retain_features_by_id {
-            let vertex_count = self.vertices.len() - vertex_offset;
-            if vertex_count > 0 {
-                self.retain_feature(feature, vertex_offset, vertex_count);
-            }
-        }
         Ok(())
     }
 

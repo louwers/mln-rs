@@ -36,11 +36,9 @@ use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionPaintProper
 use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_style_types::AlignmentType;
 use mln_util::error::Error;
-use mln_util::hash::HashSet;
 
 use super::fill_extrusion_layer_tweaker::FillExtrusionLayerTweaker;
 use super::{DrawableBinders, DrawableRenderTile, TileDrawables, drawable_has_layer_tweaker, shared_vertices};
-use crate::bucket::Bucket;
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, derived_vertices, paint_vertices};
 use crate::buckets::fill_extrusion_bucket::{
     FillExtrusionBinders, FillExtrusionBucket, FillExtrusionLayoutSpec, FillExtrusionLayoutVertex,
@@ -55,94 +53,13 @@ use crate::layer_tweaker::LayerTweakerPtr;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::pattern_layout::{PatternLayout, uses_pattern};
-use crate::paint_parameters::{PaintParameters, TransformParameters};
+use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
-use crate::render_layer::{
-    CaptureView, RenderLayer, RenderLayerBase, RenderLayerPtr, Stats, set_style, vertex_color_alpha,
-};
+use crate::render_layer::{RenderLayer, RenderLayerBase, RenderLayerPtr, set_style};
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
-use crate::render_tile::RenderTile;
 use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
-
-fn capture_rendered_features(
-    stats: &mut Stats,
-    bucket: &FillExtrusionBucket,
-    tile: &RenderTile,
-    binders: &FillExtrusionBinders,
-    evaluated: &FillExtrusionPaintProperties::PossiblyEvaluated,
-    state: &TransformState,
-    transform_params: &TransformParameters,
-) {
-    let tile_id = tile.get_overscaled_tile_id();
-
-    // fill-extrusion-opacity does not support data-driven expressions
-    if *evaluated.fill_extrusion_opacity.uniform() == 0.0 {
-        return;
-    }
-
-    let color = &evaluated.fill_extrusion_color;
-    let color_is_constant = color.is_constant();
-    if color_is_constant && binders.fill_extrusion_color.uniform_value(color).a == 0.0 {
-        return;
-    }
-
-    let translation = evaluated.fill_extrusion_translate.uniform();
-    let translation_anchor = &evaluated.fill_extrusion_translate_anchor;
-    let base = f64::from(
-        evaluated.fill_extrusion_base.constant_or(&FillExtrusionPaintProperties::Defaults::fill_extrusion_base()),
-    );
-    let height = f64::from(
-        evaluated.fill_extrusion_height.constant_or(&FillExtrusionPaintProperties::Defaults::fill_extrusion_height()),
-    );
-    let zoom_fraction = state.get_zoom_fraction();
-    let buffer = &binders.interleaved_vertex_buffer;
-    let vertices = bucket.vertices.data();
-    let mut view: Option<CaptureView<'_>> = None;
-
-    let features = bucket.get_retained_features();
-    stats.rendered_features.reserve(features.len());
-
-    for feature in features {
-        debug_assert_ne!(feature.feature_id, "");
-
-        if !color_is_constant {
-            // Consider only the value for the first vertex of this feature, for now.
-            let alpha = binders
-                .fill_extrusion_color
-                .get_vertex_value(buffer, feature.vertex_offset)
-                .and_then(|v| vertex_color_alpha(&v, zoom_fraction));
-            if alpha == Some(0.0) {
-                continue;
-            }
-        }
-
-        // Compute the view once
-        let view = view.get_or_insert_with(|| {
-            CaptureView::new(
-                tile_id,
-                state,
-                transform_params,
-                *translation,
-                *translation_anchor.uniform(),
-                /*near_clipped=*/ true,
-            )
-        });
-
-        // Each vertex is considered twice, once at the base z and once at the height z
-        let vertex_offset = feature.vertex_offset;
-        let vertex_count = feature.vertex_count;
-        let get_vertex = |vi: usize| {
-            let vertex = vertices.get(vertex_offset.checked_add(vi.checked_rem(vertex_count)?)?)?;
-            let z = if vi < vertex_count { base } else { height };
-            Some([f64::from(vertex.a1[0]), f64::from(vertex.a1[1]), z])
-        };
-        if let Some(bound) = view.tile_space_bound(2 * vertex_count, get_vertex) {
-            stats.add_rendered_feature(&feature.feature_id, &bound, HashSet::from_iter([*tile_id]));
-        }
-    }
-}
 
 fn read_paint_properties(
     attrs: &mut VertexAttributeArray,
@@ -463,13 +380,12 @@ impl RenderLayer for RenderFillExtrusionLayer {
         shaders: &ShaderRegistry,
         context: &Context,
         state: &TransformState,
-        update_parameters: &Arc<UpdateParameters>,
+        _update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
-        render_tree: &RenderTree,
+        _render_tree: &RenderTree,
         changes: &mut UniqueChangeRequestVec,
     ) {
         self.update_projection_variant(state);
-        self.base.stats.rendered_features.clear();
 
         let render_tiles = match self.base.render_tiles.clone() {
             Some(tiles) if !tiles.is_empty() && self.base.passes != RenderPass::None => tiles,
@@ -607,12 +523,6 @@ impl RenderLayer for RenderFillExtrusionLayer {
             let binders_guard = binders_lock.read();
             let binders = &*binders_guard;
             let geometry = tile.get_bucket_geometry();
-
-            // Capture rendered features if requested
-            if update_parameters.capture_rendered_features {
-                let params = &render_tree.get_parameters().transform_params;
-                capture_rendered_features(&mut self.base.stats, bucket, tile, binders, evaluated, state, params);
-            }
 
             // If we already have drawables for this tile, update them.
             let update_existing = |drawable: &mut crate::drawable::Drawable| {

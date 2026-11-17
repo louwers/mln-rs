@@ -247,7 +247,6 @@ impl Scene {
             subdivision_granularity: SubdivisionGranularitySetting::none(),
             global_state: None,
             is_update_synchronous: false,
-            capture_rendered_features: false,
             font_faces: None,
         };
         // The first frame lays the tiles out.

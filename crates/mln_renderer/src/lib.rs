@@ -61,8 +61,7 @@ pub(crate) use paint_property_binder::paint_property_binders;
 pub use registry::{Registry, RegistryBuilder, register_builtins};
 pub use renderer::{RenderTimings, Renderer};
 pub use renderer_event::{
-    FeatureInfo, FontStack, FrameRenderedFeaturesMap, GlyphRange, LayerFeaturesMap, NDCBound, OverscaledTileID,
-    RenderMode, RendererEvent, RendererEvents, RenderingStats, SourceLayerID, TileOperation,
+    FontStack, GlyphRange, OverscaledTileID, RenderMode, RendererEvent, RendererEvents, RenderingStats, TileOperation,
 };
 pub use update_parameters::UpdateParameters;
 pub use update_slot::{Update, UpdateReader, UpdateSlot};

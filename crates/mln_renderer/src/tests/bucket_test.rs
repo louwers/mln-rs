@@ -296,24 +296,6 @@ fn fill_bucket_keeps_paint_data_that_feature_state_rewrites() {
     });
 }
 
-// gtest: Buckets.FillBucketKeepsCpuGeometryWhenRenderedFeaturesAreRetained
-#[test]
-fn fill_bucket_keeps_cpu_geometry_when_rendered_features_are_retained() {
-    let mut bucket = data_driven_fill_bucket(&serde_json::json!(["to-color", ["get", "c"]]));
-    bucket.set_retain_features_by_id(true);
-    let vertex_count = bucket.vertices.len();
-
-    with_context(|context| {
-        bucket.upload(context);
-        let geometry = BucketGeometry::default();
-        let vertices = geometry.vertices(&bucket, &bucket.vertices);
-        assert!(vertex_buffer(context, &vertices, false).expect("uploads").is_some());
-
-        // Reading rendered features back needs the vertices.
-        assert_eq!(bucket.vertices.data().len(), vertex_count);
-    });
-}
-
 // gtest: Buckets.LineBucket
 #[test]
 fn line_bucket() {

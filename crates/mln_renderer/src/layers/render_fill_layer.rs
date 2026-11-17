@@ -37,15 +37,11 @@ use crate::layer_tweaker::LayerTweakerPtr;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::pattern_layout::{FillLayoutSpec, PatternLayout, uses_pattern};
-use crate::paint_parameters::{PaintParameters, TransformParameters};
+use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
-use crate::render_layer::{
-    RenderLayer, RenderLayerBase, RenderLayerPtr, Stats, capture_retained_features, set_style, vertex_color_alpha,
-    vertex_opacity,
-};
+use crate::render_layer::{RenderLayer, RenderLayerBase, RenderLayerPtr, set_style};
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
-use crate::render_tile::RenderTile;
 use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
 
@@ -88,64 +84,6 @@ impl FillVariant {
             _ => None,
         }
     }
-}
-
-/// Captures the tile's rendered features in `stats`, skipping the features
-/// that draw fully transparent.
-fn capture_rendered_features(
-    stats: &mut Stats,
-    bucket: &FillBucket,
-    tile: &RenderTile,
-    binders: &FillBinders,
-    evaluated: &FillPaintProperties::PossiblyEvaluated,
-    state: &TransformState,
-    transform_params: &TransformParameters,
-) {
-    let alpha = &evaluated.fill_opacity;
-    let alpha_is_constant = alpha.is_constant();
-    if alpha_is_constant && binders.fill_opacity.uniform_value(alpha) == 0.0 {
-        return;
-    }
-
-    let color = &evaluated.fill_color;
-    let color_is_constant = color.is_constant();
-    if color_is_constant && binders.fill_color.uniform_value(color).a == 0.0 {
-        return;
-    }
-
-    let zoom_fraction = state.get_zoom_fraction();
-    let buffer = &binders.interleaved_vertex_buffer;
-    let vertices = bucket.vertices.data();
-    capture_retained_features(
-        stats,
-        bucket,
-        tile.get_overscaled_tile_id(),
-        state,
-        transform_params,
-        *evaluated.fill_translate.uniform(),
-        *evaluated.fill_translate_anchor.uniform(),
-        |vertex_offset| {
-            if !alpha_is_constant {
-                let opacity = binders.fill_opacity.get_vertex_value(buffer, vertex_offset);
-                if opacity.and_then(|v| vertex_opacity(&v, zoom_fraction)) == Some(0.0) {
-                    return false;
-                }
-            }
-            if !color_is_constant {
-                let color = binders.fill_color.get_vertex_value(buffer, vertex_offset);
-                if color.and_then(|v| vertex_color_alpha(&v, zoom_fraction)) == Some(0.0) {
-                    return false;
-                }
-            }
-            true
-        },
-        |view, vertex_offset, vertex_count| {
-            view.tile_space_bound(vertex_count, |i| {
-                let vertex = vertices.get(vertex_offset.checked_add(i)?)?;
-                Some([vertex.a1[0].into(), vertex.a1[1].into(), 0.0])
-            })
-        },
-    );
 }
 
 fn read_fill_attributes(
@@ -358,13 +296,11 @@ impl RenderLayer for RenderFillLayer {
         shaders: &ShaderRegistry,
         context: &Context,
         state: &TransformState,
-        update_parameters: &Arc<UpdateParameters>,
+        _update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
-        render_tree: &RenderTree,
+        _render_tree: &RenderTree,
         changes: &mut UniqueChangeRequestVec,
     ) {
-        self.base.stats.rendered_features.clear();
-
         let Some(render_tiles) = self.base.render_tiles.clone().filter(|t| !t.is_empty()) else {
             self.remove_all_drawables();
             return;
@@ -497,11 +433,6 @@ impl RenderLayer for RenderFillLayer {
             };
 
             // (getAtlasTweaker: in the pattern branch.)
-
-            if update_parameters.capture_rendered_features {
-                let params = &render_tree.get_parameters().transform_params;
-                capture_rendered_features(&mut self.base.stats, bucket, tile, binders, evaluated, state, params);
-            }
 
             // Drawables' stored attributes point directly into the bucket's
             // shared vectors; the backend upload guard fires automatically

@@ -108,13 +108,9 @@ impl<T> GeometryVec<T> {
 }
 
 impl<T: bytemuck::Pod> GeometryVec<T> {
-    /// The data, moved out unless `keep` (which copies it).
-    fn take(&self, keep: bool) -> Vec<T> {
-        let mut v = self.data();
-        if keep {
-            return v.clone();
-        }
-        let data = std::mem::take(&mut *v);
+    /// The data, moved out.
+    fn take(&self) -> Vec<T> {
+        let data = std::mem::take(&mut *self.data());
         self.moved.fetch_add(data.len(), Ordering::Relaxed);
         data
     }
@@ -133,27 +129,27 @@ impl<T: bytemuck::Pod> GeometryVec<T> {
         if self.take_host().is_some() {
             return;
         }
-        drop(self.take(false));
+        drop(self.take());
     }
 
-    /// A released gfx vector of the data, moved out unless `keep`.
-    fn vertex_vector(&self, keep: bool) -> VertexVector<T> {
+    /// A released gfx vector of the data, moved out.
+    fn vertex_vector(&self) -> VertexVector<T> {
         #[cfg(target_family = "wasm")]
-        if !keep && let Some(bytes) = self.take_host() {
+        if let Some(bytes) = self.take_host() {
             return VertexVector::from_host_released(bytes);
         }
-        VertexVector::from_vec_released(self.take(keep))
+        VertexVector::from_vec_released(self.take())
     }
 }
 
 impl GeometryVec<u16> {
-    /// A released gfx index vector of the data, moved out unless `keep`.
-    fn index_vector(&self, keep: bool) -> IndexVectorBase {
+    /// A released gfx index vector of the data, moved out.
+    fn index_vector(&self) -> IndexVectorBase {
         #[cfg(target_family = "wasm")]
-        if !keep && let Some(bytes) = self.take_host() {
+        if let Some(bytes) = self.take_host() {
             return IndexVectorBase::from_host_released(bytes);
         }
-        IndexVectorBase::new_released(self.take(keep))
+        IndexVectorBase::new_released(self.take())
     }
 }
 
@@ -228,12 +224,6 @@ fn key<T>(bucket: &dyn Bucket, vec: &GeometryVec<T>) -> (SimpleIdentity, usize) 
     (bucket.get_id(), std::ptr::from_ref(vec) as usize)
 }
 
-/// Nothing is moved out when the map reads the vertices back to report
-/// rendered features.
-fn keep(bucket: &dyn Bucket) -> bool {
-    bucket.base().retain_features_by_id
-}
-
 /// The vector of `key` in `map`, which `make` makes the first time.
 fn cached<T: ?Sized>(
     map: &RefCell<HashMap<(SimpleIdentity, usize), Rc<T>>>,
@@ -246,12 +236,12 @@ fn cached<T: ?Sized>(
 impl BucketGeometry {
     /// The shared vertex vector of `vec`, one of `bucket`'s.
     pub(crate) fn vertices<V: bytemuck::Pod>(&self, bucket: &dyn Bucket, vec: &GeometryVec<V>) -> VertexVectorBasePtr {
-        cached(&self.vertices, key(bucket, vec), || Rc::new(vec.vertex_vector(keep(bucket))))
+        cached(&self.vertices, key(bucket, vec), || Rc::new(vec.vertex_vector()))
     }
 
     /// The shared index vector of `vec`, one of `bucket`'s.
     pub(crate) fn indexes(&self, bucket: &dyn Bucket, vec: &GeometryVec<u16>) -> IndexVectorBasePtr {
-        cached(&self.indexes, key(bucket, vec), || Rc::new(RefCell::new(vec.index_vector(keep(bucket)))))
+        cached(&self.indexes, key(bucket, vec), || Rc::new(RefCell::new(vec.index_vector())))
     }
 
     /// The vertex vector that `make` makes of the data of `vec`, one of

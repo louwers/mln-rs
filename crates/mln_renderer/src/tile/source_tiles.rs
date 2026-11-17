@@ -263,7 +263,6 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
             show_collision_boxes: parameters.debug_options.contains(MapDebugOptions::COLLISION),
             subdivision_granularity: parameters.subdivision_granularity,
             first_load: true,
-            capture_rendered_features: parameters.capture_rendered_features,
         };
         let tile = self.source.info.new_tile(*id, params)?;
         self.source.insert(tile);
@@ -1347,7 +1346,6 @@ mod tests {
             show_collision_boxes: false,
             subdivision_granularity: SubdivisionGranularitySetting::none(),
             first_load: true,
-            capture_rendered_features: false,
         };
         let load = Load { necessity: TileNecessity::Optional, origin: OriginLoad::GeoJson { load: None } };
         source.insert(Tile::new(key, load, Pipeline::new(TileKind::Geometry, 1, params)));

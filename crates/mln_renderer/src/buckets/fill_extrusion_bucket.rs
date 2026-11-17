@@ -268,10 +268,6 @@ impl Bucket for FillExtrusionBucket {
         &self.base
     }
 
-    fn base_mut(&mut self) -> &mut BucketBase {
-        &mut self.base
-    }
-
     fn add_feature(
         &mut self,
         feature: &dyn GeometryTileFeature,
@@ -281,8 +277,6 @@ impl Bucket for FillExtrusionBucket {
         index: usize,
         canonical: &CanonicalTileID,
     ) -> Result<(), Error> {
-        let vertex_offset = self.vertices.len();
-
         for mut polygon in classify_rings(geometry) {
             // Optimize polygons with many interior rings for earcut
             // tessellation.
@@ -323,13 +317,6 @@ impl Bucket for FillExtrusionBucket {
                 canonical,
                 &EMPTY_FORMATTED_SECTION,
             );
-        }
-
-        if self.base.retain_features_by_id {
-            let vertex_count = self.vertices.len() - vertex_offset;
-            if vertex_count > 0 {
-                self.retain_feature(feature, vertex_offset, vertex_count);
-            }
         }
         Ok(())
     }

@@ -34,7 +34,6 @@ pub struct UpdateParameters {
     pub still_image_request_id: u64,
     pub cross_source_collisions: bool,
     pub fast_pfor_enabled: bool,
-    pub capture_rendered_features: bool,
 
     pub tile_lod_min_radius: f64,
     pub tile_lod_scale: f64,

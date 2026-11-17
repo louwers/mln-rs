@@ -29,10 +29,8 @@ pub(crate) struct HeatmapLayout {
     /// The indices of the features the filter accepted, in order.
     features: Vec<usize>,
     /// The number of features in the source layer.
-    feature_count: usize,
     zoom: f32,
     mode: MapMode,
-    retain_features_by_id: bool,
     source_layer: SourceLayer,
 }
 
@@ -73,10 +71,8 @@ impl HeatmapLayout {
             bucket_leader_id: leader.id.clone(),
             source_layer_id: leader.source_layer.clone(),
             features,
-            feature_count,
             zoom,
             mode: parameters.mode,
-            retain_features_by_id: parameters.retain_features_by_id,
             source_layer,
         })
     }
@@ -95,8 +91,6 @@ impl Layout<Heatmap> for HeatmapLayout {
     ) -> Result<Option<HeatmapBucket>, Error> {
         let source_layer = self.source_layer.layer()?;
         let mut bucket = HeatmapBucket::new(&self.layers, self.mode, self.zoom);
-        bucket.set_retain_features_by_id(self.retain_features_by_id);
-        bucket.reserve_features(self.feature_count);
 
         for &i in &self.features {
             let feature = source_layer.feature(i)?;

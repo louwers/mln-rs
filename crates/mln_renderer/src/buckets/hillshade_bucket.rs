@@ -204,10 +204,6 @@ impl Bucket for HillshadeBucket {
         &self.base
     }
 
-    fn base_mut(&mut self) -> &mut BucketBase {
-        &mut self.base
-    }
-
     fn upload(&self, _context: &Context) {
         if !self.has_data() {
             return;

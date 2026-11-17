@@ -29,9 +29,6 @@ pub struct MapOptions {
     pub north_orientation: NorthOrientation,
     /// Whether symbols collide across sources. On by default.
     pub cross_source_collisions: bool,
-    /// Whether the map captures information about rendered features. Off by
-    /// default.
-    pub capture_rendered_features: bool,
     /// The size of the map and its renderer backend.
     pub size: Size,
     /// 1 by default.
@@ -52,7 +49,6 @@ impl Default for MapOptions {
             viewport_mode: ViewportMode::Default,
             north_orientation: NorthOrientation::Upwards,
             cross_source_collisions: true,
-            capture_rendered_features: false,
             size: Size::new(64, 64),
             pixel_ratio: 1.0,
             fast_pfor_enabled: false,

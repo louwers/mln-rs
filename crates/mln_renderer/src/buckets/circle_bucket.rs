@@ -123,9 +123,6 @@ impl Bucket for CircleBucket {
     fn base(&self) -> &BucketBase {
         &self.base
     }
-    fn base_mut(&mut self) -> &mut BucketBase {
-        &mut self.base
-    }
 
     fn upload(&self, _context: &Context) {
         self.base.uploaded.store(true, Ordering::SeqCst);

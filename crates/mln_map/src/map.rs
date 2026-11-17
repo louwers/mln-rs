@@ -11,8 +11,7 @@ use mln_map_types::{
     MapView, ProjectionMode, TileLodMode, TransformState, VerticalPerspectiveProjection, Viewport,
 };
 use mln_renderer::{
-    FeatureInfo, LayerFeaturesMap, Registry, RendererEvent, RendererEvents, RenderingStats, SourceLayerID,
-    UpdateParameters, UpdateReader, UpdateSlot,
+    Registry, RendererEvent, RendererEvents, RenderingStats, UpdateParameters, UpdateReader, UpdateSlot,
 };
 use mln_storage::FileSource;
 #[cfg(not(target_family = "wasm"))]
@@ -74,13 +73,10 @@ pub struct Map {
     pixel_ratio: f32,
     cross_source_collisions: bool,
     fast_pfor_enabled: bool,
-    capture_rendered_features: bool,
     unused_style_image_policy: UnusedStyleImagePolicy,
 
     debug_options: MapDebugOptions,
     rendering_stats_view: Option<RenderingStatsView>,
-    /// The stats of the last frame the renderer finished.
-    last_frame_stats: Option<Arc<RenderingStats>>,
     /// The current version of the style.
     style: Arc<Style>,
     /// Loads the style's document, its sprites and its sources'
@@ -174,11 +170,9 @@ impl Map {
             pixel_ratio,
             cross_source_collisions: map_options.cross_source_collisions,
             fast_pfor_enabled: map_options.fast_pfor_enabled,
-            capture_rendered_features: map_options.capture_rendered_features,
             unused_style_image_policy: map_options.unused_style_image_policy,
             debug_options: MapDebugOptions::NO_DEBUG,
             rendering_stats_view: None,
-            last_frame_stats: None,
             style,
             loader,
             feature_state: FeatureStateStore::default(),
@@ -523,7 +517,7 @@ impl Map {
                 mode,
                 needs_repaint,
                 placement_changed,
-                rendering_stats: Arc::clone(&stats),
+                rendering_stats: stats,
             }));
 
             if needs_repaint || self.transform.in_transition() {
@@ -537,8 +531,6 @@ impl Map {
         {
             self.still_image = StillImage::Ended(Ok(()));
         }
-
-        self.last_frame_stats = Some(stats);
     }
 
     /// Records a change to the map's state.
@@ -588,7 +580,6 @@ impl Map {
             still_image_request_id: self.still_image_request_id,
             cross_source_collisions: self.cross_source_collisions,
             fast_pfor_enabled: self.fast_pfor_enabled,
-            capture_rendered_features: self.capture_rendered_features,
             tile_lod_min_radius: self.tile.lod_min_radius,
             tile_lod_scale: self.tile.lod_scale,
             tile_lod_pitch_threshold: mln_math::deg2rad(self.tile.lod_pitch_threshold),
@@ -1298,93 +1289,6 @@ impl Map {
             self.tile = *tile;
             self.on_update();
         }
-    }
-
-    // MARK: - Rendered features
-    //
-    // With `MapOptions::capture_rendered_features` on, these give the
-    // features rendered in the most recently completed frame.
-
-    /// The stats of the most recently completed frame, whose
-    /// `frame_rendered_features` holds every rendered feature by source and
-    /// layer. `None` before the first frame.
-    pub(crate) fn get_last_frame_stats(&self) -> Option<Arc<RenderingStats>> {
-        self.last_frame_stats.clone()
-    }
-
-    /// Calls `result` with the ID and info of each feature rendered in the
-    /// last frame that matches the given feature, layer and source IDs
-    /// (`None` matches any), until it returns `false`.
-    pub fn get_rendered_features(
-        &self,
-        feature_id: Option<&str>,
-        layer_id: Option<&str>,
-        source_id: Option<&str>,
-        mut result: impl FnMut(&str, &FeatureInfo) -> bool,
-    ) {
-        let Some(stats) = self.get_last_frame_stats() else {
-            return;
-        };
-        let features = &stats.frame_rendered_features;
-
-        let mut search_features = |layer_features: &LayerFeaturesMap| {
-            for (id, info) in layer_features {
-                if feature_id.is_none_or(|feature_id| id == feature_id) && !result(id, info) {
-                    return false;
-                }
-            }
-            true
-        };
-
-        if let (Some(source_id), Some(layer_id)) = (source_id, layer_id) {
-            // Both source and layer are specified, look for an exact match
-            let key = SourceLayerID { source_id: source_id.to_owned(), layer_id: layer_id.to_owned() };
-            if let Some(layer_features) = features.get(&key) {
-                search_features(layer_features);
-            }
-        } else {
-            // Linear search for matching items
-            for (id, layer_features) in features {
-                if source_id.is_none_or(|source_id| id.source_id == source_id)
-                    && layer_id.is_none_or(|layer_id| id.layer_id == layer_id)
-                    && !search_features(layer_features)
-                {
-                    break;
-                }
-            }
-        }
-    }
-
-    /// The number of matching features rendered in the last frame (see
-    /// [`get_rendered_features`](Self::get_rendered_features)).
-    pub fn get_rendered_feature_count(
-        &self,
-        feature_id: Option<&str>,
-        layer_id: Option<&str>,
-        source_id: Option<&str>,
-    ) -> usize {
-        let mut count = 0;
-        self.get_rendered_features(feature_id, layer_id, source_id, |_, _| {
-            count += 1;
-            true
-        });
-        count
-    }
-
-    /// Whether any matching feature was rendered in the last frame (see
-    /// [`get_rendered_features`](Self::get_rendered_features)).
-    pub fn is_feature_rendered(
-        &self,
-        feature_id: Option<&str>,
-        layer_id: Option<&str>,
-        source_id: Option<&str>,
-    ) -> bool {
-        let mut found = false;
-        self.get_rendered_features(feature_id, layer_id, source_id, |_, _| {
-            found = true;
-            false
-        });
-        found
     }
 
     // gtests-core: projection and prefetch zoom delta (test/map, test/api).

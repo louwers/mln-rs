@@ -97,10 +97,6 @@ impl Bucket for HeatmapBucket {
         &self.base
     }
 
-    fn base_mut(&mut self) -> &mut BucketBase {
-        &mut self.base
-    }
-
     fn add_feature(
         &mut self,
         feature: &dyn GeometryTileFeature,

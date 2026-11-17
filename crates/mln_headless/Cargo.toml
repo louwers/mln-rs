@@ -47,11 +47,6 @@ path = "tests/local_glyph_rasterizer_test.rs"
 name = "map_snapshot_test"
 path = "tests/map_snapshot_test.rs"
 
-# gtests-core: test/renderer/feature_tracking.test.cpp.
-[[test]]
-name = "gtest_feature_tracking"
-path = "tests/gtest_feature_tracking.rs"
-
 # gtests-core: test/map/{map,prefetch}.test.cpp through Map
 # (over a StubFileSource/FakeFileSource) -> HeadlessFrontend. Shared fixture
 # in tests/support/mod.rs.

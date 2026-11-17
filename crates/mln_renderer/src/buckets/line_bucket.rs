@@ -292,9 +292,6 @@ impl Bucket for LineBucket {
     fn base(&self) -> &BucketBase {
         &self.base
     }
-    fn base_mut(&mut self) -> &mut BucketBase {
-        &mut self.base
-    }
 
     fn add_feature(
         &mut self,
@@ -305,17 +302,8 @@ impl Bucket for LineBucket {
         index: usize,
         canonical: &CanonicalTileID,
     ) -> Result<(), Error> {
-        let vertex_offset = self.vertices.len();
-
         for line in geometry_collection.iter() {
             self.add_geometry(line, feature, canonical);
-        }
-
-        if self.base.retain_features_by_id {
-            let vertex_count = self.vertices.len() - vertex_offset;
-            if vertex_count > 0 {
-                self.retain_feature(feature, vertex_offset, vertex_count);
-            }
         }
 
         let length = self.vertices.len();

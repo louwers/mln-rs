@@ -32,13 +32,11 @@ use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCoordinates, GeometryTileFeature};
 use mln_util::constants::{EXTENT, ONE_EM, TILE_SIZE_D};
 use mln_util::error::Error;
-use mln_util::feature::feature_id_to_string;
 use mln_util::geometry::FeatureType;
 use mln_util::i18n;
 use mln_util::range::Range;
 use mln_vec_map::VecMap;
 
-use crate::bucket::{Bucket, get_retain_feature_id};
 use crate::bucket_parameters::BucketParameters;
 use crate::buckets::symbol_bucket::{
     Buffer, CollisionBuffer, PlacedSymbol, SortKeyRange, SymbolBucket, SymbolBucketState,
@@ -335,7 +333,6 @@ pub(crate) struct SymbolLayout {
     bidi: BiDi,
 
     need_finalize_symbols_val: bool,
-    retain_features_by_id: bool,
 }
 
 impl SymbolLayout {
@@ -386,7 +383,6 @@ impl SymbolLayout {
             features: Vec::new(),
             bidi: BiDi::new(),
             need_finalize_symbols_val: false,
-            retain_features_by_id: parameters.retain_features_by_id,
         };
 
         // These property values are retained unevaluated; capture the
@@ -1126,8 +1122,6 @@ impl SymbolLayout {
             symbol_instance.placed_icon_index
         };
 
-        let feature_id = if self.retain_features_by_id { feature_id_to_string(&feature.get_id()) } else { None };
-
         state.text.placed_symbols.push(PlacedSymbol::new(
             symbol_instance.get_anchor().point,
             symbol_instance.get_anchor().segment.unwrap_or(0),
@@ -1137,7 +1131,6 @@ impl SymbolLayout {
             writing_mode,
             symbol_instance.line().clone(),
             Self::calculate_tile_distances(symbol_instance.line(), symbol_instance.get_anchor()),
-            feature_id,
             placed_icon_index,
         ));
         let placed_index = state.text.placed_symbols.len() - 1;
@@ -1824,8 +1817,6 @@ impl SymbolLayout {
             self.icons_in_text,
         );
 
-        bucket.set_retain_features_by_id(self.retain_features_by_id);
-
         let mut instances = std::mem::take(&mut bucket.state_mut().symbol_instances);
         {
             let bucket_ref = &bucket;
@@ -1840,8 +1831,6 @@ impl SymbolLayout {
                 let single_line = symbol_instance.get_single_line();
 
                 let feature = &self.features[symbol_instance.get_layout_feature_index()];
-                let retain_feature_id =
-                    if self.retain_features_by_id { Some(get_retain_feature_id(feature)) } else { None };
 
                 // Insert final placement into collision tree and add
                 // glyphs/icons to buffers
@@ -1863,7 +1852,6 @@ impl SymbolLayout {
                             writing_mode,
                             symbol_instance.line().clone(),
                             Vec::new(),
-                            retain_feature_id.clone(),
                             None,
                         ));
                         let index = icon_buffer.placed_symbols.len() - 1;

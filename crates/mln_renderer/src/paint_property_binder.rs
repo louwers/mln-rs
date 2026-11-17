@@ -63,13 +63,6 @@ impl InterleavedVertexBuffer {
         data[start..start + value.len()].copy_from_slice(value);
     }
 
-    /// The `len` bytes at `offset` in vertex `index`, or `None` when they are
-    /// out of range.
-    pub(crate) fn try_get(&self, index: usize, offset: usize, len: usize) -> Option<Vec<u8>> {
-        let start = self.stride.checked_mul(index)?.checked_add(offset)?;
-        self.shared_vertex_vector.data().get(start..start.checked_add(len)?).map(<[u8]>::to_vec)
-    }
-
     /// Appends a field of `size` bytes, aligned to `alignment`, to the vertex
     /// format and returns its offset.
     pub(crate) fn extend_vertex_format(&mut self, size: usize, alignment: usize) -> usize {
@@ -412,34 +405,6 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
                 )
             }
         }
-    }
-
-    /// The property's value as a uniform.
-    pub(crate) fn uniform_value(&self, current_value: &Evaluated<T>) -> T {
-        match &self.kind {
-            PaintPropertyBinderKind::Constant { constant } => current_value.constant_or(constant),
-            // Uniform values for vertex attribute arrays are unused.
-            _ => current_value.constant().unwrap_or_default(),
-        }
-    }
-
-    /// The zoom-interpolated vertex (`2 * DIMENSIONS` floats), or `None` when
-    /// `index` is out of range (where C++ throws).
-    pub(crate) fn get_vertex_value(&self, buffer: &InterleavedVertexBuffer, index: usize) -> Option<Vec<f32>> {
-        let n = T::DIMENSIONS;
-        Some(match &self.kind {
-            PaintPropertyBinderKind::Constant { .. } => vec![0.0; 2 * n],
-            PaintPropertyBinderKind::SourceFunction { vertex_data, .. } => {
-                let base: Vec<f32> =
-                    bytemuck::pod_collect_to_vec(&buffer.try_get(index, vertex_data.offset()?, n * 4)?);
-                let mut value = base.clone();
-                value.extend_from_slice(&base);
-                value
-            }
-            PaintPropertyBinderKind::CompositeFunction { vertex_data, .. } => {
-                bytemuck::pod_collect_to_vec(&buffer.try_get(index, vertex_data.offset()?, 2 * n * 4)?)
-            }
-        })
     }
 
     pub(crate) fn apply_paint_property(

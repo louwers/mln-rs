@@ -115,7 +115,6 @@ fn create_bucket(properties: &Arc<dyn ErasedEvaluatedLayer>, shape: Shape) -> Bu
         mode: MapMode::Continuous,
         pixel_ratio: 1.0,
         global_state: None,
-        retain_features_by_id: false,
         subdivision_granularity: SubdivisionGranularitySetting::none(),
     };
     let mut glyph_dependencies = GlyphDependencies::default();

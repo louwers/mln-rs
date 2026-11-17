@@ -12,6 +12,5 @@ pub(crate) struct BucketParameters {
     pub(crate) pixel_ratio: f32,
     /// The style's global state, used by "global-state" expressions.
     pub(crate) global_state: Option<Arc<GlobalStateMap>>,
-    pub(crate) retain_features_by_id: bool,
     pub(crate) subdivision_granularity: SubdivisionGranularitySetting,
 }

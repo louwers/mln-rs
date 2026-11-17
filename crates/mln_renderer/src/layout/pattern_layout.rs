@@ -101,7 +101,6 @@ pub(crate) struct PatternLayout<S: PatternLayoutSpec> {
     pub(crate) subdivision_granularity: SubdivisionGranularitySetting,
     pub(crate) source_layer_id: String,
     pub(crate) has_pattern: bool,
-    pub(crate) retain_features_by_id: bool,
 
     /// The source layer the layout gets its features from again (see
     /// layout.rs).
@@ -248,7 +247,6 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
             subdivision_granularity: parameters.subdivision_granularity,
             source_layer_id,
             has_pattern,
-            retain_features_by_id: parameters.retain_features_by_id,
             source_layer,
         })
     }
@@ -270,8 +268,6 @@ impl<S: PatternLayoutSpec> Layout<S::Type> for PatternLayout<S> {
         let source_layer = self.source_layer.layer()?;
         let mut bucket = S::create_bucket(&self.layout, &self.layer_properties_map, self.zoom, self.overscaling);
         S::set_subdivision_granularity(&mut bucket, &self.subdivision_granularity);
-        bucket.set_retain_features_by_id(self.retain_features_by_id);
-        bucket.reserve_features(self.features.len());
 
         let record_sdf_pattern = |bucket: &mut S::Bucket, layer_id: &str, image_id: &str| {
             if let Some(position) = pattern_positions.get(image_id) {

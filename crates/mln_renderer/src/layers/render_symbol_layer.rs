@@ -11,7 +11,6 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use geometry::Point;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
 use mln_gfx::shaders::shader_defines::{
@@ -25,7 +24,7 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::vertex_attribute::VertexAttributeArray;
 use mln_gfx::vertex_vector::VertexVector;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode, ShaderRegistry};
-use mln_map_types::{TileProjector, TransformState};
+use mln_map_types::TransformState;
 use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
 use mln_style::layers::Symbol;
 use mln_style::layers::symbol_layer::SymbolLayerPaintPropertyOverrides;
@@ -38,15 +37,12 @@ use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::Color;
 use mln_util::constants::EXTENT;
 use mln_util::error::Error;
-use mln_util::hash::{HashMap, HashSet};
-use mln_util::interpolate::Interpolate;
+use mln_util::hash::HashMap;
 use mln_util::mat4::{Mat4, matrix};
-use mln_util::vectors::{Vec2, Vec3, Vec4, vec2_max_scalar};
 
 use super::collision_layer_tweaker::{CollisionDrawableData, CollisionLayerTweaker};
 use super::symbol_layer_tweaker::SymbolLayerTweaker;
 use super::{DrawableBinders, DrawableRenderTile, TileDrawables, shared_vertices};
-use crate::bucket::Bucket;
 use crate::bucket_geometry::{BucketGeometry, bucket_vertices, paint_vertices, released_indexes};
 use crate::buckets::symbol_bucket::{
     Buffer, CollisionBoxDynamicVertex, CollisionBoxLayoutVertex, CollisionBuffer, PaintProperties, SymbolBucket,
@@ -56,16 +52,15 @@ use crate::drawable_builder::DrawableBuilder;
 use crate::gfx::context::Context;
 use crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker;
 use crate::layer_group::{LayerGroup, LayerGroupPtr};
-use crate::layer_tweaker::{LayerTweakerPtr, get_tile_matrix_for};
+use crate::layer_tweaker::LayerTweakerPtr;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType, evaluated};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::symbol_layout::SymbolLayout;
-use crate::layout::symbol_projection::{get_gl_coord_matrix, get_label_plane_matrix};
-use crate::paint_parameters::{PaintParameters, TransformParameters};
+use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
 use crate::render_layer::{
-    BucketPlacementData, LayerPrepareParameters, RenderLayer, RenderLayerBase, RenderLayerPtr, Stats, SymbolTranslate,
-    activate_layer_group, change_layer_index, compute_feature_ndc_bound, set_style, vertex_color_alpha, vertex_opacity,
+    BucketPlacementData, LayerPrepareParameters, RenderLayer, RenderLayerBase, RenderLayerPtr, SymbolTranslate,
+    activate_layer_group, change_layer_index, set_style,
 };
 use crate::render_pass::RenderPass;
 use crate::render_tile::RenderTile;
@@ -174,318 +169,6 @@ pub(crate) fn get_screen_matrix(translation: [f32; 2]) -> Mat4 {
     let a = m;
     matrix::translate(&mut m, &a, f64::from(translation[0]), f64::from(translation[1]), 0.0);
     m
-}
-
-/// Bounds each visible placed symbol by projecting its glyph and icon quads
-/// as the symbol shaders do.
-///
-/// `is_screen_space` and `is_offset` are the layer's `symbol-screen-space`
-/// and whether it sets `icon-offset`.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the tile, its bucket, the layer's paint and the camera that place its symbols' captured features"
-)]
-fn capture_rendered_features(
-    stats: &mut Stats,
-    layer_id: &str,
-    tile: &RenderTile,
-    bucket: &SymbolBucket,
-    evaluated: &SymbolPaintProperties::PossiblyEvaluated,
-    state: &TransformState,
-    transform_params: &TransformParameters,
-    is_screen_space: bool,
-    is_offset: bool,
-) {
-    if !Bucket::has_data(bucket) {
-        return;
-    }
-    let bucket_state = bucket.state();
-    let has_text_data = !bucket_state.text.segments.is_empty();
-    let has_icon_data = !bucket_state.icon.segments.is_empty();
-    let has_sdf_icon_data = !bucket_state.sdf_icon.segments.is_empty();
-
-    let icon_opacity = &evaluated.icon_opacity;
-    let icon_color = &evaluated.icon_color;
-    let icon_halo_color = &evaluated.icon_halo_color;
-    let text_opacity = &evaluated.text_opacity;
-    let text_color = &evaluated.text_color;
-    let text_halo_color = &evaluated.text_halo_color;
-
-    let visible_text = has_text_data
-        && text_opacity.constant_or(&SymbolPaintProperties::Defaults::text_opacity()) > 0.0
-        && (text_color.constant_or(&SymbolPaintProperties::Defaults::text_color()).a > 0.0
-            || text_halo_color.constant_or(&SymbolPaintProperties::Defaults::text_halo_color()).a > 0.0);
-    let visible_icons = (has_icon_data || has_sdf_icon_data)
-        && icon_opacity.constant_or(&SymbolPaintProperties::Defaults::icon_opacity()) > 0.0
-        && (icon_color.constant_or(&SymbolPaintProperties::Defaults::icon_color()).a > 0.0
-            || icon_halo_color.constant_or(&SymbolPaintProperties::Defaults::icon_halo_color()).a > 0.0);
-    if !visible_text && !visible_icons {
-        return;
-    }
-
-    let Some(bucket_paint_properties) = bucket.paint_properties.get(layer_id) else {
-        return;
-    };
-    let bucket_paint_properties = bucket_paint_properties.read();
-    let icon_binders = &bucket_paint_properties.icon_binders;
-    let text_binders = &bucket_paint_properties.text_binders;
-
-    let overscaled_tile_id = *tile.get_overscaled_tile_id();
-    let tile_id = overscaled_tile_id.to_unwrapped();
-
-    let text_translation = evaluated.text_translate.uniform();
-    let icon_translation = evaluated.icon_translate.uniform();
-    let text_translation_anchor = &evaluated.text_translate_anchor;
-    let icon_translation_anchor = &evaluated.icon_translate_anchor;
-    let zoom = state.get_zoom();
-    let zoom_fraction = state.get_zoom_fraction();
-    let pixels_to_tile_units = tile_id.pixels_to_tile_units(1.0, zoom as f32);
-    let camera_to_center_distance = f64::from(state.get_camera_to_center_distance());
-    let aspect_ratio = f64::from(state.get_size().aspect_ratio());
-
-    let bucket_layout = &*bucket.layout;
-    let text_fit = &bucket_layout.icon_text_fit;
-
-    let get_tile_matrix = |translation: &[f32; 2], anchor: TranslateAnchorType| {
-        get_tile_matrix_for(
-            &tile_id,
-            state,
-            transform_params,
-            *translation,
-            anchor,
-            /*origin=*/ None,
-            /*near_clipped=*/ false,
-            /*in_viewport_pixel_units=*/ false,
-            /*aligned=*/ false,
-        )
-    };
-    // As the tweaker draws them: the tile matrices leave the translation out,
-    // which the shader adds to point anchors and placement to the positions
-    // it lays out.
-    let untranslated = [0.0f32; 2];
-    let text_drawable_matrix = if is_screen_space {
-        get_screen_matrix(*text_translation)
-    } else {
-        get_tile_matrix(&untranslated, *text_translation_anchor.uniform())
-    };
-    let icon_drawable_matrix = if is_screen_space {
-        get_screen_matrix(*icon_translation)
-    } else {
-        get_tile_matrix(&untranslated, *icon_translation_anchor.uniform())
-    };
-
-    // On the globe the tile's projection stands in for the tile matrix.
-    let projector = (state.is_globe_rendering() && !is_screen_space).then(|| TileProjector::new(state, &tile_id));
-    let tile_translation = |translation: &[f32; 2], anchor: TranslateAnchorType| -> Vec2 {
-        if is_screen_space {
-            return [0.0, 0.0];
-        }
-        let translate = RenderTile::tile_unit_translation(&tile_id, *translation, anchor, state);
-        [f64::from(translate[0]), f64::from(translate[1])]
-    };
-    let text_tile_translation = tile_translation(text_translation, *text_translation_anchor.uniform());
-    let icon_tile_translation = tile_translation(icon_translation, *icon_translation_anchor.uniform());
-
-    let mut compute_buffer_bounds = |buffer: &Buffer, is_text: bool| {
-        let values = if is_text {
-            text_property_values(evaluated, bucket_layout)
-        } else {
-            icon_property_values(evaluated, bucket_layout)
-        };
-        let pitch_with_map = values.pitch_alignment == AlignmentType::Map;
-        let rotate_with_map = values.rotation_alignment == AlignmentType::Map;
-        let along_line = values.along_line;
-        let has_variable_placement =
-            bucket_state.has_variable_placement && (is_text || *text_fit.uniform() != IconTextFitType::None);
-
-        let size_binder = if is_text { &bucket.text_size_binder } else { &bucket.icon_size_binder };
-        let evaluated_size = size_binder.evaluate_for_zoom(zoom as f32);
-
-        let label_plane_matrix = get_label_plane_matrix(pitch_with_map, rotate_with_map, state, pixels_to_tile_units);
-        let gl_coord_matrix = get_gl_coord_matrix(pitch_with_map, rotate_with_map, state, pixels_to_tile_units);
-
-        // `projectTile` of the shaders: the tile matrix on Mercator, the
-        // tile's projection on the globe.
-        let drawable_matrix = if is_text { &text_drawable_matrix } else { &icon_drawable_matrix };
-        let translation = if is_text { text_tile_translation } else { icon_tile_translation };
-        let project_tile = |tile_point: Vec2, elevation: f64| -> Vec4 {
-            if let Some(projector) = &projector {
-                let projected = projector.project_as_drawn(&Point::new(tile_point[0], tile_point[1]), elevation);
-                let w = projected.signed_distance_from_camera;
-                return [projected.point.x * w, projected.point.y * w, 0.0, w];
-            }
-            matrix::transform_mat4_value(&[tile_point[0], tile_point[1], elevation, 1.0], drawable_matrix)
-        };
-
-        let rotate_in_shader = rotate_with_map && !pitch_with_map && !along_line;
-
-        let static_vertices = buffer.attribute_data.data();
-        let dynamic_vertices = buffer.dynamic_attribute_data_for(layer_id);
-
-        for symbol in &buffer.placed_symbols {
-            let Some(feature_id) = symbol.feature_id.as_ref().filter(|_| !symbol.hidden) else {
-                continue;
-            };
-            // The shader hides what the horizon covers, whatever the
-            // placement made of it.
-            if let Some(projector) = &projector {
-                let anchor = Point::new(
-                    f64::from(symbol.anchor_point.x) + translation[0],
-                    f64::from(symbol.anchor_point.y) + translation[1],
-                );
-                if projector.project_as_drawn(&anchor, f64::from(symbol.height_offset)).occluded {
-                    continue;
-                }
-            }
-
-            let start_index = symbol.start_index;
-            let vertex_count = symbol.glyph_offsets.len() * 4;
-
-            // Consider the dynamic opacity and color of the first vertex.
-            // If either is zero, skip the symbol.
-            let opacity_is_constant = if is_text { text_opacity.is_constant() } else { icon_opacity.is_constant() };
-            if !opacity_is_constant {
-                let vertex = if is_text {
-                    text_binders.text_opacity.get_vertex_value(&text_binders.interleaved_vertex_buffer, start_index)
-                } else {
-                    icon_binders.icon_opacity.get_vertex_value(&icon_binders.interleaved_vertex_buffer, start_index)
-                };
-                if vertex.and_then(|v| vertex_opacity(&v, zoom_fraction)) == Some(0.0) {
-                    continue;
-                }
-            }
-            let color_is_constant = if is_text { text_color.is_constant() } else { icon_color.is_constant() };
-            if !color_is_constant {
-                let vertex = if is_text {
-                    text_binders.text_color.get_vertex_value(&text_binders.interleaved_vertex_buffer, start_index)
-                } else {
-                    icon_binders.icon_color.get_vertex_value(&icon_binders.interleaved_vertex_buffer, start_index)
-                };
-                if vertex.and_then(|v| vertex_color_alpha(&v, zoom_fraction)) == Some(0.0) {
-                    continue;
-                }
-            }
-
-            let get_vertex = |i: usize| -> Option<Vec3> {
-                let index = start_index.checked_add(i)?;
-                let static_vertex = static_vertices.get(index)?;
-                let dynamic_vertex = dynamic_vertices.get(index)?;
-
-                let a_pos: Vec2 = [f64::from(static_vertex.a1[0]), f64::from(static_vertex.a1[1])];
-                let a_offset: Vec2 = [f64::from(static_vertex.a1[2]), f64::from(static_vertex.a1[3])];
-                let a_size: Vec2 = [f64::from(static_vertex.a2[2]), f64::from(static_vertex.a2[3])];
-                let a_pxoffset: Vec2 = [f64::from(static_vertex.a3[0]), f64::from(static_vertex.a3[1])];
-                let a_min_font_scale: Vec2 =
-                    [f64::from(static_vertex.a3[2]) / 256.0, f64::from(static_vertex.a3[3]) / 256.0];
-                let a_size_min = (a_size[0] / 2.0).floor();
-                let in_projected_pos = [f64::from(dynamic_vertex.a1[0]), f64::from(dynamic_vertex.a1[1])];
-                let segment_angle = -dynamic_vertex.a1[2];
-                let elevation = f64::from(static_vertex.a5);
-                let projected_point = project_tile([a_pos[0] + translation[0], a_pos[1] + translation[1]], elevation);
-                let camera_to_anchor_distance = projected_point[3];
-
-                let distance_ratio = if pitch_with_map {
-                    camera_to_anchor_distance / camera_to_center_distance
-                } else {
-                    camera_to_center_distance / camera_to_anchor_distance
-                } as f32;
-                let perspective_ratio = mln_math::clamp_f64(0.5 + 0.5 * f64::from(distance_ratio), 0.0, 4.0) as f32;
-
-                let mut size = if !evaluated_size.is_zoom_constant && !evaluated_size.is_feature_constant {
-                    (a_size_min.interpolate(&a_size[1], f64::from(evaluated_size.size_t)) / 128.0) as f32
-                } else if evaluated_size.is_zoom_constant && !evaluated_size.is_feature_constant {
-                    (a_size_min / 128.0) as f32
-                } else {
-                    evaluated_size.size
-                };
-                if !is_offset {
-                    size *= perspective_ratio;
-                }
-
-                let font_scale = if is_text { f64::from(size) / 24.0 } else { f64::from(size) };
-
-                let mut symbol_rotation = 0.0f32;
-                if rotate_in_shader {
-                    let offset_projected_point =
-                        project_tile([a_pos[0] + translation[0] + 1.0, a_pos[1] + translation[1]], elevation);
-                    let a = [projected_point[0] / projected_point[3], projected_point[1] / projected_point[3]];
-                    let b = [
-                        offset_projected_point[0] / offset_projected_point[3],
-                        offset_projected_point[1] / offset_projected_point[3],
-                    ];
-                    symbol_rotation = ((b[1] - a[1]) / aspect_ratio).atan2(b[0] - a[0]) as f32;
-                }
-
-                let angle_sin = f64::from((segment_angle + symbol_rotation).sin());
-                let angle_cos = f64::from((segment_angle + symbol_rotation).cos());
-
-                let translated_pos = [in_projected_pos[0] + translation[0], in_projected_pos[1] + translation[1]];
-                let projected_pos = if along_line || has_variable_placement {
-                    [in_projected_pos[0], in_projected_pos[1], elevation, 1.0]
-                } else if pitch_with_map {
-                    matrix::transform_mat4_value(
-                        &[translated_pos[0], translated_pos[1], elevation, 1.0],
-                        &label_plane_matrix,
-                    )
-                } else {
-                    matrix::transform_mat4_value(&project_tile(translated_pos, elevation), &label_plane_matrix)
-                };
-                let pos0 = [projected_pos[0] / projected_pos[3], projected_pos[1] / projected_pos[3]];
-                let z = if pitch_with_map { projected_pos[2] / projected_pos[3] } else { 0.0 };
-                let font_scales = vec2_max_scalar(&a_min_font_scale, font_scale);
-                let pos_offset = [
-                    a_offset[0] * font_scales[0] / 32.0 + a_pxoffset[0] / 16.0,
-                    a_offset[1] * font_scales[1] / 32.0 + a_pxoffset[1] / 16.0,
-                ];
-                // mat2{cos, -sin, sin, cos} * posOffset
-                let rotated = [
-                    pos_offset[0] * angle_cos + pos_offset[1] * angle_sin,
-                    -pos_offset[0] * angle_sin + pos_offset[1] * angle_cos,
-                ];
-
-                // Pitched labels come back from the label plane in tile
-                // units, scaled for their latitude on the globe.
-                let mut projection_scaling = 1.0;
-                if let Some(projector) = projector.as_ref().filter(|_| pitch_with_map) {
-                    let anchor_tile = matrix::transform_mat4_value(&[pos0[0], pos0[1], z, 1.0], &gl_coord_matrix);
-                    projection_scaling = projector.pitched_text_correction(&Point::new(anchor_tile[0], anchor_tile[1]));
-                }
-                let mut out_pos = matrix::transform_mat4_value(
-                    &[pos0[0] + rotated[0] * projection_scaling, pos0[1] + rotated[1] * projection_scaling, z, 1.0],
-                    &gl_coord_matrix,
-                );
-                if pitch_with_map {
-                    out_pos = project_tile([out_pos[0] / out_pos[3], out_pos[1] / out_pos[3]], out_pos[2] / out_pos[3]);
-                }
-                Some([out_pos[0] / out_pos[3], out_pos[1] / out_pos[3], out_pos[2] / out_pos[3]])
-            };
-            let identity = {
-                let mut m: Mat4 = [0.0; 16];
-                matrix::identity(&mut m);
-                m
-            };
-            if let Some(bound) = compute_feature_ndc_bound(vertex_count, &identity, true, get_vertex) {
-                stats.add_rendered_feature(feature_id, &bound, HashSet::from_iter([overscaled_tile_id]));
-            }
-        }
-    };
-
-    let icons_visible = icon_opacity.constant_or(&1.0) > 0.0
-        && (icon_color.constant_or(&SymbolPaintProperties::Defaults::icon_color()).a > 0.0
-            || icon_halo_color.constant_or(&SymbolPaintProperties::Defaults::icon_halo_color()).a > 0.0);
-    let text_visible = text_opacity.constant_or(&1.0) > 0.0
-        && (text_color.constant_or(&SymbolPaintProperties::Defaults::text_color()).a > 0.0
-            || text_halo_color.constant_or(&SymbolPaintProperties::Defaults::text_halo_color()).a > 0.0);
-
-    if has_icon_data && icons_visible {
-        compute_buffer_bounds(&bucket_state.icon, /* is_text = */ false);
-    }
-    if has_text_data && text_visible {
-        compute_buffer_bounds(&bucket_state.text, /* is_text = */ true);
-    }
-    if has_sdf_icon_data && (text_visible || icons_visible) {
-        compute_buffer_bounds(&bucket_state.sdf_icon, /* is_text = */ false);
-    }
 }
 
 #[expect(
@@ -1274,9 +957,9 @@ impl RenderLayer for RenderSymbolLayer {
         shaders: &ShaderRegistry,
         _context: &Context,
         state: &TransformState,
-        update_parameters: &Arc<UpdateParameters>,
+        _update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
-        render_tree: &RenderTree,
+        _render_tree: &RenderTree,
         changes: &mut UniqueChangeRequestVec,
     ) {
         /// The tweakers built for one tile.
@@ -1287,7 +970,6 @@ impl RenderLayer for RenderSymbolLayer {
         }
 
         self.update_projection_variant(state);
-        self.base.stats.rendered_features.clear();
         let passes = self.base.passes;
         let Some(render_tiles) = self.base.render_tiles.clone().filter(|t| !t.is_empty()) else {
             self.remove_all_drawables();
@@ -1417,21 +1099,6 @@ impl RenderLayer for RenderSymbolLayer {
             }
 
             let evaluated = &evaluated::<Symbol>(&render_data.layer).paint;
-
-            if update_parameters.capture_rendered_features {
-                let params = &render_tree.get_parameters().transform_params;
-                capture_rendered_features(
-                    &mut self.base.stats,
-                    &self.base.style.base().id,
-                    tile,
-                    bucket,
-                    evaluated,
-                    state,
-                    params,
-                    is_screen_space,
-                    is_offset,
-                );
-            }
 
             // If we already have drawables for this tile, update them.
             let layer_id = self.get_id().to_owned();

@@ -103,7 +103,6 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn ErasedEvaluatedLayer>]) -> Outcome {
             subdivision_granularity: SubdivisionGranularitySetting::none(),
             global_state: None,
             is_update_synchronous: false,
-            capture_rendered_features: false,
             font_faces: None,
         },
     );

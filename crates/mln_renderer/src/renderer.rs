@@ -810,9 +810,7 @@ impl Renderer {
         let rendering_time = context.rendering_stats().rendering_time;
         context.rendering_stats().encoding_time = render_tree.get_elapsed_time() - rendering_time;
 
-        let mut stats = context.stats().get();
-        stats.frame_rendered_features = orchestrator.move_frame_rendered_features();
-        let stats = Arc::new(stats);
+        let stats = Arc::new(context.stats().get());
         drop(parameters);
 
         self.timings.layers = layers_updated - uploaded;

@@ -7,7 +7,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use mln_gfx::ShaderRegistry;
-use mln_gfx::rendering_stats::{FrameRenderedFeaturesMap, SourceLayerID, merge_layer_features};
 use mln_map_types::{MapMode, TransformState};
 use mln_style::diff::{LayerChange, StyleDiff, sources_by_id};
 use mln_style::expression::{Dependency, GlobalStateMap};
@@ -232,9 +231,6 @@ pub(crate) struct RenderOrchestrator {
     globe_depth_pass: crate::globe_depth_pass::GlobeDepthPass,
     sky_pass: crate::sky_pass::SkyPass,
 
-    /// The features the layers rendered in the last `update_layers`.
-    frame_rendered_features: FrameRenderedFeaturesMap,
-
     /// Last, so that it drops after the fields above: the render layers,
     /// layer groups and placement hold render tiles, whose layouts free
     /// their data on the thread pool (`drop_on_workers`).
@@ -310,7 +306,6 @@ impl RenderOrchestrator {
             debug_layer_tweakers: VecMap::new(), // layers: debug
             render_targets: Vec::new(),          // dem-heatmap
             pending_changes: Vec::new(),
-            frame_rendered_features: FrameRenderedFeaturesMap::default(),
         }
     }
 
@@ -415,7 +410,6 @@ impl RenderOrchestrator {
             subdivision_granularity: update_parameters.subdivision_granularity,
             global_state: self.global_state.clone(),
             is_update_synchronous: false,
-            capture_rendered_features: update_parameters.capture_rendered_features,
             font_faces: style.get_font_faces().cloned(),
         };
 
@@ -1265,7 +1259,6 @@ impl RenderOrchestrator {
         let items = render_tree.get_layer_render_item_map();
 
         let mut changes: UniqueChangeRequestVec = Vec::with_capacity(items.len() * 3);
-        let mut all_features = FrameRenderedFeaturesMap::default();
 
         let mut has_3d = false;
         for item in items.values() {
@@ -1282,20 +1275,8 @@ impl RenderOrchestrator {
                 &mut changes,
             );
             has_3d = has_3d || render_layer.needs_globe_depth();
-
-            // Accumulate rendered features from each render layer, leaving each one empty.
-            let rendered_features = std::mem::take(&mut render_layer.base_mut().stats.rendered_features);
-            if !rendered_features.is_empty() {
-                let id = SourceLayerID {
-                    source_id: item.source.clone().unwrap_or_default(),
-                    layer_id: render_layer.get_id().to_owned(),
-                };
-                merge_layer_features(all_features.entry(id).or_default(), rendered_features);
-            }
         }
         self.add_changes(&mut changes);
-
-        self.frame_rendered_features = all_features;
 
         let tree_parameters = render_tree.get_parameters();
         self.sky_pass.update(
@@ -1314,12 +1295,6 @@ impl RenderOrchestrator {
             update_parameters,
             has_3d || self.sky_pass.has_atmosphere(),
         );
-    }
-
-    /// Takes the features the layers rendered in the last `update_layers`,
-    /// leaving none.
-    pub(crate) fn move_frame_rendered_features(&mut self) -> FrameRenderedFeaturesMap {
-        std::mem::take(&mut self.frame_rendered_features)
     }
 
     pub(crate) fn get_sky_layer_group(&self) -> Option<LayerGroupPtr> {

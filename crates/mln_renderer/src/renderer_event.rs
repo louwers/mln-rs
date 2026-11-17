@@ -7,9 +7,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-pub use mln_gfx::rendering_stats::{
-    FeatureInfo, FrameRenderedFeaturesMap, LayerFeaturesMap, NDCBound, RenderingStats, SourceLayerID,
-};
+pub use mln_gfx::rendering_stats::RenderingStats;
 pub use mln_text::glyph::GlyphRange;
 pub use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;

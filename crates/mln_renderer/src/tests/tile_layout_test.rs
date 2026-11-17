@@ -54,7 +54,6 @@ fn params() -> LayoutParams {
         show_collision_boxes: false,
         subdivision_granularity: SubdivisionGranularitySetting::none(),
         first_load: true,
-        capture_rendered_features: false,
     }
 }
 
