@@ -6,13 +6,13 @@ use geometry::Point;
 use glam::Vec2;
 use mln_map_types::{ProjectedTilePoint, TileProjector, TransformState};
 use mln_text::glyph::WritingModeType;
-use mln_tile_id::geometry_tile_data::GeometryCoordinates;
+use mln_tile_id::geometry_tile_data::GeometryCoordinate;
 use mln_util::constants::ONE_EM;
 use mln_util::mat4::{Mat4, matrix};
 use mln_util::vectors::Vec4;
 
 use crate::buckets::symbol_bucket::{
-    PlacedSymbol, SymbolBucket, SymbolDynamicLayoutVertex, SymbolSizeBinder, ZoomEvaluatedSize,
+    PlacedSymbol, PlacedSymbolPools, SymbolBucket, SymbolDynamicLayoutVertex, SymbolSizeBinder, ZoomEvaluatedSize,
 };
 use crate::render_tile::RenderTile;
 
@@ -299,7 +299,7 @@ impl LineProjectionCache {
     pub(crate) fn get(
         &mut self,
         index: usize,
-        line: &GeometryCoordinates,
+        line: &[GeometryCoordinate],
         label_plane: &LabelPlaneProjector<'_>,
     ) -> ProjectedTilePoint {
         if let Some(cached) = self.points[index] {
@@ -382,7 +382,7 @@ fn place_glyph_along_line(
     projected_anchor_point: Vec2,
     tile_anchor_point: Vec2,
     anchor_segment: u16,
-    line: &GeometryCoordinates,
+    line: &[GeometryCoordinate],
     tile_distances: &[f32],
     label_plane: &LabelPlaneProjector<'_>,
     projections: &mut LineProjectionCache,
@@ -492,13 +492,13 @@ pub(crate) fn place_first_and_last_glyph(
     anchor_point: Vec2,
     tile_anchor_point: Vec2,
     symbol: &PlacedSymbol,
+    pools: &PlacedSymbolPools,
     label_plane: &LabelPlaneProjector<'_>,
     projections: &mut LineProjectionCache,
     return_tile_distance: bool,
 ) -> Option<(PlacedGlyph, PlacedGlyph)> {
-    let (Some(&first_glyph_offset), Some(&last_glyph_offset)) =
-        (symbol.glyph_offsets.first(), symbol.glyph_offsets.last())
-    else {
+    let glyph_offsets = pools.glyph_offsets(symbol);
+    let (Some(&first_glyph_offset), Some(&last_glyph_offset)) = (glyph_offsets.first(), glyph_offsets.last()) else {
         debug_assert!(false);
         return None;
     };
@@ -511,8 +511,8 @@ pub(crate) fn place_first_and_last_glyph(
         anchor_point,
         tile_anchor_point,
         symbol.segment as u16,
-        &symbol.line,
-        &symbol.tile_distances,
+        pools.line(symbol),
+        pools.tile_distances(symbol),
         label_plane,
         projections,
         return_tile_distance,
@@ -526,8 +526,8 @@ pub(crate) fn place_first_and_last_glyph(
         anchor_point,
         tile_anchor_point,
         symbol.segment as u16,
-        &symbol.line,
-        &symbol.tile_distances,
+        pools.line(symbol),
+        pools.tile_distances(symbol),
         label_plane,
         projections,
         return_tile_distance,
@@ -576,6 +576,7 @@ fn requires_orientation_change(
 )]
 fn place_glyphs_along_line(
     symbol: &PlacedSymbol,
+    pools: &PlacedSymbolPools,
     font_size: f32,
     flip: bool,
     keep_upright: bool,
@@ -589,9 +590,12 @@ fn place_glyphs_along_line(
     let font_scale = font_size / ONE_EM;
     let line_offset_x = symbol.line_offset[0] * font_scale;
     let line_offset_y = symbol.line_offset[1] * font_scale;
+    let line = pools.line(symbol);
+    let tile_distances = pools.tile_distances(symbol);
+    let glyph_offsets = pools.glyph_offsets(symbol);
 
     let mut placed_glyphs: Vec<PlacedGlyph> = Vec::new();
-    if symbol.glyph_offsets.len() > 1 {
+    if glyph_offsets.len() > 1 {
         let Some(first_and_last_glyph) = place_first_and_last_glyph(
             font_scale,
             line_offset_x,
@@ -600,6 +604,7 @@ fn place_glyphs_along_line(
             projected_anchor_point,
             symbol.anchor_point,
             symbol,
+            pools,
             label_plane,
             projections,
             false,
@@ -618,10 +623,9 @@ fn place_glyphs_along_line(
             return orientation_change;
         }
 
-        placed_glyphs.reserve(symbol.glyph_offsets.len());
+        placed_glyphs.reserve(glyph_offsets.len());
         placed_glyphs.push(first_and_last_glyph.0);
-        for glyph_index in 1..symbol.glyph_offsets.len() - 1 {
-            let glyph_offset_x = symbol.glyph_offsets[glyph_index];
+        for &glyph_offset_x in &glyph_offsets[1..glyph_offsets.len() - 1] {
             // Since first and last glyph fit on the line, we're sure that the
             // rest of the glyphs can be placed
             let placed_glyph = place_glyph_along_line(
@@ -632,8 +636,8 @@ fn place_glyphs_along_line(
                 projected_anchor_point,
                 symbol.anchor_point,
                 symbol.segment as u16,
-                &symbol.line,
-                &symbol.tile_distances,
+                line,
+                tile_distances,
                 label_plane,
                 projections,
                 false,
@@ -646,7 +650,7 @@ fn place_glyphs_along_line(
             }
         }
         placed_glyphs.push(first_and_last_glyph.1);
-    } else if symbol.glyph_offsets.len() == 1 {
+    } else if glyph_offsets.len() == 1 {
         // Only a single glyph to place
         // So, determine whether to flip based on projected angle of the line segment it's on
         if keep_upright && !flip {
@@ -655,7 +659,7 @@ fn place_glyphs_along_line(
                 Vec2::new(projected.point.x as f32, projected.point.y as f32)
             };
             let a = to_clip(symbol.anchor_point);
-            let tile_segment_end = to_vec2(symbol.line[symbol.segment + 1]);
+            let tile_segment_end = to_vec2(line[symbol.segment + 1]);
             let projected_vertex = label_plane.to_clip_space_from_tile(tile_segment_end);
             // We know the anchor will be in the viewport, but the end of the
             // line segment may be behind the plane of the camera, in which case
@@ -671,7 +675,7 @@ fn place_glyphs_along_line(
                 return orientation_change;
             }
         }
-        let glyph_offset_x = symbol.glyph_offsets[0];
+        let glyph_offset_x = glyph_offsets[0];
         let single_glyph = place_glyph_along_line(
             font_scale * glyph_offset_x,
             line_offset_x,
@@ -680,8 +684,8 @@ fn place_glyphs_along_line(
             projected_anchor_point,
             symbol.anchor_point,
             symbol.segment as u16,
-            &symbol.line,
-            &symbol.tile_distances,
+            line,
+            tile_distances,
             label_plane,
             projections,
             false,
@@ -717,6 +721,7 @@ fn place_glyphs_along_line(
 pub(crate) fn reproject_line_labels(
     dynamic_vertex_array: &mut Vec<SymbolDynamicLayoutVertex>,
     placed_symbols: &[PlacedSymbol],
+    pools: &PlacedSymbolPools,
     tile_projector: &TileProjector<'_>,
     pitch_with_map: bool,
     rotate_with_map: bool,
@@ -780,6 +785,7 @@ pub(crate) fn reproject_line_labels(
         projections.reset(placed_symbol.line.len());
         let place_unflipped = place_glyphs_along_line(
             placed_symbol,
+            pools,
             pitch_scaled_font_size,
             false, /*unflipped*/
             keep_upright,
@@ -798,6 +804,7 @@ pub(crate) fn reproject_line_labels(
             || (place_unflipped == PlacementResult::NeedsFlipping
                 && place_glyphs_along_line(
                     placed_symbol,
+                    pools,
                     pitch_scaled_font_size,
                     true, /*flipped*/
                     keep_upright,

@@ -1,6 +1,7 @@
-//! Renderer utilities: tile cover, tile level of detail, tile meshes,
-//! subdivision and triangulation.
+//! Renderer utilities: pools of per-symbol data, tile cover, tile level of
+//! detail, tile meshes, subdivision and triangulation.
 
+pub(crate) mod pool;
 pub(crate) mod subdivision;
 pub mod tile_cover;
 pub(crate) mod tile_cover_impl;

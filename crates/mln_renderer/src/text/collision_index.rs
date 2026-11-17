@@ -16,7 +16,7 @@ use mln_util::intersection_tests::polygon_intersects_polygon;
 use mln_util::mat4::{Mat4, matrix};
 use mln_util::vectors::Vec4;
 
-use crate::buckets::symbol_bucket::PlacedSymbol;
+use crate::buckets::symbol_bucket::{PlacedSymbol, PlacedSymbolPools};
 use crate::geometry::feature_index::IndexedSubfeature;
 use crate::layout::symbol_projection::{
     LabelPlaneProjector, LineProjectionCache, TileDistance, get_tile_skew_vectors, place_first_and_last_glyph,
@@ -318,6 +318,7 @@ impl CollisionIndex {
         label_plane: &LabelPlaneProjector<'_>,
         text_pixel_ratio: f32,
         symbol: &PlacedSymbol,
+        symbol_pools: &PlacedSymbolPools,
         scale: f32,
         font_size: f32,
         overlap_mode: OverlapMode,
@@ -337,6 +338,7 @@ impl CollisionIndex {
                 label_plane,
                 text_pixel_ratio,
                 symbol,
+                symbol_pools,
                 scale,
                 font_size,
                 overlap_mode,
@@ -411,6 +413,7 @@ impl CollisionIndex {
         label_plane: &LabelPlaneProjector<'_>,
         text_pixel_ratio: f32,
         symbol: &PlacedSymbol,
+        symbol_pools: &PlacedSymbolPools,
         scale: f32,
         font_size: f32,
         overlap_mode: OverlapMode,
@@ -460,6 +463,7 @@ impl CollisionIndex {
             label_plane_anchor_point,
             tile_unit_anchor_point,
             symbol,
+            symbol_pools,
             label_plane,
             &mut projections,
             /*return tile distance*/ true,

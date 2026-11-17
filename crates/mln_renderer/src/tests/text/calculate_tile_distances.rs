@@ -8,16 +8,17 @@ use crate::layout::symbol_layout::SymbolLayout;
 #[test]
 fn point() {
     let line: GeometryCoordinates = vec![Point::new(1i16, 1)];
-    let distances = SymbolLayout::calculate_tile_distances(&line, &Anchor::new(1.0, 1.0, 0.0, Some(0)));
-    assert_eq!(distances.len(), 1);
-    assert_eq!(distances[0], 0.0f32);
+    let mut distances = vec![f32::NAN; line.len()];
+    SymbolLayout::calculate_tile_distances(&line, &Anchor::new(1.0, 1.0, 0.0, Some(0)), &mut distances);
+    assert_eq!(distances, vec![0.0f32]);
 }
 
 // gtest: calculateTileDistances.Line
 #[test]
 fn line() {
     let line: GeometryCoordinates = vec![Point::new(1i16, 1), Point::new(1, 2), Point::new(1, 3), Point::new(1, 4)];
-    let distances = SymbolLayout::calculate_tile_distances(&line, &Anchor::new(1.0, 3.0, 0.0, Some(2)));
+    let mut distances = vec![f32::NAN; line.len()];
+    SymbolLayout::calculate_tile_distances(&line, &Anchor::new(1.0, 3.0, 0.0, Some(2)), &mut distances);
     assert_eq!(distances, vec![2.0f32, 1.0, 0.0, 1.0]);
 }
 
@@ -25,6 +26,7 @@ fn line() {
 #[test]
 fn empty_segment() {
     let line: GeometryCoordinates = Vec::new();
-    let distances = SymbolLayout::calculate_tile_distances(&line, &Anchor::new(1.0, 1.0, 0.0, None));
-    assert_eq!(distances.len(), 0);
+    let mut distances = Vec::new();
+    SymbolLayout::calculate_tile_distances(&line, &Anchor::new(1.0, 1.0, 0.0, None), &mut distances);
+    assert_eq!(distances, Vec::<f32>::new());
 }

@@ -25,7 +25,7 @@ use mln_style_types::TextWritingModeType;
 use mln_style_types::image::ImagePositions;
 use mln_text::glyph::WritingModeType;
 use mln_tile::TileLayer;
-use mln_tile_id::geometry_tile_data::{GeometryCoordinates, GeometryTileFeature};
+use mln_tile_id::geometry_tile_data::{GeometryCoordinate, GeometryCoordinates, GeometryTileFeature};
 use mln_util::Color;
 use mln_util::range::Range;
 use mln_util::serialization::payload::pod;
@@ -38,6 +38,7 @@ use crate::gfx::context::Context;
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::symbol_instance::SymbolInstance;
 use crate::paint_property_binder::PaintPropertyBinder;
+use crate::util::pool::PoolRange;
 
 crate::paint_property_binders!(
     pub struct SymbolIconBinders for SymbolPaintProperties::PossiblyEvaluated {
@@ -269,9 +270,14 @@ pub(crate) struct PlacedSymbol {
     pub(crate) upper_size: f32,
     pub(crate) line_offset: [f32; 2],
     pub(crate) writing_modes: WritingModeType,
-    pub(crate) line: GeometryCoordinates,
-    pub(crate) tile_distances: Vec<f32>,
-    pub(crate) glyph_offsets: Vec<f32>,
+    /// The line the symbol is placed along, in its buffer's `pools.lines`.
+    pub(crate) line: PoolRange,
+    /// The distance along `line` from the anchor to each vertex, in its
+    /// buffer's `pools.tile_distances`. Empty for icons.
+    pub(crate) tile_distances: PoolRange,
+    /// The x offset of each glyph, or of the icon, in its buffer's
+    /// `pools.glyph_offsets`. There are four vertices for each.
+    pub(crate) glyph_offsets: PoolRange,
     pub(crate) hidden: bool,
     pub(crate) start_index: usize,
     /// The crossTileID is only filled/used on the foreground for variable
@@ -297,8 +303,9 @@ impl PlacedSymbol {
         upper_size: f32,
         line_offset: [f32; 2],
         writing_modes: WritingModeType,
-        line: GeometryCoordinates,
-        tile_distances: Vec<f32>,
+        line: PoolRange,
+        tile_distances: PoolRange,
+        glyph_offsets: PoolRange,
         placed_icon_index: Option<usize>,
     ) -> Self {
         PlacedSymbol {
@@ -310,7 +317,7 @@ impl PlacedSymbol {
             writing_modes,
             line,
             tile_distances,
-            glyph_offsets: Vec::new(),
+            glyph_offsets,
             hidden: false,
             start_index: 0,
             cross_tile_id: None,
@@ -341,8 +348,33 @@ pub(crate) struct Buffer {
     pub(crate) triangles: Vec<u16>,
     pub(crate) segments: Vec<SegmentBase>,
     pub(crate) placed_symbols: Vec<PlacedSymbol>,
+    pub(crate) pools: PlacedSymbolPools,
     /// Bumped by `updateModified` (the drawables re-read changed vectors).
     pub(crate) modified: u64,
+}
+
+/// The geometry of a buffer's placed symbols, which they hold ranges of.
+#[derive(Debug, Default, mln_wire::Wire)]
+pub(crate) struct PlacedSymbolPools {
+    pub(crate) lines: GeometryCoordinates,
+    #[wire(with = "pod")]
+    pub(crate) tile_distances: Vec<f32>,
+    #[wire(with = "pod")]
+    pub(crate) glyph_offsets: Vec<f32>,
+}
+
+impl PlacedSymbolPools {
+    pub(crate) fn line(&self, symbol: &PlacedSymbol) -> &[GeometryCoordinate] {
+        symbol.line.of(&self.lines)
+    }
+
+    pub(crate) fn tile_distances(&self, symbol: &PlacedSymbol) -> &[f32] {
+        symbol.tile_distances.of(&self.tile_distances)
+    }
+
+    pub(crate) fn glyph_offsets(&self, symbol: &PlacedSymbol) -> &[f32] {
+        symbol.glyph_offsets.of(&self.glyph_offsets)
+    }
 }
 
 impl Buffer {
@@ -358,16 +390,17 @@ impl Buffer {
 
     /// The positions placement lays out, the leader's or, with a layer ID,
     /// that layer's (made on first use), with the placed symbols they are
-    /// for (C++ `positions(buffer)` in `updateBucketDynamicAttributeData`).
+    /// for and their pools (C++ `positions(buffer)` in
+    /// `updateBucketDynamicAttributeData`).
     pub(crate) fn positions_and_symbols(
         &mut self,
         layer_id: Option<&str>,
-    ) -> (&mut Vec<SymbolDynamicLayoutVertex>, &[PlacedSymbol]) {
+    ) -> (&mut Vec<SymbolDynamicLayoutVertex>, &[PlacedSymbol], &PlacedSymbolPools) {
         let positions = match layer_id {
             None => &mut self.dynamic_attribute_data,
             Some(layer_id) => self.layer_dynamic_attribute_data.entry(layer_id.to_owned()).or_default(),
         };
-        (positions, &self.placed_symbols)
+        (positions, &self.placed_symbols, &self.pools)
     }
 
     /// Whether any of the `count` opacity vertices from `offset` can draw. A
@@ -680,12 +713,10 @@ impl SymbolBucket {
 
             let icon_buffer = if symbol_instance.has_sdf_icon() { &mut state.sdf_icon } else { &mut state.icon };
             if let Some(i) = symbol_instance.placed_icon_index {
-                let placed = icon_buffer.placed_symbols[i].clone();
-                add_placed_symbol(&mut icon_buffer.triangles, &placed);
+                add_placed_symbol(&mut icon_buffer.triangles, &icon_buffer.placed_symbols[i]);
             }
             if let Some(i) = symbol_instance.placed_vertical_icon_index {
-                let placed = icon_buffer.placed_symbols[i].clone();
-                add_placed_symbol(&mut icon_buffer.triangles, &placed);
+                add_placed_symbol(&mut icon_buffer.triangles, &icon_buffer.placed_symbols[i]);
             }
         }
 

@@ -47,8 +47,8 @@ use mln_vec_map::VecMap;
 
 use crate::bucket::Bucket;
 use crate::buckets::symbol_bucket::{
-    Buffer, CollisionBoxDynamicVertex, PlacedSymbol, SortKeyRange, SymbolBucket, SymbolBucketState, ZoomEvaluatedSize,
-    get_sorted_symbols,
+    Buffer, CollisionBoxDynamicVertex, PlacedSymbol, PlacedSymbolPools, SortKeyRange, SymbolBucket, SymbolBucketState,
+    ZoomEvaluatedSize, get_sorted_symbols,
 };
 use crate::geometry::feature_index::{FeatureIndex, IndexedSubfeature};
 use crate::layout::symbol_instance::SymbolInstance;
@@ -1066,6 +1066,7 @@ impl Placement {
                             &projectors.text_label_plane,
                             ctx.pixel_ratio,
                             placed_symbol,
+                            &state.text.pools,
                             ctx.scale,
                             font_size,
                             ctx.text_overlap_mode,
@@ -1152,6 +1153,7 @@ impl Placement {
                             ctx,
                             projectors,
                             placed_symbol,
+                            &state.text.pools,
                             font_size,
                             &pos_matrix,
                             variable_text_anchors_ref,
@@ -1233,6 +1235,7 @@ impl Placement {
                     &projectors.icon_label_plane,
                     ctx.pixel_ratio,
                     placed_symbol,
+                    &icon_buffer.pools,
                     ctx.scale,
                     font_size,
                     ctx.icon_overlap_mode,
@@ -1350,6 +1353,7 @@ impl Placement {
         ctx: &PlacementContext,
         projectors: &PlacementProjectors<'_>,
         placed_symbol: &PlacedSymbol,
+        pools: &PlacedSymbolPools,
         font_size: f32,
         pos_matrix: &Mat4,
         variable_text_anchors: &[SymbolAnchorType],
@@ -1415,6 +1419,7 @@ impl Placement {
                 &projectors.text_label_plane,
                 ctx.pixel_ratio,
                 placed_symbol,
+                pools,
                 ctx.scale,
                 font_size,
                 overlap_mode,
@@ -1435,6 +1440,7 @@ impl Placement {
                     &projectors.icon_label_plane,
                     ctx.pixel_ratio,
                     placed_symbol,
+                    pools,
                     ctx.scale,
                     font_size,
                     ctx.icon_overlap_mode,
@@ -1674,10 +1680,11 @@ impl Placement {
                 let pitch_with_map = *layout.icon_pitch_alignment.uniform() == AlignmentType::Map;
                 let keep_upright = &layout.icon_keep_upright;
                 if has_sdf_icon {
-                    let (positions, placed_symbols) = bs.sdf_icon.positions_and_symbols(layer_id);
+                    let (positions, placed_symbols, pools) = bs.sdf_icon.positions_and_symbols(layer_id);
                     reproject_line_labels(
                         positions,
                         placed_symbols,
+                        pools,
                         &tile_projector,
                         pitch_with_map,
                         true, /*rotateWithMap*/
@@ -1690,10 +1697,11 @@ impl Placement {
                     result = true;
                 }
                 if has_icon {
-                    let (positions, placed_symbols) = bs.icon.positions_and_symbols(layer_id);
+                    let (positions, placed_symbols, pools) = bs.icon.positions_and_symbols(layer_id);
                     reproject_line_labels(
                         positions,
                         placed_symbols,
+                        pools,
                         &tile_projector,
                         pitch_with_map,
                         true, /*rotateWithMap*/
@@ -1711,10 +1719,11 @@ impl Placement {
             if has_text && text_rotation_alignment != TextRotationAlignmentType::Viewport {
                 let pitch_with_map = *layout.text_pitch_alignment.uniform() == AlignmentType::Map;
                 let keep_upright = &layout.text_keep_upright;
-                let (positions, placed_symbols) = bs.text.positions_and_symbols(layer_id);
+                let (positions, placed_symbols, pools) = bs.text.positions_and_symbols(layer_id);
                 reproject_line_labels(
                     positions,
                     placed_symbols,
+                    pools,
                     &tile_projector,
                     pitch_with_map,
                     text_rotation_alignment == TextRotationAlignmentType::Map,
@@ -1755,7 +1764,7 @@ impl Placement {
             }
             let mut placed_text_shifts: HashMap<usize, (usize, Vec2)> = HashMap::default();
 
-            let (text_positions, text_placed_symbols) = bs.text.positions_and_symbols(layer_id);
+            let (text_positions, text_placed_symbols, _) = bs.text.positions_and_symbols(layer_id);
             text_positions.clear();
             for (i, symbol) in text_placed_symbols.iter().enumerate() {
                 let mut variable_offset: Option<VariableOffset> = None;
@@ -1849,7 +1858,7 @@ impl Placement {
 
             if update_text_fit_icon && has_variable_placement {
                 let update_icon = |icon_buffer: &mut Buffer| {
-                    let (icon_positions, icon_placed_symbols) = icon_buffer.positions_and_symbols(layer_id);
+                    let (icon_positions, icon_placed_symbols, _) = icon_buffer.positions_and_symbols(layer_id);
                     icon_positions.clear();
                     for (i, placed_icon) in icon_placed_symbols.iter().enumerate() {
                         if placed_icon.hidden
