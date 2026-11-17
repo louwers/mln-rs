@@ -21,13 +21,15 @@ static ALLOCATOR: CountingAllocator = CountingAllocator;
 
 const USAGE: &str = "usage:
   mln-bench list [--filter <s>]... [--json]
-  mln-bench run [--filter <s>]... [--json]
+  mln-bench run [--filter <s>]... [--images <dir>] [--json]
   mln-bench compare <ref> [--filter <s>]... [--rounds <n>] [--threshold <percent>]
                           [--time-threshold <percent>] [--json]
   mln-bench fixtures [--from <dir>]
 
 --filter keeps the scenarios whose names contain one of the strings.
 run and compare run each scenario in a process of its own (mln-bench exec).
+--images writes the last image each scenario drew to <dir>, as PNG files
+named after the scenarios.
 compare builds this checkout's harness against <ref> and compares the two
 (tools/bench/README.md).
 fixtures installs the snapshot that tools/bench/fixtures.json names, from its
@@ -52,6 +54,9 @@ struct Options {
     threshold: f64,
     time_threshold: f64,
     from: Option<PathBuf>,
+    images: Option<PathBuf>,
+    /// exec's: the file the scenario writes its last image to.
+    image: Option<PathBuf>,
     positional: Vec<String>,
 }
 
@@ -63,6 +68,8 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
         threshold: 1.0,
         time_threshold: 2.0,
         from: None,
+        images: None,
+        image: None,
         positional: Vec::new(),
     };
     let mut args = args.into_iter();
@@ -76,6 +83,8 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
             "--threshold" => options.threshold = number(value()?)?,
             "--time-threshold" => options.time_threshold = number(value()?)?,
             "--from" => options.from = Some(PathBuf::from(value()?)),
+            "--images" => options.images = Some(PathBuf::from(value()?)),
+            "--image" => options.image = Some(PathBuf::from(value()?)),
             "-h" | "--help" => return Err(USAGE.to_owned()),
             _ if arg.starts_with('-') => return Err(format!("unknown option {arg}\n\n{USAGE}")),
             _ => options.positional.push(arg),
@@ -118,10 +127,16 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 eprintln!("mln-bench: this build isn't optimized; `mise run bench` builds the benchmark profile");
             }
             let binary = std::env::current_exe().map_err(|error| error.to_string())?;
+            if let Some(dir) = &options.images {
+                std::fs::create_dir_all(dir).map_err(|error| format!("{}: {error}", dir.display()))?;
+            }
+            runner::warm_up(&binary, &selected)?;
             let mut runs = Vec::new();
             for scenario in selected {
                 eprintln!("mln-bench: {}", scenario.name);
-                runs.push(runner::run_in_process(&binary, scenario.name)?);
+                let image =
+                    options.images.as_ref().map(|dir| dir.join(format!("{}.png", scenario.name.replace('/', "-"))));
+                runs.push(runner::run_in_process(&binary, scenario.name, image.as_deref())?);
             }
             if options.json {
                 println!("{}", serde_json::to_string_pretty(&runs).map_err(|error| error.to_string())?);
@@ -157,7 +172,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
         }
         ["exec", name, out] => {
             let scenario = scenarios::find(name).ok_or_else(|| format!("no scenario {name}"))?;
-            runner::exec(scenario, &PathBuf::from(out))
+            runner::exec(scenario, &PathBuf::from(out), options.image)
         }
         _ => Err(USAGE.to_owned()),
     }

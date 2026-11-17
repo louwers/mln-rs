@@ -1,142 +1,62 @@
-//! A continuous map drawn by a headless frontend on the calling thread,
-//! whose frames the scenario asks for one at a time: no display clock and no
-//! sleeping, so the frames a scenario draws are the same on every machine.
+//! A map drawn by a headless frontend on the calling thread, which the
+//! scenario drives one step at a time: frames on a frame clock of its own,
+//! and waits for the map's background work to finish, so the frames a
+//! scenario draws and what each has loaded are the same on every run and
+//! every machine.
 
+use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use mln_actor::RunLoop;
+use mln_actor::scheduler::SchedulerPtr;
 use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapEvent, MapMode, MapOptions, RenderFrameStatus, RenderMode};
 use mln_runtime::Device;
 use mln_storage::FileSource;
+use mln_util::geo::LatLng;
 use mln_util::size::Size;
 
+use super::fixtures::Fixtures;
+use super::workers::Workers;
 use crate::environment::Gpu;
+use crate::scenario::Bench;
 
-/// How long [`HeadlessMap::settle`] may wait before it fails the scenario:
-/// a guard against a hang, not part of what runs.
-const SETTLE_LIMIT: Duration = Duration::from_secs(120);
+/// The interval of the frame clock: a 60 Hz display's.
+const FRAME_INTERVAL: Duration = Duration::from_nanos(16_666_667);
 
-pub(crate) struct HeadlessMap {
+/// How many frames [`HeadlessMap::settle`] and [`HeadlessMap::load`] may
+/// draw: a guard against a map that never completes.
+const FRAME_LIMIT: u64 = 10_000;
+
+/// The GPU device and the offscreen target a map draws into, with the run
+/// loop and the workers the map runs on. Making one is the part of a map's
+/// start that a scenario leaves out.
+pub(crate) struct Frontend {
     /// The loop of the map and the frontend, on the calling thread.
     run_loop: RunLoop,
+    workers: Arc<Workers>,
     frontend: HeadlessFrontend,
-    map: Map,
-    frames: u64,
-    last_frame: Option<RenderFrameStatus>,
 }
 
-impl HeadlessMap {
-    /// A continuous map of `size` without a style, on the GPU device the
-    /// headless frontend picks (`MLN_RENDER_BACKEND`, WebGPU by default).
-    pub(crate) fn new(size: Size) -> HeadlessMap {
-        HeadlessMap::build(size, None)
+impl Frontend {
+    /// A frontend of `size` at pixel ratio 1, on the device the tests
+    /// render on: the backend `MLN_RENDER_BACKEND` names, or WebGPU.
+    pub(crate) fn new(size: Size) -> Frontend {
+        let workers = Workers::new();
+        let pool: SchedulerPtr = Arc::<Workers>::clone(&workers);
+        let run_loop = RunLoop::with_pool(pool);
+        let frontend = HeadlessFrontend::new(size, 1.0, &run_loop).expect("a headless frontend");
+        Frontend { run_loop, workers, frontend }
     }
 
-    /// A map as [`HeadlessMap::new`] makes, whose resources come from
-    /// `file_source`, such as the fixtures'
-    /// ([`Fixtures::file_source`](super::fixtures::Fixtures::file_source)).
-    #[expect(dead_code, reason = "no scenario reads the fixtures")]
-    pub(crate) fn with_file_source(size: Size, file_source: Arc<dyn FileSource>) -> HeadlessMap {
-        HeadlessMap::build(size, Some(file_source))
+    /// Where a file source for the map should run its reads, so that
+    /// waiting for the workers waits for them too.
+    pub(crate) fn workers(&self) -> SchedulerPtr {
+        Arc::<Workers>::clone(&self.workers)
     }
 
-    fn build(size: Size, file_source: Option<Arc<dyn FileSource>>) -> HeadlessMap {
-        let run_loop = RunLoop::new();
-        let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop).expect("a headless frontend");
-        let options = MapOptions { map_mode: MapMode::Continuous, size, pixel_ratio: 1.0, ..Default::default() };
-        let map = match file_source {
-            Some(file_source) => Map::with_file_source(file_source, options, &run_loop),
-            None => Map::new(options, &run_loop),
-        }
-        .expect("a map");
-        frontend.attach(&map);
-        HeadlessMap { run_loop, frontend, map, frames: 0, last_frame: None }
-    }
-
-    pub(crate) fn map(&mut self) -> &mut Map {
-        &mut self.map
-    }
-
-    pub(crate) fn jump(&mut self, camera: &CameraOptions) {
-        self.map.jump_to(camera);
-    }
-
-    /// The frames drawn so far.
-    pub(crate) fn frames(&self) -> u64 {
-        self.frames
-    }
-
-    /// Draws and waits for the map's work, such as its tiles from the
-    /// workers, until a frame shows the view complete and nothing is left to
-    /// animate.
-    pub(crate) fn settle(&mut self) {
-        let start = Instant::now();
-        loop {
-            // The map's events can publish an update, which the frontend
-            // then draws.
-            self.observe();
-            let drew = self.frontend.render_update();
-            if drew {
-                self.wait_for_gpu();
-            }
-            if self.run_loop.run_once() || drew {
-                continue;
-            }
-            if self.last_frame.as_ref().is_some_and(|status| status.mode == RenderMode::Full && !status.needs_repaint) {
-                return;
-            }
-            assert!(start.elapsed() < SETTLE_LIMIT, "the view isn't complete after {SETTLE_LIMIT:?}");
-            self.run_loop.wait_for_work();
-        }
-    }
-
-    /// Runs what is ready without waiting for more, then draws the map's
-    /// latest update and waits for the GPU to finish it, as a host does
-    /// before presenting a frame. Returns how the frame went.
-    pub(crate) fn draw_frame(&mut self) -> RenderFrameStatus {
-        while self.run_loop.run_once() {}
-        self.map.process_events();
-        self.frontend.render_frame();
-        self.wait_for_gpu();
-        self.observe();
-        self.last_frame.clone().expect("the renderer reports each frame")
-    }
-
-    /// The vertex and index buffers the GPU held after the last frame.
-    pub(crate) fn gpu_buffer_bytes(&self) -> u64 {
-        let stats = &self.last_frame.as_ref().expect("a frame").rendering_stats;
-        (i64::from(stats.mem_vertex_buffers) + i64::from(stats.mem_index_buffers)) as u64
-    }
-
-    /// Handles the map's events, counting its frames.
-    fn observe(&mut self) {
-        for event in self.map.drain_events() {
-            match event {
-                MapEvent::RenderFrameFinished(status) => {
-                    self.frames += 1;
-                    self.last_frame = Some(status);
-                }
-                MapEvent::LoadingFailed(error) => panic!("the map failed to load: {error}"),
-                _ => {}
-            }
-        }
-    }
-
-    /// Waits for the GPU to finish the frame drawn last: the native backends
-    /// submit it without waiting, and WebGPU leaves it to the device.
-    fn wait_for_gpu(&self) {
-        let Device::WebGpu(device) = self.frontend.device() else {
-            let backend = self.frontend.backend();
-            let _hold = backend.hold();
-            backend.gpu().flush(true).expect("the GPU finishes the frame");
-            return;
-        };
-        device.device().poll(wgpu::PollType::wait_indefinitely()).expect("the GPU finishes the frame");
-    }
-
-    /// The device the map draws on.
+    /// The device the frontend draws on.
     pub(crate) fn gpu(&self) -> Gpu {
         let backend = self.frontend.backend();
         #[cfg(target_vendor = "apple")]
@@ -174,5 +94,254 @@ impl HeadlessMap {
         let software = info.device_type == wgpu::DeviceType::Cpu
             || ["llvmpipe", "lavapipe", "swiftshader", "software", "warp"].iter().any(|s| lower.contains(s));
         Gpu { name: info.name, backend: format!("WebGPU on {:?}", info.backend), software }
+    }
+
+    /// Waits for the GPU to finish the frame drawn last: the native backends
+    /// submit it without waiting, and WebGPU leaves it to the device.
+    fn wait_for_gpu(&self) {
+        let Device::WebGpu(device) = self.frontend.device() else {
+            let backend = self.frontend.backend();
+            let _hold = backend.hold();
+            backend.gpu().flush(true).expect("the GPU finishes the frame");
+            return;
+        };
+        device.device().poll(wgpu::PollType::wait_indefinitely()).expect("the GPU finishes the frame");
+    }
+}
+
+/// A map on a [`Frontend`], over the fixtures or another file source.
+///
+/// Nothing runs on its own: the scenario draws each frame
+/// ([`draw_frame`](Self::draw_frame)) and waits for the map's background
+/// work ([`wait_for_workers`](Self::wait_for_workers)), or does both until
+/// the map is loaded ([`load`](Self::load), [`settle`](Self::settle),
+/// [`render_still`](Self::render_still)). A frame drawn after a wait has
+/// everything the frames before it asked for, so a map loads in the same
+/// steps on every run. Each continuous frame is one tick of a frame clock
+/// that only frames advance, which places and fades symbols and runs
+/// transitions as a 60 Hz display would, however long a frame took.
+pub(crate) struct HeadlessMap {
+    // The map before its frontend, whose renderer reports to it.
+    map: Map,
+    frontend: Frontend,
+    /// The time of the next frame. It starts a day ahead of the system's
+    /// clock, so the map never takes it for a stale frame time and always
+    /// samples its animations at it.
+    clock: Instant,
+    frames: u64,
+    incomplete: u64,
+    last_frame: Option<RenderFrameStatus>,
+}
+
+impl HeadlessMap {
+    /// A map in `mode`, the frontend's size, whose resources come from
+    /// `file_source`, attached to the frontend. Make `file_source` run on
+    /// [`Frontend::workers`].
+    pub(crate) fn new(mut frontend: Frontend, mode: MapMode, file_source: Arc<dyn FileSource>) -> HeadlessMap {
+        let size = frontend.frontend.size();
+        let options = MapOptions { map_mode: mode, size, pixel_ratio: 1.0, ..Default::default() };
+        let map = Map::with_file_source(file_source, options, &frontend.run_loop).expect("a map");
+        frontend.frontend.attach(&map);
+        let clock = Instant::now() + Duration::from_hours(24);
+        HeadlessMap { map, frontend, clock, frames: 0, incomplete: 0, last_frame: None }
+    }
+
+    /// A map as [`new`](Self::new) makes, over the fixtures, on a new
+    /// frontend of `size`, at `camera`, loading `style`, such as
+    /// [`Fixtures::style`]. Records the frontend's device in `bench`.
+    pub(crate) fn open(
+        bench: &mut Bench,
+        fixtures: &Fixtures,
+        size: Size,
+        mode: MapMode,
+        style: &str,
+        camera: &CameraOptions,
+    ) -> HeadlessMap {
+        let frontend = Frontend::new(size);
+        bench.gpu = Some(frontend.gpu());
+        let file_source = fixtures.file_source(frontend.workers());
+        let mut map = HeadlessMap::new(frontend, mode, file_source);
+        map.jump(camera);
+        map.map().load_style_json(style);
+        map
+    }
+
+    pub(crate) fn map(&mut self) -> &mut Map {
+        &mut self.map
+    }
+
+    pub(crate) fn jump(&mut self, camera: &CameraOptions) {
+        self.map.jump_to(camera);
+    }
+
+    /// The background tasks the map has started so far.
+    pub(crate) fn background_tasks(&self) -> u64 {
+        self.frontend.workers.started()
+    }
+
+    /// The frames drawn so far.
+    pub(crate) fn frames(&self) -> u64 {
+        self.frames
+    }
+
+    /// The frames drawn so far with something the view needs missing.
+    pub(crate) fn frames_incomplete(&self) -> u64 {
+        self.incomplete
+    }
+
+    /// Runs the map's background work, and what it sends back to the map
+    /// and its renderer, until none is left. Returns whether there was any.
+    pub(crate) fn wait_for_workers(&mut self) -> bool {
+        let mut any = false;
+        loop {
+            self.frontend.workers.wait_until_idle();
+            let mut ran = false;
+            while self.frontend.run_loop.run_once() {
+                ran = true;
+            }
+            // The map's handling of what the workers sent can start more
+            // work, such as the requests of a style that loaded.
+            if self.map.has_reports() {
+                self.map.process_events();
+                ran = true;
+            }
+            if !ran && self.frontend.workers.is_idle() {
+                self.observe();
+                return any;
+            }
+            any = true;
+        }
+    }
+
+    /// Draws a frame of a continuous map at the next tick of its frame
+    /// clock, and waits for the GPU to finish it, as a host does before
+    /// presenting a frame. Runs what is ready on the map's run loop first,
+    /// but doesn't wait for the workers. Returns how the frame went.
+    pub(crate) fn draw_frame(&mut self) -> RenderFrameStatus {
+        while self.frontend.run_loop.run_once() {}
+        self.map.set_frame_time(Some(self.clock));
+        self.clock += FRAME_INTERVAL;
+        // An update at this frame's time, whether or not the map had one.
+        self.map.trigger_repaint();
+        self.map.process_events();
+        let drawn = self.frames;
+        self.frontend.frontend.render_frame();
+        self.frontend.wait_for_gpu();
+        self.observe();
+        assert_eq!(self.frames, drawn + 1, "the renderer reports each frame");
+        self.last_frame.clone().expect("a frame")
+    }
+
+    /// Draws frames, waiting for the workers before each, until one shows
+    /// the view complete. Returns how many it drew.
+    pub(crate) fn load(&mut self) -> u64 {
+        let start = self.frames;
+        loop {
+            self.wait_for_workers();
+            if self.draw_frame().mode == RenderMode::Full {
+                return self.frames - start;
+            }
+            assert!(self.frames - start < FRAME_LIMIT, "the view isn't complete after {FRAME_LIMIT} frames");
+        }
+    }
+
+    /// Draws frames, waiting for the workers before each, until one shows
+    /// the view complete with nothing left to animate, such as symbols
+    /// fading in. Returns how many it drew.
+    pub(crate) fn settle(&mut self) -> u64 {
+        let start = self.frames;
+        loop {
+            self.wait_for_workers();
+            let status = self.draw_frame();
+            if status.mode == RenderMode::Full && !status.needs_repaint {
+                return self.frames - start;
+            }
+            assert!(self.frames - start < FRAME_LIMIT, "the view isn't settled after {FRAME_LIMIT} frames");
+        }
+    }
+
+    /// Renders a still image of a static or tile map, waiting for the
+    /// workers between the renderer's updates, and reads it back from the
+    /// GPU.
+    pub(crate) fn render_still(&mut self) -> mln_util::image::PremultipliedImage {
+        self.map.render_still().expect("a still image starts");
+        loop {
+            self.map.process_events();
+            if let Some(result) = self.map.take_still_image() {
+                result.expect("a still image");
+                return self.frontend.frontend.read_still_image();
+            }
+            let drew = self.frontend.frontend.render_update();
+            let worked = self.wait_for_workers();
+            assert!(drew || worked, "a still image that waits for nothing");
+        }
+    }
+
+    /// The vertex and index buffers the GPU held after the last frame.
+    pub(crate) fn gpu_buffer_bytes(&self) -> u64 {
+        let stats = self.frontend.frontend.rendering_stats();
+        (i64::from(stats.mem_vertex_buffers) + i64::from(stats.mem_index_buffers)) as u64
+    }
+
+    /// The textures and buffers the renderer has made on the GPU so far.
+    pub(crate) fn gpu_objects_created(&self) -> u64 {
+        let stats = self.frontend.frontend.rendering_stats();
+        stats.num_created_textures as u64 + stats.total_buffer_objs as u64
+    }
+
+    /// Writes the last frame as a PNG to `path`.
+    pub(crate) fn save_image(&self, path: &Path) {
+        save_png(&self.frontend.frontend.read_still_image(), path);
+    }
+
+    /// Handles the map's events, counting its frames.
+    fn observe(&mut self) {
+        for event in self.map.drain_events() {
+            match event {
+                MapEvent::RenderFrameFinished(status) => {
+                    self.frames += 1;
+                    if status.mode != RenderMode::Full {
+                        self.incomplete += 1;
+                    }
+                    self.last_frame = Some(status);
+                }
+                MapEvent::LoadingFailed(error) => panic!("the map failed to load: {error}"),
+                _ => {}
+            }
+        }
+    }
+}
+
+/// Writes `image` as a PNG to `path`.
+pub(crate) fn save_png(image: &mln_util::image::PremultipliedImage, path: &Path) {
+    std::fs::write(path, mln_image::encode_png(image)).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+}
+
+/// The center of the 512-pixel tile `z`/`x`/`y` of Web Mercator.
+pub(crate) fn tile_center(z: u8, x: u32, y: u32) -> LatLng {
+    let tiles = f64::from(1u32 << z);
+    let longitude = (f64::from(x) + 0.5) / tiles * 360.0 - 180.0;
+    let latitude = (std::f64::consts::PI * (1.0 - 2.0 * (f64::from(y) + 0.5) / tiles)).sinh().atan().to_degrees();
+    LatLng::new(latitude, longitude).expect("a tile's center")
+}
+
+/// The tile of zoom `z` that holds `point`.
+pub(crate) fn tile_at(z: u8, point: LatLng) -> (u32, u32) {
+    let tiles = f64::from(1u32 << z);
+    let x = (point.longitude() + 180.0) / 360.0 * tiles;
+    let latitude = point.latitude().to_radians();
+    let y = (1.0 - latitude.tan().asinh() / std::f64::consts::PI) / 2.0 * tiles;
+    (x.floor() as u32, y.floor() as u32)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_tile_holds_its_center() {
+        for (z, x, y) in [(0, 0, 0), (14, 2620, 6332), (6, 10, 24)] {
+            assert_eq!(tile_at(z, tile_center(z, x, y)), (x, y));
+        }
     }
 }

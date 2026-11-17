@@ -52,7 +52,6 @@ pub(crate) struct TileSet {
     pub(crate) archive: String,
     /// West, south, east, north: a camera centered here sees only tiles the
     /// archive holds, when its view is at most two tiles across.
-    #[expect(dead_code, reason = "no scenario reads the fixtures")]
     pub(crate) area: [f64; 4],
     /// The archive's first and last zoom.
     #[expect(dead_code, reason = "no scenario reads the fixtures")]

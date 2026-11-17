@@ -1,5 +1,6 @@
 //! What a scenario is, and [`Bench`], through which it measures.
 
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -21,7 +22,7 @@ pub(crate) enum Kind {
 /// `name` is a path of lowercase segments: the kind, then the pipeline stage
 /// (micro) or the operation (macro), then the case or workload, and a size
 /// last where the scenario runs at two:
-/// `micro/expression/evaluate`, `macro/frame/inline`,
+/// `micro/expression/evaluate`, `macro/frame/street`,
 /// `micro/geojson/parse/large`.
 pub(crate) struct Scenario {
     pub(crate) name: &'static str,
@@ -92,10 +93,16 @@ pub(crate) struct Bench {
     wall: Duration,
     cpu: Duration,
     own: Vec<Metric>,
+    /// What one unit of the scenario's work is, and how many the measured
+    /// parts did ([`Bench::per`]).
+    per: Option<(String, u64)>,
     pub(crate) gpu: Option<Gpu>,
     /// The hash of the fixture manifest the scenario read, which
     /// `support::fixtures::Fixtures::open` sets.
     pub(crate) fixtures: Option<String>,
+    /// Where the scenario writes the last image it drew as a PNG, when
+    /// `mln-bench run --images` asks for it.
+    pub(crate) image: Option<PathBuf>,
 }
 
 impl Bench {
@@ -167,6 +174,16 @@ impl Bench {
         }
     }
 
+    /// Declares that the measured parts did `n` units of the scenario's
+    /// work, such as frames or tiles, called `unit`: the run reports
+    /// `instructions`, `allocations` and `allocated` per unit too, as
+    /// `<metric>_per_<unit>`.
+    pub(crate) fn per(&mut self, unit: &str, n: u64) {
+        assert!(self.per.is_none(), "per() twice");
+        assert!(n > 0, "{unit}: no units");
+        self.per = Some((unit.to_owned(), n));
+    }
+
     fn add(&mut self, name: &str, kind: MetricKind, unit: Unit, value: f64) {
         assert!(
             !STANDARD_METRICS.contains(&name) && self.own.iter().all(|metric| metric.name != name),
@@ -191,6 +208,15 @@ impl Bench {
         let time = |name: &str, value| Metric { name: name.to_owned(), kind: MetricKind::Time, unit: Unit::Ms, value };
         metrics.push(time("wall", ms(self.wall)));
         metrics.push(time("cpu", ms(self.cpu)));
+        if let Some((unit, n)) = &self.per {
+            let n = *n as f64;
+            let per_unit: Vec<Metric> = metrics
+                .iter()
+                .filter(|metric| ["instructions", "allocations", "allocated"].contains(&metric.name.as_str()))
+                .map(|metric| count(&format!("{}_per_{unit}", metric.name), metric.unit, (metric.value / n).round()))
+                .collect();
+            metrics.extend(per_unit);
+        }
         metrics.extend(self.own);
         metrics
     }
@@ -230,5 +256,16 @@ mod tests {
         assert_eq!(get("frame_p50"), 50.0);
         assert_eq!(get("frame_p90"), 90.0);
         assert_eq!(get("frame_p99"), 99.0);
+    }
+
+    #[test]
+    fn per_unit_metrics_divide_the_totals() {
+        let mut bench = Bench::new();
+        bench.measure(|| std::hint::black_box(vec![1u8; 4000]));
+        bench.per("tile", 4);
+        let metrics = bench.finish();
+        let get = |name: &str| metrics.iter().find(|metric| metric.name == name).unwrap().value;
+        assert_eq!(get("allocated_per_tile"), (get("allocated") / 4.0).round());
+        assert_eq!(get("allocations_per_tile"), (get("allocations") / 4.0).round());
     }
 }

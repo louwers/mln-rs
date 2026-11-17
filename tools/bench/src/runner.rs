@@ -2,22 +2,26 @@
 //! the harness with `exec <scenario> <out>`, and reads the [`Run`] it writes.
 //! No scenario inherits another's heap, threads or caches.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::environment::Environment;
 use crate::report::Run;
-use crate::scenario::{Bench, Scenario};
+use crate::scenario::{Bench, Kind, Scenario};
 
 /// Runs `scenario` in a process of `binary`, which must be a harness binary
-/// built from the same source to give the same scenario.
-pub(crate) fn run_in_process(binary: &Path, scenario: &str) -> Result<Run, String> {
+/// built from the same source to give the same scenario. With `image`, the
+/// scenario writes the last image it drew there, as a PNG.
+pub(crate) fn run_in_process(binary: &Path, scenario: &str, image: Option<&Path>) -> Result<Run, String> {
     let out = tempfile::NamedTempFile::new().map_err(|error| format!("a temporary file: {error}"))?;
+    let mut command = Command::new(binary);
+    command.args(["exec", scenario]).arg(out.path());
+    if let Some(image) = image {
+        command.arg("--image").arg(image);
+    }
     // The scenario's own output goes to stderr, so that stdout carries only
     // the report.
-    let status = Command::new(binary)
-        .args(["exec", scenario])
-        .arg(out.path())
+    let status = command
         .stdin(Stdio::null())
         .stdout(std::io::stderr())
         .status()
@@ -29,10 +33,23 @@ pub(crate) fn run_in_process(binary: &Path, scenario: &str) -> Result<Run, Strin
     serde_json::from_str(&json).map_err(|error| format!("{scenario}'s report: {error}"))
 }
 
+/// Runs each macro scenario of `scenarios` once in a process of `binary`,
+/// and drops what it reports. On macOS the system caches the GPU code it
+/// compiles for each binary, so the first process of a newly built binary
+/// to draw with a shader does more work than later ones: 1% to 2% more
+/// instructions in a scenario that makes its renderer while measuring.
+pub(crate) fn warm_up(binary: &Path, scenarios: &[&Scenario]) -> Result<(), String> {
+    for scenario in scenarios.iter().filter(|scenario| scenario.kind == Kind::Macro) {
+        run_in_process(binary, scenario.name, None)?;
+    }
+    Ok(())
+}
+
 /// Runs `scenario` in this process and writes its [`Run`] to `out`: what the
 /// runner's child process does.
-pub(crate) fn exec(scenario: &Scenario, out: &Path) -> Result<(), String> {
+pub(crate) fn exec(scenario: &Scenario, out: &Path, image: Option<PathBuf>) -> Result<(), String> {
     let mut bench = Bench::new();
+    bench.image = image;
     (scenario.run)(&mut bench);
     let gpu = bench.gpu.take();
     let fixtures = bench.fixtures.take();

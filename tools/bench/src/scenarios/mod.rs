@@ -7,7 +7,9 @@ use crate::scenario::Scenario;
 
 /// Every scenario, in the order `list` and `run` show them.
 pub(crate) fn all() -> impl Iterator<Item = &'static Scenario> {
-    [micro::expression::SCENARIOS, r#macro::frame::SCENARIOS].into_iter().flatten()
+    [micro::expression::SCENARIOS, r#macro::load::SCENARIOS, r#macro::frame::SCENARIOS, r#macro::tile_server::SCENARIOS]
+        .into_iter()
+        .flatten()
 }
 
 /// The scenario named `name`.

@@ -2,11 +2,10 @@
 //! its files, the Liberty style over one of its tile sets, single tiles, and
 //! a file source that resolves the style's `asset://` URLs in it.
 
-#![expect(dead_code, reason = "no scenario reads the fixtures")]
-
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use mln_actor::scheduler::SchedulerPtr;
 use mln_storage::{FileSource, Loader};
 
 use crate::fixtures::{CACHE_VARIABLE, Manifest, cache_root};
@@ -18,6 +17,7 @@ pub(crate) enum Tiles {
     /// Central San Francisco, zooms 0 to 14.
     Street,
     /// The street tiles as MLT.
+    #[expect(dead_code, reason = "no scenario reads the MLT tiles")]
     StreetMlt,
     /// The whole world, zooms 0 to 4.
     World,
@@ -73,6 +73,7 @@ impl Fixtures {
     }
 
     /// The directory the snapshot is installed in.
+    #[expect(dead_code, reason = "no scenario reads the directory itself")]
     pub(crate) fn dir(&self) -> &Path {
         &self.dir
     }
@@ -93,11 +94,16 @@ impl Fixtures {
     /// OpenFreeMap's Liberty style, its vector source on `tiles`, as JSON.
     /// Its URLs are `asset://` URLs that [`Fixtures::file_source`] resolves.
     pub(crate) fn style(&self, tiles: Tiles) -> String {
+        self.style_value(tiles).to_string()
+    }
+
+    /// [`Fixtures::style`] as a JSON value, for a scenario to change.
+    pub(crate) fn style_value(&self, tiles: Tiles) -> serde_json::Value {
         let mut style: serde_json::Value =
             serde_json::from_slice(&self.read("styles/liberty.json")).expect("the style is JSON");
         let url = format!("pmtiles://asset://{}", self.tile_set(tiles).archive);
         style["sources"]["openmaptiles"]["url"] = url.into();
-        style.to_string()
+        style
     }
 
     /// The manifest's description of a tile set: its archive, its zooms, and
@@ -108,6 +114,7 @@ impl Fixtures {
 
     /// The tile `z`/`x`/`y` of `tiles`, decompressed: MVT or MLT bytes as a
     /// tile worker receives them. `None` for a tile the set lacks.
+    #[expect(dead_code, reason = "no scenario reads single tiles")]
     pub(crate) fn tile(&self, tiles: Tiles, z: u8, x: u32, y: u32) -> Option<Vec<u8>> {
         let path = self.path(&self.tile_set(tiles).archive);
         let reader =
@@ -118,10 +125,10 @@ impl Fixtures {
     }
 
     /// A file source that loads `asset://` URLs from the snapshot and local
-    /// files, and nothing from the network.
-    pub(crate) fn file_source(&self) -> Arc<dyn FileSource> {
+    /// files on `pool`, and nothing from the network.
+    pub(crate) fn file_source(&self, pool: SchedulerPtr) -> Arc<dyn FileSource> {
         let dir = self.dir.to_str().expect("the fixtures' directory is UTF-8");
-        Arc::new(Loader::builder().asset_path(dir).build())
+        Arc::new(Loader::builder().asset_path(dir).pool(pool).build())
     }
 }
 

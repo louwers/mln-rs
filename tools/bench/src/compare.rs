@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::environment::Environment;
 use crate::report::{Run, format_value, table};
-use crate::runner::run_in_process;
+use crate::runner::{run_in_process, warm_up};
 use crate::scenario::{MetricKind, Scenario, Unit};
 use crate::scenarios;
 use crate::stats::{holm, mann_whitney, median, range};
@@ -152,6 +152,9 @@ pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
 
     let samples_path = work.join("samples").join(format!("{commit}.json"));
     let mut samples = read_samples(&samples_path);
+    eprintln!("mln-bench: a first run of each macro scenario on each side, not counted");
+    warm_up(&base, &scenarios)?;
+    warm_up(&candidate, &scenarios)?;
     let mut comparisons = Vec::new();
     for (index, scenario) in scenarios.iter().enumerate() {
         let (base_runs, candidate_runs) = run_sides(scenario, index, &base, &candidate, options.rounds)?;
@@ -169,7 +172,7 @@ pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
         base_counts.extend(base_runs.iter().cloned());
         while base_counts.len() < SPREAD_RUNS {
             eprintln!("mln-bench: {}: another base run, for the spread", scenario.name);
-            base_counts.push(run_in_process(&base, scenario.name)?);
+            base_counts.push(run_in_process(&base, scenario.name, None)?);
         }
         let fresh = base_counts.len() - kept.len();
         kept.extend(base_counts[base_counts.len() - fresh..].iter().cloned());
@@ -211,9 +214,9 @@ fn run_sides(
             let side = if is_base { "base" } else { "this checkout" };
             eprintln!("mln-bench: {}: {side}, round {} of {rounds_count}", scenario.name, round + 1);
             if is_base {
-                base_runs.push(run_in_process(base, scenario.name)?);
+                base_runs.push(run_in_process(base, scenario.name, None)?);
             } else {
-                candidate_runs.push(run_in_process(candidate, scenario.name)?);
+                candidate_runs.push(run_in_process(candidate, scenario.name, None)?);
             }
         }
     }

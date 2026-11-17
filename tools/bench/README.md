@@ -30,8 +30,34 @@ mise run bench:fixtures                # install the map data, once
 
 `mise run bench` builds with the `benchmark` profile (`profile.toml`) and runs
 `mln-bench run`, after `mise run bench:fixtures`; `--json` prints the runs as
-JSON. The headless frontend draws on WebGPU unless `MLN_RENDER_BACKEND` names
-another backend (`metal`, `vulkan`, `d3d12`, `gl`).
+JSON, and `--images <dir>` writes the last image each macro scenario drew to a
+PNG file there. Macro scenarios draw on the device the tests draw on: WebGPU,
+unless `MLN_RENDER_BACKEND` names another backend (`metal`, `vulkan`, `d3d12`,
+`gl`).
+
+## Scenarios
+
+| scenario                    | question                                                                                                | one unit                                                                              |
+| --------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `micro/expression/evaluate` | What does evaluating a style's kinds of expressions over features cost?                                 | 12 expressions over 50,000 features                                                   |
+| `macro/load/street`         | What does showing a city's streets from nothing take, until the first complete frame?                   | a load: the map, renderer and workers start; the style, tiles, glyphs and sprite load |
+| `macro/load/globe`          | What does showing the whole world on the globe from nothing take, until the first complete frame?       | a load                                                                                |
+| `macro/load/cjk`            | What does showing a city labelled in Japanese script from nothing take, until the first complete frame? | a load                                                                                |
+| `macro/frame/street`        | What does a frame of a city's streets cost while the camera pans, turns and tilts over loaded tiles?    | a frame: the update, symbol placement, draw calls and the GPU finishing it            |
+| `macro/frame/globe`         | What does a frame of the globe cost while it turns and tilts over loaded tiles?                         | a frame                                                                               |
+| `macro/tile-server/street`  | What does a tile server's renderer spend on each new tile of a city, from zoom 7 to 14?                 | a tile: laid out, placed, drawn and read back by a reused renderer                    |
+
+`mise run bench:list` prints the questions, and each scenario's doc comment says
+what it runs.
+
+The load scenarios start a map over the fixtures (Liberty over the street, world
+or Tokyo tiles) at 1024 x 768 and end at its first frame with nothing missing;
+making the GPU device is left out. The frame scenarios load the start of their
+path, then measure 120 frames along a camera path that keeps the same tiles in
+view: the renderer loads a tile again when it comes back into view, which a
+frame over loaded tiles mustn't do. The tile server renders thirteen new
+512-pixel tiles of zooms 7 to 14 as still images in tile mode, with one map and
+renderer that have the style loaded.
 
 ## Fixtures
 
@@ -103,8 +129,12 @@ is left out):
 | `wall`, `cpu`   | time  | wall-clock time, and the CPU time of every thread of the process        |
 
 A scenario adds its own, such as `frames`, `frames_incomplete` (frames drawn
-with tiles missing), `gpu_buffers`, or frame-time percentiles (`frame_p50`,
-`frame_p90`, `frame_p99`).
+with tiles missing), `gpu_buffers` (the bytes of the GPU's vertex and index
+buffers after the last frame), `gpu_objects` (the textures and buffers the
+renderer made), or frame-time percentiles (`frame_p50`, `frame_p90`,
+`frame_p99`). A scenario that repeats a unit of work, such as a frame or a tile,
+also reports `instructions`, `allocations` and `allocated` per unit
+(`instructions_per_frame`).
 
 Counts repeat closely from run to run, so one run of each side shows a change.
 Times depend on the machine's load and are context unless a comparison runs
@@ -193,7 +223,28 @@ fn evaluate(bench: &mut Bench) {
 
 `Bench::measure` runs the part that counts; call it once, or once per frame to
 leave waits between frames out. `count`, `bytes`, `time` and `percentiles`
-declare the scenario's own metrics. A macro scenario sets `bench.gpu` to the
-device it drew on. What more than one scenario uses goes in `src/support/`: the
-headless map (`support::map`), the fixtures (`support::fixtures`) and seeded
-data (`support::random`).
+declare the scenario's own metrics, and `per` the unit of work it repeats. A
+macro scenario sets `bench.gpu` to the device it drew on, and writes its last
+image to `bench.image` when that is set. What more than one scenario uses goes
+in `src/support/`: the headless map (`support::map`), the fixtures
+(`support::fixtures`) and seeded data (`support::random`).
+
+### Driving a map
+
+`support::map::HeadlessMap` is a map on a headless frontend that runs only when
+the scenario drives it, so that it does the same work on every run:
+
+- Each frame is a tick of a 60 Hz frame clock that only frames advance, so
+  symbol placement, fades and transitions don't depend on how long a frame took.
+- The map's background work (file reads, tile layout, glyphs, the sprite) runs
+  on the process's thread pool behind `support::workers::Workers`, which knows
+  when none is left. `HeadlessMap::load`, `settle` and `render_still` wait for
+  it before each frame, so each frame has everything the frames before it asked
+  for, and a map loads in the same steps on every run.
+- `support::map::Frontend` holds the GPU device and target, made apart from the
+  map, so that a scenario can leave them out of what it measures.
+
+On macOS, the system caches the GPU code it compiles for each binary, so the
+first process of a newly built binary to draw with a shader does 1% to 2% more
+work than later ones. `run` and `compare` therefore run each macro scenario once
+on each binary before they measure, and drop what that run reports.
