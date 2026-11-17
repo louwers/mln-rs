@@ -411,3 +411,23 @@ fn panning_and_zooming_back_and_forth_fetches_each_tile_once() {
         (14.0 + 0.9 * (1.0 - swing.abs()), z14_point(2620.5 + 0.65 * swing, 6332.0), 0.0)
     });
 }
+
+/// A pan at zoom 0 from a loaded view of one world to the next world copy
+/// east, then west. The frame that first shows a world copy draws it, from
+/// the tiles of the world that has loaded, and the network isn't asked for
+/// them again.
+#[test]
+fn pan_to_a_new_world_copy_draws_it_at_once() {
+    let mut scene = Scene::new(Size::new(512, 512));
+    scene.frames_until_complete(0.0, (0.0, 0.0));
+    let raster_wraps =
+        |scene: &Scene| -> BTreeSet<i16> { scene.pyramids()[1].rendered().map(|rendered| rendered.id.wrap).collect() };
+
+    for (longitude, wraps) in [(90.0, [0, 1]), (-90.0, [-1, 0])] {
+        scene.frame(0.0, (0.0, longitude));
+        assert_eq!(BTreeSet::from(wraps), scene.vector_wraps(), "the vector tiles' world copies at {longitude}");
+        assert_eq!(BTreeSet::from(wraps), raster_wraps(&scene), "the raster tiles' world copies at {longitude}");
+        assert!(scene.is_complete(), "the copies' tiles laid out the data of the loaded ones");
+    }
+    assert_eq!(BTreeMap::new(), scene.network.requested_again());
+}

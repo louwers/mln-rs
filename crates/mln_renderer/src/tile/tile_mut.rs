@@ -4,13 +4,15 @@
 //! (after a `StartParse` if none was reported), and a `Cancelled` when a
 //! pending tile is reset or let go of.
 
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use mln_storage::response::Reason;
-use mln_storage::{Request, Response};
+use mln_storage::{Data, Request, Response};
 use mln_style::custom_tile_loader::SubscriberKey;
 use mln_style::sources::geojson::GeoJSONData;
+use mln_util::chrono::Timestamp;
 use mln_util::error::Error;
 use mln_util::hash::HashSet;
 use mln_util::logging::{Event, Log};
@@ -86,6 +88,37 @@ impl<'a> TileMut<'a> {
                 self.load_geojson(&data, false);
             }
             Some(DataOrigin::Custom { .. }) | None => {}
+        }
+    }
+
+    /// Starts a new tile from `copy`, another world copy of it: the tile
+    /// shows the copy's contents at once. A tileset tile takes the copy's
+    /// data as a cache's answer and lays it out for the layers the copy left
+    /// out; another tile, or one whose copy has no data to lay out, loads
+    /// its own.
+    pub(crate) fn start_as_copy(&mut self, copy: WorldCopy) {
+        let WorldCopy { shown, data, freshness } = copy;
+        self.tile.shown = Some(shown);
+        self.installed = true;
+        let lays_out = matches!(self.tile.pipeline, Pipeline::Layout(_));
+        let OriginLoad::Tileset(tileset) = &mut self.tile.load.origin else {
+            self.start_load();
+            return;
+        };
+        if lays_out && data.is_none() {
+            self.start_load();
+            return;
+        }
+        let resource = &mut tileset.resource;
+        resource.prior_modified = freshness.prior_modified;
+        resource.prior_expires = freshness.prior_expires;
+        resource.prior_etag = freshness.prior_etag;
+        resource.prior_data = freshness.prior_data;
+        (tileset.modified, tileset.expires) = (freshness.modified, freshness.expires);
+        tileset.cache_answered = true;
+        self.tile.settled = true;
+        if let Some(data) = data {
+            self.change_layout(|layout| layout.data = Some(data));
         }
     }
 
@@ -693,6 +726,70 @@ impl<'a> TileMut<'a> {
             let tile_key = self.source.tile_key(self.tile);
             loader.fetch(self.tile.id, key, tile_key, &self.store.inbox, fast_pfor_enabled);
         }
+    }
+}
+
+/// What a new tile of another world copy starts with: what a loaded tile
+/// shows, and what a tileset tile was loaded from.
+pub(crate) struct WorldCopy {
+    shown: Shown,
+    data: Option<LayoutData>,
+    freshness: Freshness,
+}
+
+/// What a tileset tile's requests know of the data it has.
+#[derive(Default)]
+struct Freshness {
+    prior_modified: Option<Timestamp>,
+    prior_expires: Option<Timestamp>,
+    prior_etag: Option<String>,
+    prior_data: Option<Data>,
+    modified: Option<Timestamp>,
+    expires: Option<Timestamp>,
+}
+
+impl WorldCopy {
+    /// A copy of `tile`, if it is renderable. A geometry tile's copy draws
+    /// its buckets, apart from those of the layers that are placed: these
+    /// hold what placement made of them where their tile is. A raster or
+    /// raster-dem tile's copy has a bucket of its own, since each is masked
+    /// where it is.
+    pub(crate) fn of(tile: &Tile) -> Option<WorldCopy> {
+        let shown = tile.shown.as_ref().filter(|shown| shown.contents.is_renderable())?;
+        let contents = match &*shown.contents {
+            Contents::Geometry(contents) => {
+                let mut contents = contents.clone();
+                contents.result.layer_render_data.retain(|_, data| !data.layer.style().info().cross_tile_index);
+                Contents::Geometry(contents)
+            }
+            Contents::Raster(bucket) => {
+                Contents::Raster(Arc::new(RasterBucket::with_shared_image(bucket.image.clone())))
+            }
+            Contents::Dem(bucket) => {
+                Contents::Dem(Arc::new(HillshadeBucket::with_dem_data(bucket.get_dem_data().clone())))
+            }
+            Contents::Empty => Contents::Empty,
+        };
+        let freshness = match &tile.load.origin {
+            OriginLoad::Tileset(tileset) => Freshness {
+                prior_modified: tileset.resource.prior_modified,
+                prior_expires: tileset.resource.prior_expires,
+                prior_etag: tileset.resource.prior_etag.clone(),
+                prior_data: tileset.resource.prior_data.clone(),
+                modified: tileset.modified,
+                expires: tileset.expires,
+            },
+            OriginLoad::GeoJson { .. } | OriginLoad::Custom(_) => Freshness::default(),
+        };
+        Some(WorldCopy {
+            shown: Shown {
+                contents: Rc::new(contents),
+                feature_state_version: shown.feature_state_version,
+                answer_outdated: shown.answer_outdated,
+            },
+            data: tile.pipeline.layout().and_then(|layout| layout.data.clone()),
+            freshness,
+        })
     }
 }
 

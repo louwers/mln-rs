@@ -29,7 +29,7 @@ use crate::tile::dem;
 use crate::tile::job::SourceStyle;
 use crate::tile::store::{SourceInfo, StoreContext};
 use crate::tile::tile::{FadeState, Tile, TileKind, TileLoadOrder, TileNecessity, TileUpdateParameters};
-use crate::tile::tile_mut::{TileMut, retire};
+use crate::tile::tile_mut::{TileMut, WorldCopy, retire};
 use crate::tile_parameters::TileParameters;
 use crate::util::tile_cover::{TileCoverParameters, covering_zoom_level, globe_level_cover, tile_cover};
 
@@ -266,10 +266,17 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
             capture_rendered_features: parameters.capture_rendered_features,
         };
         let tile = self.source.info.new_tile(*id, params)?;
+        // A flat map draws each world copy of a tile from a tile of its own,
+        // which starts from a loaded copy rather than leave its world bare
+        // until it has loaded and laid out the same data.
+        let copy = if parameters.transform_state.is_globe_rendering() { None } else { self.source.world_copy(id) };
         self.source.insert(tile);
         let style = self.style;
         self.source.update(id, self.ctx, |tile| {
-            tile.start_load();
+            match copy {
+                Some(copy) => tile.start_as_copy(copy),
+                None => tile.start_load(),
+            }
             tile.set_style(style, params.pixel_ratio, params.subdivision_granularity);
         });
         Some(*id)
@@ -800,6 +807,17 @@ impl SourceTiles {
         };
         slot.set_place(Place::Cover { order: TileLoadOrder::UNWANTED });
         true
+    }
+
+    /// A copy of a renderable tile that is `id` in another world copy.
+    fn world_copy(&self, id: &OverscaledTileID) -> Option<WorldCopy> {
+        self.tiles
+            .values()
+            .map(|slot| &slot.tile)
+            .filter(|tile| {
+                tile.id.overscaled_z == id.overscaled_z && tile.id.canonical == id.canonical && tile.id.wrap != id.wrap
+            })
+            .find_map(WorldCopy::of)
     }
 
     /// Moves the tile cached under any wrap of `id` into the cover under

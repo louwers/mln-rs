@@ -34,6 +34,7 @@ pub(crate) struct Layout {
     pub(crate) work: LayoutWork,
 }
 
+#[derive(Clone)]
 pub(crate) struct LayoutData {
     pub(crate) key: DataKey,
     pub(crate) data: Option<TileData>,
