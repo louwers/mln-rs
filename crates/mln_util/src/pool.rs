@@ -35,8 +35,9 @@ pub type Respond<R> = Box<dyn FnOnce(R) + Send>;
 /// thread that runs it. Cheap to clone: clones share the pool. A worker
 /// starts when a task arrives while every running worker is busy, up to the
 /// pool's thread count, so a pool that runs nothing starts no threads. Its
-/// threads end once the last clone and the last [`TaskGroup`] of it drop,
-/// dropping the tasks still queued.
+/// threads end once the last clone and the last [`TaskGroup`] of it drop, or
+/// once it's [`shut_down`](Self::shut_down), dropping the tasks still
+/// queued.
 #[derive(Clone)]
 pub struct Pool {
     workers: Arc<Workers>,
@@ -143,6 +144,15 @@ impl Pool {
     /// Runs `task` on the pool, in its own lane.
     pub fn spawn(&self, task: impl FnOnce() + Send + 'static) {
         self.workers.shared.push(&self.workers.shared.lane, Box::new(task));
+    }
+
+    /// Stops the pool now, whatever clones and groups of it are left, as when
+    /// the last of them drops: its workers end once their current tasks
+    /// return, the tasks waiting for a worker drop, and tasks spawned later
+    /// drop at once. For an owner whose work may still be held where it
+    /// can't drop, such as a renderer forgotten with its graphics.
+    pub fn shut_down(&self) {
+        self.workers.shared.stop();
     }
 
     /// Calls `waker`, from the spawning thread, whenever a task arrives
@@ -267,6 +277,9 @@ impl Shared {
     }
 
     fn push(self: &Arc<Self>, lane: &Arc<Lane>, task: Task) {
+        if self.ring.lock().stopped {
+            return;
+        }
         let (joins, startable) = {
             let mut state = lane.state.lock();
             state.tasks.push_back(task);
@@ -362,6 +375,23 @@ impl Shared {
         task();
     }
 
+    /// Stops the workers once their tasks return, and waits for them unless
+    /// this runs on a library thread (`thread::Joined`), such as one of them.
+    /// The tasks waiting in the ring drop, and those spawned later drop at
+    /// once.
+    fn stop(&self) {
+        self.ring.lock().stopped = true;
+        self.work.notify_all();
+        // Joined outside the lock, which a task that spawns takes.
+        let threads = std::mem::take(&mut *self.threads.lock());
+        drop(threads);
+        // The tasks left, dropped here rather than with the last worker.
+        let lanes = std::mem::take(&mut self.ring.lock().lanes);
+        let tasks: Vec<VecDeque<Task>> =
+            lanes.iter().map(|lane| std::mem::take(&mut lane.state.lock().tasks)).collect();
+        drop(tasks);
+    }
+
     /// Starts the worker that `push` counted started.
     #[cfg_attr(target_family = "wasm", expect(clippy::unused_self, reason = "the browser's pools start no threads"))]
     fn start_worker(self: &Arc<Self>) {
@@ -438,19 +468,8 @@ impl LaneState {
 }
 
 impl Drop for Workers {
-    /// Stops the workers once their tasks return, and waits for them unless
-    /// it drops on a library thread (`thread::Joined`), such as one of them.
     fn drop(&mut self) {
-        self.shared.ring.lock().stopped = true;
-        self.shared.work.notify_all();
-        // Joined outside the lock, which a task that spawns takes.
-        let threads = std::mem::take(&mut *self.shared.threads.lock());
-        drop(threads);
-        // The tasks left, dropped here rather than with the last worker.
-        let lanes = std::mem::take(&mut self.shared.ring.lock().lanes);
-        let tasks: Vec<VecDeque<Task>> =
-            lanes.iter().map(|lane| std::mem::take(&mut lane.state.lock().tasks)).collect();
-        drop(tasks);
+        self.shared.stop();
     }
 }
 
@@ -754,6 +773,23 @@ mod tests {
         group.wait();
         assert_eq!(*order.lock(), vec![1, 2, 3, 4, 5]);
         assert!(!pool.run_until(None));
+    }
+
+    #[test]
+    fn a_pool_shut_down_while_a_clone_lives_stops_its_workers() {
+        let pool = Pool::new(2);
+        let (ran, first) = mpsc::channel();
+        pool.spawn(move || ran.send(()).unwrap());
+        first.recv_timeout(Duration::from_secs(10)).unwrap();
+        let worker = pool.workers.shared.threads.lock().joined.len();
+        assert_eq!(worker, 1);
+        // As a renderer forgotten with its graphics holds its pool.
+        std::mem::forget(pool.clone());
+        pool.shut_down();
+        assert!(pool.workers.shared.threads.lock().joined.is_empty());
+        let (later, dropped) = mpsc::channel::<()>();
+        pool.spawn(move || later.send(()).unwrap());
+        assert!(dropped.recv_timeout(Duration::from_secs(1)).is_err(), "a task ran after the shutdown");
     }
 
     #[test]

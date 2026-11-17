@@ -587,6 +587,7 @@ impl Runtime {
         pool: Pool,
     ) -> Result<(ThreadId, Option<Joined>), Error> {
         let thread = mln_util::thread::spawn("Runtime", move || {
+            let own_pool = pool.clone();
             let mut core =
                 Some(RuntimeCore::new(resource_options, network_options, queue.clone(), queued, registry, pool));
             queue.run(&mut core);
@@ -594,6 +595,10 @@ impl Runtime {
             // the queue can't keep it alive.
             queue.close();
             drop(core);
+            // Nothing of the runtime runs after this, but a render session
+            // that kept its graphics forgot its renderer, which holds the
+            // pool: its workers stop here rather than with the last handle.
+            own_pool.shut_down();
         })
         .map_err(|error| Error::native(format!("can't start the runtime's thread: {error}")))?;
         let thread_id = thread.thread().id();
