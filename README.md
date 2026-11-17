@@ -1,8 +1,8 @@
-# mln-rs
-
 > [!NOTE]
 > See the
 > [MapLibre onboarding discussion](https://github.com/maplibre/maplibre/issues/557).
+
+# mln-rs
 
 [![CI](https://github.com/louwers/mln-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/louwers/mln-rs/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/mln-rs)](https://crates.io/crates/mln-rs)
