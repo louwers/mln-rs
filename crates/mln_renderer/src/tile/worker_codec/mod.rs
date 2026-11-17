@@ -22,7 +22,8 @@
 //! - Trait objects cross as the types they can be (fields.rs): layers'
 //!   style data and evaluated properties, and compound expressions, as
 //!   their layer type's or function's name, which the reading side resolves
-//!   against its own [`Registry`]; buckets as their bucket type's.
+//!   against its own [`Registry`](crate::Registry); buckets as their bucket
+//!   type's.
 //!
 //! The payloads, the tables of shared values and the registry reach the
 //! values that need them through the context that each frame is written or

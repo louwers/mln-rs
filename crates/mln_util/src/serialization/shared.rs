@@ -6,7 +6,7 @@
 //! layers and their expressions, and every layout the worker sends back has
 //! buckets whose binders hold those expressions again. A [`Kind`] names such
 //! a value type, and the fields that hold one opt in with [`ByKey`]
-//! (`#[wire(with = ...)]`) or [`write`] and [`read`]. Each side keeps a
+//! (`#[wire(with = ...)]`) or [`write()`] and [`read()`]. Each side keeps a
 //! [`Table`] of each kind it shares, and while a message is written or read
 //! with a kind's table in its context, a value is written as follows:
 //!
@@ -304,7 +304,7 @@ pub fn read_option<K: Kind>(r: &mut Reader<'_>) -> Option<Option<Arc<K::Value>>>
 }
 
 /// `#[wire(with = "shared::ByKey::<K>")]` for an `Arc` of a value of kind
-/// `K`: [`write`] and [`read`].
+/// `K`: [`write()`] and [`read()`].
 pub struct ByKey<K>(PhantomData<K>);
 
 impl<K: Kind> ByKey<K> {
