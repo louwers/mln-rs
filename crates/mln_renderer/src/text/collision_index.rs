@@ -879,6 +879,8 @@ fn polygon_intersects_box(polygon: &[Point<f32>], bbox: &BBox) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use mln_util::size::Size;
 
     use super::*;
@@ -888,8 +890,8 @@ mod tests {
             boxes: Vec::new(),
             indexed_feature: IndexedSubfeature {
                 index,
-                source_layer_name: String::new(),
-                bucket_leader_id: String::new(),
+                source_layer_name: Arc::from(""),
+                bucket_leader_id: Arc::from(""),
                 sort_index: 0,
                 bucket_instance_id: 0,
                 collision_group_id: 0,

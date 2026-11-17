@@ -466,8 +466,8 @@ mod tests {
         let layout = SymbolLayoutProperties::Values::default();
         let subfeature = IndexedSubfeature {
             index: 0,
-            source_layer_name: String::new(),
-            bucket_leader_id: String::new(),
+            source_layer_name: Arc::from(""),
+            bucket_leader_id: Arc::from(""),
             sort_index: 0,
             bucket_instance_id: 0,
             collision_group_id: 0,

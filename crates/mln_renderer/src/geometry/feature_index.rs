@@ -54,8 +54,8 @@ pub(crate) struct RefIndexedSubfeature {
 #[derive(Clone, Debug, PartialEq, mln_wire::Wire)]
 pub(crate) struct IndexedSubfeature {
     pub(crate) index: usize,
-    pub(crate) source_layer_name: String,
-    pub(crate) bucket_leader_id: String,
+    pub(crate) source_layer_name: Arc<str>,
+    pub(crate) bucket_leader_id: Arc<str>,
     pub(crate) sort_index: usize,
     // Only used for symbol features
     pub(crate) bucket_instance_id: u32,

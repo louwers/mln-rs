@@ -293,7 +293,9 @@ fn evaluate_radial_offset(anchor: SymbolAnchorType, radial_offset: f32) -> [f32;
 
 pub(crate) struct SymbolLayout {
     pub(crate) layer_paint_properties: VecMap<String, Arc<EvaluatedLayer<Symbol>>>,
-    pub(crate) bucket_leader_id: String,
+    /// Shared by every symbol's `IndexedSubfeature`, which placement clones
+    /// for each symbol it places.
+    pub(crate) bucket_leader_id: Arc<str>,
     pub(crate) symbol_instances: Vec<SymbolInstance>,
     pub(crate) sort_key_ranges: Vec<SortKeyRange>,
 
@@ -302,6 +304,8 @@ pub(crate) struct SymbolLayout {
     // Stores the layer so that we can hold on to GeometryTileFeature
     // instances in SymbolFeature, which may reference data from this object.
     source_layer: SourceLayer,
+    /// `source_layer`'s name, shared like `bucket_leader_id`.
+    source_layer_name: Arc<str>,
     overscaling: f32,
     zoom: f32,
     canonical_id: CanonicalTileID,
@@ -356,10 +360,11 @@ impl SymbolLayout {
 
         let mut this = SymbolLayout {
             layer_paint_properties: VecMap::new(),
-            bucket_leader_id: leader.id.clone(),
+            bucket_leader_id: Arc::from(leader.id.as_str()),
             symbol_instances: Vec::new(),
             sort_key_ranges: Vec::new(),
             compare_text: VecMap::new(),
+            source_layer_name: Arc::from(source_layer.name.as_str()),
             source_layer,
             overscaling,
             zoom,
@@ -812,8 +817,8 @@ impl SymbolLayout {
         );
         let indexed_feature = IndexedSubfeature {
             index: feature.index,
-            source_layer_name: self.source_layer.name.clone(),
-            bucket_leader_id: self.bucket_leader_id.clone(),
+            source_layer_name: Arc::clone(&self.source_layer_name),
+            bucket_leader_id: Arc::clone(&self.bucket_leader_id),
             sort_index: self.symbol_instances.len(),
             bucket_instance_id: 0,
             collision_group_id: 0,
@@ -1810,7 +1815,7 @@ impl SymbolLayout {
             self.zoom,
             self.icons_need_linear,
             self.sort_features_by_y,
-            self.bucket_leader_id.clone(),
+            self.bucket_leader_id.to_string(),
             std::mem::take(&mut self.symbol_instances),
             std::mem::take(&mut self.sort_key_ranges),
             self.tile_pixel_ratio,
