@@ -34,6 +34,7 @@ mod metal_layer;
 #[cfg(target_os = "macos")]
 mod metal_overlay;
 mod overlay;
+mod pacing;
 mod settings;
 mod styles;
 mod ui;
