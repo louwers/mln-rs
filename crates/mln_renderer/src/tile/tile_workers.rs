@@ -249,8 +249,7 @@ impl Jobs {
         Some((lane, false))
     }
 
-    /// Forgets which lane got data `key`: a worker there lacked it, so the
-    /// next job on it carries it.
+    /// Forgets which lane got data `key`, which a worker there lacked.
     pub(crate) fn forget(&mut self, key: DataKey) {
         self.hints.remove(&key);
     }

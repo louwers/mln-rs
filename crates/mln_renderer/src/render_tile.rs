@@ -43,8 +43,6 @@ pub(crate) struct RenderTile {
 }
 
 impl RenderTile {
-    /// The render tile of `tile` under `id`, which `hold_for_fade` keeps in
-    /// the render tree only so that its symbols fade out.
     pub(crate) fn new(id: UnwrappedTileID, tile: &Tile, hold_for_fade: bool) -> Self {
         RenderTile {
             id,
@@ -134,8 +132,7 @@ impl RenderTile {
     }
 
     /// Prepares the render tile for drawing; `tile` is the tile it was
-    /// created for, whose contents the last reference frees on `pool`, and
-    /// `needs_rendering` whether it draws a visible layer.
+    /// created for, whose contents the last reference frees on `pool`.
     pub(crate) fn prepare(
         &mut self,
         tile: &Tile,

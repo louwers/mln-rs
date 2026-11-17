@@ -194,7 +194,7 @@ fn invoke_tile_changed() {
     }
     // Once present, the bucket should never "disappear", which would cause
     // flickering.
-    assert!(tiles.layer_properties_updated(&layer_properties));
+    assert!(tiles.with(|tile| tile.parts().1.layer_properties_updated(&layer_properties)));
 
     let Some(Contents::Geometry(contents)) = tiles.tile().contents() else {
         panic!("a layout");

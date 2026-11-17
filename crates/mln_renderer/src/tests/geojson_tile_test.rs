@@ -140,11 +140,11 @@ fn issue_7648() {
     // Once present, the bucket should never "disappear", which would cause
     // flickering.
     while !tiles.tile().is_complete() {
-        assert!(tiles.layer_properties_updated(&layer_properties));
+        assert!(tiles.with(|tile| tile.parts().1.layer_properties_updated(&layer_properties)));
         test.run_loop.run_once();
         tiles.update();
     }
-    assert!(tiles.layer_properties_updated(&layer_properties));
+    assert!(tiles.with(|tile| tile.parts().1.layer_properties_updated(&layer_properties)));
     assert!(tiles.changes() >= 1);
 }
 
@@ -161,20 +161,20 @@ fn issue_9927() {
     test.settle(&mut tiles, &[root()]);
 
     assert!(tiles.tile().is_renderable());
-    assert!(tiles.layer_properties_updated(&layer_properties));
+    assert!(tiles.with(|tile| tile.parts().1.layer_properties_updated(&layer_properties)));
 
     // Make sure that once we've had a renderable tile and then receive
     // erroneous data, we retain the previously rendered data and keep the
     // tile renderable.
     tiles.with(|tile| tile.fail(Error::native("Connection offline")));
     assert!(tiles.tile().is_renderable());
-    assert!(tiles.layer_properties_updated(&layer_properties));
+    assert!(tiles.with(|tile| tile.parts().1.layer_properties_updated(&layer_properties)));
 
     // Then simulate a parsing failure and make sure that we keep it
     // renderable in this situation as well.
     tiles.with(|tile| tile.fail(Error::native("Parse error")));
     assert!(tiles.tile().is_renderable());
-    assert!(tiles.layer_properties_updated(&layer_properties));
+    assert!(tiles.with(|tile| tile.parts().1.layer_properties_updated(&layer_properties)));
 }
 
 /// A circle layer as its render layer evaluates it, which records what the
@@ -197,13 +197,14 @@ fn update_through_the_codec() {
     // Two tiles, so both instances get one.
     let ids = [OverscaledTileID::from_zxy(1, 0, 0), OverscaledTileID::from_zxy(1, 1, 0)];
     let mut tiles = test.tiles(point_data(), &ids, workers, false);
+    let (style, params) = (style(std::slice::from_ref(&layer_properties)), tiles.params());
     for id in &ids {
-        tiles.set_style_at(id, &style(std::slice::from_ref(&layer_properties)));
+        tiles.with_at(id, |tile| tile.set_style(&style, params.pixel_ratio, params.subdivision_granularity));
     }
     test.settle(&mut tiles, &ids);
     for id in &ids {
         assert!(tiles.tile_at(id).is_renderable());
-        assert!(tiles.layer_properties_updated_at(id, &layer_properties));
+        assert!(tiles.with_at(id, |tile| tile.parts().1.layer_properties_updated(&layer_properties)));
     }
 
     let data = point_data();

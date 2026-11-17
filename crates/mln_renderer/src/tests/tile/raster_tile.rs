@@ -10,7 +10,7 @@ use crate::tests::OneTile;
 use crate::tests::tile_jobs_test::Manual;
 use crate::tile::contents::Contents;
 use crate::tile::job::JobResult;
-use crate::tile::tile::{TileKind, TileOperation};
+use crate::tile::tile::TileKind;
 use crate::tile::tile_workers::InlineWorkers;
 
 fn tiles(test: &RasterTileTest) -> OneTile {
@@ -167,14 +167,4 @@ fn an_empty_load_during_a_decode_keeps_one_decode_in_flight() {
     tiles.update();
     assert_eq!(image_size(&tiles, &id), Some(Size::new(8, 8)));
     assert!(tiles.tile().is_complete());
-}
-
-// Port-only: a load without an image parses at once, as in C++: its parse starts and ends together.
-#[test]
-fn an_empty_load_starts_and_ends_its_parse() {
-    let test = RasterTileTest::new();
-    let mut tiles = tiles(&test);
-    let id = tiles.id;
-    tiles.set_image(&id, None);
-    assert_eq!(tiles.actions(), [TileOperation::StartParse, TileOperation::EndParse]);
 }

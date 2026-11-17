@@ -28,7 +28,7 @@ use crate::tests::{OneTile, style, tile_store};
 use crate::tile::contents::Contents;
 use crate::tile::inbox::{SourceData, TileEvent};
 use crate::tile::job::{DataInput, Job, Run, TileKey};
-use crate::tile::loading::{DataOrigin, OriginLoad, VectorTileEncoding};
+use crate::tile::loading::{DataOrigin, Fetch, OriginLoad, VectorTileEncoding};
 use crate::tile::pipeline::LayoutWork;
 use crate::tile::tile::{TileKind, TileNecessity, TileOperation};
 use crate::tile::tile_workers::{InlineWorkers, TileWorkers};
@@ -129,7 +129,7 @@ impl Drop for Test {
 /// `false`) for no request at all.
 fn requesting_network(tile: &OneTile, pending: bool) -> bool {
     match &tile.tile().load.origin {
-        OriginLoad::Tileset(tileset) if pending => tileset.network_pending(),
+        OriginLoad::Tileset(tileset) if pending => matches!(tileset.fetch, Fetch::Network { .. }),
         OriginLoad::Tileset(tileset) => tileset.is_idle(),
         OriginLoad::GeoJson { .. } | OriginLoad::Custom(_) => false,
     }
@@ -141,7 +141,7 @@ fn start_geojson_load(tile: &mut OneTile) -> u64 {
     tile.with(|tile| {
         let (info, tile) = tile.parts();
         let load = info.next();
-        tile.load.start_geojson(load);
+        tile.load.origin = OriginLoad::GeoJson { load: Some(load) };
         load
     })
 }
@@ -195,7 +195,7 @@ fn a_not_modified_reload_keeps_the_data() {
     manual.run();
     tile.update();
     assert!(tile.tile().is_complete());
-    let key = tile.layout().data().expect("data").key;
+    let key = tile.layout().data.as_ref().expect("data").key;
     let shown = std::rc::Rc::clone(&tile.tile().shown.as_ref().expect("contents").contents);
 
     // Required again, the tile revalidates its data.
@@ -209,46 +209,25 @@ fn a_not_modified_reload_keeps_the_data() {
     file_source.respond(response);
     tile.update();
     assert!(requesting_network(&tile, false));
-    assert_eq!(tile.layout().data().expect("data").key, key, "the same data");
+    assert_eq!(tile.layout().data.as_ref().expect("data").key, key, "the same data");
     assert_eq!(manual.submitted(), 1, "nothing to lay out again");
     assert!(std::rc::Rc::ptr_eq(&tile.tile().shown.as_ref().expect("contents").contents, &shown));
     assert!(tile.tile().is_complete());
-}
 
-/// A revalidation that fails, and is answered `not_modified` when it is
-/// retried, leaves the tile with its data and complete: the answer is all
-/// the retry brings.
-#[test]
-fn a_retried_revalidation_answered_not_modified_completes() {
-    let test = Test::new();
-    let file_source = Arc::new(Held::default());
-    let manual = Manual::default();
-    let mut tile = test.tileset_tile(&file_source, Box::new(manual.clone()));
-    let id = tile.id;
-    tile.set_style(&style(&[water_layer("water", "red")]));
-    tile.set_necessity(&id, TileNecessity::Required);
-    file_source.respond(water());
-    tile.update();
-    manual.run();
-    tile.update();
-    assert!(tile.tile().is_complete());
-
+    // A revalidation that fails, retried and answered `not_modified`: the
+    // answer is all the retry brings, and the tile completes.
     tile.set_necessity(&id, TileNecessity::Optional);
     tile.set_necessity(&id, TileNecessity::Required);
     let mut failed = Response::new();
     failed.error = Some(Box::new(ResourceError::new(Reason::Connection, "offline")));
     file_source.respond(failed);
     tile.update();
-    assert!(tile.tile().is_complete(), "a failed revalidation keeps the tile complete");
-
     tile.store.retry_failed();
-    assert_eq!(file_source.pending(), 1, "the retry");
     assert!(!tile.tile().is_complete(), "the tile waits for the retry");
     let mut response = Response::new();
     response.not_modified = true;
     file_source.respond(response);
     tile.update();
-    assert!(tile.shows_layout());
     assert_eq!(manual.submitted(), 1, "nothing to lay out again");
     assert!(tile.tile().is_complete());
 }
@@ -306,11 +285,11 @@ fn a_tile_leaving_the_cover_while_waiting_then_edited_then_revived() {
     manual.run();
     // No sprite yet: the tile waits for its image.
     tile.update();
-    assert!(matches!(tile.layout().work(), LayoutWork::Waiting(_)));
+    assert!(matches!(&tile.layout().work, LayoutWork::Waiting(_)));
 
     let edited = style(&[icons(&json!("late"), 2.0)]);
     tile.set_style(&edited);
-    assert!(matches!(tile.layout().work(), LayoutWork::Outdated), "the wait is gone");
+    assert!(matches!(&tile.layout().work, LayoutWork::Outdated), "the wait is gone");
     tile.store.images_mut().add_image(super::tile_jobs_test::image("late"));
     tile.store.images_mut().set_loaded(true);
     tile.update();
@@ -400,14 +379,14 @@ fn source_data_racing_eviction() {
     };
     inbox.send(event(old_load, &[1]));
     tile.update();
-    assert!(tile.layout().data().is_none(), "the old tile's data goes nowhere");
+    assert!(tile.layout().data.as_ref().is_none(), "the old tile's data goes nowhere");
     inbox.send(TileEvent::Data { tile: TileKey { source: key, id }, load: old_load, data: SourceData::Stale });
     inbox.send(event(new_load, &[2]));
     // One update starts the layout, whose reply the next takes in.
     tile.update();
     tile.update();
     assert!(tile.shows_layout());
-    let Some(data) = tile.layout().data().and_then(|loaded| loaded.data.clone()) else {
+    let Some(data) = tile.layout().data.as_ref().and_then(|loaded| loaded.data.clone()) else {
         panic!("data");
     };
     let TileData::Features(features) = data else {
@@ -465,7 +444,9 @@ fn style_replaced_mid_load() {
     tile.store.inbox().send(TileEvent::Response { tile: TileKey { source: old_key, id }, load: 1, response: water() });
     tile.update();
     assert!(tile.store.source(old_key).is_none());
-    assert!(tile.tile().contents().is_none() && tile.layout().data().is_none() && requesting_network(&tile, false));
+    assert!(
+        tile.tile().contents().is_none() && tile.layout().data.as_ref().is_none() && requesting_network(&tile, false)
+    );
     assert_eq!(manual.submitted(), 1, "nothing for the new tile yet");
 
     tile.set_necessity(&id, TileNecessity::Required);

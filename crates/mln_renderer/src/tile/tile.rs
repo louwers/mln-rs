@@ -1,6 +1,5 @@
-//! A tile: plain data the tile store owns and changes through `&mut`. Its
-//! load, its pipeline and what it shows are separate fields, since a tile
-//! shows its last contents while newer data or work is pending.
+//! A tile: plain data the tile store owns. It shows its last contents while
+//! newer data or work is pending.
 
 use std::rc::Rc;
 use std::sync::Arc;
@@ -17,11 +16,9 @@ use crate::tile::contents::Contents;
 use crate::tile::loading::Load;
 use crate::tile::pipeline::{Layout, Pipeline};
 
-/// Tiles can have two states: optional or required.
-/// - optional means that only low-cost actions should be taken to obtain
-///   the data (e.g. load from cache, but accept stale data)
-/// - required means that every effort should be taken to obtain the data
-///   (e.g. load from internet and keep the data fresh if it expires)
+/// An optional tile only takes low-cost actions to get its data, such as
+/// loading stale data from the cache; a required one loads it from the
+/// network and keeps it fresh.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TileNecessity {
     Optional,
@@ -95,34 +92,24 @@ pub(crate) struct TileUpdateParameters {
     pub(crate) is_volatile: bool,
 }
 
-/// What a source's tiles hold, and which job turns their data into
-/// contents.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum TileKind {
-    /// Vector data, laid out into buckets.
     Geometry,
-    /// An image, decoded for raster layers.
     Raster,
-    /// A DEM of this encoding, decoded for hillshade and color-relief layers.
     Dem(mln_util::tileset::RasterEncoding),
 }
 
-/// What a load delivers: the data of a geometry tile, or the image of a
-/// raster or raster-dem tile. `missing`: the tileset has no tile here, so a
-/// tile of another zoom level draws in its place.
+/// What a load delivers. `data` is `None` for a tile without any (204, no
+/// tile in an archive); `missing`, the tileset has no tile here, so a tile
+/// of another zoom level draws in its place.
 pub(crate) enum TileInput {
-    /// `data` is `None` for a tile without any (204, no tile in an archive).
     Geometry { data: Option<TileData>, missing: bool },
-    /// `data` is `None` for a tile without an image, which shows nothing.
     Image { data: Option<Data>, missing: bool },
 }
 
-/// What a tile shows, and what is known of it.
 pub(crate) struct Shown {
-    /// `Rc` while frames draw it too.
     pub(crate) contents: Rc<Contents>,
-    /// The [`SourceFeatureState`](crate::source_state::SourceFeatureState)
-    /// version the contents' buckets hold; 0 for buckets that have none.
+    /// The feature state version the contents' buckets hold; 0 for none.
     pub(crate) feature_state_version: u64,
     /// The layout's answer resolved glyphs or images that changed since: no
     /// first try starts with it.
@@ -130,7 +117,6 @@ pub(crate) struct Shown {
 }
 
 impl Shown {
-    /// `contents`, as installed: up to date.
     pub(crate) fn new(contents: Contents, feature_state_version: u64) -> Self {
         Shown { contents: Rc::new(contents), feature_state_version, answer_outdated: false }
     }
@@ -148,7 +134,8 @@ impl crate::source_state::FeatureStateTarget for Shown {
     }
 }
 
-/// Where a render entry stands in fading its symbols out.
+/// Where a render entry stands in fading its symbols out: it is held for
+/// two placements, the first starting the fade and the second ending it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FadeState {
     Loaded,
@@ -158,8 +145,7 @@ pub(crate) enum FadeState {
 }
 
 impl FadeState {
-    /// The state of an entry rendered by the last update but not this one:
-    /// an entry that was rendered as an ideal tile starts to fade out.
+    /// An entry the last update rendered, but not this one.
     #[must_use]
     pub(crate) fn rendered_previously(self) -> Self {
         match self {
@@ -168,8 +154,6 @@ impl FadeState {
         }
     }
 
-    /// The state after a placement while the entry fades: fading starts
-    /// with the first placement and has time to finish by the second.
     #[must_use]
     pub(crate) fn stepped(self) -> Self {
         match self {
@@ -179,26 +163,19 @@ impl FadeState {
         }
     }
 
-    /// Whether the entry stays in the render tree, no longer ideal, so that
-    /// its symbols fade out.
     #[must_use]
     pub(crate) fn holds(self) -> bool {
         matches!(self, FadeState::NeedsFirstPlacement | FadeState::NeedsSecondPlacement)
     }
 }
 
-/// A tile of a source.
 pub(crate) struct Tile {
     pub(crate) id: OverscaledTileID,
-    /// Where the tile's data comes from, and how much it is needed.
     pub(crate) load: Load,
-    /// How the tile's data becomes its contents.
     pub(crate) pipeline: Pipeline,
-    /// What the tile draws.
     pub(crate) shown: Option<Shown>,
-    /// The tile has shown contents, failed, or heard that its data is
-    /// still fresh since it last started loading: it has done what it can
-    /// for now. Only its transitions (`TileMut`) write it.
+    /// The tile has shown contents, failed, or heard its data is still fresh
+    /// since it last started loading: it has done what it can for now.
     pub(super) settled: bool,
 }
 
@@ -207,54 +184,41 @@ impl Tile {
         Tile { id, load, pipeline, shown: None, settled: false }
     }
 
-    /// What the tile draws.
     pub(crate) fn contents(&self) -> Option<&Contents> {
         self.shown.as_ref().map(|shown| &*shown.contents)
     }
 
-    /// Tile data considered "Renderable" can be used for rendering. Data in
-    /// partial state is still waiting for network resources but can also be
-    /// rendered, although layers will be missing.
+    /// Whether the tile can draw, if only some of its layers.
     pub(crate) fn is_renderable(&self) -> bool {
         self.contents().is_some_and(Contents::is_renderable)
     }
 
-    /// Whether the tile has shown contents, failed, or heard that its data
-    /// is still fresh since it last started loading: whether it has done
-    /// what it can for now.
     pub(crate) fn is_settled(&self) -> bool {
         self.settled
     }
 
-    /// Whether the tile has work under way or to start: a job in flight or
-    /// waiting, or one to run for the data it has.
     pub(crate) fn is_pending(&self) -> bool {
         self.pipeline.is_pending(self.settled)
     }
 
-    /// "Completion" of a tile means that we have attempted to load it, and
-    /// parsed it completely, i.e. no parsing or placement operations are
-    /// pending for that tile. Completeness doesn't mean that the tile can be
-    /// rendered, but merely that we have exhausted all options to get this
-    /// tile to a renderable state.
+    /// Whether the tile has done all it can to become renderable, which it
+    /// may not be.
     pub(crate) fn is_complete(&self) -> bool {
         self.settled && !self.is_pending()
     }
 
-    /// Whether the tile has a job it can submit, or dependencies to resolve.
     pub(crate) fn has_work(&self) -> bool {
         self.pipeline.has_work()
     }
 
     /// Whether the tile's render entries are held after they're no longer
-    /// ideal, so that its symbols fade out: a geometry tile of a continuous
-    /// map.
+    /// ideal, so that its symbols fade out.
     pub(crate) fn fades_out(&self) -> bool {
-        self.pipeline.layout().is_some_and(|layout| layout.params().mode == MapMode::Continuous)
+        self.pipeline.layout().is_some_and(|layout| layout.params.mode == MapMode::Continuous)
     }
 
-    /// Calls `f` with the dependencies of the layout the tile shows and of
-    /// the one it lays out.
+    /// Calls `f` with the dependencies of the layout shown and of the one
+    /// under way.
     pub(crate) fn dependencies(&self, mut f: impl FnMut(&Dependencies)) {
         if let Some(contents) = self.contents().and_then(Contents::geometry) {
             f(&contents.deps);
@@ -264,8 +228,7 @@ impl Tile {
         }
     }
 
-    /// Notifies the tile of a visible layer's updated properties. Returns
-    /// whether the tile draws the layer.
+    /// Returns whether the tile draws the layer.
     pub(crate) fn layer_properties_updated(
         &mut self,
         layer_properties: &Arc<dyn crate::layer_type::ErasedEvaluatedLayer>,
@@ -275,7 +238,6 @@ impl Tile {
             .is_some_and(|shown| Contents::layer_properties_updated(&mut shown.contents, layer_properties))
     }
 
-    /// Logs the tile's state, as a tile of `kind`.
     pub(crate) fn dump_debug_logs(&self, kind: TileKind) {
         let kind = match kind {
             TileKind::Geometry => "Geometry",
