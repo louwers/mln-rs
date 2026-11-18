@@ -538,6 +538,10 @@ pub(crate) trait TypedLayer {
     /// and its tiles' entries, when it stops rendering.
     fn release(&mut self) {}
 
+    /// Called when the engine drops the layer's draws because its source
+    /// has nothing for it to draw.
+    fn nothing_to_draw(&mut self) {}
+
     /// Called when the layer's style changed to another of the same id and
     /// type, once it is the layer's and before its values transition.
     fn style_changed(&mut self) {}
@@ -769,7 +773,10 @@ impl<L: TypedLayer> LayerParts for L {
                     TypedLayer::update_image_draws(self, parameters, atlases, image);
                 }
             }
-            _ => self.remove_all_draws(),
+            _ => {
+                self.remove_all_draws();
+                TypedLayer::nothing_to_draw(self);
+            }
         }
     }
 

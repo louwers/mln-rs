@@ -547,6 +547,10 @@ impl TypedLayer for RenderRasterLayer {
     fn release(&mut self) {
         self.textures.clear();
     }
+
+    fn nothing_to_draw(&mut self) {
+        self.textures.clear();
+    }
 }
 
 /// The shader of the layer's draws in `variant`, the frame's projection,

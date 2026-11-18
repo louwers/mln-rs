@@ -85,9 +85,6 @@ pub(crate) struct LineTile {
     dash_cap: LinePatternCap,
     /// Gives a pattern draw the texture of the tile's icon atlas.
     atlases: Option<AtlasBinding>,
-    /// The texture of the bucket's dash patterns, which the draw samples
-    /// for a `line-dasharray` that differs by feature.
-    _dash_atlas: Option<SharedTexture>,
 }
 
 impl TileObjects for LineTile {
@@ -568,7 +565,9 @@ impl TypedLayer for RenderLineLayer {
         self.draw_list.finish(frame, paint_parameters.context, |writer| Self::write_uniforms(layer, writer));
     }
 
-    /// Adds the dash patterns of the tiles' buckets to the line atlas.
+    /// Adds the dash patterns of the tiles' buckets to the line atlas, then
+    /// the layer's own, which the encode draws a dashed tile with when its
+    /// bucket has no per-feature patterns.
     fn update(&mut self, params: &mut LayerUpdateParameters<'_>, tiles: &[FrameTile<'_, Line>]) {
         for tile in tiles {
             let Some(bucket) = tile.bucket() else {
@@ -580,6 +579,26 @@ impl TypedLayer for RenderLineLayer {
             }
             let cap = dash_pattern_cap(bucket.bucket);
             params.atlases.line.add(dasharray.from, dasharray.to, cap);
+        }
+        let layer_dasharray = self.values.evaluated.paint.line_dasharray.faded();
+        if layer_dasharray.from.is_empty() {
+            return;
+        }
+        for tile in tiles {
+            let Some(bucket) = tile.bucket() else {
+                continue;
+            };
+            let laid_out = &bucket.layer.paint.line_dasharray;
+            let dashed = !laid_out.is_constant() || !laid_out.faded().from.is_empty();
+            let per_feature = bucket
+                .bucket
+                .paint_property_binders
+                .get(&self.base.style.base().id)
+                .is_some_and(|binders| binders.line_dasharray.atlas().is_some());
+            if dashed && !per_feature {
+                let cap = dash_pattern_cap(bucket.bucket);
+                params.atlases.line.add(layer_dasharray.from, layer_dasharray.to, cap);
+            }
         }
     }
 }
@@ -656,7 +675,7 @@ impl RenderLineLayer {
         // draw's uniforms.
         let dash_atlas =
             if evaluated.line_dasharray.is_constant() { None } else { Some(dash_atlas_texture(context, binders)?) };
-        let dash_texture = dash_atlas.clone();
+        let dash_texture = dash_atlas;
         let has_gradient = !self.values.unevaluated.line_gradient.get_value().is_undefined();
 
         let mut textures = Textures::default();
@@ -730,7 +749,6 @@ impl RenderLineLayer {
             pass,
             dash_cap: dash_pattern_cap(bucket),
             atlases,
-            _dash_atlas: dash_atlas,
         })
     }
 

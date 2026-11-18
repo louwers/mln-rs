@@ -588,6 +588,11 @@ impl SourceTiles {
             // So are the tiles that went on loading in the cache.
             self.cache_release_loading(ctx, |_| false);
             self.rendered.clear();
+            if self.info.kind != TileKind::Geometry {
+                std::mem::swap(&mut self.masked, &mut self.masked_before);
+                self.masked.clear();
+                self.unmask_stopped();
+            }
             return;
         }
 
@@ -841,13 +846,19 @@ impl SourceTiles {
                     masked.push(entry.key);
                 }
             }
-            // A tile that stopped drawing drops its quads until it draws
-            // again, which masks it anew.
             masked.sort_unstable();
-            for key in masked_before.iter().filter(|key| masked.binary_search(key).is_err()) {
-                if let Some(contents) = tiles.get_mut(key).and_then(|slot| slot.tile.contents_mut()) {
-                    contents.unmask();
-                }
+            self.unmask_stopped();
+        }
+    }
+
+    /// Unmasks the tiles the frame before drew masked and this frame
+    /// doesn't: a tile that stopped drawing drops its quads until it draws
+    /// again, which masks it anew. `masked` is sorted.
+    fn unmask_stopped(&mut self) {
+        let SourceTiles { tiles, masked, masked_before, .. } = self;
+        for key in masked_before.iter().filter(|key| masked.binary_search(key).is_err()) {
+            if let Some(contents) = tiles.get_mut(key).and_then(|slot| slot.tile.contents_mut()) {
+                contents.unmask();
             }
         }
     }

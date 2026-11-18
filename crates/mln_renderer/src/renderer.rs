@@ -412,17 +412,17 @@ impl Renderer {
         self.orchestrator.visit_render_layers(|layer| layer.lose_context());
     }
 
-    /// Destroys what the renderer released and waits for the GPU, so that
-    /// its work finishes before the app goes to the background, and lets go
-    /// of what the orchestrator caches.
+    /// Lets go of what the orchestrator caches, destroys what it and the
+    /// renderer released, and waits for the GPU, so that its work finishes
+    /// before the app goes to the background.
     pub fn reduce_memory_use(&mut self) {
         {
             let _hold = self.backend.hold();
+            self.orchestrator.reduce_memory_use();
             self.encoder.context.destroy_released();
             if let Err(error) = self.encoder.context.gpu().flush(true) {
                 Log::error(Event::Render, format!("Waiting for the GPU failed: {error}"));
             }
-            self.orchestrator.reduce_memory_use();
         }
         report(&mut self.orchestrator, self.events.as_ref());
     }
