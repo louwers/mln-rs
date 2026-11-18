@@ -1,0 +1,6 @@
+#!/bin/sh
+# Links Rust's x86_64-pc-windows-gnu with llvm-mingw. Rust links GCC's libgcc
+# and libgcc_eh, which llvm-mingw replaces with compiler-rt and LLVM's
+# libunwind: this directory's empty archives satisfy the link, and libunwind
+# unwinds. A wrapper rather than rustflags, which RUSTFLAGS would replace.
+exec x86_64-w64-mingw32-clang -L "$(dirname "$0")" "$@" -lunwind

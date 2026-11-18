@@ -21,11 +21,9 @@ AR_aarch64_pc_windows_gnullvm = "llvm-ar"
 AR_x86_64_pc_windows_gnu = "llvm-ar"
 CARGO_TARGET_X86_64_PC_WINDOWS_GNULLVM_LINKER = "x86_64-w64-mingw32-clang"
 CARGO_TARGET_AARCH64_PC_WINDOWS_GNULLVM_LINKER = "aarch64-w64-mingw32-clang"
-CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER = "x86_64-w64-mingw32-clang"
-# Rust's x86_64-pc-windows-gnu links GCC's libgcc and libgcc_eh, which
-# llvm-mingw replaces with compiler-rt and LLVM's libunwind: empty stand-ins
-# satisfy the link, and libunwind unwinds.
-CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS = "-L {{ config_root }}/tools/mingw-libgcc -C link-arg=-lunwind"
+# Rust's x86_64-pc-windows-gnu expects GCC's runtime libraries, which this
+# linker stands in for (tools/mingw-libgcc/linker).
+CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER = "{{ config_root }}/tools/mingw-libgcc/linker"
 
 [hooks]
 # The Rust targets. An inline script, since a hook's `mise run` would not see
