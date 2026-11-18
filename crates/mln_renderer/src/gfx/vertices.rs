@@ -38,8 +38,8 @@ enum VertexData {
 pub(crate) struct Vertices {
     /// The bytes the next upload writes, `Freed` once it wrote them.
     data: VertexData,
-    count: usize,
-    vertex_size: usize,
+    count: u32,
+    vertex_size: u32,
     buffer: Option<BufferPtr>,
 }
 
@@ -87,29 +87,34 @@ impl VertexData {
 impl Vertices {
     /// `vertices`, moved.
     fn new<V: bytemuck::Pod>(vertices: Vec<V>) -> Vertices {
-        let count = vertices.len();
+        let count = vertices.len() as u32;
         let data = VertexData::of(vertices);
-        Vertices { data, count, vertex_size: size_of::<V>(), buffer: None }
+        Vertices { data, count, vertex_size: size_of::<V>() as u32, buffer: None }
     }
 
     /// The vertices of `vertex_size` bytes each in a JS array.
     #[cfg(target_family = "wasm")]
     fn from_host(bytes: HostBytes, vertex_size: usize) -> Vertices {
         debug_assert!(bytes.len().is_multiple_of(vertex_size.max(1)));
-        let count = bytes.len() / vertex_size.max(1);
-        Vertices { data: VertexData::Host(bytes), count, vertex_size, buffer: None }
+        let count = (bytes.len() / vertex_size.max(1)) as u32;
+        Vertices { data: VertexData::Host(bytes), count, vertex_size: vertex_size as u32, buffer: None }
     }
 
     /// The number of vertices, which stays once the upload freed them.
     #[must_use]
     pub(crate) fn count(&self) -> usize {
-        self.count
+        self.count as usize
     }
 
     /// The bytes a vertex takes.
     #[must_use]
     pub(crate) fn vertex_size(&self) -> usize {
-        self.vertex_size
+        self.vertex_size as usize
+    }
+
+    /// The bytes the vertices take.
+    fn size(&self) -> usize {
+        self.count() * self.vertex_size()
     }
 
     /// Whether the next upload writes the vertices: they are new, or
@@ -131,7 +136,7 @@ impl Vertices {
     /// upload writes. Returns false, leaving the vertices be, for another
     /// number of bytes.
     fn update(&mut self, bytes: &[u8]) -> bool {
-        if bytes.len() != self.count * self.vertex_size {
+        if bytes.len() != self.size() {
             return false;
         }
         match self.data.bytes_mut() {
@@ -152,7 +157,7 @@ impl Vertices {
             }
             return Ok(Some(BufferPtr::clone(buffer)));
         }
-        let size = self.count * self.vertex_size;
+        let size = self.size();
         if size == 0 {
             self.data = VertexData::Freed;
             return Ok(None);
@@ -202,7 +207,7 @@ impl VertexStore {
     }
 
     fn insert(&mut self, vertices: Vertices, released: &Rc<ReleasedEntries>) -> SharedVertices {
-        let count = vertices.count;
+        let count = vertices.count();
         SharedVertices { handle: self.0.add(vertices, released), count }
     }
 
@@ -223,7 +228,7 @@ impl VertexStore {
         let Some(entry) = self.0.get_mut(&typed.shared.handle) else {
             return false;
         };
-        debug_assert_eq!(entry.vertex_size, size_of::<V>());
+        debug_assert_eq!(entry.vertex_size(), size_of::<V>());
         entry.update(bytemuck::cast_slice(data))
     }
 
@@ -242,9 +247,14 @@ impl VertexStore {
         self.0.remove(key);
     }
 
+    /// [`Store::compact`].
+    pub(crate) fn compact(&mut self) {
+        self.0.compact();
+    }
+
     /// Drops every entry.
     pub(crate) fn clear(&mut self) {
-        self.0.drain().for_each(drop);
+        self.0.clear();
     }
 }
 

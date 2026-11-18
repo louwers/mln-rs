@@ -21,7 +21,6 @@
 
 use std::borrow::Cow;
 
-use mln_util::hash::HashMap;
 #[cfg(target_family = "wasm")]
 use mln_util::host_bytes::HostBytes;
 use mln_util::identity::SimpleIdentity;
@@ -219,35 +218,72 @@ impl<T: bytemuck::Pod> mln_wire::Wire for GeometryVec<T> {
 /// so it lives as long as the buckets it was made from.
 #[derive(Clone, Default)]
 pub(crate) struct BucketGeometry {
-    vertices: HashMap<SimpleIdentity, SharedVertices>,
-    indexes: HashMap<SimpleIdentity, SharedIndexes>,
+    vertices: Kept<SharedVertices>,
+    indexes: Kept<SharedIndexes>,
     /// The vertices a layer made of a bucket's vector.
-    derived: HashMap<SimpleIdentity, SharedVertices>,
+    derived: Kept<SharedVertices>,
 }
 
 impl BucketGeometry {
     /// The vertices that `vec`, a bucket's, moved into.
     fn vertices<V>(&self, vec: &GeometryVec<V>) -> Option<&SharedVertices> {
-        self.vertices.get(&vec.key)
+        self.vertices.get(vec.key)
+    }
+
+    /// Frees the room that the entries' lists keep for more, once a tile's
+    /// buckets uploaded.
+    pub(crate) fn shrink(&mut self) {
+        self.vertices.0.shrink_to_fit();
+        self.indexes.0.shrink_to_fit();
+        self.derived.0.shrink_to_fit();
     }
 }
 
-/// Whether `geometry` keeps an entry under `key` in its map that `map` and
-/// `map_mut` pick, taking the first of `others`' where it has none.
+/// Entries by the key of the vector they were made of, in key order: a
+/// tile's are few, and a list takes less memory than a map.
+#[derive(Clone)]
+struct Kept<T>(Vec<(SimpleIdentity, T)>);
+
+impl<T> Default for Kept<T> {
+    fn default() -> Self {
+        Kept(Vec::new())
+    }
+}
+
+impl<T: Clone> Kept<T> {
+    fn get(&self, key: SimpleIdentity) -> Option<&T> {
+        let at = self.0.binary_search_by_key(&key, |(key, _)| *key).ok()?;
+        self.0.get(at).map(|(_, value)| value)
+    }
+
+    fn insert(&mut self, key: SimpleIdentity, value: T) {
+        match self.0.binary_search_by_key(&key, |(key, _)| *key) {
+            Ok(at) => {
+                if let Some(entry) = self.0.get_mut(at) {
+                    entry.1 = value;
+                }
+            }
+            Err(at) => self.0.insert(at, (key, value)),
+        }
+    }
+}
+
+/// Whether `geometry` keeps an entry under `key` in its list that `list`
+/// and `list_mut` pick, taking the first of `others`' where it has none.
 fn kept<T: Clone>(
     geometry: &mut BucketGeometry,
     others: &[&BucketGeometry],
-    map: fn(&BucketGeometry) -> &HashMap<SimpleIdentity, T>,
-    map_mut: fn(&mut BucketGeometry) -> &mut HashMap<SimpleIdentity, T>,
+    list: fn(&BucketGeometry) -> &Kept<T>,
+    list_mut: fn(&mut BucketGeometry) -> &mut Kept<T>,
     key: SimpleIdentity,
 ) -> bool {
-    if map(geometry).contains_key(&key) {
+    if list(geometry).get(key).is_some() {
         return true;
     }
-    let Some(shared) = others.iter().find_map(|other| map(other).get(&key)) else {
+    let Some(shared) = others.iter().find_map(|other| list(other).get(key)) else {
         return false;
     };
-    map_mut(geometry).insert(key, shared.clone());
+    list_mut(geometry).insert(key, shared.clone());
     true
 }
 
@@ -332,7 +368,7 @@ impl<'a> GeometryUpload<'a> {
 /// with [`GeometryUpload::derive_vertices`], which its tile's `geometry`
 /// keeps.
 pub(crate) fn derived_vertices<V>(geometry: &BucketGeometry, vec: &GeometryVec<V>) -> Option<SharedVertices> {
-    let derived = geometry.derived.get(&vec.key);
+    let derived = geometry.derived.get(vec.key);
     debug_assert!(derived.is_some(), "vertices that the bucket's upload didn't derive");
     derived.cloned()
 }
@@ -360,7 +396,7 @@ pub(crate) fn bucket_vertices<V>(geometry: &BucketGeometry, vec: &GeometryVec<V>
 /// The indexes that a bucket's upload moved `vec`, one of its vectors,
 /// into, which its tile's `geometry` keeps and its draws share.
 pub(crate) fn bucket_indexes(geometry: &BucketGeometry, vec: &GeometryVec<u16>) -> Option<SharedIndexes> {
-    let indexes = geometry.indexes.get(&vec.key);
+    let indexes = geometry.indexes.get(vec.key);
     debug_assert!(indexes.is_some(), "indexes that the bucket's upload didn't move");
     indexes.cloned()
 }

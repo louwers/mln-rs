@@ -432,6 +432,7 @@ impl GeometryContents {
                 bucket.upload(&mut upload, needs);
             }
         }
+        self.bucket_geometry.shrink();
     }
 
     /// Brings the buckets' feature state to `states`, for the features of
