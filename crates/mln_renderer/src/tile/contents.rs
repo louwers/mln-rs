@@ -16,7 +16,6 @@ use mln_text::tagged_string::font_stack_hash;
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
 use mln_util::feature::Feature;
-use mln_util::hash::HashMap;
 use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
 use mln_util::mat4::Mat4;
@@ -43,11 +42,12 @@ use crate::tile_render_data::TileAtlasTextures;
 
 /// A layout's buckets, each once, and the bucket of each layer it laid out,
 /// with the values it laid the layer out with. The layers of a layout group
-/// share their bucket.
+/// share their bucket. A frame finds a layer by its id once
+/// ([`find`](Self::find)), and then by where it is ([`laid`](Self::laid)).
 #[derive(Default)]
 pub(crate) struct LayoutBuckets {
     buckets: Vec<Box<dyn Bucket>>,
-    layers: HashMap<String, LaidLayer>,
+    layers: VecMap<String, LaidLayer>,
 }
 
 /// A layer a layout laid out: the index of its bucket, and its values.
@@ -84,6 +84,20 @@ impl LayoutBuckets {
         Some(self.layer_bucket(self.layers.get(layer_id)?))
     }
 
+    /// Where the layer `layer_id` is among the layers laid out, which
+    /// [`laid`](Self::laid) takes while the layout stays as it is.
+    #[inline]
+    pub(crate) fn find(&self, layer_id: &str) -> Option<usize> {
+        self.layers.index_of(layer_id)
+    }
+
+    /// The bucket of the layer at `index` among those laid out, which
+    /// [`find`](Self::find) gave.
+    #[inline]
+    pub(crate) fn laid(&self, index: usize) -> Option<ErasedLayerBucket<'_>> {
+        Some(self.layer_bucket(self.layers.get_index(index)?.1))
+    }
+
     fn layer_bucket<'a>(&'a self, laid: &'a LaidLayer) -> ErasedLayerBucket<'a> {
         ErasedLayerBucket { bucket: &*self.buckets[laid.bucket], bucket_index: laid.bucket, layer: &*laid.layer }
     }
@@ -108,14 +122,14 @@ impl LayoutBuckets {
         self.layers.contains_key(layer_id)
     }
 
-    /// The layers laid out, with their buckets, in no order.
+    /// The layers laid out, with their buckets, in the order of their ids.
     #[cfg(test)]
     pub(crate) fn iter(&self) -> impl Iterator<Item = (&String, ErasedLayerBucket<'_>)> + '_ {
         self.layers.iter().map(|(id, laid)| (id, self.layer_bucket(laid)))
     }
 
     /// The layers laid out, each with the index of its bucket and the values
-    /// it was laid out with, in no order.
+    /// it was laid out with, in the order of their ids.
     pub(crate) fn laid_layers(&self) -> impl Iterator<Item = (&String, usize, &Arc<dyn ErasedEvaluatedLayer>)> + '_ {
         self.layers.iter().map(|(id, laid)| (id, laid.bucket, &laid.layer))
     }
@@ -217,7 +231,7 @@ impl LayoutResult {
                 }
                 let bucket = &mut buckets[laid.bucket];
                 if bucket.has_data() && bucket.update(feature_states, &source_layer, layer_id, pattern_positions) {
-                    changed.push(bucket.get_id());
+                    changed.push(bucket.id());
                 }
             }
         }

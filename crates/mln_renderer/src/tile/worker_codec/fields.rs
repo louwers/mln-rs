@@ -158,12 +158,10 @@ impl LayoutResult {
     /// Each bucket with the layers that render it, in layer id order.
     fn buckets(&self) -> Vec<RenderedBucket<'_>> {
         let laid = &self.layer_render_data;
-        let mut layers: Vec<_> = laid.laid_layers().collect();
-        layers.sort_unstable_by_key(|(layer_id, ..)| *layer_id);
         // Where each of the layout's buckets is among `buckets`.
         let mut positions: Vec<Option<usize>> = vec![None; laid.bucket_count()];
         let mut buckets: Vec<RenderedBucket<'_>> = Vec::new();
-        for (layer_id, bucket_index, layer) in layers {
+        for (layer_id, bucket_index, layer) in laid.laid_layers() {
             let Some(bucket) = laid.bucket(bucket_index) else { continue };
             let position = *positions[bucket_index].get_or_insert_with(|| {
                 buckets.push((bucket, Vec::new()));

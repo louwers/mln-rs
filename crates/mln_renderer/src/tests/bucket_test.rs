@@ -459,7 +459,7 @@ fn a_raster_buckets_upload_moves_its_quads_into_the_stores_once_per_mask() {
     });
 }
 
-/// The C++ test's `operator==(SegmentBase, SegmentBase)` compares only these.
+/// A segment's offsets and lengths, which the tests compare.
 fn segment_tuples(segments: &[SegmentBase]) -> Vec<(usize, usize, usize, usize)> {
     segments.iter().map(|s| (s.vertex_offset, s.index_offset, s.vertex_length, s.index_length)).collect()
 }

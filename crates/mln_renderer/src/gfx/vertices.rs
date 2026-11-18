@@ -282,7 +282,7 @@ impl SharedVertices {
     /// Whether `self` and `other` are the same vertices.
     #[must_use]
     pub(crate) fn same(&self, other: &SharedVertices) -> bool {
-        self.handle.same(&other.handle)
+        self.handle == other.handle
     }
 }
 

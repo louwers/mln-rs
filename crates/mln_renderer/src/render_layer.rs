@@ -33,7 +33,7 @@ use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;
 use crate::render_pass::RenderPass;
 use crate::render_source::{RenderSource, TileOrder};
-use crate::render_tile::{FrameTile, RenderTile, TileView};
+use crate::render_tile::{FoundTile, FrameTile, RenderTile, TileView};
 use crate::sources::render_image_source::ImageSourceRenderData;
 use crate::tile::contents::{Contents, GeometryContents};
 use crate::tile::job::SourceKey;
@@ -73,10 +73,10 @@ impl<T: LayerType> Clone for LayerBucket<'_, T> {
 impl<T: LayerType> Copy for LayerBucket<'_, T> {}
 
 impl<'a, T: LayerType> LayerBucket<'a, T> {
-    /// The bucket of the layer `layer_id` in `contents`, if the layout laid
-    /// it out as a layer of the type `T`.
-    pub(crate) fn of(contents: &'a GeometryContents, layer_id: &str) -> Option<Self> {
-        let ErasedLayerBucket { bucket, bucket_index, layer } = contents.result.layer_render_data.get(layer_id)?;
+    /// The bucket of the layer at `index` among those `contents` laid out,
+    /// if the layout laid it out as a layer of the type `T`.
+    fn laid(contents: &'a GeometryContents, index: usize) -> Option<Self> {
+        let ErasedLayerBucket { bucket, bucket_index, layer } = contents.result.layer_render_data.laid(index)?;
         let layer: &dyn Any = layer;
         Some(LayerBucket {
             bucket: crate::layer_type::recover_bucket::<T>(bucket)?,
@@ -113,8 +113,16 @@ impl<'a, T: LayerType> LayerBucket<'a, T> {
 }
 
 impl<'a, T: LayerType> TileView<'a> for LayerBucket<'a, T> {
-    fn of(contents: &'a Contents, layer_id: &str) -> Option<Self> {
-        LayerBucket::of(contents.geometry()?, layer_id)
+    fn find(contents: &'a Contents, layer_id: &str) -> Option<(Self, usize)> {
+        let contents = contents.geometry()?;
+        let index = contents.result.layer_render_data.find(layer_id)?;
+        Some((LayerBucket::laid(contents, index)?, index))
+    }
+
+    fn at(contents: &'a Contents, layer_id: &str, index: usize) -> Option<Self> {
+        let bucket = LayerBucket::laid(contents.geometry()?, index)?;
+        debug_assert_eq!(bucket.layer.style.id, layer_id, "a layer found at another's place");
+        Some(bucket)
     }
 
     fn passes(self) -> RenderPass {
@@ -136,8 +144,8 @@ impl Default for SymbolTranslate {
     }
 }
 
-/// What placement reads of the render tile of a symbol bucket, as the frame
-/// that prepared the bucket's placement data set it.
+/// What placement reads of the render tile of a symbol bucket, as the
+/// frame's update that collected the bucket's placement data found it.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct PlacedTile {
     pub(crate) id: UnwrappedTileID,
@@ -261,51 +269,57 @@ impl SymbolBuckets for HeldBuckets {
 /// without the layer's type.
 #[derive(Clone, Copy)]
 pub(crate) enum LayerSource<'a> {
-    /// A selection of the source's render tiles.
-    Tiles(LayerTiles<'a>),
+    /// The source's render tiles, of which the layer draws those its update
+    /// found.
+    Tiles(FrameSourceTiles<'a>),
     /// An image source's image.
     Image(ImageSourceRenderData<'a>),
 }
 
-/// The tiles a layer draws in a frame, as the engine sees them: a selection
-/// of its source's render tiles, in the order the layer draws them, with
-/// what their tiles show.
+/// A source's render tiles in a frame, with what each of them shows, as
+/// the engine sees them.
 #[derive(Clone, Copy)]
-pub(crate) struct LayerTiles<'a> {
+pub(crate) struct FrameSourceTiles<'a> {
     tiles: &'a [RenderTile],
     /// What each of `tiles` shows, at its index.
     contents: &'a [Option<&'a Contents>],
-    order: &'a [usize],
 }
 
 /// The tiles of a layer of the type `T` in a frame, each with what it shows
-/// the layer, recovered once for each phase of the frame, which keeps up to
-/// 64 of them on the stack.
+/// the layer, which keeps up to 64 of them on the stack.
 pub(crate) type FrameTiles<'a, T> = SmallVec<[FrameTile<'a, T>; 64]>;
 
-impl<'a> LayerTiles<'a> {
-    /// The tiles of `tiles` at the indexes of `order`, in that order, which
-    /// show `contents`, at their indexes.
+impl<'a> FrameSourceTiles<'a> {
+    /// The render tiles `tiles`, which show `contents`, at their indexes.
     #[must_use]
-    pub(crate) fn new(tiles: &'a [RenderTile], contents: &'a [Option<&'a Contents>], order: &'a [usize]) -> Self {
-        LayerTiles { tiles, contents, order }
+    pub(crate) fn new(tiles: &'a [RenderTile], contents: &'a [Option<&'a Contents>]) -> Self {
+        FrameSourceTiles { tiles, contents }
     }
 
-    /// The tiles as the layer `layer_id` of the type `T` sees them, each
-    /// with what it shows the layer.
-    fn recover<T: LayerType>(self, layer_id: &str) -> FrameTiles<'a, T> {
-        self.order
+    /// The tiles at the indexes of `order`, in that order, as the layer
+    /// `layer_id` of the type `T` sees them, each with what it shows the
+    /// layer, found by the layer's id. `found` keeps where.
+    fn find<T: LayerType>(self, order: &[usize], layer_id: &str, found: &mut Vec<FoundTile>) -> FrameTiles<'a, T> {
+        let mut tiles = FrameTiles::new();
+        for &index in order {
+            let Some(tile) = self.tiles.get(index) else { continue };
+            let (frame_tile, view) = FrameTile::find(tile, self.contents.get(index).copied().flatten(), layer_id);
+            tiles.push(frame_tile);
+            found.push(FoundTile { tile: index, view });
+        }
+        tiles
+    }
+
+    /// The tiles of `found`, as [`find`](Self::find) found them for the
+    /// layer `layer_id` of the type `T` in the same frame.
+    fn at<T: LayerType>(self, found: &[FoundTile], layer_id: &str) -> FrameTiles<'a, T> {
+        found
             .iter()
-            .filter_map(|&index| {
-                let contents = self.contents.get(index).copied().flatten();
-                Some(FrameTile::new(self.tiles.get(index)?, contents, layer_id))
+            .filter_map(|&FoundTile { tile, view }| {
+                let contents = self.contents.get(tile).copied().flatten();
+                Some(FrameTile::at(self.tiles.get(tile)?, contents, layer_id, view))
             })
             .collect()
-    }
-
-    #[must_use]
-    fn is_empty(self) -> bool {
-        self.order.is_empty()
     }
 }
 
@@ -337,11 +351,12 @@ pub(crate) struct LayerUpdateParameters<'a> {
 }
 
 impl<'a> LayerUpdateParameters<'a> {
-    /// The source's tiles in `order`; `None` without either.
+    /// The source's tiles, and their indexes in `order`; `None` for a layer
+    /// without a source or a source without tiles.
     #[must_use]
-    fn tiles(&self, order: Option<TileOrder>) -> Option<LayerTiles<'a>> {
+    fn tiles(&self, order: TileOrder) -> Option<(FrameSourceTiles<'a>, &'a [usize])> {
         let source = self.source?;
-        Some(LayerTiles::new(source.render_tiles(), self.contents, source.tile_order(order?)?))
+        Some((FrameSourceTiles::new(source.render_tiles(), self.contents), source.tile_order(order)?))
     }
 }
 
@@ -357,6 +372,10 @@ pub(crate) struct RenderLayerBase {
 
     /// The projection variant this layer's draws are built with.
     pub(crate) projection_variant: ProjectionVariant,
+
+    /// The layer's tiles of the frame, as its update found them, which its
+    /// encode draws.
+    found_tiles: Vec<FoundTile>,
 }
 
 impl RenderLayerBase {
@@ -369,6 +388,7 @@ impl RenderLayerBase {
             style_dependencies: Dependency::NONE,
             is_renderable: false,
             projection_variant: ProjectionVariant::Mercator,
+            found_tiles: Vec::new(),
         }
     }
 }
@@ -456,24 +476,29 @@ pub(crate) trait TypedLayer {
     /// a frame.
     fn passes(&self, evaluated: &EvaluatedLayer<Self::Type>) -> RenderPass;
 
-    /// Called in the frame's update with `tiles`, the frame's tiles of the
-    /// layer's source in the order it draws them, each with what it shows
-    /// the layer: none without a source, or for an image source. The layer
-    /// collects here what the update needs of its tiles' buckets, such as
-    /// their dash patterns or their symbols.
+    /// Called in the frame's update of a layer with a source with `tiles`,
+    /// the frame's tiles of the source in the order the layer draws them,
+    /// each with what it shows the layer: none for an image source. The
+    /// layer collects here what the update needs of its tiles' buckets,
+    /// such as their dash patterns or their symbols.
     fn update(&mut self, _parameters: &mut LayerUpdateParameters<'_>, _tiles: &[FrameTile<'_, Self::Type>]) {}
+
+    /// [`update`](Self::update) of a layer of a type without a source. One
+    /// that keeps tiles ([`LayerDrawing::tiles`]) picks them here, and draws
+    /// nothing in a frame it picks none in.
+    fn update_without_source(&mut self, _parameters: &mut LayerUpdateParameters<'_>) {}
 
     /// Called in the encode when the frame draws in another projection than
     /// the last, once the engine dropped the layer's draws, for the layer to
     /// drop what else it made for the last projection.
     fn projection_changed(&mut self) {}
 
-    /// Makes the layer's draws of the frame, in the frame's encode, of a
-    /// layer that draws in a pass: from `tiles`, the frame's tiles of the
-    /// layer, in the order the update gave them, each with what it shows the
-    /// layer, of which a layer with a source has some; none for a type
-    /// without a source. The layer keeps what it makes of them, with the
-    /// values of their uniforms.
+    /// Makes the layer's draws of the frame, in the frame's encode, once the
+    /// engine started them ([`LayerDrawing::begin_frame`]), of a layer that
+    /// draws in a pass and whose source has tiles to draw: from `tiles`, the
+    /// frame's tiles of the layer, in the order the update gave them, each
+    /// with what it shows the layer. The layer keeps what it makes of them,
+    /// with the values of their uniforms.
     fn update_draws(
         &mut self,
         _parameters: &mut PaintParameters<'_>,
@@ -491,6 +516,10 @@ pub(crate) trait TypedLayer {
         _image: ImageSourceRenderData<'_>,
     ) {
     }
+
+    /// [`update_draws`](Self::update_draws) of a layer of a type without a
+    /// source.
+    fn update_draws_without_source(&mut self, _parameters: &mut PaintParameters<'_>, _atlases: &Atlases) {}
 
     /// Drops what the layer keeps for its draws besides their GPU objects
     /// and its tiles' entries, when it stops rendering.
@@ -541,19 +570,22 @@ pub(crate) trait LayerParts {
     /// Whether the layer has a pattern property and is in a cross-fade.
     fn has_crossfade(&self) -> bool;
 
-    /// The frame's update of the layer: picks the tiles of `parameters`'
+    /// The frame's update of the layer: finds the tiles of `parameters`'
     /// source the layer draws, adds the passes their buckets were laid out
     /// for to the layer's, runs the layer's [`TypedLayer::update`], and
-    /// keeps entries for the tiles. Returns the order the layer draws the
-    /// tiles in, `None` for a layer without a source.
-    fn update(&mut self, parameters: &mut LayerUpdateParameters<'_>) -> Option<TileOrder>;
+    /// keeps entries for the tiles; or runs the
+    /// [`TypedLayer::update_without_source`] of a layer without a source.
+    fn update(&mut self, parameters: &mut LayerUpdateParameters<'_>);
 
     /// The encode's update of the layer's draws: picks the shader variant
     /// for the frame's projection, dropping the draws when it changed; drops
-    /// the draws of a layer whose `source` has nothing to draw, and the
-    /// frame's draws of a layer that draws in no pass; and otherwise runs the
-    /// layer's [`TypedLayer::update_draws`] with the tiles of its type, or
-    /// [`TypedLayer::update_image_draws`] with an image source's image.
+    /// the draws of a layer that has nothing to draw, and otherwise starts
+    /// its draws of the frame ([`LayerDrawing::begin_frame`]); drops them
+    /// again for a layer that draws in no pass, and otherwise runs the
+    /// layer's [`TypedLayer::update_draws`] with the tiles of its type that
+    /// its update found in `source`, its
+    /// [`TypedLayer::update_image_draws`] with an image source's image, or
+    /// its [`TypedLayer::update_draws_without_source`].
     fn update_draws(
         &mut self,
         parameters: &mut PaintParameters<'_>,
@@ -666,21 +698,24 @@ impl<L: TypedLayer> LayerParts for L {
         L::Type::CROSSFADES && self.parts().values.evaluated.crossfade.t != 1.0
     }
 
-    fn update(&mut self, parameters: &mut LayerUpdateParameters<'_>) -> Option<TileOrder> {
-        let order = parameters.source.map(|_| L::TILE_ORDER);
-        let tiles = parameters.tiles(order).map(|tiles| tiles.recover::<L::Type>(self.id())).unwrap_or_default();
+    fn update(&mut self, parameters: &mut LayerUpdateParameters<'_>) {
+        if <L::Type as StyleLayerType>::INFO.source == SourceKind::None {
+            TypedLayer::update_without_source(self, parameters);
+            return;
+        }
         let base = self.base_mut();
+        base.found_tiles.clear();
+        let tiles = match parameters.tiles(L::TILE_ORDER) {
+            Some((tiles, order)) => tiles.find::<L::Type>(order, &base.style.base().id, &mut base.found_tiles),
+            None => FrameTiles::new(),
+        };
         for bucket in tiles.iter().filter_map(|tile| tile.bucket()) {
             base.passes |= bucket.passes();
         }
         TypedLayer::update(self, parameters, &tiles);
-        // A layer without a source keeps the tiles it picks itself.
-        if <L::Type as StyleLayerType>::INFO.source != SourceKind::None
-            && let Some(kept) = self.parts_mut().drawing.tiles()
-        {
+        if let Some(kept) = self.parts_mut().drawing.tiles() {
             kept.set_tiles(tiles.iter().map(|tile| tile.id()));
         }
-        order
     }
 
     fn update_draws(
@@ -697,22 +732,24 @@ impl<L: TypedLayer> LayerParts for L {
             self.projection_changed();
         }
         if <L::Type as StyleLayerType>::INFO.source == SourceKind::None {
-            if draws_in_a_pass(self) {
-                TypedLayer::update_draws(self, parameters, atlases, &[]);
+            // A layer that keeps tiles draws those its update picked.
+            if self.parts_mut().drawing.tiles().is_some_and(|tiles| tiles.is_empty()) {
+                self.remove_all_draws();
+            } else if begin_frame(self) {
+                TypedLayer::update_draws_without_source(self, parameters, atlases);
             }
             return;
         }
         match source {
-            Some(LayerSource::Tiles(tiles)) if !tiles.is_empty() => {
-                let tiles = tiles.recover::<L::Type>(self.id());
-                self.parts_mut().drawing.begin_frame();
-                if draws_in_a_pass(self) {
+            Some(LayerSource::Tiles(source)) if !self.base().found_tiles.is_empty() => {
+                let base = self.base();
+                let tiles = source.at::<L::Type>(&base.found_tiles, &base.style.base().id);
+                if begin_frame(self) {
                     TypedLayer::update_draws(self, parameters, atlases, &tiles);
                 }
             }
             Some(LayerSource::Image(image)) => {
-                self.parts_mut().drawing.begin_frame();
-                if draws_in_a_pass(self) {
+                if begin_frame(self) {
                     TypedLayer::update_image_draws(self, parameters, atlases, image);
                 }
             }
@@ -769,10 +806,12 @@ impl<L: TypedLayer> LayerParts for L {
     }
 }
 
-/// Whether `layer` draws in a pass with its values of the frame. One that
+/// Starts the frame's draws of `layer`, which has something to draw, and
+/// returns whether it draws in a pass with its values of the frame. One that
 /// doesn't drops the frame's draws, and keeps what it keeps of its tiles.
-fn draws_in_a_pass<L: TypedLayer + ?Sized>(layer: &mut L) -> bool {
+fn begin_frame<L: TypedLayer + ?Sized>(layer: &mut L) -> bool {
     let PartsMut { values, drawing, .. } = layer.parts_mut();
+    drawing.begin_frame();
     let draws = values.evaluated.render_passes != RenderPass::None.underlying_type();
     if !draws {
         drawing.clear_frame();

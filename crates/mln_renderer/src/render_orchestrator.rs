@@ -36,7 +36,7 @@ use crate::layer_type::ErasedEvaluatedLayer;
 use crate::line_atlas::LineAtlas;
 use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;
-use crate::render_layer::{Atlases, LayerSource, LayerTiles, LayerUpdateParameters, RenderLayer};
+use crate::render_layer::{Atlases, FrameSourceTiles, LayerSource, LayerUpdateParameters, RenderLayer};
 use crate::render_source::{self, RenderSource, RenderTileParameters, TileOrder};
 use crate::render_tile::RenderTile;
 use crate::renderer_event::RendererEvent;
@@ -458,14 +458,14 @@ impl RenderOrchestrator {
         let mut placed = PlacementLayers::default();
         let mut opaque_pass_cutoff_estimation = frame.layers.len();
         let mut contents = SourceContents::default();
-        for (&index, frame_layer) in &mut frame.layers {
+        for (&index, frame_layer) in &frame.layers {
             let index = index as usize;
             let render_layer = &mut self.layers[index];
             let source = frame_layer.source.as_ref().and_then(|id| self.render_sources.get_key_value(id));
             let source = source.map(|(id, source)| (id.as_str(), &**source));
             let source_contents = contents.of(source, &self.tile_store);
             let source = source.map(|(_, source)| source);
-            frame_layer.tile_order = render_layer.update(&mut LayerUpdateParameters {
+            render_layer.update(&mut LayerUpdateParameters {
                 state: &frame.transform.state,
                 update_parameters,
                 source,
@@ -882,7 +882,7 @@ impl RenderOrchestrator {
                                 frame
                                     .layers
                                     .entry(index as u32)
-                                    .or_insert_with(|| FrameLayer { source: Some(source_id), tile_order: None });
+                                    .or_insert_with(|| FrameLayer { source: Some(source_id) });
                                 will_render[index] = true;
                             }
                         }
@@ -910,7 +910,7 @@ impl RenderOrchestrator {
                             // and it shall not be added to render items.
                         }
                     }
-                    frame.layers.entry(index as u32).or_insert_with(|| FrameLayer { source: None, tile_order: None });
+                    frame.layers.entry(index as u32).or_insert_with(|| FrameLayer { source: None });
                     will_render[index] = true;
                 }
             }
@@ -1248,13 +1248,9 @@ impl RenderOrchestrator {
             let source = frame_layer.source.as_ref().and_then(|id| self.render_sources.get_key_value(id));
             let source = source.map(|(id, source)| (id.as_str(), &**source));
             let source_contents = contents.of(source, &self.tile_store);
-            let layer_source = source.and_then(|(_, source)| {
-                match frame_layer.tile_order.and_then(|order| source.tile_order(order)) {
-                    Some(order) => {
-                        Some(LayerSource::Tiles(LayerTiles::new(source.render_tiles(), source_contents, order)))
-                    }
-                    None => source.image_render_data().map(LayerSource::Image),
-                }
+            let layer_source = source.map(|(_, source)| match source.image_render_data() {
+                Some(image) => LayerSource::Image(image),
+                None => LayerSource::Tiles(FrameSourceTiles::new(source.render_tiles(), source_contents)),
             });
             render_layer.update_draws(paint_parameters, &self.atlases, layer_source);
             needs_globe_depth = needs_globe_depth || render_layer.needs_globe_depth();

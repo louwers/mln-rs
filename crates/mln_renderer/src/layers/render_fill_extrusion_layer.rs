@@ -47,7 +47,7 @@ use mln_util::size::Size;
 use super::cast_matrix;
 use crate::bucket::Bucket;
 use crate::bucket_geometry::{
-    BucketGeometry, bucket_indexes, bucket_vertices, derived_vertices, paint_vertices, released_vertices,
+    BucketGeometry, bucket_indexes, bucket_vertices, copied_vertices, derived_vertices, paint_vertices,
 };
 use crate::buckets::fill_extrusion_bucket::{
     FillExtrusionBinders, FillExtrusionBucket, FillExtrusionLayoutSpec, FillExtrusionLayoutVertex,
@@ -405,7 +405,7 @@ impl TypedLayer for RenderFillExtrusionLayer {
         let context = &mut *paint_parameters.context;
         let static_vertices = self
             .static_data_vertices
-            .get_or_insert_with(|| released_vertices(context, &RenderStaticData::fill_extrusion_vertices()))
+            .get_or_insert_with(|| copied_vertices(context, &RenderStaticData::fill_extrusion_vertices()))
             .clone();
         let static_indices = self
             .static_data_indices

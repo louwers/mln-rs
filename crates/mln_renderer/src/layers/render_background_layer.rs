@@ -38,7 +38,7 @@ use crate::render_layer::{
 };
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
-use crate::render_tile::{FrameTile, NoTileBucket};
+use crate::render_tile::NoTileBucket;
 use crate::tile_matrix::{projection_data, to_projection_ubo};
 use crate::util::tile_cover::{TileCoverParameters, tile_cover};
 
@@ -185,12 +185,7 @@ impl TypedLayer for RenderBackgroundLayer {
     /// Makes the frame's draws of the layer, one of each tile that covers
     /// the view, which it builds for a tile it keeps none of, and writes the
     /// layer's buffers they read.
-    fn update_draws(
-        &mut self,
-        paint_parameters: &mut PaintParameters<'_>,
-        atlases: &Atlases,
-        _tiles: &[FrameTile<'_, Background>],
-    ) {
+    fn update_draws_without_source(&mut self, paint_parameters: &mut PaintParameters<'_>, atlases: &Atlases) {
         let RenderBackgroundLayer {
             base,
             values,
@@ -202,17 +197,10 @@ impl TypedLayer for RenderBackgroundLayer {
             tile_cover,
         } = self;
         let shaders = &paint_parameters.static_data.shaders;
-        let tile_cover = std::mem::take(tile_cover);
-        if tile_cover.is_empty() {
-            drawing.clear();
-            return;
-        }
-
         let layer = &*values.evaluated;
         let evaluated = &layer.paint;
         let has_pattern = !evaluated.background_pattern.faded().to.empty();
         let draw_passes = RenderPass(layer.render_passes);
-        drawing.frame_mut();
 
         if *draws_built_for != Some((draw_passes, has_pattern)) {
             drawing.clear();
@@ -236,7 +224,6 @@ impl TypedLayer for RenderBackgroundLayer {
             let (Some(from), Some(to)) = (pattern_atlas.pattern(faded.from.id()), pattern_atlas.pattern(faded.to.id()))
             else {
                 // The pattern isn't valid: the layer draws nothing.
-                drawing.frame_mut().clear();
                 return;
             };
             Some((from, to))
@@ -254,7 +241,7 @@ impl TypedLayer for RenderBackgroundLayer {
         }
 
         let variant = base.projection_variant;
-        for tile_id in &tile_cover {
+        for tile_id in &*tile_cover {
             let Some(entry) = drawing.tiles_mut().entry(tile_id) else {
                 continue;
             };
@@ -327,7 +314,7 @@ impl TypedLayer for RenderBackgroundLayer {
 
     /// Picks the tiles that cover the view, which the layer draws, having no
     /// source, and adds its pattern to the pattern atlas.
-    fn update(&mut self, parameters: &mut LayerUpdateParameters<'_>, _tiles: &[FrameTile<'_, Background>]) {
+    fn update_without_source(&mut self, parameters: &mut LayerUpdateParameters<'_>) {
         let (state, update_parameters) = (parameters.state, parameters.update_parameters);
         let zoom = state.get_integer_zoom();
         self.tile_cover = tile_cover(

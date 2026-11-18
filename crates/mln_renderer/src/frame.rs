@@ -8,16 +8,12 @@ use mln_vec_map::VecMap;
 use crate::paint_parameters::TransformParameters;
 use crate::render_light::EvaluatedLight;
 use crate::render_sky::EvaluatedSky;
-use crate::render_source::TileOrder;
 
 /// A layer the frame draws.
 #[derive(Clone)]
 pub(crate) struct FrameLayer {
     /// The id of the layer's render source, `None` for a layer without one.
     pub(crate) source: Option<String>,
-    /// The order the layer draws its source's tiles in, `None` for a layer
-    /// without tiles.
-    pub(crate) tile_order: Option<TileOrder>,
 }
 
 /// A frame, as its update leaves it for its encode: the camera, the values

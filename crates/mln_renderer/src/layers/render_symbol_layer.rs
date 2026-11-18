@@ -44,7 +44,7 @@ use mln_util::mat4::{Mat4, matrix};
 
 use super::cast_matrix;
 use crate::bucket::Bucket;
-use crate::bucket_geometry::{BucketGeometry, bucket_vertices, paint_vertices, released_indexes, released_vertices};
+use crate::bucket_geometry::{BucketGeometry, bucket_vertices, copied_indexes, copied_vertices, paint_vertices};
 use crate::buckets::symbol_bucket::{
     Buffer, CollisionBoxDynamicVertex, CollisionBoxLayoutVertex, CollisionBuffer, PaintProperties, SymbolBucket,
     SymbolDynamicLayoutVertex, SymbolOpacityVertex,
@@ -107,8 +107,8 @@ struct SymbolDrawData {
     along_line: bool,
     text_fit: IconTextFitType,
     is_offset: bool,
-    /// The bucket segment the draw draws (`sortFeaturesByKey`), or all of
-    /// them.
+    /// The bucket segment the draw draws, for a layer that sorts its
+    /// features by key, or all of them.
     segment: Option<usize>,
 }
 
@@ -498,7 +498,7 @@ impl LayerDrawing for SymbolDrawing {
     }
 
     fn begin_frame(&mut self) {
-        self.frame.get_or_insert_default();
+        self.frame.get_or_insert_default().clear();
     }
 
     fn clear_frame(&mut self) {
@@ -648,7 +648,7 @@ fn refresh_draw(
             None => &buffer.segments,
         };
         let segments = segments.iter().map(SegmentBase::copy).collect();
-        draw.objects.replace_indexes(released_indexes(&buffer.triangles), segments);
+        draw.objects.replace_indexes(copied_indexes(&buffer.triangles), segments);
     }
     copy_attributes
 }
@@ -662,7 +662,8 @@ struct SegmentGroup {
     tile_index: usize,
     tile_id: UnwrappedTileID,
     overscaled_z: u8,
-    /// One segment (`sortFeaturesByKey`) or all segments of the buffer.
+    /// One segment, for a layer that sorts its features by key, or all
+    /// segments of the buffer.
     segment: Option<usize>,
 }
 
@@ -724,9 +725,9 @@ pub(crate) struct RenderSymbolLayer {
     /// The segments of the tiles the update builds draws of, as it sorts
     /// them, kept from frame to frame for their memory.
     renderable_segments: Vec<SegmentGroup>,
-    /// The buckets the layer places, in placement order (`placementData`).
+    /// The buckets the layer places, in placement order.
     placement_data: Vec<BucketPlacementData>,
-    /// The buckets another layer places and this layer draws (`followerData`).
+    /// The buckets another layer places and this layer draws.
     follower_data: Vec<BucketPlacementData>,
 
     icon_size: f32,
@@ -945,7 +946,7 @@ impl RenderSymbolLayer {
                 vertices: collision_vertex_attributes(context, buffer),
                 vertex_count: buffer.vertices.len(),
                 mode,
-                indexes: released_indexes(&buffer.indices),
+                indexes: copied_indexes(&buffer.indices),
                 segments: buffer.segments.iter().map(SegmentBase::copy).collect(),
                 instances: None,
             };
@@ -1032,7 +1033,6 @@ impl RenderSymbolLayer {
         projection.translate = [0.0, 0.0];
         let matrix = projection.fallback_matrix;
 
-        // from symbol_program, makeValues
         let pixels_to_tile_units = tile_id.pixels_to_tile_units(1.0, zoom);
         let pitch_with_map = data.pitch_alignment == AlignmentType::Map;
         let rotate_with_map = data.rotation_alignment == AlignmentType::Map;
@@ -1050,8 +1050,8 @@ impl RenderSymbolLayer {
         let gamma_scale =
             if pitch_with_map { (state.get_pitch().cos() as f32) * state.get_camera_to_center_distance() } else { 1.0 };
 
-        // Line label rotation happens in `updateLineLabels` /
-        // `reprojectLineLabels`. Pitched point labels are automatically
+        // Line labels rotate as their placement projects them along their
+        // lines (`reproject_line_labels`). Pitched point labels are automatically
         // rotated by the label plane matrix projection. Unpitched point
         // labels need to have their rotation applied after projection.
         let rotate_in_shader = rotate_with_map && !pitch_with_map && !along_line;
@@ -1233,9 +1233,9 @@ fn write_collision_uniforms(
 fn collision_vertex_attributes(context: &mut Context, buffer: &CollisionBuffer) -> VertexAttributeArray {
     let mut attrs = VertexAttributeArray::new();
     let layout_stride = size_of::<CollisionBoxLayoutVertex>() as u32;
-    let layout = released_vertices(context, &buffer.vertices);
+    let layout = copied_vertices(context, &buffer.vertices);
     let dynamic_stride = size_of::<CollisionBoxDynamicVertex>() as u32;
-    let dynamic = released_vertices(context, &buffer.dynamic_vertices);
+    let dynamic = copied_vertices(context, &buffer.dynamic_vertices);
     if let Some(attr) = attrs.set(ID_COLLISION_POS_VERTEX_ATTRIBUTE, AttributeDataType::Invalid) {
         attr.set_shared_vertices(layout.clone(), 0, 0, layout_stride, AttributeDataType::Short2);
     }
@@ -1604,7 +1604,7 @@ impl TypedLayer for RenderSymbolLayer {
                     vertices: copy_shared_attributes(&vertex_attribs),
                     vertex_count: buffer.attribute_data.len(),
                     mode: DrawMode::Triangles(),
-                    indexes: released_indexes(&buffer.triangles),
+                    indexes: copied_indexes(&buffer.triangles),
                     segments: segments.iter().map(SegmentBase::copy).collect(),
                     instances: None,
                 };

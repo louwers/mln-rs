@@ -27,9 +27,9 @@ use crate::layer_drawing::{DrawGroup, DrawOrder, LayerDrawing, TileMap};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{Atlases, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer};
+use crate::render_layer::{LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer};
 use crate::render_pass::RenderPass;
-use crate::render_tile::{FrameTile, NoTileBucket};
+use crate::render_tile::NoTileBucket;
 
 impl LayerType for Custom {
     type Layout = NoLayout;
@@ -60,7 +60,8 @@ pub(crate) struct CustomDrawing {
     /// The backend of the frame the host last prerendered for, to wait for
     /// its work.
     backend: Option<Rc<dyn RendererBackend>>,
-    /// Whether the layer draws, which it does from its first update.
+    /// Whether the layer draws, which it does from the first frame that
+    /// draws it.
     updated: bool,
 }
 
@@ -141,7 +142,10 @@ impl LayerDrawing for CustomDrawing {
 
     fn clear(&mut self) {}
 
-    fn begin_frame(&mut self) {}
+    /// The layer draws in every frame it is renderable in.
+    fn begin_frame(&mut self) {
+        self.updated = true;
+    }
 
     fn clear_frame(&mut self) {}
 
@@ -169,15 +173,6 @@ impl TypedLayer for RenderCustomLayer {
 
     fn passes(&self, _evaluated: &EvaluatedLayer<Custom>) -> RenderPass {
         RenderPass::Translucent
-    }
-
-    fn update_draws(
-        &mut self,
-        _parameters: &mut PaintParameters<'_>,
-        _atlases: &Atlases,
-        _tiles: &[FrameTile<'_, Custom>],
-    ) {
-        self.drawing.updated = true;
     }
 
     /// A new host for the same layer ID is a new layer to the host: the old

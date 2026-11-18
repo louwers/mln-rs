@@ -420,7 +420,7 @@ fn offset_line(
             let scale = if cos_half_angle == 0.0 { 0.0 } else { 1.0 / cos_half_angle };
             extrude = Point::new(extrude.x * scale, extrude.y * scale);
 
-            // convertPoint<int16_t>(extrude * offset) + p
+            // The offset rounds toward zero to tile units, which wrap.
             let shifted = Point::new((extrude.x * offset) as i16, (extrude.y * offset) as i16);
             new_ring.push(Point::new(shifted.x.wrapping_add(p.x), shifted.y.wrapping_add(p.y)));
         }

@@ -528,9 +528,8 @@ impl Encoder {
         orchestrator.update_debug_layers(&mut parameters);
 
         // - DRAW UPLOAD ---------------------------------------------------
-        // What the update replaced goes before the uploads make what
-        // replaces it, and what the uploads replaced before the passes.
-        parameters.context.destroy_released();
+        // What the frame's update and draw update replaced, and what the
+        // uploads replaced, goes before the passes.
         orchestrator.upload_draws(parameters.context);
         parameters.context.destroy_released();
         let draw_groups = DrawGroups::of(orchestrator, &parameters);
@@ -599,10 +598,6 @@ impl Encoder {
             // texture does.
             stats.num_frame_buffers = i32::from(handoff == Handoff::ReadBack);
             stats.rendering_time = (submitted - start_rendering).as_secs_f64();
-        }
-        context.destroy_released();
-        {
-            let stats = context.rendering_stats();
             stats.encoding_time = frame.started.elapsed().as_secs_f64() - stats.rendering_time;
         }
         let stats = Arc::new(context.stats());

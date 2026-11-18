@@ -461,11 +461,7 @@ impl DrawObjects {
     /// Makes `texture` the one it binds as `id`.
     pub(crate) fn set_texture(&mut self, id: usize, texture: Option<&SharedTexture>) {
         let slot = &mut self.textures[id];
-        let same = match (slot.as_ref(), texture) {
-            (Some(a), Some(b)) => a.same(b),
-            (a, b) => a.is_none() && b.is_none(),
-        };
-        if !same {
+        if slot.as_ref() != texture {
             *slot = texture.cloned();
         }
     }

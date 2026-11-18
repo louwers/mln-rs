@@ -123,7 +123,7 @@ pub(crate) trait Bucket: Any + Send + CloneBucket {
         !self.base().uploaded && self.has_data()
     }
 
-    fn get_id(&self) -> SimpleIdentity {
+    fn id(&self) -> SimpleIdentity {
         self.base().bucket_id
     }
 }

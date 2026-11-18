@@ -141,10 +141,17 @@ impl RenderTile {
 }
 
 /// What a frame's tile shows a layer of some type: its bucket in the tile's
-/// layout, or a raster or raster-dem tile's own bucket.
+/// layout, or a raster or raster-dem tile's own bucket. A frame finds it by
+/// the layer's id once ([`find`](Self::find)), in its update, and its encode
+/// takes it again from where it was found ([`at`](Self::at)).
 pub(crate) trait TileView<'a>: Copy {
-    /// What `contents` show the layer `layer_id`, if anything.
-    fn of(contents: &'a Contents, layer_id: &str) -> Option<Self>;
+    /// What `contents` show the layer `layer_id`, if anything, and where it
+    /// is in them.
+    fn find(contents: &'a Contents, layer_id: &str) -> Option<(Self, usize)>;
+
+    /// What `contents` show the layer `layer_id` at `index`, where
+    /// [`find`](Self::find) found it in the same contents.
+    fn at(contents: &'a Contents, layer_id: &str, index: usize) -> Option<Self>;
 
     /// The passes the bucket was laid out to draw in, which its layer draws
     /// in too; none for a bucket that isn't laid out.
@@ -154,7 +161,11 @@ pub(crate) trait TileView<'a>: Copy {
 }
 
 impl<'a> TileView<'a> for &'a RasterBucket {
-    fn of(contents: &'a Contents, _layer_id: &str) -> Option<Self> {
+    fn find(contents: &'a Contents, layer_id: &str) -> Option<(Self, usize)> {
+        Some((Self::at(contents, layer_id, 0)?, 0))
+    }
+
+    fn at(contents: &'a Contents, _layer_id: &str, _index: usize) -> Option<Self> {
         match contents {
             Contents::Raster(bucket) => Some(bucket),
             _ => None,
@@ -163,7 +174,11 @@ impl<'a> TileView<'a> for &'a RasterBucket {
 }
 
 impl<'a> TileView<'a> for &'a HillshadeBucket {
-    fn of(contents: &'a Contents, _layer_id: &str) -> Option<Self> {
+    fn find(contents: &'a Contents, layer_id: &str) -> Option<(Self, usize)> {
+        Some((Self::at(contents, layer_id, 0)?, 0))
+    }
+
+    fn at(contents: &'a Contents, _layer_id: &str, _index: usize) -> Option<Self> {
         match contents {
             Contents::Dem(bucket) => Some(bucket),
             _ => None,
@@ -176,9 +191,22 @@ impl<'a> TileView<'a> for &'a HillshadeBucket {
 pub(crate) enum NoTileBucket {}
 
 impl TileView<'_> for NoTileBucket {
-    fn of(_contents: &Contents, _layer_id: &str) -> Option<Self> {
+    fn find(_contents: &Contents, _layer_id: &str) -> Option<(Self, usize)> {
         None
     }
+
+    fn at(_contents: &Contents, _layer_id: &str, _index: usize) -> Option<Self> {
+        None
+    }
+}
+
+/// Where a layer's tile of a frame is, as the frame's update found it: its
+/// index among its source's render tiles, and where what it shows the layer
+/// is in its contents ([`TileView::find`]).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct FoundTile {
+    pub(crate) tile: usize,
+    pub(crate) view: Option<usize>,
 }
 
 /// A render tile of a frame, with what it shows a layer of the type `T`.
@@ -197,10 +225,26 @@ impl<T: LayerType> Copy for FrameTile<'_, T> {}
 
 impl<'a, T: LayerType> FrameTile<'a, T> {
     /// The tile `tile`, which shows `contents`, as the layer `layer_id`
-    /// sees it.
+    /// sees it, and where it found what the tile shows the layer.
     #[must_use]
-    pub(crate) fn new(tile: &'a RenderTile, contents: Option<&'a Contents>, layer_id: &str) -> Self {
-        FrameTile { tile, bucket: contents.and_then(|contents| T::TileBucket::of(contents, layer_id)) }
+    pub(crate) fn find(tile: &'a RenderTile, contents: Option<&'a Contents>, layer_id: &str) -> (Self, Option<usize>) {
+        let found = contents.and_then(|contents| T::TileBucket::find(contents, layer_id));
+        (FrameTile { tile, bucket: found.map(|(bucket, _)| bucket) }, found.map(|(_, index)| index))
+    }
+
+    /// The tile `tile`, which shows `contents`, as the layer `layer_id`
+    /// sees it, with what it shows the layer at `view` in `contents`, where
+    /// [`find`](Self::find) found it.
+    #[must_use]
+    pub(crate) fn at(
+        tile: &'a RenderTile,
+        contents: Option<&'a Contents>,
+        layer_id: &str,
+        view: Option<usize>,
+    ) -> Self {
+        let bucket = contents.zip(view).and_then(|(contents, index)| T::TileBucket::at(contents, layer_id, index));
+        debug_assert_eq!(bucket.is_some(), view.is_some(), "a tile's contents changed since the frame's update");
+        FrameTile { tile, bucket }
     }
 
     /// What the tile shows the layer, if anything.

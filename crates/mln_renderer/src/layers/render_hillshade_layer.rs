@@ -43,7 +43,7 @@ use mln_util::time::Instant;
 
 use super::cast_matrix;
 use crate::bucket::NoBucket;
-use crate::bucket_geometry::released_vertices;
+use crate::bucket_geometry::copied_vertices;
 use crate::buckets::hillshade_bucket::HillshadeBucket;
 use crate::buckets::raster_bucket::RasterLayoutVertex;
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
@@ -340,7 +340,7 @@ impl TypedLayer for RenderHillshadeLayer {
         let context = &mut *paint_parameters.context;
         let static_data_shared_vertices = self
             .static_data_shared_vertices
-            .get_or_insert_with(|| released_vertices(context, &RenderStaticData::raster_vertices()))
+            .get_or_insert_with(|| copied_vertices(context, &RenderStaticData::raster_vertices()))
             .clone();
         let static_data_indices = self
             .static_data_indices

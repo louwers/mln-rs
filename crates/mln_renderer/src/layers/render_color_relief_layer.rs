@@ -40,7 +40,7 @@ use mln_util::time::Instant;
 
 use super::cast_matrix;
 use crate::bucket::NoBucket;
-use crate::bucket_geometry::released_vertices;
+use crate::bucket_geometry::copied_vertices;
 use crate::buckets::hillshade_bucket::HillshadeBucket;
 use crate::buckets::raster_bucket::RasterLayoutVertex;
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
@@ -234,9 +234,9 @@ impl RenderColorReliefLayer {
             return;
         }
 
-        // Resize and prepare structures
-        self.elevation_stops_data.resize(ramp_size as usize * 4, 0.0); // RGBA float for compatibility
-        // `colorStops->resize({rampSize, 1})`
+        // The ramps at their new size, as RGBA floats and colors, keeping
+        // what fits of the last.
+        self.elevation_stops_data.resize(ramp_size as usize * 4, 0.0);
         let mut color_stops = PremultipliedImage::new(Size::new(ramp_size, 1));
         let keep = color_stops.data.len().min(self.color_stops.data.len());
         color_stops.data[..keep].copy_from_slice(&self.color_stops.data[..keep]);
@@ -353,7 +353,7 @@ impl TypedLayer for RenderColorReliefLayer {
         let context = &mut *paint_parameters.context;
         let static_data_shared_vertices = self
             .static_data_shared_vertices
-            .get_or_insert_with(|| released_vertices(context, &RenderStaticData::raster_vertices()))
+            .get_or_insert_with(|| copied_vertices(context, &RenderStaticData::raster_vertices()))
             .clone();
         let static_data_indices = self
             .static_data_indices

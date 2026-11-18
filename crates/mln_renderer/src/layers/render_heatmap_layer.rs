@@ -29,17 +29,17 @@ use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 use mln_style_types::TranslateAnchorType;
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
-use mln_util::identity::SimpleIdentity;
 use mln_util::image::PremultipliedImage;
 use mln_util::mat4::{Mat4, matrix};
 use mln_util::size::Size;
 
 use super::render_line_layer::apply_color_ramp;
 use super::{cast_matrix, refresh_paint_attributes};
-use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices, released_indexes, released_vertices};
+use crate::bucket_geometry::{bucket_indexes, bucket_vertices, copied_vertices, paint_vertices};
 use crate::buckets::heatmap_bucket::{HeatmapBinders, HeatmapBucket, HeatmapLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::gfx::context::Context;
+use crate::gfx::indexes::DrawIndexes;
 use crate::gfx::store::SharedTexture;
 use crate::gfx::vertex_attribute::VertexAttributeArray;
 use crate::gfx::vertices::SharedVertices;
@@ -112,10 +112,11 @@ pub(crate) struct HeatmapDrawing {
     tiles: TileMap<KeptDraw>,
     /// The tiles' draws into the render target.
     target: Option<LayerDraws>,
-    /// The GPU objects of the layer's draw, built again each frame.
-    texture: Option<DrawObjects>,
-    /// The color ramp that `texture` samples, made again each frame.
-    color_ramp: Option<SharedTexture>,
+    /// The layer's draw, built on its first frame.
+    texture: Option<KeptDraw>,
+    /// The texture of the color ramp image that `texture` samples, made
+    /// again for a new image.
+    color_ramp: Option<(Rc<PremultipliedImage>, SharedTexture)>,
     /// The layer's draw of the frame, from its first update that draws the
     /// tiles.
     frame: Option<FrameDraws>,
@@ -164,7 +165,7 @@ impl LayerDrawing for HeatmapDrawing {
     }
 
     fn begin_frame(&mut self) {
-        self.frame.get_or_insert_default();
+        self.frame.get_or_insert_default().clear();
     }
 
     fn clear_frame(&mut self) {
@@ -178,14 +179,14 @@ impl LayerDrawing for HeatmapDrawing {
 
     fn upload(&mut self, context: &mut Context) {
         if let (Some(frame), Some(texture)) = (&self.frame, &mut self.texture) {
-            frame.upload_one(texture, context);
+            frame.upload_one(&mut texture.objects, context);
         }
     }
 
     fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
         if let Some(frame) = &self.frame {
             if let Some(texture) = &mut self.texture {
-                frame.render_one(texture, gpu, parameters);
+                frame.render_one(&mut texture.objects, gpu, parameters);
             }
             order.step(parameters);
         }
@@ -220,7 +221,6 @@ pub(crate) struct RenderHeatmapLayer {
     /// The global-state snapshot used to generate the cached color ramp and
     /// detect when it needs to be rebuilt.
     color_ramp_global_state: Option<Arc<GlobalStateMap>>,
-    segments: Vec<SegmentBase>,
 
     heatmap_shader_group: Option<ShaderGroupPtr>,
     heatmap_texture_shader: Option<ShaderProgramPtr>,
@@ -241,7 +241,6 @@ impl RenderHeatmapLayer {
             tile_draws: DrawList::default(),
             color_ramp: Rc::new(PremultipliedImage::new(Size::new(256, 1))),
             color_ramp_global_state: None,
-            segments: Vec::new(),
             heatmap_shader_group: None,
             heatmap_texture_shader: None,
             render_target: None,
@@ -519,17 +518,17 @@ impl RenderHeatmapLayer {
     }
 
     /// Makes the layer's draw of the frame, which colors the heat of
-    /// `render_target_texture` onto it, with GPU objects it builds again each
-    /// frame in the layer's cache, and writes the buffers it reads.
+    /// `render_target_texture` onto it through the layer's color ramp, with
+    /// GPU objects it builds once, and writes the buffers it reads.
     fn draw_texture(
         &mut self,
         shaders: &ShaderRegistry,
         render_target_texture: &SharedTexture,
         paint_parameters: &mut PaintParameters<'_>,
     ) {
-        let Some(frame) = self.drawing.frame.as_mut() else {
+        if self.drawing.frame.is_none() {
             return;
-        };
+        }
         if self.heatmap_texture_shader.is_none() {
             self.heatmap_texture_shader =
                 shaders.shader(HEATMAP_TEXTURE_SHADER_GROUP_NAME, ProjectionVariant::Mercator);
@@ -540,57 +539,66 @@ impl RenderHeatmapLayer {
         };
 
         let context = &mut *paint_parameters.context;
-        let vertices = self
-            .shared_texture_vertices
-            .get_or_insert_with(|| released_vertices(context, &RenderStaticData::heatmap_texture_vertices()))
-            .clone();
-        let mut attrs = VertexAttributeArray::new();
-        if let Some(attr) = attrs.set(ID_HEATMAP_POS_VERTEX_ATTRIBUTE, AttributeDataType::Invalid) {
-            attr.set_shared_vertices(
-                vertices,
-                offset_of!(HeatmapLayoutVertex, a1) as u32,
-                0,
-                size_of::<HeatmapLayoutVertex>() as u32,
-                AttributeDataType::Short2,
-            );
-        }
-        if self.segments.is_empty() {
-            self.segments = RenderStaticData::heatmap_texture_segments();
-        }
-
-        let color_ramp = context.add_texture_with(|texture| {
-            texture.set_image(Some(Rc::clone(&self.color_ramp)));
-            texture.set_sampler(SamplerState {
-                filter: TextureFilterType::Linear,
-                wrap_u: TextureWrapType::Clamp,
-                wrap_v: TextureWrapType::Clamp,
-                ..Default::default()
-            });
-        });
-
-        let geometry = DrawGeometry {
-            vertices: attrs,
-            vertex_count: 4,
-            mode: DrawMode::Triangles(),
-            indexes: released_indexes(&RenderStaticData::quad_triangle_indices()),
-            segments: self.segments.iter().map(SegmentBase::copy).collect(),
-            instances: None,
+        let drawing = &mut self.drawing;
+        let color_ramp = match &drawing.color_ramp {
+            Some((image, texture)) if Rc::ptr_eq(image, &self.color_ramp) => texture.clone(),
+            _ => {
+                let texture = context.add_texture_with(|texture| {
+                    texture.set_image(Some(Rc::clone(&self.color_ramp)));
+                    texture.set_sampler(SamplerState {
+                        filter: TextureFilterType::Linear,
+                        wrap_u: TextureWrapType::Clamp,
+                        wrap_v: TextureWrapType::Clamp,
+                        ..Default::default()
+                    });
+                });
+                drawing.color_ramp = Some((Rc::clone(&self.color_ramp), texture.clone()));
+                texture
+            }
         };
-        let mut textures = Textures::default();
-        textures[ID_HEATMAP_IMAGE_TEXTURE] = Some(render_target_texture.clone());
-        textures[ID_HEATMAP_COLOR_RAMP_TEXTURE] = Some(color_ramp.clone());
-        let objects = DrawObjects::new(
-            heatmap_texture_shader,
-            ColorMode::alpha_blended(),
-            CullFaceMode::disabled(),
-            geometry,
-            textures,
-        );
-        let frame_draw = FrameDraw { depth: DrawDepth::Off, ..FrameDraw::new(None, SimpleIdentity::new()) };
-        self.drawing.texture = Some(objects);
-        self.drawing.color_ramp = Some(color_ramp);
-
-        frame.clear();
+        if let Some(draw) = &mut drawing.texture {
+            // The render target's texture is made again with its size.
+            draw.objects.set_texture(ID_HEATMAP_IMAGE_TEXTURE, Some(render_target_texture));
+            draw.objects.set_texture(ID_HEATMAP_COLOR_RAMP_TEXTURE, Some(&color_ramp));
+        } else {
+            let vertices = self
+                .shared_texture_vertices
+                .get_or_insert_with(|| copied_vertices(context, &RenderStaticData::heatmap_texture_vertices()))
+                .clone();
+            let mut attrs = VertexAttributeArray::new();
+            if let Some(attr) = attrs.set(ID_HEATMAP_POS_VERTEX_ATTRIBUTE, AttributeDataType::Invalid) {
+                attr.set_shared_vertices(
+                    vertices,
+                    offset_of!(HeatmapLayoutVertex, a1) as u32,
+                    0,
+                    size_of::<HeatmapLayoutVertex>() as u32,
+                    AttributeDataType::Short2,
+                );
+            }
+            let geometry = DrawGeometry {
+                vertices: attrs,
+                vertex_count: 4,
+                mode: DrawMode::Triangles(),
+                indexes: DrawIndexes::new(RenderStaticData::quad_triangle_indices()),
+                segments: RenderStaticData::heatmap_texture_segments(),
+                instances: None,
+            };
+            let mut textures = Textures::default();
+            textures[ID_HEATMAP_IMAGE_TEXTURE] = Some(render_target_texture.clone());
+            textures[ID_HEATMAP_COLOR_RAMP_TEXTURE] = Some(color_ramp);
+            let objects = DrawObjects::new(
+                heatmap_texture_shader,
+                ColorMode::alpha_blended(),
+                CullFaceMode::disabled(),
+                geometry,
+                textures,
+            );
+            drawing.texture = Some(KeptDraw::new(objects));
+        }
+        let (Some(draw), Some(frame)) = (&drawing.texture, drawing.frame.as_mut()) else {
+            return;
+        };
+        let frame_draw = FrameDraw { depth: DrawDepth::Off, ..draw.frame_draw(None) };
         frame.push(frame_draw);
         let mut m: Mat4 = [0.0; 16];
         let size = paint_parameters.renderable_size;

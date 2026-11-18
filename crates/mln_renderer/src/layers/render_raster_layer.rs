@@ -29,7 +29,7 @@ use mln_util::time::Instant;
 
 use super::cast_matrix;
 use crate::bucket::NoBucket;
-use crate::bucket_geometry::released_vertices;
+use crate::bucket_geometry::copied_vertices;
 use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::gfx::context::Context;
@@ -114,7 +114,7 @@ impl LayerDrawing for RasterDrawing {
     }
 
     fn begin_frame(&mut self) {
-        self.frame.get_or_insert_default();
+        self.frame.get_or_insert_default().clear();
     }
 
     fn clear_frame(&mut self) {
@@ -149,7 +149,7 @@ impl StaticGeometry {
     /// The tile extent's quad, in `context`'s stores.
     fn new(context: &mut Context) -> StaticGeometry {
         StaticGeometry {
-            vertices: released_vertices(context, &RenderStaticData::raster_vertices()),
+            vertices: copied_vertices(context, &RenderStaticData::raster_vertices()),
             indexes: context.add_indexes(Indexes::new(RenderStaticData::quad_triangle_indices())),
             segments: RenderStaticData::raster_segments(),
         }
@@ -256,9 +256,6 @@ impl RenderRasterLayer {
         paint_parameters: &mut PaintParameters<'_>,
     ) {
         self.drawing.objects.images.clear();
-        if let Some(frame) = &mut self.drawing.frame {
-            frame.clear();
-        }
 
         // The bucket is missing until the image loads.
         let Some(bucket) = image_data.bucket else {

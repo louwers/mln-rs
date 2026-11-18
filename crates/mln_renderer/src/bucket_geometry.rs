@@ -312,13 +312,13 @@ pub(crate) fn derived_vertices<V>(geometry: &BucketGeometry, vec: &GeometryVec<V
 
 /// Vertices of `context`'s store holding a copy of `vertices`, which the
 /// draws that bind them don't change: draws replace such vertices instead.
-pub(crate) fn released_vertices<V: bytemuck::Pod>(context: &mut Context, vertices: &[V]) -> SharedVertices {
+pub(crate) fn copied_vertices<V: bytemuck::Pod>(context: &mut Context, vertices: &[V]) -> SharedVertices {
     context.add_vertices(vertices.to_vec()).into_shared()
 }
 
 /// Indexes holding a copy of `indexes`, which a draw owns.
 #[must_use]
-pub(crate) fn released_indexes(indexes: &[u16]) -> DrawIndexes {
+pub(crate) fn copied_indexes(indexes: &[u16]) -> DrawIndexes {
     DrawIndexes::new(indexes.to_vec())
 }
 
@@ -349,7 +349,7 @@ pub(crate) fn paint_vertices(
     depends_on_feature_state: bool,
 ) -> Option<SharedVertices> {
     if depends_on_feature_state {
-        Some(released_vertices(context, &buffer.shared_vertex_vector.data()))
+        Some(copied_vertices(context, &buffer.shared_vertex_vector.data()))
     } else {
         bucket_vertices(geometry, &buffer.shared_vertex_vector)
     }

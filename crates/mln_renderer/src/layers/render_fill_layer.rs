@@ -30,7 +30,7 @@ use mln_util::size::Size;
 
 use super::{cast_matrix, refresh_paint_attributes};
 use crate::bucket::Bucket;
-use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices, released_vertices};
+use crate::bucket_geometry::{bucket_indexes, bucket_vertices, copied_vertices, paint_vertices};
 use crate::buckets::fill_bucket::{FillBinders, FillBucket, FillLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, copy_shared_attributes};
 use crate::gfx::atlas_binding::AtlasBinding;
@@ -180,7 +180,7 @@ impl OutlineQuad {
     /// The quad, whose corners every instanced outline reads per vertex, in
     /// `context`'s stores.
     fn new(context: &mut Context) -> OutlineQuad {
-        let vertices = released_vertices(context, &RenderStaticData::fill_outline_vertices());
+        let vertices = copied_vertices(context, &RenderStaticData::fill_outline_vertices());
         let indexes = context.add_indexes(Indexes::new(RenderStaticData::quad_triangle_indices()));
         let vertex_count = vertices.count();
         let mut attributes = VertexAttributeArray::new();
@@ -250,8 +250,7 @@ impl TileBuilder<'_> {
         let (fill_depth, outline_sub_layer) = if self.pattern {
             (DepthMaskType::ReadWrite, 2)
         } else {
-            // Only opaque fills write depth, as `fillRenderPass` does in
-            // legacy rendering.
+            // Only opaque fills write depth.
             let opaque = evaluated.fill_color.constant_or(&Color::default()).a >= 1.0
                 && evaluated.fill_opacity.constant_or(&0.0) >= 1.0;
             let depth = if opaque { DepthMaskType::ReadWrite } else { DepthMaskType::ReadOnly };
@@ -511,7 +510,8 @@ impl RenderFillLayer {
             return Some(uniforms);
         }
 
-        // from FillPatternProgram::layoutUniformValues
+        // Where the tile is in pixels at the nearest integer zoom, which the
+        // pattern is laid out over.
         let state = parameters.state;
         let int_zoom = state.get_integer_zoom();
         let tile_ratio = 1.0f32 / tile_id.pixels_to_tile_units(1.0, f32::from(int_zoom));

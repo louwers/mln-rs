@@ -72,9 +72,12 @@ impl Released {
 
     /// Destroys the resources released so far.
     pub fn destroy(&self, gpu: &mut dyn Gpu) {
-        for id in self.resources.take() {
+        let mut resources = self.resources.take();
+        for id in resources.drain(..) {
             gpu.destroy(id);
         }
+        // Keeps the list's memory for the next batch.
+        self.resources.set(resources);
     }
 }
 

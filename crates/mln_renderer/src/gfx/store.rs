@@ -97,13 +97,16 @@ impl<K: Copy + Into<StoreKey>> Shared<K> {
     pub(crate) fn key(&self) -> K {
         self.0.key
     }
+}
 
-    /// Whether `self` and `other` hold the same entry.
-    #[must_use]
-    pub(crate) fn same(&self, other: &Shared<K>) -> bool {
+/// Handles are equal where they hold the same entry.
+impl<K: Copy + Into<StoreKey>> PartialEq for Shared<K> {
+    fn eq(&self, other: &Self) -> bool {
         Rc::ptr_eq(&self.0, &other.0)
     }
 }
+
+impl<K: Copy + Into<StoreKey>> Eq for Shared<K> {}
 
 impl<K: Copy + Into<StoreKey>> Clone for Shared<K> {
     fn clone(&self) -> Self {

@@ -279,6 +279,12 @@ impl<T> TileMap<T> {
         }
     }
 
+    /// Whether the map has no tiles.
+    #[must_use]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.set.ids.is_empty()
+    }
+
     /// Drops the entries of the tiles.
     pub(crate) fn clear_tiles(&mut self) {
         self.set.clear();
@@ -1019,7 +1025,7 @@ impl<T: TileObjects> LayerDrawing for TileDraws<T> {
     }
 
     fn begin_frame(&mut self) {
-        self.frame_mut();
+        self.frame_mut().clear();
     }
 
     fn clear_frame(&mut self) {
@@ -1064,10 +1070,10 @@ pub(crate) trait LayerDrawing {
     /// of the others. The tiles' entries stay.
     fn clear(&mut self);
 
-    /// Called in the encode before a layer with a source makes its draws of
-    /// a frame whose source has something to draw. A drawing whose draw
-    /// group takes its place from the layer's first such frame starts it
-    /// here.
+    /// Starts the layer's draws of a frame it has something to draw in, in
+    /// the encode, before the layer makes them: empty, keeping the GPU
+    /// objects of the tiles' draws. A drawing whose draw group takes its
+    /// place from the layer's first such frame starts the group here.
     fn begin_frame(&mut self);
 
     /// Drops the frame's draws, keeping the GPU objects of the tiles' draws,
