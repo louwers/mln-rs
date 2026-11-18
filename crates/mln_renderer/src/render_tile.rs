@@ -56,7 +56,7 @@ impl RenderTile {
         RenderTile {
             id,
             projection: ProjectionData::default(),
-            // Prepare sets it.
+            // `set_projection` sets it.
             matrix: [0.0; 16],
             tile_id,
             tile_hold_for_fade: hold_for_fade,
