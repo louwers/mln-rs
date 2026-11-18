@@ -169,9 +169,13 @@ pub fn linear() -> Interpolator {
 }
 
 /// An `interpolate` expression with stops as (input, output) pairs, or
-/// `None` when there are no stops or they can't be interpolated.
+/// `None` when the input isn't a number, there are no stops, or they can't be
+/// interpolated.
 #[must_use]
 pub fn interpolate(interpolator: Interpolator, input: Expr, stops_in: Vec<(f64, Expr)>) -> Option<Expr> {
+    if input.get_type() != Type::Number {
+        return None;
+    }
     let type_ = stops_in.first()?.1.get_type();
     let mut stops = Stops::new();
     for (k, v) in stops_in {

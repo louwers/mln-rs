@@ -193,3 +193,9 @@ fn non_spec_forms_fail_to_parse() {
         );
     }
 }
+
+#[test]
+fn dsl_interpolate_rejects_a_non_number_input() {
+    let stops = vec![(0.0, dsl::literal(Value::Number(1.0)))];
+    assert!(dsl::interpolate(dsl::linear(), dsl::literal_str("x"), stops).is_none());
+}
