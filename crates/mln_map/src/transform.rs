@@ -61,9 +61,10 @@ fn normalize_angle(mut angle: f64, anchor_angle: f64) -> f64 {
     angle
 }
 
+/// A `LatLng` from coordinates computed from the transform state's valid
+/// locations, which its invariants keep finite.
 fn lat_lng(lat: f64, lon: f64) -> LatLng {
-    // C++ constructs LatLng directly, which throws std::domain_error.
-    LatLng::new(lat, lon).unwrap_or_else(|e| panic!("{e}"))
+    LatLng::new(lat, lon).expect("a transform state's coordinates are finite")
 }
 
 /// An animation frame's `EdgeInsets(top, left, bottom, right)`. C++ throws

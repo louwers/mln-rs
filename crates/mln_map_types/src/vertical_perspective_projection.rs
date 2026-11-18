@@ -17,11 +17,10 @@ use mln_util::vectors::{Vec3, Vec4};
 use crate::projection::{ProjectedTilePoint, ProjectionData, mercator_tile_coords};
 use crate::transform_state::{NorthOrientation, TransformState};
 
-/// A `LatLng`, panicking on invalid input: C++ constructs it directly,
-/// which throws `std::domain_error` on invalid input; nothing catches it
-/// there.
+/// A `LatLng` from coordinates computed from a transform state and valid
+/// locations, which its invariants keep finite.
 fn lat_lng(lat: f64, lon: f64, mode: WrapMode) -> LatLng {
-    LatLng::with_mode(lat, lon, mode).unwrap_or_else(|e| panic!("{e}"))
+    LatLng::with_mode(lat, lon, mode).expect("a transform state's coordinates are finite")
 }
 
 /// Clamps `value` to `lo..=hi` as `std::clamp` does:
@@ -325,16 +324,17 @@ impl VerticalPerspectiveProjection {
         [lng.sin() * len, lat.sin(), lng.cos() * len]
     }
 
-    #[must_use]
-    pub(crate) fn surface_vector_to_lat_lng(surface: &Vec3) -> LatLng {
+    /// The location of a unit-sphere point, or `None` for a point that isn't
+    /// a number, as a degenerate camera's can be.
+    pub(crate) fn surface_vector_to_lat_lng(surface: &Vec3) -> Option<LatLng> {
         let latitude = mln_math::rad2deg(clamp(surface[1], -1.0, 1.0).asin());
         let length_xz = (surface[0] * surface[0] + surface[2] * surface[2]).sqrt();
         if length_xz <= POLE_AXIS_DISTANCE {
-            return lat_lng(latitude, 0.0, WrapMode::Unwrapped);
+            return LatLng::with_mode(latitude, 0.0, WrapMode::Unwrapped).ok();
         }
         let acos_z = clamp(surface[2] / length_xz, -1.0, 1.0).acos();
         let longitude = mln_math::rad2deg(if surface[0] > 0.0 { acos_z } else { -acos_z });
-        lat_lng(latitude, longitude, WrapMode::Wrapped)
+        LatLng::with_mode(latitude, longitude, WrapMode::Wrapped).ok()
     }
 
     /// Unit-sphere point under a screen pixel (y up, as `TransformState`
@@ -380,9 +380,9 @@ impl VerticalPerspectiveProjection {
         state: &TransformState,
         point: &ScreenCoordinate,
         wrap_mode: WrapMode,
-    ) -> LatLng {
-        let lat_lng = Self::surface_vector_to_lat_lng(&Self::screen_coordinate_to_surface(state, point));
-        if wrap_mode == WrapMode::Wrapped { lat_lng.wrapped() } else { lat_lng }
+    ) -> Option<LatLng> {
+        let lat_lng = Self::surface_vector_to_lat_lng(&Self::screen_coordinate_to_surface(state, point))?;
+        Some(if wrap_mode == WrapMode::Wrapped { lat_lng.wrapped() } else { lat_lng })
     }
 
     /// The screen point of a location on the globe and its clip-space

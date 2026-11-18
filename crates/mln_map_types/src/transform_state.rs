@@ -42,14 +42,14 @@ fn max_mercator_horizon_angle() -> f64 {
     mln_math::deg2rad(89.25)
 }
 
+/// A `LatLng` from coordinates that the state's invariants keep valid: its
+/// setters take only finite numbers.
 fn lat_lng(lat: f64, lon: f64, mode: WrapMode) -> LatLng {
-    // C++ constructs LatLng directly, which throws std::domain_error on
-    // invalid input; nothing catches it there.
-    LatLng::with_mode(lat, lon, mode).unwrap_or_else(|e| panic!("{e}"))
+    LatLng::with_mode(lat, lon, mode).expect("a transform state's coordinates are finite")
 }
 
-fn lat_lng_from_mercator(mercator_coordinate: Point<f64>, wrap_mode: WrapMode) -> LatLng {
-    lat_lng(
+fn lat_lng_from_mercator(mercator_coordinate: Point<f64>, wrap_mode: WrapMode) -> Result<LatLng, Error> {
+    LatLng::with_mode(
         mln_math::rad2deg(2.0 * (PI - mercator_coordinate.y * 2.0 * PI).exp().atan() - (PI / 2.0)),
         mercator_coordinate.x * 360.0 - 180.0,
         wrap_mode,
@@ -74,6 +74,10 @@ fn modf_fraction(x: f64) -> f64 {
     (x - x.trunc()).copysign(x)
 }
 
+/// The camera and view a map is drawn with.
+///
+/// Setters ignore numbers that aren't finite, and a camera whose projection
+/// can't be inverted shows nothing, as an empty size does.
 #[derive(Clone, Debug)]
 pub struct TransformState {
     bounds: LatLngBounds,
@@ -459,8 +463,11 @@ impl TransformState {
 
         // Compute center point of the map
         let mercator_point = Point::new(position[0] + dx * travel, position[1] + dy * travel);
+        let Ok(center) = lat_lng_from_mercator(mercator_point, WrapMode::Unwrapped) else {
+            return;
+        };
         let zoom = f64::min(zoom, self.scale_zoom(self.max_scale));
-        self.set_lat_lng_zoom(&lat_lng_from_mercator(mercator_point, WrapMode::Unwrapped), zoom);
+        self.set_lat_lng_zoom(&center, zoom);
 
         let mercator_z = position[2] + dz * travel;
         let alt_m = mercator_z
@@ -557,12 +564,10 @@ impl TransformState {
             let coord = self.coordinate_point_matrix(&projection);
 
             let mut inv_projection = [0.0; 16];
-            if matrix::invert(&mut inv_projection, &projection) {
-                panic!("failed to invert projectionMatrix");
-            }
             let mut inverted = [0.0; 16];
-            if matrix::invert(&mut inverted, &coord) {
-                panic!("failed to invert coordinatePointMatrix");
+            // `invert` returns true when the matrix is singular.
+            if matrix::invert(&mut inv_projection, &projection) || matrix::invert(&mut inverted, &coord) {
+                return Matrices::default();
             }
             let mut matrices = Matrices { projection, inv_projection, coord, inverted, ..Matrices::default() };
             // The globe's projections read only the state's fields, never
@@ -901,7 +906,7 @@ impl TransformState {
     }
 
     pub fn set_scale(&mut self, val: f64) {
-        if self.scale != val {
+        if val.is_finite() && self.scale != val {
             self.scale = val;
             self.invalidate_matrices();
         }
@@ -914,7 +919,7 @@ impl TransformState {
     }
 
     pub fn set_x(&mut self, val: f64) {
-        if self.x != val {
+        if val.is_finite() && self.x != val {
             self.x = val;
             self.invalidate_matrices();
         }
@@ -925,7 +930,7 @@ impl TransformState {
     }
 
     pub fn set_y(&mut self, val: f64) {
-        if self.y != val {
+        if val.is_finite() && self.y != val {
             self.y = val;
             self.invalidate_matrices();
         }
@@ -938,7 +943,7 @@ impl TransformState {
     }
 
     pub fn set_bearing(&mut self, val: f64) {
-        if self.bearing != val {
+        if val.is_finite() && self.bearing != val {
             self.bearing = val;
             self.invalidate_matrices();
         }
@@ -950,7 +955,7 @@ impl TransformState {
     }
 
     pub fn set_field_of_view(&mut self, val: f64) {
-        if self.fov != val {
+        if val.is_finite() && self.fov != val {
             self.fov = val;
             self.invalidate_matrices();
         }
@@ -961,7 +966,7 @@ impl TransformState {
     }
 
     pub fn set_roll(&mut self, val: f64) {
-        if self.roll != val {
+        if val.is_finite() && self.roll != val {
             self.roll = val;
             self.invalidate_matrices();
         }
@@ -986,7 +991,7 @@ impl TransformState {
     }
 
     pub fn set_pitch(&mut self, val: f64) {
-        if self.pitch != val {
+        if val.is_finite() && self.pitch != val {
             self.pitch = val;
             self.invalidate_matrices();
         }
@@ -997,7 +1002,7 @@ impl TransformState {
     }
 
     pub fn set_x_skew(&mut self, val: f64) {
-        if self.x_skew != val {
+        if val.is_finite() && self.x_skew != val {
             self.x_skew = val;
             self.invalidate_matrices();
         }
@@ -1008,7 +1013,7 @@ impl TransformState {
     }
 
     pub fn set_y_skew(&mut self, val: f64) {
-        if self.y_skew != val {
+        if val.is_finite() && self.y_skew != val {
             self.y_skew = val;
             self.invalidate_matrices();
         }
@@ -1121,10 +1126,10 @@ impl TransformState {
         }
 
         if self.is_globe_rendering() {
-            return TileCoordinate::from_lat_lng(
-                f64::from(at_zoom),
-                &VerticalPerspectiveProjection::screen_coordinate_to_lat_lng(self, point, WrapMode::Unwrapped),
-            );
+            return match VerticalPerspectiveProjection::screen_coordinate_to_lat_lng(self, point, WrapMode::Unwrapped) {
+                Some(lat_lng) => TileCoordinate::from_lat_lng(f64::from(at_zoom), &lat_lng),
+                None => TileCoordinate { p: Point::new(0.0, 0.0), z: 0.0 },
+            };
         }
 
         self.mercator_screen_coordinate_to_tile_coordinate(point, at_zoom)
@@ -1175,7 +1180,8 @@ impl TransformState {
             if !point.x.is_finite() || !point.y.is_finite() {
                 return Err(Error::invalid_argument("screen coordinate must not be infinite"));
             }
-            return Ok(VerticalPerspectiveProjection::screen_coordinate_to_lat_lng(self, point, wrap_mode));
+            return VerticalPerspectiveProjection::screen_coordinate_to_lat_lng(self, point, wrap_mode)
+                .ok_or_else(|| Error::invalid_argument("the camera shows no location"));
         }
         let coord = self.screen_coordinate_to_tile_coordinate(point, 0);
         Projection::unproject(&coord.p, 1.0 / TILE_SIZE_D, wrap_mode)
@@ -1456,6 +1462,9 @@ impl TransformState {
     }
 
     pub fn set_lat_lng_zoom(&mut self, lat_lng: &LatLng, zoom: f64) {
+        if !zoom.is_finite() {
+            return;
+        }
         let mut requested = *lat_lng;
         // Globe centers arrive wrapped, and bounds across the antimeridian
         // reach past 180 degrees: take the copy of the longitude nearest the
@@ -1512,6 +1521,9 @@ impl TransformState {
     }
 
     pub fn set_center_altitude(&mut self, alt_m: f64) {
+        if !alt_m.is_finite() {
+            return;
+        }
         self.z = alt_m
             / Projection::get_meters_per_pixel_at_latitude(
                 self.get_lat_lng(WrapMode::Unwrapped).latitude(),
@@ -1521,6 +1533,10 @@ impl TransformState {
     }
 
     fn set_scale_point(&mut self, new_scale: f64, point: &ScreenCoordinate) {
+        // A far unwrapped longitude can overflow the point.
+        if !point.x.is_finite() || !point.y.is_finite() {
+            return;
+        }
         (self.scale, self.x, self.y) = self.constrain(new_scale, point.x, point.y);
         self.bc = Projection::world_size(self.scale) / constants::DEGREES_MAX;
         self.cc = Projection::world_size(self.scale) / M2PI;
@@ -1643,6 +1659,84 @@ mod tests {
             let f = phi.sin();
             let mercator = 0.5 * ((1.0 + f) / (1.0 - f)).ln();
             assert!((globe - mercator).abs() <= 1e-12, "{latitude}: {globe} vs {mercator}");
+        }
+    }
+
+    /// Every setter that takes a number, given NaN, infinities and extreme
+    /// finite values, on a flat map and a globe: the state's reads that
+    /// return locations and matrices still don't panic.
+    #[test]
+    fn numbers_out_of_range_do_not_panic() {
+        use mln_style_types::ProjectionType;
+        use mln_util::geo::{ScreenCoordinate, WrapMode};
+
+        use crate::FreeCameraOptions;
+
+        type Setter = (&'static str, fn(&mut TransformState, f64));
+        let values =
+            [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, f64::MAX, -f64::MAX, f64::MIN_POSITIVE, 0.0, 1e300, -1e300];
+        let setters: &[Setter] = &[
+            ("scale", |s, v| s.set_scale(v)),
+            ("x", |s, v| s.set_x(v)),
+            ("y", |s, v| s.set_y(v)),
+            ("bearing", |s, v| s.set_bearing(v)),
+            ("field of view", |s, v| s.set_field_of_view(v)),
+            ("roll", |s, v| s.set_roll(v)),
+            ("pitch", |s, v| s.set_pitch(v)),
+            ("x skew", |s, v| {
+                s.set_axonometric(true);
+                s.set_x_skew(v);
+            }),
+            ("y skew", |s, v| {
+                s.set_axonometric(true);
+                s.set_y_skew(v);
+            }),
+            ("min zoom", |s, v| s.set_min_zoom(v)),
+            ("max zoom", |s, v| s.set_max_zoom(v)),
+            ("min pitch", |s, v| s.set_min_pitch(v)),
+            ("max pitch", |s, v| s.set_max_pitch(v)),
+            ("center altitude", |s, v| s.set_center_altitude(v)),
+            ("zoom", |s, v| s.set_lat_lng_zoom(&LatLng::new(10.0, 10.0).unwrap(), v)),
+            ("longitude", |s, v| {
+                if let Ok(lat_lng) = LatLng::with_mode(0.0, v, WrapMode::Unwrapped) {
+                    s.set_lat_lng_zoom(&lat_lng, 22.0);
+                }
+            }),
+            ("free camera position", |s, v| {
+                s.set_free_camera_options(&FreeCameraOptions { position: Some([v, v, v]), orientation: None });
+            }),
+            ("free camera altitude", |s, v| {
+                s.set_free_camera_options(&FreeCameraOptions { position: Some([0.5, 0.5, v]), orientation: None });
+            }),
+            ("free camera orientation", |s, v| {
+                s.set_free_camera_options(&FreeCameraOptions { position: None, orientation: Some([v, 0.0, 0.0, 1.0]) });
+            }),
+            ("move anchor", |s, v| {
+                let _ = s.move_lat_lng(&LatLng::new(1.0, 1.0).unwrap(), &ScreenCoordinate::new(v, v));
+            }),
+        ];
+        for globe in [false, true] {
+            for (name, set) in setters {
+                for &value in &values {
+                    let mut state = pitched(30.0);
+                    if globe {
+                        state.set_projection_definition(&ProjectionDefinition::new(ProjectionType::Globe));
+                    }
+                    let read = std::panic::catch_unwind(move || {
+                        set(&mut state, value);
+                        let center = state.get_lat_lng(WrapMode::Unwrapped);
+                        let _ = state.lat_lng_near_center(&LatLng::new(1.0, 1.0).unwrap());
+                        let _ = state.constrained_center(&center, state.get_zoom());
+                        let _ = state.get_center_altitude();
+                        let _ = state.get_projection_matrix();
+                        let _ = state.get_free_camera_options();
+                        let _ = state.lat_lng_to_screen_coordinate(&center);
+                        let _ = state
+                            .screen_coordinate_to_lat_lng(&ScreenCoordinate::new(256.0, 256.0), WrapMode::Unwrapped);
+                    });
+                    assert!(read.is_ok(), "globe: {globe}, {name}: {value:e}");
+                }
+            }
         }
     }
 }
