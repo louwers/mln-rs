@@ -278,6 +278,30 @@ fn fresh_data_is_kept_when_required_again() {
     assert_eq!(manual.submitted(), 2, "one layout per response");
 }
 
+/// A tile whose data failed to lay out requests it again when required
+/// again, though the data has no expiry.
+#[test]
+fn failed_data_is_requested_again() {
+    let test = Test::new();
+    let file_source = Arc::new(Held::default());
+    let manual = Manual::default();
+    let mut tile = test.tileset_tile(&file_source, Box::new(manual.clone()));
+    let id = tile.id;
+    tile.set_style(&style(&[water_layer("water", "red")]));
+    tile.set_necessity(&id, TileNecessity::Required);
+    let mut response = Response::new();
+    response.data = Some(Arc::new(b"not a tile".to_vec()));
+    file_source.respond(response);
+    tile.update();
+    manual.run();
+    tile.update();
+    assert!(tile.actions().contains(&TileOperation::Error));
+
+    tile.set_necessity(&id, TileNecessity::Optional);
+    tile.set_necessity(&id, TileNecessity::Required);
+    assert_eq!(file_source.pending(), 1);
+}
+
 /// A tile let go of while its job runs, and made again before the job
 /// replies: the new tile's generation is another, so the old reply is
 /// dropped and the new tile shows only its own layout.

@@ -299,6 +299,11 @@ impl<'a> TileMut<'a> {
     /// The tile couldn't load or lay out: it keeps what it shows.
     pub(crate) fn fail(&mut self, error: Error) {
         self.tile.settled = true;
+        // Data that failed isn't fresh: the tile requests it again when
+        // required again.
+        if let OriginLoad::Tileset(tileset) = &mut self.tile.load.origin {
+            tileset.from_network = false;
+        }
         self.action(TileOperation::Error);
         self.store.error(&self.source.id, self.tile.id, error);
     }
