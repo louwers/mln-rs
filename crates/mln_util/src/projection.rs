@@ -96,11 +96,10 @@ impl Projection {
         Self::project_(lat_lng, Self::world_size(scale))
     }
 
-    /// Returns point on tile. The C++ `project(const LatLng&, int32_t zoom)`
-    /// overload: `worldSize = 1 << zoom` (int shift; zoom must be 0..=30).
+    /// The point of `lat_lng` on a world `2^zoom` tiles wide.
     #[must_use]
     pub fn project_zoom(lat_lng: &LatLng, zoom: i32) -> Point<f64> {
-        Self::project_(lat_lng, f64::from(1i32 << zoom))
+        Self::project_(lat_lng, 2f64.powi(zoom))
     }
 
     /// Fails with the [`LatLng::new`] error for a NaN or infinite result.

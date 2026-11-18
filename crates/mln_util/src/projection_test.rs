@@ -177,3 +177,9 @@ fn project_zoom_and_unproject_errors() {
     // Unwrapped longitude 360 wraps to 0.
     assert_eq!(wrapped.longitude(), 0.0);
 }
+
+#[test]
+fn project_zoom_past_the_i32_shift() {
+    let lat_lng = LatLng::new(0.0, 180.0).unwrap();
+    assert_eq!(2f64.powi(32), Projection::project_zoom(&lat_lng, 32).x);
+}
