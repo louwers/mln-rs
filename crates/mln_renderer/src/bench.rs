@@ -489,7 +489,8 @@ mod tests {
     }
 
     fn glyphs() -> Vec<u8> {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/test/fixtures/resources/glyphs.pbf");
+        let path = std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
+            .join("testdata/test/fixtures/resources/glyphs.pbf");
         std::fs::read(path).unwrap()
     }
 

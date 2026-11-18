@@ -22,7 +22,6 @@
 //!   [`HttpServer::online_fixture`] gives tests the same bytes.
 
 use std::net::TcpListener;
-use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::time::Duration;
@@ -394,6 +393,16 @@ impl Default for HttpServer {
     }
 }
 
+/// The files of `test/fixtures/map/online`, built in: the server runs in the
+/// tests of other packages, whose device copies hold their own files only.
+const ONLINE_FIXTURES: [(&str, &[u8]); 5] = [
+    ("0-0-0.vector.pbf", include_bytes!("../testdata/test/fixtures/map/online/0-0-0.vector.pbf")),
+    ("sprite.json", include_bytes!("../testdata/test/fixtures/map/online/sprite.json")),
+    ("sprite.png", include_bytes!("../testdata/test/fixtures/map/online/sprite.png")),
+    ("streets.json", include_bytes!("../testdata/test/fixtures/map/online/streets.json")),
+    ("style.json", include_bytes!("../testdata/test/fixtures/map/online/style.json")),
+];
+
 fn base_url(port: u16) -> String {
     format!("http://127.0.0.1:{port}/")
 }
@@ -406,8 +415,7 @@ fn base_url(port: u16) -> String {
     reason = "the JSON fixtures end in a lower-case `.json`; other names are served as they are"
 )]
 fn online_fixture(base: &str, file: &str) -> Vec<u8> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/test/fixtures/map/online").join(file);
-    let content = std::fs::read(path).unwrap_or_default();
+    let content = ONLINE_FIXTURES.iter().find(|(name, _)| *name == file).map_or(&[][..], |(_, bytes)| bytes).to_vec();
     if file.ends_with(".json") {
         String::from_utf8_lossy(&content).replace("http://127.0.0.1:3000/", base).into_bytes()
     } else {

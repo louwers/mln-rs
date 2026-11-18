@@ -33,7 +33,7 @@ fn styles(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 fn every_style() -> Vec<PathBuf> {
-    let integration = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/metrics/integration");
+    let integration = Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("testdata/metrics/integration");
     let mut paths = Vec::new();
     styles(&integration.join("render-tests"), &mut paths);
     styles(&integration.join("query-tests"), &mut paths);

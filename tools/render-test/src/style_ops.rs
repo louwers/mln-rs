@@ -131,7 +131,7 @@ mod tests {
     use super::*;
 
     fn style_json(id: &str) -> String {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        let path = std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
             .join("testdata/metrics/integration/render-tests")
             .join(id)
             .join("style.json");

@@ -4,14 +4,18 @@
 use std::path::{Path, PathBuf};
 
 fn spec_path() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("v8.json")
+    Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("v8.json")
 }
 
 #[test]
+#[cfg_attr(
+    any(target_os = "android", target_env = "ohos"),
+    ignore = "reads crates/mln_style, which the device's copy of this package lacks"
+)]
 fn generated_code_is_up_to_date() {
     let spec_path = spec_path();
     let spec = std::fs::read_to_string(&spec_path).unwrap_or_else(|e| panic!("{}: {e}", spec_path.display()));
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/mln_style/src");
+    let root = Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("../../crates/mln_style/src");
     let stale = style_codegen::check(&spec, &root).expect("generator");
     assert!(
         stale.is_empty(),
