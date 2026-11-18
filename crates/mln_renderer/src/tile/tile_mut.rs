@@ -768,7 +768,7 @@ impl WorldCopy {
                 })
             }
             Contents::Raster(bucket) => Contents::Raster(RasterBucket::with_shared_image(bucket.image.clone())),
-            Contents::Dem(bucket) => Contents::Dem(HillshadeBucket::with_dem_data(bucket.get_dem_data().clone())),
+            Contents::Dem(bucket) => Contents::Dem(HillshadeBucket::with_dem_data(bucket.dem_data().clone())),
             Contents::Empty => Contents::Empty,
         };
         let load = match (&tile.load.origin, &tile.pipeline) {

@@ -132,14 +132,14 @@ fn decode_and_backfill_through_the_codec() {
     for id in &ids {
         assert!(tiles.tile_at(id).is_renderable());
         let bucket = dem(&tiles, id).expect("a bucket");
-        let dem = bucket.get_dem_data();
+        let dem = bucket.dem_data();
         assert_eq!((dem.dim, dem.stride, dem.encoding), (16, 18, RasterEncoding::Mapbox));
     }
 
     let (left, right) = (dem(&tiles, &ids[0]).unwrap(), dem(&tiles, &ids[1]).unwrap());
     for y in 0..16 {
-        assert_eq!(left.get_dem_data().get(16, y), right.get_dem_data().get(0, y));
-        assert_eq!(right.get_dem_data().get(-1, y), left.get_dem_data().get(15, y));
+        assert_eq!(left.dem_data().get(16, y), right.dem_data().get(0, y));
+        assert_eq!(right.dem_data().get(-1, y), left.dem_data().get(15, y));
     }
 
     // The DEMData constructor's error crosses as the tile's.

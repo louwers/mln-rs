@@ -3,6 +3,7 @@ use mln_gfx::shaders::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
 use mln_util::constants;
 
 use crate::buckets::fill_extrusion_bucket::FillExtrusionStaticVertex;
+use crate::buckets::raster_bucket::RasterLayoutVertex;
 
 /// The most walls whose quads a segment draws: as many as its 16-bit
 /// indices reach.
@@ -33,17 +34,16 @@ impl RenderStaticData {
     }
 
     #[must_use]
-    pub(crate) fn raster_vertices() -> Vec<crate::buckets::raster_bucket::RasterLayoutVertex> {
+    pub(crate) fn raster_vertices() -> Vec<RasterLayoutVertex> {
         use geometry::Point;
 
-        use crate::buckets::raster_bucket::RasterBucket;
         let e = constants::EXTENT as i16;
         let t = constants::EXTENT as u16;
         vec![
-            RasterBucket::layout_vertex(Point::new(0, 0), Point::new(0, 0)),
-            RasterBucket::layout_vertex(Point::new(e, 0), Point::new(t, 0)),
-            RasterBucket::layout_vertex(Point::new(0, e), Point::new(0, t)),
-            RasterBucket::layout_vertex(Point::new(e, e), Point::new(t, t)),
+            RasterLayoutVertex::new(Point::new(0, 0), Point::new(0, 0)),
+            RasterLayoutVertex::new(Point::new(e, 0), Point::new(t, 0)),
+            RasterLayoutVertex::new(Point::new(0, e), Point::new(0, t)),
+            RasterLayoutVertex::new(Point::new(e, e), Point::new(t, t)),
         ]
     }
 

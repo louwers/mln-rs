@@ -28,7 +28,7 @@ use mln_util::identity::SimpleIdentity;
 use mln_util::time::Instant;
 
 use super::cast_matrix;
-use crate::bucket::{Bucket, NoBucket};
+use crate::bucket::NoBucket;
 use crate::bucket_geometry::released_vertices;
 use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
@@ -264,23 +264,23 @@ impl RenderRasterLayer {
         let Some(bucket) = image_data.bucket else {
             return;
         };
-        let has_vertices = !bucket.geometry().vertices.is_empty();
-        if !has_vertices {
-            return;
-        }
-
-        let sampler = self.sampler_state();
-        let context = &mut *paint_parameters.context;
         // The bucket's own geometry, which an image source's bucket always
         // has.
         let geometry = bucket.geometry();
-        let vertices = released_vertices(context, &geometry.vertices);
-        let indexes = context.add_indexes(Indexes::new(geometry.indices.clone()));
-        let texture = Self::bucket_texture(&mut self.textures, sampler, context, bucket);
+        let Some(quads) = geometry.quads() else {
+            return;
+        };
+
+        let sampler = self.sampler_state();
+        let texture = Self::bucket_texture(&mut self.textures, sampler, paint_parameters.context, bucket);
         let image_draws = &mut self.drawing.objects.images;
         for (index, tile_id) in image_data.tile_ids.iter().enumerate() {
-            let draw_geometry =
-                raster_geometry(&vertices, geometry.vertices.len(), indexes.clone().into(), &geometry.segments);
+            let draw_geometry = raster_geometry(
+                &quads.vertices,
+                geometry.vertex_count(),
+                quads.indexes.clone().into(),
+                &geometry.segments,
+            );
             let draw = KeptDraw::new(new_objects(raster_shader, draw_geometry, texture.as_ref()));
             let uniforms = Self::uniforms(tile_id, paint_parameters);
             self.draw_list.push_part(FrameDraw::new(None, draw.id), RasterPart::Image(index), uniforms);
@@ -438,7 +438,7 @@ impl TypedLayer for RenderRasterLayer {
         // Drop the textures of buckets that are no longer rendered.
         let live_buckets = &mut self.live_buckets;
         live_buckets.clear();
-        live_buckets.extend(render_tiles.iter().filter_map(|tile| tile.bucket().map(Bucket::get_id)));
+        live_buckets.extend(render_tiles.iter().filter_map(|tile| Some(tile.bucket()?.base.bucket_id)));
         self.textures.retain(|id, _| live_buckets.contains(id));
         // Kept draws keep their textures, so a changed filter is applied to
         // the textures themselves.
@@ -475,27 +475,21 @@ impl TypedLayer for RenderRasterLayer {
                 // On the globe, the draw is the pole-capped grid of what the
                 // mask keeps.
                 let geometry = bucket.geometry();
-                let globe = self.base.projection_variant == ProjectionVariant::Globe;
-                let shared = !globe
-                    && !geometry.vertices.is_empty()
-                    && !geometry.indices.is_empty()
-                    && !geometry.segments.is_empty();
                 let context = &mut *paint_parameters.context;
-                let draw_geometry = if globe {
+                let draw_geometry = if self.base.projection_variant == ProjectionVariant::Globe {
                     let globe_mesh =
-                        self.globe_meshes.get(context, &tile_id.canonical, &geometry.mask, RasterBucket::layout_vertex);
+                        self.globe_meshes.get(context, &tile_id.canonical, &geometry.mask, RasterLayoutVertex::new);
                     raster_geometry(
                         &globe_mesh.vertices,
                         globe_mesh.vertices.count(),
                         globe_mesh.indexes(),
                         &globe_mesh.segments,
                     )
-                } else if shared {
-                    let vertices = released_vertices(context, &geometry.vertices);
+                } else if let Some(quads) = geometry.quads() {
                     raster_geometry(
-                        &vertices,
-                        geometry.vertices.len(),
-                        DrawIndexes::new(geometry.indices.clone()),
+                        &quads.vertices,
+                        geometry.vertex_count(),
+                        quads.indexes.clone().into(),
                         &geometry.segments,
                     )
                 } else {

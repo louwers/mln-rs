@@ -39,9 +39,10 @@ use mln_util::size::Size;
 use mln_util::time::Instant;
 
 use super::cast_matrix;
-use crate::bucket::{Bucket, NoBucket};
+use crate::bucket::NoBucket;
 use crate::bucket_geometry::released_vertices;
-use crate::buckets::hillshade_bucket::{HillshadeBucket, HillshadeLayoutVertex};
+use crate::buckets::hillshade_bucket::HillshadeBucket;
+use crate::buckets::raster_bucket::RasterLayoutVertex;
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::gfx::indexes::{DrawIndexes, Indexes, SharedIndexes};
 use crate::gfx::store::SharedTexture;
@@ -123,7 +124,7 @@ pub(crate) struct RenderColorReliefLayer {
     static_data_shared_vertices: Option<SharedVertices>,
     /// The triangles of the static data's quad.
     static_data_indices: Option<SharedIndexes>,
-    globe_meshes: GlobeTileMeshCache<HillshadeLayoutVertex>,
+    globe_meshes: GlobeTileMeshCache<RasterLayoutVertex>,
 
     /// The DEM texture of each bucket, made from its current, possibly
     /// backfilled, DEM image, with the bucket's prepare generation it was
@@ -265,13 +266,13 @@ impl RenderColorReliefLayer {
 /// The vertex attributes of a color-relief draw over `vertices`.
 fn color_relief_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeArray {
     let mut attrs = VertexAttributeArray::new();
-    let stride = size_of::<HillshadeLayoutVertex>() as u32;
+    let stride = size_of::<RasterLayoutVertex>() as u32;
     if let Some(attr) = attrs.set(ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE, AttributeDataType::Invalid) {
-        let offset = offset_of!(HillshadeLayoutVertex, a1) as u32;
+        let offset = offset_of!(RasterLayoutVertex, a1) as u32;
         attr.set_shared_vertices(vertices.clone(), offset, 0, stride, AttributeDataType::Short2);
     }
     if let Some(attr) = attrs.set(ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE, AttributeDataType::Invalid) {
-        let offset = offset_of!(HillshadeLayoutVertex, a2) as u32;
+        let offset = offset_of!(RasterLayoutVertex, a2) as u32;
         attr.set_shared_vertices(vertices.clone(), offset, 0, stride, AttributeDataType::Short2);
     }
     attrs
@@ -403,7 +404,7 @@ impl TypedLayer for RenderColorReliefLayer {
         // Drop the DEM textures of buckets that are no longer rendered.
         let live_buckets = &mut self.live_buckets;
         live_buckets.clear();
-        live_buckets.extend(render_tiles.iter().filter_map(|tile| tile.bucket().map(Bucket::get_id)));
+        live_buckets.extend(render_tiles.iter().filter_map(|tile| Some(tile.bucket()?.base.bucket_id)));
         self.dem_textures.retain(|id, _| live_buckets.contains(id));
 
         let dem_sampler = SamplerState {
@@ -432,7 +433,7 @@ impl TypedLayer for RenderColorReliefLayer {
 
             let geometry = bucket.geometry();
             let geometry_time = geometry.last_modified;
-            let dem_data = bucket.get_dem_data();
+            let dem_data = bucket.dem_data();
             if dem_data.get_image().valid() {
                 let tile_props = ColorReliefTilePropsUBO {
                     unpack: dem_data.get_unpack_vector(),
@@ -479,26 +480,19 @@ impl TypedLayer for RenderColorReliefLayer {
                         DrawIndexes,
                         Vec<SegmentBase>,
                     ) = if self.base.projection_variant == ProjectionVariant::Globe {
-                        let globe_mesh = self.globe_meshes.get(
-                            context,
-                            &tile_id.canonical,
-                            &geometry.mask,
-                            HillshadeBucket::layout_vertex,
-                        );
+                        let globe_mesh =
+                            self.globe_meshes.get(context, &tile_id.canonical, &geometry.mask, RasterLayoutVertex::new);
                         (
                             globe_mesh.vertices.clone(),
                             globe_mesh.vertices.count(),
                             globe_mesh.indexes(),
                             globe_mesh.segments.iter().map(SegmentBase::copy).collect(),
                         )
-                    } else if !geometry.vertices.is_empty()
-                        && !geometry.indices.is_empty()
-                        && !geometry.segments.is_empty()
-                    {
+                    } else if let Some(quads) = geometry.quads() {
                         (
-                            released_vertices(context, &geometry.vertices),
-                            geometry.vertices.len(),
-                            DrawIndexes::new(geometry.indices.clone()),
+                            quads.vertices.clone(),
+                            geometry.vertex_count(),
+                            quads.indexes.clone().into(),
                             geometry.segments.iter().map(SegmentBase::copy).collect(),
                         )
                     } else {

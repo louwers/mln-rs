@@ -533,15 +533,6 @@ impl Contents {
         }
     }
 
-    /// The bucket of a raster or raster-dem tile, which all its layers draw.
-    pub(crate) fn shared_bucket(&self) -> Option<&dyn Bucket> {
-        match self {
-            Contents::Raster(bucket) => Some(bucket),
-            Contents::Dem(bucket) => Some(bucket),
-            Contents::Geometry(_) | Contents::Empty => None,
-        }
-    }
-
     pub(crate) fn set_mask(&mut self, mask: TileMask) {
         match self {
             Contents::Raster(bucket) => bucket.set_mask(mask),
@@ -550,14 +541,9 @@ impl Contents {
         }
     }
 
-    /// The bucket of `layer_impl`'s layer: a raster or raster-dem tile's
-    /// for any layer.
+    /// The bucket of `layer_impl`'s layer in a geometry tile's layout.
     pub(crate) fn bucket(&self, layer_impl: &dyn ErasedLayerStyle) -> Option<&dyn Bucket> {
-        match self {
-            Contents::Geometry(contents) => contents.result.layer_bucket(layer_impl).map(|data| data.bucket),
-            Contents::Raster(_) | Contents::Dem(_) => self.shared_bucket(),
-            Contents::Empty => None,
-        }
+        Some(self.geometry()?.result.layer_bucket(layer_impl)?.bucket)
     }
 
     /// Readies the buckets that are new or changed since their last upload
@@ -566,8 +552,8 @@ impl Contents {
     pub(crate) fn upload(&mut self, context: &mut Context, needs: UploadNeeds) {
         match self {
             Contents::Geometry(contents) => contents.upload(context, needs),
-            Contents::Raster(bucket) => bucket.upload_image(),
-            Contents::Dem(bucket) => bucket.upload_dem(),
+            Contents::Raster(bucket) => bucket.upload(context),
+            Contents::Dem(bucket) => bucket.upload(context),
             Contents::Empty => {}
         }
     }

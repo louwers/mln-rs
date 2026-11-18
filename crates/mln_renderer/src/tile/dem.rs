@@ -58,7 +58,7 @@ pub(crate) fn backfill_pair(tile: &mut Contents, border: &mut Contents, offset: 
 /// Copies the edge of `border`, `tile`'s neighbour at `offset`, into
 /// `tile`'s DEM border.
 fn backfill_border(tile: &mut HillshadeBucket, border: &HillshadeBucket, offset: Offset) {
-    tile.get_dem_data_mut().backfill_border(border.get_dem_data(), offset.dx, offset.dy);
+    tile.dem_data_mut().backfill_border(border.dem_data(), offset.dx, offset.dy);
     // The bucket goes through the prepare pass again with the new border.
     tile.reset_render_target_prepared();
 }

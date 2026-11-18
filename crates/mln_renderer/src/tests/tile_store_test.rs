@@ -570,7 +570,7 @@ fn dems<'a>(tiles: &'a OneTile, left: &OverscaledTileID, right: &OverscaledTileI
 /// as its border.
 fn assert_borders_match(tiles: &OneTile, left: &OverscaledTileID, right: &OverscaledTileID) {
     let [left_dem, right_dem] = dems(tiles, left, right);
-    let (left_dem, right_dem) = (left_dem.get_dem_data(), right_dem.get_dem_data());
+    let (left_dem, right_dem) = (left_dem.dem_data(), right_dem.dem_data());
     for y in 0..16 {
         assert_eq!(left_dem.get(16, y), right_dem.get(0, y), "row {y} of the left tile's border");
         assert_eq!(right_dem.get(-1, y), left_dem.get(15, y), "row {y} of the right tile's border");
@@ -594,7 +594,7 @@ fn a_reloaded_dem_refills_both_borders() {
     assert_borders_match(&tiles, &left, &right);
     let edge = |tiles: &OneTile| -> Vec<i32> {
         let [_, right_dem] = dems(tiles, &left, &right);
-        (0..16).map(|y| right_dem.get_dem_data().get(0, y)).collect()
+        (0..16).map(|y| right_dem.dem_data().get(0, y)).collect()
     };
     let before = edge(&tiles);
 

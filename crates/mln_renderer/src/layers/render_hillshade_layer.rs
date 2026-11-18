@@ -42,9 +42,10 @@ use mln_util::size::Size;
 use mln_util::time::Instant;
 
 use super::cast_matrix;
-use crate::bucket::{Bucket, NoBucket};
+use crate::bucket::NoBucket;
 use crate::bucket_geometry::released_vertices;
-use crate::buckets::hillshade_bucket::{HillshadeBucket, HillshadeLayoutVertex};
+use crate::buckets::hillshade_bucket::HillshadeBucket;
+use crate::buckets::raster_bucket::RasterLayoutVertex;
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::geometry::dem_data::get_unpack_vector;
 use crate::gfx::context::Context;
@@ -130,7 +131,7 @@ pub(crate) struct RenderHillshadeLayer {
     static_data_shared_vertices: Option<SharedVertices>,
     /// The triangles of the static data's quad.
     static_data_indices: Option<SharedIndexes>,
-    globe_meshes: GlobeTileMeshCache<HillshadeLayoutVertex>,
+    globe_meshes: GlobeTileMeshCache<RasterLayoutVertex>,
 
     /// Each bucket's render target, by bucket id. They draw while the layer
     /// is renderable.
@@ -269,13 +270,13 @@ fn lat_range(id: &UnwrappedTileID) -> [f32; 2] {
 /// `vertices`.
 fn hillshade_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeArray {
     let mut attrs = VertexAttributeArray::new();
-    let stride = size_of::<HillshadeLayoutVertex>() as u32;
+    let stride = size_of::<RasterLayoutVertex>() as u32;
     if let Some(attr) = attrs.set(ID_HILLSHADE_POS_VERTEX_ATTRIBUTE, AttributeDataType::Invalid) {
-        let offset = offset_of!(HillshadeLayoutVertex, a1) as u32;
+        let offset = offset_of!(RasterLayoutVertex, a1) as u32;
         attr.set_shared_vertices(vertices.clone(), offset, 0, stride, AttributeDataType::Short2);
     }
     if let Some(attr) = attrs.set(ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE, AttributeDataType::Invalid) {
-        let offset = offset_of!(HillshadeLayoutVertex, a2) as u32;
+        let offset = offset_of!(RasterLayoutVertex, a2) as u32;
         attr.set_shared_vertices(vertices.clone(), offset, 0, stride, AttributeDataType::Short2);
     }
     attrs
@@ -356,7 +357,7 @@ impl TypedLayer for RenderHillshadeLayer {
         // Drop the render targets of buckets that are no longer rendered.
         let live_buckets = &mut self.live_buckets;
         live_buckets.clear();
-        live_buckets.extend(render_tiles.iter().filter_map(|tile| tile.bucket().map(Bucket::get_id)));
+        live_buckets.extend(render_tiles.iter().filter_map(|tile| Some(tile.bucket()?.base.bucket_id)));
         self.bucket_render_targets.retain(|id, _| live_buckets.contains(id));
 
         // The illumination, which the first draw computes.
@@ -412,24 +413,19 @@ impl TypedLayer for RenderHillshadeLayer {
             // geometry, or the whole tile's quad.
             let mut tile_geometry = || -> (SharedVertices, usize, DrawIndexes, Vec<SegmentBase>) {
                 if self.base.projection_variant == ProjectionVariant::Globe {
-                    let globe_mesh = self.globe_meshes.get(
-                        context,
-                        &tile_id.canonical,
-                        &geometry.mask,
-                        HillshadeBucket::layout_vertex,
-                    );
+                    let globe_mesh =
+                        self.globe_meshes.get(context, &tile_id.canonical, &geometry.mask, RasterLayoutVertex::new);
                     (
                         globe_mesh.vertices.clone(),
                         globe_mesh.vertices.count(),
                         globe_mesh.indexes(),
                         globe_mesh.segments.iter().map(SegmentBase::copy).collect(),
                     )
-                } else if !geometry.vertices.is_empty() && !geometry.indices.is_empty() && !geometry.segments.is_empty()
-                {
+                } else if let Some(quads) = geometry.quads() {
                     (
-                        released_vertices(context, &geometry.vertices),
-                        geometry.vertices.len(),
-                        DrawIndexes::new(geometry.indices.clone()),
+                        quads.vertices.clone(),
+                        geometry.vertex_count(),
+                        quads.indexes.clone().into(),
                         geometry.segments.iter().map(SegmentBase::copy).collect(),
                     )
                 } else {
@@ -547,7 +543,7 @@ impl BucketTarget {
         indexes: &SharedIndexes,
     ) -> BucketTarget {
         let (tilesize, stride, encoding, dem_image) = {
-            let dem = bucket.get_dem_data();
+            let dem = bucket.dem_data();
             (dem.dim as u16, dem.stride, dem.encoding, dem.get_image().clone())
         };
         let render_target = RenderTarget::new(

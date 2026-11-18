@@ -19,8 +19,8 @@ use mln_util::logging::{Event, Log};
 use mln_util::range::Range;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
-use crate::bucket::{Bucket, UploadNeeds};
-use crate::buckets::raster_bucket::RasterBucket;
+use crate::bucket::UploadNeeds;
+use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
 use crate::gfx::context::Context;
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::render_source::{RenderSource, RenderSourceBase, RenderTileParameters};
@@ -136,7 +136,7 @@ fn build_image_mesh(bucket: &mut RasterBucket, corners: &GeometryCoordinates, ce
             let v = f64::from(j) / f64::from(cells);
             let position = warp_position(corners, &warp, u, v);
             // std::lround
-            vertices.push(RasterBucket::layout_vertex(
+            vertices.push(RasterLayoutVertex::new(
                 Point::new(to_vertex_coordinate(position.x), to_vertex_coordinate(position.y)),
                 Point::new(
                     (u * f64::from(constants::EXTENT)).round() as u16,
@@ -346,8 +346,7 @@ impl RenderSource for RenderImageSource {
         } else {
             1
         };
-        if bucket.geometry().vertices.is_empty() || geom_coords != self.mesh_corners || cells != self.mesh_cells {
-            bucket.clear();
+        if bucket.geometry().vertex_count() == 0 || geom_coords != self.mesh_corners || cells != self.mesh_cells {
             build_image_mesh(bucket, &geom_coords, cells);
             self.mesh_corners = geom_coords;
             self.mesh_cells = cells;
@@ -356,11 +355,9 @@ impl RenderSource for RenderImageSource {
 
     fn update_render_tiles(&mut self, _store: &mut TileStore, _parameters: &RenderTileParameters<'_>) {}
 
-    fn upload(&mut self, _store: &mut TileStore, _context: &mut Context, _needs: UploadNeeds) {
-        if let Some(bucket) = &mut self.bucket
-            && bucket.needs_upload()
-        {
-            bucket.upload_image();
+    fn upload(&mut self, _store: &mut TileStore, context: &mut Context, _needs: UploadNeeds) {
+        if let Some(bucket) = &mut self.bucket {
+            bucket.upload(context);
         }
     }
 

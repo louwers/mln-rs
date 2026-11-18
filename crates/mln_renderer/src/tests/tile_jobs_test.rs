@@ -894,7 +894,7 @@ fn a_worker_lost_during_a_decode() {
     let Some(Contents::Dem(bucket)) = tiles.tile().contents() else {
         panic!("a DEM");
     };
-    assert_eq!(bucket.get_dem_data().dim, 16);
+    assert_eq!(bucket.dem_data().dim, 16);
     drop(tiles);
     pool.wait();
 }
