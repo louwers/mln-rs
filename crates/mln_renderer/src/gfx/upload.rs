@@ -3,61 +3,57 @@
 
 use std::rc::Rc;
 
-use mln_gfx::attribute::{AttributeBinding, AttributeBindingArray, AttributeDescriptor};
 use mln_gfx::buffer::BufferPtr;
+use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::gpu::{BufferUsage, GpuError};
-use mln_gfx::vertex_attribute::{VertexAttribute, VertexAttributeArray};
-use mln_gfx::vertex_vector::VertexVectorBasePtr;
+use mln_gfx::shaders::shader_defines::MAX_ATTRIBUTE_COUNT_PER_SHADER;
+use mln_util::time::Instant;
 
 use crate::gfx::context::Context;
+use crate::gfx::vertex_attribute::{VertexAttribute, VertexAttributeArray};
 
-/// The buffer of `vertices`, or `None` where there are none. Where the
-/// vertices changed since their buffer was written, or `force`, it is written
-/// again, or replaced where they don't fit in it.
-pub(crate) fn vertex_buffer(
-    context: &mut Context,
-    vertices: &VertexVectorBasePtr,
-    force: bool,
-) -> Result<Option<BufferPtr>, GpuError> {
-    let size = vertices.get_raw_count() * vertices.get_raw_size();
-    if let Some((buffer, holds)) = vertices.get_buffer()
-        && size <= buffer.size()
-    {
-        // A freed vector's data is already in the buffer.
-        if vertices.has_raw_data() && (force || vertices.is_modified_after(holds)) {
-            context.write(&buffer, &vertices.get_raw_data()[..size])?;
-            vertices.set_buffer(Rc::clone(&buffer), vertices.get_last_modified());
-        }
-        return Ok(Some(buffer));
-    }
-    if size == 0 {
-        return Ok(None);
-    }
-    debug_assert!(vertices.has_raw_data());
-    #[cfg(target_family = "wasm")]
-    let host = vertices.get_host_data().map(|data| context.buffer_from_host(BufferUsage::Vertex, &data));
-    #[cfg(target_family = "wasm")]
-    if let Some(buffer) = host {
-        let buffer = buffer?;
-        vertices.set_buffer(Rc::clone(&buffer), vertices.get_last_modified());
-        return Ok(Some(buffer));
-    }
-    let buffer = context.buffer(BufferUsage::Vertex, &vertices.get_raw_data()[..size])?;
-    vertices.set_buffer(Rc::clone(&buffer), vertices.get_last_modified());
-    Ok(Some(buffer))
+/// How a vertex attribute reads its buffer: as `data_type`, at `offset` in
+/// each vertex.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct AttributeDescriptor {
+    pub(crate) data_type: AttributeDataType,
+    pub(crate) offset: u32,
 }
+
+/// A vertex attribute bound to a vertex buffer, or to none where the
+/// draw doesn't provide the attribute. Bindings are equal where they
+/// bind the same buffer the same way.
+#[derive(Clone)]
+pub(crate) struct AttributeBinding {
+    pub(crate) attribute: AttributeDescriptor,
+    pub(crate) vertex_stride: u32,
+    pub(crate) buffer: Option<BufferPtr>,
+    pub(crate) vertex_offset: u32,
+}
+
+impl PartialEq for AttributeBinding {
+    fn eq(&self, rhs: &Self) -> bool {
+        self.attribute == rhs.attribute
+            && self.vertex_stride == rhs.vertex_stride
+            && self.buffer.as_ref().map(|buffer| buffer.id()) == rhs.buffer.as_ref().map(|buffer| buffer.id())
+            && self.vertex_offset == rhs.vertex_offset
+    }
+}
+
+/// A draw's attribute bindings, indexed by the shader's attribute index.
+pub(crate) type AttributeBindingArray = Vec<Option<AttributeBinding>>;
 
 /// The buffer of an attribute's own data, made from it, which it then
 /// frees, on first use.
 fn attribute_buffer(context: &mut Context, attribute: &mut VertexAttribute) -> Result<Option<BufferPtr>, GpuError> {
-    if let Some(buffer) = attribute.get_buffer() {
+    if let Some(buffer) = attribute.buffer() {
         return Ok(Some(Rc::clone(buffer)));
     }
-    if attribute.get_raw_data().is_empty() {
+    if attribute.raw_data().is_empty() {
         debug_assert!(false, "vertex attribute without data");
         return Ok(None);
     }
-    let buffer = context.buffer(BufferUsage::Vertex, attribute.get_raw_data())?;
+    let buffer = context.device().buffer(BufferUsage::Vertex, attribute.raw_data())?;
     attribute.set_buffer(Some(Rc::clone(&buffer)));
     attribute.set_raw_data(Vec::new());
     attribute.set_dirty(false);
@@ -71,78 +67,75 @@ fn attribute_binding(
     attribute: &mut VertexAttribute,
     force: bool,
 ) -> Result<Option<AttributeBinding>, GpuError> {
-    if let Some(shared) = attribute.get_shared_raw_data().cloned() {
-        let Some(buffer) = vertex_buffer(context, &shared, force)? else {
+    if let Some(shared) = attribute.shared() {
+        let Some(buffer) = context.upload_vertices(&shared.vertices, force)? else {
             return Ok(None);
         };
         debug_assert!(
-            (attribute.get_shared_stride() as usize) * (attribute.get_shared_vertex_offset() as usize)
-                < shared.get_raw_size() * shared.get_raw_count()
+            context
+                .vertices(&shared.vertices)
+                .is_none_or(|vertices| (shared.stride as usize) * (shared.vertex_offset as usize)
+                    < vertices.vertex_size() * vertices.count())
         );
         return Ok(Some(AttributeBinding {
-            attribute: AttributeDescriptor {
-                data_type: attribute.get_shared_type(),
-                offset: attribute.get_shared_offset(),
-            },
-            vertex_stride: attribute.get_shared_stride(),
+            attribute: AttributeDescriptor { data_type: shared.data_type, offset: shared.offset },
+            vertex_stride: shared.stride,
             buffer: Some(buffer),
-            vertex_offset: attribute.get_shared_vertex_offset(),
-            buffer_index: 0,
+            vertex_offset: shared.vertex_offset,
         }));
     }
-    debug_assert!(attribute.get_stride() > 0);
+    debug_assert!(attribute.stride() > 0);
     Ok(attribute_buffer(context, attribute)?.map(|buffer| AttributeBinding {
-        attribute: AttributeDescriptor { data_type: attribute.get_data_type(), offset: 0 },
-        vertex_stride: attribute.get_stride() as u32,
+        attribute: AttributeDescriptor { data_type: attribute.data_type(), offset: 0 },
+        vertex_stride: attribute.stride() as u32,
         buffer: Some(buffer),
         vertex_offset: 0,
-        buffer_index: 0,
     }))
 }
 
 /// The vertex bindings of a draw, indexed by shader attribute index:
-/// one for each attribute of the shader's `defaults`, read from the
-/// draw's attribute in `overrides` where it has one. An attribute the
-/// draw doesn't have, or has no data for, binds no buffer, at the
-/// default's type and stride. `force` writes shared vertex data that
-/// appears unchanged (see [`vertex_buffer`]).
+/// one for each of the shader's `attributes`, its id and the format of its
+/// default, read from the draw's attribute of that id in `overrides` where
+/// it has one. An attribute the draw doesn't have, or has no data for,
+/// binds no buffer, at the default's type and stride. `force` writes shared
+/// vertices that appear unchanged (see
+/// [`Vertices::upload`](crate::gfx::vertices::Vertices::upload)).
 pub(crate) fn build_attribute_bindings(
     context: &mut Context,
-    defaults: &VertexAttributeArray,
+    attributes: &[(usize, AttributeDataType)],
     overrides: &mut VertexAttributeArray,
     force: bool,
 ) -> Result<AttributeBindingArray, GpuError> {
-    let mut bindings: AttributeBindingArray = vec![None; defaults.allocated_size()];
-    let mut result = Ok(());
-    let resolve = |_id: usize, default: &VertexAttribute, override_: Option<&mut VertexAttribute>| {
-        if result.is_err() {
-            return;
-        }
-        let binding = match override_ {
-            Some(attribute) => attribute_binding(context, attribute, force),
-            None => Ok(None),
+    let mut bindings: AttributeBindingArray = vec![None; MAX_ATTRIBUTE_COUNT_PER_SHADER.max(attributes.len())];
+    for (index, &(id, default)) in attributes.iter().enumerate() {
+        let binding = match overrides.get_mut(id) {
+            Some(attribute) => attribute_binding(context, attribute, force)?,
+            None => None,
         };
-        let binding = match binding {
-            Ok(binding) => binding.unwrap_or_else(|| AttributeBinding {
-                attribute: AttributeDescriptor { data_type: default.get_data_type(), offset: 0 },
-                vertex_stride: VertexAttribute::get_stride_of(default.get_data_type()) as u32,
-                buffer: None,
-                vertex_offset: 0,
-                buffer_index: 0,
-            }),
-            Err(error) => {
-                result = Err(error);
-                return;
-            }
-        };
-        let index = default.get_index() as usize;
-        if bindings.len() <= index {
-            bindings.resize(index + 1, None);
+        bindings[index] = Some(binding.unwrap_or_else(|| AttributeBinding {
+            attribute: AttributeDescriptor { data_type: default, offset: 0 },
+            vertex_stride: default.stride() as u32,
+            buffer: None,
+            vertex_offset: 0,
+        }));
+    }
+    // The attributes the draw has and the shader doesn't read.
+    for (id, attribute) in overrides.iter_mut() {
+        if !attributes.iter().any(|&(shader_id, _)| shader_id == id) {
+            attribute.set_dirty(false);
         }
-        bindings[index] = Some(binding);
-    };
-    // An attribute the draw has and the shader doesn't read.
-    let unused = |_id: usize, attribute: &mut VertexAttribute| attribute.set_dirty(false);
-    defaults.resolve(overrides, resolve, unused);
-    result.map(|()| bindings)
+    }
+    Ok(bindings)
+}
+
+/// Whether an attribute of `attributes` changed since `time`: one whose
+/// shared vertices were made or updated after, or whose own data changed
+/// since its upload.
+pub(crate) fn modified_after(context: &Context, attributes: &VertexAttributeArray, time: Instant) -> bool {
+    (0..attributes.allocated_size()).filter_map(|id| attributes.get(id)).any(|attribute| {
+        match attribute.shared_vertices() {
+            Some(shared) => context.vertices(shared).is_some_and(|vertices| vertices.is_modified_after(time)),
+            None => attribute.is_dirty(),
+        }
+    })
 }

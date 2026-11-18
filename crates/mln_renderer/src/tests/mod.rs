@@ -362,3 +362,11 @@ pub(crate) fn ready(source: mln_style::Source) -> mln_style::Source {
         _ => source,
     }
 }
+
+/// Runs `f` with the context of a headless WebGPU backend.
+fn with_context(f: impl FnOnce(&mut crate::gfx::context::Context)) {
+    let device = mln_webgpu::Device::new(None).expect("device");
+    let backend: std::rc::Rc<dyn mln_gfx::RendererBackend> =
+        std::rc::Rc::new(mln_webgpu::RendererBackend::new(&device));
+    f(&mut crate::gfx::context::Context::new(backend));
+}

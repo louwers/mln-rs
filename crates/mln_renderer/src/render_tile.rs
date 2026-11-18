@@ -6,28 +6,21 @@
 // by the tile's slot and id (`FrameTile`); the store changes them only in
 // the frame's update, before the layers read them.
 
-use std::sync::Arc;
-
 use glam::Vec2;
 use mln_map_types::{MapDebugOptions, ProjectionData, TransformState};
 use mln_style_types::TranslateAnchorType;
-use mln_style_types::image::ImagePosition;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::mat4::Mat4;
 
-use crate::bucket_geometry::BucketGeometry;
 use crate::buckets::debug_bucket::DebugBucket;
 use crate::buckets::hillshade_bucket::HillshadeBucket;
 use crate::buckets::raster_bucket::RasterBucket;
-use crate::geometry::feature_index::FeatureIndex;
 use crate::layer_type::LayerType;
 use crate::paint_parameters::TransformParameters;
-use crate::render_layer::LayerBucket;
 use crate::render_pass::RenderPass;
 use crate::render_source::RenderTileParameters;
 use crate::tile::contents::Contents;
 use crate::tile::tile::Tile;
-use crate::tile_render_data::TileAtlasTextures;
 
 pub(crate) struct RenderTile {
     pub(crate) id: UnwrappedTileID,
@@ -147,12 +140,51 @@ impl RenderTile {
     }
 }
 
-/// A render tile of a frame, with what its tile shows, as a layer of the
-/// type `T` sees it: with the layer's bucket in the tile's layout.
+/// What a frame's tile shows a layer of some type: its bucket in the tile's
+/// layout, or a raster or raster-dem tile's own bucket.
+pub(crate) trait TileView<'a>: Copy {
+    /// What `contents` show the layer `layer_id`, if anything.
+    fn of(contents: &'a Contents, layer_id: &str) -> Option<Self>;
+
+    /// The passes the bucket was laid out to draw in, which its layer draws
+    /// in too; none for a bucket that isn't laid out.
+    fn passes(self) -> RenderPass {
+        RenderPass::None
+    }
+}
+
+impl<'a> TileView<'a> for &'a RasterBucket {
+    fn of(contents: &'a Contents, _layer_id: &str) -> Option<Self> {
+        match contents {
+            Contents::Raster(bucket) => Some(bucket),
+            _ => None,
+        }
+    }
+}
+
+impl<'a> TileView<'a> for &'a HillshadeBucket {
+    fn of(contents: &'a Contents, _layer_id: &str) -> Option<Self> {
+        match contents {
+            Contents::Dem(bucket) => Some(bucket),
+            _ => None,
+        }
+    }
+}
+
+/// What a tile shows a layer of a type without a source: nothing.
+#[derive(Clone, Copy)]
+pub(crate) enum NoTileBucket {}
+
+impl TileView<'_> for NoTileBucket {
+    fn of(_contents: &Contents, _layer_id: &str) -> Option<Self> {
+        None
+    }
+}
+
+/// A render tile of a frame, with what it shows a layer of the type `T`.
 pub(crate) struct FrameTile<'a, T: LayerType> {
     pub(crate) tile: &'a RenderTile,
-    contents: Option<&'a Contents>,
-    bucket: Option<LayerBucket<'a, T>>,
+    bucket: Option<T::TileBucket<'a>>,
 }
 
 impl<T: LayerType> Clone for FrameTile<'_, T> {
@@ -168,68 +200,22 @@ impl<'a, T: LayerType> FrameTile<'a, T> {
     /// sees it.
     #[must_use]
     pub(crate) fn new(tile: &'a RenderTile, contents: Option<&'a Contents>, layer_id: &str) -> Self {
-        let bucket =
-            contents.and_then(Contents::geometry).and_then(|geometry| geometry.result.typed_bucket::<T>(layer_id));
-        FrameTile { tile, contents, bucket }
+        FrameTile { tile, bucket: contents.and_then(|contents| T::TileBucket::of(contents, layer_id)) }
     }
 
-    /// The layer's bucket in the tile's layout, if the tile laid the layer
-    /// out as a layer of its type.
-    pub(crate) fn bucket(self) -> Option<LayerBucket<'a, T>> {
+    /// What the tile shows the layer, if anything.
+    pub(crate) fn bucket(self) -> Option<T::TileBucket<'a>> {
         self.bucket
     }
 
     /// [`bucket`](Self::bucket), if it was laid out to draw in `pass`.
-    pub(crate) fn bucket_for_pass(self, pass: RenderPass) -> Option<LayerBucket<'a, T>> {
-        self.bucket.filter(|bucket| bucket.layer.render_passes & pass.underlying_type() != 0)
+    pub(crate) fn bucket_for_pass(self, pass: RenderPass) -> Option<T::TileBucket<'a>> {
+        self.bucket.filter(|bucket| bucket.passes() & pass != RenderPass::None)
     }
 
     /// The tile's id.
     #[must_use]
     pub(crate) fn id(self) -> OverscaledTileID {
         *self.tile.overscaled_tile_id()
-    }
-
-    /// A raster tile's image.
-    #[must_use]
-    pub(crate) fn raster(self) -> Option<&'a RasterBucket> {
-        match self.contents? {
-            Contents::Raster(bucket) => Some(bucket),
-            _ => None,
-        }
-    }
-
-    /// A raster-dem tile's DEM.
-    #[must_use]
-    pub(crate) fn dem(self) -> Option<&'a HillshadeBucket> {
-        match self.contents? {
-            Contents::Dem(bucket) => Some(bucket),
-            _ => None,
-        }
-    }
-
-    /// The feature index of the tile's layout.
-    #[must_use]
-    pub(crate) fn feature_index(self) -> Option<&'a Arc<FeatureIndex>> {
-        self.contents?.geometry().map(|contents| &contents.result.feature_index)
-    }
-
-    /// The vertex and index data of the tile's buckets, which the frame's
-    /// draws bind (`bucket_geometry.rs`).
-    #[must_use]
-    pub(crate) fn bucket_geometry(self) -> Option<&'a BucketGeometry> {
-        self.contents?.geometry().map(|contents| &contents.bucket_geometry)
-    }
-
-    /// Where the pattern `pattern` is in the tile's icon atlas.
-    #[must_use]
-    pub(crate) fn pattern(self, pattern: &str) -> Option<ImagePosition> {
-        self.contents?.pattern(pattern)
-    }
-
-    /// The textures of the tile's glyph and icon atlases.
-    #[must_use]
-    pub(crate) fn atlas_textures(self) -> Option<TileAtlasTextures> {
-        self.contents?.geometry().map(|contents| contents.textures)
     }
 }

@@ -1,86 +1,115 @@
 use std::collections::BTreeMap;
-use std::rc::Rc;
+use std::marker::PhantomData;
 
 use geometry::Point;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::vertex_vector::VertexVector;
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants::EXTENT;
 use mln_util::subdivision_granularity::{SubdivisionGranularityExpression, SubdivisionGranularitySetting};
 
-use crate::gfx::indexes::StoredIndexes;
+use crate::gfx::context::Context;
+use crate::gfx::indexes::{DrawIndexes, Indexes, SharedIndexes};
+use crate::gfx::vertices::SharedVertices;
 use crate::tile_mask::TileMask;
 use crate::util::subdivision::{NORTH_POLE_Y, SOUTH_POLE_Y};
 use crate::util::tile_mesh::{TileMeshOptions, create_tile_mesh};
 
 /// The pole-capped globe grid for the parts of a tile its mask keeps, as
-/// position + texture-position vertices. Each part is gridded like the tile
-/// it stands in for, so it meets that tile's neighbours edge to edge; texture
-/// positions stay inside the tile so the pole rows sample the tile's edge.
-pub(crate) struct GlobeTileMesh<V: bytemuck::Pod> {
-    pub(crate) vertices: Rc<VertexVector<V>>,
-    pub(crate) indices: StoredIndexes,
+/// position + texture-position vertices, in the context's stores. Each part
+/// is gridded like the tile it stands in for, so it meets that tile's
+/// neighbours edge to edge; texture positions stay inside the tile so the
+/// pole rows sample the tile's edge.
+pub(crate) struct GlobeTileMesh {
+    pub(crate) vertices: SharedVertices,
+    indices: SharedIndexes,
     pub(crate) segments: Vec<SegmentBase>,
 }
 
-impl<V: bytemuck::Pod> GlobeTileMesh<V> {
-    pub(crate) fn new(
+/// The data of a [`GlobeTileMesh`]: its vertices, indices and segments.
+pub(crate) struct GlobeMeshData<V> {
+    pub(crate) vertices: Vec<V>,
+    pub(crate) indices: Vec<u16>,
+    pub(crate) segments: Vec<SegmentBase>,
+}
+
+impl GlobeTileMesh {
+    /// The mesh of the parts of the tile `canonical` that `mask` keeps, of
+    /// `layout_vertex`'s vertices, in `context`'s stores.
+    pub(crate) fn new<V: bytemuck::Pod>(
+        context: &mut Context,
         canonical: &CanonicalTileID,
         mask: &TileMask,
         layout_vertex: fn(Point<i16>, Point<u16>) -> V,
     ) -> Self {
-        let mut vertices: Vec<V> = Vec::new();
-        let mut indices: Vec<u16> = Vec::new();
-        let mut segments: Vec<SegmentBase> = Vec::new();
-        for part in mask {
-            let mesh = create_tile_mesh(TileMeshOptions {
-                granularity: SubdivisionGranularitySetting::globe()
-                    .tile
-                    .get_granularity_for_zoom_level(canonical.z.wrapping_add(part.z)),
-                generate_borders: false,
-                extend_to_north_pole: canonical.y == 0 && part.y == 0,
-                extend_to_south_pole: canonical.y == (1u32 << canonical.z) - 1 && part.y == (1u32 << part.z) - 1,
-            });
-            let vertex_count = mesh.vertices.len() / 2;
-            let segment = match segments.last_mut() {
-                Some(last) if u16::try_from(last.vertex_length + vertex_count).is_ok() => last,
-                _ => segments.push_mut(SegmentBase::new(vertices.len(), indices.len())),
-            };
-            let offset = segment.vertex_length;
-            let extent = EXTENT >> part.z;
-            for point in mesh.vertices.as_chunks::<2>().0 {
-                let vy = point[1];
-                let position = Point::new(
-                    (part.x as i32 * extent + (i32::from(point[0]) >> part.z)) as i16,
-                    if vy == NORTH_POLE_Y || vy == SOUTH_POLE_Y {
-                        vy
-                    } else {
-                        (part.y as i32 * extent + (i32::from(vy) >> part.z)) as i16
-                    },
-                );
-                // std::clamp<int32_t>(position, 0, EXTENT)
-                let clamp = |value: i16| i32::from(value).clamp(0, EXTENT) as u16;
-                let texture = Point::new(clamp(position.x), clamp(position.y));
-                vertices.push(layout_vertex(position, texture));
-            }
-            for triangle in mesh.indices.as_chunks::<3>().0 {
-                indices.push((offset + usize::from(triangle[0])) as u16);
-                indices.push((offset + usize::from(triangle[1])) as u16);
-                indices.push((offset + usize::from(triangle[2])) as u16);
-            }
-            segment.vertex_length += vertex_count;
-            segment.index_length += mesh.indices.len();
-        }
+        let GlobeMeshData { vertices, indices, segments } = globe_mesh_data(canonical, mask, layout_vertex);
         GlobeTileMesh {
-            vertices: Rc::new(VertexVector::from_vec(vertices)),
-            indices: StoredIndexes::new(indices),
+            vertices: context.add_vertices(vertices).into_shared(),
+            indices: context.add_indexes(Indexes::new(indices)),
             segments,
         }
     }
+
+    /// The mesh's indexes, for a draw that shares them.
+    #[must_use]
+    pub(crate) fn indexes(&self) -> DrawIndexes {
+        DrawIndexes::Shared(self.indices.clone())
+    }
 }
 
-struct Entry<V: bytemuck::Pod> {
-    mesh: GlobeTileMesh<V>,
+/// The data of the [`GlobeTileMesh`] of the parts of the tile `canonical`
+/// that `mask` keeps, of `layout_vertex`'s vertices.
+pub(crate) fn globe_mesh_data<V>(
+    canonical: &CanonicalTileID,
+    mask: &TileMask,
+    layout_vertex: fn(Point<i16>, Point<u16>) -> V,
+) -> GlobeMeshData<V> {
+    let mut vertices: Vec<V> = Vec::new();
+    let mut indices: Vec<u16> = Vec::new();
+    let mut segments: Vec<SegmentBase> = Vec::new();
+    for part in mask {
+        let mesh = create_tile_mesh(TileMeshOptions {
+            granularity: SubdivisionGranularitySetting::globe()
+                .tile
+                .get_granularity_for_zoom_level(canonical.z.wrapping_add(part.z)),
+            generate_borders: false,
+            extend_to_north_pole: canonical.y == 0 && part.y == 0,
+            extend_to_south_pole: canonical.y == (1u32 << canonical.z) - 1 && part.y == (1u32 << part.z) - 1,
+        });
+        let vertex_count = mesh.vertices.len() / 2;
+        let segment = match segments.last_mut() {
+            Some(last) if u16::try_from(last.vertex_length + vertex_count).is_ok() => last,
+            _ => segments.push_mut(SegmentBase::new(vertices.len(), indices.len())),
+        };
+        let offset = segment.vertex_length;
+        let extent = EXTENT >> part.z;
+        for point in mesh.vertices.as_chunks::<2>().0 {
+            let vy = point[1];
+            let position = Point::new(
+                (part.x as i32 * extent + (i32::from(point[0]) >> part.z)) as i16,
+                if vy == NORTH_POLE_Y || vy == SOUTH_POLE_Y {
+                    vy
+                } else {
+                    (part.y as i32 * extent + (i32::from(vy) >> part.z)) as i16
+                },
+            );
+            // Texture positions stay inside the tile.
+            let clamp = |value: i16| i32::from(value).clamp(0, EXTENT) as u16;
+            let texture = Point::new(clamp(position.x), clamp(position.y));
+            vertices.push(layout_vertex(position, texture));
+        }
+        for triangle in mesh.indices.as_chunks::<3>().0 {
+            indices.push((offset + usize::from(triangle[0])) as u16);
+            indices.push((offset + usize::from(triangle[1])) as u16);
+            indices.push((offset + usize::from(triangle[2])) as u16);
+        }
+        segment.vertex_length += vertex_count;
+        segment.index_length += mesh.indices.len();
+    }
+    GlobeMeshData { vertices, indices, segments }
+}
+
+struct Entry {
+    mesh: GlobeTileMesh,
     last_use: u64,
 }
 
@@ -88,12 +117,13 @@ struct Entry<V: bytemuck::Pod> {
 /// mesh depends on nothing else.
 pub(crate) struct GlobeTileMeshCache<V: bytemuck::Pod> {
     uses: u64,
-    meshes: BTreeMap<(u8, bool, bool, TileMask), Entry<V>>,
+    meshes: BTreeMap<(u8, bool, bool, TileMask), Entry>,
+    vertex_type: PhantomData<fn() -> V>,
 }
 
 impl<V: bytemuck::Pod> Default for GlobeTileMeshCache<V> {
     fn default() -> Self {
-        GlobeTileMeshCache { uses: 0, meshes: BTreeMap::new() }
+        GlobeTileMeshCache { uses: 0, meshes: BTreeMap::new(), vertex_type: PhantomData }
     }
 }
 
@@ -105,12 +135,15 @@ impl<V: bytemuck::Pod> GlobeTileMeshCache<V> {
         Self::default()
     }
 
+    /// The mesh of the parts of the tile `canonical` that `mask` keeps, of
+    /// `layout_vertex`'s vertices, which `context`'s stores keep.
     pub(crate) fn get(
         &mut self,
+        context: &mut Context,
         canonical: &CanonicalTileID,
         mask: &TileMask,
         layout_vertex: fn(Point<i16>, Point<u16>) -> V,
-    ) -> &mut GlobeTileMesh<V> {
+    ) -> &GlobeTileMesh {
         let key = (canonical.z, canonical.y == 0, canonical.y == (1u32 << canonical.z) - 1, mask.clone());
         // Tiles that are loading go through many masks; the one used longest
         // ago makes room, so the meshes every frame draws stay. The draws share
@@ -122,12 +155,12 @@ impl<V: bytemuck::Pod> GlobeTileMeshCache<V> {
             self.meshes.remove(&oldest);
         }
         self.uses += 1;
-        let entry = self
-            .meshes
-            .entry(key)
-            .or_insert_with(|| Entry { mesh: GlobeTileMesh::new(canonical, mask, layout_vertex), last_use: 0 });
+        let entry = self.meshes.entry(key).or_insert_with(|| Entry {
+            mesh: GlobeTileMesh::new(context, canonical, mask, layout_vertex),
+            last_use: 0,
+        });
         entry.last_use = self.uses;
-        &mut entry.mesh
+        &entry.mesh
     }
 
     pub(crate) fn clear(&mut self) {

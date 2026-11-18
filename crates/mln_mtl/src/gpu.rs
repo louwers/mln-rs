@@ -27,7 +27,6 @@ use mln_gfx::types::{
     ColorBlendEquationType, ColorBlendFactorType, CullFaceSideType, CullFaceWindingType, DepthFunctionType,
     StencilFunctionType, StencilOpType, TextureFilterType, TextureWrapType,
 };
-use mln_gfx::vertex_attribute::VertexAttribute;
 use mln_util::hash::HashMap;
 use mln_util::size::Size;
 use objc2::Message;
@@ -600,7 +599,7 @@ impl MetalGpu {
                 .into_iter()
                 .flat_map(|(step, infos)| {
                     infos.iter().map(move |info| VertexBufferLayout {
-                        stride: VertexAttribute::get_stride_of(info.data_type) as u32,
+                        stride: info.data_type.stride() as u32,
                         step,
                         attributes: vec![GpuVertexAttribute { id: info.id as u32, format: info.data_type, offset: 0 }],
                     })

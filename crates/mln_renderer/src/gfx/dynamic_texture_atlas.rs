@@ -19,7 +19,7 @@ use mln_util::size::Size;
 use super::dynamic_texture::QueuedPixels;
 use super::dynamic_texture::{DynamicTexture, DynamicTextureBinId, TextureHandle};
 use crate::gfx::context::Context;
-use crate::gfx::texture2d::TextureKey;
+use crate::gfx::store::SharedTexture;
 
 const EXTRA_PADDING: u16 = 1;
 const PADDING: u16 = ImagePosition::PADDING + EXTRA_PADDING;
@@ -504,7 +504,7 @@ impl DynamicTextureAtlas {
     }
 
     /// The GPU texture of the page `page`, once the atlas uploaded it.
-    pub(crate) fn page_texture(&self, page: PageId) -> Option<TextureKey> {
+    pub(crate) fn page_texture(&self, page: PageId) -> Option<&SharedTexture> {
         self.pages.iter().chain(&self.dummies).find(|candidate| candidate.id == page)?.texture.texture()
     }
 

@@ -1,6 +1,5 @@
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
-use std::rc::Rc;
 
 use feature::{Identifier, PropertyMap, Value};
 use geometry::Point;
@@ -16,9 +15,10 @@ use mln_util::geometry::FeatureType;
 use mln_util::subdivision_granularity::{SubdivisionGranularityExpression, SubdivisionGranularitySetting};
 use mln_vec_map::VecMap;
 
+use super::with_context;
 use crate::bucket::Bucket;
 use crate::buckets::fill_extrusion_bucket::FillExtrusionBucket;
-use crate::globe_tile_mesh::{GlobeTileMesh, GlobeTileMeshCache};
+use crate::globe_tile_mesh::{GlobeTileMeshCache, globe_mesh_data};
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::tile_mask::TileMask;
 use crate::util::subdivision::{
@@ -65,8 +65,6 @@ struct GlobeTestVertex {
 fn globe_test_vertex(position: Point<i16>, texture: Point<u16>) -> GlobeTestVertex {
     GlobeTestVertex { position: [position.x, position.y], texture: [texture.x, texture.y] }
 }
-
-type GlobeTestMesh = GlobeTileMesh<GlobeTestVertex>;
 
 fn mask(parts: &[(u8, u32, u32)]) -> TileMask {
     parts.iter().map(|&(z, x, y)| CanonicalTileID::new(z, x, y)).collect()
@@ -635,10 +633,10 @@ fn granularity_past_the_index_limit_is_capped() {
 #[test]
 fn globe_mask_keeps_the_uncovered_parts() {
     let tile = CanonicalTileID::new(1, 0, 0);
-    let masked = GlobeTestMesh::new(&tile, &mask(&[(1, 1, 0), (1, 0, 1), (1, 1, 1)]), globe_test_vertex);
-    let child = GlobeTestMesh::new(&CanonicalTileID::new(2, 0, 0), &mask(&[(0, 0, 0)]), globe_test_vertex);
-    let vertices = masked.vertices.vector();
-    let indices = masked.indices.data();
+    let masked = globe_mesh_data(&tile, &mask(&[(1, 1, 0), (1, 0, 1), (1, 1, 1)]), globe_test_vertex);
+    let child = globe_mesh_data(&CanonicalTileID::new(2, 0, 0), &mask(&[(0, 0, 0)]), globe_test_vertex);
+    let vertices = &masked.vertices;
+    let indices = &masked.indices;
     assert_eq!(1, masked.segments.len());
 
     for triangle in indices.as_chunks::<3>().0 {
@@ -655,13 +653,13 @@ fn globe_mask_keeps_the_uncovered_parts() {
     }
 
     let mut masked_edge = BTreeSet::new();
-    for vertex in vertices.iter() {
+    for vertex in vertices {
         if vertex.position[0] == EXTENT_I16 / 2 && vertex.position[1] >= 0 && vertex.position[1] <= EXTENT_I16 / 2 {
             masked_edge.insert(vertex.position[1]);
         }
     }
     let mut child_edge = BTreeSet::new();
-    for vertex in child.vertices.vector().iter() {
+    for vertex in &child.vertices {
         if vertex.position[0] == EXTENT_I16 && vertex.position[1] >= 0 {
             child_edge.insert(vertex.position[1] / 2);
         }
@@ -670,7 +668,7 @@ fn globe_mask_keeps_the_uncovered_parts() {
     assert_eq!(33, masked_edge.len());
 
     let mut north_pole = 0;
-    for vertex in vertices.iter() {
+    for vertex in vertices {
         if vertex.position[1] == NORTH_POLE_Y {
             assert!(vertex.position[0] >= EXTENT_I16 / 2);
             north_pole += 1;
@@ -678,20 +676,20 @@ fn globe_mask_keeps_the_uncovered_parts() {
     }
     assert_eq!(33, north_pole);
 
-    let full = GlobeTestMesh::new(&tile, &mask(&[(0, 0, 0)]), globe_test_vertex);
+    let full = globe_mesh_data(&tile, &mask(&[(0, 0, 0)]), globe_test_vertex);
     let grid = create_tile_mesh(TileMeshOptions {
         granularity: SubdivisionGranularitySetting::globe().tile.get_granularity_for_zoom_level(1),
         extend_to_north_pole: true,
         ..TileMeshOptions::default()
     });
-    assert_eq!(grid.vertices.len() / 2, full.vertices.elements());
-    for i in 0..full.vertices.elements() {
-        assert_eq!(grid.vertices[i * 2], full.vertices.at(i).position[0]);
-        assert_eq!(grid.vertices[i * 2 + 1], full.vertices.at(i).position[1]);
+    assert_eq!(grid.vertices.len() / 2, full.vertices.len());
+    for (i, vertex) in full.vertices.iter().enumerate() {
+        assert_eq!(grid.vertices[i * 2], vertex.position[0]);
+        assert_eq!(grid.vertices[i * 2 + 1], vertex.position[1]);
     }
-    assert_eq!(grid.indices, full.indices.data());
+    assert_eq!(grid.indices, full.indices);
 
-    assert_eq!(0, GlobeTestMesh::new(&tile, &TileMask::new(), globe_test_vertex).vertices.elements());
+    assert_eq!(globe_mesh_data(&tile, &TileMask::new(), globe_test_vertex).vertices.len(), 0);
 }
 
 // However many masks the tiles go through while they load, a layer's cache of
@@ -699,13 +697,15 @@ fn globe_mask_keeps_the_uncovered_parts() {
 // gtest: TileMesh.GlobeMeshCacheStaysBounded
 #[test]
 fn globe_mesh_cache_stays_bounded() {
-    let mut cache: GlobeTileMeshCache<GlobeTestVertex> = GlobeTileMeshCache::new();
-    let tile = CanonicalTileID::new(3, 2, 2);
-    for i in 0..1000u32 {
-        let child = i % 256;
-        cache.get(&tile, &mask(&[(4, child % 16, child / 16)]), globe_test_vertex);
-        assert!(cache.size() <= 64, "{i}");
-    }
+    with_context(|context| {
+        let mut cache: GlobeTileMeshCache<GlobeTestVertex> = GlobeTileMeshCache::new();
+        let tile = CanonicalTileID::new(3, 2, 2);
+        for i in 0..1000u32 {
+            let child = i % 256;
+            cache.get(context, &tile, &mask(&[(4, child % 16, child / 16)]), globe_test_vertex);
+            assert!(cache.size() <= 64, "{i}");
+        }
+    });
 }
 
 // A frame draws most tiles whole while one loading tile goes through a new
@@ -714,12 +714,14 @@ fn globe_mesh_cache_stays_bounded() {
 // gtest: TileMesh.GlobeMeshCacheKeepsTheMeshesInUse
 #[test]
 fn globe_mesh_cache_keeps_the_meshes_in_use() {
-    let mut cache: GlobeTileMeshCache<GlobeTestVertex> = GlobeTileMeshCache::new();
-    let tile = CanonicalTileID::new(3, 2, 2);
-    let whole = mask(&[(0, 0, 0)]);
-    let vertices = Rc::clone(&cache.get(&tile, &whole, globe_test_vertex).vertices);
-    for i in 0..256u32 {
-        cache.get(&tile, &mask(&[(4, i % 16, i / 16)]), globe_test_vertex);
-        assert!(Rc::ptr_eq(&vertices, &cache.get(&tile, &whole, globe_test_vertex).vertices), "{i}");
-    }
+    with_context(|context| {
+        let mut cache: GlobeTileMeshCache<GlobeTestVertex> = GlobeTileMeshCache::new();
+        let tile = CanonicalTileID::new(3, 2, 2);
+        let whole = mask(&[(0, 0, 0)]);
+        let vertices = cache.get(context, &tile, &whole, globe_test_vertex).vertices.clone();
+        for i in 0..256u32 {
+            cache.get(context, &tile, &mask(&[(4, i % 16, i / 16)]), globe_test_vertex);
+            assert!(vertices.same(&cache.get(context, &tile, &whole, globe_test_vertex).vertices), "{i}");
+        }
+    });
 }

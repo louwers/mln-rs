@@ -9,7 +9,7 @@ use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use crate::gfx::context::Context;
-use crate::gfx::texture2d::{OwnedTexture, TextureKey};
+use crate::gfx::store::SharedTexture;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct LinePatternPos {
@@ -202,7 +202,7 @@ pub(crate) struct DashPatternTexture {
     size: Size,
     /// The patterns, until the texture uploads them.
     image: Option<AlphaImage>,
-    texture: Option<OwnedTexture>,
+    texture: Option<SharedTexture>,
 }
 
 impl DashPatternTexture {
@@ -237,7 +237,7 @@ impl DashPatternTexture {
                 ..Default::default()
             });
         });
-        if let Err(error) = context.upload_texture_data(texture.key(), &image.data, image.size) {
+        if let Err(error) = context.upload_texture_data(&texture, &image.data, image.size) {
             Log::error(Event::Render, format!("Uploading a dash pattern failed: {error}"));
         }
         self.texture = Some(texture);
@@ -245,8 +245,8 @@ impl DashPatternTexture {
 
     /// The texture, once `upload` made it.
     #[must_use]
-    pub(crate) fn texture(&self) -> Option<TextureKey> {
-        self.texture.as_ref().map(OwnedTexture::key)
+    pub(crate) fn texture(&self) -> Option<&SharedTexture> {
+        self.texture.as_ref()
     }
 
     /// The size of the texture.

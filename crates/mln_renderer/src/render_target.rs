@@ -8,7 +8,7 @@ use mln_util::size::Size;
 
 use crate::gfx::attachment::Attachment;
 use crate::gfx::context::Context;
-use crate::gfx::texture2d::{OwnedTexture, TextureKey};
+use crate::gfx::store::SharedTexture;
 use crate::paint_parameters::{OpenPass, PaintParameters};
 use crate::render_pass::RenderPass;
 
@@ -16,7 +16,7 @@ use crate::render_pass::RenderPass;
 /// sample, with the depth texture the backend draws it with
 /// (`Context::render_target_depth`). The layer that owns it draws it.
 pub(crate) struct RenderTarget {
-    texture: OwnedTexture,
+    texture: SharedTexture,
     size: Size,
     /// Made with the first pass, of the texture's size.
     depth: Option<Attachment>,
@@ -32,8 +32,8 @@ impl RenderTarget {
 
     /// The texture the target draws into, which draws sample.
     #[must_use]
-    pub(crate) fn texture(&self) -> TextureKey {
-        self.texture.key()
+    pub(crate) fn texture(&self) -> &SharedTexture {
+        &self.texture
     }
 
     /// Draws into a texture of `size` from now on: a texture of another size
@@ -71,9 +71,8 @@ impl RenderTarget {
     /// The pass that clears the texture to opaque black and its depth to 1,
     /// making them through `gpu`, the context's.
     fn pass(&mut self, gpu: &mut dyn Gpu, context: &mut Context) -> Result<OpenPass, GpuError> {
-        let key = self.texture.key();
-        let color = context.create_texture_with(gpu, key)?;
-        let format = context.texture(key).ok_or(GpuError::UnknownId("texture"))?.format();
+        let color = context.create_texture_with(gpu, &self.texture)?;
+        let format = context.texture(&self.texture).ok_or(GpuError::UnknownId("texture"))?.format();
         let size = self.size;
         if self.depth.is_none()
             && let Some(depth_format) = context.render_target_depth()
@@ -96,7 +95,7 @@ impl RenderTarget {
 
 /// The color texture of a render target of `size`, which draws draw into and
 /// then sample, linear and clamped.
-fn texture(context: &mut Context, size: Size, type_: TextureChannelDataType) -> OwnedTexture {
+fn texture(context: &mut Context, size: Size, type_: TextureChannelDataType) -> SharedTexture {
     let format = texture_format(TexturePixelType::RGBA, context.render_target_type(type_));
     context.add_texture_with(|texture| {
         texture.set_size(size);

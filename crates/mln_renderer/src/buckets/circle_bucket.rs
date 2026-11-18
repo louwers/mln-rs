@@ -1,6 +1,5 @@
-// The vertex/index vectors are plain `Vec`s here (the bucket is built on the
-// worker thread and shared with `Arc`); the render layer copies them into
-// the shared gfx vectors its draws reference.
+// The vertices and indices are `GeometryVec`s, which a worker fills and the
+// bucket's upload moves into the context's stores, which its draws read.
 
 use std::sync::Arc;
 
@@ -13,7 +12,7 @@ use mln_util::Color;
 use mln_vec_map::VecMap;
 
 use crate::bucket::{Bucket, BucketBase, UploadNeeds};
-use crate::bucket_geometry::{BucketGeometry, GeometryVec};
+use crate::bucket_geometry::{GeometryUpload, GeometryVec};
 use crate::layer_type::EvaluatedLayer;
 use crate::paint_property_binder::PaintPropertyBinder;
 
@@ -117,7 +116,7 @@ impl Bucket for CircleBucket {
         &self.base
     }
 
-    fn upload(&mut self, geometry: &mut BucketGeometry, _needs: UploadNeeds) {
+    fn upload(&mut self, geometry: &mut GeometryUpload<'_>, _needs: UploadNeeds) {
         geometry.move_vertices(&mut self.vertices);
         geometry.move_indexes(&mut self.triangles);
         for binders in self.paint_property_binders.values_mut() {

@@ -16,7 +16,7 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecMap;
 
 use crate::bucket::{Bucket, BucketBase, UploadNeeds};
-use crate::bucket_geometry::{BucketGeometry, GeometryVec};
+use crate::bucket_geometry::{GeometryUpload, GeometryVec};
 use crate::gfx::fill_generator::generate_fill_and_outline_buffers;
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::pattern_layout::PatternLayerMap;
@@ -177,7 +177,7 @@ impl Bucket for FillBucket {
         self.sdf_patterns.get(layer_id).copied().unwrap_or(false)
     }
 
-    fn upload(&mut self, geometry: &mut BucketGeometry, needs: UploadNeeds) {
+    fn upload(&mut self, geometry: &mut GeometryUpload<'_>, needs: UploadNeeds) {
         geometry.move_vertices(&mut self.vertices);
         geometry.move_indexes(&mut self.triangles);
         geometry.move_indexes(&mut self.basic_lines);

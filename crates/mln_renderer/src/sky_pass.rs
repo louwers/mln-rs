@@ -153,7 +153,7 @@ impl SkyPass {
                     sky_blend: projection_transition as f32,
                 };
                 let buffers = &mut sky.frame.uniform_buffers;
-                buffers.create_or_update_pod(ID_SKY_PROPS_UBO, &props, context);
+                buffers.create_or_update_pod(ID_SKY_PROPS_UBO, &props, context.device());
                 bind_no_projection(buffers, context);
             }
         } else {
@@ -187,7 +187,7 @@ impl SkyPass {
             sun_position: sun_position(light, state, atmosphere_blend),
         };
         let buffers = &mut atmosphere.frame.uniform_buffers;
-        buffers.create_or_update_pod(ID_ATMOSPHERE_PROPS_UBO, &props, context);
+        buffers.create_or_update_pod(ID_ATMOSPHERE_PROPS_UBO, &props, context.device());
         bind_no_projection(buffers, context);
     }
 

@@ -22,7 +22,6 @@ use mln_vec_map::VecMap;
 
 use crate::algorithm::update_renderables::{PrefetchedTile, RenderablesContext, update_renderables};
 use crate::algorithm::update_tile_masks::update_tile_masks;
-use crate::bucket::UploadNeeds;
 use crate::layer_drawing::ChangedBuckets;
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layout::tile_layout::LayoutParams;
@@ -272,11 +271,7 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
         // A flat map draws each world copy of a tile from a tile of its own,
         // which starts from a loaded copy rather than leave its world bare
         // until it has loaded and laid out the same data.
-        let copy = if parameters.transform_state.is_globe_rendering() {
-            None
-        } else {
-            self.source.world_copy(id, self.ctx.upload_needs)
-        };
+        let copy = if parameters.transform_state.is_globe_rendering() { None } else { self.source.world_copy(id) };
         self.source.insert(tile);
         let style = self.style;
         self.source.update(id, self.ctx, |tile| {
@@ -844,20 +839,16 @@ impl SourceTiles {
         true
     }
 
-    /// A copy of a renderable tile that is `id` in another world copy. A
-    /// geometry tile's buckets upload for `needs` first, when the renderer
-    /// has uploaded any, so that the copy draws from their gfx vectors
-    /// rather than copying their data.
-    fn world_copy(&mut self, id: &OverscaledTileID, needs: Option<UploadNeeds>) -> Option<WorldCopy> {
-        let tile = self.tiles.values_mut().map(|slot| &mut slot.tile).find(|tile| {
+    /// A copy of a renderable tile that is `id` in another world copy. The
+    /// copy draws the geometry that the tile's buckets moved into the
+    /// context's stores; buckets that haven't uploaded yet upload their own.
+    fn world_copy(&self, id: &OverscaledTileID) -> Option<WorldCopy> {
+        let tile = self.tiles.values().map(|slot| &slot.tile).find(|tile| {
             tile.id.overscaled_z == id.overscaled_z
                 && tile.id.canonical == id.canonical
                 && tile.id.wrap != id.wrap
                 && tile.is_renderable()
         })?;
-        if let (Some(needs), Some(Contents::Geometry(contents))) = (needs, tile.contents_mut()) {
-            contents.upload(needs);
-        }
         WorldCopy::of(tile)
     }
 

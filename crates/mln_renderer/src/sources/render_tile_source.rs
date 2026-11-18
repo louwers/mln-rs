@@ -22,8 +22,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_PROJECTION_UBO,
 };
 use mln_gfx::shaders::shader_program::ShaderProgramPtr;
-use mln_gfx::vertex_vector::{VertexVector, VertexVectorBasePtr};
-use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode, VertexAttributeArray};
+use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::MapDebugOptions;
 use mln_style::Source;
 use mln_style_types::{LineCapType, LineJoinType, TranslateAnchorType};
@@ -42,6 +41,7 @@ use crate::buckets::line_bucket::{LineBucket, LineLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
+use crate::gfx::vertex_attribute::VertexAttributeArray;
 use crate::layer_drawing::{DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptDraw, LayerDraws};
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layers::cast_matrix;
@@ -83,6 +83,7 @@ fn debug_line_properties(type_: DebugType) -> LineEvaluatedPropsUBO {
 /// The GPU objects of `lines`, as polylines of `options` drawn with `shader`;
 /// `None` where they have no vertices.
 fn polyline_objects(
+    context: &mut Context,
     shader: &ShaderProgramPtr,
     lines: &[GeometryCoordinates],
     options: &PolylineGeneratorOptions,
@@ -107,15 +108,15 @@ fn polyline_objects(
 
     let vertex_count = vertices.len();
     let stride = size_of::<LineLayoutVertex>() as u32;
-    let shared: VertexVectorBasePtr = Rc::new(VertexVector::from_vec(vertices));
+    let shared = context.add_vertices(vertices).into_shared();
     let mut attrs = VertexAttributeArray::new();
     // The position and normal, then the extrusion data (offsetof(LineLayoutVertex, a2)).
     for (id, offset, data_type) in [
         (ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, 0, AttributeDataType::Short2),
         (ID_LINE_DATA_VERTEX_ATTRIBUTE, 4, AttributeDataType::UByte4),
     ] {
-        if let Some(attr) = attrs.set(id, -1, AttributeDataType::Invalid, 0) {
-            attr.set_shared_raw_data(Some(Rc::clone(&shared)), offset, 0, stride, data_type);
+        if let Some(attr) = attrs.set(id, AttributeDataType::Invalid) {
+            attr.set_shared_vertices(shared.clone(), offset, 0, stride, data_type);
         }
     }
 
@@ -402,7 +403,7 @@ impl RenderSource for RenderTileSource {
     ///
     /// The text is polylines, like the tile borders: WebGPU draws line
     /// primitives one pixel wide.
-    fn update_debug_draws(&self, debug_layers: &mut DebugLayers, parameters: &PaintParameters<'_>) {
+    fn update_debug_draws(&self, debug_layers: &mut DebugLayers, parameters: &mut PaintParameters<'_>) {
         if !parameters
             .debug_options
             .contains(MapDebugOptions::TIMESTAMPS | MapDebugOptions::PARSE_STATUS | MapDebugOptions::TILE_BORDERS)
@@ -480,7 +481,8 @@ impl RenderSource for RenderTileSource {
                     };
                     if tile.needs_rendering()
                         && !of_tiles.contains(&tile_id)
-                        && let Some(objects) = polyline_objects(&polyline_shader, &debug_bucket.strokes, &text_options)
+                        && let Some(objects) =
+                            polyline_objects(parameters.context, &polyline_shader, &debug_bucket.strokes, &text_options)
                     {
                         of_tiles.insert(tile_id);
                         layer.add(source, tile_id, Some(debug_bucket.text.clone()), objects);
@@ -529,8 +531,12 @@ impl RenderSource for RenderTileSource {
                 } else {
                     &tile_border
                 };
-                if let Some(objects) = polyline_objects(&polyline_shader, std::slice::from_ref(border), &border_options)
-                {
+                if let Some(objects) = polyline_objects(
+                    parameters.context,
+                    &polyline_shader,
+                    std::slice::from_ref(border),
+                    &border_options,
+                ) {
                     of_tiles.insert(tile_id);
                     layer.add(source, tile_id, None, objects);
                 }

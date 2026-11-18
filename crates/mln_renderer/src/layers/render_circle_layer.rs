@@ -1,3 +1,4 @@
+use std::mem::offset_of;
 use std::sync::Arc;
 
 use geometry::Point;
@@ -9,10 +10,8 @@ use mln_gfx::shaders::shader_defines::{
     ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE, ID_CIRCLE_DRAWABLE_UBO, ID_CIRCLE_EVALUATED_PROPS_UBO,
     ID_CIRCLE_POS_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO,
 };
-use mln_gfx::vertex_vector::VertexVectorBasePtr;
-use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode, VertexAttributeArray};
+use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::{TileProjector, TransformState};
-use mln_style::PropertyEvaluationParameters;
 use mln_style::expression::EvaluationContext;
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Circle;
@@ -27,6 +26,8 @@ use crate::bucket::Bucket;
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::circle_bucket::{CircleBinders, CircleBucket, CircleLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
+use crate::gfx::vertex_attribute::VertexAttributeArray;
+use crate::gfx::vertices::SharedVertices;
 use crate::layer_drawing::{DrawList, KeptDraw, TileDraws, UniformWriter};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::circle_layout::CircleLayout;
@@ -34,10 +35,10 @@ use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
 use crate::render_layer::{
-    Atlases, LayerParts, LayerSource, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
+    Atlases, LayerBucket, LayerParts, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
 };
 use crate::render_pass::RenderPass;
-use crate::render_tile::RenderTile;
+use crate::render_tile::{FrameTile, RenderTile};
 use crate::tile_matrix::{globe_extrude_scale, projection_data, to_projection_ubo};
 
 const CIRCLE_SHADER_GROUP_NAME: &str = "CircleShader";
@@ -48,7 +49,7 @@ const RENDER_PASS: RenderPass = RenderPass::Translucent;
 fn read_circle_attributes(
     attrs: &mut VertexAttributeArray,
     b: &CircleBinders,
-    shared: &VertexVectorBasePtr,
+    shared: Option<&SharedVertices>,
     evaluated: &CirclePaintProperties::PossiblyEvaluated,
     pau: &mut StringIDSetsPair,
 ) {
@@ -151,6 +152,7 @@ fn project_query_geometry(
 impl LayerType for Circle {
     type Layout = CircleLayout;
     type Bucket = CircleBucket;
+    type TileBucket<'a> = LayerBucket<'a, Circle>;
 
     fn create_layout(
         group: &[Arc<EvaluatedLayer<Circle>>],
@@ -200,7 +202,7 @@ impl RenderCircleLayer {
         binders: &CircleBinders,
         parameters: &PaintParameters<'_>,
     ) -> CircleUniforms {
-        const IN_VIEWPORT_PIXEL_UNITS: bool = false; // from RenderTile::translatedMatrix
+        const IN_VIEWPORT_PIXEL_UNITS: bool = false;
         const NEAR_CLIPPED: bool = false;
         let evaluated = &layer.paint;
         let zoom = parameters.state.get_zoom() as f32;
@@ -281,11 +283,7 @@ impl TypedLayer for RenderCircleLayer {
         PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
 
-    fn passes(
-        &mut self,
-        _parameters: &PropertyEvaluationParameters,
-        evaluated: &mut EvaluatedLayer<Circle>,
-    ) -> RenderPass {
+    fn passes(&self, evaluated: &EvaluatedLayer<Circle>) -> RenderPass {
         let evaluated = &evaluated.paint;
         if (evaluated.circle_radius.constant_or(&1.0) > 0.0 || evaluated.circle_stroke_width.constant_or(&1.0) > 0.0)
             && (evaluated.circle_color.constant_or(&Color::black()).a > 0.0
@@ -306,11 +304,8 @@ impl TypedLayer for RenderCircleLayer {
         &mut self,
         paint_parameters: &mut PaintParameters<'_>,
         _atlases: &Atlases,
-        source: Option<LayerSource<'_, Circle>>,
+        render_tiles: &[FrameTile<'_, Circle>],
     ) {
-        let Some(render_tiles) = source.and_then(LayerSource::tiles) else {
-            return;
-        };
         let shaders = &paint_parameters.static_data.shaders;
 
         if self.circle_shader_group.is_none() {
@@ -320,14 +315,11 @@ impl TypedLayer for RenderCircleLayer {
             self.remove_all_draws();
             return;
         };
-        if (RENDER_PASS.underlying_type() & self.base.evaluated_properties.render_passes()) == 0 {
-            return;
-        }
 
         let layer_id = self.base.style.base().id.as_str();
         let layer = &*self.values.evaluated;
         let evaluated = &layer.paint;
-        for tile in render_tiles.iter() {
+        for tile in render_tiles {
             let tile_id = tile.id();
             let Some(mut entry) = self.drawing.tiles_mut().entry(&tile_id) else {
                 continue;
@@ -342,28 +334,39 @@ impl TypedLayer for RenderCircleLayer {
             let Some(binders) = bucket.paint_property_binders.get(layer_id) else {
                 continue;
             };
-            let geometry = tile.bucket_geometry();
-            let paint =
-                || paint_vertices(geometry, &binders.interleaved_vertex_buffer, binders.depends_on_feature_state());
+            let geometry = render_data.geometry();
+            let paint = |context: &mut _| {
+                paint_vertices(
+                    context,
+                    geometry,
+                    &binders.interleaved_vertex_buffer,
+                    binders.depends_on_feature_state(),
+                )
+            };
 
             // A draw built from another bucket goes.
             entry.set_bucket(bucket.base.bucket_id);
 
-            // The draw's attributes point into the bucket's shared vectors,
-            // which upload again when they change.
+            // The draw's attributes read the bucket's vertices in the
+            // context's store, which upload again when they change.
             let changes = entry.take_changes();
+            let context = &mut *paint_parameters.context;
             if let Some(cached) = entry.value.as_mut() {
                 refresh_paint_attributes(&mut cached.objects, changes, |attrs| {
-                    read_circle_attributes(attrs, binders, &paint(), evaluated, &mut Default::default());
+                    read_circle_attributes(attrs, binders, paint(context).as_ref(), evaluated, &mut Default::default());
                 });
-            } else if !bucket.vertices.is_empty() {
+            } else if !bucket.vertices.is_empty()
+                && let (Some(vertices), Some(indexes)) =
+                    (bucket_vertices(geometry, &bucket.vertices), bucket_indexes(geometry, &bucket.triangles))
+            {
                 let mut properties_as_uniforms = StringIDSetsPair::default();
                 let mut attrs = VertexAttributeArray::new();
-                read_circle_attributes(&mut attrs, binders, &paint(), evaluated, &mut properties_as_uniforms);
-                if let Some(attr) = attrs.set(ID_CIRCLE_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-                    attr.set_shared_raw_data(
-                        Some(bucket_vertices(geometry, &bucket.vertices)),
-                        0, // offsetof(CircleLayoutVertex, a1)
+                let paint = paint(context);
+                read_circle_attributes(&mut attrs, binders, paint.as_ref(), evaluated, &mut properties_as_uniforms);
+                if let Some(attr) = attrs.set(ID_CIRCLE_POS_VERTEX_ATTRIBUTE, AttributeDataType::Invalid) {
+                    attr.set_shared_vertices(
+                        vertices,
+                        offset_of!(CircleLayoutVertex, a1) as u32,
                         0,
                         size_of::<CircleLayoutVertex>() as u32,
                         AttributeDataType::Short2,
@@ -378,7 +381,7 @@ impl TypedLayer for RenderCircleLayer {
                         vertices: attrs,
                         vertex_count,
                         mode: DrawMode::Triangles(),
-                        indexes: bucket_indexes(geometry, &bucket.triangles),
+                        indexes: indexes.into(),
                         segments: bucket.segments.iter().map(SegmentBase::copy).collect(),
                         instances: None,
                     },

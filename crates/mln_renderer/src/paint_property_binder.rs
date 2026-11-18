@@ -16,8 +16,6 @@
 use mln_expression::range::Range;
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::shader_group::StringIDSetsPair;
-use mln_gfx::vertex_attribute::{VertexAttribute, VertexAttributeArray};
-use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_style::evaluated::{Evaluated, Faded};
 use mln_style::expression::{Dependency, EvaluationContext, Image, Value, ValueConverter};
 use mln_style::property_expression::PropertyExpression;
@@ -31,6 +29,8 @@ use mln_util::feature::feature_id_to_string;
 use mln_vec_map::VecMap;
 
 use crate::bucket_geometry::GeometryVec;
+use crate::gfx::vertex_attribute::{VertexAttribute, VertexAttributeArray};
+use crate::gfx::vertices::SharedVertices;
 use crate::layout::pattern_layout::PatternDependency;
 use crate::line_atlas::{DashAtlas, LinePatternCap};
 use crate::paint_property_statistics::{PaintPropertyStatistics, StatisticValue};
@@ -410,7 +410,7 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
     pub(crate) fn apply_paint_property(
         &self,
         buffer: &InterleavedVertexBuffer,
-        shared: &VertexVectorBasePtr,
+        shared: &SharedVertices,
         _attr_index: usize,
         attrib: &mut VertexAttribute,
     ) {
@@ -418,8 +418,8 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
             let raw_size = buffer.stride as u32;
             let data_type = if self.is_interpolated() { T::INTERPOLATED_DATA_TYPE } else { T::BASE_DATA_TYPE };
 
-            debug_assert_eq!(shared.get_raw_count() / buffer.stride.max(1), self.get_vertex_count(buffer));
-            attrib.set_shared_raw_data(Some(std::rc::Rc::clone(shared)), vertex_offset as u32, 0, raw_size, data_type);
+            debug_assert_eq!(shared.count() / buffer.stride.max(1), self.get_vertex_count(buffer));
+            attrib.set_shared_vertices(shared.clone(), vertex_offset as u32, 0, raw_size, data_type);
         } else {
             // getVertexCount() is 0 without an interleaved buffer: nothing
             // to set.
@@ -563,7 +563,7 @@ impl CrossFadedPaintPropertyBinder<Image> {
     pub(crate) fn apply_paint_property(
         &self,
         buffer: &InterleavedVertexBuffer,
-        shared: &VertexVectorBasePtr,
+        shared: &SharedVertices,
         _attr_index: usize,
         attrib: &mut VertexAttribute,
     ) {
@@ -571,7 +571,7 @@ impl CrossFadedPaintPropertyBinder<Image> {
             let raw_size = buffer.stride as u32;
             // isInterpolated() is false: `Type::DataType`.
             let data_type = AttributeDataType::UShort4;
-            attrib.set_shared_raw_data(Some(std::rc::Rc::clone(shared)), vertex_offset as u32, 0, raw_size, data_type);
+            attrib.set_shared_vertices(shared.clone(), vertex_offset as u32, 0, raw_size, data_type);
         }
     }
 }
@@ -688,19 +688,13 @@ impl PaintPropertyBinderBase for DashArrayBinder {
     fn apply(
         &self,
         buffer: &InterleavedVertexBuffer,
-        shared: &VertexVectorBasePtr,
+        shared: &SharedVertices,
         _attr_index: usize,
         attrib: &mut VertexAttribute,
     ) {
         if let Some(vertex_offset) = self.vertex_offset() {
             let raw_size = buffer.stride as u32;
-            attrib.set_shared_raw_data(
-                Some(std::rc::Rc::clone(shared)),
-                vertex_offset as u32,
-                0,
-                raw_size,
-                AttributeDataType::Float4,
-            );
+            attrib.set_shared_vertices(shared.clone(), vertex_offset as u32, 0, raw_size, AttributeDataType::Float4);
         }
     }
 }
@@ -742,7 +736,7 @@ pub(crate) trait PaintPropertyBinderBase {
     fn apply(
         &self,
         buffer: &InterleavedVertexBuffer,
-        shared: &VertexVectorBasePtr,
+        shared: &SharedVertices,
         attr_index: usize,
         attrib: &mut VertexAttribute,
     );
@@ -788,7 +782,7 @@ impl<T: BinderValue> PaintPropertyBinderBase for PaintPropertyBinder<T> {
     fn apply(
         &self,
         buffer: &InterleavedVertexBuffer,
-        shared: &VertexVectorBasePtr,
+        shared: &SharedVertices,
         attr_index: usize,
         attrib: &mut VertexAttribute,
     ) {
@@ -819,7 +813,7 @@ impl PaintPropertyBinderBase for CrossFadedPaintPropertyBinder<Image> {
     fn apply(
         &self,
         buffer: &InterleavedVertexBuffer,
-        shared: &VertexVectorBasePtr,
+        shared: &SharedVertices,
         attr_index: usize,
         attrib: &mut VertexAttribute,
     ) {
@@ -827,8 +821,9 @@ impl PaintPropertyBinderBase for CrossFadedPaintPropertyBinder<Image> {
     }
 }
 
-/// Adds the attributes `attribute_names` of one property to `attrs`, or
-/// records them as uniforms if the property is constant.
+/// Adds the attributes `attribute_names` of one property to `attrs`, which
+/// read `shared`, the vertices of the paint values, or records them as
+/// uniforms if the property is constant.
 #[expect(
     clippy::too_many_arguments,
     reason = "the binder and its buffers, the attribute names, and the attributes, uniform set and counter it fills"
@@ -837,7 +832,7 @@ pub(crate) fn read_data_driven_paint_property(
     attrs: &mut VertexAttributeArray,
     binder: &dyn PaintPropertyBinderBase,
     buffer: &InterleavedVertexBuffer,
-    shared: &VertexVectorBasePtr,
+    shared: Option<&SharedVertices>,
     attribute_names: &[&str],
     is_constant: bool,
     properties_as_uniforms: &mut StringIDSetsPair,
@@ -847,7 +842,9 @@ pub(crate) fn read_data_driven_paint_property(
     for (attr_index, attribute_name) in attribute_names.iter().enumerate() {
         // Apply the property, or add it to the uniforms collection if it's constant.
         if !is_constant && binder.binder_vertex_count(buffer) > 0 {
-            if let Some(attr) = attrs.set(*data_driven_attr_id, -1, AttributeDataType::Invalid, 0) {
+            if let Some(shared) = shared
+                && let Some(attr) = attrs.set(*data_driven_attr_id, AttributeDataType::Invalid)
+            {
                 binder.apply(buffer, shared, attr_index, attr);
             }
         } else {
@@ -936,7 +933,6 @@ macro_rules! paint_property_binders {
                 }
                 $($crate::paint_property_binder::PaintPropertyBinderBase::update_vectors(
                     &mut self.$field, &mut self.interleaved_vertex_buffer, states, layer);)+
-                // interleavedVertexBuffer.sharedVertexVector->updateModified(true)
             }
 
             /// True if a feature state change rewrites the data-driven values.

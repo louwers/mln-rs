@@ -25,7 +25,8 @@ use smallvec::SmallVec;
 use crate::bucket::Bucket;
 use crate::layout::layout::{BuildParams, Layout, LayoutParameters, SourceLayer};
 use crate::layout::tile_layout::{Built, Resolved};
-use crate::render_layer::{ErasedLayerBucket, LayerBucket, RenderLayer};
+use crate::render_layer::RenderLayer;
+use crate::render_tile::TileView;
 
 /// A layer type that the renderer draws.
 pub(crate) trait LayerType: StyleLayerType {
@@ -37,6 +38,13 @@ pub(crate) trait LayerType: StyleLayerType {
     /// The bucket the layout makes. [`NoBucket`](crate::bucket::NoBucket)
     /// for a type that doesn't lay out.
     type Bucket: Bucket + Wire;
+
+    /// What a frame's tile shows a layer of the type, which its draws draw:
+    /// its bucket in the tile's layout
+    /// ([`LayerBucket`](crate::render_layer::LayerBucket)), a raster or
+    /// raster-dem tile's own bucket, or nothing for a type without a source
+    /// ([`NoTileBucket`](crate::render_tile::NoTileBucket)).
+    type TileBucket<'a>: TileView<'a>;
 
     /// Whether the layout of `group` can need glyphs or images. A tile
     /// makes such a group's layout before the dependencies are resolved,
@@ -116,9 +124,6 @@ pub(crate) trait ErasedEvaluatedLayer: Any + Send + Sync {
 
     fn shared_style(&self) -> Arc<dyn ErasedLayerStyle>;
 
-    /// The `RenderPass` bits the layer draws in.
-    fn render_passes(&self) -> u8;
-
     /// Bit i is set when the i-th data-driven paint property is the same for
     /// every feature.
     fn constants_mask(&self) -> u64;
@@ -146,10 +151,6 @@ impl<T: LayerType> ErasedEvaluatedLayer for EvaluatedLayer<T> {
 
     fn shared_style(&self) -> Arc<dyn ErasedLayerStyle> {
         Arc::<LayerStyle<T>>::clone(&self.style)
-    }
-
-    fn render_passes(&self) -> u8 {
-        self.render_passes
     }
 
     fn constants_mask(&self) -> u64 {
@@ -268,19 +269,6 @@ pub(crate) fn recover_bucket<T: LayerType>(bucket: &dyn Bucket) -> Option<&T::Bu
 pub(crate) fn recover_bucket_mut<T: LayerType>(bucket: &mut dyn Bucket) -> Option<&mut T::Bucket> {
     let any: &mut dyn Any = bucket;
     any.downcast_mut()
-}
-
-impl<'a> ErasedLayerBucket<'a> {
-    /// The bucket and the layer's values as those of a `T` layer, or `None`
-    /// for another type's.
-    pub(crate) fn recover<T: LayerType>(self) -> Option<LayerBucket<'a, T>> {
-        let layer: &dyn Any = self.layer;
-        Some(LayerBucket {
-            bucket: recover_bucket::<T>(self.bucket)?,
-            bucket_index: self.bucket_index,
-            layer: layer.downcast_ref()?,
-        })
-    }
 }
 
 /// `group`'s layers as `T` layers' values; fails if one is another type's.

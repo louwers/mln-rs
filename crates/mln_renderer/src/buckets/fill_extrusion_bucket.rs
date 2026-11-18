@@ -1,12 +1,10 @@
-// The vertex and index vectors are `GeometryVec`s, which a worker fills
-// and the bucket's upload moves into the gfx vectors its draws reference.
+// The vertices and indices are `GeometryVec`s, which a worker fills and the
+// bucket's upload moves into the context's stores, which its draws read.
 
-use std::rc::Rc;
 use std::sync::Arc;
 
 use geometry::Point;
 use mln_gfx::shaders::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
-use mln_gfx::vertex_vector::{VertexVector, VertexVectorBasePtr};
 use mln_map_types::TransformState;
 use mln_style::PropertyEvaluationParameters;
 use mln_style::evaluated::Evaluated;
@@ -26,7 +24,7 @@ use mln_util::vectors::Vec3f;
 use mln_vec_map::VecMap;
 
 use crate::bucket::{Bucket, BucketBase, UploadNeeds};
-use crate::bucket_geometry::{BucketGeometry, GeometryVec};
+use crate::bucket_geometry::{GeometryUpload, GeometryVec};
 use crate::gfx::fill_large_mesh_arrays::fill_large_mesh_arrays;
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::pattern_layout::{PatternLayerMap, PatternLayoutSpec};
@@ -72,19 +70,19 @@ pub(crate) use crate::render_light::EvaluatedLight;
 /// The quads of the walls of `vertices`: each vertex with each corner of the
 /// static quad, in its order. The quad of the wall from a vertex is its four
 /// corners, and the next four are the next vertex's.
-pub(crate) fn wall_quad_vertices(vertices: &[FillExtrusionLayoutVertex]) -> VertexVectorBasePtr {
+pub(crate) fn wall_quad_vertices(vertices: &[FillExtrusionLayoutVertex]) -> Vec<FillExtrusionWallVertex> {
     let corners = RenderStaticData::fill_extrusion_vertices();
     let quads: Vec<FillExtrusionWallVertex> = vertices
         .iter()
         .flat_map(|&vertex| corners.iter().map(move |&corner| FillExtrusionWallVertex { corner, vertex }))
         .collect();
-    Rc::new(VertexVector::from_vec_released(quads))
+    quads
 }
 
 /// The paint values of the quads of `wall_quad_vertices`: those of each of
 /// the first `walls` vertices in `paint`, `stride` bytes each, for each
 /// corner of its wall.
-pub(crate) fn wall_quad_paint(paint: &[u8], stride: usize, walls: usize) -> VertexVectorBasePtr {
+pub(crate) fn wall_quad_paint(paint: &[u8], stride: usize, walls: usize) -> Vec<u8> {
     let mut values = Vec::with_capacity(4 * stride * walls);
     if stride > 0 {
         for vertex in paint.chunks_exact(stride).take(walls) {
@@ -93,7 +91,7 @@ pub(crate) fn wall_quad_paint(paint: &[u8], stride: usize, walls: usize) -> Vert
             }
         }
     }
-    Rc::new(VertexVector::from_vec_released(values))
+    values
 }
 
 #[derive(Clone, mln_wire::Wire)]
@@ -345,7 +343,7 @@ impl Bucket for FillExtrusionBucket {
         Ok(())
     }
 
-    fn upload(&mut self, geometry: &mut BucketGeometry, needs: UploadNeeds) {
+    fn upload(&mut self, geometry: &mut GeometryUpload<'_>, needs: UploadNeeds) {
         // Walls that aren't instances of the static quad are quads of their
         // own, made of the vertices and paint values before those move.
         let walls = self.vertices.len().saturating_sub(1);

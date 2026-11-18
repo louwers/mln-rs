@@ -608,9 +608,6 @@ impl ErasedEvaluatedLayer for Unknown {
     fn shared_style(&self) -> Arc<dyn mln_style::layer_type::ErasedLayerStyle> {
         Arc::clone(&self.0)
     }
-    fn render_passes(&self) -> u8 {
-        0
-    }
     fn constants_mask(&self) -> u64 {
         0
     }

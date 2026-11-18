@@ -15,7 +15,6 @@ use std::sync::Arc;
 
 use mln_gfx::RendererBackend;
 use mln_gfx::gpu::Gpu;
-use mln_style::PropertyEvaluationParameters;
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::{
     Custom, CustomLayerFrame, CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerRenderParameters,
@@ -28,14 +27,14 @@ use crate::layer_drawing::{DrawGroup, DrawOrder, LayerDrawing, TileMap};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{
-    Atlases, LayerSource, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
-};
+use crate::render_layer::{Atlases, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer};
 use crate::render_pass::RenderPass;
+use crate::render_tile::{FrameTile, NoTileBucket};
 
 impl LayerType for Custom {
     type Layout = NoLayout;
     type Bucket = NoBucket;
+    type TileBucket<'a> = NoTileBucket;
 
     fn render_layer(style: Arc<LayerStyle<Custom>>) -> Box<dyn RenderLayer> {
         Box::new(RenderCustomLayer::new(style))
@@ -142,6 +141,10 @@ impl LayerDrawing for CustomDrawing {
 
     fn clear(&mut self) {}
 
+    fn begin_frame(&mut self) {}
+
+    fn clear_frame(&mut self) {}
+
     fn upload(&mut self, _context: &mut Context) {}
 
     fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
@@ -164,11 +167,7 @@ impl TypedLayer for RenderCustomLayer {
         PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
 
-    fn passes(
-        &mut self,
-        _parameters: &PropertyEvaluationParameters,
-        _evaluated: &mut EvaluatedLayer<Custom>,
-    ) -> RenderPass {
+    fn passes(&self, _evaluated: &EvaluatedLayer<Custom>) -> RenderPass {
         RenderPass::Translucent
     }
 
@@ -176,7 +175,7 @@ impl TypedLayer for RenderCustomLayer {
         &mut self,
         _parameters: &mut PaintParameters<'_>,
         _atlases: &Atlases,
-        _source: Option<LayerSource<'_, Custom>>,
+        _tiles: &[FrameTile<'_, Custom>],
     ) {
         self.drawing.updated = true;
     }

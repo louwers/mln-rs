@@ -23,8 +23,10 @@ use crate::render_tile::RenderTile;
 /// same.
 pub(crate) fn bind_no_projection(layer_uniforms: &mut UniformBufferArray, context: &mut Context) {
     if layer_uniforms.get(ID_PROJECTION_UBO).is_none() {
-        layer_uniforms
-            .set(ID_PROJECTION_UBO, context.create_storage_buffer(bytemuck::bytes_of(&ProjectionUBO::default())));
+        layer_uniforms.set(
+            ID_PROJECTION_UBO,
+            context.device().create_storage_buffer(bytemuck::bytes_of(&ProjectionUBO::default())),
+        );
     }
 }
 

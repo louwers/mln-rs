@@ -16,7 +16,6 @@ use super::{
     BindGroupEntry, BindingsDesc, BufferId, BufferUsage, Draw, GeometryDesc, GpuError, PassDesc, SamplerId, ShaderId,
     TargetFormats, TextureFormat, TextureId, TextureRegion, TextureUsage, VertexBufferLayout, VertexStep,
 };
-use crate::vertex_attribute::VertexAttribute;
 
 /// What the checks read of a buffer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -204,7 +203,7 @@ fn elements(layout: &VertexBufferLayout, bytes: u64) -> u32 {
     let end = layout
         .attributes
         .iter()
-        .map(|attribute| u64::from(attribute.offset) + VertexAttribute::get_stride_of(attribute.format) as u64)
+        .map(|attribute| u64::from(attribute.offset) + attribute.format.stride() as u64)
         .max()
         .unwrap_or(0);
     if end == 0 {

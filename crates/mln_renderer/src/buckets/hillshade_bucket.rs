@@ -10,7 +10,7 @@ use mln_util::constants;
 use mln_util::time::Instant;
 
 use crate::bucket::{Bucket, BucketBase, UploadNeeds};
-use crate::bucket_geometry::BucketGeometry;
+use crate::bucket_geometry::GeometryUpload;
 use crate::geometry::dem_data::DEMData;
 use crate::tile_mask::TileMask;
 
@@ -192,7 +192,7 @@ impl Bucket for HillshadeBucket {
         &self.base
     }
 
-    fn upload(&mut self, _geometry: &mut BucketGeometry, _needs: UploadNeeds) {
+    fn upload(&mut self, _geometry: &mut GeometryUpload<'_>, _needs: UploadNeeds) {
         self.upload_dem();
     }
 

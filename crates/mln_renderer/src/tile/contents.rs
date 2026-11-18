@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use mln_style::expression::GlobalStateMap;
 use mln_style::layer_type::ErasedLayerStyle;
-use mln_style_types::image::{ImagePosition, ImagePositions, ImageType};
+use mln_style_types::image::{ImagePositions, ImageType};
 use mln_text::glyph::{GlyphID, GlyphPositions};
 use mln_text::tagged_string::font_stack_hash;
 use mln_tile_id::OverscaledTileID;
@@ -24,17 +24,17 @@ use mln_util::pool::TaskGroup;
 use mln_vec_map::{VecMap, VecSet};
 
 use crate::bucket::{Bucket, LayerFeatureStates, UploadNeeds};
-use crate::bucket_geometry::BucketGeometry;
+use crate::bucket_geometry::{BucketGeometry, GeometryUpload};
 use crate::buckets::hillshade_bucket::HillshadeBucket;
 use crate::buckets::raster_bucket::RasterBucket;
 use crate::geometry::feature_index::{FeatureIndex, QueryLayers, QueryResults};
 use crate::gfx::context::Context;
 use crate::gfx::dynamic_texture_atlas::{AtlasLease, BinUse, DynamicTextureAtlas};
 use crate::layer_drawing::{BucketChanges, ChangedBuckets};
-use crate::layer_type::{ErasedEvaluatedLayer, LayerType};
+use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layout::tile_layout::{Dependencies, Resolved};
 use crate::query::{RenderedQueryOptions, SourceQueryOptions};
-use crate::render_layer::{ErasedLayerBucket, LayerBucket};
+use crate::render_layer::ErasedLayerBucket;
 use crate::render_orchestrator::drop_on_workers;
 use crate::source_state::SourceFeatureState;
 use crate::text::glyph_store::HBShapeResults;
@@ -186,13 +186,6 @@ impl LayoutResult {
             return None;
         }
         Some(result)
-    }
-
-    /// The bucket of the layer `layer_id`, if it was laid out as a layer of
-    /// the type `T`: the layer type's glue recovers its own bucket here.
-    #[inline]
-    pub(crate) fn typed_bucket<T: LayerType>(&self, layer_id: &str) -> Option<LayerBucket<'_, T>> {
-        self.layer_render_data.get(layer_id)?.recover()
     }
 
     /// Brings the buckets' feature state to `states`, for the features of
@@ -360,7 +353,7 @@ pub(crate) struct GeometryContents {
     /// What the layout used and asked for.
     pub(crate) deps: Rc<Dependencies>,
     pub(crate) textures: TileAtlasTextures,
-    /// The gfx vectors the buckets' uploads moved their geometry into.
+    /// The geometry the buckets' uploads moved into the context's stores.
     pub(crate) bucket_geometry: BucketGeometry,
 }
 
@@ -384,11 +377,13 @@ impl GeometryContents {
     }
 
     /// Readies the buckets that are new or changed since their last upload
-    /// for the tile's draws ([`Bucket::upload`]).
-    pub(crate) fn upload(&mut self, needs: UploadNeeds) {
+    /// for the tile's draws ([`Bucket::upload`]), moving their geometry into
+    /// `context`'s stores.
+    pub(crate) fn upload(&mut self, context: &mut Context, needs: UploadNeeds) {
+        let mut upload = GeometryUpload::new(&mut self.bucket_geometry, context);
         for bucket in self.result.layer_render_data.buckets_mut() {
             if bucket.needs_upload() {
-                bucket.upload(&mut self.bucket_geometry, needs);
+                bucket.upload(&mut upload, needs);
             }
         }
     }
@@ -565,19 +560,12 @@ impl Contents {
         }
     }
 
-    pub(crate) fn pattern(&self, pattern: &str) -> Option<ImagePosition> {
-        self.geometry()?.pattern_positions()?.get(pattern).cloned()
-    }
-
     /// Readies the buckets that are new or changed since their last upload
-    /// for the frame's draws ([`Bucket::upload`]), and puts the indexes they
-    /// moved in `context`'s store.
+    /// for the frame's draws ([`Bucket::upload`]), moving their geometry
+    /// into `context`'s stores.
     pub(crate) fn upload(&mut self, context: &mut Context, needs: UploadNeeds) {
         match self {
-            Contents::Geometry(contents) => {
-                contents.upload(needs);
-                contents.bucket_geometry.store_indexes(context);
-            }
+            Contents::Geometry(contents) => contents.upload(context, needs),
             Contents::Raster(bucket) => bucket.upload_image(),
             Contents::Dem(bucket) => bucket.upload_dem(),
             Contents::Empty => {}

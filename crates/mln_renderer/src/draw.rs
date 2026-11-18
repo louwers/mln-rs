@@ -1,9 +1,13 @@
 //! The GPU objects of a draw, which the renderer keeps between frames and
 //! makes again only when what they are made of changes.
+//!
+//! A draw owns what is its own, its own indexes and attribute data, and
+//! holds what it shares with other draws, its textures and the indexes and
+//! vertices of buckets and static geometry, through handles of the context's
+//! stores (`gfx::store`), which keep them while the draw lasts.
 
 use std::rc::Rc;
 
-use mln_gfx::attribute::AttributeBindingArray;
 use mln_gfx::buffer::BufferPtr;
 use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
@@ -19,20 +23,20 @@ use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{MAX_TEXTURE_COUNT_PER_SHADER, MAX_UBO_COUNT_PER_SHADER};
 use mln_gfx::shaders::shader_program::{ShaderProgram, ShaderProgramPtr};
 use mln_gfx::stencil_mode::StencilMode;
-use mln_gfx::vertex_attribute::{VertexAttribute, VertexAttributeArray};
 use mln_util::logging::{Event, Log};
 use mln_util::time::Instant;
 
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
 use crate::gfx::owned::Owned;
-use crate::gfx::texture2d::TextureKey;
+use crate::gfx::store::SharedTexture;
 use crate::gfx::uniform_buffer::UniformBufferArray;
-use crate::gfx::upload;
-use crate::paint_parameters::PaintParameters;
+use crate::gfx::upload::{self, AttributeBindingArray};
+use crate::gfx::vertex_attribute::VertexAttributeArray;
+use crate::paint_parameters::{DrawTarget, PaintParameters};
 
 /// The textures a draw binds, by texture id.
-pub(crate) type Textures = [Option<TextureKey>; MAX_TEXTURE_COUNT_PER_SHADER];
+pub(crate) type Textures = [Option<SharedTexture>; MAX_TEXTURE_COUNT_PER_SHADER];
 
 /// The most vertex buffers a draw binds, WebGPU's default limit.
 const MAX_VERTEX_BUFFERS: usize = 8;
@@ -67,9 +71,8 @@ pub(crate) fn raw_vertices(
     if count == 0 || data_type == AttributeDataType::Invalid || data.is_empty() {
         return attributes;
     }
-    if let Some(attribute) = attributes.set(id, -1, data_type, 0) {
+    if let Some(attribute) = attributes.set(id, data_type) {
         attribute.set_raw_data(data);
-        attribute.set_stride(VertexAttribute::get_stride_of(data_type));
     }
     attributes
 }
@@ -204,8 +207,10 @@ impl DrawObjects {
 
         let force = self.attribute_update_time.is_none();
         let update_time = self.attribute_update_time;
-        let modified = move |attrs: &VertexAttributeArray| update_time.is_none_or(|time| attrs.is_modified_after(time));
-        if std::mem::take(&mut self.vertex_attributes_replaced) || modified(&self.vertex_attributes) {
+        let modified = move |context: &Context, attrs: &VertexAttributeArray| {
+            update_time.is_none_or(|time| upload::modified_after(context, attrs, time))
+        };
+        if std::mem::take(&mut self.vertex_attributes_replaced) || modified(context, &self.vertex_attributes) {
             let mut bindings = upload::build_attribute_bindings(
                 context,
                 shader.vertex_attributes(),
@@ -220,8 +225,8 @@ impl DrawObjects {
             }
         }
 
-        if let Some(attrs) = self.instance_attributes.as_mut().filter(|attrs| modified(attrs)) {
-            let instance_count = attrs.get_min_count();
+        if let Some(attrs) = self.instance_attributes.as_mut().filter(|attrs| modified(context, attrs)) {
+            let instance_count = attrs.min_count();
             let mut bindings = upload::build_attribute_bindings(context, shader.instance_attributes(), attrs, force)?;
             bind_default_values(context, &mut bindings, instance_count)?;
             if self.instance_bindings != bindings {
@@ -231,7 +236,7 @@ impl DrawObjects {
             }
         }
 
-        for &texture in self.textures.iter().flatten() {
+        for texture in self.textures.iter().flatten() {
             if let Err(error) = context.upload_texture(texture) {
                 Log::error(Event::Render, format!("Uploading a texture failed: {error}"));
             }
@@ -268,10 +273,9 @@ impl DrawObjects {
         stencil_mode: StencilMode,
         global_index: u32,
     ) -> Result<(), GpuError> {
-        let Some((size, targets)) = parameters.pass_target() else {
+        let Some(DrawTarget { size, targets, scissor }) = parameters.draw_target() else {
             return Ok(());
         };
-        let scissor = clamped_scissor(parameters, size);
         let context = &mut *parameters.context;
         let index_buffer = self.indexes.buffer(context);
         debug_assert!(index_buffer.is_some(), "a draw of {} draws indexes it didn't upload", self.shader.name());
@@ -377,7 +381,7 @@ impl DrawObjects {
     ) -> Result<BindingsId, GpuError> {
         let mut textures = [None; MAX_TEXTURE_COUNT_PER_SHADER];
         for &id in self.shader.textures() {
-            if let Some(&texture) = self.textures.get(id).and_then(Option::as_ref) {
+            if let Some(texture) = self.textures.get(id).and_then(Option::as_ref) {
                 textures[id] = Some(context.texture_binding(gpu, texture)?);
             }
         }
@@ -455,13 +459,20 @@ impl DrawObjects {
 
     /// The texture it binds as `id`.
     #[must_use]
-    pub(crate) fn texture(&self, id: usize) -> Option<TextureKey> {
-        self.textures[id]
+    pub(crate) fn texture(&self, id: usize) -> Option<&SharedTexture> {
+        self.textures[id].as_ref()
     }
 
     /// Makes `texture` the one it binds as `id`.
-    pub(crate) fn set_texture(&mut self, id: usize, texture: Option<TextureKey>) {
-        self.textures[id] = texture;
+    pub(crate) fn set_texture(&mut self, id: usize, texture: Option<&SharedTexture>) {
+        let slot = &mut self.textures[id];
+        let same = match (slot.as_ref(), texture) {
+            (Some(a), Some(b)) => a.same(b),
+            (a, b) => a.is_none() && b.is_none(),
+        };
+        if !same {
+            *slot = texture.cloned();
+        }
     }
 
     /// Makes `textures` those it binds.
@@ -474,13 +485,13 @@ impl DrawObjects {
     pub(crate) fn texture_or_insert_with(
         &mut self,
         id: usize,
-        make: impl FnOnce() -> Option<TextureKey>,
-    ) -> Option<TextureKey> {
+        make: impl FnOnce() -> Option<SharedTexture>,
+    ) -> Option<&SharedTexture> {
         let texture = &mut self.textures[id];
         if texture.is_none() {
             *texture = make();
         }
-        *texture
+        texture.as_ref()
     }
 
     /// Replaces the indexes and the segments drawn from them.
@@ -496,8 +507,8 @@ impl DrawObjects {
 }
 
 /// A copy of `attrs`, none of whose attributes has data of its own: the
-/// copy reads the same shared vertex vectors, so draws of either bind the
-/// same buffers.
+/// copy reads the same vertices of the context's store, so draws of either
+/// bind the same buffers.
 #[must_use]
 pub(crate) fn copy_shared_attributes(attrs: &VertexAttributeArray) -> VertexAttributeArray {
     let mut copy = VertexAttributeArray::new();
@@ -505,18 +516,11 @@ pub(crate) fn copy_shared_attributes(attrs: &VertexAttributeArray) -> VertexAttr
         let Some(attr) = attrs.get(id) else {
             continue;
         };
-        debug_assert!(
-            attr.get_shared_raw_data().is_some() || attr.get_raw_data().is_empty(),
-            "a copied attribute has data of its own"
-        );
-        if let Some(copied) = copy.set(id, attr.get_index(), attr.get_data_type(), 0) {
-            copied.set_shared_raw_data(
-                attr.get_shared_raw_data().cloned(),
-                attr.get_shared_offset(),
-                attr.get_shared_vertex_offset(),
-                attr.get_shared_stride(),
-                attr.get_shared_type(),
-            );
+        debug_assert!(attr.shared().is_some() || attr.raw_data().is_empty(), "a copied attribute has data of its own");
+        if let Some(copied) = copy.set(id, attr.data_type())
+            && let Some(shared) = attr.shared()
+        {
+            copied.set_shared(shared.clone());
         }
     }
     copy
@@ -593,14 +597,4 @@ fn vertex_slots(
         slots.truncate(MAX_VERTEX_BUFFERS);
     }
     slots
-}
-
-/// The paint parameters' scissor rect within a target of `size`, `None`
-/// where nothing of it is.
-pub(crate) fn clamped_scissor(parameters: &PaintParameters<'_>, size: mln_util::size::Size) -> Option<Scissor> {
-    let rect = parameters.scissor_rect;
-    let (x, y) = (rect.x as u32, rect.y as u32);
-    let width = if x < size.width { rect.width.min(size.width - x) } else { 0 };
-    let height = if y < size.height { rect.height.min(size.height - y) } else { 0 };
-    (width > 0 && height > 0).then_some(Scissor { x, y, width, height })
 }

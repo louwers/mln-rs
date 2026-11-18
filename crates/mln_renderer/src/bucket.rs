@@ -16,7 +16,7 @@ use mln_util::error::Error;
 use mln_util::identity::SimpleIdentity;
 use mln_wire::{Reader, Wire, Writer};
 
-use crate::bucket_geometry::BucketGeometry;
+use crate::bucket_geometry::GeometryUpload;
 use crate::layout::pattern_layout::PatternLayerMap;
 
 pub(crate) type FeatureStates = mln_util::hash::HashMap<String, mln_style::expression::expression::FeatureState>;
@@ -106,11 +106,11 @@ pub(crate) trait Bucket: Any + Send + CloneBucket {
     }
 
     /// Readies the bucket for its tile's draws, once it has data and until
-    /// it changes again: moves its vertices and indices into `geometry`,
-    /// the gfx vectors the draws share, all but the values that feature
-    /// state rewrites, which stay with the bucket. What else the draws
-    /// read, `needs` says.
-    fn upload(&mut self, geometry: &mut BucketGeometry, needs: UploadNeeds);
+    /// it changes again: moves its vertices and indices into the context's
+    /// stores through `geometry`, for the draws to share, all but the values
+    /// that feature state rewrites, which stay with the bucket. What else
+    /// the draws read, `needs` says.
+    fn upload(&mut self, geometry: &mut GeometryUpload<'_>, needs: UploadNeeds);
 
     fn has_data(&self) -> bool;
 
@@ -150,7 +150,7 @@ impl Bucket for NoBucket {
         match *self {}
     }
 
-    fn upload(&mut self, _geometry: &mut BucketGeometry, _needs: UploadNeeds) {
+    fn upload(&mut self, _geometry: &mut GeometryUpload<'_>, _needs: UploadNeeds) {
         match *self {}
     }
 

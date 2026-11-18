@@ -77,7 +77,7 @@ pub(crate) trait RenderSource {
 
     /// Updates the source's draws of the debug overlays; a no-op for the
     /// sources that have none (the image source).
-    fn update_debug_draws(&self, _debug_layers: &mut DebugLayers, _parameters: &PaintParameters<'_>) {}
+    fn update_debug_draws(&self, _debug_layers: &mut DebugLayers, _parameters: &mut PaintParameters<'_>) {}
 
     /// Releases the render data from the last `update_render_tiles` while the source is
     /// disabled.

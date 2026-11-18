@@ -32,7 +32,7 @@ font-face-shaper = []
 bench = []
 
 [dependencies]
-bytemuck.workspace = true
+bytemuck = { workspace = true, features = ["extern_crate_alloc"] }
 earcut.workspace = true
 etagere.workspace = true
 feature.workspace = true

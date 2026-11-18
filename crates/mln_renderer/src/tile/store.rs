@@ -67,9 +67,6 @@ pub(crate) struct StoreContext {
     pub(crate) pool: TaskGroup,
     /// Where glyphs load from.
     pub(crate) file_source: Option<Arc<dyn FileSource>>,
-    /// What the draws read of the buckets, as the last upload said; `None`
-    /// before the first.
-    pub(crate) upload_needs: Option<UploadNeeds>,
     events: Vec<StoreEvent>,
     /// What the glyph and image stores reported, in the order they did.
     resource_events: Vec<RendererEvent>,
@@ -236,7 +233,6 @@ impl TileStore {
             atlas: DynamicTextureAtlas::new(),
             pool,
             file_source: None,
-            upload_needs: None,
             events: Vec::new(),
             resource_events: Vec::new(),
         };
@@ -326,7 +322,6 @@ impl TileStore {
         context: &mut Context,
         needs: UploadNeeds,
     ) {
-        self.ctx.upload_needs = Some(needs);
         let Some(tiles) = self.sources.get_mut(&key) else {
             return;
         };

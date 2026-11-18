@@ -17,7 +17,7 @@ use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use crate::gfx::context::Context;
-use crate::gfx::texture2d::{OwnedTexture, TextureKey};
+use crate::gfx::store::SharedTexture;
 
 /// Identifies a bin within a dynamic texture.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -104,7 +104,7 @@ pub(crate) struct DynamicTexture {
     /// The images queued for the frame's next upload, keyed by handle id.
     images_to_upload: HashMap<DynamicTextureBinId, (RectU16, QueuedPixels)>,
     /// The GPU texture, from the first upload.
-    texture: Option<OwnedTexture>,
+    texture: Option<SharedTexture>,
 }
 
 impl std::fmt::Debug for DynamicTexture {
@@ -152,8 +152,8 @@ impl DynamicTexture {
     }
 
     /// The page's texture in the context's store, from the first upload.
-    pub(crate) fn texture(&self) -> Option<TextureKey> {
-        self.texture.as_ref().map(OwnedTexture::key)
+    pub(crate) fn texture(&self) -> Option<&SharedTexture> {
+        self.texture.as_ref()
     }
 
     pub(crate) fn pixel_format(&self) -> TexturePixelType {
@@ -255,12 +255,12 @@ impl DynamicTexture {
                     ..SamplerState::default()
                 });
             });
-            if let Err(error) = context.create_texture(texture.key()) {
+            if let Err(error) = context.create_texture(&texture) {
                 Log::error(Event::Render, format!("Making an atlas texture failed: {error}"));
             }
             self.texture = Some(texture);
         }
-        let Some(texture) = self.texture.as_ref().map(OwnedTexture::key) else {
+        let Some(texture) = self.texture.as_ref() else {
             return;
         };
         if self.images_to_upload.is_empty() {

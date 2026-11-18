@@ -1,10 +1,9 @@
-// A tile's draws get copies of the bucket's vertex vectors. When placement,
-// sorting or feature state change the bucket (the changes the tile's entry
-// in the layer's `TileMap` collects), `update` replaces just those
-// attributes (opacity, dynamic positions, binders) and the triangle indices
-// of the tile's draws.
+// A tile's draws read the bucket's layout vertices and copies of what
+// placement lays out. When placement, sorting or feature state change the
+// bucket (the changes the tile's entry in the layer's `TileMap` collects),
+// the draw update replaces just those attributes (opacity, dynamic
+// positions, binders) and the triangle indices of the tile's draws.
 
-use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_gfx::gpu::Gpu;
@@ -25,11 +24,9 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::shaders::symbol_layer_ubo::{
     CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
 };
-use mln_gfx::vertex_attribute::VertexAttributeArray;
-use mln_gfx::vertex_vector::VertexVector;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::{Projection, ProjectionData};
-use mln_style::layer_type::LayerStyle;
+use mln_style::layer_type::{ErasedLayerStyle as _, LayerStyle};
 use mln_style::layers::Symbol;
 use mln_style::layers::symbol_layer::SymbolLayerPaintPropertyOverrides;
 use mln_style::layers::symbol_layer_properties::{SymbolLayoutProperties, SymbolPaintProperties};
@@ -45,16 +42,19 @@ use mln_util::hash::HashMap;
 use mln_util::identity::SimpleIdentity;
 use mln_util::mat4::{Mat4, matrix};
 
-use super::{cast_matrix, shared_vertices};
+use super::cast_matrix;
 use crate::bucket::Bucket;
-use crate::bucket_geometry::{BucketGeometry, bucket_vertices, paint_vertices, released_indexes};
+use crate::bucket_geometry::{BucketGeometry, bucket_vertices, paint_vertices, released_indexes, released_vertices};
 use crate::buckets::symbol_bucket::{
     Buffer, CollisionBoxDynamicVertex, CollisionBoxLayoutVertex, CollisionBuffer, PaintProperties, SymbolBucket,
+    SymbolDynamicLayoutVertex, SymbolOpacityVertex,
 };
 use crate::draw::{DrawGeometry, DrawObjects, Textures, copy_shared_attributes};
 use crate::geometry::feature_index::FeatureIndex;
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
+use crate::gfx::vertex_attribute::VertexAttributeArray;
+use crate::gfx::vertices::TypedVertices;
 use crate::layer_drawing::{
     BucketChanges, DrawDepth, DrawGroup, DrawList, DrawObjectsMut, DrawOrder, FrameDraw, KeptDraw, LayerDrawing,
     LayerDraws, TileMap, UniformWriter,
@@ -66,11 +66,11 @@ use crate::layout::symbol_projection::{get_gl_coord_matrix, get_label_plane_matr
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
 use crate::render_layer::{
-    Atlases, BucketKey, BucketPlacementData, LayerParts, LayerSource, LayerTiles, LayerUpdateParameters, LayerValues,
-    Parts, PartsMut, PlacedTile, RenderLayer, RenderLayerBase, SymbolTranslate, TypedLayer,
+    Atlases, BucketKey, BucketPlacementData, LayerBucket, LayerUpdateParameters, LayerValues, Parts, PartsMut,
+    PlacedTile, RenderLayer, RenderLayerBase, SymbolTranslate, TypedLayer,
 };
 use crate::render_pass::RenderPass;
-use crate::render_source::TileOrder;
+use crate::render_source::{RenderSource, TileOrder};
 use crate::render_tile::{FrameTile, RenderTile};
 use crate::tile_matrix::{projection_data, to_projection_ubo};
 
@@ -164,7 +164,8 @@ pub(crate) fn screen_matrix(translation: [f32; 2]) -> Mat4 {
     reason = "the bucket's buffers and the layer's paint properties, and the attributes and uniforms they fill"
 )]
 fn update_tile_attributes(
-    geometry: Option<&BucketGeometry>,
+    context: &mut Context,
+    geometry: &BucketGeometry,
     buffer: &Buffer,
     layer_id: &str,
     is_text: bool,
@@ -172,14 +173,19 @@ fn update_tile_attributes(
     evaluated: &SymbolPaintProperties::PossiblyEvaluated,
     attribs: &mut VertexAttributeArray,
     properties_as_uniforms: &mut StringIDSetsPair,
-) {
-    set_binder_attributes(geometry, is_text, paint_props, evaluated, attribs, properties_as_uniforms);
-    set_static_and_dynamic_attributes(geometry, buffer, layer_id, attribs);
+) -> PlacedVertices {
+    set_binder_attributes(context, geometry, is_text, paint_props, evaluated, attribs, properties_as_uniforms);
+    let mut placed = PlacedVertices::default();
+    set_layout_attributes(geometry, buffer, attribs);
+    set_projected_pos_attribute(context, buffer, layer_id, attribs, &mut placed.projected);
+    set_fade_opacity_attribute(context, buffer, attribs, &mut placed.opacity);
+    placed
 }
 
-/// The data-driven paint property half of `updateTileAttributes`.
+/// The attributes of the data-driven paint properties.
 fn set_binder_attributes(
-    geometry: Option<&BucketGeometry>,
+    context: &mut Context,
+    geometry: &BucketGeometry,
     is_text: bool,
     paint_props: &PaintProperties,
     evaluated: &SymbolPaintProperties::PossiblyEvaluated,
@@ -191,12 +197,13 @@ fn set_binder_attributes(
     if is_text {
         let b = &paint_props.text_binders;
         let ib = &b.interleaved_vertex_buffer;
-        let shared = paint_vertices(geometry, ib, b.depends_on_feature_state());
+        let shared = paint_vertices(context, geometry, ib, b.depends_on_feature_state());
+        let shared = shared.as_ref();
         read_data_driven_paint_property(
             attribs,
             &b.text_opacity,
             ib,
-            &shared,
+            shared,
             &["a_opacity"],
             evaluated.text_opacity.is_constant(),
             pau,
@@ -206,7 +213,7 @@ fn set_binder_attributes(
             attribs,
             &b.text_color,
             ib,
-            &shared,
+            shared,
             &["a_fill_color"],
             evaluated.text_color.is_constant(),
             pau,
@@ -216,7 +223,7 @@ fn set_binder_attributes(
             attribs,
             &b.text_halo_color,
             ib,
-            &shared,
+            shared,
             &["a_halo_color"],
             evaluated.text_halo_color.is_constant(),
             pau,
@@ -226,7 +233,7 @@ fn set_binder_attributes(
             attribs,
             &b.text_halo_width,
             ib,
-            &shared,
+            shared,
             &["a_halo_width"],
             evaluated.text_halo_width.is_constant(),
             pau,
@@ -236,7 +243,7 @@ fn set_binder_attributes(
             attribs,
             &b.text_halo_blur,
             ib,
-            &shared,
+            shared,
             &["a_halo_blur"],
             evaluated.text_halo_blur.is_constant(),
             pau,
@@ -245,12 +252,13 @@ fn set_binder_attributes(
     } else {
         let b = &paint_props.icon_binders;
         let ib = &b.interleaved_vertex_buffer;
-        let shared = paint_vertices(geometry, ib, b.depends_on_feature_state());
+        let shared = paint_vertices(context, geometry, ib, b.depends_on_feature_state());
+        let shared = shared.as_ref();
         read_data_driven_paint_property(
             attribs,
             &b.icon_opacity,
             ib,
-            &shared,
+            shared,
             &["a_opacity"],
             evaluated.icon_opacity.is_constant(),
             pau,
@@ -260,7 +268,7 @@ fn set_binder_attributes(
             attribs,
             &b.icon_color,
             ib,
-            &shared,
+            shared,
             &["a_fill_color"],
             evaluated.icon_color.is_constant(),
             pau,
@@ -270,7 +278,7 @@ fn set_binder_attributes(
             attribs,
             &b.icon_halo_color,
             ib,
-            &shared,
+            shared,
             &["a_halo_color"],
             evaluated.icon_halo_color.is_constant(),
             pau,
@@ -280,7 +288,7 @@ fn set_binder_attributes(
             attribs,
             &b.icon_halo_width,
             ib,
-            &shared,
+            shared,
             &["a_halo_width"],
             evaluated.icon_halo_width.is_constant(),
             pau,
@@ -290,7 +298,7 @@ fn set_binder_attributes(
             attribs,
             &b.icon_halo_blur,
             ib,
-            &shared,
+            shared,
             &["a_halo_blur"],
             evaluated.icon_halo_blur.is_constant(),
             pau,
@@ -299,81 +307,96 @@ fn set_binder_attributes(
     }
 }
 
-/// The vertex-buffer half of `updateTileAttributes`.
-fn set_static_and_dynamic_attributes(
-    geometry: Option<&BucketGeometry>,
-    buffer: &Buffer,
-    layer_id: &str,
-    attribs: &mut VertexAttributeArray,
-) {
-    set_layout_attributes(geometry, buffer, attribs);
-    set_projected_pos_attribute(buffer, layer_id, attribs);
-    set_fade_opacity_attribute(buffer, attribs);
-}
-
-/// The static half of `updateTileAttributes`: the layout vertices.
-fn set_layout_attributes(geometry: Option<&BucketGeometry>, buffer: &Buffer, attribs: &mut VertexAttributeArray) {
+/// The attributes of the layout vertices.
+fn set_layout_attributes(geometry: &BucketGeometry, buffer: &Buffer, attribs: &mut VertexAttributeArray) {
     let layout_size = size_of::<crate::buckets::symbol_bucket::SymbolLayoutVertex>() as u32;
-    let layout_data = bucket_vertices(geometry, &buffer.attribute_data);
-    if let Some(attr) = attribs.set(ID_SYMBOL_POS_OFFSET_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-        attr.set_shared_raw_data(Some(Rc::clone(&layout_data)), 0, 0, layout_size, AttributeDataType::Short4);
+    let Some(layout_data) = bucket_vertices(geometry, &buffer.attribute_data) else {
+        return;
+    };
+    if let Some(attr) = attribs.set(ID_SYMBOL_POS_OFFSET_ATTRIBUTE, AttributeDataType::Invalid) {
+        attr.set_shared_vertices(layout_data.clone(), 0, 0, layout_size, AttributeDataType::Short4);
     }
-    if let Some(attr) = attribs.set(ID_SYMBOL_DATA_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-        attr.set_shared_raw_data(Some(Rc::clone(&layout_data)), 8, 0, layout_size, AttributeDataType::UShort4);
+    if let Some(attr) = attribs.set(ID_SYMBOL_DATA_ATTRIBUTE, AttributeDataType::Invalid) {
+        attr.set_shared_vertices(layout_data.clone(), 8, 0, layout_size, AttributeDataType::UShort4);
     }
-    if let Some(attr) = attribs.set(ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-        attr.set_shared_raw_data(Some(Rc::clone(&layout_data)), 16, 0, layout_size, AttributeDataType::Short4);
+    if let Some(attr) = attribs.set(ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE, AttributeDataType::Invalid) {
+        attr.set_shared_vertices(layout_data.clone(), 16, 0, layout_size, AttributeDataType::Short4);
     }
-    if let Some(attr) = attribs.set(ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-        attr.set_shared_raw_data(Some(Rc::clone(&layout_data)), 24, 0, layout_size, AttributeDataType::UShort2);
+    if let Some(attr) = attribs.set(ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE, AttributeDataType::Invalid) {
+        attr.set_shared_vertices(layout_data.clone(), 24, 0, layout_size, AttributeDataType::UShort2);
     }
-    if let Some(attr) = attribs.set(ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-        attr.set_shared_raw_data(Some(layout_data), 28, 0, layout_size, AttributeDataType::Float);
+    if let Some(attr) = attribs.set(ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE, AttributeDataType::Invalid) {
+        attr.set_shared_vertices(layout_data, 28, 0, layout_size, AttributeDataType::Float);
     }
 }
 
 /// Sets the dynamic layout vertices, which placement updates: the layer's
 /// own when it has them.
-fn set_projected_pos_attribute(buffer: &Buffer, layer_id: &str, attribs: &mut VertexAttributeArray) {
+fn set_projected_pos_attribute(
+    context: &mut Context,
+    buffer: &Buffer,
+    layer_id: &str,
+    attribs: &mut VertexAttributeArray,
+    placed: &mut Option<TypedVertices<SymbolDynamicLayoutVertex>>,
+) {
+    let vertices = buffer.dynamic_attribute_data_for(layer_id);
     set_placed_attribute(
+        context,
         attribs,
         ID_SYMBOL_PROJECTED_POS_ATTRIBUTE,
-        buffer.dynamic_attribute_data_for(layer_id),
+        vertices,
         AttributeDataType::Float3,
+        placed,
     );
 }
 
 /// Sets the opacity vertices, which placement updates.
-fn set_fade_opacity_attribute(buffer: &Buffer, attribs: &mut VertexAttributeArray) {
+fn set_fade_opacity_attribute(
+    context: &mut Context,
+    buffer: &Buffer,
+    attribs: &mut VertexAttributeArray,
+    placed: &mut Option<TypedVertices<SymbolOpacityVertex>>,
+) {
+    let vertices = &buffer.opacity_attribute_data;
     set_placed_attribute(
+        context,
         attribs,
         ID_SYMBOL_FADE_OPACITY_ATTRIBUTE,
-        &buffer.opacity_attribute_data,
+        vertices,
         AttributeDataType::Float,
+        placed,
     );
 }
 
-/// Sets attribute `id` of `attribs` to read `vertices`, which placement
-/// updates, as `type_`: into the vertices it reads where they are as many,
-/// so that the upload writes them over their buffer, or else into vertices
-/// of their own. The bucket keeps `vertices`, so the attribute's copy only
-/// stages them for the upload.
+/// Sets attribute `id` of `attribs` to read a copy of `vertices`, which
+/// placement updates, as `type_`: into `placed`, the vertices the attribute
+/// reads, where they are as many, so that the upload writes them over their
+/// buffer, or else into vertices of their own, which `placed` then holds.
 fn set_placed_attribute<V: bytemuck::Pod>(
+    context: &mut Context,
     attribs: &mut VertexAttributeArray,
     id: usize,
     vertices: &[V],
     type_: AttributeDataType,
+    placed: &mut Option<TypedVertices<V>>,
 ) {
-    let updated = attribs.get(id).and_then(|attr| attr.get_shared_raw_data()).is_some_and(|shared| {
-        shared.get_raw_size() == size_of::<V>() && shared.update_raw(bytemuck::cast_slice(vertices))
-    });
-    if updated {
+    if placed.as_ref().is_some_and(|typed| context.update_vertices(typed, vertices)) {
         return;
     }
-    if let Some(attr) = attribs.set(id, -1, AttributeDataType::Invalid, 0) {
-        let shared = Rc::new(VertexVector::from_vec_staged(vertices.to_vec()));
-        attr.set_shared_raw_data(Some(shared), 0, 0, size_of::<V>() as u32, type_);
+    if let Some(attr) = attribs.set(id, AttributeDataType::Invalid) {
+        let typed = context.add_vertices(vertices.to_vec());
+        attr.set_shared_vertices(typed.shared().clone(), 0, 0, size_of::<V>() as u32, type_);
+        *placed = Some(typed);
     }
+}
+
+/// The vertices that placement lays out, which the draws of a tile that read
+/// the same attributes share, of their positions along lines or at variable
+/// anchors and of their opacities.
+#[derive(Clone, Default)]
+struct PlacedVertices {
+    projected: Option<TypedVertices<SymbolDynamicLayoutVertex>>,
+    opacity: Option<TypedVertices<SymbolOpacityVertex>>,
 }
 
 /// A draw the layer keeps of a tile: the halo or the fill of the text or the
@@ -382,6 +405,8 @@ struct SymbolDraw {
     /// The id of the draw's GPU objects, made with them.
     id: SimpleIdentity,
     objects: DrawObjects,
+    /// The vertices placement lays out, which the draw's attributes read.
+    placed: PlacedVertices,
     data: SymbolDrawData,
     /// Whether placement shows any of the draw's symbols. A draw that shows
     /// none doesn't draw, and doesn't copy the bucket's attributes again
@@ -469,6 +494,14 @@ impl LayerDrawing for SymbolDrawing {
 
     fn clear(&mut self) {
         self.tiles.clear();
+        self.clear_frame();
+    }
+
+    fn begin_frame(&mut self) {
+        self.frame.get_or_insert_default();
+    }
+
+    fn clear_frame(&mut self) {
         for draws in [&mut self.frame, &mut self.overlay].into_iter().flatten() {
             draws.clear();
         }
@@ -526,8 +559,9 @@ fn texture_size(context: &Context, objects: &DrawObjects, texture_id: usize) -> 
 /// attributes (a halo and a fill): their triangles, and the attributes,
 /// which the first of them that is visible copies and the others then read.
 fn refresh_draws(
+    context: &mut Context,
     draws: &mut [SymbolDraw],
-    geometry: Option<&BucketGeometry>,
+    geometry: &BucketGeometry,
     bucket: &SymbolBucket,
     layer_id: &str,
     evaluated: &SymbolPaintProperties::PossiblyEvaluated,
@@ -535,7 +569,7 @@ fn refresh_draws(
 ) {
     let mut source = None;
     for (index, draw) in draws.iter_mut().enumerate() {
-        if refresh_draw(draw, geometry, bucket, layer_id, evaluated, refresh, source.is_none()) {
+        if refresh_draw(context, draw, geometry, bucket, layer_id, evaluated, refresh, source.is_none()) {
             source = Some(index);
         }
     }
@@ -544,15 +578,18 @@ fn refresh_draws(
     let Some((source, after)) = rest.split_first_mut() else { return };
     for draw in before.iter_mut().chain(after) {
         draw.objects.share_vertex_attributes(&source.objects);
+        draw.placed = source.placed.clone();
     }
 }
 
 /// Copies again what placement, sorting or feature state changed of the
 /// bucket into a draw of it: its triangles, and where `copy_attributes`, its
 /// attributes. Returns whether it copied the attributes.
+#[expect(clippy::too_many_arguments, reason = "the draw and its tile's bucket, what changed of it, and the context")]
 fn refresh_draw(
+    context: &mut Context,
     draw: &mut SymbolDraw,
-    geometry: Option<&BucketGeometry>,
+    geometry: &BucketGeometry,
     bucket: &SymbolBucket,
     layer_id: &str,
     evaluated: &SymbolPaintProperties::PossiblyEvaluated,
@@ -592,16 +629,16 @@ fn refresh_draw(
     if copy_attributes {
         let attrs = draw.objects.vertex_attributes_mut();
         if refresh.dynamic {
-            set_projected_pos_attribute(buffer, layer_id, attrs);
+            set_projected_pos_attribute(context, buffer, layer_id, attrs, &mut draw.placed.projected);
         }
         if refresh.opacity {
-            set_fade_opacity_attribute(buffer, attrs);
+            set_fade_opacity_attribute(context, buffer, attrs, &mut draw.placed.opacity);
         }
         if refresh.paint
             && let Some(paint_props) = bucket.paint_properties.get(layer_id)
         {
-            let mut properties_as_uniforms = StringIDSetsPair::default();
-            set_binder_attributes(geometry, is_text, paint_props, evaluated, attrs, &mut properties_as_uniforms);
+            let mut uniforms = StringIDSetsPair::default();
+            set_binder_attributes(context, geometry, is_text, paint_props, evaluated, attrs, &mut uniforms);
         }
     }
 
@@ -621,7 +658,7 @@ fn refresh_draw(
 struct SegmentGroup {
     sort_key: f32,
     type_: SymbolType,
-    /// The tile's position among the layer's tiles ([`LayerTiles::get`](crate::render_layer::LayerTiles::get)).
+    /// The tile's index among the layer's tiles of the frame.
     tile_index: usize,
     tile_id: UnwrappedTileID,
     overscaled_z: u8,
@@ -656,6 +693,7 @@ impl SegmentGroup {
 impl LayerType for Symbol {
     type Layout = SymbolLayout;
     type Bucket = SymbolBucket;
+    type TileBucket<'a> = LayerBucket<'a, Symbol>;
 
     /// A symbol layout always waits for its glyphs and images.
     fn layout_can_need_dependencies(_group: &[Arc<EvaluatedLayer<Symbol>>]) -> bool {
@@ -851,6 +889,7 @@ impl RenderSymbolLayer {
     /// first tile that has collision boxes or circles.
     fn rebuild_collision(
         &mut self,
+        context: &mut Context,
         tile_id: &OverscaledTileID,
         bucket: &SymbolBucket,
         evaluated: &SymbolPaintProperties::PossiblyEvaluated,
@@ -858,7 +897,7 @@ impl RenderSymbolLayer {
         let mut collision = Vec::new();
         let mut has_collision = false;
         for is_text in [false, true] {
-            has_collision |= self.add_collision_draws(&mut collision, bucket, evaluated, is_text);
+            has_collision |= self.add_collision_draws(context, &mut collision, bucket, evaluated, is_text);
         }
         if has_collision {
             self.drawing.overlay.get_or_insert_default();
@@ -874,6 +913,7 @@ impl RenderSymbolLayer {
     /// text or icons to `collision`. Returns whether it has any.
     fn add_collision_draws(
         &self,
+        context: &mut Context,
         collision: &mut Vec<CollisionDraw>,
         bucket: &SymbolBucket,
         evaluated: &SymbolPaintProperties::PossiblyEvaluated,
@@ -902,7 +942,7 @@ impl RenderSymbolLayer {
                 return;
             }
             let geometry = DrawGeometry {
-                vertices: collision_vertex_attributes(buffer),
+                vertices: collision_vertex_attributes(context, buffer),
                 vertex_count: buffer.vertices.len(),
                 mode,
                 indexes: released_indexes(&buffer.indices),
@@ -1079,9 +1119,9 @@ impl RenderSymbolLayer {
     /// Makes the frame's draws of the layer's draws of `tiles` that show any
     /// symbols, in `passes`, and of their collision boxes and circles, and
     /// writes the buffers they read.
-    fn make_frame_draws<'a>(
+    fn make_frame_draws(
         &mut self,
-        tiles: impl Iterator<Item = FrameTile<'a, Symbol>>,
+        tiles: &[FrameTile<'_, Symbol>],
         passes: RenderPass,
         paint_parameters: &mut PaintParameters<'_>,
     ) {
@@ -1185,34 +1225,34 @@ fn write_collision_uniforms(
         CollisionTilePropsUBO { extrude_scale, overscale_factor: tile_id.overscale_factor() as f32, pad1: 0.0 };
     let buffers = &mut draw.draw.objects.uniform_buffers;
     let context = &mut *parameters.context;
-    buffers.create_or_update_pod(ID_COLLISION_DRAWABLE_UBO, &draw_ubo, context);
-    buffers.create_or_update_pod(ID_COLLISION_TILE_PROPS_UBO, &tile_props_ubo, context);
-    buffers.create_or_update_pod(ID_COLLISION_PROJECTION_UBO, &to_projection_ubo(&projection), context);
+    buffers.create_or_update_pod(ID_COLLISION_DRAWABLE_UBO, &draw_ubo, context.device());
+    buffers.create_or_update_pod(ID_COLLISION_TILE_PROPS_UBO, &tile_props_ubo, context.device());
+    buffers.create_or_update_pod(ID_COLLISION_PROJECTION_UBO, &to_projection_ubo(&projection), context.device());
 }
 
-fn collision_vertex_attributes(buffer: &CollisionBuffer) -> VertexAttributeArray {
+fn collision_vertex_attributes(context: &mut Context, buffer: &CollisionBuffer) -> VertexAttributeArray {
     let mut attrs = VertexAttributeArray::new();
     let layout_stride = size_of::<CollisionBoxLayoutVertex>() as u32;
-    let layout = shared_vertices(&buffer.vertices);
+    let layout = released_vertices(context, &buffer.vertices);
     let dynamic_stride = size_of::<CollisionBoxDynamicVertex>() as u32;
-    let dynamic = shared_vertices(&buffer.dynamic_vertices);
-    if let Some(attr) = attrs.set(ID_COLLISION_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-        attr.set_shared_raw_data(Some(Rc::clone(&layout)), 0, 0, layout_stride, AttributeDataType::Short2);
+    let dynamic = released_vertices(context, &buffer.dynamic_vertices);
+    if let Some(attr) = attrs.set(ID_COLLISION_POS_VERTEX_ATTRIBUTE, AttributeDataType::Invalid) {
+        attr.set_shared_vertices(layout.clone(), 0, 0, layout_stride, AttributeDataType::Short2);
     }
-    if let Some(attr) = attrs.set(ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-        attr.set_shared_raw_data(Some(Rc::clone(&layout)), 4, 0, layout_stride, AttributeDataType::Short2);
+    if let Some(attr) = attrs.set(ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE, AttributeDataType::Invalid) {
+        attr.set_shared_vertices(layout.clone(), 4, 0, layout_stride, AttributeDataType::Short2);
     }
-    if let Some(attr) = attrs.set(ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-        attr.set_shared_raw_data(Some(Rc::clone(&layout)), 8, 0, layout_stride, AttributeDataType::Short2);
+    if let Some(attr) = attrs.set(ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE, AttributeDataType::Invalid) {
+        attr.set_shared_vertices(layout.clone(), 8, 0, layout_stride, AttributeDataType::Short2);
     }
-    if let Some(attr) = attrs.set(ID_COLLISION_HEIGHT_OFFSET_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-        attr.set_shared_raw_data(Some(layout), 12, 0, layout_stride, AttributeDataType::Float);
+    if let Some(attr) = attrs.set(ID_COLLISION_HEIGHT_OFFSET_VERTEX_ATTRIBUTE, AttributeDataType::Invalid) {
+        attr.set_shared_vertices(layout, 12, 0, layout_stride, AttributeDataType::Float);
     }
-    if let Some(attr) = attrs.set(ID_COLLISION_PLACED_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-        attr.set_shared_raw_data(Some(Rc::clone(&dynamic)), 0, 0, dynamic_stride, AttributeDataType::UShort2);
+    if let Some(attr) = attrs.set(ID_COLLISION_PLACED_VERTEX_ATTRIBUTE, AttributeDataType::Invalid) {
+        attr.set_shared_vertices(dynamic.clone(), 0, 0, dynamic_stride, AttributeDataType::UShort2);
     }
-    if let Some(attr) = attrs.set(ID_COLLISION_SHIFT_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-        attr.set_shared_raw_data(Some(dynamic), 4, 0, dynamic_stride, AttributeDataType::Float2);
+    if let Some(attr) = attrs.set(ID_COLLISION_SHIFT_VERTEX_ATTRIBUTE, AttributeDataType::Invalid) {
+        attr.set_shared_vertices(dynamic, 4, 0, dynamic_stride, AttributeDataType::Float2);
     }
     attrs
 }
@@ -1233,11 +1273,13 @@ impl TypedLayer for RenderSymbolLayer {
         PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
 
-    fn passes(
+    /// The text of a `text-field` with format sections takes the values
+    /// its sections override.
+    fn complete_evaluation(
         &mut self,
         parameters: &PropertyEvaluationParameters,
         evaluated: &mut EvaluatedLayer<Symbol>,
-    ) -> RenderPass {
+    ) {
         if SymbolLayerPaintPropertyOverrides::has_overrides(&self.values.style.layout.text_field) {
             mln_style::format_section_override::set_overrides(
                 &self.values.style.layout,
@@ -1246,7 +1288,9 @@ impl TypedLayer for RenderSymbolLayer {
                 &parameters.global_state,
             );
         }
+    }
 
+    fn passes(&self, evaluated: &EvaluatedLayer<Symbol>) -> RenderPass {
         let evaluated = &evaluated.paint;
         let has_icon_opacity = evaluated.icon_color.constant_or(&SymbolPaintProperties::Defaults::icon_color()).a > 0.0
             || evaluated.icon_halo_color.constant_or(&SymbolPaintProperties::Defaults::icon_halo_color()).a > 0.0;
@@ -1270,7 +1314,7 @@ impl TypedLayer for RenderSymbolLayer {
         &mut self,
         paint_parameters: &mut PaintParameters<'_>,
         _atlases: &Atlases,
-        source: Option<LayerSource<'_, Symbol>>,
+        render_tiles: &[FrameTile<'_, Symbol>],
     ) {
         /// The atlases' textures given to one tile's draws.
         #[derive(Default)]
@@ -1279,17 +1323,13 @@ impl TypedLayer for RenderSymbolLayer {
             icon: Option<AtlasBinding>,
         }
 
-        let Some(render_tiles) = source.and_then(LayerSource::tiles) else {
-            return;
-        };
         let (static_data, transform) = (paint_parameters.static_data, paint_parameters.state);
         let shaders = &static_data.shaders;
         let passes = self.base.passes;
         if passes != self.draws_passes {
-            self.remove_all_draws();
+            self.drawing.clear();
             self.draws_passes = passes;
         }
-        self.drawing.frame.get_or_insert_default();
 
         if self.symbol_icon_group.is_none() {
             self.symbol_icon_group = shaders.shader_group(SYMBOL_ICON_SHADER_NAME);
@@ -1322,13 +1362,11 @@ impl TypedLayer for RenderSymbolLayer {
         let is_offset = !layout.icon_offset.is_undefined();
 
         let current_zoom = transform.get_zoom() as f32;
-        let style = Arc::clone(&self.base.style);
-        let layer_id: &str = &style.base().id;
 
         let mut renderable_segments = std::mem::take(&mut self.renderable_segments);
         renderable_segments.clear();
 
-        for (tile_index, tile) in render_tiles.iter_indexed() {
+        for (tile_index, tile) in render_tiles.iter().enumerate() {
             let tile_id = tile.id();
 
             let Some(mut entry) = self.drawing.tiles.entry(&tile_id) else {
@@ -1340,6 +1378,7 @@ impl TypedLayer for RenderSymbolLayer {
                 continue;
             };
             let bucket = render_data.bucket;
+            let layer_id = render_data.layer.style.base().id.as_str();
 
             // Draws built from another bucket go.
             entry.set_bucket(bucket.base.bucket_id);
@@ -1357,11 +1396,11 @@ impl TypedLayer for RenderSymbolLayer {
             if let Some(cached) = entry.value.as_mut().filter(|cached| !cached.draws.is_empty()) {
                 // The draws that read the same attributes are next to each
                 // other, as the update builds them.
-                let geometry = tile.bucket_geometry();
+                let (context, geometry) = (&mut *paint_parameters.context, render_data.geometry());
                 for draws in cached.draws.chunk_by_mut(|a, b| a.attributes_key() == b.attributes_key()) {
-                    refresh_draws(draws, geometry, bucket, layer_id, evaluated, refresh);
+                    refresh_draws(context, draws, geometry, bucket, layer_id, evaluated, refresh);
                 }
-                self.rebuild_collision(&tile_id, bucket, evaluated);
+                self.rebuild_collision(paint_parameters.context, &tile_id, bucket, evaluated);
                 continue;
             }
 
@@ -1402,9 +1441,7 @@ impl TypedLayer for RenderSymbolLayer {
                 }
             };
 
-            let Some(atlases) = tile.atlas_textures() else {
-                continue;
-            };
+            let atlases = render_data.atlas_textures();
             let has_icon_texture = atlases.icon().is_some();
             let has_glyph_texture = atlases.glyph().is_some();
 
@@ -1418,7 +1455,7 @@ impl TypedLayer for RenderSymbolLayer {
                 add_renderables(&state.text, SymbolType::Text);
             }
 
-            self.rebuild_collision(&tile_id, bucket, evaluated);
+            self.rebuild_collision(paint_parameters.context, &tile_id, bucket, evaluated);
         }
 
         // A stable sort keeps segments of the same order in the order they
@@ -1470,7 +1507,8 @@ impl TypedLayer for RenderSymbolLayer {
             let visible = buffer.segment_has_visible_vertices(group.segment);
 
             let evaluated = &render_data.layer.paint;
-            let Some(bucket_paint_properties) = bucket.paint_properties.get(self.id()) else {
+            let layer_id = render_data.layer.style.base().id.as_str();
+            let Some(bucket_paint_properties) = bucket.paint_properties.get(layer_id) else {
                 continue;
             };
 
@@ -1481,19 +1519,17 @@ impl TypedLayer for RenderSymbolLayer {
                 icon_property_values(evaluated, bucket_layout)
             };
 
-            let Some(atlases) = tile.atlas_textures() else {
-                debug_assert!(false);
-                continue;
-            };
+            let atlases = render_data.atlas_textures();
 
             properties_as_uniforms.0.clear();
             properties_as_uniforms.1.clear();
 
             let mut vertex_attribs = VertexAttributeArray::new();
-            update_tile_attributes(
-                tile.bucket_geometry(),
+            let placed = update_tile_attributes(
+                paint_parameters.context,
+                render_data.geometry(),
                 buffer,
-                self.id(),
+                layer_id,
                 is_text,
                 bucket_paint_properties,
                 evaluated,
@@ -1537,7 +1573,7 @@ impl TypedLayer for RenderSymbolLayer {
                         let text_size_is_zoom_constant =
                             bucket.text_size_binder.evaluate_for_zoom(current_zoom).is_zoom_constant;
                         AtlasBinding::new(
-                            Some(atlases),
+                            Some(atlases.clone()),
                             Some(ID_SYMBOL_IMAGE_ICON_TEXTURE),
                             Some(ID_SYMBOL_IMAGE_TEXTURE),
                             is_text,
@@ -1551,7 +1587,7 @@ impl TypedLayer for RenderSymbolLayer {
                     tile_atlases.icon.get_or_insert_with(|| {
                         let icon_scaled = bucket_layout.icon_size.constant_or(&1.0) != 1.0 || bucket.icons_need_linear;
                         AtlasBinding::new(
-                            Some(atlases),
+                            Some(atlases.clone()),
                             Some(ID_SYMBOL_IMAGE_ICON_TEXTURE),
                             Some(ID_SYMBOL_IMAGE_TEXTURE),
                             is_text,
@@ -1579,6 +1615,7 @@ impl TypedLayer for RenderSymbolLayer {
                 let draw = SymbolDraw {
                     id: SimpleIdentity::new(),
                     objects,
+                    placed: placed.clone(),
                     data: SymbolDrawData {
                         is_halo,
                         bucket_variable_placement: state.has_variable_placement,
@@ -1591,7 +1628,7 @@ impl TypedLayer for RenderSymbolLayer {
                         segment: group.segment,
                     },
                     visible,
-                    atlases: *draw_atlases,
+                    atlases: draw_atlases.clone(),
                 };
                 if let Some(entry) = self.drawing.tiles.entry(&tile_id) {
                     entry.value.get_or_insert_with(SymbolTile::default).draws.push(draw);
@@ -1600,27 +1637,24 @@ impl TypedLayer for RenderSymbolLayer {
         }
 
         self.renderable_segments = renderable_segments;
-        self.make_frame_draws(render_tiles.iter(), passes, paint_parameters);
+        self.make_frame_draws(render_tiles, passes, paint_parameters);
     }
 
     /// Collects the symbol buckets of the tiles the layer places, and of
     /// those whose buckets another layer places and this one draws.
-    fn update(&mut self, params: &mut LayerUpdateParameters<'_>, tiles: Option<LayerTiles<'_, Symbol>>) {
-        let Some(source) = params.source else {
-            return;
-        };
+    fn update(&mut self, params: &mut LayerUpdateParameters<'_>, tiles: &[FrameTile<'_, Symbol>]) {
         self.placement_data.clear();
         self.follower_data.clear();
-        let (Some(tiles), Some(source)) = (tiles, source.tiles()) else {
+        let Some(source) = params.source.and_then(RenderSource::tiles) else {
             return;
         };
         let translates = self.symbol_translates();
-        for tile in tiles.iter() {
+        for tile in tiles {
             let Some(bucket) = tile.bucket() else {
                 continue;
             };
             let key = BucketKey { source, tile: tile.id(), slot: tile.tile.slot(), bucket: bucket.bucket_index };
-            let feature_index = || tile.feature_index().cloned();
+            let feature_index = || Some(Arc::clone(bucket.feature_index()));
             self.add_bucket(&PlacedTile::new(tile.tile), key, bucket.bucket, feature_index, translates);
         }
     }

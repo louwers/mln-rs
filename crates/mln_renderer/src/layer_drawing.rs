@@ -609,19 +609,13 @@ impl<U> UniformWriter<'_, U> {
         for &(_, index) in self.draws {
             self.bytes.extend_from_slice(bytemuck::bytes_of(&entry(&self.uniforms[index])));
         }
-        self.buffers.write_storage(id, self.bytes, self.context);
+        self.buffers.write_storage(id, self.bytes, self.context.device());
     }
 
     /// Writes `value`, which all the draws read, to the uniform buffer `id`.
     pub(crate) fn uniform<P: bytemuck::Pod>(&mut self, id: usize, value: &P) {
-        self.buffers.create_or_update_pod(id, value, self.context);
+        self.buffers.create_or_update_pod(id, value, self.context.device());
     }
-}
-
-/// Uploads `objects`, and destroys the buffers the upload replaced.
-pub(crate) fn upload_objects(objects: &mut DrawObjects, context: &mut Context) {
-    objects.upload(context);
-    context.destroy_released();
 }
 
 /// Draws of a frame, and what they share.
@@ -720,7 +714,7 @@ impl FrameDraws {
     /// Uploads `objects`, which all the draws bind, if there are any draws.
     pub(crate) fn upload_one(&self, objects: &mut DrawObjects, context: &mut Context) {
         if !self.draws.is_empty() {
-            upload_objects(objects, context);
+            objects.upload(context);
         }
     }
 
@@ -867,7 +861,7 @@ impl<P: Copy> LayerDraws<P> {
     ) {
         for (draw, &part) in self.frame.draws.iter().zip(&self.parts) {
             if let Some(objects) = objects(caches, draw, part) {
-                upload_objects(objects.objects, context);
+                objects.objects.upload(context);
             }
         }
     }
@@ -1028,6 +1022,12 @@ impl<T: TileObjects> LayerDrawing for TileDraws<T> {
         self.frame_mut();
     }
 
+    fn clear_frame(&mut self) {
+        if let Some(frame) = &mut self.frame {
+            frame.clear();
+        }
+    }
+
     fn upload(&mut self, context: &mut Context) {
         if let Some(frame) = &self.frame {
             frame.upload(&mut self.tiles, tile_objects, context);
@@ -1068,7 +1068,11 @@ pub(crate) trait LayerDrawing {
     /// a frame whose source has something to draw. A drawing whose draw
     /// group takes its place from the layer's first such frame starts it
     /// here.
-    fn begin_frame(&mut self) {}
+    fn begin_frame(&mut self);
+
+    /// Drops the frame's draws, keeping the GPU objects of the tiles' draws,
+    /// for a frame the layer draws nothing in.
+    fn clear_frame(&mut self);
 
     /// Uploads the GPU objects of the draw groups' draws.
     fn upload(&mut self, context: &mut Context);

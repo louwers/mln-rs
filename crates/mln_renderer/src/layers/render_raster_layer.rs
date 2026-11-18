@@ -3,6 +3,7 @@
 // draw stays until the bucket's masked geometry changes, and is then built
 // again.
 
+use std::mem::offset_of;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -17,9 +18,7 @@ use mln_gfx::shaders::shader_defines::{
 };
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
-use mln_gfx::vertex_vector::VertexVectorBasePtr;
-use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode, ShaderProgramPtr, VertexAttributeArray};
-use mln_style::PropertyEvaluationParameters;
+use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode, ShaderProgramPtr};
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Raster;
 use mln_style_types::{RasterResamplingType, ResamplingType, TranslateAnchorType};
@@ -28,13 +27,16 @@ use mln_util::hash::{HashMap, HashSet};
 use mln_util::identity::SimpleIdentity;
 use mln_util::time::Instant;
 
-use super::{cast_matrix, shared_vertices};
+use super::cast_matrix;
 use crate::bucket::{Bucket, NoBucket};
+use crate::bucket_geometry::released_vertices;
 use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::gfx::context::Context;
-use crate::gfx::indexes::{DrawIndexes, StoredIndexes};
-use crate::gfx::texture2d::{OwnedTexture, TextureKey};
+use crate::gfx::indexes::{DrawIndexes, Indexes, SharedIndexes};
+use crate::gfx::store::SharedTexture;
+use crate::gfx::vertex_attribute::VertexAttributeArray;
+use crate::gfx::vertices::SharedVertices;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_composite::Composite;
 use crate::layer_drawing::{
@@ -43,11 +45,10 @@ use crate::layer_drawing::{
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{
-    Atlases, LayerSource, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
-};
+use crate::render_layer::{Atlases, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer};
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
+use crate::render_tile::FrameTile;
 use crate::sources::render_image_source::ImageSourceRenderData;
 use crate::tile_matrix::{projection_data, to_projection_ubo};
 
@@ -109,6 +110,14 @@ impl LayerDrawing for RasterDrawing {
     fn clear(&mut self) {
         self.objects.tiles.clear();
         self.objects.images.clear();
+        self.clear_frame();
+    }
+
+    fn begin_frame(&mut self) {
+        self.frame.get_or_insert_default();
+    }
+
+    fn clear_frame(&mut self) {
         if let Some(frame) = &mut self.frame {
             frame.clear();
         }
@@ -131,14 +140,26 @@ impl LayerDrawing for RasterDrawing {
 /// The tile extent's geometry, which a tile draws that its bucket doesn't
 /// mask.
 struct StaticGeometry {
-    vertices: VertexVectorBasePtr,
-    indexes: StoredIndexes,
+    vertices: SharedVertices,
+    indexes: SharedIndexes,
     segments: Vec<SegmentBase>,
+}
+
+impl StaticGeometry {
+    /// The tile extent's quad, in `context`'s stores.
+    fn new(context: &mut Context) -> StaticGeometry {
+        StaticGeometry {
+            vertices: released_vertices(context, &RenderStaticData::raster_vertices()),
+            indexes: context.add_indexes(Indexes::new(RenderStaticData::quad_triangle_indices())),
+            segments: RenderStaticData::raster_segments(),
+        }
+    }
 }
 
 impl LayerType for Raster {
     type Layout = NoLayout;
     type Bucket = NoBucket;
+    type TileBucket<'a> = &'a RasterBucket;
 
     fn render_layer(style: Arc<LayerStyle<Raster>>) -> Box<dyn RenderLayer> {
         Box::new(RenderRasterLayer::new(style))
@@ -160,8 +181,8 @@ pub(crate) struct RenderRasterLayer {
     static_geometry: Option<StaticGeometry>,
     globe_meshes: GlobeTileMeshCache<RasterLayoutVertex>,
 
-    /// `bucket.texture2d`, per bucket.
-    textures: HashMap<SimpleIdentity, OwnedTexture>,
+    /// The texture of each bucket's image, by bucket id.
+    textures: HashMap<SimpleIdentity, SharedTexture>,
     /// The buckets of the frame's tiles, whose textures stay.
     live_buckets: HashSet<SimpleIdentity>,
 }
@@ -185,17 +206,17 @@ impl RenderRasterLayer {
     /// The bucket's texture in `textures`, which this creates if needed,
     /// with `sampler`; `None` for a bucket without an image.
     fn bucket_texture(
-        textures: &mut HashMap<SimpleIdentity, OwnedTexture>,
+        textures: &mut HashMap<SimpleIdentity, SharedTexture>,
         sampler: SamplerState,
         context: &mut Context,
         bucket: &RasterBucket,
-    ) -> Option<TextureKey> {
+    ) -> Option<SharedTexture> {
         let image = bucket.image.as_ref()?;
         let texture = textures
             .entry(bucket.base.bucket_id)
             .or_insert_with(|| context.add_texture_with(|texture| texture.set_image(Some(Rc::new((**image).clone())))))
-            .key();
-        if let Some(mut texture) = context.texture_mut(texture) {
+            .clone();
+        if let Some(mut texture) = context.texture_mut(&texture) {
             texture.set_sampler(sampler);
         }
         Some(texture)
@@ -225,8 +246,9 @@ impl RenderRasterLayer {
 }
 
 impl RenderRasterLayer {
-    /// The `update` of an image source's layer: one draw for each tile the
-    /// image is drawn in, built again every frame.
+    /// The draws of an image source's layer: one for each tile the image is
+    /// drawn in, built again every frame, which share the image's geometry
+    /// and texture.
     fn update_image(
         &mut self,
         raster_shader: &ShaderProgramPtr,
@@ -247,24 +269,19 @@ impl RenderRasterLayer {
             return;
         }
 
-        // TODO: Share textures
         let sampler = self.sampler_state();
+        let context = &mut *paint_parameters.context;
+        // The bucket's own geometry, which an image source's bucket always
+        // has.
+        let geometry = bucket.geometry();
+        let vertices = released_vertices(context, &geometry.vertices);
+        let indexes = context.add_indexes(Indexes::new(geometry.indices.clone()));
+        let texture = Self::bucket_texture(&mut self.textures, sampler, context, bucket);
         let image_draws = &mut self.drawing.objects.images;
         for (index, tile_id) in image_data.tile_ids.iter().enumerate() {
-            let geometry = {
-                // The bucket's own geometry, which an image source's bucket
-                // always has.
-                let geometry = bucket.geometry();
-                let vertices = shared_vertices(&geometry.vertices);
-                raster_geometry(
-                    &vertices,
-                    geometry.vertices.len(),
-                    DrawIndexes::new(geometry.indices.clone()),
-                    &geometry.segments,
-                )
-            };
-            let texture = Self::bucket_texture(&mut self.textures, sampler, paint_parameters.context, bucket);
-            let draw = KeptDraw::new(new_objects(raster_shader, geometry, texture));
+            let draw_geometry =
+                raster_geometry(&vertices, geometry.vertices.len(), indexes.clone().into(), &geometry.segments);
+            let draw = KeptDraw::new(new_objects(raster_shader, draw_geometry, texture.as_ref()));
             let uniforms = Self::uniforms(tile_id, paint_parameters);
             self.draw_list.push_part(FrameDraw::new(None, draw.id), RasterPart::Image(index), uniforms);
             image_draws.push(draw);
@@ -292,7 +309,9 @@ impl RenderRasterLayer {
     /// writes the layer's buffers of them.
     fn finish_frame_draws(&mut self, context: &mut Context) {
         let composite = self.composite();
-        let frame = self.drawing.frame.get_or_insert_default();
+        let Some(frame) = self.drawing.frame.as_mut() else {
+            return;
+        };
         frame.set_composite(composite);
         let evaluated = &self.values.evaluated.paint;
         self.draw_list.finish(frame, context, |writer| {
@@ -321,7 +340,7 @@ fn spin_weights(spin: f32) -> [f32; 4] {
     let spin = mln_math::deg2radf(spin);
     let s = spin.sin();
     let c = spin.cos();
-    let sqrt3 = 3.0f32.sqrt(); // std::numbers::sqrt3_v<float>
+    let sqrt3 = 3.0f32.sqrt();
     [(2.0 * c + 1.0) / 3.0, (-sqrt3 * s - c + 1.0) / 3.0, (sqrt3 * s - c + 1.0) / 3.0, 0.0]
 }
 
@@ -335,17 +354,17 @@ fn contrast_factor(contrast: f32) -> f32 {
 
 /// The GPU objects of a raster draw of `geometry` with `shader`, which binds
 /// `texture` as both of its images.
-fn new_objects(shader: &ShaderProgramPtr, geometry: DrawGeometry, texture: Option<TextureKey>) -> DrawObjects {
+fn new_objects(shader: &ShaderProgramPtr, geometry: DrawGeometry, texture: Option<&SharedTexture>) -> DrawObjects {
     let mut textures = Textures::default();
-    textures[ID_RASTER_IMAGE0_TEXTURE] = texture;
-    textures[ID_RASTER_IMAGE1_TEXTURE] = texture;
+    textures[ID_RASTER_IMAGE0_TEXTURE] = texture.cloned();
+    textures[ID_RASTER_IMAGE1_TEXTURE] = texture.cloned();
     DrawObjects::new(Rc::clone(shader), ColorMode::alpha_blended(), CullFaceMode::disabled(), geometry, textures)
 }
 
 /// The geometry of a raster draw of `vertex_count` vertices in `vertices`,
 /// and `segments` of `indexes`.
 fn raster_geometry(
-    vertices: &VertexVectorBasePtr,
+    vertices: &SharedVertices,
     vertex_count: usize,
     indexes: DrawIndexes,
     segments: &[SegmentBase],
@@ -361,26 +380,16 @@ fn raster_geometry(
 }
 
 /// The vertex attributes of a raster draw over `vertices`.
-fn raster_vertex_attributes(vertices: &VertexVectorBasePtr) -> VertexAttributeArray {
+fn raster_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeArray {
     let mut attrs = VertexAttributeArray::new();
     let stride = size_of::<RasterLayoutVertex>() as u32;
-    if let Some(attr) = attrs.set(ID_RASTER_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-        attr.set_shared_raw_data(
-            Some(Rc::clone(vertices)),
-            0, // offsetof(RasterLayoutVertex, a1)
-            /*vertex_offset=*/ 0,
-            stride,
-            AttributeDataType::Short2,
-        );
+    if let Some(attr) = attrs.set(ID_RASTER_POS_VERTEX_ATTRIBUTE, AttributeDataType::Invalid) {
+        let offset = offset_of!(RasterLayoutVertex, a1) as u32;
+        attr.set_shared_vertices(vertices.clone(), offset, 0, stride, AttributeDataType::Short2);
     }
-    if let Some(attr) = attrs.set(ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-        attr.set_shared_raw_data(
-            Some(Rc::clone(vertices)),
-            4, // offsetof(RasterLayoutVertex, a2)
-            /*vertex_offset=*/ 0,
-            stride,
-            AttributeDataType::Short2,
-        );
+    if let Some(attr) = attrs.set(ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE, AttributeDataType::Invalid) {
+        let offset = offset_of!(RasterLayoutVertex, a2) as u32;
+        attr.set_shared_vertices(vertices.clone(), offset, 0, stride, AttributeDataType::Short2);
     }
     attrs
 }
@@ -406,71 +415,46 @@ impl TypedLayer for RenderRasterLayer {
         }
     }
 
-    fn passes(
-        &mut self,
-        _parameters: &PropertyEvaluationParameters,
-        evaluated: &mut EvaluatedLayer<Raster>,
-    ) -> RenderPass {
+    fn passes(&self, evaluated: &EvaluatedLayer<Raster>) -> RenderPass {
         if *evaluated.paint.raster_opacity.uniform() > 0.0 { RenderPass::Translucent } else { RenderPass::None }
     }
 
-    /// Makes the frame's draws of the layer: those of an image source's
-    /// image, or one of each of its tiles, which it builds for a tile it
-    /// keeps none of or whose bucket's geometry changed since, and writes
-    /// the layer's buffers they read.
+    /// Makes the frame's draws of the layer, one of each of its tiles, which
+    /// it builds for a tile it keeps none of or whose bucket's geometry
+    /// changed since, and writes the layer's buffers they read.
     fn update_draws(
         &mut self,
         paint_parameters: &mut PaintParameters<'_>,
         _atlases: &Atlases,
-        source: Option<LayerSource<'_, Raster>>,
+        render_tiles: &[FrameTile<'_, Raster>],
     ) {
-        let Some(source) = source else {
+        let Some(raster_shader) = self.raster_shader(paint_parameters) else {
             return;
         };
-        let shaders = &paint_parameters.static_data.shaders;
-        if self.raster_shader.is_none() {
-            self.raster_shader = shaders.shader("RasterShader", self.base.projection_variant);
-        }
-        let Some(raster_shader) = self.raster_shader.clone() else {
-            return;
-        };
-
-        let render_tiles = match source {
-            LayerSource::Tiles(tiles) => tiles,
-            LayerSource::Image(image) => {
-                self.update_image(&raster_shader, image, paint_parameters);
-                return;
-            }
-        };
-        self.drawing.frame.get_or_insert_default();
 
         let sampler = self.sampler_state();
-        let static_geometry = self.static_geometry.get_or_insert_with(|| StaticGeometry {
-            vertices: shared_vertices(&RenderStaticData::raster_vertices()),
-            indexes: StoredIndexes::new(RenderStaticData::quad_triangle_indices()),
-            segments: RenderStaticData::raster_segments(),
-        });
+        let static_geometry = self.static_geometry.get_or_insert_with(|| StaticGeometry::new(paint_parameters.context));
 
         // Drop the textures of buckets that are no longer rendered.
         let live_buckets = &mut self.live_buckets;
         live_buckets.clear();
-        live_buckets.extend(render_tiles.iter().filter_map(|tile| tile.raster().map(Bucket::get_id)));
+        live_buckets.extend(render_tiles.iter().filter_map(|tile| tile.bucket().map(Bucket::get_id)));
         self.textures.retain(|id, _| live_buckets.contains(id));
         // Kept draws keep their textures, so a changed filter is applied to
         // the textures themselves.
         for texture in self.textures.values() {
-            if let Some(mut texture) = paint_parameters.context.texture_mut(texture.key()) {
+            if let Some(mut texture) = paint_parameters.context.texture_mut(texture) {
                 texture.set_sampler(sampler);
             }
         }
 
-        for tile in render_tiles.iter() {
+        for tile in render_tiles {
             let tile_id = tile.id();
             let Some(mut entry) = self.drawing.objects.tiles.entry(&tile_id) else {
                 continue;
             };
 
-            let Some(bucket) = tile.raster().filter(|bucket| bucket.has_data()) else {
+            let Some(bucket) = tile.bucket().filter(|bucket| bucket.has_data()) else {
                 *entry.value = None;
                 continue;
             };
@@ -496,19 +480,18 @@ impl TypedLayer for RenderRasterLayer {
                     && !geometry.vertices.is_empty()
                     && !geometry.indices.is_empty()
                     && !geometry.segments.is_empty();
+                let context = &mut *paint_parameters.context;
                 let draw_geometry = if globe {
                     let globe_mesh =
-                        self.globe_meshes.get(&tile_id.canonical, &geometry.mask, RasterBucket::layout_vertex);
-                    let vertices: VertexVectorBasePtr =
-                        Rc::<mln_gfx::vertex_vector::VertexVector<RasterLayoutVertex>>::clone(&globe_mesh.vertices);
+                        self.globe_meshes.get(context, &tile_id.canonical, &geometry.mask, RasterBucket::layout_vertex);
                     raster_geometry(
-                        &vertices,
-                        globe_mesh.vertices.elements(),
-                        globe_mesh.indices.share(paint_parameters.context),
+                        &globe_mesh.vertices,
+                        globe_mesh.vertices.count(),
+                        globe_mesh.indexes(),
                         &globe_mesh.segments,
                     )
                 } else if shared {
-                    let vertices = shared_vertices(&geometry.vertices);
+                    let vertices = released_vertices(context, &geometry.vertices);
                     raster_geometry(
                         &vertices,
                         geometry.vertices.len(),
@@ -519,11 +502,11 @@ impl TypedLayer for RenderRasterLayer {
                     raster_geometry(
                         &static_geometry.vertices,
                         4,
-                        static_geometry.indexes.share(paint_parameters.context),
+                        static_geometry.indexes.clone().into(),
                         &static_geometry.segments,
                     )
                 };
-                let objects = new_objects(&raster_shader, draw_geometry, texture);
+                let objects = new_objects(&raster_shader, draw_geometry, texture.as_ref());
                 let built = RasterTile { draw: KeptDraw::new(objects), built: Instant::now() };
                 *entry.value = Some(built);
             }
@@ -538,8 +521,31 @@ impl TypedLayer for RenderRasterLayer {
         self.finish_frame_draws(paint_parameters.context);
     }
 
+    fn update_image_draws(
+        &mut self,
+        paint_parameters: &mut PaintParameters<'_>,
+        _atlases: &Atlases,
+        image: ImageSourceRenderData<'_>,
+    ) {
+        if let Some(raster_shader) = self.raster_shader(paint_parameters) {
+            self.update_image(&raster_shader, image, paint_parameters);
+        }
+    }
+
     fn release(&mut self) {
         self.textures.clear();
+    }
+}
+
+impl RenderRasterLayer {
+    /// The shader of the layer's draws in the frame's projection, made on
+    /// first use.
+    fn raster_shader(&mut self, paint_parameters: &PaintParameters<'_>) -> Option<ShaderProgramPtr> {
+        if self.raster_shader.is_none() {
+            let shaders = &paint_parameters.static_data.shaders;
+            self.raster_shader = shaders.shader("RasterShader", self.base.projection_variant);
+        }
+        self.raster_shader.clone()
     }
 }
 

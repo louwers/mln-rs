@@ -12,7 +12,7 @@ use mln_util::image::PremultipliedImage;
 use mln_util::time::Instant;
 
 use crate::bucket::{Bucket, BucketBase, UploadNeeds};
-use crate::bucket_geometry::BucketGeometry;
+use crate::bucket_geometry::GeometryUpload;
 use crate::tile_mask::TileMask;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
@@ -200,7 +200,7 @@ impl Bucket for RasterBucket {
         &self.base
     }
 
-    fn upload(&mut self, _geometry: &mut BucketGeometry, _needs: UploadNeeds) {
+    fn upload(&mut self, _geometry: &mut GeometryUpload<'_>, _needs: UploadNeeds) {
         self.upload_image();
     }
 

@@ -31,34 +31,36 @@ use mln_gfx::shaders::shader_defines::{
     ID_PROJECTION_UBO,
 };
 use mln_gfx::shaders::shader_program::ShaderProgramPtr;
-use mln_gfx::vertex_attribute::VertexAttributeArray;
-use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_map_types::TransformState;
-use mln_style::PropertyEvaluationParameters;
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::FillExtrusion;
 use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionPaintProperties;
 use mln_style_types::AlignmentType;
+use mln_tile_id::OverscaledTileID;
 use mln_util::constants::TILE_SIZE_D;
 use mln_util::error::Error;
 use mln_util::identity::SimpleIdentity;
 use mln_util::mat4::ClipDepthRange;
 use mln_util::size::Size;
 
-use super::{cast_matrix, shared_vertices};
+use super::cast_matrix;
 use crate::bucket::Bucket;
-use crate::bucket_geometry::{BucketGeometry, bucket_indexes, bucket_vertices, derived_vertices, paint_vertices};
+use crate::bucket_geometry::{
+    BucketGeometry, bucket_indexes, bucket_vertices, derived_vertices, paint_vertices, released_vertices,
+};
 use crate::buckets::fill_extrusion_bucket::{
     FillExtrusionBinders, FillExtrusionBucket, FillExtrusionLayoutSpec, FillExtrusionLayoutVertex,
-    FillExtrusionStaticVertex, FillExtrusionWallVertex, wall_quad_paint, wall_quad_vertices,
+    FillExtrusionStaticVertex, FillExtrusionWallVertex, wall_quad_paint,
 };
 use crate::draw::{DrawGeometry, DrawObjects, copy_shared_attributes};
 use crate::frame_projection::zero_to_one_clip_z;
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
-use crate::gfx::indexes::{DrawIndexes, StoredIndexes};
+use crate::gfx::indexes::{Indexes, SharedIndexes};
 use crate::gfx::texture2d::Texture2D;
+use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
+use crate::gfx::vertices::SharedVertices;
 use crate::layer_drawing::{
     DrawDepth, DrawList, DrawObjectsMut, DrawPriority, FrameDraw, TileDraws, TileObjects, UniformWriter,
 };
@@ -68,7 +70,7 @@ use crate::layout::pattern_layout::{PatternLayout, uses_pattern};
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
 use crate::render_layer::{
-    Atlases, LayerParts, LayerSource, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
+    Atlases, LayerBucket, LayerParts, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
 };
 use crate::render_light::EvaluatedLight;
 use crate::render_pass::RenderPass;
@@ -124,7 +126,7 @@ struct SharedGeometry<'a> {
     vertices: &'a VertexAttributeArray,
     instances: Option<&'a VertexAttributeArray>,
     vertex_count: usize,
-    indexes: &'a DrawIndexes,
+    indexes: &'a SharedIndexes,
     segments: &'a [SegmentBase],
 }
 
@@ -132,7 +134,7 @@ fn read_paint_properties(
     attrs: &mut VertexAttributeArray,
     binders: &FillExtrusionBinders,
     evaluated: &FillExtrusionPaintProperties::PossiblyEvaluated,
-    shared: &VertexVectorBasePtr,
+    shared: Option<&SharedVertices>,
     properties_as_uniforms: &mut StringIDSetsPair,
 ) {
     properties_as_uniforms.0.clear();
@@ -190,17 +192,15 @@ pub(crate) fn instanced_walls(context: &Context) -> bool {
 /// Points each attribute of `attrs` that reads `paint` at `quad_paint`
 /// (`wall_quad_paint`), which has the same layout. The binders apply their
 /// attributes only to a vector of the bucket's vertices.
-fn read_quad_paint(attrs: &mut VertexAttributeArray, paint: &VertexVectorBasePtr, quad_paint: &VertexVectorBasePtr) {
+fn read_quad_paint(attrs: &mut VertexAttributeArray, paint: &SharedVertices, quad_paint: &SharedVertices) {
     for id in 0..attrs.allocated_size() {
-        let Some(attr) =
-            attrs.get(id).filter(|attr| attr.get_shared_raw_data().is_some_and(|data| Rc::ptr_eq(data, paint)))
+        let Some(shared) = attrs.get(id).and_then(|attr| attr.shared()).filter(|shared| shared.vertices.same(paint))
         else {
             continue;
         };
-        let (offset, vertex_offset) = (attr.get_shared_offset(), attr.get_shared_vertex_offset());
-        let (stride, type_) = (attr.get_shared_stride(), attr.get_shared_type());
-        if let Some(attr) = attrs.set(id, -1, AttributeDataType::Invalid, 0) {
-            attr.set_shared_raw_data(Some(Rc::clone(quad_paint)), offset, vertex_offset, stride, type_);
+        let shared = SharedAttribute { vertices: quad_paint.clone(), ..shared.clone() };
+        if let Some(attr) = attrs.set(id, AttributeDataType::Invalid) {
+            attr.set_shared(shared);
         }
     }
 }
@@ -208,7 +208,7 @@ fn read_quad_paint(attrs: &mut VertexAttributeArray, paint: &VertexVectorBasePtr
 /// Reads each wall vertex's corner and its wall's outline vertex from
 /// `quads` (`wall_quad_vertices`), and the next outline vertex from the same
 /// buffer four vertices further on.
-fn read_wall_quads(attrs: &mut VertexAttributeArray, quads: &VertexVectorBasePtr) {
+fn read_wall_quads(attrs: &mut VertexAttributeArray, quads: &SharedVertices) {
     let stride = size_of::<FillExtrusionWallVertex>() as u32;
     let corner = offset_of!(FillExtrusionWallVertex, corner) as u32;
     let pos = offset_of!(FillExtrusionWallVertex, vertex) as u32;
@@ -220,8 +220,8 @@ fn read_wall_quads(attrs: &mut VertexAttributeArray, quads: &VertexVectorBasePtr
         (ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, pos, 4, AttributeDataType::Short2),
         (ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, decimals_ed, 4, AttributeDataType::UShort2),
     ] {
-        if let Some(attr) = attrs.set(id, -1, AttributeDataType::Invalid, 0) {
-            attr.set_shared_raw_data(Some(Rc::clone(quads)), offset, vertex_offset, stride, type_);
+        if let Some(attr) = attrs.set(id, AttributeDataType::Invalid) {
+            attr.set_shared_vertices(quads.clone(), offset, vertex_offset, stride, type_);
         }
     }
 }
@@ -231,12 +231,12 @@ fn read_wall_quads(attrs: &mut VertexAttributeArray, quads: &VertexVectorBasePtr
 fn read_wall_instances(
     attrs: &mut VertexAttributeArray,
     instance_attrs: &mut VertexAttributeArray,
-    corners: &VertexVectorBasePtr,
-    vertices: &VertexVectorBasePtr,
+    corners: &SharedVertices,
+    vertices: &SharedVertices,
 ) {
     let static_stride = size_of::<FillExtrusionStaticVertex>() as u32;
-    if let Some(attr) = attrs.set(ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-        attr.set_shared_raw_data(Some(Rc::clone(corners)), 0, 0, static_stride, AttributeDataType::Short2);
+    if let Some(attr) = attrs.set(ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, AttributeDataType::Invalid) {
+        attr.set_shared_vertices(corners.clone(), 0, 0, static_stride, AttributeDataType::Short2);
     }
     let stride = size_of::<FillExtrusionLayoutVertex>() as u32;
     // An instance's outline vertex, then the next one.
@@ -244,11 +244,11 @@ fn read_wall_instances(
         (0, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
         (1, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
     ] {
-        if let Some(attr) = instance_attrs.set(pos_id, -1, AttributeDataType::Invalid, 0) {
-            attr.set_shared_raw_data(Some(Rc::clone(vertices)), 0, vertex_offset, stride, AttributeDataType::Short2);
+        if let Some(attr) = instance_attrs.set(pos_id, AttributeDataType::Invalid) {
+            attr.set_shared_vertices(vertices.clone(), 0, vertex_offset, stride, AttributeDataType::Short2);
         }
-        if let Some(attr) = instance_attrs.set(decimals_ed_id, -1, AttributeDataType::Invalid, 0) {
-            attr.set_shared_raw_data(Some(Rc::clone(vertices)), 4, vertex_offset, stride, AttributeDataType::UShort2);
+        if let Some(attr) = instance_attrs.set(decimals_ed_id, AttributeDataType::Invalid) {
+            attr.set_shared_vertices(vertices.clone(), 4, vertex_offset, stride, AttributeDataType::UShort2);
         }
     }
 }
@@ -267,7 +267,7 @@ fn extrusion_draw(
         vertices: copy_shared_attributes(geometry.vertices),
         vertex_count: if geometry.segments.is_empty() { 0 } else { geometry.vertex_count },
         mode: DrawMode::Triangles(),
-        indexes: geometry.indexes.clone(),
+        indexes: geometry.indexes.clone().into(),
         segments: geometry.segments.iter().map(SegmentBase::copy).collect(),
         instances: geometry.instances.map(copy_shared_attributes),
     };
@@ -280,6 +280,7 @@ fn extrusion_draw(
 impl LayerType for FillExtrusion {
     type Layout = PatternLayout<FillExtrusionLayoutSpec>;
     type Bucket = FillExtrusionBucket;
+    type TileBucket<'a> = LayerBucket<'a, FillExtrusion>;
     const CROSSFADES: bool = true;
 
     /// Whether a layer of the group has a pattern.
@@ -321,10 +322,10 @@ pub(crate) struct RenderFillExtrusionLayer {
 
     /// The wall quad (`RenderStaticData::fill_extrusion_vertices`) of the
     /// instanced walls.
-    static_data_vertices: Option<VertexVectorBasePtr>,
+    static_data_vertices: Option<SharedVertices>,
     /// The triangles of the wall quad, or of the walls' own quads
     /// (`RenderStaticData::fill_extrusion_wall_indices`).
-    static_data_indices: Option<StoredIndexes>,
+    static_data_indices: Option<SharedIndexes>,
 }
 
 impl RenderFillExtrusionLayer {
@@ -357,11 +358,7 @@ impl TypedLayer for RenderFillExtrusionLayer {
         PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
 
-    fn passes(
-        &mut self,
-        _parameters: &PropertyEvaluationParameters,
-        evaluated: &mut EvaluatedLayer<FillExtrusion>,
-    ) -> RenderPass {
+    fn passes(&self, evaluated: &EvaluatedLayer<FillExtrusion>) -> RenderPass {
         if *evaluated.paint.fill_extrusion_opacity.uniform() > 0.0 { RenderPass::Translucent } else { RenderPass::None }
     }
 
@@ -372,11 +369,8 @@ impl TypedLayer for RenderFillExtrusionLayer {
         &mut self,
         paint_parameters: &mut PaintParameters<'_>,
         _atlases: &Atlases,
-        source: Option<LayerSource<'_, FillExtrusion>>,
+        render_tiles: &[FrameTile<'_, FillExtrusion>],
     ) {
-        let Some(render_tiles) = source.and_then(LayerSource::tiles) else {
-            return;
-        };
         let shaders = &paint_parameters.static_data.shaders;
         if self.fill_extrusion_group.is_none() {
             self.fill_extrusion_group = shaders.shader_group("FillExtrusionShader");
@@ -408,10 +402,11 @@ impl TypedLayer for RenderFillExtrusionLayer {
             return;
         };
 
-        let static_vertices = Rc::clone(
-            self.static_data_vertices
-                .get_or_insert_with(|| shared_vertices(&RenderStaticData::fill_extrusion_vertices())),
-        );
+        let context = &mut *paint_parameters.context;
+        let static_vertices = self
+            .static_data_vertices
+            .get_or_insert_with(|| released_vertices(context, &RenderStaticData::fill_extrusion_vertices()))
+            .clone();
         let static_indices = self
             .static_data_indices
             .get_or_insert_with(|| {
@@ -420,9 +415,9 @@ impl TypedLayer for RenderFillExtrusionLayer {
                 } else {
                     RenderStaticData::fill_extrusion_wall_indices()
                 };
-                StoredIndexes::new(indexes)
+                context.add_indexes(Indexes::new(indexes))
             })
-            .share(paint_parameters.context);
+            .clone();
         let mut builder = TileBuilder {
             shaders,
             wall_shaders,
@@ -438,7 +433,7 @@ impl TypedLayer for RenderFillExtrusionLayer {
         };
 
         let layer = &*self.values.evaluated;
-        for tile in render_tiles.iter() {
+        for tile in render_tiles {
             let tile_id = tile.id();
             let Some(mut entry) = self.drawing.tiles_mut().entry(&tile_id) else {
                 continue;
@@ -458,14 +453,15 @@ impl TypedLayer for RenderFillExtrusionLayer {
             };
 
             let changes = entry.take_changes();
+            let context = &mut *paint_parameters.context;
             let cached = match entry.value {
                 Some(cached) => {
                     if changes.paint {
-                        builder.refresh_paint(cached, tile, bucket, binders, &layer.paint);
+                        builder.refresh_paint(context, cached, render_data, binders, &layer.paint);
                     }
                     cached
                 }
-                None => entry.value.insert(builder.build(tile, bucket, binders, &layer.paint)),
+                None => entry.value.insert(builder.build(context, render_data, binders, &layer.paint)),
             };
             for (index, draw) in cached.draws.iter().enumerate() {
                 let frame_draw = FrameDraw {
@@ -475,13 +471,13 @@ impl TypedLayer for RenderFillExtrusionLayer {
                     clip: draw.clip,
                     ..FrameDraw::new(Some(tile_id), draw.id)
                 };
-                let uniforms = Self::uniforms(layer, tile, binders, &draw.objects, paint_parameters);
+                let uniforms = Self::uniforms(layer, tile_id, render_data, binders, &draw.objects, paint_parameters);
                 self.draw_list.push_part(frame_draw, index, uniforms);
             }
         }
 
         let frame = self.drawing.frame_mut();
-        frame.set_stencil_tiles(render_tiles.render_tiles().map(|tile| tile.id));
+        frame.set_stencil_tiles(render_tiles.iter().map(|tile| tile.tile.id));
         let (light, state) = (paint_parameters.light, paint_parameters.state);
         self.draw_list
             .finish(frame, paint_parameters.context, |writer| Self::write_uniforms(layer, writer, light, state));
@@ -531,8 +527,8 @@ struct TileBuilder {
     /// of their own.
     instanced_walls: bool,
     /// The static quad, and the indexes the walls draw.
-    static_vertices: VertexVectorBasePtr,
-    static_indices: DrawIndexes,
+    static_vertices: SharedVertices,
+    static_indices: SharedIndexes,
     has_pattern: bool,
     /// Whether the layer draws into depth before it draws in color.
     depth_pass: bool,
@@ -547,12 +543,17 @@ impl TileBuilder {
     /// layer draws it, then in color.
     fn build(
         &mut self,
-        tile: FrameTile<'_, FillExtrusion>,
-        bucket: &FillExtrusionBucket,
+        context: &mut Context,
+        tile_bucket: LayerBucket<'_, FillExtrusion>,
         binders: &FillExtrusionBinders,
         evaluated: &FillExtrusionPaintProperties::PossiblyEvaluated,
     ) -> ExtrusionTile {
-        let geometry = tile.bucket_geometry();
+        let (bucket, geometry) = (tile_bucket.bucket, tile_bucket.geometry());
+        let (Some(vertices), Some(triangles)) =
+            (bucket_vertices(geometry, &bucket.vertices), bucket_indexes(geometry, &bucket.triangles))
+        else {
+            return ExtrusionTile { draws: Vec::new(), atlases: None };
+        };
         let vertex_count = bucket.vertices.len();
         // A wall from each vertex to the next, but from the last, which
         // ends a ring.
@@ -563,31 +564,35 @@ impl TileBuilder {
         // vertices and paint values before those moved to the vectors the
         // roofs draw.
         let quads = (!self.instanced_walls).then(|| {
-            let vertices = derived_vertices(geometry, &bucket.vertices, wall_quad_vertices);
-            (vertices, wall_paint(geometry, binders, walls))
+            let vertices = derived_vertices(geometry, &bucket.vertices);
+            (vertices, wall_paint(context, geometry, binders, walls))
         });
 
         // The roofs read the paint values per vertex, the instanced walls per
         // instance, from the same buffer.
-        let paint = paint_vertices(geometry, buffer, depends_on_feature_state);
-        let vertices = bucket_vertices(geometry, &bucket.vertices);
+        let paint = paint_vertices(context, geometry, buffer, depends_on_feature_state);
+        let paint = paint.as_ref();
         let mut properties_as_uniforms = StringIDSetsPair::default();
         let mut wall_properties_as_uniforms = StringIDSetsPair::default();
         let mut vertex_attrs = VertexAttributeArray::new();
-        read_paint_properties(&mut vertex_attrs, binders, evaluated, &paint, &mut properties_as_uniforms);
+        read_paint_properties(&mut vertex_attrs, binders, evaluated, paint, &mut properties_as_uniforms);
         let mut wall_attrs = VertexAttributeArray::new();
         let (wall_instance_attrs, wall_vertex_count, wall_segments) = if let Some((quad_vertices, quad_paint)) = &quads
         {
-            read_paint_properties(&mut wall_attrs, binders, evaluated, &paint, &mut wall_properties_as_uniforms);
-            read_quad_paint(&mut wall_attrs, &paint, quad_paint);
-            read_wall_quads(&mut wall_attrs, quad_vertices);
+            read_paint_properties(&mut wall_attrs, binders, evaluated, paint, &mut wall_properties_as_uniforms);
+            if let (Some(paint), Some(quad_paint)) = (paint, quad_paint) {
+                read_quad_paint(&mut wall_attrs, paint, quad_paint);
+            }
+            if let Some(quad_vertices) = quad_vertices {
+                read_wall_quads(&mut wall_attrs, quad_vertices);
+            }
             (None, 4 * walls, RenderStaticData::fill_extrusion_wall_segments(walls))
         } else {
             let mut instance_attrs = VertexAttributeArray::new();
-            read_paint_properties(&mut instance_attrs, binders, evaluated, &paint, &mut wall_properties_as_uniforms);
+            read_paint_properties(&mut instance_attrs, binders, evaluated, paint, &mut wall_properties_as_uniforms);
             read_wall_instances(&mut wall_attrs, &mut instance_attrs, &self.static_vertices, &vertices);
             let segments = vec![RenderStaticData::fill_extrusion_segment(walls)];
-            (Some(instance_attrs), self.static_vertices.get_raw_count(), segments)
+            (Some(instance_attrs), self.static_vertices.count(), segments)
         };
 
         let (shader, wall_shader) = self.first_shaders.get_or_insert_with(|| {
@@ -598,20 +603,18 @@ impl TileBuilder {
         });
 
         let stride = size_of::<FillExtrusionLayoutVertex>() as u32;
-        if let Some(attr) = vertex_attrs.set(ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0)
-        {
-            // offsetof(FillExtrusionLayoutVertex, a1)
-            attr.set_shared_raw_data(Some(Rc::clone(&vertices)), 0, 0, stride, AttributeDataType::Short2);
+        if let Some(attr) = vertex_attrs.set(ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, AttributeDataType::Invalid) {
+            let offset = offset_of!(FillExtrusionLayoutVertex, a1) as u32;
+            attr.set_shared_vertices(vertices.clone(), offset, 0, stride, AttributeDataType::Short2);
         }
-        if let Some(attr) = vertex_attrs.set(ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, -1, AttributeDataType::Invalid, 0)
-        {
-            // offsetof(FillExtrusionLayoutVertex, a2)
-            attr.set_shared_raw_data(Some(Rc::clone(&vertices)), 4, 0, stride, AttributeDataType::UShort2);
+        if let Some(attr) = vertex_attrs.set(ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, AttributeDataType::Invalid) {
+            let offset = offset_of!(FillExtrusionLayoutVertex, a2) as u32;
+            attr.set_shared_vertices(vertices, offset, 0, stride, AttributeDataType::UShort2);
         }
 
-        let atlases = tile.atlas_textures().filter(|_| self.has_pattern).map(|atlases| {
+        let atlases = self.has_pattern.then(|| tile_bucket.atlas_textures()).map(|atlases| {
             AtlasBinding::new(
-                Some(atlases),
+                Some(atlases.clone()),
                 None,
                 Some(ID_FILL_EXTRUSION_IMAGE_TEXTURE),
                 /*is_text=*/ false,
@@ -628,7 +631,7 @@ impl TileBuilder {
             vertices: &vertex_attrs,
             instances: None,
             vertex_count,
-            indexes: &bucket_indexes(geometry, &bucket.triangles),
+            indexes: &triangles,
             segments: &bucket.triangle_segments,
         };
         if !bucket.triangles.is_empty() && vertex_count > 0 {
@@ -659,13 +662,18 @@ impl TileBuilder {
 /// The paint values of the walls' own quads, which the bucket's upload made
 /// of its paint values before those moved to the vectors the roofs draw,
 /// unless feature state rewrites them.
-fn wall_paint(geometry: Option<&BucketGeometry>, binders: &FillExtrusionBinders, walls: usize) -> VertexVectorBasePtr {
+fn wall_paint(
+    context: &mut Context,
+    geometry: &BucketGeometry,
+    binders: &FillExtrusionBinders,
+    walls: usize,
+) -> Option<SharedVertices> {
     let buffer = &binders.interleaved_vertex_buffer;
-    let paint_of = |paint: &[u8]| wall_quad_paint(paint, buffer.stride, walls);
     if binders.depends_on_feature_state() {
-        paint_of(&buffer.shared_vertex_vector.data())
+        let paint = wall_quad_paint(&buffer.shared_vertex_vector.data(), buffer.stride, walls);
+        Some(context.add_vertices(paint).into_shared())
     } else {
-        derived_vertices(geometry, &buffer.shared_vertex_vector, paint_of)
+        derived_vertices(geometry, &buffer.shared_vertex_vector)
     }
 }
 
@@ -674,22 +682,23 @@ impl TileBuilder {
     /// bucket's `binders` that feature state rewrote.
     fn refresh_paint(
         &self,
+        context: &mut Context,
         cached: &mut ExtrusionTile,
-        tile: FrameTile<'_, FillExtrusion>,
-        bucket: &FillExtrusionBucket,
+        tile_bucket: LayerBucket<'_, FillExtrusion>,
         binders: &FillExtrusionBinders,
         evaluated: &FillExtrusionPaintProperties::PossiblyEvaluated,
     ) {
-        let geometry = tile.bucket_geometry();
-        let paint = paint_vertices(geometry, &binders.interleaved_vertex_buffer, binders.depends_on_feature_state());
-        let walls = bucket.vertices.len().saturating_sub(1);
-        let quad_paint = (!self.instanced_walls).then(|| wall_paint(geometry, binders, walls));
+        let geometry = tile_bucket.geometry();
+        let buffer = &binders.interleaved_vertex_buffer;
+        let paint = paint_vertices(context, geometry, buffer, binders.depends_on_feature_state());
+        let walls = tile_bucket.bucket.vertices.len().saturating_sub(1);
+        let quad_paint = (!self.instanced_walls).then(|| wall_paint(context, geometry, binders, walls)).flatten();
         let mut properties_as_uniforms = StringIDSetsPair::default();
         for draw in &mut cached.draws {
             let attrs = draw.objects.paint_attributes_mut();
-            read_paint_properties(attrs, binders, evaluated, &paint, &mut properties_as_uniforms);
-            if let Some(quad_paint) = quad_paint.as_ref().filter(|_| draw.walls) {
-                read_quad_paint(attrs, &paint, quad_paint);
+            read_paint_properties(attrs, binders, evaluated, paint.as_ref(), &mut properties_as_uniforms);
+            if let (Some(paint), Some(quad_paint)) = (&paint, quad_paint.as_ref().filter(|_| draw.walls)) {
+                read_quad_paint(attrs, paint, quad_paint);
             }
         }
     }
@@ -701,17 +710,18 @@ impl RenderFillExtrusionLayer {
     /// values `layer`.
     fn uniforms(
         layer: &EvaluatedLayer<FillExtrusion>,
-        tile: FrameTile<'_, FillExtrusion>,
+        tile_id: OverscaledTileID,
+        tile_bucket: LayerBucket<'_, FillExtrusion>,
         binders: &FillExtrusionBinders,
         objects: &DrawObjects,
         parameters: &PaintParameters<'_>,
     ) -> ExtrusionUniforms {
-        const IN_VIEWPORT_PIXEL_UNITS: bool = false; // from RenderTile::translatedMatrix
+        const IN_VIEWPORT_PIXEL_UNITS: bool = false;
         const NEAR_CLIPPED: bool = true;
         let evaluated = &layer.paint;
         let state = parameters.state;
         let zoom = state.get_zoom() as f32;
-        let tile_id = tile.id().to_unwrapped();
+        let tile_id = tile_id.to_unwrapped();
 
         let mut projection = projection_data(
             &tile_id,
@@ -746,7 +756,7 @@ impl RenderFillExtrusionLayer {
             objects.texture(ID_FILL_EXTRUSION_IMAGE_TEXTURE).and_then(|texture| parameters.context.texture(texture));
         let texture_size = texture.map_or(Size::new(0, 0), Texture2D::size);
         let pattern = evaluated.fill_extrusion_pattern.faded();
-        let tlbr = |id: &str| tile.pattern(id).map_or([0.0; 4], |position| position.tlbr().map(f32::from));
+        let tlbr = |id: &str| tile_bucket.pattern(id).map_or([0.0; 4], |position| position.tlbr().map(f32::from));
 
         let pattern_t = binders.fill_extrusion_pattern.interpolation_factor(zoom).0;
         ExtrusionUniforms {
@@ -818,6 +828,7 @@ mod tests {
     use mln_gfx::shaders::segment::MAX_SEGMENT_VERTICES;
 
     use super::*;
+    use crate::buckets::fill_extrusion_bucket::wall_quad_vertices;
 
     // A wall's quad is the static quad's corners, each with the wall's
     // vertex, and the next four are the next vertex's. Its paint values are
@@ -828,8 +839,6 @@ mod tests {
             .map(|i| FillExtrusionBucket::layout_vertex(Point::new(f64::from(i) + 0.5, 1.0), i as u16, i == 3))
             .collect();
         let quads = wall_quad_vertices(&vertices);
-        let quads = quads.get_raw_data();
-        let quads: &[FillExtrusionWallVertex] = bytemuck::cast_slice(&quads);
         assert_eq!(quads.len(), 4 * 4);
         let corners = RenderStaticData::fill_extrusion_vertices();
         for (vertex, quad) in vertices.iter().zip(quads.chunks(4)) {
@@ -842,8 +851,8 @@ mod tests {
         let paint: Vec<u8> = (0..12).collect();
         let quad_paint = wall_quad_paint(&paint, 3, 3);
         let expected: Vec<u8> = paint[..9].chunks(3).flat_map(|values| values.repeat(4)).collect();
-        assert_eq!(*quad_paint.get_raw_data(), *expected);
-        assert_eq!(wall_quad_paint(&[], 0, 3).get_raw_count(), 0);
+        assert_eq!(quad_paint, expected);
+        assert_eq!(wall_quad_paint(&[], 0, 3).len(), 0);
     }
 
     // The segments draw every wall, each from the start of the indices, which

@@ -74,6 +74,16 @@ pub struct Renderer {
     /// drop, so it can't wrap their drops in the hold otherwise.
     orchestrator: ManuallyDrop<RenderOrchestrator>,
     backend: Rc<dyn RendererBackend>,
+    encoder: Encoder,
+    /// Where the renderer reports its events, once the host gives it one.
+    events: Option<RendererEvents>,
+    /// Whether `tear_down` dropped the orchestrator.
+    torn_down: bool,
+}
+
+/// What the renderer keeps for its frames' encodes: its GPU state, the
+/// shaders, the passes' masks and composite, and what the last frame drew.
+struct Encoder {
     /// What the renderer keeps over the backend's `Gpu`, which goes after
     /// the resources that `drop` drops first.
     context: Context,
@@ -89,10 +99,6 @@ pub struct Renderer {
     /// Where the last frame drew the map.
     frame_projection: Option<FrameProjection>,
     timings: RenderTimings,
-    /// Where the renderer reports its events, once the host gives it one.
-    events: Option<RendererEvents>,
-    /// Whether `tear_down` dropped the orchestrator.
-    torn_down: bool,
 }
 
 impl Renderer {
@@ -158,15 +164,17 @@ impl Renderer {
                 waker,
                 pool,
             )),
-            context: Context::new(Rc::clone(&backend)),
+            encoder: Encoder {
+                context: Context::new(Rc::clone(&backend)),
+                pixel_ratio,
+                static_data: None,
+                clip_masks: ClipMasks::default(),
+                layer_composite: LayerComposite::default(),
+                render_state: RenderState::Never,
+                frame_projection: None,
+                timings: RenderTimings::default(),
+            },
             backend,
-            pixel_ratio,
-            static_data: None,
-            clip_masks: ClipMasks::default(),
-            layer_composite: LayerComposite::default(),
-            render_state: RenderState::Never,
-            frame_projection: None,
-            timings: RenderTimings::default(),
             events: None,
             torn_down: false,
         }
@@ -177,22 +185,23 @@ impl Renderer {
     /// renderer makes its shaders and draws again, and keeps its
     /// tiles. The host sizes the backend's framebuffer for the new ratio.
     pub fn set_pixel_ratio(&mut self, pixel_ratio: f32) {
-        if pixel_ratio == self.pixel_ratio {
+        if pixel_ratio == self.encoder.pixel_ratio {
             return;
         }
         // The shaders build the pixel ratio in on some backends, so a new
         // ratio takes new shaders, and new draws that use them.
-        self.pixel_ratio = pixel_ratio;
-        self.static_data = None;
-        self.clip_masks = ClipMasks::default();
-        self.layer_composite = LayerComposite::default();
+        let encoder = &mut self.encoder;
+        encoder.pixel_ratio = pixel_ratio;
+        encoder.static_data = None;
+        encoder.clip_masks = ClipMasks::default();
+        encoder.layer_composite = LayerComposite::default();
         self.orchestrator.release_shaders();
     }
 
     /// The device pixels per logical pixel the renderer draws at.
     #[must_use]
     pub fn pixel_ratio(&self) -> f32 {
-        self.pixel_ratio
+        self.encoder.pixel_ratio
     }
 
     /// Runs the tiles' jobs, and the raster tiles' workers, in
@@ -209,21 +218,13 @@ impl Renderer {
     /// doesn't wait for the next frame to start.
     pub fn receive_tiles(&mut self) {
         self.orchestrator.receive_tiles();
-        self.report_orchestrator_events();
+        report(&mut self.orchestrator, self.events.as_ref());
     }
 
     /// Sets the queue the renderer pushes its events to: the map's, which
     /// the map's frontend passes on.
     pub fn set_event_queue(&mut self, events: Option<RendererEvents>) {
         self.events = events;
-    }
-
-    /// Pushes what the orchestrator reported since the last call to the
-    /// renderer's event queue, or drops it when there is no queue.
-    fn report_orchestrator_events(&mut self) {
-        for event in self.orchestrator.take_events() {
-            emit(self.events.as_ref(), event);
-        }
     }
 
     /// Draws `update_parameters` into a frame of `target`, which must be
@@ -239,16 +240,18 @@ impl Renderer {
         // Held from the update on: a custom layer that the update removes or
         // gives a new host deinitializes on the backend, as on OpenGL with
         // the context current.
-        let backend = Rc::clone(&self.backend);
-        let _hold = backend.hold();
-        let frame = self.orchestrator.update(update_parameters);
-        self.report_orchestrator_events();
+        let _hold = self.backend.hold();
+        let orchestrator = &mut *self.orchestrator;
+        let frame = orchestrator.update(update_parameters);
+        report(orchestrator, self.events.as_ref());
         let frame = frame?;
         let updated = Instant::now();
-        let handoff = self.encode(&frame, update_parameters, target);
+        let encoder = &mut self.encoder;
+        let handoff =
+            encoder.encode(orchestrator, &*self.backend, self.events.as_ref(), &frame, update_parameters, target);
         if handoff.is_some() {
-            self.timings.sources = frame.symbols_started - frame.started;
-            self.timings.symbols = updated - frame.symbols_started;
+            encoder.timings.sources = frame.symbols_started - frame.started;
+            encoder.timings.symbols = updated - frame.symbols_started;
         }
         handoff
     }
@@ -264,14 +267,14 @@ impl Renderer {
     /// spent on each of its steps.
     #[must_use]
     pub fn render_timings(&self) -> RenderTimings {
-        self.timings
+        self.encoder.timings
     }
 
     /// Where the last frame that [`render`](Self::render) drew put the map,
     /// or `None` before the first.
     #[must_use]
     pub fn frame_projection(&self) -> Option<FrameProjection> {
-        self.frame_projection
+        self.encoder.frame_projection
     }
 
     /// The features drawn in `geometry`, a point or a polygon in screen
@@ -282,7 +285,7 @@ impl Renderer {
         options: &crate::query::RenderedQueryOptions,
     ) -> Result<Vec<mln_util::feature::Feature>, mln_util::error::Error> {
         let features = self.orchestrator.query_rendered_features(geometry, options);
-        self.report_orchestrator_events();
+        report(&mut self.orchestrator, self.events.as_ref());
         features
     }
 
@@ -313,7 +316,7 @@ impl Renderer {
         options: &crate::query::SourceQueryOptions,
     ) -> Result<Vec<mln_util::feature::Feature>, mln_util::error::Error> {
         let features = self.orchestrator.query_source_features(source_id, options);
-        self.report_orchestrator_events();
+        report(&mut self.orchestrator, self.events.as_ref());
         features
     }
 
@@ -415,13 +418,13 @@ impl Renderer {
     pub fn reduce_memory_use(&mut self) {
         {
             let _hold = self.backend.hold();
-            self.context.destroy_released();
-            if let Err(error) = self.context.gpu().flush(true) {
+            self.encoder.context.destroy_released();
+            if let Err(error) = self.encoder.context.gpu().flush(true) {
                 Log::error(Event::Render, format!("Waiting for the GPU failed: {error}"));
             }
             self.orchestrator.reduce_memory_use();
         }
-        self.report_orchestrator_events();
+        report(&mut self.orchestrator, self.events.as_ref());
     }
 
     /// The rendering stats, which count the renderer's resources until it
@@ -429,7 +432,7 @@ impl Renderer {
     /// follows its release, or until [`reduce_memory_use`](Self::reduce_memory_use).
     #[must_use]
     pub fn rendering_stats(&self) -> RenderingStats {
-        self.context.stats()
+        self.encoder.context.stats()
     }
 
     /// Destroys the renderer, and returns its rendering stats as it leaves
@@ -437,7 +440,7 @@ impl Renderer {
     #[must_use]
     pub fn into_rendering_stats(mut self) -> RenderingStats {
         self.tear_down();
-        self.context.stats()
+        self.encoder.context.stats()
     }
 
     pub fn clear_data(&mut self) {
@@ -445,7 +448,9 @@ impl Renderer {
         let _hold = self.backend.hold();
         self.orchestrator.clear_data();
     }
+}
 
+impl Encoder {
     /// The second phase of a frame: builds and refreshes the GPU objects of
     /// the layers' draws of `frame`, and draws them into `target`, unless
     /// the target has nothing to draw into now. It reads the style, the
@@ -459,6 +464,9 @@ impl Renderer {
     /// they bind, and the draw section encodes the passes and submits them.
     fn encode(
         &mut self,
+        orchestrator: &mut RenderOrchestrator,
+        backend: &dyn RendererBackend,
+        events: Option<&RendererEvents>,
         frame: &Frame,
         update_parameters: &Arc<UpdateParameters>,
         target: &dyn FrameTarget,
@@ -476,9 +484,9 @@ impl Renderer {
         });
 
         if self.render_state == RenderState::Never {
-            emit(self.events.as_ref(), RendererEvent::RenderMapStarted);
+            emit(events, RendererEvent::RenderMapStarted);
         }
-        emit(self.events.as_ref(), RendererEvent::RenderFrameStarted);
+        emit(events, RendererEvent::RenderFrameStarted);
 
         let state = &frame.transform.state;
         let renderable_size = image.size;
@@ -495,9 +503,10 @@ impl Renderer {
                 .wrapping_sub(((frustum_offset.top + frustum_offset.bottom) * pixel_ratio) as u32),
         };
 
-        let orchestrator = &mut *self.orchestrator;
         let mut parameters = PaintParameters::new(
             &mut self.context,
+            &mut self.clip_masks,
+            &mut self.layer_composite,
             frame,
             static_data,
             self.pixel_ratio,
@@ -520,20 +529,20 @@ impl Renderer {
 
         // - DRAW UPLOAD ---------------------------------------------------
         // What the update replaced goes before the uploads make what
-        // replaces it.
+        // replaces it, and what the uploads replaced before the passes.
         parameters.context.destroy_released();
         orchestrator.upload_draws(parameters.context);
+        parameters.context.destroy_released();
         let draw_groups = DrawGroups::of(orchestrator, &parameters);
         let (proj_state, transform) = (parameters.state, parameters.transform_params);
-        self.clip_masks.update(
+        parameters.clip_masks.update(
             parameters.context,
             &static_data.shaders,
             proj_state.is_globe_rendering(),
             &draw_groups.clip_tiles,
             |tile| to_projection_ubo(&transform.projection_data_for_tile(tile, false)),
         );
-        parameters.clip_masks = std::mem::take(&mut self.clip_masks);
-        self.layer_composite.update(
+        parameters.layer_composite.update(
             parameters.context,
             &static_data.shaders,
             image.size,
@@ -541,7 +550,6 @@ impl Renderer {
             parameters.debug_options.contains(MapDebugOptions::OVERDRAW),
             &draw_groups.composited,
         );
-        parameters.layer_composite = std::mem::take(&mut self.layer_composite);
         let atlas_size = orchestrator.atlases().pattern.pixel_size();
         let global_paint_params_ubo = GlobalPaintParamsUBO {
             pattern_atlas_texsize: [atlas_size.width as f32, atlas_size.height as f32],
@@ -573,7 +581,7 @@ impl Renderer {
             width: renderable_size.width,
             height: renderable_size.height,
         });
-        let mut gpu = self.backend.gpu();
+        let mut gpu = backend.gpu();
         draw(orchestrator, &mut *gpu, &mut parameters, frame, &image, draw_groups.count, depth_range_size);
         let start_rendering = Instant::now();
         if let Err(error) = parameters.end_pass(&mut *gpu).and_then(|()| gpu.flush(false)) {
@@ -598,8 +606,6 @@ impl Renderer {
             stats.encoding_time = frame.started.elapsed().as_secs_f64() - stats.rendering_time;
         }
         let stats = Arc::new(context.stats());
-        self.clip_masks = std::mem::take(&mut parameters.clip_masks);
-        self.layer_composite = std::mem::take(&mut parameters.layer_composite);
         drop(parameters);
 
         self.timings.layers = layers_updated - uploaded;
@@ -607,7 +613,7 @@ impl Renderer {
         self.timings.draw = submitted - layers_uploaded;
 
         emit(
-            self.events.as_ref(),
+            events,
             RendererEvent::RenderFrameFinished {
                 mode: if frame.loaded { RenderMode::Full } else { RenderMode::Partial },
                 needs_repaint: frame.needs_repaint,
@@ -625,7 +631,7 @@ impl Renderer {
             self.render_state = RenderState::Partial;
         } else if self.render_state != RenderState::Fully {
             self.render_state = RenderState::Fully;
-            emit(self.events.as_ref(), RendererEvent::RenderMapFinished);
+            emit(events, RendererEvent::RenderMapFinished);
         }
 
         self.frame_projection = Some(frame_projection);
@@ -783,6 +789,14 @@ fn draw(
     );
 }
 
+/// Pushes what `orchestrator` reported since the last call to `events`, the
+/// renderer's event queue, or drops it when there is no queue.
+fn report(orchestrator: &mut RenderOrchestrator, events: Option<&RendererEvents>) {
+    for event in orchestrator.take_events() {
+        emit(events, event);
+    }
+}
+
 /// Pushes `event` to `events`, the renderer's event queue, if it has one.
 fn emit(events: Option<&RendererEvents>, event: RendererEvent) {
     if let Some(events) = events {
@@ -807,10 +821,11 @@ impl Renderer {
         unsafe {
             ManuallyDrop::drop(&mut self.orchestrator);
         }
-        self.clip_masks = ClipMasks::default();
-        self.layer_composite = LayerComposite::default();
-        self.static_data = None;
-        self.context.release_all();
+        let encoder = &mut self.encoder;
+        encoder.clip_masks = ClipMasks::default();
+        encoder.layer_composite = LayerComposite::default();
+        encoder.static_data = None;
+        encoder.context.release_all();
     }
 }
 

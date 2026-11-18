@@ -4,9 +4,7 @@ use std::sync::Arc;
 
 use feature::{Identifier, PropertyMap, Value};
 use geometry::Point;
-use mln_gfx::renderer_backend::RendererBackend;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::vertex_vector::{VertexVector, VertexVectorBasePtr};
 use mln_map_types::MapMode;
 use mln_style::PropertyEvaluationParameters;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
@@ -27,12 +25,12 @@ use mln_util::logging::{Event, EventSeverity, Log, Observer};
 use mln_util::size::Size;
 use mln_util::time::Instant;
 use mln_vec_map::VecMap;
-use mln_webgpu::Device;
 use parking_lot::Mutex;
 
+use super::with_context;
 use crate::Registry;
 use crate::bucket::Bucket;
-use crate::bucket_geometry::{BucketGeometry, bucket_indexes, bucket_vertices, paint_vertices};
+use crate::bucket_geometry::{BucketGeometry, GeometryUpload, bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::circle_bucket::CircleBucket;
 use crate::buckets::fill_bucket::FillBucket;
 use crate::buckets::fill_extrusion_bucket::FillExtrusionBucket;
@@ -40,7 +38,7 @@ use crate::buckets::line_bucket::{LineBucket, LineLayoutVertex};
 use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
 use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::gfx::context::Context;
-use crate::gfx::upload::vertex_buffer;
+use crate::gfx::indexes::DrawIndexes;
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::layout::symbol_instance::SymbolInstancePools;
@@ -78,11 +76,10 @@ fn collection(rings: &[&[(i16, i16)]]) -> GeometryCollection {
     )
 }
 
-/// Runs `f` with the context of a headless WebGPU backend.
-fn with_context(f: impl FnOnce(&mut Context)) {
-    let backend: Rc<dyn RendererBackend> =
-        Rc::new(mln_webgpu::RendererBackend::new(&Device::new(None).expect("device")));
-    f(&mut Context::new(Rc::clone(&backend)));
+/// Uploads `bucket`, keeping its geometry in `geometry`, through `context`.
+fn upload(bucket: &mut dyn Bucket, geometry: &mut BucketGeometry, context: &mut Context) {
+    let needs = crate::layers::upload_needs(context);
+    bucket.upload(&mut GeometryUpload::new(geometry, context), needs);
 }
 
 // gtest: Buckets.CircleBucket
@@ -111,7 +108,7 @@ fn circle_bucket() {
     assert!(bucket.has_data());
     assert!(bucket.needs_upload());
 
-    with_context(|context| bucket.upload(&mut BucketGeometry::default(), crate::layers::upload_needs(context)));
+    with_context(|context| upload(&mut bucket, &mut BucketGeometry::default(), context));
     assert!(bucket.has_data());
     assert!(!bucket.needs_upload());
 }
@@ -138,7 +135,7 @@ fn fill_bucket() {
     assert!(bucket.has_data());
     assert!(bucket.needs_upload());
 
-    with_context(|context| bucket.upload(&mut BucketGeometry::default(), crate::layers::upload_needs(context)));
+    with_context(|context| upload(&mut bucket, &mut BucketGeometry::default(), context));
     assert!(!bucket.needs_upload());
 }
 
@@ -231,46 +228,46 @@ fn fill_bucket_frees_cpu_geometry_after_upload() {
     with_context(|context| {
         // The bucket's upload moves its data to the render thread's
         // vectors, which hold it until they are uploaded.
+        // The bucket's upload moves its data to the context's stores, which
+        // hold it until it is uploaded.
         let mut geometry = BucketGeometry::default();
-        bucket.upload(&mut geometry, crate::layers::upload_needs(context));
-        let vertices = bucket_vertices(Some(&geometry), &bucket.vertices);
+        upload(&mut bucket, &mut geometry, context);
+        let vertices = bucket_vertices(&geometry, &bucket.vertices).expect("moved");
         assert!(bucket.vertices.data().is_empty());
         assert_eq!(bucket.vertices.len(), vertex_count);
-        assert_eq!(vertices.get_raw_data().len(), vertex_count * vertices.get_raw_size());
+        let stored = context.vertices(&vertices).expect("stored");
+        assert_eq!(stored.bytes().len(), vertex_count * stored.vertex_size());
 
-        // A draw's upload turns the shared vectors into buffers: the indexes
-        // are in the context's store once the bucket's upload put them there.
-        let buffer = vertex_buffer(context, &vertices, false).expect("uploads").expect("a buffer");
-        geometry.store_indexes(context);
-        let mut triangles = bucket_indexes(Some(&geometry), &bucket.triangles);
+        // A draw's upload writes them to buffers.
+        let buffer = context.upload_vertices(&vertices, false).expect("uploads").expect("a buffer");
+        let mut triangles = DrawIndexes::from(bucket_indexes(&geometry, &bucket.triangles).expect("moved"));
         triangles.upload(context).expect("uploads");
 
         // The CPU copies are gone, the counts that draws are built from
         // are not.
-        assert!(!vertices.has_raw_data());
-        assert!(vertices.get_raw_data().is_empty());
-        assert_eq!(vertices.get_raw_count(), vertex_count);
+        assert!(context.vertices(&vertices).is_some_and(|stored| !stored.has_data() && stored.bytes().is_empty()));
+        assert_eq!(vertices.count(), vertex_count);
         assert!(!triangles.has_data(context));
         assert_eq!(triangles.len(context), index_count);
         assert_eq!(bucket.triangles.len(), index_count);
 
-        // A second draw over the same bucket reuses the vectors and the
+        // A second draw over the same bucket shares the vertices and the
         // buffer without reading the data.
-        let again = bucket_vertices(Some(&geometry), &bucket.vertices);
-        assert!(Rc::ptr_eq(&vertices, &again));
-        let indexes = bucket_indexes(Some(&geometry), &bucket.triangles);
+        let again = bucket_vertices(&geometry, &bucket.vertices).expect("moved");
+        assert!(vertices.same(&again));
+        let indexes = DrawIndexes::from(bucket_indexes(&geometry, &bucket.triangles).expect("moved"));
         assert!(indexes.buffer(context).is_some_and(|buffer| triangles.buffer(context) == Some(buffer)));
-        let reused = vertex_buffer(context, &again, true).expect("uploads").expect("a buffer");
+        let reused = context.upload_vertices(&again, true).expect("uploads").expect("a buffer");
         assert!(Rc::ptr_eq(&buffer, &reused));
 
         // Data-driven paint values are freed too when nothing can rewrite them.
         let binders = bucket.paint_property_binders.get("fill").unwrap();
         assert!(!binders.depends_on_feature_state());
         let buffer = &binders.interleaved_vertex_buffer;
-        let paint = paint_vertices(Some(&geometry), buffer, false);
-        assert!(paint.get_raw_count() > 0);
-        assert!(vertex_buffer(context, &paint, false).expect("uploads").is_some());
-        assert!(!paint.has_raw_data());
+        let paint = paint_vertices(context, &geometry, buffer, false).expect("moved");
+        assert!(paint.count() > 0);
+        assert!(context.upload_vertices(&paint, false).expect("uploads").is_some());
+        assert!(context.vertices(&paint).is_some_and(|stored| !stored.has_data()));
         assert!(buffer.shared_vertex_vector.data().is_empty());
     });
 }
@@ -285,15 +282,15 @@ fn fill_bucket_keeps_paint_data_that_feature_state_rewrites() {
 
     with_context(|context| {
         let mut geometry = BucketGeometry::default();
-        bucket.upload(&mut geometry, crate::layers::upload_needs(context));
+        upload(&mut bucket, &mut geometry, context);
         let binders = bucket.paint_property_binders.get("fill").unwrap();
         assert!(binders.depends_on_feature_state());
         let buffer = &binders.interleaved_vertex_buffer;
-        let paint = paint_vertices(Some(&geometry), buffer, binders.depends_on_feature_state());
-        assert!(paint.get_raw_count() > 0);
-        assert!(vertex_buffer(context, &paint, false).expect("uploads").is_some());
+        let paint = paint_vertices(context, &geometry, buffer, binders.depends_on_feature_state()).expect("a copy");
+        assert!(paint.count() > 0);
+        assert!(context.upload_vertices(&paint, false).expect("uploads").is_some());
         assert!(!buffer.shared_vertex_vector.is_moved());
-        assert_eq!(buffer.shared_vertex_vector.data().len(), paint.get_raw_count());
+        assert_eq!(buffer.shared_vertex_vector.data().len(), paint.count());
     });
 }
 
@@ -333,7 +330,7 @@ fn line_bucket() {
     assert!(bucket.has_data());
     assert!(bucket.needs_upload());
 
-    with_context(|context| bucket.upload(&mut BucketGeometry::default(), crate::layers::upload_needs(context)));
+    with_context(|context| upload(&mut bucket, &mut BucketGeometry::default(), context));
     assert!(!bucket.needs_upload());
 }
 
@@ -354,25 +351,23 @@ fn line_bucket_drawables_build_from_freed_indexes() {
         .unwrap();
     assert!(bucket.has_data());
 
-    let backend: Rc<dyn RendererBackend> =
-        Rc::new(mln_webgpu::RendererBackend::new(&Device::new(None).expect("device")));
-    let context = &mut Context::new(Rc::clone(&backend));
-    let mut geometry = BucketGeometry::default();
-    let index_count = bucket.triangles.len();
-    bucket.upload(&mut geometry, crate::layers::upload_needs(context));
+    with_context(|context| {
+        let mut geometry = BucketGeometry::default();
+        let index_count = bucket.triangles.len();
+        upload(&mut bucket, &mut geometry, context);
 
-    // An earlier draw put the indexes in a buffer, which frees their CPU
-    // copy.
-    geometry.store_indexes(context);
-    let mut triangles = bucket_indexes(Some(&geometry), &bucket.triangles);
-    triangles.upload(context).expect("uploads");
-    assert!(!triangles.has_data(context));
+        // An earlier draw put the indexes in a buffer, which frees their CPU
+        // copy.
+        let mut triangles = DrawIndexes::from(bucket_indexes(&geometry, &bucket.triangles).expect("moved"));
+        triangles.upload(context).expect("uploads");
+        assert!(!triangles.has_data(context));
 
-    // A layer that rebuilds its draws of the tile builds the segments from
-    // the counts.
-    let indexes = bucket_indexes(Some(&geometry), &bucket.triangles);
-    assert_eq!(indexes.len(context), index_count);
-    assert_eq!(triangles.len(context), index_count);
+        // A layer that rebuilds its draws of the tile builds the segments
+        // from the counts.
+        let indexes = DrawIndexes::from(bucket_indexes(&geometry, &bucket.triangles).expect("moved"));
+        assert_eq!(indexes.len(context), index_count);
+        assert_eq!(triangles.len(context), index_count);
+    });
 }
 
 // gtest: Buckets.SymbolBucket
@@ -432,7 +427,7 @@ fn symbol_bucket() {
     assert!(bucket.has_data());
     assert!(bucket.needs_upload());
 
-    with_context(|context| bucket.upload(&mut BucketGeometry::default(), crate::layers::upload_needs(context)));
+    with_context(|context| upload(&mut bucket, &mut BucketGeometry::default(), context));
     assert!(!bucket.needs_upload());
 }
 
@@ -446,7 +441,7 @@ fn raster_bucket() {
     assert!(bucket.has_data());
     assert!(bucket.needs_upload());
 
-    with_context(|context| bucket.upload(&mut BucketGeometry::default(), crate::layers::upload_needs(context)));
+    with_context(|context| upload(&mut bucket, &mut BucketGeometry::default(), context));
     assert!(!bucket.needs_upload());
 
     bucket.clear();
@@ -739,75 +734,71 @@ fn line_bucket_evaluates_cap_and_limits_per_feature() {
     }
 }
 
-// A released vector frees its CPU copy once its vertices are in a buffer.
+// Stored vertices free their CPU copy once they are in a buffer.
 #[test]
-fn released_vertex_vector_frees_its_data_once_it_has_a_buffer() {
+fn stored_vertices_free_their_data_once_they_have_a_buffer() {
     with_context(|context| {
         let before = Instant::now();
         std::thread::sleep(std::time::Duration::from_millis(1));
-        let vertices: VertexVectorBasePtr = Rc::new(VertexVector::from_vec_released(vec![[1i16, 2], [3, 4]]));
-        assert!(vertices.has_raw_data());
-        assert_eq!(vertices.get_raw_data().len(), 8);
+        let vertices = context.add_vertices(vec![[1i16, 2], [3, 4]]).into_shared();
+        assert!(context.vertices(&vertices).is_some_and(|stored| stored.has_data() && stored.bytes().len() == 8));
 
-        vertex_buffer(context, &vertices, false).expect("uploads").expect("a buffer");
-        assert!(!vertices.has_raw_data());
-        assert!(vertices.get_raw_data().is_empty());
-        assert_eq!(vertices.get_raw_count(), 2);
-        // A draw that bound its attributes before the vector was made
-        // still sees it as new.
-        assert!(vertices.is_modified_after(before));
+        context.upload_vertices(&vertices, false).expect("uploads").expect("a buffer");
+        assert!(context.vertices(&vertices).is_some_and(|stored| !stored.has_data() && stored.bytes().is_empty()));
+        assert_eq!(vertices.count(), 2);
+        // A draw that bound its attributes before the vertices were made
+        // still sees them as new.
+        assert!(context.vertices(&vertices).is_some_and(|stored| stored.is_modified_after(before)));
     });
 }
 
+// The holder of typed vertices replaces them with as many vertices of the
+// type, which the next upload writes over their buffer, counted as a buffer
+// update.
 #[test]
-fn vertex_vector_that_is_not_released_keeps_its_data() {
+fn typed_vertices_take_updates_of_as_many_vertices() {
     with_context(|context| {
-        let vertices: VertexVectorBasePtr = Rc::new(VertexVector::from_vec(vec![[1i16, 2]]));
-        vertex_buffer(context, &vertices, false).expect("uploads").expect("a buffer");
-        assert!(vertices.has_raw_data());
-        assert_eq!(vertices.get_raw_data().len(), 4);
-    });
-}
+        let typed = context.add_vertices(vec![[1i16, 2], [3, 4]]);
+        let vertices = typed.shared().clone();
+        let buffer = context.upload_vertices(&vertices, false).expect("uploads").expect("a buffer");
+        assert!(context.vertices(&vertices).is_some_and(|stored| !stored.has_data()));
 
-// A staged vector frees its CPU copy once its vertices are in a buffer, and
-// still takes updates of as many vertices, which the next upload writes over
-// the buffer's.
-#[test]
-fn staged_vertex_vector_frees_its_data_and_takes_updates() {
-    with_context(|context| {
-        let staged = Rc::new(VertexVector::from_vec_staged(vec![[1i16, 2], [3, 4]]));
-        let vertices: VertexVectorBasePtr = Rc::<VertexVector<[i16; 2]>>::clone(&staged);
-        let buffer = vertex_buffer(context, &vertices, false).expect("uploads").expect("a buffer");
-        assert!(!vertices.has_raw_data());
-        assert_eq!(vertices.get_raw_count(), 2);
-
-        assert!(!staged.update(&[[5, 6]]), "another count");
+        assert!(!context.update_vertices(&typed, &[[5, 6]]), "another count");
         std::thread::sleep(std::time::Duration::from_millis(1));
-        assert!(staged.update(&[[5, 6], [7, 8]]));
-        assert_eq!(vertices.get_raw_data().len(), 8);
+        assert!(context.update_vertices(&typed, &[[5, 6], [7, 8]]));
+        assert!(context.vertices(&vertices).is_some_and(|stored| stored.bytes().len() == 8));
         let before = context.rendering_stats().clone();
-        let rewritten = vertex_buffer(context, &vertices, false).expect("uploads").expect("a buffer");
-        assert!(Rc::ptr_eq(&buffer, &rewritten));
-        assert_eq!(context.rendering_stats().vertex_update_bytes, before.vertex_update_bytes + 8);
-        assert!(!vertices.has_raw_data());
-        assert_eq!(vertices.get_raw_count(), 2);
-    });
-}
-
-// Rewriting a vector's buffer counts as a buffer update, and makes no new
-// buffer.
-#[test]
-fn rewriting_a_vertex_buffer_counts_an_update() {
-    with_context(|context| {
-        let vertices: VertexVectorBasePtr = Rc::new(VertexVector::from_vec(vec![[1i16, 2]]));
-        let buffer = vertex_buffer(context, &vertices, false).expect("uploads").expect("a buffer");
-        let before = context.rendering_stats().clone();
-        let rewritten = vertex_buffer(context, &vertices, true).expect("uploads").expect("a buffer");
+        let rewritten = context.upload_vertices(&vertices, false).expect("uploads").expect("a buffer");
         assert!(Rc::ptr_eq(&buffer, &rewritten));
         let after = context.rendering_stats().clone();
+        assert_eq!(after.vertex_update_bytes, before.vertex_update_bytes + 8);
         assert_eq!(after.buffer_updates, before.buffer_updates + 1);
-        assert_eq!(after.buffer_update_bytes, before.buffer_update_bytes + 4);
-        assert_eq!(after.vertex_update_bytes, before.vertex_update_bytes + 4);
         assert_eq!(after.num_vertex_buffers, before.num_vertex_buffers);
+        assert!(context.vertices(&vertices).is_some_and(|stored| !stored.has_data()));
+        assert_eq!(vertices.count(), 2);
+    });
+}
+
+// What draws share stays in the context's stores while a handle to it lasts,
+// and goes once the last one drops and the context destroys what the
+// renderer released.
+#[test]
+fn store_entries_last_as_long_as_their_handles() {
+    with_context(|context| {
+        let vertices = context.add_vertices(vec![[1i16, 2]]).into_shared();
+        let held = vertices.clone();
+        let texture = context.add_texture();
+        let draw_texture = texture.clone();
+        drop(vertices);
+        drop(texture);
+        context.destroy_released();
+        assert!(context.vertices(&held).is_some());
+        assert!(context.texture(&draw_texture).is_some());
+
+        let key = held.handle().key();
+        drop(held);
+        drop(draw_texture);
+        context.destroy_released();
+        assert!(!context.has_vertices(key));
     });
 }

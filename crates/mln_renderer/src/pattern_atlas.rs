@@ -8,7 +8,7 @@ use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use crate::gfx::context::Context;
-use crate::gfx::texture2d::{OwnedTexture, TextureKey};
+use crate::gfx::store::SharedTexture;
 
 /// When copied into the atlas texture, image data is padded by one pixel on
 /// each side. Pattern images are padded with a copy of the image data
@@ -25,7 +25,7 @@ pub(crate) struct PatternAtlas {
     allocator: BucketedAtlasAllocator,
     patterns: HashMap<String, Pattern>,
     atlas_image: PremultipliedImage,
-    texture: Option<OwnedTexture>,
+    texture: Option<SharedTexture>,
     dirty: bool,
 }
 
@@ -150,9 +150,9 @@ impl PatternAtlas {
         let texture = match &self.texture {
             None => {
                 let texture = context.add_texture_with(|texture| texture.set_format(TextureFormat::Rgba8Unorm));
-                self.texture.insert(texture).key()
+                &*self.texture.insert(texture)
             }
-            Some(texture) if self.dirty => texture.key(),
+            Some(texture) if self.dirty => texture,
             Some(_) => return,
         };
         let image = &self.atlas_image;
@@ -164,8 +164,8 @@ impl PatternAtlas {
 
     /// The atlas's texture, once `upload` made it.
     #[must_use]
-    pub(crate) fn texture(&self) -> Option<TextureKey> {
-        self.texture.as_ref().map(OwnedTexture::key)
+    pub(crate) fn texture(&self) -> Option<&SharedTexture> {
+        self.texture.as_ref()
     }
 
     #[cfg(test)]

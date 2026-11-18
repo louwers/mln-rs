@@ -3,6 +3,7 @@
 // elevation stops texture is made anew when the ramp changes, since its size
 // changes with the ramp.
 
+use std::mem::offset_of;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -20,8 +21,7 @@ use mln_gfx::shaders::shader_defines::{
 };
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
-use mln_gfx::vertex_vector::VertexVectorBasePtr;
-use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode, ShaderProgramPtr, VertexAttributeArray};
+use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode, ShaderProgramPtr};
 use mln_style::color_ramp_property_value::ColorRampPropertyValue;
 use mln_style::expression::{
     Dependency, EvaluationContext, GlobalStateMap, from_expression_value, global_state_refs_intersect,
@@ -38,28 +38,29 @@ use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use mln_util::time::Instant;
 
-use super::{cast_matrix, shared_vertices};
+use super::cast_matrix;
 use crate::bucket::{Bucket, NoBucket};
+use crate::bucket_geometry::released_vertices;
 use crate::buckets::hillshade_bucket::{HillshadeBucket, HillshadeLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
-use crate::gfx::indexes::{DrawIndexes, StoredIndexes};
-use crate::gfx::texture2d::OwnedTexture;
+use crate::gfx::indexes::{DrawIndexes, Indexes, SharedIndexes};
+use crate::gfx::store::SharedTexture;
+use crate::gfx::vertex_attribute::VertexAttributeArray;
+use crate::gfx::vertices::SharedVertices;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_drawing::{DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptDraw, TileDraws, TileObjects};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{
-    Atlases, LayerParts, LayerSource, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
+    Atlases, LayerParts, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
 };
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
+use crate::render_tile::FrameTile;
 use crate::tile_matrix::to_projection_ubo;
 
 const COLOR_RELIEF_SHADER_GROUP_NAME: &str = "ColorReliefShader";
-
-/// The pass the layer's draws draw in.
-const RENDER_PASS: RenderPass = RenderPass::Translucent;
 
 /// What the layer keeps of a tile: the draw that colors its bucket's DEM,
 /// with when it was built and the DEM's properties it was built with.
@@ -87,6 +88,7 @@ struct ReliefUniforms {
 impl LayerType for ColorRelief {
     type Layout = NoLayout;
     type Bucket = NoBucket;
+    type TileBucket<'a> = &'a HillshadeBucket;
 
     fn render_layer(style: Arc<LayerStyle<ColorRelief>>) -> Box<dyn RenderLayer> {
         Box::new(RenderColorReliefLayer::new(style))
@@ -113,20 +115,20 @@ pub(crate) struct RenderColorReliefLayer {
     color_stops: PremultipliedImage,
 
     // GPU textures
-    elevation_stops_texture: Option<OwnedTexture>,
-    color_stops_texture: Option<OwnedTexture>,
+    elevation_stops_texture: Option<SharedTexture>,
+    color_stops_texture: Option<SharedTexture>,
 
     color_relief_shader: Option<ShaderProgramPtr>,
 
-    static_data_shared_vertices: Option<VertexVectorBasePtr>,
+    static_data_shared_vertices: Option<SharedVertices>,
     /// The triangles of the static data's quad.
-    static_data_indices: Option<StoredIndexes>,
+    static_data_indices: Option<SharedIndexes>,
     globe_meshes: GlobeTileMeshCache<HillshadeLayoutVertex>,
 
     /// The DEM texture of each bucket, made from its current, possibly
     /// backfilled, DEM image, with the bucket's prepare generation it was
     /// made at.
-    dem_textures: HashMap<SimpleIdentity, (OwnedTexture, u64)>,
+    dem_textures: HashMap<SimpleIdentity, (SharedTexture, u64)>,
     /// The buckets of the frame's tiles, whose DEM textures stay.
     live_buckets: HashSet<SimpleIdentity>,
 }
@@ -261,26 +263,16 @@ impl RenderColorReliefLayer {
 }
 
 /// The vertex attributes of a color-relief draw over `vertices`.
-fn color_relief_vertex_attributes(vertices: &VertexVectorBasePtr) -> VertexAttributeArray {
+fn color_relief_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeArray {
     let mut attrs = VertexAttributeArray::new();
     let stride = size_of::<HillshadeLayoutVertex>() as u32;
-    if let Some(attr) = attrs.set(ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-        attr.set_shared_raw_data(
-            Some(Rc::clone(vertices)),
-            0, // offsetof(HillshadeLayoutVertex, a1)
-            0,
-            stride,
-            AttributeDataType::Short2,
-        );
+    if let Some(attr) = attrs.set(ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE, AttributeDataType::Invalid) {
+        let offset = offset_of!(HillshadeLayoutVertex, a1) as u32;
+        attr.set_shared_vertices(vertices.clone(), offset, 0, stride, AttributeDataType::Short2);
     }
-    if let Some(attr) = attrs.set(ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-        attr.set_shared_raw_data(
-            Some(Rc::clone(vertices)),
-            4, // offsetof(HillshadeLayoutVertex, a2)
-            0,
-            stride,
-            AttributeDataType::Short2,
-        );
+    if let Some(attr) = attrs.set(ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE, AttributeDataType::Invalid) {
+        let offset = offset_of!(HillshadeLayoutVertex, a2) as u32;
+        attr.set_shared_vertices(vertices.clone(), offset, 0, stride, AttributeDataType::Short2);
     }
     attrs
 }
@@ -306,11 +298,11 @@ impl TypedLayer for RenderColorReliefLayer {
         }
     }
 
-    fn passes(
+    fn complete_evaluation(
         &mut self,
         parameters: &PropertyEvaluationParameters,
-        evaluated: &mut EvaluatedLayer<ColorRelief>,
-    ) -> RenderPass {
+        _evaluated: &mut EvaluatedLayer<ColorRelief>,
+    ) {
         // Build the ramp here rather than in transition(), which has no global
         // state. A new or changed layer always needs one; otherwise only a
         // change to a state key that the ramp reads does.
@@ -331,7 +323,9 @@ impl TypedLayer for RenderColorReliefLayer {
         if ramp_affected {
             self.update_color_ramp();
         }
+    }
 
+    fn passes(&self, evaluated: &EvaluatedLayer<ColorRelief>) -> RenderPass {
         if *evaluated.paint.color_relief_opacity.uniform() > 0.0 { RenderPass::Translucent } else { RenderPass::None }
     }
 
@@ -342,11 +336,8 @@ impl TypedLayer for RenderColorReliefLayer {
         &mut self,
         paint_parameters: &mut PaintParameters<'_>,
         _atlases: &Atlases,
-        source: Option<LayerSource<'_, ColorRelief>>,
+        render_tiles: &[FrameTile<'_, ColorRelief>],
     ) {
-        let Some(render_tiles) = source.and_then(LayerSource::tiles) else {
-            return;
-        };
         let shaders = &paint_parameters.static_data.shaders;
 
         if self.color_relief_shader.is_none() {
@@ -357,18 +348,16 @@ impl TypedLayer for RenderColorReliefLayer {
             self.remove_all_draws();
             return;
         };
-        if (RENDER_PASS.underlying_type() & self.base.evaluated_properties.render_passes()) == 0 {
-            return;
-        }
 
-        let static_data_shared_vertices = Rc::clone(
-            self.static_data_shared_vertices
-                .get_or_insert_with(|| shared_vertices(&RenderStaticData::raster_vertices())),
-        );
+        let context = &mut *paint_parameters.context;
+        let static_data_shared_vertices = self
+            .static_data_shared_vertices
+            .get_or_insert_with(|| released_vertices(context, &RenderStaticData::raster_vertices()))
+            .clone();
         let static_data_indices = self
             .static_data_indices
-            .get_or_insert_with(|| StoredIndexes::new(RenderStaticData::quad_triangle_indices()))
-            .share(paint_parameters.context);
+            .get_or_insert_with(|| context.add_indexes(Indexes::new(RenderStaticData::quad_triangle_indices())))
+            .clone();
 
         // Update color ramp textures if changed
         if self.color_ramp_changed {
@@ -384,14 +373,13 @@ impl TypedLayer for RenderColorReliefLayer {
                 });
             });
             let data = bytemuck::cast_slice(&self.elevation_stops_data);
-            if let Err(error) =
-                context.upload_texture_data(elevation_stops.key(), data, Size::new(self.color_ramp_size, 1))
+            if let Err(error) = context.upload_texture_data(&elevation_stops, data, Size::new(self.color_ramp_size, 1))
             {
                 Log::error(Event::Render, format!("Uploading the elevation stops failed: {error}"));
             }
             self.elevation_stops_texture = Some(elevation_stops);
 
-            let color_stops = self.color_stops_texture.get_or_insert_with(|| context.add_texture()).key();
+            let color_stops = self.color_stops_texture.get_or_insert_with(|| context.add_texture());
             if let Some(mut texture) = context.texture_mut(color_stops) {
                 texture.set_image(Some(Rc::new(self.color_stops.clone())));
                 texture.set_sampler(SamplerState {
@@ -406,17 +394,16 @@ impl TypedLayer for RenderColorReliefLayer {
         }
 
         // Skip rendering if color ramp textures aren't ready
-        let (Some(elevation_stops_texture), Some(color_stops_texture)) = (
-            self.elevation_stops_texture.as_ref().map(OwnedTexture::key),
-            self.color_stops_texture.as_ref().map(OwnedTexture::key),
-        ) else {
+        let (Some(elevation_stops_texture), Some(color_stops_texture)) =
+            (self.elevation_stops_texture.clone(), self.color_stops_texture.clone())
+        else {
             return;
         };
 
         // Drop the DEM textures of buckets that are no longer rendered.
         let live_buckets = &mut self.live_buckets;
         live_buckets.clear();
-        live_buckets.extend(render_tiles.iter().filter_map(|tile| tile.dem().map(Bucket::get_id)));
+        live_buckets.extend(render_tiles.iter().filter_map(|tile| tile.bucket().map(Bucket::get_id)));
         self.dem_textures.retain(|id, _| live_buckets.contains(id));
 
         let dem_sampler = SamplerState {
@@ -429,13 +416,13 @@ impl TypedLayer for RenderColorReliefLayer {
             ..Default::default()
         };
 
-        for tile in render_tiles.iter() {
+        for tile in render_tiles {
             let tile_id = tile.id();
             let Some(mut entry) = self.drawing.tiles_mut().entry(&tile_id) else {
                 continue;
             };
 
-            let Some(bucket) = tile.dem().filter(|bucket| bucket.has_data()) else {
+            let Some(bucket) = tile.bucket().filter(|bucket| bucket.has_data()) else {
                 *entry.value = None;
                 continue;
             };
@@ -458,23 +445,22 @@ impl TypedLayer for RenderColorReliefLayer {
                 let generation = bucket.render_target_generation();
                 let context = &mut *paint_parameters.context;
                 let dem_texture = match self.dem_textures.get(&bucket_id) {
-                    Some((texture, made_at)) if *made_at == generation => texture.key(),
+                    Some((texture, made_at)) if *made_at == generation => texture.clone(),
                     _ => {
                         let texture = context.add_texture_with(|texture| {
                             texture.set_image(Some(Rc::new(dem_data.get_image().clone())));
                         });
-                        let key = texture.key();
-                        self.dem_textures.insert(bucket_id, (texture, generation));
-                        key
+                        self.dem_textures.insert(bucket_id, (texture.clone(), generation));
+                        texture
                     }
                 };
-                if let Some(mut texture) = context.texture_mut(dem_texture) {
+                if let Some(mut texture) = context.texture_mut(&dem_texture) {
                     texture.set_sampler(dem_sampler);
                 }
                 let mut textures = Textures::default();
                 textures[ID_COLOR_RELIEF_IMAGE_TEXTURE] = Some(dem_texture);
-                textures[ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE] = Some(elevation_stops_texture);
-                textures[ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE] = Some(color_stops_texture);
+                textures[ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE] = Some(elevation_stops_texture.clone());
+                textures[ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE] = Some(color_stops_texture.clone());
 
                 if entry.value.as_ref().is_some_and(|cached| cached.built < geometry_time) {
                     // The masked geometry changed (see the file comment).
@@ -488,20 +474,21 @@ impl TypedLayer for RenderColorReliefLayer {
                     // The tile's geometry: the globe's mesh of its mask, the
                     // mask's geometry, or the whole tile's quad.
                     let (vertices, vertex_count, indices, segments): (
-                        VertexVectorBasePtr,
+                        SharedVertices,
                         usize,
                         DrawIndexes,
                         Vec<SegmentBase>,
                     ) = if self.base.projection_variant == ProjectionVariant::Globe {
-                        let globe_mesh =
-                            self.globe_meshes.get(&tile_id.canonical, &geometry.mask, HillshadeBucket::layout_vertex);
-                        let vertices: VertexVectorBasePtr = Rc::<
-                            mln_gfx::vertex_vector::VertexVector<HillshadeLayoutVertex>,
-                        >::clone(&globe_mesh.vertices);
+                        let globe_mesh = self.globe_meshes.get(
+                            context,
+                            &tile_id.canonical,
+                            &geometry.mask,
+                            HillshadeBucket::layout_vertex,
+                        );
                         (
-                            vertices,
-                            globe_mesh.vertices.elements(),
-                            globe_mesh.indices.share(paint_parameters.context),
+                            globe_mesh.vertices.clone(),
+                            globe_mesh.vertices.count(),
+                            globe_mesh.indexes(),
                             globe_mesh.segments.iter().map(SegmentBase::copy).collect(),
                         )
                     } else if !geometry.vertices.is_empty()
@@ -509,16 +496,16 @@ impl TypedLayer for RenderColorReliefLayer {
                         && !geometry.segments.is_empty()
                     {
                         (
-                            shared_vertices(&geometry.vertices),
+                            released_vertices(context, &geometry.vertices),
                             geometry.vertices.len(),
                             DrawIndexes::new(geometry.indices.clone()),
                             geometry.segments.iter().map(SegmentBase::copy).collect(),
                         )
                     } else {
                         (
-                            Rc::clone(&static_data_shared_vertices),
+                            static_data_shared_vertices.clone(),
                             4,
-                            static_data_indices.clone(),
+                            static_data_indices.clone().into(),
                             RenderStaticData::raster_segments(),
                         )
                     };

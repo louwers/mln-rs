@@ -1,39 +1,22 @@
 use std::rc::Rc;
 
+use crate::gfx_types::AttributeDataType;
 use crate::gpu::{ShaderKey, VertexStep};
 use crate::shaders::program_info::ProgramInfo;
-use crate::vertex_attribute::VertexAttributeArray;
 
 /// A built-in program with its defines: the key a pipeline compiles it from,
 /// and what it reads.
 pub struct ShaderProgram {
     key: ShaderKey,
     info: &'static ProgramInfo,
-    attributes: VertexAttributeArray,
-    instance_attributes: VertexAttributeArray,
 }
 
 pub type ShaderProgramPtr = Rc<ShaderProgram>;
 
-/// Its attributes by id, each at its place in the program's list and of the
-/// format a draw without data for it binds.
-fn attribute_array(attributes: &[(usize, crate::gfx_types::AttributeDataType)]) -> VertexAttributeArray {
-    let mut array = VertexAttributeArray::new();
-    for (index, &(id, format)) in attributes.iter().enumerate() {
-        array.set(id, index as i32, format, 0);
-    }
-    array
-}
-
 impl ShaderProgram {
     #[must_use]
     pub fn new(key: ShaderKey, info: &'static ProgramInfo) -> ShaderProgram {
-        ShaderProgram {
-            key,
-            info,
-            attributes: attribute_array(info.attributes),
-            instance_attributes: attribute_array(info.instance_attributes),
-        }
+        ShaderProgram { key, info }
     }
 
     #[must_use]
@@ -46,16 +29,18 @@ impl ShaderProgram {
         self.info.name
     }
 
-    /// The per-vertex attributes, with the formats of their defaults.
+    /// The per-vertex attributes, in the program's order, each its id and
+    /// the format a draw without data for it binds.
     #[must_use]
-    pub fn vertex_attributes(&self) -> &VertexAttributeArray {
-        &self.attributes
+    pub fn vertex_attributes(&self) -> &'static [(usize, AttributeDataType)] {
+        self.info.attributes
     }
 
-    /// The per-instance attributes, with the formats of their defaults.
+    /// The per-instance attributes, as
+    /// [`vertex_attributes`](Self::vertex_attributes) gives them.
     #[must_use]
-    pub fn instance_attributes(&self) -> &VertexAttributeArray {
-        &self.instance_attributes
+    pub fn instance_attributes(&self) -> &'static [(usize, AttributeDataType)] {
+        self.info.instance_attributes
     }
 
     /// The id of the attribute at `index` of the program's per-vertex or

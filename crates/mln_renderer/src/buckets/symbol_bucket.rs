@@ -26,7 +26,7 @@ use mln_util::serialization::payload::pod;
 use mln_vec_map::VecMap;
 
 use crate::bucket::{Bucket, BucketBase, FeatureStates, UploadNeeds};
-use crate::bucket_geometry::{BucketGeometry, GeometryVec};
+use crate::bucket_geometry::{GeometryUpload, GeometryVec};
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::symbol_instance::{SymbolInstance, SymbolInstancePools};
 use crate::paint_property_binder::PaintPropertyBinder;
@@ -800,7 +800,7 @@ impl Bucket for SymbolBucket {
         self.max_height_offset
     }
 
-    fn upload(&mut self, geometry: &mut BucketGeometry, _needs: UploadNeeds) {
+    fn upload(&mut self, geometry: &mut GeometryUpload<'_>, _needs: UploadNeeds) {
         let state = &mut self.state;
         for buffer in [&mut state.text, &mut state.icon, &mut state.sdf_icon] {
             geometry.move_vertices(&mut buffer.attribute_data);

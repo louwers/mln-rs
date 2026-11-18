@@ -1,48 +1,15 @@
 //! The renderer's textures. Each is a [`Texture2D`] in the context's store,
-//! which one owner holds as an [`OwnedTexture`] and draws name by its
-//! [`TextureKey`]. The owner drops it wherever it goes, such as in a frame's
-//! update, so the store takes it out later, in the encode.
+//! which its owner and the draws that bind it hold as a
+//! [`SharedTexture`](crate::gfx::store::SharedTexture).
 
 use std::rc::Rc;
 
 use mln_gfx::gpu::{Gpu, GpuError, SamplerId, TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage};
-use mln_gfx::released::{Released, StoreEntry};
+use mln_gfx::released::Released;
 use mln_gfx::rendering_stats::RenderingStats;
 use mln_gfx::texture2d::SamplerState;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
-use slotmap::Key as _;
-
-slotmap::new_key_type! {
-    /// A texture of the context's store, as draws name it.
-    pub(crate) struct TextureKey;
-}
-
-/// The owner of a texture of the context's store, which goes from the store
-/// once this drops: the context removes it the next time it destroys what
-/// the renderer released.
-pub(crate) struct OwnedTexture {
-    key: TextureKey,
-    released: Rc<Released>,
-}
-
-impl OwnedTexture {
-    pub(crate) fn new(key: TextureKey, released: Rc<Released>) -> OwnedTexture {
-        OwnedTexture { key, released }
-    }
-
-    /// The texture's key, which draws name it by.
-    #[must_use]
-    pub(crate) fn key(&self) -> TextureKey {
-        self.key
-    }
-}
-
-impl Drop for OwnedTexture {
-    fn drop(&mut self) {
-        self.released.store_entry(StoreEntry::Texture(self.key.data().as_ffi()));
-    }
-}
 
 /// A texture of the renderer: its size, format and sampler state, the image
 /// it waits to upload, and once made, a texture of the backend's
