@@ -5076,25 +5076,25 @@ layout (std140) uniform SymbolEvaluatedPropsUBO {
 
 out highp vec2 v_tex;
 flat out highp vec2 v_tex_origin;
+// The fade opacity, times the opacity when it's per vertex.
 out float v_fade_opacity;
 
 #ifndef HAS_UNIFORM_u_opacity
 layout (location = 5) in lowp vec2 a_opacity;
-out lowp float opacity;
 #endif
 
 void main() {
     highp float u_opacity = u_is_text_prop ? u_text_opacity : u_icon_opacity;
 
-    #ifndef HAS_UNIFORM_u_opacity
-opacity = unpack_mix_vec2(a_opacity, u_opacity_t);
-#else
-lowp float opacity = u_opacity;
-#endif
-
     vec2 fade_opacity = unpack_opacity(a_fade_opacity);
     float fade_change = fade_opacity[1] > 0.5 ? u_symbol_fade_change : -u_symbol_fade_change;
     v_fade_opacity = max(0.0, min(1.0, fade_opacity[0] + fade_change));
+#ifndef HAS_UNIFORM_u_opacity
+    lowp float opacity = unpack_mix_vec2(a_opacity, u_opacity_t);
+    v_fade_opacity *= opacity;
+#else
+    lowp float opacity = u_opacity;
+#endif
 
     // A quad that draws nothing goes to one point off screen, so it's never
     // rasterized. All four vertices of a quad share its fade and opacity.
@@ -5224,18 +5224,12 @@ in highp vec2 v_tex;
 flat in highp vec2 v_tex_origin;
 in float v_fade_opacity;
 
-#ifndef HAS_UNIFORM_u_opacity
-in lowp float opacity;
-#endif
-
 void main() {
-    highp float u_opacity = u_is_text ? u_text_opacity : u_icon_opacity;
-
-    #ifdef HAS_UNIFORM_u_opacity
-lowp float opacity = u_opacity;
+#ifdef HAS_UNIFORM_u_opacity
+    lowp float alpha = (u_is_text ? u_text_opacity : u_icon_opacity) * v_fade_opacity;
+#else
+    lowp float alpha = v_fade_opacity;
 #endif
-
-    lowp float alpha = opacity * v_fade_opacity;
     fragColor = texture(u_texture, atlas_pos(v_tex_origin, v_tex)) * alpha;
 
 #ifdef OVERDRAW_INSPECTOR
