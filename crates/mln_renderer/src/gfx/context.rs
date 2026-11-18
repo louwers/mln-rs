@@ -211,11 +211,8 @@ impl Context {
 
     /// Destroys the resources the renderer dropped, first taking the store
     /// entries whose last handles dropped out of their stores, and takes
-    /// what they took out of the rendering stats. A frame's encode does this once it made its draws,
-    /// before it uploads them, for what the frame's update and draw update
-    /// dropped; once it uploaded them, before its passes, for what the
-    /// uploads dropped; and once it is submitted, for what its passes
-    /// dropped.
+    /// what they took out of the rendering stats. What dropped keeps its
+    /// GPU memory until then. Not while a pass holds the backend's GPU.
     pub(crate) fn destroy_released(&mut self) {
         let Context { device, textures, indexes, vertices, released_entries, .. } = self;
         released_entries.drain(|key| match key {

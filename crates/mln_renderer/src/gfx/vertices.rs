@@ -38,8 +38,8 @@ enum VertexData {
 pub(crate) struct Vertices {
     /// The bytes the next upload writes, `Freed` once it wrote them.
     data: VertexData,
-    count: u32,
-    vertex_size: u32,
+    count: usize,
+    vertex_size: usize,
     buffer: Option<BufferPtr>,
 }
 
@@ -87,29 +87,29 @@ impl VertexData {
 impl Vertices {
     /// `vertices`, moved.
     fn new<V: bytemuck::Pod>(vertices: Vec<V>) -> Vertices {
-        let count = vertices.len() as u32;
+        let count = vertices.len();
         let data = VertexData::of(vertices);
-        Vertices { data, count, vertex_size: size_of::<V>() as u32, buffer: None }
+        Vertices { data, count, vertex_size: size_of::<V>(), buffer: None }
     }
 
     /// The vertices of `vertex_size` bytes each in a JS array.
     #[cfg(target_family = "wasm")]
     fn from_host(bytes: HostBytes, vertex_size: usize) -> Vertices {
         debug_assert!(bytes.len().is_multiple_of(vertex_size.max(1)));
-        let count = (bytes.len() / vertex_size.max(1)) as u32;
-        Vertices { data: VertexData::Host(bytes), count, vertex_size: vertex_size as u32, buffer: None }
+        let count = bytes.len() / vertex_size.max(1);
+        Vertices { data: VertexData::Host(bytes), count, vertex_size, buffer: None }
     }
 
     /// The number of vertices, which stays once the upload freed them.
     #[must_use]
     pub(crate) fn count(&self) -> usize {
-        self.count as usize
+        self.count
     }
 
     /// The bytes a vertex takes.
     #[must_use]
     pub(crate) fn vertex_size(&self) -> usize {
-        self.vertex_size as usize
+        self.vertex_size
     }
 
     /// The bytes the vertices take.

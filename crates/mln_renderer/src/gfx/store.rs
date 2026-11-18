@@ -14,7 +14,7 @@ use std::rc::Rc;
 /// slot held in turn it is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct EntryKey {
-    slot: u32,
+    slot: usize,
     version: u32,
 }
 
@@ -153,8 +153,8 @@ const CHUNK: usize = 32;
 
 /// A store of the context: its entries by key, in chunks of slots. An entry
 /// takes the lowest vacant slot, so the entries gather in the first chunks,
-/// and the store frees its last chunks once they are empty: it keeps about
-/// as much memory as its entries take, rather than as many as it ever held.
+/// and the store frees its last chunks once they are empty: it keeps the
+/// chunks up to its last entry's, rather than as many as it ever filled.
 pub(crate) struct Store<K, V> {
     chunks: Vec<Box<Chunk<V>>>,
     /// The lowest chunk with a vacant slot, or past the last chunk.
@@ -207,24 +207,20 @@ impl<K: Key, V> Store<K, V> {
         let index = chunk.vacant.trailing_zeros() as usize;
         chunk.vacant &= !(1 << index);
         chunk.slots[index] = Slot { version, value: Some(value) };
-        let slot = u32::try_from(at * CHUNK + index).unwrap_or(u32::MAX);
-        debug_assert!(slot != u32::MAX, "a store of more entries than it can name");
-        Shared::new(K::new(EntryKey { slot, version }), released)
+        Shared::new(K::new(EntryKey { slot: at * CHUNK + index, version }), released)
     }
 
     /// The slot that `key` names, if the store has its entry.
     fn slot_mut(&mut self, key: K) -> Option<&mut Slot<V>> {
         let EntryKey { slot, version } = key.entry();
-        let (chunk, index) = (slot as usize / CHUNK, slot as usize % CHUNK);
-        let slot = self.chunks.get_mut(chunk)?.slots.get_mut(index)?;
+        let slot = self.chunks.get_mut(slot / CHUNK)?.slots.get_mut(slot % CHUNK)?;
         (slot.version == version && slot.value.is_some()).then_some(slot)
     }
 
     /// The entry `key` names, if the store has it.
     fn slot(&self, key: K) -> Option<&V> {
         let EntryKey { slot, version } = key.entry();
-        let (chunk, index) = (slot as usize / CHUNK, slot as usize % CHUNK);
-        let slot = self.chunks.get(chunk)?.slots.get(index)?;
+        let slot = self.chunks.get(slot / CHUNK)?.slots.get(slot % CHUNK)?;
         slot.value.as_ref().filter(|_| slot.version == version)
     }
 
@@ -252,7 +248,7 @@ impl<K: Key, V> Store<K, V> {
     /// chunks past the last entry.
     pub(crate) fn remove(&mut self, key: K) -> Option<V> {
         let value = self.slot_mut(key)?.value.take();
-        let slot = key.entry().slot as usize;
+        let slot = key.entry().slot;
         let chunk = slot / CHUNK;
         if let Some(of) = self.chunks.get_mut(chunk) {
             of.vacant |= 1 << (slot % CHUNK);
