@@ -140,7 +140,10 @@ impl RenderTile {
     }
 }
 
-/// Where a tile's contents keep what they show a layer.
+/// Where a tile's contents keep what they show a layer. The frame's found
+/// tiles keep it for layers of every type in one list, so a place of one
+/// type's views can reach another's [`TileView::at`], which asserts that it
+/// doesn't.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ViewPlace {
     /// The layer's place among the layers of the tile's layout.
@@ -182,8 +185,9 @@ impl<'a> TileView<'a> for &'a RasterBucket {
     }
 
     fn at(contents: &'a Contents, place: ViewPlace) -> Option<Self> {
-        match (contents, place) {
-            (Contents::Raster(bucket), ViewPlace::Own) => Some(bucket),
+        debug_assert_eq!(place, ViewPlace::Own, "a laid-out layer's place for a tile's own bucket");
+        match contents {
+            Contents::Raster(bucket) => Some(bucket),
             _ => None,
         }
     }
@@ -195,8 +199,9 @@ impl<'a> TileView<'a> for &'a HillshadeBucket {
     }
 
     fn at(contents: &'a Contents, place: ViewPlace) -> Option<Self> {
-        match (contents, place) {
-            (Contents::Dem(bucket), ViewPlace::Own) => Some(bucket),
+        debug_assert_eq!(place, ViewPlace::Own, "a laid-out layer's place for a tile's own bucket");
+        match contents {
+            Contents::Dem(bucket) => Some(bucket),
             _ => None,
         }
     }

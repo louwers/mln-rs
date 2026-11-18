@@ -121,10 +121,11 @@ impl<'a, T: LayerType> TileView<'a> for LayerBucket<'a, T> {
     }
 
     fn at(contents: &'a Contents, place: ViewPlace) -> Option<Self> {
-        match place {
-            ViewPlace::Laid(index) => LayerBucket::laid(contents.geometry()?, index),
-            ViewPlace::Own => None,
-        }
+        let ViewPlace::Laid(index) = place else {
+            debug_assert!(false, "a tile's own bucket's place for a laid-out layer");
+            return None;
+        };
+        LayerBucket::laid(contents.geometry()?, index)
     }
 
     fn is_for(self, layer_id: &str) -> bool {
