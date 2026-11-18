@@ -240,14 +240,26 @@ count **per unit** of work.
 Every scenario reports these, over the parts of its run it measures (its setup
 is left out):
 
-| metric          | kind  | what                                                                    |
-| --------------- | ----- | ----------------------------------------------------------------------- |
-| `instructions`  | count | retired by every thread of the process (macOS and Linux only)           |
-| `allocations`   | count | heap allocations of every thread                                        |
-| `allocated`     | count | the bytes those allocations asked for                                   |
-| `peak_heap`     | count | the most heap bytes live at once, above those live when measuring began |
-| `retained_heap` | count | the heap bytes live at the end, above those live when measuring began   |
-| `wall`, `cpu`   | time  | wall-clock time, and the CPU time of every thread of the process        |
+| metric          | kind  | what                                                                          |
+| --------------- | ----- | ----------------------------------------------------------------------------- |
+| `instructions`  | count | retired by every thread of the process (macOS and Linux only)                 |
+| `allocations`   | count | heap allocations of every thread                                              |
+| `allocated`     | count | the bytes those allocations asked for                                         |
+| `peak_heap`     | count | the most heap bytes live at once, above those live when measuring began       |
+| `retained_heap` | count | the heap bytes live at the end, above those live when measuring began         |
+| `wall`, `cpu`   | time  | wall-clock time, and the CPU time of every thread of the process              |
+| `gpu`           | time  | the GPU's time in the render passes of the frames drawn (scenarios that draw) |
+
+`gpu` adds up the time from each render pass's beginning to its end, from the
+GPU's timestamp queries, where the device has them: WebGPU on Vulkan, D3D12 or
+Metal, and the Vulkan and OpenGL backends (`GL_TIME_ELAPSED`, or
+`EXT_disjoint_timer_query` on GL ES). It counts what a shader change costs on a
+GPU, where `instructions` don't, and a frame's `wall` time, mostly the CPU's
+work in these scenarios, may not show it. On a CPU rasterizer it is the time the
+rasterizer took. A device without the queries reports none. The libraries time
+the passes only in a benchmark's process (see
+[Reaching a library's internal stages](#reaching-a-librarys-internal-stages)),
+and a commit from before they did reports none.
 
 A scenario adds its own counts and times, such as `frames`, `frames_incomplete`
 (frames drawn with tiles missing), `tile_requests`, `gpu_buffers` (the bytes of
@@ -264,8 +276,8 @@ A user feels the costliest frames, not the average one: the frame that crosses
 the antimeridian, or the one where a tile arrives. So a scenario whose measured
 parts are each one unit of a user's experience (a frame, a tile, an edit) also
 reports how the units spread, with no need to know which are costly:
-`instructions`, `allocations`, `allocated` and `wall` of the median unit, the
-90th percentile and the costliest, such as `allocations_per_frame_max`.
+`instructions`, `allocations`, `allocated`, `wall` and `gpu` of the median unit,
+the 90th percentile and the costliest, such as `allocations_per_frame_max`.
 
 How closely a count repeats depends on what it counts. Allocations and bytes
 repeat exactly in most scenarios. Instructions move by a few hundredths of a
@@ -274,7 +286,8 @@ which an edit anywhere can change: by a tenth of a percent in most scenarios,
 and by a few percent, up to ten, in some. That is real, the binary runs those
 instructions, but it doesn't come from what the edit does. Counts that depend on
 how several threads interleave, such as every count of `macro/load/runtime`,
-move by more. Times depend on the machine and its load.
+move by more. Times depend on the machine and its load; `gpu` on the GPU's
+clocks too, which it raises and lowers with its load.
 
 ## Comparing
 
@@ -317,9 +330,11 @@ doesn't repeat isn't marked.
 
 Without `--rounds`, times show what one run of each side took, with no noise to
 hold them against. `--rounds <n>` runs each side n times, interleaved ABBA so
-that changes in the machine's load hit both alike. Each scenario's `wall` time
-is then marked when a two-sided Mann-Whitney U test, Holm-adjusted over every
-scenario compared, gives p < 0.05; its other times move with it. The fewest
+that changes in the machine's load hit both alike. Each scenario's `wall` time,
+and its `gpu` time where it has one, is then marked when a two-sided
+Mann-Whitney U test, Holm-adjusted over every scenario compared, gives p < 0.05.
+Each is tested on its own, since the GPU's work can change while the CPU's, most
+of a frame's wall time, doesn't; its other times move with them. The fewest
 rounds that can mark a time grow with the scenarios compared: 4 for one
 scenario, 7 for all of them. Compare times only within one configuration.
 
@@ -416,6 +431,14 @@ comparison lays this checkout's over the ref's. An entry point takes and returns
 the library's public types, wrapping internal ones, and calls the library's own
 code for the stage rather than a copy of it, so that it measures what the
 library runs and keeps building against other commits.
+
+The GPU backends' `bench` modules measure the GPU's work instead: WebGPU's
+counts and times each render pass, and the Vulkan and OpenGL backends' time
+them, once a scenario's process asks for it (`meter::measure_render_passes`), so
+that a workspace's tests, which build with the features too, measure nothing.
+The runtime's `bench` feature turns the backends' on, and where a commit's
+runtime doesn't turn on a native backend's, the harness builds without it
+(`build.rs`) and reports no `gpu` time on that backend.
 
 ### Driving a map
 

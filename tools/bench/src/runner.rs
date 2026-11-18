@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::environment::Environment;
+use crate::meter;
 use crate::report::Run;
 use crate::scenario::{Bench, Scenario};
 
@@ -61,8 +62,9 @@ pub(crate) fn check_build() -> Result<(), String> {
 /// runner's child process does.
 pub(crate) fn exec(scenario: &Scenario, out: &Path, image: Option<PathBuf>) -> Result<(), String> {
     check_build()?;
-    // The GPU's pipeline statistics, of the devices the scenario makes.
-    mln_webgpu::bench::count_pipeline_statistics();
+    // The pipeline statistics and time of the render passes, of the
+    // devices the scenario makes.
+    meter::measure_render_passes();
     let mut bench = Bench::new();
     bench.image = image;
     (scenario.run)(&mut bench);

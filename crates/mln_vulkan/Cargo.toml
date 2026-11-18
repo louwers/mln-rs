@@ -15,6 +15,11 @@ name = "mln_vulkan"
 # The doc comments have no examples to run.
 doctest = false
 
+[features]
+# `bench`, how long the GPU took, which the benchmarks (tools/bench) measure.
+# Not API: hidden from the documentation.
+bench = []
+
 # The crate is empty on Apple platforms and in the browser build.
 [target.'cfg(not(any(target_vendor = "apple", target_family = "wasm")))'.dependencies]
 ash.workspace = true

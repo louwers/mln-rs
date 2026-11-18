@@ -55,6 +55,8 @@ pub(crate) fn format_value(unit: Unit, value: f64) -> String {
             };
             format!("{sign}{} {suffix}", three_digits(scaled))
         }
+        // Microseconds below one millisecond, such as a frame's GPU time.
+        Unit::Ms if magnitude > 0.0 && magnitude < 1.0 => format!("{sign}{} µs", three_digits(magnitude * 1000.0)),
         Unit::Ms => format!("{sign}{} ms", three_digits(magnitude)),
     }
 }
@@ -128,5 +130,6 @@ mod tests {
         assert_eq!(format_value(Unit::Bytes, 3.5 * 1024.0 * 1024.0), "3.50 MiB");
         assert_eq!(format_value(Unit::Bytes, -2048.0), "-2.00 KiB");
         assert_eq!(format_value(Unit::Ms, 1.234), "1.23 ms");
+        assert_eq!(format_value(Unit::Ms, 0.0123), "12.3 µs");
     }
 }

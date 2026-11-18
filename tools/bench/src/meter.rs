@@ -9,6 +9,8 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::time::Duration;
 
+use parking_lot::Mutex;
+
 static ALLOCATIONS: AtomicU64 = AtomicU64::new(0);
 static ALLOCATED: AtomicU64 = AtomicU64::new(0);
 static LIVE: AtomicI64 = AtomicI64::new(0);
@@ -108,6 +110,39 @@ pub(crate) fn process_cpu() -> Duration {
     // FILETIME counts 100 ns intervals.
     let hundred_ns = |time: FILETIME| (u64::from(time.dwHighDateTime) << 32) | u64::from(time.dwLowDateTime);
     Duration::from_nanos((hundred_ns(kernel) + hundred_ns(user)) * 100)
+}
+
+/// Has the devices made from now on measure their render passes: the
+/// pipeline statistics that `support::map` counts, and the time that
+/// [`gpu_time`] reads.
+pub(crate) fn measure_render_passes() {
+    mln_webgpu::bench::measure_render_passes();
+    #[cfg(all(mln_bench_vulkan, not(any(target_vendor = "apple", target_family = "wasm"))))]
+    mln_vulkan::bench::measure_render_passes();
+    #[cfg(mln_bench_gl)]
+    mln_gl::bench::measure_render_passes();
+}
+
+/// The time the GPU has spent in the render passes of the process's frames
+/// so far, from timestamp queries, or `None` until a device that has them
+/// is made: WebGPU's, and those of the native Vulkan and OpenGL backends
+/// where the libraries time them (build.rs). A frame counts once the GPU has
+/// finished it and the backend has waited for it, which waiting for a frame
+/// does: a frame's time comes in the reading after that wait.
+pub(crate) fn gpu_time() -> Option<Duration> {
+    static TOTAL: Mutex<Option<Duration>> = Mutex::new(None);
+    let mut total = TOTAL.lock();
+    let taken = [
+        mln_webgpu::bench::take_gpu_time(),
+        #[cfg(all(mln_bench_vulkan, not(any(target_vendor = "apple", target_family = "wasm"))))]
+        mln_vulkan::bench::take_gpu_time(),
+        #[cfg(mln_bench_gl)]
+        mln_gl::bench::take_gpu_time(),
+    ];
+    for time in taken.into_iter().flatten() {
+        *total = Some(total.unwrap_or_default() + time);
+    }
+    *total
 }
 
 /// How the process counts instructions, or `None` where it can't: the

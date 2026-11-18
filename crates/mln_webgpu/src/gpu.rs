@@ -178,10 +178,10 @@ pub struct WebGpu {
     /// The commands recorded since the last flush.
     encoder: Option<wgpu::CommandEncoder>,
     pass: Option<OpenPass>,
-    /// The pipeline statistics queries of each pass, where the device has
-    /// them.
+    /// The pipeline statistics and timestamp queries of each pass, where
+    /// the device has them.
     #[cfg(feature = "bench")]
-    statistics: Option<crate::bench::Queries>,
+    queries: Option<crate::bench::Queries>,
 }
 
 impl WebGpu {
@@ -225,7 +225,8 @@ impl WebGpu {
             readbacks: SlotMap::with_key(),
             spare_readback: None,
             #[cfg(feature = "bench")]
-            statistics: crate::bench::Queries::new(device.device()),
+            queries: crate::bench::Queries::new(device.device())
+                .map(|queries| queries.timed(device.device(), device.queue())),
             encoder: None,
             pass: None,
         }
@@ -259,16 +260,15 @@ impl WebGpu {
         });
         then(&mut encoder);
         #[cfg(feature = "bench")]
-        let statistics =
-            self.statistics.as_mut().and_then(|queries| queries.resolve(self.device.device(), &mut encoder));
+        let measured = self.queries.as_mut().and_then(|queries| queries.resolve(self.device.device(), &mut encoder));
         // wgpu reports what it rejects in the passes when they finish. The
         // writes stay for the next flush.
         let command_buffer = self.validated("flush", |_| encoder.finish())?;
         let writes = self.writes.encode(self.device.device(), self.device.queue());
         let submission = self.device.queue().submit(writes.into_iter().chain([command_buffer]));
         #[cfg(feature = "bench")]
-        if let Some(statistics) = statistics {
-            crate::bench::Queries::read_back(statistics);
+        if let Some(measured) = measured {
+            crate::bench::Queries::read_back(measured);
         }
         Ok(submission)
     }
@@ -332,12 +332,16 @@ impl WebGpu {
         let encoder = self.encoder.get_or_insert_with(|| {
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("frame") })
         });
+        #[cfg(feature = "bench")]
+        let timestamp_writes = self.queries.as_ref().and_then(crate::bench::Queries::timestamp_writes);
+        #[cfg(not(feature = "bench"))]
+        let timestamp_writes = None;
         let pass = encoder
             .begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some(desc.label),
                 color_attachments: &[color_attachment],
                 depth_stencil_attachment,
-                timestamp_writes: None,
+                timestamp_writes,
                 occlusion_query_set: None,
                 multiview_mask: None,
             })
@@ -868,7 +872,7 @@ impl Gpu for WebGpu {
         #[cfg_attr(not(feature = "bench"), expect(unused_mut, reason = "only the benchmarks' builds count the pass"))]
         let (mut pass, color_format, depth_stencil_format) = self.begin_render_pass(desc)?;
         #[cfg(feature = "bench")]
-        let counted = self.statistics.as_mut().is_some_and(|queries| queries.begin(&mut pass));
+        let counted = self.queries.as_mut().is_some_and(|queries| queries.begin(&mut pass));
         self.pass = Some(OpenPass {
             #[cfg(feature = "bench")]
             counted,

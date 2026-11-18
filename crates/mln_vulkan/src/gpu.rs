@@ -496,6 +496,9 @@ pub struct VulkanGpu {
     signals: Vec<(vk::Semaphore, u64)>,
     /// Whether a wait or signal of the next submit is of a timeline.
     timeline: bool,
+    /// The timestamps of each pass, where the device writes them.
+    #[cfg(feature = "bench")]
+    timer: Option<crate::bench::Timer>,
 }
 
 fn vk_error(what: &str) -> impl FnOnce(vk::Result) -> GpuError + '_ {
@@ -737,7 +740,13 @@ impl VulkanGpu {
             waits: Vec::new(),
             signals: Vec::new(),
             timeline: false,
+            #[cfg(feature = "bench")]
+            timer: None,
         };
+        #[cfg(feature = "bench")]
+        {
+            gpu.timer = crate::bench::Timer::new(&gpu.backend);
+        }
         for type_ in DescriptorSetType::ALL {
             gpu.set_layouts[type_ as usize] =
                 build_descriptor_set_layout(&gpu.backend, type_).map_err(GpuError::Invalid)?;
@@ -1087,6 +1096,10 @@ impl VulkanGpu {
             self.free_fences.push(submission.fence);
         }
         let finished = self.finished_serial;
+        #[cfg(feature = "bench")]
+        if let Some(timer) = &mut self.timer {
+            timer.finished(backend.get_device(), finished);
+        }
         let (done, waiting): (Vec<_>, Vec<_>) =
             self.discard.garbage.take().into_iter().partition(|(serial, _)| *serial <= finished);
         self.discard.garbage.set(waiting);
@@ -1773,6 +1786,10 @@ impl VulkanGpu {
         if let Some(frame) = self.frame.take() {
             self.release(frame);
             command_buffers.push(frame);
+            #[cfg(feature = "bench")]
+            if let Some(timer) = &mut self.timer {
+                timer.submitted(self.discard.next_serial.get());
+            }
         }
         command_buffers.extend(recorded);
         let fence = match self.free_fences.pop() {
@@ -2398,7 +2415,15 @@ impl Gpu for VulkanGpu {
         self.open_window()?;
         let frame = self.frame()?;
         self.acquire_attachments(frame, desc);
+        #[cfg(feature = "bench")]
+        if let Some(timer) = &mut self.timer {
+            timer.prepare(self.backend.get_device(), frame);
+        }
         let (render_pass, extent) = self.begin_render_pass(frame, desc)?;
+        #[cfg(feature = "bench")]
+        if let Some(timer) = &mut self.timer {
+            timer.begin(self.backend.get_device(), frame);
+        }
         let format = |attachment: Option<TextureId>| {
             attachment.and_then(|id| self.textures.get(id)).map_or(vk::Format::UNDEFINED, |texture| texture.vk_format)
         };
@@ -2564,6 +2589,10 @@ impl Gpu for VulkanGpu {
             // SAFETY: the command buffer is recording inside a render pass.
             unsafe { self.device().cmd_end_render_pass(command_buffer) };
             self.backend.end_debug_label(command_buffer);
+            #[cfg(feature = "bench")]
+            if let Some(timer) = &mut self.timer {
+                timer.end(self.backend.get_device(), command_buffer);
+            }
         }
         Ok(())
     }
@@ -2690,6 +2719,10 @@ impl Drop for VulkanGpu {
             self.destroy_now(garbage);
         }
         let device = self.backend.get_device();
+        #[cfg(feature = "bench")]
+        if let Some(timer) = &mut self.timer {
+            timer.destroy(device);
+        }
         let command_buffers: Vec<vk::CommandBuffer> = self
             .uploads
             .take()

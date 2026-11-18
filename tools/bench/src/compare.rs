@@ -28,9 +28,10 @@
 //! however little: one that repeats exactly is marked for any change. The
 //! reader weighs what matters.
 //! Times: one run per side has no noise to hold them against, unless
-//! `--rounds` asks for interleaved rounds, which a rank test compares. Rounds run alone among the machine's benchmark
-//! runs ([`host::measuring`]), and not while its load is over
-//! `--max-load`.
+//! `--rounds` asks for interleaved rounds, which a rank test compares: the
+//! wall-clock time, and the GPU's where the device times it. Rounds run
+//! alone among the machine's benchmark runs ([`host::measuring`]), and not
+//! while its load is over `--max-load`.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -59,8 +60,10 @@ const CONFIRM_RUNS: usize = 3;
 const NOISE_FACTOR: f64 = 2.0;
 /// A time is marked when its Holm-adjusted p-value is below this.
 const ALPHA: f64 = 0.05;
-/// The time that rounds test; a scenario's other times move with it.
-const TESTED_TIME: &str = "wall";
+/// The times that rounds test, each on its own: the wall-clock time, and
+/// the GPU's, which on a GPU can change while the wall-clock time, mostly
+/// the CPU's work, doesn't. A scenario's other times move with them.
+const TESTED_TIMES: [&str; 2] = ["wall", "gpu"];
 
 pub(crate) struct Options {
     pub(crate) base: String,
@@ -94,7 +97,7 @@ pub(crate) struct MetricComparison {
     /// either side's runs, or for instructions the most a stored layout
     /// probe moved them, if that is larger.
     pub(crate) noise: Option<f64>,
-    /// The tested time's p-value with rounds, Holm-adjusted over every
+    /// A tested time's p-value with rounds, Holm-adjusted over every
     /// scenario of the comparison.
     pub(crate) p: Option<f64>,
     /// Which way the metric moved, if beyond its noise.
@@ -285,7 +288,7 @@ pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
 }
 
 /// The fewest rounds with which a time can move beyond its noise when `tests`
-/// scenarios each test one: Holm's adjustment multiplies the smallest
+/// scenarios each test it: Holm's adjustment multiplies the smallest
 /// p-value by `tests`, and with n rounds per side the smallest p-value of a
 /// two-sided Mann-Whitney U test is 2 / C(2n, n), when the sides don't
 /// overlap at all.
@@ -298,24 +301,28 @@ fn min_rounds(tests: usize) -> usize {
         .unwrap_or(usize::MAX)
 }
 
-/// Gives the tested time of each scenario of `comparisons` its p-value
-/// Holm-adjusted over all of them, so that the chance of marking any time
-/// that didn't change stays under [`ALPHA`], and marks it if it moved.
+/// Gives each tested time of each scenario of `comparisons` its p-value
+/// Holm-adjusted over all the scenarios, so that the chance of marking that
+/// time anywhere when it didn't change stays under [`ALPHA`], and marks it
+/// if it moved. Each tested time is a question of its own, and adjusting
+/// over them all would raise the rounds a comparison needs.
 fn judge_times(comparisons: &mut [ScenarioComparison]) {
-    let mut tested: Vec<&mut MetricComparison> = comparisons
-        .iter_mut()
-        .filter(|scenario| scenario.not_comparable.is_none())
-        .flat_map(|scenario| scenario.metrics.iter_mut())
-        .filter(|metric| metric.kind == MetricKind::Time && metric.p.is_some())
-        .collect();
-    let p_values: Vec<f64> = tested.iter().map(|metric| metric.p.unwrap_or(1.0)).collect();
-    for (metric, p) in tested.iter_mut().zip(holm(&p_values)) {
-        metric.p = Some(p);
-        if let (Some(b), Some(c), Some(change)) = (metric.base, metric.candidate, metric.change)
-            && p < ALPHA
-            && change != 0.0
-        {
-            metric.moved = Some(if c > b { Moved::More } else { Moved::Less });
+    for name in TESTED_TIMES {
+        let mut tested: Vec<&mut MetricComparison> = comparisons
+            .iter_mut()
+            .filter(|scenario| scenario.not_comparable.is_none())
+            .flat_map(|scenario| scenario.metrics.iter_mut())
+            .filter(|metric| metric.name == name && metric.kind == MetricKind::Time && metric.p.is_some())
+            .collect();
+        let p_values: Vec<f64> = tested.iter().map(|metric| metric.p.unwrap_or(1.0)).collect();
+        for (metric, p) in tested.iter_mut().zip(holm(&p_values)) {
+            metric.p = Some(p);
+            if let (Some(b), Some(c), Some(change)) = (metric.base, metric.candidate, metric.change)
+                && p < ALPHA
+                && change != 0.0
+            {
+                metric.moved = Some(if c > b { Moved::More } else { Moved::Less });
+            }
         }
     }
 }
@@ -451,7 +458,7 @@ fn compare_scenario(
                 comparison.moved = Some(if c > b { Moved::More } else { Moved::Less });
             }
         }
-        if rounds.is_some() && kind == MetricKind::Time && name == TESTED_TIME {
+        if rounds.is_some() && kind == MetricKind::Time && TESTED_TIMES.contains(&name) {
             comparison.p = (!base.is_empty() && !candidate.is_empty()).then(|| mann_whitney(&base, &candidate));
         }
         metrics.push(comparison);
@@ -508,8 +515,9 @@ pub(crate) fn text(comparison: &Comparison) -> String {
         Some(rounds) => {
             let _ = writeln!(
                 out,
-                "times: {rounds} interleaved rounds; {TESTED_TIME} is marked when its Mann-Whitney p, Holm-adjusted \
-                 over the scenarios, is under {ALPHA}"
+                "times: {rounds} interleaved rounds; {} each marked when its Mann-Whitney p, Holm-adjusted over \
+                 the scenarios, is under {ALPHA}",
+                TESTED_TIMES.join(" and ")
             );
         }
         None => {
@@ -797,6 +805,7 @@ mod tests {
                 count("allocations_per_tile", MetricKind::Count, allocations / 10.0),
                 Metric { name: "wall".to_owned(), kind: MetricKind::Time, unit: Unit::Ms, value: wall },
                 Metric { name: "cpu".to_owned(), kind: MetricKind::Time, unit: Unit::Ms, value: wall },
+                Metric { name: "gpu".to_owned(), kind: MetricKind::Time, unit: Unit::Ms, value: 1.0 },
             ],
         }
     }
@@ -884,9 +893,30 @@ mod tests {
         ];
         judge_times(&mut comparisons);
         assert_eq!(moved(&comparisons[0], "wall"), Some(Moved::More));
-        // Only wall is tested.
+        // Only wall and gpu are tested.
         assert_eq!(moved(&comparisons[0], "cpu"), None);
         assert_eq!(moved(&comparisons[1], "wall"), None);
+    }
+
+    #[test]
+    fn the_gpu_time_is_tested_on_its_own() {
+        let with_gpu = |runs: &mut Vec<Run>, gpu: f64| {
+            for (i, run) in runs.iter_mut().enumerate() {
+                run.metrics.iter_mut().find(|metric| metric.name == "gpu").unwrap().value = gpu + i as f64 * 0.01;
+            }
+        };
+        let mut base: Vec<Run> = (0..4).map(|_| run(1000.0, 10.0)).collect();
+        let mut slower: Vec<Run> = (0..4).map(|_| run(1000.0, 10.0)).collect();
+        with_gpu(&mut base, 1.0);
+        with_gpu(&mut slower, 2.0);
+        let none = BTreeMap::new();
+        let mut comparisons =
+            vec![compare_scenario(&SCENARIO, &Base { runs: &base, counts: &base, layout: &none }, &slower, Some(4))];
+        judge_times(&mut comparisons);
+        // Four rounds suffice for one scenario: the wall time's test doesn't
+        // raise the gpu time's p-value.
+        assert_eq!(moved(&comparisons[0], "gpu"), Some(Moved::More));
+        assert_eq!(moved(&comparisons[0], "wall"), None);
     }
 
     #[test]

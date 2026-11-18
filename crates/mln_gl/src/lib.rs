@@ -28,6 +28,9 @@
 
 #![expect(unsafe_code, reason = "OpenGL through glow is the FFI here")]
 
+#[cfg(feature = "bench")]
+#[doc(hidden)]
+pub mod bench;
 mod custom_layer;
 mod enums;
 mod frame_image;

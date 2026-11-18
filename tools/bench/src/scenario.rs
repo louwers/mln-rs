@@ -71,12 +71,14 @@ pub(crate) struct Metric {
 ///   the bytes they asked for;
 /// - `peak_heap` and `retained_heap`: the most heap bytes live at once, and
 ///   those live at the end, above what was live when measuring began;
-/// - `wall` and `cpu`: wall-clock time, and the CPU time of every thread.
+/// - `wall` and `cpu`: wall-clock time, and the CPU time of every thread;
+/// - `gpu`: the time the GPU spent in the render passes of the frames
+///   drawn, where the device times them ([`meter::gpu_time`]).
 ///
 /// Each covers only what runs inside [`Bench::measure`], on every thread of
 /// the process while it runs.
-pub(crate) const STANDARD_METRICS: [&str; 7] =
-    ["instructions", "allocations", "allocated", "peak_heap", "retained_heap", "wall", "cpu"];
+pub(crate) const STANDARD_METRICS: [&str; 8] =
+    ["instructions", "allocations", "allocated", "peak_heap", "retained_heap", "wall", "cpu", "gpu"];
 
 /// What one measured part counted, and how long it took.
 #[derive(Clone, Copy)]
@@ -85,6 +87,8 @@ struct Part {
     allocations: u64,
     allocated: u64,
     wall: Duration,
+    /// `None` where no device timed the GPU's work.
+    gpu: Option<Duration>,
 }
 
 /// What a scenario measures through: the measured parts of its run, its own
@@ -140,7 +144,9 @@ impl Bench {
         }
         meter::reset_peak();
         // The clocks last at the start and first at the end, so that they
-        // leave out reading the counters.
+        // leave out reading the counters. Reading the GPU's time takes what
+        // it finished before the part, which the part leaves out.
+        let gpu = meter::gpu_time();
         let instructions = meter::instructions();
         let cpu = meter::process_cpu();
         let wall = Instant::now();
@@ -148,6 +154,8 @@ impl Bench {
         let wall = wall.elapsed();
         let cpu = meter::process_cpu().saturating_sub(cpu);
         let instructions = instructions.zip(meter::instructions()).map(|(start, end)| end - start);
+        // A device made during the part starts timing at zero.
+        let gpu = meter::gpu_time().map(|end| end.saturating_sub(gpu.unwrap_or_default()));
         let end = meter::heap();
         let baseline = self.baseline.unwrap_or_default();
 
@@ -157,6 +165,7 @@ impl Bench {
             allocations: end.allocations - heap.allocations,
             allocated: end.allocated - heap.allocated,
             wall,
+            gpu,
         };
         self.parts.push(part);
         self.allocations += part.allocations;
@@ -227,6 +236,9 @@ impl Bench {
         let time = |name: &str, value| Metric { name: name.to_owned(), kind: MetricKind::Time, unit: Unit::Ms, value };
         metrics.push(time("wall", ms(self.wall)));
         metrics.push(time("cpu", ms(self.cpu)));
+        if self.parts.iter().any(|part| part.gpu.is_some()) {
+            metrics.push(time("gpu", ms(self.parts.iter().filter_map(|part| part.gpu).sum())));
+        }
         if let Some((unit, n)) = &self.per {
             let n = *n as f64;
             let per_unit: Vec<Metric> = metrics
@@ -250,7 +262,8 @@ impl Bench {
 }
 
 /// The 50th and 90th percentiles and the largest of each part's
-/// instructions, allocations, bytes allocated and wall time.
+/// instructions, allocations, bytes allocated, wall time, and GPU time
+/// where every part has one.
 fn spread_of_parts(parts: &[Part], unit: &str) -> Vec<Metric> {
     let mut metrics = Vec::new();
     let mut add = |name: &str, kind: MetricKind, metric_unit: Unit, mut values: Vec<f64>| {
@@ -268,6 +281,10 @@ fn spread_of_parts(parts: &[Part], unit: &str) -> Vec<Metric> {
     add("allocations", MetricKind::Count, Unit::Count, parts.iter().map(|part| part.allocations as f64).collect());
     add("allocated", MetricKind::Count, Unit::Bytes, parts.iter().map(|part| part.allocated as f64).collect());
     add("wall", MetricKind::Time, Unit::Ms, parts.iter().map(|part| ms(part.wall)).collect());
+    let gpu: Option<Vec<f64>> = parts.iter().map(|part| part.gpu.map(ms)).collect();
+    if let Some(gpu) = gpu {
+        add("gpu", MetricKind::Time, Unit::Ms, gpu);
+    }
     metrics
 }
 
@@ -309,6 +326,29 @@ mod tests {
         assert!(get("allocations_per_frame_p50").value < get("allocations_per_frame_max").value);
         assert_eq!(get("allocations_per_frame_max").kind, MetricKind::Count);
         assert_eq!(get("wall_per_frame_p90").kind, MetricKind::Time);
+    }
+
+    #[test]
+    fn the_gpu_time_spreads_where_every_part_has_one() {
+        let part = |gpu: Option<u64>| Part {
+            instructions: None,
+            allocations: 0,
+            allocated: 0,
+            wall: Duration::ZERO,
+            gpu: gpu.map(Duration::from_millis),
+        };
+        let timed = spread_of_parts(&[part(Some(1)), part(Some(3))], "frame");
+        let max = timed.iter().find(|metric| metric.name == "gpu_per_frame_max").unwrap();
+        assert_eq!((max.kind, max.value), (MetricKind::Time, 3.0));
+        let untimed = spread_of_parts(&[part(Some(1)), part(None)], "frame");
+        assert!(untimed.iter().all(|metric| !metric.name.starts_with("gpu")));
+    }
+
+    #[test]
+    fn a_process_without_a_timed_device_has_no_gpu_time() {
+        let mut bench = Bench::new();
+        bench.measure(|| std::hint::black_box(vec![1u8; 64]));
+        assert!(bench.finish().iter().all(|metric| metric.name != "gpu"));
     }
 
     #[test]

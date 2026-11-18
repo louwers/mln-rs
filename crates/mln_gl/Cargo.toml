@@ -15,6 +15,11 @@ name = "mln_gl"
 # The doc comments have no examples to run.
 doctest = false
 
+[features]
+# `bench`, how long the GPU took, which the benchmarks (tools/bench) measure.
+# Not API: hidden from the documentation.
+bench = []
+
 [dependencies]
 bytemuck.workspace = true
 glow.workspace = true

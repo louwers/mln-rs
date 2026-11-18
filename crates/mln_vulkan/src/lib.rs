@@ -21,6 +21,9 @@
 mod allocation;
 #[cfg(target_os = "android")]
 mod android_hardware_buffer;
+#[cfg(feature = "bench")]
+#[doc(hidden)]
+pub mod bench;
 mod borrowed_target;
 mod custom_layer;
 mod descriptor_set;
