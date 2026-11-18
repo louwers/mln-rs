@@ -111,9 +111,12 @@ pub(crate) struct DrawObjects {
     vertex_attributes: VertexAttributeArray,
     /// The attributes of each instance, for a draw of instances.
     instance_attributes: Option<VertexAttributeArray>,
-    /// Whether the attributes changed since the last upload, which then
-    /// binds them all again; true until the first.
-    attributes_changed: bool,
+    /// Whether the vertex attributes changed since the last upload, which
+    /// then binds them all again; true until the first.
+    vertex_attributes_changed: bool,
+    /// Whether the instance attributes changed since the last upload, as
+    /// `vertex_attributes_changed` says of the vertex attributes.
+    instance_attributes_changed: bool,
     /// The textures it binds, by texture id.
     textures: Textures,
     /// The draw's own uniform and storage buffers, by id, which win over
@@ -162,7 +165,8 @@ impl DrawObjects {
             shader,
             vertex_attributes: vertices,
             instance_attributes: instances,
-            attributes_changed: true,
+            vertex_attributes_changed: true,
+            instance_attributes_changed: true,
             textures,
             uniform_buffers: UniformBufferArray::new(),
             color_mode,
@@ -198,11 +202,12 @@ impl DrawObjects {
         }
         self.indexes.upload(context)?;
 
-        // An attribute binds again where it changed, or where the upload
-        // writes what it reads, which may be new. A failed upload leaves
-        // the attributes changed, so the next binds them again.
-        let changed = self.attributes_changed;
-        if changed || upload::needs_upload(context, shader.vertex_attributes(), &self.vertex_attributes) {
+        // An attribute binds again where its array changed, or where the
+        // upload writes what it reads, which may be new. A failed upload
+        // leaves the attributes changed, so the next binds them again.
+        if self.vertex_attributes_changed
+            || upload::needs_upload(context, shader.vertex_attributes(), &self.vertex_attributes)
+        {
             let mut bindings =
                 upload::build_attribute_bindings(context, shader.vertex_attributes(), &mut self.vertex_attributes)?;
             bind_default_values(context, &mut bindings, self.vertex_count)?;
@@ -213,6 +218,7 @@ impl DrawObjects {
             }
         }
 
+        let changed = self.instance_attributes_changed;
         if let Some(attrs) = self
             .instance_attributes
             .as_mut()
@@ -228,7 +234,8 @@ impl DrawObjects {
             }
         }
 
-        self.attributes_changed = false;
+        self.vertex_attributes_changed = false;
+        self.instance_attributes_changed = false;
 
         for texture in self.textures.iter().flatten() {
             if let Err(error) = context.upload_texture(texture) {
@@ -418,7 +425,8 @@ impl DrawObjects {
         let DrawGeometry { vertices, vertex_count, mode, indexes, segments, instances } = geometry;
         self.vertex_attributes = vertices;
         self.instance_attributes = instances;
-        self.attributes_changed = true;
+        self.vertex_attributes_changed = true;
+        self.instance_attributes_changed = true;
         self.vertex_count = vertex_count;
         self.mode = mode;
         self.indexes = indexes;
@@ -427,7 +435,7 @@ impl DrawObjects {
 
     /// The vertex attributes, to change, which the next upload binds again.
     pub(crate) fn vertex_attributes_mut(&mut self) -> &mut VertexAttributeArray {
-        self.attributes_changed = true;
+        self.vertex_attributes_changed = true;
         &mut self.vertex_attributes
     }
 
@@ -435,7 +443,11 @@ impl DrawObjects {
     /// next upload binds again: the instance attributes of a draw of
     /// instances, else the vertex attributes.
     pub(crate) fn paint_attributes_mut(&mut self) -> &mut VertexAttributeArray {
-        self.attributes_changed = true;
+        if self.instance_attributes.is_some() {
+            self.instance_attributes_changed = true;
+        } else {
+            self.vertex_attributes_changed = true;
+        }
         self.instance_attributes.as_mut().unwrap_or(&mut self.vertex_attributes)
     }
 
@@ -449,7 +461,7 @@ impl DrawObjects {
     /// ([`copy_shared_attributes`]), which the next upload binds.
     pub(crate) fn share_vertex_attributes(&mut self, other: &DrawObjects) {
         self.vertex_attributes = copy_shared_attributes(&other.vertex_attributes);
-        self.attributes_changed = true;
+        self.vertex_attributes_changed = true;
     }
 
     /// The texture it binds as `id`.
