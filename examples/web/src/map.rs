@@ -355,15 +355,17 @@ impl WebMap {
     }
 
     /// One animation frame at `now` (milliseconds, the clock of the input
-    /// methods' `time`): steps the gestures' eased zoom and ends those that
-    /// time out, then demands a frame of the session if the map has
+    /// methods' `time`): ticks the gesture recognizer, then demands a frame
+    /// of the session if the map has
     /// something new to draw, which it renders in a later task. Returns
     /// whether a frame was rendered since the last animation frame.
     pub fn frame(&mut self, now: f64) -> bool {
         // The pool tasks that the pump ran since the last frame: with no
         // tile workers, the tiles' parsing and layout among them.
         self.tasks += pump::take_pool_time().as_secs_f64() * 1000.0;
-        self.gestures.frame(&mut self.map, now);
+        // The page runs an animation frame always, so it ticks the recognizer
+        // on each rather than at its deadlines.
+        self.gestures.tick(&mut self.map, now);
         self.answer_events();
         // A demand renders the map once the commands sent before it ran.
         let sent_sequence = self.map.sent_sequence();

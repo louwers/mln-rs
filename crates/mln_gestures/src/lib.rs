@@ -18,8 +18,8 @@
 //! rates and release velocities where it has the gesture and GL JS's rates
 //! and thresholds elsewhere (the README compares each). It is
 //! host-independent: hosts feed [`Input`]s with their timestamps and call
-//! [`GestureRecognizer::frame`] once a display frame, and it keeps no clock
-//! or thread of its own, so it runs in the browser too.
+//! [`GestureRecognizer::tick`] when it asks, and it keeps no clock or thread
+//! of its own, so it runs in the browser too.
 //!
 //! Hosts read two clocks each frame: the recognizer's, in milliseconds on any
 //! clock their input events use (`performance.now()`, an `Instant`), which
@@ -38,4 +38,4 @@ mod velocity;
 pub use camera::{GestureCamera, PendingEnd, center_latitude, zoom_range};
 pub use input::{GestureEvent, Input, Modes, PinchPhase, PointerKind};
 pub use options::{Axis, AxisOptions, GestureOptions, InvalidGestureOptions, Notch, PanOptions};
-pub use recognizer::GestureRecognizer;
+pub use recognizer::{GestureRecognizer, NextTick};

@@ -412,6 +412,17 @@ impl StepEase {
     }
 }
 
+/// When a recognizer next needs [`GestureRecognizer::tick`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum NextTick {
+    /// Every display frame, while a delta eases or a gesture may reach a
+    /// notch.
+    Frame,
+    /// At this time, on the inputs' clock: when a press becomes a long press,
+    /// or idle deltas end.
+    At(f64),
+}
+
 /// How a gesture finishes once its last pointer lifts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Finish {
@@ -447,8 +458,8 @@ enum Finish {
 /// stays in progress.
 ///
 /// Hosts feed it [`Input`]s with their timestamps, in milliseconds on any
-/// clock that only goes forward, and call [`frame`](Self::frame) once a
-/// display frame. Every move goes through the `GestureCamera`.
+/// clock that only goes forward, and call [`tick`](Self::tick) when it asks.
+/// Every move goes through the `GestureCamera`.
 #[derive(Debug)]
 pub struct GestureRecognizer {
     options: GestureOptions,
@@ -534,11 +545,24 @@ impl GestureRecognizer {
         }
     }
 
-    /// Whether the recognizer needs frames to ease or end deltas, as
-    /// [`frame`](Self::frame) also says.
+    /// When the recognizer next needs [`tick`](Self::tick): every display
+    /// frame while a delta eases or a gesture, its glide and its snap may
+    /// reach a notch; at a time for a pending long press or the end of idle
+    /// deltas; or `None`.
     #[must_use]
-    pub fn needs_frame(&self) -> bool {
-        self.deltas.is_some() || self.awaits_long_press()
+    pub fn next_tick(&self) -> Option<NextTick> {
+        let easing = self.deltas.is_some_and(|deltas| deltas.eases.iter().any(Option::is_some));
+        // A pointer held still moves nothing that could reach a notch.
+        let held_still = matches!(self.mode, Mode::Pressed { .. } | Mode::TapDrag { moved: false, .. });
+        if easing || (self.notch_watch.is_some() && !held_still) {
+            return Some(NextTick::Frame);
+        }
+        let long_press = match self.pointers[..] {
+            [pointer] if self.awaits_long_press() => Some(pointer.down_at + self.options.long_press_ms),
+            _ => None,
+        };
+        let idle = self.deltas.map(|deltas| deltas.idle_until);
+        long_press.into_iter().chain(idle).min_by(f64::total_cmp).map(NextTick::At)
     }
 
     /// Whether a press held still may yet become a long press.
@@ -573,10 +597,10 @@ impl GestureRecognizer {
     }
 
     /// Times long presses, steps the eases of discrete deltas, ends deltas
-    /// once they idle, and samples the camera for notches. Call once a
-    /// display frame with the frame's time, on the inputs' clock; returns
-    /// whether it needs more frames.
-    pub fn frame(&mut self, camera: &mut dyn GestureCamera, now: f64) -> bool {
+    /// once they idle, and samples the camera for notches, at `now` on the
+    /// inputs' clock. Call it when [`next_tick`](Self::next_tick) says, which
+    /// it also returns; a call at any other time does no harm.
+    pub fn tick(&mut self, camera: &mut dyn GestureCamera, now: f64) -> Option<NextTick> {
         self.long_press(now);
         self.delta_frame(camera, now);
         if let Some(watch) = &mut self.notch_watch {
@@ -587,7 +611,7 @@ impl GestureRecognizer {
                 self.notch_watch = None;
             }
         }
-        self.needs_frame()
+        self.next_tick()
     }
 
     /// Reports a press held still for the long-press time, once.
@@ -695,7 +719,10 @@ impl GestureRecognizer {
         // Only a glide still running can be caught: one that has ended, as
         // when a command cancelled it, carries nothing.
         self.caught_glide = self.release_end.take().filter(|end| end.take().is_none());
-        self.notch_watch = Some(NotchWatch::new(&camera.camera(), &self.options));
+        let notches = [&self.options.zoom, &self.options.bearing, &self.options.pitch]
+            .iter()
+            .any(|part| part.enabled && !part.notches.is_empty());
+        self.notch_watch = notches.then(|| NotchWatch::new(&camera.camera(), &self.options));
         let phase = if self.options.interrupt_animations {
             GesturePhase::Begin
         } else {

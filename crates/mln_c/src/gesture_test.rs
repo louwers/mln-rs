@@ -124,24 +124,25 @@ fn a_drag_moves_the_map_and_taps_come_back_as_events() {
 }
 
 #[test]
-fn a_discrete_delta_asks_for_frames_until_it_idles() {
+fn a_discrete_delta_asks_for_ticks_until_it_idles() {
     let runtime = create();
     let map = create_map(runtime, &map_options(1.0));
     let recognizer = create_recognizer(map, None).unwrap();
     let delta = mln_gesture_delta { position: point(32.0, 16.0), discrete: true, zoom: 1.0, ..zeroed() };
     let (status, result) = handle(recognizer, &input(MLN_GESTURE_INPUT_DELTA, mln_gesture_input_data { delta }), 0.0);
     assert_eq!(status, MLN_STATUS_OK);
-    assert!(result.handled && result.needs_frame);
+    assert!(result.handled);
+    assert_eq!(result.next_tick, MLN_GESTURE_NEXT_TICK_FRAME);
     let mut time = 0.0;
     loop {
         time += 16.0;
         let mut result = empty_result();
         // SAFETY: local arguments.
         assert_eq!(
-            unsafe { mln_gesture_recognizer_frame(recognizer, time, &raw mut result, NO_DIAGNOSTIC) },
+            unsafe { mln_gesture_recognizer_tick(recognizer, time, &raw mut result, NO_DIAGNOSTIC) },
             MLN_STATUS_OK
         );
-        if !result.needs_frame {
+        if result.next_tick == MLN_GESTURE_NEXT_TICK_NONE {
             break;
         }
         assert!(time < 2000.0, "the delta idles");
@@ -248,11 +249,11 @@ fn frames(recognizer: mln_gesture_recognizer, from: f64) -> (Vec<u32>, f64) {
         let mut result = empty_result();
         // SAFETY: local arguments.
         assert_eq!(
-            unsafe { mln_gesture_recognizer_frame(recognizer, time, &raw mut result, NO_DIAGNOSTIC) },
+            unsafe { mln_gesture_recognizer_tick(recognizer, time, &raw mut result, NO_DIAGNOSTIC) },
             MLN_STATUS_OK
         );
         types.extend(events(&result).iter().map(|event| event.type_));
-        if !result.needs_frame {
+        if result.next_tick == MLN_GESTURE_NEXT_TICK_NONE {
             return (types, time);
         }
         assert!(time - from < 2000.0, "the recognizer settles");
@@ -292,7 +293,7 @@ fn taps_zoom_as_the_options_and_modes_say_and_a_held_press_is_a_long_press() {
     let time = time + 1000.0;
     let (status, result) = handle(recognizer, &down(2, 30.0, 16.0, 0), time);
     assert_eq!(status, MLN_STATUS_OK);
-    assert!(result.needs_frame, "the press is timed");
+    assert_eq!((result.next_tick, result.next_tick_ms), (MLN_GESTURE_NEXT_TICK_AT, time + 500.0), "the press is timed");
     let mut long_pressed = false;
     let mut now = time;
     while !long_pressed {
@@ -300,7 +301,7 @@ fn taps_zoom_as_the_options_and_modes_say_and_a_held_press_is_a_long_press() {
         let mut result = empty_result();
         // SAFETY: local arguments.
         assert_eq!(
-            unsafe { mln_gesture_recognizer_frame(recognizer, now, &raw mut result, NO_DIAGNOSTIC) },
+            unsafe { mln_gesture_recognizer_tick(recognizer, now, &raw mut result, NO_DIAGNOSTIC) },
             MLN_STATUS_OK
         );
         long_pressed = events(&result).iter().any(|event| event.type_ == MLN_GESTURE_EVENT_LONG_PRESS);

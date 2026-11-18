@@ -433,8 +433,8 @@ typedef enum mln_gesture_event_type : uint32_t {
   MLN_GESTURE_EVENT_NOTCH = 4,
   /**
    * A pointer stayed pressed and still for 500 ms. Its lift makes no tap. The
-   * recognizer reports it from mln_gesture_recognizer_frame() while the
-   * pointer is down, or on its lift without a frame in time.
+   * recognizer reports it from mln_gesture_recognizer_tick() while the
+   * pointer is down, or on its lift without a tick in time.
    */
   MLN_GESTURE_EVENT_LONG_PRESS = 5,
 } mln_gesture_event_type;
@@ -483,29 +483,43 @@ typedef struct mln_gesture_event {
   mln_gesture_event_data data MLN_BINDING("tag=type");
 } mln_gesture_event;
 
-/** The most events that one input or frame reports. */
+/** The most events that one input or tick reports. */
 #define MLN_GESTURE_RESULT_EVENT_CAPACITY 4
 
-/** What an input or a frame did. */
+/** When a gesture recognizer next needs mln_gesture_recognizer_tick(). */
+typedef enum mln_gesture_next_tick : uint32_t {
+  /** Not until the next input. */
+  MLN_GESTURE_NEXT_TICK_NONE = 0,
+  /**
+   * Every display frame, while a delta eases or a gesture, its glide, or its
+   * snap may reach a notch.
+   */
+  MLN_GESTURE_NEXT_TICK_FRAME = 1,
+  /**
+   * At `next_tick_ms`, on the inputs' clock: when a press becomes a long
+   * press, or idle deltas end.
+   */
+  MLN_GESTURE_NEXT_TICK_AT = 2,
+} mln_gesture_next_tick;
+
+/** What an input or a tick did. */
 typedef struct mln_gesture_result {
   uint32_t size;
   /**
    * Whether the recognizer used the input, so the host stops the platform's
-   * default for it. Frames report false.
+   * default for it. Ticks report false.
    */
   bool handled;
-  /**
-   * Whether the recognizer needs another frame, to time a press or to ease
-   * or end deltas.
-   */
-  bool needs_frame;
+  mln_gesture_next_tick next_tick;
+  /** For MLN_GESTURE_NEXT_TICK_AT. */
+  double next_tick_ms;
   /**
    * Whether a box-zoom drag is drawing `box_zoom`, which the host shows, in
    * logical pixels corner to corner.
    */
   bool box_zoom_active;
   mln_screen_box box_zoom;
-  /** The events that this input or frame reported, in order. */
+  /** The events that this input or tick reported, in order. */
   size_t event_count;
   mln_gesture_event events[MLN_GESTURE_RESULT_EVENT_CAPACITY] MLN_BINDING(
     "length=event_count"
@@ -559,10 +573,12 @@ MLN_API mln_status mln_gesture_recognizer_handle(
 
 /**
  * Times long presses, steps the eases of discrete deltas, ends deltas once
- * they idle, and samples the camera for notches. Call it once a display frame,
- * with the frame's time on the inputs' clock.
+ * they idle, and samples the camera for notches, at `time_ms` on the inputs'
+ * clock. Call it when the last result's `next_tick` says: on the next display
+ * frame, or at its time with a frame or a timer. A tick at any other time does
+ * no harm.
  */
-MLN_API mln_status mln_gesture_recognizer_frame(
+MLN_API mln_status mln_gesture_recognizer_tick(
   mln_gesture_recognizer recognizer, double time_ms,
   mln_gesture_result* out_result MLN_BINDING("direction=out"),
   mln_diagnostic* out_diagnostic

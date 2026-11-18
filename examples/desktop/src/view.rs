@@ -41,7 +41,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use mln_frame_pacer::{FramePacer, RefreshWaiter};
-use mln_gestures::{GestureEvent, GestureRecognizer, Input, Modes, PinchPhase, PointerKind};
+use mln_gestures::{GestureEvent, GestureRecognizer, Input, Modes, NextTick, PinchPhase, PointerKind};
 use mln_map::{
     AnimationOptions, BoundOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, MapDebugOptions,
     MapEvent, RenderMode,
@@ -257,6 +257,7 @@ pub(crate) fn run(launch: Launch) {
         idle: false,
         gestures: GestureRecognizer::default(),
         gestures_animating: false,
+        gestures_deadline: None,
         box_zoom: None,
         ui,
         controls: Controls::default(),
@@ -396,6 +397,8 @@ struct View {
     gestures: GestureRecognizer,
     /// The recognizer eases a scroll, and wants frames.
     gestures_animating: bool,
+    /// When the recognizer next needs a tick, outside the frames it asks for.
+    gestures_deadline: Option<Instant>,
     /// The box a box-zoom drag draws, which the controls show.
     box_zoom: Option<[ScreenCoordinate; 2]>,
 
@@ -576,7 +579,7 @@ impl View {
     /// test's next step, or the quit timer.
     fn next_deadline(&self) -> Option<Instant> {
         let test = self.gesture_test.as_ref().and_then(|t| t.next_at.or(self.style_reported.then_some(self.start)));
-        [self.ui_repaint_at, test, self.quit_at].into_iter().flatten().min()
+        [self.ui_repaint_at, test, self.quit_at, self.gestures_deadline].into_iter().flatten().min()
     }
 
     /// One frame: the messages that came since the last, the recognizer's
@@ -590,7 +593,8 @@ impl View {
         }
         let now = Instant::now();
         let ms = self.ms(now);
-        self.gestures_animating = self.gestures.frame(&mut self.map, ms);
+        let next = self.gestures.tick(&mut self.map, ms);
+        self.schedule_tick(next);
         self.answer_events();
 
         self.redraw |= self.inbox.take_redraw();
@@ -672,12 +676,23 @@ impl View {
     fn gesture(&mut self, input: Input, at: Instant) {
         let ms = self.ms(at);
         self.gestures.handle(&mut self.map, input, ms);
+        self.schedule_tick(self.gestures.next_tick());
         self.answer_events();
         let box_zoom = self.gestures.box_zoom();
         if box_zoom != self.box_zoom {
             self.box_zoom = box_zoom;
             self.ui_repaint_at = Some(Instant::now());
         }
+    }
+
+    /// Ticks the recognizer when it asks: every frame while something moves,
+    /// or at its deadline.
+    fn schedule_tick(&mut self, next: Option<NextTick>) {
+        self.gestures_animating = next == Some(NextTick::Frame);
+        self.gestures_deadline = match next {
+            Some(NextTick::At(ms)) => Some(self.start + Duration::from_secs_f64(ms.max(0.0) / 1000.0)),
+            _ => None,
+        };
     }
 
     /// Answers the recognizer's events: a notch ticks the trackpad. The app

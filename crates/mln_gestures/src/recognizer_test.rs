@@ -17,7 +17,7 @@ use mln_util::size::Size;
 use mln_util::time::Instant;
 
 use super::*;
-use crate::{Axis, InvalidGestureOptions, Modes, Notch};
+use crate::{Axis, InvalidGestureOptions, Modes, NextTick, Notch};
 
 /// A transform as the recognizer's camera. It sets its releases' commands'
 /// ends, and keeps the source of each camera change that started.
@@ -215,7 +215,11 @@ impl Rig {
     /// Returns whether either needs another.
     fn frame(&mut self) -> bool {
         self.now += 16.0;
-        let gesture = self.input.frame(&mut self.camera, self.now);
+        // The recognizer has work of its own: deltas easing or idling, or a
+        // deadline. Frames that only watch a gesture for notches wait for
+        // input.
+        let next = self.input.tick(&mut self.camera, self.now);
+        let gesture = self.input.deltas.is_some() || matches!(next, Some(NextTick::At(_)));
         self.time += Duration::from_millis(16);
         self.camera.update_transitions(Some(self.time));
         self.camera.set_frame_time(Some(self.time));
@@ -338,14 +342,14 @@ fn the_zoom_out_mode_turns_a_double_tap_out() {
 fn a_press_held_still_is_a_long_press_and_no_tap() {
     let mut rig = Rig::new();
     rig.down(1, PointerKind::Touch, 200.0, 200.0);
-    assert!(rig.input.needs_frame(), "the press is timed");
+    assert_eq!(rig.input.next_tick(), Some(NextTick::At(rig.now + 500.0)), "the press is timed");
     // Frames time the press: 32 × 16 ms passes 500 ms.
     for _ in 0..32 {
         rig.frame();
     }
     let position = p(200.0, 200.0);
     assert_eq!(rig.input.take_events(), [GestureEvent::LongPress { id: 1, position }]);
-    assert!(!rig.input.needs_frame());
+    assert_eq!(rig.input.next_tick(), None);
     rig.up(1, 200.0, 200.0);
     // Its lift is no tap, and starts no double tap.
     rig.now += 100.0;
@@ -1570,7 +1574,7 @@ fn a_second_press_held_still_is_a_long_press_and_no_double_tap() {
         rig.now += 100.0;
         rig.input.take_events();
         rig.down(1, PointerKind::Touch, 300.0, 300.0);
-        assert!(rig.input.needs_frame(), "the second press is timed");
+        assert_eq!(rig.input.next_tick(), Some(NextTick::At(rig.now + 500.0)), "the second press is timed");
         if timed {
             for _ in 0..32 {
                 rig.frame();
@@ -1584,4 +1588,30 @@ fn a_second_press_held_still_is_a_long_press_and_no_double_tap() {
         rig.settle();
         assert_eq!(rig.zoom(), 12.0, "timed: {timed}");
     }
+}
+
+#[test]
+fn the_next_tick_is_every_frame_only_while_something_moves() {
+    let mut rig = Rig::new();
+    assert_eq!(rig.input.next_tick(), None);
+    // A press held still waits for the long press; a drag moves the camera.
+    rig.down(1, PointerKind::Mouse, 200.0, 200.0);
+    assert_eq!(rig.input.next_tick(), Some(NextTick::At(rig.now + 500.0)));
+    rig.now += 16.0;
+    rig.to(1, 250.0, 200.0);
+    assert_eq!(rig.input.next_tick(), Some(NextTick::Frame));
+    rig.now += 300.0;
+    rig.up(1, 250.0, 200.0);
+    rig.settle();
+    assert_eq!(rig.input.next_tick(), None);
+
+    // Without notches to watch, a continuous delta asks only for its idle end.
+    let mut options = GestureOptions::default();
+    options.bearing.notches.clear();
+    let mut rig = Rig::with(&options);
+    rig.send(pixels(p(400.0, 300.0), -30.0));
+    assert_eq!(rig.input.next_tick(), Some(NextTick::At(rig.now + 200.0)));
+    // A discrete one asks for frames while it eases.
+    rig.send(detents(p(400.0, 300.0), -1.0));
+    assert_eq!(rig.input.next_tick(), Some(NextTick::Frame));
 }

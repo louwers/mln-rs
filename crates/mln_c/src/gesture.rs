@@ -9,7 +9,8 @@ use std::sync::Arc;
 
 use ::mln_map::{MomentumDecay, MomentumDecayModel, MomentumEasing, MomentumSnap};
 use mln_gestures::{
-    AxisOptions, GestureEvent, GestureOptions, GestureRecognizer, Input, Modes, Notch, PinchPhase, PointerKind,
+    AxisOptions, GestureEvent, GestureOptions, GestureRecognizer, Input, Modes, NextTick, Notch, PinchPhase,
+    PointerKind,
 };
 use mln_util::geo::ScreenCoordinate;
 use parking_lot::Mutex;
@@ -24,7 +25,8 @@ use crate::generated::types::{
     MLN_GESTURE_EVENT_LONG_PRESS, MLN_GESTURE_EVENT_NOTCH, MLN_GESTURE_EVENT_TAP, MLN_GESTURE_EVENT_TWO_FINGER_TAP,
     MLN_GESTURE_INPUT_DELTA, MLN_GESTURE_INPUT_MODES, MLN_GESTURE_INPUT_PINCH, MLN_GESTURE_INPUT_POINTER_CANCEL,
     MLN_GESTURE_INPUT_POINTER_DOWN, MLN_GESTURE_INPUT_POINTER_MOVE, MLN_GESTURE_INPUT_POINTER_UP,
-    MLN_GESTURE_MODE_BOX_ZOOM, MLN_GESTURE_MODE_ROTATE, MLN_GESTURE_MODE_ZOOM_OUT, MLN_GESTURE_OPTION_DOUBLE_TAP_ZOOM,
+    MLN_GESTURE_MODE_BOX_ZOOM, MLN_GESTURE_MODE_ROTATE, MLN_GESTURE_MODE_ZOOM_OUT, MLN_GESTURE_NEXT_TICK_AT,
+    MLN_GESTURE_NEXT_TICK_FRAME, MLN_GESTURE_NEXT_TICK_NONE, MLN_GESTURE_OPTION_DOUBLE_TAP_ZOOM,
     MLN_GESTURE_OPTION_TWO_FINGER_TAP_ZOOM, MLN_GESTURE_PAN_OPTION_ENABLED, MLN_GESTURE_PAN_OPTION_GLIDES,
     MLN_GESTURE_PAN_OPTION_MOMENTUM, MLN_GESTURE_RESULT_EVENT_CAPACITY, MLN_MOMENTUM_DECAY_DURATION_EXPONENT,
     MLN_MOMENTUM_DECAY_DURATION_MS, MLN_MOMENTUM_DECAY_EASING, MLN_MOMENTUM_DECAY_HALF_LIFE_MS,
@@ -382,12 +384,16 @@ fn event(event: GestureEvent) -> mln_gesture_event {
 
 impl Recognizer {
     /// What the call just made did, with as many of the events as fit.
-    fn result(&mut self, handled: bool, needs_frame: bool) -> mln_gesture_result {
+    fn result(&mut self, handled: bool, next_tick: Option<NextTick>) -> mln_gesture_result {
         self.events.extend(self.gestures.take_events());
         // SAFETY: zeros are a valid result: no events, no box.
         let mut result: mln_gesture_result = unsafe { core::mem::zeroed() };
         result.handled = handled;
-        result.needs_frame = needs_frame;
+        (result.next_tick, result.next_tick_ms) = match next_tick {
+            None => (MLN_GESTURE_NEXT_TICK_NONE, 0.0),
+            Some(NextTick::Frame) => (MLN_GESTURE_NEXT_TICK_FRAME, 0.0),
+            Some(NextTick::At(ms)) => (MLN_GESTURE_NEXT_TICK_AT, ms),
+        };
         if let Some([a, b]) = self.gestures.box_zoom() {
             result.box_zoom_active = true;
             result.box_zoom = mln_screen_box { min: geo::from_screen_point(a), max: geo::from_screen_point(b) };
@@ -488,20 +494,20 @@ pub(crate) unsafe extern "C" fn mln_gesture_recognizer_handle(
         let mut recognizer = recognizer.lock();
         let Recognizer { gestures, map, .. } = &mut *recognizer;
         let handled = gestures.handle(map, input, time);
-        let needs_frame = gestures.needs_frame();
-        let result = recognizer.result(handled, needs_frame);
+        let next_tick = gestures.next_tick();
+        let result = recognizer.result(handled, next_tick);
         // SAFETY: the caller's contract.
         unsafe { abi::write_sized(out_result, &result) }
     })
 }
 
-/// `mln_gesture_recognizer_frame()`.
+/// `mln_gesture_recognizer_tick()`.
 ///
 /// # Safety
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn mln_gesture_recognizer_frame(
+pub(crate) unsafe extern "C" fn mln_gesture_recognizer_tick(
     recognizer: mln_gesture_recognizer,
     time_ms: f64,
     out_result: *mut mln_gesture_result,
@@ -514,8 +520,8 @@ pub(crate) unsafe extern "C" fn mln_gesture_recognizer_frame(
         let time = finite(time_ms, "time_ms")?;
         let mut recognizer = recognizer.lock();
         let Recognizer { gestures, map, .. } = &mut *recognizer;
-        let needs_frame = gestures.frame(map, time);
-        let result = recognizer.result(false, needs_frame);
+        let next_tick = gestures.tick(map, time);
+        let result = recognizer.result(false, next_tick);
         // SAFETY: the caller's contract.
         unsafe { abi::write_sized(out_result, &result) }
     })

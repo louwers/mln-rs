@@ -3710,8 +3710,8 @@ pub const MLN_GESTURE_EVENT_TWO_FINGER_TAP: mln_gesture_event_type = 3;
  none.*/
 pub const MLN_GESTURE_EVENT_NOTCH: mln_gesture_event_type = 4;
 /** A pointer stayed pressed and still for 500 ms. Its lift makes no tap. The
- recognizer reports it from mln_gesture_recognizer_frame() while the
- pointer is down, or on its lift without a frame in time.*/
+ recognizer reports it from mln_gesture_recognizer_tick() while the
+ pointer is down, or on its lift without a tick in time.*/
 pub const MLN_GESTURE_EVENT_LONG_PRESS: mln_gesture_event_type = 5;
 /// The kind of an mln_gesture_event.
 pub type mln_gesture_event_type = u32;
@@ -3756,22 +3756,32 @@ pub struct mln_gesture_event {
     pub type_: mln_gesture_event_type,
     pub data: mln_gesture_event_data,
 }
-/// What an input or a frame did.
+/// Not until the next input.
+pub const MLN_GESTURE_NEXT_TICK_NONE: mln_gesture_next_tick = 0;
+/** Every display frame, while a delta eases or a gesture, its glide, or its
+ snap may reach a notch.*/
+pub const MLN_GESTURE_NEXT_TICK_FRAME: mln_gesture_next_tick = 1;
+/** At `next_tick_ms`, on the inputs' clock: when a press becomes a long
+ press, or idle deltas end.*/
+pub const MLN_GESTURE_NEXT_TICK_AT: mln_gesture_next_tick = 2;
+/// When a gesture recognizer next needs mln_gesture_recognizer_tick().
+pub type mln_gesture_next_tick = u32;
+/// What an input or a tick did.
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct mln_gesture_result {
     pub size: u32,
     /** Whether the recognizer used the input, so the host stops the platform's
- default for it. Frames report false.*/
+ default for it. Ticks report false.*/
     pub handled: bool,
-    /** Whether the recognizer needs another frame, to time a press or to ease
- or end deltas.*/
-    pub needs_frame: bool,
+    pub next_tick: mln_gesture_next_tick,
+    /// For MLN_GESTURE_NEXT_TICK_AT.
+    pub next_tick_ms: f64,
     /** Whether a box-zoom drag is drawing `box_zoom`, which the host shows, in
  logical pixels corner to corner.*/
     pub box_zoom_active: bool,
     pub box_zoom: mln_screen_box,
-    /// The events that this input or frame reported, in order.
+    /// The events that this input or tick reported, in order.
     pub event_count: usize,
     pub events: [mln_gesture_event; 4usize],
 }
