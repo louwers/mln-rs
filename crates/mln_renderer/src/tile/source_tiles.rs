@@ -132,6 +132,11 @@ pub(crate) struct SourceTiles {
     cache_clock: u64,
     cache_size: usize,
     rendered: VecMap<UnwrappedTileID, Rendered>,
+    /// The raster or raster-dem tiles the last frame drew masked, whose
+    /// quads go when they stop drawing, and the list before it, whose memory
+    /// the next frame's takes.
+    masked: Vec<OverscaledTileID>,
+    masked_before: Vec<OverscaledTileID>,
     prev_lng: f32,
     fading_tiles: bool,
     cache_enabled: bool,
@@ -362,6 +367,8 @@ impl SourceTiles {
             cache_clock: 0,
             cache_size: 0,
             rendered: VecMap::default(),
+            masked: Vec::new(),
+            masked_before: Vec::new(),
             prev_lng: 0.0,
             fading_tiles: false,
             cache_enabled: true,
@@ -738,11 +745,25 @@ impl SourceTiles {
             let renderables: Vec<(UnwrappedTileID, bool)> =
                 self.rendered.iter().map(|(id, entry)| (*id, entry.needs_rendering)).collect();
             let masks = update_tile_masks(&renderables);
-            let SourceTiles { tiles, rendered, .. } = self;
+            let SourceTiles { tiles, rendered, masked, masked_before, .. } = self;
+            std::mem::swap(masked, masked_before);
+            masked.clear();
             for (entry, mask) in rendered.values().zip(masks) {
-                let contents = tiles.get_mut(&entry.key).and_then(|slot| slot.tile.contents_mut());
-                if let (Some(mask), Some(contents)) = (mask, contents) {
+                let Some(contents) = tiles.get_mut(&entry.key).and_then(|slot| slot.tile.contents_mut()) else {
+                    continue;
+                };
+                if let Some(mask) = mask {
                     contents.set_mask(mask);
+                }
+                if contents.is_masked() {
+                    masked.push(entry.key);
+                }
+            }
+            // A tile that stopped drawing drops its quads until it draws
+            // again, which masks it anew.
+            for key in masked_before.iter().filter(|key| !masked.contains(key)) {
+                if let Some(contents) = tiles.get_mut(key).and_then(|slot| slot.tile.contents_mut()) {
+                    contents.unmask();
                 }
             }
         }

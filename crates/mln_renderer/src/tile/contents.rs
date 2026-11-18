@@ -547,6 +547,26 @@ impl Contents {
         }
     }
 
+    /// Whether a raster or raster-dem tile is masked: it draws quads of the
+    /// tiles its mask keeps rather than its whole extent.
+    pub(crate) fn is_masked(&self) -> bool {
+        match self {
+            Contents::Raster(bucket) => bucket.geometry().is_masked(),
+            Contents::Dem(bucket) => bucket.geometry().is_masked(),
+            Contents::Geometry(_) | Contents::Empty => false,
+        }
+    }
+
+    /// Masks a raster or raster-dem tile's whole extent again, which drops
+    /// the quads of its last mask, for a tile that stops drawing.
+    pub(crate) fn unmask(&mut self) {
+        match self {
+            Contents::Raster(bucket) => bucket.unmask(),
+            Contents::Dem(bucket) => bucket.unmask(),
+            Contents::Geometry(_) | Contents::Empty => {}
+        }
+    }
+
     pub(crate) fn set_mask(&mut self, mask: TileMask) {
         match self {
             Contents::Raster(bucket) => bucket.set_mask(mask),

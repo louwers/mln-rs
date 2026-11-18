@@ -179,6 +179,17 @@ impl MaskedGeometry {
         true
     }
 
+    /// Whether the mask keeps less than the whole tile.
+    #[must_use]
+    pub(crate) fn is_masked(&self) -> bool {
+        !self.segments.is_empty()
+    }
+
+    /// Makes the whole tile the geometry's mask, unless it is.
+    pub(crate) fn unmask(&mut self) -> bool {
+        self.is_masked() && self.set_mask(full_mask())
+    }
+
     /// Moves the quads into `context`'s stores, unless they are there.
     pub(crate) fn upload(&mut self, context: &mut Context) {
         if self.stored.is_some() || self.vertex_count == 0 {
@@ -229,6 +240,13 @@ impl RasterBucket {
 
     pub(crate) fn set_mask(&mut self, mask: TileMask) {
         if self.geometry.set_mask(mask) {
+            self.base.uploaded = false;
+        }
+    }
+
+    /// [`MaskedGeometry::unmask`].
+    pub(crate) fn unmask(&mut self) {
+        if self.geometry.unmask() {
             self.base.uploaded = false;
         }
     }

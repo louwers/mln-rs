@@ -61,6 +61,13 @@ impl HillshadeBucket {
         }
     }
 
+    /// [`MaskedGeometry::unmask`](crate::buckets::raster_bucket::MaskedGeometry::unmask).
+    pub(crate) fn unmask(&mut self) {
+        if self.geometry.unmask() {
+            self.base.uploaded = false;
+        }
+    }
+
     /// Whether the bucket has a DEM to draw.
     #[must_use]
     pub(crate) fn has_data(&self) -> bool {
