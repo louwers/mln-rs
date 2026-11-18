@@ -6,7 +6,7 @@
 use std::rc::Rc;
 
 use mln_gfx::gpu::{Gpu, GpuError, SamplerId, TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage};
-use mln_gfx::released::Released;
+use mln_gfx::released::{Released, StoreEntry};
 use mln_gfx::rendering_stats::RenderingStats;
 use mln_gfx::texture2d::SamplerState;
 use mln_util::image::PremultipliedImage;
@@ -40,7 +40,7 @@ impl OwnedTexture {
 
 impl Drop for OwnedTexture {
     fn drop(&mut self) {
-        self.released.texture_entry(self.key.data().as_ffi());
+        self.released.store_entry(StoreEntry::Texture(self.key.data().as_ffi()));
     }
 }
 

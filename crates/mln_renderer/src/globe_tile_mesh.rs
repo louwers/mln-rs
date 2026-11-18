@@ -8,7 +8,7 @@ use mln_tile_id::CanonicalTileID;
 use mln_util::constants::EXTENT;
 use mln_util::subdivision_granularity::{SubdivisionGranularityExpression, SubdivisionGranularitySetting};
 
-use crate::gfx::indexes::Indexes;
+use crate::gfx::indexes::StoredIndexes;
 use crate::tile_mask::TileMask;
 use crate::util::subdivision::{NORTH_POLE_Y, SOUTH_POLE_Y};
 use crate::util::tile_mesh::{TileMeshOptions, create_tile_mesh};
@@ -19,7 +19,7 @@ use crate::util::tile_mesh::{TileMeshOptions, create_tile_mesh};
 /// positions stay inside the tile so the pole rows sample the tile's edge.
 pub(crate) struct GlobeTileMesh<V: bytemuck::Pod> {
     pub(crate) vertices: Rc<VertexVector<V>>,
-    pub(crate) indices: Indexes,
+    pub(crate) indices: StoredIndexes,
     pub(crate) segments: Vec<SegmentBase>,
 }
 
@@ -71,7 +71,11 @@ impl<V: bytemuck::Pod> GlobeTileMesh<V> {
             segment.vertex_length += vertex_count;
             segment.index_length += mesh.indices.len();
         }
-        GlobeTileMesh { vertices: Rc::new(VertexVector::from_vec(vertices)), indices: Indexes::new(indices), segments }
+        GlobeTileMesh {
+            vertices: Rc::new(VertexVector::from_vec(vertices)),
+            indices: StoredIndexes::new(indices),
+            segments,
+        }
     }
 }
 

@@ -36,7 +36,7 @@ use crate::buckets::fill_bucket::{FillBinders, FillBucket, FillLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, copy_shared_attributes};
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
-use crate::gfx::indexes::Indexes;
+use crate::gfx::indexes::{DrawIndexes, StoredIndexes};
 use crate::gfx::texture2d::Texture2D;
 use crate::layer_composite::Composite;
 use crate::layer_drawing::{DrawDepth, DrawList, DrawObjectsMut, FrameDraw, TileDraws, TileObjects, UniformWriter};
@@ -114,7 +114,7 @@ fn fill_geometry(
     vertices: VertexAttributeArray,
     vertex_count: usize,
     mode: DrawMode,
-    indexes: Indexes,
+    indexes: DrawIndexes,
     segments: &[SegmentBase],
 ) -> DrawGeometry {
     DrawGeometry {
@@ -171,15 +171,17 @@ struct FillUniforms {
 /// attributes every instanced outline reads of it.
 struct OutlineQuad {
     vertices: VertexVectorBasePtr,
-    indexes: Indexes,
+    indexes: StoredIndexes,
     attributes: VertexAttributeArray,
 }
 
 impl OutlineQuad {
-    /// The quad, whose corners every instanced outline reads per vertex.
-    fn new() -> OutlineQuad {
+    /// The quad, whose corners every instanced outline reads per vertex,
+    /// with its indexes in `context`'s store.
+    fn new(context: &mut Context) -> OutlineQuad {
         let vertices = shared_vertices(&RenderStaticData::fill_outline_vertices());
-        let indexes = Indexes::new(RenderStaticData::quad_triangle_indices());
+        let mut indexes = StoredIndexes::new(RenderStaticData::quad_triangle_indices());
+        indexes.store(context);
         let mut attributes = VertexAttributeArray::new();
         if let Some(attr) = attributes.set(ID_FILL_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
             let stride = size_of::<[i16; 2]>() as u32;
@@ -303,7 +305,7 @@ impl TileBuilder<'_> {
                         copy_shared_attributes(&quad.attributes),
                         quad.vertices.get_raw_count(),
                         DrawMode::Triangles(),
-                        quad.indexes.clone(),
+                        quad.indexes.draw_indexes(),
                         &[RenderStaticData::fill_outline_segment(fill_vertex_count)],
                     )
                 };
@@ -645,7 +647,7 @@ impl TypedLayer for RenderFillLayer {
         };
 
         if outline_quads && self.outline_quad.is_none() {
-            self.outline_quad = Some(OutlineQuad::new());
+            self.outline_quad = Some(OutlineQuad::new(paint_parameters.context));
         }
 
         let mut builder = TileBuilder {

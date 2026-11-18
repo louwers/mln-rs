@@ -238,19 +238,20 @@ fn fill_bucket_frees_cpu_geometry_after_upload() {
         assert_eq!(bucket.vertices.len(), vertex_count);
         assert_eq!(vertices.get_raw_data().len(), vertex_count * vertices.get_raw_size());
 
-        // A draw's upload turns the shared vertices into a buffer, and the
-        // bucket's upload the indexes.
+        // A draw's upload turns the shared vectors into buffers: the indexes
+        // are in the context's store once the bucket's upload put them there.
         let buffer = vertex_buffer(context, &vertices, false).expect("uploads").expect("a buffer");
-        geometry.upload_indexes(context);
-        let triangles = bucket_indexes(Some(&geometry), &bucket.triangles);
+        geometry.store_indexes(context);
+        let mut triangles = bucket_indexes(Some(&geometry), &bucket.triangles);
+        triangles.upload(context).expect("uploads");
 
         // The CPU copies are gone, the counts that draws are built from
         // are not.
         assert!(!vertices.has_raw_data());
         assert!(vertices.get_raw_data().is_empty());
         assert_eq!(vertices.get_raw_count(), vertex_count);
-        assert!(!triangles.has_data());
-        assert_eq!(triangles.len(), index_count);
+        assert!(!triangles.has_data(context));
+        assert_eq!(triangles.len(context), index_count);
         assert_eq!(bucket.triangles.len(), index_count);
 
         // A second draw over the same bucket reuses the vectors and the
@@ -258,7 +259,7 @@ fn fill_bucket_frees_cpu_geometry_after_upload() {
         let again = bucket_vertices(Some(&geometry), &bucket.vertices);
         assert!(Rc::ptr_eq(&vertices, &again));
         let indexes = bucket_indexes(Some(&geometry), &bucket.triangles);
-        assert!(Rc::ptr_eq(indexes.buffer().expect("a buffer"), triangles.buffer().expect("a buffer")));
+        assert!(indexes.buffer(context).is_some_and(|buffer| triangles.buffer(context) == Some(buffer)));
         let reused = vertex_buffer(context, &again, true).expect("uploads").expect("a buffer");
         assert!(Rc::ptr_eq(&buffer, &reused));
 
@@ -360,17 +361,18 @@ fn line_bucket_drawables_build_from_freed_indexes() {
     let index_count = bucket.triangles.len();
     bucket.upload(&mut geometry, crate::layers::upload_needs(context));
 
-    // The bucket's upload put the indexes in a buffer, which frees their CPU
+    // An earlier draw put the indexes in a buffer, which frees their CPU
     // copy.
-    geometry.upload_indexes(context);
-    let triangles = bucket_indexes(Some(&geometry), &bucket.triangles);
-    assert!(!triangles.has_data());
+    geometry.store_indexes(context);
+    let mut triangles = bucket_indexes(Some(&geometry), &bucket.triangles);
+    triangles.upload(context).expect("uploads");
+    assert!(!triangles.has_data(context));
 
     // A layer that rebuilds its draws of the tile builds the segments from
     // the counts.
     let indexes = bucket_indexes(Some(&geometry), &bucket.triangles);
-    assert_eq!(indexes.len(), index_count);
-    assert_eq!(triangles.len(), index_count);
+    assert_eq!(indexes.len(context), index_count);
+    assert_eq!(triangles.len(context), index_count);
 }
 
 // gtest: Buckets.SymbolBucket

@@ -570,13 +570,13 @@ impl Contents {
     }
 
     /// Readies the buckets that are new or changed since their last upload
-    /// for the frame's draws ([`Bucket::upload`]), and uploads the indexes
-    /// they moved through `context`.
+    /// for the frame's draws ([`Bucket::upload`]), and puts the indexes they
+    /// moved in `context`'s store.
     pub(crate) fn upload(&mut self, context: &mut Context, needs: UploadNeeds) {
         match self {
             Contents::Geometry(contents) => {
                 contents.upload(needs);
-                contents.bucket_geometry.upload_indexes(context);
+                contents.bucket_geometry.store_indexes(context);
             }
             Contents::Raster(bucket) => bucket.upload_image(),
             Contents::Dem(bucket) => bucket.upload_dem(),

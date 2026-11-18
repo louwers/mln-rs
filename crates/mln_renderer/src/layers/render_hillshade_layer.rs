@@ -48,7 +48,7 @@ use crate::buckets::hillshade_bucket::{HillshadeBucket, HillshadeLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::geometry::dem_data::get_unpack_vector;
 use crate::gfx::context::Context;
-use crate::gfx::indexes::Indexes;
+use crate::gfx::indexes::{DrawIndexes, StoredIndexes};
 use crate::gfx::texture2d::OwnedTexture;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_drawing::{
@@ -129,7 +129,7 @@ pub(crate) struct RenderHillshadeLayer {
 
     static_data_shared_vertices: Option<VertexVectorBasePtr>,
     /// The triangles of the static data's quad.
-    static_data_indices: Option<Indexes>,
+    static_data_indices: Option<StoredIndexes>,
     globe_meshes: GlobeTileMeshCache<HillshadeLayoutVertex>,
 
     /// Each bucket's render target, by bucket id. They draw while the layer
@@ -362,7 +362,7 @@ impl TypedLayer for RenderHillshadeLayer {
         );
         let static_data_indices = self
             .static_data_indices
-            .get_or_insert_with(|| Indexes::new(RenderStaticData::quad_triangle_indices()))
+            .get_or_insert_with(|| StoredIndexes::new(RenderStaticData::quad_triangle_indices()))
             .share(paint_parameters.context);
 
         // `resampling` filters the prepared texture the tile's draw samples;
@@ -426,7 +426,7 @@ impl TypedLayer for RenderHillshadeLayer {
             let geometry_time = geometry.last_modified;
             // The tile's geometry: the globe's mesh of its mask, the mask's
             // geometry, or the whole tile's quad.
-            let mut tile_geometry = || -> (VertexVectorBasePtr, usize, Indexes, Vec<SegmentBase>) {
+            let mut tile_geometry = || -> (VertexVectorBasePtr, usize, DrawIndexes, Vec<SegmentBase>) {
                 if self.base.projection_variant == ProjectionVariant::Globe {
                     let globe_mesh =
                         self.globe_meshes.get(&tile_id.canonical, &geometry.mask, HillshadeBucket::layout_vertex);
@@ -443,7 +443,7 @@ impl TypedLayer for RenderHillshadeLayer {
                     (
                         shared_vertices(&geometry.vertices),
                         geometry.vertices.len(),
-                        Indexes::new(geometry.indices.clone()),
+                        DrawIndexes::new(geometry.indices.clone()),
                         geometry.segments.iter().map(SegmentBase::copy).collect(),
                     )
                 } else {
@@ -558,7 +558,7 @@ impl BucketTarget {
         maxzoom: u8,
         shader: &ShaderProgramPtr,
         attrs: VertexAttributeArray,
-        indexes: &Indexes,
+        indexes: &DrawIndexes,
     ) -> BucketTarget {
         let (tilesize, stride, encoding, dem_image) = {
             let dem = bucket.get_dem_data();

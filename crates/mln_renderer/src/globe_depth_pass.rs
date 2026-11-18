@@ -19,7 +19,7 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use crate::draw::{DrawGeometry, DrawObjects, Textures, raw_vertices};
 use crate::gfx::context::Context;
-use crate::gfx::indexes::Indexes;
+use crate::gfx::indexes::DrawIndexes;
 use crate::globe_tile_mesh::{RawGlobeTileMesh, raw_globe_tile_mesh};
 use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDraws, TileMap, tile_objects};
 use crate::paint_parameters::PaintParameters;
@@ -113,7 +113,7 @@ impl GlobeDepthPass {
                     vertices,
                     vertex_count: mesh.vertex_count,
                     mode: DrawMode::Triangles(),
-                    indexes: Indexes::new(mesh.indices.clone()),
+                    indexes: DrawIndexes::new(mesh.indices.clone()),
                     segments: mesh.segments.iter().map(SegmentBase::copy).collect(),
                     instances: None,
                 };

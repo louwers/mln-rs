@@ -57,7 +57,7 @@ use crate::draw::{DrawGeometry, DrawObjects, copy_shared_attributes};
 use crate::frame_projection::zero_to_one_clip_z;
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
-use crate::gfx::indexes::Indexes;
+use crate::gfx::indexes::{DrawIndexes, StoredIndexes};
 use crate::gfx::texture2d::Texture2D;
 use crate::layer_drawing::{
     DrawDepth, DrawList, DrawObjectsMut, DrawPriority, FrameDraw, TileDraws, TileObjects, UniformWriter,
@@ -124,7 +124,7 @@ struct SharedGeometry<'a> {
     vertices: &'a VertexAttributeArray,
     instances: Option<&'a VertexAttributeArray>,
     vertex_count: usize,
-    indexes: &'a Indexes,
+    indexes: &'a DrawIndexes,
     segments: &'a [SegmentBase],
 }
 
@@ -324,7 +324,7 @@ pub(crate) struct RenderFillExtrusionLayer {
     static_data_vertices: Option<VertexVectorBasePtr>,
     /// The triangles of the wall quad, or of the walls' own quads
     /// (`RenderStaticData::fill_extrusion_wall_indices`).
-    static_data_indices: Option<Indexes>,
+    static_data_indices: Option<StoredIndexes>,
 }
 
 impl RenderFillExtrusionLayer {
@@ -420,7 +420,7 @@ impl TypedLayer for RenderFillExtrusionLayer {
                 } else {
                     RenderStaticData::fill_extrusion_wall_indices()
                 };
-                Indexes::new(indexes)
+                StoredIndexes::new(indexes)
             })
             .share(paint_parameters.context);
         let mut builder = TileBuilder {
@@ -532,7 +532,7 @@ struct TileBuilder {
     instanced_walls: bool,
     /// The static quad, and the indexes the walls draw.
     static_vertices: VertexVectorBasePtr,
-    static_indices: Indexes,
+    static_indices: DrawIndexes,
     has_pattern: bool,
     /// Whether the layer draws into depth before it draws in color.
     depth_pass: bool,

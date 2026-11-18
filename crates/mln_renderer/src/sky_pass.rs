@@ -21,7 +21,7 @@ use mln_util::vectors::Vec4;
 
 use crate::draw::{DrawGeometry, DrawObjects, Textures, raw_vertices};
 use crate::gfx::context::Context;
-use crate::gfx::indexes::Indexes;
+use crate::gfx::indexes::DrawIndexes;
 use crate::layer_drawing::{DrawDepth, FrameDraw, SingleDraw};
 use crate::render_light::EvaluatedLight;
 use crate::render_sky::EvaluatedSky;
@@ -40,7 +40,7 @@ fn fullscreen_draw(shader: &ShaderProgramPtr, vertex_attribute: usize, depth: Dr
         vertices: raw_vertices(vertex_attribute, vertices, corners.len(), AttributeDataType::Short2),
         vertex_count: corners.len(),
         mode: DrawMode::Triangles(),
-        indexes: Indexes::new(RenderStaticData::quad_triangle_indices()),
+        indexes: DrawIndexes::new(RenderStaticData::quad_triangle_indices()),
         segments: vec![SegmentBase::with_lengths(0, 0, 4, 6)],
         instances: None,
     };

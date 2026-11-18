@@ -42,7 +42,7 @@ use super::{cast_matrix, shared_vertices};
 use crate::bucket::{Bucket, NoBucket};
 use crate::buckets::hillshade_bucket::{HillshadeBucket, HillshadeLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
-use crate::gfx::indexes::Indexes;
+use crate::gfx::indexes::{DrawIndexes, StoredIndexes};
 use crate::gfx::texture2d::OwnedTexture;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_drawing::{DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptDraw, TileDraws, TileObjects};
@@ -120,7 +120,7 @@ pub(crate) struct RenderColorReliefLayer {
 
     static_data_shared_vertices: Option<VertexVectorBasePtr>,
     /// The triangles of the static data's quad.
-    static_data_indices: Option<Indexes>,
+    static_data_indices: Option<StoredIndexes>,
     globe_meshes: GlobeTileMeshCache<HillshadeLayoutVertex>,
 
     /// The DEM texture of each bucket, made from its current, possibly
@@ -367,7 +367,7 @@ impl TypedLayer for RenderColorReliefLayer {
         );
         let static_data_indices = self
             .static_data_indices
-            .get_or_insert_with(|| Indexes::new(RenderStaticData::quad_triangle_indices()))
+            .get_or_insert_with(|| StoredIndexes::new(RenderStaticData::quad_triangle_indices()))
             .share(paint_parameters.context);
 
         // Update color ramp textures if changed
@@ -490,7 +490,7 @@ impl TypedLayer for RenderColorReliefLayer {
                     let (vertices, vertex_count, indices, segments): (
                         VertexVectorBasePtr,
                         usize,
-                        Indexes,
+                        DrawIndexes,
                         Vec<SegmentBase>,
                     ) = if self.base.projection_variant == ProjectionVariant::Globe {
                         let globe_mesh =
@@ -511,7 +511,7 @@ impl TypedLayer for RenderColorReliefLayer {
                         (
                             shared_vertices(&geometry.vertices),
                             geometry.vertices.len(),
-                            Indexes::new(geometry.indices.clone()),
+                            DrawIndexes::new(geometry.indices.clone()),
                             geometry.segments.iter().map(SegmentBase::copy).collect(),
                         )
                     } else {

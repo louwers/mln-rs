@@ -24,7 +24,7 @@ use mln_util::logging::{Event, Log};
 use mln_util::time::Instant;
 
 use crate::gfx::context::Context;
-use crate::gfx::indexes::Indexes;
+use crate::gfx::indexes::DrawIndexes;
 use crate::gfx::owned::Owned;
 use crate::gfx::texture2d::TextureKey;
 use crate::gfx::uniform_buffer::UniformBufferArray;
@@ -47,7 +47,7 @@ pub(crate) struct DrawGeometry {
     pub(crate) vertex_count: usize,
     /// The primitive the segments draw.
     pub(crate) mode: DrawMode,
-    pub(crate) indexes: Indexes,
+    pub(crate) indexes: DrawIndexes,
     /// The ranges of the indexes and vertices each draw call draws.
     pub(crate) segments: Vec<SegmentBase>,
     /// The attributes of each instance, for a draw of instances.
@@ -127,7 +127,7 @@ pub(crate) struct DrawObjects {
 
     mode: DrawMode,
     segments: Vec<SegmentBase>,
-    indexes: Indexes,
+    indexes: DrawIndexes,
     vertex_count: usize,
     attribute_bindings: AttributeBindingArray,
     instance_bindings: AttributeBindingArray,
@@ -196,7 +196,7 @@ impl DrawObjects {
 
     fn upload_in(&mut self, context: &mut Context) -> Result<(), GpuError> {
         let shader = &*self.shader;
-        if self.indexes.is_empty() && self.indexes.buffer().is_none() {
+        if self.indexes.len(context) == 0 && self.indexes.buffer(context).is_none() {
             debug_assert!(false, "a draw of {} has no index data", shader.name());
             return Ok(());
         }
@@ -273,7 +273,7 @@ impl DrawObjects {
         };
         let scissor = clamped_scissor(parameters, size);
         let context = &mut *parameters.context;
-        let index_buffer = self.indexes.buffer().map(|buffer| buffer.id());
+        let index_buffer = self.indexes.buffer(context);
         debug_assert!(index_buffer.is_some(), "a draw of {} draws indexes it didn't upload", self.shader.name());
         let Some(index_buffer) = index_buffer else {
             return Ok(());
@@ -484,7 +484,7 @@ impl DrawObjects {
     }
 
     /// Replaces the indexes and the segments drawn from them.
-    pub(crate) fn replace_indexes(&mut self, indexes: Indexes, segments: Vec<SegmentBase>) {
+    pub(crate) fn replace_indexes(&mut self, indexes: DrawIndexes, segments: Vec<SegmentBase>) {
         self.indexes = indexes;
         self.segments = segments;
     }

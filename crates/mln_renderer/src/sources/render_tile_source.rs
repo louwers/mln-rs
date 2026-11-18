@@ -41,7 +41,7 @@ use crate::bucket::UploadNeeds;
 use crate::buckets::line_bucket::{LineBucket, LineLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::gfx::context::Context;
-use crate::gfx::indexes::Indexes;
+use crate::gfx::indexes::DrawIndexes;
 use crate::layer_drawing::{DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptDraw, LayerDraws};
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layers::cast_matrix;
@@ -123,7 +123,7 @@ fn polyline_objects(
         vertices: attrs,
         vertex_count,
         mode: DrawMode::Triangles(),
-        indexes: Indexes::new(indexes),
+        indexes: DrawIndexes::new(indexes),
         segments,
         instances: None,
     };

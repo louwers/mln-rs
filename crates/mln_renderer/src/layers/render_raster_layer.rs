@@ -33,7 +33,7 @@ use crate::bucket::{Bucket, NoBucket};
 use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::gfx::context::Context;
-use crate::gfx::indexes::Indexes;
+use crate::gfx::indexes::{DrawIndexes, StoredIndexes};
 use crate::gfx::texture2d::{OwnedTexture, TextureKey};
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_composite::Composite;
@@ -132,7 +132,7 @@ impl LayerDrawing for RasterDrawing {
 /// mask.
 struct StaticGeometry {
     vertices: VertexVectorBasePtr,
-    indexes: Indexes,
+    indexes: StoredIndexes,
     segments: Vec<SegmentBase>,
 }
 
@@ -259,7 +259,7 @@ impl RenderRasterLayer {
                 raster_geometry(
                     &vertices,
                     geometry.vertices.len(),
-                    Indexes::new(geometry.indices.clone()),
+                    DrawIndexes::new(geometry.indices.clone()),
                     &geometry.segments,
                 )
             };
@@ -347,7 +347,7 @@ fn new_objects(shader: &ShaderProgramPtr, geometry: DrawGeometry, texture: Optio
 fn raster_geometry(
     vertices: &VertexVectorBasePtr,
     vertex_count: usize,
-    indexes: Indexes,
+    indexes: DrawIndexes,
     segments: &[SegmentBase],
 ) -> DrawGeometry {
     DrawGeometry {
@@ -447,7 +447,7 @@ impl TypedLayer for RenderRasterLayer {
         let sampler = self.sampler_state();
         let static_geometry = self.static_geometry.get_or_insert_with(|| StaticGeometry {
             vertices: shared_vertices(&RenderStaticData::raster_vertices()),
-            indexes: Indexes::new(RenderStaticData::quad_triangle_indices()),
+            indexes: StoredIndexes::new(RenderStaticData::quad_triangle_indices()),
             segments: RenderStaticData::raster_segments(),
         });
 
@@ -512,7 +512,7 @@ impl TypedLayer for RenderRasterLayer {
                     raster_geometry(
                         &vertices,
                         geometry.vertices.len(),
-                        Indexes::new(geometry.indices.clone()),
+                        DrawIndexes::new(geometry.indices.clone()),
                         &geometry.segments,
                     )
                 } else {

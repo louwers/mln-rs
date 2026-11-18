@@ -3,15 +3,21 @@ use std::cell::Cell;
 use crate::gpu::{BufferId, BufferUsage, Gpu, ResourceId, TextureId};
 use crate::rendering_stats::RenderingStats;
 
+/// An entry of one of the renderer's stores, by the bits of its key.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StoreEntry {
+    Texture(u64),
+    Indexes(u64),
+}
+
 /// The resources the renderer dropped, which it destroys in a batch where
-/// its context reaches the backend, and the entries of its texture store
-/// whose owners dropped them, which it removes there. The rendering stats
-/// stop counting a resource when it is released.
+/// its context reaches the backend, and the entries of its stores whose
+/// owners dropped them, which it removes there. The rendering stats stop
+/// counting a resource when it is released.
 #[derive(Default)]
 pub struct Released {
     resources: Cell<Vec<ResourceId>>,
-    /// The keys of the texture store's entries released, by their bits.
-    texture_entries: Cell<Vec<u64>>,
+    store_entries: Cell<Vec<StoreEntry>>,
     /// What the resources released since the stats were last read took from
     /// them.
     uncounted: Cell<Uncounted>,
@@ -59,22 +65,20 @@ impl Released {
         push(&self.resources, id.into());
     }
 
-    /// Releases the entry of the renderer's texture store whose key has the
-    /// bits `key`.
-    pub fn texture_entry(&self, key: u64) {
-        push(&self.texture_entries, key);
+    /// Releases an entry of one of the renderer's stores.
+    pub fn store_entry(&self, entry: StoreEntry) {
+        push(&self.store_entries, entry);
     }
 
-    /// Takes the texture store's entries released so far, giving `remove`
-    /// the bits of each key.
-    pub fn remove_texture_entries(&self, mut remove: impl FnMut(u64)) {
-        let mut entries = self.texture_entries.take();
-        for key in entries.drain(..) {
-            remove(key);
+    /// Takes the stores' entries released so far, giving each to `remove`.
+    pub fn remove_store_entries(&self, mut remove: impl FnMut(StoreEntry)) {
+        let mut entries = self.store_entries.take();
+        for entry in entries.drain(..) {
+            remove(entry);
         }
         // Keeps the list's memory for the next frame's entries.
-        entries.append(&mut self.texture_entries.take());
-        self.texture_entries.set(entries);
+        entries.append(&mut self.store_entries.take());
+        self.store_entries.set(entries);
     }
 
     /// Takes the resources released since the last call out of `stats`.

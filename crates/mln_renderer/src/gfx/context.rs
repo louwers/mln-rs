@@ -14,7 +14,7 @@ use mln_gfx::gpu::{
     BufferUsage, Caps, Gpu, GpuError, PipelineId, PipelineKey, ResourceId, SamplerId, ShaderId, ShaderKey,
     TextureFormat, TextureId,
 };
-use mln_gfx::released::Released;
+use mln_gfx::released::{Released, StoreEntry};
 use mln_gfx::rendering_stats::RenderingStats;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::TextureChannelDataType;
@@ -24,6 +24,7 @@ use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use slotmap::{KeyData, SlotMap};
 
+use crate::gfx::indexes::{Indexes, IndexesKey, IndexesOwner, SharedIndexes};
 use crate::gfx::texture2d::{OwnedTexture, Texture2D, TextureKey, TextureMut};
 use crate::gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr};
 
@@ -46,6 +47,10 @@ pub(crate) struct Context {
     /// [`OwnedTexture`]s. A texture whose owner dropped it goes with the
     /// next [`destroy_released`](Self::destroy_released).
     textures: SlotMap<TextureKey, Texture2D>,
+    /// The indexes that draws share, which their holders hold as
+    /// [`SharedIndexes`]. Indexes whose last holder dropped them go with the
+    /// next [`destroy_released`](Self::destroy_released).
+    indexes: SlotMap<IndexesKey, Indexes>,
 }
 
 impl Context {
@@ -63,6 +68,7 @@ impl Context {
             pipelines: HashMap::default(),
             default_vertex_buffers: HashMap::default(),
             textures: SlotMap::with_key(),
+            indexes: SlotMap::with_key(),
         }
     }
 
@@ -188,13 +194,41 @@ impl Context {
     /// Destroys the resources the renderer dropped, first taking the
     /// textures whose owners dropped them out of the store.
     pub(crate) fn destroy_released(&mut self) {
-        let (textures, released) = (&mut self.textures, &*self.released);
-        released.remove_texture_entries(|bits| {
-            if let Some(mut texture) = textures.remove(KeyData::from_ffi(bits).into()) {
-                texture.release(released);
+        let Context { textures, indexes, released, .. } = self;
+        released.remove_store_entries(|entry| match entry {
+            StoreEntry::Texture(bits) => {
+                if let Some(mut texture) = textures.remove(KeyData::from_ffi(bits).into()) {
+                    texture.release(released);
+                }
             }
+            StoreEntry::Indexes(bits) => drop(indexes.remove(KeyData::from_ffi(bits).into())),
         });
         released.destroy(&mut *self.backend.gpu());
+    }
+
+    /// Keeps `indexes` for the draws that share them, until the last holder
+    /// of the returned owner drops it.
+    pub(crate) fn add_indexes(&mut self, indexes: Indexes) -> SharedIndexes {
+        Rc::new(IndexesOwner::new(self.indexes.insert(indexes), Rc::clone(&self.released)))
+    }
+
+    /// The indexes `key`, if their holders haven't dropped them.
+    pub(crate) fn indexes(&self, key: IndexesKey) -> Option<&Indexes> {
+        self.indexes.get(key)
+    }
+
+    /// Writes `indexes`, a draw's own, to a buffer, unless they have one.
+    pub(crate) fn upload_own_indexes(&mut self, indexes: &mut Indexes) -> Result<(), GpuError> {
+        self.released.uncount(&mut self.stats);
+        indexes.upload_to(&mut *self.backend.gpu(), &self.released, &mut self.stats)
+    }
+
+    /// Writes the indexes `key` to a buffer, unless they have one.
+    pub(crate) fn upload_indexes(&mut self, key: IndexesKey) -> Result<(), GpuError> {
+        let Context { backend, stats, released, indexes, .. } = self;
+        let indexes = indexes.get_mut(key).ok_or(GpuError::UnknownId("indexes"))?;
+        released.uncount(stats);
+        indexes.upload_to(&mut *backend.gpu(), released, stats)
     }
 
     /// A texture without a size, made by its first upload or
@@ -399,7 +433,8 @@ impl Context {
         for (_, mut texture) in self.textures.drain() {
             texture.release(&self.released);
         }
-        self.released.remove_texture_entries(|_| {});
+        self.indexes.clear();
+        self.released.remove_store_entries(|_| {});
         let mut gpu = self.backend.gpu();
         self.released.destroy(&mut *gpu);
         for (_, sampler) in self.samplers.drain() {
