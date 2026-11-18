@@ -68,8 +68,6 @@ pub(crate) struct LineBucket {
 /// to create the acute/bevelled line join.
 pub(crate) const EXTRUDE_SCALE: i8 = 63;
 
-static WARNED_INVALID_GEOMETRY: Once = Once::new();
-
 impl LineBucket {
     #[must_use]
     pub(crate) fn new(
@@ -218,6 +216,7 @@ impl LineBucket {
             // Unfortunately, we cannot show the layer or source name from
             // here.
             if coordinates.len() < min_len {
+                static WARNED_INVALID_GEOMETRY: Once = Once::new();
                 WARNED_INVALID_GEOMETRY.call_once(|| Log::warning(Event::General, "Invalid geometry in line layer"));
             }
             return;
