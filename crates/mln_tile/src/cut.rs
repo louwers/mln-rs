@@ -1,8 +1,9 @@
 //! Tiles deeper than their tileset's last zoom, cut from its tiles there.
 //!
 //! The tiles cut from one tile share its data as an [`Ancestor`], which
-//! keeps where each feature lies, so that a cut tile clips only the features
-//! that reach it ([`CutData`]), as in GL JS.
+//! decodes each layer they read once, and keeps where each feature lies, so
+//! that a cut tile clips only the features that reach it ([`CutData`]), as in
+//! GL JS.
 
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -193,18 +194,36 @@ impl Bounds {
 }
 
 /// A tile's data at its tileset's last zoom, which the deeper tiles cut from
-/// it share, and where the features of each of its layers that has been
-/// read lie.
+/// it share, and each of its layers that they have read, decoded once for
+/// all of them and kept while any of them is.
 pub struct Ancestor {
     data: TileData,
-    /// By layer name, each feature's bounds; `None` for one without points.
-    bounds: Mutex<HashMap<String, Arc<[Option<Bounds>]>>>,
+    /// By layer name; `None` for a layer the data lacks.
+    layers: Mutex<HashMap<String, Option<Arc<AncestorLayer>>>>,
+}
+
+/// An ancestor's layer, decoded once for all the tiles cut from it.
+struct AncestorLayer {
+    name: String,
+    /// The units across the tile of the layer as encoded.
+    extent: u32,
+    features: Vec<AncestorFeature>,
+}
+
+/// A feature of an [`AncestorLayer`], and where it lies.
+struct AncestorFeature {
+    kind: FeatureType,
+    id: Identifier,
+    properties: Arc<PropertyMap>,
+    geometry: GeometryCollection,
+    /// `None` for a feature without points.
+    bounds: Option<Bounds>,
 }
 
 impl Ancestor {
     #[must_use]
     pub fn new(data: TileData) -> Self {
-        Ancestor { data, bounds: Mutex::default() }
+        Ancestor { data, layers: Mutex::default() }
     }
 
     #[must_use]
@@ -212,16 +231,36 @@ impl Ancestor {
         &self.data
     }
 
-    /// The bounds of each feature of `layer`, its layer `name`.
-    fn bounds(&self, name: &str, layer: &TileLayer<'_>) -> Result<Arc<[Option<Bounds>]>, TileError> {
-        if let Some(bounds) = self.bounds.lock().get(name) {
-            return Ok(Arc::clone(bounds));
+    /// Layer `name`, decoded; `None` if the data has none.
+    fn layer(&self, name: &str) -> Result<Option<Arc<AncestorLayer>>, TileError> {
+        if let Some(layer) = self.layers.lock().get(name) {
+            return Ok(layer.clone());
         }
-        // Made unlocked: a cut tile reading another layer needn't wait.
-        let bounds = (0..layer.len())
-            .map(|index| Ok(Bounds::of(&layer.feature(index)?.geometry()?)))
-            .collect::<Result<Arc<[_]>, TileError>>()?;
-        Ok(Arc::clone(self.bounds.lock().entry(name.to_owned()).or_insert(bounds)))
+        // Decoded unlocked: a cut tile reading another layer needn't wait.
+        let layer = match self.data.layer(name)? {
+            Some(layer) => Some(Arc::new(AncestorLayer::decode(&layer)?)),
+            None => None,
+        };
+        Ok(self.layers.lock().entry(name.to_owned()).or_insert(layer).clone())
+    }
+}
+
+impl AncestorLayer {
+    fn decode(layer: &TileLayer<'_>) -> Result<AncestorLayer, TileError> {
+        let features = (0..layer.len())
+            .map(|index| {
+                let feature = layer.feature(index)?;
+                let geometry = feature.geometry()?;
+                Ok(AncestorFeature {
+                    kind: feature.get_type(),
+                    id: feature.get_id(),
+                    properties: Arc::new(feature.get_properties().into_owned()),
+                    bounds: Bounds::of(&geometry),
+                    geometry,
+                })
+            })
+            .collect::<Result<_, TileError>>()?;
+        Ok(AncestorLayer { name: layer.name().to_owned(), extent: layer.extent(), features })
     }
 }
 
@@ -271,7 +310,8 @@ impl CutLayer {
 pub struct CutFeature {
     kind: FeatureType,
     id: Identifier,
-    properties: PropertyMap,
+    /// Shared with the ancestor's feature.
+    properties: Arc<PropertyMap>,
     geometry: GeometryCollection,
 }
 
@@ -291,7 +331,7 @@ impl GeometryTileFeature for CutFeature {
     }
 
     fn get_properties(&self) -> Cow<'_, PropertyMap> {
-        Cow::Borrowed(&self.properties)
+        Cow::Borrowed(&*self.properties)
     }
 
     fn get_id(&self) -> Identifier {
@@ -323,32 +363,28 @@ impl CutData {
         if let Some(layer) = self.layers.lock().get(name) {
             return Ok(layer.clone());
         }
-        let layer = match self.ancestor.data.layer(name)? {
-            Some(layer) => Some(Arc::new(self.cut_layer(name, &layer)?)),
-            None => None,
-        };
+        let layer = self.ancestor.layer(name)?.map(|layer| Arc::new(self.cut_layer(&layer)));
         Ok(self.layers.lock().entry(name.to_owned()).or_insert(layer).clone())
     }
 
-    /// The features of `layer`, the ancestor's layer `name`, that reach the
-    /// cut tile.
-    fn cut_layer(&self, name: &str, layer: &TileLayer<'_>) -> Result<CutLayer, TileError> {
-        let extent = layer.extent();
-        let reach = self.cut.reach(buffer(extent));
-        let mut features = Vec::new();
-        for (index, bounds) in self.ancestor.bounds(name, layer)?.iter().enumerate() {
-            if !bounds.is_some_and(|bounds| bounds.overlaps(&reach)) {
-                continue;
-            }
-            let feature = layer.feature(index)?;
-            let kind = feature.get_type();
-            let geometry = self.cut.geometry(kind, &feature.geometry()?, extent);
-            if !geometry.is_empty() {
-                let (id, properties) = (feature.get_id(), feature.get_properties().into_owned());
-                features.push(CutFeature { kind, id, properties, geometry });
-            }
-        }
-        Ok(CutLayer { name: layer.name().to_owned(), features })
+    /// The features of the ancestor's `layer` that reach the cut tile.
+    fn cut_layer(&self, layer: &AncestorLayer) -> CutLayer {
+        let reach = self.cut.reach(buffer(layer.extent));
+        let features = layer
+            .features
+            .iter()
+            .filter(|feature| feature.bounds.is_some_and(|bounds| bounds.overlaps(&reach)))
+            .filter_map(|feature| {
+                let geometry = self.cut.geometry(feature.kind, &feature.geometry, layer.extent);
+                (!geometry.is_empty()).then(|| CutFeature {
+                    kind: feature.kind,
+                    id: feature.id.clone(),
+                    properties: Arc::clone(&feature.properties),
+                    geometry,
+                })
+            })
+            .collect();
+        CutLayer { name: layer.name.clone(), features }
     }
 
     pub(crate) fn has_layer(&self, name: &str) -> Result<bool, TileError> {
@@ -434,5 +470,29 @@ mod tests {
         assert_eq!(geometry[0], vec![Point::new(20, 40), Point::new(60, 40)]);
         let elsewhere = GeometryCollection::from(vec![vec![Point::new(10, 10), Point::new(30, 10)]]);
         assert!(cut.geometry(FeatureType::LineString, &elsewhere, 4096).is_empty());
+    }
+
+    #[test]
+    fn the_tiles_cut_from_an_ancestor_share_its_decoded_layer() {
+        let (half, quarter) = ((EXTENT / 2) as i16, (EXTENT / 4) as i16);
+        let road = feature::Feature {
+            geometry: Some(geo_types::Geometry::LineString(geo_types::LineString::from(vec![
+                (half - 100, quarter),
+                (half + 100, quarter),
+            ]))),
+            properties: Arc::new(PropertyMap::new()),
+            id: Identifier::Uint(1),
+        };
+        let ancestor = Arc::new(Ancestor::new(TileData::Features(Arc::new(vec![road]))));
+        let decoded = ancestor.layer("roads").unwrap().unwrap();
+        let [west, east] = [0, 1].map(|x| CutData::new(Arc::clone(&ancestor), Cut { dz: 1, x, y: 0 }));
+        let [west, east] = [west, east].map(|cut| cut.layer("roads").unwrap().unwrap());
+
+        assert!(Arc::ptr_eq(&decoded, &ancestor.layer("roads").unwrap().unwrap()), "decoded once");
+        assert!(Arc::ptr_eq(&west.features()[0].properties, &east.features()[0].properties));
+        assert_eq!(
+            west.features()[0].geometry()[0],
+            vec![Point::new(EXTENT as i16 - 200, half), Point::new(EXTENT as i16 + 200, half)]
+        );
     }
 }
