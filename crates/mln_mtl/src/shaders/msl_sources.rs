@@ -6270,21 +6270,14 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     return half4(1.0);
 #endif
 
-    // read and cross-fade colors from the main and parent tiles, skipping
-    // the one the fade leaves out
-    float4 color0 = float4(0.0);
-    if (props.fade_t < 1.0) {
-        color0 = image0.sample(image0_sampler, in.pos0);
-        if (color0.a > 0.0) {
-            color0.rgb = color0.rgb / color0.a;
-        }
+    // read and cross-fade colors from the main and parent tiles
+    float4 color0 = image0.sample(image0_sampler, in.pos0);
+    float4 color1 = image1.sample(image1_sampler, in.pos1);
+    if (color0.a > 0.0) {
+        color0.rgb = color0.rgb / color0.a;
     }
-    float4 color1 = float4(0.0);
-    if (props.fade_t > 0.0) {
-        color1 = image1.sample(image1_sampler, in.pos1);
-        if (color1.a > 0.0) {
-            color1.rgb = color1.rgb / color1.a;
-        }
+    if (color1.a > 0.0) {
+        color1.rgb = color1.rgb / color1.a;
     }
     float4 color = mix(color0, color1, props.fade_t);
     color.a *= props.opacity;
