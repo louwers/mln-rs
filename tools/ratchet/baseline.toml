@@ -11,7 +11,7 @@
 "crates/mln_gfx/src/polyline_generator.rs" = 5
 "crates/mln_image/src/png_writer.rs" = 1
 "crates/mln_map/src/transform.rs" = 1
-"crates/mln_map_types/src/transform_state.rs" = 3
+"crates/mln_map_types/src/transform_state.rs" = 1
 "crates/mln_map_types/src/vertical_perspective_projection.rs" = 1
 "crates/mln_renderer/src/layers/render_symbol_layer.rs" = 1
 "crates/mln_renderer/src/layout/symbol_instance.rs" = 1
