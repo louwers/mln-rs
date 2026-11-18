@@ -69,12 +69,14 @@ command (`mise -E target-android run ...`) or for good with
 then installs what it needs. With one selected, Cargo builds for its targets and
 runs their tests on this checkout's own simulator, emulator or Wine prefix
 through [devices-cli](https://github.com/sargunv/devices-cli), as in
-`cargo nextest run --target aarch64-linux-android -p mln-rs-style`. Windows' x64
-targets run under Wine on an x64 Linux host.
+`cargo nextest run --target aarch64-linux-android -p mln-rs-style`. On an x64
+Linux host, the x86_64 targets of Android and OpenHarmony run on emulators with
+KVM, and Windows' x64 targets under Wine.
 
 A test that reads files of its package finds them through the
 `CARGO_MANIFEST_DIR` that Cargo sets when it runs the test, not
-`env!("CARGO_MANIFEST_DIR")`: on Android the package is a copy on the device.
+`env!("CARGO_MANIFEST_DIR")`: on Android and OpenHarmony the package is a copy
+on the device.
 
 ## Documentation
 

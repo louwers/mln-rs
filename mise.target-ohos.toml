@@ -1,5 +1,7 @@
 # Builds for OpenHarmony and HarmonyOS, and runs tests on a HarmonyOS
-# emulator, as in `cargo nextest run --target aarch64-unknown-linux-ohos`.
+# emulator, as in `cargo nextest run --target aarch64-unknown-linux-ohos`, or
+# on an OpenHarmony emulator in QEMU, which the host provides, as in
+# `cargo nextest run --target x86_64-unknown-linux-ohos`.
 # Select it with `mise -E target-ohos`, or in every command with
 # `env = ["target-ohos"]` in an untracked .miserc.local.toml.
 
@@ -16,6 +18,9 @@ ohos-sdk = "6.1"
 # with this Go.
 "core:go" = "1.27.3"
 "go:github.com/sargunv/devices-cli" = "v0.0.0-20261118051936-f04e04c68e26"
+# The OpenHarmony emulator's image, of the SDK's release, which devices-cli
+# boots in QEMU for the x86_64 target.
+"http:oniro-emulator" = { version = "6.1", url = "https://github.com/eclipse-oniro4openharmony/device_board_oniro/releases/download/v{{ version }}/oniro_emulator.zip", checksum = "sha256:a30e01f1b161e0fdcd91263f30f29cc92bfa49c1776d5ee2c46caefef055b2da", bin_path = "." }
 
 [env]
 # The SDK's native toolchain: the plugin's, else DevEco Studio's on macOS.
@@ -32,6 +37,9 @@ CARGO_TARGET_X86_64_UNKNOWN_LINUX_OHOS_LINKER = { value = "{{ env.CC_x86_64_unkn
 # Cargo's runner for the arm64 target, on DevEco Studio's emulator (macOS): a
 # test gets a copy of its package directory and the RUST_ and MLN_ variables.
 CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_RUNNER = "devices-cli exec harmonyos --sync-env CARGO_MANIFEST_DIR --env RUST_* --env MLN_* --"
+# And for the x86_64 target, on the OpenHarmony emulator.
+OHOS_EMULATOR_IMAGES = { value = "{{ tools['http:oniro-emulator'].path }}/images", tools = true }
+CARGO_TARGET_X86_64_UNKNOWN_LINUX_OHOS_RUNNER = "devices-cli exec ohos --sync-env CARGO_MANIFEST_DIR --env RUST_* --env MLN_* --"
 
 [hooks]
 # The Rust targets. An inline script, since a hook's `mise run` would not see
