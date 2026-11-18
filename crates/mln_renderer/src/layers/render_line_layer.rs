@@ -580,10 +580,8 @@ impl TypedLayer for RenderLineLayer {
             let cap = dash_pattern_cap(bucket.bucket);
             params.atlases.line.add(dasharray.from, dasharray.to, cap);
         }
+        // A dashed draw asks for the layer's pattern even where it is empty.
         let layer_dasharray = self.values.evaluated.paint.line_dasharray.faded();
-        if layer_dasharray.from.is_empty() {
-            return;
-        }
         for tile in tiles {
             let Some(bucket) = tile.bucket() else {
                 continue;
@@ -673,9 +671,8 @@ impl RenderLineLayer {
             !evaluated.line_dasharray.is_constant() || !evaluated.line_dasharray.faded().from.is_empty();
         // A constant dash array's texture comes from the line atlas, with the
         // draw's uniforms.
-        let dash_atlas =
+        let dash_texture =
             if evaluated.line_dasharray.is_constant() { None } else { Some(dash_atlas_texture(context, binders)?) };
-        let dash_texture = dash_atlas;
         let has_gradient = !self.values.unevaluated.line_gradient.get_value().is_undefined();
 
         let mut textures = Textures::default();
