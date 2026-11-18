@@ -94,7 +94,8 @@ fragment half4 fragmentMain() { return half4(1.0); }
     let (vertex, fragment) =
         compile(device.device(), "direct read", MSL, "vertexMain", "fragmentMain", []).expect("the MSL compiles");
     let source = shader_source(program).expect("the table");
-    let shader = gpu.shaders.insert(Shader { source, vertex, fragment, table: None });
+    let active_attributes = active_attributes(&vertex);
+    let shader = gpu.shaders.insert(Shader { source, vertex, active_attributes, fragment, table: None });
     let unblended = mln_gfx::color_mode::ColorMode::unblended();
     let layouts = [VertexBufferLayout {
         stride: 4,

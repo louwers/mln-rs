@@ -37,9 +37,9 @@ use objc2_foundation::{NSDictionary, NSString};
 use objc2_metal::{
     MTLBinding, MTLBindingType, MTLBlendFactor, MTLBlendOperation, MTLBlitCommandEncoder, MTLBuffer, MTLBufferBinding,
     MTLClearColor, MTLColorWriteMask, MTLCommandBuffer, MTLCommandEncoder, MTLCommandQueue, MTLCompareFunction,
-    MTLCompileOptions, MTLCullMode, MTLDepthStencilDescriptor, MTLDevice, MTLDrawable, MTLEvent, MTLGPUFamily,
-    MTLIndexType, MTLLanguageVersion, MTLLibrary, MTLLoadAction, MTLOrigin, MTLPipelineOption, MTLPixelFormat,
-    MTLPrimitiveType, MTLRenderCommandEncoder, MTLRenderPassDescriptor, MTLRenderPipelineDescriptor,
+    MTLCompileOptions, MTLCullMode, MTLDepthStencilDescriptor, MTLDevice, MTLDrawable, MTLEvent, MTLFunction,
+    MTLGPUFamily, MTLIndexType, MTLLanguageVersion, MTLLibrary, MTLLoadAction, MTLOrigin, MTLPipelineOption,
+    MTLPixelFormat, MTLPrimitiveType, MTLRenderCommandEncoder, MTLRenderPassDescriptor, MTLRenderPipelineDescriptor,
     MTLRenderPipelineReflection, MTLResource, MTLResourceOptions, MTLSamplerAddressMode, MTLSamplerDescriptor,
     MTLSamplerMinMagFilter, MTLSamplerMipFilter, MTLScissorRect, MTLSize, MTLStencilDescriptor, MTLStencilOperation,
     MTLStorageMode, MTLStoreAction, MTLTexture, MTLTextureDescriptor, MTLTextureUsage, MTLVertexDescriptor,
@@ -104,6 +104,8 @@ struct Texture {
 struct Shader {
     source: &'static ShaderSource,
     vertex: MTLFunctionPtr,
+    /// The attribute indexes that `vertex` reads, by bit.
+    active_attributes: u32,
     fragment: Option<MTLFunctionPtr>,
     table: Option<ShaderTable>,
 }
@@ -651,7 +653,8 @@ impl MetalGpu {
         let device = self.device.device().clone();
         let shader = self.shaders.get(desc.shader).ok_or(GpuError::UnknownId("shader"))?;
         let name = shader.source.name;
-        let (vertex_descriptor, vertex_buffer_indices) = vertex_descriptor(shader.source, desc.vertex_buffers)?;
+        let (vertex_descriptor, vertex_buffer_indices) =
+            vertex_descriptor(shader.source, shader.active_attributes, desc.vertex_buffers)?;
 
         let descriptor = MTLRenderPipelineDescriptor::new();
         descriptor.setLabel(Some(&NSString::from_str(name)));
@@ -785,9 +788,13 @@ fn new_metal_buffer(
     }
 }
 
-/// The vertex descriptor of `layouts` for `source`'s attributes, and the
-/// buffer index each layout's slot binds at, `None` for a slot without
-/// attributes.
+/// The vertex descriptor of `layouts` for the attributes of `source` that
+/// `active` marks by index, and the buffer index each layout's slot binds
+/// at, `None` for a slot without such attributes.
+///
+/// A shader variant that takes a property as a uniform doesn't declare its
+/// attribute, which the layouts still hold. Metal rejects a layout that no
+/// attribute reads, so such a slot gets no layout and binds no buffer.
 ///
 /// The slots bind in order from the lowest buffer index of `source`'s
 /// attribute tables, which is past the indexes of the shader's own
@@ -795,27 +802,34 @@ fn new_metal_buffer(
 /// tables' grouping of them.
 fn vertex_descriptor(
     source: &ShaderSource,
+    active: u32,
     layouts: &[VertexBufferLayout],
 ) -> Result<(MTLVertexDescriptorPtr, Vec<Option<usize>>), GpuError> {
     let descriptor = MTLVertexDescriptor::vertexDescriptor();
     let first = first_vertex_buffer(source);
     let mut buffer_indices: Vec<Option<usize>> = Vec::with_capacity(layouts.len());
     for (slot, layout) in layouts.iter().enumerate() {
-        if layout.attributes.is_empty() {
-            buffer_indices.push(None);
-            continue;
-        }
         let infos = match layout.step {
             VertexStep::Vertex => source.attributes,
             VertexStep::Instance => source.instance_attributes,
         };
-        let buffer_index = first.map(|first| first + slot).filter(|&index| index < MAX_BUFFERS).ok_or_else(|| {
-            GpuError::Unsupported(format!("{}: vertex buffer slot {slot} past Metal's buffer indexes", source.name))
-        })?;
+        let mut attributes = Vec::with_capacity(layout.attributes.len());
         for attribute in &layout.attributes {
             let info = infos.iter().find(|info| info.id == attribute.id as usize).ok_or_else(|| {
                 GpuError::Invalid(format!("{} has no {:?} attribute {}", source.name, layout.step, attribute.id))
             })?;
+            if active & (1 << info.index) != 0 {
+                attributes.push((attribute, info));
+            }
+        }
+        if attributes.is_empty() {
+            buffer_indices.push(None);
+            continue;
+        }
+        let buffer_index = first.map(|first| first + slot).filter(|&index| index < MAX_BUFFERS).ok_or_else(|| {
+            GpuError::Unsupported(format!("{}: vertex buffer slot {slot} past Metal's buffer indexes", source.name))
+        })?;
+        for (attribute, info) in attributes {
             let format = vertex_format(attribute.format)
                 .ok_or_else(|| GpuError::Unsupported(format!("vertex attribute format {:?}", attribute.format)))?;
             // SAFETY: the shaders' attribute indexes are below Metal's 31,
@@ -840,6 +854,16 @@ fn vertex_descriptor(
         buffer_indices.push(Some(buffer_index));
     }
     Ok((descriptor, buffer_indices))
+}
+
+/// The attribute indexes that `function`, a vertex function, reads, by bit.
+fn active_attributes(function: &ProtocolObject<dyn MTLFunction>) -> u32 {
+    function.vertexAttributes().map_or(0, |attributes| {
+        attributes
+            .iter()
+            .filter(|attribute| attribute.isActive())
+            .fold(0, |active, attribute| active | 1 << attribute.attributeIndex())
+    })
 }
 
 /// The lowest buffer index of `source`'s attribute tables, past the indexes
@@ -1309,7 +1333,8 @@ impl Gpu for MetalGpu {
                 key.define_values(),
             )
         })?;
-        Ok(self.shaders.insert(Shader { source, vertex, fragment, table: None }))
+        let active_attributes = active_attributes(&vertex);
+        Ok(self.shaders.insert(Shader { source, vertex, active_attributes, fragment, table: None }))
     }
 
     fn create_pipeline(&mut self, desc: &PipelineDesc<'_>) -> Result<PipelineId, GpuError> {
@@ -1383,14 +1408,15 @@ impl Gpu for MetalGpu {
     }
 
     fn create_geometry(&mut self, desc: &GeometryDesc<'_>) -> Result<GeometryId, GpuError> {
-        let source = self.shaders.get(desc.shader).ok_or(GpuError::UnknownId("shader"))?.source;
+        let shader = self.shaders.get(desc.shader).ok_or(GpuError::UnknownId("shader"))?;
+        let (source, active_attributes) = (shader.source, shader.active_attributes);
         let ranges = {
             let buffer =
                 |id| self.buffers.get(id).map(|buffer: &Buffer| BufferInfo { usage: buffer.usage, size: buffer.size });
             let lookup = Lookup { buffer: &buffer, texture: &|_| None, sampler: &|_| false };
             validation::check_geometry(desc, &lookup)?
         };
-        let (_, indices) = vertex_descriptor(source, desc.layouts)?;
+        let (_, indices) = vertex_descriptor(source, active_attributes, desc.layouts)?;
         let native = |id| self.buffers.get(id).map(|buffer| buffer.buffer.clone()).ok_or(GpuError::UnknownId("buffer"));
         let mut vertex_buffers = Vec::with_capacity(desc.vertex_buffers.len());
         for (&(buffer, offset), index) in desc.vertex_buffers.iter().zip(indices) {
