@@ -62,7 +62,6 @@
 "crates/mln_renderer/src/gfx/dynamic_texture.rs" = 2
 "crates/mln_renderer/src/layers/render_background_layer.rs" = 4
 "crates/mln_renderer/src/layers/render_color_relief_layer.rs" = 4
-"crates/mln_renderer/src/layers/render_custom_layer.rs" = 5
 "crates/mln_renderer/src/layers/render_fill_extrusion_layer.rs" = 1
 "crates/mln_renderer/src/layers/render_fill_layer.rs" = 1
 "crates/mln_renderer/src/layers/render_heatmap_layer.rs" = 1

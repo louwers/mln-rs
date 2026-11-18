@@ -479,7 +479,7 @@ fn refresh_draws(
     }
     let Some(source) = source else { return };
     let (before, rest) = draws.split_at_mut(source);
-    let (source, after) = rest.split_first_mut().expect("the source is one of the draws");
+    let Some((source, after)) = rest.split_first_mut() else { return };
     for draw in before.iter_mut().chain(after) {
         draw.objects.share_vertex_attributes(&source.objects);
     }

@@ -391,15 +391,11 @@ impl LineAtlas {
         to: &[f32],
         cap: LinePatternCap,
     ) -> &mut DashPatternTexture {
-        let index = match self.textures.iter().position(|(key, _)| is_dash_key(key, from, to, cap)) {
-            Some(index) => index,
-            None => {
-                let index = self.textures.len();
-                self.textures.push((dash_key(from, to, cap), DashPatternTexture::new(from, to, cap)));
-                self.needs_upload.push(index);
-                index
-            }
-        };
+        let index = self.textures.iter().position(|(key, _)| is_dash_key(key, from, to, cap)).unwrap_or_else(|| {
+            self.textures.push((dash_key(from, to, cap), DashPatternTexture::new(from, to, cap)));
+            self.needs_upload.push(self.textures.len() - 1);
+            self.textures.len() - 1
+        });
         &mut self.textures[index].1
     }
 
