@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 #MISE description="Lint the browser build, and check it pulls in no native-only dependencies"
+#MISE tools={"core:zig"="0.17.1"}
 # The browser build (wasm32-unknown-unknown, no atomics: one wasm instance per
 # Web Worker, each with its own memory) needs the target, which
 # rust-toolchain.toml installs. Clippy, so that examples/web, which only builds
 # there, is linted too. Three runs, since one would unify their features: the
 # libraries as published (mln_storage's `sqlite` feature on, its SQLite built
-# through sqlite-wasm-rs, which needs a clang that targets wasm32, and the
+# through sqlite-wasm-rs, which needs a C compiler that targets wasm32, and the
 # in-process font-face shaper), the browser build's two modules as `mise run
 # web:build` builds them, which leave both out, with mln_web_host, the glue they
 # share, and the map's module with its `webgl` feature in place of its
@@ -19,6 +20,12 @@
 # package may carry the other's.
 set -euo pipefail
 source tools/dev-shell.sh
+
+# SQLite's C compiler and archiver for wasm32: Zig's clang
+# (tools/zig-cc-wasm32.sh), unless CC_wasm32_unknown_unknown and
+# AR_wasm32_unknown_unknown name others.
+export CC_wasm32_unknown_unknown="${CC_wasm32_unknown_unknown:-$PWD/tools/zig-cc-wasm32.sh}"
+export AR_wasm32_unknown_unknown="${AR_wasm32_unknown_unknown:-zig ar}"
 
 # `lacks <pattern> <cargo tree arguments>...` fails when the dependency tree
 # for wasm32-unknown-unknown has a package whose line matches the pattern.
