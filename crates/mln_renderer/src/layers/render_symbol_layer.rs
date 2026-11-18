@@ -866,7 +866,7 @@ impl RenderSymbolLayer {
             has_collision |= self.add_collision_draws(&mut collision, bucket, evaluated, is_text);
         }
         if has_collision {
-            self.drawing.overlay.get_or_insert_with(LayerDraws::new);
+            self.drawing.overlay.get_or_insert_default();
             if let Some(entry) = self.drawing.tiles.entry(tile_id) {
                 entry.value.get_or_insert_with(SymbolTile::default).collision = collision;
             }
@@ -1356,7 +1356,7 @@ impl RenderLayer for RenderSymbolLayer {
             self.remove_all_draws();
             self.draws_passes = passes;
         }
-        self.drawing.frame.get_or_insert_with(LayerDraws::new);
+        self.drawing.frame.get_or_insert_default();
 
         if self.symbol_icon_group.is_none() {
             self.symbol_icon_group = shaders.shader_group(SYMBOL_ICON_SHADER_NAME);

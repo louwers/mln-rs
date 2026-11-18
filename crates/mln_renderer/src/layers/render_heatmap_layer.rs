@@ -437,7 +437,7 @@ impl RenderHeatmapLayer {
             self.tile_draws.push(draw, Self::tile_uniforms(&tile_id, binders, paint_parameters));
         }
 
-        let target = self.drawing.target.get_or_insert_with(LayerDraws::new);
+        let target = self.drawing.target.get_or_insert_default();
         self.tile_draws.finish(target, context, |writer| Self::write_tile_uniforms(evaluated, writer));
         true
     }
@@ -503,7 +503,7 @@ impl RenderHeatmapLayer {
         render_target_texture: Texture2DPtr,
         paint_parameters: &PaintParameters<'_>,
     ) {
-        let frame = self.drawing.frame.get_or_insert_with(FrameDraws::new);
+        let frame = self.drawing.frame.get_or_insert_default();
         if self.heatmap_texture_shader.is_none() {
             self.heatmap_texture_shader =
                 shaders.shader(HEATMAP_TEXTURE_SHADER_GROUP_NAME, ProjectionVariant::Mercator);

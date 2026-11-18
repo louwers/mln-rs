@@ -652,9 +652,9 @@ pub(crate) struct FrameDraws {
     stencil_tiles: Vec<UnwrappedTileID>,
 }
 
-impl FrameDraws {
-    #[must_use]
-    pub(crate) fn new() -> FrameDraws {
+impl Default for FrameDraws {
+    /// No draws, with an id of their own.
+    fn default() -> Self {
         FrameDraws {
             id: SimpleIdentity::new(),
             draws: Vec::new(),
@@ -663,7 +663,9 @@ impl FrameDraws {
             stencil_tiles: Vec::new(),
         }
     }
+}
 
+impl FrameDraws {
     /// Adds `draw`, which draws after the others.
     pub(crate) fn push(&mut self, draw: FrameDraw) {
         self.draws.push(draw);
@@ -837,16 +839,11 @@ pub(crate) struct LayerDraws<P = ()> {
 
 impl<P> Default for LayerDraws<P> {
     fn default() -> Self {
-        LayerDraws { frame: FrameDraws::new(), parts: Vec::new() }
+        LayerDraws { frame: FrameDraws::default(), parts: Vec::new() }
     }
 }
 
 impl<P: Copy> LayerDraws<P> {
-    #[must_use]
-    pub(crate) fn new() -> LayerDraws<P> {
-        LayerDraws::default()
-    }
-
     /// The draws, with what they share.
     #[must_use]
     pub(crate) fn frame(&self) -> &FrameDraws {
@@ -917,7 +914,7 @@ impl SingleDraw {
     /// One draw of `objects`, as `draw` draws, without buffers.
     #[must_use]
     pub(crate) fn new(objects: DrawObjects, draw: FrameDraw) -> SingleDraw {
-        let mut frame = FrameDraws::new();
+        let mut frame = FrameDraws::default();
         frame.push(draw);
         SingleDraw { objects, frame }
     }
@@ -1012,7 +1009,7 @@ impl<T: TileObjects> TileDraws<T> {
     /// The frame's draws, which the layer has from the first call on: their
     /// group then takes a place in the layers' order and depth.
     pub(crate) fn frame_mut(&mut self) -> &mut LayerDraws<T::Part> {
-        self.frame.get_or_insert_with(LayerDraws::default)
+        self.frame.get_or_insert_default()
     }
 }
 

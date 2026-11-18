@@ -296,7 +296,7 @@ impl RenderRasterLayer {
     /// writes the layer's buffers of them.
     fn finish_frame_draws(&mut self, context: &Context) {
         let composite = self.composite();
-        let frame = self.drawing.frame.get_or_insert_with(LayerDraws::new);
+        let frame = self.drawing.frame.get_or_insert_default();
         frame.set_composite(composite);
         let evaluated = &self.values.evaluated.paint;
         self.draw_list.finish(frame, context, |writer| {
@@ -466,7 +466,7 @@ impl RenderLayer for RenderRasterLayer {
         let Some(render_tiles) = render_tiles else {
             return;
         };
-        self.drawing.frame.get_or_insert_with(LayerDraws::new);
+        self.drawing.frame.get_or_insert_default();
 
         let sampler = self.sampler_state();
         let static_geometry = self.static_geometry.get_or_insert_with(|| StaticGeometry {

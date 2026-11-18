@@ -179,7 +179,7 @@ impl DebugLayer {
             properties: debug_line_properties(type_),
             draws: Vec::new(),
             draw_list: DrawList::default(),
-            frame: LayerDraws::new(),
+            frame: LayerDraws::default(),
         }
     }
 
