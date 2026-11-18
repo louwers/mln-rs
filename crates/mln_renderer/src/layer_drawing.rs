@@ -501,8 +501,7 @@ impl<U, P: Copy> DrawList<U, P> {
         }
         layer.parts.clear();
         layer.parts.extend(self.draws.iter().map(|&(_, index)| self.parts[index]));
-        layer.frame.draws.clear();
-        layer.frame.draws.extend(self.draws.drain(..).map(|(draw, _)| draw));
+        take_draws(&mut self.draws, &mut layer.frame.draws);
         self.uniforms.clear();
         self.parts.clear();
     }
@@ -513,6 +512,13 @@ impl<U, P: Copy> DrawList<U, P> {
 /// same order.
 fn sort_draws(draws: &mut [(FrameDraw, usize)]) {
     draws.sort_unstable_by_key(|(draw, index)| (draw.order(), *index));
+}
+
+/// Makes the draws of `draws`, without their indexes, those of `frame`, and
+/// empties `draws`.
+fn take_draws(draws: &mut Vec<(FrameDraw, usize)>, frame: &mut Vec<FrameDraw>) {
+    frame.clear();
+    frame.extend(draws.drain(..).map(|(draw, _)| draw));
 }
 
 /// Writes the buffers that a frame's draws read, each draw's entries at its
@@ -726,10 +732,16 @@ impl<'a> DrawPass<'a> {
 
     /// Ends the pass's draws: composites what they drew where they drew
     /// into the layer composite's texture.
-    pub(crate) fn end(self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        if let Some(composited) = self.composited {
+    pub(crate) fn end(mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        if let Some(composited) = self.composited.take() {
             parameters.end_composited(gpu, composited);
         }
+    }
+}
+
+impl Drop for DrawPass<'_> {
+    fn drop(&mut self) {
+        debug_assert!(self.composited.is_none(), "a draw pass into the layer composite ended without `end`");
     }
 }
 
