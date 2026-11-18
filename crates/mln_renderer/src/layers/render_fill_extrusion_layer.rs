@@ -49,7 +49,7 @@ use mln_util::mat4::ClipDepthRange;
 use mln_util::size::Size;
 
 use super::{cast_matrix, shared_vertices};
-use crate::bucket_geometry::{bucket_indexes, bucket_vertices, derived_vertices, paint_vertices};
+use crate::bucket_geometry::{BucketGeometry, bucket_indexes, bucket_vertices, derived_vertices, paint_vertices};
 use crate::buckets::fill_extrusion_bucket::{
     FillExtrusionBinders, FillExtrusionBucket, FillExtrusionLayoutSpec, FillExtrusionLayoutVertex,
     FillExtrusionStaticVertex, FillExtrusionWallVertex, wall_quad_paint, wall_quad_vertices,
@@ -85,6 +85,8 @@ struct ExtrusionDraw {
     objects: DrawObjects,
     /// 0 for a draw into depth only, which draws before those in color.
     priority: DrawPriority,
+    /// Whether it draws the walls rather than the roofs.
+    walls: bool,
     /// Whether it tests the stencil value the layer's 3D draws share, which
     /// keeps the draws in color from blending a pixel twice.
     clip: bool,
@@ -255,6 +257,7 @@ fn read_wall_instances(
 /// color, which binds the textures of `atlases`.
 fn extrusion_draw(
     shader: &ShaderProgramPtr,
+    walls: bool,
     in_color: bool,
     clip: bool,
     geometry: &SharedGeometry<'_>,
@@ -271,7 +274,7 @@ fn extrusion_draw(
     let color_mode = if in_color { ColorMode::alpha_blended() } else { ColorMode::disabled() };
     let textures = atlases.map(|atlases| atlases.textures(shader)).unwrap_or_default();
     let objects = DrawObjects::new(Rc::clone(shader), color_mode, CullFaceMode::back_ccw(), draw_geometry, textures);
-    ExtrusionDraw { id: SimpleIdentity::new(), objects, priority: DrawPriority::from(in_color), clip }
+    ExtrusionDraw { id: SimpleIdentity::new(), objects, priority: DrawPriority::from(in_color), walls, clip }
 }
 
 impl LayerType for FillExtrusion {
@@ -499,10 +502,12 @@ impl RenderLayer for RenderFillExtrusionLayer {
                 continue;
             };
 
-            // The draws keep the paint values they were built with, so
-            // feature state doesn't reach an extrusion: the tile's changes go
-            // unread.
-            if self.drawing.caches.cache_mut(&tile_id).is_none() {
+            let changes = self.drawing.caches.take_changes(&tile_id);
+            if let Some(cached) = self.drawing.caches.cache_mut(&tile_id) {
+                if changes.paint {
+                    builder.refresh_paint(cached, tile, bucket, binders, &layer.paint);
+                }
+            } else {
                 let built = builder.build(tile, bucket, binders, &layer.paint);
                 self.drawing.caches.set_cache(&tile_id, built);
             }
@@ -569,13 +574,7 @@ impl TileBuilder {
         // roofs draw.
         let quads = (!self.instanced_walls).then(|| {
             let vertices = derived_vertices(geometry, &bucket.vertices, wall_quad_vertices);
-            let paint_of = |paint: &[u8]| wall_quad_paint(paint, buffer.stride, walls);
-            let paint = if depends_on_feature_state {
-                paint_of(&buffer.shared_vertex_vector.data())
-            } else {
-                derived_vertices(geometry, &buffer.shared_vertex_vector, paint_of)
-            };
-            (vertices, paint)
+            (vertices, wall_paint(geometry, binders, walls))
         });
 
         // The roofs read the paint values per vertex, the instanced walls per
@@ -644,9 +643,9 @@ impl TileBuilder {
         };
         if !bucket.triangles.is_empty() && vertex_count > 0 {
             if self.depth_pass {
-                draws.push(extrusion_draw(shader, false, false, &roofs, atlases.as_ref()));
+                draws.push(extrusion_draw(shader, false, false, false, &roofs, atlases.as_ref()));
             }
-            draws.push(extrusion_draw(shader, true, clip, &roofs, atlases.as_ref()));
+            draws.push(extrusion_draw(shader, false, true, clip, &roofs, atlases.as_ref()));
         }
         // A tile with one vertex has no wall.
         let walls_geometry = SharedGeometry {
@@ -658,12 +657,51 @@ impl TileBuilder {
         };
         if walls > 0 && wall_vertex_count > 0 {
             if self.depth_pass {
-                draws.push(extrusion_draw(wall_shader, false, false, &walls_geometry, atlases.as_ref()));
+                draws.push(extrusion_draw(wall_shader, true, false, false, &walls_geometry, atlases.as_ref()));
             }
-            draws.push(extrusion_draw(wall_shader, true, clip, &walls_geometry, atlases.as_ref()));
+            draws.push(extrusion_draw(wall_shader, true, true, clip, &walls_geometry, atlases.as_ref()));
         }
 
         ExtrusionTile { draws, atlases }
+    }
+}
+
+/// The paint values of the walls' own quads, which the bucket's upload made
+/// of its paint values before those moved to the vectors the roofs draw,
+/// unless feature state rewrites them.
+fn wall_paint(geometry: Option<&BucketGeometry>, binders: &FillExtrusionBinders, walls: usize) -> VertexVectorBasePtr {
+    let buffer = &binders.interleaved_vertex_buffer;
+    let paint_of = |paint: &[u8]| wall_quad_paint(paint, buffer.stride, walls);
+    if binders.depends_on_feature_state() {
+        paint_of(&buffer.shared_vertex_vector.data())
+    } else {
+        derived_vertices(geometry, &buffer.shared_vertex_vector, paint_of)
+    }
+}
+
+impl TileBuilder {
+    /// Points the draws of `cached`, the tile's, at the paint values of its
+    /// bucket's `binders` that feature state rewrote.
+    fn refresh_paint(
+        &self,
+        cached: &mut ExtrusionTile,
+        tile: FrameTile<'_>,
+        bucket: &FillExtrusionBucket,
+        binders: &FillExtrusionBinders,
+        evaluated: &FillExtrusionPaintProperties::PossiblyEvaluated,
+    ) {
+        let geometry = tile.bucket_geometry();
+        let paint = paint_vertices(geometry, &binders.interleaved_vertex_buffer, binders.depends_on_feature_state());
+        let walls = bucket.vertices.len().saturating_sub(1);
+        let quad_paint = (!self.instanced_walls).then(|| wall_paint(geometry, binders, walls));
+        let mut properties_as_uniforms = StringIDSetsPair::default();
+        for draw in &mut cached.draws {
+            let attrs = draw.objects.paint_attributes_mut();
+            read_paint_properties(attrs, binders, evaluated, &paint, &mut properties_as_uniforms);
+            if let Some(quad_paint) = quad_paint.as_ref().filter(|_| draw.walls) {
+                read_quad_paint(attrs, &paint, quad_paint);
+            }
+        }
     }
 }
 

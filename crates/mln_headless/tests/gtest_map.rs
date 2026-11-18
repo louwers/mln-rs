@@ -4163,6 +4163,61 @@ fn feature_state_changes_rendered_style() {
     }
 }
 
+// A feature-state change after the first frame reaches an extrusion's
+// rendered colour, whose draws were built before the change.
+#[test]
+fn feature_state_changes_rendered_extrusion() {
+    let test = MapTest::new();
+
+    test.load_json(
+        r##"{
+      "version": 8,
+      "sources": {
+        "fs": {
+          "type": "geojson",
+          "data": {
+            "type": "Feature",
+            "id": 1,
+            "properties": {},
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [[[-180, -85], [180, -85], [180, 85], [-180, 85], [-180, -85]]]
+            }
+          }
+        }
+      },
+      "layers": [{
+        "id": "extrusion",
+        "type": "fill-extrusion",
+        "source": "fs",
+        "paint": {
+          "fill-extrusion-height": 10,
+          "fill-extrusion-color": ["case", ["boolean", ["feature-state", "active"], false], "#ff0000", "#0000ff"]
+        }
+      }]
+    }"##,
+    );
+
+    test.map().jump_to(&CameraOptions { center: Some(ll(0.0, 0.0)), zoom: Some(0.0), ..Default::default() });
+
+    // The roof's colour is shaded, so compare the channels rather than
+    // expect pure colours.
+    let red_over_blue = |image: &PremultipliedImage| {
+        let pixel = center_pixel(image);
+        i32::from(pixel[0]) - i32::from(pixel[2])
+    };
+
+    assert!(red_over_blue(&test.render().image) < -40, "blue before the state is set");
+
+    let mut active = mln_style::expression::expression::FeatureState::new();
+    active.insert("active".into(), Value::Bool(true));
+    test.frontend().renderer().set_feature_state("fs", None, "1", &active);
+    assert!(red_over_blue(&test.render().image) > 40, "red once the state is set");
+
+    test.frontend().renderer().remove_feature_state("fs", None, Some("1"), None);
+    assert!(red_over_blue(&test.render().image) < -40, "blue once the state is removed");
+}
+
 fn load_selectable_halves_style(test: &MapTest) {
     test.load_json(
         r##"{
