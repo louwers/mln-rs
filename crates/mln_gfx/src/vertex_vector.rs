@@ -187,7 +187,12 @@ impl<V: bytemuck::Pod> VertexVector<V> {
         if self.base.released.get() || self.elements() != vertices.len() {
             return false;
         }
-        self.v.replace(vertices.to_vec());
+        {
+            // A staged vector keeps its allocation across updates.
+            let mut v = self.v.borrow_mut();
+            v.clear();
+            v.extend_from_slice(vertices);
+        }
         self.freed_count.set(0);
         self.base.raw_freed.set(false);
         self.base.dirty.set(true);
@@ -254,7 +259,11 @@ impl<V: bytemuck::Pod> VertexVectorBase for VertexVector<V> {
     fn free_raw_data(&self) {
         let freed = self.v.borrow().len() + self.host_count();
         self.freed_count.set(self.freed_count.get() + freed);
-        *self.v.borrow_mut() = Vec::new();
+        if self.base.staged.get() {
+            self.v.borrow_mut().clear();
+        } else {
+            *self.v.borrow_mut() = Vec::new();
+        }
         #[cfg(target_family = "wasm")]
         self.host.borrow_mut().take();
         self.base.raw_freed.set(true);
