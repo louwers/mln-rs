@@ -42,7 +42,7 @@ use crate::buckets::line_bucket::{LineBucket, LineLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
-use crate::gfx::vertex_attribute::VertexAttributeArray;
+use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
 use crate::layer_drawing::{DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptDraw, LayerDraws};
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layers::cast_matrix;
@@ -116,7 +116,7 @@ fn polyline_objects(
         (ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, offset_of!(LineLayoutVertex, a1) as u32, AttributeDataType::Short2),
         (ID_LINE_DATA_VERTEX_ATTRIBUTE, offset_of!(LineLayoutVertex, a2) as u32, AttributeDataType::UByte4),
     ] {
-        attrs.share(id, shared.clone(), offset, 0, stride, data_type);
+        attrs.set_shared(id, SharedAttribute { vertices: shared.clone(), data_type, offset, vertex_offset: 0, stride });
     }
 
     let geometry = DrawGeometry {

@@ -37,7 +37,7 @@ use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
 use crate::gfx::indexes::{DrawIndexes, Indexes, SharedIndexes};
 use crate::gfx::texture2d::Texture2D;
-use crate::gfx::vertex_attribute::VertexAttributeArray;
+use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
 use crate::layer_composite::Composite;
 use crate::layer_drawing::{DrawDepth, DrawList, DrawObjectsMut, FrameDraw, TileDraws, TileObjects, UniformWriter};
@@ -186,7 +186,10 @@ impl OutlineQuad {
         let mut attributes = VertexAttributeArray::new();
         {
             let stride = size_of::<[i16; 2]>() as u32;
-            attributes.share(ID_FILL_POS_VERTEX_ATTRIBUTE, vertices, 0, 0, stride, AttributeDataType::Short2);
+            attributes.set_shared(
+                ID_FILL_POS_VERTEX_ATTRIBUTE,
+                SharedAttribute { vertices, data_type: AttributeDataType::Short2, offset: 0, vertex_offset: 0, stride },
+            );
         }
         OutlineQuad { vertex_count, indexes, attributes }
     }
@@ -229,13 +232,15 @@ impl TileBuilder<'_> {
 
         let fill_vertex_count = bucket.vertices.len();
         if let Some(vertices) = bucket_vertices(geometry, &bucket.vertices) {
-            vertex_attrs.share(
+            vertex_attrs.set_shared(
                 ID_FILL_POS_VERTEX_ATTRIBUTE,
-                vertices,
-                offset_of!(FillLayoutVertex, a1) as u32,
-                0,
-                size_of::<FillLayoutVertex>() as u32,
-                AttributeDataType::Short2,
+                SharedAttribute {
+                    vertices,
+                    data_type: AttributeDataType::Short2,
+                    offset: offset_of!(FillLayoutVertex, a1) as u32,
+                    vertex_offset: 0,
+                    stride: size_of::<FillLayoutVertex>() as u32,
+                },
             );
         }
 
@@ -298,7 +303,16 @@ impl TileBuilder<'_> {
                     (ID_FILL_OUTLINE_END_ATTRIBUTE, &bucket.outline_ends),
                 ] {
                     if let Some(ends) = bucket_vertices(geometry, ends) {
-                        instance_attrs.share(id, ends, 0, 0, stride, AttributeDataType::Short2);
+                        instance_attrs.set_shared(
+                            id,
+                            SharedAttribute {
+                                vertices: ends,
+                                data_type: AttributeDataType::Short2,
+                                offset: 0,
+                                vertex_offset: 0,
+                                stride,
+                            },
+                        );
                     }
                 }
                 let quad_geometry = DrawGeometry {

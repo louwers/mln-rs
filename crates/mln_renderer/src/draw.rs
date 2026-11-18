@@ -199,8 +199,9 @@ impl DrawObjects {
         self.indexes.upload(context)?;
 
         // An attribute binds again where it changed, or where the upload
-        // writes what it reads, which may be new.
-        let changed = std::mem::take(&mut self.attributes_changed);
+        // writes what it reads, which may be new. A failed upload leaves
+        // the attributes changed, so the next binds them again.
+        let changed = self.attributes_changed;
         if changed || upload::needs_upload(context, shader.vertex_attributes(), &self.vertex_attributes) {
             let mut bindings =
                 upload::build_attribute_bindings(context, shader.vertex_attributes(), &mut self.vertex_attributes)?;
@@ -226,6 +227,8 @@ impl DrawObjects {
                 self.geometry = None;
             }
         }
+
+        self.attributes_changed = false;
 
         for texture in self.textures.iter().flatten() {
             if let Err(error) = context.upload_texture(texture) {

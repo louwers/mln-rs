@@ -34,7 +34,7 @@ use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::gfx::context::Context;
 use crate::gfx::indexes::{DrawIndexes, Indexes, SharedIndexes};
 use crate::gfx::store::SharedTexture;
-use crate::gfx::vertex_attribute::VertexAttributeArray;
+use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_composite::Composite;
@@ -271,10 +271,10 @@ impl RenderRasterLayer {
         if objects.image != Some(built_of) {
             objects.images.clear();
             objects.image = Some(built_of);
+            // Only the image's bucket draws: the textures of the images
+            // before it go.
+            textures.retain(|id, _| *id == bucket.base.bucket_id);
         }
-        // Only the image's bucket draws: the textures of the images before
-        // it go.
-        textures.retain(|id, _| *id == bucket.base.bucket_id);
         let texture = Self::bucket_texture(textures, sampler, paint_parameters.context, bucket);
         let tile_ids = image_data.tile_ids;
         objects.images.truncate(tile_ids.len());
@@ -384,21 +384,25 @@ fn raster_geometry(
 fn raster_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeArray {
     let mut attrs = VertexAttributeArray::new();
     let stride = size_of::<RasterLayoutVertex>() as u32;
-    attrs.share(
+    attrs.set_shared(
         ID_RASTER_POS_VERTEX_ATTRIBUTE,
-        vertices.clone(),
-        offset_of!(RasterLayoutVertex, a1) as u32,
-        0,
-        stride,
-        AttributeDataType::Short2,
+        SharedAttribute {
+            vertices: vertices.clone(),
+            data_type: AttributeDataType::Short2,
+            offset: offset_of!(RasterLayoutVertex, a1) as u32,
+            vertex_offset: 0,
+            stride,
+        },
     );
-    attrs.share(
+    attrs.set_shared(
         ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE,
-        vertices.clone(),
-        offset_of!(RasterLayoutVertex, a2) as u32,
-        0,
-        stride,
-        AttributeDataType::Short2,
+        SharedAttribute {
+            vertices: vertices.clone(),
+            data_type: AttributeDataType::Short2,
+            offset: offset_of!(RasterLayoutVertex, a2) as u32,
+            vertex_offset: 0,
+            stride,
+        },
     );
     attrs
 }

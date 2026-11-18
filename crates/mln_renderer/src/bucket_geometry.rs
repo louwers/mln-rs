@@ -230,12 +230,12 @@ impl BucketGeometry {
         self.vertices.get(vec.key)
     }
 
-    /// Frees the room that the entries' lists keep for more, once a tile's
-    /// buckets uploaded.
+    /// Frees the room that the entries' lists keep for more, where it is
+    /// over a quarter of what they keep, once a tile's buckets uploaded.
     pub(crate) fn shrink(&mut self) {
-        self.vertices.0.shrink_to_fit();
-        self.indexes.0.shrink_to_fit();
-        self.derived.0.shrink_to_fit();
+        self.vertices.shrink();
+        self.indexes.shrink();
+        self.derived.shrink();
     }
 }
 
@@ -266,25 +266,28 @@ impl<T: Clone> Kept<T> {
             Err(at) => self.0.insert(at, (key, value)),
         }
     }
-}
 
-/// Whether `geometry` keeps an entry under `key` in its list that `list`
-/// and `list_mut` pick, taking the first of `others`' where it has none.
-fn kept<T: Clone>(
-    geometry: &mut BucketGeometry,
-    others: &[&BucketGeometry],
-    list: fn(&BucketGeometry) -> &Kept<T>,
-    list_mut: fn(&mut BucketGeometry) -> &mut Kept<T>,
-    key: SimpleIdentity,
-) -> bool {
-    if list(geometry).get(key).is_some() {
-        return true;
+    /// Whether the list has an entry under `key`, taking the first of
+    /// `others`' where it has none.
+    fn has_or_takes<'a>(&mut self, key: SimpleIdentity, mut others: impl Iterator<Item = &'a Kept<T>>) -> bool
+    where
+        T: 'a,
+    {
+        if self.get(key).is_some() {
+            return true;
+        }
+        let Some(shared) = others.find_map(|other| other.get(key)) else {
+            return false;
+        };
+        self.insert(key, shared.clone());
+        true
     }
-    let Some(shared) = others.iter().find_map(|other| list(other).get(key)) else {
-        return false;
-    };
-    list_mut(geometry).insert(key, shared.clone());
-    true
+
+    fn shrink(&mut self) {
+        if self.0.capacity() - self.0.len() > self.0.len() / 4 {
+            self.0.shrink_to_fit();
+        }
+    }
 }
 
 /// A bucket's upload: what moves the bucket's geometry into the context's
@@ -316,7 +319,7 @@ impl<'a> GeometryUpload<'a> {
         if vec.is_moved() {
             return;
         }
-        if kept(self.geometry, self.copies, |g| &g.vertices, |g| &mut g.vertices, vec.key) {
+        if self.geometry.vertices.has_or_takes(vec.key, self.copies.iter().map(|copy| &copy.vertices)) {
             vec.discard();
         } else {
             let vertices = vec.store_vertices(self.context);
@@ -331,7 +334,7 @@ impl<'a> GeometryUpload<'a> {
         if vec.is_moved() {
             return;
         }
-        if kept(self.geometry, self.copies, |g| &g.indexes, |g| &mut g.indexes, vec.key) {
+        if self.geometry.indexes.has_or_takes(vec.key, self.copies.iter().map(|copy| &copy.indexes)) {
             vec.discard();
         } else {
             let indexes = self.context.add_indexes(vec.indexes());
@@ -356,7 +359,7 @@ impl<'a> GeometryUpload<'a> {
         vec: &GeometryVec<V>,
         make: impl FnOnce(&[V]) -> Vec<D>,
     ) {
-        if !kept(self.geometry, self.copies, |g| &g.derived, |g| &mut g.derived, vec.key) {
+        if !self.geometry.derived.has_or_takes(vec.key, self.copies.iter().map(|copy| &copy.derived)) {
             debug_assert!(!vec.is_moved(), "vertices derived from data that moved to the store");
             let derived = self.context.add_vertices(make(&vec.data())).into_shared();
             self.geometry.derived.insert(vec.key, derived);

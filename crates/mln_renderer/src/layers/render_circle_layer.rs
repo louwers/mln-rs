@@ -26,7 +26,7 @@ use crate::bucket::Bucket;
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::circle_bucket::{CircleBinders, CircleBucket, CircleLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
-use crate::gfx::vertex_attribute::VertexAttributeArray;
+use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
 use crate::layer_drawing::{DrawList, KeptDraw, TileDraws, UniformWriter};
 use crate::layer_type::{EvaluatedLayer, LayerType};
@@ -363,13 +363,15 @@ impl TypedLayer for RenderCircleLayer {
                 let mut attrs = VertexAttributeArray::new();
                 let paint = paint(context);
                 read_circle_attributes(&mut attrs, binders, paint.as_ref(), evaluated, &mut properties_as_uniforms);
-                attrs.share(
+                attrs.set_shared(
                     ID_CIRCLE_POS_VERTEX_ATTRIBUTE,
-                    vertices,
-                    offset_of!(CircleLayoutVertex, a1) as u32,
-                    0,
-                    size_of::<CircleLayoutVertex>() as u32,
-                    AttributeDataType::Short2,
+                    SharedAttribute {
+                        vertices,
+                        data_type: AttributeDataType::Short2,
+                        offset: offset_of!(CircleLayoutVertex, a1) as u32,
+                        vertex_offset: 0,
+                        stride: size_of::<CircleLayoutVertex>() as u32,
+                    },
                 );
                 let vertex_count = if bucket.segments.is_empty() { 0 } else { bucket.vertices.len() };
                 let objects = DrawObjects::new(

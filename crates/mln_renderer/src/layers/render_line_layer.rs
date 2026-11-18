@@ -41,7 +41,7 @@ use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
 use crate::gfx::store::SharedTexture;
 use crate::gfx::texture2d::Texture2D;
-use crate::gfx::vertex_attribute::VertexAttributeArray;
+use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
 use crate::layer_composite::Composite;
 use crate::layer_drawing::{DrawList, DrawObjectsMut, FrameDraw, TileDraws, TileObjects, UniformWriter};
@@ -698,21 +698,25 @@ impl RenderLineLayer {
 
         let shared = bucket_vertices(geometry, &bucket.vertices)?;
         let stride = size_of::<LineLayoutVertex>() as u32;
-        attrs.share(
+        attrs.set_shared(
             ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE,
-            shared.clone(),
-            offset_of!(LineLayoutVertex, a1) as u32,
-            0,
-            stride,
-            AttributeDataType::Short2,
+            SharedAttribute {
+                vertices: shared.clone(),
+                data_type: AttributeDataType::Short2,
+                offset: offset_of!(LineLayoutVertex, a1) as u32,
+                vertex_offset: 0,
+                stride,
+            },
         );
-        attrs.share(
+        attrs.set_shared(
             ID_LINE_DATA_VERTEX_ATTRIBUTE,
-            shared,
-            offset_of!(LineLayoutVertex, a2) as u32,
-            0,
-            stride,
-            AttributeDataType::UByte4,
+            SharedAttribute {
+                vertices: shared,
+                data_type: AttributeDataType::UByte4,
+                offset: offset_of!(LineLayoutVertex, a2) as u32,
+                vertex_offset: 0,
+                stride,
+            },
         );
 
         let draw_geometry = DrawGeometry {

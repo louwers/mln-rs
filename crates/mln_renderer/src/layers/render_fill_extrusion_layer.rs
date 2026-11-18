@@ -59,7 +59,7 @@ use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
 use crate::gfx::indexes::{Indexes, SharedIndexes};
 use crate::gfx::texture2d::Texture2D;
-use crate::gfx::vertex_attribute::VertexAttributeArray;
+use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
 use crate::layer_drawing::{
     DrawDepth, DrawList, DrawObjectsMut, DrawPriority, FrameDraw, TileDraws, TileObjects, UniformWriter,
@@ -213,7 +213,10 @@ fn read_wall_quads(attrs: &mut VertexAttributeArray, quads: &SharedVertices) {
         (ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, pos, 4, AttributeDataType::Short2),
         (ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, decimals_ed, 4, AttributeDataType::UShort2),
     ] {
-        attrs.share(id, quads.clone(), offset, vertex_offset, stride, type_);
+        attrs.set_shared(
+            id,
+            SharedAttribute { vertices: quads.clone(), data_type: type_, offset, vertex_offset, stride },
+        );
     }
 }
 
@@ -226,13 +229,15 @@ fn read_wall_instances(
     vertices: &SharedVertices,
 ) {
     let static_stride = size_of::<FillExtrusionStaticVertex>() as u32;
-    attrs.share(
+    attrs.set_shared(
         ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE,
-        corners.clone(),
-        0,
-        0,
-        static_stride,
-        AttributeDataType::Short2,
+        SharedAttribute {
+            vertices: corners.clone(),
+            data_type: AttributeDataType::Short2,
+            offset: 0,
+            vertex_offset: 0,
+            stride: static_stride,
+        },
     );
     let stride = size_of::<FillExtrusionLayoutVertex>() as u32;
     // An instance's outline vertex, then the next one.
@@ -240,8 +245,26 @@ fn read_wall_instances(
         (0, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
         (1, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
     ] {
-        instance_attrs.share(pos_id, vertices.clone(), 0, vertex_offset, stride, AttributeDataType::Short2);
-        instance_attrs.share(decimals_ed_id, vertices.clone(), 4, vertex_offset, stride, AttributeDataType::UShort2);
+        instance_attrs.set_shared(
+            pos_id,
+            SharedAttribute {
+                vertices: vertices.clone(),
+                data_type: AttributeDataType::Short2,
+                offset: 0,
+                vertex_offset,
+                stride,
+            },
+        );
+        instance_attrs.set_shared(
+            decimals_ed_id,
+            SharedAttribute {
+                vertices: vertices.clone(),
+                data_type: AttributeDataType::UShort2,
+                offset: 4,
+                vertex_offset,
+                stride,
+            },
+        );
     }
 }
 
@@ -591,21 +614,25 @@ impl TileBuilder<'_> {
         });
 
         let stride = size_of::<FillExtrusionLayoutVertex>() as u32;
-        vertex_attrs.share(
+        vertex_attrs.set_shared(
             ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE,
-            vertices.clone(),
-            offset_of!(FillExtrusionLayoutVertex, a1) as u32,
-            0,
-            stride,
-            AttributeDataType::Short2,
+            SharedAttribute {
+                vertices: vertices.clone(),
+                data_type: AttributeDataType::Short2,
+                offset: offset_of!(FillExtrusionLayoutVertex, a1) as u32,
+                vertex_offset: 0,
+                stride,
+            },
         );
-        vertex_attrs.share(
+        vertex_attrs.set_shared(
             ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE,
-            vertices,
-            offset_of!(FillExtrusionLayoutVertex, a2) as u32,
-            0,
-            stride,
-            AttributeDataType::UShort2,
+            SharedAttribute {
+                vertices,
+                data_type: AttributeDataType::UShort2,
+                offset: offset_of!(FillExtrusionLayoutVertex, a2) as u32,
+                vertex_offset: 0,
+                stride,
+            },
         );
 
         let atlases = self.has_pattern.then(|| tile_bucket.atlas_textures()).map(|atlases| {

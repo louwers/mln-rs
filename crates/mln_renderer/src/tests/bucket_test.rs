@@ -824,7 +824,7 @@ fn a_draw_writes_an_update_of_the_vertices_it_binds() {
     use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 
     use crate::draw::{DrawGeometry, DrawObjects};
-    use crate::gfx::vertex_attribute::VertexAttributeArray;
+    use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
 
     with_context(|context| {
         let registry = ShaderRegistry::new(&mln_gfx::shaders::program_parameters::ProgramParameters::new(1.0, false));
@@ -836,7 +836,16 @@ fn a_draw_writes_an_update_of_the_vertices_it_binds() {
         let stride = size_of::<RasterLayoutVertex>() as u32;
         let mut attrs = VertexAttributeArray::new();
         for (id, offset) in [(ID_RASTER_POS_VERTEX_ATTRIBUTE, 0), (ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE, 4)] {
-            attrs.share(id, typed.shared().clone(), offset, 0, stride, AttributeDataType::Short2);
+            attrs.set_shared(
+                id,
+                SharedAttribute {
+                    vertices: typed.shared().clone(),
+                    data_type: AttributeDataType::Short2,
+                    offset,
+                    vertex_offset: 0,
+                    stride,
+                },
+            );
         }
         let geometry = DrawGeometry {
             vertices: attrs,

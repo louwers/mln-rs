@@ -11,7 +11,7 @@ use mln_gfx::shaders::shader_defines::MAX_ATTRIBUTE_COUNT_PER_SHADER;
 
 use crate::gfx::context::Context;
 use crate::gfx::upload::{AttributeBinding, AttributeDescriptor};
-use crate::gfx::vertices::SharedVertices;
+use crate::gfx::vertices::{SharedVertices, Vertices};
 
 /// Where an attribute reads vertices of the context's store: at `offset`
 /// in each of `stride` bytes, from the vertex `vertex_offset` on, as
@@ -64,9 +64,7 @@ impl VertexAttribute {
     pub(crate) fn needs_upload(&self, context: &Context) -> bool {
         match self {
             VertexAttribute::Own { values, .. } => matches!(values, OwnValues::Bytes(_)),
-            VertexAttribute::Shared(shared) => {
-                context.vertices(&shared.vertices).is_some_and(super::vertices::Vertices::needs_upload)
-            }
+            VertexAttribute::Shared(shared) => context.vertices(&shared.vertices).is_some_and(Vertices::needs_upload),
         }
     }
 
@@ -151,20 +149,6 @@ impl VertexAttributeArray {
     /// `shared` says.
     pub(crate) fn set_shared(&mut self, id: usize, shared: SharedAttribute) {
         self.set(id, VertexAttribute::Shared(shared));
-    }
-
-    /// Makes the attribute `id` read `vertices` at `offset` in each of
-    /// `stride` bytes, from the vertex `vertex_offset` on, as `data_type`.
-    pub(crate) fn share(
-        &mut self,
-        id: usize,
-        vertices: SharedVertices,
-        offset: u32,
-        vertex_offset: u32,
-        stride: u32,
-        data_type: AttributeDataType,
-    ) {
-        self.set_shared(id, SharedAttribute { vertices, data_type, offset, vertex_offset, stride });
     }
 
     fn set(&mut self, id: usize, attribute: VertexAttribute) {

@@ -46,7 +46,7 @@ use crate::buckets::raster_bucket::RasterLayoutVertex;
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::gfx::indexes::{DrawIndexes, Indexes, SharedIndexes};
 use crate::gfx::store::SharedTexture;
-use crate::gfx::vertex_attribute::VertexAttributeArray;
+use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_drawing::{
@@ -268,21 +268,25 @@ impl RenderColorReliefLayer {
 fn color_relief_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeArray {
     let mut attrs = VertexAttributeArray::new();
     let stride = size_of::<RasterLayoutVertex>() as u32;
-    attrs.share(
+    attrs.set_shared(
         ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE,
-        vertices.clone(),
-        offset_of!(RasterLayoutVertex, a1) as u32,
-        0,
-        stride,
-        AttributeDataType::Short2,
+        SharedAttribute {
+            vertices: vertices.clone(),
+            data_type: AttributeDataType::Short2,
+            offset: offset_of!(RasterLayoutVertex, a1) as u32,
+            vertex_offset: 0,
+            stride,
+        },
     );
-    attrs.share(
+    attrs.set_shared(
         ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE,
-        vertices.clone(),
-        offset_of!(RasterLayoutVertex, a2) as u32,
-        0,
-        stride,
-        AttributeDataType::Short2,
+        SharedAttribute {
+            vertices: vertices.clone(),
+            data_type: AttributeDataType::Short2,
+            offset: offset_of!(RasterLayoutVertex, a2) as u32,
+            vertex_offset: 0,
+            stride,
+        },
     );
     attrs
 }

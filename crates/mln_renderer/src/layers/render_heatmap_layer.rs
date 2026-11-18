@@ -41,7 +41,7 @@ use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
 use crate::gfx::store::SharedTexture;
-use crate::gfx::vertex_attribute::VertexAttributeArray;
+use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
 use crate::layer_drawing::{
     DrawDepth, DrawGroup, DrawList, DrawOrder, FrameDraw, FrameDraws, KeptDraw, LayerDrawing, LayerDraws, TileMap,
@@ -426,13 +426,15 @@ impl RenderHeatmapLayer {
                 let shader = heatmap_shader.get_or_insert_with(|| {
                     heatmap_shader_group.shader(&properties_as_uniforms, base.projection_variant)
                 });
-                attrs.share(
+                attrs.set_shared(
                     ID_HEATMAP_POS_VERTEX_ATTRIBUTE,
-                    vertices,
-                    offset_of!(HeatmapLayoutVertex, a1) as u32,
-                    0,
-                    size_of::<HeatmapLayoutVertex>() as u32,
-                    AttributeDataType::Short2,
+                    SharedAttribute {
+                        vertices,
+                        data_type: AttributeDataType::Short2,
+                        offset: offset_of!(HeatmapLayoutVertex, a1) as u32,
+                        vertex_offset: 0,
+                        stride: size_of::<HeatmapLayoutVertex>() as u32,
+                    },
                 );
                 let geometry = DrawGeometry {
                     vertices: attrs,
@@ -566,13 +568,15 @@ impl RenderHeatmapLayer {
                 .get_or_insert_with(|| copied_vertices(context, &RenderStaticData::heatmap_texture_vertices()))
                 .clone();
             let mut attrs = VertexAttributeArray::new();
-            attrs.share(
+            attrs.set_shared(
                 ID_HEATMAP_POS_VERTEX_ATTRIBUTE,
-                vertices,
-                offset_of!(HeatmapLayoutVertex, a1) as u32,
-                0,
-                size_of::<HeatmapLayoutVertex>() as u32,
-                AttributeDataType::Short2,
+                SharedAttribute {
+                    vertices,
+                    data_type: AttributeDataType::Short2,
+                    offset: offset_of!(HeatmapLayoutVertex, a1) as u32,
+                    vertex_offset: 0,
+                    stride: size_of::<HeatmapLayoutVertex>() as u32,
+                },
             );
             let geometry = DrawGeometry {
                 vertices: attrs,
