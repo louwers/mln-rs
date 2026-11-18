@@ -662,6 +662,9 @@ impl<'a> TileMut<'a> {
     }
 
     fn request(&mut self, method: Method) {
+        if self.take_cut_in_memory() {
+            return;
+        }
         let Some(file_source) = self.source.file_source() else {
             self.fail(Error::native("Can't load tile."));
             return;
@@ -685,6 +688,28 @@ impl<'a> TileMut<'a> {
             Method::Cache => Fetch::Cache { load, request },
             Method::Network => Fetch::Network { load, request },
         };
+    }
+
+    /// A tile cut from an ancestor that another tile's load brought fresh
+    /// from the network takes its data from that, as that load's answer,
+    /// instead of loading the ancestor again.
+    fn take_cut_in_memory(&mut self) -> bool {
+        let Some(origin) = &mut self.source.origin else {
+            return false;
+        };
+        let Some((data, fetched)) = origin.cut_in_memory(&self.tile.id, mln_util::chrono::now()) else {
+            return false;
+        };
+        let OriginLoad::Tileset(tileset) = &mut self.tile.load.origin else {
+            return false;
+        };
+        let resource = &mut tileset.resource;
+        (resource.prior_modified, resource.prior_expires, resource.prior_etag) =
+            (fetched.modified, fetched.expires, fetched.etag);
+        (tileset.modified, tileset.expires) = (fetched.modified, fetched.expires);
+        tileset.from_network = true;
+        self.take_input(TileInput::Geometry { data: Some(data), missing: false });
+        true
     }
 
     fn take_response(&mut self, method: Method, res: &Response) {
@@ -717,7 +742,7 @@ impl<'a> TileMut<'a> {
                 self.tile.settled = true;
             }
         } else if let Some(origin) = &mut self.source.origin {
-            let input = origin.input(self.source.kind, &self.tile.id, res);
+            let input = origin.input(self.source.kind, &self.tile.id, res, method == Method::Network);
             self.take_input(input);
         }
     }

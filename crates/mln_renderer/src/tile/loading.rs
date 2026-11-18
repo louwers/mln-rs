@@ -57,11 +57,12 @@ pub(crate) enum DataOrigin {
 }
 
 impl DataOrigin {
-    /// What response `res` to a tileset tile's request delivers. A 404,
-    /// unlike an empty response (204, or no tile in an archive), says the
-    /// tileset has no tile here: a vector tile is then empty, as in GL JS,
-    /// and a raster tile missing. A sparse tileset's empty tiles are missing.
-    pub(crate) fn input(&mut self, kind: TileKind, id: &OverscaledTileID, res: &Response) -> TileInput {
+    /// What response `res` to a tileset tile's request delivers, from the
+    /// network or only the cache. A 404, unlike an empty response (204, or
+    /// no tile in an archive), says the tileset has no tile here: a vector
+    /// tile is then empty, as in GL JS, and a raster tile missing. A sparse
+    /// tileset's empty tiles are missing.
+    pub(crate) fn input(&mut self, kind: TileKind, id: &OverscaledTileID, res: &Response, network: bool) -> TileInput {
         let sparse = match self {
             DataOrigin::Tileset { tileset, .. } => tileset.sparse,
             DataOrigin::GeoJson(_) | DataOrigin::Custom { .. } => false,
@@ -72,18 +73,22 @@ impl DataOrigin {
         let missing = empty && (sparse || (not_found && !not_found_is_empty));
         let data = if empty { None } else { res.data.clone() };
         match kind {
-            TileKind::Geometry => TileInput::Geometry { data: data.map(|data| self.decode(id, data)), missing },
+            TileKind::Geometry => {
+                let fetched = network.then(|| Fetched::of(res));
+                TileInput::Geometry { data: data.map(|data| self.decode(id, data, fetched)), missing }
+            }
             TileKind::Raster | TileKind::Dem(_) => TileInput::Image { data, missing },
         }
     }
 
-    /// Tile `id`'s data, from `data`: of its ancestor if it is cut from one.
-    fn decode(&mut self, id: &OverscaledTileID, data: Data) -> TileData {
+    /// Tile `id`'s data, from `data`: of its ancestor if it is cut from one,
+    /// which `fetched` brought from the network if it isn't `None`.
+    fn decode(&mut self, id: &OverscaledTileID, data: Data, fetched: Option<Fetched>) -> TileData {
         match self {
             DataOrigin::Tileset { tileset, encoding, ancestors, .. } => {
                 match Cut::of(&id.canonical, tileset.zoom_range.max) {
                     Some(cut) => {
-                        let ancestor = ancestors.get(loaded_tile(tileset, id), data, *encoding);
+                        let ancestor = ancestors.get(loaded_tile(tileset, id), data, *encoding, fetched);
                         TileData::Cut(Arc::new(CutData::new(ancestor, cut)))
                     }
                     None => encoding.decode(data),
@@ -91,6 +96,32 @@ impl DataOrigin {
             }
             DataOrigin::GeoJson(_) | DataOrigin::Custom { .. } => VectorTileEncoding::Mvt.decode(data),
         }
+    }
+
+    /// Tile `id`'s data cut from its ancestor, if another tile's load brought
+    /// that from the network and it hasn't expired at `now`, with what that
+    /// load knew of it.
+    pub(crate) fn cut_in_memory(&mut self, id: &OverscaledTileID, now: Timestamp) -> Option<(TileData, Fetched)> {
+        let DataOrigin::Tileset { tileset, ancestors, .. } = self else {
+            return None;
+        };
+        let cut = Cut::of(&id.canonical, tileset.zoom_range.max)?;
+        let (ancestor, fetched) = ancestors.fresh(loaded_tile(tileset, id), now)?;
+        Some((TileData::Cut(Arc::new(CutData::new(ancestor, cut))), fetched))
+    }
+}
+
+/// What a load from the network knew of the data it brought.
+#[derive(Clone, Debug)]
+pub(crate) struct Fetched {
+    pub(crate) modified: Option<Timestamp>,
+    pub(crate) expires: Option<Timestamp>,
+    pub(crate) etag: Option<String>,
+}
+
+impl Fetched {
+    fn of(res: &Response) -> Fetched {
+        Fetched { modified: res.modified, expires: res.expires, etag: res.etag.clone() }
     }
 }
 
@@ -100,24 +131,45 @@ fn loaded_tile(tileset: &Tileset, id: &OverscaledTileID) -> CanonicalTileID {
     if id.canonical.z > tileset.zoom_range.max { id.scaled_to(tileset.zoom_range.max).canonical } else { id.canonical }
 }
 
-/// The ancestors that a tileset's cut tiles share, by their tile id. The
-/// tiles cut from one ancestor each load it: those whose loads bring the
-/// same data share it, decoded once.
+/// The ancestors that a tileset's cut tiles share, by their tile id, while
+/// a tile cut from them holds them. A tile cut from an ancestor whose data
+/// is fresh from the network takes it as it is; otherwise it loads the
+/// ancestor, and those whose loads bring the same data share it, decoded
+/// once.
 #[derive(Default)]
-pub(crate) struct Ancestors(HashMap<CanonicalTileID, Weak<Ancestor>>);
+pub(crate) struct Ancestors(HashMap<CanonicalTileID, Held>);
+
+struct Held {
+    ancestor: Weak<Ancestor>,
+    /// `None` if only the cache brought it.
+    fetched: Option<Fetched>,
+}
 
 impl Ancestors {
-    /// Ancestor `id` of `data`.
-    fn get(&mut self, id: CanonicalTileID, data: Data, encoding: VectorTileEncoding) -> Arc<Ancestor> {
-        self.0.retain(|_, ancestor| ancestor.strong_count() > 0);
-        if let Some(ancestor) = self.0.get(&id).and_then(Weak::upgrade)
-            && encoded(ancestor.data()) == Some(data.as_slice())
-        {
-            return ancestor;
-        }
-        let ancestor = Arc::new(Ancestor::new(encoding.decode(data)));
-        self.0.insert(id, Arc::downgrade(&ancestor));
+    /// Ancestor `id` of `data`, which `fetched` brought from the network if
+    /// it isn't `None`.
+    fn get(
+        &mut self,
+        id: CanonicalTileID,
+        data: Data,
+        encoding: VectorTileEncoding,
+        fetched: Option<Fetched>,
+    ) -> Arc<Ancestor> {
+        self.0.retain(|_, held| held.ancestor.strong_count() > 0);
+        let ancestor = match self.0.get(&id).and_then(|held| held.ancestor.upgrade()) {
+            Some(ancestor) if encoded(ancestor.data()) == Some(data.as_slice()) => ancestor,
+            _ => Arc::new(Ancestor::new(encoding.decode(data))),
+        };
+        self.0.insert(id, Held { ancestor: Arc::downgrade(&ancestor), fetched });
         ancestor
+    }
+
+    /// Ancestor `id`, if it is held and its data from the network hasn't
+    /// expired at `now`.
+    fn fresh(&self, id: CanonicalTileID, now: Timestamp) -> Option<(Arc<Ancestor>, Fetched)> {
+        let held = self.0.get(&id)?;
+        let fetched = held.fetched.as_ref().filter(|fetched| fetched.expires.is_none_or(|expires| expires > now))?;
+        Some((held.ancestor.upgrade()?, fetched.clone()))
     }
 }
 
