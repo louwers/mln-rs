@@ -270,8 +270,9 @@ impl RenderOrchestrator {
     /// update drew, evaluates the layers, updates the sources' tiles and
     /// their feature state, chooses the layers the frame draws and gives
     /// them their tiles, places the symbols and brings the symbol buckets
-    /// to the placement. The encode reads what this leaves in the
-    /// orchestrator and changes only the layers' drawing.
+    /// to the placement. The encode then changes none of this: it changes
+    /// only what draws it on the GPU, uploading the atlases and the tiles'
+    /// buckets and making the layers' draws.
     pub(crate) fn update(&mut self, update_parameters: &Arc<UpdateParameters>) -> Option<Frame> {
         let mut frame = Frame::new(&update_parameters.transform_state, update_parameters.debug_options);
         let mut clock = self.advance_clock(update_parameters);
@@ -1240,7 +1241,7 @@ impl RenderOrchestrator {
         paint_parameters: &mut PaintParameters<'_>,
         frame: &Frame,
     ) {
-        let mut has_3d = false;
+        let mut needs_globe_depth = false;
         let mut contents = SourceContents::default();
         for (&index, frame_layer) in &frame.layers {
             let render_layer = &mut self.layers[index as usize];
@@ -1256,7 +1257,7 @@ impl RenderOrchestrator {
                 }
             });
             render_layer.update_draws(paint_parameters, &self.atlases, layer_source);
-            has_3d = has_3d || render_layer.needs_globe_depth();
+            needs_globe_depth = needs_globe_depth || render_layer.needs_globe_depth();
         }
         let (static_data, state) = (paint_parameters.static_data, paint_parameters.state);
         let shaders = &static_data.shaders;
@@ -1268,7 +1269,7 @@ impl RenderOrchestrator {
             context,
             state,
             update_parameters,
-            has_3d || self.sky_pass.has_atmosphere(),
+            needs_globe_depth || self.sky_pass.has_atmosphere(),
         );
     }
 

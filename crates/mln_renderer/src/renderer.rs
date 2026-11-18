@@ -448,9 +448,11 @@ impl Renderer {
 
     /// The second phase of a frame: builds and refreshes the GPU objects of
     /// the layers' draws of `frame`, and draws them into `target`, unless
-    /// the target has nothing to draw into now. It reads the orchestrator's
-    /// sources and tiles as the update left them, and changes only the
-    /// layers' drawing and the renderer's GPU state.
+    /// the target has nothing to draw into now. It reads the style, the
+    /// sources, the tiles each layer draws and the placement as the update
+    /// left them, and changes only what draws them on the GPU: the atlases'
+    /// textures, the tiles' buckets, which it uploads and binds to the
+    /// atlases' textures, the layers' drawing and the renderer's GPU state.
     ///
     /// It uploads the atlases and the tiles' buckets; then the draw update
     /// makes the layers' draws of the frame, the draw upload uploads what
