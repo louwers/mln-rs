@@ -37,6 +37,7 @@ use mln_util::error::Error;
 use mln_util::geometry::FeatureType;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
+use mln_vec_map::VecMap;
 
 use crate::bucket::UploadNeeds;
 use crate::buckets::line_bucket::{LineBucket, LineLayoutVertex};
@@ -49,7 +50,6 @@ use crate::paint_parameters::PaintParameters;
 use crate::query::FeatureExtensionValue;
 use crate::render_source::{RenderSource, RenderSourceBase, SourcePrepareParameters, TileOrder};
 use crate::render_tile::RenderTile;
-use crate::render_tree::{DebugLayers, DebugType, debug_layer};
 use crate::source_type::{OriginUpdate, TileOrigin};
 use crate::tile::job::SourceKey;
 use crate::tile::source_tiles::{CoverUpdate, SourceTiles};
@@ -154,6 +154,23 @@ struct DebugDraw {
 struct DebugUniforms {
     draw_ubo: LineDrawableUnionUBO,
     projection: ProjectionUBO,
+}
+
+/// The kinds of debug overlays (layers: debug).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) enum DebugType {
+    TextOutline,
+    Text,
+    Border,
+}
+
+/// The debug overlays, by debug type (layers: debug).
+pub(crate) type DebugLayers = VecMap<DebugType, DebugLayer>;
+
+/// The debug overlay `type_` in `debug_layers`, made if it isn't there
+/// (layers: debug).
+fn debug_layer(debug_layers: &mut DebugLayers, type_: DebugType) -> &mut DebugLayer {
+    debug_layers.entry(type_).or_insert_with(|| DebugLayer::new(type_))
 }
 
 /// A debug overlay: polylines over the tiles of the sources, in the color

@@ -25,6 +25,7 @@ use mln_util::time::Instant;
 
 use crate::Registry;
 use crate::clip_masks::ClipMasks;
+use crate::frame::Frame;
 use crate::frame_projection::{self, FrameProjection};
 use crate::gfx::context::{Context, Stats};
 use crate::layer_composite::LayerComposite;
@@ -33,7 +34,6 @@ use crate::paint_parameters::{OpenPass, PaintParameters};
 use crate::render_orchestrator::RenderOrchestrator;
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
-use crate::render_tree::RenderTree;
 use crate::renderer_event::{RenderMode, RendererEvent, RendererEvents};
 use crate::tile::worker_codec::RemoteWorkers;
 use crate::tile_matrix::to_projection_ubo;
@@ -226,23 +226,25 @@ impl Renderer {
     /// built on the renderer's backend. Returns where the frame went, or
     /// `None` when nothing was drawn: there was nothing to draw, or the
     /// target had nothing to draw into.
+    ///
+    /// A frame runs in two phases: the orchestrator's update brings the
+    /// renderer's state to the update and returns the frame as a value, and
+    /// [`encode`](Self::encode) builds the layers' GPU objects and draws
+    /// from it.
     pub fn render(&mut self, update_parameters: &Arc<UpdateParameters>, target: &dyn FrameTarget) -> Option<Handoff> {
         // Held from the update on: a custom layer that the update removes or
         // gives a new host deinitializes on the backend, as on OpenGL with
         // the context current.
         let backend = Rc::clone(&self.backend);
         let _hold = backend.hold();
-        let start = Instant::now();
-        let frame_layers = self.orchestrator.update(update_parameters);
-        let render_tree = frame_layers.map(|layers| self.orchestrator.prepare(update_parameters, layers));
+        let frame = self.orchestrator.update(update_parameters);
         self.report_orchestrator_events();
-        let render_tree = render_tree?;
-        let prepared = Instant::now();
-        let placement = render_tree.symbols_start().max(start);
-        let handoff = self.encode(&render_tree, update_parameters, target);
+        let frame = frame?;
+        let updated = Instant::now();
+        let handoff = self.encode(&frame, update_parameters, target);
         if handoff.is_some() {
-            self.timings.sources = placement - start;
-            self.timings.symbols = prepared - placement;
+            self.timings.sources = frame.symbols_started - frame.started;
+            self.timings.symbols = updated - frame.symbols_started;
         }
         handoff
     }
@@ -432,11 +434,14 @@ impl Renderer {
         self.orchestrator.clear_data();
     }
 
-    /// The last phase of a frame: draws `render_tree` into `target`, unless
-    /// the target has nothing to draw into now.
+    /// The second phase of a frame: builds and refreshes the GPU objects of
+    /// the layers' draws of `frame`, and draws them into `target`, unless
+    /// the target has nothing to draw into now. It reads the orchestrator's
+    /// sources and tiles as the update left them, and changes only the
+    /// layers' drawing and the renderer's GPU state.
     fn encode(
         &mut self,
-        render_tree: &RenderTree,
+        frame: &Frame,
         update_parameters: &Arc<UpdateParameters>,
         target: &dyn FrameTarget,
     ) -> Option<Handoff> {
@@ -456,9 +461,8 @@ impl Renderer {
             self.static_data = Some(RenderStaticData::new(Box::new(ShaderRegistry::new(&program_parameters))));
         }
 
-        let render_tree_parameters = render_tree.get_parameters();
         let static_data = self.static_data.as_mut().expect("static data");
-        static_data.has_3d = render_tree_parameters.has_3d;
+        static_data.has_3d = frame.has_3d;
         let renderable_size = image.size;
 
         if self.render_state == RenderState::Never {
@@ -467,7 +471,7 @@ impl Renderer {
 
         emit(self.events.as_ref(), RendererEvent::RenderFrameStarted);
 
-        let state = &render_tree_parameters.transform_params.state;
+        let state = &frame.transform.state;
         let frustum_offset = state.get_frustum_offset();
         let pixel_ratio = f64::from(self.pixel_ratio);
         let scissor_rect = ScissorRect {
@@ -487,8 +491,8 @@ impl Renderer {
         let mut parameters = PaintParameters::new(
             context,
             self.pixel_ratio,
-            render_tree_parameters.debug_options,
-            &render_tree_parameters.transform_params,
+            frame.debug_options,
+            &frame.transform,
             static_data,
             Rc::clone(orchestrator.get_pattern_atlas()),
             renderable_size,
@@ -496,9 +500,9 @@ impl Renderer {
         );
 
         parameters.line_atlas = Rc::clone(orchestrator.get_line_atlas());
-        parameters.symbol_fade_change = render_tree_parameters.symbol_fade_change;
-        parameters.evaluated_light = render_tree_parameters.light.clone(); // conformance
-        parameters.opaque_pass_cutoff = render_tree_parameters.opaque_pass_cut_off;
+        parameters.symbol_fade_change = frame.symbol_fade_change;
+        parameters.evaluated_light = frame.light.clone(); // conformance
+        parameters.opaque_pass_cutoff = frame.opaque_pass_cutoff;
 
         // - UPLOAD --------------------------------------------------------
         // Uploads all required buffers and images before we do any actual
@@ -512,7 +516,7 @@ impl Renderer {
         // - DRAW UPDATE ---------------------------------------------------
         // Makes the layers' draws of the frame
         let uploaded = Instant::now();
-        orchestrator.update_layers(update_parameters, &parameters, render_tree);
+        orchestrator.update_layer_draws(update_parameters, &parameters, frame);
 
         let layers_updated = Instant::now();
 
@@ -617,7 +621,7 @@ impl Renderer {
         // depth from 0 to the passes' depth range size, which the draw
         // groups' count sets.
         let frame_projection = frame_projection::compute(
-            &render_tree_parameters.transform_params,
+            &frame.transform,
             1.0 - ((num_draw_groups + 2) * num_sublayers) as f32 * depth_epsilon,
             context.caps().clip_depth,
         );
@@ -627,7 +631,7 @@ impl Renderer {
             width: renderable_size.width,
             height: renderable_size.height,
         });
-        for &index in render_tree.get_layer_render_item_map().keys() {
+        for &index in frame.layers.keys() {
             orchestrator.layer_mut(index as usize).prerender(&parameters);
         }
 
@@ -661,7 +665,7 @@ impl Renderer {
             let color = if parameters.debug_options.contains(MapDebugOptions::OVERDRAW) {
                 Color::black()
             } else {
-                render_tree_parameters.background_color
+                frame.background_color
             };
             let pass = OpenPass {
                 label: "main buffer",
@@ -698,7 +702,7 @@ impl Renderer {
             // draw the draw groups, opaque pass: front to back with the depth
             // buffer, except on the globe, where 2D layers carry no depth and
             // are painted bottom to top.
-            if render_tree_parameters.transform_params.state.is_globe_rendering() {
+            if frame.transform.state.is_globe_rendering() {
                 parameters.current_layer = (num_draw_groups as u32).wrapping_sub(1);
                 orchestrator.render_draw_groups(&mut *gpu, &mut parameters, DrawOrder::BottomUp);
             } else {
@@ -769,7 +773,7 @@ impl Renderer {
         self.layer_composite = std::mem::take(&mut parameters.layer_composite);
 
         let rendering_time = context.rendering_stats().rendering_time;
-        context.rendering_stats().encoding_time = render_tree.get_elapsed_time() - rendering_time;
+        context.rendering_stats().encoding_time = frame.started.elapsed().as_secs_f64() - rendering_time;
 
         let stats = Arc::new(context.stats().get());
         drop(parameters);
@@ -781,9 +785,9 @@ impl Renderer {
         emit(
             self.events.as_ref(),
             RendererEvent::RenderFrameFinished {
-                mode: if render_tree_parameters.loaded { RenderMode::Full } else { RenderMode::Partial },
-                needs_repaint: render_tree_parameters.needs_repaint,
-                placement_changed: render_tree_parameters.placement_changed,
+                mode: if frame.loaded { RenderMode::Full } else { RenderMode::Partial },
+                needs_repaint: frame.needs_repaint,
+                placement_changed: frame.placement_changed,
                 still_image_request_id: if update_parameters.still_image_request {
                     update_parameters.still_image_request_id
                 } else {
@@ -793,7 +797,7 @@ impl Renderer {
             },
         );
 
-        if !render_tree_parameters.loaded {
+        if !frame.loaded {
             self.render_state = RenderState::Partial;
         } else if self.render_state != RenderState::Fully {
             self.render_state = RenderState::Fully;

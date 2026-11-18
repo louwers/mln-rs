@@ -29,6 +29,7 @@ use mln_vec_map::{VecMap, VecSet};
 use smallvec::SmallVec;
 
 use crate::Registry;
+use crate::frame::{Frame, FrameLayer};
 use crate::gfx::context::Context;
 use crate::globe_depth_pass::GlobeDepthPass;
 use crate::image_store::ImageStore;
@@ -40,9 +41,8 @@ use crate::pattern_atlas::PatternAtlas;
 use crate::render_layer::{LayerPrepareParameters, LayerSource, LayerTiles, RenderLayer};
 use crate::render_source::{self, RenderSource, SourcePrepareParameters, TileOrder};
 use crate::render_tile::RenderTile;
-use crate::render_tree::{DebugLayers, LayerRenderItem, RenderTree, RenderTreeParameters};
 use crate::renderer_event::RendererEvent;
-use crate::sources::render_tile_source::DebugLayer;
+use crate::sources::render_tile_source::{DebugLayer, DebugLayers};
 use crate::text::glyph_store::GlyphStore;
 use crate::text::placement::Placement;
 use crate::tile::contents::Contents;
@@ -103,13 +103,14 @@ fn create_render_layer(registry: &Registry, style: &Arc<dyn ErasedLayerStyle>) -
     render_layer
 }
 
-/// What an update chose to draw, for the frame's `prepare`.
-pub(crate) struct FrameLayers {
-    parameters: Box<RenderTreeParameters>,
-    /// The layers the frame draws, by their index in the style.
-    layer_render_items: VecMap<u32, LayerRenderItem>,
-    /// When the update started.
-    start_time: Instant,
+/// The layers of a frame that take part in symbol placement, by their index
+/// in the drawing order.
+#[derive(Default)]
+struct PlacementLayers {
+    /// The layers that place their symbol buckets.
+    leaders: Vec<usize>,
+    /// The layers that draw symbol buckets another layer places.
+    followers: Vec<usize>,
 }
 
 /// How an update evaluates and transitions the layers, the light and the
@@ -277,12 +278,17 @@ impl RenderOrchestrator {
     }
 
     /// The first phase of a frame: brings the orchestrator to
-    /// `update_parameters`. It applies what changed in the style since the
-    /// version the last update drew, evaluates the layers, and updates the
-    /// sources' tiles. Returns what the frame draws, or `None` for a still
-    /// image that hasn't loaded yet, which the frame doesn't draw.
-    pub(crate) fn update(&mut self, update_parameters: &Arc<UpdateParameters>) -> Option<FrameLayers> {
-        let start_time = Instant::now();
+    /// `update_parameters` and returns the frame for the encode, or `None`
+    /// for a still image that hasn't loaded yet, which isn't drawn.
+    ///
+    /// It applies what changed in the style since the version the last
+    /// update drew, evaluates the layers, updates the sources' tiles and
+    /// their feature state, chooses the layers the frame draws and gives
+    /// them their tiles, places the symbols and brings the symbol buckets
+    /// to the placement. The encode reads what this leaves in the
+    /// orchestrator and changes only the layers' drawing.
+    pub(crate) fn update(&mut self, update_parameters: &Arc<UpdateParameters>) -> Option<Frame> {
+        let mut frame = Frame::new(&update_parameters.transform_state, update_parameters.debug_options);
         let mut clock = self.advance_clock(update_parameters);
         let style = &update_parameters.style;
 
@@ -295,6 +301,8 @@ impl RenderOrchestrator {
         self.receive_tiles();
 
         self.update_light_and_sky(style, &clock);
+        frame.light = self.render_light.get_evaluated().clone();
+        frame.sky = self.render_sky.as_ref().map(|render_sky| render_sky.get_evaluated().clone());
 
         // The previous sources may hold the last references to replaced
         // data, such as a GeoJSON source's index, which can take
@@ -336,19 +344,13 @@ impl RenderOrchestrator {
         }
         self.transform_state = update_parameters.transform_state.clone();
 
-        let mut parameters =
-            Box::new(RenderTreeParameters::new(&update_parameters.transform_state, update_parameters.debug_options));
-        // conformance: the RenderTreeParameters ctor's `renderLight.getEvaluated()`.
-        parameters.light = self.render_light.get_evaluated().clone();
-        parameters.sky = self.render_sky.as_ref().map(|render_sky| render_sky.get_evaluated().clone());
-
-        let (layer_render_items, update_list) = self.update_sources(
+        let will_render = self.update_sources(
             update_parameters,
             &layers,
             &layer_changes,
             &constants_mask_changed,
             &clock,
-            &mut parameters,
+            &mut frame,
         );
 
         // A synchronous source's tile laid out by its answer isn't in this
@@ -366,10 +368,7 @@ impl RenderOrchestrator {
             update_parameters.transform_state.get_lat_lng(mln_util::geo::WrapMode::Unwrapped).longitude() as f32;
         let wrap_delta = ((longitude - self.longitude) / 360.0).round() as i16;
         self.longitude = longitude;
-
-        // Update all layers with their new renderability status, if it
-        // changed.
-        for (layer, will_render) in self.layers.iter_mut().zip(update_list) {
+        for (layer, will_render) in self.layers.iter_mut().zip(will_render) {
             if wrap_delta != 0 {
                 layer.handle_wrap_jump(wrap_delta);
             }
@@ -378,98 +377,21 @@ impl RenderOrchestrator {
             }
         }
 
-        parameters.loaded = update_parameters.style_loaded && !answered && self.is_loaded();
-        if !clock.continuous && !parameters.loaded {
+        frame.loaded = update_parameters.style_loaded && !answered && self.is_loaded();
+        if !clock.continuous && !frame.loaded {
             return None;
         }
-        Some(FrameLayers { parameters, layer_render_items, start_time })
-    }
-
-    /// The second phase of a frame: prepares what `update` chose to draw. It
-    /// computes the tiles' matrices, gives the layers their tiles, places
-    /// the symbols and updates the symbol buckets for the placement.
-    pub(crate) fn prepare(
-        &mut self,
-        update_parameters: &Arc<UpdateParameters>,
-        frame_layers: FrameLayers,
-    ) -> RenderTree {
-        let FrameLayers { mut parameters, mut layer_render_items, start_time } = frame_layers;
 
         // The buckets whose vertex data the frame's feature state and symbol
         // placement change, which the draws that copied it copy again.
         let mut changed_buckets = ChangedBuckets::default();
+        self.prepare_sources(&frame, &mut changed_buckets);
+        let placed = self.update_layer_tiles(&mut frame);
 
-        // The sources whose tiles a layer of the frame draws in
-        // `TileOrder::ByY`.
-        let mut sorted_by_y: SmallVec<[&str; 4]> = SmallVec::new();
-        for (&index, render_item) in &layer_render_items {
-            if let Some(source) = render_item.source.as_deref()
-                && self.layers[index as usize].tile_order() == TileOrder::ByY
-                && !sorted_by_y.contains(&source)
-            {
-                sorted_by_y.push(source);
-            }
-        }
+        frame.symbols_started = Instant::now();
+        let update_symbol_opacities = self.place_symbols(update_parameters, &placed.leaders, &mut frame);
 
-        // Update all matrices and generate data that we should upload to the
-        // GPU.
-        for (name, render_source) in &mut self.render_sources {
-            if render_source.is_enabled() {
-                // layers: feature state
-                if let Some((tiles, _)) = render_source.tiles().and_then(|key| self.tile_store.source_mut(key)) {
-                    tiles.coalesce_feature_state(&mut changed_buckets);
-                }
-                render_source.prepare(
-                    &mut self.tile_store,
-                    &SourcePrepareParameters {
-                        transform: &parameters.transform_params,
-                        debug_options: update_parameters.debug_options,
-                        source_name: name.clone(),
-                        sort_by_y: sorted_by_y.contains(&name.as_str()),
-                    },
-                );
-            } else {
-                render_source.release_render_data();
-            }
-        }
-        drop(sorted_by_y);
-
-        let mut layers_need_placement: Vec<usize> = Vec::new();
-        let mut layers_following_placement: Vec<usize> = Vec::new();
-        let mut opaque_pass_cut_off_estimation = layer_render_items.len();
-        let mut contents = SourceContents::default();
-        for (&index, render_item) in &mut layer_render_items {
-            let index = index as usize;
-            let render_layer = &mut self.layers[index];
-            let source = render_item.source.as_ref().and_then(|id| self.render_sources.get_key_value(id));
-            let source = source.map(|(id, source)| (id.as_str(), &**source));
-            let source_contents = contents.of(source, &self.tile_store);
-            let source = source.map(|(_, source)| source);
-            render_item.tile_order = render_layer.prepare(&LayerPrepareParameters {
-                source,
-                contents: source_contents,
-                images: self.tile_store.images(), // conformance
-                pattern_atlas: &self.pattern_atlas,
-                line_atlas: &self.line_atlas,
-            });
-            if render_layer.needs_placement() {
-                layers_need_placement.push(index);
-            }
-            if !render_layer.get_follower_data().is_empty() {
-                layers_following_placement.push(index);
-            }
-            if parameters.opaque_pass_cut_off == 0 {
-                opaque_pass_cut_off_estimation -= 1;
-                if render_layer.is_3d() {
-                    parameters.opaque_pass_cut_off = opaque_pass_cut_off_estimation as u32;
-                }
-            }
-        }
-
-        let symbols_start = Instant::now();
-        let update_symbol_opacities = self.place_symbols(update_parameters, &layers_need_placement, &mut parameters);
-
-        if !parameters.needs_repaint && parameters.loaded {
+        if !frame.needs_repaint && frame.loaded {
             // Ask the app to remove the unused images it added once the map
             // is fully loaded and there are no ongoing transitions.
             if self.tile_store.images().exceeds_cache_size_limit() {
@@ -482,19 +404,19 @@ impl RenderOrchestrator {
         // The symbol buckets of the layers that need placement, then the
         // positions of the layers that draw buckets other layers place.
         let placement = self.placement_controller.get_placement();
-        for &index in layers_need_placement.iter().rev() {
+        for &index in placed.leaders.iter().rev() {
             placement.update_layer_buckets(
                 &*self.layers[index],
-                &parameters.transform_params.state,
+                &frame.transform.state,
                 update_symbol_opacities,
                 &mut changed_buckets,
                 &mut self.tile_store,
             );
         }
-        for &index in &layers_following_placement {
+        for &index in &placed.followers {
             placement.update_follower_buckets(
                 &*self.layers[index],
-                &parameters.transform_params.state,
+                &frame.transform.state,
                 &mut changed_buckets,
                 &mut self.tile_store,
             );
@@ -505,7 +427,80 @@ impl RenderOrchestrator {
             }
         }
 
-        RenderTree::new(parameters, layer_render_items, start_time, symbols_start)
+        Some(frame)
+    }
+
+    /// Brings the feature state of the enabled sources' tiles to the
+    /// sources', recording the buckets it changes in `changed_buckets`, and
+    /// computes their tiles' matrices for the frame. A source that a layer
+    /// of the frame draws in [`TileOrder::ByY`] sorts its tiles so.
+    fn prepare_sources(&mut self, frame: &Frame, changed_buckets: &mut ChangedBuckets) {
+        let mut sorted_by_y: SmallVec<[&str; 4]> = SmallVec::new();
+        for (&index, frame_layer) in &frame.layers {
+            if let Some(source) = frame_layer.source.as_deref()
+                && self.layers[index as usize].tile_order() == TileOrder::ByY
+                && !sorted_by_y.contains(&source)
+            {
+                sorted_by_y.push(source);
+            }
+        }
+
+        for (name, render_source) in &mut self.render_sources {
+            if render_source.is_enabled() {
+                // layers: feature state
+                if let Some((tiles, _)) = render_source.tiles().and_then(|key| self.tile_store.source_mut(key)) {
+                    tiles.coalesce_feature_state(changed_buckets);
+                }
+                render_source.prepare(
+                    &mut self.tile_store,
+                    &SourcePrepareParameters {
+                        transform: &frame.transform,
+                        debug_options: frame.debug_options,
+                        source_name: name.clone(),
+                        sort_by_y: sorted_by_y.contains(&name.as_str()),
+                    },
+                );
+            } else {
+                render_source.release_render_data();
+            }
+        }
+    }
+
+    /// Gives each layer of the frame its tiles, in the order it draws them,
+    /// and sets the frame's opaque pass cutoff. Returns the layers that
+    /// place symbols and those that draw symbols another layer places.
+    fn update_layer_tiles(&mut self, frame: &mut Frame) -> PlacementLayers {
+        let mut placed = PlacementLayers::default();
+        let mut opaque_pass_cutoff_estimation = frame.layers.len();
+        let mut contents = SourceContents::default();
+        for (&index, frame_layer) in &mut frame.layers {
+            let index = index as usize;
+            let render_layer = &mut self.layers[index];
+            let source = frame_layer.source.as_ref().and_then(|id| self.render_sources.get_key_value(id));
+            let source = source.map(|(id, source)| (id.as_str(), &**source));
+            let source_contents = contents.of(source, &self.tile_store);
+            let source = source.map(|(_, source)| source);
+            frame_layer.tile_order = render_layer.prepare(&LayerPrepareParameters {
+                source,
+                contents: source_contents,
+                images: self.tile_store.images(),
+                pattern_atlas: &self.pattern_atlas,
+                line_atlas: &self.line_atlas,
+            });
+            if render_layer.needs_placement() {
+                placed.leaders.push(index);
+            }
+            if !render_layer.get_follower_data().is_empty() {
+                placed.followers.push(index);
+            }
+            if frame.opaque_pass_cutoff == 0 {
+                opaque_pass_cutoff_estimation -= 1;
+                if render_layer.is_3d() {
+                    frame.opaque_pass_cutoff = opaque_pass_cutoff_estimation as u32;
+                }
+            }
+        }
+        placed
     }
 
     /// Advances the zoom history and the global state to the update's, and
@@ -803,10 +798,9 @@ impl RenderOrchestrator {
         }
     }
 
-    /// Chooses the layers the frame draws, and updates each source's tiles
-    /// for the layers it has: whether it needs tiles at all, and whether
-    /// they lay out again. Returns the frame's layers by their index in
-    /// `ordered_layers`, and whether each ordered layer draws.
+    /// Chooses the layers the frame draws, into `frame`, and updates each
+    /// source's tiles for the layers it has: whether it needs tiles at all,
+    /// and whether they lay out again. Returns whether each layer draws.
     fn update_sources(
         &mut self,
         update_parameters: &UpdateParameters,
@@ -814,8 +808,8 @@ impl RenderOrchestrator {
         layer_changes: &LayerChanges,
         constants_mask_changed: &VecSet<String>,
         clock: &FrameClock,
-        parameters: &mut RenderTreeParameters,
-    ) -> (VecMap<u32, LayerRenderItem>, Vec<bool>) {
+        frame: &mut Frame,
+    ) -> Vec<bool> {
         let mut tile_parameters = TileParameters {
             pixel_ratio: update_parameters.pixel_ratio,
             debug_options: update_parameters.debug_options,
@@ -834,15 +828,12 @@ impl RenderOrchestrator {
             font_faces: update_parameters.style.get_font_faces().cloned(),
         };
 
-        let mut layer_render_items: VecMap<u32, LayerRenderItem> = VecMap::new();
-
         // Reserve size for filteredLayersForSource if there are sources.
         if !self.sources_by_id.is_empty() {
             self.filtered_layers_for_source.reserve(layers.len());
         }
 
-        // Track which layers are flagged for rendering
-        let mut update_list: Vec<bool> = vec![false; self.layers.len()];
+        let mut will_render: Vec<bool> = vec![false; self.layers.len()];
 
         // Update all sources and initialize renderItems.
         //
@@ -867,7 +858,7 @@ impl RenderOrchestrator {
             for (index, layer) in self.layers.iter().enumerate() {
                 let style = &layer.base().style;
                 let layer_info = style.info();
-                parameters.has_3d |= layer_info.pass_3d;
+                frame.has_3d |= layer_info.pass_3d;
 
                 if layer_info.source != SourceKind::None {
                     // Every source's pass sees every layer, so the cheap
@@ -910,10 +901,11 @@ impl RenderOrchestrator {
                             if zoom_fits_layer {
                                 source_needs_rendering = true;
                                 let source_id = style_source.id().to_owned();
-                                layer_render_items
+                                frame
+                                    .layers
                                     .entry(index as u32)
-                                    .or_insert_with(|| LayerRenderItem { source: Some(source_id), tile_order: None });
-                                update_list[index] = true;
+                                    .or_insert_with(|| FrameLayer { source: Some(source_id), tile_order: None });
+                                will_render[index] = true;
                             }
                         }
                     }
@@ -929,21 +921,19 @@ impl RenderOrchestrator {
                     // On the globe the background is a sphere mesh, not the
                     // backdrop, so it stays a layer.
                     if self.background_layer_as_color
-                        && parameters.sky.is_none()
+                        && frame.sky.is_none()
                         && !update_parameters.transform_state.is_globe_rendering()
                         && layers.first().is_some_and(|first| Arc::ptr_eq(style, first.style()))
                     {
                         let solid_background = layer.get_solid_background();
                         if let Some(solid_background) = solid_background {
-                            parameters.background_color = solid_background;
+                            frame.background_color = solid_background;
                             continue; // This layer is shown with background color,
                             // and it shall not be added to render items.
                         }
                     }
-                    layer_render_items
-                        .entry(index as u32)
-                        .or_insert_with(|| LayerRenderItem { source: None, tile_order: None });
-                    update_list[index] = true;
+                    frame.layers.entry(index as u32).or_insert_with(|| FrameLayer { source: None, tile_order: None });
+                    will_render[index] = true;
                 }
             }
             if let Some(style_source) = &style_source {
@@ -965,7 +955,7 @@ impl RenderOrchestrator {
                 self.filtered_layers_for_source.clear();
             }
         }
-        (layer_render_items, update_list)
+        will_render
     }
 
     /// Places the frame's symbols: across tiles for a continuous map, when
@@ -976,7 +966,7 @@ impl RenderOrchestrator {
         &mut self,
         update_parameters: &Arc<UpdateParameters>,
         layers_need_placement: &[usize],
-        parameters: &mut RenderTreeParameters,
+        frame: &mut Frame,
     ) -> bool {
         let layers_need_placement: Vec<&dyn RenderLayer> =
             layers_need_placement.iter().map(|&index| &*self.layers[index]).collect();
@@ -1002,12 +992,12 @@ impl RenderOrchestrator {
 
         if continuous && layers_need_placement.is_empty() {
             // Discard deferred placement and query data when no symbol buckets remain.
-            parameters.placement_changed = self.placement_controller.reset();
+            frame.placement_changed = self.placement_controller.reset();
             self.cross_tile_symbol_index.reset();
             // Source fades still need their placement bookkeeping to advance.
             self.tile_store.update_fading_tiles();
-            parameters.symbol_fade_change = 1.0;
-            parameters.needs_repaint = self.has_transitions(update_parameters.time_point);
+            frame.symbol_fade_change = 1.0;
+            frame.needs_repaint = self.has_transitions(update_parameters.time_point);
         } else if continuous {
             let tilted_view = update_parameters.transform_state.get_pitch() != 0.0;
             let mut placement_update_period_override: Option<Duration> = None;
@@ -1025,13 +1015,13 @@ impl RenderOrchestrator {
                 placement_update_period_override = Some(Duration::from_millis(30));
             }
 
-            parameters.placement_changed = !self.placement_controller.placement_is_recent(
+            frame.placement_changed = !self.placement_controller.placement_is_recent(
                 update_parameters.time_point,
                 update_parameters.transform_state.get_zoom() as f32,
                 placement_update_period_override,
             );
-            symbol_buckets_changed |= parameters.placement_changed;
-            if parameters.placement_changed {
+            symbol_buckets_changed |= frame.placement_changed;
+            if frame.placement_changed {
                 let prev = self.placement_controller.take_placement();
                 let mut placement = Placement::create(Arc::clone(update_parameters), Some(prev));
                 placement.place(&layers_need_placement, &mut self.tile_store);
@@ -1041,21 +1031,21 @@ impl RenderOrchestrator {
             } else {
                 self.placement_controller.set_placement_stale();
             }
-            parameters.symbol_fade_change =
+            frame.symbol_fade_change =
                 self.placement_controller.get_placement().symbol_fade_change(update_parameters.time_point);
-            parameters.needs_repaint = self.has_transitions(update_parameters.time_point);
+            frame.needs_repaint = self.has_transitions(update_parameters.time_point);
         } else {
-            parameters.placement_changed = !layers_need_placement.is_empty();
-            symbol_buckets_changed = parameters.placement_changed;
-            if parameters.placement_changed {
+            frame.placement_changed = !layers_need_placement.is_empty();
+            symbol_buckets_changed = frame.placement_changed;
+            if frame.placement_changed {
                 let mut placement = Placement::create(Arc::clone(update_parameters), None);
                 placement.collect_placed_symbol_data(self.placed_symbol_data_collected);
                 placement.place(&layers_need_placement, &mut self.tile_store);
                 self.placement_controller.set_placement(placement);
             }
             self.cross_tile_symbol_index.reset();
-            parameters.symbol_fade_change = 1.0;
-            parameters.needs_repaint = false;
+            frame.symbol_fade_change = 1.0;
+            frame.needs_repaint = false;
         }
         symbol_buckets_changed
     }
@@ -1256,21 +1246,21 @@ impl RenderOrchestrator {
 
     /// Makes the draws of the layers the frame draws, and of the sky and
     /// globe depth passes.
-    pub(crate) fn update_layers(
+    pub(crate) fn update_layer_draws(
         &mut self,
         update_parameters: &UpdateParameters,
         paint_parameters: &PaintParameters<'_>,
-        render_tree: &RenderTree,
+        frame: &Frame,
     ) {
         let mut has_3d = false;
         let mut contents = SourceContents::default();
-        for (&index, render_item) in render_tree.get_layer_render_item_map() {
+        for (&index, frame_layer) in &frame.layers {
             let render_layer = &mut self.layers[index as usize];
-            let source = render_item.source.as_ref().and_then(|id| self.render_sources.get_key_value(id));
+            let source = frame_layer.source.as_ref().and_then(|id| self.render_sources.get_key_value(id));
             let source = source.map(|(id, source)| (id.as_str(), &**source));
             let source_contents = contents.of(source, &self.tile_store);
             let layer_source = source.and_then(|(_, source)| {
-                match render_item.tile_order.and_then(|order| source.tile_order(order)) {
+                match frame_layer.tile_order.and_then(|order| source.tile_order(order)) {
                     Some(order) => {
                         Some(LayerSource::Tiles(LayerTiles::new(source.render_tiles(), source_contents, order)))
                     }
@@ -1283,15 +1273,14 @@ impl RenderOrchestrator {
         let shaders = &paint_parameters.static_data.shaders;
         let (context, state) = (paint_parameters.context, paint_parameters.state);
 
-        let tree_parameters = render_tree.get_parameters();
         self.sky_pass.update(
             shaders,
             context,
             state,
             paint_parameters.renderable_size,
             paint_parameters.pixel_ratio,
-            tree_parameters.sky.as_ref(),
-            &tree_parameters.light,
+            frame.sky.as_ref(),
+            &frame.light,
         );
         self.globe_depth_pass.update(
             shaders,
