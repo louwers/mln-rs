@@ -88,13 +88,13 @@ pub(crate) fn sum_within_range(stretches: &ImageStretches, min: f32, max: f32) -
 
 #[inline]
 #[must_use]
-pub(crate) fn get_em_offset(stretch_offset: f32, stretch_size: f32, icon_size: f32, icon_offset: f32) -> f32 {
+fn em_offset(stretch_offset: f32, stretch_size: f32, icon_size: f32, icon_offset: f32) -> f32 {
     icon_offset + icon_size * stretch_offset / stretch_size
 }
 
 #[inline]
 #[must_use]
-pub(crate) fn get_px_offset(fixed_offset: f32, fixed_size: f32, stretch_offset: f32, stretch_size: f32) -> f32 {
+fn px_offset(fixed_offset: f32, fixed_size: f32, stretch_offset: f32, stretch_size: f32) -> f32 {
     fixed_offset - fixed_size * stretch_offset / stretch_size
 }
 
@@ -191,18 +191,17 @@ pub(crate) fn icon_quads(
     let icon_height = icon.bottom() - icon_top;
 
     let mut make_box = |left: Cut, top: Cut, right: Cut, bottom: Cut| {
-        let left_em = get_em_offset(left.stretch - stretch_offset_x, stretch_content_width, icon_width, icon_left);
-        let left_px = get_px_offset(left.fixed - fixed_offset_x, fixed_content_width, left.stretch, stretch_width);
+        let left_em = em_offset(left.stretch - stretch_offset_x, stretch_content_width, icon_width, icon_left);
+        let left_px = px_offset(left.fixed - fixed_offset_x, fixed_content_width, left.stretch, stretch_width);
 
-        let top_em = get_em_offset(top.stretch - stretch_offset_y, stretch_content_height, icon_height, icon_top);
-        let top_px = get_px_offset(top.fixed - fixed_offset_y, fixed_content_height, top.stretch, stretch_height);
+        let top_em = em_offset(top.stretch - stretch_offset_y, stretch_content_height, icon_height, icon_top);
+        let top_px = px_offset(top.fixed - fixed_offset_y, fixed_content_height, top.stretch, stretch_height);
 
-        let right_em = get_em_offset(right.stretch - stretch_offset_x, stretch_content_width, icon_width, icon_left);
-        let right_px = get_px_offset(right.fixed - fixed_offset_x, fixed_content_width, right.stretch, stretch_width);
+        let right_em = em_offset(right.stretch - stretch_offset_x, stretch_content_width, icon_width, icon_left);
+        let right_px = px_offset(right.fixed - fixed_offset_x, fixed_content_width, right.stretch, stretch_width);
 
-        let bottom_em = get_em_offset(bottom.stretch - stretch_offset_y, stretch_content_height, icon_height, icon_top);
-        let bottom_px =
-            get_px_offset(bottom.fixed - fixed_offset_y, fixed_content_height, bottom.stretch, stretch_height);
+        let bottom_em = em_offset(bottom.stretch - stretch_offset_y, stretch_content_height, icon_height, icon_top);
+        let bottom_px = px_offset(bottom.fixed - fixed_offset_y, fixed_content_height, bottom.stretch, stretch_height);
 
         let mut tl = Vec2::new(left_em, top_em);
         let mut tr = Vec2::new(right_em, top_em);
@@ -490,7 +489,7 @@ mod tests {
     // keep its center aligned with the 1x quad.
     // gtest: getGlyphQuads.DoubleResolutionGlyphPreservesLogicalQuadSize
     #[test]
-    fn get_glyph_quads_double_resolution_glyph_preserves_logical_quad_size() {
+    fn glyph_quads_double_resolution_glyph_preserves_logical_quad_size() {
         let metrics1x =
             GlyphMetrics { width: 24, height: 24, left: 0.0, top: -8.0, advance: 24, is_double_resolution: false };
 
@@ -540,7 +539,7 @@ mod tests {
 
     // gtest: getIconQuads.normal
     #[test]
-    fn get_icon_quads_normal() {
+    fn icon_quads_normal() {
         let _layout = SymbolLayoutProperties::Values::default();
         let _anchor = Anchor::new(2.0, 3.0, 0.0, Some(0));
         let image = ImagePosition::new(rect(0, 0, 15, 11), &test_image_impl());
@@ -576,7 +575,7 @@ mod tests {
 
     // gtest: getIconQuads.style
     #[test]
-    fn get_icon_quads_style() {
+    fn icon_quads_style() {
         let _anchor = Anchor::new(0.0, 0.0, 0.0, Some(0));
         let image = ImagePosition::new(rect(0, 0, 20, 20), &test_image_impl());
 
