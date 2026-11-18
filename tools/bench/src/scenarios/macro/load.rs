@@ -119,6 +119,9 @@ fn runtime(bench: &mut Bench) {
     let device = {
         let frontend = Frontend::new(Size::new(1, 1));
         bench.gpu = Some(frontend.gpu());
+        // The image is done when the runtime's thread has drawn it, before
+        // the GPU has, and nothing waits for the GPU inside the part.
+        bench.gpu_untimed = true;
         frontend.device()
     };
     let options =

@@ -116,6 +116,10 @@ pub(crate) struct Bench {
     /// parts did ([`Bench::per`]).
     per: Option<(String, u64)>,
     pub(crate) gpu: Option<Gpu>,
+    /// Whether the GPU's time of the measured parts goes unreported: where
+    /// the GPU finishes their frames after them, out of the scenario's
+    /// sight, such as on a runtime's thread, which no part waits for.
+    pub(crate) gpu_untimed: bool,
     /// The hash of the fixture manifest the scenario read, which
     /// `support::fixtures::Fixtures::open` sets.
     pub(crate) fixtures: Option<String>,
@@ -221,7 +225,7 @@ impl Bench {
     }
 
     /// The standard metrics, then the scenario's own.
-    pub(crate) fn finish(self) -> Vec<Metric> {
+    pub(crate) fn finish(mut self) -> Vec<Metric> {
         assert!(self.baseline.is_some(), "the scenario measured nothing");
         let count =
             |name: &str, unit, value: f64| Metric { name: name.to_owned(), kind: MetricKind::Count, unit, value };
@@ -236,6 +240,11 @@ impl Bench {
         let time = |name: &str, value| Metric { name: name.to_owned(), kind: MetricKind::Time, unit: Unit::Ms, value };
         metrics.push(time("wall", ms(self.wall)));
         metrics.push(time("cpu", ms(self.cpu)));
+        if self.gpu_untimed {
+            for part in &mut self.parts {
+                part.gpu = None;
+            }
+        }
         if self.parts.iter().any(|part| part.gpu.is_some()) {
             metrics.push(time("gpu", ms(self.parts.iter().filter_map(|part| part.gpu).sum())));
         }

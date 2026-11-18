@@ -257,9 +257,10 @@ Metal, and the Vulkan and OpenGL backends (`GL_TIME_ELAPSED`, or
 GPU, where `instructions` don't, and a frame's `wall` time, mostly the CPU's
 work in these scenarios, may not show it. On lavapipe it is the time the
 rasterizer took. There is no `gpu` where the device lacks the queries, on OpenGL
-on llvmpipe, whose times don't add up to the drawing it does, and on a commit
-from before the libraries timed the passes. They time them only in a benchmark's
-process (see
+on llvmpipe, whose times don't add up to the drawing it does, in
+`macro/load/runtime`, whose frames the GPU finishes out of the scenario's sight,
+and on a commit from before the libraries timed the passes. They time them only
+in a benchmark's process (see
 [Reaching a library's internal stages](#reaching-a-librarys-internal-stages)).
 
 A scenario adds its own counts and times, such as `frames`, `frames_incomplete`
@@ -415,8 +416,9 @@ and `bytes` declare the scenario's own metrics, and `per` the unit of work it
 repeats, or `per_part` that each measured part is one unit, which adds how the
 units spread. A macro scenario sets `bench.gpu` to the device it drew on, and
 writes its last image to `bench.image` when that is set, outside its measured
-parts. What more than one scenario uses goes in `src/support/`: the headless map
-(`support::map`), the fixtures (`support::fixtures`) and seeded data
+parts; it sets `bench.gpu_untimed` if no part waits for the GPU to finish its
+frames. What more than one scenario uses goes in `src/support/`: the headless
+map (`support::map`), the fixtures (`support::fixtures`) and seeded data
 (`support::random`); what more than one micro scenario uses, such as the tiles
 they read, in `src/scenarios/micro/`.
 
