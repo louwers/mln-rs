@@ -462,7 +462,7 @@ impl D3d12Gpu {
             waits: Vec::new(),
             signals: Vec::new(),
             #[cfg(feature = "bench")]
-            timer: crate::bench::Timer::new(device.queue()),
+            timer: crate::bench::Timer::new(device.device(), device.queue()),
             texture_waits: HashMap::default(),
             memory: Memory::new(d3d)?,
             device: device.clone(),

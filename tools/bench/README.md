@@ -289,7 +289,10 @@ and by a few percent, up to ten, in some. That is real, the binary runs those
 instructions, but it doesn't come from what the edit does. Counts that depend on
 how several threads interleave, such as every count of `macro/load/runtime`,
 move by more. Times depend on the machine and its load; `gpu` on the GPU's
-clocks too, which it raises and lowers with its load.
+clocks too, which it raises and lowers with its load. On the D3D12 backend,
+`MLN_D3D12_STABLE_POWER=1` holds them steady (`SetStablePowerState`), which
+slows the GPU but keeps its times within a few percent between runs; it needs
+Windows' developer mode, without which D3D12 removes the device.
 
 ## Comparing
 

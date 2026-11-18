@@ -9,6 +9,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use mln_util::logging::{Event, Log};
 use parking_lot::Mutex;
 use windows::Win32::Graphics::Direct3D12::{
     D3D12_HEAP_FLAG_NONE, D3D12_HEAP_PROPERTIES, D3D12_HEAP_TYPE_READBACK, D3D12_QUERY_HEAP_DESC,
@@ -71,11 +72,22 @@ pub(crate) struct Timer {
 }
 
 impl Timer {
-    /// The timer of a backend on `queue`, if the process measures and the
-    /// queue has a timestamp frequency.
-    pub(crate) fn new(queue: &ID3D12CommandQueue) -> Option<Timer> {
+    /// The timer of a backend on `device` and its `queue`, if the process
+    /// measures and the queue has a timestamp frequency.
+    ///
+    /// With `MLN_D3D12_STABLE_POWER=1`, it holds the GPU's clocks steady
+    /// while the device lives, so that its times don't move as the GPU
+    /// raises and lowers its clocks between runs. That needs Windows'
+    /// developer mode, without which D3D12 removes the device.
+    pub(crate) fn new(device: &ID3D12Device, queue: &ID3D12CommandQueue) -> Option<Timer> {
         if !COUNTING.load(Ordering::Relaxed) {
             return None;
+        }
+        if std::env::var("MLN_D3D12_STABLE_POWER").as_deref() == Ok("1") {
+            // SAFETY: a plain call.
+            if let Err(error) = unsafe { device.SetStablePowerState(true) } {
+                Log::error(Event::Render, format!("D3D12 can't hold the GPU's clocks steady: {error}"));
+            }
         }
         // SAFETY: a plain query.
         let frequency = unsafe { queue.GetTimestampFrequency() }.ok()?;
