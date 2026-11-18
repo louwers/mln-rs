@@ -34,19 +34,24 @@ use crate::paint_property_binder::InterleavedVertexBuffer;
 /// A bucket's vertices or indices. The worker fills it through `get_mut`;
 /// the render thread can move the data out (`BucketGeometry`), after which
 /// `len` still counts it.
+#[derive(Clone, Debug)]
 pub(crate) struct GeometryVec<T> {
-    v: Vec<T>,
-    /// The data while it is still in the JS array it arrived in; `v` is
-    /// empty then.
-    #[cfg(target_family = "wasm")]
-    host: Option<HostBytes>,
+    data: Data<T>,
     /// What `BucketGeometry` keeps the vector's stored geometry under. A
     /// copy keeps it, so the stored geometry of either serves both.
     key: SimpleIdentity,
-    /// The element count of the data moved out.
-    moved: usize,
-    /// Whether the data moved out.
-    taken: bool,
+}
+
+/// Where a [`GeometryVec`]'s data is.
+#[derive(Clone, Debug)]
+enum Data<T> {
+    /// In memory.
+    Vec(Vec<T>),
+    /// In the JS array it arrived in.
+    #[cfg(target_family = "wasm")]
+    Host(HostBytes),
+    /// Moved out, `len` elements of it.
+    Moved { len: usize },
 }
 
 impl<T> Default for GeometryVec<T> {
@@ -58,14 +63,11 @@ impl<T> Default for GeometryVec<T> {
 impl<T> GeometryVec<T> {
     #[must_use]
     pub(crate) fn new(v: Vec<T>) -> Self {
-        GeometryVec {
-            v,
-            #[cfg(target_family = "wasm")]
-            host: None,
-            key: SimpleIdentity::new(),
-            moved: 0,
-            taken: false,
-        }
+        GeometryVec::of(Data::Vec(v))
+    }
+
+    fn of(data: Data<T>) -> Self {
+        GeometryVec { data, key: SimpleIdentity::new() }
     }
 
     /// The data, to fill. Not after it is moved out.
@@ -74,20 +76,17 @@ impl<T> GeometryVec<T> {
         T: bytemuck::Pod,
     {
         debug_assert!(!self.is_moved(), "geometry modified after it moved to the render thread");
-        #[cfg(target_family = "wasm")]
-        if let Some(bytes) = self.host.take() {
-            self.v = bytes.to_pod_vec();
-        }
-        &mut self.v
+        self.data.vec_mut()
     }
 
     /// The element count, which stays when the data is moved out.
     pub(crate) fn len(&self) -> usize {
-        #[cfg(target_family = "wasm")]
-        if let Some(bytes) = &self.host {
-            return bytes.len() / size_of::<T>() + self.moved;
+        match &self.data {
+            Data::Vec(v) => v.len(),
+            #[cfg(target_family = "wasm")]
+            Data::Host(bytes) => bytes.len() / size_of::<T>(),
+            Data::Moved { len } => *len,
         }
-        self.v.len() + self.moved
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -96,7 +95,7 @@ impl<T> GeometryVec<T> {
 
     /// True once the data has moved to the context's store.
     pub(crate) fn is_moved(&self) -> bool {
-        self.taken
+        matches!(self.data, Data::Moved { .. })
     }
 
     /// The data, empty once it is moved out.
@@ -104,88 +103,77 @@ impl<T> GeometryVec<T> {
     where
         T: bytemuck::Pod,
     {
-        #[cfg(target_family = "wasm")]
-        if let Some(bytes) = &self.host {
-            return Cow::Owned(bytes.to_pod_vec());
+        self.data.data()
+    }
+
+    /// The data, moved out, leaving its count.
+    fn take(&mut self) -> Data<T> {
+        let len = self.len();
+        std::mem::replace(&mut self.data, Data::Moved { len })
+    }
+}
+
+impl<T: bytemuck::Pod> Data<T> {
+    /// The data, empty once it is moved out.
+    fn data(&self) -> Cow<'_, [T]> {
+        match self {
+            Data::Vec(v) => Cow::Borrowed(v),
+            #[cfg(target_family = "wasm")]
+            Data::Host(bytes) => Cow::Owned(bytes.to_pod_vec()),
+            Data::Moved { .. } => Cow::Borrowed(&[]),
         }
-        Cow::Borrowed(&self.v)
+    }
+
+    /// The data's vector, which replaces the data where it isn't in memory:
+    /// a copy of the JS array's, or an empty one where it moved out.
+    fn vec_mut(&mut self) -> &mut Vec<T> {
+        match self {
+            Data::Vec(v) => v,
+            #[cfg(target_family = "wasm")]
+            host @ Data::Host(_) => {
+                *host = Data::Vec(host.data().into_owned());
+                host.vec_mut()
+            }
+            moved @ Data::Moved { .. } => {
+                *moved = Data::Vec(Vec::new());
+                moved.vec_mut()
+            }
+        }
     }
 }
 
 impl<T: bytemuck::Pod> GeometryVec<T> {
-    /// The data, moved out.
-    fn take(&mut self) -> Vec<T> {
-        let data = std::mem::take(&mut self.v);
-        self.moved += data.len();
-        self.taken = true;
-        data
-    }
-
-    /// The data, moved out if it is still in the JS array it arrived in.
-    #[cfg(target_family = "wasm")]
-    fn take_host(&mut self) -> Option<HostBytes> {
-        let bytes = self.host.take()?;
-        self.moved += bytes.len() / size_of::<T>();
-        self.taken = true;
-        Some(bytes)
-    }
-
     /// Frees the data, which nothing will draw. `len` still counts it.
     pub(crate) fn discard(&mut self) {
-        #[cfg(target_family = "wasm")]
-        if self.take_host().is_some() {
-            return;
-        }
-        drop(self.take());
+        self.take();
     }
 
     /// The data, moved out into `context`'s store.
     fn store_vertices(&mut self, context: &mut Context) -> SharedVertices {
-        #[cfg(target_family = "wasm")]
-        if let Some(bytes) = self.take_host() {
-            return context.add_host_vertices::<T>(bytes);
+        match self.take() {
+            Data::Vec(v) => context.add_vertices(v).into_shared(),
+            #[cfg(target_family = "wasm")]
+            Data::Host(bytes) => context.add_host_vertices::<T>(bytes),
+            Data::Moved { .. } => context.add_vertices(Vec::<T>::new()).into_shared(),
         }
-        context.add_vertices(self.take()).into_shared()
     }
 }
 
 impl GeometryVec<u16> {
     /// Indexes of the data, moved out.
     fn indexes(&mut self) -> Indexes {
-        #[cfg(target_family = "wasm")]
-        if let Some(bytes) = self.take_host() {
-            return Indexes::from_host(bytes);
-        }
-        Indexes::new(self.take())
-    }
-}
-
-impl<T: Clone> Clone for GeometryVec<T> {
-    fn clone(&self) -> Self {
-        GeometryVec {
-            v: self.v.clone(),
+        match self.take() {
+            Data::Vec(v) => Indexes::new(v),
             #[cfg(target_family = "wasm")]
-            host: self.host.clone(),
-            key: self.key,
-            moved: self.moved,
-            taken: self.taken,
+            Data::Host(bytes) => Indexes::from_host(bytes),
+            Data::Moved { .. } => Indexes::new(Vec::new()),
         }
     }
 }
 
 impl<T: bytemuck::Pod + PartialEq> PartialEq for GeometryVec<T> {
     fn eq(&self, other: &Self) -> bool {
-        self.moved == other.moved && self.taken == other.taken && self.data() == other.data()
-    }
-}
-
-impl<T: std::fmt::Debug> std::fmt::Debug for GeometryVec<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut f = f.debug_struct("GeometryVec");
-        f.field("v", &self.v);
-        #[cfg(target_family = "wasm")]
-        f.field("host", &self.host);
-        f.field("key", &self.key).field("moved", &self.moved).field("taken", &self.taken).finish()
+        self.is_moved() == other.is_moved() && self.len() == other.len() && self.data() == other.data()
     }
 }
 
@@ -208,7 +196,7 @@ impl<T: bytemuck::Pod> mln_wire::Wire for GeometryVec<T> {
         Some(match pod::read_payload::<T>(r)? {
             Payload::Bytes(bytes) => GeometryVec::new(bytemuck::pod_collect_to_vec(&bytes)),
             #[cfg(target_family = "wasm")]
-            Payload::Host(bytes) => GeometryVec { host: Some(bytes), ..GeometryVec::default() },
+            Payload::Host(bytes) => GeometryVec::of(Data::Host(bytes)),
         })
     }
 }
@@ -250,7 +238,7 @@ impl<T> Default for Kept<T> {
     }
 }
 
-impl<T: Clone> Kept<T> {
+impl<T> Kept<T> {
     fn get(&self, key: SimpleIdentity) -> Option<&T> {
         let at = self.0.binary_search_by_key(&key, |(key, _)| *key).ok()?;
         self.0.get(at).map(|(_, value)| value)
@@ -271,7 +259,7 @@ impl<T: Clone> Kept<T> {
     /// `others`' where it has none.
     fn has_or_takes<'a>(&mut self, key: SimpleIdentity, mut others: impl Iterator<Item = &'a Kept<T>>) -> bool
     where
-        T: 'a,
+        T: Clone + 'a,
     {
         if self.get(key).is_some() {
             return true;
