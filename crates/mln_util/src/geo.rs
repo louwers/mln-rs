@@ -225,15 +225,14 @@ impl LatLngBounds {
         LatLng::new_unchecked(self.north(), self.west())
     }
 
-    /// Panics if the longitude sum overflows to infinity (C++ constructs the
-    /// `LatLng` in a `noexcept` function, so it terminates).
     #[must_use]
     pub fn center(&self) -> LatLng {
         LatLng::new(
             f64::midpoint(self.sw.latitude(), self.ne.latitude()),
             f64::midpoint(self.sw.longitude(), self.ne.longitude()),
         )
-        .expect("LatLngBounds::center")
+        // `midpoint` of two valid coordinates can't overflow.
+        .expect("the midpoint of valid coordinates is valid")
     }
 
     #[must_use]
@@ -345,11 +344,8 @@ impl LatLngBounds {
 
         if wrap == WrapMode::Wrapped {
             let wrapped = LatLngBounds::from_corners(self.sw.wrapped(), self.ne.wrapped());
-            // LatLng(0.0, longitude).wrapped(): longitude is finite here
-            // (it compared above), except for NaN/inf inputs, which the C++
-            // constructor rejects by throwing in a noexcept function.
-            let longitude =
-                LatLng::new(0.0, longitude).expect("LatLngBounds::contains_longitude").wrapped().longitude();
+            // The callers pass a `LatLng`'s longitude, which is finite.
+            let longitude = LatLng::new(0.0, longitude).expect("a LatLng's longitude is valid").wrapped().longitude();
             if self.crosses_antimeridian() {
                 return (longitude >= -constants::LONGITUDE_MAX && longitude <= wrapped.east())
                     || (longitude >= wrapped.west() && longitude <= constants::LONGITUDE_MAX);
@@ -456,10 +452,9 @@ impl std::ops::AddAssign for EdgeInsets {
 
 impl std::ops::Add for EdgeInsets {
     type Output = EdgeInsets;
-    // C++ goes through the throwing constructor (NaN from inf + -inf).
-    fn add(self, o: EdgeInsets) -> EdgeInsets {
-        EdgeInsets::new(self.top + o.top, self.left + o.left, self.bottom + o.bottom, self.right + o.right)
-            .expect("EdgeInsets::operator+")
+    fn add(mut self, o: EdgeInsets) -> EdgeInsets {
+        self += o;
+        self
     }
 }
 

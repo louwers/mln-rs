@@ -20,7 +20,7 @@
 "crates/mln_renderer/src/text/collision_feature.rs" = 2
 "crates/mln_renderer/src/text/collision_index.rs" = 2
 "crates/mln_renderer/src/text/placement.rs" = 6
-"crates/mln_renderer/src/util/subdivision.rs" = 2
+"crates/mln_renderer/src/util/subdivision.rs" = 1
 "crates/mln_renderer/src/util/tile_cover.rs" = 2
 "crates/mln_renderer/src/util/tile_mesh.rs" = 1
 "crates/mln_sprite/src/sprite_parser.rs" = 1
@@ -29,7 +29,7 @@
 "crates/mln_storage/src/ureq_transport.rs" = 1
 "crates/mln_style/src/layers/heatmap_layer_properties.rs" = 1
 "crates/mln_text/src/harfbuzz_impl.rs" = 1
-"crates/mln_util/src/geo.rs" = 3
+"crates/mln_util/src/geo.rs" = 2
 "crates/mln_util/src/image.rs" = 1
 "crates/mln_util/src/projection.rs" = 2
 "crates/mln_vec_map/src/lib.rs" = 1

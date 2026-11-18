@@ -80,6 +80,8 @@ impl Subdivider {
     }
 
     fn vertex_to_index(&mut self, x: f64, y: f64) -> u32 {
+        // The inputs are `i16` tile coordinates, and every vertex made from
+        // them lies within the bounds of a triangle of them.
         if x < -32768.0 || y < -32768.0 || x > 32767.0 || y > 32767.0 {
             panic!("Vertex coordinates are out of signed 16 bit integer range.");
         }
@@ -666,7 +668,7 @@ pub(crate) fn fix_winding_order(vertices: &[i16], indices: &[u32]) -> Vec<u32> {
 /// from its leftmost vertex.
 pub(crate) fn scanline_triangulate_vertex_ring(vertices: &[i16], ring: &[u32], out_indices: &mut Vec<u32>) {
     if ring.is_empty() {
-        panic!("Subdivision vertex ring is empty.");
+        return;
     }
 
     let mut leftmost_index = 0;

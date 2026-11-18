@@ -308,8 +308,12 @@ const NO_CLUSTER: &str = "No cluster with the specified id.";
 
 impl Supercluster {
     /// `Supercluster(features, options)`; `Err` if a feature is not a point
-    /// (C++: `bad_variant_access` `"in get<T>()"`).
+    /// (C++: `bad_variant_access` `"in get<T>()"`), or if `min_zoom` is past
+    /// `max_zoom + 1`, which would leave zoom levels unbuilt.
     pub fn new(features: GeoJSONFeatures, options: Options) -> Result<Self, String> {
+        if u16::from(options.min_zoom) > u16::from(options.max_zoom) + 1 {
+            return Err("min_zoom must be at most max_zoom + 1".to_owned());
+        }
         let features = features
             .into_iter()
             .map(|f| Feature { geometry: f.geometry, properties: Arc::new(f.properties), id: f.id })
@@ -340,7 +344,7 @@ impl Supercluster {
     pub fn get_tile(&self, z: u8, x_: u32, y: u32) -> TileFeatures {
         let mut result = TileFeatures::new();
 
-        let zoom = self.zooms.get(&self.limit_zoom(z)).expect("zoom_iter != zooms.end()");
+        let zoom = self.zooms.get(&self.limit_zoom(z)).expect("new builds every zoom that limit_zoom returns");
 
         let z2 = 2.0f64.powf(f64::from(z)) as u32;
         let r = f64::from(self.options.radius) / f64::from(self.options.extent);

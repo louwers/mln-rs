@@ -211,3 +211,9 @@ fn test_generate_id() {
 
     assert_eq!(ids, vec![12, 20, 21, 22, 24, 28, 30, 62, 81, 118, 119, 125, 81, 118]);
 }
+
+#[test]
+fn min_zoom_past_max_zoom_is_an_error() {
+    let options = Options { min_zoom: 10, max_zoom: 5, ..Options::default() };
+    assert!(Supercluster::new(parse_features(), options).is_err());
+}
