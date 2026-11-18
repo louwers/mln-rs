@@ -111,12 +111,6 @@ csscolorparser = { version = "0.9.1" }
 flate2 = { version = "1.1.11", default-features = false, features = [
   "zlib-rs",
 ] }
-# examples/desktop: finds the system fonts it gives the map as fallback font
-# faces, and reads their names and coverage through short-lived maps.
-fontdb = { version = "0.24.0", default-features = false, features = [
-  "fs",
-  "memmap",
-] }
 # crates/mln_gl: OpenGL ES 3.0 and WebGL2 through one set of bindings.
 glow = { version = "0.17.0" }
 harfrust = { version = "0.15.0" }

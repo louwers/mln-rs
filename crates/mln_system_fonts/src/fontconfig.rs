@@ -1,6 +1,6 @@
 //! The fonts for a character from fontconfig, the font matcher of Linux and
-//! the BSDs, loaded at run time so that a system without it falls back to the
-//! scan of font files.
+//! the BSDs, loaded at run time so that a system without it finds no system
+//! fonts.
 //!
 //! fontconfig sorts the system's fonts against the family asked for (or
 //! `sans-serif`), the language, the weight and style, and the character,
@@ -163,9 +163,8 @@ impl Fontconfig {
                     } else {
                         String::new()
                     };
-                // Not a monospaced family unless asked for, as the scan
-                // does: fontconfig leaves the spacing of some (Noto Sans Mono
-                // CJK) unset.
+                // Not a monospaced family unless asked for: fontconfig leaves
+                // the spacing of some (Noto Sans Mono CJK) unset.
                 if (family.contains("Mono") && !monospaced) || candidates.iter().any(|(_, known)| *known == source) {
                     continue;
                 }

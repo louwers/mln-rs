@@ -25,6 +25,7 @@ use crate::sfnt::{self, Table};
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Source {
     /// Face `index` of the font file at `path`.
+    #[cfg_attr(target_vendor = "apple", expect(dead_code, reason = "CoreText's fonts come as tables"))]
     File { path: PathBuf, index: u32 },
     /// A font that CoreText holds.
     #[cfg(target_vendor = "apple")]
@@ -184,7 +185,7 @@ fn map(path: &Path) -> Option<Mmap> {
 
 #[cfg(test)]
 mod tests {
-    use super::{drawn_weight, near_regular};
+    use super::{drawn_weight, family_name, near_regular};
     use crate::sfnt::Table;
 
     fn os2(weight: u16) -> Table {
@@ -238,12 +239,31 @@ mod tests {
         assert_eq!(drawn_weight(&[cmap(), os2(400), fvar(700, 900)], 'A'), Some(700));
     }
 
+    /// A `name` table of Windows Unicode records of `names`, by name ID.
+    fn name(names: &[(u16, &str)]) -> Table {
+        let mut table = Vec::new();
+        let header_len = 6 + 12 * names.len();
+        for word in [0, names.len() as u16, header_len as u16] {
+            table.extend_from_slice(&word.to_be_bytes());
+        }
+        let mut strings = Vec::new();
+        for (id, text) in names {
+            let text: Vec<u8> = text.encode_utf16().flat_map(u16::to_be_bytes).collect();
+            for word in [3, 1, 0x409, *id, text.len() as u16, strings.len() as u16] {
+                table.extend_from_slice(&word.to_be_bytes());
+            }
+            strings.extend(text);
+        }
+        table.extend(strings);
+        (*b"name", table)
+    }
+
     #[test]
-    fn a_fonts_family_comes_from_its_name_table() {
-        let path = std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
-            .join("../mln_text/tests/fixtures/khmer.ttf");
-        let tables = crate::sfnt::read_tables(&path, 0, &[*b"name"]).unwrap();
-        assert_eq!(super::family_name(&tables).as_deref(), Some("Noto Sans Khmer"));
+    fn a_fonts_family_is_its_typographic_family_else_its_family() {
+        assert_eq!(family_name(&[name(&[(1, "Noto Serif"), (2, "Regular")])]).as_deref(), Some("Noto Serif"));
+        let both = name(&[(1, "Noto Sans Display SemiBold"), (16, "Noto Sans Display")]);
+        assert_eq!(family_name(&[both]).as_deref(), Some("Noto Sans Display"));
+        assert_eq!(family_name(&[name(&[(2, "Regular")])]), None);
     }
 
     #[test]

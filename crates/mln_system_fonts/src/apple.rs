@@ -177,7 +177,7 @@ mod tests {
     #[test]
     fn every_script_has_a_font_that_draws_it() {
         for script in SCRIPTS {
-            let languages = script.language.map(|language| vec![language.to_owned()]).unwrap_or_default();
+            let languages = [script.language.to_owned()];
             let found = candidates(&query(script.probe, &languages));
             println!("{:04X}: {:?}", u32::from(script.probe), found.first());
             let (_, source) = found.first().unwrap_or_else(|| panic!("no font for {:04X}", u32::from(script.probe)));

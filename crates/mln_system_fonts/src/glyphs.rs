@@ -125,7 +125,7 @@ pub(crate) fn named_fonts(name: &str, parsed: &FontName<'_>) -> Vec<(String, Sou
         weight: parsed.weight,
         italic: parsed.italic,
     };
-    let mut candidates = drawn(system().finder.lock().candidates(&query), ' ');
+    let mut candidates = drawn(system().candidates(&query), ' ');
     candidates.retain(|(family, ..)| family.eq_ignore_ascii_case(parsed.family));
     nearest(candidates, parsed.weight)
 }
@@ -144,7 +144,7 @@ pub(crate) fn picked_fonts(first: &FontName<'_>, c: char) -> Vec<(String, Source
         weight: first.weight,
         italic: first.italic,
     };
-    nearest(drawn(system.finder.lock().candidates(&query), c), first.weight)
+    nearest(drawn(system.candidates(&query), c), first.weight)
 }
 
 /// How many of a lookup's candidates to read.
