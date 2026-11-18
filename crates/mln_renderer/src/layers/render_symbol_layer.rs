@@ -4,7 +4,6 @@
 // attributes (opacity, dynamic positions, binders) and the triangle indices
 // of the tile's draws.
 
-use std::any::Any;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -365,14 +364,9 @@ fn set_placed_attribute<V: bytemuck::Pod>(
     vertices: &[V],
     type_: AttributeDataType,
 ) {
-    let updated = attribs
-        .get(id)
-        .and_then(|attr| attr.get_shared_raw_data())
-        .and_then(|shared| {
-            let any: &dyn Any = &**shared;
-            any.downcast_ref::<VertexVector<V>>()
-        })
-        .is_some_and(|shared| shared.update(vertices));
+    let updated = attribs.get(id).and_then(|attr| attr.get_shared_raw_data()).is_some_and(|shared| {
+        shared.get_raw_size() == size_of::<V>() && shared.update_raw(bytemuck::cast_slice(vertices))
+    });
     if updated {
         return;
     }

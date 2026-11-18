@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::cell::{Cell, Ref, RefCell};
 use std::rc::Rc;
 
@@ -37,7 +36,7 @@ impl Default for VertexVectorBaseData {
     }
 }
 
-pub trait VertexVectorBase: Any {
+pub trait VertexVectorBase {
     fn vertex_vector_base(&self) -> &VertexVectorBaseData;
     /// The raw bytes of all vertices (`getRawData()`, `getRawCount() * getRawSize()`
     /// bytes), empty once the CPU copy is freed after upload, or while the
@@ -56,6 +55,14 @@ pub trait VertexVectorBase: Any {
 
     /// Drop the CPU copy of the data. Vectors that keep their data leave it be.
     fn free_raw_data(&self) {}
+
+    /// Replaces the vertices with a copy of `data`, the bytes of as many
+    /// vertices of the vector's type as it holds, as
+    /// [`VertexVector::update`] does. Returns false, leaving the vector be,
+    /// for other bytes or a vector that never changes.
+    fn update_raw(&self, _data: &[u8]) -> bool {
+        false
+    }
 
     /// The buffer of the vertices, and the modification time of the
     /// vertices it holds.
@@ -184,14 +191,16 @@ impl<V: bytemuck::Pod> VertexVector<V> {
     /// over its buffer's. Returns false, leaving the vector be, for one
     /// that holds another count or never changes (`release`).
     pub fn update(&self, vertices: &[V]) -> bool {
-        if self.base.released.get() || self.elements() != vertices.len() {
+        self.replace(vertices.len(), || vertices.to_vec())
+    }
+
+    /// [`update`](Self::update) with the `count` vertices that `vertices`
+    /// makes.
+    fn replace(&self, count: usize, vertices: impl FnOnce() -> Vec<V>) -> bool {
+        if self.base.released.get() || self.elements() != count {
             return false;
         }
-        // A staged vector keeps its allocation across updates.
-        let mut v = self.v.take();
-        v.clear();
-        v.extend_from_slice(vertices);
-        self.v.replace(v);
+        self.v.replace(vertices());
         self.freed_count.set(0);
         self.base.raw_freed.set(false);
         self.base.dirty.set(true);
@@ -255,14 +264,17 @@ impl<V: bytemuck::Pod> VertexVectorBase for VertexVector<V> {
     fn get_host_data(&self) -> Option<Ref<'_, HostBytes>> {
         Ref::filter_map(self.host.borrow(), Option::as_ref).ok()
     }
+    fn update_raw(&self, data: &[u8]) -> bool {
+        if !data.len().is_multiple_of(size_of::<V>()) {
+            return false;
+        }
+        self.replace(data.len() / size_of::<V>(), || bytemuck::pod_collect_to_vec(data))
+    }
+
     fn free_raw_data(&self) {
         let freed = self.v.borrow().len() + self.host_count();
         self.freed_count.set(self.freed_count.get() + freed);
-        let mut v = self.v.take();
-        if self.base.staged.get() {
-            v.clear();
-            self.v.replace(v);
-        }
+        *self.v.borrow_mut() = Vec::new();
         #[cfg(target_family = "wasm")]
         self.host.borrow_mut().take();
         self.base.raw_freed.set(true);
