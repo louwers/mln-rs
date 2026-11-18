@@ -546,13 +546,13 @@ impl Renderer {
         // them uses the stencil buffer, of the tile that clears it. Draw
         // groups of one source clip to the same tiles, which are added once.
         let mut clip_tiles = Vec::new();
-        let mut last: Option<Rc<Vec<UnwrappedTileID>>> = None;
+        let mut last: Option<&[UnwrappedTileID]> = None;
         for group in orchestrator.draw_groups() {
             if let Some(tiles) = group.stencil_tiles()
-                && last.as_ref().is_none_or(|last| last != tiles)
+                && last.is_none_or(|last| last != tiles)
             {
                 clip_tiles.extend(tiles.iter().copied());
-                last = Some(Rc::clone(tiles));
+                last = Some(tiles);
             }
         }
         if last.is_some() {

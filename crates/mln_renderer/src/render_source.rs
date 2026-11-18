@@ -38,6 +38,16 @@ impl RenderSourceBase {
     }
 }
 
+/// An order a layer draws its source's tiles in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TileOrder {
+    /// By tile id, without the tiles held for fade.
+    ById,
+    /// By opposite y position, so that the lower of two tiles' overlapping
+    /// symbols draw over the higher's.
+    ByY,
+}
+
 pub(crate) trait RenderSource {
     fn base(&self) -> &RenderSourceBase;
 
@@ -78,18 +88,9 @@ pub(crate) trait RenderSource {
         &[]
     }
 
-    /// The order a layer draws the source's tiles in, as indexes into
-    /// `render_tiles`: by tile id, without the tiles held for fade. `None`
-    /// for a source without tiles.
-    fn tile_order(&self) -> Option<Vec<usize>> {
-        None
-    }
-
-    /// The order a symbol layer draws the source's tiles in, as indexes into
-    /// `render_tiles`: by opposite y position, so the lower of two tiles'
-    /// overlapping symbols draw over the higher's. `None` for a source
-    /// without tiles.
-    fn tile_order_by_y(&self) -> Option<Vec<usize>> {
+    /// The source's tiles in `order`, as indexes into `render_tiles`, as of
+    /// the last `prepare`; `None` for a source without tiles.
+    fn tile_order(&self, _order: TileOrder) -> Option<&[usize]> {
         None
     }
 

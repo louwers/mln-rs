@@ -55,7 +55,9 @@ use crate::buckets::fill_extrusion_bucket::{
     FillExtrusionStaticVertex, FillExtrusionWallVertex, wall_quad_paint, wall_quad_vertices,
 };
 use crate::draw::{DrawGeometry, DrawObjects, copy_shared_attributes};
-use crate::draw_cache::{DrawDepth, DrawPriority, DrawSlots, FrameDraw, FrameDraws, LayerDrawing};
+use crate::draw_cache::{
+    DrawDepth, DrawList, DrawPriority, DrawSlots, FrameDraw, FrameDraws, LayerDrawing, UniformWriter,
+};
 use crate::frame_projection::zero_to_one_clip_z;
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::layer_type::{EvaluatedLayer, LayerType};
@@ -300,6 +302,8 @@ pub(crate) struct RenderFillExtrusionLayer {
     base: RenderLayerBase,
     values: LayerValues<FillExtrusion>,
     drawing: LayerDrawing<ExtrusionTile>,
+    /// The frame's draws as the update makes them.
+    draw_list: DrawList<ExtrusionUniforms>,
 
     fill_extrusion_group: Option<ShaderGroupPtr>,
     fill_extrusion_pattern_group: Option<ShaderGroupPtr>,
@@ -323,6 +327,7 @@ impl RenderFillExtrusionLayer {
             base,
             values,
             drawing: LayerDrawing::default(),
+            draw_list: DrawList::default(),
             fill_extrusion_group: None,
             fill_extrusion_pattern_group: None,
             fill_extrusion_wall_group: None,
@@ -468,7 +473,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
             first_shaders: None,
         };
 
-        let mut frame_draws: Vec<(FrameDraw, ExtrusionUniforms)> = Vec::new();
+        let mut draw_list = std::mem::take(&mut self.draw_list);
         for tile in render_tiles.iter() {
             let tile_id = *tile.tile.get_overscaled_tile_id();
 
@@ -509,18 +514,15 @@ impl RenderLayer for RenderFillExtrusionLayer {
                     atlases: cached.atlases.clone(),
                     ..FrameDraw::new(Some(tile_id), slot as u32, draw.id)
                 };
-                frame_draws.push((frame_draw, self.uniforms(tile, binders, &draw.objects, paint_parameters)));
+                draw_list.push(frame_draw, self.uniforms(tile, binders, &draw.objects, paint_parameters));
             }
         }
 
-        frame_draws.sort_by_key(|(draw, _)| draw.order());
         let frame = self.drawing.frame.get_or_insert_with(FrameDraws::new);
-        frame.stencil_tiles = Some(Rc::new(render_tiles.render_tiles().map(|tile| tile.id).collect()));
-        if !frame_draws.is_empty() {
-            Self::write_uniforms(&self.values.evaluated, frame, &frame_draws, paint_parameters);
-        }
-        frame.draws.clear();
-        frame.draws.extend(frame_draws.into_iter().map(|(draw, _)| draw));
+        frame.set_stencil_tiles(render_tiles.render_tiles().map(|tile| tile.id));
+        let layer = &self.values.evaluated;
+        draw_list.finish(frame, context, |writer| Self::write_uniforms(layer, writer, paint_parameters));
+        self.draw_list = draw_list;
     }
 }
 
@@ -742,12 +744,10 @@ impl RenderFillExtrusionLayer {
         }
     }
 
-    /// Writes the layer's buffers of `draws`, the frame's in drawing order,
-    /// to `frame`'s.
+    /// Writes the layer's buffers of the frame's draws.
     fn write_uniforms(
         layer: &EvaluatedLayer<FillExtrusion>,
-        frame: &mut FrameDraws,
-        draws: &[(FrameDraw, ExtrusionUniforms)],
+        writer: &mut UniformWriter<'_, ExtrusionUniforms>,
         parameters: &PaintParameters<'_>,
     ) {
         let evaluated = &layer.paint;
@@ -775,16 +775,10 @@ impl RenderFillExtrusionLayer {
             to_scale: crossfade.to_scale,
             pad2: 0.0,
         };
-        let context = parameters.context;
-        let buffers = &mut frame.uniform_buffers;
-        buffers.create_or_update_pod(ID_FILL_EXTRUSION_PROPS_UBO, &props, context);
-        let draw_ubos: Vec<FillExtrusionDrawableUBO> = draws.iter().map(|(_, uniforms)| uniforms.draw_ubo).collect();
-        buffers.write_storage(ID_FILL_EXTRUSION_DRAWABLE_UBO, bytemuck::cast_slice(&draw_ubos), context);
-        let tile_props: Vec<FillExtrusionTilePropsUBO> =
-            draws.iter().map(|(_, uniforms)| uniforms.tile_props).collect();
-        buffers.write_storage(ID_FILL_EXTRUSION_TILE_PROPS_UBO, bytemuck::cast_slice(&tile_props), context);
-        let projections: Vec<ProjectionUBO> = draws.iter().map(|(_, uniforms)| uniforms.projection).collect();
-        buffers.write_storage(ID_PROJECTION_UBO, bytemuck::cast_slice(&projections), context);
+        writer.uniform(ID_FILL_EXTRUSION_PROPS_UBO, &props);
+        writer.storage(ID_FILL_EXTRUSION_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
+        writer.storage(ID_FILL_EXTRUSION_TILE_PROPS_UBO, |uniforms| uniforms.tile_props);
+        writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
     }
 }
 

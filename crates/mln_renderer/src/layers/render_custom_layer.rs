@@ -33,6 +33,7 @@ use crate::render_layer::{
     DrawGroups, LayerParts, LayerPrepareParameters, LayerSource, LayerTiles, LayerValues, RenderLayer, RenderLayerBase,
 };
 use crate::render_pass::RenderPass;
+use crate::render_source::TileOrder;
 use crate::update_parameters::UpdateParameters;
 
 /// What the render layer and what it draws share: the host, while the
@@ -215,7 +216,7 @@ impl RenderLayer for RenderCustomLayer {
         self.base.passes = RenderPass::Translucent;
     }
 
-    fn prepare(&mut self, _parameters: &LayerPrepareParameters<'_>) -> Option<Vec<usize>> {
+    fn prepare(&mut self, _parameters: &LayerPrepareParameters<'_>) -> Option<TileOrder> {
         None
     }
 

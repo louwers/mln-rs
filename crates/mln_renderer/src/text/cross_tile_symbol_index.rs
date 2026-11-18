@@ -356,13 +356,13 @@ impl CrossTileSymbolLayerIndex {
 
     pub(crate) fn remove_stale_buckets(&mut self, current_ids: &HashSet<u32>) -> bool {
         let mut tiles_changed = false;
-        let zooms: Vec<u8> = self.indexes.keys().copied().collect();
-        for zoom in zooms {
-            let Some(indexes) = self.indexes.get_mut(&zoom) else { continue };
+        let used_cross_tile_ids = &mut self.used_cross_tile_ids;
+        for i in 0..self.indexes.len() {
+            let Some((&zoom, indexes)) = self.indexes.get_index_mut(i) else { continue };
             indexes.retain(|_, index| {
                 let current = current_ids.contains(&index.bucket_instance_id);
                 if !current {
-                    remove_bucket_cross_tile_ids(&mut self.used_cross_tile_ids, zoom, index);
+                    remove_bucket_cross_tile_ids(used_cross_tile_ids, zoom, index);
                     tiles_changed = true;
                 }
                 current
@@ -387,6 +387,9 @@ pub(crate) struct CrossTileSymbolIndex {
     /// The last instance id given to a symbol bucket. It outlives `reset`,
     /// so that a bucket indexed again keeps an id no other bucket has.
     max_bucket_instance_id: u32,
+    /// The instance ids of the buckets a layer places, as `index_layer`
+    /// collects them.
+    current_bucket_ids: HashSet<u32>,
 }
 
 impl CrossTileSymbolIndex {
@@ -400,11 +403,16 @@ impl CrossTileSymbolIndex {
         state: &TransformState,
         buckets: &mut (impl SymbolBuckets + ?Sized),
     ) -> AddLayerResult {
-        let layer_index =
-            self.layer_indexes.entry(layer.get_id().to_owned()).or_insert_with(CrossTileSymbolLayerIndex::new);
+        if !self.layer_indexes.contains_key(layer.get_id()) {
+            self.layer_indexes.insert(layer.get_id().to_owned(), CrossTileSymbolLayerIndex::new());
+        }
+        let Some(layer_index) = self.layer_indexes.get_mut(layer.get_id()) else {
+            return AddLayerResult::default();
+        };
 
         let mut result = AddLayerResult::default();
-        let mut current_bucket_ids: HashSet<u32> = HashSet::default();
+        let current_bucket_ids = &mut self.current_bucket_ids;
+        current_bucket_ids.clear();
 
         layer_index.handle_wrap_jump(lng);
 
@@ -424,7 +432,7 @@ impl CrossTileSymbolIndex {
             current_bucket_ids.insert(pair.0);
         }
 
-        result.buckets_removed = layer_index.remove_stale_buckets(&current_bucket_ids);
+        result.buckets_removed = layer_index.remove_stale_buckets(current_bucket_ids);
 
         result
     }

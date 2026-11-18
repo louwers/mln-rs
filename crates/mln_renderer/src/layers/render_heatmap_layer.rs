@@ -39,7 +39,7 @@ use super::{cast_matrix, refresh_paint_attributes, shared_vertices};
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices, released_indexes};
 use crate::buckets::heatmap_bucket::{HeatmapBinders, HeatmapBucket, HeatmapLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
-use crate::draw_cache::{DrawDepth, FrameDraw, FrameDraws, KeptDraw, LayerDrawing};
+use crate::draw_cache::{DrawDepth, DrawList, FrameDraw, FrameDraws, KeptDraw, LayerDrawing, UniformWriter};
 use crate::gfx::context::Context;
 use crate::gfx::texture2d::Texture2DPtr;
 use crate::layer_type::{EvaluatedLayer, LayerType};
@@ -123,6 +123,8 @@ pub(crate) struct RenderHeatmapLayer {
     /// The tiles' draws into the render target, and the layer's draw, which
     /// colors the render target's heat onto the frame.
     drawing: LayerDrawing<KeptDraw, Option<KeptDraw>>,
+    /// The tiles' draws into the render target as the update makes them.
+    tile_draws: DrawList<HeatmapUniforms>,
     color_ramp: Rc<PremultipliedImage>,
     /// The global-state snapshot used to generate the cached color ramp and
     /// detect when it needs to be rebuilt.
@@ -145,6 +147,7 @@ impl RenderHeatmapLayer {
             base,
             values,
             drawing: LayerDrawing::default(),
+            tile_draws: DrawList::default(),
             color_ramp: Rc::new(PremultipliedImage::new(Size::new(256, 1))),
             color_ramp_global_state: None,
             segments: Vec::new(),
@@ -288,7 +291,6 @@ impl RenderHeatmapLayer {
         let evaluated = &evaluated_properties.paint;
         // The shader of the first tile this builds, which the others take.
         let mut heatmap_shader: Option<ShaderProgramPtr> = None;
-        let mut tile_draws: Vec<(FrameDraw, HeatmapUniforms)> = Vec::new();
         for tile in render_tiles.iter() {
             let tile_id = *tile.tile.get_overscaled_tile_id();
 
@@ -357,16 +359,11 @@ impl RenderHeatmapLayer {
                 continue;
             };
             let draw = FrameDraw { depth: DrawDepth::Off, ..cached.frame_draw(Some(tile_id)) };
-            tile_draws.push((draw, Self::tile_uniforms(&tile_id, binders, paint_parameters)));
+            self.tile_draws.push(draw, Self::tile_uniforms(&tile_id, binders, paint_parameters));
         }
 
-        tile_draws.sort_by_key(|(draw, _)| draw.order());
         let target = self.drawing.target.get_or_insert_with(FrameDraws::new);
-        if !tile_draws.is_empty() {
-            Self::write_tile_uniforms(&self.values.evaluated.paint, target, &tile_draws, context);
-        }
-        target.draws.clear();
-        target.draws.extend(tile_draws.into_iter().map(|(draw, _)| draw));
+        self.tile_draws.finish(target, context, |writer| Self::write_tile_uniforms(evaluated, writer));
         true
     }
 
@@ -404,14 +401,11 @@ impl RenderHeatmapLayer {
         }
     }
 
-    /// Writes the buffers of `draws`, the tiles' into the render target in
-    /// drawing order, of a layer of the paint values `evaluated`, to
-    /// `target`'s.
+    /// Writes the buffers of the tiles' draws into the render target, of a
+    /// layer of the paint values `evaluated`.
     fn write_tile_uniforms(
         evaluated: &HeatmapPaintProperties::PossiblyEvaluated,
-        target: &mut FrameDraws,
-        draws: &[(FrameDraw, HeatmapUniforms)],
-        context: &Context,
+        writer: &mut UniformWriter<'_, HeatmapUniforms>,
     ) {
         let props = HeatmapEvaluatedPropsUBO {
             weight: evaluated.heatmap_weight.constant_or(&HeatmapPaintProperties::Defaults::heatmap_weight()),
@@ -419,12 +413,9 @@ impl RenderHeatmapLayer {
             intensity: *evaluated.heatmap_intensity.uniform(),
             padding: 0.0,
         };
-        let buffers = &mut target.uniform_buffers;
-        buffers.create_or_update_pod(ID_HEATMAP_EVALUATED_PROPS_UBO, &props, context);
-        let draw_ubos: Vec<HeatmapDrawableUBO> = draws.iter().map(|(_, uniforms)| uniforms.draw_ubo).collect();
-        buffers.write_storage(ID_HEATMAP_DRAWABLE_UBO, bytemuck::cast_slice(&draw_ubos), context);
-        let projections: Vec<ProjectionUBO> = draws.iter().map(|(_, uniforms)| uniforms.projection).collect();
-        buffers.write_storage(ID_PROJECTION_UBO, bytemuck::cast_slice(&projections), context);
+        writer.uniform(ID_HEATMAP_EVALUATED_PROPS_UBO, &props);
+        writer.storage(ID_HEATMAP_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
+        writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
     }
 
     /// Makes the layer's draw of the frame, which colors the heat of

@@ -19,7 +19,7 @@ use mln_util::range::Range;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use crate::draw::{DrawGeometry, DrawObjects, Textures, raw_vertices};
-use crate::draw_cache::{DrawDepth, Draws, FrameDraw, KeptDraw};
+use crate::draw_cache::{DrawDepth, DrawList, Draws, FrameDraw, KeptDraw};
 use crate::gfx::context::Context;
 use crate::globe_tile_mesh::{RawGlobeTileMesh, raw_globe_tile_mesh};
 use crate::tile_matrix::to_projection_ubo;
@@ -36,6 +36,8 @@ pub(crate) struct GlobeDepthPass {
     /// The planet's draws, one of each tile of the cover, and the frame's
     /// draws of them, which draw into depth in the translucent pass.
     pub(crate) draws: Draws<KeptDraw>,
+    /// The frame's draws as the update makes them, with their projections.
+    draw_list: DrawList<ProjectionUBO>,
     shader: Option<ShaderProgramPtr>,
     meshes: BTreeMap<(u8, bool, bool), RawGlobeTileMesh>,
 }
@@ -86,7 +88,6 @@ impl GlobeDepthPass {
         );
 
         caches.set_tiles(tile_cover.iter().copied());
-        frame.draws.clear();
         for tile_id in &tile_cover {
             if caches.cache_mut(tile_id).is_none() {
                 // The grid depends only on the zoom and whether the tile
@@ -125,20 +126,10 @@ impl GlobeDepthPass {
                 continue;
             };
             let depth = DrawDepth::Volume { mask: DepthMaskType::ReadWrite };
-            frame.draws.push(FrameDraw { depth, ..draw.frame_draw(Some(*tile_id)) });
+            let projection = to_projection_ubo(&state.get_projection_data(&tile_id.to_unwrapped()));
+            self.draw_list.push(FrameDraw { depth, ..draw.frame_draw(Some(*tile_id)) }, projection);
         }
         // The draws draw in the order their GPU objects were made.
-        frame.draws.sort_by_key(FrameDraw::order);
-
-        // The projection blocks live in one array, indexed like the draws.
-        let projection_ubos: Vec<ProjectionUBO> = frame
-            .draws
-            .iter()
-            .filter_map(|draw| draw.tile)
-            .map(|tile_id| to_projection_ubo(&state.get_projection_data(&tile_id.to_unwrapped())))
-            .collect();
-        if !projection_ubos.is_empty() {
-            frame.uniform_buffers.write_storage(ID_PROJECTION_UBO, bytemuck::cast_slice(&projection_ubos), context);
-        }
+        self.draw_list.finish(frame, context, |writer| writer.storage(ID_PROJECTION_UBO, |projection| *projection));
     }
 }

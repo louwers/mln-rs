@@ -47,7 +47,7 @@ use super::{cast_matrix, shared_vertices};
 use crate::bucket::{Bucket, NoBucket};
 use crate::buckets::hillshade_bucket::{HillshadeBucket, HillshadeLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
-use crate::draw_cache::{DrawDepth, DrawSlots, FrameDraw, FrameDraws, KeptDraw, LayerDrawing};
+use crate::draw_cache::{DrawDepth, DrawList, DrawSlots, FrameDraw, FrameDraws, KeptDraw, LayerDrawing};
 use crate::gfx::texture2d::Texture2DPtr;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_type::LayerType;
@@ -58,7 +58,7 @@ use crate::render_layer::{
     TypedLayer, set_layer_tiles,
 };
 use crate::render_pass::RenderPass;
-use crate::render_source::RenderSource;
+use crate::render_source::TileOrder;
 use crate::render_static_data::RenderStaticData;
 use crate::tile_matrix::to_projection_ubo;
 use crate::update_parameters::UpdateParameters;
@@ -102,6 +102,8 @@ pub(crate) struct RenderColorReliefLayer {
     base: RenderLayerBase,
     values: LayerValues<ColorRelief>,
     drawing: LayerDrawing<ReliefTile>,
+    /// The frame's draws as the update makes them.
+    draw_list: DrawList<ReliefUniforms>,
 
     // Color ramp data
     color_ramp_size: u32,
@@ -122,12 +124,16 @@ pub(crate) struct RenderColorReliefLayer {
     color_relief_shader: Option<ShaderProgramPtr>,
 
     static_data_shared_vertices: Option<VertexVectorBasePtr>,
+    /// The triangles of the static data's quad.
+    static_data_indices: Option<IndexVectorBasePtr>,
     globe_meshes: GlobeTileMeshCache<HillshadeLayoutVertex>,
 
     /// The DEM texture of each bucket, with the bucket's prepare generation
     /// it was made at (C++ makes one per drawable and frame from the
     /// current, possibly backfilled, DEM image).
     dem_textures: HashMap<SimpleIdentity, (Texture2DPtr, u64)>,
+    /// The buckets of the frame's tiles, whose DEM textures stay.
+    live_buckets: HashSet<SimpleIdentity>,
 }
 
 impl RenderColorReliefLayer {
@@ -140,6 +146,7 @@ impl RenderColorReliefLayer {
             base,
             values,
             drawing: LayerDrawing::default(),
+            draw_list: DrawList::default(),
             color_ramp_size,
             color_ramp_changed: true,
             color_ramp_global_state: None,
@@ -149,8 +156,10 @@ impl RenderColorReliefLayer {
             color_stops_texture: None,
             color_relief_shader: None,
             static_data_shared_vertices: None,
+            static_data_indices: None,
             globe_meshes: GlobeTileMeshCache::new(),
             dem_textures: HashMap::default(),
+            live_buckets: HashSet::default(),
         };
 
         // Initialize with default color ramp immediately to avoid
@@ -331,8 +340,8 @@ impl RenderLayer for RenderColorReliefLayer {
         self.dem_textures.clear();
     }
 
-    fn prepare(&mut self, params: &LayerPrepareParameters<'_>) -> Option<Vec<usize>> {
-        let order = params.source.and_then(RenderSource::tile_order);
+    fn prepare(&mut self, params: &LayerPrepareParameters<'_>) -> Option<TileOrder> {
+        let order = params.source.map(|_| TileOrder::ById);
         set_layer_tiles(self, params, order)
     }
 
@@ -376,9 +385,9 @@ impl RenderLayer for RenderColorReliefLayer {
             self.static_data_shared_vertices
                 .get_or_insert_with(|| shared_vertices(&RenderStaticData::raster_vertices())),
         );
-        let static_data_indices: IndexVectorBasePtr =
-            Rc::new(RefCell::new(IndexVectorBase::new(RenderStaticData::quad_triangle_indices())));
-        let static_data_segments = RenderStaticData::raster_segments();
+        let static_data_indices = Rc::clone(self.static_data_indices.get_or_insert_with(|| {
+            Rc::new(RefCell::new(IndexVectorBase::new(RenderStaticData::quad_triangle_indices())))
+        }));
 
         // Update color ramp textures if changed
         if self.color_ramp_changed {
@@ -424,8 +433,10 @@ impl RenderLayer for RenderColorReliefLayer {
         };
 
         // Drop the DEM textures of buckets that are no longer rendered.
-        let live_buckets: HashSet<SimpleIdentity> =
-            render_tiles.iter().filter_map(|tile| tile.get_bucket(&*self.base.style).map(Bucket::get_id)).collect();
+        let live_buckets = &mut self.live_buckets;
+        live_buckets.clear();
+        live_buckets
+            .extend(render_tiles.iter().filter_map(|tile| tile.get_bucket(&*self.base.style).map(Bucket::get_id)));
         self.dem_textures.retain(|id, _| live_buckets.contains(id));
 
         let dem_sampler = SamplerState {
@@ -438,7 +449,6 @@ impl RenderLayer for RenderColorReliefLayer {
             ..Default::default()
         };
 
-        let mut frame_draws: Vec<(FrameDraw, ReliefUniforms)> = Vec::new();
         for tile in render_tiles.iter() {
             let tile_id = *tile.tile.get_overscaled_tile_id();
 
@@ -526,7 +536,7 @@ impl RenderLayer for RenderColorReliefLayer {
                             Rc::clone(&static_data_shared_vertices),
                             4,
                             Rc::clone(&static_data_indices),
-                            static_data_segments.iter().map(SegmentBase::copy).collect(),
+                            RenderStaticData::raster_segments(),
                         )
                     };
                     let geometry = DrawGeometry {
@@ -562,32 +572,17 @@ impl RenderLayer for RenderColorReliefLayer {
                 projection: to_projection_ubo(&projection),
             };
             let draw = FrameDraw { depth: DrawDepth::Off, ..cached.draw.frame_draw(Some(tile_id)) };
-            frame_draws.push((draw, uniforms));
+            self.draw_list.push(draw, uniforms);
         }
 
-        frame_draws.sort_by_key(|(draw, _)| draw.order());
-        let Some(frame) = &mut self.drawing.frame else {
-            return;
-        };
-        if !frame_draws.is_empty() {
-            let props = ColorReliefEvaluatedPropsUBO {
-                opacity: *self.values.evaluated.paint.color_relief_opacity.uniform(),
-                pad_eval0: 0.0,
-                pad_eval1: 0.0,
-                pad_eval2: 0.0,
-            };
-            let buffers = &mut frame.uniform_buffers;
-            buffers.create_or_update_pod(ID_COLOR_RELIEF_EVALUATED_PROPS_UBO, &props, context);
-            let draw_ubos: Vec<ColorReliefDrawableUBO> =
-                frame_draws.iter().map(|(_, uniforms)| uniforms.draw_ubo).collect();
-            buffers.write_storage(ID_COLOR_RELIEF_DRAWABLE_UBO, bytemuck::cast_slice(&draw_ubos), context);
-            let tile_props: Vec<ColorReliefTilePropsUBO> =
-                frame_draws.iter().map(|(_, uniforms)| uniforms.tile_props).collect();
-            buffers.write_storage(ID_COLOR_RELIEF_TILE_PROPS_UBO, bytemuck::cast_slice(&tile_props), context);
-            let projections: Vec<ProjectionUBO> = frame_draws.iter().map(|(_, uniforms)| uniforms.projection).collect();
-            buffers.write_storage(ID_PROJECTION_UBO, bytemuck::cast_slice(&projections), context);
-        }
-        frame.draws.clear();
-        frame.draws.extend(frame_draws.into_iter().map(|(draw, _)| draw));
+        let frame = self.drawing.frame.get_or_insert_with(FrameDraws::new);
+        let opacity = *self.values.evaluated.paint.color_relief_opacity.uniform();
+        self.draw_list.finish(frame, context, |writer| {
+            let props = ColorReliefEvaluatedPropsUBO { opacity, pad_eval0: 0.0, pad_eval1: 0.0, pad_eval2: 0.0 };
+            writer.uniform(ID_COLOR_RELIEF_EVALUATED_PROPS_UBO, &props);
+            writer.storage(ID_COLOR_RELIEF_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
+            writer.storage(ID_COLOR_RELIEF_TILE_PROPS_UBO, |uniforms| uniforms.tile_props);
+            writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
+        });
     }
 }

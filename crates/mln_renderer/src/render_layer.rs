@@ -27,7 +27,7 @@ use crate::line_atlas::LineAtlas;
 use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;
 use crate::render_pass::RenderPass;
-use crate::render_source::RenderSource;
+use crate::render_source::{RenderSource, TileOrder};
 use crate::render_tile::{FrameTile, RenderTile};
 use crate::sources::render_image_source::ImageSourceRenderData;
 use crate::tile::contents::Contents;
@@ -270,14 +270,11 @@ pub(crate) struct LayerPrepareParameters<'a> {
 }
 
 impl<'a> LayerPrepareParameters<'a> {
-    /// The source's tiles at the indexes of `order`; `None` without either.
+    /// The source's tiles in `order`; `None` without either.
     #[must_use]
-    pub(crate) fn tiles<'b>(&self, order: Option<&'b [usize]>) -> Option<LayerTiles<'b>>
-    where
-        'a: 'b,
-    {
+    pub(crate) fn tiles(&self, order: Option<TileOrder>) -> Option<LayerTiles<'a>> {
         let source = self.source?;
-        Some(LayerTiles::new(source.render_tiles(), self.contents, order?))
+        Some(LayerTiles::new(source.render_tiles(), self.contents, source.tile_order(order?)?))
     }
 }
 
@@ -528,10 +525,9 @@ pub(crate) trait RenderLayer: LayerParts {
     }
 
     /// Picks the tiles of the source the layer draws in the frame, and
-    /// returns their order, as indexes into the source's render tiles
-    /// (`prepare_base`); `None` for a layer without tiles. The frame's update
-    /// gets them in that order.
-    fn prepare(&mut self, parameters: &LayerPrepareParameters<'_>) -> Option<Vec<usize>> {
+    /// returns the order it draws them in (`prepare_base`); `None` for a
+    /// layer without tiles. The frame's update gets them in that order.
+    fn prepare(&mut self, parameters: &LayerPrepareParameters<'_>) -> Option<TileOrder> {
         prepare_base(self, parameters)
     }
 
@@ -704,30 +700,30 @@ pub(crate) fn release_render_data_base<L: RenderLayer + ?Sized>(layer: &mut L) {
     layer.set_tiles(None);
 }
 
-/// Makes the source's tiles at the indexes of `order` those the layer keeps
-/// entries of, none for `None`, and returns `order`.
+/// Makes the source's tiles in `order` those the layer keeps entries of,
+/// none for `None`, and returns `order`.
 pub(crate) fn set_layer_tiles<L: RenderLayer + ?Sized>(
     layer: &mut L,
     parameters: &LayerPrepareParameters<'_>,
-    order: Option<Vec<usize>>,
-) -> Option<Vec<usize>> {
-    layer.set_tiles(parameters.tiles(order.as_deref()));
+    order: Option<TileOrder>,
+) -> Option<TileOrder> {
+    layer.set_tiles(parameters.tiles(order));
     order
 }
 
 /// The default `RenderLayer::prepare`, callable from overrides: the layer
-/// draws its source's tiles in [`RenderSource::tile_order`], in the passes
-/// their buckets were laid out for. Without a source (a source type the
-/// port has no render source for), it gets no tiles.
+/// draws its source's tiles in [`TileOrder::ById`], in the passes their
+/// buckets were laid out for. Without a source (a source type the port has
+/// no render source for), it gets no tiles.
 pub(crate) fn prepare_base<L: RenderLayer + ?Sized>(
     layer: &mut L,
     parameters: &LayerPrepareParameters<'_>,
-) -> Option<Vec<usize>> {
-    let order = parameters.source.and_then(|source| {
+) -> Option<TileOrder> {
+    let order = parameters.source.map(|source| {
         debug_assert!(source.is_enabled());
-        source.tile_order()
+        TileOrder::ById
     });
-    if let Some(tiles) = parameters.tiles(order.as_deref()) {
+    if let Some(tiles) = parameters.tiles(order) {
         layer.add_render_passes_from_tiles(tiles);
     }
     set_layer_tiles(layer, parameters, order)

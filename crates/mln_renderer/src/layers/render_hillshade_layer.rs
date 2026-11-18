@@ -51,7 +51,9 @@ use super::{cast_matrix, shared_vertices};
 use crate::bucket::{Bucket, NoBucket};
 use crate::buckets::hillshade_bucket::{HillshadeBucket, HillshadeLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
-use crate::draw_cache::{DrawCaches, DrawDepth, DrawSlots, Draws, FrameDraw, FrameDraws, KeptDraw, LayerDrawing};
+use crate::draw_cache::{
+    DrawCaches, DrawDepth, DrawList, DrawSlots, Draws, FrameDraw, FrameDraws, KeptDraw, LayerDrawing,
+};
 use crate::geometry::dem_data::get_unpack_vector;
 use crate::gfx::context::Context;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
@@ -63,6 +65,7 @@ use crate::render_layer::{
     TypedLayer, set_layer_tiles,
 };
 use crate::render_pass::RenderPass;
+use crate::render_source::TileOrder;
 use crate::render_static_data::RenderStaticData;
 use crate::render_target::RenderTarget;
 use crate::tile_matrix::{bind_no_projection, get_projection_data, to_projection_ubo};
@@ -118,17 +121,23 @@ pub(crate) struct RenderHillshadeLayer {
     base: RenderLayerBase,
     values: LayerValues<Hillshade>,
     drawing: LayerDrawing<HillshadeTile>,
+    /// The frame's draws as the update makes them.
+    draw_list: DrawList<HillshadeUniforms>,
     maxzoom: u8,
 
     hillshade_prepare_shader: Option<ShaderProgramPtr>,
     hillshade_shader: Option<ShaderProgramPtr>,
 
     static_data_shared_vertices: Option<VertexVectorBasePtr>,
+    /// The triangles of the static data's quad.
+    static_data_indices: Option<IndexVectorBasePtr>,
     globe_meshes: GlobeTileMeshCache<HillshadeLayoutVertex>,
 
     /// Each bucket's render target, by bucket id. They draw while the layer
     /// is renderable.
     bucket_render_targets: HashMap<SimpleIdentity, BucketTarget>,
+    /// The buckets of the frame's tiles, which keep their render targets.
+    live_buckets: HashSet<SimpleIdentity>,
     /// The illumination of the evaluation the draws last drew with: a
     /// viewport anchor's takes the bearing of the first frame that draws
     /// with it.
@@ -142,12 +151,15 @@ impl RenderHillshadeLayer {
             base,
             values,
             drawing: LayerDrawing::default(),
+            draw_list: DrawList::default(),
             maxzoom: constants::TERRAIN_RGB_MAXZOOM,
             hillshade_prepare_shader: None,
             hillshade_shader: None,
             static_data_shared_vertices: None,
+            static_data_indices: None,
             globe_meshes: GlobeTileMeshCache::new(),
             bucket_render_targets: HashMap::default(),
+            live_buckets: HashSet::default(),
             evaluated_props: None,
         }
     }
@@ -161,10 +173,16 @@ struct IlluminationProperties {
     highlight_colors: Vec<Color>,
 }
 
-impl IlluminationProperties {
-    fn num_sources(&self) -> usize {
-        self.direction_radians.len()
-    }
+/// How many light sources the layer's illumination has: as many as its
+/// longest list of illumination values, up to `MAX_ILLUMINATION_SOURCES`,
+/// and at least one, or as many directions as it has past that limit.
+fn num_light_sources(evaluated: &HillshadePaintProperties::PossiblyEvaluated) -> usize {
+    let directions = evaluated.hillshade_illumination_direction.uniform().len();
+    let longest = directions
+        .max(evaluated.hillshade_illumination_altitude.uniform().len())
+        .max(evaluated.hillshade_highlight_color.uniform().len())
+        .max(evaluated.hillshade_shadow_color.uniform().len());
+    longest.min(MAX_ILLUMINATION_SOURCES).max(directions).max(1)
 }
 
 /// Pad shorter arrays by repeating the last element.
@@ -304,10 +322,10 @@ impl RenderLayer for RenderHillshadeLayer {
         self.values.set_evaluated(&mut self.base, properties);
     }
 
-    fn prepare(&mut self, params: &LayerPrepareParameters<'_>) -> Option<Vec<usize>> {
-        let order = params.source.and_then(|source| {
+    fn prepare(&mut self, params: &LayerPrepareParameters<'_>) -> Option<TileOrder> {
+        let order = params.source.map(|source| {
             self.maxzoom = source.get_max_zoom();
-            source.tile_order()
+            TileOrder::ById
         });
         set_layer_tiles(self, params, order)
     }
@@ -381,9 +399,9 @@ impl RenderLayer for RenderHillshadeLayer {
             self.static_data_shared_vertices
                 .get_or_insert_with(|| shared_vertices(&RenderStaticData::raster_vertices())),
         );
-        let static_data_indices: IndexVectorBasePtr =
-            Rc::new(RefCell::new(IndexVectorBase::new(RenderStaticData::quad_triangle_indices())));
-        let static_data_segments = RenderStaticData::raster_segments();
+        let static_data_indices = Rc::clone(self.static_data_indices.get_or_insert_with(|| {
+            Rc::new(RefCell::new(IndexVectorBase::new(RenderStaticData::quad_triangle_indices())))
+        }));
 
         // `resampling` filters the prepared texture the tile's draw samples;
         // the prepare pass reads the DEM with Nearest regardless.
@@ -394,11 +412,14 @@ impl RenderLayer for RenderHillshadeLayer {
 
         // Drop the render targets of buckets that are no longer rendered
         // (C++ releases them with the bucket).
-        let live_buckets: HashSet<SimpleIdentity> =
-            render_tiles.iter().filter_map(|tile| tile.get_bucket(&*self.base.style).map(Bucket::get_id)).collect();
+        let live_buckets = &mut self.live_buckets;
+        live_buckets.clear();
+        live_buckets
+            .extend(render_tiles.iter().filter_map(|tile| tile.get_bucket(&*self.base.style).map(Bucket::get_id)));
         self.bucket_render_targets.retain(|id, _| live_buckets.contains(id));
 
-        let mut frame_draws: Vec<(FrameDraw, HillshadeUniforms)> = Vec::new();
+        let num_lights = num_light_sources(&self.values.evaluated.paint);
+        let mut draw_list = std::mem::take(&mut self.draw_list);
         for tile in render_tiles.iter() {
             let tile_id = *tile.tile.get_overscaled_tile_id();
 
@@ -429,7 +450,7 @@ impl RenderLayer for RenderHillshadeLayer {
                         self.maxzoom,
                         &hillshade_prepare_shader,
                         attrs,
-                        (&static_data_indices, &static_data_segments),
+                        &static_data_indices,
                     );
                     let texture = target.render_target.get_texture();
                     entry.insert_entry(target);
@@ -472,7 +493,7 @@ impl RenderLayer for RenderHillshadeLayer {
                         Rc::clone(&static_data_shared_vertices),
                         4,
                         Rc::clone(&static_data_indices),
-                        static_data_segments.iter().map(SegmentBase::copy).collect(),
+                        RenderStaticData::raster_segments(),
                     )
                 }
             };
@@ -512,26 +533,20 @@ impl RenderLayer for RenderHillshadeLayer {
                 continue;
             };
             let draw = FrameDraw { depth: DrawDepth::Off, ..cached.draw.frame_draw(Some(tile_id)) };
-            frame_draws.push((draw, self.uniforms(&tile_id.to_unwrapped(), paint_parameters)));
+            draw_list.push(draw, self.uniforms(&tile_id.to_unwrapped(), num_lights, paint_parameters));
         }
 
-        frame_draws.sort_by_key(|(draw, _)| draw.order());
-        let props = (!frame_draws.is_empty()).then(|| self.evaluated_props(paint_parameters));
+        let props = (!draw_list.is_empty()).then(|| self.evaluated_props(paint_parameters));
         let frame = self.drawing.frame.get_or_insert_with(FrameDraws::new);
-        if let Some(props) = props {
-            let buffers = &mut frame.uniform_buffers;
-            buffers.create_or_update_pod(ID_HILLSHADE_EVALUATED_PROPS_UBO, &props, context);
-            let draw_ubos: Vec<HillshadeDrawableUBO> =
-                frame_draws.iter().map(|(_, uniforms)| uniforms.draw_ubo).collect();
-            buffers.write_storage(ID_HILLSHADE_DRAWABLE_UBO, bytemuck::cast_slice(&draw_ubos), context);
-            let tile_props: Vec<HillshadeTilePropsUBO> =
-                frame_draws.iter().map(|(_, uniforms)| uniforms.tile_props).collect();
-            buffers.write_storage(ID_HILLSHADE_TILE_PROPS_UBO, bytemuck::cast_slice(&tile_props), context);
-            let projections: Vec<ProjectionUBO> = frame_draws.iter().map(|(_, uniforms)| uniforms.projection).collect();
-            buffers.write_storage(ID_PROJECTION_UBO, bytemuck::cast_slice(&projections), context);
-        }
-        frame.draws.clear();
-        frame.draws.extend(frame_draws.into_iter().map(|(draw, _)| draw));
+        draw_list.finish(frame, context, |writer| {
+            if let Some(props) = &props {
+                writer.uniform(ID_HILLSHADE_EVALUATED_PROPS_UBO, props);
+            }
+            writer.storage(ID_HILLSHADE_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
+            writer.storage(ID_HILLSHADE_TILE_PROPS_UBO, |uniforms| uniforms.tile_props);
+            writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
+        });
+        self.draw_list = draw_list;
     }
 }
 
@@ -547,7 +562,7 @@ impl BucketTarget {
         maxzoom: u8,
         shader: &ShaderProgramPtr,
         attrs: VertexAttributeArray,
-        quad: (&IndexVectorBasePtr, &[SegmentBase]),
+        indexes: &IndexVectorBasePtr,
     ) -> BucketTarget {
         let (tilesize, stride, encoding, dem_image) = {
             let dem = bucket.get_dem_data();
@@ -572,13 +587,12 @@ impl BucketTarget {
                 ..Default::default()
             });
         }
-        let (indexes, segments) = quad;
         let geometry = DrawGeometry {
             vertices: attrs,
-            vertex_count: if segments.is_empty() { 0 } else { 4 },
+            vertex_count: 4,
             mode: DrawMode::Triangles(),
             indexes: Rc::clone(indexes),
-            segments: segments.iter().map(SegmentBase::copy).collect(),
+            segments: RenderStaticData::raster_segments(),
             instances: None,
         };
         let mut textures = Textures::default();
@@ -611,8 +625,14 @@ impl BucketTarget {
 }
 
 impl RenderHillshadeLayer {
-    /// The entries in the layer's storage buffers of the draw of `tile_id`.
-    fn uniforms(&self, tile_id: &UnwrappedTileID, parameters: &PaintParameters<'_>) -> HillshadeUniforms {
+    /// The entries in the layer's storage buffers of the draw of `tile_id`,
+    /// lit by `num_lights` light sources.
+    fn uniforms(
+        &self,
+        tile_id: &UnwrappedTileID,
+        num_lights: usize,
+        parameters: &PaintParameters<'_>,
+    ) -> HillshadeUniforms {
         let evaluated = &self.values.evaluated.paint;
         let projection = get_projection_data(
             tile_id,
@@ -630,7 +650,7 @@ impl RenderHillshadeLayer {
                 latrange: get_lat_range(tile_id),
                 exaggeration: *evaluated.hillshade_exaggeration.uniform(),
                 method: method_to_int(*evaluated.hillshade_method.uniform()),
-                num_lights: get_illumination_properties(evaluated).num_sources() as i32,
+                num_lights: num_lights as i32,
                 pad0: 0.0,
                 pad1: 0.0,
                 pad2: 0.0,

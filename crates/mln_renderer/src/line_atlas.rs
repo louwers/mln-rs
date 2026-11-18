@@ -9,7 +9,6 @@ use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_util::image::AlphaImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
-use mln_vec_map::VecMap;
 
 use crate::gfx::context::Context;
 use crate::gfx::texture2d::Texture2DPtr;
@@ -358,17 +357,25 @@ impl DashAtlas {
     }
 }
 
+/// The dash arrays of a texture, as the bits of their values, and its cap.
 type DashKey = (Vec<u32>, Vec<u32>, LinePatternCap);
 
 fn dash_key(from: &[f32], to: &[f32], cap: LinePatternCap) -> DashKey {
     (from.iter().map(|v| v.to_bits()).collect(), to.iter().map(|v| v.to_bits()).collect(), cap)
 }
 
+/// Whether `key` is that of the dash arrays `from` and `to` with `cap`.
+fn is_dash_key(key: &DashKey, from: &[f32], to: &[f32], cap: LinePatternCap) -> bool {
+    let same = |bits: &[u32], values: &[f32]| bits.iter().copied().eq(values.iter().map(|v| v.to_bits()));
+    key.2 == cap && same(&key.0, from) && same(&key.1, to)
+}
+
 #[derive(Default)]
 pub(crate) struct LineAtlas {
-    textures: VecMap<DashKey, DashPatternTexture>,
-    /// Stores a list of the texture objects that need uploading.
-    needs_upload: Vec<DashKey>,
+    /// The textures, in the order they were made, with their keys.
+    textures: Vec<(DashKey, DashPatternTexture)>,
+    /// The indexes of the textures that need uploading.
+    needs_upload: Vec<usize>,
 }
 
 impl LineAtlas {
@@ -384,18 +391,20 @@ impl LineAtlas {
         to: &[f32],
         cap: LinePatternCap,
     ) -> &mut DashPatternTexture {
-        let key = dash_key(from, to, cap);
-        let needs_upload = &mut self.needs_upload;
-        self.textures.entry(key.clone()).or_insert_with(|| {
-            needs_upload.push(key);
-            DashPatternTexture::new(from, to, cap)
-        })
+        let index = if let Some(index) = self.textures.iter().position(|(key, _)| is_dash_key(key, from, to, cap)) {
+            index
+        } else {
+            self.textures.push((dash_key(from, to, cap), DashPatternTexture::new(from, to, cap)));
+            self.needs_upload.push(self.textures.len() - 1);
+            self.textures.len() - 1
+        };
+        &mut self.textures[index].1
     }
 
     /// Uploads the textures to the GPU to be available when we need it.
     pub(crate) fn upload(&mut self, context: &Context) {
-        for key in std::mem::take(&mut self.needs_upload) {
-            if let Some(texture) = self.textures.get_mut(&key) {
+        for index in std::mem::take(&mut self.needs_upload) {
+            if let Some((_, texture)) = self.textures.get_mut(index) {
                 texture.upload(context);
             }
         }

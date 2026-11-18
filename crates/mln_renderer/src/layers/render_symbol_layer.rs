@@ -51,7 +51,9 @@ use crate::buckets::symbol_bucket::{
     Buffer, CollisionBoxDynamicVertex, CollisionBoxLayoutVertex, CollisionBuffer, PaintProperties, SymbolBucket,
 };
 use crate::draw::{DrawGeometry, DrawObjects, Textures, copy_shared_attributes};
-use crate::draw_cache::{BucketChanges, DrawDepth, DrawSlots, FrameDraw, FrameDraws, KeptDraw, LayerDrawing};
+use crate::draw_cache::{
+    BucketChanges, DrawDepth, DrawList, DrawSlots, FrameDraw, FrameDraws, KeptDraw, LayerDrawing, UniformWriter,
+};
 use crate::geometry::feature_index::FeatureIndex;
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
@@ -66,6 +68,7 @@ use crate::render_layer::{
     Parts, PartsMut, PlacedTile, RenderLayer, RenderLayerBase, SymbolTranslate, TypedLayer, set_layer_tiles,
 };
 use crate::render_pass::RenderPass;
+use crate::render_source::TileOrder;
 use crate::render_tile::{FrameTile, RenderTile};
 use crate::tile_matrix::{get_projection_data, to_projection_ubo};
 use crate::update_parameters::UpdateParameters;
@@ -589,6 +592,8 @@ pub(crate) struct RenderSymbolLayer {
     /// The layer's draws, and as its overlay those of the tiles' collision
     /// boxes and circles, from the first tile that has any.
     drawing: LayerDrawing<SymbolTile>,
+    /// The frame's draws as the update makes them.
+    draw_list: DrawList<SymbolUniforms>,
     /// The buckets the layer places, in placement order (`placementData`).
     placement_data: Vec<BucketPlacementData>,
     /// The buckets another layer places and this layer draws (`followerData`).
@@ -732,6 +737,7 @@ impl RenderSymbolLayer {
             base,
             values,
             drawing: LayerDrawing::default(),
+            draw_list: DrawList::default(),
             placement_data: Vec::new(),
             follower_data: Vec::new(),
             icon_size: 1.0,
@@ -989,8 +995,11 @@ impl RenderSymbolLayer {
         paint_parameters: &PaintParameters<'_>,
         context: &Context,
     ) {
-        let mut frame_draws: Vec<(FrameDraw, SymbolUniforms)> = Vec::new();
-        let mut collision_draws: Vec<FrameDraw> = Vec::new();
+        let mut draw_list = std::mem::take(&mut self.draw_list);
+        let mut collision_draws = self.drawing.overlay.as_mut().map(|overlay| std::mem::take(&mut overlay.draws));
+        if let Some(draws) = &mut collision_draws {
+            draws.clear();
+        }
         for tile in tiles {
             let tile_id = *tile.tile.get_overscaled_tile_id();
             if let Some(cached) = self.drawing.caches.cache(&tile_id) {
@@ -1007,7 +1016,7 @@ impl RenderSymbolLayer {
                         atlases: Some(Rc::clone(&draw.atlases)),
                         ..FrameDraw::new(Some(tile_id), slot as u32, draw.id)
                     };
-                    frame_draws.push((frame_draw, uniforms));
+                    draw_list.push(frame_draw, uniforms);
                 }
             }
             if let Some(cached) = self.drawing.caches.cache_mut(&tile_id) {
@@ -1015,38 +1024,36 @@ impl RenderSymbolLayer {
                     let slot = cached.collision_slot(index);
                     let draw = &mut cached.collision[index];
                     write_collision_uniforms(draw, &tile_id, paint_parameters);
-                    let frame_draw = FrameDraw {
-                        pass: passes,
-                        depth: DrawDepth::Off,
-                        ..FrameDraw::new(Some(tile_id), slot, draw.draw.id)
-                    };
-                    collision_draws.push(frame_draw);
+                    if let Some(collision_draws) = &mut collision_draws {
+                        collision_draws.push(FrameDraw {
+                            pass: passes,
+                            depth: DrawDepth::Off,
+                            ..FrameDraw::new(Some(tile_id), slot, draw.draw.id)
+                        });
+                    }
                 }
             }
         }
 
-        frame_draws.sort_by_key(|(draw, _)| draw.order());
         if let Some(frame) = &mut self.drawing.frame {
-            if !frame_draws.is_empty() {
-                write_uniforms(&self.values.evaluated.paint, frame, &frame_draws, context);
-            }
-            frame.draws.clear();
-            frame.draws.extend(frame_draws.into_iter().map(|(draw, _)| draw));
+            let evaluated = &self.values.evaluated.paint;
+            draw_list.finish(frame, context, |writer| write_uniforms(evaluated, writer));
+        } else {
+            draw_list.clear();
         }
-        if let Some(overlay) = &mut self.drawing.overlay {
+        self.draw_list = draw_list;
+        if let (Some(overlay), Some(mut collision_draws)) = (&mut self.drawing.overlay, collision_draws) {
             collision_draws.sort_by_key(FrameDraw::order);
             overlay.draws = collision_draws;
         }
     }
 }
 
-/// Writes the buffers of `draws`, the frame's in drawing order, of a layer
-/// of the paint values `evaluated` to `frame`'s.
+/// Writes the buffers of the frame's draws of a layer of the paint values
+/// `evaluated`.
 fn write_uniforms(
     evaluated: &SymbolPaintProperties::PossiblyEvaluated,
-    frame: &mut FrameDraws,
-    draws: &[(FrameDraw, SymbolUniforms)],
-    context: &Context,
+    writer: &mut UniformWriter<'_, SymbolUniforms>,
 ) {
     let props = SymbolEvaluatedPropsUBO {
         text_fill_color: evaluated.text_color.uniform().to_float_array(),
@@ -1062,14 +1069,10 @@ fn write_uniforms(
         icon_halo_blur: *evaluated.icon_halo_blur.uniform(),
         pad2: 0.0,
     };
-    let buffers = &mut frame.uniform_buffers;
-    buffers.create_or_update_pod(ID_SYMBOL_EVALUATED_PROPS_UBO, &props, context);
-    let draw_ubos: Vec<SymbolDrawableUBO> = draws.iter().map(|(_, uniforms)| uniforms.draw_ubo).collect();
-    buffers.write_storage(ID_SYMBOL_DRAWABLE_UBO, bytemuck::cast_slice(&draw_ubos), context);
-    let tile_props: Vec<SymbolTilePropsUBO> = draws.iter().map(|(_, uniforms)| uniforms.tile_props).collect();
-    buffers.write_storage(ID_SYMBOL_TILE_PROPS_UBO, bytemuck::cast_slice(&tile_props), context);
-    let projections: Vec<ProjectionUBO> = draws.iter().map(|(_, uniforms)| uniforms.projection).collect();
-    buffers.write_storage(ID_PROJECTION_UBO, bytemuck::cast_slice(&projections), context);
+    writer.uniform(ID_SYMBOL_EVALUATED_PROPS_UBO, &props);
+    writer.storage(ID_SYMBOL_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
+    writer.storage(ID_SYMBOL_TILE_PROPS_UBO, |uniforms| uniforms.tile_props);
+    writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
 }
 
 /// Writes the buffers of a collision draw of the tile `tile_id`: its matrix,
@@ -1190,17 +1193,16 @@ impl RenderLayer for RenderSymbolLayer {
         self.placement_data.clear();
     }
 
-    /// Picks the source's tiles in
-    /// [`tile_order_by_y`](crate::render_source::RenderSource::tile_order_by_y), and
+    /// Picks the source's tiles in [`TileOrder::ByY`], and
     /// collects the symbol buckets of the tiles the layer places, and of
     /// those whose buckets another layer places and this one draws.
-    fn prepare(&mut self, params: &LayerPrepareParameters<'_>) -> Option<Vec<usize>> {
+    fn prepare(&mut self, params: &LayerPrepareParameters<'_>) -> Option<TileOrder> {
         let Some(source) = params.source else {
             self.set_tiles(None);
             return None;
         };
-        let order = source.tile_order_by_y();
-        let tiles = params.tiles(order.as_deref());
+        let order = Some(TileOrder::ByY);
+        let tiles = params.tiles(order);
         if let Some(tiles) = tiles {
             self.add_render_passes_from_tiles(tiles);
         }

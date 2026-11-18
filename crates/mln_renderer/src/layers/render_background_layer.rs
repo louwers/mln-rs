@@ -30,7 +30,7 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use super::cast_matrix;
 use crate::bucket::NoBucket;
 use crate::draw::{DrawGeometry, DrawObjects, Textures, raw_vertices};
-use crate::draw_cache::{DrawDepth, FrameDraw, FrameDraws, KeptDraw, LayerDrawing};
+use crate::draw_cache::{DrawDepth, DrawList, FrameDraw, FrameDraws, KeptDraw, LayerDrawing};
 use crate::globe_tile_mesh::raw_globe_tile_mesh;
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
@@ -40,6 +40,7 @@ use crate::render_layer::{
     TypedLayer,
 };
 use crate::render_pass::RenderPass;
+use crate::render_source::TileOrder;
 use crate::render_static_data::RenderStaticData;
 use crate::tile_matrix::{get_projection_data, to_projection_ubo};
 use crate::update_parameters::UpdateParameters;
@@ -71,6 +72,9 @@ pub(crate) struct RenderBackgroundLayer {
     base: RenderLayerBase,
     values: LayerValues<Background>,
     drawing: LayerDrawing<KeptDraw>,
+    /// The frame's draws as the update makes them, with their drawable
+    /// UBOs and projections.
+    draw_list: DrawList<(BackgroundDrawableUnionUBO, ProjectionUBO)>,
     plain_shader: Option<ShaderProgramPtr>,
     pattern_shader: Option<ShaderProgramPtr>,
     /// The passes the tiles' draws were built for, and whether with a
@@ -85,6 +89,7 @@ impl RenderBackgroundLayer {
             base,
             values,
             drawing: LayerDrawing::default(),
+            draw_list: DrawList::default(),
             plain_shader: None,
             pattern_shader: None,
             draws_built_for: None,
@@ -221,7 +226,7 @@ impl RenderLayer for RenderBackgroundLayer {
 
     /// Adds the layer's pattern to the pattern atlas. The layer draws
     /// the tiles that cover the view, not its source's.
-    fn prepare(&mut self, parameters: &LayerPrepareParameters<'_>) -> Option<Vec<usize>> {
+    fn prepare(&mut self, parameters: &LayerPrepareParameters<'_>) -> Option<TileOrder> {
         let evaluated = &self.values.evaluated.paint;
         if !evaluated.background_pattern.faded().to.empty() {
             // Ensures that the pattern bitmap gets copied to atlas bitmap.
@@ -341,7 +346,6 @@ impl RenderLayer for RenderBackgroundLayer {
         });
         drop(pattern_atlas);
 
-        let mut frame_draws = Vec::new();
         for tile_id in &tile_cover {
             let Some(cached) = self.drawing.caches.cache_mut(tile_id) else {
                 continue;
@@ -354,15 +358,11 @@ impl RenderLayer for RenderBackgroundLayer {
                 depth: DrawDepth::Layer { sub_layer: 0, mask: DepthMaskType::ReadWrite },
                 ..cached.frame_draw(Some(*tile_id))
             };
-            frame_draws.push((draw, Self::uniforms(tile_id, has_pattern, paint_parameters)));
+            self.draw_list.push(draw, Self::uniforms(tile_id, has_pattern, paint_parameters));
         }
-        frame_draws.sort_by_key(|(draw, _)| draw.order());
 
-        let Some(frame) = &mut self.drawing.frame else {
-            return;
-        };
-        if !frame_draws.is_empty() {
-            let buffers = &mut frame.uniform_buffers;
+        let frame = self.drawing.frame.get_or_insert_with(FrameDraws::new);
+        self.draw_list.finish(frame, context, |writer| {
             let opacity = *evaluated.background_opacity.uniform();
             if let Some((from, to)) = pattern_positions {
                 let crossfade = &evaluated_properties.crossfade;
@@ -378,7 +378,7 @@ impl RenderLayer for RenderBackgroundLayer {
                     mix: crossfade.t,
                     opacity,
                 };
-                buffers.create_or_update_pod(ID_BACKGROUND_PROPS_UBO, &props, context);
+                writer.uniform(ID_BACKGROUND_PROPS_UBO, &props);
             } else {
                 let props = BackgroundPropsUBO {
                     color: evaluated.background_color.uniform().to_float_array(),
@@ -387,15 +387,10 @@ impl RenderLayer for RenderBackgroundLayer {
                     pad2: 0.0,
                     pad3: 0.0,
                 };
-                buffers.create_or_update_pod(ID_BACKGROUND_PROPS_UBO, &props, context);
+                writer.uniform(ID_BACKGROUND_PROPS_UBO, &props);
             }
-            let draw_ubos: Vec<BackgroundDrawableUnionUBO> =
-                frame_draws.iter().map(|(_, (draw_ubo, _))| *draw_ubo).collect();
-            buffers.write_storage(ID_BACKGROUND_DRAWABLE_UBO, bytemuck::cast_slice(&draw_ubos), context);
-            let projections: Vec<ProjectionUBO> = frame_draws.iter().map(|(_, (_, projection))| *projection).collect();
-            buffers.write_storage(ID_PROJECTION_UBO, bytemuck::cast_slice(&projections), context);
-        }
-        frame.draws.clear();
-        frame.draws.extend(frame_draws.into_iter().map(|(draw, _)| draw));
+            writer.storage(ID_BACKGROUND_DRAWABLE_UBO, |(draw_ubo, _)| *draw_ubo);
+            writer.storage(ID_PROJECTION_UBO, |(_, projection)| *projection);
+        });
     }
 }

@@ -1263,9 +1263,13 @@ impl RenderOrchestrator {
             let source = render_item.source.as_ref().and_then(|id| self.render_sources.get_key_value(id));
             let source = source.map(|(id, source)| (id.as_str(), &**source));
             let source_contents = contents.of(source, &self.tile_store);
-            let layer_source = source.and_then(|(_, source)| match render_item.tile_order.as_deref() {
-                Some(order) => Some(LayerSource::Tiles(LayerTiles::new(source.render_tiles(), source_contents, order))),
-                None => source.get_image_render_data().map(LayerSource::Image),
+            let layer_source = source.and_then(|(_, source)| {
+                match render_item.tile_order.and_then(|order| source.tile_order(order)) {
+                    Some(order) => {
+                        Some(LayerSource::Tiles(LayerTiles::new(source.render_tiles(), source_contents, order)))
+                    }
+                    None => source.get_image_render_data().map(LayerSource::Image),
+                }
             });
             render_layer.update(paint_parameters, update_parameters, layer_source);
             has_3d = has_3d || render_layer.needs_globe_depth();

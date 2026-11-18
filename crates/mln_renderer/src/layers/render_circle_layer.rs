@@ -26,8 +26,7 @@ use super::{cast_matrix, refresh_paint_attributes};
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::circle_bucket::{CircleBinders, CircleBucket, CircleLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
-use crate::draw_cache::{FrameDraw, FrameDraws, KeptDraw, LayerDrawing};
-use crate::gfx::context::Context;
+use crate::draw_cache::{DrawList, FrameDraws, KeptDraw, LayerDrawing, UniformWriter};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::circle_layout::CircleLayout;
 use crate::layout::layout::{LayoutParameters, SourceLayer};
@@ -174,13 +173,21 @@ pub(crate) struct RenderCircleLayer {
     base: RenderLayerBase,
     values: LayerValues<Circle>,
     drawing: LayerDrawing<KeptDraw>,
+    /// The frame's draws as the update makes them.
+    draw_list: DrawList<CircleUniforms>,
     circle_shader_group: Option<ShaderGroupPtr>,
 }
 
 impl RenderCircleLayer {
     pub(crate) fn new(impl_: Arc<LayerStyle<Circle>>) -> Self {
         let (base, values) = LayerValues::new(impl_);
-        RenderCircleLayer { base, values, drawing: LayerDrawing::default(), circle_shader_group: None }
+        RenderCircleLayer {
+            base,
+            values,
+            drawing: LayerDrawing::default(),
+            draw_list: DrawList::default(),
+            circle_shader_group: None,
+        }
     }
 
     /// The entries in the layer's storage buffers of the draw of `tile_id`,
@@ -234,14 +241,8 @@ impl RenderCircleLayer {
         }
     }
 
-    /// Writes the layer's buffers of `draws`, the frame's in drawing order,
-    /// to `frame`'s.
-    fn write_uniforms(
-        layer: &EvaluatedLayer<Circle>,
-        frame: &mut FrameDraws,
-        draws: &[(FrameDraw, CircleUniforms)],
-        context: &Context,
-    ) {
+    /// Writes the layer's buffers of the frame's draws.
+    fn write_uniforms(layer: &EvaluatedLayer<Circle>, writer: &mut UniformWriter<'_, CircleUniforms>) {
         let evaluated = &layer.paint;
         let props = CircleEvaluatedPropsUBO {
             color: evaluated.circle_color.uniform().to_float_array(),
@@ -255,12 +256,9 @@ impl RenderCircleLayer {
             pitch_with_map: i32::from(*evaluated.circle_pitch_alignment.uniform() == AlignmentType::Map),
             pad1: 0.0,
         };
-        let buffers = &mut frame.uniform_buffers;
-        buffers.create_or_update_pod(ID_CIRCLE_EVALUATED_PROPS_UBO, &props, context);
-        let draw_ubos: Vec<CircleDrawableUBO> = draws.iter().map(|(_, uniforms)| uniforms.draw_ubo).collect();
-        buffers.write_storage(ID_CIRCLE_DRAWABLE_UBO, bytemuck::cast_slice(&draw_ubos), context);
-        let projections: Vec<ProjectionUBO> = draws.iter().map(|(_, uniforms)| uniforms.projection).collect();
-        buffers.write_storage(ID_PROJECTION_UBO, bytemuck::cast_slice(&projections), context);
+        writer.uniform(ID_CIRCLE_EVALUATED_PROPS_UBO, &props);
+        writer.storage(ID_CIRCLE_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
+        writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
     }
 }
 
@@ -445,7 +443,7 @@ impl RenderLayer for RenderCircleLayer {
 
         let evaluated_properties = Arc::clone(&self.values.evaluated);
         let evaluated = &evaluated_properties.paint;
-        let mut frame_draws: Vec<(FrameDraw, CircleUniforms)> = Vec::new();
+        let mut draw_list = std::mem::take(&mut self.draw_list);
         for tile in render_tiles.iter() {
             let tile_id = *tile.tile.get_overscaled_tile_id();
 
@@ -512,15 +510,12 @@ impl RenderLayer for RenderCircleLayer {
             else {
                 continue;
             };
-            frame_draws.push((draw, self.uniforms(&tile_id, binders, paint_parameters)));
+            draw_list.push(draw, self.uniforms(&tile_id, binders, paint_parameters));
         }
 
-        frame_draws.sort_by_key(|(draw, _)| draw.order());
         let frame = self.drawing.frame.get_or_insert_with(FrameDraws::new);
-        if !frame_draws.is_empty() {
-            Self::write_uniforms(&self.values.evaluated, frame, &frame_draws, context);
-        }
-        frame.draws.clear();
-        frame.draws.extend(frame_draws.into_iter().map(|(draw, _)| draw));
+        let layer = &self.values.evaluated;
+        draw_list.finish(frame, context, |writer| Self::write_uniforms(layer, writer));
+        self.draw_list = draw_list;
     }
 }

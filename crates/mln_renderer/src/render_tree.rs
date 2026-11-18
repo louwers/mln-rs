@@ -8,6 +8,7 @@ use mln_util::Color;
 use mln_vec_map::VecMap;
 
 use crate::paint_parameters::TransformParameters;
+use crate::render_source::TileOrder;
 use crate::sources::render_tile_source::DebugLayer;
 
 /// The kinds of debug overlays (layers: debug).
@@ -33,10 +34,9 @@ pub(crate) struct LayerRenderItem {
     /// The id of the orchestrator's render source, `None` for layers without
     /// a source.
     pub(crate) source: Option<String>,
-    /// The order the layer draws its source's tiles in, as indexes into the
-    /// source's render tiles, which the layer's prepare returns; `None` for
-    /// a layer without tiles.
-    pub(crate) tile_order: Option<Vec<usize>>,
+    /// The order the layer draws its source's tiles in, which the layer's
+    /// prepare returns; `None` for a layer without tiles.
+    pub(crate) tile_order: Option<TileOrder>,
 }
 
 pub(crate) struct RenderTreeParameters {

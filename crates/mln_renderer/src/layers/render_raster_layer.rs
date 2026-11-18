@@ -31,7 +31,7 @@ use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Raster;
 use mln_style_types::{RasterResamplingType, ResamplingType, TranslateAnchorType};
 use mln_tile_id::UnwrappedTileID;
-use mln_util::hash::HashMap;
+use mln_util::hash::{HashMap, HashSet};
 use mln_util::identity::SimpleIdentity;
 use mln_util::time::Instant;
 
@@ -39,7 +39,7 @@ use super::{cast_matrix, shared_vertices};
 use crate::bucket::{Bucket, NoBucket};
 use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
-use crate::draw_cache::{DrawSlots, FrameDraw, FrameDraws, KeptDraw, LayerDrawing};
+use crate::draw_cache::{DrawList, DrawSlots, FrameDraw, FrameDraws, KeptDraw, LayerDrawing};
 use crate::gfx::context::Context;
 use crate::gfx::texture2d::Texture2DPtr;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
@@ -52,7 +52,7 @@ use crate::render_layer::{
     TypedLayer, set_layer_tiles,
 };
 use crate::render_pass::RenderPass;
-use crate::render_source::RenderSource;
+use crate::render_source::TileOrder;
 use crate::render_static_data::RenderStaticData;
 use crate::sources::render_image_source::ImageSourceRenderData;
 use crate::tile_matrix::{get_projection_data, to_projection_ubo};
@@ -93,6 +93,9 @@ pub(crate) struct RenderRasterLayer {
     /// The draws of the tiles, and of an image source's image, one for each
     /// tile it is drawn in.
     drawing: LayerDrawing<RasterTile, Vec<KeptDraw>>,
+    /// The frame's draws as the update makes them, with their drawable UBOs
+    /// and projections.
+    draw_list: DrawList<(RasterDrawableUBO, ProjectionUBO)>,
 
     raster_shader: Option<ShaderProgramPtr>,
 
@@ -101,6 +104,8 @@ pub(crate) struct RenderRasterLayer {
 
     /// `bucket.texture2d`, per bucket.
     textures: HashMap<SimpleIdentity, Texture2DPtr>,
+    /// The buckets of the frame's tiles, whose textures stay.
+    live_buckets: HashSet<SimpleIdentity>,
 }
 
 impl RenderRasterLayer {
@@ -110,10 +115,12 @@ impl RenderRasterLayer {
             base,
             values,
             drawing: LayerDrawing::default(),
+            draw_list: DrawList::default(),
             raster_shader: None,
             static_geometry: None,
             globe_meshes: GlobeTileMeshCache::new(),
             textures: HashMap::default(),
+            live_buckets: HashSet::default(),
         }
     }
 
@@ -181,7 +188,6 @@ impl RenderRasterLayer {
 
         // TODO: Share textures
         let mut image_draws = Vec::new();
-        let mut frame_draws = Vec::new();
         for (slot, tile_id) in image_data.tile_ids.iter().enumerate() {
             let geometry = {
                 // buildVertexData(builder, nullptr, bucket): the bucket's own
@@ -197,12 +203,13 @@ impl RenderRasterLayer {
             };
             let texture = self.bucket_texture(context, bucket);
             let draw = KeptDraw::new(new_objects(raster_shader, geometry, texture));
-            frame_draws.push((FrameDraw::new(None, slot as u32, draw.id), Self::uniforms(tile_id, paint_parameters)));
+            let uniforms = Self::uniforms(tile_id, paint_parameters);
+            self.draw_list.push(FrameDraw::new(None, slot as u32, draw.id), uniforms);
             image_draws.push(draw);
         }
 
         *self.drawing.caches.layer_cache_mut() = image_draws;
-        self.set_frame_draws(frame_draws, context);
+        self.finish_frame_draws(context);
     }
 
     /// The entries in the layer's storage buffers of a draw of `tile_id`.
@@ -220,15 +227,14 @@ impl RenderRasterLayer {
         (RasterDrawableUBO { matrix: cast_matrix(&projection.fallback_matrix) }, to_projection_ubo(&projection))
     }
 
-    /// Makes `draws`, sorted into drawing order, the layer's draws of the
-    /// frame, and writes the layer's buffers of them.
-    fn set_frame_draws(&mut self, mut draws: Vec<(FrameDraw, (RasterDrawableUBO, ProjectionUBO))>, context: &Context) {
+    /// Makes the draws of the draw list the layer's draws of the frame, and
+    /// writes the layer's buffers of them.
+    fn finish_frame_draws(&mut self, context: &Context) {
         let composite = self.composite();
         let frame = self.drawing.frame.get_or_insert_with(FrameDraws::new);
         frame.composite = composite;
-        draws.sort_by_key(|(draw, _)| draw.order());
-        if !draws.is_empty() {
-            let evaluated = &self.values.evaluated.paint;
+        let evaluated = &self.values.evaluated.paint;
+        self.draw_list.finish(frame, context, |writer| {
             let props = RasterEvaluatedPropsUBO {
                 spin_weights: spin_weights(*evaluated.raster_hue_rotate.uniform()),
                 tl_parent: [0.0, 0.0],
@@ -243,15 +249,10 @@ impl RenderRasterLayer {
                 pad1: 0.0,
                 pad2: 0.0,
             };
-            let buffers = &mut frame.uniform_buffers;
-            buffers.create_or_update_pod(ID_RASTER_EVALUATED_PROPS_UBO, &props, context);
-            let draw_ubos: Vec<RasterDrawableUBO> = draws.iter().map(|(_, (draw_ubo, _))| *draw_ubo).collect();
-            buffers.write_storage(ID_RASTER_DRAWABLE_UBO, bytemuck::cast_slice(&draw_ubos), context);
-            let projections: Vec<ProjectionUBO> = draws.iter().map(|(_, (_, projection))| *projection).collect();
-            buffers.write_storage(ID_PROJECTION_UBO, bytemuck::cast_slice(&projections), context);
-        }
-        frame.draws.clear();
-        frame.draws.extend(draws.into_iter().map(|(draw, _)| draw));
+            writer.uniform(ID_RASTER_EVALUATED_PROPS_UBO, &props);
+            writer.storage(ID_RASTER_DRAWABLE_UBO, |(draw_ubo, _)| *draw_ubo);
+            writer.storage(ID_PROJECTION_UBO, |(_, projection)| *projection);
+        });
     }
 }
 
@@ -351,8 +352,8 @@ impl RenderLayer for RenderRasterLayer {
     /// Picks the source's tiles; an image source has none, and its image
     /// comes with the update. The passes are the layer's own, whatever its
     /// tiles' buckets were laid out for.
-    fn prepare(&mut self, params: &LayerPrepareParameters<'_>) -> Option<Vec<usize>> {
-        let order = params.source.and_then(RenderSource::tile_order);
+    fn prepare(&mut self, params: &LayerPrepareParameters<'_>) -> Option<TileOrder> {
+        let order = params.source.map(|_| TileOrder::ById);
         set_layer_tiles(self, params, order)
     }
 
@@ -410,11 +411,12 @@ impl RenderLayer for RenderRasterLayer {
         });
         let static_vertices = Rc::clone(&static_geometry.vertices);
         let static_indexes = Rc::clone(&static_geometry.indexes);
-        let static_segments: Vec<SegmentBase> = static_geometry.segments.iter().map(SegmentBase::copy).collect();
 
         // Drop the textures of buckets that are no longer rendered.
-        let live_buckets: mln_util::hash::HashSet<SimpleIdentity> =
-            render_tiles.iter().filter_map(|tile| tile.get_bucket(&*self.base.style).map(Bucket::get_id)).collect();
+        let live_buckets = &mut self.live_buckets;
+        live_buckets.clear();
+        live_buckets
+            .extend(render_tiles.iter().filter_map(|tile| tile.get_bucket(&*self.base.style).map(Bucket::get_id)));
         self.textures.retain(|id, _| live_buckets.contains(id));
         // Kept draws keep their textures, so a changed filter is applied to
         // the textures themselves.
@@ -423,7 +425,6 @@ impl RenderLayer for RenderRasterLayer {
             texture.borrow_mut().set_sampler(sampler);
         }
 
-        let mut frame_draws = Vec::new();
         for tile in render_tiles.iter() {
             let tile_id = *tile.tile.get_overscaled_tile_id();
 
@@ -475,7 +476,8 @@ impl RenderLayer for RenderRasterLayer {
                         &geometry.segments,
                     )
                 } else {
-                    raster_geometry(&static_vertices, 4, Rc::clone(&static_indexes), &static_segments)
+                    let segments = self.static_geometry.as_ref().map_or(&[][..], |geometry| &geometry.segments);
+                    raster_geometry(&static_vertices, 4, Rc::clone(&static_indexes), segments)
                 };
                 let objects = new_objects(&raster_shader, draw_geometry, texture);
                 self.drawing
@@ -485,10 +487,10 @@ impl RenderLayer for RenderRasterLayer {
 
             if let Some(cached) = self.drawing.caches.cache_mut(&tile_id) {
                 let draw = cached.draw.frame_draw(Some(tile_id));
-                frame_draws.push((draw, Self::uniforms(&tile_id.to_unwrapped(), paint_parameters)));
+                self.draw_list.push(draw, Self::uniforms(&tile_id.to_unwrapped(), paint_parameters));
             }
         }
 
-        self.set_frame_draws(frame_draws, context);
+        self.finish_frame_draws(context);
     }
 }

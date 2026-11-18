@@ -6,9 +6,10 @@
 //! tile's draws were built from and what of that bucket's vertex data
 //! changed since, and a cache of the draws no tile holds. Its update makes
 //! the frame's draws, values ([`FrameDraw`]) that name their GPU objects by
-//! their cache and their slot in it, with their uniforms in the buffers of
-//! their [`FrameDraws`]. The caches issue the draws of the frames they are
-//! kept with, in a [`LayerDrawing`] or [`Draws`].
+//! their cache and their slot in it, in a [`DrawList`] with their uniform
+//! values, which it writes to the buffers of their [`FrameDraws`]. The caches
+//! issue the draws of the frames they are kept with, in a [`LayerDrawing`] or
+//! [`Draws`].
 
 use std::ops::BitOrAssign;
 use std::rc::Rc;
@@ -227,6 +228,104 @@ impl FrameDraw {
     }
 }
 
+/// The draws an update makes for a frame, each with its uniform values of
+/// type `U`, before they become the draws of a [`FrameDraws`]. The list
+/// keeps its memory from frame to frame, so that a frame of no more draws
+/// than one before it allocates nothing.
+pub(crate) struct DrawList<U> {
+    /// The draws, each with the index of its values in `uniforms`.
+    draws: Vec<(FrameDraw, usize)>,
+    uniforms: Vec<U>,
+    /// The bytes of a storage buffer's entries, as [`UniformWriter`] writes
+    /// them.
+    bytes: Vec<u8>,
+}
+
+impl<U> Default for DrawList<U> {
+    fn default() -> Self {
+        DrawList { draws: Vec::new(), uniforms: Vec::new(), bytes: Vec::new() }
+    }
+}
+
+impl<U> DrawList<U> {
+    #[must_use]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.draws.is_empty()
+    }
+
+    /// Drops the list's draws.
+    pub(crate) fn clear(&mut self) {
+        self.draws.clear();
+        self.uniforms.clear();
+    }
+
+    pub(crate) fn push(&mut self, draw: FrameDraw, uniforms: U) {
+        self.draws.push((draw, self.uniforms.len()));
+        self.uniforms.push(uniforms);
+    }
+
+    /// Makes the list's draws `frame`'s, in [`FrameDraw::order`] and in the
+    /// order they were pushed among draws of the same order, and empties the
+    /// list. Where there are any, `write` first writes the buffers they read
+    /// to `frame`'s.
+    pub(crate) fn finish(
+        &mut self,
+        frame: &mut FrameDraws,
+        context: &Context,
+        write: impl FnOnce(&mut UniformWriter<'_, U>),
+    ) {
+        self.draws.sort_unstable_by_key(|(draw, index)| (draw.order(), *index));
+        if !self.draws.is_empty() {
+            write(&mut UniformWriter {
+                draws: &self.draws,
+                uniforms: &self.uniforms,
+                bytes: &mut self.bytes,
+                buffers: &mut frame.uniform_buffers,
+                context,
+            });
+        }
+        frame.draws.clear();
+        frame.draws.extend(self.draws.drain(..).map(|(draw, _)| draw));
+        self.uniforms.clear();
+    }
+}
+
+/// Writes the buffers that a frame's draws read, each draw's entries at its
+/// index in drawing order.
+pub(crate) struct UniformWriter<'a, U> {
+    draws: &'a [(FrameDraw, usize)],
+    uniforms: &'a [U],
+    bytes: &'a mut Vec<u8>,
+    buffers: &'a mut UniformBufferArray,
+    context: &'a Context,
+}
+
+impl<U> UniformWriter<'_, U> {
+    /// Writes each draw's `entry` of its uniform values to the storage
+    /// buffer `id`.
+    pub(crate) fn storage<P: bytemuck::Pod>(&mut self, id: usize, entry: impl Fn(&U) -> P) {
+        self.bytes.clear();
+        for &(_, index) in self.draws {
+            self.bytes.extend_from_slice(bytemuck::bytes_of(&entry(&self.uniforms[index])));
+        }
+        self.buffers.write_storage(id, self.bytes, self.context);
+    }
+
+    /// Writes `value`, which all the draws read, to the uniform buffer `id`.
+    pub(crate) fn uniform<P: bytemuck::Pod>(&mut self, id: usize, value: &P) {
+        self.buffers.create_or_update_pod(id, value, self.context);
+    }
+
+    /// The buffers the draws read, by id.
+    pub(crate) fn buffers(&mut self) -> &mut UniformBufferArray {
+        self.buffers
+    }
+
+    pub(crate) fn context(&self) -> &Context {
+        self.context
+    }
+}
+
 /// Draws of a frame, and what they share.
 pub(crate) struct FrameDraws {
     /// Tells the draws apart in the layer composite.
@@ -240,8 +339,9 @@ pub(crate) struct FrameDraws {
     /// surface, after they draw into a texture of their own; `None` where
     /// they draw straight onto the frame.
     pub(crate) composite: Option<Composite>,
-    /// The tiles whose masks the stencil buffer holds when the draws draw.
-    pub(crate) stencil_tiles: Option<Rc<Vec<UnwrappedTileID>>>,
+    /// The tiles whose masks the stencil buffer holds when the draws draw,
+    /// none where the draws clip to no tiles' masks.
+    stencil_tiles: Vec<UnwrappedTileID>,
 }
 
 impl FrameDraws {
@@ -252,8 +352,15 @@ impl FrameDraws {
             draws: Vec::new(),
             uniform_buffers: UniformBufferArray::new(),
             composite: None,
-            stencil_tiles: None,
+            stencil_tiles: Vec::new(),
         }
+    }
+
+    /// Makes `tiles` those whose masks the stencil buffer holds when the
+    /// draws draw.
+    pub(crate) fn set_stencil_tiles(&mut self, tiles: impl IntoIterator<Item = UnwrappedTileID>) {
+        self.stencil_tiles.clear();
+        self.stencil_tiles.extend(tiles);
     }
 
     /// How the draws composite onto the frame, with the id that tells them
@@ -277,9 +384,9 @@ pub(crate) enum DrawGroup<'a> {
 impl<'a> DrawGroup<'a> {
     /// The tiles whose masks the stencil buffer holds when the group draws.
     #[must_use]
-    pub(crate) fn stencil_tiles(self) -> Option<&'a Rc<Vec<UnwrappedTileID>>> {
+    pub(crate) fn stencil_tiles(self) -> Option<&'a [UnwrappedTileID]> {
         match self {
-            DrawGroup::Draws(frame) => frame.stencil_tiles.as_ref(),
+            DrawGroup::Draws(frame) => Some(&frame.stencil_tiles[..]).filter(|tiles| !tiles.is_empty()),
             DrawGroup::Custom => None,
         }
     }
@@ -483,8 +590,8 @@ impl<T: DrawSlots, L: DrawSlots> DrawCaches<T, L> {
             let clips = frame.draws.iter().filter(in_pass).filter(is_volume).any(|draw| draw.clip);
             clips.then(|| parameters.stencil_mode_for_3d(gpu))
         } else {
-            if let Some(stencil_tiles) = frame.stencil_tiles.as_ref().filter(|tiles| !tiles.is_empty()) {
-                parameters.render_tile_clipping_masks(gpu, stencil_tiles);
+            if !frame.stencil_tiles.is_empty() {
+                parameters.render_tile_clipping_masks(gpu, &frame.stencil_tiles);
             }
             None
         };

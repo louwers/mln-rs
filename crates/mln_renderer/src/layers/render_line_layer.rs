@@ -42,7 +42,7 @@ use super::{cast_matrix, refresh_paint_attributes};
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::line_bucket::{LineBinders, LineBucket, LineLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
-use crate::draw_cache::{DrawSlots, FrameDraw, FrameDraws, LayerDrawing};
+use crate::draw_cache::{DrawList, DrawSlots, FrameDraw, FrameDraws, LayerDrawing, UniformWriter};
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
 use crate::gfx::texture2d::Texture2DPtr;
@@ -58,6 +58,7 @@ use crate::render_layer::{
     TypedLayer,
 };
 use crate::render_pass::RenderPass;
+use crate::render_source::TileOrder;
 use crate::render_tile::FrameTile;
 use crate::tile_matrix::{get_projection_data, to_projection_ubo};
 use crate::update_parameters::UpdateParameters;
@@ -309,6 +310,8 @@ pub(crate) struct RenderLineLayer {
     base: RenderLayerBase,
     values: LayerValues<Line>,
     drawing: LayerDrawing<LineTile>,
+    /// The frame's draws as the update makes them.
+    draw_list: DrawList<LineUniforms>,
 
     color_ramp: Rc<PremultipliedImage>,
     /// The global-state snapshot used to generate the cached color ramp and
@@ -334,6 +337,7 @@ impl RenderLineLayer {
             base,
             values,
             drawing: LayerDrawing::default(),
+            draw_list: DrawList::default(),
             color_ramp: Rc::new(PremultipliedImage::new(Size::new(256, 1))),
             color_ramp_global_state: None,
             color_ramp_texture_2d: None,
@@ -524,9 +528,9 @@ impl RenderLayer for RenderLineLayer {
 
     /// Picks the tiles as the default does, and adds the dash patterns of
     /// their buckets to the line atlas.
-    fn prepare(&mut self, params: &LayerPrepareParameters<'_>) -> Option<Vec<usize>> {
+    fn prepare(&mut self, params: &LayerPrepareParameters<'_>) -> Option<TileOrder> {
         let order = crate::render_layer::prepare_base(self, params);
-        let Some(render_tiles) = params.tiles(order.as_deref()) else {
+        let Some(render_tiles) = params.tiles(order) else {
             return order;
         };
         let style = Arc::clone(&self.base.style);
@@ -582,11 +586,10 @@ impl RenderLayer for RenderLineLayer {
         let frame = self.drawing.frame.get_or_insert_with(FrameDraws::new);
         let paint = &self.values.evaluated.paint;
         frame.composite = Composite::of(*paint.line_layer_opacity.uniform(), *paint.line_layer_blend.uniform());
-        frame.stencil_tiles = Some(Rc::new(render_tiles.render_tiles().map(|tile| tile.id).collect()));
+        frame.set_stencil_tiles(render_tiles.render_tiles().map(|tile| tile.id));
 
         let render_pass =
             RenderPass(self.base.evaluated_properties.render_passes() & !RenderPass::Opaque.underlying_type());
-        let mut frame_draws: Vec<(FrameDraw, LineUniforms)> = Vec::new();
         for tile in render_tiles.iter() {
             let tile_id = *tile.tile.get_overscaled_tile_id();
 
@@ -642,17 +645,13 @@ impl RenderLayer for RenderLineLayer {
                     atlases: cached.atlases.clone(),
                     ..FrameDraw::new(Some(tile_id), 0, cached.id)
                 };
-                frame_draws.push((draw, uniforms));
+                self.draw_list.push(draw, uniforms);
             }
         }
 
-        frame_draws.sort_by_key(|(draw, _)| draw.order());
         let frame = self.drawing.frame.get_or_insert_with(FrameDraws::new);
-        if !frame_draws.is_empty() {
-            Self::write_uniforms(&self.values.evaluated, frame, &frame_draws, context);
-        }
-        frame.draws.clear();
-        frame.draws.extend(frame_draws.into_iter().map(|(draw, _)| draw));
+        let layer = &self.values.evaluated;
+        self.draw_list.finish(frame, context, |writer| Self::write_uniforms(layer, writer));
     }
 }
 
@@ -950,17 +949,11 @@ impl RenderLineLayer {
         Some(uniforms)
     }
 
-    /// Writes the layer's buffers of `draws`, the frame's in drawing order,
-    /// to `frame`'s.
-    fn write_uniforms(
-        layer: &EvaluatedLayer<Line>,
-        frame: &mut FrameDraws,
-        draws: &[(FrameDraw, LineUniforms)],
-        context: &Context,
-    ) {
+    /// Writes the layer's buffers of the frame's draws.
+    fn write_uniforms(layer: &EvaluatedLayer<Line>, writer: &mut UniformWriter<'_, LineUniforms>) {
         use line_expression_mask::{BLUR, COLOR, FLOOR_WIDTH, GAP_WIDTH, NONE, OFFSET, OPACITY, WIDTH};
         let evaluated = &layer.paint;
-        let gpu_expressions = context.caps().line_expressions;
+        let gpu_expressions = writer.context().caps().line_expressions;
         // Where the shaders read the expression UBO, the mask marks the
         // properties evaluated on the GPU (none, see the top of the file);
         // elsewhere, the constant ones.
@@ -991,16 +984,13 @@ impl RenderLineLayer {
             expression_mask,
             pad1: 0.0,
         };
-        let buffers = &mut frame.uniform_buffers;
-        buffers.create_or_update_pod(ID_LINE_EVALUATED_PROPS_UBO, &props, context);
-        if gpu_expressions && buffers.get(ID_LINE_EXPRESSION_UBO).is_none() {
-            buffers.set(ID_LINE_EXPRESSION_UBO, context.create_uniform_buffer(&[0; LINE_EXPRESSION_UBO_SIZE]));
+        writer.uniform(ID_LINE_EVALUATED_PROPS_UBO, &props);
+        if gpu_expressions && writer.buffers().get(ID_LINE_EXPRESSION_UBO).is_none() {
+            let buffer = writer.context().create_uniform_buffer(&[0; LINE_EXPRESSION_UBO_SIZE]);
+            writer.buffers().set(ID_LINE_EXPRESSION_UBO, buffer);
         }
-        let draw_ubos: Vec<LineDrawableUnionUBO> = draws.iter().map(|(_, uniforms)| uniforms.draw_ubo).collect();
-        buffers.write_storage(ID_LINE_DRAWABLE_UBO, bytemuck::cast_slice(&draw_ubos), context);
-        let tile_props: Vec<LineTilePropsUnionUBO> = draws.iter().map(|(_, uniforms)| uniforms.tile_props).collect();
-        buffers.write_storage(ID_LINE_TILE_PROPS_UBO, bytemuck::cast_slice(&tile_props), context);
-        let projections: Vec<ProjectionUBO> = draws.iter().map(|(_, uniforms)| uniforms.projection).collect();
-        buffers.write_storage(ID_PROJECTION_UBO, bytemuck::cast_slice(&projections), context);
+        writer.storage(ID_LINE_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
+        writer.storage(ID_LINE_TILE_PROPS_UBO, |uniforms| uniforms.tile_props);
+        writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
     }
 }

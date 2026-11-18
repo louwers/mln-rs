@@ -36,7 +36,7 @@ use crate::bucket::Bucket;
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::fill_bucket::{FillBinders, FillBucket, FillLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, copy_shared_attributes};
-use crate::draw_cache::{DrawDepth, DrawSlots, FrameDraw, FrameDraws, LayerDrawing};
+use crate::draw_cache::{DrawDepth, DrawList, DrawSlots, FrameDraw, FrameDraws, LayerDrawing, UniformWriter};
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
 use crate::layer_composite::Composite;
@@ -167,6 +167,20 @@ struct OutlineQuad {
     vertices: VertexVectorBasePtr,
     indexes: IndexVectorBasePtr,
     attributes: VertexAttributeArray,
+}
+
+impl OutlineQuad {
+    /// The quad, whose corners every instanced outline reads per vertex.
+    fn new() -> OutlineQuad {
+        let vertices = shared_vertices(&RenderStaticData::fill_outline_vertices());
+        let indexes = Rc::new(RefCell::new(IndexVectorBase::new(RenderStaticData::quad_triangle_indices())));
+        let mut attributes = VertexAttributeArray::new();
+        if let Some(attr) = attributes.set(ID_FILL_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
+            let stride = size_of::<[i16; 2]>() as u32;
+            attr.set_shared_raw_data(Some(Rc::clone(&vertices)), 0, 0, stride, AttributeDataType::Short2);
+        }
+        OutlineQuad { vertices, indexes, attributes }
+    }
 }
 
 /// What building the draws of an update's tiles reads of the layer.
@@ -387,6 +401,8 @@ pub(crate) struct RenderFillLayer {
     base: RenderLayerBase,
     values: LayerValues<Fill>,
     drawing: LayerDrawing<FillTile>,
+    /// The frame's draws as the update makes them.
+    draw_list: DrawList<FillUniforms>,
 
     fill_shader_group: Option<ShaderGroupPtr>,
     /// The outline shaders: the line ones, or the instanced ones on a
@@ -395,9 +411,9 @@ pub(crate) struct RenderFillLayer {
     pattern_shader_group: Option<ShaderGroupPtr>,
     outline_pattern_shader_group: Option<ShaderGroupPtr>,
 
-    /// The instanced outlines' quad (`RenderStaticData::fill_outline_vertices`).
-    outline_quad_vertices: Option<VertexVectorBasePtr>,
-    outline_quad_indices: Option<IndexVectorBasePtr>,
+    /// The instanced outlines' quad (`RenderStaticData::fill_outline_vertices`),
+    /// from the first update on a device that draws them.
+    outline_quad: Option<OutlineQuad>,
 }
 
 impl RenderFillLayer {
@@ -407,12 +423,12 @@ impl RenderFillLayer {
             base,
             values,
             drawing: LayerDrawing::default(),
+            draw_list: DrawList::default(),
             fill_shader_group: None,
             outline_shader_group: None,
             pattern_shader_group: None,
             outline_pattern_shader_group: None,
-            outline_quad_vertices: None,
-            outline_quad_indices: None,
+            outline_quad: None,
         }
     }
 
@@ -514,14 +530,8 @@ impl RenderFillLayer {
         uniforms
     }
 
-    /// Writes the layer's buffers of `draws`, the frame's in drawing order,
-    /// to `frame`'s.
-    fn write_uniforms(
-        layer: &EvaluatedLayer<Fill>,
-        frame: &mut FrameDraws,
-        draws: &[(FrameDraw, FillUniforms)],
-        context: &Context,
-    ) {
+    /// Writes the layer's buffers of the frame's draws.
+    fn write_uniforms(layer: &EvaluatedLayer<Fill>, writer: &mut UniformWriter<'_, FillUniforms>) {
         let evaluated = &layer.paint;
         let props = FillEvaluatedPropsUBO {
             color: evaluated.fill_color.constant_or(&FillPaintProperties::Defaults::fill_color()).to_float_array(),
@@ -534,14 +544,10 @@ impl RenderFillLayer {
             from_scale: layer.crossfade.from_scale,
             to_scale: layer.crossfade.to_scale,
         };
-        let buffers = &mut frame.uniform_buffers;
-        buffers.create_or_update_pod(ID_FILL_EVALUATED_PROPS_UBO, &props, context);
-        let draw_ubos: Vec<FillDrawableUnionUBO> = draws.iter().map(|(_, uniforms)| uniforms.draw_ubo).collect();
-        buffers.write_storage(ID_FILL_DRAWABLE_UBO, bytemuck::cast_slice(&draw_ubos), context);
-        let tile_props: Vec<FillTilePropsUnionUBO> = draws.iter().map(|(_, uniforms)| uniforms.tile_props).collect();
-        buffers.write_storage(ID_FILL_TILE_PROPS_UBO, bytemuck::cast_slice(&tile_props), context);
-        let projections: Vec<ProjectionUBO> = draws.iter().map(|(_, uniforms)| uniforms.projection).collect();
-        buffers.write_storage(ID_PROJECTION_UBO, bytemuck::cast_slice(&projections), context);
+        writer.uniform(ID_FILL_EVALUATED_PROPS_UBO, &props);
+        writer.storage(ID_FILL_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
+        writer.storage(ID_FILL_TILE_PROPS_UBO, |uniforms| uniforms.tile_props);
+        writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
     }
 }
 
@@ -659,24 +665,11 @@ impl RenderLayer for RenderFillLayer {
         let frame = self.drawing.frame.get_or_insert_with(FrameDraws::new);
         let paint = &self.values.evaluated.paint;
         frame.composite = Composite::of(*paint.fill_layer_opacity.uniform(), *paint.fill_layer_blend.uniform());
-        frame.stencil_tiles = Some(Rc::new(render_tiles.render_tiles().map(|tile| tile.id).collect()));
+        frame.set_stencil_tiles(render_tiles.render_tiles().map(|tile| tile.id));
 
-        // The quad's corners, which every instanced outline reads per vertex.
-        let outline_quad = outline_quads.then(|| {
-            let vertices = Rc::clone(
-                self.outline_quad_vertices
-                    .get_or_insert_with(|| shared_vertices(&RenderStaticData::fill_outline_vertices())),
-            );
-            let indexes = Rc::clone(self.outline_quad_indices.get_or_insert_with(|| {
-                Rc::new(RefCell::new(IndexVectorBase::new(RenderStaticData::quad_triangle_indices())))
-            }));
-            let mut attributes = VertexAttributeArray::new();
-            if let Some(attr) = attributes.set(ID_FILL_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-                let stride = size_of::<[i16; 2]>() as u32;
-                attr.set_shared_raw_data(Some(Rc::clone(&vertices)), 0, 0, stride, AttributeDataType::Short2);
-            }
-            OutlineQuad { vertices, indexes, attributes }
-        });
+        if outline_quads && self.outline_quad.is_none() {
+            self.outline_quad = Some(OutlineQuad::new());
+        }
 
         let pattern = !self.values.unevaluated.fill_pattern.is_undefined();
         let mut builder = TileBuilder {
@@ -685,11 +678,11 @@ impl RenderLayer for RenderFillLayer {
             pattern,
             outline_is_fill_color: self.values.unevaluated.fill_outline_color.is_undefined(),
             projection_variant: self.base.projection_variant,
-            outline_quad: outline_quad.as_ref(),
+            outline_quad: self.outline_quad.as_ref().filter(|_| outline_quads),
             fill_depth: None,
         };
 
-        let mut frame_draws: Vec<(FrameDraw, FillUniforms)> = Vec::new();
+        let mut draw_list = std::mem::take(&mut self.draw_list);
         for tile in render_tiles.iter() {
             let tile_id = *tile.tile.get_overscaled_tile_id();
 
@@ -758,16 +751,13 @@ impl RenderLayer for RenderFillLayer {
                     atlases: cached.atlases.clone(),
                     ..FrameDraw::new(Some(tile_id), slot as u32, draw.id)
                 };
-                frame_draws.push((tile_draw, uniforms));
+                draw_list.push(tile_draw, uniforms);
             }
         }
 
-        frame_draws.sort_by_key(|(draw, _)| draw.order());
         let frame = self.drawing.frame.get_or_insert_with(FrameDraws::new);
-        if !frame_draws.is_empty() {
-            Self::write_uniforms(&self.values.evaluated, frame, &frame_draws, context);
-        }
-        frame.draws.clear();
-        frame.draws.extend(frame_draws.into_iter().map(|(draw, _)| draw));
+        let layer = &self.values.evaluated;
+        draw_list.finish(frame, context, |writer| Self::write_uniforms(layer, writer));
+        self.draw_list = draw_list;
     }
 }
