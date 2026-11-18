@@ -436,7 +436,7 @@ impl RenderFillLayer {
     /// `outline` of `tile`, with or without a `pattern`, of the layer
     /// `layer_id` with the values `layer`: its matrix and the interpolation
     /// of the layer's values, and for a pattern, where the pattern is in the
-    /// tile's atlas.
+    /// tile's atlas. `None` for a pattern while the tile has no atlas.
     #[expect(
         clippy::too_many_arguments,
         reason = "the layer, the draw, its tile and bucket, and the frame's parameters"
@@ -451,7 +451,7 @@ impl RenderFillLayer {
         draw: &FillDraw,
         outline: bool,
         parameters: &PaintParameters<'_>,
-    ) -> FillUniforms {
+    ) -> Option<FillUniforms> {
         const IN_VIEWPORT_PIXEL_UNITS: bool = false; // from RenderTile::translatedMatrix
         const NEAR_CLIPPED: bool = false;
         let evaluated = &layer.paint;
@@ -493,7 +493,7 @@ impl RenderFillLayer {
                     pad2: 0.0,
                 });
             }
-            return uniforms;
+            return Some(uniforms);
         }
 
         // from FillPatternProgram::layoutUniformValues
@@ -525,6 +525,11 @@ impl RenderFillLayer {
         let tlbr = |id: &str| tile.get_pattern(id).map_or([0.0; 4], |position| position.tlbr().map(f32::from));
         let texture = draw.objects.textures[ID_FILL_IMAGE_TEXTURE].as_ref();
         let texture_size = texture.map_or(Size::new(0, 0), |texture| texture.borrow().size());
+        // A pattern has nothing to sample before its tile has an atlas, and
+        // the shaders divide by the atlas size.
+        if texture_size.width == 0 || texture_size.height == 0 {
+            return None;
+        }
         uniforms.tile_props.fill_pattern_tile_props_ubo = FillPatternTilePropsUBO {
             pattern_from: tlbr(faded.from.id()),
             pattern_to: tlbr(faded.to.id()),
@@ -532,7 +537,7 @@ impl RenderFillLayer {
             sdf: if bucket.is_sdf_pattern(layer_id) { 1.0 } else { 0.0 },
             pad2: 0.0,
         };
-        uniforms
+        Some(uniforms)
     }
 
     /// Writes the layer's buffers of the frame's draws.
@@ -749,7 +754,7 @@ impl RenderLayer for RenderFillLayer {
                 let Some(draw) = draw else {
                     continue;
                 };
-                let uniforms = Self::uniforms(
+                let Some(uniforms) = Self::uniforms(
                     layer_id,
                     layer,
                     tile,
@@ -759,7 +764,9 @@ impl RenderLayer for RenderFillLayer {
                     draw,
                     outline,
                     paint_parameters,
-                );
+                ) else {
+                    continue;
+                };
                 let tile_draw = FrameDraw {
                     pass: RENDER_PASS,
                     depth: DrawDepth::Layer { sub_layer: draw.sub_layer, mask: draw.depth },

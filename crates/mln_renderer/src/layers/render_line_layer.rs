@@ -951,28 +951,8 @@ impl RenderLineLayer {
 
     /// Writes the layer's buffers of the frame's draws.
     fn write_uniforms(layer: &EvaluatedLayer<Line>, writer: &mut UniformWriter<'_, LineUniforms>) {
-        use line_expression_mask::{BLUR, COLOR, FLOOR_WIDTH, GAP_WIDTH, NONE, OFFSET, OPACITY, WIDTH};
         let evaluated = &layer.paint;
         let gpu_expressions = writer.context().caps().line_expressions;
-        // Where the shaders read the expression UBO, the mask marks the
-        // properties evaluated on the GPU (none, see the top of the file);
-        // elsewhere, the constant ones.
-        let mut expression_mask = NONE;
-        if !gpu_expressions {
-            for (constant, bit) in [
-                (evaluated.line_color.is_constant(), COLOR),
-                (evaluated.line_blur.is_constant(), BLUR),
-                (evaluated.line_opacity.is_constant(), OPACITY),
-                (evaluated.line_gap_width.is_constant(), GAP_WIDTH),
-                (evaluated.line_offset.is_constant(), OFFSET),
-                (evaluated.line_width.is_constant(), WIDTH),
-                (evaluated.line_floor_width.is_constant(), FLOOR_WIDTH),
-            ] {
-                if constant {
-                    expression_mask |= bit;
-                }
-            }
-        }
         let props = LineEvaluatedPropsUBO {
             color: evaluated.line_color.constant_or(&LinePaintProperties::Defaults::line_color()).to_float_array(),
             blur: evaluated.line_blur.constant_or(&LinePaintProperties::Defaults::line_blur()),
@@ -981,7 +961,7 @@ impl RenderLineLayer {
             offset: evaluated.line_offset.constant_or(&LinePaintProperties::Defaults::line_offset()),
             width: evaluated.line_width.constant_or(&LinePaintProperties::Defaults::line_width()),
             floorwidth: evaluated.line_floor_width.constant_or(&LinePaintProperties::Defaults::line_floor_width()),
-            expression_mask,
+            expression_mask: line_expression_mask::NONE,
             pad1: 0.0,
         };
         writer.uniform(ID_LINE_EVALUATED_PROPS_UBO, &props);
