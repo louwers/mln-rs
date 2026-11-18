@@ -599,6 +599,39 @@ fn the_redraw_wake_runs_once_per_demand() {
     assert!(eventually(|| redraws.load(Ordering::SeqCst) == before + 2));
 }
 
+// The map samples a running animation only for a frame demand, so a host
+// that demands frames only when woken draws it to its end only if each of its
+// frames wakes the host for the next, the frames that showed the map's latest
+// update too.
+#[test]
+fn each_frame_of_an_animation_wakes_the_host_for_the_next() {
+    let runtime = runtime();
+    let map = red_map(&runtime);
+    let redraws = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&redraws);
+    let options = AttachOptions {
+        redraw_wake: Some(Arc::new(move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+        })),
+        ..AttachOptions::default()
+    };
+    let (session, attached) = map.attach(offscreen(SIZE), options).unwrap();
+    result_of(attached).unwrap();
+    render_until_idle(&map, &session);
+
+    let before = redraws.load(Ordering::SeqCst);
+    let _ease = start_ease(&map, 100.0, std::time::Duration::from_secs(60));
+    assert!(eventually(|| redraws.load(Ordering::SeqCst) > before), "the ease woke no one");
+    for token in 1..=50 {
+        let woken = redraws.load(Ordering::SeqCst);
+        timed_frame(&session, DemandMode::IfChanged, token);
+        assert!(
+            eventually(|| redraws.load(Ordering::SeqCst) > woken),
+            "frame {token} of the ease woke no one for the next"
+        );
+    }
+}
+
 #[test]
 fn a_new_session_wakes_for_the_map_it_has_to_draw() {
     let runtime = runtime();

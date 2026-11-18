@@ -147,6 +147,12 @@ impl Published {
         self.sampled.load(Ordering::SeqCst)
     }
 
+    /// Whether a camera command was still animating as of the map's last
+    /// published state.
+    pub(crate) fn animating(&self) -> bool {
+        self.snapshot.lock().as_ref().is_some_and(|snapshot| snapshot.transition_in_progress)
+    }
+
     /// The still image that waits for a frame, as the
     /// `still_image_request_id` of the updates that ask for it, or 0 when
     /// none waits.
@@ -907,8 +913,7 @@ impl Map {
         }
         // A still map has nothing to sample, and its frames don't wait for
         // the runtime's thread.
-        let animating = published.snapshot.lock().is_some_and(|snapshot| snapshot.transition_in_progress);
-        if self.shared.mode != MapMode::Continuous || !animating {
+        if self.shared.mode != MapMode::Continuous || !published.animating() {
             return 0;
         }
         let sample = published.samples_requested.fetch_add(1, Ordering::SeqCst) + 1;

@@ -957,7 +957,14 @@ impl Worker {
                 self.rendering = token;
                 let frame = self.render(token, &update, slot);
                 self.rendering = None;
+                let rendered = frame.result.disposition == FrameDisposition::Rendered;
                 self.publish_rendered(frame, outbox);
+                // A running animation moves only when a demand samples it,
+                // and this frame may have shown the update that would have
+                // woken the host: the frame wakes it for the next.
+                if rendered && self.map_published.as_ref().is_some_and(|published| published.animating()) {
+                    self.wake_for_redraw(outbox);
+                }
             }
             _ if pending.demand.mode == DemandMode::WaitForUpdate => self.waiting.push((pending, latest_generation)),
             _ => self.publish(&FrameResult::unrendered(token, FrameDisposition::NoUpdate, latest_generation), outbox),
