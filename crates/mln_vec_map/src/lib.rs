@@ -94,12 +94,6 @@ impl<K, V> VecMap<K, V> {
         self.values.clear();
     }
 
-    /// Reserves room for at least `additional` more entries.
-    pub fn reserve(&mut self, additional: usize) {
-        self.keys.reserve(additional);
-        self.values.reserve(additional);
-    }
-
     pub fn iter(&self) -> Iter<'_, K, V> {
         self.keys.iter().zip(self.values.iter())
     }
