@@ -1,7 +1,3 @@
-// Where the line shaders read the expression UBO (`Caps::line_expressions`),
-// it is all zeros and no property is marked as evaluated on the GPU: the
-// layer evaluates every expression on the CPU.
-
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -10,15 +6,14 @@ use mln_gfx::gpu::TextureFormat;
 use mln_gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::line_layer_ubo::{
-    LINE_EXPRESSION_UBO_SIZE, LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineGradientDrawableUBO,
-    LinePatternDrawableUBO, LinePatternTilePropsUBO, LineSDFDrawableUBO, LineSDFTilePropsUBO, LineTilePropsUnionUBO,
-    line_expression_mask,
+    LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineGradientDrawableUBO, LinePatternDrawableUBO,
+    LinePatternTilePropsUBO, LineSDFDrawableUBO, LineSDFTilePropsUBO, LineTilePropsUnionUBO,
 };
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
     ID_LINE_COLOR_VERTEX_ATTRIBUTE, ID_LINE_DASH_TEXTURE, ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_DRAWABLE_UBO,
-    ID_LINE_EVALUATED_PROPS_UBO, ID_LINE_EXPRESSION_UBO, ID_LINE_IMAGE_TEXTURE, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE,
-    ID_LINE_TILE_PROPS_UBO, ID_PROJECTION_UBO,
+    ID_LINE_EVALUATED_PROPS_UBO, ID_LINE_IMAGE_TEXTURE, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_LINE_TILE_PROPS_UBO,
+    ID_PROJECTION_UBO,
 };
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
@@ -945,7 +940,6 @@ impl RenderLineLayer {
     /// Writes the layer's buffers of the frame's draws.
     fn write_uniforms(layer: &EvaluatedLayer<Line>, writer: &mut UniformWriter<'_, LineUniforms>) {
         let evaluated = &layer.paint;
-        let gpu_expressions = writer.context().caps().line_expressions;
         let props = LineEvaluatedPropsUBO {
             color: evaluated.line_color.constant_or(&LinePaintProperties::Defaults::line_color()).to_float_array(),
             blur: evaluated.line_blur.constant_or(&LinePaintProperties::Defaults::line_blur()),
@@ -954,14 +948,10 @@ impl RenderLineLayer {
             offset: evaluated.line_offset.constant_or(&LinePaintProperties::Defaults::line_offset()),
             width: evaluated.line_width.constant_or(&LinePaintProperties::Defaults::line_width()),
             floorwidth: evaluated.line_floor_width.constant_or(&LinePaintProperties::Defaults::line_floor_width()),
-            expression_mask: line_expression_mask::NONE,
+            pad0: 0.0,
             pad1: 0.0,
         };
         writer.uniform(ID_LINE_EVALUATED_PROPS_UBO, &props);
-        if gpu_expressions && writer.buffers().get(ID_LINE_EXPRESSION_UBO).is_none() {
-            let buffer = writer.context().create_uniform_buffer(&[0; LINE_EXPRESSION_UBO_SIZE]);
-            writer.buffers().set(ID_LINE_EXPRESSION_UBO, buffer);
-        }
         writer.storage(ID_LINE_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
         writer.storage(ID_LINE_TILE_PROPS_UBO, |uniforms| uniforms.tile_props);
         writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);

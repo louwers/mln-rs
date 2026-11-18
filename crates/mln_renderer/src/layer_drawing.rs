@@ -616,15 +616,6 @@ impl<U> UniformWriter<'_, U> {
     pub(crate) fn uniform<P: bytemuck::Pod>(&mut self, id: usize, value: &P) {
         self.buffers.create_or_update_pod(id, value, self.context);
     }
-
-    /// The buffers the draws read, by id.
-    pub(crate) fn buffers(&mut self) -> &mut UniformBufferArray {
-        self.buffers
-    }
-
-    pub(crate) fn context(&self) -> &Context {
-        self.context
-    }
 }
 
 /// Uploads `objects`, and destroys the buffers the upload replaced.
