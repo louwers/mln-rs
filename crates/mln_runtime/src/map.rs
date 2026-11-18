@@ -13,6 +13,7 @@ use mln_renderer::{Registry, UpdateReader};
 use mln_style::Edit;
 use mln_style::layers::CustomLayerHost;
 use mln_text::GlyphCache;
+use mln_text::local_glyph_rasterizer::{LocalGlyphRasterizer, LocalGlyphs};
 use mln_util::error::{Error, ErrorKind};
 use mln_util::event_queue::Waker;
 use mln_util::geo::LatLngBounds;
@@ -42,19 +43,28 @@ pub struct MapOptions {
     pub map: mln_map::MapOptions,
     /// The events that the map reports.
     pub event_mask: EventMask,
-    /// JSON text of the font faces that the map falls back to for glyphs
-    /// that the style's fonts lack, as `Map::set_fallback_font_faces`
-    /// takes it. Without it, the map falls back to the system's fonts
+    /// JSON text of the font faces that the map falls back to for the text
+    /// that the style's fonts don't draw, as `Map::set_fallback_font_faces`
+    /// takes it: the text that glyph PBFs can't shape, and the glyphs that
+    /// come from local fonts, before the system's. Without it, the map
+    /// falls back to the system's fonts for the scripts that need shaping,
     /// unless `system_fonts` is off.
     pub fallback_font_faces: Option<String>,
-    /// Whether the map falls back to the system's fonts
-    /// (`mln_system_fonts::fallback_font_faces`) for CJK and the scripts that
-    /// need complex shaping, when `fallback_font_faces` is `None`. On by
-    /// default. The first map that uses them waits for them to be found. In
-    /// the browser, which has no font files to read, the browser draws CJK
-    /// glyphs in its sans-serif font instead, where `fallback_font_faces`
-    /// doesn't cover them, as MapLibre GL JS does.
+    /// Whether the map draws from the system's fonts what the style's fonts
+    /// and `fallback_font_faces` don't: the scripts that need complex
+    /// shaping (`mln_system_fonts::fallback_font_faces`), and the glyphs of
+    /// a style without glyph PBFs, those its PBFs lack, and with
+    /// `local_ideographs`, CJK (`mln_system_fonts::SystemGlyphRasterizer`).
+    /// On by default. The first map that uses them waits for the platform's
+    /// font matcher to load. In the browser, which has no font files to
+    /// read, the browser draws those glyphs in the font stack's families,
+    /// then its sans-serif font, as MapLibre GL JS does.
     pub system_fonts: bool,
+    /// Whether CJK ideographs, kana and hangul come from local fonts (the
+    /// fallback font faces, then the system's) before glyph PBFs, as
+    /// MapLibre GL JS's `localIdeographFontFamily` draws them, rather than
+    /// downloading a glyph PBF for every few characters. On by default.
+    pub local_ideographs: bool,
     /// Whether the map's render sessions keep tiles in memory after they
     /// leave the view, so they show again without loading. On by default.
     pub tile_cache_enabled: bool,
@@ -67,6 +77,7 @@ impl Default for MapOptions {
             event_mask: EventMask::default(),
             fallback_font_faces: None,
             system_fonts: true,
+            local_ideographs: true,
             tile_cache_enabled: true,
         }
     }
@@ -167,6 +178,7 @@ pub(crate) struct MapShared {
     scale_factor: AtomicU64,
     tile_cache_enabled: bool,
     system_fonts: bool,
+    local_ideographs: bool,
     /// The render session attached to the map, from its attach until its
     /// detach completes.
     session: Mutex<Option<SessionClaim>>,
@@ -190,6 +202,7 @@ impl MapShared {
             scale_factor: AtomicU64::new(f64::from(options.map.pixel_ratio).to_bits()),
             tile_cache_enabled: options.tile_cache_enabled,
             system_fonts: options.system_fonts,
+            local_ideographs: options.local_ideographs,
             session: Mutex::new(None),
             sent: Mutex::new(1),
             released: AtomicBool::new(false),
@@ -756,12 +769,13 @@ impl Map {
         self.shared.tile_cache_enabled
     }
 
-    /// The font family that the map's renderers draw CJK glyphs in rather
-    /// than downloading them: in the browser with system fonts, its
-    /// sans-serif font, as MapLibre GL JS's `localIdeographFontFamily`
-    /// defaults to.
-    pub(crate) fn local_font_family(&self) -> Option<String> {
-        (cfg!(target_family = "wasm") && self.shared.system_fonts).then(|| "sans-serif".to_owned())
+    /// How the map's renderers draw glyphs from local fonts: from the
+    /// system's with system fonts, which in the browser are the browser's,
+    /// falling back to its sans-serif font as MapLibre GL JS's
+    /// `localIdeographFontFamily` defaults to.
+    pub(crate) fn local_glyphs(&self) -> LocalGlyphs {
+        let rasterizer = self.shared.system_fonts.then(system_glyph_rasterizer);
+        LocalGlyphs { ideographs: self.shared.local_ideographs, rasterizer }
     }
 
     pub(crate) fn glyph_cache(&self) -> Arc<GlyphCache> {
@@ -1587,6 +1601,18 @@ impl FlushFlag {
     fn clear(&self) {
         self.0.store(false, Ordering::SeqCst);
     }
+}
+
+/// The system's fonts' rasterizer.
+#[cfg(not(target_family = "wasm"))]
+fn system_glyph_rasterizer() -> Arc<dyn LocalGlyphRasterizer> {
+    Arc::new(mln_system_fonts::SystemGlyphRasterizer)
+}
+
+/// The browser's fonts' rasterizer, which falls back to its sans-serif font.
+#[cfg(target_family = "wasm")]
+fn system_glyph_rasterizer() -> Arc<dyn LocalGlyphRasterizer> {
+    Arc::new(mln_text::browser_glyph_rasterizer::BrowserGlyphRasterizer::new("sans-serif".to_owned()))
 }
 
 /// Builds the map `id` on the runtime's thread.

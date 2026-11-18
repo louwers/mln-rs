@@ -60,7 +60,7 @@ pub(crate) fn tile_store(
     workers: Box<dyn crate::tile::tile_workers::TileWorkers>,
 ) -> crate::tile::store::TileStore {
     let glyphs = crate::text::glyph_store::GlyphStore::new(
-        None,
+        mln_text::local_glyph_rasterizer::LocalGlyphs::default(),
         std::sync::Arc::default(),
         pool.clone(),
         crate::text::font_face_engine::default_engine(),

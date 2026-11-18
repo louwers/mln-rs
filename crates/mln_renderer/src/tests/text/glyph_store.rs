@@ -21,7 +21,7 @@ use mln_text::glyph::{
     NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK,
 };
 use mln_text::glyph_cache::GlyphCache;
-use mln_text::local_glyph_rasterizer::LocalGlyphRasterizer;
+use mln_text::local_glyph_rasterizer::{LocalGlyphRasterizer, LocalGlyphs};
 use mln_text::tagged_string::font_stack_hash;
 use mln_util::error::Error;
 use mln_util::font_stack::FontStack;
@@ -48,40 +48,37 @@ fn stub_glyph(glyph_id: GlyphID) -> Glyph {
     }
 }
 
+/// Local fonts with the glyphs of CJK characters
+/// (`i18n::allows_fixed_width_glyph_generation`).
 struct StubLocalGlyphRasterizer;
 
 impl LocalGlyphRasterizer for StubLocalGlyphRasterizer {
-    fn can_rasterize_glyph(&self, _font_stack: &FontStack, glyph_id: GlyphID) -> bool {
-        i18n::allows_fixed_width_glyph_generation(glyph_id.code)
-    }
-
-    fn rasterize_glyph(&self, _font_stack: &FontStack, glyph_id: GlyphID) -> Glyph {
-        stub_glyph(glyph_id)
+    fn rasterize_glyph(&self, _font_stack: &FontStack, glyph_id: GlyphID) -> Option<Glyph> {
+        i18n::allows_fixed_width_glyph_generation(glyph_id.code).then(|| stub_glyph(glyph_id))
     }
 }
 
+/// Local fonts with one glyph, katakana テ.
 struct KatakanaOnlyLocalGlyphRasterizer;
 
 impl LocalGlyphRasterizer for KatakanaOnlyLocalGlyphRasterizer {
-    fn can_rasterize_glyph(&self, _font_stack: &FontStack, glyph_id: GlyphID) -> bool {
-        glyph_id.code == 'テ' as u16
-    }
-
-    fn rasterize_glyph(&self, _font_stack: &FontStack, glyph_id: GlyphID) -> Glyph {
-        stub_glyph(glyph_id)
+    fn rasterize_glyph(&self, _font_stack: &FontStack, glyph_id: GlyphID) -> Option<Glyph> {
+        (glyph_id.code == 'テ' as u16).then(|| stub_glyph(glyph_id))
     }
 }
 
-struct LatinALocalGlyphRasterizer;
+/// Local fonts with every glyph.
+struct EveryLocalGlyphRasterizer;
 
-impl LocalGlyphRasterizer for LatinALocalGlyphRasterizer {
-    fn can_rasterize_glyph(&self, _font_stack: &FontStack, glyph_id: GlyphID) -> bool {
-        glyph_id == gid('a')
+impl LocalGlyphRasterizer for EveryLocalGlyphRasterizer {
+    fn rasterize_glyph(&self, _font_stack: &FontStack, glyph_id: GlyphID) -> Option<Glyph> {
+        Some(stub_glyph(glyph_id))
     }
+}
 
-    fn rasterize_glyph(&self, _font_stack: &FontStack, glyph_id: GlyphID) -> Glyph {
-        stub_glyph(glyph_id)
-    }
+/// Local glyphs from `rasterizer`, CJK first.
+fn local(rasterizer: impl LocalGlyphRasterizer + 'static) -> LocalGlyphs {
+    LocalGlyphs { ideographs: true, rasterizer: Some(Arc::new(rasterizer)) }
 }
 
 type LoadedFn = Box<dyn FnMut(&FontStack, &GlyphRange)>;
@@ -164,7 +161,7 @@ impl Store {
     /// A store whose wakes run in a task of `run_loop`; the wakes before it
     /// runs share it.
     fn new(
-        local_glyph_rasterizer: Box<dyn LocalGlyphRasterizer>,
+        local: LocalGlyphs,
         glyph_cache: Arc<GlyphCache>,
         engine: Arc<dyn FontFaceEngine>,
         file_source: Arc<dyn FileSource>,
@@ -190,7 +187,7 @@ impl Store {
             }
         });
         let pool = TaskGroup::new(&Pool::new(4));
-        let store = GlyphStore::new(Some(local_glyph_rasterizer), glyph_cache, pool.clone(), engine, Arc::clone(&wake));
+        let store = GlyphStore::new(local, glyph_cache, pool.clone(), engine, Arc::clone(&wake));
         let inbox = Inbox::new(wake);
         Rc::new(Store { store: RefCell::new(store), observer, inbox, pool, file_source, waits: RefCell::default() })
     }
@@ -263,29 +260,19 @@ struct GlyphStoreTest {
 
 impl GlyphStoreTest {
     fn new() -> Self {
-        Self::with(Box::new(StubLocalGlyphRasterizer), ResponseType::Asynchronous)
+        Self::with(local(StubLocalGlyphRasterizer), ResponseType::Asynchronous)
     }
 
-    fn with(local_glyph_rasterizer: Box<dyn LocalGlyphRasterizer>, response_type: ResponseType) -> Self {
-        Self::with_all(
-            local_glyph_rasterizer,
-            response_type,
-            Arc::default(),
-            crate::text::font_face_engine::default_engine(),
-        )
+    fn with(local: LocalGlyphs, response_type: ResponseType) -> Self {
+        Self::with_all(local, response_type, Arc::default(), crate::text::font_face_engine::default_engine())
     }
 
-    fn with_glyph_cache(local_glyph_rasterizer: Box<dyn LocalGlyphRasterizer>, glyph_cache: Arc<GlyphCache>) -> Self {
-        Self::with_all(
-            local_glyph_rasterizer,
-            ResponseType::Asynchronous,
-            glyph_cache,
-            crate::text::font_face_engine::default_engine(),
-        )
+    fn with_glyph_cache(local: LocalGlyphs, glyph_cache: Arc<GlyphCache>) -> Self {
+        Self::with_all(local, ResponseType::Asynchronous, glyph_cache, crate::text::font_face_engine::default_engine())
     }
 
     fn with_all(
-        local_glyph_rasterizer: Box<dyn LocalGlyphRasterizer>,
+        local: LocalGlyphs,
         response_type: ResponseType,
         glyph_cache: Arc<GlyphCache>,
         engine: Arc<dyn FontFaceEngine>,
@@ -294,14 +281,8 @@ impl GlyphStoreTest {
         let file_source = StubFileSource::on_queue(&run_loop, response_type);
         let observer = Rc::new(StubGlyphStoreObserver::default());
         let source: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&file_source);
-        let store = Store::new(
-            local_glyph_rasterizer,
-            glyph_cache,
-            engine,
-            source,
-            Rc::<StubGlyphStoreObserver>::clone(&observer),
-            &run_loop,
-        );
+        let store =
+            Store::new(local, glyph_cache, engine, source, Rc::<StubGlyphStoreObserver>::clone(&observer), &run_loop);
         GlyphStoreTest {
             file_source,
             observer,
@@ -621,7 +602,7 @@ fn loading_corrupted() {
 fn shares_parsed_glyphs_between_managers_and_font_stacks() {
     let cache = Arc::new(GlyphCache::new());
     let load = |font_stack: &str| {
-        let mut test = GlyphStoreTest::with_glyph_cache(Box::new(StubLocalGlyphRasterizer), Arc::clone(&cache));
+        let mut test = GlyphStoreTest::with_glyph_cache(local(StubLocalGlyphRasterizer), Arc::clone(&cache));
         let font_stack = vec![font_stack.to_owned()];
         test.load(font_stack.clone(), &['a']);
         test.glyph_store().get_glyph(&font_stack, gid('a'))
@@ -650,7 +631,7 @@ fn keeps_its_own_glyphs_without_a_cache() {
 #[test]
 fn releases_the_glyphs_of_evicted_font_stacks() {
     let cache = Arc::new(GlyphCache::new());
-    let mut test = GlyphStoreTest::with_glyph_cache(Box::new(StubLocalGlyphRasterizer), Arc::clone(&cache));
+    let mut test = GlyphStoreTest::with_glyph_cache(local(StubLocalGlyphRasterizer), Arc::clone(&cache));
     test.load(test_stack(), &['a']);
     assert_ne!(0, cache.size());
 
@@ -700,7 +681,7 @@ fn a_wait_requests_the_font_stacks_evicted_while_it_waits_again() {
 // URL the store has then.
 #[test]
 fn a_response_to_an_evicted_range_is_dropped() {
-    let test = GlyphStoreTest::with(Box::new(StubLocalGlyphRasterizer), ResponseType::Synchronous);
+    let test = GlyphStoreTest::with(local(StubLocalGlyphRasterizer), ResponseType::Synchronous);
     let urls = Arc::new(Mutex::new(Vec::new()));
     let u = Arc::clone(&urls);
     test.file_source.set_response(Kind::Glyphs, move |resource: &Resource| {
@@ -718,22 +699,6 @@ fn a_response_to_an_evicted_range_is_dropped() {
     let urls = urls.lock();
     assert_eq!(urls.len(), 2, "requested again: {urls:?}");
     assert!(urls[1].starts_with("new/"));
-}
-
-// gtest: GlyphManager.DoesNotKeepTheRangeGlyphsItDrawsLocally
-#[test]
-fn does_not_keep_the_range_glyphs_it_draws_locally() {
-    let loaded_glyphs = |rasterizer: Box<dyn LocalGlyphRasterizer>| {
-        let cache = Arc::new(GlyphCache::new());
-        let mut test = GlyphStoreTest::with_glyph_cache(rasterizer, Arc::clone(&cache));
-        test.load(test_stack(), &['a', 'å']);
-        cache.size()
-    };
-
-    let all = loaded_glyphs(Box::new(StubLocalGlyphRasterizer));
-
-    // The fixture has 'a', the only glyph LatinALocalGlyphRasterizer draws.
-    assert_eq!(all - 1, loaded_glyphs(Box::new(LatinALocalGlyphRasterizer)));
 }
 
 // gtest: GlyphManager.LoadingCancel
@@ -843,7 +808,7 @@ fn local_cjk_glyph_prefers_local_rasterization_over_range() {
     // Verifies that locally-rasterized glyphs (like テ) are produced by the
     // local rasterizer instead of using a glyph from an already-loaded PBF
     // range.
-    let mut test = GlyphStoreTest::with(Box::new(KatakanaOnlyLocalGlyphRasterizer), ResponseType::Asynchronous);
+    let mut test = GlyphStoreTest::with(local(KatakanaOnlyLocalGlyphRasterizer), ResponseType::Asynchronous);
     let first_glyph_response = Arc::new(AtomicBool::new(false));
 
     let f = Arc::clone(&first_glyph_response);
@@ -938,10 +903,7 @@ fn loading_invalid() {
 fn immediate_file_source() {
     // `GlyphManagerTestSynchronous`: the default store (no local
     // rasterizer) and a synchronous StubFileSource.
-    let mut test = GlyphStoreTest::with(
-        Box::new(mln_text::local_glyph_rasterizer::DefaultLocalGlyphRasterizer::new(None)),
-        ResponseType::Synchronous,
-    );
+    let mut test = GlyphStoreTest::with(LocalGlyphs::default(), ResponseType::Synchronous);
 
     test.file_source.set_response(Kind::Glyphs, glyphs_response("test/fixtures/resources/glyphs.pbf"));
 
@@ -962,7 +924,7 @@ fn immediate_file_source() {
 // gtest: GlyphManager.ImmediateFileSourceFailureRequestsTheRangeAgain
 #[test]
 fn immediate_file_source_failure_requests_the_range_again() {
-    let test = GlyphStoreTest::with(Box::new(StubLocalGlyphRasterizer), ResponseType::Synchronous);
+    let test = GlyphStoreTest::with(local(StubLocalGlyphRasterizer), ResponseType::Synchronous);
     let _log = SquelchLog::new();
     let requests = count_requests(&test);
     test.file_source.set_response(Kind::Glyphs, fails_first_then_glyphs());
@@ -1058,7 +1020,7 @@ const FONT_FACE: GlyphIDType = GlyphIDType::face(NonZeroU16::new(7).unwrap());
 /// that answers its file with "font".
 fn font_face_test(engine: &Arc<DeferredEngine>) -> GlyphStoreTest {
     let test = GlyphStoreTest::with_all(
-        Box::new(StubLocalGlyphRasterizer),
+        local(StubLocalGlyphRasterizer),
         ResponseType::Synchronous,
         Arc::default(),
         Arc::<DeferredEngine>::clone(engine),
@@ -1171,4 +1133,111 @@ fn font_face_with_data_needs_no_request() {
     assert_eq!(engine.loads.load(Ordering::SeqCst), 1);
     assert!(available.borrow_mut().take().is_some(), "answered at once");
     assert_eq!(shaped(&test), [5, 6]);
+}
+
+/// The glyphs of `chars` of the test stack that a store answers with at once,
+/// with no file source response: for the glyphs that need no request.
+fn answer_at_once(test: &GlyphStoreTest, chars: &[char]) -> Option<GlyphMap> {
+    let answer: Rc<RefCell<Option<GlyphMap>>> = Rc::default();
+    let a = Rc::clone(&answer);
+    *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |glyphs: GlyphMap| {
+        *a.borrow_mut() = Some(glyphs);
+    }));
+    test.get_glyphs(dependencies(chars));
+    answer.take()
+}
+
+// A style without a glyph URL draws its text from local fonts, and requests
+// no glyph PBF.
+#[test]
+fn without_a_glyph_url_glyphs_come_from_local_fonts() {
+    for (local, drawn) in [(local(EveryLocalGlyphRasterizer), true), (LocalGlyphs::default(), false)] {
+        let test = GlyphStoreTest::with(local, ResponseType::Asynchronous);
+        let requests = count_requests(&test);
+        test.glyph_store().set_url("");
+
+        let glyphs = answer_at_once(&test, &['a', '中']).expect("answered at once");
+
+        let glyphs = &glyphs[&font_stack_hash(&test_stack())];
+        assert_eq!(glyphs[&gid('a')].is_some(), drawn);
+        assert_eq!(glyphs[&gid('中')].is_some(), drawn);
+        assert_eq!(requests.load(Ordering::SeqCst), 0);
+    }
+}
+
+// A glyph that the stack's PBF lacks comes from local fonts, and the PBF's
+// glyphs stay the PBF's.
+#[test]
+fn a_glyph_the_pbf_lacks_comes_from_local_fonts() {
+    let mut test = GlyphStoreTest::with(local(EveryLocalGlyphRasterizer), ResponseType::Asynchronous);
+    // The fixture has 'E', not 'A'.
+    test.file_source.set_response(Kind::Glyphs, glyphs_response("test/fixtures/resources/fake_glyphs-0-255.pbf"));
+
+    let available = Rc::new(Cell::new(false));
+    let (a, run_loop) = (Rc::clone(&available), test.run_loop.clone());
+    *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |glyphs: GlyphMap| {
+        let glyphs = &glyphs[&font_stack_hash(&test_stack())];
+        let local = glyphs[&gid('A')].as_ref().expect("a local 'A'");
+        assert_eq!(local.metrics, stub_glyph(gid('A')).metrics);
+        let pbf = glyphs[&gid('E')].as_ref().expect("the PBF's 'E'");
+        assert_ne!(pbf.metrics, stub_glyph(gid('E')).metrics);
+        a.set(true);
+        run_loop.stop();
+    }));
+
+    test.run("test/fixtures/resources/glyphs.pbf", dependencies(&['A', 'E']));
+    assert!(available.get());
+}
+
+// Without local ideographs, a CJK glyph comes from the PBF first.
+#[test]
+fn ideographs_come_from_pbfs_first_unless_local_ideographs_are_set() {
+    let local = LocalGlyphs { ideographs: false, ..local(StubLocalGlyphRasterizer) };
+    let mut test = GlyphStoreTest::with(local, ResponseType::Asynchronous);
+    let requests = count_requests(&test);
+    test.file_source.set_response(Kind::Glyphs, glyphs_response("test/fixtures/resources/glyphs-12244-12543.pbf"));
+
+    let available = Rc::new(Cell::new(false));
+    let (a, run_loop) = (Rc::clone(&available), test.run_loop.clone());
+    *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |glyphs: GlyphMap| {
+        let glyphs = &glyphs[&font_stack_hash(&test_stack())];
+        let glyph = glyphs[&gid('々')].as_ref().expect("the PBF's glyph");
+        assert_ne!(glyph.metrics, stub_glyph(gid('々')).metrics);
+        a.set(true);
+        run_loop.stop();
+    }));
+
+    test.run("test/fixtures/resources/glyphs-12244-12543.pbf", dependencies(&['々']));
+    assert!(available.get());
+    assert_eq!(requests.load(Ordering::SeqCst), 1);
+}
+
+// A local glyph comes from the fallback font faces that cover it before the
+// platform's fonts, one glyph at a time.
+#[test]
+fn a_fallback_face_draws_local_glyphs_before_the_platform() {
+    let engine = Arc::new(DeferredEngine::default());
+    let test = GlyphStoreTest::with_all(
+        local(KatakanaOnlyLocalGlyphRasterizer),
+        ResponseType::Synchronous,
+        Arc::default(),
+        Arc::<DeferredEngine>::clone(&engine),
+    );
+    let _log = SquelchLog::new();
+    test.file_source.set_response(Kind::Glyphs, |resource: &Resource| -> Option<Response> {
+        panic!("requested {}", resource.url);
+    });
+    let face = FontFace { type_: FONT_FACE, ..FontFace::new("", "app://face.ttf", vec![(0x4E2D, 0x4E2D)]) }
+        .with_data(FontData::new(Arc::new(b"font".to_vec())));
+    test.glyph_store().set_font_faces(Some(Arc::new(vec![face])));
+    engine.report(&Ok(()));
+    test.run_loop.run_once(&mut test.local());
+    test.glyph_store().set_url("test/fixtures/resources/glyphs.pbf");
+
+    // The platform's fonts have only テ.
+    let glyphs = answer_at_once(&test, &['中', 'テ']).expect("answered at once, with no glyph PBF");
+    let glyphs = &glyphs[&font_stack_hash(&test_stack())];
+    assert_eq!(glyphs[&gid('中')].as_ref().expect("the face's glyph").id, gid('中'));
+    assert_eq!(engine.loads.load(Ordering::SeqCst), 1);
+    assert!(glyphs[&gid('テ')].is_some(), "the platform's glyph");
 }

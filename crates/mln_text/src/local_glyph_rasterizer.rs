@@ -1,82 +1,49 @@
+//! Glyphs drawn from the fonts on the device rather than from glyph PBFs.
+//!
+//! A character that glyph PBFs could draw takes its glyph from local fonts
+//! when the style has no `glyphs` URL, when the stack's PBF lacks it, or, if
+//! [`LocalGlyphs::ideographs`] is set, first when it is a CJK ideograph,
+//! kana or hangul. The glyph store asks the style's fallback font faces
+//! first, then the [`LocalGlyphRasterizer`].
+
+use std::sync::Arc;
+
 use mln_util::font_stack::FontStack;
 
 use crate::glyph::{Glyph, GlyphID};
 
-/// Given a font stack and a glyph ID, platform-specific implementations of
-/// `LocalGlyphRasterizer` will decide which, if any, local fonts to use and
-/// then generate a matching glyph object with a greyscale rasterization of
-/// the glyph and appropriate metrics. `GlyphStore` will then use TinySDF to
-/// transform the rasterized bitmap into an SDF.
-///
-/// The shared default codepoint filter is
-/// `util::i18n::allowsFixedWidthGlyphGeneration`. Following
-/// maplibre-gl-js, platform implementations use 2x bitmaps with 1x metrics
-/// via `GlyphMetrics::isDoubleResolution`.
-///
-/// It is left to platform-specific implementation to decide how best to
-/// map a `FontStack` to a particular rasterization (font, weight, style).
-///
-/// The default implementation simply refuses to rasterize any glyphs.
-pub trait LocalGlyphRasterizer {
-    // virtual so that test harness can override platform-specific behavior
-    fn can_rasterize_glyph(&self, _font_stack: &FontStack, _glyph_id: GlyphID) -> bool {
-        false
-    }
-
-    fn rasterize_glyph(&self, _font_stack: &FontStack, _glyph_id: GlyphID) -> Glyph {
-        Glyph::default()
-    }
+/// Draws the glyphs of characters from the device's fonts: the fonts that a
+/// font stack names, if the device has them, else the font the platform
+/// picks for the character, at the weight and style that the stack's names
+/// imply ([`font_name`](crate::font_name)).
+pub trait LocalGlyphRasterizer: Send + Sync {
+    /// The glyph of the character `glyph_id` names, for a label in
+    /// `font_stack`: its coverage at 24 px, which the glyph store turns into
+    /// a signed distance field. A bitmap twice that size sets
+    /// `GlyphMetrics::is_double_resolution`, with the metrics of 24 px.
+    /// `None` when no local font has the character.
+    fn rasterize_glyph(&self, font_stack: &FontStack, glyph_id: GlyphID) -> Option<Glyph>;
 }
 
-/// The platform's `LocalGlyphRasterizer(const std::optional<std::string>&
-/// fontFamily)`.
-///
-/// Natively it is platform/default's, which refuses every glyph. In the
-/// browser (wasm) it draws the glyphs that
-/// `allowsFixedWidthGlyphGeneration` accepts (CJK ideographs, kana, hangul
-/// and the like) with a canvas in `font_family`, a CSS font-family list, as
-/// MapLibre GL JS draws them in its `localIdeographFontFamily`; without a
-/// font family it refuses every glyph there too.
-#[derive(Debug, Default)]
-pub struct DefaultLocalGlyphRasterizer {
-    #[cfg(not(target_family = "wasm"))]
-    _font_family: Option<String>,
-    #[cfg(target_family = "wasm")]
-    browser: Option<crate::browser_glyph_rasterizer::BrowserGlyphRasterizer>,
+/// How a renderer draws glyphs from local fonts. The default draws none,
+/// so that a map draws the same everywhere.
+#[derive(Clone, Default)]
+pub struct LocalGlyphs {
+    /// Whether CJK ideographs, kana and hangul
+    /// (`i18n::allows_fixed_width_glyph_generation`) come from local fonts
+    /// before glyph PBFs, as MapLibre GL JS's `localIdeographFontFamily`
+    /// draws them: a map with such labels downloads a glyph PBF for every
+    /// few characters otherwise.
+    pub ideographs: bool,
+    /// The device's fonts, after the style's fallback font faces.
+    pub rasterizer: Option<Arc<dyn LocalGlyphRasterizer>>,
 }
 
-impl DefaultLocalGlyphRasterizer {
-    #[cfg(not(target_family = "wasm"))]
-    #[must_use]
-    pub fn new(font_family: Option<String>) -> Self {
-        DefaultLocalGlyphRasterizer { _font_family: font_family }
-    }
-
-    #[cfg(target_family = "wasm")]
-    pub fn new(font_family: Option<String>) -> Self {
-        DefaultLocalGlyphRasterizer {
-            browser: font_family.map(crate::browser_glyph_rasterizer::BrowserGlyphRasterizer::new),
-        }
-    }
-}
-
-#[cfg(not(target_family = "wasm"))]
-impl LocalGlyphRasterizer for DefaultLocalGlyphRasterizer {}
-
-#[cfg(target_family = "wasm")]
-impl LocalGlyphRasterizer for DefaultLocalGlyphRasterizer {
-    fn can_rasterize_glyph(&self, _font_stack: &FontStack, glyph_id: GlyphID) -> bool {
-        // A font face's glyph ID is a glyph index in its font, not a
-        // codepoint.
-        self.browser.is_some()
-            && glyph_id.type_ == crate::glyph::GlyphIDType::FontPBF
-            && mln_util::i18n::allows_fixed_width_glyph_generation(glyph_id.code)
-    }
-
-    fn rasterize_glyph(&self, font_stack: &FontStack, glyph_id: GlyphID) -> Glyph {
-        match &self.browser {
-            Some(browser) => browser.rasterize_glyph(font_stack, glyph_id),
-            None => Glyph::default(),
-        }
+impl std::fmt::Debug for LocalGlyphs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LocalGlyphs")
+            .field("ideographs", &self.ideographs)
+            .field("rasterizer", &self.rasterizer.is_some())
+            .finish()
     }
 }

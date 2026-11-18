@@ -317,7 +317,7 @@ async function run({
   style,
   fallbackFontFaces,
   camera,
-  systemFonts,
+  localIdeographs,
   panic,
 }: Start): Promise<Handle> {
   const {
@@ -375,7 +375,7 @@ async function run({
       ratio,
       loadShaper,
       fallbackFontFaces,
-      systemFonts,
+      localIdeographs,
       onFrame,
     );
   } catch (error) {

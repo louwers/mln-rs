@@ -1,6 +1,6 @@
-//! The font for a script from Android's font matcher (`AFontMatcher`, API
+//! The font for a character from Android's font matcher (`AFontMatcher`, API
 //! level 29), which picks the system font that the platform would draw the
-//! text in for the given languages. Its functions are looked up at run time,
+//! text in for the given family, weight, style and languages. Its functions are looked up at run time,
 //! so that an app that runs on older versions falls back to the scan of
 //! `/system/fonts`. And the app's languages, from Java, through [`init`].
 //!
@@ -20,7 +20,7 @@ use jni::objects::JString;
 use jni::{EnvUnowned, Outcome, jni_sig, jni_str};
 use libloading::Library;
 
-use crate::scripts::Script;
+use crate::Query;
 use crate::source::Source;
 
 /// The app's languages, most preferred first, once [`init`] ran: empty
@@ -78,6 +78,7 @@ pub(crate) struct FontMatcher {
     create: unsafe extern "C" fn() -> *mut c_void,
     destroy: unsafe extern "C" fn(*mut c_void),
     set_locales: unsafe extern "C" fn(*mut c_void, *const c_char),
+    set_style: unsafe extern "C" fn(*mut c_void, u16, bool),
     matches: unsafe extern "C" fn(*const c_void, *const c_char, *const u16, u32, *mut u32) -> *mut c_void,
     close: unsafe extern "C" fn(*mut c_void),
     file_path: unsafe extern "C" fn(*const c_void) -> *const c_char,
@@ -109,6 +110,7 @@ impl FontMatcher {
             create: symbol!("AFontMatcher_create"),
             destroy: symbol!("AFontMatcher_destroy"),
             set_locales: symbol!("AFontMatcher_setLocales"),
+            set_style: symbol!("AFontMatcher_setStyle"),
             matches: symbol!("AFontMatcher_match"),
             close: symbol!("AFont_close"),
             file_path: symbol!("AFont_getFontFilePath"),
@@ -117,13 +119,14 @@ impl FontMatcher {
         })
     }
 
-    /// The font that Android draws `script` in for `languages`, with the name
-    /// of its file as its family. It may lack the script's glyphs: the
-    /// matcher returns a font even when none has them.
-    pub(crate) fn candidates(&self, script: &Script, languages: &[String]) -> Vec<(String, Source)> {
+    /// The font that Android draws `query`'s character in, with its family
+    /// name. It may lack the character: the matcher returns a font even when
+    /// none has it.
+    pub(crate) fn candidates(&self, query: &Query<'_>) -> Vec<(String, Source)> {
         let mut probe = [0; 2];
-        let probe = script.probe.encode_utf16(&mut probe);
-        let Ok(locales) = CString::new(languages.join(",")) else { return Vec::new() };
+        let probe = query.probe.encode_utf16(&mut probe);
+        let Ok(locales) = CString::new(query.languages.join(",")) else { return Vec::new() };
+        let Ok(family) = CString::new(query.family.unwrap_or("sans-serif")) else { return Vec::new() };
         // SAFETY: the matcher and the font are checked for null, used while
         // they live and released once; the path belongs to the font, and is
         // copied before the font is closed.
@@ -132,16 +135,12 @@ impl FontMatcher {
             if matcher.is_null() {
                 return Vec::new();
             }
-            if !languages.is_empty() {
+            if !query.languages.is_empty() {
                 (self.set_locales)(matcher, locales.as_ptr());
             }
-            let font = (self.matches)(
-                matcher,
-                c"sans-serif".as_ptr(),
-                probe.as_ptr(),
-                probe.len() as u32,
-                std::ptr::null_mut(),
-            );
+            (self.set_style)(matcher, query.weight, query.italic);
+            let font =
+                (self.matches)(matcher, family.as_ptr(), probe.as_ptr(), probe.len() as u32, std::ptr::null_mut());
             (self.destroy)(matcher);
             if font.is_null() {
                 return Vec::new();
@@ -149,8 +148,8 @@ impl FontMatcher {
             let path = PathBuf::from(std::ffi::OsStr::from_bytes(CStr::from_ptr((self.file_path)(font)).to_bytes()));
             let index = (self.collection_index)(font) as u32;
             (self.close)(font);
-            let family = path.file_stem().map(|stem| stem.to_string_lossy().into_owned()).unwrap_or_default();
-            vec![(family, Source::File { path, index })]
+            let source = Source::File { path, index };
+            vec![(source.family_name().unwrap_or_default(), source)]
         }
     }
 }

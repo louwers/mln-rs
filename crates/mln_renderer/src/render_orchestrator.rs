@@ -18,7 +18,7 @@ use mln_style::{
 };
 use mln_style_types::image::Impl as ImageImpl;
 use mln_text::GlyphCache;
-use mln_text::local_glyph_rasterizer::DefaultLocalGlyphRasterizer;
+use mln_text::local_glyph_rasterizer::LocalGlyphs;
 use mln_util::constants::DEFAULT_TRANSITION_DURATION;
 use mln_util::error::Error;
 use mln_util::hash::{HashMap, HashSet};
@@ -200,7 +200,7 @@ impl RenderOrchestrator {
     /// `waker` for an update (see `Renderer::new`).
     pub(crate) fn new(
         background_layer_as_color: bool,
-        local_font_family: Option<String>,
+        local_glyphs: LocalGlyphs,
         glyph_cache: Arc<GlyphCache>,
         font_face_engine: Arc<dyn crate::text::font_face_engine::FontFaceEngine>,
         registry: Arc<Registry>,
@@ -208,13 +208,8 @@ impl RenderOrchestrator {
         pool: &Pool,
     ) -> Self {
         let thread_pool = TaskGroup::new(pool);
-        let glyph_store = GlyphStore::new(
-            Some(Box::new(DefaultLocalGlyphRasterizer::new(local_font_family))),
-            glyph_cache,
-            thread_pool.clone(),
-            font_face_engine,
-            Arc::clone(&waker),
-        );
+        let glyph_store =
+            GlyphStore::new(local_glyphs, glyph_cache, thread_pool.clone(), font_face_engine, Arc::clone(&waker));
         let jobs = match pool.threads() {
             0 => JOBS_WITHOUT_THREADS,
             threads => JOBS_PER_THREAD * threads,

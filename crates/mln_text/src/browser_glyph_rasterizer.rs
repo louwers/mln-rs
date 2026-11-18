@@ -1,14 +1,16 @@
 //! The browser's local glyph rasterizer: draws a glyph with an
-//! `OffscreenCanvas` 2D context in a CSS font family, as MapLibre GL JS
-//! draws CJK glyphs in its `localIdeographFontFamily` (with TinySDF, which
-//! `GlyphStore` applies here).
+//! `OffscreenCanvas` 2D context, as MapLibre GL JS draws CJK glyphs in its
+//! `localIdeographFontFamily` (with TinySDF, which `GlyphStore` applies
+//! here).
 //!
 //! The bitmap and metrics are those of C++'s Darwin and Qt rasterizers: a
 //! 24px em drawn at 2x into a 60 × 60 bitmap, a 3px border, and the glyph's
-//! top measured per character. The weight and style come from the font
-//! stack's first font name, as GL JS sniffs them.
+//! top measured per character. The font is each family of the font stack's
+//! names, then the rasterizer's own CSS font family, which the browser falls
+//! back from for a character the others lack. The weight and style come from
+//! the stack's first name ([`font_name`](crate::font_name)).
 
-use std::cell::{OnceCell, RefCell};
+use std::cell::RefCell;
 
 use js_sys::Reflect;
 use mln_util::constants::ONE_EM;
@@ -20,6 +22,7 @@ use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{OffscreenCanvas, OffscreenCanvasRenderingContext2d};
 
 use crate::glyph::{Glyph, GlyphID, GlyphMetrics};
+use crate::local_glyph_rasterizer::LocalGlyphRasterizer;
 
 // 2x bitmap with 1x logical metrics.
 const TEXTURE_SCALE: u32 = 2;
@@ -29,14 +32,25 @@ const BITMAP_SIZE: u32 = LOGICAL_SIZE * TEXTURE_SCALE;
 const RASTER_BUFFER: f64 = Glyph::BORDER_SIZE as f64 * TEXTURE_SCALE as f64;
 const TOP_ADJUSTMENT: f64 = 26.5;
 
+/// Draws glyphs with the browser's fonts.
 #[derive(Debug)]
-pub(crate) struct BrowserGlyphRasterizer {
+pub struct BrowserGlyphRasterizer {
+    /// The CSS font family after the stack's own, such as `sans-serif`.
     font_family: String,
-    /// The canvas, created at the first glyph; `None` if it can't be.
-    canvas: OnceCell<Option<RefCell<Canvas>>>,
 }
 
-#[derive(Debug)]
+thread_local! {
+    /// The thread's canvas, created at its first glyph.
+    static CANVAS: RefCell<CanvasState> = const { RefCell::new(CanvasState::Unmade) };
+}
+
+enum CanvasState {
+    Unmade,
+    Made(Canvas),
+    /// The canvas couldn't be created.
+    Failed,
+}
+
 struct Canvas {
     // Kept alive with its context.
     _canvas: OffscreenCanvas,
@@ -46,33 +60,51 @@ struct Canvas {
 }
 
 impl BrowserGlyphRasterizer {
-    pub(crate) fn new(font_family: String) -> Self {
-        BrowserGlyphRasterizer { font_family, canvas: OnceCell::new() }
+    /// A rasterizer that falls back to `font_family`, a CSS font family list.
+    #[must_use]
+    pub fn new(font_family: String) -> Self {
+        BrowserGlyphRasterizer { font_family }
     }
 
-    pub(crate) fn rasterize_glyph(&self, font_stack: &FontStack, glyph_id: GlyphID) -> Glyph {
-        let canvas = self.canvas.get_or_init(|| match Canvas::new() {
-            Ok(canvas) => Some(RefCell::new(canvas)),
-            Err(error) => {
-                Log::warning(Event::Glyph, format!("Unable to create a canvas for local glyphs: {error:?}"));
-                None
-            }
-        });
-        let Some(canvas) = canvas else {
-            return Glyph::default();
-        };
-        let Some(text) = char::from_u32(u32::from(glyph_id.code)) else {
-            return Glyph::default();
-        };
-        let first = font_stack.first().map_or("", String::as_str);
-        let font = format!("{} {} {FONT_SIZE}px {}", font_style(first), font_weight(first), self.font_family);
-        match canvas.borrow_mut().draw(&font, &text.to_string()) {
-            Ok((bitmap, metrics)) => Glyph { id: glyph_id, bitmap, metrics },
-            Err(error) => {
-                Log::warning(Event::Glyph, format!("Unable to draw glyph {}: {error:?}", glyph_id.code));
-                Glyph::default()
+    /// The CSS font of the glyphs of `font_stack`.
+    fn font(&self, font_stack: &FontStack) -> String {
+        let first = crate::font_name::parse(font_stack.first().map_or("", String::as_str));
+        let style = if first.italic { "italic" } else { "normal" };
+        let mut families: Vec<String> = Vec::new();
+        for name in font_stack {
+            let family = format!("\"{}\"", crate::font_name::parse(name).family.replace(['"', '\\'], ""));
+            if !families.contains(&family) {
+                families.push(family);
             }
         }
+        families.push(self.font_family.clone());
+        format!("{style} {} {FONT_SIZE}px {}", first.weight, families.join(", "))
+    }
+}
+
+impl LocalGlyphRasterizer for BrowserGlyphRasterizer {
+    fn rasterize_glyph(&self, font_stack: &FontStack, glyph_id: GlyphID) -> Option<Glyph> {
+        let text = char::from_u32(u32::from(glyph_id.code))?;
+        let font = self.font(font_stack);
+        CANVAS.with_borrow_mut(|state| {
+            if matches!(state, CanvasState::Unmade) {
+                *state = match Canvas::new() {
+                    Ok(canvas) => CanvasState::Made(canvas),
+                    Err(error) => {
+                        Log::warning(Event::Glyph, format!("Unable to create a canvas for local glyphs: {error:?}"));
+                        CanvasState::Failed
+                    }
+                };
+            }
+            let CanvasState::Made(canvas) = state else { return None };
+            match canvas.draw(&font, &text.to_string()) {
+                Ok((bitmap, metrics)) => Some(Glyph { id: glyph_id, bitmap, metrics }),
+                Err(error) => {
+                    Log::warning(Event::Glyph, format!("Unable to draw glyph {}: {error:?}", glyph_id.code));
+                    None
+                }
+            }
+        })
     }
 }
 
@@ -118,50 +150,4 @@ impl Canvas {
         };
         Ok((AlphaImage::from_vec(Size::new(BITMAP_SIZE, BITMAP_SIZE), alpha), metrics))
     }
-}
-
-/// GL JS's `_fontStyle`: the font style a font name implies.
-fn font_style(font_name: &str) -> &'static str {
-    let name = font_name.to_ascii_lowercase();
-    if name.contains("italic") {
-        "italic"
-    } else if name.contains("oblique") {
-        "oblique"
-    } else {
-        "normal"
-    }
-}
-
-/// GL JS's `_fontWeight`: the weight of the last of the OpenType weight
-/// names (`usWeightClass`) that a font name has as whole words.
-fn font_weight(font_name: &str) -> &'static str {
-    const WEIGHTS: [(&str, &str); 17] = [
-        ("thin", "100"),
-        ("hairline", "100"),
-        ("extra light", "200"),
-        ("ultra light", "200"),
-        ("light", "300"),
-        ("normal", "400"),
-        ("regular", "400"),
-        ("medium", "500"),
-        ("semibold", "600"),
-        ("demibold", "600"),
-        ("bold", "700"),
-        ("extra bold", "800"),
-        ("ultra bold", "800"),
-        ("black", "900"),
-        ("heavy", "900"),
-        ("extra black", "950"),
-        ("ultra black", "950"),
-    ];
-    let name = font_name.to_ascii_lowercase();
-    WEIGHTS.iter().rev().find(|(word, _)| has_word(&name, word)).map_or("normal", |(_, weight)| weight)
-}
-
-/// Whether `word` is in `text` between word boundaries (`\b` in a regular
-/// expression).
-fn has_word(text: &str, word: &str) -> bool {
-    let is_word = |c: Option<char>| c.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_');
-    text.match_indices(word)
-        .any(|(at, _)| !is_word(text[..at].chars().next_back()) && !is_word(text[at + word.len()..].chars().next()))
 }

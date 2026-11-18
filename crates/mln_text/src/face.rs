@@ -75,3 +75,49 @@ impl Face {
         crate::rasterize::rasterize_glyph(self, glyph)
     }
 }
+
+/// A font file that the map draws single characters from, unshaped, as it
+/// draws the glyphs of a glyph PBF: a local font.
+#[derive(Clone)]
+pub struct FontFile {
+    face: Face,
+}
+
+impl FontFile {
+    /// The font in `data`, as a font face reads it, at regular weight within
+    /// a variable font's `wght` axis: `None` when it isn't a font the map
+    /// can draw.
+    #[must_use]
+    pub fn new(data: FontData) -> Option<Self> {
+        let face = Face::from_memory(data);
+        face.is_valid().then_some(FontFile { face })
+    }
+
+    /// Whether the font has a glyph for `c`.
+    #[must_use]
+    pub fn has_char(&self, c: char) -> bool {
+        self.glyph_index(c).is_some()
+    }
+
+    /// The glyph of `c`, with the ID `id`: its coverage at 24 px, before the
+    /// signed distance field. `None` when the font lacks it, or when its
+    /// index doesn't fit a glyph ID.
+    #[must_use]
+    pub fn rasterize_char(&self, c: char, id: GlyphID) -> Option<Glyph> {
+        let index = self.glyph_index(c)?;
+        let mut glyph = self.face.rasterize_glyph(GlyphID::with_type(index, id.type_));
+        glyph.id = id;
+        Some(glyph)
+    }
+
+    fn glyph_index(&self, c: char) -> Option<u16> {
+        let glyph = self.face.font()?.charmap().map_unicode(c)?;
+        u16::try_from(glyph.to_u32()).ok().filter(|&index| index != 0)
+    }
+}
+
+impl std::fmt::Debug for FontFile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FontFile").finish_non_exhaustive()
+    }
+}

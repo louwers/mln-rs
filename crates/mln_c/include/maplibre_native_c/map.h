@@ -204,6 +204,7 @@ typedef enum MLN_BINDING("kind=bitmask") mln_map_option_field : uint32_t {
   MLN_MAP_OPTION_EVENT_MASK = 1U << 0U,
   MLN_MAP_OPTION_TILE_CACHE_ENABLED = 1U << 1U,
   MLN_MAP_OPTION_SYSTEM_FONTS_ENABLED = 1U << 2U,
+  MLN_MAP_OPTION_LOCAL_IDEOGRAPHS_ENABLED = 1U << 3U,
 } mln_map_option_field;
 
 /** A set of mln_map_option_field bits. */
@@ -235,24 +236,33 @@ typedef struct mln_map_options {
   bool tile_cache_enabled
     MLN_BINDING("mask=fields;bit=MLN_MAP_OPTION_TILE_CACHE_ENABLED");
   /**
-   * Fonts for the text that a style's own fonts don't draw, such as scripts
-   * that need complex shaping, like Myanmar or Devanagari. A JSON array of font
-   * files, each an object with a `url` and an optional `unicode-range`, as in
-   * a font face of a style's `font-faces`, which every font stack uses after
-   * the style's own font faces. Empty for the system's fonts, unless
-   * `system_fonts_enabled` is false.
+   * Fonts for the text that a style's own fonts don't draw. A JSON array of
+   * font files, each an object with a `url` and an optional `unicode-range`,
+   * as in a font face of a style's `font-faces`. They draw, in order, the
+   * text that glyph PBFs can't shape, such as Myanmar or Devanagari, and the
+   * glyphs that come from local fonts: those of a style without glyph PBFs,
+   * those its PBFs lack, and CJK with `local_ideographs_enabled`. Empty for
+   * the system's fonts alone.
    */
   mln_buffer_view fallback_font_faces;
   /**
-   * Whether the map falls back to the system's fonts for CJK and the scripts
-   * that need complex shaping when `fallback_font_faces` is empty: fonts that
-   * the platform's font matcher picks for the user's preferred languages.
-   * Without it, the map does. The first map that uses them waits for them
-   * to be found. In the browser, the browser draws CJK glyphs in its
-   * sans-serif font instead, where `fallback_font_faces` doesn't cover them.
+   * Whether the map draws from the system's fonts what the style's fonts and
+   * `fallback_font_faces` don't: fonts that the platform's font matcher picks
+   * for the font stack's names, or for the character and the user's preferred
+   * languages. Without it, the map does. The first map that uses them waits
+   * for the matcher to load. In the browser, the browser draws those glyphs in
+   * the font stack's families, then its sans-serif font.
    */
   bool system_fonts_enabled
     MLN_BINDING("mask=fields;bit=MLN_MAP_OPTION_SYSTEM_FONTS_ENABLED");
+  /**
+   * Whether CJK ideographs, kana and hangul come from local fonts
+   * (`fallback_font_faces`, then the system's) before glyph PBFs, rather than
+   * from a glyph PBF downloaded for every few characters. Without it, they
+   * do.
+   */
+  bool local_ideographs_enabled
+    MLN_BINDING("mask=fields;bit=MLN_MAP_OPTION_LOCAL_IDEOGRAPHS_ENABLED");
 } mln_map_options;
 
 /** A point on the screen, in logical pixels from the map's top-left corner. */

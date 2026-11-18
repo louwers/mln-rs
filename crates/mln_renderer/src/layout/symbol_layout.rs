@@ -75,12 +75,15 @@ fn has_icon_image(layout: &SymbolLayoutProperties::PossiblyEvaluated) -> bool {
 struct GlyphTypeSpan {
     range: RangeInclusive<u16>,
     type_: GlyphIDType,
+    /// Whether a fallback face draws it, only where PBFs can't.
+    fallback: bool,
 }
 
 /// Which font face draws each UTF-16 code unit of one font stack's text. The
-/// faces that name one of the stack's fonts win, in the stack's order, then
-/// the fallback faces, which have no name. Code units that no face covers
-/// take their glyphs from PBFs.
+/// faces that name one of the stack's fonts win, in the stack's order. The
+/// fallback faces, which have no name, draw only the text that glyph PBFs
+/// can't shape (`i18n::char_in_supported_script`). The rest takes its glyphs
+/// from PBFs, or from local fonts where the PBFs have none (`glyph_store.rs`).
 ///
 /// The spans are sorted and disjoint, so a lookup is a binary search, and a
 /// stack that no face applies to has none.
@@ -91,7 +94,8 @@ struct GlyphTypeTable {
 
 impl GlyphTypeTable {
     fn new(stack: &[String], faces: &mln_text::glyph::FontFaces) -> Self {
-        let named = stack.iter().flat_map(|name| faces.iter().filter(move |face| face.name == *name));
+        let named =
+            stack.iter().flat_map(|name| faces.iter().filter(move |face| !name.is_empty() && face.name == *name));
         let fallbacks = faces.iter().filter(|face| face.name.is_empty());
         let candidates: Vec<&mln_text::glyph::FontFace> = named.chain(fallbacks).collect();
         // The ranges as far as a UTF-16 code unit reaches.
@@ -117,11 +121,12 @@ impl GlyphTypeTable {
             else {
                 continue;
             };
+            let fallback = face.name.is_empty();
             match spans.last_mut() {
                 Some(span) if span.type_ == face.type_ && u32::from(span.range.last) + 1 == unit => {
                     span.range = (span.range.start..=last).into();
                 }
-                _ => spans.push(GlyphTypeSpan { range: (first..=last).into(), type_: face.type_ }),
+                _ => spans.push(GlyphTypeSpan { range: (first..=last).into(), type_: face.type_, fallback }),
             }
         }
         GlyphTypeTable { spans }
@@ -139,7 +144,9 @@ impl GlyphTypeTable {
         }
         let index = self.spans.partition_point(|span| span.range.last < unit);
         match self.spans.get(index) {
-            Some(span) if span.range.start <= unit => span.type_,
+            Some(span) if span.range.start <= unit && !(span.fallback && i18n::char_in_supported_script(unit)) => {
+                span.type_
+            }
             _ => GlyphIDType::FontPBF,
         }
     }
@@ -2054,6 +2061,7 @@ mod tests {
     use std::num::NonZeroU16;
 
     use mln_text::glyph::{FontFace, FontFaces, GlyphIDType};
+    use mln_util::i18n::char_in_supported_script;
 
     use super::{BASELINE_OFFSET, GlyphTypeTable, SymbolAnchorType, SymbolLayout, evaluate_radial_offset};
 
@@ -2094,8 +2102,10 @@ mod tests {
         }
         let covers =
             |face: &FontFace| face.ranges.iter().any(|&(first, last)| (first..=last).contains(&u32::from(unit)));
-        let named = stack.iter().flat_map(|name| faces.iter().filter(move |face| face.name == *name));
-        let fallbacks = faces.iter().filter(|face| face.name.is_empty());
+        let named =
+            stack.iter().flat_map(|name| faces.iter().filter(move |face| !name.is_empty() && face.name == *name));
+        // PBFs draw the text they can, before a fallback face.
+        let fallbacks = faces.iter().filter(|face| face.name.is_empty() && !char_in_supported_script(unit));
         named.chain(fallbacks).find(|face| covers(face)).map_or(GlyphIDType::FontPBF, |face| face.type_)
     }
 
@@ -2131,6 +2141,16 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn fallback_faces_draw_only_what_pbfs_cannot() {
+        let faces: FontFaces = vec![face("", 1, &[(0x0000, 0xFFFF)])];
+        let table = GlyphTypeTable::new(&["Open Sans".to_owned()], &faces);
+        let devanagari = GlyphIDType::face(NonZeroU16::new(1).unwrap());
+        assert_eq!(table.get(u16::from(b'a'), GlyphIDType::FontPBF), GlyphIDType::FontPBF);
+        assert_eq!(table.get(0x4E2D, GlyphIDType::FontPBF), GlyphIDType::FontPBF);
+        assert_eq!(table.get(0x0915, GlyphIDType::FontPBF), devanagari);
     }
 
     #[test]

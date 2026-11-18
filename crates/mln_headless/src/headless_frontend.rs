@@ -208,7 +208,7 @@ impl HeadlessFrontend {
             let renderer = Renderer::with_glyph_cache(
                 Rc::clone(&self.backend),
                 self.pixel_ratio,
-                None,
+                mln_text::local_glyph_rasterizer::LocalGlyphs::default(),
                 Arc::clone(&self.glyph_cache),
                 Arc::new(move || {
                     let events = reports_to.lock().clone();

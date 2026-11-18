@@ -910,8 +910,10 @@ impl Map {
         self.loader.url()
     }
 
-    /// Sets the font faces that every font stack falls back to after the
-    /// style's own, for the style documents that load after this call.
+    /// Sets the font faces that every font stack falls back to, for the
+    /// style documents that load after this call. They draw the text that
+    /// glyph PBFs can't shape, and the glyphs that come from local fonts
+    /// (`LocalGlyphs`) before the platform's fonts do.
     ///
     /// `json` is an array of font files, each an object with a `url` and an
     /// optional `unicode-range`, as in a font face of a style's `font-faces`.

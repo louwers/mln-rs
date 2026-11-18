@@ -21,6 +21,7 @@ use mln_renderer::{Registry, Renderer, RendererEvent, RendererEvents, Update, Up
 use mln_style::source_type::SourceData;
 use mln_style::sources::{GeoJSONData, GeoJsonSourceType};
 use mln_text::GlyphCache;
+use mln_text::local_glyph_rasterizer::LocalGlyphs;
 use mln_util::error::Error;
 use mln_util::event_queue::Waker;
 use mln_util::image::PremultipliedImage;
@@ -113,10 +114,8 @@ pub(crate) struct Init {
     pub(crate) registry: Arc<Registry>,
     /// Whether the renderer keeps tiles that left the view.
     pub(crate) tile_cache_enabled: bool,
-    /// The font family, a CSS font-family list, that the renderer draws CJK
-    /// glyphs in rather than downloading them: in the browser, with system
-    /// fonts.
-    pub(crate) local_font_family: Option<String>,
+    /// How the renderer draws glyphs from local fonts.
+    pub(crate) local_glyphs: LocalGlyphs,
     /// Why the session's device couldn't be made before the build: in the
     /// browser, whose WebGPU makes devices asynchronously.
     pub(crate) failure: Option<Error>,
@@ -245,8 +244,8 @@ struct Gfx {
     font_face_engine: Arc<dyn FontFaceEngine>,
     /// What the renderer's tile workers lay out with (`Init`).
     registry: Arc<Registry>,
-    /// The font family the renderer draws CJK glyphs in (`Init`).
-    local_font_family: Option<String>,
+    /// How the renderer draws glyphs from local fonts (`Init`).
+    local_glyphs: LocalGlyphs,
     /// Where the renderer's background work runs (`Init`).
     pool: Pool,
 }
@@ -267,7 +266,7 @@ impl Gfx {
             font_face_engine,
             registry,
             tile_cache_enabled,
-            local_font_family,
+            local_glyphs,
             failure,
             pool,
         } = init;
@@ -288,7 +287,7 @@ impl Gfx {
         let mut renderer = Renderer::with_fonts(
             Rc::clone(&backend),
             pixel_ratio,
-            local_font_family.clone(),
+            local_glyphs.clone(),
             Arc::clone(&glyph_cache),
             Arc::clone(&font_face_engine),
             Arc::clone(&registry),
@@ -297,7 +296,7 @@ impl Gfx {
         );
         renderer.set_tile_cache_enabled(tile_cache_enabled);
         set_tile_workers(&mut renderer, &registry);
-        Ok(Gfx { renderer, target, backend, glyph_cache, font_face_engine, registry, local_font_family, pool })
+        Ok(Gfx { renderer, target, backend, glyph_cache, font_face_engine, registry, local_glyphs, pool })
     }
 
     /// Whether the target can take a frame now: its window, if any, has an
@@ -318,7 +317,7 @@ impl Gfx {
         let mut renderer = Renderer::with_fonts(
             Rc::clone(&self.backend),
             pixel_ratio,
-            self.local_font_family.clone(),
+            self.local_glyphs.clone(),
             Arc::clone(&self.glyph_cache),
             Arc::clone(&self.font_face_engine),
             Arc::clone(&self.registry),

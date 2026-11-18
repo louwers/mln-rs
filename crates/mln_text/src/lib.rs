@@ -9,8 +9,9 @@ mod bidi;
 #[rustfmt::skip]
 mod bidi_mirroring;
 #[cfg(target_family = "wasm")]
-mod browser_glyph_rasterizer;
+pub mod browser_glyph_rasterizer;
 mod face;
+pub mod font_name;
 pub mod glyph;
 pub mod glyph_cache;
 pub mod glyph_pbf;
@@ -27,7 +28,7 @@ pub mod weight;
 mod woff;
 
 pub use bidi::{BiDi, apply_arabic_shaping, starts_right_to_left};
-pub use face::FreeTypeLibrary;
+pub use face::{FontFile, FreeTypeLibrary};
 pub use glyph::{
     Glyph, GlyphID, GlyphIDType, GlyphMap, GlyphMetrics, GlyphPosition, GlyphPositions, GlyphRange, PositionedGlyph,
     PositionedLine, Shaping, WritingModeType,

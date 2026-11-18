@@ -14,7 +14,9 @@ use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
 use skrifa::raw::tables::cmap::Cmap;
 use skrifa::raw::tables::fvar::Fvar;
+use skrifa::raw::tables::name::Name;
 use skrifa::raw::tables::os2::Os2;
+use skrifa::raw::types::NameId;
 use skrifa::raw::{FontData as RawData, FontRead};
 
 use crate::sfnt::{self, Table};
@@ -53,6 +55,27 @@ impl Source {
     pub(crate) fn drawn_weight(&self, probe: char) -> Option<u16> {
         drawn_weight(&self.tables(&[*b"cmap", *b"OS/2", *b"fvar"])?, probe)
     }
+
+    /// The font's family name, from its `name` table.
+    #[cfg_attr(not(target_os = "android"), expect(dead_code, reason = "the other matchers name the family"))]
+    pub(crate) fn family_name(&self) -> Option<String> {
+        family_name(&self.tables(&[*b"name"])?)
+    }
+}
+
+/// The family name in `tables`' `name` table: the typographic family, where
+/// the font has one, else the family.
+fn family_name(tables: &[Table]) -> Option<String> {
+    let data = tables.iter().find(|(tag, _)| tag == b"name").map(|(_, data)| RawData::new(data))?;
+    let name = Name::read(data).ok()?;
+    let find = |id: NameId| {
+        name.name_record()
+            .iter()
+            .filter(|record| record.name_id() == id)
+            .find_map(|record| record.string(name.string_data()).ok())
+            .map(|string| string.to_string())
+    };
+    find(NameId::TYPOGRAPHIC_FAMILY_NAME).or_else(|| find(NameId::FAMILY_NAME))
 }
 
 /// The font files of the chosen fonts, each shared by the faces that use it.
@@ -213,6 +236,14 @@ mod tests {
         assert_eq!(drawn_weight(&[cmap(), os2(100), fvar(100, 900)], 'A'), Some(400));
         assert_eq!(drawn_weight(&[cmap(), os2(400), fvar(100, 200)], 'A'), Some(200));
         assert_eq!(drawn_weight(&[cmap(), os2(400), fvar(700, 900)], 'A'), Some(700));
+    }
+
+    #[test]
+    fn a_fonts_family_comes_from_its_name_table() {
+        let path = std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
+            .join("../mln_text/tests/fixtures/khmer.ttf");
+        let tables = crate::sfnt::read_tables(&path, 0, &[*b"name"]).unwrap();
+        assert_eq!(super::family_name(&tables).as_deref(), Some("Noto Sans Khmer"));
     }
 
     #[test]

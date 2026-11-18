@@ -1,6 +1,7 @@
-//! The font for a script from DirectWrite's system font fallback
-//! (`IDWriteFontFallback::MapCharacters`): the font Windows draws a letter of
-//! the script in, for the user's language, when the font asked for lacks it.
+//! The font for a character from DirectWrite's system font fallback
+//! (`IDWriteFontFallback::MapCharacters`): the font asked for when it has the
+//! character, else the font Windows draws it in for the text's language, at
+//! the weight and style asked for.
 
 #![expect(unsafe_code, reason = "DirectWrite is the FFI here")]
 
@@ -10,14 +11,14 @@ use std::path::PathBuf;
 use std::ptr;
 
 use windows::Win32::Graphics::DirectWrite::{
-    DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_NORMAL,
-    DWriteCreateFactory, IDWriteFactory2, IDWriteFont, IDWriteFontFallback, IDWriteLocalFontFileLoader,
-    IDWriteTextAnalysisSource,
+    DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_ITALIC, DWRITE_FONT_STYLE_NORMAL,
+    DWRITE_FONT_WEIGHT, DWriteCreateFactory, IDWriteFactory2, IDWriteFont, IDWriteFontFallback,
+    IDWriteLocalFontFileLoader, IDWriteTextAnalysisSource,
 };
 use windows::core::{Interface, PCWSTR};
 
 use self::probe::Probe;
-use crate::scripts::Script;
+use crate::Query;
 use crate::source::Source;
 
 /// DirectWrite's system font fallback.
@@ -35,22 +36,26 @@ impl DirectWrite {
         Some(DirectWrite { fallback })
     }
 
-    /// The font that Windows draws `script` in for the first of `languages`,
-    /// or for the user's language when there are none.
-    pub(crate) fn candidates(&self, script: &Script, languages: &[String]) -> Vec<(String, Source)> {
-        self.font_for(script, languages).into_iter().collect()
+    /// The font that Windows draws `query`'s character in for the first of
+    /// its languages, or for the user's language when there are none.
+    pub(crate) fn candidates(&self, query: &Query<'_>) -> Vec<(String, Source)> {
+        self.font_for(query).into_iter().collect()
     }
 
-    fn font_for(&self, script: &Script, languages: &[String]) -> Option<(String, Source)> {
-        let locale = languages.first().cloned().or_else(sys_locale::get_locale).unwrap_or_default();
+    fn font_for(&self, query: &Query<'_>) -> Option<(String, Source)> {
+        let locale = query.languages.first().cloned().or_else(sys_locale::get_locale).unwrap_or_default();
         let mut probe = [0; 2];
-        let text = script.probe.encode_utf16(&mut probe).to_vec();
+        let text = query.probe.encode_utf16(&mut probe).to_vec();
         let length = text.len() as u32;
         let source: IDWriteTextAnalysisSource =
             Probe { text, locale: locale.encode_utf16().chain([0]).collect() }.into();
+        let family: Option<Vec<u16>> = query.family.map(|family| family.encode_utf16().chain([0]).collect());
+        let family = family.as_ref().map_or(PCWSTR::null(), |family| PCWSTR(family.as_ptr()));
+        let style = if query.italic { DWRITE_FONT_STYLE_ITALIC } else { DWRITE_FONT_STYLE_NORMAL };
         let (mut mapped, mut font, mut scale) = (0, None, 0.0);
-        // SAFETY: valid objects, and out-pointers to locals; a null base family
-        // matches no family.
+        // SAFETY: valid objects, a NUL-terminated family that outlives the
+        // call, and out-pointers to locals; a null base family matches no
+        // family.
         unsafe {
             self.fallback
                 .MapCharacters(
@@ -58,9 +63,9 @@ impl DirectWrite {
                     0,
                     length,
                     None,
-                    PCWSTR::null(),
-                    DWRITE_FONT_WEIGHT_NORMAL,
-                    DWRITE_FONT_STYLE_NORMAL,
+                    family,
+                    DWRITE_FONT_WEIGHT(i32::from(query.weight)),
+                    style,
                     DWRITE_FONT_STRETCH_NORMAL,
                     &raw mut mapped,
                     &raw mut font,
@@ -174,17 +179,26 @@ mod probe {
     }
 }
 
+// SAFETY: DirectWrite's shared factory and the objects it makes may be used
+// from any thread.
+unsafe impl Send for DirectWrite {}
+
 #[cfg(test)]
 mod tests {
     use super::DirectWrite;
+    use crate::Query;
     use crate::scripts::SCRIPTS;
+
+    fn query(probe: char, languages: &[String]) -> Query<'_> {
+        Query { name: None, family: None, probe, languages, weight: 400, italic: false }
+    }
 
     #[test]
     fn every_script_has_a_font_that_draws_it() {
         let fallback = DirectWrite::new().expect("DirectWrite's font fallback");
         for script in SCRIPTS {
             let languages = script.language.map(|language| vec![language.to_owned()]).unwrap_or_default();
-            let found = fallback.candidates(script, &languages);
+            let found = fallback.candidates(&query(script.probe, &languages));
             println!("{:04X}: {:?}", u32::from(script.probe), found.first());
             let (_, source) = found.first().unwrap_or_else(|| panic!("no font for {:04X}", u32::from(script.probe)));
             assert!(source.drawn_weight(script.probe).is_some());
@@ -194,8 +208,7 @@ mod tests {
     #[test]
     fn ideographs_take_a_font_for_the_users_language() {
         let fallback = DirectWrite::new().unwrap();
-        let han = SCRIPTS.iter().find(|script| script.probe == '\u{4E2D}').unwrap();
-        let first = |language: &str| fallback.candidates(han, &[language.to_owned()]).remove(0);
+        let first = |language: &str| fallback.candidates(&query('\u{4E2D}', &[language.to_owned()])).remove(0);
         let (japanese, chinese) = (first("ja-JP"), first("zh-CN"));
         println!("ja-JP: {japanese:?}\nzh-CN: {chinese:?}");
         assert_ne!(japanese.1, chinese.1);

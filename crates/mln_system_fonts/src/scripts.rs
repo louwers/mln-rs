@@ -1,4 +1,4 @@
-//! The scripts that the map falls back to system fonts for.
+//! The scripts that the system's fonts are known to draw.
 
 use mln_text::glyph::FontFaceRange;
 
@@ -9,8 +9,8 @@ use mln_text::glyph::FontFaceRange;
 ///
 /// The scripts are those that glyph PBFs can't shape
 /// (`i18n::char_in_supported_script`: the Indic scripts, Sinhala, Tibetan,
-/// Myanmar and Khmer), and CJK, whose ideographs, kana and hangul would
-/// otherwise come from a glyph PBF for every few characters.
+/// Myanmar and Khmer), which take a fallback face each, and CJK, whose
+/// families the scan of font files looks for.
 pub(crate) struct Script {
     /// The language to look its font up for, or `None` for the user's own
     /// languages: ideographs, which Chinese, Japanese and Korean draw

@@ -777,7 +777,7 @@ impl Runtime {
             }
             lifecycle.live_maps += 1;
         }
-        if options.fallback_font_faces.is_none() && options.system_fonts {
+        if options.system_fonts {
             mln_system_fonts::prefetch();
         }
         let id = MapId(self.shared.next_map_id.fetch_add(1, Ordering::Relaxed));

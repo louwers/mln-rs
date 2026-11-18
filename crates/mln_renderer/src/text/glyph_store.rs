@@ -14,6 +14,15 @@
 // range keeps its glyphs in one shared map; `Entry::glyphs` holds only the
 // local and HarfBuzz glyphs.
 //
+// A character that glyph PBFs can draw takes its glyph from the first
+// source that has it, in the order `pbf_first` gives: the stack's glyph PBF,
+// unless the style has no glyph URL; and local glyphs, from the style's
+// fallback font faces that cover it and then the platform's
+// `LocalGlyphRasterizer` (`LocalGlyphs`). Local glyphs come first for CJK
+// when `LocalGlyphs::ideographs` is set, and otherwise draw what the PBF
+// lacks. Either way the glyph keeps its PBF glyph ID, so the layout doesn't
+// change.
+//
 // Font faces (MLN_TEXT_SHAPING_HARFBUZZ): the style's "font-faces" are
 // fetched as font files (`Resource::fontFace`), or read from the bytes a
 // face holds (an app's fallback faces can), and shaped here, on the render
@@ -35,12 +44,13 @@ use mln_text::glyph::{
 };
 use mln_text::glyph_cache::{GlyphCache, GlyphCacheRange};
 use mln_text::glyph_pbf::parse_glyph_pbf;
-use mln_text::local_glyph_rasterizer::{DefaultLocalGlyphRasterizer, LocalGlyphRasterizer};
+use mln_text::local_glyph_rasterizer::LocalGlyphs;
 use mln_text::tagged_string::font_stack_hash;
 use mln_text::{BiDi, HBShapeAdjust};
 use mln_util::error::Error;
 use mln_util::font_stack::FontStack;
 use mln_util::hash::HashMap;
+use mln_util::i18n;
 use mln_util::logging::{Event, Log};
 use mln_util::pool::TaskGroup;
 use mln_util::tiny_sdf::transform_raster_to_sdf;
@@ -93,6 +103,8 @@ struct Entry {
     ranges: VecMap<GlyphRange, RangeState>,
     /// Local and HarfBuzz glyphs. PBF glyphs are in the ranges.
     glyphs: BTreeMap<GlyphID, Arc<Glyph>>,
+    /// The PBF glyph IDs that no local font has.
+    no_local: BTreeSet<GlyphID>,
 }
 
 impl Entry {
@@ -149,7 +161,7 @@ pub(crate) struct GlyphStore {
     /// What the store reported since the last `take_events`: the ranges it
     /// requested, loaded or failed to load.
     events: Vec<RendererEvent>,
-    local_glyph_rasterizer: Box<dyn LocalGlyphRasterizer>,
+    local: LocalGlyphs,
     glyph_cache: Arc<GlyphCache>,
     /// Where glyph PBFs are parsed.
     pool: TaskGroup,
@@ -177,24 +189,22 @@ pub(crate) struct GlyphStore {
 }
 
 impl GlyphStore {
-    /// A store that shares `glyph_cache`, parses glyph PBFs on `pool` and
-    /// loads font faces with `engine`. When the engine reports back while
-    /// font files wait for it, it calls `wake`, on the engine's thread, for
-    /// the `update` that takes them in.
+    /// A store that draws `local` glyphs, shares `glyph_cache`, parses glyph
+    /// PBFs on `pool` and loads font faces with `engine`. When the engine
+    /// reports back while font files wait for it, it calls `wake`, on the
+    /// engine's thread, for the `update` that takes them in.
     pub(crate) fn new(
-        local_glyph_rasterizer: Option<Box<dyn LocalGlyphRasterizer>>,
+        local: LocalGlyphs,
         glyph_cache: Arc<GlyphCache>,
         pool: TaskGroup,
         engine: Arc<dyn FontFaceEngine>,
         wake: Waker,
     ) -> GlyphStore {
-        let local_glyph_rasterizer =
-            local_glyph_rasterizer.unwrap_or_else(|| Box::new(DefaultLocalGlyphRasterizer::new(None)));
         GlyphStore {
             glyph_url: String::new(),
             entries: HashMap::default(),
             events: Vec::new(),
-            local_glyph_rasterizer,
+            local,
             glyph_cache,
             pool,
             wake,
@@ -265,45 +275,53 @@ impl GlyphStore {
         inbox: &InboxSender,
     ) -> Option<ResolvedGlyphs> {
         let since = *wait.since.get_or_insert(self.failures);
-        let mut to_request: Vec<(FontStack, GlyphRange)> = Vec::new();
-        let mut waits = false;
         let mut failed = false;
-        for (font_stack, glyph_ids) in &dependencies.glyphs {
-            let entry = self.entries.entry(font_stack.clone()).or_default();
-            let mut ranges: BTreeSet<GlyphRange> = BTreeSet::new();
-            for glyph_id in glyph_ids {
-                if self.local_glyph_rasterizer.can_rasterize_glyph(font_stack, *glyph_id) {
-                    if !entry.glyphs.contains_key(glyph_id) {
-                        let glyph = generate_local_sdf(&*self.local_glyph_rasterizer, font_stack, *glyph_id);
-                        entry.glyphs.insert(*glyph_id, Arc::new(glyph));
+        loop {
+            let mut to_request: Vec<(FontStack, GlyphRange)> = Vec::new();
+            let mut waits = false;
+            for (font_stack, glyph_ids) in &dependencies.glyphs {
+                let mut ranges: BTreeSet<GlyphRange> = BTreeSet::new();
+                for glyph_id in glyph_ids {
+                    let needs = if glyph_id.type_ == GlyphIDType::FontPBF {
+                        self.pbf_glyph(font_stack, *glyph_id, since, &mut failed)
+                    } else {
+                        Some(get_glyph_range(*glyph_id))
+                    };
+                    ranges.extend(needs);
+                }
+                let entry = self.entries.entry(font_stack.clone()).or_default();
+                for range in ranges {
+                    match entry.ranges.get(&range) {
+                        Some(RangeState::Loaded(_)) => {}
+                        Some(RangeState::Failed { at }) if *at > since => failed = true,
+                        Some(RangeState::Loading { .. }) => waits = true,
+                        // Never requested, or failed before this wait began.
+                        _ => to_request.push((font_stack.clone(), range)),
                     }
-                } else {
-                    ranges.insert(get_glyph_range(*glyph_id));
                 }
             }
-            for range in ranges {
-                match entry.ranges.get(&range) {
-                    Some(RangeState::Loaded(_)) => {}
-                    Some(RangeState::Failed { at }) if *at > since => failed = true,
-                    Some(RangeState::Loading { .. }) => waits = true,
-                    // Never requested, or failed before this wait began.
-                    _ => to_request.push((font_stack.clone(), range)),
+            if to_request.is_empty() {
+                if waits {
+                    return None;
                 }
+                break;
             }
-        }
 
-        // A font file that a face holds loads at once.
-        for (font_stack, range) in to_request {
-            let Some(file_source) = file_source else {
-                waits = true;
-                continue;
-            };
-            self.request_range(&font_stack, range, file_source, inbox);
-            let entry = self.entries.get(&font_stack);
-            waits |= entry.is_some_and(|entry| matches!(entry.ranges.get(&range), Some(RangeState::Loading { .. })));
-        }
-        if waits {
-            return None;
+            // A font file that a face holds loads at once, and the glyphs
+            // that waited for it look again.
+            for (font_stack, range) in to_request {
+                let Some(file_source) = file_source else {
+                    waits = true;
+                    continue;
+                };
+                self.request_range(&font_stack, range, file_source, inbox);
+                let entry = self.entries.get(&font_stack);
+                waits |=
+                    entry.is_some_and(|entry| matches!(entry.ranges.get(&range), Some(RangeState::Loading { .. })));
+            }
+            if waits {
+                return None;
+            }
         }
 
         let mut glyphs = GlyphMap::new();
@@ -318,6 +336,118 @@ impl GlyphStore {
         }
         let shaping = self.shape(&dependencies.shapes, &mut glyphs);
         Some(ResolvedGlyphs { glyphs, shaping, failed })
+    }
+
+    /// Draws the PBF glyph `glyph_id` of `font_stack` from the first source
+    /// that has it, PBF or local (`pbf_first`): `None` once it is drawn or
+    /// known missing, else the range that the next source needs. A range
+    /// that failed during the wait that began at failure `since` counts as
+    /// lacking the glyph, and sets `failed`.
+    fn pbf_glyph(
+        &mut self,
+        font_stack: &FontStack,
+        glyph_id: GlyphID,
+        since: u64,
+        failed: &mut bool,
+    ) -> Option<GlyphRange> {
+        let pbf_first = self.pbf_first(glyph_id);
+        for pbf in [pbf_first, !pbf_first] {
+            let source = if pbf {
+                self.pbf_source(font_stack, glyph_id, since)
+            } else {
+                self.local_source(font_stack, glyph_id, since)
+            };
+            match source {
+                Source::Has => return None,
+                Source::Lacks { failed: true } => *failed = true,
+                Source::Lacks { failed: false } => {}
+                Source::Needs(range) => return Some(range),
+            }
+        }
+        None
+    }
+
+    /// Whether the PBF glyph `glyph_id` comes from glyph PBFs before local
+    /// fonts.
+    fn pbf_first(&self, glyph_id: GlyphID) -> bool {
+        !(self.local.ideographs && i18n::allows_fixed_width_glyph_generation(glyph_id.code))
+    }
+
+    /// Whether `font_stack`'s glyph PBF has `glyph_id`.
+    fn pbf_source(&self, font_stack: &FontStack, glyph_id: GlyphID, since: u64) -> Source {
+        if self.glyph_url.is_empty() {
+            return Source::Lacks { failed: false };
+        }
+        let range = get_glyph_range(glyph_id);
+        match self.entries.get(font_stack).and_then(|entry| entry.ranges.get(&range)) {
+            Some(RangeState::Loaded(Some(glyphs))) if glyphs.contains_key(&glyph_id) => Source::Has,
+            Some(RangeState::Loaded(_)) => Source::Lacks { failed: false },
+            Some(RangeState::Failed { at }) if *at > since => Source::Lacks { failed: true },
+            _ => Source::Needs(range),
+        }
+    }
+
+    /// Draws the PBF glyph `glyph_id` of `font_stack` from local fonts: the
+    /// style's fallback font faces that cover it, in order, then the
+    /// platform's rasterizer.
+    fn local_source(&mut self, font_stack: &FontStack, glyph_id: GlyphID, since: u64) -> Source {
+        if let Some(entry) = self.entries.get(font_stack) {
+            if entry.glyphs.contains_key(&glyph_id) {
+                return Source::Has;
+            }
+            if entry.no_local.contains(&glyph_id) {
+                return Source::Lacks { failed: false };
+            }
+        }
+        let code = u32::from(glyph_id.code);
+        let faces: Vec<GlyphIDType> = (self.font_faces.iter().flat_map(|faces| faces.iter()))
+            .filter(|face| {
+                face.name.is_empty() && face.ranges.iter().any(|&(first, last)| (first..=last).contains(&code))
+            })
+            .map(|face| face.type_)
+            .collect();
+        let mut failed = false;
+        let mut glyph = None;
+        for type_ in faces {
+            let range = get_glyph_range(GlyphID::with_type(0, type_));
+            match self.entries.get(font_stack).and_then(|entry| entry.ranges.get(&range)) {
+                Some(RangeState::Loaded(_)) => {
+                    glyph = self.face_glyph(font_stack, type_, glyph_id);
+                    if glyph.is_some() {
+                        break;
+                    }
+                }
+                Some(RangeState::Failed { at }) if *at > since => failed = true,
+                _ => return Source::Needs(range),
+            }
+        }
+        let glyph = glyph.or_else(|| {
+            let rasterizer = self.local.rasterizer.as_ref()?;
+            rasterizer.rasterize_glyph(font_stack, glyph_id).map(to_sdf)
+        });
+        let entry = self.entries.entry(font_stack.clone()).or_default();
+        if let Some(glyph) = glyph {
+            entry.glyphs.insert(glyph_id, Arc::new(Glyph { id: glyph_id, ..glyph }));
+            Source::Has
+        } else {
+            entry.no_local.insert(glyph_id);
+            Source::Lacks { failed }
+        }
+    }
+
+    /// The glyph of the character that the PBF glyph `glyph_id` names, from
+    /// the loaded font face of `type_`, unshaped.
+    fn face_glyph(&self, font_stack: &FontStack, type_: GlyphIDType, glyph_id: GlyphID) -> Option<Glyph> {
+        let shaper = self.get_hb_shaper(font_stack, type_)?;
+        let (mut ids, mut adjusts) = (Vec::new(), Vec::new());
+        shaper.shape(&[glyph_id.code], false, &mut ids, &mut adjusts);
+        let [id] = ids[..] else { return None };
+        if id.code == 0 {
+            return None;
+        }
+        let mut glyph = shaper.rasterize(&id);
+        glyph.bitmap = transform_raster_to_sdf(&glyph.bitmap, 8.0, 0.25);
+        Some(glyph)
     }
 
     /// Shapes each font-face text with its font, and adds the glyphs it
@@ -436,11 +566,8 @@ impl GlyphStore {
             Some(GlyphData::Glyphs(glyphs)) => {
                 // Interned here rather than on the pool, where a renderer's
                 // ranges would contend for the cache's lock.
-                let interned: GlyphCacheRange = glyphs
-                    .into_iter()
-                    .filter(|glyph| !self.local_glyph_rasterizer.can_rasterize_glyph(font_stack, glyph.id))
-                    .map(|glyph| (glyph.id, self.glyph_cache.intern_glyph(glyph)))
-                    .collect();
+                let interned: GlyphCacheRange =
+                    glyphs.into_iter().map(|glyph| (glyph.id, self.glyph_cache.intern_glyph(glyph))).collect();
                 range_glyphs = Some(self.glyph_cache.intern_range(interned));
             }
             Some(GlyphData::Font(data)) => {
@@ -449,10 +576,8 @@ impl GlyphStore {
                 }
                 if self.load_hb_shaper(font_stack, range.type_, data) {
                     let id = GlyphID::with_type(0, range.type_);
-                    if !self.local_glyph_rasterizer.can_rasterize_glyph(font_stack, id) {
-                        let entry = self.entries.entry(font_stack.clone()).or_default();
-                        entry.glyphs.insert(id, Arc::new(Glyph { id, ..Glyph::default() }));
-                    }
+                    let entry = self.entries.entry(font_stack.clone()).or_default();
+                    entry.glyphs.insert(id, Arc::new(Glyph { id, ..Glyph::default() }));
                 }
             }
             None => {}
@@ -620,9 +745,19 @@ fn drawn(glyph_id: GlyphID) -> bool {
     glyph_id.code != 0 || glyph_id.type_ == GlyphIDType::FontPBF
 }
 
-fn generate_local_sdf(rasterizer: &dyn LocalGlyphRasterizer, font_stack: &FontStack, glyph_id: GlyphID) -> Glyph {
-    let mut local = rasterizer.rasterize_glyph(font_stack, glyph_id);
-    let radius = if local.metrics.is_double_resolution { 16.0 } else { 8.0 };
-    local.bitmap = transform_raster_to_sdf(&local.bitmap, radius, 0.25);
-    local
+/// A local glyph's coverage as a signed distance field.
+fn to_sdf(mut glyph: Glyph) -> Glyph {
+    let radius = if glyph.metrics.is_double_resolution { 16.0 } else { 8.0 };
+    glyph.bitmap = transform_raster_to_sdf(&glyph.bitmap, radius, 0.25);
+    glyph
+}
+
+/// What a source of a PBF glyph has of it.
+enum Source {
+    /// The glyph, now in the store.
+    Has,
+    /// Not the glyph: its range failed during the wait if `failed`.
+    Lacks { failed: bool },
+    /// The range it waits for.
+    Needs(GlyphRange),
 }

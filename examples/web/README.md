@@ -39,7 +39,7 @@ Serve dist/ over HTTP and open `index.html`. It takes these URL parameters
 | `compare`                                | overlay MapLibre GL JS's map of the same style, right of a draggable divider             |
 | `debug`                                  | the debug overlay: frame rate, frame time by phase, draw calls, memory, requests         |
 | `freeBearing`                            | free bearing on the globe                                                                |
-| `localIdeographFontFamily=false`         | download CJK glyphs rather than draw them in the browser's `sans-serif` font             |
+| `localIdeographFontFamily=false`         | download CJK glyphs rather than draw them with the browser's fonts                       |
 | `fallbackFontFaces=<json>`               | font files that every font stack falls back to, as a style's `font-faces` entry, unnamed |
 | `panic=map` or `panic=tile`              | make the map's or the first tile worker's wasm instance panic at startup, for the check  |
 
@@ -85,7 +85,9 @@ page (main thread, no wasm)
   drops the affected text instead of stopping the map.
 - Images decode with the browser's decoders, so the module carries none.
 - CJK glyphs are drawn locally with an OffscreenCanvas instead of downloaded, as
-  GL JS does with `localIdeographFontFamily`.
+  GL JS does with `localIdeographFontFamily`, and so are the glyphs of a style
+  without glyph PBFs and those its PBFs lack: in the font stack's families, then
+  the browser's `sans-serif` font.
 - Resources go through `fetch` and the browser's HTTP cache. The build has no
   SQLite, so there's no cache database, no offline packs and no `mbtiles://`.
 - A panic traps the wasm instance it happens in. If that's the map's or a tile

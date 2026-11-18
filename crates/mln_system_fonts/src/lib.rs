@@ -1,25 +1,33 @@
-//! The system's fonts for the scripts that a style's fonts and glyph PBFs
-//! can't draw well: the scripts that need complex shaping (the Indic
-//! scripts, Sinhala, Tibetan, Myanmar and Khmer), and CJK, whose glyphs
-//! would otherwise download a PBF for every few characters.
+//! The system's fonts, for the text that a style's own fonts leave to them:
 //!
-//! For each script, it picks one installed font that has the script's
-//! glyphs and draws near regular weight (`pick`), looked up for the user's preferred
-//! languages, and gives the map that font for the script's code points only.
+//! - [`fallback_font_faces`]: a font for each script that glyph PBFs can't
+//!   shape (the Indic scripts, Sinhala, Tibetan, Myanmar and Khmer), which
+//!   the map shapes with HarfBuzz. For each script, it picks one installed
+//!   font that has the script's glyphs and draws near regular weight
+//!   (`pick`).
+//! - [`SystemGlyphRasterizer`]: the glyph of any other character, one at a
+//!   time, for a style without glyph PBFs, a glyph its PBFs lack, or a CJK
+//!   character. It draws from the font that the label's font stack names, if
+//!   the system has it, else from the font the system picks for the
+//!   character, at the weight and style that the stack's names imply.
+//!
 //! It asks the platform's font matcher where it has one: fontconfig on Linux
 //! and the BSDs, `AFontMatcher` on Android 10 and later, CoreText on Apple's
-//! platforms and DirectWrite on Windows. Elsewhere, or
-//! without it, it scans the system's font files
-//! for families known to draw each script. The browser build finds none: the
-//! browser draws CJK glyphs itself (`DefaultLocalGlyphRasterizer`).
+//! platforms and DirectWrite on Windows, for the user's preferred languages.
+//! Elsewhere, or without it, it scans the system's font files for the
+//! families known to draw each script. The browser build finds none: the
+//! browser draws local glyphs itself (`BrowserGlyphRasterizer`).
 //!
-//! The fonts are found once per process, on a thread of their own. A font's
-//! file is memory-mapped the first time the map needs it.
+//! The matcher loads once per process, on a thread of its own
+//! ([`prefetch`]), and each font the first time a map needs it. A font's
+//! file is memory-mapped the first time the map draws from it.
 
 use std::sync::OnceLock;
 
 use mln_text::glyph::{FontFace, FontFaces};
 
+#[cfg(not(target_family = "wasm"))]
+mod glyphs;
 #[cfg(not(target_family = "wasm"))]
 mod languages;
 #[cfg(not(target_family = "wasm"))]
@@ -40,6 +48,9 @@ mod directwrite;
 #[cfg(all(unix, not(any(target_vendor = "apple", target_os = "android"))))]
 mod fontconfig;
 
+#[cfg(not(target_family = "wasm"))]
+pub use glyphs::SystemGlyphRasterizer;
+
 /// A system font chosen as a fallback.
 #[derive(Clone, Debug)]
 pub struct SystemFontFace {
@@ -51,8 +62,9 @@ pub struct SystemFontFace {
 /// The fallback fonts, once found.
 static FACES: OnceLock<Vec<SystemFontFace>> = OnceLock::new();
 
-/// Starts finding the fallback fonts on a thread of their own, unless that
-/// has started, so that [`fallback_font_faces`] waits less.
+/// Starts loading the platform's font matcher and finding the fallback
+/// fonts on a thread of their own, unless that has started, so that the
+/// first map that needs them waits less.
 pub fn prefetch() {
     static STARTED: OnceLock<()> = OnceLock::new();
     if FACES.get().is_some() {
@@ -64,9 +76,9 @@ pub fn prefetch() {
     });
 }
 
-/// The fallback fonts for the scripts that need them, from the fonts
-/// installed on this system: at most one per script. Finds them the first
-/// time, which can take a moment; then it returns the same fonts.
+/// The fallback fonts for the scripts that glyph PBFs can't shape, from the
+/// fonts installed on this system: at most one per script. Finds them the
+/// first time, which can take a moment; then it returns the same fonts.
 pub fn fallback_font_faces() -> &'static [SystemFontFace] {
     FACES.get_or_init(find)
 }
@@ -85,18 +97,19 @@ fn find() -> Vec<SystemFontFace> {
 
 #[cfg(not(target_family = "wasm"))]
 fn find() -> Vec<SystemFontFace> {
-    find_with(&Finder::new(), &languages::preferred())
+    find_with(&system().finder.lock())
 }
 
-/// The fallback fonts that `finder` finds for the user's `preferred`
-/// languages.
+/// The fallback fonts that `finder` finds.
 #[cfg(not(target_family = "wasm"))]
-fn find_with(finder: &Finder, preferred: &[String]) -> Vec<SystemFontFace> {
+fn find_with(finder: &Finder) -> Vec<SystemFontFace> {
     let mut files = source::Files::default();
     let mut faces = Vec::new();
-    for script in scripts::SCRIPTS {
-        let languages = languages::for_script(script, preferred);
-        let Some((family, source)) = pick(script, finder.candidates(script, &languages)) else {
+    for script in scripts::SCRIPTS.iter().filter(|script| script.needs_shaping) {
+        let languages: Vec<String> = script.language.iter().map(|&language| language.to_owned()).collect();
+        let query =
+            Query { name: None, family: None, probe: script.probe, languages: &languages, weight: 400, italic: false };
+        let Some((family, source)) = pick(script, finder.candidates(&query)) else {
             continue;
         };
         let url = source.url();
@@ -107,9 +120,8 @@ fn find_with(finder: &Finder, preferred: &[String]) -> Vec<SystemFontFace> {
 }
 
 /// The best of `candidates` for `script`: the first that has its glyphs and
-/// draws near regular weight. Glyph PBFs can't shape the scripts that need
-/// it, so for those, any weight beats none, and the first that has their
-/// glyphs is the last resort; CJK falls back to the PBFs instead.
+/// draws near regular weight, else the first that has its glyphs. Glyph PBFs
+/// can't shape the script, so any weight beats none.
 #[cfg(not(target_family = "wasm"))]
 fn pick(script: &scripts::Script, candidates: Vec<(String, source::Source)>) -> Option<(String, source::Source)> {
     let mut last_resort = None;
@@ -118,16 +130,53 @@ fn pick(script: &scripts::Script, candidates: Vec<(String, source::Source)>) -> 
         if source::near_regular(weight) {
             return Some((family, source));
         }
-        if script.needs_shaping && last_resort.is_none() {
+        if last_resort.is_none() {
             last_resort = Some((family, source));
         }
     }
     last_resort
 }
 
+/// What to look a font up for.
+#[cfg(not(target_family = "wasm"))]
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Query<'a> {
+    /// The font's full name, as a `text-font` names it: "Open Sans Bold".
+    /// CoreText finds a font by it; the other matchers by the family.
+    #[cfg_attr(not(target_vendor = "apple"), expect(dead_code, reason = "only CoreText finds fonts by full name"))]
+    pub(crate) name: Option<&'a str>,
+    /// The family to prefer, "Open Sans", or `None` for the system's sans
+    /// serif.
+    pub(crate) family: Option<&'a str>,
+    /// A character the font has to have.
+    pub(crate) probe: char,
+    /// The languages of the text, most preferred first, which choose between
+    /// the fonts of Chinese, Japanese and Korean. Empty to leave the choice to
+    /// the platform.
+    pub(crate) languages: &'a [String],
+    /// The OpenType weight to prefer.
+    pub(crate) weight: u16,
+    pub(crate) italic: bool,
+}
+
+/// The process's way to find fonts, and the user's languages.
+#[cfg(not(target_family = "wasm"))]
+pub(crate) struct System {
+    pub(crate) finder: parking_lot::Mutex<Finder>,
+    /// The user's preferred languages, most preferred first.
+    pub(crate) preferred: Vec<String>,
+}
+
+/// The system's fonts, loaded the first time.
+#[cfg(not(target_family = "wasm"))]
+pub(crate) fn system() -> &'static System {
+    static SYSTEM: OnceLock<System> = OnceLock::new();
+    SYSTEM.get_or_init(|| System { finder: parking_lot::Mutex::new(Finder::new()), preferred: languages::preferred() })
+}
+
 /// The platform's way to find fonts.
 #[cfg(not(target_family = "wasm"))]
-enum Finder {
+pub(crate) enum Finder {
     #[cfg(target_vendor = "apple")]
     CoreText,
     #[cfg(windows)]
@@ -160,22 +209,19 @@ impl Finder {
         Finder::Scan(scan::Scan::new())
     }
 
-    /// The fonts that may draw `script` for `languages`, best first, with
-    /// their family names.
-    fn candidates(&self, script: &scripts::Script, languages: &[String]) -> Vec<(String, source::Source)> {
+    /// The fonts that may draw `query`'s character, best first, with their
+    /// family names. Some may lack it.
+    pub(crate) fn candidates(&self, query: &Query<'_>) -> Vec<(String, source::Source)> {
         match self {
             #[cfg(target_vendor = "apple")]
-            Finder::CoreText => apple::candidates(script, languages),
+            Finder::CoreText => apple::candidates(query),
             #[cfg(windows)]
-            Finder::DirectWrite(fallback) => fallback.candidates(script, languages),
+            Finder::DirectWrite(fallback) => fallback.candidates(query),
             #[cfg(target_os = "android")]
-            Finder::Android(matcher) => matcher.candidates(script, languages),
+            Finder::Android(matcher) => matcher.candidates(query),
             #[cfg(all(unix, not(any(target_vendor = "apple", target_os = "android"))))]
-            Finder::Fontconfig(fontconfig) => fontconfig.candidates(script, languages),
-            Finder::Scan(scan) => {
-                let _ = languages;
-                scan.candidates(script)
-            }
+            Finder::Fontconfig(fontconfig) => fontconfig.candidates(query),
+            Finder::Scan(scan) => scan.candidates(query),
         }
     }
 }
@@ -247,6 +293,10 @@ mod tests {
             let covered =
                 font.charmap().mappings().any(|(c, _)| face.ranges.iter().any(|&(lo, hi)| c >= lo && c <= hi));
             assert!(covered, "{family} has no glyph in its ranges");
+            assert!(
+                scripts::SCRIPTS.iter().any(|script| script.needs_shaping && script.ranges == face.ranges),
+                "{family} is for a script that needs shaping"
+            );
         }
     }
 
@@ -261,7 +311,7 @@ mod tests {
 
     #[test]
     fn faces_from_the_scan_load_and_cover_their_ranges() {
-        let faces = find_with(&Finder::Scan(scan::Scan::new()), &["ko-KR".to_owned()]);
+        let faces = find_with(&Finder::Scan(scan::Scan::new()));
         println!("the scan found {} fallback faces", faces.len());
         check(&faces);
         check_shaping(&faces);

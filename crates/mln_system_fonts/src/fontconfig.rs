@@ -1,26 +1,28 @@
-//! The fonts for a script from fontconfig, the font matcher of Linux and the
-//! BSDs, loaded at run time so that a system without it falls back to the
+//! The fonts for a character from fontconfig, the font matcher of Linux and
+//! the BSDs, loaded at run time so that a system without it falls back to the
 //! scan of font files.
 //!
-//! For each script, fontconfig sorts the system's fonts against
-//! `sans-serif`, the script's language and a letter of it, applying the
-//! user's and the system's font configuration. The letter outranks the
-//! family and the language, so the fonts that have it come first, and of
-//! those, the families that the configuration prefers for the language.
+//! fontconfig sorts the system's fonts against the family asked for (or
+//! `sans-serif`), the language, the weight and style, and the character,
+//! applying the user's and the system's font configuration. The character
+//! outranks the family and the language, so the fonts that have it come
+//! first, and of those, the family asked for, then the families that the
+//! configuration prefers for the language.
 
 #![expect(unsafe_code, reason = "fontconfig's C API is the FFI here")]
 
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
+use std::fmt::Write as _;
 use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 use std::ptr;
 
 use libloading::Library;
 
-use crate::scripts::Script;
+use crate::Query;
 use crate::source::Source;
 
-/// How many of the sorted fonts that have the script's letter to try.
+/// How many of the sorted fonts that have the character to try.
 const MAX_CANDIDATES: usize = 8;
 
 type FcBool = c_int;
@@ -105,16 +107,12 @@ impl Fontconfig {
         Some(Fontconfig { api, config, _library: library })
     }
 
-    /// The fonts that may draw `script` for `languages`, best first.
-    pub(crate) fn candidates(&self, script: &Script, languages: &[String]) -> Vec<(String, Source)> {
+    /// The fonts that may draw `query`'s character, best first.
+    pub(crate) fn candidates(&self, query: &Query<'_>) -> Vec<(String, Source)> {
         let api = &self.api;
-        let mut name = String::from("sans-serif");
-        if let Some(language) = languages.first().map(|tag| fontconfig_language(tag)).filter(|tag| !tag.is_empty()) {
-            name.push_str(":lang=");
-            name.push_str(&language);
-        }
-        let Ok(name) = CString::new(name) else { return Vec::new() };
-        let probe = u32::from(script.probe);
+        let Ok(name) = CString::new(pattern(query)) else { return Vec::new() };
+        let probe = u32::from(query.probe);
+        let monospaced = query.family.is_some_and(|family| family.contains("Mono"));
         let mut candidates = Vec::new();
         // SAFETY: each object is checked for null, used while it lives and
         // destroyed once; the font set's patterns belong to the set, and the
@@ -165,9 +163,10 @@ impl Fontconfig {
                     } else {
                         String::new()
                     };
-                // Not a monospaced family, as the scan does: fontconfig
-                // leaves the spacing of some (Noto Sans Mono CJK) unset.
-                if family.contains("Mono") || candidates.iter().any(|(_, known)| *known == source) {
+                // Not a monospaced family unless asked for, as the scan
+                // does: fontconfig leaves the spacing of some (Noto Sans Mono
+                // CJK) unset.
+                if (family.contains("Mono") && !monospaced) || candidates.iter().any(|(_, known)| *known == source) {
                     continue;
                 }
                 candidates.push((family, source));
@@ -186,6 +185,56 @@ impl Drop for Fontconfig {
         // SAFETY: the configuration is this value's, and nothing uses it after.
         unsafe { (self.api.config_destroy)(self.config) };
     }
+}
+
+/// The fontconfig pattern of `query`, in fontconfig's name syntax.
+fn pattern(query: &Query<'_>) -> String {
+    let mut name = match query.family {
+        // The characters that separate a name's parts, escaped.
+        Some(family) => family.chars().fold(String::new(), |mut name, c| {
+            if matches!(c, '\\' | '-' | ':' | ',' | '=') {
+                name.push('\\');
+            }
+            name.push(c);
+            name
+        }),
+        None => String::from("sans-serif"),
+    };
+    if let Some(language) = query.languages.first().map(|tag| fontconfig_language(tag)).filter(|tag| !tag.is_empty()) {
+        name.push_str(":lang=");
+        name.push_str(&language);
+    }
+    let _ = write!(name, ":weight={}", fontconfig_weight(query.weight));
+    if query.italic {
+        name.push_str(":slant=100");
+    }
+    name
+}
+
+/// An OpenType weight on fontconfig's scale, as `FcWeightFromOpenType`
+/// converts it: between the weights both name, in proportion.
+fn fontconfig_weight(weight: u16) -> u16 {
+    const SCALE: [(u16, u16); 11] = [
+        (100, 0),
+        (200, 40),
+        (300, 50),
+        (350, 55),
+        (380, 75),
+        (400, 80),
+        (500, 100),
+        (600, 180),
+        (700, 200),
+        (800, 205),
+        (900, 210),
+    ];
+    let weight = weight.clamp(100, 900);
+    let upper = SCALE.iter().position(|&(ot, _)| ot >= weight).unwrap_or(SCALE.len() - 1);
+    let (ot_high, fc_high) = SCALE[upper];
+    if upper == 0 || ot_high == weight {
+        return fc_high;
+    }
+    let (ot_low, fc_low) = SCALE[upper - 1];
+    fc_low + (fc_high - fc_low) * (weight - ot_low) / (ot_high - ot_low)
 }
 
 /// A BCP 47 tag as fontconfig names its language: lowercase, with a region
@@ -212,9 +261,39 @@ fn fontconfig_language(tag: &str) -> String {
     language.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect()
 }
 
+// SAFETY: fontconfig's configuration may be used from any thread, one at a
+// time, which the finder's lock ensures.
+unsafe impl Send for Fontconfig {}
+
 #[cfg(test)]
 mod tests {
-    use super::fontconfig_language;
+    use super::{fontconfig_language, fontconfig_weight, pattern};
+    use crate::Query;
+
+    #[test]
+    fn weights_take_fontconfigs_scale() {
+        assert_eq!(fontconfig_weight(400), 80);
+        assert_eq!(fontconfig_weight(700), 200);
+        assert_eq!(fontconfig_weight(450), 90);
+        assert_eq!(fontconfig_weight(50), 0);
+        assert_eq!(fontconfig_weight(1000), 210);
+    }
+
+    #[test]
+    fn a_query_is_a_pattern() {
+        let languages = ["ja-JP".to_owned()];
+        let query = Query {
+            name: None,
+            family: Some("Noto Sans: CJK"),
+            probe: 'a',
+            languages: &languages,
+            weight: 700,
+            italic: true,
+        };
+        assert_eq!(pattern(&query), "Noto Sans\\: CJK:lang=ja-jp:weight=200:slant=100");
+        let query = Query { family: None, languages: &[], weight: 400, italic: false, ..query };
+        assert_eq!(pattern(&query), "sans-serif:weight=80");
+    }
 
     #[test]
     fn languages_take_fontconfigs_names() {

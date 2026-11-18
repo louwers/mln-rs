@@ -139,9 +139,9 @@ impl WebMap {
     /// time a style declares font faces. `fallback_font_faces` is the JSON
     /// array of font files that every font stack falls back to, each an
     /// object with a `url` and an optional `unicode-range`, as in a font face
-    /// of a style's `font-faces`. With `system_fonts`, the map draws CJK
-    /// glyphs in the browser's sans-serif font rather than downloading them,
-    /// as GL JS's `localIdeographFontFamily`. `on_frame()` runs in the task
+    /// of a style's `font-faces`. With `local_ideographs`, the map draws CJK
+    /// glyphs with the browser's fonts rather than downloading them, as GL
+    /// JS's `localIdeographFontFamily`. `on_frame()` runs in the task
     /// that rendered a frame, while the canvas still has it, and must call
     /// `drain_frames`.
     ///
@@ -158,7 +158,7 @@ impl WebMap {
         pixel_ratio: f64,
         load_shaper: js_sys::Function,
         fallback_font_faces: Option<String>,
-        system_fonts: bool,
+        local_ideographs: bool,
         on_frame: js_sys::Function,
     ) -> Result<WebMap, JsValue> {
         shaper::set_loader(load_shaper);
@@ -179,7 +179,7 @@ impl WebMap {
                 .with(EventType::MapLoadingFailed)
                 .with(EventType::MapRenderFrameFinished),
             fallback_font_faces,
-            system_fonts,
+            local_ideographs,
             ..Default::default()
         };
         let (map, created) = runtime.create_map(options).map_err(js_error)?;

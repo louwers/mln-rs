@@ -434,6 +434,7 @@ fn glyph_and_image_events_keep_their_order() {
     let run_loop: Queue<()> = Queue::new();
     let file_source: Arc<dyn FileSource> = StubFileSource::on_queue(&run_loop, ResponseType::Asynchronous);
     test.tile.store.set_file_source(Some(file_source));
+    test.tile.store.glyphs().set_url("test://{fontstack}/{range}.pbf");
     test.load(&[layer(json!({
         "id": "labels",
         "type": "symbol",

@@ -15,6 +15,7 @@ use mln_gfx::{FrameTarget, Handoff, RendererBackend, ScissorRect, ShaderRegistry
 use mln_map_types::{MapDebugOptions, MapView};
 use mln_style::layers::CustomLayerFrame;
 use mln_text::GlyphCache;
+use mln_text::local_glyph_rasterizer::LocalGlyphs;
 use mln_tile_id::UnwrappedTileID;
 use mln_util::Color;
 use mln_util::event_queue::Waker;
@@ -93,8 +94,7 @@ pub struct Renderer {
 
 impl Renderer {
     /// A renderer with a glyph cache of its own, which runs its background
-    /// work on `pool`. `local_font_family` is the platform's
-    /// `LocalGlyphRasterizer`'s (see `DefaultLocalGlyphRasterizer`).
+    /// work on `pool` and draws `local_glyphs` from the device's fonts.
     ///
     /// `waker` runs, on any thread, when something the renderer waits for
     /// arrives, such as a tile's data or a font engine that got ready: the
@@ -105,11 +105,11 @@ impl Renderer {
     pub fn new(
         backend: Rc<dyn RendererBackend>,
         pixel_ratio: f32,
-        local_font_family: Option<String>,
+        local_glyphs: LocalGlyphs,
         waker: Waker,
         pool: &Pool,
     ) -> Self {
-        Self::with_glyph_cache(backend, pixel_ratio, local_font_family, Arc::default(), waker, pool)
+        Self::with_glyph_cache(backend, pixel_ratio, local_glyphs, Arc::default(), waker, pool)
     }
 
     /// A renderer that uses `glyph_cache`: renderers given the same
@@ -117,14 +117,14 @@ impl Renderer {
     pub fn with_glyph_cache(
         backend: Rc<dyn RendererBackend>,
         pixel_ratio: f32,
-        local_font_family: Option<String>,
+        local_glyphs: LocalGlyphs,
         glyph_cache: Arc<GlyphCache>,
         waker: Waker,
         pool: &Pool,
     ) -> Self {
         let engine = crate::text::font_face_engine::default_engine();
         let registry = Registry::with_builtins();
-        Self::with_fonts(backend, pixel_ratio, local_font_family, glyph_cache, engine, registry, waker, pool)
+        Self::with_fonts(backend, pixel_ratio, local_glyphs, glyph_cache, engine, registry, waker, pool)
     }
 
     /// A renderer that uses `glyph_cache`, loads the font files of a style's
@@ -138,7 +138,7 @@ impl Renderer {
     pub fn with_fonts(
         backend: Rc<dyn RendererBackend>,
         pixel_ratio: f32,
-        local_font_family: Option<String>,
+        local_glyphs: LocalGlyphs,
         glyph_cache: Arc<GlyphCache>,
         font_face_engine: Arc<dyn crate::text::font_face_engine::FontFaceEngine>,
         registry: Arc<Registry>,
@@ -148,7 +148,7 @@ impl Renderer {
         Renderer {
             orchestrator: ManuallyDrop::new(RenderOrchestrator::new(
                 true,
-                local_font_family,
+                local_glyphs,
                 glyph_cache,
                 font_face_engine,
                 registry,

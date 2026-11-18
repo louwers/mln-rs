@@ -25,9 +25,9 @@
 //   width, height, ratio   a fixed map size in CSS pixels and pixel ratio
 //                          (default: the window and devicePixelRatio)
 //   localIdeographFontFamily=false
-//                          download CJK glyphs rather than draw them in the
-//                          browser's sans-serif font, as GL JS's option
-//                          does when false (or empty)
+//                          download CJK glyphs rather than draw them with
+//                          the browser's fonts, as GL JS's option does when
+//                          false (or empty)
 //   compare                MapLibre GL JS's map of the style beside this one
 //                          (compare.ts)
 //   freeBearing            free bearing on the globe: drags and zooms on it
@@ -248,7 +248,7 @@ compiling.then(
         style,
         fallbackFontFaces: params.get("fallbackFontFaces"),
         camera,
-        systemFonts: localFamily !== "" && localFamily !== "false",
+        localIdeographs: localFamily !== "" && localFamily !== "false",
         panic: panic === "map" ? panicMessage : undefined,
       },
       [offscreen, ...controls],

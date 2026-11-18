@@ -83,10 +83,10 @@ export interface Start {
   fallbackFontFaces: string | null;
   camera: Camera;
   /**
-   * Whether the map draws CJK glyphs in the browser's sans-serif font rather
-   * than downloading them.
+   * Whether the map draws CJK glyphs with the browser's fonts rather than
+   * downloading them.
    */
-  systemFonts: boolean;
+  localIdeographs: boolean;
   /** A message to panic with once the map exists, for check/check.mjs. */
   panic: string | undefined;
 }
