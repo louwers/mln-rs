@@ -5055,8 +5055,8 @@ layout (std140) uniform SymbolDrawableUBO {
     bool u_is_variable_anchor;
     highp float u_pitched_scale;
     highp vec2 u_translation;
-    highp float u_pad1;
-    highp float u_pad2;
+    highp float u_gamma_scale;
+    bool u_is_halo_pass;
 };
 
 layout (std140) uniform SymbolEvaluatedPropsUBO {
@@ -5216,8 +5216,8 @@ layout (std140) uniform SymbolEvaluatedPropsUBO {
 layout (std140) uniform SymbolTilePropsUBO {
     bool u_is_text;
     bool u_is_halo;
-    highp float u_gamma_scale;
     lowp float tileprops_pad1;
+    lowp float tileprops_pad2;
 };
 
 in highp vec2 v_tex;
@@ -5240,7 +5240,9 @@ void main() {
 };
 
 pub(crate) const SYMBOL_SDF_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"layout (location = 0) in vec4 a_pos_offset;
+    vertex: r"#define SDF_PX 8.0
+
+layout (location = 0) in vec4 a_pos_offset;
 layout (location = 1) in vec4 a_data;
 layout (location = 2) in vec4 a_pixeloffset;
 layout (location = 3) in vec3 a_projected_pos;
@@ -5297,8 +5299,8 @@ layout (std140) uniform SymbolDrawableUBO {
     bool u_is_variable_anchor;
     highp float u_pitched_scale;
     highp vec2 u_translation;
-    highp float u_pad1;
-    highp float u_pad2;
+    highp float u_gamma_scale;
+    bool u_is_halo_pass;
 };
 
 layout (std140) uniform SymbolEvaluatedPropsUBO {
@@ -5330,15 +5332,12 @@ out highp vec4 halo_color;
 #endif
 #ifndef HAS_UNIFORM_u_opacity
 layout (location = 7) in lowp vec2 a_opacity;
-out lowp float opacity;
 #endif
 #ifndef HAS_UNIFORM_u_halo_width
 layout (location = 8) in lowp vec2 a_halo_width;
-out lowp float halo_width;
 #endif
 #ifndef HAS_UNIFORM_u_halo_blur
 layout (location = 9) in lowp vec2 a_halo_blur;
-out lowp float halo_blur;
 #endif
 
 void main() {
@@ -5359,17 +5358,17 @@ halo_color = unpack_mix_color(a_halo_color, u_halo_color_t);
 highp vec4 halo_color = u_halo_color;
 #endif
     #ifndef HAS_UNIFORM_u_opacity
-opacity = unpack_mix_vec2(a_opacity, u_opacity_t);
+lowp float opacity = unpack_mix_vec2(a_opacity, u_opacity_t);
 #else
 lowp float opacity = u_opacity;
 #endif
     #ifndef HAS_UNIFORM_u_halo_width
-halo_width = unpack_mix_vec2(a_halo_width, u_halo_width_t);
+lowp float halo_width = unpack_mix_vec2(a_halo_width, u_halo_width_t);
 #else
 lowp float halo_width = u_halo_width;
 #endif
     #ifndef HAS_UNIFORM_u_halo_blur
-halo_blur = unpack_mix_vec2(a_halo_blur, u_halo_blur_t);
+lowp float halo_blur = unpack_mix_vec2(a_halo_blur, u_halo_blur_t);
 #else
 lowp float halo_blur = u_halo_blur;
 #endif
@@ -5479,11 +5478,20 @@ lowp float halo_blur = u_halo_blur;
     if (u_pitch_with_map) {
         gl_Position = projectTileWithElevation(gl_Position.xy, gl_Position.z);
     }
-    float gamma_scale = gl_Position.w;
+    // A glyph's edge's gamma, scaled by clip w, and the inner edge of its
+    // halo: the same over a quad but for the clip w, which interpolates
+    // linearly.
+    float EDGE_GAMMA = 0.105 / DEVICE_PIXEL_RATIO;
+    float halo_blur_gamma = u_is_halo_pass ? halo_blur * 1.19 / SDF_PX : 0.0;
+    float gamma_scaled = (halo_blur_gamma + EDGE_GAMMA) / (fontScale * u_gamma_scale) * gl_Position.w;
+    float halo_edge = (6.0 - halo_width / fontScale) / SDF_PX;
+#ifndef HAS_UNIFORM_u_opacity
+    interpolated_fade_opacity *= opacity;
+#endif
 
     v_data0 = (a_tex - a_tex_origin) / u_texsize;
     v_tex_origin = a_tex_origin / u_texsize;
-    v_data1 = vec3(gamma_scale, size, interpolated_fade_opacity);
+    v_data1 = vec3(gamma_scaled, halo_edge, interpolated_fade_opacity);
 }
 ",
     fragment: r"#define SDF_PX 8.0
@@ -5506,8 +5514,8 @@ layout (std140) uniform SymbolEvaluatedPropsUBO {
 layout (std140) uniform SymbolTilePropsUBO {
     bool u_is_text;
     bool u_is_halo;
-    highp float u_gamma_scale;
     lowp float tileprops_pad1;
+    lowp float tileprops_pad2;
 };
 
 uniform sampler2D u_texture;
@@ -5522,22 +5530,11 @@ in highp vec4 fill_color;
 #ifndef HAS_UNIFORM_u_halo_color
 in highp vec4 halo_color;
 #endif
-#ifndef HAS_UNIFORM_u_opacity
-in lowp float opacity;
-#endif
-#ifndef HAS_UNIFORM_u_halo_width
-in lowp float halo_width;
-#endif
-#ifndef HAS_UNIFORM_u_halo_blur
-in lowp float halo_blur;
-#endif
 
 void main() {
     highp vec4 u_fill_color = u_is_text ? u_text_fill_color : u_icon_fill_color;
     highp vec4 u_halo_color = u_is_text ? u_text_halo_color : u_icon_halo_color;
     highp float u_opacity = u_is_text ? u_text_opacity : u_icon_opacity;
-    highp float u_halo_width = u_is_text ? u_text_halo_width : u_icon_halo_width;
-    highp float u_halo_blur = u_is_text ? u_text_halo_blur : u_icon_halo_blur;
 
     #ifdef HAS_UNIFORM_u_fill_color
 highp vec4 fill_color = u_fill_color;
@@ -5545,41 +5542,29 @@ highp vec4 fill_color = u_fill_color;
     #ifdef HAS_UNIFORM_u_halo_color
 highp vec4 halo_color = u_halo_color;
 #endif
-    #ifdef HAS_UNIFORM_u_opacity
-lowp float opacity = u_opacity;
+#ifdef HAS_UNIFORM_u_opacity
+    lowp float opacity = u_opacity;
+#else
+    lowp float opacity = 1.0;
 #endif
-    #ifdef HAS_UNIFORM_u_halo_width
-lowp float halo_width = u_halo_width;
-#endif
-    #ifdef HAS_UNIFORM_u_halo_blur
-lowp float halo_blur = u_halo_blur;
-#endif
-
-    float EDGE_GAMMA = 0.105 / DEVICE_PIXEL_RATIO;
 
     highp vec2 tex = atlas_pos(v_tex_origin, v_data0.xy);
-    float gamma_scale = v_data1.x;
-    float size = v_data1.y;
-    float fade_opacity = v_data1[2];
-
-    float fontScale = u_is_text ? size / 24.0 : size;
+    float gamma_scaled = v_data1.x;
+    float halo_edge = v_data1.y;
+    float fade_opacity = v_data1.z;
 
     lowp vec4 color = fill_color;
-    highp float gamma = EDGE_GAMMA / (fontScale * u_gamma_scale);
     lowp float inner_edge = (256.0 - 64.0) / 256.0;
     if (u_is_halo) {
         color = halo_color;
-        gamma = (halo_blur * 1.19 / SDF_PX + EDGE_GAMMA) / (fontScale * u_gamma_scale);
-        inner_edge = inner_edge + gamma * gamma_scale;
+        inner_edge = inner_edge + gamma_scaled;
     }
 
     lowp float dist = texture(u_texture, tex).a;
-    highp float gamma_scaled = gamma * gamma_scale;
     highp float alpha = smoothstep(inner_edge - gamma_scaled, inner_edge + gamma_scaled, dist);
     if (u_is_halo) {
         // When drawing halos, we want the inside of the halo to be transparent as well
         // in case the text fill is transparent.
-        lowp float halo_edge = (6.0 - halo_width / fontScale) / SDF_PX;
         alpha = min(smoothstep(halo_edge - gamma_scaled, halo_edge + gamma_scaled, dist), 1.0 - alpha);
     }
 
@@ -5593,7 +5578,8 @@ lowp float halo_blur = u_halo_blur;
 };
 
 pub(crate) const SYMBOL_TEXT_AND_ICON_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"#define ICON 0.0
+    vertex: r"#define SDF_PX 8.0
+#define ICON 0.0
 
 layout (location = 0) in vec4 a_pos_offset;
 layout (location = 1) in vec4 a_data;
@@ -5651,8 +5637,8 @@ layout (std140) uniform SymbolDrawableUBO {
     bool u_is_variable_anchor;
     highp float u_pitched_scale;
     highp vec2 u_translation;
-    highp float u_pad1;
-    highp float u_pad2;
+    highp float u_gamma_scale;
+    bool u_is_halo_pass;
 };
 
 layout (std140) uniform SymbolEvaluatedPropsUBO {
@@ -5685,15 +5671,12 @@ out highp vec4 halo_color;
 #endif
 #ifndef HAS_UNIFORM_u_opacity
 layout (location = 6) in lowp vec2 a_opacity;
-out lowp float opacity;
 #endif
 #ifndef HAS_UNIFORM_u_halo_width
 layout (location = 7) in lowp vec2 a_halo_width;
-out lowp float halo_width;
 #endif
 #ifndef HAS_UNIFORM_u_halo_blur
 layout (location = 8) in lowp vec2 a_halo_blur;
-out lowp float halo_blur;
 #endif
 
 void main() {
@@ -5714,17 +5697,17 @@ halo_color = unpack_mix_color(a_halo_color, u_halo_color_t);
 highp vec4 halo_color = u_halo_color;
 #endif
     #ifndef HAS_UNIFORM_u_opacity
-opacity = unpack_mix_vec2(a_opacity, u_opacity_t);
+lowp float opacity = unpack_mix_vec2(a_opacity, u_opacity_t);
 #else
 lowp float opacity = u_opacity;
 #endif
     #ifndef HAS_UNIFORM_u_halo_width
-halo_width = unpack_mix_vec2(a_halo_width, u_halo_width_t);
+lowp float halo_width = unpack_mix_vec2(a_halo_width, u_halo_width_t);
 #else
 lowp float halo_width = u_halo_width;
 #endif
     #ifndef HAS_UNIFORM_u_halo_blur
-halo_blur = unpack_mix_vec2(a_halo_blur, u_halo_blur_t);
+lowp float halo_blur = unpack_mix_vec2(a_halo_blur, u_halo_blur_t);
 #else
 lowp float halo_blur = u_halo_blur;
 #endif
@@ -5834,13 +5817,22 @@ lowp float halo_blur = u_halo_blur;
     if (u_pitch_with_map) {
         gl_Position = projectTileWithElevation(gl_Position.xy, gl_Position.z);
     }
-    float gamma_scale = gl_Position.w;
+    // A glyph's edge's gamma, scaled by clip w, and the inner edge of its
+    // halo: the same over a quad but for the clip w, which interpolates
+    // linearly.
+    float EDGE_GAMMA = 0.105 / DEVICE_PIXEL_RATIO;
+    float halo_blur_gamma = u_is_halo_pass ? halo_blur * 1.19 / SDF_PX : 0.0;
+    float gamma_scaled = (halo_blur_gamma + EDGE_GAMMA) / (fontScale * u_gamma_scale) * gl_Position.w;
+    float halo_edge = (6.0 - halo_width / fontScale) / SDF_PX;
+#ifndef HAS_UNIFORM_u_opacity
+    interpolated_fade_opacity *= opacity;
+#endif
 
     bool is_icon = is_sdf == ICON;
     vec2 texsize = is_icon ? u_texsize_icon : u_texsize;
     v_data0 = (a_tex - a_tex_origin) / texsize;
     v_tex_origin = a_tex_origin / texsize;
-    v_data1 = vec3(gamma_scale, size, interpolated_fade_opacity);
+    v_data1 = vec3(gamma_scaled, halo_edge, interpolated_fade_opacity);
     v_is_icon = int(is_icon);
 }
 ",
@@ -5864,8 +5856,8 @@ layout (std140) uniform SymbolEvaluatedPropsUBO {
 layout (std140) uniform SymbolTilePropsUBO {
     bool u_is_text;
     bool u_is_halo;
-    highp float u_gamma_scale;
     lowp float tileprops_pad1;
+    lowp float tileprops_pad2;
 };
 
 uniform sampler2D u_texture;
@@ -5882,22 +5874,11 @@ in highp vec4 fill_color;
 #ifndef HAS_UNIFORM_u_halo_color
 in highp vec4 halo_color;
 #endif
-#ifndef HAS_UNIFORM_u_opacity
-in lowp float opacity;
-#endif
-#ifndef HAS_UNIFORM_u_halo_width
-in lowp float halo_width;
-#endif
-#ifndef HAS_UNIFORM_u_halo_blur
-in lowp float halo_blur;
-#endif
 
 void main() {
     highp vec4 u_fill_color = u_is_text ? u_text_fill_color : u_icon_fill_color;
     highp vec4 u_halo_color = u_is_text ? u_text_halo_color : u_icon_halo_color;
     highp float u_opacity = u_is_text ? u_text_opacity : u_icon_opacity;
-    highp float u_halo_width = u_is_text ? u_text_halo_width : u_icon_halo_width;
-    highp float u_halo_blur = u_is_text ? u_text_halo_blur : u_icon_halo_blur;
 
     #ifdef HAS_UNIFORM_u_fill_color
 highp vec4 fill_color = u_fill_color;
@@ -5905,17 +5886,15 @@ highp vec4 fill_color = u_fill_color;
     #ifdef HAS_UNIFORM_u_halo_color
 highp vec4 halo_color = u_halo_color;
 #endif
-    #ifdef HAS_UNIFORM_u_opacity
-lowp float opacity = u_opacity;
-#endif
-    #ifdef HAS_UNIFORM_u_halo_width
-lowp float halo_width = u_halo_width;
-#endif
-    #ifdef HAS_UNIFORM_u_halo_blur
-lowp float halo_blur = u_halo_blur;
+#ifdef HAS_UNIFORM_u_opacity
+    lowp float opacity = u_opacity;
+#else
+    lowp float opacity = 1.0;
 #endif
 
-    float fade_opacity = v_data1[2];
+    float gamma_scaled = v_data1.x;
+    float halo_edge = v_data1.y;
+    float fade_opacity = v_data1.z;
 
     highp vec2 tex = atlas_pos(v_tex_origin, v_data0);
 
@@ -5929,29 +5908,18 @@ lowp float halo_blur = u_halo_blur;
         return;
     }
 
-    float EDGE_GAMMA = 0.105 / DEVICE_PIXEL_RATIO;
-
-    float gamma_scale = v_data1.x;
-    float size = v_data1.y;
-
-    float fontScale = size / 24.0;
-
     lowp vec4 color = fill_color;
-    highp float gamma = EDGE_GAMMA / (fontScale * u_gamma_scale);
     lowp float inner_edge = (256.0 - 64.0) / 256.0;
     if (u_is_halo) {
         color = halo_color;
-        gamma = (halo_blur * 1.19 / SDF_PX + EDGE_GAMMA) / (fontScale * u_gamma_scale);
-        inner_edge = inner_edge + gamma * gamma_scale;
+        inner_edge = inner_edge + gamma_scaled;
     }
 
     lowp float dist = texture(u_texture, tex).a;
-    highp float gamma_scaled = gamma * gamma_scale;
     highp float alpha = smoothstep(inner_edge - gamma_scaled, inner_edge + gamma_scaled, dist);
     if (u_is_halo) {
         // When drawing halos, we want the inside of the halo to be transparent as well
         // in case the text fill is transparent.
-        lowp float halo_edge = (6.0 - halo_width / fontScale) / SDF_PX;
         alpha = min(smoothstep(halo_edge - gamma_scaled, halo_edge + gamma_scaled, dist), 1.0 - alpha);
     }
 

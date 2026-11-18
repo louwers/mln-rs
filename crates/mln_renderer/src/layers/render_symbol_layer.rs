@@ -1069,14 +1069,14 @@ impl RenderSymbolLayer {
                 is_variable_anchor: i32::from(has_variable_placement),
                 pitched_scale: state.get_projection().circle_radius_correction(state) as f32,
                 translation: tile_translation,
-                pad1: 0.0,
-                pad2: 0.0,
+                gamma_scale,
+                is_halo: i32::from(data.is_halo),
             },
             tile_props: SymbolTilePropsUBO {
                 is_text: i32::from(is_text),
                 is_halo: i32::from(data.is_halo),
-                gamma_scale,
                 pad1: 0.0,
+                pad2: 0.0,
             },
             projection: to_projection_ubo(&projection),
         })

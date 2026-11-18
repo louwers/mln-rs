@@ -6367,8 +6367,8 @@ struct alignas(16) SymbolDrawableUBO {
     /* 264 */ /*bool*/ int is_variable_anchor;
     /* 268 */ float pitched_scale;
     /* 272 */ float2 translation;
-    /* 280 */ float pad1;
-    /* 284 */ float pad2;
+    /* 280 */ float gamma_scale;
+    /* 284 */ /*bool*/ int is_halo;
     /* 288 */
 };
 static_assert(sizeof(SymbolDrawableUBO) == 18 * 16, "wrong size");
@@ -6376,8 +6376,8 @@ static_assert(sizeof(SymbolDrawableUBO) == 18 * 16, "wrong size");
 struct alignas(16) SymbolTilePropsUBO {
     /*  0 */ /*bool*/ int is_text;
     /*  4 */ /*bool*/ int is_halo;
-    /*  8 */ float gamma_scale;
-    /* 12 */ float pad1;
+    /*  8 */ float pad1;
+    /* 12 */ float pad2;
     /* 16 */
 };
 static_assert(sizeof(SymbolTilePropsUBO) == 16, "wrong size");
@@ -6630,8 +6630,8 @@ struct alignas(16) SymbolDrawableUBO {
     /* 264 */ /*bool*/ int is_variable_anchor;
     /* 268 */ float pitched_scale;
     /* 272 */ float2 translation;
-    /* 280 */ float pad1;
-    /* 284 */ float pad2;
+    /* 280 */ float gamma_scale;
+    /* 284 */ /*bool*/ int is_halo;
     /* 288 */
 };
 static_assert(sizeof(SymbolDrawableUBO) == 18 * 16, "wrong size");
@@ -6639,8 +6639,8 @@ static_assert(sizeof(SymbolDrawableUBO) == 18 * 16, "wrong size");
 struct alignas(16) SymbolTilePropsUBO {
     /*  0 */ /*bool*/ int is_text;
     /*  4 */ /*bool*/ int is_halo;
-    /*  8 */ float gamma_scale;
-    /* 12 */ float pad1;
+    /*  8 */ float pad1;
+    /* 12 */ float pad2;
     /* 16 */
 };
 static_assert(sizeof(SymbolTilePropsUBO) == 16, "wrong size");
@@ -6711,26 +6711,21 @@ struct FragmentStage {
     // atlas_pos adds back.
     float2 tex;
     float2 tex_origin [[flat]];
-    half gamma_scale;
-    half fontScale;
+    // A glyph's edge's gamma, scaled by clip w, and the inner edge of its
+    // halo.
+    half gamma_scaled;
+    half halo_edge;
+    // The fade opacity, times the opacity when it's per vertex.
     half fade_opacity;
 
-#if !defined(HAS_UNIFORM_u_opacity)
-    half opacity;
-#endif
-#if !defined(HAS_UNIFORM_u_halo_width)
-    half halo_width;
-#endif
-#if !defined(HAS_UNIFORM_u_halo_blur)
-    half halo_blur;
-#endif
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const SymbolDrawableUBO* drawableVector [[buffer(idSymbolDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]) {
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
+                                device const SymbolEvaluatedPropsUBO& props [[buffer(idSymbolEvaluatedPropsUBO)]]) {
 
     device const SymbolDrawableUBO& drawable = drawableVector[uboIndex];
     device const ProjectionUBO& projection = projectionVector[uboIndex];
@@ -6850,6 +6845,29 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     }
     const float2 tex_origin = float2(vertx.tex_origin);
 
+    // A glyph's edge's gamma, scaled by clip w, and the inner edge of its
+    // halo: the same over a quad but for the clip w, which interpolates
+    // linearly.
+#if defined(HAS_UNIFORM_u_halo_width)
+    const float halo_width = drawable.is_text_prop ? props.text_halo_width : props.icon_halo_width;
+#else
+    const float halo_width = unpack_mix_float(vertx.halo_width, drawable.halo_width_t);
+#endif
+#if defined(HAS_UNIFORM_u_halo_blur)
+    const float halo_blur = drawable.is_text_prop ? props.text_halo_blur : props.icon_halo_blur;
+#else
+    const float halo_blur = unpack_mix_float(vertx.halo_blur, drawable.halo_blur_t);
+#endif
+    const float EDGE_GAMMA = 0.105 / DEVICE_PIXEL_RATIO;
+    const float haloBlurGamma = drawable.is_halo ? halo_blur * 1.19 / SDF_PX : 0.0;
+    const float gamma_scaled = (haloBlurGamma + EDGE_GAMMA) / (fontScale * drawable.gamma_scale) * position.w;
+    const float halo_edge = (6.0 - halo_width / fontScale) / SDF_PX;
+#if defined(HAS_UNIFORM_u_opacity)
+    const half visible_opacity = fo;
+#else
+    const half visible_opacity = fo * opacity;
+#endif
+
     return {
         .position     = position,
 #if !defined(HAS_UNIFORM_u_fill_color)
@@ -6860,18 +6878,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 #endif
         .tex          = (a_tex - tex_origin) / drawable.texsize,
         .tex_origin   = tex_origin / drawable.texsize,
-        .gamma_scale  = half(position.w),
-        .fontScale    = half(fontScale),
-        .fade_opacity = fo,
-#if !defined(HAS_UNIFORM_u_opacity)
-        .opacity      = opacity,
-#endif
-#if !defined(HAS_UNIFORM_u_halo_width)
-        .halo_width   = half(unpack_mix_float(vertx.halo_width, drawable.halo_width_t)),
-#endif
-#if !defined(HAS_UNIFORM_u_halo_blur)
-        .halo_blur    = half(unpack_mix_float(vertx.halo_blur, drawable.halo_blur_t)),
-#endif
+        .gamma_scaled = half(gamma_scaled),
+        .halo_edge    = half(halo_edge),
+        .fade_opacity = visible_opacity,
     };
 }
 
@@ -6898,25 +6907,12 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     const half4 halo_color = in.halo_color;
 #endif
 #if defined(HAS_UNIFORM_u_opacity)
-    const float opacity = tileProps.is_text ? props.text_opacity : props.icon_opacity;
+    const float opacity = (tileProps.is_text ? props.text_opacity : props.icon_opacity) * in.fade_opacity;
 #else
-    const float opacity = in.opacity;
-#endif
-#if defined(HAS_UNIFORM_u_halo_width)
-    const float halo_width = tileProps.is_text ? props.text_halo_width : props.icon_halo_width;
-#else
-    const float halo_width = in.halo_width;
-#endif
-#if defined(HAS_UNIFORM_u_halo_blur)
-    const float halo_blur = tileProps.is_text ? props.text_halo_blur : props.icon_halo_blur;
-#else
-    const float halo_blur = in.halo_blur;
+    const float opacity = in.fade_opacity;
 #endif
 
-    const float EDGE_GAMMA = 0.105 / DEVICE_PIXEL_RATIO;
-    const float fontGamma = in.fontScale * tileProps.gamma_scale;
-    const float haloBlurGamma = tileProps.is_halo ? halo_blur * 1.19 / SDF_PX : 0.0;
-    const float gammaScaled = (haloBlurGamma + EDGE_GAMMA) / fontGamma * in.gamma_scale;
+    const float gammaScaled = in.gamma_scaled;
     const half4 color = tileProps.is_halo ? halo_color : fill_color;
     // A halo's inner edge sits a gamma outside the fill's.
     const float fillInnerEdge = (256.0 - 64.0) / 256.0;
@@ -6926,11 +6922,11 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     float alpha = smoothstep(innerEdge - gammaScaled, innerEdge + gammaScaled, dist);
     if (tileProps.is_halo) {
         // When drawing halos, if the fill is translucent we want the inside of the halo to be translucent as well
-        const float haloEdge = (6.0 - halo_width / in.fontScale) / SDF_PX;
+        const float haloEdge = in.halo_edge;
         alpha = min(smoothstep(haloEdge - gammaScaled, haloEdge + gammaScaled, dist), 1.0 - alpha);
     }
 
-    return half4(color * (alpha * opacity * in.fade_opacity));
+    return half4(color * (alpha * opacity));
 }
 ",
 };
@@ -6975,8 +6971,8 @@ struct alignas(16) SymbolDrawableUBO {
     /* 264 */ /*bool*/ int is_variable_anchor;
     /* 268 */ float pitched_scale;
     /* 272 */ float2 translation;
-    /* 280 */ float pad1;
-    /* 284 */ float pad2;
+    /* 280 */ float gamma_scale;
+    /* 284 */ /*bool*/ int is_halo;
     /* 288 */
 };
 static_assert(sizeof(SymbolDrawableUBO) == 18 * 16, "wrong size");
@@ -6984,8 +6980,8 @@ static_assert(sizeof(SymbolDrawableUBO) == 18 * 16, "wrong size");
 struct alignas(16) SymbolTilePropsUBO {
     /*  0 */ /*bool*/ int is_text;
     /*  4 */ /*bool*/ int is_halo;
-    /*  8 */ float gamma_scale;
-    /* 12 */ float pad1;
+    /*  8 */ float pad1;
+    /* 12 */ float pad2;
     /* 16 */
 };
 static_assert(sizeof(SymbolTilePropsUBO) == 16, "wrong size");
@@ -7059,18 +7055,12 @@ struct FragmentStage {
     float2 tex;
     float2 tex_origin [[flat]];
 
-#if !defined(HAS_UNIFORM_u_opacity)
-    half opacity;
-#endif
-#if !defined(HAS_UNIFORM_u_halo_width)
-    half halo_width;
-#endif
-#if !defined(HAS_UNIFORM_u_halo_blur)
-    half halo_blur;
-#endif
 
-    half gamma_scale;
-    half fontScale;
+    // A glyph's edge's gamma, scaled by clip w, and the inner edge of its
+    // halo.
+    half gamma_scaled;
+    half halo_edge;
+    // The fade opacity, times the opacity when it's per vertex.
     half fade_opacity;
     bool is_icon;
 };
@@ -7079,7 +7069,8 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const SymbolDrawableUBO* drawableVector [[buffer(idSymbolDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]) {
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
+                                device const SymbolEvaluatedPropsUBO& props [[buffer(idSymbolEvaluatedPropsUBO)]]) {
 
     device const SymbolDrawableUBO& drawable = drawableVector[uboIndex];
     device const ProjectionUBO& projection = projectionVector[uboIndex];
@@ -7198,10 +7189,32 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     if (drawable.pitch_with_map) {
         position = projectTileWithElevation(position.xy, position.z, projection);
     }
-    const float gamma_scale = position.w;
     const bool is_icon = (is_sdf == ICON);
     const float2 texsize = is_icon ? drawable.texsize_icon : drawable.texsize;
     const float2 tex_origin = float2(vertx.tex_origin);
+
+    // A glyph's edge's gamma, scaled by clip w, and the inner edge of its
+    // halo: the same over a quad but for the clip w, which interpolates
+    // linearly.
+#if defined(HAS_UNIFORM_u_halo_width)
+    const float halo_width = drawable.is_text_prop ? props.text_halo_width : props.icon_halo_width;
+#else
+    const float halo_width = unpack_mix_float(vertx.halo_width, drawable.halo_width_t);
+#endif
+#if defined(HAS_UNIFORM_u_halo_blur)
+    const float halo_blur = drawable.is_text_prop ? props.text_halo_blur : props.icon_halo_blur;
+#else
+    const float halo_blur = unpack_mix_float(vertx.halo_blur, drawable.halo_blur_t);
+#endif
+    const float EDGE_GAMMA = 0.105 / DEVICE_PIXEL_RATIO;
+    const float haloBlurGamma = drawable.is_halo ? halo_blur * 1.19 / SDF_PX : 0.0;
+    const float gamma_scaled = (haloBlurGamma + EDGE_GAMMA) / (fontScale * drawable.gamma_scale) * position.w;
+    const float halo_edge = (6.0 - halo_width / fontScale) / SDF_PX;
+#if defined(HAS_UNIFORM_u_opacity)
+    const half visible_opacity = fo;
+#else
+    const half visible_opacity = fo * opacity;
+#endif
 
     return {
         .position     = position,
@@ -7213,18 +7226,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 #endif
         .tex          = (a_tex - tex_origin) / texsize,
         .tex_origin   = tex_origin / texsize,
-#if !defined(HAS_UNIFORM_u_opacity)
-        .opacity      = opacity,
-#endif
-#if !defined(HAS_UNIFORM_u_halo_width)
-        .halo_width   = half(unpack_mix_float(vertx.halo_width, drawable.halo_width_t)),
-#endif
-#if !defined(HAS_UNIFORM_u_halo_blur)
-        .halo_blur    = half(unpack_mix_float(vertx.halo_blur, drawable.halo_blur_t)),
-#endif
-        .gamma_scale  = half(gamma_scale),
-        .fontScale    = half(fontScale),
-        .fade_opacity = fo,
+        .gamma_scaled = half(gamma_scaled),
+        .halo_edge    = half(halo_edge),
+        .fade_opacity = visible_opacity,
         .is_icon      = is_icon,
     };
 }
@@ -7254,32 +7258,18 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     const half4 halo_color = in.halo_color;
 #endif
 #if defined(HAS_UNIFORM_u_opacity)
-    const half opacity = half(tileProps.is_text ? props.text_opacity : props.icon_opacity);
+    const half opacity = half(tileProps.is_text ? props.text_opacity : props.icon_opacity) * in.fade_opacity;
 #else
-    const half opacity = in.opacity;
-#endif
-#if defined(HAS_UNIFORM_u_halo_width)
-    const half halo_width = half(tileProps.is_text ? props.text_halo_width : props.icon_halo_width);
-#else
-    const half halo_width = in.halo_width;
-#endif
-#if defined(HAS_UNIFORM_u_halo_blur)
-    const half halo_blur = half(tileProps.is_text ? props.text_halo_blur : props.icon_halo_blur);
-#else
-    const half halo_blur = in.halo_blur;
+    const half opacity = in.fade_opacity;
 #endif
 
     const float2 pos = atlas_pos(in.tex_origin, in.tex);
 
     if (in.is_icon) {
-        const float alpha = opacity * in.fade_opacity;
-        return half4(icon_image.sample(icon_sampler, pos) * alpha);
+        return half4(icon_image.sample(icon_sampler, pos) * float(opacity));
     }
 
-    const float EDGE_GAMMA = 0.105 / DEVICE_PIXEL_RATIO;
-    const float fontGamma = in.fontScale * tileProps.gamma_scale;
-    const float haloBlurGamma = tileProps.is_halo ? halo_blur * 1.19 / SDF_PX : 0.0;
-    const float gammaScaled = (haloBlurGamma + EDGE_GAMMA) / fontGamma * in.gamma_scale;
+    const float gammaScaled = in.gamma_scaled;
     const half4 color = tileProps.is_halo ? halo_color : fill_color;
     // A halo's inner edge sits a gamma outside the fill's.
     const float fillInnerEdge = (256.0 - 64.0) / 256.0;
@@ -7289,11 +7279,11 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     float alpha = smoothstep(innerEdge - gammaScaled, innerEdge + gammaScaled, dist);
     if (tileProps.is_halo) {
         // When drawing halos, if the fill is translucent we want the inside of the halo to be translucent as well
-        const float haloEdge = (6.0 - halo_width / in.fontScale) / SDF_PX;
+        const float haloEdge = in.halo_edge;
         alpha = min(smoothstep(haloEdge - gammaScaled, haloEdge + gammaScaled, dist), 1.0 - alpha);
     }
 
-    return half4(color * (alpha * opacity * in.fade_opacity));
+    return half4(color * (alpha * opacity));
 }
 ",
 };

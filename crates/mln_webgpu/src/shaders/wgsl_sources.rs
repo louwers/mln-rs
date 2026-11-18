@@ -5595,15 +5595,15 @@ struct SymbolDrawableUBO {
     is_variable_anchor: u32,
     pitched_scale: f32,
     translation: vec2<f32>,
-    pad1: f32,
-    pad2: f32,
+    gamma_scale: f32,
+    is_halo: u32,
 };
 
 struct SymbolTilePropsUBO {
     is_text: u32,
     is_halo: u32,
-    gamma_scale: f32,
     pad1: f32,
+    pad2: f32,
 };
 
 struct SymbolEvaluatedPropsUBO {
@@ -5665,22 +5665,13 @@ struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) tex: vec2<f32>,
     @location(1) fade_opacity: f32,
-    @location(2) gamma_scale: f32,
-    @location(3) fontScale: f32,
+    @location(2) gamma_scaled: f32,
+    @location(3) halo_edge: f32,
 #ifndef HAS_UNIFORM_u_fill_color
     @location(4) fill_color: vec4<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_halo_color
     @location(5) halo_color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(6) opacity: f32,
-#endif
-#ifndef HAS_UNIFORM_u_halo_width
-    @location(7) halo_width: f32,
-#endif
-#ifndef HAS_UNIFORM_u_halo_blur
-    @location(8) halo_blur: f32,
 #endif
     @location(9) @interpolate(flat) tex_origin: vec2<f32>,
 };
@@ -5810,23 +5801,35 @@ fn main(in: VertexInput) -> VertexOutput {
     let tex_origin = vec2<f32>(f32(in.tex_origin.x), f32(in.tex_origin.y));
     out.tex = (a_tex - tex_origin) / drawable.texsize;
     out.tex_origin = tex_origin / drawable.texsize;
-    out.gamma_scale = position.w;
-    out.fontScale = fontScale;
+    let gamma_scale = position.w;
+#ifdef HAS_UNIFORM_u_opacity
     out.fade_opacity = fo;
+#else
+    out.fade_opacity = fo * opacity;
+#endif
+
+    // A glyph's edge's gamma, scaled by clip w, and the inner edge of its
+    // halo: the same over a quad but for the clip w, which interpolates
+    // linearly.
+#ifndef HAS_UNIFORM_u_halo_width
+    let halo_width = unpack_mix_float(in.halo_width, drawable.halo_width_t);
+#else
+    let halo_width = select(props.icon_halo_width, props.text_halo_width, drawable.is_text_prop != 0u);
+#endif
+#ifndef HAS_UNIFORM_u_halo_blur
+    let halo_blur = unpack_mix_float(in.halo_blur, drawable.halo_blur_t);
+#else
+    let halo_blur = select(props.icon_halo_blur, props.text_halo_blur, drawable.is_text_prop != 0u);
+#endif
+    let EDGE_GAMMA = 0.105 / paintParams.pixel_ratio;
+    let halo_blur_gamma = select(0.0, halo_blur * 1.19 / SDF_PX, drawable.is_halo != 0u);
+    out.gamma_scaled = (halo_blur_gamma + EDGE_GAMMA) / (fontScale * drawable.gamma_scale) * gamma_scale;
+    out.halo_edge = (6.0 - halo_width / fontScale) / SDF_PX;
 #ifndef HAS_UNIFORM_u_fill_color
     out.fill_color = unpack_mix_color(in.fill_color, drawable.fill_color_t);
 #endif
 #ifndef HAS_UNIFORM_u_halo_color
     out.halo_color = unpack_mix_color(in.halo_color, drawable.halo_color_t);
-#endif
-#ifndef HAS_UNIFORM_u_halo_width
-    out.halo_width = unpack_mix_float(in.halo_width, drawable.halo_width_t);
-#endif
-#ifndef HAS_UNIFORM_u_halo_blur
-    out.halo_blur = unpack_mix_float(in.halo_blur, drawable.halo_blur_t);
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    out.opacity = opacity;
 #endif
 
     return out;
@@ -5838,22 +5841,13 @@ fn main(in: VertexInput) -> VertexOutput {
 struct FragmentInput {
     @location(0) tex: vec2<f32>,
     @location(1) fade_opacity: f32,
-    @location(2) gamma_scale: f32,
-    @location(3) fontScale: f32,
+    @location(2) gamma_scaled: f32,
+    @location(3) halo_edge: f32,
 #ifndef HAS_UNIFORM_u_fill_color
     @location(4) fill_color: vec4<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_halo_color
     @location(5) halo_color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(6) opacity: f32,
-#endif
-#ifndef HAS_UNIFORM_u_halo_width
-    @location(7) halo_width: f32,
-#endif
-#ifndef HAS_UNIFORM_u_halo_blur
-    @location(8) halo_blur: f32,
 #endif
     @location(9) @interpolate(flat) tex_origin: vec2<f32>,
 };
@@ -5879,26 +5873,13 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     let halo_color = select(props.icon_halo_color, props.text_halo_color, tileProps.is_text != 0u);
 #endif
 #ifndef HAS_UNIFORM_u_opacity
-    let opacity = in.opacity;
+    let opacity = in.fade_opacity;
 #else
-    let opacity = select(props.icon_opacity, props.text_opacity, tileProps.is_text != 0u);
-#endif
-#ifndef HAS_UNIFORM_u_halo_width
-    let halo_width = in.halo_width;
-#else
-    let halo_width = select(props.icon_halo_width, props.text_halo_width, tileProps.is_text != 0u);
-#endif
-#ifndef HAS_UNIFORM_u_halo_blur
-    let halo_blur = in.halo_blur;
-#else
-    let halo_blur = select(props.icon_halo_blur, props.text_halo_blur, tileProps.is_text != 0u);
+    let opacity = select(props.icon_opacity, props.text_opacity, tileProps.is_text != 0u) * in.fade_opacity;
 #endif
 
-    let EDGE_GAMMA = 0.105 / paintParams.pixel_ratio;
-    let fontGamma = in.fontScale * tileProps.gamma_scale;
     let color = select(fill_color, halo_color, tileProps.is_halo != 0u);
-    let gamma = (select(0.0, halo_blur * 1.19 / SDF_PX, tileProps.is_halo != 0u) + EDGE_GAMMA) / fontGamma;
-    let gamma_scaled = gamma * in.gamma_scale;
+    let gamma_scaled = in.gamma_scaled;
 
     // For halos, offset the inner edge outward to create the ring
     var inner_edge = (256.0 - 64.0) / 256.0;
@@ -5912,11 +5893,10 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 
     // When drawing halos, make the inside transparent so the fill can show through
     if (tileProps.is_halo != 0u) {
-        let halo_edge = (6.0 - halo_width / in.fontScale) / SDF_PX;
-        alpha = min(smoothstep(halo_edge - gamma_scaled, halo_edge + gamma_scaled, dist), 1.0 - alpha);
+        alpha = min(smoothstep(in.halo_edge - gamma_scaled, in.halo_edge + gamma_scaled, dist), 1.0 - alpha);
     }
 
-    let coverage = alpha * opacity * in.fade_opacity;
+    let coverage = alpha * opacity;
     let outAlpha = color.a * coverage;
 
     return vec4<f32>(color.rgb * coverage, outAlpha);
@@ -5974,15 +5954,15 @@ struct SymbolDrawableUBO {
     is_variable_anchor: u32,
     pitched_scale: f32,
     translation: vec2<f32>,
-    pad1: f32,
-    pad2: f32,
+    gamma_scale: f32,
+    is_halo: u32,
 };
 
 struct SymbolTilePropsUBO {
     is_text: u32,
     is_halo: u32,
-    gamma_scale: f32,
     pad1: f32,
+    pad2: f32,
 };
 
 struct SymbolEvaluatedPropsUBO {
@@ -6043,23 +6023,14 @@ struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) tex: vec2<f32>,
     @location(1) fade_opacity: f32,
-    @location(2) gamma_scale: f32,
-    @location(3) fontScale: f32,
+    @location(2) gamma_scaled: f32,
+    @location(3) halo_edge: f32,
     @location(4) is_icon: f32,
 #ifndef HAS_UNIFORM_u_fill_color
     @location(5) fill_color: vec4<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_halo_color
     @location(6) halo_color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(7) opacity: f32,
-#endif
-#ifndef HAS_UNIFORM_u_halo_width
-    @location(8) halo_width: f32,
-#endif
-#ifndef HAS_UNIFORM_u_halo_blur
-    @location(9) halo_blur: f32,
 #endif
     @location(10) @interpolate(flat) tex_origin: vec2<f32>,
 };
@@ -6068,6 +6039,7 @@ struct VertexOutput {
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<SymbolDrawableUBO>;
 @group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
+@group(0) @binding(5) var<uniform> props: SymbolEvaluatedPropsUBO;
 
 const SDF = 1.0;
 const ICON = 0.0;
@@ -6194,9 +6166,29 @@ fn main(in: VertexInput) -> VertexOutput {
     let tex_origin = vec2<f32>(f32(in.tex_origin.x), f32(in.tex_origin.y));
     out.tex = (a_tex - tex_origin) * inv_tex;
     out.tex_origin = tex_origin * inv_tex;
-    out.gamma_scale = gamma_scale;
-    out.fontScale = fontScale;
+#ifdef HAS_UNIFORM_u_opacity
     out.fade_opacity = fo;
+#else
+    out.fade_opacity = fo * opacity;
+#endif
+
+    // A glyph's edge's gamma, scaled by clip w, and the inner edge of its
+    // halo: the same over a quad but for the clip w, which interpolates
+    // linearly.
+#ifndef HAS_UNIFORM_u_halo_width
+    let halo_width = unpack_mix_float(in.halo_width, drawable.halo_width_t);
+#else
+    let halo_width = select(props.icon_halo_width, props.text_halo_width, drawable.is_text_prop != 0u);
+#endif
+#ifndef HAS_UNIFORM_u_halo_blur
+    let halo_blur = unpack_mix_float(in.halo_blur, drawable.halo_blur_t);
+#else
+    let halo_blur = select(props.icon_halo_blur, props.text_halo_blur, drawable.is_text_prop != 0u);
+#endif
+    let EDGE_GAMMA = 0.105 / paintParams.pixel_ratio;
+    let halo_blur_gamma = select(0.0, halo_blur * 1.19 / SDF_PX, drawable.is_halo != 0u);
+    out.gamma_scaled = (halo_blur_gamma + EDGE_GAMMA) / (fontScale * drawable.gamma_scale) * gamma_scale;
+    out.halo_edge = (6.0 - halo_width / fontScale) / SDF_PX;
     out.is_icon = is_icon;
 
 #ifndef HAS_UNIFORM_u_fill_color
@@ -6204,15 +6196,6 @@ fn main(in: VertexInput) -> VertexOutput {
 #endif
 #ifndef HAS_UNIFORM_u_halo_color
     out.halo_color = unpack_mix_color(in.halo_color, drawable.halo_color_t);
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    out.opacity = opacity;
-#endif
-#ifndef HAS_UNIFORM_u_halo_width
-    out.halo_width = unpack_mix_float(in.halo_width, drawable.halo_width_t);
-#endif
-#ifndef HAS_UNIFORM_u_halo_blur
-    out.halo_blur = unpack_mix_float(in.halo_blur, drawable.halo_blur_t);
 #endif
 
     return out;
@@ -6224,23 +6207,14 @@ fn main(in: VertexInput) -> VertexOutput {
 struct FragmentInput {
     @location(0) tex: vec2<f32>,
     @location(1) fade_opacity: f32,
-    @location(2) gamma_scale: f32,
-    @location(3) fontScale: f32,
+    @location(2) gamma_scaled: f32,
+    @location(3) halo_edge: f32,
     @location(4) is_icon: f32,
 #ifndef HAS_UNIFORM_u_fill_color
     @location(5) fill_color: vec4<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_halo_color
     @location(6) halo_color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(7) opacity: f32,
-#endif
-#ifndef HAS_UNIFORM_u_halo_width
-    @location(8) halo_width: f32,
-#endif
-#ifndef HAS_UNIFORM_u_halo_blur
-    @location(9) halo_blur: f32,
 #endif
     @location(10) @interpolate(flat) tex_origin: vec2<f32>,
 };
@@ -6268,32 +6242,19 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     let halo_color = select(props.icon_halo_color, props.text_halo_color, tileProps.is_text != 0u);
 #endif
 #ifndef HAS_UNIFORM_u_opacity
-    let opacity = in.opacity;
+    let opacity = in.fade_opacity;
 #else
-    let opacity = select(props.icon_opacity, props.text_opacity, tileProps.is_text != 0u);
-#endif
-#ifndef HAS_UNIFORM_u_halo_width
-    let halo_width = in.halo_width;
-#else
-    let halo_width = select(props.icon_halo_width, props.text_halo_width, tileProps.is_text != 0u);
-#endif
-#ifndef HAS_UNIFORM_u_halo_blur
-    let halo_blur = in.halo_blur;
-#else
-    let halo_blur = select(props.icon_halo_blur, props.text_halo_blur, tileProps.is_text != 0u);
+    let opacity = select(props.icon_opacity, props.text_opacity, tileProps.is_text != 0u) * in.fade_opacity;
 #endif
 
     if (in.is_icon != 0.0) {
-        let alpha = opacity * in.fade_opacity;
+        let alpha = opacity;
         let iconSample = textureSampleLevel(icon_image, icon_sampler, atlas_pos(in.tex_origin, in.tex), 0.0);
         return iconSample * alpha;
     }
 
-    let EDGE_GAMMA = 0.105 / paintParams.pixel_ratio;
     let color = select(fill_color, halo_color, tileProps.is_halo != 0u);
-    let fontGamma = in.fontScale * tileProps.gamma_scale;
-    let gamma = (select(0.0, halo_blur * 1.19 / SDF_PX, tileProps.is_halo != 0u) + EDGE_GAMMA) / fontGamma;
-    let gamma_scaled = gamma * in.gamma_scale;
+    let gamma_scaled = in.gamma_scaled;
 
     // For halos, offset the inner edge outward to create the ring
     var inner_edge = (256.0 - 64.0) / 256.0;
@@ -6307,11 +6268,10 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 
     // When drawing halos, make the inside transparent so the fill can show through
     if (tileProps.is_halo != 0u) {
-        let halo_edge = (6.0 - halo_width / in.fontScale) / SDF_PX;
-        alpha = min(smoothstep(halo_edge - gamma_scaled, halo_edge + gamma_scaled, dist), 1.0 - alpha);
+        alpha = min(smoothstep(in.halo_edge - gamma_scaled, in.halo_edge + gamma_scaled, dist), 1.0 - alpha);
     }
 
-    let coverage = alpha * opacity * in.fade_opacity;
+    let coverage = alpha * opacity;
     let outAlpha = color.a * coverage;
 
     return vec4<f32>(color.rgb * coverage, outAlpha);
@@ -6370,15 +6330,15 @@ struct SymbolDrawableUBO {
     is_variable_anchor: u32,
     pitched_scale: f32,
     translation: vec2<f32>,
-    pad1: f32,
-    pad2: f32,
+    gamma_scale: f32,
+    is_halo: u32,
 };
 
 struct SymbolTilePropsUBO {
     is_text: u32,
     is_halo: u32,
-    gamma_scale: f32,
     pad1: f32,
+    pad2: f32,
 };
 
 struct SymbolEvaluatedPropsUBO {

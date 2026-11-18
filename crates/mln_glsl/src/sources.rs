@@ -311,7 +311,6 @@ float projectLineThickness(float tileY, ProjectionUBO projection) {
 pub(crate) const PRELUDE_FRAGMENT: &str = r"
 
 #define M_PI 3.1415926535897932384626433832795
-#define SDF_PX 8.0
 
 #ifdef PROJECTION_GLOBE
 // The line fragments beyond the zoom 0 tile's X extent; see antimeridianClipX in the vertex prelude.
@@ -5901,6 +5900,8 @@ pub(crate) const SYMBOL_SHADER_PRELUDE: &str = r"
 #define idSymbolTilePropsUBO        idDrawableReservedFragmentOnlyUBO
 #define idSymbolEvaluatedPropsUBO   layerUBOStartId
 
+#define SDF_PX 8.0
+
 ";
 
 pub(crate) const SYMBOL_ICON_SHADER: GlslShaderSource = GlslShaderSource {
@@ -5957,8 +5958,8 @@ struct SymbolDrawableUBO {
     int is_variable_anchor;
     float pitched_scale;
     vec2 translation;
-    float pad1;
-    float pad2;
+    float gamma_scale;
+    int is_halo;
 };
 
 layout(std140, set = LAYER_SET_INDEX, binding = idSymbolDrawableUBO) readonly buffer SymbolDrawableUBOVector {
@@ -6109,8 +6110,8 @@ layout(push_constant) uniform Constants {
 struct SymbolTilePropsUBO {
     int is_text;
     int is_halo;
-    float gamma_scale;
     float pad1;
+    float pad2;
 };
 
 layout(std140, set = LAYER_SET_INDEX, binding = idSymbolTilePropsUBO) readonly buffer SymbolTilePropsUBOVector {
@@ -6225,8 +6226,8 @@ struct SymbolDrawableUBO {
     int is_variable_anchor;
     float pitched_scale;
     vec2 translation;
-    float pad1;
-    float pad2;
+    float gamma_scale;
+    int is_halo;
 };
 
 layout(std140, set = LAYER_SET_INDEX, binding = idSymbolDrawableUBO) readonly buffer SymbolDrawableUBOVector {
@@ -6237,10 +6238,28 @@ layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer
     ProjectionUBO projection_ubo[];
 } projectionVector;
 
+layout(set = LAYER_SET_INDEX, binding = idSymbolEvaluatedPropsUBO) uniform SymbolEvaluatedPropsUBO {
+    vec4 text_fill_color;
+    vec4 text_halo_color;
+    float text_opacity;
+    float text_halo_width;
+    float text_halo_blur;
+    float pad1;
+    vec4 icon_fill_color;
+    vec4 icon_halo_color;
+    float icon_opacity;
+    float icon_halo_width;
+    float icon_halo_blur;
+    float pad2;
+} props;
+
 layout(location = 0) out vec2 frag_tex;
+// The fade opacity, times the opacity when it's per vertex.
 layout(location = 1) out float frag_fade_opacity;
-layout(location = 2) out float frag_font_scale;
-layout(location = 3) out float frag_gamma_scale;
+// A glyph's edge's gamma, scaled by clip w, and the inner edge of its halo:
+// the same over a quad but for the clip w, which interpolates linearly.
+layout(location = 2) out float frag_gamma_scaled;
+layout(location = 3) out float frag_halo_edge;
 
 #if !defined(HAS_UNIFORM_u_fill_color)
 layout(location = 4) out vec4 frag_fill_color;
@@ -6248,18 +6267,6 @@ layout(location = 4) out vec4 frag_fill_color;
 
 #if !defined(HAS_UNIFORM_u_halo_color)
 layout(location = 5) out vec4 frag_halo_color;
-#endif
-
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 6) out float frag_opacity;
-#endif
-
-#if !defined(HAS_UNIFORM_u_halo_width)
-layout(location = 7) out float frag_halo_width;
-#endif
-
-#if !defined(HAS_UNIFORM_u_halo_blur)
-layout(location = 8) out float frag_halo_blur;
 #endif
 
 // The texture coordinate is relative to the quad's atlas origin, which
@@ -6383,9 +6390,26 @@ void main() {
     const vec2 tex_origin = vec2(in_tex_origin);
     frag_tex = (a_tex - tex_origin) / drawable.texsize;
     frag_tex_origin = tex_origin / drawable.texsize;
+#if defined(HAS_UNIFORM_u_opacity)
     frag_fade_opacity = fade_opacity;
-    frag_font_scale = fontScale;
-    frag_gamma_scale = gl_Position.w;
+#else
+    frag_fade_opacity = fade_opacity * opacity;
+#endif
+
+#if defined(HAS_UNIFORM_u_halo_width)
+    const float halo_width = drawable.is_text_prop != 0 ? props.text_halo_width : props.icon_halo_width;
+#else
+    const float halo_width = unpack_mix_float(in_halo_width, drawable.halo_width_t);
+#endif
+#if defined(HAS_UNIFORM_u_halo_blur)
+    const float halo_blur = drawable.is_text_prop != 0 ? props.text_halo_blur : props.icon_halo_blur;
+#else
+    const float halo_blur = unpack_mix_float(in_halo_blur, drawable.halo_blur_t);
+#endif
+    const float EDGE_GAMMA = 0.105 / DEVICE_PIXEL_RATIO;
+    const float haloBlurGamma = drawable.is_halo != 0 ? halo_blur * 1.19 / SDF_PX : 0.0;
+    frag_gamma_scaled = (haloBlurGamma + EDGE_GAMMA) / (fontScale * drawable.gamma_scale) * gl_Position.w;
+    frag_halo_edge = (6.0 - halo_width / fontScale) / SDF_PX;
 
 #if !defined(HAS_UNIFORM_u_fill_color)
     frag_fill_color = unpack_mix_color(in_fill_color, drawable.fill_color_t);
@@ -6393,23 +6417,14 @@ void main() {
 #if !defined(HAS_UNIFORM_u_halo_color)
     frag_halo_color = unpack_mix_color(in_halo_color, drawable.halo_color_t);
 #endif
-#if !defined(HAS_UNIFORM_u_halo_width)
-    frag_halo_width = unpack_mix_float(in_halo_width, drawable.halo_width_t);
-#endif
-#if !defined(HAS_UNIFORM_u_halo_blur)
-    frag_halo_blur = unpack_mix_float(in_halo_blur, drawable.halo_blur_t);
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-    frag_opacity = opacity;
-#endif
 }
 ",
     fragment: r"
 
 layout(location = 0) in vec2 frag_tex;
 layout(location = 1) in float frag_fade_opacity;
-layout(location = 2) in float frag_font_scale;
-layout(location = 3) in float frag_gamma_scale;
+layout(location = 2) in float frag_gamma_scaled;
+layout(location = 3) in float frag_halo_edge;
 
 #if !defined(HAS_UNIFORM_u_fill_color)
 layout(location = 4) in vec4 frag_fill_color;
@@ -6417,18 +6432,6 @@ layout(location = 4) in vec4 frag_fill_color;
 
 #if !defined(HAS_UNIFORM_u_halo_color)
 layout(location = 5) in vec4 frag_halo_color;
-#endif
-
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 6) in float frag_opacity;
-#endif
-
-#if !defined(HAS_UNIFORM_u_halo_width)
-layout(location = 7) in float frag_halo_width;
-#endif
-
-#if !defined(HAS_UNIFORM_u_halo_blur)
-layout(location = 8) in float frag_halo_blur;
 #endif
 
 // The texture coordinate is relative to the quad's atlas origin, which
@@ -6444,8 +6447,8 @@ layout(push_constant) uniform Constants {
 struct SymbolTilePropsUBO {
     int is_text;
     int is_halo;
-    float gamma_scale;
     float pad1;
+    float pad2;
 };
 
 layout(std140, set = LAYER_SET_INDEX, binding = idSymbolTilePropsUBO) readonly buffer SymbolTilePropsUBOVector {
@@ -6490,25 +6493,12 @@ void main() {
     const vec4 halo_color = frag_halo_color;
 #endif
 #if defined(HAS_UNIFORM_u_opacity)
-    const float opacity = tileProps.is_text != 0 ? props.text_opacity : props.icon_opacity;
+    const float opacity = (tileProps.is_text != 0 ? props.text_opacity : props.icon_opacity) * frag_fade_opacity;
 #else
-    const float opacity = frag_opacity;
-#endif
-#if defined(HAS_UNIFORM_u_halo_width)
-    const float halo_width = tileProps.is_text != 0 ? props.text_halo_width : props.icon_halo_width;
-#else
-    const float halo_width = frag_halo_width;
-#endif
-#if defined(HAS_UNIFORM_u_halo_blur)
-    const float halo_blur = tileProps.is_text != 0 ? props.text_halo_blur : props.icon_halo_blur;
-#else
-    const float halo_blur = frag_halo_blur;
+    const float opacity = frag_fade_opacity;
 #endif
 
-    const float EDGE_GAMMA = 0.105 / DEVICE_PIXEL_RATIO;
-    const float fontGamma = frag_font_scale * tileProps.gamma_scale;
-    const float haloBlurGamma = tileProps.is_halo != 0 ? halo_blur * 1.19 / SDF_PX : 0.0;
-    const float gammaScaled = (haloBlurGamma + EDGE_GAMMA) / fontGamma * frag_gamma_scale;
+    const float gammaScaled = frag_gamma_scaled;
     const vec4 color = tileProps.is_halo != 0 ? halo_color : fill_color;
     // A halo's inner edge sits a gamma outside the fill's.
     const float fillInnerEdge = (256.0 - 64.0) / 256.0;
@@ -6518,11 +6508,10 @@ void main() {
     if (tileProps.is_halo != 0) {
         // When drawing halos, if the fill is translucent we want
         // the inside of the halo to be translucent as well
-        const float haloEdge = (6.0 - halo_width / frag_font_scale) / SDF_PX;
-        alpha = min(smoothstep(haloEdge - gammaScaled, haloEdge + gammaScaled, dist), 1.0 - alpha);
+        alpha = min(smoothstep(frag_halo_edge - gammaScaled, frag_halo_edge + gammaScaled, dist), 1.0 - alpha);
     }
 
-    out_color = color * (alpha * opacity * frag_fade_opacity);
+    out_color = color * (alpha * opacity);
 #endif
 }
 ",
@@ -6600,8 +6589,8 @@ struct SymbolDrawableUBO {
     int is_variable_anchor;
     float pitched_scale;
     vec2 translation;
-    float pad1;
-    float pad2;
+    float gamma_scale;
+    int is_halo;
 };
 
 layout(std140, set = LAYER_SET_INDEX, binding = idSymbolDrawableUBO) readonly buffer SymbolDrawableUBOVector {
@@ -6612,10 +6601,28 @@ layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer
     ProjectionUBO projection_ubo[];
 } projectionVector;
 
+layout(set = LAYER_SET_INDEX, binding = idSymbolEvaluatedPropsUBO) uniform SymbolEvaluatedPropsUBO {
+    vec4 text_fill_color;
+    vec4 text_halo_color;
+    float text_opacity;
+    float text_halo_width;
+    float text_halo_blur;
+    float pad1;
+    vec4 icon_fill_color;
+    vec4 icon_halo_color;
+    float icon_opacity;
+    float icon_halo_width;
+    float icon_halo_blur;
+    float pad2;
+} props;
+
 layout(location = 0) out vec2 frag_tex;
+// The fade opacity, times the opacity when it's per vertex.
 layout(location = 1) out float frag_fade_opacity;
-layout(location = 2) out float frag_font_scale;
-layout(location = 3) out float frag_gamma_scale;
+// A glyph's edge's gamma, scaled by clip w, and the inner edge of its halo:
+// the same over a quad but for the clip w, which interpolates linearly.
+layout(location = 2) out float frag_gamma_scaled;
+layout(location = 3) out float frag_halo_edge;
 
 #if !defined(HAS_UNIFORM_u_fill_color)
 layout(location = 4) out vec4 frag_fill_color;
@@ -6623,18 +6630,6 @@ layout(location = 4) out vec4 frag_fill_color;
 
 #if !defined(HAS_UNIFORM_u_halo_color)
 layout(location = 5) out vec4 frag_halo_color;
-#endif
-
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 6) out float frag_opacity;
-#endif
-
-#if !defined(HAS_UNIFORM_u_halo_width)
-layout(location = 7) out float frag_halo_width;
-#endif
-
-#if !defined(HAS_UNIFORM_u_halo_blur)
-layout(location = 8) out float frag_halo_blur;
 #endif
 
 layout(location = 9) flat out int frag_is_icon;
@@ -6764,9 +6759,26 @@ void main() {
     const vec2 tex_origin = vec2(in_tex_origin);
     frag_tex = (a_tex - tex_origin) / texsize;
     frag_tex_origin = tex_origin / texsize;
+#if defined(HAS_UNIFORM_u_opacity)
     frag_fade_opacity = fade_opacity;
-    frag_font_scale = fontScale;
-    frag_gamma_scale = gl_Position.w;
+#else
+    frag_fade_opacity = fade_opacity * opacity;
+#endif
+
+#if defined(HAS_UNIFORM_u_halo_width)
+    const float halo_width = drawable.is_text_prop != 0 ? props.text_halo_width : props.icon_halo_width;
+#else
+    const float halo_width = unpack_mix_float(in_halo_width, drawable.halo_width_t);
+#endif
+#if defined(HAS_UNIFORM_u_halo_blur)
+    const float halo_blur = drawable.is_text_prop != 0 ? props.text_halo_blur : props.icon_halo_blur;
+#else
+    const float halo_blur = unpack_mix_float(in_halo_blur, drawable.halo_blur_t);
+#endif
+    const float EDGE_GAMMA = 0.105 / DEVICE_PIXEL_RATIO;
+    const float haloBlurGamma = drawable.is_halo != 0 ? halo_blur * 1.19 / SDF_PX : 0.0;
+    frag_gamma_scaled = (haloBlurGamma + EDGE_GAMMA) / (fontScale * drawable.gamma_scale) * gl_Position.w;
+    frag_halo_edge = (6.0 - halo_width / fontScale) / SDF_PX;
 
 #if !defined(HAS_UNIFORM_u_fill_color)
     frag_fill_color = unpack_mix_color(in_fill_color, drawable.fill_color_t);
@@ -6774,23 +6786,14 @@ void main() {
 #if !defined(HAS_UNIFORM_u_halo_color)
     frag_halo_color = unpack_mix_color(in_halo_color, drawable.halo_color_t);
 #endif
-#if !defined(HAS_UNIFORM_u_halo_width)
-    frag_halo_width = unpack_mix_float(in_halo_width, drawable.halo_width_t);
-#endif
-#if !defined(HAS_UNIFORM_u_halo_blur)
-    frag_halo_blur = unpack_mix_float(in_halo_blur, drawable.halo_blur_t);
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-    frag_opacity = opacity;
-#endif
 }
 ",
     fragment: r"
 
 layout(location = 0) in vec2 frag_tex;
 layout(location = 1) in float frag_fade_opacity;
-layout(location = 2) in float frag_font_scale;
-layout(location = 3) in float frag_gamma_scale;
+layout(location = 2) in float frag_gamma_scaled;
+layout(location = 3) in float frag_halo_edge;
 
 #if !defined(HAS_UNIFORM_u_fill_color)
 layout(location = 4) in vec4 frag_fill_color;
@@ -6798,18 +6801,6 @@ layout(location = 4) in vec4 frag_fill_color;
 
 #if !defined(HAS_UNIFORM_u_halo_color)
 layout(location = 5) in vec4 frag_halo_color;
-#endif
-
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 6) in float frag_opacity;
-#endif
-
-#if !defined(HAS_UNIFORM_u_halo_width)
-layout(location = 7) in float frag_halo_width;
-#endif
-
-#if !defined(HAS_UNIFORM_u_halo_blur)
-layout(location = 8) in float frag_halo_blur;
 #endif
 
 layout(location = 9) flat in int frag_is_icon;
@@ -6827,8 +6818,8 @@ layout(push_constant) uniform Constants {
 struct SymbolTilePropsUBO {
     int is_text;
     int is_halo;
-    float gamma_scale;
     float pad1;
+    float pad2;
 };
 
 layout(std140, set = LAYER_SET_INDEX, binding = idSymbolTilePropsUBO) readonly buffer SymbolTilePropsUBOVector {
@@ -6874,33 +6865,19 @@ void main() {
     const vec4 halo_color = frag_halo_color;
 #endif
 #if defined(HAS_UNIFORM_u_opacity)
-    const float opacity = tileProps.is_text != 0 ? props.text_opacity : props.icon_opacity;
+    const float opacity = (tileProps.is_text != 0 ? props.text_opacity : props.icon_opacity) * frag_fade_opacity;
 #else
-    const float opacity = frag_opacity;
-#endif
-#if defined(HAS_UNIFORM_u_halo_width)
-    const float halo_width = tileProps.is_text != 0 ? props.text_halo_width : props.icon_halo_width;
-#else
-    const float halo_width = frag_halo_width;
-#endif
-#if defined(HAS_UNIFORM_u_halo_blur)
-    const float halo_blur = tileProps.is_text != 0 ? props.text_halo_blur : props.icon_halo_blur;
-#else
-    const float halo_blur = frag_halo_blur;
+    const float opacity = frag_fade_opacity;
 #endif
 
     const vec2 pos = atlas_pos(frag_tex_origin, frag_tex);
 
     if (bool(frag_is_icon)) {
-        const float alpha = opacity * frag_fade_opacity;
-        out_color = texture(sampler2D(icon_image_texture, icon_image_sampler), pos) * alpha;
+        out_color = texture(sampler2D(icon_image_texture, icon_image_sampler), pos) * opacity;
         return;
     }
 
-    const float EDGE_GAMMA = 0.105 / DEVICE_PIXEL_RATIO;
-    const float fontGamma = frag_font_scale * tileProps.gamma_scale;
-    const float haloBlurGamma = tileProps.is_halo != 0 ? halo_blur * 1.19 / SDF_PX : 0.0;
-    const float gammaScaled = (haloBlurGamma + EDGE_GAMMA) / fontGamma * frag_gamma_scale;
+    const float gammaScaled = frag_gamma_scaled;
     const vec4 color = tileProps.is_halo != 0 ? halo_color : fill_color;
     // A halo's inner edge sits a gamma outside the fill's.
     const float fillInnerEdge = (256.0 - 64.0) / 256.0;
@@ -6910,11 +6887,10 @@ void main() {
     if (tileProps.is_halo != 0) {
         // When drawing halos, if the fill is translucent we want
         // the inside of the halo to be translucent as well
-        const float haloEdge = (6.0 - halo_width / frag_font_scale) / SDF_PX;
-        alpha = min(smoothstep(haloEdge - gammaScaled, haloEdge + gammaScaled, dist), 1.0 - alpha);
+        alpha = min(smoothstep(frag_halo_edge - gammaScaled, frag_halo_edge + gammaScaled, dist), 1.0 - alpha);
     }
 
-    out_color = color * (alpha * opacity * frag_fade_opacity);
+    out_color = color * (alpha * opacity);
 #endif
 }
 ",

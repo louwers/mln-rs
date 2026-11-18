@@ -1,7 +1,6 @@
 use bytemuck::{Pod, Zeroable};
 
-/// The symbol shader's per-drawable uniform block (272 bytes). The C++ tail
-/// padding is spelled out as `pad1..3`.
+/// The symbol shader's per-drawable uniform block (288 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct SymbolDrawableUBO {
@@ -28,8 +27,8 @@ pub struct SymbolDrawableUBO {
     /* 264 */ pub is_variable_anchor: i32,
     /* 268 */ pub pitched_scale: f32,
     /* 272 */ pub translation: [f32; 2],
-    /* 280 */ pub pad1: f32,
-    /* 284 */ pub pad2: f32,
+    /* 280 */ pub gamma_scale: f32,
+    /* 284 */ pub is_halo: i32,
     /* 288 */
 }
 const _: () = assert!(size_of::<SymbolDrawableUBO>() == 18 * 16);
@@ -39,8 +38,8 @@ const _: () = assert!(size_of::<SymbolDrawableUBO>() == 18 * 16);
 pub struct SymbolTilePropsUBO {
     /*  0 */ pub is_text: i32,
     /*  4 */ pub is_halo: i32,
-    /*  8 */ pub gamma_scale: f32,
-    /* 12 */ pub pad1: f32,
+    /*  8 */ pub pad1: f32,
+    /* 12 */ pub pad2: f32,
     /* 16 */
 }
 const _: () = assert!(size_of::<SymbolTilePropsUBO>() == 16);
