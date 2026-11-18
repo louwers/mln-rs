@@ -3,7 +3,8 @@
 //! pass, from `GL_TIME_ELAPSED` queries. Measured once a process calls
 //! [`measure_render_passes`], on the backends made after, where the context
 //! has the queries: desktop OpenGL 3.3, `ARB_timer_query`, or GL ES's
-//! `EXT_disjoint_timer_query`. A build with the feature in which no one
+//! `EXT_disjoint_timer_query`, and on a GPU: Mesa's CPU rasterizers report
+//! times that don't add up to the drawing they do. A build with the feature in which no one
 //! calls it, such as a workspace's tests, measures nothing. Built only with
 //! the `bench` feature, and hidden from the documentation: it isn't API.
 
@@ -53,9 +54,10 @@ pub(crate) struct Timer {
 
 impl Timer {
     /// The timer of a backend on `gl`, which is current, if the process
-    /// measures and the context has time queries.
-    pub(crate) fn new(gl: &Gl) -> Option<Timer> {
-        if !COUNTING.load(Ordering::Relaxed) {
+    /// measures and the context has time queries, unless it draws on the
+    /// CPU (`cpu_rasterizer`).
+    pub(crate) fn new(gl: &Gl, cpu_rasterizer: bool) -> Option<Timer> {
+        if !COUNTING.load(Ordering::Relaxed) || cpu_rasterizer {
             return None;
         }
         let version = gl.version();

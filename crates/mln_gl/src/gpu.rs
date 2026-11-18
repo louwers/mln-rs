@@ -589,7 +589,7 @@ impl GlGpu {
             (caps, anisotropic, line_widths[0].min(1.0)..=max_line_width)
         };
         #[cfg(feature = "bench")]
-        let timer = crate::bench::Timer::new(gl);
+        let timer = crate::bench::Timer::new(gl, caps.cpu_rasterizer);
         drop(current);
         GlGpu {
             context,

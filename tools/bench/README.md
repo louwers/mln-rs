@@ -255,11 +255,12 @@ GPU's timestamp queries, where the device has them: WebGPU on Vulkan, D3D12 or
 Metal, and the Vulkan and OpenGL backends (`GL_TIME_ELAPSED`, or
 `EXT_disjoint_timer_query` on GL ES). It counts what a shader change costs on a
 GPU, where `instructions` don't, and a frame's `wall` time, mostly the CPU's
-work in these scenarios, may not show it. On a CPU rasterizer it is the time the
-rasterizer took. A device without the queries reports none. The libraries time
-the passes only in a benchmark's process (see
-[Reaching a library's internal stages](#reaching-a-librarys-internal-stages)),
-and a commit from before they did reports none.
+work in these scenarios, may not show it. On lavapipe it is the time the
+rasterizer took. There is no `gpu` where the device lacks the queries, on OpenGL
+on llvmpipe, whose times don't add up to the drawing it does, and on a commit
+from before the libraries timed the passes. They time them only in a benchmark's
+process (see
+[Reaching a library's internal stages](#reaching-a-librarys-internal-stages)).
 
 A scenario adds its own counts and times, such as `frames`, `frames_incomplete`
 (frames drawn with tiles missing), `tile_requests`, `gpu_buffers` (the bytes of
