@@ -74,7 +74,6 @@ fn tile_cover(
     for z in clamped_zoom_range.min..=clamped_zoom_range.max {
         let cover = match definition {
             OfflineRegionDefinition::TilePyramid(reg) => Some(TileCover::new_from_bounds(&reg.bounds, z)),
-            // C++ `util::TileCover(geometry, z)` (project = true).
             OfflineRegionDefinition::Geometry(reg) => TileCover::new_from_geometry(&reg.geometry, z).ok(),
         };
         if let Some(mut cover) = cover {
