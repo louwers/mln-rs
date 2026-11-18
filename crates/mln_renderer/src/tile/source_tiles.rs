@@ -137,9 +137,9 @@ pub(crate) struct SourceTiles {
     cache_clock: u64,
     cache_size: usize,
     rendered: VecMap<UnwrappedTileID, Rendered>,
-    /// The raster or raster-dem tiles the last frame drew masked, whose
-    /// quads go when they stop drawing, and the list before it, whose memory
-    /// the next frame's takes.
+    /// The raster or raster-dem tiles the last frame drew masked, in order,
+    /// whose quads go when they stop drawing, and the list before it, whose
+    /// memory the next frame's takes.
     masked: Vec<OverscaledTileID>,
     masked_before: Vec<OverscaledTileID>,
     prev_lng: f32,
@@ -822,7 +822,8 @@ impl SourceTiles {
             }
             // A tile that stopped drawing drops its quads until it draws
             // again, which masks it anew.
-            for key in masked_before.iter().filter(|key| !masked.contains(key)) {
+            masked.sort_unstable();
+            for key in masked_before.iter().filter(|key| masked.binary_search(key).is_err()) {
                 if let Some(contents) = tiles.get_mut(key).and_then(|slot| slot.tile.contents_mut()) {
                     contents.unmask();
                 }
