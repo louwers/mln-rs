@@ -577,6 +577,15 @@ fsst-rs = { path = "patches/fsst-rs" }
 [profile.dev]
 debug = "line-tables-only"
 
+# Interactive apps keep debug checks and line tables, with optimized code
+# and incremental compilation for development.
+[profile.dev-opt]
+inherits = "dev"
+opt-level = 2
+lto = false
+codegen-units = 16
+incremental = true
+
 # Fat LTO with one codegen unit: smaller release binaries, for a longer
 # build. The browser build adds opt-level "s" (`mise run web:build`).
 [profile.release]

@@ -28,7 +28,8 @@ mise run web:dev   # serve the browser demo at http://localhost:5173/
 mise run test      # every test, including the render suite
 ```
 
-`mise run desktop` and `mise run web:dev` take `--profile release` for an
-optimized build.
+`mise run desktop` and `mise run web:dev` default to the optimized `dev-opt`
+profile with incremental compilation and debug checks. Use `--profile dev` for
+unoptimized debugging or `--profile release` for shipping optimizations.
 
 `mise tasks` lists every task.

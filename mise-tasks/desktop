@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #MISE description="Run the desktop demo app"
-#USAGE flag "--profile <profile>" default="dev" help="The Cargo profile to build with: `--profile release` runs an optimized build"
+#USAGE flag "--profile <profile>" default="dev-opt" help="The Cargo profile: dev-opt for development, dev for unoptimized debugging, release for shipping optimizations"
 #USAGE arg "[args]..." var=#true help="Arguments to the app"
 set -euo pipefail
 source tools/dev-shell.sh

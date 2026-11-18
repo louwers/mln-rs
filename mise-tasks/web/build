@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #MISE description="Build the browser demo into examples/web/dist"
-#USAGE flag "--profile <profile>" default="dev" help="The Cargo profile: release for the page to ship, dev to debug with names kept"
+#USAGE flag "--profile <profile>" default="dev-opt" help="The Cargo profile: dev-opt for development, release for the page to ship, dev for unoptimized debugging"
 # Two modules from one cargo run: the map with its tile workers (mln_web), and
 # the font-face shaper (mln_web_shaper), which the page loads only once a
 # style declares font faces. The map is built again with its `webgl` feature
@@ -18,11 +18,13 @@ if [[ "$profile" == release ]]; then
 fi
 target="${CARGO_TARGET_DIR:-target}/wasm32-unknown-unknown/$([[ "$profile" == dev ]] && echo debug || echo "$profile")"
 pkg=examples/web/web/pkg
-[[ "$profile" == dev ]] || web_wasm_opt_require
+if [[ "$profile" == release ]]; then
+    web_wasm_opt_require
+fi
 # wasm-bindgen's output for a module cargo built, into a directory.
 bind() {
     wasm-bindgen --target web --out-dir "$2" "$target/$1.wasm"
-    if [[ "$profile" != dev ]]; then
+    if [[ "$profile" == release ]]; then
         web_wasm_opt "$2/$1_bg.wasm" --strip-debug
     fi
 }

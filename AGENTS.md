@@ -90,6 +90,8 @@ not the code.
 
 ## Pull requests
 
+Use Conventional Commits for commit titles and pull request titles.
+
 Open a PR as a draft until it's ready to merge.
 
 A PR that claims a performance change includes measurements in its description.

@@ -11,13 +11,16 @@ pnpm.
 
 ```sh
 mise install
-mise run web:build --profile release  # into dist/, as GitHub Pages deploys it
-mise run web:dev                      # Vite's dev server, from the sources
+mise run web:build  # build into dist/
+mise run web:dev    # Vite's dev server, from the sources
 ```
 
 `web:build` builds the wasm modules into web/pkg, then Vite bundles the page
-(web/, TypeScript) into dist/. The default dev profile skips `wasm-opt` and
-keeps symbol names, for debugging and profiling.
+(web/, TypeScript) into dist/. The default `dev-opt` profile builds optimized
+code with debug checks and keeps symbol names for debugging and profiling. Use
+`--profile dev` for unoptimized debugging, or `--profile release` for the
+size-optimized build GitHub Pages deploys.
+
 `pnpm -C examples/web typecheck` checks the page's TypeScript, and
 `pnpm -C examples/web test` checks how it tells a mouse wheel from a trackpad
 (web/wheel.ts) against each browser's events. No one has tried that with real

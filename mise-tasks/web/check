@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #MISE description="Compare the browser demo's frames with native renders in headless Chromium"
-#USAGE flag "--profile <profile>" default="dev" help="The Cargo profile, as for `web:build`"
+#USAGE flag "--profile <profile>" default="dev-opt" help="The Cargo profile, as for `web:build`"
 #USAGE arg "[args]..." var=#true help="Arguments to examples/web/check/check.mjs, such as `--filter real-world`"
 # Offline, from the render suite's cache database. Needs playwright-core's
 # Chromium (`pnpm -C examples/web exec playwright-core install --no-shell
