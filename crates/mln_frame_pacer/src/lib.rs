@@ -5,7 +5,7 @@
 //! A [`VsyncSource`] reports each refresh. [`FramePacer::new`] follows the
 //! platform's display: a `CADisplayLink` on macOS, iOS and tvOS, the calling
 //! thread's `AChoreographer` on Android, and an `OH_NativeVSync` on
-//! `OpenHarmony`. On macOS, iOS and tvOS, [`FramePacer::for_view`] follows
+//! `OpenHarmony`. On macOS, iOS and tvOS, `FramePacer::for_view` follows
 //! the display that a view's window is on. A host with a source of its own
 //! gives it to [`FramePacer::with_source`].
 
