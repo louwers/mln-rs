@@ -267,6 +267,8 @@ impl CrossTileSymbolLayerIndex {
         }
 
         state.has_uninitialized_symbols = false;
+        let previous_ids: Vec<Option<NonZeroU32>> =
+            state.symbol_instances.iter().map(SymbolInstance::cross_tile_id).collect();
 
         // Symbols that still need an id; skipped ones keep `None`.
         let mut pending: Vec<bool> = Vec::with_capacity(state.symbol_instances.len());
@@ -330,6 +332,9 @@ impl CrossTileSymbolLayerIndex {
                 symbol_instance.set_cross_tile_id(Some(id));
                 this_zoom_used_cross_tile_ids.insert(id);
             }
+        }
+        if state.symbol_instances.iter().map(SymbolInstance::cross_tile_id).ne(previous_ids) {
+            state.cross_tile_ids_revision = state.cross_tile_ids_revision.wrapping_add(1);
         }
 
         let this_zoom_indexes = self.indexes.entry(tile_id.overscaled_z).or_default();
@@ -883,23 +888,33 @@ mod tests {
     }
 
     // An overscaled tile with symbols off the screen registers again each
-    // frame; under the same camera that changes no symbol's id, which
-    // placement relies on to compare a bucket by its instance id.
+    // frame. Under the same camera that changes no symbol's id; a camera
+    // that leaves a symbol and comes back gives it a new one. Placement
+    // keys symbols by their ids, so the bucket's revision counts the
+    // changes.
     #[test]
-    fn registering_again_under_the_same_camera_keeps_the_ids() {
+    fn registering_again_revises_the_ids_only_when_they_change() {
         let mut index = CrossTileSymbolLayerIndex::new();
         let mut max_cross_tile_id = 0;
         let tile_id = OverscaledTileID::with_zxy(7, 0, 6, 18, 24);
         let mut symbol_bucket = make_bucket(vec![(1000.0, 1000.0, "Pittsburgh"), (8000.0, 8000.0, "Norfolk")], 1);
-        let camera = camera_at(40.5, -78.0, 7.0, false);
-        let projector = TileProjector::new(&camera, &tile_id.to_unwrapped());
+        let over = camera_at(40.5, -78.0, 7.0, false);
+        let away = camera_at(60.0, 25.0, 7.0, false);
+        let mut register = |camera: &TransformState| {
+            let projector = TileProjector::new(camera, &tile_id.to_unwrapped());
+            assert!(index.add_bucket(&tile_id, &projector, &mut symbol_bucket, &mut max_cross_tile_id));
+            let ids = (cross_tile_id(&symbol_bucket, 0), cross_tile_id(&symbol_bucket, 1));
+            (ids, symbol_bucket.state.cross_tile_ids_revision)
+        };
 
-        assert!(index.add_bucket(&tile_id, &projector, &mut symbol_bucket, &mut max_cross_tile_id));
-        let ids = (cross_tile_id(&symbol_bucket, 0), cross_tile_id(&symbol_bucket, 1));
-        assert_eq!(ids, (Some(1), None));
+        let (ids, revision) = register(&over);
+        assert_eq!(ids.1, None, "a symbol off the screen");
+        assert_eq!(register(&over), (ids, revision), "the same camera");
 
-        assert!(index.add_bucket(&tile_id, &projector, &mut symbol_bucket, &mut max_cross_tile_id));
-        assert_eq!((cross_tile_id(&symbol_bucket, 0), cross_tile_id(&symbol_bucket, 1)), ids);
+        assert_eq!(register(&away).0, (None, None));
+        let (back, back_revision) = register(&over);
+        assert_ne!(back, ids, "a new id for the symbol the camera left");
+        assert_ne!(back_revision, revision);
     }
 
     // gtest: CrossTileSymbolLayerIndex.offscreenSymbols

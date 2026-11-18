@@ -446,6 +446,9 @@ pub(crate) struct SymbolBucketState {
     pub(crate) just_reloaded: bool,
     pub(crate) has_variable_placement: bool,
     pub(crate) has_uninitialized_symbols: bool,
+    /// Counts the times the cross-tile index changed the ids of the
+    /// bucket's symbols, which placement keys its symbols by.
+    pub(crate) cross_tile_ids_revision: u32,
     /// The tile-unit translations the leader's dynamic positions carry,
     /// which layers sharing the bucket compare.
     pub(crate) dynamic_text_translation: Vec2,

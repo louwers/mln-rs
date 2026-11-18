@@ -1269,6 +1269,17 @@ fn cached_tiles_wait_behind_the_view() {
     assert_eq!(cover, hidden.cached_unwanted(), "the hidden source's tiles");
 }
 
+/// A tile the view leaves holds for its symbols' fade from the update that
+/// leaves it, which the next placements step.
+#[test]
+fn a_tile_the_view_leaves_fades_from_that_update() {
+    let mut turned = TurningSource::new("mercator", Size::new(512, 512), 0);
+    turned.load(0.0, 3.0);
+    assert!(!turned.store.has_fading_tiles());
+    turned.update(120.0, 3.0);
+    assert!(turned.store.has_fading_tiles());
+}
+
 /// A globe turned to its far side before any tile there has loaded draws the
 /// source's first level in their place.
 fn globe_far_side_falls_back_to_the_base_level(size: Size, min_zoom: u8, zoom: f64) {

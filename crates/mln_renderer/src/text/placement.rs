@@ -450,8 +450,9 @@ impl<'a> PlacementContext<'a> {
 
 /// Everything a placement places from, besides the contents of the
 /// buckets it names and the placement it replaces. A bucket's contents go
-/// by its instance id, which a bucket gets anew when it changes, so equal
-/// inputs name the same symbols.
+/// by its instance id, which a bucket gets anew when it changes, and by the
+/// revision of its symbols' cross-tile ids, so equal inputs name the same
+/// symbols.
 #[derive(Clone, PartialEq)]
 pub(crate) struct PlacementInputs {
     mode: MapMode,
@@ -472,6 +473,7 @@ struct PlacedBucket {
     /// that has it.
     layer: usize,
     instance_id: u32,
+    cross_tile_ids_revision: u32,
     data: BucketPlacementData,
 }
 
@@ -486,7 +488,12 @@ impl PlacementInputs {
         let placed = layers.iter().rev().enumerate().flat_map(|(layer, render_layer)| {
             render_layer.placement_data().iter().filter_map(move |data| {
                 let bucket = buckets.get(&data.bucket)?;
-                Some(PlacedBucket { layer, instance_id: bucket.bucket_instance_id, data: data.clone() })
+                Some(PlacedBucket {
+                    layer,
+                    instance_id: bucket.bucket_instance_id,
+                    cross_tile_ids_revision: bucket.state.cross_tile_ids_revision,
+                    data: data.clone(),
+                })
             })
         });
         PlacementInputs {
@@ -2914,6 +2921,7 @@ mod tests {
         PlacedBucket {
             layer,
             instance_id: u32::try_from(index).unwrap() + 1,
+            cross_tile_ids_revision: 0,
             data: BucketPlacementData {
                 bucket: BucketKey { bucket: index, slot: Some(0), tile, source: crate::tile::job::SourceKey(0) },
                 tile: PlacedTile {
@@ -2975,6 +2983,7 @@ mod tests {
             ("cross-source collisions", |inputs| inputs.cross_source_collisions = false),
             ("the collision boxes", |inputs| inputs.show_collision_boxes = true),
             ("a bucket's instance", |inputs| inputs.buckets[0].instance_id = 10),
+            ("a bucket's cross-tile ids", |inputs| inputs.buckets[0].cross_tile_ids_revision = 1),
             ("a bucket added", |inputs| inputs.buckets.push(bucket(1, 2))),
             ("a bucket removed", |inputs| drop(inputs.buckets.pop())),
             ("the layers' order", |inputs| inputs.buckets.swap(0, 1)),

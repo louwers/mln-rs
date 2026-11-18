@@ -146,7 +146,6 @@ pub(crate) struct SourceTiles {
     masked: Vec<OverscaledTileID>,
     masked_before: Vec<OverscaledTileID>,
     prev_lng: f32,
-    fading_tiles: bool,
     cache_enabled: bool,
     last_subdivision_granularity: SubdivisionGranularitySetting,
     /// The highest `symbol-height-offset` seen since the tiles were last
@@ -378,7 +377,6 @@ impl SourceTiles {
             masked: Vec::new(),
             masked_before: Vec::new(),
             prev_lng: 0.0,
-            fading_tiles: false,
             cache_enabled: true,
             last_subdivision_granularity: SubdivisionGranularitySetting::none(),
             max_content_elevation: 0.0,
@@ -1466,7 +1464,6 @@ impl SourceTiles {
     }
 
     pub(crate) fn clear_all(&mut self, ctx: &mut StoreContext) {
-        self.fading_tiles = false;
         self.max_content_elevation = 0.0;
         self.rendered.clear();
         for (_, slot) in std::mem::take(&mut self.tiles) {
@@ -1475,21 +1472,24 @@ impl SourceTiles {
     }
 
     pub(crate) fn update_fading_tiles(&mut self) {
-        let SourceTiles { tiles, rendered, fading_tiles, .. } = self;
-        *fading_tiles = false;
+        let SourceTiles { tiles, rendered, .. } = self;
         for entry in rendered.values_mut() {
             if let Some(slot) = tiles.get(&entry.key)
                 && entry.holds_for_fade(&slot.tile)
             {
-                *fading_tiles = true;
                 entry.fade = entry.fade.stepped();
             }
         }
     }
 
+    /// Whether an entry the view left is still rendered: held while
+    /// placements fade its symbols out, or faded out and waiting for the
+    /// next update to drop it.
     #[must_use]
     pub(crate) fn has_fading_tiles(&self) -> bool {
-        self.fading_tiles
+        self.rendered.values().any(|entry| {
+            entry.fade != FadeState::Loaded && self.tiles.get(&entry.key).is_some_and(|slot| slot.tile.fades_out())
+        })
     }
 }
 
@@ -1563,10 +1563,10 @@ mod tests {
         assert!(source.has_fading_tiles());
         assert_eq!(source.rendered[&held].fade, FadeState::NeedsSecondPlacement, "one step per placement");
         source.update_fading_tiles();
-        assert!(source.has_fading_tiles());
+        assert!(source.has_fading_tiles(), "faded out, until an update drops it");
         assert_eq!(holds(&source), [(ideal, false), (held, false)], "faded out");
-        source.update_fading_tiles();
-        assert!(!source.has_fading_tiles());
         assert_eq!(source.rendered[&ideal].fade, FadeState::Loaded);
+        source.rendered.remove(&held);
+        assert!(!source.has_fading_tiles());
     }
 }
