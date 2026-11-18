@@ -8,7 +8,7 @@ use mln_vec_map::VecSet;
 
 use super::util::{StubGeometryTileFeature, property_map};
 use crate::evaluated::Evaluated;
-use crate::expression::dsl::{get, get_str, image, interpolate, linear, literal, literal_str, number, step, zoom};
+use crate::expression::dsl::{self, get, get_str, image, linear, literal, literal_str, number, step, zoom};
 use crate::expression::{Dependency, EvaluationContext, Functions, Image, Value};
 use crate::property_expression::PropertyExpression;
 use crate::property_value::{PropertyValue, StyleValue as _};
@@ -80,6 +80,14 @@ fn defaults() {
     assert_eq!(2.0_f32, no_default.evaluate(&EvaluationContext::from_feature(Some(&one_string())), 2.0));
 
     assert_eq!(Dependency::FEATURE, no_default.get_dependencies());
+}
+
+fn interpolate(
+    interpolator: crate::expression::Interpolator,
+    input: crate::expression::Expr,
+    stops: Vec<(f64, crate::expression::Expr)>,
+) -> crate::expression::Expr {
+    dsl::interpolate(interpolator, input, stops).expect("valid stops")
 }
 
 /// `["interpolate", ["linear"], ["number", ["get", "property"]], 1, v]`.

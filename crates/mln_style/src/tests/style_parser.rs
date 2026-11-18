@@ -255,13 +255,16 @@ fn zoom_curve() {
     use crate::expression::dsl::{interpolate, linear, literal, zoom};
     use crate::expression::find_zoom_curve_checked;
 
-    let zoom_interp =
-        || interpolate(linear(), zoom(), vec![(0.0, literal(Value::Number(0.0))), (0.0, literal(Value::Number(0.0)))]);
+    let zoom_interp = || {
+        interpolate(linear(), zoom(), vec![(0.0, literal(Value::Number(0.0))), (0.0, literal(Value::Number(0.0)))])
+            .unwrap()
+    };
 
-    let expr1 = interpolate(linear(), literal(Value::Number(0.0)), vec![(0.0, zoom_interp()), (0.0, zoom_interp())]);
+    let expr1 =
+        interpolate(linear(), literal(Value::Number(0.0)), vec![(0.0, zoom_interp()), (0.0, zoom_interp())]).unwrap();
     assert!(find_zoom_curve_checked(&expr1).is_null());
 
-    let expr2 = interpolate(linear(), zoom(), vec![(0.0, literal(Value::Number(0.0))), (0.0, zoom_interp())]);
+    let expr2 = interpolate(linear(), zoom(), vec![(0.0, literal(Value::Number(0.0))), (0.0, zoom_interp())]).unwrap();
     assert!(find_zoom_curve_checked(&expr2).is_null());
 }
 

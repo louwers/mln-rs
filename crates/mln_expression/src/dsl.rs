@@ -24,12 +24,11 @@ use crate::stops::Stops;
 use crate::type_::Type;
 use crate::value::Value;
 
-/// The call of the built-in function `op` with `args`.
-#[must_use]
-pub fn compound(op: &str, args: Vec<Expr>) -> Expr {
+/// The call of the built-in function `op` with `args`, for the calls this
+/// module makes, which are always valid.
+fn compound(op: &str, args: Vec<Expr>) -> Expr {
     let mut ctx = ParsingContext::new(&Functions::with_builtins());
-    let result = create_compound_expression(op, args, &mut ctx);
-    result.expect("dsl::compound")
+    create_compound_expression(op, args, &mut ctx).expect("the dsl builds only valid built-in calls")
 }
 
 /// Parses an expression from JSON text against `functions`.
@@ -169,17 +168,17 @@ pub fn linear() -> Interpolator {
     ExponentialInterpolator::new(1.0).into()
 }
 
-/// The `dsl::interpolate` overloads: stops as (input, output) pairs.
+/// An `interpolate` expression with stops as (input, output) pairs, or
+/// `None` when there are no stops or they can't be interpolated.
 #[must_use]
-pub fn interpolate(interpolator: Interpolator, input: Expr, stops_in: Vec<(f64, Expr)>) -> Expr {
-    let type_ = stops_in.first().expect("at least one stop").1.get_type();
+pub fn interpolate(interpolator: Interpolator, input: Expr, stops_in: Vec<(f64, Expr)>) -> Option<Expr> {
+    let type_ = stops_in.first()?.1.get_type();
     let mut stops = Stops::new();
     for (k, v) in stops_in {
         stops.insert_or_assign(k, v);
     }
     let mut ctx = ParsingContext::without_functions();
-    let result = create_interpolate(type_, interpolator, ColorSpace::Rgb, input, stops, &mut ctx);
-    result.expect("dsl::interpolate")
+    create_interpolate(type_, interpolator, ColorSpace::Rgb, input, stops, &mut ctx)
 }
 
 #[must_use]
