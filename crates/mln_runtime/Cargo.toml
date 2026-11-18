@@ -36,7 +36,13 @@ d3d12 = ["dep:mln_d3d12"]
 gl = ["dep:mln_gl"]
 # `bench`, the entry points to internal stages that the benchmarks
 # (tools/bench) measure. Not API: hidden from the documentation.
-bench = ["mln_webgpu?/bench", "mln_vulkan?/bench", "mln_gl?/bench", "mln_d3d12?/bench"]
+bench = [
+  "mln_webgpu?/bench",
+  "mln_vulkan?/bench",
+  "mln_gl?/bench",
+  "mln_d3d12?/bench",
+  "mln_mtl?/bench",
+]
 
 [dependencies]
 feature.workspace = true

@@ -2517,6 +2517,7 @@ dependencies = [
  "mln-rs-headless",
  "mln-rs-image",
  "mln-rs-map",
+ "mln-rs-mtl",
  "mln-rs-renderer",
  "mln-rs-runtime",
  "mln-rs-sprite",

@@ -10,6 +10,9 @@
 #![cfg(target_vendor = "apple")]
 #![expect(unsafe_code, reason = "Metal through objc2 is the FFI here")]
 
+#[cfg(feature = "bench")]
+#[doc(hidden)]
+pub mod bench;
 mod borrowed_target;
 mod custom_layer;
 mod device;

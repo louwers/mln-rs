@@ -333,6 +333,9 @@ pub struct MetalGpu {
     /// Called with each command buffer just before it's committed.
     #[cfg(test)]
     before_commit: Option<BeforeCommit>,
+    /// The timestamps of each pass, where the device samples them.
+    #[cfg(feature = "bench")]
+    timer: Option<crate::bench::Timer>,
 }
 
 impl MetalGpu {
@@ -375,6 +378,8 @@ impl MetalGpu {
             presents: Vec::new(),
             #[cfg(test)]
             before_commit: None,
+            #[cfg(feature = "bench")]
+            timer: crate::bench::Timer::new(mtl_device),
         }
     }
 
@@ -435,6 +440,13 @@ impl MetalGpu {
     fn retire(&mut self) {
         while self.in_flight.front().is_some_and(|(_, completion)| completion.is_done()) {
             self.in_flight.pop_front();
+        }
+        #[cfg(feature = "bench")]
+        {
+            let finished = self.finished();
+            if let Some(timer) = &mut self.timer {
+                timer.finished(finished);
+            }
         }
     }
 
@@ -531,6 +543,10 @@ impl MetalGpu {
             frame.presentDrawable(&drawable);
         }
         self.commit(&frame);
+        #[cfg(feature = "bench")]
+        if let Some(timer) = &mut self.timer {
+            timer.committed(self.submitted);
+        }
         Ok(())
     }
 
@@ -704,7 +720,7 @@ impl MetalGpu {
 
     /// Begins `pass` in `command_buffer`, and returns its encoder.
     fn begin_render_pass(
-        &self,
+        &mut self,
         command_buffer: &ProtocolObject<dyn MTLCommandBuffer>,
         pass: &PassDesc<'_>,
     ) -> Result<MTLRenderCommandEncoderPtr, GpuError> {
@@ -752,6 +768,10 @@ impl MetalGpu {
                 }
                 stencil.setStoreAction(MTLStoreAction::Store);
             }
+        }
+        #[cfg(feature = "bench")]
+        if let Some(timer) = &mut self.timer {
+            timer.time(&descriptor);
         }
         let encoder = command_buffer
             .renderCommandEncoderWithDescriptor(&descriptor)
