@@ -898,3 +898,46 @@ fn a_worker_lost_during_a_decode() {
     drop(tiles);
     pool.wait();
 }
+
+/// A world copy made of a tile that hasn't uploaded copies the data of its
+/// buckets. The tile's upload moves it into the context's stores once, and
+/// the copy, laid out from the same data, takes what the upload moved and
+/// frees its own.
+#[test]
+fn a_tiles_upload_frees_the_data_its_world_copy_copied() {
+    use crate::bucket_geometry::bucket_vertices;
+    use crate::buckets::circle_bucket::CircleBucket;
+    use crate::tile::source_tiles::SourceTiles;
+
+    let thread_pool = TaskGroup::new(&crate::tests::pool());
+    let id = OverscaledTileID::new(0, 0, CanonicalTileID::new(0, 0, 0));
+    let copy_id = OverscaledTileID::new(0, 1, CanonicalTileID::new(0, 0, 0));
+    let mut tiles =
+        OneTile::new(tile_store(&thread_pool, Box::new(InlineWorkers)), TileKind::Geometry, id, MapMode::Continuous);
+    tiles.set_style(&style(&[layer(json!({"id": "circles", "type": "circle"}))]));
+    tiles.set_data(Some(points()));
+    tiles.settle(&[id]);
+    tiles.add(copy_id);
+    let (source, ctx) = tiles.store.source_mut(tiles.key).expect("the source");
+    let copy = source.world_copy(&copy_id).expect("a copy of the tile");
+    source.update(&copy_id, ctx, |tile| tile.start_as_copy(copy));
+    // Whether the circles' vertices of tile `id` moved out of its bucket and
+    // its data is gone, and the stored vertices they moved into.
+    let circles = |source: &SourceTiles, id: &OverscaledTileID| {
+        let contents = source.tile(id)?.contents()?.geometry()?;
+        let mut buckets = contents.result.layer_render_data.buckets();
+        let vertices = &buckets.find_map(|bucket| bucket.downcast_ref::<CircleBucket>())?.vertices;
+        let stored = vertices.is_moved().then(|| bucket_vertices(&contents.bucket_geometry, vertices)).flatten();
+        Some((vertices.is_moved(), vertices.data().is_empty(), stored))
+    };
+    assert!(matches!(circles(source, &copy_id), Some((false, false, None))), "the copy holds a copy of the data");
+
+    crate::tests::with_context(|context| {
+        let needs = crate::layers::upload_needs(context);
+        source.upload_at(&id, None, &ctx.atlas, context, needs);
+        let (tile, copy) = (circles(source, &id), circles(source, &copy_id));
+        assert!(matches!(&tile, Some((true, true, Some(_)))), "the tile's data moved");
+        assert!(matches!(&copy, Some((true, true, Some(_)))), "the copy freed its data");
+        assert!(tile.and_then(|tile| tile.2) == copy.and_then(|copy| copy.2), "both draw the same vertices");
+    });
+}

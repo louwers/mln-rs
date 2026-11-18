@@ -314,7 +314,7 @@ impl TileStore {
 
     /// Readies the buckets of the tiles of `render_tiles`, render tiles of
     /// the source `key`, for the frame's draws, which read what `needs`
-    /// says (`Contents::upload`).
+    /// says (`SourceTiles::upload_at`).
     pub(crate) fn upload(
         &mut self,
         key: SourceKey,

@@ -432,35 +432,55 @@ impl SourceTiles {
         let Some((&id, slot)) = self.tiles.get_index_mut(index) else {
             return;
         };
-        let Some(contents) = slot.tile.contents_mut() else {
-            return;
+        let feature_index = match slot.tile.contents_mut() {
+            Some(Contents::Geometry(geometry)) => {
+                geometry.textures.resolve(atlas);
+                if !geometry.needs_upload() {
+                    return;
+                }
+                Arc::clone(&geometry.result.feature_index)
+            }
+            Some(Contents::Raster(bucket)) => return bucket.upload(context),
+            Some(Contents::Dem(bucket)) => return bucket.upload(context),
+            Some(Contents::Empty) | None => return,
         };
-        let Contents::Geometry(geometry) = contents else {
-            contents.upload(context, needs);
-            return;
-        };
-        geometry.textures.resolve(atlas);
-        if !geometry.needs_upload() {
-            return;
-        }
-        // The tile's other world copies, whose geometry its buckets share.
-        let is_copy = |tile: &Tile| {
-            tile.id.canonical == id.canonical && tile.id.overscaled_z == id.overscaled_z && tile.id.wrap != id.wrap
-        };
-        let mut uploading = None;
-        let mut copies: SmallVec<[&BucketGeometry; 4]> = SmallVec::new();
-        for (at, slot) in self.tiles.values_mut().enumerate() {
-            if at == index {
-                uploading = slot.tile.contents_mut().and_then(Contents::geometry_mut);
-            } else if is_copy(&slot.tile)
-                && let Some(contents) = slot.tile.contents().and_then(Contents::geometry)
-            {
-                copies.push(&contents.bucket_geometry);
+        let mut same: SmallVec<[usize; 4]> = self.same_place(&id);
+        same.retain(|&mut at| at != index);
+        let slots = self.tiles.values_mut().into_slice();
+        upload_sharing(slots, index, &same, context, needs);
+        for &copy in &same {
+            let laid_out_alike =
+                slots.get(copy).and_then(|slot| slot.tile.contents()?.geometry()).is_some_and(|geometry| {
+                    geometry.needs_upload() && Arc::ptr_eq(&geometry.result.feature_index, &feature_index)
+                });
+            if laid_out_alike {
+                let others: SmallVec<[usize; 4]> =
+                    same.iter().copied().chain([index]).filter(|&other| other != copy).collect();
+                upload_sharing(slots, copy, &others, context, needs);
             }
         }
-        if let Some(geometry) = uploading {
-            geometry.upload(&copies, context, needs);
+    }
+
+    /// The indexes of the tiles that are `id` in any world copy, `id`'s own
+    /// among them if there is one. The tiles are in order of zoom, then
+    /// world copy, then place, so each world copy's tile is a search away.
+    fn same_place(&self, id: &OverscaledTileID) -> SmallVec<[usize; 4]> {
+        let keys = self.tiles.keys().as_slice();
+        let mut found = SmallVec::new();
+        let mut at = keys.partition_point(|key| key.overscaled_z < id.overscaled_z);
+        while let Some(&OverscaledTileID { overscaled_z, wrap, .. }) = keys.get(at) {
+            if overscaled_z != id.overscaled_z {
+                break;
+            }
+            let rest = keys.get(at..).unwrap_or_default();
+            let end = at + rest.partition_point(|key| key.overscaled_z == overscaled_z && key.wrap == wrap);
+            let place = OverscaledTileID { wrap, ..*id };
+            if let Ok(offset) = keys.get(at..end).unwrap_or_default().binary_search(&place) {
+                found.push(at + offset);
+            }
+            at = end;
         }
+        found
     }
 
     pub(crate) fn slots(&self) -> impl Iterator<Item = &Slot> + '_ {
@@ -927,13 +947,12 @@ impl SourceTiles {
     /// copy's buckets, copies of the tile's, draw the geometry that the
     /// first of either to upload moves into the context's stores
     /// (`upload_at`).
-    fn world_copy(&self, id: &OverscaledTileID) -> Option<WorldCopy> {
-        let tile = self.tiles.values().map(|slot| &slot.tile).find(|tile| {
-            tile.id.overscaled_z == id.overscaled_z
-                && tile.id.canonical == id.canonical
-                && tile.id.wrap != id.wrap
-                && tile.is_renderable()
-        })?;
+    pub(crate) fn world_copy(&self, id: &OverscaledTileID) -> Option<WorldCopy> {
+        let tile = self
+            .same_place(id)
+            .into_iter()
+            .filter_map(|at| Some(&self.tiles.get_index(at)?.1.tile))
+            .find(|tile| tile.id.wrap != id.wrap && tile.is_renderable())?;
         WorldCopy::of(tile)
     }
 
@@ -941,14 +960,11 @@ impl SourceTiles {
     /// `id`'s: on the globe every wrap of a tile is the same piece of it.
     fn cache_pop_any_wrap(&mut self, id: &OverscaledTileID, ctx: &mut StoreContext) -> bool {
         let Some(found) = self
-            .tiles
-            .values()
-            .find(|slot| {
-                slot.place.is_cached()
-                    && slot.tile.id.overscaled_z == id.overscaled_z
-                    && slot.tile.id.canonical == id.canonical
-            })
-            .map(|slot| slot.tile.id)
+            .same_place(id)
+            .into_iter()
+            .filter_map(|at| self.tiles.get_index(at))
+            .find(|(_, slot)| slot.place.is_cached())
+            .map(|(&found, _)| found)
         else {
             return false;
         };
@@ -1459,6 +1475,30 @@ impl SourceTiles {
     pub(crate) fn has_fading_tiles(&self) -> bool {
         self.fading_tiles
     }
+}
+
+/// Readies the buckets of the geometry tile at `at` of `slots` for the
+/// frame's draws, sharing what the buckets of the tiles at `copies`, its
+/// other world copies, moved into `context`'s stores.
+fn upload_sharing(slots: &mut [Slot], at: usize, copies: &[usize], context: &mut Context, needs: UploadNeeds) {
+    let Some((before, rest)) = slots.split_at_mut_checked(at) else {
+        return;
+    };
+    let Some((slot, after)) = rest.split_first_mut() else {
+        return;
+    };
+    let Some(geometry) = slot.tile.contents_mut().and_then(Contents::geometry_mut) else {
+        return;
+    };
+    let shared: SmallVec<[&BucketGeometry; 4]> = copies
+        .iter()
+        .filter_map(|&copy| match copy.checked_sub(at + 1) {
+            Some(after_at) => after.get(after_at),
+            None => before.get(copy),
+        })
+        .filter_map(|slot| Some(&slot.tile.contents()?.geometry()?.bucket_geometry))
+        .collect();
+    geometry.upload(&shared, context, needs);
 }
 
 #[cfg(test)]

@@ -612,18 +612,6 @@ impl Contents {
         Some(self.geometry()?.result.layer_bucket(layer_impl)?.bucket)
     }
 
-    /// Readies the buckets that are new or changed since their last upload
-    /// for the frame's draws ([`Bucket::upload`]), moving their geometry
-    /// into `context`'s stores.
-    pub(crate) fn upload(&mut self, context: &mut Context, needs: UploadNeeds) {
-        match self {
-            Contents::Geometry(contents) => contents.upload(&[], context, needs),
-            Contents::Raster(bucket) => bucket.upload(context),
-            Contents::Dem(bucket) => bucket.upload(context),
-            Contents::Empty => {}
-        }
-    }
-
     /// Whether a layer with `layer_properties` draws from these contents:
     /// for a geometry tile, whether its layout has the layer, whose render
     /// data then takes the new properties if only their values changed.
