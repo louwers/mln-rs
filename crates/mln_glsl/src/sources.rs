@@ -2651,13 +2651,6 @@ void main() {
     const vec2 instancePos = vec2(in_outline_pos);
     const vec2 instanceDecimalsEd = vec2(in_decimals_ed);
 
-    bool isDiscarded = mod(instanceDecimalsEd.x, 2.0) > 0.0;
-    if (isDiscarded) {
-        gl_Position = vec4(0.0);
-        frag_color = vec4(0.0);
-        return;
-    }
-
     const FillExtrusionDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
 
 #if defined(HAS_UNIFORM_u_base)
@@ -2677,6 +2670,13 @@ void main() {
 #else
     vec4 color = unpack_mix_color(in_color, drawable.color_t);
 #endif
+    bool isDiscarded = mod(instanceDecimalsEd.x, 2.0) > 0.0;
+    if (isDiscarded) {
+        gl_Position = vec4(0.0);
+        frag_color = vec4(0.0);
+        return;
+    }
+
     const vec2 nextInstancePos = vec2(in_next_outline_pos);
     const vec2 nextInstanceDecimalsEd = vec2(in_next_decimals_ed);
 
@@ -3119,12 +3119,6 @@ void main() {
     const vec2 instancePos = vec2(in_outline_pos);
     const vec2 instanceDecimalsEd = vec2(in_decimals_ed);
 
-    bool isDiscarded = mod(instanceDecimalsEd.x, 2.0) > 0.0;
-    if (isDiscarded) {
-        gl_Position = vec4(0.0);
-        return;
-    }
-
     const FillExtrusionDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
     const FillExtrusionTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
 
@@ -3139,6 +3133,12 @@ void main() {
 #else
     const float height = max(unpack_mix_float(in_height, drawable.height_t), 0.0);
 #endif
+    bool isDiscarded = mod(instanceDecimalsEd.x, 2.0) > 0.0;
+    if (isDiscarded) {
+        gl_Position = vec4(0.0);
+        return;
+    }
+
     const vec2 nextInstancePos = vec2(in_next_outline_pos);
     const vec2 nextInstanceDecimalsEd = vec2(in_next_decimals_ed);
 
