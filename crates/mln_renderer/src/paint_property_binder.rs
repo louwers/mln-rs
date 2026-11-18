@@ -51,11 +51,15 @@ pub(crate) struct InterleavedVertexBuffer {
 }
 
 impl InterleavedVertexBuffer {
-    pub(crate) fn set(&mut self, index: usize, offset: usize, value: &[u8]) {
-        let start = self.stride * index + offset;
+    /// Writes `value` at `offset` in each of the vertices `indexes`.
+    pub(crate) fn fill(&mut self, indexes: std::ops::Range<usize>, offset: usize, value: &[u8]) {
+        let stride = self.stride;
         let data = self.shared_vertex_vector.get_mut();
-        debug_assert!(start + value.len() <= data.len());
-        data[start..start + value.len()].copy_from_slice(value);
+        for index in indexes {
+            let start = stride * index + offset;
+            debug_assert!(start + value.len() <= data.len());
+            data[start..start + value.len()].copy_from_slice(value);
+        }
     }
 
     /// Appends a field of `size` bytes, aligned to `alignment`, to the vertex
@@ -121,8 +125,14 @@ impl BinderValue for Color {
     }
 }
 
-fn floats_to_bytes(values: &[f32]) -> Vec<u8> {
-    bytemuck::cast_slice(values).to_vec()
+/// The attribute values of a property that the shader interpolates between
+/// `min` and `max`, its values at the zoom stops: `min`'s, then `max`'s, in
+/// the first `2 * T::DIMENSIONS` floats.
+fn zoom_stop_values<T: BinderValue>(min: &T, max: &T) -> [f32; 4] {
+    let mut values = [0.0; 4];
+    values[..T::DIMENSIONS].copy_from_slice(&min.attribute_value()[..T::DIMENSIONS]);
+    values[T::DIMENSIONS..2 * T::DIMENSIONS].copy_from_slice(&max.attribute_value()[..T::DIMENSIONS]);
+    values
 }
 
 /// The data of a `PaintPropertyBinder` subclass.
@@ -189,10 +199,7 @@ impl<T: BinderValue> PaintPropertyBinderKind<T> {
                 );
                 statistics.add(&evaluated);
                 let value = evaluated.attribute_value();
-                let bytes = floats_to_bytes(&value[..T::DIMENSIONS]);
-                for i in range.start..range.end {
-                    buffer.set(i, vertex_offset, &bytes);
-                }
+                buffer.fill(range.start..range.end, vertex_offset, bytemuck::cast_slice(&value[..T::DIMENSIONS]));
             }
             Self::CompositeFunction { expression, default_value, zoom_range, .. } => {
                 let min = expression.evaluate(
@@ -205,13 +212,8 @@ impl<T: BinderValue> PaintPropertyBinderKind<T> {
                 );
                 statistics.add(&min);
                 statistics.add(&max);
-                let mut value = Vec::with_capacity(2 * T::DIMENSIONS);
-                value.extend_from_slice(&min.attribute_value()[..T::DIMENSIONS]);
-                value.extend_from_slice(&max.attribute_value()[..T::DIMENSIONS]);
-                let bytes = floats_to_bytes(&value);
-                for i in range.start..range.end {
-                    buffer.set(i, vertex_offset, &bytes);
-                }
+                let value = zoom_stop_values(&min, &max);
+                buffer.fill(range.start..range.end, vertex_offset, bytemuck::cast_slice(&value[..2 * T::DIMENSIONS]));
             }
         }
     }
@@ -302,12 +304,8 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
                 );
                 self.statistics.add(&evaluated);
                 let value = evaluated.attribute_value();
-                // BaseVertex{value}: the base attribute only.
-                let bytes = floats_to_bytes(&value[..T::DIMENSIONS]);
-
-                for i in elements..length {
-                    buffer.set(i, vertex_offset, &bytes);
-                }
+                // The base attribute only.
+                buffer.fill(elements..length, vertex_offset, bytemuck::cast_slice(&value[..T::DIMENSIONS]));
                 if let Some(id_str) = feature_id_to_string(&feature.get_id()) {
                     feature_map.entry(id_str).or_default().push(FeatureVertexRange {
                         feature_index: index,
@@ -333,17 +331,8 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
                 );
                 self.statistics.add(&min);
                 self.statistics.add(&max);
-                // The values at both zoom stops, which the shader interpolates.
-                let min_value = min.attribute_value();
-                let max_value = max.attribute_value();
-                let mut value = Vec::with_capacity(2 * T::DIMENSIONS);
-                value.extend_from_slice(&min_value[..T::DIMENSIONS]);
-                value.extend_from_slice(&max_value[..T::DIMENSIONS]);
-                let bytes = floats_to_bytes(&value);
-
-                for i in elements..length {
-                    buffer.set(i, vertex_offset, &bytes);
-                }
+                let value = zoom_stop_values(&min, &max);
+                buffer.fill(elements..length, vertex_offset, bytemuck::cast_slice(&value[..2 * T::DIMENSIONS]));
                 if let Some(id_str) = feature_id_to_string(&feature.get_id()) {
                     feature_map.entry(id_str).or_default().push(FeatureVertexRange {
                         feature_index: index,
@@ -525,9 +514,7 @@ impl CrossFadedPaintPropertyBinder<Image> {
                         return;
                     };
 
-                    for i in *populated_count..length {
-                        buffer.set(i, *vertex_offset, bytemuck::cast_slice(&image_mid.tlbr()));
-                    }
+                    buffer.fill(*populated_count..length, *vertex_offset, bytemuck::cast_slice(&image_mid.tlbr()));
                     *populated_count = (*populated_count).max(length);
                 }
             }
@@ -539,9 +526,7 @@ impl CrossFadedPaintPropertyBinder<Image> {
                 // buffers to avoid crashes when we try to draw the layer
                 // because we don't know at draw time if all features were
                 // evaluated to valid pattern dependencies.
-                for i in *populated_count..length {
-                    buffer.set(i, *vertex_offset, bytemuck::cast_slice(&[0u16; 4]));
-                }
+                buffer.fill(*populated_count..length, *vertex_offset, bytemuck::cast_slice(&[0u16; 4]));
                 *populated_count = (*populated_count).max(length);
             }
         }
@@ -672,10 +657,8 @@ impl PaintPropertyBinderBase for DashArrayBinder {
         let cap =
             if cap.evaluate(&context) == LineCapType::Round { LinePatternCap::Round } else { LinePatternCap::Square };
         let entry = atlas.add(&dasharray, cap);
-        let bytes = floats_to_bytes(&[entry.y, entry.height, entry.width, 0.0]);
-        for i in buffer.vertex_count..length {
-            buffer.set(i, vertex_offset, &bytes);
-        }
+        let value = [entry.y, entry.height, entry.width, 0.0];
+        buffer.fill(buffer.vertex_count..length, vertex_offset, bytemuck::cast_slice(&value));
     }
 
     fn binder_vertex_count(&self, buffer: &InterleavedVertexBuffer) -> usize {
