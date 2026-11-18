@@ -471,3 +471,18 @@ impl ParsingContext {
         Some(expr)
     }
 }
+
+/// Parses an expression from JSON text against `functions`.
+#[must_use]
+pub fn create_expression_from_str(expr: &str, functions: &Arc<Functions>) -> Option<Expr> {
+    let document: serde_json::Value = serde_json::from_str(expr).ok()?;
+    let mut ctx = ParsingContext::new(functions);
+    ctx.parse_expression(&Convertible::from(&document), None)
+}
+
+/// Parses an expression against `functions`.
+#[must_use]
+pub fn create_expression(expr: &Convertible<'_>, functions: &Arc<Functions>) -> Option<Expr> {
+    let mut ctx = ParsingContext::new(functions);
+    ctx.parse_expression(expr, None)
+}

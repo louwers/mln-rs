@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use super::{Convertible, Error};
-use crate::expression::{Functions, dsl};
+use crate::expression::Functions;
+use crate::expression::parsing_context::create_expression;
 use crate::sources::geojson::{ClusterProperties, GeoJSONOptions};
 
 // The C++ `static_cast<uint8_t/uint16_t/size_t>(float)` of out-of-range
@@ -131,12 +132,12 @@ pub fn convert_geojson_options(
                 error.message = "GeoJSON source clusterProperties member must be an array with length of 2".to_owned();
                 return None;
             }
-            let Some(map) = dsl::create_expression(&v.array_member(1), functions) else {
+            let Some(map) = create_expression(&v.array_member(1), functions) else {
                 error.message = "Failed to convert GeoJSON source clusterProperties map expression".to_owned();
                 return None;
             };
             let reduce = if v.array_member(0).is_array() {
-                dsl::create_expression(&v.array_member(0), functions)
+                create_expression(&v.array_member(0), functions)
             } else {
                 let Some(reduce_op) = v.array_member(0).to_string() else {
                     error.message = "GeoJSON source clusterProperties member must contain a valid operator".to_owned();
@@ -145,7 +146,7 @@ pub fn convert_geojson_options(
                 // Reformulate reduce expression to [operator,
                 // ['accumulated'], ['get', key]].
                 let reduce = serde_json::json!([reduce_op, ["accumulated"], ["get", k]]);
-                dsl::create_expression(&Convertible::from(&reduce), functions)
+                create_expression(&Convertible::from(&reduce), functions)
             };
             let Some(reduce) = reduce else {
                 error.message = "Failed to convert GeoJSON source clusterProperties reduce expression".to_owned();

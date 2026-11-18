@@ -21,6 +21,7 @@ mod collator_expression;
 mod comparison;
 pub mod compound_expression;
 mod distance;
+#[cfg(any(test, feature = "dsl"))]
 pub mod dsl;
 pub mod expression;
 mod feature_property_keys;

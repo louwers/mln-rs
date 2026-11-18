@@ -15,6 +15,11 @@ name = "mln_expression"
 # The doc comments have no examples to run.
 doctest = false
 
+[features]
+# `dsl`, the functions that build expressions in the tests of mln_expression's
+# dependents.
+dsl = []
+
 [dependencies]
 cheap-ruler.workspace = true
 feature.workspace = true

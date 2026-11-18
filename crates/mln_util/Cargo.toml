@@ -44,7 +44,9 @@ path = "tests/gtest_padding.rs"
 
 [dev-dependencies]
 mln_conversion = { package = "mln-rs-conversion", path = "../mln_conversion" }
-mln_expression = { package = "mln-rs-expression", path = "../mln_expression" }
+mln_expression = { package = "mln-rs-expression", path = "../mln_expression", features = [
+  "dsl",
+] }
 mln_style = { package = "mln-rs-style", path = "../mln_style" }
 mln_style_types = { package = "mln-rs-style-types", path = "../mln_style_types" }
 mln_tile_id = { package = "mln-rs-tile-id", path = "../mln_tile_id" }

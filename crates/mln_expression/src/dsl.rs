@@ -1,10 +1,6 @@
-// This convenience API does little to no expression validation or
-// type-checking, and is intended for use only by test and other non-production
-// code.
+// Functions that build expressions for tests: they check little of what they
+// build. Dependents' tests reach them through the `dsl` feature.
 
-use std::sync::Arc;
-
-use mln_conversion::Convertible;
 use mln_util::ColorSpace;
 
 use crate::assertion::Assertion;
@@ -29,21 +25,6 @@ use crate::value::Value;
 fn compound(op: &str, args: Vec<Expr>) -> Expr {
     let mut ctx = ParsingContext::new(&Functions::with_builtins());
     create_compound_expression(op, args, &mut ctx).expect("the dsl builds only valid built-in calls")
-}
-
-/// Parses an expression from JSON text against `functions`.
-#[must_use]
-pub fn create_expression_from_str(expr: &str, functions: &Arc<Functions>) -> Option<Expr> {
-    let document: serde_json::Value = serde_json::from_str(expr).ok()?;
-    let mut ctx = ParsingContext::new(functions);
-    ctx.parse_expression(&Convertible::from(&document), None)
-}
-
-/// Parses an expression against `functions`.
-#[must_use]
-pub fn create_expression(expr: &Convertible<'_>, functions: &Arc<Functions>) -> Option<Expr> {
-    let mut ctx = ParsingContext::new(functions);
-    ctx.parse_expression(expr, None)
 }
 
 #[must_use]

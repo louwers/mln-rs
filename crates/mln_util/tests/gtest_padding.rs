@@ -7,7 +7,8 @@ use std::sync::Arc;
 
 use feature::{PropertyMap, Value as MbglValue};
 use mln_conversion::{Convertible, Error};
-use mln_expression::dsl::{create_expression_from_str, interpolate, linear, literal, zoom};
+use mln_expression::dsl::{interpolate, linear, literal, zoom};
+use mln_expression::parsing_context::create_expression_from_str;
 use mln_expression::{EvaluationContext, Functions};
 use mln_style::conversion::convert_property_value;
 use mln_style::property_expression::PropertyExpression;

@@ -2838,6 +2838,7 @@ dependencies = [
  "glow",
  "khronos-egl",
  "mln-rs-d3d12",
+ "mln-rs-expression",
  "mln-rs-feature",
  "mln-rs-gfx",
  "mln-rs-gl",

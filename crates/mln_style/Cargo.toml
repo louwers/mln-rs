@@ -38,6 +38,7 @@ supercluster.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+mln_expression = { workspace = true, features = ["dsl"] }
 mln_storage = { workspace = true, features = ["stub-file-source"] }
 mln_tile = { package = "mln-rs-tile", path = "../mln_tile" }
 

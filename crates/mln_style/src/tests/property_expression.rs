@@ -1,6 +1,6 @@
 use feature::{Value as MbglValue, geojson};
 use geo_types::{Geometry, LineString, MultiLineString, MultiPoint, Point, Polygon};
-use mln_expression::dsl::create_expression_from_str;
+use mln_expression::parsing_context::create_expression_from_str;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::GeometryCollection;
 use mln_util::geometry::FeatureType;

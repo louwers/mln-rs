@@ -47,6 +47,7 @@ impl Stops {
     }
 
     /// Inserts `value` at `key`, or replaces the output there.
+    #[cfg(any(test, feature = "dsl"))]
     pub(crate) fn insert_or_assign(&mut self, key: f64, value: Expr) {
         let i = self.lower_bound(key);
         if i < self.keys.len() && key.partial_cmp(&self.keys[i]) != Some(Ordering::Less) {

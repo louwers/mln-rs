@@ -1100,8 +1100,8 @@ mod tests {
 
     use super::*;
     use crate::Functions;
-    use crate::dsl::create_expression_from_str;
     use crate::expression::EvaluationResult;
+    use crate::parsing_context::create_expression_from_str;
     use crate::value::Value;
 
     struct Feature {

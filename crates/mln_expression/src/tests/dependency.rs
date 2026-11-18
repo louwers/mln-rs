@@ -2,6 +2,7 @@ use crate::Functions;
 use crate::collator_expression::CollatorExpression;
 use crate::dsl::*;
 use crate::expression::Dependency;
+use crate::parsing_context::create_expression_from_str;
 use crate::semiliteral::Semiliteral;
 
 // gtest: ExpressionDependencies.Get
