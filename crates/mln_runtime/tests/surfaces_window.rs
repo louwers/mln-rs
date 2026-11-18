@@ -1,7 +1,7 @@
 // Surface sessions that present to X11 windows: the frames they render,
 // releasing the surface, and moving to another window. It needs an X server
 // that the GPU can present to, so it is ignored by default: run
-// `cargo test -p mln-rs-runtime --test surfaces_window -- --ignored` in a
+// `cargo test -p mln-rs-runtime --test integration surfaces_window:: -- --ignored` in a
 // desktop session, or in a headless compositor such as
 // `kwin_wayland --virtual --xwayland --exit-with-session <script>`. Xvfb has
 // no DRI3, which Mesa's Vulkan drivers need to present.
