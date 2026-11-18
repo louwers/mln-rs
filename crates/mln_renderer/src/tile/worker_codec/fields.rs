@@ -14,7 +14,6 @@ use crate::Registry;
 use crate::bucket::Bucket;
 use crate::geometry::feature_index::FeatureIndex;
 use crate::layer_type::ErasedEvaluatedLayer;
-use crate::render_layer::LayerRenderData;
 use crate::tile::contents::{LayoutBuckets, LayoutResult};
 use crate::tile::job::SourceStyle;
 
@@ -158,12 +157,14 @@ type RenderedBucket<'a> = (&'a dyn Bucket, Vec<(&'a String, &'a Arc<dyn ErasedEv
 impl LayoutResult {
     /// Each bucket with the layers that render it, in layer id order.
     fn buckets(&self) -> Vec<RenderedBucket<'_>> {
-        let mut layers: Vec<_> = self.layer_render_data.iter().collect();
-        layers.sort_unstable_by_key(|(layer_id, _)| *layer_id);
+        let laid = &self.layer_render_data;
+        let mut layers: Vec<_> = laid.laid_layers().collect();
+        layers.sort_unstable_by_key(|(layer_id, ..)| *layer_id);
         // Where each of the layout's buckets is among `buckets`.
-        let mut positions: Vec<Option<usize>> = vec![None; self.layer_render_data.bucket_count()];
+        let mut positions: Vec<Option<usize>> = vec![None; laid.bucket_count()];
         let mut buckets: Vec<RenderedBucket<'_>> = Vec::new();
-        for (layer_id, LayerRenderData { bucket, bucket_index, layer }) in layers {
+        for (layer_id, bucket_index, layer) in layers {
+            let Some(bucket) = laid.bucket(bucket_index) else { continue };
             let position = *positions[bucket_index].get_or_insert_with(|| {
                 buckets.push((bucket, Vec::new()));
                 buckets.len() - 1

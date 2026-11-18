@@ -33,18 +33,18 @@ use crate::tile::contents::Contents;
 use crate::tile::job::SourceKey;
 use crate::update_parameters::UpdateParameters;
 
-/// A layer's bucket in a layout, which the layers of its layout group
-/// share, and the layer's values it was laid out with.
+/// A borrowed view of a layer's bucket in a layout, which the layers of its
+/// layout group share, with the layer's values it was laid out with.
 #[derive(Clone, Copy)]
-pub(crate) struct LayerRenderData<'a> {
+pub(crate) struct LayerBucket<'a> {
     pub(crate) bucket: &'a dyn Bucket,
     /// The index of the bucket among the layout's buckets.
     pub(crate) bucket_index: usize,
     /// The values of the layer that the bucket was laid out with.
-    pub(crate) layer: &'a Arc<dyn ErasedEvaluatedLayer>,
+    pub(crate) layer: &'a dyn ErasedEvaluatedLayer,
 }
 
-impl<'a> LayerRenderData<'a> {
+impl<'a> LayerBucket<'a> {
     /// The bucket, as a bucket of a `T` layer, or `None` for another type's.
     pub(crate) fn bucket<T: LayerType>(self) -> Option<&'a T::Bucket> {
         self.bucket.downcast_ref()
@@ -53,7 +53,7 @@ impl<'a> LayerRenderData<'a> {
     /// The values the bucket was laid out with, as a `T` layer's, or `None`
     /// for another type's.
     pub(crate) fn layer<T: LayerType>(self) -> Option<&'a EvaluatedLayer<T>> {
-        let any: &dyn std::any::Any = &**self.layer;
+        let any: &dyn std::any::Any = self.layer;
         any.downcast_ref()
     }
 }
@@ -610,7 +610,7 @@ pub(crate) trait RenderLayer: LayerParts {
     fn add_render_passes_from_tiles(&mut self, tiles: LayerTiles<'_>) {
         let base = self.base_mut();
         for tile in tiles.iter() {
-            if let Some(render_data) = tile.get_layer_render_data(&*base.style) {
+            if let Some(render_data) = tile.layer_bucket(&*base.style) {
                 base.passes |= RenderPass(render_data.layer.render_passes());
             }
         }

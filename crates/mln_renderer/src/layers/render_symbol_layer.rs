@@ -64,7 +64,7 @@ use crate::layout::symbol_projection::{get_gl_coord_matrix, get_label_plane_matr
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
 use crate::render_layer::{
-    BucketKey, BucketPlacementData, LayerParts, LayerPrepareParameters, LayerRenderData, LayerSource, LayerValues,
+    BucketKey, BucketPlacementData, LayerParts, LayerPrepareParameters, LayerBucket, LayerSource, LayerValues,
     Parts, PartsMut, PlacedTile, RenderLayer, RenderLayerBase, SymbolTranslate, TypedLayer, set_layer_tiles,
 };
 use crate::render_pass::RenderPass;
@@ -1036,7 +1036,7 @@ impl RenderSymbolLayer {
         for tile in tiles {
             let tile_id = *tile.tile.get_overscaled_tile_id();
             if let Some(cached) = self.drawing.caches.cache(&tile_id) {
-                let bucket = tile.get_layer_render_data(&*self.base.style).and_then(LayerRenderData::bucket::<Symbol>);
+                let bucket = tile.layer_bucket(&*self.base.style).and_then(LayerBucket::bucket::<Symbol>);
                 debug_assert!(bucket.is_some() || cached.draws.is_empty());
                 for (slot, draw) in cached.draws.iter().enumerate().filter(|(_, draw)| draw.visible) {
                     let Some(uniforms) = bucket
@@ -1247,7 +1247,7 @@ impl RenderLayer for RenderSymbolLayer {
         };
         let source_key = source.tiles();
         for render_tile in render_tiles.iter() {
-            let Some(render_data) = render_tile.get_layer_render_data(&*self.base.style) else {
+            let Some(render_data) = render_tile.layer_bucket(&*self.base.style) else {
                 continue;
             };
             let (Some(source), Some(bucket)) = (source_key, render_data.bucket::<Symbol>()) else {
@@ -1341,7 +1341,7 @@ impl RenderLayer for RenderSymbolLayer {
         for (tile_index, tile) in render_tiles.iter_indexed() {
             let tile_id = *tile.tile.get_overscaled_tile_id();
 
-            let render_data = super::render_data_for_pass(tile, &*style, passes);
+            let render_data = super::layer_bucket_for_pass(tile, &*style, passes);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
                 self.drawing.caches.drop_cache(&tile_id);
                 continue;
@@ -1465,7 +1465,7 @@ impl RenderLayer for RenderSymbolLayer {
                 continue;
             };
             let tile_id = tile.tile.id.overscale_to(group.overscaled_z);
-            let Some(render_data) = super::render_data_for_pass(tile, &*style, passes) else {
+            let Some(render_data) = super::layer_bucket_for_pass(tile, &*style, passes) else {
                 continue;
             };
             let Some(bucket) = render_data.bucket::<Symbol>() else {

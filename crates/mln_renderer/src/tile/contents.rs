@@ -33,7 +33,7 @@ use crate::gfx::dynamic_texture_atlas::{AtlasLease, BinUse, DynamicTextureAtlas}
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layout::tile_layout::{Dependencies, Resolved};
 use crate::query::{RenderedQueryOptions, SourceQueryOptions};
-use crate::render_layer::LayerRenderData;
+use crate::render_layer::LayerBucket;
 use crate::render_orchestrator::drop_on_workers;
 use crate::source_state::SourceFeatureState;
 use crate::text::glyph_store::HBShapeResults;
@@ -77,11 +77,14 @@ impl LayoutBuckets {
         }
     }
 
-    /// The render data of the layer `layer_id`.
+    /// The bucket of the layer `layer_id`.
     #[inline]
-    pub(crate) fn get(&self, layer_id: &str) -> Option<LayerRenderData<'_>> {
-        let laid = self.layers.get(layer_id)?;
-        Some(LayerRenderData { bucket: &*self.buckets[laid.bucket], bucket_index: laid.bucket, layer: &laid.layer })
+    pub(crate) fn get(&self, layer_id: &str) -> Option<LayerBucket<'_>> {
+        Some(self.layer_bucket(self.layers.get(layer_id)?))
+    }
+
+    fn layer_bucket<'a>(&'a self, laid: &'a LaidLayer) -> LayerBucket<'a> {
+        LayerBucket { bucket: &*self.buckets[laid.bucket], bucket_index: laid.bucket, layer: &*laid.layer }
     }
 
     /// The number of layers laid out.
@@ -104,11 +107,16 @@ impl LayoutBuckets {
         self.layers.contains_key(layer_id)
     }
 
-    /// The layers laid out, with their render data, in no order.
-    pub(crate) fn iter(&self) -> impl Iterator<Item = (&String, LayerRenderData<'_>)> + '_ {
-        self.layers.iter().map(|(id, laid)| {
-            (id, LayerRenderData { bucket: &*self.buckets[laid.bucket], bucket_index: laid.bucket, layer: &laid.layer })
-        })
+    /// The layers laid out, with their buckets, in no order.
+    #[cfg(test)]
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&String, LayerBucket<'_>)> + '_ {
+        self.layers.iter().map(|(id, laid)| (id, self.layer_bucket(laid)))
+    }
+
+    /// The layers laid out, each with the index of its bucket and the values
+    /// it was laid out with, in no order.
+    pub(crate) fn laid_layers(&self) -> impl Iterator<Item = (&String, usize, &Arc<dyn ErasedEvaluatedLayer>)> + '_ {
+        self.layers.iter().map(|(id, laid)| (id, laid.bucket, &laid.layer))
     }
 
     /// The number of buckets, each of which some layer renders.
@@ -116,12 +124,12 @@ impl LayoutBuckets {
         self.buckets.len()
     }
 
-    /// The bucket at `index`, as [`LayerRenderData::bucket_index`] gives it.
+    /// The bucket at `index`, as [`LayerBucket::bucket_index`] gives it.
     pub(crate) fn bucket_mut(&mut self, index: usize) -> Option<&mut dyn Bucket> {
         Some(&mut **self.buckets.get_mut(index)?)
     }
 
-    /// The bucket at `index`, as [`LayerRenderData::bucket_index`] gives it.
+    /// The bucket at `index`, as [`LayerBucket::bucket_index`] gives it.
     pub(crate) fn bucket(&self, index: usize) -> Option<&dyn Bucket> {
         Some(&**self.buckets.get(index)?)
     }
@@ -166,12 +174,12 @@ impl LayoutResult {
         LayoutResult { layer_render_data, feature_index }
     }
 
-    /// The render data of `layer_impl`'s layer, if it was laid out as a layer
+    /// The bucket of `layer_impl`'s layer, if it was laid out as a layer
     /// of the same type. A tile shows its contents until a relayout for a
     /// changed layer arrives, so a layer that changed type meanwhile finds
     /// nothing.
     #[inline]
-    pub(crate) fn get_layer_render_data(&self, layer_impl: &dyn ErasedLayerStyle) -> Option<LayerRenderData<'_>> {
+    pub(crate) fn layer_bucket(&self, layer_impl: &dyn ErasedLayerStyle) -> Option<LayerBucket<'_>> {
         let result = self.layer_render_data.get(&layer_impl.base().id)?;
         if result.layer.style().info().name != layer_impl.info().name {
             return None;
@@ -392,7 +400,7 @@ impl GeometryContents {
     pub(crate) fn query_padding(&self, layers: &QueryLayers<'_>) -> f32 {
         let mut query_padding: f32 = 0.0;
         for layer in layers.values() {
-            let Some(data) = self.result.get_layer_render_data(&*layer.base().style) else {
+            let Some(data) = self.result.layer_bucket(&*layer.base().style) else {
                 continue;
             };
             if data.bucket.has_data() {
@@ -543,7 +551,7 @@ impl Contents {
     /// for any layer.
     pub(crate) fn get_bucket(&self, layer_impl: &dyn ErasedLayerStyle) -> Option<&dyn Bucket> {
         match self {
-            Contents::Geometry(contents) => contents.result.get_layer_render_data(layer_impl).map(|data| data.bucket),
+            Contents::Geometry(contents) => contents.result.layer_bucket(layer_impl).map(|data| data.bucket),
             Contents::Raster(_) | Contents::Dem(_) => self.shared_bucket(),
             Contents::Empty => None,
         }
@@ -576,7 +584,7 @@ impl Contents {
             return false;
         };
         // A layer that changed type meanwhile isn't laid out (see
-        // `get_layer_render_data`).
+        // `layer_bucket`).
         if layer.style().info().name != layer_impl.info().name {
             return false;
         }

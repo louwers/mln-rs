@@ -691,7 +691,7 @@ impl RenderLayer for RenderFillLayer {
         for tile in render_tiles.iter() {
             let tile_id = *tile.tile.get_overscaled_tile_id();
 
-            let render_data = super::render_data_for_pass(tile, &*self.base.style, RENDER_PASS);
+            let render_data = super::layer_bucket_for_pass(tile, &*self.base.style, RENDER_PASS);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
                 self.drawing.caches.drop_cache(&tile_id);
                 continue;

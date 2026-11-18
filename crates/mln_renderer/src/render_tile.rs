@@ -20,7 +20,7 @@ use crate::bucket::Bucket;
 use crate::bucket_geometry::BucketGeometry;
 use crate::buckets::debug_bucket::DebugBucket; // layers: debug
 use crate::paint_parameters::TransformParameters;
-use crate::render_layer::LayerRenderData;
+use crate::render_layer::LayerBucket;
 use crate::render_source::SourcePrepareParameters;
 use crate::tile::contents::Contents;
 use crate::tile::tile::Tile;
@@ -177,8 +177,8 @@ impl<'a> FrameTile<'a> {
         self.contents?.geometry().map(|contents| &contents.bucket_geometry)
     }
 
-    pub(crate) fn get_layer_render_data(self, impl_: &dyn ErasedLayerStyle) -> Option<LayerRenderData<'a>> {
-        self.contents?.geometry()?.result.get_layer_render_data(impl_)
+    pub(crate) fn layer_bucket(self, impl_: &dyn ErasedLayerStyle) -> Option<LayerBucket<'a>> {
+        self.contents?.geometry()?.result.layer_bucket(impl_)
     }
 
     #[must_use]

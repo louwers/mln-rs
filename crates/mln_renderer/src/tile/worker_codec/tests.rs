@@ -317,7 +317,7 @@ fn every_geometry_layer_type_crosses() {
     let result = cross(&layers, &tile_data());
     for (layer_id, render_data) in result.layer_render_data.iter() {
         let sent = layers.iter().find(|layer| &layer.style().base().id == layer_id).unwrap();
-        assert!(Arc::ptr_eq(render_data.layer, sent));
+        assert!(std::ptr::addr_eq(render_data.layer, &**sent));
         assert!(render_data.bucket.has_data());
     }
 }
@@ -501,7 +501,7 @@ fn properties_cross_while_a_paint_property_transitions() {
     let JobResult::Laid(output) = codec.run(&job(&style, full(&tile_data()), Resolved::default())) else {
         panic!("not a layout");
     };
-    assert!(Arc::ptr_eq(output.result.layer_render_data.get("water").unwrap().layer, &transitioning));
+    assert!(std::ptr::addr_eq(output.result.layer_render_data.get("water").unwrap().layer, &*transitioning));
 }
 
 /// A layout's render data has the layers of its job, not of a job sent
@@ -521,7 +521,7 @@ fn layouts_have_the_layers_they_answer() {
         panic!("not a layout");
     };
     for (_, render_data) in output.result.layer_render_data.iter() {
-        assert!(sent.layers.iter().any(|layer| Arc::ptr_eq(layer, render_data.layer)));
+        assert!(sent.layers.iter().any(|layer| std::ptr::addr_eq(&**layer, render_data.layer)));
     }
 }
 

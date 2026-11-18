@@ -50,13 +50,14 @@ pub(crate) fn shared_vertices<V: bytemuck::Pod>(vertices: &[V]) -> VertexVectorB
     crate::bucket_geometry::released_vertices(vertices)
 }
 
-/// The tile's render data for `pass`.
-pub(crate) fn render_data_for_pass<'a>(
+/// The tile's bucket of the layer `style`, if it was laid out to draw in
+/// `pass`.
+pub(crate) fn layer_bucket_for_pass<'a>(
     tile: FrameTile<'a>,
     style: &dyn ErasedLayerStyle,
     pass: crate::render_pass::RenderPass,
-) -> Option<crate::render_layer::LayerRenderData<'a>> {
-    let render_data = tile.get_layer_render_data(style)?;
+) -> Option<crate::render_layer::LayerBucket<'a>> {
+    let render_data = tile.layer_bucket(style)?;
     if (render_data.layer.render_passes() & pass.underlying_type()) != 0 { Some(render_data) } else { None }
 }
 

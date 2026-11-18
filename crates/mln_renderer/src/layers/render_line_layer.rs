@@ -539,7 +539,7 @@ impl RenderLayer for RenderLineLayer {
         };
         let style = Arc::clone(&self.base.style);
         for tile in render_tiles.iter() {
-            let Some(render_data) = tile.get_layer_render_data(&*style) else {
+            let Some(render_data) = tile.layer_bucket(&*style) else {
                 continue;
             };
 
@@ -597,7 +597,7 @@ impl RenderLayer for RenderLineLayer {
         for tile in render_tiles.iter() {
             let tile_id = *tile.tile.get_overscaled_tile_id();
 
-            let Some(render_data) = super::render_data_for_pass(tile, &*self.base.style, render_pass) else {
+            let Some(render_data) = super::layer_bucket_for_pass(tile, &*self.base.style, render_pass) else {
                 self.drawing.caches.drop_cache(&tile_id);
                 continue;
             };

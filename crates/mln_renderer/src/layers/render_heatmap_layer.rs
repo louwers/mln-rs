@@ -294,7 +294,7 @@ impl RenderHeatmapLayer {
         for tile in render_tiles.iter() {
             let tile_id = *tile.tile.get_overscaled_tile_id();
 
-            let Some(render_data) = super::render_data_for_pass(tile, &*self.base.style, RENDER_PASS) else {
+            let Some(render_data) = super::layer_bucket_for_pass(tile, &*self.base.style, RENDER_PASS) else {
                 self.drawing.caches.drop_cache(&tile_id);
                 continue;
             };
