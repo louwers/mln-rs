@@ -40,7 +40,7 @@ pub(crate) fn refresh_paint_attributes(
     if !changes.paint {
         return;
     }
-    refresh(objects.instance_attributes.as_mut().unwrap_or(&mut objects.vertex_attributes));
+    refresh(objects.paint_attributes_mut());
 }
 
 /// A shared gfx vertex vector holding a copy of `vertices`, for data that

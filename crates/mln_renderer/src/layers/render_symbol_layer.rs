@@ -453,17 +453,41 @@ struct SymbolUniforms {
 
 /// The size of the texture `objects` binds at `texture_id`, zero for none.
 fn texture_size(objects: &DrawObjects, texture_id: usize) -> [f32; 2] {
-    objects.textures[texture_id].as_ref().map_or([0.0, 0.0], |texture| {
+    objects.texture(texture_id).map_or([0.0, 0.0], |texture| {
         let size = texture.borrow().size();
         [size.width as f32, size.height as f32]
     })
 }
 
 /// Copies again what placement, sorting or feature state changed of the
-/// bucket into a draw of it: its attributes, which a halo and a fill draw
-/// read the same of, so only the first of them that is visible copies them
-/// (the keys of those copied are in `refreshed_attributes`), and its
-/// triangles. Returns whether it copied the attributes.
+/// bucket into the draws of a tile, `draws`, all of which read the same
+/// attributes (a halo and a fill): their triangles, and the attributes,
+/// which the first of them that is visible copies and the others then read.
+fn refresh_draws(
+    draws: &mut [SymbolDraw],
+    geometry: Option<&BucketGeometry>,
+    bucket: &SymbolBucket,
+    layer_id: &str,
+    evaluated: &SymbolPaintProperties::PossiblyEvaluated,
+    refresh: BucketChanges,
+) {
+    let mut source = None;
+    for (index, draw) in draws.iter_mut().enumerate() {
+        if refresh_draw(draw, geometry, bucket, layer_id, evaluated, refresh, source.is_none()) {
+            source = Some(index);
+        }
+    }
+    let Some(source) = source else { return };
+    let (before, rest) = draws.split_at_mut(source);
+    let (source, after) = rest.split_first_mut().expect("the source is one of the draws");
+    for draw in before.iter_mut().chain(after) {
+        draw.objects.share_vertex_attributes(&source.objects);
+    }
+}
+
+/// Copies again what placement, sorting or feature state changed of the
+/// bucket into a draw of it: its triangles, and where `copy_attributes`, its
+/// attributes. Returns whether it copied the attributes.
 fn refresh_draw(
     draw: &mut SymbolDraw,
     geometry: Option<&BucketGeometry>,
@@ -471,7 +495,7 @@ fn refresh_draw(
     layer_id: &str,
     evaluated: &SymbolPaintProperties::PossiblyEvaluated,
     refresh: BucketChanges,
-    refreshed_attributes: &mut Vec<AttributesKey>,
+    copy_attributes: bool,
 ) -> bool {
     let is_text = draw.data.symbol_type == SymbolType::Text;
     let sdf_icons = draw.data.symbol_type == SymbolType::IconSDF;
@@ -503,11 +527,8 @@ fn refresh_draw(
         return false;
     }
 
-    let key = draw.attributes_key();
-    let copies = !refreshed_attributes.contains(&key);
-    if copies {
-        refreshed_attributes.push(key);
-        let attrs = &mut draw.objects.vertex_attributes;
+    if copy_attributes {
+        let attrs = draw.objects.vertex_attributes_mut();
         if refresh.dynamic {
             set_projected_pos_attribute(buffer, layer_id, attrs);
         }
@@ -530,13 +551,15 @@ fn refresh_draw(
         let segments = segments.iter().map(SegmentBase::copy).collect();
         draw.objects.replace_indexes(released_indexes(&buffer.triangles), segments);
     }
-    copies
+    copy_attributes
 }
 
-/// A `SegmentGroup` (a `RenderableSegment` plus its segments).
+/// One segment, or all the segments, of a buffer of a tile's bucket, which
+/// the update builds draws of in the order of [`SegmentGroup::less`].
 struct SegmentGroup {
     sort_key: f32,
     type_: SymbolType,
+    /// The tile's position among the layer's tiles ([`LayerTiles::get`](crate::render_layer::LayerTiles::get)).
     tile_index: usize,
     tile_id: UnwrappedTileID,
     overscaled_z: u8,
@@ -598,6 +621,9 @@ pub(crate) struct RenderSymbolLayer {
     drawing: LayerDrawing<SymbolTile>,
     /// The frame's draws as the update makes them.
     draw_list: DrawList<SymbolUniforms>,
+    /// The segments of the tiles the update builds draws of, as it sorts
+    /// them, kept from frame to frame for their memory.
+    renderable_segments: Vec<SegmentGroup>,
     /// The buckets the layer places, in placement order (`placementData`).
     placement_data: Vec<BucketPlacementData>,
     /// The buckets another layer places and this layer draws (`followerData`).
@@ -742,6 +768,7 @@ impl RenderSymbolLayer {
             values,
             drawing: LayerDrawing::default(),
             draw_list: DrawList::default(),
+            renderable_segments: Vec::new(),
             placement_data: Vec::new(),
             follower_data: Vec::new(),
             icon_size: 1.0,
@@ -1255,9 +1282,9 @@ impl RenderLayer for RenderSymbolLayer {
             icon: Option<Rc<AtlasBinding>>,
         }
 
-        let (shaders, context, state) =
+        let (shaders, context, transform) =
             (&paint_parameters.static_data.shaders, paint_parameters.context, paint_parameters.state);
-        self.update_projection_variant(state);
+        self.update_projection_variant(transform);
         let passes = self.base.passes;
         let Some(render_tiles) = source.and_then(LayerSource::tiles).filter(|tiles| !tiles.is_empty()) else {
             self.remove_all_draws();
@@ -1304,14 +1331,14 @@ impl RenderLayer for RenderSymbolLayer {
             if is_screen_space { ProjectionVariant::Mercator } else { self.base.projection_variant };
         let is_offset = !layout.icon_offset.is_undefined();
 
-        let current_zoom = state.get_zoom() as f32;
+        let current_zoom = transform.get_zoom() as f32;
         let style = Arc::clone(&self.base.style);
         let layer_id: &str = &style.base().id;
 
-        let mut renderable_segments: Vec<SegmentGroup> = Vec::new();
+        let mut renderable_segments = std::mem::take(&mut self.renderable_segments);
+        renderable_segments.clear();
 
-        let tiles: Vec<FrameTile<'_>> = render_tiles.iter().collect();
-        for (tile_index, &tile) in tiles.iter().enumerate() {
+        for (tile_index, tile) in render_tiles.iter_indexed() {
             let tile_id = *tile.tile.get_overscaled_tile_id();
 
             let render_data = super::render_data_for_pass(tile, &*style, passes);
@@ -1342,30 +1369,18 @@ impl RenderLayer for RenderSymbolLayer {
 
             // A tile the layer keeps draws of refreshes them.
             if let Some(cached) = self.drawing.caches.cache_mut(&tile_id).filter(|cached| !cached.draws.is_empty()) {
-                let mut refreshed_attributes = Vec::new();
-                let mut copied = Vec::new();
-                for (index, draw) in cached.draws.iter_mut().enumerate() {
-                    let geometry = tile.get_bucket_geometry();
-                    if refresh_draw(draw, geometry, bucket, layer_id, evaluated, refresh, &mut refreshed_attributes) {
-                        copied.push(index);
-                    }
-                }
-                // The other draws that read the same attributes read the copies.
-                for source in copied {
-                    let key = cached.draws[source].attributes_key();
-                    for index in 0..cached.draws.len() {
-                        if index != source && cached.draws[index].attributes_key() == key {
-                            let attrs = copy_shared_attributes(&cached.draws[source].objects.vertex_attributes);
-                            cached.draws[index].objects.vertex_attributes = attrs;
-                        }
-                    }
+                // The draws that read the same attributes are next to each
+                // other, as the update builds them.
+                let geometry = tile.get_bucket_geometry();
+                for draws in cached.draws.chunk_by_mut(|a, b| a.attributes_key() == b.attributes_key()) {
+                    refresh_draws(draws, geometry, bucket, layer_id, evaluated, refresh);
                 }
                 self.rebuild_collision(&tile_id, bucket, evaluated);
                 continue;
             }
 
             let mut serial_key = 1.0_f32;
-            let state_guard = &bucket.state;
+            let state = &bucket.state;
             // A bucket laid out before a layout change can still have the
             // previous sort-key expression until it is rebuilt.
             let sort_segments =
@@ -1407,21 +1422,21 @@ impl RenderLayer for RenderSymbolLayer {
             let has_icon_texture = atlases.icon().is_some();
             let has_glyph_texture = atlases.glyph().is_some();
 
-            if !state_guard.icon.segments.is_empty() && has_icon_texture {
-                add_renderables(&state_guard.icon, SymbolType::IconRGBA);
+            if !state.icon.segments.is_empty() && has_icon_texture {
+                add_renderables(&state.icon, SymbolType::IconRGBA);
             }
-            if !state_guard.sdf_icon.segments.is_empty() && has_icon_texture {
-                add_renderables(&state_guard.sdf_icon, SymbolType::IconSDF);
+            if !state.sdf_icon.segments.is_empty() && has_icon_texture {
+                add_renderables(&state.sdf_icon, SymbolType::IconSDF);
             }
-            if !state_guard.text.segments.is_empty() && has_glyph_texture {
-                add_renderables(&state_guard.text, SymbolType::Text);
+            if !state.text.segments.is_empty() && has_glyph_texture {
+                add_renderables(&state.text, SymbolType::Text);
             }
 
             self.rebuild_collision(&tile_id, bucket, evaluated);
         }
 
-        // std::multiset<SegmentGroup>: a stable sort keeps equal elements in
-        // insertion order, as multiset::emplace does.
+        // A stable sort keeps segments of the same order in the order they
+        // were added.
         renderable_segments.sort_by(|a, b| {
             if SegmentGroup::less(a, b) {
                 std::cmp::Ordering::Less
@@ -1446,7 +1461,9 @@ impl RenderLayer for RenderSymbolLayer {
             let is_text = group.type_ == SymbolType::Text;
             let sdf_icons = group.type_ == SymbolType::IconSDF;
 
-            let tile = tiles[group.tile_index];
+            let Some(tile) = render_tiles.get(group.tile_index) else {
+                continue;
+            };
             let tile_id = tile.tile.id.overscale_to(group.overscaled_z);
             let Some(render_data) = super::render_data_for_pass(tile, &*style, passes) else {
                 continue;
@@ -1454,13 +1471,13 @@ impl RenderLayer for RenderSymbolLayer {
             let Some(bucket) = render_data.bucket::<Symbol>() else {
                 continue;
             };
-            let state_guard = &bucket.state;
+            let state = &bucket.state;
             let buffer = if is_text {
-                &state_guard.text
+                &state.text
             } else if sdf_icons {
-                &state_guard.sdf_icon
+                &state.sdf_icon
             } else {
-                &state_guard.icon
+                &state.icon
             };
 
             if buffer.triangles.is_empty() {
@@ -1582,7 +1599,7 @@ impl RenderLayer for RenderSymbolLayer {
                     objects,
                     data: SymbolDrawData {
                         is_halo,
-                        bucket_variable_placement: state_guard.has_variable_placement,
+                        bucket_variable_placement: state.has_variable_placement,
                         symbol_type: group.type_,
                         pitch_alignment: values.pitch_alignment,
                         rotation_alignment: values.rotation_alignment,
@@ -1603,6 +1620,7 @@ impl RenderLayer for RenderSymbolLayer {
             }
         }
 
+        self.renderable_segments = renderable_segments;
         self.make_frame_draws(render_tiles.iter(), passes, paint_parameters, context);
     }
 }

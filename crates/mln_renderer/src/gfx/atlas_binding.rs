@@ -6,6 +6,7 @@ use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_style_types::AlignmentType;
 
 use crate::draw::{DrawObjects, Textures};
+use crate::gfx::texture2d::Texture2DPtr;
 use crate::paint_parameters::PaintParameters;
 use crate::tile_render_data::TileAtlasTextures;
 
@@ -53,7 +54,7 @@ impl AtlasBinding {
     #[must_use]
     pub(crate) fn textures(&self, shader: &ShaderProgram) -> Textures {
         let mut textures = Textures::default();
-        self.set_textures(&mut textures, self.samples_icon(shader));
+        self.set_textures(self.samples_icon(shader), |id, texture| textures[id] = texture);
         textures
     }
 
@@ -74,12 +75,12 @@ impl AtlasBinding {
             set_samplers(atlases, linear_filter_for_icons);
         }
         let samples_icon = self.samples_icon(objects.shader());
-        self.set_textures(&mut objects.textures, samples_icon);
+        self.set_textures(samples_icon, |id, texture| objects.set_texture(id, texture));
     }
 
-    /// Sets the atlases' textures in `textures`, those of a shader that
-    /// samples the icon texture or not.
-    fn set_textures(&self, textures: &mut Textures, samples_icon: bool) {
+    /// Sets the atlases' textures, those of a shader that samples the icon
+    /// texture or not, with `set(id, texture)`.
+    fn set_textures(&self, samples_icon: bool, mut set: impl FnMut(usize, Option<Texture2DPtr>)) {
         let (Some(glyph_texture_id), Some(atlases)) = (self.glyph_texture_id, &self.atlases) else {
             return;
         };
@@ -87,10 +88,10 @@ impl AtlasBinding {
         let icon = atlases.icon();
         if let Some(icon_texture_id) = self.icon_texture_id.filter(|_| samples_icon) {
             debug_assert_ne!(glyph_texture_id, icon_texture_id);
-            textures[glyph_texture_id] = glyph;
-            textures[icon_texture_id] = icon;
+            set(glyph_texture_id, glyph);
+            set(icon_texture_id, icon);
         } else {
-            textures[glyph_texture_id] = if self.is_text { glyph } else { icon };
+            set(glyph_texture_id, if self.is_text { glyph } else { icon });
         }
     }
 

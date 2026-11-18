@@ -245,6 +245,17 @@ impl<'a> LayerTiles<'a> {
         self.order.iter().filter_map(move |&i| self.tile(i))
     }
 
+    /// The tiles in order, each with its position in the order, which
+    /// [`get`](Self::get) takes.
+    pub(crate) fn iter_indexed(self) -> impl Iterator<Item = (usize, FrameTile<'a>)> + 'a {
+        self.order.iter().enumerate().filter_map(move |(position, &i)| Some((position, self.tile(i)?)))
+    }
+
+    /// The tile at `position` in the order.
+    pub(crate) fn get(self, position: usize) -> Option<FrameTile<'a>> {
+        self.tile(*self.order.get(position)?)
+    }
+
     /// The render tiles in order, without what they show.
     pub(crate) fn render_tiles(self) -> impl Iterator<Item = &'a RenderTile> + 'a {
         self.order.iter().filter_map(move |&i| self.tiles.get(i))

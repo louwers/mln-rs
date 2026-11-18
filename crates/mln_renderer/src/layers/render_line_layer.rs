@@ -841,7 +841,7 @@ impl RenderLineLayer {
                 pad2: 0.0,
             }),
             LineType::Pattern => {
-                let texture = cached.objects.textures[ID_LINE_IMAGE_TEXTURE].as_ref();
+                let texture = cached.objects.texture(ID_LINE_IMAGE_TEXTURE);
                 let texture_size = texture.map_or(Size::new(0, 0), |texture| texture.borrow().size());
                 uniforms.draw_ubo.set(&LinePatternDrawableUBO {
                     matrix,
@@ -902,9 +902,7 @@ impl RenderLineLayer {
                     let dasharray = evaluated.line_dasharray.faded();
                     let dash_pattern =
                         line_atlas.get_dash_pattern_texture(dasharray.from, dasharray.to, cached.dash_cap);
-                    if cached.objects.textures[dash_texture_id].is_none() {
-                        cached.objects.textures[dash_texture_id] = Some(dash_pattern.get_texture()?);
-                    }
+                    cached.objects.texture_or_insert_with(dash_texture_id, || dash_pattern.get_texture())?;
 
                     let pos_a = dash_pattern.get_from();
                     let pos_b = dash_pattern.get_to();

@@ -715,7 +715,7 @@ impl RenderFillExtrusionLayer {
         let num_tiles = 2f64.powi(i32::from(tile_id.canonical.z));
         let height_factor = (-num_tiles / TILE_SIZE_D / 8.0) as f32;
 
-        let texture = objects.textures[ID_FILL_EXTRUSION_IMAGE_TEXTURE].as_ref();
+        let texture = objects.texture(ID_FILL_EXTRUSION_IMAGE_TEXTURE);
         let texture_size = texture.map_or(Size::new(0, 0), |texture| texture.borrow().size());
         let pattern = evaluated.fill_extrusion_pattern.faded();
         let tlbr = |id: &str| tile.get_pattern(id).map_or([0.0; 4], |position| position.tlbr().map(f32::from));

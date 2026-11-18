@@ -500,7 +500,7 @@ impl RenderLayer for RenderColorReliefLayer {
                 if let Some(cached) = self.drawing.caches.cache_mut(&tile_id) {
                     // The DEM and the ramps' textures change with the
                     // bucket's generation and the ramps.
-                    cached.draw.objects.textures = textures;
+                    cached.draw.objects.set_textures(textures);
                 } else {
                     // The tile's geometry: the globe's mesh of its mask, the
                     // mask's geometry, or the whole tile's quad.

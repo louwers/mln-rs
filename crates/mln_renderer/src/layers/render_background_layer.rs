@@ -351,7 +351,7 @@ impl RenderLayer for RenderBackgroundLayer {
                 continue;
             };
             if let Some(texture) = &pattern_texture {
-                cached.objects.textures[ID_BACKGROUND_IMAGE_TEXTURE] = Some(Rc::clone(texture));
+                cached.objects.set_texture(ID_BACKGROUND_IMAGE_TEXTURE, Some(Rc::clone(texture)));
             }
             let draw = FrameDraw {
                 pass: draw_passes,

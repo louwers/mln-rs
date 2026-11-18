@@ -527,7 +527,7 @@ impl RenderFillLayer {
 
         let faded = evaluated.fill_pattern.faded();
         let tlbr = |id: &str| tile.get_pattern(id).map_or([0.0; 4], |position| position.tlbr().map(f32::from));
-        let texture = draw.objects.textures[ID_FILL_IMAGE_TEXTURE].as_ref();
+        let texture = draw.objects.texture(ID_FILL_IMAGE_TEXTURE);
         let texture_size = texture.map_or(Size::new(0, 0), |texture| texture.borrow().size());
         // A pattern has nothing to sample before its tile has an atlas, and
         // the shaders divide by the atlas size.
@@ -740,8 +740,8 @@ impl RenderLayer for RenderFillLayer {
                     match &cached.fill {
                         // A line outline reads the fill's attributes, and so
                         // binds the buffers the fill uploads.
-                        Some(fill) if changes.paint && outline.objects.instance_attributes.is_none() => {
-                            outline.objects.vertex_attributes = copy_shared_attributes(&fill.objects.vertex_attributes);
+                        Some(fill) if changes.paint && !outline.objects.has_instances() => {
+                            outline.objects.share_vertex_attributes(&fill.objects);
                         }
                         _ => refresh_paint_attributes(&mut outline.objects, changes, refresh),
                     }

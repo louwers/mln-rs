@@ -108,14 +108,17 @@ struct PipelineVariant {
 /// when what they are made of changes.
 pub(crate) struct DrawObjects {
     shader: ShaderProgramPtr,
-    pub(crate) vertex_attributes: VertexAttributeArray,
+    vertex_attributes: VertexAttributeArray,
     /// The attributes of each instance, for a draw of instances.
-    pub(crate) instance_attributes: Option<VertexAttributeArray>,
+    instance_attributes: Option<VertexAttributeArray>,
     /// When the attributes last uploaded, `None` until they upload, which
     /// binds them all again.
     attribute_update_time: Option<Instant>,
+    /// Whether the vertex attributes were replaced since the last upload,
+    /// which then binds them again.
+    vertex_attributes_replaced: bool,
     /// The textures it binds, by texture id.
-    pub(crate) textures: Textures,
+    textures: Textures,
     /// The draw's own uniform and storage buffers, by id, which win over
     /// its layer's and the frame's.
     pub(crate) uniform_buffers: UniformBufferArray,
@@ -163,6 +166,7 @@ impl DrawObjects {
             vertex_attributes: vertices,
             instance_attributes: instances,
             attribute_update_time: None,
+            vertex_attributes_replaced: false,
             textures,
             uniform_buffers: UniformBufferArray::new(),
             color_mode,
@@ -204,7 +208,7 @@ impl DrawObjects {
         let force = self.attribute_update_time.is_none();
         let update_time = self.attribute_update_time;
         let modified = move |attrs: &VertexAttributeArray| update_time.is_none_or(|time| attrs.is_modified_after(time));
-        if modified(&self.vertex_attributes) {
+        if std::mem::take(&mut self.vertex_attributes_replaced) || modified(&self.vertex_attributes) {
             let mut bindings = upload::build_attribute_bindings(
                 context,
                 shader.vertex_attributes(),
@@ -427,6 +431,61 @@ impl DrawObjects {
         self.mode = mode;
         self.indexes = indexes;
         self.segments = segments;
+    }
+
+    /// The vertex attributes, to change their data in place, which the next
+    /// upload binds where it changed.
+    pub(crate) fn vertex_attributes_mut(&mut self) -> &mut VertexAttributeArray {
+        &mut self.vertex_attributes
+    }
+
+    /// The attributes the paint values are read into: the instance
+    /// attributes of a draw of instances, else the vertex attributes.
+    pub(crate) fn paint_attributes_mut(&mut self) -> &mut VertexAttributeArray {
+        self.instance_attributes.as_mut().unwrap_or(&mut self.vertex_attributes)
+    }
+
+    /// Whether the draw draws instances.
+    #[must_use]
+    pub(crate) fn has_instances(&self) -> bool {
+        self.instance_attributes.is_some()
+    }
+
+    /// Replaces the vertex attributes with a copy of those of `other`
+    /// ([`copy_shared_attributes`]), which the next upload binds.
+    pub(crate) fn share_vertex_attributes(&mut self, other: &DrawObjects) {
+        self.vertex_attributes = copy_shared_attributes(&other.vertex_attributes);
+        self.vertex_attributes_replaced = true;
+    }
+
+    /// The texture it binds as `id`.
+    #[must_use]
+    pub(crate) fn texture(&self, id: usize) -> Option<&Texture2DPtr> {
+        self.textures[id].as_ref()
+    }
+
+    /// Makes `texture` the one it binds as `id`.
+    pub(crate) fn set_texture(&mut self, id: usize, texture: Option<Texture2DPtr>) {
+        self.textures[id] = texture;
+    }
+
+    /// Makes `textures` those it binds.
+    pub(crate) fn set_textures(&mut self, textures: Textures) {
+        self.textures = textures;
+    }
+
+    /// The texture it binds as `id`, which `make` makes where it has none;
+    /// `None` where it has none and `make` returns `None`.
+    pub(crate) fn texture_or_insert_with(
+        &mut self,
+        id: usize,
+        make: impl FnOnce() -> Option<Texture2DPtr>,
+    ) -> Option<&Texture2DPtr> {
+        let texture = &mut self.textures[id];
+        if texture.is_none() {
+            *texture = make();
+        }
+        texture.as_ref()
     }
 
     /// Replaces the indexes and the segments drawn from them.

@@ -511,7 +511,7 @@ impl RenderLayer for RenderHillshadeLayer {
                 }
                 // The bucket's render target is made again with its
                 // generation.
-                cached.draw.objects.textures[ID_HILLSHADE_IMAGE_TEXTURE] = Some(render_target_texture);
+                cached.draw.objects.set_texture(ID_HILLSHADE_IMAGE_TEXTURE, Some(render_target_texture));
             } else {
                 let mut textures = Textures::default();
                 textures[ID_HILLSHADE_IMAGE_TEXTURE] = Some(render_target_texture);
