@@ -438,7 +438,7 @@ impl GlyphStore {
     /// The glyph of the character that the PBF glyph `glyph_id` names, from
     /// the loaded font face of `type_`, unshaped.
     fn face_glyph(&self, font_stack: &FontStack, type_: GlyphIDType, glyph_id: GlyphID) -> Option<Glyph> {
-        let shaper = self.get_hb_shaper(font_stack, type_)?;
+        let shaper = self.hb_shaper(font_stack, type_)?;
         let (mut ids, mut adjusts) = (Vec::new(), Vec::new());
         shaper.shape(&[glyph_id.code], false, &mut ids, &mut adjusts);
         let [id] = ids[..] else { return None };

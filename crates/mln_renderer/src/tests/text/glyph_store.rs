@@ -1147,7 +1147,7 @@ fn answer_at_once(test: &GlyphStoreTest, chars: &[char]) -> Option<GlyphMap> {
     *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |glyphs: GlyphMap| {
         *a.borrow_mut() = Some(glyphs);
     }));
-    test.get_glyphs(dependencies(chars));
+    test.request_glyphs(dependencies(chars));
     answer.take()
 }
 
