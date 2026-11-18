@@ -595,7 +595,7 @@ impl RenderLayer for RenderLineLayer {
         let render_pass =
             RenderPass(self.base.evaluated_properties.render_passes() & !RenderPass::Opaque.underlying_type());
         for tile in render_tiles.iter() {
-            let tile_id = *tile.tile.get_overscaled_tile_id();
+            let tile_id = tile.id();
 
             let Some(render_data) = super::layer_bucket_for_pass(tile, &*self.base.style, render_pass) else {
                 self.drawing.caches.drop_cache(&tile_id);
@@ -629,7 +629,7 @@ impl RenderLayer for RenderLineLayer {
             let changes = self.drawing.caches.take_changes(&tile_id);
             if let Some(cached) = self.drawing.caches.cache_mut(&tile_id) {
                 refresh_paint_attributes(&mut cached.objects, changes, |attrs| {
-                    let geometry = tile.get_bucket_geometry();
+                    let geometry = tile.bucket_geometry();
                     let buffer = &binders.interleaved_vertex_buffer;
                     let paint = paint_vertices(geometry, buffer, binders.depends_on_feature_state());
                     read_line_attributes(attrs, binders, &paint, evaluated, &mut Default::default());
@@ -643,11 +643,7 @@ impl RenderLayer for RenderLineLayer {
                 continue;
             };
             if let Some(uniforms) = Self::uniforms(&self.values.evaluated, tile, binders, cached, paint_parameters) {
-                let draw = FrameDraw {
-                    pass: cached.pass,
-                    clip: true,
-                    ..FrameDraw::new(Some(tile_id), 0, cached.id)
-                };
+                let draw = FrameDraw { pass: cached.pass, clip: true, ..FrameDraw::new(Some(tile_id), 0, cached.id) };
                 self.draw_list.push(draw, uniforms);
             }
         }
@@ -672,7 +668,7 @@ impl RenderLineLayer {
         evaluated: &LinePaintProperties::PossiblyEvaluated,
         pass: RenderPass,
     ) -> Option<LineTile> {
-        let geometry = tile.get_bucket_geometry();
+        let geometry = tile.bucket_geometry();
         let buffer = &binders.interleaved_vertex_buffer;
         let paint = paint_vertices(geometry, buffer, binders.depends_on_feature_state());
         let mut properties_as_uniforms = StringIDSetsPair::default();
@@ -697,7 +693,7 @@ impl RenderLineLayer {
             textures[ID_LINE_IMAGE_TEXTURE] = dash_texture;
             (LineType::Sdf, &mut self.line_sdf_shader_group, "LineSDFShader")
         } else if !self.values.unevaluated.line_pattern.is_undefined() {
-            let icons = tile.get_atlas_textures().filter(|atlases| atlases.icon().is_some())?;
+            let icons = tile.atlas_textures().filter(|atlases| atlases.icon().is_some())?;
             atlases = Some(AtlasBinding::new(
                 Some(Rc::clone(icons)),
                 None,
@@ -797,7 +793,7 @@ impl RenderLineLayer {
         let zoom = state.get_zoom() as f32;
         let int_zoom = state.get_integer_zoom();
         let pixel_scale = state.get_projection().pixel_scale(state) as f32;
-        let tile_id = tile.tile.get_overscaled_tile_id().to_unwrapped();
+        let tile_id = tile.id().to_unwrapped();
 
         let projection = get_projection_data(
             &tile_id,
@@ -859,7 +855,7 @@ impl RenderLineLayer {
                     pad3: 0.0,
                 });
                 let pattern = evaluated.line_pattern.faded();
-                let tlbr = |id: &str| tile.get_pattern(id).map_or([0.0; 4], |position| cast_tlbr(position.tlbr()));
+                let tlbr = |id: &str| tile.pattern(id).map_or([0.0; 4], |position| cast_tlbr(position.tlbr()));
                 uniforms.tile_props.set(&LinePatternTilePropsUBO {
                     pattern_from: tlbr(pattern.from.id()),
                     pattern_to: tlbr(pattern.to.id()),

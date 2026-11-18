@@ -409,16 +409,15 @@ impl RenderLayer for RenderHillshadeLayer {
         // Drop the render targets of buckets that are no longer rendered.
         let live_buckets = &mut self.live_buckets;
         live_buckets.clear();
-        live_buckets
-            .extend(render_tiles.iter().filter_map(|tile| tile.get_bucket(&*self.base.style).map(Bucket::get_id)));
+        live_buckets.extend(render_tiles.iter().filter_map(|tile| tile.bucket(&*self.base.style).map(Bucket::get_id)));
         self.bucket_render_targets.retain(|id, _| live_buckets.contains(id));
 
         // The illumination, which the first draw computes.
         let mut illumination = None;
         for tile in render_tiles.iter() {
-            let tile_id = *tile.tile.get_overscaled_tile_id();
+            let tile_id = tile.id();
 
-            let bucket = tile.get_bucket(&*self.base.style).filter(|b| b.has_data());
+            let bucket = tile.bucket(&*self.base.style).filter(|b| b.has_data());
             let Some(bucket) = bucket.and_then(|bucket| bucket.downcast_ref::<HillshadeBucket>()) else {
                 self.drawing.caches.drop_cache(&tile_id);
                 continue;

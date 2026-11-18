@@ -7,6 +7,7 @@
 // frames.
 
 use std::rc::Rc;
+use std::sync::Arc;
 
 use glam::Vec2;
 use mln_map_types::{MapDebugOptions, ProjectionData, TransformState};
@@ -19,6 +20,7 @@ use mln_util::mat4::Mat4;
 use crate::bucket::Bucket;
 use crate::bucket_geometry::BucketGeometry;
 use crate::buckets::debug_bucket::DebugBucket; // layers: debug
+use crate::geometry::feature_index::FeatureIndex;
 use crate::paint_parameters::TransformParameters;
 use crate::render_layer::LayerBucket;
 use crate::render_source::SourcePrepareParameters;
@@ -158,36 +160,46 @@ impl<'a> FrameTile<'a> {
         FrameTile { tile, contents }
     }
 
+    /// The tile's id.
+    #[must_use]
+    pub(crate) fn id(self) -> OverscaledTileID {
+        *self.tile.get_overscaled_tile_id()
+    }
+
     /// The bucket of `impl_`'s layer; a raster or raster-dem tile's for any
     /// layer.
-    pub(crate) fn get_bucket(self, impl_: &dyn ErasedLayerStyle) -> Option<&'a dyn Bucket> {
+    pub(crate) fn bucket(self, impl_: &dyn ErasedLayerStyle) -> Option<&'a dyn Bucket> {
         self.contents?.get_bucket(impl_)
     }
 
-    /// symbols: the feature index of the tile's layout result.
+    /// symbols: the feature index of the tile's layout.
     #[must_use]
-    pub(crate) fn get_feature_index(self) -> Option<std::sync::Arc<crate::geometry::feature_index::FeatureIndex>> {
-        self.contents?.geometry().map(|contents| std::sync::Arc::clone(&contents.result.feature_index))
+    pub(crate) fn feature_index(self) -> Option<&'a Arc<FeatureIndex>> {
+        self.contents?.geometry().map(|contents| &contents.result.feature_index)
     }
 
-    /// Port-only: the render thread's copies of the tile's bucket geometry
-    /// (`bucket_geometry.rs`).
+    /// The vertex and index data of the tile's buckets, which the frame's
+    /// draws bind (`bucket_geometry.rs`).
     #[must_use]
-    pub(crate) fn get_bucket_geometry(self) -> Option<&'a BucketGeometry> {
+    pub(crate) fn bucket_geometry(self) -> Option<&'a BucketGeometry> {
         self.contents?.geometry().map(|contents| &contents.bucket_geometry)
     }
 
+    /// The bucket of `impl_`'s layer in the tile's layout, if it was laid out
+    /// as a layer of the same type.
     pub(crate) fn layer_bucket(self, impl_: &dyn ErasedLayerStyle) -> Option<LayerBucket<'a>> {
         self.contents?.geometry()?.result.layer_bucket(impl_)
     }
 
+    /// Where the pattern `pattern` is in the tile's icon atlas.
     #[must_use]
-    pub(crate) fn get_pattern(self, pattern: &str) -> Option<ImagePosition> {
+    pub(crate) fn pattern(self, pattern: &str) -> Option<ImagePosition> {
         self.contents?.get_pattern(pattern)
     }
 
+    /// The textures of the tile's glyph and icon atlases.
     #[must_use]
-    pub(crate) fn get_atlas_textures(self) -> Option<&'a Rc<TileAtlasTextures>> {
+    pub(crate) fn atlas_textures(self) -> Option<&'a Rc<TileAtlasTextures>> {
         self.contents?.geometry().map(|contents| &contents.textures)
     }
 }

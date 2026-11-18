@@ -64,8 +64,8 @@ use crate::layout::symbol_projection::{get_gl_coord_matrix, get_label_plane_matr
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
 use crate::render_layer::{
-    BucketKey, BucketPlacementData, LayerParts, LayerPrepareParameters, LayerBucket, LayerSource, LayerValues,
-    Parts, PartsMut, PlacedTile, RenderLayer, RenderLayerBase, SymbolTranslate, TypedLayer, set_layer_tiles,
+    BucketKey, BucketPlacementData, LayerBucket, LayerParts, LayerPrepareParameters, LayerSource, LayerValues, Parts,
+    PartsMut, PlacedTile, RenderLayer, RenderLayerBase, SymbolTranslate, TypedLayer, set_layer_tiles,
 };
 use crate::render_pass::RenderPass;
 use crate::render_source::TileOrder;
@@ -1034,7 +1034,7 @@ impl RenderSymbolLayer {
             &mut overlay.draws
         });
         for tile in tiles {
-            let tile_id = *tile.tile.get_overscaled_tile_id();
+            let tile_id = tile.id();
             if let Some(cached) = self.drawing.caches.cache(&tile_id) {
                 let bucket = tile.layer_bucket(&*self.base.style).and_then(LayerBucket::bucket::<Symbol>);
                 debug_assert!(bucket.is_some() || cached.draws.is_empty());
@@ -1044,10 +1044,7 @@ impl RenderSymbolLayer {
                     else {
                         continue;
                     };
-                    let frame_draw = FrameDraw {
-                        pass: passes,
-                        ..FrameDraw::new(Some(tile_id), slot as u32, draw.id)
-                    };
+                    let frame_draw = FrameDraw { pass: passes, ..FrameDraw::new(Some(tile_id), slot as u32, draw.id) };
                     self.draw_list.push(frame_draw, uniforms);
                 }
             }
@@ -1255,11 +1252,11 @@ impl RenderLayer for RenderSymbolLayer {
             };
             let key = BucketKey {
                 source,
-                tile: *render_tile.tile.get_overscaled_tile_id(),
+                tile: render_tile.id(),
                 slot: render_tile.tile.slot(),
                 bucket: render_data.bucket_index,
             };
-            let feature_index = || render_tile.get_feature_index();
+            let feature_index = || render_tile.feature_index().cloned();
             self.add_bucket(&PlacedTile::new(render_tile.tile), key, bucket, feature_index, translates);
         }
         set_layer_tiles(self, params, order)
@@ -1339,7 +1336,7 @@ impl RenderLayer for RenderSymbolLayer {
         renderable_segments.clear();
 
         for (tile_index, tile) in render_tiles.iter_indexed() {
-            let tile_id = *tile.tile.get_overscaled_tile_id();
+            let tile_id = tile.id();
 
             let render_data = super::layer_bucket_for_pass(tile, &*style, passes);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
@@ -1371,7 +1368,7 @@ impl RenderLayer for RenderSymbolLayer {
             if let Some(cached) = self.drawing.caches.cache_mut(&tile_id).filter(|cached| !cached.draws.is_empty()) {
                 // The draws that read the same attributes are next to each
                 // other, as the update builds them.
-                let geometry = tile.get_bucket_geometry();
+                let geometry = tile.bucket_geometry();
                 for draws in cached.draws.chunk_by_mut(|a, b| a.attributes_key() == b.attributes_key()) {
                     refresh_draws(draws, geometry, bucket, layer_id, evaluated, refresh);
                 }
@@ -1416,7 +1413,7 @@ impl RenderLayer for RenderSymbolLayer {
                 }
             };
 
-            let Some(atlases) = tile.get_atlas_textures() else {
+            let Some(atlases) = tile.atlas_textures() else {
                 continue;
             };
             let has_icon_texture = atlases.icon().is_some();
@@ -1499,7 +1496,7 @@ impl RenderLayer for RenderSymbolLayer {
                 icon_property_values(evaluated, bucket_layout)
             };
 
-            let Some(atlases) = tile.get_atlas_textures() else {
+            let Some(atlases) = tile.atlas_textures() else {
                 debug_assert!(false);
                 continue;
             };
@@ -1509,7 +1506,7 @@ impl RenderLayer for RenderSymbolLayer {
 
             let mut vertex_attribs = VertexAttributeArray::new();
             update_tile_attributes(
-                tile.get_bucket_geometry(),
+                tile.bucket_geometry(),
                 buffer,
                 self.get_id(),
                 is_text,

@@ -446,7 +446,7 @@ impl RenderLayer for RenderCircleLayer {
         let layer = &*self.values.evaluated;
         let evaluated = &layer.paint;
         for tile in render_tiles.iter() {
-            let tile_id = *tile.tile.get_overscaled_tile_id();
+            let tile_id = tile.id();
 
             let render_data = super::layer_bucket_for_pass(tile, &*self.base.style, RENDER_PASS);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
@@ -459,7 +459,7 @@ impl RenderLayer for RenderCircleLayer {
             let Some(binders) = bucket.paint_property_binders.get(layer_id) else {
                 continue;
             };
-            let geometry = tile.get_bucket_geometry();
+            let geometry = tile.bucket_geometry();
             let paint =
                 || paint_vertices(geometry, &binders.interleaved_vertex_buffer, binders.depends_on_feature_state());
 

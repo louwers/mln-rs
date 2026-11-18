@@ -479,7 +479,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
 
         let layer = &*self.values.evaluated;
         for tile in render_tiles.iter() {
-            let tile_id = *tile.tile.get_overscaled_tile_id();
+            let tile_id = tile.id();
 
             let render_data = super::layer_bucket_for_pass(tile, &*self.base.style, RENDER_PASS);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
@@ -557,7 +557,7 @@ impl TileBuilder {
         binders: &FillExtrusionBinders,
         evaluated: &FillExtrusionPaintProperties::PossiblyEvaluated,
     ) -> ExtrusionTile {
-        let geometry = tile.get_bucket_geometry();
+        let geometry = tile.bucket_geometry();
         let vertex_count = bucket.vertices.len();
         // A wall from each vertex to the next, but from the last, which
         // ends a ring.
@@ -620,7 +620,7 @@ impl TileBuilder {
             attr.set_shared_raw_data(Some(Rc::clone(&vertices)), 4, 0, stride, AttributeDataType::UShort2);
         }
 
-        let atlases = tile.get_atlas_textures().filter(|_| self.has_pattern).map(|atlases| {
+        let atlases = tile.atlas_textures().filter(|_| self.has_pattern).map(|atlases| {
             AtlasBinding::new(
                 Some(Rc::clone(atlases)),
                 None,
@@ -683,7 +683,7 @@ impl RenderFillExtrusionLayer {
         let evaluated = &layer.paint;
         let state = parameters.state;
         let zoom = state.get_zoom() as f32;
-        let tile_id = tile.tile.get_overscaled_tile_id().to_unwrapped();
+        let tile_id = tile.id().to_unwrapped();
 
         let mut projection = get_projection_data(
             &tile_id,
@@ -717,7 +717,7 @@ impl RenderFillExtrusionLayer {
         let texture = objects.texture(ID_FILL_EXTRUSION_IMAGE_TEXTURE);
         let texture_size = texture.map_or(Size::new(0, 0), |texture| texture.borrow().size());
         let pattern = evaluated.fill_extrusion_pattern.faded();
-        let tlbr = |id: &str| tile.get_pattern(id).map_or([0.0; 4], |position| position.tlbr().map(f32::from));
+        let tlbr = |id: &str| tile.pattern(id).map_or([0.0; 4], |position| position.tlbr().map(f32::from));
 
         let pattern_t = binders.fill_extrusion_pattern.interpolation_factor(zoom).0;
         ExtrusionUniforms {

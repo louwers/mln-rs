@@ -292,7 +292,7 @@ impl RenderHeatmapLayer {
         // The shader of the first tile this builds, which the others take.
         let mut heatmap_shader: Option<ShaderProgramPtr> = None;
         for tile in render_tiles.iter() {
-            let tile_id = *tile.tile.get_overscaled_tile_id();
+            let tile_id = tile.id();
 
             let Some(render_data) = super::layer_bucket_for_pass(tile, &*self.base.style, RENDER_PASS) else {
                 self.drawing.caches.drop_cache(&tile_id);
@@ -304,7 +304,7 @@ impl RenderHeatmapLayer {
             let Some(binders) = bucket.paint_property_binders.get(self.get_id()) else {
                 continue;
             };
-            let geometry = tile.get_bucket_geometry();
+            let geometry = tile.bucket_geometry();
             let paint =
                 || paint_vertices(geometry, &binders.interleaved_vertex_buffer, binders.depends_on_feature_state());
 

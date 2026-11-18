@@ -66,15 +66,7 @@ impl RenderCustomLayer {
         let host = impl_.host();
         let (mut base, values) = LayerValues::new(impl_);
         base.passes = RenderPass::Translucent;
-        RenderCustomLayer {
-            base,
-            style: values.style,
-            host,
-            frame: None,
-            used: false,
-            backend: None,
-            updated: false,
-        }
+        RenderCustomLayer { base, style: values.style, host, frame: None, used: false, backend: None, updated: false }
     }
 
     /// Lets go of the host: tells it the renderer stopped, once the GPU

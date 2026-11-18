@@ -215,7 +215,7 @@ impl TileBuilder<'_> {
         binders: &FillBinders,
         evaluated: &FillPaintProperties::PossiblyEvaluated,
     ) -> Option<FillTile> {
-        let geometry = tile.get_bucket_geometry();
+        let geometry = tile.bucket_geometry();
         let mut properties_as_uniforms = StringIDSetsPair::default();
         let paint = paint_vertices(geometry, &binders.interleaved_vertex_buffer, binders.depends_on_feature_state());
         let mut vertex_attrs = VertexAttributeArray::new();
@@ -253,7 +253,7 @@ impl TileBuilder<'_> {
             return None;
         }
 
-        let atlases = tile.get_atlas_textures().filter(|atlases| self.pattern && atlases.icon().is_some());
+        let atlases = tile.atlas_textures().filter(|atlases| self.pattern && atlases.icon().is_some());
         let atlases = atlases.map(|atlases| {
             AtlasBinding::new(
                 Some(Rc::clone(atlases)),
@@ -460,7 +460,7 @@ impl RenderFillLayer {
         const NEAR_CLIPPED: bool = false;
         let evaluated = &layer.paint;
         let zoom = parameters.state.get_zoom() as f32;
-        let tile_id = tile.tile.get_overscaled_tile_id().to_unwrapped();
+        let tile_id = tile.id().to_unwrapped();
 
         let projection = get_projection_data(
             &tile_id,
@@ -526,7 +526,7 @@ impl RenderFillLayer {
         });
 
         let faded = evaluated.fill_pattern.faded();
-        let tlbr = |id: &str| tile.get_pattern(id).map_or([0.0; 4], |position| position.tlbr().map(f32::from));
+        let tlbr = |id: &str| tile.pattern(id).map_or([0.0; 4], |position| position.tlbr().map(f32::from));
         let texture = draw.objects.texture(ID_FILL_IMAGE_TEXTURE);
         let texture_size = texture.map_or(Size::new(0, 0), |texture| texture.borrow().size());
         // A pattern has nothing to sample before its tile has an atlas, and
@@ -689,7 +689,7 @@ impl RenderLayer for RenderFillLayer {
         let layer_id = self.base.style.base().id.as_str();
         let layer = &*self.values.evaluated;
         for tile in render_tiles.iter() {
-            let tile_id = *tile.tile.get_overscaled_tile_id();
+            let tile_id = tile.id();
 
             let render_data = super::layer_bucket_for_pass(tile, &*self.base.style, RENDER_PASS);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
@@ -717,7 +717,7 @@ impl RenderLayer for RenderFillLayer {
             // which upload again when they change.
             let changes = self.drawing.caches.take_changes(&tile_id);
             if let Some(cached) = self.drawing.caches.cache_mut(&tile_id) {
-                let geometry = tile.get_bucket_geometry();
+                let geometry = tile.bucket_geometry();
                 let refresh = |attrs: &mut VertexAttributeArray| {
                     let buffer = &binders.interleaved_vertex_buffer;
                     let paint = paint_vertices(geometry, buffer, binders.depends_on_feature_state());
@@ -772,7 +772,8 @@ impl RenderLayer for RenderFillLayer {
         }
 
         let frame = self.drawing.frame.get_or_insert_with(FrameDraws::new);
-        frame.composite = Composite::of(*layer.paint.fill_layer_opacity.uniform(), *layer.paint.fill_layer_blend.uniform());
+        frame.composite =
+            Composite::of(*layer.paint.fill_layer_opacity.uniform(), *layer.paint.fill_layer_blend.uniform());
         frame.set_stencil_tiles(render_tiles.render_tiles().map(|tile| tile.id));
         self.draw_list.finish(frame, context, |writer| Self::write_uniforms(layer, writer));
     }
