@@ -73,7 +73,7 @@ fn image_warp(corners: &GeometryCoordinates) -> ImageWarp {
     // the top left; its spread is the foreshortening, and it stays finite
     // and positive only while the quad is a perspective view of the image.
     let denominators = [1.0, 1.0 + perspective_x, 1.0 + perspective_x + perspective_y, 1.0 + perspective_y];
-    // std::max_element / std::min_element: the first largest and smallest.
+    // The first largest and smallest, which comparisons with a NaN keep.
     let mut largest = denominators[0];
     let mut smallest = denominators[0];
     for &denominator in &denominators[1..] {
@@ -85,7 +85,6 @@ fn image_warp(corners: &GeometryCoordinates) -> ImageWarp {
         }
     }
     let foreshortening = largest / smallest;
-    // std::max(0.0, x)
     let blend_term = (1.0 - PROJECTIVE_FORESHORTENING / foreshortening)
         / (1.0 - PROJECTIVE_FORESHORTENING / BILINEAR_FORESHORTENING);
     let blend = if 0.0 < blend_term { blend_term } else { 0.0 };
@@ -246,7 +245,6 @@ impl RenderSource for RenderImageSource {
         for lat_lng in &coords {
             let point = TileCoordinate::from_lat_lng(0.0, lat_lng).p;
             tile_coordinates.push(point);
-            // std::min / std::max
             sw_point.x = if point.x < sw_point.x { point.x } else { sw_point.x };
             ne_point.x = if ne_point.x < point.x { point.x } else { ne_point.x };
             sw_point.y = if point.y < sw_point.y { point.y } else { sw_point.y };

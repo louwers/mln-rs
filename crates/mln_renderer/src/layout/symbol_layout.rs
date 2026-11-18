@@ -1227,8 +1227,8 @@ impl SymbolLayout {
                 last
             }
             _ => {
-                // text-conformance: C++ `triangles.elements()` counts indices
-                // (three per triangle), not triangles.
+                // A segment's length counts indices (three per triangle), not
+                // triangles.
                 let mut segment =
                     mln_gfx::shaders::segment::SegmentBase::with_lengths(vertex_offset, index_offset, 0, 0);
                 segment.sort_key = sort_key;
@@ -1372,8 +1372,7 @@ impl SymbolLayout {
 
                     let index_length = if feature.along_line { 6 } else { 8 };
 
-                    // text-conformance: C++ `triangles/lines.elements()`
-                    // counts indices, not primitives.
+                    // A segment's length counts indices, not primitives.
                     let (vertex_offset, index_offset) =
                         (collision_buffer.vertices.len(), collision_buffer.indices.len());
                     let segment = match collision_buffer.segments.last_mut() {

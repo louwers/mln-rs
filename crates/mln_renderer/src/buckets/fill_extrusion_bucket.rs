@@ -109,9 +109,8 @@ pub(crate) struct FillExtrusionBucket {
 
 static EMPTY_FORMATTED_SECTION: Value = Value::Null;
 
-/// The distance from `a` to `b`, cast to `u16` as C++'s
-/// `static_cast<uint16_t>` does on x86-64: through a wider integer, keeping
-/// the low bits.
+/// The distance from `a` to `b`, cast to `u16` through a wider integer,
+/// keeping the low bits.
 fn dist_u16(a: Point<f64>, b: Point<f64>) -> u16 {
     let dx = b.x - a.x;
     let dy = b.y - a.y;
@@ -409,7 +408,7 @@ impl PatternLayoutSpec for FillExtrusionLayoutSpec {
     }
 
     fn sorted(_leader: &EvaluatedLayer<FillExtrusion>) -> bool {
-        // conformance: FillExtrusionLayerFactory::createLayout (no sort key)
+        // Fill extrusions have no sort key.
         false
     }
 

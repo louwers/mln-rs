@@ -1,17 +1,12 @@
-// The C++ class hierarchy (`PaintPropertyBinder<T, UniformValueType,
-// PossiblyEvaluatedType, As...>` with Constant / SourceFunction /
-// CompositeFunction / ConstantCrossFaded / CompositeCrossFaded subclasses)
-// becomes two enums: `PaintPropertyBinder<T>` for the data-driven
-// properties and `CrossFadedPaintPropertyBinder<T>` for the cross-faded
-// (pattern) ones.
-// `PaintPropertyBinders<TypeList<Ps...>>` is generated per layer type by
-// `paint_property_binders!` (circle, fill, line).
+// The binders of a layer's data-driven paint properties, which write each
+// feature's values into the vertices its draws read: `PaintPropertyBinder<T>`
+// for a constant, source or composite function, and
+// `CrossFadedPaintPropertyBinder<T>` for the cross-faded (pattern) ones.
+// `paint_property_binders!` declares a layer type's set of them.
 //
-// The binders write into the bucket's `InterleavedVertexBuffer`; C++ keeps
-// a pointer to it in every binder, here the buffer is passed in. Bytes are
-// written with the C++ in-memory layout (native-endian floats/u16s), so the
-// buffer is the GPU vertex data as C++ uploads it.
-//
+// The binders write into the bucket's `InterleavedVertexBuffer`, which is
+// passed in, in the vertices' in-memory layout (native-endian floats and
+// u16s), so the buffer is the GPU vertex data as it uploads.
 
 use mln_expression::range::Range;
 use mln_gfx::gfx_types::AttributeDataType;
@@ -102,7 +97,7 @@ impl BinderValue for f32 {
 }
 
 /// Packs two values into a `u16`: `a as u16 * 256 + b as u16`, computed as an
-/// `i32` and truncated, as C++ does.
+/// `i32` and truncated.
 fn pack_uint8_pair(a: f32, b: f32) -> u16 {
     (i32::from(a as u16) * 256 + i32::from(b as u16)) as u16
 }
@@ -559,7 +554,7 @@ impl CrossFadedPaintPropertyBinder<Image> {
     }
 
     /// Points `attrib` at the interleaved pattern data. Both attributes
-    /// (`attr_index` 0 and 1) get the same data, as in C++.
+    /// (`attr_index` 0 and 1) get the same data.
     pub(crate) fn apply_paint_property(
         &self,
         buffer: &InterleavedVertexBuffer,
@@ -699,9 +694,8 @@ impl PaintPropertyBinderBase for DashArrayBinder {
     }
 }
 
-/// The virtual interface shared by both binder enums (the C++ base class
-/// `PaintPropertyBinder`), as `PaintPropertyBinders` and
-/// `readDataDrivenPaintProperty` use it.
+/// What a layer's set of binders and [`read_data_driven_paint_property`] do
+/// with either binder enum.
 pub(crate) trait PaintPropertyBinderBase {
     fn set_interleaved(&mut self, buffer: &mut InterleavedVertexBuffer);
     #[expect(
@@ -856,8 +850,8 @@ pub(crate) fn read_data_driven_paint_property(
 }
 
 /// Declares the binders of one layer type's data-driven paint properties: a
-/// struct with one binder per property (fields in the C++ type-list order,
-/// which is also the interleaved vertex order) and the shared
+/// struct with one binder per property (fields in the interleaved vertex
+/// order) and the shared
 /// `InterleavedVertexBuffer`. Attributes before a trailing
 /// `fn update_vertex_vectors;` go on that method.
 macro_rules! paint_property_binders {

@@ -67,8 +67,8 @@ impl HeatmapBucket {
         }
     }
 
-    /// The layout vertex for `p` with extrusion (`ex`, `ey`). As in C++,
-    /// `p.x * 2` is an integer, added to a float and truncated to `i16`.
+    /// The layout vertex for `p` with extrusion (`ex`, `ey`): `p.x * 2` is
+    /// an integer, added to a float and truncated to `i16`.
     #[must_use]
     pub(crate) fn vertex(p: GeometryCoordinate, ex: f32, ey: f32) -> HeatmapLayoutVertex {
         HeatmapLayoutVertex {

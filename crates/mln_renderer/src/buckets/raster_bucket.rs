@@ -136,7 +136,7 @@ impl RasterBucket {
             // Create a quad for every masked tile.
             let vertex_extent: i32 = constants::EXTENT >> id.z;
 
-            // C++ static_cast<int16_t> of `id.x * vertexExtent` (int32).
+            // `id.x * vertex_extent` in `i32`, wrapped to `i16`.
             let tl_vertex = Point::new(
                 (id.x as i32).wrapping_mul(vertex_extent) as i16,
                 (id.y as i32).wrapping_mul(vertex_extent) as i16,

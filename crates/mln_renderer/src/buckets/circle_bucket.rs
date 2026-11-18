@@ -85,8 +85,8 @@ impl CircleBucket {
         radius + stroke + (translate[0] * translate[0] + translate[1] * translate[1]).sqrt()
     }
 
-    /// The layout vertex for `p` with extrusion (`ex`, `ey`). As in C++,
-    /// `p.x * 2` is an integer, added to a float and truncated to `i16`.
+    /// The layout vertex for `p` with extrusion (`ex`, `ey`): `p.x * 2` is
+    /// an integer, added to a float and truncated to `i16`.
     #[must_use]
     pub(crate) fn vertex(
         p: mln_tile_id::geometry_tile_data::GeometryCoordinate,

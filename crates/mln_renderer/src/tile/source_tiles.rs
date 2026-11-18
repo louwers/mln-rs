@@ -1099,7 +1099,7 @@ impl SourceTiles {
                 continue;
             };
 
-            // equivalent to std::pow(2, transformState.getZoom() - id.canonical.z);
+            // 2 to the power of the zoom's distance above the tile's.
             let scale = (transform_state.get_scale() / f64::from(1u32 << id.canonical.z)) as f32;
             let query_padding =
                 f64::from(max_pitch_scale_factor * contents.query_padding(layers) * constants::EXTENT as f32)

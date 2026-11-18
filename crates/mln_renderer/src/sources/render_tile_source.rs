@@ -3,6 +3,7 @@
 // polylines by the line shader.
 
 use std::collections::BTreeMap;
+use std::mem::offset_of;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -110,10 +111,10 @@ fn polyline_objects(
     let stride = size_of::<LineLayoutVertex>() as u32;
     let shared = context.add_vertices(vertices).into_shared();
     let mut attrs = VertexAttributeArray::new();
-    // The position and normal, then the extrusion data (offsetof(LineLayoutVertex, a2)).
+    // The position and normal, then the extrusion data.
     for (id, offset, data_type) in [
-        (ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, 0, AttributeDataType::Short2),
-        (ID_LINE_DATA_VERTEX_ATTRIBUTE, 4, AttributeDataType::UByte4),
+        (ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, offset_of!(LineLayoutVertex, a1) as u32, AttributeDataType::Short2),
+        (ID_LINE_DATA_VERTEX_ATTRIBUTE, offset_of!(LineLayoutVertex, a2) as u32, AttributeDataType::UByte4),
     ] {
         if let Some(attr) = attrs.set(id, AttributeDataType::Invalid) {
             attr.set_shared_vertices(shared.clone(), offset, 0, stride, data_type);
