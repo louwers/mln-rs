@@ -450,7 +450,7 @@ struct AtmosphereVertexStage {
 };
 
 struct AtmosphereFragmentStage {
-    float4 position [[position, invariant]];
+    float4 position [[position]];
     float3 view_direction;
 };
 
@@ -642,7 +642,7 @@ struct VertexStage {
 };
 
 struct FragmentStage {
-    float4 position [[position, invariant]];
+    float4 position [[position]];
     float2 pos_a;
     float2 pos_b;
 };
@@ -770,7 +770,7 @@ struct VertexStage {
 };
 
 struct FragmentStage {
-    float4 position [[position, invariant]];
+    float4 position [[position]];
 };
 
 FragmentStage vertex vertexMain(VertexStage in [[stage_in]],
@@ -872,7 +872,7 @@ struct VertexStage {
 };
 
 struct FragmentStage {
-    float4 position [[position, invariant]];
+    float4 position [[position]];
     float2 extrude;
     float antialiasblur;
 
@@ -1077,7 +1077,7 @@ struct VertexStage {
 };
 
 struct FragmentStage {
-    float4 position [[position, invariant]];
+    float4 position [[position]];
 };
 
 struct FragmentResult {
@@ -1136,7 +1136,7 @@ struct VertexStage {
 };
 
 struct FragmentStage {
-    float4 position [[position, invariant]];
+    float4 position [[position]];
     float placed;
     float notUsed;
 };
@@ -1239,7 +1239,7 @@ struct VertexStage {
 };
 
 struct FragmentStage {
-    float4 position [[position, invariant]];
+    float4 position [[position]];
     float placed;
     float notUsed;
     float radius;
@@ -1370,7 +1370,7 @@ struct VertexStage {
 };
 
 struct FragmentStage {
-    float4 position [[position, invariant]];
+    float4 position [[position]];
     float2 pos;
 };
 
@@ -1505,7 +1505,7 @@ struct VertexStage {
 };
 
 struct FragmentStage {
-    float4 position [[position, invariant]];
+    float4 position [[position]];
     float2 uv;
 };
 
@@ -2629,7 +2629,7 @@ struct VertexStage {
 };
 
 struct FragmentStage {
-    float4 position [[position, invariant]];
+    float4 position [[position]];
     float2 v_pos_a;
     float2 v_pos_b;
     float2 v_pos;
@@ -2945,7 +2945,7 @@ struct VertexStage {
 };
 
 struct FragmentStage {
-    float4 position [[position, invariant]];
+    float4 position [[position]];
     float2 pos;
 #if !defined(HAS_UNIFORM_u_outline_color)
     half4 outline_color;
@@ -3162,7 +3162,7 @@ struct VertexStage {
 };
 
 struct FragmentStage {
-    float4 position [[position, invariant]];
+    float4 position [[position]];
     float width2;
     float2 normal;
     half gamma_scale;
@@ -3390,7 +3390,7 @@ struct VertexStage {
 };
 
 struct FragmentStage {
-    float4 position [[position, invariant]];
+    float4 position [[position]];
     float2 v_pos_a;
     float2 v_pos_b;
 
@@ -3683,7 +3683,7 @@ struct VertexStage {
 };
 
 struct FragmentStage {
-    float4 position [[position, invariant]];
+    float4 position [[position]];
 
 #if !defined(HAS_UNIFORM_u_color)
     half4 color;
@@ -3751,7 +3751,7 @@ struct VertexStage {
 };
 
 struct FragmentStage {
-    float4 position [[position, invariant]];
+    float4 position [[position]];
 };
 
 FragmentStage vertex vertexMain(VertexStage in [[stage_in]],
@@ -3816,7 +3816,7 @@ struct VertexStage {
 };
 
 struct FragmentStage {
-    float4 position [[position, invariant]];
+    float4 position [[position]];
 #if !defined(HAS_UNIFORM_u_weight)
     float weight;
 #endif
@@ -3942,7 +3942,7 @@ struct VertexStage {
 };
 
 struct FragmentStage {
-    float4 position [[position, invariant]];
+    float4 position [[position]];
     float2 pos;
 };
 
@@ -4007,7 +4007,7 @@ struct VertexStage {
 };
 
 struct FragmentStage {
-    float4 position [[position, invariant]];
+    float4 position [[position]];
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]]) {
@@ -4112,7 +4112,7 @@ struct VertexStage {
 };
 
 struct FragmentStage {
-    float4 position [[position, invariant]];
+    float4 position [[position]];
     float2 pos;
 };
 
@@ -4257,7 +4257,7 @@ struct VertexStage {
 };
 
 struct FragmentStage {
-    float4 position [[position, invariant]];
+    float4 position [[position]];
     float2 pos;
 };
 
@@ -4646,7 +4646,7 @@ struct VertexStage {
 };
 
 struct FragmentStage {
-    float4 position [[position, invariant]];
+    float4 position [[position]];
 #if defined(PROJECTION_GLOBE)
     float tile_x;
 #endif
@@ -5059,7 +5059,7 @@ struct VertexStage {
 };
 
 struct FragmentStage {
-    float4 position [[position, invariant]];
+    float4 position [[position]];
 #if defined(PROJECTION_GLOBE)
     float tile_x;
 #endif
@@ -5414,7 +5414,7 @@ struct VertexStage {
 };
 
 struct FragmentStage {
-    float4 position [[position, invariant]];
+    float4 position [[position]];
 #if defined(PROJECTION_GLOBE)
     float tile_x;
 #endif
@@ -5853,7 +5853,7 @@ struct VertexStage {
 };
 
 struct FragmentStage {
-    float4 position [[position, invariant]];
+    float4 position [[position]];
 #if defined(PROJECTION_GLOBE)
     float tile_x;
 #endif
@@ -6276,7 +6276,7 @@ struct VertexStage {
 };
 
 struct FragmentStage {
-    float4 position [[position, invariant]];
+    float4 position [[position]];
 #if defined(PROJECTION_GLOBE)
     float tile_x;
 #endif
@@ -6483,7 +6483,7 @@ struct VertexStage {
 };
 
 struct FragmentStage {
-    float4 position [[position, invariant]];
+    float4 position [[position]];
     float2 pos0;
     float2 pos1;
 };
@@ -6597,7 +6597,7 @@ struct SkyVertexStage {
 };
 
 struct SkyFragmentStage {
-    float4 position [[position, invariant]];
+    float4 position [[position]];
     float2 pos;
 };
 
@@ -6725,7 +6725,7 @@ struct VertexStage {
 };
 
 struct FragmentStage {
-    float4 position [[position, invariant]];
+    float4 position [[position]];
     // The texture coordinate relative to the quad's atlas origin, which
     // atlas_pos adds back.
     float2 tex;
@@ -7000,7 +7000,7 @@ struct VertexStage {
 };
 
 struct FragmentStage {
-    float4 position [[position, invariant]];
+    float4 position [[position]];
 
 #if !defined(HAS_UNIFORM_u_fill_color)
     half4 fill_color;
@@ -7347,7 +7347,7 @@ struct VertexStage {
 };
 
 struct FragmentStage {
-    float4 position [[position, invariant]];
+    float4 position [[position]];
 
 #if !defined(HAS_UNIFORM_u_fill_color)
     half4 fill_color;

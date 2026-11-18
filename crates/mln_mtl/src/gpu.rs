@@ -959,8 +959,8 @@ pub(crate) fn compile<'a>(
     unsafe { options.setPreprocessorMacros(Some(&defines)) };
     // Fast math is Metal's default.
     options.setLanguageVersion(MTLLanguageVersion::Version2_4);
-    // Lets the position outputs marked [[invariant]] be computed the same
-    // way in every shader.
+    // Computes the position outputs marked [[invariant]], fill extrusion's,
+    // the same way in its depth pass and its colour pass.
     options.setPreserveInvariance(true);
 
     let library = device
