@@ -35,6 +35,9 @@ use crate::tile::tile_mut::{TileMut, WorldCopy, retire};
 use crate::tile_parameters::TileParameters;
 use crate::util::tile_cover::{TileCoverParameters, covering_zoom_level, globe_level_cover, tile_cover};
 
+/// How many times the tiles in view the cache keeps, at least.
+const VIEWS_CACHED: usize = 3;
+
 /// The coarsest zoom a source can start at and still have its whole first
 /// level kept loaded on the globe: four tiles, no more than a view's prefetch
 /// cover holds.
@@ -673,7 +676,10 @@ impl SourceTiles {
                 * f64::max(f64::from(size.height) / f64::from(tile_size), 1.0)
                 * (parameters.transform_state.get_max_zoom() - parameters.transform_state.get_min_zoom() + 1.0)
                 * 0.5) as usize;
-            self.cache_set_size(conservative_cache_size, ctx);
+            // A tilted view holds more tiles than its size suggests, and as it
+            // turns it passes over more again.
+            let view_cache_size = ideal_tiles.len() * VIEWS_CACHED;
+            self.cache_set_size(conservative_cache_size.max(view_cache_size), ctx);
         } else {
             self.cache_set_size(0, ctx);
         }
