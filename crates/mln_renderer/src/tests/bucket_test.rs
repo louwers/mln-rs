@@ -764,38 +764,37 @@ fn stored_vertices_free_their_data_once_they_have_a_buffer() {
 }
 
 // The holder of typed vertices replaces them with as many vertices of the
-// type: before they have a buffer, the first upload writes the new ones;
-// once they do, the update writes them over it, counted as a buffer update,
-// and the draws that bind them bind them again.
+// type, which the next upload writes over their buffer, counted as a buffer
+// update, and which the draws that bind them bind again.
 #[test]
 fn typed_vertices_take_updates_of_as_many_vertices() {
     with_context(|context| {
         let typed = context.add_vertices(vec![[1i16, 2], [3, 4]]);
         let vertices = typed.shared().clone();
+        let buffer = context.upload_vertices(&vertices).expect("uploads").expect("a buffer");
+        assert!(context.vertices(&vertices).is_some_and(|stored| !stored.has_data()));
+
         assert!(!context.update_vertices(&typed, &[[5, 6]]), "another count");
+        let bound = Instant::now();
+        std::thread::sleep(std::time::Duration::from_millis(1));
         assert!(context.update_vertices(&typed, &[[5, 6], [7, 8]]));
         assert!(
             context
                 .vertices(&vertices)
-                .is_some_and(|stored| stored.bytes() == bytemuck::cast_slice::<i16, u8>(&[5, 6, 7, 8]))
+                .is_some_and(|stored| stored.bytes() == bytemuck::cast_slice::<i16, u8>(&[5, 6, 7, 8])
+                    && stored.is_modified_after(bound))
         );
-
-        let buffer = context.upload_vertices(&vertices).expect("uploads").expect("a buffer");
-        assert!(context.vertices(&vertices).is_some_and(|stored| !stored.has_data()));
-        let bound = Instant::now();
-        std::thread::sleep(std::time::Duration::from_millis(1));
         let before = context.rendering_stats().clone();
-        assert!(context.update_vertices(&typed, &[[9, 10], [11, 12]]));
+        let rewritten = context.upload_vertices(&vertices).expect("uploads").expect("a buffer");
+        assert!(Rc::ptr_eq(&buffer, &rewritten));
         let after = context.rendering_stats().clone();
         assert_eq!(after.vertex_update_bytes, before.vertex_update_bytes + 8);
         assert_eq!(after.buffer_updates, before.buffer_updates + 1);
         assert_eq!(after.num_vertex_buffers, before.num_vertex_buffers);
-        assert!(
-            context.vertices(&vertices).is_some_and(|stored| !stored.has_data() && stored.is_modified_after(bound))
-        );
+        assert!(context.vertices(&vertices).is_some_and(|stored| !stored.has_data()));
 
-        let rewritten = context.upload_vertices(&vertices).expect("uploads").expect("a buffer");
-        assert!(Rc::ptr_eq(&buffer, &rewritten));
+        // An upload without an update writes nothing.
+        context.upload_vertices(&vertices).expect("uploads");
         assert_eq!(context.rendering_stats().buffer_updates, after.buffer_updates);
         assert_eq!(vertices.count(), 2);
     });

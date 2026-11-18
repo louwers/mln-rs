@@ -274,19 +274,16 @@ impl Context {
         self.vertices.contains(key)
     }
 
-    /// Replaces the vertices of `typed` with a copy of `data`, as many,
-    /// writing them over their buffer where they have one. Returns false,
-    /// leaving them be, for another number of vertices, or where the write
-    /// failed, which it logs: new vertices then replace them.
+    /// Replaces the vertices of `typed` with a copy of `data`, as many, which
+    /// the next upload writes over their buffer's. Returns false, leaving
+    /// them be, for another number of vertices.
     pub(crate) fn update_vertices<V: bytemuck::Pod>(&mut self, typed: &TypedVertices<V>, data: &[V]) -> bool {
-        self.vertices.update(&mut self.device, typed, data).unwrap_or_else(|error| {
-            Log::error(Event::Render, format!("Updating vertices failed: {error}"));
-            false
-        })
+        self.vertices.update(typed, data)
     }
 
     /// The buffer of the vertices of `shared`, made of them by their first
-    /// upload, which frees their bytes.
+    /// upload and written over after an update, as [`Vertices::upload`]
+    /// says.
     pub(crate) fn upload_vertices(&mut self, shared: &SharedVertices) -> Result<Option<BufferPtr>, GpuError> {
         self.vertices.upload(&mut self.device, shared)
     }

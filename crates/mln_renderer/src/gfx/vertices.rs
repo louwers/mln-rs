@@ -33,8 +33,9 @@ enum VertexData {
 }
 
 /// Vertices of the context's store: their bytes until an upload writes them
-/// to a buffer, which frees them, and that buffer. An update of as many
-/// vertices writes over the buffer's, or over the bytes before there is one.
+/// to a buffer, which frees them, and that buffer. An update brings new
+/// bytes of as many vertices, which the next upload writes over the
+/// buffer's.
 pub(crate) struct Vertices {
     data: VertexData,
     count: usize,
@@ -134,28 +135,30 @@ impl Vertices {
         time < self.modified
     }
 
-    /// Replaces the bytes with `bytes`, of as many vertices, writing them
-    /// over the buffer's through `device` where there is one. Returns false,
-    /// leaving the vertices be, for another number of bytes.
-    fn update(&mut self, device: &mut Device, bytes: &[u8]) -> Result<bool, GpuError> {
+    /// Replaces the bytes with `bytes`, of as many vertices, which the next
+    /// upload writes. Returns false, leaving the vertices be, for another
+    /// number of bytes.
+    fn update(&mut self, bytes: &[u8]) -> bool {
         if bytes.len() != self.count * self.vertex_size {
-            return Ok(false);
+            return false;
         }
-        if let Some(buffer) = &self.buffer {
-            device.write(buffer, bytes)?;
-        } else if let Some(data) = self.data.bytes_mut() {
-            data.copy_from_slice(bytes);
-        } else {
-            self.data = VertexData::Bytes(bytes.to_vec());
+        match self.data.bytes_mut() {
+            Some(data) => data.copy_from_slice(bytes),
+            None => self.data = VertexData::Bytes(bytes.to_vec()),
         }
         self.modified = Instant::now();
-        Ok(true)
+        true
     }
 
-    /// The buffer of the vertices through `device`, made of them by the
-    /// first upload, which frees their bytes; `None` where there are none.
+    /// The buffer of the vertices through `device`: made of them by the
+    /// first upload, and written over by the upload after an update, each
+    /// of which frees their bytes; `None` where there are none.
     fn upload(&mut self, device: &mut Device) -> Result<Option<BufferPtr>, GpuError> {
         if let Some(buffer) = &self.buffer {
+            if let Some(bytes) = self.data.bytes() {
+                device.write(buffer, bytes)?;
+                self.data = VertexData::Freed;
+            }
             return Ok(Some(BufferPtr::clone(buffer)));
         }
         let size = self.count * self.vertex_size;
@@ -222,15 +225,12 @@ impl VertexStore {
 
     /// Replaces the vertices of `typed` with a copy of `data`, as many, as
     /// [`Vertices::update`] does.
-    pub(crate) fn update<V: bytemuck::Pod>(
-        &mut self,
-        device: &mut Device,
-        typed: &TypedVertices<V>,
-        data: &[V],
-    ) -> Result<bool, GpuError> {
-        let entry = self.0.get_mut(&typed.shared.handle).ok_or(GpuError::UnknownId("vertices"))?;
+    pub(crate) fn update<V: bytemuck::Pod>(&mut self, typed: &TypedVertices<V>, data: &[V]) -> bool {
+        let Some(entry) = self.0.get_mut(&typed.shared.handle) else {
+            return false;
+        };
         debug_assert_eq!(entry.vertex_size, size_of::<V>());
-        entry.update(device, bytemuck::cast_slice(data))
+        entry.update(bytemuck::cast_slice(data))
     }
 
     /// The buffer of the vertices of `shared`, as [`Vertices::upload`]

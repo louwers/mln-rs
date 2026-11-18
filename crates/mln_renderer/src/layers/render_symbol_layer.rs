@@ -370,8 +370,8 @@ fn set_fade_opacity_attribute(
 
 /// Sets attribute `id` of `attribs` to read a copy of `vertices`, which
 /// placement updates, as `type_`: into `placed`, the vertices the attribute
-/// reads, where they are as many, which writes them over their buffer, or
-/// else into vertices of their own, which `placed` then holds.
+/// reads, where they are as many, so that the upload writes them over their
+/// buffer, or else into vertices of their own, which `placed` then holds.
 fn set_placed_attribute<V: bytemuck::Pod>(
     context: &mut Context,
     attribs: &mut VertexAttributeArray,
