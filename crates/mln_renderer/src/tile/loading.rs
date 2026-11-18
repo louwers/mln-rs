@@ -183,6 +183,8 @@ pub(crate) struct TilesetLoad {
     pub(crate) cache_answered: bool,
     pub(crate) modified: Option<Timestamp>,
     pub(crate) expires: Option<Timestamp>,
+    /// The data the tile has came from the network, not only the cache.
+    pub(crate) from_network: bool,
 }
 
 /// A request answers as load `load`; dropping `request` cancels it.
@@ -254,6 +256,7 @@ impl Load {
                     cache_answered: false,
                     modified: None,
                     expires: None,
+                    from_network: false,
                 }))
             }
             DataOrigin::GeoJson(_) => OriginLoad::GeoJson { load: None },
@@ -337,6 +340,12 @@ impl TilesetLoad {
 
     pub(crate) fn is_idle(&self) -> bool {
         matches!(self.fetch, Fetch::Idle | Fetch::Failed)
+    }
+
+    /// Whether the tile has data from the network that hasn't expired. Data
+    /// without an expiry stays fresh.
+    pub(crate) fn is_fresh(&self, now: Timestamp) -> bool {
+        self.from_network && self.expires.is_none_or(|expires| expires > now)
     }
 
     /// What the requests know of the data they brought.

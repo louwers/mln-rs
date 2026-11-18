@@ -13,6 +13,7 @@ use mln_storage::response::{Reason, ResourceError};
 use mln_storage::{FileSource, Resource, Responder, Response};
 use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
+use mln_util::chrono::Timestamp;
 use mln_util::pool::TaskGroup;
 use mln_util::tileset::{RasterEncoding, Tileset};
 use parking_lot::Mutex;
@@ -66,6 +67,19 @@ fn water() -> Response {
     let mut response = Response::new();
     response.data = Some(Arc::new(std::fs::read(path).expect("the tile")));
     response.etag = Some("a".to_owned());
+    response
+}
+
+/// `response`, expired: a tile that has it requests it again when required.
+fn expired(mut response: Response) -> Response {
+    response.expires = Some(Timestamp::from_secs(0));
+    response
+}
+
+/// A `not_modified` answer whose data has expired again.
+fn not_modified() -> Response {
+    let mut response = expired(Response::new());
+    response.not_modified = true;
     response
 }
 
@@ -187,7 +201,7 @@ fn a_not_modified_reload_keeps_the_data() {
     let id = tile.id;
     tile.set_style(&style(&[water_layer("water", "red")]));
     tile.set_necessity(&id, TileNecessity::Required);
-    file_source.respond(water());
+    file_source.respond(expired(water()));
     tile.update();
     manual.run();
     tile.update();
@@ -199,15 +213,13 @@ fn a_not_modified_reload_keeps_the_data() {
     };
     let shown = shown_layout(&tile);
 
-    // Required again, the tile revalidates its data.
+    // Required again, the tile revalidates its expired data.
     tile.set_necessity(&id, TileNecessity::Optional);
     tile.set_necessity(&id, TileNecessity::Required);
     assert_eq!(file_source.pending(), 1);
     assert!(requesting_network(&tile, true));
     assert!(tile.tile().is_complete(), "a reload keeps the tile complete");
-    let mut response = Response::new();
-    response.not_modified = true;
-    file_source.respond(response);
+    file_source.respond(not_modified());
     tile.update();
     assert!(requesting_network(&tile, false));
     assert_eq!(tile.layout().data.as_ref().expect("data").key, key, "the same data");
@@ -225,12 +237,45 @@ fn a_not_modified_reload_keeps_the_data() {
     tile.update();
     tile.store.retry_failed();
     assert!(!tile.tile().is_complete(), "the tile waits for the retry");
-    let mut response = Response::new();
-    response.not_modified = true;
-    file_source.respond(response);
+    file_source.respond(not_modified());
     tile.update();
     assert_eq!(manual.submitted(), 1, "nothing to lay out again");
     assert!(tile.tile().is_complete());
+}
+
+/// A tile required again keeps network data that hasn't expired, or that
+/// has no expiry, as a local file's: it neither requests nor lays it out
+/// again.
+#[test]
+fn fresh_data_is_kept_when_required_again() {
+    let test = Test::new();
+    let file_source = Arc::new(Held::default());
+    let manual = Manual::default();
+    let mut tile = test.tileset_tile(&file_source, Box::new(manual.clone()));
+    let id = tile.id;
+    tile.set_style(&style(&[water_layer("water", "red")]));
+    for expires in [None, Some(Timestamp::from_secs(i64::MAX))] {
+        tile.set_necessity(&id, TileNecessity::Optional);
+        tile.set_necessity(&id, TileNecessity::Required);
+        let mut response = water();
+        response.expires = expires;
+        file_source.respond(response);
+        tile.update();
+        manual.run();
+        tile.update();
+        assert!(tile.tile().is_complete());
+
+        tile.set_necessity(&id, TileNecessity::Optional);
+        tile.set_necessity(&id, TileNecessity::Required);
+        assert_eq!(file_source.pending(), 0, "no request");
+        assert!(tile.tile().is_complete());
+        // Expired, so the next round requests it again.
+        tile.with(|tile| {
+            let OriginLoad::Tileset(tileset) = &mut tile.parts().1.load.origin else { unreachable!() };
+            tileset.expires = Some(Timestamp::from_secs(0));
+        });
+    }
+    assert_eq!(manual.submitted(), 2, "one layout per response");
 }
 
 /// A tile let go of while its job runs, and made again before the job
@@ -409,7 +454,7 @@ fn style_replaced_mid_load() {
     let layers = [water_layer("water", "red")];
     tile.set_style(&style(&layers));
     tile.set_necessity(&id, TileNecessity::Required);
-    file_source.respond(water());
+    file_source.respond(expired(water()));
     tile.update();
     let old_job = manual.take();
     // A reload under way.
