@@ -27,8 +27,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+use mln_frame_pacer::FramePacer;
 use mln_gestures::{Button, Input, Modifiers, PinchPhase, PointerKind, WheelDelta};
 use mln_map::MapEvent;
+use mln_util::error::Error;
 use mln_util::geo::ScreenCoordinate;
 use parking_lot::{Condvar, Mutex};
 use winit::application::ApplicationHandler;
@@ -43,6 +45,29 @@ use crate::Args;
 use crate::metal_layer::MetalLayer;
 use crate::settings::Settings;
 use crate::view::{self, Launch};
+
+/// A frame pacer of the display that `window` is on. On macOS it follows
+/// the window to another display, and `AppKit` makes it on the main thread.
+#[cfg_attr(target_os = "macos", expect(unsafe_code, reason = "the window's view is a pointer to an NSView"))]
+fn frame_pacer(window: &Window) -> Result<Arc<FramePacer>, Error> {
+    #[cfg(target_os = "macos")]
+    {
+        use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+        let handle = window.window_handle().map_err(|e| Error::native(format!("the window has no handle: {e}")))?;
+        let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
+            return Err(Error::native("the window is not an AppKit window"));
+        };
+        // SAFETY: the handle's view is the window's NSView, and this runs on
+        // the main thread with the window alive.
+        unsafe { FramePacer::for_view(handle.ns_view, None) }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = window;
+        FramePacer::new(None)
+    }
+}
 
 /// The window's size before it opens, in logical pixels (C++'s 1024x768).
 const WINDOW_SIZE: LogicalSize<f64> = LogicalSize::new(1024.0, 768.0);
@@ -346,7 +371,10 @@ impl ApplicationHandler<UserEvent> for Host {
             window.theme(),
             None,
         );
+        // Benchmark frames don't wait for the display.
+        let frame_pacer = args.benchmark.is_none().then(|| frame_pacer(&window));
         let launch = Launch {
+            frame_pacer,
             #[cfg(all(not(target_os = "macos"), not(windows)))]
             window: Arc::clone(&window),
             #[cfg(windows)]

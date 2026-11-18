@@ -88,7 +88,7 @@ fn dispose_owner(handle: u64) -> Result<(), Error> {
         HandleKind::DeliveryQueue => delivery::release(handle),
         HandleKind::StyleExpression => style_expression::release(handle),
         HandleKind::GpuDevice => gpu_device::release(handle),
-        HandleKind::AcquiredFrame | HandleKind::FramePacer => Err(Error::invalid_argument(format!(
+        HandleKind::AcquiredFrame => Err(Error::invalid_argument(format!(
             "{} handle {handle:#x} was never created by this process",
             kind.name()
         ))),

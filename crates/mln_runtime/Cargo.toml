@@ -36,6 +36,7 @@ feature.workspace = true
 geo-types.workspace = true
 geojson.workspace = true
 mln_conversion.workspace = true
+mln_frame_pacer.workspace = true
 mln_gestures.workspace = true
 mln_gfx.workspace = true
 mln_map.workspace = true

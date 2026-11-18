@@ -157,90 +157,97 @@ impl FakeDisplay {
     }
 }
 
-type Calls = Arc<Mutex<Vec<Vec<u32>>>>;
+type Calls = Arc<Mutex<Vec<(u32, Duration)>>>;
 
-/// A pacer on a fake display, and the waiters of each of its callbacks.
-fn fake_pacer(limit: Option<Limit>) -> (Arc<FramePacer<u32>>, Arc<FakeDisplay>, Calls) {
+/// A pacer on a fake display, which records each call to its waiters.
+fn fake_pacer(limit: Option<Limit>) -> (Arc<FramePacer>, Arc<FakeDisplay>, Calls) {
     let display = Arc::new(FakeDisplay::default());
-    let calls = Calls::default();
-    let called = Arc::clone(&calls);
     let source = |vsyncs: Vsyncs, _: Option<Limit>| {
         let _ = display.vsyncs.set(vsyncs);
         Ok::<_, Error>(FakeSource(Arc::clone(&display)))
     };
-    let pacer = FramePacer::with_source(limit, move |_, waiters| called.lock().push(waiters), source).unwrap();
-    (pacer, display, calls)
+    let pacer = FramePacer::with_source(limit, source).unwrap();
+    (pacer, display, Calls::default())
+}
+
+/// A waiter, `id`, that records its calls in `calls`.
+fn waiter(id: u32, calls: &Calls) -> Arc<dyn RefreshWaiter> {
+    let calls = Arc::clone(calls);
+    Arc::new(move |time| calls.lock().push((id, time)))
+}
+
+fn waiting(pacer: &FramePacer) -> usize {
+    pacer.state.lock().waiting.len()
+}
+
+fn ids(calls: &Calls) -> Vec<u32> {
+    calls.lock().iter().map(|&(id, _)| id).collect()
 }
 
 #[test]
 fn requests_share_one_refresh_until_it_comes() {
     let (pacer, display, calls) = fake_pacer(None);
-    pacer.request(1);
-    pacer.request(2);
-    pacer.request(1);
-    assert_eq!(display.scheduled(), 1);
-    assert_eq!(pacer.waiting(), [1, 2]);
+    let (one, two) = (waiter(1, &calls), waiter(2, &calls));
+    pacer.request(&one);
+    pacer.request(&two);
+    pacer.request(&one);
+    assert_eq!((display.scheduled(), waiting(&pacer)), (1, 2));
     display.refresh(Duration::from_secs(1));
-    assert_eq!(*calls.lock(), [vec![1, 2]]);
+    assert_eq!(*calls.lock(), [(1, Duration::from_secs(1)), (2, Duration::from_secs(1))]);
     // Nothing asked for another.
     assert_eq!(display.scheduled(), 0);
-    pacer.request(3);
+    pacer.request(&waiter(3, &calls));
     assert_eq!(display.scheduled(), 1);
 }
 
 #[test]
 fn a_request_from_the_callback_waits_for_the_next_refresh() {
-    let display = Arc::new(FakeDisplay::default());
-    let calls = Calls::default();
-    let source = |vsyncs: Vsyncs, _: Option<Limit>| {
-        let _ = display.vsyncs.set(vsyncs);
-        Ok::<_, Error>(FakeSource(Arc::clone(&display)))
-    };
-    let pacer: Arc<OnceLock<Weak<FramePacer<u32>>>> = Arc::default();
-    let (callback_pacer, called) = (Arc::clone(&pacer), Arc::clone(&calls));
-    let on_refresh = move |_, waiters: Vec<u32>| {
-        if waiters == [1]
-            && let Some(pacer) = callback_pacer.get().and_then(Weak::upgrade)
-        {
-            pacer.request(2);
+    let (pacer, display, calls) = fake_pacer(Limit::new(30));
+    let second = waiter(2, &calls);
+    let first: Arc<dyn RefreshWaiter> = Arc::new({
+        let (pacer, second, calls) = (Arc::downgrade(&pacer), Arc::clone(&second), Arc::clone(&calls));
+        move |time| {
+            calls.lock().push((1, time));
+            if let Some(pacer) = pacer.upgrade() {
+                pacer.request(&second);
+            }
         }
-        called.lock().push(waiters);
-    };
-    let frames = FramePacer::with_source(Limit::new(30), on_refresh, source).unwrap();
-    let _ = pacer.set(Arc::downgrade(&frames));
+    });
     let at = Duration::from_millis;
-    frames.request(1);
+    pacer.request(&first);
     display.refresh(at(1000));
-    assert_eq!((display.scheduled(), frames.waiting()), (1, vec![2]));
+    assert_eq!((display.scheduled(), waiting(&pacer)), (1, 1));
     // The limit skips the next refresh, and takes the one after.
     display.refresh(at(1016));
     display.refresh(at(1033));
-    assert_eq!(*calls.lock(), [vec![1], vec![2]]);
+    assert_eq!(*calls.lock(), [(1, at(1000)), (2, at(1033))]);
     assert_eq!(display.scheduled(), 0);
 }
 
 #[test]
 fn a_refresh_that_the_limit_skips_schedules_the_next() {
     let (pacer, display, calls) = fake_pacer(Limit::new(30));
+    let one = waiter(1, &calls);
     let at = Duration::from_millis;
-    pacer.request(1);
+    pacer.request(&one);
     display.refresh(at(1000));
-    pacer.request(1);
+    pacer.request(&one);
     display.refresh(at(1016));
     assert_eq!(calls.lock().len(), 1);
     assert_eq!(display.scheduled(), 1);
     display.refresh(at(1033));
-    assert_eq!(calls.lock().len(), 2);
+    assert_eq!(ids(&calls), [1, 1]);
     assert_eq!(display.scheduled(), 0);
 }
 
 #[test]
 fn a_new_limit_reaches_the_source_and_the_refresh_on_its_way() {
     let (pacer, display, calls) = fake_pacer(None);
+    let one = waiter(1, &calls);
     let at = Duration::from_millis;
-    pacer.request(1);
+    pacer.request(&one);
     display.refresh(at(1000));
-    pacer.request(1);
+    pacer.request(&one);
     pacer.set_limit(Limit::new(10));
     assert_eq!(pacer.limit(), Limit::new(10));
     assert_eq!(*display.limits.lock(), [Limit::new(10)]);
@@ -253,16 +260,55 @@ fn a_new_limit_reaches_the_source_and_the_refresh_on_its_way() {
 #[test]
 fn a_dropped_pacer_drops_its_source_and_ignores_its_refreshes() {
     let (pacer, display, calls) = fake_pacer(None);
-    pacer.request(1);
+    pacer.request(&waiter(1, &calls));
     drop(pacer);
     assert!(*display.dropped.lock());
     display.refresh(Duration::from_secs(1));
     assert!(calls.lock().is_empty());
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "tvos")))]
+#[cfg(not(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "tvos",
+    target_os = "android",
+    target_env = "ohos"
+)))]
 #[test]
 fn a_platform_without_a_display_source_makes_no_pacer() {
-    let error = FramePacer::<()>::new(None, |_, _| {}).err().unwrap();
+    let error = FramePacer::new(None).err().unwrap();
     assert_eq!(error.kind, mln_util::ErrorKind::Unsupported);
+}
+
+/// The platform's display link calls back at its refreshes, on macOS from a
+/// pacer made off the main thread, as the tests run.
+#[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
+#[test]
+fn a_display_link_calls_back_at_refreshes() {
+    for limit in [None, Limit::new(30)] {
+        let pacer = FramePacer::new(limit).unwrap();
+        let (sender, refreshes) = std::sync::mpsc::channel();
+        let waiter: Arc<dyn RefreshWaiter> = Arc::new(move |time| {
+            let _ = sender.send(time);
+        });
+        let mut last = Duration::ZERO;
+        for _ in 0..3 {
+            pacer.request(&waiter);
+            let time = refreshes.recv_timeout(Duration::from_secs(10)).expect("the display link called back");
+            assert!(time > last);
+            last = time;
+        }
+    }
+}
+
+/// A pacer for a view must be made on the main thread, which the tests
+/// don't run on.
+#[cfg(target_os = "macos")]
+#[test]
+#[expect(unsafe_code, reason = "the view is a pointer to an Objective-C object")]
+fn a_pacer_for_a_view_needs_the_main_thread() {
+    let view = core::ptr::NonNull::<u8>::dangling().cast();
+    // SAFETY: the pacer checks the thread before it uses the view.
+    let error = unsafe { FramePacer::for_view(view, None) }.err().unwrap();
+    assert_eq!(error.kind, mln_util::ErrorKind::InvalidState);
 }

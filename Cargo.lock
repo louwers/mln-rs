@@ -2744,6 +2744,7 @@ dependencies = [
 name = "mln-rs-frame-pacer"
 version = "0.0.13"
 dependencies = [
+ "libc",
  "mln-rs-util",
  "objc2 0.6.5",
  "objc2-core-foundation",
@@ -3035,6 +3036,7 @@ dependencies = [
  "mln-rs-conversion",
  "mln-rs-d3d12",
  "mln-rs-feature",
+ "mln-rs-frame-pacer",
  "mln-rs-gestures",
  "mln-rs-gfx",
  "mln-rs-gl",

@@ -3,8 +3,10 @@
 /// Every pacer's display link runs on one thread that the library starts for
 /// them, on a run loop that runs for the rest of the process, so a pacer
 /// needs no run loop of the host's. A display link and its run loop aren't
-/// thread-safe, so the pacer touches its link only on that thread: a call
-/// from another thread runs a task there. A display link retains its target
+/// thread-safe, so once the link is in that run loop, the pacer touches it
+/// only on that thread: a call from another thread runs a task there. On
+/// macOS, the main thread can make the link, as `AppKit` asks, and hands it
+/// over before anything else uses it. A display link retains its target
 /// until it is invalidated, so the target reaches the pacer through
 /// [`Vsyncs`], which holds it weakly.
 #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
@@ -35,7 +37,8 @@ pub(crate) mod display_link {
         fn pthread_set_qos_class_self_np(qos_class: u32, relative_priority: c_int) -> c_int;
     }
 
-    // NSScreen, whose display links follow a screen, is AppKit's.
+    // NSView and NSScreen, which make the display links on macOS, are
+    // AppKit's.
     #[cfg(target_os = "macos")]
     #[link(name = "AppKit", kind = "framework")]
     unsafe extern "C" {}
@@ -162,8 +165,9 @@ pub(crate) mod display_link {
     #[derive(Clone)]
     struct Link(Retained<CADisplayLink>);
 
-    // SAFETY: the link's methods run only on the link thread; other threads
-    // only retain and release it, which is thread-safe.
+    // SAFETY: the link's methods run only on the thread that makes it, until
+    // it hands the link to the link thread, and on the link thread after;
+    // other threads only retain and release it, which is thread-safe.
     unsafe impl Send for Link {}
     // SAFETY: as for `Send`.
     unsafe impl Sync for Link {}
@@ -188,6 +192,12 @@ pub(crate) mod display_link {
                 None => unsafe { CAFrameRateRangeDefault },
             };
             self.0.setPreferredFrameRateRange(range);
+        }
+
+        /// Runs on the link thread.
+        fn add_to_current_run_loop(&self) {
+            // SAFETY: the link thread's own run loop.
+            unsafe { self.0.addToRunLoop_forMode(&NSRunLoop::currentRunLoop(), NSDefaultRunLoopMode) };
         }
 
         /// Runs on the link thread.
@@ -226,39 +236,77 @@ pub(crate) mod display_link {
         }
     }
 
-    /// A display link that calls `target`, on the link thread.
+    /// An `NSView`, whose window's display a pacer follows.
     #[cfg(target_os = "macos")]
-    fn display_link(target: &Target) -> Result<Retained<CADisplayLink>, Error> {
+    #[derive(Clone, Copy)]
+    pub(crate) struct View(pub(crate) core::ptr::NonNull<c_void>);
+
+    /// Where a link follows a display from: none, as on iOS and tvOS.
+    #[cfg(not(target_os = "macos"))]
+    pub(crate) enum View {}
+
+    /// A display link that calls `target`: of the display that `view`'s window
+    /// is on, or without one, of the main display, the one with the menu bar.
+    /// Runs on the main thread, or without a view, on any.
+    #[cfg(target_os = "macos")]
+    fn display_link(target: &Target, view: Option<View>) -> Result<Retained<CADisplayLink>, Error> {
         use objc2::runtime::{AnyClass, AnyObject};
 
         let no_display = || Error::native("the system has no display for the pacer to follow");
-        let screens = AnyClass::get(c"NSScreen").ok_or_else(no_display)?;
-        // SAFETY: `+[NSScreen screens]`, an array of screens, or nil without
-        // a window server.
-        let screens: Option<Retained<AnyObject>> = unsafe { msg_send![screens, screens] };
-        // SAFETY: `-[NSArray firstObject]`, the main display, the one with
-        // the menu bar, or nil.
-        let screen: Option<Retained<AnyObject>> = unsafe { msg_send![&*screens.ok_or_else(no_display)?, firstObject] };
-        let screen = screen.ok_or_else(no_display)?;
+        let owner: Retained<AnyObject> = if let Some(view) = view {
+            // SAFETY: the caller's view, which `for_view`'s contract makes an
+            // NSView, and which isn't null.
+            unsafe { Retained::retain(view.0.as_ptr().cast::<AnyObject>()) }.ok_or_else(no_display)?
+        } else {
+            let screens = AnyClass::get(c"NSScreen").ok_or_else(no_display)?;
+            // SAFETY: `+[NSScreen screens]`, an array of screens, or nil
+            // without a window server.
+            let screens: Option<Retained<AnyObject>> = unsafe { msg_send![screens, screens] };
+            // SAFETY: `-[NSArray firstObject]`, the main display, or nil.
+            let screen: Option<Retained<AnyObject>> =
+                unsafe { msg_send![&*screens.ok_or_else(no_display)?, firstObject] };
+            screen.ok_or_else(no_display)?
+        };
         let selector = sel!(displayLinkWithTarget:selector:);
         // SAFETY: `-[NSObject respondsToSelector:]`. macOS 14 added the
-        // method.
-        let available: bool = unsafe { msg_send![&*screen, respondsToSelector: selector] };
+        // method to NSView and NSScreen.
+        let available: bool = unsafe { msg_send![&*owner, respondsToSelector: selector] };
         if !available {
             return Err(Error::unsupported("the frame pacer needs macOS 14 or later"));
         }
-        // SAFETY: `-[NSScreen displayLinkWithTarget:selector:]`, with a
-        // target that implements the selector.
+        // SAFETY: `-[NSView displayLinkWithTarget:selector:]` or
+        // `-[NSScreen displayLinkWithTarget:selector:]`, with a target that
+        // implements the selector.
         let link: Option<Retained<CADisplayLink>> =
-            unsafe { msg_send![&*screen, displayLinkWithTarget: target, selector: sel!(vsync:)] };
+            unsafe { msg_send![&*owner, displayLinkWithTarget: target, selector: sel!(vsync:)] };
         link.ok_or_else(no_display)
     }
 
-    /// A display link that calls `target`, on the link thread.
+    /// A display link that calls `target`, of the main screen.
     #[cfg(not(target_os = "macos"))]
-    fn display_link(target: &Target) -> Result<Retained<CADisplayLink>, Error> {
+    #[expect(clippy::unnecessary_wraps, reason = "macOS's can fail")]
+    fn display_link(target: &Target, view: Option<View>) -> Result<Retained<CADisplayLink>, Error> {
+        if let Some(view) = view {
+            match view {}
+        }
         // SAFETY: a target that implements the selector.
         Ok(unsafe { CADisplayLink::displayLinkWithTarget_selector(target, sel!(vsync:)) })
+    }
+
+    /// A new display link, paused and at `limit`, that reports to `vsyncs`.
+    fn new_link(vsyncs: Vsyncs, limit: Option<Limit>, view: Option<View>) -> Result<Link, Error> {
+        let target = Target::new(vsyncs);
+        let link = Link(display_link(&target, view)?);
+        link.0.setPaused(true);
+        if limit.is_some() {
+            link.set_limit(limit);
+        }
+        Ok(link)
+    }
+
+    /// Whether this is the main thread, where `AppKit` makes display links.
+    fn on_main_thread() -> bool {
+        cfg!(target_os = "macos") && objc2::MainThreadMarker::new().is_some()
     }
 
     /// A pacer's display link.
@@ -268,21 +316,33 @@ pub(crate) mod display_link {
     }
 
     impl DisplayLinkSource {
-        pub(crate) fn new(vsyncs: Vsyncs, limit: Option<Limit>) -> Result<Self, Error> {
+        /// A source on a link of the display that `view`'s window is on, or
+        /// of the main display. On macOS, `AppKit` makes the link, on the main
+        /// thread: with a view, this must run there, and without one, the
+        /// link thread makes it unless this runs there.
+        pub(crate) fn new(vsyncs: Vsyncs, limit: Option<Limit>, view: Option<View>) -> Result<Self, Error> {
+            let on_main = on_main_thread();
+            if view.is_some() && !on_main {
+                return Err(Error::invalid_state("a frame pacer for a view must be made on the main thread"));
+            }
             let thread = LinkThread::get()?;
-            let link = thread.call(move || {
-                let target = Target::new(vsyncs);
-                let link = Link(display_link(&target)?);
-                link.0.setPaused(true);
-                if limit.is_some() {
-                    link.set_limit(limit);
-                }
-                // SAFETY: the link thread's own run loop.
-                unsafe { link.0.addToRunLoop_forMode(&NSRunLoop::currentRunLoop(), NSDefaultRunLoopMode) };
-                Ok(link)
-            });
-            let link =
-                link.ok_or_else(|| Error::native("the frame pacer's thread failed to make its display link"))??;
+            let failed = || Error::native("the frame pacer's thread failed to take its display link");
+            let link = if on_main {
+                let link = new_link(vsyncs, limit, view)?;
+                let added = link.clone();
+                // A link calls back on the thread whose run loop it is in.
+                thread.call(move || added.add_to_current_run_loop()).ok_or_else(failed)?;
+                link
+            } else {
+                // Without a view, as off the main thread.
+                thread
+                    .call(move || {
+                        let link = new_link(vsyncs, limit, None)?;
+                        link.add_to_current_run_loop();
+                        Ok(link)
+                    })
+                    .ok_or_else(failed)??
+            };
             Ok(Self { thread, link })
         }
     }

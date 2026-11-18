@@ -3,9 +3,11 @@
 //! is ready for it rather than on a timer of its own.
 //!
 //! A [`VsyncSource`] reports each refresh. [`FramePacer::new`] follows the
-//! platform's display: a `CADisplayLink` on macOS, iOS and tvOS. A host on
-//! another platform's display, such as the C API's `AChoreographer` on
-//! Android, gives [`FramePacer::with_source`] a source of its own.
+//! platform's display: a `CADisplayLink` on macOS, iOS and tvOS, the calling
+//! thread's `AChoreographer` on Android, and an `OH_NativeVSync` on
+//! `OpenHarmony`. On macOS, [`FramePacer::for_view`] follows the display that
+//! a view's window is on. A host with a source of its own gives it to
+//! [`FramePacer::with_source`].
 
 use std::sync::{Arc, OnceLock, Weak};
 use std::time::Duration;
@@ -13,11 +15,15 @@ use std::time::Duration;
 use mln_util::Error;
 use parking_lot::Mutex;
 
+#[cfg_attr(target_os = "android", expect(unsafe_code, reason = "the choreographer and its looper are the FFI here"))]
+mod android;
 #[cfg_attr(
     any(target_os = "macos", target_os = "ios", target_os = "tvos"),
     expect(unsafe_code, reason = "the display link through objc2 is the FFI here")
 )]
 mod apple;
+#[cfg_attr(target_env = "ohos", expect(unsafe_code, reason = "the native VSync is the FFI here"))]
+mod ohos;
 
 // MARK: - Limit
 
@@ -125,11 +131,11 @@ pub trait VsyncSource: Send + Sync {
 /// A source that the pacer drops can still report the refreshes it
 /// scheduled, which then go nowhere.
 #[derive(Clone, Default)]
-pub struct Vsyncs(Arc<OnceLock<Weak<dyn Refreshes>>>);
+pub struct Vsyncs(Arc<OnceLock<Weak<FramePacer>>>);
 
 impl Vsyncs {
-    /// Reports a refresh at `time` on a monotonic clock. The pacer runs its
-    /// callback on this thread before it returns, when the refresh is one
+    /// Reports a refresh at `time` on a monotonic clock. The pacer calls its
+    /// waiters on this thread before it returns, when the refresh is one
     /// that it calls back at.
     pub fn vsync(&self, time: Duration) {
         if let Some(pacer) = self.0.get().and_then(Weak::upgrade) {
@@ -138,63 +144,95 @@ impl Vsyncs {
     }
 }
 
-/// A pacer, as its [`Vsyncs`] reach it.
-trait Refreshes: Send + Sync {
-    fn on_vsync(&self, time: Duration);
-}
-
 // MARK: - Pacer
 
-/// Calls back at the first refresh that its limit allows after a
-/// [`request`](Self::request), with the waiters that asked since the last
-/// callback, each once. The callback gets the refresh's time on the source's
-/// monotonic clock, and runs on the source's thread, holding none of the
-/// pacer's locks. Dropping the pacer drops its source, which stops.
-pub struct FramePacer<T = ()> {
-    state: Mutex<PacerState<T>>,
+/// What waits for a pacer's refresh.
+pub trait RefreshWaiter: Send + Sync {
+    /// The refresh at `time` on the source's monotonic clock. It runs on the
+    /// source's thread, holding none of the pacer's locks.
+    fn refresh(&self, time: Duration);
+}
+
+impl<F: Fn(Duration) + Send + Sync> RefreshWaiter for F {
+    fn refresh(&self, time: Duration) {
+        self(time);
+    }
+}
+
+/// Calls each waiter that [requested](Self::request) a refresh once, at the
+/// first refresh that its limit allows after the request. Dropping the pacer
+/// drops its source, which stops.
+pub struct FramePacer {
+    state: Mutex<PacerState>,
     /// Held while the limit changes, so that the source ends with the
     /// throttle's limit.
     limit_lock: Mutex<()>,
     source: Box<dyn VsyncSource>,
-    on_refresh: Box<dyn Fn(Duration, Vec<T>) + Send + Sync>,
 }
 
-struct PacerState<T> {
+struct PacerState {
     /// The waiters that asked for a refresh since the last callback.
-    waiting: Vec<T>,
+    waiting: Vec<Arc<dyn RefreshWaiter>>,
     /// Whether the source has a refresh on its way.
     scheduled: bool,
     throttle: Throttle,
 }
 
-impl<T: PartialEq + Send + 'static> FramePacer<T> {
+impl FramePacer {
     /// A pacer on the platform's display: a `CADisplayLink` of the main
-    /// display on macOS 14 and later, iOS and tvOS. Its thread runs the
-    /// callback.
+    /// display on macOS 14 and later, and of the main screen on iOS and
+    /// tvOS, on a thread of the pacer's own; the `AChoreographer` of the
+    /// calling thread on Android, whose looper calls back; and an
+    /// `OH_NativeVSync` on `OpenHarmony`, on a thread of its own.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) elsewhere,
-    /// including on older macOS, and with
+    /// including on older macOS, with
+    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) on Android when the
+    /// calling thread has no `ALooper`, and with
     /// [`ErrorKind::Native`](mln_util::ErrorKind) without a display.
-    pub fn new(
-        limit: Option<Limit>,
-        on_refresh: impl Fn(Duration, Vec<T>) + Send + Sync + 'static,
-    ) -> Result<Arc<Self>, Error> {
+    pub fn new(limit: Option<Limit>) -> Result<Arc<Self>, Error> {
         #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
-        {
-            Self::with_source(limit, on_refresh, apple::display_link::DisplayLinkSource::new)
-        }
-        #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "tvos")))]
-        {
-            let _ = (limit, on_refresh);
-            Err(Error::unsupported("the platform's display has no frame pacer"))
-        }
+        let source = |vsyncs, limit| apple::display_link::DisplayLinkSource::new(vsyncs, limit, None);
+        #[cfg(target_os = "android")]
+        let source = android::choreographer::ChoreographerSource::new;
+        #[cfg(target_env = "ohos")]
+        let source = ohos::native_vsync::NativeVsyncSource::new;
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "tvos",
+            target_os = "android",
+            target_env = "ohos"
+        )))]
+        let source = |_, _| Err::<Unsupported, _>(Error::unsupported("the platform's display has no frame pacer"));
+        Self::with_source(limit, source)
+    }
+
+    /// A pacer on the display that the window of `view`, an `NSView`, is on,
+    /// which it follows when the window moves to another display. While the
+    /// view is hidden or on no display, the pacer calls back at no refresh.
+    ///
+    /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) off the
+    /// main thread, and with [`ErrorKind::Unsupported`](mln_util::ErrorKind)
+    /// before macOS 14.
+    ///
+    /// # Safety
+    ///
+    /// `view` points to an `NSView`.
+    #[cfg(target_os = "macos")]
+    #[expect(unsafe_code, reason = "the view is a pointer to an Objective-C object")]
+    pub unsafe fn for_view(
+        view: core::ptr::NonNull<core::ffi::c_void>,
+        limit: Option<Limit>,
+    ) -> Result<Arc<Self>, Error> {
+        let view = apple::display_link::View(view);
+        Self::with_source(limit, |vsyncs, limit| apple::display_link::DisplayLinkSource::new(vsyncs, limit, Some(view)))
     }
 
     /// A pacer on the source that `source` makes from where it reports
     /// refreshes and the limit.
     pub fn with_source<S: VsyncSource + 'static, E>(
         limit: Option<Limit>,
-        on_refresh: impl Fn(Duration, Vec<T>) + Send + Sync + 'static,
         source: impl FnOnce(Vsyncs, Option<Limit>) -> Result<S, E>,
     ) -> Result<Arc<Self>, E> {
         let vsyncs = Vsyncs::default();
@@ -203,22 +241,19 @@ impl<T: PartialEq + Send + 'static> FramePacer<T> {
             state: Mutex::new(PacerState { waiting: Vec::new(), scheduled: false, throttle: Throttle::new(limit) }),
             limit_lock: Mutex::new(()),
             source: Box::new(source),
-            on_refresh: Box::new(on_refresh),
         });
-        let weak = Arc::downgrade(&pacer);
-        let refreshes: Weak<dyn Refreshes> = weak;
         // A new `Vsyncs` is unset.
-        let _ = vsyncs.0.set(refreshes);
+        let _ = vsyncs.0.set(Arc::downgrade(&pacer));
         Ok(pacer)
     }
 
-    /// Asks for a callback for `waiter` at the next refresh that the limit
-    /// allows.
-    pub fn request(&self, waiter: T) {
+    /// Asks for a call to `waiter` at the next refresh that the limit allows.
+    /// A waiter that asked since the last callback waits for that one.
+    pub fn request(&self, waiter: &Arc<dyn RefreshWaiter>) {
         {
             let mut state = self.state.lock();
-            if !state.waiting.contains(&waiter) {
-                state.waiting.push(waiter);
+            if !state.waiting.iter().any(|waiting| Arc::ptr_eq(waiting, waiter)) {
+                state.waiting.push(Arc::clone(waiter));
             }
             if std::mem::replace(&mut state.scheduled, true) {
                 return;
@@ -240,17 +275,7 @@ impl<T: PartialEq + Send + 'static> FramePacer<T> {
         self.state.lock().throttle.set_limit(limit);
         self.source.set_limit(limit);
     }
-}
 
-impl<T: Clone> FramePacer<T> {
-    /// The waiters that the next callback is for.
-    #[must_use]
-    pub fn waiting(&self) -> Vec<T> {
-        self.state.lock().waiting.clone()
-    }
-}
-
-impl<T: Send + 'static> Refreshes for FramePacer<T> {
     fn on_vsync(&self, time: Duration) {
         let due = {
             let mut state = self.state.lock();
@@ -266,10 +291,33 @@ impl<T: Send + 'static> Refreshes for FramePacer<T> {
             }
         };
         match due {
-            Some(waiters) => (self.on_refresh)(time, waiters),
+            Some(waiters) => waiters.iter().for_each(|waiter| waiter.refresh(time)),
             // Waits for the next refresh.
             None => self.source.schedule(),
         }
+    }
+}
+
+/// The source of a platform without one, which no pacer gets.
+#[cfg(not(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "tvos",
+    target_os = "android",
+    target_env = "ohos"
+)))]
+enum Unsupported {}
+
+#[cfg(not(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "tvos",
+    target_os = "android",
+    target_env = "ohos"
+)))]
+impl VsyncSource for Unsupported {
+    fn schedule(&self) {
+        match *self {}
     }
 }
 

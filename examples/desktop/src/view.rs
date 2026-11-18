@@ -40,7 +40,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use mln_frame_pacer::FramePacer;
+use mln_frame_pacer::{FramePacer, RefreshWaiter};
 use mln_gestures::{Button, GestureRecognizer, Input, Key, Modifiers, PinchPhase, PointerKind, WheelDelta};
 use mln_map::{
     AnimationOptions, BoundOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, MapDebugOptions,
@@ -72,6 +72,9 @@ use crate::ui::{Action, Controls, Shown};
 
 /// What the render thread starts with.
 pub(crate) struct Launch {
+    /// The display's frame pacer, made on the main thread, except in
+    /// benchmark mode.
+    pub frame_pacer: Option<Result<Arc<FramePacer>, Error>>,
     pub args: Args,
     pub settings: Settings,
     /// The window, which the render sessions make their surfaces of.
@@ -128,7 +131,7 @@ impl StyleInfo {
 
 /// Opens the map in the window and runs it until the window closes.
 pub(crate) fn run(launch: Launch) {
-    let Launch { args, settings, ui, pixel_ratio, size, frame_interval, start, inbox, proxy, .. } = launch;
+    let Launch { frame_pacer, args, settings, ui, pixel_ratio, size, frame_interval, start, inbox, proxy, .. } = launch;
     #[cfg(not(target_os = "macos"))]
     let surfaces = WindowSurfaces { window: launch.window, cap_frame_rate: args.benchmark.is_none() };
     #[cfg(target_os = "macos")]
@@ -223,18 +226,17 @@ pub(crate) fn run(launch: Launch) {
         None => std::env::var("MLN_STYLE_URL").unwrap_or_else(|_| DEFAULT_STYLE.to_owned()),
     };
 
-    // Benchmark frames don't wait for the display.
-    let refreshes = if benchmark.is_some() {
-        None
-    } else {
-        let woken = Arc::clone(&inbox);
-        match FramePacer::new(None, move |_, _| woken.wake_for_refresh()) {
-            Ok(pacer) => Some(DisplayRefreshes { pacer, inbox: Arc::clone(&inbox) }),
-            Err(e) => {
-                Log::info(Event::Render, format!("Pacing frames on a timer: {}", e.message));
-                None
-            }
+    let refreshes = match frame_pacer {
+        Some(Ok(pacer)) => {
+            let woken = Arc::clone(&inbox);
+            let waiter: Arc<dyn RefreshWaiter> = Arc::new(move |_| woken.wake_for_refresh());
+            Some(DisplayRefreshes { pacer, waiter, inbox: Arc::clone(&inbox) })
         }
+        Some(Err(e)) => {
+            Log::info(Event::Render, format!("Pacing frames on a timer: {}", e.message));
+            None
+        }
+        None => None,
     };
 
     let mut view = View {
@@ -348,12 +350,14 @@ fn log_failure<T: Send + 'static>(sent: Result<Completion<T>, Error>) {
 /// render thread through its inbox.
 struct DisplayRefreshes {
     pacer: Arc<FramePacer>,
+    /// Wakes the render thread.
+    waiter: Arc<dyn RefreshWaiter>,
     inbox: Arc<Inbox>,
 }
 
 impl Refreshes for DisplayRefreshes {
     fn request(&self) {
-        self.pacer.request(());
+        self.pacer.request(&self.waiter);
     }
 
     fn take(&self) -> bool {

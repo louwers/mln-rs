@@ -8,6 +8,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::thread::ThreadId;
 
+use ::mln_frame_pacer::{FramePacer, Limit};
 use ::mln_runtime::{
     AttachOptions, ClipDepthRange, DemandMode, Driver, DriverWork, FrameDemand, FrameDisposition, FrameProjection,
     FrameResult, LogicalExtent, RenderSession, RenderSessionState, RenderTarget,
@@ -21,12 +22,12 @@ use crate::abi::{self, Fields};
 use crate::callback::Wake;
 use crate::completion::{self, CompletionValue, Generations, PendingCompletion};
 use crate::error::Error;
-use crate::frame_pacer::{self, Pacer, SessionPacing};
 use crate::generated::types::{
     MLN_CLIP_DEPTH_RANGE_NEGATIVE_ONE_TO_ONE, MLN_CLIP_DEPTH_RANGE_ZERO_TO_ONE, MLN_FRAME_DEMAND_FORCE,
-    MLN_FRAME_DEMAND_WAIT_FOR_UPDATE, MLN_GPU_SYNC_CPU_COMPLETE, MLN_GPU_SYNC_KIND_FLAG_CPU_COMPLETE,
-    MLN_GPU_SYNC_KIND_FLAG_D3D12_FENCE, MLN_GPU_SYNC_KIND_FLAG_METAL_SHARED_EVENT,
-    MLN_GPU_SYNC_KIND_FLAG_OPEN_GL_FENCE, MLN_GPU_SYNC_KIND_FLAG_QUEUE_ORDER, MLN_GPU_SYNC_KIND_FLAG_SYNC_FD,
+    MLN_FRAME_DEMAND_WAIT_FOR_UPDATE, MLN_FRAME_PACING_OPTION_MAXIMUM_FRAMES_PER_SECOND, MLN_FRAME_PACING_OPTION_VIEW,
+    MLN_GPU_SYNC_CPU_COMPLETE, MLN_GPU_SYNC_KIND_FLAG_CPU_COMPLETE, MLN_GPU_SYNC_KIND_FLAG_D3D12_FENCE,
+    MLN_GPU_SYNC_KIND_FLAG_METAL_SHARED_EVENT, MLN_GPU_SYNC_KIND_FLAG_OPEN_GL_FENCE,
+    MLN_GPU_SYNC_KIND_FLAG_QUEUE_ORDER, MLN_GPU_SYNC_KIND_FLAG_SYNC_FD,
     MLN_GPU_SYNC_KIND_FLAG_VULKAN_TIMELINE_SEMAPHORE, MLN_RENDER_ABANDON_DISPOSITION_CLEAN,
     MLN_RENDER_ABANDON_DISPOSITION_QUARANTINED, MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD,
     MLN_RENDER_DRIVER_CORE_WORKER, MLN_RENDER_RESULT_FAILED, MLN_RENDER_RESULT_NO_UPDATE, MLN_RENDER_RESULT_RENDERED,
@@ -35,7 +36,7 @@ use crate::generated::types::{
     MLN_RENDER_SESSION_STATE_ABANDONED, MLN_RENDER_SESSION_STATE_ATTACHED, MLN_RENDER_SESSION_STATE_ATTACHING,
     MLN_RENDER_SESSION_STATE_DETACHED, MLN_RENDER_SESSION_STATE_DETACHING, MLN_RENDER_SESSION_STATE_FAILED,
     MLN_STATUS_INVALID_STATE, MLN_STATUS_NATIVE_ERROR, MLN_STATUS_OK, MLN_STATUS_TARGET_LOST, mln_completion,
-    mln_diagnostic, mln_frame_demand, mln_frame_pacer, mln_frame_projection, mln_logical_extent, mln_map_view,
+    mln_diagnostic, mln_frame_demand, mln_frame_pacing_options, mln_frame_projection, mln_logical_extent, mln_map_view,
     mln_mat4, mln_render_abandon_result, mln_render_frame_batch, mln_render_frame_batch_view, mln_render_frame_result,
     mln_render_session, mln_render_session_attach_options, mln_render_session_capabilities,
     mln_render_session_snapshot, mln_status, mln_vec4,
@@ -49,6 +50,7 @@ abi::versioned!(
     mln_render_session_capabilities,
     mln_render_session_snapshot,
     mln_frame_demand,
+    mln_frame_pacing_options,
     mln_render_frame_batch_view,
     mln_render_abandon_result,
 );
@@ -61,22 +63,10 @@ pub(crate) struct SessionObject {
     /// The scale factor that the caller created the map with, which the
     /// session's extents and views report exactly.
     pub(crate) initial_scale_factor: f64,
-    /// For a session attached without a redraw wake: its frame pacer, which
-    /// takes the runtime's redraw wakes.
-    pacing: Option<Arc<SessionPacing>>,
     /// Held so that its user data lives as long as the session's handle: a
     /// core worker never runs it, and a caller-driven session lets go of it
     /// once its driver work finishes.
     _driver_work_wake: Arc<Wake>,
-}
-
-impl Drop for SessionObject {
-    /// A released session stops pacing, and lets go of its pacer.
-    fn drop(&mut self) {
-        if let Some(pacing) = &self.pacing {
-            pacing.set(handles::NULL, None);
-        }
-    }
 }
 
 static SESSIONS: HandleTable<SessionObject> = HandleTable::new(HandleKind::RenderSession);
@@ -184,14 +174,10 @@ pub(crate) fn attach(
     request: AttachRequest,
     attached: impl FnOnce(mln_render_session, ::mln_runtime::Completion<()>),
 ) -> Result<(), Error> {
-    let pacing = (!request.has_redraw_wake).then(|| Arc::new(SessionPacing::default()));
     let options = AttachOptions {
         driver: request.driver,
         frame_wake: Some(runtime_wake(&request.frame_wake)),
-        redraw_wake: Some(match &pacing {
-            Some(pacing) => pacing.wake(),
-            None => runtime_wake(&request.redraw_wake),
-        }),
+        redraw_wake: request.has_redraw_wake.then(|| runtime_wake(&request.redraw_wake)),
         driver_work_wake: Some(runtime_wake(&request.driver_work_wake)),
         producer_sync_kinds: request.producer_sync_kinds,
     };
@@ -208,7 +194,6 @@ pub(crate) fn attach(
             session: session.clone(),
             map: map.map.clone(),
             initial_scale_factor: map.scale_factor,
-            pacing,
             _driver_work_wake: driver_work_wake,
         };
         match SESSIONS.insert(Arc::new(object)) {
@@ -377,62 +362,64 @@ pub(crate) unsafe extern "C" fn mln_render_session_demand_frame(
         if demand.token == STILL_IMAGE_TOKEN {
             return Err(Error::invalid_argument("the token is reserved for still images"));
         }
-        let object = resolve(session)?;
-        if let Some(pacing) = &object.pacing {
-            pacing.demanded();
-        }
-        object.session.demand_frame(FrameDemand::new(mode, demand.token))?;
+        resolve(session)?.session.demand_frame(FrameDemand::new(mode, demand.token))?;
         Ok(())
     })
 }
 
-/// The demand that `pacer` makes at a display refresh: a frame without flags
-/// and with token 0, when `pacer` paces `session` and its map has something
-/// new to draw. A session that has gone or failed since it asked refuses it.
-pub(crate) fn demand_paced(session: mln_render_session, pacer: &Pacer) {
-    let Ok(object) = resolve(session) else {
-        return;
-    };
-    if object.pacing.as_ref().is_some_and(|pacing| pacing.take_redraw(pacer)) {
-        let _ = object.session.demand_frame(FrameDemand::new(DemandMode::IfChanged, 0));
-    }
-}
-
-/// `mln_render_session_set_frame_pacer()`.
+/// `mln_render_session_set_frame_pacing()`.
 ///
 /// # Safety
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn mln_render_session_set_frame_pacer(
+pub(crate) unsafe extern "C" fn mln_render_session_set_frame_pacing(
     session: mln_render_session,
-    pacer: mln_frame_pacer,
+    options: *const mln_frame_pacing_options,
     out_diagnostic: *mut mln_diagnostic,
 ) -> mln_status {
     export!(out_diagnostic, {
-        let pacer = if pacer == handles::NULL { None } else { Some(frame_pacer::resolve(pacer)?) };
         let object = resolve(session)?;
-        let snapshot = object.session.snapshot()?;
-        match snapshot.state {
-            RenderSessionState::Attaching | RenderSessionState::Attached => {}
-            RenderSessionState::Failed => {
-                let failure = snapshot.failure.unwrap_or_else(|| mln_util::Error::native("the render session failed"));
-                return Err(failure.into());
-            }
-            _ => return Err(Error::invalid_state("the render session is not attached: it was detached or abandoned")),
-        }
-        let Some(pacing) = &object.pacing else {
-            return Err(Error::invalid_state("a render session with a redraw wake takes no pacer"));
+        let pacer = if options.is_null() {
+            None
+        } else {
+            // SAFETY: the caller's contract.
+            let options = unsafe { abi::read_sized(options) }?;
+            Some(frame_pacer(&options)?)
         };
-        pacing.set(session, pacer);
+        object.session.set_frame_pacer(pacer)?;
         Ok(())
     })
 }
 
-/// `mln_frame_pacer_release()`.
-#[unsafe(no_mangle)]
-pub(crate) extern "C" fn mln_frame_pacer_release(pacer: mln_frame_pacer) {
-    frame_pacer::release(pacer);
+/// A pacer of the display that `options` names, at its frame rate limit.
+fn frame_pacer(options: &mln_frame_pacing_options) -> Result<Arc<FramePacer>, Error> {
+    let fields = Fields::new(
+        options.fields,
+        MLN_FRAME_PACING_OPTION_MAXIMUM_FRAMES_PER_SECOND | MLN_FRAME_PACING_OPTION_VIEW,
+        "mln_frame_pacing_options.fields",
+    )?;
+    let limit = match fields.get(MLN_FRAME_PACING_OPTION_MAXIMUM_FRAMES_PER_SECOND, options.maximum_frames_per_second) {
+        Some(frames_per_second) => Some(Limit::new(frames_per_second).ok_or_else(|| {
+            Error::invalid_argument("mln_frame_pacing_options.maximum_frames_per_second must be greater than zero")
+        })?),
+        None => None,
+    };
+    let Some(view) = fields.get(MLN_FRAME_PACING_OPTION_VIEW, options.view) else {
+        return Ok(FramePacer::new(limit)?);
+    };
+    let view = core::ptr::NonNull::new(view)
+        .ok_or_else(|| Error::invalid_argument("mln_frame_pacing_options.view must not be null"))?;
+    #[cfg(target_os = "macos")]
+    {
+        // SAFETY: the header's contract makes the view an NSView.
+        Ok(unsafe { FramePacer::for_view(view, limit) }?)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = view;
+        Err(Error::new(ErrorKind::Unsupported, "mln_frame_pacing_options.view needs macOS"))
+    }
 }
 
 fn disposition(disposition: FrameDisposition) -> u32 {
@@ -933,6 +920,9 @@ pub(crate) unsafe extern "C" fn mln_render_session_dispose(
         Ok(())
     })
 }
+
+#[cfg(test)]
+mod pacing_tests;
 
 #[cfg(test)]
 pub(crate) mod tests {

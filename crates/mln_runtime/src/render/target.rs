@@ -46,7 +46,9 @@ pub struct AttachOptions {
     /// and not again until a drain takes them.
     pub frame_wake: Option<Wake>,
     /// Runs when the map has something new to draw, and not again until the
-    /// host demands a frame, or while the session has no target.
+    /// host demands a frame, or while the session has no target. A session
+    /// without one can have a frame pacer demand its frames instead
+    /// ([`RenderSession::set_frame_pacer`](crate::RenderSession::set_frame_pacer)).
     pub redraw_wake: Option<Wake>,
     /// Runs when a [`Driver::CallerThread`] session has work for
     /// [`DriverWork::service`](crate::DriverWork::service), and not again

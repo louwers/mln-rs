@@ -8,8 +8,10 @@
 
 Paces frames to a display: a `FramePacer` calls back at the display's refreshes,
 at most at a frame rate limit, so that a host draws each frame when the display
-is ready for it. It follows a `CADisplayLink` on Apple platforms, or a source of
-the host's own.
+is ready for it. It follows a `CADisplayLink` on Apple platforms,
+`AChoreographer` on Android, `OH_NativeVSync` on OpenHarmony, or a source of the
+host's own. A render session of `mln-rs-runtime` can take one to demand its
+frames.
 
 Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering

@@ -24,10 +24,10 @@ pub(crate) mod choreographer {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
 
-    use ::mln_frame_pacer::{Limit, VsyncSource, Vsyncs};
+    use mln_util::Error;
     use parking_lot::Mutex;
 
-    use crate::error::Error;
+    use crate::{Limit, VsyncSource, Vsyncs};
 
     /// Longer than a vsync period at the lowest refresh rate that a phone
     /// display runs at while it is on.
@@ -439,11 +439,12 @@ pub(crate) mod choreographer {
         use std::cell::Cell;
         use std::sync::mpsc;
 
+        use mln_util::ErrorKind;
+
         use super::*;
-        use crate::frame_pacer::mln_frame_pacer_create;
-        use crate::frame_pacer::tests::expect_paced_frames;
-        use crate::generated::types::{MLN_STATUS_INVALID_STATE, MLN_STATUS_OK, mln_frame_pacer, mln_status};
-        use crate::handles;
+        use crate::{FramePacer, RefreshWaiter};
+
+        const TIMEOUT: Duration = Duration::from_secs(10);
 
         unsafe extern "C" {
             fn ALooper_prepare(options: c_int) -> *mut ALooper;
@@ -471,18 +472,11 @@ pub(crate) mod choreographer {
         // SAFETY: other threads only wake the looper, which is thread-safe.
         unsafe impl Send for Looper {}
 
-        fn create_pacer() -> (mln_status, mln_frame_pacer) {
-            let mut pacer = handles::NULL;
-            // SAFETY: null options, a local out-handle and a null diagnostic.
-            let status = unsafe { mln_frame_pacer_create(core::ptr::null(), &raw mut pacer, core::ptr::null_mut()) };
-            (status, pacer)
-        }
-
         /// Runs `body` with a pacer on a thread that polls its looper, as an
         /// app's main thread does, and whose choreographer reports no vsyncs
         /// when `choreographer_stopped` says so. Stops the thread after, even
         /// when `body` panics.
-        fn with_looper_pacer(choreographer_stopped: bool, body: impl FnOnce(mln_frame_pacer)) {
+        fn with_looper_pacer(choreographer_stopped: bool, body: impl FnOnce(&FramePacer)) {
             let stop = Arc::new(AtomicBool::new(false));
             let (ready, readied) = mpsc::channel();
             let thread = std::thread::spawn({
@@ -491,7 +485,7 @@ pub(crate) mod choreographer {
                     CHOREOGRAPHER_STOPPED.set(choreographer_stopped);
                     // SAFETY: prepares this thread's own looper.
                     let looper = unsafe { ALooper_prepare(0) };
-                    let _ = ready.send((Looper(looper), create_pacer()));
+                    let _ = ready.send((Looper(looper), FramePacer::new(None)));
                     while !stop.load(Ordering::SeqCst) {
                         // SAFETY: this thread's looper, and no outputs.
                         unsafe {
@@ -500,11 +494,8 @@ pub(crate) mod choreographer {
                     }
                 }
             });
-            let (looper, (status, pacer)) = readied.recv().unwrap();
-            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                assert_eq!(status, MLN_STATUS_OK);
-                body(pacer);
-            }));
+            let (looper, pacer) = readied.recv().unwrap();
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| body(&pacer.unwrap())));
             stop.store(true, Ordering::SeqCst);
             // SAFETY: the thread's looper, which lives until the thread ends.
             unsafe { ALooper_wake(looper.0) };
@@ -514,25 +505,36 @@ pub(crate) mod choreographer {
             }
         }
 
-        #[test]
-        fn a_thread_without_a_looper_creates_no_pacer() {
-            let (status, pacer) = std::thread::spawn(create_pacer).join().unwrap();
-            assert_eq!((status, pacer), (MLN_STATUS_INVALID_STATE, handles::NULL));
+        /// Expects the pacer to call a waiter back at each of a few requests,
+        /// from another thread than the looper's, at increasing times.
+        fn expect_refreshes(pacer: &FramePacer) {
+            let (sender, refreshes) = mpsc::channel();
+            let waiter: Arc<dyn RefreshWaiter> = Arc::new(move |time| {
+                let _ = sender.send(time);
+            });
+            let mut last = Duration::ZERO;
+            for _ in 0..3 {
+                pacer.request(&waiter);
+                let time = refreshes.recv_timeout(TIMEOUT).expect("the pacer called back");
+                assert!(time > last);
+                last = time;
+            }
         }
 
         #[test]
-        fn a_choreographer_paces_a_session() {
-            with_looper_pacer(false, |pacer| expect_paced_frames(pacer, false));
+        fn a_thread_without_a_looper_makes_no_pacer() {
+            let error = std::thread::spawn(|| FramePacer::new(None).err().unwrap()).join().unwrap();
+            assert_eq!(error.kind, ErrorKind::InvalidState);
         }
 
         #[test]
-        fn the_timer_paces_a_session_while_the_choreographer_stops() {
-            with_looper_pacer(true, |pacer| expect_paced_frames(pacer, false));
+        fn a_choreographer_calls_back_at_vsyncs() {
+            with_looper_pacer(false, expect_refreshes);
         }
 
         #[test]
-        fn a_released_choreographer_pacer_keeps_pacing_its_sessions() {
-            with_looper_pacer(false, |pacer| expect_paced_frames(pacer, true));
+        fn the_timer_calls_back_while_the_choreographer_stops() {
+            with_looper_pacer(true, expect_refreshes);
         }
     }
 }

@@ -5,9 +5,11 @@ use std::any::Any;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, OnceLock, Weak};
 use std::thread::ThreadId;
+use std::time::Duration;
 
+use mln_frame_pacer::{FramePacer, RefreshWaiter};
 use mln_map::LogicalExtent;
 use mln_renderer::query::{RenderedQueryOptions, SourceQueryOptions};
 use mln_util::error::Error;
@@ -160,7 +162,12 @@ pub(crate) struct SessionState {
     /// Whether the frame wake ran since the last drain.
     pub(crate) frame_woken: bool,
     /// Whether the redraw wake may run: from the last demand until it runs.
+    /// Once it ran, the map has something new to draw that no demand has
+    /// answered.
     pub(crate) redraw_armed: bool,
+    /// The frame pacer that takes the redraw wake's place, while one paces
+    /// the session.
+    pacing: Option<Pacing>,
     /// The attach's completion, until the map binds the session.
     pub(crate) attach: Option<Resolver<()>>,
     /// The completions of the detaches on their way.
@@ -260,6 +267,37 @@ pub(crate) enum Abandoner {
     Library,
 }
 
+/// A session's frame pacer, and what waits for its refreshes.
+struct Pacing {
+    pacer: Arc<FramePacer>,
+    /// The session, as the pacer calls it back. Each pacing has its own, so
+    /// a refresh that an earlier pacing asked for demands nothing.
+    waiter: Arc<dyn RefreshWaiter>,
+}
+
+impl Pacing {
+    fn new(pacer: Arc<FramePacer>, session: Weak<SessionShared>) -> Self {
+        Self { pacer, waiter: Arc::new(PacedSession(session)) }
+    }
+
+    /// What asks the pacer for a refresh, in place of the redraw wake.
+    fn request(&self) -> Wake {
+        let (pacer, waiter) = (Arc::clone(&self.pacer), Arc::clone(&self.waiter));
+        Arc::new(move || pacer.request(&waiter))
+    }
+}
+
+/// A paced session, as its pacer holds it while it waits for a refresh.
+struct PacedSession(Weak<SessionShared>);
+
+impl RefreshWaiter for PacedSession {
+    fn refresh(&self, _time: Duration) {
+        if let Some(shared) = self.0.upgrade() {
+            shared.demand_paced(self);
+        }
+    }
+}
+
 pub(crate) struct SessionShared {
     pub(crate) id: SessionId,
     pub(crate) driver: Driver,
@@ -329,7 +367,44 @@ impl SessionShared {
         let mut state = self.state.lock();
         let wake = state.redraw_armed && state.has_target && state.lifecycle == RenderSessionState::Attached;
         state.redraw_armed &= !wake;
-        wake.then(|| self.redraw_wake.clone()).flatten()
+        if !wake {
+            return None;
+        }
+        match &state.pacing {
+            Some(pacing) => Some(pacing.request()),
+            None => self.redraw_wake.clone(),
+        }
+    }
+
+    /// Sends `demand` to the session's thread. The state is locked.
+    fn demand_locked(&self, state: &mut SessionState, demand: FrameDemand) -> Result<(), Error> {
+        check_usable(state)?;
+        if !state.ring.is_empty() && state.ring.iter().all(|slot| slot.quarantined) {
+            return Err(Error::invalid_state(
+                "every texture of the ring is quarantined: give the session new textures",
+            ));
+        }
+        let (sequence, sample) = state.map.as_ref().map_or((0, 0), |map| (map.sent_sequence(), map.frame_demanded()));
+        state.redraw_armed = true;
+        worker::post(&self.queue, move |worker, outbox| worker.demand(demand, sequence, sample, outbox));
+        Ok(())
+    }
+
+    /// The refresh that `waiter`, a pacing's, waited for: demands the frame
+    /// that the map has to draw, unless a demand answered it first or the
+    /// pacing ended.
+    fn demand_paced(&self, waiter: &PacedSession) {
+        with_unlocked_wakes(|| {
+            let mut state = self.state.lock();
+            let current = state
+                .pacing
+                .as_ref()
+                .is_some_and(|pacing| core::ptr::addr_eq(Arc::as_ptr(&pacing.waiter), core::ptr::from_ref(waiter)));
+            if current && !state.redraw_armed {
+                // A session that failed or ended since it asked takes no demand.
+                let _ = self.demand_locked(&mut state, FrameDemand::new(super::DemandMode::IfChanged, 0));
+            }
+        });
     }
 
     /// Starts a detach on the session's thread, after the work sent before.
@@ -359,6 +434,7 @@ impl SessionShared {
                     return Err(released());
                 }
                 state.released = true;
+                state.pacing = None;
                 state.keep_graphics = true;
                 if matches!(state.lifecycle, RenderSessionState::Detached | RenderSessionState::Abandoned) {
                     return Ok(());
@@ -385,6 +461,7 @@ impl SessionShared {
             return Err(released());
         }
         state.released = true;
+        state.pacing = None;
         // A released map waits for no service of its session's detach.
         let map_released = state.map.as_ref().is_some_and(Map::is_released);
         match state.lifecycle {
@@ -842,6 +919,7 @@ fn attach_unlocked<R>(
             results: Vec::new(),
             frame_woken: false,
             redraw_armed: true,
+            pacing: None,
             attach: None,
             detach_waiters: Vec::new(),
             release_waiters: Vec::new(),
@@ -1236,20 +1314,42 @@ impl RenderSession {
     /// [`FrameDisposition::TargetNotReady`](super::FrameDisposition).
     pub fn demand_frame(&self, demand: FrameDemand) -> Result<(), Error> {
         let shared = self.shared();
-        with_unlocked_wakes(|| {
+        with_unlocked_wakes(|| shared.demand_locked(&mut shared.state.lock(), demand))
+    }
+
+    /// Paces the session's frames with `pacer`, or with none, stops pacing
+    /// them. At the first refresh that the pacer allows after the map has
+    /// something new to draw, the pacer demands a frame in
+    /// [`DemandMode::IfChanged`](super::DemandMode::IfChanged) with token 0,
+    /// unless a demand answered it first. A new pacer demands at its next
+    /// refresh what the map had to draw. One pacer can pace many sessions,
+    /// and a session holds its pacer until it takes another or is released.
+    ///
+    /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) for a
+    /// session with a redraw wake, which the pacer would take the place of.
+    pub fn set_frame_pacer(&self, pacer: Option<Arc<FramePacer>>) -> Result<(), Error> {
+        let shared = self.shared();
+        let request = {
             let mut state = shared.state.lock();
             check_usable(&state)?;
-            if !state.ring.is_empty() && state.ring.iter().all(|slot| slot.quarantined) {
-                return Err(Error::invalid_state(
-                    "every texture of the ring is quarantined: give the session new textures",
-                ));
+            if shared.redraw_wake.is_some() {
+                return Err(Error::invalid_state("a render session with a redraw wake takes no frame pacer"));
             }
-            let (sequence, sample) =
-                state.map.as_ref().map_or((0, 0), |map| (map.sent_sequence(), map.frame_demanded()));
-            state.redraw_armed = true;
-            worker::post(&shared.queue, move |worker, outbox| worker.demand(demand, sequence, sample, outbox));
-            Ok(())
-        })
+            let same = match (&state.pacing, &pacer) {
+                (Some(pacing), Some(pacer)) => Arc::ptr_eq(&pacing.pacer, pacer),
+                (None, None) => true,
+                _ => false,
+            };
+            if same {
+                return Ok(());
+            }
+            state.pacing = pacer.map(|pacer| Pacing::new(pacer, Arc::downgrade(shared)));
+            state.pacing.as_ref().filter(|_| !state.redraw_armed).map(Pacing::request)
+        };
+        if let Some(request) = request {
+            request();
+        }
+        Ok(())
     }
 
     /// Takes the frame results that wait, oldest first. Fails with

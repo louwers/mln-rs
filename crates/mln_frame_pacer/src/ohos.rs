@@ -13,10 +13,10 @@ pub(super) mod native_vsync {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use ::mln_frame_pacer::{Limit, VsyncSource, Vsyncs};
+    use mln_util::Error;
     use parking_lot::Mutex;
 
-    use crate::error::Error;
+    use crate::{Limit, VsyncSource, Vsyncs};
 
     #[repr(C)]
     struct OH_NativeVSync {
@@ -100,25 +100,24 @@ pub(super) mod native_vsync {
 
 #[cfg(all(test, target_env = "ohos"))]
 mod tests {
-    use crate::frame_pacer::mln_frame_pacer_create;
-    use crate::frame_pacer::tests::expect_paced_frames;
-    use crate::generated::types::{MLN_STATUS_OK, mln_frame_pacer};
+    use std::sync::{Arc, mpsc};
+    use std::time::Duration;
 
-    fn create() -> mln_frame_pacer {
-        let mut pacer = crate::handles::NULL;
-        // SAFETY: null options, a local out-handle and a null diagnostic.
-        let status = unsafe { mln_frame_pacer_create(core::ptr::null(), &raw mut pacer, core::ptr::null_mut()) };
-        assert_eq!(status, MLN_STATUS_OK);
-        pacer
-    }
+    use crate::{FramePacer, RefreshWaiter};
 
     #[test]
-    fn a_native_vsync_paces_a_session() {
-        expect_paced_frames(create(), false);
-    }
-
-    #[test]
-    fn a_released_native_vsync_pacer_keeps_pacing_its_sessions() {
-        expect_paced_frames(create(), true);
+    fn a_native_vsync_calls_back_at_vsyncs() {
+        let pacer = FramePacer::new(None).unwrap();
+        let (sender, refreshes) = mpsc::channel();
+        let waiter: Arc<dyn RefreshWaiter> = Arc::new(move |time| {
+            let _ = sender.send(time);
+        });
+        let mut last = Duration::ZERO;
+        for _ in 0..3 {
+            pacer.request(&waiter);
+            let time = refreshes.recv_timeout(Duration::from_secs(10)).expect("the pacer called back");
+            assert!(time > last);
+            last = time;
+        }
     }
 }

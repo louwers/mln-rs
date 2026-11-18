@@ -1,6 +1,7 @@
-// The Apple frame pacer, which demands a session's frames at the vsyncs that a
-// CADisplayLink reports. The display link runs on a thread of the library's
-// own, so these cases need no run loop.
+// Frame pacing on Apple platforms, which demands a session's frames at the
+// vsyncs that a CADisplayLink reports. The display link runs on a thread of
+// the library's own, so these cases need no run loop. On macOS, these cases
+// run on the main thread, where the library makes the main display's link.
 
 #include <TargetConditionals.h>
 
@@ -8,21 +9,21 @@
 #include "support/test_support.h"
 
 #if TARGET_OS_VISION
-static void visionos_has_no_apple_frame_pacer(void) {
-  mln_frame_pacer pacer = MLN_HANDLE_NULL;
+static void visionos_has_no_frame_pacing(void) {
+  mln_runtime runtime = mln_test_create_runtime();
+  mln_map map = mln_test_create_map(runtime);
+  mln_test_render_fixture fixture = {0};
+  TEST_ASSERT_TRUE(mln_test_render_fixture_create_offscreen(map, &fixture));
+  mln_frame_pacing_options options = {.size = sizeof(mln_frame_pacing_options)};
   MLN_TEST_STATUS(
     MLN_STATUS_UNSUPPORTED,
-    mln_frame_pacer_create(NULL, &pacer, MLN_TEST_DIAGNOSTIC)
+    mln_render_session_set_frame_pacing(fixture.session, &options, NULL)
   );
-  TEST_ASSERT_EQUAL_UINT64(MLN_HANDLE_NULL, pacer);
+  mln_test_render_fixture_destroy(&fixture);
+  mln_test_destroy_map(map);
+  mln_test_destroy_runtime(runtime);
 }
 #else
-
-static mln_frame_pacer create_pacer(const mln_frame_pacer_options* options) {
-  mln_frame_pacer pacer = MLN_HANDLE_NULL;
-  MLN_TEST_OK(mln_frame_pacer_create(options, &pacer, MLN_TEST_DIAGNOSTIC));
-  return pacer;
-}
 
 // Returns the render update generation that shows the change.
 static uint64_t move_camera(mln_map map, double zoom) {
@@ -43,131 +44,52 @@ static uint64_t move_camera(mln_map map, double zoom) {
   return generation;
 }
 
-// Paces a new session with a new pacer made from `options`, which it releases
-// first when `release` is set, and expects a camera change to reach a frame
-// that no one else demands.
+// Paces a new session with `options`, then with `changed`, and expects a
+// camera change under each to reach a frame that no one else demands.
 static void expect_paced_frames(
-  const mln_frame_pacer_options* options, bool release
+  const mln_frame_pacing_options* options,
+  const mln_frame_pacing_options* changed
 ) {
   mln_runtime runtime = mln_test_create_runtime();
   mln_map map = mln_test_create_map(runtime);
   mln_test_render_prepare_map(map);
   mln_test_render_fixture fixture = {0};
   TEST_ASSERT_TRUE(mln_test_render_fixture_create_offscreen(map, &fixture));
-  const mln_frame_pacer pacer = create_pacer(options);
-  MLN_TEST_OK(mln_render_session_set_frame_pacer(fixture.session, pacer, NULL));
-  if (release) mln_frame_pacer_release(pacer);
-
+  MLN_TEST_OK(mln_render_session_set_frame_pacing(
+    fixture.session, options, MLN_TEST_DIAGNOSTIC
+  ));
   mln_test_render_wait_for_update(&fixture, move_camera(map, 2.0));
+  MLN_TEST_OK(mln_render_session_set_frame_pacing(
+    fixture.session, changed, MLN_TEST_DIAGNOSTIC
+  ));
   mln_test_render_wait_for_update(&fixture, move_camera(map, 3.0));
 
   mln_test_render_fixture_destroy(&fixture);
-  if (!release) mln_frame_pacer_release(pacer);
   mln_test_destroy_map(map);
   mln_test_destroy_runtime(runtime);
 }
 
 static void a_paced_session_draws_each_change_without_a_demand(void) {
-  expect_paced_frames(NULL, false);
+  mln_frame_pacing_options options = {.size = sizeof(mln_frame_pacing_options)};
+  expect_paced_frames(&options, &options);
 }
 
-// A new limit also changes the display link's preferred frame rate range, and
-// each change can come while the session waits for a refresh.
-static void a_pacer_keeps_pacing_its_sessions_as_its_limit_changes(void) {
-  mln_runtime runtime = mln_test_create_runtime();
-  mln_map map = mln_test_create_map(runtime);
-  mln_test_render_prepare_map(map);
-  mln_test_render_fixture fixture = {0};
-  TEST_ASSERT_TRUE(mln_test_render_fixture_create_offscreen(map, &fixture));
-  const mln_frame_pacer pacer = create_pacer(NULL);
-  MLN_TEST_OK(mln_render_session_set_frame_pacer(fixture.session, pacer, NULL));
-  mln_frame_pacer_options options = {.size = sizeof(mln_frame_pacer_options)};
-
-  uint64_t generation = move_camera(map, 2.0);
-  options.fields = MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND;
-  options.maximum_frames_per_second = 30;
-  MLN_TEST_OK(
-    mln_frame_pacer_set_options(pacer, &options, MLN_TEST_DIAGNOSTIC)
-  );
-  mln_test_render_wait_for_update(&fixture, generation);
-
-  generation = move_camera(map, 3.0);
-  options.fields = MLN_FRAME_PACER_OPTION_UNLIMITED_FRAMES_PER_SECOND;
-  MLN_TEST_OK(
-    mln_frame_pacer_set_options(pacer, &options, MLN_TEST_DIAGNOSTIC)
-  );
-  mln_test_render_wait_for_update(&fixture, generation);
-
-  mln_test_render_fixture_destroy(&fixture);
-  mln_frame_pacer_release(pacer);
-  mln_test_destroy_map(map);
-  mln_test_destroy_runtime(runtime);
-}
-
-static void set_options_refuses_an_invalid_limit_and_a_released_pacer(void) {
-  const mln_frame_pacer pacer = create_pacer(NULL);
-  mln_frame_pacer_options options = {.size = sizeof(mln_frame_pacer_options)};
-  options.fields = MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND;
-  options.maximum_frames_per_second = 0;
-  MLN_TEST_INVALID(mln_frame_pacer_set_options(pacer, &options, NULL));
-  options.fields |= MLN_FRAME_PACER_OPTION_UNLIMITED_FRAMES_PER_SECOND;
-  options.maximum_frames_per_second = 30;
-  MLN_TEST_INVALID(mln_frame_pacer_set_options(pacer, &options, NULL));
-
-  mln_frame_pacer_release(pacer);
-  options.fields = MLN_FRAME_PACER_OPTION_UNLIMITED_FRAMES_PER_SECOND;
-  MLN_TEST_INVALID_STATE(mln_frame_pacer_set_options(pacer, &options, NULL));
-}
-
-static void a_released_pacer_keeps_pacing_its_sessions(void) {
-  expect_paced_frames(NULL, true);
-}
-
-// The limit also sets the display link's preferred frame rate range.
-static void a_pacer_with_a_frame_rate_limit_paces_its_sessions(void) {
-  mln_frame_pacer_options options = {.size = sizeof(mln_frame_pacer_options)};
-  options.fields = MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND;
-  options.maximum_frames_per_second = 30;
-  expect_paced_frames(&options, false);
-}
-
-static void a_session_with_a_redraw_wake_takes_no_pacer(void) {
-  mln_runtime runtime = mln_test_create_runtime();
-  mln_map map = mln_test_create_map(runtime);
-  mln_render_session_attach_options options = {
-    .size = sizeof(mln_render_session_attach_options)
-  };
-  options.redraw_wake = mln_test_pulse_wake();
-  mln_test_completion attach = mln_test_completion_default(0);
-  mln_test_render_fixture fixture = {0};
-  MLN_TEST_OK(mln_test_render_fixture_start_attach(
-    map, &options, &attach.descriptor, &fixture
-  ));
-  MLN_TEST_OK(mln_test_render_fixture_finish_operation(&fixture, &attach));
-  mln_test_completion_destroy(&attach);
-  const mln_frame_pacer pacer = create_pacer(NULL);
-
-  MLN_TEST_INVALID_STATE(
-    mln_render_session_set_frame_pacer(fixture.session, pacer, NULL)
-  );
-
-  mln_test_render_fixture_destroy(&fixture);
-  mln_frame_pacer_release(pacer);
-  mln_test_destroy_map(map);
-  mln_test_destroy_runtime(runtime);
+// The limit also asks the display link for that refresh rate.
+static void a_paced_session_follows_a_new_frame_rate_limit(void) {
+  mln_frame_pacing_options options = {.size = sizeof(mln_frame_pacing_options)};
+  mln_frame_pacing_options limited = options;
+  limited.fields = MLN_FRAME_PACING_OPTION_MAXIMUM_FRAMES_PER_SECOND;
+  limited.maximum_frames_per_second = 30;
+  expect_paced_frames(&limited, &options);
 }
 
 #endif
 
 MLN_TEST_GROUP {
 #if TARGET_OS_VISION
-  RUN_TEST(visionos_has_no_apple_frame_pacer);
+  RUN_TEST(visionos_has_no_frame_pacing);
 #else
   RUN_TEST(a_paced_session_draws_each_change_without_a_demand);
-  RUN_TEST(a_released_pacer_keeps_pacing_its_sessions);
-  RUN_TEST(a_pacer_with_a_frame_rate_limit_paces_its_sessions);
-  RUN_TEST(a_pacer_keeps_pacing_its_sessions_as_its_limit_changes);
-  RUN_TEST(set_options_refuses_an_invalid_limit_and_a_released_pacer);
-  RUN_TEST(a_session_with_a_redraw_wake_takes_no_pacer);
+  RUN_TEST(a_paced_session_follows_a_new_frame_rate_limit);
 #endif
 }

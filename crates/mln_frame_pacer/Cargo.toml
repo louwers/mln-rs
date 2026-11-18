@@ -29,5 +29,9 @@ objc2-quartz-core = { workspace = true, features = [
   "CAFrameRateRange",
 ] }
 
+# The eventfd and timerfd of the choreographer's looper.
+[target.'cfg(target_os = "android")'.dependencies]
+libc.workspace = true
+
 [lints]
 workspace = true

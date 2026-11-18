@@ -10,14 +10,12 @@
 //! signature. Tests of the API go in this crate, and maplibre-native-ffi's
 //! ABI suite also runs against the library (`mise run test:c-abi`).
 //!
-//! Each header's functions live in the module of its name, except
-//! `mln_frame_pacer_create()`, which lives in `frame_pacer` beside each
-//! platform's source of display refreshes. The modules the headers share
-//! hold the C-only rules: `export!` bodies, `handles`, struct versioning
-//! (`abi`), `buffer`s, `callback` registrations, `delivery` queues and
-//! `completion`s, the event batches that handlers receive (`events`), the
-//! headers' geometry values (`geo`), and the
-//! `parse_thread` that parses for callers that wait.
+//! Each header's functions live in the module of its name. The modules the
+//! headers share hold the C-only rules: `export!` bodies, `handles`, struct
+//! versioning (`abi`), `buffer`s, `callback` registrations, `delivery` queues
+//! and `completion`s, the event batches that handlers receive (`events`), the
+//! headers' geometry values (`geo`), and the `parse_thread` that parses for
+//! callers that wait.
 //!
 //! In the browser, the library is a wasm-bindgen package per backend (`mise
 //! run c-web:build webgpu` or `gl`): its instance's exports are the raw
@@ -53,7 +51,6 @@ mod delivery;
 mod diagnostic;
 mod error;
 mod events;
-mod frame_pacer;
 mod geo;
 mod gpu_device;
 mod handles;
