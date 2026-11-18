@@ -751,4 +751,14 @@ mod tests {
         assert!(!set.insert(K(1, "second")));
         assert_eq!(set.first().map(|k| k.1), Some("first"));
     }
+
+    #[test]
+    fn map_keys_in_order_keeps_the_order() {
+        let mut map: VecMap<i32, char> = [(1, 'a'), (3, 'b'), (5, 'c')].into();
+        assert!(map.map_keys_in_order(|k| k + 10));
+        assert_eq!(map.get(&13), Some(&'b'));
+        assert!(!map.map_keys_in_order(|k| -k));
+        assert_eq!(map.keys().copied().collect::<Vec<_>>(), [11, 13, 15]);
+        assert!(!map.map_keys_in_order(|_| 0));
+    }
 }
