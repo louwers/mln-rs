@@ -1,6 +1,5 @@
 use std::any::Any;
-use std::cell::{Cell, RefCell};
-use std::rc::Rc;
+use std::cell::Cell;
 
 use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, GpuError, LoadOp, PassDesc, TargetFormats};
 use mln_gfx::stencil_mode::Test;
@@ -18,8 +17,6 @@ use mln_vec_map::VecMap;
 use crate::clip_masks::ClipMasks;
 use crate::gfx::context::Context;
 use crate::layer_composite::LayerComposite;
-use crate::line_atlas::LineAtlas;
-use crate::pattern_atlas::PatternAtlas;
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 
@@ -139,10 +136,6 @@ pub(crate) struct PaintParameters<'a> {
     /// renderer sets it from the render tree's parameters).
     pub(crate) evaluated_light: crate::render_light::EvaluatedLight,
     pub(crate) static_data: &'a RenderStaticData,
-    /// The orchestrator's line atlas. `new` starts with an empty one, and the
-    /// renderer assigns the orchestrator's.
-    pub(crate) line_atlas: Rc<RefCell<LineAtlas>>,
-    pub(crate) pattern_atlas: Rc<RefCell<PatternAtlas>>,
 
     pub(crate) pass: RenderPass,
     pub(crate) debug_options: MapDebugOptions,
@@ -181,7 +174,6 @@ impl<'a> PaintParameters<'a> {
         debug_options: MapDebugOptions,
         transform_params: &'a TransformParameters,
         static_data: &'a RenderStaticData,
-        pattern_atlas: Rc<RefCell<PatternAtlas>>,
         renderable_size: Size,
         scissor_rect: ScissorRect,
     ) -> Self {
@@ -199,8 +191,6 @@ impl<'a> PaintParameters<'a> {
             state,
             static_data,
             evaluated_light: crate::render_light::EvaluatedLight::default(),
-            line_atlas: Rc::new(RefCell::new(LineAtlas::new())),
-            pattern_atlas,
             pass: RenderPass::Opaque,
             debug_options,
             pixel_ratio,

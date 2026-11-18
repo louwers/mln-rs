@@ -66,7 +66,7 @@ use crate::layout::symbol_layout::SymbolLayout;
 use crate::layout::symbol_projection::{get_gl_coord_matrix, get_label_plane_matrix};
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
-use crate::render_layer::{
+use crate::render_layer::{Atlases, 
     BucketKey, BucketPlacementData, LayerParts, LayerSource, LayerTiles, LayerUpdateParameters, LayerValues, Parts,
     PartsMut, PlacedTile, RenderLayer, RenderLayerBase, SymbolTranslate, TypedLayer,
 };
@@ -1243,6 +1243,7 @@ impl TypedLayer for RenderSymbolLayer {
     fn update_draws(
         &mut self,
         paint_parameters: &PaintParameters<'_>,
+        _atlases: &Atlases,
         _update_parameters: &UpdateParameters,
         source: Option<LayerSource<'_, Symbol>>,
     ) {
@@ -1585,7 +1586,7 @@ impl TypedLayer for RenderSymbolLayer {
 
     /// Collects the symbol buckets of the tiles the layer places, and of
     /// those whose buckets another layer places and this one draws.
-    fn update(&mut self, params: &LayerUpdateParameters<'_>, tiles: Option<LayerTiles<'_, Symbol>>) {
+    fn update(&mut self, params: &mut LayerUpdateParameters<'_>, tiles: Option<LayerTiles<'_, Symbol>>) {
         let Some(source) = params.source else {
             return;
         };

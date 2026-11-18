@@ -28,7 +28,7 @@ use crate::layer_drawing::{DrawGroup, DrawOrder, LayerDrawing, TileMap};
 use crate::layer_type::LayerType;
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{LayerSource, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer};
+use crate::render_layer::{Atlases, LayerSource, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer};
 use crate::render_pass::RenderPass;
 use crate::update_parameters::UpdateParameters;
 
@@ -166,6 +166,7 @@ impl TypedLayer for RenderCustomLayer {
     fn update_draws(
         &mut self,
         _parameters: &PaintParameters<'_>,
+        _atlases: &Atlases,
         _update_parameters: &UpdateParameters,
         _source: Option<LayerSource<'_, Custom>>,
     ) {

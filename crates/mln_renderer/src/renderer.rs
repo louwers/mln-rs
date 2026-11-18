@@ -494,12 +494,10 @@ impl Renderer {
             frame.debug_options,
             &frame.transform,
             static_data,
-            Rc::clone(orchestrator.get_pattern_atlas()),
             renderable_size,
             scissor_rect,
         );
 
-        parameters.line_atlas = Rc::clone(orchestrator.get_line_atlas());
         parameters.symbol_fade_change = frame.symbol_fade_change;
         parameters.evaluated_light = frame.light.clone(); // conformance
         parameters.opaque_pass_cutoff = frame.opaque_pass_cutoff;
@@ -507,11 +505,9 @@ impl Renderer {
         // - UPLOAD --------------------------------------------------------
         // Uploads all required buffers and images before we do any actual
         // rendering. The atlas goes first: the tiles bind its textures.
-        orchestrator.upload_atlas(context);
+        orchestrator.upload_atlases(context);
         orchestrator.upload_sources(context);
         static_data.upload(context);
-        parameters.line_atlas.borrow_mut().upload(context);
-        parameters.pattern_atlas.borrow_mut().upload(context); // conformance
 
         // - DRAW UPDATE ---------------------------------------------------
         // Makes the layers' draws of the frame
@@ -593,7 +589,7 @@ impl Renderer {
         parameters.layer_composite = std::mem::take(&mut self.layer_composite);
 
         let layers_uploaded = Instant::now();
-        let atlas_size = parameters.pattern_atlas.borrow().get_pixel_size();
+        let atlas_size = orchestrator.atlases().pattern.get_pixel_size();
         let world_size = parameters.renderable_size;
         let global_paint_params_ubo = GlobalPaintParamsUBO {
             pattern_atlas_texsize: [atlas_size.width as f32, atlas_size.height as f32],

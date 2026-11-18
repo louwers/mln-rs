@@ -35,7 +35,7 @@ use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, TileDraws};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{
+use crate::render_layer::{Atlases, 
     LayerParts, LayerSource, LayerTiles, LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer,
     RenderLayerBase, TypedLayer,
 };
@@ -49,11 +49,11 @@ const BACKGROUND_PLAIN_SHADER_NAME: &str = "BackgroundShader";
 const BACKGROUND_PATTERN_SHADER_NAME: &str = "BackgroundPatternShader";
 
 /// Adds the image `id` to the pattern atlas if it isn't there yet.
-fn add_pattern_if_needed(id: &str, params: &LayerUpdateParameters<'_>) {
-    if params.pattern_atlas.borrow().get_pattern(id).is_none()
+fn add_pattern_if_needed(id: &str, params: &mut LayerUpdateParameters<'_>) {
+    if params.atlases.pattern.get_pattern(id).is_none()
         && let Some(image) = params.images.get_image(id)
     {
-        params.pattern_atlas.borrow_mut().add_pattern(image);
+        params.atlases.pattern.add_pattern(image);
     }
 }
 
@@ -210,6 +210,7 @@ impl TypedLayer for RenderBackgroundLayer {
     fn update_draws(
         &mut self,
         paint_parameters: &PaintParameters<'_>,
+        atlases: &Atlases,
         update_parameters: &UpdateParameters,
         _source: Option<LayerSource<'_, Background>>,
     ) {
@@ -279,7 +280,7 @@ impl TypedLayer for RenderBackgroundLayer {
         self.drawing.tiles_mut().set_tiles(tile_cover.iter().copied());
 
         // conformance: background-pattern.
-        let pattern_atlas = paint_parameters.pattern_atlas.borrow();
+        let pattern_atlas = &atlases.pattern;
         let faded = evaluated.background_pattern.faded();
         let pattern_positions = if has_pattern {
             let (Some(from), Some(to)) =
@@ -302,7 +303,6 @@ impl TypedLayer for RenderBackgroundLayer {
             });
             Rc::clone(texture)
         });
-        drop(pattern_atlas);
 
         let variant = self.base.projection_variant;
         for tile_id in &tile_cover {
@@ -358,7 +358,7 @@ impl TypedLayer for RenderBackgroundLayer {
 
     /// Adds the layer's pattern to the pattern atlas. The layer draws
     /// the tiles that cover the view, not its source's.
-    fn update(&mut self, parameters: &LayerUpdateParameters<'_>, _tiles: Option<LayerTiles<'_, Background>>) {
+    fn update(&mut self, parameters: &mut LayerUpdateParameters<'_>, _tiles: Option<LayerTiles<'_, Background>>) {
         let evaluated = &self.values.evaluated.paint;
         if !evaluated.background_pattern.faded().to.empty() {
             // The encode uploads the atlas image with the patterns.

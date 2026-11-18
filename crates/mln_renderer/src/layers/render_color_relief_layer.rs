@@ -50,7 +50,7 @@ use crate::layer_drawing::{DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptD
 use crate::layer_type::LayerType;
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{
+use crate::render_layer::{Atlases, 
     LayerParts, LayerSource, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
 };
 use crate::render_pass::RenderPass;
@@ -305,6 +305,7 @@ impl TypedLayer for RenderColorReliefLayer {
     fn update_draws(
         &mut self,
         paint_parameters: &PaintParameters<'_>,
+        _atlases: &Atlases,
         _update_parameters: &UpdateParameters,
         source: Option<LayerSource<'_, ColorRelief>>,
     ) {

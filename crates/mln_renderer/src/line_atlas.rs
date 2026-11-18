@@ -384,19 +384,22 @@ impl LineAtlas {
         Self::default()
     }
 
-    /// Obtains or creates a texture that has both line patterns in it
-    pub(crate) fn get_dash_pattern_texture(
-        &mut self,
-        from: &[f32],
-        to: &[f32],
-        cap: LinePatternCap,
-    ) -> &mut DashPatternTexture {
+    /// The texture of the dash patterns `from` and `to` with `cap` ends,
+    /// made if the atlas has none, which the next upload uploads.
+    pub(crate) fn add(&mut self, from: &[f32], to: &[f32], cap: LinePatternCap) -> &DashPatternTexture {
         let index = self.textures.iter().position(|(key, _)| is_dash_key(key, from, to, cap)).unwrap_or_else(|| {
             self.textures.push((dash_key(from, to, cap), DashPatternTexture::new(from, to, cap)));
             self.needs_upload.push(self.textures.len() - 1);
             self.textures.len() - 1
         });
-        &mut self.textures[index].1
+        &self.textures[index].1
+    }
+
+    /// The texture of the dash patterns `from` and `to` with `cap` ends, if
+    /// the atlas has it.
+    #[must_use]
+    pub(crate) fn get(&self, from: &[f32], to: &[f32], cap: LinePatternCap) -> Option<&DashPatternTexture> {
+        self.textures.iter().find(|(key, _)| is_dash_key(key, from, to, cap)).map(|(_, texture)| texture)
     }
 
     /// Uploads the textures to the GPU to be available when we need it.

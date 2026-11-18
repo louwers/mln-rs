@@ -33,7 +33,7 @@ use crate::layout::circle_layout::CircleLayout;
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
-use crate::render_layer::{
+use crate::render_layer::{Atlases, 
     LayerParts, LayerSource, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
 };
 use crate::render_pass::RenderPass;
@@ -288,6 +288,7 @@ impl TypedLayer for RenderCircleLayer {
     fn update_draws(
         &mut self,
         paint_parameters: &PaintParameters<'_>,
+        _atlases: &Atlases,
         _update_parameters: &UpdateParameters,
         source: Option<LayerSource<'_, Circle>>,
     ) {

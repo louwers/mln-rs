@@ -45,10 +45,10 @@ use crate::layer_drawing::{DrawList, DrawObjectsMut, FrameDraw, TileDraws, TileO
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::pattern_layout::{LineLayoutSpec, PatternLayout, uses_pattern};
-use crate::line_atlas::LinePatternCap;
+use crate::line_atlas::{LineAtlas, LinePatternCap};
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
-use crate::render_layer::{
+use crate::render_layer::{Atlases, 
     LayerParts, LayerSource, LayerTiles, LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer,
     RenderLayerBase, TypedLayer,
 };
@@ -441,6 +441,7 @@ impl TypedLayer for RenderLineLayer {
     fn update_draws(
         &mut self,
         paint_parameters: &PaintParameters<'_>,
+        atlases: &Atlases,
         _update_parameters: &UpdateParameters,
         source: Option<LayerSource<'_, Line>>,
     ) {
@@ -510,7 +511,8 @@ impl TypedLayer for RenderLineLayer {
                 };
                 cached
             };
-            if let Some(uniforms) = Self::uniforms(&self.values.evaluated, tile, binders, cached, paint_parameters) {
+            if let Some(uniforms) = Self::uniforms(&self.values.evaluated, tile, binders, cached, paint_parameters, &atlases.line)
+            {
                 let draw = FrameDraw { pass: cached.pass, clip: true, ..FrameDraw::new(Some(tile_id), cached.id) };
                 self.draw_list.push(draw, uniforms);
             }
@@ -522,7 +524,7 @@ impl TypedLayer for RenderLineLayer {
     }
 
     /// Adds the dash patterns of the tiles' buckets to the line atlas.
-    fn update(&mut self, params: &LayerUpdateParameters<'_>, tiles: Option<LayerTiles<'_, Line>>) {
+    fn update(&mut self, params: &mut LayerUpdateParameters<'_>, tiles: Option<LayerTiles<'_, Line>>) {
         let Some(tiles) = tiles else {
             return;
         };
@@ -535,7 +537,7 @@ impl TypedLayer for RenderLineLayer {
                 continue;
             }
             let cap = dash_pattern_cap(bucket.bucket);
-            params.line_atlas.borrow_mut().get_dash_pattern_texture(dasharray.from, dasharray.to, cap);
+            params.atlases.line.add(dasharray.from, dasharray.to, cap);
         }
     }
 }
@@ -754,6 +756,7 @@ impl RenderLineLayer {
         binders: &LineBinders,
         cached: &mut LineTile,
         parameters: &PaintParameters<'_>,
+        line_atlas: &LineAtlas,
     ) -> Option<LineUniforms> {
         const NEAR_CLIPPED: bool = false;
         const IN_VIEWPORT_PIXEL_UNITS: bool = false; // from RenderTile::translatedMatrix
@@ -864,10 +867,8 @@ impl RenderLineLayer {
                         sdfgamma: atlas_size.width as f32 / (min_scale * 256.0 * parameters.pixel_ratio) / 2.0,
                     }
                 } else {
-                    let mut line_atlas = parameters.line_atlas.borrow_mut();
                     let dasharray = evaluated.line_dasharray.faded();
-                    let dash_pattern =
-                        line_atlas.get_dash_pattern_texture(dasharray.from, dasharray.to, cached.dash_cap);
+                    let dash_pattern = line_atlas.get(dasharray.from, dasharray.to, cached.dash_cap)?;
                     cached.objects.texture_or_insert_with(dash_texture_id, || dash_pattern.get_texture())?;
 
                     let pos_a = dash_pattern.get_from();

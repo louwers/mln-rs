@@ -1,8 +1,6 @@
 // The orchestrator owns the render sources and the tile store their tiles
 // are in, and turns what the store reports into the renderer's events.
 
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -38,7 +36,7 @@ use crate::layer_type::ErasedEvaluatedLayer;
 use crate::line_atlas::LineAtlas;
 use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;
-use crate::render_layer::{LayerSource, LayerTiles, LayerUpdateParameters, RenderLayer};
+use crate::render_layer::{Atlases, LayerSource, LayerTiles, LayerUpdateParameters, RenderLayer};
 use crate::render_source::{self, RenderSource, SourcePrepareParameters, TileOrder};
 use crate::render_tile::RenderTile;
 use crate::renderer_event::RendererEvent;
@@ -146,8 +144,7 @@ pub(crate) struct RenderOrchestrator {
     /// The sources' tiles, with the glyph and image stores their layouts
     /// resolve through and the atlas they pack them into.
     tile_store: TileStore,
-    line_atlas: Rc<RefCell<LineAtlas>>,
-    pattern_atlas: Rc<RefCell<PatternAtlas>>,
+    atlases: Atlases,
 
     /// The version of the style the last update drew, or `None` before
     /// the first and after `clear_data`: no layers, sources or images.
@@ -227,8 +224,7 @@ impl RenderOrchestrator {
             tile_store,
             cross_tile_symbol_index: crate::text::cross_tile_symbol_index::CrossTileSymbolIndex::default(),
             placement_controller: crate::text::placement::PlacementController::new(),
-            line_atlas: Rc::new(RefCell::new(LineAtlas::new())),
-            pattern_atlas: Rc::new(RefCell::new(PatternAtlas::new())),
+            atlases: Atlases::default(),
             style: None,
             sources_by_id: Vec::new(),
             render_sources: HashMap::default(),
@@ -268,13 +264,9 @@ impl RenderOrchestrator {
         self.render_sources.get(id).map(AsRef::as_ref)
     }
 
-    /// The orchestrator's line atlas.
-    pub(crate) fn get_line_atlas(&self) -> &Rc<RefCell<LineAtlas>> {
-        &self.line_atlas
-    }
-
-    pub(crate) fn get_pattern_atlas(&self) -> &Rc<RefCell<PatternAtlas>> {
-        &self.pattern_atlas
+    /// The atlases the layers' draws share.
+    pub(crate) fn atlases(&self) -> &Atlases {
+        &self.atlases
     }
 
     /// The first phase of a frame: brings the orchestrator to
@@ -480,12 +472,11 @@ impl RenderOrchestrator {
             let source = source.map(|(id, source)| (id.as_str(), &**source));
             let source_contents = contents.of(source, &self.tile_store);
             let source = source.map(|(_, source)| source);
-            frame_layer.tile_order = render_layer.update(&LayerUpdateParameters {
+            frame_layer.tile_order = render_layer.update(&mut LayerUpdateParameters {
                 source,
                 contents: source_contents,
                 images: self.tile_store.images(),
-                pattern_atlas: &self.pattern_atlas,
-                line_atlas: &self.line_atlas,
+                atlases: &mut self.atlases,
             });
             if render_layer.needs_placement() {
                 placed.leaders.push(index);
@@ -626,7 +617,7 @@ impl RenderOrchestrator {
         let mut relayout_images: HashSet<String> = HashSet::default();
         for id in image_diff.removed.keys() {
             images.remove_image(id);
-            self.pattern_atlas.borrow_mut().remove_pattern(id);
+            self.atlases.pattern.remove_pattern(id);
             relayout_images.insert(id.clone());
         }
         for image in image_diff.added.values() {
@@ -636,7 +627,7 @@ impl RenderOrchestrator {
         let mut patched = Vec::new();
         for image in image_diff.changed.values() {
             if images.update_image(Arc::clone(image)) {
-                self.pattern_atlas.borrow_mut().remove_pattern(&image.id);
+                self.atlases.pattern.remove_pattern(&image.id);
                 relayout_images.insert(image.id.clone());
             }
             patched.push(Arc::clone(image));
@@ -1100,12 +1091,11 @@ impl RenderOrchestrator {
         self.layer_indexes.clear();
 
         self.cross_tile_symbol_index.reset();
-        if !self.line_atlas.borrow().is_empty() {
-            self.line_atlas = Rc::new(RefCell::new(LineAtlas::new()));
+        if !self.atlases.line.is_empty() {
+            self.atlases.line = LineAtlas::new();
         }
-
-        if !self.pattern_atlas.borrow().is_empty() {
-            self.pattern_atlas = Rc::new(RefCell::new(PatternAtlas::new()));
+        if !self.atlases.pattern.is_empty() {
+            self.atlases.pattern = PatternAtlas::new();
         }
 
         self.tile_store.images_mut().clear();
@@ -1123,9 +1113,12 @@ impl RenderOrchestrator {
         self.globe_depth_pass = GlobeDepthPass::default();
     }
 
-    /// Makes the atlas's GPU textures and uploads what its pages queued.
-    pub(crate) fn upload_atlas(&mut self, context: &Context) {
+    /// Makes the GPU textures of the tiles' atlas and of the layers'
+    /// atlases, and uploads what they queued.
+    pub(crate) fn upload_atlases(&mut self, context: &Context) {
         self.tile_store.atlas().upload(context);
+        self.atlases.line.upload(context);
+        self.atlases.pattern.upload(context);
     }
 
     /// Takes in what arrived for the tiles, and starts the jobs that it
@@ -1266,7 +1259,7 @@ impl RenderOrchestrator {
                     None => source.get_image_render_data().map(LayerSource::Image),
                 }
             });
-            render_layer.update_draws(paint_parameters, update_parameters, layer_source);
+            render_layer.update_draws(paint_parameters, &self.atlases, update_parameters, layer_source);
             has_3d = has_3d || render_layer.needs_globe_depth();
         }
         let shaders = &paint_parameters.static_data.shaders;

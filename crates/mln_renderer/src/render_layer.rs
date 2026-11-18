@@ -5,7 +5,6 @@
 // what the engine does around the hooks, the same for every type. The
 // orchestrator owns the render layers, in the style's order.
 
-use std::cell::RefCell;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -331,6 +330,16 @@ impl<'a, T: 'a> LayerTiles<'a, T> {
     }
 }
 
+/// The atlases that the layers' draws share: the line atlas of the dash
+/// patterns of `line-dasharray`s that don't differ by feature, and the
+/// pattern atlas of `background-pattern`s. A frame's update adds what its
+/// layers draw, and its encode uploads them and binds their textures.
+#[derive(Default)]
+pub(crate) struct Atlases {
+    pub(crate) line: LineAtlas,
+    pub(crate) pattern: PatternAtlas,
+}
+
 /// What a layer reads in the frame's update, besides its tiles.
 pub(crate) struct LayerUpdateParameters<'a> {
     /// The layer's source, `None` for a layer without one or a source type
@@ -340,8 +349,8 @@ pub(crate) struct LayerUpdateParameters<'a> {
     pub(crate) contents: &'a [Option<&'a Contents>],
     /// The images of the style.
     pub(crate) images: &'a crate::image_store::ImageStore,
-    pub(crate) pattern_atlas: &'a RefCell<PatternAtlas>,
-    pub(crate) line_atlas: &'a RefCell<LineAtlas>,
+    /// The atlases, to add what the layer draws to.
+    pub(crate) atlases: &'a mut Atlases,
 }
 
 impl<'a> LayerUpdateParameters<'a> {
@@ -454,7 +463,7 @@ pub(crate) trait TypedLayer {
     /// source, or for an image source. The layer collects here what the
     /// update needs of its tiles' buckets, such as their dash patterns or
     /// their symbols.
-    fn update(&mut self, _parameters: &LayerUpdateParameters<'_>, _tiles: Option<LayerTiles<'_, Self::Type>>) {}
+    fn update(&mut self, _parameters: &mut LayerUpdateParameters<'_>, _tiles: Option<LayerTiles<'_, Self::Type>>) {}
 
     /// Makes the layer's draws of the frame, in the frame's encode, from
     /// what it draws of its `source`: the frame's tiles of the layer, in the
@@ -463,6 +472,7 @@ pub(crate) trait TypedLayer {
     fn update_draws(
         &mut self,
         _parameters: &PaintParameters<'_>,
+        _atlases: &Atlases,
         _update_parameters: &UpdateParameters,
         _source: Option<LayerSource<'_, Self::Type>>,
     ) {
@@ -516,12 +526,13 @@ pub(crate) trait LayerParts {
     /// for to the layer's, runs the layer's [`TypedLayer::update`], and
     /// keeps entries for the tiles. Returns the order the layer draws the
     /// tiles in, `None` for a layer without a source.
-    fn update(&mut self, parameters: &LayerUpdateParameters<'_>) -> Option<TileOrder>;
+    fn update(&mut self, parameters: &mut LayerUpdateParameters<'_>) -> Option<TileOrder>;
 
     /// Runs the layer's [`TypedLayer::update_draws`] with `source`.
     fn update_draws(
         &mut self,
         parameters: &PaintParameters<'_>,
+        atlases: &Atlases,
         update_parameters: &UpdateParameters,
         source: Option<LayerSource<'_>>,
     );
@@ -634,7 +645,7 @@ impl<L: TypedLayer> LayerParts for L {
         L::Type::CROSSFADES && self.parts().values.evaluated.crossfade.t != 1.0
     }
 
-    fn update(&mut self, parameters: &LayerUpdateParameters<'_>) -> Option<TileOrder> {
+    fn update(&mut self, parameters: &mut LayerUpdateParameters<'_>) -> Option<TileOrder> {
         let order = parameters.source.map(|source| {
             debug_assert!(source.is_enabled());
             L::TILE_ORDER
@@ -659,10 +670,11 @@ impl<L: TypedLayer> LayerParts for L {
     fn update_draws(
         &mut self,
         parameters: &PaintParameters<'_>,
+        atlases: &Atlases,
         update_parameters: &UpdateParameters,
         source: Option<LayerSource<'_>>,
     ) {
-        TypedLayer::update_draws(self, parameters, update_parameters, source.map(LayerSource::typed));
+        TypedLayer::update_draws(self, parameters, atlases, update_parameters, source.map(LayerSource::typed));
     }
 
     fn mark_changed(&mut self, changed: &ChangedBuckets) {

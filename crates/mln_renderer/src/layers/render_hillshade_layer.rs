@@ -56,7 +56,7 @@ use crate::layer_drawing::{
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{
+use crate::render_layer::{Atlases, 
     LayerParts, LayerSource, LayerTiles, LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer,
     RenderLayerBase, TypedLayer,
 };
@@ -308,6 +308,7 @@ impl TypedLayer for RenderHillshadeLayer {
     fn update_draws(
         &mut self,
         paint_parameters: &PaintParameters<'_>,
+        _atlases: &Atlases,
         _update_parameters: &UpdateParameters,
         source: Option<LayerSource<'_, Hillshade>>,
     ) {
@@ -495,7 +496,7 @@ impl TypedLayer for RenderHillshadeLayer {
     }
 
     /// Keeps the source's maximum zoom, which the DEMs' preparation reads.
-    fn update(&mut self, params: &LayerUpdateParameters<'_>, _tiles: Option<LayerTiles<'_, Hillshade>>) {
+    fn update(&mut self, params: &mut LayerUpdateParameters<'_>, _tiles: Option<LayerTiles<'_, Hillshade>>) {
         if let Some(source) = params.source {
             self.maxzoom = source.get_max_zoom();
         }

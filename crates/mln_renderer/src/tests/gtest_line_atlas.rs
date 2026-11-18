@@ -137,7 +137,7 @@ fn random() {
             let pattern_cap =
                 if cap_style_distribution(&mut generator) > 0 { LinePatternCap::Round } else { LinePatternCap::Square };
 
-            atlas.get_dash_pattern_texture(&dasharray, &dasharray, pattern_cap);
+            atlas.add(&dasharray, &dasharray, pattern_cap);
         }
     }
 }
