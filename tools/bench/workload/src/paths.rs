@@ -27,6 +27,10 @@ pub enum Path {
     /// meet, and its view stays inside them; at a steeper tilt it would see
     /// more. It ends where it starts.
     Street,
+    /// Downtown San Francisco at zoom 22, eight zooms past its tiles' 14,
+    /// tilted to 60 degrees: the camera turns a full circle over the corner
+    /// where four tiles of zoom 14 meet, by Union Square.
+    Overzoom,
     /// The whole globe (zoom 1.5) turning 120 degrees of longitude under the
     /// camera, which turns and tilts to 30 degrees and back.
     Globe,
@@ -54,8 +58,8 @@ pub enum Path {
 
 impl Path {
     /// Every path.
-    pub const ALL: [Path; 6] =
-        [Path::Street, Path::Globe, Path::Antimeridian, Path::Earthquakes, Path::Terrain, Path::Labels];
+    pub const ALL: [Path; 7] =
+        [Path::Street, Path::Overzoom, Path::Globe, Path::Antimeridian, Path::Earthquakes, Path::Terrain, Path::Labels];
 
     /// The path named `name`, such as `street`.
     pub fn parse(name: &str) -> Result<Path, String> {
@@ -69,6 +73,7 @@ impl Path {
     pub fn name(self) -> &'static str {
         match self {
             Path::Street => "street",
+            Path::Overzoom => "overzoom",
             Path::Globe => "globe",
             Path::Antimeridian => "antimeridian",
             Path::Earthquakes => "earthquakes",
@@ -81,7 +86,7 @@ impl Path {
     #[must_use]
     pub fn style(self, snapshot: &Snapshot) -> String {
         match self {
-            Path::Street => snapshot.style(Tiles::Street),
+            Path::Street | Path::Overzoom => snapshot.style(Tiles::Street),
             Path::Globe => snapshot.globe_style(),
             Path::Antimeridian => snapshot.style(Tiles::World),
             Path::Earthquakes => snapshot.earthquakes_style(),
@@ -93,6 +98,10 @@ impl Path {
     /// The camera of each of the path's [`FRAMES`] frames, by its index.
     pub fn camera(self, snapshot: &Snapshot) -> impl Fn(usize) -> CameraOptions + use<> {
         let corner = match self {
+            Path::Overzoom => {
+                let (x, y) = tile_at(13, LatLng::new(37.785, -122.4075).expect("Union Square"));
+                tile_center(13, x, y)
+            }
             Path::Street => {
                 let (x, y) = tile_at(12, snapshot.area_center(Tiles::Street));
                 tile_center(12, x, y)
@@ -118,6 +127,13 @@ impl Path {
                         ..Default::default()
                     }
                 }
+                Path::Overzoom => CameraOptions {
+                    center: Some(corner),
+                    zoom: Some(22.0),
+                    bearing: Some(360.0 * t),
+                    pitch: Some(60.0),
+                    ..Default::default()
+                },
                 Path::Globe => {
                     let wave = (std::f64::consts::PI * t).sin();
                     CameraOptions {

@@ -17,6 +17,12 @@ pub(crate) const SCENARIOS: &[Scenario] = &[
         run: street,
     },
     Scenario {
+        name: "macro/frame/overzoom",
+        kind: Kind::Macro,
+        question: "What does a frame of a city's streets cost far past its tiles' maximum zoom, tilted, while the camera turns over loaded tiles?",
+        run: overzoom,
+    },
+    Scenario {
         name: "macro/frame/globe",
         kind: Kind::Macro,
         question: "What does a frame of the globe cost while it turns and tilts over loaded tiles?",
@@ -54,6 +60,15 @@ pub(crate) const SCENARIOS: &[Scenario] = &[
 /// placement, draw calls and the GPU finishing it.
 fn street(bench: &mut Bench) {
     path(bench, Path::Street);
+}
+
+/// The question: what does a frame of downtown San Francisco cost at zoom
+/// 22, eight zooms past its tiles' 14 and tilted to 60 degrees, while the
+/// camera turns over loaded tiles ([`Path::Overzoom`])? The tiles in view
+/// are drawn many times their size, so what a tile's symbols cost per frame
+/// shows here as it does at no other zoom. One measured unit is one frame.
+fn overzoom(bench: &mut Bench) {
+    path(bench, Path::Overzoom);
 }
 
 /// The question: what does a frame of the whole globe cost while it turns
