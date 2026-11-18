@@ -66,12 +66,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # The C compiler and libc headers for `mise run check:32bit`'s C
-      # dependencies, and libclang for `mise run generate:c-abi`.
+      # libclang for `mise run generate:c-abi`.
       - name: Install system packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends gcc-i686-linux-gnu libc6-dev-i386-cross libclang-dev
+          sudo apt-get install -y --no-install-recommends libclang-dev
 
       # The tools that mise.toml pins, Rust from rust-toolchain.toml among
       # them, at the versions mise.lock records.

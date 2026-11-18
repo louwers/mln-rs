@@ -13,6 +13,10 @@
 //!
 //! The crate is empty on Apple platforms and in the browser build.
 
+#![cfg_attr(
+    any(target_vendor = "apple", target_family = "wasm"),
+    expect(rustdoc::broken_intra_doc_links, reason = "the crate docs link to items that these targets compile out")
+)]
 #![cfg(not(any(target_vendor = "apple", target_family = "wasm")))]
 
 mod front_end;

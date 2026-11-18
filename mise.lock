@@ -501,3 +501,33 @@ specifiers = ["1.99.1"]
 components = "clippy,rustfmt"
 profile = "minimal"
 targets = "wasm32-unknown-unknown"
+
+[[tools.zig]]
+version = "0.17.1"
+backend = "core:zig"
+specifiers = ["0.17.1"]
+
+[tools.zig."platforms.linux-arm64"]
+checksum = "sha256:a1546d5646eb184437918d6635ca6b762a0e889eac09cef720ee7a1ed3fe7795"
+url = "https://ziglang.org/download/0.17.1/zig-aarch64-linux-0.17.1.tar.xz"
+provenance = "minisign"
+
+[tools.zig."platforms.linux-x64"]
+checksum = "sha256:3581863e3cbcfd0fce0efc682ce7e9e93da96668a977791d356a26d2a7e9b17a"
+url = "https://ziglang.org/download/0.17.1/zig-x86_64-linux-0.17.1.tar.xz"
+provenance = "minisign"
+
+[tools.zig."platforms.macos-arm64"]
+checksum = "sha256:75f1bc7a1e9852f17ec9a0c1895f767c4ec56d46bc8a834920eece1d0359dd8d"
+url = "https://ziglang.org/download/0.17.1/zig-aarch64-macos-0.17.1.tar.xz"
+provenance = "minisign"
+
+[tools.zig."platforms.windows-arm64"]
+checksum = "sha256:4789895bdb1e312a2ea73b2a7c0a0cc8d2ab62ba6976e834a7c54cf443377c15"
+url = "https://ziglang.org/download/0.17.1/zig-aarch64-windows-0.17.1.zip"
+provenance = "minisign"
+
+[tools.zig."platforms.windows-x64"]
+checksum = "sha256:b03f477a1943673e02aca0f570e8030dffd536ce1f45cbc4d3326ec31159562e"
+url = "https://ziglang.org/download/0.17.1/zig-x86_64-windows-0.17.1.zip"
+provenance = "minisign"

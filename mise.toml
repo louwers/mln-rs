@@ -71,10 +71,13 @@ run = "hk fix --all"
 
 # The C library as maplibre-native-ffi's 32-bit presets build it (Android's
 # armeabi-v7a and x86): a type whose size a dependency asserts, or a cast that
-# assumes a 64-bit usize, fails here. Needs a C compiler for the target, for
-# SQLite: i686-linux-gnu-gcc, or the one CC_i686_unknown_linux_gnu names.
+# assumes a 64-bit usize, fails here. ring's and SQLite's C build with Zig's
+# clang (tools/zig-cc-x86-linux.sh), unless CC_i686_unknown_linux_gnu and
+# AR_i686_unknown_linux_gnu name another compiler and archiver.
 [tasks."check:32bit"]
 description = "Lint the C library for 32-bit Linux"
+tools = { "core:zig" = "0.17.1" }
+env = { CC_i686_unknown_linux_gnu = "{{ get_env(name='CC_i686_unknown_linux_gnu', default=config_root ~ '/tools/zig-cc-x86-linux.sh') }}", AR_i686_unknown_linux_gnu = "{{ get_env(name='AR_i686_unknown_linux_gnu', default='zig ar') }}" }
 run = [
   "rustup target add i686-unknown-linux-gnu",
   "cargo clippy --target i686-unknown-linux-gnu -p mln-rs-c",
