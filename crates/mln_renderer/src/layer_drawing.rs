@@ -121,7 +121,9 @@ impl TileSet {
     /// which `moves` then says.
     fn set_tiles(&mut self) -> bool {
         let incoming = &mut self.incoming;
-        incoming.sort_unstable();
+        // The stable sort, which the renderer's other sorts of tile ids
+        // share, allocates nothing for a frame's tens of tiles.
+        incoming.sort();
         incoming.dedup();
         let keys = self.tiles.keys().as_slice();
         if keys == incoming.as_slice() {
@@ -135,7 +137,13 @@ impl TileSet {
             }
             self.moves.push(keys.get(old).filter(|key| *key == id).map(|_| old));
         }
-        self.tiles.retain(|id, _| incoming.binary_search(id).is_ok());
+        // The tiles that stay, whose old indexes go up in `moves`.
+        let (mut kept, mut index) = (self.moves.iter().flatten().peekable(), 0);
+        self.tiles.retain(|_, _| {
+            let keep = kept.next_if_eq(&&index).is_some();
+            index += 1;
+            keep
+        });
         for (id, old) in incoming.iter().zip(&self.moves) {
             if old.is_none() {
                 self.tiles.insert(*id, TileState::default());
@@ -152,13 +160,20 @@ impl TileSet {
         if self.tiles.map_keys_in_order(shift) {
             return false;
         }
-        let mut shifted: Vec<(OverscaledTileID, usize)> = self.tiles.keys().map(shift).zip(0..).collect();
-        shifted.sort_unstable();
-        let mut states: Vec<Option<TileState>> =
-            std::mem::take(&mut self.tiles).into_iter().map(|(_, state)| Some(state)).collect();
+        // The shifted ids, in their old order.
+        self.incoming.clear();
+        for (id, state) in std::mem::take(&mut self.tiles) {
+            let id = shift(&id);
+            self.incoming.push(id);
+            self.tiles.insert(id, state);
+        }
         self.moves.clear();
-        self.moves.extend(shifted.iter().map(|&(_, old)| Some(old)));
-        self.tiles = shifted.into_iter().map(|(id, old)| (id, states[old].take().unwrap_or_default())).collect();
+        self.moves.resize(self.tiles.len(), None);
+        for (old, id) in self.incoming.iter().enumerate() {
+            if let Some(new) = self.tiles.index_of(id) {
+                self.moves[new] = Some(old);
+            }
+        }
         true
     }
 
