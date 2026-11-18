@@ -7,7 +7,6 @@ use std::sync::Arc;
 
 use mln_map_types::MapDebugOptions;
 use mln_style::Source;
-use mln_util::constants;
 use mln_util::error::Error;
 
 use crate::bucket::UploadNeeds;
@@ -22,12 +21,12 @@ use crate::tile::job::SourceKey;
 use crate::tile::store::TileStore;
 use crate::tile_parameters::TileParameters;
 
-pub(crate) struct SourcePrepareParameters<'a> {
+pub(crate) struct RenderTileParameters<'a> {
     pub(crate) transform: &'a TransformParameters,
     pub(crate) debug_options: MapDebugOptions,
     pub(crate) source_name: String,
     /// Whether a layer of the frame draws the source's tiles in
-    /// [`TileOrder::ByY`], which `prepare` then sorts them in.
+    /// [`TileOrder::ByY`], which `update_render_tiles` then sorts them in.
     pub(crate) sort_by_y: bool,
 }
 
@@ -69,7 +68,7 @@ pub(crate) trait RenderSource {
     );
 
     /// Makes the source's render tiles of the frame.
-    fn prepare(&mut self, store: &mut TileStore, parameters: &SourcePrepareParameters<'_>);
+    fn update_render_tiles(&mut self, store: &mut TileStore, parameters: &RenderTileParameters<'_>);
 
     /// Readies the buckets the frame draws, before its layers make their
     /// draws, which read what `needs` says, uploading their indexes through
@@ -80,7 +79,7 @@ pub(crate) trait RenderSource {
     /// sources that have none (the image source).
     fn update_debug_draws(&self, _debug_layers: &mut DebugLayers, _parameters: &PaintParameters<'_>) {}
 
-    /// Releases the render data from the last `prepare` while the source is
+    /// Releases the render data from the last `update_render_tiles` while the source is
     /// disabled.
     fn release_render_data(&mut self) {}
 
@@ -89,7 +88,7 @@ pub(crate) trait RenderSource {
         None
     }
 
-    /// The source's render tiles, as of the last `prepare`.
+    /// The source's render tiles, as of the last `update_render_tiles`.
     fn render_tiles(&self) -> &[RenderTile] {
         &[]
     }
@@ -122,10 +121,9 @@ pub(crate) trait RenderSource {
 
     fn dump_debug_logs(&self);
 
-    fn max_zoom(&self) -> u8 {
-        debug_assert!(false);
-        constants::TERRAIN_RGB_MAXZOOM
-    }
+    /// The deepest zoom the source has tiles of; `None` for a source without
+    /// tiles.
+    fn max_zoom(&self) -> Option<u8>;
 
     fn is_enabled(&self) -> bool {
         self.base().enabled

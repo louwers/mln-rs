@@ -37,7 +37,7 @@ use crate::line_atlas::LineAtlas;
 use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;
 use crate::render_layer::{Atlases, LayerSource, LayerTiles, LayerUpdateParameters, RenderLayer};
-use crate::render_source::{self, RenderSource, SourcePrepareParameters, TileOrder};
+use crate::render_source::{self, RenderSource, RenderTileParameters, TileOrder};
 use crate::render_tile::RenderTile;
 use crate::renderer_event::RendererEvent;
 use crate::sources::render_tile_source::{DebugLayer, DebugLayers};
@@ -287,8 +287,8 @@ impl RenderOrchestrator {
         self.receive_tiles();
 
         self.update_light_and_sky(style, &clock);
-        frame.light = self.render_light.get_evaluated().clone();
-        frame.sky = self.render_sky.as_ref().map(|render_sky| render_sky.get_evaluated().clone());
+        frame.light = self.render_light.evaluated().clone();
+        frame.sky = self.render_sky.as_ref().map(|render_sky| render_sky.evaluated().clone());
 
         // The previous sources may hold the last references to replaced
         // data, such as a GeoJSON source's index, which can take
@@ -371,7 +371,7 @@ impl RenderOrchestrator {
         // The buckets whose vertex data the frame's feature state and symbol
         // placement change, which the draws that copied it copy again.
         let mut changed_buckets = ChangedBuckets::default();
-        self.prepare_sources(&frame, &mut changed_buckets);
+        self.update_render_tiles(&frame, &mut changed_buckets);
         let placed = self.update_layer_tiles(update_parameters, &mut frame);
 
         frame.symbols_started = Instant::now();
@@ -420,7 +420,7 @@ impl RenderOrchestrator {
     /// sources', recording the buckets it changes in `changed_buckets`, and
     /// computes their tiles' matrices for the frame. A source that a layer
     /// of the frame draws in [`TileOrder::ByY`] sorts its tiles so.
-    fn prepare_sources(&mut self, frame: &Frame, changed_buckets: &mut ChangedBuckets) {
+    fn update_render_tiles(&mut self, frame: &Frame, changed_buckets: &mut ChangedBuckets) {
         let mut sorted_by_y: SmallVec<[&str; 4]> = SmallVec::new();
         for (&index, frame_layer) in &frame.layers {
             if let Some(source) = frame_layer.source.as_deref()
@@ -436,9 +436,9 @@ impl RenderOrchestrator {
                 if let Some((tiles, _)) = render_source.tiles().and_then(|key| self.tile_store.source_mut(key)) {
                     tiles.coalesce_feature_state(changed_buckets);
                 }
-                render_source.prepare(
+                render_source.update_render_tiles(
                     &mut self.tile_store,
-                    &SourcePrepareParameters {
+                    &RenderTileParameters {
                         transform: &frame.transform,
                         debug_options: frame.debug_options,
                         source_name: name.clone(),
@@ -1004,7 +1004,7 @@ impl RenderOrchestrator {
                 self.placement_controller.set_placement_stale();
             }
             frame.symbol_fade_change =
-                self.placement_controller.get_placement().symbol_fade_change(update_parameters.time_point);
+                self.placement_controller.placement().symbol_fade_change(update_parameters.time_point);
             frame.needs_repaint = self.has_transitions(update_parameters.time_point);
         } else {
             frame.placement_changed = !layers_need_placement.is_empty();
@@ -1217,7 +1217,7 @@ impl RenderOrchestrator {
             }
         }
         for debug in self.debug_layers.values_mut() {
-            debug.prepare(parameters);
+            debug.update_draws(parameters);
         }
     }
 
@@ -1335,11 +1335,11 @@ impl RenderOrchestrator {
         if cross_tile_symbol_index_layers.is_empty() {
             return Ok(());
         }
-        let placement = self.placement_controller.get_placement();
-        let mut rendered_symbols = placement.get_collision_index().query_rendered_symbols(&geometry.to_vec());
+        let placement = self.placement_controller.placement();
+        let mut rendered_symbols = placement.collision_index().query_rendered_symbols(&geometry.to_vec());
         let mut bucket_query_data = Vec::with_capacity(rendered_symbols.len());
         for bucket_instance_id in rendered_symbols.keys() {
-            bucket_query_data.push(placement.get_query_data(*bucket_instance_id).map_err(Error::native)?);
+            bucket_query_data.push(placement.query_data(*bucket_instance_id).map_err(Error::native)?);
         }
         // Symbols sort only within their bucket, so the buckets go in the
         // order of their tiles for a predictable order of all of them.
@@ -1436,7 +1436,7 @@ impl RenderOrchestrator {
 
     /// A copy of the placed symbols' data (the placement is shared).
     pub(crate) fn placed_symbols_data(&self) -> Vec<crate::text::placement::PlacedSymbolData> {
-        self.placement_controller.get_placement().get_placed_symbols_data().to_vec()
+        self.placement_controller.placement().placed_symbols_data().to_vec()
     }
 
     /// Queries the features of the source `source_id`. `Err`: as

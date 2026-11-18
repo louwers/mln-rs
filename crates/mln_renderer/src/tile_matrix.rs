@@ -28,11 +28,16 @@ pub(crate) fn bind_no_projection(layer_uniforms: &mut UniformBufferArray, contex
     }
 }
 
+/// The matrix that draws geometry of the tile `tile_id` in the frame of
+/// `parameters`: translated by `translation`, anchored as `anchor` says, in
+/// tile units or viewport pixels, from `origin` in the tile where it has
+/// one, and projected with the near-clipped or pixel-aligned projection
+/// matrix where those say so.
 #[expect(
     clippy::too_many_arguments,
     reason = "the tile, the paint parameters and the translation, origin, clipping and alignment options of its matrix"
 )]
-pub(crate) fn get_tile_matrix(
+pub(crate) fn tile_matrix(
     tile_id: &UnwrappedTileID,
     parameters: &PaintParameters<'_>,
     translation: [f32; 2],
@@ -42,7 +47,7 @@ pub(crate) fn get_tile_matrix(
     origin: Option<Point<f64>>,
     aligned: bool,
 ) -> Mat4 {
-    get_tile_matrix_for(
+    tile_matrix_for(
         tile_id,
         parameters.state,
         parameters.transform_params,
@@ -61,7 +66,7 @@ pub(crate) fn get_tile_matrix(
     clippy::too_many_arguments,
     reason = "the tile, the paint parameters and the translation, origin, clipping and alignment options of its projection"
 )]
-pub(crate) fn get_projection_data(
+pub(crate) fn projection_data(
     tile_id: &UnwrappedTileID,
     parameters: &PaintParameters<'_>,
     translation: [f32; 2],
@@ -73,23 +78,14 @@ pub(crate) fn get_projection_data(
 ) -> ProjectionData {
     let mut data = parameters.state.get_projection_data_for_matrix(
         tile_id,
-        &get_tile_matrix(
-            tile_id,
-            parameters,
-            translation,
-            anchor,
-            near_clipped,
-            in_viewport_pixel_units,
-            origin,
-            aligned,
-        ),
+        &tile_matrix(tile_id, parameters, translation, anchor, near_clipped, in_viewport_pixel_units, origin, aligned),
     );
     if !in_viewport_pixel_units {
         let translate = RenderTile::tile_unit_translation(tile_id, translation, anchor, parameters.state);
         data.translate = [f64::from(translate[0]), f64::from(translate[1])];
     }
-    // MLN_GLOBE_DEPTH_OFFSET_IN_SHADER is off, as on OpenGL: a draw's
-    // depth range keeps the layers apart, so the shader's depth shift stays 0.
+    // A draw's depth range keeps the layers apart, so the shader's depth
+    // offset stays 0.
     data
 }
 
@@ -106,7 +102,7 @@ pub(crate) fn to_projection_ubo(data: &ProjectionData) -> ProjectionUBO {
     }
 }
 
-/// Radians per pixel on the sphere for a tile, as GL JS `globeExtrudeScale`.
+/// Radians per pixel on the sphere for a tile.
 /// `latitude_scale` is the cosine of the center latitude on the globe and 1
 /// on Mercator.
 #[must_use]
@@ -116,13 +112,13 @@ pub(crate) fn globe_extrude_scale(tile_id: &UnwrappedTileID, zoom: f32, latitude
         * latitude_scale) as f32
 }
 
-/// The static `getTileMatrix(tileID, transformState, transformParams, ...)`
-/// overload.
+/// [`tile_matrix`] in `transform_state`'s view, projected with the
+/// matrices of `transform_params`.
 #[expect(
     clippy::too_many_arguments,
     reason = "the tile, the transform and the translation, origin, clipping and alignment options of its matrix"
 )]
-pub(crate) fn get_tile_matrix_for(
+pub(crate) fn tile_matrix_for(
     tile_id: &UnwrappedTileID,
     transform_state: &TransformState,
     transform_params: &TransformParameters,
@@ -133,7 +129,6 @@ pub(crate) fn get_tile_matrix_for(
     in_viewport_pixel_units: bool,
     aligned: bool,
 ) -> Mat4 {
-    // from RenderTile::prepare
     let mut tile_matrix = transform_state.matrix_for(tile_id);
     if let Some(origin) = origin {
         let a = tile_matrix;

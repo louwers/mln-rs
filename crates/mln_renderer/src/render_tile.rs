@@ -1,10 +1,10 @@
 // A render tile is a tile as a frame draws it: where it draws, its
 // matrices, and what it copies of the tile and its render entry (its id,
-// hold-for-fade state and whether it draws a visible layer) when it is
-// created and prepared. It lives in its render source, apart from the tile
-// store. The frame's phases look the tile's contents up in the store by the
-// tile's slot and id (`FrameTile`); the store changes them only in the
-// frame's update, before the layers read them.
+// hold-for-fade state and whether it draws a visible layer) when the
+// frame's update makes it. It lives in its render source, apart from the
+// tile store. The frame's phases look the tile's contents up in the store
+// by the tile's slot and id (`FrameTile`); the store changes them only in
+// the frame's update, before the layers read them.
 
 use std::sync::Arc;
 
@@ -24,7 +24,7 @@ use crate::layer_type::LayerType;
 use crate::paint_parameters::TransformParameters;
 use crate::render_layer::LayerBucket;
 use crate::render_pass::RenderPass;
-use crate::render_source::SourcePrepareParameters;
+use crate::render_source::RenderTileParameters;
 use crate::tile::contents::Contents;
 use crate::tile::tile::Tile;
 use crate::tile_render_data::TileAtlasTextures;
@@ -48,13 +48,13 @@ pub(crate) struct RenderTile {
 
 impl RenderTile {
     /// The render tile of `tile`, at `slot` of its source's tiles, drawn as
-    /// `id`, before it is prepared.
+    /// `id`, before its first update.
     pub(crate) fn new(id: UnwrappedTileID, tile: &Tile, slot: usize, hold_for_fade: bool) -> Self {
         RenderTile { slot: Some(slot), ..RenderTile::of_tile_id(id, tile.id, hold_for_fade) }
     }
 
     /// The render tile of the tile `tile_id`, drawn as `id`, before it is
-    /// prepared, which isn't among a source's tiles.
+    /// updated, which isn't among a source's tiles.
     pub(crate) fn of_tile_id(id: UnwrappedTileID, tile_id: OverscaledTileID, hold_for_fade: bool) -> Self {
         RenderTile {
             id,
@@ -90,7 +90,7 @@ impl RenderTile {
         &self.tile_id
     }
 
-    /// Where the tile is among its source's, as of `prepare`; `None` for a
+    /// Where the tile is among its source's, as of its last update; `None` for a
     /// tile that isn't among a source's.
     #[must_use]
     pub(crate) fn slot(&self) -> Option<usize> {
@@ -107,9 +107,9 @@ impl RenderTile {
         self.needs_rendering
     }
 
-    /// Prepares the render tile for drawing; `tile` is the tile it was
+    /// Updates the render tile for the frame; `tile` is the tile it was
     /// created for.
-    pub(crate) fn prepare(&mut self, tile: &Tile, needs_rendering: bool, parameters: &SourcePrepareParameters<'_>) {
+    pub(crate) fn update(&mut self, tile: &Tile, needs_rendering: bool, parameters: &RenderTileParameters<'_>) {
         self.needs_rendering = needs_rendering;
         let (modified, expires) = tile.load.freshness();
 

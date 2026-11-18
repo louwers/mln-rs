@@ -49,7 +49,7 @@ use crate::render_layer::{
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::sources::render_image_source::ImageSourceRenderData;
-use crate::tile_matrix::{get_projection_data, to_projection_ubo};
+use crate::tile_matrix::{projection_data, to_projection_ubo};
 
 /// What the layer keeps of a tile: its draw, and when the draw was built.
 pub(crate) struct RasterTile {
@@ -275,7 +275,7 @@ impl RenderRasterLayer {
 
     /// The entries in the layer's storage buffers of a draw of `tile_id`.
     fn uniforms(tile_id: &UnwrappedTileID, parameters: &PaintParameters<'_>) -> (RasterDrawableUBO, ProjectionUBO) {
-        let projection = get_projection_data(
+        let projection = projection_data(
             tile_id,
             parameters,
             [0.0, 0.0],

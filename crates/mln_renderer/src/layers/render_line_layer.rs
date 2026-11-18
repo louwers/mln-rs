@@ -53,7 +53,7 @@ use crate::render_layer::{
 };
 use crate::render_pass::RenderPass;
 use crate::render_tile::FrameTile;
-use crate::tile_matrix::{get_projection_data, to_projection_ubo};
+use crate::tile_matrix::{projection_data, to_projection_ubo};
 
 /// What a line draws: its shader and the uniforms it reads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -767,7 +767,7 @@ impl RenderLineLayer {
         let pixel_scale = state.get_projection().pixel_scale(state) as f32;
         let tile_id = tile.id().to_unwrapped();
 
-        let projection = get_projection_data(
+        let projection = projection_data(
             &tile_id,
             parameters,
             *evaluated.line_translate.uniform(),

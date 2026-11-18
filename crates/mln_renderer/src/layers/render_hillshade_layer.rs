@@ -62,9 +62,10 @@ use crate::render_layer::{
     RenderLayerBase, TypedLayer,
 };
 use crate::render_pass::RenderPass;
+use crate::render_source::RenderSource;
 use crate::render_static_data::RenderStaticData;
 use crate::render_target::RenderTarget;
-use crate::tile_matrix::{bind_no_projection, get_projection_data, to_projection_ubo};
+use crate::tile_matrix::{bind_no_projection, projection_data, to_projection_ubo};
 
 const HILLSHADE_PREPARE_SHADER_GROUP_NAME: &str = "HillshadePrepareShader";
 const HILLSHADE_SHADER_GROUP_NAME: &str = "HillshadeShader";
@@ -510,8 +511,8 @@ impl TypedLayer for RenderHillshadeLayer {
 
     /// Keeps the source's maximum zoom, which the DEMs' preparation reads.
     fn update(&mut self, params: &mut LayerUpdateParameters<'_>, _tiles: Option<LayerTiles<'_, Hillshade>>) {
-        if let Some(source) = params.source {
-            self.maxzoom = source.max_zoom();
+        if let Some(max_zoom) = params.source.and_then(RenderSource::max_zoom) {
+            self.maxzoom = max_zoom;
         }
     }
 
@@ -624,16 +625,8 @@ impl RenderHillshadeLayer {
         num_lights: usize,
         parameters: &PaintParameters<'_>,
     ) -> HillshadeUniforms {
-        let projection = get_projection_data(
-            tile_id,
-            parameters,
-            [0.0, 0.0],
-            TranslateAnchorType::Viewport,
-            false,
-            false,
-            None,
-            true,
-        );
+        let projection =
+            projection_data(tile_id, parameters, [0.0, 0.0], TranslateAnchorType::Viewport, false, false, None, true);
         HillshadeUniforms {
             draw_ubo: HillshadeDrawableUBO { matrix: cast_matrix(&projection.fallback_matrix) },
             tile_props: HillshadeTilePropsUBO {

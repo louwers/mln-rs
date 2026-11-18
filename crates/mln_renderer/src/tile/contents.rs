@@ -557,7 +557,7 @@ impl Contents {
 
     /// The bucket of `layer_impl`'s layer: a raster or raster-dem tile's
     /// for any layer.
-    pub(crate) fn get_bucket(&self, layer_impl: &dyn ErasedLayerStyle) -> Option<&dyn Bucket> {
+    pub(crate) fn bucket(&self, layer_impl: &dyn ErasedLayerStyle) -> Option<&dyn Bucket> {
         match self {
             Contents::Geometry(contents) => contents.result.layer_bucket(layer_impl).map(|data| data.bucket),
             Contents::Raster(_) | Contents::Dem(_) => self.shared_bucket(),

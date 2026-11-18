@@ -23,15 +23,14 @@ use crate::bucket::{Bucket, UploadNeeds};
 use crate::buckets::raster_bucket::RasterBucket;
 use crate::gfx::context::Context;
 use crate::layer_type::ErasedEvaluatedLayer;
-use crate::render_source::{RenderSource, RenderSourceBase, SourcePrepareParameters};
+use crate::render_source::{RenderSource, RenderSourceBase, RenderTileParameters};
 use crate::tile::store::TileStore;
 use crate::tile_parameters::TileParameters;
 use crate::util::tile_cover::{TileCoverParameters, tile_cover, tile_cover_bounds};
 
 // The mapping from the unit square onto the image's corners: the perspective
 // terms of the projective warp and how far it is blended towards the
-// bilinear one. Port of GL JS `calculateImageWarp` for the "auto" warp,
-// after Heckbert, "Fundamentals of Texture Mapping and Image Warping"
+// bilinear one, as the "auto" warp blends them, after Heckbert, "Fundamentals of Texture Mapping and Image Warping"
 // (1989), 2.2.3 and A.2.
 #[derive(Clone, Copy, Debug)]
 struct ImageWarp {
@@ -190,9 +189,9 @@ impl RenderImageSource {
         }
     }
 
-    /// Whether the source's image has arrived. Unlike C++, a source without
-    /// an image (one made without a url) has nothing to load, so a still
-    /// render of it finishes.
+    /// Whether the source's image has arrived. A source without an image
+    /// (one made without a url) has nothing to load, so a still render of it
+    /// finishes.
     fn loaded(&self) -> bool {
         self.bucket.is_some() || self.data().is_none_or(|data| data.description.is_none())
     }
@@ -357,7 +356,7 @@ impl RenderSource for RenderImageSource {
         }
     }
 
-    fn prepare(&mut self, _store: &mut TileStore, _parameters: &SourcePrepareParameters<'_>) {}
+    fn update_render_tiles(&mut self, _store: &mut TileStore, _parameters: &RenderTileParameters<'_>) {}
 
     fn upload(&mut self, _store: &mut TileStore, _context: &mut Context, _needs: UploadNeeds) {
         if let Some(bucket) = &mut self.bucket
@@ -375,5 +374,9 @@ impl RenderSource for RenderImageSource {
     fn dump_debug_logs(&self) {
         Log::info(Event::General, format!("RenderImageSource::id: {}", self.base.style_source.id()));
         Log::info(Event::General, format!("RenderImageSource::loaded: {}", if self.loaded() { "yes" } else { "no" }));
+    }
+
+    fn max_zoom(&self) -> Option<u8> {
+        None
     }
 }

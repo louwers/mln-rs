@@ -74,7 +74,7 @@ use crate::render_light::EvaluatedLight;
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_tile::FrameTile;
-use crate::tile_matrix::{get_projection_data, to_projection_ubo};
+use crate::tile_matrix::{projection_data, to_projection_ubo};
 
 /// The pass the layer's draws draw in.
 const RENDER_PASS: RenderPass = RenderPass::Translucent;
@@ -713,7 +713,7 @@ impl RenderFillExtrusionLayer {
         let zoom = state.get_zoom() as f32;
         let tile_id = tile.id().to_unwrapped();
 
-        let mut projection = get_projection_data(
+        let mut projection = projection_data(
             &tile_id,
             parameters,
             *evaluated.fill_extrusion_translate.uniform(),

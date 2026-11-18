@@ -59,7 +59,7 @@ use crate::render_layer::{
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_target::RenderTarget;
-use crate::tile_matrix::{bind_no_projection, get_projection_data, globe_extrude_scale, to_projection_ubo};
+use crate::tile_matrix::{bind_no_projection, globe_extrude_scale, projection_data, to_projection_ubo};
 
 fn read_heatmap_attributes(
     attrs: &mut VertexAttributeArray,
@@ -451,7 +451,7 @@ impl RenderHeatmapLayer {
         const IN_VIEWPORT_PIXEL_UNITS: bool = false;
         let zoom = parameters.state.get_zoom() as f32;
         let tile_id = tile_id.to_unwrapped();
-        let projection = get_projection_data(
+        let projection = projection_data(
             &tile_id,
             parameters,
             [0.0, 0.0],

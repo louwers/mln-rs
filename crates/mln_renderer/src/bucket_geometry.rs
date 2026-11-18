@@ -292,7 +292,7 @@ impl BucketGeometry {
         });
     }
 
-    fn get_vertices<V>(&self, vec: &GeometryVec<V>) -> Option<&VertexVectorBasePtr> {
+    fn vertices<V>(&self, vec: &GeometryVec<V>) -> Option<&VertexVectorBasePtr> {
         self.vertices.get(&vec.key?)
     }
 }
@@ -330,7 +330,7 @@ pub(crate) fn bucket_vertices<V: bytemuck::Pod>(
     geometry: Option<&BucketGeometry>,
     vec: &GeometryVec<V>,
 ) -> VertexVectorBasePtr {
-    match geometry.and_then(|geometry| geometry.get_vertices(vec)) {
+    match geometry.and_then(|geometry| geometry.vertices(vec)) {
         Some(vertices) => Rc::clone(vertices),
         None => released_vertices(&vec.data()),
     }

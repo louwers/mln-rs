@@ -73,10 +73,7 @@ impl TileLayerIndex {
             index.symbols.push(IndexedSymbol {
                 key_start: index.keys.len() as u32,
                 key_len: key.len() as u32,
-                instance: IndexedSymbolInstance::new(
-                    cross_tile_id,
-                    index.get_scaled_coordinates(symbol_instance, &coord),
-                ),
+                instance: IndexedSymbolInstance::new(cross_tile_id, index.scaled_coordinates(symbol_instance, &coord)),
             });
             index.keys.extend_from_slice(key);
         }
@@ -94,7 +91,7 @@ impl TileLayerIndex {
     }
 
     #[must_use]
-    pub(crate) fn get_scaled_coordinates(
+    pub(crate) fn scaled_coordinates(
         &self,
         symbol_instance: &SymbolInstance,
         child_tile_coord: &OverscaledTileID,
@@ -142,7 +139,7 @@ impl TileLayerIndex {
                 continue;
             }
 
-            let scaled_symbol_coord = self.get_scaled_coordinates(symbol_instance, new_coord);
+            let scaled_symbol_coord = self.scaled_coordinates(symbol_instance, new_coord);
 
             for this_tile_symbol in indexed.iter().map(|symbol| &symbol.instance) {
                 // Return any symbol with the same keys whose coordinates are within
@@ -428,8 +425,8 @@ impl CrossTileSymbolIndex {
         result
     }
 
-    /// bench: [`index_layer`](Self::index_layer) of the buckets that
-    /// `HeldBuckets` holds.
+    /// [`index_layer`](Self::index_layer) of the buckets that
+    /// `HeldBuckets` holds, for the benchmarks.
     #[cfg(feature = "bench")]
     pub(crate) fn add_layer(&mut self, layer: &dyn RenderLayer, lng: f32, state: &TransformState) -> AddLayerResult {
         let mut buckets = crate::render_layer::HeldBuckets::take();

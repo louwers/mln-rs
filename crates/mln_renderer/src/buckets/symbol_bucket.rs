@@ -1,8 +1,6 @@
 // The bucket is built on a worker and then owned by its tile's contents on
 // the render thread, where placement, cross-tile indexing and sorting
 // change its `state` in the frame's update.
-//
-// Not ported: the MLN_SYMBOL_GUARDS `check` (memory-corruption guards).
 
 use std::cmp::Reverse;
 use std::collections::BTreeMap;
@@ -193,7 +191,7 @@ impl SymbolSizeBinder {
         }
     }
 
-    pub(crate) fn get_vertex_size_data(&self, feature: &dyn GeometryTileFeature) -> Range<f32> {
+    pub(crate) fn vertex_size_data(&self, feature: &dyn GeometryTileFeature) -> Range<f32> {
         match self {
             SymbolSizeBinder::Constant { .. } => Range { min: 0.0, max: 0.0 },
             SymbolSizeBinder::SourceFunction { expression, default_value } => {
@@ -384,8 +382,7 @@ impl Buffer {
 
     /// The positions placement lays out, the leader's or, with a layer ID,
     /// that layer's (made on first use), with the placed symbols they are
-    /// for and their pools (C++ `positions(buffer)` in
-    /// `updateBucketDynamicAttributeData`).
+    /// for and their pools.
     pub(crate) fn positions_and_symbols(
         &mut self,
         layer_id: Option<&str>,
@@ -644,7 +641,7 @@ impl SymbolBucket {
         // If the symbols are allowed to overlap sort them by their vertical
         // screen position. The index array buffer is rewritten to reference
         // the (unchanged) vertices in the sorted order.
-        for index in get_sorted_symbols(&state.symbol_instances, angle) {
+        for index in symbols_by_viewport_y(&state.symbol_instances, angle) {
             let symbol_instance = &state.symbol_instances[index];
             symbols_sort_order.push(symbol_instance.get_data_feature_index());
 
@@ -681,7 +678,7 @@ impl SymbolBucket {
     /// The indices into `symbol_instances` of a sort key range, or all
     /// `count` of them if `range` is `None` or invalid.
     #[expect(clippy::unused_self, reason = "the bucket's view of its sort key ranges")]
-    pub(crate) fn get_symbols(&self, range: Option<&SortKeyRange>, count: usize) -> std::ops::Range<usize> {
+    pub(crate) fn symbols_in(&self, range: Option<&SortKeyRange>, count: usize) -> std::ops::Range<usize> {
         match range {
             Some(range) if range.start < range.end && range.end <= count => range.start..range.end,
             _ => 0..count,
@@ -782,7 +779,7 @@ fn add_placed_symbol(triangles: &mut Vec<u16>, placed_symbol: &PlacedSymbol) {
 /// `angle`, then by descending data feature index. Equal keys keep their
 /// index order.
 #[must_use]
-pub(crate) fn get_sorted_symbols(symbol_instances: &[SymbolInstance], angle: f32) -> Vec<usize> {
+pub(crate) fn symbols_by_viewport_y(symbol_instances: &[SymbolInstance], angle: f32) -> Vec<usize> {
     let mut result: Vec<usize> = (0..symbol_instances.len()).collect();
     let sin = angle.sin();
     let cos = angle.cos();

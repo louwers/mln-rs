@@ -38,7 +38,7 @@ use crate::render_layer::{
 };
 use crate::render_pass::RenderPass;
 use crate::render_tile::RenderTile;
-use crate::tile_matrix::{get_projection_data, globe_extrude_scale, to_projection_ubo};
+use crate::tile_matrix::{globe_extrude_scale, projection_data, to_projection_ubo};
 
 const CIRCLE_SHADER_GROUP_NAME: &str = "CircleShader";
 
@@ -205,7 +205,7 @@ impl RenderCircleLayer {
         let evaluated = &layer.paint;
         let zoom = parameters.state.get_zoom() as f32;
         let tile_id = tile_id.to_unwrapped();
-        let projection = get_projection_data(
+        let projection = projection_data(
             &tile_id,
             parameters,
             *evaluated.circle_translate.uniform(),

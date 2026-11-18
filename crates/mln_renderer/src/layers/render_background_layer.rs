@@ -40,7 +40,7 @@ use crate::render_layer::{
 };
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
-use crate::tile_matrix::{get_projection_data, to_projection_ubo};
+use crate::tile_matrix::{projection_data, to_projection_ubo};
 use crate::util::tile_cover::{TileCoverParameters, tile_cover};
 
 const BACKGROUND_PLAIN_SHADER_NAME: &str = "BackgroundShader";
@@ -140,16 +140,8 @@ impl RenderBackgroundLayer {
         parameters: &PaintParameters<'_>,
     ) -> (BackgroundDrawableUnionUBO, ProjectionUBO) {
         let tile_id = tile_id.to_unwrapped();
-        let projection = get_projection_data(
-            &tile_id,
-            parameters,
-            [0.0, 0.0],
-            TranslateAnchorType::Viewport,
-            false,
-            false,
-            None,
-            false,
-        );
+        let projection =
+            projection_data(&tile_id, parameters, [0.0, 0.0], TranslateAnchorType::Viewport, false, false, None, false);
         let matrix = cast_matrix(&projection.fallback_matrix);
         let draw_ubo = if pattern {
             let state = parameters.state;

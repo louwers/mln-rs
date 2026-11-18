@@ -1128,7 +1128,7 @@ impl SymbolLayout {
         mut last_added_section: Option<usize>,
         line: &mut Option<(PoolRange, PoolRange)>,
     ) -> (usize, usize) {
-        let size_data = bucket.text_size_binder.get_vertex_size_data(feature);
+        let size_data = bucket.text_size_binder.vertex_size_data(feature);
         let has_format_section_overrides = bucket.has_format_section_overrides();
         let placed_icon_index = if writing_mode == WritingModeType::Vertical {
             symbol_instance.placed_vertical_icon_index
@@ -1869,7 +1869,7 @@ impl SymbolLayout {
                 // reference to iconIndex which is used when dynamic vertices
                 // for icon-text-fit image have to be updated.
                 if has_icon {
-                    let size_data = bucket_ref.icon_size_binder.get_vertex_size_data(feature);
+                    let size_data = bucket_ref.icon_size_binder.vertex_size_data(feature);
                     let sdf = symbol_instance.has_sdf_icon();
                     let mut place_icon = |icon_quads: &SymbolQuads, writing_mode: WritingModeType| -> usize {
                         let icon_buffer = if sdf { &mut state.sdf_icon } else { &mut state.icon };

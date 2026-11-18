@@ -770,7 +770,7 @@ impl SourceTiles {
             let contents = self.cover().filter_map(Tile::contents);
             for contents in contents {
                 for layer in &expression_layers {
-                    if let Some(bucket) = contents.get_bucket(*layer) {
+                    if let Some(bucket) = contents.bucket(*layer) {
                         max = max.max(bucket.max_content_elevation());
                     }
                 }

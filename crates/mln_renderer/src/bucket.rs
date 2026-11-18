@@ -182,7 +182,7 @@ impl dyn Bucket {
     }
 }
 
-// bench: `bench.rs` reaches the bucket a benchmark's layer places by this
-// path, which other commits' `bench.rs` builds against too.
+// The benchmarks (`bench.rs`) hold the bucket a benchmark's layer places
+// through this path, which they take in every commit they compare.
 #[cfg(feature = "bench")]
 pub(crate) use crate::render_layer::hold_symbol_bucket as recover;

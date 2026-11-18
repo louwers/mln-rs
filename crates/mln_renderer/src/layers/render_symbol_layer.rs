@@ -72,7 +72,7 @@ use crate::render_layer::{
 use crate::render_pass::RenderPass;
 use crate::render_source::TileOrder;
 use crate::render_tile::{FrameTile, RenderTile};
-use crate::tile_matrix::{get_projection_data, to_projection_ubo};
+use crate::tile_matrix::{projection_data, to_projection_ubo};
 
 const SYMBOL_ICON_SHADER_NAME: &str = "SymbolIconShader";
 const SYMBOL_SDF_SHADER_NAME: &str = "SymbolSDFShader";
@@ -970,7 +970,7 @@ impl RenderSymbolLayer {
         } else {
             const NEAR_CLIPPED: bool = false;
             const IN_VIEWPORT_PIXEL_UNITS: bool = false;
-            get_projection_data(
+            projection_data(
                 &tile_id,
                 parameters,
                 [0.0, 0.0],
@@ -1162,7 +1162,7 @@ fn write_collision_uniforms(
     const NEAR_CLIPPED: bool = false;
     const IN_VIEWPORT_PIXEL_UNITS: bool = false;
     let unwrapped = tile_id.to_unwrapped();
-    let projection = get_projection_data(
+    let projection = projection_data(
         &unwrapped,
         parameters,
         draw.translate,

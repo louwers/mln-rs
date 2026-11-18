@@ -32,7 +32,7 @@ impl RenderSky {
         self.transitioning.has_transition()
     }
 
-    pub(crate) fn get_evaluated(&self) -> &EvaluatedSky {
+    pub(crate) fn evaluated(&self) -> &EvaluatedSky {
         &self.evaluated
     }
 }

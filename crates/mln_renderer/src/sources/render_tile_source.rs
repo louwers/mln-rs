@@ -47,14 +47,14 @@ use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layers::cast_matrix;
 use crate::paint_parameters::PaintParameters;
 use crate::query::FeatureExtensionValue;
-use crate::render_source::{RenderSource, RenderSourceBase, SourcePrepareParameters, TileOrder};
+use crate::render_source::{RenderSource, RenderSourceBase, RenderTileParameters, TileOrder};
 use crate::render_tile::RenderTile;
 use crate::source_type::{OriginUpdate, TileOrigin};
 use crate::tile::job::SourceKey;
 use crate::tile::source_tiles::{CoverUpdate, SourceTiles};
 use crate::tile::store::TileStore;
 use crate::tile::tile::TileKind;
-use crate::tile_matrix::{get_projection_data, to_projection_ubo};
+use crate::tile_matrix::{projection_data, to_projection_ubo};
 use crate::tile_parameters::TileParameters;
 use crate::util::subdivision::subdivide_vertex_line;
 
@@ -177,7 +177,7 @@ pub(crate) struct DebugLayer {
     /// The overlay's draws, in the order they were made, which is the order
     /// they draw in.
     draws: Vec<DebugDraw>,
-    /// The frame's draws as `prepare` makes them.
+    /// The frame's draws as `update_draws` makes them.
     draw_list: DrawList<DebugUniforms, usize>,
     /// The frame's draws of the overlay, each of the overlay's draw at its
     /// index, with the buffers they read.
@@ -230,11 +230,11 @@ impl DebugLayer {
 
     /// Makes the frame's draws of the overlay, and writes the buffers they
     /// read.
-    pub(crate) fn prepare(&mut self, parameters: &mut PaintParameters<'_>) {
+    pub(crate) fn update_draws(&mut self, parameters: &mut PaintParameters<'_>) {
         let zoom = parameters.state.get_zoom();
         for (index, draw) in self.draws.iter().enumerate() {
             let tile_id = draw.tile.to_unwrapped();
-            let projection = get_projection_data(
+            let projection = projection_data(
                 &tile_id,
                 parameters,
                 [0.0, 0.0],
@@ -271,7 +271,7 @@ impl DebugLayer {
 }
 
 /// The render source of a source with tiles: a view into the tile store,
-/// which keeps the tiles, with the render tiles of the last `prepare`.
+/// which keeps the tiles, with the render tiles of the last `update_render_tiles`.
 pub(crate) struct RenderTileSource {
     pub(crate) base: RenderSourceBase,
     /// The source's id, which its debug overlays' draws carry.
@@ -283,7 +283,7 @@ pub(crate) struct RenderTileSource {
     /// The render tiles in [`TileOrder::ById`], as indexes into them.
     order_by_id: Vec<usize>,
     /// The render tiles in [`TileOrder::ByY`], where the frame's
-    /// [`SourcePrepareParameters::sort_by_y`] asked for them; empty
+    /// [`RenderTileParameters::sort_by_y`] asked for them; empty
     /// otherwise.
     order_by_y: Vec<usize>,
 }
@@ -368,14 +368,14 @@ impl RenderSource for RenderTileSource {
         source.update_cover(&update, ctx);
     }
 
-    fn prepare(&mut self, store: &mut TileStore, parameters: &SourcePrepareParameters<'_>) {
+    fn update_render_tiles(&mut self, store: &mut TileStore, parameters: &RenderTileParameters<'_>) {
         self.render_tiles.clear();
         if let Some(source) = store.source(self.key) {
             self.render_tiles.reserve(source.rendered_count());
             for rendered in source.rendered() {
                 let mut render_tile =
                     RenderTile::new(*rendered.id, rendered.tile, rendered.slot, rendered.hold_for_fade);
-                render_tile.prepare(rendered.tile, rendered.needs_rendering, parameters);
+                render_tile.update(rendered.tile, rendered.needs_rendering, parameters);
                 self.render_tiles.push(render_tile);
             }
         }
@@ -572,7 +572,7 @@ impl RenderSource for RenderTileSource {
 
     fn dump_debug_logs(&self) {}
 
-    fn max_zoom(&self) -> u8 {
-        self.origin.max_zoom()
+    fn max_zoom(&self) -> Option<u8> {
+        Some(self.origin.max_zoom())
     }
 }

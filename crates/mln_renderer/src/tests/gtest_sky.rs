@@ -46,7 +46,7 @@ fn sky_defaults() {
     let mut render_sky = RenderSky::new(Arc::new(sky));
     render_sky.evaluate(&PropertyEvaluationParameters::new(0.0));
 
-    let evaluated = render_sky.get_evaluated();
+    let evaluated = render_sky.evaluated();
     assert_eq!(Color::new(136.0 / 255.0, 198.0 / 255.0, 252.0 / 255.0, 1.0), *evaluated.sky_color.uniform());
     assert_eq!(Color::white(), *evaluated.sky_horizon_color.uniform());
     assert_eq!(Color::white(), *evaluated.sky_fog_color.uniform());
@@ -132,11 +132,11 @@ fn sky_constants_and_transitions() {
     let mut evaluation = PropertyEvaluationParameters::new(0.0);
     evaluation.now = Some(start);
     transitioning.evaluate(&evaluation);
-    assert_float_eq(0.4, *transitioning.get_evaluated().sky_atmosphere_blend.uniform());
+    assert_float_eq(0.4, *transitioning.evaluated().sky_atmosphere_blend.uniform());
 
     evaluation.now = Some(start + Duration::from_millis(100));
     transitioning.evaluate(&evaluation);
-    assert_float_eq(0.9, *transitioning.get_evaluated().sky_atmosphere_blend.uniform());
+    assert_float_eq(0.9, *transitioning.evaluated().sky_atmosphere_blend.uniform());
     assert!(!transitioning.has_transition());
 }
 
@@ -158,12 +158,12 @@ fn sky_zoom_expressions() {
 
     let mut render_sky = RenderSky::new(Arc::new(sky));
     render_sky.evaluate(&PropertyEvaluationParameters::new(5.0));
-    assert_float_eq(0.5, *render_sky.get_evaluated().sky_atmosphere_blend.uniform());
-    assert_eq!(Color::new(0.5, 0.5, 0.5, 1.0), *render_sky.get_evaluated().sky_color.uniform());
+    assert_float_eq(0.5, *render_sky.evaluated().sky_atmosphere_blend.uniform());
+    assert_eq!(Color::new(0.5, 0.5, 0.5, 1.0), *render_sky.evaluated().sky_color.uniform());
 
     render_sky.evaluate(&PropertyEvaluationParameters::new(10.0));
-    assert_float_eq(1.0, *render_sky.get_evaluated().sky_atmosphere_blend.uniform());
-    assert_eq!(Color::white(), *render_sky.get_evaluated().sky_color.uniform());
+    assert_float_eq(1.0, *render_sky.evaluated().sky_atmosphere_blend.uniform());
+    assert_eq!(Color::white(), *render_sky.evaluated().sky_color.uniform());
 }
 
 // gtest: StyleConversion.InvalidSky

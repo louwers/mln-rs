@@ -32,7 +32,7 @@ impl RenderLight {
         self.transitioning.has_transition()
     }
 
-    pub(crate) fn get_evaluated(&self) -> &EvaluatedLight {
+    pub(crate) fn evaluated(&self) -> &EvaluatedLight {
         &self.evaluated
     }
 }

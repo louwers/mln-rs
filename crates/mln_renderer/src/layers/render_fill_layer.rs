@@ -51,7 +51,7 @@ use crate::render_layer::{
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_tile::FrameTile;
-use crate::tile_matrix::{get_projection_data, to_projection_ubo};
+use crate::tile_matrix::{projection_data, to_projection_ubo};
 
 const FILL_SHADER_NAME: &str = "FillShader";
 const FILL_OUTLINE_SHADER_NAME: &str = "FillOutlineShader";
@@ -466,7 +466,7 @@ impl RenderFillLayer {
         let zoom = parameters.state.get_zoom() as f32;
         let tile_id = tile.id().to_unwrapped();
 
-        let projection = get_projection_data(
+        let projection = projection_data(
             &tile_id,
             parameters,
             *evaluated.fill_translate.uniform(),
