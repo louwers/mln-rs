@@ -402,10 +402,7 @@ impl CrossTileSymbolIndex {
         state: &TransformState,
         buckets: &mut (impl SymbolBuckets + ?Sized),
     ) -> AddLayerResult {
-        let layer_index = match self.layer_indexes.index_of(layer.get_id()) {
-            Some(index) => &mut self.layer_indexes.values_mut().into_slice()[index],
-            None => self.layer_indexes.entry(layer.get_id().to_owned()).or_insert_with(CrossTileSymbolLayerIndex::new),
-        };
+        let layer_index = self.layer_indexes.get_or_insert_with(layer.get_id(), CrossTileSymbolLayerIndex::new);
 
         let mut result = AddLayerResult::default();
         let current_bucket_ids = &mut self.current_bucket_ids;

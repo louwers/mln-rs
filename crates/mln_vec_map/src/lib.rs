@@ -229,6 +229,24 @@ impl<K: Ord, V> VecMap<K, V> {
         Some((self.keys.remove(i), self.values.remove(i)))
     }
 
+    /// The value of `key`, which is `value()`, under `key.to_owned()`, where
+    /// the map has none. Unlike [`entry`](Self::entry), it makes an owned
+    /// key only for an entry it inserts.
+    pub fn get_or_insert_with<Q>(&mut self, key: &Q, value: impl FnOnce() -> V) -> &mut V
+    where
+        K: Borrow<Q>,
+        Q: Ord + ToOwned<Owned = K> + ?Sized,
+    {
+        let i = match self.search(key) {
+            Ok(i) => i,
+            Err(i) => {
+                self.insert_at(i, key.to_owned(), value());
+                i
+            }
+        };
+        &mut self.values[i]
+    }
+
     pub fn entry(&mut self, key: K) -> Entry<'_, K, V> {
         match self.search(&key) {
             Ok(index) => Entry::Occupied(OccupiedEntry { map: self, index }),
@@ -664,6 +682,14 @@ mod tests {
         let map: VecMap<String, u32> = [("b".to_owned(), 2), ("a".to_owned(), 1)].into();
         assert_eq!(map["a"], 1);
         assert_eq!(map["b"], 2);
+    }
+
+    #[test]
+    fn get_or_insert_with_inserts_only_a_missing_key() {
+        let mut map: VecMap<String, u32> = [("b".to_owned(), 2)].into();
+        *map.get_or_insert_with("b", || unreachable!()) += 1;
+        *map.get_or_insert_with("a", || 10) += 1;
+        assert!(map.iter().eq([(&"a".to_owned(), &11), (&"b".to_owned(), &3)]));
     }
 
     #[test]
