@@ -236,7 +236,7 @@ impl RenderRasterLayer {
     /// properties.
     fn sampler_state(&self) -> SamplerState {
         let evaluated = &self.values.evaluated.paint;
-        // GL JS draws Nearest when either property asks for it.
+        // Either property asking for Nearest draws Nearest.
         let nearest = *evaluated.raster_resampling.uniform() == RasterResamplingType::Nearest
             || *evaluated.resampling.uniform() == ResamplingType::Nearest;
         SamplerState {

@@ -62,7 +62,7 @@ use crate::layer_drawing::{
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::symbol_layout::SymbolLayout;
-use crate::layout::symbol_projection::{get_gl_coord_matrix, get_label_plane_matrix};
+use crate::layout::symbol_projection::{gl_coord_matrix, label_plane_matrix};
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
 use crate::render_layer::{
@@ -1033,9 +1033,9 @@ impl RenderSymbolLayer {
             matrix::identity(&mut m);
             m
         } else {
-            get_label_plane_matrix(pitch_with_map, rotate_with_map, state, pixels_to_tile_units)
+            label_plane_matrix(pitch_with_map, rotate_with_map, state, pixels_to_tile_units)
         };
-        let gl_coord_matrix = get_gl_coord_matrix(pitch_with_map, rotate_with_map, state, pixels_to_tile_units);
+        let gl_coord_matrix = gl_coord_matrix(pitch_with_map, rotate_with_map, state, pixels_to_tile_units);
         let gamma_scale =
             if pitch_with_map { (state.get_pitch().cos() as f32) * state.get_camera_to_center_distance() } else { 1.0 };
 

@@ -44,8 +44,8 @@ use crate::geometry::feature_index::{FeatureIndex, IndexedSubfeature};
 use crate::layer_drawing::{BucketChanges, ChangedBuckets};
 use crate::layout::symbol_instance::{SymbolInstance, SymbolInstancePools};
 use crate::layout::symbol_projection::{
-    LabelPlaneProjector, add_dynamic_attributes, evaluate_size_for_feature, get_tile_skew_vectors, hide_glyphs,
-    reproject_line_labels,
+    LabelPlaneProjector, add_dynamic_attributes, evaluate_size_for_feature, hide_glyphs, reproject_line_labels,
+    tile_skew_vectors,
 };
 use crate::render_layer::{BucketKey, BucketPlacementData, PlacedTile, RenderLayer, SymbolBuckets, SymbolTranslate};
 use crate::render_tile::RenderTile;
@@ -1834,7 +1834,7 @@ impl Placement {
             let mut vec_east = Vec2::new(1.0f32, 0.0);
             let mut vec_south = Vec2::new(0.0f32, 1.0);
             if pitch_with_map && !rotate_with_map {
-                let (east, south) = get_tile_skew_vectors(state);
+                let (east, south) = tile_skew_vectors(state);
                 vec_east = Vec2::new(east[0] as f32, east[1] as f32);
                 vec_south = Vec2::new(south[0] as f32, south[1] as f32);
             }

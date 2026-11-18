@@ -1,6 +1,5 @@
 // The label-plane matrices and the CPU line-label projection. Symbols are
-// not instanced (C++'s `MLN_USE_SYMBOL_INSTANCING` is off): each glyph has
-// four dynamic vertices.
+// not instanced: each glyph has four dynamic vertices.
 
 use geometry::Point;
 use glam::Vec2;
@@ -16,7 +15,7 @@ use crate::buckets::symbol_bucket::{
 };
 use crate::render_layer::PlacedTile;
 
-pub(crate) fn get_tile_skew_vectors(state: &TransformState) -> ([f64; 2], [f64; 2]) {
+pub(crate) fn tile_skew_vectors(state: &TransformState) -> ([f64; 2], [f64; 2]) {
     let cos_roll = state.get_roll().cos();
     let sin_roll = state.get_roll().sin();
     let cos_pitch = state.get_pitch().cos();
@@ -47,8 +46,8 @@ pub(crate) fn get_tile_skew_vectors(state: &TransformState) -> ([f64; 2], [f64; 
     (vec_east, vec_south)
 }
 
-pub(crate) fn get_tile_skew_matrix(state: &TransformState) -> Mat4 {
-    let (vec_east, vec_south) = get_tile_skew_vectors(state);
+pub(crate) fn tile_skew_matrix(state: &TransformState) -> Mat4 {
+    let (vec_east, vec_south) = tile_skew_vectors(state);
     let mut m: Mat4 = [0.0; 16];
     matrix::identity(&mut m);
     m[0] = vec_east[0];
@@ -61,7 +60,7 @@ pub(crate) fn get_tile_skew_matrix(state: &TransformState) -> Mat4 {
 /// A matrix for converting to the label coordinate space, from tile units
 /// when pitched with the map and from clip space otherwise; the shaders apply
 /// the tile's projection themselves.
-pub(crate) fn get_label_plane_matrix(
+pub(crate) fn label_plane_matrix(
     pitch_with_map: bool,
     rotate_with_map: bool,
     state: &TransformState,
@@ -74,7 +73,7 @@ pub(crate) fn get_label_plane_matrix(
         let a = m;
         matrix::scale(&mut m, &a, s, s, 1.0);
         if !rotate_with_map {
-            let skew = get_tile_skew_matrix(state);
+            let skew = tile_skew_matrix(state);
             let mut inverted = skew;
             matrix::invert(&mut inverted, &skew);
             let a = m;
@@ -92,7 +91,7 @@ pub(crate) fn get_label_plane_matrix(
 
 /// A matrix for converting from the label coordinate space back to tile
 /// units when pitched with the map, and to GL coordinates otherwise.
-pub(crate) fn get_gl_coord_matrix(
+pub(crate) fn gl_coord_matrix(
     pitch_with_map: bool,
     rotate_with_map: bool,
     state: &TransformState,
@@ -106,7 +105,7 @@ pub(crate) fn get_gl_coord_matrix(
         matrix::scale(&mut m, &a, s, s, 1.0);
         if !rotate_with_map {
             let a = m;
-            matrix::multiply(&mut m, &a, &get_tile_skew_matrix(state));
+            matrix::multiply(&mut m, &a, &tile_skew_matrix(state));
         }
     } else {
         let size = state.get_size();
@@ -197,8 +196,8 @@ pub(crate) struct LabelPlaneProjector<'a> {
 }
 
 impl<'a> LabelPlaneProjector<'a> {
-    /// A projector into the label plane. C++ defaults `translation` to
-    /// (0, 0).
+    /// A projector of `tile`'s points, moved by `translation` in tile
+    /// units, into the label plane.
     #[must_use]
     pub(crate) fn new(
         tile: &TileProjector<'a>,
@@ -214,7 +213,7 @@ impl<'a> LabelPlaneProjector<'a> {
         // through the projection.
         if pitch_with_map {
             pitched_label_plane_matrix =
-                get_label_plane_matrix(true, rotate_with_map, tile.get_transform_state(), pixels_to_tile_units);
+                label_plane_matrix(true, rotate_with_map, tile.get_transform_state(), pixels_to_tile_units);
             matrix::invert(&mut pitched_label_plane_matrix_inverse, &pitched_label_plane_matrix);
         } else {
             matrix::identity(&mut pitched_label_plane_matrix);
@@ -358,8 +357,8 @@ fn project_truncated_line_segment(
     minimum_length: f32,
     project_point: impl Fn(Vec2) -> Vec2,
 ) -> Vec2 {
-    // We are assuming "previousTilePoint" won't project to a point within one
-    // unit of the camera plane If it did, that would mean our label extended
+    // We are assuming the previous tile point won't project to a point within
+    // one unit of the camera plane. If it did, that would mean our label extended
     // all the way out from within the viewport to a (very distant) point near
     // the plane of the camera. We wouldn't be able to render the label anyway
     // once it crossed the plane of the camera.
@@ -564,7 +563,7 @@ fn requires_orientation_change(
     } else {
         first_point.x > last_point.x
     } {
-        // Includes "horizontalOnly" case for labels without vertical glyphs
+        // Includes the horizontal-only case, of labels without vertical glyphs
         return Some(PlacementResult::NeedsFlipping);
     }
     None
@@ -697,9 +696,9 @@ fn place_glyphs_along_line(
         placed_glyphs.push(single_glyph);
     }
 
-    // The number of placedGlyphs must equal the number of glyphOffsets, which
-    // must correspond to the number of glyph vertices There may be 0 glyphs
-    // here, if a label consists entirely of glyphs that have 0x0 dimensions
+    // The number of placed glyphs must equal the number of glyph offsets,
+    // which must correspond to the number of glyph vertices. There may be 0
+    // glyphs here, if a label consists entirely of glyphs of 0x0 dimensions.
     if dynamic_vertex_array.is_empty() {
         dynamic_vertex_array.reserve(4 * placed_glyphs.len());
     }

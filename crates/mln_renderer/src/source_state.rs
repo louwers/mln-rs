@@ -1,6 +1,6 @@
-// `coalesceChanges(std::vector<RenderTile>&)` calls `tile.setFeatureState`
-// on every render tile; a Rust RenderTile has no reference to its Tile, so
-// `coalesce_changes` takes the source's rendered tiles from the tile store.
+// A render tile has no reference to its tile, so `coalesce_changes` takes
+// the source's rendered tiles from the tile store to set their feature
+// state.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, LazyLock};

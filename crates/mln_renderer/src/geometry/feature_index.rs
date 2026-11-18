@@ -3,8 +3,7 @@
 // in the index, so the grid entries stay cheap to copy and the index can be
 // built on a worker thread and shared (`Arc<FeatureIndex>`).
 //
-// The `layers` argument (C++ `std::unordered_map<std::string, const
-// RenderLayer*>`) is `QueryLayers`.
+// A query names the layers it reads by id (`QueryLayers`).
 
 use std::sync::Arc;
 
@@ -172,8 +171,8 @@ impl FeatureIndex {
         self.sort_index += 1;
         for ring in geometries.iter() {
             let Some((min, max)) = envelope(ring.iter().copied()) else {
-                // C++ envelope of an empty ring is {max, lowest}: never
-                // inside the tile.
+                // An empty ring has no envelope, and nothing of it is in
+                // the tile.
                 continue;
             };
             let extent = constants::EXTENT;
@@ -231,7 +230,7 @@ impl FeatureIndex {
         let Some((min, max)) = envelope(query_geometry.iter().copied()) else {
             return Ok(());
         };
-        // `box.min - additionalPadding` is Point<int16_t> arithmetic.
+        // The padded box's corners are tile coordinates, which wrap in i16.
         let query_box = BBox::new(
             Point::new(
                 f32::from(min.x.wrapping_sub(additional_padding)),
@@ -289,13 +288,13 @@ impl FeatureIndex {
 
         sorted_features.sort_by(|a, b| {
             // Same idea as the non-symbol sort order, but symbol features may
-            // have changed their sort order since their corresponding
-            // IndexedSubfeature was added to the CollisionIndex The
-            // 'featureSortOrder' is relatively inefficient for querying but
-            // cheap to build on every bucket sort
+            // have changed their sort order since their indexed subfeature
+            // was added to the collision index. The feature sort order is
+            // relatively inefficient for querying but cheap to build on every
+            // bucket sort.
             if let Some(order) = feature_sort_order {
-                // queryRenderedSymbols documentation says we'll return features in
-                // "top-to-bottom" rendering order (aka last-to-first).
+                // A query of rendered symbols returns features in
+                // top-to-bottom rendering order, last to first.
                 // Actually there can be multiple symbol instances per feature, so
                 // we sort each feature based on the first matching symbol instance.
                 let sorted_a = order.iter().position(|&i| i == a.index).unwrap_or(order.len());
@@ -356,15 +355,15 @@ impl FeatureIndex {
         let Some(tile_data) = &self.tile_data else {
             return Ok(());
         };
-        // C++ `bucketLayerIDs.at(..)` throws for an unknown leader.
+        // Every leader the index holds has its bucket's layers.
         let Some(layer_ids) = self.bucket_layer_ids.get(bucket_leader_id) else {
             debug_assert!(false, "unknown bucket leader {bucket_leader_id}");
             return Ok(());
         };
 
-        // C++ fetches the source layer, the feature and its state lazily, at
-        // the first of the bucket's layers that is queried; they are the
-        // same for every layer.
+        // The source layer, the feature and its state are the same for every
+        // layer of the bucket: they are read once, where one of its layers
+        // is queried.
         if !layer_ids.iter().any(|layer_id| layers.contains_key(layer_id)) {
             return Ok(());
         }

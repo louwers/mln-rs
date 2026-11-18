@@ -61,10 +61,10 @@ const FILL_OUTLINE_PATTERN_SHADER_NAME: &str = "FillOutlinePatternShader";
 const FILL_OUTLINE_INSTANCED_SHADER_NAME: &str = "FillOutlineInstancedShader";
 const FILL_OUTLINE_PATTERN_INSTANCED_SHADER_NAME: &str = "FillOutlinePatternInstancedShader";
 
-/// The outlines' line width, which the style spec doesn't give. GL JS sets
-/// none, so it draws 1 px; MapLibre Native draws 2 px on OpenGL. The outline
+/// The outlines' line width, which the style spec doesn't give. The render
+/// tests' expected images have outlines of 1 px and of 2 px; the outline
 /// shaders fade the pixels on both sides of a fill's edge by their distance
-/// from it, and the render tests' expected images have both. A device that
+/// from it, which a 2 px line covers. A device that
 /// draws no lines this wide draws each segment of an outline as an instance
 /// of a quad, which the instanced outline shaders lay over the pixels such a
 /// line covers. One that rasterizes on the CPU, where an instance costs about

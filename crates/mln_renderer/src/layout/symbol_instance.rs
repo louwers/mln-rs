@@ -13,7 +13,7 @@ use mln_util::serialization::payload::pod;
 use crate::geometry::anchor::Anchor;
 use crate::geometry::feature_index::IndexedSubfeature;
 use crate::text::collision_feature::{CollisionBox, CollisionFeature};
-use crate::text::quads::{SymbolQuads, get_glyph_quads, get_icon_quads};
+use crate::text::quads::{SymbolQuads, glyph_quads, icon_quads};
 use crate::util::pool::PoolRange;
 
 /// The collision boxes and keys of a bucket's symbol instances, which they
@@ -141,15 +141,15 @@ impl SymbolInstanceSharedData {
         let mut data = SymbolInstanceSharedData { line, ..Default::default() };
         // Create the quads used for rendering the icon and glyphs.
         if let Some(shaped_icon) = shaped_icon {
-            data.icon_quads = Some(get_icon_quads(shaped_icon, icon_rotation, icon_type, has_icon_text_fit));
+            data.icon_quads = Some(icon_quads(shaped_icon, icon_rotation, icon_type, has_icon_text_fit));
             if let Some(vertically_shaped_icon) = vertically_shaped_icon {
                 data.vertical_icon_quads =
-                    Some(get_icon_quads(vertically_shaped_icon, icon_rotation, icon_type, has_icon_text_fit));
+                    Some(icon_quads(vertically_shaped_icon, icon_rotation, icon_type, has_icon_text_fit));
             }
         }
 
         let quads = |shaping: &Shaping| {
-            get_glyph_quads(shaping, text_offset, layout, text_placement, icons, allow_vertical_placement)
+            glyph_quads(shaping, text_offset, layout, text_placement, icons, allow_vertical_placement)
         };
 
         let mut single_line_initialized = false;

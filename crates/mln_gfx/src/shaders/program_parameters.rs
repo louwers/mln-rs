@@ -26,7 +26,7 @@ impl ProgramParameters {
     }
 
     #[must_use]
-    pub fn get_defines(&self) -> &VecMap<String, String> {
+    pub fn defines(&self) -> &VecMap<String, String> {
         &self.defines
     }
 }
@@ -38,9 +38,9 @@ mod tests {
     #[test]
     fn defines() {
         let p = ProgramParameters::new(1.0, false);
-        assert_eq!(p.get_defines().get("DEVICE_PIXEL_RATIO").map(String::as_str), Some("1.0"));
-        assert!(!p.get_defines().contains_key("OVERDRAW_INSPECTOR"));
+        assert_eq!(p.defines().get("DEVICE_PIXEL_RATIO").map(String::as_str), Some("1.0"));
+        assert!(!p.defines().contains_key("OVERDRAW_INSPECTOR"));
         let p = ProgramParameters::new(2.0, true);
-        assert!(p.get_defines().contains_key("OVERDRAW_INSPECTOR"));
+        assert!(p.defines().contains_key("OVERDRAW_INSPECTOR"));
     }
 }

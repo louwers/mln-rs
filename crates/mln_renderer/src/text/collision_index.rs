@@ -16,7 +16,7 @@ use crate::buckets::symbol_bucket::{PlacedSymbol, PlacedSymbolPools};
 use crate::geometry::feature_index::IndexedSubfeature;
 use crate::layout::symbol_instance::SymbolInstancePools;
 use crate::layout::symbol_projection::{
-    LabelPlaneProjector, LineProjectionCache, TileDistance, get_tile_skew_vectors, place_first_and_last_glyph,
+    LabelPlaneProjector, LineProjectionCache, TileDistance, place_first_and_last_glyph, tile_skew_vectors,
 };
 use crate::text::collision_feature::{CollisionBox, CollisionFeature, ProjectedCollisionBox};
 
@@ -86,7 +86,7 @@ const VIEWPORT_PADDING_FOR_STATIC_TILES: f32 = 1024.0;
 /// The ratio is 0.5 + 0.5 × the camera-to-center distance over the anchor's
 /// distance from the camera, so this hides labels more than five times as far
 /// away as the center, which crowd the horizon at high pitch, and labels
-/// behind the camera, whose ratio is below 0.5. As in GL JS.
+/// behind the camera, whose ratio is below 0.5.
 const PERSPECTIVE_RATIO_CUTOFF: f32 = 0.6;
 
 fn find_viewport_padding(transform_state: &TransformState, map_mode: MapMode) -> f32 {
@@ -806,7 +806,7 @@ impl CollisionIndex {
             vec_south = Vec2::new(-angle.sin(), angle.cos());
         } else if !rotate_with_map && pitch_with_map {
             // Pitched texts that stay aligned with the viewport's X axis.
-            let (east, south) = get_tile_skew_vectors(&self.transform_state);
+            let (east, south) = tile_skew_vectors(&self.transform_state);
             vec_east = Vec2::new(east[0] as f32, east[1] as f32);
             vec_south = Vec2::new(south[0] as f32, south[1] as f32);
         }

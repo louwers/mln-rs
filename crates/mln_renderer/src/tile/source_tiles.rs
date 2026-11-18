@@ -414,9 +414,10 @@ impl SourceTiles {
 
     /// Readies the buckets of what tile `id` shows, see `contents_at_mut`,
     /// for the frame's draws, which read what `needs` says, finding its
-    /// atlas pages' textures in `atlas` (`Contents::upload`). Its buckets
-    /// share what those of the tile's other world copies, copies of them or
-    /// they of theirs, moved into `context`'s stores.
+    /// atlas pages' textures in `atlas`. A geometry tile's buckets share
+    /// what those of its other world copies, copies of them or they of
+    /// its, moved into `context`'s stores; and the copies laid out from the
+    /// same data then take what it moved, freeing their own.
     pub(crate) fn upload_at(
         &mut self,
         id: &OverscaledTileID,
@@ -1104,10 +1105,11 @@ impl SourceTiles {
             screen_max.1 -= shrink;
             let (bounds_min, bounds_max) = envelope(&mut query_geometry.iter().map(|p| (p.x, p.y)));
             // A corner past the planet stands for the nearest point on the
-            // horizon, which tells nothing about the antimeridian, so GL JS's
-            // check lost boxes that reach into space, such as the whole view
-            // of a small globe. Such corners are left out, and the box's
-            // center, when it is on the planet, decides by longitude for them.
+            // horizon, which tells nothing about the antimeridian: a check of
+            // the corners alone would lose boxes that reach into space, such
+            // as the whole view of a small globe. Such corners are left out,
+            // and the box's center, when it is on the planet, decides by
+            // longitude for them.
             let mut covered = true;
             let mut reaches_into_space = false;
             for corner in [
@@ -1146,8 +1148,8 @@ impl SourceTiles {
         let box_min = geometry::Point::new(box_min.0, box_min.1);
         let box_max = geometry::Point::new(box_max.0, box_max.1);
 
-        // Sorted by (z, y, wrap, x). GL JS sorts the globe's query tiles by
-        // their copy on the main world, so there the wrap only breaks ties.
+        // Sorted by (z, y, wrap, x); on the globe by their copy on the main
+        // world, (z, y, x, wrap), so that there the wrap only breaks ties.
         let mut sorted_tiles: Vec<(&UnwrappedTileID, &OverscaledTileID)> =
             self.rendered.iter().map(|(id, entry)| (id, &entry.key)).collect();
         sorted_tiles.sort_by(|(a, _), (b, _)| {
@@ -1169,7 +1171,7 @@ impl SourceTiles {
 
         let max_pitch_scale_factor = transform_state.max_pitch_scale_factor();
 
-        // The globe returns a feature once per tile, as GL JS does, though the
+        // The globe returns a feature once per tile, though the
         // tile is tested at three copies and can be rendered at two wraps:
         // these are where this tile's features start in each layer's results.
         let mut canonical_tile: Option<mln_tile_id::CanonicalTileID> = None;
@@ -1201,9 +1203,8 @@ impl SourceTiles {
             // The query geometry lies on the main world or, across the
             // antimeridian, west of it, and its padding reaches past either
             // side of it: a globe tile is tested at its copies west of, on and
-            // east of the main world. GL JS leaves out the east copy and misses
-            // features just east of the antimeridian under a query just west
-            // of it.
+            // east of the main world, so that a query just west of the
+            // antimeridian finds the features just east of it.
             let globe_copies = [
                 UnwrappedTileID::with_wrap(-1, id.canonical),
                 UnwrappedTileID::with_wrap(0, id.canonical),

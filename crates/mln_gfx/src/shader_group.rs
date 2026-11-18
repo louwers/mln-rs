@@ -42,7 +42,7 @@ impl ShaderGroup {
     pub fn shader(&self, properties_as_uniforms: &StringIDSetsPair, variant: ProjectionVariant) -> ShaderProgramPtr {
         let parameters = self
             .parameters
-            .get_defines()
+            .defines()
             .iter()
             .map(|(name, value)| if value.is_empty() { name.clone() } else { format!("{name}={value}") });
         let uniforms = properties_as_uniforms

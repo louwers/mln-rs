@@ -24,7 +24,7 @@
 // change.
 //
 // Font faces (MLN_TEXT_SHAPING_HARFBUZZ): the style's "font-faces" are
-// fetched as font files (`Resource::fontFace`), or read from the bytes a
+// fetched as font files (`Resource::font_face`), or read from the bytes a
 // face holds (an app's fallback faces can), and shaped here, on the render
 // thread, with the `FontFaceEngine` (font_face_engine.rs): mln_text's
 // HBShaper (HarfRust) natively, ready at once. An engine that needs time to
@@ -458,7 +458,7 @@ impl GlyphStore {
         for (font_stack, font_types) in requests {
             let font_stack_hash = font_stack_hash(font_stack);
             for (type_, strs) in font_types {
-                let shaper = self.get_hb_shaper(font_stack, *type_);
+                let shaper = self.hb_shaper(font_stack, *type_);
                 for str_ in strs {
                     let mut shaped_glyph_ids = Vec::new();
                     let mut shaped_adjusts = Vec::new();
@@ -474,7 +474,7 @@ impl GlyphStore {
                         let need_shape =
                             !glyphs.get(&font_stack_hash).is_some_and(|glyphs| glyphs.contains_key(glyph_id));
                         if need_shape {
-                            let glyph = self.get_glyph(font_stack, *glyph_id);
+                            let glyph = self.glyph(font_stack, *glyph_id);
                             let id = glyph.id;
                             glyphs.entry(font_stack_hash).or_default().entry(id).or_insert(drawn(id).then_some(glyph));
                         }
@@ -501,7 +501,7 @@ impl GlyphStore {
     ) {
         self.requests += 1;
         let id = self.requests;
-        if let Some(data) = self.get_font_face_data(range.type_) {
+        if let Some(data) = self.font_face_data(range.type_) {
             // A face that holds its font file needs no request.
             self.set_range(font_stack, range, RangeState::Loading { id, request: None });
             self.events.push(RendererEvent::GlyphsRequested { font_stack: font_stack.clone(), range });
@@ -512,9 +512,9 @@ impl GlyphStore {
         let resource = if range.type_ == GlyphIDType::FontPBF {
             Resource::glyphs(&self.glyph_url, font_stack, (range.first, range.second))
         } else {
-            let url = self.get_font_face_url(range.type_);
+            let url = self.font_face_url(range.type_);
             if url.is_empty() {
-                // C++ logs and requests an empty Resource.
+                // The request of an empty URL fails, as the glyphs do.
                 Log::error(Event::Style, "Try download a glyph doesn't in current faces");
             }
             Resource::font_face(&url)
@@ -555,7 +555,8 @@ impl GlyphStore {
         self.entries.entry(font_stack.clone()).or_default().ranges.insert(range, state);
     }
 
-    /// The rest of `processResponse`, for the answer to request `id`.
+    /// Takes in the answer to request `id`, the glyphs of `range` of
+    /// `font_stack` or the error that failed it.
     fn process_data(&mut self, result: GlyphResult, font_stack: &FontStack, range: GlyphRange, id: u64) {
         let (data, error) = match result {
             Ok(data) => (data, None),
@@ -621,13 +622,13 @@ impl GlyphStore {
         }
     }
 
-    pub(crate) fn get_glyph(&mut self, font_stack: &FontStack, glyph_id: GlyphID) -> Arc<Glyph> {
+    pub(crate) fn glyph(&mut self, font_stack: &FontStack, glyph_id: GlyphID) -> Arc<Glyph> {
         if let Some(glyph) = self.entries.get(font_stack).and_then(|entry| entry.find_glyph(glyph_id)) {
             return glyph;
         }
 
         if glyph_id.type_ != GlyphIDType::FontPBF
-            && let Some(shaper) = self.get_hb_shaper(font_stack, glyph_id.type_)
+            && let Some(shaper) = self.hb_shaper(font_stack, glyph_id.type_)
         {
             let mut glyph = shaper.rasterize(&glyph_id);
             glyph.bitmap = transform_raster_to_sdf(&glyph.bitmap, 8.0, 0.25);
@@ -689,7 +690,7 @@ impl GlyphStore {
         true
     }
 
-    fn get_hb_shaper(&self, font_stack: &FontStack, type_: GlyphIDType) -> Option<Rc<dyn FontFaceShaper>> {
+    fn hb_shaper(&self, font_stack: &FontStack, type_: GlyphIDType) -> Option<Rc<dyn FontFaceShaper>> {
         self.hb_shapers.get(font_stack).and_then(|shapers| shapers.get(&type_)).cloned()
     }
 
@@ -706,7 +707,7 @@ impl GlyphStore {
         true
     }
 
-    fn get_font_face_url(&self, type_: GlyphIDType) -> String {
+    fn font_face_url(&self, type_: GlyphIDType) -> String {
         self.font_faces
             .iter()
             .flat_map(|faces| faces.iter())
@@ -716,7 +717,7 @@ impl GlyphStore {
     }
 
     /// The font file that the face of `type_` holds, if it holds one.
-    fn get_font_face_data(&self, type_: GlyphIDType) -> Option<FontData> {
+    fn font_face_data(&self, type_: GlyphIDType) -> Option<FontData> {
         if type_ == GlyphIDType::FontPBF {
             return None;
         }

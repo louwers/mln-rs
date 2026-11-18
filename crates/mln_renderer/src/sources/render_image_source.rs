@@ -94,8 +94,9 @@ fn image_warp(corners: &GeometryCoordinates) -> ImageWarp {
     ImageWarp { perspective_x, perspective_y, blend }
 }
 
-// Where the unit-square point (u, v) lands on the corners; the same blend
-// GL JS's raster vertex shader evaluates per vertex.
+// Where the unit-square point (u, v) lands on the corners: where a
+// projective warp puts it, blended with where a bilinear one does by
+// `warp.blend`.
 fn warp_position(corners: &GeometryCoordinates, warp: &ImageWarp, u: f64, v: f64) -> Point<f64> {
     let point = |p: GeometryCoordinate| Point::new(f64::from(p.x), f64::from(p.y));
     let top_left = point(corners[0]);
@@ -104,7 +105,8 @@ fn warp_position(corners: &GeometryCoordinates, warp: &ImageWarp, u: f64, v: f64
     let bottom_left = point(corners[3]);
     let bilinear = top_left.interpolate(&top_right, u).interpolate(&bottom_left.interpolate(&bottom_right, u), v);
     let denominator = warp.perspective_x * u + warp.perspective_y * v + 1.0;
-    // The point arithmetic of mapbox::geometry, a coordinate at a time.
+    // The homography's columns: the top edge and the left edge, each scaled
+    // by the denominator's change along it.
     let across_top = Point::new(
         top_right.x - top_left.x + top_right.x * warp.perspective_x,
         top_right.y - top_left.y + top_right.y * warp.perspective_x,
@@ -339,7 +341,7 @@ impl RenderSource for RenderImageSource {
         };
 
         // The globe bends the quad over the sphere with the tile mesh
-        // granularity of its tile, like GL JS.
+        // granularity of its tile.
         let cells = if transform_state.is_globe_rendering() {
             SubdivisionGranularitySetting::globe().tile.get_granularity_for_zoom_level(self.tile_ids[0].canonical.z)
         } else {

@@ -122,8 +122,8 @@ fn cast_tlbr(a: [u16; 4]) -> [f32; 4] {
 }
 
 /// The ends of a bucket's dashes. A dash pattern is shared by the whole
-/// bucket, so a `line-cap` that varies by feature gets square dashes, as in
-/// GL JS; each line still gets its own cap at its ends.
+/// bucket, so a `line-cap` that varies by feature gets square dashes; each
+/// line still gets its own cap at its ends.
 fn dash_pattern_cap(bucket: &LineBucket) -> LinePatternCap {
     if bucket.layout.line_cap.constant_or(&LineCapType::Butt) == LineCapType::Round {
         LinePatternCap::Round

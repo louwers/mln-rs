@@ -202,7 +202,7 @@ impl Store {
 
     /// Asks for `dependencies` for `requestor`, which gets them once the
     /// store has them.
-    fn get_glyphs(&self, requestor: &Rc<StubGlyphRequestor>, dependencies: GlyphDependencies) {
+    fn request_glyphs(&self, requestor: &Rc<StubGlyphRequestor>, dependencies: GlyphDependencies) {
         self.waits.borrow_mut().push(Wait {
             requestor: Rc::clone(requestor),
             dependencies,
@@ -302,8 +302,8 @@ impl GlyphStoreTest {
         self.store.store.borrow_mut()
     }
 
-    fn get_glyphs(&self, dependencies: GlyphDependencies) {
-        self.store.get_glyphs(&self.requestor, dependencies);
+    fn request_glyphs(&self, dependencies: GlyphDependencies) {
+        self.store.request_glyphs(&self.requestor, dependencies);
     }
 
     fn run(&mut self, url: &str, dependencies: GlyphDependencies) {
@@ -311,7 +311,7 @@ impl GlyphStoreTest {
         self.squelch_log = Some(SquelchLog::new());
 
         self.glyph_store().set_url(url);
-        self.get_glyphs(dependencies);
+        self.request_glyphs(dependencies);
 
         self.run_loop.run(&mut self.local());
     }
@@ -477,7 +477,11 @@ fn loading_fail_requests_the_range_again() {
             // C++ asks again through `loop.invoke`, after this response is
             // processed.
             run_loop.post(|local| {
-                local.store.upgrade().unwrap().get_glyphs(&local.requestor.upgrade().unwrap(), dependencies(&['a']));
+                local
+                    .store
+                    .upgrade()
+                    .unwrap()
+                    .request_glyphs(&local.requestor.upgrade().unwrap(), dependencies(&['a']));
             });
         } else {
             assert!(test_positions[&gid('a')].is_some());
@@ -605,7 +609,7 @@ fn shares_parsed_glyphs_between_managers_and_font_stacks() {
         let mut test = GlyphStoreTest::with_glyph_cache(local(StubLocalGlyphRasterizer), Arc::clone(&cache));
         let font_stack = vec![font_stack.to_owned()];
         test.load(font_stack.clone(), &['a']);
-        test.glyph_store().get_glyph(&font_stack, gid('a'))
+        test.glyph_store().glyph(&font_stack, gid('a'))
     };
 
     let first = load("Test Stack");
@@ -619,7 +623,7 @@ fn keeps_its_own_glyphs_without_a_cache() {
     let load = || {
         let mut test = GlyphStoreTest::new();
         test.load(test_stack(), &['a']);
-        test.glyph_store().get_glyph(&test_stack(), gid('a'))
+        test.glyph_store().glyph(&test_stack(), gid('a'))
     };
 
     let first = load();
@@ -659,7 +663,7 @@ fn a_wait_requests_the_font_stacks_evicted_while_it_waits_again() {
         glyphs: VecMap::from([(loaded_stack.clone(), ids.clone()), (test_stack(), ids)]),
         shapes: HBShapeRequests::default(),
     };
-    test.get_glyphs(dependencies);
+    test.request_glyphs(dependencies);
 
     test.glyph_store().evict(&VecSet::new());
     // The renderer's update asks the waiting tiles again after an eviction.
@@ -690,12 +694,12 @@ fn a_response_to_an_evicted_range_is_dropped() {
     });
 
     test.glyph_store().set_url("old/{fontstack}/{range}.pbf");
-    test.get_glyphs(dependencies(&['a']));
+    test.request_glyphs(dependencies(&['a']));
     test.glyph_store().evict(&VecSet::new());
     test.store.take_responses();
 
     test.glyph_store().set_url("new/{fontstack}/{range}.pbf");
-    test.get_glyphs(dependencies(&['a']));
+    test.request_glyphs(dependencies(&['a']));
     let urls = urls.lock();
     assert_eq!(urls.len(), 2, "requested again: {urls:?}");
     assert!(urls[1].starts_with("new/"));
@@ -833,7 +837,7 @@ fn local_cjk_glyph_prefers_local_rasterization_over_range() {
             // Katakana letter te, should be locally rasterized
             //  instead of using the glyph received from the range
             //  for the ideagraphic mark
-            store.upgrade().unwrap().get_glyphs(
+            store.upgrade().unwrap().request_glyphs(
                 &requestor.upgrade().unwrap(),
                 dependencies(&['テ']), // 0x30c6
             );
@@ -939,9 +943,9 @@ fn immediate_file_source_failure_requests_the_range_again() {
 
     // The failure is taken in when the store wakes the renderer, and the
     // glyphs once the pool has parsed them.
-    test.get_glyphs(dependencies(&['a']));
+    test.request_glyphs(dependencies(&['a']));
     test.run_loop.run_once(&mut test.local());
-    test.get_glyphs(dependencies(&['a']));
+    test.request_glyphs(dependencies(&['a']));
     test.store.pool.wait();
     test.run_loop.run_once(&mut test.local());
 
@@ -1052,7 +1056,7 @@ fn request_font_face(test: &GlyphStoreTest) -> Rc<RefCell<Option<GlyphMap>>> {
     }));
     let ids: GlyphIDs = [GlyphID::with_type(0, FONT_FACE)].into_iter().collect();
     let shapes = VecMap::from([(test_stack(), VecMap::from([(FONT_FACE, [vec![5, 6]].into_iter().collect())]))]);
-    test.get_glyphs(GlyphDependencies { glyphs: VecMap::from([(test_stack(), ids)]), shapes });
+    test.request_glyphs(GlyphDependencies { glyphs: VecMap::from([(test_stack(), ids)]), shapes });
     available
 }
 

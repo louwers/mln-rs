@@ -288,10 +288,9 @@ impl ClipMasks {
             blend_constant: ColorMode::disabled().blend_color,
             line_width: 1.0,
         };
-        // On the globe each mask is drawn with a border first, then exactly,
-        // as GL JS does: where a tile meets finer ones, its coarser edge
-        // leaves a sliver between the masks that only a neighbor's border
-        // covers.
+        // On the globe each mask is drawn with a border first, then exactly:
+        // where a tile meets finer ones, its coarser edge leaves a sliver
+        // between the masks that only a neighbor's border covers.
         let passes = if self.globe { 2 } else { 1 };
         let mut draws = 0;
         for pass in 0..passes {

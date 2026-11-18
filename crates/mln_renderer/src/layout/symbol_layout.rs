@@ -2029,7 +2029,8 @@ impl SymbolLayout {
                         last_added_section = Some(section);
                         symbol_instance.placed_vertical_text_index = Some(placed);
                     }
-                    debug_assert!(last_added_section.is_some()); // True, as hasText == true;
+                    // The instance has text, so a section was added.
+                    debug_assert!(last_added_section.is_some());
                     Self::update_paint_properties_for_section(
                         &mut paint_properties,
                         state,

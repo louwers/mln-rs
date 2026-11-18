@@ -244,7 +244,8 @@ mod tests {
     // In the globe's frame +x points to 0°N 90°E, +y to the North Pole and
     // +z to 0°N 0°E.
 
-    // As GL JS's projection/globe/atmosphere/light-position-map: wherever the
+    // As the render test projection/globe/atmosphere/light-position-map
+    // shows: wherever the
     // camera is, a map light at [1.5, 90, 90] stays over 0°N 90°E.
     #[test]
     fn map_light_stays_over_one_place() {
@@ -254,7 +255,8 @@ mod tests {
         }
     }
 
-    // As GL JS's projection/globe/atmosphere/ligth-position-viewport: a
+    // As the render test projection/globe/atmosphere/light-position-viewport
+    // shows: a
     // viewport light at [1.5, 90, 90] stays on the right of the view, which
     // is east of the center: over 0°N 90°E seen from 0°N 0°E, over 0°N 180°
     // seen from 0°N 90°E.
