@@ -24,7 +24,7 @@ use mln_util::logging::{Event, Log};
 use mln_util::time::Instant;
 
 use crate::gfx::context::Context;
-use crate::gfx::index_vector::Indexes;
+use crate::gfx::indexes::Indexes;
 use crate::gfx::owned::Owned;
 use crate::gfx::texture2d::TextureKey;
 use crate::gfx::uniform_buffer::UniformBufferArray;

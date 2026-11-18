@@ -48,7 +48,7 @@ use crate::buckets::hillshade_bucket::{HillshadeBucket, HillshadeLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::geometry::dem_data::get_unpack_vector;
 use crate::gfx::context::Context;
-use crate::gfx::index_vector::Indexes;
+use crate::gfx::indexes::Indexes;
 use crate::gfx::texture2d::OwnedTexture;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_drawing::{

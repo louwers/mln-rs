@@ -29,7 +29,7 @@ use mln_util::logging::{Event, Log};
 use mln_util::serialization::payload::{Payload, pod};
 
 use crate::gfx::context::Context;
-use crate::gfx::index_vector::Indexes;
+use crate::gfx::indexes::Indexes;
 use crate::paint_property_binder::InterleavedVertexBuffer;
 
 /// A bucket's vertices or indices. The worker fills it through `get_mut`;
@@ -158,8 +158,8 @@ impl<T: bytemuck::Pod> GeometryVec<T> {
 }
 
 impl GeometryVec<u16> {
-    /// A released gfx index vector of the data, moved out.
-    fn index_vector(&mut self) -> Indexes {
+    /// Indexes of the data, moved out.
+    fn indexes(&mut self) -> Indexes {
         #[cfg(target_family = "wasm")]
         if let Some(bytes) = self.take_host() {
             return Indexes::from_host(bytes);
@@ -245,14 +245,15 @@ impl BucketGeometry {
         self.vertices.entry(key).or_insert_with(|| Rc::new(vec.vertex_vector()));
     }
 
-    /// Moves the data of `vec`, a bucket's, into a shared index vector,
-    /// unless it moved before.
+    /// Moves the data of `vec`, a bucket's, into indexes that
+    /// [`upload_indexes`](Self::upload_indexes) uploads, unless it moved
+    /// before.
     pub(crate) fn move_indexes(&mut self, vec: &mut GeometryVec<u16>) {
         if vec.is_moved() {
             return;
         }
         let key = vec.key();
-        self.indexes.entry(key).or_insert_with(|| vec.index_vector());
+        self.indexes.entry(key).or_insert_with(|| vec.indexes());
         self.indexes_to_upload = true;
     }
 
@@ -319,8 +320,7 @@ pub(crate) fn released_vertices<V: bytemuck::Pod>(vertices: &[V]) -> VertexVecto
     Rc::new(VertexVector::from_vec_released(vertices.to_vec()))
 }
 
-/// A released gfx index vector holding a copy of `indexes`, see
-/// `released_vertices`.
+/// Indexes holding a copy of `indexes`, which a draw owns.
 #[must_use]
 pub(crate) fn released_indexes(indexes: &[u16]) -> Indexes {
     Indexes::new(indexes.to_vec())
@@ -338,8 +338,9 @@ pub(crate) fn bucket_vertices<V: bytemuck::Pod>(
     }
 }
 
-/// The shared index vector of one of a bucket's vectors, see
-/// `bucket_vertices`.
+/// The indexes of one of a bucket's vectors: those of the tile's `geometry`,
+/// whose buffer the draws share, once the bucket's upload moved them there,
+/// else a copy.
 pub(crate) fn bucket_indexes(geometry: Option<&BucketGeometry>, vec: &GeometryVec<u16>) -> Indexes {
     match geometry.zip(vec.key).and_then(|(geometry, key)| geometry.indexes.get(&key)) {
         Some(indexes) => indexes.clone(),

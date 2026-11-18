@@ -8,7 +8,7 @@ use mln_tile_id::CanonicalTileID;
 use mln_util::constants::EXTENT;
 use mln_util::subdivision_granularity::{SubdivisionGranularityExpression, SubdivisionGranularitySetting};
 
-use crate::gfx::index_vector::Indexes;
+use crate::gfx::indexes::Indexes;
 use crate::tile_mask::TileMask;
 use crate::util::subdivision::{NORTH_POLE_Y, SOUTH_POLE_Y};
 use crate::util::tile_mesh::{TileMeshOptions, create_tile_mesh};
