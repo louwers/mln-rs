@@ -2,7 +2,6 @@
 // `RenderSourceBase`. A source's tiles are in the renderer's tile store,
 // which the source's methods are given.
 
-use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_map_types::MapDebugOptions;
@@ -10,11 +9,13 @@ use mln_style::Source;
 use mln_util::constants;
 use mln_util::error::Error;
 
+use crate::gfx::context::Context;
 use crate::layer_type::ErasedEvaluatedLayer;
-use crate::paint_parameters::TransformParameters;
+use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::registry::Registry;
 use crate::render_tile::RenderTile;
-use crate::render_tree::RenderItem;
+use crate::render_tree::DebugLayers;
+use crate::sources::render_image_source::ImageSourceRenderData;
 use crate::tile::job::SourceKey;
 use crate::tile::store::TileStore;
 use crate::tile_parameters::TileParameters;
@@ -52,11 +53,16 @@ pub(crate) trait RenderSource {
         parameters: &TileParameters<'_>,
     );
 
-    /// Note: calling of this method might reset the contained render data.
-    fn create_render_item(&mut self) -> Box<dyn RenderItem>;
-
-    /// Creates the render data to be passed to the render item.
+    /// Makes the source's render tiles of the frame.
     fn prepare(&mut self, store: &mut TileStore, parameters: &SourcePrepareParameters<'_>);
+
+    /// Readies the buckets the frame draws, before its layers make their
+    /// draws.
+    fn upload(&mut self, store: &mut TileStore, context: &Context);
+
+    /// Updates the source's draws of the debug overlays; a no-op for the
+    /// sources that have none (the image source) (layers: debug).
+    fn update_debug_draws(&self, _debug_layers: &mut DebugLayers, _parameters: &PaintParameters<'_>) {}
 
     /// Releases the render data from the last `prepare` while the source is
     /// disabled.
@@ -88,7 +94,7 @@ pub(crate) trait RenderSource {
     }
 
     /// conformance: `getImageRenderData()` (image sources).
-    fn get_image_render_data(&self) -> Option<Rc<crate::sources::render_image_source::ImageSourceRenderData>> {
+    fn get_image_render_data(&self) -> Option<ImageSourceRenderData<'_>> {
         None
     }
 

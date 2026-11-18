@@ -159,7 +159,7 @@ impl TileLayout {
     /// tile, to `states`, as a tile does when a map's feature state
     /// changes: each bucket whose paint depends on feature state evaluates
     /// that paint again for the features that have a state.
-    pub fn set_feature_state(&self, laid_out: &LaidOut, states: &LayerFeatureStates) {
+    pub fn set_feature_state(&self, laid_out: &mut LaidOut, states: &LayerFeatureStates) {
         laid_out.result.set_feature_state(states, &self.resolved.patterns);
     }
 
@@ -546,16 +546,16 @@ mod tests {
     fn feature_state_rewrites_the_buckets_that_depend_on_it() {
         let (style, data) = (style(), data());
         let layout = TileLayout::new(&style, "s", |type_| type_ == "line", (0, 0, 0), &data, |_| None).unwrap();
-        let laid_out = layout.run(data).unwrap();
-        let set = |states: &LayerFeatureStates| laid_out.result.set_feature_state(states, &layout.resolved.patterns);
+        let mut laid_out = layout.run(data).unwrap();
+        let patterns = &layout.resolved.patterns;
 
         let mut states = LayerFeatureStates::default();
-        assert!(set(&states).is_empty(), "no state, no change");
+        assert!(laid_out.result.set_feature_state(&states, patterns).is_empty(), "no state, no change");
         let mut on = mln_style::expression::expression::FeatureState::new();
         on.insert("on".to_owned(), Value::Bool(true));
         states.entry("l".to_owned()).or_default().insert("1".to_owned(), on);
-        let roads = laid_out.result.layer_render_data["roads"].bucket.get_id();
-        assert_eq!(set(&states), [roads]);
+        let roads = laid_out.result.layer_render_data.get("roads").unwrap().bucket.get_id();
+        assert_eq!(laid_out.result.set_feature_state(&states, patterns), [roads]);
     }
 
     #[test]

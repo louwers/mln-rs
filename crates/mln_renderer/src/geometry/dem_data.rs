@@ -1,6 +1,6 @@
 // C++ keeps the image behind a `shared_ptr` that textures share; here the
 // image is owned and textures get a copy (`get_image`), because the DEM
-// lives in a bucket shared between threads.
+// lives in a bucket, which is Send, and textures are render-thread `Rc`s.
 
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;

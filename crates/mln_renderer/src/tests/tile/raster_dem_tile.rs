@@ -20,9 +20,9 @@ fn tiles(test: &RasterTileTest) -> OneTile {
 }
 
 /// The bucket of the DEM tile `id` shows.
-fn dem(tiles: &OneTile, id: &OverscaledTileID) -> Option<std::sync::Arc<HillshadeBucket>> {
+fn dem<'a>(tiles: &'a OneTile, id: &OverscaledTileID) -> Option<&'a HillshadeBucket> {
     match tiles.tile_at(id).contents() {
-        Some(Contents::Dem(bucket)) => Some(std::sync::Arc::clone(bucket)),
+        Some(Contents::Dem(bucket)) => Some(bucket),
         _ => None,
     }
 }

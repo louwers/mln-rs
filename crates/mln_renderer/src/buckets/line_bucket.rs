@@ -1,5 +1,4 @@
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Once};
 
 use geometry::Point;
 use mln_gfx::polyline_generator::{PolylineGenerator, PolylineGeneratorDistances, PolylineGeneratorOptions, dist};
@@ -18,10 +17,9 @@ use mln_util::geometry::FeatureType;
 use mln_util::logging::{Event, Log};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecMap;
-use parking_lot::RwLock;
 
 use crate::bucket::{Bucket, BucketBase};
-use crate::bucket_geometry::GeometryVec;
+use crate::bucket_geometry::{BucketGeometry, GeometryVec};
 use crate::gfx::context::Context;
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::pattern_layout::PatternLayerMap;
@@ -51,16 +49,14 @@ pub(crate) struct LineLayoutVertex {
     pub(crate) a2: [u8; 4],
 }
 
-#[derive(mln_wire::Wire)]
+#[derive(Clone, mln_wire::Wire)]
 pub(crate) struct LineBucket {
     pub(crate) base: BucketBase,
     pub(crate) layout: LineLayoutProperties::PossiblyEvaluated,
     pub(crate) vertices: GeometryVec<LineLayoutVertex>,
     pub(crate) triangles: GeometryVec<u16>,
     pub(crate) segments: Vec<SegmentBase>,
-    /// Behind `RwLock`s: `update` (feature state) changes them while the
-    /// bucket is shared.
-    pub(crate) paint_property_binders: VecMap<String, RwLock<LineBinders>>,
+    pub(crate) paint_property_binders: VecMap<String, LineBinders>,
     zoom: f32,
     overscaling: u32,
     subdivision_granularity: SubdivisionGranularitySetting,
@@ -73,7 +69,7 @@ pub(crate) struct LineBucket {
 /// to create the acute/bevelled line join.
 pub(crate) const EXTRUDE_SCALE: i8 = 63;
 
-static WARNED_INVALID_GEOMETRY: AtomicBool = AtomicBool::new(false);
+static WARNED_INVALID_GEOMETRY: Once = Once::new();
 
 impl LineBucket {
     #[must_use]
@@ -88,7 +84,7 @@ impl LineBucket {
             paint_property_binders.entry(id.clone()).or_insert_with(|| {
                 let mut binders = LineBinders::new(&properties.paint, zoom);
                 binders.line_dasharray.set_line_cap(&layout.line_cap);
-                RwLock::new(binders)
+                binders
             });
         }
         LineBucket {
@@ -113,17 +109,17 @@ impl LineBucket {
         let offset = get_or_max(
             evaluated.line_offset.constant(),
             LinePaintProperties::Defaults::line_offset(),
-            binders.and_then(|b| b.read().line_offset.statistics.max()),
+            binders.and_then(|b| b.line_offset.statistics.max()),
         );
         let mut line_width = get_or_max(
             evaluated.line_width.constant(),
             LinePaintProperties::Defaults::line_width(),
-            binders.and_then(|b| b.read().line_width.statistics.max()),
+            binders.and_then(|b| b.line_width.statistics.max()),
         );
         let gap_width = get_or_max(
             evaluated.line_gap_width.constant(),
             LinePaintProperties::Defaults::line_gap_width(),
-            binders.and_then(|b| b.read().line_gap_width.statistics.max()),
+            binders.and_then(|b| b.line_gap_width.statistics.max()),
         );
         if gap_width != 0.0 {
             line_width = gap_width + 2.0 * line_width;
@@ -222,8 +218,8 @@ impl LineBucket {
             // `MLNPointCollectionFeature` as the source for a line layer.
             // Unfortunately, we cannot show the layer or source name from
             // here.
-            if coordinates.len() < min_len && !WARNED_INVALID_GEOMETRY.swap(true, Ordering::Relaxed) {
-                Log::warning(Event::General, "Invalid geometry in line layer");
+            if coordinates.len() < min_len {
+                WARNED_INVALID_GEOMETRY.call_once(|| Log::warning(Event::General, "Invalid geometry in line layer"));
             }
             return;
         }
@@ -308,7 +304,7 @@ impl Bucket for LineBucket {
 
         let length = self.vertices.len();
         for (id, binders) in &mut self.paint_property_binders {
-            binders.get_mut().populate_vertex_vectors(
+            binders.populate_vertex_vectors(
                 feature,
                 length,
                 index,
@@ -321,8 +317,14 @@ impl Bucket for LineBucket {
         Ok(())
     }
 
-    fn upload(&self, _context: &Context) {
-        self.base.uploaded.store(true, Ordering::SeqCst);
+    fn upload(&mut self, geometry: &mut BucketGeometry, _context: &Context) {
+        geometry.move_vertices(&mut self.vertices);
+        geometry.move_indexes(&mut self.triangles);
+        for binders in self.paint_property_binders.values_mut() {
+            let depends_on_feature_state = binders.depends_on_feature_state();
+            geometry.move_paint(&mut binders.interleaved_vertex_buffer, depends_on_feature_state);
+        }
+        self.base.uploaded = true;
     }
 
     fn has_data(&self) -> bool {
@@ -333,18 +335,22 @@ impl Bucket for LineBucket {
         mln_wire::Wire::write(self, w);
     }
 
+    fn clone_bucket(&self) -> Box<dyn Bucket> {
+        Box::new(self.clone())
+    }
+
     fn update(
-        &self,
+        &mut self,
         states: &crate::bucket::FeatureStates,
         layer: &mln_tile::TileLayer<'_>,
         layer_id: &str,
         image_positions: &ImagePositions,
     ) -> bool {
-        let Some(binders) = self.paint_property_binders.get(layer_id) else {
+        let Some(binders) = self.paint_property_binders.get_mut(layer_id) else {
             return false;
         };
-        binders.write().update_vertex_vectors(states, layer, image_positions);
-        self.base.uploaded.store(false, Ordering::SeqCst);
+        binders.update_vertex_vectors(states, layer, image_positions);
+        self.base.uploaded = false;
         true
     }
 }

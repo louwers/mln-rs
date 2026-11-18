@@ -19,7 +19,7 @@ pub(crate) trait FeatureStateTarget {
     fn feature_state_version(&mut self) -> &mut u64;
     /// Brings the buckets to `states`, and adds those whose vertex data that
     /// changed to `changed`.
-    fn set_feature_state(&self, states: &LayerFeatureStates, changed: &mut ChangedBuckets);
+    fn set_feature_state(&mut self, states: &LayerFeatureStates, changed: &mut ChangedBuckets);
 }
 
 /// The feature state of a map's sources, as the map's updates carry it: by
@@ -606,7 +606,7 @@ mod tests {
         fn feature_state_version(&mut self) -> &mut u64 {
             &mut self.version
         }
-        fn set_feature_state(&self, states: &LayerFeatureStates, _changed: &mut ChangedBuckets) {
+        fn set_feature_state(&mut self, states: &LayerFeatureStates, _changed: &mut ChangedBuckets) {
             self.applied.borrow_mut().push(states.clone());
         }
     }

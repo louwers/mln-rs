@@ -315,9 +315,9 @@ fn every_geometry_layer_type_crosses() {
 
     let layers: Vec<_> = layers_of_type.iter().flat_map(|(_, jsons)| jsons).map(|json| layer(json, 0.0)).collect();
     let result = cross(&layers, &tile_data());
-    for (layer_id, render_data) in &result.layer_render_data {
+    for (layer_id, render_data) in result.layer_render_data.iter() {
         let sent = layers.iter().find(|layer| &layer.style().base().id == layer_id).unwrap();
-        assert!(Arc::ptr_eq(&render_data.layer, sent));
+        assert!(Arc::ptr_eq(render_data.layer, sent));
         assert!(render_data.bucket.has_data());
     }
 }
@@ -342,10 +342,10 @@ fn symbol_layouts_cross_with_their_glyphs_and_images() {
         panic!("expected the layout");
     };
     assert_eq!(output.deps.images.keys().collect::<Vec<_>>(), ["interstate_1"]);
-    for render_data in output.result.layer_render_data.values() {
+    for (_, render_data) in output.result.layer_render_data.iter() {
         let symbols = render_data.bucket.downcast_ref::<crate::buckets::symbol_bucket::SymbolBucket>().unwrap();
         assert!(symbols.has_text_data() && symbols.has_icon_data());
-        assert!(!symbols.state().symbol_instances.is_empty());
+        assert!(!symbols.state.symbol_instances.is_empty());
     }
 }
 
@@ -381,11 +381,14 @@ fn mlt_tiles_cross() {
 #[test]
 fn pattern_layouts_cross() {
     let result = cross(&layers(&[FILL_PATTERN, LINE_PATTERN, EXTRUSION_PATTERN]), &tile_data());
-    let extrusion = result.layer_render_data["extrusion-pattern"]
+    let extrusion = result
+        .layer_render_data
+        .get("extrusion-pattern")
+        .unwrap()
         .bucket
         .downcast_ref::<crate::buckets::fill_extrusion_bucket::FillExtrusionBucket>()
         .unwrap();
-    let binders = extrusion.paint_property_binders["extrusion-pattern"].read();
+    let binders = &extrusion.paint_property_binders["extrusion-pattern"];
     assert!(matches!(
         binders.fill_extrusion_pattern.kind,
         crate::paint_property_binder::CrossFadedPaintPropertyBinderKind::Composite { .. }
@@ -498,7 +501,7 @@ fn properties_cross_while_a_paint_property_transitions() {
     let JobResult::Laid(output) = codec.run(&job(&style, full(&tile_data()), Resolved::default())) else {
         panic!("not a layout");
     };
-    assert!(Arc::ptr_eq(&output.result.layer_render_data["water"].layer, &transitioning));
+    assert!(Arc::ptr_eq(output.result.layer_render_data.get("water").unwrap().layer, &transitioning));
 }
 
 /// A layout's render data has the layers of its job, not of a job sent
@@ -517,8 +520,8 @@ fn layouts_have_the_layers_they_answer() {
     let (_, JobResult::Laid(output)) = codec.decode(reply) else {
         panic!("not a layout");
     };
-    for render_data in output.result.layer_render_data.values() {
-        assert!(sent.layers.iter().any(|layer| Arc::ptr_eq(layer, &render_data.layer)));
+    for (_, render_data) in output.result.layer_render_data.iter() {
+        assert!(sent.layers.iter().any(|layer| Arc::ptr_eq(layer, render_data.layer)));
     }
 }
 

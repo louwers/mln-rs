@@ -62,11 +62,11 @@ use crate::layout::symbol_projection::{get_gl_coord_matrix, get_label_plane_matr
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
 use crate::render_layer::{
-    BucketPlacementData, LayerParts, LayerPrepareParameters, LayerTiles, LayerValues, Parts, PartsMut, PlacedTile,
-    RenderLayer, RenderLayerBase, SymbolTranslate, TypedLayer, set_layer_tiles,
+    BucketKey, BucketPlacementData, LayerParts, LayerPrepareParameters, LayerTiles, LayerValues, Parts, PartsMut,
+    PlacedTile, RenderLayer, RenderLayerBase, SymbolTranslate, TypedLayer, set_layer_tiles,
 };
 use crate::render_pass::RenderPass;
-use crate::render_tile::RenderTile;
+use crate::render_tile::{FrameTile, RenderTile};
 use crate::tile_matrix::{get_projection_data, to_projection_ubo};
 use crate::update_parameters::UpdateParameters;
 
@@ -161,7 +161,6 @@ pub(crate) fn get_screen_matrix(translation: [f32; 2]) -> Mat4 {
 )]
 fn update_tile_attributes(
     geometry: Option<&BucketGeometry>,
-    bucket: &SymbolBucket,
     buffer: &Buffer,
     layer_id: &str,
     is_text: bool,
@@ -170,14 +169,13 @@ fn update_tile_attributes(
     attribs: &mut VertexAttributeArray,
     properties_as_uniforms: &mut StringIDSetsPair,
 ) {
-    set_binder_attributes(geometry, bucket, is_text, paint_props, evaluated, attribs, properties_as_uniforms);
-    set_static_and_dynamic_attributes(geometry, bucket, buffer, layer_id, attribs);
+    set_binder_attributes(geometry, is_text, paint_props, evaluated, attribs, properties_as_uniforms);
+    set_static_and_dynamic_attributes(geometry, buffer, layer_id, attribs);
 }
 
 /// The data-driven paint property half of `updateTileAttributes`.
 fn set_binder_attributes(
     geometry: Option<&BucketGeometry>,
-    bucket: &SymbolBucket,
     is_text: bool,
     paint_props: &PaintProperties,
     evaluated: &SymbolPaintProperties::PossiblyEvaluated,
@@ -189,7 +187,7 @@ fn set_binder_attributes(
     if is_text {
         let b = &paint_props.text_binders;
         let ib = &b.interleaved_vertex_buffer;
-        let shared = paint_vertices(geometry, bucket, ib, b.depends_on_feature_state());
+        let shared = paint_vertices(geometry, ib, b.depends_on_feature_state());
         read_data_driven_paint_property(
             attribs,
             &b.text_opacity,
@@ -243,7 +241,7 @@ fn set_binder_attributes(
     } else {
         let b = &paint_props.icon_binders;
         let ib = &b.interleaved_vertex_buffer;
-        let shared = paint_vertices(geometry, bucket, ib, b.depends_on_feature_state());
+        let shared = paint_vertices(geometry, ib, b.depends_on_feature_state());
         read_data_driven_paint_property(
             attribs,
             &b.icon_opacity,
@@ -300,25 +298,19 @@ fn set_binder_attributes(
 /// The vertex-buffer half of `updateTileAttributes`.
 fn set_static_and_dynamic_attributes(
     geometry: Option<&BucketGeometry>,
-    bucket: &SymbolBucket,
     buffer: &Buffer,
     layer_id: &str,
     attribs: &mut VertexAttributeArray,
 ) {
-    set_layout_attributes(geometry, bucket, buffer, attribs);
+    set_layout_attributes(geometry, buffer, attribs);
     set_projected_pos_attribute(buffer, layer_id, attribs);
     set_fade_opacity_attribute(buffer, attribs);
 }
 
 /// The static half of `updateTileAttributes`: the layout vertices.
-fn set_layout_attributes(
-    geometry: Option<&BucketGeometry>,
-    bucket: &SymbolBucket,
-    buffer: &Buffer,
-    attribs: &mut VertexAttributeArray,
-) {
+fn set_layout_attributes(geometry: Option<&BucketGeometry>, buffer: &Buffer, attribs: &mut VertexAttributeArray) {
     let layout_size = size_of::<crate::buckets::symbol_bucket::SymbolLayoutVertex>() as u32;
-    let layout_data = bucket_vertices(geometry, bucket, &buffer.attribute_data);
+    let layout_data = bucket_vertices(geometry, &buffer.attribute_data);
     if let Some(attr) = attribs.set(ID_SYMBOL_POS_OFFSET_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
         attr.set_shared_raw_data(Some(Rc::clone(&layout_data)), 0, 0, layout_size, AttributeDataType::Short4);
     }
@@ -477,7 +469,7 @@ fn refresh_draw(
     let is_text = draw.data.symbol_type == SymbolType::Text;
     let sdf_icons = draw.data.symbol_type == SymbolType::IconSDF;
 
-    let state = bucket.state();
+    let state = &bucket.state;
 
     // This property can be set after the initial appearance of the tile, as
     // part of the layout process.
@@ -518,17 +510,8 @@ fn refresh_draw(
         if refresh.paint
             && let Some(paint_props) = bucket.paint_properties.get(layer_id)
         {
-            let paint_props = paint_props.read();
             let mut properties_as_uniforms = StringIDSetsPair::default();
-            set_binder_attributes(
-                geometry,
-                bucket,
-                is_text,
-                &paint_props,
-                evaluated,
-                attrs,
-                &mut properties_as_uniforms,
-            );
+            set_binder_attributes(geometry, is_text, paint_props, evaluated, attrs, &mut properties_as_uniforms);
         }
     }
 
@@ -640,58 +623,44 @@ impl RenderSymbolLayer {
         (text_translate, icon_translate)
     }
 
-    /// Adds `bucket`, of the tile at `tile_index` of `tiles`, to what the
-    /// layer places: when the layer leads the bucket, to its placement data,
-    /// with the tile's feature index, in order of sort key; otherwise to its
-    /// follower data.
-    pub(crate) fn add_placement_data(
+    /// Adds `bucket`, `key`'s, of `tile`, to what the layer places: when the
+    /// layer leads the bucket, to its placement data, with the tile's feature
+    /// index, in order of sort key; otherwise to its follower data.
+    pub(crate) fn add_bucket(
         &mut self,
-        tiles: &[RenderTile],
-        tile_index: usize,
-        bucket: Arc<SymbolBucket>,
+        tile: &PlacedTile,
+        key: BucketKey,
+        bucket: &SymbolBucket,
         feature_index: impl FnOnce() -> Option<Arc<FeatureIndex>>,
         (text_translate, icon_translate): (SymbolTranslate, SymbolTranslate),
     ) {
-        let Some(tile) = tiles.get(tile_index).map(PlacedTile::new) else {
-            return;
+        let source_id = &self.base.style.base().source;
+        let data = |feature_index, sort_key_range| BucketPlacementData {
+            bucket: key,
+            tile: *tile,
+            feature_index,
+            source_id: source_id.clone(),
+            sort_key_range,
+            text_translate,
+            icon_translate,
+            #[cfg(feature = "bench")]
+            held: None,
         };
-        if bucket.bucket_leader_id != self.get_id() {
-            self.follower_data.push(BucketPlacementData {
-                bucket,
-                tile,
-                feature_index: None,
-                source_id: self.base.style.base().source.clone(),
-                sort_key_range: None,
-                text_translate,
-                icon_translate,
-            });
+        if bucket.bucket_leader_id != self.base.style.base().id {
+            let data = data(None, None);
+            self.follower_data.push(data);
             return;
         }
         // Only place this layer if it's the "group leader" for the bucket
         let feature_index = feature_index();
 
         if bucket.sort_key_ranges.is_empty() {
-            self.placement_data.push(BucketPlacementData {
-                bucket,
-                tile,
-                feature_index,
-                source_id: self.base.style.base().source.clone(),
-                sort_key_range: None,
-                text_translate,
-                icon_translate,
-            });
+            let data = data(feature_index, None);
+            self.placement_data.push(data);
             return;
         }
         for sort_key_range in &bucket.sort_key_ranges {
-            let layer_data = BucketPlacementData {
-                bucket: Arc::clone(&bucket),
-                tile,
-                feature_index: feature_index.clone(),
-                source_id: self.base.style.base().source.clone(),
-                sort_key_range: Some(*sort_key_range),
-                text_translate,
-                icon_translate,
-            };
+            let layer_data = data(feature_index.clone(), Some(*sort_key_range));
             if self
                 .placement_data
                 .last()
@@ -707,6 +676,35 @@ impl RenderSymbolLayer {
                 sort_key_range.sort_key.partial_cmp(&key) != Some(std::cmp::Ordering::Less)
             });
             self.placement_data.insert(sort_position, layer_data);
+        }
+    }
+
+    /// bench: [`add_bucket`](Self::add_bucket) of `bucket`, a copy the
+    /// layer's placement data hold, of the tile at `tile_index` of `tiles`.
+    #[cfg(feature = "bench")]
+    #[expect(clippy::needless_pass_by_value, reason = "a benchmark passes the copy it recovered")]
+    pub(crate) fn add_placement_data(
+        &mut self,
+        tiles: &[RenderTile],
+        tile_index: usize,
+        bucket: crate::render_layer::HeldBucket,
+        feature_index: impl FnOnce() -> Option<Arc<FeatureIndex>>,
+        translates: (SymbolTranslate, SymbolTranslate),
+    ) {
+        let (Some(tile), Some(held)) = (tiles.get(tile_index), bucket.take()) else {
+            return;
+        };
+        let key = BucketKey {
+            source: crate::tile::job::SourceKey(0),
+            tile: *tile.get_overscaled_tile_id(),
+            bucket: held.bucket_instance_id as usize,
+        };
+        self.add_bucket(&PlacedTile::new(tile), key, &held, feature_index, translates);
+        bucket.set(Some(held));
+        for data in self.placement_data.iter_mut().chain(&mut self.follower_data) {
+            if data.bucket == key {
+                data.held = Some(Rc::clone(&bucket));
+            }
         }
     }
 
@@ -784,7 +782,7 @@ impl RenderSymbolLayer {
         } else {
             icon_property_values(evaluated, &bucket.layout)
         };
-        let state = bucket.state();
+        let state = &bucket.state;
         let mut add = |buffer: &CollisionBuffer, group: &Option<ShaderGroupPtr>, mode: DrawMode| {
             let Some(group) = group else {
                 return;
@@ -842,7 +840,7 @@ impl RenderSymbolLayer {
         let layer = &*self.values.evaluated;
         let evaluated = &layer.paint;
         let zoom = state.get_zoom() as f32;
-        let paint_properties = bucket.paint_properties.get(self.get_id())?.read();
+        let paint_properties = bucket.paint_properties.get(self.get_id())?;
 
         let data = &draw.data;
         let tile_id = tile_id.to_unwrapped();
@@ -972,7 +970,7 @@ impl RenderSymbolLayer {
     /// writes the buffers they read.
     fn make_frame_draws<'a>(
         &mut self,
-        tiles: impl Iterator<Item = &'a RenderTile>,
+        tiles: impl Iterator<Item = FrameTile<'a>>,
         passes: RenderPass,
         paint_parameters: &PaintParameters<'_>,
         context: &Context,
@@ -982,7 +980,9 @@ impl RenderSymbolLayer {
         for tile in tiles {
             let tile_id = *tile.get_overscaled_tile_id();
             if let Some(cached) = self.drawing.caches.cache(&tile_id) {
-                let bucket = tile.get_layer_render_data(&*self.base.style).and_then(|data| data.bucket::<Symbol>());
+                let bucket = tile
+                    .get_layer_render_data(&*self.base.style)
+                    .and_then(super::super::render_layer::LayerRenderData::bucket::<Symbol>);
                 debug_assert!(bucket.is_some() || cached.draws.is_empty());
                 for (slot, draw) in cached.draws.iter().enumerate().filter(|(_, draw)| draw.visible) {
                     let Some(uniforms) =
@@ -1200,15 +1200,18 @@ impl RenderLayer for RenderSymbolLayer {
         let Some(render_tiles) = tiles else {
             return set_layer_tiles(self, params, order);
         };
-        for (tile_index, render_tile) in render_tiles.indexed() {
-            let Some(bucket_ptr) = render_tile.get_bucket(&*self.base.style) else {
+        let source_key = source.tiles();
+        for render_tile in render_tiles.iter() {
+            let Some(render_data) = render_tile.get_layer_render_data(&*self.base.style) else {
                 continue;
             };
-            let Some(bucket) = crate::bucket::recover::<SymbolBucket>(bucket_ptr) else {
+            let (Some(source), Some(bucket)) = (source_key, render_data.bucket::<Symbol>()) else {
                 continue;
             };
+            let key =
+                BucketKey { source, tile: *render_tile.get_overscaled_tile_id(), bucket: render_data.bucket_index };
             let feature_index = || render_tile.get_feature_index();
-            self.add_placement_data(render_tiles.source_tiles(), tile_index, bucket, feature_index, translates);
+            self.add_bucket(&PlacedTile::new(render_tile.tile), key, bucket, feature_index, translates);
         }
         set_layer_tiles(self, params, order)
     }
@@ -1285,8 +1288,8 @@ impl RenderLayer for RenderSymbolLayer {
 
         let mut renderable_segments: Vec<SegmentGroup> = Vec::new();
 
-        let tiles: Vec<&RenderTile> = render_tiles.iter().collect();
-        for (tile_index, tile) in tiles.iter().enumerate() {
+        let tiles: Vec<FrameTile<'_>> = render_tiles.iter().collect();
+        for (tile_index, &tile) in tiles.iter().enumerate() {
             let tile_id = *tile.get_overscaled_tile_id();
 
             let render_data = super::render_data_for_pass(tile, &*style, passes);
@@ -1340,7 +1343,7 @@ impl RenderLayer for RenderSymbolLayer {
             }
 
             let mut serial_key = 1.0_f32;
-            let state_guard = bucket.state();
+            let state_guard = &bucket.state;
             // A bucket laid out before a layout change can still have the
             // previous sort-key expression until it is rebuilt.
             let sort_segments =
@@ -1392,7 +1395,6 @@ impl RenderLayer for RenderSymbolLayer {
                 add_renderables(&state_guard.text, SymbolType::Text);
             }
 
-            drop(state_guard);
             self.rebuild_collision(&tile_id, bucket, evaluated);
         }
 
@@ -1430,7 +1432,7 @@ impl RenderLayer for RenderSymbolLayer {
             let Some(bucket) = render_data.bucket::<Symbol>() else {
                 continue;
             };
-            let state_guard = bucket.state();
+            let state_guard = &bucket.state;
             let buffer = if is_text {
                 &state_guard.text
             } else if sdf_icons {
@@ -1450,7 +1452,6 @@ impl RenderLayer for RenderSymbolLayer {
             let Some(bucket_paint_properties) = bucket.paint_properties.get(self.get_id()) else {
                 continue;
             };
-            let bucket_paint_properties = bucket_paint_properties.read();
 
             let bucket_layout = &*bucket.layout;
             let values = if is_text {
@@ -1470,11 +1471,10 @@ impl RenderLayer for RenderSymbolLayer {
             let mut vertex_attribs = VertexAttributeArray::new();
             update_tile_attributes(
                 tile.get_bucket_geometry(),
-                bucket,
                 buffer,
                 self.get_id(),
                 is_text,
-                &bucket_paint_properties,
+                bucket_paint_properties,
                 evaluated,
                 &mut vertex_attribs,
                 &mut properties_as_uniforms,

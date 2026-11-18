@@ -3,7 +3,6 @@
 // the shared gfx vectors its draws reference.
 
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 
 use geometry::Point;
 use mln_gfx::shaders::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
@@ -24,10 +23,9 @@ use mln_util::mat3::{Mat3, matrix as mat3};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::vectors::Vec3f;
 use mln_vec_map::VecMap;
-use parking_lot::RwLock;
 
 use crate::bucket::{Bucket, BucketBase};
-use crate::bucket_geometry::GeometryVec;
+use crate::bucket_geometry::{BucketGeometry, GeometryVec};
 use crate::gfx::context::Context;
 use crate::gfx::fill_large_mesh_arrays::fill_large_mesh_arrays;
 use crate::layer_type::EvaluatedLayer;
@@ -70,7 +68,7 @@ pub(crate) struct FillExtrusionWallVertex {
 
 pub(crate) use crate::render_light::EvaluatedLight;
 
-#[derive(mln_wire::Wire)]
+#[derive(Clone, mln_wire::Wire)]
 pub(crate) struct FillExtrusionBucket {
     pub(crate) base: BucketBase,
     pub(crate) layout: FillExtrusionLayoutProperties::PossiblyEvaluated,
@@ -80,9 +78,7 @@ pub(crate) struct FillExtrusionBucket {
     pub(crate) triangle_segments: Vec<SegmentBase>,
     pub(crate) subdivision_granularity: SubdivisionGranularitySetting,
 
-    /// Behind `RwLock`s: `update` (feature state) changes them while the
-    /// bucket is shared.
-    pub(crate) paint_property_binders: VecMap<String, RwLock<FillExtrusionBinders>>,
+    pub(crate) paint_property_binders: VecMap<String, FillExtrusionBinders>,
 }
 
 static EMPTY_FORMATTED_SECTION: Value = Value::Null;
@@ -108,7 +104,7 @@ impl FillExtrusionBucket {
         for (id, properties) in layer_paint_properties {
             paint_property_binders
                 .entry(id.clone())
-                .or_insert_with(|| RwLock::new(FillExtrusionBinders::new(&properties.paint, zoom)));
+                .or_insert_with(|| FillExtrusionBinders::new(&properties.paint, zoom));
         }
         FillExtrusionBucket {
             base: BucketBase::default(),
@@ -308,7 +304,7 @@ impl Bucket for FillExtrusionBucket {
 
         let length = self.vertices.len();
         for (id, binders) in &mut self.paint_property_binders {
-            binders.get_mut().populate_vertex_vectors(
+            binders.populate_vertex_vectors(
                 feature,
                 length,
                 index,
@@ -321,8 +317,27 @@ impl Bucket for FillExtrusionBucket {
         Ok(())
     }
 
-    fn upload(&self, _context: &Context) {
-        self.base.uploaded.store(true, Ordering::SeqCst);
+    fn upload(&mut self, geometry: &mut BucketGeometry, context: &Context) {
+        use crate::layers::render_fill_extrusion_layer::{instanced_walls, wall_quad_paint, wall_quad_vertices};
+        // Walls that aren't instances of the static quad are quads of their
+        // own, made of the vertices and paint values before those move.
+        let walls = self.vertices.len().saturating_sub(1);
+        if !instanced_walls(context) {
+            geometry.derive_vertices(&mut self.vertices, wall_quad_vertices);
+        }
+        geometry.move_vertices(&mut self.vertices);
+        geometry.move_indexes(&mut self.triangles);
+        for binders in self.paint_property_binders.values_mut() {
+            let depends_on_feature_state = binders.depends_on_feature_state();
+            let buffer = &mut binders.interleaved_vertex_buffer;
+            if !instanced_walls(context) && !depends_on_feature_state {
+                let stride = buffer.stride;
+                geometry
+                    .derive_vertices(&mut buffer.shared_vertex_vector, |paint| wall_quad_paint(paint, stride, walls));
+            }
+            geometry.move_paint(buffer, depends_on_feature_state);
+        }
+        self.base.uploaded = true;
     }
 
     fn has_data(&self) -> bool {
@@ -333,18 +348,22 @@ impl Bucket for FillExtrusionBucket {
         mln_wire::Wire::write(self, w);
     }
 
+    fn clone_bucket(&self) -> Box<dyn Bucket> {
+        Box::new(self.clone())
+    }
+
     fn update(
-        &self,
+        &mut self,
         states: &crate::bucket::FeatureStates,
         layer: &mln_tile::TileLayer<'_>,
         layer_id: &str,
         image_positions: &ImagePositions,
     ) -> bool {
-        let Some(binders) = self.paint_property_binders.get(layer_id) else {
+        let Some(binders) = self.paint_property_binders.get_mut(layer_id) else {
             return false;
         };
-        binders.write().update_vertex_vectors(states, layer, image_positions);
-        self.base.uploaded.store(false, Ordering::SeqCst);
+        binders.update_vertex_vectors(states, layer, image_positions);
+        self.base.uploaded = false;
         true
     }
 }

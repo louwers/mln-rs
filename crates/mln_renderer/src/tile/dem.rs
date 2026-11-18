@@ -5,8 +5,8 @@
 
 use mln_tile_id::OverscaledTileID;
 
+use crate::buckets::hillshade_bucket::HillshadeBucket;
 use crate::tile::contents::Contents;
-use crate::tile::tile::Tile;
 
 /// Where a neighbour is, in tiles: `dx` east and `dy` south.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -41,31 +41,24 @@ pub(crate) fn neighbors(id: &OverscaledTileID) -> impl Iterator<Item = (Offset, 
     })
 }
 
-/// Backfills `tile`'s DEM from the edge of `border`, its neighbour at
-/// `offset`, and `border`'s from `tile`'s, if `border` is renderable.
-pub(crate) fn backfill_pair(tile: &Tile, border: &Tile, offset: Offset) {
+/// Backfills the DEM of `tile`, a raster-dem tile's contents, from the edge
+/// of `border`, its neighbour's at `offset`, and `border`'s from `tile`'s, if
+/// `border` is renderable.
+pub(crate) fn backfill_pair(tile: &mut Contents, border: &mut Contents, offset: Offset) {
     if !border.is_renderable() {
         return;
     }
+    let (Contents::Dem(tile), Contents::Dem(border)) = (tile, border) else {
+        return;
+    };
     backfill_border(tile, border, offset);
     backfill_border(border, tile, offset.opposite());
 }
 
 /// Copies the edge of `border`, `tile`'s neighbour at `offset`, into
 /// `tile`'s DEM border.
-fn backfill_border(tile: &Tile, border: &Tile, offset: Offset) {
-    let (Some(Contents::Dem(border_bucket)), Some(Contents::Dem(bucket))) = (border.contents(), tile.contents()) else {
-        return;
-    };
-    if std::sync::Arc::ptr_eq(border_bucket, bucket) {
-        return;
-    }
-    {
-        let border_dem = border_bucket.get_dem_data();
-        let mut tile_dem = bucket.get_dem_data_mut();
-        tile_dem.backfill_border(&border_dem, offset.dx, offset.dy);
-    }
+fn backfill_border(tile: &mut HillshadeBucket, border: &HillshadeBucket, offset: Offset) {
+    tile.get_dem_data_mut().backfill_border(border.get_dem_data(), offset.dx, offset.dy);
     // The bucket goes through the prepare pass again with the new border.
-    bucket.set_prepared(false);
-    bucket.reset_render_target_prepared();
+    tile.reset_render_target_prepared();
 }

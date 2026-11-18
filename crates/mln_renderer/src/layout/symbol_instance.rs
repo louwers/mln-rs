@@ -22,7 +22,7 @@ use crate::util::pool::PoolRange;
 
 /// The collision boxes and keys of a bucket's symbol instances, which they
 /// hold ranges of.
-#[derive(Debug, Default, mln_wire::Wire)]
+#[derive(Clone, Debug, Default, mln_wire::Wire)]
 pub(crate) struct SymbolInstancePools {
     pub(crate) collision_boxes: Vec<CollisionBox>,
     #[wire(with = "pod")]

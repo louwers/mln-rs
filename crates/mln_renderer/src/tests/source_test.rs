@@ -1409,13 +1409,20 @@ fn globe_base_level_is_not_kept_where_it_is_large_or_out_of_reach() {
     assert_eq!(4, out_of_reach.tiles_at(1).len());
 }
 
+/// The DEM of `tile`, a raster-dem tile.
+fn dem(tile: &crate::tile::tile::Tile) -> &crate::buckets::hillshade_bucket::HillshadeBucket {
+    match tile.contents() {
+        Some(crate::tile::contents::Contents::Dem(bucket)) => bucket,
+        _ => panic!("a DEM"),
+    }
+}
+
 /// Port-only: raster-dem tiles that meet at the antimeridian, in two copies
 /// of the world, backfill each other's borders as neighbours in one copy
 /// do.
 #[test]
 fn raster_dem_borders_across_a_world_wrap() {
     use crate::tests::tile::dem_png;
-    use crate::tile::contents::Contents;
 
     let mut test = SourceTest::new();
     test.transform.jump_to(&CameraOptions {
@@ -1459,10 +1466,6 @@ fn raster_dem_borders_across_a_world_wrap() {
             .map(|slot| &slot.tile)
             .find(|tile| tile.id.canonical == CanonicalTileID::new(2, x, 1))
             .unwrap_or_else(|| panic!("no tile 2/{x}/1"))
-    };
-    let dem = |tile: &crate::tile::tile::Tile| match tile.contents() {
-        Some(Contents::Dem(bucket)) => Arc::clone(bucket),
-        _ => panic!("a DEM"),
     };
     // The east edge of a copy of the world, and the west edge of the copy
     // east of it.

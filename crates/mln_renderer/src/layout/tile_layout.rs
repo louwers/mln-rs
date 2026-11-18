@@ -15,7 +15,6 @@ use mln_text::tagged_string::font_stack_hash;
 use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
-use mln_util::hash::HashMap;
 use mln_util::serialization::sorted;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
@@ -26,8 +25,8 @@ use crate::group_by_layout::group_layers;
 use crate::layer_type::{ErasedEvaluatedLayer, ErasedLayout};
 use crate::layout::filter_groups::FilterGroups;
 use crate::layout::layout::{BuildParams, LayoutParameters, SourceLayer};
-use crate::render_layer::LayerRenderData;
 use crate::text::glyph_store::HBShapeResults;
+use crate::tile::contents::LayoutBuckets;
 
 /// How a tile is laid out, apart from its style and data.
 #[derive(Clone, Copy, Debug, mln_wire::Wire)]
@@ -146,8 +145,8 @@ struct DiscoveredGroup {
 
 /// A tile's buckets and feature index.
 pub(crate) struct Built {
-    /// Each layer's bucket, by layer id.
-    pub(crate) render_data: HashMap<String, LayerRenderData>,
+    /// The buckets, and each layer's.
+    pub(crate) buckets: LayoutBuckets,
     pub(crate) feature_index: FeatureIndex,
 }
 
@@ -209,7 +208,7 @@ pub(crate) fn build(discovered: Discovered, input: &LayoutInput<'_>, resolved: &
     const ESTIMATED_ELEMENTS_PER_CELL: usize = 8;
 
     let Discovered { groups, mut filter_groups, dependencies: _ } = discovered;
-    let mut built = Built { render_data: HashMap::default(), feature_index: FeatureIndex::new(input.data.cloned()) };
+    let mut built = Built { buckets: LayoutBuckets::default(), feature_index: FeatureIndex::new(input.data.cloned()) };
     built.feature_index.reserve(ESTIMATED_ELEMENTS_PER_CELL);
     let Some(data) = input.data else {
         return Ok(built);

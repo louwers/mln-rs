@@ -193,7 +193,7 @@ impl CircleLayout {
 
         let length = bucket.vertices.len();
         for binders in bucket.paint_property_binders.values_mut() {
-            binders.get_mut().populate_vertex_vectors(
+            binders.populate_vertex_vectors(
                 feature,
                 length,
                 feature_index,

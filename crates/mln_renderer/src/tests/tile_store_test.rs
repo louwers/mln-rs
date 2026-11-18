@@ -193,7 +193,11 @@ fn a_not_modified_reload_keeps_the_data() {
     tile.update();
     assert!(tile.tile().is_complete());
     let key = tile.layout().data.as_ref().expect("data").key;
-    let shown = std::rc::Rc::clone(&tile.tile().shown.as_ref().expect("contents").contents);
+    let shown_layout = |tile: &OneTile| {
+        let contents = tile.tile().contents().and_then(Contents::geometry).expect("contents");
+        Arc::clone(&contents.result.feature_index)
+    };
+    let shown = shown_layout(&tile);
 
     // Required again, the tile revalidates its data.
     tile.set_necessity(&id, TileNecessity::Optional);
@@ -208,7 +212,7 @@ fn a_not_modified_reload_keeps_the_data() {
     assert!(requesting_network(&tile, false));
     assert_eq!(tile.layout().data.as_ref().expect("data").key, key, "the same data");
     assert_eq!(manual.submitted(), 1, "nothing to lay out again");
-    assert!(std::rc::Rc::ptr_eq(&tile.tile().shown.as_ref().expect("contents").contents, &shown));
+    assert!(Arc::ptr_eq(&shown_layout(&tile), &shown), "the same contents");
     assert!(tile.tile().is_complete());
 
     // A revalidation that fails, retried and answered `not_modified`: the
@@ -486,9 +490,9 @@ fn dem_backfill_as_dems_arrive() {
 }
 
 /// The DEMs of tiles `left` and `right`, neighbours in a row.
-fn dems(tiles: &OneTile, left: &OverscaledTileID, right: &OverscaledTileID) -> [Arc<HillshadeBucket>; 2] {
+fn dems<'a>(tiles: &'a OneTile, left: &OverscaledTileID, right: &OverscaledTileID) -> [&'a HillshadeBucket; 2] {
     [left, right].map(|id| match tiles.tile_at(id).contents() {
-        Some(Contents::Dem(bucket)) => Arc::clone(bucket),
+        Some(Contents::Dem(bucket)) => bucket,
         _ => panic!("a DEM"),
     })
 }

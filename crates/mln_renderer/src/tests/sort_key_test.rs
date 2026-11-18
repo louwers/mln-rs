@@ -10,7 +10,6 @@ use mln_style::layers::{Circle, Fill, Line, Symbol};
 use mln_style_types::image::{ImageDependencies, ImagePosition, ImagePositions, Impl as ImageImpl, RectU16};
 use mln_text::glyph::GlyphDependencies;
 use mln_tile_id::OverscaledTileID;
-use mln_util::hash::HashMap;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
@@ -18,7 +17,7 @@ use mln_vec_map::VecSet;
 use serde_json::json;
 
 use crate::Registry;
-use crate::bucket::BucketPtr;
+use crate::bucket::Bucket;
 use crate::bucket_parameters::BucketParameters;
 use crate::buckets::circle_bucket::CircleBucket;
 use crate::buckets::fill_bucket::FillBucket;
@@ -29,6 +28,7 @@ use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::layout::filter_groups::FilterGroups;
 use crate::layout::layout::{BuildParams, LayoutParameters, SourceLayer};
 use crate::layout::tile_layout::{Built, Resolved};
+use crate::tile::contents::LayoutBuckets;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum SortKeyType {
@@ -87,7 +87,7 @@ fn layer(mut json: serde_json::Value, sort_key_name: &str, type_: SortKeyType) -
 
 /// Lays out three features with ranks 2, 0, 1 at x = 100, 200, 300 and
 /// returns the layer's bucket.
-fn create_bucket(properties: &Arc<dyn ErasedEvaluatedLayer>, shape: Shape) -> BucketPtr {
+fn create_bucket(properties: &Arc<dyn ErasedEvaluatedLayer>, shape: Shape) -> Box<dyn Bucket> {
     let ranks = [2.0, 0.0, 1.0];
     let features = ranks
         .iter()
@@ -158,11 +158,11 @@ fn create_bucket(properties: &Arc<dyn ErasedEvaluatedLayer>, shape: Shape) -> Bu
         ImagePosition::new(RectU16 { x: 0, y: 0, w: 18, h: 18 }, &marker),
     )]);
     let resolved = Resolved { icons: image_positions.clone(), patterns: image_positions, ..Resolved::default() };
-    let mut built = Built { render_data: HashMap::default(), feature_index: FeatureIndex::new(Some(data)) };
+    let mut built = Built { buckets: LayoutBuckets::default(), feature_index: FeatureIndex::new(Some(data)) };
     let build =
         BuildParams { first_load: true, show_collision_boxes: false, canonical: bucket_parameters.tile_id.canonical };
     layout.create_bucket(Some(&resolved), &mut built, &build).unwrap();
-    built.render_data.remove(&layer_id).unwrap().bucket
+    built.buckets.into_bucket(&layer_id).unwrap()
 }
 
 /// The features in the order their vertices are, from the x coordinate the
@@ -243,7 +243,7 @@ fn symbol_order() {
         let bucket = create_bucket(&symbol_layer(type_, None), Shape::Point);
         let bucket = bucket.downcast_ref::<SymbolBucket>().unwrap();
         let order: Vec<usize> = bucket
-            .state()
+            .state
             .symbol_instances
             .iter()
             .map(crate::layout::symbol_instance::SymbolInstance::get_data_feature_index)
@@ -273,7 +273,7 @@ fn symbol_viewport_y() {
         assert!(bucket.sort_features_by_y, "{type_:?}");
         assert!(bucket.sort_key_ranges.is_empty(), "{type_:?}");
         let order: Vec<usize> = bucket
-            .state()
+            .state
             .symbol_instances
             .iter()
             .map(crate::layout::symbol_instance::SymbolInstance::get_data_feature_index)

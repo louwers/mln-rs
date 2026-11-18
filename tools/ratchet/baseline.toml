@@ -17,7 +17,6 @@
 "crates/mln_renderer/src/layout/symbol_instance.rs" = 1
 "crates/mln_renderer/src/layout/symbol_layout.rs" = 3
 "crates/mln_renderer/src/renderer.rs" = 1
-"crates/mln_renderer/src/sources/render_image_source.rs" = 1
 "crates/mln_renderer/src/text/collision_feature.rs" = 2
 "crates/mln_renderer/src/text/collision_index.rs" = 2
 "crates/mln_renderer/src/text/placement.rs" = 6
@@ -57,7 +56,6 @@
 "crates/mln_mtl/src/exported_target.rs" = 8
 "crates/mln_mtl/src/renderer_backend.rs" = 2
 "crates/mln_mtl/src/surface_target.rs" = 13
-"crates/mln_renderer/src/bucket_geometry.rs" = 1
 "crates/mln_renderer/src/draw.rs" = 4
 "crates/mln_renderer/src/gfx/atlas_binding.rs" = 2
 "crates/mln_renderer/src/gfx/context.rs" = 7

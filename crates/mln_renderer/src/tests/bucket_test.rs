@@ -32,7 +32,7 @@ use parking_lot::Mutex;
 
 use crate::Registry;
 use crate::bucket::Bucket;
-use crate::bucket_geometry::{BucketGeometry, paint_vertices};
+use crate::bucket_geometry::{BucketGeometry, bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::circle_bucket::CircleBucket;
 use crate::buckets::fill_bucket::FillBucket;
 use crate::buckets::fill_extrusion_bucket::FillExtrusionBucket;
@@ -112,7 +112,7 @@ fn circle_bucket() {
     assert!(bucket.has_data());
     assert!(bucket.needs_upload());
 
-    with_context(|context| bucket.upload(context));
+    with_context(|context| bucket.upload(&mut BucketGeometry::default(), context));
     assert!(bucket.has_data());
     assert!(!bucket.needs_upload());
 }
@@ -139,7 +139,7 @@ fn fill_bucket() {
     assert!(bucket.has_data());
     assert!(bucket.needs_upload());
 
-    with_context(|context| bucket.upload(context));
+    with_context(|context| bucket.upload(&mut BucketGeometry::default(), context));
     assert!(!bucket.needs_upload());
 }
 
@@ -222,26 +222,25 @@ fn data_driven_fill_bucket(fill_color: &serde_json::Value) -> FillBucket {
 // gtest: Buckets.FillBucketFreesCpuGeometryAfterUpload
 #[test]
 fn fill_bucket_frees_cpu_geometry_after_upload() {
-    let bucket = data_driven_fill_bucket(&serde_json::json!(["to-color", ["get", "c"]]));
+    let mut bucket = data_driven_fill_bucket(&serde_json::json!(["to-color", ["get", "c"]]));
     let vertex_count = bucket.vertices.len();
     let index_count = bucket.triangles.len();
     assert!(vertex_count > 0);
     assert!(index_count > 0);
 
     with_context(|context| {
-        bucket.upload(context);
-        let geometry = BucketGeometry::default();
-
-        // A layer draws the bucket: its data moves to the render thread's
+        // The bucket's upload moves its data to the render thread's
         // vectors, which hold it until they are uploaded.
-        let vertices = geometry.vertices(&bucket, &bucket.vertices);
-        assert_eq!(bucket.vertices.data().capacity(), 0);
+        let mut geometry = BucketGeometry::default();
+        bucket.upload(&mut geometry, context);
+        let vertices = bucket_vertices(Some(&geometry), &bucket.vertices);
+        assert!(bucket.vertices.data().is_empty());
         assert_eq!(bucket.vertices.len(), vertex_count);
         assert_eq!(vertices.get_raw_data().len(), vertex_count * vertices.get_raw_size());
 
         // A draw's upload turns the shared vectors into buffers.
         let buffer = vertex_buffer(context, &vertices, false).expect("uploads").expect("a buffer");
-        let triangles = geometry.indexes(&bucket, &bucket.triangles);
+        let triangles = bucket_indexes(Some(&geometry), &bucket.triangles);
         upload_indexes(context, &mut triangles.borrow_mut()).expect("uploads");
 
         // The CPU copies are gone, the counts that draws are built from
@@ -255,39 +254,39 @@ fn fill_bucket_frees_cpu_geometry_after_upload() {
 
         // A second draw over the same bucket reuses the vectors and the
         // buffer without reading the data.
-        let again = geometry.vertices(&bucket, &bucket.vertices);
+        let again = bucket_vertices(Some(&geometry), &bucket.vertices);
         assert!(Rc::ptr_eq(&vertices, &again));
-        assert!(Rc::ptr_eq(&geometry.indexes(&bucket, &bucket.triangles), &triangles));
+        assert!(Rc::ptr_eq(&bucket_indexes(Some(&geometry), &bucket.triangles), &triangles));
         let reused = vertex_buffer(context, &again, true).expect("uploads").expect("a buffer");
         assert!(Rc::ptr_eq(&buffer, &reused));
 
         // Data-driven paint values are freed too when nothing can rewrite them.
-        let binders = bucket.paint_property_binders.get("fill").unwrap().read();
+        let binders = bucket.paint_property_binders.get("fill").unwrap();
         assert!(!binders.depends_on_feature_state());
         let buffer = &binders.interleaved_vertex_buffer;
-        let paint = paint_vertices(Some(&geometry), &bucket, buffer, false);
+        let paint = paint_vertices(Some(&geometry), buffer, false);
         assert!(paint.get_raw_count() > 0);
         assert!(vertex_buffer(context, &paint, false).expect("uploads").is_some());
         assert!(!paint.has_raw_data());
-        assert_eq!(buffer.shared_vertex_vector.data().capacity(), 0);
+        assert!(buffer.shared_vertex_vector.data().is_empty());
     });
 }
 
 // gtest: Buckets.FillBucketKeepsPaintDataThatFeatureStateRewrites
 #[test]
 fn fill_bucket_keeps_paint_data_that_feature_state_rewrites() {
-    let bucket = data_driven_fill_bucket(&serde_json::json!([
+    let mut bucket = data_driven_fill_bucket(&serde_json::json!([
         "to-color",
         ["case", ["boolean", ["feature-state", "hover"], false], "red", "blue"]
     ]));
 
     with_context(|context| {
-        bucket.upload(context);
-        let geometry = BucketGeometry::default();
-        let binders = bucket.paint_property_binders.get("fill").unwrap().read();
+        let mut geometry = BucketGeometry::default();
+        bucket.upload(&mut geometry, context);
+        let binders = bucket.paint_property_binders.get("fill").unwrap();
         assert!(binders.depends_on_feature_state());
         let buffer = &binders.interleaved_vertex_buffer;
-        let paint = paint_vertices(Some(&geometry), &bucket, buffer, binders.depends_on_feature_state());
+        let paint = paint_vertices(Some(&geometry), buffer, binders.depends_on_feature_state());
         assert!(paint.get_raw_count() > 0);
         assert!(vertex_buffer(context, &paint, false).expect("uploads").is_some());
         assert!(!buffer.shared_vertex_vector.is_moved());
@@ -331,7 +330,7 @@ fn line_bucket() {
     assert!(bucket.has_data());
     assert!(bucket.needs_upload());
 
-    with_context(|context| bucket.upload(context));
+    with_context(|context| bucket.upload(&mut BucketGeometry::default(), context));
     assert!(!bucket.needs_upload());
 }
 
@@ -355,19 +354,19 @@ fn line_bucket_drawables_build_from_freed_indexes() {
     let backend: Rc<dyn RendererBackend> =
         Rc::new(mln_webgpu::RendererBackend::new(&Device::new(None).expect("device")));
     let context = &Context::new(Rc::clone(&backend));
-    bucket.upload(context);
+    let mut geometry = BucketGeometry::default();
+    let index_count = bucket.triangles.len();
+    bucket.upload(&mut geometry, context);
 
     // An earlier draw put the indexes in a buffer, which frees their CPU
     // copy.
-    let geometry = BucketGeometry::default();
-    let index_count = bucket.triangles.len();
-    let triangles = geometry.indexes(&bucket, &bucket.triangles);
+    let triangles = bucket_indexes(Some(&geometry), &bucket.triangles);
     upload_indexes(context, &mut triangles.borrow_mut()).expect("uploads");
     assert_eq!(*triangles.borrow().vector(), Vec::<u16>::new());
 
     // A layer that rebuilds its draws of the tile builds the segments from
     // the counts.
-    let indexes = geometry.indexes(&bucket, &bucket.triangles);
+    let indexes = bucket_indexes(Some(&geometry), &bucket.triangles);
     assert_eq!(indexes.borrow().elements(), index_count);
     assert_eq!(triangles.borrow().elements(), index_count);
 }
@@ -424,12 +423,12 @@ fn symbol_bucket() {
     assert!(!bucket.has_data());
     assert!(!bucket.needs_upload());
 
-    bucket.state().text.segments.push(SegmentBase::new(0, 0));
+    bucket.state.text.segments.push(SegmentBase::new(0, 0));
     assert!(bucket.has_text_data());
     assert!(bucket.has_data());
     assert!(bucket.needs_upload());
 
-    with_context(|context| bucket.upload(context));
+    with_context(|context| bucket.upload(&mut BucketGeometry::default(), context));
     assert!(!bucket.needs_upload());
 }
 
@@ -439,11 +438,11 @@ fn raster_bucket() {
     let rgba = PremultipliedImage::new(Size::new(1, 1));
 
     // RasterBucket::hasData() is always true.
-    let bucket = RasterBucket::new(rgba);
+    let mut bucket = RasterBucket::new(rgba);
     assert!(bucket.has_data());
     assert!(bucket.needs_upload());
 
-    with_context(|context| bucket.upload(context));
+    with_context(|context| bucket.upload(&mut BucketGeometry::default(), context));
     assert!(!bucket.needs_upload());
 
     bucket.clear();
@@ -470,7 +469,7 @@ fn raster_vertex(p: (i16, i16), t: (u16, u16)) -> RasterLayoutVertex {
 // gtest: Buckets.RasterBucketMaskEmpty
 #[test]
 fn raster_bucket_mask_empty() {
-    let bucket = RasterBucket::with_shared_image(None);
+    let mut bucket = RasterBucket::with_shared_image(None);
     bucket.set_mask(mask(&[]));
     let geometry = bucket.geometry();
     assert_eq!(Vec::<RasterLayoutVertex>::new(), geometry.vertices);
@@ -481,7 +480,7 @@ fn raster_bucket_mask_empty() {
 // gtest: Buckets.RasterBucketMaskNoChildren
 #[test]
 fn raster_bucket_mask_no_children() {
-    let bucket = RasterBucket::with_shared_image(None);
+    let mut bucket = RasterBucket::with_shared_image(None);
     bucket.set_mask(mask(&[(0, 0, 0)]));
 
     // A mask of 0/0/0 doesn't produce buffers since we're instead using the
@@ -495,7 +494,7 @@ fn raster_bucket_mask_no_children() {
 // gtest: Buckets.RasterBucketMaskTwoChildren
 #[test]
 fn raster_bucket_mask_two_children() {
-    let bucket = RasterBucket::with_shared_image(None);
+    let mut bucket = RasterBucket::with_shared_image(None);
     bucket.set_mask(mask(&[(1, 0, 0), (1, 1, 1)]));
 
     let geometry = bucket.geometry();
@@ -531,7 +530,7 @@ fn raster_bucket_mask_two_children() {
 // gtest: Buckets.RasterBucketMaskComplex
 #[test]
 fn raster_bucket_mask_complex() {
-    let bucket = RasterBucket::with_shared_image(None);
+    let mut bucket = RasterBucket::with_shared_image(None);
     bucket.set_mask(mask(&[(1, 0, 1), (1, 1, 0), (2, 2, 3), (2, 3, 2), (3, 6, 7), (3, 7, 6)]));
 
     let geometry = bucket.geometry();
@@ -704,7 +703,7 @@ fn line_bucket_vertices(
             )
             .unwrap();
     }
-    bucket.vertices.data().clone()
+    bucket.vertices.data().into_owned()
 }
 
 #[test]

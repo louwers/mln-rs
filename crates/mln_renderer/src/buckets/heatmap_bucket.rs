@@ -3,7 +3,6 @@
 // layer copies them into the shared gfx vectors its draws reference.
 
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_map_types::MapMode;
@@ -16,10 +15,9 @@ use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, Ge
 use mln_util::constants::EXTENT;
 use mln_util::error::Error;
 use mln_vec_map::VecMap;
-use parking_lot::RwLock;
 
 use crate::bucket::{Bucket, BucketBase};
-use crate::bucket_geometry::GeometryVec;
+use crate::bucket_geometry::{BucketGeometry, GeometryVec};
 use crate::gfx::context::Context;
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::pattern_layout::PatternLayerMap;
@@ -41,15 +39,13 @@ pub(crate) struct HeatmapLayoutVertex {
 
 pub(crate) type HeatmapTextureLayoutVertex = HeatmapLayoutVertex;
 
-#[derive(mln_wire::Wire)]
+#[derive(Clone, mln_wire::Wire)]
 pub(crate) struct HeatmapBucket {
     pub(crate) base: BucketBase,
     pub(crate) vertices: GeometryVec<HeatmapLayoutVertex>,
     pub(crate) triangles: GeometryVec<u16>,
     pub(crate) segments: Vec<SegmentBase>,
-    /// Behind `RwLock`s, as the bucket is shared and a feature state
-    /// change rewrites them.
-    pub(crate) paint_property_binders: VecMap<String, RwLock<HeatmapBinders>>,
+    pub(crate) paint_property_binders: VecMap<String, HeatmapBinders>,
     pub(crate) mode: MapMode,
 }
 
@@ -60,9 +56,7 @@ impl HeatmapBucket {
     pub(crate) fn new(layers: &VecMap<String, Arc<EvaluatedLayer<Heatmap>>>, mode: MapMode, zoom: f32) -> Self {
         let mut paint_property_binders = VecMap::new();
         for (id, layer) in layers {
-            paint_property_binders
-                .entry(id.clone())
-                .or_insert_with(|| RwLock::new(HeatmapBinders::new(&layer.paint, zoom)));
+            paint_property_binders.entry(id.clone()).or_insert_with(|| HeatmapBinders::new(&layer.paint, zoom));
         }
         HeatmapBucket {
             base: BucketBase::default(),
@@ -155,7 +149,7 @@ impl Bucket for HeatmapBucket {
 
         let length = self.vertices.len();
         for binders in self.paint_property_binders.values_mut() {
-            binders.get_mut().populate_vertex_vectors(
+            binders.populate_vertex_vectors(
                 feature,
                 length,
                 feature_index,
@@ -169,22 +163,28 @@ impl Bucket for HeatmapBucket {
     }
 
     fn update(
-        &self,
+        &mut self,
         states: &crate::bucket::FeatureStates,
         layer: &mln_tile::TileLayer<'_>,
         layer_id: &str,
         image_positions: &ImagePositions,
     ) -> bool {
-        let Some(binders) = self.paint_property_binders.get(layer_id) else {
+        let Some(binders) = self.paint_property_binders.get_mut(layer_id) else {
             return false;
         };
-        binders.write().update_vertex_vectors(states, layer, image_positions);
-        self.base.uploaded.store(false, Ordering::SeqCst);
+        binders.update_vertex_vectors(states, layer, image_positions);
+        self.base.uploaded = false;
         true
     }
 
-    fn upload(&self, _context: &Context) {
-        self.base.uploaded.store(true, Ordering::SeqCst);
+    fn upload(&mut self, geometry: &mut BucketGeometry, _context: &Context) {
+        geometry.move_vertices(&mut self.vertices);
+        geometry.move_indexes(&mut self.triangles);
+        for binders in self.paint_property_binders.values_mut() {
+            let depends_on_feature_state = binders.depends_on_feature_state();
+            geometry.move_paint(&mut binders.interleaved_vertex_buffer, depends_on_feature_state);
+        }
+        self.base.uploaded = true;
     }
 
     fn has_data(&self) -> bool {
@@ -193,5 +193,9 @@ impl Bucket for HeatmapBucket {
 
     fn write_wire(&self, w: &mut mln_wire::Writer) {
         mln_wire::Wire::write(self, w);
+    }
+
+    fn clone_bucket(&self) -> Box<dyn Bucket> {
+        Box::new(self.clone())
     }
 }

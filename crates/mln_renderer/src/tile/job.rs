@@ -313,7 +313,7 @@ fn layout(
     times.build = start.elapsed();
     let result = match built {
         Ok(built) => JobResult::Laid(LayoutOutput {
-            result: LayoutResult::new(built.render_data, Arc::new(built.feature_index)),
+            result: LayoutResult::new(built.buckets, Arc::new(built.feature_index)),
             deps,
         }),
         Err(error) => JobResult::Failed(error),

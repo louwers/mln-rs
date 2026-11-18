@@ -49,7 +49,7 @@ use crate::paint_parameters::PaintParameters;
 use crate::query::FeatureExtensionValue;
 use crate::render_source::{RenderSource, RenderSourceBase, SourcePrepareParameters};
 use crate::render_tile::RenderTile;
-use crate::render_tree::{DebugLayers, DebugType, RenderItem, debug_layer};
+use crate::render_tree::{DebugLayers, DebugType, debug_layer};
 use crate::source_type::{OriginUpdate, TileOrigin};
 use crate::tile::job::SourceKey;
 use crate::tile::source_tiles::{CoverUpdate, SourceTiles};
@@ -59,19 +59,6 @@ use crate::tile::tile::TileKind;
 use crate::tile_matrix::{get_projection_data, to_projection_ubo};
 use crate::tile_parameters::TileParameters;
 use crate::util::subdivision::subdivide_vertex_line;
-
-pub(crate) struct TileSourceRenderItem {
-    render_tiles: Rc<Vec<RenderTile>>,
-    /// The source's id.
-    name: Rc<str>,
-}
-
-impl TileSourceRenderItem {
-    #[must_use]
-    pub(crate) fn new(render_tiles: Rc<Vec<RenderTile>>, name: Rc<str>) -> Self {
-        TileSourceRenderItem { render_tiles, name }
-    }
-}
 
 /// The line properties of a debug overlay's polylines: red tile borders, and
 /// black text over a white outline (layers: debug).
@@ -151,18 +138,12 @@ fn polyline_objects(
     ))
 }
 
-impl RenderItem for TileSourceRenderItem {
-    fn upload(&self, context: &Context) {
-        for tile in self.render_tiles.iter() {
-            tile.upload(context);
-        }
-    }
-
-    // layers: debug
-    //
-    // The text is polylines, like the tile borders: WebGPU draws line
-    // primitives one pixel wide.
-    fn update_debug_draws(&self, debug_layers: &mut DebugLayers, parameters: &PaintParameters<'_>) {
+impl RenderTileSource {
+    /// Updates the source's draws of the debug overlays (layers: debug).
+    ///
+    /// The text is polylines, like the tile borders: WebGPU draws line
+    /// primitives one pixel wide.
+    fn update_tile_debug_draws(&self, debug_layers: &mut DebugLayers, parameters: &PaintParameters<'_>) {
         if !parameters
             .debug_options
             .contains(MapDebugOptions::TIMESTAMPS | MapDebugOptions::PARSE_STATUS | MapDebugOptions::TILE_BORDERS)
@@ -172,7 +153,8 @@ impl RenderItem for TileSourceRenderItem {
         }
 
         let shaders = &*parameters.static_data.shaders;
-        let source = &self.name;
+        let source: Rc<str> = Rc::from(self.base.style_source.id());
+        let source = &source;
         let globe = parameters.state.is_globe_rendering();
         let projection_variant = if globe { ProjectionVariant::Globe } else { ProjectionVariant::Mercator };
 
@@ -233,7 +215,7 @@ impl RenderItem for TileSourceRenderItem {
                 // add draws of the tiles without any: new tiles, and those
                 // whose text changed
                 let mut of_tiles = layer.tiles_of(source);
-                for tile in self.render_tiles.iter() {
+                for tile in &self.render_tiles {
                     let tile_id = *tile.get_overscaled_tile_id();
                     let Some(debug_bucket) = &tile.debug_bucket else {
                         continue;
@@ -272,7 +254,7 @@ impl RenderItem for TileSourceRenderItem {
             // subdivided at the tile mesh's granularity, one per zoom.
             let mut globe_borders: BTreeMap<u8, GeometryCoordinates> = BTreeMap::new();
             let border_options = PolylineGeneratorOptions { type_: FeatureType::Polygon, ..Default::default() };
-            for tile in self.render_tiles.iter() {
+            for tile in &self.render_tiles {
                 let tile_id = *tile.get_overscaled_tile_id();
                 if tile.debug_bucket.is_none() || !tile.get_needs_rendering() {
                     continue;
@@ -424,7 +406,7 @@ pub(crate) struct RenderTileSource {
     key: SourceKey,
     origin: Box<dyn TileOrigin>,
     fast_pfor_enabled: bool,
-    pub(crate) render_tiles: Rc<Vec<RenderTile>>,
+    pub(crate) render_tiles: Vec<RenderTile>,
     bearing: f32,
 }
 
@@ -445,13 +427,9 @@ impl RenderTileSource {
             key,
             origin,
             fast_pfor_enabled: false,
-            render_tiles: Rc::new(Vec::new()),
+            render_tiles: Vec::new(),
             bearing: 0.0,
         }
-    }
-
-    pub(crate) fn create_render_item(&mut self) -> Box<dyn RenderItem> {
-        Box::new(TileSourceRenderItem::new(Rc::clone(&self.render_tiles), Rc::from(self.base.style_source.id())))
     }
 }
 
@@ -495,30 +473,30 @@ impl RenderSource for RenderTileSource {
         source.update_cover(&update, ctx);
     }
 
-    fn create_render_item(&mut self) -> Box<dyn RenderItem> {
-        RenderTileSource::create_render_item(self)
-    }
-
     fn prepare(&mut self, store: &mut TileStore, parameters: &SourcePrepareParameters<'_>) {
         self.bearing = parameters.transform.state.get_bearing() as f32;
-        let pool = store.pool().clone();
-        let Some((source, _)) = store.source_mut(self.key) else {
-            self.render_tiles = Rc::new(Vec::new());
+        self.render_tiles.clear();
+        let Some(source) = store.source(self.key) else {
             return;
         };
-        let mut tiles: Vec<RenderTile> = Vec::with_capacity(source.rendered_count());
+        self.render_tiles.reserve(source.rendered_count());
         for rendered in source.rendered() {
             let mut render_tile = RenderTile::new(*rendered.id, rendered.tile, rendered.hold_for_fade);
-            render_tile.prepare(rendered.tile, rendered.needs_rendering, &pool, parameters);
-            tiles.push(render_tile);
+            render_tile.prepare(rendered.tile, rendered.needs_rendering, parameters);
+            self.render_tiles.push(render_tile);
         }
-        self.render_tiles = Rc::new(tiles);
     }
 
     fn release_render_data(&mut self) {
-        if !self.render_tiles.is_empty() {
-            self.render_tiles = Rc::new(Vec::new());
-        }
+        self.render_tiles = Vec::new();
+    }
+
+    fn upload(&mut self, store: &mut TileStore, context: &Context) {
+        store.upload(self.key, &self.render_tiles, context);
+    }
+
+    fn update_debug_draws(&self, debug_layers: &mut DebugLayers, parameters: &PaintParameters<'_>) {
+        self.update_tile_debug_draws(debug_layers, parameters);
     }
 
     fn tiles(&self) -> Option<SourceKey> {

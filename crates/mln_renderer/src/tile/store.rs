@@ -17,14 +17,18 @@ use mln_util::error::Error;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::pool::TaskGroup;
 
+use crate::buckets::symbol_bucket::SymbolBucket;
+use crate::gfx::context::Context;
 use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::image_store::ImageStore;
 use crate::layout::tile_layout::{LayoutParams, Resolved};
+use crate::render_layer::{BucketKey, SymbolBuckets};
 use crate::render_orchestrator::drop_on_workers;
+use crate::render_tile::RenderTile;
 use crate::renderer_event::RendererEvent;
 use crate::source_state::SourceFeatureState;
 use crate::text::glyph_store::GlyphStore;
-use crate::tile::contents::{Answer, TileAtlases};
+use crate::tile::contents::{Answer, Contents, TileAtlases};
 use crate::tile::inbox::{Inbox, InboxSender, TileEvent, Waker};
 use crate::tile::job::{SourceKey, TileKey};
 use crate::tile::loading::{DataOrigin, Load};
@@ -305,6 +309,26 @@ impl TileStore {
         Some((self.sources.get_mut(&key)?, &mut self.ctx))
     }
 
+    /// What the tiles of `render_tiles`, render tiles of the source `key`,
+    /// show, at their indexes.
+    pub(crate) fn contents_of(&self, key: Option<SourceKey>, render_tiles: &[RenderTile]) -> Vec<Option<&Contents>> {
+        let tiles = key.and_then(|key| self.sources.get(&key));
+        render_tiles.iter().map(|render_tile| tiles?.tile(render_tile.get_overscaled_tile_id())?.contents()).collect()
+    }
+
+    /// Readies the buckets of the tiles of `render_tiles`, render tiles of
+    /// the source `key`, for the frame's draws (`Contents::upload`).
+    pub(crate) fn upload(&mut self, key: SourceKey, render_tiles: &[RenderTile], context: &Context) {
+        let Some(tiles) = self.sources.get_mut(&key) else {
+            return;
+        };
+        for render_tile in render_tiles {
+            if let Some(contents) = tiles.contents_mut(render_tile.get_overscaled_tile_id()) {
+                contents.upload(context);
+            }
+        }
+    }
+
     pub(crate) fn take_events(&mut self) -> Vec<StoreEvent> {
         std::mem::take(&mut self.ctx.events)
     }
@@ -480,12 +504,21 @@ impl TileStore {
         self.ctx.jobs.log_stats();
     }
 
-    pub(crate) fn pool(&self) -> &TaskGroup {
-        &self.ctx.pool
-    }
-
     #[cfg(test)]
     pub(crate) fn is_idle(&self) -> bool {
         self.ctx.jobs.is_idle()
+    }
+}
+
+/// The symbol buckets of the tiles' layouts.
+impl SymbolBuckets for TileStore {
+    fn get(&self, key: &BucketKey) -> Option<&SymbolBucket> {
+        let contents = self.sources.get(&key.source)?.tile(&key.tile)?.contents()?.geometry()?;
+        contents.result.layer_render_data.bucket(key.bucket)?.downcast_ref()
+    }
+
+    fn get_mut(&mut self, key: &BucketKey) -> Option<&mut SymbolBucket> {
+        let contents = self.sources.get_mut(&key.source)?.contents_mut(&key.tile)?.geometry_mut()?;
+        contents.result.layer_render_data.bucket_mut(key.bucket)?.downcast_mut()
     }
 }

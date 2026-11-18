@@ -22,10 +22,10 @@ use mln_vec_map::VecSet;
 use mln_wire::{Reader, Wire, Writer};
 use smallvec::SmallVec;
 
-use crate::bucket::{Bucket, BucketPtr};
+use crate::bucket::Bucket;
 use crate::layout::layout::{BuildParams, Layout, LayoutParameters, SourceLayer};
 use crate::layout::tile_layout::{Built, Resolved};
-use crate::render_layer::{LayerRenderData, RenderLayer};
+use crate::render_layer::RenderLayer;
 
 /// A layer type that the renderer draws.
 pub(crate) trait LayerType: StyleLayerType {
@@ -209,7 +209,7 @@ pub(crate) trait ErasedLayerType: ErasedStyleLayerType {
     fn read_evaluated(&self, r: &mut Reader<'_>) -> Option<Arc<dyn ErasedEvaluatedLayer>>;
 
     /// Reads a bucket of the type, which [`Bucket::write_wire`] wrote.
-    fn read_bucket(&self, r: &mut Reader<'_>) -> Option<BucketPtr>;
+    fn read_bucket(&self, r: &mut Reader<'_>) -> Option<Box<dyn Bucket>>;
 }
 
 impl<T: LayerType> ErasedLayerType for LayerTypeEntry<T> {
@@ -252,8 +252,8 @@ impl<T: LayerType> ErasedLayerType for LayerTypeEntry<T> {
         }))
     }
 
-    fn read_bucket(&self, r: &mut Reader<'_>) -> Option<BucketPtr> {
-        Some(Arc::new(T::Bucket::read(r)?))
+    fn read_bucket(&self, r: &mut Reader<'_>) -> Option<Box<dyn Bucket>> {
+        Some(Box::new(T::Bucket::read(r)?))
     }
 }
 
@@ -305,13 +305,10 @@ impl<T: LayerType> ErasedLayout for TypedLayout<T> {
         if !bucket.has_data() {
             return Ok(());
         }
-        let bucket: BucketPtr = Arc::new(bucket);
-        for (id, layer) in self.0.layers() {
-            built.render_data.entry(id.clone()).or_insert_with(|| LayerRenderData {
-                bucket: Arc::clone(&bucket),
-                layer: Arc::<EvaluatedLayer<T>>::clone(layer),
-            });
-        }
+        let layers = self.0.layers().iter().map(|(id, layer)| -> (String, Arc<dyn ErasedEvaluatedLayer>) {
+            (id.clone(), Arc::<EvaluatedLayer<T>>::clone(layer))
+        });
+        built.buckets.add(Box::new(bucket), layers);
         Ok(())
     }
 }

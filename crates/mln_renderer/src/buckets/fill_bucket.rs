@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_style::expression::{Image, Value};
@@ -15,10 +14,9 @@ use mln_util::logging::{Event, Log};
 use mln_util::serialization::sorted;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecMap;
-use parking_lot::RwLock;
 
 use crate::bucket::{Bucket, BucketBase};
-use crate::bucket_geometry::GeometryVec;
+use crate::bucket_geometry::{BucketGeometry, GeometryVec};
 use crate::gfx::context::Context;
 use crate::gfx::fill_generator::generate_fill_and_outline_buffers;
 use crate::layer_type::EvaluatedLayer;
@@ -40,7 +38,7 @@ pub(crate) struct FillLayoutVertex {
     pub(crate) a1: [i16; 2],
 }
 
-#[derive(mln_wire::Wire)]
+#[derive(Clone, mln_wire::Wire)]
 pub(crate) struct FillBucket {
     pub(crate) base: BucketBase,
 
@@ -56,9 +54,7 @@ pub(crate) struct FillBucket {
     pub(crate) triangle_segments: Vec<SegmentBase>,
     pub(crate) subdivision_granularity: SubdivisionGranularitySetting,
 
-    /// Behind `RwLock`s: `update` (feature state) changes them while the
-    /// bucket is shared.
-    pub(crate) paint_property_binders: VecMap<String, RwLock<FillBinders>>,
+    pub(crate) paint_property_binders: VecMap<String, FillBinders>,
 
     #[wire(with = "sorted::map")]
     sdf_patterns: HashMap<String, bool>,
@@ -78,9 +74,7 @@ impl FillBucket {
     ) -> Self {
         let mut paint_property_binders = VecMap::new();
         for (id, properties) in layer_paint_properties {
-            paint_property_binders
-                .entry(id.clone())
-                .or_insert_with(|| RwLock::new(FillBinders::new(&properties.paint, zoom)));
+            paint_property_binders.entry(id.clone()).or_insert_with(|| FillBinders::new(&properties.paint, zoom));
         }
         FillBucket {
             base: BucketBase::default(),
@@ -130,7 +124,7 @@ impl FillBucket {
     ) {
         let length = self.vertices.len();
         for (id, binders) in &mut self.paint_property_binders {
-            binders.get_mut().populate_vertex_vectors(
+            binders.populate_vertex_vectors(
                 feature,
                 length,
                 index,
@@ -184,8 +178,21 @@ impl Bucket for FillBucket {
         self.sdf_patterns.get(layer_id).copied().unwrap_or(false)
     }
 
-    fn upload(&self, _context: &Context) {
-        self.base.uploaded.store(true, Ordering::SeqCst);
+    fn upload(&mut self, geometry: &mut BucketGeometry, context: &Context) {
+        geometry.move_vertices(&mut self.vertices);
+        geometry.move_indexes(&mut self.triangles);
+        geometry.move_indexes(&mut self.basic_lines);
+        if crate::layers::render_fill_layer::draws_outline_quads(context) {
+            geometry.move_vertices(&mut self.outline_ends);
+        } else {
+            // Only the instanced outlines read the outline ends.
+            self.outline_ends.discard();
+        }
+        for binders in self.paint_property_binders.values_mut() {
+            let depends_on_feature_state = binders.depends_on_feature_state();
+            geometry.move_paint(&mut binders.interleaved_vertex_buffer, depends_on_feature_state);
+        }
+        self.base.uploaded = true;
     }
 
     fn has_data(&self) -> bool {
@@ -196,18 +203,22 @@ impl Bucket for FillBucket {
         mln_wire::Wire::write(self, w);
     }
 
+    fn clone_bucket(&self) -> Box<dyn Bucket> {
+        Box::new(self.clone())
+    }
+
     fn update(
-        &self,
+        &mut self,
         states: &crate::bucket::FeatureStates,
         layer: &mln_tile::TileLayer<'_>,
         layer_id: &str,
         image_positions: &ImagePositions,
     ) -> bool {
-        let Some(binders) = self.paint_property_binders.get(layer_id) else {
+        let Some(binders) = self.paint_property_binders.get_mut(layer_id) else {
             return false;
         };
-        binders.write().update_vertex_vectors(states, layer, image_positions);
-        self.base.uploaded.store(false, Ordering::SeqCst);
+        binders.update_vertex_vectors(states, layer, image_positions);
+        self.base.uploaded = false;
         true
     }
 }

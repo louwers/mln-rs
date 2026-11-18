@@ -298,14 +298,12 @@ impl RenderHeatmapLayer {
             let Some(bucket) = render_data.bucket::<Heatmap>() else {
                 continue;
             };
-            let Some(binders_lock) = bucket.paint_property_binders.get(self.get_id()) else {
+            let Some(binders) = bucket.paint_property_binders.get(self.get_id()) else {
                 continue;
             };
-            let binders = &*binders_lock.read();
             let geometry = tile.get_bucket_geometry();
-            let paint = || {
-                paint_vertices(geometry, bucket, &binders.interleaved_vertex_buffer, binders.depends_on_feature_state())
-            };
+            let paint =
+                || paint_vertices(geometry, &binders.interleaved_vertex_buffer, binders.depends_on_feature_state());
 
             if self.drawing.caches.bucket(&tile_id).is_some_and(|prev| prev != bucket.base.bucket_id) {
                 // The tile's draw was built from another bucket.
@@ -329,7 +327,7 @@ impl RenderHeatmapLayer {
                 });
                 if let Some(attr) = attrs.set(ID_HEATMAP_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
                     attr.set_shared_raw_data(
-                        Some(bucket_vertices(geometry, bucket, &bucket.vertices)),
+                        Some(bucket_vertices(geometry, &bucket.vertices)),
                         0, // offsetof(HeatmapLayoutVertex, a1)
                         /*vertex_offset=*/ 0,
                         size_of::<HeatmapLayoutVertex>() as u32,
@@ -340,7 +338,7 @@ impl RenderHeatmapLayer {
                     vertices: attrs,
                     vertex_count: if bucket.segments.is_empty() { 0 } else { bucket.vertices.len() },
                     mode: DrawMode::Triangles(),
-                    indexes: bucket_indexes(geometry, bucket, &bucket.triangles),
+                    indexes: bucket_indexes(geometry, &bucket.triangles),
                     segments: bucket.segments.iter().map(SegmentBase::copy).collect(),
                     instances: None,
                 };

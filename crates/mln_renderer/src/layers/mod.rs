@@ -17,7 +17,7 @@ use mln_style::layer_type::ErasedLayerStyle;
 
 use crate::draw::DrawObjects;
 use crate::draw_cache::BucketChanges;
-use crate::render_tile::RenderTile;
+use crate::render_tile::FrameTile;
 
 /// Copies the bucket's data-driven attributes into a draw again where
 /// `changes` says their values changed: `refresh(attrs)` reads them into its
@@ -41,13 +41,12 @@ pub(crate) fn shared_vertices<V: bytemuck::Pod>(vertices: &[V]) -> VertexVectorB
     crate::bucket_geometry::released_vertices(vertices)
 }
 
-/// The tile's render data for `pass`. A free function, so that the result
-/// borrows only the tile (the layers mutate themselves while they hold it).
+/// The tile's render data for `pass`.
 pub(crate) fn render_data_for_pass<'a>(
-    tile: &'a RenderTile,
+    tile: FrameTile<'a>,
     style: &dyn ErasedLayerStyle,
     pass: crate::render_pass::RenderPass,
-) -> Option<&'a crate::render_layer::LayerRenderData> {
+) -> Option<crate::render_layer::LayerRenderData<'a>> {
     let render_data = tile.get_layer_render_data(style)?;
     if (render_data.layer.render_passes() & pass.underlying_type()) != 0 { Some(render_data) } else { None }
 }

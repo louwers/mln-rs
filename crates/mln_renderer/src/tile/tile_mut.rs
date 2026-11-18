@@ -23,7 +23,7 @@ use crate::buckets::raster_bucket::RasterBucket;
 use crate::draw_cache::ChangedBuckets;
 use crate::layout::tile_layout::{Dependencies, LayoutParams};
 use crate::render_orchestrator::drop_on_workers;
-use crate::tile::contents::{Contents, GeometryContents, release};
+use crate::tile::contents::{Contents, GeometryContents, LayoutResult, release};
 use crate::tile::inbox::{SourceData, TileEvent};
 use crate::tile::job::{DataInput, DataKey, Job, JobId, JobResult, LayoutJob, LayoutOutput, Run, SourceStyle};
 use crate::tile::loading::{self, CustomLoad, CustomLoader, DataOrigin, Fetch, Method, OriginLoad, TilesetAnswered};
@@ -426,9 +426,9 @@ impl<'a> TileMut<'a> {
 
     /// Shows `contents`, with the source's feature state applied.
     fn install(&mut self, contents: Option<Contents>) {
-        let shown = contents.map(|contents| {
+        let shown = contents.map(|mut contents| {
             let mut version = 0;
-            if let Some(geometry) = contents.geometry() {
+            if let Some(geometry) = contents.geometry_mut() {
                 // New buckets, which no draws copied yet.
                 let mut changed = ChangedBuckets::default();
                 geometry.set_feature_state(self.source.feature_state.current_states(), &mut changed);
@@ -573,10 +573,10 @@ impl<'a> TileMut<'a> {
                 decode.work = DecodeWork::Current;
                 return match result {
                     JobResult::Raster(image) => {
-                        self.install(Some(Contents::Raster(Arc::new(RasterBucket::new(image)))));
+                        self.install(Some(Contents::Raster(RasterBucket::new(image))));
                     }
                     JobResult::Dem(dem) => {
-                        self.install(Some(Contents::Dem(Arc::new(HillshadeBucket::with_dem_data(dem)))));
+                        self.install(Some(Contents::Dem(HillshadeBucket::with_dem_data(dem))));
                     }
                     JobResult::Failed(error) => self.fail(error),
                     JobResult::Laid(_) | JobResult::NeedsDeps(_) | JobResult::NeedsData => {
@@ -747,18 +747,21 @@ impl WorldCopy {
     /// where it is.
     pub(crate) fn of(tile: &Tile) -> Option<WorldCopy> {
         let shown = tile.shown.as_ref().filter(|shown| shown.contents.is_renderable())?;
-        let contents = match &*shown.contents {
+        let contents = match &shown.contents {
             Contents::Geometry(contents) => {
-                let mut contents = contents.clone();
-                contents.result.layer_render_data.retain(|_, data| !data.layer.style().info().cross_tile_index);
-                Contents::Geometry(contents)
+                let layer_render_data =
+                    contents.result.layer_render_data.copy_where(|layer| !layer.style().info().cross_tile_index);
+                Contents::Geometry(GeometryContents {
+                    result: LayoutResult::new(layer_render_data, Arc::clone(&contents.result.feature_index)),
+                    missing: contents.missing,
+                    answer: contents.answer.clone(),
+                    deps: Rc::clone(&contents.deps),
+                    textures: Rc::clone(&contents.textures),
+                    bucket_geometry: contents.bucket_geometry.clone(),
+                })
             }
-            Contents::Raster(bucket) => {
-                Contents::Raster(Arc::new(RasterBucket::with_shared_image(bucket.image.clone())))
-            }
-            Contents::Dem(bucket) => {
-                Contents::Dem(Arc::new(HillshadeBucket::with_dem_data(bucket.get_dem_data().clone())))
-            }
+            Contents::Raster(bucket) => Contents::Raster(RasterBucket::with_shared_image(bucket.image.clone())),
+            Contents::Dem(bucket) => Contents::Dem(HillshadeBucket::with_dem_data(bucket.get_dem_data().clone())),
             Contents::Empty => Contents::Empty,
         };
         let load = match (&tile.load.origin, &tile.pipeline) {
@@ -775,7 +778,7 @@ impl WorldCopy {
         let world_copy = matches!(contents, Contents::Geometry(_));
         Some(WorldCopy {
             shown: Shown {
-                contents: Rc::new(contents),
+                contents,
                 feature_state_version: shown.feature_state_version,
                 answer_outdated: shown.answer_outdated,
                 world_copy,

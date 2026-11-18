@@ -39,7 +39,7 @@ use mln_vec_map::VecMap;
 
 use crate::bucket_parameters::BucketParameters;
 use crate::buckets::symbol_bucket::{
-    Buffer, CollisionBuffer, PlacedSymbol, SortKeyRange, SymbolBucket, SymbolBucketState,
+    Buffer, CollisionBuffer, PaintProperties, PlacedSymbol, SortKeyRange, SymbolBucket, SymbolBucketState,
 };
 use crate::geometry::anchor::{Anchor, Anchors};
 use crate::geometry::feature_index::{FeatureIndex, IndexedSubfeature};
@@ -1080,7 +1080,7 @@ impl SymbolLayout {
     }
 
     fn update_paint_properties_for_section(
-        bucket: &SymbolBucket,
+        paint_properties: &mut VecMap<String, PaintProperties>,
         state: &SymbolBucketState,
         feature: &SymbolFeature,
         section_index: usize,
@@ -1089,8 +1089,7 @@ impl SymbolLayout {
         let formatted_section =
             section_options_to_value(feature.formatted_text.as_ref().expect("text").section_at(section_index));
         let length = state.text.attribute_data.len();
-        for binders in bucket.paint_properties.values() {
-            let mut binders = binders.write();
+        for binders in paint_properties.values_mut() {
             binders.text_binders.populate_vertex_vectors(
                 feature,
                 length,
@@ -1107,12 +1106,13 @@ impl SymbolLayout {
     /// of the last added quad.
     #[expect(
         clippy::too_many_arguments,
-        reason = "the bucket and its state, the symbol and feature, and the quads of one writing mode"
+        reason = "the bucket, its state and binders, the symbol and feature, and the quads of one writing mode"
     )]
     fn add_symbol_glyph_quads(
         &self,
         bucket: &SymbolBucket,
         state: &mut SymbolBucketState,
+        paint_properties: &mut VecMap<String, PaintProperties>,
         symbol_instance: &SymbolInstance,
         feature: &SymbolFeature,
         writing_mode: WritingModeType,
@@ -1169,7 +1169,7 @@ impl SymbolLayout {
                 if let Some(last) = last_added_section
                     && last != symbol_quad.section_index
                 {
-                    Self::update_paint_properties_for_section(bucket, state, feature, last, canonical);
+                    Self::update_paint_properties_for_section(paint_properties, state, feature, last, canonical);
                 }
                 last_added_section = Some(symbol_quad.section_index);
             }
@@ -1841,14 +1841,13 @@ impl SymbolLayout {
             self.icons_in_text,
         );
 
-        let mut instances = std::mem::take(&mut bucket.state_mut().symbol_instances);
+        // Out of the bucket while the symbols fill them.
+        let mut state = std::mem::take(&mut bucket.state);
+        let mut paint_properties = std::mem::take(&mut bucket.paint_properties);
+        let mut instances = std::mem::take(&mut state.symbol_instances);
         {
             let bucket_ref = &bucket;
-            // The bucket is still owned here; lock-free access through
-            // `state_mut` is not possible while `bucket_ref` is borrowed, so
-            // take the lock (uncontended).
-            let mut state = bucket_ref.state();
-            let state = &mut *state;
+            let state = &mut state;
             for symbol_instance in &mut instances {
                 let has_text = symbol_instance.has_text();
                 let has_icon = symbol_instance.has_icon();
@@ -1915,8 +1914,7 @@ impl SymbolLayout {
 
                     let length =
                         if sdf { state.sdf_icon.attribute_data.len() } else { state.icon.attribute_data.len() };
-                    for binders in bucket_ref.paint_properties.values() {
-                        let mut binders = binders.write();
+                    for binders in paint_properties.values_mut() {
                         binders.icon_binders.populate_vertex_vectors(
                             feature,
                             length,
@@ -1938,6 +1936,7 @@ impl SymbolLayout {
                         let (section, placed) = self.add_symbol_glyph_quads(
                             bucket_ref,
                             state,
+                            &mut paint_properties,
                             symbol_instance,
                             feature,
                             writing_modes,
@@ -1956,6 +1955,7 @@ impl SymbolLayout {
                             let (section, placed) = self.add_symbol_glyph_quads(
                                 bucket_ref,
                                 state,
+                                &mut paint_properties,
                                 symbol_instance,
                                 feature,
                                 writing_modes,
@@ -1972,6 +1972,7 @@ impl SymbolLayout {
                             let (section, placed) = self.add_symbol_glyph_quads(
                                 bucket_ref,
                                 state,
+                                &mut paint_properties,
                                 symbol_instance,
                                 feature,
                                 writing_modes,
@@ -1988,6 +1989,7 @@ impl SymbolLayout {
                             let (section, placed) = self.add_symbol_glyph_quads(
                                 bucket_ref,
                                 state,
+                                &mut paint_properties,
                                 symbol_instance,
                                 feature,
                                 writing_modes,
@@ -2007,6 +2009,7 @@ impl SymbolLayout {
                         let (section, placed) = self.add_symbol_glyph_quads(
                             bucket_ref,
                             state,
+                            &mut paint_properties,
                             symbol_instance,
                             feature,
                             WritingModeType::Vertical,
@@ -2020,7 +2023,7 @@ impl SymbolLayout {
                     }
                     debug_assert!(last_added_section.is_some()); // True, as hasText == true;
                     Self::update_paint_properties_for_section(
-                        bucket_ref,
+                        &mut paint_properties,
                         state,
                         feature,
                         last_added_section.unwrap_or(0),
@@ -2039,6 +2042,8 @@ impl SymbolLayout {
                 state.just_reloaded = true;
             }
         }
+        bucket.state = state;
+        bucket.paint_properties = paint_properties;
 
         bucket
     }

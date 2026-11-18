@@ -53,13 +53,13 @@ fn apply_dense(bench: &mut Bench) {
 fn apply(bench: &mut Bench, tile: StreetTile) {
     let fixtures = Fixtures::open(bench);
     let layout = StreetLayout::new(&fixtures, &selectable(&fixtures), |_| true, tile.id);
-    let laid_out = layout.run();
+    let mut laid_out = layout.run();
     let states = [states(&layout.data(), 0), states(&layout.data(), 1)];
     assert!(states[0].values().any(|states| !states.is_empty()), "the tile has roads and buildings");
 
     for repeat in 0..tile.repeats {
         let states = &states[(repeat % 2) as usize];
-        bench.measure(|| layout.job.set_feature_state(&laid_out, states));
+        bench.measure(|| layout.job.set_feature_state(&mut laid_out, states));
     }
     bench.per("tile", tile.repeats);
 }

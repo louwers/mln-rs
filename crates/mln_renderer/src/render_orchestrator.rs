@@ -38,12 +38,13 @@ use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;
 use crate::render_layer::{LayerPrepareParameters, LayerTiles, RenderLayer};
 use crate::render_source::{self, RenderSource, SourcePrepareParameters};
-use crate::render_tree::{DebugLayers, LayerRenderItem, RenderItem, RenderTree, RenderTreeParameters};
+use crate::render_tree::{DebugLayers, LayerRenderItem, RenderTree, RenderTreeParameters};
 use crate::renderer_event::RendererEvent;
 use crate::sky_pass::FullscreenDraw;
 use crate::sources::render_tile_source::DebugLayer;
 use crate::text::glyph_store::GlyphStore;
 use crate::text::placement::Placement;
+use crate::tile::contents::Contents;
 use crate::tile::inbox::Waker;
 use crate::tile::source_tiles::SourceTiles;
 use crate::tile::store::{StoreEvent, TileStore};
@@ -426,12 +427,15 @@ impl RenderOrchestrator {
         let mut layers_need_placement: Vec<usize> = Vec::new();
         let mut layers_following_placement: Vec<usize> = Vec::new();
         let mut opaque_pass_cut_off_estimation = layer_render_items.len();
+        let source_contents = frame_contents(&self.render_sources, &self.tile_store);
         for (&index, render_item) in &mut layer_render_items {
             let index = index as usize;
             let render_layer = &mut self.layers[index];
             let source = render_item.source.as_ref().and_then(|id| self.render_sources.get(id)).map(AsRef::as_ref);
+            let contents = render_item.source.as_ref().and_then(|id| source_contents.get(id.as_str()));
             render_item.tile_order = render_layer.prepare(&LayerPrepareParameters {
                 source,
+                contents: contents.map_or(&[], Vec::as_slice),
                 images: self.tile_store.images(), // conformance
                 pattern_atlas: &self.pattern_atlas,
                 line_atlas: &self.line_atlas,
@@ -463,13 +467,6 @@ impl RenderOrchestrator {
             }
         }
 
-        let mut source_render_items: Vec<Box<dyn RenderItem>> = Vec::new();
-        for render_source in self.render_sources.values_mut() {
-            if render_source.is_enabled() {
-                source_render_items.push(render_source.create_render_item());
-            }
-        }
-
         // The symbol buckets of the layers that need placement, then the
         // positions of the layers that draw buckets other layers place.
         let placement = self.placement_controller.get_placement();
@@ -479,6 +476,7 @@ impl RenderOrchestrator {
                 &parameters.transform_params.state,
                 update_symbol_opacities,
                 &mut changed_buckets,
+                &mut self.tile_store,
             );
         }
         for &index in &layers_following_placement {
@@ -486,6 +484,7 @@ impl RenderOrchestrator {
                 &*self.layers[index],
                 &parameters.transform_params.state,
                 &mut changed_buckets,
+                &mut self.tile_store,
             );
         }
         if !changed_buckets.is_empty() {
@@ -494,7 +493,7 @@ impl RenderOrchestrator {
             }
         }
 
-        RenderTree::new(parameters, layer_render_items, source_render_items, start_time, symbols_start)
+        RenderTree::new(parameters, layer_render_items, start_time, symbols_start)
     }
 
     /// Advances the zoom history and the global state to the update's, and
@@ -976,7 +975,12 @@ impl RenderOrchestrator {
         let longitude =
             update_parameters.transform_state.get_lat_lng(mln_util::geo::WrapMode::Unwrapped).longitude() as f32;
         for layer in layers_need_placement.iter().rev() {
-            let result = self.cross_tile_symbol_index.add_layer(*layer, longitude, &update_parameters.transform_state);
+            let result = self.cross_tile_symbol_index.index_layer(
+                *layer,
+                longitude,
+                &update_parameters.transform_state,
+                &mut self.tile_store,
+            );
             if continuous {
                 used_symbol_layers.insert(layer.get_id().to_owned());
                 symbol_buckets_added |= result.buckets_added;
@@ -1018,7 +1022,7 @@ impl RenderOrchestrator {
             if parameters.placement_changed {
                 let prev = self.placement_controller.take_placement();
                 let mut placement = Placement::create(Arc::clone(update_parameters), Some(prev));
-                placement.place_layers(&layers_need_placement);
+                placement.place(&layers_need_placement, &mut self.tile_store);
                 self.placement_controller.set_placement(placement);
                 self.cross_tile_symbol_index.prune_unused_layers(&used_symbol_layers);
                 self.tile_store.update_fading_tiles();
@@ -1034,7 +1038,7 @@ impl RenderOrchestrator {
             if parameters.placement_changed {
                 let mut placement = Placement::create(Arc::clone(update_parameters), None);
                 placement.collect_placed_symbol_data(self.placed_symbol_data_collected);
-                placement.place_layers(&layers_need_placement);
+                placement.place(&layers_need_placement, &mut self.tile_store);
                 self.placement_controller.set_placement(placement);
             }
             self.cross_tile_symbol_index.reset();
@@ -1206,11 +1210,22 @@ impl RenderOrchestrator {
         }
     }
 
+    /// Readies the buckets of the frame's sources for the frame's draws.
+    pub(crate) fn upload_sources(&mut self, context: &Context) {
+        for source in self.render_sources.values_mut() {
+            if source.is_enabled() {
+                source.upload(&mut self.tile_store, context);
+            }
+        }
+    }
+
     /// Updates the debug overlays' draws from the sources' tiles, and makes
     /// their draws of the frame (layers: debug).
-    pub(crate) fn update_debug_layers(&mut self, render_tree: &RenderTree, parameters: &PaintParameters<'_>) {
-        for item in render_tree.get_source_render_items() {
-            item.update_debug_draws(&mut self.debug_layers, parameters);
+    pub(crate) fn update_debug_layers(&mut self, parameters: &PaintParameters<'_>) {
+        for source in self.render_sources.values() {
+            if source.is_enabled() {
+                source.update_debug_draws(&mut self.debug_layers, parameters);
+            }
         }
         for debug in self.debug_layers.values_mut() {
             debug.prepare(parameters);
@@ -1238,12 +1253,17 @@ impl RenderOrchestrator {
         render_tree: &RenderTree,
     ) {
         let mut has_3d = false;
+        let source_contents = frame_contents(&self.render_sources, &self.tile_store);
         for (&index, render_item) in render_tree.get_layer_render_item_map() {
             let render_layer = &mut self.layers[index as usize];
-            let source = render_item.source.as_ref().and_then(|id| self.render_sources.get(id));
-            let tiles = source
-                .zip(render_item.tile_order.as_deref())
-                .map(|(source, order)| LayerTiles::new(source.render_tiles(), order));
+            let source = render_item.source.as_ref().and_then(|id| Some((id, self.render_sources.get(id)?)));
+            let tiles = source.and_then(|(id, source)| match render_item.tile_order.as_deref() {
+                Some(order) => {
+                    let contents = source_contents.get(id.as_str()).map_or(&[][..], Vec::as_slice);
+                    Some(LayerTiles::new(source.render_tiles(), contents, order))
+                }
+                None => source.get_image_render_data().map(LayerTiles::of_image),
+            });
             render_layer.update(paint_parameters, update_parameters, tiles);
             has_3d = has_3d || render_layer.needs_globe_depth();
         }
@@ -1545,6 +1565,19 @@ impl RenderOrchestrator {
     pub(crate) fn drop_on_workers<T: Send + 'static>(&self, value: T) {
         drop_on_workers(&self.thread_pool, value);
     }
+}
+
+/// What the render tiles of each enabled source show, at their indexes, by
+/// source id.
+fn frame_contents<'a>(
+    render_sources: &'a HashMap<String, Box<dyn RenderSource>>,
+    store: &'a TileStore,
+) -> HashMap<&'a str, Vec<Option<&'a Contents>>> {
+    render_sources
+        .iter()
+        .filter(|(_, source)| source.is_enabled() && source.tiles().is_some())
+        .map(|(id, source)| (id.as_str(), store.contents_of(source.tiles(), source.render_tiles())))
+        .collect()
 }
 
 /// Drops `value` on `thread_pool`, the orchestrator's workers, instead of

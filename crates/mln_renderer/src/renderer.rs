@@ -504,9 +504,7 @@ impl Renderer {
         // Uploads all required buffers and images before we do any actual
         // rendering. The atlas goes first: the tiles bind its textures.
         orchestrator.upload_atlas(context);
-        for item in render_tree.get_source_render_items() {
-            item.upload(context);
-        }
+        orchestrator.upload_sources(context);
         static_data.upload(context);
         parameters.line_atlas.borrow_mut().upload(context);
         parameters.pattern_atlas.borrow_mut().upload(context); // conformance
@@ -520,7 +518,7 @@ impl Renderer {
 
         // - DRAW UPLOAD -----------------------------------------------------
         // Update the debug overlays
-        orchestrator.update_debug_layers(render_tree, &parameters); // layers: debug
+        orchestrator.update_debug_layers(&parameters); // layers: debug
         // What the update replaced, before the uploads make what replaces it.
         context.destroy_released();
 

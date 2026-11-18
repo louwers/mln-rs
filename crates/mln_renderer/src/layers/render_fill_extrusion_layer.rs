@@ -68,7 +68,7 @@ use crate::render_layer::{
 };
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
-use crate::render_tile::RenderTile;
+use crate::render_tile::FrameTile;
 use crate::tile_matrix::{get_projection_data, to_projection_ubo};
 use crate::update_parameters::UpdateParameters;
 
@@ -173,10 +173,16 @@ fn read_paint_properties(
     );
 }
 
+/// Whether the walls draw as instances of the static quad, rather than as
+/// quads of their own, which a device that rasterizes on the CPU draws.
+pub(crate) fn instanced_walls(context: &crate::gfx::context::Context) -> bool {
+    !context.caps().cpu_rasterizer
+}
+
 /// The quads of the walls of `vertices`: each vertex with each corner of the
 /// static quad, in its order. The quad of the wall from a vertex is its four
 /// corners, and the next four are the next vertex's.
-fn wall_quad_vertices(vertices: &[FillExtrusionLayoutVertex]) -> VertexVectorBasePtr {
+pub(crate) fn wall_quad_vertices(vertices: &[FillExtrusionLayoutVertex]) -> VertexVectorBasePtr {
     let corners = RenderStaticData::fill_extrusion_vertices();
     let quads: Vec<FillExtrusionWallVertex> = vertices
         .iter()
@@ -188,7 +194,7 @@ fn wall_quad_vertices(vertices: &[FillExtrusionLayoutVertex]) -> VertexVectorBas
 /// The paint values of the quads of `wall_quad_vertices`: those of each of
 /// the first `walls` vertices in `paint`, `stride` bytes each, for each
 /// corner of its wall.
-fn wall_quad_paint(paint: &[u8], stride: usize, walls: usize) -> VertexVectorBasePtr {
+pub(crate) fn wall_quad_paint(paint: &[u8], stride: usize, walls: usize) -> VertexVectorBasePtr {
     let mut values = Vec::with_capacity(4 * stride * walls);
     if stride > 0 {
         for vertex in paint.chunks_exact(stride).take(walls) {
@@ -441,7 +447,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
         }
         // A device that rasterizes on the CPU draws each wall as a quad of
         // its own.
-        let instanced_walls = !context.caps().cpu_rasterizer;
+        let instanced_walls = instanced_walls(context);
         if self.fill_extrusion_wall_group.is_none() {
             let name = if instanced_walls { "FillExtrusionInstancedShader" } else { "FillExtrusionWallShader" };
             self.fill_extrusion_wall_group = shaders.shader_group(name);
@@ -506,10 +512,9 @@ impl RenderLayer for RenderFillExtrusionLayer {
             }
             self.drawing.caches.set_bucket(&tile_id, bucket.base.bucket_id);
 
-            let Some(binders_lock) = bucket.paint_property_binders.get(self.get_id()) else {
+            let Some(binders) = bucket.paint_property_binders.get(self.get_id()) else {
                 continue;
             };
-            let binders = &*binders_lock.read();
 
             // The draws keep the paint values they were built with, so
             // feature state doesn't reach an extrusion: the tile's changes go
@@ -571,7 +576,7 @@ impl TileBuilder {
     /// layer draws it, then in color.
     fn build(
         &mut self,
-        tile: &RenderTile,
+        tile: FrameTile<'_>,
         bucket: &FillExtrusionBucket,
         binders: &FillExtrusionBinders,
         evaluated: &FillExtrusionPaintProperties::PossiblyEvaluated,
@@ -583,23 +588,24 @@ impl TileBuilder {
         let walls = vertex_count.saturating_sub(1);
         let buffer = &binders.interleaved_vertex_buffer;
         let depends_on_feature_state = binders.depends_on_feature_state();
-        // The walls' own quads are made of the bucket's vertices and paint
-        // values before those move to the vectors the roofs draw.
+        // The walls' own quads, which the bucket's upload made of its
+        // vertices and paint values before those moved to the vectors the
+        // roofs draw.
         let quads = (!self.instanced_walls).then(|| {
-            let vertices = derived_vertices(geometry, bucket, &bucket.vertices, wall_quad_vertices);
+            let vertices = derived_vertices(geometry, &bucket.vertices, wall_quad_vertices);
             let paint_of = |paint: &[u8]| wall_quad_paint(paint, buffer.stride, walls);
             let paint = if depends_on_feature_state {
                 paint_of(&buffer.shared_vertex_vector.data())
             } else {
-                derived_vertices(geometry, bucket, &buffer.shared_vertex_vector, paint_of)
+                derived_vertices(geometry, &buffer.shared_vertex_vector, paint_of)
             };
             (vertices, paint)
         });
 
         // The roofs read the paint values per vertex, the instanced walls per
         // instance, from the same buffer.
-        let paint = paint_vertices(geometry, bucket, buffer, depends_on_feature_state);
-        let vertices = bucket_vertices(geometry, bucket, &bucket.vertices);
+        let paint = paint_vertices(geometry, buffer, depends_on_feature_state);
+        let vertices = bucket_vertices(geometry, &bucket.vertices);
         let mut properties_as_uniforms = StringIDSetsPair::default();
         let mut wall_properties_as_uniforms = StringIDSetsPair::default();
         let mut vertex_attrs = VertexAttributeArray::new();
@@ -657,7 +663,7 @@ impl TileBuilder {
             vertices: &vertex_attrs,
             instances: None,
             vertex_count,
-            indexes: &bucket_indexes(geometry, bucket, &bucket.triangles),
+            indexes: &bucket_indexes(geometry, &bucket.triangles),
             segments: &bucket.triangle_segments,
         };
         if !bucket.triangles.is_empty() && vertex_count > 0 {
@@ -690,7 +696,7 @@ impl RenderFillExtrusionLayer {
     /// draw of `tile`, whose bucket's binders are `binders`.
     fn uniforms(
         &self,
-        tile: &RenderTile,
+        tile: FrameTile<'_>,
         binders: &FillExtrusionBinders,
         objects: &DrawObjects,
         parameters: &PaintParameters<'_>,

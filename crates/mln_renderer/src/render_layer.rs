@@ -18,7 +18,8 @@ use mln_util::Color;
 use mln_util::mat4::Mat4;
 use smallvec::SmallVec;
 
-use crate::bucket::BucketPtr;
+use crate::bucket::Bucket;
+use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::draw_cache::{ChangedBuckets, DrawGroup, DrawOrder, DrawSlots, LayerDrawing};
 use crate::gfx::context::Context;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType};
@@ -27,26 +28,33 @@ use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;
 use crate::render_pass::RenderPass;
 use crate::render_source::RenderSource;
-use crate::render_tile::RenderTile;
+use crate::render_tile::{FrameTile, RenderTile};
+use crate::sources::render_image_source::ImageSourceRenderData;
+use crate::tile::contents::Contents;
+use crate::tile::job::SourceKey;
 use crate::update_parameters::UpdateParameters;
 
-#[derive(Clone)]
-pub(crate) struct LayerRenderData {
-    pub(crate) bucket: BucketPtr,
+/// A layer's bucket in a layout, which the layers of its layout group
+/// share, and the layer's values it was laid out with.
+#[derive(Clone, Copy)]
+pub(crate) struct LayerRenderData<'a> {
+    pub(crate) bucket: &'a dyn Bucket,
+    /// The index of the bucket among the layout's buckets.
+    pub(crate) bucket_index: usize,
     /// The values of the layer that the bucket was laid out with.
-    pub(crate) layer: Arc<dyn ErasedEvaluatedLayer>,
+    pub(crate) layer: &'a Arc<dyn ErasedEvaluatedLayer>,
 }
 
-impl LayerRenderData {
+impl<'a> LayerRenderData<'a> {
     /// The bucket, as a bucket of a `T` layer, or `None` for another type's.
-    pub(crate) fn bucket<T: LayerType>(&self) -> Option<&T::Bucket> {
-        (*self.bucket).downcast_ref()
+    pub(crate) fn bucket<T: LayerType>(self) -> Option<&'a T::Bucket> {
+        self.bucket.downcast_ref()
     }
 
     /// The values the bucket was laid out with, as a `T` layer's, or `None`
     /// for another type's.
-    pub(crate) fn layer<T: LayerType>(&self) -> Option<&EvaluatedLayer<T>> {
-        let any: &dyn std::any::Any = &*self.layer;
+    pub(crate) fn layer<T: LayerType>(self) -> Option<&'a EvaluatedLayer<T>> {
+        let any: &dyn std::any::Any = &**self.layer;
         any.downcast_ref()
     }
 }
@@ -90,47 +98,125 @@ impl PlacedTile {
     }
 }
 
+/// symbols: where a symbol bucket is: its tile, in the tile store, and its
+/// index among the tile's buckets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct BucketKey {
+    pub(crate) source: SourceKey,
+    pub(crate) tile: OverscaledTileID,
+    pub(crate) bucket: usize,
+}
+
+/// symbols: the symbol buckets of the frame's tiles, by key.
+pub(crate) trait SymbolBuckets {
+    fn get(&self, key: &BucketKey) -> Option<&SymbolBucket>;
+    fn get_mut(&mut self, key: &BucketKey) -> Option<&mut SymbolBucket>;
+}
+
 /// symbols: a symbol bucket a layer places or draws, with its tile.
 #[derive(Clone)]
 pub(crate) struct BucketPlacementData {
-    pub(crate) bucket: Arc<crate::buckets::symbol_bucket::SymbolBucket>,
+    pub(crate) bucket: BucketKey,
     pub(crate) tile: PlacedTile,
     pub(crate) feature_index: Option<Arc<crate::geometry::feature_index::FeatureIndex>>,
     pub(crate) source_id: String,
     pub(crate) sort_key_range: Option<crate::buckets::symbol_bucket::SortKeyRange>,
     pub(crate) text_translate: SymbolTranslate,
     pub(crate) icon_translate: SymbolTranslate,
+    /// bench: the copy of the bucket a benchmark's layer places, which it
+    /// holds instead of a tile store.
+    #[cfg(feature = "bench")]
+    pub(crate) held: Option<HeldBucket>,
+}
+
+/// bench: a copy of a symbol bucket that a benchmark's layer holds, and
+/// lends to the index and the placement (`HeldBuckets`).
+#[cfg(feature = "bench")]
+pub(crate) type HeldBucket = std::rc::Rc<std::cell::Cell<Option<Box<SymbolBucket>>>>;
+
+/// bench: the buckets that the placement data of `layers` hold, lent until
+/// `restore`.
+#[cfg(feature = "bench")]
+pub(crate) struct HeldBuckets(mln_util::hash::HashMap<BucketKey, (HeldBucket, Box<SymbolBucket>)>);
+
+#[cfg(feature = "bench")]
+impl HeldBuckets {
+    pub(crate) fn take(layers: &[&dyn RenderLayer]) -> Self {
+        let mut buckets = mln_util::hash::HashMap::default();
+        for data in layers.iter().flat_map(|layer| layer.get_placement_data()) {
+            if let Some(held) = &data.held
+                && let Some(bucket) = held.take()
+            {
+                buckets.insert(data.bucket, (std::rc::Rc::clone(held), bucket));
+            }
+        }
+        HeldBuckets(buckets)
+    }
+
+    /// Gives the buckets back to the placement data that holds them.
+    pub(crate) fn restore(self) {
+        for (held, bucket) in self.0.into_values() {
+            held.set(Some(bucket));
+        }
+    }
+}
+
+#[cfg(feature = "bench")]
+impl SymbolBuckets for HeldBuckets {
+    fn get(&self, key: &BucketKey) -> Option<&SymbolBucket> {
+        self.0.get(key).map(|(_, bucket)| &**bucket)
+    }
+
+    fn get_mut(&mut self, key: &BucketKey) -> Option<&mut SymbolBucket> {
+        self.0.get_mut(key).map(|(_, bucket)| &mut **bucket)
+    }
 }
 
 /// The tiles a layer draws in a frame: a selection of its source's render
-/// tiles, in the order the layer draws them.
+/// tiles, in the order the layer draws them, with what their tiles show;
+/// or an image source's image.
 #[derive(Clone, Copy)]
 pub(crate) struct LayerTiles<'a> {
     tiles: &'a [RenderTile],
+    /// What each of `tiles` shows, at its index.
+    contents: &'a [Option<&'a Contents>],
     order: &'a [usize],
+    image: Option<ImageSourceRenderData<'a>>,
 }
 
 impl<'a> LayerTiles<'a> {
-    /// The tiles of `tiles` at the indexes of `order`, in that order.
+    /// The tiles of `tiles` at the indexes of `order`, in that order, which
+    /// show `contents`, at their indexes.
     #[must_use]
-    pub(crate) fn new(tiles: &'a [RenderTile], order: &'a [usize]) -> LayerTiles<'a> {
-        LayerTiles { tiles, order }
+    pub(crate) fn new(
+        tiles: &'a [RenderTile],
+        contents: &'a [Option<&'a Contents>],
+        order: &'a [usize],
+    ) -> LayerTiles<'a> {
+        debug_assert_eq!(tiles.len(), contents.len());
+        LayerTiles { tiles, contents, order, image: None }
     }
 
-    pub(crate) fn iter(self) -> impl Iterator<Item = &'a RenderTile> + 'a {
-        self.order.iter().filter_map(|&i| self.tiles.get(i))
-    }
-
-    /// The tiles in order, each with its index in the source's tiles
-    /// ([`source_tiles`](Self::source_tiles)).
-    pub(crate) fn indexed(self) -> impl Iterator<Item = (usize, &'a RenderTile)> + 'a {
-        self.order.iter().filter_map(|&i| Some((i, self.tiles.get(i)?)))
-    }
-
-    /// All the source's tiles, which the order indexes.
+    /// An image source's image, without tiles.
     #[must_use]
-    pub(crate) fn source_tiles(self) -> &'a [RenderTile] {
-        self.tiles
+    pub(crate) fn of_image(image: ImageSourceRenderData<'a>) -> LayerTiles<'a> {
+        LayerTiles { tiles: &[], contents: &[], order: &[], image: Some(image) }
+    }
+
+    /// The tile at `index` of the source's tiles.
+    fn tile(self, index: usize) -> Option<FrameTile<'a>> {
+        let tile = self.tiles.get(index)?;
+        Some(FrameTile::new(tile, self.contents.get(index).copied().flatten()))
+    }
+
+    pub(crate) fn iter(self) -> impl Iterator<Item = FrameTile<'a>> + 'a {
+        self.order.iter().filter_map(move |&i| self.tile(i))
+    }
+
+    /// An image source's image.
+    #[must_use]
+    pub(crate) fn image(self) -> Option<ImageSourceRenderData<'a>> {
+        self.image
     }
 
     #[must_use]
@@ -143,6 +229,8 @@ pub(crate) struct LayerPrepareParameters<'a> {
     /// The layer's source, `None` for a layer without one or a source type
     /// the renderer has no render source for.
     pub(crate) source: Option<&'a dyn RenderSource>,
+    /// What each of the source's render tiles shows, at its index.
+    pub(crate) contents: &'a [Option<&'a Contents>],
     /// conformance: `ImageManager& imageManager` (background-pattern): the image store.
     pub(crate) images: &'a crate::image_store::ImageStore,
     pub(crate) pattern_atlas: &'a RefCell<PatternAtlas>,
@@ -157,7 +245,7 @@ impl<'a> LayerPrepareParameters<'a> {
         'a: 'b,
     {
         let source = self.source?;
-        Some(LayerTiles::new(source.render_tiles(), order?))
+        Some(LayerTiles::new(source.render_tiles(), self.contents, order?))
     }
 }
 

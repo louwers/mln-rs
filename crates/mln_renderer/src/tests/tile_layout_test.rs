@@ -114,7 +114,7 @@ fn build_indexes_the_layouts_that_waited_last() {
     let built = build(discovered, &input, &Resolved::default()).unwrap();
 
     assert_eq!(built.feature_index.leaders(), ["outline", "outline", "patterned", "patterned"]);
-    assert!(built.render_data.contains_key("outline"));
+    assert!(built.buckets.contains_key("outline"));
 }
 
 /// The result of a job that lays tile 0/0/0 out with `layers`, `data` and

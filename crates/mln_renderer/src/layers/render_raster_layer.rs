@@ -1,7 +1,7 @@
 // Differences in mechanics, not in output:
-// - C++ keeps the GPU texture in the (shared) RasterBucket; here the layer
-//   keeps one texture per bucket id (`textures`), because buckets are Send +
-//   Sync and textures are render-thread `Rc`s.
+// - C++ keeps the GPU texture in the RasterBucket; here the layer keeps one
+//   texture per bucket id (`textures`), because buckets are Send and
+//   textures are render-thread `Rc`s.
 // - C++ re-applies the static vertex attributes to existing tile drawables
 //   every frame (`buildVertexData(none, &drawable, bucket)`); the port only
 //   checks, as C++ does there, whether the bucket's masked geometry changed
@@ -101,8 +101,6 @@ pub(crate) struct RenderRasterLayer {
 
     /// `bucket.texture2d`, per bucket.
     textures: HashMap<SimpleIdentity, Texture2DPtr>,
-
-    image_data: Option<Rc<ImageSourceRenderData>>,
 }
 
 impl RenderRasterLayer {
@@ -116,7 +114,6 @@ impl RenderRasterLayer {
             static_geometry: None,
             globe_meshes: GlobeTileMeshCache::new(),
             textures: HashMap::default(),
-            image_data: None,
         }
     }
 
@@ -164,7 +161,7 @@ impl RenderRasterLayer {
         &mut self,
         context: &Context,
         raster_shader: &ShaderProgramPtr,
-        image_data: &ImageSourceRenderData,
+        image_data: ImageSourceRenderData<'_>,
         paint_parameters: &PaintParameters<'_>,
     ) {
         self.drawing.caches.layer_cache_mut().clear();
@@ -174,7 +171,7 @@ impl RenderRasterLayer {
 
         // C++ dereferences the bucket unconditionally; it is missing until
         // the image loads.
-        let Some(bucket) = image_data.bucket.clone() else {
+        let Some(bucket) = image_data.bucket else {
             return;
         };
         let has_vertices = !bucket.geometry().vertices.is_empty();
@@ -198,7 +195,7 @@ impl RenderRasterLayer {
                     &geometry.segments,
                 )
             };
-            let texture = self.bucket_texture(context, &bucket);
+            let texture = self.bucket_texture(context, bucket);
             let draw = KeptDraw::new(new_objects(raster_shader, geometry, texture));
             frame_draws.push((FrameDraw::new(None, slot as u32, draw.id), Self::uniforms(tile_id, paint_parameters)));
             image_draws.push(draw);
@@ -351,19 +348,17 @@ impl RenderLayer for RenderRasterLayer {
         self.values.set_evaluated(&mut self.base, properties);
     }
 
-    /// Picks the source's tiles, or an image source's image, which may not
-    /// be available until the source loads it. The passes are the layer's
-    /// own, whatever its tiles' buckets were laid out for.
+    /// Picks the source's tiles; an image source has none, and its image
+    /// comes with the update. The passes are the layer's own, whatever its
+    /// tiles' buckets were laid out for.
     fn prepare(&mut self, params: &LayerPrepareParameters<'_>) -> Option<Vec<usize>> {
         let order = params.source.and_then(RenderSource::tile_order);
-        self.image_data = params.source.and_then(RenderSource::get_image_render_data);
         set_layer_tiles(self, params, order)
     }
 
     fn release_render_data(&mut self) {
         crate::render_layer::release_render_data_base(self);
         self.textures.clear();
-        self.image_data = None;
     }
 
     /// Makes the frame's draws of the layer: those of an image source's
@@ -385,7 +380,7 @@ impl RenderLayer for RenderRasterLayer {
             }
         }
         let render_tiles = tiles.filter(|tiles| !tiles.is_empty());
-        let image_data = self.image_data.clone();
+        let image_data = tiles.and_then(LayerTiles::image);
         if render_tiles.is_none() && image_data.is_none() {
             self.remove_all_draws();
             self.textures.clear();
@@ -400,7 +395,7 @@ impl RenderLayer for RenderRasterLayer {
         };
 
         if let Some(image_data) = image_data {
-            self.update_image(context, &raster_shader, &image_data, paint_parameters);
+            self.update_image(context, &raster_shader, image_data, paint_parameters);
             return;
         }
         let Some(render_tiles) = render_tiles else {
@@ -418,8 +413,10 @@ impl RenderLayer for RenderRasterLayer {
         let static_segments: Vec<SegmentBase> = static_geometry.segments.iter().map(SegmentBase::copy).collect();
 
         // Drop the textures of buckets that are no longer rendered.
-        let live_buckets: mln_util::hash::HashSet<SimpleIdentity> =
-            render_tiles.iter().filter_map(|tile| tile.get_bucket(&*self.base.style).map(|b| b.get_id())).collect();
+        let live_buckets: mln_util::hash::HashSet<SimpleIdentity> = render_tiles
+            .iter()
+            .filter_map(|tile| tile.get_bucket(&*self.base.style).map(super::super::bucket::Bucket::get_id))
+            .collect();
         self.textures.retain(|id, _| live_buckets.contains(id));
         // Kept draws keep their textures, so a changed filter is applied to
         // the textures themselves.
@@ -432,8 +429,8 @@ impl RenderLayer for RenderRasterLayer {
         for tile in render_tiles.iter() {
             let tile_id = *tile.get_overscaled_tile_id();
 
-            let bucket_ptr = tile.get_bucket(&*self.base.style).filter(|b| b.has_data()).cloned();
-            let Some(bucket) = bucket_ptr.as_deref().and_then(|bucket| bucket.downcast_ref::<RasterBucket>()) else {
+            let bucket = tile.get_bucket(&*self.base.style).filter(|b| b.has_data());
+            let Some(bucket) = bucket.and_then(|bucket| bucket.downcast_ref::<RasterBucket>()) else {
                 self.drawing.caches.drop_cache(&tile_id);
                 continue;
             };
@@ -482,7 +479,6 @@ impl RenderLayer for RenderRasterLayer {
                 } else {
                     raster_geometry(&static_vertices, 4, Rc::clone(&static_indexes), &static_segments)
                 };
-                drop(geometry);
                 let objects = new_objects(&raster_shader, draw_geometry, texture);
                 self.drawing
                     .caches

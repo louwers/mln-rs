@@ -58,7 +58,7 @@ use crate::render_layer::{
     TypedLayer,
 };
 use crate::render_pass::RenderPass;
-use crate::render_tile::RenderTile;
+use crate::render_tile::FrameTile;
 use crate::tile_matrix::{get_projection_data, to_projection_ubo};
 use crate::update_parameters::UpdateParameters;
 
@@ -600,10 +600,9 @@ impl RenderLayer for RenderLineLayer {
                 self.drawing.caches.drop_cache(&tile_id);
                 continue;
             }
-            let Some(binders_lock) = bucket.paint_property_binders.get(self.get_id()) else {
+            let Some(binders) = bucket.paint_property_binders.get(self.get_id()) else {
                 continue;
             };
-            let binders = &*binders_lock.read();
             let Some(evaluated) = render_data.layer::<Line>().map(|layer| &layer.paint) else {
                 continue;
             };
@@ -624,7 +623,7 @@ impl RenderLayer for RenderLineLayer {
                 refresh_paint_attributes(&mut cached.objects, changes, |attrs| {
                     let geometry = tile.get_bucket_geometry();
                     let buffer = &binders.interleaved_vertex_buffer;
-                    let paint = paint_vertices(geometry, bucket, buffer, binders.depends_on_feature_state());
+                    let paint = paint_vertices(geometry, buffer, binders.depends_on_feature_state());
                     read_line_attributes(attrs, binders, &paint, evaluated, &mut Default::default());
                 });
             } else if let Some(built) = self.build_tile(shaders, context, tile, bucket, binders, evaluated, render_pass)
@@ -664,7 +663,7 @@ impl RenderLineLayer {
         &mut self,
         shaders: &ShaderRegistry,
         context: &Context,
-        tile: &RenderTile,
+        tile: FrameTile<'_>,
         bucket: &LineBucket,
         binders: &LineBinders,
         evaluated: &LinePaintProperties::PossiblyEvaluated,
@@ -672,7 +671,7 @@ impl RenderLineLayer {
     ) -> Option<LineTile> {
         let geometry = tile.get_bucket_geometry();
         let buffer = &binders.interleaved_vertex_buffer;
-        let paint = paint_vertices(geometry, bucket, buffer, binders.depends_on_feature_state());
+        let paint = paint_vertices(geometry, buffer, binders.depends_on_feature_state());
         let mut properties_as_uniforms = StringIDSetsPair::default();
         let mut attrs = VertexAttributeArray::new();
         read_line_attributes(&mut attrs, binders, &paint, evaluated, &mut properties_as_uniforms);
@@ -722,7 +721,7 @@ impl RenderLineLayer {
             textures = atlases.textures(&shader);
         }
 
-        let shared = bucket_vertices(geometry, bucket, &bucket.vertices);
+        let shared = bucket_vertices(geometry, &bucket.vertices);
         let stride = size_of::<LineLayoutVertex>() as u32;
         if let Some(attr) = attrs.set(ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
             // offsetof(LineLayoutVertex, a1)
@@ -737,7 +736,7 @@ impl RenderLineLayer {
             vertices: attrs,
             vertex_count: if bucket.segments.is_empty() { 0 } else { bucket.vertices.len() },
             mode: DrawMode::Triangles(),
-            indexes: bucket_indexes(geometry, bucket, &bucket.triangles),
+            indexes: bucket_indexes(geometry, &bucket.triangles),
             segments: bucket.segments.iter().map(SegmentBase::copy).collect(),
             instances: None,
         };
@@ -782,7 +781,7 @@ impl RenderLineLayer {
     /// doesn't draw.
     fn uniforms(
         layer: &EvaluatedLayer<Line>,
-        tile: &RenderTile,
+        tile: FrameTile<'_>,
         binders: &LineBinders,
         cached: &mut LineTile,
         parameters: &PaintParameters<'_>,

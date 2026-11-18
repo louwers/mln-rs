@@ -1,7 +1,6 @@
 //! A tile: plain data the tile store owns. It shows its last contents while
 //! newer data or work is pending.
 
-use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -108,7 +107,7 @@ pub(crate) enum TileInput {
 }
 
 pub(crate) struct Shown {
-    pub(crate) contents: Rc<Contents>,
+    pub(crate) contents: Contents,
     /// The feature state version the contents' buckets hold; 0 for none.
     pub(crate) feature_state_version: u64,
     /// The layout's answer resolved glyphs or images that changed since: no
@@ -121,7 +120,7 @@ pub(crate) struct Shown {
 
 impl Shown {
     pub(crate) fn new(contents: Contents, feature_state_version: u64) -> Self {
-        Shown { contents: Rc::new(contents), feature_state_version, answer_outdated: false, world_copy: false }
+        Shown { contents, feature_state_version, answer_outdated: false, world_copy: false }
     }
 }
 
@@ -131,11 +130,11 @@ impl crate::source_state::FeatureStateTarget for Shown {
     }
 
     fn set_feature_state(
-        &self,
+        &mut self,
         states: &crate::bucket::LayerFeatureStates,
         changed: &mut crate::draw_cache::ChangedBuckets,
     ) {
-        if let Some(contents) = self.contents.geometry() {
+        if let Some(contents) = self.contents.geometry_mut() {
             contents.set_feature_state(states, changed);
         }
     }
@@ -192,7 +191,13 @@ impl Tile {
     }
 
     pub(crate) fn contents(&self) -> Option<&Contents> {
-        self.shown.as_ref().map(|shown| &*shown.contents)
+        self.shown.as_ref().map(|shown| &shown.contents)
+    }
+
+    /// The contents, whose buckets the frame changes: their masks, feature
+    /// state, placement and upload.
+    pub(crate) fn contents_mut(&mut self) -> Option<&mut Contents> {
+        self.shown.as_mut().map(|shown| &mut shown.contents)
     }
 
     /// Whether the tile can draw, if only some of its layers.
@@ -240,9 +245,7 @@ impl Tile {
         &mut self,
         layer_properties: &Arc<dyn crate::layer_type::ErasedEvaluatedLayer>,
     ) -> bool {
-        self.shown
-            .as_mut()
-            .is_some_and(|shown| Contents::layer_properties_updated(&mut shown.contents, layer_properties))
+        self.shown.as_mut().is_some_and(|shown| shown.contents.layer_properties_updated(layer_properties))
     }
 
     pub(crate) fn dump_debug_logs(&self, kind: TileKind) {

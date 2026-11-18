@@ -7,8 +7,7 @@ use mln_map_types::{MapDebugOptions, TransformState};
 use mln_util::Color;
 use mln_vec_map::VecMap;
 
-use crate::gfx::context::Context; // layers: debug
-use crate::paint_parameters::{PaintParameters, TransformParameters};
+use crate::paint_parameters::TransformParameters;
 use crate::sources::render_tile_source::DebugLayer;
 
 /// The kinds of debug overlays (layers: debug).
@@ -26,15 +25,6 @@ pub(crate) type DebugLayers = VecMap<DebugType, DebugLayer>;
 /// (layers: debug).
 pub(crate) fn debug_layer(debug_layers: &mut DebugLayers, type_: DebugType) -> &mut DebugLayer {
     debug_layers.entry(type_).or_insert_with(|| DebugLayer::new(type_))
-}
-
-/// The render item of a source. The layer render items are the concrete
-/// `LayerRenderItem`.
-pub(crate) trait RenderItem {
-    fn upload(&self, context: &Context);
-    /// Updates the item's draws of the debug overlays; a no-op for the items
-    /// that have none (the image source) (layers: debug).
-    fn update_debug_draws(&self, _debug_layers: &mut DebugLayers, _parameters: &PaintParameters<'_>) {}
 }
 
 /// A layer the frame draws, by its index in the orchestrator's layers.
@@ -87,7 +77,6 @@ impl RenderTreeParameters {
 pub(crate) struct RenderTree {
     parameters: Box<RenderTreeParameters>,
     layer_render_items: VecMap<u32, LayerRenderItem>,
-    source_render_items: Vec<Box<dyn RenderItem>>,
     /// When the frame's update started.
     start_time: mln_util::time::Instant,
     /// When the frame started placing symbols.
@@ -98,11 +87,10 @@ impl RenderTree {
     pub(crate) fn new(
         parameters: Box<RenderTreeParameters>,
         layer_render_items: VecMap<u32, LayerRenderItem>,
-        source_render_items: Vec<Box<dyn RenderItem>>,
         start_time: mln_util::time::Instant,
         symbols_start: mln_util::time::Instant,
     ) -> Self {
-        RenderTree { parameters, layer_render_items, source_render_items, start_time, symbols_start }
+        RenderTree { parameters, layer_render_items, start_time, symbols_start }
     }
 
     /// When the frame started placing symbols.
@@ -114,11 +102,6 @@ impl RenderTree {
     #[must_use]
     pub(crate) fn get_layer_render_item_map(&self) -> &VecMap<u32, LayerRenderItem> {
         &self.layer_render_items
-    }
-
-    #[must_use]
-    pub(crate) fn get_source_render_items(&self) -> &[Box<dyn RenderItem>] {
-        &self.source_render_items
     }
 
     #[must_use]

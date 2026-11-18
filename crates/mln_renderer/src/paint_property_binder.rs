@@ -131,7 +131,7 @@ fn floats_to_bytes(values: &[f32]) -> Vec<u8> {
 }
 
 /// The data of a `PaintPropertyBinder` subclass.
-#[derive(Debug, mln_wire::Wire)]
+#[derive(Clone, Debug, mln_wire::Wire)]
 pub(crate) enum PaintPropertyBinderKind<T> {
     Constant {
         constant: T,
@@ -151,7 +151,7 @@ pub(crate) enum PaintPropertyBinderKind<T> {
     },
 }
 
-#[derive(Debug, mln_wire::Wire, PartialEq, Eq)]
+#[derive(Clone, Debug, mln_wire::Wire, PartialEq, Eq)]
 pub(crate) enum InterleavedVertexData {
     Uninitialized,
     Interleaved { offset: usize },
@@ -222,7 +222,7 @@ impl<T: BinderValue> PaintPropertyBinderKind<T> {
     }
 }
 
-#[derive(Debug, mln_wire::Wire)]
+#[derive(Clone, Debug, mln_wire::Wire)]
 pub(crate) struct PaintPropertyBinder<T> {
     pub(crate) kind: PaintPropertyBinderKind<T>,
     pub(crate) statistics: PaintPropertyStatistics<T>,
@@ -429,7 +429,7 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
 }
 
 /// The data of a cross-faded `PaintPropertyBinder` subclass.
-#[derive(Debug, mln_wire::Wire)]
+#[derive(Clone, Debug, mln_wire::Wire)]
 pub(crate) enum CrossFadedPaintPropertyBinderKind<T> {
     Constant {
         constant: Faded<T>,
@@ -458,7 +458,7 @@ impl<T> CrossFadedPaintPropertyBinderKind<T> {
 
 /// The binder of a `*-pattern` property, whose two attributes are four `u16`s
 /// each.
-#[derive(Debug, mln_wire::Wire)]
+#[derive(Clone, Debug, mln_wire::Wire)]
 pub(crate) struct CrossFadedPaintPropertyBinder<T> {
     pub(crate) kind: CrossFadedPaintPropertyBinderKind<T>,
 }
@@ -579,14 +579,14 @@ impl CrossFadedPaintPropertyBinder<Image> {
 /// The binder of `line-dasharray`. Where the dash array differs by feature,
 /// each feature's vertices hold its pattern's [`DashEntry`] in the bucket's
 /// [`DashAtlas`], as four floats with the last unused.
-#[derive(Debug, mln_wire::Wire)]
+#[derive(Clone, Debug, mln_wire::Wire)]
 pub(crate) enum DashArrayBinder {
     Constant,
     PerFeature(Box<PerFeatureDashes>),
 }
 
 /// The data of a [`DashArrayBinder`] whose dash array differs by feature.
-#[derive(Debug, mln_wire::Wire)]
+#[derive(Clone, Debug, mln_wire::Wire)]
 pub(crate) struct PerFeatureDashes {
     expression: PropertyExpression<Vec<f32>>,
     default_value: Vec<f32>,
@@ -872,7 +872,7 @@ macro_rules! paint_property_binders {
         $($(#[$update_meta:meta])+ fn update_vertex_vectors;)?
     ) => {
         $(#[$meta])*
-        #[derive(Debug, mln_wire::Wire)]
+        #[derive(Clone, Debug, mln_wire::Wire)]
         pub(crate) struct $name {
             pub interleaved_vertex_buffer: $crate::paint_property_binder::InterleavedVertexBuffer,
             $(pub $field: $binder,)+

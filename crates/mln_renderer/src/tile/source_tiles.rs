@@ -373,6 +373,11 @@ impl SourceTiles {
         self.tiles.get(id).map(|slot| &slot.tile)
     }
 
+    /// What tile `id` shows, whose buckets the frame changes.
+    pub(crate) fn contents_mut(&mut self, id: &OverscaledTileID) -> Option<&mut Contents> {
+        self.tiles.get_mut(id)?.tile.contents_mut()
+    }
+
     pub(crate) fn slots(&self) -> impl Iterator<Item = &Slot> + '_ {
         self.tiles.values()
     }
@@ -427,15 +432,22 @@ impl SourceTiles {
         Some(result)
     }
 
-    fn contents_installed(&self, id: &OverscaledTileID) {
+    fn contents_installed(&mut self, id: &OverscaledTileID) {
         let dem = matches!(self.info.kind, TileKind::Dem(_));
-        let Some(tile) = self.tile(id).filter(|tile| dem && tile.is_renderable()) else {
+        if !dem || !self.tile(id).is_some_and(Tile::is_renderable) {
+            return;
+        }
+        // Out of its slot while it trades borders with the neighbours'.
+        let Some(mut shown) = self.tiles.get_mut(id).and_then(|slot| slot.tile.shown.take()) else {
             return;
         };
         for (offset, neighbor) in dem::neighbors(id) {
-            if let Some(border) = self.tile(&neighbor) {
-                dem::backfill_pair(tile, border, offset);
+            if let Some(border) = self.tiles.get_mut(&neighbor).and_then(|slot| slot.tile.shown.as_mut()) {
+                dem::backfill_pair(&mut shown.contents, &mut border.contents, offset);
             }
+        }
+        if let Some(slot) = self.tiles.get_mut(id) {
+            slot.tile.shown = Some(shown);
         }
     }
 
@@ -710,8 +722,10 @@ impl SourceTiles {
             let renderables: Vec<(UnwrappedTileID, bool)> =
                 self.rendered.iter().map(|(id, entry)| (*id, entry.needs_rendering)).collect();
             let masks = update_tile_masks(&renderables);
-            for (entry, mask) in self.rendered.values().zip(masks) {
-                if let (Some(mask), Some(contents)) = (mask, self.tile(&entry.key).and_then(Tile::contents)) {
+            let SourceTiles { tiles, rendered, .. } = self;
+            for (entry, mask) in rendered.values().zip(masks) {
+                let contents = tiles.get_mut(&entry.key).and_then(|slot| slot.tile.contents_mut());
+                if let (Some(mask), Some(contents)) = (mask, contents) {
                     contents.set_mask(mask);
                 }
             }

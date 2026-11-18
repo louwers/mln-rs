@@ -1,8 +1,7 @@
 // C++ moves the `ImageSourceRenderData` into the render tree in
 // `createRenderItem` and the raster layers keep a raw pointer to it from
-// `prepare`; here it is an `Rc` both hold.
+// `prepare`; here the layers borrow it from the source for the frame.
 
-use std::rc::Rc;
 use std::sync::Arc;
 
 use geometry::Point;
@@ -25,7 +24,6 @@ use crate::buckets::raster_bucket::RasterBucket;
 use crate::gfx::context::Context;
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::render_source::{RenderSource, RenderSourceBase, SourcePrepareParameters};
-use crate::render_tree::RenderItem;
 use crate::tile::store::TileStore;
 use crate::tile_parameters::TileParameters;
 use crate::util::tile_cover::{TileCoverParameters, tile_cover, tile_cover_bounds};
@@ -130,7 +128,7 @@ fn to_vertex_coordinate(value: f64) -> i16 {
 
 // The image quad as a grid of `cells` x `cells`, textured edge to edge; one
 // cell is the flat quad.
-fn build_image_mesh(bucket: &RasterBucket, corners: &GeometryCoordinates, cells: u32) {
+fn build_image_mesh(bucket: &mut RasterBucket, corners: &GeometryCoordinates, cells: u32) {
     let warp = image_warp(corners);
     let rows = cells + 1;
     let mut vertices = Vec::with_capacity((rows * rows) as usize);
@@ -164,41 +162,17 @@ fn build_image_mesh(bucket: &RasterBucket, corners: &GeometryCoordinates, cells:
     bucket.set_geometry(vertices, indices, segments);
 }
 
-pub(crate) struct ImageSourceRenderData {
-    pub(crate) bucket: Option<Arc<RasterBucket>>,
-    pub(crate) tile_ids: Vec<UnwrappedTileID>,
-}
-
-impl ImageSourceRenderData {
-    #[must_use]
-    pub(crate) fn new(bucket: Option<Arc<RasterBucket>>, tile_ids: Vec<UnwrappedTileID>) -> Self {
-        ImageSourceRenderData { bucket, tile_ids }
-    }
-}
-
-impl RenderItem for ImageSourceRenderData {
-    fn upload(&self, context: &Context) {
-        if let Some(bucket) = &self.bucket
-            && bucket.needs_upload()
-        {
-            bucket.upload(context);
-        }
-    }
-}
-
-/// The render tree's handle on the source's render data.
-struct ImageSourceRenderItem(Rc<ImageSourceRenderData>);
-
-impl RenderItem for ImageSourceRenderItem {
-    fn upload(&self, context: &Context) {
-        self.0.upload(context);
-    }
+/// What a frame draws of an image source: its bucket, once the image has
+/// arrived, in each of the tiles it covers.
+#[derive(Clone, Copy)]
+pub(crate) struct ImageSourceRenderData<'a> {
+    pub(crate) bucket: Option<&'a RasterBucket>,
+    pub(crate) tile_ids: &'a [UnwrappedTileID],
 }
 
 pub(crate) struct RenderImageSource {
     base: RenderSourceBase,
-    bucket: Option<Arc<RasterBucket>>,
-    render_data: Option<Rc<ImageSourceRenderData>>,
+    bucket: Option<RasterBucket>,
     tile_ids: Vec<UnwrappedTileID>,
     mesh_corners: GeometryCoordinates,
     mesh_cells: u32,
@@ -210,7 +184,6 @@ impl RenderImageSource {
         RenderImageSource {
             base: RenderSourceBase::new(style_source),
             bucket: None,
-            render_data: None,
             tile_ids: Vec::new(),
             mesh_corners: GeometryCoordinates::new(),
             mesh_cells: 0,
@@ -363,10 +336,10 @@ impl RenderSource for RenderImageSource {
             .collect();
 
         // C++ swaps the image of its bucket in place; a changed image gets a
-        // new bucket here (buckets are shared across threads).
+        // new bucket here, whose id tells the layers to make its texture.
         let bucket = match &mut self.bucket {
             Some(bucket) if bucket.image.as_ref().is_some_and(|i| Arc::ptr_eq(i, &image)) => bucket,
-            slot => slot.insert(Arc::new(RasterBucket::with_shared_image(Some(image)))),
+            slot => slot.insert(RasterBucket::with_shared_image(Some(image))),
         };
 
         // The globe bends the quad over the sphere with the tile mesh
@@ -384,20 +357,19 @@ impl RenderSource for RenderImageSource {
         }
     }
 
-    fn create_render_item(&mut self) -> Box<dyn RenderItem> {
-        let render_data = self.render_data.take().expect("RenderImageSource::prepare");
-        Box::new(ImageSourceRenderItem(render_data))
+    fn prepare(&mut self, _store: &mut TileStore, _parameters: &SourcePrepareParameters<'_>) {}
+
+    fn upload(&mut self, _store: &mut TileStore, _context: &Context) {
+        if let Some(bucket) = &mut self.bucket
+            && bucket.needs_upload()
+        {
+            bucket.upload_image();
+        }
     }
 
-    fn prepare(&mut self, _store: &mut TileStore, _parameters: &SourcePrepareParameters<'_>) {
-        self.render_data = Some(Rc::new(ImageSourceRenderData::new(
-            self.bucket.clone(),
-            if self.loaded() { self.tile_ids.clone() } else { Vec::new() },
-        )));
-    }
-
-    fn get_image_render_data(&self) -> Option<Rc<ImageSourceRenderData>> {
-        self.render_data.clone()
+    fn get_image_render_data(&self) -> Option<ImageSourceRenderData<'_>> {
+        let tile_ids: &[UnwrappedTileID] = if self.loaded() { &self.tile_ids } else { &[] };
+        Some(ImageSourceRenderData { bucket: self.bucket.as_ref(), tile_ids })
     }
 
     fn dump_debug_logs(&self) {
