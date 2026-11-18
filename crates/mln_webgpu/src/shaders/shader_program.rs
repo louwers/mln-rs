@@ -26,9 +26,11 @@ pub(crate) enum BindingType {
     ReadOnlyStorageBuffer,
     StorageBuffer,
     Sampler,
+    /// The sampler of an unfilterable texture.
+    NonFilteringSampler,
     Texture,
-    /// A texture that the shader only reads with `textureLoad`, such as an
-    /// `Rgba32Float` one.
+    /// A texture whose format can't be filtered, or that the shader only
+    /// reads with `textureLoad`.
     UnfilterableTexture,
 }
 
@@ -310,6 +312,16 @@ impl ShaderProgram {
         let mut binding_infos = Vec::new();
         analyze_shader_bindings(&mut binding_infos, vertex_source, wgpu::ShaderStages::VERTEX);
         analyze_shader_bindings(&mut binding_infos, fragment_source, wgpu::ShaderStages::FRAGMENT);
+        for info in &mut binding_infos {
+            let sampler = match info.type_ {
+                BindingType::Sampler => true,
+                BindingType::Texture => false,
+                _ => continue,
+            };
+            if texture_info_at(source.textures, info.binding, sampler).is_some_and(|texture| !texture.filterable) {
+                info.type_ = if sampler { BindingType::NonFilteringSampler } else { BindingType::UnfilterableTexture };
+            }
+        }
         let groups = BindGroups::new(device, binding_infos, index_group, index_layout);
         let layouts: Vec<Option<&wgpu::BindGroupLayout>> = groups.layouts.iter().map(Some).collect();
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -375,14 +387,7 @@ impl ShaderProgram {
     /// sampler is at its location, and the texture there or at the next
     /// binding.
     pub(crate) fn texture_at(&self, binding: u32, sampler: bool) -> Option<usize> {
-        self.textures
-            .iter()
-            .filter(|texture| {
-                let location = texture.index as u32;
-                location == binding || (!sampler && location + 1 == binding)
-            })
-            .map(|texture| texture.id)
-            .min()
+        texture_info_at(self.textures, binding, sampler).map(|texture| texture.id)
     }
 
     /// The shader location of the input `id` that steps by `step`.
@@ -604,10 +609,24 @@ impl BindingType {
             BindingType::ReadOnlyStorageBuffer => buffer(wgpu::BufferBindingType::Storage { read_only: true }),
             BindingType::StorageBuffer => buffer(wgpu::BufferBindingType::Storage { read_only: false }),
             BindingType::Sampler => wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+            BindingType::NonFilteringSampler => wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
             BindingType::Texture => texture(true),
             BindingType::UnfilterableTexture => texture(false),
         }
     }
+}
+
+/// The texture of `textures` with the lowest id whose sampler is at
+/// `binding` if `sampler`, else whose texture is (see
+/// [`ShaderProgram::texture_at`]).
+fn texture_info_at(textures: &[TextureInfo], binding: u32, sampler: bool) -> Option<&TextureInfo> {
+    textures
+        .iter()
+        .filter(|texture| {
+            let location = texture.index as u32;
+            location == binding || (!sampler && location + 1 == binding)
+        })
+        .min_by_key(|texture| texture.id)
 }
 
 /// Adds the bindings of the `@group(N) @binding(M) var<...> name: type`

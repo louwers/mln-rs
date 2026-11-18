@@ -58,12 +58,14 @@ pub(crate) struct AttributeInfo {
     pub(crate) id: usize,
 }
 
-/// A texture of a shader: the binding of its sampler, and the id the
-/// renderer names it by.
+/// A texture of a shader: the binding of its sampler, the id the renderer
+/// names it by, and whether its format can be filtered, which an
+/// `Rgba32Float` one can't.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct TextureInfo {
     pub(crate) index: usize,
     pub(crate) id: usize,
+    pub(crate) filterable: bool,
 }
 
 /// A shader: its WGSL, and its per-vertex inputs, per-instance inputs and
@@ -78,7 +80,7 @@ pub(crate) struct ShaderSource {
 }
 
 const BACKGROUND_ATTRIBUTES: &[AttributeInfo] = &[AttributeInfo { index: 3, id: ID_BACKGROUND_POS_VERTEX_ATTRIBUTE }];
-const BACKGROUND_PATTERN_TEXTURES: &[TextureInfo] = &[TextureInfo { index: 0, id: ID_BACKGROUND_IMAGE_TEXTURE }];
+const BACKGROUND_PATTERN_TEXTURES: &[TextureInfo] = &[tex(0, ID_BACKGROUND_IMAGE_TEXTURE)];
 
 const CLIPPING_MASK_ATTRIBUTES: &[AttributeInfo] =
     &[AttributeInfo { index: 2, id: ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE }];
@@ -112,7 +114,11 @@ const fn attr(index: usize, id: usize) -> AttributeInfo {
 }
 
 const fn tex(index: usize, id: usize) -> TextureInfo {
-    TextureInfo { index, id }
+    TextureInfo { index, id, filterable: true }
+}
+
+const fn unfilterable_tex(index: usize, id: usize) -> TextureInfo {
+    TextureInfo { index, id, filterable: false }
 }
 
 const CIRCLE_ATTRIBUTES: &[AttributeInfo] = &[
@@ -332,8 +338,8 @@ const COLOR_RELIEF_ATTRIBUTES: &[AttributeInfo] =
     &[attr(5, ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE), attr(6, ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE)];
 const COLOR_RELIEF_TEXTURES: &[TextureInfo] = &[
     tex(0, ID_COLOR_RELIEF_IMAGE_TEXTURE),
-    tex(1, ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE),
-    tex(2, ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE),
+    unfilterable_tex(2, ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE),
+    tex(4, ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE),
 ];
 shader_source!(
     COLOR_RELIEF_SHADER,

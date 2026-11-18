@@ -1032,25 +1032,30 @@ struct ColorReliefEvaluatedPropsUBO {
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(5) var<storage, read> tilePropsVector: array<ColorReliefTilePropsUBO>;
 @group(0) @binding(6) var<uniform> props: ColorReliefEvaluatedPropsUBO;
-@group(1) @binding(0) var texture_sampler: sampler;
+@group(1) @binding(0) var dem_sampler: sampler;
 @group(1) @binding(1) var dem_texture: texture_2d<f32>;
-@group(1) @binding(2) var elevation_stops_texture: texture_2d<f32>;
-@group(1) @binding(3) var color_stops_texture: texture_2d<f32>;
+@group(1) @binding(2) var elevation_stops_sampler: sampler;
+@group(1) @binding(3) var elevation_stops_texture: texture_2d<f32>;
+@group(1) @binding(4) var color_stops_sampler: sampler;
+@group(1) @binding(5) var color_stops_texture: texture_2d<f32>;
 
 fn getElevation(coord: vec2<f32>, unpack: vec4<f32>) -> f32 {
-    var data = textureSample(dem_texture, texture_sampler, coord) * 255.0;
+    var data = textureSample(dem_texture, dem_sampler, coord) * 255.0;
     data.a = -1.0;
     return dot(data, unpack);
 }
 
+// The stops are read at texel centres, from textures without mipmaps, so
+// level 0 is exact. The elevation stops are read in a loop of varying
+// length, where WGSL allows no implicit level.
 fn getElevationStop(stop: i32, color_ramp_size: i32) -> f32 {
-    // Use textureLoad for RGBA32Float texture (not filterable in WebGPU)
-    return textureLoad(elevation_stops_texture, vec2<i32>(stop, 0), 0).r;
+    let x = (f32(stop) + 0.5) / f32(color_ramp_size);
+    return textureSampleLevel(elevation_stops_texture, elevation_stops_sampler, vec2<f32>(x, 0.5), 0.0).r;
 }
 
 fn getColorStop(stop: i32, color_ramp_size: i32) -> vec4<f32> {
     let x = (f32(stop) + 0.5) / f32(color_ramp_size);
-    return textureSample(color_stops_texture, texture_sampler, vec2<f32>(x, 0.5));
+    return textureSample(color_stops_texture, color_stops_sampler, vec2<f32>(x, 0.5));
 }
 
 @fragment

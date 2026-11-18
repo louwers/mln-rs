@@ -491,8 +491,11 @@ fn shader_bindings(shader: &ShaderProgram) -> Result<Vec<ShaderBinding>, GpuErro
                 BindingType::UniformBuffer | BindingType::ReadOnlyStorageBuffer | BindingType::StorageBuffer => {
                     ShaderBinding::Buffer { id: info.binding, min_size: shader.buffer_size(group, info.binding) }
                 }
-                BindingType::Sampler | BindingType::Texture | BindingType::UnfilterableTexture => {
-                    let sampler = info.type_ == BindingType::Sampler;
+                BindingType::Sampler
+                | BindingType::NonFilteringSampler
+                | BindingType::Texture
+                | BindingType::UnfilterableTexture => {
+                    let sampler = matches!(info.type_, BindingType::Sampler | BindingType::NonFilteringSampler);
                     let id = shader.texture_at(info.binding, sampler).ok_or_else(|| {
                         GpuError::Invalid(format!(
                             "{} reads binding {} with no texture id",
@@ -771,8 +774,11 @@ impl Gpu for WebGpu {
                             size: wgpu::BufferSize::new(size),
                         })
                     }
-                    BindingType::Sampler | BindingType::Texture | BindingType::UnfilterableTexture => {
-                        let sampler = info.type_ == BindingType::Sampler;
+                    BindingType::Sampler
+                    | BindingType::NonFilteringSampler
+                    | BindingType::Texture
+                    | BindingType::UnfilterableTexture => {
+                        let sampler = matches!(info.type_, BindingType::Sampler | BindingType::NonFilteringSampler);
                         let texture_id = program.texture_at(info.binding, sampler).ok_or_else(missing)? as u32;
                         let (texture, texture_sampler) = desc
                             .entries
