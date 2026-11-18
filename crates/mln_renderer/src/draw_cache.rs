@@ -12,7 +12,6 @@
 //! [`Draws`].
 
 use std::ops::BitOrAssign;
-use std::rc::Rc;
 
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::gpu::Gpu;
@@ -94,6 +93,12 @@ impl ChangedBuckets {
 pub(crate) trait DrawSlots {
     /// The GPU objects in `slot`, if the cache has any there.
     fn slot_mut(&mut self, slot: u32) -> Option<&mut DrawObjects>;
+
+    /// The GPU objects in `slot`, with what gives them the textures of their
+    /// tile's atlases before they draw, if they sample any.
+    fn slot_with_atlases(&mut self, slot: u32) -> Option<(&mut DrawObjects, Option<&AtlasBinding>)> {
+        Some((self.slot_mut(slot)?, None))
+    }
 }
 
 /// The cache of a layer without draws of its kind.
@@ -107,6 +112,10 @@ impl DrawSlots for () {
 impl<T: DrawSlots> DrawSlots for Option<T> {
     fn slot_mut(&mut self, slot: u32) -> Option<&mut DrawObjects> {
         self.as_mut()?.slot_mut(slot)
+    }
+
+    fn slot_with_atlases(&mut self, slot: u32) -> Option<(&mut DrawObjects, Option<&AtlasBinding>)> {
+        self.as_mut()?.slot_with_atlases(slot)
     }
 }
 
@@ -198,8 +207,6 @@ pub(crate) struct FrameDraw {
     /// its tile, a 3D one to where none of the layer's 3D draws of the pass
     /// drew before it, so no pixel blends twice.
     pub(crate) clip: bool,
-    /// Gives the draw the textures of its tile's atlases before it draws.
-    pub(crate) atlases: Option<Rc<AtlasBinding>>,
 }
 
 impl FrameDraw {
@@ -216,7 +223,6 @@ impl FrameDraw {
             pass: RenderPass::Translucent,
             depth: DrawDepth::Layer { sub_layer: 0, mask: DepthMaskType::ReadOnly },
             clip: false,
-            atlases: None,
         }
     }
 
@@ -550,6 +556,15 @@ impl<T: DrawSlots, L: DrawSlots> DrawCaches<T, L> {
         }
     }
 
+    /// The GPU objects `draw` binds, with what gives them the textures of
+    /// their tile's atlases.
+    fn objects_with_atlases(&mut self, draw: &FrameDraw) -> Option<(&mut DrawObjects, Option<&AtlasBinding>)> {
+        match draw.tile {
+            Some(tile) => self.tiles.get_mut(&tile)?.cache.as_mut()?.slot_with_atlases(draw.slot),
+            None => self.layer.slot_with_atlases(draw.slot),
+        }
+    }
+
     /// Uploads the GPU objects of `frame`'s draws, all of which the caches
     /// hold, in drawing order, and destroys the buffers each upload replaced.
     fn upload(&mut self, frame: &FrameDraws, context: &Context) {
@@ -596,11 +611,11 @@ impl<T: DrawSlots, L: DrawSlots> DrawCaches<T, L> {
             if !in_pass(&draw) {
                 continue;
             }
-            let Some(objects) = self.objects_mut(draw) else {
+            let Some((objects, atlases)) = self.objects_with_atlases(draw) else {
                 debug_assert!(false, "a draw of tile {:?} has no GPU objects", draw.tile);
                 continue;
             };
-            if let Some(atlases) = &draw.atlases {
+            if let Some(atlases) = atlases {
                 atlases.bind(objects, parameters);
             }
             let tile_stencil = || match draw.tile.filter(|_| draw.clip) {

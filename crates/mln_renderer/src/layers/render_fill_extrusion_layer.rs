@@ -95,13 +95,17 @@ struct ExtrusionDraw {
 pub(crate) struct ExtrusionTile {
     draws: Vec<ExtrusionDraw>,
     /// Gives the pattern draws the texture of the tile's icon atlas.
-    atlases: Option<Rc<AtlasBinding>>,
+    atlases: Option<AtlasBinding>,
 }
 
 /// Each draw in the slot of its index.
 impl DrawSlots for ExtrusionTile {
     fn slot_mut(&mut self, slot: u32) -> Option<&mut DrawObjects> {
         self.draws.get_mut(slot as usize).map(|draw| &mut draw.objects)
+    }
+
+    fn slot_with_atlases(&mut self, slot: u32) -> Option<(&mut DrawObjects, Option<&AtlasBinding>)> {
+        Some((&mut self.draws.get_mut(slot as usize)?.objects, self.atlases.as_ref()))
     }
 }
 
@@ -511,7 +515,6 @@ impl RenderLayer for RenderFillExtrusionLayer {
                     pass: RENDER_PASS,
                     depth: DrawDepth::Volume { mask: DepthMaskType::ReadWrite },
                     clip: draw.clip,
-                    atlases: cached.atlases.clone(),
                     ..FrameDraw::new(Some(tile_id), slot as u32, draw.id)
                 };
                 self.draw_list.push(frame_draw, Self::uniforms(layer, tile, binders, &draw.objects, paint_parameters));
@@ -619,7 +622,7 @@ impl TileBuilder {
         }
 
         let atlases = tile.get_atlas_textures().filter(|_| self.has_pattern).map(|atlases| {
-            Rc::new(AtlasBinding::new(
+            AtlasBinding::new(
                 Some(Rc::clone(atlases)),
                 None,
                 Some(ID_FILL_EXTRUSION_IMAGE_TEXTURE),
@@ -628,7 +631,7 @@ impl TileBuilder {
                 AlignmentType::Auto,
                 false,
                 false,
-            ))
+            )
         });
         let mut draws = Vec::new();
         // The draws in color clip where the layer draws into depth first.
@@ -642,9 +645,9 @@ impl TileBuilder {
         };
         if !bucket.triangles.is_empty() && vertex_count > 0 {
             if self.depth_pass {
-                draws.push(extrusion_draw(shader, false, false, &roofs, atlases.as_deref()));
+                draws.push(extrusion_draw(shader, false, false, &roofs, atlases.as_ref()));
             }
-            draws.push(extrusion_draw(shader, true, clip, &roofs, atlases.as_deref()));
+            draws.push(extrusion_draw(shader, true, clip, &roofs, atlases.as_ref()));
         }
         // A tile with one vertex has no wall.
         let walls_geometry = SharedGeometry {
@@ -656,9 +659,9 @@ impl TileBuilder {
         };
         if walls > 0 && wall_vertex_count > 0 {
             if self.depth_pass {
-                draws.push(extrusion_draw(wall_shader, false, false, &walls_geometry, atlases.as_deref()));
+                draws.push(extrusion_draw(wall_shader, false, false, &walls_geometry, atlases.as_ref()));
             }
-            draws.push(extrusion_draw(wall_shader, true, clip, &walls_geometry, atlases.as_deref()));
+            draws.push(extrusion_draw(wall_shader, true, clip, &walls_geometry, atlases.as_ref()));
         }
 
         ExtrusionTile { draws, atlases }

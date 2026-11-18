@@ -424,10 +424,14 @@ impl SymbolTile {
 /// slots after them.
 impl DrawSlots for SymbolTile {
     fn slot_mut(&mut self, slot: u32) -> Option<&mut DrawObjects> {
+        Some(self.slot_with_atlases(slot)?.0)
+    }
+
+    fn slot_with_atlases(&mut self, slot: u32) -> Option<(&mut DrawObjects, Option<&AtlasBinding>)> {
         let slot = slot as usize;
         match slot.checked_sub(self.draws.len()) {
-            None => self.draws.get_mut(slot).map(|draw| &mut draw.objects),
-            Some(index) => self.collision.get_mut(index).map(|draw| &mut draw.draw.objects),
+            None => self.draws.get_mut(slot).map(|draw| (&mut draw.objects, Some(&*draw.atlases))),
+            Some(index) => self.collision.get_mut(index).map(|draw| (&mut draw.draw.objects, None)),
         }
     }
 }
@@ -1015,7 +1019,6 @@ impl RenderSymbolLayer {
                     };
                     let frame_draw = FrameDraw {
                         pass: passes,
-                        atlases: Some(Rc::clone(&draw.atlases)),
                         ..FrameDraw::new(Some(tile_id), slot as u32, draw.id)
                     };
                     self.draw_list.push(frame_draw, uniforms);

@@ -88,13 +88,17 @@ pub(crate) struct LineTile {
     /// line atlas.
     dash_cap: LinePatternCap,
     /// Gives a pattern draw the texture of the tile's icon atlas.
-    atlases: Option<Rc<AtlasBinding>>,
+    atlases: Option<AtlasBinding>,
 }
 
 /// The draw in slot 0.
 impl DrawSlots for LineTile {
     fn slot_mut(&mut self, slot: u32) -> Option<&mut DrawObjects> {
         (slot == 0).then_some(&mut self.objects)
+    }
+
+    fn slot_with_atlases(&mut self, slot: u32) -> Option<(&mut DrawObjects, Option<&AtlasBinding>)> {
+        (slot == 0).then_some((&mut self.objects, self.atlases.as_ref()))
     }
 }
 
@@ -642,7 +646,6 @@ impl RenderLayer for RenderLineLayer {
                 let draw = FrameDraw {
                     pass: cached.pass,
                     clip: true,
-                    atlases: cached.atlases.clone(),
                     ..FrameDraw::new(Some(tile_id), 0, cached.id)
                 };
                 self.draw_list.push(draw, uniforms);
@@ -695,7 +698,7 @@ impl RenderLineLayer {
             (LineType::Sdf, &mut self.line_sdf_shader_group, "LineSDFShader")
         } else if !self.values.unevaluated.line_pattern.is_undefined() {
             let icons = tile.get_atlas_textures().filter(|atlases| atlases.icon().is_some())?;
-            atlases = Some(Rc::new(AtlasBinding::new(
+            atlases = Some(AtlasBinding::new(
                 Some(Rc::clone(icons)),
                 None,
                 Some(ID_LINE_IMAGE_TEXTURE),
@@ -704,7 +707,7 @@ impl RenderLineLayer {
                 AlignmentType::Auto,
                 /*icon_scaled*/ false,
                 /*text_size_is_zoom_constant*/ false,
-            )));
+            ));
             (LineType::Pattern, &mut self.line_pattern_shader_group, "LinePatternShader")
         } else if has_gradient {
             textures[ID_LINE_IMAGE_TEXTURE] = Some(self.color_ramp_texture(context)?);

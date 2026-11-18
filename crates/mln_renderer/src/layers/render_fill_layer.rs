@@ -139,18 +139,22 @@ pub(crate) struct FillTile {
     /// bucket has any.
     outline: Option<FillDraw>,
     /// Gives the pattern draws the texture of the tile's icon atlas.
-    atlases: Option<Rc<AtlasBinding>>,
+    atlases: Option<AtlasBinding>,
 }
 
 /// The fill in slot 0, the outline in slot 1.
 impl DrawSlots for FillTile {
     fn slot_mut(&mut self, slot: u32) -> Option<&mut DrawObjects> {
+        Some(self.slot_with_atlases(slot)?.0)
+    }
+
+    fn slot_with_atlases(&mut self, slot: u32) -> Option<(&mut DrawObjects, Option<&AtlasBinding>)> {
         let draw = match slot {
             0 => &mut self.fill,
             1 => &mut self.outline,
             _ => return None,
         };
-        draw.as_mut().map(|draw| &mut draw.objects)
+        Some((&mut draw.as_mut()?.objects, self.atlases.as_ref()))
     }
 }
 
@@ -251,7 +255,7 @@ impl TileBuilder<'_> {
 
         let atlases = tile.get_atlas_textures().filter(|atlases| self.pattern && atlases.icon().is_some());
         let atlases = atlases.map(|atlases| {
-            Rc::new(AtlasBinding::new(
+            AtlasBinding::new(
                 Some(Rc::clone(atlases)),
                 None,
                 Some(ID_FILL_IMAGE_TEXTURE),
@@ -260,7 +264,7 @@ impl TileBuilder<'_> {
                 AlignmentType::Auto,
                 /*icon_scaled*/ false,
                 /*text_size_is_zoom_constant*/ false,
-            ))
+            )
         });
 
         let fill = (!bucket.triangles.is_empty()).then(|| {
@@ -272,7 +276,7 @@ impl TileBuilder<'_> {
                 bucket_indexes(geometry, &bucket.triangles),
                 &bucket.triangle_segments,
             );
-            FillDraw::new(fill_shader, 1, fill_depth, fill_geometry, atlases.as_deref())
+            FillDraw::new(fill_shader, 1, fill_depth, fill_geometry, atlases.as_ref())
         });
 
         // The bucket's lines, or an instance of the quad for each vertex,
@@ -301,7 +305,7 @@ impl TileBuilder<'_> {
                         &[RenderStaticData::fill_outline_segment(fill_vertex_count)],
                     )
                 };
-                FillDraw::new(shader, outline_sub_layer, DepthMaskType::ReadOnly, quad_geometry, atlases.as_deref())
+                FillDraw::new(shader, outline_sub_layer, DepthMaskType::ReadOnly, quad_geometry, atlases.as_ref())
             } else {
                 let line_geometry = fill_geometry(
                     copy_shared_attributes(&vertex_attrs),
@@ -310,7 +314,7 @@ impl TileBuilder<'_> {
                     bucket_indexes(geometry, &bucket.basic_lines),
                     &bucket.basic_line_segments,
                 );
-                FillDraw::new(shader, outline_sub_layer, DepthMaskType::ReadOnly, line_geometry, atlases.as_deref())
+                FillDraw::new(shader, outline_sub_layer, DepthMaskType::ReadOnly, line_geometry, atlases.as_ref())
             }
         });
 
@@ -771,7 +775,6 @@ impl RenderLayer for RenderFillLayer {
                     pass: RENDER_PASS,
                     depth: DrawDepth::Layer { sub_layer: draw.sub_layer, mask: draw.depth },
                     clip: true,
-                    atlases: cached.atlases.clone(),
                     ..FrameDraw::new(Some(tile_id), slot as u32, draw.id)
                 };
                 self.draw_list.push(tile_draw, uniforms);

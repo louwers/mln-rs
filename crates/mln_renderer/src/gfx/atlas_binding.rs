@@ -48,30 +48,43 @@ impl AtlasBinding {
         }
     }
 
+    /// The textures of a draw with `shader`: the atlases', in the slots the
+    /// shader samples them from. [`bind`](Self::bind) sets how they filter.
+    #[must_use]
+    pub(crate) fn textures(&self, shader: &ShaderProgram) -> Textures {
+        let mut textures = Textures::default();
+        self.set_textures(&mut textures, self.samples_icon(shader));
+        textures
+    }
+
+    /// Gives the draw the atlases' textures before it draws, and sets the
+    /// samplers of the atlases, which the tile's draws share, to filter as
+    /// the frame's view asks.
+    pub(crate) fn bind(&self, objects: &mut DrawObjects, parameters: &PaintParameters<'_>) {
+        let state = parameters.state;
+        let transformed = self.rotation_alignment == AlignmentType::Map || state.get_pitch() != 0.0;
+        let linear_filter_for_icons = if self.is_text {
+            state.is_changing() || transformed || !self.text_size_is_zoom_constant
+        } else {
+            self.sdf_icons || state.is_changing() || self.icon_scaled || transformed
+        };
+        if self.glyph_texture_id.is_some()
+            && let Some(atlases) = &self.atlases
+        {
+            set_samplers(atlases, linear_filter_for_icons);
+        }
+        let samples_icon = self.samples_icon(objects.shader());
+        self.set_textures(&mut objects.textures, samples_icon);
+    }
+
     /// Sets the atlases' textures in `textures`, those of a shader that
-    /// samples the icon texture or not, with icons filtered linearly or not.
-    fn setup_textures(&self, textures: &mut Textures, samples_icon: bool, linear_filter_for_icons: bool) {
+    /// samples the icon texture or not.
+    fn set_textures(&self, textures: &mut Textures, samples_icon: bool) {
         let (Some(glyph_texture_id), Some(atlases)) = (self.glyph_texture_id, &self.atlases) else {
             return;
         };
         let glyph = atlases.glyph();
         let icon = atlases.icon();
-        if let Some(glyph) = &glyph {
-            glyph.borrow_mut().set_sampler(SamplerState {
-                filter: TextureFilterType::Linear,
-                wrap_u: TextureWrapType::Clamp,
-                wrap_v: TextureWrapType::Clamp,
-                ..Default::default()
-            });
-        }
-        if let Some(icon) = &icon {
-            icon.borrow_mut().set_sampler(SamplerState {
-                filter: if linear_filter_for_icons { TextureFilterType::Linear } else { TextureFilterType::Nearest },
-                wrap_u: TextureWrapType::Clamp,
-                wrap_v: TextureWrapType::Clamp,
-                ..Default::default()
-            });
-        }
         if let Some(icon_texture_id) = self.icon_texture_id.filter(|_| samples_icon) {
             debug_assert_ne!(glyph_texture_id, icon_texture_id);
             textures[glyph_texture_id] = glyph;
@@ -87,26 +100,23 @@ impl AtlasBinding {
     }
 }
 
-impl AtlasBinding {
-    /// The textures of a draw with `shader` when it is made: the atlases'.
-    #[must_use]
-    pub(crate) fn textures(&self, shader: &ShaderProgram) -> Textures {
-        let mut textures = Textures::default();
-        self.setup_textures(&mut textures, self.samples_icon(shader), true);
-        textures
+/// Makes the glyph atlas's texture filter linearly, and the icon atlas's
+/// linearly or not.
+fn set_samplers(atlases: &TileAtlasTextures, linear_filter_for_icons: bool) {
+    if let Some(glyph) = atlases.glyph() {
+        glyph.borrow_mut().set_sampler(SamplerState {
+            filter: TextureFilterType::Linear,
+            wrap_u: TextureWrapType::Clamp,
+            wrap_v: TextureWrapType::Clamp,
+            ..Default::default()
+        });
     }
-
-    /// Gives the draw the atlases' textures before it draws, filtered as the
-    /// frame's view asks.
-    pub(crate) fn bind(&self, objects: &mut DrawObjects, parameters: &PaintParameters<'_>) {
-        let state = parameters.state;
-        let transformed = self.rotation_alignment == AlignmentType::Map || state.get_pitch() != 0.0;
-        let linear_filter_for_icons = if self.is_text {
-            state.is_changing() || transformed || !self.text_size_is_zoom_constant
-        } else {
-            self.sdf_icons || state.is_changing() || self.icon_scaled || transformed
-        };
-        let samples_icon = self.samples_icon(objects.shader());
-        self.setup_textures(&mut objects.textures, samples_icon, linear_filter_for_icons);
+    if let Some(icon) = atlases.icon() {
+        icon.borrow_mut().set_sampler(SamplerState {
+            filter: if linear_filter_for_icons { TextureFilterType::Linear } else { TextureFilterType::Nearest },
+            wrap_u: TextureWrapType::Clamp,
+            wrap_v: TextureWrapType::Clamp,
+            ..Default::default()
+        });
     }
 }
