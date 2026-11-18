@@ -139,6 +139,14 @@ thread_local! {
     static HELD_BUCKETS: std::cell::Cell<Vec<Option<SymbolBucket>>> = const { std::cell::Cell::new(Vec::new()) };
 }
 
+/// bench: a copy of the bucket `bucket` points to, if it is a symbol
+/// bucket, which `HeldBuckets` holds for a benchmark's layer to place, at
+/// the index this returns, until the layer drops.
+#[cfg(feature = "bench")]
+pub(crate) fn hold_symbol_bucket(bucket: &impl std::ops::Deref<Target = dyn Bucket>) -> Option<usize> {
+    Some(HeldBuckets::hold(bucket.downcast_ref::<SymbolBucket>()?.clone()))
+}
+
 #[cfg(feature = "bench")]
 impl HeldBuckets {
     /// Keeps `bucket`, and returns its index.

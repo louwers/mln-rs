@@ -187,11 +187,7 @@ impl dyn Bucket {
     }
 }
 
-/// bench: a copy of the bucket `bucket` points to, if it is a symbol
-/// bucket, which `HeldBuckets` holds for a benchmark's layer to place, at
-/// the index this returns, until the layer drops.
+// bench: `bench.rs` reaches the bucket a benchmark's layer places by this
+// path, which other commits' `bench.rs` builds against too.
 #[cfg(feature = "bench")]
-pub(crate) fn recover(bucket: &impl std::ops::Deref<Target = dyn Bucket>) -> Option<usize> {
-    let bucket: &crate::buckets::symbol_bucket::SymbolBucket = bucket.downcast_ref()?;
-    Some(crate::render_layer::HeldBuckets::hold(bucket.clone()))
-}
+pub(crate) use crate::render_layer::hold_symbol_bucket as recover;
