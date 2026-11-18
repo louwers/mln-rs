@@ -766,16 +766,10 @@ impl<'a> DrawPass<'a> {
 
     /// Ends the pass's draws: composites what they drew where they drew
     /// into the layer composite's texture.
-    pub(crate) fn end(mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        if let Some(composited) = self.composited.take() {
+    pub(crate) fn end(self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        if let Some(composited) = self.composited {
             parameters.end_composited(gpu, composited);
         }
-    }
-}
-
-impl Drop for DrawPass<'_> {
-    fn drop(&mut self) {
-        debug_assert!(self.composited.is_none(), "a draw pass into the layer composite ended without `end`");
     }
 }
 

@@ -36,6 +36,18 @@ pub(crate) struct Composited {
     /// The frame's tile masks and next stencil value, which the group's
     /// draws don't share; `None` where the texture's pass didn't begin.
     frame_stencil: Option<(VecMap<UnwrappedTileID, i32>, i32)>,
+    unended: Unended,
+}
+
+/// Checks, in debug builds, that a [`Composited`] reaches
+/// [`PaintParameters::end_composited`], which forgets it: dropping a group
+/// that didn't would drop the layer composite it took.
+struct Unended;
+
+impl Drop for Unended {
+    fn drop(&mut self) {
+        debug_assert!(std::thread::panicking(), "a composited draw group ended without `end_composited`");
+    }
 }
 
 impl Composited {
@@ -273,13 +285,14 @@ impl<'a> PaintParameters<'a> {
                 None
             }
         };
-        Some(Composited { group, frame, layer_composite, frame_stencil })
+        Some(Composited { group, frame, layer_composite, frame_stencil, unended: Unended })
     }
 
     /// Ends the draws `begin_composited` began, and composites what they drew
     /// onto the frame's pass, which this begins again.
     pub(crate) fn end_composited(&mut self, gpu: &mut dyn Gpu, composited: Composited) {
-        let Composited { group, frame, mut layer_composite, frame_stencil } = composited;
+        let Composited { group, frame, mut layer_composite, frame_stencil, unended } = composited;
+        std::mem::forget(unended);
         let drawn = frame_stencil.is_some();
         if let Some((tile_clipping_mask_ids, next_stencil_id)) = frame_stencil {
             self.tile_clipping_mask_ids = tile_clipping_mask_ids;
