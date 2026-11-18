@@ -698,14 +698,22 @@ impl RenderLineLayer {
 
         let shared = bucket_vertices(geometry, &bucket.vertices)?;
         let stride = size_of::<LineLayoutVertex>() as u32;
-        if let Some(attr) = attrs.set(ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, AttributeDataType::Invalid) {
-            let offset = offset_of!(LineLayoutVertex, a1) as u32;
-            attr.set_shared_vertices(shared.clone(), offset, 0, stride, AttributeDataType::Short2);
-        }
-        if let Some(attr) = attrs.set(ID_LINE_DATA_VERTEX_ATTRIBUTE, AttributeDataType::Invalid) {
-            let offset = offset_of!(LineLayoutVertex, a2) as u32;
-            attr.set_shared_vertices(shared, offset, 0, stride, AttributeDataType::UByte4);
-        }
+        attrs.share(
+            ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE,
+            shared.clone(),
+            offset_of!(LineLayoutVertex, a1) as u32,
+            0,
+            stride,
+            AttributeDataType::Short2,
+        );
+        attrs.share(
+            ID_LINE_DATA_VERTEX_ATTRIBUTE,
+            shared,
+            offset_of!(LineLayoutVertex, a2) as u32,
+            0,
+            stride,
+            AttributeDataType::UByte4,
+        );
 
         let draw_geometry = DrawGeometry {
             vertices: attrs,

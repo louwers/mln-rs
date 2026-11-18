@@ -573,8 +573,8 @@ impl Contents {
     /// tiles its mask keeps rather than its whole extent.
     pub(crate) fn is_masked(&self) -> bool {
         match self {
-            Contents::Raster(bucket) => bucket.geometry().is_masked(),
-            Contents::Dem(bucket) => bucket.geometry().is_masked(),
+            Contents::Raster(bucket) => bucket.geometry().has_quads(),
+            Contents::Dem(bucket) => bucket.geometry().has_quads(),
             Contents::Geometry(_) | Contents::Empty => false,
         }
     }

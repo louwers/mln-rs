@@ -721,7 +721,7 @@ fn globe_mesh_cache_keeps_the_meshes_in_use() {
         let vertices = cache.get(context, &tile, &whole, globe_test_vertex).vertices.clone();
         for i in 0..256u32 {
             cache.get(context, &tile, &mask(&[(4, i % 16, i / 16)]), globe_test_vertex);
-            assert!(vertices.same(&cache.get(context, &tile, &whole, globe_test_vertex).vertices), "{i}");
+            assert!(vertices == cache.get(context, &tile, &whole, globe_test_vertex).vertices, "{i}");
         }
     });
 }

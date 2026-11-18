@@ -9,7 +9,6 @@ use mln_gfx::shaders::segment::SegmentBase;
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
 use mln_util::image::PremultipliedImage;
-use mln_util::time::Instant;
 
 use crate::bucket::BucketBase;
 use crate::gfx::context::Context;
@@ -35,25 +34,30 @@ impl RasterLayoutVertex {
 /// its mask keeps, or none where the mask keeps the whole tile, which then
 /// draws the tile's quad. Its upload moves the quads' vertices and indices
 /// into the context's stores, which the draws of the tile's layers share.
-#[derive(Clone)]
 pub(crate) struct MaskedGeometry {
     pub(crate) mask: TileMask,
-    /// The quads' vertices and indices until their upload moves them.
-    vertices: Vec<RasterLayoutVertex>,
-    indices: Vec<u16>,
-    vertex_count: usize,
-    pub(crate) segments: Vec<SegmentBase>,
-    /// When the geometry last changed.
-    pub(crate) last_modified: Instant,
-    /// The quads in the context's stores, once uploaded.
-    stored: Option<StoredQuads>,
+    quads: Quads,
+    /// Counts the changes of the quads, which the layers build their draws
+    /// of the tile again after.
+    generation: u64,
 }
 
-/// The quads of a [`MaskedGeometry`] in the context's stores.
-#[derive(Clone)]
+/// Where a mask's quads are.
+enum Quads {
+    /// There are none: the mask keeps the whole tile.
+    Whole,
+    /// Their vertices and indices, until their upload moves them.
+    Data { vertices: Vec<RasterLayoutVertex>, indices: Vec<u16>, segments: Vec<SegmentBase> },
+    /// In the context's stores.
+    Stored(StoredQuads),
+}
+
+/// The quads of a [`MaskedGeometry`] in the context's stores, and the
+/// segments that draw them.
 pub(crate) struct StoredQuads {
     pub(crate) vertices: SharedVertices,
     pub(crate) indexes: SharedIndexes,
+    pub(crate) segments: Vec<SegmentBase>,
 }
 
 fn full_mask() -> TileMask {
@@ -65,58 +69,66 @@ fn full_mask() -> TileMask {
 impl Default for MaskedGeometry {
     /// The geometry of the whole tile.
     fn default() -> Self {
-        MaskedGeometry {
-            mask: full_mask(),
-            vertices: Vec::new(),
-            indices: Vec::new(),
-            vertex_count: 0,
-            segments: Vec::new(),
-            last_modified: Instant::now(),
-            stored: None,
-        }
+        MaskedGeometry { mask: full_mask(), quads: Quads::Whole, generation: 0 }
     }
 }
 
 impl MaskedGeometry {
-    /// The number of the quads' vertices.
-    #[must_use]
-    pub(crate) fn vertex_count(&self) -> usize {
-        self.vertex_count
-    }
-
     /// The quads' vertices, before their upload moves them.
     #[cfg(test)]
     pub(crate) fn vertices(&self) -> &[RasterLayoutVertex] {
-        &self.vertices
+        match &self.quads {
+            Quads::Data { vertices, .. } => vertices,
+            Quads::Whole | Quads::Stored(_) => &[],
+        }
     }
 
     /// The quads' indices, before their upload moves them.
     #[cfg(test)]
     pub(crate) fn indices(&self) -> &[u16] {
-        &self.indices
+        match &self.quads {
+            Quads::Data { indices, .. } => indices,
+            Quads::Whole | Quads::Stored(_) => &[],
+        }
+    }
+
+    /// The segments that draw the quads, none for the whole tile.
+    #[cfg(test)]
+    pub(crate) fn segments(&self) -> &[SegmentBase] {
+        match &self.quads {
+            Quads::Whole => &[],
+            Quads::Data { segments, .. } | Quads::Stored(StoredQuads { segments, .. }) => segments,
+        }
     }
 
     /// The quads in the context's stores; `None` where there are none to
     /// draw, and the tile draws its quad.
     #[must_use]
     pub(crate) fn quads(&self) -> Option<&StoredQuads> {
-        debug_assert!(self.stored.is_some() || self.vertex_count == 0, "masked geometry drawn before its upload");
-        self.stored.as_ref().filter(|_| !self.segments.is_empty())
+        match &self.quads {
+            Quads::Stored(quads) => Some(quads),
+            Quads::Data { vertices, .. } => {
+                debug_assert!(vertices.is_empty(), "masked geometry drawn before its upload");
+                None
+            }
+            Quads::Whole => None,
+        }
+    }
+
+    /// The number of times the quads changed.
+    #[must_use]
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation
     }
 
     /// Makes the geometry `vertices` and `indices` in `segments`.
     pub(crate) fn set(&mut self, vertices: Vec<RasterLayoutVertex>, indices: Vec<u16>, segments: Vec<SegmentBase>) {
-        self.vertex_count = vertices.len();
-        self.vertices = vertices;
-        self.indices = indices;
-        self.segments = segments;
-        self.stored = None;
-        self.last_modified = Instant::now();
+        self.replace(Quads::Data { vertices, indices, segments });
     }
 
-    /// Drops the quads.
-    pub(crate) fn clear(&mut self) {
-        self.set(Vec::new(), Vec::new(), Vec::new());
+    fn replace(&mut self, quads: Quads) {
+        self.quads = quads;
+        self.generation += 1;
     }
 
     /// Makes `mask` the geometry's, with the quads of its tiles. Returns
@@ -130,7 +142,7 @@ impl MaskedGeometry {
         self.mask = mask;
         if self.mask == full_mask() {
             // The whole tile draws the tile's quad, which the layers share.
-            self.clear();
+            self.replace(Quads::Whole);
             return true;
         }
 
@@ -179,31 +191,34 @@ impl MaskedGeometry {
         true
     }
 
-    /// Whether the mask keeps less than the whole tile.
+    /// Whether the geometry has quads: an image's, or those of a mask that
+    /// keeps less than the whole tile.
     #[must_use]
-    pub(crate) fn is_masked(&self) -> bool {
-        !self.segments.is_empty()
+    pub(crate) fn has_quads(&self) -> bool {
+        !matches!(self.quads, Quads::Whole)
     }
 
     /// Makes the whole tile the geometry's mask, unless it is.
     pub(crate) fn unmask(&mut self) -> bool {
-        self.is_masked() && self.set_mask(full_mask())
+        self.has_quads() && self.set_mask(full_mask())
     }
 
-    /// Moves the quads into `context`'s stores, unless they are there.
+    /// Moves the quads into `context`'s stores, unless they are there or
+    /// there are none.
     pub(crate) fn upload(&mut self, context: &mut Context) {
-        if self.stored.is_some() || self.vertex_count == 0 {
-            return;
-        }
-        let vertices = context.add_vertices(std::mem::take(&mut self.vertices)).into_shared();
-        let indexes = context.add_indexes(Indexes::new(std::mem::take(&mut self.indices)));
-        self.stored = Some(StoredQuads { vertices, indexes });
+        self.quads = match std::mem::replace(&mut self.quads, Quads::Whole) {
+            Quads::Data { vertices, indices, segments } if !vertices.is_empty() => {
+                let vertices = context.add_vertices(vertices).into_shared();
+                let indexes = context.add_indexes(Indexes::new(indices));
+                Quads::Stored(StoredQuads { vertices, indexes, segments })
+            }
+            quads => quads,
+        };
     }
 }
 
 /// A raster tile's image and the geometry that draws it, which the tile
 /// masks (`set_mask`).
-#[derive(Clone)]
 pub(crate) struct RasterBucket {
     pub(crate) base: BucketBase,
     pub(crate) image: Option<Arc<PremultipliedImage>>,
@@ -280,7 +295,7 @@ mod tests {
         assert!(bucket.has_data());
         bucket.set_mask(full_mask());
         let geometry = bucket.geometry();
-        assert!(geometry.vertices().is_empty() && geometry.segments.is_empty());
+        assert!(geometry.vertices().is_empty() && geometry.segments().is_empty());
     }
 
     #[test]
@@ -291,10 +306,10 @@ mod tests {
         mask.insert(CanonicalTileID::new(1, 1, 1));
         bucket.set_mask(mask);
         let geometry = bucket.geometry();
-        assert_eq!(geometry.vertex_count(), 8);
+        assert_eq!(geometry.vertices().len(), 8);
         assert_eq!(geometry.indices(), [0, 1, 2, 1, 2, 3, 4, 5, 6, 5, 6, 7]);
-        assert_eq!(geometry.segments.len(), 1);
-        assert_eq!(geometry.segments[0].index_length, 12);
+        assert_eq!(geometry.segments().len(), 1);
+        assert_eq!(geometry.segments()[0].index_length, 12);
         assert_eq!(geometry.vertices()[7].a1, [8192, 8192]);
         assert_eq!(geometry.vertices()[4].a2, [4096, 4096]);
     }

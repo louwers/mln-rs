@@ -346,7 +346,7 @@ impl RenderSource for RenderImageSource {
         } else {
             1
         };
-        if bucket.geometry().vertex_count() == 0 || geom_coords != self.mesh_corners || cells != self.mesh_cells {
+        if !bucket.geometry().has_quads() || geom_coords != self.mesh_corners || cells != self.mesh_cells {
             build_image_mesh(bucket, &geom_coords, cells);
             self.mesh_corners = geom_coords;
             self.mesh_cells = cells;

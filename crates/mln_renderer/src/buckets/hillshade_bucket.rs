@@ -11,7 +11,6 @@ use crate::tile_mask::TileMask;
 
 /// A raster-dem tile's DEM, which the tile backfills from its neighbours,
 /// and the geometry that draws it, which the tile masks (`set_mask`).
-#[derive(Clone)]
 pub(crate) struct HillshadeBucket {
     pub(crate) base: BucketBase,
     geometry: MaskedGeometry,

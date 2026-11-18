@@ -25,7 +25,6 @@ use mln_style_types::{RasterResamplingType, ResamplingType, TranslateAnchorType}
 use mln_tile_id::UnwrappedTileID;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::identity::SimpleIdentity;
-use mln_util::time::Instant;
 
 use super::cast_matrix;
 use crate::bucket::NoBucket;
@@ -52,10 +51,11 @@ use crate::render_tile::FrameTile;
 use crate::sources::render_image_source::ImageSourceRenderData;
 use crate::tile_matrix::{projection_data, to_projection_ubo};
 
-/// What the layer keeps of a tile: its draw, and when the draw was built.
+/// What the layer keeps of a tile: its draw, and the generation of the
+/// bucket's geometry it was built of.
 pub(crate) struct RasterTile {
     draw: KeptDraw,
-    built: Instant,
+    geometry_generation: u64,
 }
 
 /// What a frame's draw of the layer draws.
@@ -272,12 +272,8 @@ impl RenderRasterLayer {
         let texture = Self::bucket_texture(&mut self.textures, sampler, paint_parameters.context, bucket);
         let image_draws = &mut self.drawing.objects.images;
         for (index, tile_id) in image_data.tile_ids.iter().enumerate() {
-            let draw_geometry = raster_geometry(
-                &quads.vertices,
-                geometry.vertex_count(),
-                quads.indexes.clone().into(),
-                &geometry.segments,
-            );
+            let draw_geometry =
+                raster_geometry(&quads.vertices, quads.vertices.count(), quads.indexes.clone().into(), &quads.segments);
             let draw = KeptDraw::new(new_objects(raster_shader, draw_geometry, texture.as_ref()));
             let uniforms = Self::uniforms(tile_id, paint_parameters);
             self.draw_list.push_part(FrameDraw::new(None, draw.id), RasterPart::Image(index), uniforms);
@@ -380,14 +376,22 @@ fn raster_geometry(
 fn raster_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeArray {
     let mut attrs = VertexAttributeArray::new();
     let stride = size_of::<RasterLayoutVertex>() as u32;
-    if let Some(attr) = attrs.set(ID_RASTER_POS_VERTEX_ATTRIBUTE, AttributeDataType::Invalid) {
-        let offset = offset_of!(RasterLayoutVertex, a1) as u32;
-        attr.set_shared_vertices(vertices.clone(), offset, 0, stride, AttributeDataType::Short2);
-    }
-    if let Some(attr) = attrs.set(ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE, AttributeDataType::Invalid) {
-        let offset = offset_of!(RasterLayoutVertex, a2) as u32;
-        attr.set_shared_vertices(vertices.clone(), offset, 0, stride, AttributeDataType::Short2);
-    }
+    attrs.share(
+        ID_RASTER_POS_VERTEX_ATTRIBUTE,
+        vertices.clone(),
+        offset_of!(RasterLayoutVertex, a1) as u32,
+        0,
+        stride,
+        AttributeDataType::Short2,
+    );
+    attrs.share(
+        ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE,
+        vertices.clone(),
+        offset_of!(RasterLayoutVertex, a2) as u32,
+        0,
+        stride,
+        AttributeDataType::Short2,
+    );
     attrs
 }
 
@@ -459,8 +463,8 @@ impl TypedLayer for RenderRasterLayer {
             // A draw of another bucket, or of the bucket's geometry before
             // its mask changed, is built again.
             entry.set_bucket(bucket.base.bucket_id);
-            let geometry_modified = bucket.geometry().last_modified;
-            if entry.value.as_ref().is_some_and(|cached| cached.built < geometry_modified) {
+            let geometry_generation = bucket.geometry().generation();
+            if entry.value.as_ref().is_some_and(|cached| cached.geometry_generation != geometry_generation) {
                 *entry.value = None;
             }
 
@@ -485,9 +489,9 @@ impl TypedLayer for RenderRasterLayer {
                 } else if let Some(quads) = geometry.quads() {
                     raster_geometry(
                         &quads.vertices,
-                        geometry.vertex_count(),
+                        quads.vertices.count(),
                         quads.indexes.clone().into(),
-                        &geometry.segments,
+                        &quads.segments,
                     )
                 } else {
                     raster_geometry(
@@ -498,7 +502,7 @@ impl TypedLayer for RenderRasterLayer {
                     )
                 };
                 let objects = new_objects(&raster_shader, draw_geometry, texture.as_ref());
-                let built = RasterTile { draw: KeptDraw::new(objects), built: Instant::now() };
+                let built = RasterTile { draw: KeptDraw::new(objects), geometry_generation };
                 *entry.value = Some(built);
             }
 

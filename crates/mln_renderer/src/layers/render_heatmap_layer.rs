@@ -427,15 +427,14 @@ impl RenderHeatmapLayer {
                 let shader = heatmap_shader.get_or_insert_with(|| {
                     heatmap_shader_group.shader(&properties_as_uniforms, base.projection_variant)
                 });
-                if let Some(attr) = attrs.set(ID_HEATMAP_POS_VERTEX_ATTRIBUTE, AttributeDataType::Invalid) {
-                    attr.set_shared_vertices(
-                        vertices,
-                        offset_of!(HeatmapLayoutVertex, a1) as u32,
-                        0,
-                        size_of::<HeatmapLayoutVertex>() as u32,
-                        AttributeDataType::Short2,
-                    );
-                }
+                attrs.share(
+                    ID_HEATMAP_POS_VERTEX_ATTRIBUTE,
+                    vertices,
+                    offset_of!(HeatmapLayoutVertex, a1) as u32,
+                    0,
+                    size_of::<HeatmapLayoutVertex>() as u32,
+                    AttributeDataType::Short2,
+                );
                 let geometry = DrawGeometry {
                     vertices: attrs,
                     vertex_count: if bucket.segments.is_empty() { 0 } else { bucket.vertices.len() },
@@ -566,15 +565,14 @@ impl RenderHeatmapLayer {
                 .get_or_insert_with(|| copied_vertices(context, &RenderStaticData::heatmap_texture_vertices()))
                 .clone();
             let mut attrs = VertexAttributeArray::new();
-            if let Some(attr) = attrs.set(ID_HEATMAP_POS_VERTEX_ATTRIBUTE, AttributeDataType::Invalid) {
-                attr.set_shared_vertices(
-                    vertices,
-                    offset_of!(HeatmapLayoutVertex, a1) as u32,
-                    0,
-                    size_of::<HeatmapLayoutVertex>() as u32,
-                    AttributeDataType::Short2,
-                );
-            }
+            attrs.share(
+                ID_HEATMAP_POS_VERTEX_ATTRIBUTE,
+                vertices,
+                offset_of!(HeatmapLayoutVertex, a1) as u32,
+                0,
+                size_of::<HeatmapLayoutVertex>() as u32,
+                AttributeDataType::Short2,
+            );
             let geometry = DrawGeometry {
                 vertices: attrs,
                 vertex_count: 4,

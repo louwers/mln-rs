@@ -184,9 +184,9 @@ impl OutlineQuad {
         let indexes = context.add_indexes(Indexes::new(RenderStaticData::quad_triangle_indices()));
         let vertex_count = vertices.count();
         let mut attributes = VertexAttributeArray::new();
-        if let Some(attr) = attributes.set(ID_FILL_POS_VERTEX_ATTRIBUTE, AttributeDataType::Invalid) {
+        {
             let stride = size_of::<[i16; 2]>() as u32;
-            attr.set_shared_vertices(vertices, 0, 0, stride, AttributeDataType::Short2);
+            attributes.share(ID_FILL_POS_VERTEX_ATTRIBUTE, vertices, 0, 0, stride, AttributeDataType::Short2);
         }
         OutlineQuad { vertex_count, indexes, attributes }
     }
@@ -228,10 +228,9 @@ impl TileBuilder<'_> {
         read_fill_attributes(&mut vertex_attrs, binders, paint.as_ref(), evaluated, &mut properties_as_uniforms);
 
         let fill_vertex_count = bucket.vertices.len();
-        if let Some(attr) = vertex_attrs.set(ID_FILL_POS_VERTEX_ATTRIBUTE, AttributeDataType::Invalid)
-            && let Some(vertices) = bucket_vertices(geometry, &bucket.vertices)
-        {
-            attr.set_shared_vertices(
+        if let Some(vertices) = bucket_vertices(geometry, &bucket.vertices) {
+            vertex_attrs.share(
+                ID_FILL_POS_VERTEX_ATTRIBUTE,
                 vertices,
                 offset_of!(FillLayoutVertex, a1) as u32,
                 0,
@@ -298,10 +297,8 @@ impl TileBuilder<'_> {
                     (ID_FILL_OUTLINE_POS_ATTRIBUTE, &bucket.vertices),
                     (ID_FILL_OUTLINE_END_ATTRIBUTE, &bucket.outline_ends),
                 ] {
-                    if let Some(attr) = instance_attrs.set(id, AttributeDataType::Invalid)
-                        && let Some(ends) = bucket_vertices(geometry, ends)
-                    {
-                        attr.set_shared_vertices(ends, 0, 0, stride, AttributeDataType::Short2);
+                    if let Some(ends) = bucket_vertices(geometry, ends) {
+                        instance_attrs.share(id, ends, 0, 0, stride, AttributeDataType::Short2);
                     }
                 }
                 let quad_geometry = DrawGeometry {

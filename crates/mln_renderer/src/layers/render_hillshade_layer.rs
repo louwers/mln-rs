@@ -39,7 +39,6 @@ use mln_util::hash::{HashMap, HashSet};
 use mln_util::identity::SimpleIdentity;
 use mln_util::mat4::{Mat4, matrix};
 use mln_util::size::Size;
-use mln_util::time::Instant;
 
 use super::cast_matrix;
 use crate::bucket::NoBucket;
@@ -96,10 +95,10 @@ struct BucketTarget {
 }
 
 /// What the layer keeps of a tile: the draw that shades the slopes of its
-/// bucket, with when the bucket's geometry it took was made.
+/// bucket, with the generation of the bucket's geometry it took.
 pub(crate) struct HillshadeTile {
     draw: KeptDraw,
-    geometry_time: Instant,
+    geometry_generation: u64,
 }
 
 impl TileObjects for HillshadeTile {
@@ -271,14 +270,22 @@ fn lat_range(id: &UnwrappedTileID) -> [f32; 2] {
 fn hillshade_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeArray {
     let mut attrs = VertexAttributeArray::new();
     let stride = size_of::<RasterLayoutVertex>() as u32;
-    if let Some(attr) = attrs.set(ID_HILLSHADE_POS_VERTEX_ATTRIBUTE, AttributeDataType::Invalid) {
-        let offset = offset_of!(RasterLayoutVertex, a1) as u32;
-        attr.set_shared_vertices(vertices.clone(), offset, 0, stride, AttributeDataType::Short2);
-    }
-    if let Some(attr) = attrs.set(ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE, AttributeDataType::Invalid) {
-        let offset = offset_of!(RasterLayoutVertex, a2) as u32;
-        attr.set_shared_vertices(vertices.clone(), offset, 0, stride, AttributeDataType::Short2);
-    }
+    attrs.share(
+        ID_HILLSHADE_POS_VERTEX_ATTRIBUTE,
+        vertices.clone(),
+        offset_of!(RasterLayoutVertex, a1) as u32,
+        0,
+        stride,
+        AttributeDataType::Short2,
+    );
+    attrs.share(
+        ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE,
+        vertices.clone(),
+        offset_of!(RasterLayoutVertex, a2) as u32,
+        0,
+        stride,
+        AttributeDataType::Short2,
+    );
     attrs
 }
 
@@ -408,7 +415,7 @@ impl TypedLayer for RenderHillshadeLayer {
             }
 
             let geometry = bucket.geometry();
-            let geometry_time = geometry.last_modified;
+            let geometry_generation = geometry.generation();
             // The tile's geometry: the globe's mesh of its mask, the mask's
             // geometry, or the whole tile's quad.
             let mut tile_geometry = || -> (SharedVertices, usize, DrawIndexes, Vec<SegmentBase>) {
@@ -424,9 +431,9 @@ impl TypedLayer for RenderHillshadeLayer {
                 } else if let Some(quads) = geometry.quads() {
                     (
                         quads.vertices.clone(),
-                        geometry.vertex_count(),
+                        quads.vertices.count(),
                         quads.indexes.clone().into(),
-                        geometry.segments.iter().map(SegmentBase::copy).collect(),
+                        quads.segments.iter().map(SegmentBase::copy).collect(),
                     )
                 } else {
                     (
@@ -450,9 +457,9 @@ impl TypedLayer for RenderHillshadeLayer {
             };
 
             let cached = if let Some(cached) = entry.value {
-                if cached.geometry_time != geometry_time {
+                if cached.geometry_generation != geometry_generation {
                     cached.draw.objects.replace_geometry(draw_geometry());
-                    cached.geometry_time = geometry_time;
+                    cached.geometry_generation = geometry_generation;
                 }
                 // The bucket's render target is made again with its
                 // generation.
@@ -468,7 +475,7 @@ impl TypedLayer for RenderHillshadeLayer {
                     draw_geometry(),
                     textures,
                 );
-                entry.value.insert(HillshadeTile { draw: KeptDraw::new(objects), geometry_time })
+                entry.value.insert(HillshadeTile { draw: KeptDraw::new(objects), geometry_generation })
             };
             let draw = FrameDraw { depth: DrawDepth::Off, ..cached.draw.frame_draw(Some(tile_id)) };
             let Illumination { num_lights, .. } = *illumination.get_or_insert_with(|| {

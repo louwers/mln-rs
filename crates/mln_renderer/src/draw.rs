@@ -24,7 +24,6 @@ use mln_gfx::shaders::shader_defines::{MAX_TEXTURE_COUNT_PER_SHADER, MAX_UBO_COU
 use mln_gfx::shaders::shader_program::{ShaderProgram, ShaderProgramPtr};
 use mln_gfx::stencil_mode::StencilMode;
 use mln_util::logging::{Event, Log};
-use mln_util::time::Instant;
 
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
@@ -71,9 +70,7 @@ pub(crate) fn raw_vertices(
     if count == 0 || data_type == AttributeDataType::Invalid || data.is_empty() {
         return attributes;
     }
-    if let Some(attribute) = attributes.set(id, data_type) {
-        attribute.set_raw_data(data);
-    }
+    attributes.set_own(id, data_type, data);
     attributes
 }
 
@@ -114,12 +111,9 @@ pub(crate) struct DrawObjects {
     vertex_attributes: VertexAttributeArray,
     /// The attributes of each instance, for a draw of instances.
     instance_attributes: Option<VertexAttributeArray>,
-    /// When the attributes last uploaded, `None` until they upload, which
-    /// binds them all again.
-    attribute_update_time: Option<Instant>,
-    /// Whether the vertex attributes were replaced since the last upload,
-    /// which then binds them again.
-    vertex_attributes_replaced: bool,
+    /// Whether the attributes changed since the last upload, which then
+    /// binds them all again; true until the first.
+    attributes_changed: bool,
     /// The textures it binds, by texture id.
     textures: Textures,
     /// The draw's own uniform and storage buffers, by id, which win over
@@ -168,8 +162,7 @@ impl DrawObjects {
             shader,
             vertex_attributes: vertices,
             instance_attributes: instances,
-            attribute_update_time: None,
-            vertex_attributes_replaced: false,
+            attributes_changed: true,
             textures,
             uniform_buffers: UniformBufferArray::new(),
             color_mode,
@@ -205,11 +198,10 @@ impl DrawObjects {
         }
         self.indexes.upload(context)?;
 
-        let update_time = self.attribute_update_time;
-        let modified = move |context: &Context, attrs: &VertexAttributeArray| {
-            update_time.is_none_or(|time| upload::modified_after(context, attrs, time))
-        };
-        if std::mem::take(&mut self.vertex_attributes_replaced) || modified(context, &self.vertex_attributes) {
+        // An attribute binds again where it changed, or where the upload
+        // writes what it reads, which may be new.
+        let changed = std::mem::take(&mut self.attributes_changed);
+        if changed || upload::needs_upload(context, shader.vertex_attributes(), &self.vertex_attributes) {
             let mut bindings =
                 upload::build_attribute_bindings(context, shader.vertex_attributes(), &mut self.vertex_attributes)?;
             bind_default_values(context, &mut bindings, self.vertex_count)?;
@@ -220,7 +212,11 @@ impl DrawObjects {
             }
         }
 
-        if let Some(attrs) = self.instance_attributes.as_mut().filter(|attrs| modified(context, attrs)) {
+        if let Some(attrs) = self
+            .instance_attributes
+            .as_mut()
+            .filter(|attrs| changed || upload::needs_upload(context, shader.instance_attributes(), attrs))
+        {
             let instance_count = attrs.min_count();
             let mut bindings = upload::build_attribute_bindings(context, shader.instance_attributes(), attrs)?;
             bind_default_values(context, &mut bindings, instance_count)?;
@@ -237,7 +233,6 @@ impl DrawObjects {
             }
         }
 
-        self.attribute_update_time = Some(Instant::now());
         Ok(())
     }
 
@@ -420,22 +415,24 @@ impl DrawObjects {
         let DrawGeometry { vertices, vertex_count, mode, indexes, segments, instances } = geometry;
         self.vertex_attributes = vertices;
         self.instance_attributes = instances;
-        self.attribute_update_time = None;
+        self.attributes_changed = true;
         self.vertex_count = vertex_count;
         self.mode = mode;
         self.indexes = indexes;
         self.segments = segments;
     }
 
-    /// The vertex attributes, to change their data in place, which the next
-    /// upload binds where it changed.
+    /// The vertex attributes, to change, which the next upload binds again.
     pub(crate) fn vertex_attributes_mut(&mut self) -> &mut VertexAttributeArray {
+        self.attributes_changed = true;
         &mut self.vertex_attributes
     }
 
-    /// The attributes the paint values are read into: the instance
-    /// attributes of a draw of instances, else the vertex attributes.
+    /// The attributes the paint values are read into, to change, which the
+    /// next upload binds again: the instance attributes of a draw of
+    /// instances, else the vertex attributes.
     pub(crate) fn paint_attributes_mut(&mut self) -> &mut VertexAttributeArray {
+        self.attributes_changed = true;
         self.instance_attributes.as_mut().unwrap_or(&mut self.vertex_attributes)
     }
 
@@ -449,7 +446,7 @@ impl DrawObjects {
     /// ([`copy_shared_attributes`]), which the next upload binds.
     pub(crate) fn share_vertex_attributes(&mut self, other: &DrawObjects) {
         self.vertex_attributes = copy_shared_attributes(&other.vertex_attributes);
-        self.vertex_attributes_replaced = true;
+        self.attributes_changed = true;
     }
 
     /// The texture it binds as `id`.
@@ -497,21 +494,16 @@ impl DrawObjects {
     }
 }
 
-/// A copy of `attrs`, none of whose attributes has data of its own: the
-/// copy reads the same vertices of the context's store, so draws of either
+/// A copy of `attrs`, all of whose attributes read vertices of the
+/// context's store: the copy reads the same vertices, so draws of either
 /// bind the same buffers.
 #[must_use]
 pub(crate) fn copy_shared_attributes(attrs: &VertexAttributeArray) -> VertexAttributeArray {
     let mut copy = VertexAttributeArray::new();
-    for id in 0..attrs.allocated_size() {
-        let Some(attr) = attrs.get(id) else {
-            continue;
-        };
-        debug_assert!(attr.shared().is_some() || attr.raw_data().is_empty(), "a copied attribute has data of its own");
-        if let Some(copied) = copy.set(id, attr.data_type())
-            && let Some(shared) = attr.shared()
-        {
-            copied.set_shared(shared.clone());
+    for (id, attr) in attrs.iter() {
+        debug_assert!(attr.shared().is_some(), "a copied attribute has values of its own");
+        if let Some(shared) = attr.shared() {
+            copy.set_shared(id, shared.clone());
         }
     }
     copy

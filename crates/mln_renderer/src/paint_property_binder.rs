@@ -24,7 +24,7 @@ use mln_util::feature::feature_id_to_string;
 use mln_vec_map::VecMap;
 
 use crate::bucket_geometry::GeometryVec;
-use crate::gfx::vertex_attribute::{VertexAttribute, VertexAttributeArray};
+use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
 use crate::layout::pattern_layout::PatternDependency;
 use crate::line_atlas::{DashAtlas, LinePatternCap};
@@ -402,23 +402,24 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
         }
     }
 
+    /// Where the property's attribute reads its values in `shared`, the
+    /// vertices of `buffer`; `None` without values.
     pub(crate) fn apply_paint_property(
         &self,
         buffer: &InterleavedVertexBuffer,
         shared: &SharedVertices,
         _attr_index: usize,
-        attrib: &mut VertexAttribute,
-    ) {
+    ) -> Option<SharedAttribute> {
         if let Some(vertex_offset) = self.kind.vertex_offset() {
             let raw_size = buffer.stride as u32;
             let data_type = if self.is_interpolated() { T::INTERPOLATED_DATA_TYPE } else { T::BASE_DATA_TYPE };
 
             debug_assert_eq!(shared.count() / buffer.stride.max(1), self.vertex_count(buffer));
-            attrib.set_shared_vertices(shared.clone(), vertex_offset as u32, 0, raw_size, data_type);
+            Some(shared_paint(shared, vertex_offset, raw_size, data_type))
         } else {
-            // Without an interleaved buffer there are no vertices: nothing
-            // to set.
+            // Without an interleaved buffer there are no vertices to read.
             debug_assert_eq!(self.vertex_count(buffer), 0);
+            None
         }
     }
 }
@@ -553,20 +554,21 @@ impl CrossFadedPaintPropertyBinder<Image> {
         (0.0, 0.0)
     }
 
-    /// Points `attrib` at the interleaved pattern data. Both attributes
-    /// (`attr_index` 0 and 1) get the same data.
+    /// Where the property's attributes read the pattern values in `shared`,
+    /// the vertices of `buffer`: both (`attr_index` 0 and 1) read the same
+    /// values. `None` without values.
     pub(crate) fn apply_paint_property(
         &self,
         buffer: &InterleavedVertexBuffer,
         shared: &SharedVertices,
         _attr_index: usize,
-        attrib: &mut VertexAttribute,
-    ) {
+    ) -> Option<SharedAttribute> {
         if let Some(vertex_offset) = self.kind.vertex_offset() {
             let raw_size = buffer.stride as u32;
             // Patterns don't interpolate: one value of four shorts.
-            let data_type = AttributeDataType::UShort4;
-            attrib.set_shared_vertices(shared.clone(), vertex_offset as u32, 0, raw_size, data_type);
+            Some(shared_paint(shared, vertex_offset, raw_size, AttributeDataType::UShort4))
+        } else {
+            None
         }
     }
 }
@@ -685,12 +687,9 @@ impl PaintPropertyBinderBase for DashArrayBinder {
         buffer: &InterleavedVertexBuffer,
         shared: &SharedVertices,
         _attr_index: usize,
-        attrib: &mut VertexAttribute,
-    ) {
-        if let Some(vertex_offset) = self.vertex_offset() {
-            let raw_size = buffer.stride as u32;
-            attrib.set_shared_vertices(shared.clone(), vertex_offset as u32, 0, raw_size, AttributeDataType::Float4);
-        }
+    ) -> Option<SharedAttribute> {
+        let vertex_offset = self.vertex_offset()?;
+        Some(shared_paint(shared, vertex_offset, buffer.stride as u32, AttributeDataType::Float4))
     }
 }
 
@@ -732,8 +731,7 @@ pub(crate) trait PaintPropertyBinderBase {
         buffer: &InterleavedVertexBuffer,
         shared: &SharedVertices,
         attr_index: usize,
-        attrib: &mut VertexAttribute,
-    );
+    ) -> Option<SharedAttribute>;
 }
 
 impl<T: BinderValue> PaintPropertyBinderBase for PaintPropertyBinder<T> {
@@ -778,9 +776,8 @@ impl<T: BinderValue> PaintPropertyBinderBase for PaintPropertyBinder<T> {
         buffer: &InterleavedVertexBuffer,
         shared: &SharedVertices,
         attr_index: usize,
-        attrib: &mut VertexAttribute,
-    ) {
-        self.apply_paint_property(buffer, shared, attr_index, attrib);
+    ) -> Option<SharedAttribute> {
+        self.apply_paint_property(buffer, shared, attr_index)
     }
 }
 
@@ -809,10 +806,21 @@ impl PaintPropertyBinderBase for CrossFadedPaintPropertyBinder<Image> {
         buffer: &InterleavedVertexBuffer,
         shared: &SharedVertices,
         attr_index: usize,
-        attrib: &mut VertexAttribute,
-    ) {
-        self.apply_paint_property(buffer, shared, attr_index, attrib);
+    ) -> Option<SharedAttribute> {
+        self.apply_paint_property(buffer, shared, attr_index)
     }
+}
+
+/// An attribute that reads the values at `vertex_offset` in each of the
+/// `stride` bytes of `shared`, the vertices of a bucket's paint values, as
+/// `data_type`.
+fn shared_paint(
+    shared: &SharedVertices,
+    vertex_offset: usize,
+    stride: u32,
+    data_type: AttributeDataType,
+) -> SharedAttribute {
+    SharedAttribute { vertices: shared.clone(), data_type, offset: vertex_offset as u32, vertex_offset: 0, stride }
 }
 
 /// Adds the attributes `attribute_names` of one property to `attrs`, which
@@ -836,10 +844,8 @@ pub(crate) fn read_data_driven_paint_property(
     for (attr_index, attribute_name) in attribute_names.iter().enumerate() {
         // Apply the property, or add it to the uniforms collection if it's constant.
         if !is_constant && binder.binder_vertex_count(buffer) > 0 {
-            if let Some(shared) = shared
-                && let Some(attr) = attrs.set(*data_driven_attr_id, AttributeDataType::Invalid)
-            {
-                binder.apply(buffer, shared, attr_index, attr);
+            if let Some(attribute) = shared.and_then(|shared| binder.apply(buffer, shared, attr_index)) {
+                attrs.set_shared(*data_driven_attr_id, attribute);
             }
         } else {
             properties_as_uniforms.0.insert((*attribute_name).to_owned());

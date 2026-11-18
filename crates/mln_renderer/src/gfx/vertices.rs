@@ -12,7 +12,6 @@ use mln_gfx::buffer::BufferPtr;
 use mln_gfx::gpu::{BufferUsage, GpuError};
 #[cfg(target_family = "wasm")]
 use mln_util::host_bytes::HostBytes;
-use mln_util::time::Instant;
 
 use crate::gfx::context::Device;
 use crate::gfx::store::{ReleasedEntries, Shared, Store, VerticesKey};
@@ -37,11 +36,10 @@ enum VertexData {
 /// bytes of as many vertices, which the next upload writes over the
 /// buffer's.
 pub(crate) struct Vertices {
+    /// The bytes the next upload writes, `Freed` once it wrote them.
     data: VertexData,
     count: usize,
     vertex_size: usize,
-    /// When the vertices were made or last updated.
-    modified: Instant,
     buffer: Option<BufferPtr>,
 }
 
@@ -91,7 +89,7 @@ impl Vertices {
     fn new<V: bytemuck::Pod>(vertices: Vec<V>) -> Vertices {
         let count = vertices.len();
         let data = VertexData::of(vertices);
-        Vertices { data, count, vertex_size: size_of::<V>(), modified: Instant::now(), buffer: None }
+        Vertices { data, count, vertex_size: size_of::<V>(), buffer: None }
     }
 
     /// The vertices of `vertex_size` bytes each in a JS array.
@@ -99,7 +97,7 @@ impl Vertices {
     fn from_host(bytes: HostBytes, vertex_size: usize) -> Vertices {
         debug_assert!(bytes.len().is_multiple_of(vertex_size.max(1)));
         let count = bytes.len() / vertex_size.max(1);
-        Vertices { data: VertexData::Host(bytes), count, vertex_size, modified: Instant::now(), buffer: None }
+        Vertices { data: VertexData::Host(bytes), count, vertex_size, buffer: None }
     }
 
     /// The number of vertices, which stays once the upload freed them.
@@ -114,11 +112,12 @@ impl Vertices {
         self.vertex_size
     }
 
-    /// Whether the vertices' bytes are still here: false once an upload
-    /// wrote them to their buffer, until an update brings new ones.
-    #[cfg(test)]
+    /// Whether the next upload writes the vertices: they are new, or
+    /// updated since the last upload, which wrote and freed their bytes.
+    /// A draw bound before then binds them again, and its other attributes
+    /// with them.
     #[must_use]
-    pub(crate) fn has_data(&self) -> bool {
+    pub(crate) fn needs_upload(&self) -> bool {
         !matches!(self.data, VertexData::Freed)
     }
 
@@ -126,13 +125,6 @@ impl Vertices {
     #[cfg(test)]
     pub(crate) fn bytes(&self) -> &[u8] {
         self.data.bytes().unwrap_or_default()
-    }
-
-    /// Whether the vertices were made or updated after `time`: a draw bound
-    /// before then binds them again, and its other attributes with them.
-    #[must_use]
-    pub(crate) fn is_modified_after(&self, time: Instant) -> bool {
-        time < self.modified
     }
 
     /// Replaces the bytes with `bytes`, of as many vertices, which the next
@@ -146,7 +138,6 @@ impl Vertices {
             Some(data) => data.copy_from_slice(bytes),
             None => self.data = VertexData::Bytes(bytes.to_vec()),
         }
-        self.modified = Instant::now();
         true
     }
 
@@ -163,15 +154,18 @@ impl Vertices {
         }
         let size = self.count * self.vertex_size;
         if size == 0 {
+            self.data = VertexData::Freed;
             return Ok(None);
         }
-        let buffer = match (&self.data, self.data.bytes()) {
-            (_, Some(bytes)) => device.buffer(BufferUsage::Vertex, &bytes[..size])?,
+        let buffer = match &self.data {
             #[cfg(target_family = "wasm")]
-            (VertexData::Host(bytes), None) => device.buffer_from_host(BufferUsage::Vertex, bytes)?,
-            _ => {
-                debug_assert!(false, "vertices without data or a buffer");
-                return Err(GpuError::Invalid("vertices without data or a buffer".to_owned()));
+            VertexData::Host(bytes) => device.buffer_from_host(BufferUsage::Vertex, bytes)?,
+            data => {
+                let Some(bytes) = data.bytes() else {
+                    debug_assert!(false, "vertices without data or a buffer");
+                    return Err(GpuError::Invalid("vertices without data or a buffer".to_owned()));
+                };
+                device.buffer(BufferUsage::Vertex, &bytes[..size])?
             }
         };
         self.buffer = Some(BufferPtr::clone(&buffer));
@@ -254,8 +248,9 @@ impl VertexStore {
     }
 }
 
-/// Vertices of the context's store that draws bind, with their count.
-#[derive(Clone)]
+/// Vertices of the context's store that draws bind, with their count. They
+/// are equal where they are the same entry.
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) struct SharedVertices {
     handle: Shared<VerticesKey>,
     count: usize,
@@ -274,12 +269,6 @@ impl SharedVertices {
     pub(crate) fn count(&self) -> usize {
         self.count
     }
-
-    /// Whether `self` and `other` are the same vertices.
-    #[must_use]
-    pub(crate) fn same(&self, other: &SharedVertices) -> bool {
-        self.handle == other.handle
-    }
 }
 
 /// Vertices of the context's store made of vertices of the type `V`, which
@@ -297,7 +286,7 @@ impl<V> TypedVertices<V> {
         &self.shared
     }
 
-    /// The vertices, as draws bind them.
+    /// [`shared`](Self::shared), without the type.
     #[must_use]
     pub(crate) fn into_shared(self) -> SharedVertices {
         self.shared

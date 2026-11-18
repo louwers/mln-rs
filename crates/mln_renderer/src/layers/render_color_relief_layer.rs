@@ -36,7 +36,6 @@ use mln_util::identity::SimpleIdentity;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
-use mln_util::time::Instant;
 
 use super::cast_matrix;
 use crate::bucket::NoBucket;
@@ -64,10 +63,11 @@ use crate::tile_matrix::to_projection_ubo;
 const COLOR_RELIEF_SHADER_GROUP_NAME: &str = "ColorReliefShader";
 
 /// What the layer keeps of a tile: the draw that colors its bucket's DEM,
-/// with when it was built and the DEM's properties it was built with.
+/// with the generation of the bucket's geometry and the DEM's properties it
+/// was built with.
 pub(crate) struct ReliefTile {
     draw: KeptDraw,
-    built: Instant,
+    geometry_generation: u64,
     tile_props: ColorReliefTilePropsUBO,
 }
 
@@ -267,14 +267,22 @@ impl RenderColorReliefLayer {
 fn color_relief_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeArray {
     let mut attrs = VertexAttributeArray::new();
     let stride = size_of::<RasterLayoutVertex>() as u32;
-    if let Some(attr) = attrs.set(ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE, AttributeDataType::Invalid) {
-        let offset = offset_of!(RasterLayoutVertex, a1) as u32;
-        attr.set_shared_vertices(vertices.clone(), offset, 0, stride, AttributeDataType::Short2);
-    }
-    if let Some(attr) = attrs.set(ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE, AttributeDataType::Invalid) {
-        let offset = offset_of!(RasterLayoutVertex, a2) as u32;
-        attr.set_shared_vertices(vertices.clone(), offset, 0, stride, AttributeDataType::Short2);
-    }
+    attrs.share(
+        ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE,
+        vertices.clone(),
+        offset_of!(RasterLayoutVertex, a1) as u32,
+        0,
+        stride,
+        AttributeDataType::Short2,
+    );
+    attrs.share(
+        ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE,
+        vertices.clone(),
+        offset_of!(RasterLayoutVertex, a2) as u32,
+        0,
+        stride,
+        AttributeDataType::Short2,
+    );
     attrs
 }
 
@@ -432,7 +440,7 @@ impl TypedLayer for RenderColorReliefLayer {
             entry.set_bucket(bucket_id);
 
             let geometry = bucket.geometry();
-            let geometry_time = geometry.last_modified;
+            let geometry_generation = geometry.generation();
             let dem_data = bucket.dem_data();
             if dem_data.get_image().valid() {
                 let tile_props = ColorReliefTilePropsUBO {
@@ -463,7 +471,7 @@ impl TypedLayer for RenderColorReliefLayer {
                 textures[ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE] = Some(elevation_stops_texture.clone());
                 textures[ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE] = Some(color_stops_texture.clone());
 
-                if entry.value.as_ref().is_some_and(|cached| cached.built < geometry_time) {
+                if entry.value.as_ref().is_some_and(|cached| cached.geometry_generation != geometry_generation) {
                     // The masked geometry changed (see the file comment).
                     *entry.value = None;
                 }
@@ -491,9 +499,9 @@ impl TypedLayer for RenderColorReliefLayer {
                     } else if let Some(quads) = geometry.quads() {
                         (
                             quads.vertices.clone(),
-                            geometry.vertex_count(),
+                            quads.vertices.count(),
                             quads.indexes.clone().into(),
-                            geometry.segments.iter().map(SegmentBase::copy).collect(),
+                            quads.segments.iter().map(SegmentBase::copy).collect(),
                         )
                     } else {
                         (
@@ -518,7 +526,7 @@ impl TypedLayer for RenderColorReliefLayer {
                         geometry,
                         textures,
                     );
-                    let cached = ReliefTile { draw: KeptDraw::new(objects), built: Instant::now(), tile_props };
+                    let cached = ReliefTile { draw: KeptDraw::new(objects), geometry_generation, tile_props };
                     *entry.value = Some(cached);
                 }
             } else {

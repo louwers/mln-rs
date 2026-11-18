@@ -23,7 +23,6 @@ use mln_util::geometry::FeatureType;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
 use mln_util::size::Size;
-use mln_util::time::Instant;
 use mln_vec_map::VecMap;
 use parking_lot::Mutex;
 
@@ -245,7 +244,7 @@ fn fill_bucket_frees_cpu_geometry_after_upload() {
 
         // The CPU copies are gone, the counts that draws are built from
         // are not.
-        assert!(context.vertices(&vertices).is_some_and(|stored| !stored.has_data() && stored.bytes().is_empty()));
+        assert!(context.vertices(&vertices).is_some_and(|stored| !stored.needs_upload() && stored.bytes().is_empty()));
         assert_eq!(vertices.count(), vertex_count);
         assert!(!triangles.has_data(context));
         assert_eq!(triangles.len(context), index_count);
@@ -254,7 +253,7 @@ fn fill_bucket_frees_cpu_geometry_after_upload() {
         // A second draw over the same bucket shares the vertices and the
         // buffer without reading the data.
         let again = bucket_vertices(&geometry, &bucket.vertices).expect("moved");
-        assert!(vertices.same(&again));
+        assert!(vertices == again);
         let indexes = DrawIndexes::from(bucket_indexes(&geometry, &bucket.triangles).expect("moved"));
         assert!(indexes.buffer(context).is_some_and(|buffer| triangles.buffer(context) == Some(buffer)));
         let reused = context.upload_vertices(&again).expect("uploads").expect("a buffer");
@@ -267,7 +266,7 @@ fn fill_bucket_frees_cpu_geometry_after_upload() {
         let paint = paint_vertices(context, &geometry, buffer, false).expect("moved");
         assert!(paint.count() > 0);
         assert!(context.upload_vertices(&paint).expect("uploads").is_some());
-        assert!(context.vertices(&paint).is_some_and(|stored| !stored.has_data()));
+        assert!(context.vertices(&paint).is_some_and(|stored| !stored.needs_upload()));
         assert!(buffer.shared_vertex_vector.data().is_empty());
     });
 }
@@ -445,7 +444,7 @@ fn a_raster_buckets_upload_moves_its_quads_into_the_stores_once_per_mask() {
         let quads = geometry.quads().expect("the mask's quads");
         assert_eq!(context.vertices(&quads.vertices).expect("stored").count(), 8);
         assert!(geometry.vertices().is_empty(), "the upload moves the vertices");
-        assert_eq!(geometry.vertex_count(), 8);
+        assert_eq!(quads.vertices.count(), 8);
 
         bucket.set_mask(mask(&[(1, 0, 0)]));
         assert!(!bucket.base.uploaded);
@@ -484,7 +483,7 @@ fn raster_bucket_mask_empty() {
     let geometry = bucket.geometry();
     assert_eq!(Vec::<RasterLayoutVertex>::new(), geometry.vertices());
     assert_eq!(Vec::<u16>::new(), geometry.indices());
-    assert_eq!(vec![(0, 0, 0, 0)], segment_tuples(&geometry.segments));
+    assert_eq!(vec![(0, 0, 0, 0)], segment_tuples(geometry.segments()));
 }
 
 // gtest: Buckets.RasterBucketMaskNoChildren
@@ -498,7 +497,7 @@ fn raster_bucket_mask_no_children() {
     let geometry = bucket.geometry();
     assert_eq!(Vec::<RasterLayoutVertex>::new(), geometry.vertices());
     assert_eq!(Vec::<u16>::new(), geometry.indices());
-    assert_eq!(Vec::<(usize, usize, usize, usize)>::new(), segment_tuples(&geometry.segments));
+    assert_eq!(Vec::<(usize, usize, usize, usize)>::new(), segment_tuples(geometry.segments()));
 }
 
 // gtest: Buckets.RasterBucketMaskTwoChildren
@@ -534,7 +533,7 @@ fn raster_bucket_mask_two_children() {
         geometry.indices()
     );
 
-    assert_eq!(vec![(0, 0, 8, 12)], segment_tuples(&geometry.segments));
+    assert_eq!(vec![(0, 0, 8, 12)], segment_tuples(geometry.segments()));
 }
 
 // gtest: Buckets.RasterBucketMaskComplex
@@ -598,7 +597,7 @@ fn raster_bucket_mask_complex() {
         geometry.indices()
     );
 
-    assert_eq!(vec![(0, 0, 24, 36)], segment_tuples(&geometry.segments));
+    assert_eq!(vec![(0, 0, 24, 36)], segment_tuples(geometry.segments()));
 }
 
 type Records = Arc<Mutex<Vec<(EventSeverity, Event, i64, String)>>>;
@@ -749,17 +748,12 @@ fn line_bucket_evaluates_cap_and_limits_per_feature() {
 #[test]
 fn stored_vertices_free_their_data_once_they_have_a_buffer() {
     with_context(|context| {
-        let before = Instant::now();
-        std::thread::sleep(std::time::Duration::from_millis(1));
         let vertices = context.add_vertices(vec![[1i16, 2], [3, 4]]).into_shared();
-        assert!(context.vertices(&vertices).is_some_and(|stored| stored.has_data() && stored.bytes().len() == 8));
+        assert!(context.vertices(&vertices).is_some_and(|stored| stored.needs_upload() && stored.bytes().len() == 8));
 
         context.upload_vertices(&vertices).expect("uploads").expect("a buffer");
-        assert!(context.vertices(&vertices).is_some_and(|stored| !stored.has_data() && stored.bytes().is_empty()));
+        assert!(context.vertices(&vertices).is_some_and(|stored| !stored.needs_upload() && stored.bytes().is_empty()));
         assert_eq!(vertices.count(), 2);
-        // A draw that bound its attributes before the vertices were made
-        // still sees them as new.
-        assert!(context.vertices(&vertices).is_some_and(|stored| stored.is_modified_after(before)));
     });
 }
 
@@ -772,18 +766,13 @@ fn typed_vertices_take_updates_of_as_many_vertices() {
         let typed = context.add_vertices(vec![[1i16, 2], [3, 4]]);
         let vertices = typed.shared().clone();
         let buffer = context.upload_vertices(&vertices).expect("uploads").expect("a buffer");
-        assert!(context.vertices(&vertices).is_some_and(|stored| !stored.has_data()));
+        assert!(context.vertices(&vertices).is_some_and(|stored| !stored.needs_upload()));
 
         assert!(!context.update_vertices(&typed, &[[5, 6]]), "another count");
-        let bound = Instant::now();
-        std::thread::sleep(std::time::Duration::from_millis(1));
         assert!(context.update_vertices(&typed, &[[5, 6], [7, 8]]));
-        assert!(
-            context
-                .vertices(&vertices)
-                .is_some_and(|stored| stored.bytes() == bytemuck::cast_slice::<i16, u8>(&[5, 6, 7, 8])
-                    && stored.is_modified_after(bound))
-        );
+        assert!(context.vertices(&vertices).is_some_and(|stored| stored.bytes()
+            == bytemuck::cast_slice::<i16, u8>(&[5, 6, 7, 8])
+            && stored.needs_upload()));
         let before = context.rendering_stats().clone();
         let rewritten = context.upload_vertices(&vertices).expect("uploads").expect("a buffer");
         assert!(Rc::ptr_eq(&buffer, &rewritten));
@@ -791,12 +780,65 @@ fn typed_vertices_take_updates_of_as_many_vertices() {
         assert_eq!(after.vertex_update_bytes, before.vertex_update_bytes + 8);
         assert_eq!(after.buffer_updates, before.buffer_updates + 1);
         assert_eq!(after.num_vertex_buffers, before.num_vertex_buffers);
-        assert!(context.vertices(&vertices).is_some_and(|stored| !stored.has_data()));
+        assert!(context.vertices(&vertices).is_some_and(|stored| !stored.needs_upload()));
 
         // An upload without an update writes nothing.
         context.upload_vertices(&vertices).expect("uploads");
         assert_eq!(context.rendering_stats().buffer_updates, after.buffer_updates);
         assert_eq!(vertices.count(), 2);
+    });
+}
+
+// A draw that binds vertices writes their update in its next upload, however
+// soon after its last upload the update comes.
+#[test]
+fn a_draw_writes_an_update_of_the_vertices_it_binds() {
+    use mln_gfx::shader_registry::ShaderRegistry;
+    use mln_gfx::shaders::shader_defines::{ID_RASTER_POS_VERTEX_ATTRIBUTE, ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE};
+    use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
+
+    use crate::draw::{DrawGeometry, DrawObjects};
+    use crate::gfx::vertex_attribute::VertexAttributeArray;
+
+    with_context(|context| {
+        let registry = ShaderRegistry::new(&mln_gfx::shaders::program_parameters::ProgramParameters::new(1.0, false));
+        let shader = registry
+            .shader("RasterShader", mln_gfx::projection_variant::ProjectionVariant::Mercator)
+            .expect("the raster shader");
+        let vertex = |x: i16| RasterLayoutVertex { a1: [x, x], a2: [0, 0] };
+        let typed = context.add_vertices(vec![vertex(0), vertex(1), vertex(2)]);
+        let stride = size_of::<RasterLayoutVertex>() as u32;
+        let mut attrs = VertexAttributeArray::new();
+        for (id, offset) in [(ID_RASTER_POS_VERTEX_ATTRIBUTE, 0), (ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE, 4)] {
+            attrs.share(id, typed.shared().clone(), offset, 0, stride, AttributeDataType::Short2);
+        }
+        let geometry = DrawGeometry {
+            vertices: attrs,
+            vertex_count: 3,
+            mode: DrawMode::Triangles(),
+            indexes: DrawIndexes::new(vec![0, 1, 2]),
+            segments: vec![SegmentBase::new(0, 0)],
+            instances: None,
+        };
+        let mut objects = DrawObjects::new(
+            shader,
+            ColorMode::alpha_blended(),
+            CullFaceMode::disabled(),
+            geometry,
+            Default::default(),
+        );
+        objects.upload(context);
+        let uploaded = context.rendering_stats().buffer_updates;
+
+        for x in 3..6 {
+            assert!(context.update_vertices(&typed, &[vertex(x), vertex(x), vertex(x)]));
+            objects.upload(context);
+            assert!(context.vertices(typed.shared()).is_some_and(|stored| !stored.needs_upload()), "{x}");
+            assert_eq!(context.rendering_stats().buffer_updates, uploaded + x as usize - 2, "{x}");
+        }
+        // Without an update, an upload writes nothing.
+        objects.upload(context);
+        assert_eq!(context.rendering_stats().buffer_updates, uploaded + 3);
     });
 }
 

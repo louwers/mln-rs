@@ -363,15 +363,14 @@ impl TypedLayer for RenderCircleLayer {
                 let mut attrs = VertexAttributeArray::new();
                 let paint = paint(context);
                 read_circle_attributes(&mut attrs, binders, paint.as_ref(), evaluated, &mut properties_as_uniforms);
-                if let Some(attr) = attrs.set(ID_CIRCLE_POS_VERTEX_ATTRIBUTE, AttributeDataType::Invalid) {
-                    attr.set_shared_vertices(
-                        vertices,
-                        offset_of!(CircleLayoutVertex, a1) as u32,
-                        0,
-                        size_of::<CircleLayoutVertex>() as u32,
-                        AttributeDataType::Short2,
-                    );
-                }
+                attrs.share(
+                    ID_CIRCLE_POS_VERTEX_ATTRIBUTE,
+                    vertices,
+                    offset_of!(CircleLayoutVertex, a1) as u32,
+                    0,
+                    size_of::<CircleLayoutVertex>() as u32,
+                    AttributeDataType::Short2,
+                );
                 let vertex_count = if bucket.segments.is_empty() { 0 } else { bucket.vertices.len() };
                 let objects = DrawObjects::new(
                     circle_shader_group.shader(&properties_as_uniforms, self.base.projection_variant),

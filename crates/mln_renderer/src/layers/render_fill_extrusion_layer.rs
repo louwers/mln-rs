@@ -59,7 +59,7 @@ use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
 use crate::gfx::indexes::{Indexes, SharedIndexes};
 use crate::gfx::texture2d::Texture2D;
-use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
+use crate::gfx::vertex_attribute::VertexAttributeArray;
 use crate::gfx::vertices::SharedVertices;
 use crate::layer_drawing::{
     DrawDepth, DrawList, DrawObjectsMut, DrawPriority, FrameDraw, TileDraws, TileObjects, UniformWriter,
@@ -193,15 +193,8 @@ pub(crate) fn instanced_walls(context: &Context) -> bool {
 /// (`wall_quad_paint`), which has the same layout. The binders apply their
 /// attributes only to a vector of the bucket's vertices.
 fn read_quad_paint(attrs: &mut VertexAttributeArray, paint: &SharedVertices, quad_paint: &SharedVertices) {
-    for id in 0..attrs.allocated_size() {
-        let Some(shared) = attrs.get(id).and_then(|attr| attr.shared()).filter(|shared| shared.vertices.same(paint))
-        else {
-            continue;
-        };
-        let shared = SharedAttribute { vertices: quad_paint.clone(), ..shared.clone() };
-        if let Some(attr) = attrs.set(id, AttributeDataType::Invalid) {
-            attr.set_shared(shared);
-        }
+    for shared in attrs.shared_mut().filter(|shared| shared.vertices == *paint) {
+        shared.vertices = quad_paint.clone();
     }
 }
 
@@ -220,9 +213,7 @@ fn read_wall_quads(attrs: &mut VertexAttributeArray, quads: &SharedVertices) {
         (ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, pos, 4, AttributeDataType::Short2),
         (ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, decimals_ed, 4, AttributeDataType::UShort2),
     ] {
-        if let Some(attr) = attrs.set(id, AttributeDataType::Invalid) {
-            attr.set_shared_vertices(quads.clone(), offset, vertex_offset, stride, type_);
-        }
+        attrs.share(id, quads.clone(), offset, vertex_offset, stride, type_);
     }
 }
 
@@ -235,21 +226,22 @@ fn read_wall_instances(
     vertices: &SharedVertices,
 ) {
     let static_stride = size_of::<FillExtrusionStaticVertex>() as u32;
-    if let Some(attr) = attrs.set(ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, AttributeDataType::Invalid) {
-        attr.set_shared_vertices(corners.clone(), 0, 0, static_stride, AttributeDataType::Short2);
-    }
+    attrs.share(
+        ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE,
+        corners.clone(),
+        0,
+        0,
+        static_stride,
+        AttributeDataType::Short2,
+    );
     let stride = size_of::<FillExtrusionLayoutVertex>() as u32;
     // An instance's outline vertex, then the next one.
     for (vertex_offset, pos_id, decimals_ed_id) in [
         (0, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
         (1, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
     ] {
-        if let Some(attr) = instance_attrs.set(pos_id, AttributeDataType::Invalid) {
-            attr.set_shared_vertices(vertices.clone(), 0, vertex_offset, stride, AttributeDataType::Short2);
-        }
-        if let Some(attr) = instance_attrs.set(decimals_ed_id, AttributeDataType::Invalid) {
-            attr.set_shared_vertices(vertices.clone(), 4, vertex_offset, stride, AttributeDataType::UShort2);
-        }
+        instance_attrs.share(pos_id, vertices.clone(), 0, vertex_offset, stride, AttributeDataType::Short2);
+        instance_attrs.share(decimals_ed_id, vertices.clone(), 4, vertex_offset, stride, AttributeDataType::UShort2);
     }
 }
 
@@ -603,14 +595,22 @@ impl TileBuilder {
         });
 
         let stride = size_of::<FillExtrusionLayoutVertex>() as u32;
-        if let Some(attr) = vertex_attrs.set(ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, AttributeDataType::Invalid) {
-            let offset = offset_of!(FillExtrusionLayoutVertex, a1) as u32;
-            attr.set_shared_vertices(vertices.clone(), offset, 0, stride, AttributeDataType::Short2);
-        }
-        if let Some(attr) = vertex_attrs.set(ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, AttributeDataType::Invalid) {
-            let offset = offset_of!(FillExtrusionLayoutVertex, a2) as u32;
-            attr.set_shared_vertices(vertices, offset, 0, stride, AttributeDataType::UShort2);
-        }
+        vertex_attrs.share(
+            ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE,
+            vertices.clone(),
+            offset_of!(FillExtrusionLayoutVertex, a1) as u32,
+            0,
+            stride,
+            AttributeDataType::Short2,
+        );
+        vertex_attrs.share(
+            ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE,
+            vertices,
+            offset_of!(FillExtrusionLayoutVertex, a2) as u32,
+            0,
+            stride,
+            AttributeDataType::UShort2,
+        );
 
         let atlases = self.has_pattern.then(|| tile_bucket.atlas_textures()).map(|atlases| {
             AtlasBinding::new(
