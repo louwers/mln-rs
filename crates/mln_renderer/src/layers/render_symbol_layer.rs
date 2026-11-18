@@ -1146,7 +1146,7 @@ impl RenderSymbolLayer {
 /// `evaluated`.
 fn write_uniforms(
     evaluated: &SymbolPaintProperties::PossiblyEvaluated,
-    writer: &mut UniformWriter<'_, SymbolUniforms>,
+    writer: &mut UniformWriter<'_, SymbolUniforms, usize>,
 ) {
     let props = SymbolEvaluatedPropsUBO {
         text_fill_color: evaluated.text_color.uniform().to_float_array(),

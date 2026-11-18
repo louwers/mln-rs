@@ -94,6 +94,12 @@ impl<K, V> VecMap<K, V> {
         self.values.clear();
     }
 
+    /// Reserves room for at least `additional` more entries.
+    pub fn reserve(&mut self, additional: usize) {
+        self.keys.reserve(additional);
+        self.values.reserve(additional);
+    }
+
     pub fn iter(&self) -> Iter<'_, K, V> {
         self.keys.iter().zip(self.values.iter())
     }
@@ -135,6 +141,22 @@ impl<K, V> VecMap<K, V> {
     #[must_use]
     pub(crate) fn last_key_value(&self) -> Option<(&K, &V)> {
         Some((self.keys.last()?, self.values.last()?))
+    }
+
+    /// Replaces each key with `f` of it, keeping its value, where the new
+    /// keys are in the order of the old ones; otherwise leaves the map as it
+    /// is. Returns whether it replaced them.
+    pub fn map_keys_in_order(&mut self, f: impl Fn(&K) -> K) -> bool
+    where
+        K: Ord,
+    {
+        if !self.keys.iter().map(&f).is_sorted_by(|a, b| a < b) {
+            return false;
+        }
+        for key in &mut self.keys {
+            *key = f(key);
+        }
+        true
     }
 
     /// Keeps the entries for which `f` returns true, visiting them in key

@@ -11,6 +11,7 @@
 //! loops of its own: [`FrameDraws::begin`] begins a pass's draws, and
 //! [`DrawPass::draw`] draws one draw's objects.
 
+use std::cell::Cell;
 use std::ops::BitOrAssign;
 
 use mln_gfx::depth_mode::DepthMode;
@@ -105,43 +106,78 @@ struct TileState {
 #[derive(Default)]
 struct TileSet {
     tiles: VecMap<OverscaledTileID, TileState>,
-    /// The tiles `rebuild` makes the set's, in any order.
-    next: Vec<OverscaledTileID>,
-    /// The map `rebuild` builds, kept for its memory.
-    spare: VecMap<OverscaledTileID, TileState>,
     /// For each tile of the set, the index it had before the last
-    /// `rebuild`, `None` for a tile new to the set.
+    /// `retarget`, `None` for a tile new to the set. The indexes it had go
+    /// up.
     moves: Vec<Option<usize>>,
+    /// The tile `index_of` found last, and its index: a layer's update asks
+    /// for one tile several times in a row.
+    last_found: Cell<Option<(OverscaledTileID, usize)>>,
 }
 
 impl TileSet {
-    /// Makes the tiles of `next`, each `wrap_delta` world copies east of
-    /// the one whose entry it takes, the set's, and drops the entries no
-    /// tile takes. Returns whether any tile's index changed, which `moves`
-    /// then says.
-    fn rebuild(&mut self, wrap_delta: i16) -> bool {
-        self.spare.clear();
-        for id in &self.next {
-            self.spare.insert(*id, TileState::default());
+    /// The index of `tile_id`'s entry, if the set has one.
+    fn index_of(&self, tile_id: &OverscaledTileID) -> Option<usize> {
+        if let Some((last, index)) = self.last_found.get()
+            && last == *tile_id
+        {
+            return Some(index);
         }
-        if wrap_delta == 0 && self.spare.keys().eq(self.tiles.keys()) {
+        let index = self.tiles.index_of(tile_id)?;
+        self.last_found.set(Some((*tile_id, index)));
+        Some(index)
+    }
+
+    /// The state of `tile_id`, if the set has it.
+    fn state_mut(&mut self, tile_id: &OverscaledTileID) -> Option<&mut TileState> {
+        let index = self.index_of(tile_id)?;
+        Some(self.tiles.get_index_mut(index)?.1)
+    }
+
+    /// Drops the set's tiles.
+    fn clear(&mut self) {
+        self.tiles.clear();
+        self.last_found.set(None);
+    }
+
+    /// Makes `tiles` the set's: keeps the entries of those it has, and
+    /// drops the others. Returns the number of tiles it had where any tile's
+    /// index changed, which `moves` then says.
+    fn retarget(&mut self, tiles: impl Iterator<Item = OverscaledTileID> + Clone) -> Option<usize> {
+        if tiles.clone().eq(self.tiles.keys().copied()) {
+            return None;
+        }
+        let old_len = self.tiles.len();
+        let has = |id: &OverscaledTileID| tiles.clone().any(|tile| tile == *id);
+        self.moves.clear();
+        self.moves.extend((0..old_len).map(Some));
+        let mut keys = self.tiles.keys();
+        self.moves.retain(|_| keys.next().is_some_and(has));
+        self.tiles.retain(|id, _| has(id));
+        for id in tiles {
+            if self.tiles.index_of(&id).is_none() {
+                self.tiles.insert(id, TileState::default());
+                if let Some(index) = self.tiles.index_of(&id) {
+                    self.moves.insert(index, None);
+                }
+            }
+        }
+        self.last_found.set(None);
+        let moved = old_len != self.moves.len() || self.moves.iter().enumerate().any(|(i, old)| *old != Some(i));
+        moved.then_some(old_len)
+    }
+
+    /// Moves the tiles' entries to the tiles `wrap_delta` world copies east
+    /// of theirs. Returns whether that changed their order, which only a
+    /// wrap that overflows does.
+    fn shift_wraps(&mut self, wrap_delta: i16) -> bool {
+        self.last_found.set(None);
+        let shift = |id: &OverscaledTileID| id.unwrap_to(id.wrap.wrapping_add(wrap_delta));
+        if self.tiles.map_keys_in_order(shift) {
             return false;
         }
-        self.moves.clear();
-        for index in 0..self.spare.len() {
-            let Some((id, state)) = self.spare.get_index_mut(index) else {
-                break;
-            };
-            let old = self.tiles.index_of(&id.unwrap_to(id.wrap.wrapping_sub(wrap_delta)));
-            if let Some((_, old_state)) = old.and_then(|old| self.tiles.get_index_mut(old)) {
-                *state = std::mem::take(old_state);
-            }
-            self.moves.push(old);
-        }
-        std::mem::swap(&mut self.tiles, &mut self.spare);
-        let old_len = self.spare.len();
-        self.spare.clear();
-        old_len != self.moves.len() || self.moves.iter().enumerate().any(|(i, old)| *old != Some(i))
+        self.tiles = std::mem::take(&mut self.tiles).into_iter().map(|(id, state)| (shift(&id), state)).collect();
+        true
     }
 
     fn mark_changed(&mut self, changed: &ChangedBuckets) {
@@ -158,15 +194,14 @@ impl TileSet {
 /// and the layer's own `T` of the tile, from when the layer builds one.
 pub(crate) struct TileMap<T> {
     set: TileSet,
-    /// Each tile's `T`, at the tile's index in the set.
-    values: Vec<Option<T>>,
-    /// The values `apply_moves` builds, kept for their memory.
-    spare: Vec<Option<T>>,
+    /// Each tile's `T`, at the tile's index in the set, boxed so that the
+    /// values stay small to move.
+    values: Vec<Option<Box<T>>>,
 }
 
 impl<T> Default for TileMap<T> {
     fn default() -> Self {
-        TileMap { set: TileSet::default(), values: Vec::new(), spare: Vec::new() }
+        TileMap { set: TileSet::default(), values: Vec::new() }
     }
 }
 
@@ -174,35 +209,57 @@ impl<T> TileMap<T> {
     /// Makes `tiles`, the frame's tiles of the layer, those the map has
     /// entries for: it keeps the entries of those it had, and drops the
     /// others.
-    pub(crate) fn set_tiles(&mut self, tiles: impl IntoIterator<Item = OverscaledTileID>) {
-        self.set.next.clear();
-        self.set.next.extend(tiles);
-        self.rebuild(0);
+    pub(crate) fn set_tiles<I>(&mut self, tiles: I)
+    where
+        I: IntoIterator<Item = OverscaledTileID>,
+        I::IntoIter: Clone,
+    {
+        let tiles = tiles.into_iter();
+        if self.set.tiles.is_empty() {
+            // Without tiles, the map has no values to move.
+            debug_assert!(self.values.is_empty());
+            let (min, max) = tiles.size_hint();
+            self.set.tiles.reserve(max.unwrap_or(min));
+            for id in tiles {
+                self.set.tiles.insert(id, TileState::default());
+            }
+            return;
+        }
+        let Some(old_len) = self.set.retarget(tiles) else {
+            return;
+        };
+        let (values, moves) = (&mut self.values, &self.set.moves);
+        // The values of the tiles that stay, in order, then those of the new
+        // tiles at their indexes, moving the others up.
+        values.resize_with(old_len, || None);
+        let mut kept = 0;
+        for &old in moves.iter().flatten() {
+            values.swap(kept, old);
+            kept += 1;
+        }
+        values.truncate(kept);
+        values.resize_with(moves.len(), || None);
+        for (index, old) in moves.iter().enumerate().rev() {
+            if old.is_some() {
+                kept -= 1;
+                values.swap(index, kept);
+            }
+        }
     }
 
     /// Drops the entries of the tiles.
     pub(crate) fn clear_tiles(&mut self) {
-        self.set.tiles.clear();
+        self.set.clear();
         self.values.clear();
     }
 
     /// Moves the tiles' entries to the tiles `wrap_delta` world copies east
     /// of theirs.
     pub(crate) fn shift_wraps(&mut self, wrap_delta: i16) {
-        self.set.next.clear();
-        self.set.next.extend(self.set.tiles.keys().map(|id| id.unwrap_to(id.wrap.wrapping_add(wrap_delta))));
-        self.rebuild(wrap_delta);
-    }
-
-    fn rebuild(&mut self, wrap_delta: i16) {
-        if !self.set.rebuild(wrap_delta) {
-            return;
+        if self.set.shift_wraps(wrap_delta) {
+            // The tiles' values are no longer at their tiles' indexes.
+            self.values.clear();
         }
-        let values = &mut self.values;
-        self.spare.clear();
-        self.spare.extend(self.set.moves.iter().map(|old| old.and_then(|i| values.get_mut(i)?.take())));
-        std::mem::swap(&mut self.values, &mut self.spare);
-        self.spare.clear();
     }
 
     /// Adds `changed` to the changes of the tiles whose draws were built from
@@ -222,14 +279,14 @@ impl<T> TileMap<T> {
     #[cfg(test)]
     #[must_use]
     pub(crate) fn has_tile(&self, tile_id: &OverscaledTileID) -> bool {
-        self.set.tiles.contains_key(tile_id)
+        self.set.index_of(tile_id).is_some()
     }
 
     /// The bucket the draws of `tile_id` were built from, if the tile is one
     /// of the frame's and they were.
     #[must_use]
     pub(crate) fn bucket(&self, tile_id: &OverscaledTileID) -> Option<SimpleIdentity> {
-        self.set.tiles.get(tile_id).and_then(|state| state.bucket)
+        self.set.index_of(tile_id).and_then(|index| self.set.tiles.get_index(index)?.1.bucket)
     }
 
     /// Records that the draws of `tile_id` are built from `bucket`, which
@@ -237,7 +294,7 @@ impl<T> TileMap<T> {
     /// whether that changed it; a tile that isn't one of the frame's takes no
     /// bucket.
     pub(crate) fn set_bucket(&mut self, tile_id: &OverscaledTileID, bucket: SimpleIdentity) -> bool {
-        match self.set.tiles.get_mut(tile_id) {
+        match self.set.state_mut(tile_id) {
             Some(state) if state.bucket != Some(bucket) => {
                 state.bucket = Some(bucket);
                 state.changes = BucketChanges::default();
@@ -250,35 +307,35 @@ impl<T> TileMap<T> {
     /// What of the bucket of `tile_id` changed since its draws last copied
     /// it, which they are about to copy again.
     pub(crate) fn take_changes(&mut self, tile_id: &OverscaledTileID) -> BucketChanges {
-        self.set.tiles.get_mut(tile_id).map(|state| std::mem::take(&mut state.changes)).unwrap_or_default()
+        self.set.state_mut(tile_id).map(|state| std::mem::take(&mut state.changes)).unwrap_or_default()
     }
 
     /// What the layer keeps of `tile_id`, if the tile is one of the frame's
     /// and the layer keeps anything of it.
     #[must_use]
     pub(crate) fn cache(&self, tile_id: &OverscaledTileID) -> Option<&T> {
-        self.values.get(self.set.tiles.index_of(tile_id)?)?.as_ref()
+        self.values.get(self.set.index_of(tile_id)?)?.as_deref()
     }
 
     /// What the layer keeps of `tile_id`, if the tile is one of the frame's
     /// and the layer keeps anything of it.
     pub(crate) fn cache_mut(&mut self, tile_id: &OverscaledTileID) -> Option<&mut T> {
-        self.values.get_mut(self.set.tiles.index_of(tile_id)?)?.as_mut()
+        self.values.get_mut(self.set.index_of(tile_id)?)?.as_deref_mut()
     }
 
     /// Makes `value` what the layer keeps of `tile_id`, if the tile is one
     /// of the frame's, and returns it.
     pub(crate) fn set_cache(&mut self, tile_id: &OverscaledTileID, value: T) -> Option<&mut T> {
-        let index = self.set.tiles.index_of(tile_id)?;
+        let index = self.set.index_of(tile_id)?;
         if self.values.len() <= index {
-            self.values.resize_with(index + 1, || None);
+            self.values.resize_with(self.set.tiles.len(), || None);
         }
-        Some(self.values[index].insert(value))
+        Some(self.values[index].insert(Box::new(value)))
     }
 
     /// Drops what the layer keeps of `tile_id`.
     pub(crate) fn drop_cache(&mut self, tile_id: &OverscaledTileID) {
-        if let Some(value) = self.set.tiles.index_of(tile_id).and_then(|index| self.values.get_mut(index)) {
+        if let Some(value) = self.set.index_of(tile_id).and_then(|index| self.values.get_mut(index)) {
             *value = None;
         }
     }
@@ -378,11 +435,10 @@ impl FrameDraw {
 /// memory from frame to frame, so that a frame of no more draws than one
 /// before it allocates nothing.
 pub(crate) struct DrawList<U, P = ()> {
-    /// The draws, each with the index of its values in `uniforms` and of its
-    /// part in `parts`.
-    draws: Vec<(FrameDraw, usize)>,
+    /// The draws, each with its part and the index of its values in
+    /// `uniforms`.
+    draws: Vec<(FrameDraw, P, usize)>,
     uniforms: Vec<U>,
-    parts: Vec<P>,
     /// The bytes of a storage buffer's entries, as [`UniformWriter`] writes
     /// them.
     bytes: Vec<u8>,
@@ -390,7 +446,7 @@ pub(crate) struct DrawList<U, P = ()> {
 
 impl<U, P> Default for DrawList<U, P> {
     fn default() -> Self {
-        DrawList { draws: Vec::new(), uniforms: Vec::new(), parts: Vec::new(), bytes: Vec::new() }
+        DrawList { draws: Vec::new(), uniforms: Vec::new(), bytes: Vec::new() }
     }
 }
 
@@ -405,14 +461,12 @@ impl<U, P: Copy> DrawList<U, P> {
     pub(crate) fn clear(&mut self) {
         self.draws.clear();
         self.uniforms.clear();
-        self.parts.clear();
     }
 
-    /// Adds `draw`, of the GPU objects of the layer's `part` of its tile.
+    /// Adds `draw`, of the GPU objects of the layer's `part`.
     pub(crate) fn push_part(&mut self, draw: FrameDraw, part: P, uniforms: U) {
-        self.draws.push((draw, self.uniforms.len()));
+        self.draws.push((draw, part, self.uniforms.len()));
         self.uniforms.push(uniforms);
-        self.parts.push(part);
     }
 
     /// Makes the list's draws `layer`'s, in [`FrameDraw::order`] and in the
@@ -423,9 +477,9 @@ impl<U, P: Copy> DrawList<U, P> {
         &mut self,
         layer: &mut LayerDraws<P>,
         context: &Context,
-        write: impl FnOnce(&mut UniformWriter<'_, U>),
+        write: impl FnOnce(&mut UniformWriter<'_, U, P>),
     ) {
-        self.draws.sort_unstable_by_key(|(draw, index)| (draw.order(), *index));
+        self.draws.sort_unstable_by_key(|(draw, _, index)| (draw.order(), *index));
         if !self.draws.is_empty() {
             write(&mut UniformWriter {
                 draws: &self.draws,
@@ -436,37 +490,36 @@ impl<U, P: Copy> DrawList<U, P> {
             });
         }
         layer.parts.clear();
-        layer.parts.extend(self.draws.iter().map(|&(_, index)| self.parts[index]));
+        layer.parts.extend(self.draws.iter().map(|&(_, part, _)| part));
         layer.frame.draws.clear();
-        layer.frame.draws.extend(self.draws.drain(..).map(|(draw, _)| draw));
+        layer.frame.draws.extend(self.draws.drain(..).map(|(draw, _, _)| draw));
         self.uniforms.clear();
-        self.parts.clear();
     }
 }
 
 /// Writes the buffers that a frame's draws read, each draw's entries at its
 /// index in drawing order.
-pub(crate) struct UniformWriter<'a, U> {
-    draws: &'a [(FrameDraw, usize)],
+pub(crate) struct UniformWriter<'a, U, P = ()> {
+    draws: &'a [(FrameDraw, P, usize)],
     uniforms: &'a [U],
     bytes: &'a mut Vec<u8>,
     buffers: &'a mut UniformBufferArray,
     context: &'a Context,
 }
 
-impl<U> UniformWriter<'_, U> {
+impl<U, P> UniformWriter<'_, U, P> {
     /// Writes each draw's `entry` of its uniform values to the storage
     /// buffer `id`.
-    pub(crate) fn storage<P: bytemuck::Pod>(&mut self, id: usize, entry: impl Fn(&U) -> P) {
+    pub(crate) fn storage<E: bytemuck::Pod>(&mut self, id: usize, entry: impl Fn(&U) -> E) {
         self.bytes.clear();
-        for &(_, index) in self.draws {
-            self.bytes.extend_from_slice(bytemuck::bytes_of(&entry(&self.uniforms[index])));
+        for (_, _, index) in self.draws {
+            self.bytes.extend_from_slice(bytemuck::bytes_of(&entry(&self.uniforms[*index])));
         }
         self.buffers.write_storage(id, self.bytes, self.context);
     }
 
     /// Writes `value`, which all the draws read, to the uniform buffer `id`.
-    pub(crate) fn uniform<P: bytemuck::Pod>(&mut self, id: usize, value: &P) {
+    pub(crate) fn uniform<E: bytemuck::Pod>(&mut self, id: usize, value: &E) {
         self.buffers.create_or_update_pod(id, value, self.context);
     }
 
@@ -905,6 +958,29 @@ mod tests {
         assert_eq!(Some(other_bucket), tiles.bucket(&other));
         tiles.shift_wraps(1);
         assert_eq!(Some(other_bucket), tiles.bucket(&other.unwrap_to(1)));
+    }
+
+    /// Each tile keeps its value and bucket as tiles before and after it
+    /// come and go, and in whatever order the frame gives the tiles.
+    #[test]
+    fn values_stay_with_their_tiles() {
+        let ids: Vec<OverscaledTileID> = (0..6).map(|x| OverscaledTileID::with_zxy(3, 0, 3, x, 2)).collect();
+        let mut tiles = TileMap::<u32>::default();
+        tiles.set_tiles([ids[4], ids[1], ids[2]]);
+        for &i in &[1, 2, 4] {
+            assert!(tiles.set_cache(&ids[i], i as u32).is_some());
+        }
+        let bucket = SimpleIdentity::new();
+        assert!(tiles.set_bucket(&ids[2], bucket));
+        tiles.set_tiles([ids[5], ids[2], ids[0], ids[4], ids[3]]);
+        let values: Vec<Option<u32>> = ids.iter().map(|id| tiles.cache(id).copied()).collect();
+        assert_eq!(vec![None, None, Some(2), None, Some(4), None], values);
+        assert_eq!(Some(bucket), tiles.bucket(&ids[2]));
+        assert!(tiles.set_cache(&ids[0], 0).is_some());
+        tiles.set_tiles([ids[0], ids[4]]);
+        let values: Vec<Option<u32>> = ids.iter().map(|id| tiles.cache(id).copied()).collect();
+        assert_eq!(vec![Some(0), None, None, None, Some(4), None], values);
+        assert!(!tiles.has_tile(&ids[2]));
     }
 
     /// What the layer keeps of a tile moves with the tile across a wrap jump
