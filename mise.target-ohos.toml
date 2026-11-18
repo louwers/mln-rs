@@ -1,0 +1,31 @@
+# Builds for OpenHarmony and HarmonyOS, as in
+# `cargo build --target aarch64-unknown-linux-ohos -p mln-rs-c`. Select it with
+# `mise -E target-ohos`, or in every command with `env = ["target-ohos"]` in an
+# untracked .miserc.local.toml.
+
+[plugins]
+ohos-sdk = "https://github.com/sargunv/mise-ohos-sdk#v0.1.0"
+
+[tools]
+# The OpenHarmony SDK of API level 23. With DevEco Studio's SDK of that level
+# installed, skip the download with `disable_tools = ["ohos-sdk"]` in
+# mise.local.toml's [settings]: the compilers then come from DevEco's.
+ohos-sdk = "6.1"
+
+[env]
+# The SDK's native toolchain: the plugin's, else DevEco Studio's on macOS.
+MLN_OHOS_NATIVE = { value = "{% if env.OHOS_SDK_NATIVE is defined %}{{ env.OHOS_SDK_NATIVE }}{% else %}{{ env.HOME }}/Library/OpenHarmony/Sdk/23/native{% endif %}", tools = true }
+CC_aarch64_unknown_linux_ohos = { value = "{{ env.MLN_OHOS_NATIVE }}/llvm/bin/aarch64-unknown-linux-ohos-clang", tools = true }
+CC_armv7_unknown_linux_ohos = { value = "{{ env.MLN_OHOS_NATIVE }}/llvm/bin/armv7-unknown-linux-ohos-clang", tools = true }
+CC_x86_64_unknown_linux_ohos = { value = "{{ env.MLN_OHOS_NATIVE }}/llvm/bin/x86_64-unknown-linux-ohos-clang", tools = true }
+AR_aarch64_unknown_linux_ohos = { value = "{{ env.MLN_OHOS_NATIVE }}/llvm/bin/llvm-ar", tools = true }
+AR_armv7_unknown_linux_ohos = { value = "{{ env.MLN_OHOS_NATIVE }}/llvm/bin/llvm-ar", tools = true }
+AR_x86_64_unknown_linux_ohos = { value = "{{ env.MLN_OHOS_NATIVE }}/llvm/bin/llvm-ar", tools = true }
+CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_LINKER = { value = "{{ env.CC_aarch64_unknown_linux_ohos }}", tools = true }
+CARGO_TARGET_ARMV7_UNKNOWN_LINUX_OHOS_LINKER = { value = "{{ env.CC_armv7_unknown_linux_ohos }}", tools = true }
+CARGO_TARGET_X86_64_UNKNOWN_LINUX_OHOS_LINKER = { value = "{{ env.CC_x86_64_unknown_linux_ohos }}", tools = true }
+
+[hooks]
+# The Rust targets. An inline script, since a hook's `mise run` would not see
+# an environment selected with -E.
+postinstall = "rustup target add aarch64-unknown-linux-ohos armv7-unknown-linux-ohos x86_64-unknown-linux-ohos"

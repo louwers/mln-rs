@@ -1,0 +1,33 @@
+# Builds for Windows from macOS or Linux, as in
+# `cargo build --target x86_64-pc-windows-gnullvm -p mln-rs-c`, or for MSVC
+# `cargo xwin build --target x86_64-pc-windows-msvc -p mln-rs-c`. Select it
+# with `mise -E target-windows`, or in every command with
+# `env = ["target-windows"]` in an untracked .miserc.local.toml. maplibre-native-ffi
+# ships both: MSVC, and MinGW for Kotlin/Native's mingwX64.
+
+[tools]
+# The MinGW targets' compilers and linkers: LLVM's, for x64 and arm64.
+"github:mstorsjo/llvm-mingw" = { version = "20261104", platforms = { macos-arm64 = { asset_pattern = "llvm-mingw-*-ucrt-macos-universal.tar.xz" }, macos-x64 = { asset_pattern = "llvm-mingw-*-ucrt-macos-universal.tar.xz" }, linux-x64 = { asset_pattern = "llvm-mingw-*-ucrt-ubuntu-22.04-x86_64.tar.xz" }, linux-arm64 = { asset_pattern = "llvm-mingw-*-ucrt-ubuntu-22.04-aarch64.tar.xz" } } }
+# `cargo xwin` builds the MSVC targets with clang-cl, against Microsoft's CRT
+# and Windows SDK, which it downloads on first use.
+"github:rust-cross/cargo-xwin" = "0.23.1"
+
+[env]
+CC_x86_64_pc_windows_gnullvm = "x86_64-w64-mingw32-clang"
+CC_aarch64_pc_windows_gnullvm = "aarch64-w64-mingw32-clang"
+CC_x86_64_pc_windows_gnu = "x86_64-w64-mingw32-clang"
+AR_x86_64_pc_windows_gnullvm = "llvm-ar"
+AR_aarch64_pc_windows_gnullvm = "llvm-ar"
+AR_x86_64_pc_windows_gnu = "llvm-ar"
+CARGO_TARGET_X86_64_PC_WINDOWS_GNULLVM_LINKER = "x86_64-w64-mingw32-clang"
+CARGO_TARGET_AARCH64_PC_WINDOWS_GNULLVM_LINKER = "aarch64-w64-mingw32-clang"
+CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER = "x86_64-w64-mingw32-clang"
+# Rust's x86_64-pc-windows-gnu links GCC's libgcc and libgcc_eh, which
+# llvm-mingw replaces with compiler-rt and LLVM's libunwind: empty stand-ins
+# satisfy the link, and libunwind unwinds.
+CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS = "-L {{ config_root }}/tools/mingw-libgcc -C link-arg=-lunwind"
+
+[hooks]
+# The Rust targets. An inline script, since a hook's `mise run` would not see
+# an environment selected with -E.
+postinstall = "rustup target add x86_64-pc-windows-gnullvm aarch64-pc-windows-gnullvm x86_64-pc-windows-gnu x86_64-pc-windows-msvc aarch64-pc-windows-msvc"
