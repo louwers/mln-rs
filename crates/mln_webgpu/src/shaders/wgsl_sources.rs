@@ -263,15 +263,19 @@ struct GlobalPaintParamsUBO {
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     let texsize = paintParams.pattern_atlas_texsize;
 
-    // Sample pattern A
-    let imagecoord_a = gl_mod(in.pos_a, vec2<f32>(1.0));
-    let pos_a = atlas_pos(props.pattern_tl_a / texsize, (props.pattern_br_a - props.pattern_tl_a) / texsize * imagecoord_a);
-    let color_a = textureSample(pattern_texture, texture_sampler, pos_a);
-
-    // Sample pattern B
-    let imagecoord_b = gl_mod(in.pos_b, vec2<f32>(1.0));
-    let pos_b = atlas_pos(props.pattern_tl_b / texsize, (props.pattern_br_b - props.pattern_tl_b) / texsize * imagecoord_b);
-    let color_b = textureSample(pattern_texture, texture_sampler, pos_b);
+    // A crossfade at 0 or 1 shows one pattern, so skip the other.
+    var color_a = vec4<f32>(0.0);
+    if (props.mix < 1.0) {
+        let imagecoord_a = gl_mod(in.pos_a, vec2<f32>(1.0));
+        let pos_a = atlas_pos(props.pattern_tl_a / texsize, (props.pattern_br_a - props.pattern_tl_a) / texsize * imagecoord_a);
+        color_a = textureSample(pattern_texture, texture_sampler, pos_a);
+    }
+    var color_b = vec4<f32>(0.0);
+    if (props.mix > 0.0) {
+        let imagecoord_b = gl_mod(in.pos_b, vec2<f32>(1.0));
+        let pos_b = atlas_pos(props.pattern_tl_b / texsize, (props.pattern_br_b - props.pattern_tl_b) / texsize * imagecoord_b);
+        color_b = textureSample(pattern_texture, texture_sampler, pos_b);
+    }
 
     // Mix patterns and apply opacity
     return mix(color_a, color_b, props.mix) * props.opacity;
@@ -1441,13 +1445,19 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     let pattern_tl_b = pattern_to.xy;
     let pattern_br_b = pattern_to.zw;
 
-    let imagecoord_a = gl_mod(in.pos_a, vec2<f32>(1.0));
-    let pos_a = atlas_pos(pattern_tl_a / tileProps.texsize, (pattern_br_a - pattern_tl_a) / tileProps.texsize * imagecoord_a);
-    let color_a = textureSample(pattern_texture, texture_sampler, pos_a);
-
-    let imagecoord_b = gl_mod(in.pos_b, vec2<f32>(1.0));
-    let pos_b = atlas_pos(pattern_tl_b / tileProps.texsize, (pattern_br_b - pattern_tl_b) / tileProps.texsize * imagecoord_b);
-    let color_b = textureSample(pattern_texture, texture_sampler, pos_b);
+    // A crossfade at 0 or 1 shows one pattern, so skip the other.
+    var color_a = vec4<f32>(0.0);
+    if (props.fade < 1.0) {
+        let imagecoord_a = gl_mod(in.pos_a, vec2<f32>(1.0));
+        let pos_a = atlas_pos(pattern_tl_a / tileProps.texsize, (pattern_br_a - pattern_tl_a) / tileProps.texsize * imagecoord_a);
+        color_a = textureSample(pattern_texture, texture_sampler, pos_a);
+    }
+    var color_b = vec4<f32>(0.0);
+    if (props.fade > 0.0) {
+        let imagecoord_b = gl_mod(in.pos_b, vec2<f32>(1.0));
+        let pos_b = atlas_pos(pattern_tl_b / tileProps.texsize, (pattern_br_b - pattern_tl_b) / tileProps.texsize * imagecoord_b);
+        color_b = textureSample(pattern_texture, texture_sampler, pos_b);
+    }
 
     let pattern_color = mix(color_a, color_b, props.fade);
     return pattern_color * in.lighting;
@@ -1842,15 +1852,19 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     let pattern_tl_b = pattern_to.xy;
     let pattern_br_b = pattern_to.zw;
 
-    // Sample pattern A
-    let imagecoord_a = gl_mod(in.v_pos_a, vec2<f32>(1.0));
-    let pos_a = atlas_pos(pattern_tl_a / tileProps.texsize, (pattern_br_a - pattern_tl_a) / tileProps.texsize * imagecoord_a);
-    let color_a = textureSample(pattern_texture, texture_sampler, pos_a);
-
-    // Sample pattern B
-    let imagecoord_b = gl_mod(in.v_pos_b, vec2<f32>(1.0));
-    let pos_b = atlas_pos(pattern_tl_b / tileProps.texsize, (pattern_br_b - pattern_tl_b) / tileProps.texsize * imagecoord_b);
-    let color_b = textureSample(pattern_texture, texture_sampler, pos_b);
+    // A crossfade at 0 or 1 shows one pattern, so skip the other.
+    var color_a = vec4<f32>(0.0);
+    if (props.fade < 1.0) {
+        let imagecoord_a = gl_mod(in.v_pos_a, vec2<f32>(1.0));
+        let pos_a = atlas_pos(pattern_tl_a / tileProps.texsize, (pattern_br_a - pattern_tl_a) / tileProps.texsize * imagecoord_a);
+        color_a = textureSample(pattern_texture, texture_sampler, pos_a);
+    }
+    var color_b = vec4<f32>(0.0);
+    if (props.fade > 0.0) {
+        let imagecoord_b = gl_mod(in.v_pos_b, vec2<f32>(1.0));
+        let pos_b = atlas_pos(pattern_tl_b / tileProps.texsize, (pattern_br_b - pattern_tl_b) / tileProps.texsize * imagecoord_b);
+        color_b = textureSample(pattern_texture, texture_sampler, pos_b);
+    }
 
     // Mix patterns and apply opacity
     let opacity =
@@ -2411,15 +2425,19 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     let pattern_tl_b = pattern_to.xy;
     let pattern_br_b = pattern_to.zw;
 
-    // Sample pattern A
-    let imagecoord_a = gl_mod(in.v_pos_a, vec2<f32>(1.0));
-    let pos_a = atlas_pos(pattern_tl_a / tileProps.texsize, (pattern_br_a - pattern_tl_a) / tileProps.texsize * imagecoord_a);
-    let color_a = textureSample(pattern_texture, texture_sampler, pos_a);
-
-    // Sample pattern B
-    let imagecoord_b = gl_mod(in.v_pos_b, vec2<f32>(1.0));
-    let pos_b = atlas_pos(pattern_tl_b / tileProps.texsize, (pattern_br_b - pattern_tl_b) / tileProps.texsize * imagecoord_b);
-    let color_b = textureSample(pattern_texture, texture_sampler, pos_b);
+    // A crossfade at 0 or 1 shows one pattern, so skip the other.
+    var color_a = vec4<f32>(0.0);
+    if (props.fade < 1.0) {
+        let imagecoord_a = gl_mod(in.v_pos_a, vec2<f32>(1.0));
+        let pos_a = atlas_pos(pattern_tl_a / tileProps.texsize, (pattern_br_a - pattern_tl_a) / tileProps.texsize * imagecoord_a);
+        color_a = textureSample(pattern_texture, texture_sampler, pos_a);
+    }
+    var color_b = vec4<f32>(0.0);
+    if (props.fade > 0.0) {
+        let imagecoord_b = gl_mod(in.v_pos_b, vec2<f32>(1.0));
+        let pos_b = atlas_pos(pattern_tl_b / tileProps.texsize, (pattern_br_b - pattern_tl_b) / tileProps.texsize * imagecoord_b);
+        color_b = textureSample(pattern_texture, texture_sampler, pos_b);
+    }
 
     // Mix patterns and apply opacity
     let opacity =
@@ -4239,20 +4257,25 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     let patternSizeAX = max(pattern_size_a.x, 1e-6);
     let patternSizeBX = max(pattern_size_b.x, 1e-6);
 
-    let x_a = glMod(in.v_linesofar / patternSizeAX * aspect_a, 1.0);
-    let x_b = glMod(in.v_linesofar / patternSizeBX * aspect_b, 1.0);
-
     let y = 0.5 * in.v_normal.y + 0.5;
 
     let texel_size = 1.0 / tileProps.texsize;
     let half_texel = 0.5 * texel_size;
-    var pos_a = atlas_pos((pattern_tl_a - 1.0) * texel_size, (pattern_br_a - pattern_tl_a + 2.0) * texel_size * vec2<f32>(x_a, y));
-    pos_a = clamp(pos_a, (pattern_tl_a - 1.0) * texel_size + half_texel, (pattern_br_a + 1.0) * texel_size - half_texel);
-    var pos_b = atlas_pos((pattern_tl_b - 1.0) * texel_size, (pattern_br_b - pattern_tl_b + 2.0) * texel_size * vec2<f32>(x_b, y));
-    pos_b = clamp(pos_b, (pattern_tl_b - 1.0) * texel_size + half_texel, (pattern_br_b + 1.0) * texel_size - half_texel);
-
-    let color_a = textureSample(pattern_texture, pattern_sampler, pos_a);
-    let color_b = textureSample(pattern_texture, pattern_sampler, pos_b);
+    // A crossfade at 0 or 1 shows one pattern, so skip the other.
+    var color_a = vec4<f32>(0.0);
+    if (tileProps.fade < 1.0) {
+        let x_a = glMod(in.v_linesofar / patternSizeAX * aspect_a, 1.0);
+        var pos_a = atlas_pos((pattern_tl_a - 1.0) * texel_size, (pattern_br_a - pattern_tl_a + 2.0) * texel_size * vec2<f32>(x_a, y));
+        pos_a = clamp(pos_a, (pattern_tl_a - 1.0) * texel_size + half_texel, (pattern_br_a + 1.0) * texel_size - half_texel);
+        color_a = textureSample(pattern_texture, pattern_sampler, pos_a);
+    }
+    var color_b = vec4<f32>(0.0);
+    if (tileProps.fade > 0.0) {
+        let x_b = glMod(in.v_linesofar / patternSizeBX * aspect_b, 1.0);
+        var pos_b = atlas_pos((pattern_tl_b - 1.0) * texel_size, (pattern_br_b - pattern_tl_b + 2.0) * texel_size * vec2<f32>(x_b, y));
+        pos_b = clamp(pos_b, (pattern_tl_b - 1.0) * texel_size + half_texel, (pattern_br_b + 1.0) * texel_size - half_texel);
+        color_b = textureSample(pattern_texture, pattern_sampler, pos_b);
+    }
 
     let pattern_color = mix(color_a, color_b, tileProps.fade);
 

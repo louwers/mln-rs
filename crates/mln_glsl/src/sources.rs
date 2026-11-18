@@ -514,13 +514,19 @@ void main() {
 
     const vec2 texsize = paintParams.pattern_atlas_texsize;
 
-    const vec2 imagecoord = mod(frag_pos_a, 1.0);
-    const vec2 pos = atlas_pos(props.pattern_tl_a / texsize, (props.pattern_br_a - props.pattern_tl_a) / texsize * imagecoord);
-    const vec4 color1 = texture(sampler2D(image_texture, image_sampler), pos);
-
-    const vec2 imagecoord_b = mod(frag_pos_b, 1.0);
-    const vec2 pos2 = atlas_pos(props.pattern_tl_b / texsize, (props.pattern_br_b - props.pattern_tl_b) / texsize * imagecoord_b);
-    const vec4 color2 = texture(sampler2D(image_texture, image_sampler), pos2);
+    // A crossfade at 0 or 1 shows one pattern, so skip the other.
+    vec4 color1 = vec4(0.0);
+    if (props.mix < 1.0) {
+        const vec2 imagecoord = mod(frag_pos_a, 1.0);
+        const vec2 pos = atlas_pos(props.pattern_tl_a / texsize, (props.pattern_br_a - props.pattern_tl_a) / texsize * imagecoord);
+        color1 = texture(sampler2D(image_texture, image_sampler), pos);
+    }
+    vec4 color2 = vec4(0.0);
+    if (props.mix > 0.0) {
+        const vec2 imagecoord_b = mod(frag_pos_b, 1.0);
+        const vec2 pos2 = atlas_pos(props.pattern_tl_b / texsize, (props.pattern_br_b - props.pattern_tl_b) / texsize * imagecoord_b);
+        color2 = texture(sampler2D(image_texture, image_sampler), pos2);
+    }
 
     out_color = mix(color1, color2, props.mix) * props.opacity;
 #endif
@@ -1749,13 +1755,19 @@ void main() {
     const vec2 pattern_tl_b = pattern_to.xy;
     const vec2 pattern_br_b = pattern_to.zw;
 
-    const vec2 imagecoord = mod(frag_pos_a, 1.0);
-    const vec2 pos = atlas_pos(pattern_tl_a / tileProps.texsize, (pattern_br_a - pattern_tl_a) / tileProps.texsize * imagecoord);
-    const vec4 color1 = texture(sampler2D(image0_texture, image0_sampler), pos);
-
-    const vec2 imagecoord_b = mod(frag_pos_b, 1.0);
-    const vec2 pos2 = atlas_pos(pattern_tl_b / tileProps.texsize, (pattern_br_b - pattern_tl_b) / tileProps.texsize * imagecoord_b);
-    const vec4 color2 = texture(sampler2D(image0_texture, image0_sampler), pos2);
+    // A crossfade at 0 or 1 shows one pattern, so skip the other.
+    vec4 color1 = vec4(0.0);
+    if (props.fade < 1.0) {
+        const vec2 imagecoord = mod(frag_pos_a, 1.0);
+        const vec2 pos = atlas_pos(pattern_tl_a / tileProps.texsize, (pattern_br_a - pattern_tl_a) / tileProps.texsize * imagecoord);
+        color1 = texture(sampler2D(image0_texture, image0_sampler), pos);
+    }
+    vec4 color2 = vec4(0.0);
+    if (props.fade > 0.0) {
+        const vec2 imagecoord_b = mod(frag_pos_b, 1.0);
+        const vec2 pos2 = atlas_pos(pattern_tl_b / tileProps.texsize, (pattern_br_b - pattern_tl_b) / tileProps.texsize * imagecoord_b);
+        color2 = texture(sampler2D(image0_texture, image0_sampler), pos2);
+    }
 
     if (tileProps.sdf > 0.5) {
         const float sdf_edge = (256.0 - 64.0) / 256.0;
@@ -2000,13 +2012,19 @@ void main() {
     const vec2 pattern_tl_b = pattern_to.xy;
     const vec2 pattern_br_b = pattern_to.zw;
 
-    const vec2 imagecoord = mod(frag_pos_a, 1.0);
-    const vec2 pos = atlas_pos(pattern_tl_a / tileProps.texsize, (pattern_br_a - pattern_tl_a) / tileProps.texsize * imagecoord);
-    const vec4 color1 = texture(sampler2D(image0_texture, image0_sampler), pos);
-
-    const vec2 imagecoord_b = mod(frag_pos_b, 1.0);
-    const vec2 pos2 = atlas_pos(pattern_tl_b / tileProps.texsize, (pattern_br_b - pattern_tl_b) / tileProps.texsize * imagecoord_b);
-    const vec4 color2 = texture(sampler2D(image0_texture, image0_sampler), pos2);
+    // A crossfade at 0 or 1 shows one pattern, so skip the other.
+    vec4 color1 = vec4(0.0);
+    if (props.fade < 1.0) {
+        const vec2 imagecoord = mod(frag_pos_a, 1.0);
+        const vec2 pos = atlas_pos(pattern_tl_a / tileProps.texsize, (pattern_br_a - pattern_tl_a) / tileProps.texsize * imagecoord);
+        color1 = texture(sampler2D(image0_texture, image0_sampler), pos);
+    }
+    vec4 color2 = vec4(0.0);
+    if (props.fade > 0.0) {
+        const vec2 imagecoord_b = mod(frag_pos_b, 1.0);
+        const vec2 pos2 = atlas_pos(pattern_tl_b / tileProps.texsize, (pattern_br_b - pattern_tl_b) / tileProps.texsize * imagecoord_b);
+        color2 = texture(sampler2D(image0_texture, image0_sampler), pos2);
+    }
 
     const float dist = length(frag_pos - gl_FragCoord.xy);
     const float alpha = 1.0 - smoothstep(0.0, 1.0, dist);
@@ -3004,13 +3022,19 @@ void main() {
     const vec2 pattern_tl_b = pattern_to.xy;
     const vec2 pattern_br_b = pattern_to.zw;
 
-    const vec2 imagecoord = mod(frag_pos_a, 1.0);
-    const vec2 pos = atlas_pos(pattern_tl_a / tileProps.texsize, (pattern_br_a - pattern_tl_a) / tileProps.texsize * imagecoord);
-    const vec4 color1 = texture(sampler2D(image0_texture, image0_sampler), pos);
-
-    const vec2 imagecoord_b = mod(frag_pos_b, 1.0);
-    const vec2 pos2 = atlas_pos(pattern_tl_b / tileProps.texsize, (pattern_br_b - pattern_tl_b) / tileProps.texsize * imagecoord_b);
-    const vec4 color2 = texture(sampler2D(image0_texture, image0_sampler), pos2);
+    // A crossfade at 0 or 1 shows one pattern, so skip the other.
+    vec4 color1 = vec4(0.0);
+    if (props.fade < 1.0) {
+        const vec2 imagecoord = mod(frag_pos_a, 1.0);
+        const vec2 pos = atlas_pos(pattern_tl_a / tileProps.texsize, (pattern_br_a - pattern_tl_a) / tileProps.texsize * imagecoord);
+        color1 = texture(sampler2D(image0_texture, image0_sampler), pos);
+    }
+    vec4 color2 = vec4(0.0);
+    if (props.fade > 0.0) {
+        const vec2 imagecoord_b = mod(frag_pos_b, 1.0);
+        const vec2 pos2 = atlas_pos(pattern_tl_b / tileProps.texsize, (pattern_br_b - pattern_tl_b) / tileProps.texsize * imagecoord_b);
+        color2 = texture(sampler2D(image0_texture, image0_sampler), pos2);
+    }
 
     out_color = mix(color1, color2, props.fade) * frag_lighting;
 #endif
@@ -3300,13 +3324,19 @@ void main() {
     const vec2 pattern_tl_b = pattern_to.xy;
     const vec2 pattern_br_b = pattern_to.zw;
 
-    const vec2 imagecoord = mod(frag_pos_a, 1.0);
-    const vec2 pos = atlas_pos(pattern_tl_a / tileProps.texsize, (pattern_br_a - pattern_tl_a) / tileProps.texsize * imagecoord);
-    const vec4 color1 = texture(sampler2D(image0_texture, image0_sampler), pos);
-
-    const vec2 imagecoord_b = mod(frag_pos_b, 1.0);
-    const vec2 pos2 = atlas_pos(pattern_tl_b / tileProps.texsize, (pattern_br_b - pattern_tl_b) / tileProps.texsize * imagecoord_b);
-    const vec4 color2 = texture(sampler2D(image0_texture, image0_sampler), pos2);
+    // A crossfade at 0 or 1 shows one pattern, so skip the other.
+    vec4 color1 = vec4(0.0);
+    if (props.fade < 1.0) {
+        const vec2 imagecoord = mod(frag_pos_a, 1.0);
+        const vec2 pos = atlas_pos(pattern_tl_a / tileProps.texsize, (pattern_br_a - pattern_tl_a) / tileProps.texsize * imagecoord);
+        color1 = texture(sampler2D(image0_texture, image0_sampler), pos);
+    }
+    vec4 color2 = vec4(0.0);
+    if (props.fade > 0.0) {
+        const vec2 imagecoord_b = mod(frag_pos_b, 1.0);
+        const vec2 pos2 = atlas_pos(pattern_tl_b / tileProps.texsize, (pattern_br_b - pattern_tl_b) / tileProps.texsize * imagecoord_b);
+        color2 = texture(sampler2D(image0_texture, image0_sampler), pos2);
+    }
 
     out_color = mix(color1, color2, props.fade) * frag_lighting;
 #endif
@@ -4879,19 +4909,27 @@ void main() {
     const float blur2 = (blur + 1.0 / DEVICE_PIXEL_RATIO) * frag_gamma_scale;
     const float alpha = clamp(min(dist - (frag_width2.y - blur2), frag_width2.x - dist) / blur2, 0.0, 1.0);
 
-    const float x_a = mod(frag_linesofar / pattern_size_a.x * aspect_a, 1.0);
-    const float x_b = mod(frag_linesofar / pattern_size_b.x * aspect_b, 1.0);
-
     const float y = 0.5 * frag_normal.y + 0.5;
 
     const vec2 texel_size = 1.0 / tileProps.texsize;
     const vec2 half_texel = 0.5 * texel_size;
-    vec2 pos_a = atlas_pos((pattern_tl_a - 1.0) * texel_size, (pattern_br_a - pattern_tl_a + 2.0) * texel_size * vec2(x_a, y));
-    pos_a = clamp(pos_a, (pattern_tl_a - 1.0) * texel_size + half_texel, (pattern_br_a + 1.0) * texel_size - half_texel);
-    vec2 pos_b = atlas_pos((pattern_tl_b - 1.0) * texel_size, (pattern_br_b - pattern_tl_b + 2.0) * texel_size * vec2(x_b, y));
-    pos_b = clamp(pos_b, (pattern_tl_b - 1.0) * texel_size + half_texel, (pattern_br_b + 1.0) * texel_size - half_texel);
+    // A crossfade at 0 or 1 shows one pattern, so skip the other.
+    vec4 color_a = vec4(0.0);
+    if (tileProps.fade < 1.0) {
+        const float x_a = mod(frag_linesofar / pattern_size_a.x * aspect_a, 1.0);
+        vec2 pos_a = atlas_pos((pattern_tl_a - 1.0) * texel_size, (pattern_br_a - pattern_tl_a + 2.0) * texel_size * vec2(x_a, y));
+        pos_a = clamp(pos_a, (pattern_tl_a - 1.0) * texel_size + half_texel, (pattern_br_a + 1.0) * texel_size - half_texel);
+        color_a = texture(sampler2D(image0_texture, image0_sampler), pos_a);
+    }
+    vec4 color_b = vec4(0.0);
+    if (tileProps.fade > 0.0) {
+        const float x_b = mod(frag_linesofar / pattern_size_b.x * aspect_b, 1.0);
+        vec2 pos_b = atlas_pos((pattern_tl_b - 1.0) * texel_size, (pattern_br_b - pattern_tl_b + 2.0) * texel_size * vec2(x_b, y));
+        pos_b = clamp(pos_b, (pattern_tl_b - 1.0) * texel_size + half_texel, (pattern_br_b + 1.0) * texel_size - half_texel);
+        color_b = texture(sampler2D(image0_texture, image0_sampler), pos_b);
+    }
 
-    const vec4 color = mix(texture(sampler2D(image0_texture, image0_sampler), pos_a), texture(sampler2D(image0_texture, image0_sampler), pos_b), tileProps.fade);
+    const vec4 color = mix(color_a, color_b, tileProps.fade);
 
     out_color = color * (alpha * opacity);
 #endif

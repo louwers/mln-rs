@@ -263,13 +263,19 @@ in mediump vec2 v_pos_a;
 in mediump vec2 v_pos_b;
 
 void main() {
-    vec2 imagecoord = mod(v_pos_a, 1.0);
-    highp vec2 pos = atlas_pos(u_pattern_tl_a / u_pattern_atlas_texsize, (u_pattern_br_a - u_pattern_tl_a) / u_pattern_atlas_texsize * imagecoord);
-    vec4 color1 = texture(u_image, pos);
-
-    vec2 imagecoord_b = mod(v_pos_b, 1.0);
-    highp vec2 pos2 = atlas_pos(u_pattern_tl_b / u_pattern_atlas_texsize, (u_pattern_br_b - u_pattern_tl_b) / u_pattern_atlas_texsize * imagecoord_b);
-    vec4 color2 = texture(u_image, pos2);
+    // A crossfade at 0 or 1 shows one pattern, so skip the other.
+    vec4 color1 = vec4(0.0);
+    if (u_mix < 1.0) {
+        vec2 imagecoord = mod(v_pos_a, 1.0);
+        highp vec2 pos = atlas_pos(u_pattern_tl_a / u_pattern_atlas_texsize, (u_pattern_br_a - u_pattern_tl_a) / u_pattern_atlas_texsize * imagecoord);
+        color1 = texture(u_image, pos);
+    }
+    vec4 color2 = vec4(0.0);
+    if (u_mix > 0.0) {
+        vec2 imagecoord_b = mod(v_pos_b, 1.0);
+        highp vec2 pos2 = atlas_pos(u_pattern_tl_b / u_pattern_atlas_texsize, (u_pattern_br_b - u_pattern_tl_b) / u_pattern_atlas_texsize * imagecoord_b);
+        color2 = texture(u_image, pos2);
+    }
 
     fragColor = mix(color1, color2, u_mix) * u_opacity;
 
@@ -1303,13 +1309,19 @@ highp vec4 pattern_to = u_pattern_to;
     vec2 pattern_tl_b = pattern_to.xy;
     vec2 pattern_br_b = pattern_to.zw;
 
-    vec2 imagecoord = mod(v_pos_a, 1.0);
-    highp vec2 pos = atlas_pos(pattern_tl_a / u_texsize, (pattern_br_a - pattern_tl_a) / u_texsize * imagecoord);
-    vec4 color1 = texture(u_image, pos);
-
-    vec2 imagecoord_b = mod(v_pos_b, 1.0);
-    highp vec2 pos2 = atlas_pos(pattern_tl_b / u_texsize, (pattern_br_b - pattern_tl_b) / u_texsize * imagecoord_b);
-    vec4 color2 = texture(u_image, pos2);
+    // A crossfade at 0 or 1 shows one pattern, so skip the other.
+    vec4 color1 = vec4(0.0);
+    if (u_fade < 1.0) {
+        vec2 imagecoord = mod(v_pos_a, 1.0);
+        highp vec2 pos = atlas_pos(pattern_tl_a / u_texsize, (pattern_br_a - pattern_tl_a) / u_texsize * imagecoord);
+        color1 = texture(u_image, pos);
+    }
+    vec4 color2 = vec4(0.0);
+    if (u_fade > 0.0) {
+        vec2 imagecoord_b = mod(v_pos_b, 1.0);
+        highp vec2 pos2 = atlas_pos(pattern_tl_b / u_texsize, (pattern_br_b - pattern_tl_b) / u_texsize * imagecoord_b);
+        color2 = texture(u_image, pos2);
+    }
 
     vec4 mixedColor = mix(color1, color2, u_fade);
 
@@ -1536,13 +1548,19 @@ highp vec4 pattern_to = u_pattern_to;
     vec2 pattern_tl_b = pattern_to.xy;
     vec2 pattern_br_b = pattern_to.zw;
 
-    vec2 imagecoord = mod(v_pos_a, 1.0);
-    highp vec2 pos = atlas_pos(pattern_tl_a / u_texsize, (pattern_br_a - pattern_tl_a) / u_texsize * imagecoord);
-    vec4 color1 = texture(u_image, pos);
-
-    vec2 imagecoord_b = mod(v_pos_b, 1.0);
-    highp vec2 pos2 = atlas_pos(pattern_tl_b / u_texsize, (pattern_br_b - pattern_tl_b) / u_texsize * imagecoord_b);
-    vec4 color2 = texture(u_image, pos2);
+    // A crossfade at 0 or 1 shows one pattern, so skip the other.
+    vec4 color1 = vec4(0.0);
+    if (u_fade < 1.0) {
+        vec2 imagecoord = mod(v_pos_a, 1.0);
+        highp vec2 pos = atlas_pos(pattern_tl_a / u_texsize, (pattern_br_a - pattern_tl_a) / u_texsize * imagecoord);
+        color1 = texture(u_image, pos);
+    }
+    vec4 color2 = vec4(0.0);
+    if (u_fade > 0.0) {
+        vec2 imagecoord_b = mod(v_pos_b, 1.0);
+        highp vec2 pos2 = atlas_pos(pattern_tl_b / u_texsize, (pattern_br_b - pattern_tl_b) / u_texsize * imagecoord_b);
+        color2 = texture(u_image, pos2);
+    }
 
     vec4 mixedColor = mix(color1, color2, u_fade);
 
@@ -1858,13 +1876,19 @@ highp vec4 pattern_to = u_pattern_to;
     vec2 pattern_tl_b = pattern_to.xy;
     vec2 pattern_br_b = pattern_to.zw;
 
-    vec2 imagecoord = mod(v_pos_a, 1.0);
-    highp vec2 pos = atlas_pos(pattern_tl_a / u_texsize, (pattern_br_a - pattern_tl_a) / u_texsize * imagecoord);
-    vec4 color1 = texture(u_image, pos);
-
-    vec2 imagecoord_b = mod(v_pos_b, 1.0);
-    highp vec2 pos2 = atlas_pos(pattern_tl_b / u_texsize, (pattern_br_b - pattern_tl_b) / u_texsize * imagecoord_b);
-    vec4 color2 = texture(u_image, pos2);
+    // A crossfade at 0 or 1 shows one pattern, so skip the other.
+    vec4 color1 = vec4(0.0);
+    if (u_fade < 1.0) {
+        vec2 imagecoord = mod(v_pos_a, 1.0);
+        highp vec2 pos = atlas_pos(pattern_tl_a / u_texsize, (pattern_br_a - pattern_tl_a) / u_texsize * imagecoord);
+        color1 = texture(u_image, pos);
+    }
+    vec4 color2 = vec4(0.0);
+    if (u_fade > 0.0) {
+        vec2 imagecoord_b = mod(v_pos_b, 1.0);
+        highp vec2 pos2 = atlas_pos(pattern_tl_b / u_texsize, (pattern_br_b - pattern_tl_b) / u_texsize * imagecoord_b);
+        color2 = texture(u_image, pos2);
+    }
 
     // find distance to outline for alpha interpolation
 
@@ -2509,13 +2533,19 @@ highp vec4 pattern_to = u_pattern_to;
     vec2 pattern_tl_b = pattern_to.xy;
     vec2 pattern_br_b = pattern_to.zw;
 
-    vec2 imagecoord = mod(v_pos_a, 1.0);
-    highp vec2 pos = atlas_pos(pattern_tl_a / u_texsize, (pattern_br_a - pattern_tl_a) / u_texsize * imagecoord);
-    vec4 color1 = texture(u_image, pos);
-
-    vec2 imagecoord_b = mod(v_pos_b, 1.0);
-    highp vec2 pos2 = atlas_pos(pattern_tl_b / u_texsize, (pattern_br_b - pattern_tl_b) / u_texsize * imagecoord_b);
-    vec4 color2 = texture(u_image, pos2);
+    // A crossfade at 0 or 1 shows one pattern, so skip the other.
+    vec4 color1 = vec4(0.0);
+    if (u_fade < 1.0) {
+        vec2 imagecoord = mod(v_pos_a, 1.0);
+        highp vec2 pos = atlas_pos(pattern_tl_a / u_texsize, (pattern_br_a - pattern_tl_a) / u_texsize * imagecoord);
+        color1 = texture(u_image, pos);
+    }
+    vec4 color2 = vec4(0.0);
+    if (u_fade > 0.0) {
+        vec2 imagecoord_b = mod(v_pos_b, 1.0);
+        highp vec2 pos2 = atlas_pos(pattern_tl_b / u_texsize, (pattern_br_b - pattern_tl_b) / u_texsize * imagecoord_b);
+        color2 = texture(u_image, pos2);
+    }
 
     if (u_sdf > 0.5) {
         highp float sdf_edge = (256.0 - 64.0) / 256.0;
@@ -4022,19 +4052,27 @@ lowp float opacity = u_opacity;
     float blur2 = (blur + 1.0 / DEVICE_PIXEL_RATIO) * v_gamma_scale;
     float alpha = clamp(min(dist - (v_width2.t - blur2), v_width2.s - dist) / blur2, 0.0, 1.0);
 
-    float x_a = mod(v_linesofar / pattern_size_a.x * aspect_a, 1.0);
-    float x_b = mod(v_linesofar / pattern_size_b.x * aspect_b, 1.0);
-
     float y = 0.5 * v_normal.y + 0.5;
 
     vec2 texel_size = 1.0 / u_texsize;
     vec2 half_texel = 0.5 * texel_size;
-    highp vec2 pos_a = atlas_pos((pattern_tl_a - 1.0) * texel_size, (pattern_br_a - pattern_tl_a + 2.0) * texel_size * vec2(x_a, y));
-    pos_a = clamp(pos_a, (pattern_tl_a - 1.0) * texel_size + half_texel, (pattern_br_a + 1.0) * texel_size - half_texel);
-    highp vec2 pos_b = atlas_pos((pattern_tl_b - 1.0) * texel_size, (pattern_br_b - pattern_tl_b + 2.0) * texel_size * vec2(x_b, y));
-    pos_b = clamp(pos_b, (pattern_tl_b - 1.0) * texel_size + half_texel, (pattern_br_b + 1.0) * texel_size - half_texel);
+    // A crossfade at 0 or 1 shows one pattern, so skip the other.
+    vec4 color_a = vec4(0.0);
+    if (u_fade < 1.0) {
+        float x_a = mod(v_linesofar / pattern_size_a.x * aspect_a, 1.0);
+        highp vec2 pos_a = atlas_pos((pattern_tl_a - 1.0) * texel_size, (pattern_br_a - pattern_tl_a + 2.0) * texel_size * vec2(x_a, y));
+        pos_a = clamp(pos_a, (pattern_tl_a - 1.0) * texel_size + half_texel, (pattern_br_a + 1.0) * texel_size - half_texel);
+        color_a = texture(u_image, pos_a);
+    }
+    vec4 color_b = vec4(0.0);
+    if (u_fade > 0.0) {
+        float x_b = mod(v_linesofar / pattern_size_b.x * aspect_b, 1.0);
+        highp vec2 pos_b = atlas_pos((pattern_tl_b - 1.0) * texel_size, (pattern_br_b - pattern_tl_b + 2.0) * texel_size * vec2(x_b, y));
+        pos_b = clamp(pos_b, (pattern_tl_b - 1.0) * texel_size + half_texel, (pattern_br_b + 1.0) * texel_size - half_texel);
+        color_b = texture(u_image, pos_b);
+    }
 
-    vec4 color = mix(texture(u_image, pos_a), texture(u_image, pos_b), u_fade);
+    vec4 color = mix(color_a, color_b, u_fade);
 
     fragColor = color * alpha * opacity;
 
