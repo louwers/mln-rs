@@ -227,6 +227,9 @@ impl Context {
     pub(crate) fn upload_indexes(&mut self, key: IndexesKey) -> Result<(), GpuError> {
         let Context { backend, stats, released, indexes, .. } = self;
         let indexes = indexes.get_mut(key).ok_or(GpuError::UnknownId("indexes"))?;
+        if indexes.buffer().is_some() {
+            return Ok(());
+        }
         released.uncount(stats);
         indexes.upload_to(&mut *backend.gpu(), released, stats)
     }
@@ -397,7 +400,6 @@ fn bind(
     gpu: &mut dyn Gpu,
     key: TextureKey,
 ) -> Result<(TextureId, SamplerId), GpuError> {
-    released.uncount(stats);
     let texture = textures.get_mut(key).ok_or(GpuError::UnknownId("texture"))?;
     let id = texture.bind(gpu, stats, released)?;
     let sampler = if let Some(sampler) = texture.sampler_id() {

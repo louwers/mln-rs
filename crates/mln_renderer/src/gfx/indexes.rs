@@ -96,6 +96,9 @@ impl Indexes {
     /// Writes the indexes to a buffer of `context`'s, unless they have one,
     /// and frees them. Indexes that fail to upload stay for the next try.
     pub(crate) fn upload(&mut self, context: &mut Context) -> Result<(), GpuError> {
+        if self.buffer().is_some() {
+            return Ok(());
+        }
         context.upload_own_indexes(self)
     }
 

@@ -196,7 +196,7 @@ impl DrawObjects {
 
     fn upload_in(&mut self, context: &mut Context) -> Result<(), GpuError> {
         let shader = &*self.shader;
-        if self.indexes.len(context) == 0 && self.indexes.buffer(context).is_none() {
+        if self.indexes.buffer(context).is_none() && self.indexes.len(context) == 0 {
             debug_assert!(false, "a draw of {} has no index data", shader.name());
             return Ok(());
         }
