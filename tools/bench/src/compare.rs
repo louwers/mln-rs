@@ -415,6 +415,10 @@ fn compare_scenario(
             "the sides ran in different environments ({})",
             environment.differences(&run.environment).join("; ")
         ));
+    } else if timed_gpu(base_counts) != timed_gpu(candidate_runs) {
+        // A commit from before the libraries timed the GPU, against one
+        // that does.
+        not_comparable = Some("only one side timed the GPU, whose timestamps cost work of their own".to_owned());
     }
     let values = |runs: &[Run], name: &str| -> Vec<f64> {
         runs.iter().filter_map(|run| run.metric(name)).map(|metric| metric.value).collect()
@@ -476,6 +480,12 @@ fn compare_scenario(
         candidate_runs: candidate_runs.len(),
         metrics,
     }
+}
+
+/// Whether `runs` timed the GPU's render passes, which costs instructions
+/// and allocations of its own.
+fn timed_gpu(runs: &[Run]) -> bool {
+    runs.iter().any(|run| run.metric("gpu").is_some())
 }
 
 impl ScenarioComparison {
@@ -935,6 +945,17 @@ mod tests {
         let mut other = run(2000.0, 1.0);
         other.environment.cpu = "another".to_owned();
         let comparison = compare_scenario(&SCENARIO, &base_of(&base), &[other], None);
+        assert!(comparison.not_comparable.is_some());
+        assert_eq!(moved(&comparison, "instructions"), None);
+    }
+
+    #[test]
+    fn a_side_that_didnt_time_the_gpu_is_not_compared() {
+        let none = BTreeMap::new();
+        let base_runs = [run(1000.0, 1.0), run(1000.0, 1.0), run(1000.0, 1.0)];
+        let mut untimed = run(1050.0, 1.0);
+        untimed.metrics.retain(|metric| metric.name != "gpu");
+        let comparison = compare_scenario(&SCENARIO, &base(&base_runs, &none), &[untimed], None);
         assert!(comparison.not_comparable.is_some());
         assert_eq!(moved(&comparison, "instructions"), None);
     }

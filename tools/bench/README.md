@@ -352,7 +352,9 @@ them.
 Each run records its environment: the OS, the CPU, how it counted instructions,
 the GPU it drew on and its backend, whether that GPU is a CPU rasterizer, and
 the fixtures it read. A scenario whose sides ran in different environments isn't
-compared.
+compared, nor one that only one side timed the GPU in (a commit from before the
+libraries timed it), since the timestamps cost instructions and allocations of
+their own.
 
 ## Reading a report
 

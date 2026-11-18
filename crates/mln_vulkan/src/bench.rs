@@ -51,6 +51,8 @@ pub(crate) struct Timer {
     /// The pools of submissions, by serial, and how many passes each timed.
     in_flight: Vec<(u64, vk::QueryPool, u32)>,
     free: Vec<vk::QueryPool>,
+    /// The timestamps read back last, whose memory the next read reuses.
+    values: Vec<u64>,
 }
 
 impl Timer {
@@ -71,7 +73,14 @@ impl Timer {
         }
         TIME.lock().get_or_insert_default();
         let mask = if bits >= 64 { u64::MAX } else { (1 << bits) - 1 };
-        Some(Timer { period: f64::from(period), mask, recording: None, in_flight: Vec::new(), free: Vec::new() })
+        Some(Timer {
+            period: f64::from(period),
+            mask,
+            recording: None,
+            in_flight: Vec::new(),
+            free: Vec::new(),
+            values: Vec::new(),
+        })
     }
 
     /// Readies the pool of the batch being recorded in `command_buffer`,
@@ -137,7 +146,7 @@ impl Timer {
     /// finished.
     pub(crate) fn finished(&mut self, device: &ash::Device, serial: u64) {
         let mut time = Duration::ZERO;
-        let mut values = Vec::new();
+        let values = &mut self.values;
         self.in_flight.retain(|&(submitted, pool, passes)| {
             if submitted > serial {
                 return true;
@@ -145,7 +154,7 @@ impl Timer {
             values.resize(2 * passes as usize, 0u64);
             // SAFETY: the pool's submission has finished, which wrote both
             // timestamps of each pass it counts.
-            let read = unsafe { device.get_query_pool_results(pool, 0, &mut values, vk::QueryResultFlags::TYPE_64) };
+            let read = unsafe { device.get_query_pool_results(pool, 0, values, vk::QueryResultFlags::TYPE_64) };
             if read.is_ok() {
                 let ticks: u64 =
                     values.as_chunks::<2>().0.iter().map(|[begin, end]| end.wrapping_sub(*begin) & self.mask).sum();
