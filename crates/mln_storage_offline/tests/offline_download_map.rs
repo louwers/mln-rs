@@ -26,7 +26,7 @@ use mln_util::pool::Pool;
 use mln_util::queue::Queue;
 
 fn cpp_path(relative: &str) -> PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join(relative)
+    std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("testdata").join(relative)
 }
 
 /// `test.response(path)`.

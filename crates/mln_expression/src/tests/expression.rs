@@ -13,7 +13,7 @@ use crate::{Functions, dsl};
 /// A path relative to the C++ repository, in the copy of the files these
 /// tests read (testdata/).
 fn cpp_path(relative: &str) -> PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join(relative)
+    std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("testdata").join(relative)
 }
 
 fn read_file(relative: &str) -> String {
@@ -24,10 +24,10 @@ fn read_file(relative: &str) -> String {
 // gtest: Expression.IsExpression
 #[test]
 fn is_expression_() {
-    // The style spec copy that style-codegen generates from.
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools/style-codegen/v8.json");
-    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    let spec: serde_json::Value = serde_json::from_str(&text).unwrap();
+    // The style spec copy that style-codegen generates from, which lies outside
+    // this package, so the test carries it rather than reading it where it runs.
+    let text = include_str!("../../../../tools/style-codegen/v8.json");
+    let spec: serde_json::Value = serde_json::from_str(text).unwrap();
     let all_expressions = spec["expression_name"]["values"].as_object().expect("expression_name.values");
 
     for name in all_expressions.keys() {

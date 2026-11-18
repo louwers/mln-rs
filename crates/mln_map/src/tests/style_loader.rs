@@ -13,7 +13,11 @@ use crate::{Map, MapEvent, MapOptions};
 
 /// A path of this crate's test data.
 fn testdata(relative: &str) -> String {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join(relative).to_string_lossy().into_owned()
+    std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
+        .join("testdata")
+        .join(relative)
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn map_over(file_source: Arc<StubFileSource>, options: MapOptions) -> Map {

@@ -10,8 +10,8 @@ use serde_json::Value as Json;
 use crate::{Options, Supercluster};
 
 fn parse_features() -> Vec<Feature<f64>> {
-    let path =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/vendor/supercluster/test/fixtures/places.json");
+    let path = std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
+        .join("testdata/vendor/supercluster/test/fixtures/places.json");
     let d: Json = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
 
     let json_features = d["features"].as_array().unwrap();

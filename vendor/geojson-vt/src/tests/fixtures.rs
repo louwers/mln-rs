@@ -19,7 +19,7 @@ use serde_json::Value as Json;
 use crate::{EMPTY_TILE, GeoJSONVT, Options, TileFeatures, TileOptions, geojson_to_tile};
 
 fn load_file(name: &str) -> String {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+    let path = std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
         .join("testdata/vendor/maplibre-native-base/deps/geojson-vt-cpp")
         .join(name);
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))

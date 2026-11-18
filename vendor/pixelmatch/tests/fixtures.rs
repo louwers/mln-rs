@@ -5,7 +5,8 @@
 use std::path::{Path, PathBuf};
 
 fn fixture_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/vendor/maplibre-native-base/deps/pixelmatch-cpp/test/fixtures")
+    Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
+        .join("testdata/vendor/maplibre-native-base/deps/pixelmatch-cpp/test/fixtures")
 }
 
 fn read_image(name: &str) -> Vec<u8> {

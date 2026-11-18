@@ -44,7 +44,7 @@ use parking_lot::{Mutex, MutexGuard};
 
 /// testdata/, the copy of the C++ repository's files these tests read.
 pub(crate) fn cpp_root() -> PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata")
+    std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("testdata")
 }
 
 /// Reads the file at `path`, relative to [`cpp_root`].

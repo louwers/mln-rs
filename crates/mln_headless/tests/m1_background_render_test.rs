@@ -17,7 +17,8 @@ use mln_util::queue::Queue;
 use mln_util::size::Size;
 
 fn render_tests_dir() -> PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/metrics/integration/render-tests")
+    std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
+        .join("testdata/metrics/integration/render-tests")
 }
 
 /// Returns (difference, allowed).

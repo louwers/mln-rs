@@ -17,7 +17,7 @@ use crate::renderer_event::RendererEvent;
 
 /// Reads a test fixture from the copy of the C++ files (testdata/).
 fn read_file(relative: &str) -> Vec<u8> {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join(relative);
+    let path = std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("testdata").join(relative);
     std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 

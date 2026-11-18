@@ -28,7 +28,8 @@ use crate::style::Style;
 use crate::transition_options::TransitionOptions;
 
 fn render_tests_dir() -> PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/metrics/integration/render-tests")
+    std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
+        .join("testdata/metrics/integration/render-tests")
 }
 
 fn load(test: &str) -> Style {

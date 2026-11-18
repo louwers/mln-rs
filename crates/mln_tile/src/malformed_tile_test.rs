@@ -10,7 +10,7 @@ use proptest::prelude::*;
 use crate::{MltTile, MvtTile, TileData};
 
 fn read_file(path: &str) -> Vec<u8> {
-    std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join(path)).unwrap()
+    std::fs::read(Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("testdata").join(path)).unwrap()
 }
 
 static MVT: LazyLock<Vec<u8>> = LazyLock::new(|| read_file("test/fixtures/map/issue12432/0-0-0.mvt"));

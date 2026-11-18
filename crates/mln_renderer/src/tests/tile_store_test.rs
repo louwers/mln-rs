@@ -60,7 +60,8 @@ impl FileSource for Held {
 
 /// A response with the bytes of a vector tile with a "water" layer.
 fn water() -> Response {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/test/fixtures/map/issue12432/0-0-0.mvt");
+    let path = std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
+        .join("testdata/test/fixtures/map/issue12432/0-0-0.mvt");
     let mut response = Response::new();
     response.data = Some(Arc::new(std::fs::read(path).expect("the tile")));
     response.etag = Some("a".to_owned());

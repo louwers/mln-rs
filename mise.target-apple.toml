@@ -1,0 +1,23 @@
+# Builds for Apple's phones and headsets and their simulators, and runs tests
+# on a simulator, as in `cargo nextest run --target aarch64-apple-ios-sim`.
+# Select it with `mise -E target-apple`, or in every command with
+# `env = ["target-apple"]` in an untracked .miserc.local.toml. Needs Xcode.
+
+[tools]
+# devices-cli gives this checkout its own simulator and runs each test in it.
+# The go backend builds it with this Go.
+"core:go" = "1.27.3"
+"go:github.com/sargunv/devices-cli" = "v0.0.0-20261118002609-fa79cf5c1292"
+
+[env]
+# Cargo's runners: a test gets its package directory and the RUST_ and MLN_
+# variables.
+CARGO_TARGET_AARCH64_APPLE_IOS_SIM_RUNNER = "devices-cli exec ios --env CARGO_MANIFEST_DIR --env RUST_* --env MLN_* --"
+CARGO_TARGET_AARCH64_APPLE_VISIONOS_SIM_RUNNER = "devices-cli exec visionos --env CARGO_MANIFEST_DIR --env RUST_* --env MLN_* --"
+
+[hooks]
+postinstall = { task = "setup:target-apple" }
+
+[tasks."setup:target-apple"]
+description = "Install the Rust targets for Apple's phones, headsets and simulators"
+run = "rustup target add aarch64-apple-ios aarch64-apple-ios-sim aarch64-apple-ios-macabi aarch64-apple-visionos aarch64-apple-visionos-sim"

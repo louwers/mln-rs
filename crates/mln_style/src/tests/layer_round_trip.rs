@@ -190,7 +190,7 @@ fn boolean_filters() {
 /// that converts.
 #[test]
 fn style_parser_fixture_layers() {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/test/fixtures/style_parser");
+    let dir = Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("testdata/test/fixtures/style_parser");
     let mut count = 0;
     for entry in std::fs::read_dir(dir).unwrap() {
         let path = entry.unwrap().path();

@@ -19,7 +19,7 @@ use mln_util::logging::{Event, EventSeverity, Log, Observer};
 /// (testdata/).
 #[must_use]
 pub(crate) fn cpp_path(relative: &str) -> PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join(relative)
+    std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("testdata").join(relative)
 }
 
 /// Reads a C++ test fixture.

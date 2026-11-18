@@ -224,7 +224,8 @@ fn set_mlt_tile_data() {
     tiles.set_necessity(&root, TileNecessity::Required);
     test.local_pool.run_all();
 
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/test/fixtures/map/issue12432/0-0-0.mlt");
+    let path = std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
+        .join("testdata/test/fixtures/map/issue12432/0-0-0.mlt");
     let data = Arc::new(std::fs::read(path).unwrap());
     loader.set_tile_data(root.canonical, (Some(data), TileDataFormat::Mlt));
     while !tiles.tile().is_complete() {

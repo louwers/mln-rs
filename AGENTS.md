@@ -59,6 +59,21 @@ A benchmark scenario answers a lasting question about a stage or an operation
 (tools/bench/README.md); don't add one to prove one pull request's claim. An
 exact expectation, such as "an idle map draws no frames", belongs in a test.
 
+## Other targets
+
+The mise environments `target-apple` and `target-android` add the toolchains,
+SDKs and test devices for Apple's phones and headsets and for Android. Select
+one per command (`mise -E target-android run ...`) or for good with
+`env = ["target-android"]` in an untracked `.miserc.local.toml`; `mise install`
+then installs what it needs. With one selected, Cargo builds for its targets and
+runs their tests on this checkout's own simulator or emulator through
+[devices-cli](https://github.com/sargunv/devices-cli), as in
+`cargo nextest run --target aarch64-linux-android -p mln-rs-style`.
+
+A test that reads files of its package finds them through the
+`CARGO_MANIFEST_DIR` that Cargo sets when it runs the test, not
+`env!("CARGO_MANIFEST_DIR")`: on Android the package is a copy on the device.
+
 ## Documentation
 
 Describe the code as it is, for a reader who doesn't know its history. Markdown

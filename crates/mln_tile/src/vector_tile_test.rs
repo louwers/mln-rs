@@ -12,7 +12,7 @@ use mln_util::geometry::FeatureType;
 use crate::{MltTile, MvtTile, TileData, TileError};
 
 fn read_file(path: &str) -> Vec<u8> {
-    std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join(path)).unwrap()
+    std::fs::read(Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("testdata").join(path)).unwrap()
 }
 
 // gtest: VectorTileData.ParseResults

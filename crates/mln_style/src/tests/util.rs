@@ -73,7 +73,7 @@ impl Drop for FixtureLog {
 /// Reads a file of testdata/, the copy of the C++ repository's files that
 /// these tests read, by its path relative to the repository.
 pub(crate) fn read_file(relative: &str) -> String {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join(relative);
+    let path = std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("testdata").join(relative);
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 

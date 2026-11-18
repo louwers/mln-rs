@@ -1,0 +1,55 @@
+# Builds for Android and runs tests on an emulator or a device, as in
+# `cargo nextest run --target aarch64-linux-android`. Select it with
+# `mise -E target-android`, or in every command with
+# `env = ["target-android"]` in an untracked .miserc.local.toml. Runs on macOS
+# and x86_64 Linux, the hosts that the NDK and android-cli publish for.
+
+[tools]
+# devices-cli gives this checkout its own emulator and runs each test on it,
+# or on a device assigned with `devices-cli assign`. The go backend builds it
+# with this Go.
+"core:go" = "1.27.3"
+"go:github.com/sargunv/devices-cli" = "v0.0.0-20261118002609-fa79cf5c1292"
+# Google's SDK installer, which needs no JDK: setup:target-android installs the
+# NDK with it, and devices-cli the emulator and its system images.
+android-cli = "1.1.16919734"
+
+[env]
+# The SDK that Android Studio and devices-cli share: ANDROID_HOME, else the
+# platform's usual place, where setup:target-android installs the NDK beside
+# any others.
+ANDROID_HOME = "{% if get_env(name='ANDROID_HOME', default='') != '' %}{{ get_env(name='ANDROID_HOME') }}{% elif os() == 'macos' %}{{ env.HOME }}/Library/Android/sdk{% else %}{{ env.HOME }}/Android/Sdk{% endif %}"
+MLN_ANDROID_NDK = "29.0.14206865"
+ANDROID_NDK_HOME = "{{ env.ANDROID_HOME }}/ndk/{{ env.MLN_ANDROID_NDK }}"
+# The NDK's compilers, one per target, for API level 26 and later: the tests
+# link AHardwareBuffer, which arrived in 26. The libraries load it when they
+# run, so maplibre-native-ffi still builds them for 24.
+MLN_ANDROID_API = "26"
+MLN_ANDROID_NDK_BIN = "{{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/{% if os() == 'macos' %}darwin{% else %}linux{% endif %}-x86_64/bin"
+CC_aarch64_linux_android = "{{ env.MLN_ANDROID_NDK_BIN }}/aarch64-linux-android{{ env.MLN_ANDROID_API }}-clang"
+CC_armv7_linux_androideabi = "{{ env.MLN_ANDROID_NDK_BIN }}/armv7a-linux-androideabi{{ env.MLN_ANDROID_API }}-clang"
+CC_x86_64_linux_android = "{{ env.MLN_ANDROID_NDK_BIN }}/x86_64-linux-android{{ env.MLN_ANDROID_API }}-clang"
+CC_i686_linux_android = "{{ env.MLN_ANDROID_NDK_BIN }}/i686-linux-android{{ env.MLN_ANDROID_API }}-clang"
+AR_aarch64_linux_android = "{{ env.MLN_ANDROID_NDK_BIN }}/llvm-ar"
+AR_armv7_linux_androideabi = "{{ env.MLN_ANDROID_NDK_BIN }}/llvm-ar"
+AR_x86_64_linux_android = "{{ env.MLN_ANDROID_NDK_BIN }}/llvm-ar"
+AR_i686_linux_android = "{{ env.MLN_ANDROID_NDK_BIN }}/llvm-ar"
+CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER = "{{ env.CC_aarch64_linux_android }}"
+CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER = "{{ env.CC_armv7_linux_androideabi }}"
+CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER = "{{ env.CC_x86_64_linux_android }}"
+CARGO_TARGET_I686_LINUX_ANDROID_LINKER = "{{ env.CC_i686_linux_android }}"
+# Cargo's runners, for the 64-bit targets, whose emulators run on a host of the
+# same architecture: a test gets a copy of its package directory and the RUST_
+# and MLN_ variables.
+CARGO_TARGET_AARCH64_LINUX_ANDROID_RUNNER = "devices-cli exec android --api 36 --abi arm64-v8a --sync-env CARGO_MANIFEST_DIR --env RUST_* --env MLN_* --"
+CARGO_TARGET_X86_64_LINUX_ANDROID_RUNNER = "devices-cli exec android --api 36 --abi x86_64 --sync-env CARGO_MANIFEST_DIR --env RUST_* --env MLN_* --"
+
+[hooks]
+postinstall = { task = "setup:target-android" }
+
+[tasks."setup:target-android"]
+description = "Install the Rust targets for Android, and the NDK into ANDROID_HOME"
+run = [
+  "rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android",
+  '[ -d "$ANDROID_NDK_HOME" ] || android --sdk="$ANDROID_HOME" sdk install "ndk/$MLN_ANDROID_NDK"',
+]

@@ -11,7 +11,7 @@ use parking_lot::Mutex;
 /// A path of the C++ repository, in the copy of its files these tests read
 /// (testdata/).
 pub(crate) fn cpp_path(relative: &str) -> PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join(relative)
+    std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("testdata").join(relative)
 }
 
 pub(crate) fn read_file(relative: &str) -> Vec<u8> {

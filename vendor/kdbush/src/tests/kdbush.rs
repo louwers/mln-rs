@@ -7,7 +7,8 @@ type TPoint = (i32, i32);
 
 fn test_source() -> String {
     std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/vendor/kdbush.hpp/test.cpp"),
+        std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
+            .join("testdata/vendor/kdbush.hpp/test.cpp"),
     )
     .unwrap()
 }

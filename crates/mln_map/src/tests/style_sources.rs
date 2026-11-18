@@ -331,7 +331,8 @@ fn image_source_image_update() {
     let file_source = StubFileSource::on_queue(&run_loop, ResponseType::Asynchronous);
     file_source.set_global_response(|resource| {
         assert_eq!("http://url", resource.url);
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/test/fixtures/image/no_profile.png");
+        let path = std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
+            .join("testdata/test/fixtures/image/no_profile.png");
         Some(data_response(&std::fs::read(path).unwrap()))
     });
     let mut map = map_over(&file_source);

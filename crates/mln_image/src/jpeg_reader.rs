@@ -84,7 +84,7 @@ mod tests {
     use super::*;
 
     fn read(path: &str) -> Vec<u8> {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(path);
+        let path = std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join(path);
         std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
     }
 

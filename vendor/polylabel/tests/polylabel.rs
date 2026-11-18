@@ -4,8 +4,9 @@ use geometry::Point;
 use polylabel::{Polygon, polylabel};
 
 fn fixture(name: &str) -> Polygon<f64> {
-    let path =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/vendor/polylabel/test/fixtures").join(name);
+    let path = std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
+        .join("testdata/vendor/polylabel/test/fixtures")
+        .join(name);
     let d: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
 
     d.as_array()

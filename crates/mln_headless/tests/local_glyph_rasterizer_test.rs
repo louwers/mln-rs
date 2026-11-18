@@ -21,7 +21,7 @@ use mln_util::queue::Queue;
 use mln_util::size::Size;
 
 fn cpp_path(relative: &str) -> PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join(relative)
+    std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("testdata").join(relative)
 }
 
 fn read_file(relative: &str) -> Vec<u8> {

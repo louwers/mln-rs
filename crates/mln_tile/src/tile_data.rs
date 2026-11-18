@@ -222,7 +222,9 @@ mod tests {
     use super::*;
 
     fn fixture(name: &str) -> Arc<Vec<u8>> {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/test/fixtures/map/issue12432").join(name);
+        let path = Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
+            .join("testdata/test/fixtures/map/issue12432")
+            .join(name);
         Arc::new(std::fs::read(path).unwrap())
     }
 

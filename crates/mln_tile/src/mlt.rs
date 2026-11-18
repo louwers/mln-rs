@@ -678,7 +678,8 @@ mod tests {
     /// Clones share one decoding, which threads may race to make.
     #[test]
     fn clones_share_the_decoded_layers() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/test/fixtures/map/issue12432/0-0-0.mlt");
+        let path = Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
+            .join("testdata/test/fixtures/map/issue12432/0-0-0.mlt");
         let tile = MltTile::new(Arc::new(std::fs::read(path).unwrap()), false);
         let layers: Vec<usize> = std::thread::scope(|scope| {
             let threads: Vec<_> = (0..4)

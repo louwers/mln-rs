@@ -11,7 +11,7 @@ use crate::parser::Parser;
 use crate::style_property::Kind;
 
 fn fixtures_dir() -> PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/test/fixtures/style_parser")
+    std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("testdata/test/fixtures/style_parser")
 }
 
 /// The name of every `<name>.info.json` in the fixture directory.
