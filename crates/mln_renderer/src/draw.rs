@@ -205,18 +205,13 @@ impl DrawObjects {
         }
         self.indexes.upload(context)?;
 
-        let force = self.attribute_update_time.is_none();
         let update_time = self.attribute_update_time;
         let modified = move |context: &Context, attrs: &VertexAttributeArray| {
             update_time.is_none_or(|time| upload::modified_after(context, attrs, time))
         };
         if std::mem::take(&mut self.vertex_attributes_replaced) || modified(context, &self.vertex_attributes) {
-            let mut bindings = upload::build_attribute_bindings(
-                context,
-                shader.vertex_attributes(),
-                &mut self.vertex_attributes,
-                force,
-            )?;
+            let mut bindings =
+                upload::build_attribute_bindings(context, shader.vertex_attributes(), &mut self.vertex_attributes)?;
             bind_default_values(context, &mut bindings, self.vertex_count)?;
             if self.attribute_bindings != bindings {
                 self.attribute_bindings = bindings;
@@ -227,7 +222,7 @@ impl DrawObjects {
 
         if let Some(attrs) = self.instance_attributes.as_mut().filter(|attrs| modified(context, attrs)) {
             let instance_count = attrs.min_count();
-            let mut bindings = upload::build_attribute_bindings(context, shader.instance_attributes(), attrs, force)?;
+            let mut bindings = upload::build_attribute_bindings(context, shader.instance_attributes(), attrs)?;
             bind_default_values(context, &mut bindings, instance_count)?;
             if self.instance_bindings != bindings {
                 self.instance_bindings = bindings;

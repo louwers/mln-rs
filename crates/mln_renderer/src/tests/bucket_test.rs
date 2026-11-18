@@ -239,7 +239,7 @@ fn fill_bucket_frees_cpu_geometry_after_upload() {
         assert_eq!(stored.bytes().len(), vertex_count * stored.vertex_size());
 
         // A draw's upload writes them to buffers.
-        let buffer = context.upload_vertices(&vertices, false).expect("uploads").expect("a buffer");
+        let buffer = context.upload_vertices(&vertices).expect("uploads").expect("a buffer");
         let mut triangles = DrawIndexes::from(bucket_indexes(&geometry, &bucket.triangles).expect("moved"));
         triangles.upload(context).expect("uploads");
 
@@ -257,7 +257,7 @@ fn fill_bucket_frees_cpu_geometry_after_upload() {
         assert!(vertices.same(&again));
         let indexes = DrawIndexes::from(bucket_indexes(&geometry, &bucket.triangles).expect("moved"));
         assert!(indexes.buffer(context).is_some_and(|buffer| triangles.buffer(context) == Some(buffer)));
-        let reused = context.upload_vertices(&again, true).expect("uploads").expect("a buffer");
+        let reused = context.upload_vertices(&again).expect("uploads").expect("a buffer");
         assert!(Rc::ptr_eq(&buffer, &reused));
 
         // Data-driven paint values are freed too when nothing can rewrite them.
@@ -266,7 +266,7 @@ fn fill_bucket_frees_cpu_geometry_after_upload() {
         let buffer = &binders.interleaved_vertex_buffer;
         let paint = paint_vertices(context, &geometry, buffer, false).expect("moved");
         assert!(paint.count() > 0);
-        assert!(context.upload_vertices(&paint, false).expect("uploads").is_some());
+        assert!(context.upload_vertices(&paint).expect("uploads").is_some());
         assert!(context.vertices(&paint).is_some_and(|stored| !stored.has_data()));
         assert!(buffer.shared_vertex_vector.data().is_empty());
     });
@@ -288,7 +288,7 @@ fn fill_bucket_keeps_paint_data_that_feature_state_rewrites() {
         let buffer = &binders.interleaved_vertex_buffer;
         let paint = paint_vertices(context, &geometry, buffer, binders.depends_on_feature_state()).expect("a copy");
         assert!(paint.count() > 0);
-        assert!(context.upload_vertices(&paint, false).expect("uploads").is_some());
+        assert!(context.upload_vertices(&paint).expect("uploads").is_some());
         assert!(!buffer.shared_vertex_vector.is_moved());
         assert_eq!(buffer.shared_vertex_vector.data().len(), paint.count());
     });
@@ -754,7 +754,7 @@ fn stored_vertices_free_their_data_once_they_have_a_buffer() {
         let vertices = context.add_vertices(vec![[1i16, 2], [3, 4]]).into_shared();
         assert!(context.vertices(&vertices).is_some_and(|stored| stored.has_data() && stored.bytes().len() == 8));
 
-        context.upload_vertices(&vertices, false).expect("uploads").expect("a buffer");
+        context.upload_vertices(&vertices).expect("uploads").expect("a buffer");
         assert!(context.vertices(&vertices).is_some_and(|stored| !stored.has_data() && stored.bytes().is_empty()));
         assert_eq!(vertices.count(), 2);
         // A draw that bound its attributes before the vertices were made
@@ -764,28 +764,37 @@ fn stored_vertices_free_their_data_once_they_have_a_buffer() {
 }
 
 // The holder of typed vertices replaces them with as many vertices of the
-// type, which the next upload writes over their buffer, counted as a buffer
-// update.
+// type: before they have a buffer, the first upload writes the new ones;
+// once they do, the update writes them over it, counted as a buffer update.
 #[test]
 fn typed_vertices_take_updates_of_as_many_vertices() {
     with_context(|context| {
         let typed = context.add_vertices(vec![[1i16, 2], [3, 4]]);
         let vertices = typed.shared().clone();
-        let buffer = context.upload_vertices(&vertices, false).expect("uploads").expect("a buffer");
-        assert!(context.vertices(&vertices).is_some_and(|stored| !stored.has_data()));
-
         assert!(!context.update_vertices(&typed, &[[5, 6]]), "another count");
-        std::thread::sleep(std::time::Duration::from_millis(1));
         assert!(context.update_vertices(&typed, &[[5, 6], [7, 8]]));
-        assert!(context.vertices(&vertices).is_some_and(|stored| stored.bytes().len() == 8));
+        assert!(
+            context
+                .vertices(&vertices)
+                .is_some_and(|stored| stored.bytes() == bytemuck::cast_slice::<i16, u8>(&[5, 6, 7, 8]))
+        );
+
+        let buffer = context.upload_vertices(&vertices).expect("uploads").expect("a buffer");
+        assert!(context.vertices(&vertices).is_some_and(|stored| !stored.has_data()));
+        let bound = Instant::now();
         let before = context.rendering_stats().clone();
-        let rewritten = context.upload_vertices(&vertices, false).expect("uploads").expect("a buffer");
-        assert!(Rc::ptr_eq(&buffer, &rewritten));
+        assert!(context.update_vertices(&typed, &[[9, 10], [11, 12]]));
         let after = context.rendering_stats().clone();
         assert_eq!(after.vertex_update_bytes, before.vertex_update_bytes + 8);
         assert_eq!(after.buffer_updates, before.buffer_updates + 1);
         assert_eq!(after.num_vertex_buffers, before.num_vertex_buffers);
-        assert!(context.vertices(&vertices).is_some_and(|stored| !stored.has_data()));
+        assert!(
+            context.vertices(&vertices).is_some_and(|stored| !stored.has_data() && !stored.is_modified_after(bound))
+        );
+
+        let rewritten = context.upload_vertices(&vertices).expect("uploads").expect("a buffer");
+        assert!(Rc::ptr_eq(&buffer, &rewritten));
+        assert_eq!(context.rendering_stats().buffer_updates, after.buffer_updates);
         assert_eq!(vertices.count(), 2);
     });
 }
@@ -806,7 +815,7 @@ fn store_entries_last_as_long_as_their_handles() {
         assert!(context.vertices(&held).is_some());
         assert!(context.texture(&draw_texture).is_some());
 
-        let key = held.handle().key();
+        let key = held.key();
         drop(held);
         drop(draw_texture);
         context.destroy_released();

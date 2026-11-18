@@ -24,10 +24,10 @@ use mln_util::size::Size;
 use slotmap::SlotMap;
 
 use crate::gfx::indexes::{Indexes, SharedIndexes};
-use crate::gfx::store::{self, IndexesKey, ReleasedEntries, Shared, SharedTexture, StoreKey, TextureKey, VerticesKey};
+use crate::gfx::store::{self, IndexesKey, ReleasedEntries, Shared, SharedTexture, StoreKey, TextureKey};
 use crate::gfx::texture2d::{Texture2D, TextureMut};
 use crate::gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr};
-use crate::gfx::vertices::{self, SharedVertices, TypedVertices, Vertices};
+use crate::gfx::vertices::{SharedVertices, TypedVertices, VertexStore, Vertices};
 
 /// What the renderer makes its resources with: the backend's `Gpu`, the
 /// queue that the resources go to when they drop, and the rendering stats
@@ -129,7 +129,7 @@ pub(crate) struct Context {
     /// The indexes that draws share, which they hold as [`SharedIndexes`].
     indexes: SlotMap<IndexesKey, Indexes>,
     /// The vertices that draws share, which they hold as [`SharedVertices`].
-    vertices: SlotMap<VerticesKey, Vertices>,
+    vertices: VertexStore,
     /// The keys of the entries of the stores whose last handles dropped,
     /// which go with the next [`destroy_released`](Self::destroy_released).
     released_entries: Rc<ReleasedEntries>,
@@ -149,7 +149,7 @@ impl Context {
             default_vertex_buffers: HashMap::default(),
             textures: SlotMap::with_key(),
             indexes: SlotMap::with_key(),
-            vertices: SlotMap::with_key(),
+            vertices: VertexStore::default(),
             released_entries: Rc::default(),
         }
     }
@@ -223,7 +223,7 @@ impl Context {
                 }
             }
             StoreKey::Indexes(key) => drop(indexes.remove(key)),
-            StoreKey::Vertices(key) => drop(vertices.remove(key)),
+            StoreKey::Vertices(key) => vertices.remove(key),
         });
         device.released.destroy(&mut *device.backend.gpu());
         device.released.uncount(&mut device.stats);
@@ -249,7 +249,7 @@ impl Context {
     /// Keeps `vertices` for the draws that share them, while a clone of the
     /// returned handle lasts.
     pub(crate) fn add_vertices<V: bytemuck::Pod>(&mut self, vertices: Vec<V>) -> TypedVertices<V> {
-        TypedVertices::new(self.store_vertices(Vertices::new(vertices)))
+        self.vertices.add(vertices, &self.released_entries)
     }
 
     /// Keeps the vertices of the type `V` in the JS array `bytes`, as
@@ -259,41 +259,35 @@ impl Context {
         &mut self,
         bytes: mln_util::host_bytes::HostBytes,
     ) -> SharedVertices {
-        self.store_vertices(Vertices::from_host(bytes, size_of::<V>()))
-    }
-
-    fn store_vertices(&mut self, vertices: Vertices) -> SharedVertices {
-        let count = vertices.count();
-        SharedVertices::new(Shared::new(self.vertices.insert(vertices), &self.released_entries), count)
+        self.vertices.add_host::<V>(bytes, &self.released_entries)
     }
 
     /// The vertices of `shared`.
     pub(crate) fn vertices(&self, shared: &SharedVertices) -> Option<&Vertices> {
-        store::entry(&self.vertices, shared.handle())
+        self.vertices.get(shared)
     }
 
     /// Whether the store has the vertices `key`.
     #[cfg(test)]
-    pub(crate) fn has_vertices(&self, key: VerticesKey) -> bool {
-        self.vertices.contains_key(key)
+    pub(crate) fn has_vertices(&self, key: store::VerticesKey) -> bool {
+        self.vertices.contains(key)
     }
 
-    /// Replaces the vertices of `typed` with a copy of `data`, as many, which
-    /// the next upload writes over their buffer's. Returns false, leaving
-    /// them be, for another number of vertices.
+    /// Replaces the vertices of `typed` with a copy of `data`, as many,
+    /// writing them over their buffer where they have one. Returns false,
+    /// leaving them be, for another number of vertices, or where the write
+    /// failed, which it logs: new vertices then replace them.
     pub(crate) fn update_vertices<V: bytemuck::Pod>(&mut self, typed: &TypedVertices<V>, data: &[V]) -> bool {
-        store::entry_mut(&mut self.vertices, typed.shared().handle()).is_some_and(|entry| vertices::update(entry, data))
+        self.vertices.update(&mut self.device, typed, data).unwrap_or_else(|error| {
+            Log::error(Event::Render, format!("Updating vertices failed: {error}"));
+            false
+        })
     }
 
-    /// The buffer of the vertices of `shared`, written as
-    /// [`Vertices::upload`] says.
-    pub(crate) fn upload_vertices(
-        &mut self,
-        shared: &SharedVertices,
-        force: bool,
-    ) -> Result<Option<BufferPtr>, GpuError> {
-        let Context { device, vertices, .. } = self;
-        store::entry_mut(vertices, shared.handle()).ok_or(GpuError::UnknownId("vertices"))?.upload(device, force)
+    /// The buffer of the vertices of `shared`, made of them by their first
+    /// upload, which frees their bytes.
+    pub(crate) fn upload_vertices(&mut self, shared: &SharedVertices) -> Result<Option<BufferPtr>, GpuError> {
+        self.vertices.upload(&mut self.device, shared)
     }
 
     /// A texture without a size, made by its first upload or

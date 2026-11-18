@@ -65,10 +65,9 @@ fn attribute_buffer(context: &mut Context, attribute: &mut VertexAttribute) -> R
 fn attribute_binding(
     context: &mut Context,
     attribute: &mut VertexAttribute,
-    force: bool,
 ) -> Result<Option<AttributeBinding>, GpuError> {
     if let Some(shared) = attribute.shared() {
-        let Some(buffer) = context.upload_vertices(&shared.vertices, force)? else {
+        let Some(buffer) = context.upload_vertices(&shared.vertices)? else {
             return Ok(None);
         };
         debug_assert!(
@@ -97,19 +96,16 @@ fn attribute_binding(
 /// one for each of the shader's `attributes`, its id and the format of its
 /// default, read from the draw's attribute of that id in `overrides` where
 /// it has one. An attribute the draw doesn't have, or has no data for,
-/// binds no buffer, at the default's type and stride. `force` writes shared
-/// vertices that appear unchanged (see
-/// [`Vertices::upload`](crate::gfx::vertices::Vertices::upload)).
+/// binds no buffer, at the default's type and stride.
 pub(crate) fn build_attribute_bindings(
     context: &mut Context,
     attributes: &[(usize, AttributeDataType)],
     overrides: &mut VertexAttributeArray,
-    force: bool,
 ) -> Result<AttributeBindingArray, GpuError> {
     let mut bindings: AttributeBindingArray = vec![None; MAX_ATTRIBUTE_COUNT_PER_SHADER.max(attributes.len())];
     for (index, &(id, default)) in attributes.iter().enumerate() {
         let binding = match overrides.get_mut(id) {
-            Some(attribute) => attribute_binding(context, attribute, force)?,
+            Some(attribute) => attribute_binding(context, attribute)?,
             None => None,
         };
         bindings[index] = Some(binding.unwrap_or_else(|| AttributeBinding {
@@ -129,8 +125,10 @@ pub(crate) fn build_attribute_bindings(
 }
 
 /// Whether an attribute of `attributes` changed since `time`: one whose
-/// shared vertices were made or updated after, or whose own data changed
-/// since its upload.
+/// shared vertices were made after ([`Vertices::is_modified_after`]), or
+/// whose own data changed since its upload.
+///
+/// [`Vertices::is_modified_after`]: crate::gfx::vertices::Vertices::is_modified_after
 pub(crate) fn modified_after(context: &Context, attributes: &VertexAttributeArray, time: Instant) -> bool {
     (0..attributes.allocated_size()).filter_map(|id| attributes.get(id)).any(|attribute| {
         match attribute.shared_vertices() {

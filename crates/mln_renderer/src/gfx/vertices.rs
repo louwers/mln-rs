@@ -1,18 +1,22 @@
 //! The vertices that draws bind from the context's store: a bucket's, which
 //! a tile's draws share, and those a layer makes for its draws. Draws hold
 //! them as [`SharedVertices`]; only the holder of a [`TypedVertices`], who
-//! made them of a type, can replace them with new vertices of it.
+//! made them of a type, can replace them with new vertices of it. Only the
+//! store makes either, of the entries it adds, so a handle's count and
+//! vertex type are its entry's.
 
 use std::marker::PhantomData;
+use std::rc::Rc;
 
 use mln_gfx::buffer::BufferPtr;
 use mln_gfx::gpu::{BufferUsage, GpuError};
 #[cfg(target_family = "wasm")]
 use mln_util::host_bytes::HostBytes;
 use mln_util::time::Instant;
+use slotmap::SlotMap;
 
 use crate::gfx::context::Device;
-use crate::gfx::store::{Shared, VerticesKey};
+use crate::gfx::store::{self, ReleasedEntries, Shared, VerticesKey};
 
 /// Where the vertices' bytes are: in the vector of the alignment of their
 /// type, which a vector of vertices moves into without a copy.
@@ -30,17 +34,15 @@ enum VertexData {
 }
 
 /// Vertices of the context's store: their bytes until an upload writes them
-/// to a buffer, which frees them, and that buffer. An update brings new
-/// bytes of as many vertices, which the next upload writes over the
-/// buffer's.
+/// to a buffer, which frees them, and that buffer. An update of as many
+/// vertices writes over the buffer's, or over the bytes before there is one.
 pub(crate) struct Vertices {
     data: VertexData,
     count: usize,
     vertex_size: usize,
-    /// When the vertices were made or last updated.
+    /// When the vertices were made, or updated before they had a buffer.
     modified: Instant,
-    /// The buffer, and the modification time of the vertices it holds.
-    buffer: Option<(BufferPtr, Instant)>,
+    buffer: Option<BufferPtr>,
 }
 
 impl VertexData {
@@ -55,6 +57,19 @@ impl VertexData {
             _ => Err((bytemuck::PodCastError::AlignmentMismatch, vertices)),
         };
         moved.unwrap_or_else(|(_, vertices)| VertexData::Bytes(bytemuck::cast_slice(&vertices).to_vec()))
+    }
+
+    /// The bytes, while they are in wasm memory, to change.
+    fn bytes_mut(&mut self) -> Option<&mut [u8]> {
+        match self {
+            VertexData::Bytes(bytes) => Some(bytes),
+            VertexData::Halves(data) => Some(bytemuck::cast_slice_mut(data)),
+            VertexData::Words(data) => Some(bytemuck::cast_slice_mut(data)),
+            VertexData::Doubles(data) => Some(bytemuck::cast_slice_mut(data)),
+            #[cfg(target_family = "wasm")]
+            VertexData::Host(_) => None,
+            VertexData::Freed => None,
+        }
     }
 
     /// The bytes, while they are in wasm memory.
@@ -73,7 +88,7 @@ impl VertexData {
 
 impl Vertices {
     /// `vertices`, moved.
-    pub(crate) fn new<V: bytemuck::Pod>(vertices: Vec<V>) -> Vertices {
+    fn new<V: bytemuck::Pod>(vertices: Vec<V>) -> Vertices {
         let count = vertices.len();
         let data = VertexData::of(vertices);
         Vertices { data, count, vertex_size: size_of::<V>(), modified: Instant::now(), buffer: None }
@@ -81,7 +96,7 @@ impl Vertices {
 
     /// The vertices of `vertex_size` bytes each in a JS array.
     #[cfg(target_family = "wasm")]
-    pub(crate) fn from_host(bytes: HostBytes, vertex_size: usize) -> Vertices {
+    fn from_host(bytes: HostBytes, vertex_size: usize) -> Vertices {
         debug_assert!(bytes.len().is_multiple_of(vertex_size.max(1)));
         let count = bytes.len() / vertex_size.max(1);
         Vertices { data: VertexData::Host(bytes), count, vertex_size, modified: Instant::now(), buffer: None }
@@ -113,44 +128,41 @@ impl Vertices {
         self.data.bytes().unwrap_or_default()
     }
 
-    /// Whether the vertices were made or updated after `time`. Still true
-    /// once their upload freed them: a draw bound before then binds the
-    /// buffer that holds them.
+    /// Whether the vertices were made after `time`, or updated after it
+    /// before they had a buffer: a draw bound before then binds them again.
+    /// An update of vertices in a buffer writes over the buffer, which the
+    /// draws keep binding.
     #[must_use]
     pub(crate) fn is_modified_after(&self, time: Instant) -> bool {
         time < self.modified
     }
 
-    /// Replaces the bytes with `bytes`, of as many vertices, which the next
-    /// upload writes. Returns false, leaving the vertices be, for another
-    /// number of bytes.
-    fn update(&mut self, bytes: &[u8]) -> bool {
+    /// Replaces the bytes with `bytes`, of as many vertices, writing them
+    /// over the buffer's through `device` where there is one. Returns false,
+    /// leaving the vertices be, for another number of bytes.
+    fn update(&mut self, device: &mut Device, bytes: &[u8]) -> Result<bool, GpuError> {
         if bytes.len() != self.count * self.vertex_size {
-            return false;
+            return Ok(false);
         }
-        self.data = VertexData::Bytes(bytes.to_vec());
+        if let Some(buffer) = &self.buffer {
+            device.write(buffer, bytes)?;
+            return Ok(true);
+        }
+        match self.data.bytes_mut() {
+            Some(data) => data.copy_from_slice(bytes),
+            None => self.data = VertexData::Bytes(bytes.to_vec()),
+        }
         self.modified = Instant::now();
-        true
+        Ok(true)
     }
 
-    /// The buffer of the vertices through `device`, `None` where there are
-    /// none. Where they changed since their buffer was written, or with
-    /// `force`, it is written again, or replaced where they don't fit in it.
-    /// The bytes go once in a buffer.
-    pub(crate) fn upload(&mut self, device: &mut Device, force: bool) -> Result<Option<BufferPtr>, GpuError> {
-        let size = self.count * self.vertex_size;
-        if let Some((buffer, holds)) = &self.buffer
-            && size <= buffer.size()
-        {
-            if let Some(bytes) = self.data.bytes()
-                && (force || *holds < self.modified)
-            {
-                device.write(buffer, &bytes[..size])?;
-                let buffer = BufferPtr::clone(buffer);
-                return Ok(Some(self.hold(buffer)));
-            }
+    /// The buffer of the vertices through `device`, made of them by the
+    /// first upload, which frees their bytes; `None` where there are none.
+    fn upload(&mut self, device: &mut Device) -> Result<Option<BufferPtr>, GpuError> {
+        if let Some(buffer) = &self.buffer {
             return Ok(Some(BufferPtr::clone(buffer)));
         }
+        let size = self.count * self.vertex_size;
         if size == 0 {
             return Ok(None);
         }
@@ -159,19 +171,90 @@ impl Vertices {
             #[cfg(target_family = "wasm")]
             (VertexData::Host(bytes), None) => device.buffer_from_host(BufferUsage::Vertex, bytes)?,
             _ => {
-                debug_assert!(false, "vertices without data or a buffer they fit in");
-                return Err(GpuError::Invalid("vertices without data or a buffer they fit in".to_owned()));
+                debug_assert!(false, "vertices without data or a buffer");
+                return Err(GpuError::Invalid("vertices without data or a buffer".to_owned()));
             }
         };
-        Ok(Some(self.hold(buffer)))
+        self.buffer = Some(BufferPtr::clone(&buffer));
+        self.data = VertexData::Freed;
+        Ok(Some(buffer))
+    }
+}
+
+/// The context's store of the vertices that draws bind, which their
+/// handles keep while they last.
+#[derive(Default)]
+pub(crate) struct VertexStore(SlotMap<VerticesKey, Vertices>);
+
+impl VertexStore {
+    /// Keeps `vertices` while a clone of the returned handle lasts, whose
+    /// key goes to `released` once the last clone drops.
+    pub(crate) fn add<V: bytemuck::Pod>(
+        &mut self,
+        vertices: Vec<V>,
+        released: &Rc<ReleasedEntries>,
+    ) -> TypedVertices<V> {
+        TypedVertices { shared: self.insert(Vertices::new(vertices), released), vertex_type: PhantomData }
     }
 
-    /// Makes `buffer`, which holds the vertices, theirs, and frees their
-    /// bytes.
-    fn hold(&mut self, buffer: BufferPtr) -> BufferPtr {
-        self.buffer = Some((BufferPtr::clone(&buffer), self.modified));
-        self.data = VertexData::Freed;
-        buffer
+    /// Keeps the vertices of the type `V` in the JS array `bytes`, as
+    /// [`add`](Self::add) does.
+    #[cfg(target_family = "wasm")]
+    pub(crate) fn add_host<V: bytemuck::Pod>(
+        &mut self,
+        bytes: HostBytes,
+        released: &Rc<ReleasedEntries>,
+    ) -> SharedVertices {
+        self.insert(Vertices::from_host(bytes, size_of::<V>()), released)
+    }
+
+    fn insert(&mut self, vertices: Vertices, released: &Rc<ReleasedEntries>) -> SharedVertices {
+        let count = vertices.count;
+        SharedVertices { handle: Shared::new(self.0.insert(vertices), released), count }
+    }
+
+    /// The vertices of `shared`.
+    pub(crate) fn get(&self, shared: &SharedVertices) -> Option<&Vertices> {
+        store::entry(&self.0, &shared.handle)
+    }
+
+    /// Whether the store has the vertices `key`.
+    #[cfg(test)]
+    pub(crate) fn contains(&self, key: VerticesKey) -> bool {
+        self.0.contains_key(key)
+    }
+
+    /// Replaces the vertices of `typed` with a copy of `data`, as many, as
+    /// [`Vertices::update`] does.
+    pub(crate) fn update<V: bytemuck::Pod>(
+        &mut self,
+        device: &mut Device,
+        typed: &TypedVertices<V>,
+        data: &[V],
+    ) -> Result<bool, GpuError> {
+        let entry = store::entry_mut(&mut self.0, &typed.shared.handle).ok_or(GpuError::UnknownId("vertices"))?;
+        debug_assert_eq!(entry.vertex_size, size_of::<V>());
+        entry.update(device, bytemuck::cast_slice(data))
+    }
+
+    /// The buffer of the vertices of `shared`, as [`Vertices::upload`]
+    /// makes it.
+    pub(crate) fn upload(
+        &mut self,
+        device: &mut Device,
+        shared: &SharedVertices,
+    ) -> Result<Option<BufferPtr>, GpuError> {
+        store::entry_mut(&mut self.0, &shared.handle).ok_or(GpuError::UnknownId("vertices"))?.upload(device)
+    }
+
+    /// Drops the vertices `key`, whose last handle dropped.
+    pub(crate) fn remove(&mut self, key: VerticesKey) {
+        self.0.remove(key);
+    }
+
+    /// Drops every entry.
+    pub(crate) fn clear(&mut self) {
+        self.0.clear();
     }
 }
 
@@ -183,14 +266,11 @@ pub(crate) struct SharedVertices {
 }
 
 impl SharedVertices {
-    pub(crate) fn new(handle: Shared<VerticesKey>, count: usize) -> SharedVertices {
-        SharedVertices { handle, count }
-    }
-
-    /// The entry's handle.
+    /// The entry's key in the store.
+    #[cfg(test)]
     #[must_use]
-    pub(crate) fn handle(&self) -> &Shared<VerticesKey> {
-        &self.handle
+    pub(crate) fn key(&self) -> VerticesKey {
+        self.handle.key()
     }
 
     /// The number of vertices.
@@ -215,10 +295,6 @@ pub(crate) struct TypedVertices<V> {
 }
 
 impl<V> TypedVertices<V> {
-    pub(crate) fn new(shared: SharedVertices) -> TypedVertices<V> {
-        TypedVertices { shared, vertex_type: PhantomData }
-    }
-
     /// The vertices, as draws bind them.
     #[must_use]
     pub(crate) fn shared(&self) -> &SharedVertices {
@@ -234,12 +310,6 @@ impl<V> TypedVertices<V> {
 
 impl<V> Clone for TypedVertices<V> {
     fn clone(&self) -> Self {
-        TypedVertices::new(self.shared.clone())
+        TypedVertices { shared: self.shared.clone(), vertex_type: PhantomData }
     }
-}
-
-/// Replaces the bytes of `vertices` with those of `data`.
-pub(crate) fn update<V: bytemuck::Pod>(vertices: &mut Vertices, data: &[V]) -> bool {
-    debug_assert_eq!(vertices.vertex_size, size_of::<V>());
-    vertices.update(bytemuck::cast_slice(data))
 }
