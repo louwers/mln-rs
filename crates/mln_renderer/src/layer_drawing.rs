@@ -113,6 +113,11 @@ struct TileSet {
     /// For each tile of the set, the index it had before the set's tiles
     /// last changed, `None` for a tile new to the set.
     moves: Vec<Option<usize>>,
+    /// The permutation that `moves` makes of the indexes of the tiles before
+    /// and after the change, whichever are more: for each index, the index
+    /// whose value it takes, which is a tile's old index where `moves` says
+    /// so.
+    permutation: Vec<usize>,
 }
 
 impl TileSet {
@@ -120,6 +125,7 @@ impl TileSet {
     /// and drops the others. Returns whether that changed any tile's index,
     /// which `moves` then says.
     fn set_tiles(&mut self) -> bool {
+        let old_len = self.tiles.len();
         let incoming = &mut self.incoming;
         // The stable sort, which the renderer's other sorts of tile ids
         // share, allocates nothing for a frame's tens of tiles.
@@ -149,7 +155,23 @@ impl TileSet {
                 self.tiles.insert(*id, TileState::default());
             }
         }
+        self.permute(old_len);
         true
+    }
+
+    /// Makes `permutation` that of `moves`, from a set of `old_len` tiles.
+    /// Where `moves` has new tiles, the tiles it moves keep their order.
+    fn permute(&mut self, old_len: usize) {
+        let len = old_len.max(self.moves.len());
+        // The indexes no tile moves to take the values no tile moves from,
+        // the indexes between those that the tiles that stay move from.
+        let mut moved = self.moves.iter().flatten().copied().peekable();
+        let mut free = (0..len).filter(move |&old| moved.next_if_eq(&old).is_none());
+        self.permutation.clear();
+        self.permutation.extend((0..len).map(|index| match self.moves.get(index) {
+            Some(&Some(old)) => old,
+            _ => free.next().unwrap_or(index),
+        }));
     }
 
     /// Moves the tiles' states to the tiles `wrap_delta` world copies east
@@ -174,6 +196,7 @@ impl TileSet {
                 self.moves[new] = Some(old);
             }
         }
+        self.permute(self.tiles.len());
         true
     }
 
@@ -193,14 +216,11 @@ pub(crate) struct TileMap<T> {
     set: TileSet,
     /// Each tile's `T`, at the tile's index in the set.
     values: Vec<Option<T>>,
-    /// The values before the set's tiles changed, while they move to their
-    /// tiles' new indexes; empty otherwise.
-    moving: Vec<Option<T>>,
 }
 
 impl<T> Default for TileMap<T> {
     fn default() -> Self {
-        TileMap { set: TileSet::default(), values: Vec::new(), moving: Vec::new() }
+        TileMap { set: TileSet::default(), values: Vec::new() }
     }
 }
 
@@ -219,10 +239,24 @@ impl<T> TileMap<T> {
     /// Moves the values to their tiles' indexes, as the set's `moves` say,
     /// and drops those of the tiles that left.
     fn apply_moves(&mut self) {
-        std::mem::swap(&mut self.values, &mut self.moving);
-        let moving = &mut self.moving;
-        self.values.extend(self.set.moves.iter().map(|old| old.and_then(|old| moving.get_mut(old)?.take())));
-        moving.clear();
+        let (values, permutation) = (&mut self.values, &self.set.permutation);
+        values.resize_with(permutation.len(), || None);
+        for index in 0..permutation.len() {
+            // Where the value that the index takes is now: the indexes
+            // before this one took theirs, and moved the values they had
+            // to where they took them from.
+            let mut from = permutation[index];
+            while from < index {
+                from = permutation[from];
+            }
+            values.swap(index, from);
+        }
+        values.truncate(self.set.moves.len());
+        for (value, old) in values.iter_mut().zip(&self.set.moves) {
+            if old.is_none() {
+                *value = None;
+            }
+        }
     }
 
     /// Drops the entries of the tiles.
@@ -1090,6 +1124,28 @@ mod tests {
         assert!(!tiles.has_tile(&ids[2]));
     }
 
+    /// Each tile keeps its value from any set of tiles to any other.
+    #[test]
+    fn values_stay_through_every_change() {
+        let ids: Vec<OverscaledTileID> = (0..5).map(|x| OverscaledTileID::with_zxy(3, 0, 3, x, 2)).collect();
+        let subsets = |mask: u32| ids.iter().enumerate().filter(move |(i, _)| mask & (1 << i) != 0).map(|(_, id)| *id);
+        let mut tiles = TileMap::<usize>::default();
+        for from in 0..32 {
+            for to in 0..32 {
+                tiles.clear_tiles();
+                tiles.set_tiles(subsets(from));
+                for (i, id) in ids.iter().enumerate() {
+                    set(&mut tiles, id, i);
+                }
+                tiles.set_tiles(subsets(to).rev());
+                let values: Vec<Option<usize>> = ids.iter().map(|id| tiles.get(id).copied()).collect();
+                let expected: Vec<Option<usize>> =
+                    (0..ids.len()).map(|i| (from & to & (1 << i) != 0).then_some(i)).collect();
+                assert_eq!(expected, values, "from {from:05b} to {to:05b}");
+            }
+        }
+    }
+
     /// What the layer keeps of a tile moves with the tile across a wrap jump,
     /// even one that changes the tiles' order, and as other tiles come and
     /// go, and goes when the tile leaves the frame or the map is cleared.
@@ -1114,12 +1170,14 @@ mod tests {
         assert_eq!(Some(&1), tiles.get(&moved));
 
         let (high, low) = (tile.unwrap_to(i16::MAX), other.unwrap_to(i16::MAX - 1));
-        tiles.set_tiles([high, low]);
+        tiles.set_tiles([high, low, tile]);
         assert!(set(&mut tiles, &high, 3));
         assert!(set(&mut tiles, &low, 4));
+        assert!(set(&mut tiles, &tile, 5));
         tiles.shift_wraps(1);
         assert_eq!(Some(&3), tiles.get(&tile.unwrap_to(i16::MIN)));
         assert_eq!(Some(&4), tiles.get(&other.unwrap_to(i16::MAX)));
+        assert_eq!(Some(&5), tiles.get(&tile.unwrap_to(1)));
 
         tiles.clear();
         assert!(tiles.has_tile(&other.unwrap_to(i16::MAX)));
