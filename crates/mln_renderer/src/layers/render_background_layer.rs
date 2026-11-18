@@ -97,9 +97,14 @@ impl RenderBackgroundLayer {
     }
 
     /// The GPU objects of the draw of the tile `tile_id`, with `shader`, in
-    /// `passes`.
-    fn build_tile(&self, tile_id: &OverscaledTileID, shader: ShaderProgramPtr, passes: RenderPass) -> DrawObjects {
-        let (vertices, vertex_count, indexes, segments) = if self.base.projection_variant == ProjectionVariant::Globe {
+    /// `passes`, in the projection `variant`.
+    fn build_tile(
+        tile_id: &OverscaledTileID,
+        shader: ShaderProgramPtr,
+        passes: RenderPass,
+        variant: ProjectionVariant,
+    ) -> DrawObjects {
+        let (vertices, vertex_count, indexes, segments) = if variant == ProjectionVariant::Globe {
             // The background is not depth tested, so it needs no tile border.
             let mesh = raw_globe_tile_mesh(&tile_id.canonical, false, SubdivisionGranularitySetting::globe().tile);
             (mesh.vertices, mesh.vertex_count, mesh.indices, mesh.segments)
@@ -310,12 +315,6 @@ impl RenderLayer for RenderBackgroundLayer {
         };
 
         self.drawing.tiles.set_tiles(tile_cover.iter().copied());
-        for tile_id in &tile_cover {
-            if self.drawing.tiles.get(tile_id).is_none() {
-                let objects = self.build_tile(tile_id, Rc::clone(&shader), draw_passes);
-                self.drawing.tiles.insert(tile_id, KeptDraw::new(objects));
-            }
-        }
 
         // conformance: background-pattern.
         let pattern_atlas = paint_parameters.pattern_atlas.borrow();
@@ -345,10 +344,14 @@ impl RenderLayer for RenderBackgroundLayer {
         });
         drop(pattern_atlas);
 
+        let variant = self.base.projection_variant;
         for tile_id in &tile_cover {
-            let Some(cached) = self.drawing.tiles.get_mut(tile_id) else {
+            let Some(entry) = self.drawing.tiles.entry(tile_id) else {
                 continue;
             };
+            let cached = entry.value.get_or_insert_with(|| {
+                KeptDraw::new(Self::build_tile(tile_id, Rc::clone(&shader), draw_passes, variant))
+            });
             if let Some(texture) = &pattern_texture {
                 cached.objects.set_texture(ID_BACKGROUND_IMAGE_TEXTURE, Some(Rc::clone(texture)));
             }

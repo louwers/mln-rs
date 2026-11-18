@@ -500,10 +500,9 @@ impl RenderLayer for RenderRasterLayer {
 
             // A draw of another bucket, or of the bucket's geometry before
             // its mask changed, is built again.
+            entry.set_bucket(bucket.base.bucket_id);
             let geometry_modified = bucket.geometry().last_modified;
-            if entry.set_bucket(bucket.base.bucket_id)
-                || entry.value.as_ref().is_some_and(|cached| cached.built < geometry_modified)
-            {
+            if entry.value.as_ref().is_some_and(|cached| cached.built < geometry_modified) {
                 *entry.value = None;
             }
 

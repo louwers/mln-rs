@@ -313,6 +313,7 @@ impl<T> TileMap<T> {
 
     /// What the layer keeps of `tile_id`, if the tile is one of the frame's
     /// and the layer keeps anything of it.
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn get(&self, tile_id: &OverscaledTileID) -> Option<&T> {
         self.values.get(self.set.index_of(tile_id)?)?.as_ref()
@@ -324,10 +325,13 @@ impl<T> TileMap<T> {
         self.values.get_mut(self.set.index_of(tile_id)?)?.as_mut()
     }
 
-    /// Makes `value` what the layer keeps of `tile_id`, if the tile is one
-    /// of the frame's, and returns it.
-    pub(crate) fn insert(&mut self, tile_id: &OverscaledTileID, value: T) -> Option<&mut T> {
-        Some(self.entry(tile_id)?.value.insert(value))
+    /// Makes `value` what the layer keeps of `tile_id`, and returns it;
+    /// gives `value` back where the tile isn't one of the frame's.
+    pub(crate) fn insert(&mut self, tile_id: &OverscaledTileID, value: T) -> Result<&mut T, T> {
+        match self.entry(tile_id) {
+            Some(entry) => Ok(entry.value.insert(value)),
+            None => Err(value),
+        }
     }
 
     /// Drops what the layer keeps of `tile_id`.

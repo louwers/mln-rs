@@ -633,7 +633,7 @@ impl RenderLayer for RenderLineLayer {
                 cached
             } else {
                 let built = self.build_tile(shaders, context, tile, bucket, binders, evaluated, render_pass);
-                let Some(cached) = built.and_then(|built| self.drawing.tiles.insert(&tile_id, built)) else {
+                let Some(cached) = built.and_then(|built| self.drawing.tiles.insert(&tile_id, built).ok()) else {
                     continue;
                 };
                 cached
