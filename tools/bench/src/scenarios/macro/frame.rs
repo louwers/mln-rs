@@ -40,6 +40,12 @@ pub(crate) const SCENARIOS: &[Scenario] = &[
         question: "What does a frame of a city's hills cost, tinted by elevation and hillshaded, while the camera circles, turns and tilts over loaded tiles?",
         run: terrain,
     },
+    Scenario {
+        name: "macro/frame/labels",
+        kind: Kind::Macro,
+        question: "What does a frame of a city's dense labels cost, POI labels choosing among anchors, while the tilted camera turns over loaded tiles?",
+        run: labels,
+    },
 ];
 
 /// The question: what does a frame of western San Francisco at zoom 13.5
@@ -81,6 +87,14 @@ fn earthquakes(bench: &mut Bench) {
 /// frame.
 fn terrain(bench: &mut Bench) {
     path(bench, Path::Terrain);
+}
+
+/// The question: what does a frame of downtown San Francisco's labels cost,
+/// Liberty with POI labels that choose among anchors, while the camera turns
+/// a full circle tilted to 60 degrees ([`Path::Labels`])? One measured unit
+/// is one frame.
+fn labels(bench: &mut Bench) {
+    path(bench, Path::Labels);
 }
 
 fn path(bench: &mut Bench, path: Path) {

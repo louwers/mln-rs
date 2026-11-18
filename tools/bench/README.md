@@ -17,16 +17,16 @@ inherits another's heap, threads or caches.
 
 A third kind runs outside `mln-bench`: the desktop example's **presented**
 benchmark (`mise run desktop -- --benchmark[=<path>]`, where the path is
-`street`, `globe`, `antimeridian`, `earthquakes` or `terrain`) draws the camera
-path of a `macro/frame` scenario in a window, over the same fixtures, and prints
-the times between the frames the window presents. It shows what a user sees of a
-frame, the backend's surface and the display's compositor included, which a
-headless frame leaves out. Nothing runs it but a person at a machine with a
-display: run it on both sides of a change by hand, and compare the summaries.
-Use `--profile release` when measuring shipping performance. `--laps <n>` sets
-how long it runs (10 laps of 120 frames; 0 draws until the window closes, for a
-profiler). The fixtures and the paths come from `workload/`, a crate both
-programs share.
+`street`, `globe`, `antimeridian`, `earthquakes`, `terrain` or `labels`) draws
+the camera path of a `macro/frame` scenario in a window, over the same fixtures,
+and prints the times between the frames the window presents. It shows what a
+user sees of a frame, the backend's surface and the display's compositor
+included, which a headless frame leaves out. Nothing runs it but a person at a
+machine with a display: run it on both sides of a change by hand, and compare
+the summaries. Use `--profile release` when measuring shipping performance.
+`--laps <n>` sets how long it runs (10 laps of 120 frames; 0 draws until the
+window closes, for a profiler). The fixtures and the paths come from
+`workload/`, a crate both programs share.
 
 ## Running
 
@@ -126,6 +126,7 @@ its sizes are the ones it uses.
 | `macro/frame/antimeridian`              | What does a frame of the world on a flat map cost while the view crosses the antimeridian over loaded tiles?                               |
 | `macro/frame/earthquakes`               | What does a frame of a map of earthquakes cost, a heatmap that gives way to circles, while the camera circles and zooms in and out?        |
 | `macro/frame/terrain`                   | What does a frame of a city's hills cost, tinted by elevation and hillshaded, while the camera circles, turns and tilts over loaded tiles? |
+| `macro/frame/labels`                    | What does a frame of a city's dense labels cost, POI labels choosing among anchors, while the tilted camera turns over loaded tiles?       |
 | `macro/navigate/street`                 | What does a flight into a city's streets and back out cost, with tiles arriving while it flies?                                            |
 | `macro/navigate/fly`                    | What does a flight from one city's streets, out over an ocean and into another city's streets, cost, with tiles arriving while it flies?   |
 | `macro/navigate/zoom`                   | What does zooming from a city's streets out to the world and back in cost, with tiles arriving while it zooms?                             |

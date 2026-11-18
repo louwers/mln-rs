@@ -193,6 +193,26 @@ impl Snapshot {
         style.to_string()
     }
 
+    /// Liberty over the street tiles with its POI labels placed as many
+    /// styles place them: each tries the anchors below, beside and above its
+    /// icon (`text-variable-anchor`) instead of one.
+    #[must_use]
+    pub fn labels_style(&self) -> String {
+        let mut style = self.style_value(Tiles::Street);
+        for layer in style["layers"].as_array_mut().expect("a style's layers") {
+            if layer["source-layer"] != "poi" {
+                continue;
+            }
+            let layout = layer["layout"].as_object_mut().expect("a POI layer's layout");
+            layout.remove("text-anchor");
+            layout.remove("text-offset");
+            layout.insert("text-variable-anchor".into(), serde_json::json!(["top", "bottom", "left", "right"]));
+            layout.insert("text-radial-offset".into(), serde_json::json!(0.8));
+            layout.insert("text-justify".into(), serde_json::json!("auto"));
+        }
+        style.to_string()
+    }
+
     /// The style over the world's tiles, on the globe.
     #[must_use]
     pub fn globe_style(&self) -> String {

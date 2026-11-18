@@ -45,11 +45,17 @@ pub enum Path {
     /// the camera circles Twin Peaks, turning a quarter turn and back, tilted
     /// between 30 and 45 degrees. It ends where it starts.
     Terrain,
+    /// Downtown San Francisco at zoom 16, tilted to 60 degrees, where the
+    /// labels are dense: the camera turns a full circle in place over
+    /// [`Snapshot::labels_style`], whose POI labels choose among anchors. It
+    /// ends where it starts.
+    Labels,
 }
 
 impl Path {
     /// Every path.
-    pub const ALL: [Path; 5] = [Path::Street, Path::Globe, Path::Antimeridian, Path::Earthquakes, Path::Terrain];
+    pub const ALL: [Path; 6] =
+        [Path::Street, Path::Globe, Path::Antimeridian, Path::Earthquakes, Path::Terrain, Path::Labels];
 
     /// The path named `name`, such as `street`.
     pub fn parse(name: &str) -> Result<Path, String> {
@@ -67,6 +73,7 @@ impl Path {
             Path::Antimeridian => "antimeridian",
             Path::Earthquakes => "earthquakes",
             Path::Terrain => "terrain",
+            Path::Labels => "labels",
         }
     }
 
@@ -79,6 +86,7 @@ impl Path {
             Path::Antimeridian => snapshot.style(Tiles::World),
             Path::Earthquakes => snapshot.earthquakes_style(),
             Path::Terrain => snapshot.terrain_style(),
+            Path::Labels => snapshot.labels_style(),
         }
     }
 
@@ -89,7 +97,7 @@ impl Path {
                 let (x, y) = tile_at(12, snapshot.area_center(Tiles::Street));
                 tile_center(12, x, y)
             }
-            Path::Globe | Path::Antimeridian | Path::Earthquakes | Path::Terrain => LatLng::default(),
+            Path::Globe | Path::Antimeridian | Path::Earthquakes | Path::Terrain | Path::Labels => LatLng::default(),
         };
         move |frame| {
             let t = frame as f64 / FRAMES as f64;
@@ -141,6 +149,14 @@ impl Path {
                         ..Default::default()
                     }
                 }
+                Path::Labels => CameraOptions {
+                    // Union Square.
+                    center: Some(LatLng::new(37.7880, -122.4075).expect("a center")),
+                    zoom: Some(16.0),
+                    bearing: Some(360.0 * t),
+                    pitch: Some(60.0),
+                    ..Default::default()
+                },
                 Path::Antimeridian => {
                     let longitude = 180.0 + 40.0 * (std::f64::consts::TAU * t).sin();
                     let longitude = if longitude >= 180.0 { longitude - 360.0 } else { longitude };
