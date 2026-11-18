@@ -1307,6 +1307,9 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     // 2. Binary search to find surrounding elevation stops (l and r indices)
     int r = tileProps.color_ramp_size - 1;
     int l = 0;
+    // The elevations at l and r, as the search reads them.
+    float el_l = 0.0;
+    float el_r = 0.0;
 
     // Perform binary search
     while (r - l > 1) {
@@ -1315,14 +1318,21 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 
         if (el < el_m) {
             r = m;
+            el_r = el_m;
         } else {
             l = m;
+            el_l = el_m;
         }
     }
 
-    // 3. Get the elevation values and colors at the stops
-    float el_l = getElevationStop(l, tileProps.color_ramp_size, elevationStops, elevation_stops_sampler);
-    float el_r = getElevationStop(r, tileProps.color_ramp_size, elevationStops, elevation_stops_sampler);
+    // The search never reads the ramp's ends, so read an end that l or r
+    // still is.
+    if (l == 0) {
+        el_l = getElevationStop(0, tileProps.color_ramp_size, elevationStops, elevation_stops_sampler);
+    }
+    if (r == tileProps.color_ramp_size - 1) {
+        el_r = getElevationStop(r, tileProps.color_ramp_size, elevationStops, elevation_stops_sampler);
+    }
 
     float4 color_l = getColorStop(l, tileProps.color_ramp_size, colorStops, color_stops_sampler);
     float4 color_r = getColorStop(r, tileProps.color_ramp_size, colorStops, color_stops_sampler);

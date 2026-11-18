@@ -864,20 +864,30 @@ void main() {
     // Binary search for color stops
     int r = (u_color_ramp_size - 1);
     int l = 0;
+    // The elevations at l and r, as the search reads them.
+    float el_l = 0.0;
+    float el_r = 0.0;
 
     while (r - l > 1) {
         int m = (r + l) / 2;
         float el_m = getElevationStop(m);
         if (el < el_m) {
             r = m;
+            el_r = el_m;
         } else {
             l = m;
+            el_l = el_m;
         }
     }
 
-    // Get elevation values for interpolation
-    float el_l = getElevationStop(l);
-    float el_r = getElevationStop(r);
+    // The search never reads the ramp's ends, so read an end that l or r
+    // still is.
+    if (l == 0) {
+        el_l = getElevationStop(0);
+    }
+    if (r == u_color_ramp_size - 1) {
+        el_r = getElevationStop(r);
+    }
 
     // Get colors for interpolation
     vec4 color_l = getColorStop(l);

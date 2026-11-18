@@ -1077,6 +1077,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     // Binary search to find surrounding elevation stops
     var r: i32 = tileProps.color_ramp_size - 1;
     var l: i32 = 0;
+    // The elevations at l and r, as the search reads them.
+    var el_l: f32 = 0.0;
+    var el_r: f32 = 0.0;
 
     loop {
         if (r - l <= 1) { break; }
@@ -1084,14 +1087,21 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
         let el_m = getElevationStop(m, tileProps.color_ramp_size);
         if (el < el_m) {
             r = m;
+            el_r = el_m;
         } else {
             l = m;
+            el_l = el_m;
         }
     }
 
-    // Get elevation values and colors at the stops
-    let el_l = getElevationStop(l, tileProps.color_ramp_size);
-    let el_r = getElevationStop(r, tileProps.color_ramp_size);
+    // The search never reads the ramp's ends, so read an end that l or r
+    // still is.
+    if (l == 0) {
+        el_l = getElevationStop(0, tileProps.color_ramp_size);
+    }
+    if (r == tileProps.color_ramp_size - 1) {
+        el_r = getElevationStop(r, tileProps.color_ramp_size);
+    }
 
     let color_l = getColorStop(l, tileProps.color_ramp_size);
     let color_r = getColorStop(r, tileProps.color_ramp_size);
