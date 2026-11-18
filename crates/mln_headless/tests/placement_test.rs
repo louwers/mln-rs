@@ -183,12 +183,15 @@ impl ContinuousMap {
             self.wait_for_workers();
             let mut map = self.map.borrow_mut();
             let updated = map.update_generation() != self.drawn.get();
-            if loaded && !needs_repaint && !updated {
-                let Some(at) = map.repaint_at() else { return frames };
-                while self.start + self.time.get() < at {
-                    self.time.set(self.time.get() + FRAME);
+            if loaded && !updated {
+                if let Some(at) = map.repaint_at() {
+                    while self.start + self.time.get() < at {
+                        self.time.set(self.time.get() + FRAME);
+                    }
+                    map.trigger_repaint();
+                } else if !needs_repaint {
+                    return frames;
                 }
-                map.trigger_repaint();
             }
             drop(map);
             assert!(frames.len() < 600, "the map is still drawing after {} frames", frames.len());

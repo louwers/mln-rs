@@ -66,7 +66,9 @@ pub struct FrameResult {
     /// Counts the session's rendered frames, this one included. Zero for a
     /// demand that rendered nothing.
     pub frame_generation: u64,
-    /// Whether the map has transitions still running after this frame.
+    /// Whether the map changes after this frame without new commands: a
+    /// transition runs, or the symbols wait for a placement, which an update
+    /// of the map's own draws.
     pub needs_repaint: bool,
     /// The camera and extent that a rendered frame shows.
     pub view: Option<MapView>,

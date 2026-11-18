@@ -310,12 +310,16 @@ impl HeadlessMap {
         loop {
             self.wait_for_workers();
             let status = self.draw_frame();
-            if status.mode == RenderMode::Full && !status.needs_repaint {
-                let Some(at) = self.map.repaint_at() else { return self.frames - start };
-                while self.clock < at {
-                    self.clock += FRAME_INTERVAL;
+            if status.mode == RenderMode::Full {
+                if let Some(at) = self.map.repaint_at() {
+                    while self.clock < at {
+                        self.clock += FRAME_INTERVAL;
+                    }
+                    continue;
                 }
-                continue;
+                if !status.needs_repaint {
+                    return self.frames - start;
+                }
             }
             assert!(self.frames - start < FRAME_LIMIT, "the view isn't settled after {FRAME_LIMIT} frames");
         }

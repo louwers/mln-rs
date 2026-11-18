@@ -521,7 +521,7 @@ impl Map {
         if self.mode == MapMode::Continuous {
             self.emit(MapEvent::RenderFrameFinished(RenderFrameStatus {
                 mode,
-                needs_repaint,
+                needs_repaint: needs_repaint || self.repaint_at.is_some(),
                 placement_changed,
                 rendering_stats: stats,
             }));
@@ -566,12 +566,15 @@ impl Map {
             return;
         }
 
-        // The update's frame says anew when the map changes next.
-        self.repaint_at = None;
-
         // Still modes have no clock: they show every transition as ended.
         let time_point =
             (self.mode == MapMode::Continuous).then(|| self.transform.frame_time().unwrap_or_else(Instant::now));
+        // An update once the time the map changes next came shows the map at
+        // that time, though the host's last frame came before it.
+        let time_point = match (time_point, self.repaint_at.take()) {
+            (Some(time), Some(at)) if Instant::now() >= at => Some(time.max(at)),
+            (time_point, _) => time_point,
+        };
 
         self.transform.update_transitions(time_point);
         let projection = self.projection_at(self.transform.get_zoom());

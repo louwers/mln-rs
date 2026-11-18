@@ -1143,8 +1143,8 @@ impl Worker {
         self.rendered_update = update.generation;
         self.rendered_generation = self.generation();
         let report = events.iter().rev().find_map(|event| match event {
-            RendererEvent::RenderFrameFinished { mode, needs_repaint, .. } => {
-                Some(FrameReport { mode: *mode, needs_repaint: *needs_repaint })
+            RendererEvent::RenderFrameFinished { mode, needs_repaint, repaint_at, .. } => {
+                Some(FrameReport { mode: *mode, needs_repaint: *needs_repaint || repaint_at.is_some() })
             }
             _ => None,
         });

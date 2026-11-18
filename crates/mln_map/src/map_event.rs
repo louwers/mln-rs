@@ -48,7 +48,9 @@ pub struct CameraChange {
 #[derive(Clone, Debug, PartialEq)]
 pub struct RenderFrameStatus {
     pub mode: RenderMode,
-    /// In continuous mode, shows that there are ongoing transitions.
+    /// In continuous mode, the map changes after this frame without new
+    /// commands: a transition runs, or the symbols wait for a placement
+    /// ([`Map::repaint_at`](crate::Map::repaint_at)).
     pub needs_repaint: bool,
     pub placement_changed: bool,
     /// The render context's counters after this frame: per-frame ones such

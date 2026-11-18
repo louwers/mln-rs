@@ -150,8 +150,10 @@ fn the_waker_runs_when_the_map_has_events() {
     assert_eq!(map.update_generation(), updates + 1);
 }
 
-/// A frame that only waits for a symbol placement asks for no update until
-/// the placement is due, and the map isn't idle until it ran.
+/// A frame that only waits for a symbol placement asks for no update, and
+/// the map isn't settled or idle, until its owner repaints it then. The
+/// repaint shows the map at that time, though the host's last frame time
+/// still counts and comes before it.
 #[test]
 fn a_frame_waiting_for_a_placement_asks_for_no_update_until_then() {
     let run_loop = Queue::<()>::new();
@@ -167,21 +169,32 @@ fn a_frame_waiting_for_a_placement_asks_for_no_update_until_then() {
         still_image_request_id: 0,
         stats: Arc::default(),
     };
-    let idle = |map: &mut Map| map.drain_events().iter().any(|event| matches!(event, MapEvent::Idle));
+    let finished = |map: &mut Map| {
+        let events = map.drain_events();
+        let settled = events.iter().find_map(|event| match event {
+            MapEvent::RenderFrameFinished(status) => Some(!status.needs_repaint),
+            _ => None,
+        });
+        (settled, events.iter().any(|event| matches!(event, MapEvent::Idle)))
+    };
 
-    let at = Instant::now() + Duration::from_millis(200);
+    let now = Instant::now();
+    map.set_frame_time(Some(now.checked_sub(Duration::from_millis(20)).unwrap()));
+    let at = now.checked_sub(Duration::from_millis(10)).unwrap();
     let updates = map.update_generation();
     report(&map, frame(Some(at)));
     map.process_events();
-    assert_eq!(map.update_generation(), updates, "no update before the placement");
+    assert_eq!(map.update_generation(), updates, "no update until the owner repaints");
     assert_eq!(map.repaint_at(), Some(at));
-    assert!(!idle(&mut map));
+    assert_eq!(finished(&mut map), (Some(false), false));
 
     map.trigger_repaint();
     assert_eq!(map.repaint_at(), None);
+    let update = map.update_reader().latest().expect("an update");
+    assert!(update.parameters.time_point >= Some(at), "the repaint shows the map at its time");
     report(&map, frame(None));
     map.process_events();
-    assert!(idle(&mut map));
+    assert_eq!(finished(&mut map), (Some(true), true));
 }
 
 #[test]
