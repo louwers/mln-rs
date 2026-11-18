@@ -5599,7 +5599,9 @@ lowp float halo_blur = u_halo_blur;
 };
 
 pub(crate) const SYMBOL_TEXT_AND_ICON_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"layout (location = 0) in vec4 a_pos_offset;
+    vertex: r"#define ICON 0.0
+
+layout (location = 0) in vec4 a_pos_offset;
 layout (location = 1) in vec4 a_data;
 layout (location = 2) in vec3 a_projected_pos;
 layout (location = 3) in float a_fade_opacity;
@@ -5674,9 +5676,10 @@ layout (std140) uniform SymbolEvaluatedPropsUBO {
     lowp float props_pad2;
 };
 
-out highp vec4 v_data0;
-flat out highp vec4 v_tex_origin;
-out vec4 v_data1;
+out highp vec2 v_data0;
+flat out highp vec2 v_tex_origin;
+out vec3 v_data1;
+flat out lowp int v_is_icon;
 
 #ifndef HAS_UNIFORM_u_fill_color
 layout (location = 4) in highp vec4 a_fill_color;
@@ -5839,16 +5842,15 @@ lowp float halo_blur = u_halo_blur;
     }
     float gamma_scale = gl_Position.w;
 
-    v_data0.xy = (a_tex - a_tex_origin) / u_texsize;
-    v_data0.zw = (a_tex - a_tex_origin) / u_texsize_icon;
-    v_tex_origin = vec4(a_tex_origin / u_texsize, a_tex_origin / u_texsize_icon);
-    v_data1 = vec4(gamma_scale, size, interpolated_fade_opacity, is_sdf);
+    bool is_icon = is_sdf == ICON;
+    vec2 texsize = is_icon ? u_texsize_icon : u_texsize;
+    v_data0 = (a_tex - a_tex_origin) / texsize;
+    v_tex_origin = a_tex_origin / texsize;
+    v_data1 = vec3(gamma_scale, size, interpolated_fade_opacity);
+    v_is_icon = int(is_icon);
 }
 ",
     fragment: r"#define SDF_PX 8.0
-
-#define SDF 1.0
-#define ICON 0.0
 
 layout (std140) uniform SymbolEvaluatedPropsUBO {
     highp vec4 u_text_fill_color;
@@ -5875,9 +5877,10 @@ layout (std140) uniform SymbolTilePropsUBO {
 uniform sampler2D u_texture;
 uniform sampler2D u_texture_icon;
 
-in highp vec4 v_data0;
-flat in highp vec4 v_tex_origin;
-in vec4 v_data1;
+in highp vec2 v_data0;
+flat in highp vec2 v_tex_origin;
+in vec3 v_data1;
+flat in lowp int v_is_icon;
 
 #ifndef HAS_UNIFORM_u_fill_color
 in highp vec4 fill_color;
@@ -5920,18 +5923,17 @@ lowp float halo_blur = u_halo_blur;
 
     float fade_opacity = v_data1[2];
 
-    if (v_data1.w == ICON) {
-        highp vec2 tex_icon = atlas_pos(v_tex_origin.zw, v_data0.zw);
+    highp vec2 tex = atlas_pos(v_tex_origin, v_data0);
+
+    if (v_is_icon != 0) {
         lowp float alpha = opacity * fade_opacity;
-        fragColor = texture(u_texture_icon, tex_icon) * alpha;
+        fragColor = texture(u_texture_icon, tex) * alpha;
 
 #ifdef OVERDRAW_INSPECTOR
         fragColor = vec4(1.0);
 #endif
         return;
     }
-
-    highp vec2 tex = atlas_pos(v_tex_origin.xy, v_data0.xy);
 
     float EDGE_GAMMA = 0.105 / DEVICE_PIXEL_RATIO;
 
