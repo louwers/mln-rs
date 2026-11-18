@@ -765,7 +765,8 @@ fn stored_vertices_free_their_data_once_they_have_a_buffer() {
 
 // The holder of typed vertices replaces them with as many vertices of the
 // type: before they have a buffer, the first upload writes the new ones;
-// once they do, the update writes them over it, counted as a buffer update.
+// once they do, the update writes them over it, counted as a buffer update,
+// and the draws that bind them bind them again.
 #[test]
 fn typed_vertices_take_updates_of_as_many_vertices() {
     with_context(|context| {
@@ -782,6 +783,7 @@ fn typed_vertices_take_updates_of_as_many_vertices() {
         let buffer = context.upload_vertices(&vertices).expect("uploads").expect("a buffer");
         assert!(context.vertices(&vertices).is_some_and(|stored| !stored.has_data()));
         let bound = Instant::now();
+        std::thread::sleep(std::time::Duration::from_millis(1));
         let before = context.rendering_stats().clone();
         assert!(context.update_vertices(&typed, &[[9, 10], [11, 12]]));
         let after = context.rendering_stats().clone();
@@ -789,7 +791,7 @@ fn typed_vertices_take_updates_of_as_many_vertices() {
         assert_eq!(after.buffer_updates, before.buffer_updates + 1);
         assert_eq!(after.num_vertex_buffers, before.num_vertex_buffers);
         assert!(
-            context.vertices(&vertices).is_some_and(|stored| !stored.has_data() && !stored.is_modified_after(bound))
+            context.vertices(&vertices).is_some_and(|stored| !stored.has_data() && stored.is_modified_after(bound))
         );
 
         let rewritten = context.upload_vertices(&vertices).expect("uploads").expect("a buffer");

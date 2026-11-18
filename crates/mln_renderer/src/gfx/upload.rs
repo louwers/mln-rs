@@ -125,8 +125,9 @@ pub(crate) fn build_attribute_bindings(
 }
 
 /// Whether an attribute of `attributes` changed since `time`: one whose
-/// shared vertices were made after ([`Vertices::is_modified_after`]), or
-/// whose own data changed since its upload.
+/// shared vertices were made or updated after
+/// ([`Vertices::is_modified_after`]), or whose own data changed since its
+/// upload.
 ///
 /// [`Vertices::is_modified_after`]: crate::gfx::vertices::Vertices::is_modified_after
 pub(crate) fn modified_after(context: &Context, attributes: &VertexAttributeArray, time: Instant) -> bool {

@@ -527,11 +527,12 @@ impl Encoder {
         let layers_updated = Instant::now();
         orchestrator.update_debug_layers(&mut parameters);
 
-        // - DRAW UPLOAD ---------------------------------------------------
-        // What the frame's update and draw update replaced, and what the
-        // uploads replaced, goes before the passes.
-        orchestrator.upload_draws(parameters.context);
+        // What the frame's update and draw update replaced goes before the
+        // uploads make what replaces it.
         parameters.context.destroy_released();
+
+        // - DRAW UPLOAD ---------------------------------------------------
+        orchestrator.upload_draws(parameters.context);
         let draw_groups = DrawGroups::of(orchestrator, &parameters);
         let (proj_state, transform) = (parameters.state, parameters.transform_params);
         parameters.clip_masks.update(
@@ -598,6 +599,11 @@ impl Encoder {
             // texture does.
             stats.num_frame_buffers = i32::from(handoff == Handoff::ReadBack);
             stats.rendering_time = (submitted - start_rendering).as_secs_f64();
+        }
+        // What the uploads and the passes replaced.
+        context.destroy_released();
+        {
+            let stats = context.rendering_stats();
             stats.encoding_time = frame.started.elapsed().as_secs_f64() - stats.rendering_time;
         }
         let stats = Arc::new(context.stats());

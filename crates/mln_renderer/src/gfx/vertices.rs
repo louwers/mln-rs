@@ -13,10 +13,9 @@ use mln_gfx::gpu::{BufferUsage, GpuError};
 #[cfg(target_family = "wasm")]
 use mln_util::host_bytes::HostBytes;
 use mln_util::time::Instant;
-use slotmap::SlotMap;
 
 use crate::gfx::context::Device;
-use crate::gfx::store::{self, ReleasedEntries, Shared, VerticesKey};
+use crate::gfx::store::{ReleasedEntries, Shared, Store, VerticesKey};
 
 /// Where the vertices' bytes are: in the vector of the alignment of their
 /// type, which a vector of vertices moves into without a copy.
@@ -40,7 +39,7 @@ pub(crate) struct Vertices {
     data: VertexData,
     count: usize,
     vertex_size: usize,
-    /// When the vertices were made, or updated before they had a buffer.
+    /// When the vertices were made or last updated.
     modified: Instant,
     buffer: Option<BufferPtr>,
 }
@@ -128,10 +127,8 @@ impl Vertices {
         self.data.bytes().unwrap_or_default()
     }
 
-    /// Whether the vertices were made after `time`, or updated after it
-    /// before they had a buffer: a draw bound before then binds them again.
-    /// An update of vertices in a buffer writes over the buffer, which the
-    /// draws keep binding.
+    /// Whether the vertices were made or updated after `time`: a draw bound
+    /// before then binds them again, and its other attributes with them.
     #[must_use]
     pub(crate) fn is_modified_after(&self, time: Instant) -> bool {
         time < self.modified
@@ -146,11 +143,10 @@ impl Vertices {
         }
         if let Some(buffer) = &self.buffer {
             device.write(buffer, bytes)?;
-            return Ok(true);
-        }
-        match self.data.bytes_mut() {
-            Some(data) => data.copy_from_slice(bytes),
-            None => self.data = VertexData::Bytes(bytes.to_vec()),
+        } else if let Some(data) = self.data.bytes_mut() {
+            data.copy_from_slice(bytes);
+        } else {
+            self.data = VertexData::Bytes(bytes.to_vec());
         }
         self.modified = Instant::now();
         Ok(true)
@@ -184,7 +180,7 @@ impl Vertices {
 /// The context's store of the vertices that draws bind, which their
 /// handles keep while they last.
 #[derive(Default)]
-pub(crate) struct VertexStore(SlotMap<VerticesKey, Vertices>);
+pub(crate) struct VertexStore(Store<VerticesKey, Vertices>);
 
 impl VertexStore {
     /// Keeps `vertices` while a clone of the returned handle lasts, whose
@@ -210,18 +206,18 @@ impl VertexStore {
 
     fn insert(&mut self, vertices: Vertices, released: &Rc<ReleasedEntries>) -> SharedVertices {
         let count = vertices.count;
-        SharedVertices { handle: Shared::new(self.0.insert(vertices), released), count }
+        SharedVertices { handle: self.0.add(vertices, released), count }
     }
 
     /// The vertices of `shared`.
     pub(crate) fn get(&self, shared: &SharedVertices) -> Option<&Vertices> {
-        store::entry(&self.0, &shared.handle)
+        self.0.get(&shared.handle)
     }
 
     /// Whether the store has the vertices `key`.
     #[cfg(test)]
     pub(crate) fn contains(&self, key: VerticesKey) -> bool {
-        self.0.contains_key(key)
+        self.0.contains(key)
     }
 
     /// Replaces the vertices of `typed` with a copy of `data`, as many, as
@@ -232,7 +228,7 @@ impl VertexStore {
         typed: &TypedVertices<V>,
         data: &[V],
     ) -> Result<bool, GpuError> {
-        let entry = store::entry_mut(&mut self.0, &typed.shared.handle).ok_or(GpuError::UnknownId("vertices"))?;
+        let entry = self.0.get_mut(&typed.shared.handle).ok_or(GpuError::UnknownId("vertices"))?;
         debug_assert_eq!(entry.vertex_size, size_of::<V>());
         entry.update(device, bytemuck::cast_slice(data))
     }
@@ -244,7 +240,7 @@ impl VertexStore {
         device: &mut Device,
         shared: &SharedVertices,
     ) -> Result<Option<BufferPtr>, GpuError> {
-        store::entry_mut(&mut self.0, &shared.handle).ok_or(GpuError::UnknownId("vertices"))?.upload(device)
+        self.0.get_mut(&shared.handle).ok_or(GpuError::UnknownId("vertices"))?.upload(device)
     }
 
     /// Drops the vertices `key`, whose last handle dropped.
@@ -254,7 +250,7 @@ impl VertexStore {
 
     /// Drops every entry.
     pub(crate) fn clear(&mut self) {
-        self.0.clear();
+        self.0.drain().for_each(drop);
     }
 }
 

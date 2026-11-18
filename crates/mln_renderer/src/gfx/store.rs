@@ -126,22 +126,50 @@ pub(crate) type SharedTexture = Shared<TextureKey>;
 /// Indexes of the context's store.
 pub(crate) type SharedIndexes = Shared<IndexesKey>;
 
-/// The entry of `handle` in `store`, which is there while the handle is.
-pub(crate) fn entry<'s, K: slotmap::Key + Into<StoreKey>, V>(
-    store: &'s slotmap::SlotMap<K, V>,
-    handle: &Shared<K>,
-) -> Option<&'s V> {
-    let entry = store.get(handle.key());
-    debug_assert!(entry.is_some(), "a handle outlived its store entry");
-    entry
+/// A store of the context: its entries by key. It keeps the slots of the
+/// entries it removes for those it adds next.
+pub(crate) struct Store<K: slotmap::Key, V>(slotmap::SlotMap<K, V>);
+
+impl<K: slotmap::Key, V> Default for Store<K, V> {
+    fn default() -> Self {
+        Store(slotmap::SlotMap::with_key())
+    }
 }
 
-/// [`entry`], to change.
-pub(crate) fn entry_mut<'s, K: slotmap::Key + Into<StoreKey>, V>(
-    store: &'s mut slotmap::SlotMap<K, V>,
-    handle: &Shared<K>,
-) -> Option<&'s mut V> {
-    let entry = store.get_mut(handle.key());
-    debug_assert!(entry.is_some(), "a handle outlived its store entry");
-    entry
+impl<K: slotmap::Key + Into<StoreKey>, V> Store<K, V> {
+    /// Keeps `value`, while a clone of the returned handle lasts, whose key
+    /// goes to `released` once the last clone drops.
+    pub(crate) fn add(&mut self, value: V, released: &Rc<ReleasedEntries>) -> Shared<K> {
+        Shared::new(self.0.insert(value), released)
+    }
+
+    /// The entry of `handle`, which is there while the handle is.
+    pub(crate) fn get(&self, handle: &Shared<K>) -> Option<&V> {
+        let entry = self.0.get(handle.key());
+        debug_assert!(entry.is_some(), "a handle outlived its store entry");
+        entry
+    }
+
+    /// [`get`](Self::get), to change.
+    pub(crate) fn get_mut(&mut self, handle: &Shared<K>) -> Option<&mut V> {
+        let entry = self.0.get_mut(handle.key());
+        debug_assert!(entry.is_some(), "a handle outlived its store entry");
+        entry
+    }
+
+    /// Whether the store has the entry `key`.
+    #[cfg(test)]
+    pub(crate) fn contains(&self, key: K) -> bool {
+        self.0.contains_key(key)
+    }
+
+    /// Takes out the entry `key`, whose last handle dropped.
+    pub(crate) fn remove(&mut self, key: K) -> Option<V> {
+        self.0.remove(key)
+    }
+
+    /// Takes out every entry.
+    pub(crate) fn drain(&mut self) -> impl Iterator<Item = V> + '_ {
+        self.0.drain().map(|(_, entry)| entry)
+    }
 }

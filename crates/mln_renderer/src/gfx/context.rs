@@ -21,10 +21,9 @@ use mln_gfx::types::TextureChannelDataType;
 use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
-use slotmap::SlotMap;
 
 use crate::gfx::indexes::{Indexes, SharedIndexes};
-use crate::gfx::store::{self, IndexesKey, ReleasedEntries, Shared, SharedTexture, StoreKey, TextureKey};
+use crate::gfx::store::{IndexesKey, ReleasedEntries, SharedTexture, Store, StoreKey, TextureKey};
 use crate::gfx::texture2d::{Texture2D, TextureMut};
 use crate::gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr};
 use crate::gfx::vertices::{SharedVertices, TypedVertices, VertexStore, Vertices};
@@ -125,9 +124,9 @@ pub(crate) struct Context {
     default_vertex_buffers: HashMap<AttributeDataType, (usize, BufferPtr)>,
     /// The renderer's textures, which their owners and the draws that bind
     /// them hold as [`SharedTexture`]s.
-    textures: SlotMap<TextureKey, Texture2D>,
+    textures: Store<TextureKey, Texture2D>,
     /// The indexes that draws share, which they hold as [`SharedIndexes`].
-    indexes: SlotMap<IndexesKey, Indexes>,
+    indexes: Store<IndexesKey, Indexes>,
     /// The vertices that draws share, which they hold as [`SharedVertices`].
     vertices: VertexStore,
     /// The keys of the entries of the stores whose last handles dropped,
@@ -147,8 +146,8 @@ impl Context {
             shaders: HashMap::default(),
             pipelines: HashMap::default(),
             default_vertex_buffers: HashMap::default(),
-            textures: SlotMap::with_key(),
-            indexes: SlotMap::with_key(),
+            textures: Store::default(),
+            indexes: Store::default(),
             vertices: VertexStore::default(),
             released_entries: Rc::default(),
         }
@@ -213,8 +212,9 @@ impl Context {
     /// Destroys the resources the renderer dropped, first taking the store
     /// entries whose last handles dropped out of their stores, and takes
     /// what they took out of the rendering stats. A frame's encode does this
-    /// once its draws are uploaded, before its passes, for what the frame
-    /// dropped until then; what its passes drop goes with the next frame's.
+    /// once it made its draws, before it uploads them, for what the frame's
+    /// update and draw update dropped, and once it is submitted, for what
+    /// its uploads and passes dropped.
     pub(crate) fn destroy_released(&mut self) {
         let Context { device, textures, indexes, vertices, released_entries, .. } = self;
         released_entries.drain(|key| match key {
@@ -233,18 +233,18 @@ impl Context {
     /// Keeps `indexes` for the draws that share them, while a clone of the
     /// returned handle lasts.
     pub(crate) fn add_indexes(&mut self, indexes: Indexes) -> SharedIndexes {
-        Shared::new(self.indexes.insert(indexes), &self.released_entries)
+        self.indexes.add(indexes, &self.released_entries)
     }
 
     /// The indexes of `handle`.
     pub(crate) fn indexes(&self, handle: &SharedIndexes) -> Option<&Indexes> {
-        store::entry(&self.indexes, handle)
+        self.indexes.get(handle)
     }
 
     /// Writes the indexes of `handle` to a buffer, unless they have one.
     pub(crate) fn upload_indexes(&mut self, handle: &SharedIndexes) -> Result<(), GpuError> {
         let Context { device, indexes, .. } = self;
-        store::entry_mut(indexes, handle).ok_or(GpuError::UnknownId("indexes"))?.upload(device)
+        indexes.get_mut(handle).ok_or(GpuError::UnknownId("indexes"))?.upload(device)
     }
 
     /// Keeps `vertices` for the draws that share them, while a clone of the
@@ -270,7 +270,7 @@ impl Context {
 
     /// Whether the store has the vertices `key`.
     #[cfg(test)]
-    pub(crate) fn has_vertices(&self, key: store::VerticesKey) -> bool {
+    pub(crate) fn has_vertices(&self, key: crate::gfx::store::VerticesKey) -> bool {
         self.vertices.contains(key)
     }
 
@@ -303,24 +303,24 @@ impl Context {
     pub(crate) fn add_texture_with(&mut self, setup: impl FnOnce(&mut TextureMut<'_>)) -> SharedTexture {
         let mut texture = Texture2D::default();
         setup(&mut TextureMut::new(&mut texture, &self.device.released));
-        Shared::new(self.textures.insert(texture), &self.released_entries)
+        self.textures.add(texture, &self.released_entries)
     }
 
     /// The texture of `handle`.
     pub(crate) fn texture(&self, handle: &SharedTexture) -> Option<&Texture2D> {
-        store::entry(&self.textures, handle)
+        self.textures.get(handle)
     }
 
     /// The texture of `handle`, to set up.
     pub(crate) fn texture_mut(&mut self, handle: &SharedTexture) -> Option<TextureMut<'_>> {
-        Some(TextureMut::new(store::entry_mut(&mut self.textures, handle)?, &self.device.released))
+        Some(TextureMut::new(self.textures.get_mut(handle)?, &self.device.released))
     }
 
     /// The texture of `handle` and what changes it, or the error of a handle
     /// without one.
     fn texture_entry(&mut self, handle: &SharedTexture) -> Result<(&mut Texture2D, &mut Device), GpuError> {
         let Context { device, textures, .. } = self;
-        Ok((store::entry_mut(textures, handle).ok_or(GpuError::UnknownId("texture"))?, device))
+        Ok((textures.get_mut(handle).ok_or(GpuError::UnknownId("texture"))?, device))
     }
 
     /// Makes the backend's texture of `handle`'s size and format, unless it
@@ -459,14 +459,14 @@ impl Context {
 /// `gpu`: the texture, made and holding its image, which `stats` count, and
 /// the sampler of its state in `samplers`.
 fn bind(
-    textures: &mut SlotMap<TextureKey, Texture2D>,
+    textures: &mut Store<TextureKey, Texture2D>,
     samplers: &mut HashMap<SamplerState, SamplerId>,
     stats: &mut RenderingStats,
     released: &Released,
     gpu: &mut dyn Gpu,
     handle: &SharedTexture,
 ) -> Result<(TextureId, SamplerId), GpuError> {
-    let texture = store::entry_mut(textures, handle).ok_or(GpuError::UnknownId("texture"))?;
+    let texture = textures.get_mut(handle).ok_or(GpuError::UnknownId("texture"))?;
     let id = texture.bind(gpu, stats, released)?;
     let sampler = if let Some(sampler) = texture.sampler_id() {
         sampler
@@ -499,10 +499,10 @@ impl Context {
         self.global_uniform_buffers = UniformBufferArray::new();
         self.default_vertex_buffers.clear();
         let Context { device, textures, indexes, vertices, released_entries, .. } = self;
-        for (_, mut texture) in textures.drain() {
+        for mut texture in textures.drain() {
             texture.release(&device.released);
         }
-        indexes.clear();
+        indexes.drain().for_each(drop);
         vertices.clear();
         released_entries.drain(|_| {});
         let mut gpu = device.backend.gpu();
