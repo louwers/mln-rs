@@ -31,7 +31,7 @@ use super::cast_matrix;
 use crate::bucket::NoBucket;
 use crate::draw::{DrawGeometry, DrawObjects, Textures, raw_vertices};
 use crate::globe_tile_mesh::raw_globe_tile_mesh;
-use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDraws, TileDraws};
+use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, TileDraws};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
@@ -292,7 +292,7 @@ impl RenderLayer for RenderBackgroundLayer {
             self.remove_all_draws();
             return;
         }
-        self.drawing.frame.get_or_insert_with(LayerDraws::new);
+        self.drawing.frame_mut();
 
         if self.update_projection_variant(state) {
             self.plain_shader = None;
@@ -314,7 +314,7 @@ impl RenderLayer for RenderBackgroundLayer {
             return;
         };
 
-        self.drawing.tiles.set_tiles(tile_cover.iter().copied());
+        self.drawing.tiles_mut().set_tiles(tile_cover.iter().copied());
 
         // conformance: background-pattern.
         let pattern_atlas = paint_parameters.pattern_atlas.borrow();
@@ -324,9 +324,7 @@ impl RenderLayer for RenderBackgroundLayer {
                 (pattern_atlas.get_pattern(faded.from.id()), pattern_atlas.get_pattern(faded.to.id()))
             else {
                 // The pattern isn't valid: the layer draws nothing.
-                if let Some(frame) = &mut self.drawing.frame {
-                    frame.clear();
-                }
+                self.drawing.frame_mut().clear();
                 return;
             };
             Some((from, to))
@@ -346,7 +344,7 @@ impl RenderLayer for RenderBackgroundLayer {
 
         let variant = self.base.projection_variant;
         for tile_id in &tile_cover {
-            let Some(entry) = self.drawing.tiles.entry(tile_id) else {
+            let Some(entry) = self.drawing.tiles_mut().entry(tile_id) else {
                 continue;
             };
             let cached = entry.value.get_or_insert_with(|| {
@@ -363,7 +361,7 @@ impl RenderLayer for RenderBackgroundLayer {
             self.draw_list.push(draw, Self::uniforms(tile_id, has_pattern, paint_parameters));
         }
 
-        let frame = self.drawing.frame.get_or_insert_with(LayerDraws::new);
+        let frame = self.drawing.frame_mut();
         self.draw_list.finish(frame, context, |writer| {
             let opacity = *evaluated.background_opacity.uniform();
             if let Some((from, to)) = pattern_positions {

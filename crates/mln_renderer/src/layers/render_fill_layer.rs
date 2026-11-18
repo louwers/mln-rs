@@ -39,9 +39,7 @@ use crate::draw::{DrawGeometry, DrawObjects, copy_shared_attributes};
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
 use crate::layer_composite::Composite;
-use crate::layer_drawing::{
-    DrawDepth, DrawList, DrawObjectsMut, FrameDraw, LayerDraws, TileDraws, TileObjects, UniformWriter,
-};
+use crate::layer_drawing::{DrawDepth, DrawList, DrawObjectsMut, FrameDraw, TileDraws, TileObjects, UniformWriter};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::pattern_layout::{FillLayoutSpec, PatternLayout, uses_pattern};
@@ -694,7 +692,7 @@ impl RenderLayer for RenderFillLayer {
         let layer = &*self.values.evaluated;
         for tile in render_tiles.iter() {
             let tile_id = tile.id();
-            let Some(mut entry) = self.drawing.tiles.entry(&tile_id) else {
+            let Some(mut entry) = self.drawing.tiles_mut().entry(&tile_id) else {
                 continue;
             };
 
@@ -775,7 +773,7 @@ impl RenderLayer for RenderFillLayer {
             }
         }
 
-        let frame = self.drawing.frame.get_or_insert_with(LayerDraws::new);
+        let frame = self.drawing.frame_mut();
         frame.set_composite(Composite::of(
             *layer.paint.fill_layer_opacity.uniform(),
             *layer.paint.fill_layer_blend.uniform(),

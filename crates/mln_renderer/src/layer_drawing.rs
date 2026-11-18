@@ -991,10 +991,10 @@ impl DrawOrder {
 /// The drawing of a layer that draws one group of draws, each of a part of
 /// the tile it draws, and keeps a `T` of each tile.
 pub(crate) struct TileDraws<T: TileObjects> {
-    pub(crate) tiles: TileMap<T>,
+    tiles: TileMap<T>,
     /// The frame's draws, from the layer's first update with something to
     /// draw.
-    pub(crate) frame: Option<LayerDraws<T::Part>>,
+    frame: Option<LayerDraws<T::Part>>,
 }
 
 impl<T: TileObjects> Default for TileDraws<T> {
@@ -1004,21 +1004,15 @@ impl<T: TileObjects> Default for TileDraws<T> {
 }
 
 impl<T: TileObjects> TileDraws<T> {
-    /// Uploads the GPU objects of the frame's draws.
-    pub(crate) fn upload_draws(&mut self, context: &Context) {
-        if let Some(frame) = &self.frame {
-            frame.upload(&mut self.tiles, tile_objects, context);
-        }
+    /// What the layer keeps of the frame's tiles.
+    pub(crate) fn tiles_mut(&mut self) -> &mut TileMap<T> {
+        &mut self.tiles
     }
 
-    /// Draws the pass's draws of the frame into the open pass of `gpu`, the
-    /// context's. Returns whether the layer has their group.
-    pub(crate) fn render_draws(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) -> bool {
-        let Some(frame) = &self.frame else {
-            return false;
-        };
-        frame.render(&mut self.tiles, tile_objects, gpu, parameters);
-        true
+    /// The frame's draws, which the layer has from the first call on: their
+    /// group then takes a place in the layers' order and depth.
+    pub(crate) fn frame_mut(&mut self) -> &mut LayerDraws<T::Part> {
+        self.frame.get_or_insert_with(LayerDraws::default)
     }
 }
 
@@ -1043,11 +1037,14 @@ impl<T: TileObjects> LayerDrawing for TileDraws<T> {
     }
 
     fn upload(&mut self, context: &Context) {
-        self.upload_draws(context);
+        if let Some(frame) = &self.frame {
+            frame.upload(&mut self.tiles, tile_objects, context);
+        }
     }
 
     fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
-        if self.render_draws(gpu, parameters) {
+        if let Some(frame) = &self.frame {
+            frame.render(&mut self.tiles, tile_objects, gpu, parameters);
             order.step(parameters);
         }
     }

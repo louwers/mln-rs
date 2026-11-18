@@ -26,7 +26,7 @@ use super::{cast_matrix, refresh_paint_attributes};
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::circle_bucket::{CircleBinders, CircleBucket, CircleLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
-use crate::layer_drawing::{DrawList, KeptDraw, LayerDraws, TileDraws, UniformWriter};
+use crate::layer_drawing::{DrawList, KeptDraw, TileDraws, UniformWriter};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::circle_layout::CircleLayout;
 use crate::layout::layout::{LayoutParameters, SourceLayer};
@@ -428,7 +428,7 @@ impl RenderLayer for RenderCircleLayer {
             self.remove_all_draws();
             return;
         };
-        let frame = self.drawing.frame.get_or_insert_with(LayerDraws::new);
+        self.drawing.frame_mut();
 
         if self.circle_shader_group.is_none() {
             self.circle_shader_group = shaders.shader_group(CIRCLE_SHADER_GROUP_NAME);
@@ -446,7 +446,7 @@ impl RenderLayer for RenderCircleLayer {
         let evaluated = &layer.paint;
         for tile in render_tiles.iter() {
             let tile_id = tile.id();
-            let Some(mut entry) = self.drawing.tiles.entry(&tile_id) else {
+            let Some(mut entry) = self.drawing.tiles_mut().entry(&tile_id) else {
                 continue;
             };
 
@@ -512,6 +512,6 @@ impl RenderLayer for RenderCircleLayer {
             self.draw_list.push(draw, Self::uniforms(layer, &tile_id, binders, paint_parameters));
         }
 
-        self.draw_list.finish(frame, context, |writer| Self::write_uniforms(layer, writer));
+        self.draw_list.finish(self.drawing.frame_mut(), context, |writer| Self::write_uniforms(layer, writer));
     }
 }

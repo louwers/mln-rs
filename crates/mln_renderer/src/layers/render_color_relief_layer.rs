@@ -46,9 +46,7 @@ use crate::buckets::hillshade_bucket::{HillshadeBucket, HillshadeLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::gfx::texture2d::Texture2DPtr;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
-use crate::layer_drawing::{
-    DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptDraw, LayerDraws, TileDraws, TileObjects,
-};
+use crate::layer_drawing::{DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptDraw, TileDraws, TileObjects};
 use crate::layer_type::LayerType;
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
@@ -367,7 +365,7 @@ impl RenderLayer for RenderColorReliefLayer {
             self.remove_all_draws();
             return;
         };
-        self.drawing.frame.get_or_insert_with(LayerDraws::new);
+        self.drawing.frame_mut();
 
         if self.color_relief_shader.is_none() {
             self.color_relief_shader = shaders.shader(COLOR_RELIEF_SHADER_GROUP_NAME, self.base.projection_variant);
@@ -450,7 +448,7 @@ impl RenderLayer for RenderColorReliefLayer {
 
         for tile in render_tiles.iter() {
             let tile_id = tile.id();
-            let Some(mut entry) = self.drawing.tiles.entry(&tile_id) else {
+            let Some(mut entry) = self.drawing.tiles_mut().entry(&tile_id) else {
                 continue;
             };
 
@@ -573,7 +571,7 @@ impl RenderLayer for RenderColorReliefLayer {
             self.draw_list.push(draw, uniforms);
         }
 
-        let frame = self.drawing.frame.get_or_insert_with(LayerDraws::new);
+        let frame = self.drawing.frame_mut();
         let opacity = *self.values.evaluated.paint.color_relief_opacity.uniform();
         self.draw_list.finish(frame, context, |writer| {
             let props = ColorReliefEvaluatedPropsUBO { opacity, pad_eval0: 0.0, pad_eval1: 0.0, pad_eval2: 0.0 };

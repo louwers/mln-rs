@@ -59,7 +59,7 @@ use crate::frame_projection::zero_to_one_clip_z;
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
 use crate::layer_drawing::{
-    DrawDepth, DrawList, DrawObjectsMut, DrawPriority, FrameDraw, LayerDraws, TileDraws, TileObjects, UniformWriter,
+    DrawDepth, DrawList, DrawObjectsMut, DrawPriority, FrameDraw, TileDraws, TileObjects, UniformWriter,
 };
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
@@ -421,7 +421,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
                 return;
             }
         };
-        let frame = self.drawing.frame.get_or_insert_with(LayerDraws::new);
+        self.drawing.frame_mut();
 
         if self.fill_extrusion_group.is_none() {
             self.fill_extrusion_group = shaders.shader_group("FillExtrusionShader");
@@ -481,7 +481,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
         let layer = &*self.values.evaluated;
         for tile in render_tiles.iter() {
             let tile_id = tile.id();
-            let Some(mut entry) = self.drawing.tiles.entry(&tile_id) else {
+            let Some(mut entry) = self.drawing.tiles_mut().entry(&tile_id) else {
                 continue;
             };
 
@@ -523,6 +523,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
             }
         }
 
+        let frame = self.drawing.frame_mut();
         frame.set_stencil_tiles(render_tiles.render_tiles().map(|tile| tile.id));
         self.draw_list.finish(frame, context, |writer| Self::write_uniforms(layer, writer, paint_parameters));
     }

@@ -51,7 +51,7 @@ use crate::geometry::dem_data::get_unpack_vector;
 use crate::gfx::context::Context;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_drawing::{
-    DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptDraw, LayerDraws, SingleDraw, TileDraws, TileObjects,
+    DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptDraw, SingleDraw, TileDraws, TileObjects,
 };
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
@@ -375,7 +375,7 @@ impl RenderLayer for RenderHillshadeLayer {
             self.remove_all_draws();
             return;
         };
-        self.drawing.frame.get_or_insert_with(LayerDraws::new);
+        self.drawing.frame_mut();
 
         if self.hillshade_prepare_shader.is_none() {
             self.hillshade_prepare_shader =
@@ -419,7 +419,7 @@ impl RenderLayer for RenderHillshadeLayer {
         let mut illumination = None;
         for tile in render_tiles.iter() {
             let tile_id = tile.id();
-            let Some(mut entry) = self.drawing.tiles.entry(&tile_id) else {
+            let Some(mut entry) = self.drawing.tiles_mut().entry(&tile_id) else {
                 continue;
             };
 
@@ -535,7 +535,7 @@ impl RenderLayer for RenderHillshadeLayer {
             self.draw_list.push(draw, uniforms);
         }
 
-        let frame = self.drawing.frame.get_or_insert_with(LayerDraws::new);
+        let frame = self.drawing.frame_mut();
         self.draw_list.finish(frame, context, |writer| {
             if let Some(Illumination { props, .. }) = &illumination {
                 writer.uniform(ID_HILLSHADE_EVALUATED_PROPS_UBO, props);

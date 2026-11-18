@@ -46,7 +46,7 @@ use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
 use crate::gfx::texture2d::Texture2DPtr;
 use crate::layer_composite::Composite;
-use crate::layer_drawing::{DrawList, DrawObjectsMut, FrameDraw, LayerDraws, TileDraws, TileObjects, UniformWriter};
+use crate::layer_drawing::{DrawList, DrawObjectsMut, FrameDraw, TileDraws, TileObjects, UniformWriter};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::pattern_layout::{LineLayoutSpec, PatternLayout, uses_pattern};
@@ -582,7 +582,7 @@ impl RenderLayer for RenderLineLayer {
             return;
         };
 
-        let frame = self.drawing.frame.get_or_insert_with(LayerDraws::new);
+        let frame = self.drawing.frame_mut();
         let paint = &self.values.evaluated.paint;
         frame.set_composite(Composite::of(*paint.line_layer_opacity.uniform(), *paint.line_layer_blend.uniform()));
         frame.set_stencil_tiles(render_tiles.render_tiles().map(|tile| tile.id));
@@ -593,14 +593,14 @@ impl RenderLayer for RenderLineLayer {
             let tile_id = tile.id();
 
             let Some(render_data) = super::layer_bucket_for_pass(tile, &*self.base.style, render_pass) else {
-                self.drawing.tiles.drop_value(&tile_id);
+                self.drawing.tiles_mut().drop_value(&tile_id);
                 continue;
             };
             let Some(bucket) = render_data.bucket::<Line>() else {
                 continue;
             };
             if bucket.triangles.is_empty() {
-                self.drawing.tiles.drop_value(&tile_id);
+                self.drawing.tiles_mut().drop_value(&tile_id);
                 continue;
             }
             let Some(binders) = bucket.paint_property_binders.get(self.get_id()) else {
@@ -610,7 +610,7 @@ impl RenderLayer for RenderLineLayer {
                 continue;
             };
 
-            let Some(mut entry) = self.drawing.tiles.entry(&tile_id) else {
+            let Some(mut entry) = self.drawing.tiles_mut().entry(&tile_id) else {
                 continue;
             };
             if entry.value.as_ref().is_some_and(|cached| cached.pass != render_pass) {
@@ -633,7 +633,7 @@ impl RenderLayer for RenderLineLayer {
                 cached
             } else {
                 let built = self.build_tile(shaders, context, tile, bucket, binders, evaluated, render_pass);
-                let Some(cached) = built.and_then(|built| self.drawing.tiles.insert(&tile_id, built).ok()) else {
+                let Some(cached) = built.and_then(|built| self.drawing.tiles_mut().insert(&tile_id, built).ok()) else {
                     continue;
                 };
                 cached
@@ -644,7 +644,7 @@ impl RenderLayer for RenderLineLayer {
             }
         }
 
-        let frame = self.drawing.frame.get_or_insert_with(LayerDraws::new);
+        let frame = self.drawing.frame_mut();
         let layer = &self.values.evaluated;
         self.draw_list.finish(frame, context, |writer| Self::write_uniforms(layer, writer));
     }
