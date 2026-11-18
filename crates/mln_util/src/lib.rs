@@ -37,6 +37,7 @@ pub mod logging;
 pub mod mat3;
 pub mod mat4;
 pub mod math;
+pub mod panic;
 pub mod pool;
 pub mod premultiply;
 pub mod projection;

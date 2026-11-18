@@ -162,7 +162,7 @@ pub(crate) unsafe extern "C" fn mln_style_expression_create(
 /// `mln_style_expression_release()`.
 #[unsafe(no_mangle)]
 pub(crate) extern "C" fn mln_style_expression_release(expression: mln_style_expression) {
-    let _ = release(expression);
+    crate::export::catch_and_log(|| drop(release(expression)));
 }
 
 /// Releases `expression`, as `mln_style_expression_release()` does.

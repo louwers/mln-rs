@@ -4,8 +4,8 @@
 use std::cell::OnceCell;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::thread::ThreadId;
 
 use mln_renderer::Registry;
@@ -19,6 +19,7 @@ use mln_storage::{FileSource, Loader, OnlineFileSource, ResourceOptions};
 use mln_storage_offline::RegionDatabase;
 use mln_text::GlyphCache;
 use mln_util::error::Error;
+use mln_util::logging::{Event, Log};
 use mln_util::pool::Pool;
 use mln_util::queue::Queue;
 use mln_util::thread::Joined;
@@ -76,6 +77,13 @@ pub struct RuntimeOptions {
 /// thread that drops it. A drop on a thread of the library, such as in a
 /// handler or callback that the library runs, doesn't wait: it leaves the
 /// runtime's threads to end alone.
+///
+/// A panic in the work of the runtime or its maps is a bug in the library,
+/// and stops the runtime instead of the process. It logs the panic, the
+/// command that panicked fails with
+/// [`ErrorKind::Native`](mln_util::ErrorKind), those that waited are
+/// cancelled, and the commands sent to the runtime and its maps after fail
+/// with `ErrorKind::Native`. Release its maps and the runtime then.
 #[derive(Clone)]
 pub struct Runtime {
     pub(crate) shared: Arc<RuntimeShared>,
@@ -99,6 +107,8 @@ pub(crate) struct RuntimeShared {
     queued: Arc<AtomicUsize>,
     thread: ThreadId,
     lifecycle: Mutex<Lifecycle>,
+    /// Why the runtime stopped, once a panic in its work stopped it.
+    failure: Arc<OnceLock<Error>>,
     next_map_id: AtomicU64,
     /// The glyphs that the renderers of the runtime's maps parse, which they
     /// share.
@@ -123,6 +133,26 @@ impl RuntimeShared {
     pub(crate) fn post(&self, task: impl FnOnce(&mut RuntimeCore, &mut Outbox) + Send + 'static) {
         self.queued.fetch_add(1, Ordering::SeqCst);
         self.queue.post(move |core| run(core, task, true));
+    }
+
+    /// Runs `task` with `value` on the runtime's thread, after everything
+    /// sent before it, or `stopped` with `value` there instead once the
+    /// runtime has let go of its state, for work that ends the same either
+    /// way, such as a release.
+    pub(crate) fn post_or_stopped<V: Send + 'static>(
+        &self,
+        value: V,
+        task: impl FnOnce(&mut RuntimeCore, &mut Outbox, V) + Send + 'static,
+        stopped: impl FnOnce(V) + Send + 'static,
+    ) {
+        self.queued.fetch_add(1, Ordering::SeqCst);
+        self.queue.post(move |core| {
+            if core.is_some() {
+                run(core, move |core, outbox| task(core, outbox, value), true);
+            } else {
+                stopped(value);
+            }
+        });
     }
 
     /// Runs `task` on the runtime's thread, after everything sent before it,
@@ -170,7 +200,15 @@ impl RuntimeShared {
     }
 
     fn check_live(&self) -> Result<(), Error> {
-        if self.lifecycle.lock().released { Err(released()) } else { Ok(()) }
+        if self.lifecycle.lock().released {
+            return Err(released());
+        }
+        self.check_running()
+    }
+
+    /// Fails once a panic in the runtime's work stopped it.
+    pub(crate) fn check_running(&self) -> Result<(), Error> {
+        self.failure.get().map_or(Ok(()), |failure| Err(failure.clone()))
     }
 
     /// A map of the runtime was released or dropped. A disposed runtime shuts
@@ -270,16 +308,37 @@ pub(crate) fn post(queue: &CoreQueue, task: impl FnOnce(&mut RuntimeCore, &mut O
 /// its completions. A task that [`RuntimeShared::post`] sent runs in its
 /// burst.
 fn run(core: &mut Option<RuntimeCore>, task: impl FnOnce(&mut RuntimeCore, &mut Outbox), in_burst: bool) {
-    let Some(core) = core.as_mut() else { return };
-    let mut outbox = Outbox { deliveries: std::mem::take(&mut core.spare_deliveries) };
-    if in_burst {
-        core.begin_burst_task();
+    let Some(state) = core.as_mut() else { return };
+    let mut outbox = Outbox { deliveries: std::mem::take(&mut state.spare_deliveries) };
+    let ran = mln_util::panic::catch(|| {
+        if in_burst {
+            state.begin_burst_task();
+        }
+        task(state, &mut outbox);
+        if in_burst {
+            state.end_burst_task(&mut outbox);
+        }
+    });
+    match ran {
+        Ok(()) => state.spare_deliveries = outbox.deliver(),
+        Err(message) => {
+            fail(core, &message);
+            outbox.deliver();
+        }
     }
-    task(core, &mut outbox);
-    if in_burst {
-        core.end_burst_task(&mut outbox);
-    }
-    core.spare_deliveries = outbox.deliver();
+}
+
+/// Stops the runtime after a panic in its work, a bug in the library: its
+/// state drops, as at a shutdown, which cancels the completions of the
+/// commands that it held, and the commands sent from now on fail.
+fn fail(core: &mut Option<RuntimeCore>, message: &str) {
+    let Some(state) = core.take() else { return };
+    let error = Error::native(format!("the runtime stopped after a panic in the library: {message}"));
+    Log::error(Event::Crash, &error.message);
+    let _ = state.failure.set(error);
+    // The panic may have left the state half-changed, so its drop may panic
+    // too.
+    let _ = mln_util::panic::catch(move || drop(state));
 }
 
 /// What a task sends to the host: event batches and results, in order. They
@@ -339,6 +398,8 @@ pub(crate) struct RuntimeCore {
     pub(crate) pool: Pool,
     /// [`RuntimeShared::queued`].
     queued: Arc<AtomicUsize>,
+    /// [`RuntimeShared::failure`].
+    failure: Arc<OnceLock<Error>>,
     /// The tasks of the burst in progress that haven't finished.
     burst_left: usize,
     /// Whether the maps hold their updates back for the burst.
@@ -362,6 +423,7 @@ impl RuntimeCore {
         network_options: NetworkOptions,
         queue: CoreQueue,
         queued: Arc<AtomicUsize>,
+        failure: Arc<OnceLock<Error>>,
         registry: Arc<Registry>,
         pool: Pool,
     ) -> Self {
@@ -380,6 +442,7 @@ impl RuntimeCore {
             registry,
             pool,
             queued,
+            failure,
             burst_left: 0,
             holding: false,
             spare_deliveries: Vec::new(),
@@ -564,13 +627,23 @@ impl Runtime {
             fetch_preloads: options.fetch_preloads.clone(),
         };
         let queued = Arc::new(AtomicUsize::new(0));
+        let failure = Arc::new(OnceLock::new());
         let queue = CoreQueue::default();
         let pool = runtime_pool();
+        // A panic in a task of the runtime's maps or their sessions stops the
+        // runtime, as one on its thread does.
+        let failing = queue.downgrade();
+        pool.set_panic_handler(Some(Arc::new(move |message| {
+            if let Some(queue) = failing.upgrade() {
+                queue.post(move |core| fail(core, &message));
+            }
+        })));
         let (thread, thread_end) = Self::start(
             resource_options,
             network_options,
             queue.clone(),
             Arc::clone(&queued),
+            Arc::clone(&failure),
             Arc::clone(&registry),
             pool.clone(),
         )?;
@@ -580,6 +653,7 @@ impl Runtime {
                 queued,
                 thread,
                 lifecycle: Mutex::new(Lifecycle { released: false, live_maps: 0, shut_down: false }),
+                failure,
                 next_map_id: AtomicU64::new(1),
                 glyph_cache: Arc::default(),
                 font_face_engine: font_face_engine(),
@@ -598,13 +672,21 @@ impl Runtime {
         network_options: NetworkOptions,
         queue: CoreQueue,
         queued: Arc<AtomicUsize>,
+        failure: Arc<OnceLock<Error>>,
         registry: Arc<Registry>,
         pool: Pool,
     ) -> Result<(ThreadId, Option<Joined>), Error> {
         let thread = mln_util::thread::spawn("Runtime", move || {
             let own_pool = pool.clone();
-            let mut core =
-                Some(RuntimeCore::new(resource_options, network_options, queue.clone(), queued, registry, pool));
+            let mut core = Some(RuntimeCore::new(
+                resource_options,
+                network_options,
+                queue.clone(),
+                queued,
+                failure,
+                registry,
+                pool,
+            ));
             queue.run(&mut core);
             // What comes after the shutdown drops at once, so tasks that hold
             // the queue can't keep it alive.
@@ -630,10 +712,11 @@ impl Runtime {
         network_options: NetworkOptions,
         queue: CoreQueue,
         queued: Arc<AtomicUsize>,
+        failure: Arc<OnceLock<Error>>,
         registry: Arc<Registry>,
         pool: Pool,
     ) -> Result<(ThreadId, Option<Joined>), Error> {
-        let core = RuntimeCore::new(resource_options, network_options, queue.clone(), queued, registry, pool);
+        let core = RuntimeCore::new(resource_options, network_options, queue.clone(), queued, failure, registry, pool);
         let pool = core.pool.clone();
         crate::web::drive(&pool, queue, Some(core));
         Ok((std::thread::current().id(), None))
@@ -686,6 +769,7 @@ impl Runtime {
         if !pixel_ratio.is_finite() || pixel_ratio <= 0.0 {
             return Err(Error::invalid_argument("the map's pixel ratio must be finite and positive"));
         }
+        self.shared.check_running()?;
         {
             let mut lifecycle = self.shared.lifecycle.lock();
             if lifecycle.released {

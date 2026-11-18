@@ -253,9 +253,17 @@ impl<T> Resolver<T> {
 
 impl<T> Drop for Resolver<T> {
     fn drop(&mut self) {
-        if !matches!(self.target, Target::Resolved) {
-            self.deliver(Err(Error::cancelled("the command was dropped before it ran")));
+        if matches!(self.target, Target::Resolved) {
+            return;
         }
+        // A command whose work panicked drops its resolver as the panic
+        // unwinds.
+        let error = if std::thread::panicking() {
+            Error::native("a panic in the library stopped the command")
+        } else {
+            Error::cancelled("the command was dropped before it ran")
+        };
+        self.deliver(Err(error));
     }
 }
 

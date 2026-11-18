@@ -257,7 +257,7 @@ pub(crate) unsafe extern "C" fn mln_resource_transform_request_fail(
 /// `mln_resource_transform_request_release()`.
 #[unsafe(no_mangle)]
 pub(crate) extern "C" fn mln_resource_transform_request_release(request: mln_resource_transform_request) {
-    let _ = release(request);
+    crate::export::catch_and_log(|| drop(release(request)));
 }
 
 /// The headers that header transform callbacks are setting now, by the

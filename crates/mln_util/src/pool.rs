@@ -28,6 +28,9 @@ pub type Task = Box<dyn FnOnce() + Send + 'static>;
 /// What a pool calls when work arrives while it had none.
 pub type Waker = Arc<dyn Fn() + Send + Sync>;
 
+/// What a pool calls with the message of a task's panic.
+pub type PanicHandler = Arc<dyn Fn(String) + Send + Sync>;
+
 /// Where a job hands its result: called at most once, from any thread,
 /// while the job runs or later. Dropping it uncalled drops the result.
 pub type Respond<R> = Box<dyn FnOnce(R) + Send>;
@@ -68,6 +71,7 @@ struct Shared {
     /// The pool's own lane, for [`Pool::spawn`].
     lane: Arc<Lane>,
     waker: Mutex<Option<Waker>>,
+    panic_handler: Mutex<Option<PanicHandler>>,
     /// The most worker threads the pool starts: none for a local pool.
     max_threads: usize,
     /// The workers started so far.
@@ -165,6 +169,13 @@ impl Pool {
         *self.workers.shared.waker.lock() = waker;
     }
 
+    /// Calls `handler` with the message of each task that panics, after the
+    /// panic hook reported it. The task ends as any other, and the pool goes
+    /// on, so the owner of what the task worked on fails it.
+    pub fn set_panic_handler(&self, handler: Option<PanicHandler>) {
+        *self.workers.shared.panic_handler.lock() = handler;
+    }
+
     /// Runs queued tasks on this thread, one from each lane in turn, until
     /// none are left or `deadline` has passed (checked after each task).
     /// Returns whether tasks remain.
@@ -259,8 +270,7 @@ impl TaskGroup {
                 lane.ended.wait(&mut state);
             } else if let Some(task) = state.start() {
                 drop(state);
-                // As on a worker, a task that panics ends as any other.
-                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| shared.run(lane, task)));
+                shared.run(lane, task);
                 state = lane.state.lock();
             } else if state.running == 0 || !waits {
                 return;
@@ -284,6 +294,7 @@ impl Shared {
             work: Condvar::new(),
             lane: Arc::default(),
             waker: Mutex::new(None),
+            panic_handler: Mutex::new(None),
             max_threads,
             threads: Mutex::default(),
             stopped: AtomicBool::new(false),
@@ -362,7 +373,8 @@ impl Shared {
     }
 
     /// Runs `task`, which `lane` counts running, and counts it ended once it
-    /// and its captures are gone, even if it panics. A serial lane with tasks
+    /// and its captures are gone, even if it panics: the panic goes to the
+    /// pool's panic handler instead of up this thread. A serial lane with tasks
     /// queued goes back in the ring then. No worker starts for it: the
     /// thread that ran the task goes on to take tasks, a worker's or
     /// [`Pool::run_until`]'s from the ring, a [`TaskGroup::wait`]'s from
@@ -393,7 +405,12 @@ impl Shared {
             }
         }
         let _ended = Ended(self, lane);
-        task();
+        if let Err(message) = crate::panic::catch(task) {
+            let handler = self.panic_handler.lock().clone();
+            if let Some(handler) = handler {
+                handler(message);
+            }
+        }
     }
 
     /// Whether the pool stopped.
@@ -462,9 +479,7 @@ impl Shared {
                 }
             };
             let (lane, task) = next;
-            // A task that panics ends as any other: the panic hook reported
-            // it, and the worker goes on.
-            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.run(&lane, task)));
+            self.run(&lane, task);
         }
     }
 }
@@ -664,6 +679,15 @@ mod tests {
         group.spawn(move || done.send(()).unwrap());
         finished.recv_timeout(Duration::from_secs(10)).unwrap();
         group.wait();
+    }
+
+    #[test]
+    fn a_task_that_panics_tells_the_panic_handler() {
+        let pool = Pool::new(1);
+        let (report, reported) = mpsc::channel();
+        pool.set_panic_handler(Some(Arc::new(move |message| report.send(message).unwrap())));
+        pool.spawn(|| panic!("a task panicked"));
+        assert_eq!(reported.recv_timeout(Duration::from_secs(10)).unwrap(), "a task panicked");
     }
 
     #[test]

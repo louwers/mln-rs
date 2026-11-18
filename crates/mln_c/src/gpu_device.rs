@@ -865,7 +865,7 @@ pub(crate) unsafe extern "C" fn mln_gpu_device_get_d3d12_context(
 #[unsafe(no_mangle)]
 pub(crate) extern "C" fn mln_gpu_device_release(device: mln_gpu_device) {
     if device != handles::NULL {
-        let _ = release(device);
+        crate::export::catch_and_log(|| drop(release(device)));
     }
 }
 

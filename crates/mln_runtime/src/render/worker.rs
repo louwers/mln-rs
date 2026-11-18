@@ -60,10 +60,15 @@ fn run(worker: &mut Option<Worker>, task: impl FnOnce(&mut Worker, &mut Outbox))
     let mut outbox = Outbox::default();
     {
         let _gate = shared.gate.lock();
-        if !worker.torn_down && shared.state.lock().lifecycle == RenderSessionState::Abandoned {
-            worker.tear_down(&mut outbox);
+        let ran = mln_util::panic::catch(|| {
+            if !worker.torn_down && shared.state.lock().lifecycle == RenderSessionState::Abandoned {
+                worker.tear_down(&mut outbox);
+            }
+            task(worker, &mut outbox);
+        });
+        if let Err(message) = ran {
+            worker.fail_after_panic(&message, &mut outbox);
         }
-        task(worker, &mut outbox);
     }
     shared.wait_for_senders();
     outbox.deliver();
@@ -437,6 +442,9 @@ pub(crate) struct Worker {
     /// The demands that wait for a borrowed ring to free a texture, ahead of
     /// the queue.
     parked: VecDeque<PendingDemand>,
+    /// The token of the demand that the session is rendering, which a panic
+    /// on the way ends with the others.
+    rendering: Option<u64>,
     /// The textures of a borrowed ring.
     ring: Option<BorrowedRing>,
     /// The update generation and session generation of the last render.
@@ -621,6 +629,7 @@ impl Worker {
             queue: VecDeque::new(),
             waiting: Vec::new(),
             parked: VecDeque::new(),
+            rendering: None,
             ring,
             rendered_update: 0,
             rendered_generation: 0,
@@ -946,7 +955,9 @@ impl Worker {
                     RingPick::None => None,
                     RingPick::Slot(slot) => Some(slot),
                 };
+                self.rendering = token;
                 let frame = self.render(token, &update, slot);
+                self.rendering = None;
                 self.publish_rendered(frame, outbox);
             }
             _ if pending.demand.mode == DemandMode::WaitForUpdate => self.waiting.push((pending, latest_generation)),
@@ -1495,6 +1506,36 @@ impl Worker {
         }
     }
 
+    /// Fails the session after a panic in its work, a bug in the library:
+    /// it lets go of its renderer and target, which the panic may have left
+    /// half-changed, and ends the attach and the demands on their way. A
+    /// detach or release still ends the session.
+    fn fail_after_panic(&mut self, message: &str, outbox: &mut Outbox) {
+        let error = Error::native(format!("the render session stopped after a panic in the library: {message}"));
+        Log::error(Event::Crash, &error.message);
+        let attach = {
+            let mut state = self.shared.state.lock();
+            if matches!(state.lifecycle, RenderSessionState::Attaching | RenderSessionState::Attached) {
+                state.lifecycle = RenderSessionState::Failed;
+                state.failure = Some(error.clone());
+            }
+            state.attach.take()
+        };
+        if let Some(attach) = attach {
+            outbox.resolve(attach, Err(error));
+        }
+        // These run on the state that the panic left, so they may panic too.
+        let _ = mln_util::panic::catch(|| {
+            if let Some(token) = self.rendering.take() {
+                let result = FrameResult::unrendered(Some(token), FrameDisposition::Failed, self.latest_generation());
+                self.publish(&result, outbox);
+            }
+            self.end_demands(FrameDisposition::Failed, outbox);
+            self.drop_gfx();
+            self.run_queued(outbox);
+        });
+    }
+
     /// Draws at `scale_factor` from the next frame on, which the map took
     /// too: the renderer lays out the tiles it has again.
     fn set_scale_factor(&mut self, scale_factor: f64) -> Result<(), Error> {
@@ -1778,7 +1819,11 @@ impl Worker {
     /// completion may hold. The map unbinds the session before it binds
     /// another.
     pub(crate) fn detach(&mut self, outbox: &mut Outbox) {
-        self.tear_down(outbox);
+        // A panic in the teardown, such as a custom layer's, still detaches
+        // the session.
+        if let Err(message) = mln_util::panic::catch(|| self.tear_down(outbox)) {
+            self.fail_after_panic(&message, outbox);
+        }
         let map = self.shared.state.lock().map.clone();
         if let Some(map) = map {
             map.unbind_session(self.shared.id);

@@ -5,6 +5,8 @@
 use core::cell::Cell;
 use core::marker::PhantomData;
 
+use mln_util::logging::{Event, Log};
+
 use crate::diagnostic;
 use crate::error::Error;
 use crate::generated::types::{MLN_STATUS_OK, mln_diagnostic, mln_status};
@@ -18,23 +20,25 @@ use crate::generated::types::{MLN_STATUS_OK, mln_diagnostic, mln_status};
 /// ```
 ///
 /// It fails with `MLN_STATUS_INVALID_ARGUMENT` when a pointer that
-/// `non_null(...)` lists is null, and with `MLN_STATUS_INVALID_STATE`, without
-/// running the body, inside a [`ForbidReentry`] scope. Then it writes the
-/// error's message to `out_diagnostic`, or clears it on success, and returns
-/// the status.
+/// `non_null(...)` lists is null, with `MLN_STATUS_INVALID_STATE`, without
+/// running the body, inside a [`ForbidReentry`] scope, and as [`catch`] does
+/// when the body panics. Then it writes the error's message to
+/// `out_diagnostic`, or clears it on success, and returns the status.
 macro_rules! export {
     ($diagnostic:ident, $(non_null($($pointer:ident),+ $(,)?),)? $body:block) => {{
         // The closure gives the body a scope for `?` and `return`.
         let result = $crate::export::refusal().map_or_else(
-            || -> ::core::result::Result<(), $crate::error::Error> {
-                $($(
-                    if $pointer.is_null() {
-                        return ::core::result::Result::Err($crate::error::Error::invalid_argument(
-                            concat!(stringify!($pointer), " must not be null"),
-                        ));
-                    }
-                )+)?
-                $body
+            || {
+                $crate::export::catch(|| -> ::core::result::Result<(), $crate::error::Error> {
+                    $($(
+                        if $pointer.is_null() {
+                            return ::core::result::Result::Err($crate::error::Error::invalid_argument(
+                                concat!(stringify!($pointer), " must not be null"),
+                            ));
+                        }
+                    )+)?
+                    $body
+                })
             },
             ::core::result::Result::Err,
         );
@@ -43,6 +47,26 @@ macro_rules! export {
         // declares bytes the caller can write.
         unsafe { $crate::export::finish($diagnostic, result) }
     }};
+}
+
+/// Runs an entry point's `body`, and fails with `MLN_STATUS_NATIVE_ERROR`
+/// when it panics, a bug in the library, instead of unwinding into the
+/// caller, which would end the process.
+pub(crate) fn catch(body: impl FnOnce() -> Result<(), Error>) -> Result<(), Error> {
+    mln_util::panic::catch(body).unwrap_or_else(|message| Err(panicked(&message)))
+}
+
+/// The failure of a call that a panic with `message` stopped.
+pub(crate) fn panicked(message: &str) -> Error {
+    Error::native(format!("a panic in the library stopped the call: {message}"))
+}
+
+/// Runs the `body` of an entry point that returns nothing, such as a
+/// release, and logs a panic in it instead of unwinding into the caller.
+pub(crate) fn catch_and_log(body: impl FnOnce()) {
+    if let Err(message) = mln_util::panic::catch(body) {
+        Log::error(Event::Crash, panicked(&message).message());
+    }
 }
 
 /// Writes `result`'s diagnostic, an empty one on success, and returns its
@@ -102,7 +126,9 @@ mod tests {
     use core::ffi::CStr;
 
     use super::*;
-    use crate::generated::types::{MLN_STATUS_INVALID_ARGUMENT, MLN_STATUS_INVALID_STATE, MLN_STATUS_NOT_FOUND};
+    use crate::generated::types::{
+        MLN_STATUS_INVALID_ARGUMENT, MLN_STATUS_INVALID_STATE, MLN_STATUS_NATIVE_ERROR, MLN_STATUS_NOT_FOUND,
+    };
 
     fn diagnostic() -> Box<mln_diagnostic> {
         let mut diagnostic = Box::new(mln_diagnostic { size: size_of::<mln_diagnostic>() as u32, message: [0; 4096] });
@@ -138,6 +164,17 @@ mod tests {
         assert_eq!(entry(&0, true, &raw mut *out), MLN_STATUS_NOT_FOUND);
         assert_eq!(message(&out), "nothing is there");
         assert_eq!(entry(&0, true, core::ptr::null_mut()), MLN_STATUS_NOT_FOUND);
+    }
+
+    #[test]
+    fn a_panic_fails_the_call_with_its_message() {
+        fn panics(out_diagnostic: *mut mln_diagnostic) -> mln_status {
+            export!(out_diagnostic, { panic!("a bug in the library") })
+        }
+        let mut out = diagnostic();
+        assert_eq!(panics(&raw mut *out), MLN_STATUS_NATIVE_ERROR);
+        assert_eq!(message(&out), "a panic in the library stopped the call: a bug in the library");
+        catch_and_log(|| panic!("a bug in the library"));
     }
 
     #[test]

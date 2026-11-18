@@ -47,7 +47,8 @@ pub enum RenderSessionState {
     Detaching,
     /// The session let go of its map and its graphics objects.
     Detached,
-    /// The session couldn't build its renderer. Its snapshot says why.
+    /// The session couldn't build its renderer, or failed while it rendered,
+    /// as when a panic in its work stopped it. Its snapshot says why.
     Failed,
     Abandoned,
 }

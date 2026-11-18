@@ -34,7 +34,8 @@ pub(crate) extern "C" fn mln_binding_owner_token_create(handle: u64) -> *mut c_v
 #[unsafe(no_mangle)]
 pub(crate) unsafe extern "C" fn mln_binding_owner_token_destroy(token: *mut c_void) {
     // SAFETY: the caller's contract.
-    drop(unsafe { take(token) });
+    let token = unsafe { take(token) };
+    crate::export::catch_and_log(|| drop(token));
 }
 
 /// `mln_binding_owner_finalize()`.
@@ -46,7 +47,9 @@ pub(crate) unsafe extern "C" fn mln_binding_owner_token_destroy(token: *mut c_vo
 pub(crate) unsafe extern "C" fn mln_binding_owner_finalize(token: *mut c_void) {
     // SAFETY: the caller's contract.
     let Some(token) = (unsafe { take(token) }) else { return };
-    if let Err(error) = dispose_owner(token.handle) {
+    let mut disposed = Ok(());
+    crate::export::catch_and_log(|| disposed = dispose_owner(token.handle));
+    if let Err(error) = disposed {
         Log::error(
             Event::General,
             format!(

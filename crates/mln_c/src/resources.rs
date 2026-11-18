@@ -521,7 +521,7 @@ pub(crate) unsafe extern "C" fn mln_resource_request_set_cancel_callback(
 /// `mln_resource_request_release()`.
 #[unsafe(no_mangle)]
 pub(crate) extern "C" fn mln_resource_request_release(handle: mln_resource_request) {
-    let _ = release(handle);
+    crate::export::catch_and_log(|| drop(release(handle)));
 }
 
 #[cfg(test)]

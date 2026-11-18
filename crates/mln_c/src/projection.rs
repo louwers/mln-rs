@@ -196,7 +196,7 @@ pub(crate) unsafe extern "C" fn mln_map_projection_create(
 /// `mln_map_projection_release()`.
 #[unsafe(no_mangle)]
 pub(crate) extern "C" fn mln_map_projection_release(projection: mln_map_projection) {
-    let _ = release(projection);
+    crate::export::catch_and_log(|| drop(release(projection)));
 }
 
 /// Releases `projection`, as `mln_map_projection_release()` does.

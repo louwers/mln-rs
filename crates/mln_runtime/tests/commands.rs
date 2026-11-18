@@ -417,3 +417,41 @@ fn a_disposed_map_lets_its_runtime_release() {
     disposed.wait().unwrap();
     runtime.release().unwrap().wait().unwrap();
 }
+
+#[test]
+fn a_panic_on_the_runtimes_thread_stops_the_runtime() {
+    let runtime = runtime();
+    let map = map(&runtime);
+    // The gate holds the runtime's thread until the commands after the panic
+    // are sent, so they wait behind it.
+    let (open, gate) = channel::<()>();
+    drop(map.with_core(move |_| gate.recv_timeout(TIMEOUT)).unwrap());
+    let panicked = map.with_core(|_| panic!("a bug in the library")).unwrap();
+    let waited = map.request_repaint().unwrap();
+    open.send(()).unwrap();
+
+    let error = panicked.wait().unwrap_err();
+    assert_eq!(ErrorKind::Native, error.kind, "{error:?}");
+    assert_eq!(ErrorKind::Cancelled, waited.wait().unwrap_err().kind);
+    let error = map.request_repaint().unwrap_err();
+    assert_eq!(ErrorKind::Native, error.kind);
+    assert!(error.message.contains("a bug in the library"), "{error:?}");
+    assert_eq!(ErrorKind::Native, runtime.clear_event_handler().unwrap_err().kind);
+    assert_eq!(ErrorKind::Native, runtime.create_map(map_options()).unwrap_err().kind);
+    // The runtime and its maps release as usual.
+    wait(map.release());
+    wait(runtime.release());
+}
+
+#[test]
+fn a_panic_in_a_pool_task_stops_the_runtime() {
+    let runtime = runtime();
+    let map = map(&runtime);
+    wait(map.with_core(|core| core.pool().spawn(|| panic!("a bug in the library"))));
+    assert!(eventually(|| map.request_repaint().is_err()));
+    let error = map.request_repaint().unwrap_err();
+    assert_eq!(ErrorKind::Native, error.kind);
+    assert!(error.message.contains("a bug in the library"), "{error:?}");
+    wait(map.release());
+    wait(runtime.release());
+}

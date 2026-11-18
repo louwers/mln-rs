@@ -54,23 +54,28 @@ pub(crate) fn run<R: Send + 'static>(work: impl FnOnce() -> R + Send + 'static) 
     let (reply, result) = mpsc::sync_channel(1);
     let job: Job = Box::new(move || {
         // The caller waits for the reply, so it is there to receive it.
-        let _ = reply.send(work());
+        let _ = reply.send(mln_util::panic::catch(work));
     });
-    if jobs()?.send(job).is_err() {
-        // The thread ended, which only a panic in a job does: a bug, which
-        // ends the process as it would have on the caller's thread.
-        std::process::abort();
-    }
+    // The thread catches its jobs' panics, so it never ends.
+    let ended = || Error::native("the parse thread ended");
+    jobs()?.send(job).map_err(|_| ended())?;
     match result.recv() {
-        Ok(value) => Ok(value),
-        // As above: the job panicked before it replied.
-        Err(mpsc::RecvError) => std::process::abort(),
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(message)) => Err(crate::export::panicked(&message)),
+        Err(mpsc::RecvError) => Err(ended()),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_job_that_panics_fails_and_the_thread_goes_on() {
+        let error = run(|| panic!("a bug in the library")).unwrap_err();
+        assert_eq!(error.message(), "a panic in the library stopped the call: a bug in the library");
+        assert_eq!(run(|| 7).unwrap(), 7);
+    }
 
     #[test]
     fn work_runs_on_one_thread_in_order() {

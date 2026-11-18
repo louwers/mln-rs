@@ -280,7 +280,7 @@ pub(crate) unsafe extern "C" fn mln_delivery_queue_create(
 /// `mln_delivery_queue_release()`.
 #[unsafe(no_mangle)]
 pub(crate) extern "C" fn mln_delivery_queue_release(queue: mln_delivery_queue) {
-    let _ = release(queue);
+    crate::export::catch_and_log(|| drop(release(queue)));
 }
 
 /// Releases `queue`, as `mln_delivery_queue_release()` does.

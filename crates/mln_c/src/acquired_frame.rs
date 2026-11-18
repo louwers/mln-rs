@@ -355,13 +355,15 @@ pub(crate) unsafe extern "C" fn mln_acquired_frame_view_end(scope: *mut c_void) 
     }
     // SAFETY: the caller's contract: a scope of `view_begin`, ended once.
     let ViewScope(object, view) = *unsafe { Box::from_raw(scope.cast::<ViewScope>()) };
-    let mut held = object.frame.lock();
-    drop(view);
-    let discarded = (object.views.fetch_sub(1, Ordering::AcqRel) == 1).then(|| held.discarded.take()).flatten();
-    drop(held);
-    if let Some(frame) = discarded {
-        frame.discard();
-    }
+    crate::export::catch_and_log(|| {
+        let mut held = object.frame.lock();
+        drop(view);
+        let discarded = (object.views.fetch_sub(1, Ordering::AcqRel) == 1).then(|| held.discarded.take()).flatten();
+        drop(held);
+        if let Some(frame) = discarded {
+            frame.discard();
+        }
+    });
 }
 
 /// The texture of the frame `frame` names, the scale factor it rendered at,

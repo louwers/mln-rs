@@ -1626,3 +1626,76 @@ fn cluster_queries_read_a_clustered_source() {
     // A limit of 0 still checks the cluster ID.
     assert_eq!(ErrorKind::NotFound, kind(session.cluster_leaves("clustered", 0, 0, 0)));
 }
+
+// MARK: - Panics
+
+/// A custom layer whose drawing hits a bug.
+struct PanickingLayer;
+
+impl mln_style::layers::CustomLayerHost for PanickingLayer {
+    fn prerender(&self, _parameters: &mut mln_style::layers::CustomLayerPrerenderParameters<'_>) {
+        panic!("a bug in the library");
+    }
+}
+
+#[test]
+fn a_panic_on_the_sessions_thread_fails_the_session() {
+    let runtime = runtime();
+    let map = red_map(&runtime);
+    let session = attach(&map);
+    wait(map.add_custom_layer("panics", Arc::new(PanickingLayer), None));
+    demand(&session, DemandMode::Force, 1);
+    let result = take_one(&session);
+    assert_eq!((Some(1), FrameDisposition::Failed), (result.token, result.disposition));
+    let snapshot = session.snapshot().unwrap();
+    assert_eq!(RenderSessionState::Failed, snapshot.state);
+    let failure = snapshot.failure.unwrap();
+    assert_eq!(ErrorKind::Native, failure.kind);
+    assert!(failure.message.contains("a bug in the library"), "{failure:?}");
+    // The session detaches and releases as a failed one does, and the map
+    // and runtime go on.
+    wait(session.release());
+    wait(map.request_repaint());
+    wait(map.release());
+}
+
+#[test]
+fn a_runtime_that_a_panic_stopped_ends_the_work_of_its_sessions() {
+    let runtime = runtime();
+    let map = red_map(&runtime);
+    let session = attach(&map);
+    let open = hold_runtime(&map);
+    let panicked = map.with_core(|_| panic!("a bug in the library")).unwrap();
+    // The map's side of the resize waits behind the panic, which drops it.
+    let resized = session.resize(LogicalExtent::new(Size::new(64, 64), 1.0)).unwrap();
+    drop(open);
+    assert_eq!(ErrorKind::Native, panicked.wait().unwrap_err().kind);
+    assert_eq!(ErrorKind::Cancelled, resized.wait().unwrap_err().kind);
+    // The session's thread ends once it unbinds from the stopped map.
+    session.abandon().unwrap();
+    drop(session);
+    wait(map.release());
+}
+
+/// A custom layer whose teardown hits a bug.
+struct PanickingTeardown;
+
+impl mln_style::layers::CustomLayerHost for PanickingTeardown {
+    fn deinitialize(&self) {
+        panic!("a bug in the library");
+    }
+}
+
+#[test]
+fn a_panic_in_a_detach_still_detaches_the_session() {
+    let runtime = runtime();
+    let map = red_map(&runtime);
+    let session = attach(&map);
+    wait(map.add_custom_layer("panics", Arc::new(PanickingTeardown), None));
+    demand(&session, DemandMode::Force, 1);
+    assert_eq!(FrameDisposition::Rendered, take_one(&session).disposition);
+    wait(session.detach());
+    assert_eq!(RenderSessionState::Detached, session.snapshot().unwrap().state);
+    wait(session.release());
+    wait(map.release());
+}

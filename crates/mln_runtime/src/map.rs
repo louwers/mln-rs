@@ -218,6 +218,7 @@ impl MapShared {
         if self.released.load(Ordering::SeqCst) {
             return Err(released());
         }
+        self.runtime.check_running()?;
         let (completion, resolver) = self.completion(discard);
         let id = self.id;
         *sent += 1;
@@ -251,7 +252,16 @@ impl MapShared {
             return;
         }
         let id = self.id;
-        self.runtime.post(move |core, outbox| remove(core, id, done, outbox));
+        // A runtime that a panic stopped let go of the map already.
+        self.runtime.post_or_stopped(
+            done,
+            move |core, outbox, done| remove(core, id, done, outbox),
+            |done| {
+                if let Some(done) = done {
+                    done.resolve(Ok(()));
+                }
+            },
+        );
         self.runtime.map_released();
     }
 }
@@ -310,6 +320,42 @@ pub(crate) fn style_not_loaded() -> Error {
 /// while the command was on its way.
 pub(crate) fn missing_map() -> Error {
     Error::invalid_state("the map failed to be built or was released")
+}
+
+/// What a render session runs with the outcome of a command it waits for.
+type Reply<T> = Box<dyn FnOnce(&mut Worker, Result<T, Error>, &mut Outbox) + Send>;
+
+/// What a render session waits for from a command on the runtime's thread:
+/// `reply` runs on the session's thread with the command's outcome, or with
+/// an error if the command drops without one, as when a panic stopped the
+/// runtime.
+struct SessionReply<T: Send + 'static> {
+    queue: SessionQueue,
+    reply: Option<Reply<T>>,
+}
+
+impl<T: Send + 'static> SessionReply<T> {
+    fn new(
+        queue: SessionQueue,
+        reply: impl FnOnce(&mut Worker, Result<T, Error>, &mut Outbox) + Send + 'static,
+    ) -> Self {
+        SessionReply { queue, reply: Some(Box::new(reply)) }
+    }
+
+    fn send(mut self, result: Result<T, Error>) {
+        if let Some(reply) = self.reply.take() {
+            worker_post(&self.queue, move |worker, outbox| reply(worker, result, outbox));
+        }
+    }
+}
+
+impl<T: Send + 'static> Drop for SessionReply<T> {
+    fn drop(&mut self) {
+        if let Some(reply) = self.reply.take() {
+            let error = Error::cancelled("the runtime stopped before the command ran");
+            worker_post(&self.queue, move |worker, outbox| reply(worker, Err(error), outbox));
+        }
+    }
 }
 
 impl Map {
@@ -777,12 +823,16 @@ impl Map {
         awaited: Arc<AtomicU64>,
         size: Size,
     ) -> Result<(), Error> {
+        let reply = SessionReply::new(queue.clone(), |worker, bound, outbox| match bound {
+            Ok((sequence, reader, events, published)) => worker.bound(sequence, reader, events, published, outbox),
+            Err(error) => worker.bind_failed(error, outbox),
+        });
         let sent = self.shared.send(Some(drop), move |core, outbox, map_id, sequence, resolver: Resolver<()>| {
             drop(resolver);
             if !core.maps.contains_key(&map_id) {
-                return worker_post(&queue, |worker, outbox| worker.bind_failed(missing_map(), outbox));
+                return reply.send(Err(missing_map()));
             }
-            let link = SessionLink { id, queue: queue.clone(), awaited };
+            let link = SessionLink { id, queue, awaited };
             apply_command(
                 core,
                 map_id,
@@ -793,14 +843,8 @@ impl Map {
                     let resized = entry.core.set_size(size);
                     (resized, entry.core.update_reader(), entry.core.renderer_events(), Arc::clone(&entry.published))
                 },
-                move |_, (resized, reader, events, published), _, _| match resized {
-                    Ok(()) => {
-                        let bound = move |worker: &mut Worker, outbox: &mut Outbox| {
-                            worker.bound(sequence, reader, events, published, outbox);
-                        };
-                        worker_post(&queue, bound);
-                    }
-                    Err(error) => worker_post(&queue, move |worker, outbox| worker.bind_failed(error, outbox)),
+                move |_, (resized, reader, events, published), _, _| {
+                    reply.send(resized.map(|()| (sequence, reader, events, published)));
                 },
             );
         });
@@ -824,15 +868,16 @@ impl Map {
         then: impl FnOnce(&mut Worker, &mut Outbox) + Send + 'static,
     ) {
         let map_id = self.shared.id;
-        let session_queue = queue.clone();
-        // A runtime that shut down has no map to unbind from.
+        let reply = SessionReply::new(queue, move |worker, _: Result<(), Error>, outbox| then(worker, outbox));
+        // A runtime that shut down or stopped has no map to unbind from, and
+        // the reply's drop runs `then`.
         self.shared.runtime.post_or(
-            then,
-            move |core, _, then| {
+            reply,
+            move |core, _, reply| {
                 unbind(core, map_id, id);
-                worker_post(&queue, then);
+                reply.send(Ok(()));
             },
-            |then| worker_post(&session_queue, then),
+            drop,
         );
     }
 
@@ -872,10 +917,11 @@ impl Map {
     ) -> Result<(), Error> {
         // The scale factor that a session attached later renders at.
         self.shared.scale_factor.store(scale_factor.to_bits(), Ordering::SeqCst);
+        let reply = SessionReply::new(queue, resize);
         let sent = self.shared.send(Some(drop), move |core, outbox, id, sequence, resolver: Resolver<()>| {
             drop(resolver);
             if !core.maps.contains_key(&id) {
-                return worker_post(&queue, move |worker, outbox| resize(worker, Err(missing_map()), outbox));
+                return reply.send(Err(missing_map()));
             }
             apply_command(
                 core,
@@ -894,10 +940,7 @@ impl Map {
                     entry.core.set_size(size)?;
                     entry.core.set_pixel_ratio(pixel_ratio)
                 },
-                move |_, resized, applied, _| {
-                    let result = resized.map(|()| applied);
-                    worker_post(&queue, move |worker, outbox| resize(worker, result, outbox));
-                },
+                move |_, resized, applied, _| reply.send(resized.map(|()| applied)),
             );
         });
         sent.map(drop)

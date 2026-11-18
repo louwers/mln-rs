@@ -526,7 +526,7 @@ pub(crate) unsafe extern "C" fn mln_render_session_drain_frame_results(
 #[unsafe(no_mangle)]
 pub(crate) extern "C" fn mln_render_frame_batch_release(batch: mln_render_frame_batch) {
     if batch != handles::NULL {
-        let _ = release_batch(batch);
+        crate::export::catch_and_log(|| drop(release_batch(batch)));
     }
 }
 
