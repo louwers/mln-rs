@@ -17,7 +17,9 @@ pub use camera::{
     AnimationOptions, CameraDelta, CameraError, CameraOptions, CameraUpdate, CameraUpdateMode, CameraVelocity,
     GesturePhase, TransitionEnd, TransitionOutcome,
 };
-pub use camera_momentum::{CameraMomentum, MomentumDecay, MomentumDecayModel, MomentumEasing, MomentumSnap};
+pub use camera_momentum::{
+    AnchoredMomentum, CameraMomentum, MomentumEasing, MomentumFriction, MomentumGlide, MomentumSnap,
+};
 pub use frame_projection::{ClipDepthRange, FrameProjection};
 pub use map_view::{Camera, LogicalExtent, MapView, Viewport};
 pub use mode::{ConstrainMode, MapDebugOptions, MapMode, TileLodMode, ViewportMode};

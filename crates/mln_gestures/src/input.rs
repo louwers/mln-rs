@@ -2,6 +2,8 @@
 
 use mln_util::geo::ScreenCoordinate;
 
+use crate::options::Axis;
+
 /// What kind of device a pointer is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PointerKind {
@@ -128,4 +130,11 @@ pub enum GestureEvent {
     Click { position: ScreenCoordinate, button: Button },
     /// The second click or tap of a double click or double tap.
     DoubleClick { position: ScreenCoordinate },
+    /// A gesture, its glide or its snap moved `axis` to or across the
+    /// [`Notch`](crate::Notch) of `kind` at `value`, in the axis's unit, a
+    /// bearing in [0°, 360°): the host plays its feedback. A gesture that
+    /// starts at a notch reports it only once it leaves and comes back, an
+    /// axis reports at most one notch every 50 ms, and keys, double taps and
+    /// box zooms report none unless they step within a gesture under way.
+    Notch { axis: Axis, value: f64, kind: u32 },
 }

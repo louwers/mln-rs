@@ -17,6 +17,7 @@ use mln_util::size::Size;
 use mln_util::time::Instant;
 
 use super::*;
+use crate::{Axis, Notch};
 
 /// A transform as the recognizer's camera. It sets its releases' commands'
 /// ends, and keeps the source of each camera change that started.
@@ -132,7 +133,7 @@ struct Rig {
 
 impl Rig {
     fn new() -> Self {
-        Self::with(&GestureOptions::DEFAULT)
+        Self::with(&GestureOptions::default())
     }
 
     fn with(options: &GestureOptions) -> Self {
@@ -141,7 +142,7 @@ impl Rig {
         camera.set_frame_time(Some(time));
         camera.drain_events().for_each(drop);
         let camera = TestCamera { transform: camera, ends: HashMap::default(), sources: Vec::new() };
-        Rig { camera, input: GestureRecognizer::new(*options), now: 1000.0, time }
+        Rig { camera, input: GestureRecognizer::new(options.clone()), now: 1000.0, time }
     }
 
     fn zoom(&self) -> f64 {
@@ -665,7 +666,10 @@ fn keys_step_the_camera() {
 
 #[test]
 fn rotate_pitch_and_scroll_zoom_turn_their_gestures_off() {
-    let off = GestureOptions::DEFAULT.rotate(false).pitch(false).scroll_zoom(false);
+    let mut off = GestureOptions::default();
+    off.bearing.enabled = false;
+    off.pitch.enabled = false;
+    off.scroll_zoom = false;
 
     // A rotate drag neither turns nor pitches.
     let mut rig = Rig::with(&off);
@@ -728,8 +732,6 @@ fn rotate_pitch_and_scroll_zoom_turn_their_gestures_off() {
     assert!(!rig.input.handle(&mut rig.camera, pixels(at, -30.0, Modifiers::default()), rig.now));
     rig.settle();
     assert_eq!((rig.zoom(), rig.bearing(), rig.pitch()), (12.0, 0.0, 0.0));
-
-    assert_eq!(off.rotate(true).pitch(true).scroll_zoom(true), GestureOptions::DEFAULT);
 }
 
 #[test]
@@ -744,7 +746,7 @@ fn input_interrupts_animations() {
     assert!(!rig.camera.in_transition());
 
     // Or only the recognizer's own.
-    let mut rig = Rig::with(&GestureOptions { interrupt_animations: false, ..GestureOptions::DEFAULT });
+    let mut rig = Rig::with(&GestureOptions { interrupt_animations: false, ..GestureOptions::default() });
     rig.camera.ease_to(
         &CameraOptions { zoom: Some(4.0), ..Default::default() },
         &AnimationOptions::new(Duration::from_millis(500)),
@@ -805,12 +807,12 @@ fn a_flick_that_catches_a_glide_carries_its_speed() {
     // A glide that a command stopped before the press carries nothing.
     let mut rig = Rig::new();
     fling_and_glide(&mut rig, 100.0, 1.0, 6);
-    rig.camera.cancel_transitions_with_id(GestureOptions::DEFAULT.transition_id);
+    rig.camera.cancel_transitions_with_id(GestureOptions::default().transition_id);
     let after_cancel = rig.fling(300.0, 10.0);
     assert!((after_cancel - alone).abs() < 0.01, "{after_cancel} vs {alone}");
 
     // Off, each release glides at its own speed, as ffi's demo and GL JS do.
-    let mut rig = Rig::with(&GestureOptions { carry_caught_glide: false, ..GestureOptions::DEFAULT });
+    let mut rig = Rig::with(&GestureOptions { carry_caught_glide: false, ..GestureOptions::default() });
     fling_and_glide(&mut rig, 100.0, 1.0, 6);
     let own = rig.fling(300.0, 10.0);
     assert!((own - alone).abs() < 0.01, "{own} vs {alone}");
@@ -957,15 +959,14 @@ fn pinch_and_tilt(options: &GestureOptions) -> (f64, f64) {
 #[test]
 fn zoom_and_pitch_settle_only_when_their_snaps_are_set() {
     // Compose's defaults: zoom and pitch stay where the gesture left them.
-    let (zoom, pitch) = pinch_and_tilt(&GestureOptions::DEFAULT);
+    let (zoom, pitch) = pinch_and_tilt(&GestureOptions::default());
     assert!((zoom - zoom.round()).abs() > 0.05, "{zoom}");
     assert!(pitch > 1.0, "{pitch}");
     // The C API's defaults: a whole level, and flat within 7°.
-    let (zoom, pitch) = pinch_and_tilt(&GestureOptions {
-        zoom_snap: Some(MomentumSnap::ZOOM),
-        pitch_snap: Some(MomentumSnap::PITCH),
-        ..GestureOptions::DEFAULT
-    });
+    let mut options = GestureOptions::default();
+    options.zoom.snap = Some(MomentumSnap::ZOOM);
+    options.pitch.snap = Some(MomentumSnap::PITCH);
+    let (zoom, pitch) = pinch_and_tilt(&options);
     assert!((zoom - zoom.round()).abs() < 1e-6, "{zoom}");
     assert!(pitch.abs() < 1e-6, "{pitch}");
 }
@@ -1353,4 +1354,145 @@ fn a_finger_landing_in_a_globe_drag_doesnt_jump() {
     // The pan of two fingers holds the location under their middle.
     let drift = distance(rig.project(ground), p(520.0, 250.0));
     assert!(drift < 0.5, "{drift} px");
+}
+
+/// The notches reported since the last call: the axis, the value, the kind.
+fn notch_events(rig: &mut Rig) -> Vec<(Axis, f64, u32)> {
+    rig.input
+        .take_events()
+        .into_iter()
+        .filter_map(|event| match event {
+            GestureEvent::Notch { axis, value, kind } => Some((axis, value, kind)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Twists two fingers `degrees` counterclockwise around (400, 300), a frame
+/// per move, holds still, and lifts them.
+fn twist(rig: &mut Rig, degrees: f64) {
+    rig.down(1, PointerKind::Touch, 300.0, 300.0);
+    rig.down(2, PointerKind::Touch, 500.0, 300.0);
+    for i in 1..=10 {
+        let angle = -(f64::from(i) / 10.0 * degrees).to_radians();
+        let (dx, dy) = (angle.cos() * 100.0, angle.sin() * 100.0);
+        rig.now += 16.0;
+        rig.to(1, 400.0 - dx, 300.0 - dy);
+        rig.to(2, 400.0 + dx, 300.0 + dy);
+        rig.frame();
+    }
+    rig.now += 300.0;
+    rig.up(1, 0.0, 0.0);
+    rig.up(2, 0.0, 0.0);
+}
+
+#[test]
+fn a_twist_and_its_snap_report_the_notches_they_reach() {
+    // The twist starts at north, which is silent, turns away, and the snap
+    // settles back on it.
+    let mut rig = Rig::new();
+    twist(&mut rig, 19.5);
+    assert_eq!(notch_events(&mut rig), []);
+    rig.settle();
+    assert_eq!(notch_events(&mut rig), [(Axis::Bearing, 0.0, 0)]);
+
+    // A twist across north reports it as it crosses.
+    let mut rig = Rig::new();
+    rig.camera.jump_to(&CameraOptions { bearing: Some(-10.0), ..Default::default() });
+    let mut options = GestureOptions::default();
+    options.bearing.notches = vec![Notch { spacing: 90.0, offset: 0.0, kind: 3 }];
+    rig.input.set_options(options);
+    twist(&mut rig, 40.0);
+    assert_eq!(notch_events(&mut rig), [(Axis::Bearing, 0.0, 3)]);
+    rig.settle();
+    assert_eq!(notch_events(&mut rig), []);
+}
+
+#[test]
+fn a_scroll_reports_zoom_notches() {
+    let mut rig = Rig::new();
+    let mut options = GestureOptions::default();
+    options.zoom.notches = vec![Notch { spacing: 1.0, offset: 0.0, kind: 7 }];
+    rig.input.set_options(options);
+    for _ in 0..4 {
+        rig.send(pixels(p(400.0, 300.0), -90.0, Modifiers::default()));
+        rig.frame();
+    }
+    rig.settle();
+    assert!((rig.zoom() - 13.2).abs() < 1e-9, "{}", rig.zoom());
+    assert_eq!(notch_events(&mut rig), [(Axis::Zoom, 13.0, 7)]);
+}
+
+#[test]
+fn steps_and_commands_after_a_gesture_report_no_notches() {
+    let mut rig = Rig::new();
+    rig.camera.jump_to(&CameraOptions { bearing: Some(-20.0), ..Default::default() });
+    // Keys turn across north without a tick.
+    for _ in 0..3 {
+        rig.key(Key::Right, SHIFT);
+        rig.settle();
+    }
+    assert!((rig.bearing() - 25.0).abs() < 1e-9, "{}", rig.bearing());
+    assert_eq!(notch_events(&mut rig), []);
+
+    // Once a gesture's snap ends, so do its notches: a command that turns
+    // back across north reports nothing.
+    twist(&mut rig, 3.0);
+    rig.settle();
+    rig.camera.ease_to(
+        &CameraOptions { bearing: Some(-20.0), ..Default::default() },
+        &AnimationOptions::new(Duration::from_millis(200)),
+    );
+    rig.settle();
+    assert_eq!(notch_events(&mut rig), []);
+}
+
+#[test]
+fn pan_and_zoom_turn_their_gestures_off() {
+    let mut off = GestureOptions::default();
+    off.pan.enabled = false;
+    off.zoom.enabled = false;
+
+    // A drag doesn't pan, and a double tap doesn't zoom but still reports.
+    let mut rig = Rig::with(&off);
+    let ground = rig.unproject(p(400.0, 300.0));
+    rig.fling(400.0, 20.0);
+    assert!(distance(rig.project(ground), p(400.0, 300.0)) < 1e-6);
+    rig.down(1, PointerKind::Touch, 200.0, 200.0);
+    rig.up(1, 200.0, 200.0);
+    rig.now += 100.0;
+    rig.down(1, PointerKind::Touch, 200.0, 200.0);
+    rig.up(1, 200.0, 200.0);
+    rig.settle();
+    assert_eq!(rig.zoom(), 12.0);
+    assert!(rig.input.take_events().contains(&GestureEvent::DoubleClick { position: p(200.0, 200.0) }));
+
+    // Spreading and moving two fingers neither zooms nor pans.
+    rig.down(1, PointerKind::Touch, 300.0, 300.0);
+    rig.down(2, PointerKind::Touch, 500.0, 300.0);
+    for i in 1..=10 {
+        let half = 100.0 * (1.0 + f64::from(i) / 10.0);
+        rig.now += 16.0;
+        rig.to(1, 450.0 - half, 300.0);
+        rig.to(2, 450.0 + half, 300.0);
+    }
+    rig.up(1, 250.0, 300.0);
+    rig.up(2, 650.0, 300.0);
+    rig.settle();
+    assert_eq!(rig.zoom(), 12.0);
+    assert!(distance(rig.project(ground), p(400.0, 300.0)) < 1e-6);
+
+    // Shift-drag pans nothing rather than zooming to a box, and scrolls and
+    // the arrow and zoom keys go unhandled.
+    rig.down_with(1, PointerKind::Mouse, 100.0, 100.0, SHIFT);
+    rig.to(1, 500.0, 400.0);
+    assert_eq!(rig.input.box_zoom(), None);
+    rig.up(1, 500.0, 400.0);
+    for key in [Key::Left, Key::Up, Key::ZoomIn, Key::ZoomOut] {
+        assert!(!rig.input.handle(&mut rig.camera, Input::Key { key, modifiers: Modifiers::default() }, rig.now));
+    }
+    assert!(!rig.input.handle(&mut rig.camera, notches(p(100.0, 100.0), -1.0), rig.now));
+    rig.settle();
+    assert_eq!(rig.zoom(), 12.0);
+    assert!(distance(rig.project(ground), p(400.0, 300.0)) < 1e-6);
 }

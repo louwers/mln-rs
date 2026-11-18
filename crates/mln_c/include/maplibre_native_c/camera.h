@@ -103,8 +103,8 @@ MLN_API mln_status mln_map_update_camera(
  * the camera, so the rest of the replaced change never happens. To reach an
  * exact camera, use mln_map_update_camera().
  *
- * A delta in the end phase can carry momentum, which keeps the camera moving
- * from the gesture's release velocities and slows it on each rendered frame.
+ * A delta in the end phase can carry momentum, which keeps the camera gliding
+ * after the gesture's release, advancing on each rendered frame.
  * The gesture lasts until the momentum ends: the snapshot keeps
  * `gesture_in_progress` set, and camera events report
  * MLN_CAMERA_CHANGE_SOURCE_MOMENTUM. With momentum, `animation` sets only

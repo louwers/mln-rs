@@ -3,6 +3,7 @@
 pub const MLN_DIAGNOSTIC_MESSAGE_CAPACITY: u32 = 4096;
 pub const MLN_C_VERSION: u32 = 0;
 pub const MLN_TEXTURE_RING_MAX_DEPTH: u32 = 8;
+pub const MLN_FRAME_DEMAND_TOKEN_STILL_IMAGE: i32 = -1;
 pub const MLN_STATUS_OK: mln_status = 0;
 /// An argument is invalid, such as malformed JSON or a value out of range.
 pub const MLN_STATUS_INVALID_ARGUMENT: mln_status = -1;
@@ -1262,80 +1263,72 @@ pub const MLN_GESTURE_PHASE_CANCEL: mln_gesture_phase = 4;
  MLN_GESTURE_PHASE_BEGIN and MLN_GESTURE_PHASE_UPDATE mark a gesture in
  progress, and MLN_GESTURE_PHASE_END and MLN_GESTURE_PHASE_CANCEL end it.*/
 pub type mln_gesture_phase = u32;
-/** The speed halves every `half_life_ms`, until it drops to `stop_speed`.
- UIScrollView's normal deceleration is a half-life of 346 ms, and its fast
- deceleration 69 ms.*/
-pub const MLN_MOMENTUM_DECAY_MODEL_FRICTION: mln_momentum_decay_model = 0;
-/** The part eases `distance` over `duration_ms`, along `easing`, as a camera
- animation does. The caller plans the glide, for example from the
- platform's own fling physics, such as Android's OverScroller.*/
-pub const MLN_MOMENTUM_DECAY_MODEL_EASE: mln_momentum_decay_model = 1;
-/// How a part of a gesture's momentum slows from its release speed.
-pub type mln_momentum_decay_model = u32;
-pub const MLN_MOMENTUM_DECAY_MODEL: mln_momentum_decay_field = 1;
-pub const MLN_MOMENTUM_DECAY_HALF_LIFE_MS: mln_momentum_decay_field = 2;
-pub const MLN_MOMENTUM_DECAY_STOP_SPEED: mln_momentum_decay_field = 4;
-pub const MLN_MOMENTUM_DECAY_DISTANCE: mln_momentum_decay_field = 8;
-pub const MLN_MOMENTUM_DECAY_DURATION_MS: mln_momentum_decay_field = 16;
-pub const MLN_MOMENTUM_DECAY_EASING: mln_momentum_decay_field = 32;
-pub const MLN_MOMENTUM_DECAY_MIN_SPEED: mln_momentum_decay_field = 64;
-pub const MLN_MOMENTUM_DECAY_MAX_SPEED: mln_momentum_decay_field = 128;
-pub const MLN_MOMENTUM_DECAY_MAX_DISTANCE: mln_momentum_decay_field = 256;
-/// The fields that mln_momentum_decay sets.
-pub type mln_momentum_decay_field = u32;
-/// A set of mln_momentum_decay_field bits.
-pub type mln_momentum_decay_fields = u32;
-/** How one part of a gesture's momentum slows from its release speed.
+pub const MLN_MOMENTUM_FRICTION_HALF_LIFE_MS: mln_momentum_friction_field = 1;
+pub const MLN_MOMENTUM_FRICTION_STOP_SPEED: mln_momentum_friction_field = 2;
+pub const MLN_MOMENTUM_FRICTION_MIN_SPEED: mln_momentum_friction_field = 4;
+pub const MLN_MOMENTUM_FRICTION_MAX_SPEED: mln_momentum_friction_field = 8;
+pub const MLN_MOMENTUM_FRICTION_MAX_DISTANCE: mln_momentum_friction_field = 16;
+/// The fields that mln_momentum_friction sets.
+pub type mln_momentum_friction_field = u32;
+/// A set of mln_momentum_friction_field bits.
+pub type mln_momentum_friction_fields = u32;
+/** How a part slows from its release speed by friction: the speed halves every
+ `half_life_ms`, until it drops to `stop_speed`.
 
  Speeds and distances are in the part's unit: logical pixels for pan, zoom
  levels for zoom, and degrees for bearing and pitch. A setting whose bit
  isn't set takes the part's default, which mln_gesture_momentum lists.
  `min_speed` is finite and not negative, and every other number is finite
- and positive. A friction decay can serve every release, as a preset that
- matches a platform's scrolling. An eased glide takes its direction from the
- part's velocity, and its distance and duration from the caller's plan.*/
+ and positive. UIScrollView's normal deceleration is a half-life of 346 ms,
+ and its fast deceleration 69 ms.*/
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
-pub struct mln_momentum_decay {
-    pub fields: mln_momentum_decay_fields,
-    pub model: mln_momentum_decay_model,
-    /// For MLN_MOMENTUM_DECAY_MODEL_FRICTION, how long the speed takes to halve.
+pub struct mln_momentum_friction {
+    pub fields: mln_momentum_friction_fields,
     pub half_life_ms: f64,
-    /// For MLN_MOMENTUM_DECAY_MODEL_FRICTION, the speed at which it ends.
+    /// The speed at which the glide ends.
     pub stop_speed: f64,
-    /// Required for MLN_MOMENTUM_DECAY_MODEL_EASE.
-    pub distance: f64,
-    /// Required for MLN_MOMENTUM_DECAY_MODEL_EASE.
-    pub duration_ms: f64,
-    /** For MLN_MOMENTUM_DECAY_MODEL_EASE, the share of `distance` covered over
- the share of `duration_ms`. Its control points are between 0 and 1, so the
- glide never passes its distance. Defaults to (0, 0, 0.25, 1), the curve
- that camera animations ease along by default. Android's scroll fling
- follows (0.175, 0.5, 0.35, 1).*/
-    pub easing: mln_unit_bezier,
-    /// A slower release starts no momentum.
+    /// A slower release doesn't glide.
     pub min_speed: f64,
-    /// For MLN_MOMENTUM_DECAY_MODEL_FRICTION, a faster release counts as this.
+    /// A faster release counts as this.
     pub max_speed: f64,
-    /** The farthest the part moves. A friction release that would move farther
- starts slower, so it ends sooner, and a planned glide moves at most this
- far over its duration.*/
+    /** The farthest the part glides. A release that would glide farther starts
+ slower, so it ends sooner.*/
     pub max_distance: f64,
 }
 pub const MLN_PAN_MOMENTUM_VELOCITY: mln_pan_momentum_field = 1;
+pub const MLN_PAN_MOMENTUM_DELTA: mln_pan_momentum_field = 2;
+pub const MLN_PAN_MOMENTUM_DURATION_MS: mln_pan_momentum_field = 4;
+pub const MLN_PAN_MOMENTUM_EASING: mln_pan_momentum_field = 8;
 /// The fields that mln_pan_momentum sets.
 pub type mln_pan_momentum_field = u32;
 /// A set of mln_pan_momentum_field bits.
 pub type mln_pan_momentum_fields = u32;
-/// How a gesture's pan keeps moving the map's content after release.
+/** How a gesture's pan keeps moving the map's content after release.
+
+ The pan glides from its release `velocity`, slowing by `friction`, or it
+ moves by `delta` over `duration_ms`, as the caller planned the glide, for
+ example from the platform's own fling physics. It does one or the other, or
+ neither, and then stops. On a tilted map, the content moves the same
+ distance on the screen in every direction.*/
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mln_pan_momentum {
     pub fields: mln_pan_momentum_fields,
     /** How fast the map's content moved on the screen at release, in logical
- pixels per second. The pan moves only when this is set.*/
+ pixels per second.*/
     pub velocity: mln_screen_point,
-    pub decay: mln_momentum_decay,
+    /// How the glide from `velocity` slows. Read only with `velocity`.
+    pub friction: mln_momentum_friction,
+    /// How far the map's content moves on the screen, in logical pixels.
+    pub delta: mln_screen_point,
+    /// How long `delta` takes. Positive, and required with `delta`.
+    pub duration_ms: f64,
+    /** The share of `delta` covered over the share of `duration_ms`. Its control
+ points are between 0 and 1, so the glide never passes `delta`. Defaults to
+ (0, 0, 0.25, 1), the curve that camera animations ease along by default.
+ Android's scroll fling follows (0.175, 0.5, 0.35, 1). Only with `delta`.*/
+    pub easing: mln_unit_bezier,
 }
 pub const MLN_MOMENTUM_SNAP_SPACING: mln_momentum_snap_field = 1;
 pub const MLN_MOMENTUM_SNAP_OFFSET: mln_momentum_snap_field = 2;
@@ -1348,8 +1341,9 @@ pub type mln_momentum_snap_fields = u32;
 /** Where a part settles after a gesture that changed it.
 
  The targets are every `spacing` from `offset`, in the part's unit. Bearing
- targets wrap around the circle. Once the part's glide ends, or right away
- when it doesn't move, the part eases to the nearest target if it is within
+ targets lie within one turn from `offset`, and the bearing takes the
+ shorter way around to the nearest. Once the part's glide ends, or right
+ away when it has none, the part eases to the nearest target if it is within
  `tolerance` of it, and otherwise stays where it is. A setting whose bit
  isn't set takes the part's default, which mln_gesture_momentum lists.*/
 #[repr(C)]
@@ -1366,38 +1360,51 @@ pub struct mln_momentum_snap {
     pub duration_ms: f64,
 }
 pub const MLN_ANCHORED_MOMENTUM_VELOCITY: mln_anchored_momentum_field = 1;
-pub const MLN_ANCHORED_MOMENTUM_ANCHOR: mln_anchored_momentum_field = 2;
-pub const MLN_ANCHORED_MOMENTUM_SNAP: mln_anchored_momentum_field = 4;
+pub const MLN_ANCHORED_MOMENTUM_DELTA: mln_anchored_momentum_field = 2;
+pub const MLN_ANCHORED_MOMENTUM_DURATION_MS: mln_anchored_momentum_field = 4;
+pub const MLN_ANCHORED_MOMENTUM_EASING: mln_anchored_momentum_field = 8;
+pub const MLN_ANCHORED_MOMENTUM_ANCHOR: mln_anchored_momentum_field = 16;
+pub const MLN_ANCHORED_MOMENTUM_SNAP: mln_anchored_momentum_field = 32;
 /// The fields that mln_anchored_momentum sets.
 pub type mln_anchored_momentum_field = u32;
 /// A set of mln_anchored_momentum_field bits.
 pub type mln_anchored_momentum_fields = u32;
-/// How a gesture's zoom, bearing, or pitch keeps changing after release.
+/** How a gesture's zoom, bearing, or pitch keeps changing after release.
+
+ The part glides from its release `velocity`, slowing by `friction`, or it
+ changes by `delta` over `duration_ms`, as the caller planned the glide. It
+ does one or the other, or neither, and then settles on its snap. Values
+ are in the part's unit: zoom levels for zoom, and degrees for bearing and
+ pitch.*/
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mln_anchored_momentum {
     pub fields: mln_anchored_momentum_fields,
-    /** How fast the value changed at release: zoom levels per second for zoom,
- and degrees per second for bearing and pitch. The part moves only when
- this is set.*/
+    /// How fast the value changed at release, per second.
     pub velocity: f64,
+    /// How the glide from `velocity` slows. Read only with `velocity`.
+    pub friction: mln_momentum_friction,
+    /// How far the value changes, signed.
+    pub delta: f64,
+    /// How long `delta` takes. Positive, and required with `delta`.
+    pub duration_ms: f64,
+    /// As mln_pan_momentum's `easing`. Only with `delta`.
+    pub easing: mln_unit_bezier,
     /** The screen point that the change keeps in place. Without one, the change
  keeps the center of the view in place.*/
     pub anchor: mln_screen_point,
-    pub decay: mln_momentum_decay,
     /** Where the part settles. Without this, it stays where the gesture and its
  glide leave it.*/
     pub snap: mln_momentum_snap,
 }
 /** How a gesture keeps moving the camera after the user lets go.
 
- A part moves only when its velocity is set, and each part slows on its own.
- Every part defaults to MLN_MOMENTUM_DECAY_MODEL_FRICTION with a half-life of
- 140 ms, and these other defaults:
+ Each part glides on its own. Friction defaults to a half-life of 140 ms, a
+ minimum speed of 0, and no maximum speed or distance, with these exceptions:
 
  - Pan stops at 10 logical pixels per second, needs a release of at least
    200, and counts a release faster than 10000 as 10000.
- - Zoom stops at 0.01 levels per second and moves at most 2.5 levels. Its
+ - Zoom stops at 0.01 levels per second and glides at most 2.5 levels. Its
    snap settles on the nearest whole level.
  - Bearing stops at 1 degree per second and needs a release of at least 60.
    Its snap settles on north within 7 degrees.

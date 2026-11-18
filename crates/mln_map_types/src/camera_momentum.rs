@@ -1,20 +1,10 @@
 // The `PAN`, `ZOOM`, `BEARING` and `PITCH` constants are the C API's defaults
-// for each part, which Orbis's orb-camera also names, so that hosts and the
-// gesture recognizer start from the same glide.
+// for each part, so that hosts and the gesture recognizer start from the same
+// glide.
 
 use std::time::Duration;
 
 use mln_util::geo::ScreenCoordinate;
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum MomentumDecayModel {
-    /// The speed halves every `half_life`, until it drops to `stop_speed`.
-    #[default]
-    Friction,
-    /// The part moves `distance` over `duration`, along `easing`, as a caller
-    /// plans it, for example from a platform's own fling physics.
-    Ease,
-}
 
 /// A unit cubic Bézier, from (0, 0) to (1, 1), with these control points.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -25,86 +15,86 @@ pub struct MomentumEasing {
     pub y2: f64,
 }
 
+impl MomentumEasing {
+    /// The curve that camera animations ease along by default.
+    pub const DEFAULT: MomentumEasing = MomentumEasing { x1: 0.0, y1: 0.0, x2: 0.25, y2: 1.0 };
+}
+
 impl Default for MomentumEasing {
     fn default() -> Self {
-        MomentumEasing { x1: 0.0, y1: 0.0, x2: 0.25, y2: 1.0 }
+        MomentumEasing::DEFAULT
     }
 }
 
-/// How one part of a momentum slows from its release speed.
+/// How a part slows from its release speed by friction: the speed halves
+/// every `half_life`, until it drops to `stop_speed`.
 ///
 /// Speeds and distances are in the part's unit: logical pixels for pan, zoom
-/// levels for zoom, and degrees for bearing and pitch.
-///
-/// The C API gives each setting a field bit, and a setting
-/// whose bit isn't set takes the part's default. In Rust that is struct
-/// update from the part's constant: `UIScrollView`'s normal deceleration with
-/// the pan's other defaults is
-/// `MomentumDecay { half_life: Duration::from_millis(346), ..MomentumDecay::PAN }`.
+/// levels for zoom, and degrees for bearing and pitch. `UIScrollView`'s
+/// normal deceleration is a half-life of 346 ms, and its fast deceleration
+/// 69 ms. Each part has a default (`PAN`, `ZOOM`, `BEARING` and `PITCH`),
+/// which struct update starts from.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct MomentumDecay {
-    pub model: MomentumDecayModel,
+pub struct MomentumFriction {
     pub half_life: Duration,
-    /// Must be positive for [`MomentumDecayModel::Friction`].
+    /// Must be positive.
     pub stop_speed: f64,
-    /// For [`MomentumDecayModel::Ease`].
-    pub distance: f64,
-    pub duration: Duration,
-    /// For [`MomentumDecayModel::Ease`], the share of `distance` covered over
-    /// the share of `duration`. Android's scroll fling follows (0.175, 0.5,
-    /// 0.35, 1).
-    pub easing: MomentumEasing,
-    /// A slower release doesn't move.
+    /// A slower release doesn't glide.
     pub min_speed: f64,
-    /// For [`MomentumDecayModel::Friction`], a faster release counts as this
-    /// speed.
+    /// A faster release counts as this speed.
     pub max_speed: f64,
-    /// The farthest the part moves. A friction release that would move
-    /// farther starts slower, so it ends sooner, and an eased glide moves at
-    /// most this far over its duration.
+    /// The farthest the part glides. A release that would glide farther
+    /// starts slower, so it ends sooner.
     pub max_distance: f64,
 }
 
-impl MomentumDecay {
-    /// The header's defaults: friction with a 140 ms half-life, stopping at
-    /// 1 unit per second, with no limits.
-    pub const FRICTION: MomentumDecay = MomentumDecay {
-        model: MomentumDecayModel::Friction,
+impl MomentumFriction {
+    /// A 140 ms half-life, stopping at 1 unit per second, with no limits.
+    pub const DEFAULT: MomentumFriction = MomentumFriction {
         half_life: Duration::from_millis(140),
         stop_speed: 1.0,
-        distance: 0.0,
-        duration: Duration::ZERO,
-        easing: MomentumEasing { x1: 0.0, y1: 0.0, x2: 0.25, y2: 1.0 },
         min_speed: 0.0,
         max_speed: f64::INFINITY,
         max_distance: f64::INFINITY,
     };
-    /// The C API's pan default: stops at 10 px/s, needs a release
-    /// of at least 200 px/s, and counts one faster than 10 000 px/s as
-    /// 10 000.
-    pub const PAN: MomentumDecay =
-        MomentumDecay { stop_speed: 10.0, min_speed: 200.0, max_speed: 10_000.0, ..MomentumDecay::FRICTION };
-    /// The C API's zoom default: stops at 0.01 levels/s and moves at
-    /// most 2.5 levels.
-    pub const ZOOM: MomentumDecay = MomentumDecay { stop_speed: 0.01, max_distance: 2.5, ..MomentumDecay::FRICTION };
-    /// The C API's bearing default: stops at 1°/s and needs at least
-    /// 60°/s.
-    pub const BEARING: MomentumDecay = MomentumDecay { min_speed: 60.0, ..MomentumDecay::FRICTION };
-    /// The C API's pitch default: stops at 1°/s and needs at least
-    /// 5°/s.
-    pub const PITCH: MomentumDecay = MomentumDecay { min_speed: 5.0, ..MomentumDecay::FRICTION };
+    /// Stops at 10 px/s, needs a release of at least 200 px/s, and counts one
+    /// faster than 10 000 px/s as 10 000.
+    pub const PAN: MomentumFriction =
+        MomentumFriction { stop_speed: 10.0, min_speed: 200.0, max_speed: 10_000.0, ..MomentumFriction::DEFAULT };
+    /// Stops at 0.01 levels/s and glides at most 2.5 levels.
+    pub const ZOOM: MomentumFriction =
+        MomentumFriction { stop_speed: 0.01, max_distance: 2.5, ..MomentumFriction::DEFAULT };
+    /// Stops at 1°/s and needs at least 60°/s.
+    pub const BEARING: MomentumFriction = MomentumFriction { min_speed: 60.0, ..MomentumFriction::DEFAULT };
+    /// Stops at 1°/s and needs at least 5°/s.
+    pub const PITCH: MomentumFriction = MomentumFriction { min_speed: 5.0, ..MomentumFriction::DEFAULT };
 }
 
-impl Default for MomentumDecay {
+impl Default for MomentumFriction {
     fn default() -> Self {
-        MomentumDecay::FRICTION
+        MomentumFriction::DEFAULT
     }
 }
 
-/// Where a part settles once its glide ends normally: on the nearest of the
-/// targets every `spacing` from `offset`, when it is within `tolerance` of
-/// one. Bearing targets lie within one turn from `offset`, and the bearing
-/// takes the shorter way around to the nearest.
+/// How one part glides after release, in the part's unit: a
+/// [`ScreenCoordinate`] in logical pixels for pan, and an `f64` for zoom
+/// (levels), bearing and pitch (degrees).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum MomentumGlide<T> {
+    /// From the release velocity, per second, slowing by friction. A pan's
+    /// friction applies to its speed.
+    Friction { velocity: T, friction: MomentumFriction },
+    /// As the caller planned it, for example from a platform's own fling
+    /// physics: the part changes by `delta` over `duration`, along `easing`,
+    /// whose control points are within [0, 1] so the glide never passes
+    /// `delta`.
+    Planned { delta: T, duration: Duration, easing: MomentumEasing },
+}
+
+/// Where a part settles once its glide ends: on the nearest of the targets
+/// every `spacing` from `offset`, when it is within `tolerance` of one.
+/// Bearing targets lie within one turn from `offset`, and the bearing takes
+/// the shorter way around to the nearest.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MomentumSnap {
     pub spacing: f64,
@@ -115,86 +105,46 @@ pub struct MomentumSnap {
 }
 
 impl MomentumSnap {
-    /// The C API's zoom snap: the nearest whole level, over 300 ms.
+    /// The nearest whole level, over 300 ms.
     pub const ZOOM: MomentumSnap =
         MomentumSnap { spacing: 1.0, offset: 0.0, tolerance: 0.5, duration: Duration::from_millis(300) };
-    /// The C API's bearing snap: north, within 7°, over 300 ms.
+    /// North, within 7°, over 300 ms.
     pub const BEARING: MomentumSnap =
         MomentumSnap { spacing: 360.0, offset: 0.0, tolerance: 7.0, duration: Duration::from_millis(300) };
-    /// The C API's pitch snap: flat, within 7°, over 300 ms.
+    /// Flat, within 7°, over 300 ms.
     pub const PITCH: MomentumSnap =
         MomentumSnap { spacing: 90.0, offset: 0.0, tolerance: 7.0, duration: Duration::from_millis(300) };
 }
 
-impl Default for MomentumSnap {
-    fn default() -> Self {
-        MomentumSnap { spacing: 360.0, offset: 0.0, tolerance: 7.0, duration: Duration::ZERO }
-    }
+/// How a gesture's zoom, bearing or pitch keeps changing after release.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct AnchoredMomentum {
+    /// Without one, the part stops where the gesture leaves it.
+    pub glide: Option<MomentumGlide<f64>>,
+    /// The screen point that the change keeps in place; without one, the
+    /// center of the view.
+    pub anchor: Option<ScreenCoordinate>,
+    /// Where the part settles; without one, it stays where the gesture and
+    /// its glide leave it.
+    pub snap: Option<MomentumSnap>,
 }
 
 /// Camera motion that continues a gesture after its last contact lifts.
 ///
-/// Each part starts at its release velocity and slows by its decay, applied
-/// every frame relative to the camera as it stands, so other commands can
-/// change the fields that the momentum leaves alone. A command that sets a
-/// field stops the parts that move it. On a tilted map, pan moves the map's
-/// content the same distance on screen in every direction.
-///
-/// [`Default`] gives each part the C API's default decay
-/// ([`MomentumDecay::PAN`], [`ZOOM`](MomentumDecay::ZOOM),
-/// [`BEARING`](MomentumDecay::BEARING) and [`PITCH`](MomentumDecay::PITCH)),
-/// and no velocities, anchors or snaps: a part moves only when its velocity
-/// is set, and settles only when its snap is.
+/// Each part glides on its own, applied every frame relative to the camera
+/// as it stands, so other commands can change the fields that the momentum
+/// leaves alone. A command that sets a field stops the parts that move it.
+/// On a tilted map, pan moves the map's content the same distance on screen
+/// in every direction. [`Default`] glides and settles nothing.
 ///
 /// The momentum's command ends when the momentum does, with a
 /// [`TransitionEnd`](crate::TransitionEnd) whose velocity says how fast a
 /// cancelled momentum still moved.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct CameraMomentum {
-    /// How fast the map's content moved on screen, in logical pixels per
-    /// second.
-    pub pan_velocity: Option<ScreenCoordinate>,
-    pub pan_decay: MomentumDecay,
-
-    /// Zoom levels per second.
-    pub zoom_velocity: Option<f64>,
-    pub zoom_decay: MomentumDecay,
-    /// The screen point that the zoom keeps in place.
-    pub zoom_anchor: Option<ScreenCoordinate>,
-    pub zoom_snap: Option<MomentumSnap>,
-
-    /// Degrees per second.
-    pub bearing_velocity: Option<f64>,
-    pub bearing_decay: MomentumDecay,
-    /// The screen point that the rotation keeps in place.
-    pub bearing_anchor: Option<ScreenCoordinate>,
-    pub bearing_snap: Option<MomentumSnap>,
-
-    /// Degrees per second.
-    pub pitch_velocity: Option<f64>,
-    pub pitch_decay: MomentumDecay,
-    /// The screen point that the tilt keeps in place.
-    pub pitch_anchor: Option<ScreenCoordinate>,
-    pub pitch_snap: Option<MomentumSnap>,
-}
-
-impl Default for CameraMomentum {
-    fn default() -> Self {
-        CameraMomentum {
-            pan_velocity: None,
-            pan_decay: MomentumDecay::PAN,
-            zoom_velocity: None,
-            zoom_decay: MomentumDecay::ZOOM,
-            zoom_anchor: None,
-            zoom_snap: None,
-            bearing_velocity: None,
-            bearing_decay: MomentumDecay::BEARING,
-            bearing_anchor: None,
-            bearing_snap: None,
-            pitch_velocity: None,
-            pitch_decay: MomentumDecay::PITCH,
-            pitch_anchor: None,
-            pitch_snap: None,
-        }
-    }
+    /// Without one, the pan stops where the gesture leaves it.
+    pub pan: Option<MomentumGlide<ScreenCoordinate>>,
+    pub zoom: AnchoredMomentum,
+    pub bearing: AnchoredMomentum,
+    pub pitch: AnchoredMomentum,
 }

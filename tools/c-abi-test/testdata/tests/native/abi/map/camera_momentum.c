@@ -190,10 +190,10 @@ static void a_release_glides_and_then_ends_the_gesture(void) {
   mln_gesture_momentum momentum = {0};
   momentum.pan.fields = MLN_PAN_MOMENTUM_VELOCITY;
   momentum.pan.velocity = (mln_screen_point){.x = 600.0, .y = 800.0};
-  momentum.pan.decay.fields =
-    MLN_MOMENTUM_DECAY_HALF_LIFE_MS | MLN_MOMENTUM_DECAY_STOP_SPEED;
-  momentum.pan.decay.half_life_ms = 20.0;
-  momentum.pan.decay.stop_speed = 100.0;
+  momentum.pan.friction.fields =
+    MLN_MOMENTUM_FRICTION_HALF_LIFE_MS | MLN_MOMENTUM_FRICTION_STOP_SPEED;
+  momentum.pan.friction.half_life_ms = 20.0;
+  momentum.pan.friction.stop_speed = 100.0;
   const mln_camera_delta delta = release(&momentum, &probe);
   apply_delta(fixture.map, &delta);
   TEST_ASSERT_TRUE(read_snapshot(fixture.map).gesture_in_progress);
@@ -233,15 +233,15 @@ static void a_new_gesture_stops_momentum_and_reports_its_speed(void) {
   momentum.bearing.velocity = -90.0;
   momentum.pitch.fields = MLN_ANCHORED_MOMENTUM_VELOCITY;
   momentum.pitch.velocity = 20.0;
-  mln_momentum_decay* decays[] = {
-    &momentum.pan.decay, &momentum.zoom.decay, &momentum.bearing.decay,
-    &momentum.pitch.decay
+  mln_momentum_friction* frictions[] = {
+    &momentum.pan.friction, &momentum.zoom.friction, &momentum.bearing.friction,
+    &momentum.pitch.friction
   };
-  for (size_t i = 0; i < sizeof(decays) / sizeof(*decays); ++i) {
-    decays[i]->fields =
-      MLN_MOMENTUM_DECAY_HALF_LIFE_MS | MLN_MOMENTUM_DECAY_MAX_DISTANCE;
-    decays[i]->half_life_ms = 600000.0;
-    decays[i]->max_distance = 1e9;
+  for (size_t i = 0; i < sizeof(frictions) / sizeof(*frictions); ++i) {
+    frictions[i]->fields =
+      MLN_MOMENTUM_FRICTION_HALF_LIFE_MS | MLN_MOMENTUM_FRICTION_MAX_DISTANCE;
+    frictions[i]->half_life_ms = 600000.0;
+    frictions[i]->max_distance = 1e9;
   }
   const mln_camera_delta delta = release(&momentum, &probe);
   apply_delta(map, &delta);
@@ -270,12 +270,12 @@ static mln_gesture_momentum long_pan_and_zoom(void) {
   mln_gesture_momentum momentum = {0};
   momentum.pan.fields = MLN_PAN_MOMENTUM_VELOCITY;
   momentum.pan.velocity = (mln_screen_point){.x = 1000.0, .y = 0.0};
-  momentum.pan.decay.fields = MLN_MOMENTUM_DECAY_HALF_LIFE_MS;
-  momentum.pan.decay.half_life_ms = 600000.0;
+  momentum.pan.friction.fields = MLN_MOMENTUM_FRICTION_HALF_LIFE_MS;
+  momentum.pan.friction.half_life_ms = 600000.0;
   momentum.zoom.fields = MLN_ANCHORED_MOMENTUM_VELOCITY;
   momentum.zoom.velocity = 1.0;
-  momentum.zoom.decay.fields = MLN_MOMENTUM_DECAY_HALF_LIFE_MS;
-  momentum.zoom.decay.half_life_ms = 600000.0;
+  momentum.zoom.friction.fields = MLN_MOMENTUM_FRICTION_HALF_LIFE_MS;
+  momentum.zoom.friction.half_life_ms = 600000.0;
   return momentum;
 }
 

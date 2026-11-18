@@ -48,6 +48,12 @@ impl PendingEnd {
     pub fn take(&self) -> Option<TransitionEnd> {
         self.0.lock().take()
     }
+
+    /// Whether the command's end has come and not been taken.
+    #[must_use]
+    pub(crate) fn has_ended(&self) -> bool {
+        self.0.lock().is_some()
+    }
 }
 
 /// The least and greatest zoom that `state` may take at `latitude`: on the

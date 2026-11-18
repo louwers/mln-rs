@@ -14,9 +14,9 @@ use std::time::Duration;
 
 use geometry::Point;
 use mln_map_types::{
-    AnimationOptions, CameraDelta, CameraError, CameraMomentum, CameraOptions, CameraUpdate, CameraUpdateMode,
-    CameraVelocity, CenterAndBearing, ConstrainMode, FreeCameraOptions, GesturePhase, MomentumDecay,
-    MomentumDecayModel, MomentumEasing, MomentumSnap, NorthOrientation, ProjectionMode, TransformState, TransitionEnd,
+    AnchoredMomentum, AnimationOptions, CameraDelta, CameraError, CameraMomentum, CameraOptions, CameraUpdate,
+    CameraUpdateMode, CameraVelocity, CenterAndBearing, ConstrainMode, FreeCameraOptions, GesturePhase, MomentumEasing,
+    MomentumFriction, MomentumGlide, MomentumSnap, NorthOrientation, ProjectionMode, TransformState, TransitionEnd,
     TransitionOutcome, VerticalPerspectiveProjection, ViewportMode,
 };
 use mln_style_types::ProjectionDefinition;
@@ -268,50 +268,80 @@ fn nanos_from_secs(seconds: f64) -> Option<Duration> {
 /// How far one part of a momentum moves, over how long, and along which
 /// curve.
 #[derive(Clone, Copy, Default)]
-struct Glide {
+struct GlidePlan {
     distance: f64,
     duration: Duration,
     /// For friction, the decay rate per second.
     rate: f64,
-    /// For an eased glide, the curve it follows.
+    /// For a planned glide, the curve it follows.
     easing: Option<MomentumEasing>,
 }
 
-impl Glide {
-    /// Plans a release at `speed`, or returns nothing when it doesn't move.
-    fn plan(speed: f64, decay: &MomentumDecay) -> Option<Glide> {
-        if speed.is_nan() || speed <= 0.0 || speed < decay.min_speed {
+impl GlidePlan {
+    /// Plans a friction release at `speed`, or returns nothing when it
+    /// doesn't move.
+    fn friction(speed: f64, friction: &MomentumFriction) -> Option<GlidePlan> {
+        let MomentumFriction { half_life, stop_speed, min_speed, max_speed, max_distance } = *friction;
+        let half_life = half_life.as_secs_f64();
+        if speed.is_nan()
+            || speed <= 0.0
+            || speed < min_speed
+            || half_life.is_nan()
+            || half_life <= 0.0
+            || stop_speed.is_nan()
+            || stop_speed <= 0.0
+        {
             return None;
         }
-        let mut speed = f64::min(speed, decay.max_speed);
-        let mut glide = Glide::default();
-        let seconds;
-        match decay.model {
-            MomentumDecayModel::Friction => {
-                let half_life = decay.half_life.as_secs_f64();
-                if half_life.is_nan() || half_life <= 0.0 || decay.stop_speed.is_nan() || decay.stop_speed <= 0.0 {
-                    return None;
-                }
-                glide.rate = std::f64::consts::LN_2 / half_life;
-                speed = f64::min(speed, decay.stop_speed + glide.rate * decay.max_distance);
-                if speed <= decay.stop_speed {
-                    return None;
-                }
-                seconds = (speed / decay.stop_speed).ln() / glide.rate;
-                glide.distance = (speed - decay.stop_speed) / glide.rate;
-            }
-            MomentumDecayModel::Ease => {
-                glide.distance = f64::min(decay.distance, decay.max_distance);
-                seconds = decay.duration.as_secs_f64();
-                glide.easing = Some(decay.easing);
-            }
-        }
-        // A glide too long for the clock doesn't move.
-        if glide.distance.is_nan() || glide.distance <= 0.0 {
+        let rate = std::f64::consts::LN_2 / half_life;
+        let speed = speed.min(max_speed).min(stop_speed + rate * max_distance);
+        if speed <= stop_speed {
             return None;
         }
-        glide.duration = nanos_from_secs(seconds).filter(|duration| !duration.is_zero())?;
-        Some(glide)
+        GlidePlan::new((speed - stop_speed) / rate, (speed / stop_speed).ln() / rate, rate, None)
+    }
+
+    /// A caller's planned glide `distance` long, or nothing when it doesn't
+    /// move.
+    fn planned(distance: f64, duration: Duration, easing: MomentumEasing) -> Option<GlidePlan> {
+        GlidePlan::new(distance, duration.as_secs_f64(), 0.0, Some(easing))
+    }
+
+    /// A glide too short or too long for the clock doesn't move.
+    fn new(distance: f64, seconds: f64, rate: f64, easing: Option<MomentumEasing>) -> Option<GlidePlan> {
+        if distance.is_nan() || distance <= 0.0 {
+            return None;
+        }
+        let duration = nanos_from_secs(seconds).filter(|duration| !duration.is_zero())?;
+        Some(GlidePlan { distance, duration, rate, easing })
+    }
+
+    /// A scalar part's plan and its signed distance.
+    fn scalar(glide: &MomentumGlide<f64>) -> Option<(GlidePlan, f64)> {
+        match *glide {
+            MomentumGlide::Friction { velocity, friction } => {
+                let plan = GlidePlan::friction(velocity.abs(), &friction)?;
+                Some((plan, plan.distance.copysign(velocity)))
+            }
+            MomentumGlide::Planned { delta, duration, easing } => {
+                Some((GlidePlan::planned(delta.abs(), duration, easing)?, delta))
+            }
+        }
+    }
+
+    /// The pan's plan and its offset on screen.
+    fn pan(glide: &MomentumGlide<ScreenCoordinate>) -> Option<(GlidePlan, ScreenCoordinate)> {
+        match *glide {
+            MomentumGlide::Friction { velocity, friction } => {
+                let speed = velocity.x.hypot(velocity.y);
+                let plan = GlidePlan::friction(speed, &friction)?;
+                let scale = plan.distance / speed;
+                Some((plan, ScreenCoordinate::new(velocity.x * scale, velocity.y * scale)))
+            }
+            MomentumGlide::Planned { delta, duration, easing } => {
+                Some((GlidePlan::planned(delta.x.hypot(delta.y), duration, easing)?, delta))
+            }
+        }
     }
 
     /// The share of the distance covered after `elapsed`, from 0 to 1.
@@ -362,7 +392,7 @@ fn bezier(easing: &MomentumEasing) -> UnitBezier {
 struct MomentumPart {
     /// The fields that this part needs to keep moving or to settle.
     fields: u16,
-    glide: Glide,
+    glide: GlidePlan,
     /// The share of the distance already applied.
     applied: f64,
     moving: bool,
@@ -387,6 +417,16 @@ const MOMENTUM_ZOOM: usize = 0;
 const MOMENTUM_BEARING: usize = 1;
 const MOMENTUM_PITCH: usize = 2;
 
+/// The zoom, bearing or pitch part of `momentum`, by its index in
+/// `MomentumState::scalars`.
+fn scalar_momentum(momentum: &CameraMomentum, part: usize) -> &AnchoredMomentum {
+    match part {
+        MOMENTUM_ZOOM => &momentum.zoom,
+        MOMENTUM_BEARING => &momentum.bearing,
+        _ => &momentum.pitch,
+    }
+}
+
 /// A momentum under way.
 struct MomentumState {
     options: CameraMomentum,
@@ -404,11 +444,7 @@ struct MomentumState {
 
 impl MomentumState {
     fn anchor(&self, part: usize) -> Option<ScreenCoordinate> {
-        match part {
-            MOMENTUM_ZOOM => self.options.zoom_anchor,
-            MOMENTUM_BEARING => self.options.bearing_anchor,
-            _ => self.options.pitch_anchor,
-        }
+        scalar_momentum(&self.options, part).anchor
     }
 
     /// Stops the parts that lost a field they need, and returns the fields
@@ -570,14 +606,12 @@ impl GestureState {
     /// Drops the snaps of the parts the gesture didn't change: only what it
     /// changed settles.
     fn mask_snaps(&self, momentum: &mut CameraMomentum) {
-        if self.changed & ZOOM == 0 {
-            momentum.zoom_snap = None;
-        }
-        if self.changed & BEARING == 0 {
-            momentum.bearing_snap = None;
-        }
-        if self.changed & PITCH == 0 {
-            momentum.pitch_snap = None;
+        for (part, field) in
+            [(&mut momentum.zoom, ZOOM), (&mut momentum.bearing, BEARING), (&mut momentum.pitch, PITCH)]
+        {
+            if self.changed & field == 0 {
+                part.snap = None;
+            }
         }
     }
 }
@@ -1987,33 +2021,23 @@ impl Transform {
         let mut moving = 0;
         let mut settling = 0;
         let mut motion = Duration::ZERO;
-        if let Some(velocity) = options.pan_velocity {
-            let speed = velocity.x.hypot(velocity.y);
-            if let Some(glide) = Glide::plan(speed, &options.pan_decay) {
-                momentum.pan = MomentumPart { fields: CENTER, glide, moving: true, ..Default::default() };
-                moving |= CENTER;
-                motion = glide.duration;
-                let scale = glide.distance / speed;
-                momentum.pan_total = ScreenCoordinate::new(velocity.x * scale, velocity.y * scale);
-            }
+        if let Some((glide, total)) = options.pan.as_ref().and_then(GlidePlan::pan) {
+            momentum.pan = MomentumPart { fields: CENTER, glide, moving: true, ..Default::default() };
+            moving |= CENTER;
+            motion = glide.duration;
+            momentum.pan_total = total;
         }
-        let scalars = [
-            (options.zoom_velocity, &options.zoom_decay, options.zoom_anchor, options.zoom_snap, ZOOM),
-            (options.bearing_velocity, &options.bearing_decay, options.bearing_anchor, options.bearing_snap, BEARING),
-            (options.pitch_velocity, &options.pitch_decay, options.pitch_anchor, options.pitch_snap, PITCH),
-        ];
         let mut instant = true;
-        for (i, (velocity, decay, anchor, snap, field)) in scalars.into_iter().enumerate() {
+        for (i, field) in [ZOOM, BEARING, PITCH].into_iter().enumerate() {
+            let AnchoredMomentum { glide, anchor, snap } = *scalar_momentum(options, i);
             let part = &mut momentum.scalars[i];
             part.fields = field | if anchor.is_some() { CENTER } else { 0 };
-            if let Some(velocity) = velocity
-                && let Some(glide) = Glide::plan(velocity.abs(), decay)
-            {
+            if let Some((glide, total)) = glide.as_ref().and_then(GlidePlan::scalar) {
                 part.glide = glide;
                 part.moving = true;
                 moving |= part.fields;
                 motion = motion.max(glide.duration);
-                momentum.scalar_totals[i] = glide.distance.copysign(velocity);
+                momentum.scalar_totals[i] = total;
             }
             // Without motion, a part settles only if it is near a target now.
             part.snap = snap;
@@ -2135,9 +2159,11 @@ impl Transform {
             }
             // The part settles once it stops moving, which can be before its
             // planned end when bounds, limits, or commands stopped it.
-            if part.snap_pending && !part.moving {
+            if part.snap_pending
+                && !part.moving
+                && let Some(snap) = part.snap
+            {
                 part.snap_pending = false;
-                let snap = part.snap.unwrap_or_default();
                 let delta = snap_delta(momentum_value(&self.state, i), &snap, i == MOMENTUM_BEARING);
                 if delta != 0.0 {
                     part.snap_delta = Some(delta);
@@ -2146,8 +2172,9 @@ impl Transform {
                     moving_fields |= part.fields;
                 }
             }
-            if let Some(delta) = part.snap_delta {
-                let duration = part.snap.unwrap_or_default().duration;
+            if let Some(delta) = part.snap_delta
+                && let Some(MomentumSnap { duration, .. }) = part.snap
+            {
                 // Without a clock, the snap ends with its command.
                 let t = if duration.is_zero() || now.is_none() {
                     1.0

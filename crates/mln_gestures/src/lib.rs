@@ -3,7 +3,11 @@
 //! [`GestureCamera`], such as `mln_runtime::Map`, through
 //! the map's camera calls with their gesture phases
 //! ([`Map::apply_camera_delta`](mln_map::Map::apply_camera_delta)), and
-//! releases continued with the map's momentum.
+//! releases continued with the map's momentum. It reports what gestures mean
+//! beyond camera moves as [`GestureEvent`]s: clicks, and the notches where
+//! hosts play haptic feedback. [`GestureOptions`] sets, for each part of the
+//! camera, whether gestures move it, how its release glides, where it
+//! settles, and where it has notches.
 //!
 //! MapLibre Native has no counterpart: each of its platform SDKs recognizes
 //! gestures itself. This is ported from Orbis's orb-camera input, which has
@@ -23,11 +27,12 @@
 
 mod camera;
 mod input;
+mod notches;
 mod options;
 mod recognizer;
 mod velocity;
 
 pub use camera::{GestureCamera, PendingEnd, center_latitude, zoom_range};
 pub use input::{Button, GestureEvent, Input, Key, Modifiers, PinchPhase, PointerKind, WheelDelta};
-pub use options::GestureOptions;
+pub use options::{Axis, AxisOptions, GestureOptions, Notch, PanOptions};
 pub use recognizer::GestureRecognizer;
