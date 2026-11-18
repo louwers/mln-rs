@@ -15,6 +15,11 @@ name = "mln_mtl"
 # The doc comments have no examples to run.
 doctest = false
 
+[features]
+# `bench`, how long the GPU took, which the benchmarks (tools/bench) measure.
+# Not API: hidden from the documentation.
+bench = ["objc2-metal/MTLCounters"]
+
 # Metal exists on Apple platforms only; elsewhere the crate is empty.
 [target.'cfg(target_vendor = "apple")'.dependencies]
 block2.workspace = true

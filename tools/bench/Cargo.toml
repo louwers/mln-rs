@@ -82,6 +82,9 @@ wgpu = { version = "30", default-features = false }
 [target.'cfg(not(any(target_vendor = "apple", target_family = "wasm")))'.dependencies]
 mln_vulkan = { package = "mln-rs-vulkan", path = "../../crates/mln_vulkan" }
 
+[target.'cfg(target_vendor = "apple")'.dependencies]
+mln_mtl = { package = "mln-rs-mtl", path = "../../crates/mln_mtl" }
+
 # The instruction counters and the process's CPU time (meter.rs), and the
 # machine's description (environment.rs).
 [target.'cfg(unix)'.dependencies]
