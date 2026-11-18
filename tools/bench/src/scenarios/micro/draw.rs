@@ -76,6 +76,15 @@ scenarios! {
             "layout": { "text-field": ["get", "name"], "text-font": ["Noto Sans Regular"], "text-size": 12 },
             "paint": { "text-color": "#666666", "text-halo-color": "#ffffff", "text-halo-width": 1, "text-halo-blur": 0.5 },
         }));
+    "micro/draw/symbol/text-and-icon", "What does drawing a city's points of interest as haloed labels led by their icon cost, those that collide hidden?",
+        symbol_text_and_icon => Case::street(|_| json!({
+            "id": "layer", "type": "symbol", "source": "openmaptiles", "source-layer": "poi",
+            "layout": {
+                "text-field": ["format", ["image", ["get", "class"]], {}, " ", {}, ["get", "name"], {}],
+                "text-font": ["Noto Sans Regular"], "text-size": 12,
+            },
+            "paint": { "text-color": "#666666", "text-halo-color": "#ffffff", "text-halo-width": 1, "text-halo-blur": 0.5 },
+        }));
     "micro/draw/raster/terrain", "What does drawing a city's terrain tiles as raster images cost?",
         raster_terrain => Case::terrain(|fixtures| {
             let mut source = fixtures.terrain_source();

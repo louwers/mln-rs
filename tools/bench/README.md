@@ -112,6 +112,7 @@ its sizes are the ones it uses.
 | `micro/draw/heatmap/data-driven`        | What does drawing a month's earthquakes over the world as a heatmap weighted by magnitude cost?                                            |
 | `micro/draw/symbol/icon`                | What does drawing a city's points of interest as icons cost, those that collide hidden?                                                    |
 | `micro/draw/symbol/text`                | What does drawing a city's points of interest as haloed labels cost, those that collide hidden?                                            |
+| `micro/draw/symbol/text-and-icon`       | What does drawing a city's points of interest as haloed labels led by their icon cost, those that collide hidden?                          |
 | `micro/draw/raster/terrain`             | What does drawing a city's terrain tiles as raster images cost?                                                                            |
 | `micro/draw/hillshade/terrain`          | What does hillshading a city's hills cost?                                                                                                 |
 | `micro/draw/color-relief/terrain`       | What does tinting a city's hills by elevation cost?                                                                                        |
