@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 use mln_renderer::RendererEvent;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
@@ -12,6 +13,7 @@ use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::queue::Queue;
 use mln_util::size::Size;
+use mln_util::time::Instant;
 
 use crate::map_options::UnusedStyleImagePolicy;
 use crate::{CameraChange, CameraChangeMode, CameraChangeSource, CameraOptions, Map, MapEvent, MapMode, MapOptions};
@@ -148,6 +150,40 @@ fn the_waker_runs_when_the_map_has_events() {
     assert_eq!(map.update_generation(), updates + 1);
 }
 
+/// A frame that only waits for a symbol placement asks for no update until
+/// the placement is due, and the map isn't idle until it ran.
+#[test]
+fn a_frame_waiting_for_a_placement_asks_for_no_update_until_then() {
+    let run_loop = Queue::<()>::new();
+    let mut map = map(MapOptions { map_mode: MapMode::Continuous, ..Default::default() }, &run_loop);
+    map.load_style_json(STYLE);
+    map.process_events();
+    map.drain_events();
+    let frame = |repaint_at| RendererEvent::RenderFrameFinished {
+        mode: mln_renderer::RenderMode::Full,
+        needs_repaint: false,
+        repaint_at,
+        placement_changed: false,
+        still_image_request_id: 0,
+        stats: Arc::default(),
+    };
+    let idle = |map: &mut Map| map.drain_events().iter().any(|event| matches!(event, MapEvent::Idle));
+
+    let at = Instant::now() + Duration::from_millis(200);
+    let updates = map.update_generation();
+    report(&map, frame(Some(at)));
+    map.process_events();
+    assert_eq!(map.update_generation(), updates, "no update before the placement");
+    assert_eq!(map.repaint_at(), Some(at));
+    assert!(!idle(&mut map));
+
+    map.trigger_repaint();
+    assert_eq!(map.repaint_at(), None);
+    report(&map, frame(None));
+    map.process_events();
+    assert!(idle(&mut map));
+}
+
 #[test]
 fn the_reports_waker_runs_for_reports_only() {
     let run_loop = Queue::<()>::new();
@@ -237,6 +273,7 @@ fn a_still_image_completes_with_a_full_frame() {
     let frame = |mode, still_image_request_id| RendererEvent::RenderFrameFinished {
         mode,
         needs_repaint: false,
+        repaint_at: None,
         placement_changed: false,
         still_image_request_id,
         stats: Arc::clone(&stats),

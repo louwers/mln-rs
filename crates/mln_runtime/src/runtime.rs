@@ -21,8 +21,9 @@ use mln_text::GlyphCache;
 use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
 use mln_util::pool::Pool;
-use mln_util::queue::Queue;
+use mln_util::queue::{Queue, TimedTask};
 use mln_util::thread::Joined;
+use mln_util::time::Instant;
 use parking_lot::Mutex;
 
 use crate::completion::{Completion, Resolver};
@@ -301,6 +302,16 @@ pub(crate) struct Background {
 /// Posts `task` to the runtime thread that runs `queue`.
 pub(crate) fn post(queue: &CoreQueue, task: impl FnOnce(&mut RuntimeCore, &mut Outbox) + Send + 'static) {
     queue.post(move |core| run(core, task, false));
+}
+
+/// Posts `task` to the runtime thread that runs `queue`, to run once
+/// `deadline` passed.
+pub(crate) fn post_at(
+    queue: &CoreQueue,
+    deadline: Instant,
+    task: impl FnOnce(&mut RuntimeCore, &mut Outbox) + Send + 'static,
+) -> TimedTask {
+    queue.post_at(deadline, move |core| run(core, task, false))
 }
 
 /// Runs `task` on the runtime's state, then delivers what it sends to the

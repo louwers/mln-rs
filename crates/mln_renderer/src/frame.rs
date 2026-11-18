@@ -35,6 +35,9 @@ pub(crate) struct Frame {
     /// Whether a transition or a fade still runs, which the next frame
     /// continues.
     pub(crate) needs_repaint: bool,
+    /// When, without `needs_repaint`, the map changes next on its own: a
+    /// symbol placement that isn't due yet.
+    pub(crate) repaint_at: Option<Instant>,
     /// Whether every source, image and tile the frame needs had loaded.
     pub(crate) loaded: bool,
     pub(crate) placement_changed: bool,
@@ -60,6 +63,7 @@ impl Frame {
             background_color: Color::new_unchecked(0.0, 0.0, 0.0, 0.0),
             symbol_fade_change: 0.0,
             needs_repaint: false,
+            repaint_at: None,
             loaded: false,
             placement_changed: false,
             layers: VecMap::new(),

@@ -307,7 +307,9 @@ impl StubMapObserver {
     /// has some, while the returned value lives. With a `frontend`, which
     /// renders `map`, it also draws each update that the map publishes
     /// first, as a window's frontend draws when the display asks for a
-    /// frame; while someone else holds the frontend, they draw.
+    /// frame, and repaints the map when it changes next on its own
+    /// ([`Map::repaint_at`]); while someone else holds the frontend, they
+    /// draw.
     pub(crate) fn observe(
         self: &Rc<Self>,
         run_loop: &TestLoop,
@@ -318,11 +320,24 @@ impl StubMapObserver {
             let observer = Rc::downgrade(self);
             let map = Rc::downgrade(map);
             let frontend = frontend.map(Rc::downgrade);
+            let queue = run_loop.handle();
+            // The repaint the loop wakes for.
+            let woken_at = Cell::new(None);
             Rc::new(move || {
                 if let Some(frontend) = frontend.as_ref().and_then(Weak::upgrade)
                     && let Ok(mut frontend) = frontend.try_borrow_mut()
                 {
                     frontend.render_update();
+                    if let Some(map) = map.upgrade()
+                        && let Ok(mut map) = map.try_borrow_mut()
+                        && let Some(at) = map.repaint_at()
+                    {
+                        if mln_util::time::Instant::now() >= at {
+                            map.trigger_repaint();
+                        } else if woken_at.replace(Some(at)) != Some(at) {
+                            queue.post_at(at, |()| {});
+                        }
+                    }
                 }
                 if let (Some(observer), Some(map)) = (observer.upgrade(), map.upgrade()) {
                     observer.dispatch_events(&map);

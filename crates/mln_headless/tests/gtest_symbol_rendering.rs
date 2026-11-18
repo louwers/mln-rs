@@ -234,7 +234,7 @@ fn continuous_collision_visibility_fades_and_reappears() {
             let draw_calls = status.rendering_stats.num_draw_calls;
             match phase.get() {
                 Phase::Initial => {
-                    if status.needs_repaint {
+                    if status.needs_repaint || map.borrow().repaint_at().is_some() {
                         return;
                     }
                     if draw_calls != 2 {
@@ -260,7 +260,7 @@ fn continuous_collision_visibility_fades_and_reappears() {
                     map.borrow_mut().jump_to(&CameraOptions { zoom: Some(4.9), ..Default::default() });
                 }
                 Phase::Reappearing => {
-                    if status.needs_repaint {
+                    if status.needs_repaint || map.borrow().repaint_at().is_some() {
                         return;
                     }
                     if draw_calls != 2 {

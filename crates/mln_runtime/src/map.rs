@@ -19,6 +19,7 @@ use mln_util::event_queue::Waker;
 use mln_util::geo::LatLngBounds;
 use mln_util::hash::HashMap;
 use mln_util::pool::Pool;
+use mln_util::queue::TimedTask;
 use mln_util::size::Size;
 use mln_util::time::Instant;
 use parking_lot::Mutex;
@@ -30,7 +31,7 @@ use crate::feature_state::{FeatureState, FeatureStateSelector};
 use crate::render::{
     Abandoner, AttachOptions, RenderSession, RenderTarget, SessionId, SessionQueue, SessionShared, Worker, worker_post,
 };
-use crate::runtime::{CoreQueue, Outbox, Runtime, RuntimeCore, RuntimeShared, post};
+use crate::runtime::{CoreQueue, Outbox, Runtime, RuntimeCore, RuntimeShared, post, post_at};
 use crate::style::{CallbackSources, GeoJsonUpdates};
 
 /// The ID of a map, unique within its runtime.
@@ -1561,6 +1562,9 @@ pub(crate) struct MapEntry {
     pub(crate) callback_sources: CallbackSources,
     /// The GeoJSON data that commands set and that is still being built.
     pub(crate) geojson_updates: GeoJsonUpdates,
+    /// The repaint posted for when the map changes next on its own
+    /// ([`mln_map::Map::repaint_at`]).
+    repaint: Option<(Instant, TimedTask)>,
 }
 
 impl MapEntry {
@@ -1662,6 +1666,7 @@ pub(crate) fn create(
             camera_commands: HashMap::default(),
             callback_sources: CallbackSources::default(),
             geojson_updates: GeoJsonUpdates::default(),
+            repaint: None,
         },
     );
     flush(core, id, outbox);
@@ -1821,6 +1826,14 @@ pub(crate) fn flush(core: &mut RuntimeCore, id: MapId, outbox: &mut Outbox) {
     // now on posts another.
     entry.flush_pending.clear();
     let events = entry.core.drain_events();
+    let repaint_at = entry.core.repaint_at();
+    if entry.repaint.as_ref().map(|(at, _)| *at) != repaint_at {
+        if let Some((_, task)) = entry.repaint.take() {
+            core.queue.cancel(task);
+        }
+        entry.repaint =
+            repaint_at.map(|at| (at, post_at(&core.queue, at, move |core, outbox| repaint(core, id, outbox))));
+    }
     // The sources that left the style, by a command or a style load, let go
     // of what they held before anything reports the change.
     crate::style::reconcile(entry, outbox);
@@ -1889,10 +1902,23 @@ pub(crate) fn flush(core: &mut RuntimeCore, id: MapId, outbox: &mut Outbox) {
     }
 }
 
+/// Draws the map `id` once its last frame's time to change came.
+fn repaint(core: &mut RuntimeCore, id: MapId, outbox: &mut Outbox) {
+    let Some(entry) = core.maps.get_mut(&id) else { return };
+    entry.repaint = None;
+    if entry.core.repaint_at().is_some() {
+        entry.core.trigger_repaint();
+    }
+    flush(core, id, outbox);
+}
+
 /// Lets go of the map `id`, after sending the events it still had.
 fn remove(core: &mut RuntimeCore, id: MapId, done: Option<Resolver<()>>, outbox: &mut Outbox) {
     flush(core, id, outbox);
     if let Some(mut entry) = core.maps.remove(&id) {
+        if let Some((_, task)) = entry.repaint.take() {
+            core.queue.cancel(task);
+        }
         entry.core.set_waker(None);
         if let Some(pending) = entry.pending_style.take() {
             outbox.resolve(pending.resolver, Err(Error::cancelled("the map was released")));

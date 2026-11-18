@@ -11,6 +11,7 @@ pub use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
 use mln_util::event_queue::EventQueue;
 pub use mln_util::font_stack::FontStack;
+use mln_util::time::Instant;
 
 pub use crate::tile::TileOperation;
 
@@ -38,6 +39,10 @@ pub enum RendererEvent {
         mode: RenderMode,
         /// The frame has transitions still running.
         needs_repaint: bool,
+        /// When, without `needs_repaint`, the map changes next though
+        /// nothing asks for a frame before: a frame then places the symbols
+        /// again.
+        repaint_at: Option<Instant>,
         placement_changed: bool,
         /// The still image request of the update that the frame drew, or 0
         /// when the update requested none. Only a frame of the request's own

@@ -621,6 +621,7 @@ impl Encoder {
             RendererEvent::RenderFrameFinished {
                 mode: if frame.loaded { RenderMode::Full } else { RenderMode::Partial },
                 needs_repaint: frame.needs_repaint,
+                repaint_at: frame.repaint_at,
                 placement_changed: frame.placement_changed,
                 still_image_request_id: if update_parameters.still_image_request {
                     update_parameters.still_image_request_id

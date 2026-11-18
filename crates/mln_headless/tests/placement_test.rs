@@ -167,7 +167,9 @@ impl ContinuousMap {
 
     /// Draws frames while the map loads, asks for them or publishes new
     /// updates, until it shows its view complete. The clock stands still
-    /// while the map loads. Returns the frames.
+    /// while the map loads, and skips to the frame at or after the time the
+    /// map changes next on its own ([`Map::repaint_at`]). Returns the
+    /// frames.
     fn settle(&self) -> Vec<RenderFrameStatus> {
         let mut frames = Vec::new();
         loop {
@@ -179,10 +181,16 @@ impl ContinuousMap {
                 self.time.set(self.time.get() + FRAME);
             }
             self.wait_for_workers();
-            let updated = self.map.borrow().update_generation() != self.drawn.get();
+            let mut map = self.map.borrow_mut();
+            let updated = map.update_generation() != self.drawn.get();
             if loaded && !needs_repaint && !updated {
-                return frames;
+                let Some(at) = map.repaint_at() else { return frames };
+                while self.start + self.time.get() < at {
+                    self.time.set(self.time.get() + FRAME);
+                }
+                map.trigger_repaint();
             }
+            drop(map);
             assert!(frames.len() < 600, "the map is still drawing after {} frames", frames.len());
         }
     }
@@ -292,4 +300,18 @@ fn tiles_held_with_no_symbols_to_place_let_the_map_go_idle() {
     test.settle();
     test.map.borrow_mut().jump_to(&CameraOptions { zoom: Some(5.0), ..Default::default() });
     test.settle();
+}
+
+/// A camera move that moves no label waits for the next placement without
+/// drawing: one frame shows the move, and one at the placement's time finds
+/// nothing to change.
+#[test]
+fn a_camera_move_that_moves_no_label_draws_twice() {
+    let test = ContinuousMap::new();
+    test.settle_after_a_placement();
+    let nudged = mln_util::geo::LatLng::new(5.0, 5.001).unwrap();
+    test.map.borrow_mut().jump_to(&CameraOptions { center: Some(nudged), ..Default::default() });
+    let frames = test.settle();
+    assert_eq!(frames.len(), 2, "{frames:?}");
+    assert!(!frames[0].placement_changed && frames[1].placement_changed);
 }

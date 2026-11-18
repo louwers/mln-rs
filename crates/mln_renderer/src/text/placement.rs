@@ -519,7 +519,6 @@ impl PlacementInputs {
 
 pub(crate) struct PlacementController {
     placement: Placement,
-    stale: bool,
     commits: u64,
 }
 
@@ -532,13 +531,12 @@ impl Default for PlacementController {
 impl PlacementController {
     #[must_use]
     pub(crate) fn new() -> Self {
-        PlacementController { placement: Placement::new_default(), stale: false, commits: 0 }
+        PlacementController { placement: Placement::new_default(), commits: 0 }
     }
 
     /// Commits `placement`.
     pub(crate) fn set_placement(&mut self, placement: Placement) {
         self.placement = placement;
-        self.stale = false;
         self.commits += 1;
     }
 
@@ -571,7 +569,6 @@ impl PlacementController {
         if changed {
             self.placement = Placement::new_default();
         }
-        self.stale = false;
         self.commits += 1;
         changed
     }
@@ -585,42 +582,22 @@ impl PlacementController {
         &mut self.placement
     }
 
-    /// Sets whether the placement is stale, which keeps the map drawing
-    /// until the next placement.
-    pub(crate) fn set_stale(&mut self, stale: bool) {
-        self.stale = stale;
-    }
-
+    /// When the next placement may run: an update period, or
+    /// `period_override`, after this one; `None` for at once, as where
+    /// placements don't fade.
     #[must_use]
-    pub(crate) fn placement_is_recent(
-        &self,
-        now: Option<Instant>,
-        zoom: f32,
-        period_override: Option<Duration>,
-    ) -> bool {
+    pub(crate) fn next_placement_at(&self, zoom: f32, period_override: Option<Duration>) -> Option<Instant> {
         if !self.placement.transitions_enabled() {
-            return false;
+            return None;
         }
-
-        let update_period = match period_override {
-            Some(period) => period,
-            None => self.placement.update_period(zoom),
-        };
-
-        elapsed(now, self.placement.commit_time()) < update_period
+        let update_period = period_override.unwrap_or_else(|| self.placement.update_period(zoom));
+        self.placement.commit_time()?.checked_add(update_period)
     }
 
+    /// Whether the symbols' fade still runs at `now`.
     #[must_use]
     pub(crate) fn has_transitions(&self, now: Option<Instant>) -> bool {
-        if !self.placement.transitions_enabled() {
-            return false;
-        }
-
-        if self.stale {
-            return true;
-        }
-
-        self.placement.has_transitions(now)
+        self.placement.transitions_enabled() && self.placement.has_transitions(now)
     }
 }
 

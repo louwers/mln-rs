@@ -90,6 +90,9 @@ pub struct Map {
     tile: TileSettings,
     loading: bool,
     renderer_fully_loaded: bool,
+    /// When the last frame said the map changes next on its own, until an
+    /// update goes out.
+    repaint_at: Option<Instant>,
     /// A still image that [`Map::render_still`] asked for, until it ends.
     still_image: StillImage,
     /// Counts the still image requests, so the renderer can tell a new one.
@@ -188,6 +191,7 @@ impl Map {
             },
             loading: false,
             renderer_fully_loaded: false,
+            repaint_at: None,
             still_image: StillImage::None,
             still_image_request_id: 0,
             generation: 1,
@@ -440,10 +444,12 @@ impl Map {
             RendererEvent::RenderFrameFinished {
                 mode,
                 needs_repaint,
+                repaint_at,
                 placement_changed,
                 still_image_request_id,
                 stats,
             } => {
+                self.repaint_at = repaint_at.filter(|_| continuous && !needs_repaint);
                 self.on_render_frame_finished(mode, needs_repaint, placement_changed, still_image_request_id, stats);
             }
             RendererEvent::RenderMapStarted => {
@@ -526,7 +532,7 @@ impl Map {
             let animating = self.transform.in_transition();
             if needs_repaint || (animating && self.transform.frame_time().is_none()) {
                 self.on_update();
-            } else if !animating && self.renderer_fully_loaded {
+            } else if !animating && self.renderer_fully_loaded && self.repaint_at.is_none() {
                 self.emit(MapEvent::Idle);
             }
         } else if self.renderer_fully_loaded
@@ -559,6 +565,9 @@ impl Map {
         if self.mode != MapMode::Continuous && self.still_image != StillImage::Pending {
             return;
         }
+
+        // The update's frame says anew when the map changes next.
+        self.repaint_at = None;
 
         // Still modes have no clock: they show every transition as ended.
         let time_point =
@@ -680,6 +689,14 @@ impl Map {
     /// Triggers a repaint.
     pub fn trigger_repaint(&mut self) {
         self.on_update();
+    }
+
+    /// When the map changes next on its own, though its last frame asked for
+    /// no other: the owner calls [`trigger_repaint`](Self::trigger_repaint)
+    /// then, by the frame clock. `None` once an update went out since.
+    #[must_use]
+    pub fn repaint_at(&self) -> Option<Instant> {
+        self.repaint_at
     }
 
     // MARK: - Feature state

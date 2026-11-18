@@ -994,15 +994,20 @@ impl RenderOrchestrator {
 
             // Placement runs again, at most once per update period, when it
             // would place differently, and while the sources hold tiles
-            // that wait for placements to fade their symbols out.
+            // that wait for placements to fade their symbols out. Until it
+            // may, the frame says when, rather than asking for frames that
+            // would show the same.
             let inputs = PlacementInputs::new(update_parameters, &layers_need_placement, &self.tile_store);
             let stale = self.placement_controller.is_stale(&inputs) || self.tile_store.has_fading_tiles();
-            frame.placement_changed = stale
-                && !self.placement_controller.placement_is_recent(
-                    update_parameters.time_point,
-                    update_parameters.transform_state.get_zoom() as f32,
-                    placement_update_period_override,
-                );
+            let next_placement_at = self.placement_controller.next_placement_at(
+                update_parameters.transform_state.get_zoom() as f32,
+                placement_update_period_override,
+            );
+            let due = match (next_placement_at, update_parameters.time_point) {
+                (Some(at), Some(now)) => now >= at,
+                _ => true,
+            };
+            frame.placement_changed = stale && due;
             symbol_buckets_changed |= frame.placement_changed;
             if frame.placement_changed {
                 let prev = self.placement_controller.take_placement();
@@ -1010,8 +1015,8 @@ impl RenderOrchestrator {
                 placement.place(&mut self.tile_store);
                 self.placement_controller.set_placement(placement);
                 self.cross_tile_symbol_index.prune_unused_layers(&used_symbol_layers);
-            } else {
-                self.placement_controller.set_stale(stale);
+            } else if stale {
+                frame.repaint_at = next_placement_at;
             }
             frame.symbol_fade_change =
                 self.placement_controller.placement().symbol_fade_change(update_parameters.time_point);
