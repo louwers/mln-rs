@@ -53,6 +53,10 @@ pub(crate) struct InterleavedVertexBuffer {
 impl InterleavedVertexBuffer {
     /// Writes `value` at `offset` in each of the vertices `indexes`.
     pub(crate) fn fill(&mut self, indexes: std::ops::Range<usize>, offset: usize, value: &[u8]) {
+        // Taking the vertices copies a worker's buffer into wasm memory.
+        if indexes.is_empty() {
+            return;
+        }
         let stride = self.stride;
         let data = self.shared_vertex_vector.get_mut();
         for index in indexes {
