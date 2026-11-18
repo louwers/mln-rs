@@ -15,7 +15,7 @@
 // `forceFail`; always true without guards). `TilePlacement::locationCache`
 // is unused in C++ and left out.
 
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::collections::BTreeSet;
 use std::num::NonZeroU32;
 use std::rc::Rc;
@@ -162,7 +162,9 @@ pub(crate) struct RetainedQueryData {
     pub(crate) bucket_instance_id: u32,
     pub(crate) feature_index: Option<Arc<FeatureIndex>>,
     pub(crate) tile_id: OverscaledTileID,
-    pub(crate) feature_sort_order: RefCell<Option<Arc<Vec<usize>>>>,
+    /// The order of the bucket's features as the last opacity update
+    /// sorted them, for a bucket whose symbols sort by their position.
+    pub(crate) feature_sort_order: Option<Arc<Vec<usize>>>,
 }
 
 impl RetainedQueryData {
@@ -172,7 +174,7 @@ impl RetainedQueryData {
         feature_index: Option<Arc<FeatureIndex>>,
         tile_id: OverscaledTileID,
     ) -> Self {
-        RetainedQueryData { bucket_instance_id, feature_index, tile_id, feature_sort_order: RefCell::new(None) }
+        RetainedQueryData { bucket_instance_id, feature_index, tile_id, feature_sort_order: None }
     }
 }
 
@@ -487,6 +489,10 @@ impl PlacementController {
     #[must_use]
     pub(crate) fn get_placement(&self) -> &Placement {
         &self.placement
+    }
+
+    pub(crate) fn placement_mut(&mut self) -> &mut Placement {
+        &mut self.placement
     }
 
     pub(crate) fn set_placement_stale(&mut self) {
@@ -1654,7 +1660,7 @@ impl Placement {
     /// Brings the vertices of the buckets `layer` places up to date with
     /// the placement, and adds what changed of them to `changed`.
     pub(crate) fn update_layer_buckets(
-        &self,
+        &mut self,
         layer: &dyn RenderLayer,
         state: &TransformState,
         update_opacities: bool,
@@ -1669,6 +1675,11 @@ impl Placement {
             {
                 let changes = bucket.update_vertices(self, update_opacities, state, item, &mut seen_cross_tile_ids);
                 changed.mark(bucket.base.bucket_id, changes);
+                if update_opacities
+                    && let Some(retained_data) = self.retained_query_data.get_mut(&bucket.bucket_instance_id)
+                {
+                    retained_data.feature_sort_order.clone_from(&bucket.state.feature_sort_order);
+                }
             }
         }
     }
@@ -2262,12 +2273,7 @@ impl Placement {
                 );
             }
         }
-        let sorted = bucket.sort_features(state.get_bearing() as f32);
-
-        if let Some(retained_data) = self.retained_query_data.get(&bucket.bucket_instance_id) {
-            *retained_data.feature_sort_order.borrow_mut() = bucket.state.feature_sort_order.clone();
-        }
-        sorted
+        bucket.sort_features(state.get_bearing() as f32)
     }
 
     /// The virtual `symbolFadeChange(now)`.

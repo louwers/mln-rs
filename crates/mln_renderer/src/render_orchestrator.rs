@@ -395,7 +395,7 @@ impl RenderOrchestrator {
 
         // The symbol buckets of the layers that need placement, then the
         // positions of the layers that draw buckets other layers place.
-        let placement = self.placement_controller.get_placement();
+        let placement = self.placement_controller.placement_mut();
         for &index in placed.leaders.iter().rev() {
             placement.update_layer_buckets(
                 &*self.layers[index],
@@ -1385,7 +1385,7 @@ impl RenderOrchestrator {
                 self.global_state.as_deref(),
                 &cross_tile_symbol_index_layers,
                 &query_data.tile_id,
-                &query_data.feature_sort_order.borrow().clone(),
+                &query_data.feature_sort_order,
             )?;
 
             for (layer_id, features) in bucket_symbols {
