@@ -82,6 +82,12 @@ impl OpacityState {
     pub(crate) fn is_hidden(self) -> bool {
         self.opacity == 0.0 && !self.placed
     }
+
+    /// Whether the opacity has reached the end of its fade.
+    #[must_use]
+    pub(crate) fn is_settled(self) -> bool {
+        self.opacity == if self.placed { 1.0 } else { 0.0 }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -442,6 +448,68 @@ impl<'a> PlacementContext<'a> {
     }
 }
 
+/// Everything a placement places from, besides the contents of the
+/// buckets it names and the placement it replaces. A bucket's contents go
+/// by its instance id, which a bucket gets anew when it changes, so equal
+/// inputs name the same symbols.
+#[derive(Clone, PartialEq)]
+pub(crate) struct PlacementInputs {
+    mode: MapMode,
+    transform_state: TransformState,
+    transition_options: TransitionOptions,
+    cross_source_collisions: bool,
+    show_collision_boxes: bool,
+    /// The buckets in the order placement places them: the layers'
+    /// buckets, topmost layer first.
+    buckets: Vec<PlacedBucket>,
+}
+
+/// A bucket a placement places.
+#[derive(Clone, PartialEq)]
+struct PlacedBucket {
+    /// The position of the bucket's layer among the layers placed:
+    /// a symbol shows once per layer, from the first of its layer's buckets
+    /// that has it.
+    layer: usize,
+    instance_id: u32,
+    data: BucketPlacementData,
+}
+
+impl PlacementInputs {
+    /// The inputs for placing, at `update_parameters`, the buckets in
+    /// `buckets` that `layers` place, which are ordered bottom to top.
+    pub(crate) fn new<B: SymbolBuckets + ?Sized>(
+        update_parameters: &UpdateParameters,
+        layers: &[&dyn RenderLayer],
+        buckets: &B,
+    ) -> Self {
+        let placed = layers.iter().rev().enumerate().flat_map(|(layer, render_layer)| {
+            render_layer.placement_data().iter().filter_map(move |data| {
+                let bucket = buckets.get(&data.bucket)?;
+                Some(PlacedBucket { layer, instance_id: bucket.bucket_instance_id, data: data.clone() })
+            })
+        });
+        PlacementInputs {
+            mode: update_parameters.mode,
+            transform_state: update_parameters.transform_state.clone(),
+            transition_options: update_parameters.style.get_transition_options(),
+            cross_source_collisions: update_parameters.cross_source_collisions,
+            show_collision_boxes: update_parameters.debug_options.contains(MapDebugOptions::COLLISION),
+            buckets: placed.collect(),
+        }
+    }
+
+    /// The placement data of the buckets, layer by layer in the order
+    /// they're placed.
+    fn layers(&self) -> impl Iterator<Item = impl Iterator<Item = &BucketPlacementData>> {
+        self.buckets.chunk_by(|a, b| a.layer == b.layer).map(|layer| layer.iter().map(|bucket| &bucket.data))
+    }
+
+    fn buckets(&self) -> impl Iterator<Item = &BucketPlacementData> {
+        self.buckets.iter().map(|bucket| &bucket.data)
+    }
+}
+
 pub(crate) struct PlacementController {
     placement: Placement,
     stale: bool,
@@ -464,6 +532,15 @@ impl PlacementController {
         self.stale = false;
     }
 
+    /// Whether placing again from `inputs` would change the placement:
+    /// they differ from the placement's own, or its symbols were still
+    /// fading when it was made, which the first placement after their fade
+    /// ends brings to their final opacities.
+    #[must_use]
+    pub(crate) fn is_stale(&self, inputs: &PlacementInputs) -> bool {
+        self.placement.inputs.as_deref() != Some(inputs) || !self.placement.settled
+    }
+
     /// Takes the current placement, for the next one to place against,
     /// leaving the empty placement.
     pub(crate) fn take_placement(&mut self) -> Placement {
@@ -473,7 +550,7 @@ impl PlacementController {
     /// Resets to the empty placement; returns whether a committed placement
     /// was discarded.
     pub(crate) fn reset(&mut self) -> bool {
-        let changed = self.placement.update_parameters.is_some();
+        let changed = self.placement.inputs.is_some();
         if changed {
             self.placement = Placement::new_default();
         }
@@ -490,8 +567,10 @@ impl PlacementController {
         &mut self.placement
     }
 
-    pub(crate) fn set_placement_stale(&mut self) {
-        self.stale = true;
+    /// Sets whether the placement is stale, which keeps the map drawing
+    /// until the next placement.
+    pub(crate) fn set_stale(&mut self, stale: bool) {
+        self.stale = stale;
     }
 
     #[must_use]
@@ -579,7 +658,8 @@ fn elapsed(now: Option<Instant>, since: Option<Instant>) -> Duration {
 pub(crate) struct Placement {
     kind: PlacementKind,
 
-    update_parameters: Option<Arc<UpdateParameters>>,
+    /// What the placement places from; `None` for the empty placement.
+    inputs: Option<Arc<PlacementInputs>>,
     collision_index: CollisionIndex,
 
     transition_options: TransitionOptions,
@@ -605,6 +685,9 @@ pub(crate) struct Placement {
     /// commit no longer reads; the next placement reuses its grids.
     spare_collision_index: Option<CollisionIndex>,
     show_collision_boxes: bool,
+    /// Every symbol's opacity was at the end of its fade when the
+    /// placement was made.
+    settled: bool,
 
     // The boxes of the symbol being placed, kept between symbols.
     text_boxes: Vec<ProjectedCollisionBox>,
@@ -845,7 +928,7 @@ impl Placement {
     pub(crate) fn new_default() -> Self {
         Placement {
             kind: PlacementKind::Continuous,
-            update_parameters: None,
+            inputs: None,
             collision_index: CollisionIndex::new(&TransformState::default(), MapMode::Static),
             transition_options: TransitionOptions::default(),
             fade_start_time: None,
@@ -861,53 +944,60 @@ impl Placement {
             prev_placement: None,
             spare_collision_index: None,
             show_collision_boxes: false,
+            settled: false,
             text_boxes: Vec::new(),
             icon_boxes: Vec::new(),
             collision_circles: HashMap::default(),
         }
     }
 
-    fn new(update_parameters: Arc<UpdateParameters>, prev_placement: Option<Placement>, kind: PlacementKind) -> Self {
+    fn new(
+        inputs: Arc<PlacementInputs>,
+        time_point: Option<Instant>,
+        prev_placement: Option<Placement>,
+        kind: PlacementKind,
+    ) -> Self {
         let mut prev_placement = prev_placement;
         let previous_collision_index = prev_placement.as_mut().and_then(|prev| prev.spare_collision_index.take());
         Placement {
             kind,
-            collision_index: CollisionIndex::reusing(
-                &update_parameters.transform_state,
-                update_parameters.mode,
-                previous_collision_index,
-            ),
-            transition_options: update_parameters.style.get_transition_options(),
+            collision_index: CollisionIndex::reusing(&inputs.transform_state, inputs.mode, previous_collision_index),
+            transition_options: inputs.transition_options,
             fade_start_time: None,
-            commit_time: update_parameters.time_point,
-            placement_zoom: update_parameters.transform_state.get_zoom() as f32,
+            commit_time: time_point,
+            placement_zoom: inputs.transform_state.get_zoom() as f32,
             prev_zoom_adjustment: 0.0,
             placements: HashMap::default(),
             opacities: HashMap::default(),
             variable_offsets: HashMap::default(),
             placed_orientations: HashMap::default(),
             retained_query_data: HashMap::default(),
-            collision_groups: CollisionGroups::new(update_parameters.cross_source_collisions),
+            collision_groups: CollisionGroups::new(inputs.cross_source_collisions),
             prev_placement: prev_placement.map(Box::new),
             spare_collision_index: None,
-            show_collision_boxes: update_parameters.debug_options.contains(MapDebugOptions::COLLISION),
+            show_collision_boxes: inputs.show_collision_boxes,
+            settled: false,
             text_boxes: Vec::new(),
             icon_boxes: Vec::new(),
             collision_circles: HashMap::default(),
-            update_parameters: Some(update_parameters),
+            inputs: Some(inputs),
         }
     }
 
-    /// A new placement, from the given update parameters and the previous
-    /// placement. In Continuous map mode, `prev_placement` must be provided.
-    pub(crate) fn create(update_parameters: Arc<UpdateParameters>, prev_placement: Option<Placement>) -> Placement {
-        match update_parameters.mode {
+    /// A new placement from `inputs`, at `time_point`, the frame's time. In
+    /// continuous mode, `prev_placement` must be provided.
+    pub(crate) fn create(
+        inputs: Arc<PlacementInputs>,
+        time_point: Option<Instant>,
+        prev_placement: Option<Placement>,
+    ) -> Placement {
+        match inputs.mode {
             MapMode::Continuous => {
                 debug_assert!(prev_placement.is_some());
-                Placement::new(update_parameters, prev_placement, PlacementKind::Continuous)
+                Placement::new(inputs, time_point, prev_placement, PlacementKind::Continuous)
             }
-            MapMode::Static => Placement::new(update_parameters, None, PlacementKind::Static),
-            MapMode::Tile => Placement::new(update_parameters, None, PlacementKind::Tile(Box::default())),
+            MapMode::Static => Placement::new(inputs, time_point, None, PlacementKind::Static),
+            MapMode::Tile => Placement::new(inputs, time_point, None, PlacementKind::Tile(Box::default())),
         }
     }
 
@@ -915,13 +1005,13 @@ impl Placement {
         self.prev_placement.as_deref()
     }
 
+    /// The inputs the placement places from.
+    fn inputs(&self) -> &Arc<PlacementInputs> {
+        self.inputs.as_ref().expect("a placement that places has inputs")
+    }
+
     fn is_tilted_view(&self) -> bool {
-        self.update_parameters
-            .as_ref()
-            .expect("placement runs with its update's parameters")
-            .transform_state
-            .get_pitch()
-            != 0.0
+        self.inputs().transform_state.get_pitch() != 0.0
     }
 
     pub(crate) fn collision_index(&self) -> &CollisionIndex {
@@ -938,13 +1028,13 @@ impl Placement {
         self.placements.values().filter(|placement| placement.placed()).count()
     }
 
-    /// Places the symbols of the buckets `layers` place, of `buckets`, and
-    /// marks the buckets as placed.
-    pub(crate) fn place<B: SymbolBuckets + ?Sized>(&mut self, layers: &[&dyn RenderLayer], buckets: &mut B) {
+    /// Places the symbols of the buckets its inputs name, of `buckets`,
+    /// and marks the buckets as placed.
+    pub(crate) fn place<B: SymbolBuckets + ?Sized>(&mut self, buckets: &mut B) {
         // The buckets placed since their tiles showed them, which are marked
         // as placed when the placement is done.
         let mut reloaded_placed = HashSet::default();
-        self.place_layers_of(layers, &*buckets, &mut reloaded_placed);
+        self.place_buckets(&*buckets, &mut reloaded_placed);
         for key in reloaded_placed {
             if let Some(bucket) = buckets.get_mut(&key) {
                 bucket.state.just_reloaded = false;
@@ -952,31 +1042,18 @@ impl Placement {
         }
     }
 
-    /// [`place`](Self::place) of the buckets that `HeldBuckets` holds, for
-    /// the benchmarks.
-    #[cfg(feature = "bench")]
-    pub(crate) fn place_layers(&mut self, layers: &[&dyn RenderLayer]) {
-        let mut buckets = crate::render_layer::HeldBuckets::take();
-        self.place(layers, &mut buckets);
-        buckets.restore();
-    }
-
-    /// Places the symbols of the buckets `layers` place, of `buckets`, and
+    /// Places the symbols of the buckets its inputs name, of `buckets`, and
     /// adds the keys of those placed since their tiles showed them to
     /// `reloaded_placed`.
-    fn place_layers_of<B: SymbolBuckets + ?Sized>(
-        &mut self,
-        layers: &[&dyn RenderLayer],
-        buckets: &B,
-        reloaded_placed: &mut HashSet<BucketKey>,
-    ) {
+    fn place_buckets<B: SymbolBuckets + ?Sized>(&mut self, buckets: &B, reloaded_placed: &mut HashSet<BucketKey>) {
         if matches!(self.kind, PlacementKind::Tile(_)) {
-            self.tile_place_layers(layers, buckets, reloaded_placed);
+            self.tile_place_buckets(buckets, reloaded_placed);
             return;
         }
-        for layer in layers.iter().rev() {
+        let inputs = Arc::clone(self.inputs());
+        for layer in inputs.layers() {
             let mut seen_cross_tile_ids = BTreeSet::new();
-            for data in layer.placement_data() {
+            for data in layer {
                 if let Some(bucket) = buckets.get(&data.bucket) {
                     self.base_place_symbol_bucket(data, bucket, &mut seen_cross_tile_ids, reloaded_placed);
                 }
@@ -992,7 +1069,7 @@ impl Placement {
         seen_cross_tile_ids: &mut BTreeSet<NonZeroU32>,
         reloaded_placed: &mut HashSet<BucketKey>,
     ) {
-        debug_assert!(self.update_parameters.is_some());
+        debug_assert!(self.inputs.is_some());
         let render_tile = &params.tile;
         let collision_group = self.collision_groups.get(&params.source_id);
         let avoid_edges = self.avoid_edges(symbol_bucket, &render_tile.matrix);
@@ -1644,6 +1721,7 @@ impl Placement {
         }
 
         self.fade_start_time = if placement_changed { self.commit_time } else { prev.fade_start_time };
+        self.settled = self.opacities.values().all(|opacity| opacity.icon.is_settled() && opacity.text.is_settled());
         self.spare_collision_index = Some(prev.collision_index);
     }
 
@@ -2486,12 +2564,12 @@ impl Placement {
         }
     }
 
-    fn tile_place_layers<'a, B: SymbolBuckets + ?Sized>(
+    fn tile_place_buckets<'a, B: SymbolBuckets + ?Sized>(
         &mut self,
-        layers: &[&dyn RenderLayer],
         buckets: &'a B,
         reloaded_placed: &mut HashSet<BucketKey>,
     ) {
+        let inputs = Arc::clone(self.inputs());
         {
             let tile = self.tile_state();
             tile.placed_symbols_data.clear();
@@ -2503,11 +2581,9 @@ impl Placement {
         let mut seen_cross_tile_ids = std::mem::take(&mut self.tile_state().seen_cross_tile_ids);
         let mut contexts: Vec<PlacementContext<'a>> = Vec::new();
         let mut intersections: Vec<Intersection> = Vec::new();
-        for layer in layers.iter().rev() {
-            for data in layer.placement_data() {
-                if let Some(bucket) = buckets.get(&data.bucket) {
-                    self.collect_intersections(data, bucket, reloaded_placed, &mut contexts, &mut intersections);
-                }
+        for data in inputs.buckets() {
+            if let Some(bucket) = buckets.get(&data.bucket) {
+                self.collect_intersections(data, bucket, reloaded_placed, &mut contexts, &mut intersections);
             }
         }
 
@@ -2551,11 +2627,9 @@ impl Placement {
         drop((intersections, contexts));
         // Place the rest labels.
         self.tile_state().populate_intersections = false;
-        for layer in layers.iter().rev() {
-            for data in layer.placement_data() {
-                if let Some(bucket) = buckets.get(&data.bucket) {
-                    self.base_place_symbol_bucket(data, bucket, &mut seen_cross_tile_ids, reloaded_placed);
-                }
+        for data in inputs.buckets() {
+            if let Some(bucket) = buckets.get(&data.bucket) {
+                self.base_place_symbol_bucket(data, bucket, &mut seen_cross_tile_ids, reloaded_placed);
             }
         }
         self.tile_state().seen_cross_tile_ids = seen_cross_tile_ids;
@@ -2563,7 +2637,7 @@ impl Placement {
     }
 
     /// Collects the intersections of the symbols of `bucket`, `params`'
-    /// bucket, with the tile borders, which `tile_place_layers` places
+    /// bucket, with the tile borders, which `tile_place_buckets` places
     /// first.
     fn collect_intersections<'a>(
         &mut self,
@@ -2580,7 +2654,7 @@ impl Placement {
             borders: CollisionBoundaries,
         }
 
-        debug_assert!(self.update_parameters.is_some());
+        debug_assert!(self.inputs.is_some());
         let layout = &*bucket.layout;
         if *layout.symbol_placement.uniform() != SymbolPlacementType::Point || *layout.symbol_avoid_edges.uniform() {
             // Collect intersection only for point placement.
@@ -2811,10 +2885,130 @@ mod tests {
     fn opacity_state() {
         let state = OpacityState::new(true, true);
         assert_eq!(state.opacity, 1.0);
+        assert!(state.is_settled());
         let faded = OpacityState::from_prev(OpacityState::new(false, false), 0.5, false);
         assert_eq!(faded.opacity, 0.0);
         assert!(faded.is_hidden());
+        assert!(faded.is_settled());
         let fading_in = OpacityState::from_prev(OpacityState::new(true, false), 0.25, true);
         assert_eq!(fading_in.opacity, 0.25);
+        assert!(!fading_in.is_settled());
+    }
+
+    /// No symbol buckets.
+    struct NoBuckets;
+
+    impl SymbolBuckets for NoBuckets {
+        fn get(&self, _: &BucketKey) -> Option<&SymbolBucket> {
+            None
+        }
+
+        fn get_mut(&mut self, _: &BucketKey) -> Option<&mut SymbolBucket> {
+            None
+        }
+    }
+
+    /// The `index`th bucket of a tile, which the layer at `layer` places.
+    fn bucket(layer: usize, index: usize) -> PlacedBucket {
+        let tile = OverscaledTileID::with_zxy(4, 0, 4, 8, 8);
+        PlacedBucket {
+            layer,
+            instance_id: u32::try_from(index).unwrap() + 1,
+            data: BucketPlacementData {
+                bucket: BucketKey { bucket: index, slot: Some(0), tile, source: crate::tile::job::SourceKey(0) },
+                tile: PlacedTile {
+                    id: tile.to_unwrapped(),
+                    overscaled_id: tile,
+                    hold_for_fade: false,
+                    projection: ProjectionData::default(),
+                    matrix: [0.0; 16],
+                },
+                feature_index: None,
+                source_id: Arc::from("source"),
+                sort_key_range: None,
+                text_translate: SymbolTranslate::default(),
+                icon_translate: SymbolTranslate::default(),
+            },
+        }
+    }
+
+    fn inputs() -> PlacementInputs {
+        let mut transform_state = TransformState::default();
+        transform_state.set_size(mln_util::size::Size::new(256, 256));
+        PlacementInputs {
+            mode: MapMode::Continuous,
+            transform_state,
+            transition_options: TransitionOptions::default(),
+            cross_source_collisions: true,
+            show_collision_boxes: false,
+            buckets: vec![bucket(0, 0), bucket(1, 1)],
+        }
+    }
+
+    /// The placement from `inputs` at `time`, after `controller`'s, where
+    /// the symbols of `placed` show.
+    fn place(controller: &mut PlacementController, inputs: PlacementInputs, time: Instant, placed: &[u32]) {
+        let prev = controller.take_placement();
+        let mut placement = Placement::create(Arc::new(inputs), Some(time), Some(prev));
+        for &id in placed {
+            placement.placements.insert(NonZeroU32::new(id).unwrap(), JointPlacement::new(true, true, false));
+        }
+        placement.place(&mut NoBuckets);
+        controller.set_placement(placement);
+    }
+
+    /// A change to placement's inputs, by name.
+    type InputChange = (&'static str, fn(&mut PlacementInputs));
+
+    #[test]
+    fn a_placement_is_stale_once_an_input_changes() {
+        let changes: Vec<InputChange> = vec![
+            ("the map mode", |inputs| inputs.mode = MapMode::Static),
+            ("the zoom", |inputs| inputs.transform_state.set_scale(2.0)),
+            ("the bearing", |inputs| inputs.transform_state.set_bearing(0.5)),
+            ("the pitch", |inputs| inputs.transform_state.set_pitch(0.5)),
+            ("the size", |inputs| inputs.transform_state.set_size(mln_util::size::Size::new(200, 256))),
+            ("the padding", |inputs| {
+                inputs.transform_state.set_edge_insets(&mln_util::geo::EdgeInsets::new(10.0, 0.0, 0.0, 0.0));
+            }),
+            ("the transition", |inputs| inputs.transition_options.duration = Some(Duration::ZERO)),
+            ("cross-source collisions", |inputs| inputs.cross_source_collisions = false),
+            ("the collision boxes", |inputs| inputs.show_collision_boxes = true),
+            ("a bucket's instance", |inputs| inputs.buckets[0].instance_id = 10),
+            ("a bucket added", |inputs| inputs.buckets.push(bucket(1, 2))),
+            ("a bucket removed", |inputs| drop(inputs.buckets.pop())),
+            ("the layers' order", |inputs| inputs.buckets.swap(0, 1)),
+            ("the buckets' layers", |inputs| inputs.buckets[1].layer = 0),
+            ("a tile's matrix", |inputs| inputs.buckets[0].data.tile.matrix[0] = 1.0),
+            ("a tile held for fade", |inputs| inputs.buckets[0].data.tile.hold_for_fade = true),
+            ("a bucket's source", |inputs| inputs.buckets[0].data.source_id = Arc::from("other")),
+            ("a text-translate", |inputs| inputs.buckets[0].data.text_translate.offset = [1.0, 0.0]),
+            ("an icon-translate", |inputs| inputs.buckets[0].data.icon_translate.offset = [0.0, 1.0]),
+        ];
+        let mut controller = PlacementController::new();
+        assert!(controller.is_stale(&inputs()), "the empty placement");
+        place(&mut controller, inputs(), Instant::now(), &[]);
+        assert!(!controller.is_stale(&inputs()), "the same inputs");
+        for (name, change) in changes {
+            let mut changed = inputs();
+            change(&mut changed);
+            assert!(controller.is_stale(&changed), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_placement_is_stale_until_one_after_its_fade() {
+        let mut controller = PlacementController::new();
+        let start = Instant::now();
+        place(&mut controller, inputs(), start, &[1]);
+        assert!(controller.is_stale(&inputs()), "a symbol fading in");
+        place(&mut controller, inputs(), start + Duration::from_millis(100), &[1]);
+        assert!(controller.is_stale(&inputs()), "a symbol still fading in");
+        place(&mut controller, inputs(), start + Duration::from_secs(1), &[1]);
+        assert!(!controller.is_stale(&inputs()), "a symbol faded in");
+        place(&mut controller, inputs(), start + Duration::from_secs(2), &[]);
+        assert!(controller.is_stale(&inputs()), "a symbol fading out");
+        place(&mut controller, inputs(), start + Duration::from_secs(3), &[]);
+        assert!(!controller.is_stale(&inputs()), "a symbol faded out");
     }
 }

@@ -147,6 +147,81 @@ struct Matrices {
     globe_camera_position: Vec3,
 }
 
+/// Two states are equal when they describe the same camera and view; the
+/// matrices they cache don't count.
+impl PartialEq for TransformState {
+    fn eq(&self, other: &Self) -> bool {
+        // Destructured so that a new field must be compared or skipped here.
+        let TransformState {
+            bounds,
+            min_scale,
+            max_scale,
+            min_pitch,
+            max_pitch,
+            min_fov,
+            max_fov,
+            orientation,
+            size,
+            frustum_offset,
+            projection_definition,
+            projection_transition,
+            constrain_mode,
+            viewport_mode,
+            rotating,
+            scaling,
+            panning,
+            gesture_in_progress,
+            x,
+            y,
+            z,
+            bearing,
+            scale,
+            fov,
+            pitch,
+            roll,
+            x_skew,
+            y_skew,
+            axonometric,
+            edge_insets,
+            bc,
+            cc,
+            matrices: _,
+        } = self;
+        *bounds == other.bounds
+            && *min_scale == other.min_scale
+            && *max_scale == other.max_scale
+            && *min_pitch == other.min_pitch
+            && *max_pitch == other.max_pitch
+            && *min_fov == other.min_fov
+            && *max_fov == other.max_fov
+            && *orientation == other.orientation
+            && *size == other.size
+            && *frustum_offset == other.frustum_offset
+            && *projection_definition == other.projection_definition
+            && *projection_transition == other.projection_transition
+            && *constrain_mode == other.constrain_mode
+            && *viewport_mode == other.viewport_mode
+            && *rotating == other.rotating
+            && *scaling == other.scaling
+            && *panning == other.panning
+            && *gesture_in_progress == other.gesture_in_progress
+            && *x == other.x
+            && *y == other.y
+            && *z == other.z
+            && *bearing == other.bearing
+            && *scale == other.scale
+            && *fov == other.fov
+            && *pitch == other.pitch
+            && *roll == other.roll
+            && *x_skew == other.x_skew
+            && *y_skew == other.y_skew
+            && *axonometric == other.axonometric
+            && *edge_insets == other.edge_insets
+            && *bc == other.bc
+            && *cc == other.cc
+    }
+}
+
 impl Default for TransformState {
     fn default() -> Self {
         TransformState::new(ConstrainMode::HeightOnly, ViewportMode::Default)

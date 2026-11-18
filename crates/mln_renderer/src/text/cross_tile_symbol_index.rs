@@ -882,6 +882,26 @@ mod tests {
         assert_eq!(cross_tile_id(&symbol_bucket, 1), Some(2));
     }
 
+    // An overscaled tile with symbols off the screen registers again each
+    // frame; under the same camera that changes no symbol's id, which
+    // placement relies on to compare a bucket by its instance id.
+    #[test]
+    fn registering_again_under_the_same_camera_keeps_the_ids() {
+        let mut index = CrossTileSymbolLayerIndex::new();
+        let mut max_cross_tile_id = 0;
+        let tile_id = OverscaledTileID::with_zxy(7, 0, 6, 18, 24);
+        let mut symbol_bucket = make_bucket(vec![(1000.0, 1000.0, "Pittsburgh"), (8000.0, 8000.0, "Norfolk")], 1);
+        let camera = camera_at(40.5, -78.0, 7.0, false);
+        let projector = TileProjector::new(&camera, &tile_id.to_unwrapped());
+
+        assert!(index.add_bucket(&tile_id, &projector, &mut symbol_bucket, &mut max_cross_tile_id));
+        let ids = (cross_tile_id(&symbol_bucket, 0), cross_tile_id(&symbol_bucket, 1));
+        assert_eq!(ids, (Some(1), None));
+
+        assert!(index.add_bucket(&tile_id, &projector, &mut symbol_bucket, &mut max_cross_tile_id));
+        assert_eq!((cross_tile_id(&symbol_bucket, 0), cross_tile_id(&symbol_bucket, 1)), ids);
+    }
+
     // gtest: CrossTileSymbolLayerIndex.offscreenSymbols
     #[test]
     fn offscreen_symbols() {

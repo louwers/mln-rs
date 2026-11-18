@@ -31,6 +31,9 @@ mod local_glyph_rasterizer_test;
 // render-test runner (see the file comment).
 mod m1_background_render_test;
 mod map_snapshot_test;
+// Symbol placement in a continuous map runs again when, and only when,
+// what it places from changes.
+mod placement_test;
 // Map::set_pixel_ratio and HeadlessFrontend::set_pixel_ratio.
 mod pixel_ratio_test;
 // Map::set_size and HeadlessFrontend::set_size with a heatmap, which draws into a texture of its own.

@@ -732,6 +732,8 @@ pub(crate) struct RenderSymbolLayer {
     placement_data: Vec<BucketPlacementData>,
     /// The buckets another layer places and this layer draws.
     follower_data: Vec<BucketPlacementData>,
+    /// The layer's source, which its buckets' placement data shares.
+    source_id: Arc<str>,
 
     icon_size: f32,
     text_size: f32,
@@ -785,12 +787,16 @@ impl RenderSymbolLayer {
         feature_index: impl FnOnce() -> Option<Arc<FeatureIndex>>,
         (text_translate, icon_translate): (SymbolTranslate, SymbolTranslate),
     ) {
-        let source_id = &self.base.style.base().source;
+        let source = &self.base.style.base().source;
+        if *self.source_id != **source {
+            self.source_id = Arc::from(source.as_str());
+        }
+        let source_id = &self.source_id;
         let data = |feature_index, sort_key_range| BucketPlacementData {
             bucket: key,
             tile: *tile,
             feature_index,
-            source_id: source_id.clone(),
+            source_id: Arc::clone(source_id),
             sort_key_range,
             text_translate,
             icon_translate,
@@ -877,6 +883,7 @@ impl RenderSymbolLayer {
             renderable_segments: Vec::new(),
             placement_data: Vec::new(),
             follower_data: Vec::new(),
+            source_id: Arc::from(""),
             icon_size: 1.0,
             text_size: 16.0,
             symbol_icon_group: None,

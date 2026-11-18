@@ -153,7 +153,7 @@ impl Default for SymbolTranslate {
 
 /// What placement reads of the render tile of a symbol bucket, as the
 /// frame's update that collected the bucket's placement data found it.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct PlacedTile {
     pub(crate) id: UnwrappedTileID,
     pub(crate) overscaled_id: OverscaledTileID,
@@ -199,10 +199,35 @@ pub(crate) struct BucketPlacementData {
     pub(crate) bucket: BucketKey,
     pub(crate) tile: PlacedTile,
     pub(crate) feature_index: Option<Arc<FeatureIndex>>,
-    pub(crate) source_id: String,
+    pub(crate) source_id: Arc<str>,
     pub(crate) sort_key_range: Option<crate::buckets::symbol_bucket::SortKeyRange>,
     pub(crate) text_translate: SymbolTranslate,
     pub(crate) icon_translate: SymbolTranslate,
+}
+
+impl PartialEq for BucketPlacementData {
+    fn eq(&self, other: &Self) -> bool {
+        let BucketPlacementData {
+            bucket,
+            tile,
+            feature_index,
+            source_id,
+            sort_key_range,
+            text_translate,
+            icon_translate,
+        } = self;
+        *bucket == other.bucket
+            && *tile == other.tile
+            && match (feature_index, &other.feature_index) {
+                (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+                (None, None) => true,
+                _ => false,
+            }
+            && *source_id == other.source_id
+            && *sort_key_range == other.sort_key_range
+            && *text_translate == other.text_translate
+            && *icon_translate == other.icon_translate
+    }
 }
 
 /// The copies of symbol buckets that benchmarks' layers place, kept

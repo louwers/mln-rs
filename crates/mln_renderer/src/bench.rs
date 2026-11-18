@@ -37,7 +37,7 @@ use crate::render_layer::{LayerParts, RenderLayer};
 use crate::render_tile::RenderTile;
 use crate::text::cross_tile_symbol_index::CrossTileSymbolIndex;
 use crate::text::glyph_store::HBShapeResults;
-use crate::text::placement::Placement;
+use crate::text::placement::{Placement, PlacementInputs};
 use crate::tile::contents::LayoutResult;
 use crate::tile::job::{
     DataInput, DataKey, Job, JobId, JobResult, JobTimes, LayoutJob, Reply, Run, SourceKey, SourceStyle, TileKey,
@@ -309,9 +309,12 @@ impl SymbolView {
     #[must_use]
     pub fn place(&self) -> usize {
         let previous = Placement::new_default();
-        let mut placement = Placement::create(Arc::clone(&self.update), Some(previous));
         let layers: Vec<&dyn RenderLayer> = self.layers.iter().map(|layer| -> &dyn RenderLayer { layer }).collect();
-        placement.place_layers(&layers);
+        let mut buckets = crate::render_layer::HeldBuckets::take();
+        let inputs = PlacementInputs::new(&self.update, &layers, &buckets);
+        let mut placement = Placement::create(Arc::new(inputs), self.update.time_point, Some(previous));
+        placement.place(&mut buckets);
+        buckets.restore();
         placement.shown()
     }
 }

@@ -42,7 +42,7 @@ use crate::render_tile::{FoundTile, RenderTile};
 use crate::renderer_event::RendererEvent;
 use crate::sources::render_tile_source::{DebugLayer, DebugLayers};
 use crate::text::glyph_store::GlyphStore;
-use crate::text::placement::Placement;
+use crate::text::placement::{Placement, PlacementInputs};
 use crate::tile::contents::Contents;
 use crate::tile::inbox::Waker;
 use crate::tile::source_tiles::SourceTiles;
@@ -993,21 +993,27 @@ impl RenderOrchestrator {
                 placement_update_period_override = Some(Duration::from_millis(30));
             }
 
-            frame.placement_changed = !self.placement_controller.placement_is_recent(
-                update_parameters.time_point,
-                update_parameters.transform_state.get_zoom() as f32,
-                placement_update_period_override,
-            );
+            // Placement runs again, at most once per update period, when it
+            // would place differently, and while the sources hold tiles
+            // that wait for placements to fade their symbols out.
+            let inputs = PlacementInputs::new(update_parameters, &layers_need_placement, &self.tile_store);
+            let stale = self.placement_controller.is_stale(&inputs) || self.tile_store.has_fading_tiles();
+            frame.placement_changed = stale
+                && !self.placement_controller.placement_is_recent(
+                    update_parameters.time_point,
+                    update_parameters.transform_state.get_zoom() as f32,
+                    placement_update_period_override,
+                );
             symbol_buckets_changed |= frame.placement_changed;
             if frame.placement_changed {
                 let prev = self.placement_controller.take_placement();
-                let mut placement = Placement::create(Arc::clone(update_parameters), Some(prev));
-                placement.place(&layers_need_placement, &mut self.tile_store);
+                let mut placement = Placement::create(Arc::new(inputs), update_parameters.time_point, Some(prev));
+                placement.place(&mut self.tile_store);
                 self.placement_controller.set_placement(placement);
                 self.cross_tile_symbol_index.prune_unused_layers(&used_symbol_layers);
                 self.tile_store.update_fading_tiles();
             } else {
-                self.placement_controller.set_placement_stale();
+                self.placement_controller.set_stale(stale);
             }
             frame.symbol_fade_change =
                 self.placement_controller.placement().symbol_fade_change(update_parameters.time_point);
@@ -1016,9 +1022,10 @@ impl RenderOrchestrator {
             frame.placement_changed = !layers_need_placement.is_empty();
             symbol_buckets_changed = frame.placement_changed;
             if frame.placement_changed {
-                let mut placement = Placement::create(Arc::clone(update_parameters), None);
+                let inputs = PlacementInputs::new(update_parameters, &layers_need_placement, &self.tile_store);
+                let mut placement = Placement::create(Arc::new(inputs), update_parameters.time_point, None);
                 placement.collect_placed_symbol_data(self.placed_symbol_data_collected);
-                placement.place(&layers_need_placement, &mut self.tile_store);
+                placement.place(&mut self.tile_store);
                 self.placement_controller.set_placement(placement);
             }
             self.cross_tile_symbol_index.reset();
