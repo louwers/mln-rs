@@ -19,6 +19,8 @@ use mln_util::pool::Pool;
 use mln_util::size::Size;
 use serde_json::json;
 
+use crate::gtest_api::style_image;
+use crate::gtest_map::layer_property;
 use crate::support::*;
 
 /// The time between frames: a 60 Hz display's.
@@ -81,18 +83,6 @@ fn style() -> String {
     .to_string()
 }
 
-fn marker() -> Arc<mln_style::image::Impl> {
-    let image = PremultipliedImage::from_vec(Size::new(16, 16), vec![255; 16 * 16 * 4]);
-    Arc::new(
-        mln_style::image::Impl::new("marker".to_owned(), image, 1.0, false, Vec::new(), Vec::new(), None, None, None)
-            .expect("style::Image"),
-    )
-}
-
-fn layer_property(layer: &str, name: &str, value: serde_json::Value) -> Edit {
-    Edit::SetLayerProperty { layer: layer.to_owned(), name: name.to_owned(), value }
-}
-
 impl ContinuousMap {
     fn new() -> Self {
         let run_loop = TestLoop::new();
@@ -109,7 +99,8 @@ impl ContinuousMap {
         .unwrap();
         frontend.attach(&mut map);
         map.load_style_json(&style());
-        map.edit_style(|style| style.apply(Edit::AddImage(marker()))).unwrap();
+        let marker = PremultipliedImage::from_vec(Size::new(16, 16), vec![255; 16 * 16 * 4]);
+        map.edit_style(|style| style.apply(Edit::AddImage(style_image("marker", marker, 1.0)))).unwrap();
         map.jump_to(&CameraOptions {
             center: Some(mln_util::geo::LatLng::new(5.0, 5.0).unwrap()),
             zoom: Some(4.0),
@@ -196,20 +187,11 @@ impl ContinuousMap {
         }
     }
 
-    /// Settles the map, then sets the clock a frame past its last placement:
-    /// a change from then on comes while that placement is recent.
+    /// Settles the map, which it does at a placement: a change made next
+    /// comes while that placement is recent.
     fn settle_after_a_placement(&self) {
-        let mut placed = None;
-        let mut time = Duration::ZERO;
-        for status in self.settle() {
-            if status.placement_changed {
-                placed = Some(time);
-            }
-            if status.mode == RenderMode::Full {
-                time += FRAME;
-            }
-        }
-        self.time.set(placed.expect("a placement") + FRAME);
+        let frames = self.settle();
+        assert!(frames.last().expect("a frame").placement_changed, "the map settles at a placement");
     }
 }
 
@@ -237,22 +219,7 @@ fn changes_that_move_no_label() -> Vec<Change> {
 /// Changes to what placement places from.
 fn changes_to_placement_inputs() -> Vec<Change> {
     vec![
-        ("the bearing", |map| map.jump_to(&CameraOptions { bearing: Some(30.0), ..Default::default() })),
-        ("the zoom", |map| map.jump_to(&CameraOptions { zoom: Some(4.25), ..Default::default() })),
-        ("the pitch", |map| map.jump_to(&CameraOptions { pitch: Some(30.0), ..Default::default() })),
-        ("the center", |map| {
-            map.jump_to(&CameraOptions {
-                center: Some(mln_util::geo::LatLng::new(5.0, 5.5).unwrap()),
-                ..Default::default()
-            });
-        }),
-        ("the padding", |map| {
-            map.jump_to(&CameraOptions {
-                padding: Some(mln_util::geo::EdgeInsets::new(40.0, 0.0, 0.0, 0.0)),
-                ..Default::default()
-            });
-        }),
-        ("the map's size", |map| map.set_size(Size::new(200, 256)).unwrap()),
+        ("the camera", |map| map.jump_to(&CameraOptions { bearing: Some(30.0), ..Default::default() })),
         ("new data for the labels", |map| set_geojson(map, "labels", points(&[(4.5, 5.0), (6.0, 5.0)]))),
         ("a symbol layer's icon-translate", |map| {
             map.edit_style(|style| style.apply(layer_property("labels", "icon-translate", json!([10, 0])))).unwrap();

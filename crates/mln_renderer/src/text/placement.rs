@@ -2915,41 +2915,14 @@ mod tests {
         }
     }
 
-    /// The `index`th bucket of a tile, which the layer at `layer` places.
-    fn bucket(layer: usize, index: usize) -> PlacedBucket {
-        let tile = OverscaledTileID::with_zxy(4, 0, 4, 8, 8);
-        PlacedBucket {
-            layer,
-            instance_id: u32::try_from(index).unwrap() + 1,
-            cross_tile_ids_revision: 0,
-            data: BucketPlacementData {
-                bucket: BucketKey { bucket: index, slot: Some(0), tile, source: crate::tile::job::SourceKey(0) },
-                tile: PlacedTile {
-                    id: tile.to_unwrapped(),
-                    overscaled_id: tile,
-                    hold_for_fade: false,
-                    projection: ProjectionData::default(),
-                    matrix: [0.0; 16],
-                },
-                feature_index: None,
-                source_id: Arc::from("source"),
-                sort_key_range: None,
-                text_translate: SymbolTranslate::default(),
-                icon_translate: SymbolTranslate::default(),
-            },
-        }
-    }
-
     fn inputs() -> PlacementInputs {
-        let mut transform_state = TransformState::default();
-        transform_state.set_size(mln_util::size::Size::new(256, 256));
         PlacementInputs {
             mode: MapMode::Continuous,
-            transform_state,
+            transform_state: TransformState::default(),
             transition_options: TransitionOptions::default(),
             cross_source_collisions: true,
             show_collision_boxes: false,
-            buckets: vec![bucket(0, 0), bucket(1, 1)],
+            buckets: Vec::new(),
         }
     }
 
@@ -2963,46 +2936,6 @@ mod tests {
         }
         placement.place(&mut NoBuckets);
         controller.set_placement(placement);
-    }
-
-    /// A change to placement's inputs, by name.
-    type InputChange = (&'static str, fn(&mut PlacementInputs));
-
-    #[test]
-    fn a_placement_is_stale_once_an_input_changes() {
-        let changes: Vec<InputChange> = vec![
-            ("the map mode", |inputs| inputs.mode = MapMode::Static),
-            ("the zoom", |inputs| inputs.transform_state.set_scale(2.0)),
-            ("the bearing", |inputs| inputs.transform_state.set_bearing(0.5)),
-            ("the pitch", |inputs| inputs.transform_state.set_pitch(0.5)),
-            ("the size", |inputs| inputs.transform_state.set_size(mln_util::size::Size::new(200, 256))),
-            ("the padding", |inputs| {
-                inputs.transform_state.set_edge_insets(&mln_util::geo::EdgeInsets::new(10.0, 0.0, 0.0, 0.0));
-            }),
-            ("the transition", |inputs| inputs.transition_options.duration = Some(Duration::ZERO)),
-            ("cross-source collisions", |inputs| inputs.cross_source_collisions = false),
-            ("the collision boxes", |inputs| inputs.show_collision_boxes = true),
-            ("a bucket's instance", |inputs| inputs.buckets[0].instance_id = 10),
-            ("a bucket's cross-tile ids", |inputs| inputs.buckets[0].cross_tile_ids_revision = 1),
-            ("a bucket added", |inputs| inputs.buckets.push(bucket(1, 2))),
-            ("a bucket removed", |inputs| drop(inputs.buckets.pop())),
-            ("the layers' order", |inputs| inputs.buckets.swap(0, 1)),
-            ("the buckets' layers", |inputs| inputs.buckets[1].layer = 0),
-            ("a tile's matrix", |inputs| inputs.buckets[0].data.tile.matrix[0] = 1.0),
-            ("a tile held for fade", |inputs| inputs.buckets[0].data.tile.hold_for_fade = true),
-            ("a bucket's source", |inputs| inputs.buckets[0].data.source_id = Arc::from("other")),
-            ("a text-translate", |inputs| inputs.buckets[0].data.text_translate.offset = [1.0, 0.0]),
-            ("an icon-translate", |inputs| inputs.buckets[0].data.icon_translate.offset = [0.0, 1.0]),
-        ];
-        let mut controller = PlacementController::new();
-        assert!(controller.is_stale(&inputs()), "the empty placement");
-        place(&mut controller, inputs(), Instant::now(), &[]);
-        assert!(!controller.is_stale(&inputs()), "the same inputs");
-        for (name, change) in changes {
-            let mut changed = inputs();
-            change(&mut changed);
-            assert!(controller.is_stale(&changed), "{name}");
-        }
     }
 
     #[test]

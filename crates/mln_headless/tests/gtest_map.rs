@@ -91,7 +91,7 @@ fn set(layer: &mut Layer, name: &str, value: &serde_json::Value) {
 }
 
 /// The edit that sets the property `name` of the layer `layer` to `value`.
-fn layer_property(layer: &str, name: &str, value: serde_json::Value) -> Edit {
+pub(crate) fn layer_property(layer: &str, name: &str, value: serde_json::Value) -> Edit {
     Edit::SetLayerProperty { layer: layer.to_owned(), name: name.to_owned(), value }
 }
 
