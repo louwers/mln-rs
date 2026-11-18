@@ -227,12 +227,12 @@ impl LatLngBounds {
 
     #[must_use]
     pub fn center(&self) -> LatLng {
-        LatLng::new(
+        // The midpoint of two valid coordinates is valid: `midpoint` can't
+        // overflow.
+        LatLng::new_unchecked(
             f64::midpoint(self.sw.latitude(), self.ne.latitude()),
             f64::midpoint(self.sw.longitude(), self.ne.longitude()),
         )
-        // `midpoint` of two valid coordinates can't overflow.
-        .expect("the midpoint of valid coordinates is valid")
     }
 
     #[must_use]
@@ -344,8 +344,7 @@ impl LatLngBounds {
 
         if wrap == WrapMode::Wrapped {
             let wrapped = LatLngBounds::from_corners(self.sw.wrapped(), self.ne.wrapped());
-            // The callers pass a `LatLng`'s longitude, which is finite.
-            let longitude = LatLng::new(0.0, longitude).expect("a LatLng's longitude is valid").wrapped().longitude();
+            let longitude = mln_math::wrap(longitude, -constants::LONGITUDE_MAX, constants::LONGITUDE_MAX);
             if self.crosses_antimeridian() {
                 return (longitude >= -constants::LONGITUDE_MAX && longitude <= wrapped.east())
                     || (longitude >= wrapped.west() && longitude <= constants::LONGITUDE_MAX);
@@ -382,8 +381,7 @@ pub enum NorthOrientation {
 
 /// The distance on each side between a rectangle and a rectangle within.
 ///
-/// The fields are public (seed API); `new` validates like the C++
-/// constructor.
+/// Any values are allowed; the users of insets say which they accept.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct EdgeInsets {
     /// Number of pixels inset from the top edge.
@@ -397,22 +395,9 @@ pub struct EdgeInsets {
 }
 
 impl EdgeInsets {
-    /// Fails with [`ErrorKind::InvalidArgument`](crate::ErrorKind) for a NaN
-    /// inset.
-    pub fn new(top: f64, left: f64, bottom: f64, right: f64) -> Result<Self, Error> {
-        if top.is_nan() {
-            return Err(Error::invalid_argument("top must not be NaN"));
-        }
-        if left.is_nan() {
-            return Err(Error::invalid_argument("left must not be NaN"));
-        }
-        if bottom.is_nan() {
-            return Err(Error::invalid_argument("bottom must not be NaN"));
-        }
-        if right.is_nan() {
-            return Err(Error::invalid_argument("right must not be NaN"));
-        }
-        Ok(EdgeInsets { top, left, bottom, right })
+    #[must_use]
+    pub const fn new(top: f64, left: f64, bottom: f64, right: f64) -> Self {
+        EdgeInsets { top, left, bottom, right }
     }
 
     #[must_use]

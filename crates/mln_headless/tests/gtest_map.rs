@@ -66,7 +66,7 @@ fn ll(lat: f64, lon: f64) -> LatLng {
 }
 
 fn insets(top: f64, left: f64, bottom: f64, right: f64) -> EdgeInsets {
-    EdgeInsets::new(top, left, bottom, right).expect("EdgeInsets")
+    EdgeInsets::new(top, left, bottom, right)
 }
 
 #[must_use]

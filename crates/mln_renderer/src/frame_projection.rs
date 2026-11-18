@@ -79,7 +79,7 @@ mod tests {
             camera: Camera {
                 center: LatLng::new(40.7, -74.0).unwrap(),
                 center_altitude: 30.0,
-                padding: EdgeInsets::new(40.0, 60.0, 10.0, 0.0).unwrap(),
+                padding: EdgeInsets::new(40.0, 60.0, 10.0, 0.0),
                 zoom: 15.5,
                 bearing: 25.0,
                 pitch: 55.0,

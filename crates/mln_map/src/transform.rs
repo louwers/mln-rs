@@ -67,12 +67,14 @@ fn lat_lng(lat: f64, lon: f64) -> LatLng {
     LatLng::new(lat, lon).expect("a transform state's coordinates are finite")
 }
 
-/// An animation frame's `EdgeInsets(top, left, bottom, right)`. C++ throws
-/// `std::domain_error` for NaN (infinite insets interpolate to NaN) out of
-/// the frame, and nothing catches it; the port logs it, and the frame keeps
-/// the insets.
+/// An animation frame's insets, or `None` when one is NaN (infinite insets
+/// interpolate to NaN): the frame keeps the insets it has.
 fn frame_edge_insets(top: f64, left: f64, bottom: f64, right: f64) -> Option<EdgeInsets> {
-    EdgeInsets::new(top, left, bottom, right).map_err(|e| Log::error(Event::General, &e.message)).ok()
+    if [top, left, bottom, right].iter().any(|value| value.is_nan()) {
+        Log::error(Event::General, "an animation frame's insets are NaN");
+        return None;
+    }
+    Some(EdgeInsets::new(top, left, bottom, right))
 }
 
 /// An animation frame's `Projection::unproject`, which constructs a `LatLng`

@@ -56,7 +56,7 @@ fn map_of(runtime: &Runtime) -> Map {
         bearing: Some(-70.0),
         pitch: Some(50.0),
         roll: Some(6.0),
-        padding: Some(EdgeInsets::new(6.0, 10.0, 0.0, 0.0).unwrap()),
+        padding: Some(EdgeInsets::new(6.0, 10.0, 0.0, 0.0)),
         ..Default::default()
     };
     wait(map.update_camera(CameraUpdate { camera, ..CameraUpdate::default() }));

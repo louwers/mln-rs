@@ -7,7 +7,7 @@ use mln_tile_id::{CanonicalTileID, UnwrappedTileID};
 
 use crate::Error;
 use crate::constants::{LATITUDE_MAX, LONGITUDE_MAX};
-use crate::geo::{EdgeInsets, LatLng, LatLngBounds, WrapMode};
+use crate::geo::{LatLng, LatLngBounds, WrapMode};
 use crate::tests::gtest::assert_double_eq;
 
 fn ll(lat: f64, lon: f64) -> LatLng {
@@ -33,18 +33,6 @@ fn invalid_lat_lng() {
     assert_eq!(LatLng::new(0.0, f64::NAN).unwrap_err(), Error::invalid_argument("longitude must not be NaN"));
     assert_eq!(LatLng::new(91.0, 0.0).unwrap_err(), Error::invalid_argument("latitude must be between -90 and 90"));
     assert_eq!(LatLng::new(0.0, f64::INFINITY).unwrap_err(), Error::invalid_argument("longitude must not be infinite"));
-}
-
-// gtest: EdgeInsets.InvalidEdgeInsets
-#[test]
-fn invalid_edge_insets() {
-    assert_eq!(EdgeInsets::new(f64::NAN, 0.0, 0.0, 0.0).unwrap_err(), Error::invalid_argument("top must not be NaN"));
-    assert_eq!(EdgeInsets::new(0.0, f64::NAN, 0.0, 0.0).unwrap_err(), Error::invalid_argument("left must not be NaN"));
-    assert_eq!(
-        EdgeInsets::new(0.0, 0.0, f64::NAN, 0.0).unwrap_err(),
-        Error::invalid_argument("bottom must not be NaN")
-    );
-    assert_eq!(EdgeInsets::new(0.0, 0.0, 0.0, f64::NAN).unwrap_err(), Error::invalid_argument("right must not be NaN"));
 }
 
 // gtest: LatLngBounds.World

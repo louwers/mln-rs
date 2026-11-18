@@ -38,7 +38,7 @@ fn sc(x: f64, y: f64) -> ScreenCoordinate {
 }
 
 fn insets(top: f64, left: f64, bottom: f64, right: f64) -> EdgeInsets {
-    EdgeInsets::new(top, left, bottom, right).unwrap()
+    EdgeInsets::new(top, left, bottom, right)
 }
 
 /// gtest's `FloatingPoint<T>::AlmostEquals` distance: sign-and-magnitude
