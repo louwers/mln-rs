@@ -16,7 +16,6 @@ use mln_style_types::{TranslateAnchorType, VisibilityType};
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::Color;
 use mln_util::mat4::Mat4;
-use smallvec::SmallVec;
 
 use crate::bucket::Bucket;
 use crate::buckets::symbol_bucket::SymbolBucket;
@@ -412,9 +411,10 @@ pub(crate) trait LayerParts {
     /// objects. The tiles' entries stay.
     fn remove_all_draws(&mut self);
 
-    /// The layer's draw groups of the frame, in drawing order: none unless
-    /// the frame draws the layer.
-    fn draw_groups(&self) -> DrawGroups<'_>;
+    /// Visits the layer's draw groups of the frame, in drawing order: none
+    /// unless the frame draws the layer. They are the groups `upload` and
+    /// `render` upload and draw.
+    fn visit_draw_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>));
 
     /// Uploads the GPU objects of the layer's draw groups, before the frame
     /// draws them.
@@ -481,12 +481,11 @@ impl<L: TypedLayer> LayerParts for L {
         self.parts_mut().drawing.clear();
     }
 
-    fn draw_groups(&self) -> DrawGroups<'_> {
+    fn visit_draw_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>)) {
         let Parts { base, drawing, .. } = self.parts();
-        if !base.is_renderable {
-            return DrawGroups::new();
+        if base.is_renderable {
+            drawing.groups().for_each(|frame| visit(DrawGroup::Draws(frame)));
         }
-        drawing.groups().map(DrawGroup::Draws).collect()
     }
 
     fn upload(&mut self, context: &Context) {
@@ -503,9 +502,6 @@ impl<L: TypedLayer> LayerParts for L {
         }
     }
 }
-
-/// A layer's draw groups of a frame, in drawing order.
-pub(crate) type DrawGroups<'a> = SmallVec<[DrawGroup<'a>; 2]>;
 
 pub(crate) trait RenderLayer: LayerParts {
     /// Fully evaluate possibly-transitioning paint properties based on a

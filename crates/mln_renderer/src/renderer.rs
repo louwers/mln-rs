@@ -24,7 +24,7 @@ use mln_util::time::Instant;
 
 use crate::Registry;
 use crate::clip_masks::ClipMasks;
-use crate::draw_cache::{DrawGroup, DrawOrder};
+use crate::draw_cache::DrawOrder;
 use crate::frame_projection::{self, FrameProjection};
 use crate::gfx::context::{Context, Stats};
 use crate::layer_composite::LayerComposite;
@@ -542,19 +542,26 @@ impl Renderer {
             debug.draws.upload(context);
         }
 
-        // The masks of the tiles the draw groups clip to and, when any of
-        // them uses the stencil buffer, of the tile that clears it. Draw
-        // groups of one source clip to the same tiles, which are added once.
+        // The number of draw groups, which sets the depth range of the passes;
+        // the masks of the tiles the draw groups clip to and, when any of them
+        // uses the stencil buffer, of the tile that clears it; and the draw
+        // groups drawn as a whole, each into the layer composite's texture and
+        // then onto the frame. Draw groups of one source clip to the same
+        // tiles, which are added once.
+        let mut num_draw_groups = 0_usize;
         let mut clip_tiles = Vec::new();
         let mut last: Option<&[UnwrappedTileID]> = None;
-        for group in orchestrator.draw_groups() {
+        let mut composited = Vec::new();
+        orchestrator.visit_draw_groups(|group| {
+            num_draw_groups += 1;
             if let Some(tiles) = group.stencil_tiles()
                 && last.is_none_or(|last| last != tiles)
             {
                 clip_tiles.extend(tiles.iter().copied());
                 last = Some(tiles);
             }
-        }
+            composited.extend(group.composite());
+        });
         if last.is_some() {
             clip_tiles.extend(parameters.stencil_clear_tile());
         }
@@ -571,9 +578,6 @@ impl Renderer {
         );
         parameters.clip_masks = std::mem::take(&mut self.clip_masks);
 
-        // The draw groups drawn as a whole, each into the layer composite's
-        // texture and then onto the frame.
-        let composited: Vec<_> = orchestrator.draw_groups().filter_map(DrawGroup::composite).collect();
         self.layer_composite.update(
             context,
             &static_data.shaders,
@@ -606,7 +610,6 @@ impl Renderer {
 
         let num_sublayers = PaintParameters::NUM_SUBLAYERS as usize;
         let depth_epsilon = PaintParameters::DEPTH_EPSILON;
-        let num_draw_groups = orchestrator.num_draw_groups();
 
         // - CUSTOM LAYER PRERENDER ------------------------------------------
         // Custom layers record their own work before the first pass, with the

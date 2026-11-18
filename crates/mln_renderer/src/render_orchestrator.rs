@@ -1173,14 +1173,11 @@ impl RenderOrchestrator {
         Some(self.tile_store.source_mut(key)?.0)
     }
 
-    /// The layers' draw groups of the frame, in drawing order.
-    pub(crate) fn draw_groups(&self) -> impl Iterator<Item = DrawGroup<'_>> {
-        self.layers.iter().flat_map(|layer| layer.draw_groups())
-    }
-
-    /// The number of the layers' draw groups of the frame.
-    pub(crate) fn num_draw_groups(&self) -> usize {
-        self.draw_groups().count()
+    /// Visits the layers' draw groups of the frame, in drawing order.
+    pub(crate) fn visit_draw_groups<'a>(&'a self, mut visit: impl FnMut(DrawGroup<'a>)) {
+        for layer in &self.layers {
+            layer.visit_draw_groups(&mut visit);
+        }
     }
 
     /// Uploads the GPU objects of the layers' draw groups, in drawing order.

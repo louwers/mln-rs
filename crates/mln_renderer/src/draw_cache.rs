@@ -676,6 +676,15 @@ pub(crate) struct LayerDrawing<T, L = ()> {
     pub(crate) target: Option<FrameDraws>,
 }
 
+/// A layer's draw groups of the frame, in drawing order: its draws, then
+/// those over them.
+fn groups<'a>(
+    frame: &'a Option<FrameDraws>,
+    overlay: &'a Option<FrameDraws>,
+) -> impl DoubleEndedIterator<Item = &'a FrameDraws> {
+    frame.iter().chain(overlay)
+}
+
 impl<T, L: Default> Default for LayerDrawing<T, L> {
     fn default() -> Self {
         LayerDrawing { caches: DrawCaches::default(), frame: None, overlay: None, target: None }
@@ -685,7 +694,7 @@ impl<T, L: Default> Default for LayerDrawing<T, L> {
 impl<T, L> LayerDrawing<T, L> {
     /// The layer's draw groups of the frame, in drawing order.
     pub(crate) fn groups(&self) -> impl DoubleEndedIterator<Item = &FrameDraws> {
-        self.frame.iter().chain(&self.overlay)
+        groups(&self.frame, &self.overlay)
     }
 }
 
@@ -703,7 +712,7 @@ impl<T, L: Default> LayerDrawing<T, L> {
 impl<T: DrawSlots, L: DrawSlots> LayerDrawing<T, L> {
     /// Uploads the GPU objects of the draw groups' draws.
     pub(crate) fn upload(&mut self, context: &Context) {
-        for frame in self.frame.iter().chain(&self.overlay) {
+        for frame in groups(&self.frame, &self.overlay) {
             self.caches.upload(frame, context);
         }
     }
@@ -716,7 +725,7 @@ impl<T: DrawSlots, L: DrawSlots> LayerDrawing<T, L> {
             caches.render(frame, gpu, parameters);
             order.step(parameters);
         };
-        let groups = frame.iter().chain(&*overlay);
+        let groups = groups(frame, overlay);
         match order {
             DrawOrder::BottomUp => groups.for_each(&mut render),
             DrawOrder::TopDown => groups.rev().for_each(&mut render),

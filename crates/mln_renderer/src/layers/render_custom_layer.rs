@@ -29,7 +29,7 @@ use crate::layer_type::LayerType;
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{
-    DrawGroups, LayerParts, LayerPrepareParameters, LayerSource, LayerTiles, LayerValues, RenderLayer, RenderLayerBase,
+    LayerParts, LayerPrepareParameters, LayerSource, LayerTiles, LayerValues, RenderLayer, RenderLayerBase,
 };
 use crate::render_pass::RenderPass;
 use crate::render_source::TileOrder;
@@ -101,6 +101,11 @@ impl RenderCustomLayer {
         }
     }
 
+    /// Whether the frame draws the layer's draw group.
+    fn draws(&self) -> bool {
+        self.updated && self.base.is_renderable
+    }
+
     /// In the translucent pass, lends the live pass to the host.
     fn lend_pass(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         if parameters.pass_target().is_none() || parameters.pass != RenderPass::Translucent {
@@ -164,14 +169,16 @@ impl LayerParts for RenderCustomLayer {
 
     fn remove_all_draws(&mut self) {}
 
-    fn draw_groups(&self) -> DrawGroups<'_> {
-        (self.updated && self.base.is_renderable).then_some(DrawGroup::Custom).into_iter().collect()
+    fn visit_draw_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>)) {
+        if self.draws() {
+            visit(DrawGroup::Custom);
+        }
     }
 
     fn upload(&mut self, _context: &Context) {}
 
     fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
-        if self.updated && self.base.is_renderable {
+        if self.draws() {
             self.lend_pass(gpu, parameters);
             order.step(parameters);
         }
