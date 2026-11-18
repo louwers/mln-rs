@@ -461,7 +461,9 @@ enum Finish {
 /// clock that only goes forward, and call [`tick`](Self::tick) when it asks.
 /// Every move goes through the `GestureCamera`.
 #[derive(Debug)]
-pub struct GestureRecognizer {
+pub struct GestureRecognizer<C> {
+    /// The map's camera, which every move goes through.
+    camera: C,
     options: GestureOptions,
     pointers: Vec<Pointer>,
     mode: Mode,
@@ -486,21 +488,22 @@ pub struct GestureRecognizer {
     events: Vec<GestureEvent>,
 }
 
-impl Default for GestureRecognizer {
-    fn default() -> Self {
-        GestureRecognizer::with(GestureOptions::default())
+impl<C: GestureCamera> GestureRecognizer<C> {
+    /// A recognizer that moves `camera`, with the default options.
+    pub fn new(camera: C) -> Self {
+        GestureRecognizer::with(camera, GestureOptions::default())
     }
-}
 
-impl GestureRecognizer {
-    /// A recognizer with `options`, which must be in range.
-    pub fn new(options: GestureOptions) -> Result<Self, InvalidGestureOptions> {
+    /// A recognizer that moves `camera`, with `options`, which must be in
+    /// range.
+    pub fn with_options(camera: C, options: GestureOptions) -> Result<Self, InvalidGestureOptions> {
         options.validate()?;
-        Ok(GestureRecognizer::with(options))
+        Ok(GestureRecognizer::with(camera, options))
     }
 
-    fn with(options: GestureOptions) -> Self {
+    fn with(camera: C, options: GestureOptions) -> Self {
         GestureRecognizer {
+            camera,
             options,
             pointers: Vec::new(),
             mode: Mode::Idle,
@@ -514,6 +517,12 @@ impl GestureRecognizer {
             notch_watch: None,
             events: Vec::new(),
         }
+    }
+
+    /// The camera it moves.
+    #[must_use]
+    pub fn camera(&self) -> &C {
+        &self.camera
     }
 
     #[must_use]
@@ -583,7 +592,7 @@ impl GestureRecognizer {
     /// parts it sets, which would otherwise take them back, and is an update
     /// of a gesture under way or a gesture of its own. `update.phase` is
     /// ignored.
-    pub fn step_to(&mut self, camera: &mut dyn GestureCamera, update: &CameraUpdate) {
+    pub fn step_to(&mut self, update: &CameraUpdate) {
         let set = &update.camera;
         let center = set.center.is_some();
         self.stop_step_eases([center, center, set.zoom.is_some(), set.bearing.is_some(), set.pitch.is_some()]);
@@ -593,18 +602,18 @@ impl GestureRecognizer {
             self.notch_watch = None;
         }
         let phase = if self.begun { GesturePhase::Update } else { GesturePhase::End };
-        camera.update_camera(&CameraUpdate { phase, ..*update });
+        self.camera.update_camera(&CameraUpdate { phase, ..*update });
     }
 
     /// Times long presses, steps the eases of discrete deltas, ends deltas
     /// once they idle, and samples the camera for notches, at `now` on the
     /// inputs' clock. Call it when [`next_tick`](Self::next_tick) says, which
     /// it also returns; a call at any other time does no harm.
-    pub fn tick(&mut self, camera: &mut dyn GestureCamera, now: f64) -> Option<NextTick> {
+    pub fn tick(&mut self, now: f64) -> Option<NextTick> {
         self.long_press(now);
-        self.delta_frame(camera, now);
+        self.delta_frame(now);
         if let Some(watch) = &mut self.notch_watch {
-            watch.sample(&camera.camera(), &self.options, now, &mut self.events);
+            watch.sample(&self.camera.camera(), &self.options, now, &mut self.events);
             // The gesture ended, and so did its glide and snap: its command
             // has ended (a gesture cancelled outright has none).
             if !self.begun && self.release_end.as_ref().is_none_or(PendingEnd::has_ended) {
@@ -630,7 +639,7 @@ impl GestureRecognizer {
     }
 
     /// The deltas' part of [`Self::frame`].
-    fn delta_frame(&mut self, camera: &mut dyn GestureCamera, now: f64) -> bool {
+    fn delta_frame(&mut self, now: f64) -> bool {
         let Some(mut gesture) = self.deltas else {
             return false;
         };
@@ -655,13 +664,13 @@ impl GestureRecognizer {
         // gesture of their own, which keeps the release's glide.
         if !self.begun && amounts.iter().any(|amount| *amount != 0.0) {
             self.begun = true;
-            camera.apply_camera_delta(&CameraDelta { phase: GesturePhase::Update, ..CameraDelta::default() });
+            self.camera.apply_camera_delta(&CameraDelta { phase: GesturePhase::Update, ..CameraDelta::default() });
         }
-        self.move_by(camera, amounts, gesture.anchor);
+        self.move_by(amounts, gesture.anchor);
         if gesture.eases.iter().all(Option::is_none) && now >= gesture.idle_until {
             self.deltas = None;
             if matches!(self.mode, Mode::Idle) {
-                self.end_phase(camera, None);
+                self.end_phase(None);
             }
             return false;
         }
@@ -671,15 +680,15 @@ impl GestureRecognizer {
 
     /// Handles one input at host time `now`, in milliseconds. Returns whether
     /// the map used it, so hosts can stop the platform's default.
-    pub fn handle(&mut self, camera: &mut dyn GestureCamera, input: Input, now: f64) -> bool {
+    pub fn handle(&mut self, input: Input, now: f64) -> bool {
         match input {
             Input::PointerDown { id, kind, position, modes } => {
                 let position = position.into();
-                self.down(camera, Pointer { id, kind, position, down: position, down_at: now, modes })
+                self.down(Pointer { id, kind, position, down: position, down_at: now, modes })
             }
-            Input::PointerMove { id, position } => self.moved(camera, id, position.into(), now),
-            Input::PointerUp { id, position } => self.up(camera, id, Some(position.into()), now),
-            Input::PointerCancel { id } => self.up(camera, id, None, now),
+            Input::PointerMove { id, position } => self.moved(id, position.into(), now),
+            Input::PointerUp { id, position } => self.up(id, Some(position.into()), now),
+            Input::PointerCancel { id } => self.up(id, None, now),
             // Modes only change what later drags do: the platform's default
             // for the keys stands.
             Input::Modes(modes) => {
@@ -687,10 +696,10 @@ impl GestureRecognizer {
                 false
             }
             Input::Delta { position, discrete, pan, zoom, bearing, pitch } => {
-                self.delta(camera, position.into(), discrete, [pan.x, pan.y, zoom, bearing, pitch], now)
+                self.delta(position.into(), discrete, [pan.x, pan.y, zoom, bearing, pitch], now)
             }
             Input::Pinch { center, scale, rotation, phase } => {
-                self.platform_pinch(camera, center.into(), scale, rotation, phase, now)
+                self.platform_pinch(center.into(), scale, rotation, phase, now)
             }
         }
     }
@@ -711,7 +720,7 @@ impl GestureRecognizer {
     /// own, and begins with `Update`, which keeps the others. A glide that
     /// this stops is caught: the release may carry its speed, which the
     /// glide's end reports.
-    fn begin(&mut self, camera: &mut dyn GestureCamera) {
+    fn begin(&mut self) {
         if self.begun {
             return;
         }
@@ -722,25 +731,25 @@ impl GestureRecognizer {
         let notches = [&self.options.zoom, &self.options.bearing, &self.options.pitch]
             .iter()
             .any(|part| part.enabled && !part.notches.is_empty());
-        self.notch_watch = notches.then(|| NotchWatch::new(&camera.camera(), &self.options));
+        self.notch_watch = notches.then(|| NotchWatch::new(&self.camera.camera(), &self.options));
         let phase = if self.options.interrupt_animations {
             GesturePhase::Begin
         } else {
-            camera.cancel_transitions_with_id(self.options.transition_id);
+            self.camera.cancel_transitions_with_id(self.options.transition_id);
             GesturePhase::Update
         };
-        camera.apply_camera_delta(&CameraDelta { phase, ..CameraDelta::default() });
+        self.camera.apply_camera_delta(&CameraDelta { phase, ..CameraDelta::default() });
     }
 
     /// One step of the gesture, at once.
-    fn update(&mut self, camera: &mut dyn GestureCamera, delta: &CameraDelta) {
-        self.begin(camera);
-        camera.apply_camera_delta(&CameraDelta { phase: GesturePhase::Update, ..*delta });
+    fn update(&mut self, delta: &CameraDelta) {
+        self.begin();
+        self.camera.apply_camera_delta(&CameraDelta { phase: GesturePhase::Update, ..*delta });
     }
 
     /// Ends the gesture, with the momentum it continues with: the gesture
     /// stays in progress until the momentum ends.
-    fn end_phase(&mut self, camera: &mut dyn GestureCamera, momentum: Option<&CameraMomentum>) {
+    fn end_phase(&mut self, momentum: Option<&CameraMomentum>) {
         if !std::mem::replace(&mut self.begun, false) {
             return;
         }
@@ -748,7 +757,7 @@ impl GestureRecognizer {
             AnimationOptions { transition_id: Some(self.options.transition_id), ..AnimationOptions::default() };
         let phase = GesturePhase::End;
         let delta = CameraDelta { momentum: momentum.copied(), animation, phase, ..CameraDelta::default() };
-        let end = camera.release(&delta);
+        let end = self.camera.release(&delta);
         // The end of a release that may glide, which a press may catch; a
         // gesture that ends without momentum leaves the last one's.
         if momentum.is_some() {
@@ -759,7 +768,7 @@ impl GestureRecognizer {
     /// The platform cancelled the gesture: it ends, and the `Cancel` phase
     /// stops the camera's animations (only the recognizer's own, without
     /// `interrupt_animations`).
-    fn cancel_phase(&mut self, camera: &mut dyn GestureCamera) {
+    fn cancel_phase(&mut self) {
         self.notch_watch = None;
         if !std::mem::replace(&mut self.begun, false) {
             return;
@@ -767,10 +776,10 @@ impl GestureRecognizer {
         let phase = if self.options.interrupt_animations {
             GesturePhase::Cancel
         } else {
-            camera.cancel_transitions_with_id(self.options.transition_id);
+            self.camera.cancel_transitions_with_id(self.options.transition_id);
             GesturePhase::End
         };
-        camera.apply_camera_delta(&CameraDelta { phase, ..CameraDelta::default() });
+        self.camera.apply_camera_delta(&CameraDelta { phase, ..CameraDelta::default() });
     }
 
     /// Stops the step eases of the parts in `parts` ([`DELTA_PARTS`]).
@@ -785,7 +794,7 @@ impl GestureRecognizer {
     }
 
     /// A press of `pointer`, at its position and at its `down_at` time.
-    fn down(&mut self, camera: &mut dyn GestureCamera, pointer: Pointer) -> bool {
+    fn down(&mut self, pointer: Pointer) -> bool {
         let Pointer { id, kind, position, down_at: now, .. } = pointer;
         if self.pointers.iter().any(|p| p.id == id) {
             return false;
@@ -796,12 +805,12 @@ impl GestureRecognizer {
         }
         if matches!(self.mode, Mode::Platform) {
             // A press during a platform pinch takes over from it.
-            self.finish(camera, now, Finish::Cancel);
+            self.finish(now, Finish::Cancel);
         }
         self.pointers.push(pointer);
         // A press takes over from deltas, and stops their easing.
         self.deltas = None;
-        self.begin(camera);
+        self.begin();
         match (self.mode, self.pointers.len()) {
             (Mode::Idle, 1) => {
                 self.mode = if touch && self.follows_tap(kind, position, now) {
@@ -835,7 +844,7 @@ impl GestureRecognizer {
         true
     }
 
-    fn moved(&mut self, camera: &mut dyn GestureCamera, id: u32, position: V2, now: f64) -> bool {
+    fn moved(&mut self, id: u32, position: V2, now: f64) -> bool {
         let Some(index) = self.pointers.iter().position(|p| p.id == id) else {
             return false;
         };
@@ -860,10 +869,10 @@ impl GestureRecognizer {
                     // Compose resets its tracker here, which protects its
                     // least-squares fit; an average needs no protecting, and
                     // dropping the jump loses the start of a short flick.
-                    self.drag_step(camera, down, position, now);
+                    self.drag_step(down, position, now);
                 }
             }
-            Mode::Pan | Mode::Rotate => self.drag_step(camera, last, position, now),
+            Mode::Pan | Mode::Rotate => self.drag_step(last, position, now),
             Mode::TapDrag { origin, moved, .. } => {
                 let (origin, dy) = (*origin, position.y - last.y);
                 *moved = *moved || position.distance(origin) > self.options.click_tolerance;
@@ -871,7 +880,7 @@ impl GestureRecognizer {
                     let zoom = dy * self.options.tap_drag_zoom;
                     let delta =
                         CameraDelta { scale: Some(zoom.exp2()), anchor: Some(origin.into()), ..CameraDelta::default() };
-                    self.update(camera, &delta);
+                    self.update(&delta);
                     self.tracking.record(now, Step { zoom, around: Some(origin), ..Step::default() });
                 }
             }
@@ -879,7 +888,7 @@ impl GestureRecognizer {
                 // The other finger of a two-finger tap lifted, and this one
                 // moves on: a pan.
                 self.mode = Mode::Pan;
-                self.drag_step(camera, last, position, now);
+                self.drag_step(last, position, now);
             }
             Mode::Pinch(pinch) => {
                 if index > 1 {
@@ -887,7 +896,7 @@ impl GestureRecognizer {
                 }
                 let mut pinch = *pinch;
                 let points = [self.pointers[0].position, self.pointers[1].position];
-                self.pinch_step(camera, &mut pinch, points, now);
+                self.pinch_step(&mut pinch, points, now);
                 self.mode = Mode::Pinch(pinch);
             }
             Mode::BoxZoom { .. } | Mode::Idle | Mode::Ignored | Mode::Platform => {}
@@ -896,14 +905,14 @@ impl GestureRecognizer {
     }
 
     /// One pan or mouse-rotate step from `from` to `to`.
-    fn drag_step(&mut self, camera: &mut dyn GestureCamera, from: V2, to: V2, now: f64) {
+    fn drag_step(&mut self, from: V2, to: V2, now: f64) {
         let delta = to - from;
         match self.mode {
             Mode::Rotate => {
                 let bearing = if self.options.bearing.enabled { delta.x * self.options.drag_rotate } else { 0.0 };
                 let pitch = if self.options.pitch.enabled { -delta.y * self.options.drag_pitch } else { 0.0 };
                 let step = CameraDelta { bearing: Some(bearing), pitch: Some(pitch), ..CameraDelta::default() };
-                self.update(camera, &step);
+                self.update(&step);
                 self.tracking.record(now, Step { bearing, pitch, ..Step::default() });
             }
             Mode::BoxZoom { .. } => {}
@@ -913,13 +922,13 @@ impl GestureRecognizer {
                 // turns to keep under it.
                 let step =
                     CameraDelta { offset: Some(delta.into()), anchor: Some(to.into()), ..CameraDelta::default() };
-                self.update(camera, &step);
+                self.update(&step);
                 self.tracking.record(now, Step { pan: delta, ..Step::default() });
             }
         }
     }
 
-    fn pinch_step(&mut self, camera: &mut dyn GestureCamera, pinch: &mut Pinch, points: [V2; 2], now: f64) {
+    fn pinch_step(&mut self, pinch: &mut Pinch, points: [V2; 2], now: f64) {
         let [a, b] = points;
         let [la, lb] = pinch.last;
         let (va, vb) = (a - la, b - lb);
@@ -949,7 +958,7 @@ impl GestureRecognizer {
         }
         if pinch.pitch == Some(true) {
             let pitch = f64::midpoint(va.y, vb.y) * -self.options.drag_pitch;
-            self.update(camera, &CameraDelta { pitch: Some(pitch), ..CameraDelta::default() });
+            self.update(&CameraDelta { pitch: Some(pitch), ..CameraDelta::default() });
             pinch.last = points;
             pinch.tap = false;
             self.tracking.record(now, Step { pitch, ..Step::default() });
@@ -988,21 +997,18 @@ impl GestureRecognizer {
         // The pan applies first, holding the fingers' middle, then the zoom
         // and turn hold it in place.
         let anchored = zoom != 0.0 || bearing != 0.0 || pan != V2::ZERO;
-        self.update(
-            camera,
-            &CameraDelta {
-                offset: (pan != V2::ZERO).then_some(pan.into()),
-                scale: (zoom != 0.0).then_some(zoom.exp2()),
-                bearing: (bearing != 0.0).then_some(bearing),
-                anchor: anchored.then_some(mid.into()),
-                ..CameraDelta::default()
-            },
-        );
+        self.update(&CameraDelta {
+            offset: (pan != V2::ZERO).then_some(pan.into()),
+            scale: (zoom != 0.0).then_some(zoom.exp2()),
+            bearing: (bearing != 0.0).then_some(bearing),
+            anchor: anchored.then_some(mid.into()),
+            ..CameraDelta::default()
+        });
         pinch.tap = false;
         self.tracking.record(now, Step { pan, zoom, bearing, around: Some(mid), ..Step::default() });
     }
 
-    fn up(&mut self, camera: &mut dyn GestureCamera, id: u32, position: Option<V2>, now: f64) -> bool {
+    fn up(&mut self, id: u32, position: Option<V2>, now: f64) -> bool {
         let Some(index) = self.pointers.iter().position(|p| p.id == id) else {
             return false;
         };
@@ -1011,7 +1017,7 @@ impl GestureRecognizer {
         // A cancelled pointer cancels its whole gesture, and the pointers
         // still down make no tap and no release until they all lift.
         if cancelled && !self.pointers.is_empty() {
-            self.finish(camera, now, Finish::Cancel);
+            self.finish(now, Finish::Cancel);
             self.mode = Mode::Ignored;
             return true;
         }
@@ -1032,37 +1038,37 @@ impl GestureRecognizer {
                     };
                     return true;
                 }
-                self.finish(camera, now, unless_cancelled(if pinch.tap { Finish::Settle } else { Finish::Glide }));
+                self.finish(now, unless_cancelled(if pinch.tap { Finish::Settle } else { Finish::Glide }));
                 if pinch.tap && !cancelled {
                     let mid = (pinch.last[0] + pinch.last[1]) / 2.0;
                     self.events.push(GestureEvent::TwoFingerTap { position: mid.into() });
-                    self.tap_zoom(camera, mid, self.options.two_finger_tap_zoom, now);
+                    self.tap_zoom(mid, self.options.two_finger_tap_zoom, now);
                 }
             }
             Mode::Pan if !self.pointers.is_empty() => {}
             Mode::Pressed { long_pressed } => {
                 if self.pointers.is_empty() {
-                    self.finish(camera, now, unless_cancelled(Finish::Settle));
+                    self.finish(now, unless_cancelled(Finish::Settle));
                     // A long press that no frame timed reports as it lifts.
                     if !cancelled && !long_pressed && now - pointer.down_at >= self.options.long_press_ms {
                         let position = pointer.position.into();
                         self.events.push(GestureEvent::LongPress { id: pointer.id, position });
                         self.last_tap = None;
                     } else if !cancelled && !long_pressed {
-                        self.tap(camera, pointer, now);
+                        self.tap(pointer, now);
                     }
                 }
             }
             Mode::BoxZoom { origin } => {
-                self.finish(camera, now, unless_cancelled(Finish::Stop));
+                self.finish(now, unless_cancelled(Finish::Stop));
                 if !cancelled {
-                    self.zoom_to_box(camera, origin, position.unwrap_or(pointer.position));
+                    self.zoom_to_box(origin, position.unwrap_or(pointer.position));
                 }
             }
             Mode::TapDrag { origin, moved, long_pressed } => {
                 if self.pointers.is_empty() {
                     self.last_tap = None;
-                    self.finish(camera, now, unless_cancelled(if moved { Finish::Glide } else { Finish::Settle }));
+                    self.finish(now, unless_cancelled(if moved { Finish::Glide } else { Finish::Settle }));
                     if !moved && !cancelled && !long_pressed {
                         let (id, position) = (pointer.id, origin.into());
                         // A long press that no frame timed reports as it lifts.
@@ -1071,17 +1077,17 @@ impl GestureRecognizer {
                         } else {
                             self.events
                                 .extend([GestureEvent::Tap { id, position }, GestureEvent::DoubleTap { id, position }]);
-                            self.double_tap_zoom(camera, pointer, origin, now);
+                            self.double_tap_zoom(pointer, origin, now);
                         }
                     }
                 }
             }
             Mode::Pan | Mode::Rotate => {
-                self.finish(camera, now, unless_cancelled(Finish::Glide));
+                self.finish(now, unless_cancelled(Finish::Glide));
             }
             Mode::Ignored | Mode::Idle | Mode::Platform => {
                 if self.pointers.is_empty() {
-                    self.finish(camera, now, unless_cancelled(Finish::Stop));
+                    self.finish(now, unless_cancelled(Finish::Stop));
                 }
             }
         }
@@ -1090,36 +1096,36 @@ impl GestureRecognizer {
 
     /// A press released without moving before a long press: a tap, perhaps
     /// the second of a double tap.
-    fn tap(&mut self, camera: &mut dyn GestureCamera, pointer: Pointer, now: f64) {
+    fn tap(&mut self, pointer: Pointer, now: f64) {
         let (id, position) = (pointer.id, pointer.position);
         self.events.push(GestureEvent::Tap { id, position: position.into() });
         if self.follows_tap(pointer.kind, position, now) {
             self.last_tap = None;
             self.events.push(GestureEvent::DoubleTap { id, position: position.into() });
-            self.double_tap_zoom(camera, pointer, position, now);
+            self.double_tap_zoom(pointer, position, now);
         } else {
             self.last_tap = Some((position, now, pointer.kind));
         }
     }
 
     /// A double tap's zoom at `at`: in, or out with the zoom-out mode.
-    fn double_tap_zoom(&mut self, camera: &mut dyn GestureCamera, pointer: Pointer, at: V2, now: f64) {
+    fn double_tap_zoom(&mut self, pointer: Pointer, at: V2, now: f64) {
         let levels = self.options.double_tap_zoom;
         let out = (pointer.modes | self.modes).zoom_out;
-        self.tap_zoom(camera, at, if out { -levels } else { levels }, now);
+        self.tap_zoom(at, if out { -levels } else { levels }, now);
     }
 
     /// Zooms `levels` around `at` as a discrete delta does, unless the zoom
     /// is off or `levels` is 0.
-    fn tap_zoom(&mut self, camera: &mut dyn GestureCamera, at: V2, levels: f64, now: f64) {
+    fn tap_zoom(&mut self, at: V2, levels: f64, now: f64) {
         if levels != 0.0 {
-            self.delta(camera, at, true, [0.0, 0.0, levels, 0.0, 0.0], now);
+            self.delta(at, true, [0.0, 0.0, levels, 0.0, 0.0], now);
         }
     }
 
     /// Ends the gesture with every pointer up: a release glides on with the
     /// speed its last moves had, and settles what it changed.
-    fn finish(&mut self, camera: &mut dyn GestureCamera, now: f64, finish: Finish) {
+    fn finish(&mut self, now: f64, finish: Finish) {
         self.mode = Mode::Idle;
         let caught_glide = self
             .caught_glide
@@ -1130,13 +1136,13 @@ impl GestureRecognizer {
         match finish {
             Finish::Cancel => {
                 self.deltas = None;
-                self.cancel_phase(camera);
+                self.cancel_phase();
             }
-            Finish::Stop => self.end_phase(camera, None),
+            Finish::Stop => self.end_phase(None),
             Finish::Settle | Finish::Glide => {
                 let release = if finish == Finish::Glide { self.tracking.release(now) } else { Release::default() };
                 let momentum = release.into_momentum(caught_glide, &self.options);
-                self.end_phase(camera, Some(&momentum));
+                self.end_phase(Some(&momentum));
             }
         }
     }
@@ -1150,40 +1156,33 @@ impl GestureRecognizer {
 
     /// Zooms so the box from `a` to `b` fills the view, centred on its
     /// middle (GL JS `BoxZoomHandler`); a box without area does nothing.
-    fn zoom_to_box(&mut self, camera: &mut dyn GestureCamera, a: V2, b: V2) {
+    fn zoom_to_box(&mut self, a: V2, b: V2) {
         let size = (b - a).abs();
         if size.x < 1.0 || size.y < 1.0 {
             return;
         }
-        let Some(center) = camera.lat_lng_for_pixel(((a + b) / 2.0).into()) else {
+        let Some(center) = self.camera.lat_lng_for_pixel(((a + b) / 2.0).into()) else {
             return;
         };
-        let viewport = V2::from(camera.viewport());
+        let viewport = V2::from(self.camera.viewport());
         let zoom = (viewport.x / size.x).min(viewport.y / size.y).log2();
         // The box is what the user sees now: setting the zoom stops a
         // running notch ease.
-        let target = clamp_zoom(camera, zoom_of(camera) + zoom);
+        let target = clamp_zoom(&self.camera, zoom_of(&self.camera) + zoom);
         let update = CameraUpdate {
             mode: CameraUpdateMode::Ease,
             camera: CameraOptions { center: Some(center), zoom: Some(target), ..Default::default() },
             animation: self.animation(BOX_EASE, EASE),
             phase: GesturePhase::None,
         };
-        self.step_to(camera, &update);
+        self.step_to(&update);
     }
 
     /// Camera movement from a delta at `position`, in `amounts` per
     /// [`DELTA_PARTS`], of the parts that are on; nothing moves when none is.
     /// A continuous delta moves at once; a discrete one eases, retargeting
     /// the ease of each part it moves.
-    fn delta(
-        &mut self,
-        camera: &mut dyn GestureCamera,
-        position: V2,
-        discrete: bool,
-        mut amounts: [f64; DELTA_PARTS],
-        now: f64,
-    ) -> bool {
+    fn delta(&mut self, position: V2, discrete: bool, mut amounts: [f64; DELTA_PARTS], now: f64) -> bool {
         let options = &self.options;
         let on = [
             options.pan.enabled,
@@ -1205,7 +1204,7 @@ impl GestureRecognizer {
             self.deltas.unwrap_or(DeltaGesture { anchor: position, idle_until: now, eases: [None; DELTA_PARTS] });
         gesture.anchor = position;
         gesture.idle_until = now + options.delta_idle_ms;
-        self.begin(camera);
+        self.begin();
         if discrete {
             for (part, amount) in amounts.into_iter().enumerate() {
                 if amount == 0.0 {
@@ -1216,14 +1215,14 @@ impl GestureRecognizer {
                 // past a limit would hold the zoom there once the input
                 // turns back, until it undid them.
                 gesture.eases[part] = Some(if part == DELTA_ZOOM {
-                    StepEase::retarget(ease, amount, now, duration, |levels| within_zoom_range(camera, levels))
+                    StepEase::retarget(ease, amount, now, duration, |levels| within_zoom_range(&self.camera, levels))
                 } else {
                     StepEase::retarget(ease, amount, now, duration, |amount| amount)
                 });
             }
         } else {
             amounts[DELTA_ZOOM] = amounts[DELTA_ZOOM].clamp(-max_zoom, max_zoom);
-            self.move_by(camera, amounts, position);
+            self.move_by(amounts, position);
         }
         self.deltas = Some(gesture);
         true
@@ -1231,7 +1230,7 @@ impl GestureRecognizer {
 
     /// Moves each part by its amount per [`DELTA_PARTS`] at once, holding
     /// the ground under `at`.
-    fn move_by(&mut self, camera: &mut dyn GestureCamera, amounts: [f64; DELTA_PARTS], at: V2) {
+    fn move_by(&mut self, amounts: [f64; DELTA_PARTS], at: V2) {
         let [x, y, zoom, bearing, pitch] = amounts;
         if amounts.iter().all(|amount| *amount == 0.0) {
             return;
@@ -1244,20 +1243,12 @@ impl GestureRecognizer {
             anchor: Some(at.into()),
             ..CameraDelta::default()
         };
-        self.update(camera, &delta);
+        self.update(&delta);
     }
 
     /// A pinch the platform recognized: it zooms and turns around its center
     /// as a touch pinch does, and glides on when it ends.
-    fn platform_pinch(
-        &mut self,
-        camera: &mut dyn GestureCamera,
-        center: V2,
-        scale: f64,
-        rotation: f64,
-        phase: PinchPhase,
-        now: f64,
-    ) -> bool {
+    fn platform_pinch(&mut self, center: V2, scale: f64, rotation: f64, phase: PinchPhase, now: f64) -> bool {
         let pinching = matches!(self.mode, Mode::Platform);
         match phase {
             PinchPhase::End | PinchPhase::Cancel => {
@@ -1265,7 +1256,7 @@ impl GestureRecognizer {
                     return false;
                 }
                 let finish = if phase == PinchPhase::End { Finish::Glide } else { Finish::Cancel };
-                self.finish(camera, now, finish);
+                self.finish(now, finish);
                 return true;
             }
             PinchPhase::Begin | PinchPhase::Update if !pinching => {
@@ -1274,7 +1265,7 @@ impl GestureRecognizer {
                 }
                 // A pinch takes over from deltas, and stops their easing.
                 self.deltas = None;
-                self.begin(camera);
+                self.begin();
                 self.tracking.reset(now);
                 self.mode = Mode::Platform;
             }
@@ -1286,32 +1277,29 @@ impl GestureRecognizer {
         if zoom == 0.0 && bearing == 0.0 {
             return true;
         }
-        self.update(
-            camera,
-            &CameraDelta {
-                scale: (zoom != 0.0).then_some(scale),
-                bearing: (bearing != 0.0).then_some(bearing),
-                anchor: Some(center.into()),
-                ..CameraDelta::default()
-            },
-        );
+        self.update(&CameraDelta {
+            scale: (zoom != 0.0).then_some(scale),
+            bearing: (bearing != 0.0).then_some(bearing),
+            anchor: Some(center.into()),
+            ..CameraDelta::default()
+        });
         self.tracking.record(now, Step { zoom, bearing, around: Some(center), ..Step::default() });
         true
     }
 }
 
-fn zoom_of(camera: &dyn GestureCamera) -> f64 {
+fn zoom_of(camera: &impl GestureCamera) -> f64 {
     camera.camera().zoom.unwrap_or(0.0)
 }
 
-fn clamp_zoom(camera: &dyn GestureCamera, zoom: f64) -> f64 {
+fn clamp_zoom(camera: &impl GestureCamera, zoom: f64) -> f64 {
     let (min, max) = camera.zoom_range();
     zoom.max(min).min(max)
 }
 
 /// `levels` of zoom from the camera's zoom, cut at its zoom range. A zoom
 /// outside the range may still move toward it.
-fn within_zoom_range(camera: &dyn GestureCamera, levels: f64) -> f64 {
+fn within_zoom_range(camera: &impl GestureCamera, levels: f64) -> f64 {
     let zoom = zoom_of(camera);
     let (min, max) = camera.zoom_range();
     levels.clamp((min - zoom).min(0.0), (max - zoom).max(0.0))

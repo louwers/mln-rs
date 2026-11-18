@@ -11,7 +11,7 @@ use mln_map::transform::{CameraCommandId, Transform, TransformEvent};
 use mln_map::{CameraChangeSource, ConstrainMode, MomentumDecay, MomentumSnap, ViewportMode};
 use mln_style_types::ProjectionDefinition;
 use mln_util::LatLng;
-use mln_util::geo::LatLngBounds;
+use mln_util::geo::{LatLngBounds, WrapMode};
 use mln_util::hash::HashMap;
 use mln_util::size::Size;
 use mln_util::time::Instant;
@@ -71,11 +71,11 @@ impl GestureCamera for TestCamera {
 
     fn zoom_range(&self) -> (f64, f64) {
         let state = self.transform.get_state();
-        crate::zoom_range(state, crate::center_latitude(state))
+        crate::zoom_range(state, state.get_lat_lng(WrapMode::Unwrapped).latitude())
     }
 
     fn lat_lng_for_pixel(&self, pixel: ScreenCoordinate) -> Option<LatLng> {
-        self.transform.screen_coordinate_to_lat_lng(&pixel, mln_util::geo::WrapMode::Unwrapped).ok()
+        self.transform.screen_coordinate_to_lat_lng(&pixel, WrapMode::Unwrapped).ok()
     }
 
     fn apply_camera_delta(&mut self, delta: &CameraDelta) {
@@ -147,8 +147,7 @@ fn key(pan: ScreenCoordinate, bearing: f64, pitch: f64) -> Input {
 }
 
 struct Rig {
-    camera: TestCamera,
-    input: GestureRecognizer,
+    input: GestureRecognizer<TestCamera>,
     now: f64,
     time: Instant,
 }
@@ -164,31 +163,31 @@ impl Rig {
         camera.set_frame_time(Some(time));
         camera.drain_events().for_each(drop);
         let camera = TestCamera { transform: camera, ends: HashMap::default(), sources: Vec::new() };
-        Rig { camera, input: GestureRecognizer::new(options.clone()).unwrap(), now: 1000.0, time }
+        Rig { input: GestureRecognizer::with_options(camera, options.clone()).unwrap(), now: 1000.0, time }
     }
 
     fn zoom(&self) -> f64 {
-        self.camera.camera().zoom.unwrap()
+        self.input.camera.camera().zoom.unwrap()
     }
 
     fn bearing(&self) -> f64 {
-        self.camera.camera().bearing.unwrap()
+        self.input.camera.camera().bearing.unwrap()
     }
 
     fn pitch(&self) -> f64 {
-        self.camera.camera().pitch.unwrap()
+        self.input.camera.camera().pitch.unwrap()
     }
 
     fn unproject(&self, at: ScreenCoordinate) -> LatLng {
-        self.camera.lat_lng_for_pixel(at).unwrap()
+        self.input.camera.lat_lng_for_pixel(at).unwrap()
     }
 
     fn project(&self, ground: LatLng) -> ScreenCoordinate {
-        self.camera.lat_lng_to_screen_coordinate(&ground)
+        self.input.camera.lat_lng_to_screen_coordinate(&ground)
     }
 
     fn send(&mut self, input: Input) {
-        self.input.handle(&mut self.camera, input, self.now);
+        self.input.handle(input, self.now);
     }
 
     fn down(&mut self, id: u32, kind: PointerKind, x: f64, y: f64) {
@@ -218,13 +217,13 @@ impl Rig {
         // The recognizer has work of its own: deltas easing or idling, or a
         // deadline. Frames that only watch a gesture for notches wait for
         // input.
-        let next = self.input.tick(&mut self.camera, self.now);
+        let next = self.input.tick(self.now);
         let gesture = self.input.deltas.is_some() || matches!(next, Some(NextTick::At(_)));
         self.time += Duration::from_millis(16);
-        self.camera.update_transitions(Some(self.time));
-        self.camera.set_frame_time(Some(self.time));
-        self.camera.take_events();
-        gesture || self.camera.in_transition()
+        self.input.camera.update_transitions(Some(self.time));
+        self.input.camera.set_frame_time(Some(self.time));
+        self.input.camera.take_events();
+        gesture || self.input.camera.in_transition()
     }
 
     /// Runs frames until nothing moves; returns how many.
@@ -260,7 +259,7 @@ fn dragging_pans_and_glides_on() {
     let mut rig = Rig::new();
     let ground = rig.unproject(p(400.0, 300.0));
     rig.down(1, PointerKind::Mouse, 400.0, 300.0);
-    assert!(rig.camera.is_gesture_in_progress());
+    assert!(rig.input.camera.is_gesture_in_progress());
     for i in 1..=10 {
         rig.now += 16.0;
         rig.to(1, 400.0 + 10.0 * f64::from(i), 300.0);
@@ -271,9 +270,9 @@ fn dragging_pans_and_glides_on() {
     assert!(distance(under, p(500.0, 300.0)) < 1e-6, "{under:?}");
     rig.up(1, 500.0, 300.0);
     // The gesture lasts until its glide ends.
-    assert!(rig.camera.is_gesture_in_progress());
+    assert!(rig.input.camera.is_gesture_in_progress());
     let frames = rig.settle();
-    assert!(!rig.camera.is_gesture_in_progress());
+    assert!(!rig.input.camera.is_gesture_in_progress());
     // 10 px every 32 ms, released a frame after the last move: the window
     // starts at the move 112 ms before the release, 30 px back, so
     // 267.9 px/s, as ffi's demo averages it. The pan friction (half-life
@@ -295,8 +294,8 @@ fn holding_still_before_release_stops_momentum() {
     rig.to(1, 450.0, 300.0);
     rig.now += 300.0;
     rig.up(1, 450.0, 300.0);
-    assert!(!rig.camera.in_transition());
-    assert!(!rig.camera.is_gesture_in_progress());
+    assert!(!rig.input.camera.in_transition());
+    assert!(!rig.input.camera.is_gesture_in_progress());
 }
 
 #[test]
@@ -409,7 +408,7 @@ fn platform_pinches_zoom_turn_and_glide() {
     let mut rig = Rig::new();
     let ground = rig.unproject(p(200.0, 200.0));
     rig.pinch(1.0, 0.0, PinchPhase::Begin);
-    assert!(rig.input.is_active() && rig.camera.is_gesture_in_progress());
+    assert!(rig.input.is_active() && rig.input.camera.is_gesture_in_progress());
     for _ in 0..10 {
         rig.now += 16.0;
         rig.pinch(2f64.powf(0.05), -2.0, PinchPhase::Update);
@@ -421,12 +420,12 @@ fn platform_pinches_zoom_turn_and_glide() {
     assert!(distance(under, p(200.0, 200.0)) < 1e-5, "{under:?}");
     rig.pinch(1.0, 0.0, PinchPhase::End);
     assert!(!rig.input.is_active());
-    assert!(rig.camera.is_gesture_in_progress(), "the gesture lasts through its glide");
+    assert!(rig.input.camera.is_gesture_in_progress(), "the gesture lasts through its glide");
     rig.settle();
     // 0.05 levels and 2 degrees per 16 ms glide on, as touch pinches do.
     assert!(rig.zoom() > 12.7, "{}", rig.zoom());
     assert!(rig.bearing() > 25.0, "{}", rig.bearing());
-    assert!(!rig.camera.is_gesture_in_progress());
+    assert!(!rig.input.camera.is_gesture_in_progress());
     let under = rig.project(ground);
     assert!(distance(under, p(200.0, 200.0)) < 1e-3, "the glide holds the center: {under:?}");
 }
@@ -441,7 +440,7 @@ fn a_cancelled_platform_pinch_doesnt_glide_and_a_touch_takes_over() {
     }
     rig.pinch(1.0, 0.0, PinchPhase::Cancel);
     assert_eq!(rig.settle(), 0);
-    assert!(!rig.camera.is_gesture_in_progress());
+    assert!(!rig.input.camera.is_gesture_in_progress());
     assert!((rig.zoom() - 12.5).abs() < 1e-9);
 
     rig.pinch(2.0, 0.0, PinchPhase::Begin);
@@ -576,9 +575,9 @@ fn a_discrete_delta_eases_around_its_position() {
     assert!(steps.iter().all(|&step| step >= 0.0), "{steps:?}");
     assert!(steps[0] < 1.0 / 6.0, "it eases in: {steps:?}");
     // Deltas are one gesture until 200 ms after their last input and ease.
-    assert!(rig.camera.is_gesture_in_progress());
+    assert!(rig.input.camera.is_gesture_in_progress());
     rig.settle();
-    assert!(!rig.camera.is_gesture_in_progress());
+    assert!(!rig.input.camera.is_gesture_in_progress());
 }
 
 #[test]
@@ -623,9 +622,9 @@ fn notches_past_a_zoom_limit_dont_hold_the_zoom_there() {
     let at = p(400.0, 300.0);
     for (zoom, direction) in [(2.0, 1.0), (20.0, -1.0)] {
         let mut rig = Rig::new();
-        rig.camera.jump_to(&CameraOptions { zoom: Some(zoom), ..Default::default() });
+        rig.input.camera.jump_to(&CameraOptions { zoom: Some(zoom), ..Default::default() });
         let (limit, back) = spin_into_a_limit_and_back(&mut rig, at, direction);
-        let (min, max) = rig.camera.zoom_range();
+        let (min, max) = rig.input.camera.zoom_range();
         assert!((limit - if direction > 0.0 { min } else { max }).abs() < 1e-6, "{limit}");
         assert!((back - (limit + direction / 3.0)).abs() < 1e-6, "{}", back - limit);
     }
@@ -634,26 +633,26 @@ fn notches_past_a_zoom_limit_dont_hold_the_zoom_there() {
 #[test]
 fn notches_on_the_globe_zoom_out_to_the_floor_at_the_center_latitude() {
     let mut rig = Rig::new();
-    rig.camera.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
-    rig.camera.jump_to(&CameraOptions {
+    rig.input.camera.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
+    rig.input.camera.jump_to(&CameraOptions {
         center: Some(LatLng::new(60.0, 20.0).unwrap()),
         zoom: Some(1.0),
         ..Default::default()
     });
     let (limit, back) = spin_into_a_limit_and_back(&mut rig, p(400.0, 300.0), 1.0);
     // The floor at 60° is a level below the plain minimum.
-    assert!((limit - rig.camera.get_state().get_min_zoom_at_latitude(60.0)).abs() < 1e-6, "{limit}");
-    assert!(limit < rig.camera.get_state().get_min_zoom() - 0.5, "{limit}");
+    assert!((limit - rig.input.camera.get_state().get_min_zoom_at_latitude(60.0)).abs() < 1e-6, "{limit}");
+    assert!(limit < rig.input.camera.get_state().get_min_zoom() - 0.5, "{limit}");
     assert!((back - (limit + 1.0 / 3.0)).abs() < 1e-6, "{}", back - limit);
 }
 
 #[test]
 fn notches_zoom_out_to_the_floor_screen_bounds_set() {
     let mut rig = Rig::new();
-    rig.camera.set_constrain_mode(ConstrainMode::Screen);
+    rig.input.camera.set_constrain_mode(ConstrainMode::Screen);
     let bounds = LatLngBounds::hull(LatLng::new(52.3, 4.8).unwrap(), LatLng::new(52.4, 5.0).unwrap());
-    rig.camera.set_lat_lng_bounds(bounds).unwrap();
-    rig.camera.jump_to(&CameraOptions {
+    rig.input.camera.set_lat_lng_bounds(bounds).unwrap();
+    rig.input.camera.jump_to(&CameraOptions {
         center: Some(LatLng::new(52.35, 4.9).unwrap()),
         zoom: Some(14.0),
         ..Default::default()
@@ -661,9 +660,9 @@ fn notches_zoom_out_to_the_floor_screen_bounds_set() {
     let (limit, back) = spin_into_a_limit_and_back(&mut rig, p(400.0, 300.0), 1.0);
     // The bounds fill the 800 px width at about 11.46, far above the plain
     // minimum.
-    let floor = rig.camera.get_state().get_min_zoom_for_screen_bounds().unwrap();
+    let floor = rig.input.camera.get_state().get_min_zoom_for_screen_bounds().unwrap();
     assert!((limit - floor).abs() < 1e-6, "{limit} {floor}");
-    assert!(limit > rig.camera.get_state().get_min_zoom() + 10.0, "{limit}");
+    assert!(limit > rig.input.camera.get_state().get_min_zoom() + 10.0, "{limit}");
     assert!((back - (limit + 1.0 / 3.0)).abs() < 1e-6, "{}", back - limit);
 }
 
@@ -713,13 +712,13 @@ fn deltas_zoom_around_where_the_pointer_is_now() {
 #[test]
 fn a_delta_stops_the_cameras_animations() {
     let mut rig = Rig::new();
-    rig.camera.ease_to(
+    rig.input.camera.ease_to(
         &CameraOptions { bearing: Some(45.0), ..Default::default() },
         &AnimationOptions::new(Duration::from_millis(500)),
     );
     rig.send(detents(p(400.0, 300.0), 1.0));
-    assert!(!rig.camera.in_transition());
-    assert!(rig.camera.is_gesture_in_progress());
+    assert!(!rig.input.camera.in_transition());
+    assert!(rig.input.camera.is_gesture_in_progress());
 }
 
 #[test]
@@ -795,8 +794,8 @@ fn rotate_and_pitch_turn_their_gestures_off() {
 
     // Deltas that only turn or tilt go unhandled.
     let mut rig = Rig::with(&off);
-    assert!(!rig.input.handle(&mut rig.camera, key(p(0.0, 0.0), 15.0, 0.0), rig.now));
-    assert!(!rig.input.handle(&mut rig.camera, key(p(0.0, 0.0), 0.0, 10.0), rig.now));
+    assert!(!rig.input.handle(key(p(0.0, 0.0), 15.0, 0.0), rig.now));
+    assert!(!rig.input.handle(key(p(0.0, 0.0), 0.0, 10.0), rig.now));
     rig.settle();
     assert_eq!((rig.zoom(), rig.bearing(), rig.pitch()), (12.0, 0.0, 0.0));
 }
@@ -804,23 +803,23 @@ fn rotate_and_pitch_turn_their_gestures_off() {
 #[test]
 fn input_interrupts_animations() {
     let mut rig = Rig::new();
-    rig.camera.ease_to(
+    rig.input.camera.ease_to(
         &CameraOptions { zoom: Some(4.0), ..Default::default() },
         &AnimationOptions::new(Duration::from_millis(500)),
     );
     rig.frame();
     rig.down(1, PointerKind::Mouse, 10.0, 10.0);
-    assert!(!rig.camera.in_transition());
+    assert!(!rig.input.camera.in_transition());
 
     // Or only the recognizer's own.
     let mut rig = Rig::with(&GestureOptions { interrupt_animations: false, ..GestureOptions::default() });
-    rig.camera.ease_to(
+    rig.input.camera.ease_to(
         &CameraOptions { zoom: Some(4.0), ..Default::default() },
         &AnimationOptions::new(Duration::from_millis(500)),
     );
     rig.frame();
     rig.down(1, PointerKind::Mouse, 10.0, 10.0);
-    assert!(rig.camera.in_transition());
+    assert!(rig.input.camera.in_transition());
 }
 
 /// The pan friction's glide from `speed` px/s: (v − 10 px/s) / (ln 2 / 140 ms).
@@ -874,7 +873,7 @@ fn a_flick_that_catches_a_glide_carries_its_speed() {
     // A glide that a command stopped before the press carries nothing.
     let mut rig = Rig::new();
     fling_and_glide(&mut rig, 100.0, 1.0, 6);
-    rig.camera.cancel_transitions_with_id(GestureOptions::default().transition_id);
+    rig.input.camera.cancel_transitions_with_id(GestureOptions::default().transition_id);
     let after_cancel = rig.fling(300.0, 10.0);
     assert!((after_cancel - alone).abs() < 0.01, "{after_cancel} vs {alone}");
 
@@ -1065,7 +1064,7 @@ fn zoom_and_pitch_settle_only_when_their_snaps_are_set() {
 fn gestures_and_their_steps_report_themselves_as_gestures() {
     use mln_map::CameraChangeSource::{Gesture, Momentum};
     let mut rig = Rig::new();
-    let take = |rig: &mut Rig| std::mem::take(&mut rig.camera.sources);
+    let take = |rig: &mut Rig| std::mem::take(&mut rig.input.camera.sources);
 
     // A drag and its glide.
     rig.fling(100.0, 10.0);
@@ -1075,9 +1074,9 @@ fn gestures_and_their_steps_report_themselves_as_gestures() {
 
     // A key's delta: a gesture until it idles.
     rig.send(key(p(100.0, 0.0), 0.0, 0.0));
-    assert!(rig.camera.is_gesture_in_progress());
+    assert!(rig.input.camera.is_gesture_in_progress());
     rig.settle();
-    assert!(!rig.camera.is_gesture_in_progress());
+    assert!(!rig.input.camera.is_gesture_in_progress());
     assert!(take(&mut rig).iter().all(|&s| s == Gesture));
 }
 
@@ -1088,13 +1087,13 @@ fn a_cancelled_pointer_stops_the_gesture_and_the_cameras_animations() {
     rig.now += 16.0;
     rig.to(1, 450.0, 300.0);
     // An animation the app starts mid-gesture.
-    rig.camera.ease_to(
+    rig.input.camera.ease_to(
         &CameraOptions { bearing: Some(45.0), ..Default::default() },
         &AnimationOptions::new(Duration::from_millis(500)),
     );
     rig.send(Input::PointerCancel { id: 1 });
-    assert!(!rig.camera.is_gesture_in_progress());
-    assert!(!rig.camera.in_transition(), "no glide, and the animation stopped");
+    assert!(!rig.input.camera.is_gesture_in_progress());
+    assert!(!rig.input.camera.in_transition(), "no glide, and the animation stopped");
 }
 
 #[test]
@@ -1138,19 +1137,19 @@ fn a_delta_during_a_drag_leaves_the_drag_going() {
     }
     // A key mid-drag eases its delta within the drag's gesture.
     rig.send(zoom_delta(p(400.0, 300.0), true, 1.0));
-    assert!(rig.camera.is_gesture_in_progress());
+    assert!(rig.input.camera.is_gesture_in_progress());
     for i in 5..=8 {
         rig.now += 16.0;
         rig.to(1, 400.0 + 10.0 * f64::from(i), 300.0);
         rig.frame();
     }
-    assert!(rig.camera.is_gesture_in_progress());
+    assert!(rig.input.camera.is_gesture_in_progress());
     // The release still glides, and the gesture lasts until it ends.
     rig.up(1, 480.0, 300.0);
-    assert!(rig.camera.in_transition());
-    assert!(rig.camera.is_gesture_in_progress());
+    assert!(rig.input.camera.in_transition());
+    assert!(rig.input.camera.is_gesture_in_progress());
     rig.settle();
-    assert!(!rig.camera.is_gesture_in_progress());
+    assert!(!rig.input.camera.is_gesture_in_progress());
     assert!((rig.zoom() - (zoom + 1.0)).abs() < 1e-9, "{}", rig.zoom() - zoom);
 }
 
@@ -1165,7 +1164,7 @@ fn a_command_through_the_recognizer_stops_its_eases() {
         animation: AnimationOptions::new(Duration::from_millis(100)),
         phase: GesturePhase::None,
     };
-    rig.input.step_to(&mut rig.camera, &north);
+    rig.input.step_to(&north);
     rig.settle();
     assert!(rig.bearing().abs() < 1e-9, "{}", rig.bearing());
 }
@@ -1184,7 +1183,7 @@ fn a_drag_on_the_globe_turns_it_around_the_cursor() {
         });
     };
     let mut rig = Rig::new();
-    globe(&mut rig.camera);
+    globe(&mut rig.input.camera);
     let mut direct = transform();
     globe(&mut direct);
     let mut centered = transform();
@@ -1197,9 +1196,9 @@ fn a_drag_on_the_globe_turns_it_around_the_cursor() {
         direct.move_by_with_anchor(&p(6.0, 3.0), Some(cursor), &AnimationOptions::default()).unwrap();
         centered.move_by(&p(6.0, 3.0), &AnimationOptions::default()).unwrap();
     }
-    let center = |transform: &Transform| transform.get_lat_lng(mln_util::geo::WrapMode::Unwrapped);
-    assert_eq!(center(&rig.camera), center(&direct));
-    let (dragged, around_the_center) = (center(&rig.camera), center(&centered));
+    let center = |transform: &Transform| transform.get_lat_lng(WrapMode::Unwrapped);
+    assert_eq!(center(&rig.input.camera), center(&direct));
+    let (dragged, around_the_center) = (center(&rig.input.camera), center(&centered));
     assert!(
         (dragged.latitude() - around_the_center.latitude()).abs() > 0.5
             || (dragged.longitude() - around_the_center.longitude()).abs() > 0.5,
@@ -1210,8 +1209,8 @@ fn a_drag_on_the_globe_turns_it_around_the_cursor() {
 /// A rig on the globe, centered at `latitude`.
 fn globe_rig(latitude: f64, zoom: f64, pitch: f64) -> Rig {
     let mut rig = Rig::new();
-    rig.camera.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
-    rig.camera.jump_to(&CameraOptions {
+    rig.input.camera.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
+    rig.input.camera.jump_to(&CameraOptions {
         center: Some(LatLng::new(latitude, 20.0).unwrap()),
         zoom: Some(zoom),
         pitch: Some(pitch),
@@ -1292,7 +1291,7 @@ fn a_drag_on_the_globe_holds_the_location_it_grabbed() {
     let drift = drag_drift(&mut rig, &paths[5].1);
     assert!(drift < 0.01, "at latitude 60: {drift} px");
     // A drag that returns to its press returns the camera.
-    let center = rig.camera.get_lat_lng(mln_util::geo::WrapMode::Unwrapped);
+    let center = rig.input.camera.get_lat_lng(WrapMode::Unwrapped);
     assert!((center.latitude() - 60.0).abs() < 1e-6 && (center.longitude() - 20.0).abs() < 1e-6, "{center:?}");
     assert!((rig.zoom() - 2.0).abs() < 1e-6, "{}", rig.zoom());
 }
@@ -1327,12 +1326,12 @@ fn a_drag_on_the_globe_changes_how_it_holds_without_a_jump() {
         let mut fastest = 0.0f64;
         for at in &path[1..] {
             rig.now += 16.0;
-            let before = rig.camera.get_lat_lng(mln_util::geo::WrapMode::Unwrapped);
+            let before = rig.input.camera.get_lat_lng(WrapMode::Unwrapped);
             let radius = 512.0 * rig.zoom().exp2()
                 / std::f64::consts::TAU
                 / before.latitude().to_radians().cos().max(85.051_129f64.to_radians().cos());
             rig.to(1, at.x, at.y);
-            let after = rig.camera.get_lat_lng(mln_util::geo::WrapMode::Unwrapped);
+            let after = rig.input.camera.get_lat_lng(WrapMode::Unwrapped);
             if after == before {
                 continue;
             }
@@ -1418,7 +1417,7 @@ fn a_twist_and_its_snap_report_the_notches_they_reach() {
 
     // A twist across north reports it as it crosses.
     let mut rig = Rig::new();
-    rig.camera.jump_to(&CameraOptions { bearing: Some(-10.0), ..Default::default() });
+    rig.input.camera.jump_to(&CameraOptions { bearing: Some(-10.0), ..Default::default() });
     let mut options = GestureOptions::default();
     options.bearing.notches = vec![Notch { spacing: 90.0, offset: 0.0, kind: 3 }];
     rig.input.set_options(options).unwrap();
@@ -1446,13 +1445,13 @@ fn a_delta_reports_zoom_notches() {
 #[test]
 fn commands_after_a_gesture_report_no_notches() {
     let mut rig = Rig::new();
-    rig.camera.jump_to(&CameraOptions { bearing: Some(25.0), ..Default::default() });
+    rig.input.camera.jump_to(&CameraOptions { bearing: Some(25.0), ..Default::default() });
 
     // Once a gesture's snap ends, so do its notches: a command that turns
     // back across north reports nothing.
     twist(&mut rig, 3.0);
     rig.settle();
-    rig.camera.ease_to(
+    rig.input.camera.ease_to(
         &CameraOptions { bearing: Some(-20.0), ..Default::default() },
         &AnimationOptions::new(Duration::from_millis(200)),
     );
@@ -1501,8 +1500,8 @@ fn pan_and_zoom_turn_their_gestures_off() {
     rig.to(1, 500.0, 400.0);
     assert_eq!(rig.input.box_zoom(), None);
     rig.up(1, 500.0, 400.0);
-    assert!(!rig.input.handle(&mut rig.camera, key(p(100.0, 0.0), 0.0, 0.0), rig.now));
-    assert!(!rig.input.handle(&mut rig.camera, detents(p(100.0, 100.0), -1.0), rig.now));
+    assert!(!rig.input.handle(key(p(100.0, 0.0), 0.0, 0.0), rig.now));
+    assert!(!rig.input.handle(detents(p(100.0, 100.0), -1.0), rig.now));
     rig.settle();
     assert_eq!(rig.zoom(), 12.0);
     assert!(distance(rig.project(ground), p(400.0, 300.0)) < 1e-6);
@@ -1514,7 +1513,8 @@ fn options_out_of_range_are_rejected() {
     let mut options = GestureOptions::default();
     options.bearing.notches = vec![Notch { spacing: 0.0, offset: 0.0, kind: 0 }];
     assert_eq!(rig.input.set_options(options.clone()), Err(InvalidGestureOptions::Notch("bearing")));
-    assert!(GestureRecognizer::new(options).is_err());
+    let camera = TestCamera { transform: transform(), ends: HashMap::default(), sources: Vec::new() };
+    assert!(GestureRecognizer::with_options(camera, options).is_err());
     let mut options = GestureOptions::default();
     let mut decay = MomentumDecay::ANDROID_FLING;
     decay.max_speed = -1.0;
@@ -1562,7 +1562,7 @@ fn a_cancelled_finger_cancels_the_whole_gesture() {
     rig.settle();
     assert_eq!(rig.zoom(), zoom);
     assert!(distance(rig.project(ground), p(400.0, 300.0)) < 1e-6);
-    assert!(!rig.camera.is_gesture_in_progress());
+    assert!(!rig.input.camera.is_gesture_in_progress());
 }
 
 #[test]

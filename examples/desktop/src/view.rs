@@ -244,7 +244,7 @@ pub(crate) fn run(launch: Launch) {
         start,
         pacing: Pacing::new(refreshes, frame_interval, Instant::now()),
         runtime,
-        map,
+        map: map.clone(),
         surfaces,
         kind: window.kind(),
         window: Some(window),
@@ -255,7 +255,7 @@ pub(crate) fn run(launch: Launch) {
         target_not_ready: false,
         style_loaded: false,
         idle: false,
-        gestures: GestureRecognizer::default(),
+        gestures: GestureRecognizer::new(map),
         gestures_animating: false,
         gestures_deadline: None,
         box_zoom: None,
@@ -394,7 +394,7 @@ struct View {
     style_loaded: bool,
     /// The map has become idle since the view opened.
     idle: bool,
-    gestures: GestureRecognizer,
+    gestures: GestureRecognizer<Map>,
     /// The recognizer eases a scroll, and wants frames.
     gestures_animating: bool,
     /// When the recognizer next needs a tick, outside the frames it asks for.
@@ -593,7 +593,7 @@ impl View {
         }
         let now = Instant::now();
         let ms = self.ms(now);
-        let next = self.gestures.tick(&mut self.map, ms);
+        let next = self.gestures.tick(ms);
         self.schedule_tick(next);
         self.answer_events();
 
@@ -675,7 +675,7 @@ impl View {
     /// draws the controls again when a box zoom's box moved.
     fn gesture(&mut self, input: Input, at: Instant) {
         let ms = self.ms(at);
-        self.gestures.handle(&mut self.map, input, ms);
+        self.gestures.handle(input, ms);
         self.schedule_tick(self.gestures.next_tick());
         self.answer_events();
         let box_zoom = self.gestures.box_zoom();
@@ -834,7 +834,7 @@ impl View {
                     animation: AnimationOptions::new(Duration::from_millis(500)),
                     phase: GesturePhase::None,
                 };
-                self.gestures.step_to(&mut self.map, &north);
+                self.gestures.step_to(&north);
             }
             Action::PickStyle(index) => {
                 if let Some(style) = self.styles.get(index).cloned() {

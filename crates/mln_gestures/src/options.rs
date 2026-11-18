@@ -145,12 +145,6 @@ pub struct GestureOptions {
 }
 
 impl GestureOptions {
-    /// How far a press may move and still be a tap, in logical pixels.
-    #[must_use]
-    pub fn click_tolerance(&self) -> f64 {
-        self.click_tolerance
-    }
-
     /// The options of `axis`.
     #[must_use]
     pub fn axis(&self, axis: Axis) -> &AxisOptions {

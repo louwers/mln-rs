@@ -112,7 +112,7 @@ pub struct WebMap {
     size: Size,
     pixel_ratio: f64,
     /// The page's pointer, wheel and key input, turned into camera moves.
-    gestures: GestureRecognizer,
+    gestures: GestureRecognizer<Map>,
     /// The pointers that went down on the map and haven't lifted.
     pointers: Vec<u32>,
     /// Whether a gesture reached a notch since `take_notch`.
@@ -209,7 +209,7 @@ impl WebMap {
 
         Ok(WebMap {
             session,
-            map,
+            map: map.clone(),
             _runtime: runtime,
             reports,
             redraw,
@@ -218,7 +218,7 @@ impl WebMap {
             rendered: 0,
             size,
             pixel_ratio,
-            gestures: GestureRecognizer::default(),
+            gestures: GestureRecognizer::new(map),
             pointers: Vec::new(),
             notched: false,
             tasks: 0.0,
@@ -267,7 +267,7 @@ impl WebMap {
             animation: AnimationOptions::new(Duration::from_millis(500)),
             phase: GesturePhase::None,
         };
-        self.gestures.step_to(&mut self.map, &update);
+        self.gestures.step_to(&update);
     }
 
     /// Lets drags and zooms on the globe turn the bearing with the planet,
@@ -289,7 +289,7 @@ impl WebMap {
             animation: AnimationOptions::default(),
             phase: GesturePhase::None,
         };
-        self.gestures.step_to(&mut self.map, &update);
+        self.gestures.step_to(&update);
     }
 
     /// Reads the style's attributions and name again, for `attributions`
@@ -365,7 +365,7 @@ impl WebMap {
         self.tasks += pump::take_pool_time().as_secs_f64() * 1000.0;
         // The page runs an animation frame always, so it ticks the recognizer
         // on each rather than at its deadlines.
-        self.gestures.tick(&mut self.map, now);
+        self.gestures.tick(now);
         self.answer_events();
         // A demand renders the map once the commands sent before it ran.
         let sent_sequence = self.map.sent_sequence();
@@ -602,7 +602,7 @@ impl WebMap {
     /// Feeds one input to the gesture recognizer, and answers its events.
     /// Returns whether the map used the input.
     fn gesture(&mut self, input: Input, time: f64) -> bool {
-        let used = self.gestures.handle(&mut self.map, input, time);
+        let used = self.gestures.handle(input, time);
         self.answer_events();
         used
     }

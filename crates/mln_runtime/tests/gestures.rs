@@ -14,7 +14,7 @@ fn at(x: f64, y: f64) -> ScreenCoordinate {
 #[test]
 fn the_recognizer_reads_and_moves_a_runtime_map() {
     let runtime = runtime();
-    let mut map = map(&runtime);
+    let map = map(&runtime);
     let center = LatLng::new(10.0, 20.0).unwrap();
     let update = CameraUpdate {
         camera: CameraOptions { center: Some(center), zoom: Some(4.0), ..Default::default() },
@@ -31,16 +31,16 @@ fn the_recognizer_reads_and_moves_a_runtime_map() {
     assert!((under.latitude() - 10.0).abs() < 1e-6 && (under.longitude() - 20.0).abs() < 1e-6, "{under:?}");
 
     // A drag to the right moves the map's content right: the center goes west.
-    let mut gestures = GestureRecognizer::default();
+    let mut gestures = GestureRecognizer::new(map.clone());
     let down =
         Input::PointerDown { id: 1, kind: PointerKind::Mouse, position: at(100.0, 128.0), modes: Modes::default() };
-    gestures.handle(&mut map, down, 0.0);
+    gestures.handle(down, 0.0);
     for step in 1..=10 {
         let position = at(100.0 + 10.0 * f64::from(step), 128.0);
-        gestures.handle(&mut map, Input::PointerMove { id: 1, position }, 16.0 * f64::from(step));
+        gestures.handle(Input::PointerMove { id: 1, position }, 16.0 * f64::from(step));
     }
     // Held still past the release window, so no glide follows.
-    gestures.handle(&mut map, Input::PointerUp { id: 1, position: at(200.0, 128.0) }, 1000.0);
+    gestures.handle(Input::PointerUp { id: 1, position: at(200.0, 128.0) }, 1000.0);
     let moved = wait(map.camera()).camera;
     assert!(moved.center.longitude() < 20.0, "{:?}", moved.center);
     assert!((moved.zoom - 4.0).abs() < 1e-9);

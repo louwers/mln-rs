@@ -48,8 +48,7 @@ abi::versioned!(mln_gesture_options, mln_gesture_input, mln_gesture_result);
 /// A recognizer, the map it moves, and the events that a call couldn't fit
 /// in its result, which the next one reports first.
 struct Recognizer {
-    gestures: GestureRecognizer,
-    map: ::mln_runtime::Map,
+    gestures: GestureRecognizer<::mln_runtime::Map>,
     events: VecDeque<GestureEvent>,
 }
 
@@ -431,9 +430,9 @@ pub(crate) unsafe extern "C" fn mln_gesture_recognizer_create(
             // SAFETY: the caller's contract.
             self::options(&unsafe { abi::read_sized(options) }?, &GestureOptions::default())?
         };
-        let gestures =
-            GestureRecognizer::new(gesture_options).map_err(|error| Error::invalid_argument(error.to_string()))?;
-        let recognizer = Recognizer { gestures, map, events: VecDeque::new() };
+        let gestures = GestureRecognizer::with_options(map, gesture_options)
+            .map_err(|error| Error::invalid_argument(error.to_string()))?;
+        let recognizer = Recognizer { gestures, events: VecDeque::new() };
         *out_recognizer = RECOGNIZERS.insert(Arc::new(Mutex::new(recognizer)))?;
         Ok(())
     })
@@ -492,9 +491,8 @@ pub(crate) unsafe extern "C" fn mln_gesture_recognizer_handle(
         let input = self::input(&unsafe { abi::read_sized(input) }?)?;
         let time = finite(time_ms, "time_ms")?;
         let mut recognizer = recognizer.lock();
-        let Recognizer { gestures, map, .. } = &mut *recognizer;
-        let handled = gestures.handle(map, input, time);
-        let next_tick = gestures.next_tick();
+        let handled = recognizer.gestures.handle(input, time);
+        let next_tick = recognizer.gestures.next_tick();
         let result = recognizer.result(handled, next_tick);
         // SAFETY: the caller's contract.
         unsafe { abi::write_sized(out_result, &result) }
@@ -519,8 +517,7 @@ pub(crate) unsafe extern "C" fn mln_gesture_recognizer_tick(
         unsafe { abi::check_out_size(out_result) }?;
         let time = finite(time_ms, "time_ms")?;
         let mut recognizer = recognizer.lock();
-        let Recognizer { gestures, map, .. } = &mut *recognizer;
-        let next_tick = gestures.tick(map, time);
+        let next_tick = recognizer.gestures.tick(time);
         let result = recognizer.result(false, next_tick);
         // SAFETY: the caller's contract.
         unsafe { abi::write_sized(out_result, &result) }

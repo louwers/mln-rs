@@ -35,7 +35,7 @@ mod options;
 mod recognizer;
 mod velocity;
 
-pub use camera::{GestureCamera, PendingEnd, center_latitude, zoom_range};
+pub use camera::{GestureCamera, PendingEnd, zoom_range};
 pub use input::{GestureEvent, Input, Modes, PinchPhase, PointerKind};
 pub use options::{Axis, AxisOptions, GestureOptions, InvalidGestureOptions, Notch, PanOptions};
 pub use recognizer::{GestureRecognizer, NextTick};

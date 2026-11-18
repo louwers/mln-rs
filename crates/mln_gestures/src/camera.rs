@@ -1,18 +1,18 @@
-//! The camera the recognizer moves: a small command sink that reads the
-//! camera and sends it the map's camera calls.
-//! `mln_runtime::Map` implements it.
+//! The camera the recognizer moves: `mln_runtime::Map`, and in this crate's
+//! tests a bare transform.
 
 use std::sync::Arc;
 
 use mln_map::{CameraDelta, CameraOptions, CameraUpdate, TransformState, TransitionEnd};
 use mln_util::LatLng;
-use mln_util::geo::{ScreenCoordinate, WrapMode};
+use mln_util::geo::ScreenCoordinate;
 use parking_lot::Mutex;
 
 /// What the recognizer needs from a camera: to read it, and
 /// the map's two camera calls, which carry each change's gesture
 /// phase. The calls may apply later, as a runtime's commands do: the
-/// recognizer reads what the camera shows by then.
+/// recognizer reads what the camera shows by then. It is the recognizer's
+/// only tie to the map.
 pub trait GestureCamera {
     /// The viewport's width and height, in logical pixels.
     fn viewport(&self) -> ScreenCoordinate;
@@ -67,10 +67,4 @@ pub fn zoom_range(state: &TransformState, latitude: f64) -> (f64, f64) {
     // Bounds too small to fill the screen at the greatest zoom hold the
     // camera there.
     (min.min(max), max)
-}
-
-/// The latitude of `state`'s center, as the recognizer reads it.
-#[must_use]
-pub fn center_latitude(state: &TransformState) -> f64 {
-    state.get_lat_lng(WrapMode::Unwrapped).latitude()
 }

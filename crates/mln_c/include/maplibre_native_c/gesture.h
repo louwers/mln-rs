@@ -6,6 +6,9 @@
  * buttons and held keys select which modes, and how far a wheel, a dial, or a
  * key moves the camera. The recognizer interprets the inputs over time:
  * drags, pinches, twists, tilts, taps, releases that glide, and snaps.
+ *
+ * Each recognizer belongs to one mln_map and moves its camera directly, so
+ * the host never relays camera changes.
  */
 
 #ifndef MAPLIBRE_NATIVE_C_GESTURE_H
