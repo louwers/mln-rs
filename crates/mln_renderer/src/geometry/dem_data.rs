@@ -1,6 +1,5 @@
-// C++ keeps the image behind a `shared_ptr` that textures share; here the
-// image is owned and textures get a copy (`get_image`), because the DEM
-// lives in a bucket, which is Send, and textures are render-thread `Rc`s.
+// The DEM owns its image, and textures get a copy of it (`image`): the DEM
+// lives in a bucket, which is Send, and textures live on the render thread.
 
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
@@ -11,8 +10,8 @@ const UNPACK_MAPBOX: [f32; 4] = [6553.6, 25.6, 0.1, 10000.0];
 /// <https://aws.amazon.com/public-datasets/terrain>/
 const UNPACK_TERRARIUM: [f32; 4] = [256.0, 1.0, 1.0 / 256.0, 32768.0];
 
-/// The DEM unpack vector for an encoding (`DEMData::getUnpackVector`): the
-/// red, green and blue factors and the base shift.
+/// The DEM unpack vector for an encoding: the red, green and blue factors
+/// and the base shift.
 #[must_use]
 pub(crate) fn unpack_vector(encoding: RasterEncoding) -> [f32; 4] {
     match encoding {
@@ -84,7 +83,7 @@ impl DEMData {
         // the data of the nearest pixel from the image. this data is
         // eventually replaced when the tile's neighboring tiles are loaded
         // and the accurate data can be backfilled using
-        // DEMData#backfillBorder
+        // `backfill_border`.
 
         let data = &mut out.data;
         for x in 0..dim_u {
@@ -147,16 +146,15 @@ impl DEMData {
     pub(crate) fn backfill_border(&mut self, border_tile_data: &DEMData, dx: i8, dy: i8) {
         let o = border_tile_data;
 
-        // Tiles from the same source should always be of the same dimensions.
-        // C++ asserts it and reads out of bounds when they aren't (tiles of
-        // different sizes, or an empty one from a corrupt image); the port
-        // leaves the border as it is.
+        // Tiles from the same source should always be of the same
+        // dimensions. Where they aren't (tiles of different sizes, or an
+        // empty one from a corrupt image), the border stays as it is.
         if self.dim != o.dim || self.dim == 0 {
             return;
         }
 
         // We determine the pixel range to backfill based which corner/edge
-        // `borderTileData` represents. For example, dx = -1, dy = -1
+        // `border_tile_data` represents. For example, dx = -1, dy = -1
         // represents the upper left corner of the base tile, so we only
         // need to backfill one pixel at coordinates (-1, -1) of the tile
         // image.
@@ -356,7 +354,7 @@ mod tests {
         assert_eq!(dem0.get(4, -1), dem1.get(0, 3));
     }
 
-    // Port-only: C++ reads out of bounds for neighbours of another size.
+    // A neighbour of another size leaves the border as it is.
     #[test]
     fn backfill_border_of_another_size() {
         let mut dem = DEMData::new(&fake_image(Size::new(4, 4)), RasterEncoding::Mapbox).unwrap();

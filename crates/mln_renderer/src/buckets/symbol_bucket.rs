@@ -220,10 +220,10 @@ impl SymbolSizeBinder {
                 let is_zoom_constant = !(covering_ranges.is_some() || expression.is_some());
                 if let (Some((zoom_levels, size_levels)), Some(expression)) = (covering_ranges, expression) {
                     // Even though we could get the exact value of the camera
-                    // function at z = currentZoom, we intentionally do not:
+                    // function at the current zoom, we intentionally do not:
                     // instead, we interpolate between the camera function
-                    // values at a pair of zoom stops covering [tileZoom,
-                    // tileZoom + 1] in order to be consistent with this
+                    // values at a pair of zoom stops covering [tile zoom,
+                    // tile zoom + 1] in order to be consistent with this
                     // restriction on composite functions.
                     let t = mln_math::clamp_f32(expression.interpolation_factor(*zoom_levels, current_zoom), 0.0, 1.0);
                     size = size_levels.min + t * (size_levels.max - size_levels.min);
@@ -278,11 +278,10 @@ pub(crate) struct PlacedSymbol {
     pub(crate) glyph_offsets: PoolRange,
     pub(crate) hidden: bool,
     pub(crate) start_index: usize,
-    /// The crossTileID is only filled/used on the foreground for variable
-    /// text anchors
+    /// The symbol's id across tiles, which only variable text anchors read.
     pub(crate) cross_tile_id: Option<NonZeroU32>,
-    /// The placedOrientation is only used when symbol layer's property is
-    /// set to support placement for orientation variants.
+    /// The orientation the symbol was placed in, where the layer places
+    /// orientation variants.
     pub(crate) placed_orientation: Option<TextWritingModeType>,
     pub(crate) angle: f32,
     /// Reference to placed icon, only applicable for text symbols.

@@ -1500,7 +1500,7 @@ impl RenderOrchestrator {
         feature_id: &str,
     ) -> mln_style::expression::expression::FeatureState {
         match self.source_tiles(source_id) {
-            Some(source) => source.info.feature_state.get_state(source_layer_id, feature_id),
+            Some(source) => source.info.feature_state.state(source_layer_id, feature_id),
             None => mln_style::expression::expression::FeatureState::default(),
         }
     }

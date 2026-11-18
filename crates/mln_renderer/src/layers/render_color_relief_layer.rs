@@ -49,13 +49,13 @@ use crate::gfx::store::SharedTexture;
 use crate::gfx::vertex_attribute::VertexAttributeArray;
 use crate::gfx::vertices::SharedVertices;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
-use crate::layer_drawing::{LayerDrawing, DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptDraw, TileDraws, TileObjects};
+use crate::layer_drawing::{
+    DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptDraw, LayerDrawing, TileDraws, TileObjects,
+};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{
-    Atlases, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
-};
+use crate::render_layer::{Atlases, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer};
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_tile::FrameTile;
@@ -398,8 +398,7 @@ impl TypedLayer for RenderColorReliefLayer {
                 });
             });
             let data = bytemuck::cast_slice(elevation_stops_data.as_slice());
-            if let Err(error) = context.upload_texture_data(&elevation_stops, data, Size::new(*color_ramp_size, 1))
-            {
+            if let Err(error) = context.upload_texture_data(&elevation_stops, data, Size::new(*color_ramp_size, 1)) {
                 Log::error(Event::Render, format!("Uploading the elevation stops failed: {error}"));
             }
             *elevation_stops_texture = Some(elevation_stops);
@@ -426,7 +425,7 @@ impl TypedLayer for RenderColorReliefLayer {
         };
 
         // Drop the DEM textures of buckets that are no longer rendered.
-                live_buckets.clear();
+        live_buckets.clear();
         live_buckets.extend(render_tiles.iter().filter_map(|tile| Some(tile.bucket()?.base.bucket_id)));
         dem_textures.retain(|id, _| live_buckets.contains(id));
 

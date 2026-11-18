@@ -240,8 +240,8 @@ fn dist(ax: f32, ay: f32, bx: f32, by: f32) -> f32 {
 // The radial offset is to the edge of the text box. In the horizontal
 // direction, the edge of the text box is where glyphs start. But in the
 // vertical direction, the glyphs appear to "start" at the baseline. We don't
-// actually load baseline data, but we assume an offset of ONE_EM - 17 (see
-// "yOffset" in shaping.js)
+// actually load baseline data, but we assume an offset of ONE_EM - 17, as
+// the shaping does.
 const BASELINE_OFFSET: f32 = 7.0;
 
 /// Any horizontal shaping: this is used for collision purposes, and all the
@@ -277,7 +277,7 @@ fn shaping_for_text_justify_type(
 fn evaluate_radial_offset(anchor: SymbolAnchorType, radial_offset: f32) -> [f32; 2] {
     let mut result = [0.0_f32, 0.0_f32];
     let radial_offset = mln_math::fmaxf(radial_offset, 0.0); // Ignore negative offset.
-    // solve for r where r^2 + r^2 = radialOffset^2
+    // Solve for r where r^2 + r^2 = radial_offset^2.
     let hypotenuse = radial_offset / std::f32::consts::SQRT_2;
 
     match anchor {
@@ -980,7 +980,8 @@ impl SymbolLayout {
             }
         } else if *placement.uniform() == SymbolPlacementType::LineCenter {
             // No clipping, multiple lines per feature are allowed
-            // "lines" with only one point are ignored as in clipLines
+            // "lines" with only one point are ignored, as clipping ignores
+            // them
             for line in feature.geometry.iter() {
                 if line.len() > 1 {
                     let anchor = get_center_anchor(
@@ -1713,8 +1714,8 @@ impl SymbolLayout {
                         }
                     }
 
-                    // Vertical point label shaping if allowVerticalPlacement
-                    // is enabled.
+                    // Vertical point label shaping where the layer allows
+                    // vertical placement.
                     if allow_vertical_placement && formatted_text.allows_vertical_writing_mode() {
                         formatted_text.verticalize_punctuation();
                         // Vertical POI label placement is meant to be used
@@ -1748,8 +1749,8 @@ impl SymbolLayout {
                         shaped_text_orientations.horizontal = shaping;
                     }
 
-                    // Vertical point label shaping if allowVerticalPlacement
-                    // is enabled.
+                    // Vertical point label shaping where the layer allows
+                    // vertical placement.
                     if allow_vertical_placement && formatted_text.allows_vertical_writing_mode() {
                         formatted_text.verticalize_punctuation();
                         shaped_text_orientations.vertical = apply_shaping(
@@ -1800,8 +1801,7 @@ impl SymbolLayout {
                 }
             }
 
-            // if either shapedText or icon position is present, add the
-            // feature
+            // Add the feature if it has either shaped text or an icon.
             let default_shaping = default_horizontal_shaping(&shaped_text_orientations);
             self.icons_in_text |= default_shaping.is_some() && default_shaping.icons_in_text;
             if default_shaping.is_some() || shaped_icon.is_some() {
@@ -1867,8 +1867,8 @@ impl SymbolLayout {
                 // glyphs/icons to buffers
 
                 // Process icon first, so that text symbols would have
-                // reference to iconIndex which is used when dynamic vertices
-                // for icon-text-fit image have to be updated.
+                // the index of the icon, which updates the dynamic vertices of
+                // an `icon-text-fit` image.
                 if has_icon {
                     let size_data = bucket_ref.icon_size_binder.vertex_size_data(feature);
                     let sdf = symbol_instance.has_sdf_icon();

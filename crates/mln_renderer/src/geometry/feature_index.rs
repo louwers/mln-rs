@@ -119,7 +119,7 @@ impl FeatureIndex {
     }
 
     #[must_use]
-    pub(crate) fn get_data(&self) -> Option<&TileData> {
+    pub(crate) fn data(&self) -> Option<&TileData> {
         self.tile_data.as_ref()
     }
 
@@ -379,7 +379,7 @@ impl FeatureIndex {
         if let Some(source_feature_state) = source_feature_state
             && let Some(id_str) = feature_id_to_string(&feature.get_id())
         {
-            state = source_feature_state.get_state(Some(&source_layer_id), &id_str);
+            state = source_feature_state.state(Some(&source_layer_id), &id_str);
         }
 
         for layer_id in layer_ids {

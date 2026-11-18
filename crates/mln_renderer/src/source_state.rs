@@ -361,7 +361,7 @@ impl SourceFeatureState {
     }
 
     #[must_use]
-    pub(crate) fn get_state(&self, source_layer_id: Option<&str>, feature_id: &str) -> FeatureState {
+    pub(crate) fn state(&self, source_layer_id: Option<&str>, feature_id: &str) -> FeatureState {
         let source_layer = source_layer_id.unwrap_or("");
         let current = self
             .current_states
@@ -735,7 +735,7 @@ mod tests {
     fn assert_state(state: &SourceFeatureState, expected: &FeatureStates, context: &str) {
         for feature in FEATURES {
             let expected = expected.get(feature).cloned().unwrap_or_default();
-            assert_eq!(state.get_state(Some("layer"), feature), expected, "feature {feature}, {context}");
+            assert_eq!(state.state(Some("layer"), feature), expected, "feature {feature}, {context}");
         }
     }
 
@@ -796,7 +796,7 @@ mod tests {
         // Feature 2 loses its state, and the tile gets only that change.
         let (second, _) = states_of(&[&hover(), &FeatureState::new()]);
         state.set_states(Some(&second));
-        assert!(state.get_state(Some("layer"), "2").is_empty());
+        assert!(state.state(Some("layer"), "2").is_empty());
         render_frame(&mut state, &mut [&mut tile]);
         assert_eq!(2, tile.applied_count());
         assert_eq!(vec!["2"], tile.applied(1)["layer"].keys().map(String::as_str).collect::<Vec<_>>());
@@ -809,7 +809,7 @@ mod tests {
         render_frame(&mut state, &mut [&mut tile, &mut fresh]);
         assert!(tile.drawn().is_empty());
         assert!(fresh.drawn().is_empty());
-        assert!(state.get_state(Some("layer"), "1").is_empty());
+        assert!(state.state(Some("layer"), "1").is_empty());
     }
 
     // From every state to every other, with a queued call of the renderer's
@@ -928,7 +928,7 @@ mod tests {
         state.set_states(Some(&changed(&start, &[("1", &FeatureState::new())])));
         render_frame(&mut state, &mut [&mut tile]);
         assert!(tile.drawn().is_empty());
-        assert!(state.get_state(Some("layer"), "2").is_empty());
+        assert!(state.state(Some("layer"), "2").is_empty());
     }
 
     // Dropping a long chain of changes doesn't overflow the stack.

@@ -344,7 +344,7 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
 
     fn prefetched_tiles(&self) -> Vec<PrefetchedTile> {
         if !self.render {
-            // The pan pass: `emptyPrefetchedTiles`.
+            // The pan pass prefetches none.
             return Vec::new();
         }
         // The ideal pass: the cover's tiles.
@@ -1092,7 +1092,7 @@ impl SourceTiles {
         };
 
         if globe {
-            // GL JS's `transformBbox`: the globe has no world copies, so a box
+            // The globe has no world copies, so a box
             // across the antimeridian lands on the rest of the world, which
             // shows when its slightly shrunken corners fall outside it. It
             // moves to the copy west of the main world.
@@ -1141,7 +1141,7 @@ impl SourceTiles {
             }
         }
 
-        // mapbox::geometry::envelope(queryGeometry)
+        // The bounding box of the query.
         let (box_min, box_max) = envelope(&mut query_geometry.iter().map(|p| (p.x, p.y)));
         let box_min = geometry::Point::new(box_min.0, box_min.1);
         let box_max = geometry::Point::new(box_max.0, box_max.1);
@@ -1322,7 +1322,7 @@ impl SourceTiles {
             };
             let rendered_id = loaded.to_unwrapped();
             self.rekey(&loaded, *id, ctx);
-            // `renderedTiles.insert(node)` keeps an entry already at the key.
+            // An entry already at the key stays.
             if let Some(entry) = self.rendered.remove(&rendered_id) {
                 self.rendered.entry(id.to_unwrapped()).or_insert(Rendered { key: *id, ..entry });
             }

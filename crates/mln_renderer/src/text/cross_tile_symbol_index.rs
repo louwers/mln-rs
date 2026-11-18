@@ -206,8 +206,8 @@ impl CrossTileSymbolLayerIndex {
 
     /// Sometimes when a user pans across the antimeridian the longitude value
     /// gets wrapped. To prevent labels from flashing out and in we adjust the
-    /// tileID values in the indexes so that they match the new wrapped
-    /// version of the map.
+    /// tile ids in the indexes so that they match the new wrapped version of
+    /// the map.
     pub(crate) fn handle_wrap_jump(&mut self, new_lng: f32) {
         let wrap_delta = ((new_lng - self.lng) / 360.0).round() as i32;
         if wrap_delta != 0 {
@@ -215,7 +215,7 @@ impl CrossTileSymbolLayerIndex {
             for (zoom, zoom_index) in std::mem::take(&mut self.indexes) {
                 let mut new_zoom_index: VecMap<OverscaledTileID, TileLayerIndex> = VecMap::new();
                 for (_, mut index) in zoom_index {
-                    // change the tileID's wrap and move its index
+                    // Change the tile id's wrap and move its index.
                     index.coord = index.coord.unwrap_to((i32::from(index.coord.wrap) + wrap_delta) as i16);
                     new_zoom_index.entry(index.coord).or_insert(index);
                 }
@@ -673,7 +673,7 @@ mod tests {
             &mut max_cross_tile_id,
         );
 
-        // Matches the symbol in `mainBucket`
+        // Matches the symbol in the main bucket.
         assert_eq!(cross_tile_id(&grandchild_bucket, 0), Some(1));
         // Does not match the previous value for Windsor because that tile was removed
         assert_eq!(cross_tile_id(&grandchild_bucket, 1), Some(5));

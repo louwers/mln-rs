@@ -1,13 +1,11 @@
-// The C++ template `PatternLayout<BucketType, LayerPropertiesType,
-// PatternPropertyType, LayoutPropertiesType, SortKeyPropertyType>` is
-// `PatternLayout<S: PatternLayoutSpec>`; the fill and line specs are below.
-// The unsorted/sorted instantiations (`SortKeyPropertyType = void` or the
-// sort key) are one type with a `sorted` flag, which the spec's `sorted`
-// chooses as the C++ factories choose the instantiation.
+// A pattern layout lays out the features of a layer type whose spec
+// (`PatternLayoutSpec`) says how it reads patterns and sort keys; the fill
+// and line specs are below. A layout that sorts its features by key, which
+// the spec's `sorted` asks for, keeps them in key order as it accepts them.
 //
 // A `TileLayer` borrows its tile data, so the layout keeps the
 // feature *indices* it accepted (`PatternFeature::i`) and gets the features
-// again in `create_bucket` (C++ keeps the `unique_ptr<GeometryTileFeature>`).
+// again in `create_bucket`.
 
 use std::sync::Arc;
 
@@ -220,14 +218,12 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
             if let Some(sort_key) = constant_sort_key {
                 features.push(PatternFeature { i, sort_key, patterns: pattern_dependency_map });
             } else if sorted {
-                // PatternFeatureInserter<SortKeyPropertyType>::insert
                 let sort_key = S::sort_key(&layout, &feature, zoom, &parameters.tile_id.canonical);
                 let pattern_feature = PatternFeature { i, sort_key, patterns: pattern_dependency_map };
-                // std::lower_bound: the first feature whose key is not less.
+                // Before the first feature whose key is not less.
                 let lower_bound = features.partition_point(|f| f.sort_key < sort_key);
                 features.insert(lower_bound, pattern_feature);
             } else {
-                // PatternFeatureInserter<void>::insert
                 features.push(PatternFeature { i, sort_key: 0.0, patterns: pattern_dependency_map });
             }
         }

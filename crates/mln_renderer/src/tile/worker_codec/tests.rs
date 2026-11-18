@@ -232,7 +232,7 @@ fn cross(layers: &[Arc<dyn ErasedEvaluatedLayer>], data: &TileData) -> LayoutRes
     assert_eq!(result.layer_render_data.len(), layers.len());
     assert_eq!(comparable(&lay_out(layers, data, direct_result).result), comparable(&result));
     // The tile attaches its own data.
-    assert!(result.feature_index.get_data().is_none());
+    assert!(result.feature_index.data().is_none());
     result
 }
 

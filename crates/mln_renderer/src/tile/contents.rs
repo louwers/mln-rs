@@ -237,7 +237,7 @@ impl LayoutResult {
         pattern_positions: &ImagePositions,
     ) -> Vec<SimpleIdentity> {
         let mut changed = Vec::new();
-        let Some(layers) = self.feature_index.get_data() else {
+        let Some(layers) = self.feature_index.data() else {
             return changed;
         };
         if states.is_empty() {
@@ -478,7 +478,7 @@ impl GeometryContents {
         proj_matrix: &Mat4,
         feature_state: &SourceFeatureState,
     ) -> Result<(), Error> {
-        if self.result.feature_index.get_data().is_none() {
+        if self.result.feature_index.data().is_none() {
             return Ok(());
         }
         let query_padding = self.query_padding(layers);
@@ -514,11 +514,11 @@ impl GeometryContents {
         options: &SourceQueryOptions,
         global_state: Option<&GlobalStateMap>,
     ) -> Result<(), Error> {
-        let Some(data) = self.result.feature_index.get_data() else {
+        let Some(data) = self.result.feature_index.data() else {
             return Ok(());
         };
         if single_layer {
-            // Ignore the sourceLayer, there is only one
+            // Ignore the source layer: there is only one.
             if let Some(layer) = data.layer("")? {
                 query_layer_source_features(&layer, result, options, global_state, id)?;
             }
@@ -530,8 +530,7 @@ impl GeometryContents {
             return Ok(());
         };
         for source_layer in source_layers {
-            // Go through all sourceLayers, if any
-            // to gather all the features
+            // Gather the features of every source layer.
             if let Some(layer) = data.layer(source_layer)? {
                 let start = result.len();
                 query_layer_source_features(&layer, result, options, global_state, id)?;

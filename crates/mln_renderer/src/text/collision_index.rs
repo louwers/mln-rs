@@ -1,7 +1,3 @@
-// The C++ `collisionGroupPredicate` (`std::optional<std::function<bool(const
-// RefIndexedSubfeature&)>>`) is an `Option<&dyn Fn(&IndexedSubfeature) ->
-// bool>`.
-
 use geometry::Point;
 use glam::Vec2;
 use mln_map_types::{MapMode, ProjectedTilePoint, TileProjector, TransformState};
@@ -162,7 +158,7 @@ impl CollisionIndex {
     ) -> Self {
         let viewport_padding = find_viewport_padding(transform_state, map_mode);
         let size = transform_state.get_size();
-        // `width + 2 * viewportPadding`: uint32_t + float.
+        // The grid covers the viewport and its padding on each side.
         let width = size.width as f32;
         let height = size.height as f32;
         let grid_width = width + 2.0 * viewport_padding;
@@ -210,15 +206,15 @@ impl CollisionIndex {
         // think we should generate collision circles on the fly in viewport
         // coordinates at the time we do collision detection.
 
-        // incidenceStretch is the ratio of how much y space a label takes up on a
-        // tile while drawn perpendicular to the viewport vs
-        //  how much space it would take up if it were drawn flat on the tile
-        // Using law of sines, camera_to_anchor/sin(ground_angle) =
-        // camera_to_center/sin(incidence_angle) Incidence angle 90 -> head on,
-        // sin(incidence_angle) = 1, no stretch Incidence angle 1 -> very oblique,
-        // sin(incidence_angle) =~ 0, lots of stretch ground_angle = u_pitch + PI/2
-        // -> sin(ground_angle) = cos(u_pitch) incidenceStretch = 1 /
-        // sin(incidenceAngle)
+        // The incidence stretch is the ratio of how much y space a label takes
+        // up on a tile while drawn perpendicular to the viewport to how much
+        // it would take up drawn flat on the tile. By the law of sines,
+        // camera_to_anchor / sin(ground_angle) = camera_to_center /
+        // sin(incidence_angle). An incidence angle of 90° is head on, with
+        // sin(incidence_angle) = 1 and no stretch; one of 1° is very oblique,
+        // with sin(incidence_angle) ≈ 0 and a lot of stretch. ground_angle =
+        // pitch + π/2, so sin(ground_angle) = cos(pitch), and the stretch is
+        // 1 / sin(incidence_angle).
 
         let incidence_stretch: f32 = if pitch_with_map { 1.0 } else { camera_to_anchor_distance / self.pitch_factor };
         let last_segment_tile = tile_distance.last_segment_viewport_distance * pixels_to_tile_units;
@@ -266,7 +262,7 @@ impl CollisionIndex {
         text_pixel_ratio: f32,
         tile_edges: &CollisionBoundaries,
     ) -> IntersectStatus {
-        let boundaries = self.get_projected_collision_boundaries(pos_matrix, shift, text_pixel_ratio, box_);
+        let boundaries = self.projected_collision_boundaries(pos_matrix, shift, text_pixel_ratio, box_);
         let mut result = IntersectStatus::default();
         let x1 = boundaries[0];
         let y1 = boundaries[1];
@@ -278,7 +274,8 @@ impl CollisionIndex {
         let tile_x2 = tile_edges[2];
         let tile_y2 = tile_edges[3];
 
-        // `static_cast<int>(std::min(a, b))`: std::min is `(b < a) ? b : a`.
+        // The smaller of `a` and `b`, `a` where either is NaN, truncated
+        // where it is used.
         let min = |a: f32, b: f32| if b < a { b } else { a };
 
         // Check left border
@@ -375,7 +372,7 @@ impl CollisionIndex {
                 collision_boundaries = projected_box.boundaries;
                 occluded = if pitch_with_map { projected_box.all_points_occluded } else { projected_point.occluded };
             } else {
-                collision_boundaries = Self::get_projected_collision_boundaries_for_anchor(
+                collision_boundaries = Self::projected_collision_boundaries_for_anchor(
                     &projected_point,
                     shift.unwrap_or(Vec2::ZERO),
                     text_pixel_ratio,
@@ -478,9 +475,8 @@ impl CollisionIndex {
         let mut entirely_offscreen = true;
 
         let tile_to_viewport = projected_anchor.0 * text_pixel_ratio;
-        // pixelsToTileUnits is used for translating line geometry to tile units
-        // ... so we care about 'scale' but not 'perspectiveRatio'
-        // equivalent to pixel_to_tile_units
+        // Translates line geometry to tile units, so it takes the scale but
+        // not the perspective ratio.
         let pixels_to_tile_units = 1.0 / (text_pixel_ratio * scale);
 
         let mut first_tile_distance: f32 = 0.0;
@@ -659,7 +655,7 @@ impl CollisionIndex {
             grid_query.push(Point::new(point.x as f32 + self.viewport_padding, point.y as f32 + self.viewport_padding));
         }
 
-        // `mapbox::geometry::envelope(gridQuery)`.
+        // The bounding box of the query in the grid.
         let mut envelope = BBox::new(grid_query[0], grid_query[0]);
         for point in &grid_query {
             envelope.min.x = envelope.min.x.min(point.x);
@@ -742,7 +738,7 @@ impl CollisionIndex {
         )
     }
 
-    fn get_projected_collision_boundaries(
+    fn projected_collision_boundaries(
         &self,
         pos_matrix: &Mat4,
         shift: Vec2,
@@ -755,15 +751,10 @@ impl CollisionIndex {
             signed_distance_from_camera: p[3],
             occluded: false,
         };
-        Self::get_projected_collision_boundaries_for_anchor(
-            &self.to_viewport(&projected),
-            shift,
-            text_pixel_ratio,
-            box_,
-        )
+        Self::projected_collision_boundaries_for_anchor(&self.to_viewport(&projected), shift, text_pixel_ratio, box_)
     }
 
-    fn get_projected_collision_boundaries_for_anchor(
+    fn projected_collision_boundaries_for_anchor(
         projected_point: &ProjectedAnchor,
         shift: Vec2,
         text_pixel_ratio: f32,
@@ -891,9 +882,8 @@ fn transform(pos_matrix: &Mat4, point: Vec2) -> Vec4 {
 }
 
 fn polygon_intersects_box(polygon: &[Point<f32>], bbox: &BBox) -> bool {
-    // This is just a wrapper that allows us to use the integer-based
-    // util::polygonIntersectsPolygon Conversion limits our query accuracy to
-    // single-pixel resolution
+    // The integer polygon test, whose conversion limits the query's accuracy
+    // to a pixel.
     let mut integer_polygon = GeometryCoordinates::new();
     for point in polygon {
         integer_polygon.push(Point::new(point.x as i16, point.y as i16));

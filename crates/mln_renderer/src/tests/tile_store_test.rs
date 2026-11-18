@@ -335,7 +335,7 @@ fn eviction_and_revival_while_a_job_is_in_flight() {
     let Some(Contents::Geometry(contents)) = tile.tile().contents() else {
         panic!("a layout");
     };
-    let Some(TileData::Features(shown)) = contents.result.feature_index.get_data() else {
+    let Some(TileData::Features(shown)) = contents.result.feature_index.data() else {
         panic!("features");
     };
     assert_eq!(shown[0].id, feature::Identifier::Uint(2));
