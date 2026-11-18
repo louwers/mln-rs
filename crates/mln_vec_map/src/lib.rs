@@ -137,22 +137,6 @@ impl<K, V> VecMap<K, V> {
         Some((self.keys.last()?, self.values.last()?))
     }
 
-    /// Replaces each key with `f` of it, keeping its value, where the new
-    /// keys are in the order of the old ones; otherwise leaves the map as it
-    /// is. Returns whether it replaced them.
-    pub fn map_keys_in_order(&mut self, f: impl Fn(&K) -> K) -> bool
-    where
-        K: Ord,
-    {
-        if !self.keys.iter().map(&f).is_sorted_by(|a, b| a < b) {
-            return false;
-        }
-        for key in &mut self.keys {
-            *key = f(key);
-        }
-        true
-    }
-
     /// Keeps the entries for which `f` returns true, visiting them in key
     /// order.
     pub fn retain(&mut self, mut f: impl FnMut(&K, &mut V) -> bool) {
@@ -744,15 +728,5 @@ mod tests {
         assert!(set.insert(K(1, "first")));
         assert!(!set.insert(K(1, "second")));
         assert_eq!(set.first().map(|k| k.1), Some("first"));
-    }
-
-    #[test]
-    fn map_keys_in_order_keeps_the_order() {
-        let mut map: VecMap<i32, char> = [(1, 'a'), (3, 'b'), (5, 'c')].into();
-        assert!(map.map_keys_in_order(|k| k + 10));
-        assert_eq!(map.get(&13), Some(&'b'));
-        assert!(!map.map_keys_in_order(|k| -k));
-        assert_eq!(map.keys().copied().collect::<Vec<_>>(), [11, 13, 15]);
-        assert!(!map.map_keys_in_order(|_| 0));
     }
 }

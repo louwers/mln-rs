@@ -23,7 +23,6 @@ use mln_gfx::types::DepthMaskType;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::hash::HashMap;
 use mln_util::identity::SimpleIdentity;
-use mln_vec_map::VecMap;
 
 use crate::draw::DrawObjects;
 use crate::gfx::atlas_binding::AtlasBinding;
@@ -107,17 +106,44 @@ struct TileState {
 /// layer keeps of a tile.
 #[derive(Default)]
 struct TileSet {
-    tiles: VecMap<OverscaledTileID, TileState>,
-    /// The tiles that `set_tiles` makes the set's.
+    /// The tiles' ids, in order.
+    ids: Vec<OverscaledTileID>,
+    /// Each tile's state, at the tile's index.
+    states: Vec<TileState>,
+    /// How the tiles' indexes last changed.
+    moves: TileMoves,
+    /// The ids that `set_tiles` makes the set's; after it, the ids the set
+    /// had, whose memory the next change reuses.
     incoming: Vec<OverscaledTileID>,
-    /// For each tile of the set, the index it had before the set's tiles
-    /// last changed, `None` for a tile new to the set.
-    moves: Vec<Option<usize>>,
-    /// The permutation that `moves` makes of the indexes of the tiles before
-    /// and after the change, whichever are more: for each index, the index
-    /// whose value it takes, which is a tile's old index where `moves` says
-    /// so.
-    permutation: Vec<usize>,
+}
+
+/// How the indexes of a set's tiles change, as swaps of the values at them
+/// that move the values of the tiles that stay to their new indexes.
+#[derive(Default)]
+struct TileMoves {
+    /// The swaps: `swaps[..split]` before the values beyond `kept` drop, and
+    /// the others after the new tiles' values fill the indexes up to `len`.
+    swaps: Vec<(usize, usize)>,
+    split: usize,
+    kept: usize,
+    len: usize,
+}
+
+impl TileMoves {
+    /// Moves `values`, one at each index of the set's tiles before the
+    /// change, to their tiles' indexes after it, drops those of the tiles
+    /// that left, and gives the new tiles `fill()`.
+    fn apply<V>(&self, values: &mut Vec<V>, fill: impl FnMut() -> V) {
+        let (before, after) = self.swaps.split_at(self.split);
+        for &(a, b) in before {
+            values.swap(a, b);
+        }
+        values.truncate(self.kept);
+        values.resize_with(self.len, fill);
+        for &(a, b) in after {
+            values.swap(a, b);
+        }
+    }
 }
 
 impl TileSet {
@@ -125,88 +151,105 @@ impl TileSet {
     /// and drops the others. Returns whether that changed any tile's index,
     /// which `moves` then says.
     fn set_tiles(&mut self) -> bool {
-        let old_len = self.tiles.len();
-        let incoming = &mut self.incoming;
         // The stable sort, which the renderer's other sorts of tile ids
         // share, allocates nothing for a frame's tens of tiles.
-        incoming.sort();
-        incoming.dedup();
-        let keys = self.tiles.keys().as_slice();
-        if keys == incoming.as_slice() {
+        self.incoming.sort();
+        self.incoming.dedup();
+        if self.ids == self.incoming {
             return false;
         }
-        self.moves.clear();
-        let mut old = 0;
-        for id in incoming.iter() {
-            while keys.get(old).is_some_and(|key| key < id) {
-                old += 1;
+        let (ids, incoming, moves) = (&self.ids, &self.incoming, &mut self.moves);
+        moves.swaps.clear();
+        // The tiles that stay move to the front, in order, ahead of those
+        // that leave...
+        let mut kept = 0;
+        for (old, _) in kept_tiles(ids, incoming) {
+            if kept != old {
+                moves.swaps.push((kept, old));
             }
-            self.moves.push(keys.get(old).filter(|key| *key == id).map(|_| old));
+            kept += 1;
         }
-        // The tiles that stay, whose old indexes go up in `moves`.
-        let (mut kept, mut index) = (self.moves.iter().flatten().peekable(), 0);
-        self.tiles.retain(|_, _| {
-            let keep = kept.next_if_eq(&&index).is_some();
-            index += 1;
-            keep
-        });
-        for (id, old) in incoming.iter().zip(&self.moves) {
-            if old.is_none() {
-                self.tiles.insert(*id, TileState::default());
+        moves.split = moves.swaps.len();
+        moves.kept = kept;
+        moves.len = incoming.len();
+        // ...and then, from the last to the first, to their new indexes,
+        // whose values are the new tiles' until then.
+        for (rank, (_, new)) in kept_tiles(ids, incoming).enumerate() {
+            if rank != new {
+                moves.swaps.push((new, rank));
             }
         }
-        self.permute(old_len);
+        moves.swaps[moves.split..].reverse();
+        moves.apply(&mut self.states, TileState::default);
+        std::mem::swap(&mut self.ids, &mut self.incoming);
         true
-    }
-
-    /// Makes `permutation` that of `moves`, from a set of `old_len` tiles.
-    /// Where `moves` has new tiles, the tiles it moves keep their order.
-    fn permute(&mut self, old_len: usize) {
-        let len = old_len.max(self.moves.len());
-        // The indexes no tile moves to take the values no tile moves from,
-        // the indexes between those that the tiles that stay move from.
-        let mut moved = self.moves.iter().flatten().copied().peekable();
-        let mut free = (0..len).filter(move |&old| moved.next_if_eq(&old).is_none());
-        self.permutation.clear();
-        self.permutation.extend((0..len).map(|index| match self.moves.get(index) {
-            Some(&Some(old)) => old,
-            _ => free.next().unwrap_or(index),
-        }));
     }
 
     /// Moves the tiles' states to the tiles `wrap_delta` world copies east
     /// of theirs. Returns whether that changed their order, which `moves`
     /// then says; only a wrap that overflows does.
     fn shift_wraps(&mut self, wrap_delta: i16) -> bool {
-        let shift = |id: &OverscaledTileID| id.unwrap_to(id.wrap.wrapping_add(wrap_delta));
-        if self.tiles.map_keys_in_order(shift) {
+        for id in &mut self.ids {
+            *id = id.unwrap_to(id.wrap.wrapping_add(wrap_delta));
+        }
+        if self.ids.is_sorted() {
             return false;
         }
         // The shifted ids, in their old order.
-        self.incoming.clear();
-        for (id, state) in std::mem::take(&mut self.tiles) {
-            let id = shift(&id);
-            self.incoming.push(id);
-            self.tiles.insert(id, state);
-        }
-        self.moves.clear();
-        self.moves.resize(self.tiles.len(), None);
-        for (old, id) in self.incoming.iter().enumerate() {
-            if let Some(new) = self.tiles.index_of(id) {
-                self.moves[new] = Some(old);
+        self.incoming.clone_from(&self.ids);
+        self.ids.sort();
+        // For each tile's old index, its new one. A wrap overflows rarely
+        // enough that this allocates.
+        let mut new_index: Vec<usize> =
+            self.incoming.iter().map(|id| self.ids.binary_search(id).unwrap_or_default()).collect();
+        let moves = &mut self.moves;
+        moves.swaps.clear();
+        for old in 0..new_index.len() {
+            while new_index[old] != old {
+                let new = new_index[old];
+                moves.swaps.push((old, new));
+                new_index.swap(old, new);
             }
         }
-        self.permute(self.tiles.len());
+        moves.split = moves.swaps.len();
+        moves.kept = self.ids.len();
+        moves.len = self.ids.len();
+        moves.apply(&mut self.states, TileState::default);
         true
     }
 
+    /// The index of `tile_id`, if it is one of the set's.
+    fn index_of(&self, tile_id: &OverscaledTileID) -> Option<usize> {
+        self.ids.binary_search(tile_id).ok()
+    }
+
+    fn clear(&mut self) {
+        self.ids.clear();
+        self.states.clear();
+    }
+
     fn mark_changed(&mut self, changed: &ChangedBuckets) {
-        for state in self.tiles.values_mut() {
+        for state in &mut self.states {
             if let Some(changes) = state.bucket.and_then(|bucket| changed.get(bucket)) {
                 state.changes |= changes;
             }
         }
     }
+}
+
+/// The tiles of both `old` and `new`, sorted ids, each with its index in
+/// `old` and in `new`, in order.
+fn kept_tiles<'a>(
+    old: &'a [OverscaledTileID],
+    new: &'a [OverscaledTileID],
+) -> impl Iterator<Item = (usize, usize)> + 'a {
+    let mut old_index = 0;
+    new.iter().enumerate().filter_map(move |(new_index, id)| {
+        while old.get(old_index).is_some_and(|old_id| old_id < id) {
+            old_index += 1;
+        }
+        (old.get(old_index) == Some(id)).then_some((old_index, new_index))
+    })
 }
 
 /// What a layer keeps of each of the frame's tiles it draws, by tile id: the
@@ -232,36 +275,13 @@ impl<T> TileMap<T> {
         self.set.incoming.clear();
         self.set.incoming.extend(tiles);
         if self.set.set_tiles() {
-            self.apply_moves();
-        }
-    }
-
-    /// Moves the values to their tiles' indexes, as the set's `moves` say,
-    /// and drops those of the tiles that left.
-    fn apply_moves(&mut self) {
-        let (values, permutation) = (&mut self.values, &self.set.permutation);
-        values.resize_with(permutation.len(), || None);
-        for index in 0..permutation.len() {
-            // Where the value that the index takes is now: the indexes
-            // before this one took theirs, and moved the values they had
-            // to where they took them from.
-            let mut from = permutation[index];
-            while from < index {
-                from = permutation[from];
-            }
-            values.swap(index, from);
-        }
-        values.truncate(self.set.moves.len());
-        for (value, old) in values.iter_mut().zip(&self.set.moves) {
-            if old.is_none() {
-                *value = None;
-            }
+            self.set.moves.apply(&mut self.values, || None);
         }
     }
 
     /// Drops the entries of the tiles.
     pub(crate) fn clear_tiles(&mut self) {
-        self.set.tiles.clear();
+        self.set.clear();
         self.values.clear();
     }
 
@@ -269,7 +289,7 @@ impl<T> TileMap<T> {
     /// of theirs.
     pub(crate) fn shift_wraps(&mut self, wrap_delta: i16) {
         if self.set.shift_wraps(wrap_delta) {
-            self.apply_moves();
+            self.set.moves.apply(&mut self.values, || None);
         }
     }
 
@@ -288,20 +308,20 @@ impl<T> TileMap<T> {
     #[cfg(test)]
     #[must_use]
     pub(crate) fn has_tile(&self, tile_id: &OverscaledTileID) -> bool {
-        self.set.tiles.contains_key(tile_id)
+        self.set.index_of(tile_id).is_some()
     }
 
     /// What the layer keeps of `tile_id`, if the tile is one of the frame's
     /// and the layer keeps anything of it.
     #[must_use]
     pub(crate) fn get(&self, tile_id: &OverscaledTileID) -> Option<&T> {
-        self.values.get(self.set.tiles.index_of(tile_id)?)?.as_ref()
+        self.values.get(self.set.index_of(tile_id)?)?.as_ref()
     }
 
     /// What the layer keeps of `tile_id`, if the tile is one of the frame's
     /// and the layer keeps anything of it.
     pub(crate) fn get_mut(&mut self, tile_id: &OverscaledTileID) -> Option<&mut T> {
-        self.values.get_mut(self.set.tiles.index_of(tile_id)?)?.as_mut()
+        self.values.get_mut(self.set.index_of(tile_id)?)?.as_mut()
     }
 
     /// Makes `value` what the layer keeps of `tile_id`, if the tile is one
@@ -312,16 +332,15 @@ impl<T> TileMap<T> {
 
     /// Drops what the layer keeps of `tile_id`.
     pub(crate) fn drop_value(&mut self, tile_id: &OverscaledTileID) {
-        if let Some(entry) = self.entry(tile_id) {
-            *entry.value = None;
+        if let Some(value) = self.set.index_of(tile_id).and_then(|index| self.values.get_mut(index)) {
+            *value = None;
         }
     }
 
     /// The entry of `tile_id`, if the tile is one of the frame's.
     pub(crate) fn entry(&mut self, tile_id: &OverscaledTileID) -> Option<TileEntry<'_, T>> {
-        let index = self.set.tiles.index_of(tile_id)?;
-        let (_, state) = self.set.tiles.get_index_mut(index)?;
-        Some(TileEntry { state, value: self.values.get_mut(index)? })
+        let index = self.set.index_of(tile_id)?;
+        Some(TileEntry { state: self.set.states.get_mut(index)?, value: self.values.get_mut(index)? })
     }
 }
 
@@ -1149,10 +1168,12 @@ mod tests {
         assert!(!tiles.has_tile(&ids[2]));
     }
 
-    /// Each tile keeps its value from any set of tiles to any other.
+    /// Each tile keeps its value and bucket from any set of tiles to any
+    /// other.
     #[test]
     fn values_stay_through_every_change() {
         let ids: Vec<OverscaledTileID> = (0..5).map(|x| OverscaledTileID::with_zxy(3, 0, 3, x, 2)).collect();
+        let buckets: Vec<SimpleIdentity> = ids.iter().map(|_| SimpleIdentity::new()).collect();
         let subsets = |mask: u32| ids.iter().enumerate().filter(move |(i, _)| mask & (1 << i) != 0).map(|(_, id)| *id);
         let mut tiles = TileMap::<usize>::default();
         for from in 0..32 {
@@ -1160,6 +1181,9 @@ mod tests {
                 tiles.clear_tiles();
                 tiles.set_tiles(subsets(from));
                 for (i, id) in ids.iter().enumerate() {
+                    if let Some(mut entry) = tiles.entry(id) {
+                        entry.set_bucket(buckets[i]);
+                    }
                     set(&mut tiles, id, i);
                 }
                 tiles.set_tiles(subsets(to).rev());
@@ -1167,6 +1191,11 @@ mod tests {
                 let expected: Vec<Option<usize>> =
                     (0..ids.len()).map(|i| (from & to & (1 << i) != 0).then_some(i)).collect();
                 assert_eq!(expected, values, "from {from:05b} to {to:05b}");
+                let kept_buckets: Vec<Option<SimpleIdentity>> =
+                    ids.iter().map(|id| bucket_of(&mut tiles, id)).collect();
+                let expected: Vec<Option<SimpleIdentity>> =
+                    (0..ids.len()).map(|i| (from & to & (1 << i) != 0).then_some(buckets[i])).collect();
+                assert_eq!(expected, kept_buckets, "from {from:05b} to {to:05b}");
             }
         }
     }
