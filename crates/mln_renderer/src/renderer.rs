@@ -524,7 +524,7 @@ impl Renderer {
 
         // Give the layers a chance to upload
         orchestrator.upload_draw_groups(context);
-        orchestrator.globe_depth().draws.upload(context);
+        orchestrator.globe_depth().upload(context);
         if let Some(sky) = orchestrator.sky() {
             sky.upload(context);
         }
@@ -539,7 +539,7 @@ impl Renderer {
         // Upload the debug overlays
         // layers: debug
         for debug in orchestrator.debug_layers() {
-            debug.draws.upload(context);
+            debug.upload(context);
         }
 
         // The number of draw groups, which sets the depth range of the passes;
@@ -714,7 +714,7 @@ impl Renderer {
 
             // The planet goes into the depth buffer first, so 3D geometry
             // behind the horizon stays hidden.
-            orchestrator.globe_depth().draws.render(&mut *gpu, &mut parameters);
+            orchestrator.globe_depth().render(&mut *gpu, &mut parameters);
 
             // draw the draw groups, translucent pass
             parameters.current_layer = (num_draw_groups as u32).wrapping_sub(1);
@@ -734,7 +734,7 @@ impl Renderer {
         parameters.current_layer = 0;
         // layers: debug
         for debug in orchestrator.debug_layers() {
-            debug.draws.render(&mut *gpu, &mut parameters);
+            debug.render(&mut *gpu, &mut parameters);
             parameters.current_layer += 1;
         }
 

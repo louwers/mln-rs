@@ -6,6 +6,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use mln_gfx::gpu::Gpu;
 use mln_gfx::index_vector::{IndexVectorBase, IndexVectorBasePtr};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
@@ -32,7 +33,8 @@ use super::{cast_matrix, shared_vertices};
 use crate::bucket::{Bucket, NoBucket};
 use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
-use crate::draw_cache::{DrawList, DrawSlots, FrameDraw, FrameDraws, KeptDraw, LayerDrawing};
+use crate::draw_cache::{DrawList, DrawOrder, FrameDraw, FrameDraws, KeptDraw, LayerDrawing, LayerDraws, TileMap};
+use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
 use crate::gfx::texture2d::Texture2DPtr;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
@@ -57,9 +59,76 @@ pub(crate) struct RasterTile {
     built: Instant,
 }
 
-impl DrawSlots for RasterTile {
-    fn slot_mut(&mut self, slot: u32) -> Option<&mut DrawObjects> {
-        self.draw.slot_mut(slot)
+/// What a frame's draw of the layer draws.
+#[derive(Clone, Copy)]
+enum RasterPart {
+    /// The draw of its tile.
+    Tile,
+    /// The image source's draw at the index.
+    Image(usize),
+}
+
+/// What the layer keeps of its draws: those of the tiles, and of an image
+/// source's image, one for each tile it is drawn in.
+#[derive(Default)]
+struct RasterObjects {
+    tiles: TileMap<RasterTile>,
+    images: Vec<KeptDraw>,
+}
+
+/// The layer's drawing: the GPU objects of its draws, and its draws of the
+/// frame.
+#[derive(Default)]
+pub(crate) struct RasterDrawing {
+    objects: RasterObjects,
+    frame: Option<LayerDraws<RasterPart>>,
+}
+
+impl RasterDrawing {
+    /// The GPU objects of `draw`, `part` of the layer's.
+    fn objects<'a>(
+        objects: &'a mut RasterObjects,
+        draw: &FrameDraw,
+        part: RasterPart,
+    ) -> Option<(&'a mut DrawObjects, Option<&'a AtlasBinding>)> {
+        let draw = match part {
+            RasterPart::Tile => &mut objects.tiles.cache_mut(&draw.tile?)?.draw,
+            RasterPart::Image(index) => objects.images.get_mut(index)?,
+        };
+        Some((&mut draw.objects, None))
+    }
+}
+
+impl LayerDrawing for RasterDrawing {
+    type Tile = RasterTile;
+
+    fn tiles(&mut self) -> &mut TileMap<RasterTile> {
+        &mut self.objects.tiles
+    }
+
+    fn groups(&self) -> [Option<&FrameDraws>; 2] {
+        [self.frame.as_ref().map(|frame| &frame.frame), None]
+    }
+
+    fn clear(&mut self) {
+        self.objects.tiles.clear();
+        self.objects.images.clear();
+        if let Some(frame) = &mut self.frame {
+            frame.clear();
+        }
+    }
+
+    fn upload(&mut self, context: &Context) {
+        if let Some(frame) = &self.frame {
+            frame.upload(&mut self.objects, Self::objects, context);
+        }
+    }
+
+    fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
+        if let Some(frame) = &self.frame {
+            frame.render(&mut self.objects, Self::objects, gpu, parameters);
+            order.step(parameters);
+        }
     }
 }
 
@@ -85,10 +154,10 @@ pub(crate) struct RenderRasterLayer {
     values: LayerValues<Raster>,
     /// The draws of the tiles, and of an image source's image, one for each
     /// tile it is drawn in.
-    drawing: LayerDrawing<RasterTile, Vec<KeptDraw>>,
+    drawing: RasterDrawing,
     /// The frame's draws as the update makes them, with their uniform blocks
     /// and projections.
-    draw_list: DrawList<(RasterDrawableUBO, ProjectionUBO)>,
+    draw_list: DrawList<(RasterDrawableUBO, ProjectionUBO), RasterPart>,
 
     raster_shader: Option<ShaderProgramPtr>,
 
@@ -107,7 +176,7 @@ impl RenderRasterLayer {
         RenderRasterLayer {
             base,
             values,
-            drawing: LayerDrawing::default(),
+            drawing: RasterDrawing::default(),
             draw_list: DrawList::default(),
             raster_shader: None,
             static_geometry: None,
@@ -169,9 +238,9 @@ impl RenderRasterLayer {
         image_data: ImageSourceRenderData<'_>,
         paint_parameters: &PaintParameters<'_>,
     ) {
-        self.drawing.caches.layer_cache_mut().clear();
+        self.drawing.objects.images.clear();
         if let Some(frame) = &mut self.drawing.frame {
-            frame.draws.clear();
+            frame.clear();
         }
 
         // The bucket is missing until the image loads.
@@ -184,9 +253,9 @@ impl RenderRasterLayer {
         }
 
         // TODO: Share textures
-        let mut image_draws = Vec::new();
         let sampler = self.sampler_state();
-        for (slot, tile_id) in image_data.tile_ids.iter().enumerate() {
+        let image_draws = &mut self.drawing.objects.images;
+        for (index, tile_id) in image_data.tile_ids.iter().enumerate() {
             let geometry = {
                 // The bucket's own geometry, which an image source's bucket
                 // always has.
@@ -202,11 +271,10 @@ impl RenderRasterLayer {
             let texture = Self::bucket_texture(&mut self.textures, sampler, context, bucket);
             let draw = KeptDraw::new(new_objects(raster_shader, geometry, texture));
             let uniforms = Self::uniforms(tile_id, paint_parameters);
-            self.draw_list.push(FrameDraw::new(None, slot as u32, draw.id), uniforms);
+            self.draw_list.push_part(FrameDraw::new(None, draw.id), RasterPart::Image(index), uniforms);
             image_draws.push(draw);
         }
 
-        *self.drawing.caches.layer_cache_mut() = image_draws;
         self.finish_frame_draws(context);
     }
 
@@ -229,8 +297,8 @@ impl RenderRasterLayer {
     /// writes the layer's buffers of them.
     fn finish_frame_draws(&mut self, context: &Context) {
         let composite = self.composite();
-        let frame = self.drawing.frame.get_or_insert_with(FrameDraws::new);
-        frame.composite = composite;
+        let frame = self.drawing.frame.get_or_insert_with(LayerDraws::new);
+        frame.frame.composite = composite;
         let evaluated = &self.values.evaluated.paint;
         self.draw_list.finish(frame, context, |writer| {
             let props = RasterEvaluatedPropsUBO {
@@ -326,8 +394,7 @@ fn raster_vertex_attributes(vertices: &VertexVectorBasePtr) -> VertexAttributeAr
 
 impl TypedLayer for RenderRasterLayer {
     type Type = Raster;
-    type Tile = RasterTile;
-    type Shared = Vec<KeptDraw>;
+    type Drawing = RasterDrawing;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -400,7 +467,7 @@ impl RenderLayer for RenderRasterLayer {
         let Some(render_tiles) = render_tiles else {
             return;
         };
-        self.drawing.frame.get_or_insert_with(FrameDraws::new);
+        self.drawing.frame.get_or_insert_with(LayerDraws::new);
 
         let sampler = self.sampler_state();
         let static_geometry = self.static_geometry.get_or_insert_with(|| StaticGeometry {
@@ -425,20 +492,20 @@ impl RenderLayer for RenderRasterLayer {
 
             let bucket = tile.bucket(&*self.base.style).filter(|b| b.has_data());
             let Some(bucket) = bucket.and_then(|bucket| bucket.downcast_ref::<RasterBucket>()) else {
-                self.drawing.caches.drop_cache(&tile_id);
+                self.drawing.objects.tiles.drop_cache(&tile_id);
                 continue;
             };
 
             // A draw of another bucket, or of the bucket's geometry before
             // its mask changed, is built again.
             let geometry_modified = bucket.geometry().last_modified;
-            if self.drawing.caches.set_bucket(&tile_id, bucket.base.bucket_id)
-                || self.drawing.caches.cache_mut(&tile_id).is_some_and(|cached| cached.built < geometry_modified)
+            if self.drawing.objects.tiles.set_bucket(&tile_id, bucket.base.bucket_id)
+                || self.drawing.objects.tiles.cache_mut(&tile_id).is_some_and(|cached| cached.built < geometry_modified)
             {
-                self.drawing.caches.drop_cache(&tile_id);
+                self.drawing.objects.tiles.drop_cache(&tile_id);
             }
 
-            if self.drawing.caches.cache_mut(&tile_id).is_none() {
+            if self.drawing.objects.tiles.cache_mut(&tile_id).is_none() {
                 let texture = Self::bucket_texture(&mut self.textures, sampler, context, bucket);
 
                 // The bucket only has geometry for a masked tile; any other
@@ -479,14 +546,14 @@ impl RenderLayer for RenderRasterLayer {
                     )
                 };
                 let objects = new_objects(&raster_shader, draw_geometry, texture);
-                self.drawing
-                    .caches
-                    .set_cache(&tile_id, RasterTile { draw: KeptDraw::new(objects), built: Instant::now() });
+                let built = RasterTile { draw: KeptDraw::new(objects), built: Instant::now() };
+                self.drawing.objects.tiles.set_cache(&tile_id, built);
             }
 
-            if let Some(cached) = self.drawing.caches.cache_mut(&tile_id) {
+            if let Some(cached) = self.drawing.objects.tiles.cache_mut(&tile_id) {
                 let draw = cached.draw.frame_draw(Some(tile_id));
-                self.draw_list.push(draw, Self::uniforms(&tile_id.to_unwrapped(), paint_parameters));
+                let uniforms = Self::uniforms(&tile_id.to_unwrapped(), paint_parameters);
+                self.draw_list.push_part(draw, RasterPart::Tile, uniforms);
             }
         }
 

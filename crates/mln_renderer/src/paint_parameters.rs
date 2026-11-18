@@ -23,6 +23,28 @@ use crate::pattern_atlas::PatternAtlas;
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 
+/// A draw group drawing into the layer composite's texture, from
+/// [`PaintParameters::begin_composited`] to
+/// [`PaintParameters::end_composited`].
+pub(crate) struct Composited {
+    group: SimpleIdentity,
+    /// The frame's pass, which resumes after the group's draws.
+    frame: OpenPass,
+    layer_composite: LayerComposite,
+    /// The frame's tile masks and next stencil value, which the group's
+    /// draws don't share; `None` where the texture's pass didn't begin.
+    frame_stencil: Option<(VecMap<UnwrappedTileID, i32>, i32)>,
+}
+
+impl Composited {
+    /// Whether the group draws: false where the texture's pass didn't
+    /// begin.
+    #[must_use]
+    pub(crate) fn draws(&self) -> bool {
+        self.frame_stencil.is_some()
+    }
+}
+
 pub(crate) struct TransformParameters {
     pub(crate) proj_matrix: Mat4,
     pub(crate) aligned_proj_matrix: Mat4,
@@ -218,24 +240,16 @@ impl<'a> PaintParameters<'a> {
         }
     }
 
-    /// Runs `draw` into the layer composite's texture, rather than into the
-    /// pass begun on `gpu`, the context's, and then composites the texture
-    /// onto that pass as the draw group `group` asks. Runs `draw` into the
-    /// pass begun where the frame doesn't composite `group`.
-    ///
-    /// `draw` starts with the texture's stencil clear, and the pass begun
-    /// keeps its stencil as it was.
-    pub(crate) fn draw_composited(
-        &mut self,
-        gpu: &mut dyn Gpu,
-        group: SimpleIdentity,
-        draw: impl FnOnce(&mut dyn Gpu, &mut Self),
-    ) {
-        let Some((frame, composite)) =
-            self.open_pass.get().zip(self.layer_composite.pass()).filter(|_| self.layer_composite.composites(group))
-        else {
-            return draw(gpu, self);
-        };
+    /// Begins drawing the draw group `group` into the layer composite's
+    /// texture, rather than into the pass begun on `gpu`, the context's,
+    /// where the frame composites `group`; `None` where it doesn't, and the
+    /// group draws into the pass begun. The group draws only where
+    /// [`Composited::draws`] says, starting with the texture's stencil
+    /// clear, and [`end_composited`](Self::end_composited) then composites
+    /// the texture onto the pass begun, whose stencil stays as it was.
+    pub(crate) fn begin_composited(&mut self, gpu: &mut dyn Gpu, group: SimpleIdentity) -> Option<Composited> {
+        let (frame, composite) =
+            self.open_pass.get().zip(self.layer_composite.pass()).filter(|_| self.layer_composite.composites(group))?;
         let mut layer_composite = std::mem::take(&mut self.layer_composite);
         let mut drawn = self.end_pass(gpu);
         if drawn.is_ok()
@@ -247,12 +261,25 @@ impl<'a> PaintParameters<'a> {
                 .and_then(|()| self.end_pass(gpu));
         }
         drawn = drawn.and_then(|()| self.begin_pass(gpu, composite));
-        if let Err(error) = &drawn {
-            Log::error(Event::Render, format!("Beginning the layer composite's pass failed: {error}"));
-        } else {
-            let tile_clipping_mask_ids = std::mem::take(&mut self.tile_clipping_mask_ids);
-            let next_stencil_id = std::mem::replace(&mut self.next_stencil_id, 1);
-            draw(gpu, self);
+        let frame_stencil = match drawn {
+            Ok(()) => Some((
+                std::mem::take(&mut self.tile_clipping_mask_ids),
+                std::mem::replace(&mut self.next_stencil_id, 1),
+            )),
+            Err(error) => {
+                Log::error(Event::Render, format!("Beginning the layer composite's pass failed: {error}"));
+                None
+            }
+        };
+        Some(Composited { group, frame, layer_composite, frame_stencil })
+    }
+
+    /// Ends the draws `begin_composited` began, and composites what they drew
+    /// onto the frame's pass, which this begins again.
+    pub(crate) fn end_composited(&mut self, gpu: &mut dyn Gpu, composited: Composited) {
+        let Composited { group, frame, mut layer_composite, frame_stencil } = composited;
+        let drawn = frame_stencil.is_some();
+        if let Some((tile_clipping_mask_ids, next_stencil_id)) = frame_stencil {
             self.tile_clipping_mask_ids = tile_clipping_mask_ids;
             self.next_stencil_id = next_stencil_id;
             if let Err(error) = self.end_pass(gpu) {
@@ -261,7 +288,7 @@ impl<'a> PaintParameters<'a> {
         }
         if let Err(error) = self.begin_pass(gpu, frame.loading(LoadOp::Load)) {
             Log::error(Event::Render, format!("Resuming the {} pass failed: {error}", frame.label));
-        } else if drawn.is_ok() {
+        } else if drawn {
             layer_composite.draw(gpu, self, group);
         }
         self.layer_composite = layer_composite;

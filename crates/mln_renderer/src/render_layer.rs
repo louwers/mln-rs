@@ -19,7 +19,7 @@ use mln_util::mat4::Mat4;
 
 use crate::bucket::Bucket;
 use crate::buckets::symbol_bucket::SymbolBucket;
-use crate::draw_cache::{ChangedBuckets, DrawGroup, DrawOrder, DrawSlots, LayerDrawing};
+use crate::draw_cache::{ChangedBuckets, DrawGroup, DrawOrder, LayerDrawing};
 use crate::gfx::context::Context;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType};
 use crate::line_atlas::LineAtlas;
@@ -368,23 +368,22 @@ impl<T: LayerType> LayerValues<T> {
 pub(crate) struct Parts<'a, L: TypedLayer + ?Sized> {
     pub(crate) base: &'a RenderLayerBase,
     pub(crate) values: &'a LayerValues<L::Type>,
-    pub(crate) drawing: &'a LayerDrawing<L::Tile, L::Shared>,
+    pub(crate) drawing: &'a L::Drawing,
 }
 
 /// The parts of a render layer of a [`TypedLayer`] `L`, to change.
 pub(crate) struct PartsMut<'a, L: TypedLayer + ?Sized> {
     pub(crate) base: &'a mut RenderLayerBase,
     pub(crate) values: &'a mut LayerValues<L::Type>,
-    pub(crate) drawing: &'a mut LayerDrawing<L::Tile, L::Shared>,
+    pub(crate) drawing: &'a mut L::Drawing,
 }
 
 /// A render layer whose values are of the layer type `Type`, and that keeps
-/// the GPU objects of its draws in caches of `Tile` for each tile and of
-/// `Shared` for the draws no tile holds. Its parts give it [`LayerParts`].
+/// its drawing, the GPU objects of its draws and its draw groups of the
+/// frame, in a `Drawing` of its own type. Its parts give it [`LayerParts`].
 pub(crate) trait TypedLayer {
     type Type: LayerType;
-    type Tile: DrawSlots;
-    type Shared: DrawSlots + Default;
+    type Drawing: LayerDrawing;
 
     fn parts(&self) -> Parts<'_, Self>;
     fn parts_mut(&mut self) -> PartsMut<'_, Self>;
@@ -392,8 +391,8 @@ pub(crate) trait TypedLayer {
 
 /// What a render layer does with its parts, whatever its type: its base,
 /// its values, which this transitions without knowing their type, and its
-/// drawing, whose caches this keeps for its tiles and whose draws this
-/// issues.
+/// drawing, which keeps what the layer keeps of its tiles and uploads and
+/// draws its draw groups.
 pub(crate) trait LayerParts {
     fn base(&self) -> &RenderLayerBase;
     fn base_mut(&mut self) -> &mut RenderLayerBase;
@@ -480,20 +479,19 @@ impl<L: TypedLayer> LayerParts for L {
     }
 
     fn set_tiles(&mut self, tiles: Option<LayerTiles<'_>>) {
-        let PartsMut { drawing, .. } = self.parts_mut();
-        let caches = &mut drawing.caches;
+        let tiles_kept = self.parts_mut().drawing.tiles();
         match tiles {
-            Some(tiles) => caches.set_tiles(tiles.render_tiles().map(|tile| *tile.get_overscaled_tile_id())),
-            None => caches.clear_tiles(),
+            Some(tiles) => tiles_kept.set_tiles(tiles.render_tiles().map(|tile| *tile.get_overscaled_tile_id())),
+            None => tiles_kept.clear_tiles(),
         }
     }
 
     fn mark_changed(&mut self, changed: &ChangedBuckets) {
-        self.parts_mut().drawing.caches.mark_changed(changed);
+        self.parts_mut().drawing.tiles().mark_changed(changed);
     }
 
     fn handle_wrap_jump(&mut self, wrap_delta: i16) {
-        self.parts_mut().drawing.caches.shift_wraps(wrap_delta);
+        self.parts_mut().drawing.tiles().shift_wraps(wrap_delta);
     }
 
     fn remove_all_draws(&mut self) {
@@ -503,7 +501,7 @@ impl<L: TypedLayer> LayerParts for L {
     fn visit_draw_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>)) {
         let Parts { base, drawing, .. } = self.parts();
         if base.is_renderable {
-            drawing.groups().for_each(|frame| visit(DrawGroup::Draws(frame)));
+            drawing.groups().into_iter().flatten().for_each(|frame| visit(DrawGroup::Draws(frame)));
         }
     }
 

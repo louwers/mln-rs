@@ -21,7 +21,7 @@ use mln_util::size::Size;
 use mln_util::vectors::Vec4;
 
 use crate::draw::{DrawGeometry, DrawObjects, Textures, raw_vertices};
-use crate::draw_cache::{DrawCaches, DrawDepth, Draws, FrameDraw, KeptDraw};
+use crate::draw_cache::{DrawDepth, FrameDraw, KeptDraw, SingleDraw};
 use crate::gfx::context::Context;
 use crate::render_light::EvaluatedLight;
 use crate::render_sky::EvaluatedSky;
@@ -32,7 +32,7 @@ const SKY_SHADER_NAME: &str = "SkyShader";
 const ATMOSPHERE_SHADER_NAME: &str = "AtmosphereShader";
 
 /// A draw over the whole view, with the buffers it binds.
-pub(crate) type FullscreenDraw = Draws<(), KeptDraw>;
+pub(crate) type FullscreenDraw = SingleDraw;
 
 /// A draw of `shader`, which reads the view's corners as the vertex attribute
 /// `vertex_attribute`, in the translucent pass at `depth`.
@@ -57,9 +57,7 @@ fn fullscreen_draw(shader: &ShaderProgramPtr, vertex_attribute: usize, depth: Dr
     );
     let draw = KeptDraw::new(objects);
     let frame_draw = FrameDraw { depth, ..draw.frame_draw(None) };
-    let mut fullscreen = Draws::new(DrawCaches::of_layer(draw));
-    fullscreen.frame.draws.push(frame_draw);
-    fullscreen
+    SingleDraw::new(draw.objects, frame_draw)
 }
 
 /// The direction of the sun in the globe's frame, where the atmosphere traces

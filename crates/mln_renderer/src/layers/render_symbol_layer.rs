@@ -1,6 +1,6 @@
 // A tile's draws get copies of the bucket's vertex vectors. When placement,
 // sorting or feature state change the bucket (the changes the tile's entry
-// in the layer's `DrawCaches` collects), `update` replaces just those
+// in the layer's `TileMap` collects), `update` replaces just those
 // attributes (opacity, dynamic positions, binders) and the triangle indices
 // of the tile's draws.
 
@@ -8,6 +8,7 @@ use std::any::Any;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
@@ -52,7 +53,8 @@ use crate::buckets::symbol_bucket::{
 };
 use crate::draw::{DrawGeometry, DrawObjects, Textures, copy_shared_attributes};
 use crate::draw_cache::{
-    BucketChanges, DrawDepth, DrawList, DrawSlots, FrameDraw, FrameDraws, KeptDraw, LayerDrawing, UniformWriter,
+    BucketChanges, DrawDepth, DrawList, DrawOrder, FrameDraw, FrameDraws, KeptDraw, LayerDrawing, LayerDraws, TileMap,
+    UniformWriter,
 };
 use crate::geometry::feature_index::FeatureIndex;
 use crate::gfx::atlas_binding::AtlasBinding;
@@ -413,25 +415,92 @@ pub(crate) struct SymbolTile {
     collision: Vec<CollisionDraw>,
 }
 
-impl SymbolTile {
-    /// The slot of the collision draw at `index`.
-    fn collision_slot(&self, index: usize) -> u32 {
-        (self.draws.len() + index) as u32
+/// The layer's drawing: what it keeps of each tile, its draws of the frame,
+/// each of the draw at its index among its tile's, and as its overlay those
+/// of the tiles' collision boxes and circles, from the first tile that has
+/// any, each of the collision draw at its index among its tile's.
+#[derive(Default)]
+pub(crate) struct SymbolDrawing {
+    tiles: TileMap<SymbolTile>,
+    frame: Option<LayerDraws<usize>>,
+    overlay: Option<LayerDraws<usize>>,
+}
+
+impl SymbolDrawing {
+    /// The GPU objects of `draw`, the draw at `index` of its tile, with what
+    /// gives them the textures of the tile's atlases.
+    fn objects<'a>(
+        tiles: &'a mut TileMap<SymbolTile>,
+        draw: &FrameDraw,
+        index: usize,
+    ) -> Option<(&'a mut DrawObjects, Option<&'a AtlasBinding>)> {
+        let draw = tiles.cache_mut(&draw.tile?)?.draws.get_mut(index)?;
+        Some((&mut draw.objects, Some(&*draw.atlases)))
+    }
+
+    /// The GPU objects of `draw`, the collision draw at `index` of its tile.
+    fn collision_objects<'a>(
+        tiles: &'a mut TileMap<SymbolTile>,
+        draw: &FrameDraw,
+        index: usize,
+    ) -> Option<(&'a mut DrawObjects, Option<&'a AtlasBinding>)> {
+        Some((&mut tiles.cache_mut(&draw.tile?)?.collision.get_mut(index)?.draw.objects, None))
+    }
+
+    /// Draws the pass's draws of the layer's draw group, if it has it.
+    fn render_frame(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
+        if let Some(frame) = &self.frame {
+            frame.render(&mut self.tiles, Self::objects, gpu, parameters);
+            order.step(parameters);
+        }
+    }
+
+    /// Draws the pass's draws of the overlay, if the layer has it.
+    fn render_overlay(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
+        if let Some(overlay) = &self.overlay {
+            overlay.render(&mut self.tiles, Self::collision_objects, gpu, parameters);
+            order.step(parameters);
+        }
     }
 }
 
-/// The draws in the slots of their indexes, and the collision draws in the
-/// slots after them.
-impl DrawSlots for SymbolTile {
-    fn slot_mut(&mut self, slot: u32) -> Option<&mut DrawObjects> {
-        Some(self.slot_with_atlases(slot)?.0)
+impl LayerDrawing for SymbolDrawing {
+    type Tile = SymbolTile;
+
+    fn tiles(&mut self) -> &mut TileMap<SymbolTile> {
+        &mut self.tiles
     }
 
-    fn slot_with_atlases(&mut self, slot: u32) -> Option<(&mut DrawObjects, Option<&AtlasBinding>)> {
-        let slot = slot as usize;
-        match slot.checked_sub(self.draws.len()) {
-            None => self.draws.get_mut(slot).map(|draw| (&mut draw.objects, Some(&*draw.atlases))),
-            Some(index) => self.collision.get_mut(index).map(|draw| (&mut draw.draw.objects, None)),
+    fn groups(&self) -> [Option<&FrameDraws>; 2] {
+        [self.frame.as_ref().map(|frame| &frame.frame), self.overlay.as_ref().map(|overlay| &overlay.frame)]
+    }
+
+    fn clear(&mut self) {
+        self.tiles.clear();
+        for draws in [&mut self.frame, &mut self.overlay].into_iter().flatten() {
+            draws.clear();
+        }
+    }
+
+    fn upload(&mut self, context: &Context) {
+        if let Some(frame) = &self.frame {
+            frame.upload(&mut self.tiles, Self::objects, context);
+        }
+        if let Some(overlay) = &self.overlay {
+            overlay.upload(&mut self.tiles, Self::collision_objects, context);
+        }
+    }
+
+    fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
+        match order {
+            DrawOrder::BottomUp => {
+                self.render_frame(gpu, parameters, order);
+                self.render_overlay(gpu, parameters, order);
+            }
+            DrawOrder::TopDown => {
+                self.render_overlay(gpu, parameters, order);
+                self.render_frame(gpu, parameters, order);
+            }
         }
     }
 }
@@ -616,11 +685,11 @@ impl LayerType for Symbol {
 pub(crate) struct RenderSymbolLayer {
     base: RenderLayerBase,
     values: LayerValues<Symbol>,
-    /// The layer's draws, and as its overlay those of the tiles' collision
-    /// boxes and circles, from the first tile that has any.
-    drawing: LayerDrawing<SymbolTile>,
+    drawing: SymbolDrawing,
     /// The frame's draws as the update makes them.
-    draw_list: DrawList<SymbolUniforms>,
+    draw_list: DrawList<SymbolUniforms, usize>,
+    /// The overlay's draws as the update makes them.
+    collision_list: DrawList<(), usize>,
     /// The segments of the tiles the update builds draws of, as it sorts
     /// them, kept from frame to frame for their memory.
     renderable_segments: Vec<SegmentGroup>,
@@ -766,8 +835,9 @@ impl RenderSymbolLayer {
         RenderSymbolLayer {
             base,
             values,
-            drawing: LayerDrawing::default(),
+            drawing: SymbolDrawing::default(),
             draw_list: DrawList::default(),
+            collision_list: DrawList::default(),
             renderable_segments: Vec::new(),
             placement_data: Vec::new(),
             follower_data: Vec::new(),
@@ -798,14 +868,14 @@ impl RenderSymbolLayer {
             has_collision |= self.add_collision_draws(&mut collision, bucket, evaluated, is_text);
         }
         if has_collision {
-            self.drawing.overlay.get_or_insert_with(FrameDraws::new);
-            if self.drawing.caches.cache_mut(tile_id).is_none() {
-                self.drawing.caches.set_cache(tile_id, SymbolTile::default());
+            self.drawing.overlay.get_or_insert_with(LayerDraws::new);
+            if self.drawing.tiles.cache_mut(tile_id).is_none() {
+                self.drawing.tiles.set_cache(tile_id, SymbolTile::default());
             }
-            if let Some(cached) = self.drawing.caches.cache_mut(tile_id) {
+            if let Some(cached) = self.drawing.tiles.cache_mut(tile_id) {
                 cached.collision = collision;
             }
-        } else if let Some(cached) = self.drawing.caches.cache_mut(tile_id) {
+        } else if let Some(cached) = self.drawing.tiles.cache_mut(tile_id) {
             cached.collision.clear();
         }
     }
@@ -1029,37 +1099,30 @@ impl RenderSymbolLayer {
     ) {
         let layer_id = self.base.style.base().id.as_str();
         let layer = &*self.values.evaluated;
-        let mut collision_draws = self.drawing.overlay.as_mut().map(|overlay| {
-            overlay.draws.clear();
-            &mut overlay.draws
-        });
         for tile in tiles {
             let tile_id = tile.id();
-            if let Some(cached) = self.drawing.caches.cache(&tile_id) {
+            if let Some(cached) = self.drawing.tiles.cache(&tile_id) {
                 let bucket = tile.layer_bucket(&*self.base.style).and_then(LayerBucket::bucket::<Symbol>);
                 debug_assert!(bucket.is_some() || cached.draws.is_empty());
-                for (slot, draw) in cached.draws.iter().enumerate().filter(|(_, draw)| draw.visible) {
+                for (index, draw) in cached.draws.iter().enumerate().filter(|(_, draw)| draw.visible) {
                     let Some(uniforms) = bucket
                         .and_then(|bucket| Self::uniforms(layer_id, layer, &tile_id, bucket, draw, paint_parameters))
                     else {
                         continue;
                     };
-                    let frame_draw = FrameDraw { pass: passes, ..FrameDraw::new(Some(tile_id), slot as u32, draw.id) };
-                    self.draw_list.push(frame_draw, uniforms);
+                    let frame_draw = FrameDraw { pass: passes, ..FrameDraw::new(Some(tile_id), draw.id) };
+                    self.draw_list.push_part(frame_draw, index, uniforms);
                 }
             }
-            if let Some(cached) = self.drawing.caches.cache_mut(&tile_id) {
-                for index in 0..cached.collision.len() {
-                    let slot = cached.collision_slot(index);
-                    let draw = &mut cached.collision[index];
+            if let Some(cached) = self.drawing.tiles.cache_mut(&tile_id) {
+                for (index, draw) in cached.collision.iter_mut().enumerate() {
                     write_collision_uniforms(draw, &tile_id, paint_parameters);
-                    if let Some(collision_draws) = &mut collision_draws {
-                        collision_draws.push(FrameDraw {
-                            pass: passes,
-                            depth: DrawDepth::Off,
-                            ..FrameDraw::new(Some(tile_id), slot, draw.draw.id)
-                        });
-                    }
+                    let frame_draw = FrameDraw {
+                        pass: passes,
+                        depth: DrawDepth::Off,
+                        ..FrameDraw::new(Some(tile_id), draw.draw.id)
+                    };
+                    self.collision_list.push_part(frame_draw, index, ());
                 }
             }
         }
@@ -1069,10 +1132,12 @@ impl RenderSymbolLayer {
         } else {
             self.draw_list.clear();
         }
-        // Each collision draw has its own GPU objects, so no two share an
-        // order.
-        if let Some(collision_draws) = collision_draws {
-            collision_draws.sort_unstable_by_key(FrameDraw::order);
+        // Each collision draw has its own GPU objects and buffers, so no two
+        // share an order, and the overlay's buffers are none.
+        if let Some(overlay) = &mut self.drawing.overlay {
+            self.collision_list.finish(overlay, context, |_| {});
+        } else {
+            self.collision_list.clear();
         }
     }
 }
@@ -1166,8 +1231,7 @@ fn get_collision_vertex_attributes(buffer: &CollisionBuffer) -> VertexAttributeA
 
 impl TypedLayer for RenderSymbolLayer {
     type Type = Symbol;
-    type Tile = SymbolTile;
-    type Shared = ();
+    type Drawing = SymbolDrawing;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -1301,7 +1365,7 @@ impl RenderLayer for RenderSymbolLayer {
             self.remove_all_draws();
             self.draws_passes = passes;
         }
-        self.drawing.frame.get_or_insert_with(FrameDraws::new);
+        self.drawing.frame.get_or_insert_with(LayerDraws::new);
 
         if self.symbol_icon_group.is_none() {
             self.symbol_icon_group = shaders.shader_group(SYMBOL_ICON_SHADER_NAME);
@@ -1346,20 +1410,20 @@ impl RenderLayer for RenderSymbolLayer {
 
             let render_data = super::layer_bucket_for_pass(tile, &*style, passes);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
-                self.drawing.caches.drop_cache(&tile_id);
+                self.drawing.tiles.drop_cache(&tile_id);
                 continue;
             };
             let Some(bucket) = render_data.bucket::<Symbol>() else {
                 continue;
             };
 
-            if self.drawing.caches.bucket(&tile_id).is_some_and(|prev| prev != bucket.base.bucket_id) {
+            if self.drawing.tiles.bucket(&tile_id).is_some_and(|prev| prev != bucket.base.bucket_id) {
                 // The tile's draws were built from another bucket.
-                self.drawing.caches.drop_cache(&tile_id);
+                self.drawing.tiles.drop_cache(&tile_id);
             }
-            self.drawing.caches.set_bucket(&tile_id, bucket.base.bucket_id);
+            self.drawing.tiles.set_bucket(&tile_id, bucket.base.bucket_id);
             // What changed since the draws were built or last refreshed.
-            let refresh = self.drawing.caches.take_changes(&tile_id);
+            let refresh = self.drawing.tiles.take_changes(&tile_id);
 
             debug_assert!(bucket.paint_properties.contains_key(layer_id));
             if !bucket.paint_properties.contains_key(layer_id) {
@@ -1371,7 +1435,7 @@ impl RenderLayer for RenderSymbolLayer {
             };
 
             // A tile the layer keeps draws of refreshes them.
-            if let Some(cached) = self.drawing.caches.cache_mut(&tile_id).filter(|cached| !cached.draws.is_empty()) {
+            if let Some(cached) = self.drawing.tiles.cache_mut(&tile_id).filter(|cached| !cached.draws.is_empty()) {
                 // The draws that read the same attributes are next to each
                 // other, as the update builds them.
                 let geometry = tile.bucket_geometry();
@@ -1614,10 +1678,10 @@ impl RenderLayer for RenderSymbolLayer {
                     visible,
                     atlases: Rc::clone(draw_atlases),
                 };
-                if self.drawing.caches.cache_mut(&tile_id).is_none() {
-                    self.drawing.caches.set_cache(&tile_id, SymbolTile::default());
+                if self.drawing.tiles.cache_mut(&tile_id).is_none() {
+                    self.drawing.tiles.set_cache(&tile_id, SymbolTile::default());
                 }
-                if let Some(cached) = self.drawing.caches.cache_mut(&tile_id) {
+                if let Some(cached) = self.drawing.tiles.cache_mut(&tile_id) {
                     cached.draws.push(draw);
                 }
             }

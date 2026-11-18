@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use geometry::Point;
 use glam::Vec2;
+use mln_gfx::gpu::Gpu;
 use mln_gfx::index_vector::IndexVectorBase;
 use mln_gfx::polyline_generator::{PolylineGenerator, PolylineGeneratorOptions};
 use mln_gfx::projection_variant::ProjectionVariant;
@@ -42,7 +43,8 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use crate::bucket::UploadNeeds;
 use crate::buckets::line_bucket::{LineBucket, LineLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
-use crate::draw_cache::{DrawDepth, DrawSlots, Draws, FrameDraw, KeptDraw};
+use crate::draw_cache::{DrawDepth, FrameDraw, FrameDraws, KeptDraw, upload_objects};
+use crate::gfx::context::Context;
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layers::cast_matrix;
 use crate::paint_parameters::PaintParameters;
@@ -150,35 +152,49 @@ struct DebugDraw {
     draw: KeptDraw,
 }
 
-/// The draws of a debug overlay, in the order they were made, which is the
-/// order they draw in, each in the slot of its index.
-#[derive(Default)]
-pub(crate) struct DebugDraws(Vec<DebugDraw>);
-
-impl DrawSlots for DebugDraws {
-    fn slot_mut(&mut self, slot: u32) -> Option<&mut DrawObjects> {
-        self.0.get_mut(slot as usize).map(|draw| &mut draw.draw.objects)
-    }
-}
-
 /// A debug overlay: polylines over the tiles of the sources, in the color
 /// and width of its type (layers: debug).
 pub(crate) struct DebugLayer {
     properties: LineEvaluatedPropsUBO,
-    /// The overlay's draws, and the frame's draws of them, with the buffers
-    /// they read.
-    pub(crate) draws: Draws<(), DebugDraws>,
+    /// The overlay's draws, in the order they were made, which is the order
+    /// they draw in.
+    draws: Vec<DebugDraw>,
+    /// The frame's draws of the overlay, with the buffers they read: the
+    /// draw at an index is of the overlay's draw at that index.
+    frame: FrameDraws,
 }
 
 impl DebugLayer {
     #[must_use]
     pub(crate) fn new(type_: DebugType) -> Self {
-        DebugLayer { properties: debug_line_properties(type_), draws: Draws::default() }
+        DebugLayer { properties: debug_line_properties(type_), draws: Vec::new(), frame: FrameDraws::new() }
     }
 
     /// The overlay's draws, in drawing order.
     fn draws(&mut self) -> &mut Vec<DebugDraw> {
-        &mut self.draws.caches.layer_cache_mut().0
+        &mut self.draws
+    }
+
+    /// Uploads the GPU objects of the frame's draws.
+    pub(crate) fn upload(&mut self, context: &Context) {
+        for draw in self.draws.iter_mut().take(self.frame.draws.len()) {
+            upload_objects(&mut draw.draw.objects, context);
+        }
+    }
+
+    /// Draws the frame's draws of the pass into the open pass of `gpu`, the
+    /// context's.
+    pub(crate) fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        let Some(pass) = self.frame.begin(gpu, parameters) else {
+            return;
+        };
+        for (index, _) in pass.draws() {
+            match self.draws.get_mut(index) {
+                Some(draw) => pass.draw(gpu, parameters, &mut draw.draw.objects, index, None),
+                None => debug_assert!(false, "a debug draw has no GPU objects"),
+            }
+        }
+        pass.end(gpu, parameters);
     }
 
     /// The tiles with draws of the source `source`.
@@ -197,9 +213,8 @@ impl DebugLayer {
     /// read.
     pub(crate) fn prepare(&mut self, parameters: &PaintParameters<'_>) {
         let context = parameters.context;
-        let Draws { caches, frame } = &mut self.draws;
+        let (draws, frame) = (&self.draws, &mut self.frame);
         frame.draws.clear();
-        let draws = &caches.layer_cache().0;
         if draws.is_empty() {
             return;
         }
@@ -218,7 +233,7 @@ impl DebugLayer {
         let zoom = parameters.state.get_zoom();
         let mut draw_ubos = Vec::with_capacity(draws.len());
         let mut projection_ubos: Vec<ProjectionUBO> = Vec::with_capacity(draws.len());
-        for (slot, draw) in draws.iter().enumerate() {
+        for draw in draws {
             let tile_id = draw.tile.to_unwrapped();
             let projection = get_projection_data(
                 &tile_id,
@@ -244,7 +259,7 @@ impl DebugLayer {
                 pad1: 0.0,
             });
             draw_ubos.push(draw_ubo);
-            let frame_draw = FrameDraw::new(None, slot as u32, draw.draw.id);
+            let frame_draw = FrameDraw::new(None, draw.draw.id);
             frame.draws.push(FrameDraw { depth: DrawDepth::Off, ..frame_draw });
         }
         let buffers = &mut frame.uniform_buffers;

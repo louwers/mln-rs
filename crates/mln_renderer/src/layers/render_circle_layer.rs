@@ -26,7 +26,7 @@ use super::{cast_matrix, refresh_paint_attributes};
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::circle_bucket::{CircleBinders, CircleBucket, CircleLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
-use crate::draw_cache::{DrawList, FrameDraws, KeptDraw, LayerDrawing, UniformWriter};
+use crate::draw_cache::{DrawList, KeptDraw, LayerDraws, TileDraws, UniformWriter};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::circle_layout::CircleLayout;
 use crate::layout::layout::{LayoutParameters, SourceLayer};
@@ -172,7 +172,7 @@ impl LayerType for Circle {
 pub(crate) struct RenderCircleLayer {
     base: RenderLayerBase,
     values: LayerValues<Circle>,
-    drawing: LayerDrawing<KeptDraw>,
+    drawing: TileDraws,
     /// The frame's draws as the update makes them.
     draw_list: DrawList<CircleUniforms>,
     circle_shader_group: Option<ShaderGroupPtr>,
@@ -184,7 +184,7 @@ impl RenderCircleLayer {
         RenderCircleLayer {
             base,
             values,
-            drawing: LayerDrawing::default(),
+            drawing: TileDraws::default(),
             draw_list: DrawList::default(),
             circle_shader_group: None,
         }
@@ -271,8 +271,7 @@ struct CircleUniforms {
 
 impl TypedLayer for RenderCircleLayer {
     type Type = Circle;
-    type Tile = KeptDraw;
-    type Shared = ();
+    type Drawing = TileDraws;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -429,7 +428,7 @@ impl RenderLayer for RenderCircleLayer {
             self.remove_all_draws();
             return;
         };
-        let frame = self.drawing.frame.get_or_insert_with(FrameDraws::new);
+        let frame = self.drawing.frame.get_or_insert_with(LayerDraws::new);
 
         if self.circle_shader_group.is_none() {
             self.circle_shader_group = shaders.shader_group(CIRCLE_SHADER_GROUP_NAME);
@@ -450,7 +449,7 @@ impl RenderLayer for RenderCircleLayer {
 
             let render_data = super::layer_bucket_for_pass(tile, &*self.base.style, RENDER_PASS);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
-                self.drawing.caches.drop_cache(&tile_id);
+                self.drawing.tiles.drop_cache(&tile_id);
                 continue;
             };
             let Some(bucket) = render_data.bucket::<Circle>() else {
@@ -463,16 +462,16 @@ impl RenderLayer for RenderCircleLayer {
             let paint =
                 || paint_vertices(geometry, &binders.interleaved_vertex_buffer, binders.depends_on_feature_state());
 
-            if self.drawing.caches.bucket(&tile_id).is_some_and(|prev| prev != bucket.base.bucket_id) {
+            if self.drawing.tiles.bucket(&tile_id).is_some_and(|prev| prev != bucket.base.bucket_id) {
                 // The tile's draw was built from another bucket.
-                self.drawing.caches.drop_cache(&tile_id);
+                self.drawing.tiles.drop_cache(&tile_id);
             }
-            self.drawing.caches.set_bucket(&tile_id, bucket.base.bucket_id);
+            self.drawing.tiles.set_bucket(&tile_id, bucket.base.bucket_id);
 
             // The draw's attributes point into the bucket's shared vectors,
             // which upload again when they change.
-            let changes = self.drawing.caches.take_changes(&tile_id);
-            if let Some(cached) = self.drawing.caches.cache_mut(&tile_id) {
+            let changes = self.drawing.tiles.take_changes(&tile_id);
+            if let Some(cached) = self.drawing.tiles.cache_mut(&tile_id) {
                 refresh_paint_attributes(&mut cached.objects, changes, |attrs| {
                     read_circle_attributes(attrs, binders, &paint(), evaluated, &mut Default::default());
                 });
@@ -504,10 +503,10 @@ impl RenderLayer for RenderCircleLayer {
                     },
                     Textures::default(),
                 );
-                self.drawing.caches.set_cache(&tile_id, KeptDraw::new(objects));
+                self.drawing.tiles.set_cache(&tile_id, KeptDraw::new(objects));
             }
 
-            let Some(draw) = self.drawing.caches.cache_mut(&tile_id).map(|cached| cached.frame_draw(Some(tile_id)))
+            let Some(draw) = self.drawing.tiles.cache_mut(&tile_id).map(|cached| cached.frame_draw(Some(tile_id)))
             else {
                 continue;
             };

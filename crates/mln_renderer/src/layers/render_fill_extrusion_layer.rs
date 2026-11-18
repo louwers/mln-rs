@@ -18,6 +18,7 @@ use std::mem::offset_of;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use mln_gfx::gpu::Gpu;
 use mln_gfx::index_vector::{IndexVectorBase, IndexVectorBasePtr};
 use mln_gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
 use mln_gfx::shaders::fill_extrusion_layer_ubo::{
@@ -56,10 +57,12 @@ use crate::buckets::fill_extrusion_bucket::{
 };
 use crate::draw::{DrawGeometry, DrawObjects, copy_shared_attributes};
 use crate::draw_cache::{
-    DrawDepth, DrawList, DrawPriority, DrawSlots, FrameDraw, FrameDraws, LayerDrawing, UniformWriter,
+    DrawDepth, DrawList, DrawOrder, DrawPriority, FrameDraw, FrameDraws, LayerDrawing, LayerDraws, TileMap,
+    UniformWriter,
 };
 use crate::frame_projection::zero_to_one_clip_z;
 use crate::gfx::atlas_binding::AtlasBinding;
+use crate::gfx::context::Context;
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::pattern_layout::{PatternLayout, uses_pattern};
@@ -100,14 +103,56 @@ pub(crate) struct ExtrusionTile {
     atlases: Option<AtlasBinding>,
 }
 
-/// Each draw in the slot of its index.
-impl DrawSlots for ExtrusionTile {
-    fn slot_mut(&mut self, slot: u32) -> Option<&mut DrawObjects> {
-        self.draws.get_mut(slot as usize).map(|draw| &mut draw.objects)
+/// The layer's drawing: what it keeps of each tile, and its draws of the
+/// frame, each of the draw at its index among its tile's.
+#[derive(Default)]
+pub(crate) struct ExtrusionDrawing {
+    tiles: TileMap<ExtrusionTile>,
+    frame: Option<LayerDraws<usize>>,
+}
+
+impl ExtrusionDrawing {
+    /// The GPU objects of `draw`, the draw at `index` of its tile, with what
+    /// gives them the texture of the tile's icon atlas.
+    fn objects<'a>(
+        tiles: &'a mut TileMap<ExtrusionTile>,
+        draw: &FrameDraw,
+        index: usize,
+    ) -> Option<(&'a mut DrawObjects, Option<&'a AtlasBinding>)> {
+        let tile = tiles.cache_mut(&draw.tile?)?;
+        Some((&mut tile.draws.get_mut(index)?.objects, tile.atlases.as_ref()))
+    }
+}
+
+impl LayerDrawing for ExtrusionDrawing {
+    type Tile = ExtrusionTile;
+
+    fn tiles(&mut self) -> &mut TileMap<ExtrusionTile> {
+        &mut self.tiles
     }
 
-    fn slot_with_atlases(&mut self, slot: u32) -> Option<(&mut DrawObjects, Option<&AtlasBinding>)> {
-        Some((&mut self.draws.get_mut(slot as usize)?.objects, self.atlases.as_ref()))
+    fn groups(&self) -> [Option<&FrameDraws>; 2] {
+        [self.frame.as_ref().map(|frame| &frame.frame), None]
+    }
+
+    fn clear(&mut self) {
+        self.tiles.clear();
+        if let Some(frame) = &mut self.frame {
+            frame.clear();
+        }
+    }
+
+    fn upload(&mut self, context: &Context) {
+        if let Some(frame) = &self.frame {
+            frame.upload(&mut self.tiles, Self::objects, context);
+        }
+    }
+
+    fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
+        if let Some(frame) = &self.frame {
+            frame.render(&mut self.tiles, Self::objects, gpu, parameters);
+            order.step(parameters);
+        }
     }
 }
 
@@ -183,7 +228,7 @@ fn read_paint_properties(
 
 /// Whether the walls draw as instances of the static quad, rather than as
 /// quads of their own, which a device that rasterizes on the CPU draws.
-pub(crate) fn instanced_walls(context: &crate::gfx::context::Context) -> bool {
+pub(crate) fn instanced_walls(context: &Context) -> bool {
     !context.caps().cpu_rasterizer
 }
 
@@ -308,9 +353,9 @@ impl LayerType for FillExtrusion {
 pub(crate) struct RenderFillExtrusionLayer {
     base: RenderLayerBase,
     values: LayerValues<FillExtrusion>,
-    drawing: LayerDrawing<ExtrusionTile>,
+    drawing: ExtrusionDrawing,
     /// The frame's draws as the update makes them.
-    draw_list: DrawList<ExtrusionUniforms>,
+    draw_list: DrawList<ExtrusionUniforms, usize>,
 
     fill_extrusion_group: Option<ShaderGroupPtr>,
     fill_extrusion_pattern_group: Option<ShaderGroupPtr>,
@@ -333,7 +378,7 @@ impl RenderFillExtrusionLayer {
         RenderFillExtrusionLayer {
             base,
             values,
-            drawing: LayerDrawing::default(),
+            drawing: ExtrusionDrawing::default(),
             draw_list: DrawList::default(),
             fill_extrusion_group: None,
             fill_extrusion_pattern_group: None,
@@ -347,8 +392,7 @@ impl RenderFillExtrusionLayer {
 
 impl TypedLayer for RenderFillExtrusionLayer {
     type Type = FillExtrusion;
-    type Tile = ExtrusionTile;
-    type Shared = ();
+    type Drawing = ExtrusionDrawing;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -423,7 +467,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
                 return;
             }
         };
-        let frame = self.drawing.frame.get_or_insert_with(FrameDraws::new);
+        let frame = self.drawing.frame.get_or_insert_with(LayerDraws::new);
 
         if self.fill_extrusion_group.is_none() {
             self.fill_extrusion_group = shaders.shader_group("FillExtrusionShader");
@@ -486,47 +530,48 @@ impl RenderLayer for RenderFillExtrusionLayer {
 
             let render_data = super::layer_bucket_for_pass(tile, &*self.base.style, RENDER_PASS);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
-                self.drawing.caches.drop_cache(&tile_id);
+                self.drawing.tiles.drop_cache(&tile_id);
                 continue;
             };
             let Some(bucket) = render_data.bucket::<FillExtrusion>() else {
                 continue;
             };
-            if self.drawing.caches.bucket(&tile_id).is_some_and(|prev| prev != bucket.base.bucket_id) {
+            if self.drawing.tiles.bucket(&tile_id).is_some_and(|prev| prev != bucket.base.bucket_id) {
                 // The tile's draws were built from another bucket.
-                self.drawing.caches.drop_cache(&tile_id);
+                self.drawing.tiles.drop_cache(&tile_id);
             }
-            self.drawing.caches.set_bucket(&tile_id, bucket.base.bucket_id);
+            self.drawing.tiles.set_bucket(&tile_id, bucket.base.bucket_id);
 
             let Some(binders) = bucket.paint_property_binders.get(self.base.style.base().id.as_str()) else {
                 continue;
             };
 
-            let changes = self.drawing.caches.take_changes(&tile_id);
-            if let Some(cached) = self.drawing.caches.cache_mut(&tile_id) {
+            let changes = self.drawing.tiles.take_changes(&tile_id);
+            if let Some(cached) = self.drawing.tiles.cache_mut(&tile_id) {
                 if changes.paint {
                     builder.refresh_paint(cached, tile, bucket, binders, &layer.paint);
                 }
             } else {
                 let built = builder.build(tile, bucket, binders, &layer.paint);
-                self.drawing.caches.set_cache(&tile_id, built);
+                self.drawing.tiles.set_cache(&tile_id, built);
             }
-            let Some(cached) = self.drawing.caches.cache(&tile_id) else {
+            let Some(cached) = self.drawing.tiles.cache(&tile_id) else {
                 continue;
             };
-            for (slot, draw) in cached.draws.iter().enumerate() {
+            for (index, draw) in cached.draws.iter().enumerate() {
                 let frame_draw = FrameDraw {
                     priority: draw.priority,
                     pass: RENDER_PASS,
                     depth: DrawDepth::Volume { mask: DepthMaskType::ReadWrite },
                     clip: draw.clip,
-                    ..FrameDraw::new(Some(tile_id), slot as u32, draw.id)
+                    ..FrameDraw::new(Some(tile_id), draw.id)
                 };
-                self.draw_list.push(frame_draw, Self::uniforms(layer, tile, binders, &draw.objects, paint_parameters));
+                let uniforms = Self::uniforms(layer, tile, binders, &draw.objects, paint_parameters);
+                self.draw_list.push_part(frame_draw, index, uniforms);
             }
         }
 
-        frame.set_stencil_tiles(render_tiles.render_tiles().map(|tile| tile.id));
+        frame.frame.set_stencil_tiles(render_tiles.render_tiles().map(|tile| tile.id));
         self.draw_list.finish(frame, context, |writer| Self::write_uniforms(layer, writer, paint_parameters));
     }
 }

@@ -8,6 +8,7 @@ use std::rc::Rc;
 
 use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
+use mln_gfx::gpu::Gpu;
 use mln_gfx::index_vector::IndexVectorBase;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
@@ -19,9 +20,10 @@ use mln_util::range::Range;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use crate::draw::{DrawGeometry, DrawObjects, Textures, raw_vertices};
-use crate::draw_cache::{DrawDepth, DrawList, Draws, FrameDraw, KeptDraw};
+use crate::draw_cache::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDraws, TileMap, kept_tile_draw};
 use crate::gfx::context::Context;
 use crate::globe_tile_mesh::{RawGlobeTileMesh, raw_globe_tile_mesh};
+use crate::paint_parameters::PaintParameters;
 use crate::tile_matrix::to_projection_ubo;
 use crate::update_parameters::UpdateParameters;
 use crate::util::tile_cover::{TileCoverParameters, tile_cover};
@@ -33,9 +35,11 @@ const GLOBE_DEPTH_SHADER_NAME: &str = "GlobeDepthShader";
 /// layers are by their clip Z.
 #[derive(Default)]
 pub(crate) struct GlobeDepthPass {
-    /// The planet's draws, one of each tile of the cover, and the frame's
-    /// draws of them, which draw into depth in the translucent pass.
-    pub(crate) draws: Draws<KeptDraw>,
+    /// The planet's draws, one of each tile of the cover.
+    tiles: TileMap<KeptDraw>,
+    /// The frame's draws of the planet, which draw into depth in the
+    /// translucent pass.
+    frame: LayerDraws,
     /// The frame's draws as the update makes them, with their projections.
     draw_list: DrawList<ProjectionUBO>,
     shader: Option<ShaderProgramPtr>,
@@ -54,8 +58,8 @@ impl GlobeDepthPass {
         needed: bool,
     ) {
         if !state.is_globe_rendering() || !needed {
-            self.draws.caches.clear_tiles();
-            self.draws.frame.draws.clear();
+            self.tiles.clear_tiles();
+            self.frame.clear();
             if !state.is_globe_rendering() {
                 self.meshes.clear();
             }
@@ -68,7 +72,7 @@ impl GlobeDepthPass {
         let Some(shader) = self.shader.clone() else {
             return;
         };
-        let Draws { caches, frame } = &mut self.draws;
+        let caches = &mut self.tiles;
 
         let zoom = state.get_integer_zoom();
         let tile_cover = tile_cover(
@@ -130,6 +134,19 @@ impl GlobeDepthPass {
             self.draw_list.push(FrameDraw { depth, ..draw.frame_draw(Some(*tile_id)) }, projection);
         }
         // The draws draw in the order their GPU objects were made.
-        self.draw_list.finish(frame, context, |writer| writer.storage(ID_PROJECTION_UBO, |projection| *projection));
+        self.draw_list.finish(&mut self.frame, context, |writer| {
+            writer.storage(ID_PROJECTION_UBO, |projection| *projection);
+        });
+    }
+
+    /// Uploads the GPU objects of the frame's draws.
+    pub(crate) fn upload(&mut self, context: &Context) {
+        self.frame.upload(&mut self.tiles, kept_tile_draw, context);
+    }
+
+    /// Draws the frame's draws of the pass into the open pass of `gpu`, the
+    /// context's.
+    pub(crate) fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        self.frame.render(&mut self.tiles, kept_tile_draw, gpu, parameters);
     }
 }

@@ -7,7 +7,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_gfx::gpu::TextureFormat;
+use mln_gfx::gpu::{Gpu, TextureFormat};
 use mln_gfx::index_vector::{IndexVectorBase, IndexVectorBasePtr};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::color_relief_layer_ubo::{
@@ -44,7 +44,11 @@ use super::{cast_matrix, shared_vertices};
 use crate::bucket::{Bucket, NoBucket};
 use crate::buckets::hillshade_bucket::{HillshadeBucket, HillshadeLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
-use crate::draw_cache::{DrawDepth, DrawList, DrawSlots, FrameDraw, FrameDraws, KeptDraw, LayerDrawing};
+use crate::draw_cache::{
+    DrawDepth, DrawList, DrawOrder, FrameDraw, FrameDraws, KeptDraw, LayerDrawing, LayerDraws, TileMap,
+};
+use crate::gfx::atlas_binding::AtlasBinding;
+use crate::gfx::context::Context;
 use crate::gfx::texture2d::Texture2DPtr;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_type::LayerType;
@@ -73,9 +77,54 @@ pub(crate) struct ReliefTile {
     tile_props: ColorReliefTilePropsUBO,
 }
 
-impl DrawSlots for ReliefTile {
-    fn slot_mut(&mut self, slot: u32) -> Option<&mut DrawObjects> {
-        self.draw.slot_mut(slot)
+/// The layer's drawing: what it keeps of each tile, and its draws of the
+/// frame, one of each tile.
+#[derive(Default)]
+pub(crate) struct ReliefDrawing {
+    tiles: TileMap<ReliefTile>,
+    frame: Option<LayerDraws>,
+}
+
+impl ReliefDrawing {
+    /// The GPU objects of `draw`, its tile's.
+    fn objects<'a>(
+        tiles: &'a mut TileMap<ReliefTile>,
+        draw: &FrameDraw,
+        (): (),
+    ) -> Option<(&'a mut DrawObjects, Option<&'a AtlasBinding>)> {
+        Some((&mut tiles.cache_mut(&draw.tile?)?.draw.objects, None))
+    }
+}
+
+impl LayerDrawing for ReliefDrawing {
+    type Tile = ReliefTile;
+
+    fn tiles(&mut self) -> &mut TileMap<ReliefTile> {
+        &mut self.tiles
+    }
+
+    fn groups(&self) -> [Option<&FrameDraws>; 2] {
+        [self.frame.as_ref().map(|frame| &frame.frame), None]
+    }
+
+    fn clear(&mut self) {
+        self.tiles.clear();
+        if let Some(frame) = &mut self.frame {
+            frame.clear();
+        }
+    }
+
+    fn upload(&mut self, context: &Context) {
+        if let Some(frame) = &self.frame {
+            frame.upload(&mut self.tiles, Self::objects, context);
+        }
+    }
+
+    fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
+        if let Some(frame) = &self.frame {
+            frame.render(&mut self.tiles, Self::objects, gpu, parameters);
+            order.step(parameters);
+        }
     }
 }
 
@@ -98,7 +147,7 @@ impl LayerType for ColorRelief {
 pub(crate) struct RenderColorReliefLayer {
     base: RenderLayerBase,
     values: LayerValues<ColorRelief>,
-    drawing: LayerDrawing<ReliefTile>,
+    drawing: ReliefDrawing,
     /// The frame's draws as the update makes them.
     draw_list: DrawList<ReliefUniforms>,
 
@@ -142,7 +191,7 @@ impl RenderColorReliefLayer {
         let mut layer = RenderColorReliefLayer {
             base,
             values,
-            drawing: LayerDrawing::default(),
+            drawing: ReliefDrawing::default(),
             draw_list: DrawList::default(),
             color_ramp_size,
             color_ramp_changed: true,
@@ -287,8 +336,7 @@ fn color_relief_vertex_attributes(vertices: &VertexVectorBasePtr) -> VertexAttri
 
 impl TypedLayer for RenderColorReliefLayer {
     type Type = ColorRelief;
-    type Tile = ReliefTile;
-    type Shared = ();
+    type Drawing = ReliefDrawing;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -364,7 +412,7 @@ impl RenderLayer for RenderColorReliefLayer {
             self.remove_all_draws();
             return;
         };
-        self.drawing.frame.get_or_insert_with(FrameDraws::new);
+        self.drawing.frame.get_or_insert_with(LayerDraws::new);
 
         if self.color_relief_shader.is_none() {
             self.color_relief_shader = shaders.shader(COLOR_RELIEF_SHADER_GROUP_NAME, self.base.projection_variant);
@@ -450,16 +498,16 @@ impl RenderLayer for RenderColorReliefLayer {
 
             let bucket = tile.bucket(&*self.base.style).filter(|b| b.has_data());
             let Some(bucket) = bucket.and_then(|bucket| bucket.downcast_ref::<HillshadeBucket>()) else {
-                self.drawing.caches.drop_cache(&tile_id);
+                self.drawing.tiles.drop_cache(&tile_id);
                 continue;
             };
             let bucket_id = bucket.base.bucket_id;
 
-            if self.drawing.caches.bucket(&tile_id).is_some_and(|prev| prev != bucket_id) {
+            if self.drawing.tiles.bucket(&tile_id).is_some_and(|prev| prev != bucket_id) {
                 // The tile's draw was built from another bucket.
-                self.drawing.caches.drop_cache(&tile_id);
+                self.drawing.tiles.drop_cache(&tile_id);
             }
-            self.drawing.caches.set_bucket(&tile_id, bucket_id);
+            self.drawing.tiles.set_bucket(&tile_id, bucket_id);
 
             let geometry = bucket.geometry();
             let geometry_time = geometry.last_modified;
@@ -489,11 +537,11 @@ impl RenderLayer for RenderColorReliefLayer {
                 textures[ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE] = Some(Rc::clone(&elevation_stops_texture));
                 textures[ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE] = Some(Rc::clone(&color_stops_texture));
 
-                if self.drawing.caches.cache_mut(&tile_id).is_some_and(|cached| cached.built < geometry_time) {
+                if self.drawing.tiles.cache_mut(&tile_id).is_some_and(|cached| cached.built < geometry_time) {
                     // The masked geometry changed (see the file comment).
-                    self.drawing.caches.drop_cache(&tile_id);
+                    self.drawing.tiles.drop_cache(&tile_id);
                 }
-                if let Some(cached) = self.drawing.caches.cache_mut(&tile_id) {
+                if let Some(cached) = self.drawing.tiles.cache_mut(&tile_id) {
                     // The DEM and the ramps' textures change with the
                     // bucket's generation and the ramps.
                     cached.draw.objects.set_textures(textures);
@@ -551,14 +599,14 @@ impl RenderLayer for RenderColorReliefLayer {
                         textures,
                     );
                     let cached = ReliefTile { draw: KeptDraw::new(objects), built: Instant::now(), tile_props };
-                    self.drawing.caches.set_cache(&tile_id, cached);
+                    self.drawing.tiles.set_cache(&tile_id, cached);
                 }
             } else {
                 // The tile's draw, if it has one, draws as it was.
                 Log::warning(Event::Render, "ColorRelief: DEM image not valid for tile");
             }
 
-            let Some(cached) = self.drawing.caches.cache_mut(&tile_id) else {
+            let Some(cached) = self.drawing.tiles.cache_mut(&tile_id) else {
                 continue;
             };
             let projection = paint_parameters.projection_data_for_tile(&tile_id.to_unwrapped(), false);
@@ -571,7 +619,7 @@ impl RenderLayer for RenderColorReliefLayer {
             self.draw_list.push(draw, uniforms);
         }
 
-        let frame = self.drawing.frame.get_or_insert_with(FrameDraws::new);
+        let frame = self.drawing.frame.get_or_insert_with(LayerDraws::new);
         let opacity = *self.values.evaluated.paint.color_relief_opacity.uniform();
         self.draw_list.finish(frame, context, |writer| {
             let props = ColorReliefEvaluatedPropsUBO { opacity, pad_eval0: 0.0, pad_eval1: 0.0, pad_eval2: 0.0 };

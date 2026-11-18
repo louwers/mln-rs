@@ -30,7 +30,7 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use super::cast_matrix;
 use crate::bucket::NoBucket;
 use crate::draw::{DrawGeometry, DrawObjects, Textures, raw_vertices};
-use crate::draw_cache::{DrawDepth, DrawList, FrameDraw, FrameDraws, KeptDraw, LayerDrawing};
+use crate::draw_cache::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDraws, TileDraws};
 use crate::globe_tile_mesh::raw_globe_tile_mesh;
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
@@ -71,7 +71,7 @@ impl LayerType for Background {
 pub(crate) struct RenderBackgroundLayer {
     base: RenderLayerBase,
     values: LayerValues<Background>,
-    drawing: LayerDrawing<KeptDraw>,
+    drawing: TileDraws,
     /// The frame's draws as the update makes them, with their uniform blocks
     /// and projections.
     draw_list: DrawList<(BackgroundDrawableUnionUBO, ProjectionUBO)>,
@@ -88,7 +88,7 @@ impl RenderBackgroundLayer {
         RenderBackgroundLayer {
             base,
             values,
-            drawing: LayerDrawing::default(),
+            drawing: TileDraws::default(),
             draw_list: DrawList::default(),
             plain_shader: None,
             pattern_shader: None,
@@ -190,8 +190,7 @@ impl RenderBackgroundLayer {
 
 impl TypedLayer for RenderBackgroundLayer {
     type Type = Background;
-    type Tile = KeptDraw;
-    type Shared = ();
+    type Drawing = TileDraws;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -288,7 +287,7 @@ impl RenderLayer for RenderBackgroundLayer {
             self.remove_all_draws();
             return;
         }
-        self.drawing.frame.get_or_insert_with(FrameDraws::new);
+        self.drawing.frame.get_or_insert_with(LayerDraws::new);
 
         if self.update_projection_variant(state) {
             self.plain_shader = None;
@@ -310,11 +309,11 @@ impl RenderLayer for RenderBackgroundLayer {
             return;
         };
 
-        self.drawing.caches.set_tiles(tile_cover.iter().copied());
+        self.drawing.tiles.set_tiles(tile_cover.iter().copied());
         for tile_id in &tile_cover {
-            if self.drawing.caches.cache_mut(tile_id).is_none() {
+            if self.drawing.tiles.cache_mut(tile_id).is_none() {
                 let objects = self.build_tile(tile_id, Rc::clone(&shader), draw_passes);
-                self.drawing.caches.set_cache(tile_id, KeptDraw::new(objects));
+                self.drawing.tiles.set_cache(tile_id, KeptDraw::new(objects));
             }
         }
 
@@ -327,7 +326,7 @@ impl RenderLayer for RenderBackgroundLayer {
             else {
                 // The pattern isn't valid: the layer draws nothing.
                 if let Some(frame) = &mut self.drawing.frame {
-                    frame.draws.clear();
+                    frame.clear();
                 }
                 return;
             };
@@ -347,7 +346,7 @@ impl RenderLayer for RenderBackgroundLayer {
         drop(pattern_atlas);
 
         for tile_id in &tile_cover {
-            let Some(cached) = self.drawing.caches.cache_mut(tile_id) else {
+            let Some(cached) = self.drawing.tiles.cache_mut(tile_id) else {
                 continue;
             };
             if let Some(texture) = &pattern_texture {
@@ -361,7 +360,7 @@ impl RenderLayer for RenderBackgroundLayer {
             self.draw_list.push(draw, Self::uniforms(tile_id, has_pattern, paint_parameters));
         }
 
-        let frame = self.drawing.frame.get_or_insert_with(FrameDraws::new);
+        let frame = self.drawing.frame.get_or_insert_with(LayerDraws::new);
         self.draw_list.finish(frame, context, |writer| {
             let opacity = *evaluated.background_opacity.uniform();
             if let Some((from, to)) = pattern_positions {
