@@ -2,6 +2,67 @@
 
 lockfile_version = 4
 
+[[tools."github:HansKristian-Work/vkd3d-proton"]]
+version = "3.1"
+backend = "github:HansKristian-Work/vkd3d-proton"
+specifiers = ["3.1"]
+
+[tools."github:HansKristian-Work/vkd3d-proton"."platforms.linux-arm64"]
+checksum = "sha256:b85ea8219b71093a3924913dd7aae6172333dc0c069983ed510816d67f02120b"
+checksum_source = "mise-versions"
+url = "https://github.com/HansKristian-Work/vkd3d-proton/releases/download/v3.1/vkd3d-proton-3.1.tar.zst"
+url_api = "https://api.github.com/repos/HansKristian-Work/vkd3d-proton/releases/assets/684603038"
+
+[tools."github:HansKristian-Work/vkd3d-proton"."platforms.linux-x64"]
+checksum = "sha256:b85ea8219b71093a3924913dd7aae6172333dc0c069983ed510816d67f02120b"
+url = "https://github.com/HansKristian-Work/vkd3d-proton/releases/download/v3.1/vkd3d-proton-3.1.tar.zst"
+url_api = "https://api.github.com/repos/HansKristian-Work/vkd3d-proton/releases/assets/684603038"
+
+[tools."github:HansKristian-Work/vkd3d-proton"."platforms.macos-arm64"]
+checksum = "sha256:b85ea8219b71093a3924913dd7aae6172333dc0c069983ed510816d67f02120b"
+checksum_source = "mise-versions"
+url = "https://github.com/HansKristian-Work/vkd3d-proton/releases/download/v3.1/vkd3d-proton-3.1.tar.zst"
+url_api = "https://api.github.com/repos/HansKristian-Work/vkd3d-proton/releases/assets/684603038"
+
+[[tools."github:Kron4ek/Wine-Builds"]]
+version = "11.22"
+backend = "github:Kron4ek/Wine-Builds"
+specifiers = ["11.22"]
+
+[tools."github:Kron4ek/Wine-Builds".options]
+asset_pattern = "wine-*-amd64-wow64.tar.xz"
+
+[tools."github:Kron4ek/Wine-Builds"."platforms.linux-x64"]
+checksum = "sha256:e2967393d203121195cba94159efe9b575a6fa8fad2815c557036e69285093d8"
+url = "https://github.com/Kron4ek/Wine-Builds/releases/download/11.22/wine-11.22-amd64-wow64.tar.xz"
+url_api = "https://api.github.com/repos/Kron4ek/Wine-Builds/releases/assets/747892769"
+
+[[tools."github:microsoft/DirectXShaderCompiler"]]
+version = "1.9.2609"
+backend = "github:microsoft/DirectXShaderCompiler"
+specifiers = ["1.9.2609"]
+
+[tools."github:microsoft/DirectXShaderCompiler".options]
+asset_pattern = "dxc_*.zip"
+
+[tools."github:microsoft/DirectXShaderCompiler"."platforms.linux-arm64"]
+checksum = "sha256:ad31b1fc8443175d204f77a611fdb3ef2ec42759bdc2f1167368de24a4a7e7f1"
+url = "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2609/dxc_2026_09_29.zip"
+url_api = "https://api.github.com/repos/microsoft/DirectXShaderCompiler/releases/assets/596913261"
+provenance = "github-attestations"
+
+[tools."github:microsoft/DirectXShaderCompiler"."platforms.linux-x64"]
+checksum = "sha256:ad31b1fc8443175d204f77a611fdb3ef2ec42759bdc2f1167368de24a4a7e7f1"
+url = "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2609/dxc_2026_09_29.zip"
+url_api = "https://api.github.com/repos/microsoft/DirectXShaderCompiler/releases/assets/596913261"
+provenance = "github-attestations"
+
+[tools."github:microsoft/DirectXShaderCompiler"."platforms.macos-arm64"]
+checksum = "sha256:ad31b1fc8443175d204f77a611fdb3ef2ec42759bdc2f1167368de24a4a7e7f1"
+url = "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2609/dxc_2026_09_29.zip"
+url_api = "https://api.github.com/repos/microsoft/DirectXShaderCompiler/releases/assets/596913261"
+provenance = "github-attestations"
+
 [[tools."github:mstorsjo/llvm-mingw"]]
 version = "20261104"
 backend = "github:mstorsjo/llvm-mingw"
@@ -64,3 +125,25 @@ url_api = "https://api.github.com/repos/rust-cross/cargo-xwin/releases/assets/51
 checksum = "sha256:1d74345d23ec744728124a0244696e9f21340fbb4b8a59cc1e39ba4ab18d8113"
 url = "https://github.com/rust-cross/cargo-xwin/releases/download/v0.23.1/cargo-xwin-v0.23.1.universal2-apple-darwin.tar.gz"
 url_api = "https://api.github.com/repos/rust-cross/cargo-xwin/releases/assets/512896327"
+
+[[tools.go]]
+version = "1.27.3"
+backend = "core:go"
+specifiers = ["1.27.3"]
+
+[tools.go."platforms.linux-arm64"]
+checksum = "sha256:a06e99309dbcbdca1a8ccd2282c3ee146e55930886e26b4f1193269587165f49"
+url = "https://dl.google.com/go/go1.27.3.linux-arm64.tar.gz"
+
+[tools.go."platforms.linux-x64"]
+checksum = "sha256:65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40"
+url = "https://dl.google.com/go/go1.27.3.linux-amd64.tar.gz"
+
+[tools.go."platforms.macos-arm64"]
+checksum = "sha256:dd3908cf20959d798c1e06ebe5b72213f0505ce01373b40ce3110975a6cd99c2"
+url = "https://dl.google.com/go/go1.27.3.darwin-arm64.tar.gz"
+
+[[tools."go:github.com/sargunv/devices-cli"]]
+version = "0.0.0-20261118051936-f04e04c68e26"
+backend = "go:github.com/sargunv/devices-cli"
+specifiers = ["v0.0.0-20261118051936-f04e04c68e26"]

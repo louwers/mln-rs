@@ -1,16 +1,29 @@
 # Builds for Windows from macOS or Linux, as in
 # `cargo build --target x86_64-pc-windows-gnullvm -p mln-rs-c`, or for MSVC
-# `cargo xwin build --target x86_64-pc-windows-msvc -p mln-rs-c`. Select it
+# `cargo xwin build --target x86_64-pc-windows-msvc -p mln-rs-c`, and on x64
+# Linux runs the x64 targets' tests under Wine, as in
+# `cargo nextest run --target x86_64-pc-windows-gnullvm`. Select it
 # with `mise -E target-windows`, or in every command with
 # `env = ["target-windows"]` in an untracked .miserc.local.toml. maplibre-native-ffi
 # ships both: MSVC, and MinGW for Kotlin/Native's mingwX64.
 
 [tools]
+# devices-cli gives this checkout its own Wine prefix. The go backend builds it
+# with this Go.
+"core:go" = "1.27.3"
+"go:github.com/sargunv/devices-cli" = "v0.0.0-20261118051936-f04e04c68e26"
 # The MinGW targets' compilers and linkers: LLVM's, for x64 and arm64.
 "github:mstorsjo/llvm-mingw" = { version = "20261104", platforms = { macos-arm64 = { asset_pattern = "llvm-mingw-*-ucrt-macos-universal.tar.xz" }, macos-x64 = { asset_pattern = "llvm-mingw-*-ucrt-macos-universal.tar.xz" }, linux-x64 = { asset_pattern = "llvm-mingw-*-ucrt-ubuntu-22.04-x86_64.tar.xz" }, linux-arm64 = { asset_pattern = "llvm-mingw-*-ucrt-ubuntu-22.04-aarch64.tar.xz" } } }
 # `cargo xwin` builds the MSVC targets with clang-cl, against Microsoft's CRT
 # and Windows SDK, which it downloads on first use.
 "github:rust-cross/cargo-xwin" = "0.23.1"
+# Wine runs the tests; vkd3d-proton's Direct3D 12, on the host's Vulkan, and
+# DXC, which compiles the D3D12 backend's shaders, replace Wine's own.
+"github:Kron4ek/Wine-Builds" = { version = "11.22", os = [
+  "linux/x64",
+], asset_pattern = "wine-*-amd64-wow64.tar.xz" }
+"github:HansKristian-Work/vkd3d-proton" = "3.1"
+"github:microsoft/DirectXShaderCompiler" = { version = "1.9.2609", asset_pattern = "dxc_*.zip" }
 
 [env]
 CC_x86_64_pc_windows_gnullvm = "x86_64-w64-mingw32-clang"
@@ -24,6 +37,16 @@ CARGO_TARGET_AARCH64_PC_WINDOWS_GNULLVM_LINKER = "aarch64-w64-mingw32-clang"
 # Rust's x86_64-pc-windows-gnu expects GCC's runtime libraries, which this
 # linker stands in for (tools/mingw-libgcc/linker).
 CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER = "{{ config_root }}/tools/mingw-libgcc/linker"
+# Cargo's runners for the x64 targets: devices-cli gives this checkout its own
+# Wine prefix, with vkd3d-proton, DXC and the libunwind.dll that gnullvm builds
+# load in its system directory, and runs each test there.
+MLN_WINE_RUNNER = { value = "devices-cli exec wine --dll {{ tools['github:HansKristian-Work/vkd3d-proton'].path }}/x64 --dll {{ tools['github:microsoft/DirectXShaderCompiler'].path }}/bin/x64 --dll {{ tools['github:mstorsjo/llvm-mingw'].path }}/x86_64-w64-mingw32/bin/libunwind.dll --", tools = true }
+CARGO_TARGET_X86_64_PC_WINDOWS_GNULLVM_RUNNER = { value = "{{ env.MLN_WINE_RUNNER }}", tools = true }
+CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUNNER = { value = "{{ env.MLN_WINE_RUNNER }}", tools = true }
+CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUNNER = { value = "{{ env.MLN_WINE_RUNNER }}", tools = true }
+# No vkd3d-proton shader cache, which it would write in each test's working
+# directory.
+VKD3D_SHADER_CACHE_PATH = "0"
 
 [hooks]
 # The Rust targets. An inline script, since a hook's `mise run` would not see

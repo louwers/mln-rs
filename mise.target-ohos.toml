@@ -15,7 +15,7 @@ ohos-sdk = "6.1"
 # DevEco Studio downloaded, and runs each test on it. The go backend builds it
 # with this Go.
 "core:go" = "1.27.3"
-"go:github.com/sargunv/devices-cli" = "v0.0.0-20261118022140-4bddbd21331f"
+"go:github.com/sargunv/devices-cli" = "v0.0.0-20261118051936-f04e04c68e26"
 
 [env]
 # The SDK's native toolchain: the plugin's, else DevEco Studio's on macOS.

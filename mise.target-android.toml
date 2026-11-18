@@ -9,7 +9,7 @@
 # or on a device assigned with `devices-cli assign`. The go backend builds it
 # with this Go.
 "core:go" = "1.27.3"
-"go:github.com/sargunv/devices-cli" = "v0.0.0-20261118022140-4bddbd21331f"
+"go:github.com/sargunv/devices-cli" = "v0.0.0-20261118051936-f04e04c68e26"
 # Google's SDK installer, which needs no JDK: setup:target-android installs the
 # NDK with it, and devices-cli the emulator and its system images.
 android-cli = "1.1.16919734"

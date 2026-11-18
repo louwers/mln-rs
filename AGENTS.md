@@ -63,13 +63,14 @@ exact expectation, such as "an idle map draws no frames", belongs in a test.
 
 The mise environments `target-apple`, `target-android`, `target-ohos` and
 `target-windows` add the toolchains, SDKs and test devices for Apple's phones
-and headsets, Android, OpenHarmony and HarmonyOS, and Windows (which builds
-only). Select one per command (`mise -E target-android run ...`) or for good
-with `env = ["target-android"]` in an untracked `.miserc.local.toml`;
-`mise install` then installs what it needs. With one selected, Cargo builds for
-its targets and runs their tests on this checkout's own simulator or emulator
+and headsets, Android, OpenHarmony and HarmonyOS, and Windows. Select one per
+command (`mise -E target-android run ...`) or for good with
+`env = ["target-android"]` in an untracked `.miserc.local.toml`; `mise install`
+then installs what it needs. With one selected, Cargo builds for its targets and
+runs their tests on this checkout's own simulator, emulator or Wine prefix
 through [devices-cli](https://github.com/sargunv/devices-cli), as in
-`cargo nextest run --target aarch64-linux-android -p mln-rs-style`.
+`cargo nextest run --target aarch64-linux-android -p mln-rs-style`. Windows' x64
+targets run under Wine on an x64 Linux host.
 
 A test that reads files of its package finds them through the
 `CARGO_MANIFEST_DIR` that Cargo sets when it runs the test, not
