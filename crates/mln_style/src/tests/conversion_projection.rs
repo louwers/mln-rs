@@ -57,7 +57,7 @@ fn projection() {
     {
         let projection = parse_projection(r#"{"type":"globe"}"#, &mut error).expect("projection");
         assert!(projection.get_type().is_constant());
-        assert_eq!(definition("globe"), *projection.get_type().as_constant());
+        assert_eq!(definition("globe"), *projection.get_type().as_constant().unwrap());
         // The preset is the vertical perspective until zoom 11, Mercator from
         // zoom 12, and blends in between.
         assert_eq!(definition("vertical-perspective"), projection.evaluate(3.0));
@@ -71,7 +71,7 @@ fn projection() {
         let projection =
             parse_projection(r#"{"type":["vertical-perspective","mercator",0.25]}"#, &mut error).expect("projection");
         assert!(projection.get_type().is_constant());
-        assert_eq!(between("vertical-perspective", "mercator", 0.25), *projection.get_type().as_constant());
+        assert_eq!(between("vertical-perspective", "mercator", 0.25), *projection.get_type().as_constant().unwrap());
     }
 
     {
@@ -140,7 +140,7 @@ fn projection() {
         assert!(
             projection.set_property("type", &Convertible::from(&type_value), &Functions::with_builtins()).is_none()
         );
-        assert_eq!(definition("globe"), *projection.get_type().as_constant());
+        assert_eq!(definition("globe"), *projection.get_type().as_constant().unwrap());
         assert!(
             projection.set_property("bogus", &Convertible::from(&type_value), &Functions::with_builtins()).is_some()
         );

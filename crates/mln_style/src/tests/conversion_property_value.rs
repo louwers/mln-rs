@@ -23,7 +23,7 @@ fn property_value() {
     );
     let result = result.expect("constant expression");
     assert!(result.is_constant());
-    assert_eq!(*result.as_constant(), expected);
+    assert_eq!(*result.as_constant().unwrap(), expected);
 }
 
 // gtest: StyleConversion.SemiliteralOffsets
@@ -42,7 +42,7 @@ fn semiliteral_offsets() {
     assert!(result.is_expression());
     let feature = StubGeometryTileFeature::new(property_map(&[("x", Value::Double(3.0)), ("y", Value::Double(4.0))]));
     assert_eq!(
-        result.as_expression().evaluate(&EvaluationContext::from_feature(Some(&feature)), [0.0, 0.0]),
+        result.as_expression().unwrap().evaluate(&EvaluationContext::from_feature(Some(&feature)), [0.0, 0.0]),
         [3.0_f32, 8.0]
     );
 
@@ -60,6 +60,7 @@ fn semiliteral_offsets() {
     assert!(anchors.is_expression());
     let evaluated = anchors
         .as_expression()
+        .unwrap()
         .evaluate(&EvaluationContext::from_feature(Some(&feature)), VariableAnchorOffsetCollection::default());
     assert_eq!(evaluated.len(), 2);
     assert_eq!(evaluated[0].anchor_type, SymbolAnchorType::Top);

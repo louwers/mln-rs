@@ -5,7 +5,7 @@ use mln_util::{Color, Padding};
 use crate::color_ramp_property_value::ColorRampPropertyValue;
 use crate::expression::value::to_mbgl_value;
 use crate::expression::{Formatted, Image, Value as ExpressionValue};
-use crate::property_value::{PropertyValue, StyleValue as _};
+use crate::property_value::PropertyValue;
 use crate::style_property::{Kind, StyleProperty};
 use crate::transition_options::TransitionOptions;
 
@@ -108,12 +108,6 @@ impl ValueFactory for Formatted {
     }
 }
 
-impl ValueFactory for ColorRampPropertyValue {
-    fn make_value(&self) -> Value {
-        self.get_expression().serialize()
-    }
-}
-
 /// An array of the elements' values.
 impl<T: ValueFactory, const N: usize> ValueFactory for [T; N] {
     fn make_value(&self) -> Value {
@@ -184,8 +178,8 @@ pub(crate) fn make_transition_style_property(value: &TransitionOptions) -> Style
 
 #[must_use]
 pub(crate) fn make_color_ramp_style_property(value: &ColorRampPropertyValue) -> StyleProperty {
-    if value.is_undefined() {
-        return StyleProperty::default();
+    match value.get_expression() {
+        Some(expression) => StyleProperty::new(expression.serialize(), Kind::Expression),
+        None => StyleProperty::default(),
     }
-    StyleProperty::new(make_value(value), Kind::Expression)
 }

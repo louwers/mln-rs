@@ -181,7 +181,9 @@ impl RenderColorReliefLayer {
         let mut elevation_stops_vector: Vec<f32> = Vec::new();
         let mut color_stops_vector: Vec<Color> = Vec::new();
 
-        let expr = color_value.get_expression();
+        let Some(expr) = color_value.get_expression() else {
+            return;
+        };
 
         if let Some(interpolate) = expr.as_interpolate() {
             let stop_count = interpolate.get_stop_count();

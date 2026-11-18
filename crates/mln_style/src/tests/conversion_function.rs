@@ -94,7 +94,7 @@ fn formatted_identity_function() {
     let fn1 = convert_json::<Formatted>(r#"{ "property": "name", "type": "identity" }"#, &mut error, true);
     let fn1 = fn1.expect("identity function");
     assert!(fn1.is_expression());
-    assert_eq!(fn1.as_expression().get_expression().serialize(), format(get(literal_str("name"))).serialize());
+    assert_eq!(fn1.as_expression().unwrap().get_expression().serialize(), format(get(literal_str("name"))).serialize());
 }
 
 /// An identity function's `default` replaces a feature value that doesn't
@@ -114,7 +114,7 @@ fn identity_function_default_for_unconvertible_values() {
     let join =
         convert_json::<LineJoinType>(r#"{"type": "identity", "property": "p", "default": "bevel"}"#, &mut error, true)
             .expect("identity function");
-    assert_eq!(join.as_expression().evaluate(&context, LineJoinType::Miter), LineJoinType::Bevel);
+    assert_eq!(join.as_expression().unwrap().evaluate(&context, LineJoinType::Miter), LineJoinType::Bevel);
 
     let default = parse_json(r#"["left", [1, 2]]"#);
     let default = convert::<VariableAnchorOffsetCollection>(&Convertible::from(&default), &mut error).unwrap();
@@ -124,7 +124,7 @@ fn identity_function_default_for_unconvertible_values() {
         true,
     )
     .expect("identity function");
-    assert_eq!(offsets.as_expression().evaluate(&context, VariableAnchorOffsetCollection::default()), default);
+    assert_eq!(offsets.as_expression().unwrap().evaluate(&context, VariableAnchorOffsetCollection::default()), default);
 }
 
 /// A legacy color function's `colorSpace` picks the interpolation operator.
@@ -140,7 +140,7 @@ fn function_color_space() {
         let json = format!(r#"{{"stops": [[0, "red"], [1, "blue"]], "colorSpace": "{color_space}"}}"#);
         let mut error = Error::default();
         let function = convert_json::<mln_util::Color>(&json, &mut error, false).expect("color function");
-        let feature::Value::Array(serialized) = function.as_expression().get_expression().serialize() else {
+        let feature::Value::Array(serialized) = function.as_expression().unwrap().get_expression().serialize() else {
             panic!("{color_space}: not an expression array");
         };
         assert_eq!(serialized[0], feature::Value::String(operator.to_owned()), "{color_space}");

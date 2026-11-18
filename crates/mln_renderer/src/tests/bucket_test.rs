@@ -189,6 +189,7 @@ fn data_driven_fill_bucket(fill_color: &serde_json::Value) -> FillBucket {
                 .fill_color
                 .value
                 .as_expression()
+                .unwrap()
                 .clone(),
             default: FillPaintProperties::Defaults::fill_color(),
         },

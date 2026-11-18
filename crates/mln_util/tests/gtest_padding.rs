@@ -74,7 +74,7 @@ fn function() {
             &Functions::with_builtins(),
         )
         .unwrap_or_else(|| panic!("{json}: {}", error.message));
-        function.as_expression().clone()
+        function.as_expression().unwrap().clone()
     };
     let eval_in_context = |expr: &PropertyExpression<Padding>, properties: &[(&str, MbglValue)]| -> Padding {
         let feature = StubGeometryTileFeature {

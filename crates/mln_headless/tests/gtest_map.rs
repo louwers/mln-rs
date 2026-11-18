@@ -994,7 +994,7 @@ fn style_expired_with_projection() {
         let map = test.map();
         let type_ = map.style().get_projection().get_type();
         assert!(type_.is_constant(), "{in_place}");
-        assert_eq!(ProjectionType::Globe, type_.as_constant().from, "{in_place}");
+        assert_eq!(ProjectionType::Globe, type_.as_constant().unwrap().from, "{in_place}");
     }
 }
 

@@ -75,8 +75,7 @@ impl Projection {
     #[must_use]
     pub fn get_subdivision_granularity(&self) -> SubdivisionGranularitySetting {
         if self.type_.is_undefined()
-            || (self.type_.is_constant()
-                && *self.type_.as_constant() == ProjectionDefinition::new(ProjectionType::Mercator))
+            || self.type_.as_constant().is_some_and(|t| *t == ProjectionDefinition::new(ProjectionType::Mercator))
         {
             return SubdivisionGranularitySetting::none();
         }

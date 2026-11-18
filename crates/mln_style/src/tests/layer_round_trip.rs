@@ -119,7 +119,13 @@ fn zoom_functions_of_images() {
         parse_json(r#"["step", ["zoom"], "a", 19.0, "b"]"#)
     );
     let runtime_constant = |layer: &Layer| {
-        style_of::<FillExtrusion>(layer).paint.fill_extrusion_pattern.value.as_expression().is_runtime_constant()
+        style_of::<FillExtrusion>(layer)
+            .paint
+            .fill_extrusion_pattern
+            .value
+            .as_expression()
+            .unwrap()
+            .is_runtime_constant()
     };
     assert!(runtime_constant(&extrusion));
     assert!(runtime_constant(&parse(&json(&serialized))));

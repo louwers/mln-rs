@@ -67,26 +67,27 @@ impl<T> PropertyValue<T> {
         matches!(self, PropertyValue::Expression(_))
     }
 
-    /// The constant. Panics when the value isn't a constant.
-    pub fn as_constant(&self) -> &T {
+    /// The constant, or `None` when the value isn't a constant.
+    pub fn as_constant(&self) -> Option<&T> {
         match self {
-            PropertyValue::Constant(t) => t,
-            _ => panic!("PropertyValue::as_constant on a non-constant value"),
+            PropertyValue::Constant(t) => Some(t),
+            _ => None,
         }
     }
 
-    /// The expression. Panics when the value isn't an expression.
-    pub fn as_expression(&self) -> &PropertyExpression<T> {
+    /// The expression, or `None` when the value isn't an expression.
+    pub fn as_expression(&self) -> Option<&PropertyExpression<T>> {
         match self {
-            PropertyValue::Expression(e) => e,
-            _ => panic!("PropertyValue::as_expression on a non-expression value"),
+            PropertyValue::Expression(e) => Some(e),
+            _ => None,
         }
     }
 
-    pub fn as_expression_mut(&mut self) -> &mut PropertyExpression<T> {
+    /// The expression, or `None` when the value isn't an expression.
+    pub fn as_expression_mut(&mut self) -> Option<&mut PropertyExpression<T>> {
         match self {
-            PropertyValue::Expression(e) => e,
-            _ => panic!("PropertyValue::as_expression_mut on a non-expression value"),
+            PropertyValue::Expression(e) => Some(e),
+            _ => None,
         }
     }
 }
@@ -208,8 +209,10 @@ where
     }
 
     fn retain_prior_global_state(&mut self, change: &GlobalStateChange) {
-        if self.is_expression() && self.transitions_on_global_state_change(Some(&change.changed_keys)) {
-            self.as_expression_mut().pin_global_state(Arc::clone(&change.prior_state));
+        if self.transitions_on_global_state_change(Some(&change.changed_keys))
+            && let Some(expression) = self.as_expression_mut()
+        {
+            expression.pin_global_state(Arc::clone(&change.prior_state));
         }
     }
 }

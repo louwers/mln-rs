@@ -24,19 +24,19 @@ fn light() {
 
         assert!(!light.properties.light_color.value.is_undefined());
         assert!(light.properties.light_color.value.is_constant());
-        assert_eq!(*light.properties.light_color.value.as_constant(), Color::blue());
+        assert_eq!(*light.properties.light_color.value.as_constant().unwrap(), Color::blue());
 
         let intensity_value = serde_json::json!(0.5);
         light.set_property("intensity", &Convertible::from(&intensity_value), &Functions::with_builtins());
         assert!(!light.properties.light_intensity.value.is_undefined());
         assert!(light.properties.light_intensity.value.is_constant());
-        assert_eq!(*light.properties.light_intensity.value.as_constant(), 0.5);
+        assert_eq!(*light.properties.light_intensity.value.as_constant().unwrap(), 0.5);
 
         let position_value = serde_json::json!([1.0, 2.0, 3.0]);
         light.set_property("position", &Convertible::from(&position_value), &Functions::with_builtins());
         assert!(!light.properties.light_position.value.is_undefined());
         assert!(light.properties.light_position.value.is_constant());
-        assert_eq!(*light.properties.light_position.value.as_constant(), Position::new([1.0, 2.0, 3.0]));
+        assert_eq!(*light.properties.light_position.value.as_constant().unwrap(), Position::new([1.0, 2.0, 3.0]));
     }
 
     {
@@ -52,17 +52,17 @@ fn light() {
 
         assert!(!light.properties.light_intensity.value.is_undefined());
         assert!(light.properties.light_intensity.value.is_constant());
-        assert_eq!(*light.properties.light_intensity.value.as_constant(), 0.3_f32);
+        assert_eq!(*light.properties.light_intensity.value.as_constant().unwrap(), 0.3_f32);
         assert!(!light.properties.light_intensity.value.is_expression());
 
         assert!(!light.properties.light_color.value.is_undefined());
         assert!(!light.properties.light_color.value.is_constant());
         assert!(light.properties.light_color.value.is_expression());
-        assert!(!light.properties.light_color.value.as_expression().is_zoom_constant());
+        assert!(!light.properties.light_color.value.as_expression().unwrap().is_zoom_constant());
 
         assert!(!light.properties.light_position.value.is_undefined());
         assert!(light.properties.light_position.value.is_constant());
-        assert_eq!(*light.properties.light_position.value.as_constant(), Position::new([3.0, 90.0, 90.0]));
+        assert_eq!(*light.properties.light_position.value.as_constant().unwrap(), Position::new([3.0, 90.0, 90.0]));
         assert!(!light.properties.light_position.value.is_expression());
     }
 

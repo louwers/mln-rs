@@ -69,13 +69,13 @@ fn sky_set_and_get() {
     set(&mut sky, "atmosphere-blend", &json!(0.4));
 
     let properties = &sky.properties;
-    assert_eq!(Color::red(), *properties.sky_color.value.as_constant());
-    assert_eq!(Color::green(), *properties.sky_horizon_color.value.as_constant());
-    assert_eq!(Color::blue(), *properties.sky_fog_color.value.as_constant());
-    assert_float_eq(0.1, *properties.sky_fog_ground_blend.value.as_constant());
-    assert_float_eq(0.2, *properties.sky_horizon_fog_blend.value.as_constant());
-    assert_float_eq(0.3, *properties.sky_horizon_blend.value.as_constant());
-    assert_float_eq(0.4, *properties.sky_atmosphere_blend.value.as_constant());
+    assert_eq!(Color::red(), *properties.sky_color.value.as_constant().unwrap());
+    assert_eq!(Color::green(), *properties.sky_horizon_color.value.as_constant().unwrap());
+    assert_eq!(Color::blue(), *properties.sky_fog_color.value.as_constant().unwrap());
+    assert_float_eq(0.1, *properties.sky_fog_ground_blend.value.as_constant().unwrap());
+    assert_float_eq(0.2, *properties.sky_horizon_fog_blend.value.as_constant().unwrap());
+    assert_float_eq(0.3, *properties.sky_horizon_blend.value.as_constant().unwrap());
+    assert_float_eq(0.4, *properties.sky_atmosphere_blend.value.as_constant().unwrap());
     assert_eq!(Kind::Constant, sky.get_property("sky-color").get_kind());
     assert_eq!(Kind::Undefined, sky.get_property("unknown").get_kind());
 }
@@ -100,12 +100,12 @@ fn sky_constants_and_transitions() {
     .expect("sky");
 
     let properties = &sky.properties;
-    assert_eq!(Color::red(), *properties.sky_horizon_color.value.as_constant());
-    assert_eq!(Color::blue(), *properties.sky_fog_color.value.as_constant());
-    assert_float_eq(0.1, *properties.sky_fog_ground_blend.value.as_constant());
-    assert_float_eq(0.2, *properties.sky_horizon_fog_blend.value.as_constant());
-    assert_float_eq(0.3, *properties.sky_horizon_blend.value.as_constant());
-    assert_float_eq(0.4, *properties.sky_atmosphere_blend.value.as_constant());
+    assert_eq!(Color::red(), *properties.sky_horizon_color.value.as_constant().unwrap());
+    assert_eq!(Color::blue(), *properties.sky_fog_color.value.as_constant().unwrap());
+    assert_float_eq(0.1, *properties.sky_fog_ground_blend.value.as_constant().unwrap());
+    assert_float_eq(0.2, *properties.sky_horizon_fog_blend.value.as_constant().unwrap());
+    assert_float_eq(0.3, *properties.sky_horizon_blend.value.as_constant().unwrap());
+    assert_float_eq(0.4, *properties.sky_atmosphere_blend.value.as_constant().unwrap());
     let transition = sky.get_property("sky-color-transition");
     assert_eq!(Kind::Transition, transition.get_kind());
     assert_eq!(
@@ -154,7 +154,7 @@ fn sky_zoom_expressions() {
     .unwrap_or_else(|| panic!("{}", error.message));
     let atmosphere_blend = &sky.properties.sky_atmosphere_blend.value;
     assert!(atmosphere_blend.is_expression());
-    assert!(!atmosphere_blend.as_expression().is_zoom_constant());
+    assert!(!atmosphere_blend.as_expression().unwrap().is_zoom_constant());
 
     let mut render_sky = RenderSky::new(Arc::new(sky));
     render_sky.evaluate(&PropertyEvaluationParameters::new(5.0));

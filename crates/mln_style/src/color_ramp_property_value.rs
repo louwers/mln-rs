@@ -66,9 +66,13 @@ impl ColorRampPropertyValue {
         ColorRampPropertyValue { value, global_state_refs }
     }
 
+    /// The ramp's color at `ramp_evaluation_parameter`, or the default color
+    /// when the value is undefined or doesn't evaluate to a color.
     #[must_use]
     pub fn evaluate_ramp(&self, ramp_evaluation_parameter: f64, global_state: Option<&GlobalStateMap>) -> Color {
-        let value = self.value.as_ref().expect("ColorRampPropertyValue::evaluate on an undefined value");
+        let Some(value) = &self.value else {
+            return Color::default();
+        };
         let result = value.evaluate(
             &EvaluationContext::with_color_ramp(None, None, Some(ramp_evaluation_parameter))
                 .with_global_state(global_state),
@@ -79,10 +83,10 @@ impl ColorRampPropertyValue {
         from_expression_value::<Color>(&result).unwrap_or_default()
     }
 
-    /// The expression of a defined value. Panics when the value is undefined.
+    /// The expression, or `None` when the value is undefined.
     #[must_use]
-    pub fn get_expression(&self) -> &Expr {
-        self.value.as_deref().expect("ColorRampPropertyValue::get_expression on an undefined value")
+    pub fn get_expression(&self) -> Option<&Expr> {
+        self.value.as_deref()
     }
 }
 

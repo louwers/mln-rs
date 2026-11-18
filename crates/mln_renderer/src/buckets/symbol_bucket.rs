@@ -11,7 +11,6 @@ use std::sync::Arc;
 
 use glam::Vec2;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_style::StyleValue as _;
 use mln_style::expression::EvaluationContext;
 use mln_style::layers::Symbol;
 use mln_style::layers::symbol_layer::SymbolLayerPaintPropertyOverrides;
@@ -147,17 +146,23 @@ pub(crate) enum SymbolSizeBinder {
 impl SymbolSizeBinder {
     #[must_use]
     pub(crate) fn create(tile_zoom: f32, size_property: &PropertyValue<f32>, default_value: f32) -> Self {
-        if size_property.is_undefined() {
-            return SymbolSizeBinder::Constant { layout_size: default_value, covering_ranges: None, expression: None };
-        }
-        if size_property.is_constant() {
-            return SymbolSizeBinder::Constant {
-                layout_size: *size_property.as_constant(),
-                covering_ranges: None,
-                expression: None,
-            };
-        }
-        let expression = size_property.as_expression().clone();
+        let expression = match size_property {
+            PropertyValue::Undefined => {
+                return SymbolSizeBinder::Constant {
+                    layout_size: default_value,
+                    covering_ranges: None,
+                    expression: None,
+                };
+            }
+            PropertyValue::Constant(layout_size) => {
+                return SymbolSizeBinder::Constant {
+                    layout_size: *layout_size,
+                    covering_ranges: None,
+                    expression: None,
+                };
+            }
+            PropertyValue::Expression(expression) => expression.clone(),
+        };
         if expression.is_feature_constant() {
             let layout_size = expression.evaluate(&EvaluationContext::new(tile_zoom + 1.0), 0.0);
             // A feature-constant expression without a zoom dependency (e.g.
@@ -536,8 +541,8 @@ impl SymbolBucket {
         placement_modes: Vec<TextWritingModeType>,
         icons_in_text: bool,
     ) -> Self {
-        let icon_size_data_driven_or_zoom = icon_size.is_expression()
-            && (!icon_size.as_expression().is_feature_constant() || !icon_size.as_expression().is_zoom_constant());
+        let icon_size_data_driven_or_zoom =
+            icon_size.as_expression().is_some_and(|e| !e.is_feature_constant() || !e.is_zoom_constant());
         let mut binders = VecMap::new();
         for (id, properties) in paint_properties {
             let evaluated = &properties.paint;

@@ -963,11 +963,10 @@ impl RenderSymbolLayer {
         let tile_id = tile_id.to_unwrapped();
         let is_text = data.symbol_type == SymbolType::Text;
         let screen_space_prop = &layer.style.layout.symbol_screen_space;
-        let is_screen_space = if screen_space_prop.is_constant() {
-            *screen_space_prop.as_constant()
-        } else {
-            SymbolLayoutProperties::Defaults::symbol_screen_space()
-        };
+        let is_screen_space = screen_space_prop
+            .as_constant()
+            .copied()
+            .unwrap_or_else(SymbolLayoutProperties::Defaults::symbol_screen_space);
 
         let translate = if is_text { &evaluated.text_translate } else { &evaluated.icon_translate };
         let anchor = if is_text { &evaluated.text_translate_anchor } else { &evaluated.icon_translate_anchor };
@@ -1380,11 +1379,10 @@ impl RenderLayer for RenderSymbolLayer {
         // Screen-space symbols are drawn over the view, not projected onto
         // the map.
         let screen_space_prop = &layout.symbol_screen_space;
-        let is_screen_space = if screen_space_prop.is_constant() {
-            *screen_space_prop.as_constant()
-        } else {
-            SymbolLayoutProperties::Defaults::symbol_screen_space()
-        };
+        let is_screen_space = screen_space_prop
+            .as_constant()
+            .copied()
+            .unwrap_or_else(SymbolLayoutProperties::Defaults::symbol_screen_space);
         let symbol_projection_variant =
             if is_screen_space { ProjectionVariant::Mercator } else { self.base.projection_variant };
         let is_offset = !layout.icon_offset.is_undefined();

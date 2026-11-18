@@ -347,8 +347,8 @@ impl SymbolLayout {
         layout_parameters: &mut LayoutParameters<'_>,
     ) -> Result<Self, Error> {
         fn capture<T>(property_value: &mut PropertyValue<T>, global_state: Option<&Arc<GlobalStateMap>>) {
-            if property_value.is_expression() {
-                property_value.as_expression_mut().capture_global_state(global_state.cloned());
+            if let Some(expression) = property_value.as_expression_mut() {
+                expression.capture_global_state(global_state.cloned());
             }
         }
 

@@ -40,10 +40,10 @@ pub fn set_overrides(
     // the wrapper and exempt the bucket from relayout tracking.
     if value.is_constant() {
         let unevaluated_value = unevaluated.text_color.get_value();
-        if unevaluated_value.is_expression()
+        if let Some(expression) = unevaluated_value.as_expression()
             && unevaluated_value.get_dependencies().intersects(Dependency::GLOBAL_STATE)
         {
-            let mut retained = unevaluated_value.as_expression().clone();
+            let mut retained = expression.clone();
             retained.capture_global_state(global_state.clone());
             *value =
                 Evaluated::PerFeature { expression: retained, default: SymbolPaintProperties::Defaults::text_color() };
