@@ -43,7 +43,7 @@ impl GlobeTileMesh {
     ) -> Self {
         let GlobeMeshData { vertices, indices, segments } = globe_mesh_data(canonical, mask, layout_vertex);
         GlobeTileMesh {
-            vertices: context.add_vertices(vertices).into_shared(),
+            vertices: context.add_vertices(vertices),
             indices: context.add_indexes(Indexes::new(indices)),
             segments,
         }

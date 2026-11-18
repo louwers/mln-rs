@@ -388,7 +388,7 @@ fn set_placed_attribute<V: bytemuck::Pod>(
     if placed.as_ref().is_some_and(|typed| context.update_vertices(typed, vertices)) {
         return;
     }
-    let typed = context.add_vertices(vertices.to_vec());
+    let typed = context.add_dynamic_vertices(vertices);
     attribs.set_shared(id, SharedAttribute::new(typed.shared().clone(), type_, 0, size_of::<V>() as u32));
     *placed = Some(typed);
 }

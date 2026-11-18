@@ -151,10 +151,10 @@ impl<T: bytemuck::Pod> GeometryVec<T> {
     /// The data, moved out into `context`'s store.
     fn store_vertices(&mut self, context: &mut Context) -> SharedVertices {
         match self.take() {
-            Data::Vec(v) => context.add_vertices(v).into_shared(),
+            Data::Vec(v) => context.add_vertices(v),
             #[cfg(target_family = "wasm")]
             Data::Host(bytes) => context.add_host_vertices::<T>(bytes),
-            Data::Moved { .. } => context.add_vertices(Vec::<T>::new()).into_shared(),
+            Data::Moved { .. } => context.add_vertices(Vec::<T>::new()),
         }
     }
 }
@@ -349,7 +349,7 @@ impl<'a> GeometryUpload<'a> {
     ) {
         if !self.geometry.derived.has_or_takes(vec.key, self.copies.iter().map(|copy| &copy.derived)) {
             debug_assert!(!vec.is_moved(), "vertices derived from data that moved to the store");
-            let derived = self.context.add_vertices(make(&vec.data())).into_shared();
+            let derived = self.context.add_vertices(make(&vec.data()));
             self.geometry.derived.insert(vec.key, derived);
         }
     }
@@ -367,7 +367,7 @@ pub(crate) fn derived_vertices<V>(geometry: &BucketGeometry, vec: &GeometryVec<V
 /// Vertices of `context`'s store holding a copy of `vertices`, which the
 /// draws that bind them don't change: draws replace such vertices instead.
 pub(crate) fn copied_vertices<V: bytemuck::Pod>(context: &mut Context, vertices: &[V]) -> SharedVertices {
-    context.add_vertices(vertices.to_vec()).into_shared()
+    context.add_vertices(vertices.to_vec())
 }
 
 /// Indexes holding a copy of `indexes`, which a draw owns.

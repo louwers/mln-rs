@@ -671,7 +671,7 @@ fn wall_paint(
     let buffer = &binders.interleaved_vertex_buffer;
     if binders.depends_on_feature_state() {
         let paint = wall_quad_paint(&buffer.shared_vertex_vector.data(), buffer.stride, walls);
-        Some(context.add_vertices(paint).into_shared())
+        Some(context.add_vertices(paint))
     } else {
         derived_vertices(geometry, &buffer.shared_vertex_vector)
     }

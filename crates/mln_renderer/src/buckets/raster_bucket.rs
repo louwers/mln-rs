@@ -208,7 +208,7 @@ impl MaskedGeometry {
     pub(crate) fn upload(&mut self, context: &mut Context) {
         self.quads = match std::mem::replace(&mut self.quads, Quads::Whole) {
             Quads::Data { vertices, indices, segments } if !vertices.is_empty() => {
-                let vertices = context.add_vertices(vertices).into_shared();
+                let vertices = context.add_vertices(vertices);
                 let indexes = context.add_indexes(Indexes::new(indices));
                 Quads::Stored(StoredQuads { vertices, indexes, segments })
             }

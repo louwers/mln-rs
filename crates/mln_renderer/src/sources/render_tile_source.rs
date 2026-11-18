@@ -109,7 +109,7 @@ fn polyline_objects(
 
     let vertex_count = vertices.len();
     let stride = size_of::<LineLayoutVertex>() as u32;
-    let shared = context.add_vertices(vertices).into_shared();
+    let shared = context.add_vertices(vertices);
     let mut attrs = VertexAttributeArray::new();
     // The position and normal, then the extrusion data.
     for (id, offset, data_type) in [

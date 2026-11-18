@@ -243,8 +243,16 @@ impl Context {
 
     /// Keeps `vertices` for the draws that share them, while a clone of the
     /// returned handle lasts.
-    pub(crate) fn add_vertices<V: bytemuck::Pod>(&mut self, vertices: Vec<V>) -> TypedVertices<V> {
+    pub(crate) fn add_vertices<V: bytemuck::Pod>(&mut self, vertices: Vec<V>) -> SharedVertices {
         self.vertices.add(vertices, &self.released_entries)
+    }
+
+    /// Keeps a copy of `vertices`, as [`add_vertices`](Self::add_vertices)
+    /// does, as dynamic vertices, which the holder of the returned handle
+    /// updates ([`update_vertices`](Self::update_vertices)), and whose
+    /// storage stays across uploads for the next update to fill.
+    pub(crate) fn add_dynamic_vertices<V: bytemuck::Pod>(&mut self, vertices: &[V]) -> TypedVertices<V> {
+        self.vertices.add_dynamic(vertices, &self.released_entries)
     }
 
     /// Keeps the vertices of the type `V` in the JS array `bytes`, as

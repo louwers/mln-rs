@@ -774,12 +774,27 @@ fn line_bucket_evaluates_cap_and_limits_per_feature() {
 #[test]
 fn stored_vertices_free_their_data_once_they_have_a_buffer() {
     with_context(|context| {
-        let vertices = context.add_vertices(vec![[1i16, 2], [3, 4]]).into_shared();
+        let vertices = context.add_vertices(vec![[1i16, 2], [3, 4]]);
         assert!(context.vertices(&vertices).is_some_and(|stored| stored.needs_upload() && stored.bytes().len() == 8));
 
         context.upload_vertices(&vertices).expect("uploads").expect("a buffer");
         assert!(context.vertices(&vertices).is_some_and(|stored| !stored.needs_upload() && stored.bytes().is_empty()));
         assert_eq!(vertices.count(), 2);
+    });
+}
+
+// Dynamic vertices' updates fill the storage of the bytes they were made of,
+// which their uploads keep.
+#[test]
+fn dynamic_vertices_keep_their_storage_across_uploads() {
+    with_context(|context| {
+        let typed = context.add_dynamic_vertices(&[[1i16, 2], [3, 4]]);
+        let storage = context.vertices(typed.shared()).map(|stored| stored.bytes().as_ptr());
+        for x in 5..8 {
+            context.upload_vertices(typed.shared()).expect("uploads").expect("a buffer");
+            assert!(context.update_vertices(&typed, &[[x, x], [x, x]]));
+            assert_eq!(context.vertices(typed.shared()).map(|stored| stored.bytes().as_ptr()), storage, "{x}");
+        }
     });
 }
 
@@ -789,7 +804,7 @@ fn stored_vertices_free_their_data_once_they_have_a_buffer() {
 #[test]
 fn typed_vertices_take_updates_of_as_many_vertices() {
     with_context(|context| {
-        let typed = context.add_vertices(vec![[1i16, 2], [3, 4]]);
+        let typed = context.add_dynamic_vertices(&[[1i16, 2], [3, 4]]);
         let vertices = typed.shared().clone();
         let buffer = context.upload_vertices(&vertices).expect("uploads").expect("a buffer");
         assert!(context.vertices(&vertices).is_some_and(|stored| !stored.needs_upload()));
@@ -832,7 +847,7 @@ fn a_draw_writes_an_update_of_the_vertices_it_binds() {
             .shader("RasterShader", mln_gfx::projection_variant::ProjectionVariant::Mercator)
             .expect("the raster shader");
         let vertex = |x: i16| RasterLayoutVertex { a1: [x, x], a2: [0, 0] };
-        let typed = context.add_vertices(vec![vertex(0), vertex(1), vertex(2)]);
+        let typed = context.add_dynamic_vertices(&[vertex(0), vertex(1), vertex(2)]);
         let stride = size_of::<RasterLayoutVertex>() as u32;
         let mut attrs = VertexAttributeArray::new();
         for (id, offset) in [(ID_RASTER_POS_VERTEX_ATTRIBUTE, 0), (ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE, 4)] {
@@ -877,7 +892,7 @@ fn a_draw_writes_an_update_of_the_vertices_it_binds() {
 #[test]
 fn store_entries_last_as_long_as_their_handles() {
     with_context(|context| {
-        let vertices = context.add_vertices(vec![[1i16, 2]]).into_shared();
+        let vertices = context.add_vertices(vec![[1i16, 2]]);
         let held = vertices.clone();
         let texture = context.add_texture();
         let draw_texture = texture.clone();

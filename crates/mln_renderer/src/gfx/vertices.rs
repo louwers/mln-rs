@@ -1,9 +1,9 @@
 //! The vertices that draws bind from the context's store: a bucket's, which
 //! a tile's draws share, and those a layer makes for its draws. Draws hold
 //! them as [`SharedVertices`]; only the holder of a [`TypedVertices`], who
-//! made them of a type, can replace them with new vertices of it. Only the
-//! store makes either, of the entries it adds, so a handle's count and
-//! vertex type are its entry's.
+//! made them as dynamic vertices of a type, can replace them with new
+//! vertices of it. Only the store makes either, of the entries it adds, so a
+//! handle's count and vertex type are its entry's.
 
 use std::marker::PhantomData;
 use std::rc::Rc;
@@ -17,12 +17,18 @@ use crate::gfx::context::Device;
 use crate::gfx::store::{ReleasedEntries, Shared, Store, VerticesKey};
 
 /// Where the vertices' bytes are: in the vector of the alignment of their
-/// type, which a vector of vertices moves into without a copy.
+/// type, which a vector of vertices moves into without a copy, or of
+/// dynamic vertices in bytes.
 enum VertexData {
     Bytes(Vec<u8>),
     Halves(Vec<u16>),
     Words(Vec<u32>),
     Doubles(Vec<u64>),
+    /// Dynamic vertices' bytes, which the next upload writes.
+    Dynamic(Vec<u8>),
+    /// Dynamic vertices' bytes that the last upload wrote, whose storage the
+    /// next update fills.
+    Written(Vec<u8>),
     /// The bytes in the JS array they arrived in, which the upload writes
     /// from there.
     #[cfg(target_family = "wasm")]
@@ -32,11 +38,13 @@ enum VertexData {
 }
 
 /// Vertices of the context's store: their bytes until an upload writes them
-/// to a buffer, which frees them, and that buffer. An update brings new
-/// bytes of as many vertices, which the next upload writes over the
-/// buffer's.
+/// to a buffer, which frees them, and that buffer. Dynamic vertices take
+/// updates, each new bytes of as many vertices, which the next upload
+/// writes over the buffer's; their uploads keep their bytes' storage for
+/// the next update to fill.
 pub(crate) struct Vertices {
-    /// The bytes the next upload writes, `Freed` once it wrote them.
+    /// The bytes the next upload writes; once it wrote them, `Freed`, or
+    /// `Written` for dynamic vertices.
     data: VertexData,
     count: usize,
     vertex_size: usize,
@@ -64,9 +72,10 @@ impl VertexData {
             VertexData::Halves(data) => Some(bytemuck::cast_slice_mut(data)),
             VertexData::Words(data) => Some(bytemuck::cast_slice_mut(data)),
             VertexData::Doubles(data) => Some(bytemuck::cast_slice_mut(data)),
+            VertexData::Dynamic(bytes) => Some(bytes),
             #[cfg(target_family = "wasm")]
             VertexData::Host(_) => None,
-            VertexData::Freed => None,
+            VertexData::Written(_) | VertexData::Freed => None,
         }
     }
 
@@ -77,9 +86,10 @@ impl VertexData {
             VertexData::Halves(data) => Some(bytemuck::cast_slice(data)),
             VertexData::Words(data) => Some(bytemuck::cast_slice(data)),
             VertexData::Doubles(data) => Some(bytemuck::cast_slice(data)),
+            VertexData::Dynamic(bytes) => Some(bytes),
             #[cfg(target_family = "wasm")]
             VertexData::Host(_) => None,
-            VertexData::Freed => None,
+            VertexData::Written(_) | VertexData::Freed => None,
         }
     }
 }
@@ -90,6 +100,12 @@ impl Vertices {
         let count = vertices.len();
         let data = VertexData::of(vertices);
         Vertices { data, count, vertex_size: size_of::<V>(), buffer: None }
+    }
+
+    /// Dynamic vertices of a copy of `vertices`.
+    fn dynamic<V: bytemuck::Pod>(vertices: &[V]) -> Vertices {
+        let data = VertexData::Dynamic(bytemuck::cast_slice(vertices).to_vec());
+        Vertices { data, count: vertices.len(), vertex_size: size_of::<V>(), buffer: None }
     }
 
     /// The vertices of `vertex_size` bytes each in a JS array.
@@ -118,12 +134,11 @@ impl Vertices {
     }
 
     /// Whether the next upload writes the vertices: they are new, or
-    /// updated since the last upload, which wrote and freed their bytes.
-    /// A draw bound before then binds them again, and its other attributes
-    /// with them.
+    /// updated since the last upload, which wrote their bytes. A draw bound
+    /// before then binds them again, and its other attributes with them.
     #[must_use]
     pub(crate) fn needs_upload(&self) -> bool {
-        !matches!(self.data, VertexData::Freed)
+        !matches!(self.data, VertexData::Written(_) | VertexData::Freed)
     }
 
     /// The bytes of the vertices while they are in wasm memory.
@@ -132,12 +147,15 @@ impl Vertices {
         self.data.bytes().unwrap_or_default()
     }
 
-    /// Replaces the bytes with `bytes`, of as many vertices, which the next
-    /// upload writes. Returns false, leaving the vertices be, for another
-    /// number of bytes.
+    /// Replaces the bytes of dynamic vertices with `bytes`, of as many
+    /// vertices, which the next upload writes. Returns false, leaving the
+    /// vertices be, for another number of bytes.
     fn update(&mut self, bytes: &[u8]) -> bool {
         if bytes.len() != self.size() {
             return false;
+        }
+        if let VertexData::Written(storage) = &mut self.data {
+            self.data = VertexData::Dynamic(std::mem::take(storage));
         }
         match self.data.bytes_mut() {
             Some(data) => data.copy_from_slice(bytes),
@@ -146,20 +164,31 @@ impl Vertices {
         true
     }
 
+    /// Frees the bytes, which the upload wrote, or keeps those of dynamic
+    /// vertices for the next update.
+    fn written(&mut self) {
+        self.data = match std::mem::replace(&mut self.data, VertexData::Freed) {
+            VertexData::Dynamic(bytes) | VertexData::Written(bytes) => VertexData::Written(bytes),
+            _ => VertexData::Freed,
+        };
+    }
+
     /// The buffer of the vertices through `device`: made of them by the
     /// first upload, and written over by the upload after an update, each
-    /// of which frees their bytes; `None` where there are none.
+    /// of which frees their bytes, or keeps dynamic vertices' for the next
+    /// update; `None` where there are none.
     fn upload(&mut self, device: &mut Device) -> Result<Option<BufferPtr>, GpuError> {
         if let Some(buffer) = &self.buffer {
+            let buffer = BufferPtr::clone(buffer);
             if let Some(bytes) = self.data.bytes() {
-                device.write(buffer, bytes)?;
-                self.data = VertexData::Freed;
+                device.write(&buffer, bytes)?;
+                self.written();
             }
-            return Ok(Some(BufferPtr::clone(buffer)));
+            return Ok(Some(buffer));
         }
         let size = self.size();
         if size == 0 {
-            self.data = VertexData::Freed;
+            self.written();
             return Ok(None);
         }
         let buffer = match &self.data {
@@ -174,7 +203,7 @@ impl Vertices {
             }
         };
         self.buffer = Some(BufferPtr::clone(&buffer));
-        self.data = VertexData::Freed;
+        self.written();
         Ok(Some(buffer))
     }
 }
@@ -187,12 +216,19 @@ pub(crate) struct VertexStore(Store<VerticesKey, Vertices>);
 impl VertexStore {
     /// Keeps `vertices` while a clone of the returned handle lasts, whose
     /// key goes to `released` once the last clone drops.
-    pub(crate) fn add<V: bytemuck::Pod>(
+    pub(crate) fn add<V: bytemuck::Pod>(&mut self, vertices: Vec<V>, released: &Rc<ReleasedEntries>) -> SharedVertices {
+        self.insert(Vertices::new(vertices), released)
+    }
+
+    /// Keeps a copy of `vertices` as dynamic vertices, which the holder of
+    /// the returned handle updates ([`update`](Self::update)), as
+    /// [`add`](Self::add) does.
+    pub(crate) fn add_dynamic<V: bytemuck::Pod>(
         &mut self,
-        vertices: Vec<V>,
+        vertices: &[V],
         released: &Rc<ReleasedEntries>,
     ) -> TypedVertices<V> {
-        TypedVertices { shared: self.insert(Vertices::new(vertices), released), vertex_type: PhantomData }
+        TypedVertices { shared: self.insert(Vertices::dynamic(vertices), released), vertex_type: PhantomData }
     }
 
     /// Keeps the vertices of the type `V` in the JS array `bytes`, as
@@ -276,8 +312,8 @@ impl SharedVertices {
     }
 }
 
-/// Vertices of the context's store made of vertices of the type `V`, which
-/// their holder can replace with others of `V`
+/// Dynamic vertices of the context's store made of vertices of the type
+/// `V`, which their holder can replace with others of `V`
 /// ([`Context::update_vertices`]).
 ///
 /// [`Context::update_vertices`]: crate::gfx::context::Context::update_vertices
@@ -291,12 +327,6 @@ impl<V> TypedVertices<V> {
     #[must_use]
     pub(crate) fn shared(&self) -> &SharedVertices {
         &self.shared
-    }
-
-    /// [`shared`](Self::shared), without the type.
-    #[must_use]
-    pub(crate) fn into_shared(self) -> SharedVertices {
-        self.shared
     }
 }
 
