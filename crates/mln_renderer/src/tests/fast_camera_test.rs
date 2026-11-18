@@ -248,6 +248,7 @@ impl Scene {
             global_state: None,
             is_update_synchronous: false,
             font_faces: None,
+            placement_commits: 0,
         };
         // The first frame lays the tiles out.
         let relayout = !self.laid_out;

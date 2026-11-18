@@ -815,6 +815,7 @@ impl RenderOrchestrator {
             global_state: self.global_state.clone(),
             is_update_synchronous: false,
             font_faces: update_parameters.style.get_font_faces().cloned(),
+            placement_commits: self.placement_controller.commits(),
         };
 
         if !self.sources_by_id.is_empty() {
@@ -976,8 +977,6 @@ impl RenderOrchestrator {
             // Discard deferred placement and query data when no symbol buckets remain.
             frame.placement_changed = self.placement_controller.reset();
             self.cross_tile_symbol_index.reset();
-            // Source fades still need their placement bookkeeping to advance.
-            self.tile_store.update_fading_tiles();
             frame.symbol_fade_change = 1.0;
             frame.needs_repaint = self.has_transitions(update_parameters.time_point);
         } else if continuous {
@@ -1011,7 +1010,6 @@ impl RenderOrchestrator {
                 placement.place(&mut self.tile_store);
                 self.placement_controller.set_placement(placement);
                 self.cross_tile_symbol_index.prune_unused_layers(&used_symbol_layers);
-                self.tile_store.update_fading_tiles();
             } else {
                 self.placement_controller.set_stale(stale);
             }

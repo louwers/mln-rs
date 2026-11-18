@@ -140,41 +140,6 @@ impl crate::source_state::FeatureStateTarget for Shown {
     }
 }
 
-/// Where a render entry stands in fading its symbols out: it is held for
-/// two placements, the first starting the fade and the second ending it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum FadeState {
-    Loaded,
-    NeedsFirstPlacement,
-    NeedsSecondPlacement,
-    CanRemove,
-}
-
-impl FadeState {
-    /// An entry the last update rendered, but not this one.
-    #[must_use]
-    pub(crate) fn rendered_previously(self) -> Self {
-        match self {
-            FadeState::Loaded => FadeState::NeedsFirstPlacement,
-            other => other,
-        }
-    }
-
-    #[must_use]
-    pub(crate) fn stepped(self) -> Self {
-        match self {
-            FadeState::NeedsFirstPlacement => FadeState::NeedsSecondPlacement,
-            FadeState::NeedsSecondPlacement => FadeState::CanRemove,
-            other => other,
-        }
-    }
-
-    #[must_use]
-    pub(crate) fn holds(self) -> bool {
-        matches!(self, FadeState::NeedsFirstPlacement | FadeState::NeedsSecondPlacement)
-    }
-}
-
 pub(crate) struct Tile {
     pub(crate) id: OverscaledTileID,
     pub(crate) load: Load,

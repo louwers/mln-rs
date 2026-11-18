@@ -470,12 +470,6 @@ impl TileStore {
         used
     }
 
-    pub(crate) fn update_fading_tiles(&mut self) {
-        for source in self.sources.values_mut() {
-            source.update_fading_tiles();
-        }
-    }
-
     pub(crate) fn has_fading_tiles(&self) -> bool {
         self.sources.values().any(SourceTiles::has_fading_tiles)
     }

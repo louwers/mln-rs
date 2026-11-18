@@ -34,7 +34,7 @@ use crate::tile::contents::Contents;
 use crate::tile::dem;
 use crate::tile::job::SourceStyle;
 use crate::tile::store::{SourceInfo, StoreContext};
-use crate::tile::tile::{FadeState, Tile, TileKind, TileLoadOrder, TileNecessity, TileUpdateParameters};
+use crate::tile::tile::{Tile, TileKind, TileLoadOrder, TileNecessity, TileUpdateParameters};
 use crate::tile::tile_mut::{TileMut, WorldCopy, retire};
 use crate::tile_parameters::TileParameters;
 use crate::util::tile_cover::{TileCoverParameters, covering_zoom_level, globe_level_cover, tile_cover};
@@ -104,22 +104,28 @@ impl Place {
     }
 }
 
+/// How many placements an entry the view leaves stays rendered for: the
+/// first fades its symbols out and the second ends the fade.
+const PLACEMENTS_HELD_FOR_FADE: u64 = 2;
+
 /// A tile an update renders under one unwrapped id.
 #[derive(Clone, Copy, Debug)]
 struct Rendered {
     key: OverscaledTileID,
-    fade: FadeState,
+    /// For an entry the view left, held so that its symbols fade out, how
+    /// many placements had committed when it left.
+    held_since: Option<u64>,
     /// Whether the tile draws a visible layer here.
     needs_rendering: bool,
 }
 
 impl Rendered {
     fn ideal(key: OverscaledTileID) -> Self {
-        Rendered { key, fade: FadeState::Loaded, needs_rendering: false }
+        Rendered { key, held_since: None, needs_rendering: false }
     }
 
-    fn holds_for_fade(&self, tile: &Tile) -> bool {
-        tile.fades_out() && self.fade.holds()
+    fn is_held(&self) -> bool {
+        self.held_since.is_some()
     }
 }
 
@@ -740,6 +746,9 @@ impl SourceTiles {
             cover.pass_rank = 0;
             update_renderables(&mut cover, &ideal_tiles, zoom_range, max_parent_tile_overscale_factor);
 
+            // An entry the view left stays, held, until enough placements
+            // have committed since it left.
+            let commits = parameters.placement_commits;
             let previously: Vec<(UnwrappedTileID, Rendered)> =
                 cover.previously_rendered.iter().map(|(id, entry)| (*id, *entry)).collect();
             for (unwrapped, entry) in previously {
@@ -747,8 +756,9 @@ impl SourceTiles {
                 let Some(tile) = cover.tile(&key) else {
                     continue;
                 };
-                let entry = Rendered { fade: entry.fade.rendered_previously(), needs_rendering: false, ..entry };
-                if entry.holds_for_fade(tile) {
+                let held_since = entry.held_since.unwrap_or(commits);
+                if tile.fades_out() && commits < held_since + PLACEMENTS_HELD_FOR_FADE {
+                    let entry = Rendered { held_since: Some(held_since), needs_rendering: false, ..entry };
                     // Optional, so that it requests nothing.
                     cover.retain_tile(&key, TileNecessity::Optional);
                     debug_assert!(cover.is_renderable(&key));
@@ -821,10 +831,9 @@ impl SourceTiles {
                 continue;
             };
             debug_assert!(tile.is_renderable());
-            let hold_for_fade = entry.holds_for_fade(tile);
             for layer_properties in update.layers {
                 let type_info = layer_properties.style().info();
-                if hold_for_fade && !type_info.fading_tiles {
+                if entry.is_held() && !type_info.fading_tiles {
                     continue;
                 }
                 let updated = tile.layer_properties_updated(layer_properties);
@@ -1033,7 +1042,7 @@ impl SourceTiles {
                 id,
                 tile,
                 slot,
-                hold_for_fade: entry.holds_for_fade(tile),
+                hold_for_fade: entry.is_held(),
                 needs_rendering: entry.needs_rendering,
             })
         })
@@ -1471,25 +1480,12 @@ impl SourceTiles {
         }
     }
 
-    pub(crate) fn update_fading_tiles(&mut self) {
-        let SourceTiles { tiles, rendered, .. } = self;
-        for entry in rendered.values_mut() {
-            if let Some(slot) = tiles.get(&entry.key)
-                && entry.holds_for_fade(&slot.tile)
-            {
-                entry.fade = entry.fade.stepped();
-            }
-        }
-    }
-
-    /// Whether an entry the view left is still rendered: held while
-    /// placements fade its symbols out, or faded out and waiting for the
-    /// next update to drop it.
+    /// Whether the last update held an entry the view left, which waits for
+    /// placements to fade its symbols out, or for the next update to drop
+    /// it once they have.
     #[must_use]
     pub(crate) fn has_fading_tiles(&self) -> bool {
-        self.rendered.values().any(|entry| {
-            entry.fade != FadeState::Loaded && self.tiles.get(&entry.key).is_some_and(|slot| slot.tile.fades_out())
-        })
+        self.rendered.values().any(Rendered::is_held)
     }
 }
 
@@ -1515,58 +1511,4 @@ fn upload_sharing(slots: &mut [Slot], at: usize, copies: &[usize], context: &mut
         .filter_map(|slot| Some(&slot.tile.contents()?.geometry()?.bucket_geometry))
         .collect();
     geometry.upload(&shared, context, needs);
-}
-
-#[cfg(test)]
-mod tests {
-    use mln_map_types::MapMode;
-    use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
-    use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
-
-    use super::{Rendered, SourceTiles};
-    use crate::layout::tile_layout::LayoutParams;
-    use crate::tile::job::SourceKey;
-    use crate::tile::loading::{Load, OriginLoad};
-    use crate::tile::pipeline::Pipeline;
-    use crate::tile::store::SourceInfo;
-    use crate::tile::tile::{FadeState, Tile, TileKind, TileNecessity};
-
-    /// A geometry tile of a continuous map, rendered as an ideal tile under
-    /// one id while held for fade under another: only the held entry
-    /// fades, once per placement, and the ideal one draws as usual.
-    #[test]
-    fn each_render_entry_fades_on_its_own() {
-        let mut source = SourceTiles::new(SourceInfo::new(SourceKey(1), "s".to_owned(), TileKind::Geometry, false));
-        let key = OverscaledTileID::from_zxy(1, 0, 0);
-        let params = LayoutParams {
-            mode: MapMode::Continuous,
-            pixel_ratio: 1.0,
-            show_collision_boxes: false,
-            subdivision_granularity: SubdivisionGranularitySetting::none(),
-            first_load: true,
-        };
-        let load = Load { necessity: TileNecessity::Optional, origin: OriginLoad::GeoJson { load: None } };
-        source.insert(Tile::new(key, load, Pipeline::new(TileKind::Geometry, 1, params)));
-        let ideal = key.to_unwrapped();
-        let held = UnwrappedTileID::with_wrap(1, key.canonical);
-        source.rendered.insert(ideal, Rendered::ideal(key));
-        source
-            .rendered
-            .insert(held, Rendered { fade: FadeState::Loaded.rendered_previously(), ..Rendered::ideal(key) });
-
-        let holds = |source: &SourceTiles| -> Vec<(UnwrappedTileID, bool)> {
-            source.rendered().map(|rendered| (*rendered.id, rendered.hold_for_fade)).collect()
-        };
-        assert_eq!(holds(&source), [(ideal, false), (held, true)]);
-
-        source.update_fading_tiles();
-        assert!(source.has_fading_tiles());
-        assert_eq!(source.rendered[&held].fade, FadeState::NeedsSecondPlacement, "one step per placement");
-        source.update_fading_tiles();
-        assert!(source.has_fading_tiles(), "faded out, until an update drops it");
-        assert_eq!(holds(&source), [(ideal, false), (held, false)], "faded out");
-        assert_eq!(source.rendered[&ideal].fade, FadeState::Loaded);
-        source.rendered.remove(&held);
-        assert!(!source.has_fading_tiles());
-    }
 }

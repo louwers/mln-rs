@@ -276,3 +276,20 @@ fn tiles_held_for_their_fade_let_the_map_go_idle() {
     let placements = frames.iter().filter(|status| status.placement_changed).count();
     assert!(placements >= 2, "{placements} placements");
 }
+
+/// With no symbols to place, each frame commits the empty placement: the
+/// tiles of zoom 4 are held for the two frames after the map shows zoom
+/// 5's, and the map goes idle.
+#[test]
+fn tiles_held_with_no_symbols_to_place_let_the_map_go_idle() {
+    let test = ContinuousMap::new();
+    for layer in ["labels", "more-labels"] {
+        test.map
+            .borrow_mut()
+            .edit_style(|style| style.apply(layer_property(layer, "visibility", json!("none"))))
+            .unwrap();
+    }
+    test.settle();
+    test.map.borrow_mut().jump_to(&CameraOptions { zoom: Some(5.0), ..Default::default() });
+    test.settle();
+}

@@ -520,6 +520,7 @@ impl PlacementInputs {
 pub(crate) struct PlacementController {
     placement: Placement,
     stale: bool,
+    commits: u64,
 }
 
 impl Default for PlacementController {
@@ -531,12 +532,21 @@ impl Default for PlacementController {
 impl PlacementController {
     #[must_use]
     pub(crate) fn new() -> Self {
-        PlacementController { placement: Placement::new_default(), stale: false }
+        PlacementController { placement: Placement::new_default(), stale: false, commits: 0 }
     }
 
+    /// Commits `placement`.
     pub(crate) fn set_placement(&mut self, placement: Placement) {
         self.placement = placement;
         self.stale = false;
+        self.commits += 1;
+    }
+
+    /// How many placements the controller has committed, each reset to the
+    /// empty placement included.
+    #[must_use]
+    pub(crate) fn commits(&self) -> u64 {
+        self.commits
     }
 
     /// Whether placing again from `inputs` would change the placement:
@@ -554,14 +564,15 @@ impl PlacementController {
         std::mem::replace(&mut self.placement, Placement::new_default())
     }
 
-    /// Resets to the empty placement; returns whether a committed placement
-    /// was discarded.
+    /// Commits the empty placement; returns whether a placement with
+    /// symbols was discarded.
     pub(crate) fn reset(&mut self) -> bool {
         let changed = self.placement.inputs.is_some();
         if changed {
             self.placement = Placement::new_default();
         }
         self.stale = false;
+        self.commits += 1;
         changed
     }
 

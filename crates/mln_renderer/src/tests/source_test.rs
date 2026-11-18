@@ -74,6 +74,7 @@ fn tile_parameters(
         global_state: None,
         is_update_synchronous: false,
         font_faces: None,
+        placement_commits: 0,
     }
 }
 
@@ -1121,6 +1122,8 @@ struct TurningSource {
     layers: Vec<Arc<dyn ErasedEvaluatedLayer>>,
     prefetch_zoom_delta: u8,
     latitude: f64,
+    /// The placements committed before the next update.
+    placement_commits: u64,
 }
 
 impl TurningSource {
@@ -1167,6 +1170,7 @@ impl TurningSource {
             layers: Tiled::Vector.layers(),
             prefetch_zoom_delta: 0,
             latitude: 0.0,
+            placement_commits: 0,
         }
     }
 
@@ -1190,6 +1194,7 @@ impl TurningSource {
         let file_source: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&self.file_source);
         let mut parameters = self.test.tile_parameters_with(MapMode::Continuous, Some(file_source));
         parameters.prefetch_zoom_delta = self.prefetch_zoom_delta;
+        parameters.placement_commits = self.placement_commits;
         let (store, source, layers) = (&mut self.store, self.source.clone(), &self.layers);
         self.render_source.update(store, source, layers, needs_rendering, false, &parameters);
     }
@@ -1257,7 +1262,7 @@ fn cached_tiles_wait_behind_the_view() {
     // two placements.
     for _ in 0..3 {
         panned.update(120.0, 3.0);
-        panned.store.update_fading_tiles();
+        panned.placement_commits += 1;
     }
     assert!(panned.cached_unwanted() > 0, "the tiles the view left");
 
@@ -1269,15 +1274,25 @@ fn cached_tiles_wait_behind_the_view() {
     assert_eq!(cover, hidden.cached_unwanted(), "the hidden source's tiles");
 }
 
-/// A tile the view leaves holds for its symbols' fade from the update that
-/// leaves it, which the next placements step.
+/// A tile the view leaves is held for its symbols' fade from the update that
+/// leaves it until two placements have committed since, however many
+/// updates come in between, and the next update drops it.
 #[test]
-fn a_tile_the_view_leaves_fades_from_that_update() {
+fn a_tile_the_view_leaves_is_held_for_two_placements() {
     let mut turned = TurningSource::new("mercator", Size::new(512, 512), 0);
+    turned.placement_commits = 5;
     turned.load(0.0, 3.0);
     assert!(!turned.store.has_fading_tiles());
     turned.update(120.0, 3.0);
-    assert!(turned.store.has_fading_tiles());
+    assert!(turned.store.has_fading_tiles(), "held from the update that leaves it");
+    turned.update(120.0, 3.0);
+    assert!(turned.store.has_fading_tiles(), "held while no placement commits");
+    turned.placement_commits += 1;
+    turned.update(120.0, 3.0);
+    assert!(turned.store.has_fading_tiles(), "held after one placement");
+    turned.placement_commits += 1;
+    turned.update(120.0, 3.0);
+    assert!(!turned.store.has_fading_tiles(), "dropped after two");
 }
 
 /// A globe turned to its far side before any tile there has loaded draws the
