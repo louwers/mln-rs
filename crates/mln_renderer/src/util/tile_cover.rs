@@ -16,7 +16,7 @@ use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::bounding_volumes::{AABB, Frustum, IntersectionResult};
 use mln_util::constants;
 use mln_util::error::Error;
-use mln_util::geo::{LatLng, LatLngBounds, ScreenCoordinate};
+use mln_util::geo::{LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
 use mln_util::mat3::{vec3_length, vec3_scale, vec3_sub};
 use mln_util::projection::Projection;
 use mln_util::range::Range;
@@ -24,11 +24,10 @@ use mln_util::vectors::Vec3;
 
 use crate::util::tile_cover_impl::Impl;
 
-/// A `LatLng` built from the coordinates of an existing `LatLngBounds` (with
-/// the latitude clamped to ±`LATITUDE_MAX`), so the constructor's checks
-/// cannot fail.
+/// A corner of a `LatLngBounds` with its latitude clamped to
+/// ±`LATITUDE_MAX`.
 fn bounds_lat_lng(lat: f64, lon: f64) -> LatLng {
-    LatLng::new(lat, lon).expect("LatLng from LatLngBounds coordinates")
+    LatLng::saturating(lat, lon, WrapMode::Unwrapped)
 }
 
 /// A callback for each span of a scan line: `(x0, x1, y)`.
@@ -197,10 +196,7 @@ impl TileCover {
         let nw = Projection::project_zoom(&bounds.northwest(), i32::from(z));
 
         let p = Polygon::new(LineString([sw, nw, ne, se, sw].map(Coord::from).to_vec()), Vec::new());
-        // Nothing is projected (`project = false`), so nothing can throw.
-        TileCover {
-            impl_: Box::new(Impl::new(i32::from(z), &Geometry::Polygon(p), false).expect("unprojected tile cover")),
-        }
+        TileCover { impl_: Box::new(Impl::new(i32::from(z), &Geometry::Polygon(p))) }
     }
 
     /// The cover of `geom` at zoom `z`. With `project`, projects the geometry
@@ -208,7 +204,8 @@ impl TileCover {
     /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a point that
     /// isn't a valid `LatLng`.
     pub fn new_from_geometry(geom: &Geometry<f64>, z: u8, project: bool) -> Result<TileCover, Error> {
-        Ok(TileCover { impl_: Box::new(Impl::new(i32::from(z), geom, project)?) })
+        let impl_ = if project { Impl::new_projected(i32::from(z), geom)? } else { Impl::new(i32::from(z), geom) };
+        Ok(TileCover { impl_: Box::new(impl_) })
     }
 
     #[must_use]

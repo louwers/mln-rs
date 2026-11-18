@@ -18,9 +18,9 @@ use crate::projection::{ProjectedTilePoint, ProjectionData, mercator_tile_coords
 use crate::transform_state::{NorthOrientation, TransformState};
 
 /// A `LatLng` from coordinates computed from a transform state and valid
-/// locations, which its invariants keep finite.
+/// locations, which the state keeps finite.
 fn lat_lng(lat: f64, lon: f64, mode: WrapMode) -> LatLng {
-    LatLng::with_mode(lat, lon, mode).expect("a transform state's coordinates are finite")
+    LatLng::saturating(lat, lon, mode)
 }
 
 /// Clamps `value` to `lo..=hi` as `std::clamp` does:

@@ -344,7 +344,9 @@ impl Supercluster {
     pub fn get_tile(&self, z: u8, x_: u32, y: u32) -> TileFeatures {
         let mut result = TileFeatures::new();
 
-        let zoom = self.zooms.get(&self.limit_zoom(z)).expect("new builds every zoom that limit_zoom returns");
+        let Some(zoom) = self.zooms.get(&self.limit_zoom(z)) else {
+            return result;
+        };
 
         let z2 = 2.0f64.powf(f64::from(z)) as u32;
         let r = f64::from(self.options.radius) / f64::from(self.options.extent);

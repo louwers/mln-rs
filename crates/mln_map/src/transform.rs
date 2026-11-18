@@ -62,9 +62,9 @@ fn normalize_angle(mut angle: f64, anchor_angle: f64) -> f64 {
 }
 
 /// A `LatLng` from coordinates computed from the transform state's valid
-/// locations, which its invariants keep finite.
+/// locations, which the state keeps finite.
 fn lat_lng(lat: f64, lon: f64) -> LatLng {
-    LatLng::new(lat, lon).expect("a transform state's coordinates are finite")
+    LatLng::saturating(lat, lon, WrapMode::Unwrapped)
 }
 
 /// An animation frame's insets, or `None` when one is NaN (infinite insets

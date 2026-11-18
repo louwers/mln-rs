@@ -81,13 +81,10 @@ impl Subdivider {
 
     fn vertex_to_index(&mut self, x: f64, y: f64) -> u32 {
         // The inputs are `i16` tile coordinates, and every vertex made from
-        // them lies within the bounds of a triangle of them.
-        if x < -32768.0 || y < -32768.0 || x > 32767.0 || y > 32767.0 {
-            panic!("Vertex coordinates are out of signed 16 bit integer range.");
-        }
-        // std::lround
-        let x_int = x.round() as i32;
-        let y_int = y.round() as i32;
+        // them lies within the bounds of a triangle of them, so the casts
+        // never saturate.
+        let x_int = i32::from(x.round() as i16);
+        let y_int = i32::from(y.round() as i16);
         let k = Self::key(x_int, y_int);
         if let Some(&index) = self.dictionary.get(&k) {
             return index;

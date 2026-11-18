@@ -1,7 +1,3 @@
-// C++ throws `std::invalid_argument` for a granularity past the 16-bit index
-// space, which the subdivision granularity settings never ask for; the port
-// panics with the same message, as a broken invariant.
-
 use mln_util::constants::EXTENT;
 
 use crate::util::subdivision::{NORTH_POLE_Y, SOUTH_POLE_Y};
@@ -44,19 +40,14 @@ pub(crate) struct TileMesh {
 /// tile space.
 #[must_use]
 pub(crate) fn create_tile_mesh(options: TileMeshOptions) -> TileMesh {
-    // Capped first so the product cannot wrap; every granularity past the
-    // vertex limit fails the check anyway.
-    const MAX_VERTICES: u64 = 1 << 16;
-    let requested_granularity = u64::from(options.granularity.max(1)).min(MAX_VERTICES);
-    let extra_quads_x: u64 = if options.generate_borders { 2 } else { 0 };
-    let extra_quads_y: u64 = u64::from(options.extend_to_north_pole || options.generate_borders)
-        + u64::from(options.extend_to_south_pole || options.generate_borders);
-    if (requested_granularity + extra_quads_x + 1) * (requested_granularity + extra_quads_y + 1) > MAX_VERTICES {
-        panic!("Tile mesh granularity is too large for 16 bit indices.");
-    }
-    let granularity = requested_granularity as i32;
-    let quads_per_axis_x = granularity + extra_quads_x as i32;
-    let quads_per_axis_y = granularity + extra_quads_y as i32;
+    let extra_quads_x: i32 = if options.generate_borders { 2 } else { 0 };
+    let extra_quads_y = i32::from(options.extend_to_north_pole || options.generate_borders)
+        + i32::from(options.extend_to_south_pole || options.generate_borders);
+    // At most 256 vertices per axis, so every index fits in 16 bits.
+    let max_granularity = 255 - extra_quads_x.max(extra_quads_y);
+    let granularity = i32::try_from(options.granularity).unwrap_or(i32::MAX).clamp(1, max_granularity);
+    let quads_per_axis_x = granularity + extra_quads_x;
+    let quads_per_axis_y = granularity + extra_quads_y;
     let vertices_per_axis_x = quads_per_axis_x + 1;
     let vertices_per_axis_y = quads_per_axis_y + 1;
     let offset_x = if options.generate_borders { -1 } else { 0 };

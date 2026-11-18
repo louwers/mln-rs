@@ -55,18 +55,6 @@ fn assert_double_eq(expected: f64, actual: f64) {
     assert!(expected == actual || (ulps(expected) - ulps(actual)).abs() <= 4, "{expected} != {actual}");
 }
 
-/// The message of the panic `f` raises, if it panics (the port panics where
-/// C++ throws).
-fn panic_message(f: impl FnOnce() + std::panic::UnwindSafe) -> Option<String> {
-    std::panic::catch_unwind(f).err().map(|payload| {
-        payload
-            .downcast_ref::<&str>()
-            .map(|message| (*message).to_owned())
-            .or_else(|| payload.downcast_ref::<String>().cloned())
-            .unwrap_or_default()
-    })
-}
-
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 struct GlobeTestVertex {
@@ -629,31 +617,18 @@ fn quad_and_grid() {
     }
 }
 
-// gtest: TileMesh.GranularityPastTheIndexLimitThrows
+/// A granularity past what 16-bit indices can address is capped to the
+/// largest that fits.
 #[test]
-fn granularity_past_the_index_limit_throws() {
-    // EXPECT_THROW(..., std::invalid_argument): the port panics with the
-    // C++ exception's message.
-    const TOO_LARGE: &str = "Tile mesh granularity is too large for 16 bit indices.";
-    let throws = |options: TileMeshOptions| panic_message(move || drop(create_tile_mesh(options)));
-    assert_eq!(None, throws(TileMeshOptions { granularity: 255, ..TileMeshOptions::default() }));
-    assert_eq!(Some(TOO_LARGE.to_owned()), throws(TileMeshOptions { granularity: 256, ..TileMeshOptions::default() }));
-    assert_eq!(
-        None,
-        throws(TileMeshOptions { granularity: 253, generate_borders: true, ..TileMeshOptions::default() })
-    );
-    assert_eq!(
-        Some(TOO_LARGE.to_owned()),
-        throws(TileMeshOptions { granularity: 254, generate_borders: true, ..TileMeshOptions::default() })
-    );
-    assert_eq!(
-        Some(TOO_LARGE.to_owned()),
-        throws(TileMeshOptions { granularity: 50000, ..TileMeshOptions::default() })
-    );
-    assert_eq!(
-        Some(TOO_LARGE.to_owned()),
-        throws(TileMeshOptions { granularity: u32::MAX, ..TileMeshOptions::default() })
-    );
+fn granularity_past_the_index_limit_is_capped() {
+    let vertex_count = |options: TileMeshOptions| create_tile_mesh(options).vertices.len() / 2;
+    let plain = |granularity| TileMeshOptions { granularity, ..TileMeshOptions::default() };
+    let bordered = |granularity| TileMeshOptions { granularity, generate_borders: true, ..TileMeshOptions::default() };
+    assert_eq!(256 * 256, vertex_count(plain(255)));
+    for granularity in [256, 50_000, u32::MAX] {
+        assert_eq!(256 * 256, vertex_count(plain(granularity)));
+        assert_eq!(256 * 256, vertex_count(bordered(granularity)));
+    }
 }
 
 // gtest: TileMesh.GlobeMaskKeepsTheUncoveredParts

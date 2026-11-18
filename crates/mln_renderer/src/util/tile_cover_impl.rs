@@ -4,6 +4,7 @@
 // mask the count like x86 does (`wrapping_shl`), as in mln_tile_id.
 
 use std::collections::VecDeque;
+use std::convert::Infallible;
 use std::iter::Peekable;
 
 use geo_types::{Coord, Geometry, Polygon};
@@ -253,36 +254,27 @@ fn scan_row(y: u32, active_bounds: &mut Bounds) -> Vec<TileSpan> {
 
 /// The geometry visitor that builds the edge table. Projecting a point with
 /// an out-of-range latitude is an `Err`.
-struct BuildBoundsMap {
+struct BuildBoundsMap<P> {
     zoom: i32,
-    project: bool,
+    project: P,
 }
 
-impl BuildBoundsMap {
-    fn new(z: i32, p: bool) -> Self {
-        BuildBoundsMap { zoom: z, project: p }
-    }
-
+impl<E, P: Fn(Point<f64>) -> Result<Point<f64>, E>> BuildBoundsMap<P> {
     /// `1 << zoom` (an int shift).
     fn max_tile(&self) -> i32 {
         1i32.wrapping_shl(self.zoom as u32)
     }
 
-    fn project_point(&self, p: &Point<f64>) -> Result<Point<f64>, Error> {
-        Ok(Projection::project_zoom(&LatLng::new(p.y, p.x)?, self.zoom))
-    }
-
-    fn build_table(&self, points: &[Coord<f64>], et: &mut BoundsMap, closed: bool) -> Result<(), Error> {
+    fn build_table(&self, points: &[Coord<f64>], et: &mut BoundsMap, closed: bool) -> Result<(), E> {
         let mut projected_points: PointList = Vec::with_capacity(points.len());
         for &p in points {
-            let p = Point::from(p);
-            projected_points.push(if self.project { self.project_point(&p)? } else { p });
+            projected_points.push((self.project)(Point::from(p))?);
         }
         build_bounds_map(&mut projected_points, self.max_tile() as u32, et, closed);
         Ok(())
     }
 
-    fn build_polygon_table(&self, polygon: &Polygon<f64>, et: &mut BoundsMap) -> Result<(), Error> {
+    fn build_polygon_table(&self, polygon: &Polygon<f64>, et: &mut BoundsMap) -> Result<(), E> {
         for ring in std::iter::once(polygon.exterior()).chain(polygon.interiors()) {
             self.build_table(&ring.0, et, true)?;
         }
@@ -291,12 +283,9 @@ impl BuildBoundsMap {
 
     /// The body of `operator()(const Point<double>&)`, which
     /// `operator()(const MultiPoint<double>&)` repeats per point.
-    fn point(&self, p: Coord<f64>, et: &mut BoundsMap) -> Result<(), Error> {
+    fn point(&self, p: Coord<f64>, et: &mut BoundsMap) -> Result<(), E> {
         let mut bnd = Bound::default();
-        let mut point = Point::from(p);
-        if self.project {
-            point = self.project_point(&point)?;
-        }
+        let point = (self.project)(Point::from(p))?;
         bnd.points.extend([point, point]);
         bnd.winding = false;
         let y = start_row(point.y, f64::from(self.max_tile()));
@@ -304,14 +293,14 @@ impl BuildBoundsMap {
         Ok(())
     }
 
-    fn multi_point(&self, points: &geo_types::MultiPoint<f64>, et: &mut BoundsMap) -> Result<(), Error> {
+    fn multi_point(&self, points: &geo_types::MultiPoint<f64>, et: &mut BoundsMap) -> Result<(), E> {
         for p in points {
             self.point(p.0, et)?;
         }
         Ok(())
     }
 
-    fn apply(&self, geom: &Geometry<f64>) -> Result<BoundsMap, Error> {
+    fn apply(&self, geom: &Geometry<f64>) -> Result<BoundsMap, E> {
         let mut et = BoundsMap::new();
         match geom {
             Geometry::GeometryCollection(_) => {}
@@ -371,14 +360,26 @@ pub(crate) struct Impl {
 }
 
 impl Impl {
-    /// The cover of `geom` at zoom `z`, projecting the geometry if `project`
-    /// (C++ defaults it to true). Errors for a point with an out-of-range
-    /// latitude while projecting.
-    pub(crate) fn new(z: i32, geom: &Geometry<f64>, project: bool) -> Result<Impl, Error> {
+    /// The cover at zoom `z` of `geom` in tile coordinates.
+    pub(crate) fn new(z: i32, geom: &Geometry<f64>) -> Impl {
+        let Ok(this) = Self::build(z, geom, Ok::<_, Infallible>);
+        this
+    }
+
+    /// The cover at zoom `z` of `geom` in longitudes and latitudes, or an
+    /// error for a point that isn't a valid `LatLng`.
+    pub(crate) fn new_projected(z: i32, geom: &Geometry<f64>) -> Result<Impl, Error> {
+        Self::build(z, geom, |p: Point<f64>| Ok(Projection::project_zoom(&LatLng::new(p.y, p.x)?, z)))
+    }
+
+    fn build<E>(
+        z: i32,
+        geom: &Geometry<f64>,
+        project: impl Fn(Point<f64>) -> Result<Point<f64>, E>,
+    ) -> Result<Impl, E> {
         let is_closed = to_feature_type(Some(geom)) == FeatureType::Polygon;
 
-        let to_bounds_map = BuildBoundsMap::new(z, project);
-        let bounds_map = to_bounds_map.apply(geom)?;
+        let bounds_map = BuildBoundsMap { zoom: z, project }.apply(geom)?;
         let empty = bounds_map.is_empty();
         let mut this = Impl {
             zoom: z,
