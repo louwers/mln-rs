@@ -218,11 +218,7 @@ impl Context {
     pub(crate) fn destroy_released(&mut self) {
         let Context { device, textures, indexes, vertices, released_entries, .. } = self;
         released_entries.drain(|key| match key {
-            StoreKey::Texture(key) => {
-                if let Some(mut texture) = textures.remove(key) {
-                    texture.release(&device.released);
-                }
-            }
+            StoreKey::Texture(key) => drop(textures.remove(key)),
             StoreKey::Indexes(key) => drop(indexes.remove(key)),
             StoreKey::Vertices(key) => vertices.remove(key),
         });
@@ -298,8 +294,8 @@ impl Context {
     /// A texture that `setup` sets up, as [`add_texture`](Self::add_texture)
     /// makes it.
     pub(crate) fn add_texture_with(&mut self, setup: impl FnOnce(&mut TextureMut<'_>)) -> SharedTexture {
-        let mut texture = Texture2D::default();
-        setup(&mut TextureMut::new(&mut texture, &self.device.released));
+        let mut texture = Texture2D::new(&self.device.released);
+        setup(&mut TextureMut::new(&mut texture));
         self.textures.add(texture, &self.released_entries)
     }
 
@@ -310,7 +306,7 @@ impl Context {
 
     /// The texture of `handle`, to set up.
     pub(crate) fn texture_mut(&mut self, handle: &SharedTexture) -> Option<TextureMut<'_>> {
-        Some(TextureMut::new(self.textures.get_mut(handle)?, &self.device.released))
+        Some(TextureMut::new(self.textures.get_mut(handle)?))
     }
 
     /// The texture of `handle` and what changes it, or the error of a handle
@@ -349,7 +345,7 @@ impl Context {
         size: Size,
     ) -> Result<(), GpuError> {
         let (texture, device) = self.texture_entry(handle)?;
-        texture.upload_data(&mut *device.backend.gpu(), &mut device.stats, &device.released, data, size)
+        texture.upload_data(&mut *device.backend.gpu(), &mut device.stats, data, size)
     }
 
     /// Writes `data`, the texels of a region of `size` in rows from the top,
@@ -372,14 +368,14 @@ impl Context {
         if !texture.has_image() {
             return Ok(());
         }
-        texture.upload(&mut *device.backend.gpu(), &mut device.stats, &device.released)
+        texture.upload(&mut *device.backend.gpu(), &mut device.stats)
     }
 
     /// [`texture_binding`](Self::texture_binding) through the context's
     /// `Gpu`, which the caller doesn't hold.
     pub(crate) fn bind_texture(&mut self, handle: &SharedTexture) -> Result<(TextureId, SamplerId), GpuError> {
         let Context { device, textures, samplers, .. } = self;
-        bind(textures, samplers, &mut device.stats, &device.released, &mut *device.backend.gpu(), handle)
+        bind(textures, samplers, &mut device.stats, &mut *device.backend.gpu(), handle)
     }
 
     /// What a draw binds of the texture of `handle`, through `gpu`, the
@@ -391,7 +387,7 @@ impl Context {
         handle: &SharedTexture,
     ) -> Result<(TextureId, SamplerId), GpuError> {
         let Context { device, textures, samplers, .. } = self;
-        bind(textures, samplers, &mut device.stats, &device.released, gpu, handle)
+        bind(textures, samplers, &mut device.stats, gpu, handle)
     }
 
     /// The shader of `key`, made through `gpu`, the context's, on first use.
@@ -459,12 +455,11 @@ fn bind(
     textures: &mut Store<TextureKey, Texture2D>,
     samplers: &mut HashMap<SamplerState, SamplerId>,
     stats: &mut RenderingStats,
-    released: &Released,
     gpu: &mut dyn Gpu,
     handle: &SharedTexture,
 ) -> Result<(TextureId, SamplerId), GpuError> {
     let texture = textures.get_mut(handle).ok_or(GpuError::UnknownId("texture"))?;
-    let id = texture.bind(gpu, stats, released)?;
+    let id = texture.bind(gpu, stats)?;
     let sampler = if let Some(sampler) = texture.sampler_id() {
         sampler
     } else {
@@ -496,9 +491,7 @@ impl Context {
         self.global_uniform_buffers = UniformBufferArray::new();
         self.default_vertex_buffers.clear();
         let Context { device, textures, indexes, vertices, released_entries, .. } = self;
-        for mut texture in textures.drain() {
-            texture.release(&device.released);
-        }
+        textures.drain().for_each(drop);
         indexes.drain().for_each(drop);
         vertices.clear();
         released_entries.drain(|_| {});

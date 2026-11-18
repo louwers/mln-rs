@@ -14,11 +14,11 @@ use mln_util::size::Size;
 /// A texture of the renderer: its size, format and sampler state, the image
 /// it waits to upload, and once made, a texture of the backend's
 /// [`Gpu`](mln_gfx::gpu::Gpu), which goes to the renderer's release queue
-/// when it is replaced or the context removes the texture (see
-/// [`Released`]). The context changes it, and lends it to set up as a
-/// [`TextureMut`].
+/// (see [`Released`]) when it is replaced or the texture drops. The context
+/// changes it, and lends it to set up as a [`TextureMut`].
 pub(crate) struct Texture2D {
     texture: Option<TextureId>,
+    released: Rc<Released>,
     size: Size,
     format: TextureFormat,
     render_target: bool,
@@ -29,11 +29,13 @@ pub(crate) struct Texture2D {
     image: Option<Rc<PremultipliedImage>>,
 }
 
-impl Default for Texture2D {
-    /// An RGBA texture without a size.
-    fn default() -> Texture2D {
+impl Texture2D {
+    /// An RGBA texture without a size, whose backend's texture goes to
+    /// `released`.
+    pub(crate) fn new(released: &Rc<Released>) -> Texture2D {
         Texture2D {
             texture: None,
+            released: Rc::clone(released),
             size: Size::new(0, 0),
             format: TextureFormat::Rgba8Unorm,
             render_target: false,
@@ -42,19 +44,17 @@ impl Default for Texture2D {
             image: None,
         }
     }
-}
 
-impl Texture2D {
     #[must_use]
     pub(crate) fn size(&self) -> Size {
         self.size
     }
 
     /// Sets the size the texture is made with. A texture made with another
-    /// size goes to `released`.
-    fn set_size(&mut self, size: Size, released: &Released) {
+    /// size goes.
+    fn set_size(&mut self, size: Size) {
         if size != self.size {
-            self.release(released);
+            self.release();
             self.size = size;
         }
     }
@@ -65,10 +65,10 @@ impl Texture2D {
     }
 
     /// Sets the format the texture is made with. A texture made with
-    /// another format goes to `released`.
-    fn set_format(&mut self, format: TextureFormat, released: &Released) {
+    /// another format goes.
+    fn set_format(&mut self, format: TextureFormat) {
         if format != self.format {
-            self.release(released);
+            self.release();
             self.format = format;
         }
     }
@@ -121,11 +121,10 @@ impl Texture2D {
         &mut self,
         gpu: &mut dyn Gpu,
         stats: &mut RenderingStats,
-        released: &Released,
         data: &[u8],
         size: Size,
     ) -> Result<(), GpuError> {
-        self.set_size(size, released);
+        self.set_size(size);
         if size.is_empty() {
             return Ok(());
         }
@@ -152,26 +151,16 @@ impl Texture2D {
     }
 
     /// Writes the image [`TextureMut::set_image`] set, if any.
-    pub(crate) fn upload(
-        &mut self,
-        gpu: &mut dyn Gpu,
-        stats: &mut RenderingStats,
-        released: &Released,
-    ) -> Result<(), GpuError> {
+    pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, stats: &mut RenderingStats) -> Result<(), GpuError> {
         match self.image.take() {
-            Some(image) if image.valid() => self.upload_data(gpu, stats, released, &image.data, image.size),
+            Some(image) if image.valid() => self.upload_data(gpu, stats, &image.data, image.size),
             _ => Ok(()),
         }
     }
 
     /// The texture a draw binds, made through `gpu` and holding its image.
-    pub(crate) fn bind(
-        &mut self,
-        gpu: &mut dyn Gpu,
-        stats: &mut RenderingStats,
-        released: &Released,
-    ) -> Result<TextureId, GpuError> {
-        self.upload(gpu, stats, released)?;
+    pub(crate) fn bind(&mut self, gpu: &mut dyn Gpu, stats: &mut RenderingStats) -> Result<TextureId, GpuError> {
+        self.upload(gpu, stats)?;
         self.create(gpu, stats)
     }
 
@@ -181,11 +170,17 @@ impl Texture2D {
         self.size.width as usize * self.size.height as usize * texel
     }
 
-    /// Lets go of the backend's texture, to `released`.
-    pub(crate) fn release(&mut self, released: &Released) {
+    /// Lets go of the backend's texture, to the release queue.
+    fn release(&mut self) {
         if let Some(texture) = self.texture.take() {
-            released.texture(texture, self.bytes());
+            self.released.texture(texture, self.bytes());
         }
+    }
+}
+
+impl Drop for Texture2D {
+    fn drop(&mut self) {
+        self.release();
     }
 }
 
@@ -193,24 +188,23 @@ impl Texture2D {
 /// backend's texture release that to the context's queue.
 pub(crate) struct TextureMut<'a> {
     texture: &'a mut Texture2D,
-    released: &'a Released,
 }
 
 impl<'a> TextureMut<'a> {
-    pub(crate) fn new(texture: &'a mut Texture2D, released: &'a Released) -> TextureMut<'a> {
-        TextureMut { texture, released }
+    pub(crate) fn new(texture: &'a mut Texture2D) -> TextureMut<'a> {
+        TextureMut { texture }
     }
 
     /// Sets the size the texture is made with. A texture made with another
     /// size goes.
     pub(crate) fn set_size(&mut self, size: Size) {
-        self.texture.set_size(size, self.released);
+        self.texture.set_size(size);
     }
 
     /// Sets the format the texture is made with. A texture made with
     /// another format goes.
     pub(crate) fn set_format(&mut self, format: TextureFormat) {
-        self.texture.set_format(format, self.released);
+        self.texture.set_format(format);
     }
 
     /// Makes the texture one that passes draw into, as well as one that
