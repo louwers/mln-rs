@@ -56,7 +56,7 @@ fn all_extracted_wgsl_compiles() {
             };
             let vertex = preprocess_wgsl(&assemble(source, vertex), &defines);
             let fragment = preprocess_wgsl(&assemble(source, fragment), &defines);
-            match ShaderProgram::new(device, index_table.layout(), &vertex, &fragment, &without_inputs(source)) {
+            match ShaderProgram::new(device, index_table.layout(), &vertex, &fragment, &without_inputs(source), 1.0) {
                 Ok(program) => {
                     assert_eq!(
                         program.index_group().is_some(),
@@ -117,6 +117,7 @@ fn all_extracted_wgsl_compiles_with_all_conditionals_defined() {
             &preprocess_wgsl(&vertex, &defines),
             &preprocess_wgsl(&fragment, &defines),
             &without_inputs(source),
+            1.0,
         );
         if program.is_ok() {
             compiled += 1;

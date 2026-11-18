@@ -267,6 +267,25 @@ pub(crate) struct ShaderProgram {
     bindings_per_group: Vec<Vec<BindingInfo>>,
     /// The bytes of each buffer the sources read (`buffer_sizes`).
     buffer_sizes: Vec<((u32, u32), u64)>,
+    /// The value of the `DEVICE_PIXEL_RATIO` override, for each stage that
+    /// declares it.
+    vertex_constants: Vec<(&'static str, f64)>,
+    fragment_constants: Vec<(&'static str, f64)>,
+}
+
+/// The pipeline-overridable constant that holds the program's pixel ratio.
+/// WGSL reads no define's value, so a stage that needs the ratio declares
+/// it as `override DEVICE_PIXEL_RATIO: f32`.
+const PIXEL_RATIO_OVERRIDE: &str = "DEVICE_PIXEL_RATIO";
+
+/// The constants a stage of `source` overrides, at `pixel_ratio`. A
+/// pipeline may set only the constants its stage declares.
+fn constants(source: &str, pixel_ratio: f32) -> Vec<(&'static str, f64)> {
+    if source.contains(&format!("override {PIXEL_RATIO_OVERRIDE}:")) {
+        vec![(PIXEL_RATIO_OVERRIDE, f64::from(pixel_ratio))]
+    } else {
+        Vec::new()
+    }
 }
 
 impl ShaderProgram {
@@ -277,6 +296,9 @@ impl ShaderProgram {
     /// own, with layout `index_layout` (see
     /// [`index_group`](Self::index_group)).
     ///
+    /// Its pipelines set the stages' `DEVICE_PIXEL_RATIO` override to
+    /// `pixel_ratio`.
+    ///
     /// Fails if either source is empty or doesn't compile.
     pub(crate) fn new(
         device: &wgpu::Device,
@@ -284,6 +306,7 @@ impl ShaderProgram {
         vertex_source: &str,
         fragment_source: &str,
         source: &ShaderSource,
+        pixel_ratio: f32,
     ) -> Result<Self, GpuError> {
         let name = source.name;
         let index_group = index_group_of(&[vertex_source, fragment_source]);
@@ -344,6 +367,8 @@ impl ShaderProgram {
             textures: source.textures,
             bindings_per_group: groups.bindings,
             buffer_sizes: buffer_sizes(&[vertex_source, fragment_source]),
+            vertex_constants: constants(vertex_source, pixel_ratio),
+            fragment_constants: constants(fragment_source, pixel_ratio),
         })
     }
 
@@ -515,7 +540,10 @@ impl ShaderProgram {
                 vertex: wgpu::VertexState {
                     module: &self.vertex_shader_module,
                     entry_point: Some("main"),
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    compilation_options: wgpu::PipelineCompilationOptions {
+                        constants: &self.vertex_constants,
+                        ..Default::default()
+                    },
                     buffers: &buffers,
                 },
                 primitive,
@@ -524,7 +552,10 @@ impl ShaderProgram {
                 fragment: Some(wgpu::FragmentState {
                     module: &self.fragment_shader_module,
                     entry_point: Some("main"),
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    compilation_options: wgpu::PipelineCompilationOptions {
+                        constants: &self.fragment_constants,
+                        ..Default::default()
+                    },
                     targets: &targets,
                 }),
                 multiview_mask: None,
@@ -749,12 +780,17 @@ pub(crate) fn compile(
     // its `#ifdef`s see the defines.
     let shader_prelude = source.wgsl.prelude.unwrap_or("");
     let assemble = |stage: Option<&str>| format!("{}\n{shader_prelude}{}", prelude(), stage.unwrap_or(""));
-    // WGSL reads no define's value.
+    // WGSL reads no define's value; the pixel ratio's is an override's.
     let defines: HashMap<String, bool> = key.define_values().map(|(name, _)| (name.to_owned(), true)).collect();
     let vertex_source = preprocess_wgsl(&assemble(source.wgsl.vertex), &defines);
     let fragment_source = preprocess_wgsl(&assemble(source.wgsl.fragment), &defines);
+    let pixel_ratio = key
+        .define_values()
+        .find(|&(name, _)| name == PIXEL_RATIO_OVERRIDE)
+        .and_then(|(_, value)| value.parse().ok())
+        .unwrap_or(1.0);
 
-    ShaderProgram::new(device, index_layout, &vertex_source, &fragment_source, source)
+    ShaderProgram::new(device, index_layout, &vertex_source, &fragment_source, source, pixel_ratio)
 }
 
 /// How the vendored sources declare `globalIndex`.
