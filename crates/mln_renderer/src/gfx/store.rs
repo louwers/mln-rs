@@ -77,15 +77,16 @@ impl ReleasedEntries {
         self.0.set(keys);
     }
 
-    /// Takes the keys released so far, giving each to `remove`.
+    /// Takes the keys released so far, giving each to `remove`, which may
+    /// release more, until none are left.
     pub(crate) fn drain(&self, mut remove: impl FnMut(StoreKey)) {
-        let mut keys = self.0.take();
-        for key in keys.drain(..) {
-            remove(key);
+        loop {
+            let keys = self.0.take();
+            if keys.is_empty() {
+                return;
+            }
+            keys.into_iter().for_each(&mut remove);
         }
-        // Keeps the list's memory for the next frame's keys.
-        keys.append(&mut self.0.take());
-        self.0.set(keys);
     }
 }
 
@@ -147,21 +148,28 @@ pub(crate) type SharedTexture = Shared<TextureKey>;
 /// Indexes of the context's store.
 pub(crate) type SharedIndexes = Shared<IndexesKey>;
 
-/// A store of the context: its entries by key, in slots that the entries it
-/// removes leave to those it adds next, lowest first. It grows by a quarter
-/// of its slots at a time, and once most of them are vacant gives back those
-/// past its last entry ([`compact`](Self::compact)), so that it keeps about
+/// The slots of a store's chunk.
+const CHUNK: usize = 32;
+
+/// A store of the context: its entries by key, in chunks of slots. An entry
+/// takes the lowest vacant slot, so the entries gather in the first chunks,
+/// and the store frees its last chunks once they are empty: it keeps about
 /// as much memory as its entries take, rather than as many as it ever held.
 pub(crate) struct Store<K, V> {
-    slots: Vec<Slot<V>>,
-    /// The vacant slots, the lowest last after a compaction.
-    vacant: Vec<u32>,
+    chunks: Vec<Box<Chunk<V>>>,
+    /// The lowest chunk with a vacant slot, or past the last chunk.
+    first_vacant: usize,
     /// The version of the next entry. Each entry has its own, so a key of an
     /// entry the store removed names none of those it adds after.
     next_version: u32,
-    /// The entries removed since the last compaction.
-    removed: usize,
     key: PhantomData<fn() -> K>,
+}
+
+/// Slots of a store, with which of them are vacant.
+struct Chunk<V> {
+    slots: [Slot<V>; CHUNK],
+    /// A bit for each slot, set where it is vacant.
+    vacant: u32,
 }
 
 /// A slot of a store: its entry, if any, with the entry's version.
@@ -170,9 +178,15 @@ struct Slot<V> {
     value: Option<V>,
 }
 
+impl<V> Chunk<V> {
+    fn new() -> Box<Chunk<V>> {
+        Box::new(Chunk { slots: std::array::from_fn(|_| Slot { version: 0, value: None }), vacant: u32::MAX })
+    }
+}
+
 impl<K, V> Default for Store<K, V> {
     fn default() -> Self {
-        Store { slots: Vec::new(), vacant: Vec::new(), next_version: 0, removed: 0, key: PhantomData }
+        Store { chunks: Vec::new(), first_vacant: 0, next_version: 0, key: PhantomData }
     }
 }
 
@@ -182,28 +196,36 @@ impl<K: Key, V> Store<K, V> {
     pub(crate) fn add(&mut self, value: V, released: &Rc<ReleasedEntries>) -> Shared<K> {
         let version = self.next_version;
         self.next_version = version.wrapping_add(1);
-        let slot = Slot { version, value: Some(value) };
-        let at = if let Some(at) = self.vacant.pop() {
-            if let Some(vacant) = self.slots.get_mut(at as usize) {
-                *vacant = slot;
-            }
-            at
+        if let Some(offset) = self.chunks.iter().skip(self.first_vacant).position(|chunk| chunk.vacant != 0) {
+            self.first_vacant += offset;
         } else {
-            if self.slots.len() == self.slots.capacity() {
-                self.slots.reserve_exact((self.slots.len() / 4).max(16));
-            }
-            let at = u32::try_from(self.slots.len()).unwrap_or(u32::MAX);
-            debug_assert!(at != u32::MAX, "a store of more entries than it can name");
-            self.slots.push(slot);
-            at
-        };
-        Shared::new(K::new(EntryKey { slot: at, version }), released)
+            self.first_vacant = self.chunks.len();
+            self.chunks.push(Chunk::new());
+        }
+        let at = self.first_vacant;
+        let chunk = &mut self.chunks[at];
+        let index = chunk.vacant.trailing_zeros() as usize;
+        chunk.vacant &= !(1 << index);
+        chunk.slots[index] = Slot { version, value: Some(value) };
+        let slot = u32::try_from(at * CHUNK + index).unwrap_or(u32::MAX);
+        debug_assert!(slot != u32::MAX, "a store of more entries than it can name");
+        Shared::new(K::new(EntryKey { slot, version }), released)
+    }
+
+    /// The slot that `key` names, if the store has its entry.
+    fn slot_mut(&mut self, key: K) -> Option<&mut Slot<V>> {
+        let EntryKey { slot, version } = key.entry();
+        let (chunk, index) = (slot as usize / CHUNK, slot as usize % CHUNK);
+        let slot = self.chunks.get_mut(chunk)?.slots.get_mut(index)?;
+        (slot.version == version && slot.value.is_some()).then_some(slot)
     }
 
     /// The entry `key` names, if the store has it.
     fn slot(&self, key: K) -> Option<&V> {
         let EntryKey { slot, version } = key.entry();
-        self.slots.get(slot as usize).filter(|slot| slot.version == version)?.value.as_ref()
+        let (chunk, index) = (slot as usize / CHUNK, slot as usize % CHUNK);
+        let slot = self.chunks.get(chunk)?.slots.get(index)?;
+        slot.value.as_ref().filter(|_| slot.version == version)
     }
 
     /// The entry of `handle`, which is there while the handle is.
@@ -215,9 +237,7 @@ impl<K: Key, V> Store<K, V> {
 
     /// [`get`](Self::get), to change.
     pub(crate) fn get_mut(&mut self, handle: &Shared<K>) -> Option<&mut V> {
-        let EntryKey { slot, version } = handle.key().entry();
-        let entry = self.slots.get_mut(slot as usize).filter(|slot| slot.version == version);
-        let entry = entry.and_then(|slot| slot.value.as_mut());
+        let entry = self.slot_mut(handle.key()).and_then(|slot| slot.value.as_mut());
         debug_assert!(entry.is_some(), "a handle outlived its store entry");
         entry
     }
@@ -228,38 +248,27 @@ impl<K: Key, V> Store<K, V> {
         self.slot(key).is_some()
     }
 
-    /// Takes out the entry `key`, whose last handle dropped.
+    /// Takes out the entry `key`, whose last handle dropped, and frees the
+    /// chunks past the last entry.
     pub(crate) fn remove(&mut self, key: K) -> Option<V> {
-        let EntryKey { slot, version } = key.entry();
-        let value = self.slots.get_mut(slot as usize).filter(|of| of.version == version)?.value.take()?;
-        self.vacant.push(slot);
-        self.removed += 1;
-        Some(value)
+        let value = self.slot_mut(key)?.value.take();
+        let slot = key.entry().slot as usize;
+        let chunk = slot / CHUNK;
+        if let Some(of) = self.chunks.get_mut(chunk) {
+            of.vacant |= 1 << (slot % CHUNK);
+        }
+        self.first_vacant = self.first_vacant.min(chunk);
+        while self.chunks.last().is_some_and(|last| last.vacant == u32::MAX) {
+            self.chunks.pop();
+        }
+        self.first_vacant = self.first_vacant.min(self.chunks.len());
+        value
     }
 
     /// Drops every entry.
     pub(crate) fn clear(&mut self) {
-        self.slots.clear();
-        self.vacant.clear();
-        self.removed = 0;
-    }
-
-    /// Gives back the vacant slots past the last entry, and the memory they
-    /// took, once most slots are vacant, and orders the others so that the
-    /// entries the store adds next take the lowest. Its entries' removals
-    /// since it last compacted call for the next.
-    pub(crate) fn compact(&mut self) {
-        let slots = self.slots.len();
-        if self.vacant.len() * 2 <= slots || self.removed * 2 <= slots {
-            return;
-        }
-        self.removed = 0;
-        let end = self.slots.iter().rposition(|slot| slot.value.is_some()).map_or(0, |last| last + 1);
-        self.slots.truncate(end);
-        self.slots.shrink_to(end + end / 4);
-        self.vacant.retain(|&at| (at as usize) < end);
-        self.vacant.sort_unstable_by(|a, b| b.cmp(a));
-        self.vacant.shrink_to(self.vacant.len() * 2);
+        self.chunks.clear();
+        self.first_vacant = 0;
     }
 }
 
@@ -276,6 +285,7 @@ mod tests {
     #[test]
     fn a_removed_entrys_key_names_no_later_entry() {
         let (mut store, released) = store();
+        let kept = store.add(0, &released);
         let first = store.add(1, &released);
         let key = first.key();
         drop(first);
@@ -284,26 +294,35 @@ mod tests {
         assert_eq!(second.key().entry().slot, key.entry().slot);
         assert!(!store.contains(key));
         assert_eq!(store.get(&second), Some(&2));
+        assert_eq!(store.get(&kept), Some(&0));
         assert_eq!(store.remove(key), None);
     }
 
-    // Once most of its slots are vacant, a store gives back those past its
-    // last entry, and the next entries take its lowest vacant slots.
+    // Entries take the lowest vacant slots, and a store frees its chunks
+    // past its last entry.
     #[test]
-    fn a_store_gives_back_its_vacant_slots() {
+    fn a_store_frees_its_empty_last_chunks() {
         let (mut store, released) = store();
         let handles: Vec<_> = (0..100).map(|value| store.add(value, &released)).collect();
         let keys: Vec<_> = handles.iter().map(Shared::key).collect();
         drop(handles);
+        assert_eq!(store.chunks.len(), 4);
         for &key in keys.iter().skip(10) {
             store.remove(key);
         }
+        assert_eq!(store.chunks.len(), 1);
         store.remove(keys[2]);
-        store.compact();
-        assert_eq!(store.slots.len(), 10);
-        assert!(store.slots.capacity() < 100);
         let next = store.add(100, &released);
         assert_eq!(next.key().entry().slot, 2);
+        let after = store.add(101, &released);
+        assert_eq!(after.key().entry().slot, 10);
         assert!(keys.iter().take(10).enumerate().all(|(at, &key)| (at == 2) != store.contains(key)));
+        for &key in keys.iter().take(10) {
+            store.remove(key);
+        }
+        store.remove(next.key());
+        assert_eq!(store.chunks.len(), 1);
+        store.remove(after.key());
+        assert!(store.chunks.is_empty());
     }
 }

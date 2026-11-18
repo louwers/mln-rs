@@ -210,12 +210,12 @@ impl Context {
     }
 
     /// Destroys the resources the renderer dropped, first taking the store
-    /// entries whose last handles dropped out of their stores, which then
-    /// compact ([`Store::compact`]), and takes
-    /// what they took out of the rendering stats. A frame's encode does this
-    /// once it made its draws, before it uploads them, for what the frame's
-    /// update and draw update dropped, and once it is submitted, for what
-    /// its uploads and passes dropped.
+    /// entries whose last handles dropped out of their stores, and takes
+    /// what they took out of the rendering stats. A frame's encode does this once it made its draws,
+    /// before it uploads them, for what the frame's update and draw update
+    /// dropped; once it uploaded them, before its passes, for what the
+    /// uploads dropped; and once it is submitted, for what its passes
+    /// dropped.
     pub(crate) fn destroy_released(&mut self) {
         let Context { device, textures, indexes, vertices, released_entries, .. } = self;
         released_entries.drain(|key| match key {
@@ -223,9 +223,6 @@ impl Context {
             StoreKey::Indexes(key) => drop(indexes.remove(key)),
             StoreKey::Vertices(key) => vertices.remove(key),
         });
-        textures.compact();
-        indexes.compact();
-        vertices.compact();
         device.released.destroy(&mut *device.backend.gpu());
         device.released.uncount(&mut device.stats);
     }

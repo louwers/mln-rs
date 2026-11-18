@@ -247,11 +247,6 @@ impl VertexStore {
         self.0.remove(key);
     }
 
-    /// [`Store::compact`].
-    pub(crate) fn compact(&mut self) {
-        self.0.compact();
-    }
-
     /// Drops every entry.
     pub(crate) fn clear(&mut self) {
         self.0.clear();

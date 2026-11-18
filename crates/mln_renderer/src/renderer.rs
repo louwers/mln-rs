@@ -563,6 +563,9 @@ impl Encoder {
             pad1: 0.0,
         };
         parameters.context.write_global_uniform_buffer(ID_GLOBAL_PAINT_PARAMS_UBO, &global_paint_params_ubo);
+        // What the uploads replaced goes before the passes make what
+        // replaces it, such as a draw's geometry.
+        parameters.context.destroy_released();
         let layers_uploaded = Instant::now();
 
         // - DRAW ----------------------------------------------------------
