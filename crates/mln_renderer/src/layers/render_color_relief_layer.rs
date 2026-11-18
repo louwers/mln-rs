@@ -477,12 +477,20 @@ impl RenderLayer for RenderColorReliefLayer {
                     }
                 };
                 dem_texture.borrow_mut().set_sampler(dem_sampler);
+                let mut textures = Textures::default();
+                textures[ID_COLOR_RELIEF_IMAGE_TEXTURE] = Some(dem_texture);
+                textures[ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE] = Some(Rc::clone(&elevation_stops_texture));
+                textures[ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE] = Some(Rc::clone(&color_stops_texture));
 
                 if self.drawing.caches.cache_mut(&tile_id).is_some_and(|cached| cached.built < geometry_time) {
                     // The masked geometry changed (see the file comment).
                     self.drawing.caches.drop_cache(&tile_id);
                 }
-                if self.drawing.caches.cache_mut(&tile_id).is_none() {
+                if let Some(cached) = self.drawing.caches.cache_mut(&tile_id) {
+                    // The DEM and the ramps' textures change with the
+                    // bucket's generation and the ramps.
+                    cached.draw.objects.textures = textures;
+                } else {
                     // The tile's geometry: the globe's mesh of its mask, the
                     // mask's geometry, or the whole tile's quad.
                     let (vertices, vertex_count, indices, segments): (
@@ -533,16 +541,10 @@ impl RenderLayer for RenderColorReliefLayer {
                         ColorMode::alpha_blended(),
                         CullFaceMode::disabled(),
                         geometry,
-                        Textures::default(),
+                        textures,
                     );
                     let cached = ReliefTile { draw: KeptDraw::new(objects), built: Instant::now(), tile_props };
                     self.drawing.caches.set_cache(&tile_id, cached);
-                }
-                if let Some(cached) = self.drawing.caches.cache_mut(&tile_id) {
-                    let textures = &mut cached.draw.objects.textures;
-                    textures[ID_COLOR_RELIEF_IMAGE_TEXTURE] = Some(dem_texture);
-                    textures[ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE] = Some(Rc::clone(&elevation_stops_texture));
-                    textures[ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE] = Some(Rc::clone(&color_stops_texture));
                 }
             } else {
                 // The tile's draw, if it has one, draws as it was.

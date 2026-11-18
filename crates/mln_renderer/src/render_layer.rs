@@ -545,8 +545,8 @@ pub(crate) trait RenderLayer: LayerParts {
 
     // query: `queryIntersectsFeature(queryGeometry, feature, zoom,
     // transformState, pixelsToTileUnits, projector, featureState)`, with the
-    // tile's projector in place of its matrix; C++ returns false unless a
-    // layer type overrides it.
+    // tile's projector in place of its matrix; false unless a layer type
+    // overrides it.
     #[expect(
         clippy::too_many_arguments,
         reason = "the query geometry, the feature and its state, and the zoom, camera and projector that test them"

@@ -492,20 +492,24 @@ impl RenderLayer for RenderHillshadeLayer {
                     cached.draw.objects.replace_geometry(draw_geometry());
                     cached.geometry_time = geometry_time;
                 }
+                // The bucket's render target is made again with its
+                // generation.
+                cached.draw.objects.textures[ID_HILLSHADE_IMAGE_TEXTURE] = Some(render_target_texture);
             } else {
+                let mut textures = Textures::default();
+                textures[ID_HILLSHADE_IMAGE_TEXTURE] = Some(render_target_texture);
                 let objects = DrawObjects::new(
                     Rc::clone(&hillshade_shader),
                     ColorMode::alpha_blended(),
                     CullFaceMode::disabled(),
                     draw_geometry(),
-                    Textures::default(),
+                    textures,
                 );
                 self.drawing.caches.set_cache(&tile_id, HillshadeTile { draw: KeptDraw::new(objects), geometry_time });
             }
-            let Some(cached) = self.drawing.caches.cache_mut(&tile_id) else {
+            let Some(cached) = self.drawing.caches.cache(&tile_id) else {
                 continue;
             };
-            cached.draw.objects.textures[ID_HILLSHADE_IMAGE_TEXTURE] = Some(render_target_texture);
             let draw = FrameDraw { depth: DrawDepth::Off, ..cached.draw.frame_draw(Some(tile_id)) };
             frame_draws.push((draw, self.uniforms(&tile_id.to_unwrapped(), paint_parameters)));
         }
