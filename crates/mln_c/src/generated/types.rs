@@ -3,7 +3,6 @@
 pub const MLN_DIAGNOSTIC_MESSAGE_CAPACITY: u32 = 4096;
 pub const MLN_C_VERSION: u32 = 0;
 pub const MLN_TEXTURE_RING_MAX_DEPTH: u32 = 8;
-pub const MLN_FRAME_DEMAND_TOKEN_STILL_IMAGE: i32 = -1;
 pub const MLN_STATUS_OK: mln_status = 0;
 /// An argument is invalid, such as malformed JSON or a value out of range.
 pub const MLN_STATUS_INVALID_ARGUMENT: mln_status = -1;
