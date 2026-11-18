@@ -36,6 +36,9 @@ static COUNTING: AtomicBool = AtomicBool::new(false);
 /// `None` until a backend times its passes.
 static TIME: Mutex<Option<Duration>> = Mutex::new(None);
 
+/// Whether a pass ended before it began, which leaves the time unknown.
+static UNKNOWN: AtomicBool = AtomicBool::new(false);
+
 /// Times the render passes of the backends made from now on, for
 /// [`take_gpu_time`] to take after each frame.
 pub fn measure_render_passes() {
@@ -50,10 +53,15 @@ pub fn leave_render_passes_untimed() {
 
 /// The time the GPU spent in the render passes it has finished since the
 /// last call, once the backend has waited for them, or `None` where no
-/// backend times its passes.
+/// backend times its passes, and from the first pass that ended before it
+/// began on, which leaves the time unknown.
 #[must_use]
 pub fn take_gpu_time() -> Option<Duration> {
-    TIME.lock().as_mut().map(std::mem::take)
+    let mut time = TIME.lock();
+    if UNKNOWN.load(Ordering::Relaxed) {
+        return None;
+    }
+    time.as_mut().map(std::mem::take)
 }
 
 type SampleBuffer = Retained<ProtocolObject<dyn MTLCounterSampleBuffer>>;
@@ -156,8 +164,12 @@ impl Timer {
                     let start = u64::from_ne_bytes(start.try_into().unwrap_or_default());
                     let end = u64::from_ne_bytes(end.try_into().unwrap_or_default());
                     // A pass without draws has no vertex stage to sample.
-                    if start != ERROR_VALUE && end != ERROR_VALUE && end > start && start != 0 {
-                        ticks += end - start;
+                    let sampled = |timestamp| timestamp != ERROR_VALUE && timestamp != 0;
+                    if sampled(start) && sampled(end) {
+                        match end.checked_sub(start) {
+                            Some(pass) => ticks += pass,
+                            None => UNKNOWN.store(true, Ordering::Relaxed),
+                        }
                     }
                 }
             }

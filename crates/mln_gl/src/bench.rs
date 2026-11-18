@@ -46,16 +46,16 @@ pub fn leave_render_passes_untimed() {
 
 /// The time the GPU spent in the render passes it has finished since the
 /// last call, once the backend has waited for them, or `None` where no
-/// backend times its passes.
-///
-/// # Panics
-///
-/// If GL reported a disjoint operation, such as a change of the GPU's
-/// clocks, which leaves the time unknown.
+/// backend times its passes, and from when GL first reported a disjoint
+/// operation on, such as a change of the GPU's clocks, which leaves the
+/// time unknown.
 #[must_use]
 pub fn take_gpu_time() -> Option<Duration> {
-    assert!(!DISJOINT.load(Ordering::Relaxed), "GL reported a disjoint operation, so the GPU's time is unknown");
-    TIME.lock().as_mut().map(std::mem::take)
+    let mut time = TIME.lock();
+    if DISJOINT.load(Ordering::Relaxed) {
+        return None;
+    }
+    time.as_mut().map(std::mem::take)
 }
 
 /// A backend's time queries, one for each pass whose time hasn't come back.

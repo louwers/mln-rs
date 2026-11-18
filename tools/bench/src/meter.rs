@@ -147,10 +147,13 @@ pub(crate) fn leave_gpu_untimed() {
 /// is made: WebGPU's, and those of the native Vulkan, OpenGL, D3D12 and Metal backends
 /// where the libraries time them (build.rs). A frame counts once the GPU has
 /// finished it and the backend has waited for it, which waiting for a frame
-/// does: a frame's time comes in the reading after that wait.
+/// does: a frame's time comes in the reading after that wait. `None` too
+/// once a backend that timed its passes has lost track of their time.
 pub(crate) fn gpu_time() -> Option<Duration> {
-    static TOTAL: Mutex<Option<Duration>> = Mutex::new(None);
-    let mut total = TOTAL.lock();
+    /// The time so far, which backends have timed passes, and whether one
+    /// of them lost track of the time.
+    static TOTAL: Mutex<(Option<Duration>, Vec<bool>, bool)> = Mutex::new((None, Vec::new(), false));
+    let (total, timed, unknown) = &mut *TOTAL.lock();
     let taken = [
         mln_webgpu::bench::take_gpu_time(),
         #[cfg(all(mln_bench_vulkan, not(any(target_vendor = "apple", target_family = "wasm"))))]
@@ -162,10 +165,19 @@ pub(crate) fn gpu_time() -> Option<Duration> {
         #[cfg(all(mln_bench_mtl, target_vendor = "apple"))]
         mln_mtl::bench::take_gpu_time(),
     ];
-    for time in taken.into_iter().flatten() {
-        *total = Some(total.unwrap_or_default() + time);
+    timed.resize(taken.len(), false);
+    for (time, timed) in taken.into_iter().zip(timed) {
+        match time {
+            Some(time) => {
+                *timed = true;
+                *total = Some(total.unwrap_or_default() + time);
+            }
+            // A backend that timed its passes gives no time once it lost
+            // track of it.
+            None => *unknown |= *timed,
+        }
     }
-    *total
+    if *unknown { None } else { *total }
 }
 
 /// How the process counts instructions, or `None` where it can't: the

@@ -236,8 +236,13 @@ impl Bench {
         let time = |name: &str, value| Metric { name: name.to_owned(), kind: MetricKind::Time, unit: Unit::Ms, value };
         metrics.push(time("wall", ms(self.wall)));
         metrics.push(time("cpu", ms(self.cpu)));
-        if self.parts.iter().any(|part| part.gpu.is_some()) {
-            metrics.push(time("gpu", ms(self.parts.iter().filter_map(|part| part.gpu).sum())));
+        // A part without a time after a timed one ran once the GPU's time
+        // became unknown.
+        let mut timed = self.parts.iter().map(|part| part.gpu).skip_while(Option::is_none).peekable();
+        if timed.peek().is_some()
+            && let Some(gpu) = timed.sum::<Option<Duration>>()
+        {
+            metrics.push(time("gpu", ms(gpu)));
         }
         if let Some((unit, n)) = &self.per {
             let n = *n as f64;
@@ -342,6 +347,28 @@ mod tests {
         assert_eq!((max.kind, max.value), (MetricKind::Time, 3.0));
         let untimed = spread_of_parts(&[part(Some(1)), part(None)], "frame");
         assert!(untimed.iter().all(|metric| !metric.name.starts_with("gpu")));
+    }
+
+    #[test]
+    fn the_gpu_time_adds_up_from_the_first_timed_part_while_it_is_known() {
+        let gpu_of = |parts: &[Option<u64>]| {
+            let mut bench = Bench::new();
+            bench.measure(|| ());
+            bench.parts = parts
+                .iter()
+                .map(|gpu| Part {
+                    instructions: None,
+                    allocations: 0,
+                    allocated: 0,
+                    wall: Duration::ZERO,
+                    gpu: gpu.map(Duration::from_millis),
+                })
+                .collect();
+            bench.finish().into_iter().find(|metric| metric.name == "gpu").map(|metric| metric.value)
+        };
+        assert_eq!(gpu_of(&[None, Some(1), Some(2)]), Some(3.0));
+        assert_eq!(gpu_of(&[Some(1), None]), None);
+        assert_eq!(gpu_of(&[None]), None);
     }
 
     #[test]
