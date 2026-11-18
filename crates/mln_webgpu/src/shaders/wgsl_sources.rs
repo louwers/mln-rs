@@ -3344,7 +3344,7 @@ struct LineEvaluatedPropsUBO {
     offset: f32,
     width: f32,
     floorwidth: f32,
-    expressionMask: u32,
+    pad0: f32,
     pad1: f32,
 };
 
@@ -3526,7 +3526,7 @@ struct LineEvaluatedPropsUBO {
     offset: f32,
     width: f32,
     floorwidth: f32,
-    expressionMask: u32,
+    pad0: f32,
     pad1: f32,
 };
 
@@ -3686,7 +3686,7 @@ struct LineEvaluatedPropsUBO {
     offset: f32,
     width: f32,
     floorwidth: f32,
-    expressionMask: u32,
+    pad0: f32,
     pad1: f32,
 };
 
@@ -3828,7 +3828,7 @@ struct LineEvaluatedPropsUBO {
     offset: f32,
     width: f32,
     floorwidth: f32,
-    expressionMask: u32,
+    pad0: f32,
     pad1: f32,
 };
 
@@ -3975,7 +3975,7 @@ struct LineEvaluatedPropsUBO {
     offset: f32,
     width: f32,
     floorwidth: f32,
-    expressionMask: u32,
+    pad0: f32,
     pad1: f32,
 };
 
@@ -4134,7 +4134,7 @@ struct LineEvaluatedPropsUBO {
     offset: f32,
     width: f32,
     floorwidth: f32,
-    expressionMask: u32,
+    pad0: f32,
     pad1: f32,
 };
 
@@ -4357,7 +4357,7 @@ struct LineEvaluatedPropsUBO {
     offset: f32,
     width: f32,
     floorwidth: f32,
-    expressionMask: u32,
+    pad0: f32,
     pad1: f32,
 };
 
@@ -4550,7 +4550,7 @@ struct LineEvaluatedPropsUBO {
     offset: f32,
     width: f32,
     floorwidth: f32,
-    expressionMask: u32,
+    pad0: f32,
     pad1: f32,
 };
 
@@ -4715,7 +4715,7 @@ struct LineEvaluatedPropsUBO {
     offset: f32,
     width: f32,
     floorwidth: f32,
-    expressionMask: u32,
+    pad0: f32,
     pad1: f32,
 };
 
@@ -4859,7 +4859,7 @@ struct LineEvaluatedPropsUBO {
     offset: f32,
     width: f32,
     floorwidth: f32,
-    expressionMask: u32,
+    pad0: f32,
     pad1: f32,
 };
 

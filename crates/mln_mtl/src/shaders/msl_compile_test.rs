@@ -278,7 +278,6 @@ fn ubo_ids(source: &ShaderSource) -> Vec<(&'static str, usize)> {
                 ("idLineDrawableUBO", ID_LINE_DRAWABLE_UBO),
                 ("idLineTilePropsUBO", ID_LINE_TILE_PROPS_UBO),
                 ("idLineEvaluatedPropsUBO", ID_LINE_EVALUATED_PROPS_UBO),
-                ("idLineExpressionUBO", ID_LINE_EXPRESSION_UBO),
             ],
             "lineUBOCount",
         ),

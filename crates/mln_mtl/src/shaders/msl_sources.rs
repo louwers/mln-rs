@@ -79,148 +79,6 @@ inline float2 atlas_pos(const float2 origin, const float2 offset) {
     return origin + rint(offset * 16777216.0) / 16777216.0;
 }
 
-template<class ForwardIt, class T>
-ForwardIt upper_bound(ForwardIt first, ForwardIt last, thread const T& value)
-{
-    size_t count = last - first;
-    while (count > 0)
-    {
-        ForwardIt it = first;
-        const size_t step = count / 2;
-        it += step;
-        if (!(value < *it))
-        {
-            first = ++it;
-            count -= step + 1;
-        }
-        else {
-            count = step;
-        }
-    }
-    return first;
-}
-
-float interpolationFactor(float base, float rangeMin, float rangeMax, float z) {
-    const float zoomDiff = rangeMax - rangeMin;
-    const float zoomProgress = z - rangeMin;
-    if (zoomDiff == 0) {
-        return 0;
-    } else if (base == 1.0f) {
-        return zoomProgress / zoomDiff;
-    } else {
-        return (pow(base, zoomProgress) - 1) / (pow(base, zoomDiff) - 1);
-    }
-}
-
-
-enum class GPUInterpType : uint16_t {
-    Step,
-    Linear,
-    Exponential,
-    Bezier
-};
-enum class GPUOutputType : uint16_t {
-    Float,
-    Color,
-};
-enum class GPUOptions : uint16_t {
-    None = 0,
-    IntegerZoom = 1 << 0,
-    Transitioning = 1 << 1,
-};
-bool operator&(GPUOptions a, GPUOptions b) { return (uint16_t)a & (uint16_t)b; }
-
-constant const int maxExprStops = 16;
-struct alignas(16) GPUExpression {
-    GPUOutputType outputType;
-    uint16_t stopCount;
-    GPUOptions options;
-    GPUInterpType interpolation;
-
-    union InterpOptions {
-        struct Exponential {
-            float base;
-        } exponential;
-
-        struct Bezier {
-            float x1;
-            float y1;
-            float x2;
-            float y2;
-        } bezier;
-    } interpOptions;
-
-    float inputs[maxExprStops];
-
-    union Stops {
-        float floats[maxExprStops];
-        float2 colors[maxExprStops];
-    } stops;
-
-    float eval(float zoom) device const {
-        const auto effectiveZoom = (options & GPUOptions::IntegerZoom) ? floor(zoom) : zoom;
-        const auto index = find(effectiveZoom);
-        if (index == 0) {
-            return stops.floats[0];
-        } else if (index == stopCount) {
-            return stops.floats[stopCount - 1];
-        }
-        switch (interpolation) {
-            case GPUInterpType::Step: return stops.floats[index - 1];
-            default: assert(false);
-                [[fallthrough]];
-            case GPUInterpType::Linear: assert(interpOptions.exponential.base == 1.0f);
-                [[fallthrough]];
-            case GPUInterpType::Exponential: {
-                const float rangeBeg = inputs[index - 1];
-                const float rangeEnd = inputs[index];
-                const auto t = interpolationFactor(interpOptions.exponential.base, rangeBeg, rangeEnd, effectiveZoom);
-                return mix(stops.floats[index - 1], stops.floats[index], t);
-            }
-            case GPUInterpType::Bezier:
-                assert(false);
-                return stops.floats[0];
-        }
-    }
-
-    float4 evalColor(float zoom) device const {
-        const auto effectiveZoom = (options & GPUOptions::IntegerZoom) ? floor(zoom) : zoom;
-        const auto index = find(effectiveZoom);
-        if (index == 0) {
-            return getColor(0);
-        } else if (index == stopCount) {
-            return getColor(stopCount - 1);
-        }
-        switch (interpolation) {
-            case GPUInterpType::Step:
-                return getColor(index - 1);
-            default:
-                assert(false);
-                [[fallthrough]];
-            case GPUInterpType::Linear:
-                assert(interpOptions.exponential.base == 1.0f);
-                [[fallthrough]];
-            case GPUInterpType::Exponential: {
-                const float rangeBeg = inputs[index - 1];
-                const float rangeEnd = inputs[index];
-                const auto t = interpolationFactor(interpOptions.exponential.base, rangeBeg, rangeEnd, effectiveZoom);
-                return mix(getColor(index - 1), getColor(index), clamp(t, 0.0, 1.0));
-            }
-            case GPUInterpType::Bezier:
-                assert(false);
-                return getColor(0);
-        }
-    }
-
-    /// Get the index of the entry to use from the zoom level
-    size_t find(float zoom) device const {
-        return upper_bound(&inputs[0], &inputs[stopCount], zoom) - &inputs[0];
-    }
-
-    float4 getColor(size_t index) device const { return decode_color(stops.colors[index]); }
-};
-static_assert(sizeof(GPUExpression) == 32 + (4 + 8) * maxExprStops, "wrong size");
-static_assert(sizeof(GPUExpression) % 16 == 0, "wrong alignment");
 
 struct alignas(16) GlobalPaintParamsUBO {
     /*  0 */ float2 pattern_atlas_texsize;
@@ -4454,7 +4312,6 @@ enum {
     idLineDrawableUBO = idDrawableReservedVertexOnlyUBO,
     idLineTilePropsUBO = idDrawableReservedFragmentOnlyUBO,
     idLineEvaluatedPropsUBO = drawableReservedUBOCount,
-    idLineExpressionUBO,
     lineUBOCount
 };
 
@@ -4564,30 +4421,6 @@ struct alignas(16) LineSDFTilePropsUBO {
 };
 static_assert(sizeof(LineSDFTilePropsUBO) == 16, "wrong size");
 
-/// Expression properties that do not depend on the tile
-enum class LineExpressionMask : uint32_t {
-    None = 0,
-    Color = 1 << 0,
-    Opacity = 1 << 1,
-    Blur = 1 << 2,
-    Width = 1 << 3,
-    GapWidth = 1 << 4,
-    FloorWidth = 1 << 5,
-    Offset = 1 << 6,
-};
-bool operator&(LineExpressionMask a, LineExpressionMask b) { return (uint32_t)a & (uint32_t)b; }
-
-struct alignas(16) LineExpressionUBO {
-    GPUExpression color;
-    GPUExpression blur;
-    GPUExpression opacity;
-    GPUExpression gapwidth;
-    GPUExpression offset;
-    GPUExpression width;
-    GPUExpression floorwidth;
-};
-static_assert(sizeof(LineExpressionUBO) % 16 == 0, "wrong alignment");
-
 /// Evaluated properties that do not depend on the tile
 struct alignas(16) LineEvaluatedPropsUBO {
     /*  0 */ float4 color;
@@ -4597,7 +4430,7 @@ struct alignas(16) LineEvaluatedPropsUBO {
     /* 28 */ float offset;
     /* 32 */ float width;
     /* 36 */ float floorwidth;
-    /* 40 */ LineExpressionMask expressionMask;
+    /* 40 */ float pad0;
     /* 44 */ float pad1;
     /* 48 */
 };
@@ -4676,35 +4509,30 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const LineDrawableUnionUBO* drawableVector [[buffer(idLineDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
-                                device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]],
-                                device const LineExpressionUBO& expr [[buffer(idLineExpressionUBO)]]) {
+                                device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]]) {
 
     device const LineSDFDrawableUBO& drawable = drawableVector[uboIndex].lineSDFDrawableUBO;
 
 #if defined(HAS_UNIFORM_u_gapwidth)
-    const auto exprGapWidth = (props.expressionMask & LineExpressionMask::GapWidth);
-    const auto gapwidth = (exprGapWidth ? expr.gapwidth.eval(paintParams.map_zoom) : props.gapwidth) / 2.0;
+    const auto gapwidth = props.gapwidth / 2.0;
 #else
     const auto gapwidth = unpack_mix_float(vertx.gapwidth, drawable.gapwidth_t) / 2.0;
 #endif
 
 #if defined(HAS_UNIFORM_u_offset)
-    const auto exprOffset = (props.expressionMask & LineExpressionMask::Offset);
-    const auto offset   = (exprOffset ? expr.offset.eval(paintParams.map_zoom) : props.offset) * -1.0;
+    const auto offset   = props.offset * -1.0;
 #else
     const auto offset   = unpack_mix_float(vertx.offset, drawable.offset_t) * -1.0;
 #endif
 
 #if defined(HAS_UNIFORM_u_width)
-    const auto exprWidth = (props.expressionMask & LineExpressionMask::Width);
-    const auto width    = exprWidth ? expr.width.eval(paintParams.map_zoom) : props.width;
+    const auto width    = props.width;
 #else
     const auto width    = unpack_mix_float(vertx.width, drawable.width_t);
 #endif
 
 #if defined(HAS_UNIFORM_u_floorwidth)
-    const auto exprFloorWidth = (props.expressionMask & LineExpressionMask::FloorWidth);
-    const auto floorwidth = exprFloorWidth ? expr.floorwidth.eval(paintParams.map_zoom) : props.floorwidth;
+    const auto floorwidth = props.floorwidth;
 #else
     const auto floorwidth = unpack_mix_float(vertx.floorwidth, drawable.floorwidth_t);
 #endif
@@ -4801,7 +4629,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
                             device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                             device const LineTilePropsUnionUBO* tilePropsVector [[buffer(idLineTilePropsUBO)]],
                             device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]],
-                            device const LineExpressionUBO& expr [[buffer(idLineExpressionUBO)]],
                             texture2d<float, access::sample> gradientTexture [[texture(0)]],
                             texture2d<float, access::sample> dashTexture [[texture(1)]],
                             sampler gradientSampler [[sampler(0)]],
@@ -4819,22 +4646,19 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     device const LineSDFTilePropsUBO& tileProps = tilePropsVector[uboIndex].lineSDFTilePropsUBO;
 
 #if defined(HAS_UNIFORM_u_blur)
-    const auto exprBlur = (props.expressionMask & LineExpressionMask::Blur);
-    const float blur = exprBlur ? expr.blur.eval(paintParams.map_zoom) : props.blur;
+    const float blur = props.blur;
 #else
     const float blur = in.blur;
 #endif
 
 #if defined(HAS_UNIFORM_u_opacity)
-    const auto exprOpacity = (props.expressionMask & LineExpressionMask::Opacity);
-    const float opacity = exprOpacity ? expr.opacity.eval(paintParams.map_zoom) : props.opacity;
+    const float opacity = props.opacity;
 #else
     const float opacity = in.opacity;
 #endif
 
 #if defined(HAS_UNIFORM_u_floorwidth)
-    const auto exprFloorWidth = (props.expressionMask & LineExpressionMask::FloorWidth);
-    const auto floorwidth = exprFloorWidth ? expr.floorwidth.eval(paintParams.map_zoom) : props.floorwidth;
+    const auto floorwidth = props.floorwidth;
 #else
     const auto floorwidth = in.floorwidth;
 #endif
@@ -4874,7 +4698,6 @@ enum {
     idLineDrawableUBO = idDrawableReservedVertexOnlyUBO,
     idLineTilePropsUBO = idDrawableReservedFragmentOnlyUBO,
     idLineEvaluatedPropsUBO = drawableReservedUBOCount,
-    idLineExpressionUBO,
     lineUBOCount
 };
 
@@ -4984,30 +4807,6 @@ struct alignas(16) LineSDFTilePropsUBO {
 };
 static_assert(sizeof(LineSDFTilePropsUBO) == 16, "wrong size");
 
-/// Expression properties that do not depend on the tile
-enum class LineExpressionMask : uint32_t {
-    None = 0,
-    Color = 1 << 0,
-    Opacity = 1 << 1,
-    Blur = 1 << 2,
-    Width = 1 << 3,
-    GapWidth = 1 << 4,
-    FloorWidth = 1 << 5,
-    Offset = 1 << 6,
-};
-bool operator&(LineExpressionMask a, LineExpressionMask b) { return (uint32_t)a & (uint32_t)b; }
-
-struct alignas(16) LineExpressionUBO {
-    GPUExpression color;
-    GPUExpression blur;
-    GPUExpression opacity;
-    GPUExpression gapwidth;
-    GPUExpression offset;
-    GPUExpression width;
-    GPUExpression floorwidth;
-};
-static_assert(sizeof(LineExpressionUBO) % 16 == 0, "wrong alignment");
-
 /// Evaluated properties that do not depend on the tile
 struct alignas(16) LineEvaluatedPropsUBO {
     /*  0 */ float4 color;
@@ -5017,7 +4816,7 @@ struct alignas(16) LineEvaluatedPropsUBO {
     /* 28 */ float offset;
     /* 32 */ float width;
     /* 36 */ float floorwidth;
-    /* 40 */ LineExpressionMask expressionMask;
+    /* 40 */ float pad0;
     /* 44 */ float pad1;
     /* 48 */
 };
@@ -5222,7 +5021,6 @@ enum {
     idLineDrawableUBO = idDrawableReservedVertexOnlyUBO,
     idLineTilePropsUBO = idDrawableReservedFragmentOnlyUBO,
     idLineEvaluatedPropsUBO = drawableReservedUBOCount,
-    idLineExpressionUBO,
     lineUBOCount
 };
 
@@ -5332,30 +5130,6 @@ struct alignas(16) LineSDFTilePropsUBO {
 };
 static_assert(sizeof(LineSDFTilePropsUBO) == 16, "wrong size");
 
-/// Expression properties that do not depend on the tile
-enum class LineExpressionMask : uint32_t {
-    None = 0,
-    Color = 1 << 0,
-    Opacity = 1 << 1,
-    Blur = 1 << 2,
-    Width = 1 << 3,
-    GapWidth = 1 << 4,
-    FloorWidth = 1 << 5,
-    Offset = 1 << 6,
-};
-bool operator&(LineExpressionMask a, LineExpressionMask b) { return (uint32_t)a & (uint32_t)b; }
-
-struct alignas(16) LineExpressionUBO {
-    GPUExpression color;
-    GPUExpression blur;
-    GPUExpression opacity;
-    GPUExpression gapwidth;
-    GPUExpression offset;
-    GPUExpression width;
-    GPUExpression floorwidth;
-};
-static_assert(sizeof(LineExpressionUBO) % 16 == 0, "wrong alignment");
-
 /// Evaluated properties that do not depend on the tile
 struct alignas(16) LineEvaluatedPropsUBO {
     /*  0 */ float4 color;
@@ -5365,7 +5139,7 @@ struct alignas(16) LineEvaluatedPropsUBO {
     /* 28 */ float offset;
     /* 32 */ float width;
     /* 36 */ float floorwidth;
-    /* 40 */ LineExpressionMask expressionMask;
+    /* 40 */ float pad0;
     /* 44 */ float pad1;
     /* 48 */
 };
@@ -5445,28 +5219,24 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const LineDrawableUnionUBO* drawableVector [[buffer(idLineDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
-                                device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]],
-                                device const LineExpressionUBO& expr [[buffer(idLineExpressionUBO)]]) {
+                                device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]]) {
 
     device const LinePatternDrawableUBO& drawable = drawableVector[uboIndex].linePatternDrawableUBO;
 
 #if defined(HAS_UNIFORM_u_gapwidth)
-    const auto exprGapWidth = (props.expressionMask & LineExpressionMask::GapWidth);
-    const auto gapwidth = (exprGapWidth ? expr.gapwidth.eval(paintParams.map_zoom) : props.gapwidth) / 2;
+    const auto gapwidth = props.gapwidth / 2;
 #else
     const auto gapwidth = unpack_mix_float(vertx.gapwidth, drawable.gapwidth_t) / 2;
 #endif
 
 #if defined(HAS_UNIFORM_u_offset)
-    const auto exprOffset = (props.expressionMask & LineExpressionMask::Offset);
-    const auto offset   = (exprOffset ? expr.offset.eval(paintParams.map_zoom) : props.offset) * -1;
+    const auto offset   = props.offset * -1;
 #else
     const auto offset   = unpack_mix_float(vertx.offset, drawable.offset_t) * -1;
 #endif
 
 #if defined(HAS_UNIFORM_u_width)
-    const auto exprWidth = (props.expressionMask & LineExpressionMask::Width);
-    const auto width    = exprWidth ? expr.width.eval(paintParams.map_zoom) : props.width;
+    const auto width    = props.width;
 #else
     const auto width    = unpack_mix_float(vertx.width, drawable.width_t);
 #endif
@@ -5554,7 +5324,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
                             device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                             device const LineTilePropsUnionUBO* tilePropsVector [[buffer(idLineTilePropsUBO)]],
                             device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]],
-                            device const LineExpressionUBO& expr [[buffer(idLineExpressionUBO)]],
                             texture2d<float, access::sample> image0 [[texture(0)]],
                             sampler image0_sampler [[sampler(0)]]) {
 
@@ -5571,15 +5340,13 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     device const LinePatternTilePropsUBO& tileProps = tilePropsVector[uboIndex].linePatternTilePropsUBO;
 
 #if defined(HAS_UNIFORM_u_blur)
-    const auto exprBlur = (props.expressionMask & LineExpressionMask::Blur);
-    const float blur = exprBlur ? expr.blur.eval(paintParams.map_zoom) : props.blur;
+    const float blur = props.blur;
 #else
     const float blur = in.blur;
 #endif
 
 #if defined(HAS_UNIFORM_u_opacity)
-    const auto exprOpacity = (props.expressionMask & LineExpressionMask::Opacity);
-    const float opacity = exprOpacity ? expr.opacity.eval(paintParams.map_zoom) : props.opacity;
+    const float opacity = props.opacity;
 #else
     const float opacity = in.opacity;
 #endif
@@ -5613,8 +5380,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     const float2 pattern_size_b = float2(display_size_b.x * toScale / tileZoomRatio, display_size_b.y);
 
 #if defined(HAS_UNIFORM_u_width)
-    const auto exprFloorWidth = (props.expressionMask & LineExpressionMask::FloorWidth);
-    const float floorwidth = exprFloorWidth ? expr.floorwidth.eval(paintParams.map_zoom) : props.floorwidth;
+    const float floorwidth = props.floorwidth;
 #else
     const float floorwidth = in.floorwidth;
 #endif
@@ -5658,7 +5424,6 @@ enum {
     idLineDrawableUBO = idDrawableReservedVertexOnlyUBO,
     idLineTilePropsUBO = idDrawableReservedFragmentOnlyUBO,
     idLineEvaluatedPropsUBO = drawableReservedUBOCount,
-    idLineExpressionUBO,
     lineUBOCount
 };
 
@@ -5768,30 +5533,6 @@ struct alignas(16) LineSDFTilePropsUBO {
 };
 static_assert(sizeof(LineSDFTilePropsUBO) == 16, "wrong size");
 
-/// Expression properties that do not depend on the tile
-enum class LineExpressionMask : uint32_t {
-    None = 0,
-    Color = 1 << 0,
-    Opacity = 1 << 1,
-    Blur = 1 << 2,
-    Width = 1 << 3,
-    GapWidth = 1 << 4,
-    FloorWidth = 1 << 5,
-    Offset = 1 << 6,
-};
-bool operator&(LineExpressionMask a, LineExpressionMask b) { return (uint32_t)a & (uint32_t)b; }
-
-struct alignas(16) LineExpressionUBO {
-    GPUExpression color;
-    GPUExpression blur;
-    GPUExpression opacity;
-    GPUExpression gapwidth;
-    GPUExpression offset;
-    GPUExpression width;
-    GPUExpression floorwidth;
-};
-static_assert(sizeof(LineExpressionUBO) % 16 == 0, "wrong alignment");
-
 /// Evaluated properties that do not depend on the tile
 struct alignas(16) LineEvaluatedPropsUBO {
     /*  0 */ float4 color;
@@ -5801,7 +5542,7 @@ struct alignas(16) LineEvaluatedPropsUBO {
     /* 28 */ float offset;
     /* 32 */ float width;
     /* 36 */ float floorwidth;
-    /* 40 */ LineExpressionMask expressionMask;
+    /* 40 */ float pad0;
     /* 44 */ float pad1;
     /* 48 */
 };
@@ -5885,35 +5626,30 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const LineDrawableUnionUBO* drawableVector [[buffer(idLineDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
-                                device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]],
-                                device const LineExpressionUBO& expr [[buffer(idLineExpressionUBO)]]) {
+                                device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]]) {
 
     device const LineSDFDrawableUBO& drawable = drawableVector[uboIndex].lineSDFDrawableUBO;
 
 #if defined(HAS_UNIFORM_u_gapwidth)
-    const auto exprGapWidth = (props.expressionMask & LineExpressionMask::GapWidth);
-    const auto gapwidth = (exprGapWidth ? expr.gapwidth.eval(paintParams.map_zoom) : props.gapwidth) / 2.0;
+    const auto gapwidth = props.gapwidth / 2.0;
 #else
     const auto gapwidth = unpack_mix_float(vertx.gapwidth, drawable.gapwidth_t) / 2.0;
 #endif
 
 #if defined(HAS_UNIFORM_u_offset)
-    const auto exprOffset = (props.expressionMask & LineExpressionMask::Offset);
-    const auto offset   = (exprOffset ? expr.offset.eval(paintParams.map_zoom) : props.offset) * -1.0;
+    const auto offset   = props.offset * -1.0;
 #else
     const auto offset   = unpack_mix_float(vertx.offset, drawable.offset_t) * -1.0;
 #endif
 
 #if defined(HAS_UNIFORM_u_width)
-    const auto exprWidth = (props.expressionMask & LineExpressionMask::Width);
-    const auto width    = exprWidth ? expr.width.eval(paintParams.map_zoom) : props.width;
+    const auto width    = props.width;
 #else
     const auto width    = unpack_mix_float(vertx.width, drawable.width_t);
 #endif
 
 #if defined(HAS_UNIFORM_u_floorwidth)
-    const auto exprFloorWidth = (props.expressionMask & LineExpressionMask::FloorWidth);
-    const auto floorwidth = exprFloorWidth ? expr.floorwidth.eval(paintParams.map_zoom) : props.floorwidth;
+    const auto floorwidth = props.floorwidth;
 #else
     const auto floorwidth = unpack_mix_float(vertx.floorwidth, drawable.floorwidth_t);
 #endif
@@ -6011,7 +5747,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
                             device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                             device const LineTilePropsUnionUBO* tilePropsVector [[buffer(idLineTilePropsUBO)]],
                             device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]],
-                            device const LineExpressionUBO& expr [[buffer(idLineExpressionUBO)]],
                             texture2d<float, access::sample> image0 [[texture(0)]],
                             sampler image0_sampler [[sampler(0)]]) {
 
@@ -6028,29 +5763,25 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     device const LineSDFTilePropsUBO& tileProps = tilePropsVector[uboIndex].lineSDFTilePropsUBO;
 
 #if defined(HAS_UNIFORM_u_color)
-    const auto exprColor = (props.expressionMask & LineExpressionMask::Color);
-    const auto color     = exprColor ? expr.color.evalColor(paintParams.map_zoom) : props.color;
+    const auto color     = props.color;
 #else
     const float4 color = in.color;
 #endif
 
 #if defined(HAS_UNIFORM_u_blur)
-    const auto exprBlur = (props.expressionMask & LineExpressionMask::Blur);
-    const float blur = exprBlur ? expr.blur.eval(paintParams.map_zoom) : props.blur;
+    const float blur = props.blur;
 #else
     const float blur = in.blur;
 #endif
 
 #if defined(HAS_UNIFORM_u_opacity)
-    const auto exprOpacity = (props.expressionMask & LineExpressionMask::Opacity);
-    const float opacity = exprOpacity ? expr.opacity.eval(paintParams.map_zoom) : props.opacity;
+    const float opacity = props.opacity;
 #else
     const float opacity = in.opacity;
 #endif
 
 #if defined(HAS_UNIFORM_u_floorwidth)
-    const auto exprFloorWidth = (props.expressionMask & LineExpressionMask::FloorWidth);
-    const auto floorwidth = exprFloorWidth ? expr.floorwidth.eval(paintParams.map_zoom) : props.floorwidth;
+    const auto floorwidth = props.floorwidth;
 #else
     const auto floorwidth = in.floorwidth;
 #endif
@@ -6087,7 +5818,6 @@ enum {
     idLineDrawableUBO = idDrawableReservedVertexOnlyUBO,
     idLineTilePropsUBO = idDrawableReservedFragmentOnlyUBO,
     idLineEvaluatedPropsUBO = drawableReservedUBOCount,
-    idLineExpressionUBO,
     lineUBOCount
 };
 
@@ -6197,30 +5927,6 @@ struct alignas(16) LineSDFTilePropsUBO {
 };
 static_assert(sizeof(LineSDFTilePropsUBO) == 16, "wrong size");
 
-/// Expression properties that do not depend on the tile
-enum class LineExpressionMask : uint32_t {
-    None = 0,
-    Color = 1 << 0,
-    Opacity = 1 << 1,
-    Blur = 1 << 2,
-    Width = 1 << 3,
-    GapWidth = 1 << 4,
-    FloorWidth = 1 << 5,
-    Offset = 1 << 6,
-};
-bool operator&(LineExpressionMask a, LineExpressionMask b) { return (uint32_t)a & (uint32_t)b; }
-
-struct alignas(16) LineExpressionUBO {
-    GPUExpression color;
-    GPUExpression blur;
-    GPUExpression opacity;
-    GPUExpression gapwidth;
-    GPUExpression offset;
-    GPUExpression width;
-    GPUExpression floorwidth;
-};
-static_assert(sizeof(LineExpressionUBO) % 16 == 0, "wrong alignment");
-
 /// Evaluated properties that do not depend on the tile
 struct alignas(16) LineEvaluatedPropsUBO {
     /*  0 */ float4 color;
@@ -6230,7 +5936,7 @@ struct alignas(16) LineEvaluatedPropsUBO {
     /* 28 */ float offset;
     /* 32 */ float width;
     /* 36 */ float floorwidth;
-    /* 40 */ LineExpressionMask expressionMask;
+    /* 40 */ float pad0;
     /* 44 */ float pad1;
     /* 48 */
 };
@@ -6300,28 +6006,24 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const LineDrawableUnionUBO* drawableVector [[buffer(idLineDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
-                                device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]],
-                                device const LineExpressionUBO& expr [[buffer(idLineExpressionUBO)]]) {
+                                device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]]) {
 
     device const LineDrawableUBO& drawable = drawableVector[uboIndex].lineDrawableUBO;
 
 #if defined(HAS_UNIFORM_u_gapwidth)
-    const auto exprGapWidth = (props.expressionMask & LineExpressionMask::GapWidth);
-    const auto gapwidth = (exprGapWidth ? expr.gapwidth.eval(paintParams.map_zoom) : props.gapwidth) / 2;
+    const auto gapwidth = props.gapwidth / 2;
 #else
     const auto gapwidth = unpack_mix_float(vertx.gapwidth, drawable.gapwidth_t) / 2;
 #endif
 
 #if defined(HAS_UNIFORM_u_offset)
-    const auto exprOffset = (props.expressionMask & LineExpressionMask::Offset);
-    const auto offset   = (exprOffset ? expr.offset.eval(paintParams.map_zoom) : props.offset) * -1;
+    const auto offset   = props.offset * -1;
 #else
     const auto offset   = unpack_mix_float(vertx.offset, drawable.offset_t) * -1;
 #endif
 
 #if defined(HAS_UNIFORM_u_width)
-    const auto exprWidth = (props.expressionMask & LineExpressionMask::Width);
-    const auto width    = exprWidth ? expr.width.eval(paintParams.map_zoom) : props.width;
+    const auto width    = props.width;
 #else
     const auto width    = unpack_mix_float(vertx.width, drawable.width_t);
 #endif
@@ -6393,8 +6095,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
                             device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
-                            device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]],
-                            device const LineExpressionUBO& expr [[buffer(idLineExpressionUBO)]]) {
+                            device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]]) {
 #if defined(PROJECTION_GLOBE)
     if (clippedAtAntimeridian(in.tile_x)) {
         discard_fragment();
@@ -6406,22 +6107,19 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 #endif
 
 #if defined(HAS_UNIFORM_u_color)
-    const auto exprColor = (props.expressionMask & LineExpressionMask::Color);
-    const auto color     = exprColor ? expr.color.evalColor(paintParams.map_zoom) : props.color;
+    const auto color     = props.color;
 #else
     const float4 color = in.color;
 #endif
 
 #if defined(HAS_UNIFORM_u_blur)
-    const auto exprBlur = (props.expressionMask & LineExpressionMask::Blur);
-    const float blur = exprBlur ? expr.blur.eval(paintParams.map_zoom) : props.blur;
+    const float blur = props.blur;
 #else
     const float blur = in.blur;
 #endif
 
 #if defined(HAS_UNIFORM_u_opacity)
-    const auto exprOpacity = (props.expressionMask & LineExpressionMask::Opacity);
-    const float opacity = exprOpacity ? expr.opacity.eval(paintParams.map_zoom) : props.opacity;
+    const float opacity = props.opacity;
 #else
     const float opacity = in.opacity;
 #endif

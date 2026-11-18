@@ -681,7 +681,6 @@ impl VulkanGpu {
             clip_depth: ClipDepthRange::ZeroToOne,
             render_target_depth: None,
             clear_stencil_with_pass: true,
-            line_expressions: false,
             cpu_rasterizer: properties.device_type == vk::PhysicalDeviceType::CPU,
             max_line_width: line_widths.map_or(1.0, |(_, max)| max),
         };

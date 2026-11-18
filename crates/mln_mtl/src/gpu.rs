@@ -347,7 +347,6 @@ impl MetalGpu {
             clip_depth: ClipDepthRange::ZeroToOne,
             render_target_depth: None,
             clear_stencil_with_pass: false,
-            line_expressions: true,
             cpu_rasterizer: false,
             max_line_width: 1.0,
         };

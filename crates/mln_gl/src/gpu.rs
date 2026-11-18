@@ -579,7 +579,6 @@ impl GlGpu {
                 clip_depth: ClipDepthRange::NegativeOneToOne,
                 render_target_depth: None,
                 clear_stencil_with_pass: false,
-                line_expressions: false,
                 cpu_rasterizer: renderer.contains("llvmpipe") || renderer.contains("softpipe"),
                 max_line_width,
             };

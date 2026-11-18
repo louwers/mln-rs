@@ -4106,7 +4106,7 @@ layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEva
     float offset;
     float width;
     float floorwidth;
-    uint expressionMask;
+    float pad0;
     float pad1;
 } props;
 
@@ -4244,7 +4244,7 @@ layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEva
     float offset;
     float width;
     float floorwidth;
-    uint expressionMask;
+    float pad0;
     float pad1;
 } props;
 
@@ -4360,7 +4360,7 @@ layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEva
     float offset;
     float width;
     float floorwidth;
-    uint expressionMask;
+    float pad0;
     float pad1;
 } props;
 
@@ -4492,7 +4492,7 @@ layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEva
     float offset;
     float width;
     float floorwidth;
-    uint expressionMask;
+    float pad0;
     float pad1;
 } props;
 
@@ -4617,7 +4617,7 @@ layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEva
     float offset;
     float width;
     float floorwidth;
-    uint expressionMask;
+    float pad0;
     float pad1;
 } props;
 
@@ -4797,7 +4797,7 @@ layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEva
     float offset;
     float width;
     float floorwidth;
-    uint expressionMask;
+    float pad0;
     float pad1;
 } props;
 
@@ -4979,7 +4979,7 @@ layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEva
     float offset;
     float width;
     float floorwidth;
-    uint expressionMask;
+    float pad0;
     float pad1;
 } props;
 
@@ -5176,7 +5176,7 @@ layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEva
     float offset;
     float width;
     float floorwidth;
-    uint expressionMask;
+    float pad0;
     float pad1;
 } props;
 
@@ -5328,7 +5328,7 @@ layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEva
     float offset;
     float width;
     float floorwidth;
-    uint expressionMask;
+    float pad0;
     float pad1;
 } props;
 
@@ -5524,7 +5524,7 @@ layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEva
     float offset;
     float width;
     float floorwidth;
-    uint expressionMask;
+    float pad0;
     float pad1;
 } props;
 
