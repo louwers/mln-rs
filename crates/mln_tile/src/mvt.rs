@@ -114,6 +114,10 @@ impl MvtLayer<'_> {
         self.layer.name()
     }
 
+    pub(crate) fn extent(&self) -> u32 {
+        self.layer.extent()
+    }
+
     pub(crate) fn len(&self) -> usize {
         self.layer.feature_count()
     }

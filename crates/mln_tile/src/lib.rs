@@ -14,6 +14,7 @@
 //! the geometry functions. The tiles themselves, and their workers, depend
 //! on the renderer and live in a higher crate.
 
+pub mod cut;
 mod error;
 pub mod geometry_tile_data;
 mod mlt;

@@ -29,7 +29,7 @@ use crate::query::FeatureExtensionValue;
 use crate::render_source::RenderSource;
 use crate::sources::render_image_source::RenderImageSource;
 use crate::sources::render_tile_source::RenderTileSource;
-use crate::tile::loading::{CustomLoader, DataOrigin, VectorTileEncoding};
+use crate::tile::loading::{Ancestors, CustomLoader, DataOrigin, VectorTileEncoding};
 use crate::tile::source_tiles::SourceTiles;
 use crate::tile::store::{StoreContext, TileStore};
 use crate::tile::tile::TileKind;
@@ -43,7 +43,8 @@ pub(crate) trait SourceType: StyleSourceType {
 }
 
 /// What a source's tiles cover: their size in pixels, the zoom levels that
-/// have tiles, and the bounds outside which there are none.
+/// have tiles of their own, beyond which they are drawn scaled up, and the
+/// bounds outside which there are none.
 pub(crate) struct Cover {
     pub(crate) tile_size: u16,
     pub(crate) zoom_range: Range<u8>,
@@ -130,6 +131,11 @@ impl<K: TilesetKind> SourceType for TilesetSourceType<K> {
     }
 }
 
+/// How many zooms, up to the map's last, draw a vector tileset's tiles
+/// scaled up. The zooms between the tileset's last and these have tiles cut
+/// from its tiles, as in GL JS.
+const OVERSCALED_ZOOMS: u8 = 4;
+
 /// A tileset source's tiles: the tileset they were made from.
 struct TilesetOrigin<K> {
     tileset: Option<Tileset>,
@@ -175,16 +181,28 @@ impl<K: TilesetKind> TileOrigin for TilesetOrigin<K> {
         let file_source = parameters.file_source.clone();
         let current = matches!(
             &tiles.info.origin,
-            Some(DataOrigin::Tileset { tileset: origin, encoding: current, file_source: current_file_source })
+            Some(DataOrigin::Tileset { tileset: origin, encoding: current, file_source: current_file_source, .. })
                 if *origin == tileset
                     && *current == encoding
                     && same_file_source(current_file_source.as_ref(), file_source.as_ref())
         );
         if !current {
-            tiles.info.origin = Some(DataOrigin::Tileset { tileset: tileset.clone(), encoding, file_source });
+            tiles.info.origin = Some(DataOrigin::Tileset {
+                tileset: tileset.clone(),
+                encoding,
+                file_source,
+                ancestors: Ancestors::default(),
+            });
         }
         let tile_size = if is_vector::<K>() { constants::TILE_SIZE_I } else { data.options.tile_size };
-        Some(Cover { tile_size, zoom_range: tileset.zoom_range, bounds: tileset.bounds })
+        let mut zoom_range = tileset.zoom_range;
+        if is_vector::<K>() {
+            // Past the tileset's last zoom, tiles are cut from its tiles until
+            // the last few zooms the map can reach, which draw them scaled up.
+            let max_zoom = parameters.transform_state.get_max_zoom().floor() as i32 - i32::from(OVERSCALED_ZOOMS);
+            zoom_range.max = zoom_range.max.max(max_zoom.clamp(0, i32::from(u8::MAX)) as u8);
+        }
+        Some(Cover { tile_size, zoom_range, bounds: tileset.bounds })
     }
 
     fn max_zoom(&self) -> u8 {

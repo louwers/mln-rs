@@ -3248,6 +3248,7 @@ dependencies = [
  "mln-rs-util",
  "mln-rs-wire",
  "mlt-core",
+ "parking_lot",
  "proptest",
  "thiserror 2.0.21",
 ]

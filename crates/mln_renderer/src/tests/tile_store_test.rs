@@ -29,7 +29,7 @@ use crate::tests::{OneTile, style, tile_store};
 use crate::tile::contents::Contents;
 use crate::tile::inbox::{SourceData, TileEvent};
 use crate::tile::job::{DataInput, Job, Run, TileKey};
-use crate::tile::loading::{DataOrigin, Fetch, OriginLoad, VectorTileEncoding};
+use crate::tile::loading::{Ancestors, DataOrigin, Fetch, OriginLoad, VectorTileEncoding};
 use crate::tile::pipeline::LayoutWork;
 use crate::tile::tile::{TileKind, TileNecessity, TileOperation};
 use crate::tile::tile_workers::{InlineWorkers, TileWorkers};
@@ -118,6 +118,7 @@ impl Test {
             tileset: Tileset { tiles: vec!["tiles".to_owned()], ..Default::default() },
             encoding: VectorTileEncoding::Mvt,
             file_source: Some(file_source),
+            ancestors: Ancestors::default(),
         };
         let id = OverscaledTileID::from_zxy(0, 0, 0);
         OneTile::with_origin(store, TileKind::Geometry, false, origin, &[id], MapMode::Static)
@@ -500,6 +501,7 @@ fn style_replaced_mid_load() {
         tileset: Tileset { tiles: vec!["tiles".to_owned()], ..Default::default() },
         encoding: VectorTileEncoding::Mvt,
         file_source: Some(file_source_dyn),
+        ancestors: Ancestors::default(),
     });
     let new_tile = source.info.new_tile(id, params).expect("a tile");
     source.insert(new_tile);

@@ -716,8 +716,8 @@ impl<'a> TileMut<'a> {
             if !self.tile.pipeline.is_pending(true) {
                 self.tile.settled = true;
             }
-        } else if let Some(origin) = &self.source.origin {
-            let input = origin.input(self.source.kind, res);
+        } else if let Some(origin) = &mut self.source.origin {
+            let input = origin.input(self.source.kind, &self.tile.id, res);
             self.take_input(input);
         }
     }

@@ -562,8 +562,9 @@ fn styles_and_layers_are_defined_once() {
     drop(layers);
     let forget = forgotten(&map.encode_run(&job(&fill_only, data_input(&data), Resolved::default())).unwrap());
     let counts: Vec<usize> = forget.iter().map(Vec::len).collect();
-    // Source styles, sets of images, layers, evaluated layers, expressions.
-    assert_eq!(counts, [2, 1, 1, 2, 1]);
+    // Source styles, sets of images, layers, evaluated layers, expressions,
+    // ancestors.
+    assert_eq!(counts, [2, 1, 1, 2, 1, 0]);
 }
 
 fn data_input(data: &DataInput) -> DataInput {
@@ -707,6 +708,25 @@ fn evicted_data_needs_sending_again() {
     assert!(matches!(codec.run(&job(&style, full_load(2), Resolved::default())), JobResult::Laid(_)));
     assert!(matches!(codec.run(&job(&style, DataInput::Cached(key(1)), Resolved::default())), JobResult::NeedsData));
     assert!(matches!(codec.run(&job(&style, DataInput::Cached(key(2)), Resolved::default())), JobResult::Laid(_)));
+}
+
+/// The tiles cut from one ancestor share its data, which crosses to a worker
+/// once for them all, and goes when nothing on the map side holds it.
+#[test]
+fn an_ancestor_crosses_once_for_its_cut_tiles() {
+    use mln_tile::cut::{Ancestor, Cut, CutData};
+
+    let mut map = MapCodec::new(Registry::with_builtins());
+    let style = style(&layers(&[FILL]));
+    let ancestor = Arc::new(Ancestor::new(tile_data()));
+    let cut = |x| TileData::Cut(Arc::new(CutData::new(Arc::clone(&ancestor), Cut { dz: 1, x, y: 0 })));
+    let first = map.encode_run(&job(&style, full(&cut(0)), Resolved::default())).unwrap();
+    let second = map.encode_run(&job(&style, full(&cut(1)), Resolved::default())).unwrap();
+    assert!(second.len() * 5 < first.len(), "{} bytes, then {}", first.len(), second.len());
+
+    drop(ancestor);
+    let forget = forgotten(&map.encode_run(&job(&style, DataInput::Cached(key(1)), Resolved::default())).unwrap());
+    assert_eq!(forget.last().map(Vec::len), Some(1));
 }
 
 /// A PNG of opaque pixels that differ from their neighbours.

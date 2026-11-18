@@ -8,6 +8,7 @@ use mln_util::serialization::payload;
 use mln_wire::{Reader, Wire, Writer};
 
 use crate::TileError;
+use crate::cut::{CutData, CutFeature, CutLayer};
 use crate::geometry_tile_data::to_geometry_collection;
 use crate::mlt::{MltFeature, MltLayer, MltTile};
 use crate::mvt::{MvtFeature, MvtLayer, MvtTile};
@@ -28,6 +29,9 @@ pub enum TileData {
     Mlt(MltTile),
     /// One layer, which every layer name finds.
     Features(Arc<Vec<GeoJsonFeature>>),
+    /// A tile past its tileset's last zoom: the part of its ancestor's data
+    /// there that reaches it.
+    Cut(Arc<CutData>),
 }
 
 impl TileData {
@@ -38,6 +42,7 @@ impl TileData {
             TileData::Mvt(tile) => tile.layer(name)?.map(TileLayer::Mvt),
             TileData::Mlt(tile) => tile.layer(name).map(TileLayer::Mlt),
             TileData::Features(features) => Some(TileLayer::Features(features)),
+            TileData::Cut(data) => data.layer(name)?.map(TileLayer::Cut),
         })
     }
 
@@ -48,6 +53,7 @@ impl TileData {
             TileData::Mvt(tile) => tile.has_layer(name),
             TileData::Mlt(tile) => Ok(tile.layer(name).is_some()),
             TileData::Features(_) => Ok(true),
+            TileData::Cut(data) => data.has_layer(name),
         }
     }
 }
@@ -57,6 +63,9 @@ pub enum TileLayer<'a> {
     Mvt(MvtLayer<'a>),
     Mlt(MltLayer<'a>),
     Features(&'a [GeoJsonFeature]),
+    /// The features of an ancestor's layer that reach a cut tile, with their
+    /// geometry there.
+    Cut(Arc<CutLayer>),
 }
 
 impl TileLayer<'_> {
@@ -67,6 +76,18 @@ impl TileLayer<'_> {
             TileLayer::Mvt(layer) => layer.name(),
             TileLayer::Mlt(layer) => layer.name(),
             TileLayer::Features(_) => "",
+            TileLayer::Cut(layer) => layer.name(),
+        }
+    }
+
+    /// The units across the tile of the layer as encoded; its features'
+    /// geometry is in [`EXTENT`](mln_util::constants::EXTENT)'s.
+    #[must_use]
+    pub fn extent(&self) -> u32 {
+        match self {
+            TileLayer::Mvt(layer) => layer.extent(),
+            TileLayer::Mlt(layer) => layer.extent(),
+            TileLayer::Features(_) | TileLayer::Cut(_) => mln_util::constants::EXTENT as u32,
         }
     }
 
@@ -77,6 +98,7 @@ impl TileLayer<'_> {
             TileLayer::Mvt(layer) => layer.len(),
             TileLayer::Mlt(layer) => layer.len(),
             TileLayer::Features(features) => features.len(),
+            TileLayer::Cut(layer) => layer.features().len(),
         }
     }
 
@@ -96,6 +118,10 @@ impl TileLayer<'_> {
                 Some(feature) => Ok(Feature::Features(feature)),
                 None => Err(TileError::vector_range_check(index, features.len())),
             },
+            TileLayer::Cut(layer) => match layer.features().get(index) {
+                Some(feature) => Ok(Feature::Cut(feature)),
+                None => Err(TileError::vector_range_check(index, layer.features().len())),
+            },
         }
     }
 
@@ -109,7 +135,7 @@ impl TileLayer<'_> {
         match self {
             TileLayer::Mvt(layer) => layer.group_features(keys),
             TileLayer::Mlt(layer) => layer.group_features(keys),
-            TileLayer::Features(_) => None,
+            TileLayer::Features(_) | TileLayer::Cut(_) => None,
         }
     }
 }
@@ -129,6 +155,7 @@ pub enum Feature<'a> {
     Mvt(MvtFeature<'a>),
     Mlt(MltFeature<'a>),
     Features(&'a GeoJsonFeature),
+    Cut(&'a CutFeature),
 }
 
 impl Feature<'_> {
@@ -139,6 +166,7 @@ impl Feature<'_> {
             Feature::Mvt(feature) => feature.geometry(),
             Feature::Mlt(feature) => feature.geometry(),
             Feature::Features(feature) => Ok(to_geometry_collection(feature.geometry.as_ref())),
+            Feature::Cut(feature) => Ok(feature.geometry().clone()),
         }
     }
 }
@@ -149,6 +177,7 @@ impl GeometryTileFeature for Feature<'_> {
             Feature::Mvt(feature) => feature.get_type(),
             Feature::Mlt(feature) => feature.get_type(),
             Feature::Features(feature) => to_feature_type(feature.geometry.as_ref()),
+            Feature::Cut(feature) => feature.get_type(),
         }
     }
 
@@ -157,6 +186,7 @@ impl GeometryTileFeature for Feature<'_> {
             Feature::Mvt(feature) => feature.get_value(key),
             Feature::Mlt(feature) => feature.get_value(key),
             Feature::Features(feature) => feature.properties.get(key).cloned(),
+            Feature::Cut(feature) => feature.get_value(key),
         }
     }
 
@@ -165,6 +195,7 @@ impl GeometryTileFeature for Feature<'_> {
             Feature::Mvt(feature) => Cow::Owned(feature.get_properties()),
             Feature::Mlt(feature) => Cow::Owned(feature.get_properties()),
             Feature::Features(feature) => Cow::Borrowed(&feature.properties),
+            Feature::Cut(feature) => feature.get_properties(),
         }
     }
 
@@ -173,11 +204,15 @@ impl GeometryTileFeature for Feature<'_> {
             Feature::Mvt(feature) => feature.get_id(),
             Feature::Mlt(feature) => feature.get_id(),
             Feature::Features(feature) => feature.id.clone(),
+            Feature::Cut(feature) => feature.get_id(),
         }
     }
 
     fn get_geometries(&self) -> Result<Cow<'_, GeometryCollection>, mln_util::error::Error> {
-        Ok(Cow::Owned(self.geometry()?))
+        match self {
+            Feature::Cut(feature) => feature.get_geometries(),
+            Feature::Mvt(_) | Feature::Mlt(_) | Feature::Features(_) => Ok(Cow::Owned(self.geometry()?)),
+        }
     }
 }
 
@@ -197,6 +232,10 @@ impl Wire for TileData {
                 w.push(2);
                 features.write(w);
             }
+            TileData::Cut(data) => {
+                w.push(3);
+                data.write(w);
+            }
         }
     }
 
@@ -208,6 +247,7 @@ impl Wire for TileData {
                 TileData::Mlt(MltTile::new(Arc::new(payload::bytes::read(r)?), fast_pfor_enabled))
             }
             2 => TileData::Features(Arc::new(Vec::read(r)?)),
+            3 => TileData::Cut(Arc::new(CutData::read(r)?)),
             _ => return r.fail_tag(),
         })
     }

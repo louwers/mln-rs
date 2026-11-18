@@ -2,7 +2,7 @@
 //! source's counter, and its responses arrive in the store's inbox naming
 //! it; the store applies one only while the tile still waits for that load.
 
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use mln_storage::response::Reason;
@@ -11,9 +11,11 @@ use mln_style::custom_tile_loader::{CustomProvider, CustomTileSubscriber, Subscr
 use mln_style::sources::custom::{CustomVectorTileData, TileDataFormat};
 use mln_style::sources::geojson::{GeoJSONData, TileFeatures};
 use mln_tile::TileData;
-use mln_tile_id::OverscaledTileID;
+use mln_tile::cut::{Ancestor, Cut, CutData};
+use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::chrono::Timestamp;
 use mln_util::error::Error;
+use mln_util::hash::HashMap;
 use mln_util::pool::Pool;
 use mln_util::tileset::Tileset;
 use parking_lot::Mutex;
@@ -44,6 +46,7 @@ pub(crate) enum DataOrigin {
         tileset: Tileset,
         encoding: VectorTileEncoding,
         file_source: Option<Arc<dyn FileSource>>,
+        ancestors: Ancestors,
     },
     GeoJson(Arc<dyn GeoJSONData>),
     /// Fetches only the tiles that are required.
@@ -58,10 +61,10 @@ impl DataOrigin {
     /// unlike an empty response (204, or no tile in an archive), says the
     /// tileset has no tile here: a vector tile is then empty, as in GL JS,
     /// and a raster tile missing. A sparse tileset's empty tiles are missing.
-    pub(crate) fn input(&self, kind: TileKind, res: &Response) -> TileInput {
-        let (sparse, encoding) = match self {
-            DataOrigin::Tileset { tileset, encoding, .. } => (tileset.sparse, *encoding),
-            DataOrigin::GeoJson(_) | DataOrigin::Custom { .. } => (false, VectorTileEncoding::Mvt),
+    pub(crate) fn input(&mut self, kind: TileKind, id: &OverscaledTileID, res: &Response) -> TileInput {
+        let sparse = match self {
+            DataOrigin::Tileset { tileset, .. } => tileset.sparse,
+            DataOrigin::GeoJson(_) | DataOrigin::Custom { .. } => false,
         };
         let not_found = res.tile_not_found || res.error.as_ref().is_some_and(|e| e.reason == Reason::NotFound);
         let empty = res.no_content || not_found;
@@ -69,9 +72,61 @@ impl DataOrigin {
         let missing = empty && (sparse || (not_found && !not_found_is_empty));
         let data = if empty { None } else { res.data.clone() };
         match kind {
-            TileKind::Geometry => TileInput::Geometry { data: data.map(|data| encoding.decode(data)), missing },
+            TileKind::Geometry => TileInput::Geometry { data: data.map(|data| self.decode(id, data)), missing },
             TileKind::Raster | TileKind::Dem(_) => TileInput::Image { data, missing },
         }
+    }
+
+    /// Tile `id`'s data, from `data`: of its ancestor if it is cut from one.
+    fn decode(&mut self, id: &OverscaledTileID, data: Data) -> TileData {
+        match self {
+            DataOrigin::Tileset { tileset, encoding, ancestors, .. } => {
+                match Cut::of(&id.canonical, tileset.zoom_range.max) {
+                    Some(cut) => {
+                        let ancestor = ancestors.get(loaded_tile(tileset, id), data, *encoding);
+                        TileData::Cut(Arc::new(CutData::new(ancestor, cut)))
+                    }
+                    None => encoding.decode(data),
+                }
+            }
+            DataOrigin::GeoJson(_) | DataOrigin::Custom { .. } => VectorTileEncoding::Mvt.decode(data),
+        }
+    }
+}
+
+/// The tile of `tileset` that tile `id` loads: past the tileset's last zoom,
+/// its ancestor there, which it is cut from.
+fn loaded_tile(tileset: &Tileset, id: &OverscaledTileID) -> CanonicalTileID {
+    if id.canonical.z > tileset.zoom_range.max { id.scaled_to(tileset.zoom_range.max).canonical } else { id.canonical }
+}
+
+/// The ancestors that a tileset's cut tiles share, by their tile id. The
+/// tiles cut from one ancestor each load it: those whose loads bring the
+/// same data share it, decoded once.
+#[derive(Default)]
+pub(crate) struct Ancestors(HashMap<CanonicalTileID, Weak<Ancestor>>);
+
+impl Ancestors {
+    /// Ancestor `id` of `data`.
+    fn get(&mut self, id: CanonicalTileID, data: Data, encoding: VectorTileEncoding) -> Arc<Ancestor> {
+        self.0.retain(|_, ancestor| ancestor.strong_count() > 0);
+        if let Some(ancestor) = self.0.get(&id).and_then(Weak::upgrade)
+            && encoded(ancestor.data()) == Some(data.as_slice())
+        {
+            return ancestor;
+        }
+        let ancestor = Arc::new(Ancestor::new(encoding.decode(data)));
+        self.0.insert(id, Arc::downgrade(&ancestor));
+        ancestor
+    }
+}
+
+/// The bytes `data` was decoded from, if it was.
+fn encoded(data: &TileData) -> Option<&[u8]> {
+    match data {
+        TileData::Mvt(tile) => Some(tile.bytes().as_slice()),
+        TileData::Mlt(tile) => Some(tile.bytes().as_slice()),
+        TileData::Features(_) | TileData::Cut(_) => None,
     }
 }
 
@@ -237,12 +292,13 @@ impl Load {
                 // The render sources make no tiles for a tileset without
                 // tiles; such a tile can't load.
                 let url = tileset.tiles.first().map_or("", String::as_str);
+                let canonical = loaded_tile(tileset, id);
                 let resource = Resource::tile(
                     url,
                     pixel_ratio,
-                    id.canonical.x as i32,
-                    id.canonical.y as i32,
-                    id.canonical.z as i8,
+                    canonical.x as i32,
+                    canonical.y as i32,
+                    canonical.z as i8,
                     tileset.scheme,
                     LoadingMethod::CacheOnly,
                 );

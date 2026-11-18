@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 use mln_style::serialization::{SharedExpression, SharedLayer};
+use mln_tile::cut::SharedAncestor;
 use mln_util::serialization::shared::{self, ErasedTable, Role, Table};
 use mln_vec_map::VecSet;
 use mln_wire::{Context, Reader, Request, Wire, Writer};
@@ -94,6 +95,7 @@ pub(crate) struct Tables {
     layers: Table<SharedLayer>,
     evaluated_layers: Table<SharedEvaluatedLayer>,
     expressions: Table<SharedExpression>,
+    ancestors: Table<SharedAncestor>,
 }
 
 impl Tables {
@@ -104,17 +106,19 @@ impl Tables {
             layers: Table::new(role),
             evaluated_layers: Table::new(role),
             expressions: Table::new(role),
+            ancestors: Table::new(role),
         }
     }
 
     /// The tables, in the order the lists of keys to forget are in.
-    fn all(&mut self) -> [&mut dyn ErasedTable; 5] {
+    fn all(&mut self) -> [&mut dyn ErasedTable; 6] {
         [
             &mut self.source_styles,
             &mut self.available_images,
             &mut self.layers,
             &mut self.evaluated_layers,
             &mut self.expressions,
+            &mut self.ancestors,
         ]
     }
 

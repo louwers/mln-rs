@@ -462,6 +462,11 @@ fn data_bytes(data: &TileData) -> usize {
                 size_of_val(feature) + coordinates * 4 + feature.properties.len() * 64
             })
             .sum(),
+        // The ancestor stays while the map side holds it, whatever the
+        // cache keeps: a cut tile's own data is about its share of it.
+        TileData::Cut(data) => {
+            data_bytes(data.ancestor().data()).checked_shr(2 * u32::from(data.cut().dz)).unwrap_or(0)
+        }
     }
 }
 

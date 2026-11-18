@@ -514,6 +514,10 @@ impl<'a> MltLayer<'a> {
         &self.0.name
     }
 
+    pub(crate) fn extent(self) -> u32 {
+        self.0.extent
+    }
+
     pub(crate) fn len(self) -> usize {
         self.0.len()
     }
