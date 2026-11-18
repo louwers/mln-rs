@@ -265,7 +265,7 @@ impl<'a> LayerTiles<'a> {
     }
 
     /// The render tiles in order, without what they show.
-    pub(crate) fn render_tiles(self) -> impl Iterator<Item = &'a RenderTile> + Clone + 'a {
+    pub(crate) fn render_tiles(self) -> impl Iterator<Item = &'a RenderTile> + 'a {
         self.order.iter().filter_map(move |&i| self.tiles.get(i))
     }
 
