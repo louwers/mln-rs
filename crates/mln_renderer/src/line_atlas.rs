@@ -391,12 +391,14 @@ impl LineAtlas {
         to: &[f32],
         cap: LinePatternCap,
     ) -> &mut DashPatternTexture {
-        let index = if let Some(index) = self.textures.iter().position(|(key, _)| is_dash_key(key, from, to, cap)) {
-            index
-        } else {
-            self.textures.push((dash_key(from, to, cap), DashPatternTexture::new(from, to, cap)));
-            self.needs_upload.push(self.textures.len() - 1);
-            self.textures.len() - 1
+        let index = match self.textures.iter().position(|(key, _)| is_dash_key(key, from, to, cap)) {
+            Some(index) => index,
+            None => {
+                let index = self.textures.len();
+                self.textures.push((dash_key(from, to, cap), DashPatternTexture::new(from, to, cap)));
+                self.needs_upload.push(index);
+                index
+            }
         };
         &mut self.textures[index].1
     }
@@ -404,9 +406,7 @@ impl LineAtlas {
     /// Uploads the textures to the GPU to be available when we need it.
     pub(crate) fn upload(&mut self, context: &Context) {
         for index in self.needs_upload.drain(..) {
-            if let Some((_, texture)) = self.textures.get_mut(index) {
-                texture.upload(context);
-            }
+            self.textures[index].1.upload(context);
         }
     }
 
