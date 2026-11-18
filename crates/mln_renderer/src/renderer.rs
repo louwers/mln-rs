@@ -234,8 +234,7 @@ impl Renderer {
     ///
     /// A frame runs in two phases: the orchestrator's update brings the
     /// renderer's state to the update and returns the frame as a value, and
-    /// [`encode`](Self::encode) builds the layers' GPU objects and draws
-    /// from it.
+    /// the encode builds the layers' GPU objects and draws from it.
     pub fn render(&mut self, update_parameters: &Arc<UpdateParameters>, target: &dyn FrameTarget) -> Option<Handoff> {
         // Held from the update on: a custom layer that the update removes or
         // gives a new host deinitializes on the backend, as on OpenGL with
