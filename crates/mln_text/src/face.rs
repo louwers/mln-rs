@@ -23,9 +23,9 @@ impl FreeTypeLibrary {
 
 #[derive(Clone)]
 pub(crate) struct Face {
-    /// The font at regular weight (`weight::at_regular_weight`), or `None`
-    /// when the data holds no font this can read or the font maps no
-    /// characters.
+    /// The font at its weight (`weight::REGULAR_WEIGHT`, unless
+    /// made with [`Face::from_memory_at_weight`]), or `None` when the data
+    /// holds no font this can read or the font maps no characters.
     font: Option<Font>,
     /// The hinted glyph loader at `SDF_FONT_SIZE`, made on first use.
     scaler: Arc<OnceLock<ScalerFont>>,
@@ -41,11 +41,17 @@ impl Face {
     /// or WOFF2 file: then it reads the font decoded from it, and isn't valid
     /// when that fails.
     pub(crate) fn from_memory(font_data: impl Into<FontData>) -> Self {
+        Self::from_memory_at_weight(font_data, crate::weight::REGULAR_WEIGHT)
+    }
+
+    /// [`Face::from_memory`], with a variable font at `weight` within its
+    /// `wght` axis rather than at regular weight.
+    pub(crate) fn from_memory_at_weight(font_data: impl Into<FontData>, weight: f32) -> Self {
         let font = crate::woff::to_sfnt(font_data.into())
             .ok()
             .and_then(|data| Font::new(data.shared(), data.face_index()))
             .filter(|font| font.charmap().has_unicode())
-            .map(crate::weight::at_regular_weight);
+            .map(|font| crate::weight::at_weight(font, weight));
         Face { font, scaler: Arc::default() }
     }
 
@@ -84,12 +90,12 @@ pub struct FontFile {
 }
 
 impl FontFile {
-    /// The font in `data`, as a font face reads it, at regular weight within
-    /// a variable font's `wght` axis: `None` when it isn't a font the map
-    /// can draw.
+    /// The font in `data`, as a font face reads it, at the OpenType `weight`
+    /// within a variable font's `wght` axis (a static font draws at its own):
+    /// `None` when it isn't a font the map can draw.
     #[must_use]
-    pub fn new(data: FontData) -> Option<Self> {
-        let face = Face::from_memory(data);
+    pub fn new(data: FontData, weight: u16) -> Option<Self> {
+        let face = Face::from_memory_at_weight(data, f32::from(weight));
         face.is_valid().then_some(FontFile { face })
     }
 

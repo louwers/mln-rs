@@ -9,7 +9,6 @@ use std::sync::{Arc, OnceLock};
 
 use memmap2::Mmap;
 use mln_text::glyph::FontData;
-use mln_text::weight::REGULAR_WEIGHT;
 use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
 use skrifa::raw::tables::cmap::Cmap;
@@ -52,9 +51,10 @@ impl Source {
         }
     }
 
-    /// The weight the map draws the font at, if it has a glyph for `probe`.
-    pub(crate) fn drawn_weight(&self, probe: char) -> Option<u16> {
-        drawn_weight(&self.tables(&[*b"cmap", *b"OS/2", *b"fvar"])?, probe)
+    /// The weight the map draws the font at when asked for `weight`, if it
+    /// has a glyph for `probe`.
+    pub(crate) fn drawn_weight(&self, probe: char, weight: u16) -> Option<u16> {
+        drawn_weight(&self.tables(&[*b"cmap", *b"OS/2", *b"fvar"])?, probe, weight)
     }
 
     /// The font's family name, from its `name` table.
@@ -120,12 +120,12 @@ pub(crate) fn near_regular(weight: u16) -> bool {
     (300..=600).contains(&weight)
 }
 
-/// The weight the map draws a font with `tables` at, if it has a glyph for
-/// `probe`.
+/// The weight the map draws a font with `tables` at when asked for
+/// `weight`, if it has a glyph for `probe`.
 ///
-/// A variable font draws at regular weight within the range of its `wght`
-/// axis (`mln_text::weight`), a static font at its own.
-pub(crate) fn drawn_weight(tables: &[Table], probe: char) -> Option<u16> {
+/// A variable font draws at `weight` within the range of its `wght` axis, a
+/// static font at its own.
+pub(crate) fn drawn_weight(tables: &[Table], probe: char, weight: u16) -> Option<u16> {
     let table = |tag: &[u8; 4]| tables.iter().find(|(t, _)| t == tag).map(|(_, data)| RawData::new(data));
     let cmap = Cmap::read(table(b"cmap")?).ok()?;
     cmap.map_codepoint(probe)?;
@@ -133,7 +133,7 @@ pub(crate) fn drawn_weight(tables: &[Table], probe: char) -> Option<u16> {
         let axes = fvar.axes().ok()?;
         let axis = axes.iter().find(|axis| axis.axis_tag() == skrifa::Tag::new(b"wght"))?;
         let range = axis.min_value().to_f64() as f32..=axis.max_value().to_f64() as f32;
-        Some(REGULAR_WEIGHT.clamp(*range.start(), *range.end()).round() as u16)
+        Some(f32::from(weight).clamp(*range.start(), *range.end()).round() as u16)
     });
     Some(
         wght.or_else(|| table(b"OS/2").and_then(|data| Os2::read(data).ok()).map(|os2| os2.us_weight_class()))
@@ -225,18 +225,20 @@ mod tests {
 
     #[test]
     fn a_font_draws_what_it_maps_at_its_weight() {
-        assert_eq!(drawn_weight(&[cmap(), os2(400)], 'A'), Some(400));
-        assert_eq!(drawn_weight(&[cmap(), os2(100)], 'A'), Some(100));
-        assert_eq!(drawn_weight(&[cmap()], 'A'), Some(400));
-        assert_eq!(drawn_weight(&[cmap(), os2(400)], 'B'), None);
-        assert_eq!(drawn_weight(&[os2(400)], 'A'), None);
+        assert_eq!(drawn_weight(&[cmap(), os2(400)], 'A', 400), Some(400));
+        assert_eq!(drawn_weight(&[cmap(), os2(100)], 'A', 900), Some(100));
+        assert_eq!(drawn_weight(&[cmap()], 'A', 400), Some(400));
+        assert_eq!(drawn_weight(&[cmap(), os2(400)], 'B', 400), None);
+        assert_eq!(drawn_weight(&[os2(400)], 'A', 400), None);
     }
 
     #[test]
-    fn a_variable_font_draws_at_regular_weight_within_its_range() {
-        assert_eq!(drawn_weight(&[cmap(), os2(100), fvar(100, 900)], 'A'), Some(400));
-        assert_eq!(drawn_weight(&[cmap(), os2(400), fvar(100, 200)], 'A'), Some(200));
-        assert_eq!(drawn_weight(&[cmap(), os2(400), fvar(700, 900)], 'A'), Some(700));
+    fn a_variable_font_draws_at_the_weight_asked_for_within_its_range() {
+        assert_eq!(drawn_weight(&[cmap(), os2(100), fvar(100, 900)], 'A', 400), Some(400));
+        assert_eq!(drawn_weight(&[cmap(), os2(100), fvar(100, 900)], 'A', 700), Some(700));
+        assert_eq!(drawn_weight(&[cmap(), os2(400), fvar(100, 900)], 'A', 50), Some(100));
+        assert_eq!(drawn_weight(&[cmap(), os2(400), fvar(100, 200)], 'A', 400), Some(200));
+        assert_eq!(drawn_weight(&[cmap(), os2(400), fvar(700, 900)], 'A', 400), Some(700));
     }
 
     /// A `name` table of Windows Unicode records of `names`, by name ID.

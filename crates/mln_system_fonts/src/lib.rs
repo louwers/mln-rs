@@ -131,7 +131,7 @@ fn find_with(finder: &Finder) -> Vec<SystemFontFace> {
 fn pick(script: &scripts::Script, candidates: Vec<(String, source::Source)>) -> Option<(String, source::Source)> {
     let mut last_resort = None;
     for (family, source) in candidates {
-        let Some(weight) = source.drawn_weight(script.probe) else { continue };
+        let Some(weight) = source.drawn_weight(script.probe, 400) else { continue };
         if source::near_regular(weight) {
             return Some((family, source));
         }

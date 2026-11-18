@@ -181,7 +181,7 @@ mod tests {
             let found = candidates(&query(script.probe, &languages));
             println!("{:04X}: {:?}", u32::from(script.probe), found.first());
             let (_, source) = found.first().unwrap_or_else(|| panic!("no font for {:04X}", u32::from(script.probe)));
-            assert!(source.drawn_weight(script.probe).is_some());
+            assert!(source.drawn_weight(script.probe, 400).is_some());
         }
     }
 

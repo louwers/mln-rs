@@ -58,7 +58,7 @@ fn font_for(font_stack: &FontStack, c: char) -> Option<Arc<FontFile>> {
         let font = fonts
             .named
             .entry((*name).to_owned())
-            .or_insert_with(|| first_drawing(&mut fonts.files, named_fonts(name, parsed), ' '));
+            .or_insert_with(|| first_drawing(&mut fonts.files, named_fonts(name, parsed), ' ', parsed.weight));
         named.push(font.clone());
     }
     let key = (font_stack.clone(), class(c));
@@ -70,7 +70,7 @@ fn font_for(font_stack: &FontStack, c: char) -> Option<Arc<FontFile>> {
         return None;
     }
     let first = names.first().map_or(FontName { family: "", weight: 400, italic: false }, |(_, parsed)| *parsed);
-    let font = first_drawing(&mut fonts.files, picked_fonts(&first, c), c);
+    let font = first_drawing(&mut fonts.files, picked_fonts(&first, c), c, first.weight);
     match &font {
         Some(font) => fonts.picked.entry(key).or_default().push(Arc::clone(font)),
         None => {
@@ -86,11 +86,17 @@ fn first_with<'a, F>(named: &'a [Option<F>], picked: &'a [F], has: impl Fn(&F) -
     named.iter().flatten().chain(picked).find(|font| has(font))
 }
 
-/// The first of `candidates` that the map can draw `c` from.
-fn first_drawing(files: &mut source::Files, candidates: Vec<(String, Source)>, c: char) -> Option<Arc<FontFile>> {
+/// The first of `candidates` that the map can draw `c` from, at `weight`
+/// if it is a variable font.
+fn first_drawing(
+    files: &mut source::Files,
+    candidates: Vec<(String, Source)>,
+    c: char,
+    weight: u16,
+) -> Option<Arc<FontFile>> {
     candidates
         .into_iter()
-        .find_map(|(_, source)| FontFile::new(files.data(&source)).filter(|font| font.has_char(c)))
+        .find_map(|(_, source)| FontFile::new(files.data(&source), weight).filter(|font| font.has_char(c)))
         .map(Arc::new)
 }
 
@@ -125,7 +131,7 @@ pub(crate) fn named_fonts(name: &str, parsed: &FontName<'_>) -> Vec<(String, Sou
         weight: parsed.weight,
         italic: parsed.italic,
     };
-    let mut candidates = drawn(system().candidates(&query), ' ');
+    let mut candidates = drawn(system().candidates(&query), ' ', parsed.weight);
     candidates.retain(|(family, ..)| family.eq_ignore_ascii_case(parsed.family));
     nearest(candidates, parsed.weight)
 }
@@ -144,20 +150,21 @@ pub(crate) fn picked_fonts(first: &FontName<'_>, c: char) -> Vec<(String, Source
         weight: first.weight,
         italic: first.italic,
     };
-    nearest(drawn(system.candidates(&query), c), first.weight)
+    nearest(drawn(system.candidates(&query), c, first.weight), first.weight)
 }
 
 /// How many of a lookup's candidates to read.
 const MAX_CANDIDATES: usize = 16;
 
-/// The first of `candidates` that have `c`, with the weight they draw at.
-fn drawn(candidates: Vec<(String, Source)>, c: char) -> Vec<(String, Source, u16)> {
+/// The first of `candidates` that have `c`, with the weight they draw at
+/// when asked for `weight`.
+fn drawn(candidates: Vec<(String, Source)>, c: char, weight: u16) -> Vec<(String, Source, u16)> {
     candidates
         .into_iter()
         .take(MAX_CANDIDATES)
         .filter_map(|(family, source)| {
-            let weight = source.drawn_weight(c)?;
-            Some((family, source, weight))
+            let drawn = source.drawn_weight(c, weight)?;
+            Some((family, source, drawn))
         })
         .collect()
 }
@@ -191,7 +198,7 @@ mod tests {
                 let found = picked_fonts(&font_name::parse(name), c).into_iter().next();
                 println!("{c} for {name:?}: {found:?}");
                 if let Some((_, source)) = found {
-                    assert!(source.drawn_weight(c).is_some(), "{c} for {name:?}");
+                    assert!(source.drawn_weight(c, 400).is_some(), "{c} for {name:?}");
                 }
             }
         }
@@ -234,6 +241,31 @@ mod tests {
                 assert_eq!(glyph.id, GlyphID::new(u32::from(c)));
                 assert!(glyph.metrics.advance > 0);
                 assert!(glyph.bitmap.data.iter().any(|&alpha| alpha > 0));
+            }
+        }
+    }
+
+    // A variable font draws at each name's weight, a static family from its
+    // file of that weight.
+    #[test]
+    fn a_bold_name_draws_bolder_where_the_system_has_a_bolder_font() {
+        for c in ['a', 'Ж', 'α', 'א', 'ب'] {
+            let Some((family, _)) = picked_fonts(&font_name::parse(""), c).into_iter().next() else { continue };
+            let ink = |name: &str| {
+                let glyph = SystemGlyphRasterizer.rasterize_glyph(&stack(&[name]), GlyphID::new(u32::from(c)))?;
+                Some(glyph.bitmap.data.iter().map(|&alpha| u64::from(alpha)).sum::<u64>())
+            };
+            let drawn = |name: &str| {
+                let (_, source) = named_fonts(name, &font_name::parse(name)).into_iter().next()?;
+                Some((source.drawn_weight(c, font_name::parse(name).weight)?, source))
+            };
+            let (regular, bold) = (format!("{family} Regular"), format!("{family} Bold"));
+            let (Some((regular_weight, _)), Some((bold_weight, source))) = (drawn(&regular), drawn(&bold)) else {
+                continue;
+            };
+            println!("{c}: {regular_weight} {:?}, {bold_weight} {:?} from {source:?}", ink(&regular), ink(&bold));
+            if bold_weight > regular_weight {
+                assert!(ink(&bold) > ink(&regular), "{c} in {family}");
             }
         }
     }

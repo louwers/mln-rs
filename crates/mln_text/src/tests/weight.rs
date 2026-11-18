@@ -1,4 +1,5 @@
-// Variable fonts draw at regular weight. The fixtures are Noto Sans CJK JP's
+// Variable fonts draw at regular weight, and local fonts at the weight a
+// font stack names. The fixtures are Noto Sans CJK JP's
 // variable font, whose default instance is Thin (100), subset to the glyph
 // of "中" and "A", whose advance varies, by fontTools (`fonttools subset
 // NotoSansCJK-VF.ttc --font-number=0 --text=中A --layout-features='*'
@@ -7,9 +8,9 @@
 
 use std::num::NonZeroU16;
 
-use crate::glyph::{Glyph, GlyphIDType};
-use crate::weight::at_regular_weight;
-use crate::{FreeTypeLibrary, HBShapeAdjust, HBShaper};
+use crate::glyph::{Glyph, GlyphID, GlyphIDType};
+use crate::weight::{REGULAR_WEIGHT, at_weight};
+use crate::{FontFile, FreeTypeLibrary, HBShapeAdjust, HBShaper};
 
 const VARIABLE: &[u8] = include_bytes!("../../tests/fixtures/cjk-vf.otf");
 const REGULAR: &[u8] = include_bytes!("../../tests/fixtures/cjk-400.otf");
@@ -53,7 +54,25 @@ fn a_variable_font_draws_as_its_regular_instance() {
 #[test]
 fn only_a_font_off_regular_weight_gets_a_location() {
     let font = |data: &'static [u8]| skrifa::Font::new(data, 0).unwrap();
-    assert_ne!(at_regular_weight(font(VARIABLE)).normalized_coords(), []);
-    assert_eq!(at_regular_weight(font(REGULAR)).normalized_coords(), []);
-    assert_eq!(at_regular_weight(font(KHMER)).normalized_coords(), []);
+    assert_ne!(at_weight(font(VARIABLE), REGULAR_WEIGHT).normalized_coords(), []);
+    assert_eq!(at_weight(font(REGULAR), REGULAR_WEIGHT).normalized_coords(), []);
+    assert_eq!(at_weight(font(KHMER), REGULAR_WEIGHT).normalized_coords(), []);
+}
+
+/// The glyph of "中" that a local font draws at `weight`.
+fn local(font: &[u8], weight: u16) -> Glyph {
+    let file = FontFile::new(font.to_vec().into(), weight).unwrap();
+    file.rasterize_char('中', GlyphID::new(0x4E2D)).unwrap()
+}
+
+#[test]
+fn a_local_variable_font_draws_at_the_weight_asked_for() {
+    let close = |a: &Glyph, b: &Glyph| ink(a).abs_diff(ink(b)) * 100 < ink(b);
+    assert!(close(&local(VARIABLE, 100), &local(THIN, 100)));
+    assert!(close(&local(VARIABLE, 400), &local(REGULAR, 400)));
+    // Below the axis, the font draws at its lightest; a static font draws
+    // at its own weight whatever is asked for.
+    assert_eq!(ink(&local(VARIABLE, 1)), ink(&local(VARIABLE, 100)));
+    assert_eq!(ink(&local(REGULAR, 100)), ink(&local(REGULAR, 900)));
+    assert!(ink(&local(VARIABLE, 900)) > ink(&local(VARIABLE, 400)));
 }
