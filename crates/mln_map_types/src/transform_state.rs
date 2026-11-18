@@ -1500,8 +1500,8 @@ impl TransformState {
         };
         let new_scale = mln_math::clamp_f64(self.zoom_scale(zoom), min_scale, self.max_scale);
         let new_world_size = new_scale * TILE_SIZE_D;
-        self.bc = new_world_size / constants::DEGREES_MAX;
-        self.cc = new_world_size / M2PI;
+        let bc = new_world_size / constants::DEGREES_MAX;
+        let cc = new_world_size / M2PI;
 
         // The globe's center can be on a pole, which the clamped sine stops
         // short of.
@@ -1510,11 +1510,11 @@ impl TransformState {
         let f = mln_math::clamp_f64(latitude.sin(), -m, m);
 
         let point = ScreenCoordinate::new(
-            -constrained.longitude() * self.bc,
+            -constrained.longitude() * bc,
             if self.is_globe_rendering() {
-                self.cc * latitude.tan().asinh()
+                cc * latitude.tan().asinh()
             } else {
-                0.5 * self.cc * ((1.0 + f) / (1.0 - f)).ln()
+                0.5 * cc * ((1.0 + f) / (1.0 - f)).ln()
             },
         );
         self.set_scale_point(new_scale, &point);
@@ -1660,6 +1660,20 @@ mod tests {
             let mercator = 0.5 * ((1.0 + f) / (1.0 - f)).ln();
             assert!((globe - mercator).abs() <= 1e-12, "{latitude}: {globe} vs {mercator}");
         }
+    }
+
+    #[test]
+    fn a_center_too_far_to_place_leaves_the_camera_unchanged() {
+        use mln_util::geo::WrapMode;
+
+        let mut state = pitched(30.0);
+        let center = state.get_lat_lng(WrapMode::Unwrapped);
+        let zoom = state.get_zoom();
+        let projection = state.get_projection_matrix();
+        state.set_lat_lng_zoom(&LatLng::with_mode(0.0, f64::MAX, WrapMode::Unwrapped).unwrap(), 22.0);
+        assert_eq!(center, state.get_lat_lng(WrapMode::Unwrapped));
+        assert_eq!(zoom, state.get_zoom());
+        assert_eq!(projection, state.get_projection_matrix());
     }
 
     /// Every setter that takes a number, given NaN, infinities and extreme
