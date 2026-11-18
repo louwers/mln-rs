@@ -45,11 +45,9 @@ CARGO_TARGET_AARCH64_LINUX_ANDROID_RUNNER = "devices-cli exec android --api 36 -
 CARGO_TARGET_X86_64_LINUX_ANDROID_RUNNER = "devices-cli exec android --api 36 --abi x86_64 --sync-env CARGO_MANIFEST_DIR --env RUST_* --env MLN_* --"
 
 [hooks]
-postinstall = { task = "setup:target-android" }
-
-[tasks."setup:target-android"]
-description = "Install the Rust targets for Android, and the NDK into ANDROID_HOME"
-run = [
+# The Rust targets, and the NDK into the SDK when it lacks it. Inline scripts,
+# since a hook's `mise run` would not see an environment selected with -E.
+postinstall = [
   "rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android",
   '[ -d "$ANDROID_NDK_HOME" ] || android --sdk="$ANDROID_HOME" sdk install "ndk/$MLN_ANDROID_NDK"',
 ]

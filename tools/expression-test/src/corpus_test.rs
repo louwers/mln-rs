@@ -24,7 +24,8 @@ fn expression_corpus() {
     let stats = run(&metrics, &[], None, false);
     print_stats(&stats);
 
-    let expected_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("expected_failures.txt");
+    let expected_path =
+        std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("expected_failures.txt");
     let expected_text = std::fs::read_to_string(&expected_path).expect("expected_failures.txt");
     let expected: BTreeSet<&str> =
         expected_text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).collect();

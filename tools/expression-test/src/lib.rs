@@ -11,10 +11,14 @@ use parser::{collect_test_paths, parse_expression_ignores, parse_test_data};
 use runner::{TestRunOutput, TestStats, run_expression_test};
 
 /// The copy of the C++ repository's metrics directory (testdata/metrics):
-/// the expression tests and the ignore list they use.
+/// the expression tests and the ignore list they use. The package directory is
+/// the one Cargo names when it runs the tests or the runner, which on a device
+/// is the package's copy, else the one this was built in.
 #[must_use]
 pub fn find_metrics_dir() -> Option<PathBuf> {
-    let metrics = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/metrics");
+    let package =
+        std::env::var_os("CARGO_MANIFEST_DIR").map_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")), PathBuf::from);
+    let metrics = package.join("testdata/metrics");
     metrics.join("integration/expression-tests").exists().then_some(metrics)
 }
 
