@@ -4,11 +4,15 @@
 // Buckets cross from the worker threads, so they hold plain vectors
 // (`GeometryVec`). A bucket's upload moves each vector into the context's
 // stores, which the draws of the bucket's tile share, so the bucket and the
-// draws don't each keep a copy; the tile keeps their handles, by the
-// vector they were made of, in a `BucketGeometry`. The stores free the data
-// once it is in a GPU buffer, and the draws a layer builds again for the
-// same bucket reuse that buffer. Vertices that a layer makes of a bucket's
-// vector are kept there too, made before the vector moves.
+// draws don't each keep a copy; the tile keeps their handles, by the key of
+// the vector they were made of, in a `BucketGeometry`. The stores free the
+// data once it is in a GPU buffer, and the draws a layer builds again for
+// the same bucket reuse that buffer. Vertices that a layer makes of a
+// bucket's vector are kept there too, made before the vector moves.
+//
+// A copy of a vector keeps its key. The tiles of a tile's other world
+// copies hold copies of its buckets, and the upload of either takes what
+// the other already moved into the stores, freeing its own copy.
 //
 // In the browser, the arrays a bucket gets from a tile worker in another
 // wasm instance stay the JS arrays they arrived in (mln_util::host_bytes)
@@ -37,10 +41,9 @@ pub(crate) struct GeometryVec<T> {
     /// empty then.
     #[cfg(target_family = "wasm")]
     host: Option<HostBytes>,
-    /// What `BucketGeometry` keeps the vector's stored geometry under, from
-    /// the first time it keeps any. A copy keeps it, so a copy of the
-    /// `BucketGeometry` serves the copy.
-    key: Option<SimpleIdentity>,
+    /// What `BucketGeometry` keeps the vector's stored geometry under. A
+    /// copy keeps it, so the stored geometry of either serves both.
+    key: SimpleIdentity,
     /// The element count of the data moved out.
     moved: usize,
     /// Whether the data moved out.
@@ -60,7 +63,7 @@ impl<T> GeometryVec<T> {
             v,
             #[cfg(target_family = "wasm")]
             host: None,
-            key: None,
+            key: SimpleIdentity::new(),
             moved: 0,
             taken: false,
         }
@@ -107,12 +110,6 @@ impl<T> GeometryVec<T> {
             return Cow::Owned(bytes.to_pod_vec());
         }
         Cow::Borrowed(&self.v)
-    }
-
-    /// The key of the vector's stored geometry, which this gives it the
-    /// first time.
-    fn key(&mut self) -> SimpleIdentity {
-        *self.key.get_or_insert_with(SimpleIdentity::new)
     }
 }
 
@@ -231,47 +228,78 @@ pub(crate) struct BucketGeometry {
 impl BucketGeometry {
     /// The vertices that `vec`, a bucket's, moved into.
     fn vertices<V>(&self, vec: &GeometryVec<V>) -> Option<&SharedVertices> {
-        self.vertices.get(&vec.key?)
+        self.vertices.get(&vec.key)
     }
+}
+
+/// Whether `geometry` keeps an entry under `key` in its map that `map` and
+/// `map_mut` pick, taking the first of `others`' where it has none.
+fn kept<T: Clone>(
+    geometry: &mut BucketGeometry,
+    others: &[&BucketGeometry],
+    map: fn(&BucketGeometry) -> &HashMap<SimpleIdentity, T>,
+    map_mut: fn(&mut BucketGeometry) -> &mut HashMap<SimpleIdentity, T>,
+    key: SimpleIdentity,
+) -> bool {
+    if map(geometry).contains_key(&key) {
+        return true;
+    }
+    let Some(shared) = others.iter().find_map(|other| map(other).get(&key)) else {
+        return false;
+    };
+    map_mut(geometry).insert(key, shared.clone());
+    true
 }
 
 /// A bucket's upload: what moves the bucket's geometry into the context's
 /// stores, and keeps its handles in its tile's [`BucketGeometry`].
 pub(crate) struct GeometryUpload<'a> {
     geometry: &'a mut BucketGeometry,
+    /// The geometry of the tile's other world copies, whose buckets the
+    /// tile's are copies of, or they of the tile's.
+    copies: &'a [&'a BucketGeometry],
     context: &'a mut Context,
 }
 
 impl<'a> GeometryUpload<'a> {
     /// The upload of buckets whose geometry `geometry` keeps, into
-    /// `context`'s stores.
-    pub(crate) fn new(geometry: &'a mut BucketGeometry, context: &'a mut Context) -> Self {
-        GeometryUpload { geometry, context }
+    /// `context`'s stores, which takes what of it `copies`, the geometry of
+    /// the tile's other world copies, keep.
+    pub(crate) fn new(
+        geometry: &'a mut BucketGeometry,
+        copies: &'a [&'a BucketGeometry],
+        context: &'a mut Context,
+    ) -> Self {
+        GeometryUpload { geometry, copies, context }
     }
 
     /// Moves the data of `vec`, a bucket's, into the store, unless it moved
-    /// before.
+    /// before. Where a copy of it moved, this frees it and shares the
+    /// copy's.
     pub(crate) fn move_vertices<V: bytemuck::Pod>(&mut self, vec: &mut GeometryVec<V>) {
         if vec.is_moved() {
             return;
         }
-        let key = vec.key();
-        if !self.geometry.vertices.contains_key(&key) {
+        if kept(self.geometry, self.copies, |g| &g.vertices, |g| &mut g.vertices, vec.key) {
+            vec.discard();
+        } else {
             let vertices = vec.store_vertices(self.context);
-            self.geometry.vertices.insert(key, vertices);
+            self.geometry.vertices.insert(vec.key, vertices);
         }
     }
 
     /// Moves the data of `vec`, a bucket's, into the store's indexes,
-    /// unless it moved before.
+    /// unless it moved before, as [`move_vertices`](Self::move_vertices)
+    /// does.
     pub(crate) fn move_indexes(&mut self, vec: &mut GeometryVec<u16>) {
         if vec.is_moved() {
             return;
         }
-        let key = vec.key();
-        if !self.geometry.indexes.contains_key(&key) {
+        if kept(self.geometry, self.copies, |g| &g.indexes, |g| &mut g.indexes, vec.key) {
+            vec.discard();
+        } else {
             let indexes = self.context.add_indexes(vec.indexes());
-            self.geometry.indexes.insert(key, indexes);
+            self.geometry.indexes.insert(vec.key, indexes);
         }
     }
 
@@ -285,18 +313,17 @@ impl<'a> GeometryUpload<'a> {
     }
 
     /// Keeps the vertices that `make` makes of the data of `vec`, a
-    /// bucket's, for [`derived_vertices`], unless it has some. Before the
-    /// data moves.
+    /// bucket's, for [`derived_vertices`], unless it or a copy has some.
+    /// Before the data moves.
     pub(crate) fn derive_vertices<V: bytemuck::Pod, D: bytemuck::Pod>(
         &mut self,
-        vec: &mut GeometryVec<V>,
+        vec: &GeometryVec<V>,
         make: impl FnOnce(&[V]) -> Vec<D>,
     ) {
-        let key = vec.key();
-        if !self.geometry.derived.contains_key(&key) {
+        if !kept(self.geometry, self.copies, |g| &g.derived, |g| &mut g.derived, vec.key) {
             debug_assert!(!vec.is_moved(), "vertices derived from data that moved to the store");
             let derived = self.context.add_vertices(make(&vec.data())).into_shared();
-            self.geometry.derived.insert(key, derived);
+            self.geometry.derived.insert(vec.key, derived);
         }
     }
 }
@@ -305,7 +332,7 @@ impl<'a> GeometryUpload<'a> {
 /// with [`GeometryUpload::derive_vertices`], which its tile's `geometry`
 /// keeps.
 pub(crate) fn derived_vertices<V>(geometry: &BucketGeometry, vec: &GeometryVec<V>) -> Option<SharedVertices> {
-    let derived = vec.key.and_then(|key| geometry.derived.get(&key));
+    let derived = geometry.derived.get(&vec.key);
     debug_assert!(derived.is_some(), "vertices that the bucket's upload didn't derive");
     derived.cloned()
 }
@@ -333,7 +360,7 @@ pub(crate) fn bucket_vertices<V>(geometry: &BucketGeometry, vec: &GeometryVec<V>
 /// The indexes that a bucket's upload moved `vec`, one of its vectors,
 /// into, which its tile's `geometry` keeps and its draws share.
 pub(crate) fn bucket_indexes(geometry: &BucketGeometry, vec: &GeometryVec<u16>) -> Option<SharedIndexes> {
-    let indexes = vec.key.and_then(|key| geometry.indexes.get(&key));
+    let indexes = geometry.indexes.get(&vec.key);
     debug_assert!(indexes.is_some(), "indexes that the bucket's upload didn't move");
     indexes.cloned()
 }

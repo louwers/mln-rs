@@ -345,7 +345,7 @@ impl Bucket for FillExtrusionBucket {
         // own, made of the vertices and paint values before those move.
         let walls = self.vertices.len().saturating_sub(1);
         if needs.wall_quads {
-            geometry.derive_vertices(&mut self.vertices, wall_quad_vertices);
+            geometry.derive_vertices(&self.vertices, wall_quad_vertices);
         }
         geometry.move_vertices(&mut self.vertices);
         geometry.move_indexes(&mut self.triangles);
@@ -354,8 +354,7 @@ impl Bucket for FillExtrusionBucket {
             let buffer = &mut binders.interleaved_vertex_buffer;
             if needs.wall_quads && !depends_on_feature_state {
                 let stride = buffer.stride;
-                geometry
-                    .derive_vertices(&mut buffer.shared_vertex_vector, |paint| wall_quad_paint(paint, stride, walls));
+                geometry.derive_vertices(&buffer.shared_vertex_vector, |paint| wall_quad_paint(paint, stride, walls));
             }
             geometry.move_paint(buffer, depends_on_feature_state);
         }

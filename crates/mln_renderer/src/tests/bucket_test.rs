@@ -78,7 +78,7 @@ fn collection(rings: &[&[(i16, i16)]]) -> GeometryCollection {
 /// Uploads `bucket`, keeping its geometry in `geometry`, through `context`.
 fn upload(bucket: &mut dyn Bucket, geometry: &mut BucketGeometry, context: &mut Context) {
     let needs = crate::layers::upload_needs(context);
-    bucket.upload(&mut GeometryUpload::new(geometry, context), needs);
+    bucket.upload(&mut GeometryUpload::new(geometry, &[], context), needs);
 }
 
 // gtest: Buckets.CircleBucket
@@ -225,8 +225,6 @@ fn fill_bucket_frees_cpu_geometry_after_upload() {
     assert!(index_count > 0);
 
     with_context(|context| {
-        // The bucket's upload moves its data to the render thread's
-        // vectors, which hold it until they are uploaded.
         // The bucket's upload moves its data to the context's stores, which
         // hold it until it is uploaded.
         let mut geometry = BucketGeometry::default();
@@ -268,6 +266,34 @@ fn fill_bucket_frees_cpu_geometry_after_upload() {
         assert!(context.upload_vertices(&paint).expect("uploads").is_some());
         assert!(context.vertices(&paint).is_some_and(|stored| !stored.needs_upload()));
         assert!(buffer.shared_vertex_vector.data().is_empty());
+    });
+}
+
+// The buckets of a tile's world copy are copies of the tile's, and the
+// upload of either shares what the other moved into the context's stores,
+// freeing its own data.
+#[test]
+fn world_copies_share_their_buckets_stored_geometry() {
+    let mut bucket = data_driven_fill_bucket(&serde_json::json!(["to-color", ["get", "c"]]));
+    let mut copy = bucket.clone();
+    with_context(|context| {
+        let mut copy_geometry = BucketGeometry::default();
+        upload(&mut copy, &mut copy_geometry, context);
+        let mut geometry = BucketGeometry::default();
+        let needs = crate::layers::upload_needs(context);
+        bucket.upload(&mut GeometryUpload::new(&mut geometry, &[&copy_geometry], context), needs);
+
+        assert!(bucket.vertices.is_moved() && bucket.vertices.data().is_empty());
+        assert!(bucket.triangles.is_moved() && bucket.triangles.data().is_empty());
+        let vertices = bucket_vertices(&geometry, &bucket.vertices);
+        assert!(vertices.is_some() && vertices == bucket_vertices(&copy_geometry, &copy.vertices));
+        let indexes = bucket_indexes(&geometry, &bucket.triangles);
+        assert!(indexes.is_some() && indexes == bucket_indexes(&copy_geometry, &copy.triangles));
+        let mut paint = |bucket: &FillBucket, geometry: &BucketGeometry| {
+            let buffer = &bucket.paint_property_binders.get("fill").unwrap().interleaved_vertex_buffer;
+            paint_vertices(context, geometry, buffer, false)
+        };
+        assert!(paint(&bucket, &geometry) == paint(&copy, &copy_geometry));
     });
 }
 

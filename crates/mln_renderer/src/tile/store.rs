@@ -31,7 +31,7 @@ use crate::render_tile::RenderTile;
 use crate::renderer_event::RendererEvent;
 use crate::source_state::SourceFeatureState;
 use crate::text::glyph_store::GlyphStore;
-use crate::tile::contents::{Answer, Contents, TileAtlases};
+use crate::tile::contents::{Answer, TileAtlases};
 use crate::tile::inbox::{Inbox, InboxSender, TileEvent, Waker};
 use crate::tile::job::{SourceKey, TileKey};
 use crate::tile::loading::{DataOrigin, Load};
@@ -326,12 +326,7 @@ impl TileStore {
             return;
         };
         for render_tile in render_tiles {
-            if let Some(contents) = tiles.contents_at_mut(render_tile.overscaled_tile_id(), render_tile.slot()) {
-                if let Contents::Geometry(contents) = contents {
-                    contents.textures.resolve(&self.ctx.atlas);
-                }
-                contents.upload(context, needs);
-            }
+            tiles.upload_at(render_tile.overscaled_tile_id(), render_tile.slot(), &self.ctx.atlas, context, needs);
         }
     }
 

@@ -19,9 +19,14 @@ use mln_util::projection::Projection;
 use mln_util::range::Range;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecMap;
+use smallvec::SmallVec;
 
 use crate::algorithm::update_renderables::{PrefetchedTile, RenderablesContext, update_renderables};
 use crate::algorithm::update_tile_masks::update_tile_masks;
+use crate::bucket::UploadNeeds;
+use crate::bucket_geometry::BucketGeometry;
+use crate::gfx::context::Context;
+use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::layer_drawing::ChangedBuckets;
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layout::tile_layout::LayoutParams;
@@ -394,11 +399,67 @@ impl SourceTiles {
     /// What tile `id` shows, whose buckets the frame changes, see
     /// `contents_at`.
     pub(crate) fn contents_at_mut(&mut self, id: &OverscaledTileID, slot: Option<usize>) -> Option<&mut Contents> {
-        let index = match slot.filter(|&slot| self.tiles.get_index(slot).is_some_and(|(key, _)| key == id)) {
-            Some(slot) => slot,
-            None => self.tiles.index_of(id)?,
-        };
+        let index = self.index_at(id, slot)?;
         self.tiles.get_index_mut(index)?.1.tile.contents_mut()
+    }
+
+    /// The index of tile `id` among the tiles, which is `slot` if they
+    /// haven't changed since `rendered` said so.
+    fn index_at(&self, id: &OverscaledTileID, slot: Option<usize>) -> Option<usize> {
+        match slot.filter(|&slot| self.tiles.get_index(slot).is_some_and(|(key, _)| key == id)) {
+            Some(slot) => Some(slot),
+            None => self.tiles.index_of(id),
+        }
+    }
+
+    /// Readies the buckets of what tile `id` shows, see `contents_at_mut`,
+    /// for the frame's draws, which read what `needs` says, finding its
+    /// atlas pages' textures in `atlas` (`Contents::upload`). Its buckets
+    /// share what those of the tile's other world copies, copies of them or
+    /// they of theirs, moved into `context`'s stores.
+    pub(crate) fn upload_at(
+        &mut self,
+        id: &OverscaledTileID,
+        slot: Option<usize>,
+        atlas: &DynamicTextureAtlas,
+        context: &mut Context,
+        needs: UploadNeeds,
+    ) {
+        let Some(index) = self.index_at(id, slot) else {
+            return;
+        };
+        let Some((&id, slot)) = self.tiles.get_index_mut(index) else {
+            return;
+        };
+        let Some(contents) = slot.tile.contents_mut() else {
+            return;
+        };
+        let Contents::Geometry(geometry) = contents else {
+            contents.upload(context, needs);
+            return;
+        };
+        geometry.textures.resolve(atlas);
+        if !geometry.needs_upload() {
+            return;
+        }
+        // The tile's other world copies, whose geometry its buckets share.
+        let is_copy = |tile: &Tile| {
+            tile.id.canonical == id.canonical && tile.id.overscaled_z == id.overscaled_z && tile.id.wrap != id.wrap
+        };
+        let mut uploading = None;
+        let mut copies: SmallVec<[&BucketGeometry; 4]> = SmallVec::new();
+        for (at, slot) in self.tiles.values_mut().enumerate() {
+            if at == index {
+                uploading = slot.tile.contents_mut().and_then(Contents::geometry_mut);
+            } else if is_copy(&slot.tile)
+                && let Some(contents) = slot.tile.contents().and_then(Contents::geometry)
+            {
+                copies.push(&contents.bucket_geometry);
+            }
+        }
+        if let Some(geometry) = uploading {
+            geometry.upload(&copies, context, needs);
+        }
     }
 
     pub(crate) fn slots(&self) -> impl Iterator<Item = &Slot> + '_ {
@@ -861,8 +922,9 @@ impl SourceTiles {
     }
 
     /// A copy of a renderable tile that is `id` in another world copy. The
-    /// copy draws the geometry that the tile's buckets moved into the
-    /// context's stores; buckets that haven't uploaded yet upload their own.
+    /// copy's buckets, copies of the tile's, draw the geometry that the
+    /// first of either to upload moves into the context's stores
+    /// (`upload_at`).
     fn world_copy(&self, id: &OverscaledTileID) -> Option<WorldCopy> {
         let tile = self.tiles.values().map(|slot| &slot.tile).find(|tile| {
             tile.id.overscaled_z == id.overscaled_z

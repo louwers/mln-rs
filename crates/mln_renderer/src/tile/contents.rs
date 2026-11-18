@@ -168,6 +168,10 @@ impl LayoutBuckets {
     }
 
     /// The buckets, each once.
+    pub(crate) fn buckets(&self) -> impl Iterator<Item = &dyn Bucket> + '_ {
+        self.buckets.iter().map(|bucket| &**bucket)
+    }
+
     pub(crate) fn buckets_mut(&mut self) -> impl Iterator<Item = &mut dyn Bucket> + '_ {
         self.buckets.iter_mut().map(|bucket| &mut **bucket)
     }
@@ -412,11 +416,17 @@ impl GeometryContents {
         self.answer.atlases.as_ref().map(|atlases| &atlases.pattern_positions)
     }
 
+    /// Whether a bucket is new or changed since its last upload.
+    pub(crate) fn needs_upload(&self) -> bool {
+        self.result.layer_render_data.buckets().any(Bucket::needs_upload)
+    }
+
     /// Readies the buckets that are new or changed since their last upload
     /// for the tile's draws ([`Bucket::upload`]), moving their geometry into
-    /// `context`'s stores.
-    pub(crate) fn upload(&mut self, context: &mut Context, needs: UploadNeeds) {
-        let mut upload = GeometryUpload::new(&mut self.bucket_geometry, context);
+    /// `context`'s stores, where `copies`, the geometry of the tile's other
+    /// world copies, hasn't some of it.
+    pub(crate) fn upload(&mut self, copies: &[&BucketGeometry], context: &mut Context, needs: UploadNeeds) {
+        let mut upload = GeometryUpload::new(&mut self.bucket_geometry, copies, context);
         for bucket in self.result.layer_render_data.buckets_mut() {
             if bucket.needs_upload() {
                 bucket.upload(&mut upload, needs);
@@ -607,7 +617,7 @@ impl Contents {
     /// into `context`'s stores.
     pub(crate) fn upload(&mut self, context: &mut Context, needs: UploadNeeds) {
         match self {
-            Contents::Geometry(contents) => contents.upload(context, needs),
+            Contents::Geometry(contents) => contents.upload(&[], context, needs),
             Contents::Raster(bucket) => bucket.upload(context),
             Contents::Dem(bucket) => bucket.upload(context),
             Contents::Empty => {}
