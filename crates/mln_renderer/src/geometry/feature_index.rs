@@ -464,12 +464,12 @@ impl FeatureIndex {
     }
 }
 
-/// Port-only: a `FeatureIndex` as it crosses, for a tile worker in
-/// another wasm instance (`tile/worker_codec)`: the grid's boxes in insertion
-/// order, which `insert` puts in an empty grid again, with their strings once
-/// each, and the tile data by key (the side that gets the index has the data
-/// it sent). A derive would write the grid's cells too, and every element's
-/// strings. Only symbol layouts insert circles, which a worker never does.
+/// A `FeatureIndex` as it crosses, for a tile worker in another wasm instance
+/// (`tile/worker_codec`): the grid's boxes in insertion order, which `insert`
+/// puts in an empty grid again, with their strings once each, and the tile data
+/// by key (the side that gets the index has the data it sent). A derive would
+/// write the grid's cells too, and every element's strings. Only symbol layouts
+/// insert circles, which a worker never does.
 #[derive(mln_wire::Wire)]
 struct Grid {
     sort_index: usize,

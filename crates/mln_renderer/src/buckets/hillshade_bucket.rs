@@ -60,7 +60,7 @@ impl HillshadeBucket {
         }
     }
 
-    /// [`MaskedGeometry::unmask`](crate::buckets::raster_bucket::MaskedGeometry::unmask).
+    /// [`MaskedGeometry::unmask`].
     pub(crate) fn unmask(&mut self) {
         if self.geometry.unmask() {
             self.base.uploaded = false;

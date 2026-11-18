@@ -372,16 +372,16 @@ pub(crate) fn glyph_quads(
                 // layout box centered below the midline, we align the center of
                 // the glyphs with the horizontal midline, so the y offset is no
                 // longer necessary, but we also pull the glyph to the left
-                // along the x axis. The y coordinate includes the baseline's y offset,
-                // therefore, needs to be accounted for when glyph is rotated
-                // and translated.
+                // along the x axis. The y coordinate includes the baseline's
+                // y offset, which needs to be accounted for when the glyph is
+                // rotated and translated.
 
                 let center = Vec2::new(-half_advance, half_advance - Shaping::Y_OFFSET as f32);
                 let vertical_rotation = -std::f32::consts::PI / 2.0;
 
-                // The x half-width offset correction is the difference between full-width
-                // and half-width advance, should be 0 for full-width glyphs and
-                // will pull up half-width glyphs.
+                // The x half-width offset correction is the difference
+                // between full-width and half-width advance: 0 for full-width
+                // glyphs, and it pulls up half-width glyphs.
                 let x_half_width_offset_correction = ONE_EM / 2.0 - half_advance;
                 let y_image_offset_correction =
                     if positioned_glyph.image_id.is_some() { x_half_width_offset_correction } else { 0.0 };

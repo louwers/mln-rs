@@ -60,12 +60,11 @@ pub(crate) struct SymbolLayoutVertex {
     pub(crate) a1: [i16; 4],
     pub(crate) a2: [u16; 4],
     pub(crate) a3: [i16; 4],
-    /// Port-only: the top-left of the quad's atlas rectangle, the same on all
-    /// four of its vertices. The shaders interpolate the texture coordinate
-    /// relative to it and add it back per fragment, as interpolating the
-    /// absolute coordinate rounds differently at different atlas positions,
-    /// and which tile reserves an image first, and so its position, varies
-    /// from run to run.
+    /// The top-left of the quad's atlas rectangle, the same on all four of its
+    /// vertices. The shaders interpolate the texture coordinate relative to it
+    /// and add it back per fragment, as interpolating the absolute coordinate
+    /// rounds differently at different atlas positions, and which tile reserves
+    /// an image first, and so its position, varies from run to run.
     pub(crate) a4: [u16; 2],
     /// The symbol's `symbol-height-offset`, in meters.
     pub(crate) a5: f32,

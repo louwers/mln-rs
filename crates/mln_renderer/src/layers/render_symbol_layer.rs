@@ -1055,9 +1055,9 @@ impl RenderSymbolLayer {
             if pitch_with_map { (state.get_pitch().cos() as f32) * state.get_camera_to_center_distance() } else { 1.0 };
 
         // Line labels rotate as their placement projects them along their
-        // lines (`reproject_line_labels`). Pitched point labels are automatically
-        // rotated by the label plane matrix projection. Unpitched point
-        // labels need to have their rotation applied after projection.
+        // lines (`reproject_line_labels`). Pitched point labels rotate with
+        // the label plane matrix's projection. Unpitched point labels need
+        // their rotation applied after projection.
         let rotate_in_shader = rotate_with_map && !pitch_with_map && !along_line;
 
         let size_binder = if is_text { &bucket.text_size_binder } else { &bucket.icon_size_binder };

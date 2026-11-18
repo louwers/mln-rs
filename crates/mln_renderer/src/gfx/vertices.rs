@@ -278,7 +278,9 @@ impl SharedVertices {
 
 /// Vertices of the context's store made of vertices of the type `V`, which
 /// their holder can replace with others of `V`
-/// ([`Context::update_vertices`](crate::gfx::context::Context::update_vertices)).
+/// ([`Context::update_vertices`]).
+///
+/// [`Context::update_vertices`]: crate::gfx::context::Context::update_vertices
 pub(crate) struct TypedVertices<V> {
     shared: SharedVertices,
     vertex_type: PhantomData<fn() -> V>,

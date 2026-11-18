@@ -358,10 +358,10 @@ fn project_truncated_line_segment(
     project_point: impl Fn(Vec2) -> Vec2,
 ) -> Vec2 {
     // We are assuming the previous tile point won't project to a point within
-    // one unit of the camera plane. If it did, that would mean our label extended
-    // all the way out from within the viewport to a (very distant) point near
-    // the plane of the camera. We wouldn't be able to render the label anyway
-    // once it crossed the plane of the camera.
+    // one unit of the camera plane. If it did, that would mean our label
+    // extended all the way out from within the viewport to a (very distant)
+    // point near the plane of the camera. We wouldn't be able to render the
+    // label anyway once it crossed the plane of the camera.
     let projected_unit_vertex =
         project_point(previous_tile_point + (previous_tile_point - current_tile_point).normalize_or_zero());
     let projected_unit_segment = previous_projected_point - projected_unit_vertex;

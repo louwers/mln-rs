@@ -271,7 +271,8 @@ impl DebugLayer {
 }
 
 /// The render source of a source with tiles: a view into the tile store,
-/// which keeps the tiles, with the render tiles of the last `update_render_tiles`.
+/// which keeps the tiles, with the render tiles of the last
+/// `update_render_tiles`.
 pub(crate) struct RenderTileSource {
     pub(crate) base: RenderSourceBase,
     /// The source's id, which its debug overlays' draws carry.

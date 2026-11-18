@@ -23,7 +23,8 @@ pub(crate) fn unpack_vector(encoding: RasterEncoding) -> [f32; 4] {
     }
 }
 
-/// Port-only: only what `new` can make reads back (`from_parts`).
+/// A raster-dem tile's elevations, a pixel of border on each side. It reads
+/// back only as `new` can make it (`from_parts`).
 #[derive(Clone, Debug)]
 pub(crate) struct DEMData {
     pub(crate) dim: i32,
@@ -105,8 +106,8 @@ impl DEMData {
         Ok(DEMData { dim, stride, encoding, image: out })
     }
 
-    /// Port-only: a DEM as another `DEMData` was (its members), as it
-    /// reads back. Fails unless the image is `stride` by `stride` pixels with
+    /// A DEM as another `DEMData` was (its members), as it reads back.
+    /// Fails unless the image is `stride` by `stride` pixels with
     /// `stride == dim + 2` and `dim >= 0`, as `new` makes them. The sizes are
     /// checked without overflow: on wasm32 `Image::bytes` would wrap for a
     /// large stride.

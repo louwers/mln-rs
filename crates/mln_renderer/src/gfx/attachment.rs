@@ -8,8 +8,10 @@ use mln_gfx::released::Released;
 use mln_util::size::Size;
 
 /// A render target of the context's `Gpu`, which goes to the context's
-/// release queue when dropped, as a [`Texture2D`](crate::gfx::texture2d::Texture2D)'s
-/// backend texture does. The rendering stats don't count it.
+/// release queue when dropped, as a [`Texture2D`]'s backend texture does.
+/// The rendering stats don't count it.
+///
+/// [`Texture2D`]: crate::gfx::texture2d::Texture2D
 pub(crate) struct Attachment {
     id: TextureId,
     format: TextureFormat,

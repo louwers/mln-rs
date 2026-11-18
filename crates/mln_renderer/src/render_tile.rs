@@ -83,8 +83,8 @@ impl RenderTile {
         &self.tile_id
     }
 
-    /// Where the tile is among its source's, as of its last update; `None` for a
-    /// tile that isn't among a source's.
+    /// Where the tile is among its source's, as of its last update; `None`
+    /// for a tile that isn't among a source's.
     #[must_use]
     pub(crate) fn slot(&self) -> Option<usize> {
         self.slot

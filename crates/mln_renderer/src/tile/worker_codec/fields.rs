@@ -1,6 +1,6 @@
-// Port-only: how the members of the tile workers' messages that the derive
-// can't write cross (mod.rs): trait objects, as the types they can be, and
-// the values that cross once per worker instance, then by key
+// How the members of the tile workers' messages that the derive can't
+// write cross (mod.rs): trait objects, as the types they can be, and the
+// values that cross once per worker instance, then by key
 // (mln_util::serialization::shared).
 
 use std::sync::Arc;

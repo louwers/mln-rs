@@ -429,7 +429,8 @@ impl Renderer {
 
     /// The rendering stats, which count the renderer's resources until it
     /// releases them. A texture counts until the end of the frame that
-    /// follows its release, or until [`reduce_memory_use`](Self::reduce_memory_use).
+    /// follows its release, or until
+    /// [`reduce_memory_use`](Self::reduce_memory_use).
     #[must_use]
     pub fn rendering_stats(&self) -> RenderingStats {
         self.encoder.context.stats()

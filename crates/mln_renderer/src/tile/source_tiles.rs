@@ -1097,8 +1097,7 @@ impl SourceTiles {
         let screen_geometry: &[mln_util::geo::ScreenCoordinate] = if traced.is_empty() { geometry } else { &traced };
         let mut query_geometry: Vec<geometry::Point<f64>> = screen_geometry.iter().map(to_world).collect();
 
-        // mapbox::geometry::envelope, of points the geometry has at least one
-        // of.
+        // The bounding box of points, of which the geometry has at least one.
         let envelope = |points: &mut dyn Iterator<Item = (f64, f64)>| {
             let (mut min, mut max) = ((f64::INFINITY, f64::INFINITY), (f64::NEG_INFINITY, f64::NEG_INFINITY));
             for (x, y) in points {
@@ -1109,10 +1108,10 @@ impl SourceTiles {
         };
 
         if globe {
-            // The globe has no world copies, so a box
-            // across the antimeridian lands on the rest of the world, which
-            // shows when its slightly shrunken corners fall outside it. It
-            // moves to the copy west of the main world.
+            // The globe has no world copies, so a box across the
+            // antimeridian lands on the rest of the world, which shows when
+            // its slightly shrunken corners fall outside it. It moves to the
+            // copy west of the main world.
             let (mut screen_min, mut screen_max) = envelope(&mut geometry.iter().map(|p| (p.x, p.y)));
             let shrink = f64::min(screen_max.0 - screen_min.0, screen_max.1 - screen_min.1) * 0.001;
             screen_min.0 += shrink;
@@ -1187,9 +1186,9 @@ impl SourceTiles {
 
         let max_pitch_scale_factor = transform_state.max_pitch_scale_factor();
 
-        // The globe returns a feature once per tile, though the
-        // tile is tested at three copies and can be rendered at two wraps:
-        // these are where this tile's features start in each layer's results.
+        // The globe returns a feature once per tile, though the tile is
+        // tested at three copies and can be rendered at two wraps: these are
+        // where this tile's features start in each layer's results.
         let mut canonical_tile: Option<mln_tile_id::CanonicalTileID> = None;
         let mut canonical_tile_start: mln_util::hash::HashMap<String, usize> = mln_util::hash::HashMap::default();
 

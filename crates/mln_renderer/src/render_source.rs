@@ -79,8 +79,8 @@ pub(crate) trait RenderSource {
     /// sources that have none (the image source).
     fn update_debug_draws(&self, _debug_layers: &mut DebugLayers, _parameters: &mut PaintParameters<'_>) {}
 
-    /// Releases the render data from the last `update_render_tiles` while the source is
-    /// disabled.
+    /// Releases the render data from the last `update_render_tiles` while
+    /// the source is disabled.
     fn release_render_data(&mut self) {}
 
     /// The source's tiles in the tile store, for a source with tiles.

@@ -133,9 +133,9 @@ pub(crate) struct JointPlacement {
     pub(crate) text: bool,
     pub(crate) icon: bool,
     /// Outside the viewport, but within the collision index's viewport
-    /// padding of its edge. Because these symbols aren't onscreen yet, we can skip
-    /// the "fade in" animation, and if a subsequent viewport change brings
-    /// them into view, they'll be fully visible right away.
+    /// padding of its edge. Because these symbols aren't onscreen yet, we can
+    /// skip the "fade in" animation, and if a subsequent viewport change
+    /// brings them into view, they'll be fully visible right away.
     pub(crate) skip_fade: bool,
 }
 
