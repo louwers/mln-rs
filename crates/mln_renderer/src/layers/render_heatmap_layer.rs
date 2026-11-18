@@ -31,6 +31,7 @@ use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 use mln_style_types::TranslateAnchorType;
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
+use mln_util::identity::SimpleIdentity;
 use mln_util::image::PremultipliedImage;
 use mln_util::mat4::{Mat4, matrix};
 use mln_util::size::Size;
@@ -560,9 +561,8 @@ impl RenderHeatmapLayer {
             geometry,
             textures,
         );
-        let draw = KeptDraw::new(objects);
-        let frame_draw = FrameDraw { depth: DrawDepth::Off, ..draw.frame_draw(None) };
-        self.drawing.texture = Some(draw.objects);
+        let frame_draw = FrameDraw { depth: DrawDepth::Off, ..FrameDraw::new(None, SimpleIdentity::new()) };
+        self.drawing.texture = Some(objects);
 
         frame.clear();
         frame.push(frame_draw);

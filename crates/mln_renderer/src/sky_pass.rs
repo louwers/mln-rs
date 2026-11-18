@@ -16,13 +16,14 @@ use mln_map_types::TransformState;
 use mln_style_types::LightAnchorType;
 use mln_util::Color;
 use mln_util::geo::WrapMode;
+use mln_util::identity::SimpleIdentity;
 use mln_util::mat4::{Mat4, matrix};
 use mln_util::size::Size;
 use mln_util::vectors::Vec4;
 
 use crate::draw::{DrawGeometry, DrawObjects, Textures, raw_vertices};
 use crate::gfx::context::Context;
-use crate::layer_drawing::{DrawDepth, FrameDraw, KeptDraw, SingleDraw};
+use crate::layer_drawing::{DrawDepth, FrameDraw, SingleDraw};
 use crate::render_light::EvaluatedLight;
 use crate::render_sky::EvaluatedSky;
 use crate::render_static_data::RenderStaticData;
@@ -52,9 +53,7 @@ fn fullscreen_draw(shader: &ShaderProgramPtr, vertex_attribute: usize, depth: Dr
         geometry,
         Textures::default(),
     );
-    let draw = KeptDraw::new(objects);
-    let frame_draw = FrameDraw { depth, ..draw.frame_draw(None) };
-    SingleDraw::new(draw.objects, frame_draw)
+    SingleDraw::new(objects, FrameDraw { depth, ..FrameDraw::new(None, SimpleIdentity::new()) })
 }
 
 /// The direction of the sun in the globe's frame, where the atmosphere traces

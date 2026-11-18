@@ -596,9 +596,7 @@ impl BucketTarget {
         textures[ID_HILLSHADE_IMAGE_TEXTURE] = Some(texture);
         let objects =
             DrawObjects::new(Rc::clone(shader), ColorMode::unblended(), CullFaceMode::disabled(), geometry, textures);
-        let draw = KeptDraw::new(objects);
-        let frame_draw = draw.frame_draw(None);
-        let mut prepare = SingleDraw::new(draw.objects, frame_draw);
+        let mut prepare = SingleDraw::new(objects, FrameDraw::new(None, SimpleIdentity::new()));
         let mut m: Mat4 = [0.0; 16];
         let extent = f64::from(EXTENT);
         matrix::ortho(&mut m, 0.0, extent, -extent, 0.0, -1.0, 1.0);
