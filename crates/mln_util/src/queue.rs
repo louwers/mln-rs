@@ -420,20 +420,24 @@ mod tests {
     fn timed_tasks_run_once_due_earliest_first_before_the_turns_tasks() {
         let queue = Queue::<Vec<&str>>::new();
         let now = Instant::now();
-        queue.post_at(now + Duration::from_millis(20), |state| state.push("later"));
+        let later = now + Duration::from_secs(3600);
+        queue.post_at(later, |state| state.push("later"));
         queue.post_at(now, |state| state.push("due"));
         queue.post_at(now, |state| state.push("due too"));
         queue.post(|state| state.push("task"));
         let mut state = Vec::new();
         queue.run_once(&mut state);
         assert_eq!(state, ["due", "due too", "task"]);
-        assert_eq!(queue.next_deadline(), Some(now + Duration::from_millis(20)));
+        assert_eq!(queue.next_deadline(), Some(later));
+        let soon = Instant::now() + Duration::from_millis(20);
+        queue.post_at(soon, |state| state.push("soon"));
         queue.park();
         // The posts signalled the queue, so the first park returns at once.
         queue.park();
-        assert!(Instant::now() >= now + Duration::from_millis(20));
+        assert!(Instant::now() >= soon);
         queue.run_once(&mut state);
-        assert_eq!(state, ["due", "due too", "task", "later"]);
+        assert_eq!(state, ["due", "due too", "task", "soon"]);
+        assert_eq!(queue.next_deadline(), Some(later));
     }
 
     #[test]
@@ -490,16 +494,24 @@ mod tests {
     fn a_cancel_moves_a_parked_threads_deadline() {
         let queue = Queue::<()>::new();
         let now = Instant::now();
-        let first = queue.post_at(now + Duration::from_millis(50), |()| {});
+        let due = now + Duration::from_millis(100);
+        let bound = now + Duration::from_millis(150);
+        let first = queue.post_at(due, |()| {});
         let parked = queue.clone();
         let thread = std::thread::spawn(move || {
+            // The post signalled the queue, so the first park returns at once.
             parked.park();
-            parked.park_until(Some(now + Duration::from_millis(200)));
+            parked.park_until(Some(bound));
             Instant::now()
         });
         std::thread::sleep(Duration::from_millis(10));
         queue.cancel(first);
-        assert!(thread.join().unwrap() >= now + Duration::from_millis(200));
+        // A busy machine can keep this thread from cancelling until after
+        // the task fell due, and then the parked thread rightly returns at
+        // its deadline. Only a cancel that ends before it moves the deadline.
+        let cancelled_in_time = Instant::now() < due;
+        let returned = thread.join().unwrap();
+        assert!(returned >= if cancelled_in_time { bound } else { due });
     }
 
     #[test]
