@@ -617,7 +617,11 @@ fn build(root: &Path, manifest: &Path, target_dir: Option<&Path>, features: Opti
         .arg("--manifest-path")
         .arg(manifest);
     if let Some(dir) = target_dir {
-        command.arg("--target-dir").arg(dir);
+        // A base's build, the only one in a directory of its own. Its code
+        // can go unused under this checkout's harness, such as a `bench`
+        // hook that its libraries don't call, and its warnings are no one's
+        // to fix, even in CI, which denies them.
+        command.arg("--target-dir").arg(dir).env("CARGO_BUILD_WARNINGS", "allow");
     }
     if let Some(features) = features {
         command.args(["--features", features]);
