@@ -23,7 +23,6 @@ use std::mem::offset_of;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
 use mln_gfx::shaders::fill_extrusion_layer_ubo::{
     FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO,
 };
@@ -36,7 +35,6 @@ use mln_gfx::shaders::shader_defines::{
     ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_PROPS_UBO, ID_FILL_EXTRUSION_TILE_PROPS_UBO,
     ID_PROJECTION_UBO,
 };
-use mln_gfx::shaders::shader_program::ShaderProgramPtr;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_map_types::TransformState;
 use mln_style::layer_type::LayerStyle;
@@ -64,6 +62,8 @@ use crate::frame_projection::zero_to_one_clip_z;
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
 use crate::gfx::indexes::{Indexes, SharedIndexes};
+use crate::gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
+use crate::gfx::shader_program::ShaderProgramPtr;
 use crate::gfx::texture2d::Texture2D;
 use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;

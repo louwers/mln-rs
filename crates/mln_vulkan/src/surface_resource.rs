@@ -22,7 +22,8 @@ use std::rc::Rc;
 use ash::vk;
 use mln_gfx::frame::FrameImage;
 use mln_gfx::gpu::{
-    Gpu as _, ReadbackId, ResourceId, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage,
+    Gpu as _, ReadbackId, ResourceId, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureRegion,
+    TextureUsage, destroy_unused,
 };
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
@@ -370,10 +371,10 @@ impl SurfaceResource {
         let device = self.backend().get_device();
         let mut gpu = self.renderer.gpu();
         if let Some((readback, _)) = self.readback.take() {
-            gpu.destroy(ResourceId::Readback(readback));
+            destroy_unused(&mut *gpu, [ResourceId::Readback(readback)]);
         }
         for image in state.images.drain(..) {
-            gpu.destroy(ResourceId::Texture(image.texture));
+            destroy_unused(&mut *gpu, [ResourceId::Texture(image.texture)]);
             // SAFETY: the device is idle, and the view and the semaphore are
             // this resource's.
             unsafe {
@@ -387,7 +388,7 @@ impl SurfaceResource {
             unsafe { device.destroy_semaphore(semaphore, None) };
         }
         if let Some(depth_stencil) = state.depth_stencil.take() {
-            gpu.destroy(ResourceId::Texture(depth_stencil));
+            destroy_unused(&mut *gpu, [ResourceId::Texture(depth_stencil)]);
         }
         state.next_slot = 0;
         state.acquired = None;
@@ -662,7 +663,7 @@ impl SurfaceResource {
                 match gpu.read_texture(texture, TextureRegion::whole(size)) {
                     Ok(readback) => {
                         if let Some((previous, _)) = self.readback.replace(Some((readback, size))) {
-                            gpu.destroy(ResourceId::Readback(previous));
+                            destroy_unused(&mut *gpu, [ResourceId::Readback(previous)]);
                         }
                     }
                     Err(error) => Log::error(Event::Render, format!("Reading the frame back failed: {error}")),

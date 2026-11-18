@@ -526,6 +526,8 @@ pub(crate) struct GlGpu {
     pipelines: SlotMap<PipelineId, Pipeline>,
     bindings: SlotMap<BindingsId, Bindings>,
     geometries: SlotMap<GeometryId, Geometry>,
+    /// What the live bindings and geometry were made of.
+    dependents: validation::Dependents,
     /// The framebuffer of each pair of attachments a pass has drawn into,
     /// or a readback has read.
     framebuffers: HashMap<(Option<TextureId>, Option<TextureId>), FramebufferID>,
@@ -607,6 +609,7 @@ impl GlGpu {
             pipelines: SlotMap::with_key(),
             bindings: SlotMap::with_key(),
             geometries: SlotMap::with_key(),
+            dependents: validation::Dependents::default(),
             framebuffers: HashMap::default(),
             pass: None,
             readbacks: SlotMap::with_key(),
@@ -1475,7 +1478,9 @@ impl Gpu for GlGpu {
         }
         let has_elements = blocks.iter().any(|block| matches!(block.range, BlockRange::Element { .. }));
         let tags = BindingsTags { shader: desc.shader, elements };
-        Ok(self.bindings.insert(Bindings { blocks, textures, elements: has_elements, tags }))
+        let id = self.bindings.insert(Bindings { blocks, textures, elements: has_elements, tags });
+        self.dependents.bindings(id, desc);
+        Ok(id)
     }
 
     fn create_geometry(&mut self, desc: &GeometryDesc<'_>) -> Result<GeometryId, GpuError> {
@@ -1494,7 +1499,7 @@ impl Gpu for GlGpu {
             .collect::<Result<Vec<_>, GpuError>>()?;
         let index_buffer = native(desc.index_buffer)?;
         let tags = GeometryTags { layout: self.layout_tags.tag(desc.shader, desc.layouts), ranges };
-        Ok(self.geometries.insert(Geometry {
+        let id = self.geometries.insert(Geometry {
             program,
             layouts: desc.layouts.to_vec(),
             vertex_buffers,
@@ -1502,17 +1507,20 @@ impl Gpu for GlGpu {
             vertex_arrays: Vec::new(),
             deleted: Rc::clone(&self.deleted),
             tags,
-        }))
+        });
+        self.dependents.geometry(id, desc);
+        Ok(id)
     }
 
     /// Lets go of `resource`. A GL object that nothing else holds is deleted
     /// the next time a call has the context current.
-    fn destroy(&mut self, resource: ResourceId) {
+    fn destroy(&mut self, resource: ResourceId) -> Result<(), GpuError> {
+        self.dependents.destroy(resource)?;
         match resource {
             ResourceId::Buffer(id) => drop(self.buffers.remove(id)),
             ResourceId::Texture(id) => {
                 if self.textures.remove(id).is_none() {
-                    return;
+                    return Ok(());
                 }
                 match &mut self.pass {
                     Some(pass) if pass.textures.iter().any(|(texture, _)| *texture == id) => pass.destroyed.push(id),
@@ -1526,6 +1534,7 @@ impl Gpu for GlGpu {
             ResourceId::Geometry(id) => drop(self.geometries.remove(id)),
             ResourceId::Readback(id) => drop(self.readbacks.remove(id)),
         }
+        Ok(())
     }
 
     fn attaches_with_any_color(&self, depth_stencil: TextureId) -> bool {

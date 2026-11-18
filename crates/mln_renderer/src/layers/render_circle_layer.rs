@@ -2,7 +2,6 @@ use std::mem::offset_of;
 use std::sync::Arc;
 
 use geometry::Point;
-use mln_gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
 use mln_gfx::shaders::circle_layer_ubo::{CircleDrawableUBO, CircleEvaluatedPropsUBO};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::segment::SegmentBase;
@@ -26,6 +25,7 @@ use crate::bucket::Bucket;
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::circle_bucket::{CircleBinders, CircleBucket, CircleLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
+use crate::gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
 use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
 use crate::layer_drawing::{DrawList, KeptDraw, TileDraws, UniformWriter};

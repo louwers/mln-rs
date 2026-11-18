@@ -1,5 +1,4 @@
 use std::borrow::Cow;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use feature::{Identifier, PropertyMap, Value};
@@ -255,7 +254,7 @@ fn fill_bucket_frees_cpu_geometry_after_upload() {
         let indexes = DrawIndexes::from(bucket_indexes(&geometry, &bucket.triangles).expect("moved"));
         assert!(indexes.buffer(context).is_some_and(|buffer| triangles.buffer(context) == Some(buffer)));
         let reused = context.upload_vertices(&again).expect("uploads").expect("a buffer");
-        assert!(Rc::ptr_eq(&buffer, &reused));
+        assert_eq!(buffer, reused);
 
         // Data-driven paint values are freed too when nothing can rewrite them.
         let binders = bucket.paint_property_binders.get("fill").unwrap();
@@ -816,7 +815,7 @@ fn typed_vertices_take_updates_of_as_many_vertices() {
             && stored.needs_upload()));
         let before = context.rendering_stats().clone();
         let rewritten = context.upload_vertices(&vertices).expect("uploads").expect("a buffer");
-        assert!(Rc::ptr_eq(&buffer, &rewritten));
+        assert_eq!(buffer, rewritten);
         let after = context.rendering_stats().clone();
         assert_eq!(after.vertex_update_bytes, before.vertex_update_bytes + 8);
         assert_eq!(after.buffer_updates, before.buffer_updates + 1);
@@ -834,11 +833,11 @@ fn typed_vertices_take_updates_of_as_many_vertices() {
 // soon after its last upload the update comes.
 #[test]
 fn a_draw_writes_an_update_of_the_vertices_it_binds() {
-    use mln_gfx::shader_registry::ShaderRegistry;
     use mln_gfx::shaders::shader_defines::{ID_RASTER_POS_VERTEX_ATTRIBUTE, ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE};
     use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 
     use crate::draw::{DrawGeometry, DrawObjects};
+    use crate::gfx::shader_registry::ShaderRegistry;
     use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
 
     with_context(|context| {

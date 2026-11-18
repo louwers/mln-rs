@@ -6,9 +6,6 @@
 //! vertices of buckets and static geometry, through handles of the context's
 //! stores (`gfx::store`), which keep them while the draw lasts.
 
-use std::rc::Rc;
-
-use mln_gfx::buffer::BufferPtr;
 use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::depth_mode::DepthMode;
@@ -21,13 +18,14 @@ use mln_gfx::gpu::{
 };
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{MAX_TEXTURE_COUNT_PER_SHADER, MAX_UBO_COUNT_PER_SHADER};
-use mln_gfx::shaders::shader_program::{ShaderProgram, ShaderProgramPtr};
 use mln_gfx::stencil_mode::StencilMode;
 use mln_util::logging::{Event, Log};
 
+use crate::gfx::buffer::SharedBuffer;
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
-use crate::gfx::owned::Owned;
+use crate::gfx::owned::{Held, Owned};
+use crate::gfx::shader_program::{ShaderProgram, ShaderProgramPtr};
 use crate::gfx::store::SharedTexture;
 use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::gfx::upload::{self, AttributeBindingArray};
@@ -76,7 +74,7 @@ pub(crate) fn raw_vertices(
 
 /// A vertex buffer a draw binds, and how its pipeline reads it.
 struct VertexSlot {
-    buffer: BufferPtr,
+    buffer: SharedBuffer,
     offset: u64,
     layout: VertexBufferLayout,
 }
@@ -277,7 +275,7 @@ impl DrawObjects {
             return Ok(());
         };
         let context = &mut *parameters.context;
-        let index_buffer = self.indexes.buffer(context);
+        let index_buffer = self.indexes.buffer_id(context);
         debug_assert!(index_buffer.is_some(), "a draw of {} draws indexes it didn't upload", self.shader.name());
         let Some(index_buffer) = index_buffer else {
             return Ok(());
@@ -312,7 +310,13 @@ impl DrawObjects {
                     vertex_buffers: &buffers,
                     index_buffer,
                 })?;
-                self.geometry = Some((Owned::new(geometry, context.released()), index_buffer));
+                let held = slots
+                    .iter()
+                    .map(|slot| &slot.buffer)
+                    .chain(self.indexes.buffer(context))
+                    .map(|buffer| Held::Buffer(buffer.clone()))
+                    .collect();
+                self.geometry = Some((context.own(geometry, held), index_buffer));
                 geometry
             }
         };
@@ -395,6 +399,7 @@ impl DrawObjects {
         }
         self.bindings = None;
         let mut entries = Vec::with_capacity(MAX_UBO_COUNT_PER_SHADER + MAX_TEXTURE_COUNT_PER_SHADER);
+        let mut held = Vec::with_capacity(MAX_UBO_COUNT_PER_SHADER + MAX_TEXTURE_COUNT_PER_SHADER);
         for id in 0..MAX_UBO_COUNT_PER_SHADER {
             // The draw's buffer wins over its frame's, and that over the
             // global one.
@@ -406,6 +411,7 @@ impl DrawObjects {
                     offset: 0,
                     size: buffer.size() as u64,
                 });
+                held.push(Held::Buffer(buffer.clone()));
             }
         }
         for (id, binding) in textures.iter().enumerate() {
@@ -413,9 +419,12 @@ impl DrawObjects {
                 entries.push(BindGroupEntry::Texture { id: id as u32, texture, sampler });
             }
         }
+        for texture in self.shader.textures().iter().filter_map(|&id| self.textures.get(id)?.as_ref()) {
+            held.extend(context.gpu_texture(texture).cloned().map(Held::Texture));
+        }
         let bindings =
             gpu.create_bindings(&BindingsDesc { label: self.shader.name(), shader: shader_id, entries: &entries })?;
-        self.bindings = Some((Owned::new(bindings, context.released()), stamp));
+        self.bindings = Some((context.own(bindings, held), stamp));
         Ok(bindings)
     }
 
@@ -575,7 +584,7 @@ fn vertex_slots(
             match shared {
                 Some(slot) => slot.layout.attributes.push(attribute),
                 None => slots.push(VertexSlot {
-                    buffer: Rc::clone(buffer),
+                    buffer: buffer.clone(),
                     offset,
                     layout: VertexBufferLayout { stride: binding.vertex_stride, step, attributes: vec![attribute] },
                 }),

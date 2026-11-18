@@ -459,6 +459,8 @@ pub struct VulkanGpu {
     pipelines: SlotMap<PipelineId, Pipeline>,
     bindings: SlotMap<BindingsId, Bindings>,
     geometries: SlotMap<GeometryId, Geometry>,
+    /// What the live bindings and geometry were made of.
+    dependents: validation::Dependents,
     /// The descriptor sets of the bindings so far, by what they bind,
     /// which bindings of equal resources share.
     descriptor_sets: HashMap<SetKey, Weak<DescriptorSet>>,
@@ -720,6 +722,7 @@ impl VulkanGpu {
             pipelines: SlotMap::with_key(),
             bindings: SlotMap::with_key(),
             geometries: SlotMap::with_key(),
+            dependents: validation::Dependents::default(),
             descriptor_sets: HashMap::default(),
             render_passes: HashMap::default(),
             framebuffers: HashMap::default(),
@@ -819,7 +822,7 @@ impl VulkanGpu {
     }
 
     /// The destroyed buffers that wait for their windows to be current.
-    #[cfg(test)]
+    #[cfg(all(test, not(debug_assertions)))]
     pub(crate) fn destroyed_stale_count(&self) -> usize {
         self.stale.iter().filter(|stale| matches!(stale, Stale::Destroyed(_))).count()
     }
@@ -2312,7 +2315,9 @@ impl Gpu for VulkanGpu {
             })
             .collect();
         let tags = BindingsTags { shader: desc.shader, elements };
-        Ok(self.bindings.insert(Bindings { sets, handles, tags }))
+        let id = self.bindings.insert(Bindings { sets, handles, tags });
+        self.dependents.bindings(id, desc);
+        Ok(id)
     }
 
     fn create_geometry(&mut self, desc: &GeometryDesc<'_>) -> Result<GeometryId, GpuError> {
@@ -2336,15 +2341,18 @@ impl Gpu for VulkanGpu {
         let index_buffer = index.buffer();
         held.push(index);
         let tags = GeometryTags { layout: self.layout_tags.tag(desc.shader, desc.layouts), ranges };
-        Ok(self.geometries.insert(Geometry { _held: held, buffers, offsets, index_buffer, tags }))
+        let id = self.geometries.insert(Geometry { _held: held, buffers, offsets, index_buffer, tags });
+        self.dependents.geometry(id, desc);
+        Ok(id)
     }
 
     /// Lets go of `resource`. What holds a native resource keeps it, and
     /// it goes once the submits that may use it have finished.
-    fn destroy(&mut self, resource: ResourceId) {
+    fn destroy(&mut self, resource: ResourceId) -> Result<(), GpuError> {
+        self.dependents.destroy(resource)?;
         match resource {
             ResourceId::Buffer(id) => {
-                let Some(buffer) = self.buffers.remove(id) else { return };
+                let Some(buffer) = self.buffers.remove(id) else { return Ok(()) };
                 // Bindings that still hold it read each window in turn, so
                 // `open_window` keeps bringing them up to date.
                 let all = (1 << self.window_count) - 1;
@@ -2355,7 +2363,7 @@ impl Gpu for VulkanGpu {
             }
             ResourceId::Texture(id) => {
                 if self.textures.remove(id).is_none() {
-                    return;
+                    return Ok(());
                 }
                 let mut forgotten = Vec::new();
                 self.framebuffers.retain(|key, &mut framebuffer| {
@@ -2386,7 +2394,7 @@ impl Gpu for VulkanGpu {
                 }
             }
             ResourceId::Bindings(id) => {
-                let Some(bindings) = self.bindings.remove(id) else { return };
+                let Some(bindings) = self.bindings.remove(id) else { return Ok(()) };
                 // The sets that no other bindings share go with these.
                 for set in bindings.sets.iter().flatten() {
                     if Rc::strong_count(set) == 1 {
@@ -2401,6 +2409,7 @@ impl Gpu for VulkanGpu {
                 }
             }
         }
+        Ok(())
     }
 
     fn begin_pass(&mut self, desc: &PassDesc<'_>) -> Result<(), GpuError> {

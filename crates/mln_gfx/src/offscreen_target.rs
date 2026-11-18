@@ -11,7 +11,8 @@ use mln_util::size::Size;
 
 use crate::frame::{FrameImage, FrameTarget, Handoff};
 use crate::gpu::{
-    GpuError, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage, read_texels,
+    GpuError, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage, destroy_unused,
+    read_texels,
 };
 use crate::renderer_backend::RendererBackend;
 
@@ -82,7 +83,7 @@ impl<B: RendererBackend> OffscreenTarget<B> {
         match texture(&mut *gpu, "offscreen depth and stencil", DEPTH_STENCIL, false) {
             Ok(depth_stencil) => Ok(Image { size, color, depth_stencil }),
             Err(error) => {
-                gpu.destroy(color.into());
+                destroy_unused(&mut *gpu, [color.into()]);
                 Err(error)
             }
         }
@@ -92,9 +93,7 @@ impl<B: RendererBackend> OffscreenTarget<B> {
     /// the work that uses them finishes.
     fn release(&self) {
         if let Some(image) = self.image.take() {
-            let mut gpu = self.backend.gpu();
-            gpu.destroy(image.color.into());
-            gpu.destroy(image.depth_stencil.into());
+            destroy_unused(&mut *self.backend.gpu(), [image.color.into(), image.depth_stencil.into()]);
         }
     }
 }

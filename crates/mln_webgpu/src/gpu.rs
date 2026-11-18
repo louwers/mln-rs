@@ -171,6 +171,8 @@ pub struct WebGpu {
     pipelines: SlotMap<PipelineId, Pipeline>,
     bindings: SlotMap<BindingsId, Bindings>,
     geometries: SlotMap<GeometryId, Geometry>,
+    /// What the live bindings and geometry were made of.
+    dependents: validation::Dependents,
     readbacks: SlotMap<ReadbackId, Readback>,
     /// The buffer of the last readback taken, which the next readback of
     /// its size copies into, as a frame read back each time is.
@@ -221,6 +223,7 @@ impl WebGpu {
             pipelines: SlotMap::with_key(),
             bindings: SlotMap::with_key(),
             geometries: SlotMap::with_key(),
+            dependents: validation::Dependents::default(),
             readbacks: SlotMap::with_key(),
             spare_readback: None,
             #[cfg(feature = "bench")]
@@ -816,7 +819,9 @@ impl Gpu for WebGpu {
             groups.push((slot as u32, group));
         }
         let tags = BindingsTags { shader: desc.shader, elements };
-        Ok(self.bindings.insert(Bindings { groups, index_slot, tags }))
+        let id = self.bindings.insert(Bindings { groups, index_slot, tags });
+        self.dependents.bindings(id, desc);
+        Ok(id)
     }
 
     fn create_geometry(&mut self, desc: &GeometryDesc<'_>) -> Result<GeometryId, GpuError> {
@@ -836,18 +841,21 @@ impl Gpu for WebGpu {
             desc.vertex_buffers.iter().map(|&(id, offset)| native(id, offset)).collect::<Result<Vec<_>, _>>()?;
         let index_buffer = native(desc.index_buffer, 0)?;
         let tags = GeometryTags { layout: self.layout_tags.tag(desc.shader, desc.layouts), ranges };
-        Ok(self.geometries.insert(Geometry {
+        let id = self.geometries.insert(Geometry {
             vertex_buffers,
             index_buffer,
             vertex_ids: desc.vertex_buffers.to_vec(),
             index_id: (desc.index_buffer, 0),
             tags,
-        }))
+        });
+        self.dependents.geometry(id, desc);
+        Ok(id)
     }
 
     /// Drops this backend's references: wgpu keeps a resource while
     /// bindings, geometry or recorded commands hold it.
-    fn destroy(&mut self, resource: ResourceId) {
+    fn destroy(&mut self, resource: ResourceId) -> Result<(), GpuError> {
+        self.dependents.destroy(resource)?;
         match resource {
             ResourceId::Buffer(id) => drop(self.buffers.remove(id)),
             ResourceId::Texture(id) => drop(self.textures.remove(id)),
@@ -858,6 +866,7 @@ impl Gpu for WebGpu {
             ResourceId::Geometry(id) => drop(self.geometries.remove(id)),
             ResourceId::Readback(id) => drop(self.readbacks.remove(id)),
         }
+        Ok(())
     }
 
     fn begin_pass(&mut self, desc: &PassDesc<'_>) -> Result<(), GpuError> {

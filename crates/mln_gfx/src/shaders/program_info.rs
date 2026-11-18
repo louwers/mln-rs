@@ -6,6 +6,8 @@ use crate::gfx_types::AttributeDataType::{
     self, Float, Float2, Float3, Float4, Short2, Short4, UByte4, UShort2, UShort4,
 };
 use crate::gpu::ShaderKey;
+use crate::projection_variant::ProjectionVariant;
+use crate::shaders::program_parameters::ProgramParameters;
 use crate::shaders::shader_defines::{
     ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_IMAGE_TEXTURE, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE,
     ID_CIRCLE_BLUR_VERTEX_ATTRIBUTE, ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE, ID_CIRCLE_OPACITY_VERTEX_ATTRIBUTE,
@@ -46,7 +48,7 @@ use crate::shaders::shader_source::BuiltIn;
 /// What a built-in program reads.
 #[derive(Debug)]
 pub struct ProgramInfo {
-    /// The name its shader group is registered under.
+    /// The name the renderer finds it by.
     pub name: &'static str,
     pub program: BuiltIn,
     /// Each per-vertex attribute's id and format.
@@ -573,10 +575,38 @@ pub fn program_info(program: BuiltIn) -> Option<&'static ProgramInfo> {
     }
 }
 
+/// The define that compiles a program's globe variant.
+pub const GLOBE_DEFINE: &str = "PROJECTION_GLOBE";
+
+const UNIFORM_PREFIX: &str = "HAS_UNIFORM_u_";
+
 impl ProgramInfo {
     /// The key of the program with `defines`.
     #[must_use]
     pub fn key(&self, defines: impl IntoIterator<Item = String>) -> ShaderKey {
         ShaderKey::new(self.program, defines)
+    }
+
+    /// The key of the variant compiled with `parameters` that reads the
+    /// paint properties `uniforms`, named as their attributes (`a_color`),
+    /// from uniforms, for `variant`'s projection. It has the parameters'
+    /// defines (`DEVICE_PIXEL_RATIO=<ratio>`), a `HAS_UNIFORM_u_*` define for
+    /// each property read from a uniform (`a_color` gives
+    /// `HAS_UNIFORM_u_color`), and the globe's define for its variant.
+    #[must_use]
+    pub fn variant_key<'a>(
+        &self,
+        parameters: &ProgramParameters,
+        uniforms: impl IntoIterator<Item = &'a str>,
+        variant: ProjectionVariant,
+    ) -> ShaderKey {
+        let parameters = parameters
+            .defines()
+            .iter()
+            .map(|(name, value)| if value.is_empty() { name.clone() } else { format!("{name}={value}") });
+        let uniforms =
+            uniforms.into_iter().map(|name| format!("{UNIFORM_PREFIX}{}", name.strip_prefix("a_").unwrap_or(name)));
+        let globe = (variant == ProjectionVariant::Globe).then(|| GLOBE_DEFINE.to_owned());
+        self.key(parameters.chain(uniforms).chain(globe))
     }
 }

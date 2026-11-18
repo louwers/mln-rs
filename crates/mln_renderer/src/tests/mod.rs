@@ -39,6 +39,8 @@ mod source_test;
 mod drop_on_workers_test;
 // Port-only: malformed vector tiles become tile errors, not panics.
 mod malformed_tile_test;
+// The context destroys what it released after what was made of it.
+mod release_test;
 // Port-only: a tile drives its layout jobs.
 mod tile_jobs_test;
 // Port-only: a tile's layout in two stages, and the worker over them.

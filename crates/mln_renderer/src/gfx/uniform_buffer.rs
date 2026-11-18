@@ -1,19 +1,14 @@
 use std::cell::Cell;
-use std::rc::Rc;
 
-use mln_gfx::buffer::BufferPtr;
 use mln_gfx::shaders::shader_defines::MAX_UBO_COUNT_PER_SHADER;
 
+use crate::gfx::buffer::SharedBuffer;
 use crate::gfx::context::Device;
 
-/// A buffer of [`Uniform`](mln_gfx::gpu::BufferUsage::Uniform) or
-/// [`Storage`](mln_gfx::gpu::BufferUsage::Storage) usage.
-pub(crate) type UniformBufferPtr = BufferPtr;
-
-/// A collection of uniform buffers by id.
+/// A collection of uniform and storage buffers by id.
 #[derive(Clone)]
 pub(crate) struct UniformBufferArray {
-    uniform_buffer_vector: [Option<UniformBufferPtr>; MAX_UBO_COUNT_PER_SHADER],
+    uniform_buffer_vector: [Option<SharedBuffer>; MAX_UBO_COUNT_PER_SHADER],
     epoch: u64,
 }
 
@@ -47,18 +42,18 @@ impl UniformBufferArray {
     }
 
     /// Get an uniform buffer element, or `None` if it doesn't exist.
-    pub(crate) fn get(&self, id: usize) -> Option<&UniformBufferPtr> {
+    pub(crate) fn get(&self, id: usize) -> Option<&SharedBuffer> {
         self.uniform_buffer_vector.get(id).and_then(Option::as_ref)
     }
 
     /// Set a new uniform buffer element or replace the existing one.
-    pub(crate) fn set(&mut self, id: usize, uniform_buffer: Option<UniformBufferPtr>) -> Option<&UniformBufferPtr> {
+    pub(crate) fn set(&mut self, id: usize, uniform_buffer: Option<SharedBuffer>) -> Option<&SharedBuffer> {
         debug_assert!(id < self.uniform_buffer_vector.len());
         if id >= self.uniform_buffer_vector.len() {
             return None;
         }
         let slot = &mut self.uniform_buffer_vector[id];
-        if !same_buffer(slot.as_ref(), uniform_buffer.as_ref()) {
+        if *slot != uniform_buffer {
             *slot = uniform_buffer;
             self.epoch = next_epoch();
         }
@@ -79,22 +74,14 @@ impl UniformBufferArray {
 
     fn write(&mut self, id: usize, data: &[u8], storage: bool, device: &mut Device) {
         let slot = &mut self.uniform_buffer_vector[id];
-        let before = slot.as_ref().map(Rc::as_ptr);
+        let before = slot.as_ref().map(SharedBuffer::key);
         if storage {
             device.write_storage_buffer(slot, data);
         } else {
             device.write_uniform_buffer(slot, data);
         }
-        if slot.as_ref().map(Rc::as_ptr) != before {
+        if slot.as_ref().map(SharedBuffer::key) != before {
             self.epoch = next_epoch();
         }
-    }
-}
-
-fn same_buffer(a: Option<&UniformBufferPtr>, b: Option<&UniformBufferPtr>) -> bool {
-    match (a, b) {
-        (Some(a), Some(b)) => Rc::ptr_eq(a, b),
-        (None, None) => true,
-        _ => false,
     }
 }

@@ -10,8 +10,8 @@ use mln_gfx::color_mode::{BlendFunction, Mask};
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
 use mln_gfx::gpu::validation::{
-    self, BindingsTags, BufferInfo, GeometryTags, LayoutTags, Lookup, PassTarget, PipelineTags, ShaderBinding,
-    TextureInfo,
+    self, BindingsTags, BufferInfo, Dependents, GeometryTags, LayoutTags, Lookup, PassTarget, PipelineTags,
+    ShaderBinding, TextureInfo,
 };
 use mln_gfx::gpu::{
     BindGroupEntry, BindingsDesc, BindingsId, BufferDesc, BufferId, BufferUsage, Caps, ClipDepthRange, DepthState,
@@ -314,6 +314,7 @@ pub struct MetalGpu {
     pipelines: SlotMap<PipelineId, Pipeline>,
     bindings: SlotMap<BindingsId, Bindings>,
     geometries: SlotMap<GeometryId, Geometry>,
+    dependents: Dependents,
     uploads: Uploads,
     /// The command buffer of the passes since the last flush.
     frame: Option<MTLCommandBufferPtr>,
@@ -367,6 +368,7 @@ impl MetalGpu {
             pipelines: SlotMap::with_key(),
             bindings: SlotMap::with_key(),
             geometries: SlotMap::with_key(),
+            dependents: Dependents::default(),
             uploads: Uploads::default(),
             frame: None,
             pass: None,
@@ -1422,7 +1424,9 @@ impl Gpu for MetalGpu {
                 }
             }
         }
-        Ok(self.bindings.insert(bindings))
+        let id = self.bindings.insert(bindings);
+        self.dependents.bindings(id, desc);
+        Ok(id)
     }
 
     fn create_geometry(&mut self, desc: &GeometryDesc<'_>) -> Result<GeometryId, GpuError> {
@@ -1444,12 +1448,15 @@ impl Gpu for MetalGpu {
         }
         let index_buffer = native(desc.index_buffer)?;
         let tags = GeometryTags { layout: self.layout_tags.tag(desc.shader, desc.layouts), ranges };
-        Ok(self.geometries.insert(Geometry { vertex_buffers, index_buffer, tags }))
+        let id = self.geometries.insert(Geometry { vertex_buffers, index_buffer, tags });
+        self.dependents.geometry(id, desc);
+        Ok(id)
     }
 
     /// Drops this backend's reference: the command buffers that use a
     /// resource keep it.
-    fn destroy(&mut self, resource: ResourceId) {
+    fn destroy(&mut self, resource: ResourceId) -> Result<(), GpuError> {
+        self.dependents.destroy(resource)?;
         match resource {
             ResourceId::Buffer(id) => drop(self.buffers.remove(id)),
             ResourceId::Texture(id) => drop(self.textures.remove(id)),
@@ -1460,6 +1467,7 @@ impl Gpu for MetalGpu {
             ResourceId::Geometry(id) => drop(self.geometries.remove(id)),
             ResourceId::Readback(id) => drop(self.readbacks.remove(id)),
         }
+        Ok(())
     }
 
     fn begin_pass(&mut self, desc: &PassDesc<'_>) -> Result<(), GpuError> {

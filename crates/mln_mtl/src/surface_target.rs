@@ -10,6 +10,7 @@ use std::rc::Rc;
 use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
 use mln_gfx::gpu::{
     Gpu as _, ResourceId, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage,
+    destroy_unused,
 };
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
@@ -159,7 +160,7 @@ impl SurfaceTarget {
         self.readback_requested.set(true);
         let taken = self.frame.borrow_mut().take_if(|frame| frame.drawable.texture().isFramebufferOnly());
         if let Some(frame) = taken {
-            self.gpu.borrow_mut().destroy(ResourceId::Texture(frame.color));
+            destroy_unused(&mut *self.gpu.borrow_mut(), [ResourceId::Texture(frame.color)]);
         }
     }
 
@@ -201,7 +202,7 @@ impl SurfaceTarget {
             Some((made, depth_stencil)) if made == size => depth_stencil,
             made => {
                 if let Some((_, old)) = made {
-                    gpu.destroy(ResourceId::Texture(old));
+                    destroy_unused(&mut *gpu, [ResourceId::Texture(old)]);
                 }
                 self.depth_stencil.set(None);
                 let desc = TextureDesc {
@@ -267,7 +268,7 @@ impl SurfaceTarget {
         if let Err(error) = gpu.flush(false) {
             Log::error(Event::Render, format!("Presenting the frame failed: {error}"));
         }
-        gpu.destroy(ResourceId::Texture(color));
+        destroy_unused(&mut *gpu, [ResourceId::Texture(color)]);
 
         if let Some(id) = readback {
             match gpu.take_readback(id, true) {
@@ -304,10 +305,10 @@ impl Drop for SurfaceTarget {
         self.overlay.borrow_mut().take();
         let mut gpu = self.gpu.borrow_mut();
         if let Some(frame) = self.frame.borrow_mut().take() {
-            gpu.destroy(ResourceId::Texture(frame.color));
+            destroy_unused(&mut *gpu, [ResourceId::Texture(frame.color)]);
         }
         if let Some((_, depth_stencil)) = self.depth_stencil.take() {
-            gpu.destroy(ResourceId::Texture(depth_stencil));
+            destroy_unused(&mut *gpu, [ResourceId::Texture(depth_stencil)]);
         }
     }
 }

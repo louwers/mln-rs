@@ -4,11 +4,11 @@
 //! draw's upload writes them to a buffer of the context's `Gpu`, freeing
 //! their data.
 
-use mln_gfx::buffer::BufferPtr;
 use mln_gfx::gpu::{BufferId, BufferUsage, GpuError};
 #[cfg(target_family = "wasm")]
 use mln_util::host_bytes::HostBytes;
 
+use crate::gfx::buffer::SharedBuffer;
 use crate::gfx::context::{Context, Device};
 pub(crate) use crate::gfx::store::SharedIndexes;
 
@@ -24,7 +24,7 @@ enum IndexData {
 /// Where the indexes are.
 enum Held {
     Data(IndexData),
-    Buffer(BufferPtr),
+    Buffer(SharedBuffer),
 }
 
 /// Indexes, which don't change once made: an upload moves them into their
@@ -63,7 +63,7 @@ impl Indexes {
 
     /// The buffer of the indexes, once uploaded.
     #[must_use]
-    pub(crate) fn buffer(&self) -> Option<&BufferPtr> {
+    pub(crate) fn buffer(&self) -> Option<&SharedBuffer> {
         match &self.held {
             Held::Buffer(buffer) => Some(buffer),
             Held::Data(_) => None,
@@ -142,7 +142,14 @@ impl DrawIndexes {
 
     /// The buffer of the indexes, once uploaded.
     #[must_use]
-    pub(crate) fn buffer(&self, context: &Context) -> Option<BufferId> {
-        self.indexes(context).and_then(Indexes::buffer).map(|buffer| buffer.id())
+    pub(crate) fn buffer_id(&self, context: &Context) -> Option<BufferId> {
+        self.buffer(context).map(SharedBuffer::id)
+    }
+
+    /// The buffer of the indexes, once uploaded, which geometry made of it
+    /// holds.
+    #[must_use]
+    pub(crate) fn buffer<'a>(&'a self, context: &'a Context) -> Option<&'a SharedBuffer> {
+        self.indexes(context).and_then(Indexes::buffer)
     }
 }

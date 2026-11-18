@@ -10,7 +10,6 @@
 
 use mln_expression::range::Range;
 use mln_gfx::gfx_types::AttributeDataType;
-use mln_gfx::shader_group::StringIDSetsPair;
 use mln_style::evaluated::{Evaluated, Faded};
 use mln_style::expression::{Dependency, EvaluationContext, Image, Value, ValueConverter};
 use mln_style::property_expression::PropertyExpression;
@@ -24,6 +23,7 @@ use mln_util::feature::feature_id_to_string;
 use mln_vec_map::VecMap;
 
 use crate::bucket_geometry::GeometryVec;
+use crate::gfx::shader_group::StringIDSetsPair;
 use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
 use crate::layout::pattern_layout::PatternDependency;

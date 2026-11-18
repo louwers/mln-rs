@@ -4,7 +4,7 @@
 use std::cell::Cell;
 
 use mln_gfx::frame::FrameImage;
-use mln_gfx::gpu::{Gpu as _, ResourceId, TargetFormats, TextureFormat};
+use mln_gfx::gpu::{ResourceId, TargetFormats, TextureFormat, destroy_unused};
 use mln_util::size::Size;
 
 use crate::renderer_backend::RendererBackend;
@@ -45,7 +45,7 @@ impl FrameImports {
         let mut gpu = backend.gpu();
         let depth_stencil = image.depth_stencil.filter(|_| depth_imported);
         for texture in [Some(image.color), depth_stencil].into_iter().flatten() {
-            gpu.destroy(ResourceId::Texture(texture));
+            destroy_unused(&mut *gpu, [ResourceId::Texture(texture)]);
         }
         true
     }

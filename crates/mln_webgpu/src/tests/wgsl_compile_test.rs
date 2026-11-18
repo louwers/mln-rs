@@ -6,7 +6,7 @@
 // The shaders in `REQUIRED` must compile; the rest are reported only.
 
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shader_group::GLOBE_DEFINE;
+use mln_gfx::shaders::program_info::GLOBE_DEFINE;
 use mln_util::hash::HashMap;
 
 use crate::Device;

@@ -1,7 +1,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 //! Compiles and links every GLSL program `shader_source()` returns on an
 //! OpenGL ES 3.0 context and on a desktop OpenGL one, through `GlGpu`, with
-//! the keys of the shader groups: in both projection variants, with every data-driven property as a vertex attribute and with
+//! the keys of the renderer's variants: in both projection variants, with every data-driven property as a vertex attribute and with
 //! every one as a uniform. Also checks each program against its tables:
 //! every uniform block is as large as the UBO the renderer writes for it,
 //! and every attribute and sampler the program has is in them.
@@ -9,8 +9,7 @@
 use std::collections::BTreeSet;
 
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shader_group::StringIDSetsPair;
-use mln_gfx::shader_registry::ShaderRegistry;
+use mln_gfx::shaders::program_info::program_info;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_util::hash::HashSet;
 
@@ -127,27 +126,25 @@ fn every_program_links_and_matches_its_tables_on_desktop_open_gl() {
 fn every_program_links_and_matches_its_tables(backend: &RendererBackend) {
     let version = glow::HasContext::version(backend.context().gl());
     println!("GL_RENDERER: {}, GL_VERSION: {}", backend.get_renderer_name(), version.vendor_info);
-    let registry = ShaderRegistry::new(&ProgramParameters::new(1.0, false));
+    let parameters = ProgramParameters::new(1.0, false);
 
     let mut programs = 0;
     for &shader_id in REGISTERED_SHADERS {
         let source = shader_source(shader_id).expect("a registered shader has a source");
-        let group = registry.shader_group(source.name).expect("a registered shader has a group");
+        let info = program_info(shader_id).expect("a registered shader has a program");
         let properties = properties(source);
-        let all_uniforms: StringIDSetsPair =
-            (properties.iter().map(|name| format!("a_{name}")).collect::<HashSet<_>>(), HashSet::default());
-        let mut property_sets = vec![StringIDSetsPair::default()];
+        let mut property_sets = vec![Vec::new()];
         if !properties.is_empty() {
-            property_sets.push(all_uniforms);
+            property_sets.push(properties.iter().map(String::as_str).collect());
         }
         for variant in [ProjectionVariant::Mercator, ProjectionVariant::Globe] {
             for (i, property_set) in property_sets.iter().enumerate() {
                 let what = format!("{} ({variant:?}, {})", source.name, ["attributes", "uniforms"][i]);
-                let shader = group.shader(property_set, variant);
+                let key = info.variant_key(&parameters, property_set.iter().copied(), variant);
                 // Fragment shaders default to mediump on a GPU and to highp
                 // on a CPU rasterizer, so both must link wherever this runs.
                 let compile = |highp_fragment| {
-                    backend.gpu().program(shader.key(), highp_fragment).unwrap_or_else(|error| {
+                    backend.gpu().program(&key, highp_fragment).unwrap_or_else(|error| {
                         panic!("{what} failed to compile or link with highp_fragment {highp_fragment}: {error}")
                     })
                 };

@@ -8,7 +8,9 @@ use std::ptr::NonNull;
 use std::rc::Rc;
 
 use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
-use mln_gfx::gpu::{Gpu as _, ResourceId, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureUsage};
+use mln_gfx::gpu::{
+    Gpu as _, ResourceId, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureUsage, destroy_unused,
+};
 use mln_gfx::{ConsumerSync, DepthStencilFormat, DepthStencilFormats, GpuSync, SyncKind, SyncKinds};
 use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
@@ -246,7 +248,7 @@ impl Drop for Imports {
     fn drop(&mut self) {
         let mut gpu = self.gpu.borrow_mut();
         for texture in self.color.drain(..).chain(self.depth.drain(..)).chain(self.own_depth.take()) {
-            gpu.destroy(ResourceId::Texture(texture));
+            destroy_unused(&mut *gpu, [ResourceId::Texture(texture)]);
         }
     }
 }

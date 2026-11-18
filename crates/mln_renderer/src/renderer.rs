@@ -8,7 +8,7 @@ use mln_gfx::rendering_stats::RenderingStats;
 use mln_gfx::shaders::layer_ubo::GlobalPaintParamsUBO;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::shader_defines::ID_GLOBAL_PAINT_PARAMS_UBO;
-use mln_gfx::{FrameImage, FrameTarget, Handoff, RendererBackend, ScissorRect, ShaderRegistry};
+use mln_gfx::{FrameImage, FrameTarget, Handoff, RendererBackend, ScissorRect};
 use mln_map_types::{MapDebugOptions, MapView};
 use mln_style::layers::CustomLayerFrame;
 use mln_text::GlyphCache;
@@ -26,6 +26,7 @@ use crate::clip_masks::ClipMasks;
 use crate::frame::Frame;
 use crate::frame_projection::{self, FrameProjection};
 use crate::gfx::context::Context;
+use crate::gfx::shader_registry::ShaderRegistry;
 use crate::layer_composite::{Composite, LayerComposite};
 use crate::layer_drawing::DrawOrder;
 use crate::paint_parameters::{OpenPass, PaintParameters};
@@ -182,19 +183,22 @@ impl Renderer {
 
     /// Draws at `pixel_ratio` device pixels per logical pixel from the next
     /// frame on, which should be the map's (`Map::set_pixel_ratio`). The
-    /// renderer makes its shaders and draws again, and keeps its
-    /// tiles. The host sizes the backend's framebuffer for the new ratio.
+    /// renderer makes its shaders and draws again, frees the ones they
+    /// replace, and keeps its tiles. The host sizes the backend's
+    /// framebuffer for the new ratio.
     pub fn set_pixel_ratio(&mut self, pixel_ratio: f32) {
         if pixel_ratio == self.encoder.pixel_ratio {
             return;
         }
         // The shaders build the pixel ratio in on some backends, so a new
-        // ratio takes new shaders, and new draws that use them.
+        // ratio takes new shaders, and new draws that use them. The next
+        // frame destroys the old ones after the draws that used them.
         let encoder = &mut self.encoder;
         encoder.pixel_ratio = pixel_ratio;
         encoder.static_data = None;
         encoder.clip_masks = ClipMasks::default();
         encoder.layer_composite = LayerComposite::default();
+        encoder.context.release_shaders();
         self.orchestrator.release_shaders();
     }
 
@@ -427,8 +431,8 @@ impl Renderer {
     }
 
     /// The rendering stats, which count the renderer's resources until it
-    /// releases them. A texture counts until the end of the frame that
-    /// follows its release, or until
+    /// destroys them: a buffer or texture counts until the end of the frame
+    /// that follows its release, or until
     /// [`reduce_memory_use`](Self::reduce_memory_use).
     #[must_use]
     pub fn rendering_stats(&self) -> RenderingStats {

@@ -12,7 +12,7 @@ use std::fmt::Write as _;
 use std::mem::size_of;
 
 use mln_gfx::gfx_types::AttributeDataType;
-use mln_gfx::shader_group::GLOBE_DEFINE;
+use mln_gfx::shaders::program_info::GLOBE_DEFINE;
 use mln_gfx::shaders::shader_defines::*;
 use mln_gfx::shaders::shader_source::BuiltIn;
 use mln_gfx::shaders::*;

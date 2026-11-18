@@ -9,7 +9,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE, ID_ATMOSPHERE_PROPS_UBO, ID_SKY_POS_VERTEX_ATTRIBUTE, ID_SKY_PROPS_UBO,
 };
 use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
-use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode, ShaderProgramPtr, ShaderRegistry};
+use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
 use mln_map_types::TransformState;
 use mln_style_types::LightAnchorType;
 use mln_util::Color;
@@ -22,6 +22,8 @@ use mln_util::vectors::Vec4;
 use crate::draw::{DrawGeometry, DrawObjects, Textures, raw_vertices};
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
+use crate::gfx::shader_program::ShaderProgramPtr;
+use crate::gfx::shader_registry::ShaderRegistry;
 use crate::layer_drawing::{DrawDepth, FrameDraw, SingleDraw};
 use crate::render_light::EvaluatedLight;
 use crate::render_sky::EvaluatedSky;

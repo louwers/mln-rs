@@ -1,10 +1,10 @@
-use mln_gfx::shaders::shader_program::ShaderProgram;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_style_types::AlignmentType;
 
 use crate::draw::{DrawObjects, Textures};
 use crate::gfx::context::Context;
+use crate::gfx::shader_program::ShaderProgram;
 use crate::gfx::store::SharedTexture;
 use crate::paint_parameters::PaintParameters;
 use crate::tile_render_data::TileAtlasTextures;

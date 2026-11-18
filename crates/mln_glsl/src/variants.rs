@@ -2,7 +2,7 @@
 
 use std::fmt::Write;
 
-use mln_gfx::shader_group::GLOBE_DEFINE;
+use mln_gfx::shaders::program_info::GLOBE_DEFINE;
 
 use crate::ShaderSource;
 

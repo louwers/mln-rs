@@ -8,7 +8,9 @@ use std::time::Instant;
 
 use ash::vk;
 use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
-use mln_gfx::gpu::{Gpu as _, ResourceId, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureUsage};
+use mln_gfx::gpu::{
+    Gpu as _, ResourceId, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureUsage, destroy_unused,
+};
 use mln_gfx::{ConsumerSync, GpuSync, SyncKind};
 use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
@@ -192,7 +194,7 @@ impl Drop for Imports {
     fn drop(&mut self) {
         let mut gpu = self.backend.gpu();
         for texture in self.color.drain(..).chain(self.depth.drain(..)).chain(self.own_depth.take()) {
-            gpu.destroy(ResourceId::Texture(texture));
+            destroy_unused(&mut *gpu, [ResourceId::Texture(texture)]);
         }
     }
 }

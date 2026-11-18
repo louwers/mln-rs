@@ -1,11 +1,11 @@
 //! Writes draws' vertex attributes to buffers of the
 //! backend's [`Gpu`](mln_gfx::gpu::Gpu).
 
-use mln_gfx::buffer::BufferPtr;
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::gpu::GpuError;
 use mln_gfx::shaders::shader_defines::MAX_ATTRIBUTE_COUNT_PER_SHADER;
 
+use crate::gfx::buffer::SharedBuffer;
 use crate::gfx::context::Context;
 use crate::gfx::vertex_attribute::VertexAttributeArray;
 
@@ -24,7 +24,7 @@ pub(crate) struct AttributeDescriptor {
 pub(crate) struct AttributeBinding {
     pub(crate) attribute: AttributeDescriptor,
     pub(crate) vertex_stride: u32,
-    pub(crate) buffer: Option<BufferPtr>,
+    pub(crate) buffer: Option<SharedBuffer>,
     pub(crate) vertex_offset: u32,
 }
 
@@ -32,7 +32,7 @@ impl PartialEq for AttributeBinding {
     fn eq(&self, rhs: &Self) -> bool {
         self.attribute == rhs.attribute
             && self.vertex_stride == rhs.vertex_stride
-            && self.buffer.as_ref().map(|buffer| buffer.id()) == rhs.buffer.as_ref().map(|buffer| buffer.id())
+            && self.buffer == rhs.buffer
             && self.vertex_offset == rhs.vertex_offset
     }
 }

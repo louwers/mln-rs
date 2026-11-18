@@ -1,9 +1,9 @@
-use mln_gfx::ShaderRegistry;
 use mln_gfx::shaders::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
 use mln_util::constants;
 
 use crate::buckets::fill_extrusion_bucket::FillExtrusionStaticVertex;
 use crate::buckets::raster_bucket::RasterLayoutVertex;
+use crate::gfx::shader_registry::ShaderRegistry;
 
 /// The most walls whose quads a segment draws: as many as its 16-bit
 /// indices reach.

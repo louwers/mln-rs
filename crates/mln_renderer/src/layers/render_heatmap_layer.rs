@@ -8,7 +8,6 @@ use std::sync::Arc;
 
 use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
 use mln_gfx::shaders::heatmap_layer_ubo::{HeatmapDrawableUBO, HeatmapEvaluatedPropsUBO};
 use mln_gfx::shaders::heatmap_texture_layer_ubo::HeatmapTexturePropsUBO;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
@@ -20,7 +19,7 @@ use mln_gfx::shaders::shader_defines::{
 };
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
-use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode, ShaderProgramPtr, ShaderRegistry};
+use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_style::expression::{Dependency, GlobalStateMap, global_state_refs_intersect};
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Heatmap;
@@ -40,6 +39,9 @@ use crate::buckets::heatmap_bucket::{HeatmapBinders, HeatmapBucket, HeatmapLayou
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
+use crate::gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
+use crate::gfx::shader_program::ShaderProgramPtr;
+use crate::gfx::shader_registry::ShaderRegistry;
 use crate::gfx::store::SharedTexture;
 use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;

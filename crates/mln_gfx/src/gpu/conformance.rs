@@ -7,8 +7,8 @@
 //! [`foreign_ids`] that a backend takes no other backend's ids,
 //! [`readbacks`] what a readback copies, [`custom_layers`] what a custom
 //! layer is lent, [`imported_textures`] textures made elsewhere, and
-//! [`destroyed_resources_draw_until_their_users_go`] that a destroyed
-//! resource draws while bindings or geometry hold it.
+//! [`resources_in_use`] what destroying a resource that bindings or
+//! geometry were made of does.
 //! [`instanced_walls`] draws fill extrusion walls over the left half, and
 //! [`wall_quads`] draws them again from quads of their own. The
 //! other cases draw one color over the whole target, as
@@ -122,9 +122,8 @@ fn fixed(color: ColorMode, stencil: StencilState) -> FixedState {
 
 /// Draws the frame through `gpu` into an [`Rgba8Unorm`](TextureFormat)
 /// texture of [`SIZE`], and checks the texels it reads back. Then checks
-/// that bindings missing what their shader reads fail, and that a
-/// destroyed buffer stays as long as geometry made of it, though calls
-/// that name it fail. Returns the error of a call that should succeed.
+/// that bindings missing what their shader reads fail. Returns the error of
+/// a call that should succeed.
 ///
 /// # Panics
 ///
@@ -152,18 +151,6 @@ pub fn clip_mask_and_background(gpu: &mut impl Gpu) -> Result<(), GpuError> {
         entries: &frame.mask_entries,
     });
     assert!(matches!(unbound, Err(GpuError::Invalid(_))), "bindings without the shader's buffers");
-    gpu.destroy(frame.quad.into());
-    assert!(matches!(gpu.write_buffer(frame.quad, 0, &[0; 4]), Err(GpuError::UnknownId("buffer"))));
-    let layouts = [position_layout(ID_BACKGROUND_POS_VERTEX_ATTRIBUTE)];
-    let geometry = gpu.create_geometry(&GeometryDesc {
-        shader: frame.background_shader,
-        layouts: &layouts,
-        vertex_buffers: &[(frame.quad, 0)],
-        index_buffer: frame.indices,
-    });
-    assert!(matches!(geometry, Err(GpuError::UnknownId("buffer"))), "geometry of a destroyed buffer");
-    frame.draw(gpu, frame_pass(color, depth_stencil), true)?;
-    check_clipped(&read(gpu, color)?);
     Ok(())
 }
 
@@ -185,8 +172,6 @@ fn frame_pass(color: TextureId, depth_stencil: TextureId) -> PassDesc<'static> {
 /// over the left half and no color, and the background, where the stencil
 /// is 1.
 struct ClippedFrame {
-    quad: BufferId,
-    indices: BufferId,
     mask: (PipelineId, BindingsId, GeometryId),
     background: (PipelineId, BindingsId, GeometryId),
     background_shader: ShaderId,
@@ -295,8 +280,6 @@ fn clipped_frame(gpu: &mut impl Gpu) -> Result<ClippedFrame, GpuError> {
         index_buffer: indices,
     })?;
     Ok(ClippedFrame {
-        quad,
-        indices,
         mask: (mask_pipeline, mask_bindings, mask_geometry),
         background: (background_pipeline, background_bindings, background_geometry),
         background_shader,
@@ -349,8 +332,8 @@ pub fn imported_textures<G: Gpu>(
     let frame = clipped_frame(gpu)?;
     frame.draw(gpu, frame_pass(imported_color, imported_depth_stencil), true)?;
     check_clipped(&read(gpu, imported_color)?);
-    gpu.destroy(ResourceId::Texture(imported_color));
-    gpu.destroy(ResourceId::Texture(imported_depth_stencil));
+    gpu.destroy(ResourceId::Texture(imported_color))?;
+    gpu.destroy(ResourceId::Texture(imported_depth_stencil))?;
     gpu.flush(true)?;
     let gone = gpu.begin_pass(&frame_pass(imported_color, imported_depth_stencil));
     assert!(matches!(gone, Err(GpuError::UnknownId("texture"))), "a pass into destroyed imports");

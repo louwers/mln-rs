@@ -3,19 +3,14 @@ use std::rc::Rc;
 
 use ash::vk;
 use mln_gfx::gpu::conformance::{
-    clip_mask_and_background, custom_layers, depth_only, destroyed_resources_draw_until_their_users_go, foreign_ids,
-    imported_textures, instanced_walls, invalid_calls, readbacks, topologies, transparent_replace, vertex_layouts,
-    wall_quads,
+    clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures, instanced_walls,
+    invalid_calls, readbacks, resources_in_use, topologies, transparent_replace, vertex_layouts, wall_quads,
 };
 use mln_gfx::gpu::{
-    BindGroupEntry, BindingsDesc, BufferDesc, BufferUsage, ColorAttachment, Gpu as _, GpuError, LoadOp, PassDesc,
-    ShaderKey, TextureDesc, TextureFormat, TextureRegion, TextureUsage, read_texels,
+    ColorAttachment, Gpu as _, GpuError, LoadOp, PassDesc, ShaderKey, TextureDesc, TextureFormat, TextureRegion,
+    TextureUsage, read_texels,
 };
-use mln_gfx::shader_group::GLOBE_DEFINE;
-use mln_gfx::shaders::background_layer_ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
-use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::shader_defines::{ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_PROPS_UBO, ID_PROJECTION_UBO};
-use mln_gfx::shaders::shader_source::BuiltIn;
+use mln_gfx::shaders::program_info::GLOBE_DEFINE;
 use mln_glsl::PROGRAMS;
 use mln_util::Color;
 use mln_util::size::Size;
@@ -29,10 +24,9 @@ fn clip_mask_and_background_through_gpu() {
 }
 
 #[test]
-fn destroyed_resources_draw_until_their_users_go_through_gpu() {
+fn resources_in_use_through_gpu() {
     let device = Device::new(None).expect("Vulkan device");
-    destroyed_resources_draw_until_their_users_go(&mut VulkanGpu::new(&device).expect("VulkanGpu"))
-        .expect("the frames");
+    resources_in_use(&mut VulkanGpu::new(&device).expect("VulkanGpu")).expect("the frames");
 }
 
 #[test]
@@ -117,9 +111,17 @@ fn destroy_later_waits_for_the_next_submit() {
 }
 
 // A destroyed buffer whose windows aren't all current stays while bindings
-// hold it, and goes with the last of them though no frame follows.
+// hold it, and goes with the last of them though no frame follows. Debug
+// builds refuse to destroy a buffer that bindings hold.
+#[cfg(not(debug_assertions))]
 #[test]
 fn destroyed_stale_buffers_go_with_their_last_bindings() {
+    use mln_gfx::gpu::{BindGroupEntry, BindingsDesc, BufferDesc, BufferUsage};
+    use mln_gfx::shaders::background_layer_ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
+    use mln_gfx::shaders::layer_ubo::ProjectionUBO;
+    use mln_gfx::shaders::shader_defines::{ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_PROPS_UBO, ID_PROJECTION_UBO};
+    use mln_gfx::shaders::shader_source::BuiltIn;
+
     let device = Device::new(None).expect("Vulkan device");
     let mut gpu = VulkanGpu::new(&device).expect("VulkanGpu");
     let shader = gpu.create_shader(&ShaderKey::new(BuiltIn::BackgroundShader, [])).expect("the shader");
@@ -138,10 +140,10 @@ fn destroyed_stale_buffers_go_with_their_last_bindings() {
     let bindings =
         gpu.create_bindings(&BindingsDesc { label: "background", shader, entries: &entries }).expect("the bindings");
     for buffer in buffers {
-        gpu.destroy(buffer.into());
+        gpu.destroy(buffer.into()).expect("the destroy");
     }
     assert_eq!(gpu.destroyed_stale_count(), 3, "while the bindings hold them");
-    gpu.destroy(bindings.into());
+    gpu.destroy(bindings.into()).expect("the destroy");
     gpu.flush(true).expect("the flush");
     assert_eq!(gpu.destroyed_stale_count(), 0, "after the bindings go");
 }

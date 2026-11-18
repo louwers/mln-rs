@@ -12,7 +12,6 @@ use glam::Vec2;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::polyline_generator::{PolylineGenerator, PolylineGeneratorOptions};
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shader_group::StringIDSetsPair;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::line_layer_ubo::{LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO};
 use mln_gfx::shaders::segment::SegmentBase;
@@ -22,7 +21,6 @@ use mln_gfx::shaders::shader_defines::{
     ID_LINE_OPACITY_VERTEX_ATTRIBUTE, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
     ID_PROJECTION_UBO,
 };
-use mln_gfx::shaders::shader_program::ShaderProgramPtr;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::MapDebugOptions;
 use mln_style::Source;
@@ -42,6 +40,8 @@ use crate::buckets::line_bucket::{LineBucket, LineLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
+use crate::gfx::shader_group::StringIDSetsPair;
+use crate::gfx::shader_program::ShaderProgramPtr;
 use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
 use crate::layer_drawing::{DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptDraw, LayerDraws};
 use crate::layer_type::ErasedEvaluatedLayer;

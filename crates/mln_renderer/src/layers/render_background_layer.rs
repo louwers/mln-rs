@@ -14,7 +14,7 @@ use mln_gfx::shaders::shader_defines::{
 };
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
-use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode, ShaderProgramPtr};
+use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Background;
 use mln_style_types::TranslateAnchorType;
@@ -28,6 +28,7 @@ use super::cast_matrix;
 use crate::bucket::NoBucket;
 use crate::draw::{DrawGeometry, DrawObjects, Textures, raw_vertices};
 use crate::gfx::indexes::DrawIndexes;
+use crate::gfx::shader_program::ShaderProgramPtr;
 use crate::globe_tile_mesh::raw_globe_tile_mesh;
 use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDrawing, TileDraws};
 use crate::layer_type::{EvaluatedLayer, LayerType};

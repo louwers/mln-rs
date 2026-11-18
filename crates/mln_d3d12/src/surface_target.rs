@@ -23,7 +23,7 @@ use mln_gfx::Window;
 use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
 use mln_gfx::gpu::{
     ColorAttachment, Gpu as _, LoadOp, PassDesc, ResourceId, TargetFormats, TextureDesc, TextureFormat, TextureId,
-    TextureUsage,
+    TextureUsage, destroy_unused,
 };
 use mln_gfx::window::raw_window_handle::RawWindowHandle;
 use mln_util::error::Error;
@@ -349,7 +349,7 @@ impl SurfaceTarget {
         let mut gpu = self.backend.d3d12_gpu();
         if let Some(old) = buffers.take() {
             for texture in old.color.into_iter().chain([old.depth_stencil]) {
-                gpu.destroy(ResourceId::Texture(texture));
+                destroy_unused(&mut *gpu, [ResourceId::Texture(texture)]);
             }
             gpu.flush(true).map_err(|error| Error::native(format!("Waiting for the GPU failed: {error}")))?;
             // SAFETY: nothing holds the buffers any more: their textures
@@ -374,7 +374,7 @@ impl SurfaceTarget {
                 Ok(texture) => color.push(texture),
                 Err(error) => {
                     for texture in color {
-                        gpu.destroy(ResourceId::Texture(texture));
+                        destroy_unused(&mut *gpu, [ResourceId::Texture(texture)]);
                     }
                     return Err(Error::native(format!("Importing a swap chain buffer failed: {error}")));
                 }
@@ -390,7 +390,7 @@ impl SurfaceTarget {
             Ok(texture) => texture,
             Err(error) => {
                 for texture in color {
-                    gpu.destroy(ResourceId::Texture(texture));
+                    destroy_unused(&mut *gpu, [ResourceId::Texture(texture)]);
                 }
                 return Err(Error::native(format!("Making the depth and stencil texture failed: {error}")));
             }
@@ -536,7 +536,7 @@ impl Drop for SurfaceTarget {
         }
         if let Some(buffers) = self.buffers.get_mut().take() {
             for texture in buffers.color.into_iter().chain([buffers.depth_stencil]) {
-                gpu.destroy(ResourceId::Texture(texture));
+                destroy_unused(&mut *gpu, [ResourceId::Texture(texture)]);
             }
         }
         let _ = gpu.flush(true);

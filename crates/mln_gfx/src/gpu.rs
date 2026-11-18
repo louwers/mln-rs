@@ -26,6 +26,7 @@ use std::any::Any;
 use std::sync::Arc;
 
 use mln_util::Color;
+use mln_util::logging::{Event, Log};
 pub use mln_util::mat4::ClipDepthRange;
 use mln_util::size::Size;
 
@@ -49,6 +50,10 @@ pub enum GpuError {
     /// backend made, or one already destroyed.
     #[error("no such {0}")]
     UnknownId(&'static str),
+    /// A destroy of a resource that live bindings or geometry were made of,
+    /// which debug builds refuse.
+    #[error("the {0} is in use by bindings or geometry")]
+    InUse(&'static str),
     /// The backend can't make what the descriptor asks for, such as a
     /// texture format the device lacks.
     #[error("unsupported: {0}")]
@@ -524,11 +529,14 @@ pub struct Draw {
 /// [`SlotMap`]. Another backend's id names nothing there: a call that names
 /// one fails with [`GpuError::UnknownId`], and destroying it does nothing.
 ///
+/// The caller destroys bindings and geometry before the buffers, textures
+/// and samplers they were made of: in debug builds, destroying one that
+/// live bindings or geometry were made of fails with [`GpuError::InUse`]
+/// and keeps it, as every backend checks with [`validation::Dependents`].
 /// Destroying a resource frees it once nothing uses it: the work flushed
-/// and recorded so far, and the pipelines, bindings and geometry made of
-/// it. Its id is invalid from the call on: a later call that names it
-/// fails with [`GpuError::UnknownId`], and destroying it again does
-/// nothing.
+/// and recorded so far, and the pipelines made of it. Its id is invalid
+/// from the call on: a later call that names it fails with
+/// [`GpuError::UnknownId`], and destroying it again does nothing.
 ///
 /// A draw reads what the buffers and textures it binds hold when the work
 /// is flushed, or what they held when it was recorded, for each write since
@@ -586,8 +594,9 @@ pub trait Gpu {
     /// buffer for each layout but not one.
     fn create_geometry(&mut self, desc: &GeometryDesc<'_>) -> Result<GeometryId, GpuError>;
 
-    /// Destroys `resource`, or drops a readback without reading it.
-    fn destroy(&mut self, resource: ResourceId);
+    /// Destroys `resource`, or drops a readback without reading it. Fails,
+    /// destroying nothing, as [`validation::Dependents::destroy`] does.
+    fn destroy(&mut self, resource: ResourceId) -> Result<(), GpuError>;
 
     /// Begins a pass over `desc`'s attachments, which are render targets of
     /// one size, a color one and a depth one, at least one of them. Fails
@@ -650,11 +659,22 @@ pub fn read_texels(
     region: TextureRegion,
 ) -> Result<Vec<u8>, GpuError> {
     let readback = gpu.read_texture(texture, region)?;
-    let texels = gpu.take_readback(readback, true)?;
-    texels.ok_or_else(|| {
-        gpu.destroy(ResourceId::Readback(readback));
-        GpuError::Unsupported("waiting for a readback".to_owned())
-    })
+    if let Some(texels) = gpu.take_readback(readback, true)? {
+        return Ok(texels);
+    }
+    gpu.destroy(ResourceId::Readback(readback))?;
+    Err(GpuError::Unsupported("waiting for a readback".to_owned()))
+}
+
+/// Destroys `resources`, of which no bindings or geometry were made, such as
+/// a frame target's textures and readbacks. Logs a failure, which only a
+/// caller that made bindings or geometry of one of them causes.
+pub fn destroy_unused(gpu: &mut (impl Gpu + ?Sized), resources: impl IntoIterator<Item = ResourceId>) {
+    for resource in resources {
+        if let Err(error) = gpu.destroy(resource) {
+            Log::error(Event::Render, format!("Destroying {resource:?} failed: {error}"));
+        }
+    }
 }
 
 #[cfg(test)]

@@ -15,7 +15,7 @@ use mln_gfx::gpu::{
     BindGroupEntry, BindingsDesc, BindingsId, BufferDesc, BufferId, BufferUsage, Caps, ClipDepthRange, Draw,
     DynamicState, GeometryDesc, GeometryId, Gpu, GpuError, LoadOp, PassDesc, PipelineDesc, PipelineId, ReadbackId,
     ResourceId, SamplerId, Scissor, ShaderId, ShaderKey, SlotMap, TextureDesc, TextureFormat, TextureId, TextureRegion,
-    TextureUsage, VertexStep,
+    TextureUsage, VertexStep, destroy_unused,
 };
 use mln_gfx::shaders::shader_defines::{DRAWABLE_RESERVED_UBO_COUNT, LAYER_SSBO_START_ID};
 use mln_gfx::texture2d::SamplerState;
@@ -283,6 +283,8 @@ pub struct D3d12Gpu {
     pipelines: SlotMap<PipelineId, Pipeline>,
     bindings: SlotMap<BindingsId, Bindings>,
     geometries: SlotMap<GeometryId, Geometry>,
+    /// What the live bindings and geometry were made of.
+    dependents: validation::Dependents,
     readbacks: SlotMap<ReadbackId, Readback>,
     /// The memory of the last readback taken, which the next readback of
     /// its size copies into, as a frame read back each time is.
@@ -455,6 +457,7 @@ impl D3d12Gpu {
             pipelines: SlotMap::with_key(),
             bindings: SlotMap::with_key(),
             geometries: SlotMap::with_key(),
+            dependents: validation::Dependents::default(),
             readbacks: SlotMap::with_key(),
             spare_readback: None,
             copies: None,
@@ -1009,7 +1012,7 @@ impl Gpu for D3d12Gpu {
         if desc.usage.render_target
             && let Err(error) = self.clear_new_target(id, depth)
         {
-            self.destroy(ResourceId::Texture(id));
+            destroy_unused(self, [ResourceId::Texture(id)]);
             return Err(error);
         }
         Ok(id)
@@ -1193,7 +1196,9 @@ impl Gpu for D3d12Gpu {
             }
         };
         let tags = BindingsTags { shader: desc.shader, elements };
-        Ok(self.bindings.insert(Bindings { buffers, textures, keep: (kept_buffers, kept_textures), tags }))
+        let id = self.bindings.insert(Bindings { buffers, textures, keep: (kept_buffers, kept_textures), tags });
+        self.dependents.bindings(id, desc);
+        Ok(id)
     }
 
     fn create_geometry(&mut self, desc: &GeometryDesc<'_>) -> Result<GeometryId, GpuError> {
@@ -1224,13 +1229,16 @@ impl Gpu for D3d12Gpu {
         };
         keep.push(Rc::clone(&index.memory));
         let tags = GeometryTags { layout: self.layout_tags.tag(desc.shader, desc.layouts), ranges };
-        Ok(self.geometries.insert(Geometry { vertex_views, index_view, keep, tags }))
+        let id = self.geometries.insert(Geometry { vertex_views, index_view, keep, tags });
+        self.dependents.geometry(id, desc);
+        Ok(id)
     }
 
-    fn destroy(&mut self, resource: ResourceId) {
+    fn destroy(&mut self, resource: ResourceId) -> Result<(), GpuError> {
         fn held<T: Any>(value: Option<T>) -> Option<Garbage> {
             value.map(|value| Garbage::Held(Box::new(value)))
         }
+        self.dependents.destroy(resource)?;
         let garbage = match resource {
             ResourceId::Buffer(id) => match self.buffers.remove(id) {
                 // Bindings may still read the buffer in each window.
@@ -1260,6 +1268,7 @@ impl Gpu for D3d12Gpu {
         if let Some(garbage) = garbage {
             self.garbage.push((self.serial, garbage));
         }
+        Ok(())
     }
 
     fn begin_pass(&mut self, desc: &PassDesc<'_>) -> Result<(), GpuError> {

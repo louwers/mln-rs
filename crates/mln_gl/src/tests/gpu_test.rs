@@ -4,9 +4,8 @@ use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
 use mln_gfx::gpu::conformance::{
-    clip_mask_and_background, custom_layers, depth_only, destroyed_resources_draw_until_their_users_go, foreign_ids,
-    imported_textures, instanced_walls, invalid_calls, readbacks, topologies, transparent_replace, vertex_layouts,
-    wall_quads,
+    clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures, instanced_walls,
+    invalid_calls, readbacks, resources_in_use, topologies, transparent_replace, vertex_layouts, wall_quads,
 };
 use mln_gfx::gpu::{
     BindGroupEntry, BindingsDesc, BindingsId, BufferDesc, BufferId, BufferUsage, ColorAttachment, DepthState,
@@ -124,11 +123,11 @@ fn readbacks_through_gpu() {
 }
 
 #[test]
-fn destroyed_resources_draw_until_their_users_go_through_gpu() {
+fn resources_in_use_through_gpu() {
     let Some(mut gpu) = gpu() else {
         return;
     };
-    destroyed_resources_draw_until_their_users_go(&mut gpu).expect("the frames");
+    resources_in_use(&mut gpu).expect("the frames");
 }
 
 #[test]
@@ -410,8 +409,8 @@ fn imported_framebuffers_draw_as_they_are() {
         })
         .unwrap();
     assert!(matches!(gpu.begin_pass(&pass(Some(color_id), Some(own_depth))), Err(GpuError::Invalid(_))));
-    gpu.destroy(ResourceId::Texture(color_id));
-    gpu.destroy(ResourceId::Texture(depth_id));
+    gpu.destroy(ResourceId::Texture(color_id)).expect("the destroy");
+    gpu.destroy(ResourceId::Texture(depth_id)).expect("the destroy");
     // SAFETY: the objects are the test's, which the backend forgot.
     gpu.with_gl(|gl| unsafe {
         assert!(gl.is_framebuffer(framebuffer), "the framebuffer stays");

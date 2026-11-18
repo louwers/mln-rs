@@ -5,20 +5,21 @@
 use std::rc::Rc;
 
 use mln_gfx::gpu::{Gpu, GpuError, SamplerId, TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage};
-use mln_gfx::released::Released;
 use mln_gfx::rendering_stats::RenderingStats;
 use mln_gfx::texture2d::SamplerState;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
+use crate::gfx::resources::{Resources, SharedGpuTexture};
+
 /// A texture of the renderer: its size, format and sampler state, the image
 /// it waits to upload, and once made, a texture of the backend's
-/// [`Gpu`](mln_gfx::gpu::Gpu), which goes to the renderer's release queue
-/// (see [`Released`]) when it is replaced or the texture drops. The context
-/// changes it, and lends it to set up as a [`TextureMut`].
+/// [`Gpu`](mln_gfx::gpu::Gpu) in the context's store, which the texture lets
+/// go of when it replaces it or drops, and which bindings made of it hold
+/// until they go. The context changes it, and lends it to set up as a
+/// [`TextureMut`].
 pub(crate) struct Texture2D {
-    texture: Option<TextureId>,
-    released: Rc<Released>,
+    texture: Option<SharedGpuTexture>,
     size: Size,
     format: TextureFormat,
     render_target: bool,
@@ -30,12 +31,10 @@ pub(crate) struct Texture2D {
 }
 
 impl Texture2D {
-    /// An RGBA texture without a size, whose backend's texture goes to
-    /// `released`.
-    pub(crate) fn new(released: &Rc<Released>) -> Texture2D {
+    /// An RGBA texture without a size.
+    pub(crate) fn new() -> Texture2D {
         Texture2D {
             texture: None,
-            released: Rc::clone(released),
             size: Size::new(0, 0),
             format: TextureFormat::Rgba8Unorm,
             render_target: false,
@@ -94,11 +93,16 @@ impl Texture2D {
         self.image.is_some()
     }
 
-    /// Makes the backend's texture of the size and format set through `gpu`,
-    /// unless it is made, counting it in `stats`. Fails for an empty size.
-    pub(crate) fn create(&mut self, gpu: &mut dyn Gpu, stats: &mut RenderingStats) -> Result<TextureId, GpuError> {
-        if let Some(texture) = self.texture {
-            return Ok(texture);
+    /// The backend's texture, once made, which bindings made of it hold.
+    pub(crate) fn gpu_texture(&self) -> Option<&SharedGpuTexture> {
+        self.texture.as_ref()
+    }
+
+    /// Makes the backend's texture of the size and format set through `gpu`
+    /// into `resources`, unless it is made. Fails for an empty size.
+    pub(crate) fn create(&mut self, gpu: &mut dyn Gpu, resources: &mut Resources) -> Result<TextureId, GpuError> {
+        if let Some(texture) = &self.texture {
+            return Ok(texture.id());
         }
         let desc = TextureDesc {
             label: if self.render_target { "render target" } else { "texture" },
@@ -106,12 +110,10 @@ impl Texture2D {
             format: self.format,
             usage: TextureUsage { sampled: true, render_target: self.render_target, copy_src: self.render_target },
         };
-        let texture = gpu.create_texture(&desc)?;
-        stats.num_created_textures += 1;
-        stats.num_active_textures += 1;
-        stats.mem_textures += self.bytes() as i32;
+        let texture = resources.texture(gpu, &desc, Some(self.bytes()))?;
+        let id = texture.id();
         self.texture = Some(texture);
-        Ok(texture)
+        Ok(id)
     }
 
     /// Writes `data`, the texels of a texture of `size` in rows from the top,
@@ -120,7 +122,7 @@ impl Texture2D {
     pub(crate) fn upload_data(
         &mut self,
         gpu: &mut dyn Gpu,
-        stats: &mut RenderingStats,
+        resources: &mut Resources,
         data: &[u8],
         size: Size,
     ) -> Result<(), GpuError> {
@@ -128,11 +130,11 @@ impl Texture2D {
         if size.is_empty() {
             return Ok(());
         }
-        let texture = self.create(gpu, stats)?;
+        let texture = self.create(gpu, resources)?;
         if data.is_empty() {
             return Ok(());
         }
-        write(gpu, stats, texture, data, TextureRegion { x: 0, y: 0, size })
+        write(gpu, &mut resources.stats, texture, data, TextureRegion { x: 0, y: 0, size })
     }
 
     /// Writes `data`, the texels of a region of `size` in rows from the top,
@@ -140,28 +142,29 @@ impl Texture2D {
     pub(crate) fn upload_sub_region(
         &mut self,
         gpu: &mut dyn Gpu,
-        stats: &mut RenderingStats,
+        resources: &mut Resources,
         data: &[u8],
         size: Size,
         x: u16,
         y: u16,
     ) -> Result<(), GpuError> {
-        let texture = self.create(gpu, stats)?;
-        write(gpu, stats, texture, data, TextureRegion { x: u32::from(x), y: u32::from(y), size })
+        let texture = self.create(gpu, resources)?;
+        let region = TextureRegion { x: u32::from(x), y: u32::from(y), size };
+        write(gpu, &mut resources.stats, texture, data, region)
     }
 
     /// Writes the image [`TextureMut::set_image`] set, if any.
-    pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, stats: &mut RenderingStats) -> Result<(), GpuError> {
+    pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, resources: &mut Resources) -> Result<(), GpuError> {
         match self.image.take() {
-            Some(image) if image.valid() => self.upload_data(gpu, stats, &image.data, image.size),
+            Some(image) if image.valid() => self.upload_data(gpu, resources, &image.data, image.size),
             _ => Ok(()),
         }
     }
 
     /// The texture a draw binds, made through `gpu` and holding its image.
-    pub(crate) fn bind(&mut self, gpu: &mut dyn Gpu, stats: &mut RenderingStats) -> Result<TextureId, GpuError> {
-        self.upload(gpu, stats)?;
-        self.create(gpu, stats)
+    pub(crate) fn bind(&mut self, gpu: &mut dyn Gpu, resources: &mut Resources) -> Result<TextureId, GpuError> {
+        self.upload(gpu, resources)?;
+        self.create(gpu, resources)
     }
 
     /// The bytes the texture takes.
@@ -170,22 +173,15 @@ impl Texture2D {
         self.size.width as usize * self.size.height as usize * texel
     }
 
-    /// Lets go of the backend's texture, to the release queue.
+    /// Lets go of the backend's texture, which goes once the bindings made
+    /// of it do.
     fn release(&mut self) {
-        if let Some(texture) = self.texture.take() {
-            self.released.texture(texture, self.bytes());
-        }
-    }
-}
-
-impl Drop for Texture2D {
-    fn drop(&mut self) {
-        self.release();
+        self.texture = None;
     }
 }
 
 /// A texture of the context's store, to set up: changes that replace its
-/// backend's texture release that to the context's queue.
+/// backend's texture let go of that.
 pub(crate) struct TextureMut<'a> {
     texture: &'a mut Texture2D,
 }

@@ -3,7 +3,6 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_gfx::gpu::TextureFormat;
-use mln_gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::line_layer_ubo::{
     LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineGradientDrawableUBO, LinePatternDrawableUBO,
@@ -17,7 +16,7 @@ use mln_gfx::shaders::shader_defines::{
 };
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
-use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode, ShaderRegistry};
+use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::TransformState;
 use mln_style::expression::{Dependency, EvaluationContext, GlobalStateMap, global_state_refs_intersect};
 use mln_style::layer_type::LayerStyle;
@@ -39,6 +38,8 @@ use crate::buckets::line_bucket::{LineBinders, LineBucket, LineLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
+use crate::gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
+use crate::gfx::shader_registry::ShaderRegistry;
 use crate::gfx::store::SharedTexture;
 use crate::gfx::texture2d::Texture2D;
 use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};

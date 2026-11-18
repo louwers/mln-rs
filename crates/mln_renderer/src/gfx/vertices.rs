@@ -8,13 +8,14 @@
 use std::marker::PhantomData;
 use std::rc::Rc;
 
-use mln_gfx::buffer::BufferPtr;
 use mln_gfx::gpu::{BufferUsage, GpuError};
 #[cfg(target_family = "wasm")]
 use mln_util::host_bytes::HostBytes;
 
+use crate::gfx::buffer::SharedBuffer;
 use crate::gfx::context::Device;
-use crate::gfx::store::{ReleasedEntries, Shared, Store, VerticesKey};
+use crate::gfx::release::ReleaseQueue;
+use crate::gfx::store::{Shared, Store, VerticesKey};
 
 /// Where the vertices' bytes are: in the vector of the alignment of their
 /// type, which a vector of vertices moves into without a copy, or of
@@ -48,7 +49,7 @@ pub(crate) struct Vertices {
     data: VertexData,
     count: usize,
     vertex_size: usize,
-    buffer: Option<BufferPtr>,
+    buffer: Option<SharedBuffer>,
 }
 
 impl VertexData {
@@ -177,9 +178,9 @@ impl Vertices {
     /// first upload, and written over by the upload after an update, each
     /// of which frees their bytes, or keeps dynamic vertices' for the next
     /// update; `None` where there are none.
-    fn upload(&mut self, device: &mut Device) -> Result<Option<BufferPtr>, GpuError> {
+    fn upload(&mut self, device: &mut Device) -> Result<Option<SharedBuffer>, GpuError> {
         if let Some(buffer) = &self.buffer {
-            let buffer = BufferPtr::clone(buffer);
+            let buffer = buffer.clone();
             if let Some(bytes) = self.data.bytes() {
                 device.write(&buffer, bytes)?;
                 self.written();
@@ -202,7 +203,7 @@ impl Vertices {
                 device.buffer(BufferUsage::Vertex, &bytes[..size])?
             }
         };
-        self.buffer = Some(BufferPtr::clone(&buffer));
+        self.buffer = Some(buffer.clone());
         self.written();
         Ok(Some(buffer))
     }
@@ -215,9 +216,9 @@ pub(crate) struct VertexStore(Store<VerticesKey, Vertices>);
 
 impl VertexStore {
     /// Keeps `vertices` while a clone of the returned handle lasts, whose
-    /// key goes to `released` once the last clone drops.
-    pub(crate) fn add<V: bytemuck::Pod>(&mut self, vertices: Vec<V>, released: &Rc<ReleasedEntries>) -> SharedVertices {
-        self.insert(Vertices::new(vertices), released)
+    /// key goes to `queue` once the last clone drops.
+    pub(crate) fn add<V: bytemuck::Pod>(&mut self, vertices: Vec<V>, queue: &Rc<ReleaseQueue>) -> SharedVertices {
+        self.insert(Vertices::new(vertices), queue)
     }
 
     /// Keeps a copy of `vertices` as dynamic vertices, which the holder of
@@ -226,25 +227,21 @@ impl VertexStore {
     pub(crate) fn add_dynamic<V: bytemuck::Pod>(
         &mut self,
         vertices: &[V],
-        released: &Rc<ReleasedEntries>,
+        queue: &Rc<ReleaseQueue>,
     ) -> TypedVertices<V> {
-        TypedVertices { shared: self.insert(Vertices::dynamic(vertices), released), vertex_type: PhantomData }
+        TypedVertices { shared: self.insert(Vertices::dynamic(vertices), queue), vertex_type: PhantomData }
     }
 
     /// Keeps the vertices of the type `V` in the JS array `bytes`, as
     /// [`add`](Self::add) does.
     #[cfg(target_family = "wasm")]
-    pub(crate) fn add_host<V: bytemuck::Pod>(
-        &mut self,
-        bytes: HostBytes,
-        released: &Rc<ReleasedEntries>,
-    ) -> SharedVertices {
-        self.insert(Vertices::from_host(bytes, size_of::<V>()), released)
+    pub(crate) fn add_host<V: bytemuck::Pod>(&mut self, bytes: HostBytes, queue: &Rc<ReleaseQueue>) -> SharedVertices {
+        self.insert(Vertices::from_host(bytes, size_of::<V>()), queue)
     }
 
-    fn insert(&mut self, vertices: Vertices, released: &Rc<ReleasedEntries>) -> SharedVertices {
+    fn insert(&mut self, vertices: Vertices, queue: &Rc<ReleaseQueue>) -> SharedVertices {
         let count = vertices.count();
-        SharedVertices { handle: self.0.add(vertices, released), count }
+        SharedVertices { handle: self.0.add(vertices, queue), count }
     }
 
     /// The vertices of `shared`.
@@ -274,7 +271,7 @@ impl VertexStore {
         &mut self,
         device: &mut Device,
         shared: &SharedVertices,
-    ) -> Result<Option<BufferPtr>, GpuError> {
+    ) -> Result<Option<SharedBuffer>, GpuError> {
         self.0.get_mut(&shared.handle).ok_or(GpuError::UnknownId("vertices"))?.upload(device)
     }
 

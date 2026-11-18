@@ -334,7 +334,7 @@ pub fn foreign_ids<G: Gpu>(first: &mut G, second: &mut G) -> Result<(), GpuError
         ResourceId::Shader(theirs.shader),
         ResourceId::Texture(theirs.target),
     ] {
-        second.destroy(id);
+        assert!(second.destroy(id).is_ok(), "their {id:?}");
     }
     theirs.frame(first, &[theirs.draw(theirs.pipeline)])?;
     ours.frame(second, &[ours.draw(ours.pipeline)])?;
@@ -808,7 +808,7 @@ pub fn readbacks(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     assert_eq!(read_texels(gpu, written, part)?, [3; 4 * 2 * 2], "the write after it");
 
     let dropped = gpu.read_texture(written, part)?;
-    gpu.destroy(ResourceId::Readback(dropped));
+    gpu.destroy(ResourceId::Readback(dropped))?;
     assert!(matches!(gpu.take_readback(dropped, true), Err(GpuError::UnknownId("readback"))));
     let depth = gpu.create_texture(&TextureDesc {
         label: "depth",
@@ -819,7 +819,7 @@ pub fn readbacks(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     assert!(invalid(&gpu.read_texture(depth, TextureRegion::whole(size))), "a depth texture");
     assert!(invalid(&gpu.read_texture(written, TextureRegion { x: 1, ..TextureRegion::whole(size) })), "past it");
     assert!(invalid(&gpu.write_texture(written, TextureRegion::whole(size), &[0; 4])), "a write of too few bytes");
-    gpu.destroy(ResourceId::Texture(written));
+    gpu.destroy(ResourceId::Texture(written))?;
     let gone = gpu.read_texture(written, part);
     assert!(matches!(gone, Err(GpuError::UnknownId("texture"))), "a destroyed texture");
     let gone = gpu.write_texture(written, part, &[0; 4 * 2 * 2]);
@@ -827,15 +827,17 @@ pub fn readbacks(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     Ok(())
 }
 
-/// Checks that destroyed resources draw until their users go: buffers, a
-/// texture and a sampler that bindings and geometry hold draw as before for
-/// several frames once destroyed, though calls that name them fail. Returns
-/// the error of a call that should succeed.
+/// Checks destroying what bindings and geometry were made of. In debug
+/// builds, destroying a buffer, texture or sampler that live bindings or
+/// geometry were made of fails with [`GpuError::InUse`] and keeps it, so
+/// that it draws as before, until the last of them goes. Then it destroys,
+/// calls that name it fail, and the work flushed before reads it until
+/// done. Returns the error of a call that should succeed.
 ///
 /// # Panics
 ///
 /// Where a check doesn't hold.
-pub fn destroyed_resources_draw_until_their_users_go<G: Gpu>(gpu: &mut G) -> Result<(), GpuError> {
+pub fn resources_in_use<G: Gpu>(gpu: &mut G) -> Result<(), GpuError> {
     let size = Size { width: 2, height: 2 };
     let image = gpu.create_texture(&TextureDesc {
         label: "image",
@@ -873,7 +875,8 @@ pub fn destroyed_resources_draw_until_their_users_go<G: Gpu>(gpu: &mut G) -> Res
         BindGroupEntry::Texture { id: ID_HEATMAP_IMAGE_TEXTURE as u32, texture: image, sampler },
         BindGroupEntry::Texture { id: ID_HEATMAP_COLOR_RAMP_TEXTURE as u32, texture: image, sampler },
     ];
-    let bindings = gpu.create_bindings(&BindingsDesc { label: "heatmap", shader, entries: &entries })?;
+    let first = gpu.create_bindings(&BindingsDesc { label: "heatmap", shader, entries: &entries })?;
+    let second = gpu.create_bindings(&BindingsDesc { label: "heatmap again", shader, entries: &entries })?;
     let geometry = gpu.create_geometry(&GeometryDesc {
         shader,
         layouts: &layouts,
@@ -881,35 +884,50 @@ pub fn destroyed_resources_draw_until_their_users_go<G: Gpu>(gpu: &mut G) -> Res
         index_buffer: indices,
     })?;
     let target = target(gpu, TextureFormat::Rgba8Unorm)?;
-    let frames = |gpu: &mut G, count, what: &str| -> Result<(), GpuError> {
-        for _ in 0..count {
-            gpu.begin_pass(&PassDesc {
-                label: "heatmap",
-                color: Some(ColorAttachment { texture: target, load: LoadOp::Clear(BLACK) }),
-                depth_stencil: None,
-            })?;
-            gpu.draw(&draw(pipeline, bindings, geometry, 6))?;
-            gpu.end_pass()?;
-            assert!(read(gpu, target)?.chunks(4).all(|texel| texel == [255, 0, 0, 255]), "{what}");
-        }
+    let frame = |gpu: &mut G, bindings: BindingsId| -> Result<(), GpuError> {
+        gpu.begin_pass(&PassDesc {
+            label: "heatmap",
+            color: Some(ColorAttachment { texture: target, load: LoadOp::Clear(BLACK) }),
+            depth_stencil: None,
+        })?;
+        gpu.draw(&draw(pipeline, bindings, geometry, 6))?;
+        gpu.end_pass()
+    };
+    let red = |gpu: &mut G, what: &str| -> Result<(), GpuError> {
+        assert!(read(gpu, target)?.chunks(4).all(|texel| texel == [255, 0, 0, 255]), "{what}");
         Ok(())
     };
-    frames(gpu, 1, "the draw")?;
+    frame(gpu, first)?;
+    red(gpu, "the draw")?;
 
-    for buffer in [paint_buffer, props_buffer, projection_buffer, vertices, indices] {
-        gpu.destroy(buffer.into());
+    let buffers = [paint_buffer, props_buffer, projection_buffer, vertices, indices].map(ResourceId::Buffer);
+    let resources: Vec<ResourceId> = buffers.into_iter().chain([image.into(), sampler.into()]).collect();
+    let in_use = |result: Result<(), GpuError>| matches!(result, Err(GpuError::InUse(_)));
+    if cfg!(debug_assertions) {
+        for &resource in &resources {
+            assert!(in_use(gpu.destroy(resource)), "{resource:?}, which both bindings and the geometry use");
+        }
+        gpu.destroy(first.into())?;
+        for &resource in &resources {
+            assert!(in_use(gpu.destroy(resource)), "{resource:?}, which the second bindings or the geometry use");
+        }
+        gpu.write_buffer(props_buffer, 0, props)?;
+        frame(gpu, second)?;
+        red(gpu, "a draw of the resources kept")?;
     }
-    gpu.destroy(image.into());
-    gpu.destroy(sampler.into());
+
+    frame(gpu, second)?;
+    gpu.flush(false)?;
+    for dependent in [first.into(), second.into(), geometry.into()] {
+        gpu.destroy(dependent)?;
+    }
+    for &resource in &resources {
+        gpu.destroy(resource)?;
+    }
     assert!(matches!(gpu.write_buffer(props_buffer, 0, props), Err(GpuError::UnknownId("buffer"))));
     let destroyed = gpu.create_bindings(&BindingsDesc { label: "destroyed", shader, entries: &entries });
     assert!(matches!(destroyed, Err(GpuError::UnknownId(_))), "bindings of destroyed resources");
-    // More frames than a backend keeps copies of a uniform buffer for, so
-    // that each copy draws after the buffer is destroyed.
-    frames(gpu, 4, "a draw of destroyed resources")?;
-
-    gpu.destroy(bindings.into());
-    gpu.destroy(geometry.into());
+    red(gpu, "the frame flushed before the destroys")?;
     gpu.flush(true)
 }
 

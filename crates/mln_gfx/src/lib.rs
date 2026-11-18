@@ -6,11 +6,9 @@
 //! A backend's `RendererBackend` hands the renderer its `Gpu`, which owns
 //! the renderer's buffers, textures and the groups of buffers its draws
 //! bind; the renderer keeps them in `mln_renderer`. Each program's
-//! attributes are in `shaders::program_info` and its variants come from
-//! `shader_group`.
+//! attributes and the keys of its variants are in `shaders::program_info`.
 
 pub mod backend;
-pub mod buffer;
 pub mod color_mode;
 pub mod cull_face_mode;
 pub mod depth_mode;
@@ -22,12 +20,9 @@ pub mod gpu;
 pub mod offscreen_target;
 pub mod polyline_generator;
 pub mod projection_variant;
-pub mod released;
 pub mod renderer_backend;
 pub mod rendering_stats;
 pub mod scissor_rect;
-pub mod shader_group;
-pub mod shader_registry;
 pub mod shaders;
 pub mod stencil_mode;
 pub mod texture2d;
@@ -35,7 +30,6 @@ pub mod types;
 pub mod util_hash;
 pub mod window;
 
-pub use buffer::{Buffer, BufferPtr};
 pub use color_mode::ColorMode;
 pub use cull_face_mode::CullFaceMode;
 pub use depth_mode::DepthMode;
@@ -48,8 +42,6 @@ pub use frame::{ConsumerSync, FrameImage, FrameTarget, GpuSync, Handoff, SyncKin
 pub use gfx_types::{AttributeDataType, DrawModeType, PrimitiveType};
 pub use renderer_backend::{Hold, RendererBackend};
 pub use scissor_rect::ScissorRect;
-pub use shader_registry::ShaderRegistry;
-pub use shaders::shader_program::{ShaderProgram, ShaderProgramPtr};
 pub use stencil_mode::StencilMode;
 pub use types::DepthMaskType;
 pub use window::Window;

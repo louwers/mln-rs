@@ -7,7 +7,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
-use mln_gfx::gpu::{Gpu as _, ResourceId, TargetFormats};
+use mln_gfx::gpu::{Gpu as _, ResourceId, TargetFormats, destroy_unused};
 use mln_gfx::{ConsumerSync, DepthStencilFormat, DepthStencilFormats, GpuSync, SyncKind, SyncKinds};
 use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
@@ -232,7 +232,7 @@ impl BorrowedTarget {
     fn destroy_imports(&self, image: FrameImage) {
         let mut gpu = self.backend.gpu();
         for import in [Some(image.color), image.depth_stencil].into_iter().flatten() {
-            gpu.destroy(ResourceId::Texture(import));
+            destroy_unused(&mut *gpu, [ResourceId::Texture(import)]);
         }
     }
 }

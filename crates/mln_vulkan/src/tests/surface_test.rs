@@ -34,12 +34,12 @@ use mln_gfx::gpu::{
     TextureRegion, TextureUsage, VertexAttribute, VertexBufferLayout, VertexStep,
 };
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shader_registry::ShaderRegistry;
 use mln_gfx::shaders::background_layer_ubo::{BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPropsUBO};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
+use mln_gfx::shaders::program_info::program_info;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::shader_defines::{ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_PROPS_UBO, ID_PROJECTION_UBO};
-use mln_gfx::shaders::shader_program::ShaderProgramPtr;
+use mln_gfx::shaders::shader_source::BuiltIn;
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::types::DepthFunctionType;
 use mln_util::Color;
@@ -191,11 +191,11 @@ fn buffer(gpu: &mut VulkanGpu, usage: BufferUsage, data: &[u8]) -> BufferId {
 impl Scene {
     fn new(backend: &Window) -> Scene {
         let gpu = &mut *backend.gpu();
-        let registry = ShaderRegistry::new(&ProgramParameters::new(1.0, false));
-        let program: ShaderProgramPtr =
-            registry.shader("BackgroundShader", ProjectionVariant::Mercator).expect("BackgroundShader");
-        let shader = gpu.create_shader(program.key()).expect("the shader");
-        let attribute = program.attribute_id(VertexStep::Vertex, 0).expect("position attribute");
+        let program = program_info(BuiltIn::BackgroundShader).expect("BackgroundShader");
+        let parameters = ProgramParameters::new(1.0, false);
+        let key = program.variant_key(&parameters, std::iter::empty(), ProjectionVariant::Mercator);
+        let shader = gpu.create_shader(&key).expect("the shader");
+        let (attribute, _) = program.attributes[0];
         let layouts = [VertexBufferLayout {
             stride: 4,
             step: VertexStep::Vertex,
@@ -608,12 +608,12 @@ impl Overlay for QuarterOverlay {
             target.device.cmd_bind_vertex_buffers(target.command_buffer, 0, &[raw_buffer], &[0]);
             target.device.cmd_clear_attachments(target.command_buffer, &[attachment], &[rect]);
         }
-        target.gpu.destroy(ResourceId::Buffer(buffer));
+        target.gpu.destroy(ResourceId::Buffer(buffer)).expect("the destroy");
     }
 
     fn destroy(&mut self, gpu: &mut VulkanGpu) {
         if let Some(texture) = self.texture.take() {
-            gpu.destroy(ResourceId::Texture(texture));
+            gpu.destroy(ResourceId::Texture(texture)).expect("the destroy");
         }
         self.destroyed.set(self.destroyed.get() + 1);
     }

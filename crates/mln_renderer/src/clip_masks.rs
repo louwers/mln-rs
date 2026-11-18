@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 
-use mln_gfx::buffer::BufferPtr;
 use mln_gfx::gpu::{
     BindGroupEntry, BindingsDesc, BindingsId, BufferUsage, DepthState, Draw, DynamicState, FixedState, GeometryDesc,
     GeometryId, Gpu, GpuError, PipelineId, PipelineKey, Scissor, ShaderId, StencilState, TargetFormats,
@@ -14,16 +13,16 @@ use mln_gfx::shaders::shader_defines::{
 };
 use mln_gfx::stencil_mode::Test;
 use mln_gfx::types::StencilOpType;
-use mln_gfx::{
-    AttributeDataType, ColorMode, CullFaceMode, DepthMode, DrawModeType, ShaderProgramPtr, ShaderRegistry, StencilMode,
-};
+use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMode, DrawModeType, StencilMode};
 use mln_tile_id::UnwrappedTileID;
 use mln_util::logging::{Event, Log};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
+use crate::gfx::buffer::SharedBuffer;
 use crate::gfx::context::Context;
-use crate::gfx::owned::Owned;
-use crate::gfx::uniform_buffer::UniformBufferPtr;
+use crate::gfx::owned::{Held, Owned};
+use crate::gfx::shader_program::ShaderProgramPtr;
+use crate::gfx::shader_registry::ShaderRegistry;
 use crate::globe_tile_mesh::raw_globe_tile_mesh;
 use crate::paint_parameters::DrawTarget;
 use crate::render_static_data::RenderStaticData;
@@ -51,8 +50,8 @@ const SQUARE: MeshKey = (0, false, false, false);
 
 /// A mesh that masks draw, and its geometry, made at its first draw.
 struct Mesh {
-    vertices: BufferPtr,
-    indices: BufferPtr,
+    vertices: SharedBuffer,
+    indices: SharedBuffer,
     segments: Vec<SegmentBase>,
     geometry: Option<Owned<GeometryId>>,
 }
@@ -81,7 +80,8 @@ impl Mesh {
             vertex_buffers: &[(self.vertices.id(), 0)],
             index_buffer: self.indices.id(),
         })?;
-        self.geometry = Some(Owned::new(geometry, context.released()));
+        let held = vec![Held::Buffer(self.vertices.clone()), Held::Buffer(self.indices.clone())];
+        self.geometry = Some(context.own(geometry, held));
         Ok(geometry)
     }
 }
@@ -102,7 +102,7 @@ pub(crate) struct ClipMasks {
     masks: BTreeMap<UnwrappedTileID, (usize, [MeshKey; 2])>,
     /// The masks' projections, each at an offset the GPU can bind, in the
     /// order of their tiles: one write a frame.
-    projections: Option<UniformBufferPtr>,
+    projections: Option<SharedBuffer>,
     /// The bytes of `projections`, kept between frames.
     bytes: Vec<u8>,
     /// The bindings of each slot of `projections`, and what they were made
@@ -227,6 +227,7 @@ impl ClipMasks {
             let size = size_of::<ProjectionUBO>();
             let stride = size.next_multiple_of(context.caps().buffer_offset_alignment as usize);
             for slot in 0..projections.size() / stride {
+                let mut held = Vec::new();
                 let entries: Vec<BindGroupEntry> = (0..MAX_UBO_COUNT_PER_SHADER)
                     .filter_map(|id| {
                         let (buffer, offset, size) = if id == ID_PROJECTION_UBO {
@@ -234,6 +235,7 @@ impl ClipMasks {
                         } else {
                             global.get(id).map(|buffer| (buffer, 0, buffer.size() as u64))?
                         };
+                        held.push(Held::Buffer(buffer.clone()));
                         Some(BindGroupEntry::Buffer { id: id as u32, buffer: buffer.id(), offset, size })
                     })
                     .collect();
@@ -242,7 +244,7 @@ impl ClipMasks {
                     shader: shader_id,
                     entries: &entries,
                 })?;
-                self.bindings.push(Owned::new(bindings, context.released()));
+                self.bindings.push(context.own(bindings, held));
             }
             self.bindings_made = Some(made);
         }

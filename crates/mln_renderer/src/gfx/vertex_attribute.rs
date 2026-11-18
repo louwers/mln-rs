@@ -2,13 +2,11 @@
 //! values of its own, which the draw owns and uploads to a buffer of its
 //! own, or vertices of the context's store that other draws share.
 
-use std::rc::Rc;
-
-use mln_gfx::buffer::BufferPtr;
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::gpu::{BufferUsage, GpuError};
 use mln_gfx::shaders::shader_defines::MAX_ATTRIBUTE_COUNT_PER_SHADER;
 
+use crate::gfx::buffer::SharedBuffer;
 use crate::gfx::context::Context;
 use crate::gfx::upload::{AttributeBinding, AttributeDescriptor};
 use crate::gfx::vertices::{SharedVertices, Vertices};
@@ -42,7 +40,7 @@ impl SharedAttribute {
 /// upload moves them into a buffer.
 pub(crate) enum OwnValues {
     Bytes(Vec<u8>),
-    Buffer(BufferPtr),
+    Buffer(SharedBuffer),
 }
 
 /// What a vertex attribute reads.
@@ -88,10 +86,10 @@ impl VertexAttribute {
         match self {
             VertexAttribute::Own { data_type, values, .. } => {
                 let buffer = match values {
-                    OwnValues::Buffer(buffer) => Rc::clone(buffer),
+                    OwnValues::Buffer(buffer) => buffer.clone(),
                     OwnValues::Bytes(bytes) => {
                         let buffer = context.device().buffer(BufferUsage::Vertex, bytes)?;
-                        *values = OwnValues::Buffer(Rc::clone(&buffer));
+                        *values = OwnValues::Buffer(buffer.clone());
                         buffer
                     }
                 };

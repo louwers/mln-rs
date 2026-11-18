@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use glow::HasContext;
 use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
-use mln_gfx::gpu::{Gpu as _, ResourceId, TargetFormats, TextureDesc, TextureId, TextureUsage};
+use mln_gfx::gpu::{Gpu as _, ResourceId, TargetFormats, TextureDesc, TextureId, TextureUsage, destroy_unused};
 use mln_gfx::{ConsumerSync, DepthStencilFormat, DepthStencilFormats, GpuSync, SyncKind, SyncKinds};
 use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
@@ -136,11 +136,11 @@ impl BorrowedTarget {
         for (image, depth_imported) in self.imports.iter().filter_map(Cell::take) {
             let depth_stencil = image.depth_stencil.filter(|_| depth_imported);
             for texture in [Some(image.color), depth_stencil].into_iter().flatten() {
-                gpu.destroy(ResourceId::Texture(texture));
+                destroy_unused(&mut *gpu, [ResourceId::Texture(texture)]);
             }
         }
         if let Some(texture) = self.depth_stencil.take() {
-            gpu.destroy(ResourceId::Texture(texture));
+            destroy_unused(&mut *gpu, [ResourceId::Texture(texture)]);
         }
     }
 

@@ -7,14 +7,16 @@
 //! comparisons of what the pipeline, bindings and geometry it names were
 //! made for. [`check_pass`] checks a pass's attachments in `begin_pass`,
 //! [`check_readback`] a readback in `read_texture`, and [`check_write`] a
-//! write in `write_buffer`.
+//! write in `write_buffer`. [`Dependents`] keeps what bindings and geometry
+//! are made of, which `destroy` checks.
 
 use mln_util::hash::HashMap;
 use mln_util::size::Size;
 
 use super::{
-    BindGroupEntry, BindingsDesc, BufferId, BufferUsage, Draw, GeometryDesc, GpuError, PassDesc, SamplerId, ShaderId,
-    TargetFormats, TextureFormat, TextureId, TextureRegion, TextureUsage, VertexBufferLayout, VertexStep,
+    BindGroupEntry, BindingsDesc, BindingsId, BufferId, BufferUsage, Draw, GeometryDesc, GeometryId, GpuError,
+    PassDesc, ResourceId, SamplerId, ShaderId, TargetFormats, TextureFormat, TextureId, TextureRegion, TextureUsage,
+    VertexBufferLayout, VertexStep,
 };
 
 /// What the checks read of a buffer.
@@ -241,6 +243,106 @@ impl LayoutTags {
         self.next += 1;
         tags.push((layouts.to_vec(), tag));
         tag
+    }
+}
+
+/// The buffers, textures and samplers that a backend's live bindings and
+/// geometry were made of, which a backend keeps in debug builds: there,
+/// destroying one of them fails with [`GpuError::InUse`] until the bindings
+/// and geometry made of it go. A backend records what it made in
+/// `create_bindings` ([`bindings`](Self::bindings)) and `create_geometry`
+/// ([`geometry`](Self::geometry)), and checks each `destroy` first
+/// ([`destroy`](Self::destroy)). Release builds keep nothing, and every
+/// destroy passes.
+#[derive(Default)]
+pub struct Dependents {
+    #[cfg(debug_assertions)]
+    counts: HashMap<ResourceId, u32>,
+    /// What each of the live bindings and geometry was made of.
+    #[cfg(debug_assertions)]
+    made_of: HashMap<ResourceId, Vec<ResourceId>>,
+}
+
+impl Dependents {
+    /// Records that `bindings` were made of `desc`'s buffers, textures and
+    /// samplers.
+    #[cfg_attr(not(debug_assertions), expect(unused_variables, reason = "release builds keep nothing"))]
+    pub fn bindings(&mut self, bindings: BindingsId, desc: &BindingsDesc<'_>) {
+        #[cfg(debug_assertions)]
+        {
+            let mut of = Vec::with_capacity(2 * desc.entries.len());
+            for entry in desc.entries {
+                match *entry {
+                    BindGroupEntry::Buffer { buffer, .. } => of.push(buffer.into()),
+                    BindGroupEntry::Texture { texture, sampler, .. } => {
+                        of.extend([ResourceId::Texture(texture), ResourceId::Sampler(sampler)]);
+                    }
+                }
+            }
+            self.made(bindings.into(), of);
+        }
+    }
+
+    /// Records that `geometry` was made of `desc`'s vertex and index
+    /// buffers.
+    #[cfg_attr(not(debug_assertions), expect(unused_variables, reason = "release builds keep nothing"))]
+    pub fn geometry(&mut self, geometry: GeometryId, desc: &GeometryDesc<'_>) {
+        #[cfg(debug_assertions)]
+        {
+            let buffers = desc.vertex_buffers.iter().map(|&(buffer, _)| buffer).chain([desc.index_buffer]);
+            self.made(geometry.into(), buffers.map(ResourceId::Buffer).collect());
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    fn made(&mut self, dependent: ResourceId, of: Vec<ResourceId>) {
+        for &resource in &of {
+            *self.counts.entry(resource).or_default() += 1;
+        }
+        self.made_of.insert(dependent, of);
+    }
+
+    /// Checks that `resource` may be destroyed, and forgets it: fails with
+    /// [`GpuError::InUse`] in debug builds for a buffer, texture or sampler
+    /// that live bindings or geometry were made of. Destroying bindings or
+    /// geometry lets go of what they were made of.
+    #[cfg_attr(not(debug_assertions), expect(unused_variables, reason = "release builds keep nothing"))]
+    pub fn destroy(&mut self, resource: ResourceId) -> Result<(), GpuError> {
+        #[cfg(debug_assertions)]
+        match resource {
+            ResourceId::Buffer(_) | ResourceId::Texture(_) | ResourceId::Sampler(_) => {
+                if self.counts.contains_key(&resource) {
+                    return Err(GpuError::InUse(kind(resource)));
+                }
+            }
+            ResourceId::Bindings(_) | ResourceId::Geometry(_) => {
+                for of in self.made_of.remove(&resource).into_iter().flatten() {
+                    if let Some(count) = self.counts.get_mut(&of) {
+                        *count -= 1;
+                        if *count == 0 {
+                            self.counts.remove(&of);
+                        }
+                    }
+                }
+            }
+            ResourceId::Shader(_) | ResourceId::Pipeline(_) | ResourceId::Readback(_) => {}
+        }
+        Ok(())
+    }
+}
+
+/// What `resource` is, as [`GpuError`] names it.
+#[cfg(debug_assertions)]
+fn kind(resource: ResourceId) -> &'static str {
+    match resource {
+        ResourceId::Buffer(_) => "buffer",
+        ResourceId::Texture(_) => "texture",
+        ResourceId::Sampler(_) => "sampler",
+        ResourceId::Shader(_) => "shader",
+        ResourceId::Pipeline(_) => "pipeline",
+        ResourceId::Bindings(_) => "bindings",
+        ResourceId::Geometry(_) => "geometry",
+        ResourceId::Readback(_) => "readback",
     }
 }
 
@@ -472,8 +574,8 @@ mod tests {
         let geometry = GeometryTags { layout: 0, ranges: GeometryRanges { indices: 6, instances: u32::MAX } };
         let draw = Draw {
             pipeline: crate::gpu::PipelineId::default(),
-            bindings: crate::gpu::BindingsId::default(),
-            geometry: crate::gpu::GeometryId::default(),
+            bindings: BindingsId::default(),
+            geometry: GeometryId::default(),
             first_index: 0,
             index_count: 6,
             base_vertex: 0,
@@ -520,6 +622,47 @@ mod tests {
         assert!(check_pass(&pass(None, None), &texture).is_err(), "no attachments");
         assert!(check_pass(&pass(Some(attachment(color)), Some(depth(small))), &texture).is_err(), "sizes");
         assert!(check_pass(&pass(Some(attachment(small)), None), &texture).is_err(), "depth as color");
+    }
+
+    #[test]
+    fn dependents_keep_what_they_were_made_of_in_debug_builds() {
+        let mut buffers = SlotMap::<BufferId, ()>::with_key();
+        let (uniform, vertices, indices) = (buffers.insert(()), buffers.insert(()), buffers.insert(()));
+        let texture = SlotMap::<TextureId, ()>::with_key().insert(());
+        let sampler = SlotMap::<SamplerId, ()>::with_key().insert(());
+        let shader = SlotMap::<ShaderId, ()>::with_key().insert(());
+        let mut bindings = SlotMap::<BindingsId, ()>::with_key();
+        let (first, second) = (bindings.insert(()), bindings.insert(()));
+        let geometry = SlotMap::<GeometryId, ()>::with_key().insert(());
+        let entries = [
+            BindGroupEntry::Buffer { id: 0, buffer: uniform, offset: 0, size: 4 },
+            BindGroupEntry::Texture { id: 0, texture, sampler },
+        ];
+        let desc = BindingsDesc { label: "test", shader, entries: &entries };
+        let mut dependents = Dependents::default();
+        dependents.bindings(first, &desc);
+        dependents.bindings(second, &desc);
+        dependents.geometry(
+            geometry,
+            &GeometryDesc { shader, layouts: &[], vertex_buffers: &[(vertices, 0)], index_buffer: indices },
+        );
+        let in_use = |dependents: &mut Dependents, resource: ResourceId| {
+            matches!(dependents.destroy(resource), Err(GpuError::InUse(_)))
+        };
+        let used = [uniform.into(), texture.into(), sampler.into(), vertices.into(), indices.into()];
+        for resource in used {
+            assert_eq!(in_use(&mut dependents, resource), cfg!(debug_assertions), "{resource:?}");
+        }
+        assert!(dependents.destroy(first.into()).is_ok());
+        assert!(dependents.destroy(first.into()).is_ok(), "twice");
+        assert_eq!(in_use(&mut dependents, uniform.into()), cfg!(debug_assertions), "the second bindings'");
+        assert!(dependents.destroy(second.into()).is_ok());
+        for resource in [uniform.into(), texture.into(), sampler.into()] {
+            assert!(dependents.destroy(resource).is_ok(), "{resource:?}, of no live bindings");
+        }
+        assert_eq!(in_use(&mut dependents, indices.into()), cfg!(debug_assertions), "the geometry's");
+        assert!(dependents.destroy(geometry.into()).is_ok());
+        assert!(dependents.destroy(indices.into()).is_ok());
     }
 
     #[test]

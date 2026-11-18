@@ -77,7 +77,7 @@ impl RenderTarget {
         if self.depth.is_none()
             && let Some(depth_format) = context.render_target_depth()
         {
-            self.depth = Some(Attachment::new(gpu, context.released(), "render target depth", size, depth_format)?);
+            self.depth = Some(context.device().attachment(gpu, "render target depth", size, depth_format)?);
         }
         Ok(OpenPass {
             label: "render target",

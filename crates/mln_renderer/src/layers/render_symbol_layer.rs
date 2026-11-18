@@ -8,7 +8,6 @@ use std::sync::Arc;
 
 use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
@@ -53,6 +52,7 @@ use crate::draw::{DrawGeometry, DrawObjects, Textures, copy_shared_attributes};
 use crate::geometry::feature_index::FeatureIndex;
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
+use crate::gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
 use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
 use crate::gfx::vertices::TypedVertices;
 use crate::layer_drawing::{

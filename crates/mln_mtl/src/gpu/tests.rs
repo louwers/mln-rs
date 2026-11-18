@@ -2,8 +2,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use mln_gfx::gpu::conformance::{
-    clip_mask_and_background, custom_layers, depth_only, destroyed_resources_draw_until_their_users_go, foreign_ids,
-    imported_textures, instanced_walls, invalid_calls, readbacks, topologies, transparent_replace, vertex_layouts,
+    clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures, instanced_walls,
+    invalid_calls, readbacks, resources_in_use, topologies, transparent_replace, vertex_layouts,
 };
 use mln_gfx::gpu::{BufferUsage, ColorAttachment};
 use mln_gfx::shaders::shader_source::BuiltIn;
@@ -51,9 +51,9 @@ fn readbacks_through_gpu() {
 }
 
 #[test]
-fn destroyed_resources_draw_until_their_users_go_through_gpu() {
+fn resources_in_use_through_gpu() {
     let device = Device::new(None).expect("Metal device");
-    destroyed_resources_draw_until_their_users_go(&mut MetalGpu::new(&device)).expect("the frames");
+    resources_in_use(&mut MetalGpu::new(&device)).expect("the frames");
 }
 
 #[test]
@@ -148,8 +148,8 @@ fn a_destroyed_buffer_stays_for_the_flushes_before() {
     gpu.begin_pass(&pass).unwrap();
     gpu.end_pass().unwrap();
     gpu.flush(false).unwrap();
-    gpu.destroy(ResourceId::Buffer(buffer));
-    gpu.destroy(ResourceId::Texture(target));
+    gpu.destroy(ResourceId::Buffer(buffer)).unwrap();
+    gpu.destroy(ResourceId::Texture(target)).unwrap();
     gpu.flush(true).unwrap();
     assert!(gpu.in_flight.is_empty());
 }

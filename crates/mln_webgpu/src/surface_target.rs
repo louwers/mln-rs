@@ -6,7 +6,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
-use mln_gfx::gpu::{Gpu as _, ReadbackId, ResourceId, TargetFormats, TextureId, TextureRegion};
+use mln_gfx::gpu::{Gpu as _, ReadbackId, ResourceId, TargetFormats, TextureId, TextureRegion, destroy_unused};
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
@@ -294,7 +294,7 @@ impl State {
             Some(texture) if (texture.width(), texture.height()) == (size.width, size.height) => texture,
             _ => {
                 if let Some(import) = self.depth_import.take() {
-                    gpu.destroy(ResourceId::Texture(import));
+                    destroy_unused(&mut *gpu, [ResourceId::Texture(import)]);
                 }
                 self.backend.device().device().create_texture(&wgpu::TextureDescriptor {
                     label: Some("surface depth and stencil"),
@@ -324,11 +324,11 @@ impl State {
         let mut gpu = self.backend.gpu();
         let imported = gpu.import_texture(texture);
         let readback = gpu.read_texture(imported, TextureRegion::whole(size));
-        gpu.destroy(ResourceId::Texture(imported));
+        destroy_unused(&mut *gpu, [ResourceId::Texture(imported)]);
         match readback {
             Ok(readback) => {
                 if let Some((stale, _)) = self.pending_readback.replace(Some((readback, size))) {
-                    gpu.destroy(ResourceId::Readback(stale));
+                    destroy_unused(&mut *gpu, [ResourceId::Readback(stale)]);
                 }
             }
             Err(error) => Log::error(Event::Render, format!("WebGPU: reading the frame back failed: {error}")),
@@ -389,7 +389,7 @@ impl State {
 
     fn end_frame(&self) -> Handoff {
         if let Some(color) = self.color_import.take() {
-            self.backend.gpu().destroy(ResourceId::Texture(color));
+            destroy_unused(&mut *self.backend.gpu(), [ResourceId::Texture(color)]);
         }
         let Some(current) = self.current.take() else {
             return Handoff::Dropped;
@@ -427,10 +427,10 @@ impl Drop for State {
         drop(self.overlay.take());
         let mut gpu = self.backend.gpu();
         if let Some((readback, _)) = self.pending_readback.take() {
-            gpu.destroy(ResourceId::Readback(readback));
+            destroy_unused(&mut *gpu, [ResourceId::Readback(readback)]);
         }
         for import in [self.color_import.take(), self.depth_import.take()].into_iter().flatten() {
-            gpu.destroy(ResourceId::Texture(import));
+            destroy_unused(&mut *gpu, [ResourceId::Texture(import)]);
         }
         drop(gpu);
         // Runs the callbacks still outstanding.

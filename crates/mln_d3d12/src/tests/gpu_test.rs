@@ -1,10 +1,9 @@
 use mln_gfx::gpu::conformance::{
-    clip_mask_and_background, custom_layers, depth_only, destroyed_resources_draw_until_their_users_go, foreign_ids,
-    imported_textures, instanced_walls, invalid_calls, readbacks, topologies, transparent_replace, vertex_layouts,
-    wall_quads,
+    clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures, instanced_walls,
+    invalid_calls, readbacks, resources_in_use, topologies, transparent_replace, vertex_layouts, wall_quads,
 };
 use mln_gfx::gpu::{Gpu as _, GpuError, ShaderKey};
-use mln_gfx::shader_group::GLOBE_DEFINE;
+use mln_gfx::shaders::program_info::GLOBE_DEFINE;
 use mln_glsl::PROGRAMS;
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_UNKNOWN};
 
@@ -54,8 +53,8 @@ fn readbacks_through_gpu() {
 }
 
 #[test]
-fn destroyed_resources_draw_until_their_users_go_through_gpu() {
-    destroyed_resources_draw_until_their_users_go(&mut gpu()).expect("the frames");
+fn resources_in_use_through_gpu() {
+    resources_in_use(&mut gpu()).expect("the frames");
 }
 
 #[test]
@@ -133,7 +132,7 @@ fn destroyed_buffers_memory_is_reused() {
             .map(|desc| gpu.create_buffer(&desc).expect("a buffer"))
             .collect();
         for buffer in buffers {
-            gpu.destroy(ResourceId::Buffer(buffer));
+            gpu.destroy(ResourceId::Buffer(buffer)).expect("the destroy");
         }
         gpu.flush(true).expect("the flush");
         gpu.slab_pages()
@@ -169,7 +168,7 @@ fn a_uniform_buffer_in_reused_memory_starts_zeroed() {
     gpu.end_pass().expect("the pass's end");
     gpu.flush(true).expect("the flush");
     assert!(gpu.windows(first).iter().all(|window| window.iter().all(|&byte| byte == 0xAB)));
-    gpu.destroy(ResourceId::Buffer(first));
+    gpu.destroy(ResourceId::Buffer(first)).expect("the destroy");
     gpu.flush(true).expect("the flush");
     let pages = gpu.slab_pages();
     let second = gpu.create_buffer(&desc).expect("a buffer");
