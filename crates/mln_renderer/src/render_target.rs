@@ -97,9 +97,8 @@ impl RenderTarget {
 /// The color texture of a render target of `size`, which draws draw into and
 /// then sample, linear and clamped.
 fn texture(context: &mut Context, size: Size, type_: TextureChannelDataType) -> OwnedTexture {
-    let owned = context.add_texture();
     let format = texture_format(TexturePixelType::RGBA, context.render_target_type(type_));
-    if let Some(texture) = context.texture_mut(owned.key()) {
+    context.add_texture_with(|texture| {
         texture.set_size(size);
         texture.set_format(format);
         texture.set_render_target();
@@ -109,8 +108,7 @@ fn texture(context: &mut Context, size: Size, type_: TextureChannelDataType) -> 
             wrap_v: TextureWrapType::Clamp,
             ..SamplerState::default()
         });
-    }
-    owned
+    })
 }
 
 /// The passes of the draws into a [`RenderTarget`], from

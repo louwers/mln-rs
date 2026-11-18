@@ -263,7 +263,7 @@ impl TypedLayer for RenderBackgroundLayer {
             None
         };
         let pattern_texture = pattern_atlas.texture().filter(|_| has_pattern);
-        if let Some(texture) = pattern_texture.and_then(|texture| paint_parameters.context.texture_mut(texture)) {
+        if let Some(mut texture) = pattern_texture.and_then(|texture| paint_parameters.context.texture_mut(texture)) {
             texture.set_sampler(SamplerState {
                 filter: TextureFilterType::Linear,
                 wrap_u: TextureWrapType::Clamp,

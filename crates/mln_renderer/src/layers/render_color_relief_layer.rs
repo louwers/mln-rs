@@ -391,7 +391,7 @@ impl TypedLayer for RenderColorReliefLayer {
             self.elevation_stops_texture = Some(elevation_stops);
 
             let color_stops = self.color_stops_texture.get_or_insert_with(|| context.add_texture()).key();
-            if let Some(texture) = context.texture_mut(color_stops) {
+            if let Some(mut texture) = context.texture_mut(color_stops) {
                 texture.set_image(Some(Rc::new(self.color_stops.clone())));
                 texture.set_sampler(SamplerState {
                     filter: TextureFilterType::Linear,
@@ -467,7 +467,7 @@ impl TypedLayer for RenderColorReliefLayer {
                         key
                     }
                 };
-                if let Some(texture) = context.texture_mut(dem_texture) {
+                if let Some(mut texture) = context.texture_mut(dem_texture) {
                     texture.set_sampler(dem_sampler);
                 }
                 let mut textures = Textures::default();

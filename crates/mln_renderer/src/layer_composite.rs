@@ -11,8 +11,6 @@
 //! its own, copied into a second texture before each such layer and onto the
 //! frame's target at the end.
 
-use std::rc::Rc;
-
 use mln_gfx::buffer::BufferPtr;
 use mln_gfx::color_mode::{BlendFunction, LinearBlend};
 use mln_gfx::gpu::{
@@ -131,14 +129,12 @@ struct Texture {
 
 impl Texture {
     fn new(context: &mut Context, size: Size, format: TextureFormat) -> Result<Texture, GpuError> {
-        let owned = context.add_texture();
-        if let Some(texture) = context.texture_mut(owned.key()) {
+        let owned = context.add_texture_with(|texture| {
             texture.set_size(size);
             texture.set_format(format);
             texture.set_render_target();
-        }
-        let backend = Rc::clone(context.backend());
-        let (texture, sampler) = context.texture_binding(&mut *backend.gpu(), owned.key())?;
+        });
+        let (texture, sampler) = context.bind_texture(owned.key())?;
         Ok(Texture { _texture: owned, texture, sampler })
     }
 }

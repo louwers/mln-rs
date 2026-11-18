@@ -228,20 +228,17 @@ impl DashPatternTexture {
         let Some(image) = self.image.take() else {
             return;
         };
-        let texture = context.add_texture();
-        if let Some(texture) = context.texture_mut(texture.key()) {
+        let texture = context.add_texture_with(|texture| {
             texture.set_format(TextureFormat::A8Unorm);
-        }
-        if let Err(error) = context.upload_texture_data(texture.key(), &image.data, image.size) {
-            Log::error(Event::Render, format!("Uploading a dash pattern failed: {error}"));
-        }
-        if let Some(texture) = context.texture_mut(texture.key()) {
             texture.set_sampler(SamplerState {
                 filter: TextureFilterType::Linear,
                 wrap_u: TextureWrapType::Repeat,
                 wrap_v: TextureWrapType::Clamp,
                 ..Default::default()
             });
+        });
+        if let Err(error) = context.upload_texture_data(texture.key(), &image.data, image.size) {
+            Log::error(Event::Render, format!("Uploading a dash pattern failed: {error}"));
         }
         self.texture = Some(texture);
     }

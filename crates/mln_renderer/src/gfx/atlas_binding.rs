@@ -11,6 +11,7 @@ use crate::tile_render_data::TileAtlasTextures;
 
 /// Gives a draw the textures of its tile's glyph and icon atlases, which
 /// change after the draw is made.
+#[derive(Clone, Copy)]
 pub(crate) struct AtlasBinding {
     /// The textures of the tile's glyph and icon atlases, if it has
     /// atlases.
@@ -110,7 +111,7 @@ fn set_samplers(
     icon: Option<TextureKey>,
     linear_filter_for_icons: bool,
 ) {
-    if let Some(glyph) = glyph.and_then(|glyph| context.texture_mut(glyph)) {
+    if let Some(mut glyph) = glyph.and_then(|glyph| context.texture_mut(glyph)) {
         glyph.set_sampler(SamplerState {
             filter: TextureFilterType::Linear,
             wrap_u: TextureWrapType::Clamp,
@@ -118,7 +119,7 @@ fn set_samplers(
             ..Default::default()
         });
     }
-    if let Some(icon) = icon.and_then(|icon| context.texture_mut(icon)) {
+    if let Some(mut icon) = icon.and_then(|icon| context.texture_mut(icon)) {
         icon.set_sampler(SamplerState {
             filter: if linear_filter_for_icons { TextureFilterType::Linear } else { TextureFilterType::Nearest },
             wrap_u: TextureWrapType::Clamp,

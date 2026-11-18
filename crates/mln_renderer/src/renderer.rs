@@ -25,7 +25,7 @@ use crate::Registry;
 use crate::clip_masks::ClipMasks;
 use crate::frame::Frame;
 use crate::frame_projection::{self, FrameProjection};
-use crate::gfx::context::{Context, Stats};
+use crate::gfx::context::Context;
 use crate::layer_composite::{Composite, LayerComposite};
 use crate::layer_drawing::DrawOrder;
 use crate::paint_parameters::{OpenPass, PaintParameters};
@@ -68,7 +68,7 @@ pub struct RenderTimings {
 /// map's sources, tiles and layers between frames, and the GPU objects
 /// they draw with.
 pub struct Renderer {
-    /// Dropped by hand in `drop`, inside the backend's hold: its custom
+    /// Dropped by hand in `tear_down`, inside the backend's hold: its custom
     /// layers' hosts free their graphics objects as the layers go, which on
     /// GL needs the context current. A safe `Drop` runs before the fields
     /// drop, so it can't wrap their drops in the hold otherwise.
@@ -91,6 +91,8 @@ pub struct Renderer {
     timings: RenderTimings,
     /// Where the renderer reports its events, once the host gives it one.
     events: Option<RendererEvents>,
+    /// Whether `tear_down` dropped the orchestrator.
+    torn_down: bool,
 }
 
 impl Renderer {
@@ -166,6 +168,7 @@ impl Renderer {
             frame_projection: None,
             timings: RenderTimings::default(),
             events: None,
+            torn_down: false,
         }
     }
 
@@ -410,30 +413,31 @@ impl Renderer {
     /// its work finishes before the app goes to the background, and lets go
     /// of what the orchestrator caches.
     pub fn reduce_memory_use(&mut self) {
-        let backend = Rc::clone(&self.backend);
-        let _hold = backend.hold();
-        self.context.destroy_released();
-        if let Err(error) = self.context.gpu().flush(true) {
-            Log::error(Event::Render, format!("Waiting for the GPU failed: {error}"));
+        {
+            let _hold = self.backend.hold();
+            self.context.destroy_released();
+            if let Err(error) = self.context.gpu().flush(true) {
+                Log::error(Event::Render, format!("Waiting for the GPU failed: {error}"));
+            }
+            self.orchestrator.reduce_memory_use();
         }
-        self.orchestrator.reduce_memory_use();
         self.report_orchestrator_events();
     }
 
     /// The rendering stats, which count the renderer's resources until it
-    /// releases them.
+    /// releases them. A texture counts until the end of the frame that
+    /// follows its release, or until [`reduce_memory_use`](Self::reduce_memory_use).
     #[must_use]
     pub fn rendering_stats(&self) -> RenderingStats {
         self.context.stats()
     }
 
-    /// The rendering stats, to read after the renderer goes, as it left
-    /// them: what it releases as it goes comes off them. They don't change
-    /// while it renders; [`rendering_stats`](Self::rendering_stats) reads
-    /// those.
+    /// Destroys the renderer, and returns its rendering stats as it leaves
+    /// them, with all its resources released.
     #[must_use]
-    pub fn stats(&self) -> Rc<Stats> {
-        Rc::clone(self.context.shared_stats())
+    pub fn into_rendering_stats(mut self) -> RenderingStats {
+        self.tear_down();
+        self.context.stats()
     }
 
     pub fn clear_data(&mut self) {
@@ -567,8 +571,7 @@ impl Renderer {
             width: renderable_size.width,
             height: renderable_size.height,
         });
-        let backend = Rc::clone(&self.backend);
-        let mut gpu = backend.gpu();
+        let mut gpu = self.backend.gpu();
         draw(orchestrator, &mut *gpu, &mut parameters, frame, &image, draw_groups.count, depth_range_size);
         let start_rendering = Instant::now();
         if let Err(error) = parameters.end_pass(&mut *gpu).and_then(|()| gpu.flush(false)) {
@@ -785,12 +788,19 @@ fn emit(events: Option<&RendererEvents>, event: RendererEvent) {
     }
 }
 
-impl Drop for Renderer {
-    fn drop(&mut self) {
-        let backend = Rc::clone(&self.backend);
-        let _hold = backend.hold();
-        // SAFETY: `orchestrator` is dropped once, here, and nothing reads it
-        // afterwards: the remaining fields' drops don't touch it.
+impl Renderer {
+    /// Drops the renderer's resources inside the backend's hold, and
+    /// destroys what the context made and what the renderer released. Once:
+    /// the renderer is then only dropped.
+    fn tear_down(&mut self) {
+        if self.torn_down {
+            return;
+        }
+        self.torn_down = true;
+        let _hold = self.backend.hold();
+        // SAFETY: `torn_down` drops `orchestrator` once, here, and nothing
+        // reads it afterwards: the renderer only drops after this, and the
+        // remaining fields' drops don't touch it.
         #[expect(unsafe_code, reason = "drops the orchestrator inside the backend's hold; see its field")]
         unsafe {
             ManuallyDrop::drop(&mut self.orchestrator);
@@ -798,6 +808,12 @@ impl Drop for Renderer {
         self.clip_masks = ClipMasks::default();
         self.layer_composite = LayerComposite::default();
         self.static_data = None;
-        self.context.destroy_released();
+        self.context.release_all();
+    }
+}
+
+impl Drop for Renderer {
+    fn drop(&mut self) {
+        self.tear_down();
     }
 }

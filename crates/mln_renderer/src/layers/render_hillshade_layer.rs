@@ -412,7 +412,7 @@ impl TypedLayer for RenderHillshadeLayer {
                     texture
                 }
             };
-            if let Some(texture) = paint_parameters.context.texture_mut(render_target_texture) {
+            if let Some(mut texture) = paint_parameters.context.texture_mut(render_target_texture) {
                 texture.set_sampler(SamplerState {
                     filter: resampling_filter,
                     wrap_u: TextureWrapType::Clamp,

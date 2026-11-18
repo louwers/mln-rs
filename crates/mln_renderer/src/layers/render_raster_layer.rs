@@ -195,7 +195,7 @@ impl RenderRasterLayer {
             .entry(bucket.base.bucket_id)
             .or_insert_with(|| context.add_texture_with(|texture| texture.set_image(Some(Rc::new((**image).clone())))))
             .key();
-        if let Some(texture) = context.texture_mut(texture) {
+        if let Some(mut texture) = context.texture_mut(texture) {
             texture.set_sampler(sampler);
         }
         Some(texture)
@@ -459,7 +459,7 @@ impl TypedLayer for RenderRasterLayer {
         // Kept draws keep their textures, so a changed filter is applied to
         // the textures themselves.
         for texture in self.textures.values() {
-            if let Some(texture) = paint_parameters.context.texture_mut(texture.key()) {
+            if let Some(mut texture) = paint_parameters.context.texture_mut(texture.key()) {
                 texture.set_sampler(sampler);
             }
         }

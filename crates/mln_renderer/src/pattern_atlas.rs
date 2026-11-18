@@ -148,13 +148,13 @@ impl PatternAtlas {
     /// atlas grew since.
     pub(crate) fn upload(&mut self, context: &mut Context) {
         let texture = match &self.texture {
-            None => self.texture.insert(context.add_texture()).key(),
+            None => {
+                let texture = context.add_texture_with(|texture| texture.set_format(TextureFormat::Rgba8Unorm));
+                self.texture.insert(texture).key()
+            }
             Some(texture) if self.dirty => texture.key(),
             Some(_) => return,
         };
-        if let Some(texture) = context.texture_mut(texture) {
-            texture.set_format(TextureFormat::Rgba8Unorm);
-        }
         let image = &self.atlas_image;
         if let Err(error) = context.upload_texture_data(texture, &image.data, image.size) {
             Log::error(Event::Render, format!("Uploading the pattern atlas failed: {error}"));

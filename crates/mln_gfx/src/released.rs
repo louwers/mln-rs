@@ -4,11 +4,14 @@ use crate::gpu::{BufferId, BufferUsage, Gpu, ResourceId, TextureId};
 use crate::rendering_stats::RenderingStats;
 
 /// The resources the renderer dropped, which it destroys in a batch where
-/// its context reaches the backend. The rendering stats stop counting a
-/// resource when it is released.
+/// its context reaches the backend, and the entries of its texture store
+/// whose owners dropped them, which it removes there. The rendering stats
+/// stop counting a resource when it is released.
 #[derive(Default)]
 pub struct Released {
     resources: Cell<Vec<ResourceId>>,
+    /// The keys of the texture store's entries released, by their bits.
+    texture_entries: Cell<Vec<u64>>,
     /// What the resources released since the stats were last read took from
     /// them.
     uncounted: Cell<Uncounted>,
@@ -54,6 +57,24 @@ impl Released {
     /// geometry.
     pub fn resource(&self, id: impl Into<ResourceId>) {
         push(&self.resources, id.into());
+    }
+
+    /// Releases the entry of the renderer's texture store whose key has the
+    /// bits `key`.
+    pub fn texture_entry(&self, key: u64) {
+        push(&self.texture_entries, key);
+    }
+
+    /// Takes the texture store's entries released so far, giving `remove`
+    /// the bits of each key.
+    pub fn remove_texture_entries(&self, mut remove: impl FnMut(u64)) {
+        let mut entries = self.texture_entries.take();
+        for key in entries.drain(..) {
+            remove(key);
+        }
+        // Keeps the list's memory for the next frame's entries.
+        entries.append(&mut self.texture_entries.take());
+        self.texture_entries.set(entries);
     }
 
     /// Takes the resources released since the last call out of `stats`.

@@ -57,7 +57,6 @@ pub mod update_slot;
 pub mod util;
 
 pub use frame_projection::{ClipDepthRange, FrameProjection};
-pub use gfx::context::Stats;
 pub(crate) use paint_property_binder::paint_property_binders;
 pub use registry::{Registry, RegistryBuilder, register_builtins};
 pub use renderer::{RenderTimings, Renderer};

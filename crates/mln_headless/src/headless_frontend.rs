@@ -13,7 +13,7 @@ use std::sync::Arc;
 use mln_gfx::RendererBackend;
 use mln_gfx::rendering_stats::RenderingStats;
 use mln_map::Map;
-use mln_renderer::{Renderer, RendererEvent, RendererEvents, Stats, UpdateParameters, UpdateReader};
+use mln_renderer::{Renderer, RendererEvent, RendererEvents, UpdateParameters, UpdateReader};
 use mln_runtime::{BackendType, Device, DeviceOptions, GlApi, LocalTarget};
 use mln_text::GlyphCache;
 use mln_util::error::Error;
@@ -56,8 +56,8 @@ pub struct HeadlessFrontend {
     reports_to: Arc<Mutex<Option<RendererEvents>>>,
     /// Made when first used, and dropped when the attached map goes.
     renderer: Option<Renderer>,
-    /// The stats of the renderer made last, which outlive it.
-    stats: Option<Rc<Stats>>,
+    /// The stats that the last renderer left as it went.
+    stats: RenderingStats,
     /// The updates of the map that the frontend renders.
     updates: Option<UpdateReader>,
     /// The generation of the last update drawn from `updates`, or 0.
@@ -140,7 +140,7 @@ impl HeadlessFrontend {
             pool: pool.clone(),
             reports_to: Arc::default(),
             renderer: None,
-            stats: None,
+            stats: RenderingStats::default(),
             updates: None,
             drawn: 0,
         })
@@ -205,7 +205,7 @@ impl HeadlessFrontend {
     pub fn renderer(&mut self) -> &mut Renderer {
         self.renderer.get_or_insert_with(|| {
             let reports_to = Arc::clone(&self.reports_to);
-            let renderer = Renderer::with_glyph_cache(
+            Renderer::with_glyph_cache(
                 Rc::clone(&self.backend),
                 self.pixel_ratio,
                 mln_text::local_glyph_rasterizer::LocalGlyphs::default(),
@@ -217,9 +217,7 @@ impl HeadlessFrontend {
                     }
                 }),
                 &self.pool,
-            );
-            self.stats = Some(renderer.stats());
-            renderer
+            )
         })
     }
 
@@ -293,7 +291,9 @@ impl HeadlessFrontend {
         };
         if updates.is_closed() {
             self.updates = None;
-            self.renderer = None;
+            if let Some(renderer) = self.renderer.take() {
+                self.stats = renderer.into_rendering_stats();
+            }
             return false;
         }
         if updates.generation() == self.drawn {
@@ -323,13 +323,13 @@ impl HeadlessFrontend {
         }
     }
 
-    /// The rendering stats of the frontend's renderer, or of the last one
-    /// after it went: what it released as it went comes off them.
+    /// The rendering stats of the frontend's renderer, or those the last one
+    /// left as it went, with all its resources released.
     #[must_use]
     pub fn rendering_stats(&self) -> RenderingStats {
         match &self.renderer {
             Some(renderer) => renderer.rendering_stats(),
-            None => self.stats.as_ref().map(|stats| stats.get()).unwrap_or_default(),
+            None => self.stats.clone(),
         }
     }
 
