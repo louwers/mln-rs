@@ -26,6 +26,7 @@ use mln_util::logging::{Event, Log};
 use mln_util::pool::{Pool, TaskGroup};
 use mln_util::time::Instant;
 use mln_vec_map::{VecMap, VecSet};
+use smallvec::SmallVec;
 
 use crate::Registry;
 use crate::draw_cache::{ChangedBuckets, DrawGroup, DrawOrder};
@@ -37,7 +38,7 @@ use crate::line_atlas::LineAtlas;
 use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;
 use crate::render_layer::{LayerPrepareParameters, LayerSource, LayerTiles, RenderLayer};
-use crate::render_source::{self, RenderSource, SourcePrepareParameters};
+use crate::render_source::{self, RenderSource, SourcePrepareParameters, TileOrder};
 use crate::render_tile::RenderTile;
 use crate::render_tree::{DebugLayers, LayerRenderItem, RenderTree, RenderTreeParameters};
 use crate::renderer_event::RendererEvent;
@@ -404,6 +405,18 @@ impl RenderOrchestrator {
         // placement change, which the draws that copied it copy again.
         let mut changed_buckets = ChangedBuckets::default();
 
+        // The sources whose tiles a layer of the frame draws in
+        // `TileOrder::ByY`.
+        let mut sorted_by_y: SmallVec<[&str; 4]> = SmallVec::new();
+        for (&index, render_item) in &layer_render_items {
+            if let Some(source) = render_item.source.as_deref()
+                && self.layers[index as usize].tile_order() == TileOrder::ByY
+                && !sorted_by_y.contains(&source)
+            {
+                sorted_by_y.push(source);
+            }
+        }
+
         // Update all matrices and generate data that we should upload to the
         // GPU.
         for (name, render_source) in &mut self.render_sources {
@@ -418,12 +431,14 @@ impl RenderOrchestrator {
                         transform: &parameters.transform_params,
                         debug_options: update_parameters.debug_options,
                         source_name: name.clone(),
+                        sort_by_y: sorted_by_y.contains(&name.as_str()),
                     },
                 );
             } else {
                 render_source.release_render_data();
             }
         }
+        drop(sorted_by_y);
 
         let mut layers_need_placement: Vec<usize> = Vec::new();
         let mut layers_following_placement: Vec<usize> = Vec::new();

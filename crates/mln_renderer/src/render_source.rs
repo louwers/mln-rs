@@ -24,6 +24,9 @@ pub(crate) struct SourcePrepareParameters<'a> {
     pub(crate) transform: &'a TransformParameters,
     pub(crate) debug_options: MapDebugOptions,
     pub(crate) source_name: String,
+    /// Whether a layer of the frame draws the source's tiles in
+    /// [`TileOrder::ByY`], which `prepare` then sorts them in.
+    pub(crate) sort_by_y: bool,
 }
 
 /// The data members of `RenderSource`.

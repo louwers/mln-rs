@@ -531,6 +531,11 @@ pub(crate) trait RenderLayer: LayerParts {
         self.is_3d()
     }
 
+    /// The order the layer draws its source's tiles in.
+    fn tile_order(&self) -> TileOrder {
+        TileOrder::ById
+    }
+
     /// Picks the tiles of the source the layer draws in the frame, and
     /// returns the order it draws them in (`prepare_base`); `None` for a
     /// layer without tiles. The frame's update gets them in that order.
@@ -719,16 +724,16 @@ pub(crate) fn set_layer_tiles<L: RenderLayer + ?Sized>(
 }
 
 /// The default `RenderLayer::prepare`, callable from overrides: the layer
-/// draws its source's tiles in [`TileOrder::ById`], in the passes their
-/// buckets were laid out for. Without a source (a source type the port has
-/// no render source for), it gets no tiles.
+/// draws its source's tiles in its [`RenderLayer::tile_order`], in the
+/// passes their buckets were laid out for. Without a source, or with a
+/// source of a type the renderer can't draw, it gets no tiles.
 pub(crate) fn prepare_base<L: RenderLayer + ?Sized>(
     layer: &mut L,
     parameters: &LayerPrepareParameters<'_>,
 ) -> Option<TileOrder> {
     let order = parameters.source.map(|source| {
         debug_assert!(source.is_enabled());
-        TileOrder::ById
+        layer.tile_order()
     });
     if let Some(tiles) = parameters.tiles(order) {
         layer.add_render_passes_from_tiles(tiles);

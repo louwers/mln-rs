@@ -1221,6 +1221,12 @@ impl RenderLayer for RenderSymbolLayer {
         self.placement_data.clear();
     }
 
+    /// Symbols draw the lower of two tiles' overlapping symbols over the
+    /// higher's.
+    fn tile_order(&self) -> TileOrder {
+        TileOrder::ByY
+    }
+
     /// Picks the source's tiles in [`TileOrder::ByY`], and
     /// collects the symbol buckets of the tiles the layer places, and of
     /// those whose buckets another layer places and this one draws.
@@ -1229,7 +1235,7 @@ impl RenderLayer for RenderSymbolLayer {
             self.set_tiles(None);
             return None;
         };
-        let order = Some(TileOrder::ByY);
+        let order = Some(self.tile_order());
         let tiles = params.tiles(order);
         if let Some(tiles) = tiles {
             self.add_render_passes_from_tiles(tiles);
