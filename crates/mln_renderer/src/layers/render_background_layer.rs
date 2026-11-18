@@ -35,8 +35,8 @@ use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, TileDraws};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{Atlases, 
-    LayerParts, LayerSource, LayerTiles, LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer,
+use crate::render_layer::{
+    Atlases, LayerParts, LayerSource, LayerTiles, LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer,
     RenderLayerBase, TypedLayer,
 };
 use crate::render_pass::RenderPass;
@@ -209,13 +209,13 @@ impl TypedLayer for RenderBackgroundLayer {
     /// layer's buffers they read.
     fn update_draws(
         &mut self,
-        paint_parameters: &PaintParameters<'_>,
+        paint_parameters: &mut PaintParameters<'_>,
         atlases: &Atlases,
         update_parameters: &UpdateParameters,
         _source: Option<LayerSource<'_, Background>>,
     ) {
-        let (shaders, context, state) =
-            (&paint_parameters.static_data.shaders, paint_parameters.context, paint_parameters.state);
+        let (static_data, state) = (paint_parameters.static_data, paint_parameters.state);
+        let shaders = &static_data.shaders;
         let zoom = state.get_integer_zoom();
         let zoom_range = Range::new(0u8, zoom);
         let tile_cover = tile_cover(
@@ -279,7 +279,6 @@ impl TypedLayer for RenderBackgroundLayer {
 
         self.drawing.tiles_mut().set_tiles(tile_cover.iter().copied());
 
-        // conformance: background-pattern.
         let pattern_atlas = &atlases.pattern;
         let faded = evaluated.background_pattern.faded();
         let pattern_positions = if has_pattern {
@@ -294,15 +293,15 @@ impl TypedLayer for RenderBackgroundLayer {
         } else {
             None
         };
-        let pattern_texture = pattern_atlas.texture().filter(|_| has_pattern).map(|texture| {
-            texture.borrow_mut().set_sampler(SamplerState {
+        let pattern_texture = pattern_atlas.texture().filter(|_| has_pattern);
+        if let Some(texture) = pattern_texture.and_then(|texture| paint_parameters.context.texture_mut(texture)) {
+            texture.set_sampler(SamplerState {
                 filter: TextureFilterType::Linear,
                 wrap_u: TextureWrapType::Clamp,
                 wrap_v: TextureWrapType::Clamp,
                 ..Default::default()
             });
-            Rc::clone(texture)
-        });
+        }
 
         let variant = self.base.projection_variant;
         for tile_id in &tile_cover {
@@ -312,8 +311,8 @@ impl TypedLayer for RenderBackgroundLayer {
             let cached = entry.value.get_or_insert_with(|| {
                 KeptDraw::new(Self::build_tile(tile_id, Rc::clone(&shader), draw_passes, variant))
             });
-            if let Some(texture) = &pattern_texture {
-                cached.objects.set_texture(ID_BACKGROUND_IMAGE_TEXTURE, Some(Rc::clone(texture)));
+            if let Some(texture) = pattern_texture {
+                cached.objects.set_texture(ID_BACKGROUND_IMAGE_TEXTURE, Some(texture));
             }
             let draw = FrameDraw {
                 pass: draw_passes,
@@ -324,7 +323,7 @@ impl TypedLayer for RenderBackgroundLayer {
         }
 
         let frame = self.drawing.frame_mut();
-        self.draw_list.finish(frame, context, |writer| {
+        self.draw_list.finish(frame, paint_parameters.context, |writer| {
             let opacity = *evaluated.background_opacity.uniform();
             if let Some((from, to)) = pattern_positions {
                 let crossfade = &evaluated_properties.crossfade;

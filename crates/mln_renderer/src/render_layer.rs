@@ -471,7 +471,7 @@ pub(crate) trait TypedLayer {
     /// keeps of them, with the values of their uniforms.
     fn update_draws(
         &mut self,
-        _parameters: &PaintParameters<'_>,
+        _parameters: &mut PaintParameters<'_>,
         _atlases: &Atlases,
         _update_parameters: &UpdateParameters,
         _source: Option<LayerSource<'_, Self::Type>>,
@@ -531,7 +531,7 @@ pub(crate) trait LayerParts {
     /// Runs the layer's [`TypedLayer::update_draws`] with `source`.
     fn update_draws(
         &mut self,
-        parameters: &PaintParameters<'_>,
+        parameters: &mut PaintParameters<'_>,
         atlases: &Atlases,
         update_parameters: &UpdateParameters,
         source: Option<LayerSource<'_>>,
@@ -577,7 +577,7 @@ pub(crate) trait LayerParts {
 
     /// Uploads the GPU objects of the layer's draw groups, before the frame
     /// draws them.
-    fn upload(&mut self, context: &Context);
+    fn upload(&mut self, context: &mut Context);
 
     /// Draws the pass's draws of the layer's draw groups into the open pass
     /// of `gpu`, the context's, in `order`, each at its depth.
@@ -646,10 +646,7 @@ impl<L: TypedLayer> LayerParts for L {
     }
 
     fn update(&mut self, parameters: &mut LayerUpdateParameters<'_>) -> Option<TileOrder> {
-        let order = parameters.source.map(|source| {
-            debug_assert!(source.is_enabled());
-            L::TILE_ORDER
-        });
+        let order = parameters.source.map(|_| L::TILE_ORDER);
         let tiles = parameters.tiles(order).map(LayerTiles::typed::<L::Type>);
         if let Some(tiles) = tiles {
             let base = self.parts_mut().base;
@@ -669,7 +666,7 @@ impl<L: TypedLayer> LayerParts for L {
 
     fn update_draws(
         &mut self,
-        parameters: &PaintParameters<'_>,
+        parameters: &mut PaintParameters<'_>,
         atlases: &Atlases,
         update_parameters: &UpdateParameters,
         source: Option<LayerSource<'_>>,
@@ -709,7 +706,7 @@ impl<L: TypedLayer> LayerParts for L {
         }
     }
 
-    fn upload(&mut self, context: &Context) {
+    fn upload(&mut self, context: &mut Context) {
         let PartsMut { base, drawing, .. } = self.parts_mut();
         if base.is_renderable {
             drawing.upload(context);
@@ -762,15 +759,15 @@ pub(crate) trait RenderLayer: LayerParts {
 
     /// Uploads what draws into the layer's render targets, which draw before
     /// the frame's passes.
-    fn upload_render_targets(&mut self, _context: &Context) {}
+    fn upload_render_targets(&mut self, _context: &mut Context) {}
 
-    /// Draws the layer's render targets, ahead of the frame's passes, which
-    /// sample them.
-    fn render_targets(&mut self, _parameters: &mut PaintParameters<'_>) {}
+    /// Draws the layer's render targets through `gpu`, the context's, ahead
+    /// of the frame's passes, which sample them.
+    fn render_targets(&mut self, _gpu: &mut dyn Gpu, _parameters: &mut PaintParameters<'_>) {}
 
-    /// Runs a custom layer's prerender, after the layers' draws upload and
-    /// before the frame's first pass, which draws into `target`.
-    fn prerender(&mut self, _parameters: &PaintParameters<'_>) {}
+    /// Runs a custom layer's prerender through `gpu`, the context's, after
+    /// the layers' draws upload and before the frame's first pass.
+    fn prerender(&mut self, _gpu: &mut dyn Gpu, _parameters: &PaintParameters<'_>) {}
 
     /// Tells a custom layer's host that the renderer's graphics objects are
     /// lost, and lets go of it.

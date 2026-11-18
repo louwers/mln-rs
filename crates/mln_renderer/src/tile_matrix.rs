@@ -21,7 +21,7 @@ use crate::render_tile::RenderTile;
 /// projection, a projection block of zeros if they have none. GL's programs
 /// declare the block whether they read it or not, so a draw binds it all the
 /// same.
-pub(crate) fn bind_no_projection(layer_uniforms: &mut UniformBufferArray, context: &Context) {
+pub(crate) fn bind_no_projection(layer_uniforms: &mut UniformBufferArray, context: &mut Context) {
     if layer_uniforms.get(ID_PROJECTION_UBO).is_none() {
         layer_uniforms
             .set(ID_PROJECTION_UBO, context.create_storage_buffer(bytemuck::bytes_of(&ProjectionUBO::default())));

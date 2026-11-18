@@ -38,6 +38,7 @@ use crate::buckets::fill_bucket::{FillBinders, FillBucket, FillLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, copy_shared_attributes};
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
+use crate::gfx::texture2d::Texture2D;
 use crate::layer_composite::Composite;
 use crate::layer_drawing::{DrawDepth, DrawList, DrawObjectsMut, FrameDraw, TileDraws, TileObjects, UniformWriter};
 use crate::layer_type::{EvaluatedLayer, LayerType};
@@ -45,8 +46,8 @@ use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::pattern_layout::{FillLayoutSpec, PatternLayout, uses_pattern};
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
-use crate::render_layer::{Atlases, 
-    LayerParts, LayerSource, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
+use crate::render_layer::{
+    Atlases, LayerParts, LayerSource, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
 };
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
@@ -259,7 +260,7 @@ impl TileBuilder<'_> {
         let atlases = tile.atlas_textures().filter(|atlases| self.pattern && atlases.icon().is_some());
         let atlases = atlases.map(|atlases| {
             AtlasBinding::new(
-                Some(Rc::clone(atlases)),
+                Some(atlases),
                 None,
                 Some(ID_FILL_IMAGE_TEXTURE),
                 /*is_text*/ false,
@@ -530,8 +531,9 @@ impl RenderFillLayer {
 
         let faded = evaluated.fill_pattern.faded();
         let tlbr = |id: &str| tile.pattern(id).map_or([0.0; 4], |position| position.tlbr().map(f32::from));
-        let texture = draw.objects.texture(ID_FILL_IMAGE_TEXTURE);
-        let texture_size = texture.map_or(Size::new(0, 0), |texture| texture.borrow().size());
+        let texture =
+            draw.objects.texture(ID_FILL_IMAGE_TEXTURE).and_then(|texture| parameters.context.texture(texture));
+        let texture_size = texture.map_or(Size::new(0, 0), Texture2D::size);
         // A pattern has nothing to sample before its tile has an atlas, and
         // the shaders divide by the atlas size.
         if texture_size.width == 0 || texture_size.height == 0 {
@@ -585,14 +587,14 @@ impl TypedLayer for RenderFillLayer {
     /// buffers they read.
     fn update_draws(
         &mut self,
-        paint_parameters: &PaintParameters<'_>,
+        paint_parameters: &mut PaintParameters<'_>,
         _atlases: &Atlases,
         _update_parameters: &UpdateParameters,
         source: Option<LayerSource<'_, Fill>>,
     ) {
         let tiles = source.and_then(LayerSource::tiles);
-        let (shaders, context, state) =
-            (&paint_parameters.static_data.shaders, paint_parameters.context, paint_parameters.state);
+        let (static_data, state) = (paint_parameters.static_data, paint_parameters.state);
+        let shaders = &static_data.shaders;
         let Some(render_tiles) = tiles.filter(|tiles| !tiles.is_empty()) else {
             self.remove_all_draws();
             return;
@@ -600,7 +602,7 @@ impl TypedLayer for RenderFillLayer {
 
         self.update_projection_variant(state);
 
-        let outline_quads = draws_outline_quads(context);
+        let outline_quads = draws_outline_quads(paint_parameters.context);
         let pattern = !self.values.unevaluated.fill_pattern.is_undefined();
         let (outline_name, outline_pattern_name) = if outline_quads {
             (FILL_OUTLINE_INSTANCED_SHADER_NAME, FILL_OUTLINE_PATTERN_INSTANCED_SHADER_NAME)
@@ -725,7 +727,7 @@ impl TypedLayer for RenderFillLayer {
             *layer.paint.fill_layer_blend.uniform(),
         ));
         frame.set_stencil_tiles(render_tiles.render_tiles().map(|tile| tile.id));
-        self.draw_list.finish(frame, context, |writer| Self::write_uniforms(layer, writer));
+        self.draw_list.finish(frame, paint_parameters.context, |writer| Self::write_uniforms(layer, writer));
     }
 }
 

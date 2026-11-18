@@ -59,6 +59,7 @@ use crate::draw::{DrawGeometry, DrawObjects, copy_shared_attributes};
 use crate::frame_projection::zero_to_one_clip_z;
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
+use crate::gfx::texture2d::Texture2D;
 use crate::layer_drawing::{
     DrawDepth, DrawList, DrawObjectsMut, DrawPriority, FrameDraw, TileDraws, TileObjects, UniformWriter,
 };
@@ -67,9 +68,10 @@ use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::pattern_layout::{PatternLayout, uses_pattern};
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
-use crate::render_layer::{Atlases, 
-    LayerParts, LayerSource, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
+use crate::render_layer::{
+    Atlases, LayerParts, LayerSource, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
 };
+use crate::render_light::EvaluatedLight;
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_tile::FrameTile;
@@ -362,14 +364,14 @@ impl TypedLayer for RenderFillExtrusionLayer {
     /// buffers they read.
     fn update_draws(
         &mut self,
-        paint_parameters: &PaintParameters<'_>,
+        paint_parameters: &mut PaintParameters<'_>,
         _atlases: &Atlases,
         _update_parameters: &UpdateParameters,
         source: Option<LayerSource<'_, FillExtrusion>>,
     ) {
         let tiles = source.and_then(LayerSource::tiles);
-        let (shaders, context, state) =
-            (&paint_parameters.static_data.shaders, paint_parameters.context, paint_parameters.state);
+        let (static_data, state) = (paint_parameters.static_data, paint_parameters.state);
+        let shaders = &static_data.shaders;
         self.update_projection_variant(state);
 
         let render_tiles = match tiles {
@@ -389,7 +391,7 @@ impl TypedLayer for RenderFillExtrusionLayer {
         }
         // A device that rasterizes on the CPU draws each wall as a quad of
         // its own.
-        let instanced_walls = instanced_walls(context);
+        let instanced_walls = instanced_walls(paint_parameters.context);
         if self.fill_extrusion_wall_group.is_none() {
             let name = if instanced_walls { "FillExtrusionInstancedShader" } else { "FillExtrusionWallShader" };
             self.fill_extrusion_wall_group = shaders.shader_group(name);
@@ -481,7 +483,9 @@ impl TypedLayer for RenderFillExtrusionLayer {
 
         let frame = self.drawing.frame_mut();
         frame.set_stencil_tiles(render_tiles.render_tiles().map(|tile| tile.id));
-        self.draw_list.finish(frame, context, |writer| Self::write_uniforms(layer, writer, paint_parameters));
+        let (light, state) = (&paint_parameters.evaluated_light, paint_parameters.state);
+        self.draw_list
+            .finish(frame, paint_parameters.context, |writer| Self::write_uniforms(layer, writer, light, state));
     }
 }
 
@@ -619,7 +623,7 @@ impl TileBuilder {
 
         let atlases = tile.atlas_textures().filter(|_| self.has_pattern).map(|atlases| {
             AtlasBinding::new(
-                Some(Rc::clone(atlases)),
+                Some(atlases),
                 None,
                 Some(ID_FILL_EXTRUSION_IMAGE_TEXTURE),
                 /*is_text=*/ false,
@@ -750,8 +754,9 @@ impl RenderFillExtrusionLayer {
         let num_tiles = 2f64.powi(i32::from(tile_id.canonical.z));
         let height_factor = (-num_tiles / TILE_SIZE_D / 8.0) as f32;
 
-        let texture = objects.texture(ID_FILL_EXTRUSION_IMAGE_TEXTURE);
-        let texture_size = texture.map_or(Size::new(0, 0), |texture| texture.borrow().size());
+        let texture =
+            objects.texture(ID_FILL_EXTRUSION_IMAGE_TEXTURE).and_then(|texture| parameters.context.texture(texture));
+        let texture_size = texture.map_or(Size::new(0, 0), Texture2D::size);
         let pattern = evaluated.fill_extrusion_pattern.faded();
         let tlbr = |id: &str| tile.pattern(id).map_or([0.0; 4], |position| position.tlbr().map(f32::from));
 
@@ -785,11 +790,11 @@ impl RenderFillExtrusionLayer {
     fn write_uniforms(
         layer: &EvaluatedLayer<FillExtrusion>,
         writer: &mut UniformWriter<'_, ExtrusionUniforms>,
-        parameters: &PaintParameters<'_>,
+        light: &EvaluatedLight,
+        state: &TransformState,
     ) {
         let evaluated = &layer.paint;
         let crossfade = layer.crossfade;
-        let light = &parameters.evaluated_light;
         let props = FillExtrusionPropsUBO {
             color: evaluated
                 .fill_extrusion_color
@@ -797,7 +802,7 @@ impl RenderFillExtrusionLayer {
                 .to_float_array(),
             light_color: FillExtrusionBucket::light_color(light),
             pad1: 0.0,
-            light_position: FillExtrusionBucket::light_position(light, parameters.state),
+            light_position: FillExtrusionBucket::light_position(light, state),
             base: evaluated
                 .fill_extrusion_base
                 .constant_or(&FillExtrusionPaintProperties::Defaults::fill_extrusion_base()),

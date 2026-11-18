@@ -1,5 +1,4 @@
 use std::any::Any;
-use std::cell::Cell;
 
 use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, GpuError, LoadOp, PassDesc, TargetFormats};
 use mln_gfx::stencil_mode::Test;
@@ -91,6 +90,14 @@ impl TransformParameters {
             state,
         }
     }
+
+    /// The projection of the tile `tile_id`, with the projection matrix
+    /// aligned to the pixel grid or not.
+    #[must_use]
+    pub(crate) fn projection_data_for_tile(&self, tile_id: &UnwrappedTileID, aligned: bool) -> ProjectionData {
+        self.state
+            .get_projection_data_with(tile_id, if aligned { &self.aligned_proj_matrix } else { &self.proj_matrix })
+    }
 }
 
 /// A pass of the backend's `Gpu` that draws draw into, and its
@@ -125,10 +132,10 @@ impl OpenPass {
 }
 
 pub(crate) struct PaintParameters<'a> {
-    pub(crate) context: &'a Context,
+    pub(crate) context: &'a mut Context,
     /// The pass of the backend's `Gpu` that draws draw into, while one
     /// is open.
-    open_pass: Cell<Option<OpenPass>>,
+    open_pass: Option<OpenPass>,
 
     pub(crate) transform_params: &'a TransformParameters,
     pub(crate) state: &'a TransformState,
@@ -167,9 +174,8 @@ impl<'a> PaintParameters<'a> {
     pub(crate) const DEPTH_EPSILON: f32 = 1.0 / (1 << 16) as f32;
     pub(crate) const MAX_STENCIL_VALUE: i32 = 255;
 
-    #[expect(clippy::too_many_arguments, reason = "each argument is a field of the paint parameters")]
     pub(crate) fn new(
-        context: &'a Context,
+        context: &'a mut Context,
         pixel_ratio: f32,
         debug_options: MapDebugOptions,
         transform_params: &'a TransformParameters,
@@ -186,7 +192,7 @@ impl<'a> PaintParameters<'a> {
 
         PaintParameters {
             context,
-            open_pass: Cell::new(None),
+            open_pass: None,
             transform_params,
             state,
             static_data,
@@ -213,19 +219,19 @@ impl<'a> PaintParameters<'a> {
     /// The size and formats of the attachments that draws draw into
     /// now, `None` outside a pass.
     pub(crate) fn pass_target(&self) -> Option<(Size, TargetFormats)> {
-        self.open_pass.get().map(|pass| (pass.size, pass.targets))
+        self.open_pass.map(|pass| (pass.size, pass.targets))
     }
 
     /// Begins `pass` on `gpu`, the context's, which draws then draw
     /// into.
-    pub(crate) fn begin_pass(&self, gpu: &mut dyn Gpu, pass: OpenPass) -> Result<(), GpuError> {
+    pub(crate) fn begin_pass(&mut self, gpu: &mut dyn Gpu, pass: OpenPass) -> Result<(), GpuError> {
         gpu.begin_pass(&pass.desc())?;
-        self.open_pass.set(Some(pass));
+        self.open_pass = Some(pass);
         Ok(())
     }
 
     /// Ends the pass begun on `gpu`, the context's, if any.
-    pub(crate) fn end_pass(&self, gpu: &mut dyn Gpu) -> Result<(), GpuError> {
+    pub(crate) fn end_pass(&mut self, gpu: &mut dyn Gpu) -> Result<(), GpuError> {
         match self.open_pass.take() {
             Some(_) => gpu.end_pass(),
             None => Ok(()),
@@ -234,8 +240,8 @@ impl<'a> PaintParameters<'a> {
 
     /// Ends the pass begun on `gpu`, the context's, and begins one over its
     /// attachments that loads them, with the stencil as `stencil` says.
-    fn restart_pass(&self, gpu: &mut dyn Gpu, stencil: LoadOp<u32>) {
-        let Some(pass) = self.open_pass.get() else {
+    fn restart_pass(&mut self, gpu: &mut dyn Gpu, stencil: LoadOp<u32>) {
+        let Some(pass) = self.open_pass else {
             return;
         };
         let restarted = self.end_pass(gpu).and_then(|()| self.begin_pass(gpu, pass.loading(stencil)));
@@ -253,7 +259,7 @@ impl<'a> PaintParameters<'a> {
     /// the texture onto the pass begun, whose stencil stays as it was.
     pub(crate) fn begin_composited(&mut self, gpu: &mut dyn Gpu, group: SimpleIdentity) -> Option<Composited> {
         let (frame, composite) =
-            self.open_pass.get().zip(self.layer_composite.pass()).filter(|_| self.layer_composite.composites(group))?;
+            self.open_pass.zip(self.layer_composite.pass()).filter(|_| self.layer_composite.composites(group))?;
         let mut layer_composite = std::mem::take(&mut self.layer_composite);
         let mut drawn = self.end_pass(gpu);
         if drawn.is_ok()
@@ -319,7 +325,7 @@ impl<'a> PaintParameters<'a> {
     /// begun, after what drew there so far, as a custom layer draws: `f`
     /// gets the backend's `CustomLayerPass`. Returns whether `f` ran.
     pub(crate) fn lend_pass(&self, gpu: &mut dyn Gpu, f: &mut dyn FnMut(&mut dyn Any)) -> Result<bool, GpuError> {
-        if self.open_pass.get().is_none() {
+        if self.open_pass.is_none() {
             return Ok(false);
         }
         gpu.lend(f).map(|()| true)
@@ -327,10 +333,7 @@ impl<'a> PaintParameters<'a> {
 
     #[must_use]
     pub(crate) fn projection_data_for_tile(&self, tile_id: &UnwrappedTileID, aligned: bool) -> ProjectionData {
-        self.state.get_projection_data_with(
-            tile_id,
-            if aligned { &self.transform_params.aligned_proj_matrix } else { &self.transform_params.proj_matrix },
-        )
+        self.transform_params.projection_data_for_tile(tile_id, aligned)
     }
 
     #[must_use]

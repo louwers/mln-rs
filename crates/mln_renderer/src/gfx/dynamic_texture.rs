@@ -4,9 +4,7 @@
 // leases through a `OnceCell`, so a tile's render data can bind it without
 // reaching the atlas.
 
-use std::cell::OnceCell;
 use std::num::NonZeroU32;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use etagere::{AllocId, AtlasAllocator, size2};
@@ -20,7 +18,7 @@ use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use crate::gfx::context::Context;
-use crate::gfx::texture2d::Texture2DPtr;
+use crate::gfx::texture2d::{OwnedTexture, TextureKey};
 
 /// Identifies a bin within a dynamic texture.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -84,8 +82,6 @@ struct Bin {
 
 /// A page's GPU texture, once the page's first `upload` made it. Shared with
 /// the leases on the page's bins.
-pub(crate) type PageTexture = Rc<OnceCell<Texture2DPtr>>;
-
 /// The pixels queued for a bin.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum QueuedPixels {
@@ -110,7 +106,8 @@ pub(crate) struct DynamicTexture {
     max_id: Option<DynamicTextureBinId>,
     /// The images queued for the frame's next upload, keyed by handle id.
     images_to_upload: HashMap<DynamicTextureBinId, (RectU16, QueuedPixels)>,
-    texture: PageTexture,
+    /// The GPU texture, from the first upload.
+    texture: Option<OwnedTexture>,
 }
 
 impl std::fmt::Debug for DynamicTexture {
@@ -153,13 +150,14 @@ impl DynamicTexture {
             bins: HashMap::default(),
             max_id: None,
             images_to_upload: HashMap::default(),
-            texture: PageTexture::default(),
+            texture: None,
         }
     }
 
     /// The page's GPU texture, shared with the leases on its bins.
-    pub(crate) fn texture(&self) -> &PageTexture {
-        &self.texture
+    /// The GPU texture, from the first upload.
+    pub(crate) fn texture(&self) -> Option<TextureKey> {
+        self.texture.as_ref().map(OwnedTexture::key)
     }
 
     pub(crate) fn get_pixel_format(&self) -> TexturePixelType {
@@ -249,29 +247,29 @@ impl DynamicTexture {
     }
 
     /// Makes the GPU texture on first use and uploads the queued images.
-    pub(crate) fn upload(&mut self, context: &Context) {
-        let texture = self.texture.get_or_init(|| {
-            let texture = context.create_texture_2d();
-            {
-                let mut t = texture.borrow_mut();
-                t.set_size(self.size);
-                t.set_format(texture_format(self.pixel_format, TextureChannelDataType::UnsignedByte));
-                t.set_sampler(SamplerState {
+    pub(crate) fn upload(&mut self, context: &mut Context) {
+        if self.texture.is_none() {
+            let texture = context.add_texture_with(|texture| {
+                texture.set_size(self.size);
+                texture.set_format(texture_format(self.pixel_format, TextureChannelDataType::UnsignedByte));
+                texture.set_sampler(SamplerState {
                     filter: TextureFilterType::Linear,
                     wrap_u: TextureWrapType::Clamp,
                     wrap_v: TextureWrapType::Clamp,
                     ..SamplerState::default()
                 });
-                if let Err(error) = t.create(context) {
-                    Log::error(Event::Render, format!("Making an atlas texture failed: {error}"));
-                }
+            });
+            if let Err(error) = context.create_texture(texture.key()) {
+                Log::error(Event::Render, format!("Making an atlas texture failed: {error}"));
             }
-            texture
-        });
+            self.texture = Some(texture);
+        }
+        let Some(texture) = self.texture.as_ref().map(OwnedTexture::key) else {
+            return;
+        };
         if self.images_to_upload.is_empty() {
             return;
         }
-        let mut t = texture.borrow_mut();
         // The padded pixels of the glyph being uploaded, reused across bins.
         let mut padded = Vec::new();
         for (rect, pixels) in self.images_to_upload.values() {
@@ -283,7 +281,7 @@ impl DynamicTexture {
                 }
             };
             let size = Size::new(u32::from(rect.w), u32::from(rect.h));
-            if let Err(error) = t.upload_sub_region(context, data, size, rect.x, rect.y) {
+            if let Err(error) = context.upload_texture_region(texture, data, size, rect.x, rect.y) {
                 Log::error(Event::Render, format!("Uploading to an atlas texture failed: {error}"));
             }
         }

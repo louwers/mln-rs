@@ -26,13 +26,13 @@ use mln_util::time::Instant;
 
 use crate::gfx::context::Context;
 use crate::gfx::owned::Owned;
-use crate::gfx::texture2d::Texture2DPtr;
+use crate::gfx::texture2d::TextureKey;
 use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::gfx::upload;
 use crate::paint_parameters::PaintParameters;
 
 /// The textures a draw binds, by texture id.
-pub(crate) type Textures = [Option<Texture2DPtr>; MAX_TEXTURE_COUNT_PER_SHADER];
+pub(crate) type Textures = [Option<TextureKey>; MAX_TEXTURE_COUNT_PER_SHADER];
 
 /// The most vertex buffers a draw binds, WebGPU's default limit.
 const MAX_VERTEX_BUFFERS: usize = 8;
@@ -188,13 +188,13 @@ impl DrawObjects {
 
     /// Uploads the indexes, vertex attributes and textures, where they
     /// changed since the last upload.
-    pub(crate) fn upload(&mut self, context: &Context) {
+    pub(crate) fn upload(&mut self, context: &mut Context) {
         if let Err(error) = self.upload_in(context) {
             Log::error(Event::Render, format!("Uploading a draw of {} failed: {error}", self.shader.name()));
         }
     }
 
-    fn upload_in(&mut self, context: &Context) -> Result<(), GpuError> {
+    fn upload_in(&mut self, context: &mut Context) -> Result<(), GpuError> {
         let shader = &*self.shader;
         {
             let mut indexes = self.indexes.borrow_mut();
@@ -234,8 +234,8 @@ impl DrawObjects {
             }
         }
 
-        for texture in self.textures.iter().flatten() {
-            if let Err(error) = texture.borrow_mut().upload(context) {
+        for &texture in self.textures.iter().flatten() {
+            if let Err(error) = context.upload_texture(texture) {
                 Log::error(Event::Render, format!("Uploading a texture failed: {error}"));
             }
         }
@@ -251,7 +251,7 @@ impl DrawObjects {
     pub(crate) fn draw(
         &mut self,
         gpu: &mut dyn Gpu,
-        parameters: &PaintParameters<'_>,
+        parameters: &mut PaintParameters<'_>,
         frame: &UniformBufferArray,
         depth_mode: DepthMode,
         stencil_mode: StencilMode,
@@ -265,7 +265,7 @@ impl DrawObjects {
     fn draw_in(
         &mut self,
         gpu: &mut dyn Gpu,
-        parameters: &PaintParameters<'_>,
+        parameters: &mut PaintParameters<'_>,
         frame: &UniformBufferArray,
         depth_mode: DepthMode,
         stencil_mode: StencilMode,
@@ -274,7 +274,8 @@ impl DrawObjects {
         let Some((size, targets)) = parameters.pass_target() else {
             return Ok(());
         };
-        let context = parameters.context;
+        let scissor = clamped_scissor(parameters, size);
+        let context = &mut *parameters.context;
         let Some(index_buffer) = ({
             let indexes = self.indexes.borrow();
             debug_assert!(!indexes.get_dirty(), "a draw of {} draws indexes it didn't upload", self.shader.name());
@@ -320,7 +321,7 @@ impl DrawObjects {
         let full = Scissor { x: 0, y: 0, width: size.width, height: size.height };
         let dynamic = DynamicState {
             depth_range: (depth_mode.range.min, depth_mode.range.max),
-            scissor: clamped_scissor(parameters, size).unwrap_or(full),
+            scissor: scissor.unwrap_or(full),
             stencil_reference: stencil_mode.ref_ as u32,
             blend_constant: self.color_mode.blend_color,
             line_width: 1.0,
@@ -362,7 +363,7 @@ impl DrawObjects {
             })?;
             draws += 1;
         }
-        let mut stats = context.rendering_stats();
+        let stats = context.rendering_stats();
         stats.num_draw_calls += draws;
         stats.total_draw_calls += draws;
         Ok(())
@@ -375,14 +376,14 @@ impl DrawObjects {
     fn bindings(
         &mut self,
         gpu: &mut dyn Gpu,
-        context: &Context,
+        context: &mut Context,
         shader_id: ShaderId,
         frame: &UniformBufferArray,
     ) -> Result<BindingsId, GpuError> {
         let mut textures = [None; MAX_TEXTURE_COUNT_PER_SHADER];
         for &id in self.shader.textures() {
-            if let Some(texture) = self.textures.get(id).and_then(Option::as_ref) {
-                textures[id] = Some(texture.borrow_mut().binding(gpu, context)?);
+            if let Some(&texture) = self.textures.get(id).and_then(Option::as_ref) {
+                textures[id] = Some(context.texture_binding(gpu, texture)?);
             }
         }
         let global = context.global_uniform_buffers();
@@ -408,7 +409,6 @@ impl DrawObjects {
                 });
             }
         }
-        drop(global);
         for (id, binding) in textures.iter().enumerate() {
             if let Some((texture, sampler)) = *binding {
                 entries.push(BindGroupEntry::Texture { id: id as u32, texture, sampler });
@@ -460,12 +460,12 @@ impl DrawObjects {
 
     /// The texture it binds as `id`.
     #[must_use]
-    pub(crate) fn texture(&self, id: usize) -> Option<&Texture2DPtr> {
-        self.textures[id].as_ref()
+    pub(crate) fn texture(&self, id: usize) -> Option<TextureKey> {
+        self.textures[id]
     }
 
     /// Makes `texture` the one it binds as `id`.
-    pub(crate) fn set_texture(&mut self, id: usize, texture: Option<Texture2DPtr>) {
+    pub(crate) fn set_texture(&mut self, id: usize, texture: Option<TextureKey>) {
         self.textures[id] = texture;
     }
 
@@ -479,13 +479,13 @@ impl DrawObjects {
     pub(crate) fn texture_or_insert_with(
         &mut self,
         id: usize,
-        make: impl FnOnce() -> Option<Texture2DPtr>,
-    ) -> Option<&Texture2DPtr> {
+        make: impl FnOnce() -> Option<TextureKey>,
+    ) -> Option<TextureKey> {
         let texture = &mut self.textures[id];
         if texture.is_none() {
             *texture = make();
         }
-        texture.as_ref()
+        *texture
     }
 
     /// Replaces the indexes and the segments drawn from them.
@@ -541,7 +541,7 @@ fn fixed_state(variant: PipelineVariant, color_mode: &ColorMode, cull: CullFaceM
 /// Gives each binding without data a buffer of its format's default value,
 /// for `vertex_count` vertices.
 fn bind_default_values(
-    context: &Context,
+    context: &mut Context,
     bindings: &mut AttributeBindingArray,
     vertex_count: usize,
 ) -> Result<(), GpuError> {

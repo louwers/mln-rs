@@ -1115,7 +1115,7 @@ impl RenderOrchestrator {
 
     /// Makes the GPU textures of the tiles' atlas and of the layers'
     /// atlases, and uploads what they queued.
-    pub(crate) fn upload_atlases(&mut self, context: &Context) {
+    pub(crate) fn upload_atlases(&mut self, context: &mut Context) {
         self.tile_store.atlas().upload(context);
         self.atlases.line.upload(context);
         self.atlases.pattern.upload(context);
@@ -1171,10 +1171,26 @@ impl RenderOrchestrator {
         }
     }
 
-    /// Uploads the GPU objects of the layers' draw groups, in drawing order.
-    pub(crate) fn upload_draw_groups(&mut self, context: &Context) {
+    /// Uploads the GPU objects of the frame's draws: the layers' draw
+    /// groups in drawing order, the globe's depth, the sky and the
+    /// atmosphere, what draws into the layers' render targets, and the debug
+    /// overlays.
+    pub(crate) fn upload_draws(&mut self, context: &mut Context) {
         for layer in &mut self.layers {
             layer.upload(context);
+        }
+        self.globe_depth_pass.upload(context);
+        if let Some(sky) = self.sky_pass.sky() {
+            sky.upload(context);
+        }
+        if let Some(atmosphere) = self.sky_pass.atmosphere() {
+            atmosphere.upload(context);
+        }
+        for layer in &mut self.layers {
+            layer.upload_render_targets(context);
+        }
+        for debug in self.debug_layers.values_mut() {
+            debug.upload(context);
         }
     }
 
@@ -1202,7 +1218,7 @@ impl RenderOrchestrator {
     }
 
     /// Readies the buckets of the frame's sources for the frame's draws.
-    pub(crate) fn upload_sources(&mut self, context: &Context) {
+    pub(crate) fn upload_sources(&mut self, context: &mut Context) {
         let needs = crate::layers::upload_needs(context);
         for source in self.render_sources.values_mut() {
             if source.is_enabled() {
@@ -1213,7 +1229,7 @@ impl RenderOrchestrator {
 
     /// Updates the debug overlays' draws from the sources' tiles, and makes
     /// their draws of the frame (layers: debug).
-    pub(crate) fn update_debug_layers(&mut self, parameters: &PaintParameters<'_>) {
+    pub(crate) fn update_debug_layers(&mut self, parameters: &mut PaintParameters<'_>) {
         for source in self.render_sources.values() {
             if source.is_enabled() {
                 source.update_debug_draws(&mut self.debug_layers, parameters);
@@ -1241,7 +1257,7 @@ impl RenderOrchestrator {
     pub(crate) fn update_layer_draws(
         &mut self,
         update_parameters: &UpdateParameters,
-        paint_parameters: &PaintParameters<'_>,
+        paint_parameters: &mut PaintParameters<'_>,
         frame: &Frame,
     ) {
         let mut has_3d = false;
@@ -1262,18 +1278,11 @@ impl RenderOrchestrator {
             render_layer.update_draws(paint_parameters, &self.atlases, update_parameters, layer_source);
             has_3d = has_3d || render_layer.needs_globe_depth();
         }
-        let shaders = &paint_parameters.static_data.shaders;
-        let (context, state) = (paint_parameters.context, paint_parameters.state);
-
-        self.sky_pass.update(
-            shaders,
-            context,
-            state,
-            paint_parameters.renderable_size,
-            paint_parameters.pixel_ratio,
-            frame.sky.as_ref(),
-            &frame.light,
-        );
+        let (static_data, state) = (paint_parameters.static_data, paint_parameters.state);
+        let shaders = &static_data.shaders;
+        let (renderable_size, pixel_ratio) = (paint_parameters.renderable_size, paint_parameters.pixel_ratio);
+        let context = &mut *paint_parameters.context;
+        self.sky_pass.update(shaders, context, state, renderable_size, pixel_ratio, frame.sky.as_ref(), &frame.light);
         self.globe_depth_pass.update(
             shaders,
             context,

@@ -46,7 +46,7 @@ use crate::draw::clamped_scissor;
 use crate::gfx::attachment::Attachment;
 use crate::gfx::context::Context;
 use crate::gfx::owned::Owned;
-use crate::gfx::texture2d::Texture2D;
+use crate::gfx::texture2d::OwnedTexture;
 use crate::gfx::uniform_buffer::UniformBufferPtr;
 use crate::paint_parameters::{OpenPass, PaintParameters};
 use crate::render_static_data::RenderStaticData;
@@ -124,19 +124,22 @@ impl Composite {
 /// A texture that passes draw into and draws sample.
 struct Texture {
     /// The texture, which `texture` and `sampler` bind.
-    _texture: Texture2D,
+    _texture: OwnedTexture,
     texture: TextureId,
     sampler: SamplerId,
 }
 
 impl Texture {
-    fn new(context: &Context, size: Size, format: TextureFormat) -> Result<Texture, GpuError> {
-        let mut texture = Texture2D::new(Rc::clone(context.released()));
-        texture.set_size(size);
-        texture.set_format(format);
-        texture.set_render_target();
-        let (id, sampler) = texture.binding(&mut *context.gpu(), context)?;
-        Ok(Texture { _texture: texture, texture: id, sampler })
+    fn new(context: &mut Context, size: Size, format: TextureFormat) -> Result<Texture, GpuError> {
+        let owned = context.add_texture();
+        if let Some(texture) = context.texture_mut(owned.key()) {
+            texture.set_size(size);
+            texture.set_format(format);
+            texture.set_render_target();
+        }
+        let backend = Rc::clone(context.backend());
+        let (texture, sampler) = context.texture_binding(&mut *backend.gpu(), owned.key())?;
+        Ok(Texture { _texture: owned, texture, sampler })
     }
 }
 
@@ -198,7 +201,7 @@ impl LayerComposite {
     /// does every group that blends in the shader.
     pub(crate) fn update(
         &mut self,
-        context: &Context,
+        context: &mut Context,
         shaders: &ShaderRegistry,
         size: Size,
         format: Option<TextureFormat>,
@@ -259,11 +262,17 @@ impl LayerComposite {
 
     /// Makes the target of `size`, unless it is made, the frame copy of
     /// `frame_format` where there is one, and the quad.
-    fn make(&mut self, context: &Context, size: Size, frame_format: Option<TextureFormat>) -> Result<(), GpuError> {
+    fn make(&mut self, context: &mut Context, size: Size, frame_format: Option<TextureFormat>) -> Result<(), GpuError> {
         if self.target.as_ref().is_none_or(|target| target.size != size) {
             self.drop_textures();
             let color = Texture::new(context, size, COLOR)?;
-            let depth_stencil = Attachment::new(context, "layer composite depth and stencil", size, DEPTH_STENCIL)?;
+            let depth_stencil = Attachment::new(
+                &mut *context.gpu(),
+                context.released(),
+                "layer composite depth and stencil",
+                size,
+                DEPTH_STENCIL,
+            )?;
             self.target = Some(Target { size, color, depth_stencil });
         }
         match frame_format {
@@ -345,7 +354,7 @@ impl LayerComposite {
     /// Composites the texture onto the open pass, as the draw group `group`
     /// does, at the depth of the current layer: layers above that drew into
     /// the depth buffer hide it.
-    pub(crate) fn draw(&mut self, gpu: &mut dyn Gpu, parameters: &PaintParameters<'_>, group: SimpleIdentity) {
+    pub(crate) fn draw(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, group: SimpleIdentity) {
         let Some(slot) = self.groups.iter().position(|(id, _)| *id == group) else {
             return;
         };
@@ -357,7 +366,7 @@ impl LayerComposite {
     }
 
     /// Copies the frame's texture onto the open pass, over what it holds.
-    pub(crate) fn copy_frame(&mut self, gpu: &mut dyn Gpu, parameters: &PaintParameters<'_>) {
+    pub(crate) fn copy_frame(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         if self.frame.is_none() {
             return;
         }
@@ -372,7 +381,7 @@ impl LayerComposite {
     fn draw_quad(
         &mut self,
         gpu: &mut dyn Gpu,
-        parameters: &PaintParameters<'_>,
+        parameters: &mut PaintParameters<'_>,
         slot: usize,
         blend: BlendFunction,
         depth: DepthMode,
@@ -385,7 +394,8 @@ impl LayerComposite {
         let Some((size, targets)) = parameters.pass_target() else {
             return Ok(());
         };
-        let context = parameters.context;
+        let scissor = clamped_scissor(parameters, size);
+        let context = &mut *parameters.context;
         let shader_id = match self.shader_id {
             Some(id) => id,
             None => *self.shader_id.insert(context.shader(gpu, shader.key())?),
@@ -489,13 +499,13 @@ impl LayerComposite {
             global_index: 0,
             dynamic: DynamicState {
                 depth_range: (depth.range.min, depth.range.max),
-                scissor: clamped_scissor(parameters, size).unwrap_or(full),
+                scissor: scissor.unwrap_or(full),
                 stencil_reference: 0,
                 blend_constant: Color::default(),
                 line_width: 1.0,
             },
         })?;
-        let mut stats = context.rendering_stats();
+        let stats = context.rendering_stats();
         stats.num_draw_calls += 1;
         stats.total_draw_calls += 1;
         Ok(())

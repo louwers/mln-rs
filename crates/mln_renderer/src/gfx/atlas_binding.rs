@@ -1,19 +1,19 @@
-use std::rc::Rc;
-
 use mln_gfx::shaders::shader_program::ShaderProgram;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_style_types::AlignmentType;
 
 use crate::draw::{DrawObjects, Textures};
-use crate::gfx::texture2d::Texture2DPtr;
+use crate::gfx::context::Context;
+use crate::gfx::texture2d::TextureKey;
 use crate::paint_parameters::PaintParameters;
 use crate::tile_render_data::TileAtlasTextures;
 
 /// Gives a draw the textures of its tile's glyph and icon atlases, which
 /// change after the draw is made.
+#[derive(Clone, Copy)]
 pub(crate) struct AtlasBinding {
-    atlases: Option<Rc<TileAtlasTextures>>,
+    atlases: Option<TileAtlasTextures>,
     icon_texture_id: Option<usize>,
     glyph_texture_id: Option<usize>,
     is_text: bool,
@@ -27,7 +27,7 @@ impl AtlasBinding {
     #[expect(clippy::too_many_arguments, reason = "each argument is a field of the binding")]
     #[must_use]
     pub(crate) fn new(
-        atlases: Option<Rc<TileAtlasTextures>>,
+        atlases: Option<TileAtlasTextures>,
         icon_texture_id: Option<usize>,
         glyph_texture_id: Option<usize>,
         is_text: bool,
@@ -61,7 +61,7 @@ impl AtlasBinding {
     /// Gives the draw the atlases' textures before it draws, and sets the
     /// samplers of the atlases, which the tile's draws share, to filter as
     /// the frame's view asks.
-    pub(crate) fn bind(&self, objects: &mut DrawObjects, parameters: &PaintParameters<'_>) {
+    pub(crate) fn bind(&self, objects: &mut DrawObjects, parameters: &mut PaintParameters<'_>) {
         let state = parameters.state;
         let transformed = self.rotation_alignment == AlignmentType::Map || state.get_pitch() != 0.0;
         let linear_filter_for_icons = if self.is_text {
@@ -72,7 +72,7 @@ impl AtlasBinding {
         if self.glyph_texture_id.is_some()
             && let Some(atlases) = &self.atlases
         {
-            set_samplers(atlases, linear_filter_for_icons);
+            set_samplers(parameters.context, atlases, linear_filter_for_icons);
         }
         let samples_icon = self.samples_icon(objects.shader());
         self.set_textures(samples_icon, |id, texture| objects.set_texture(id, texture));
@@ -80,7 +80,7 @@ impl AtlasBinding {
 
     /// Sets the atlases' textures, those of a shader that samples the icon
     /// texture or not, with `set(id, texture)`.
-    fn set_textures(&self, samples_icon: bool, mut set: impl FnMut(usize, Option<Texture2DPtr>)) {
+    fn set_textures(&self, samples_icon: bool, mut set: impl FnMut(usize, Option<TextureKey>)) {
         let (Some(glyph_texture_id), Some(atlases)) = (self.glyph_texture_id, &self.atlases) else {
             return;
         };
@@ -103,17 +103,17 @@ impl AtlasBinding {
 
 /// Makes the glyph atlas's texture filter linearly, and the icon atlas's
 /// linearly or not.
-fn set_samplers(atlases: &TileAtlasTextures, linear_filter_for_icons: bool) {
-    if let Some(glyph) = atlases.glyph() {
-        glyph.borrow_mut().set_sampler(SamplerState {
+fn set_samplers(context: &mut Context, atlases: &TileAtlasTextures, linear_filter_for_icons: bool) {
+    if let Some(glyph) = atlases.glyph().and_then(|glyph| context.texture_mut(glyph)) {
+        glyph.set_sampler(SamplerState {
             filter: TextureFilterType::Linear,
             wrap_u: TextureWrapType::Clamp,
             wrap_v: TextureWrapType::Clamp,
             ..Default::default()
         });
     }
-    if let Some(icon) = atlases.icon() {
-        icon.borrow_mut().set_sampler(SamplerState {
+    if let Some(icon) = atlases.icon().and_then(|icon| context.texture_mut(icon)) {
+        icon.set_sampler(SamplerState {
             filter: if linear_filter_for_icons { TextureFilterType::Linear } else { TextureFilterType::Nearest },
             wrap_u: TextureWrapType::Clamp,
             wrap_v: TextureWrapType::Clamp,

@@ -33,8 +33,8 @@ use crate::layout::circle_layout::CircleLayout;
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
-use crate::render_layer::{Atlases, 
-    LayerParts, LayerSource, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
+use crate::render_layer::{
+    Atlases, LayerParts, LayerSource, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
 };
 use crate::render_pass::RenderPass;
 use crate::render_tile::RenderTile;
@@ -287,14 +287,14 @@ impl TypedLayer for RenderCircleLayer {
     /// they read.
     fn update_draws(
         &mut self,
-        paint_parameters: &PaintParameters<'_>,
+        paint_parameters: &mut PaintParameters<'_>,
         _atlases: &Atlases,
         _update_parameters: &UpdateParameters,
         source: Option<LayerSource<'_, Circle>>,
     ) {
         let tiles = source.and_then(LayerSource::tiles);
-        let (shaders, context, state) =
-            (&paint_parameters.static_data.shaders, paint_parameters.context, paint_parameters.state);
+        let (static_data, state) = (paint_parameters.static_data, paint_parameters.state);
+        let shaders = &static_data.shaders;
         self.update_projection_variant(state);
 
         let Some(render_tiles) = tiles.filter(|tiles| !tiles.is_empty()) else {
@@ -383,7 +383,8 @@ impl TypedLayer for RenderCircleLayer {
             self.draw_list.push(draw, Self::uniforms(layer, &tile_id, binders, paint_parameters));
         }
 
-        self.draw_list.finish(self.drawing.frame_mut(), context, |writer| Self::write_uniforms(layer, writer));
+        self.draw_list
+            .finish(self.drawing.frame_mut(), paint_parameters.context, |writer| Self::write_uniforms(layer, writer));
     }
 }
 

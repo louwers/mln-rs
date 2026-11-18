@@ -7,7 +7,6 @@
 // frames.
 
 use std::marker::PhantomData;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use glam::Vec2;
@@ -231,7 +230,7 @@ impl<'a, T> FrameTile<'a, T> {
 
     /// The textures of the tile's glyph and icon atlases.
     #[must_use]
-    pub(crate) fn atlas_textures(self) -> Option<&'a Rc<TileAtlasTextures>> {
-        self.contents?.geometry().map(|contents| &contents.textures)
+    pub(crate) fn atlas_textures(self) -> Option<TileAtlasTextures> {
+        self.contents?.geometry().map(|contents| contents.textures)
     }
 }

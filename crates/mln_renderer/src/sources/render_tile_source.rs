@@ -204,7 +204,7 @@ impl DebugLayer {
     }
 
     /// Uploads the GPU objects of the frame's draws.
-    pub(crate) fn upload(&mut self, context: &Context) {
+    pub(crate) fn upload(&mut self, context: &mut Context) {
         self.frame.upload(&mut self.draws[..], Self::objects, context);
     }
 
@@ -233,7 +233,7 @@ impl DebugLayer {
 
     /// Makes the frame's draws of the overlay, and writes the buffers they
     /// read.
-    pub(crate) fn prepare(&mut self, parameters: &PaintParameters<'_>) {
+    pub(crate) fn prepare(&mut self, parameters: &mut PaintParameters<'_>) {
         let zoom = parameters.state.get_zoom();
         for (index, draw) in self.draws.iter().enumerate() {
             let tile_id = draw.tile.to_unwrapped();
@@ -264,8 +264,8 @@ impl DebugLayer {
             self.draw_list.push_part(frame_draw, index, uniforms);
         }
 
-        let (properties, context) = (&self.properties, parameters.context);
-        self.draw_list.finish(&mut self.frame, context, |writer| {
+        let properties = &self.properties;
+        self.draw_list.finish(&mut self.frame, parameters.context, |writer| {
             writer.uniform(ID_LINE_EVALUATED_PROPS_UBO, properties);
             writer.storage(ID_LINE_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
             writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);

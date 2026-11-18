@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -39,7 +38,7 @@ use crate::buckets::line_bucket::{LineBinders, LineBucket, LineLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
-use crate::gfx::texture2d::Texture2DPtr;
+use crate::gfx::texture2d::{OwnedTexture, Texture2D, TextureKey};
 use crate::layer_composite::Composite;
 use crate::layer_drawing::{DrawList, DrawObjectsMut, FrameDraw, TileDraws, TileObjects, UniformWriter};
 use crate::layer_type::{EvaluatedLayer, LayerType};
@@ -48,8 +47,8 @@ use crate::layout::pattern_layout::{LineLayoutSpec, PatternLayout, uses_pattern}
 use crate::line_atlas::{LineAtlas, LinePatternCap};
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
-use crate::render_layer::{Atlases, 
-    LayerParts, LayerSource, LayerTiles, LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer,
+use crate::render_layer::{
+    Atlases, LayerParts, LayerSource, LayerTiles, LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer,
     RenderLayerBase, TypedLayer,
 };
 use crate::render_pass::RenderPass;
@@ -83,6 +82,9 @@ pub(crate) struct LineTile {
     dash_cap: LinePatternCap,
     /// Gives a pattern draw the texture of the tile's icon atlas.
     atlases: Option<AtlasBinding>,
+    /// The texture of the bucket's dash patterns, which the draw samples
+    /// for a `line-dasharray` that differs by feature.
+    _dash_atlas: Option<OwnedTexture>,
 }
 
 impl TileObjects for LineTile {
@@ -254,24 +256,25 @@ fn read_line_attributes(
 
 /// A texture of the bucket's dash patterns, for a `line-dasharray` that
 /// differs by feature.
-fn dash_atlas_texture(context: &Context, binders: &LineBinders) -> Option<Texture2DPtr> {
+fn dash_atlas_texture(context: &mut Context, binders: &LineBinders) -> Option<OwnedTexture> {
     let image = binders.line_dasharray.atlas()?.image();
     if !image.valid() {
         return None;
     }
-    let mut texture = context.texture_2d();
-    texture.set_format(TextureFormat::A8Unorm);
-    if let Err(error) = texture.upload_data(context, &image.data, image.size) {
+    let texture = context.add_texture_with(|texture| {
+        texture.set_format(TextureFormat::A8Unorm);
+        texture.set_sampler(SamplerState {
+            filter: TextureFilterType::Linear,
+            wrap_u: TextureWrapType::Repeat,
+            wrap_v: TextureWrapType::Clamp,
+            ..Default::default()
+        });
+    });
+    if let Err(error) = context.upload_texture_data(texture.key(), &image.data, image.size) {
         Log::error(Event::Render, format!("Uploading the dash patterns failed: {error}"));
         return None;
     }
-    texture.set_sampler(SamplerState {
-        filter: TextureFilterType::Linear,
-        wrap_u: TextureWrapType::Repeat,
-        wrap_v: TextureWrapType::Clamp,
-        ..Default::default()
-    });
-    Some(Rc::new(RefCell::new(texture)))
+    Some(texture)
 }
 
 impl LayerType for Line {
@@ -312,7 +315,7 @@ pub(crate) struct RenderLineLayer {
     /// The global-state snapshot used to generate the cached color ramp and
     /// detect when it needs to be rebuilt.
     color_ramp_global_state: Option<Arc<GlobalStateMap>>,
-    color_ramp_texture_2d: Option<Texture2DPtr>,
+    color_ramp_texture: Option<OwnedTexture>,
     /// Whether the color ramp changed since the draws that read it were
     /// built, which the next update drops.
     color_ramp_changed: bool,
@@ -335,7 +338,7 @@ impl RenderLineLayer {
             draw_list: DrawList::default(),
             color_ramp: Rc::new(PremultipliedImage::new(Size::new(256, 1))),
             color_ramp_global_state: None,
-            color_ramp_texture_2d: None,
+            color_ramp_texture: None,
             color_ramp_changed: false,
             line_shader_group: None,
             line_gradient_shader_group: None,
@@ -354,8 +357,8 @@ impl RenderLineLayer {
         // The texture shares the ramp image, so a new one replaces it.
         self.color_ramp = Rc::new(image);
 
-        if self.color_ramp_texture_2d.is_some() {
-            self.color_ramp_texture_2d = None;
+        if self.color_ramp_texture.is_some() {
+            self.color_ramp_texture = None;
             self.color_ramp_changed = true;
         }
     }
@@ -440,14 +443,14 @@ impl TypedLayer for RenderLineLayer {
     /// buffers they read.
     fn update_draws(
         &mut self,
-        paint_parameters: &PaintParameters<'_>,
+        paint_parameters: &mut PaintParameters<'_>,
         atlases: &Atlases,
         _update_parameters: &UpdateParameters,
         source: Option<LayerSource<'_, Line>>,
     ) {
         let tiles = source.and_then(LayerSource::tiles);
-        let (shaders, context, state) =
-            (&paint_parameters.static_data.shaders, paint_parameters.context, paint_parameters.state);
+        let (static_data, state) = (paint_parameters.static_data, paint_parameters.state);
+        let shaders = &static_data.shaders;
         if std::mem::take(&mut self.color_ramp_changed) {
             // The gradients' draws read the old ramp's texture.
             self.remove_all_draws();
@@ -505,13 +508,15 @@ impl TypedLayer for RenderLineLayer {
                 });
                 cached
             } else {
-                let built = self.build_tile(shaders, context, tile, bucket, binders, evaluated, render_pass);
+                let built =
+                    self.build_tile(shaders, paint_parameters.context, tile, bucket, binders, evaluated, render_pass);
                 let Some(cached) = built.and_then(|built| self.drawing.tiles_mut().insert(&tile_id, built).ok()) else {
                     continue;
                 };
                 cached
             };
-            if let Some(uniforms) = Self::uniforms(&self.values.evaluated, tile, binders, cached, paint_parameters, &atlases.line)
+            if let Some(uniforms) =
+                Self::uniforms(&self.values.evaluated, tile, binders, cached, paint_parameters, &atlases.line)
             {
                 let draw = FrameDraw { pass: cached.pass, clip: true, ..FrameDraw::new(Some(tile_id), cached.id) };
                 self.draw_list.push(draw, uniforms);
@@ -520,7 +525,7 @@ impl TypedLayer for RenderLineLayer {
 
         let frame = self.drawing.frame_mut();
         let layer = &self.values.evaluated;
-        self.draw_list.finish(frame, context, |writer| Self::write_uniforms(layer, writer));
+        self.draw_list.finish(frame, paint_parameters.context, |writer| Self::write_uniforms(layer, writer));
     }
 
     /// Adds the dash patterns of the tiles' buckets to the line atlas.
@@ -633,7 +638,7 @@ impl RenderLineLayer {
     fn build_tile(
         &mut self,
         shaders: &ShaderRegistry,
-        context: &Context,
+        context: &mut Context,
         tile: FrameTile<'_, Line>,
         bucket: &LineBucket,
         binders: &LineBinders,
@@ -651,8 +656,9 @@ impl RenderLineLayer {
             !evaluated.line_dasharray.is_constant() || !evaluated.line_dasharray.faded().from.is_empty();
         // A constant dash array's texture comes from the line atlas, with the
         // draw's uniforms.
-        let dash_texture =
+        let dash_atlas =
             if evaluated.line_dasharray.is_constant() { None } else { Some(dash_atlas_texture(context, binders)?) };
+        let dash_texture = dash_atlas.as_ref().map(OwnedTexture::key);
         let has_gradient = !self.values.unevaluated.line_gradient.get_value().is_undefined();
 
         let mut textures = Textures::default();
@@ -667,7 +673,7 @@ impl RenderLineLayer {
         } else if !self.values.unevaluated.line_pattern.is_undefined() {
             let icons = tile.atlas_textures().filter(|atlases| atlases.icon().is_some())?;
             atlases = Some(AtlasBinding::new(
-                Some(Rc::clone(icons)),
+                Some(icons),
                 None,
                 Some(ID_LINE_IMAGE_TEXTURE),
                 /*is_text*/ false,
@@ -721,27 +727,25 @@ impl RenderLineLayer {
             pass,
             dash_cap: dash_pattern_cap(bucket),
             atlases,
+            _dash_atlas: dash_atlas,
         })
     }
 
     /// The texture of the color ramp, which every gradient of the layer
     /// shares, if the ramp is valid.
-    fn color_ramp_texture(&mut self, context: &Context) -> Option<Texture2DPtr> {
-        if self.color_ramp_texture_2d.is_none() && self.color_ramp.valid() {
-            let texture = context.create_texture_2d();
-            {
-                let mut t = texture.borrow_mut();
-                t.set_image(Some(Rc::clone(&self.color_ramp)));
-                t.set_sampler(SamplerState {
+    fn color_ramp_texture(&mut self, context: &mut Context) -> Option<TextureKey> {
+        if self.color_ramp_texture.is_none() && self.color_ramp.valid() {
+            self.color_ramp_texture = Some(context.add_texture_with(|texture| {
+                texture.set_image(Some(Rc::clone(&self.color_ramp)));
+                texture.set_sampler(SamplerState {
                     filter: TextureFilterType::Linear,
                     wrap_u: TextureWrapType::Clamp,
                     wrap_v: TextureWrapType::Clamp,
                     ..Default::default()
                 });
-            }
-            self.color_ramp_texture_2d = Some(texture);
+            }));
         }
-        self.color_ramp_texture_2d.clone()
+        self.color_ramp_texture.as_ref().map(OwnedTexture::key)
     }
 
     /// The entries in the layer's storage buffers of `cached`, the draw of
@@ -810,8 +814,11 @@ impl RenderLineLayer {
                 pad2: 0.0,
             }),
             LineType::Pattern => {
-                let texture = cached.objects.texture(ID_LINE_IMAGE_TEXTURE);
-                let texture_size = texture.map_or(Size::new(0, 0), |texture| texture.borrow().size());
+                let texture = cached
+                    .objects
+                    .texture(ID_LINE_IMAGE_TEXTURE)
+                    .and_then(|texture| parameters.context.texture(texture));
+                let texture_size = texture.map_or(Size::new(0, 0), Texture2D::size);
                 uniforms.draw_ubo.set(&LinePatternDrawableUBO {
                     matrix,
                     ratio,
@@ -869,10 +876,10 @@ impl RenderLineLayer {
                 } else {
                     let dasharray = evaluated.line_dasharray.faded();
                     let dash_pattern = line_atlas.get(dasharray.from, dasharray.to, cached.dash_cap)?;
-                    cached.objects.texture_or_insert_with(dash_texture_id, || dash_pattern.get_texture())?;
+                    cached.objects.texture_or_insert_with(dash_texture_id, || dash_pattern.texture())?;
 
-                    let pos_a = dash_pattern.get_from();
-                    let pos_b = dash_pattern.get_to();
+                    let pos_a = dash_pattern.from();
+                    let pos_b = dash_pattern.to();
                     let width_a = pos_a.width * crossfade.from_scale;
                     let width_b = pos_b.width * crossfade.to_scale;
                     // std::min(widthA, widthB)
@@ -883,9 +890,7 @@ impl RenderLineLayer {
                         tex_y_a: pos_a.y,
                         tex_y_b: pos_b.y,
                         atlas_height: 0.0,
-                        sdfgamma: dash_pattern.get_size().width as f32
-                            / (min_width * 256.0 * parameters.pixel_ratio)
-                            / 2.0,
+                        sdfgamma: dash_pattern.size().width as f32 / (min_width * 256.0 * parameters.pixel_ratio) / 2.0,
                     }
                 };
 

@@ -112,7 +112,7 @@ impl SkyPass {
     pub(crate) fn update(
         &mut self,
         shaders: &ShaderRegistry,
-        context: &Context,
+        context: &mut Context,
         state: &TransformState,
         viewport_size: Size,
         pixel_ratio: f32,

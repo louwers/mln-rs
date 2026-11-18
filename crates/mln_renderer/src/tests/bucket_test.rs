@@ -78,12 +78,11 @@ fn collection(rings: &[&[(i16, i16)]]) -> GeometryCollection {
     )
 }
 
-/// Runs `f` with the context of a headless WebGPU backend (the C++ tests
-/// create a `gl::HeadlessBackend`, a context and an upload pass).
-fn with_context(f: impl FnOnce(&Context)) {
+/// Runs `f` with the context of a headless WebGPU backend.
+fn with_context(f: impl FnOnce(&mut Context)) {
     let backend: Rc<dyn RendererBackend> =
         Rc::new(mln_webgpu::RendererBackend::new(&Device::new(None).expect("device")));
-    f(&Context::new(Rc::clone(&backend)));
+    f(&mut Context::new(Rc::clone(&backend)));
 }
 
 // gtest: Buckets.CircleBucket
@@ -354,7 +353,7 @@ fn line_bucket_drawables_build_from_freed_indexes() {
 
     let backend: Rc<dyn RendererBackend> =
         Rc::new(mln_webgpu::RendererBackend::new(&Device::new(None).expect("device")));
-    let context = &Context::new(Rc::clone(&backend));
+    let context = &mut Context::new(Rc::clone(&backend));
     let mut geometry = BucketGeometry::default();
     let index_count = bucket.triangles.len();
     bucket.upload(&mut geometry, crate::layers::upload_needs(context));

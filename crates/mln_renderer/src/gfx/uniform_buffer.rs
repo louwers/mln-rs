@@ -67,17 +67,17 @@ impl UniformBufferArray {
 
     /// Writes `data` to the uniform buffer `id`, first making one if there
     /// is none or `data` doesn't fit in it.
-    pub(crate) fn create_or_update_pod<T: bytemuck::Pod>(&mut self, id: usize, data: &T, context: &Context) {
+    pub(crate) fn create_or_update_pod<T: bytemuck::Pod>(&mut self, id: usize, data: &T, context: &mut Context) {
         self.write(id, bytemuck::bytes_of(data), false, context);
     }
 
     /// Writes `data` to the storage buffer `id`, first making one if there
     /// is none or `data` doesn't fit in it.
-    pub(crate) fn write_storage(&mut self, id: usize, data: &[u8], context: &Context) {
+    pub(crate) fn write_storage(&mut self, id: usize, data: &[u8], context: &mut Context) {
         self.write(id, data, true, context);
     }
 
-    fn write(&mut self, id: usize, data: &[u8], storage: bool, context: &Context) {
+    fn write(&mut self, id: usize, data: &[u8], storage: bool, context: &mut Context) {
         let slot = &mut self.uniform_buffer_vector[id];
         let before = slot.as_ref().map(Rc::as_ptr);
         if storage {

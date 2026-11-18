@@ -327,7 +327,10 @@ impl HeadlessFrontend {
     /// after it went: what it released as it went comes off them.
     #[must_use]
     pub fn rendering_stats(&self) -> RenderingStats {
-        self.stats.as_ref().map(|stats| stats.get()).unwrap_or_default()
+        match &self.renderer {
+            Some(renderer) => renderer.rendering_stats(),
+            None => self.stats.as_ref().map(|stats| stats.get()).unwrap_or_default(),
+        }
     }
 
     /// The target the frontend draws into, so a host can reach the frame's

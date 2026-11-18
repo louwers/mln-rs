@@ -8,25 +8,16 @@ use crate::buckets::fill_extrusion_bucket::FillExtrusionStaticVertex;
 /// indices reach.
 const FILL_EXTRUSION_SEGMENT_WALLS: usize = MAX_SEGMENT_VERTICES / 4;
 
+/// What every frame draws with: the shaders, made for the renderer's pixel
+/// ratio, and the vertices and indices of the geometry the layers share.
 pub(crate) struct RenderStaticData {
-    pub(crate) has_3d: bool,
-    pub(crate) uploaded: std::cell::Cell<bool>,
     pub(crate) shaders: Box<ShaderRegistry>,
 }
 
 impl RenderStaticData {
     #[must_use]
     pub(crate) fn new(shaders: Box<ShaderRegistry>) -> Self {
-        RenderStaticData { has_3d: false, uploaded: std::cell::Cell::new(false), shaders }
-    }
-
-    /// Uploads the static data. Takes `&self` (the flag is a `Cell`): the
-    /// renderer calls it while `PaintParameters` borrows the static data.
-    pub(crate) fn upload(&self, _context: &crate::gfx::context::Context) {
-        if !self.uploaded.get() {
-            // these are still used by stencil buffer rendering
-            self.uploaded.set(true);
-        }
+        RenderStaticData { shaders }
     }
 
     /// The tile's four corners, as position-only vertices (`a_pos`).

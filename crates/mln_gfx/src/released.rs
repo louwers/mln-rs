@@ -58,19 +58,16 @@ impl Released {
 
     /// Takes the resources released since the last call out of `stats`.
     pub fn uncount(&self, stats: &mut RenderingStats) {
-        let uncounted = self.uncounted.take();
-        for ((count, bytes), (num, mem)) in [
-            (uncounted.vertex_buffers, (&mut stats.num_vertex_buffers, &mut stats.mem_vertex_buffers)),
-            (uncounted.index_buffers, (&mut stats.num_index_buffers, &mut stats.mem_index_buffers)),
-            (uncounted.uniform_buffers, (&mut stats.num_uniform_buffers, &mut stats.mem_uniform_buffers)),
-        ] {
-            *num -= count;
-            *mem -= bytes;
-            stats.num_buffers -= count;
-            stats.mem_buffers -= bytes;
-        }
-        stats.num_active_textures -= uncounted.textures;
-        stats.mem_textures -= uncounted.texture_bytes;
+        uncount(self.uncounted.take(), stats);
+    }
+
+    /// `stats` without the resources released since the last
+    /// [`uncount`](Self::uncount), which still takes them out.
+    #[must_use]
+    pub fn uncounted(&self, stats: &RenderingStats) -> RenderingStats {
+        let mut stats = stats.clone();
+        uncount(self.uncounted.get(), &mut stats);
+        stats
     }
 
     /// Destroys the resources released so far.
@@ -79,6 +76,22 @@ impl Released {
             gpu.destroy(id);
         }
     }
+}
+
+/// Takes the resources `uncounted` out of `stats`.
+fn uncount(uncounted: Uncounted, stats: &mut RenderingStats) {
+    for ((count, bytes), (num, mem)) in [
+        (uncounted.vertex_buffers, (&mut stats.num_vertex_buffers, &mut stats.mem_vertex_buffers)),
+        (uncounted.index_buffers, (&mut stats.num_index_buffers, &mut stats.mem_index_buffers)),
+        (uncounted.uniform_buffers, (&mut stats.num_uniform_buffers, &mut stats.mem_uniform_buffers)),
+    ] {
+        *num -= count;
+        *mem -= bytes;
+        stats.num_buffers -= count;
+        stats.mem_buffers -= bytes;
+    }
+    stats.num_active_textures -= uncounted.textures;
+    stats.mem_textures -= uncounted.texture_bytes;
 }
 
 fn push<T>(list: &Cell<Vec<T>>, item: T) {

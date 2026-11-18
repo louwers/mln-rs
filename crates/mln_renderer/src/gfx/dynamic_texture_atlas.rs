@@ -4,7 +4,6 @@
 // its layout goes, and dropping a lease queues its bins for the atlas to free
 // the next time it packs or uploads.
 
-use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
@@ -18,8 +17,9 @@ use mln_util::size::Size;
 
 #[cfg(test)]
 use super::dynamic_texture::QueuedPixels;
-use super::dynamic_texture::{DynamicTexture, DynamicTextureBinId, PageTexture, TextureHandle};
+use super::dynamic_texture::{DynamicTexture, DynamicTextureBinId, TextureHandle};
 use crate::gfx::context::Context;
+use crate::gfx::texture2d::TextureKey;
 
 const EXTRA_PADDING: u16 = 1;
 const PADDING: u16 = ImagePosition::PADDING + EXTRA_PADDING;
@@ -61,7 +61,7 @@ fn padded_image(image: &PremultipliedImage, bin: RectU16, type_: ImageType) -> P
 
 /// A page of the atlas, as the atlas numbers it. Never reused within an
 /// atlas.
-type PageId = u64;
+pub(crate) type PageId = u64;
 
 /// Bins a lease gives back: the page's id and the handles.
 type Release = (PageId, Vec<TextureHandle>);
@@ -86,17 +86,10 @@ pub(crate) struct AtlasLease {
     texture_handles: Vec<TextureHandle>,
     /// What each of `texture_handles` is for.
     uses: Vec<BinUse>,
-    texture: PageTexture,
     releases: Sender<Release>,
 }
 
 impl AtlasLease {
-    /// The page's GPU texture, which the atlas makes in its first upload of
-    /// the page.
-    pub(crate) fn page_texture(&self) -> &PageTexture {
-        &self.texture
-    }
-
     /// The handles of the bins the lease holds, one per use.
     #[cfg(test)]
     pub(crate) fn texture_handles(&self) -> &[TextureHandle] {
@@ -104,7 +97,6 @@ impl AtlasLease {
     }
 
     /// The id of the page the bins are on.
-    #[cfg(test)]
     pub(crate) fn page(&self) -> PageId {
         self.page
     }
@@ -219,13 +211,7 @@ impl DynamicTextureAtlas {
 
     fn lease(&self, page: &Page, texture_handles: Vec<TextureHandle>, uses: Vec<BinUse>) -> AtlasLease {
         debug_assert_eq!(texture_handles.len(), uses.len());
-        AtlasLease {
-            page: page.id,
-            texture_handles,
-            uses,
-            texture: Rc::clone(page.texture.texture()),
-            releases: self.releases.clone(),
-        }
+        AtlasLease { page: page.id, texture_handles, uses, releases: self.releases.clone() }
     }
 
     /// A lease on the bins of `lease` that `keep` keeps, on the same page.
@@ -247,13 +233,7 @@ impl DynamicTextureAtlas {
                 }
             }
         }
-        AtlasLease {
-            page: lease.page,
-            texture_handles,
-            uses,
-            texture: Rc::clone(&lease.texture),
-            releases: self.releases.clone(),
-        }
+        AtlasLease { page: lease.page, texture_handles, uses, releases: self.releases.clone() }
     }
 
     /// A lease on the bin of the 1×1 page of `pixel_type`.
@@ -518,11 +498,16 @@ impl DynamicTextureAtlas {
     }
 
     /// Makes the pages' GPU textures and uploads what was queued for them.
-    pub(crate) fn upload(&mut self, context: &Context) {
+    pub(crate) fn upload(&mut self, context: &mut Context) {
         self.free_released();
         for page in self.pages.iter_mut().chain(&mut self.dummies) {
             page.texture.upload(context);
         }
+    }
+
+    /// The GPU texture of the page `page`, once the atlas uploaded it.
+    pub(crate) fn page_texture(&self, page: PageId) -> Option<TextureKey> {
+        self.pages.iter().chain(&self.dummies).find(|candidate| candidate.id == page)?.texture.texture()
     }
 
     /// The pages, for tests.

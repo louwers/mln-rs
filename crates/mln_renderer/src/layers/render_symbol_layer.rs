@@ -66,9 +66,9 @@ use crate::layout::symbol_layout::SymbolLayout;
 use crate::layout::symbol_projection::{get_gl_coord_matrix, get_label_plane_matrix};
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
-use crate::render_layer::{Atlases, 
-    BucketKey, BucketPlacementData, LayerParts, LayerSource, LayerTiles, LayerUpdateParameters, LayerValues, Parts,
-    PartsMut, PlacedTile, RenderLayer, RenderLayerBase, SymbolTranslate, TypedLayer,
+use crate::render_layer::{
+    Atlases, BucketKey, BucketPlacementData, LayerParts, LayerSource, LayerTiles, LayerUpdateParameters, LayerValues,
+    Parts, PartsMut, PlacedTile, RenderLayer, RenderLayerBase, SymbolTranslate, TypedLayer,
 };
 use crate::render_pass::RenderPass;
 use crate::render_source::TileOrder;
@@ -395,7 +395,7 @@ struct SymbolDraw {
     /// until it shows some.
     visible: bool,
     /// Gives the draw the textures of its tile's atlases.
-    atlases: Rc<AtlasBinding>,
+    atlases: AtlasBinding,
 }
 
 /// What tells apart the draws of a tile that read the same attributes: a
@@ -432,7 +432,7 @@ impl SymbolDrawing {
     /// gives them the textures of the tile's atlases.
     fn objects<'a>(tiles: &'a mut TileMap<SymbolTile>, draw: &FrameDraw, index: usize) -> Option<DrawObjectsMut<'a>> {
         let draw = tiles.get_mut(&draw.tile?)?.draws.get_mut(index)?;
-        Some(DrawObjectsMut { objects: &mut draw.objects, atlases: Some(&*draw.atlases) })
+        Some(DrawObjectsMut { objects: &mut draw.objects, atlases: Some(&draw.atlases) })
     }
 
     /// The GPU objects of `draw`, the collision draw at `index` of its tile.
@@ -481,7 +481,7 @@ impl LayerDrawing for SymbolDrawing {
         }
     }
 
-    fn upload(&mut self, context: &Context) {
+    fn upload(&mut self, context: &mut Context) {
         if let Some(frame) = &self.frame {
             frame.upload(&mut self.tiles, Self::objects, context);
         }
@@ -519,10 +519,11 @@ struct SymbolUniforms {
     projection: ProjectionUBO,
 }
 
-/// The size of the texture `objects` binds at `texture_id`, zero for none.
-fn texture_size(objects: &DrawObjects, texture_id: usize) -> [f32; 2] {
-    objects.texture(texture_id).map_or([0.0, 0.0], |texture| {
-        let size = texture.borrow().size();
+/// The size of the texture `objects` binds at `texture_id` in `context`,
+/// zero for none.
+fn texture_size(context: &Context, objects: &DrawObjects, texture_id: usize) -> [f32; 2] {
+    objects.texture(texture_id).and_then(|texture| context.texture(texture)).map_or([0.0, 0.0], |texture| {
+        let size = texture.size();
         [size.width as f32, size.height as f32]
     })
 }
@@ -1050,8 +1051,8 @@ impl RenderSymbolLayer {
                 matrix: cast_matrix(&matrix),
                 label_plane_matrix: cast_matrix(&label_plane_matrix),
                 coord_matrix: cast_matrix(&gl_coord_matrix),
-                texsize: texture_size(&draw.objects, ID_SYMBOL_IMAGE_TEXTURE),
-                texsize_icon: texture_size(&draw.objects, ID_SYMBOL_IMAGE_ICON_TEXTURE),
+                texsize: texture_size(parameters.context, &draw.objects, ID_SYMBOL_IMAGE_TEXTURE),
+                texsize_icon: texture_size(parameters.context, &draw.objects, ID_SYMBOL_IMAGE_ICON_TEXTURE),
                 is_text_prop: i32::from(is_text),
                 rotate_symbol: i32::from(rotate_in_shader),
                 pitch_with_map: i32::from(pitch_with_map),
@@ -1089,8 +1090,7 @@ impl RenderSymbolLayer {
         &mut self,
         tiles: impl Iterator<Item = FrameTile<'a, Symbol>>,
         passes: RenderPass,
-        paint_parameters: &PaintParameters<'_>,
-        context: &Context,
+        paint_parameters: &mut PaintParameters<'_>,
     ) {
         let layer_id = self.base.style.base().id.as_str();
         let layer = &*self.values.evaluated;
@@ -1119,14 +1119,14 @@ impl RenderSymbolLayer {
         }
 
         if let Some(frame) = &mut self.drawing.frame {
-            self.draw_list.finish(frame, context, |writer| write_uniforms(&layer.paint, writer));
+            self.draw_list.finish(frame, paint_parameters.context, |writer| write_uniforms(&layer.paint, writer));
         } else {
             self.draw_list.clear();
         }
         // Each collision draw has its own GPU objects and buffers, so no two
         // share an order, and the overlay's buffers are none.
         if let Some(overlay) = &mut self.drawing.overlay {
-            self.collision_list.finish(overlay, context, |_| {});
+            self.collision_list.finish(overlay, paint_parameters.context, |_| {});
         } else {
             self.collision_list.clear();
         }
@@ -1161,10 +1161,13 @@ fn write_uniforms(
 
 /// Writes the buffers of a collision draw of the tile `tile_id`: its matrix,
 /// and the scale of its boxes' and circles' extrusions.
-fn write_collision_uniforms(draw: &mut CollisionDraw, tile_id: &OverscaledTileID, parameters: &PaintParameters<'_>) {
+fn write_collision_uniforms(
+    draw: &mut CollisionDraw,
+    tile_id: &OverscaledTileID,
+    parameters: &mut PaintParameters<'_>,
+) {
     const NEAR_CLIPPED: bool = false;
     const IN_VIEWPORT_PIXEL_UNITS: bool = false;
-    let context = parameters.context;
     let unwrapped = tile_id.to_unwrapped();
     let projection = get_projection_data(
         &unwrapped,
@@ -1188,6 +1191,7 @@ fn write_collision_uniforms(draw: &mut CollisionDraw, tile_id: &OverscaledTileID
     let tile_props_ubo =
         CollisionTilePropsUBO { extrude_scale, overscale_factor: tile_id.overscale_factor() as f32, pad1: 0.0 };
     let buffers = &mut draw.draw.objects.uniform_buffers;
+    let context = &mut *parameters.context;
     buffers.create_or_update_pod(ID_COLLISION_DRAWABLE_UBO, &draw_ubo, context);
     buffers.create_or_update_pod(ID_COLLISION_TILE_PROPS_UBO, &tile_props_ubo, context);
     buffers.create_or_update_pod(ID_COLLISION_PROJECTION_UBO, &to_projection_ubo(&projection), context);
@@ -1242,7 +1246,7 @@ impl TypedLayer for RenderSymbolLayer {
     /// over them, and writes the buffers they read.
     fn update_draws(
         &mut self,
-        paint_parameters: &PaintParameters<'_>,
+        paint_parameters: &mut PaintParameters<'_>,
         _atlases: &Atlases,
         _update_parameters: &UpdateParameters,
         source: Option<LayerSource<'_, Symbol>>,
@@ -1250,12 +1254,12 @@ impl TypedLayer for RenderSymbolLayer {
         /// The atlases' textures given to one tile's draws.
         #[derive(Default)]
         struct TileAtlases {
-            text: Option<Rc<AtlasBinding>>,
-            icon: Option<Rc<AtlasBinding>>,
+            text: Option<AtlasBinding>,
+            icon: Option<AtlasBinding>,
         }
 
-        let (shaders, context, transform) =
-            (&paint_parameters.static_data.shaders, paint_parameters.context, paint_parameters.state);
+        let (static_data, transform) = (paint_parameters.static_data, paint_parameters.state);
+        let shaders = &static_data.shaders;
         self.update_projection_variant(transform);
         let passes = self.base.passes;
         let Some(render_tiles) = source.and_then(LayerSource::tiles).filter(|tiles| !tiles.is_empty()) else {
@@ -1517,8 +1521,8 @@ impl TypedLayer for RenderSymbolLayer {
                     tile_atlases.text.get_or_insert_with(|| {
                         let text_size_is_zoom_constant =
                             bucket.text_size_binder.evaluate_for_zoom(current_zoom).is_zoom_constant;
-                        Rc::new(AtlasBinding::new(
-                            Some(Rc::clone(atlases)),
+                        AtlasBinding::new(
+                            Some(atlases),
                             Some(ID_SYMBOL_IMAGE_ICON_TEXTURE),
                             Some(ID_SYMBOL_IMAGE_TEXTURE),
                             is_text,
@@ -1526,13 +1530,13 @@ impl TypedLayer for RenderSymbolLayer {
                             values.rotation_alignment,
                             false,
                             text_size_is_zoom_constant,
-                        ))
+                        )
                     })
                 } else {
                     tile_atlases.icon.get_or_insert_with(|| {
                         let icon_scaled = bucket_layout.icon_size.constant_or(&1.0) != 1.0 || bucket.icons_need_linear;
-                        Rc::new(AtlasBinding::new(
-                            Some(Rc::clone(atlases)),
+                        AtlasBinding::new(
+                            Some(atlases),
                             Some(ID_SYMBOL_IMAGE_ICON_TEXTURE),
                             Some(ID_SYMBOL_IMAGE_TEXTURE),
                             is_text,
@@ -1540,7 +1544,7 @@ impl TypedLayer for RenderSymbolLayer {
                             values.rotation_alignment,
                             icon_scaled,
                             false,
-                        ))
+                        )
                     })
                 };
 
@@ -1572,7 +1576,7 @@ impl TypedLayer for RenderSymbolLayer {
                         segment: group.segment,
                     },
                     visible,
-                    atlases: Rc::clone(draw_atlases),
+                    atlases: *draw_atlases,
                 };
                 if let Some(entry) = self.drawing.tiles.entry(&tile_id) {
                     entry.value.get_or_insert_with(SymbolTile::default).draws.push(draw);
@@ -1581,7 +1585,7 @@ impl TypedLayer for RenderSymbolLayer {
         }
 
         self.renderable_segments = renderable_segments;
-        self.make_frame_draws(render_tiles.iter(), passes, paint_parameters, context);
+        self.make_frame_draws(render_tiles.iter(), passes, paint_parameters);
     }
 
     /// Collects the symbol buckets of the tiles the layer places, and of

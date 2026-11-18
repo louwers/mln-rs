@@ -556,7 +556,7 @@ impl<U, P: Copy> DrawList<U, P> {
     pub(crate) fn finish(
         &mut self,
         layer: &mut LayerDraws<P>,
-        context: &Context,
+        context: &mut Context,
         write: impl FnOnce(&mut UniformWriter<'_, U>),
     ) {
         sort_draws(&mut self.draws);
@@ -598,7 +598,7 @@ pub(crate) struct UniformWriter<'a, U> {
     uniforms: &'a [U],
     bytes: &'a mut Vec<u8>,
     buffers: &'a mut UniformBufferArray,
-    context: &'a Context,
+    context: &'a mut Context,
 }
 
 impl<U> UniformWriter<'_, U> {
@@ -619,7 +619,7 @@ impl<U> UniformWriter<'_, U> {
 }
 
 /// Uploads `objects`, and destroys the buffers the upload replaced.
-pub(crate) fn upload_objects(objects: &mut DrawObjects, context: &Context) {
+pub(crate) fn upload_objects(objects: &mut DrawObjects, context: &mut Context) {
     objects.upload(context);
     context.destroy_released();
 }
@@ -718,7 +718,7 @@ impl FrameDraws {
     }
 
     /// Uploads `objects`, which all the draws bind, if there are any draws.
-    pub(crate) fn upload_one(&self, objects: &mut DrawObjects, context: &Context) {
+    pub(crate) fn upload_one(&self, objects: &mut DrawObjects, context: &mut Context) {
         if !self.draws.is_empty() {
             upload_objects(objects, context);
         }
@@ -785,7 +785,7 @@ impl<'a> DrawPass<'a> {
     pub(crate) fn draw(
         &self,
         gpu: &mut dyn Gpu,
-        parameters: &PaintParameters<'_>,
+        parameters: &mut PaintParameters<'_>,
         objects: DrawObjectsMut<'_>,
         draw: PassDraw<'_>,
     ) {
@@ -863,7 +863,7 @@ impl<P: Copy> LayerDraws<P> {
         &self,
         caches: &mut C,
         objects: impl for<'c> Fn(&'c mut C, &FrameDraw, P) -> Option<DrawObjectsMut<'c>>,
-        context: &Context,
+        context: &mut Context,
     ) {
         for (draw, &part) in self.frame.draws.iter().zip(&self.parts) {
             if let Some(objects) = objects(caches, draw, part) {
@@ -910,7 +910,7 @@ impl SingleDraw {
         SingleDraw { objects, frame }
     }
 
-    pub(crate) fn upload(&mut self, context: &Context) {
+    pub(crate) fn upload(&mut self, context: &mut Context) {
         self.frame.upload_one(&mut self.objects, context);
     }
 
@@ -1024,7 +1024,7 @@ impl<T: TileObjects> LayerDrawing for TileDraws<T> {
         }
     }
 
-    fn upload(&mut self, context: &Context) {
+    fn upload(&mut self, context: &mut Context) {
         if let Some(frame) = &self.frame {
             frame.upload(&mut self.tiles, tile_objects, context);
         }
@@ -1061,7 +1061,7 @@ pub(crate) trait LayerDrawing {
     fn clear(&mut self);
 
     /// Uploads the GPU objects of the draw groups' draws.
-    fn upload(&mut self, context: &Context);
+    fn upload(&mut self, context: &mut Context);
 
     /// Draws the draw groups' draws of the pass into the open pass of `gpu`,
     /// the context's, in `order`, each at its depth.

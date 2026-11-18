@@ -351,7 +351,7 @@ pub(crate) struct GeometryContents {
     pub(crate) answer: Answer,
     /// What the layout used and asked for.
     pub(crate) deps: Rc<Dependencies>,
-    pub(crate) textures: Rc<TileAtlasTextures>,
+    pub(crate) textures: TileAtlasTextures,
     /// The gfx vectors the buckets' uploads moved their geometry into.
     pub(crate) bucket_geometry: BucketGeometry,
 }
@@ -359,14 +359,14 @@ pub(crate) struct GeometryContents {
 impl GeometryContents {
     pub(crate) fn new(result: LayoutResult, missing: bool, answer: Answer, deps: Dependencies) -> Self {
         let textures = answer.atlases.as_ref().map_or_else(TileAtlasTextures::default, |atlases| {
-            TileAtlasTextures::new(Rc::clone(atlases.glyphs.page_texture()), Rc::clone(atlases.images.page_texture()))
+            TileAtlasTextures::new(atlases.glyphs.page(), atlases.images.page())
         });
         GeometryContents {
             result,
             missing,
             answer,
             deps: Rc::new(deps),
-            textures: Rc::new(textures),
+            textures,
             bucket_geometry: BucketGeometry::default(),
         }
     }

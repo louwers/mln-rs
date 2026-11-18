@@ -10,6 +10,7 @@ use std::collections::hash_map::Entry;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use mln_gfx::gpu::Gpu;
 use mln_gfx::index_vector::{IndexVectorBase, IndexVectorBasePtr};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::hillshade_layer_ubo::{
@@ -49,6 +50,7 @@ use crate::buckets::hillshade_bucket::{HillshadeBucket, HillshadeLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::geometry::dem_data::get_unpack_vector;
 use crate::gfx::context::Context;
+use crate::gfx::texture2d::OwnedTexture;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_drawing::{
     DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptDraw, SingleDraw, TileDraws, TileObjects,
@@ -56,8 +58,8 @@ use crate::layer_drawing::{
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{Atlases, 
-    LayerParts, LayerSource, LayerTiles, LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer,
+use crate::render_layer::{
+    Atlases, LayerParts, LayerSource, LayerTiles, LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer,
     RenderLayerBase, TypedLayer,
 };
 use crate::render_pass::RenderPass;
@@ -86,6 +88,8 @@ impl LayerType for Hillshade {
 /// are prepared in, and the draw that prepares them.
 struct BucketTarget {
     render_target: RenderTarget,
+    /// The bucket's DEM, which `prepare` samples.
+    _dem: OwnedTexture,
     /// The draw that prepares the slopes, with the uniforms it reads.
     prepare: SingleDraw,
     /// The bucket's prepare generation the target was made at.
@@ -307,14 +311,14 @@ impl TypedLayer for RenderHillshadeLayer {
     /// none of, and writes the layer's buffers they read.
     fn update_draws(
         &mut self,
-        paint_parameters: &PaintParameters<'_>,
+        paint_parameters: &mut PaintParameters<'_>,
         _atlases: &Atlases,
         _update_parameters: &UpdateParameters,
         source: Option<LayerSource<'_, Hillshade>>,
     ) {
         let tiles = source.and_then(LayerSource::tiles);
-        let (shaders, context, state) =
-            (&paint_parameters.static_data.shaders, paint_parameters.context, paint_parameters.state);
+        let (static_data, state) = (paint_parameters.static_data, paint_parameters.state);
+        let shaders = &static_data.shaders;
         if self.update_projection_variant(state) {
             self.hillshade_shader = None;
             if self.base.projection_variant == ProjectionVariant::Mercator {
@@ -383,13 +387,11 @@ impl TypedLayer for RenderHillshadeLayer {
 
             let generation = bucket.render_target_generation();
             let render_target_texture = match self.bucket_render_targets.entry(bucket_id) {
-                Entry::Occupied(entry) if entry.get().generation == generation => {
-                    entry.get().render_target.get_texture()
-                }
+                Entry::Occupied(entry) if entry.get().generation == generation => entry.get().render_target.texture(),
                 entry => {
                     let attrs = hillshade_vertex_attributes(&static_data_shared_vertices);
                     let target = BucketTarget::new(
-                        context,
+                        paint_parameters.context,
                         bucket,
                         &tile_id.to_unwrapped(),
                         self.maxzoom,
@@ -397,17 +399,19 @@ impl TypedLayer for RenderHillshadeLayer {
                         attrs,
                         &static_data_indices,
                     );
-                    let texture = target.render_target.get_texture();
+                    let texture = target.render_target.texture();
                     entry.insert_entry(target);
                     texture
                 }
             };
-            render_target_texture.borrow_mut().set_sampler(SamplerState {
-                filter: resampling_filter,
-                wrap_u: TextureWrapType::Clamp,
-                wrap_v: TextureWrapType::Clamp,
-                ..Default::default()
-            });
+            if let Some(texture) = paint_parameters.context.texture_mut(render_target_texture) {
+                texture.set_sampler(SamplerState {
+                    filter: resampling_filter,
+                    wrap_u: TextureWrapType::Clamp,
+                    wrap_v: TextureWrapType::Clamp,
+                    ..Default::default()
+                });
+            }
 
             let geometry = bucket.geometry();
             let geometry_time = geometry.last_modified;
@@ -485,7 +489,7 @@ impl TypedLayer for RenderHillshadeLayer {
         }
 
         let frame = self.drawing.frame_mut();
-        self.draw_list.finish(frame, context, |writer| {
+        self.draw_list.finish(frame, paint_parameters.context, |writer| {
             if let Some(Illumination { props, .. }) = &illumination {
                 writer.uniform(ID_HILLSHADE_EVALUATED_PROPS_UBO, props);
             }
@@ -519,7 +523,7 @@ impl RenderLayer for RenderHillshadeLayer {
         self.values.set_evaluated(&mut self.base, properties);
     }
 
-    fn upload_render_targets(&mut self, context: &Context) {
+    fn upload_render_targets(&mut self, context: &mut Context) {
         if self.base.is_renderable {
             for target in self.bucket_render_targets.values_mut() {
                 target.prepare.upload(context);
@@ -527,19 +531,19 @@ impl RenderLayer for RenderHillshadeLayer {
         }
     }
 
-    fn render_targets(&mut self, parameters: &mut PaintParameters<'_>) {
+    fn render_targets(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         if !self.base.is_renderable {
             return;
         }
         for BucketTarget { render_target, prepare, .. } in self.bucket_render_targets.values_mut() {
             parameters.current_layer = 0;
-            let Some(mut passes) = render_target.begin(parameters) else {
+            let Some(mut passes) = render_target.begin(gpu, parameters) else {
                 continue;
             };
-            while let Some(gpu) = passes.next(parameters) {
+            while passes.next(parameters) {
                 prepare.render(gpu, parameters);
             }
-            passes.end(parameters);
+            passes.end(gpu, parameters);
         }
     }
 }
@@ -550,7 +554,7 @@ impl BucketTarget {
     /// static data, with the uniforms of `tile_id`, the tile it is made for,
     /// of a source of `maxzoom`.
     fn new(
-        context: &Context,
+        context: &mut Context,
         bucket: &HillshadeBucket,
         tile_id: &UnwrappedTileID,
         maxzoom: u8,
@@ -568,19 +572,16 @@ impl BucketTarget {
             TextureChannelDataType::UnsignedByte,
         );
 
-        let texture = context.create_texture_2d();
-        {
-            let mut t = texture.borrow_mut();
-            t.set_image(Some(Rc::new(dem_image)));
-            // Use Nearest filtering to match GL JS behavior - the Sobel
-            // kernel samples exact pixel values
-            t.set_sampler(SamplerState {
+        // Nearest, as the Sobel kernel samples exact texel values.
+        let dem = context.add_texture_with(|texture| {
+            texture.set_image(Some(Rc::new(dem_image)));
+            texture.set_sampler(SamplerState {
                 filter: TextureFilterType::Nearest,
                 wrap_u: TextureWrapType::Clamp,
                 wrap_v: TextureWrapType::Clamp,
                 ..Default::default()
             });
-        }
+        });
         let geometry = DrawGeometry {
             vertices: attrs,
             vertex_count: 4,
@@ -590,7 +591,7 @@ impl BucketTarget {
             instances: None,
         };
         let mut textures = Textures::default();
-        textures[ID_HILLSHADE_IMAGE_TEXTURE] = Some(texture);
+        textures[ID_HILLSHADE_IMAGE_TEXTURE] = Some(dem.key());
         let objects =
             DrawObjects::new(Rc::clone(shader), ColorMode::unblended(), CullFaceMode::disabled(), geometry, textures);
         let mut prepare = SingleDraw::new(objects, FrameDraw::new(None, SimpleIdentity::new()));
@@ -611,7 +612,7 @@ impl BucketTarget {
         };
         buffers.create_or_update_pod(ID_HILLSHADE_PREPARE_TILE_PROPS_UBO, &tile_props, context);
 
-        BucketTarget { render_target, prepare, generation: bucket.render_target_generation() }
+        BucketTarget { render_target, _dem: dem, prepare, generation: bucket.render_target_generation() }
     }
 }
 

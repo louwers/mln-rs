@@ -3,15 +3,13 @@
 
 use std::rc::Rc;
 
-use mln_gfx::gpu::{GpuError, TextureDesc, TextureFormat, TextureId, TextureUsage};
+use mln_gfx::gpu::{Gpu, GpuError, TextureDesc, TextureFormat, TextureId, TextureUsage};
 use mln_gfx::released::Released;
 use mln_util::size::Size;
 
-use crate::gfx::context::Context;
-
 /// A render target of the context's `Gpu`, which goes to the context's
-/// release queue when dropped, as a [`Texture2D`](crate::gfx::texture2d::Texture2D)
-/// does. The rendering stats don't count it.
+/// release queue when dropped, as a [`Texture2D`](crate::gfx::texture2d::Texture2D)'s
+/// backend texture does. The rendering stats don't count it.
 pub(crate) struct Attachment {
     id: TextureId,
     format: TextureFormat,
@@ -19,16 +17,18 @@ pub(crate) struct Attachment {
 }
 
 impl Attachment {
-    /// A render target of `size` and `format`.
+    /// A render target of `size` and `format`, made through `gpu`, which
+    /// goes to `released` when dropped.
     pub(crate) fn new(
-        context: &Context,
+        gpu: &mut dyn Gpu,
+        released: &Rc<Released>,
         label: &str,
         size: Size,
         format: TextureFormat,
     ) -> Result<Attachment, GpuError> {
         let usage = TextureUsage { render_target: true, ..TextureUsage::default() };
-        let id = context.gpu().create_texture(&TextureDesc { label, size, format, usage })?;
-        Ok(Attachment { id, format, released: Rc::clone(context.released()) })
+        let id = gpu.create_texture(&TextureDesc { label, size, format, usage })?;
+        Ok(Attachment { id, format, released: Rc::clone(released) })
     }
 
     #[must_use]

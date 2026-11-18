@@ -28,7 +28,9 @@ use crate::layer_drawing::{DrawGroup, DrawOrder, LayerDrawing, TileMap};
 use crate::layer_type::LayerType;
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{Atlases, LayerSource, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer};
+use crate::render_layer::{
+    Atlases, LayerSource, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
+};
 use crate::render_pass::RenderPass;
 use crate::update_parameters::UpdateParameters;
 
@@ -141,7 +143,7 @@ impl LayerDrawing for CustomDrawing {
 
     fn clear(&mut self) {}
 
-    fn upload(&mut self, _context: &Context) {}
+    fn upload(&mut self, _context: &mut Context) {}
 
     fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
         if self.updated {
@@ -165,7 +167,7 @@ impl TypedLayer for RenderCustomLayer {
 
     fn update_draws(
         &mut self,
-        _parameters: &PaintParameters<'_>,
+        _parameters: &mut PaintParameters<'_>,
         _atlases: &Atlases,
         _update_parameters: &UpdateParameters,
         _source: Option<LayerSource<'_, Custom>>,
@@ -192,7 +194,7 @@ impl RenderLayer for RenderCustomLayer {
         self.base.passes = RenderPass::Translucent;
     }
 
-    fn prerender(&mut self, parameters: &PaintParameters<'_>) {
+    fn prerender(&mut self, gpu: &mut dyn Gpu, parameters: &PaintParameters<'_>) {
         let Some(frame) = parameters.custom_layer_frame else {
             return;
         };
@@ -200,7 +202,7 @@ impl RenderLayer for RenderCustomLayer {
         drawing.frame = Some(frame);
         drawing.backend = Some(Rc::clone(parameters.context.backend()));
         let Some(host) = &drawing.host else { return };
-        let lent = parameters.context.gpu().lend(&mut |encoder| {
+        let lent = gpu.lend(&mut |encoder| {
             host.prerender(&mut CustomLayerPrerenderParameters { encoder, frame: &frame });
         });
         match lent {

@@ -59,7 +59,7 @@ struct Mesh {
 }
 
 impl Mesh {
-    fn new(context: &Context, vertices: &[u8], indices: &[u16], segments: Vec<SegmentBase>) -> Option<Mesh> {
+    fn new(context: &mut Context, vertices: &[u8], indices: &[u16], segments: Vec<SegmentBase>) -> Option<Mesh> {
         let made = context
             .buffer(BufferUsage::Vertex, vertices)
             .and_then(|vertices| Ok((vertices, context.buffer(BufferUsage::Index, bytemuck::cast_slice(indices))?)));
@@ -119,7 +119,7 @@ impl ClipMasks {
     /// over the area that `projection` gives its tile.
     pub(crate) fn update(
         &mut self,
-        context: &Context,
+        context: &mut Context,
         shaders: &ShaderRegistry,
         globe: bool,
         tiles: &[UnwrappedTileID],
@@ -196,7 +196,7 @@ impl ClipMasks {
         &mut self,
         gpu: &mut dyn Gpu,
         masks: &[(UnwrappedTileID, i32)],
-        parameters: &PaintParameters<'_>,
+        parameters: &mut PaintParameters<'_>,
     ) {
         if let Err(error) = self.draw_in(gpu, masks, parameters) {
             Log::warning(Event::Render, format!("Drawing the clipping masks failed: {error}"));
@@ -207,7 +207,7 @@ impl ClipMasks {
         &mut self,
         gpu: &mut dyn Gpu,
         masks: &[(UnwrappedTileID, i32)],
-        parameters: &PaintParameters<'_>,
+        parameters: &mut PaintParameters<'_>,
     ) -> Result<(), GpuError> {
         let (Some(shader), Some(projections)) = (&self.shader, &self.projections) else {
             return Ok(());
@@ -215,7 +215,8 @@ impl ClipMasks {
         let Some((size, targets)) = parameters.pass_target() else {
             return Ok(());
         };
-        let context = parameters.context;
+        let scissor = clamped_scissor(parameters, size);
+        let context = &mut *parameters.context;
         let shader_id = match self.shader_id {
             Some(id) => id,
             None => *self.shader_id.insert(context.shader(gpu, shader.key())?),
@@ -285,7 +286,7 @@ impl ClipMasks {
         let full = Scissor { x: 0, y: 0, width: size.width, height: size.height };
         let dynamic = DynamicState {
             depth_range: (depth.min, depth.max),
-            scissor: clamped_scissor(parameters, size).unwrap_or(full),
+            scissor: scissor.unwrap_or(full),
             stencil_reference: 0,
             blend_constant: ColorMode::disabled().blend_color,
             line_width: 1.0,
@@ -324,7 +325,7 @@ impl ClipMasks {
                 }
             }
         }
-        let mut stats = context.rendering_stats();
+        let stats = context.rendering_stats();
         stats.num_draw_calls += draws;
         stats.total_draw_calls += draws;
         Ok(())

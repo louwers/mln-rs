@@ -763,7 +763,7 @@ impl WorldCopy {
                     missing: contents.missing,
                     answer: contents.answer.clone(),
                     deps: Rc::clone(&contents.deps),
-                    textures: Rc::clone(&contents.textures),
+                    textures: contents.textures,
                     bucket_geometry: contents.bucket_geometry.clone(),
                 })
             }

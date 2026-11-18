@@ -14,7 +14,7 @@ use crate::gfx::context::Context;
 
 /// Writes `indexes` to their buffer, where they have none or changed since
 /// they were written, making one where they have none or don't fit in it.
-pub(crate) fn upload_indexes(context: &Context, indexes: &mut IndexVectorBase) -> Result<(), GpuError> {
+pub(crate) fn upload_indexes(context: &mut Context, indexes: &mut IndexVectorBase) -> Result<(), GpuError> {
     if indexes.get_buffer().is_some() && !indexes.get_dirty() {
         return Ok(());
     }
@@ -41,7 +41,7 @@ pub(crate) fn upload_indexes(context: &Context, indexes: &mut IndexVectorBase) -
 /// vertices changed since their buffer was written, or `force`, it is written
 /// again, or replaced where they don't fit in it.
 pub(crate) fn vertex_buffer(
-    context: &Context,
+    context: &mut Context,
     vertices: &VertexVectorBasePtr,
     force: bool,
 ) -> Result<Option<BufferPtr>, GpuError> {
@@ -75,7 +75,7 @@ pub(crate) fn vertex_buffer(
 
 /// The buffer of an attribute's own data, made from it, which it then
 /// frees, on first use.
-fn attribute_buffer(context: &Context, attribute: &mut VertexAttribute) -> Result<Option<BufferPtr>, GpuError> {
+fn attribute_buffer(context: &mut Context, attribute: &mut VertexAttribute) -> Result<Option<BufferPtr>, GpuError> {
     if let Some(buffer) = attribute.get_buffer() {
         return Ok(Some(Rc::clone(buffer)));
     }
@@ -93,7 +93,7 @@ fn attribute_buffer(context: &Context, attribute: &mut VertexAttribute) -> Resul
 /// The binding of an attribute the draw has, `None` where it has no
 /// data.
 fn attribute_binding(
-    context: &Context,
+    context: &mut Context,
     attribute: &mut VertexAttribute,
     force: bool,
 ) -> Result<Option<AttributeBinding>, GpuError> {
@@ -133,7 +133,7 @@ fn attribute_binding(
 /// default's type and stride. `force` writes shared vertex data that
 /// appears unchanged (see [`vertex_buffer`]).
 pub(crate) fn build_attribute_bindings(
-    context: &Context,
+    context: &mut Context,
     defaults: &VertexAttributeArray,
     overrides: &mut VertexAttributeArray,
     force: bool,

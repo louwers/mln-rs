@@ -52,7 +52,7 @@ impl GlobeDepthPass {
     pub(crate) fn update(
         &mut self,
         shaders: &ShaderRegistry,
-        context: &Context,
+        context: &mut Context,
         state: &TransformState,
         update_parameters: &UpdateParameters,
         needed: bool,
@@ -143,7 +143,7 @@ impl GlobeDepthPass {
     }
 
     /// Uploads the GPU objects of the frame's draws.
-    pub(crate) fn upload(&mut self, context: &Context) {
+    pub(crate) fn upload(&mut self, context: &mut Context) {
         self.frame.upload(&mut self.tiles, tile_objects, context);
     }
 
