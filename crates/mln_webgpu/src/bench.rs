@@ -5,7 +5,8 @@
 //! [`measure_render_passes`], on the devices made after: their pipeline
 //! statistics where the device has those queries (Vulkan, D3D12), and their
 //! time where it has timestamp queries (Vulkan, D3D12, Metal), which the
-//! library's device then asks for. A build with the feature in which no one
+//! library's device then asks for, unless the process leaves them untimed
+//! ([`leave_render_passes_untimed`]). A build with the feature in which no one
 //! calls it, such as a workspace's tests, measures nothing. Built only with
 //! the `bench` feature, and hidden from the documentation: it isn't API.
 
@@ -25,8 +26,16 @@ pub struct PipelineStatistics {
 }
 
 /// The device features that measuring asks for, where the adapter has them.
-pub(crate) const FEATURES: wgpu::Features =
-    wgpu::Features::PIPELINE_STATISTICS_QUERY.union(wgpu::Features::TIMESTAMP_QUERY);
+pub(crate) fn features() -> wgpu::Features {
+    let mut features = wgpu::Features::empty();
+    if COUNTING.load(Ordering::Relaxed) {
+        features |= wgpu::Features::PIPELINE_STATISTICS_QUERY;
+    }
+    if TIMING.load(Ordering::Relaxed) {
+        features |= wgpu::Features::TIMESTAMP_QUERY;
+    }
+    features
+}
 
 /// What each statistics query counts, in the order it writes them: by their
 /// bits.
@@ -41,12 +50,22 @@ const QUERIES: u32 = 1024;
 
 /// Whether [`measure_render_passes`] was called.
 static COUNTING: AtomicBool = AtomicBool::new(false);
+/// Whether the devices made now time their render passes.
+static TIMING: AtomicBool = AtomicBool::new(false);
 
 /// Measures the render passes of the devices made from now on, for
 /// [`take_pipeline_statistics`] and [`take_gpu_time`] to take after each
 /// frame, which the caller must, since what isn't taken stays.
 pub fn measure_render_passes() {
     COUNTING.store(true, Ordering::Relaxed);
+    TIMING.store(true, Ordering::Relaxed);
+}
+
+/// Has the devices made from now on count their render passes' pipeline
+/// statistics without timing them, where no one would read the time and the
+/// timestamps would only cost work.
+pub fn leave_render_passes_untimed() {
+    TIMING.store(false, Ordering::Relaxed);
 }
 
 /// Whether the devices made now measure their render passes.
@@ -56,7 +75,8 @@ pub(crate) fn counting() -> bool {
 
 /// The measurements of submissions that the GPU hasn't finished, and the
 /// sums of those it has that nobody has taken yet.
-static COUNTED: Mutex<Counted> = Mutex::new(Counted { pending: Vec::new(), statistics: None, time: None });
+static COUNTED: Mutex<Counted> =
+    Mutex::new(Counted { pending: Vec::new(), statistics: None, time: None, wrapped: false });
 
 struct Counted {
     pending: Vec<Pending>,
@@ -64,12 +84,15 @@ struct Counted {
     statistics: Option<PipelineStatistics>,
     /// `None` until a device has timestamp queries.
     time: Option<Duration>,
+    /// Whether a pass ended at an earlier timestamp than it began: the
+    /// counter wrapped, and wgpu doesn't say at how many bits.
+    wrapped: bool,
 }
 
 impl Counted {
     /// Adds up the submissions whose measurements have come back.
     fn collect(&mut self) {
-        let (statistics, time) = (&mut self.statistics, &mut self.time);
+        let (statistics, time, wrapped) = (&mut self.statistics, &mut self.time, &mut self.wrapped);
         self.pending.retain(|pending| {
             if !pending.mapped.load(Ordering::Acquire) {
                 return true;
@@ -91,8 +114,11 @@ impl Counted {
                 {
                     let start = (offset / 8) as usize;
                     let passes = &values[start..start + 2 * pending.queries as usize];
-                    let ticks: u64 =
-                        passes.as_chunks::<2>().0.iter().map(|[begin, end]| end.saturating_sub(*begin)).sum();
+                    let mut ticks = 0u64;
+                    for [begin, end] in passes.as_chunks::<2>().0 {
+                        *wrapped |= end < begin;
+                        ticks += end.wrapping_sub(*begin);
+                    }
                     *time += Duration::from_nanos((ticks as f64 * f64::from(period)).round() as u64);
                 }
             }
@@ -127,11 +153,16 @@ pub fn take_pipeline_statistics() -> Option<PipelineStatistics> {
 
 /// The time the GPU spent in the render passes it has finished since the
 /// last call, once the device has been polled for them, or `None` where no
-/// device has timestamp queries.
+/// device times them.
+///
+/// # Panics
+///
+/// If a pass's timestamps wrapped, which leaves the time unknown.
 #[must_use]
 pub fn take_gpu_time() -> Option<Duration> {
     let mut counted = COUNTED.lock();
     counted.collect();
+    assert!(!counted.wrapped, "a render pass's timestamps wrapped, so the GPU's time is unknown");
     counted.time.as_mut().map(std::mem::take)
 }
 
@@ -150,7 +181,7 @@ impl Queries {
     /// and the device has them: a host's own device may have them without
     /// the process measuring. [`timed`](Self::timed) adds timestamps.
     pub(crate) fn new(device: &wgpu::Device) -> Option<Queries> {
-        if !counting() || !device.features().intersects(FEATURES) {
+        if !counting() || !device.features().intersects(features()) {
             return None;
         }
         let statistics = device.features().contains(wgpu::Features::PIPELINE_STATISTICS_QUERY).then(|| {
@@ -164,11 +195,11 @@ impl Queries {
         Some(Queries { statistics, timestamps: None, used: 0 })
     }
 
-    /// Times each pass too, where the device has timestamp queries, with
-    /// the writes that [`timestamp_writes`](Self::timestamp_writes) gives
-    /// the pass.
+    /// Times each pass too, where the device has timestamp queries and the
+    /// process times the passes of the devices it makes now, with the writes
+    /// that [`timestamp_writes`](Self::timestamp_writes) gives the pass.
     pub(crate) fn timed(mut self, device: &wgpu::Device, queue: &wgpu::Queue) -> Queries {
-        if device.features().contains(wgpu::Features::TIMESTAMP_QUERY) {
+        if TIMING.load(Ordering::Relaxed) && device.features().contains(wgpu::Features::TIMESTAMP_QUERY) {
             COUNTED.lock().time.get_or_insert_default();
             let set = device.create_query_set(&wgpu::QuerySetDescriptor {
                 label: Some("pass timestamps"),

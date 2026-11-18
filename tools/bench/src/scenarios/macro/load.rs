@@ -8,6 +8,7 @@ use mln_util::geo::LatLng;
 use mln_util::size::Size;
 
 use super::VIEW;
+use crate::meter;
 use crate::scenario::{Bench, Kind, Scenario};
 use crate::support::fixtures::{Fixtures, Tiles};
 use crate::support::map::{Frontend, HeadlessMap, save_png};
@@ -116,12 +117,12 @@ fn runtime(bench: &mut Bench) {
     let fixtures = Fixtures::open(bench);
     let style = fixtures.style(Tiles::Street);
     let camera = super::street_center(&fixtures, 14.0);
+    // The image is done when the runtime's thread has drawn it, before the
+    // GPU has, and nothing waits for the GPU inside the part.
+    meter::leave_gpu_untimed();
     let device = {
         let frontend = Frontend::new(Size::new(1, 1));
         bench.gpu = Some(frontend.gpu());
-        // The image is done when the runtime's thread has drawn it, before
-        // the GPU has, and nothing waits for the GPU inside the part.
-        bench.gpu_untimed = true;
         frontend.device()
     };
     let options =

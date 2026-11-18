@@ -72,13 +72,13 @@ fn shared_instance(backends: wgpu::Backends) -> wgpu::Instance {
 /// visionOS simulators allows fewer inter-stage shader variables than they
 /// ask), and 32-bit float depth with stencil where `adapter` has it. A
 /// benchmark that measures the render passes also asks for pipeline
-/// statistics and timestamp queries (`bench::measure_render_passes`).
+/// statistics and timestamp queries (`bench::features`).
 fn device_descriptor(adapter: &wgpu::Adapter) -> wgpu::DeviceDescriptor<'static> {
     #[cfg_attr(not(feature = "bench"), expect(unused_mut, reason = "only a benchmark asks for more"))]
     let mut features = wgpu::Features::DEPTH32FLOAT_STENCIL8;
     #[cfg(feature = "bench")]
-    if crate::bench::counting() {
-        features |= crate::bench::FEATURES;
+    {
+        features |= crate::bench::features();
     }
     wgpu::DeviceDescriptor {
         label: Some("MapLibre WebGPU Device"),

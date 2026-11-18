@@ -123,6 +123,17 @@ pub(crate) fn measure_render_passes() {
     mln_gl::bench::measure_render_passes();
 }
 
+/// Leaves the render passes of the devices made from now on untimed, for a
+/// scenario that no GPU time would describe, so that it doesn't pay for the
+/// timestamps. Their pipeline statistics stay counted.
+pub(crate) fn leave_gpu_untimed() {
+    mln_webgpu::bench::leave_render_passes_untimed();
+    #[cfg(all(mln_bench_vulkan, not(any(target_vendor = "apple", target_family = "wasm"))))]
+    mln_vulkan::bench::leave_render_passes_untimed();
+    #[cfg(mln_bench_gl)]
+    mln_gl::bench::leave_render_passes_untimed();
+}
+
 /// The time the GPU has spent in the render passes of the process's frames
 /// so far, from timestamp queries, or `None` until a device that has them
 /// is made: WebGPU's, and those of the native Vulkan and OpenGL backends

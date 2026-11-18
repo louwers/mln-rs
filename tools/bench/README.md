@@ -416,11 +416,11 @@ and `bytes` declare the scenario's own metrics, and `per` the unit of work it
 repeats, or `per_part` that each measured part is one unit, which adds how the
 units spread. A macro scenario sets `bench.gpu` to the device it drew on, and
 writes its last image to `bench.image` when that is set, outside its measured
-parts; it sets `bench.gpu_untimed` if no part waits for the GPU to finish its
-frames. What more than one scenario uses goes in `src/support/`: the headless
-map (`support::map`), the fixtures (`support::fixtures`) and seeded data
-(`support::random`); what more than one micro scenario uses, such as the tiles
-they read, in `src/scenarios/micro/`.
+parts; it calls `meter::leave_gpu_untimed` before making its device if no part
+waits for the GPU to finish its frames. What more than one scenario uses goes in
+`src/support/`: the headless map (`support::map`), the fixtures
+(`support::fixtures`) and seeded data (`support::random`); what more than one
+micro scenario uses, such as the tiles they read, in `src/scenarios/micro/`.
 
 ### Reaching a library's internal stages
 

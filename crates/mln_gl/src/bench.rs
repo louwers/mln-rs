@@ -4,9 +4,10 @@
 //! [`measure_render_passes`], on the backends made after, where the context
 //! has the queries: desktop OpenGL 3.3, `ARB_timer_query`, or GL ES's
 //! `EXT_disjoint_timer_query`, and on a GPU: Mesa's CPU rasterizers report
-//! times that don't add up to the drawing they do. A build with the feature in which no one
-//! calls it, such as a workspace's tests, measures nothing. Built only with
-//! the `bench` feature, and hidden from the documentation: it isn't API.
+//! times that don't add up to the drawing they do. A build with the feature
+//! in which no one calls it, such as a workspace's tests, measures nothing.
+//! Built only with the `bench` feature, and hidden from the documentation:
+//! it isn't API.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -20,8 +21,12 @@ use crate::types::Gl;
 /// clocks, made the times measured since it was last read meaningless.
 const GPU_DISJOINT: u32 = 0x8FBB;
 
-/// Whether [`measure_render_passes`] was called.
+/// Whether the backends made now time their render passes.
 static COUNTING: AtomicBool = AtomicBool::new(false);
+
+/// Whether GL reported a disjoint operation, which leaves the time of the
+/// passes it ran then unknown.
+static DISJOINT: AtomicBool = AtomicBool::new(false);
 
 /// The time of the passes the GPU has finished that nobody has taken yet;
 /// `None` until a backend times its passes.
@@ -33,11 +38,23 @@ pub fn measure_render_passes() {
     COUNTING.store(true, Ordering::Relaxed);
 }
 
+/// Leaves the render passes of the backends made from now on untimed,
+/// where no one would read the time and the queries would only cost work.
+pub fn leave_render_passes_untimed() {
+    COUNTING.store(false, Ordering::Relaxed);
+}
+
 /// The time the GPU spent in the render passes it has finished since the
 /// last call, once the backend has waited for them, or `None` where no
 /// backend times its passes.
+///
+/// # Panics
+///
+/// If GL reported a disjoint operation, such as a change of the GPU's
+/// clocks, which leaves the time unknown.
 #[must_use]
 pub fn take_gpu_time() -> Option<Duration> {
+    assert!(!DISJOINT.load(Ordering::Relaxed), "GL reported a disjoint operation, so the GPU's time is unknown");
     TIME.lock().as_mut().map(std::mem::take)
 }
 
@@ -95,7 +112,8 @@ impl Timer {
     }
 
     /// Adds up the passes whose times have come back, which they all have
-    /// once GL has finished the commands so far.
+    /// once GL has finished the commands so far, as after a flush that waits
+    /// or a readback.
     pub(crate) fn collect(&mut self, gl: &Gl) {
         let mut time = Duration::ZERO;
         // SAFETY: the context is current, and the queries have ended. A
@@ -111,9 +129,10 @@ impl Timer {
             self.free.push(query);
         }
         // SAFETY: the context is current, and has the parameter where it
-        // reports disjoint operations.
+        // reports disjoint operations. Reading it clears it, though queries
+        // still pending may be affected too.
         if self.disjoint && unsafe { gl.get_parameter_i32(GPU_DISJOINT) } != 0 {
-            return;
+            DISJOINT.store(true, Ordering::Relaxed);
         }
         if let Some(total) = TIME.lock().as_mut() {
             *total += time;

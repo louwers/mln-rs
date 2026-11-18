@@ -18,7 +18,7 @@ use crate::renderer_backend::BackendImpl;
 /// The passes one submission times at most; a pass past them goes untimed.
 const PASSES: u32 = 1024;
 
-/// Whether [`measure_render_passes`] was called.
+/// Whether the backends made now time their render passes.
 static COUNTING: AtomicBool = AtomicBool::new(false);
 
 /// The time of the passes the GPU has finished that nobody has taken yet;
@@ -29,6 +29,12 @@ static TIME: Mutex<Option<Duration>> = Mutex::new(None);
 /// [`take_gpu_time`] to take after each frame.
 pub fn measure_render_passes() {
     COUNTING.store(true, Ordering::Relaxed);
+}
+
+/// Leaves the render passes of the backends made from now on untimed,
+/// where no one would read the time and the queries would only cost work.
+pub fn leave_render_passes_untimed() {
+    COUNTING.store(false, Ordering::Relaxed);
 }
 
 /// The time the GPU spent in the render passes it has finished since the

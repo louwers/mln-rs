@@ -1703,7 +1703,13 @@ impl Gpu for GlGpu {
         let rgba = self.current(|gpu| {
             let framebuffer = gpu.framebuffer_of(Some(texture), None, "readback")?;
             gpu.context.state().bind_framebuffer(gpu.context.gl(), framebuffer);
-            Ok::<_, GpuError>(read_pixels(gpu.context.gl(), gpu.context.state(), height, region))
+            let rgba = read_pixels(gpu.context.gl(), gpu.context.state(), height, region);
+            // Reading the pixels waited for the passes before it.
+            #[cfg(feature = "bench")]
+            if let Some(timer) = &mut gpu.timer {
+                timer.collect(gpu.context.gl());
+            }
+            Ok::<_, GpuError>(rgba)
         })?;
         let texels = if red { rgba.as_chunks::<4>().0.iter().map(|&[red, ..]| red).collect() } else { rgba };
         Ok(self.readbacks.insert(texels))
