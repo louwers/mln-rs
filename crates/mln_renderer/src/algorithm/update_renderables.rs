@@ -1,7 +1,6 @@
-// C++ passes four callbacks that all touch the caller's tile map and hands
-// `Tile*`s between them. Here the caller implements `RenderablesContext`,
-// and tiles are named by their key in the caller's tile storage (the
-// `OverscaledTileID` the tile was stored under).
+// The caller's tile map is a `RenderablesContext`, which names tiles by
+// their key in the caller's tile storage (the `OverscaledTileID` the tile
+// was stored under).
 
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::hash::HashSet;
@@ -9,10 +8,10 @@ use mln_util::range::Range;
 
 use crate::tile::tile::TileNecessity;
 
-/// The tile storage and the callbacks `updateRenderables` works with.
+/// The tile storage and the calls `update_renderables` works with.
 pub(crate) trait RenderablesContext {
     /// Returns the key of the existing tile with this id, if there is one.
-    fn get_tile(&mut self, id: &OverscaledTileID) -> Option<OverscaledTileID>;
+    fn existing_tile(&mut self, id: &OverscaledTileID) -> Option<OverscaledTileID>;
     /// Creates and stores the tile with this id and returns its key; `None`
     /// if no tile is created (e.g. outside the TileJSON bounds).
     fn create_tile(&mut self, id: &OverscaledTileID) -> Option<OverscaledTileID>;
@@ -48,7 +47,7 @@ pub(crate) fn update_renderables<C: RenderablesContext>(
         debug_assert!(ideal_data_tile_id.overscaled_z >= ideal_data_tile_id.canonical.z);
 
         let ideal_render_tile_id = ideal_data_tile_id.to_unwrapped();
-        let ideal_tile = match ctx.get_tile(ideal_data_tile_id) {
+        let ideal_tile = match ctx.existing_tile(ideal_data_tile_id) {
             Some(tile) => tile,
             None => match ctx.create_tile(ideal_data_tile_id) {
                 Some(tile) => tile,
@@ -76,7 +75,7 @@ pub(crate) fn update_renderables<C: RenderablesContext>(
             if overscaled_z > i32::from(zoom_range.max) {
                 // We're looking for an overzoomed child tile.
                 let child_data_tile_id = ideal_data_tile_id.scaled_to(overscaled_z as u8);
-                let tile = ctx.get_tile(&child_data_tile_id);
+                let tile = ctx.existing_tile(&child_data_tile_id);
                 match tile {
                     Some(tile) if ctx.is_renderable(&tile) => {
                         ctx.retain_tile(&tile, TileNecessity::Optional);
@@ -90,7 +89,7 @@ pub(crate) fn update_renderables<C: RenderablesContext>(
                 for child_tile_id in ideal_data_tile_id.canonical.children() {
                     let child_data_tile_id =
                         OverscaledTileID::new(overscaled_z as u8, ideal_render_tile_id.wrap, child_tile_id);
-                    let tile = ctx.get_tile(&child_data_tile_id);
+                    let tile = ctx.existing_tile(&child_data_tile_id);
                     match tile {
                         Some(tile) if ctx.is_renderable(&tile) => {
                             ctx.retain_tile(&tile, TileNecessity::Optional);
@@ -129,7 +128,7 @@ pub(crate) fn update_renderables<C: RenderablesContext>(
                     }
                     checked.insert(parent_data_tile_id);
 
-                    let mut tile = ctx.get_tile(&parent_data_tile_id);
+                    let mut tile = ctx.existing_tile(&parent_data_tile_id);
                     if tile.is_none() && (parent_has_tried_optional || parent_is_loaded) {
                         tile = ctx.create_tile(&parent_data_tile_id);
                     }

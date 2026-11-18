@@ -643,18 +643,18 @@ impl SymbolBucket {
         // the (unchanged) vertices in the sorted order.
         for index in symbols_by_viewport_y(&state.symbol_instances, angle) {
             let symbol_instance = &state.symbol_instances[index];
-            symbols_sort_order.push(symbol_instance.get_data_feature_index());
+            symbols_sort_order.push(symbol_instance.data_feature_index());
 
             if let Some(i) = symbol_instance.placed_right_text_index {
                 add_placed_symbol(&mut state.text.triangles, &state.text.placed_symbols[i]);
             }
             if let Some(i) = symbol_instance.placed_center_text_index
-                && !symbol_instance.get_single_line()
+                && !symbol_instance.single_line()
             {
                 add_placed_symbol(&mut state.text.triangles, &state.text.placed_symbols[i]);
             }
             if let Some(i) = symbol_instance.placed_left_text_index
-                && !symbol_instance.get_single_line()
+                && !symbol_instance.single_line()
             {
                 add_placed_symbol(&mut state.text.triangles, &state.text.placed_symbols[i]);
             }
@@ -785,8 +785,8 @@ pub(crate) fn symbols_by_viewport_y(symbol_instances: &[SymbolInstance], angle: 
     let cos = angle.cos();
     result.sort_by_key(|&i| {
         let s = &symbol_instances[i];
-        let p = s.get_anchor().point;
-        ((sin * p.x + cos * p.y).round() as i64, Reverse(s.get_data_feature_index()))
+        let p = s.anchor().point;
+        ((sin * p.x + cos * p.y).round() as i64, Reverse(s.data_feature_index()))
     });
     result
 }

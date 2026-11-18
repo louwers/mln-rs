@@ -186,7 +186,7 @@ fn with_tiles(source: &Source, tiles: &[&str]) -> Source {
     source.with_data(SourceData::<VectorSourceType> { description: Some(tileset), ..data.clone() })
 }
 
-/// The three tiled source types the C++ tests repeat each case for.
+/// The three tiled source types that each case runs for.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Tiled {
     Raster,
@@ -316,8 +316,7 @@ fn tile_fail(kind: Tiled) {
         }));
     }
 
-    // C++ checks `source_.baseImpl->type` in the callback; the port's
-    // observer gets the source id, so the type is checked here.
+    // The observer gets the source id, so the type is checked here.
     assert_eq!(kind.type_name(), run_tile_case(&test, kind, file_source, &observer));
     assert!(*failed.borrow());
 }

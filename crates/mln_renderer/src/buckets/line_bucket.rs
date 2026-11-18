@@ -103,17 +103,17 @@ impl LineBucket {
         let evaluated = &layer.paint;
         let binders = self.paint_property_binders.get(&layer.style.id);
         let translate = evaluated.line_translate.uniform();
-        let offset = get_or_max(
+        let offset = evaluated_or_max(
             evaluated.line_offset.constant(),
             LinePaintProperties::Defaults::line_offset(),
             binders.and_then(|b| b.line_offset.statistics.max()),
         );
-        let mut line_width = get_or_max(
+        let mut line_width = evaluated_or_max(
             evaluated.line_width.constant(),
             LinePaintProperties::Defaults::line_width(),
             binders.and_then(|b| b.line_width.statistics.max()),
         );
-        let gap_width = get_or_max(
+        let gap_width = evaluated_or_max(
             evaluated.line_gap_width.constant(),
             LinePaintProperties::Defaults::line_gap_width(),
             binders.and_then(|b| b.line_gap_width.statistics.max()),
@@ -273,7 +273,7 @@ impl LineBucket {
 
 /// The anonymous-namespace `get<Property>(evaluated, id, binders)` of
 /// `line_bucket.cpp`.
-fn get_or_max(evaluated_constant: Option<f32>, default_value: f32, statistics_max: Option<f32>) -> f32 {
+fn evaluated_or_max(evaluated_constant: Option<f32>, default_value: f32, statistics_max: Option<f32>) -> f32 {
     match statistics_max {
         Some(max) => max,
         None => evaluated_constant.unwrap_or(default_value),

@@ -246,7 +246,7 @@ fn symbol_order() {
             .state
             .symbol_instances
             .iter()
-            .map(crate::layout::symbol_instance::SymbolInstance::get_data_feature_index)
+            .map(crate::layout::symbol_instance::SymbolInstance::data_feature_index)
             .collect();
         assert_eq!(expected_order(type_), order, "{type_:?}");
         // An explicit constant key still disables viewport-Y sorting for symbol-z-order:auto.
@@ -276,7 +276,7 @@ fn symbol_viewport_y() {
             .state
             .symbol_instances
             .iter()
-            .map(crate::layout::symbol_instance::SymbolInstance::get_data_feature_index)
+            .map(crate::layout::symbol_instance::SymbolInstance::data_feature_index)
             .collect();
         assert_eq!(vec![0, 1, 2], order, "{type_:?}");
     }

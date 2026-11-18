@@ -74,8 +74,8 @@ impl InterleavedVertexBuffer {
 }
 
 /// The value types of data-driven paint properties with a single attribute
-/// (`float` and `Color` in circle, fill and line): `attributeValue(v)` and
-/// the attribute's type (`A::Type`).
+/// (`float` and `Color` in circle, fill and line): the attribute's value of
+/// a value ([`attribute_value`](Self::attribute_value)), and its type.
 pub(crate) trait BinderValue: Clone + Default + ValueConverter + StatisticValue + std::fmt::Debug {
     /// The number of floats `attribute_value` uses.
     const DIMENSIONS: usize;
@@ -272,7 +272,7 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
         }
     }
 
-    pub(crate) fn get_vertex_count(&self, buffer: &InterleavedVertexBuffer) -> usize {
+    pub(crate) fn vertex_count(&self, buffer: &InterleavedVertexBuffer) -> usize {
         if self.kind.vertex_offset().is_some() { buffer.vertex_count } else { 0 }
     }
 
@@ -290,7 +290,7 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
         formatted_section: &Value,
     ) {
         let Some(vertex_offset) = self.kind.vertex_offset() else { return };
-        let elements = self.get_vertex_count(buffer);
+        let elements = self.vertex_count(buffer);
         match &mut self.kind {
             PaintPropertyBinderKind::Constant { .. } => {}
             PaintPropertyBinderKind::SourceFunction { expression, default_value, feature_map, .. } => {
@@ -333,7 +333,7 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
                 );
                 self.statistics.add(&min);
                 self.statistics.add(&max);
-                // zoomInterpolatedAttributeValue(attributeValue(min), attributeValue(max))
+                // The values at both zoom stops, which the shader interpolates.
                 let min_value = min.attribute_value();
                 let max_value = max.attribute_value();
                 let mut value = Vec::with_capacity(2 * T::DIMENSIONS);
@@ -413,12 +413,12 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
             let raw_size = buffer.stride as u32;
             let data_type = if self.is_interpolated() { T::INTERPOLATED_DATA_TYPE } else { T::BASE_DATA_TYPE };
 
-            debug_assert_eq!(shared.count() / buffer.stride.max(1), self.get_vertex_count(buffer));
+            debug_assert_eq!(shared.count() / buffer.stride.max(1), self.vertex_count(buffer));
             attrib.set_shared_vertices(shared.clone(), vertex_offset as u32, 0, raw_size, data_type);
         } else {
-            // getVertexCount() is 0 without an interleaved buffer: nothing
+            // Without an interleaved buffer there are no vertices: nothing
             // to set.
-            debug_assert_eq!(self.get_vertex_count(buffer), 0);
+            debug_assert_eq!(self.vertex_count(buffer), 0);
         }
     }
 }
@@ -494,7 +494,7 @@ impl CrossFadedPaintPropertyBinder<Image> {
         }
     }
 
-    pub(crate) fn get_vertex_count(&self, buffer: &InterleavedVertexBuffer) -> usize {
+    pub(crate) fn vertex_count(&self, buffer: &InterleavedVertexBuffer) -> usize {
         if self.kind.vertex_offset().is_some() { buffer.vertex_count } else { 0 }
     }
 
@@ -533,8 +533,8 @@ impl CrossFadedPaintPropertyBinder<Image> {
             _ => {
                 // Unlike other properties with expressions that evaluate to
                 // null, the default value for `*-pattern` properties is an
-                // empty string and will not have a valid entry in
-                // patternPositions. We still need to populate the attribute
+                // empty string and will not have a valid entry in the
+                // pattern positions. We still need to populate the attribute
                 // buffers to avoid crashes when we try to draw the layer
                 // because we don't know at draw time if all features were
                 // evaluated to valid pattern dependencies.
@@ -564,7 +564,7 @@ impl CrossFadedPaintPropertyBinder<Image> {
     ) {
         if let Some(vertex_offset) = self.kind.vertex_offset() {
             let raw_size = buffer.stride as u32;
-            // isInterpolated() is false: `Type::DataType`.
+            // Patterns don't interpolate: one value of four shorts.
             let data_type = AttributeDataType::UShort4;
             attrib.set_shared_vertices(shared.clone(), vertex_offset as u32, 0, raw_size, data_type);
         }
@@ -771,7 +771,7 @@ impl<T: BinderValue> PaintPropertyBinderBase for PaintPropertyBinder<T> {
         }
     }
     fn binder_vertex_count(&self, buffer: &InterleavedVertexBuffer) -> usize {
-        self.get_vertex_count(buffer)
+        self.vertex_count(buffer)
     }
     fn apply(
         &self,
@@ -802,7 +802,7 @@ impl PaintPropertyBinderBase for CrossFadedPaintPropertyBinder<Image> {
         self.populate_vertex_vector(buffer, length, pattern_positions, pattern_dependencies);
     }
     fn binder_vertex_count(&self, buffer: &InterleavedVertexBuffer) -> usize {
-        self.get_vertex_count(buffer)
+        self.vertex_count(buffer)
     }
     fn apply(
         &self,

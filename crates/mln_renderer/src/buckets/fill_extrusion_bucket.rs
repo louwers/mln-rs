@@ -156,11 +156,10 @@ impl FillExtrusionBucket {
         FillExtrusionLayoutVertex {
             a1: [int_part.x as i16, int_part.y as i16],
             a2: [
-                // We pack a bool (`isDiscarded`) indicating whether this
-                // instance is discarded
+                // Packs whether this instance is discarded in the low bit.
                 ((i32::from(frac_x) * 256 + i32::from(frac_y)) * 2 + i32::from(is_discarded)) as u16,
-                // The edgeDistance attribute is used for wrapping
-                // fill_extrusion patterns
+                // The edge distance, which fill-extrusion patterns wrap
+                // along.
                 edge_distance,
             ],
         }
@@ -177,7 +176,6 @@ impl FillExtrusionBucket {
                 let p1 = Point::new(p.x.into(), p.y.into());
                 let p2 = ring.get(i + 1).map(|p| Point::new(p.x.into(), p.y.into()));
 
-                // processRingPoints(p1, p2, edgeDistance)
                 vertices.push(Self::layout_vertex(p1, edge_distance as u16, p2.is_none()));
 
                 if let Some(p2) = p2 {

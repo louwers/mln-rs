@@ -70,12 +70,12 @@ impl CircleBucket {
     pub(crate) fn query_radius(&self, layer: &EvaluatedLayer<Circle>) -> f32 {
         let evaluated = &layer.paint;
         let binders = self.paint_property_binders.get(&layer.style.id);
-        let radius = get_radius_or_width(
+        let radius = radius_or_width(
             evaluated.circle_radius.constant(),
             CirclePaintProperties::Defaults::circle_radius(),
             binders.and_then(|b| b.circle_radius.statistics.max()),
         );
-        let stroke = get_radius_or_width(
+        let stroke = radius_or_width(
             evaluated.circle_stroke_width.constant(),
             CirclePaintProperties::Defaults::circle_stroke_width(),
             binders.and_then(|b| b.circle_stroke_width.statistics.max()),
@@ -104,7 +104,7 @@ impl CircleBucket {
 
 /// The anonymous-namespace `get<Property>(evaluated, id, binders)` of
 /// `circle_bucket.cpp`.
-fn get_radius_or_width(evaluated_constant: Option<f32>, default_value: f32, statistics_max: Option<f32>) -> f32 {
+fn radius_or_width(evaluated_constant: Option<f32>, default_value: f32, statistics_max: Option<f32>) -> f32 {
     match statistics_max {
         Some(max) => max,
         None => evaluated_constant.unwrap_or(default_value),

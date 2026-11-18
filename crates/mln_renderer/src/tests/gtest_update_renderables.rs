@@ -123,7 +123,7 @@ struct Callbacks<'a> {
 }
 
 impl RenderablesContext for Callbacks<'_> {
-    fn get_tile(&mut self, id: &OverscaledTileID) -> Option<OverscaledTileID> {
+    fn existing_tile(&mut self, id: &OverscaledTileID) -> Option<OverscaledTileID> {
         let found = self.data_tiles.contains_key(id);
         self.log.push(GetTileDataAction(*id, if found { Found } else { NotFound }));
         found.then_some(*id)

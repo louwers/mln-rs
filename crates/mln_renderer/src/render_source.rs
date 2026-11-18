@@ -94,7 +94,7 @@ pub(crate) trait RenderSource {
     }
 
     /// The source's tiles in `order`, as indexes into `render_tiles`, as of
-    /// the last `prepare`; `None` for a source without tiles.
+    /// the last `update_render_tiles`; `None` for a source without tiles.
     fn tile_order(&self, _order: TileOrder) -> Option<&[usize]> {
         None
     }

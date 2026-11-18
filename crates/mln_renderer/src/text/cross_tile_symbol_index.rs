@@ -100,9 +100,9 @@ impl TileLayerIndex {
         let rounding_factor: f64 = 512.0 / f64::from(EXTENT) / 2.0;
         let scale =
             rounding_factor / 2f64.powi(i32::from(child_tile_coord.canonical.z) - i32::from(self.coord.canonical.z));
-        // `childTileCoord.canonical.x * util::EXTENT` is uint32_t arithmetic;
-        // adding the float anchor makes it a float, the scale a double.
-        let anchor = symbol_instance.get_anchor().point;
+        // The tile's position wraps in `u32`; adding the anchor makes it an
+        // `f32`, and the scale an `f64`.
+        let anchor = symbol_instance.anchor().point;
         let x = child_tile_coord.canonical.x.wrapping_mul(EXTENT as u32) as f32 + anchor.x;
         let y = child_tile_coord.canonical.y.wrapping_mul(EXTENT as u32) as f32 + anchor.y;
         Point::new((f64::from(x) * scale).floor() as i64, (f64::from(y) * scale).floor() as i64)
@@ -259,11 +259,10 @@ impl CrossTileSymbolLayerIndex {
             if previous_index.bucket_instance_id == bucket.bucket_instance_id && !state.has_uninitialized_symbols {
                 return false;
             }
-            // We're replacing this bucket with an updated version
-            // Remove the old bucket's "used crossTileIDs" now so that the new
-            // bucket can claim them. We have to keep the old index entries
-            // themselves until the end of 'addBucket' so that we can copy them
-            // with 'findMatches'.
+            // An updated version replaces this bucket: the old bucket's used
+            // cross-tile ids go now, so that the new bucket can claim them.
+            // The old index entries stay until the end of `add_bucket`,
+            // which copies them as it finds matches.
             remove_bucket_cross_tile_ids(&mut self.used_cross_tile_ids, tile_id.overscaled_z, previous_index);
         }
 
@@ -277,7 +276,7 @@ impl CrossTileSymbolLayerIndex {
             for symbol_instance in &mut state.symbol_instances {
                 symbol_instance.set_cross_tile_id(None);
                 let in_viewport =
-                    is_in_viewport(projector, symbol_instance.get_anchor().point, symbol_instance.height_offset());
+                    is_in_viewport(projector, symbol_instance.anchor().point, symbol_instance.height_offset());
                 pending.push(in_viewport);
                 state.has_uninitialized_symbols |= !in_viewport;
             }

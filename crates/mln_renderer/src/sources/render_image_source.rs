@@ -367,8 +367,7 @@ impl RenderSource for RenderImageSource {
     }
 
     fn dump_debug_logs(&self) {
-        Log::info(Event::General, format!("RenderImageSource::id: {}", self.base.style_source.id()));
-        Log::info(Event::General, format!("RenderImageSource::loaded: {}", if self.loaded() { "yes" } else { "no" }));
+        Log::info(Event::General, format!("Image source {}: loaded {}", self.base.style_source.id(), self.loaded()));
     }
 
     fn max_zoom(&self) -> Option<u8> {

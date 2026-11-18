@@ -226,7 +226,7 @@ impl CoverContext<'_, '_, '_> {
 }
 
 impl RenderablesContext for CoverContext<'_, '_, '_> {
-    fn get_tile(&mut self, id: &OverscaledTileID) -> Option<OverscaledTileID> {
+    fn existing_tile(&mut self, id: &OverscaledTileID) -> Option<OverscaledTileID> {
         if self.in_cover(id) {
             return Some(*id);
         }
