@@ -421,6 +421,11 @@ impl D3d12Gpu {
             half_float_render_targets: true,
             clip_depth: ClipDepthRange::ZeroToOne,
             render_target_depth: None,
+            // With the debug layer on (`MLN_D3D12_VALIDATION`), Qualcomm's
+            // Adreno driver loses this clear, and
+            // `fill-extrusion-multiple/stencil-wrap` fails. It isn't ours to
+            // fix: the debug layer reports no error, WARP draws the test right
+            // under it, and so does the Adreno without it.
             clear_stencil_with_pass: true,
             line_expressions: false,
             cpu_rasterizer: device.is_software(),
