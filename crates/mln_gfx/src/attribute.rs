@@ -8,7 +8,7 @@ pub struct AttributeDescriptor {
 }
 
 /// A vertex attribute bound to a vertex buffer, or to none where the
-/// drawable doesn't provide the attribute. Bindings are equal where they
+/// draw doesn't provide the attribute. Bindings are equal where they
 /// bind the same buffer the same way.
 #[derive(Clone)]
 pub struct AttributeBinding {

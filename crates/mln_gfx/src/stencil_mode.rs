@@ -68,8 +68,8 @@ impl StencilMode {
     }
 }
 
-/// `Never`, zeros and `StencilOpType::Zero`: a drawable's stencil mode until
-/// it is set.
+/// `Never`, zeros and `StencilOpType::Zero`: a draw's stencil mode until it
+/// is set.
 impl Default for StencilMode {
     fn default() -> Self {
         StencilMode {

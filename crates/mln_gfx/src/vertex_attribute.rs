@@ -92,7 +92,8 @@ impl VertexAttribute {
         self.data_type
     }
 
-    /// `dirty` is `mutable` in C++.
+    /// Marks the attribute's own data changed, or uploaded; it is a `Cell`, so
+    /// that an upload through a shared reference can clear it.
     pub fn set_dirty(&self, value: bool) {
         self.dirty.set(value);
     }
@@ -203,8 +204,8 @@ impl VertexAttributeArray {
 
     /// For each id, calls `found(id, default, override)` when this array has
     /// the attribute, otherwise `missing(id, override)` when only the
-    /// override exists. The override is mutable, as through C++'s
-    /// `unique_ptr` deref.
+    /// override exists. The callbacks get the override mutably, to bind
+    /// it.
     pub fn resolve(
         &self,
         overrides: &mut VertexAttributeArray,

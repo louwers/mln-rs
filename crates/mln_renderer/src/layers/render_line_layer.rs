@@ -1,6 +1,6 @@
 // Where the line shaders read the expression UBO (`Caps::line_expressions`),
-// it is all zeros and no property is marked as evaluated on the GPU, as in
-// C++ with GPU expressions off (its default).
+// it is all zeros and no property is marked as evaluated on the GPU: the
+// layer evaluates every expression on the CPU.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -360,8 +360,7 @@ impl RenderLineLayer {
         if !apply_color_ramp(&color_value, &mut image, self.color_ramp_global_state.as_deref()) {
             return;
         }
-        // The ramp image is shared with the texture (C++ shared_ptr); a new
-        // one replaces it.
+        // The texture shares the ramp image, so a new one replaces it.
         self.color_ramp = Rc::new(image);
 
         if self.color_ramp_texture_2d.is_some() {

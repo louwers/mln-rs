@@ -1,8 +1,7 @@
-// C++ also keeps the prepare render target in the bucket (`renderTarget`,
-// `renderTargetPrepared`); render targets are render-thread objects
-// (`Rc`), so the render layer keeps them per bucket id, and the bucket
-// counts the C++ `renderTargetPrepared = false` resets
-// (`render_target_generation`) so the layer can tell when to prepare again.
+// The bucket keeps no prepare render target: render targets are
+// render-thread objects (`Rc`), so the render layer keeps them per bucket
+// id, and the bucket counts the changes that call for preparing it again
+// (`render_target_generation`).
 
 use geometry::Point;
 use mln_gfx::shaders::segment::SegmentBase;
@@ -22,8 +21,7 @@ pub(crate) struct HillshadeLayoutVertex {
     pub(crate) a2: [u16; 2],
 }
 
-/// The masked geometry of a hillshade bucket (C++ `mask`, `vertices`,
-/// `indices`, `segments`).
+/// The masked geometry of a hillshade bucket.
 #[derive(Clone)]
 pub(crate) struct HillshadeBucketGeometry {
     pub(crate) mask: TileMask,
@@ -46,7 +44,7 @@ pub(crate) struct HillshadeBucket {
     pub(crate) base: BucketBase,
     geometry: HillshadeBucketGeometry,
     demdata: DEMData,
-    /// Incremented where C++ sets `renderTargetPrepared = false`.
+    /// Incremented whenever the render target has to be prepared again.
     render_target_generation: u64,
 }
 
@@ -71,7 +69,7 @@ impl HillshadeBucket {
         HillshadeLayoutVertex { a1: [p.x, p.y], a2: [t.x, t.y] }
     }
 
-    /// The masked geometry (C++ reads the members directly).
+    /// The masked geometry.
     pub(crate) fn geometry(&self) -> &HillshadeBucketGeometry {
         &self.geometry
     }

@@ -1,6 +1,6 @@
-// The `MLN_UBO_CONSOLIDATION` path, as for the WebGPU backend: the projection
-// blocks live in one array of the pass's, so the `GlobeDepthTweaker` the
-// other backends use is not ported.
+// The globe's depth, which hides 3D geometry behind the horizon: a draw of
+// each covering tile's mesh into depth only, before the layers' 3D draws.
+// The draws' projections are entries of one storage buffer of the pass's.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;

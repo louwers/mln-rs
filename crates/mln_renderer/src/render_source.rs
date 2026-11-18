@@ -1,6 +1,7 @@
-// C++ `RenderSource` is an abstract class with data members; the data is
-// `RenderSourceBase`. A source's tiles are in the renderer's tile store,
-// which the source's methods are given.
+// A render source is the renderer's side of a style source: what every one
+// has is `RenderSourceBase`, what each type does the `RenderSource` trait. A
+// source's tiles are in the renderer's tile store, which the source's
+// methods are given.
 
 use std::sync::Arc;
 
@@ -29,7 +30,7 @@ pub(crate) struct SourcePrepareParameters<'a> {
     pub(crate) sort_by_y: bool,
 }
 
-/// The data members of `RenderSource`.
+/// What every render source has, whatever its type.
 pub(crate) struct RenderSourceBase {
     pub(crate) style_source: Source,
     pub(crate) enabled: bool,
@@ -122,8 +123,6 @@ pub(crate) trait RenderSource {
         debug_assert!(false);
         constants::TERRAIN_RGB_MAXZOOM
     }
-
-    // Non-virtual members of the C++ class.
 
     fn is_enabled(&self) -> bool {
         self.base().enabled

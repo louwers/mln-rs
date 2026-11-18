@@ -72,8 +72,8 @@ pub(crate) struct RenderBackgroundLayer {
     base: RenderLayerBase,
     values: LayerValues<Background>,
     drawing: LayerDrawing<KeptDraw>,
-    /// The frame's draws as the update makes them, with their drawable
-    /// UBOs and projections.
+    /// The frame's draws as the update makes them, with their uniform blocks
+    /// and projections.
     draw_list: DrawList<(BackgroundDrawableUnionUBO, ProjectionUBO)>,
     plain_shader: Option<ShaderProgramPtr>,
     pattern_shader: Option<ShaderProgramPtr>,

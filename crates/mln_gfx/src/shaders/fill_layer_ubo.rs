@@ -3,7 +3,7 @@ use bytemuck::{Pod, Zeroable};
 //
 // Fill
 
-/// The fill shader's per-drawable uniform block (80 bytes).
+/// The fill shader's per-draw uniform block (80 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct FillDrawableUBO {
@@ -21,7 +21,7 @@ const _: () = assert!(size_of::<FillDrawableUBO>() == 5 * 16);
 //
 // Fill outline
 
-/// The fill outline shader's per-drawable uniform block (80 bytes).
+/// The fill outline shader's per-draw uniform block (80 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct FillOutlineDrawableUBO {
@@ -39,7 +39,7 @@ const _: () = assert!(size_of::<FillOutlineDrawableUBO>() == 5 * 16);
 //
 // Fill pattern
 
-/// The fill pattern shader's per-drawable uniform block (112 bytes).
+/// The fill pattern shader's per-draw uniform block (112 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct FillPatternDrawableUBO {
@@ -76,7 +76,7 @@ const _: () = assert!(size_of::<FillPatternTilePropsUBO>() == 3 * 16);
 //
 // Fill pattern outline
 
-/// The fill outline pattern shader's per-drawable uniform block, laid out as
+/// The fill outline pattern shader's per-draw uniform block, laid out as
 /// `FillPatternDrawableUBO`.
 pub type FillOutlinePatternDrawableUBO = FillPatternDrawableUBO;
 
@@ -87,7 +87,7 @@ pub type FillOutlinePatternTilePropsUBO = FillPatternTilePropsUBO;
 //
 // Fill outline triangulated
 
-/// The fill outline triangulated shader's per-drawable uniform block (80
+/// The fill outline triangulated shader's per-draw uniform block (80
 /// bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
@@ -115,9 +115,9 @@ pub struct FillEvaluatedPropsUBO {
 }
 const _: () = assert!(size_of::<FillEvaluatedPropsUBO>() == 3 * 16);
 
-/// Any fill per-drawable uniform block, for consolidated UBOs: a C++ union, the
-/// size of the largest member, 112 bytes. Members are written with the `from_*`
-/// constructors; the rest stays zero (C++ value-initializes the vector).
+/// Any fill per-draw uniform block, for consolidated UBOs: the bytes of one of
+/// them, the size of the largest, 112 bytes. Members are written with the
+/// `from_*` constructors; the rest stays zero.
 #[derive(Clone, Copy, Debug, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct FillDrawableUnionUBO {

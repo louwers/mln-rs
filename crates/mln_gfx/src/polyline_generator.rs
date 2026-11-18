@@ -102,8 +102,8 @@ impl Default for PolylineGeneratorOptions {
 
 /// `(p, e, round, up, dir, linesofar) -> vertex`.
 pub(crate) type LayoutVertexFunc<V> = fn(Point<i16>, Point<f64>, bool, bool, i8, i32) -> V;
-/// `(vertex_offset, index_offset) -> segment`. A closure, because the
-/// drawable builder's captures the builder.
+/// `(vertex_offset, index_offset) -> segment`. A closure, so that it can
+/// capture what the segments are made with.
 pub(crate) type CreateSegmentFunc<'a, S> = &'a dyn Fn(usize, usize) -> S;
 pub(crate) type GetSegmentFunc<S> = fn(&mut S) -> &mut SegmentBase;
 

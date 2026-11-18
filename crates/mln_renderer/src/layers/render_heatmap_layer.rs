@@ -164,8 +164,7 @@ impl RenderHeatmapLayer {
             color_value = default_heatmap_color();
         }
 
-        // The ramp image is shared with the texture (C++ shared_ptr); a new
-        // one replaces it.
+        // The texture shares the ramp image, so a new one replaces it.
         let mut image = (*self.color_ramp).clone();
         apply_color_ramp(&color_value, &mut image, self.color_ramp_global_state.as_deref());
         self.color_ramp = Rc::new(image);

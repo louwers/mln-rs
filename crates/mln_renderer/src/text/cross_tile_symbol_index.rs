@@ -1,8 +1,5 @@
 // The index gives the symbols of the buckets a layer places their ids in
 // the frame's prepare, which has the buckets mutably (`SymbolBuckets`).
-//
-// Not ported: the MLN_SYMBOL_GUARDS `check` calls (always true without
-// guards) and the render-thread id.
 
 use std::collections::BTreeSet;
 use std::num::NonZeroU32;

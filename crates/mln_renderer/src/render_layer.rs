@@ -527,8 +527,8 @@ pub(crate) trait RenderLayer: LayerParts {
     /// zoom and some evaluated layout properties.
     fn evaluate(&mut self, parameters: &PropertyEvaluationParameters);
 
-    /// Returns true if layer writes to depth buffer by drawing using
-    /// `PaintParameters::depthModeFor3D()`.
+    /// Whether the layer draws 3D geometry, whose depth it writes in the
+    /// range of [`PaintParameters::depth_mode_for_3d`].
     fn is_3d(&self) -> bool {
         false
     }
@@ -551,7 +551,8 @@ pub(crate) trait RenderLayer: LayerParts {
         prepare_base(self, parameters)
     }
 
-    /// TODO: Only for background layers.
+    /// A background layer's color, where it is a solid color the frame can
+    /// clear to instead of drawing the layer.
     fn get_solid_background(&self) -> Option<Color> {
         None
     }

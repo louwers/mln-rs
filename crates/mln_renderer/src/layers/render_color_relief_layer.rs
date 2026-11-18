@@ -1,10 +1,7 @@
-// Differences in mechanics, not in output:
-// - C++ re-applies the vertex attributes and creates new DEM textures for
-//   existing tile drawables every frame; the port builds a tile's draw again
-//   only when the bucket's masked geometry changed, and keeps the DEM
-//   texture per bucket id.
-// - The elevation stops texture is created anew when the ramp changes (C++
-//   re-uploads into the same texture; its size may change with the ramp).
+// A tile's draw is built again only when the bucket's masked geometry
+// changed, and the layer keeps each bucket's DEM texture by its id. The
+// elevation stops texture is made anew when the ramp changes, since its size
+// changes with the ramp.
 
 use std::cell::RefCell;
 use std::rc::Rc;

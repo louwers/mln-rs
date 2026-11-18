@@ -43,7 +43,7 @@ pub trait VertexVectorBase: Any {
     /// bytes), empty once the CPU copy is freed after upload, or while the
     /// bytes are in a JS array (`get_host_data`).
     fn get_raw_data(&self) -> Ref<'_, [u8]>;
-    /// Port-only: the bytes of all vertices while they are in a JS array
+    /// The bytes of all vertices while they are in a JS array
     /// rather than in wasm memory, until they are freed after upload.
     #[cfg(target_family = "wasm")]
     fn get_host_data(&self) -> Option<Ref<'_, HostBytes>> {
@@ -80,7 +80,7 @@ pub trait VertexVectorBase: Any {
     fn get_last_modified(&self) -> Instant {
         self.vertex_vector_base().last_modified.get()
     }
-    /// Also true of a freed vector: a drawable that shares an attribute
+    /// Also true of a freed vector: a draw that shares an attribute
     /// array with the one that uploaded and freed a new vector still has to
     /// bind its buffer. Uploads check `has_raw_data` before they read the data.
     fn is_modified_after(&self, t: Instant) -> bool {
@@ -121,9 +121,8 @@ impl<V: bytemuck::Pod> Default for VertexVector<V> {
 }
 
 impl<V: bytemuck::Pod> VertexVector<V> {
-    /// A vector holding `vertices` (C++ builds one with `emplace_back`; the
-    /// renderer moves a bucket's vertices into a shared vector this way, see
-    /// `mln_renderer::bucket_geometry`).
+    /// A vector holding `vertices`; the renderer moves a bucket's vertices
+    /// into a shared vector this way (see `mln_renderer::bucket_geometry`).
     #[must_use]
     pub fn from_vec(vertices: Vec<V>) -> Self {
         VertexVector {
@@ -154,7 +153,7 @@ impl<V: bytemuck::Pod> VertexVector<V> {
         result
     }
 
-    /// Port-only: a released vector of the vertices in a JS array, which the
+    /// A released vector of the vertices in a JS array, which the
     /// upload writes to the GPU from there. Released, it frees them once
     /// it has a buffer, so no buffer is ever updated from them.
     #[cfg(target_family = "wasm")]

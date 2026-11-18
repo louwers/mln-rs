@@ -422,7 +422,7 @@ pub struct BindingsDesc<'a> {
     /// The shader whose draws bind them.
     pub shader: ShaderId,
     /// Everything the shader reads, each id once, and possibly more, which
-    /// the bindings leave out: the frame's, the layer's and the drawable's
+    /// the bindings leave out: the frame's, the layer's and the draw's
     /// buffers and textures together.
     pub entries: &'a [BindGroupEntry],
 }

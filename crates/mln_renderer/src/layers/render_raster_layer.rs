@@ -1,13 +1,6 @@
-// Differences in mechanics, not in output:
-// - C++ keeps the GPU texture in the RasterBucket; here the layer keeps one
-//   texture per bucket id (`textures`), because buckets are Send and
-//   textures are render-thread `Rc`s.
-// - C++ re-applies the static vertex attributes to existing tile drawables
-//   every frame (`buildVertexData(none, &drawable, bucket)`); the port only
-//   checks, as C++ does there, whether the bucket's masked geometry changed
-//   since the tile's draw was built, and builds it again if so. The static
-//   geometry never changes, so the draws are the same.
-//
+// The layer keeps one texture per bucket id (`textures`): buckets are Send,
+// and textures are render-thread `Rc`s. A tile's draw stays until the
+// bucket's masked geometry changes, and is then built again.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -93,7 +86,7 @@ pub(crate) struct RenderRasterLayer {
     /// The draws of the tiles, and of an image source's image, one for each
     /// tile it is drawn in.
     drawing: LayerDrawing<RasterTile, Vec<KeptDraw>>,
-    /// The frame's draws as the update makes them, with their drawable UBOs
+    /// The frame's draws as the update makes them, with their uniform blocks
     /// and projections.
     draw_list: DrawList<(RasterDrawableUBO, ProjectionUBO)>,
 
@@ -181,8 +174,7 @@ impl RenderRasterLayer {
             frame.draws.clear();
         }
 
-        // C++ dereferences the bucket unconditionally; it is missing until
-        // the image loads.
+        // The bucket is missing until the image loads.
         let Some(bucket) = image_data.bucket else {
             return;
         };

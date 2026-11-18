@@ -22,11 +22,11 @@ use crate::layout::pattern_layout::PatternLayerMap;
 pub(crate) type FeatureStates = mln_util::hash::HashMap<String, mln_style::expression::expression::FeatureState>;
 pub type LayerFeatureStates = mln_util::hash::HashMap<String, FeatureStates>;
 
-/// The data members of `Bucket`.
+/// What every bucket has, whatever its type.
 ///
-/// Port-only: the codec writes what a worker sets (`tile/worker_codec`); the
-/// upload flag and the id are the side's that has the bucket. A copy keeps
-/// the id: its draws are the same.
+/// The codec writes what a worker sets (`tile/worker_codec`); the upload flag
+/// and the id are the side's that has the bucket. A copy keeps the id: its
+/// draws are the same.
 #[derive(Clone, Debug, mln_wire::Wire)]
 pub(crate) struct BucketBase {
     #[wire(skip)]

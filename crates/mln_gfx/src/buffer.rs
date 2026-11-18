@@ -96,8 +96,8 @@ impl Buffer {
         self.usage
     }
 
-    /// Whether the buffer binds as a storage buffer, which a layer's
-    /// drawables index with their UBO index.
+    /// Whether the buffer binds as a storage buffer, which a layer's draws
+    /// index with their index among its draws.
     #[must_use]
     pub fn is_storage(&self) -> bool {
         self.usage == BufferUsage::Storage

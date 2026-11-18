@@ -1,15 +1,13 @@
-// Port-only: where a bucket's vertices and indices live once the render
-// thread draws them.
+// Where a bucket's vertices and indices live once the render thread draws
+// them.
 //
-// C++ buckets keep their geometry in shared gfx vectors: the drawables point
-// at them, an upload attaches the GPU buffers to them, and a released
-// vector frees its CPU copy once it is in a buffer. The port's buckets cross
-// from the worker threads, so they hold plain vectors (`GeometryVec`), and
-// the render thread keeps the gfx vectors made from them, per tile, in a
-// `BucketGeometry`. A bucket's upload moves each vector into its gfx vector,
-// so the bucket and the draws don't each keep a copy. The gfx vector is
-// released, so it frees the data once it is uploaded, and the draws a layer
-// builds again for the same bucket reuse its buffer. Vertices that a layer
+// Buckets cross from the worker threads, so they hold plain vectors
+// (`GeometryVec`), and the render thread keeps the shared gfx vectors made
+// from them, which the draws bind, per tile, in a `BucketGeometry`. A
+// bucket's upload moves each vector into its gfx vector, so the bucket and
+// the draws don't each keep a copy. The gfx vector is released: it frees the
+// data once it is in a GPU buffer, and the draws a layer builds again for the
+// same bucket reuse that buffer. Vertices that a layer
 // makes of a bucket's vector are kept there too, made before the vector
 // moves.
 //

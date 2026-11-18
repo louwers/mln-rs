@@ -1,13 +1,9 @@
 // Each DEM tile is first drawn into its own render target by the prepare
 // shader (slopes from the DEM), then the tile's draw shades that texture.
-//
-// Differences in mechanics, not in output:
-// - C++ keeps the prepare render target in the (shared) HillshadeBucket;
-//   here the layer keeps it per bucket id (`bucket_render_targets`), with
-//   the bucket's prepare generation (see hillshade_bucket.rs).
-// - C++ re-applies the vertex attributes to existing tile drawables every
-//   frame; the port does so only when the bucket's masked geometry changed
-//   since the tile's draw took it.
+// The layer keeps the render targets per bucket id
+// (`bucket_render_targets`), with the bucket's prepare generation (see
+// hillshade_bucket.rs), and a tile's draw takes the bucket's masked geometry
+// again only when it changed.
 
 use std::cell::RefCell;
 use std::collections::hash_map::Entry;

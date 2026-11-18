@@ -1,6 +1,6 @@
-// C++ also keeps the GPU texture in the bucket (`texture2d`); textures are
-// render-thread objects (`Rc`), so the render layer keeps them per bucket
-// id instead (see render_raster_layer.rs).
+// The bucket keeps no GPU texture: textures are render-thread objects
+// (`Rc`), so the render layer keeps them per bucket id (see
+// render_raster_layer.rs).
 
 use std::sync::Arc;
 
@@ -22,9 +22,7 @@ pub(crate) struct RasterLayoutVertex {
     pub(crate) a2: [u16; 2],
 }
 
-/// The masked geometry of a raster bucket (C++ `mask`, `vertices`,
-/// `indices`, `segments`), with when it last changed (C++
-/// `vertices.updateModified()`).
+/// The masked geometry of a raster bucket, with when it last changed.
 #[derive(Clone)]
 pub(crate) struct RasterBucketGeometry {
     pub(crate) mask: TileMask,
@@ -77,7 +75,7 @@ impl RasterBucket {
         RasterLayoutVertex { a1: [p.x, p.y], a2: [t.x, t.y] }
     }
 
-    /// The masked geometry (C++ reads the members directly).
+    /// The masked geometry.
     pub(crate) fn geometry(&self) -> &RasterBucketGeometry {
         &self.geometry
     }
