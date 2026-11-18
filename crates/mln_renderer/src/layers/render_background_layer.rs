@@ -29,13 +29,16 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use super::cast_matrix;
 use crate::bucket::NoBucket;
-use crate::draw::{DrawGeometry, DrawObjects, raw_vertices};
-use crate::draw_cache::{DrawCaches, DrawDepth, FrameDraw, FrameDraws, KeptDraw};
+use crate::draw::{DrawGeometry, DrawObjects, Textures, raw_vertices};
+use crate::draw_cache::{DrawDepth, FrameDraw, FrameDraws, KeptDraw, LayerDrawing};
 use crate::globe_tile_mesh::raw_globe_tile_mesh;
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{LayerPrepareParameters, LayerTiles, LayerValues, RenderLayer, RenderLayerBase, TypedLayer};
+use crate::render_layer::{
+    LayerParts, LayerPrepareParameters, LayerTiles, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase,
+    TypedLayer,
+};
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::tile_matrix::{get_projection_data, to_projection_ubo};
@@ -67,7 +70,7 @@ impl LayerType for Background {
 pub(crate) struct RenderBackgroundLayer {
     base: RenderLayerBase,
     values: LayerValues<Background>,
-    caches: DrawCaches<KeptDraw>,
+    drawing: LayerDrawing<KeptDraw>,
     plain_shader: Option<ShaderProgramPtr>,
     pattern_shader: Option<ShaderProgramPtr>,
     /// The passes the tiles' draws were built for, and whether with a
@@ -81,7 +84,7 @@ impl RenderBackgroundLayer {
         RenderBackgroundLayer {
             base,
             values,
-            caches: DrawCaches::default(),
+            drawing: LayerDrawing::default(),
             plain_shader: None,
             pattern_shader: None,
             draws_built_for: None,
@@ -112,10 +115,11 @@ impl RenderBackgroundLayer {
             mode: DrawMode::Triangles(),
             indexes: Rc::new(RefCell::new(IndexVectorBase::new(indexes))),
             segments: segments.iter().map(SegmentBase::copy).collect(),
+            instances: None,
         };
         let color_mode =
             if passes == RenderPass::Translucent { ColorMode::alpha_blended() } else { ColorMode::unblended() };
-        DrawObjects::new(String::new(), shader, color_mode, CullFaceMode::disabled(), geometry)
+        DrawObjects::new(shader, color_mode, CullFaceMode::disabled(), geometry, Textures::default())
     }
 
     /// The entries in the layer's storage buffers of the draw of `tile_id`.
@@ -136,7 +140,7 @@ impl RenderBackgroundLayer {
             false,
         );
         let matrix = cast_matrix(&projection.fallback_matrix);
-        let drawable = if pattern {
+        let draw_ubo = if pattern {
             let state = parameters.state;
             let int_zoom = state.get_integer_zoom();
             let tile_size_at_nearest_zoom =
@@ -159,7 +163,7 @@ impl RenderBackgroundLayer {
         } else {
             BackgroundDrawableUnionUBO::from_drawable(&BackgroundDrawableUBO { matrix })
         };
-        (drawable, to_projection_ubo(&projection))
+        (draw_ubo, to_projection_ubo(&projection))
     }
 
     /// The `drawPasses` / `passes` expression shared by `evaluate` and
@@ -184,16 +188,12 @@ impl TypedLayer for RenderBackgroundLayer {
     type Tile = KeptDraw;
     type Shared = ();
 
-    fn parts(&self) -> (&RenderLayerBase, &LayerValues<Background>) {
-        (&self.base, &self.values)
+    fn parts(&self) -> Parts<'_, Self> {
+        Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
     }
 
-    fn parts_mut(&mut self) -> (&mut RenderLayerBase, &mut LayerValues<Background>) {
-        (&mut self.base, &mut self.values)
-    }
-
-    fn caches_mut(&mut self) -> (&mut RenderLayerBase, &mut DrawCaches<KeptDraw>) {
-        (&mut self.base, &mut self.caches)
+    fn parts_mut(&mut self) -> PartsMut<'_, Self> {
+        PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
 }
 
@@ -283,7 +283,7 @@ impl RenderLayer for RenderBackgroundLayer {
             self.remove_all_draws();
             return;
         }
-        self.base.frame.get_or_insert_with(FrameDraws::new);
+        self.drawing.frame.get_or_insert_with(FrameDraws::new);
 
         if self.update_projection_variant(state) {
             self.plain_shader = None;
@@ -305,11 +305,11 @@ impl RenderLayer for RenderBackgroundLayer {
             return;
         };
 
-        self.caches.set_tiles(tile_cover.iter().copied());
+        self.drawing.caches.set_tiles(tile_cover.iter().copied());
         for tile_id in &tile_cover {
-            if self.caches.cache_mut(tile_id).is_none() {
+            if self.drawing.caches.cache_mut(tile_id).is_none() {
                 let objects = self.build_tile(tile_id, Rc::clone(&shader), draw_passes);
-                self.caches.set_cache(tile_id, KeptDraw::new(objects));
+                self.drawing.caches.set_cache(tile_id, KeptDraw::new(objects));
             }
         }
 
@@ -321,7 +321,7 @@ impl RenderLayer for RenderBackgroundLayer {
                 (pattern_atlas.get_pattern(faded.from.id()), pattern_atlas.get_pattern(faded.to.id()))
             else {
                 // The pattern isn't valid: the layer draws nothing.
-                if let Some(frame) = &mut self.base.frame {
+                if let Some(frame) = &mut self.drawing.frame {
                     frame.draws.clear();
                 }
                 return;
@@ -343,7 +343,7 @@ impl RenderLayer for RenderBackgroundLayer {
 
         let mut frame_draws = Vec::new();
         for tile_id in &tile_cover {
-            let Some(cached) = self.caches.cache_mut(tile_id) else {
+            let Some(cached) = self.drawing.caches.cache_mut(tile_id) else {
                 continue;
             };
             if let Some(texture) = &pattern_texture {
@@ -358,7 +358,7 @@ impl RenderLayer for RenderBackgroundLayer {
         }
         frame_draws.sort_by_key(|(draw, _)| draw.order());
 
-        let Some(frame) = &mut self.base.frame else {
+        let Some(frame) = &mut self.drawing.frame else {
             return;
         };
         if !frame_draws.is_empty() {
@@ -389,12 +389,13 @@ impl RenderLayer for RenderBackgroundLayer {
                 };
                 buffers.create_or_update_pod(ID_BACKGROUND_PROPS_UBO, &props, context);
             }
-            let drawables: Vec<BackgroundDrawableUnionUBO> =
-                frame_draws.iter().map(|(_, (drawable, _))| *drawable).collect();
-            buffers.write_storage(ID_BACKGROUND_DRAWABLE_UBO, bytemuck::cast_slice(&drawables), context);
+            let draw_ubos: Vec<BackgroundDrawableUnionUBO> =
+                frame_draws.iter().map(|(_, (draw_ubo, _))| *draw_ubo).collect();
+            buffers.write_storage(ID_BACKGROUND_DRAWABLE_UBO, bytemuck::cast_slice(&draw_ubos), context);
             let projections: Vec<ProjectionUBO> = frame_draws.iter().map(|(_, (_, projection))| *projection).collect();
             buffers.write_storage(ID_PROJECTION_UBO, bytemuck::cast_slice(&projections), context);
         }
-        frame.draws = frame_draws.into_iter().map(|(draw, _)| draw).collect();
+        frame.draws.clear();
+        frame.draws.extend(frame_draws.into_iter().map(|(draw, _)| draw));
     }
 }

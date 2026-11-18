@@ -55,7 +55,7 @@ use crate::buckets::fill_extrusion_bucket::{
     FillExtrusionStaticVertex, FillExtrusionWallVertex,
 };
 use crate::draw::{DrawGeometry, DrawObjects, copy_shared_attributes};
-use crate::draw_cache::{DrawCaches, DrawDepth, DrawPriority, DrawSlots, FrameDraw, FrameDraws};
+use crate::draw_cache::{DrawDepth, DrawPriority, DrawSlots, FrameDraw, FrameDraws, LayerDrawing};
 use crate::frame_projection::zero_to_one_clip_z;
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::layer_type::{EvaluatedLayer, LayerType};
@@ -63,7 +63,9 @@ use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::pattern_layout::{PatternLayout, uses_pattern};
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
-use crate::render_layer::{LayerTiles, LayerValues, RenderLayer, RenderLayerBase, TypedLayer};
+use crate::render_layer::{
+    LayerParts, LayerTiles, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
+};
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_tile::RenderTile;
@@ -103,7 +105,7 @@ impl DrawSlots for ExtrusionTile {
 
 /// A draw's entries in the layer's storage buffers.
 struct ExtrusionUniforms {
-    drawable: FillExtrusionDrawableUBO,
+    draw_ubo: FillExtrusionDrawableUBO,
     tile_props: FillExtrusionTilePropsUBO,
     projection: ProjectionUBO,
 }
@@ -265,12 +267,13 @@ fn read_wall_instances(
 }
 
 /// A draw of `geometry` with `shader`, into depth only or, `in_color`, in
-/// color.
+/// color, which binds the textures of `atlases`.
 fn extrusion_draw(
     shader: &ShaderProgramPtr,
     in_color: bool,
     clip: bool,
     geometry: &SharedGeometry<'_>,
+    atlases: Option<&AtlasBinding>,
 ) -> ExtrusionDraw {
     let draw_geometry = DrawGeometry {
         vertices: copy_shared_attributes(geometry.vertices),
@@ -278,11 +281,11 @@ fn extrusion_draw(
         mode: DrawMode::Triangles(),
         indexes: Rc::clone(geometry.indexes),
         segments: geometry.segments.iter().map(SegmentBase::copy).collect(),
+        instances: geometry.instances.map(copy_shared_attributes),
     };
     let color_mode = if in_color { ColorMode::alpha_blended() } else { ColorMode::disabled() };
-    let mut objects =
-        DrawObjects::new(String::new(), Rc::clone(shader), color_mode, CullFaceMode::back_ccw(), draw_geometry);
-    objects.instance_attributes = geometry.instances.map(copy_shared_attributes);
+    let textures = atlases.map(|atlases| atlases.textures(shader)).unwrap_or_default();
+    let objects = DrawObjects::new(Rc::clone(shader), color_mode, CullFaceMode::back_ccw(), draw_geometry, textures);
     ExtrusionDraw { id: SimpleIdentity::new(), objects, priority: DrawPriority::from(in_color), clip }
 }
 
@@ -317,7 +320,7 @@ impl LayerType for FillExtrusion {
 pub(crate) struct RenderFillExtrusionLayer {
     base: RenderLayerBase,
     values: LayerValues<FillExtrusion>,
-    caches: DrawCaches<ExtrusionTile>,
+    drawing: LayerDrawing<ExtrusionTile>,
 
     fill_extrusion_group: Option<ShaderGroupPtr>,
     fill_extrusion_pattern_group: Option<ShaderGroupPtr>,
@@ -340,7 +343,7 @@ impl RenderFillExtrusionLayer {
         RenderFillExtrusionLayer {
             base,
             values,
-            caches: DrawCaches::default(),
+            drawing: LayerDrawing::default(),
             fill_extrusion_group: None,
             fill_extrusion_pattern_group: None,
             fill_extrusion_wall_group: None,
@@ -356,16 +359,12 @@ impl TypedLayer for RenderFillExtrusionLayer {
     type Tile = ExtrusionTile;
     type Shared = ();
 
-    fn parts(&self) -> (&RenderLayerBase, &LayerValues<FillExtrusion>) {
-        (&self.base, &self.values)
+    fn parts(&self) -> Parts<'_, Self> {
+        Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
     }
 
-    fn parts_mut(&mut self) -> (&mut RenderLayerBase, &mut LayerValues<FillExtrusion>) {
-        (&mut self.base, &mut self.values)
-    }
-
-    fn caches_mut(&mut self) -> (&mut RenderLayerBase, &mut DrawCaches<ExtrusionTile>) {
-        (&mut self.base, &mut self.caches)
+    fn parts_mut(&mut self) -> PartsMut<'_, Self> {
+        PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
 }
 
@@ -432,7 +431,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
                 return;
             }
         };
-        self.base.frame.get_or_insert_with(FrameDraws::new);
+        self.drawing.frame.get_or_insert_with(FrameDraws::new);
 
         if self.fill_extrusion_group.is_none() {
             self.fill_extrusion_group = shaders.shader_group("FillExtrusionShader");
@@ -495,17 +494,17 @@ impl RenderLayer for RenderFillExtrusionLayer {
 
             let render_data = super::render_data_for_pass(tile, &*self.base.style, RENDER_PASS);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
-                self.caches.drop_cache(&tile_id);
+                self.drawing.caches.drop_cache(&tile_id);
                 continue;
             };
             let Some(bucket) = render_data.bucket::<FillExtrusion>() else {
                 continue;
             };
-            if self.caches.bucket(&tile_id).is_some_and(|prev| prev != bucket.base.bucket_id) {
+            if self.drawing.caches.bucket(&tile_id).is_some_and(|prev| prev != bucket.base.bucket_id) {
                 // The tile's draws were built from another bucket.
-                self.caches.drop_cache(&tile_id);
+                self.drawing.caches.drop_cache(&tile_id);
             }
-            self.caches.set_bucket(&tile_id, bucket.base.bucket_id);
+            self.drawing.caches.set_bucket(&tile_id, bucket.base.bucket_id);
 
             let Some(binders_lock) = bucket.paint_property_binders.get(self.get_id()) else {
                 continue;
@@ -515,11 +514,11 @@ impl RenderLayer for RenderFillExtrusionLayer {
             // The draws keep the paint values they were built with, so
             // feature state doesn't reach an extrusion: the tile's changes go
             // unread.
-            if self.caches.cache_mut(&tile_id).is_none() {
+            if self.drawing.caches.cache_mut(&tile_id).is_none() {
                 let built = builder.build(tile, bucket, binders, &self.values.evaluated.paint);
-                self.caches.set_cache(&tile_id, built);
+                self.drawing.caches.set_cache(&tile_id, built);
             }
-            let Some(cached) = self.caches.cache(&tile_id) else {
+            let Some(cached) = self.drawing.caches.cache(&tile_id) else {
                 continue;
             };
             for (slot, draw) in cached.draws.iter().enumerate() {
@@ -536,15 +535,13 @@ impl RenderLayer for RenderFillExtrusionLayer {
         }
 
         frame_draws.sort_by_key(|(draw, _)| draw.order());
-        let Some(mut frame) = self.base.frame.take() else {
-            return;
-        };
+        let frame = self.drawing.frame.get_or_insert_with(FrameDraws::new);
         frame.stencil_tiles = Some(Rc::new(render_tiles.iter().map(|tile| tile.id).collect()));
         if !frame_draws.is_empty() {
-            self.write_uniforms(&mut frame, &frame_draws, paint_parameters);
+            Self::write_uniforms(&self.values.evaluated, frame, &frame_draws, paint_parameters);
         }
-        frame.draws = frame_draws.into_iter().map(|(draw, _)| draw).collect();
-        self.base.frame = Some(frame);
+        frame.draws.clear();
+        frame.draws.extend(frame_draws.into_iter().map(|(draw, _)| draw));
     }
 }
 
@@ -641,37 +638,6 @@ impl TileBuilder {
             attr.set_shared_raw_data(Some(Rc::clone(&vertices)), 4, 0, stride, AttributeDataType::UShort2);
         }
 
-        let mut draws = Vec::new();
-        // The draws in color clip where the layer draws into depth first.
-        let clip = self.depth_pass;
-        let roofs = SharedGeometry {
-            vertices: &vertex_attrs,
-            instances: None,
-            vertex_count,
-            indexes: &bucket_indexes(geometry, bucket, &bucket.triangles),
-            segments: &bucket.triangle_segments,
-        };
-        if !bucket.triangles.is_empty() && vertex_count > 0 {
-            if self.depth_pass {
-                draws.push(extrusion_draw(shader, false, false, &roofs));
-            }
-            draws.push(extrusion_draw(shader, true, clip, &roofs));
-        }
-        // A tile with one vertex has no wall.
-        let walls_geometry = SharedGeometry {
-            vertices: &wall_attrs,
-            instances: wall_instance_attrs.as_ref(),
-            vertex_count: wall_vertex_count,
-            indexes: &self.static_indices,
-            segments: &wall_segments,
-        };
-        if walls > 0 && wall_vertex_count > 0 {
-            if self.depth_pass {
-                draws.push(extrusion_draw(wall_shader, false, false, &walls_geometry));
-            }
-            draws.push(extrusion_draw(wall_shader, true, clip, &walls_geometry));
-        }
-
         let atlases = tile.get_atlas_textures().filter(|_| self.has_pattern).map(|atlases| {
             Rc::new(AtlasBinding::new(
                 Some(Rc::clone(atlases)),
@@ -684,11 +650,37 @@ impl TileBuilder {
                 false,
             ))
         });
-        if let Some(atlases) = &atlases {
-            for draw in &mut draws {
-                atlases.init(&mut draw.objects);
+        let mut draws = Vec::new();
+        // The draws in color clip where the layer draws into depth first.
+        let clip = self.depth_pass;
+        let roofs = SharedGeometry {
+            vertices: &vertex_attrs,
+            instances: None,
+            vertex_count,
+            indexes: &bucket_indexes(geometry, bucket, &bucket.triangles),
+            segments: &bucket.triangle_segments,
+        };
+        if !bucket.triangles.is_empty() && vertex_count > 0 {
+            if self.depth_pass {
+                draws.push(extrusion_draw(shader, false, false, &roofs, atlases.as_deref()));
             }
+            draws.push(extrusion_draw(shader, true, clip, &roofs, atlases.as_deref()));
         }
+        // A tile with one vertex has no wall.
+        let walls_geometry = SharedGeometry {
+            vertices: &wall_attrs,
+            instances: wall_instance_attrs.as_ref(),
+            vertex_count: wall_vertex_count,
+            indexes: &self.static_indices,
+            segments: &wall_segments,
+        };
+        if walls > 0 && wall_vertex_count > 0 {
+            if self.depth_pass {
+                draws.push(extrusion_draw(wall_shader, false, false, &walls_geometry, atlases.as_deref()));
+            }
+            draws.push(extrusion_draw(wall_shader, true, clip, &walls_geometry, atlases.as_deref()));
+        }
+
         ExtrusionTile { draws, atlases }
     }
 }
@@ -746,7 +738,7 @@ impl RenderFillExtrusionLayer {
 
         let pattern_t = binders.fill_extrusion_pattern.interpolation_factor(zoom).0;
         ExtrusionUniforms {
-            drawable: FillExtrusionDrawableUBO {
+            draw_ubo: FillExtrusionDrawableUBO {
                 matrix: cast_matrix(&projection.fallback_matrix),
                 pixel_coord_upper: [(pixel_x >> 16) as f32, (pixel_y >> 16) as f32],
                 pixel_coord_lower: [(pixel_x & 0xFFFF) as f32, (pixel_y & 0xFFFF) as f32],
@@ -773,12 +765,11 @@ impl RenderFillExtrusionLayer {
     /// Writes the layer's buffers of `draws`, the frame's in drawing order,
     /// to `frame`'s.
     fn write_uniforms(
-        &self,
+        layer: &EvaluatedLayer<FillExtrusion>,
         frame: &mut FrameDraws,
         draws: &[(FrameDraw, ExtrusionUniforms)],
         parameters: &PaintParameters<'_>,
     ) {
-        let layer = &*self.values.evaluated;
         let evaluated = &layer.paint;
         let crossfade = layer.crossfade;
         let light = &parameters.evaluated_light;
@@ -807,8 +798,8 @@ impl RenderFillExtrusionLayer {
         let context = parameters.context;
         let buffers = &mut frame.uniform_buffers;
         buffers.create_or_update_pod(ID_FILL_EXTRUSION_PROPS_UBO, &props, context);
-        let drawables: Vec<FillExtrusionDrawableUBO> = draws.iter().map(|(_, uniforms)| uniforms.drawable).collect();
-        buffers.write_storage(ID_FILL_EXTRUSION_DRAWABLE_UBO, bytemuck::cast_slice(&drawables), context);
+        let draw_ubos: Vec<FillExtrusionDrawableUBO> = draws.iter().map(|(_, uniforms)| uniforms.draw_ubo).collect();
+        buffers.write_storage(ID_FILL_EXTRUSION_DRAWABLE_UBO, bytemuck::cast_slice(&draw_ubos), context);
         let tile_props: Vec<FillExtrusionTilePropsUBO> =
             draws.iter().map(|(_, uniforms)| uniforms.tile_props).collect();
         buffers.write_storage(ID_FILL_EXTRUSION_TILE_PROPS_UBO, bytemuck::cast_slice(&tile_props), context);

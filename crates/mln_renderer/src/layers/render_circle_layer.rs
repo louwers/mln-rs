@@ -25,15 +25,17 @@ use mln_util::error::Error;
 use super::{cast_matrix, refresh_paint_attributes};
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::circle_bucket::{CircleBinders, CircleBucket, CircleLayoutVertex};
-use crate::draw::{DrawGeometry, DrawObjects};
-use crate::draw_cache::{DrawCaches, FrameDraw, FrameDraws, KeptDraw};
+use crate::draw::{DrawGeometry, DrawObjects, Textures};
+use crate::draw_cache::{FrameDraw, FrameDraws, KeptDraw, LayerDrawing};
 use crate::gfx::context::Context;
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::circle_layout::CircleLayout;
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
-use crate::render_layer::{LayerTiles, LayerValues, RenderLayer, RenderLayerBase, TypedLayer};
+use crate::render_layer::{
+    LayerParts, LayerTiles, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
+};
 use crate::render_pass::RenderPass;
 use crate::render_tile::RenderTile;
 use crate::tile_matrix::{get_projection_data, globe_extrude_scale, to_projection_ubo};
@@ -171,14 +173,14 @@ impl LayerType for Circle {
 pub(crate) struct RenderCircleLayer {
     base: RenderLayerBase,
     values: LayerValues<Circle>,
-    caches: DrawCaches<KeptDraw>,
+    drawing: LayerDrawing<KeptDraw>,
     circle_shader_group: Option<ShaderGroupPtr>,
 }
 
 impl RenderCircleLayer {
     pub(crate) fn new(impl_: Arc<LayerStyle<Circle>>) -> Self {
         let (base, values) = LayerValues::new(impl_);
-        RenderCircleLayer { base, values, caches: DrawCaches::default(), circle_shader_group: None }
+        RenderCircleLayer { base, values, drawing: LayerDrawing::default(), circle_shader_group: None }
     }
 
     /// The entries in the layer's storage buffers of the draw of `tile_id`,
@@ -210,7 +212,7 @@ impl RenderCircleLayer {
         let pixels_to_tile_units = tile_id.pixels_to_tile_units(1.0, zoom);
         let latitude_scale = parameters.state.get_projection().circle_radius_correction(parameters.state);
         CircleUniforms {
-            drawable: CircleDrawableUBO {
+            draw_ubo: CircleDrawableUBO {
                 matrix: cast_matrix(&projection.fallback_matrix),
                 extrude_scale: if pitch_with_map {
                     [pixels_to_tile_units, pixels_to_tile_units]
@@ -234,8 +236,13 @@ impl RenderCircleLayer {
 
     /// Writes the layer's buffers of `draws`, the frame's in drawing order,
     /// to `frame`'s.
-    fn write_uniforms(&self, frame: &mut FrameDraws, draws: &[(FrameDraw, CircleUniforms)], context: &Context) {
-        let evaluated = &self.values.evaluated.paint;
+    fn write_uniforms(
+        layer: &EvaluatedLayer<Circle>,
+        frame: &mut FrameDraws,
+        draws: &[(FrameDraw, CircleUniforms)],
+        context: &Context,
+    ) {
+        let evaluated = &layer.paint;
         let props = CircleEvaluatedPropsUBO {
             color: evaluated.circle_color.uniform().to_float_array(),
             stroke_color: evaluated.circle_stroke_color.uniform().to_float_array(),
@@ -250,8 +257,8 @@ impl RenderCircleLayer {
         };
         let buffers = &mut frame.uniform_buffers;
         buffers.create_or_update_pod(ID_CIRCLE_EVALUATED_PROPS_UBO, &props, context);
-        let drawables: Vec<CircleDrawableUBO> = draws.iter().map(|(_, uniforms)| uniforms.drawable).collect();
-        buffers.write_storage(ID_CIRCLE_DRAWABLE_UBO, bytemuck::cast_slice(&drawables), context);
+        let draw_ubos: Vec<CircleDrawableUBO> = draws.iter().map(|(_, uniforms)| uniforms.draw_ubo).collect();
+        buffers.write_storage(ID_CIRCLE_DRAWABLE_UBO, bytemuck::cast_slice(&draw_ubos), context);
         let projections: Vec<ProjectionUBO> = draws.iter().map(|(_, uniforms)| uniforms.projection).collect();
         buffers.write_storage(ID_PROJECTION_UBO, bytemuck::cast_slice(&projections), context);
     }
@@ -259,7 +266,7 @@ impl RenderCircleLayer {
 
 /// A draw's entries in the layer's storage buffers.
 struct CircleUniforms {
-    drawable: CircleDrawableUBO,
+    draw_ubo: CircleDrawableUBO,
     projection: ProjectionUBO,
 }
 
@@ -268,16 +275,12 @@ impl TypedLayer for RenderCircleLayer {
     type Tile = KeptDraw;
     type Shared = ();
 
-    fn parts(&self) -> (&RenderLayerBase, &LayerValues<Circle>) {
-        (&self.base, &self.values)
+    fn parts(&self) -> Parts<'_, Self> {
+        Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
     }
 
-    fn parts_mut(&mut self) -> (&mut RenderLayerBase, &mut LayerValues<Circle>) {
-        (&mut self.base, &mut self.values)
-    }
-
-    fn caches_mut(&mut self) -> (&mut RenderLayerBase, &mut DrawCaches<KeptDraw>) {
-        (&mut self.base, &mut self.caches)
+    fn parts_mut(&mut self) -> PartsMut<'_, Self> {
+        PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
 }
 
@@ -426,7 +429,7 @@ impl RenderLayer for RenderCircleLayer {
             self.remove_all_draws();
             return;
         };
-        self.base.frame.get_or_insert_with(FrameDraws::new);
+        self.drawing.frame.get_or_insert_with(FrameDraws::new);
 
         if self.circle_shader_group.is_none() {
             self.circle_shader_group = shaders.shader_group(CIRCLE_SHADER_GROUP_NAME);
@@ -447,7 +450,7 @@ impl RenderLayer for RenderCircleLayer {
 
             let render_data = super::render_data_for_pass(tile, &*self.base.style, RENDER_PASS);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
-                self.caches.drop_cache(&tile_id);
+                self.drawing.caches.drop_cache(&tile_id);
                 continue;
             };
             let Some(bucket) = render_data.bucket::<Circle>() else {
@@ -462,16 +465,16 @@ impl RenderLayer for RenderCircleLayer {
                 paint_vertices(geometry, bucket, &binders.interleaved_vertex_buffer, binders.depends_on_feature_state())
             };
 
-            if self.caches.bucket(&tile_id).is_some_and(|prev| prev != bucket.base.bucket_id) {
+            if self.drawing.caches.bucket(&tile_id).is_some_and(|prev| prev != bucket.base.bucket_id) {
                 // The tile's draw was built from another bucket.
-                self.caches.drop_cache(&tile_id);
+                self.drawing.caches.drop_cache(&tile_id);
             }
-            self.caches.set_bucket(&tile_id, bucket.base.bucket_id);
+            self.drawing.caches.set_bucket(&tile_id, bucket.base.bucket_id);
 
             // The draw's attributes point into the bucket's shared vectors,
             // which upload again when they change.
-            let changes = self.caches.take_changes(&tile_id);
-            if let Some(cached) = self.caches.cache_mut(&tile_id) {
+            let changes = self.drawing.caches.take_changes(&tile_id);
+            if let Some(cached) = self.drawing.caches.cache_mut(&tile_id) {
                 refresh_paint_attributes(&mut cached.objects, changes, |attrs| {
                     read_circle_attributes(attrs, binders, &paint(), evaluated, &mut Default::default());
                 });
@@ -490,7 +493,6 @@ impl RenderLayer for RenderCircleLayer {
                 }
                 let vertex_count = if bucket.segments.is_empty() { 0 } else { bucket.vertices.len() };
                 let objects = DrawObjects::new(
-                    String::new(),
                     circle_shader_group.shader(&properties_as_uniforms, self.base.projection_variant),
                     ColorMode::alpha_blended(),
                     CullFaceMode::disabled(),
@@ -500,25 +502,26 @@ impl RenderLayer for RenderCircleLayer {
                         mode: DrawMode::Triangles(),
                         indexes: bucket_indexes(geometry, bucket, &bucket.triangles),
                         segments: bucket.segments.iter().map(SegmentBase::copy).collect(),
+                        instances: None,
                     },
+                    Textures::default(),
                 );
-                self.caches.set_cache(&tile_id, KeptDraw::new(objects));
+                self.drawing.caches.set_cache(&tile_id, KeptDraw::new(objects));
             }
 
-            let Some(draw) = self.caches.cache_mut(&tile_id).map(|cached| cached.frame_draw(Some(tile_id))) else {
+            let Some(draw) = self.drawing.caches.cache_mut(&tile_id).map(|cached| cached.frame_draw(Some(tile_id)))
+            else {
                 continue;
             };
             frame_draws.push((draw, self.uniforms(&tile_id, binders, paint_parameters)));
         }
 
         frame_draws.sort_by_key(|(draw, _)| draw.order());
-        let Some(mut frame) = self.base.frame.take() else {
-            return;
-        };
+        let frame = self.drawing.frame.get_or_insert_with(FrameDraws::new);
         if !frame_draws.is_empty() {
-            self.write_uniforms(&mut frame, &frame_draws, context);
+            Self::write_uniforms(&self.values.evaluated, frame, &frame_draws, context);
         }
-        frame.draws = frame_draws.into_iter().map(|(draw, _)| draw).collect();
-        self.base.frame = Some(frame);
+        frame.draws.clear();
+        frame.draws.extend(frame_draws.into_iter().map(|(draw, _)| draw));
     }
 }

@@ -38,8 +38,8 @@ use super::render_line_layer::apply_color_ramp;
 use super::{cast_matrix, refresh_paint_attributes, shared_vertices};
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices, released_indexes};
 use crate::buckets::heatmap_bucket::{HeatmapBinders, HeatmapBucket, HeatmapLayoutVertex};
-use crate::draw::{DrawGeometry, DrawObjects};
-use crate::draw_cache::{DrawCaches, DrawDepth, FrameDraw, FrameDraws, KeptDraw};
+use crate::draw::{DrawGeometry, DrawObjects, Textures};
+use crate::draw_cache::{DrawDepth, FrameDraw, FrameDraws, KeptDraw, LayerDrawing};
 use crate::gfx::context::Context;
 use crate::gfx::texture2d::Texture2DPtr;
 use crate::layer_type::{EvaluatedLayer, LayerType};
@@ -47,7 +47,9 @@ use crate::layout::heatmap_layout::HeatmapLayout;
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
-use crate::render_layer::{LayerParts, LayerTiles, LayerValues, RenderLayer, RenderLayerBase, TypedLayer};
+use crate::render_layer::{
+    LayerParts, LayerTiles, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
+};
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_target::RenderTarget;
@@ -94,7 +96,7 @@ const RENDER_PASS: RenderPass = RenderPass::Translucent;
 
 /// A tile's draw's entries in the render target's storage buffers.
 struct HeatmapUniforms {
-    drawable: HeatmapDrawableUBO,
+    draw_ubo: HeatmapDrawableUBO,
     projection: ProjectionUBO,
 }
 
@@ -120,7 +122,7 @@ pub(crate) struct RenderHeatmapLayer {
     values: LayerValues<Heatmap>,
     /// The tiles' draws into the render target, and the layer's draw, which
     /// colors the render target's heat onto the frame.
-    caches: DrawCaches<KeptDraw, Option<KeptDraw>>,
+    drawing: LayerDrawing<KeptDraw, Option<KeptDraw>>,
     color_ramp: Rc<PremultipliedImage>,
     /// The global-state snapshot used to generate the cached color ramp and
     /// detect when it needs to be rebuilt.
@@ -132,9 +134,6 @@ pub(crate) struct RenderHeatmapLayer {
     /// The texture the tiles draw their heat into, which the layer's draw
     /// colors onto the frame.
     render_target: Option<RenderTarget>,
-    /// The tiles' draws into the render target, of GPU objects in the tiles'
-    /// caches.
-    target_draws: FrameDraws,
 
     shared_texture_vertices: Option<VertexVectorBasePtr>,
 }
@@ -145,14 +144,13 @@ impl RenderHeatmapLayer {
         RenderHeatmapLayer {
             base,
             values,
-            caches: DrawCaches::default(),
+            drawing: LayerDrawing::default(),
             color_ramp: Rc::new(PremultipliedImage::new(Size::new(256, 1))),
             color_ramp_global_state: None,
             segments: Vec::new(),
             heatmap_shader_group: None,
             heatmap_texture_shader: None,
             render_target: None,
-            target_draws: FrameDraws::new(),
             shared_texture_vertices: None,
         }
     }
@@ -176,16 +174,12 @@ impl TypedLayer for RenderHeatmapLayer {
     type Tile = KeptDraw;
     type Shared = Option<KeptDraw>;
 
-    fn parts(&self) -> (&RenderLayerBase, &LayerValues<Heatmap>) {
-        (&self.base, &self.values)
+    fn parts(&self) -> Parts<'_, Self> {
+        Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
     }
 
-    fn parts_mut(&mut self) -> (&mut RenderLayerBase, &mut LayerValues<Heatmap>) {
-        (&mut self.base, &mut self.values)
-    }
-
-    fn caches_mut(&mut self) -> (&mut RenderLayerBase, &mut DrawCaches<KeptDraw, Option<KeptDraw>>) {
-        (&mut self.base, &mut self.caches)
+    fn parts_mut(&mut self) -> PartsMut<'_, Self> {
+        PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
 }
 
@@ -222,14 +216,9 @@ impl RenderLayer for RenderHeatmapLayer {
         self.values.set_evaluated(&mut self.base, properties);
     }
 
-    fn remove_all_draws(&mut self) {
-        self.clear_draws();
-        self.target_draws.draws.clear();
-    }
-
     fn upload_render_targets(&mut self, context: &Context) {
         if self.base.is_renderable && self.render_target.is_some() {
-            self.caches.upload(&self.target_draws, context);
+            self.drawing.upload_target(context);
         }
     }
 
@@ -237,8 +226,8 @@ impl RenderLayer for RenderHeatmapLayer {
         if self.base.is_renderable
             && let Some(render_target) = &mut self.render_target
         {
-            let (caches, target_draws) = (&mut self.caches, &self.target_draws);
-            render_target.render(parameters, |gpu, parameters| caches.render(target_draws, gpu, parameters));
+            let drawing = &mut self.drawing;
+            render_target.render(parameters, |gpu, parameters| drawing.render_target(gpu, parameters));
         }
     }
 
@@ -303,7 +292,7 @@ impl RenderHeatmapLayer {
             let tile_id = *tile.get_overscaled_tile_id();
 
             let Some(render_data) = super::render_data_for_pass(tile, &*self.base.style, RENDER_PASS) else {
-                self.caches.drop_cache(&tile_id);
+                self.drawing.caches.drop_cache(&tile_id);
                 continue;
             };
             let Some(bucket) = render_data.bucket::<Heatmap>() else {
@@ -318,16 +307,16 @@ impl RenderHeatmapLayer {
                 paint_vertices(geometry, bucket, &binders.interleaved_vertex_buffer, binders.depends_on_feature_state())
             };
 
-            if self.caches.bucket(&tile_id).is_some_and(|prev| prev != bucket.base.bucket_id) {
+            if self.drawing.caches.bucket(&tile_id).is_some_and(|prev| prev != bucket.base.bucket_id) {
                 // The tile's draw was built from another bucket.
-                self.caches.drop_cache(&tile_id);
+                self.drawing.caches.drop_cache(&tile_id);
             }
-            self.caches.set_bucket(&tile_id, bucket.base.bucket_id);
+            self.drawing.caches.set_bucket(&tile_id, bucket.base.bucket_id);
 
             // The draw's attributes point into the bucket's shared vectors,
             // which upload again when they change.
-            let changes = self.caches.take_changes(&tile_id);
-            if let Some(cached) = self.caches.cache_mut(&tile_id) {
+            let changes = self.drawing.caches.take_changes(&tile_id);
+            if let Some(cached) = self.drawing.caches.cache_mut(&tile_id) {
                 refresh_paint_attributes(&mut cached.objects, changes, |attrs| {
                     read_heatmap_attributes(attrs, binders, &paint(), evaluated, &mut Default::default());
                 });
@@ -353,18 +342,19 @@ impl RenderHeatmapLayer {
                     mode: DrawMode::Triangles(),
                     indexes: bucket_indexes(geometry, bucket, &bucket.triangles),
                     segments: bucket.segments.iter().map(SegmentBase::copy).collect(),
+                    instances: None,
                 };
                 let objects = DrawObjects::new(
-                    String::new(),
                     Rc::clone(shader),
                     ColorMode::additive(),
                     CullFaceMode::disabled(),
                     geometry,
+                    Textures::default(),
                 );
-                self.caches.set_cache(&tile_id, KeptDraw::new(objects));
+                self.drawing.caches.set_cache(&tile_id, KeptDraw::new(objects));
             }
 
-            let Some(cached) = self.caches.cache(&tile_id) else {
+            let Some(cached) = self.drawing.caches.cache(&tile_id) else {
                 continue;
             };
             let draw = FrameDraw { depth: DrawDepth::Off, ..cached.frame_draw(Some(tile_id)) };
@@ -372,10 +362,12 @@ impl RenderHeatmapLayer {
         }
 
         tile_draws.sort_by_key(|(draw, _)| draw.order());
+        let target = self.drawing.target.get_or_insert_with(FrameDraws::new);
         if !tile_draws.is_empty() {
-            self.write_tile_uniforms(&tile_draws, context);
+            Self::write_tile_uniforms(&self.values.evaluated.paint, target, &tile_draws, context);
         }
-        self.target_draws.draws = tile_draws.into_iter().map(|(draw, _)| draw).collect();
+        target.draws.clear();
+        target.draws.extend(tile_draws.into_iter().map(|(draw, _)| draw));
         true
     }
 
@@ -402,7 +394,7 @@ impl RenderHeatmapLayer {
         );
         let latitude_scale = parameters.state.get_projection().circle_radius_correction(parameters.state);
         HeatmapUniforms {
-            drawable: HeatmapDrawableUBO {
+            draw_ubo: HeatmapDrawableUBO {
                 matrix: cast_matrix(&projection.fallback_matrix),
                 extrude_scale: tile_id.pixels_to_tile_units(1.0, zoom),
                 weight_t: binders.heatmap_weight.interpolation_factor(zoom),
@@ -413,20 +405,25 @@ impl RenderHeatmapLayer {
         }
     }
 
-    /// Writes the render target's buffers of `draws`, the tiles' in drawing
-    /// order.
-    fn write_tile_uniforms(&mut self, draws: &[(FrameDraw, HeatmapUniforms)], context: &Context) {
-        let evaluated = &self.values.evaluated.paint;
+    /// Writes the buffers of `draws`, the tiles' into the render target in
+    /// drawing order, of a layer of the paint values `evaluated`, to
+    /// `target`'s.
+    fn write_tile_uniforms(
+        evaluated: &HeatmapPaintProperties::PossiblyEvaluated,
+        target: &mut FrameDraws,
+        draws: &[(FrameDraw, HeatmapUniforms)],
+        context: &Context,
+    ) {
         let props = HeatmapEvaluatedPropsUBO {
             weight: evaluated.heatmap_weight.constant_or(&HeatmapPaintProperties::Defaults::heatmap_weight()),
             radius: evaluated.heatmap_radius.constant_or(&HeatmapPaintProperties::Defaults::heatmap_radius()),
             intensity: *evaluated.heatmap_intensity.uniform(),
             padding: 0.0,
         };
-        let buffers = &mut self.target_draws.uniform_buffers;
+        let buffers = &mut target.uniform_buffers;
         buffers.create_or_update_pod(ID_HEATMAP_EVALUATED_PROPS_UBO, &props, context);
-        let drawables: Vec<HeatmapDrawableUBO> = draws.iter().map(|(_, uniforms)| uniforms.drawable).collect();
-        buffers.write_storage(ID_HEATMAP_DRAWABLE_UBO, bytemuck::cast_slice(&drawables), context);
+        let draw_ubos: Vec<HeatmapDrawableUBO> = draws.iter().map(|(_, uniforms)| uniforms.draw_ubo).collect();
+        buffers.write_storage(ID_HEATMAP_DRAWABLE_UBO, bytemuck::cast_slice(&draw_ubos), context);
         let projections: Vec<ProjectionUBO> = draws.iter().map(|(_, uniforms)| uniforms.projection).collect();
         buffers.write_storage(ID_PROJECTION_UBO, bytemuck::cast_slice(&projections), context);
     }
@@ -441,7 +438,7 @@ impl RenderHeatmapLayer {
         render_target_texture: Texture2DPtr,
         paint_parameters: &PaintParameters<'_>,
     ) {
-        self.base.frame.get_or_insert_with(FrameDraws::new);
+        self.drawing.frame.get_or_insert_with(FrameDraws::new);
         if self.heatmap_texture_shader.is_none() {
             self.heatmap_texture_shader =
                 shaders.shader(HEATMAP_TEXTURE_SHADER_GROUP_NAME, ProjectionVariant::Mercator);
@@ -487,24 +484,25 @@ impl RenderHeatmapLayer {
             mode: DrawMode::Triangles(),
             indexes: released_indexes(&RenderStaticData::quad_triangle_indices()),
             segments: self.segments.iter().map(SegmentBase::copy).collect(),
+            instances: None,
         };
-        let mut objects = DrawObjects::new(
-            String::new(),
+        let mut textures = Textures::default();
+        textures[ID_HEATMAP_IMAGE_TEXTURE] = Some(render_target_texture);
+        textures[ID_HEATMAP_COLOR_RAMP_TEXTURE] = Some(color_ramp);
+        let objects = DrawObjects::new(
             heatmap_texture_shader,
             ColorMode::alpha_blended(),
             CullFaceMode::disabled(),
             geometry,
+            textures,
         );
-        objects.textures[ID_HEATMAP_IMAGE_TEXTURE] = Some(render_target_texture);
-        objects.textures[ID_HEATMAP_COLOR_RAMP_TEXTURE] = Some(color_ramp);
         let draw = KeptDraw::new(objects);
         let frame_draw = FrameDraw { depth: DrawDepth::Off, ..draw.frame_draw(None) };
-        *self.caches.layer_cache_mut() = Some(draw);
+        *self.drawing.caches.layer_cache_mut() = Some(draw);
 
-        let Some(frame) = &mut self.base.frame else {
-            return;
-        };
-        frame.draws = vec![frame_draw];
+        let frame = self.drawing.frame.get_or_insert_with(FrameDraws::new);
+        frame.draws.clear();
+        frame.draws.push(frame_draw);
         let mut m: Mat4 = [0.0; 16];
         let size = paint_parameters.renderable_size;
         matrix::ortho(&mut m, 0.0, f64::from(size.width), f64::from(size.height), 0.0, -1.0, 1.0);

@@ -7,8 +7,8 @@
 //! changed since, and a cache of the draws no tile holds. Its update makes
 //! the frame's draws, values ([`FrameDraw`]) that name their GPU objects by
 //! their cache and their slot in it, with their uniforms in the buffers of
-//! their [`FrameDraws`], which [`DrawCaches::upload`] and
-//! [`DrawCaches::render`] issue.
+//! their [`FrameDraws`]. The caches issue the draws of the frames they are
+//! kept with, in a [`LayerDrawing`] or [`Draws`].
 
 use std::ops::BitOrAssign;
 use std::rc::Rc;
@@ -416,6 +416,11 @@ impl<T, L> DrawCaches<T, L> {
     }
 
     /// The cache of the draws that no tile holds.
+    pub(crate) fn layer_cache(&self) -> &L {
+        &self.layer
+    }
+
+    /// The cache of the draws that no tile holds.
     pub(crate) fn layer_cache_mut(&mut self) -> &mut L {
         &mut self.layer
     }
@@ -443,7 +448,7 @@ impl<T: DrawSlots, L: DrawSlots> DrawCaches<T, L> {
 
     /// Uploads the GPU objects of `frame`'s draws, all of which the caches
     /// hold, in drawing order, and destroys the buffers each upload replaced.
-    pub(crate) fn upload(&mut self, frame: &FrameDraws, context: &Context) {
+    fn upload(&mut self, frame: &FrameDraws, context: &Context) {
         for draw in &frame.draws {
             if let Some(objects) = self.objects_mut(draw) {
                 objects.upload(context);
@@ -456,7 +461,7 @@ impl<T: DrawSlots, L: DrawSlots> DrawCaches<T, L> {
     /// hold, into the open pass of `gpu`, the context's: into the layer
     /// composite's texture in the translucent pass where they composite, and
     /// onto the frame otherwise.
-    pub(crate) fn render(&mut self, frame: &FrameDraws, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+    fn render(&mut self, frame: &FrameDraws, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         if frame.draws.is_empty() || parameters.pass_target().is_none() {
             return;
         }
@@ -508,8 +513,143 @@ impl<T: DrawSlots, L: DrawSlots> DrawCaches<T, L> {
                     volume_stencil.filter(|_| draw.clip).unwrap_or_else(StencilMode::disabled),
                 ),
             };
-            objects.draw(gpu, parameters, Some(&frame.uniform_buffers), depth, stencil, index as u32);
+            objects.draw(gpu, parameters, &frame.uniform_buffers, depth, stencil, index as u32);
         }
+    }
+}
+
+/// The order the frame draws the layers' draw groups in, each at the depth
+/// of [`PaintParameters::current_layer`], which [`DrawOrder::step`] moves to
+/// the next group's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DrawOrder {
+    /// The layers' order, bottom to top, with the depth going down by one
+    /// after each group, to 0.
+    BottomUp,
+    /// The reverse order, top to bottom, with the depth going up by one
+    /// after each group.
+    TopDown,
+}
+
+impl DrawOrder {
+    /// Moves `parameters` to the depth of the group after the one it is at.
+    pub(crate) fn step(self, parameters: &mut PaintParameters<'_>) {
+        match self {
+            DrawOrder::BottomUp => parameters.current_layer = parameters.current_layer.saturating_sub(1),
+            DrawOrder::TopDown => parameters.current_layer += 1,
+        }
+    }
+}
+
+/// What a layer keeps of its drawing: the caches of the GPU objects of its
+/// draws, and its draws of the frame.
+pub(crate) struct LayerDrawing<T, L = ()> {
+    pub(crate) caches: DrawCaches<T, L>,
+    /// The layer's draw group of the frame, from its first update with tiles
+    /// to draw. While the layer is renderable, it takes a place in the
+    /// layers' order and depth, even when it has no draws.
+    pub(crate) frame: Option<FrameDraws>,
+    /// Draws over the layer's, for debugging, in a draw group of their own
+    /// after the layer's, from the first update that makes any.
+    pub(crate) overlay: Option<FrameDraws>,
+    /// Draws into a render target of the layer's, which draw ahead of the
+    /// frame's passes.
+    pub(crate) target: Option<FrameDraws>,
+}
+
+impl<T, L: Default> Default for LayerDrawing<T, L> {
+    fn default() -> Self {
+        LayerDrawing { caches: DrawCaches::default(), frame: None, overlay: None, target: None }
+    }
+}
+
+impl<T, L> LayerDrawing<T, L> {
+    /// The layer's draw groups of the frame, in drawing order.
+    pub(crate) fn groups(&self) -> impl DoubleEndedIterator<Item = &FrameDraws> {
+        self.frame.iter().chain(&self.overlay)
+    }
+}
+
+impl<T, L: Default> LayerDrawing<T, L> {
+    /// Drops the frame's draws, and the caches of the GPU objects of the
+    /// tiles' draws and of the others. The tiles' entries stay.
+    pub(crate) fn clear(&mut self) {
+        for frame in [&mut self.frame, &mut self.overlay, &mut self.target].into_iter().flatten() {
+            frame.draws.clear();
+        }
+        self.caches.clear();
+    }
+}
+
+impl<T: DrawSlots, L: DrawSlots> LayerDrawing<T, L> {
+    /// Uploads the GPU objects of the draw groups' draws.
+    pub(crate) fn upload(&mut self, context: &Context) {
+        for frame in self.frame.iter().chain(&self.overlay) {
+            self.caches.upload(frame, context);
+        }
+    }
+
+    /// Draws the draw groups' draws of the pass into the open pass of `gpu`,
+    /// the context's, in `order`, each at its depth.
+    pub(crate) fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
+        let LayerDrawing { caches, frame, overlay, .. } = self;
+        let mut render = |frame: &FrameDraws| {
+            caches.render(frame, gpu, parameters);
+            order.step(parameters);
+        };
+        let groups = frame.iter().chain(&*overlay);
+        match order {
+            DrawOrder::BottomUp => groups.for_each(&mut render),
+            DrawOrder::TopDown => groups.rev().for_each(&mut render),
+        }
+    }
+
+    /// Uploads the GPU objects of the draws into the render target.
+    pub(crate) fn upload_target(&mut self, context: &Context) {
+        if let Some(target) = &self.target {
+            self.caches.upload(target, context);
+        }
+    }
+
+    /// Draws the draws into the render target into the open pass of `gpu`,
+    /// the context's, which draws into it.
+    pub(crate) fn render_target(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        if let Some(target) = &self.target {
+            self.caches.render(target, gpu, parameters);
+        }
+    }
+}
+
+/// Caches of the GPU objects of draws, and a frame's draws of them.
+pub(crate) struct Draws<T, L = ()> {
+    pub(crate) caches: DrawCaches<T, L>,
+    pub(crate) frame: FrameDraws,
+}
+
+impl<T, L: Default> Default for Draws<T, L> {
+    fn default() -> Self {
+        Draws::new(DrawCaches::default())
+    }
+}
+
+impl<T, L> Draws<T, L> {
+    /// `caches` without draws of a frame.
+    #[must_use]
+    pub(crate) fn new(caches: DrawCaches<T, L>) -> Self {
+        Draws { caches, frame: FrameDraws::new() }
+    }
+}
+
+impl<T: DrawSlots, L: DrawSlots> Draws<T, L> {
+    /// Uploads the GPU objects of the frame's draws.
+    pub(crate) fn upload(&mut self, context: &Context) {
+        self.caches.upload(&self.frame, context);
+    }
+
+    /// Draws the frame's draws of the pass into the open pass of `gpu`, the
+    /// context's.
+    pub(crate) fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        self.caches.render(&self.frame, gpu, parameters);
     }
 }
 

@@ -1,6 +1,7 @@
-// C++ `RenderLayer` is an abstract class with data members; the data is
-// `RenderLayerBase` and the virtual interface is the `RenderLayer` trait.
-// The orchestrator owns the render layers, in the style's order.
+// A render layer is the renderer's side of a style layer: its base, its
+// values of its type and its drawing (`LayerParts`), and what its type does
+// with them (`RenderLayer`). The orchestrator owns the render layers, in the
+// style's order.
 
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -18,7 +19,7 @@ use mln_util::mat4::Mat4;
 use smallvec::SmallVec;
 
 use crate::bucket::BucketPtr;
-use crate::draw_cache::{ChangedBuckets, DrawCaches, DrawGroup, DrawSlots, FrameDraws};
+use crate::draw_cache::{ChangedBuckets, DrawGroup, DrawOrder, DrawSlots, LayerDrawing};
 use crate::gfx::context::Context;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType};
 use crate::line_atlas::LineAtlas;
@@ -160,7 +161,7 @@ impl<'a> LayerPrepareParameters<'a> {
     }
 }
 
-/// The data members of `RenderLayer`.
+/// What every render layer has, whatever its type.
 pub(crate) struct RenderLayerBase {
     pub(crate) evaluated_properties: Arc<dyn ErasedEvaluatedLayer>,
     pub(crate) style: Arc<dyn ErasedLayerStyle>,
@@ -172,11 +173,6 @@ pub(crate) struct RenderLayerBase {
 
     /// The projection variant this layer's draws are built with.
     pub(crate) projection_variant: ProjectionVariant,
-
-    /// The layer's draws of the frame, from its first update with tiles to
-    /// draw. While the layer is renderable, they take a place in the layers'
-    /// order and depth, even when there are none.
-    pub(crate) frame: Option<FrameDraws>,
 }
 
 impl RenderLayerBase {
@@ -189,7 +185,6 @@ impl RenderLayerBase {
             style_dependencies: Dependency::NONE,
             is_renderable: false,
             projection_variant: ProjectionVariant::Mercator,
-            frame: None,
         }
     }
 }
@@ -234,23 +229,36 @@ impl<T: LayerType> LayerValues<T> {
     }
 }
 
+/// The parts of a render layer of a [`TypedLayer`] `L`.
+pub(crate) struct Parts<'a, L: TypedLayer + ?Sized> {
+    pub(crate) base: &'a RenderLayerBase,
+    pub(crate) values: &'a LayerValues<L::Type>,
+    pub(crate) drawing: &'a LayerDrawing<L::Tile, L::Shared>,
+}
+
+/// The parts of a render layer of a [`TypedLayer`] `L`, to change.
+pub(crate) struct PartsMut<'a, L: TypedLayer + ?Sized> {
+    pub(crate) base: &'a mut RenderLayerBase,
+    pub(crate) values: &'a mut LayerValues<L::Type>,
+    pub(crate) drawing: &'a mut LayerDrawing<L::Tile, L::Shared>,
+}
+
 /// A render layer whose values are of the layer type `Type`, and that keeps
 /// the GPU objects of its draws in caches of `Tile` for each tile and of
-/// `Shared` for the draws no tile holds. Its base, values and caches give it
-/// [`LayerParts`].
+/// `Shared` for the draws no tile holds. Its parts give it [`LayerParts`].
 pub(crate) trait TypedLayer {
     type Type: LayerType;
     type Tile: DrawSlots;
     type Shared: DrawSlots + Default;
 
-    fn parts(&self) -> (&RenderLayerBase, &LayerValues<Self::Type>);
-    fn parts_mut(&mut self) -> (&mut RenderLayerBase, &mut LayerValues<Self::Type>);
-    fn caches_mut(&mut self) -> (&mut RenderLayerBase, &mut DrawCaches<Self::Tile, Self::Shared>);
+    fn parts(&self) -> Parts<'_, Self>;
+    fn parts_mut(&mut self) -> PartsMut<'_, Self>;
 }
 
-/// What a render layer holds whatever its type: its base, its values, which
-/// this transitions without knowing their type, and its caches of its draws,
-/// which this keeps for its tiles and draws from.
+/// What a render layer does with its parts, whatever its type: its base,
+/// its values, which this transitions without knowing their type, and its
+/// drawing, whose caches this keeps for its tiles and whose draws this
+/// issues.
 pub(crate) trait LayerParts {
     fn base(&self) -> &RenderLayerBase;
     fn base_mut(&mut self) -> &mut RenderLayerBase;
@@ -259,14 +267,15 @@ pub(crate) trait LayerParts {
     /// a layer of its type.
     fn set_style(&mut self, style: &Arc<dyn ErasedLayerStyle>);
 
-    /// Transitions the layer's paint values to those of its style.
-    fn transition_values(&mut self, parameters: &TransitionParameters);
+    /// Begins transitions for the paint values that changed since the last
+    /// frame, to those of the layer's style.
+    fn transition(&mut self, parameters: &TransitionParameters);
 
     /// Whether a paint value of the layer is still in transition.
-    fn values_in_transition(&self) -> bool;
+    fn has_transition(&self) -> bool;
 
-    /// Whether the layer's evaluation is in a cross-fade.
-    fn values_crossfading(&self) -> bool;
+    /// Whether the layer has a pattern property and is in a cross-fade.
+    fn has_crossfade(&self) -> bool;
 
     /// Makes `tiles`, the frame's tiles of the layer, those the layer keeps
     /// entries of, with what it keeps of the tiles it had; none for `None`.
@@ -276,57 +285,67 @@ pub(crate) trait LayerParts {
     /// draws were built from them.
     fn mark_changed(&mut self, changed: &ChangedBuckets);
 
-    /// Moves what the layer keeps of each tile to the tile `wrap_delta`
-    /// world copies east of it.
-    fn shift_wraps(&mut self, wrap_delta: i16);
+    /// Moves what the layer keeps for each tile to the tile `wrap_delta`
+    /// world copies east of it: the tiles are the same ones under new ids
+    /// once the map's center has crossed the antimeridian, and their draws
+    /// stay rather than being built again.
+    fn handle_wrap_jump(&mut self, wrap_delta: i16);
 
     /// Drops the frame's draws of the layer and the caches of their GPU
     /// objects. The tiles' entries stay.
-    fn clear_draws(&mut self);
+    fn remove_all_draws(&mut self);
 
-    /// Uploads the GPU objects of the frame's draws of the layer.
-    fn upload_frame(&mut self, context: &Context);
+    /// The layer's draw groups of the frame, in drawing order: none unless
+    /// the frame draws the layer.
+    fn draw_groups(&self) -> DrawGroups<'_>;
 
-    /// Draws the frame's draws of the layer of the pass into the open pass
-    /// of `gpu`, the context's.
-    fn render_frame(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>);
+    /// Uploads the GPU objects of the layer's draw groups, before the frame
+    /// draws them.
+    fn upload(&mut self, context: &Context);
+
+    /// Draws the pass's draws of the layer's draw groups into the open pass
+    /// of `gpu`, the context's, in `order`, each at its depth.
+    fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder);
 }
 
 impl<L: TypedLayer> LayerParts for L {
     fn base(&self) -> &RenderLayerBase {
-        self.parts().0
+        self.parts().base
     }
 
     fn base_mut(&mut self) -> &mut RenderLayerBase {
-        self.parts_mut().0
+        self.parts_mut().base
     }
 
     fn set_style(&mut self, style: &Arc<dyn ErasedLayerStyle>) {
-        let (base, values) = self.parts_mut();
+        let PartsMut { base, values, .. } = self.parts_mut();
         if let Some(recovered) = LayerStyle::recover(style) {
             values.style = recovered;
             base.style = Arc::clone(style);
         }
     }
 
-    fn transition_values(&mut self, parameters: &TransitionParameters) {
-        let (base, values) = self.parts_mut();
+    fn transition(&mut self, parameters: &TransitionParameters) {
+        let PartsMut { base, values, .. } = self.parts_mut();
         let prior = std::mem::take(&mut values.unevaluated);
         values.unevaluated = values.style.paint.transitioned(parameters, prior);
         base.style_dependencies =
             <L::Type as mln_style::layer_type::StyleLayerType>::PaintProperties::dependencies(&values.unevaluated);
     }
 
-    fn values_in_transition(&self) -> bool {
-        <L::Type as mln_style::layer_type::StyleLayerType>::PaintProperties::has_transition(&self.parts().1.unevaluated)
+    fn has_transition(&self) -> bool {
+        <L::Type as mln_style::layer_type::StyleLayerType>::PaintProperties::has_transition(
+            &self.parts().values.unevaluated,
+        )
     }
 
-    fn values_crossfading(&self) -> bool {
-        L::Type::CROSSFADES && self.parts().1.evaluated.crossfade.t != 1.0
+    fn has_crossfade(&self) -> bool {
+        L::Type::CROSSFADES && self.parts().values.evaluated.crossfade.t != 1.0
     }
 
     fn set_tiles(&mut self, tiles: Option<LayerTiles<'_>>) {
-        let caches = self.caches_mut().1;
+        let PartsMut { drawing, .. } = self.parts_mut();
+        let caches = &mut drawing.caches;
         match tiles {
             Some(tiles) => caches.set_tiles(tiles.iter().map(|tile| *tile.get_overscaled_tile_id())),
             None => caches.clear_tiles(),
@@ -334,32 +353,36 @@ impl<L: TypedLayer> LayerParts for L {
     }
 
     fn mark_changed(&mut self, changed: &ChangedBuckets) {
-        self.caches_mut().1.mark_changed(changed);
+        self.parts_mut().drawing.caches.mark_changed(changed);
     }
 
-    fn shift_wraps(&mut self, wrap_delta: i16) {
-        self.caches_mut().1.shift_wraps(wrap_delta);
+    fn handle_wrap_jump(&mut self, wrap_delta: i16) {
+        self.parts_mut().drawing.caches.shift_wraps(wrap_delta);
     }
 
-    fn clear_draws(&mut self) {
-        let (base, caches) = self.caches_mut();
-        if let Some(frame) = &mut base.frame {
-            frame.draws.clear();
+    fn remove_all_draws(&mut self) {
+        self.parts_mut().drawing.clear();
+    }
+
+    fn draw_groups(&self) -> DrawGroups<'_> {
+        let Parts { base, drawing, .. } = self.parts();
+        if !base.is_renderable {
+            return DrawGroups::new();
         }
-        caches.clear();
+        drawing.groups().map(DrawGroup::Draws).collect()
     }
 
-    fn upload_frame(&mut self, context: &Context) {
-        let (base, caches) = self.caches_mut();
-        if let Some(frame) = &base.frame {
-            caches.upload(frame, context);
+    fn upload(&mut self, context: &Context) {
+        let PartsMut { base, drawing, .. } = self.parts_mut();
+        if base.is_renderable {
+            drawing.upload(context);
         }
     }
 
-    fn render_frame(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        let (base, caches) = self.caches_mut();
-        if let Some(frame) = &base.frame {
-            caches.render(frame, gpu, parameters);
+    fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
+        let PartsMut { base, drawing, .. } = self.parts_mut();
+        if base.is_renderable {
+            drawing.render(gpu, parameters, order);
         }
     }
 }
@@ -368,26 +391,9 @@ impl<L: TypedLayer> LayerParts for L {
 pub(crate) type DrawGroups<'a> = SmallVec<[DrawGroup<'a>; 2]>;
 
 pub(crate) trait RenderLayer: LayerParts {
-    /// Begin transitions for any properties that have changed since the last
-    /// frame.
-    fn transition(&mut self, parameters: &TransitionParameters) {
-        self.transition_values(parameters);
-    }
-
     /// Fully evaluate possibly-transitioning paint properties based on a
     /// zoom and some evaluated layout properties.
     fn evaluate(&mut self, parameters: &PropertyEvaluationParameters);
-
-    /// Returns true if any paint properties have active transitions.
-    fn has_transition(&self) -> bool {
-        self.values_in_transition()
-    }
-
-    /// Returns true if the layer has a pattern property and is actively
-    /// crossfading.
-    fn has_crossfade(&self) -> bool {
-        self.values_crossfading()
-    }
 
     /// Returns true if layer writes to depth buffer by drawing using
     /// `PaintParameters::depthModeFor3D()`.
@@ -423,28 +429,6 @@ pub(crate) trait RenderLayer: LayerParts {
         _update_parameters: &UpdateParameters,
         _tiles: Option<LayerTiles<'_>>,
     ) {
-    }
-
-    /// The layer's draw groups of the frame, in drawing order: none unless
-    /// the frame draws the layer.
-    fn draw_groups(&self) -> DrawGroups<'_> {
-        let base = self.base();
-        base.frame.as_ref().filter(|_| base.is_renderable).map(DrawGroup::Draws).into_iter().collect()
-    }
-
-    /// Uploads the GPU objects of the layer's draw groups, before the frame
-    /// draws them.
-    fn upload(&mut self, context: &Context) {
-        if self.base().is_renderable {
-            self.upload_frame(context);
-        }
-    }
-
-    /// Draws the pass's draws of the layer's draw group `group`, the index of
-    /// one of its [`draw_groups`](Self::draw_groups), into the open pass of
-    /// `gpu`, the context's.
-    fn render(&mut self, _group: usize, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        self.render_frame(gpu, parameters);
     }
 
     /// Uploads what draws into the layer's render targets, which draw before
@@ -484,21 +468,6 @@ pub(crate) trait RenderLayer: LayerParts {
     fn release_render_data(&mut self) {
         release_render_data_base(self);
     }
-
-    /// Removes the layer's draws and the caches of them.
-    fn remove_all_draws(&mut self) {
-        self.clear_draws();
-    }
-
-    /// Moves what the layer keeps for each tile to the tile `wrap_delta`
-    /// world copies east of it: the tiles are the same ones under new ids
-    /// once the map's center has crossed the antimeridian, and their
-    /// draws stay rather than being built again.
-    fn handle_wrap_jump(&mut self, wrap_delta: i16) {
-        self.shift_wraps(wrap_delta);
-    }
-
-    // Non-virtual members of the C++ class.
 
     /// Picks the shader variant for the state's projection; returns true and
     /// drops the draws when it changed.

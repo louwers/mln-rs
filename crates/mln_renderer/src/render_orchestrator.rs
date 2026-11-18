@@ -28,7 +28,7 @@ use mln_util::time::Instant;
 use mln_vec_map::{VecMap, VecSet};
 
 use crate::Registry;
-use crate::draw_cache::{ChangedBuckets, DrawGroup};
+use crate::draw_cache::{ChangedBuckets, DrawGroup, DrawOrder};
 use crate::gfx::context::Context;
 use crate::globe_depth_pass::GlobeDepthPass;
 use crate::image_store::ImageStore;
@@ -1184,32 +1184,23 @@ impl RenderOrchestrator {
     }
 
     /// Draws the pass's draws of the layers' draw groups into the open pass
-    /// of `gpu`, the context's: in drawing order, each at the depth of
-    /// `parameters.current_layer`, which goes down by one after each group
-    /// to 0; or, with `reverse`, in the reverse order, with the depth going
-    /// up by one after each group.
+    /// of `gpu`, the context's, in `order`, each at the depth of
+    /// `parameters.current_layer`, which `order` steps after each group.
     pub(crate) fn render_draw_groups(
         &mut self,
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
-        reverse: bool,
+        order: DrawOrder,
     ) {
-        if reverse {
-            for layer in self.layers.iter_mut().rev() {
-                let groups = layer.draw_groups().len();
-                for group in (0..groups).rev() {
-                    layer.render(group, gpu, parameters);
-                    parameters.current_layer += 1;
+        match order {
+            DrawOrder::BottomUp => {
+                for layer in &mut self.layers {
+                    layer.render(gpu, parameters, order);
                 }
             }
-        } else {
-            for layer in &mut self.layers {
-                let groups = layer.draw_groups().len();
-                for group in 0..groups {
-                    layer.render(group, gpu, parameters);
-                    if parameters.current_layer > 0 {
-                        parameters.current_layer -= 1;
-                    }
+            DrawOrder::TopDown => {
+                for layer in self.layers.iter_mut().rev() {
+                    layer.render(gpu, parameters, order);
                 }
             }
         }

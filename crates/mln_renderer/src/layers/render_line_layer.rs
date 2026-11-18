@@ -41,8 +41,8 @@ use mln_util::size::Size;
 use super::{cast_matrix, refresh_paint_attributes};
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::line_bucket::{LineBinders, LineBucket, LineLayoutVertex};
-use crate::draw::{DrawGeometry, DrawObjects};
-use crate::draw_cache::{DrawCaches, DrawSlots, FrameDraw, FrameDraws};
+use crate::draw::{DrawGeometry, DrawObjects, Textures};
+use crate::draw_cache::{DrawSlots, FrameDraw, FrameDraws, LayerDrawing};
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
 use crate::gfx::texture2d::Texture2DPtr;
@@ -54,7 +54,8 @@ use crate::line_atlas::LinePatternCap;
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
 use crate::render_layer::{
-    LayerParts, LayerPrepareParameters, LayerTiles, LayerValues, RenderLayer, RenderLayerBase, TypedLayer,
+    LayerParts, LayerPrepareParameters, LayerTiles, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase,
+    TypedLayer,
 };
 use crate::render_pass::RenderPass;
 use crate::render_tile::RenderTile;
@@ -98,7 +99,7 @@ impl DrawSlots for LineTile {
 
 /// A draw's entries in the layer's storage buffers.
 struct LineUniforms {
-    drawable: LineDrawableUnionUBO,
+    draw_ubo: LineDrawableUnionUBO,
     tile_props: LineTilePropsUnionUBO,
     projection: ProjectionUBO,
 }
@@ -307,7 +308,7 @@ impl LayerType for Line {
 pub(crate) struct RenderLineLayer {
     base: RenderLayerBase,
     values: LayerValues<Line>,
-    caches: DrawCaches<LineTile>,
+    drawing: LayerDrawing<LineTile>,
 
     color_ramp: Rc<PremultipliedImage>,
     /// The global-state snapshot used to generate the cached color ramp and
@@ -332,7 +333,7 @@ impl RenderLineLayer {
         RenderLineLayer {
             base,
             values,
-            caches: DrawCaches::default(),
+            drawing: LayerDrawing::default(),
             color_ramp: Rc::new(PremultipliedImage::new(Size::new(256, 1))),
             color_ramp_global_state: None,
             color_ramp_texture_2d: None,
@@ -429,16 +430,12 @@ impl TypedLayer for RenderLineLayer {
     type Tile = LineTile;
     type Shared = ();
 
-    fn parts(&self) -> (&RenderLayerBase, &LayerValues<Line>) {
-        (&self.base, &self.values)
+    fn parts(&self) -> Parts<'_, Self> {
+        Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
     }
 
-    fn parts_mut(&mut self) -> (&mut RenderLayerBase, &mut LayerValues<Line>) {
-        (&mut self.base, &mut self.values)
-    }
-
-    fn caches_mut(&mut self) -> (&mut RenderLayerBase, &mut DrawCaches<LineTile>) {
-        (&mut self.base, &mut self.caches)
+    fn parts_mut(&mut self) -> PartsMut<'_, Self> {
+        PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
 }
 
@@ -572,7 +569,7 @@ impl RenderLayer for RenderLineLayer {
             (&paint_parameters.static_data.shaders, paint_parameters.context, paint_parameters.state);
         if std::mem::take(&mut self.color_ramp_changed) {
             // The gradients' draws read the old ramp's texture.
-            self.clear_draws();
+            self.remove_all_draws();
         }
         self.update_projection_variant(state);
 
@@ -581,7 +578,7 @@ impl RenderLayer for RenderLineLayer {
             return;
         };
 
-        let frame = self.base.frame.get_or_insert_with(FrameDraws::new);
+        let frame = self.drawing.frame.get_or_insert_with(FrameDraws::new);
         let paint = &self.values.evaluated.paint;
         frame.composite = Composite::of(*paint.line_layer_opacity.uniform(), *paint.line_layer_blend.uniform());
         frame.stencil_tiles = Some(Rc::new(render_tiles.iter().map(|tile| tile.id).collect()));
@@ -593,14 +590,14 @@ impl RenderLayer for RenderLineLayer {
             let tile_id = *tile.get_overscaled_tile_id();
 
             let Some(render_data) = super::render_data_for_pass(tile, &*self.base.style, render_pass) else {
-                self.caches.drop_cache(&tile_id);
+                self.drawing.caches.drop_cache(&tile_id);
                 continue;
             };
             let Some(bucket) = render_data.bucket::<Line>() else {
                 continue;
             };
             if bucket.triangles.is_empty() {
-                self.caches.drop_cache(&tile_id);
+                self.drawing.caches.drop_cache(&tile_id);
                 continue;
             }
             let Some(binders_lock) = bucket.paint_property_binders.get(self.get_id()) else {
@@ -611,19 +608,19 @@ impl RenderLayer for RenderLineLayer {
                 continue;
             };
 
-            if self.caches.bucket(&tile_id).is_some_and(|prev| prev != bucket.base.bucket_id)
-                || self.caches.cache_mut(&tile_id).is_some_and(|cached| cached.pass != render_pass)
+            if self.drawing.caches.bucket(&tile_id).is_some_and(|prev| prev != bucket.base.bucket_id)
+                || self.drawing.caches.cache_mut(&tile_id).is_some_and(|cached| cached.pass != render_pass)
             {
                 // The tile's draw was built from another bucket, or for other
                 // passes.
-                self.caches.drop_cache(&tile_id);
+                self.drawing.caches.drop_cache(&tile_id);
             }
-            self.caches.set_bucket(&tile_id, bucket.base.bucket_id);
+            self.drawing.caches.set_bucket(&tile_id, bucket.base.bucket_id);
 
             // The draw's attributes point into the bucket's shared vectors,
             // which upload again when they change.
-            let changes = self.caches.take_changes(&tile_id);
-            if let Some(cached) = self.caches.cache_mut(&tile_id) {
+            let changes = self.drawing.caches.take_changes(&tile_id);
+            if let Some(cached) = self.drawing.caches.cache_mut(&tile_id) {
                 refresh_paint_attributes(&mut cached.objects, changes, |attrs| {
                     let geometry = tile.get_bucket_geometry();
                     let buffer = &binders.interleaved_vertex_buffer;
@@ -632,10 +629,10 @@ impl RenderLayer for RenderLineLayer {
                 });
             } else if let Some(built) = self.build_tile(shaders, context, tile, bucket, binders, evaluated, render_pass)
             {
-                self.caches.set_cache(&tile_id, built);
+                self.drawing.caches.set_cache(&tile_id, built);
             }
 
-            let Some(cached) = self.caches.cache_mut(&tile_id) else {
+            let Some(cached) = self.drawing.caches.cache_mut(&tile_id) else {
                 continue;
             };
             if let Some(uniforms) = Self::uniforms(&self.values.evaluated, tile, binders, cached, paint_parameters) {
@@ -650,14 +647,12 @@ impl RenderLayer for RenderLineLayer {
         }
 
         frame_draws.sort_by_key(|(draw, _)| draw.order());
-        let Some(mut frame) = self.base.frame.take() else {
-            return;
-        };
+        let frame = self.drawing.frame.get_or_insert_with(FrameDraws::new);
         if !frame_draws.is_empty() {
-            self.write_uniforms(&mut frame, &frame_draws, context);
+            Self::write_uniforms(&self.values.evaluated, frame, &frame_draws, context);
         }
-        frame.draws = frame_draws.into_iter().map(|(draw, _)| draw).collect();
-        self.base.frame = Some(frame);
+        frame.draws.clear();
+        frame.draws.extend(frame_draws.into_iter().map(|(draw, _)| draw));
     }
 }
 
@@ -690,14 +685,14 @@ impl RenderLineLayer {
             if evaluated.line_dasharray.is_constant() { None } else { Some(dash_atlas_texture(context, binders)?) };
         let has_gradient = !self.values.unevaluated.line_gradient.get_value().is_undefined();
 
-        let mut textures: [(Option<Texture2DPtr>, usize); 2] = Default::default();
+        let mut textures = Textures::default();
         let mut atlases = None;
         let (line_type, group, name) = if has_dasharray && has_gradient {
-            let ramp = self.color_ramp_texture(context)?;
-            textures = [(Some(ramp), ID_LINE_IMAGE_TEXTURE), (dash_texture, ID_LINE_DASH_TEXTURE)];
+            textures[ID_LINE_IMAGE_TEXTURE] = Some(self.color_ramp_texture(context)?);
+            textures[ID_LINE_DASH_TEXTURE] = dash_texture;
             (LineType::GradientSdf, &mut self.line_gradient_sdf_shader_group, "LineGradientSDFShader")
         } else if has_dasharray {
-            textures[0] = (dash_texture, ID_LINE_IMAGE_TEXTURE);
+            textures[ID_LINE_IMAGE_TEXTURE] = dash_texture;
             (LineType::Sdf, &mut self.line_sdf_shader_group, "LineSDFShader")
         } else if !self.values.unevaluated.line_pattern.is_undefined() {
             let icons = tile.get_atlas_textures().filter(|atlases| atlases.icon().is_some())?;
@@ -713,8 +708,7 @@ impl RenderLineLayer {
             )));
             (LineType::Pattern, &mut self.line_pattern_shader_group, "LinePatternShader")
         } else if has_gradient {
-            let ramp = self.color_ramp_texture(context)?;
-            textures[0] = (Some(ramp), ID_LINE_IMAGE_TEXTURE);
+            textures[ID_LINE_IMAGE_TEXTURE] = Some(self.color_ramp_texture(context)?);
             (LineType::Gradient, &mut self.line_gradient_shader_group, "LineGradientShader")
         } else {
             (LineType::Simple, &mut self.line_shader_group, "LineShader")
@@ -723,6 +717,10 @@ impl RenderLineLayer {
             *group = shaders.shader_group(name);
         }
         let shader = group.as_ref()?.shader(&properties_as_uniforms, self.base.projection_variant);
+        if let Some(atlases) = &atlases {
+            // A pattern binds the atlas's texture and no other.
+            textures = atlases.textures(&shader);
+        }
 
         let shared = bucket_vertices(geometry, bucket, &bucket.vertices);
         let stride = size_of::<LineLayoutVertex>() as u32;
@@ -741,18 +739,11 @@ impl RenderLineLayer {
             mode: DrawMode::Triangles(),
             indexes: bucket_indexes(geometry, bucket, &bucket.triangles),
             segments: bucket.segments.iter().map(SegmentBase::copy).collect(),
+            instances: None,
         };
         let color_mode =
             if pass == RenderPass::Translucent { ColorMode::alpha_blended() } else { ColorMode::unblended() };
-        let mut objects = DrawObjects::new(String::new(), shader, color_mode, CullFaceMode::disabled(), draw_geometry);
-        for (texture, id) in textures {
-            if texture.is_some() {
-                objects.textures[id] = texture;
-            }
-        }
-        if let Some(atlases) = &atlases {
-            atlases.init(&mut objects);
-        }
+        let objects = DrawObjects::new(shader, color_mode, CullFaceMode::disabled(), draw_geometry, textures);
         Some(LineTile {
             id: SimpleIdentity::new(),
             objects,
@@ -818,14 +809,14 @@ impl RenderLineLayer {
         );
         let matrix = cast_matrix(&projection.fallback_matrix);
         let mut uniforms = LineUniforms {
-            drawable: LineDrawableUnionUBO::default(),
+            draw_ubo: LineDrawableUnionUBO::default(),
             tile_props: LineTilePropsUnionUBO::default(),
             projection: to_projection_ubo(&projection),
         };
         let ratio = pixel_scale / tile_id.pixels_to_tile_units(1.0, zoom);
 
         match cached.line_type {
-            LineType::Simple => uniforms.drawable.set(&LineDrawableUBO {
+            LineType::Simple => uniforms.draw_ubo.set(&LineDrawableUBO {
                 matrix,
                 ratio,
                 color_t: binders.line_color.interpolation_factor(zoom),
@@ -836,7 +827,7 @@ impl RenderLineLayer {
                 width_t: binders.line_width.interpolation_factor(zoom),
                 pad1: 0.0,
             }),
-            LineType::Gradient => uniforms.drawable.set(&LineGradientDrawableUBO {
+            LineType::Gradient => uniforms.draw_ubo.set(&LineGradientDrawableUBO {
                 matrix,
                 ratio,
                 blur_t: binders.line_blur.interpolation_factor(zoom),
@@ -850,7 +841,7 @@ impl RenderLineLayer {
             LineType::Pattern => {
                 let texture = cached.objects.textures[ID_LINE_IMAGE_TEXTURE].as_ref();
                 let texture_size = texture.map_or(Size::new(0, 0), |texture| texture.borrow().size());
-                uniforms.drawable.set(&LinePatternDrawableUBO {
+                uniforms.draw_ubo.set(&LinePatternDrawableUBO {
                     matrix,
                     ratio,
                     blur_t: binders.line_blur.interpolation_factor(zoom),
@@ -931,7 +922,7 @@ impl RenderLineLayer {
                     }
                 };
 
-                uniforms.drawable.set(&LineSDFDrawableUBO {
+                uniforms.draw_ubo.set(&LineSDFDrawableUBO {
                     matrix,
                     patternscale_a: sdf.patternscale_a,
                     patternscale_b: sdf.patternscale_b,
@@ -961,9 +952,14 @@ impl RenderLineLayer {
 
     /// Writes the layer's buffers of `draws`, the frame's in drawing order,
     /// to `frame`'s.
-    fn write_uniforms(&self, frame: &mut FrameDraws, draws: &[(FrameDraw, LineUniforms)], context: &Context) {
+    fn write_uniforms(
+        layer: &EvaluatedLayer<Line>,
+        frame: &mut FrameDraws,
+        draws: &[(FrameDraw, LineUniforms)],
+        context: &Context,
+    ) {
         use line_expression_mask::{BLUR, COLOR, FLOOR_WIDTH, GAP_WIDTH, NONE, OFFSET, OPACITY, WIDTH};
-        let evaluated = &self.values.evaluated.paint;
+        let evaluated = &layer.paint;
         let gpu_expressions = context.caps().line_expressions;
         // Where the shaders read the expression UBO, the mask marks the
         // properties evaluated on the GPU (none, see the top of the file);
@@ -1000,8 +996,8 @@ impl RenderLineLayer {
         if gpu_expressions && buffers.get(ID_LINE_EXPRESSION_UBO).is_none() {
             buffers.set(ID_LINE_EXPRESSION_UBO, context.create_uniform_buffer(&[0; LINE_EXPRESSION_UBO_SIZE]));
         }
-        let drawables: Vec<LineDrawableUnionUBO> = draws.iter().map(|(_, uniforms)| uniforms.drawable).collect();
-        buffers.write_storage(ID_LINE_DRAWABLE_UBO, bytemuck::cast_slice(&drawables), context);
+        let draw_ubos: Vec<LineDrawableUnionUBO> = draws.iter().map(|(_, uniforms)| uniforms.draw_ubo).collect();
+        buffers.write_storage(ID_LINE_DRAWABLE_UBO, bytemuck::cast_slice(&draw_ubos), context);
         let tile_props: Vec<LineTilePropsUnionUBO> = draws.iter().map(|(_, uniforms)| uniforms.tile_props).collect();
         buffers.write_storage(ID_LINE_TILE_PROPS_UBO, bytemuck::cast_slice(&tile_props), context);
         let projections: Vec<ProjectionUBO> = draws.iter().map(|(_, uniforms)| uniforms.projection).collect();

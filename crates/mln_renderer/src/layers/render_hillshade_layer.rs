@@ -50,8 +50,8 @@ use mln_util::time::Instant;
 use super::{cast_matrix, shared_vertices};
 use crate::bucket::NoBucket;
 use crate::buckets::hillshade_bucket::{HillshadeBucket, HillshadeLayoutVertex};
-use crate::draw::{DrawGeometry, DrawObjects};
-use crate::draw_cache::{DrawCaches, DrawDepth, DrawSlots, FrameDraw, FrameDraws, KeptDraw};
+use crate::draw::{DrawGeometry, DrawObjects, Textures};
+use crate::draw_cache::{DrawCaches, DrawDepth, DrawSlots, Draws, FrameDraw, FrameDraws, KeptDraw, LayerDrawing};
 use crate::geometry::dem_data::get_unpack_vector;
 use crate::gfx::context::Context;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
@@ -59,7 +59,8 @@ use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{
-    LayerPrepareParameters, LayerTiles, LayerValues, RenderLayer, RenderLayerBase, TypedLayer, set_layer_tiles,
+    LayerParts, LayerPrepareParameters, LayerTiles, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase,
+    TypedLayer, set_layer_tiles,
 };
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
@@ -87,9 +88,8 @@ impl LayerType for Hillshade {
 /// are prepared in, and the draw that prepares them.
 struct BucketTarget {
     render_target: RenderTarget,
-    prepare: DrawCaches<(), KeptDraw>,
-    /// The draw of `prepare`, with the uniforms it reads.
-    draws: FrameDraws,
+    /// The draw that prepares the slopes, with the uniforms it reads.
+    prepare: Draws<(), KeptDraw>,
     /// The bucket's prepare generation the target was made at.
     generation: u64,
 }
@@ -109,7 +109,7 @@ impl DrawSlots for HillshadeTile {
 
 /// A tile's draw's entries in the layer's storage buffers.
 struct HillshadeUniforms {
-    drawable: HillshadeDrawableUBO,
+    draw_ubo: HillshadeDrawableUBO,
     tile_props: HillshadeTilePropsUBO,
     projection: ProjectionUBO,
 }
@@ -117,7 +117,7 @@ struct HillshadeUniforms {
 pub(crate) struct RenderHillshadeLayer {
     base: RenderLayerBase,
     values: LayerValues<Hillshade>,
-    caches: DrawCaches<HillshadeTile>,
+    drawing: LayerDrawing<HillshadeTile>,
     maxzoom: u8,
 
     hillshade_prepare_shader: Option<ShaderProgramPtr>,
@@ -141,7 +141,7 @@ impl RenderHillshadeLayer {
         RenderHillshadeLayer {
             base,
             values,
-            caches: DrawCaches::default(),
+            drawing: LayerDrawing::default(),
             maxzoom: constants::TERRAIN_RGB_MAXZOOM,
             hillshade_prepare_shader: None,
             hillshade_shader: None,
@@ -283,16 +283,12 @@ impl TypedLayer for RenderHillshadeLayer {
     type Tile = HillshadeTile;
     type Shared = ();
 
-    fn parts(&self) -> (&RenderLayerBase, &LayerValues<Hillshade>) {
-        (&self.base, &self.values)
+    fn parts(&self) -> Parts<'_, Self> {
+        Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
     }
 
-    fn parts_mut(&mut self) -> (&mut RenderLayerBase, &mut LayerValues<Hillshade>) {
-        (&mut self.base, &mut self.values)
-    }
-
-    fn caches_mut(&mut self) -> (&mut RenderLayerBase, &mut DrawCaches<HillshadeTile>) {
-        (&mut self.base, &mut self.caches)
+    fn parts_mut(&mut self) -> PartsMut<'_, Self> {
+        PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
 }
 
@@ -324,7 +320,7 @@ impl RenderLayer for RenderHillshadeLayer {
     fn upload_render_targets(&mut self, context: &Context) {
         if self.base.is_renderable {
             for target in self.bucket_render_targets.values_mut() {
-                target.prepare.upload(&target.draws, context);
+                target.prepare.upload(context);
             }
         }
     }
@@ -333,9 +329,9 @@ impl RenderLayer for RenderHillshadeLayer {
         if !self.base.is_renderable {
             return;
         }
-        for BucketTarget { render_target, prepare, draws, .. } in self.bucket_render_targets.values_mut() {
+        for BucketTarget { render_target, prepare, .. } in self.bucket_render_targets.values_mut() {
             parameters.current_layer = 0;
-            render_target.render(parameters, |gpu, parameters| prepare.render(draws, gpu, parameters));
+            render_target.render(parameters, |gpu, parameters| prepare.render(gpu, parameters));
         }
     }
 
@@ -361,7 +357,7 @@ impl RenderLayer for RenderHillshadeLayer {
             self.remove_all_draws();
             return;
         };
-        self.base.frame.get_or_insert_with(FrameDraws::new);
+        self.drawing.frame.get_or_insert_with(FrameDraws::new);
 
         if self.hillshade_prepare_shader.is_none() {
             self.hillshade_prepare_shader =
@@ -407,16 +403,16 @@ impl RenderLayer for RenderHillshadeLayer {
 
             let bucket_ptr = tile.get_bucket(&*self.base.style).filter(|b| b.has_data()).cloned();
             let Some(bucket) = bucket_ptr.as_deref().and_then(|bucket| bucket.downcast_ref::<HillshadeBucket>()) else {
-                self.caches.drop_cache(&tile_id);
+                self.drawing.caches.drop_cache(&tile_id);
                 continue;
             };
             let bucket_id = bucket.base.bucket_id;
 
-            if self.caches.bucket(&tile_id).is_some_and(|prev| prev != bucket_id) {
+            if self.drawing.caches.bucket(&tile_id).is_some_and(|prev| prev != bucket_id) {
                 // The tile's draw was built from another bucket.
-                self.caches.drop_cache(&tile_id);
+                self.drawing.caches.drop_cache(&tile_id);
             }
-            self.caches.set_bucket(&tile_id, bucket_id);
+            self.drawing.caches.set_bucket(&tile_id, bucket_id);
 
             let generation = bucket.render_target_generation();
             let render_target_texture = match self.bucket_render_targets.entry(bucket_id) {
@@ -487,25 +483,26 @@ impl RenderLayer for RenderHillshadeLayer {
                     mode: DrawMode::Triangles(),
                     indexes,
                     segments,
+                    instances: None,
                 }
             };
 
-            if let Some(cached) = self.caches.cache_mut(&tile_id) {
+            if let Some(cached) = self.drawing.caches.cache_mut(&tile_id) {
                 if cached.geometry_time != geometry_time {
                     cached.draw.objects.replace_geometry(draw_geometry());
                     cached.geometry_time = geometry_time;
                 }
             } else {
                 let objects = DrawObjects::new(
-                    String::new(),
                     Rc::clone(&hillshade_shader),
                     ColorMode::alpha_blended(),
                     CullFaceMode::disabled(),
                     draw_geometry(),
+                    Textures::default(),
                 );
-                self.caches.set_cache(&tile_id, HillshadeTile { draw: KeptDraw::new(objects), geometry_time });
+                self.drawing.caches.set_cache(&tile_id, HillshadeTile { draw: KeptDraw::new(objects), geometry_time });
             }
-            let Some(cached) = self.caches.cache_mut(&tile_id) else {
+            let Some(cached) = self.drawing.caches.cache_mut(&tile_id) else {
                 continue;
             };
             cached.draw.objects.textures[ID_HILLSHADE_IMAGE_TEXTURE] = Some(render_target_texture);
@@ -515,22 +512,21 @@ impl RenderLayer for RenderHillshadeLayer {
 
         frame_draws.sort_by_key(|(draw, _)| draw.order());
         let props = (!frame_draws.is_empty()).then(|| self.evaluated_props(paint_parameters));
-        let Some(frame) = &mut self.base.frame else {
-            return;
-        };
+        let frame = self.drawing.frame.get_or_insert_with(FrameDraws::new);
         if let Some(props) = props {
             let buffers = &mut frame.uniform_buffers;
             buffers.create_or_update_pod(ID_HILLSHADE_EVALUATED_PROPS_UBO, &props, context);
-            let drawables: Vec<HillshadeDrawableUBO> =
-                frame_draws.iter().map(|(_, uniforms)| uniforms.drawable).collect();
-            buffers.write_storage(ID_HILLSHADE_DRAWABLE_UBO, bytemuck::cast_slice(&drawables), context);
+            let draw_ubos: Vec<HillshadeDrawableUBO> =
+                frame_draws.iter().map(|(_, uniforms)| uniforms.draw_ubo).collect();
+            buffers.write_storage(ID_HILLSHADE_DRAWABLE_UBO, bytemuck::cast_slice(&draw_ubos), context);
             let tile_props: Vec<HillshadeTilePropsUBO> =
                 frame_draws.iter().map(|(_, uniforms)| uniforms.tile_props).collect();
             buffers.write_storage(ID_HILLSHADE_TILE_PROPS_UBO, bytemuck::cast_slice(&tile_props), context);
             let projections: Vec<ProjectionUBO> = frame_draws.iter().map(|(_, uniforms)| uniforms.projection).collect();
             buffers.write_storage(ID_PROJECTION_UBO, bytemuck::cast_slice(&projections), context);
         }
-        frame.draws = frame_draws.into_iter().map(|(draw, _)| draw).collect();
+        frame.draws.clear();
+        frame.draws.extend(frame_draws.into_iter().map(|(draw, _)| draw));
     }
 }
 
@@ -578,28 +574,25 @@ impl BucketTarget {
             mode: DrawMode::Triangles(),
             indexes: Rc::clone(indexes),
             segments: segments.iter().map(SegmentBase::copy).collect(),
+            instances: None,
         };
-        let mut objects = DrawObjects::new(
-            String::new(),
-            Rc::clone(shader),
-            ColorMode::unblended(),
-            CullFaceMode::disabled(),
-            geometry,
-        );
-        objects.textures[ID_HILLSHADE_IMAGE_TEXTURE] = Some(texture);
-        let prepare = KeptDraw::new(objects);
-
-        let mut draws = FrameDraws::new();
-        draws.draws.push(prepare.frame_draw(None));
+        let mut textures = Textures::default();
+        textures[ID_HILLSHADE_IMAGE_TEXTURE] = Some(texture);
+        let objects =
+            DrawObjects::new(Rc::clone(shader), ColorMode::unblended(), CullFaceMode::disabled(), geometry, textures);
+        let draw = KeptDraw::new(objects);
+        let frame_draw = draw.frame_draw(None);
+        let mut prepare = Draws::new(DrawCaches::of_layer(draw));
+        prepare.frame.draws.push(frame_draw);
         let mut m: Mat4 = [0.0; 16];
         let extent = f64::from(EXTENT);
         matrix::ortho(&mut m, 0.0, extent, -extent, 0.0, -1.0, 1.0);
         let a = m;
         matrix::translate(&mut m, &a, 0.0, -extent, 0.0);
-        let buffers = &mut draws.uniform_buffers;
+        let buffers = &mut prepare.frame.uniform_buffers;
         bind_no_projection(buffers, context);
-        let drawable = HillshadePrepareDrawableUBO { matrix: cast_matrix(&m) };
-        buffers.create_or_update_pod(ID_HILLSHADE_PREPARE_DRAWABLE_UBO, &drawable, context);
+        let draw_ubo = HillshadePrepareDrawableUBO { matrix: cast_matrix(&m) };
+        buffers.create_or_update_pod(ID_HILLSHADE_PREPARE_DRAWABLE_UBO, &draw_ubo, context);
         let tile_props = HillshadePrepareTilePropsUBO {
             unpack: get_unpack_vector(encoding),
             dimension: [stride as f32, stride as f32],
@@ -608,8 +601,7 @@ impl BucketTarget {
         };
         buffers.create_or_update_pod(ID_HILLSHADE_PREPARE_TILE_PROPS_UBO, &tile_props, context);
 
-        let prepare = DrawCaches::of_layer(prepare);
-        BucketTarget { render_target, prepare, draws, generation: bucket.render_target_generation() }
+        BucketTarget { render_target, prepare, generation: bucket.render_target_generation() }
     }
 }
 
@@ -628,7 +620,7 @@ impl RenderHillshadeLayer {
             true,
         );
         HillshadeUniforms {
-            drawable: HillshadeDrawableUBO { matrix: cast_matrix(&projection.fallback_matrix) },
+            draw_ubo: HillshadeDrawableUBO { matrix: cast_matrix(&projection.fallback_matrix) },
             tile_props: HillshadeTilePropsUBO {
                 latrange: get_lat_range(tile_id),
                 exaggeration: *evaluated.hillshade_exaggeration.uniform(),

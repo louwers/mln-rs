@@ -24,7 +24,7 @@ use mln_util::time::Instant;
 
 use crate::Registry;
 use crate::clip_masks::ClipMasks;
-use crate::draw_cache::DrawGroup;
+use crate::draw_cache::{DrawGroup, DrawOrder};
 use crate::frame_projection::{self, FrameProjection};
 use crate::gfx::context::{Context, Stats};
 use crate::layer_composite::LayerComposite;
@@ -526,7 +526,7 @@ impl Renderer {
 
         // Give the layers a chance to upload
         orchestrator.upload_draw_groups(context);
-        orchestrator.globe_depth().upload(context);
+        orchestrator.globe_depth().draws.upload(context);
         if let Some(sky) = orchestrator.sky() {
             sky.upload(context);
         }
@@ -541,7 +541,7 @@ impl Renderer {
         // Upload the debug overlays
         // layers: debug
         for debug in orchestrator.debug_layers() {
-            debug.upload(context);
+            debug.draws.upload(context);
         }
 
         // The masks of the tiles the draw groups clip to and, when any of
@@ -644,7 +644,7 @@ impl Renderer {
             parameters.depth_range_size = 1.0 - ((num_draw_groups + 2) * num_sublayers) as f32 * depth_epsilon;
             parameters.current_layer = (num_draw_groups as u32).wrapping_sub(1);
             let mut gpu = context.gpu();
-            orchestrator.render_draw_groups(&mut *gpu, &mut parameters, false);
+            orchestrator.render_draw_groups(&mut *gpu, &mut parameters, DrawOrder::BottomUp);
         }
 
         // Draw the render targets.
@@ -699,10 +699,10 @@ impl Renderer {
             // are painted bottom to top.
             if render_tree_parameters.transform_params.state.is_globe_rendering() {
                 parameters.current_layer = (num_draw_groups as u32).wrapping_sub(1);
-                orchestrator.render_draw_groups(&mut *gpu, &mut parameters, false);
+                orchestrator.render_draw_groups(&mut *gpu, &mut parameters, DrawOrder::BottomUp);
             } else {
                 parameters.current_layer = 0;
-                orchestrator.render_draw_groups(&mut *gpu, &mut parameters, true);
+                orchestrator.render_draw_groups(&mut *gpu, &mut parameters, DrawOrder::TopDown);
             }
         }
 
@@ -713,11 +713,11 @@ impl Renderer {
 
             // The planet goes into the depth buffer first, so 3D geometry
             // behind the horizon stays hidden.
-            orchestrator.globe_depth().render(&mut *gpu, &mut parameters);
+            orchestrator.globe_depth().draws.render(&mut *gpu, &mut parameters);
 
             // draw the draw groups, translucent pass
             parameters.current_layer = (num_draw_groups as u32).wrapping_sub(1);
-            orchestrator.render_draw_groups(&mut *gpu, &mut parameters, false);
+            orchestrator.render_draw_groups(&mut *gpu, &mut parameters, DrawOrder::BottomUp);
         }
 
         // The atmosphere.
@@ -733,7 +733,7 @@ impl Renderer {
         parameters.current_layer = 0;
         // layers: debug
         for debug in orchestrator.debug_layers() {
-            debug.render(&mut *gpu, &mut parameters);
+            debug.draws.render(&mut *gpu, &mut parameters);
             parameters.current_layer += 1;
         }
 

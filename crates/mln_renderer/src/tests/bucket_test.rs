@@ -239,12 +239,12 @@ fn fill_bucket_frees_cpu_geometry_after_upload() {
         assert_eq!(bucket.vertices.len(), vertex_count);
         assert_eq!(vertices.get_raw_data().len(), vertex_count * vertices.get_raw_size());
 
-        // A drawable upload turns the shared vectors into buffers.
+        // A draw's upload turns the shared vectors into buffers.
         let buffer = vertex_buffer(context, &vertices, false).expect("uploads").expect("a buffer");
         let triangles = geometry.indexes(&bucket, &bucket.triangles);
         upload_indexes(context, &mut triangles.borrow_mut()).expect("uploads");
 
-        // The CPU copies are gone, the counts that drawables are built from
+        // The CPU copies are gone, the counts that draws are built from
         // are not.
         assert!(!vertices.has_raw_data());
         assert!(vertices.get_raw_data().is_empty());
@@ -253,7 +253,7 @@ fn fill_bucket_frees_cpu_geometry_after_upload() {
         assert_eq!(triangles.borrow().elements(), index_count);
         assert_eq!(bucket.triangles.len(), index_count);
 
-        // A second drawable over the same bucket reuses the vectors and the
+        // A second draw over the same bucket reuses the vectors and the
         // buffer without reading the data.
         let again = geometry.vertices(&bucket, &bucket.vertices);
         assert!(Rc::ptr_eq(&vertices, &again));
@@ -357,7 +357,7 @@ fn line_bucket_drawables_build_from_freed_indexes() {
     let context = &Context::new(Rc::clone(&backend));
     bucket.upload(context);
 
-    // An earlier drawable put the indexes in a buffer, which frees their CPU
+    // An earlier draw put the indexes in a buffer, which frees their CPU
     // copy.
     let geometry = BucketGeometry::default();
     let index_count = bucket.triangles.len();
@@ -750,7 +750,7 @@ fn released_vertex_vector_frees_its_data_once_it_has_a_buffer() {
         assert!(!vertices.has_raw_data());
         assert!(vertices.get_raw_data().is_empty());
         assert_eq!(vertices.get_raw_count(), 2);
-        // A drawable that bound its attributes before the vector was made
+        // A draw that bound its attributes before the vector was made
         // still sees it as new.
         assert!(vertices.is_modified_after(before));
     });

@@ -24,12 +24,13 @@ use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_util::logging::{Event, Log};
 
 use crate::bucket::NoBucket;
-use crate::draw_cache::{DrawCaches, DrawGroup};
+use crate::draw_cache::{ChangedBuckets, DrawGroup, DrawOrder};
+use crate::gfx::context::Context;
 use crate::layer_type::LayerType;
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{
-    DrawGroups, LayerParts, LayerPrepareParameters, LayerTiles, LayerValues, RenderLayer, RenderLayerBase, TypedLayer,
+    DrawGroups, LayerParts, LayerPrepareParameters, LayerTiles, LayerValues, RenderLayer, RenderLayerBase,
 };
 use crate::render_pass::RenderPass;
 use crate::update_parameters::UpdateParameters;
@@ -88,9 +89,7 @@ impl LayerType for Custom {
 
 pub(crate) struct RenderCustomLayer {
     base: RenderLayerBase,
-    values: LayerValues<Custom>,
-    /// Empty: the host draws with objects of its own.
-    caches: DrawCaches<()>,
+    style: Arc<LayerStyle<Custom>>,
     shared: Rc<Shared>,
     /// Whether the layer draws, which it does from its first update.
     updated: bool,
@@ -103,8 +102,7 @@ impl RenderCustomLayer {
         base.passes = RenderPass::Translucent;
         RenderCustomLayer {
             base,
-            values,
-            caches: DrawCaches::default(),
+            style: values.style,
             shared: Rc::new(Shared {
                 host: RefCell::new(host),
                 frame: Cell::new(None),
@@ -119,6 +117,28 @@ impl RenderCustomLayer {
     pub(crate) fn lose_context(&mut self) {
         self.shared.end(true);
     }
+
+    /// In the translucent pass, lends the live pass to the host.
+    fn lend_pass(&self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        if parameters.pass_target().is_none() || parameters.pass != RenderPass::Translucent {
+            return;
+        }
+        let (Some(host), Some(frame)) = (self.shared.host(), self.shared.frame.get()) else {
+            return;
+        };
+        let layer_depth = f64::from(parameters.layer_depth());
+        let lent = parameters.lend_pass(gpu, &mut |pass| {
+            host.render(&mut CustomLayerRenderParameters { pass, frame: &frame, layer_depth });
+        });
+        match lent {
+            Ok(lent) => {
+                if lent {
+                    self.shared.used.set(true);
+                }
+            }
+            Err(error) => Log::error(Event::Render, format!("Lending a custom layer the pass failed: {error}")),
+        }
+    }
 }
 
 impl Drop for RenderCustomLayer {
@@ -127,21 +147,53 @@ impl Drop for RenderCustomLayer {
     }
 }
 
-impl TypedLayer for RenderCustomLayer {
-    type Type = Custom;
-    type Tile = ();
-    type Shared = ();
-
-    fn parts(&self) -> (&RenderLayerBase, &LayerValues<Custom>) {
-        (&self.base, &self.values)
+/// The layer has no paint properties to transition, and no draws of its
+/// own: its one draw group is what the host draws.
+impl LayerParts for RenderCustomLayer {
+    fn base(&self) -> &RenderLayerBase {
+        &self.base
     }
 
-    fn parts_mut(&mut self) -> (&mut RenderLayerBase, &mut LayerValues<Custom>) {
-        (&mut self.base, &mut self.values)
+    fn base_mut(&mut self) -> &mut RenderLayerBase {
+        &mut self.base
     }
 
-    fn caches_mut(&mut self) -> (&mut RenderLayerBase, &mut DrawCaches<()>) {
-        (&mut self.base, &mut self.caches)
+    fn set_style(&mut self, style: &Arc<dyn ErasedLayerStyle>) {
+        if let Some(recovered) = LayerStyle::recover(style) {
+            self.style = recovered;
+            self.base.style = Arc::clone(style);
+        }
+    }
+
+    fn transition(&mut self, _parameters: &TransitionParameters) {}
+
+    fn has_transition(&self) -> bool {
+        false
+    }
+
+    fn has_crossfade(&self) -> bool {
+        false
+    }
+
+    fn set_tiles(&mut self, _tiles: Option<LayerTiles<'_>>) {}
+
+    fn mark_changed(&mut self, _changed: &ChangedBuckets) {}
+
+    fn handle_wrap_jump(&mut self, _wrap_delta: i16) {}
+
+    fn remove_all_draws(&mut self) {}
+
+    fn draw_groups(&self) -> DrawGroups<'_> {
+        (self.updated && self.base.is_renderable).then_some(DrawGroup::Custom).into_iter().collect()
+    }
+
+    fn upload(&mut self, _context: &Context) {}
+
+    fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
+        if self.updated && self.base.is_renderable {
+            self.lend_pass(gpu, parameters);
+            order.step(parameters);
+        }
     }
 }
 
@@ -150,10 +202,10 @@ impl RenderLayer for RenderCustomLayer {
     /// one hears that the renderer stopped.
     fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>) {
         self.set_style(style);
-        let same = self.shared.host.borrow().as_ref().is_some_and(|host| self.values.style.has_host(host));
+        let same = self.shared.host.borrow().as_ref().is_some_and(|host| self.style.has_host(host));
         if !same {
             self.shared.end(false);
-            *self.shared.host.borrow_mut() = self.values.style.host();
+            *self.shared.host.borrow_mut() = self.style.host();
         }
         self.transition(parameters);
     }
@@ -174,32 +226,6 @@ impl RenderLayer for RenderCustomLayer {
         _tiles: Option<LayerTiles<'_>>,
     ) {
         self.updated = true;
-    }
-
-    fn draw_groups(&self) -> DrawGroups<'_> {
-        (self.updated && self.base.is_renderable).then_some(DrawGroup::Custom).into_iter().collect()
-    }
-
-    /// In the translucent pass, lends the live pass to the host.
-    fn render(&mut self, _group: usize, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        if parameters.pass_target().is_none() || parameters.pass != RenderPass::Translucent {
-            return;
-        }
-        let (Some(host), Some(frame)) = (self.shared.host(), self.shared.frame.get()) else {
-            return;
-        };
-        let layer_depth = f64::from(parameters.layer_depth());
-        let lent = parameters.lend_pass(gpu, &mut |pass| {
-            host.render(&mut CustomLayerRenderParameters { pass, frame: &frame, layer_depth });
-        });
-        match lent {
-            Ok(lent) => {
-                if lent {
-                    self.shared.used.set(true);
-                }
-            }
-            Err(error) => Log::error(Event::Render, format!("Lending a custom layer the pass failed: {error}")),
-        }
     }
 
     fn prerender(&mut self, parameters: &PaintParameters<'_>) {

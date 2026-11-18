@@ -1,7 +1,6 @@
-// layers: debug: TileSourceRenderItem::updateDebugDrawables, with the tile
-// borders and the parse status and timestamp text as polylines
-// (MLN_ENABLE_POLYLINE_DRAWABLES, set for WebGPU), and
-// PolylineLayerImpl/Properties/Tweaker.
+// layers: debug: the debug overlays of a source's tiles, the tile borders
+// and the parse status and timestamp text, drawn as polylines by the line
+// shader.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -10,7 +9,6 @@ use std::sync::Arc;
 
 use geometry::Point;
 use glam::Vec2;
-use mln_gfx::gpu::Gpu;
 use mln_gfx::index_vector::IndexVectorBase;
 use mln_gfx::polyline_generator::{PolylineGenerator, PolylineGeneratorOptions};
 use mln_gfx::projection_variant::ProjectionVariant;
@@ -42,8 +40,8 @@ use mln_util::hash::{HashMap, HashSet};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use crate::buckets::line_bucket::{LineBucket, LineLayoutVertex};
-use crate::draw::{DrawGeometry, DrawObjects};
-use crate::draw_cache::{DrawCaches, DrawDepth, DrawSlots, FrameDraw, FrameDraws, KeptDraw};
+use crate::draw::{DrawGeometry, DrawObjects, Textures};
+use crate::draw_cache::{DrawDepth, DrawSlots, Draws, FrameDraw, KeptDraw};
 use crate::gfx::context::Context;
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layers::cast_matrix;
@@ -64,12 +62,13 @@ use crate::util::subdivision::subdivide_vertex_line;
 
 pub(crate) struct TileSourceRenderItem {
     render_tiles: Rc<Vec<RenderTile>>,
-    name: String,
+    /// The source's id.
+    name: Rc<str>,
 }
 
 impl TileSourceRenderItem {
     #[must_use]
-    pub(crate) fn new(render_tiles: Rc<Vec<RenderTile>>, name: String) -> Self {
+    pub(crate) fn new(render_tiles: Rc<Vec<RenderTile>>, name: Rc<str>) -> Self {
         TileSourceRenderItem { render_tiles, name }
     }
 }
@@ -96,10 +95,9 @@ fn debug_line_properties(type_: DebugType) -> LineEvaluatedPropsUBO {
     }
 }
 
-/// The GPU objects of `lines`, as polylines of `options` drawn with `shader`,
-/// named `name`; `None` where they have no vertices.
+/// The GPU objects of `lines`, as polylines of `options` drawn with `shader`;
+/// `None` where they have no vertices.
 fn polyline_objects(
-    name: &str,
     shader: &ShaderProgramPtr,
     lines: &[GeometryCoordinates],
     options: &PolylineGeneratorOptions,
@@ -142,13 +140,14 @@ fn polyline_objects(
         mode: DrawMode::Triangles(),
         indexes: Rc::new(RefCell::new(IndexVectorBase::new(indexes))),
         segments,
+        instances: None,
     };
     Some(DrawObjects::new(
-        name.to_owned(),
         Rc::clone(shader),
         ColorMode::alpha_blended(),
         CullFaceMode::disabled(),
         geometry,
+        Textures::default(),
     ))
 }
 
@@ -161,9 +160,8 @@ impl RenderItem for TileSourceRenderItem {
 
     // layers: debug
     //
-    // C++ draws the text with the DebugShader as line primitives of 2 and 4
-    // pixels. WebGPU draws line primitives one pixel wide, so the text is
-    // polylines, like the tile borders (MLN_ENABLE_POLYLINE_DRAWABLES).
+    // The text is polylines, like the tile borders: WebGPU draws line
+    // primitives one pixel wide.
     fn update_debug_draws(&self, debug_layers: &mut DebugLayers, parameters: &PaintParameters<'_>) {
         if !parameters
             .debug_options
@@ -174,7 +172,7 @@ impl RenderItem for TileSourceRenderItem {
         }
 
         let shaders = &*parameters.static_data.shaders;
-        let name = format!("debug-{}", self.name);
+        let source = &self.name;
         let globe = parameters.state.is_globe_rendering();
         let projection_variant = if globe { ProjectionVariant::Globe } else { ProjectionVariant::Mercator };
 
@@ -201,12 +199,23 @@ impl RenderItem for TileSourceRenderItem {
         };
 
         // The tiles to cover, whose draws stay where they were built with
-        // the same shader: one of the other projection keeps its shader.
-        let new_tiles: HashSet<OverscaledTileID> =
-            self.render_tiles.iter().map(|tile| *tile.get_overscaled_tile_id()).collect();
+        // the same shader and spell the tile's text: one of the other
+        // projection keeps its shader.
+        let new_tiles: HashMap<OverscaledTileID, &RenderTile> =
+            self.render_tiles.iter().map(|tile| (*tile.get_overscaled_tile_id(), tile)).collect();
         let keep = |draw: &DebugDraw| {
+            if draw.source != *source {
+                return true;
+            }
+            let Some(tile) = new_tiles.get(&draw.tile) else {
+                return false;
+            };
             let same_shader = std::ptr::addr_eq(Rc::as_ptr(draw.draw.objects.shader()), Rc::as_ptr(&polyline_shader));
-            draw.draw.objects.name != name || (new_tiles.contains(&draw.tile) && same_shader)
+            let same_text = match (&draw.text, &tile.debug_bucket) {
+                (Some(text), Some(debug_bucket)) => *text == debug_bucket.text,
+                _ => true,
+            };
+            same_shader && same_text
         };
 
         // Timestamps or Parse Status
@@ -221,30 +230,22 @@ impl RenderItem for TileSourceRenderItem {
                 let layer = debug_layer(debug_layers, type_);
                 layer.draws().retain(keep);
 
-                // add new draws and replace those whose text changed
-                let mut of_tiles = layer.draws_named(&name);
-                let mut replaced = Vec::new();
+                // add draws of the tiles without any: new tiles, and those
+                // whose text changed
+                let mut of_tiles = layer.tiles_of(source);
                 for tile in self.render_tiles.iter() {
                     let tile_id = *tile.get_overscaled_tile_id();
                     let Some(debug_bucket) = &tile.debug_bucket else {
                         continue;
                     };
-                    if let Some(index) = of_tiles.remove(&tile_id) {
-                        if layer.draws()[index].text.as_ref() == Some(&debug_bucket.text) {
-                            of_tiles.insert(tile_id, index);
-                            continue;
-                        }
-                        replaced.push(index);
-                    }
                     if tile.get_needs_rendering()
-                        && let Some(objects) =
-                            polyline_objects(&name, &polyline_shader, &debug_bucket.strokes, &text_options)
+                        && !of_tiles.contains(&tile_id)
+                        && let Some(objects) = polyline_objects(&polyline_shader, &debug_bucket.strokes, &text_options)
                     {
-                        of_tiles.insert(tile_id, layer.draws().len());
-                        layer.add(tile_id, Some(debug_bucket.text.clone()), objects);
+                        of_tiles.insert(tile_id);
+                        layer.add(source, tile_id, Some(debug_bucket.text.clone()), objects);
                     }
                 }
-                layer.remove(&replaced);
             }
         } else {
             // tile texts are not required, erase their overlays
@@ -256,7 +257,7 @@ impl RenderItem for TileSourceRenderItem {
         if parameters.debug_options.contains(MapDebugOptions::TILE_BORDERS) {
             let layer = debug_layer(debug_layers, DebugType::Border);
             layer.draws().retain(keep);
-            let mut of_tiles = layer.draws_named(&name);
+            let mut of_tiles = layer.tiles_of(source);
 
             // add new draws
             let extent = EXTENT as i16;
@@ -276,7 +277,7 @@ impl RenderItem for TileSourceRenderItem {
                 if tile.debug_bucket.is_none() || !tile.get_needs_rendering() {
                     continue;
                 }
-                if of_tiles.contains_key(&tile_id) {
+                if of_tiles.contains(&tile_id) {
                     continue;
                 }
                 let border = if globe {
@@ -288,11 +289,10 @@ impl RenderItem for TileSourceRenderItem {
                 } else {
                     &tile_border
                 };
-                if let Some(objects) =
-                    polyline_objects(&name, &polyline_shader, std::slice::from_ref(border), &border_options)
+                if let Some(objects) = polyline_objects(&polyline_shader, std::slice::from_ref(border), &border_options)
                 {
-                    of_tiles.insert(tile_id, layer.draws().len());
-                    layer.add(tile_id, None, objects);
+                    of_tiles.insert(tile_id);
+                    layer.add(source, tile_id, None, objects);
                 }
             }
         } else {
@@ -304,9 +304,10 @@ impl RenderItem for TileSourceRenderItem {
 
 // layers: debug --------------------------------------------------------------
 
-/// A draw of a debug overlay: polylines over a tile of a source, which the
-/// draw's GPU objects are named after.
+/// A draw of a debug overlay: polylines over a tile of a source.
 struct DebugDraw {
+    /// The id of the source.
+    source: Rc<str>,
     tile: OverscaledTileID,
     /// The lines of text the polylines spell, of a text overlay.
     text: Option<Vec<String>>,
@@ -316,7 +317,7 @@ struct DebugDraw {
 /// The draws of a debug overlay, in the order they were made, which is the
 /// order they draw in, each in the slot of its index.
 #[derive(Default)]
-struct DebugDraws(Vec<DebugDraw>);
+pub(crate) struct DebugDraws(Vec<DebugDraw>);
 
 impl DrawSlots for DebugDraws {
     fn slot_mut(&mut self, slot: u32) -> Option<&mut DrawObjects> {
@@ -328,62 +329,46 @@ impl DrawSlots for DebugDraws {
 /// and width of its type (layers: debug).
 pub(crate) struct DebugLayer {
     properties: LineEvaluatedPropsUBO,
-    caches: DrawCaches<(), DebugDraws>,
-    /// The frame's draws, with the buffers they read.
-    frame: FrameDraws,
+    /// The overlay's draws, and the frame's draws of them, with the buffers
+    /// they read.
+    pub(crate) draws: Draws<(), DebugDraws>,
 }
 
 impl DebugLayer {
     #[must_use]
     pub(crate) fn new(type_: DebugType) -> Self {
-        DebugLayer { properties: debug_line_properties(type_), caches: DrawCaches::default(), frame: FrameDraws::new() }
+        DebugLayer { properties: debug_line_properties(type_), draws: Draws::default() }
     }
 
     /// The overlay's draws, in drawing order.
     fn draws(&mut self) -> &mut Vec<DebugDraw> {
-        &mut self.caches.layer_cache_mut().0
+        &mut self.draws.caches.layer_cache_mut().0
     }
 
-    /// The indexes of the draws named `name`, those of a source, by their
-    /// tile.
-    fn draws_named(&mut self, name: &str) -> HashMap<OverscaledTileID, usize> {
-        let draws = self.draws().iter().enumerate();
-        draws.filter(|(_, draw)| draw.draw.objects.name == name).map(|(index, draw)| (draw.tile, index)).collect()
+    /// The tiles with draws of the source `source`.
+    fn tiles_of(&mut self, source: &str) -> HashSet<OverscaledTileID> {
+        self.draws().iter().filter(|draw| *draw.source == *source).map(|draw| draw.tile).collect()
     }
 
-    /// Removes the draws at `indexes`, and keeps the others in order.
-    fn remove(&mut self, indexes: &[usize]) {
-        if indexes.is_empty() {
-            return;
-        }
-        let draws = self.draws();
-        let mut removed = vec![false; draws.len()];
-        for &index in indexes {
-            removed[index] = true;
-        }
-        let mut index = 0;
-        draws.retain(|_| {
-            index += 1;
-            !removed[index - 1]
-        });
-    }
-
-    /// Adds a draw of `objects` over `tile_id`, spelling `text`.
-    fn add(&mut self, tile_id: OverscaledTileID, text: Option<Vec<String>>, objects: DrawObjects) {
-        self.draws().push(DebugDraw { tile: tile_id, text, draw: KeptDraw::new(objects) });
+    /// Adds a draw of `objects` over `tile_id` of the source `source`,
+    /// spelling `text`.
+    fn add(&mut self, source: &Rc<str>, tile_id: OverscaledTileID, text: Option<Vec<String>>, objects: DrawObjects) {
+        let draw = KeptDraw::new(objects);
+        self.draws().push(DebugDraw { source: Rc::clone(source), tile: tile_id, text, draw });
     }
 
     /// Makes the frame's draws of the overlay, and writes the buffers they
     /// read.
     pub(crate) fn prepare(&mut self, parameters: &PaintParameters<'_>) {
         let context = parameters.context;
-        self.frame.draws.clear();
-        let draws = &self.caches.layer_cache_mut().0;
+        let Draws { caches, frame } = &mut self.draws;
+        frame.draws.clear();
+        let draws = &caches.layer_cache().0;
         if draws.is_empty() {
             return;
         }
 
-        let buffers = &mut self.frame.uniform_buffers;
+        let buffers = &mut frame.uniform_buffers;
         buffers.create_or_update_pod(ID_LINE_EVALUATED_PROPS_UBO, &self.properties, context);
         // We would need to set up `idLineExpressionUBO` if the expression
         // mask isn't empty
@@ -395,11 +380,10 @@ impl DebugLayer {
         }
 
         let zoom = parameters.state.get_zoom();
-        let mut drawable_ubos = Vec::with_capacity(draws.len());
+        let mut draw_ubos = Vec::with_capacity(draws.len());
         let mut projection_ubos: Vec<ProjectionUBO> = Vec::with_capacity(draws.len());
         for (slot, draw) in draws.iter().enumerate() {
             let tile_id = draw.tile.to_unwrapped();
-            // C++ also computes an unused `tileMatrix` (state.matrixFor).
             let projection = get_projection_data(
                 &tile_id,
                 parameters,
@@ -411,8 +395,8 @@ impl DebugLayer {
                 false,
             );
             projection_ubos.push(to_projection_ubo(&projection));
-            let mut drawable_ubo = LineDrawableUnionUBO::default();
-            drawable_ubo.set(&LineDrawableUBO {
+            let mut draw_ubo = LineDrawableUnionUBO::default();
+            draw_ubo.set(&LineDrawableUBO {
                 matrix: cast_matrix(&projection.fallback_matrix),
                 ratio: 1.0 / tile_id.pixels_to_tile_units(1.0, zoom as f32),
                 color_t: 0.0,
@@ -423,23 +407,13 @@ impl DebugLayer {
                 width_t: 0.0,
                 pad1: 0.0,
             });
-            drawable_ubos.push(drawable_ubo);
+            draw_ubos.push(draw_ubo);
             let frame_draw = FrameDraw::new(None, slot as u32, draw.draw.id);
-            self.frame.draws.push(FrameDraw { depth: DrawDepth::Off, ..frame_draw });
+            frame.draws.push(FrameDraw { depth: DrawDepth::Off, ..frame_draw });
         }
-        let buffers = &mut self.frame.uniform_buffers;
-        buffers.write_storage(ID_LINE_DRAWABLE_UBO, bytemuck::cast_slice(&drawable_ubos), context);
+        let buffers = &mut frame.uniform_buffers;
+        buffers.write_storage(ID_LINE_DRAWABLE_UBO, bytemuck::cast_slice(&draw_ubos), context);
         buffers.write_storage(ID_PROJECTION_UBO, bytemuck::cast_slice(&projection_ubos), context);
-    }
-
-    /// Uploads the GPU objects of the overlay's draws.
-    pub(crate) fn upload(&mut self, context: &Context) {
-        self.caches.upload(&self.frame, context);
-    }
-
-    /// Draws the overlay into the open pass of `gpu`, the context's.
-    pub(crate) fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        self.caches.render(&self.frame, gpu, parameters);
     }
 }
 
@@ -477,7 +451,7 @@ impl RenderTileSource {
     }
 
     pub(crate) fn create_render_item(&mut self) -> Box<dyn RenderItem> {
-        Box::new(TileSourceRenderItem::new(Rc::clone(&self.render_tiles), self.base.style_source.id().to_owned()))
+        Box::new(TileSourceRenderItem::new(Rc::clone(&self.render_tiles), Rc::from(self.base.style_source.id())))
     }
 }
 

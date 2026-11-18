@@ -1,10 +1,11 @@
 use std::rc::Rc;
 
+use mln_gfx::shaders::shader_program::ShaderProgram;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_style_types::AlignmentType;
 
-use crate::draw::DrawObjects;
+use crate::draw::{DrawObjects, Textures};
 use crate::paint_parameters::PaintParameters;
 use crate::tile_render_data::TileAtlasTextures;
 
@@ -47,7 +48,9 @@ impl AtlasBinding {
         }
     }
 
-    fn setup_textures(&self, objects: &mut DrawObjects, linear_filter_for_icons: bool) {
+    /// Sets the atlases' textures in `textures`, those of a shader that
+    /// samples the icon texture or not, with icons filtered linearly or not.
+    fn setup_textures(&self, textures: &mut Textures, samples_icon: bool, linear_filter_for_icons: bool) {
         let (Some(glyph_texture_id), Some(atlases)) = (self.glyph_texture_id, &self.atlases) else {
             return;
         };
@@ -69,22 +72,28 @@ impl AtlasBinding {
                 ..Default::default()
             });
         }
-        if let Some(icon_texture_id) = self.icon_texture_id
-            && objects.shader().samples(icon_texture_id)
-        {
+        if let Some(icon_texture_id) = self.icon_texture_id.filter(|_| samples_icon) {
             debug_assert_ne!(glyph_texture_id, icon_texture_id);
-            objects.textures[glyph_texture_id] = glyph;
-            objects.textures[icon_texture_id] = icon;
+            textures[glyph_texture_id] = glyph;
+            textures[icon_texture_id] = icon;
         } else {
-            objects.textures[glyph_texture_id] = if self.is_text { glyph } else { icon };
+            textures[glyph_texture_id] = if self.is_text { glyph } else { icon };
         }
+    }
+
+    /// Whether `shader` samples the icon texture.
+    fn samples_icon(&self, shader: &ShaderProgram) -> bool {
+        self.icon_texture_id.is_some_and(|id| shader.samples(id))
     }
 }
 
 impl AtlasBinding {
-    /// Gives a draw the atlases' textures when it is made.
-    pub(crate) fn init(&self, objects: &mut DrawObjects) {
-        self.setup_textures(objects, true);
+    /// The textures of a draw with `shader` when it is made: the atlases'.
+    #[must_use]
+    pub(crate) fn textures(&self, shader: &ShaderProgram) -> Textures {
+        let mut textures = Textures::default();
+        self.setup_textures(&mut textures, self.samples_icon(shader), true);
+        textures
     }
 
     /// Gives the draw the atlases' textures before it draws, filtered as the
@@ -97,6 +106,7 @@ impl AtlasBinding {
         } else {
             self.sdf_icons || state.is_changing() || self.icon_scaled || transformed
         };
-        self.setup_textures(objects, linear_filter_for_icons);
+        let samples_icon = self.samples_icon(objects.shader());
+        self.setup_textures(&mut objects.textures, samples_icon, linear_filter_for_icons);
     }
 }
