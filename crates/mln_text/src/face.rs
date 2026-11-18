@@ -60,7 +60,7 @@ impl Face {
         self.font.is_some()
     }
 
-    /// The font at regular weight, `None` when not valid.
+    /// The font at the face's weight, `None` when not valid.
     #[must_use]
     pub(crate) fn font(&self) -> Option<&Font> {
         self.font.as_ref()
