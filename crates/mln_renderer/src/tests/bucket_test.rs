@@ -838,13 +838,7 @@ fn a_draw_writes_an_update_of_the_vertices_it_binds() {
         for (id, offset) in [(ID_RASTER_POS_VERTEX_ATTRIBUTE, 0), (ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE, 4)] {
             attrs.set_shared(
                 id,
-                SharedAttribute {
-                    vertices: typed.shared().clone(),
-                    data_type: AttributeDataType::Short2,
-                    offset,
-                    vertex_offset: 0,
-                    stride,
-                },
+                SharedAttribute::new(typed.shared().clone(), AttributeDataType::Short2, offset, stride),
             );
         }
         let geometry = DrawGeometry {

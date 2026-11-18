@@ -116,7 +116,7 @@ fn polyline_objects(
         (ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, offset_of!(LineLayoutVertex, a1) as u32, AttributeDataType::Short2),
         (ID_LINE_DATA_VERTEX_ATTRIBUTE, offset_of!(LineLayoutVertex, a2) as u32, AttributeDataType::UByte4),
     ] {
-        attrs.set_shared(id, SharedAttribute { vertices: shared.clone(), data_type, offset, vertex_offset: 0, stride });
+        attrs.set_shared(id, SharedAttribute::new(shared.clone(), data_type, offset, stride));
     }
 
     let geometry = DrawGeometry {

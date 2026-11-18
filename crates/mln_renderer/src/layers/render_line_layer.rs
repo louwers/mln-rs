@@ -700,23 +700,16 @@ impl RenderLineLayer {
         let stride = size_of::<LineLayoutVertex>() as u32;
         attrs.set_shared(
             ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE,
-            SharedAttribute {
-                vertices: shared.clone(),
-                data_type: AttributeDataType::Short2,
-                offset: offset_of!(LineLayoutVertex, a1) as u32,
-                vertex_offset: 0,
+            SharedAttribute::new(
+                shared.clone(),
+                AttributeDataType::Short2,
+                offset_of!(LineLayoutVertex, a1) as u32,
                 stride,
-            },
+            ),
         );
         attrs.set_shared(
             ID_LINE_DATA_VERTEX_ATTRIBUTE,
-            SharedAttribute {
-                vertices: shared,
-                data_type: AttributeDataType::UByte4,
-                offset: offset_of!(LineLayoutVertex, a2) as u32,
-                vertex_offset: 0,
-                stride,
-            },
+            SharedAttribute::new(shared, AttributeDataType::UByte4, offset_of!(LineLayoutVertex, a2) as u32, stride),
         );
 
         let draw_geometry = DrawGeometry {

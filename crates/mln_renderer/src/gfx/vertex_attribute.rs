@@ -25,6 +25,19 @@ pub(crate) struct SharedAttribute {
     pub(crate) stride: u32,
 }
 
+impl SharedAttribute {
+    /// The attribute that reads `vertices` at `offset` in each of `stride`
+    /// bytes, from the first vertex on, as `data_type`.
+    pub(crate) fn new(vertices: SharedVertices, data_type: AttributeDataType, offset: u32, stride: u32) -> Self {
+        SharedAttribute { vertices, data_type, offset, vertex_offset: 0, stride }
+    }
+
+    /// The attribute, reading from the vertex `vertex_offset` on.
+    pub(crate) fn starting_at(self, vertex_offset: u32) -> Self {
+        SharedAttribute { vertex_offset, ..self }
+    }
+}
+
 /// Where an attribute's own values are: in their bytes until the first
 /// upload moves them into a buffer.
 pub(crate) enum OwnValues {

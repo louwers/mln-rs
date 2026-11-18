@@ -315,53 +315,23 @@ fn set_layout_attributes(geometry: &BucketGeometry, buffer: &Buffer, attribs: &m
     };
     attribs.set_shared(
         ID_SYMBOL_POS_OFFSET_ATTRIBUTE,
-        SharedAttribute {
-            vertices: layout_data.clone(),
-            data_type: AttributeDataType::Short4,
-            offset: 0,
-            vertex_offset: 0,
-            stride: layout_size,
-        },
+        SharedAttribute::new(layout_data.clone(), AttributeDataType::Short4, 0, layout_size),
     );
     attribs.set_shared(
         ID_SYMBOL_DATA_ATTRIBUTE,
-        SharedAttribute {
-            vertices: layout_data.clone(),
-            data_type: AttributeDataType::UShort4,
-            offset: 8,
-            vertex_offset: 0,
-            stride: layout_size,
-        },
+        SharedAttribute::new(layout_data.clone(), AttributeDataType::UShort4, 8, layout_size),
     );
     attribs.set_shared(
         ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE,
-        SharedAttribute {
-            vertices: layout_data.clone(),
-            data_type: AttributeDataType::Short4,
-            offset: 16,
-            vertex_offset: 0,
-            stride: layout_size,
-        },
+        SharedAttribute::new(layout_data.clone(), AttributeDataType::Short4, 16, layout_size),
     );
     attribs.set_shared(
         ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE,
-        SharedAttribute {
-            vertices: layout_data.clone(),
-            data_type: AttributeDataType::UShort2,
-            offset: 24,
-            vertex_offset: 0,
-            stride: layout_size,
-        },
+        SharedAttribute::new(layout_data.clone(), AttributeDataType::UShort2, 24, layout_size),
     );
     attribs.set_shared(
         ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE,
-        SharedAttribute {
-            vertices: layout_data,
-            data_type: AttributeDataType::Float,
-            offset: 28,
-            vertex_offset: 0,
-            stride: layout_size,
-        },
+        SharedAttribute::new(layout_data, AttributeDataType::Float, 28, layout_size),
     );
 }
 
@@ -419,16 +389,7 @@ fn set_placed_attribute<V: bytemuck::Pod>(
         return;
     }
     let typed = context.add_vertices(vertices.to_vec());
-    attribs.set_shared(
-        id,
-        SharedAttribute {
-            vertices: typed.shared().clone(),
-            data_type: type_,
-            offset: 0,
-            vertex_offset: 0,
-            stride: size_of::<V>() as u32,
-        },
-    );
+    attribs.set_shared(id, SharedAttribute::new(typed.shared().clone(), type_, 0, size_of::<V>() as u32));
     *placed = Some(typed);
 }
 
@@ -1281,63 +1242,27 @@ fn collision_vertex_attributes(context: &mut Context, buffer: &CollisionBuffer) 
     let dynamic = copied_vertices(context, &buffer.dynamic_vertices);
     attrs.set_shared(
         ID_COLLISION_POS_VERTEX_ATTRIBUTE,
-        SharedAttribute {
-            vertices: layout.clone(),
-            data_type: AttributeDataType::Short2,
-            offset: 0,
-            vertex_offset: 0,
-            stride: layout_stride,
-        },
+        SharedAttribute::new(layout.clone(), AttributeDataType::Short2, 0, layout_stride),
     );
     attrs.set_shared(
         ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE,
-        SharedAttribute {
-            vertices: layout.clone(),
-            data_type: AttributeDataType::Short2,
-            offset: 4,
-            vertex_offset: 0,
-            stride: layout_stride,
-        },
+        SharedAttribute::new(layout.clone(), AttributeDataType::Short2, 4, layout_stride),
     );
     attrs.set_shared(
         ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE,
-        SharedAttribute {
-            vertices: layout.clone(),
-            data_type: AttributeDataType::Short2,
-            offset: 8,
-            vertex_offset: 0,
-            stride: layout_stride,
-        },
+        SharedAttribute::new(layout.clone(), AttributeDataType::Short2, 8, layout_stride),
     );
     attrs.set_shared(
         ID_COLLISION_HEIGHT_OFFSET_VERTEX_ATTRIBUTE,
-        SharedAttribute {
-            vertices: layout,
-            data_type: AttributeDataType::Float,
-            offset: 12,
-            vertex_offset: 0,
-            stride: layout_stride,
-        },
+        SharedAttribute::new(layout, AttributeDataType::Float, 12, layout_stride),
     );
     attrs.set_shared(
         ID_COLLISION_PLACED_VERTEX_ATTRIBUTE,
-        SharedAttribute {
-            vertices: dynamic.clone(),
-            data_type: AttributeDataType::UShort2,
-            offset: 0,
-            vertex_offset: 0,
-            stride: dynamic_stride,
-        },
+        SharedAttribute::new(dynamic.clone(), AttributeDataType::UShort2, 0, dynamic_stride),
     );
     attrs.set_shared(
         ID_COLLISION_SHIFT_VERTEX_ATTRIBUTE,
-        SharedAttribute {
-            vertices: dynamic,
-            data_type: AttributeDataType::Float2,
-            offset: 4,
-            vertex_offset: 0,
-            stride: dynamic_stride,
-        },
+        SharedAttribute::new(dynamic, AttributeDataType::Float2, 4, dynamic_stride),
     );
     attrs
 }

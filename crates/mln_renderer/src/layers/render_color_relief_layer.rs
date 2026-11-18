@@ -270,23 +270,21 @@ fn color_relief_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeA
     let stride = size_of::<RasterLayoutVertex>() as u32;
     attrs.set_shared(
         ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE,
-        SharedAttribute {
-            vertices: vertices.clone(),
-            data_type: AttributeDataType::Short2,
-            offset: offset_of!(RasterLayoutVertex, a1) as u32,
-            vertex_offset: 0,
+        SharedAttribute::new(
+            vertices.clone(),
+            AttributeDataType::Short2,
+            offset_of!(RasterLayoutVertex, a1) as u32,
             stride,
-        },
+        ),
     );
     attrs.set_shared(
         ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE,
-        SharedAttribute {
-            vertices: vertices.clone(),
-            data_type: AttributeDataType::Short2,
-            offset: offset_of!(RasterLayoutVertex, a2) as u32,
-            vertex_offset: 0,
+        SharedAttribute::new(
+            vertices.clone(),
+            AttributeDataType::Short2,
+            offset_of!(RasterLayoutVertex, a2) as u32,
             stride,
-        },
+        ),
     );
     attrs
 }

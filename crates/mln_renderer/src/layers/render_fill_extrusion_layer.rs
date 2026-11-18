@@ -213,10 +213,7 @@ fn read_wall_quads(attrs: &mut VertexAttributeArray, quads: &SharedVertices) {
         (ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, pos, 4, AttributeDataType::Short2),
         (ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, decimals_ed, 4, AttributeDataType::UShort2),
     ] {
-        attrs.set_shared(
-            id,
-            SharedAttribute { vertices: quads.clone(), data_type: type_, offset, vertex_offset, stride },
-        );
+        attrs.set_shared(id, SharedAttribute::new(quads.clone(), type_, offset, stride).starting_at(vertex_offset));
     }
 }
 
@@ -231,13 +228,7 @@ fn read_wall_instances(
     let static_stride = size_of::<FillExtrusionStaticVertex>() as u32;
     attrs.set_shared(
         ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE,
-        SharedAttribute {
-            vertices: corners.clone(),
-            data_type: AttributeDataType::Short2,
-            offset: 0,
-            vertex_offset: 0,
-            stride: static_stride,
-        },
+        SharedAttribute::new(corners.clone(), AttributeDataType::Short2, 0, static_stride),
     );
     let stride = size_of::<FillExtrusionLayoutVertex>() as u32;
     // An instance's outline vertex, then the next one.
@@ -247,23 +238,11 @@ fn read_wall_instances(
     ] {
         instance_attrs.set_shared(
             pos_id,
-            SharedAttribute {
-                vertices: vertices.clone(),
-                data_type: AttributeDataType::Short2,
-                offset: 0,
-                vertex_offset,
-                stride,
-            },
+            SharedAttribute::new(vertices.clone(), AttributeDataType::Short2, 0, stride).starting_at(vertex_offset),
         );
         instance_attrs.set_shared(
             decimals_ed_id,
-            SharedAttribute {
-                vertices: vertices.clone(),
-                data_type: AttributeDataType::UShort2,
-                offset: 4,
-                vertex_offset,
-                stride,
-            },
+            SharedAttribute::new(vertices.clone(), AttributeDataType::UShort2, 4, stride).starting_at(vertex_offset),
         );
     }
 }
@@ -616,23 +595,21 @@ impl TileBuilder<'_> {
         let stride = size_of::<FillExtrusionLayoutVertex>() as u32;
         vertex_attrs.set_shared(
             ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE,
-            SharedAttribute {
-                vertices: vertices.clone(),
-                data_type: AttributeDataType::Short2,
-                offset: offset_of!(FillExtrusionLayoutVertex, a1) as u32,
-                vertex_offset: 0,
+            SharedAttribute::new(
+                vertices.clone(),
+                AttributeDataType::Short2,
+                offset_of!(FillExtrusionLayoutVertex, a1) as u32,
                 stride,
-            },
+            ),
         );
         vertex_attrs.set_shared(
             ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE,
-            SharedAttribute {
+            SharedAttribute::new(
                 vertices,
-                data_type: AttributeDataType::UShort2,
-                offset: offset_of!(FillExtrusionLayoutVertex, a2) as u32,
-                vertex_offset: 0,
+                AttributeDataType::UShort2,
+                offset_of!(FillExtrusionLayoutVertex, a2) as u32,
                 stride,
-            },
+            ),
         );
 
         let atlases = self.has_pattern.then(|| tile_bucket.atlas_textures()).map(|atlases| {

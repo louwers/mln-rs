@@ -811,16 +811,11 @@ impl PaintPropertyBinderBase for CrossFadedPaintPropertyBinder<Image> {
     }
 }
 
-/// An attribute that reads the values at `vertex_offset` in each of the
-/// `stride` bytes of `shared`, the vertices of a bucket's paint values, as
+/// An attribute that reads the values at `offset` in each of the `stride`
+/// bytes of `shared`, the vertices of a bucket's paint values, as
 /// `data_type`.
-fn shared_paint(
-    shared: &SharedVertices,
-    vertex_offset: usize,
-    stride: u32,
-    data_type: AttributeDataType,
-) -> SharedAttribute {
-    SharedAttribute { vertices: shared.clone(), data_type, offset: vertex_offset as u32, vertex_offset: 0, stride }
+fn shared_paint(shared: &SharedVertices, offset: usize, stride: u32, data_type: AttributeDataType) -> SharedAttribute {
+    SharedAttribute::new(shared.clone(), data_type, offset as u32, stride)
 }
 
 /// Adds the attributes `attribute_names` of one property to `attrs`, which

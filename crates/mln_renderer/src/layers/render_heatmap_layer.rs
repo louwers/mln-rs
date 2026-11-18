@@ -428,13 +428,12 @@ impl RenderHeatmapLayer {
                 });
                 attrs.set_shared(
                     ID_HEATMAP_POS_VERTEX_ATTRIBUTE,
-                    SharedAttribute {
+                    SharedAttribute::new(
                         vertices,
-                        data_type: AttributeDataType::Short2,
-                        offset: offset_of!(HeatmapLayoutVertex, a1) as u32,
-                        vertex_offset: 0,
-                        stride: size_of::<HeatmapLayoutVertex>() as u32,
-                    },
+                        AttributeDataType::Short2,
+                        offset_of!(HeatmapLayoutVertex, a1) as u32,
+                        size_of::<HeatmapLayoutVertex>() as u32,
+                    ),
                 );
                 let geometry = DrawGeometry {
                     vertices: attrs,
@@ -570,13 +569,12 @@ impl RenderHeatmapLayer {
             let mut attrs = VertexAttributeArray::new();
             attrs.set_shared(
                 ID_HEATMAP_POS_VERTEX_ATTRIBUTE,
-                SharedAttribute {
+                SharedAttribute::new(
                     vertices,
-                    data_type: AttributeDataType::Short2,
-                    offset: offset_of!(HeatmapLayoutVertex, a1) as u32,
-                    vertex_offset: 0,
-                    stride: size_of::<HeatmapLayoutVertex>() as u32,
-                },
+                    AttributeDataType::Short2,
+                    offset_of!(HeatmapLayoutVertex, a1) as u32,
+                    size_of::<HeatmapLayoutVertex>() as u32,
+                ),
             );
             let geometry = DrawGeometry {
                 vertices: attrs,
