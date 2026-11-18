@@ -1,0 +1,41 @@
+# Builds for FreeBSD, and on x64 Linux with KVM runs tests in a FreeBSD virtual
+# machine, as in `cargo nextest run --target x86_64-unknown-freebsd`. Select it
+# with `mise -E target-freebsd`, or in every command with
+# `env = ["target-freebsd"]` in an untracked .miserc.local.toml. The virtual
+# machine needs QEMU and UEFI firmware from the host (the ovmf or edk2-ovmf
+# package).
+
+[tools]
+# The C compiler and linker: Zig's clang (tools/zig-cc-freebsd.sh).
+"core:zig" = "0.17.1"
+# devices-cli gives this checkout its own virtual machine, which anyvm boots
+# with the checkout mounted at its own path, and runs each test there. The go
+# backend builds it with this Go. anyvm, a Python script, installs on every host
+# so that ANYVM resolves, though only x64 Linux with KVM runs the machine.
+"core:go" = "1.27.3"
+"go:github.com/sargunv/devices-cli" = "v0.0.0-20261118051936-f04e04c68e26"
+"http:anyvm" = { version = "0.7.5", url = "https://github.com/anyvm-org/anyvm/releases/download/v{{ version }}/anyvm.py", checksum = "sha256:c192b299b9bf1b9f07b1d5e5b3977b518f8f24a9af9c20da259cdca22271d9f5" }
+
+[env]
+# The libraries of FreeBSD's base system, of the virtual machine's release,
+# which the hook below installs: Zig lacks some that the tests link, such as
+# libkvm.
+MLN_FREEBSD_RELEASE = "14.4"
+MLN_FREEBSD_SYSROOT = "{{ xdg_data_home }}/mln-rs/freebsd-{{ env.MLN_FREEBSD_RELEASE }}-base"
+CC_x86_64_unknown_freebsd = "{{ config_root }}/tools/zig-cc-freebsd.sh"
+AR_x86_64_unknown_freebsd = "zig ar"
+CARGO_TARGET_X86_64_UNKNOWN_FREEBSD_LINKER = "{{ config_root }}/tools/zig-cc-freebsd.sh"
+ANYVM = { value = "{{ tools['http:anyvm'].path }}/anyvm.py", tools = true }
+# Cargo's runner: the virtual machine sees the checkout at its own path, so a
+# test gets its package directory and the RUST_ and MLN_ variables.
+CARGO_TARGET_X86_64_UNKNOWN_FREEBSD_RUNNER = "devices-cli exec freebsd --release {{ env.MLN_FREEBSD_RELEASE }} --env CARGO_MANIFEST_DIR --env RUST_* --env MLN_* --"
+
+[hooks]
+# The Rust target, and the base system's libraries when they're missing, from
+# the release's base.txz (which mise's http backend won't unpack, since it holds
+# absolute symbolic links). Inline scripts, since a hook's `mise run` would not
+# see an environment selected with -E.
+postinstall = [
+  "rustup target add x86_64-unknown-freebsd",
+  '''[ -d "$MLN_FREEBSD_SYSROOT/usr/lib" ] || { f=$(mktemp) && curl -fsSL -o "$f" "https://download.freebsd.org/releases/amd64/$MLN_FREEBSD_RELEASE-RELEASE/base.txz" && echo "769f60a6eea2938ad6b7943cfbcc17dfaf7d1f7ba59a32b869a00349302df853  $f" | $(command -v sha256sum || echo shasum -a 256) -c - && mkdir -p "$MLN_FREEBSD_SYSROOT" && tar -xf "$f" -C "$MLN_FREEBSD_SYSROOT" ./lib ./usr/lib; s=$?; rm -f "$f"; exit $s; }''',
+]
