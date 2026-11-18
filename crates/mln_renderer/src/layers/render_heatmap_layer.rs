@@ -428,7 +428,7 @@ impl RenderHeatmapLayer {
         render_target_texture: Texture2DPtr,
         paint_parameters: &PaintParameters<'_>,
     ) {
-        self.drawing.frame.get_or_insert_with(FrameDraws::new);
+        let frame = self.drawing.frame.get_or_insert_with(FrameDraws::new);
         if self.heatmap_texture_shader.is_none() {
             self.heatmap_texture_shader =
                 shaders.shader(HEATMAP_TEXTURE_SHADER_GROUP_NAME, ProjectionVariant::Mercator);
@@ -490,7 +490,6 @@ impl RenderHeatmapLayer {
         let frame_draw = FrameDraw { depth: DrawDepth::Off, ..draw.frame_draw(None) };
         *self.drawing.caches.layer_cache_mut() = Some(draw);
 
-        let frame = self.drawing.frame.get_or_insert_with(FrameDraws::new);
         frame.draws.clear();
         frame.draws.push(frame_draw);
         let mut m: Mat4 = [0.0; 16];

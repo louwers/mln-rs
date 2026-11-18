@@ -191,8 +191,8 @@ impl OutlineQuad {
 struct TileBuilder<'a> {
     /// The shaders of the fills and the outlines, with or without a
     /// pattern.
-    fill_shaders: ShaderGroupPtr,
-    outline_shaders: ShaderGroupPtr,
+    fill_shaders: &'a ShaderGroupPtr,
+    outline_shaders: &'a ShaderGroupPtr,
     /// Whether the layer fills with a pattern.
     pattern: bool,
     /// Whether the layer's outline color is its fill color.
@@ -648,47 +648,37 @@ impl RenderLayer for RenderFillLayer {
 
         self.update_projection_variant(state);
 
-        if self.fill_shader_group.is_none() {
-            self.fill_shader_group = shaders.shader_group(FILL_SHADER_NAME);
-        }
         let outline_quads = draws_outline_quads(context);
+        let pattern = !self.values.unevaluated.fill_pattern.is_undefined();
         let (outline_name, outline_pattern_name) = if outline_quads {
             (FILL_OUTLINE_INSTANCED_SHADER_NAME, FILL_OUTLINE_PATTERN_INSTANCED_SHADER_NAME)
         } else {
             (FILL_OUTLINE_SHADER_NAME, FILL_OUTLINE_PATTERN_SHADER_NAME)
         };
-        if self.outline_shader_group.is_none() {
-            self.outline_shader_group = shaders.shader_group(outline_name);
+        let (fill_group, fill_name, outline_group, outline_name) = if pattern {
+            let outline = &mut self.outline_pattern_shader_group;
+            (&mut self.pattern_shader_group, FILL_PATTERN_SHADER_NAME, outline, outline_pattern_name)
+        } else {
+            (&mut self.fill_shader_group, FILL_SHADER_NAME, &mut self.outline_shader_group, outline_name)
+        };
+        if fill_group.is_none() {
+            *fill_group = shaders.shader_group(fill_name);
         }
-        if self.pattern_shader_group.is_none() {
-            self.pattern_shader_group = shaders.shader_group(FILL_PATTERN_SHADER_NAME);
+        if outline_group.is_none() {
+            *outline_group = shaders.shader_group(outline_name);
         }
-        if self.outline_pattern_shader_group.is_none() {
-            self.outline_pattern_shader_group = shaders.shader_group(outline_pattern_name);
-        }
-        let (Some(fill_shaders), Some(outline_shaders), Some(pattern_shaders), Some(outline_pattern_shaders)) = (
-            self.fill_shader_group.clone(),
-            self.outline_shader_group.clone(),
-            self.pattern_shader_group.clone(),
-            self.outline_pattern_shader_group.clone(),
-        ) else {
+        let (Some(fill_shaders), Some(outline_shaders)) = (&*fill_group, &*outline_group) else {
             self.remove_all_draws();
             return;
         };
-
-        let frame = self.drawing.frame.get_or_insert_with(FrameDraws::new);
-        let paint = &self.values.evaluated.paint;
-        frame.composite = Composite::of(*paint.fill_layer_opacity.uniform(), *paint.fill_layer_blend.uniform());
-        frame.set_stencil_tiles(render_tiles.render_tiles().map(|tile| tile.id));
 
         if outline_quads && self.outline_quad.is_none() {
             self.outline_quad = Some(OutlineQuad::new());
         }
 
-        let pattern = !self.values.unevaluated.fill_pattern.is_undefined();
         let mut builder = TileBuilder {
-            fill_shaders: if pattern { pattern_shaders } else { fill_shaders },
-            outline_shaders: if pattern { outline_pattern_shaders } else { outline_shaders },
+            fill_shaders,
+            outline_shaders,
             pattern,
             outline_is_fill_color: self.values.unevaluated.fill_outline_color.is_undefined(),
             projection_variant: self.base.projection_variant,
@@ -782,6 +772,8 @@ impl RenderLayer for RenderFillLayer {
         }
 
         let frame = self.drawing.frame.get_or_insert_with(FrameDraws::new);
+        frame.composite = Composite::of(*layer.paint.fill_layer_opacity.uniform(), *layer.paint.fill_layer_blend.uniform());
+        frame.set_stencil_tiles(render_tiles.render_tiles().map(|tile| tile.id));
         self.draw_list.finish(frame, context, |writer| Self::write_uniforms(layer, writer));
     }
 }

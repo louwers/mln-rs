@@ -429,12 +429,12 @@ impl RenderLayer for RenderCircleLayer {
             self.remove_all_draws();
             return;
         };
-        self.drawing.frame.get_or_insert_with(FrameDraws::new);
+        let frame = self.drawing.frame.get_or_insert_with(FrameDraws::new);
 
         if self.circle_shader_group.is_none() {
             self.circle_shader_group = shaders.shader_group(CIRCLE_SHADER_GROUP_NAME);
         }
-        let Some(circle_shader_group) = self.circle_shader_group.clone() else {
+        let Some(circle_shader_group) = &self.circle_shader_group else {
             self.remove_all_draws();
             return;
         };
@@ -442,6 +442,7 @@ impl RenderLayer for RenderCircleLayer {
             return;
         }
 
+        let layer_id = self.base.style.base().id.as_str();
         let layer = &*self.values.evaluated;
         let evaluated = &layer.paint;
         for tile in render_tiles.iter() {
@@ -455,7 +456,7 @@ impl RenderLayer for RenderCircleLayer {
             let Some(bucket) = render_data.bucket::<Circle>() else {
                 continue;
             };
-            let Some(binders) = bucket.paint_property_binders.get(self.get_id()) else {
+            let Some(binders) = bucket.paint_property_binders.get(layer_id) else {
                 continue;
             };
             let geometry = tile.get_bucket_geometry();
@@ -513,7 +514,6 @@ impl RenderLayer for RenderCircleLayer {
             self.draw_list.push(draw, Self::uniforms(layer, &tile_id, binders, paint_parameters));
         }
 
-        let frame = self.drawing.frame.get_or_insert_with(FrameDraws::new);
         self.draw_list.finish(frame, context, |writer| Self::write_uniforms(layer, writer));
     }
 }

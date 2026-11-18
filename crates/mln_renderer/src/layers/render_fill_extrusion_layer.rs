@@ -420,7 +420,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
                 return;
             }
         };
-        self.drawing.frame.get_or_insert_with(FrameDraws::new);
+        let frame = self.drawing.frame.get_or_insert_with(FrameDraws::new);
 
         if self.fill_extrusion_group.is_none() {
             self.fill_extrusion_group = shaders.shader_group("FillExtrusionShader");
@@ -443,11 +443,11 @@ impl RenderLayer for RenderFillExtrusionLayer {
 
         let has_pattern = !self.values.unevaluated.fill_extrusion_pattern.is_undefined();
         let (shader_group, wall_shader_group) = if has_pattern {
-            (self.fill_extrusion_pattern_group.clone(), self.fill_extrusion_pattern_wall_group.clone())
+            (&self.fill_extrusion_pattern_group, &self.fill_extrusion_pattern_wall_group)
         } else {
-            (self.fill_extrusion_group.clone(), self.fill_extrusion_wall_group.clone())
+            (&self.fill_extrusion_group, &self.fill_extrusion_wall_group)
         };
-        let (Some(shaders), Some(wall_shaders)) = (shader_group, wall_shader_group) else {
+        let (Some(shaders), Some(wall_shaders)) = (shader_group.clone(), wall_shader_group.clone()) else {
             self.remove_all_draws();
             return;
         };
@@ -495,7 +495,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
             }
             self.drawing.caches.set_bucket(&tile_id, bucket.base.bucket_id);
 
-            let Some(binders) = bucket.paint_property_binders.get(self.get_id()) else {
+            let Some(binders) = bucket.paint_property_binders.get(self.base.style.base().id.as_str()) else {
                 continue;
             };
 
@@ -521,7 +521,6 @@ impl RenderLayer for RenderFillExtrusionLayer {
             }
         }
 
-        let frame = self.drawing.frame.get_or_insert_with(FrameDraws::new);
         frame.set_stencil_tiles(render_tiles.render_tiles().map(|tile| tile.id));
         self.draw_list.finish(frame, context, |writer| Self::write_uniforms(layer, writer, paint_parameters));
     }
