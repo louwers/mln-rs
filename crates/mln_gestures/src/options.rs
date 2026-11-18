@@ -69,6 +69,8 @@ pub enum InvalidGestureOptions {
     Snap(&'static str, InvalidMomentum),
     #[error("a notch of {0} needs a positive spacing and a finite offset")]
     Notch(&'static str),
+    #[error("a tap's zoom must be finite")]
+    TapZoom,
 }
 
 /// How the recognizer moves each part of the camera. By default every part
@@ -76,7 +78,8 @@ pub enum InvalidGestureOptions {
 /// rest); the bearing settles on north within 7° and notches there; zoom and
 /// pitch stay where gestures leave them, without notches
 /// ([`MomentumSnap::ZOOM`] and [`MomentumSnap::PITCH`] settle them on a whole
-/// level and flat).
+/// level and flat); and a double tap zooms in a level and a two-finger tap
+/// out.
 ///
 /// The recognizer's rates and thresholds come from maplibre-native-ffi's
 /// browser demo where it has the gesture and GL JS's handlers elsewhere; the
@@ -88,6 +91,12 @@ pub struct GestureOptions {
     pub zoom: AxisOptions,
     pub bearing: AxisOptions,
     pub pitch: AxisOptions,
+    /// Zoom levels that a double tap zooms in, eased; the zoom-out mode zooms
+    /// out instead. 0 leaves double taps to the host.
+    pub double_tap_zoom: f64,
+    /// Zoom levels that a two-finger tap zooms, eased; negative zooms out.
+    /// 0 leaves two-finger taps to the host.
+    pub two_finger_tap_zoom: f64,
 
     /// How far a press may move and still be a tap; drags start past it.
     pub(crate) click_tolerance: f64,
@@ -95,6 +104,9 @@ pub struct GestureOptions {
     /// between them. A two-finger tap's fingers may move this far.
     pub(crate) tap_tolerance: f64,
     pub(crate) tap_interval_ms: f64,
+    /// How long a press stays still to be a long press (Android's and iOS's
+    /// 500 ms).
+    pub(crate) long_press_ms: f64,
     /// Degrees of bearing per pixel of a sideways rotate drag: ffi's demo's
     /// 0.5 (GL JS, Compose and Orbis turn 0.8).
     pub(crate) drag_rotate: f64,
@@ -149,8 +161,11 @@ impl GestureOptions {
         }
     }
 
-    /// Checks every part's momentum, snap and notches.
+    /// Checks every part's momentum, snap and notches, and the taps' zooms.
     pub fn validate(&self) -> Result<(), InvalidGestureOptions> {
+        if !self.double_tap_zoom.is_finite() || !self.two_finger_tap_zoom.is_finite() {
+            return Err(InvalidGestureOptions::TapZoom);
+        }
         let momentum = |name, momentum: Option<MomentumDecay>| {
             momentum
                 .map_or(Ok(()), |decay| decay.validate().map_err(|error| InvalidGestureOptions::Momentum(name, error)))
@@ -183,9 +198,12 @@ impl Default for GestureOptions {
             zoom: axis(MomentumDecay::ZOOM, None, Vec::new()),
             bearing: axis(MomentumDecay::BEARING, Some(MomentumSnap::BEARING), vec![Notch::NORTH]),
             pitch: axis(MomentumDecay::PITCH, None, Vec::new()),
+            double_tap_zoom: 1.0,
+            two_finger_tap_zoom: -1.0,
             click_tolerance: 3.0,
             tap_tolerance: 30.0,
             tap_interval_ms: 500.0,
+            long_press_ms: 500.0,
             drag_rotate: 0.5,
             drag_pitch: 0.5,
             tap_drag_zoom: 1.0 / 128.0,

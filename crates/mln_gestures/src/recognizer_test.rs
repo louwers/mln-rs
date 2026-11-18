@@ -122,8 +122,8 @@ fn distance(a: ScreenCoordinate, b: ScreenCoordinate) -> f64 {
     (a.x - b.x).hypot(a.y - b.y)
 }
 
-const ROTATE: Modes = Modes { rotate: true, box_zoom: false };
-const BOX: Modes = Modes { rotate: false, box_zoom: true };
+const ROTATE: Modes = Modes { rotate: true, box_zoom: false, zoom_out: false };
+const BOX: Modes = Modes { rotate: false, box_zoom: true, zoom_out: false };
 
 /// A discrete delta, as a host maps a wheel's `n` detents: a third of a level
 /// each, scrolling down zooming out.
@@ -296,7 +296,7 @@ fn holding_still_before_release_stops_momentum() {
 }
 
 #[test]
-fn taps_and_double_taps_report_without_zooming() {
+fn taps_report_and_a_double_tap_zooms_in_around_it() {
     let mut rig = Rig::new();
     rig.down(1, PointerKind::Mouse, 200.0, 200.0);
     rig.to(1, 201.0, 200.0);
@@ -304,23 +304,73 @@ fn taps_and_double_taps_report_without_zooming() {
     let position = p(201.0, 200.0);
     assert_eq!(rig.input.take_events(), [GestureEvent::Tap { id: 1, position }]);
     rig.now += 100.0;
+    let ground = rig.unproject(position);
     rig.down(1, PointerKind::Mouse, 201.0, 200.0);
     rig.up(1, 201.0, 200.0);
     let double = [GestureEvent::Tap { id: 1, position }, GestureEvent::DoubleTap { id: 1, position }];
     assert_eq!(rig.input.take_events(), double);
     rig.settle();
-    assert_eq!(rig.zoom(), 12.0);
+    assert!((rig.zoom() - 13.0).abs() < 1e-9, "{}", rig.zoom());
+    let under = rig.project(ground);
+    assert!(distance(under, position) < 1e-6, "{under:?}");
 
-    // A third tap starts over, and a long press isn't the first of a double.
+    // A third tap starts over.
     rig.now += 100.0;
     rig.down(1, PointerKind::Mouse, 201.0, 200.0);
+    rig.up(1, 201.0, 200.0);
+    assert_eq!(rig.input.take_events(), [GestureEvent::Tap { id: 1, position }]);
+}
+
+#[test]
+fn the_zoom_out_mode_turns_a_double_tap_out() {
+    let mut rig = Rig::new();
+    rig.send(Input::Modes(Modes { zoom_out: true, ..Modes::default() }));
+    for _ in 0..2 {
+        rig.down(1, PointerKind::Mouse, 200.0, 200.0);
+        rig.up(1, 200.0, 200.0);
+        rig.now += 100.0;
+    }
+    rig.settle();
+    assert!((rig.zoom() - 11.0).abs() < 1e-9, "{}", rig.zoom());
+}
+
+#[test]
+fn a_press_held_still_is_a_long_press_and_no_tap() {
+    let mut rig = Rig::new();
+    rig.down(1, PointerKind::Touch, 200.0, 200.0);
+    assert!(rig.input.needs_frame(), "the press is timed");
+    // Frames time the press: 32 × 16 ms passes 500 ms.
+    for _ in 0..32 {
+        rig.frame();
+    }
+    let position = p(200.0, 200.0);
+    assert_eq!(rig.input.take_events(), [GestureEvent::LongPress { id: 1, position }]);
+    assert!(!rig.input.needs_frame());
+    rig.up(1, 200.0, 200.0);
+    // Its lift is no tap, and starts no double tap.
+    rig.now += 100.0;
+    rig.down(1, PointerKind::Touch, 200.0, 200.0);
+    rig.up(1, 200.0, 200.0);
+    assert_eq!(rig.input.take_events(), [GestureEvent::Tap { id: 1, position }]);
+
+    // Without frames, a press held that long reports its long press as it
+    // lifts, and still no tap.
+    rig.now += 1000.0;
+    rig.down(1, PointerKind::Touch, 200.0, 200.0);
     rig.now += 600.0;
-    rig.up(1, 201.0, 200.0);
-    rig.now += 100.0;
-    rig.down(1, PointerKind::Mouse, 201.0, 200.0);
-    rig.up(1, 201.0, 200.0);
-    let taps = [GestureEvent::Tap { id: 1, position }, GestureEvent::Tap { id: 1, position }];
-    assert_eq!(rig.input.take_events(), taps);
+    rig.up(1, 200.0, 200.0);
+    assert_eq!(rig.input.take_events(), [GestureEvent::LongPress { id: 1, position }]);
+
+    // A press that moves past the click tolerance is a drag, not a long press.
+    rig.now += 1000.0;
+    rig.down(1, PointerKind::Touch, 200.0, 200.0);
+    rig.now += 16.0;
+    rig.to(1, 220.0, 200.0);
+    for _ in 0..40 {
+        rig.frame();
+    }
+    rig.up(1, 220.0, 200.0);
+    assert_eq!(rig.input.take_events(), []);
 }
 
 #[test]
@@ -443,22 +493,41 @@ fn two_fingers_moving_up_together_tilt() {
 }
 
 #[test]
-fn double_taps_and_two_finger_taps_report_without_zooming() {
+fn a_double_tap_zooms_in_and_a_two_finger_tap_out_unless_their_zoom_is_0() {
+    let tap_twice = |rig: &mut Rig| {
+        rig.down(1, PointerKind::Touch, 300.0, 300.0);
+        rig.up(1, 300.0, 300.0);
+        rig.now += 150.0;
+        rig.down(1, PointerKind::Touch, 305.0, 302.0);
+        rig.up(1, 305.0, 302.0);
+    };
+    let tap_two = |rig: &mut Rig| {
+        rig.now += 1000.0;
+        rig.down(1, PointerKind::Touch, 300.0, 300.0);
+        rig.down(2, PointerKind::Touch, 400.0, 300.0);
+        rig.now += 60.0;
+        rig.up(1, 300.0, 300.0);
+        rig.up(2, 400.0, 300.0);
+    };
     let mut rig = Rig::new();
-    rig.down(1, PointerKind::Touch, 300.0, 300.0);
-    rig.up(1, 300.0, 300.0);
-    rig.now += 150.0;
-    rig.down(1, PointerKind::Touch, 305.0, 302.0);
-    rig.up(1, 305.0, 302.0);
+    tap_twice(&mut rig);
     let events = rig.input.take_events();
     assert!(events.contains(&GestureEvent::DoubleTap { id: 1, position: p(305.0, 302.0) }), "{events:?}");
-    rig.now += 1000.0;
-    rig.down(1, PointerKind::Touch, 300.0, 300.0);
-    rig.down(2, PointerKind::Touch, 400.0, 300.0);
-    rig.now += 60.0;
-    rig.up(1, 300.0, 300.0);
-    rig.up(2, 400.0, 300.0);
+    rig.settle();
+    assert!((rig.zoom() - 13.0).abs() < 1e-9, "{}", rig.zoom());
+    tap_two(&mut rig);
     assert_eq!(rig.input.take_events(), [GestureEvent::TwoFingerTap { position: p(350.0, 300.0) }]);
+    rig.settle();
+    assert!((rig.zoom() - 12.0).abs() < 1e-9, "{}", rig.zoom());
+
+    // At 0 they report and leave the zoom to the host.
+    let options = GestureOptions { double_tap_zoom: 0.0, two_finger_tap_zoom: 0.0, ..GestureOptions::default() };
+    let mut rig = Rig::with(&options);
+    tap_twice(&mut rig);
+    tap_two(&mut rig);
+    let events = rig.input.take_events();
+    assert!(events.contains(&GestureEvent::DoubleTap { id: 1, position: p(305.0, 302.0) }), "{events:?}");
+    assert!(events.contains(&GestureEvent::TwoFingerTap { position: p(350.0, 300.0) }), "{events:?}");
     rig.settle();
     assert_eq!(rig.zoom(), 12.0);
 }
@@ -1490,4 +1559,29 @@ fn a_cancelled_finger_cancels_the_whole_gesture() {
     assert_eq!(rig.zoom(), zoom);
     assert!(distance(rig.project(ground), p(400.0, 300.0)) < 1e-6);
     assert!(!rig.camera.is_gesture_in_progress());
+}
+
+#[test]
+fn a_second_press_held_still_is_a_long_press_and_no_double_tap() {
+    for timed in [true, false] {
+        let mut rig = Rig::new();
+        rig.down(1, PointerKind::Touch, 300.0, 300.0);
+        rig.up(1, 300.0, 300.0);
+        rig.now += 100.0;
+        rig.input.take_events();
+        rig.down(1, PointerKind::Touch, 300.0, 300.0);
+        assert!(rig.input.needs_frame(), "the second press is timed");
+        if timed {
+            for _ in 0..32 {
+                rig.frame();
+            }
+        } else {
+            rig.now += 600.0;
+        }
+        rig.up(1, 300.0, 300.0);
+        let position = p(300.0, 300.0);
+        assert_eq!(rig.input.take_events(), [GestureEvent::LongPress { id: 1, position }], "timed: {timed}");
+        rig.settle();
+        assert_eq!(rig.zoom(), 12.0, "timed: {timed}");
+    }
 }

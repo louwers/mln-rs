@@ -3537,9 +3537,15 @@ pub struct mln_gesture_axis_options {
     pub notches: *const mln_gesture_notch,
     pub notch_count: usize,
 }
+pub const MLN_GESTURE_OPTION_DOUBLE_TAP_ZOOM: mln_gesture_option_field = 1;
+pub const MLN_GESTURE_OPTION_TWO_FINGER_TAP_ZOOM: mln_gesture_option_field = 2;
+/// The fields that mln_gesture_options sets.
+pub type mln_gesture_option_field = u32;
+/// A set of mln_gesture_option_field bits.
+pub type mln_gesture_option_fields = u32;
 /** How a gesture recognizer moves each part of the camera.
 
- Each part's settings whose bits aren't set keep their values. A new
+ Settings whose bits aren't set keep their values. A new
  recognizer moves every part, and glides each by friction with a half-life
  of 140 ms, a minimum speed of 0, and no maximum speed or distance, with
  these exceptions:
@@ -3553,11 +3559,19 @@ pub struct mln_gesture_axis_options {
  - Pitch stops at 1 degree per second and needs a release of at least 5. Its
    snap, when on, settles flat within 7 degrees.
 
- Snaps take 300 ms.*/
+ Snaps take 300 ms. A double tap zooms in a level and a two-finger tap out.*/
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mln_gesture_options {
     pub size: u32,
+    pub fields: mln_gesture_option_fields,
+    /** Zoom levels that a double tap zooms in, eased; with
+ MLN_GESTURE_MODE_ZOOM_OUT it zooms out instead. 0 leaves double taps to
+ the host. Finite.*/
+    pub double_tap_zoom: f64,
+    /** Zoom levels that a two-finger tap zooms, eased; negative zooms out. 0
+ leaves two-finger taps to the host. Finite.*/
+    pub two_finger_tap_zoom: f64,
     pub pan: mln_gesture_pan_options,
     pub zoom: mln_gesture_axis_options,
     pub bearing: mln_gesture_axis_options,
@@ -3574,9 +3588,12 @@ pub type mln_pointer_kind = u32;
 pub const MLN_GESTURE_MODE_ROTATE: mln_gesture_mode = 1;
 /// Draws a box that the map zooms to when the pointer lifts.
 pub const MLN_GESTURE_MODE_BOX_ZOOM: mln_gesture_mode = 2;
-/** What a one-pointer drag does instead of panning, from the pointer's held
- buttons or from held keys. A drag reads its modes when it starts and keeps
- them until it ends; rotating wins over a box zoom.*/
+/// A double tap zooms out instead of in.
+pub const MLN_GESTURE_MODE_ZOOM_OUT: mln_gesture_mode = 4;
+/** What a one-pointer drag or a double tap does instead of its default, from
+ the pointer's held buttons or from held keys. A drag reads its modes when
+ it starts and keeps them until it ends, and a double tap when it lifts;
+ rotating wins over a box zoom.*/
 pub type mln_gesture_mode = u32;
 /// A set of mln_gesture_mode bits.
 pub type mln_gesture_modes = u32;
@@ -3681,7 +3698,7 @@ pub struct mln_gesture_input {
     pub type_: mln_gesture_input_type,
     pub data: mln_gesture_input_data,
 }
-/// A pointer pressed and lifted without moving the map.
+/// A pointer pressed and lifted without moving the map, before 500 ms.
 pub const MLN_GESTURE_EVENT_TAP: mln_gesture_event_type = 1;
 /// The second tap of a double tap.
 pub const MLN_GESTURE_EVENT_DOUBLE_TAP: mln_gesture_event_type = 2;
@@ -3692,6 +3709,10 @@ pub const MLN_GESTURE_EVENT_TWO_FINGER_TAP: mln_gesture_event_type = 3;
  back, a part reports at most one notch every 50 ms, and box zooms report
  none.*/
 pub const MLN_GESTURE_EVENT_NOTCH: mln_gesture_event_type = 4;
+/** A pointer stayed pressed and still for 500 ms. Its lift makes no tap. The
+ recognizer reports it from mln_gesture_recognizer_frame() while the
+ pointer is down, or on its lift without a frame in time.*/
+pub const MLN_GESTURE_EVENT_LONG_PRESS: mln_gesture_event_type = 5;
 /// The kind of an mln_gesture_event.
 pub type mln_gesture_event_type = u32;
 /// A tap, at `position`, by the pointer `id`.
@@ -3725,10 +3746,10 @@ pub union mln_gesture_event_data {
     pub double_tap: mln_gesture_tap,
     pub two_finger_tap: mln_gesture_tap,
     pub notch: mln_gesture_notch_event,
+    pub long_press: mln_gesture_tap,
 }
-/** What a gesture means beyond moving the camera. The recognizer doesn't zoom
- on taps: the host answers them, such as a double tap with a discrete delta
- that zooms in a level.*/
+/** What a gesture means beyond moving the camera. Double taps and two-finger
+ taps also zoom, as the options say.*/
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct mln_gesture_event {
@@ -3743,7 +3764,8 @@ pub struct mln_gesture_result {
     /** Whether the recognizer used the input, so the host stops the platform's
  default for it. Frames report false.*/
     pub handled: bool,
-    /// Whether the recognizer needs another frame to ease or end deltas.
+    /** Whether the recognizer needs another frame, to time a press or to ease
+ or end deltas.*/
     pub needs_frame: bool,
     /** Whether a box-zoom drag is drawing `box_zoom`, which the host shows, in
  logical pixels corner to corner.*/

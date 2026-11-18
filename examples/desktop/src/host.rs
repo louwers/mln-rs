@@ -313,9 +313,10 @@ fn egui_over(ctx: &egui::Context, at: egui::Pos2) -> bool {
     crate::ui::over_controls(ctx, at.x, at.y)
 }
 
-/// What held keys do to drags: Ctrl rotates and tilts, Shift zooms to a box.
+/// What held keys do: Ctrl rotates and tilts on a drag, and Shift zooms to a
+/// box on a drag and out on a double click.
 fn key_modes(state: ModifiersState) -> Modes {
-    Modes { rotate: state.control_key(), box_zoom: state.shift_key() }
+    Modes { rotate: state.control_key(), box_zoom: state.shift_key(), zoom_out: state.shift_key() }
 }
 
 /// The recognizer's pointer id for a touch: the mouse is 0.
@@ -473,7 +474,7 @@ impl ApplicationHandler<UserEvent> for Host {
             WindowEvent::MouseInput { state, button, .. } => {
                 let modes = match button {
                     MouseButton::Left => Modes::default(),
-                    MouseButton::Right => Modes { rotate: true, box_zoom: false },
+                    MouseButton::Right => Modes { rotate: true, ..Modes::default() },
                     _ => return,
                 };
                 let position = open.cursor;

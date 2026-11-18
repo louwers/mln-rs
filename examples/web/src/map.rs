@@ -364,7 +364,7 @@ impl WebMap {
         // tile workers, the tiles' parsing and layout among them.
         self.tasks += pump::take_pool_time().as_secs_f64() * 1000.0;
         self.gestures.frame(&mut self.map, now);
-        self.answer_events(now);
+        self.answer_events();
         // A demand renders the map once the commands sent before it ran.
         let sent_sequence = self.map.sent_sequence();
         if self.redraw.swap(false, Ordering::SeqCst) || self.force || sent_sequence != self.demanded {
@@ -436,7 +436,7 @@ impl WebMap {
         // nothing to the map.
         let modes = match button {
             0 => Modes::default(),
-            2 => Modes { rotate: true, box_zoom: false },
+            2 => Modes { rotate: true, ..Modes::default() },
             _ => return false,
         };
         self.gesture(Input::Modes(key_modes(modifiers)), time);
@@ -569,9 +569,11 @@ const WHEEL_NOTCHES: u32 = 1;
 const SHIFT: u32 = 1;
 const CTRL: u32 = 2;
 
-/// What held keys do to drags: Ctrl rotates and tilts, Shift zooms to a box.
+/// What held keys do: Ctrl rotates and tilts on a drag, and Shift zooms to a
+/// box on a drag and out on a double click.
 fn key_modes(modifiers: u32) -> Modes {
-    Modes { rotate: modifiers & CTRL != 0, box_zoom: modifiers & SHIFT != 0 }
+    let shift = modifiers & SHIFT != 0;
+    Modes { rotate: modifiers & CTRL != 0, box_zoom: shift, zoom_out: shift }
 }
 
 fn camera_options(latitude: f64, longitude: f64, zoom: f64, bearing: f64, pitch: f64) -> CameraOptions {
@@ -599,26 +601,17 @@ impl WebMap {
     /// Returns whether the map used the input.
     fn gesture(&mut self, input: Input, time: f64) -> bool {
         let used = self.gestures.handle(&mut self.map, input, time);
-        self.answer_events(time);
+        self.answer_events();
         used
     }
 
-    /// Answers the recognizer's events: a double tap zooms in a level and a
-    /// two-finger tap out, where they were, and a notch reaches the page.
-    fn answer_events(&mut self, time: f64) {
+    /// Answers the recognizer's events: a notch reaches the page. The page
+    /// has no use for taps.
+    fn answer_events(&mut self) {
         for event in self.gestures.take_events() {
-            let (position, zoom) = match event {
-                GestureEvent::DoubleTap { position, .. } => (position, 1.0),
-                GestureEvent::TwoFingerTap { position } => (position, -1.0),
-                GestureEvent::Notch { .. } => {
-                    self.notched = true;
-                    continue;
-                }
-                GestureEvent::Tap { .. } => continue,
-            };
-            let pan = ScreenCoordinate::default();
-            let step = Input::Delta { position, discrete: true, pan, zoom, bearing: 0.0, pitch: 0.0 };
-            self.gestures.handle(&mut self.map, step, time);
+            if let GestureEvent::Notch { .. } = event {
+                self.notched = true;
+            }
         }
     }
 

@@ -591,7 +591,7 @@ impl View {
         let now = Instant::now();
         let ms = self.ms(now);
         self.gestures_animating = self.gestures.frame(&mut self.map, ms);
-        self.answer_events(ms);
+        self.answer_events();
 
         self.redraw |= self.inbox.take_redraw();
         let controls_due =
@@ -672,7 +672,7 @@ impl View {
     fn gesture(&mut self, input: Input, at: Instant) {
         let ms = self.ms(at);
         self.gestures.handle(&mut self.map, input, ms);
-        self.answer_events(ms);
+        self.answer_events();
         let box_zoom = self.gestures.box_zoom();
         if box_zoom != self.box_zoom {
             self.box_zoom = box_zoom;
@@ -680,20 +680,13 @@ impl View {
         }
     }
 
-    /// Answers the recognizer's events: a double tap zooms in a level and a
-    /// two-finger tap out, where they were, and a notch ticks the trackpad.
-    fn answer_events(&mut self, ms: f64) {
+    /// Answers the recognizer's events: a notch ticks the trackpad. The app
+    /// has no use for taps.
+    fn answer_events(&mut self) {
         for event in self.gestures.take_events() {
-            let (position, zoom) = match event {
-                GestureEvent::DoubleTap { position, .. } => (position, 1.0),
-                GestureEvent::TwoFingerTap { position } => (position, -1.0),
-                GestureEvent::Notch { .. } => {
-                    let _ = self.proxy.send_event(UserEvent::Notch);
-                    continue;
-                }
-                GestureEvent::Tap { .. } => continue,
-            };
-            self.gestures.handle(&mut self.map, zoom_step(position, zoom), ms);
+            if let GestureEvent::Notch { .. } = event {
+                let _ = self.proxy.send_event(UserEvent::Notch);
+            }
         }
     }
 

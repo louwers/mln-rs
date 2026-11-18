@@ -224,7 +224,7 @@ fn invalid_inputs_fail() {
     let recognizer = create_recognizer(map, None).unwrap();
     assert_eq!(handle(recognizer, &input(9, zeroed()), 0.0).0, MLN_STATUS_INVALID_ARGUMENT);
     assert_eq!(
-        handle(recognizer, &input(MLN_GESTURE_INPUT_MODES, mln_gesture_input_data { modes: 4 }), 0.0).0,
+        handle(recognizer, &input(MLN_GESTURE_INPUT_MODES, mln_gesture_input_data { modes: 8 }), 0.0).0,
         MLN_STATUS_INVALID_ARGUMENT
     );
     let delta = mln_gesture_delta { zoom: f64::NAN, ..zeroed() };
@@ -233,6 +233,82 @@ fn invalid_inputs_fail() {
         MLN_STATUS_INVALID_ARGUMENT
     );
     assert_eq!(handle(recognizer, &down(1, f64::INFINITY, 0.0, 0), 0.0).0, MLN_STATUS_INVALID_ARGUMENT);
+    mln_gesture_recognizer_release(recognizer);
+    release_map(map);
+    release(runtime);
+}
+
+/// Runs frames from `from` until the recognizer needs none; the events they
+/// reported and the time it stopped at.
+fn frames(recognizer: mln_gesture_recognizer, from: f64) -> (Vec<u32>, f64) {
+    let mut types = Vec::new();
+    let mut time = from;
+    loop {
+        time += 16.0;
+        let mut result = empty_result();
+        // SAFETY: local arguments.
+        assert_eq!(
+            unsafe { mln_gesture_recognizer_frame(recognizer, time, &raw mut result, NO_DIAGNOSTIC) },
+            MLN_STATUS_OK
+        );
+        types.extend(events(&result).iter().map(|event| event.type_));
+        if !result.needs_frame {
+            return (types, time);
+        }
+        assert!(time - from < 2000.0, "the recognizer settles");
+    }
+}
+
+fn zoom(map: mln_map) -> f64 {
+    map::resolve(map).unwrap().map.camera().and_then(Completion::wait).unwrap().camera.zoom
+}
+
+#[test]
+fn taps_zoom_as_the_options_and_modes_say_and_a_held_press_is_a_long_press() {
+    let runtime = create();
+    let map = create_map(runtime, &map_options(1.0));
+    let mut options = options();
+    options.fields = MLN_GESTURE_OPTION_DOUBLE_TAP_ZOOM;
+    options.double_tap_zoom = 2.0;
+    let recognizer = create_recognizer(map, Some(&options)).unwrap();
+    assert_eq!(held(recognizer).double_tap_zoom, 2.0);
+    assert_eq!(held(recognizer).two_finger_tap_zoom, -1.0);
+
+    // A double tap zooms in its two levels, and one with the zoom-out mode
+    // back out.
+    let start = zoom(map);
+    let mut time = 0.0;
+    for (modes, expected) in [(0, start + 2.0), (MLN_GESTURE_MODE_ZOOM_OUT, start)] {
+        for _ in 0..2 {
+            handle(recognizer, &down(1, 30.0, 16.0, modes), time);
+            handle(recognizer, &pointer(MLN_GESTURE_INPUT_POINTER_UP, 1, 30.0, 16.0), time + 30.0);
+            time += 100.0;
+        }
+        time = frames(recognizer, time).1 + 1000.0;
+        assert!((zoom(map) - expected).abs() < 1e-6, "{} != {expected}", zoom(map));
+    }
+
+    // A press held still: frames time it, and its lift makes no tap.
+    let time = time + 1000.0;
+    let (status, result) = handle(recognizer, &down(2, 30.0, 16.0, 0), time);
+    assert_eq!(status, MLN_STATUS_OK);
+    assert!(result.needs_frame, "the press is timed");
+    let mut long_pressed = false;
+    let mut now = time;
+    while !long_pressed {
+        now += 16.0;
+        let mut result = empty_result();
+        // SAFETY: local arguments.
+        assert_eq!(
+            unsafe { mln_gesture_recognizer_frame(recognizer, now, &raw mut result, NO_DIAGNOSTIC) },
+            MLN_STATUS_OK
+        );
+        long_pressed = events(&result).iter().any(|event| event.type_ == MLN_GESTURE_EVENT_LONG_PRESS);
+        assert!(now - time < 600.0, "a long press by 500 ms");
+    }
+    let (_, result) = handle(recognizer, &pointer(MLN_GESTURE_INPUT_POINTER_UP, 2, 30.0, 16.0), now + 16.0);
+    assert_eq!(result.event_count, 0);
+
     mln_gesture_recognizer_release(recognizer);
     release_map(map);
     release(runtime);

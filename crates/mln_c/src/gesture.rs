@@ -21,20 +21,22 @@ use crate::generated::types::{
     MLN_GESTURE_AXIS_BEARING, MLN_GESTURE_AXIS_OPTION_ENABLED, MLN_GESTURE_AXIS_OPTION_GLIDES,
     MLN_GESTURE_AXIS_OPTION_MOMENTUM, MLN_GESTURE_AXIS_OPTION_NOTCHES, MLN_GESTURE_AXIS_OPTION_SNAP,
     MLN_GESTURE_AXIS_OPTION_SNAPS, MLN_GESTURE_AXIS_PITCH, MLN_GESTURE_AXIS_ZOOM, MLN_GESTURE_EVENT_DOUBLE_TAP,
-    MLN_GESTURE_EVENT_NOTCH, MLN_GESTURE_EVENT_TAP, MLN_GESTURE_EVENT_TWO_FINGER_TAP, MLN_GESTURE_INPUT_DELTA,
-    MLN_GESTURE_INPUT_MODES, MLN_GESTURE_INPUT_PINCH, MLN_GESTURE_INPUT_POINTER_CANCEL, MLN_GESTURE_INPUT_POINTER_DOWN,
-    MLN_GESTURE_INPUT_POINTER_MOVE, MLN_GESTURE_INPUT_POINTER_UP, MLN_GESTURE_MODE_BOX_ZOOM, MLN_GESTURE_MODE_ROTATE,
-    MLN_GESTURE_PAN_OPTION_ENABLED, MLN_GESTURE_PAN_OPTION_GLIDES, MLN_GESTURE_PAN_OPTION_MOMENTUM,
-    MLN_GESTURE_RESULT_EVENT_CAPACITY, MLN_MOMENTUM_DECAY_DURATION_EXPONENT, MLN_MOMENTUM_DECAY_DURATION_MS,
-    MLN_MOMENTUM_DECAY_EASING, MLN_MOMENTUM_DECAY_HALF_LIFE_MS, MLN_MOMENTUM_DECAY_MAX_DISTANCE,
-    MLN_MOMENTUM_DECAY_MAX_SPEED, MLN_MOMENTUM_DECAY_MIN_SPEED, MLN_MOMENTUM_DECAY_MODEL,
-    MLN_MOMENTUM_DECAY_MODEL_CURVE, MLN_MOMENTUM_DECAY_MODEL_FRICTION, MLN_MOMENTUM_DECAY_REFERENCE_SPEED,
-    MLN_MOMENTUM_DECAY_STOP_SPEED, MLN_MOMENTUM_SNAP_DURATION_MS, MLN_MOMENTUM_SNAP_OFFSET, MLN_MOMENTUM_SNAP_SPACING,
-    MLN_MOMENTUM_SNAP_TOLERANCE, MLN_PINCH_PHASE_BEGIN, MLN_PINCH_PHASE_CANCEL, MLN_PINCH_PHASE_END,
-    MLN_PINCH_PHASE_UPDATE, MLN_POINTER_KIND_MOUSE, MLN_POINTER_KIND_PEN, MLN_POINTER_KIND_TOUCH, mln_diagnostic,
-    mln_gesture_axis_options, mln_gesture_event, mln_gesture_event_data, mln_gesture_input, mln_gesture_notch,
-    mln_gesture_notch_event, mln_gesture_options, mln_gesture_pan_options, mln_gesture_recognizer, mln_gesture_result,
-    mln_gesture_tap, mln_map, mln_momentum_decay, mln_momentum_snap, mln_screen_box, mln_status,
+    MLN_GESTURE_EVENT_LONG_PRESS, MLN_GESTURE_EVENT_NOTCH, MLN_GESTURE_EVENT_TAP, MLN_GESTURE_EVENT_TWO_FINGER_TAP,
+    MLN_GESTURE_INPUT_DELTA, MLN_GESTURE_INPUT_MODES, MLN_GESTURE_INPUT_PINCH, MLN_GESTURE_INPUT_POINTER_CANCEL,
+    MLN_GESTURE_INPUT_POINTER_DOWN, MLN_GESTURE_INPUT_POINTER_MOVE, MLN_GESTURE_INPUT_POINTER_UP,
+    MLN_GESTURE_MODE_BOX_ZOOM, MLN_GESTURE_MODE_ROTATE, MLN_GESTURE_MODE_ZOOM_OUT, MLN_GESTURE_OPTION_DOUBLE_TAP_ZOOM,
+    MLN_GESTURE_OPTION_TWO_FINGER_TAP_ZOOM, MLN_GESTURE_PAN_OPTION_ENABLED, MLN_GESTURE_PAN_OPTION_GLIDES,
+    MLN_GESTURE_PAN_OPTION_MOMENTUM, MLN_GESTURE_RESULT_EVENT_CAPACITY, MLN_MOMENTUM_DECAY_DURATION_EXPONENT,
+    MLN_MOMENTUM_DECAY_DURATION_MS, MLN_MOMENTUM_DECAY_EASING, MLN_MOMENTUM_DECAY_HALF_LIFE_MS,
+    MLN_MOMENTUM_DECAY_MAX_DISTANCE, MLN_MOMENTUM_DECAY_MAX_SPEED, MLN_MOMENTUM_DECAY_MIN_SPEED,
+    MLN_MOMENTUM_DECAY_MODEL, MLN_MOMENTUM_DECAY_MODEL_CURVE, MLN_MOMENTUM_DECAY_MODEL_FRICTION,
+    MLN_MOMENTUM_DECAY_REFERENCE_SPEED, MLN_MOMENTUM_DECAY_STOP_SPEED, MLN_MOMENTUM_SNAP_DURATION_MS,
+    MLN_MOMENTUM_SNAP_OFFSET, MLN_MOMENTUM_SNAP_SPACING, MLN_MOMENTUM_SNAP_TOLERANCE, MLN_PINCH_PHASE_BEGIN,
+    MLN_PINCH_PHASE_CANCEL, MLN_PINCH_PHASE_END, MLN_PINCH_PHASE_UPDATE, MLN_POINTER_KIND_MOUSE, MLN_POINTER_KIND_PEN,
+    MLN_POINTER_KIND_TOUCH, mln_diagnostic, mln_gesture_axis_options, mln_gesture_event, mln_gesture_event_data,
+    mln_gesture_input, mln_gesture_notch, mln_gesture_notch_event, mln_gesture_options, mln_gesture_pan_options,
+    mln_gesture_recognizer, mln_gesture_result, mln_gesture_tap, mln_map, mln_momentum_decay, mln_momentum_snap,
+    mln_screen_box, mln_status,
 };
 use crate::handles::{self, HandleKind, HandleTable};
 use crate::{geo, map};
@@ -56,6 +58,17 @@ static RECOGNIZERS: HandleTable<Mutex<Recognizer>> = HandleTable::new(HandleKind
 /// `options` over `current`, checked.
 fn options(options: &mln_gesture_options, current: &GestureOptions) -> Result<GestureOptions, Error> {
     let mut next = current.clone();
+    let fields = Fields::new(
+        options.fields,
+        MLN_GESTURE_OPTION_DOUBLE_TAP_ZOOM | MLN_GESTURE_OPTION_TWO_FINGER_TAP_ZOOM,
+        "mln_gesture_options.fields",
+    )?;
+    if let Some(levels) = fields.get(MLN_GESTURE_OPTION_DOUBLE_TAP_ZOOM, options.double_tap_zoom) {
+        next.double_tap_zoom = levels;
+    }
+    if let Some(levels) = fields.get(MLN_GESTURE_OPTION_TWO_FINGER_TAP_ZOOM, options.two_finger_tap_zoom) {
+        next.two_finger_tap_zoom = levels;
+    }
     pan(&options.pan, &mut next)?;
     let parts = [
         (&options.zoom, &mut next.zoom, MomentumDecay::ZOOM, MomentumSnap::ZOOM, "zoom"),
@@ -260,10 +273,15 @@ fn snap(options: &mln_momentum_snap, mut snap: MomentumSnap) -> Result<MomentumS
 // MARK: - Inputs and results
 
 fn modes(bits: u32) -> Result<Modes, Error> {
-    let fields = Fields::new(bits, MLN_GESTURE_MODE_ROTATE | MLN_GESTURE_MODE_BOX_ZOOM, "mln_gesture_modes")?;
+    let fields = Fields::new(
+        bits,
+        MLN_GESTURE_MODE_ROTATE | MLN_GESTURE_MODE_BOX_ZOOM | MLN_GESTURE_MODE_ZOOM_OUT,
+        "mln_gesture_modes",
+    )?;
     Ok(Modes {
         rotate: fields.get(MLN_GESTURE_MODE_ROTATE, ()).is_some(),
         box_zoom: fields.get(MLN_GESTURE_MODE_BOX_ZOOM, ()).is_some(),
+        zoom_out: fields.get(MLN_GESTURE_MODE_ZOOM_OUT, ()).is_some(),
     })
 }
 
@@ -340,6 +358,9 @@ fn event(event: GestureEvent) -> mln_gesture_event {
     let (type_, data) = match event {
         GestureEvent::Tap { id, position } => {
             (MLN_GESTURE_EVENT_TAP, mln_gesture_event_data { tap: tap(id, position) })
+        }
+        GestureEvent::LongPress { id, position } => {
+            (MLN_GESTURE_EVENT_LONG_PRESS, mln_gesture_event_data { long_press: tap(id, position) })
         }
         GestureEvent::DoubleTap { id, position } => {
             (MLN_GESTURE_EVENT_DOUBLE_TAP, mln_gesture_event_data { double_tap: tap(id, position) })

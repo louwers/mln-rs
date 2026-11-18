@@ -153,8 +153,11 @@ struct Pinch {
 #[derive(Clone, Copy, Debug)]
 enum Mode {
     Idle,
-    /// Pressed and not moved past the click tolerance.
-    Pressed,
+    /// Pressed and not moved past the click tolerance; held long enough,
+    /// it is a long press, which makes no tap.
+    Pressed {
+        long_pressed: bool,
+    },
     Pan,
     /// Shift-drag: the box from `origin` to the pointer is where the map
     /// zooms on release.
@@ -164,10 +167,12 @@ enum Mode {
     /// Mouse rotation and tilt.
     Rotate,
     Pinch(Pinch),
-    /// The second press of a double tap, held: dragging zooms.
+    /// The second press of a double tap, held: dragging zooms, and held
+    /// still it can be a long press, which makes no double tap.
     TapDrag {
         origin: V2,
         moved: bool,
+        long_pressed: bool,
     },
     /// A pinch the platform recognized ([`Input::Pinch`]).
     Platform,
@@ -533,10 +538,18 @@ impl GestureRecognizer {
     /// [`frame`](Self::frame) also says.
     #[must_use]
     pub fn needs_frame(&self) -> bool {
-        self.deltas.is_some()
+        self.deltas.is_some() || self.awaits_long_press()
     }
 
-    /// Taps and notches recognized since the last call.
+    /// Whether a press held still may yet become a long press.
+    fn awaits_long_press(&self) -> bool {
+        matches!(
+            self.mode,
+            Mode::Pressed { long_pressed: false } | Mode::TapDrag { moved: false, long_pressed: false, .. }
+        )
+    }
+
+    /// Taps, long presses and notches recognized since the last call.
     pub fn take_events(&mut self) -> Vec<GestureEvent> {
         std::mem::take(&mut self.events)
     }
@@ -559,12 +572,13 @@ impl GestureRecognizer {
         camera.update_camera(&CameraUpdate { phase, ..*update });
     }
 
-    /// Steps the eases of discrete deltas, ends deltas once they idle, and
-    /// samples the camera for notches. Call once a display frame with the
-    /// frame's time, on the inputs' clock; returns whether it needs more
-    /// frames.
+    /// Times long presses, steps the eases of discrete deltas, ends deltas
+    /// once they idle, and samples the camera for notches. Call once a
+    /// display frame with the frame's time, on the inputs' clock; returns
+    /// whether it needs more frames.
     pub fn frame(&mut self, camera: &mut dyn GestureCamera, now: f64) -> bool {
-        let animating = self.delta_frame(camera, now);
+        self.long_press(now);
+        self.delta_frame(camera, now);
         if let Some(watch) = &mut self.notch_watch {
             watch.sample(&camera.camera(), &self.options, now, &mut self.events);
             // The gesture ended, and so did its glide and snap: its command
@@ -573,7 +587,22 @@ impl GestureRecognizer {
                 self.notch_watch = None;
             }
         }
-        animating
+        self.needs_frame()
+    }
+
+    /// Reports a press held still for the long-press time, once.
+    fn long_press(&mut self, now: f64) {
+        if self.awaits_long_press()
+            && let [pointer] = self.pointers[..]
+            && now - pointer.down_at >= self.options.long_press_ms
+        {
+            match &mut self.mode {
+                Mode::Pressed { long_pressed } | Mode::TapDrag { long_pressed, .. } => *long_pressed = true,
+                _ => {}
+            }
+            self.last_tap = None;
+            self.events.push(GestureEvent::LongPress { id: pointer.id, position: pointer.position.into() });
+        }
     }
 
     /// The deltas' part of [`Self::frame`].
@@ -749,13 +778,13 @@ impl GestureRecognizer {
         match (self.mode, self.pointers.len()) {
             (Mode::Idle, 1) => {
                 self.mode = if touch && self.follows_tap(kind, position, now) {
-                    Mode::TapDrag { origin: position, moved: false }
+                    Mode::TapDrag { origin: position, moved: false, long_pressed: false }
                 } else {
-                    Mode::Pressed
+                    Mode::Pressed { long_pressed: false }
                 };
                 self.tracking.reset(now);
             }
-            (Mode::Pressed | Mode::Pan | Mode::TapDrag { .. }, 2) if touch => {
+            (Mode::Pressed { .. } | Mode::Pan | Mode::TapDrag { .. }, 2) if touch => {
                 let [a, b] = [self.pointers[0].position, self.pointers[1].position];
                 let vector = b - a;
                 self.mode = Mode::Pinch(Pinch {
@@ -770,7 +799,7 @@ impl GestureRecognizer {
                     single_since: None,
                     panning: false,
                     tap: now - self.pointers[0].down_at < self.options.tap_interval_ms
-                        && matches!(self.mode, Mode::Pressed),
+                        && matches!(self.mode, Mode::Pressed { .. }),
                 });
                 self.tracking.record(now, Step::default());
             }
@@ -786,7 +815,7 @@ impl GestureRecognizer {
         let last = self.pointers[index].position;
         self.pointers[index].position = position;
         match &mut self.mode {
-            Mode::Pressed => {
+            Mode::Pressed { .. } => {
                 let pointer = self.pointers[index];
                 let down = pointer.down;
                 if position.distance(down) > self.options.click_tolerance {
@@ -808,7 +837,7 @@ impl GestureRecognizer {
                 }
             }
             Mode::Pan | Mode::Rotate => self.drag_step(camera, last, position, now),
-            Mode::TapDrag { origin, moved } => {
+            Mode::TapDrag { origin, moved, .. } => {
                 let (origin, dy) = (*origin, position.y - last.y);
                 *moved = *moved || position.distance(origin) > self.options.click_tolerance;
                 if *moved && self.options.zoom.enabled {
@@ -980,14 +1009,20 @@ impl GestureRecognizer {
                 if pinch.tap && !cancelled {
                     let mid = (pinch.last[0] + pinch.last[1]) / 2.0;
                     self.events.push(GestureEvent::TwoFingerTap { position: mid.into() });
+                    self.tap_zoom(camera, mid, self.options.two_finger_tap_zoom, now);
                 }
             }
             Mode::Pan if !self.pointers.is_empty() => {}
-            Mode::Pressed => {
+            Mode::Pressed { long_pressed } => {
                 if self.pointers.is_empty() {
                     self.finish(camera, now, unless_cancelled(Finish::Settle));
-                    if !cancelled {
-                        self.tap(pointer, now);
+                    // A long press that no frame timed reports as it lifts.
+                    if !cancelled && !long_pressed && now - pointer.down_at >= self.options.long_press_ms {
+                        let position = pointer.position.into();
+                        self.events.push(GestureEvent::LongPress { id: pointer.id, position });
+                        self.last_tap = None;
+                    } else if !cancelled && !long_pressed {
+                        self.tap(camera, pointer, now);
                     }
                 }
             }
@@ -997,14 +1032,20 @@ impl GestureRecognizer {
                     self.zoom_to_box(camera, origin, position.unwrap_or(pointer.position));
                 }
             }
-            Mode::TapDrag { origin, moved } => {
+            Mode::TapDrag { origin, moved, long_pressed } => {
                 if self.pointers.is_empty() {
                     self.last_tap = None;
                     self.finish(camera, now, unless_cancelled(if moved { Finish::Glide } else { Finish::Settle }));
-                    if !moved && !cancelled {
+                    if !moved && !cancelled && !long_pressed {
                         let (id, position) = (pointer.id, origin.into());
-                        self.events
-                            .extend([GestureEvent::Tap { id, position }, GestureEvent::DoubleTap { id, position }]);
+                        // A long press that no frame timed reports as it lifts.
+                        if now - pointer.down_at >= self.options.long_press_ms {
+                            self.events.push(GestureEvent::LongPress { id, position });
+                        } else {
+                            self.events
+                                .extend([GestureEvent::Tap { id, position }, GestureEvent::DoubleTap { id, position }]);
+                            self.double_tap_zoom(camera, pointer, origin, now);
+                        }
                     }
                 }
             }
@@ -1020,19 +1061,32 @@ impl GestureRecognizer {
         true
     }
 
-    /// A press released without moving: a tap, perhaps the second of a
-    /// double tap. A long press isn't the first of one.
-    fn tap(&mut self, pointer: Pointer, now: f64) {
+    /// A press released without moving before a long press: a tap, perhaps
+    /// the second of a double tap.
+    fn tap(&mut self, camera: &mut dyn GestureCamera, pointer: Pointer, now: f64) {
         let (id, position) = (pointer.id, pointer.position);
         self.events.push(GestureEvent::Tap { id, position: position.into() });
-        if now - pointer.down_at > self.options.tap_interval_ms {
-            return;
-        }
         if self.follows_tap(pointer.kind, position, now) {
             self.last_tap = None;
             self.events.push(GestureEvent::DoubleTap { id, position: position.into() });
+            self.double_tap_zoom(camera, pointer, position, now);
         } else {
             self.last_tap = Some((position, now, pointer.kind));
+        }
+    }
+
+    /// A double tap's zoom at `at`: in, or out with the zoom-out mode.
+    fn double_tap_zoom(&mut self, camera: &mut dyn GestureCamera, pointer: Pointer, at: V2, now: f64) {
+        let levels = self.options.double_tap_zoom;
+        let out = (pointer.modes | self.modes).zoom_out;
+        self.tap_zoom(camera, at, if out { -levels } else { levels }, now);
+    }
+
+    /// Zooms `levels` around `at` as a discrete delta does, unless the zoom
+    /// is off or `levels` is 0.
+    fn tap_zoom(&mut self, camera: &mut dyn GestureCamera, at: V2, levels: f64, now: f64) {
+        if levels != 0.0 {
+            self.delta(camera, at, true, [0.0, 0.0, levels, 0.0, 0.0], now);
         }
     }
 

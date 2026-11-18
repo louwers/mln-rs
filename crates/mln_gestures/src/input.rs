@@ -20,23 +20,30 @@ pub enum PointerKind {
     Pen,
 }
 
-/// What a one-pointer drag does instead of panning, from the pointer's held
-/// buttons (a mouse's secondary button rotates on most platforms) or from
-/// held keys ([`Input::Modes`]). A drag reads the modes when it starts and
-/// keeps them until it ends; rotating wins over a box zoom.
+/// What a one-pointer drag or a double tap does instead of its default, from
+/// the pointer's held buttons (a mouse's secondary button rotates on most
+/// platforms) or from held keys ([`Input::Modes`]). A drag reads the modes
+/// when it starts and keeps them until it ends, and a double tap when it
+/// lifts; rotating wins over a box zoom.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Modes {
     /// Sideways turns the map and up and down tilts it.
     pub rotate: bool,
     /// Draws a box that the map zooms to when the pointer lifts.
     pub box_zoom: bool,
+    /// A double tap zooms out instead of in.
+    pub zoom_out: bool,
 }
 
 impl BitOr for Modes {
     type Output = Modes;
 
     fn bitor(self, other: Modes) -> Modes {
-        Modes { rotate: self.rotate || other.rotate, box_zoom: self.box_zoom || other.box_zoom }
+        Modes {
+            rotate: self.rotate || other.rotate,
+            box_zoom: self.box_zoom || other.box_zoom,
+            zoom_out: self.zoom_out || other.zoom_out,
+        }
     }
 }
 
@@ -113,13 +120,16 @@ pub enum PinchPhase {
     Cancel,
 }
 
-/// What a gesture means beyond moving the camera. The recognizer doesn't
-/// zoom on taps: hosts answer them, such as a double tap with a discrete
-/// [`Input::Delta`] that zooms in.
+/// What a gesture means beyond moving the camera. Double taps and two-finger
+/// taps also zoom, as the options say.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum GestureEvent {
-    /// The pointer `id` pressed and lifted without moving the map.
+    /// The pointer `id` pressed and lifted without moving the map, before a
+    /// long press.
     Tap { id: u32, position: ScreenCoordinate },
+    /// The pointer `id` stayed pressed and still for 500 ms; its lift makes
+    /// no tap.
+    LongPress { id: u32, position: ScreenCoordinate },
     /// The second tap of a double tap, by pointer `id`.
     DoubleTap { id: u32, position: ScreenCoordinate },
     /// Two fingers tapped together, around `position`.
