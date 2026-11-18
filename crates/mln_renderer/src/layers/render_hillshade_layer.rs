@@ -338,21 +338,19 @@ impl TypedLayer for RenderHillshadeLayer {
             self.hillshade_shader = shaders.shader(HILLSHADE_SHADER_GROUP_NAME, self.base.projection_variant);
         }
         let (Some(hillshade_prepare_shader), Some(hillshade_shader)) =
-            (self.hillshade_prepare_shader.clone(), self.hillshade_shader.clone())
+            (self.hillshade_prepare_shader.as_ref(), self.hillshade_shader.as_ref())
         else {
             self.remove_all_draws();
             return;
         };
 
         let context = &mut *paint_parameters.context;
-        let static_data_shared_vertices = self
+        let static_data_shared_vertices = &*self
             .static_data_shared_vertices
-            .get_or_insert_with(|| copied_vertices(context, &RenderStaticData::raster_vertices()))
-            .clone();
-        let static_data_indices = self
+            .get_or_insert_with(|| copied_vertices(context, &RenderStaticData::raster_vertices()));
+        let static_data_indices = &*self
             .static_data_indices
-            .get_or_insert_with(|| context.add_indexes(Indexes::new(RenderStaticData::quad_triangle_indices())))
-            .clone();
+            .get_or_insert_with(|| context.add_indexes(Indexes::new(RenderStaticData::quad_triangle_indices())));
 
         // `resampling` filters the prepared texture the tile's draw samples;
         // the prepare pass reads the DEM with Nearest regardless.
@@ -384,28 +382,25 @@ impl TypedLayer for RenderHillshadeLayer {
             entry.set_bucket(bucket_id);
 
             let generation = bucket.render_target_generation();
-            let render_target_texture = match self.bucket_render_targets.entry(bucket_id) {
-                Entry::Occupied(entry) if entry.get().generation == generation => {
-                    entry.get().render_target.texture().clone()
-                }
+            let target = match self.bucket_render_targets.entry(bucket_id) {
+                Entry::Occupied(entry) if entry.get().generation == generation => entry.into_mut(),
                 entry => {
-                    let attrs = hillshade_vertex_attributes(&static_data_shared_vertices);
+                    let attrs = hillshade_vertex_attributes(static_data_shared_vertices);
                     let target = BucketTarget::new(
                         paint_parameters.context,
                         bucket,
                         &tile_id.to_unwrapped(),
                         self.maxzoom,
-                        &hillshade_prepare_shader,
+                        hillshade_prepare_shader,
                         attrs,
-                        &static_data_indices,
+                        static_data_indices,
                     );
-                    let texture = target.render_target.texture().clone();
-                    entry.insert_entry(target);
-                    texture
+                    entry.insert_entry(target).into_mut()
                 }
             };
+            let render_target_texture = target.render_target.texture();
             let context = &mut *paint_parameters.context;
-            if let Some(mut texture) = context.texture_mut(&render_target_texture) {
+            if let Some(mut texture) = context.texture_mut(render_target_texture) {
                 texture.set_sampler(SamplerState {
                     filter: resampling_filter,
                     wrap_u: TextureWrapType::Clamp,
@@ -463,13 +458,13 @@ impl TypedLayer for RenderHillshadeLayer {
                 }
                 // The bucket's render target is made again with its
                 // generation.
-                cached.draw.objects.set_texture(ID_HILLSHADE_IMAGE_TEXTURE, Some(&render_target_texture));
+                cached.draw.objects.set_texture(ID_HILLSHADE_IMAGE_TEXTURE, Some(render_target_texture));
                 cached
             } else {
                 let mut textures = Textures::default();
-                textures[ID_HILLSHADE_IMAGE_TEXTURE] = Some(render_target_texture);
+                textures[ID_HILLSHADE_IMAGE_TEXTURE] = Some(render_target_texture.clone());
                 let objects = DrawObjects::new(
-                    Rc::clone(&hillshade_shader),
+                    Rc::clone(hillshade_shader),
                     ColorMode::alpha_blended(),
                     CullFaceMode::disabled(),
                     draw_geometry(),

@@ -196,7 +196,8 @@ impl RenderLayer for RenderCustomLayer {
         };
         let drawing = &mut self.drawing;
         drawing.frame = Some(frame);
-        drawing.backend = Some(Rc::clone(parameters.context.backend()));
+        // The renderer's backend, which stays the same.
+        drawing.backend.get_or_insert_with(|| Rc::clone(parameters.context.backend()));
         let Some(host) = &drawing.host else { return };
         let lent = gpu.lend(&mut |encoder| {
             host.prerender(&mut CustomLayerPrerenderParameters { encoder, frame: &frame });

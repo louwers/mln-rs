@@ -463,11 +463,6 @@ impl DrawObjects {
         }
     }
 
-    /// Makes `textures` those it binds.
-    pub(crate) fn set_textures(&mut self, textures: Textures) {
-        self.textures = textures;
-    }
-
     /// The texture it binds as `id`, which `make` makes where it has none;
     /// `None` where it has none and `make` returns `None`.
     pub(crate) fn texture_or_insert_with(

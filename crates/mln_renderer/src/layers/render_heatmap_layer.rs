@@ -53,7 +53,7 @@ use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
 use crate::render_layer::{
-    Atlases, LayerBucket, LayerParts, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
+    Atlases, LayerBucket, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
 };
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
@@ -326,9 +326,8 @@ impl TypedLayer for RenderHeatmapLayer {
             RenderTarget::new(paint_parameters.context, size, TextureChannelDataType::HalfFloat)
         });
         render_target.set_size(paint_parameters.context, size);
-        let render_target_texture = render_target.texture().clone();
         if self.draw_tiles(shaders, render_tiles, paint_parameters) {
-            self.draw_texture(shaders, &render_target_texture, paint_parameters);
+            self.draw_texture(shaders, paint_parameters);
         }
     }
 }
@@ -516,52 +515,54 @@ impl RenderHeatmapLayer {
         writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
     }
 
-    /// Makes the layer's draw of the frame, which colors the heat of
-    /// `render_target_texture` onto it through the layer's color ramp, with
-    /// GPU objects it builds once, and writes the buffers it reads.
-    fn draw_texture(
-        &mut self,
-        shaders: &ShaderRegistry,
-        render_target_texture: &SharedTexture,
-        paint_parameters: &mut PaintParameters<'_>,
-    ) {
-        if self.drawing.frame.is_none() {
+    /// Makes the layer's draw of the frame, which colors the heat of the
+    /// render target onto it through the layer's color ramp, with GPU
+    /// objects it builds once, and writes the buffers it reads.
+    fn draw_texture(&mut self, shaders: &ShaderRegistry, paint_parameters: &mut PaintParameters<'_>) {
+        let RenderHeatmapLayer {
+            values,
+            drawing,
+            color_ramp,
+            heatmap_texture_shader,
+            render_target,
+            shared_texture_vertices,
+            ..
+        } = self;
+        let Some(render_target) = render_target.as_ref() else {
+            return;
+        };
+        if drawing.frame.is_none() {
             return;
         }
-        if self.heatmap_texture_shader.is_none() {
-            self.heatmap_texture_shader =
-                shaders.shader(HEATMAP_TEXTURE_SHADER_GROUP_NAME, ProjectionVariant::Mercator);
+        if heatmap_texture_shader.is_none() {
+            *heatmap_texture_shader = shaders.shader(HEATMAP_TEXTURE_SHADER_GROUP_NAME, ProjectionVariant::Mercator);
         }
-        let Some(heatmap_texture_shader) = self.heatmap_texture_shader.clone() else {
-            self.remove_all_draws();
+        let Some(heatmap_texture_shader) = heatmap_texture_shader.as_ref() else {
+            drawing.clear();
             return;
         };
 
         let context = &mut *paint_parameters.context;
-        let drawing = &mut self.drawing;
-        let color_ramp = match &drawing.color_ramp {
-            Some((image, texture)) if Rc::ptr_eq(image, &self.color_ramp) => texture.clone(),
-            _ => {
-                let texture = context.add_texture_with(|texture| {
-                    texture.set_image(Some(Rc::clone(&self.color_ramp)));
-                    texture.set_sampler(SamplerState {
-                        filter: TextureFilterType::Linear,
-                        wrap_u: TextureWrapType::Clamp,
-                        wrap_v: TextureWrapType::Clamp,
-                        ..Default::default()
-                    });
+        if !drawing.color_ramp.as_ref().is_some_and(|(image, _)| Rc::ptr_eq(image, color_ramp)) {
+            let texture = context.add_texture_with(|texture| {
+                texture.set_image(Some(Rc::clone(color_ramp)));
+                texture.set_sampler(SamplerState {
+                    filter: TextureFilterType::Linear,
+                    wrap_u: TextureWrapType::Clamp,
+                    wrap_v: TextureWrapType::Clamp,
+                    ..Default::default()
                 });
-                drawing.color_ramp = Some((Rc::clone(&self.color_ramp), texture.clone()));
-                texture
-            }
-        };
+            });
+            drawing.color_ramp = Some((Rc::clone(color_ramp), texture));
+        }
+        let color_ramp = drawing.color_ramp.as_ref().map(|(_, texture)| texture);
+        let render_target_texture = render_target.texture();
         if let Some(draw) = &mut drawing.texture {
             // The render target's texture is made again with its size.
             draw.objects.set_texture(ID_HEATMAP_IMAGE_TEXTURE, Some(render_target_texture));
-            draw.objects.set_texture(ID_HEATMAP_COLOR_RAMP_TEXTURE, Some(&color_ramp));
+            draw.objects.set_texture(ID_HEATMAP_COLOR_RAMP_TEXTURE, color_ramp);
         } else {
-            let vertices = self
-                .shared_texture_vertices
+            let vertices = shared_texture_vertices
                 .get_or_insert_with(|| copied_vertices(context, &RenderStaticData::heatmap_texture_vertices()))
                 .clone();
             let mut attrs = VertexAttributeArray::new();
@@ -583,9 +584,9 @@ impl RenderHeatmapLayer {
             };
             let mut textures = Textures::default();
             textures[ID_HEATMAP_IMAGE_TEXTURE] = Some(render_target_texture.clone());
-            textures[ID_HEATMAP_COLOR_RAMP_TEXTURE] = Some(color_ramp);
+            textures[ID_HEATMAP_COLOR_RAMP_TEXTURE] = color_ramp.cloned();
             let objects = DrawObjects::new(
-                heatmap_texture_shader,
+                Rc::clone(heatmap_texture_shader),
                 ColorMode::alpha_blended(),
                 CullFaceMode::disabled(),
                 geometry,
@@ -603,7 +604,7 @@ impl RenderHeatmapLayer {
         matrix::ortho(&mut m, 0.0, f64::from(size.width), f64::from(size.height), 0.0, -1.0, 1.0);
         let props = HeatmapTexturePropsUBO {
             matrix: cast_matrix(&m),
-            opacity: *self.values.evaluated.paint.heatmap_opacity.uniform(),
+            opacity: *values.evaluated.paint.heatmap_opacity.uniform(),
             pad1: 0.0,
             pad2: 0.0,
             pad3: 0.0,

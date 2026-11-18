@@ -389,27 +389,23 @@ impl TypedLayer for RenderFillExtrusionLayer {
         } else {
             (&self.fill_extrusion_group, &self.fill_extrusion_wall_group)
         };
-        let (Some(shaders), Some(wall_shaders)) = (shader_group.clone(), wall_shader_group.clone()) else {
+        let (Some(shaders), Some(wall_shaders)) = (shader_group.as_ref(), wall_shader_group.as_ref()) else {
             self.remove_all_draws();
             return;
         };
 
         let context = &mut *paint_parameters.context;
-        let static_vertices = self
+        let static_vertices = &*self
             .static_data_vertices
-            .get_or_insert_with(|| copied_vertices(context, &RenderStaticData::fill_extrusion_vertices()))
-            .clone();
-        let static_indices = self
-            .static_data_indices
-            .get_or_insert_with(|| {
-                let indexes = if instanced_walls {
-                    RenderStaticData::fill_extrusion_triangle_indices()
-                } else {
-                    RenderStaticData::fill_extrusion_wall_indices()
-                };
-                context.add_indexes(Indexes::new(indexes))
-            })
-            .clone();
+            .get_or_insert_with(|| copied_vertices(context, &RenderStaticData::fill_extrusion_vertices()));
+        let static_indices = &*self.static_data_indices.get_or_insert_with(|| {
+            let indexes = if instanced_walls {
+                RenderStaticData::fill_extrusion_triangle_indices()
+            } else {
+                RenderStaticData::fill_extrusion_wall_indices()
+            };
+            context.add_indexes(Indexes::new(indexes))
+        });
         let mut builder = TileBuilder {
             shaders,
             wall_shaders,
@@ -510,17 +506,17 @@ impl RenderLayer for RenderFillExtrusionLayer {
 }
 
 /// What building the draws of an update's tiles reads of the layer.
-struct TileBuilder {
+struct TileBuilder<'a> {
     /// The shaders of the roofs and of the walls.
-    shaders: ShaderGroupPtr,
-    wall_shaders: ShaderGroupPtr,
+    shaders: &'a ShaderGroupPtr,
+    wall_shaders: &'a ShaderGroupPtr,
     projection_variant: mln_gfx::projection_variant::ProjectionVariant,
     /// Whether the walls are instances of the static quad, rather than quads
     /// of their own.
     instanced_walls: bool,
     /// The static quad, and the indexes the walls draw.
-    static_vertices: SharedVertices,
-    static_indices: SharedIndexes,
+    static_vertices: &'a SharedVertices,
+    static_indices: &'a SharedIndexes,
     has_pattern: bool,
     /// Whether the layer draws into depth before it draws in color.
     depth_pass: bool,
@@ -529,7 +525,7 @@ struct TileBuilder {
     first_shaders: Option<(ShaderProgramPtr, ShaderProgramPtr)>,
 }
 
-impl TileBuilder {
+impl TileBuilder<'_> {
     /// The draws of `tile`'s `bucket`, laid out with the layer's `evaluated`
     /// values: of its roofs, then of its walls, each into depth, where the
     /// layer draws it, then in color.
@@ -582,7 +578,7 @@ impl TileBuilder {
         } else {
             let mut instance_attrs = VertexAttributeArray::new();
             read_paint_properties(&mut instance_attrs, binders, evaluated, paint, &mut wall_properties_as_uniforms);
-            read_wall_instances(&mut wall_attrs, &mut instance_attrs, &self.static_vertices, &vertices);
+            read_wall_instances(&mut wall_attrs, &mut instance_attrs, self.static_vertices, &vertices);
             let segments = vec![RenderStaticData::fill_extrusion_segment(walls)];
             (Some(instance_attrs), self.static_vertices.count(), segments)
         };
@@ -645,7 +641,7 @@ impl TileBuilder {
             vertices: &wall_attrs,
             instances: wall_instance_attrs.as_ref(),
             vertex_count: wall_vertex_count,
-            indexes: &self.static_indices,
+            indexes: self.static_indices,
             segments: &wall_segments,
         };
         if walls > 0 && wall_vertex_count > 0 {
@@ -677,7 +673,7 @@ fn wall_paint(
     }
 }
 
-impl TileBuilder {
+impl TileBuilder<'_> {
     /// Points the draws of `cached`, the tile's, at the paint values of its
     /// bucket's `binders` that feature state rewrote.
     fn refresh_paint(

@@ -68,11 +68,13 @@ enum RasterPart {
 }
 
 /// What the layer keeps of its draws: those of the tiles, and of an image
-/// source's image, one for each tile it is drawn in.
+/// source's image, one for each tile it is drawn in, with the image's
+/// bucket and the generation of its geometry they were built of.
 #[derive(Default)]
 struct RasterObjects {
     tiles: TileMap<RasterTile>,
     images: Vec<KeptDraw>,
+    image: Option<(SimpleIdentity, u64)>,
 }
 
 /// The layer's drawing: the GPU objects of its draws, and its draws of the
@@ -110,6 +112,7 @@ impl LayerDrawing for RasterDrawing {
     fn clear(&mut self) {
         self.objects.tiles.clear();
         self.objects.images.clear();
+        self.objects.image = None;
         self.clear_frame();
     }
 
@@ -246,38 +249,43 @@ impl RenderRasterLayer {
 }
 
 impl RenderRasterLayer {
-    /// The draws of an image source's layer: one for each tile the image is
-    /// drawn in, built again every frame, which share the image's geometry
-    /// and texture.
-    fn update_image(
-        &mut self,
-        raster_shader: &ShaderProgramPtr,
-        image_data: ImageSourceRenderData<'_>,
-        paint_parameters: &mut PaintParameters<'_>,
-    ) {
-        self.drawing.objects.images.clear();
-
-        // The bucket is missing until the image loads.
-        let Some(bucket) = image_data.bucket else {
-            return;
-        };
-        // The bucket's own geometry, which an image source's bucket always
-        // has.
-        let geometry = bucket.geometry();
-        let Some(quads) = geometry.quads() else {
-            return;
-        };
-
+    /// The draws of an image source's layer with `raster_shader`: one for
+    /// each tile the image is drawn in, which share the image's geometry
+    /// and texture, built again when the image or its geometry changes.
+    fn update_image(&mut self, image_data: ImageSourceRenderData<'_>, paint_parameters: &mut PaintParameters<'_>) {
         let sampler = self.sampler_state();
-        let texture = Self::bucket_texture(&mut self.textures, sampler, paint_parameters.context, bucket);
-        let image_draws = &mut self.drawing.objects.images;
-        for (index, tile_id) in image_data.tile_ids.iter().enumerate() {
+        let RenderRasterLayer { base, drawing, draw_list, raster_shader, textures, .. } = self;
+        let Some(raster_shader) = shader(raster_shader, base.projection_variant, paint_parameters) else {
+            return;
+        };
+        let objects = &mut drawing.objects;
+        // The bucket is missing until the image loads. An image source's
+        // bucket always has geometry of its own once it has an image.
+        let Some((bucket, quads)) = image_data.bucket.and_then(|bucket| Some((bucket, bucket.geometry().quads()?)))
+        else {
+            objects.images.clear();
+            objects.image = None;
+            return;
+        };
+        let built_of = (bucket.base.bucket_id, bucket.geometry().generation());
+        if objects.image != Some(built_of) {
+            objects.images.clear();
+            objects.image = Some(built_of);
+        }
+        // Only the image's bucket draws: the textures of the images before
+        // it go.
+        textures.retain(|id, _| *id == bucket.base.bucket_id);
+        let texture = Self::bucket_texture(textures, sampler, paint_parameters.context, bucket);
+        let tile_ids = image_data.tile_ids;
+        objects.images.truncate(tile_ids.len());
+        while objects.images.len() < tile_ids.len() {
             let draw_geometry =
                 raster_geometry(&quads.vertices, quads.vertices.count(), quads.indexes.clone().into(), &quads.segments);
-            let draw = KeptDraw::new(new_objects(raster_shader, draw_geometry, texture.as_ref()));
+            objects.images.push(KeptDraw::new(new_objects(raster_shader, draw_geometry, texture.as_ref())));
+        }
+        for (index, (tile_id, draw)) in tile_ids.iter().zip(&objects.images).enumerate() {
             let uniforms = Self::uniforms(tile_id, paint_parameters);
-            self.draw_list.push_part(FrameDraw::new(None, draw.id), RasterPart::Image(index), uniforms);
-            image_draws.push(draw);
+            draw_list.push_part(FrameDraw::new(None, draw.id), RasterPart::Image(index), uniforms);
         }
 
         self.finish_frame_draws(paint_parameters.context);
@@ -429,21 +437,30 @@ impl TypedLayer for RenderRasterLayer {
         _atlases: &Atlases,
         render_tiles: &[FrameTile<'_, Raster>],
     ) {
-        let Some(raster_shader) = self.raster_shader(paint_parameters) else {
+        let sampler = self.sampler_state();
+        let RenderRasterLayer {
+            base,
+            drawing,
+            draw_list,
+            raster_shader,
+            static_geometry,
+            globe_meshes,
+            textures,
+            live_buckets,
+            ..
+        } = self;
+        let Some(raster_shader) = shader(raster_shader, base.projection_variant, paint_parameters) else {
             return;
         };
-
-        let sampler = self.sampler_state();
-        let static_geometry = self.static_geometry.get_or_insert_with(|| StaticGeometry::new(paint_parameters.context));
+        let static_geometry = static_geometry.get_or_insert_with(|| StaticGeometry::new(paint_parameters.context));
 
         // Drop the textures of buckets that are no longer rendered.
-        let live_buckets = &mut self.live_buckets;
         live_buckets.clear();
         live_buckets.extend(render_tiles.iter().filter_map(|tile| Some(tile.bucket()?.base.bucket_id)));
-        self.textures.retain(|id, _| live_buckets.contains(id));
+        textures.retain(|id, _| live_buckets.contains(id));
         // Kept draws keep their textures, so a changed filter is applied to
         // the textures themselves.
-        for texture in self.textures.values() {
+        for texture in textures.values() {
             if let Some(mut texture) = paint_parameters.context.texture_mut(texture) {
                 texture.set_sampler(sampler);
             }
@@ -451,7 +468,7 @@ impl TypedLayer for RenderRasterLayer {
 
         for tile in render_tiles {
             let tile_id = tile.id();
-            let Some(mut entry) = self.drawing.objects.tiles.entry(&tile_id) else {
+            let Some(mut entry) = drawing.objects.tiles.entry(&tile_id) else {
                 continue;
             };
 
@@ -469,7 +486,7 @@ impl TypedLayer for RenderRasterLayer {
             }
 
             if entry.value.is_none() {
-                let texture = Self::bucket_texture(&mut self.textures, sampler, paint_parameters.context, bucket);
+                let texture = Self::bucket_texture(textures, sampler, paint_parameters.context, bucket);
 
                 // The bucket only has geometry for a masked tile; any other
                 // tile is drawn with the static quad over the tile's extent.
@@ -477,9 +494,9 @@ impl TypedLayer for RenderRasterLayer {
                 // mask keeps.
                 let geometry = bucket.geometry();
                 let context = &mut *paint_parameters.context;
-                let draw_geometry = if self.base.projection_variant == ProjectionVariant::Globe {
+                let draw_geometry = if base.projection_variant == ProjectionVariant::Globe {
                     let globe_mesh =
-                        self.globe_meshes.get(context, &tile_id.canonical, &geometry.mask, RasterLayoutVertex::new);
+                        globe_meshes.get(context, &tile_id.canonical, &geometry.mask, RasterLayoutVertex::new);
                     raster_geometry(
                         &globe_mesh.vertices,
                         globe_mesh.vertices.count(),
@@ -501,7 +518,7 @@ impl TypedLayer for RenderRasterLayer {
                         &static_geometry.segments,
                     )
                 };
-                let objects = new_objects(&raster_shader, draw_geometry, texture.as_ref());
+                let objects = new_objects(raster_shader, draw_geometry, texture.as_ref());
                 let built = RasterTile { draw: KeptDraw::new(objects), geometry_generation };
                 *entry.value = Some(built);
             }
@@ -509,7 +526,7 @@ impl TypedLayer for RenderRasterLayer {
             if let Some(cached) = entry.value.as_ref() {
                 let draw = cached.draw.frame_draw(Some(tile_id));
                 let uniforms = Self::uniforms(&tile_id.to_unwrapped(), paint_parameters);
-                self.draw_list.push_part(draw, RasterPart::Tile, uniforms);
+                draw_list.push_part(draw, RasterPart::Tile, uniforms);
             }
         }
 
@@ -522,9 +539,7 @@ impl TypedLayer for RenderRasterLayer {
         _atlases: &Atlases,
         image: ImageSourceRenderData<'_>,
     ) {
-        if let Some(raster_shader) = self.raster_shader(paint_parameters) {
-            self.update_image(&raster_shader, image, paint_parameters);
-        }
+        self.update_image(image, paint_parameters);
     }
 
     fn release(&mut self) {
@@ -532,16 +547,17 @@ impl TypedLayer for RenderRasterLayer {
     }
 }
 
-impl RenderRasterLayer {
-    /// The shader of the layer's draws in the frame's projection, made on
-    /// first use.
-    fn raster_shader(&mut self, paint_parameters: &PaintParameters<'_>) -> Option<ShaderProgramPtr> {
-        if self.raster_shader.is_none() {
-            let shaders = &paint_parameters.static_data.shaders;
-            self.raster_shader = shaders.shader("RasterShader", self.base.projection_variant);
-        }
-        self.raster_shader.clone()
+/// The shader of the layer's draws in `variant`, the frame's projection,
+/// which `slot` keeps from its first use.
+fn shader<'a>(
+    slot: &'a mut Option<ShaderProgramPtr>,
+    variant: ProjectionVariant,
+    paint_parameters: &PaintParameters<'_>,
+) -> Option<&'a ShaderProgramPtr> {
+    if slot.is_none() {
+        *slot = paint_parameters.static_data.shaders.shader("RasterShader", variant);
     }
+    slot.as_ref()
 }
 
 impl RenderLayer for RenderRasterLayer {}
