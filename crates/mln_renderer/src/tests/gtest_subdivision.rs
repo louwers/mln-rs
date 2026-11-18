@@ -638,8 +638,7 @@ fn globe_mask_keeps_the_uncovered_parts() {
     let masked = GlobeTestMesh::new(&tile, &mask(&[(1, 1, 0), (1, 0, 1), (1, 1, 1)]), globe_test_vertex);
     let child = GlobeTestMesh::new(&CanonicalTileID::new(2, 0, 0), &mask(&[(0, 0, 0)]), globe_test_vertex);
     let vertices = masked.vertices.vector();
-    let masked_indices = masked.indices.borrow();
-    let indices = masked_indices.vector();
+    let indices = masked.indices.data();
     assert_eq!(1, masked.segments.len());
 
     for triangle in indices.as_chunks::<3>().0 {
@@ -690,7 +689,7 @@ fn globe_mask_keeps_the_uncovered_parts() {
         assert_eq!(grid.vertices[i * 2], full.vertices.at(i).position[0]);
         assert_eq!(grid.vertices[i * 2 + 1], full.vertices.at(i).position[1]);
     }
-    assert_eq!(&grid.indices, full.indices.borrow().vector());
+    assert_eq!(grid.indices, full.indices.data());
 
     assert_eq!(0, GlobeTestMesh::new(&tile, &TileMask::new(), globe_test_vertex).vertices.elements());
 }

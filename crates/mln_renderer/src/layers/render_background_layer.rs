@@ -1,8 +1,7 @@
-use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_gfx::index_vector::IndexVectorBase;
+use crate::gfx::index_vector::IndexVector;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::background_layer_ubo::{
     BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPatternDrawableUBO, BackgroundPatternPropsUBO,
@@ -122,7 +121,7 @@ impl RenderBackgroundLayer {
             ),
             vertex_count,
             mode: DrawMode::Triangles(),
-            indexes: Rc::new(RefCell::new(IndexVectorBase::new(indexes))),
+            indexes: IndexVector::new(indexes),
             segments: segments.iter().map(SegmentBase::copy).collect(),
             instances: None,
         };

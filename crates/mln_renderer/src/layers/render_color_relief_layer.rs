@@ -3,12 +3,11 @@
 // elevation stops texture is made anew when the ramp changes, since its size
 // changes with the ramp.
 
-use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_gfx::gpu::TextureFormat;
-use mln_gfx::index_vector::{IndexVectorBase, IndexVectorBasePtr};
+use crate::gfx::index_vector::{IndexVector, IndexVectorPtr};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::color_relief_layer_ubo::{
     ColorReliefDrawableUBO, ColorReliefEvaluatedPropsUBO, ColorReliefTilePropsUBO,
@@ -122,7 +121,7 @@ pub(crate) struct RenderColorReliefLayer {
 
     static_data_shared_vertices: Option<VertexVectorBasePtr>,
     /// The triangles of the static data's quad.
-    static_data_indices: Option<IndexVectorBasePtr>,
+    static_data_indices: Option<IndexVectorPtr>,
     globe_meshes: GlobeTileMeshCache<HillshadeLayoutVertex>,
 
     /// The DEM texture of each bucket, made from its current, possibly
@@ -341,7 +340,7 @@ impl TypedLayer for RenderColorReliefLayer {
                 .get_or_insert_with(|| shared_vertices(&RenderStaticData::raster_vertices())),
         );
         let static_data_indices = Rc::clone(self.static_data_indices.get_or_insert_with(|| {
-            Rc::new(RefCell::new(IndexVectorBase::new(RenderStaticData::quad_triangle_indices())))
+            IndexVector::new(RenderStaticData::quad_triangle_indices())
         }));
 
         // Update color ramp textures if changed
@@ -464,7 +463,7 @@ impl TypedLayer for RenderColorReliefLayer {
                     let (vertices, vertex_count, indices, segments): (
                         VertexVectorBasePtr,
                         usize,
-                        IndexVectorBasePtr,
+                        IndexVectorPtr,
                         Vec<SegmentBase>,
                     ) = if self.base.projection_variant == ProjectionVariant::Globe {
                         let globe_mesh =
@@ -485,7 +484,7 @@ impl TypedLayer for RenderColorReliefLayer {
                         (
                             shared_vertices(&geometry.vertices),
                             geometry.vertices.len(),
-                            Rc::new(RefCell::new(IndexVectorBase::new(geometry.indices.clone()))),
+                            IndexVector::new(geometry.indices.clone()),
                             geometry.segments.iter().map(SegmentBase::copy).collect(),
                         )
                     } else {

@@ -1,8 +1,7 @@
-use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_gfx::index_vector::{IndexVectorBase, IndexVectorBasePtr};
+use crate::gfx::index_vector::{IndexVector, IndexVectorPtr};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
 use mln_gfx::shaders::fill_layer_ubo::{
@@ -116,7 +115,7 @@ fn fill_geometry(
     vertices: VertexAttributeArray,
     vertex_count: usize,
     mode: DrawMode,
-    indexes: IndexVectorBasePtr,
+    indexes: IndexVectorPtr,
     segments: &[SegmentBase],
 ) -> DrawGeometry {
     DrawGeometry {
@@ -173,7 +172,7 @@ struct FillUniforms {
 /// attributes every instanced outline reads of it.
 struct OutlineQuad {
     vertices: VertexVectorBasePtr,
-    indexes: IndexVectorBasePtr,
+    indexes: IndexVectorPtr,
     attributes: VertexAttributeArray,
 }
 
@@ -181,7 +180,7 @@ impl OutlineQuad {
     /// The quad, whose corners every instanced outline reads per vertex.
     fn new() -> OutlineQuad {
         let vertices = shared_vertices(&RenderStaticData::fill_outline_vertices());
-        let indexes = Rc::new(RefCell::new(IndexVectorBase::new(RenderStaticData::quad_triangle_indices())));
+        let indexes = IndexVector::new(RenderStaticData::quad_triangle_indices());
         let mut attributes = VertexAttributeArray::new();
         if let Some(attr) = attributes.set(ID_FILL_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
             let stride = size_of::<[i16; 2]>() as u32;

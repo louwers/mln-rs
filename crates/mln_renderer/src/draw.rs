@@ -15,7 +15,7 @@ use mln_gfx::gpu::{
     GeometryId, Gpu, GpuError, PipelineId, PipelineKey, SamplerId, Scissor, ShaderId, StencilState, TargetFormats,
     TextureId, VertexAttribute as GpuVertexAttribute, VertexBufferLayout, VertexStep,
 };
-use mln_gfx::index_vector::IndexVectorBasePtr;
+use crate::gfx::index_vector::IndexVectorPtr;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{MAX_TEXTURE_COUNT_PER_SHADER, MAX_UBO_COUNT_PER_SHADER};
 use mln_gfx::shaders::shader_program::{ShaderProgram, ShaderProgramPtr};
@@ -47,7 +47,7 @@ pub(crate) struct DrawGeometry {
     pub(crate) vertex_count: usize,
     /// The primitive the segments draw.
     pub(crate) mode: DrawMode,
-    pub(crate) indexes: IndexVectorBasePtr,
+    pub(crate) indexes: IndexVectorPtr,
     /// The ranges of the indexes and vertices each draw call draws.
     pub(crate) segments: Vec<SegmentBase>,
     /// The attributes of each instance, for a draw of instances.
@@ -127,7 +127,7 @@ pub(crate) struct DrawObjects {
 
     mode: DrawMode,
     segments: Vec<SegmentBase>,
-    indexes: IndexVectorBasePtr,
+    indexes: IndexVectorPtr,
     vertex_count: usize,
     attribute_bindings: AttributeBindingArray,
     instance_bindings: AttributeBindingArray,
@@ -196,14 +196,11 @@ impl DrawObjects {
 
     fn upload_in(&mut self, context: &mut Context) -> Result<(), GpuError> {
         let shader = &*self.shader;
-        {
-            let mut indexes = self.indexes.borrow_mut();
-            if indexes.empty() && (indexes.get_buffer().is_none() || indexes.get_dirty()) {
-                debug_assert!(false, "a draw of {} has no index data", shader.name());
-                return Ok(());
-            }
-            upload::upload_indexes(context, &mut indexes)?;
+        if self.indexes.is_empty() && self.indexes.buffer().is_none() {
+            debug_assert!(false, "a draw of {} has no index data", shader.name());
+            return Ok(());
         }
+        self.indexes.upload(context)?;
 
         let force = self.attribute_update_time.is_none();
         let update_time = self.attribute_update_time;
@@ -276,11 +273,9 @@ impl DrawObjects {
         };
         let scissor = clamped_scissor(parameters, size);
         let context = &mut *parameters.context;
-        let Some(index_buffer) = ({
-            let indexes = self.indexes.borrow();
-            debug_assert!(!indexes.get_dirty(), "a draw of {} draws indexes it didn't upload", self.shader.name());
-            indexes.get_buffer().filter(|_| !indexes.get_dirty()).map(|buffer| buffer.id())
-        }) else {
+        let index_buffer = self.indexes.buffer().map(|buffer| buffer.id());
+        debug_assert!(index_buffer.is_some(), "a draw of {} draws indexes it didn't upload", self.shader.name());
+        let Some(index_buffer) = index_buffer else {
             return Ok(());
         };
 
@@ -489,7 +484,7 @@ impl DrawObjects {
     }
 
     /// Replaces the indexes and the segments drawn from them.
-    pub(crate) fn replace_indexes(&mut self, indexes: IndexVectorBasePtr, segments: Vec<SegmentBase>) {
+    pub(crate) fn replace_indexes(&mut self, indexes: IndexVectorPtr, segments: Vec<SegmentBase>) {
         self.indexes = indexes;
         self.segments = segments;
     }

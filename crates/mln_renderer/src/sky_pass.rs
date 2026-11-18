@@ -1,10 +1,9 @@
-use std::cell::RefCell;
 use std::f64::consts::PI;
 use std::rc::Rc;
 
 use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
-use mln_gfx::index_vector::IndexVectorBase;
+use crate::gfx::index_vector::IndexVector;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
@@ -37,12 +36,11 @@ const ATMOSPHERE_SHADER_NAME: &str = "AtmosphereShader";
 fn fullscreen_draw(shader: &ShaderProgramPtr, vertex_attribute: usize, depth: DrawDepth) -> SingleDraw {
     let corners: [[i16; 2]; 4] = [[-1, -1], [1, -1], [-1, 1], [1, 1]];
     let vertices = bytemuck::cast_slice(&corners).to_vec();
-    let indexes = IndexVectorBase::new(RenderStaticData::quad_triangle_indices());
     let geometry = DrawGeometry {
         vertices: raw_vertices(vertex_attribute, vertices, corners.len(), AttributeDataType::Short2),
         vertex_count: corners.len(),
         mode: DrawMode::Triangles(),
-        indexes: Rc::new(RefCell::new(indexes)),
+        indexes: IndexVector::new(RenderStaticData::quad_triangle_indices()),
         segments: vec![SegmentBase::with_lengths(0, 0, 4, 6)],
         instances: None,
     };

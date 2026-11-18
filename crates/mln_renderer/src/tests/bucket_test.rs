@@ -40,7 +40,7 @@ use crate::buckets::line_bucket::{LineBucket, LineLayoutVertex};
 use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
 use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::gfx::context::Context;
-use crate::gfx::upload::{upload_indexes, vertex_buffer};
+use crate::gfx::upload::vertex_buffer;
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::layout::symbol_instance::SymbolInstancePools;
@@ -241,15 +241,15 @@ fn fill_bucket_frees_cpu_geometry_after_upload() {
         // A draw's upload turns the shared vectors into buffers.
         let buffer = vertex_buffer(context, &vertices, false).expect("uploads").expect("a buffer");
         let triangles = bucket_indexes(Some(&geometry), &bucket.triangles);
-        upload_indexes(context, &mut triangles.borrow_mut()).expect("uploads");
+        triangles.upload(context).expect("uploads");
 
         // The CPU copies are gone, the counts that draws are built from
         // are not.
         assert!(!vertices.has_raw_data());
         assert!(vertices.get_raw_data().is_empty());
         assert_eq!(vertices.get_raw_count(), vertex_count);
-        assert_eq!(triangles.borrow().vector().capacity(), 0);
-        assert_eq!(triangles.borrow().elements(), index_count);
+        assert!(!triangles.has_data());
+        assert_eq!(triangles.len(), index_count);
         assert_eq!(bucket.triangles.len(), index_count);
 
         // A second draw over the same bucket reuses the vectors and the
@@ -361,14 +361,14 @@ fn line_bucket_drawables_build_from_freed_indexes() {
     // An earlier draw put the indexes in a buffer, which frees their CPU
     // copy.
     let triangles = bucket_indexes(Some(&geometry), &bucket.triangles);
-    upload_indexes(context, &mut triangles.borrow_mut()).expect("uploads");
-    assert_eq!(*triangles.borrow().vector(), Vec::<u16>::new());
+    triangles.upload(context).expect("uploads");
+    assert!(!triangles.has_data());
 
     // A layer that rebuilds its draws of the tile builds the segments from
     // the counts.
     let indexes = bucket_indexes(Some(&geometry), &bucket.triangles);
-    assert_eq!(indexes.borrow().elements(), index_count);
-    assert_eq!(triangles.borrow().elements(), index_count);
+    assert_eq!(indexes.len(), index_count);
+    assert_eq!(triangles.len(), index_count);
 }
 
 // gtest: Buckets.SymbolBucket

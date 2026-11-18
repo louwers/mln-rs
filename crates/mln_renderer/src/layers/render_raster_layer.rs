@@ -2,12 +2,11 @@
 // and textures are render-thread `Rc`s. A tile's draw stays until the
 // bucket's masked geometry changes, and is then built again.
 
-use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_gfx::gpu::Gpu;
-use mln_gfx::index_vector::{IndexVectorBase, IndexVectorBasePtr};
+use crate::gfx::index_vector::{IndexVector, IndexVectorPtr};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::raster_layer_ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
@@ -133,7 +132,7 @@ impl LayerDrawing for RasterDrawing {
 /// mask.
 struct StaticGeometry {
     vertices: VertexVectorBasePtr,
-    indexes: IndexVectorBasePtr,
+    indexes: IndexVectorPtr,
     segments: Vec<SegmentBase>,
 }
 
@@ -260,7 +259,7 @@ impl RenderRasterLayer {
                 raster_geometry(
                     &vertices,
                     geometry.vertices.len(),
-                    Rc::new(RefCell::new(IndexVectorBase::new(geometry.indices.clone()))),
+                    IndexVector::new(geometry.indices.clone()),
                     &geometry.segments,
                 )
             };
@@ -348,7 +347,7 @@ fn new_objects(shader: &ShaderProgramPtr, geometry: DrawGeometry, texture: Optio
 fn raster_geometry(
     vertices: &VertexVectorBasePtr,
     vertex_count: usize,
-    indexes: IndexVectorBasePtr,
+    indexes: IndexVectorPtr,
     segments: &[SegmentBase],
 ) -> DrawGeometry {
     DrawGeometry {
@@ -444,7 +443,7 @@ impl TypedLayer for RenderRasterLayer {
         let sampler = self.sampler_state();
         let static_geometry = self.static_geometry.get_or_insert_with(|| StaticGeometry {
             vertices: shared_vertices(&RenderStaticData::raster_vertices()),
-            indexes: Rc::new(RefCell::new(IndexVectorBase::new(RenderStaticData::quad_triangle_indices()))),
+            indexes: IndexVector::new(RenderStaticData::quad_triangle_indices()),
             segments: RenderStaticData::raster_segments(),
         });
 
@@ -509,7 +508,7 @@ impl TypedLayer for RenderRasterLayer {
                     raster_geometry(
                         &vertices,
                         geometry.vertices.len(),
-                        Rc::new(RefCell::new(IndexVectorBase::new(geometry.indices.clone()))),
+                        IndexVector::new(geometry.indices.clone()),
                         &geometry.segments,
                     )
                 } else {

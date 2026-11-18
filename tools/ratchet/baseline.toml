@@ -44,7 +44,6 @@
 "crates/mln_mtl/src/exported_target.rs" = 8
 "crates/mln_mtl/src/renderer_backend.rs" = 2
 "crates/mln_mtl/src/surface_target.rs" = 13
-"crates/mln_renderer/src/draw.rs" = 2
 "crates/mln_renderer/src/render_orchestrator.rs" = 1
 "crates/mln_renderer/src/text/placement.rs" = 1
 "crates/mln_renderer/src/tile/worker_codec/host.rs" = 5

@@ -23,7 +23,6 @@ pub mod export;
 pub mod frame;
 pub mod gfx_types;
 pub mod gpu;
-pub mod index_vector;
 pub mod offscreen_target;
 pub mod polyline_generator;
 pub mod projection_variant;

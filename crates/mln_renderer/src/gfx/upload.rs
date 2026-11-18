@@ -1,4 +1,4 @@
-//! Writes draws' indexes and vertex attributes to buffers of the
+//! Writes draws' vertex attributes to buffers of the
 //! backend's [`Gpu`](mln_gfx::gpu::Gpu).
 
 use std::rc::Rc;
@@ -6,36 +6,10 @@ use std::rc::Rc;
 use mln_gfx::attribute::{AttributeBinding, AttributeBindingArray, AttributeDescriptor};
 use mln_gfx::buffer::BufferPtr;
 use mln_gfx::gpu::{BufferUsage, GpuError};
-use mln_gfx::index_vector::IndexVectorBase;
 use mln_gfx::vertex_attribute::{VertexAttribute, VertexAttributeArray};
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
 
 use crate::gfx::context::Context;
-
-/// Writes `indexes` to their buffer, where they have none or changed since
-/// they were written, making one where they have none or don't fit in it.
-pub(crate) fn upload_indexes(context: &mut Context, indexes: &mut IndexVectorBase) -> Result<(), GpuError> {
-    if indexes.get_buffer().is_some() && !indexes.get_dirty() {
-        return Ok(());
-    }
-    #[cfg(target_family = "wasm")]
-    if let Some(data) = indexes.host_data() {
-        let buffer = context.buffer_from_host(BufferUsage::Index, data)?;
-        indexes.set_buffer(Some(buffer));
-        indexes.set_dirty(false);
-        return Ok(());
-    }
-    let data: &[u8] = bytemuck::cast_slice(indexes.data());
-    match indexes.get_buffer() {
-        Some(buffer) if data.len() <= buffer.size() => context.write(buffer, data)?,
-        _ => {
-            let buffer = context.buffer(BufferUsage::Index, data)?;
-            indexes.set_buffer(Some(buffer));
-        }
-    }
-    indexes.set_dirty(false);
-    Ok(())
-}
 
 /// The buffer of `vertices`, or `None` where there are none. Where the
 /// vertices changed since their buffer was written, or `force`, it is written

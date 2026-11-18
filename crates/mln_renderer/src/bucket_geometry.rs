@@ -17,10 +17,9 @@
 // Anything that reads or changes them first copies them into wasm memory.
 
 use std::borrow::Cow;
-use std::cell::RefCell;
 use std::rc::Rc;
 
-use mln_gfx::index_vector::{IndexVectorBase, IndexVectorBasePtr};
+use crate::gfx::index_vector::{IndexVector, IndexVectorPtr};
 use mln_gfx::vertex_vector::{VertexVector, VertexVectorBasePtr};
 use mln_util::hash::HashMap;
 #[cfg(target_family = "wasm")]
@@ -157,12 +156,12 @@ impl<T: bytemuck::Pod> GeometryVec<T> {
 
 impl GeometryVec<u16> {
     /// A released gfx index vector of the data, moved out.
-    fn index_vector(&mut self) -> IndexVectorBase {
+    fn index_vector(&mut self) -> IndexVectorPtr {
         #[cfg(target_family = "wasm")]
         if let Some(bytes) = self.take_host() {
-            return IndexVectorBase::from_host_released(bytes);
+            return IndexVector::from_host(bytes);
         }
-        IndexVectorBase::new_released(self.take())
+        IndexVector::new(self.take())
     }
 }
 
@@ -225,7 +224,7 @@ impl<T: bytemuck::Pod> mln_wire::Wire for GeometryVec<T> {
 #[derive(Clone, Default)]
 pub(crate) struct BucketGeometry {
     vertices: HashMap<SimpleIdentity, VertexVectorBasePtr>,
-    indexes: HashMap<SimpleIdentity, IndexVectorBasePtr>,
+    indexes: HashMap<SimpleIdentity, IndexVectorPtr>,
     /// The vertices a layer made of a bucket's vector.
     derived: HashMap<SimpleIdentity, VertexVectorBasePtr>,
 }
@@ -248,7 +247,7 @@ impl BucketGeometry {
             return;
         }
         let key = vec.key();
-        self.indexes.entry(key).or_insert_with(|| Rc::new(RefCell::new(vec.index_vector())));
+        self.indexes.entry(key).or_insert_with(|| vec.index_vector());
     }
 
     /// Moves the values of `buffer`, a layer's data-driven paint values,
@@ -304,8 +303,8 @@ pub(crate) fn released_vertices<V: bytemuck::Pod>(vertices: &[V]) -> VertexVecto
 /// A released gfx index vector holding a copy of `indexes`, see
 /// `released_vertices`.
 #[must_use]
-pub(crate) fn released_indexes(indexes: &[u16]) -> IndexVectorBasePtr {
-    Rc::new(RefCell::new(IndexVectorBase::new_released(indexes.to_vec())))
+pub(crate) fn released_indexes(indexes: &[u16]) -> IndexVectorPtr {
+    IndexVector::new(indexes.to_vec())
 }
 
 /// The shared vertex vector of one of a bucket's vectors, from the tile's
@@ -322,7 +321,7 @@ pub(crate) fn bucket_vertices<V: bytemuck::Pod>(
 
 /// The shared index vector of one of a bucket's vectors, see
 /// `bucket_vertices`.
-pub(crate) fn bucket_indexes(geometry: Option<&BucketGeometry>, vec: &GeometryVec<u16>) -> IndexVectorBasePtr {
+pub(crate) fn bucket_indexes(geometry: Option<&BucketGeometry>, vec: &GeometryVec<u16>) -> IndexVectorPtr {
     match geometry.zip(vec.key).and_then(|(geometry, key)| geometry.indexes.get(&key)) {
         Some(indexes) => Rc::clone(indexes),
         None => released_indexes(&vec.data()),

@@ -2,14 +2,13 @@
 // each covering tile's mesh into depth only, before the layers' 3D draws.
 // The draws' projections are entries of one storage buffer of the pass's.
 
-use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::gpu::Gpu;
-use mln_gfx::index_vector::IndexVectorBase;
+use crate::gfx::index_vector::IndexVector;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::segment::SegmentBase;
@@ -114,7 +113,7 @@ impl GlobeDepthPass {
                     vertices,
                     vertex_count: mesh.vertex_count,
                     mode: DrawMode::Triangles(),
-                    indexes: Rc::new(RefCell::new(IndexVectorBase::new(mesh.indices.clone()))),
+                    indexes: IndexVector::new(mesh.indices.clone()),
                     segments: mesh.segments.iter().map(SegmentBase::copy).collect(),
                     instances: None,
                 };

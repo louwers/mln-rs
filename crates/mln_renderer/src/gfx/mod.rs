@@ -10,6 +10,7 @@ pub(crate) mod dynamic_texture;
 pub(crate) mod dynamic_texture_atlas;
 pub(crate) mod fill_generator;
 pub(crate) mod fill_large_mesh_arrays;
+pub(crate) mod index_vector;
 pub(crate) mod owned;
 pub(crate) mod texture2d;
 pub(crate) mod uniform_buffer;

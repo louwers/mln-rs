@@ -5,13 +5,12 @@
 // hillshade_bucket.rs), and a tile's draw takes the bucket's masked geometry
 // again only when it changed.
 
-use std::cell::RefCell;
 use std::collections::hash_map::Entry;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_gfx::gpu::Gpu;
-use mln_gfx::index_vector::{IndexVectorBase, IndexVectorBasePtr};
+use crate::gfx::index_vector::{IndexVector, IndexVectorPtr};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::hillshade_layer_ubo::{
     HillshadeDrawableUBO, HillshadeEvaluatedPropsUBO, HillshadeTilePropsUBO, MAX_ILLUMINATION_SOURCES,
@@ -131,7 +130,7 @@ pub(crate) struct RenderHillshadeLayer {
 
     static_data_shared_vertices: Option<VertexVectorBasePtr>,
     /// The triangles of the static data's quad.
-    static_data_indices: Option<IndexVectorBasePtr>,
+    static_data_indices: Option<IndexVectorPtr>,
     globe_meshes: GlobeTileMeshCache<HillshadeLayoutVertex>,
 
     /// Each bucket's render target, by bucket id. They draw while the layer
@@ -353,7 +352,7 @@ impl TypedLayer for RenderHillshadeLayer {
                 .get_or_insert_with(|| shared_vertices(&RenderStaticData::raster_vertices())),
         );
         let static_data_indices = Rc::clone(self.static_data_indices.get_or_insert_with(|| {
-            Rc::new(RefCell::new(IndexVectorBase::new(RenderStaticData::quad_triangle_indices())))
+            IndexVector::new(RenderStaticData::quad_triangle_indices())
         }));
 
         // `resampling` filters the prepared texture the tile's draw samples;
@@ -417,7 +416,7 @@ impl TypedLayer for RenderHillshadeLayer {
             let geometry_time = geometry.last_modified;
             // The tile's geometry: the globe's mesh of its mask, the mask's
             // geometry, or the whole tile's quad.
-            let mut tile_geometry = || -> (VertexVectorBasePtr, usize, IndexVectorBasePtr, Vec<SegmentBase>) {
+            let mut tile_geometry = || -> (VertexVectorBasePtr, usize, IndexVectorPtr, Vec<SegmentBase>) {
                 if self.base.projection_variant == ProjectionVariant::Globe {
                     let globe_mesh =
                         self.globe_meshes.get(&tile_id.canonical, &geometry.mask, HillshadeBucket::layout_vertex);
@@ -434,7 +433,7 @@ impl TypedLayer for RenderHillshadeLayer {
                     (
                         shared_vertices(&geometry.vertices),
                         geometry.vertices.len(),
-                        Rc::new(RefCell::new(IndexVectorBase::new(geometry.indices.clone()))),
+                        IndexVector::new(geometry.indices.clone()),
                         geometry.segments.iter().map(SegmentBase::copy).collect(),
                     )
                 } else {
@@ -560,7 +559,7 @@ impl BucketTarget {
         maxzoom: u8,
         shader: &ShaderProgramPtr,
         attrs: VertexAttributeArray,
-        indexes: &IndexVectorBasePtr,
+        indexes: &IndexVectorPtr,
     ) -> BucketTarget {
         let (tilesize, stride, encoding, dem_image) = {
             let dem = bucket.get_dem_data();

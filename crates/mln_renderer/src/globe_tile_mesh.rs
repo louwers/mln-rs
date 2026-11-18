@@ -2,12 +2,11 @@
 // pointer, `fn(Point<i16>, Point<u16>) -> V`, as `decltype(&layoutVertex)`
 // is in C++.
 
-use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use geometry::Point;
-use mln_gfx::index_vector::{IndexVectorBase, IndexVectorBasePtr};
+use crate::gfx::index_vector::{IndexVector, IndexVectorPtr};
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::vertex_vector::VertexVector;
 use mln_tile_id::CanonicalTileID;
@@ -24,7 +23,7 @@ use crate::util::tile_mesh::{TileMeshOptions, create_tile_mesh};
 /// positions stay inside the tile so the pole rows sample the tile's edge.
 pub(crate) struct GlobeTileMesh<V: bytemuck::Pod> {
     pub(crate) vertices: Rc<VertexVector<V>>,
-    pub(crate) indices: IndexVectorBasePtr,
+    pub(crate) indices: IndexVectorPtr,
     pub(crate) segments: Vec<SegmentBase>,
 }
 
@@ -78,7 +77,7 @@ impl<V: bytemuck::Pod> GlobeTileMesh<V> {
         }
         GlobeTileMesh {
             vertices: Rc::new(VertexVector::from_vec(vertices)),
-            indices: Rc::new(RefCell::new(IndexVectorBase::new(indices))),
+            indices: IndexVector::new(indices),
             segments,
         }
     }

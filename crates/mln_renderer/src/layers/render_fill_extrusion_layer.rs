@@ -13,12 +13,11 @@
 // instanced ones' code with every attribute per vertex: the same vertices in
 // the same order, drawn without instances.
 
-use std::cell::RefCell;
 use std::mem::offset_of;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_gfx::index_vector::{IndexVectorBase, IndexVectorBasePtr};
+use crate::gfx::index_vector::{IndexVector, IndexVectorPtr};
 use mln_gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
 use mln_gfx::shaders::fill_extrusion_layer_ubo::{
     FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO,
@@ -126,7 +125,7 @@ struct SharedGeometry<'a> {
     vertices: &'a VertexAttributeArray,
     instances: Option<&'a VertexAttributeArray>,
     vertex_count: usize,
-    indexes: &'a IndexVectorBasePtr,
+    indexes: &'a IndexVectorPtr,
     segments: &'a [SegmentBase],
 }
 
@@ -326,7 +325,7 @@ pub(crate) struct RenderFillExtrusionLayer {
     static_data_vertices: Option<VertexVectorBasePtr>,
     /// The triangles of the wall quad, or of the walls' own quads
     /// (`RenderStaticData::fill_extrusion_wall_indices`).
-    static_data_indices: Option<IndexVectorBasePtr>,
+    static_data_indices: Option<IndexVectorPtr>,
 }
 
 impl RenderFillExtrusionLayer {
@@ -418,11 +417,11 @@ impl TypedLayer for RenderFillExtrusionLayer {
                 .get_or_insert_with(|| shared_vertices(&RenderStaticData::fill_extrusion_vertices())),
         );
         let static_indices = Rc::clone(self.static_data_indices.get_or_insert_with(|| {
-            Rc::new(RefCell::new(if instanced_walls {
-                IndexVectorBase::new(RenderStaticData::fill_extrusion_triangle_indices())
+            IndexVector::new(if instanced_walls {
+                RenderStaticData::fill_extrusion_triangle_indices()
             } else {
-                IndexVectorBase::new_released(RenderStaticData::fill_extrusion_wall_indices())
-            }))
+                RenderStaticData::fill_extrusion_wall_indices()
+            })
         }));
         let mut builder = TileBuilder {
             shaders,
@@ -544,7 +543,7 @@ struct TileBuilder {
     instanced_walls: bool,
     /// The static quad, and the indexes the walls draw.
     static_vertices: VertexVectorBasePtr,
-    static_indices: IndexVectorBasePtr,
+    static_indices: IndexVectorPtr,
     has_pattern: bool,
     /// Whether the layer draws into depth before it draws in color.
     depth_pass: bool,

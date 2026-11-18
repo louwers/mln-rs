@@ -2,7 +2,6 @@
 // and the parse status and timestamp text, drawn as polylines by the line
 // shader.
 
-use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -10,7 +9,7 @@ use std::sync::Arc;
 use geometry::Point;
 use glam::Vec2;
 use mln_gfx::gpu::Gpu;
-use mln_gfx::index_vector::IndexVectorBase;
+use crate::gfx::index_vector::IndexVector;
 use mln_gfx::polyline_generator::{PolylineGenerator, PolylineGeneratorOptions};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shader_group::StringIDSetsPair;
@@ -125,7 +124,7 @@ fn polyline_objects(
         vertices: attrs,
         vertex_count,
         mode: DrawMode::Triangles(),
-        indexes: Rc::new(RefCell::new(IndexVectorBase::new(indexes))),
+        indexes: IndexVector::new(indexes),
         segments,
         instances: None,
     };
