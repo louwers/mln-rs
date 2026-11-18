@@ -19,7 +19,6 @@
 use std::borrow::Cow;
 use std::rc::Rc;
 
-use crate::gfx::index_vector::{IndexVector, IndexVectorPtr};
 use mln_gfx::vertex_vector::{VertexVector, VertexVectorBasePtr};
 use mln_util::hash::HashMap;
 #[cfg(target_family = "wasm")]
@@ -27,6 +26,7 @@ use mln_util::host_bytes::HostBytes;
 use mln_util::identity::SimpleIdentity;
 use mln_util::serialization::payload::{Payload, pod};
 
+use crate::gfx::index_vector::{IndexVector, IndexVectorPtr};
 use crate::paint_property_binder::InterleavedVertexBuffer;
 
 /// A bucket's vertices or indices. The worker fills it through `get_mut`;

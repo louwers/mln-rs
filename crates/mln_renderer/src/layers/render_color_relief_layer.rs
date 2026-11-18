@@ -7,7 +7,6 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_gfx::gpu::TextureFormat;
-use crate::gfx::index_vector::{IndexVector, IndexVectorPtr};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::color_relief_layer_ubo::{
     ColorReliefDrawableUBO, ColorReliefEvaluatedPropsUBO, ColorReliefTilePropsUBO,
@@ -43,6 +42,7 @@ use super::{cast_matrix, shared_vertices};
 use crate::bucket::{Bucket, NoBucket};
 use crate::buckets::hillshade_bucket::{HillshadeBucket, HillshadeLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
+use crate::gfx::index_vector::{IndexVector, IndexVectorPtr};
 use crate::gfx::texture2d::OwnedTexture;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_drawing::{DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptDraw, TileDraws, TileObjects};
@@ -339,9 +339,9 @@ impl TypedLayer for RenderColorReliefLayer {
             self.static_data_shared_vertices
                 .get_or_insert_with(|| shared_vertices(&RenderStaticData::raster_vertices())),
         );
-        let static_data_indices = Rc::clone(self.static_data_indices.get_or_insert_with(|| {
-            IndexVector::new(RenderStaticData::quad_triangle_indices())
-        }));
+        let static_data_indices = Rc::clone(
+            self.static_data_indices.get_or_insert_with(|| IndexVector::new(RenderStaticData::quad_triangle_indices())),
+        );
 
         // Update color ramp textures if changed
         if self.color_ramp_changed {

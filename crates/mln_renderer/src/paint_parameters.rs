@@ -139,8 +139,7 @@ pub(crate) struct PaintParameters<'a> {
 
     pub(crate) transform_params: &'a TransformParameters,
     pub(crate) state: &'a TransformState,
-    /// conformance: `const EvaluatedLight& evaluatedLight` (a copy; the
-    /// renderer sets it from the render tree's parameters).
+    /// The light of the frame.
     pub(crate) evaluated_light: crate::render_light::EvaluatedLight,
     pub(crate) static_data: &'a RenderStaticData,
 

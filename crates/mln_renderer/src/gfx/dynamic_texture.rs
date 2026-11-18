@@ -1,8 +1,7 @@
 // A page of the dynamic texture atlas (dynamic_texture_atlas.rs), which owns
-// it on the render thread. The GPU texture is made in the first `upload`, as
-// the C++ WebGPU texture is (`deferredCreation`), and shared with the tiles'
-// leases through a `OnceCell`, so a tile's render data can bind it without
-// reaching the atlas.
+// it on the render thread. The page's texture in the context's store is made
+// in its first `upload`; the tiles whose layouts are on the page find it by
+// the page's id once it is (`TileAtlasTextures::resolve`).
 
 use std::num::NonZeroU32;
 use std::sync::Arc;

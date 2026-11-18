@@ -169,7 +169,7 @@ impl TestRunnerImpl for Impl {
         let to_box = |b: &mln_util::grid_index::BBox| [b.min.x, b.min.y, b.max.x, b.max.y];
         self.frontend
             .renderer()
-            .get_placed_symbols_data()
+            .placed_symbols_data()
             .iter()
             .map(|data| crate::runner::PlacedSymbol {
                 key: data.key.clone(),
@@ -257,7 +257,7 @@ impl TestRunnerImpl for Impl {
         if self.frontend.render(&mut self.map).is_err() {
             return Ok(false);
         }
-        let _ = self.frontend.renderer().get_feature_state(source_id, source_layer, feature_id);
+        let _ = self.frontend.renderer().feature_state(source_id, source_layer, feature_id);
         Ok(true)
     }
 

@@ -1,7 +1,5 @@
-// The C++ `std::map<size_t, DashPatternTexture>` is keyed by a hash of the
-// two dash arrays and the cap ("We're not handling hash collisions here");
-// the port keys by the values themselves (the float bits), which is the same
-// map without the collisions. The hash is only a cache key.
+// The line atlas keys its textures by the dash arrays' values themselves
+// (their float bits) and the cap.
 
 use mln_gfx::gpu::TextureFormat;
 use mln_gfx::texture2d::SamplerState;

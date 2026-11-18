@@ -37,7 +37,11 @@ impl IndexVector {
     /// Shared indexes holding `indexes`.
     #[must_use]
     pub(crate) fn new(indexes: Vec<u16>) -> IndexVectorPtr {
-        Rc::new(IndexVector { len: indexes.len(), data: Cell::new(Some(IndexData::Vec(indexes))), buffer: OnceCell::new() })
+        Rc::new(IndexVector {
+            len: indexes.len(),
+            data: Cell::new(Some(IndexData::Vec(indexes))),
+            buffer: OnceCell::new(),
+        })
     }
 
     /// Shared indexes holding the indexes in a JS array.

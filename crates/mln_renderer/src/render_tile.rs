@@ -3,8 +3,8 @@
 // hold-for-fade state and whether it draws a visible layer) when it is
 // created and prepared. It lives in its render source, apart from the tile
 // store. The frame's phases look the tile's contents up in the store by the
-// tile's slot and id (`FrameTile`); the store changes them only between
-// frames.
+// tile's slot and id (`FrameTile`); the store changes them only in the
+// frame's update, before the layers read them.
 
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -18,7 +18,7 @@ use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::mat4::Mat4;
 
 use crate::bucket_geometry::BucketGeometry;
-use crate::buckets::debug_bucket::DebugBucket; // layers: debug
+use crate::buckets::debug_bucket::DebugBucket;
 use crate::buckets::hillshade_bucket::HillshadeBucket;
 use crate::buckets::raster_bucket::RasterBucket;
 use crate::geometry::feature_index::FeatureIndex;
@@ -36,7 +36,7 @@ pub(crate) struct RenderTile {
     /// The projection contract for this tile; `matrix` is its main matrix.
     pub(crate) projection: ProjectionData,
     pub(crate) matrix: Mat4,
-    /// layers: debug
+    /// The tile's debug overlay, when the map's debug options show one.
     pub(crate) debug_bucket: Option<Box<DebugBucket>>,
 
     /// `tile.id`.
@@ -67,7 +67,7 @@ impl RenderTile {
             tile_hold_for_fade: hold_for_fade,
             slot: None,
             needs_rendering: false,
-            debug_bucket: None, // layers: debug
+            debug_bucket: None,
         }
     }
 
@@ -115,7 +115,6 @@ impl RenderTile {
         self.needs_rendering = needs_rendering;
         let (modified, expires) = tile.load.freshness();
 
-        // layers: debug
         let needs_debug_bucket = match &self.debug_bucket {
             None => true,
             Some(debug_bucket) => {

@@ -6,7 +6,6 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_gfx::gpu::Gpu;
-use crate::gfx::index_vector::{IndexVector, IndexVectorPtr};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::raster_layer_ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
@@ -33,6 +32,7 @@ use crate::bucket::{Bucket, NoBucket};
 use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::gfx::context::Context;
+use crate::gfx::index_vector::{IndexVector, IndexVectorPtr};
 use crate::gfx::texture2d::{OwnedTexture, TextureKey};
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_composite::Composite;

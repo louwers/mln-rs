@@ -1,5 +1,5 @@
 //! The map renderer: sources and tiles, layouts and buckets, render layers,
-//! and the orchestrator that turns a style into each frame's render tree.
+//! and the orchestrator that brings them to each frame's update.
 
 mod algorithm;
 #[cfg(feature = "bench")]

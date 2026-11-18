@@ -1,6 +1,6 @@
 // The bucket is built on a worker and then owned by its tile's contents on
 // the render thread, where placement, cross-tile indexing and sorting
-// change its `state` in the frame's prepare.
+// change its `state` in the frame's update.
 //
 // Not ported: the MLN_SYMBOL_GUARDS `check` (memory-corruption guards).
 

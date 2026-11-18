@@ -8,7 +8,6 @@ use std::rc::Rc;
 use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::gpu::Gpu;
-use crate::gfx::index_vector::IndexVector;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::segment::SegmentBase;
@@ -20,6 +19,7 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use crate::draw::{DrawGeometry, DrawObjects, Textures, raw_vertices};
 use crate::gfx::context::Context;
+use crate::gfx::index_vector::IndexVector;
 use crate::globe_tile_mesh::{RawGlobeTileMesh, raw_globe_tile_mesh};
 use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDraws, TileMap, tile_objects};
 use crate::paint_parameters::PaintParameters;

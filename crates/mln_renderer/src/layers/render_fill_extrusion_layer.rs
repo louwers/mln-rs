@@ -17,7 +17,6 @@ use std::mem::offset_of;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use crate::gfx::index_vector::{IndexVector, IndexVectorPtr};
 use mln_gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
 use mln_gfx::shaders::fill_extrusion_layer_ubo::{
     FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO,
@@ -58,6 +57,7 @@ use crate::draw::{DrawGeometry, DrawObjects, copy_shared_attributes};
 use crate::frame_projection::zero_to_one_clip_z;
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
+use crate::gfx::index_vector::{IndexVector, IndexVectorPtr};
 use crate::gfx::texture2d::Texture2D;
 use crate::layer_drawing::{
     DrawDepth, DrawList, DrawObjectsMut, DrawPriority, FrameDraw, TileDraws, TileObjects, UniformWriter,

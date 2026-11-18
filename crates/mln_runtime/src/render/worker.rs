@@ -313,7 +313,7 @@ impl Gfx {
     /// one it drew with, with what the session set on it.
     fn renew_renderer(&mut self, events: &RendererEvents) {
         self.backend = self.target.backend();
-        let pixel_ratio = self.renderer.get_pixel_ratio();
+        let pixel_ratio = self.renderer.pixel_ratio();
         let mut renderer = Renderer::with_fonts(
             Rc::clone(&self.backend),
             pixel_ratio,
@@ -324,7 +324,7 @@ impl Gfx {
             invalidate(events),
             &self.pool,
         );
-        renderer.set_tile_cache_enabled(self.renderer.get_tile_cache_enabled());
+        renderer.set_tile_cache_enabled(self.renderer.tile_cache_enabled());
         renderer.set_event_queue(Some(events.clone()));
         set_tile_workers(&mut renderer, &self.registry);
         self.renderer = renderer;

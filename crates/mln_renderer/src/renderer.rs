@@ -1,6 +1,3 @@
-// C++ keeps a `gfx::RendererBackend&`; the frontend owns the backend, so the
-// renderer shares it through an `Rc`.
-
 use std::mem::ManuallyDrop;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -47,15 +44,16 @@ enum RenderState {
     Fully,
 }
 
-/// Port-only: what the last frame that [`Renderer::render`] drew spent on
+/// What the last frame that [`Renderer::render`] drew spent on
 /// each of its steps, on the CPU. They follow each other, and together take
 /// nearly all of `render`.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct RenderTimings {
-    /// Updating the render layers and sources from the update: the sources'
-    /// tile pyramids and the tiles' matrices.
+    /// The update up to symbol placement: the style's changes, the layers'
+    /// values, the sources' tiles and the layers' choice of them.
     pub sources: Duration,
-    /// Placing symbols across tiles and updating their opacities.
+    /// The rest of the update: placing symbols across tiles and updating
+    /// their buckets.
     pub symbols: Duration,
     /// Making the layers' draws from the tiles, with their uniforms.
     pub layers: Duration,
@@ -66,6 +64,9 @@ pub struct RenderTimings {
     pub draw: Duration,
 }
 
+/// Draws a map's updates into frame targets on one backend: it keeps the
+/// map's sources, tiles and layers between frames, and the GPU objects
+/// they draw with.
 pub struct Renderer {
     /// Dropped by hand in `drop`, inside the backend's hold: its custom
     /// layers' hosts free their graphics objects as the layers go, which on
@@ -187,12 +188,13 @@ impl Renderer {
         self.orchestrator.release_shaders();
     }
 
+    /// The device pixels per logical pixel the renderer draws at.
     #[must_use]
-    pub fn get_pixel_ratio(&self) -> f32 {
+    pub fn pixel_ratio(&self) -> f32 {
         self.pixel_ratio
     }
 
-    /// Port-only: runs the tiles' jobs, and the raster tiles' workers, in
+    /// Runs the tiles' jobs, and the raster tiles' workers, in
     /// `workers` (by default on the renderer's pool). Set it before the
     /// first render so that every tile uses it.
     pub fn set_tile_workers(&mut self, workers: RemoteWorkers) {
@@ -250,14 +252,14 @@ impl Renderer {
         handoff
     }
 
-    /// Port-only: drops `value` on the renderer's workers instead of this
+    /// Drops `value` on the renderer's workers instead of this
     /// thread, for data that would take a frame long to free, such as the
     /// sources of an earlier update. The renderer's drop waits for it.
     pub fn drop_on_workers<T: Send + 'static>(&self, value: T) {
         self.orchestrator.drop_on_workers(value);
     }
 
-    /// Port-only: what the last frame that [`render`](Self::render) drew
+    /// What the last frame that [`render`](Self::render) drew
     /// spent on each of its steps.
     #[must_use]
     pub fn render_timings(&self) -> RenderTimings {
@@ -271,8 +273,8 @@ impl Renderer {
         self.frame_projection
     }
 
-    // query: `Err` is the exception C++ throws out of the query (a
-    // malformed tile).
+    /// The features drawn in `geometry`, a point or a polygon in screen
+    /// coordinates. `Err` for a malformed tile.
     pub fn query_rendered_features(
         &mut self,
         geometry: &[mln_util::geo::ScreenCoordinate],
@@ -330,9 +332,12 @@ impl Renderer {
         self.orchestrator.query_feature_extensions(source_id, feature, extension, extension_field, args)
     }
 
+    /// The data of the symbols the last placement placed, when
+    /// [`collect_placed_symbol_data`](Self::collect_placed_symbol_data)
+    /// turned their collection on.
     #[must_use]
-    pub fn get_placed_symbols_data(&self) -> Vec<crate::text::placement::PlacedSymbolData> {
-        self.orchestrator.get_placed_symbols_data()
+    pub fn placed_symbols_data(&self) -> Vec<crate::text::placement::PlacedSymbolData> {
+        self.orchestrator.placed_symbols_data()
     }
 
     /// Logs every render source's tiles and the image manager's state.
@@ -340,7 +345,6 @@ impl Renderer {
         self.orchestrator.dump_debug_logs();
     }
 
-    // layers: feature state
     /// Merges `state` into a feature's state.
     ///
     /// An update whose feature state for the source differs from the last
@@ -358,14 +362,15 @@ impl Renderer {
         self.orchestrator.set_feature_state(source_id, source_layer_id, feature_id, state);
     }
 
+    /// The state of a feature.
     #[must_use]
-    pub fn get_feature_state(
+    pub fn feature_state(
         &self,
         source_id: &str,
         source_layer_id: Option<&str>,
         feature_id: &str,
     ) -> mln_style::expression::expression::FeatureState {
-        self.orchestrator.get_feature_state(source_id, source_layer_id, feature_id)
+        self.orchestrator.feature_state(source_id, source_layer_id, feature_id)
     }
 
     /// Removes a key of a feature's state, a feature's whole state, or a
@@ -389,9 +394,11 @@ impl Renderer {
         self.orchestrator.set_tile_cache_enabled(enable);
     }
 
+    /// Whether the renderer keeps tiles that left the view, to show them
+    /// again without loading them.
     #[must_use]
-    pub fn get_tile_cache_enabled(&self) -> bool {
-        self.orchestrator.get_tile_cache_enabled()
+    pub fn tile_cache_enabled(&self) -> bool {
+        self.orchestrator.tile_cache_enabled()
     }
 
     /// Tells the hosts of the custom layers that the renderer's graphics

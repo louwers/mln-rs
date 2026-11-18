@@ -4,7 +4,7 @@
 //! Each layer type keeps the GPU objects of its draws in types of its own,
 //! those of a tile in a [`TileMap`], which also says which bucket the
 //! tile's draws were built from and what of that bucket's vertex data
-//! changed since. Its update makes the frame's draws, values
+//! changed since. Its draw update makes the frame's draws, values
 //! ([`FrameDraw`]) in a [`DrawList`] with their uniform values and the part
 //! of the layer's GPU objects each binds, which it writes to the buffers of
 //! their [`LayerDraws`]. The layer type then uploads and draws them in

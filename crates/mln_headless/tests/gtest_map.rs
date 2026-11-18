@@ -2610,7 +2610,7 @@ fn disabled_placed_symbol_data() {
     test.frontend().renderer().collect_placed_symbol_data(true);
     test.render();
 
-    let placed_symbols = test.frontend().renderer().get_placed_symbols_data();
+    let placed_symbols = test.frontend().renderer().placed_symbols_data();
     assert_ne!(placed_symbols, Vec::<mln_renderer::text::placement::PlacedSymbolData>::new());
 
     let mut placed_text_inside_tile = 0;
@@ -2660,7 +2660,7 @@ fn disabled_placed_symbol_data() {
     test.render();
 
     assert_eq!(
-        test.frontend().renderer().get_placed_symbols_data(),
+        test.frontend().renderer().placed_symbols_data(),
         Vec::<mln_renderer::text::placement::PlacedSymbolData>::new()
     );
 }

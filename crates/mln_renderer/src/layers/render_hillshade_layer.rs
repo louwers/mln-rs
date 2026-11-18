@@ -10,7 +10,6 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_gfx::gpu::Gpu;
-use crate::gfx::index_vector::{IndexVector, IndexVectorPtr};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::hillshade_layer_ubo::{
     HillshadeDrawableUBO, HillshadeEvaluatedPropsUBO, HillshadeTilePropsUBO, MAX_ILLUMINATION_SOURCES,
@@ -49,6 +48,7 @@ use crate::buckets::hillshade_bucket::{HillshadeBucket, HillshadeLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::geometry::dem_data::get_unpack_vector;
 use crate::gfx::context::Context;
+use crate::gfx::index_vector::{IndexVector, IndexVectorPtr};
 use crate::gfx::texture2d::OwnedTexture;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_drawing::{
@@ -351,9 +351,9 @@ impl TypedLayer for RenderHillshadeLayer {
             self.static_data_shared_vertices
                 .get_or_insert_with(|| shared_vertices(&RenderStaticData::raster_vertices())),
         );
-        let static_data_indices = Rc::clone(self.static_data_indices.get_or_insert_with(|| {
-            IndexVector::new(RenderStaticData::quad_triangle_indices())
-        }));
+        let static_data_indices = Rc::clone(
+            self.static_data_indices.get_or_insert_with(|| IndexVector::new(RenderStaticData::quad_triangle_indices())),
+        );
 
         // `resampling` filters the prepared texture the tile's draw samples;
         // the prepare pass reads the DEM with Nearest regardless.

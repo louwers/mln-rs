@@ -159,11 +159,9 @@ pub(crate) struct RenderOrchestrator {
     layers: Vec<Box<dyn RenderLayer>>,
     /// The index in `layers` of each render layer, by layer id.
     layer_indexes: HashMap<String, usize>,
-    // conformance: renderLight.
     render_light: crate::render_light::RenderLight,
     render_sky: Option<crate::render_sky::RenderSky>,
 
-    // symbols:
     cross_tile_symbol_index: crate::text::cross_tile_symbol_index::CrossTileSymbolIndex,
     placement_controller: crate::text::placement::PlacementController,
     background_layer_as_color: bool,
@@ -181,7 +179,7 @@ pub(crate) struct RenderOrchestrator {
 
     global_state: Option<Arc<GlobalStateMap>>,
 
-    /// The debug overlays (layers: debug).
+    /// The debug overlays.
     debug_layers: DebugLayers,
 
     globe_depth_pass: GlobeDepthPass,
@@ -230,7 +228,6 @@ impl RenderOrchestrator {
             render_sources: HashMap::default(),
             layers: Vec::new(),
             layer_indexes: HashMap::default(),
-            // conformance: renderLight(makeMutable<Light::Impl>())
             render_light: crate::render_light::RenderLight::new(Arc::default()),
             render_sky: None,
             background_layer_as_color,
@@ -244,12 +241,12 @@ impl RenderOrchestrator {
             global_state: None,
             globe_depth_pass: GlobeDepthPass::default(),
             sky_pass: crate::sky_pass::SkyPass::default(),
-            debug_layers: VecMap::new(), // layers: debug
+            debug_layers: VecMap::new(),
         }
     }
 
-    /// Port-only: runs the tiles' jobs in `workers` (by default on the
-    /// thread pool). The jobs in flight elsewhere run again there.
+    /// Runs the tiles' jobs in `workers` (by default on the thread
+    /// pool). The jobs in flight elsewhere run again there.
     pub(crate) fn set_tile_workers(&mut self, workers: RemoteWorkers) {
         self.tile_store.set_workers(Box::new(workers));
     }
@@ -258,10 +255,6 @@ impl RenderOrchestrator {
     /// oldest first.
     pub(crate) fn take_events(&mut self) -> Vec<RendererEvent> {
         std::mem::take(&mut self.events)
-    }
-
-    pub(crate) fn get_render_source(&self, id: &str) -> Option<&dyn RenderSource> {
-        self.render_sources.get(id).map(AsRef::as_ref)
     }
 
     /// The atlases the layers' draws share.
@@ -439,7 +432,6 @@ impl RenderOrchestrator {
 
         for (name, render_source) in &mut self.render_sources {
             if render_source.is_enabled() {
-                // layers: feature state
                 if let Some((tiles, _)) = render_source.tiles().and_then(|key| self.tile_store.source_mut(key)) {
                     tiles.coalesce_feature_state(changed_buckets);
                 }
@@ -564,7 +556,6 @@ impl RenderOrchestrator {
     /// Transitions and evaluates the light and the sky, keeping the running
     /// transitions of a sky that changes.
     fn update_light_and_sky(&mut self, style: &Style, clock: &FrameClock) {
-        // conformance
         let light_changed = !Arc::ptr_eq(&self.render_light.light, style.get_light());
 
         if light_changed {
@@ -673,7 +664,7 @@ impl RenderOrchestrator {
                 let Some(layer) = layers.get(id) else { continue };
                 if let Some(mut render_layer) = create_render_layer(&self.registry, layer.style()) {
                     render_layer.transition(&clock.added_layer_transition);
-                    // `emplace` keeps an existing entry.
+                    // A layer added twice keeps its first render layer.
                     by_id.entry(id.to_string()).or_insert(render_layer);
                 }
             }
@@ -766,7 +757,6 @@ impl RenderOrchestrator {
 
         for (id, style_source) in &source_diff.added {
             if self.render_sources.contains_key(id) {
-                // `emplace` keeps an existing entry.
                 continue;
             }
             let Some(mut render_source) = render_source::create(&self.registry, style_source, &mut self.tile_store)
@@ -825,20 +815,16 @@ impl RenderOrchestrator {
 
         let mut will_render: Vec<bool> = vec![false; self.layers.len()];
 
-        // Update all sources and initialize renderItems.
-        //
-        // DEVIATION: C++ always has at least one source, the annotation
-        // source that AnnotationManager::onStyleLoaded adds to every style,
-        // and handles the layers without a source (background) while it
-        // iterates over the first source. Annotations are not ported yet, so
-        // with no style sources the loop runs once without a source.
+        // Each source in turn takes its layers. The layers without a source
+        // go with the first, and with no sources the loop runs once for
+        // them.
         let source_count = std::cmp::max(self.sources_by_id.len(), 1);
         for source_index in 0..source_count {
             let style_source = self.sources_by_id.get(source_index).cloned();
             let mut source_needs_rendering = false;
             let mut source_needs_relayout = false;
-            // C++ has a render source for every source type; the port skips
-            // the layers of a source type without one.
+            // The layers of a source type without a render source are
+            // skipped.
             let has_render_source =
                 style_source.as_ref().is_some_and(|style_source| self.render_sources.contains_key(style_source.id()));
             // The id of the source whose layers this pass takes, if it has a
@@ -929,8 +915,6 @@ impl RenderOrchestrator {
             if let Some(style_source) = &style_source {
                 tile_parameters.is_update_synchronous = style_source.data().is_update_synchronous();
                 let filtered_layers = std::mem::take(&mut self.filtered_layers_for_source);
-                // C++ `renderSources.at(sourceImpl->id)`; a source type
-                // without a render source has none.
                 if let Some(source) = self.render_sources.get_mut(style_source.id()) {
                     source.update(
                         &mut self.tile_store,
@@ -1041,7 +1025,6 @@ impl RenderOrchestrator {
     }
 
     pub(crate) fn has_transitions(&self, time_point: Option<Instant>) -> bool {
-        // conformance
         if self.render_light.has_transition() {
             return true;
         }
@@ -1084,7 +1067,7 @@ impl RenderOrchestrator {
         self.style = None;
         self.sources_by_id.clear();
 
-        self.debug_layers.clear(); // layers: debug
+        self.debug_layers.clear();
         self.render_sources.clear();
         self.tile_store.clear();
         self.layers.clear();
@@ -1108,7 +1091,7 @@ impl RenderOrchestrator {
     /// sources keep their tiles, and the tiles their layout.
     pub(crate) fn release_shaders(&mut self) {
         self.remake_render_layers = true;
-        self.debug_layers.clear(); // layers: debug
+        self.debug_layers.clear();
         self.sky_pass = crate::sky_pass::SkyPass::default();
         self.globe_depth_pass = GlobeDepthPass::default();
     }
@@ -1228,7 +1211,7 @@ impl RenderOrchestrator {
     }
 
     /// Updates the debug overlays' draws from the sources' tiles, and makes
-    /// their draws of the frame (layers: debug).
+    /// their draws of the frame.
     pub(crate) fn update_debug_layers(&mut self, parameters: &mut PaintParameters<'_>) {
         for source in self.render_sources.values() {
             if source.is_enabled() {
@@ -1240,7 +1223,7 @@ impl RenderOrchestrator {
         }
     }
 
-    /// The debug overlays, in `DebugType` order (layers: debug).
+    /// The debug overlays, in `DebugType` order.
     pub(crate) fn debug_layers(&mut self) -> impl Iterator<Item = &mut DebugLayer> {
         self.debug_layers.values_mut()
     }
@@ -1313,7 +1296,6 @@ impl RenderOrchestrator {
         &mut self.globe_depth_pass
     }
 
-    // query
     /// Queries the rendered features in `geometry`. `Err` if the query fails
     /// (a malformed tile).
     pub(crate) fn query_rendered_features(
@@ -1359,12 +1341,10 @@ impl RenderOrchestrator {
         let mut rendered_symbols = placement.get_collision_index().query_rendered_symbols(&geometry.to_vec());
         let mut bucket_query_data = Vec::with_capacity(rendered_symbols.len());
         for bucket_instance_id in rendered_symbols.keys() {
-            // C++ `getQueryData` throws for an unknown bucket.
             bucket_query_data.push(placement.get_query_data(*bucket_instance_id).map_err(Error::native)?);
         }
-        // Although symbol query is global, symbol results are only sortable within
-        // a bucket For a predictable global sort renderItems, we sort the buckets
-        // based on their corresponding tile position
+        // Symbols sort only within their bucket, so the buckets go in the
+        // order of their tiles for a predictable order of all of them.
         bucket_query_data.sort_by(|a, b| {
             (a.tile_id.canonical.z, a.tile_id.canonical.y, a.tile_id.wrap, a.tile_id.canonical.x).cmp(&(
                 b.tile_id.canonical.z,
@@ -1438,10 +1418,7 @@ impl RenderOrchestrator {
             return Ok(result);
         }
 
-        // Combine all results based on the style layer renderItems.
-        // DEVIATION: C++ iterates `filteredLayers`, an unordered_map (libstdc++
-        // hash order); the port goes from the topmost style layer down, the
-        // order GL JS (which wrote the expectations) returns.
+        // The results go from the topmost style layer down.
         let layers = self.style.as_ref().map(|style| Arc::clone(style.get_layer_list())).unwrap_or_default();
         for style_layer in layers.iter().rev() {
             let id = style_layer.get_id();
@@ -1460,7 +1437,7 @@ impl RenderOrchestrator {
     }
 
     /// A copy of the placed symbols' data (the placement is shared).
-    pub(crate) fn get_placed_symbols_data(&self) -> Vec<crate::text::placement::PlacedSymbolData> {
+    pub(crate) fn placed_symbols_data(&self) -> Vec<crate::text::placement::PlacedSymbolData> {
         self.placement_controller.get_placement().get_placed_symbols_data().to_vec()
     }
 
@@ -1489,7 +1466,7 @@ impl RenderOrchestrator {
         extension_field: &str,
         args: Option<&feature::PropertyMap>,
     ) -> Result<crate::query::FeatureExtensionValue, Error> {
-        match self.get_render_source(source_id) {
+        match self.render_sources.get(source_id) {
             Some(source) => source.query_feature_extensions(feature, extension, extension_field, args),
             None => Ok(crate::query::FeatureExtensionValue::default()),
         }
@@ -1502,7 +1479,6 @@ impl RenderOrchestrator {
         self.tile_store.dump_debug_logs();
     }
 
-    // layers: feature state
     pub(crate) fn set_feature_state(
         &mut self,
         source_id: &str,
@@ -1515,7 +1491,7 @@ impl RenderOrchestrator {
         }
     }
 
-    pub(crate) fn get_feature_state(
+    pub(crate) fn feature_state(
         &self,
         source_id: &str,
         source_layer_id: Option<&str>,
@@ -1557,7 +1533,7 @@ impl RenderOrchestrator {
         self.events.push(RendererEvent::Invalidate);
     }
 
-    pub(crate) fn get_tile_cache_enabled(&self) -> bool {
+    pub(crate) fn tile_cache_enabled(&self) -> bool {
         self.tile_cache_enabled
     }
 }
@@ -1635,8 +1611,8 @@ impl Drop for WaitOnDrop {
 impl Drop for RenderOrchestrator {
     fn drop(&mut self) {
         self.tile_store.log_stats();
-        // Destroy the render sources and their tiles before waiting for the
-        // thread pool, as the C++ members' destructors do.
+        // The render sources and their tiles go before the wait, since
+        // their data drops on the thread pool.
         self.render_sources.clear();
         self.tile_store.clear();
         self.thread_pool.wait();

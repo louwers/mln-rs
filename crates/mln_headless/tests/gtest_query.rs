@@ -403,7 +403,7 @@ fn query_source_feature_states() {
     test.0.frontend().renderer().set_feature_state("source1", None, "feature1", &new_state);
 
     // C++ fills an out-parameter; the Rust getter returns the state.
-    let states = test.0.frontend().renderer().get_feature_state("source1", None, "feature1");
+    let states = test.0.frontend().renderer().feature_state("source1", None, "feature1");
     assert_eq!(states.len(), 2);
     assert_eq!(states["hover"], Value::Bool(true));
     assert_eq!(states["radius"], Value::Uint(20));
@@ -423,7 +423,7 @@ fn remove_source_feature_state() {
     test.0.frontend().renderer().set_feature_state("source1", None, "feature1", &new_state);
 
     // Read back (C++: the out-parameter overload).
-    let after_set = test.0.frontend().renderer().get_feature_state("source1", None, "feature1");
+    let after_set = test.0.frontend().renderer().feature_state("source1", None, "feature1");
     assert_eq!(after_set, new_state);
 
     // Remove a single key. Unlike updates, removals are only reflected once a
@@ -433,7 +433,7 @@ fn remove_source_feature_state() {
     test.render();
 
     // Read back (C++: the return-value overload).
-    let after_key_removal = test.0.frontend().renderer().get_feature_state("source1", None, "feature1");
+    let after_key_removal = test.0.frontend().renderer().feature_state("source1", None, "feature1");
     assert_eq!(after_key_removal.len(), 1);
     assert!(!after_key_removal.contains_key("hover"));
     assert_eq!(after_key_removal["radius"], Value::Uint(20));
@@ -443,7 +443,7 @@ fn remove_source_feature_state() {
     test.render();
 
     // Read back (C++: the out-parameter overload again).
-    let after_feature_removal = test.0.frontend().renderer().get_feature_state("source1", None, "feature1");
+    let after_feature_removal = test.0.frontend().renderer().feature_state("source1", None, "feature1");
     assert!(after_feature_removal.is_empty());
 }
 

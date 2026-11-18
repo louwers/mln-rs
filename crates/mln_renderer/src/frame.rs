@@ -29,7 +29,8 @@ pub(crate) struct Frame {
     pub(crate) sky: Option<EvaluatedSky>,
     /// Whether a layer draws in the 3D pass.
     pub(crate) has_3d: bool,
-    /// The number of layers, from the top, below the topmost 3D layer.
+    /// The number of the frame's layers above its lowest 3D layer, which
+    /// draw without a depth test; 0 without 3D layers.
     pub(crate) opaque_pass_cutoff: u32,
     /// What the frame clears to: transparent black unless the style's
     /// bottom layer is a solid background.

@@ -245,7 +245,7 @@ impl SymbolView {
                 .ok_or_else(|| Error::invalid_argument(format!("no render layer for {}", layer.get_id())))?;
             let mut render_layer = RenderSymbolLayer::new(style);
             render_layer.evaluate(&parameters);
-            // As the layer's prepare adds its tiles' buckets.
+            // As the layer's update adds its tiles' buckets.
             let translates = render_layer.symbol_translates();
             for (tile_index, laid_out) in tiles.iter().enumerate() {
                 let Some(render_data) = laid_out.result.layer_render_data.get(layer.get_id()) else { continue };

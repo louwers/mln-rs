@@ -3,7 +3,6 @@ use std::rc::Rc;
 
 use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
-use crate::gfx::index_vector::IndexVector;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
@@ -22,6 +21,7 @@ use mln_util::vectors::Vec4;
 
 use crate::draw::{DrawGeometry, DrawObjects, Textures, raw_vertices};
 use crate::gfx::context::Context;
+use crate::gfx::index_vector::IndexVector;
 use crate::layer_drawing::{DrawDepth, FrameDraw, SingleDraw};
 use crate::render_light::EvaluatedLight;
 use crate::render_sky::EvaluatedSky;

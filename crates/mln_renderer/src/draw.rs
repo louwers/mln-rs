@@ -15,7 +15,6 @@ use mln_gfx::gpu::{
     GeometryId, Gpu, GpuError, PipelineId, PipelineKey, SamplerId, Scissor, ShaderId, StencilState, TargetFormats,
     TextureId, VertexAttribute as GpuVertexAttribute, VertexBufferLayout, VertexStep,
 };
-use crate::gfx::index_vector::IndexVectorPtr;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{MAX_TEXTURE_COUNT_PER_SHADER, MAX_UBO_COUNT_PER_SHADER};
 use mln_gfx::shaders::shader_program::{ShaderProgram, ShaderProgramPtr};
@@ -25,6 +24,7 @@ use mln_util::logging::{Event, Log};
 use mln_util::time::Instant;
 
 use crate::gfx::context::Context;
+use crate::gfx::index_vector::IndexVectorPtr;
 use crate::gfx::owned::Owned;
 use crate::gfx::texture2d::TextureKey;
 use crate::gfx::uniform_buffer::UniformBufferArray;

@@ -2,7 +2,7 @@
 // layer's draws: their vertices, indices and paint values. Workers build
 // buckets and send them to the render thread, which owns each one once, in
 // its tile's contents, and changes it only where it has the contents
-// mutably: feature state and symbol placement in a frame's prepare, the
+// mutably: feature state and symbol placement in a frame's update, the
 // upload that moves its geometry to the draws in the frame's encode. What
 // every bucket has is `BucketBase`; what each type does, the `Bucket` trait.
 

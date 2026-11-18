@@ -1,5 +1,5 @@
 // The index gives the symbols of the buckets a layer places their ids in
-// the frame's prepare, which has the buckets mutably (`SymbolBuckets`).
+// the frame's update, which has the buckets mutably (`SymbolBuckets`).
 
 use std::collections::BTreeSet;
 use std::num::NonZeroU32;
