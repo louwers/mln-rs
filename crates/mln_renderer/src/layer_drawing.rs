@@ -9,9 +9,11 @@
 //! of the layer's GPU objects each binds, which it writes to the buffers of
 //! their [`LayerDraws`]. The layer type then uploads and draws them in
 //! loops of its own: [`FrameDraws::begin`] begins a pass's draws, and
-//! [`DrawPass::draw`] draws one draw's objects.
+//! [`DrawPass::draw`] draws one draw's objects. A layer type that draws one
+//! group of its tiles' draws keeps them in a [`TileDraws`], whose tiles name
+//! the objects of their draws by a part of their own type
+//! ([`TileObjects`]).
 
-use std::cell::Cell;
 use std::ops::BitOrAssign;
 
 use mln_gfx::depth_mode::DepthMode;
@@ -106,86 +108,57 @@ struct TileState {
 #[derive(Default)]
 struct TileSet {
     tiles: VecMap<OverscaledTileID, TileState>,
-    /// For each tile of the set, the index it had before the last
-    /// `set_tiles`, `None` for a tile new to the set. The indexes it had go
-    /// up.
+    /// The tiles that `set_tiles` makes the set's.
+    incoming: Vec<OverscaledTileID>,
+    /// For each tile of the set, the index it had before the set's tiles
+    /// last changed, `None` for a tile new to the set.
     moves: Vec<Option<usize>>,
-    /// The tile `index_of` found last, and its index: a layer's update asks
-    /// for one tile several times in a row.
-    last_found: Cell<Option<(OverscaledTileID, usize)>>,
 }
 
 impl TileSet {
-    /// The index of `tile_id`'s entry, if the set has one.
-    fn index_of(&self, tile_id: &OverscaledTileID) -> Option<usize> {
-        if let Some((last, index)) = self.last_found.get()
-            && last == *tile_id
-        {
-            return Some(index);
+    /// Makes `incoming` the set's tiles: keeps the states of those it has,
+    /// and drops the others. Returns whether that changed any tile's index,
+    /// which `moves` then says.
+    fn set_tiles(&mut self) -> bool {
+        let incoming = &mut self.incoming;
+        incoming.sort_unstable();
+        incoming.dedup();
+        let keys = self.tiles.keys().as_slice();
+        if keys == incoming.as_slice() {
+            return false;
         }
-        let index = self.tiles.index_of(tile_id)?;
-        self.last_found.set(Some((*tile_id, index)));
-        Some(index)
-    }
-
-    /// The state of `tile_id`, if the set has it.
-    fn state_mut(&mut self, tile_id: &OverscaledTileID) -> Option<&mut TileState> {
-        let index = self.index_of(tile_id)?;
-        Some(self.tiles.get_index_mut(index)?.1)
-    }
-
-    /// Drops the set's tiles.
-    fn clear(&mut self) {
-        self.tiles.clear();
-        self.last_found.set(None);
-    }
-
-    /// Makes `tiles` the set's: keeps the entries of those it has, and
-    /// drops the others. Returns the number of tiles it had where any tile's
-    /// index changed, which `moves` then says; a set without tiles had no
-    /// values to move.
-    fn set_tiles(&mut self, tiles: impl Iterator<Item = OverscaledTileID> + Clone) -> Option<usize> {
-        if self.tiles.is_empty() {
-            let (min, max) = tiles.size_hint();
-            self.tiles.reserve(max.unwrap_or(min));
-            for id in tiles {
-                self.tiles.insert(id, TileState::default());
-            }
-            return None;
-        }
-        if tiles.clone().eq(self.tiles.keys().copied()) {
-            return None;
-        }
-        let old_len = self.tiles.len();
-        let has = |id: &OverscaledTileID| tiles.clone().any(|tile| tile == *id);
         self.moves.clear();
-        self.moves.extend((0..old_len).map(Some));
-        let mut keys = self.tiles.keys();
-        self.moves.retain(|_| keys.next().is_some_and(has));
-        self.tiles.retain(|id, _| has(id));
-        for id in tiles {
-            if self.tiles.index_of(&id).is_none() {
-                self.tiles.insert(id, TileState::default());
-                if let Some(index) = self.tiles.index_of(&id) {
-                    self.moves.insert(index, None);
-                }
+        let mut old = 0;
+        for id in incoming.iter() {
+            while keys.get(old).is_some_and(|key| key < id) {
+                old += 1;
+            }
+            self.moves.push(keys.get(old).filter(|key| *key == id).map(|_| old));
+        }
+        self.tiles.retain(|id, _| incoming.binary_search(id).is_ok());
+        for (id, old) in incoming.iter().zip(&self.moves) {
+            if old.is_none() {
+                self.tiles.insert(*id, TileState::default());
             }
         }
-        self.last_found.set(None);
-        let moved = old_len != self.moves.len() || self.moves.iter().enumerate().any(|(i, old)| *old != Some(i));
-        moved.then_some(old_len)
+        true
     }
 
-    /// Moves the tiles' entries to the tiles `wrap_delta` world copies east
-    /// of theirs. Returns whether that changed their order, which only a
-    /// wrap that overflows does.
+    /// Moves the tiles' states to the tiles `wrap_delta` world copies east
+    /// of theirs. Returns whether that changed their order, which `moves`
+    /// then says; only a wrap that overflows does.
     fn shift_wraps(&mut self, wrap_delta: i16) -> bool {
-        self.last_found.set(None);
         let shift = |id: &OverscaledTileID| id.unwrap_to(id.wrap.wrapping_add(wrap_delta));
         if self.tiles.map_keys_in_order(shift) {
             return false;
         }
-        self.tiles = std::mem::take(&mut self.tiles).into_iter().map(|(id, state)| (shift(&id), state)).collect();
+        let mut shifted: Vec<(OverscaledTileID, usize)> = self.tiles.keys().map(shift).zip(0..).collect();
+        shifted.sort_unstable();
+        let mut states: Vec<Option<TileState>> =
+            std::mem::take(&mut self.tiles).into_iter().map(|(_, state)| Some(state)).collect();
+        self.moves.clear();
+        self.moves.extend(shifted.iter().map(|&(_, old)| Some(old)));
+        self.tiles = shifted.into_iter().map(|(id, old)| (id, states[old].take().unwrap_or_default())).collect();
         true
     }
 
@@ -203,58 +176,43 @@ impl TileSet {
 /// and the layer's own `T` of the tile, from when the layer builds one.
 pub(crate) struct TileMap<T> {
     set: TileSet,
-    /// Each tile's `T`, at the tile's index in the set, boxed so that the
-    /// values stay small to move.
-    values: Vec<Option<Box<T>>>,
+    /// Each tile's `T`, at the tile's index in the set.
+    values: Vec<Option<T>>,
+    /// The values before the set's tiles changed, while they move to their
+    /// tiles' new indexes; empty otherwise.
+    moving: Vec<Option<T>>,
 }
 
 impl<T> Default for TileMap<T> {
     fn default() -> Self {
-        TileMap { set: TileSet::default(), values: Vec::new() }
+        TileMap { set: TileSet::default(), values: Vec::new(), moving: Vec::new() }
     }
 }
 
 impl<T> TileMap<T> {
-    /// Makes `tiles`, the frame's tiles of the layer, those the map has
-    /// entries for: it keeps the entries of those it had, and drops the
-    /// others.
-    pub(crate) fn set_tiles<I>(&mut self, tiles: I)
-    where
-        I: IntoIterator<Item = OverscaledTileID>,
-        I::IntoIter: Clone,
-    {
-        debug_assert!(!self.set.tiles.is_empty() || self.values.is_empty());
-        if let Some(old_len) = self.set.set_tiles(tiles.into_iter()) {
-            self.apply_moves(old_len);
+    /// Makes `tiles`, the frame's tiles of the layer in any order, those the
+    /// map has entries for: it keeps the entries of those it had, and drops
+    /// the others.
+    pub(crate) fn set_tiles(&mut self, tiles: impl IntoIterator<Item = OverscaledTileID>) {
+        self.set.incoming.clear();
+        self.set.incoming.extend(tiles);
+        if self.set.set_tiles() {
+            self.apply_moves();
         }
     }
 
-    /// Moves the values of the `old_len` tiles the set had to their tiles'
-    /// indexes, as the set's `moves` say, and drops those of the tiles that
-    /// left.
-    fn apply_moves(&mut self, old_len: usize) {
-        let (values, moves) = (&mut self.values, &self.set.moves);
-        // The values of the tiles that stay, in order, then those of the new
-        // tiles at their indexes, moving the others up.
-        values.resize_with(old_len, || None);
-        let mut kept = 0;
-        for &old in moves.iter().flatten() {
-            values.swap(kept, old);
-            kept += 1;
-        }
-        values.truncate(kept);
-        values.resize_with(moves.len(), || None);
-        for (index, old) in moves.iter().enumerate().rev() {
-            if old.is_some() {
-                kept -= 1;
-                values.swap(index, kept);
-            }
-        }
+    /// Moves the values to their tiles' indexes, as the set's `moves` say,
+    /// and drops those of the tiles that left.
+    fn apply_moves(&mut self) {
+        std::mem::swap(&mut self.values, &mut self.moving);
+        let moving = &mut self.moving;
+        self.values.extend(self.set.moves.iter().map(|old| old.and_then(|old| moving.get_mut(old)?.take())));
+        moving.clear();
     }
 
     /// Drops the entries of the tiles.
     pub(crate) fn clear_tiles(&mut self) {
-        self.set.clear();
+        self.set.tiles.clear();
         self.values.clear();
     }
 
@@ -262,8 +220,7 @@ impl<T> TileMap<T> {
     /// of theirs.
     pub(crate) fn shift_wraps(&mut self, wrap_delta: i16) {
         if self.set.shift_wraps(wrap_delta) {
-            // The tiles' values are no longer at their tiles' indexes.
-            self.values.clear();
+            self.apply_moves();
         }
     }
 
@@ -275,74 +232,85 @@ impl<T> TileMap<T> {
 
     /// Drops what the layer keeps of the tiles. The tiles' entries stay.
     pub(crate) fn clear(&mut self) {
-        for value in &mut self.values {
-            *value = None;
-        }
+        self.values.fill_with(|| None);
     }
 
     /// Whether `tile_id` is one of the frame's tiles of the layer.
     #[cfg(test)]
     #[must_use]
     pub(crate) fn has_tile(&self, tile_id: &OverscaledTileID) -> bool {
-        self.set.index_of(tile_id).is_some()
-    }
-
-    /// The bucket the draws of `tile_id` were built from, if the tile is one
-    /// of the frame's and they were.
-    #[must_use]
-    pub(crate) fn bucket(&self, tile_id: &OverscaledTileID) -> Option<SimpleIdentity> {
-        self.set.index_of(tile_id).and_then(|index| self.set.tiles.get_index(index)?.1.bucket)
-    }
-
-    /// Records that the draws of `tile_id` are built from `bucket`, which
-    /// drops the changes of the bucket they were built from before. Returns
-    /// whether that changed it; a tile that isn't one of the frame's takes no
-    /// bucket.
-    pub(crate) fn set_bucket(&mut self, tile_id: &OverscaledTileID, bucket: SimpleIdentity) -> bool {
-        match self.set.state_mut(tile_id) {
-            Some(state) if state.bucket != Some(bucket) => {
-                state.bucket = Some(bucket);
-                state.changes = BucketChanges::default();
-                true
-            }
-            _ => false,
-        }
-    }
-
-    /// What of the bucket of `tile_id` changed since its draws last copied
-    /// it, which they are about to copy again.
-    pub(crate) fn take_changes(&mut self, tile_id: &OverscaledTileID) -> BucketChanges {
-        self.set.state_mut(tile_id).map(|state| std::mem::take(&mut state.changes)).unwrap_or_default()
+        self.set.tiles.contains_key(tile_id)
     }
 
     /// What the layer keeps of `tile_id`, if the tile is one of the frame's
     /// and the layer keeps anything of it.
     #[must_use]
-    pub(crate) fn cache(&self, tile_id: &OverscaledTileID) -> Option<&T> {
-        self.values.get(self.set.index_of(tile_id)?)?.as_deref()
+    pub(crate) fn get(&self, tile_id: &OverscaledTileID) -> Option<&T> {
+        self.values.get(self.set.tiles.index_of(tile_id)?)?.as_ref()
     }
 
     /// What the layer keeps of `tile_id`, if the tile is one of the frame's
     /// and the layer keeps anything of it.
-    pub(crate) fn cache_mut(&mut self, tile_id: &OverscaledTileID) -> Option<&mut T> {
-        self.values.get_mut(self.set.index_of(tile_id)?)?.as_deref_mut()
+    pub(crate) fn get_mut(&mut self, tile_id: &OverscaledTileID) -> Option<&mut T> {
+        self.values.get_mut(self.set.tiles.index_of(tile_id)?)?.as_mut()
     }
 
     /// Makes `value` what the layer keeps of `tile_id`, if the tile is one
     /// of the frame's, and returns it.
-    pub(crate) fn set_cache(&mut self, tile_id: &OverscaledTileID, value: T) -> Option<&mut T> {
-        let index = self.set.index_of(tile_id)?;
-        if self.values.len() <= index {
-            self.values.resize_with(self.set.tiles.len(), || None);
-        }
-        Some(self.values[index].insert(Box::new(value)))
+    pub(crate) fn insert(&mut self, tile_id: &OverscaledTileID, value: T) -> Option<&mut T> {
+        Some(self.entry(tile_id)?.value.insert(value))
     }
 
     /// Drops what the layer keeps of `tile_id`.
-    pub(crate) fn drop_cache(&mut self, tile_id: &OverscaledTileID) {
-        if let Some(value) = self.set.index_of(tile_id).and_then(|index| self.values.get_mut(index)) {
-            *value = None;
+    pub(crate) fn drop_value(&mut self, tile_id: &OverscaledTileID) {
+        if let Some(entry) = self.entry(tile_id) {
+            *entry.value = None;
         }
+    }
+
+    /// The entry of `tile_id`, if the tile is one of the frame's.
+    pub(crate) fn entry(&mut self, tile_id: &OverscaledTileID) -> Option<TileEntry<'_, T>> {
+        let index = self.set.tiles.index_of(tile_id)?;
+        let (_, state) = self.set.tiles.get_index_mut(index)?;
+        Some(TileEntry { state, value: self.values.get_mut(index)? })
+    }
+}
+
+/// The entry of a tile in a [`TileMap`].
+pub(crate) struct TileEntry<'a, T> {
+    state: &'a mut TileState,
+    /// What the layer keeps of the tile, if anything.
+    pub(crate) value: &'a mut Option<T>,
+}
+
+impl<T> TileEntry<'_, T> {
+    /// The bucket the tile's draws were built from, if they were.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn bucket(&self) -> Option<SimpleIdentity> {
+        self.state.bucket
+    }
+
+    /// Records that the tile's draws are built from `bucket`. Where they
+    /// were built from another bucket, this drops what the layer keeps of
+    /// the tile. Returns whether the bucket changed, which drops the changes
+    /// of the one before.
+    pub(crate) fn set_bucket(&mut self, bucket: SimpleIdentity) -> bool {
+        if self.state.bucket == Some(bucket) {
+            return false;
+        }
+        if self.state.bucket.is_some() {
+            *self.value = None;
+        }
+        self.state.bucket = Some(bucket);
+        self.state.changes = BucketChanges::default();
+        true
+    }
+
+    /// What of the tile's bucket changed since its draws last copied it,
+    /// which they are about to copy again.
+    pub(crate) fn take_changes(&mut self) -> BucketChanges {
+        std::mem::take(&mut self.state.changes)
     }
 }
 
@@ -367,15 +335,33 @@ impl KeptDraw {
     }
 }
 
-/// The GPU objects of the draw of a tile of a layer that keeps one draw of
-/// each tile, as [`LayerDraws::upload`] and [`LayerDraws::render`] find
-/// them.
-pub(crate) fn kept_tile_draw<'a>(
-    tiles: &'a mut TileMap<KeptDraw>,
+/// What a layer keeps of a tile, whose draws a frame's draws name by a part
+/// of the layer's own type.
+pub(crate) trait TileObjects {
+    /// Which of the tile's draws a frame's draw draws.
+    type Part: Copy;
+
+    /// The GPU objects of the tile's draw `part`, with what gives them the
+    /// textures of the tile's atlases.
+    fn objects(&mut self, part: Self::Part) -> Option<(&mut DrawObjects, Option<&AtlasBinding>)>;
+}
+
+impl TileObjects for KeptDraw {
+    type Part = ();
+
+    fn objects(&mut self, (): ()) -> Option<(&mut DrawObjects, Option<&AtlasBinding>)> {
+        Some((&mut self.objects, None))
+    }
+}
+
+/// The GPU objects of `draw`, `part` of its tile's, as
+/// [`LayerDraws::upload`] and [`LayerDraws::render`] find them.
+pub(crate) fn tile_objects<'a, T: TileObjects>(
+    tiles: &'a mut TileMap<T>,
     draw: &FrameDraw,
-    (): (),
+    part: T::Part,
 ) -> Option<(&'a mut DrawObjects, Option<&'a AtlasBinding>)> {
-    Some((&mut tiles.cache_mut(&draw.tile?)?.objects, None))
+    tiles.get_mut(&draw.tile?)?.objects(part)
 }
 
 /// How a draw tests and writes depth.
@@ -488,7 +474,7 @@ impl<U, P: Copy> DrawList<U, P> {
         context: &Context,
         write: impl FnOnce(&mut UniformWriter<'_, U>),
     ) {
-        self.draws.sort_unstable_by_key(|(draw, index)| (draw.order(), *index));
+        sort_draws(&mut self.draws);
         if !self.draws.is_empty() {
             write(&mut UniformWriter {
                 draws: &self.draws,
@@ -505,6 +491,13 @@ impl<U, P: Copy> DrawList<U, P> {
         self.uniforms.clear();
         self.parts.clear();
     }
+}
+
+/// Sorts `draws`, each with the index it was pushed at, in
+/// [`FrameDraw::order`], and in the order they were pushed among draws of the
+/// same order.
+fn sort_draws(draws: &mut [(FrameDraw, usize)]) {
+    draws.sort_unstable_by_key(|(draw, index)| (draw.order(), *index));
 }
 
 /// Writes the buffers that a frame's draws read, each draw's entries at its
@@ -555,13 +548,13 @@ pub(crate) struct FrameDraws {
     id: SimpleIdentity,
     /// The draws, in [`FrameDraw::order`]. A draw's index is the index of its
     /// entries in the storage buffers, which shaders read as `globalIndex`.
-    pub(crate) draws: Vec<FrameDraw>,
+    draws: Vec<FrameDraw>,
     /// The buffers the draws bind, by id.
     pub(crate) uniform_buffers: UniformBufferArray,
     /// How the draws composite onto the frame in the translucent pass, as one
     /// surface, after they draw into a texture of their own; `None` where
     /// they draw straight onto the frame.
-    pub(crate) composite: Option<Composite>,
+    composite: Option<Composite>,
     /// The tiles whose masks the stencil buffer holds when the draws draw.
     /// Draws that don't clip need none, and neither does a layer without
     /// tiles, whose draws are none.
@@ -578,6 +571,22 @@ impl FrameDraws {
             composite: None,
             stencil_tiles: Vec::new(),
         }
+    }
+
+    /// Adds `draw`, which draws after the others.
+    pub(crate) fn push(&mut self, draw: FrameDraw) {
+        self.draws.push(draw);
+    }
+
+    /// Drops the draws.
+    pub(crate) fn clear(&mut self) {
+        self.draws.clear();
+    }
+
+    /// Makes the draws composite onto the frame as `composite` says, or
+    /// draw straight onto it for `None`.
+    pub(crate) fn set_composite(&mut self, composite: Option<Composite>) {
+        self.composite = composite;
     }
 
     /// Makes `tiles` those whose masks the stencil buffer holds when the
@@ -608,31 +617,24 @@ impl FrameDraws {
         let composited = (self.composite.is_some() && parameters.pass == RenderPass::Translucent)
             .then(|| parameters.begin_composited(gpu, self.id))
             .flatten();
-        let mut pass = DrawPass {
-            frame: self,
-            pass: parameters.pass.underlying_type(),
-            drawing: composited.as_ref().is_none_or(Composited::draws),
-            volume_stencil: None,
-            composited,
-        };
-        if pass.drawing {
-            let in_pass = pass.draws().map(|(_, draw)| draw);
-            let (volume, volume_clips) = in_pass.fold((false, false), |(volume, clips), draw| match draw.depth {
-                DrawDepth::Volume { .. } => (true, clips || draw.clip),
-                _ => (volume, clips),
-            });
-            if volume {
-                pass.volume_stencil = volume_clips.then(|| parameters.stencil_mode_for_3d(gpu));
-            } else if !self.stencil_tiles.is_empty() {
-                parameters.render_tile_clipping_masks(gpu, &self.stencil_tiles);
-            }
+        let drawing = composited.as_ref().is_none_or(Composited::draws);
+        let draws = if drawing { &self.draws[..] } else { &[] };
+        let mut pass = DrawPass { frame: self, draws, pass: parameters.pass, volume_stencil: None, composited };
+        let (volume, volume_clips) = pass.draws().fold((false, false), |(volume, clips), (_, draw)| match draw.depth {
+            DrawDepth::Volume { .. } => (true, clips || draw.clip),
+            _ => (volume, clips),
+        });
+        if volume {
+            pass.volume_stencil = volume_clips.then(|| parameters.stencil_mode_for_3d(gpu));
+        } else if drawing && !self.stencil_tiles.is_empty() {
+            parameters.render_tile_clipping_masks(gpu, &self.stencil_tiles);
         }
         Some(pass)
     }
 
     /// Uploads `objects`, which all the draws bind, if there are any draws.
-    pub(crate) fn upload_one(&self, objects: Option<&mut DrawObjects>, context: &Context) {
-        if let Some(objects) = objects.filter(|_| !self.draws.is_empty()) {
+    pub(crate) fn upload_one(&self, objects: &mut DrawObjects, context: &Context) {
+        if !self.draws.is_empty() {
             upload_objects(objects, context);
         }
     }
@@ -641,7 +643,7 @@ impl FrameDraws {
     /// pass of `gpu`, the context's.
     pub(crate) fn render_one(
         &self,
-        mut objects: Option<&mut DrawObjects>,
+        objects: &mut DrawObjects,
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
     ) {
@@ -649,24 +651,21 @@ impl FrameDraws {
             return;
         };
         for (index, _) in pass.draws() {
-            match objects.as_deref_mut() {
-                Some(objects) => pass.draw(gpu, parameters, objects, index, None),
-                None => debug_assert!(false, "a draw has no GPU objects"),
-            }
+            pass.draw(gpu, parameters, objects, index, None);
         }
         pass.end(gpu, parameters);
     }
 }
 
 /// The draws of a pass of a [`FrameDraws`], from [`FrameDraws::begin`] to
-/// [`DrawPass::end`].
+/// [`DrawPass::end`], which every pass that begins must reach.
+#[must_use = "a pass's draws end with `DrawPass::end`"]
 pub(crate) struct DrawPass<'a> {
     frame: &'a FrameDraws,
-    /// The pass, as a [`RenderPass`]'s bits.
-    pass: u8,
-    /// Whether the draws draw: false where their layer composite's pass
-    /// didn't begin.
-    drawing: bool,
+    /// The frame's draws, none where their layer composite's pass didn't
+    /// begin.
+    draws: &'a [FrameDraw],
+    pass: RenderPass,
     /// The stencil of the 3D draws that clip.
     volume_stencil: Option<StencilMode>,
     composited: Option<Composited>,
@@ -675,8 +674,8 @@ pub(crate) struct DrawPass<'a> {
 impl<'a> DrawPass<'a> {
     /// The draws of the pass, in drawing order, each with its index.
     pub(crate) fn draws(&self) -> impl Iterator<Item = (usize, &'a FrameDraw)> + use<'a> {
-        let (pass, drawing) = (self.pass, self.drawing);
-        self.frame.draws.iter().enumerate().filter(move |(_, draw)| drawing && draw.pass.underlying_type() & pass != 0)
+        let pass = self.pass;
+        self.draws.iter().enumerate().filter(move |(_, draw)| draw.pass & pass != RenderPass::None)
     }
 
     /// Draws `objects`, the GPU objects of the draw at `index`, with the
@@ -689,7 +688,7 @@ impl<'a> DrawPass<'a> {
         index: usize,
         atlases: Option<&AtlasBinding>,
     ) {
-        let draw = &self.frame.draws[index];
+        let draw = &self.draws[index];
         if let Some(atlases) = atlases {
             atlases.bind(objects, parameters);
         }
@@ -722,7 +721,7 @@ impl<'a> DrawPass<'a> {
 /// A layer's draws of a frame, each with the part of the layer's GPU objects
 /// it binds, of the layer's type `P`.
 pub(crate) struct LayerDraws<P = ()> {
-    pub(crate) frame: FrameDraws,
+    frame: FrameDraws,
     /// Each draw's part, at the draw's index.
     parts: Vec<P>,
 }
@@ -737,6 +736,22 @@ impl<P: Copy> LayerDraws<P> {
     #[must_use]
     pub(crate) fn new() -> LayerDraws<P> {
         LayerDraws::default()
+    }
+
+    /// The draws, with what they share.
+    #[must_use]
+    pub(crate) fn frame(&self) -> &FrameDraws {
+        &self.frame
+    }
+
+    /// See [`FrameDraws::set_composite`].
+    pub(crate) fn set_composite(&mut self, composite: Option<Composite>) {
+        self.frame.set_composite(composite);
+    }
+
+    /// See [`FrameDraws::set_stencil_tiles`].
+    pub(crate) fn set_stencil_tiles(&mut self, tiles: impl IntoIterator<Item = UnwrappedTileID>) {
+        self.frame.set_stencil_tiles(tiles);
     }
 
     /// Drops the draws.
@@ -794,18 +809,18 @@ impl SingleDraw {
     #[must_use]
     pub(crate) fn new(objects: DrawObjects, draw: FrameDraw) -> SingleDraw {
         let mut frame = FrameDraws::new();
-        frame.draws.push(draw);
+        frame.push(draw);
         SingleDraw { objects, frame }
     }
 
     pub(crate) fn upload(&mut self, context: &Context) {
-        self.frame.upload_one(Some(&mut self.objects), context);
+        self.frame.upload_one(&mut self.objects, context);
     }
 
     /// Draws the draw, if it draws in the pass, into the open pass of `gpu`,
     /// the context's.
     pub(crate) fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        self.frame.render_one(Some(&mut self.objects), gpu, parameters);
+        self.frame.render_one(&mut self.objects, gpu, parameters);
     }
 }
 
@@ -864,23 +879,51 @@ impl DrawOrder {
     }
 }
 
-/// The drawing of a layer that keeps one draw of each tile it draws, and
-/// draws one group.
-#[derive(Default)]
-pub(crate) struct TileDraws {
-    pub(crate) tiles: TileMap<KeptDraw>,
-    pub(crate) frame: Option<LayerDraws>,
+/// The drawing of a layer that draws one group of draws, each of a part of
+/// the tile it draws, and keeps a `T` of each tile.
+pub(crate) struct TileDraws<T: TileObjects> {
+    pub(crate) tiles: TileMap<T>,
+    /// The frame's draws, from the layer's first update with something to
+    /// draw.
+    pub(crate) frame: Option<LayerDraws<T::Part>>,
 }
 
-impl LayerDrawing for TileDraws {
-    type Tile = KeptDraw;
+impl<T: TileObjects> Default for TileDraws<T> {
+    fn default() -> Self {
+        TileDraws { tiles: TileMap::default(), frame: None }
+    }
+}
 
-    fn tiles(&mut self) -> &mut TileMap<KeptDraw> {
+impl<T: TileObjects> TileDraws<T> {
+    /// Uploads the GPU objects of the frame's draws.
+    pub(crate) fn upload_draws(&mut self, context: &Context) {
+        if let Some(frame) = &self.frame {
+            frame.upload(&mut self.tiles, tile_objects, context);
+        }
+    }
+
+    /// Draws the pass's draws of the frame into the open pass of `gpu`, the
+    /// context's. Returns whether the layer has their group.
+    pub(crate) fn render_draws(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) -> bool {
+        let Some(frame) = &self.frame else {
+            return false;
+        };
+        frame.render(&mut self.tiles, tile_objects, gpu, parameters);
+        true
+    }
+}
+
+impl<T: TileObjects> LayerDrawing for TileDraws<T> {
+    type Tile = T;
+
+    fn tiles(&mut self) -> &mut TileMap<T> {
         &mut self.tiles
     }
 
-    fn groups(&self) -> [Option<&FrameDraws>; 2] {
-        [self.frame.as_ref().map(|frame| &frame.frame), None]
+    fn visit_groups<'a>(&'a self, visit: &mut dyn FnMut(&'a FrameDraws)) {
+        if let Some(frame) = &self.frame {
+            visit(&frame.frame);
+        }
     }
 
     fn clear(&mut self) {
@@ -891,14 +934,11 @@ impl LayerDrawing for TileDraws {
     }
 
     fn upload(&mut self, context: &Context) {
-        if let Some(frame) = &self.frame {
-            frame.upload(&mut self.tiles, kept_tile_draw, context);
-        }
+        self.upload_draws(context);
     }
 
     fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
-        if let Some(frame) = &self.frame {
-            frame.render(&mut self.tiles, kept_tile_draw, gpu, parameters);
+        if self.render_draws(gpu, parameters) {
             order.step(parameters);
         }
     }
@@ -915,12 +955,11 @@ pub(crate) trait LayerDrawing {
     /// What the layer keeps of the frame's tiles.
     fn tiles(&mut self) -> &mut TileMap<Self::Tile>;
 
-    /// The layer's draw groups of the frame, in drawing order: a group of
-    /// its draws, from its first update with something to draw, and one of
-    /// draws over them, for debugging. While the layer is renderable, a
-    /// group takes a place in the layers' order and depth, even when it has
-    /// no draws.
-    fn groups(&self) -> [Option<&FrameDraws>; 2];
+    /// Visits the layer's draw groups of the frame, in drawing order: from
+    /// its first update with something to draw, a group of its draws, and
+    /// any of draws over them. While the layer is renderable, a group takes
+    /// a place in the layers' order and depth, even when it has no draws.
+    fn visit_groups<'a>(&'a self, visit: &mut dyn FnMut(&'a FrameDraws));
 
     /// Drops the frame's draws, and the GPU objects of the tiles' draws and
     /// of the others. The tiles' entries stay.
@@ -941,6 +980,17 @@ mod tests {
 
     use super::{BucketChanges, ChangedBuckets, TileMap};
 
+    /// Sets what `tiles` keeps of `tile_id` to `value`, if the tile is one
+    /// of the map's; returns whether it is.
+    fn set<T>(tiles: &mut TileMap<T>, tile_id: &OverscaledTileID, value: T) -> bool {
+        tiles.entry(tile_id).map(|entry| *entry.value = Some(value)).is_some()
+    }
+
+    /// The bucket of `tile_id` in `tiles`.
+    fn bucket_of<T>(tiles: &mut TileMap<T>, tile_id: &OverscaledTileID) -> Option<SimpleIdentity> {
+        tiles.entry(tile_id)?.bucket()
+    }
+
     /// A tile's changes are those of the bucket its draws were built from,
     /// until the draws take them; a tile that leaves the frame
     /// takes its entry with it.
@@ -950,24 +1000,44 @@ mod tests {
         let (bucket, other_bucket) = (SimpleIdentity::new(), SimpleIdentity::new());
         let mut tiles = TileMap::<()>::default();
         tiles.set_tiles([tile, other]);
-        assert!(tiles.set_bucket(&tile, bucket));
-        assert!(!tiles.set_bucket(&tile, bucket));
-        assert!(tiles.set_bucket(&other, other_bucket));
+        assert!(tiles.entry(&tile).is_some_and(|mut entry| entry.set_bucket(bucket)));
+        assert!(tiles.entry(&tile).is_some_and(|mut entry| !entry.set_bucket(bucket)));
+        assert!(tiles.entry(&other).is_some_and(|mut entry| entry.set_bucket(other_bucket)));
 
         let mut changed = ChangedBuckets::default();
         changed.mark(bucket, BucketChanges { paint: true, ..BucketChanges::default() });
         changed.mark(bucket, BucketChanges { sort: true, ..BucketChanges::default() });
         tiles.mark_changed(&changed);
 
-        assert_eq!(BucketChanges { paint: true, sort: true, ..BucketChanges::default() }, tiles.take_changes(&tile));
-        assert_eq!(BucketChanges::default(), tiles.take_changes(&tile));
-        assert_eq!(BucketChanges::default(), tiles.take_changes(&other));
+        let mut take = |tile_id| tiles.entry(tile_id).map(|mut entry| entry.take_changes());
+        assert_eq!(Some(BucketChanges { paint: true, sort: true, ..BucketChanges::default() }), take(&tile));
+        assert_eq!(Some(BucketChanges::default()), take(&tile));
+        assert_eq!(Some(BucketChanges::default()), take(&other));
 
         tiles.set_tiles([other]);
         assert!(!tiles.has_tile(&tile));
-        assert_eq!(Some(other_bucket), tiles.bucket(&other));
+        assert_eq!(Some(other_bucket), bucket_of(&mut tiles, &other));
         tiles.shift_wraps(1);
-        assert_eq!(Some(other_bucket), tiles.bucket(&other.unwrap_to(1)));
+        assert_eq!(Some(other_bucket), bucket_of(&mut tiles, &other.unwrap_to(1)));
+    }
+
+    /// A tile whose draws are built from another bucket drops what the layer
+    /// kept of it, and the changes of the bucket before.
+    #[test]
+    fn another_bucket_drops_the_value() {
+        let tile = OverscaledTileID::with_zxy(1, 0, 1, 1, 0);
+        let (bucket, other_bucket) = (SimpleIdentity::new(), SimpleIdentity::new());
+        let mut tiles = TileMap::<u32>::default();
+        tiles.set_tiles([tile]);
+        assert!(set(&mut tiles, &tile, 1));
+        assert!(tiles.entry(&tile).is_some_and(|mut entry| entry.set_bucket(bucket)));
+        assert_eq!(Some(&1), tiles.get(&tile));
+        let mut changed = ChangedBuckets::default();
+        changed.mark(bucket, BucketChanges { paint: true, ..BucketChanges::default() });
+        tiles.mark_changed(&changed);
+        assert!(tiles.entry(&tile).is_some_and(|mut entry| entry.set_bucket(other_bucket)));
+        assert!(tiles.get(&tile).is_none());
+        assert_eq!(Some(BucketChanges::default()), tiles.entry(&tile).map(|mut entry| entry.take_changes()));
     }
 
     /// Each tile keeps its value and bucket as tiles before and after it
@@ -978,46 +1048,54 @@ mod tests {
         let mut tiles = TileMap::<u32>::default();
         tiles.set_tiles([ids[4], ids[1], ids[2]]);
         for &i in &[1, 2, 4] {
-            assert!(tiles.set_cache(&ids[i], i as u32).is_some());
+            assert!(set(&mut tiles, &ids[i], i as u32));
         }
         let bucket = SimpleIdentity::new();
-        assert!(tiles.set_bucket(&ids[2], bucket));
+        assert!(tiles.entry(&ids[2]).is_some_and(|mut entry| entry.set_bucket(bucket)));
         tiles.set_tiles([ids[5], ids[2], ids[0], ids[4], ids[3]]);
-        let values: Vec<Option<u32>> = ids.iter().map(|id| tiles.cache(id).copied()).collect();
+        let values: Vec<Option<u32>> = ids.iter().map(|id| tiles.get(id).copied()).collect();
         assert_eq!(vec![None, None, Some(2), None, Some(4), None], values);
-        assert_eq!(Some(bucket), tiles.bucket(&ids[2]));
-        assert!(tiles.set_cache(&ids[0], 0).is_some());
-        tiles.set_tiles([ids[0], ids[4]]);
-        let values: Vec<Option<u32>> = ids.iter().map(|id| tiles.cache(id).copied()).collect();
+        assert_eq!(Some(bucket), bucket_of(&mut tiles, &ids[2]));
+        assert!(set(&mut tiles, &ids[0], 0));
+        tiles.set_tiles([ids[4], ids[0], ids[4]]);
+        let values: Vec<Option<u32>> = ids.iter().map(|id| tiles.get(id).copied()).collect();
         assert_eq!(vec![Some(0), None, None, None, Some(4), None], values);
         assert!(!tiles.has_tile(&ids[2]));
     }
 
-    /// What the layer keeps of a tile moves with the tile across a wrap jump
-    /// and as other tiles come and go, and goes when the tile leaves the
-    /// frame or the map is cleared.
+    /// What the layer keeps of a tile moves with the tile across a wrap jump,
+    /// even one that changes the tiles' order, and as other tiles come and
+    /// go, and goes when the tile leaves the frame or the map is cleared.
     #[test]
     fn caches_follow_their_tiles() {
         let (tile, other) = (OverscaledTileID::with_zxy(1, 0, 1, 1, 0), OverscaledTileID::with_zxy(1, 0, 1, 0, 0));
         let mut tiles = TileMap::<u32>::default();
         tiles.set_tiles([tile, other]);
-        assert!(tiles.set_cache(&tile, 1).is_some());
-        assert!(tiles.set_cache(&other, 2).is_some());
-        assert!(tiles.set_cache(&OverscaledTileID::with_zxy(1, 0, 1, 1, 1), 3).is_none());
+        assert!(set(&mut tiles, &tile, 1));
+        assert!(set(&mut tiles, &other, 2));
+        assert!(!set(&mut tiles, &OverscaledTileID::with_zxy(1, 0, 1, 1, 1), 3));
 
         tiles.shift_wraps(1);
         let moved = tile.unwrap_to(1);
-        assert_eq!(Some(&mut 1), tiles.cache_mut(&moved));
+        assert_eq!(Some(&mut 1), tiles.get_mut(&moved));
         tiles.set_tiles([moved]);
-        assert!(tiles.cache_mut(&other.unwrap_to(1)).is_none());
+        assert!(tiles.get_mut(&other.unwrap_to(1)).is_none());
         tiles.set_tiles([other, moved]);
-        assert!(tiles.cache_mut(&other).is_none());
-        assert_eq!(Some(&1), tiles.cache(&moved));
+        assert!(tiles.get_mut(&other).is_none());
+        assert_eq!(Some(&1), tiles.get(&moved));
         tiles.set_tiles([moved]);
-        assert_eq!(Some(&1), tiles.cache(&moved));
+        assert_eq!(Some(&1), tiles.get(&moved));
+
+        let (high, low) = (tile.unwrap_to(i16::MAX), other.unwrap_to(i16::MAX - 1));
+        tiles.set_tiles([high, low]);
+        assert!(set(&mut tiles, &high, 3));
+        assert!(set(&mut tiles, &low, 4));
+        tiles.shift_wraps(1);
+        assert_eq!(Some(&3), tiles.get(&tile.unwrap_to(i16::MIN)));
+        assert_eq!(Some(&4), tiles.get(&other.unwrap_to(i16::MAX)));
 
         tiles.clear();
-        assert!(tiles.has_tile(&moved));
-        assert!(tiles.cache_mut(&moved).is_none());
+        assert!(tiles.has_tile(&other.unwrap_to(i16::MAX)));
+        assert!(tiles.get(&other.unwrap_to(i16::MAX)).is_none());
     }
 }

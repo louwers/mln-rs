@@ -19,8 +19,8 @@ use mln_util::mat4::Mat4;
 
 use crate::bucket::Bucket;
 use crate::buckets::symbol_bucket::SymbolBucket;
-use crate::draw_cache::{ChangedBuckets, DrawGroup, DrawOrder, LayerDrawing};
 use crate::gfx::context::Context;
+use crate::layer_drawing::{ChangedBuckets, DrawGroup, DrawOrder, LayerDrawing};
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType};
 use crate::line_atlas::LineAtlas;
 use crate::paint_parameters::PaintParameters;
@@ -269,6 +269,11 @@ impl<'a> LayerTiles<'a> {
         self.order.iter().filter_map(move |&i| self.tiles.get(i))
     }
 
+    /// The ids of the tiles, in order.
+    pub(crate) fn tile_ids(self) -> impl Iterator<Item = OverscaledTileID> + 'a {
+        self.render_tiles().map(|tile| *tile.get_overscaled_tile_id())
+    }
+
     #[must_use]
     pub(crate) fn is_empty(self) -> bool {
         self.order.is_empty()
@@ -481,7 +486,7 @@ impl<L: TypedLayer> LayerParts for L {
     fn set_tiles(&mut self, tiles: Option<LayerTiles<'_>>) {
         let tiles_kept = self.parts_mut().drawing.tiles();
         match tiles {
-            Some(tiles) => tiles_kept.set_tiles(tiles.render_tiles().map(|tile| *tile.get_overscaled_tile_id())),
+            Some(tiles) => tiles_kept.set_tiles(tiles.tile_ids()),
             None => tiles_kept.clear_tiles(),
         }
     }
@@ -501,7 +506,7 @@ impl<L: TypedLayer> LayerParts for L {
     fn visit_draw_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>)) {
         let Parts { base, drawing, .. } = self.parts();
         if base.is_renderable {
-            drawing.groups().into_iter().flatten().for_each(|frame| visit(DrawGroup::Draws(frame)));
+            drawing.visit_groups(&mut |frame| visit(DrawGroup::Draws(frame)));
         }
     }
 

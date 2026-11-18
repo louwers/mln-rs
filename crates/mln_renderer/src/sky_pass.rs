@@ -21,8 +21,8 @@ use mln_util::size::Size;
 use mln_util::vectors::Vec4;
 
 use crate::draw::{DrawGeometry, DrawObjects, Textures, raw_vertices};
-use crate::draw_cache::{DrawDepth, FrameDraw, KeptDraw, SingleDraw};
 use crate::gfx::context::Context;
+use crate::layer_drawing::{DrawDepth, FrameDraw, KeptDraw, SingleDraw};
 use crate::render_light::EvaluatedLight;
 use crate::render_sky::EvaluatedSky;
 use crate::render_static_data::RenderStaticData;
@@ -31,12 +31,9 @@ use crate::tile_matrix::bind_no_projection;
 const SKY_SHADER_NAME: &str = "SkyShader";
 const ATMOSPHERE_SHADER_NAME: &str = "AtmosphereShader";
 
-/// A draw over the whole view, with the buffers it binds.
-pub(crate) type FullscreenDraw = SingleDraw;
-
 /// A draw of `shader`, which reads the view's corners as the vertex attribute
 /// `vertex_attribute`, in the translucent pass at `depth`.
-fn fullscreen_draw(shader: &ShaderProgramPtr, vertex_attribute: usize, depth: DrawDepth) -> FullscreenDraw {
+fn fullscreen_draw(shader: &ShaderProgramPtr, vertex_attribute: usize, depth: DrawDepth) -> SingleDraw {
     let corners: [[i16; 2]; 4] = [[-1, -1], [1, -1], [-1, 1], [1, 1]];
     let vertices = bytemuck::cast_slice(&corners).to_vec();
     let indexes = IndexVectorBase::new(RenderStaticData::quad_triangle_indices());
@@ -102,8 +99,8 @@ fn color_components(color: &Color) -> [f32; 4] {
 /// after them, against the globe depth prepass, so the planet correctly occludes it.
 #[derive(Default)]
 pub(crate) struct SkyPass {
-    sky: Option<FullscreenDraw>,
-    atmosphere: Option<FullscreenDraw>,
+    sky: Option<SingleDraw>,
+    atmosphere: Option<SingleDraw>,
     sky_shader: Option<ShaderProgramPtr>,
     atmosphere_shader: Option<ShaderProgramPtr>,
 }
@@ -199,14 +196,14 @@ impl SkyPass {
 
     /// The planar sky, which draws before the layers, if the frame draws it.
     #[must_use]
-    pub(crate) fn sky(&mut self) -> Option<&mut FullscreenDraw> {
+    pub(crate) fn sky(&mut self) -> Option<&mut SingleDraw> {
         self.sky.as_mut()
     }
 
     /// The globe's atmosphere, which draws after the layers, if the frame
     /// draws it.
     #[must_use]
-    pub(crate) fn atmosphere(&mut self) -> Option<&mut FullscreenDraw> {
+    pub(crate) fn atmosphere(&mut self) -> Option<&mut SingleDraw> {
         self.atmosphere.as_mut()
     }
 

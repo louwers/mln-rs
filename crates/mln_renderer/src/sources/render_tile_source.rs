@@ -43,8 +43,9 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use crate::bucket::UploadNeeds;
 use crate::buckets::line_bucket::{LineBucket, LineLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
-use crate::draw_cache::{DrawDepth, FrameDraw, FrameDraws, KeptDraw, upload_objects};
+use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
+use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDraws};
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layers::cast_matrix;
 use crate::paint_parameters::PaintParameters;
@@ -152,6 +153,12 @@ struct DebugDraw {
     draw: KeptDraw,
 }
 
+/// A draw's entries in a debug overlay's storage buffers.
+struct DebugUniforms {
+    draw_ubo: LineDrawableUnionUBO,
+    projection: ProjectionUBO,
+}
+
 /// A debug overlay: polylines over the tiles of the sources, in the color
 /// and width of its type (layers: debug).
 pub(crate) struct DebugLayer {
@@ -159,81 +166,66 @@ pub(crate) struct DebugLayer {
     /// The overlay's draws, in the order they were made, which is the order
     /// they draw in.
     draws: Vec<DebugDraw>,
-    /// The frame's draws of the overlay, with the buffers they read: the
-    /// draw at an index is of the overlay's draw at that index.
-    frame: FrameDraws,
+    /// The frame's draws as `prepare` makes them.
+    draw_list: DrawList<DebugUniforms, usize>,
+    /// The frame's draws of the overlay, each of the overlay's draw at its
+    /// index, with the buffers they read.
+    frame: LayerDraws<usize>,
 }
 
 impl DebugLayer {
     #[must_use]
     pub(crate) fn new(type_: DebugType) -> Self {
-        DebugLayer { properties: debug_line_properties(type_), draws: Vec::new(), frame: FrameDraws::new() }
+        DebugLayer {
+            properties: debug_line_properties(type_),
+            draws: Vec::new(),
+            draw_list: DrawList::default(),
+            frame: LayerDraws::new(),
+        }
     }
 
-    /// The overlay's draws, in drawing order.
-    fn draws(&mut self) -> &mut Vec<DebugDraw> {
-        &mut self.draws
+    /// The GPU objects of the overlay's draw at `index`.
+    fn objects<'a>(
+        draws: &'a mut [DebugDraw],
+        _: &FrameDraw,
+        index: usize,
+    ) -> Option<(&'a mut DrawObjects, Option<&'a AtlasBinding>)> {
+        Some((&mut draws.get_mut(index)?.draw.objects, None))
     }
 
     /// Uploads the GPU objects of the frame's draws.
     pub(crate) fn upload(&mut self, context: &Context) {
-        for draw in self.draws.iter_mut().take(self.frame.draws.len()) {
-            upload_objects(&mut draw.draw.objects, context);
-        }
+        self.frame.upload(&mut self.draws[..], Self::objects, context);
     }
 
     /// Draws the frame's draws of the pass into the open pass of `gpu`, the
     /// context's.
     pub(crate) fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        let Some(pass) = self.frame.begin(gpu, parameters) else {
-            return;
-        };
-        for (index, _) in pass.draws() {
-            match self.draws.get_mut(index) {
-                Some(draw) => pass.draw(gpu, parameters, &mut draw.draw.objects, index, None),
-                None => debug_assert!(false, "a debug draw has no GPU objects"),
-            }
-        }
-        pass.end(gpu, parameters);
+        self.frame.render(&mut self.draws[..], Self::objects, gpu, parameters);
+    }
+
+    /// Keeps the draws for which `keep` returns true.
+    fn retain(&mut self, keep: impl FnMut(&DebugDraw) -> bool) {
+        self.draws.retain(keep);
     }
 
     /// The tiles with draws of the source `source`.
-    fn tiles_of(&mut self, source: &str) -> HashSet<OverscaledTileID> {
-        self.draws().iter().filter(|draw| *draw.source == *source).map(|draw| draw.tile).collect()
+    fn tiles_of(&self, source: &str) -> HashSet<OverscaledTileID> {
+        self.draws.iter().filter(|draw| *draw.source == *source).map(|draw| draw.tile).collect()
     }
 
     /// Adds a draw of `objects` over `tile_id` of the source `source`,
     /// spelling `text`.
     fn add(&mut self, source: &Rc<str>, tile_id: OverscaledTileID, text: Option<Vec<String>>, objects: DrawObjects) {
         let draw = KeptDraw::new(objects);
-        self.draws().push(DebugDraw { source: Rc::clone(source), tile: tile_id, text, draw });
+        self.draws.push(DebugDraw { source: Rc::clone(source), tile: tile_id, text, draw });
     }
 
     /// Makes the frame's draws of the overlay, and writes the buffers they
     /// read.
     pub(crate) fn prepare(&mut self, parameters: &PaintParameters<'_>) {
-        let context = parameters.context;
-        let (draws, frame) = (&self.draws, &mut self.frame);
-        frame.draws.clear();
-        if draws.is_empty() {
-            return;
-        }
-
-        let buffers = &mut frame.uniform_buffers;
-        buffers.create_or_update_pod(ID_LINE_EVALUATED_PROPS_UBO, &self.properties, context);
-        // We would need to set up `idLineExpressionUBO` if the expression
-        // mask isn't empty
-        debug_assert_eq!(self.properties.expression_mask, line_expression_mask::NONE);
-        // No GPU expressions; only line shaders of `Caps::line_expressions`
-        // read it.
-        if context.caps().line_expressions && buffers.get(ID_LINE_EXPRESSION_UBO).is_none() {
-            buffers.set(ID_LINE_EXPRESSION_UBO, context.create_uniform_buffer(&[0; LINE_EXPRESSION_UBO_SIZE]));
-        }
-
         let zoom = parameters.state.get_zoom();
-        let mut draw_ubos = Vec::with_capacity(draws.len());
-        let mut projection_ubos: Vec<ProjectionUBO> = Vec::with_capacity(draws.len());
-        for draw in draws {
+        for (index, draw) in self.draws.iter().enumerate() {
             let tile_id = draw.tile.to_unwrapped();
             let projection = get_projection_data(
                 &tile_id,
@@ -245,7 +237,6 @@ impl DebugLayer {
                 None,
                 false,
             );
-            projection_ubos.push(to_projection_ubo(&projection));
             let mut draw_ubo = LineDrawableUnionUBO::default();
             draw_ubo.set(&LineDrawableUBO {
                 matrix: cast_matrix(&projection.fallback_matrix),
@@ -258,13 +249,27 @@ impl DebugLayer {
                 width_t: 0.0,
                 pad1: 0.0,
             });
-            draw_ubos.push(draw_ubo);
-            let frame_draw = FrameDraw::new(None, draw.draw.id);
-            frame.draws.push(FrameDraw { depth: DrawDepth::Off, ..frame_draw });
+            let frame_draw = FrameDraw { depth: DrawDepth::Off, ..draw.draw.frame_draw(None) };
+            let uniforms = DebugUniforms { draw_ubo, projection: to_projection_ubo(&projection) };
+            self.draw_list.push_part(frame_draw, index, uniforms);
         }
-        let buffers = &mut frame.uniform_buffers;
-        buffers.write_storage(ID_LINE_DRAWABLE_UBO, bytemuck::cast_slice(&draw_ubos), context);
-        buffers.write_storage(ID_PROJECTION_UBO, bytemuck::cast_slice(&projection_ubos), context);
+
+        let (properties, context) = (&self.properties, parameters.context);
+        self.draw_list.finish(&mut self.frame, context, |writer| {
+            writer.uniform(ID_LINE_EVALUATED_PROPS_UBO, properties);
+            // We would need to set up `idLineExpressionUBO` if the
+            // expression mask isn't empty
+            debug_assert_eq!(properties.expression_mask, line_expression_mask::NONE);
+            // No GPU expressions; only line shaders of
+            // `Caps::line_expressions` read it.
+            if context.caps().line_expressions && writer.buffers().get(ID_LINE_EXPRESSION_UBO).is_none() {
+                writer
+                    .buffers()
+                    .set(ID_LINE_EXPRESSION_UBO, context.create_uniform_buffer(&[0; LINE_EXPRESSION_UBO_SIZE]));
+            }
+            writer.storage(ID_LINE_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
+            writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
+        });
     }
 }
 
@@ -466,7 +471,7 @@ impl RenderSource for RenderTileSource {
             };
             for type_ in [DebugType::TextOutline, DebugType::Text] {
                 let layer = debug_layer(debug_layers, type_);
-                layer.draws().retain(keep);
+                layer.retain(keep);
 
                 // add draws of the tiles without any: new tiles, and those
                 // whose text changed
@@ -494,7 +499,7 @@ impl RenderSource for RenderTileSource {
         // Tile Borders
         if parameters.debug_options.contains(MapDebugOptions::TILE_BORDERS) {
             let layer = debug_layer(debug_layers, DebugType::Border);
-            layer.draws().retain(keep);
+            layer.retain(keep);
             let mut of_tiles = layer.tiles_of(source);
 
             // add new draws

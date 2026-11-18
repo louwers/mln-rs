@@ -2,7 +2,6 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_gfx::gpu::Gpu;
 use mln_gfx::index_vector::{IndexVectorBase, IndexVectorBasePtr};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
@@ -37,12 +36,10 @@ use crate::bucket::Bucket;
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::fill_bucket::{FillBinders, FillBucket, FillLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, copy_shared_attributes};
-use crate::draw_cache::{
-    DrawDepth, DrawList, DrawOrder, FrameDraw, FrameDraws, LayerDrawing, LayerDraws, TileMap, UniformWriter,
-};
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
 use crate::layer_composite::Composite;
+use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, LayerDraws, TileDraws, TileObjects, UniformWriter};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::pattern_layout::{FillLayoutSpec, PatternLayout, uses_pattern};
@@ -147,65 +144,20 @@ pub(crate) struct FillTile {
 
 /// Which of a tile's draws a frame's draw draws.
 #[derive(Clone, Copy)]
-enum FillPart {
+pub(crate) enum FillPart {
     Fill,
     Outline,
 }
 
-/// The layer's drawing: what it keeps of each tile, and its draws of the
-/// frame.
-#[derive(Default)]
-pub(crate) struct FillDrawing {
-    tiles: TileMap<FillTile>,
-    frame: Option<LayerDraws<FillPart>>,
-}
+impl TileObjects for FillTile {
+    type Part = FillPart;
 
-impl FillDrawing {
-    /// The GPU objects of `draw`, of `part` of its tile, with what gives
-    /// them the texture of the tile's icon atlas.
-    fn objects<'a>(
-        tiles: &'a mut TileMap<FillTile>,
-        draw: &FrameDraw,
-        part: FillPart,
-    ) -> Option<(&'a mut DrawObjects, Option<&'a AtlasBinding>)> {
-        let tile = tiles.cache_mut(&draw.tile?)?;
+    fn objects(&mut self, part: FillPart) -> Option<(&mut DrawObjects, Option<&AtlasBinding>)> {
         let draw = match part {
-            FillPart::Fill => &mut tile.fill,
-            FillPart::Outline => &mut tile.outline,
+            FillPart::Fill => &mut self.fill,
+            FillPart::Outline => &mut self.outline,
         };
-        Some((&mut draw.as_mut()?.objects, tile.atlases.as_ref()))
-    }
-}
-
-impl LayerDrawing for FillDrawing {
-    type Tile = FillTile;
-
-    fn tiles(&mut self) -> &mut TileMap<FillTile> {
-        &mut self.tiles
-    }
-
-    fn groups(&self) -> [Option<&FrameDraws>; 2] {
-        [self.frame.as_ref().map(|frame| &frame.frame), None]
-    }
-
-    fn clear(&mut self) {
-        self.tiles.clear();
-        if let Some(frame) = &mut self.frame {
-            frame.clear();
-        }
-    }
-
-    fn upload(&mut self, context: &Context) {
-        if let Some(frame) = &self.frame {
-            frame.upload(&mut self.tiles, Self::objects, context);
-        }
-    }
-
-    fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
-        if let Some(frame) = &self.frame {
-            frame.render(&mut self.tiles, Self::objects, gpu, parameters);
-            order.step(parameters);
-        }
+        Some((&mut draw.as_mut()?.objects, self.atlases.as_ref()))
     }
 }
 
@@ -455,7 +407,7 @@ impl LayerType for Fill {
 pub(crate) struct RenderFillLayer {
     base: RenderLayerBase,
     values: LayerValues<Fill>,
-    drawing: FillDrawing,
+    drawing: TileDraws<FillTile>,
     /// The frame's draws as the update makes them.
     draw_list: DrawList<FillUniforms, FillPart>,
 
@@ -477,7 +429,7 @@ impl RenderFillLayer {
         RenderFillLayer {
             base,
             values,
-            drawing: FillDrawing::default(),
+            drawing: TileDraws::default(),
             draw_list: DrawList::default(),
             fill_shader_group: None,
             outline_shader_group: None,
@@ -618,7 +570,7 @@ impl RenderFillLayer {
 
 impl TypedLayer for RenderFillLayer {
     type Type = Fill;
-    type Drawing = FillDrawing;
+    type Drawing = TileDraws<FillTile>;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -740,10 +692,13 @@ impl RenderLayer for RenderFillLayer {
         let layer = &*self.values.evaluated;
         for tile in render_tiles.iter() {
             let tile_id = tile.id();
+            let Some(mut entry) = self.drawing.tiles.entry(&tile_id) else {
+                continue;
+            };
 
             let render_data = super::layer_bucket_for_pass(tile, &*self.base.style, RENDER_PASS);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
-                self.drawing.tiles.drop_cache(&tile_id);
+                *entry.value = None;
                 continue;
             };
             let Some(bucket) = render_data.bucket::<Fill>() else {
@@ -753,11 +708,8 @@ impl RenderLayer for RenderFillLayer {
                 continue;
             };
 
-            if self.drawing.tiles.bucket(&tile_id).is_some_and(|prev| prev != bucket.base.bucket_id) {
-                // The tile's draws were built from another bucket.
-                self.drawing.tiles.drop_cache(&tile_id);
-            }
-            self.drawing.tiles.set_bucket(&tile_id, bucket.base.bucket_id);
+            // Draws built from another bucket go.
+            entry.set_bucket(bucket.base.bucket_id);
 
             let Some(evaluated) = render_data.layer::<Fill>().map(|layer| &layer.paint) else {
                 continue;
@@ -765,8 +717,8 @@ impl RenderLayer for RenderFillLayer {
 
             // The draws' attributes point into the bucket's shared vectors,
             // which upload again when they change.
-            let changes = self.drawing.tiles.take_changes(&tile_id);
-            if let Some(cached) = self.drawing.tiles.cache_mut(&tile_id) {
+            let changes = entry.take_changes();
+            if let Some(cached) = entry.value.as_mut() {
                 let geometry = tile.bucket_geometry();
                 let refresh = |attrs: &mut VertexAttributeArray| {
                     let buffer = &binders.interleaved_vertex_buffer;
@@ -787,10 +739,10 @@ impl RenderLayer for RenderFillLayer {
                     }
                 }
             } else if let Some(built) = builder.build(tile, bucket, binders, evaluated) {
-                self.drawing.tiles.set_cache(&tile_id, built);
+                *entry.value = Some(built);
             }
 
-            let Some(cached) = self.drawing.tiles.cache(&tile_id) else {
+            let Some(cached) = entry.value.as_ref() else {
                 continue;
             };
             let tile_draws = [(&cached.fill, FillPart::Fill), (&cached.outline, FillPart::Outline)];
@@ -822,9 +774,11 @@ impl RenderLayer for RenderFillLayer {
         }
 
         let frame = self.drawing.frame.get_or_insert_with(LayerDraws::new);
-        frame.frame.composite =
-            Composite::of(*layer.paint.fill_layer_opacity.uniform(), *layer.paint.fill_layer_blend.uniform());
-        frame.frame.set_stencil_tiles(render_tiles.render_tiles().map(|tile| tile.id));
+        frame.set_composite(Composite::of(
+            *layer.paint.fill_layer_opacity.uniform(),
+            *layer.paint.fill_layer_blend.uniform(),
+        ));
+        frame.set_stencil_tiles(render_tiles.render_tiles().map(|tile| tile.id));
         self.draw_list.finish(frame, context, |writer| Self::write_uniforms(layer, writer));
     }
 }

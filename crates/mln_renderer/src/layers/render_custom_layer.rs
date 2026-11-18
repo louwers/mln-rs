@@ -23,8 +23,8 @@ use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_util::logging::{Event, Log};
 
 use crate::bucket::NoBucket;
-use crate::draw_cache::{ChangedBuckets, DrawGroup, DrawOrder};
 use crate::gfx::context::Context;
+use crate::layer_drawing::{ChangedBuckets, DrawGroup, DrawOrder};
 use crate::layer_type::LayerType;
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;

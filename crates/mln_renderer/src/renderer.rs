@@ -24,10 +24,10 @@ use mln_util::time::Instant;
 
 use crate::Registry;
 use crate::clip_masks::ClipMasks;
-use crate::draw_cache::DrawOrder;
 use crate::frame_projection::{self, FrameProjection};
 use crate::gfx::context::{Context, Stats};
 use crate::layer_composite::LayerComposite;
+use crate::layer_drawing::DrawOrder;
 use crate::paint_parameters::{OpenPass, PaintParameters};
 use crate::render_orchestrator::RenderOrchestrator;
 use crate::render_pass::RenderPass;

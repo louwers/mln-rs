@@ -40,12 +40,12 @@ use super::{cast_matrix, refresh_paint_attributes, shared_vertices};
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices, released_indexes};
 use crate::buckets::heatmap_bucket::{HeatmapBinders, HeatmapBucket, HeatmapLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
-use crate::draw_cache::{
-    DrawDepth, DrawList, DrawOrder, FrameDraw, FrameDraws, KeptDraw, LayerDrawing, LayerDraws, TileMap, UniformWriter,
-    kept_tile_draw,
-};
 use crate::gfx::context::Context;
 use crate::gfx::texture2d::Texture2DPtr;
+use crate::layer_drawing::{
+    DrawDepth, DrawList, DrawOrder, FrameDraw, FrameDraws, KeptDraw, LayerDrawing, LayerDraws, TileMap, UniformWriter,
+    tile_objects,
+};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::heatmap_layout::HeatmapLayout;
 use crate::layout::layout::{LayoutParameters, SourceLayer};
@@ -122,7 +122,7 @@ impl HeatmapDrawing {
     /// Uploads the GPU objects of the tiles' draws into the render target.
     fn upload_target(&mut self, context: &Context) {
         if let Some(target) = &self.target {
-            target.upload(&mut self.tiles, kept_tile_draw, context);
+            target.upload(&mut self.tiles, tile_objects, context);
         }
     }
 
@@ -130,7 +130,7 @@ impl HeatmapDrawing {
     /// `gpu`, the context's, which draws into it.
     fn render_target(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         if let Some(target) = &self.target {
-            target.render(&mut self.tiles, kept_tile_draw, gpu, parameters);
+            target.render(&mut self.tiles, tile_objects, gpu, parameters);
         }
     }
 }
@@ -142,8 +142,10 @@ impl LayerDrawing for HeatmapDrawing {
         &mut self.tiles
     }
 
-    fn groups(&self) -> [Option<&FrameDraws>; 2] {
-        [self.frame.as_ref(), None]
+    fn visit_groups<'a>(&'a self, visit: &mut dyn FnMut(&'a FrameDraws)) {
+        if let Some(frame) = &self.frame {
+            visit(frame);
+        }
     }
 
     fn clear(&mut self) {
@@ -153,19 +155,21 @@ impl LayerDrawing for HeatmapDrawing {
             target.clear();
         }
         if let Some(frame) = &mut self.frame {
-            frame.draws.clear();
+            frame.clear();
         }
     }
 
     fn upload(&mut self, context: &Context) {
-        if let Some(frame) = &self.frame {
-            frame.upload_one(self.texture.as_mut(), context);
+        if let (Some(frame), Some(texture)) = (&self.frame, &mut self.texture) {
+            frame.upload_one(texture, context);
         }
     }
 
     fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
         if let Some(frame) = &self.frame {
-            frame.render_one(self.texture.as_mut(), gpu, parameters);
+            if let Some(texture) = &mut self.texture {
+                frame.render_one(texture, gpu, parameters);
+            }
             order.step(parameters);
         }
     }
@@ -295,9 +299,12 @@ impl RenderLayer for RenderHeatmapLayer {
     fn render_targets(&mut self, parameters: &mut PaintParameters<'_>) {
         if self.base.is_renderable
             && let Some(render_target) = &mut self.render_target
+            && let Some(mut passes) = render_target.begin(parameters)
         {
-            let drawing = &mut self.drawing;
-            render_target.render(parameters, |gpu, parameters| drawing.render_target(gpu, parameters));
+            while let Some(gpu) = passes.next(parameters) {
+                self.drawing.render_target(gpu, parameters);
+            }
+            passes.end(parameters);
         }
     }
 
@@ -362,7 +369,7 @@ impl RenderHeatmapLayer {
             let tile_id = tile.id();
 
             let Some(render_data) = super::layer_bucket_for_pass(tile, &*self.base.style, RENDER_PASS) else {
-                self.drawing.tiles.drop_cache(&tile_id);
+                self.drawing.tiles.drop_value(&tile_id);
                 continue;
             };
             let Some(bucket) = render_data.bucket::<Heatmap>() else {
@@ -375,16 +382,16 @@ impl RenderHeatmapLayer {
             let paint =
                 || paint_vertices(geometry, &binders.interleaved_vertex_buffer, binders.depends_on_feature_state());
 
-            if self.drawing.tiles.bucket(&tile_id).is_some_and(|prev| prev != bucket.base.bucket_id) {
-                // The tile's draw was built from another bucket.
-                self.drawing.tiles.drop_cache(&tile_id);
-            }
-            self.drawing.tiles.set_bucket(&tile_id, bucket.base.bucket_id);
+            let Some(mut entry) = self.drawing.tiles.entry(&tile_id) else {
+                continue;
+            };
+            // A draw built from another bucket goes.
+            entry.set_bucket(bucket.base.bucket_id);
 
             // The draw's attributes point into the bucket's shared vectors,
             // which upload again when they change.
-            let changes = self.drawing.tiles.take_changes(&tile_id);
-            if let Some(cached) = self.drawing.tiles.cache_mut(&tile_id) {
+            let changes = entry.take_changes();
+            if let Some(cached) = entry.value.as_mut() {
                 refresh_paint_attributes(&mut cached.objects, changes, |attrs| {
                     read_heatmap_attributes(attrs, binders, &paint(), evaluated, &mut Default::default());
                 });
@@ -419,10 +426,10 @@ impl RenderHeatmapLayer {
                     geometry,
                     Textures::default(),
                 );
-                self.drawing.tiles.set_cache(&tile_id, KeptDraw::new(objects));
+                *entry.value = Some(KeptDraw::new(objects));
             }
 
-            let Some(cached) = self.drawing.tiles.cache(&tile_id) else {
+            let Some(cached) = entry.value.as_ref() else {
                 continue;
             };
             let draw = FrameDraw { depth: DrawDepth::Off, ..cached.frame_draw(Some(tile_id)) };
@@ -557,8 +564,8 @@ impl RenderHeatmapLayer {
         let frame_draw = FrameDraw { depth: DrawDepth::Off, ..draw.frame_draw(None) };
         self.drawing.texture = Some(draw.objects);
 
-        frame.draws.clear();
-        frame.draws.push(frame_draw);
+        frame.clear();
+        frame.push(frame_draw);
         let mut m: Mat4 = [0.0; 16];
         let size = paint_parameters.renderable_size;
         matrix::ortho(&mut m, 0.0, f64::from(size.width), f64::from(size.height), 0.0, -1.0, 1.0);

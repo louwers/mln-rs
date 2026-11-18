@@ -29,10 +29,10 @@ use mln_vec_map::{VecMap, VecSet};
 use smallvec::SmallVec;
 
 use crate::Registry;
-use crate::draw_cache::{ChangedBuckets, DrawGroup, DrawOrder};
 use crate::gfx::context::Context;
 use crate::globe_depth_pass::GlobeDepthPass;
 use crate::image_store::ImageStore;
+use crate::layer_drawing::{ChangedBuckets, DrawGroup, DrawOrder, SingleDraw};
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::line_atlas::LineAtlas;
 use crate::paint_parameters::PaintParameters;
@@ -42,7 +42,6 @@ use crate::render_source::{self, RenderSource, SourcePrepareParameters, TileOrde
 use crate::render_tile::RenderTile;
 use crate::render_tree::{DebugLayers, LayerRenderItem, RenderTree, RenderTreeParameters};
 use crate::renderer_event::RendererEvent;
-use crate::sky_pass::FullscreenDraw;
 use crate::sources::render_tile_source::DebugLayer;
 use crate::text::glyph_store::GlyphStore;
 use crate::text::placement::Placement;
@@ -1314,13 +1313,13 @@ impl RenderOrchestrator {
     }
 
     /// The planar sky, which draws before the layers, if the frame draws it.
-    pub(crate) fn sky(&mut self) -> Option<&mut FullscreenDraw> {
+    pub(crate) fn sky(&mut self) -> Option<&mut SingleDraw> {
         self.sky_pass.sky()
     }
 
     /// The globe's atmosphere, which draws after the layers, if the frame
     /// draws it.
-    pub(crate) fn atmosphere(&mut self) -> Option<&mut FullscreenDraw> {
+    pub(crate) fn atmosphere(&mut self) -> Option<&mut SingleDraw> {
         self.sky_pass.atmosphere()
     }
 

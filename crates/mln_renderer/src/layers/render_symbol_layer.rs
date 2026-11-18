@@ -52,13 +52,13 @@ use crate::buckets::symbol_bucket::{
     Buffer, CollisionBoxDynamicVertex, CollisionBoxLayoutVertex, CollisionBuffer, PaintProperties, SymbolBucket,
 };
 use crate::draw::{DrawGeometry, DrawObjects, Textures, copy_shared_attributes};
-use crate::draw_cache::{
-    BucketChanges, DrawDepth, DrawList, DrawOrder, FrameDraw, FrameDraws, KeptDraw, LayerDrawing, LayerDraws, TileMap,
-    UniformWriter,
-};
 use crate::geometry::feature_index::FeatureIndex;
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
+use crate::layer_drawing::{
+    BucketChanges, DrawDepth, DrawList, DrawOrder, FrameDraw, FrameDraws, KeptDraw, LayerDrawing, LayerDraws, TileMap,
+    UniformWriter,
+};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::symbol_layout::SymbolLayout;
@@ -434,7 +434,7 @@ impl SymbolDrawing {
         draw: &FrameDraw,
         index: usize,
     ) -> Option<(&'a mut DrawObjects, Option<&'a AtlasBinding>)> {
-        let draw = tiles.cache_mut(&draw.tile?)?.draws.get_mut(index)?;
+        let draw = tiles.get_mut(&draw.tile?)?.draws.get_mut(index)?;
         Some((&mut draw.objects, Some(&*draw.atlases)))
     }
 
@@ -444,7 +444,7 @@ impl SymbolDrawing {
         draw: &FrameDraw,
         index: usize,
     ) -> Option<(&'a mut DrawObjects, Option<&'a AtlasBinding>)> {
-        Some((&mut tiles.cache_mut(&draw.tile?)?.collision.get_mut(index)?.draw.objects, None))
+        Some((&mut tiles.get_mut(&draw.tile?)?.collision.get_mut(index)?.draw.objects, None))
     }
 
     /// Draws the pass's draws of the layer's draw group, if it has it.
@@ -471,8 +471,10 @@ impl LayerDrawing for SymbolDrawing {
         &mut self.tiles
     }
 
-    fn groups(&self) -> [Option<&FrameDraws>; 2] {
-        [self.frame.as_ref().map(|frame| &frame.frame), self.overlay.as_ref().map(|overlay| &overlay.frame)]
+    fn visit_groups<'a>(&'a self, visit: &mut dyn FnMut(&'a FrameDraws)) {
+        for draws in [&self.frame, &self.overlay].into_iter().flatten() {
+            visit(draws.frame());
+        }
     }
 
     fn clear(&mut self) {
@@ -869,13 +871,10 @@ impl RenderSymbolLayer {
         }
         if has_collision {
             self.drawing.overlay.get_or_insert_with(LayerDraws::new);
-            if self.drawing.tiles.cache_mut(tile_id).is_none() {
-                self.drawing.tiles.set_cache(tile_id, SymbolTile::default());
+            if let Some(entry) = self.drawing.tiles.entry(tile_id) {
+                entry.value.get_or_insert_with(SymbolTile::default).collision = collision;
             }
-            if let Some(cached) = self.drawing.tiles.cache_mut(tile_id) {
-                cached.collision = collision;
-            }
-        } else if let Some(cached) = self.drawing.tiles.cache_mut(tile_id) {
+        } else if let Some(cached) = self.drawing.tiles.get_mut(tile_id) {
             cached.collision.clear();
         }
     }
@@ -1101,29 +1100,25 @@ impl RenderSymbolLayer {
         let layer = &*self.values.evaluated;
         for tile in tiles {
             let tile_id = tile.id();
-            if let Some(cached) = self.drawing.tiles.cache(&tile_id) {
-                let bucket = tile.layer_bucket(&*self.base.style).and_then(LayerBucket::bucket::<Symbol>);
-                debug_assert!(bucket.is_some() || cached.draws.is_empty());
-                for (index, draw) in cached.draws.iter().enumerate().filter(|(_, draw)| draw.visible) {
-                    let Some(uniforms) = bucket
-                        .and_then(|bucket| Self::uniforms(layer_id, layer, &tile_id, bucket, draw, paint_parameters))
-                    else {
-                        continue;
-                    };
-                    let frame_draw = FrameDraw { pass: passes, ..FrameDraw::new(Some(tile_id), draw.id) };
-                    self.draw_list.push_part(frame_draw, index, uniforms);
-                }
+            let Some(cached) = self.drawing.tiles.get_mut(&tile_id) else {
+                continue;
+            };
+            let bucket = tile.layer_bucket(&*self.base.style).and_then(LayerBucket::bucket::<Symbol>);
+            debug_assert!(bucket.is_some() || cached.draws.is_empty());
+            for (index, draw) in cached.draws.iter().enumerate().filter(|(_, draw)| draw.visible) {
+                let Some(uniforms) =
+                    bucket.and_then(|bucket| Self::uniforms(layer_id, layer, &tile_id, bucket, draw, paint_parameters))
+                else {
+                    continue;
+                };
+                let frame_draw = FrameDraw { pass: passes, ..FrameDraw::new(Some(tile_id), draw.id) };
+                self.draw_list.push_part(frame_draw, index, uniforms);
             }
-            if let Some(cached) = self.drawing.tiles.cache_mut(&tile_id) {
-                for (index, draw) in cached.collision.iter_mut().enumerate() {
-                    write_collision_uniforms(draw, &tile_id, paint_parameters);
-                    let frame_draw = FrameDraw {
-                        pass: passes,
-                        depth: DrawDepth::Off,
-                        ..FrameDraw::new(Some(tile_id), draw.draw.id)
-                    };
-                    self.collision_list.push_part(frame_draw, index, ());
-                }
+            for (index, draw) in cached.collision.iter_mut().enumerate() {
+                write_collision_uniforms(draw, &tile_id, paint_parameters);
+                let frame_draw =
+                    FrameDraw { pass: passes, depth: DrawDepth::Off, ..FrameDraw::new(Some(tile_id), draw.draw.id) };
+                self.collision_list.push_part(frame_draw, index, ());
             }
         }
 
@@ -1408,22 +1403,22 @@ impl RenderLayer for RenderSymbolLayer {
         for (tile_index, tile) in render_tiles.iter_indexed() {
             let tile_id = tile.id();
 
+            let Some(mut entry) = self.drawing.tiles.entry(&tile_id) else {
+                continue;
+            };
             let render_data = super::layer_bucket_for_pass(tile, &*style, passes);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
-                self.drawing.tiles.drop_cache(&tile_id);
+                *entry.value = None;
                 continue;
             };
             let Some(bucket) = render_data.bucket::<Symbol>() else {
                 continue;
             };
 
-            if self.drawing.tiles.bucket(&tile_id).is_some_and(|prev| prev != bucket.base.bucket_id) {
-                // The tile's draws were built from another bucket.
-                self.drawing.tiles.drop_cache(&tile_id);
-            }
-            self.drawing.tiles.set_bucket(&tile_id, bucket.base.bucket_id);
+            // Draws built from another bucket go.
+            entry.set_bucket(bucket.base.bucket_id);
             // What changed since the draws were built or last refreshed.
-            let refresh = self.drawing.tiles.take_changes(&tile_id);
+            let refresh = entry.take_changes();
 
             debug_assert!(bucket.paint_properties.contains_key(layer_id));
             if !bucket.paint_properties.contains_key(layer_id) {
@@ -1435,7 +1430,7 @@ impl RenderLayer for RenderSymbolLayer {
             };
 
             // A tile the layer keeps draws of refreshes them.
-            if let Some(cached) = self.drawing.tiles.cache_mut(&tile_id).filter(|cached| !cached.draws.is_empty()) {
+            if let Some(cached) = entry.value.as_mut().filter(|cached| !cached.draws.is_empty()) {
                 // The draws that read the same attributes are next to each
                 // other, as the update builds them.
                 let geometry = tile.bucket_geometry();
@@ -1678,11 +1673,8 @@ impl RenderLayer for RenderSymbolLayer {
                     visible,
                     atlases: Rc::clone(draw_atlases),
                 };
-                if self.drawing.tiles.cache_mut(&tile_id).is_none() {
-                    self.drawing.tiles.set_cache(&tile_id, SymbolTile::default());
-                }
-                if let Some(cached) = self.drawing.tiles.cache_mut(&tile_id) {
-                    cached.draws.push(draw);
+                if let Some(entry) = self.drawing.tiles.entry(&tile_id) {
+                    entry.value.get_or_insert_with(SymbolTile::default).draws.push(draw);
                 }
             }
         }

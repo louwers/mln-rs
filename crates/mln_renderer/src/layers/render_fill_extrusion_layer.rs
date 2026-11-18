@@ -18,7 +18,6 @@ use std::mem::offset_of;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_gfx::gpu::Gpu;
 use mln_gfx::index_vector::{IndexVectorBase, IndexVectorBasePtr};
 use mln_gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
 use mln_gfx::shaders::fill_extrusion_layer_ubo::{
@@ -56,13 +55,12 @@ use crate::buckets::fill_extrusion_bucket::{
     FillExtrusionStaticVertex, FillExtrusionWallVertex, wall_quad_paint, wall_quad_vertices,
 };
 use crate::draw::{DrawGeometry, DrawObjects, copy_shared_attributes};
-use crate::draw_cache::{
-    DrawDepth, DrawList, DrawOrder, DrawPriority, FrameDraw, FrameDraws, LayerDrawing, LayerDraws, TileMap,
-    UniformWriter,
-};
 use crate::frame_projection::zero_to_one_clip_z;
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
+use crate::layer_drawing::{
+    DrawDepth, DrawList, DrawPriority, FrameDraw, LayerDraws, TileDraws, TileObjects, UniformWriter,
+};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::pattern_layout::{PatternLayout, uses_pattern};
@@ -103,56 +101,12 @@ pub(crate) struct ExtrusionTile {
     atlases: Option<AtlasBinding>,
 }
 
-/// The layer's drawing: what it keeps of each tile, and its draws of the
-/// frame, each of the draw at its index among its tile's.
-#[derive(Default)]
-pub(crate) struct ExtrusionDrawing {
-    tiles: TileMap<ExtrusionTile>,
-    frame: Option<LayerDraws<usize>>,
-}
+impl TileObjects for ExtrusionTile {
+    /// The index of the draw among the tile's.
+    type Part = usize;
 
-impl ExtrusionDrawing {
-    /// The GPU objects of `draw`, the draw at `index` of its tile, with what
-    /// gives them the texture of the tile's icon atlas.
-    fn objects<'a>(
-        tiles: &'a mut TileMap<ExtrusionTile>,
-        draw: &FrameDraw,
-        index: usize,
-    ) -> Option<(&'a mut DrawObjects, Option<&'a AtlasBinding>)> {
-        let tile = tiles.cache_mut(&draw.tile?)?;
-        Some((&mut tile.draws.get_mut(index)?.objects, tile.atlases.as_ref()))
-    }
-}
-
-impl LayerDrawing for ExtrusionDrawing {
-    type Tile = ExtrusionTile;
-
-    fn tiles(&mut self) -> &mut TileMap<ExtrusionTile> {
-        &mut self.tiles
-    }
-
-    fn groups(&self) -> [Option<&FrameDraws>; 2] {
-        [self.frame.as_ref().map(|frame| &frame.frame), None]
-    }
-
-    fn clear(&mut self) {
-        self.tiles.clear();
-        if let Some(frame) = &mut self.frame {
-            frame.clear();
-        }
-    }
-
-    fn upload(&mut self, context: &Context) {
-        if let Some(frame) = &self.frame {
-            frame.upload(&mut self.tiles, Self::objects, context);
-        }
-    }
-
-    fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
-        if let Some(frame) = &self.frame {
-            frame.render(&mut self.tiles, Self::objects, gpu, parameters);
-            order.step(parameters);
-        }
+    fn objects(&mut self, index: usize) -> Option<(&mut DrawObjects, Option<&AtlasBinding>)> {
+        Some((&mut self.draws.get_mut(index)?.objects, self.atlases.as_ref()))
     }
 }
 
@@ -353,7 +307,7 @@ impl LayerType for FillExtrusion {
 pub(crate) struct RenderFillExtrusionLayer {
     base: RenderLayerBase,
     values: LayerValues<FillExtrusion>,
-    drawing: ExtrusionDrawing,
+    drawing: TileDraws<ExtrusionTile>,
     /// The frame's draws as the update makes them.
     draw_list: DrawList<ExtrusionUniforms, usize>,
 
@@ -378,7 +332,7 @@ impl RenderFillExtrusionLayer {
         RenderFillExtrusionLayer {
             base,
             values,
-            drawing: ExtrusionDrawing::default(),
+            drawing: TileDraws::default(),
             draw_list: DrawList::default(),
             fill_extrusion_group: None,
             fill_extrusion_pattern_group: None,
@@ -392,7 +346,7 @@ impl RenderFillExtrusionLayer {
 
 impl TypedLayer for RenderFillExtrusionLayer {
     type Type = FillExtrusion;
-    type Drawing = ExtrusionDrawing;
+    type Drawing = TileDraws<ExtrusionTile>;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -527,36 +481,34 @@ impl RenderLayer for RenderFillExtrusionLayer {
         let layer = &*self.values.evaluated;
         for tile in render_tiles.iter() {
             let tile_id = tile.id();
+            let Some(mut entry) = self.drawing.tiles.entry(&tile_id) else {
+                continue;
+            };
 
             let render_data = super::layer_bucket_for_pass(tile, &*self.base.style, RENDER_PASS);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
-                self.drawing.tiles.drop_cache(&tile_id);
+                *entry.value = None;
                 continue;
             };
             let Some(bucket) = render_data.bucket::<FillExtrusion>() else {
                 continue;
             };
-            if self.drawing.tiles.bucket(&tile_id).is_some_and(|prev| prev != bucket.base.bucket_id) {
-                // The tile's draws were built from another bucket.
-                self.drawing.tiles.drop_cache(&tile_id);
-            }
-            self.drawing.tiles.set_bucket(&tile_id, bucket.base.bucket_id);
+            // Draws built from another bucket go.
+            entry.set_bucket(bucket.base.bucket_id);
 
             let Some(binders) = bucket.paint_property_binders.get(self.base.style.base().id.as_str()) else {
                 continue;
             };
 
-            let changes = self.drawing.tiles.take_changes(&tile_id);
-            if let Some(cached) = self.drawing.tiles.cache_mut(&tile_id) {
-                if changes.paint {
-                    builder.refresh_paint(cached, tile, bucket, binders, &layer.paint);
+            let changes = entry.take_changes();
+            let cached = match entry.value {
+                Some(cached) => {
+                    if changes.paint {
+                        builder.refresh_paint(cached, tile, bucket, binders, &layer.paint);
+                    }
+                    cached
                 }
-            } else {
-                let built = builder.build(tile, bucket, binders, &layer.paint);
-                self.drawing.tiles.set_cache(&tile_id, built);
-            }
-            let Some(cached) = self.drawing.tiles.cache(&tile_id) else {
-                continue;
+                None => entry.value.insert(builder.build(tile, bucket, binders, &layer.paint)),
             };
             for (index, draw) in cached.draws.iter().enumerate() {
                 let frame_draw = FrameDraw {
@@ -571,7 +523,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
             }
         }
 
-        frame.frame.set_stencil_tiles(render_tiles.render_tiles().map(|tile| tile.id));
+        frame.set_stencil_tiles(render_tiles.render_tiles().map(|tile| tile.id));
         self.draw_list.finish(frame, context, |writer| Self::write_uniforms(layer, writer, paint_parameters));
     }
 }

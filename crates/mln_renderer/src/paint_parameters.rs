@@ -25,7 +25,9 @@ use crate::render_static_data::RenderStaticData;
 
 /// A draw group drawing into the layer composite's texture, from
 /// [`PaintParameters::begin_composited`] to
-/// [`PaintParameters::end_composited`].
+/// [`PaintParameters::end_composited`], which every group that begins must
+/// reach.
+#[must_use = "a composited draw group ends with `PaintParameters::end_composited`"]
 pub(crate) struct Composited {
     group: SimpleIdentity,
     /// The frame's pass, which resumes after the group's draws.

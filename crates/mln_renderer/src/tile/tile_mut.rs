@@ -20,7 +20,7 @@ use mln_vec_map::VecSet;
 
 use crate::buckets::hillshade_bucket::HillshadeBucket;
 use crate::buckets::raster_bucket::RasterBucket;
-use crate::draw_cache::ChangedBuckets;
+use crate::layer_drawing::ChangedBuckets;
 use crate::layout::tile_layout::{Dependencies, LayoutParams};
 use crate::render_orchestrator::drop_on_workers;
 use crate::tile::contents::{Contents, GeometryContents, LayoutResult, release};

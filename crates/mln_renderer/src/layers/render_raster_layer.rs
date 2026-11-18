@@ -33,12 +33,12 @@ use super::{cast_matrix, shared_vertices};
 use crate::bucket::{Bucket, NoBucket};
 use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
-use crate::draw_cache::{DrawList, DrawOrder, FrameDraw, FrameDraws, KeptDraw, LayerDrawing, LayerDraws, TileMap};
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
 use crate::gfx::texture2d::Texture2DPtr;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_composite::Composite;
+use crate::layer_drawing::{DrawList, DrawOrder, FrameDraw, FrameDraws, KeptDraw, LayerDrawing, LayerDraws, TileMap};
 use crate::layer_type::LayerType;
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
@@ -92,7 +92,7 @@ impl RasterDrawing {
         part: RasterPart,
     ) -> Option<(&'a mut DrawObjects, Option<&'a AtlasBinding>)> {
         let draw = match part {
-            RasterPart::Tile => &mut objects.tiles.cache_mut(&draw.tile?)?.draw,
+            RasterPart::Tile => &mut objects.tiles.get_mut(&draw.tile?)?.draw,
             RasterPart::Image(index) => objects.images.get_mut(index)?,
         };
         Some((&mut draw.objects, None))
@@ -106,8 +106,10 @@ impl LayerDrawing for RasterDrawing {
         &mut self.objects.tiles
     }
 
-    fn groups(&self) -> [Option<&FrameDraws>; 2] {
-        [self.frame.as_ref().map(|frame| &frame.frame), None]
+    fn visit_groups<'a>(&'a self, visit: &mut dyn FnMut(&'a FrameDraws)) {
+        if let Some(frame) = &self.frame {
+            visit(frame.frame());
+        }
     }
 
     fn clear(&mut self) {
@@ -298,7 +300,7 @@ impl RenderRasterLayer {
     fn finish_frame_draws(&mut self, context: &Context) {
         let composite = self.composite();
         let frame = self.drawing.frame.get_or_insert_with(LayerDraws::new);
-        frame.frame.composite = composite;
+        frame.set_composite(composite);
         let evaluated = &self.values.evaluated.paint;
         self.draw_list.finish(frame, context, |writer| {
             let props = RasterEvaluatedPropsUBO {
@@ -489,23 +491,26 @@ impl RenderLayer for RenderRasterLayer {
 
         for tile in render_tiles.iter() {
             let tile_id = tile.id();
+            let Some(mut entry) = self.drawing.objects.tiles.entry(&tile_id) else {
+                continue;
+            };
 
             let bucket = tile.bucket(&*self.base.style).filter(|b| b.has_data());
             let Some(bucket) = bucket.and_then(|bucket| bucket.downcast_ref::<RasterBucket>()) else {
-                self.drawing.objects.tiles.drop_cache(&tile_id);
+                *entry.value = None;
                 continue;
             };
 
             // A draw of another bucket, or of the bucket's geometry before
             // its mask changed, is built again.
             let geometry_modified = bucket.geometry().last_modified;
-            if self.drawing.objects.tiles.set_bucket(&tile_id, bucket.base.bucket_id)
-                || self.drawing.objects.tiles.cache_mut(&tile_id).is_some_and(|cached| cached.built < geometry_modified)
+            if entry.set_bucket(bucket.base.bucket_id)
+                || entry.value.as_ref().is_some_and(|cached| cached.built < geometry_modified)
             {
-                self.drawing.objects.tiles.drop_cache(&tile_id);
+                *entry.value = None;
             }
 
-            if self.drawing.objects.tiles.cache_mut(&tile_id).is_none() {
+            if entry.value.is_none() {
                 let texture = Self::bucket_texture(&mut self.textures, sampler, context, bucket);
 
                 // The bucket only has geometry for a masked tile; any other
@@ -547,10 +552,10 @@ impl RenderLayer for RenderRasterLayer {
                 };
                 let objects = new_objects(&raster_shader, draw_geometry, texture);
                 let built = RasterTile { draw: KeptDraw::new(objects), built: Instant::now() };
-                self.drawing.objects.tiles.set_cache(&tile_id, built);
+                *entry.value = Some(built);
             }
 
-            if let Some(cached) = self.drawing.objects.tiles.cache_mut(&tile_id) {
+            if let Some(cached) = entry.value.as_ref() {
                 let draw = cached.draw.frame_draw(Some(tile_id));
                 let uniforms = Self::uniforms(&tile_id.to_unwrapped(), paint_parameters);
                 self.draw_list.push_part(draw, RasterPart::Tile, uniforms);

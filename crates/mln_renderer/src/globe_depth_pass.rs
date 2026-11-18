@@ -20,9 +20,9 @@ use mln_util::range::Range;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use crate::draw::{DrawGeometry, DrawObjects, Textures, raw_vertices};
-use crate::draw_cache::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDraws, TileMap, kept_tile_draw};
 use crate::gfx::context::Context;
 use crate::globe_tile_mesh::{RawGlobeTileMesh, raw_globe_tile_mesh};
+use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDraws, TileDraws};
 use crate::paint_parameters::PaintParameters;
 use crate::tile_matrix::to_projection_ubo;
 use crate::update_parameters::UpdateParameters;
@@ -35,11 +35,9 @@ const GLOBE_DEPTH_SHADER_NAME: &str = "GlobeDepthShader";
 /// layers are by their clip Z.
 #[derive(Default)]
 pub(crate) struct GlobeDepthPass {
-    /// The planet's draws, one of each tile of the cover.
-    tiles: TileMap<KeptDraw>,
-    /// The frame's draws of the planet, which draw into depth in the
-    /// translucent pass.
-    frame: LayerDraws,
+    /// The planet's draws, one of each tile of the cover, and the frame's
+    /// draws of them, which draw into depth in the translucent pass.
+    drawing: TileDraws<KeptDraw>,
     /// The frame's draws as the update makes them, with their projections.
     draw_list: DrawList<ProjectionUBO>,
     shader: Option<ShaderProgramPtr>,
@@ -58,8 +56,10 @@ impl GlobeDepthPass {
         needed: bool,
     ) {
         if !state.is_globe_rendering() || !needed {
-            self.tiles.clear_tiles();
-            self.frame.clear();
+            self.drawing.tiles.clear_tiles();
+            if let Some(frame) = &mut self.drawing.frame {
+                frame.clear();
+            }
             if !state.is_globe_rendering() {
                 self.meshes.clear();
             }
@@ -72,7 +72,7 @@ impl GlobeDepthPass {
         let Some(shader) = self.shader.clone() else {
             return;
         };
-        let caches = &mut self.tiles;
+        let caches = &mut self.drawing.tiles;
 
         let zoom = state.get_integer_zoom();
         let tile_cover = tile_cover(
@@ -93,7 +93,10 @@ impl GlobeDepthPass {
 
         caches.set_tiles(tile_cover.iter().copied());
         for tile_id in &tile_cover {
-            if caches.cache_mut(tile_id).is_none() {
+            let Some(entry) = caches.entry(tile_id) else {
+                continue;
+            };
+            if entry.value.is_none() {
                 // The grid depends only on the zoom and whether the tile
                 // touches a pole.
                 let canonical = &tile_id.canonical;
@@ -124,9 +127,9 @@ impl GlobeDepthPass {
                     geometry,
                     Textures::default(),
                 );
-                caches.set_cache(tile_id, KeptDraw::new(objects));
+                *entry.value = Some(KeptDraw::new(objects));
             }
-            let Some(draw) = caches.cache_mut(tile_id) else {
+            let Some(draw) = entry.value.as_ref() else {
                 continue;
             };
             let depth = DrawDepth::Volume { mask: DepthMaskType::ReadWrite };
@@ -134,19 +137,20 @@ impl GlobeDepthPass {
             self.draw_list.push(FrameDraw { depth, ..draw.frame_draw(Some(*tile_id)) }, projection);
         }
         // The draws draw in the order their GPU objects were made.
-        self.draw_list.finish(&mut self.frame, context, |writer| {
+        let frame = self.drawing.frame.get_or_insert_with(LayerDraws::new);
+        self.draw_list.finish(frame, context, |writer| {
             writer.storage(ID_PROJECTION_UBO, |projection| *projection);
         });
     }
 
     /// Uploads the GPU objects of the frame's draws.
     pub(crate) fn upload(&mut self, context: &Context) {
-        self.frame.upload(&mut self.tiles, kept_tile_draw, context);
+        self.drawing.upload_draws(context);
     }
 
     /// Draws the frame's draws of the pass into the open pass of `gpu`, the
     /// context's.
     pub(crate) fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        self.frame.render(&mut self.tiles, kept_tile_draw, gpu, parameters);
+        self.drawing.render_draws(gpu, parameters);
     }
 }

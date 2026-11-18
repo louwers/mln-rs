@@ -10,7 +10,6 @@ use std::collections::hash_map::Entry;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_gfx::gpu::Gpu;
 use mln_gfx::index_vector::{IndexVectorBase, IndexVectorBasePtr};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::hillshade_layer_ubo::{
@@ -48,13 +47,11 @@ use super::{cast_matrix, shared_vertices};
 use crate::bucket::{Bucket, NoBucket};
 use crate::buckets::hillshade_bucket::{HillshadeBucket, HillshadeLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
-use crate::draw_cache::{
-    DrawDepth, DrawList, DrawOrder, FrameDraw, FrameDraws, KeptDraw, LayerDrawing, LayerDraws, SingleDraw, TileMap,
-};
 use crate::geometry::dem_data::get_unpack_vector;
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
+use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDraws, SingleDraw, TileDraws, TileObjects};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
@@ -102,54 +99,11 @@ pub(crate) struct HillshadeTile {
     geometry_time: Instant,
 }
 
-/// The layer's drawing: what it keeps of each tile, and its draws of the
-/// frame, one of each tile.
-#[derive(Default)]
-pub(crate) struct HillshadeDrawing {
-    tiles: TileMap<HillshadeTile>,
-    frame: Option<LayerDraws>,
-}
+impl TileObjects for HillshadeTile {
+    type Part = ();
 
-impl HillshadeDrawing {
-    /// The GPU objects of `draw`, its tile's.
-    fn objects<'a>(
-        tiles: &'a mut TileMap<HillshadeTile>,
-        draw: &FrameDraw,
-        (): (),
-    ) -> Option<(&'a mut DrawObjects, Option<&'a AtlasBinding>)> {
-        Some((&mut tiles.cache_mut(&draw.tile?)?.draw.objects, None))
-    }
-}
-
-impl LayerDrawing for HillshadeDrawing {
-    type Tile = HillshadeTile;
-
-    fn tiles(&mut self) -> &mut TileMap<HillshadeTile> {
-        &mut self.tiles
-    }
-
-    fn groups(&self) -> [Option<&FrameDraws>; 2] {
-        [self.frame.as_ref().map(|frame| &frame.frame), None]
-    }
-
-    fn clear(&mut self) {
-        self.tiles.clear();
-        if let Some(frame) = &mut self.frame {
-            frame.clear();
-        }
-    }
-
-    fn upload(&mut self, context: &Context) {
-        if let Some(frame) = &self.frame {
-            frame.upload(&mut self.tiles, Self::objects, context);
-        }
-    }
-
-    fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
-        if let Some(frame) = &self.frame {
-            frame.render(&mut self.tiles, Self::objects, gpu, parameters);
-            order.step(parameters);
-        }
+    fn objects(&mut self, (): ()) -> Option<(&mut DrawObjects, Option<&AtlasBinding>)> {
+        self.draw.objects(())
     }
 }
 
@@ -163,7 +117,7 @@ struct HillshadeUniforms {
 pub(crate) struct RenderHillshadeLayer {
     base: RenderLayerBase,
     values: LayerValues<Hillshade>,
-    drawing: HillshadeDrawing,
+    drawing: TileDraws<HillshadeTile>,
     /// The frame's draws as the update makes them.
     draw_list: DrawList<HillshadeUniforms>,
     maxzoom: u8,
@@ -193,7 +147,7 @@ impl RenderHillshadeLayer {
         RenderHillshadeLayer {
             base,
             values,
-            drawing: HillshadeDrawing::default(),
+            drawing: TileDraws::default(),
             draw_list: DrawList::default(),
             maxzoom: constants::TERRAIN_RGB_MAXZOOM,
             hillshade_prepare_shader: None,
@@ -337,7 +291,7 @@ fn hillshade_vertex_attributes(vertices: &VertexVectorBasePtr) -> VertexAttribut
 
 impl TypedLayer for RenderHillshadeLayer {
     type Type = Hillshade;
-    type Drawing = HillshadeDrawing;
+    type Drawing = TileDraws<HillshadeTile>;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -387,7 +341,13 @@ impl RenderLayer for RenderHillshadeLayer {
         }
         for BucketTarget { render_target, prepare, .. } in self.bucket_render_targets.values_mut() {
             parameters.current_layer = 0;
-            render_target.render(parameters, |gpu, parameters| prepare.render(gpu, parameters));
+            let Some(mut passes) = render_target.begin(parameters) else {
+                continue;
+            };
+            while let Some(gpu) = passes.next(parameters) {
+                prepare.render(gpu, parameters);
+            }
+            passes.end(parameters);
         }
     }
 
@@ -458,19 +418,18 @@ impl RenderLayer for RenderHillshadeLayer {
         let mut illumination = None;
         for tile in render_tiles.iter() {
             let tile_id = tile.id();
+            let Some(mut entry) = self.drawing.tiles.entry(&tile_id) else {
+                continue;
+            };
 
             let bucket = tile.bucket(&*self.base.style).filter(|b| b.has_data());
             let Some(bucket) = bucket.and_then(|bucket| bucket.downcast_ref::<HillshadeBucket>()) else {
-                self.drawing.tiles.drop_cache(&tile_id);
+                *entry.value = None;
                 continue;
             };
             let bucket_id = bucket.base.bucket_id;
-
-            if self.drawing.tiles.bucket(&tile_id).is_some_and(|prev| prev != bucket_id) {
-                // The tile's draw was built from another bucket.
-                self.drawing.tiles.drop_cache(&tile_id);
-            }
-            self.drawing.tiles.set_bucket(&tile_id, bucket_id);
+            // A draw built from another bucket goes.
+            entry.set_bucket(bucket_id);
 
             let generation = bucket.render_target_generation();
             let render_target_texture = match self.bucket_render_targets.entry(bucket_id) {
@@ -545,7 +504,7 @@ impl RenderLayer for RenderHillshadeLayer {
                 }
             };
 
-            if let Some(cached) = self.drawing.tiles.cache_mut(&tile_id) {
+            let cached = if let Some(cached) = entry.value {
                 if cached.geometry_time != geometry_time {
                     cached.draw.objects.replace_geometry(draw_geometry());
                     cached.geometry_time = geometry_time;
@@ -553,6 +512,7 @@ impl RenderLayer for RenderHillshadeLayer {
                 // The bucket's render target is made again with its
                 // generation.
                 cached.draw.objects.set_texture(ID_HILLSHADE_IMAGE_TEXTURE, Some(render_target_texture));
+                cached
             } else {
                 let mut textures = Textures::default();
                 textures[ID_HILLSHADE_IMAGE_TEXTURE] = Some(render_target_texture);
@@ -563,10 +523,7 @@ impl RenderLayer for RenderHillshadeLayer {
                     draw_geometry(),
                     textures,
                 );
-                self.drawing.tiles.set_cache(&tile_id, HillshadeTile { draw: KeptDraw::new(objects), geometry_time });
-            }
-            let Some(cached) = self.drawing.tiles.cache(&tile_id) else {
-                continue;
+                entry.value.insert(HillshadeTile { draw: KeptDraw::new(objects), geometry_time })
             };
             let draw = FrameDraw { depth: DrawDepth::Off, ..cached.draw.frame_draw(Some(tile_id)) };
             let Illumination { num_lights, .. } = *illumination.get_or_insert_with(|| {

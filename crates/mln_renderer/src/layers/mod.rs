@@ -17,7 +17,7 @@ use mln_style::layer_type::ErasedLayerStyle;
 
 use crate::bucket::UploadNeeds;
 use crate::draw::DrawObjects;
-use crate::draw_cache::BucketChanges;
+use crate::layer_drawing::BucketChanges;
 use crate::render_tile::FrameTile;
 
 /// What the layers' draws read of the buckets on the device of `context`.

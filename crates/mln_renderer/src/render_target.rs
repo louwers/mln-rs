@@ -1,3 +1,4 @@
+use std::cell::RefMut;
 use std::rc::Rc;
 
 use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, GpuError, LoadOp, TargetFormats};
@@ -47,47 +48,26 @@ impl RenderTarget {
         }
     }
 
-    /// Clears the texture and draws into it with `draw`, which draws what of
-    /// the target is in `parameters`' pass into the open pass of the `Gpu`,
-    /// the context's. It draws in the opaque pass, then the translucent one,
-    /// both as the frame's first layer.
-    pub(crate) fn render(
-        &mut self,
-        parameters: &mut PaintParameters<'_>,
-        mut draw: impl FnMut(&mut dyn Gpu, &mut PaintParameters<'_>),
-    ) {
-        let num_sublayers = PaintParameters::NUM_SUBLAYERS as usize;
-        let depth_epsilon = PaintParameters::DEPTH_EPSILON;
-
+    /// Clears the texture and begins drawing into it, in the passes that
+    /// [`TargetPasses::next`] moves `parameters` to; [`TargetPasses::end`]
+    /// ends what this begins. `None` where the pass didn't begin.
+    pub(crate) fn begin<'a>(&mut self, parameters: &mut PaintParameters<'a>) -> Option<TargetPasses<'a>> {
         let pass = match self.pass(parameters.context) {
             Ok(pass) => pass,
             Err(error) => {
                 Log::error(Event::Render, format!("Beginning a render target's pass failed: {error}"));
-                return;
+                return None;
             }
         };
         let context = parameters.context;
         let mut gpu = context.gpu();
         if let Err(error) = parameters.begin_pass(&mut *gpu, pass) {
             Log::error(Event::Render, format!("Beginning a render target's pass failed: {error}"));
-            return;
+            return None;
         }
-
         let prev_scissor_rect = parameters.scissor_rect;
         parameters.scissor_rect = ScissorRect { x: 0, y: 0, width: pass.size.width, height: pass.size.height };
-
-        let depth_range_size = 1.0 - (3 * num_sublayers) as f32 * depth_epsilon;
-        for pass in [RenderPass::Opaque, RenderPass::Translucent] {
-            parameters.pass = pass;
-            parameters.depth_range_size = depth_range_size;
-            parameters.current_layer = 0;
-            draw(&mut *gpu, parameters);
-        }
-
-        if let Err(error) = parameters.end_pass(&mut *gpu) {
-            Log::error(Event::Render, format!("Ending a render target's pass failed: {error}"));
-        }
-        parameters.scissor_rect = prev_scissor_rect;
+        Some(TargetPasses { gpu, passes: [RenderPass::Opaque, RenderPass::Translucent].into_iter(), prev_scissor_rect })
     }
 
     /// The pass that clears the texture to opaque black and its depth to 1.
@@ -131,4 +111,37 @@ fn texture(context: &Context, size: Size, type_: TextureChannelDataType) -> Text
         });
     }
     texture
+}
+
+/// The passes of the draws into a [`RenderTarget`], from
+/// [`RenderTarget::begin`] to [`TargetPasses::end`], which every one that
+/// begins must reach.
+#[must_use = "the draws into a render target end with `TargetPasses::end`"]
+pub(crate) struct TargetPasses<'a> {
+    gpu: RefMut<'a, dyn Gpu>,
+    /// The passes not yet drawn.
+    passes: std::array::IntoIter<RenderPass, 2>,
+    /// The frame's scissor rect, which `end` restores.
+    prev_scissor_rect: ScissorRect,
+}
+
+impl TargetPasses<'_> {
+    /// Moves `parameters` to the next pass, the opaque one, then the
+    /// translucent one, both as the frame's first layer, and returns the
+    /// `Gpu` that draws it; `None` after the last.
+    pub(crate) fn next(&mut self, parameters: &mut PaintParameters<'_>) -> Option<&mut dyn Gpu> {
+        let num_sublayers = PaintParameters::NUM_SUBLAYERS as usize;
+        parameters.pass = self.passes.next()?;
+        parameters.depth_range_size = 1.0 - (3 * num_sublayers) as f32 * PaintParameters::DEPTH_EPSILON;
+        parameters.current_layer = 0;
+        Some(&mut *self.gpu)
+    }
+
+    /// Ends the draws into the render target.
+    pub(crate) fn end(mut self, parameters: &mut PaintParameters<'_>) {
+        if let Err(error) = parameters.end_pass(&mut *self.gpu) {
+            Log::error(Event::Render, format!("Ending a render target's pass failed: {error}"));
+        }
+        parameters.scissor_rect = self.prev_scissor_rect;
+    }
 }

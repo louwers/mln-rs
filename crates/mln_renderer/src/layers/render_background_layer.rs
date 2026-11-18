@@ -30,8 +30,8 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use super::cast_matrix;
 use crate::bucket::NoBucket;
 use crate::draw::{DrawGeometry, DrawObjects, Textures, raw_vertices};
-use crate::draw_cache::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDraws, TileDraws};
 use crate::globe_tile_mesh::raw_globe_tile_mesh;
+use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDraws, TileDraws};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
@@ -71,7 +71,7 @@ impl LayerType for Background {
 pub(crate) struct RenderBackgroundLayer {
     base: RenderLayerBase,
     values: LayerValues<Background>,
-    drawing: TileDraws,
+    drawing: TileDraws<KeptDraw>,
     /// The frame's draws as the update makes them, with their uniform blocks
     /// and projections.
     draw_list: DrawList<(BackgroundDrawableUnionUBO, ProjectionUBO)>,
@@ -190,7 +190,7 @@ impl RenderBackgroundLayer {
 
 impl TypedLayer for RenderBackgroundLayer {
     type Type = Background;
-    type Drawing = TileDraws;
+    type Drawing = TileDraws<KeptDraw>;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -311,9 +311,9 @@ impl RenderLayer for RenderBackgroundLayer {
 
         self.drawing.tiles.set_tiles(tile_cover.iter().copied());
         for tile_id in &tile_cover {
-            if self.drawing.tiles.cache_mut(tile_id).is_none() {
+            if self.drawing.tiles.get(tile_id).is_none() {
                 let objects = self.build_tile(tile_id, Rc::clone(&shader), draw_passes);
-                self.drawing.tiles.set_cache(tile_id, KeptDraw::new(objects));
+                self.drawing.tiles.insert(tile_id, KeptDraw::new(objects));
             }
         }
 
@@ -346,7 +346,7 @@ impl RenderLayer for RenderBackgroundLayer {
         drop(pattern_atlas);
 
         for tile_id in &tile_cover {
-            let Some(cached) = self.drawing.tiles.cache_mut(tile_id) else {
+            let Some(cached) = self.drawing.tiles.get_mut(tile_id) else {
                 continue;
             };
             if let Some(texture) = &pattern_texture {

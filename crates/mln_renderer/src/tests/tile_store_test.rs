@@ -20,7 +20,7 @@ use serde_json::json;
 
 use super::tile_jobs_test::{Manual, icons, layer, points};
 use crate::buckets::hillshade_bucket::HillshadeBucket;
-use crate::draw_cache::ChangedBuckets;
+use crate::layer_drawing::ChangedBuckets;
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::query::SourceQueryOptions;
 use crate::tests::tile::{dem_png, png};

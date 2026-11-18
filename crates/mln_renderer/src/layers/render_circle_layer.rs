@@ -26,7 +26,7 @@ use super::{cast_matrix, refresh_paint_attributes};
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::circle_bucket::{CircleBinders, CircleBucket, CircleLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
-use crate::draw_cache::{DrawList, KeptDraw, LayerDraws, TileDraws, UniformWriter};
+use crate::layer_drawing::{DrawList, KeptDraw, LayerDraws, TileDraws, UniformWriter};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::circle_layout::CircleLayout;
 use crate::layout::layout::{LayoutParameters, SourceLayer};
@@ -172,7 +172,7 @@ impl LayerType for Circle {
 pub(crate) struct RenderCircleLayer {
     base: RenderLayerBase,
     values: LayerValues<Circle>,
-    drawing: TileDraws,
+    drawing: TileDraws<KeptDraw>,
     /// The frame's draws as the update makes them.
     draw_list: DrawList<CircleUniforms>,
     circle_shader_group: Option<ShaderGroupPtr>,
@@ -271,7 +271,7 @@ struct CircleUniforms {
 
 impl TypedLayer for RenderCircleLayer {
     type Type = Circle;
-    type Drawing = TileDraws;
+    type Drawing = TileDraws<KeptDraw>;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -446,10 +446,13 @@ impl RenderLayer for RenderCircleLayer {
         let evaluated = &layer.paint;
         for tile in render_tiles.iter() {
             let tile_id = tile.id();
+            let Some(mut entry) = self.drawing.tiles.entry(&tile_id) else {
+                continue;
+            };
 
             let render_data = super::layer_bucket_for_pass(tile, &*self.base.style, RENDER_PASS);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
-                self.drawing.tiles.drop_cache(&tile_id);
+                *entry.value = None;
                 continue;
             };
             let Some(bucket) = render_data.bucket::<Circle>() else {
@@ -462,16 +465,13 @@ impl RenderLayer for RenderCircleLayer {
             let paint =
                 || paint_vertices(geometry, &binders.interleaved_vertex_buffer, binders.depends_on_feature_state());
 
-            if self.drawing.tiles.bucket(&tile_id).is_some_and(|prev| prev != bucket.base.bucket_id) {
-                // The tile's draw was built from another bucket.
-                self.drawing.tiles.drop_cache(&tile_id);
-            }
-            self.drawing.tiles.set_bucket(&tile_id, bucket.base.bucket_id);
+            // A draw built from another bucket goes.
+            entry.set_bucket(bucket.base.bucket_id);
 
             // The draw's attributes point into the bucket's shared vectors,
             // which upload again when they change.
-            let changes = self.drawing.tiles.take_changes(&tile_id);
-            if let Some(cached) = self.drawing.tiles.cache_mut(&tile_id) {
+            let changes = entry.take_changes();
+            if let Some(cached) = entry.value.as_mut() {
                 refresh_paint_attributes(&mut cached.objects, changes, |attrs| {
                     read_circle_attributes(attrs, binders, &paint(), evaluated, &mut Default::default());
                 });
@@ -503,11 +503,10 @@ impl RenderLayer for RenderCircleLayer {
                     },
                     Textures::default(),
                 );
-                self.drawing.tiles.set_cache(&tile_id, KeptDraw::new(objects));
+                *entry.value = Some(KeptDraw::new(objects));
             }
 
-            let Some(draw) = self.drawing.tiles.cache_mut(&tile_id).map(|cached| cached.frame_draw(Some(tile_id)))
-            else {
+            let Some(draw) = entry.value.as_ref().map(|cached| cached.frame_draw(Some(tile_id))) else {
                 continue;
             };
             self.draw_list.push(draw, Self::uniforms(layer, &tile_id, binders, paint_parameters));

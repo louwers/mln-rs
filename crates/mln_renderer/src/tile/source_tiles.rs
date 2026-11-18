@@ -23,7 +23,7 @@ use mln_vec_map::VecMap;
 use crate::algorithm::update_renderables::{PrefetchedTile, RenderablesContext, update_renderables};
 use crate::algorithm::update_tile_masks::update_tile_masks;
 use crate::bucket::UploadNeeds;
-use crate::draw_cache::ChangedBuckets;
+use crate::layer_drawing::ChangedBuckets;
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layout::tile_layout::LayoutParams;
 use crate::tile::contents::Contents;

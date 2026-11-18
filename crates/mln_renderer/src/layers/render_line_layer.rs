@@ -6,7 +6,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_gfx::gpu::{Gpu, TextureFormat};
+use mln_gfx::gpu::TextureFormat;
 use mln_gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::line_layer_ubo::{
@@ -42,11 +42,11 @@ use super::{cast_matrix, refresh_paint_attributes};
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::line_bucket::{LineBinders, LineBucket, LineLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
-use crate::draw_cache::{DrawList, DrawOrder, FrameDraw, FrameDraws, LayerDrawing, LayerDraws, TileMap, UniformWriter};
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
 use crate::gfx::texture2d::Texture2DPtr;
 use crate::layer_composite::Composite;
+use crate::layer_drawing::{DrawList, FrameDraw, LayerDraws, TileDraws, TileObjects, UniformWriter};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::pattern_layout::{LineLayoutSpec, PatternLayout, uses_pattern};
@@ -91,56 +91,11 @@ pub(crate) struct LineTile {
     atlases: Option<AtlasBinding>,
 }
 
-/// The layer's drawing: what it keeps of each tile, and its draws of the
-/// frame, one of each tile.
-#[derive(Default)]
-pub(crate) struct LineDrawing {
-    tiles: TileMap<LineTile>,
-    frame: Option<LayerDraws>,
-}
+impl TileObjects for LineTile {
+    type Part = ();
 
-impl LineDrawing {
-    /// The GPU objects of `draw`, with what gives them the texture of their
-    /// tile's icon atlas.
-    fn objects<'a>(
-        tiles: &'a mut TileMap<LineTile>,
-        draw: &FrameDraw,
-        (): (),
-    ) -> Option<(&'a mut DrawObjects, Option<&'a AtlasBinding>)> {
-        let tile = tiles.cache_mut(&draw.tile?)?;
-        Some((&mut tile.objects, tile.atlases.as_ref()))
-    }
-}
-
-impl LayerDrawing for LineDrawing {
-    type Tile = LineTile;
-
-    fn tiles(&mut self) -> &mut TileMap<LineTile> {
-        &mut self.tiles
-    }
-
-    fn groups(&self) -> [Option<&FrameDraws>; 2] {
-        [self.frame.as_ref().map(|frame| &frame.frame), None]
-    }
-
-    fn clear(&mut self) {
-        self.tiles.clear();
-        if let Some(frame) = &mut self.frame {
-            frame.clear();
-        }
-    }
-
-    fn upload(&mut self, context: &Context) {
-        if let Some(frame) = &self.frame {
-            frame.upload(&mut self.tiles, Self::objects, context);
-        }
-    }
-
-    fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
-        if let Some(frame) = &self.frame {
-            frame.render(&mut self.tiles, Self::objects, gpu, parameters);
-            order.step(parameters);
-        }
+    fn objects(&mut self, (): ()) -> Option<(&mut DrawObjects, Option<&AtlasBinding>)> {
+        Some((&mut self.objects, self.atlases.as_ref()))
     }
 }
 
@@ -355,7 +310,7 @@ impl LayerType for Line {
 pub(crate) struct RenderLineLayer {
     base: RenderLayerBase,
     values: LayerValues<Line>,
-    drawing: LineDrawing,
+    drawing: TileDraws<LineTile>,
     /// The frame's draws as the update makes them.
     draw_list: DrawList<LineUniforms>,
 
@@ -382,7 +337,7 @@ impl RenderLineLayer {
         RenderLineLayer {
             base,
             values,
-            drawing: LineDrawing::default(),
+            drawing: TileDraws::default(),
             draw_list: DrawList::default(),
             color_ramp: Rc::new(PremultipliedImage::new(Size::new(256, 1))),
             color_ramp_global_state: None,
@@ -476,7 +431,7 @@ fn offset_line(
 
 impl TypedLayer for RenderLineLayer {
     type Type = Line;
-    type Drawing = LineDrawing;
+    type Drawing = TileDraws<LineTile>;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -629,8 +584,8 @@ impl RenderLayer for RenderLineLayer {
 
         let frame = self.drawing.frame.get_or_insert_with(LayerDraws::new);
         let paint = &self.values.evaluated.paint;
-        frame.frame.composite = Composite::of(*paint.line_layer_opacity.uniform(), *paint.line_layer_blend.uniform());
-        frame.frame.set_stencil_tiles(render_tiles.render_tiles().map(|tile| tile.id));
+        frame.set_composite(Composite::of(*paint.line_layer_opacity.uniform(), *paint.line_layer_blend.uniform()));
+        frame.set_stencil_tiles(render_tiles.render_tiles().map(|tile| tile.id));
 
         let render_pass =
             RenderPass(self.base.evaluated_properties.render_passes() & !RenderPass::Opaque.underlying_type());
@@ -638,14 +593,14 @@ impl RenderLayer for RenderLineLayer {
             let tile_id = tile.id();
 
             let Some(render_data) = super::layer_bucket_for_pass(tile, &*self.base.style, render_pass) else {
-                self.drawing.tiles.drop_cache(&tile_id);
+                self.drawing.tiles.drop_value(&tile_id);
                 continue;
             };
             let Some(bucket) = render_data.bucket::<Line>() else {
                 continue;
             };
             if bucket.triangles.is_empty() {
-                self.drawing.tiles.drop_cache(&tile_id);
+                self.drawing.tiles.drop_value(&tile_id);
                 continue;
             }
             let Some(binders) = bucket.paint_property_binders.get(self.get_id()) else {
@@ -655,32 +610,33 @@ impl RenderLayer for RenderLineLayer {
                 continue;
             };
 
-            if self.drawing.tiles.bucket(&tile_id).is_some_and(|prev| prev != bucket.base.bucket_id)
-                || self.drawing.tiles.cache_mut(&tile_id).is_some_and(|cached| cached.pass != render_pass)
-            {
-                // The tile's draw was built from another bucket, or for other
-                // passes.
-                self.drawing.tiles.drop_cache(&tile_id);
+            let Some(mut entry) = self.drawing.tiles.entry(&tile_id) else {
+                continue;
+            };
+            if entry.value.as_ref().is_some_and(|cached| cached.pass != render_pass) {
+                // The tile's draw was built for other passes.
+                *entry.value = None;
             }
-            self.drawing.tiles.set_bucket(&tile_id, bucket.base.bucket_id);
+            // A draw built from another bucket goes.
+            entry.set_bucket(bucket.base.bucket_id);
 
             // The draw's attributes point into the bucket's shared vectors,
             // which upload again when they change.
-            let changes = self.drawing.tiles.take_changes(&tile_id);
-            if let Some(cached) = self.drawing.tiles.cache_mut(&tile_id) {
+            let changes = entry.take_changes();
+            let cached = if let Some(cached) = entry.value {
                 refresh_paint_attributes(&mut cached.objects, changes, |attrs| {
                     let geometry = tile.bucket_geometry();
                     let buffer = &binders.interleaved_vertex_buffer;
                     let paint = paint_vertices(geometry, buffer, binders.depends_on_feature_state());
                     read_line_attributes(attrs, binders, &paint, evaluated, &mut Default::default());
                 });
-            } else if let Some(built) = self.build_tile(shaders, context, tile, bucket, binders, evaluated, render_pass)
-            {
-                self.drawing.tiles.set_cache(&tile_id, built);
-            }
-
-            let Some(cached) = self.drawing.tiles.cache_mut(&tile_id) else {
-                continue;
+                cached
+            } else {
+                let built = self.build_tile(shaders, context, tile, bucket, binders, evaluated, render_pass);
+                let Some(cached) = built.and_then(|built| self.drawing.tiles.insert(&tile_id, built)) else {
+                    continue;
+                };
+                cached
             };
             if let Some(uniforms) = Self::uniforms(&self.values.evaluated, tile, binders, cached, paint_parameters) {
                 let draw = FrameDraw { pass: cached.pass, clip: true, ..FrameDraw::new(Some(tile_id), cached.id) };

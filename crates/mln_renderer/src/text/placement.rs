@@ -46,8 +46,8 @@ use crate::buckets::symbol_bucket::{
     Buffer, CollisionBoxDynamicVertex, PlacedSymbol, PlacedSymbolPools, SortKeyRange, SymbolBucket, SymbolBucketState,
     ZoomEvaluatedSize, get_sorted_symbols,
 };
-use crate::draw_cache::{BucketChanges, ChangedBuckets};
 use crate::geometry::feature_index::{FeatureIndex, IndexedSubfeature};
+use crate::layer_drawing::{BucketChanges, ChangedBuckets};
 use crate::layout::symbol_instance::{SymbolInstance, SymbolInstancePools};
 use crate::layout::symbol_projection::{
     LabelPlaneProjector, add_dynamic_attributes, evaluate_size_for_feature, get_tile_skew_vectors, hide_glyphs,

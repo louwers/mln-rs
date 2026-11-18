@@ -132,7 +132,7 @@ impl crate::source_state::FeatureStateTarget for Shown {
     fn set_feature_state(
         &mut self,
         states: &crate::bucket::LayerFeatureStates,
-        changed: &mut crate::draw_cache::ChangedBuckets,
+        changed: &mut crate::layer_drawing::ChangedBuckets,
     ) {
         if let Some(contents) = self.contents.geometry_mut() {
             contents.set_feature_state(states, changed);
