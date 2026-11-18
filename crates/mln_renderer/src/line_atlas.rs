@@ -32,7 +32,7 @@ pub(crate) struct DashRange {
     pub(crate) is_zero_length: bool,
 }
 
-fn get_dash_ranges(dasharray: &[f32], stretch: f32) -> Vec<DashRange> {
+fn dash_ranges(dasharray: &[f32], stretch: f32) -> Vec<DashRange> {
     // If dasharray has an odd length, both the first and last parts are
     // dashes and should be joined seamlessly.
     let odd_dash_array = dasharray.len() % 2 == 1;
@@ -179,7 +179,7 @@ fn add_dash_pattern(
     }
 
     let stretch = image.size.width as f32 / length;
-    let mut ranges = get_dash_ranges(dasharray, stretch);
+    let mut ranges = dash_ranges(dasharray, stretch);
 
     if pattern_cap == LinePatternCap::Round {
         add_round_dash(&ranges, y_offset, stretch, i32::from(n), image);

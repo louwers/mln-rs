@@ -33,7 +33,7 @@ use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layers::render_symbol_layer::RenderSymbolLayer;
 use crate::layout::tile_layout::{Dependencies, LayoutParams, Resolved};
 use crate::paint_parameters::TransformParameters;
-use crate::render_layer::RenderLayer;
+use crate::render_layer::{LayerParts, RenderLayer};
 use crate::render_tile::RenderTile;
 use crate::text::cross_tile_symbol_index::CrossTileSymbolIndex;
 use crate::text::glyph_store::HBShapeResults;

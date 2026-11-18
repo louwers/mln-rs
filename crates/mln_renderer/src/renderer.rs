@@ -86,7 +86,6 @@ pub struct Renderer {
     /// frames.
     layer_composite: LayerComposite,
     render_state: RenderState,
-    frame_count: u64,
     /// Where the last frame drew the map.
     frame_projection: Option<FrameProjection>,
     timings: RenderTimings,
@@ -164,7 +163,6 @@ impl Renderer {
             clip_masks: ClipMasks::default(),
             layer_composite: LayerComposite::default(),
             render_state: RenderState::Never,
-            frame_count: 0,
             frame_projection: None,
             timings: RenderTimings::default(),
             events: None,
@@ -494,16 +492,12 @@ impl Renderer {
         let orchestrator = &mut *self.orchestrator;
         let mut parameters = PaintParameters::new(
             &mut self.context,
-            self.pixel_ratio,
-            frame.debug_options,
-            &frame.transform,
+            frame,
             static_data,
+            self.pixel_ratio,
             renderable_size,
             scissor_rect,
         );
-        parameters.symbol_fade_change = frame.symbol_fade_change;
-        parameters.evaluated_light = frame.light.clone();
-        parameters.opaque_pass_cutoff = frame.opaque_pass_cutoff;
 
         // - UPLOAD --------------------------------------------------------
         // The atlases first, whose textures the tiles bind, then the tiles'
@@ -542,7 +536,7 @@ impl Renderer {
             &draw_groups.composited,
         );
         parameters.layer_composite = std::mem::take(&mut self.layer_composite);
-        let atlas_size = orchestrator.atlases().pattern.get_pixel_size();
+        let atlas_size = orchestrator.atlases().pattern.pixel_size();
         let global_paint_params_ubo = GlobalPaintParamsUBO {
             pattern_atlas_texsize: [atlas_size.width as f32, atlas_size.height as f32],
             units_to_pixels: [1.0 / parameters.pixels_to_gl_units[0], 1.0 / parameters.pixels_to_gl_units[1]],
@@ -629,7 +623,6 @@ impl Renderer {
             emit(self.events.as_ref(), RendererEvent::RenderMapFinished);
         }
 
-        self.frame_count += 1;
         self.frame_projection = Some(frame_projection);
         Some(handoff)
     }

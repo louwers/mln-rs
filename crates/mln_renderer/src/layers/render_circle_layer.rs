@@ -39,7 +39,6 @@ use crate::render_layer::{
 use crate::render_pass::RenderPass;
 use crate::render_tile::RenderTile;
 use crate::tile_matrix::{get_projection_data, globe_extrude_scale, to_projection_ubo};
-use crate::update_parameters::UpdateParameters;
 
 const CIRCLE_SHADER_GROUP_NAME: &str = "CircleShader";
 
@@ -282,6 +281,24 @@ impl TypedLayer for RenderCircleLayer {
         PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
 
+    fn passes(
+        &mut self,
+        _parameters: &PropertyEvaluationParameters,
+        evaluated: &mut EvaluatedLayer<Circle>,
+    ) -> RenderPass {
+        let evaluated = &evaluated.paint;
+        if (evaluated.circle_radius.constant_or(&1.0) > 0.0 || evaluated.circle_stroke_width.constant_or(&1.0) > 0.0)
+            && (evaluated.circle_color.constant_or(&Color::black()).a > 0.0
+                || evaluated.circle_stroke_color.constant_or(&Color::black()).a > 0.0)
+            && (evaluated.circle_opacity.constant_or(&1.0) > 0.0
+                || evaluated.circle_stroke_opacity.constant_or(&1.0) > 0.0)
+        {
+            RenderPass::Translucent
+        } else {
+            RenderPass::None
+        }
+    }
+
     /// Makes the frame's draws of the layer, one of each of its tiles, which
     /// it builds for a tile it keeps none of, and writes the layer's buffers
     /// they read.
@@ -289,19 +306,12 @@ impl TypedLayer for RenderCircleLayer {
         &mut self,
         paint_parameters: &mut PaintParameters<'_>,
         _atlases: &Atlases,
-        _update_parameters: &UpdateParameters,
         source: Option<LayerSource<'_, Circle>>,
     ) {
-        let tiles = source.and_then(LayerSource::tiles);
-        let (static_data, state) = (paint_parameters.static_data, paint_parameters.state);
-        let shaders = &static_data.shaders;
-        self.update_projection_variant(state);
-
-        let Some(render_tiles) = tiles.filter(|tiles| !tiles.is_empty()) else {
-            self.remove_all_draws();
+        let Some(render_tiles) = source.and_then(LayerSource::tiles) else {
             return;
         };
-        self.drawing.frame_mut();
+        let shaders = &paint_parameters.static_data.shaders;
 
         if self.circle_shader_group.is_none() {
             self.circle_shader_group = shaders.shader_group(CIRCLE_SHADER_GROUP_NAME);
@@ -323,7 +333,7 @@ impl TypedLayer for RenderCircleLayer {
                 continue;
             };
 
-            let render_data = tile.bucket_for_pass(&*self.base.style, RENDER_PASS);
+            let render_data = tile.bucket_for_pass(RENDER_PASS);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
                 *entry.value = None;
                 continue;
@@ -389,24 +399,6 @@ impl TypedLayer for RenderCircleLayer {
 }
 
 impl RenderLayer for RenderCircleLayer {
-    fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
-        let properties = self.values.evaluate(parameters);
-        let evaluated = &properties.paint;
-
-        self.base.passes = if (evaluated.circle_radius.constant_or(&1.0) > 0.0
-            || evaluated.circle_stroke_width.constant_or(&1.0) > 0.0)
-            && (evaluated.circle_color.constant_or(&Color::black()).a > 0.0
-                || evaluated.circle_stroke_color.constant_or(&Color::black()).a > 0.0)
-            && (evaluated.circle_opacity.constant_or(&1.0) > 0.0
-                || evaluated.circle_stroke_opacity.constant_or(&1.0) > 0.0)
-        {
-            RenderPass::Translucent
-        } else {
-            RenderPass::None
-        };
-        self.values.set_evaluated(&mut self.base, properties);
-    }
-
     // query
     fn query_intersects_feature(
         &self,

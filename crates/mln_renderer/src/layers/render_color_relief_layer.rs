@@ -46,7 +46,7 @@ use crate::gfx::index_vector::{IndexVector, IndexVectorPtr};
 use crate::gfx::texture2d::OwnedTexture;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_drawing::{DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptDraw, TileDraws, TileObjects};
-use crate::layer_type::LayerType;
+use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{
@@ -55,7 +55,6 @@ use crate::render_layer::{
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::tile_matrix::to_projection_ubo;
-use crate::update_parameters::UpdateParameters;
 
 const COLOR_RELIEF_SHADER_GROUP_NAME: &str = "ColorReliefShader";
 
@@ -298,6 +297,44 @@ impl TypedLayer for RenderColorReliefLayer {
         PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
 
+    /// Drops the shader of the last projection, and the globe's meshes
+    /// when the frame isn't on the globe.
+    fn projection_changed(&mut self) {
+        self.color_relief_shader = None;
+        if self.base.projection_variant == ProjectionVariant::Mercator {
+            self.globe_meshes.clear();
+        }
+    }
+
+    fn passes(
+        &mut self,
+        parameters: &PropertyEvaluationParameters,
+        evaluated: &mut EvaluatedLayer<ColorRelief>,
+    ) -> RenderPass {
+        // Build the ramp here rather than in transition(), which has no global
+        // state. A new or changed layer always needs one; otherwise only a
+        // change to a state key that the ramp reads does.
+        let global_state_differs = match (&self.color_ramp_global_state, &parameters.global_state) {
+            (None, None) => false,
+            (Some(a), Some(b)) => !Arc::ptr_eq(a, b),
+            _ => true,
+        };
+        let ramp_value = self.values.unevaluated.color_relief_color.get_value();
+        let ramp_affected = parameters.layer_changed
+            || (global_state_differs
+                && ramp_value.get_dependencies().intersects(Dependency::GLOBAL_STATE)
+                && global_state_refs_intersect(
+                    ramp_value.get_global_state_refs(),
+                    parameters.changed_global_state_keys.as_deref(),
+                ));
+        self.color_ramp_global_state = parameters.global_state.clone();
+        if ramp_affected {
+            self.update_color_ramp();
+        }
+
+        if *evaluated.paint.color_relief_opacity.uniform() > 0.0 { RenderPass::Translucent } else { RenderPass::None }
+    }
+
     /// Makes the frame's draws of the layer, those of each of its tiles,
     /// which it builds for a tile it keeps none of, and writes the layer's
     /// buffers they read.
@@ -305,23 +342,12 @@ impl TypedLayer for RenderColorReliefLayer {
         &mut self,
         paint_parameters: &mut PaintParameters<'_>,
         _atlases: &Atlases,
-        _update_parameters: &UpdateParameters,
         source: Option<LayerSource<'_, ColorRelief>>,
     ) {
-        let tiles = source.and_then(LayerSource::tiles);
-        let (static_data, state) = (paint_parameters.static_data, paint_parameters.state);
-        let shaders = &static_data.shaders;
-        if self.update_projection_variant(state) {
-            self.color_relief_shader = None;
-            if self.base.projection_variant == ProjectionVariant::Mercator {
-                self.globe_meshes.clear();
-            }
-        }
-        let Some(render_tiles) = tiles.filter(|tiles| !tiles.is_empty()) else {
-            self.remove_all_draws();
+        let Some(render_tiles) = source.and_then(LayerSource::tiles) else {
             return;
         };
-        self.drawing.frame_mut();
+        let shaders = &paint_parameters.static_data.shaders;
 
         if self.color_relief_shader.is_none() {
             self.color_relief_shader = shaders.shader(COLOR_RELIEF_SHADER_GROUP_NAME, self.base.projection_variant);
@@ -547,36 +573,4 @@ impl TypedLayer for RenderColorReliefLayer {
     }
 }
 
-impl RenderLayer for RenderColorReliefLayer {
-    fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
-        // Build the ramp here rather than in transition(), which has no global
-        // state. A new or changed layer always needs one; otherwise only a
-        // change to a state key that the ramp reads does.
-        let global_state_differs = match (&self.color_ramp_global_state, &parameters.global_state) {
-            (None, None) => false,
-            (Some(a), Some(b)) => !Arc::ptr_eq(a, b),
-            _ => true,
-        };
-        let ramp_value = self.values.unevaluated.color_relief_color.get_value();
-        let ramp_affected = parameters.layer_changed
-            || (global_state_differs
-                && ramp_value.get_dependencies().intersects(Dependency::GLOBAL_STATE)
-                && global_state_refs_intersect(
-                    ramp_value.get_global_state_refs(),
-                    parameters.changed_global_state_keys.as_deref(),
-                ));
-        self.color_ramp_global_state = parameters.global_state.clone();
-        if ramp_affected {
-            self.update_color_ramp();
-        }
-
-        let properties = self.values.evaluate(parameters);
-
-        self.base.passes = if *properties.paint.color_relief_opacity.uniform() > 0.0 {
-            RenderPass::Translucent
-        } else {
-            RenderPass::None
-        };
-        self.values.set_evaluated(&mut self.base, properties);
-    }
-}
+impl RenderLayer for RenderColorReliefLayer {}

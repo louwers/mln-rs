@@ -30,10 +30,10 @@ use crate::buckets::raster_bucket::RasterBucket;
 use crate::geometry::feature_index::{FeatureIndex, QueryLayers, QueryResults};
 use crate::gfx::dynamic_texture_atlas::{AtlasLease, BinUse, DynamicTextureAtlas};
 use crate::layer_drawing::{BucketChanges, ChangedBuckets};
-use crate::layer_type::ErasedEvaluatedLayer;
+use crate::layer_type::{ErasedEvaluatedLayer, LayerType};
 use crate::layout::tile_layout::{Dependencies, Resolved};
 use crate::query::{RenderedQueryOptions, SourceQueryOptions};
-use crate::render_layer::ErasedLayerBucket;
+use crate::render_layer::{ErasedLayerBucket, LayerBucket};
 use crate::render_orchestrator::drop_on_workers;
 use crate::source_state::SourceFeatureState;
 use crate::text::glyph_store::HBShapeResults;
@@ -185,6 +185,13 @@ impl LayoutResult {
             return None;
         }
         Some(result)
+    }
+
+    /// The bucket of the layer `layer_id`, if it was laid out as a layer of
+    /// the type `T`: the layer type's glue recovers its own bucket here.
+    #[inline]
+    pub(crate) fn typed_bucket<T: LayerType>(&self, layer_id: &str) -> Option<LayerBucket<'_, T>> {
+        self.layer_render_data.get(layer_id)?.recover()
     }
 
     /// Brings the buckets' feature state to `states`, for the features of
@@ -557,7 +564,7 @@ impl Contents {
         }
     }
 
-    pub(crate) fn get_pattern(&self, pattern: &str) -> Option<ImagePosition> {
+    pub(crate) fn pattern(&self, pattern: &str) -> Option<ImagePosition> {
         self.geometry()?.pattern_positions()?.get(pattern).cloned()
     }
 

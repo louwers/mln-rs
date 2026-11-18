@@ -52,7 +52,6 @@ use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_tile::FrameTile;
 use crate::tile_matrix::{get_projection_data, to_projection_ubo};
-use crate::update_parameters::UpdateParameters;
 
 const FILL_SHADER_NAME: &str = "FillShader";
 const FILL_OUTLINE_SHADER_NAME: &str = "FillOutlineShader";
@@ -581,6 +580,32 @@ impl TypedLayer for RenderFillLayer {
         PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
 
+    /// The passes: the translucent one where the layer shows, and the
+    /// opaque one too where its fill is opaque, for the layers below the
+    /// frame's opaque pass cutoff. An undefined outline color is the fill
+    /// color.
+    fn passes(
+        &mut self,
+        _parameters: &PropertyEvaluationParameters,
+        evaluated: &mut EvaluatedLayer<Fill>,
+    ) -> RenderPass {
+        let evaluated = &mut evaluated.paint;
+        if self.values.unevaluated.fill_outline_color.is_undefined() {
+            evaluated.fill_outline_color = evaluated.fill_color.clone();
+        }
+        let opaque = self.values.unevaluated.fill_pattern.is_undefined()
+            && evaluated.fill_color.constant_or(&Color::default()).a >= 1.0
+            && evaluated.fill_opacity.constant_or(&0.0) >= 1.0;
+        let shows = *evaluated.fill_layer_opacity.uniform() > 0.0;
+        if shows && opaque {
+            RenderPass::Translucent | RenderPass::Opaque
+        } else if shows {
+            RenderPass::Translucent
+        } else {
+            RenderPass::None
+        }
+    }
+
     /// Makes the frame's draws of the layer, those of each of its tiles,
     /// which it builds for a tile it keeps none of, and writes the layer's
     /// buffers they read.
@@ -588,18 +613,12 @@ impl TypedLayer for RenderFillLayer {
         &mut self,
         paint_parameters: &mut PaintParameters<'_>,
         _atlases: &Atlases,
-        _update_parameters: &UpdateParameters,
         source: Option<LayerSource<'_, Fill>>,
     ) {
-        let tiles = source.and_then(LayerSource::tiles);
-        let (static_data, state) = (paint_parameters.static_data, paint_parameters.state);
-        let shaders = &static_data.shaders;
-        let Some(render_tiles) = tiles.filter(|tiles| !tiles.is_empty()) else {
-            self.remove_all_draws();
+        let Some(render_tiles) = source.and_then(LayerSource::tiles) else {
             return;
         };
-
-        self.update_projection_variant(state);
+        let shaders = &paint_parameters.static_data.shaders;
 
         let outline_quads = draws_outline_quads(paint_parameters.context);
         let pattern = !self.values.unevaluated.fill_pattern.is_undefined();
@@ -647,7 +666,7 @@ impl TypedLayer for RenderFillLayer {
                 continue;
             };
 
-            let render_data = tile.bucket_for_pass(&*self.base.style, RENDER_PASS);
+            let render_data = tile.bucket_for_pass(RENDER_PASS);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
                 *entry.value = None;
                 continue;
@@ -731,28 +750,6 @@ impl TypedLayer for RenderFillLayer {
 }
 
 impl RenderLayer for RenderFillLayer {
-    fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
-        let mut properties = self.values.evaluate(parameters);
-        let evaluated = &mut properties.paint;
-
-        if self.values.unevaluated.fill_outline_color.is_undefined() {
-            evaluated.fill_outline_color = evaluated.fill_color.clone();
-        }
-
-        self.base.passes =
-            if *evaluated.fill_layer_opacity.uniform() > 0.0 { RenderPass::Translucent } else { RenderPass::None };
-
-        if self.base.passes != RenderPass::None
-            && self.values.unevaluated.fill_pattern.is_undefined()
-            && evaluated.fill_color.constant_or(&Color::default()).a >= 1.0
-            && evaluated.fill_opacity.constant_or(&0.0) >= 1.0
-        {
-            // Supply both - evaluated based on opaquePassCutoff in render().
-            self.base.passes |= RenderPass::Opaque;
-        }
-        self.values.set_evaluated(&mut self.base, properties);
-    }
-
     // query
     fn query_intersects_feature(
         &self,

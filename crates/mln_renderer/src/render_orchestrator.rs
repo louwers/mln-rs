@@ -371,7 +371,7 @@ impl RenderOrchestrator {
         // placement change, which the draws that copied it copy again.
         let mut changed_buckets = ChangedBuckets::default();
         self.prepare_sources(&frame, &mut changed_buckets);
-        let placed = self.update_layer_tiles(&mut frame);
+        let placed = self.update_layer_tiles(update_parameters, &mut frame);
 
         frame.symbols_started = Instant::now();
         let update_symbol_opacities = self.place_symbols(update_parameters, &placed.leaders, &mut frame);
@@ -453,7 +453,7 @@ impl RenderOrchestrator {
     /// Gives each layer of the frame its tiles, in the order it draws them,
     /// and sets the frame's opaque pass cutoff. Returns the layers that
     /// place symbols and those that draw symbols another layer places.
-    fn update_layer_tiles(&mut self, frame: &mut Frame) -> PlacementLayers {
+    fn update_layer_tiles(&mut self, update_parameters: &UpdateParameters, frame: &mut Frame) -> PlacementLayers {
         let mut placed = PlacementLayers::default();
         let mut opaque_pass_cutoff_estimation = frame.layers.len();
         let mut contents = SourceContents::default();
@@ -465,6 +465,8 @@ impl RenderOrchestrator {
             let source_contents = contents.of(source, &self.tile_store);
             let source = source.map(|(_, source)| source);
             frame_layer.tile_order = render_layer.update(&mut LayerUpdateParameters {
+                state: &frame.transform.state,
+                update_parameters,
                 source,
                 contents: source_contents,
                 images: self.tile_store.images(),
@@ -808,7 +810,6 @@ impl RenderOrchestrator {
             font_faces: update_parameters.style.get_font_faces().cloned(),
         };
 
-        // Reserve size for filteredLayersForSource if there are sources.
         if !self.sources_by_id.is_empty() {
             self.filtered_layers_for_source.reserve(layers.len());
         }
@@ -976,16 +977,12 @@ impl RenderOrchestrator {
             let tilted_view = update_parameters.transform_state.get_pitch() != 0.0;
             let mut placement_update_period_override: Option<Duration> = None;
             if symbol_buckets_added && !tilted_view {
-                // If the view is not tilted, we want *the new* symbols to
-                // show up faster, however simple setting `placementChanged`
-                // to `true` would initiate placement too often as new
-                // buckets usually come from several rendered tiles in a row
-                // within a short period of time. Instead, we squeeze
-                // placement update period to coalesce buckets updates from
-                // several tiles. On contrary, with the tilted view it's more
-                // important to make placement rarely for performance reasons
-                // and as the new symbols are normally "far away" and the
-                // user is not that interested to see them ASAP.
+                // In a flat view, new symbols show soon: placement runs
+                // within a short period rather than at once, since new
+                // buckets usually come from several tiles in a row, and the
+                // short period places them together. A tilted view places
+                // less often, for speed: its new symbols are mostly far
+                // away.
                 placement_update_period_override = Some(Duration::from_millis(30));
             }
 
@@ -1255,10 +1252,10 @@ impl RenderOrchestrator {
                     Some(order) => {
                         Some(LayerSource::Tiles(LayerTiles::new(source.render_tiles(), source_contents, order)))
                     }
-                    None => source.get_image_render_data().map(LayerSource::Image),
+                    None => source.image_render_data().map(LayerSource::Image),
                 }
             });
-            render_layer.update_draws(paint_parameters, &self.atlases, update_parameters, layer_source);
+            render_layer.update_draws(paint_parameters, &self.atlases, layer_source);
             has_3d = has_3d || render_layer.needs_globe_depth();
         }
         let (static_data, state) = (paint_parameters.static_data, paint_parameters.state);
@@ -1565,7 +1562,7 @@ impl<'a> SourceContents<'a> {
             self.source = Some(id);
             self.contents.clear();
             let tiles = source.tiles().and_then(|key| store.source(key));
-            let contents_of = |tile: &RenderTile| tiles?.contents_at(tile.get_overscaled_tile_id(), tile.slot());
+            let contents_of = |tile: &RenderTile| tiles?.contents_at(tile.overscaled_tile_id(), tile.slot());
             self.contents.extend(source.render_tiles().iter().map(contents_of));
         }
         &self.contents

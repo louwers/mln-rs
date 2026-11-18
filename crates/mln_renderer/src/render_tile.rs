@@ -6,12 +6,10 @@
 // tile's slot and id (`FrameTile`); the store changes them only in the
 // frame's update, before the layers read them.
 
-use std::marker::PhantomData;
 use std::sync::Arc;
 
 use glam::Vec2;
 use mln_map_types::{MapDebugOptions, ProjectionData, TransformState};
-use mln_style::layer_type::ErasedLayerStyle;
 use mln_style_types::TranslateAnchorType;
 use mln_style_types::image::ImagePosition;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
@@ -24,7 +22,7 @@ use crate::buckets::raster_bucket::RasterBucket;
 use crate::geometry::feature_index::FeatureIndex;
 use crate::layer_type::LayerType;
 use crate::paint_parameters::TransformParameters;
-use crate::render_layer::{Erased, LayerBucket};
+use crate::render_layer::LayerBucket;
 use crate::render_pass::RenderPass;
 use crate::render_source::SourcePrepareParameters;
 use crate::tile::contents::Contents;
@@ -88,7 +86,7 @@ impl RenderTile {
     }
 
     #[must_use]
-    pub(crate) fn get_overscaled_tile_id(&self) -> &OverscaledTileID {
+    pub(crate) fn overscaled_tile_id(&self) -> &OverscaledTileID {
         &self.tile_id
     }
 
@@ -105,7 +103,7 @@ impl RenderTile {
     }
 
     #[must_use]
-    pub(crate) fn get_needs_rendering(&self) -> bool {
+    pub(crate) fn needs_rendering(&self) -> bool {
         self.needs_rendering
     }
 
@@ -150,44 +148,46 @@ impl RenderTile {
 }
 
 /// A render tile of a frame, with what its tile shows, as a layer of the
-/// type `T` sees it.
-pub(crate) struct FrameTile<'a, T = Erased> {
+/// type `T` sees it: with the layer's bucket in the tile's layout.
+pub(crate) struct FrameTile<'a, T: LayerType> {
     pub(crate) tile: &'a RenderTile,
     contents: Option<&'a Contents>,
-    layer_type: PhantomData<fn() -> T>,
+    bucket: Option<LayerBucket<'a, T>>,
 }
 
-impl<T> Clone for FrameTile<'_, T> {
+impl<T: LayerType> Clone for FrameTile<'_, T> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<T> Copy for FrameTile<'_, T> {}
+impl<T: LayerType> Copy for FrameTile<'_, T> {}
 
 impl<'a, T: LayerType> FrameTile<'a, T> {
-    /// The bucket of `style`'s layer in the tile's layout, if it was laid
-    /// out as a layer of the same type.
-    pub(crate) fn bucket(self, style: &dyn ErasedLayerStyle) -> Option<LayerBucket<'a, T>> {
-        self.contents?.geometry()?.result.layer_bucket(style)?.recover()
+    /// The tile `tile`, which shows `contents`, as the layer `layer_id`
+    /// sees it.
+    #[must_use]
+    pub(crate) fn new(tile: &'a RenderTile, contents: Option<&'a Contents>, layer_id: &str) -> Self {
+        let bucket =
+            contents.and_then(Contents::geometry).and_then(|geometry| geometry.result.typed_bucket::<T>(layer_id));
+        FrameTile { tile, contents, bucket }
+    }
+
+    /// The layer's bucket in the tile's layout, if the tile laid the layer
+    /// out as a layer of its type.
+    pub(crate) fn bucket(self) -> Option<LayerBucket<'a, T>> {
+        self.bucket
     }
 
     /// [`bucket`](Self::bucket), if it was laid out to draw in `pass`.
-    pub(crate) fn bucket_for_pass(self, style: &dyn ErasedLayerStyle, pass: RenderPass) -> Option<LayerBucket<'a, T>> {
-        self.bucket(style).filter(|bucket| bucket.layer.render_passes & pass.underlying_type() != 0)
-    }
-}
-
-impl<'a, T> FrameTile<'a, T> {
-    #[must_use]
-    pub(crate) fn new(tile: &'a RenderTile, contents: Option<&'a Contents>) -> Self {
-        FrameTile { tile, contents, layer_type: PhantomData }
+    pub(crate) fn bucket_for_pass(self, pass: RenderPass) -> Option<LayerBucket<'a, T>> {
+        self.bucket.filter(|bucket| bucket.layer.render_passes & pass.underlying_type() != 0)
     }
 
     /// The tile's id.
     #[must_use]
     pub(crate) fn id(self) -> OverscaledTileID {
-        *self.tile.get_overscaled_tile_id()
+        *self.tile.overscaled_tile_id()
     }
 
     /// A raster tile's image.
@@ -208,7 +208,7 @@ impl<'a, T> FrameTile<'a, T> {
         }
     }
 
-    /// symbols: the feature index of the tile's layout.
+    /// The feature index of the tile's layout.
     #[must_use]
     pub(crate) fn feature_index(self) -> Option<&'a Arc<FeatureIndex>> {
         self.contents?.geometry().map(|contents| &contents.result.feature_index)
@@ -224,7 +224,7 @@ impl<'a, T> FrameTile<'a, T> {
     /// Where the pattern `pattern` is in the tile's icon atlas.
     #[must_use]
     pub(crate) fn pattern(self, pattern: &str) -> Option<ImagePosition> {
-        self.contents?.get_pattern(pattern)
+        self.contents?.pattern(pattern)
     }
 
     /// The textures of the tile's glyph and icon atlases.

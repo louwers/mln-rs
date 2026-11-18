@@ -74,7 +74,6 @@ use crate::render_pass::RenderPass;
 use crate::render_source::TileOrder;
 use crate::render_tile::{FrameTile, RenderTile};
 use crate::tile_matrix::{get_projection_data, to_projection_ubo};
-use crate::update_parameters::UpdateParameters;
 
 const SYMBOL_ICON_SHADER_NAME: &str = "SymbolIconShader";
 const SYMBOL_SDF_SHADER_NAME: &str = "SymbolSDFShader";
@@ -151,7 +150,7 @@ pub(crate) fn text_property_values(
 }
 
 /// The tile matrix of screen-space symbols.
-pub(crate) fn get_screen_matrix(translation: [f32; 2]) -> Mat4 {
+pub(crate) fn screen_matrix(translation: [f32; 2]) -> Mat4 {
     let mut m: Mat4 = [0.0; 16];
     matrix::ortho(&mut m, 0.0, f64::from(EXTENT), -f64::from(EXTENT), 0.0, 0.0, 1.0);
     let a = m;
@@ -709,7 +708,7 @@ pub(crate) struct RenderSymbolLayer {
     collision_circle_group: Option<ShaderGroupPtr>,
     /// The passes the layer's draws were built for.
     draws_passes: RenderPass,
-    /// bench: the indexes of the buckets `HeldBuckets` holds for the layer.
+    /// The indexes of the buckets `HeldBuckets` holds for the layer.
     #[cfg(feature = "bench")]
     held: Vec<usize>,
 }
@@ -793,7 +792,7 @@ impl RenderSymbolLayer {
         }
     }
 
-    /// bench: [`add_bucket`](Self::add_bucket) of the bucket that
+    /// [`add_bucket`](Self::add_bucket) of the bucket that
     /// `HeldBuckets` holds at `bucket` ([`crate::bucket::recover`]), of the
     /// tile at `tile_index` of `tiles`. The layer frees the bucket when it
     /// drops.
@@ -814,7 +813,7 @@ impl RenderSymbolLayer {
         let key = BucketKey {
             bucket,
             slot: tile.slot(),
-            tile: *tile.get_overscaled_tile_id(),
+            tile: *tile.overscaled_tile_id(),
             source: crate::tile::job::SourceKey(0),
         };
         let held = HeldBuckets::take();
@@ -909,7 +908,7 @@ impl RenderSymbolLayer {
                 return;
             }
             let geometry = DrawGeometry {
-                vertices: get_collision_vertex_attributes(buffer),
+                vertices: collision_vertex_attributes(buffer),
                 vertex_count: buffer.vertices.len(),
                 mode,
                 indexes: released_indexes(&buffer.indices),
@@ -973,7 +972,7 @@ impl RenderSymbolLayer {
         let translate = if is_text { &evaluated.text_translate } else { &evaluated.icon_translate };
         let anchor = if is_text { &evaluated.text_translate_anchor } else { &evaluated.icon_translate_anchor };
         let mut projection: ProjectionData = if is_screen_space {
-            Projection::Mercator.get_projection_data(state, &tile_id, &get_screen_matrix(*translate.uniform()))
+            Projection::Mercator.get_projection_data(state, &tile_id, &screen_matrix(*translate.uniform()))
         } else {
             const NEAR_CLIPPED: bool = false;
             const IN_VIEWPORT_PIXEL_UNITS: bool = false;
@@ -1099,7 +1098,7 @@ impl RenderSymbolLayer {
             let Some(cached) = self.drawing.tiles.get_mut(&tile_id) else {
                 continue;
             };
-            let bucket = tile.bucket(&*self.base.style).map(|bucket| bucket.bucket);
+            let bucket = tile.bucket().map(|bucket| bucket.bucket);
             debug_assert!(bucket.is_some() || cached.draws.is_empty());
             for (index, draw) in cached.draws.iter().enumerate().filter(|(_, draw)| draw.visible) {
                 let Some(uniforms) =
@@ -1197,7 +1196,7 @@ fn write_collision_uniforms(
     buffers.create_or_update_pod(ID_COLLISION_PROJECTION_UBO, &to_projection_ubo(&projection), context);
 }
 
-fn get_collision_vertex_attributes(buffer: &CollisionBuffer) -> VertexAttributeArray {
+fn collision_vertex_attributes(buffer: &CollisionBuffer) -> VertexAttributeArray {
     let mut attrs = VertexAttributeArray::new();
     let layout_stride = size_of::<CollisionBoxLayoutVertex>() as u32;
     let layout = shared_vertices(&buffer.vertices);
@@ -1240,6 +1239,35 @@ impl TypedLayer for RenderSymbolLayer {
         PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
 
+    fn passes(
+        &mut self,
+        parameters: &PropertyEvaluationParameters,
+        evaluated: &mut EvaluatedLayer<Symbol>,
+    ) -> RenderPass {
+        if SymbolLayerPaintPropertyOverrides::has_overrides(&self.values.style.layout.text_field) {
+            mln_style::format_section_override::set_overrides(
+                &self.values.style.layout,
+                &mut evaluated.paint,
+                &self.values.unevaluated,
+                &parameters.global_state,
+            );
+        }
+
+        let evaluated = &evaluated.paint;
+        let has_icon_opacity = evaluated.icon_color.constant_or(&SymbolPaintProperties::Defaults::icon_color()).a > 0.0
+            || evaluated.icon_halo_color.constant_or(&SymbolPaintProperties::Defaults::icon_halo_color()).a > 0.0;
+        let has_text_opacity = evaluated.text_color.constant_or(&SymbolPaintProperties::Defaults::text_color()).a > 0.0
+            || evaluated.text_halo_color.constant_or(&SymbolPaintProperties::Defaults::text_halo_color()).a > 0.0;
+
+        if (evaluated.icon_opacity.constant_or(&1.0) > 0.0 && has_icon_opacity && self.icon_size > 0.0)
+            || (evaluated.text_opacity.constant_or(&1.0) > 0.0 && has_text_opacity && self.text_size > 0.0)
+        {
+            RenderPass::Translucent
+        } else {
+            RenderPass::None
+        }
+    }
+
     /// Makes the frame's draws of the layer: those of each of its tiles,
     /// which it builds for a tile it keeps none of and refreshes where the
     /// tile's bucket changed, and the collision boxes and circles it draws
@@ -1248,7 +1276,6 @@ impl TypedLayer for RenderSymbolLayer {
         &mut self,
         paint_parameters: &mut PaintParameters<'_>,
         _atlases: &Atlases,
-        _update_parameters: &UpdateParameters,
         source: Option<LayerSource<'_, Symbol>>,
     ) {
         /// The atlases' textures given to one tile's draws.
@@ -1258,18 +1285,12 @@ impl TypedLayer for RenderSymbolLayer {
             icon: Option<Rc<AtlasBinding>>,
         }
 
-        let (static_data, transform) = (paint_parameters.static_data, paint_parameters.state);
-        let shaders = &static_data.shaders;
-        self.update_projection_variant(transform);
-        let passes = self.base.passes;
-        let Some(render_tiles) = source.and_then(LayerSource::tiles).filter(|tiles| !tiles.is_empty()) else {
-            self.remove_all_draws();
+        let Some(render_tiles) = source.and_then(LayerSource::tiles) else {
             return;
         };
-        if passes == RenderPass::None {
-            self.remove_all_draws();
-            return;
-        }
+        let (static_data, transform) = (paint_parameters.static_data, paint_parameters.state);
+        let shaders = &static_data.shaders;
+        let passes = self.base.passes;
         if passes != self.draws_passes {
             self.remove_all_draws();
             self.draws_passes = passes;
@@ -1319,7 +1340,7 @@ impl TypedLayer for RenderSymbolLayer {
             let Some(mut entry) = self.drawing.tiles.entry(&tile_id) else {
                 continue;
             };
-            let render_data = tile.bucket_for_pass(&*style, passes);
+            let render_data = tile.bucket_for_pass(passes);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
                 *entry.value = None;
                 continue;
@@ -1436,7 +1457,7 @@ impl TypedLayer for RenderSymbolLayer {
                 continue;
             };
             let tile_id = tile.tile.id.overscale_to(group.overscaled_z);
-            let Some(render_data) = tile.bucket_for_pass(&*style, passes) else {
+            let Some(render_data) = tile.bucket_for_pass(passes) else {
                 continue;
             };
             let bucket = render_data.bucket;
@@ -1601,7 +1622,7 @@ impl TypedLayer for RenderSymbolLayer {
         };
         let translates = self.symbol_translates();
         for tile in tiles.iter() {
-            let Some(bucket) = tile.bucket(&*self.base.style) else {
+            let Some(bucket) = tile.bucket() else {
                 continue;
             };
             let key = BucketKey { source, tile: tile.id(), slot: tile.tile.slot(), bucket: bucket.bucket_index };
@@ -1616,35 +1637,6 @@ impl TypedLayer for RenderSymbolLayer {
 }
 
 impl RenderLayer for RenderSymbolLayer {
-    fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
-        let mut properties = self.values.evaluate(parameters);
-
-        if SymbolLayerPaintPropertyOverrides::has_overrides(&self.values.style.layout.text_field) {
-            mln_style::format_section_override::set_overrides(
-                &self.values.style.layout,
-                &mut properties.paint,
-                &self.values.unevaluated,
-                &parameters.global_state,
-            );
-        }
-
-        let evaluated = &properties.paint;
-        let has_icon_opacity = evaluated.icon_color.constant_or(&SymbolPaintProperties::Defaults::icon_color()).a > 0.0
-            || evaluated.icon_halo_color.constant_or(&SymbolPaintProperties::Defaults::icon_halo_color()).a > 0.0;
-        let has_text_opacity = evaluated.text_color.constant_or(&SymbolPaintProperties::Defaults::text_color()).a > 0.0
-            || evaluated.text_halo_color.constant_or(&SymbolPaintProperties::Defaults::text_halo_color()).a > 0.0;
-
-        self.base.passes =
-            if (evaluated.icon_opacity.constant_or(&1.0) > 0.0 && has_icon_opacity && self.icon_size > 0.0)
-                || (evaluated.text_opacity.constant_or(&1.0) > 0.0 && has_text_opacity && self.text_size > 0.0)
-            {
-                RenderPass::Translucent
-            } else {
-                RenderPass::None
-            };
-        self.values.set_evaluated(&mut self.base, properties);
-    }
-
     fn placement_data(&self) -> &[BucketPlacementData] {
         &self.placement_data
     }

@@ -1,6 +1,7 @@
-// The layer keeps one texture per bucket id (`textures`): buckets are Send,
-// and textures are render-thread `Rc`s. A tile's draw stays until the
-// bucket's masked geometry changes, and is then built again.
+// The layer keeps one texture per bucket id (`textures`), in the context's
+// store: buckets are Send and cross from the workers without one. A tile's
+// draw stays until the bucket's masked geometry changes, and is then built
+// again.
 
 use std::rc::Rc;
 use std::sync::Arc;
@@ -39,17 +40,16 @@ use crate::layer_composite::Composite;
 use crate::layer_drawing::{
     DrawGroup, DrawList, DrawObjectsMut, DrawOrder, FrameDraw, KeptDraw, LayerDrawing, LayerDraws, TileMap,
 };
-use crate::layer_type::LayerType;
+use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{
-    Atlases, LayerParts, LayerSource, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
+    Atlases, LayerSource, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
 };
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::sources::render_image_source::ImageSourceRenderData;
 use crate::tile_matrix::{get_projection_data, to_projection_ubo};
-use crate::update_parameters::UpdateParameters;
 
 /// What the layer keeps of a tile: its draw, and when the draw was built.
 pub(crate) struct RasterTile {
@@ -397,6 +397,23 @@ impl TypedLayer for RenderRasterLayer {
         PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
 
+    /// Drops the shader of the last projection, and the globe's meshes
+    /// when the frame isn't on the globe.
+    fn projection_changed(&mut self) {
+        self.raster_shader = None;
+        if self.base.projection_variant == ProjectionVariant::Mercator {
+            self.globe_meshes.clear();
+        }
+    }
+
+    fn passes(
+        &mut self,
+        _parameters: &PropertyEvaluationParameters,
+        evaluated: &mut EvaluatedLayer<Raster>,
+    ) -> RenderPass {
+        if *evaluated.paint.raster_opacity.uniform() > 0.0 { RenderPass::Translucent } else { RenderPass::None }
+    }
+
     /// Makes the frame's draws of the layer: those of an image source's
     /// image, or one of each of its tiles, which it builds for a tile it
     /// keeps none of or whose bucket's geometry changed since, and writes
@@ -405,25 +422,12 @@ impl TypedLayer for RenderRasterLayer {
         &mut self,
         paint_parameters: &mut PaintParameters<'_>,
         _atlases: &Atlases,
-        _update_parameters: &UpdateParameters,
         source: Option<LayerSource<'_, Raster>>,
     ) {
-        let (static_data, state) = (paint_parameters.static_data, paint_parameters.state);
-        let shaders = &static_data.shaders;
-        if self.update_projection_variant(state) {
-            self.raster_shader = None;
-            if self.base.projection_variant == ProjectionVariant::Mercator {
-                self.globe_meshes.clear();
-            }
-        }
-        let render_tiles = source.and_then(LayerSource::tiles).filter(|tiles| !tiles.is_empty());
-        let image_data = source.and_then(LayerSource::image);
-        if render_tiles.is_none() && image_data.is_none() {
-            self.remove_all_draws();
-            self.textures.clear();
+        let Some(source) = source else {
             return;
-        }
-
+        };
+        let shaders = &paint_parameters.static_data.shaders;
         if self.raster_shader.is_none() {
             self.raster_shader = shaders.shader("RasterShader", self.base.projection_variant);
         }
@@ -431,12 +435,12 @@ impl TypedLayer for RenderRasterLayer {
             return;
         };
 
-        if let Some(image_data) = image_data {
-            self.update_image(&raster_shader, image_data, paint_parameters);
-            return;
-        }
-        let Some(render_tiles) = render_tiles else {
-            return;
+        let render_tiles = match source {
+            LayerSource::Tiles(tiles) => tiles,
+            LayerSource::Image(image) => {
+                self.update_image(&raster_shader, image, paint_parameters);
+                return;
+            }
         };
         self.drawing.frame.get_or_insert_default();
 
@@ -539,12 +543,4 @@ impl TypedLayer for RenderRasterLayer {
     }
 }
 
-impl RenderLayer for RenderRasterLayer {
-    fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
-        let properties = self.values.evaluate(parameters);
-
-        self.base.passes =
-            if *properties.paint.raster_opacity.uniform() > 0.0 { RenderPass::Translucent } else { RenderPass::None };
-        self.values.set_evaluated(&mut self.base, properties);
-    }
-}
+impl RenderLayer for RenderRasterLayer {}

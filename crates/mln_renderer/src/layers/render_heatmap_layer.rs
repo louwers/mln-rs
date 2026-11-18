@@ -60,7 +60,6 @@ use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_target::RenderTarget;
 use crate::tile_matrix::{bind_no_projection, get_projection_data, globe_extrude_scale, to_projection_ubo};
-use crate::update_parameters::UpdateParameters;
 
 fn read_heatmap_attributes(
     attrs: &mut VertexAttributeArray,
@@ -261,40 +260,11 @@ impl TypedLayer for RenderHeatmapLayer {
         PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
 
-    /// Makes the tiles' draws into the render target, which it builds for a
-    /// tile it keeps none of, and the layer's draw of the frame, which colors
-    /// the render target's heat onto it, and writes the buffers they read.
-    fn update_draws(
+    fn passes(
         &mut self,
-        paint_parameters: &mut PaintParameters<'_>,
-        _atlases: &Atlases,
-        _update_parameters: &UpdateParameters,
-        source: Option<LayerSource<'_, Heatmap>>,
-    ) {
-        let tiles = source.and_then(LayerSource::tiles);
-        let (static_data, state) = (paint_parameters.static_data, paint_parameters.state);
-        let shaders = &static_data.shaders;
-        self.update_projection_variant(state);
-        let Some(render_tiles) = tiles.filter(|tiles| !tiles.is_empty()) else {
-            self.remove_all_draws();
-            return;
-        };
-
-        let viewport_size = state.get_size();
-        let size = Size::new(viewport_size.width / 2, viewport_size.height / 2);
-        let render_target = self.render_target.get_or_insert_with(|| {
-            RenderTarget::new(paint_parameters.context, size, TextureChannelDataType::HalfFloat)
-        });
-        render_target.set_size(paint_parameters.context, size);
-        let render_target_texture = render_target.texture();
-        if self.draw_tiles(shaders, render_tiles, paint_parameters) {
-            self.draw_texture(shaders, render_target_texture, paint_parameters);
-        }
-    }
-}
-
-impl RenderLayer for RenderHeatmapLayer {
-    fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
+        parameters: &PropertyEvaluationParameters,
+        evaluated: &mut EvaluatedLayer<Heatmap>,
+    ) -> RenderPass {
         // Build the ramp here rather than in transition(), which has no global
         // state. A new or changed layer always needs one; otherwise only a
         // change to a state key that the ramp reads does.
@@ -316,16 +286,42 @@ impl RenderLayer for RenderHeatmapLayer {
             self.update_color_ramp();
         }
 
-        let properties = self.values.evaluate(parameters);
-
-        self.base.passes = if *properties.paint.heatmap_opacity.uniform() > 0.0 {
+        if *evaluated.paint.heatmap_opacity.uniform() > 0.0 {
             RenderPass::Translucent | RenderPass::Pass3D
         } else {
             RenderPass::None
-        };
-        self.values.set_evaluated(&mut self.base, properties);
+        }
     }
 
+    /// Makes the tiles' draws into the render target, which it builds for a
+    /// tile it keeps none of, and the layer's draw of the frame, which colors
+    /// the render target's heat onto it, and writes the buffers they read.
+    fn update_draws(
+        &mut self,
+        paint_parameters: &mut PaintParameters<'_>,
+        _atlases: &Atlases,
+        source: Option<LayerSource<'_, Heatmap>>,
+    ) {
+        let Some(render_tiles) = source.and_then(LayerSource::tiles) else {
+            return;
+        };
+        let (static_data, state) = (paint_parameters.static_data, paint_parameters.state);
+        let shaders = &static_data.shaders;
+
+        let viewport_size = state.get_size();
+        let size = Size::new(viewport_size.width / 2, viewport_size.height / 2);
+        let render_target = self.render_target.get_or_insert_with(|| {
+            RenderTarget::new(paint_parameters.context, size, TextureChannelDataType::HalfFloat)
+        });
+        render_target.set_size(paint_parameters.context, size);
+        let render_target_texture = render_target.texture();
+        if self.draw_tiles(shaders, render_tiles, paint_parameters) {
+            self.draw_texture(shaders, render_target_texture, paint_parameters);
+        }
+    }
+}
+
+impl RenderLayer for RenderHeatmapLayer {
     fn upload_render_targets(&mut self, context: &mut Context) {
         if self.base.is_renderable && self.render_target.is_some() {
             self.drawing.upload_target(context);
@@ -373,7 +369,7 @@ impl RenderHeatmapLayer {
         for tile in render_tiles.iter() {
             let tile_id = tile.id();
 
-            let Some(render_data) = tile.bucket_for_pass(&*self.base.style, RENDER_PASS) else {
+            let Some(render_data) = tile.bucket_for_pass(RENDER_PASS) else {
                 self.drawing.tiles.drop_value(&tile_id);
                 continue;
             };

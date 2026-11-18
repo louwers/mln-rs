@@ -25,14 +25,13 @@ use mln_util::logging::{Event, Log};
 use crate::bucket::NoBucket;
 use crate::gfx::context::Context;
 use crate::layer_drawing::{DrawGroup, DrawOrder, LayerDrawing, TileMap};
-use crate::layer_type::LayerType;
+use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{
     Atlases, LayerSource, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
 };
 use crate::render_pass::RenderPass;
-use crate::update_parameters::UpdateParameters;
 
 impl LayerType for Custom {
     type Layout = NoLayout;
@@ -165,11 +164,18 @@ impl TypedLayer for RenderCustomLayer {
         PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
 
+    fn passes(
+        &mut self,
+        _parameters: &PropertyEvaluationParameters,
+        _evaluated: &mut EvaluatedLayer<Custom>,
+    ) -> RenderPass {
+        RenderPass::Translucent
+    }
+
     fn update_draws(
         &mut self,
         _parameters: &mut PaintParameters<'_>,
         _atlases: &Atlases,
-        _update_parameters: &UpdateParameters,
         _source: Option<LayerSource<'_, Custom>>,
     ) {
         self.drawing.updated = true;
@@ -190,10 +196,6 @@ impl TypedLayer for RenderCustomLayer {
 impl RenderLayer for RenderCustomLayer {
     /// The layer has no properties: it only keeps drawing in the
     /// translucent pass.
-    fn evaluate(&mut self, _parameters: &PropertyEvaluationParameters) {
-        self.base.passes = RenderPass::Translucent;
-    }
-
     fn prerender(&mut self, gpu: &mut dyn Gpu, parameters: &PaintParameters<'_>) {
         let Some(frame) = parameters.custom_layer_frame else {
             return;

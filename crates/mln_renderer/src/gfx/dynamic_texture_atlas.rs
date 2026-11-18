@@ -225,9 +225,9 @@ impl DynamicTextureAtlas {
                     continue;
                 }
                 // `lease` holds the bin, so its id still names it.
-                let rect = handle.get_rectangle();
+                let rect = handle.rectangle();
                 let size = Size::new(u32::from(rect.w), u32::from(rect.h));
-                if let Some(handle) = page.texture.reserve_size(size, Some(handle.get_id())) {
+                if let Some(handle) = page.texture.reserve_size(size, Some(handle.id())) {
                     texture_handles.push(handle);
                     uses.push(bin_use.clone());
                 }
@@ -238,7 +238,7 @@ impl DynamicTextureAtlas {
 
     /// A lease on the bin of the 1×1 page of `pixel_type`.
     fn dummy_lease(&mut self, pixel_type: TexturePixelType) -> AtlasLease {
-        let existing = self.dummies.iter().position(|page| page.texture.get_pixel_format() == pixel_type);
+        let existing = self.dummies.iter().position(|page| page.texture.pixel_format() == pixel_type);
         let index = if let Some(index) = existing {
             index
         } else {
@@ -296,7 +296,7 @@ impl DynamicTextureAtlas {
                     texture.upload_glyph(Arc::clone(glyph), PADDING, tex_handle);
                 }
             }
-            let rects: Vec<RectU16> = texture_handles.iter().map(|handle| *handle.get_rectangle()).collect();
+            let rects: Vec<RectU16> = texture_handles.iter().map(|handle| *handle.rectangle()).collect();
             let uses = drawn.into_iter().map(|(bin_use, _)| bin_use).collect();
             (self.lease(&self.pages[index], texture_handles, uses), rects)
         };
@@ -348,7 +348,7 @@ impl DynamicTextureAtlas {
 
         let texture = &mut self.pages[index].texture;
         for (tex_handle, (image, type_)) in texture_handles.iter_mut().zip(&images) {
-            let rect = *tex_handle.get_rectangle();
+            let rect = *tex_handle.rectangle();
             if tex_handle.is_upload_needed() {
                 texture.upload_image(padded_image(&image.image, rect, *type_).data, tex_handle);
             }
@@ -375,7 +375,7 @@ impl DynamicTextureAtlas {
     ) -> (usize, Vec<TextureHandle>) {
         let mut handles = Vec::new();
         for index in 0..self.pages.len() {
-            if self.pages[index].texture.get_pixel_format() != pixel_type {
+            if self.pages[index].texture.pixel_format() != pixel_type {
                 continue;
             }
             if reserve(self, index, &mut handles) {
@@ -414,9 +414,8 @@ impl DynamicTextureAtlas {
         if let Some(tex_handle) = &tex_handle
             && existing.is_none()
         {
-            self.image_allocations
-                .insert(key, ImageAllocation { image: Arc::clone(image), bin_id: tex_handle.get_id() });
-            self.image_allocation_keys.insert(BinKey { page: page.id, bin_id: tex_handle.get_id() }, key);
+            self.image_allocations.insert(key, ImageAllocation { image: Arc::clone(image), bin_id: tex_handle.id() });
+            self.image_allocation_keys.insert(BinKey { page: page.id, bin_id: tex_handle.id() }, key);
         }
         tex_handle
     }
@@ -436,9 +435,8 @@ impl DynamicTextureAtlas {
         if let Some(tex_handle) = &tex_handle
             && existing.is_none()
         {
-            self.glyph_allocations
-                .insert(key, GlyphAllocation { _glyph: Arc::clone(glyph), bin_id: tex_handle.get_id() });
-            self.glyph_allocation_keys.insert(BinKey { page: page.id, bin_id: tex_handle.get_id() }, key);
+            self.glyph_allocations.insert(key, GlyphAllocation { _glyph: Arc::clone(glyph), bin_id: tex_handle.id() });
+            self.glyph_allocation_keys.insert(BinKey { page: page.id, bin_id: tex_handle.id() }, key);
         }
         tex_handle
     }
@@ -451,7 +449,7 @@ impl DynamicTextureAtlas {
             }
             // The last handle was released, so forget the image revision or
             // glyph; its bin may now be reused.
-            let bin_key = BinKey { page: page.id, bin_id: tex_handle.get_id() };
+            let bin_key = BinKey { page: page.id, bin_id: tex_handle.id() };
             if let Some(key) = self.image_allocation_keys.remove(&bin_key) {
                 self.image_allocations.remove(&key);
             }

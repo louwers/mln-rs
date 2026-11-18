@@ -203,7 +203,7 @@ impl Test {
         let image = self.tile.store.images().get_image(id).cloned().expect("image");
         let icons = [(id.to_owned(), image)].into_iter().collect();
         let page = self.tile.store.atlas().pack_images(&icons, &mln_style_types::image::ImageMap::default());
-        page.lease.texture_handles()[0].get_id()
+        page.lease.texture_handles()[0].id()
     }
 }
 

@@ -1,6 +1,6 @@
-// layers: debug: the debug overlays of a source's tiles, the tile borders
-// and the parse status and timestamp text, drawn as polylines by the line
-// shader.
+// The render source of a source with tiles, and the debug overlays of its
+// tiles: the tile borders and the parse status and timestamp text, drawn as
+// polylines by the line shader.
 
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -54,13 +54,12 @@ use crate::tile::job::SourceKey;
 use crate::tile::source_tiles::{CoverUpdate, SourceTiles};
 use crate::tile::store::TileStore;
 use crate::tile::tile::TileKind;
-// layers: debug
 use crate::tile_matrix::{get_projection_data, to_projection_ubo};
 use crate::tile_parameters::TileParameters;
 use crate::util::subdivision::subdivide_vertex_line;
 
 /// The line properties of a debug overlay's polylines: red tile borders, and
-/// black text over a white outline (layers: debug).
+/// black text over a white outline.
 #[must_use]
 fn debug_line_properties(type_: DebugType) -> LineEvaluatedPropsUBO {
     let (color, width) = match type_ {
@@ -137,7 +136,7 @@ fn polyline_objects(
     ))
 }
 
-// layers: debug --------------------------------------------------------------
+// Debug overlays -------------------------------------------------------------
 
 /// A draw of a debug overlay: polylines over a tile of a source.
 struct DebugDraw {
@@ -155,7 +154,7 @@ struct DebugUniforms {
     projection: ProjectionUBO,
 }
 
-/// The kinds of debug overlays (layers: debug).
+/// The kinds of debug overlays.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum DebugType {
     TextOutline,
@@ -163,17 +162,16 @@ pub(crate) enum DebugType {
     Border,
 }
 
-/// The debug overlays, by debug type (layers: debug).
+/// The debug overlays, by debug type.
 pub(crate) type DebugLayers = VecMap<DebugType, DebugLayer>;
 
-/// The debug overlay `type_` in `debug_layers`, made if it isn't there
-/// (layers: debug).
+/// The debug overlay `type_` in `debug_layers`, made if it isn't there.
 fn debug_layer(debug_layers: &mut DebugLayers, type_: DebugType) -> &mut DebugLayer {
     debug_layers.entry(type_).or_insert_with(|| DebugLayer::new(type_))
 }
 
 /// A debug overlay: polylines over the tiles of the sources, in the color
-/// and width of its type (layers: debug).
+/// and width of its type.
 pub(crate) struct DebugLayer {
     properties: LineEvaluatedPropsUBO,
     /// The overlay's draws, in the order they were made, which is the order
@@ -400,7 +398,7 @@ impl RenderSource for RenderTileSource {
         store.upload(self.key, &self.render_tiles, needs);
     }
 
-    /// Updates the source's draws of the debug overlays (layers: debug).
+    /// Updates the source's draws of the debug overlays.
     ///
     /// The text is polylines, like the tile borders: WebGPU draws line
     /// primitives one pixel wide.
@@ -444,7 +442,7 @@ impl RenderSource for RenderTileSource {
         // the same shader and spell the tile's text: one of the other
         // projection keeps its shader.
         let new_tiles: HashMap<OverscaledTileID, &RenderTile> =
-            self.render_tiles.iter().map(|tile| (*tile.get_overscaled_tile_id(), tile)).collect();
+            self.render_tiles.iter().map(|tile| (*tile.overscaled_tile_id(), tile)).collect();
         let keep = |draw: &DebugDraw| {
             if draw.source != *source {
                 return true;
@@ -476,11 +474,11 @@ impl RenderSource for RenderTileSource {
                 // whose text changed
                 let mut of_tiles = layer.tiles_of(source);
                 for tile in &self.render_tiles {
-                    let tile_id = *tile.get_overscaled_tile_id();
+                    let tile_id = *tile.overscaled_tile_id();
                     let Some(debug_bucket) = &tile.debug_bucket else {
                         continue;
                     };
-                    if tile.get_needs_rendering()
+                    if tile.needs_rendering()
                         && !of_tiles.contains(&tile_id)
                         && let Some(objects) = polyline_objects(&polyline_shader, &debug_bucket.strokes, &text_options)
                     {
@@ -515,8 +513,8 @@ impl RenderSource for RenderTileSource {
             let mut globe_borders: BTreeMap<u8, GeometryCoordinates> = BTreeMap::new();
             let border_options = PolylineGeneratorOptions { type_: FeatureType::Polygon, ..Default::default() };
             for tile in &self.render_tiles {
-                let tile_id = *tile.get_overscaled_tile_id();
-                if tile.debug_bucket.is_none() || !tile.get_needs_rendering() {
+                let tile_id = *tile.overscaled_tile_id();
+                if tile.debug_bucket.is_none() || !tile.needs_rendering() {
                     continue;
                 }
                 if of_tiles.contains(&tile_id) {
@@ -574,7 +572,7 @@ impl RenderSource for RenderTileSource {
 
     fn dump_debug_logs(&self) {}
 
-    fn get_max_zoom(&self) -> u8 {
+    fn max_zoom(&self) -> u8 {
         self.origin.max_zoom()
     }
 }

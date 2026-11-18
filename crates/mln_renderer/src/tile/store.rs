@@ -324,7 +324,7 @@ impl TileStore {
             return;
         };
         for render_tile in render_tiles {
-            if let Some(contents) = tiles.contents_at_mut(render_tile.get_overscaled_tile_id(), render_tile.slot()) {
+            if let Some(contents) = tiles.contents_at_mut(render_tile.overscaled_tile_id(), render_tile.slot()) {
                 if let Contents::Geometry(contents) = contents {
                     contents.textures.resolve(&self.ctx.atlas);
                 }

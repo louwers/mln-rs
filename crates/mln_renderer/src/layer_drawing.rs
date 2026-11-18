@@ -1024,6 +1024,10 @@ impl<T: TileObjects> LayerDrawing for TileDraws<T> {
         }
     }
 
+    fn begin_frame(&mut self) {
+        self.frame_mut();
+    }
+
     fn upload(&mut self, context: &mut Context) {
         if let Some(frame) = &self.frame {
             frame.upload(&mut self.tiles, tile_objects, context);
@@ -1059,6 +1063,12 @@ pub(crate) trait LayerDrawing {
     /// Drops the frame's draws, and the GPU objects of the tiles' draws and
     /// of the others. The tiles' entries stay.
     fn clear(&mut self);
+
+    /// Called in the encode before a layer with a source makes its draws of
+    /// a frame whose source has something to draw. A drawing whose draw
+    /// group takes its place from the layer's first such frame starts it
+    /// here.
+    fn begin_frame(&mut self) {}
 
     /// Uploads the GPU objects of the draw groups' draws.
     fn upload(&mut self, context: &mut Context);

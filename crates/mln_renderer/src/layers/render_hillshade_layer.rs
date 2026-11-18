@@ -65,7 +65,6 @@ use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_target::RenderTarget;
 use crate::tile_matrix::{bind_no_projection, get_projection_data, to_projection_ubo};
-use crate::update_parameters::UpdateParameters;
 
 const HILLSHADE_PREPARE_SHADER_GROUP_NAME: &str = "HillshadePrepareShader";
 const HILLSHADE_SHADER_GROUP_NAME: &str = "HillshadeShader";
@@ -189,7 +188,7 @@ fn pad_array<T: Clone + Default>(arr: &mut Vec<T>, max_length: usize) {
 }
 
 /// Convert style properties to illumination properties
-fn get_illumination_properties(evaluated: &HillshadePaintProperties::PossiblyEvaluated) -> IlluminationProperties {
+fn illumination_properties(evaluated: &HillshadePaintProperties::PossiblyEvaluated) -> IlluminationProperties {
     // Get the values from evaluated properties (these are now vectors)
     let mut directions: Vec<f32> = evaluated.hillshade_illumination_direction.uniform().clone();
     let mut altitudes: Vec<f32> = evaluated.hillshade_illumination_altitude.uniform().clone();
@@ -259,7 +258,7 @@ fn method_to_int(method: HillshadeMethodType) -> i32 {
 }
 
 /// Calculate latitude range for tile
-fn get_lat_range(id: &UnwrappedTileID) -> [f32; 2] {
+fn lat_range(id: &UnwrappedTileID) -> [f32; 2] {
     let latlng0 = LatLng::from_unwrapped_tile(id.canonical.z, id.canonical.x, id.canonical.y, id.wrap);
     let below = UnwrappedTileID::new(id.canonical.z, i64::from(id.canonical.x), i64::from(id.canonical.y) + 1);
     let latlng1 = LatLng::from_unwrapped_tile(below.canonical.z, below.canonical.x, below.canonical.y, below.wrap);
@@ -304,6 +303,27 @@ impl TypedLayer for RenderHillshadeLayer {
         PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
 
+    /// Drops the shader of the last projection, and the globe's meshes
+    /// when the frame isn't on the globe.
+    fn projection_changed(&mut self) {
+        self.hillshade_shader = None;
+        if self.base.projection_variant == ProjectionVariant::Mercator {
+            self.globe_meshes.clear();
+        }
+    }
+
+    fn passes(
+        &mut self,
+        _parameters: &PropertyEvaluationParameters,
+        evaluated: &mut EvaluatedLayer<Hillshade>,
+    ) -> RenderPass {
+        if *evaluated.paint.hillshade_exaggeration.uniform() > 0.0 {
+            RenderPass::Translucent | RenderPass::Pass3D
+        } else {
+            RenderPass::None
+        }
+    }
+
     /// Makes the render target of each bucket it has none of, which prepares
     /// its slopes, and the frame's draws of the layer, those of each of its
     /// tiles, which shade the slopes and which it builds for a tile it keeps
@@ -312,23 +332,12 @@ impl TypedLayer for RenderHillshadeLayer {
         &mut self,
         paint_parameters: &mut PaintParameters<'_>,
         _atlases: &Atlases,
-        _update_parameters: &UpdateParameters,
         source: Option<LayerSource<'_, Hillshade>>,
     ) {
-        let tiles = source.and_then(LayerSource::tiles);
-        let (static_data, state) = (paint_parameters.static_data, paint_parameters.state);
-        let shaders = &static_data.shaders;
-        if self.update_projection_variant(state) {
-            self.hillshade_shader = None;
-            if self.base.projection_variant == ProjectionVariant::Mercator {
-                self.globe_meshes.clear();
-            }
-        }
-        let Some(render_tiles) = tiles.filter(|tiles| !tiles.is_empty()) else {
-            self.remove_all_draws();
+        let Some(render_tiles) = source.and_then(LayerSource::tiles) else {
             return;
         };
-        self.drawing.frame_mut();
+        let shaders = &paint_parameters.static_data.shaders;
 
         if self.hillshade_prepare_shader.is_none() {
             self.hillshade_prepare_shader =
@@ -501,7 +510,7 @@ impl TypedLayer for RenderHillshadeLayer {
     /// Keeps the source's maximum zoom, which the DEMs' preparation reads.
     fn update(&mut self, params: &mut LayerUpdateParameters<'_>, _tiles: Option<LayerTiles<'_, Hillshade>>) {
         if let Some(source) = params.source {
-            self.maxzoom = source.get_max_zoom();
+            self.maxzoom = source.max_zoom();
         }
     }
 
@@ -511,17 +520,6 @@ impl TypedLayer for RenderHillshadeLayer {
 }
 
 impl RenderLayer for RenderHillshadeLayer {
-    fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
-        let properties = self.values.evaluate(parameters);
-
-        self.base.passes = if *properties.paint.hillshade_exaggeration.uniform() > 0.0 {
-            RenderPass::Translucent | RenderPass::Pass3D
-        } else {
-            RenderPass::None
-        };
-        self.values.set_evaluated(&mut self.base, properties);
-    }
-
     fn upload_render_targets(&mut self, context: &mut Context) {
         if self.base.is_renderable {
             for target in self.bucket_render_targets.values_mut() {
@@ -638,7 +636,7 @@ impl RenderHillshadeLayer {
         HillshadeUniforms {
             draw_ubo: HillshadeDrawableUBO { matrix: cast_matrix(&projection.fallback_matrix) },
             tile_props: HillshadeTilePropsUBO {
-                latrange: get_lat_range(tile_id),
+                latrange: lat_range(tile_id),
                 exaggeration: *evaluated.hillshade_exaggeration.uniform(),
                 method: method_to_int(*evaluated.hillshade_method.uniform()),
                 num_lights: num_lights as i32,
@@ -664,7 +662,7 @@ impl RenderHillshadeLayer {
             return *illumination;
         }
         let evaluated = &layer.paint;
-        let mut illumination = get_illumination_properties(evaluated);
+        let mut illumination = illumination_properties(evaluated);
         if *evaluated.hillshade_illumination_anchor.uniform() == HillshadeIlluminationAnchorType::Viewport {
             let bearing = parameters.state.get_bearing() as f32;
             for azimuth in &mut illumination.direction_radians {

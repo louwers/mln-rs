@@ -1,7 +1,3 @@
-// The C++ templates take the layout function's type; here it is a function
-// pointer, `fn(Point<i16>, Point<u16>) -> V`, as `decltype(&layoutVertex)`
-// is in C++.
-
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
@@ -156,8 +152,7 @@ pub(crate) struct RawGlobeTileMesh {
 }
 
 /// The globe mesh of the tile `canonical`, with borders if
-/// `generate_borders`. C++ defaults `granularity` to the globe's tile
-/// granularity.
+/// `generate_borders`, subdivided by `granularity`.
 #[must_use]
 pub(crate) fn raw_globe_tile_mesh(
     canonical: &CanonicalTileID,

@@ -62,7 +62,7 @@ fn basic() {
             assert!(pattern_atlas.add_pattern(image).is_some());
         }
     }
-    let found = pattern_atlas.get_pattern("metro");
+    let found = pattern_atlas.pattern("metro");
     assert!(found.is_some());
 
     let metro = found.unwrap();
@@ -74,9 +74,9 @@ fn basic() {
     assert_eq!(18.0, metro.display_size()[1]);
     assert_eq!(1.0f32, metro.pixel_ratio);
     assert!(!metro.sdf);
-    assert_eq!(pattern_atlas.get_pixel_size(), pattern_atlas.get_atlas_image_for_test().size);
+    assert_eq!(pattern_atlas.pixel_size(), pattern_atlas.atlas_image().size);
 
-    check_image("test/fixtures/image_manager/basic", pattern_atlas.get_atlas_image_for_test());
+    check_image("test/fixtures/image_manager/basic", pattern_atlas.atlas_image());
 }
 
 // gtest: PatternAtlas.PreservesSDFMetadata
@@ -106,7 +106,7 @@ fn updates() {
 
     let added = pattern_atlas.add_pattern(&make_image("one", image_a, 1.0, false));
     assert!(added.is_some());
-    let found = pattern_atlas.get_pattern("one");
+    let found = pattern_atlas.pattern("one");
     assert!(found.is_some());
     assert_eq!(added.unwrap().padded_rect, found.as_ref().unwrap().padded_rect);
 
@@ -118,23 +118,23 @@ fn updates() {
     assert_eq!(16.0, a.display_size()[0]);
     assert_eq!(12.0, a.display_size()[1]);
     assert_eq!(1.0f32, a.pixel_ratio);
-    check_image("test/fixtures/image_manager/updates_before", pattern_atlas.get_atlas_image_for_test());
+    check_image("test/fixtures/image_manager/updates_before", pattern_atlas.atlas_image());
 
     let image_b = make_image("one", PremultipliedImage::new(Size::new(5, 5)), 1.0, false);
     assert!(pattern_atlas.add_pattern(&image_b).is_none()); // Already added.
 
     pattern_atlas.remove_pattern("one");
-    assert!(pattern_atlas.get_pattern("one").is_none());
+    assert!(pattern_atlas.pattern("one").is_none());
     assert!(pattern_atlas.add_pattern(&image_b).is_some());
 
     // The atlas can pack the new image anywhere, not only in the space the
     // removed one freed.
-    let b = pattern_atlas.get_pattern("one").expect("one");
+    let b = pattern_atlas.pattern("one").expect("one");
     assert_eq!([5, 5], [b.br()[0] - b.tl()[0], b.br()[1] - b.tl()[1]]);
-    let atlas_size = pattern_atlas.get_pixel_size();
+    let atlas_size = pattern_atlas.pixel_size();
     assert!(u32::from(b.br()[0]) < atlas_size.width && u32::from(b.br()[1]) < atlas_size.height);
     assert_eq!(5.0, b.display_size()[0]);
     assert_eq!(5.0, b.display_size()[1]);
     assert_eq!(1.0f32, b.pixel_ratio);
-    check_image("test/fixtures/image_manager/updates_after", pattern_atlas.get_atlas_image_for_test());
+    check_image("test/fixtures/image_manager/updates_after", pattern_atlas.atlas_image());
 }

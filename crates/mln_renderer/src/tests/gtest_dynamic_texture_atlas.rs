@@ -99,8 +99,8 @@ fn shares_allocation_within_image_revision() {
     let first = handle(test.upload_pattern(&image));
     let second = handle(test.upload_pattern(&image));
 
-    assert_eq!(first.get_id(), second.get_id());
-    assert_eq!(first.get_rectangle(), second.get_rectangle());
+    assert_eq!(first.id(), second.id());
+    assert_eq!(first.rectangle(), second.rectangle());
 }
 
 // gtest: DynamicTextureAtlasTest.ReplacedSameSizeImageGetsFreshAllocation
@@ -112,9 +112,9 @@ fn replaced_same_size_image_gets_fresh_allocation() {
     let sdf = handle(test.upload_pattern(&make_image("pattern", true)));
     let toggled_back = handle(test.upload_pattern(&make_image("pattern", false)));
 
-    assert_ne!(original.get_rectangle(), sdf.get_rectangle());
-    assert_ne!(original.get_rectangle(), toggled_back.get_rectangle());
-    assert_ne!(sdf.get_rectangle(), toggled_back.get_rectangle());
+    assert_ne!(original.rectangle(), sdf.rectangle());
+    assert_ne!(original.rectangle(), toggled_back.rectangle());
+    assert_ne!(sdf.rectangle(), toggled_back.rectangle());
 }
 
 // gtest: DynamicTextureAtlasTest.IconAndPatternUsageDoNotShareAllocation
@@ -127,7 +127,7 @@ fn icon_and_pattern_usage_do_not_share_allocation() {
 
     let handles = page.lease.texture_handles();
     assert_eq!(2, handles.len());
-    assert_ne!(handles[0].get_rectangle(), handles[1].get_rectangle());
+    assert_ne!(handles[0].rectangle(), handles[1].rectangle());
 }
 
 // gtest: DynamicTextureAtlasTest.ResizedImageWithSameAreaGetsItsOwnShape
@@ -154,12 +154,12 @@ fn released_revision_gets_fresh_allocation() {
     test.upload_icon(&make_image("other", false));
     let image = make_image("pattern", false);
     let released = test.atlas.pack_images(&ImageMap::new(), &image_map(&image));
-    let released_id = handle(&released).get_id();
+    let released_id = handle(&released).id();
     drop(released);
 
     // The revision was forgotten on its last release, so it is packed and uploaded again under a new id.
     let page = test.upload_pattern(&image);
-    assert_ne!(released_id, handle(page).get_id());
+    assert_ne!(released_id, handle(page).id());
 }
 
 // gtest: DynamicTextureAtlasTest.GlyphsOfDifferentFontStacksGetTheirOwnAllocations
@@ -175,7 +175,7 @@ fn glyphs_of_different_font_stacks_get_their_own_allocations() {
 
     let handles = page.lease.texture_handles();
     assert_eq!(handles.len(), 2);
-    assert_ne!(handles[0].get_rectangle(), handles[1].get_rectangle());
+    assert_ne!(handles[0].rectangle(), handles[1].rectangle());
     assert_ne!(page.positions[&0][&b.id].unwrap().rect, page.positions[&4][&a.id].unwrap().rect);
 }
 
@@ -188,7 +188,7 @@ fn font_stacks_share_the_allocation_of_the_same_glyph() {
 
     let handles = page.lease.texture_handles();
     assert_eq!(handles.len(), 2);
-    assert_eq!(handles[0].get_id(), handles[1].get_id());
+    assert_eq!(handles[0].id(), handles[1].id());
 }
 
 /// A glyph no font has stays missing, and one without a bitmap has its
@@ -257,10 +257,10 @@ fn updated_icon_gets_fresh_allocation() {
     let original_image = make_image("marker", false);
     let original = handle(test.upload_icon(&original_image));
     let shared = handle(test.upload_icon(&original_image));
-    assert_eq!(original.get_id(), shared.get_id());
+    assert_eq!(original.id(), shared.id());
 
     let updated = handle(test.upload_icon(&make_image("marker", false)));
-    assert_ne!(original.get_rectangle(), updated.get_rectangle());
+    assert_ne!(original.rectangle(), updated.rectangle());
 }
 
 #[test]
@@ -268,7 +268,7 @@ fn many_live_icon_revisions_get_their_own_allocations() {
     const REVISIONS: u32 = 64;
     let mut test = DynamicTextureAtlasTest::new();
     let ids: mln_util::hash::HashSet<DynamicTextureBinId> =
-        (0..REVISIONS).map(|_| handle(test.upload_icon(&make_image("marker", false))).get_id()).collect();
+        (0..REVISIONS).map(|_| handle(test.upload_icon(&make_image("marker", false))).id()).collect();
     assert_eq!(ids.len(), REVISIONS as usize);
 }
 
@@ -289,8 +289,7 @@ fn patched_pattern_is_queued_for_its_bin() {
     test.upload_pattern(&make_image("pattern", false));
     let page = test.image_pages[0].lease.page();
     let tex_handle = handle(&test.image_pages[0]);
-    let queued =
-        |test: &DynamicTextureAtlasTest| test.atlas.queued_uploads(page).unwrap()[&tex_handle.get_id()].clone();
+    let queued = |test: &DynamicTextureAtlasTest| test.atlas.queued_uploads(page).unwrap()[&tex_handle.id()].clone();
     let original = queued(&test);
 
     test.atlas.patch_image(&make_sized_image("pattern", false, Size::new(8, 8)));
@@ -301,7 +300,7 @@ fn patched_pattern_is_queued_for_its_bin() {
     let (rect, QueuedPixels::Bytes(data)) = queued(&test) else {
         panic!("a patch queues the bin's pixels");
     };
-    assert_eq!(&rect, tex_handle.get_rectangle());
+    assert_eq!(&rect, tex_handle.rectangle());
 
     // The image starts two pixels in: one of padding, one of wrapped edge.
     let pixel = |x: usize, y: usize| {

@@ -48,7 +48,7 @@ impl PatternAtlas {
     }
 
     #[must_use]
-    pub(crate) fn get_pattern(&self, id: &str) -> Option<ImagePosition> {
+    pub(crate) fn pattern(&self, id: &str) -> Option<ImagePosition> {
         self.patterns.get(id).map(|pattern| pattern.position.clone())
     }
 
@@ -61,7 +61,7 @@ impl PatternAtlas {
 
         let (alloc_id, bin) = self.allocate(width, height)?;
 
-        let size = self.get_pixel_size();
+        let size = self.pixel_size();
         self.atlas_image.resize(size);
 
         let src = &image.image;
@@ -113,7 +113,7 @@ impl PatternAtlas {
     }
 
     #[must_use]
-    pub(crate) fn get_pixel_size(&self) -> Size {
+    pub(crate) fn pixel_size(&self) -> Size {
         let size = self.allocator.size();
         Size::new(size.width as u32, size.height as u32)
     }
@@ -170,7 +170,7 @@ impl PatternAtlas {
 
     #[cfg(test)]
     #[must_use]
-    pub(crate) fn get_atlas_image_for_test(&self) -> &PremultipliedImage {
+    pub(crate) fn atlas_image(&self) -> &PremultipliedImage {
         &self.atlas_image
     }
 

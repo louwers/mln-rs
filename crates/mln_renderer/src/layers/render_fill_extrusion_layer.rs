@@ -75,7 +75,6 @@ use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_tile::FrameTile;
 use crate::tile_matrix::{get_projection_data, to_projection_ubo};
-use crate::update_parameters::UpdateParameters;
 
 /// The pass the layer's draws draw in.
 const RENDER_PASS: RenderPass = RenderPass::Translucent;
@@ -358,6 +357,14 @@ impl TypedLayer for RenderFillExtrusionLayer {
         PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
 
+    fn passes(
+        &mut self,
+        _parameters: &PropertyEvaluationParameters,
+        evaluated: &mut EvaluatedLayer<FillExtrusion>,
+    ) -> RenderPass {
+        if *evaluated.paint.fill_extrusion_opacity.uniform() > 0.0 { RenderPass::Translucent } else { RenderPass::None }
+    }
+
     /// Makes the frame's draws of the layer, those of each of its tiles,
     /// which it builds for a tile it keeps none of, and writes the layer's
     /// buffers they read.
@@ -365,23 +372,12 @@ impl TypedLayer for RenderFillExtrusionLayer {
         &mut self,
         paint_parameters: &mut PaintParameters<'_>,
         _atlases: &Atlases,
-        _update_parameters: &UpdateParameters,
         source: Option<LayerSource<'_, FillExtrusion>>,
     ) {
-        let tiles = source.and_then(LayerSource::tiles);
-        let (static_data, state) = (paint_parameters.static_data, paint_parameters.state);
-        let shaders = &static_data.shaders;
-        self.update_projection_variant(state);
-
-        let render_tiles = match tiles {
-            Some(tiles) if !tiles.is_empty() && self.base.passes != RenderPass::None => tiles,
-            _ => {
-                self.remove_all_draws();
-                return;
-            }
+        let Some(render_tiles) = source.and_then(LayerSource::tiles) else {
+            return;
         };
-        self.drawing.frame_mut();
-
+        let shaders = &paint_parameters.static_data.shaders;
         if self.fill_extrusion_group.is_none() {
             self.fill_extrusion_group = shaders.shader_group("FillExtrusionShader");
         }
@@ -444,7 +440,7 @@ impl TypedLayer for RenderFillExtrusionLayer {
                 continue;
             };
 
-            let render_data = tile.bucket_for_pass(&*self.base.style, RENDER_PASS);
+            let render_data = tile.bucket_for_pass(RENDER_PASS);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
                 *entry.value = None;
                 continue;
@@ -482,24 +478,13 @@ impl TypedLayer for RenderFillExtrusionLayer {
 
         let frame = self.drawing.frame_mut();
         frame.set_stencil_tiles(render_tiles.render_tiles().map(|tile| tile.id));
-        let (light, state) = (&paint_parameters.evaluated_light, paint_parameters.state);
+        let (light, state) = (paint_parameters.light, paint_parameters.state);
         self.draw_list
             .finish(frame, paint_parameters.context, |writer| Self::write_uniforms(layer, writer, light, state));
     }
 }
 
 impl RenderLayer for RenderFillExtrusionLayer {
-    fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
-        let properties = self.values.evaluate(parameters);
-
-        self.base.passes = if *properties.paint.fill_extrusion_opacity.uniform() > 0.0 {
-            RenderPass::Translucent
-        } else {
-            RenderPass::None
-        };
-        self.values.set_evaluated(&mut self.base, properties);
-    }
-
     fn is_3d(&self) -> bool {
         true
     }

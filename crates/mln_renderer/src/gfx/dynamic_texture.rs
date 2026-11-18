@@ -48,12 +48,12 @@ pub(crate) struct TextureHandle {
 
 impl TextureHandle {
     #[must_use]
-    pub(crate) fn get_id(&self) -> DynamicTextureBinId {
+    pub(crate) fn id(&self) -> DynamicTextureBinId {
         self.id
     }
 
     #[must_use]
-    pub(crate) fn get_rectangle(&self) -> &RectU16 {
+    pub(crate) fn rectangle(&self) -> &RectU16 {
         &self.rectangle
     }
 
@@ -63,7 +63,7 @@ impl TextureHandle {
     }
 }
 
-/// `operator==`: handles compare by id.
+/// Handles compare by id.
 impl PartialEq for TextureHandle {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
@@ -79,8 +79,6 @@ struct Bin {
     refcount: u32,
 }
 
-/// A page's GPU texture, once the page's first `upload` made it. Shared with
-/// the leases on the page's bins.
 /// The pixels queued for a bin.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum QueuedPixels {
@@ -153,13 +151,12 @@ impl DynamicTexture {
         }
     }
 
-    /// The page's GPU texture, shared with the leases on its bins.
-    /// The GPU texture, from the first upload.
+    /// The page's texture in the context's store, from the first upload.
     pub(crate) fn texture(&self) -> Option<TextureKey> {
         self.texture.as_ref().map(OwnedTexture::key)
     }
 
-    pub(crate) fn get_pixel_format(&self) -> TexturePixelType {
+    pub(crate) fn pixel_format(&self) -> TexturePixelType {
         self.pixel_format
     }
 
@@ -320,12 +317,12 @@ mod tests {
         let size = Size::new(8, 8);
         let first = texture.reserve_size(size, None).expect("first bin");
         let second = texture.reserve_size(size, None).expect("second bin");
-        let reused = texture.reserve_size(size, Some(first.get_id())).expect("existing bin");
+        let reused = texture.reserve_size(size, Some(first.id())).expect("existing bin");
 
-        assert_eq!(first.get_id(), DynamicTextureBinId::new(1).unwrap());
-        assert_eq!(second.get_id(), DynamicTextureBinId::new(2).unwrap());
-        assert_eq!(reused.get_id(), first.get_id());
+        assert_eq!(first.id(), DynamicTextureBinId::new(1).unwrap());
+        assert_eq!(second.id(), DynamicTextureBinId::new(2).unwrap());
+        assert_eq!(reused.id(), first.id());
         assert!(!reused.is_upload_needed());
-        assert_eq!(reused.get_rectangle(), first.get_rectangle());
+        assert_eq!(reused.rectangle(), first.rectangle());
     }
 }

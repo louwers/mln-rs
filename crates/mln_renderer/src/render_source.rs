@@ -75,7 +75,7 @@ pub(crate) trait RenderSource {
     fn upload(&mut self, store: &mut TileStore, needs: UploadNeeds);
 
     /// Updates the source's draws of the debug overlays; a no-op for the
-    /// sources that have none (the image source) (layers: debug).
+    /// sources that have none (the image source).
     fn update_debug_draws(&self, _debug_layers: &mut DebugLayers, _parameters: &PaintParameters<'_>) {}
 
     /// Releases the render data from the last `prepare` while the source is
@@ -98,8 +98,9 @@ pub(crate) trait RenderSource {
         None
     }
 
-    /// conformance: `getImageRenderData()` (image sources).
-    fn get_image_render_data(&self) -> Option<ImageSourceRenderData<'_>> {
+    /// An image source's image, as the layers that draw it read it; `None`
+    /// for other sources.
+    fn image_render_data(&self) -> Option<ImageSourceRenderData<'_>> {
         None
     }
 
@@ -119,7 +120,7 @@ pub(crate) trait RenderSource {
 
     fn dump_debug_logs(&self);
 
-    fn get_max_zoom(&self) -> u8 {
+    fn max_zoom(&self) -> u8 {
         debug_assert!(false);
         constants::TERRAIN_RGB_MAXZOOM
     }

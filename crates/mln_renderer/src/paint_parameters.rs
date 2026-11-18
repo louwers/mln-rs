@@ -14,6 +14,7 @@ use mln_util::size::Size;
 use mln_vec_map::VecMap;
 
 use crate::clip_masks::ClipMasks;
+use crate::frame::Frame;
 use crate::gfx::context::Context;
 use crate::layer_composite::LayerComposite;
 use crate::render_pass::RenderPass;
@@ -142,7 +143,7 @@ pub(crate) struct PaintParameters<'a> {
     pub(crate) transform_params: &'a TransformParameters,
     pub(crate) state: &'a TransformState,
     /// The light of the frame.
-    pub(crate) evaluated_light: crate::render_light::EvaluatedLight,
+    pub(crate) light: &'a crate::render_light::EvaluatedLight,
     pub(crate) static_data: &'a RenderStaticData,
 
     pub(crate) pass: RenderPass,
@@ -175,15 +176,18 @@ impl<'a> PaintParameters<'a> {
     pub(crate) const DEPTH_EPSILON: f32 = 1.0 / (1 << 16) as f32;
     pub(crate) const MAX_STENCIL_VALUE: i32 = 255;
 
+    /// The parameters of the encode of `frame`, into a target of
+    /// `renderable_size` device pixels at `pixel_ratio`, drawn within
+    /// `scissor_rect`.
     pub(crate) fn new(
         context: &'a mut Context,
-        pixel_ratio: f32,
-        debug_options: MapDebugOptions,
-        transform_params: &'a TransformParameters,
+        frame: &'a Frame,
         static_data: &'a RenderStaticData,
+        pixel_ratio: f32,
         renderable_size: Size,
         scissor_rect: ScissorRect,
     ) -> Self {
+        let transform_params = &frame.transform;
         let state = &transform_params.state;
         let mut pixels_to_gl_units = [2.0f32 / state.get_size().width as f32, -2.0f32 / state.get_size().height as f32];
 
@@ -197,9 +201,9 @@ impl<'a> PaintParameters<'a> {
             transform_params,
             state,
             static_data,
-            evaluated_light: crate::render_light::EvaluatedLight::default(),
+            light: &frame.light,
             pass: RenderPass::Opaque,
-            debug_options,
+            debug_options: frame.debug_options,
             pixel_ratio,
             renderable_size,
             pixels_to_gl_units,
@@ -210,8 +214,8 @@ impl<'a> PaintParameters<'a> {
             // The renderer sets these before use.
             current_layer: 0,
             depth_range_size: 1.0,
-            opaque_pass_cutoff: 0,
-            symbol_fade_change: 0.0,
+            opaque_pass_cutoff: frame.opaque_pass_cutoff,
+            symbol_fade_change: frame.symbol_fade_change,
             scissor_rect,
             custom_layer_frame: None,
         }

@@ -54,7 +54,6 @@ use crate::render_layer::{
 use crate::render_pass::RenderPass;
 use crate::render_tile::FrameTile;
 use crate::tile_matrix::{get_projection_data, to_projection_ubo};
-use crate::update_parameters::UpdateParameters;
 
 /// What a line draws: its shader and the uniforms it reads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -364,7 +363,7 @@ impl RenderLineLayer {
     }
 
     // query
-    fn get_line_width(
+    fn line_width(
         &self,
         feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
         zoom: f32,
@@ -438,6 +437,45 @@ impl TypedLayer for RenderLineLayer {
         PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
 
+    fn passes(
+        &mut self,
+        parameters: &PropertyEvaluationParameters,
+        evaluated: &mut EvaluatedLayer<Line>,
+    ) -> RenderPass {
+        // Build the ramp here rather than in transition(), which has no global
+        // state. A new or changed layer always needs one; otherwise only a
+        // change to a state key that the ramp reads does.
+        let global_state_differs = match (&self.color_ramp_global_state, &parameters.global_state) {
+            (None, None) => false,
+            (Some(a), Some(b)) => !Arc::ptr_eq(a, b),
+            _ => true,
+        };
+        let ramp_value = self.values.unevaluated.line_gradient.get_value();
+        let ramp_affected = parameters.layer_changed
+            || (global_state_differs
+                && ramp_value.get_dependencies().intersects(Dependency::GLOBAL_STATE)
+                && global_state_refs_intersect(
+                    ramp_value.get_global_state_refs(),
+                    parameters.changed_global_state_keys.as_deref(),
+                ));
+        self.color_ramp_global_state = parameters.global_state.clone();
+        if ramp_affected {
+            self.update_color_ramp();
+        }
+
+        let evaluated = &evaluated.paint;
+
+        if *evaluated.line_layer_opacity.uniform() > 0.0
+            && evaluated.line_opacity.constant_or(&1.0) > 0.0
+            && evaluated.line_color.constant_or(&Color::black()).a > 0.0
+            && evaluated.line_width.constant_or(&1.0) > 0.0
+        {
+            RenderPass::Translucent
+        } else {
+            RenderPass::None
+        }
+    }
+
     /// Makes the frame's draws of the layer, those of each of its tiles,
     /// which it builds for a tile it keeps none of, and writes the layer's
     /// buffers they read.
@@ -445,22 +483,16 @@ impl TypedLayer for RenderLineLayer {
         &mut self,
         paint_parameters: &mut PaintParameters<'_>,
         atlases: &Atlases,
-        _update_parameters: &UpdateParameters,
         source: Option<LayerSource<'_, Line>>,
     ) {
-        let tiles = source.and_then(LayerSource::tiles);
-        let (static_data, state) = (paint_parameters.static_data, paint_parameters.state);
-        let shaders = &static_data.shaders;
+        let Some(render_tiles) = source.and_then(LayerSource::tiles) else {
+            return;
+        };
+        let shaders = &paint_parameters.static_data.shaders;
         if std::mem::take(&mut self.color_ramp_changed) {
             // The gradients' draws read the old ramp's texture.
             self.remove_all_draws();
         }
-        self.update_projection_variant(state);
-
-        let Some(render_tiles) = tiles.filter(|tiles| !tiles.is_empty()) else {
-            self.remove_all_draws();
-            return;
-        };
 
         let frame = self.drawing.frame_mut();
         let paint = &self.values.evaluated.paint;
@@ -472,7 +504,7 @@ impl TypedLayer for RenderLineLayer {
         for tile in render_tiles.iter() {
             let tile_id = tile.id();
 
-            let Some(render_data) = tile.bucket_for_pass(&*self.base.style, render_pass) else {
+            let Some(render_data) = tile.bucket_for_pass(render_pass) else {
                 self.drawing.tiles_mut().drop_value(&tile_id);
                 continue;
             };
@@ -534,7 +566,7 @@ impl TypedLayer for RenderLineLayer {
             return;
         };
         for tile in tiles.iter() {
-            let Some(bucket) = tile.bucket(&*self.base.style) else {
+            let Some(bucket) = tile.bucket() else {
                 continue;
             };
             let dasharray = bucket.layer.paint.line_dasharray.faded();
@@ -548,43 +580,6 @@ impl TypedLayer for RenderLineLayer {
 }
 
 impl RenderLayer for RenderLineLayer {
-    fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
-        // Build the ramp here rather than in transition(), which has no global
-        // state. A new or changed layer always needs one; otherwise only a
-        // change to a state key that the ramp reads does.
-        let global_state_differs = match (&self.color_ramp_global_state, &parameters.global_state) {
-            (None, None) => false,
-            (Some(a), Some(b)) => !Arc::ptr_eq(a, b),
-            _ => true,
-        };
-        let ramp_value = self.values.unevaluated.line_gradient.get_value();
-        let ramp_affected = parameters.layer_changed
-            || (global_state_differs
-                && ramp_value.get_dependencies().intersects(Dependency::GLOBAL_STATE)
-                && global_state_refs_intersect(
-                    ramp_value.get_global_state_refs(),
-                    parameters.changed_global_state_keys.as_deref(),
-                ));
-        self.color_ramp_global_state = parameters.global_state.clone();
-        if ramp_affected {
-            self.update_color_ramp();
-        }
-
-        let properties = self.values.evaluate(parameters);
-        let evaluated = &properties.paint;
-
-        self.base.passes = if *evaluated.line_layer_opacity.uniform() > 0.0
-            && evaluated.line_opacity.constant_or(&1.0) > 0.0
-            && evaluated.line_color.constant_or(&Color::black()).a > 0.0
-            && evaluated.line_width.constant_or(&1.0) > 0.0
-        {
-            RenderPass::Translucent
-        } else {
-            RenderPass::None
-        };
-        self.values.set_evaluated(&mut self.base, properties);
-    }
-
     // query
     fn query_intersects_feature(
         &self,
@@ -615,8 +610,8 @@ impl RenderLayer for RenderLineLayer {
             Some(feature_state),
         )) * pixels_to_tile_units;
         // Test intersection
-        let half_width = (f64::from(self.get_line_width(feature, zoom, feature_state)) / 2.0
-            * f64::from(pixels_to_tile_units)) as f32;
+        let half_width =
+            (f64::from(self.line_width(feature, zoom, feature_state)) / 2.0 * f64::from(pixels_to_tile_units)) as f32;
 
         // Apply offset to geometry
         if offset != 0.0 && !geometry.is_empty() {

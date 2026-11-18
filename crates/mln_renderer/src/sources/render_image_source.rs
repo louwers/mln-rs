@@ -366,7 +366,7 @@ impl RenderSource for RenderImageSource {
         }
     }
 
-    fn get_image_render_data(&self) -> Option<ImageSourceRenderData<'_>> {
+    fn image_render_data(&self) -> Option<ImageSourceRenderData<'_>> {
         let tile_ids: &[UnwrappedTileID] = if self.loaded() { &self.tile_ids } else { &[] };
         Some(ImageSourceRenderData { bucket: self.bucket.as_ref(), tile_ids })
     }

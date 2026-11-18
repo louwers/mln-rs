@@ -66,8 +66,8 @@ impl<T: LayerType> Clone for LayerBucket<'_, T> {
 
 impl<T: LayerType> Copy for LayerBucket<'_, T> {}
 
-/// A symbol layer's `*-translate` in pixels, carried into placement the way
-/// GL JS passes `translation`.
+/// A symbol layer's `*-translate` in pixels, which placement moves the
+/// layer's symbols' collision geometry by.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct SymbolTranslate {
     pub(crate) offset: [f32; 2],
@@ -97,7 +97,7 @@ impl PlacedTile {
     pub(crate) fn new(tile: &RenderTile) -> PlacedTile {
         PlacedTile {
             id: tile.id,
-            overscaled_id: *tile.get_overscaled_tile_id(),
+            overscaled_id: *tile.overscaled_tile_id(),
             hold_for_fade: tile.hold_for_fade(),
             projection: tile.projection,
             matrix: tile.matrix,
@@ -105,7 +105,7 @@ impl PlacedTile {
     }
 }
 
-/// symbols: where a symbol bucket is: its tile, in the tile store, with
+/// Where a symbol bucket is: its tile, in the tile store, with
 /// where the tile is among its source's tiles as the frame's render tiles
 /// found it ([`RenderTile::slot`]), and its index among the tile's buckets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -116,13 +116,13 @@ pub(crate) struct BucketKey {
     pub(crate) source: SourceKey,
 }
 
-/// symbols: the symbol buckets of the frame's tiles, by key.
+/// The symbol buckets of the frame's tiles, by key.
 pub(crate) trait SymbolBuckets {
     fn get(&self, key: &BucketKey) -> Option<&SymbolBucket>;
     fn get_mut(&mut self, key: &BucketKey) -> Option<&mut SymbolBucket>;
 }
 
-/// symbols: a symbol bucket a layer places or draws, with its tile.
+/// A symbol bucket a layer places or draws, with its tile.
 #[derive(Clone)]
 pub(crate) struct BucketPlacementData {
     pub(crate) bucket: BucketKey,
@@ -134,7 +134,7 @@ pub(crate) struct BucketPlacementData {
     pub(crate) icon_translate: SymbolTranslate,
 }
 
-/// bench: the copies of symbol buckets that benchmarks' layers place, kept
+/// The copies of symbol buckets that benchmarks' layers place, kept
 /// where a tile store would keep the buckets, by their index, which is
 /// their keys' `bucket`. The benchmarks' entry points pass no store, so the
 /// copies are the thread's, and the layer that places one frees it
@@ -147,7 +147,7 @@ thread_local! {
     static HELD_BUCKETS: std::cell::Cell<Vec<Option<SymbolBucket>>> = const { std::cell::Cell::new(Vec::new()) };
 }
 
-/// bench: a copy of the bucket `bucket` points to, if it is a symbol
+/// A copy of the bucket `bucket` points to, if it is a symbol
 /// bucket, which `HeldBuckets` holds for a benchmark's layer to place, at
 /// the index this returns, until the layer drops.
 #[cfg(feature = "bench")]
@@ -234,21 +234,20 @@ impl<'a, T> LayerSource<'a, T> {
         }
     }
 
-    /// The image, of an image source.
-    #[must_use]
-    pub(crate) fn image(self) -> Option<ImageSourceRenderData<'a>> {
+    /// Whether the layer has nothing to draw of the source: no tiles.
+    fn is_empty(self) -> bool {
         match self {
-            LayerSource::Tiles(_) => None,
-            LayerSource::Image(image) => Some(image),
+            LayerSource::Tiles(tiles) => tiles.is_empty(),
+            LayerSource::Image(_) => false,
         }
     }
 }
 
 impl<'a> LayerSource<'a> {
-    /// The source as a layer of the type `T` sees it.
-    fn typed<T: LayerType>(self) -> LayerSource<'a, T> {
+    /// The source as the layer `layer_id` of the type `T` sees it.
+    fn typed<T: LayerType>(self, layer_id: &'a str) -> LayerSource<'a, T> {
         match self {
-            LayerSource::Tiles(tiles) => LayerSource::Tiles(tiles.typed()),
+            LayerSource::Tiles(tiles) => LayerSource::Tiles(tiles.typed(layer_id)),
             LayerSource::Image(image) => LayerSource::Image(image),
         }
     }
@@ -256,12 +255,16 @@ impl<'a> LayerSource<'a> {
 
 /// The tiles a layer draws in a frame: a selection of its source's render
 /// tiles, in the order the layer draws them, with what their tiles show, as
-/// a layer of the type `T` sees them.
+/// a layer of the type `T` sees them: each with the layer's bucket of the
+/// type's, which the glue of the type recovers as it hands the tile out.
 pub(crate) struct LayerTiles<'a, T = Erased> {
     tiles: &'a [RenderTile],
     /// What each of `tiles` shows, at its index.
     contents: &'a [Option<&'a Contents>],
     order: &'a [usize],
+    /// The id of the layer whose buckets the tiles hold; empty while the
+    /// tiles are the engine's.
+    layer_id: &'a str,
     layer_type: PhantomData<fn() -> T>,
 }
 
@@ -282,21 +285,21 @@ impl<'a> LayerTiles<'a> {
         contents: &'a [Option<&'a Contents>],
         order: &'a [usize],
     ) -> LayerTiles<'a> {
-        LayerTiles { tiles, contents, order, layer_type: PhantomData }
+        LayerTiles { tiles, contents, order, layer_id: "", layer_type: PhantomData }
     }
 
-    /// The tiles as a layer of the type `T` sees them.
-    fn typed<T: LayerType>(self) -> LayerTiles<'a, T> {
-        let LayerTiles { tiles, contents, order, layer_type: _ } = self;
-        LayerTiles { tiles, contents, order, layer_type: PhantomData }
+    /// The tiles as the layer `layer_id` of the type `T` sees them.
+    fn typed<T: LayerType>(self, layer_id: &'a str) -> LayerTiles<'a, T> {
+        let LayerTiles { tiles, contents, order, layer_id: _, layer_type: _ } = self;
+        LayerTiles { tiles, contents, order, layer_id, layer_type: PhantomData }
     }
 }
 
-impl<'a, T: 'a> LayerTiles<'a, T> {
+impl<'a, T: LayerType> LayerTiles<'a, T> {
     /// The tile at `index` of the source's tiles.
     fn tile(self, index: usize) -> Option<FrameTile<'a, T>> {
         let tile = self.tiles.get(index)?;
-        Some(FrameTile::new(tile, self.contents.get(index).copied().flatten()))
+        Some(FrameTile::new(tile, self.contents.get(index).copied().flatten(), self.layer_id))
     }
 
     pub(crate) fn iter(self) -> impl Iterator<Item = FrameTile<'a, T>> + 'a {
@@ -313,7 +316,9 @@ impl<'a, T: 'a> LayerTiles<'a, T> {
     pub(crate) fn get(self, position: usize) -> Option<FrameTile<'a, T>> {
         self.tile(*self.order.get(position)?)
     }
+}
 
+impl<'a, T: 'a> LayerTiles<'a, T> {
     /// The render tiles in order, without what they show.
     pub(crate) fn render_tiles(self) -> impl Iterator<Item = &'a RenderTile> + 'a {
         self.order.iter().filter_map(move |&i| self.tiles.get(i))
@@ -321,7 +326,7 @@ impl<'a, T: 'a> LayerTiles<'a, T> {
 
     /// The ids of the tiles, in order.
     pub(crate) fn tile_ids(self) -> impl Iterator<Item = OverscaledTileID> + 'a {
-        self.render_tiles().map(|tile| *tile.get_overscaled_tile_id())
+        self.render_tiles().map(|tile| *tile.overscaled_tile_id())
     }
 
     #[must_use]
@@ -342,6 +347,10 @@ pub(crate) struct Atlases {
 
 /// What a layer reads in the frame's update, besides its tiles.
 pub(crate) struct LayerUpdateParameters<'a> {
+    /// The frame's camera.
+    pub(crate) state: &'a TransformState,
+    /// The update the frame draws.
+    pub(crate) update_parameters: &'a UpdateParameters,
     /// The layer's source, `None` for a layer without one or a source type
     /// the renderer has no render source for.
     pub(crate) source: Option<&'a dyn RenderSource>,
@@ -458,6 +467,16 @@ pub(crate) trait TypedLayer {
     fn parts(&self) -> Parts<'_, Self>;
     fn parts_mut(&mut self) -> PartsMut<'_, Self>;
 
+    /// The passes the layer draws in with `evaluated`, its paint values
+    /// evaluated for a frame of `parameters`, which the layer first
+    /// completes where its type derives some of them. The engine then makes
+    /// them the layer's values.
+    fn passes(
+        &mut self,
+        parameters: &PropertyEvaluationParameters,
+        evaluated: &mut EvaluatedLayer<Self::Type>,
+    ) -> RenderPass;
+
     /// Called in the frame's update once the layer has `tiles`, the frame's
     /// tiles of its source in the order it draws them: `None` without a
     /// source, or for an image source. The layer collects here what the
@@ -465,15 +484,20 @@ pub(crate) trait TypedLayer {
     /// their symbols.
     fn update(&mut self, _parameters: &mut LayerUpdateParameters<'_>, _tiles: Option<LayerTiles<'_, Self::Type>>) {}
 
+    /// Called in the encode when the frame draws in another projection than
+    /// the last, once the engine dropped the layer's draws, for the layer to
+    /// drop what else it made for the last projection.
+    fn projection_changed(&mut self) {}
+
     /// Makes the layer's draws of the frame, in the frame's encode, from
-    /// what it draws of its `source`: the frame's tiles of the layer, in the
-    /// order the update gave them, or an image source's image; and what it
-    /// keeps of them, with the values of their uniforms.
+    /// what it draws of its `source`, which has something to draw: the
+    /// frame's tiles of the layer, in the order the update gave them, or an
+    /// image source's image; `None` for a type without a source. The layer
+    /// keeps what it makes of them, with the values of their uniforms.
     fn update_draws(
         &mut self,
         _parameters: &mut PaintParameters<'_>,
         _atlases: &Atlases,
-        _update_parameters: &UpdateParameters,
         _source: Option<LayerSource<'_, Self::Type>>,
     ) {
     }
@@ -515,6 +539,11 @@ pub(crate) trait LayerParts {
     /// frame, to those of the layer's style.
     fn transition(&mut self, parameters: &TransitionParameters);
 
+    /// Evaluates the layer's paint values for a frame of `parameters`, and
+    /// sets the passes the layer draws in with them
+    /// ([`TypedLayer::passes`]).
+    fn evaluate(&mut self, parameters: &PropertyEvaluationParameters);
+
     /// Whether a paint value of the layer is still in transition.
     fn has_transition(&self) -> bool;
 
@@ -528,12 +557,14 @@ pub(crate) trait LayerParts {
     /// tiles in, `None` for a layer without a source.
     fn update(&mut self, parameters: &mut LayerUpdateParameters<'_>) -> Option<TileOrder>;
 
-    /// Runs the layer's [`TypedLayer::update_draws`] with `source`.
+    /// The encode's update of the layer's draws: picks the shader variant
+    /// for the frame's projection, dropping the draws when it changed; drops
+    /// the draws of a layer whose `source` has nothing to draw; and
+    /// otherwise runs the layer's [`TypedLayer::update_draws`] with it.
     fn update_draws(
         &mut self,
         parameters: &mut PaintParameters<'_>,
         atlases: &Atlases,
-        update_parameters: &UpdateParameters,
         source: Option<LayerSource<'_>>,
     );
 
@@ -557,18 +588,6 @@ pub(crate) trait LayerParts {
     /// Drops the frame's draws of the layer and the caches of their GPU
     /// objects. The tiles' entries stay.
     fn remove_all_draws(&mut self);
-
-    /// Picks the shader variant for the state's projection; returns true and
-    /// drops the draws when it changed.
-    fn update_projection_variant(&mut self, state: &TransformState) -> bool {
-        let variant = if state.is_globe_rendering() { ProjectionVariant::Globe } else { ProjectionVariant::Mercator };
-        if variant == self.base().projection_variant {
-            return false;
-        }
-        self.base_mut().projection_variant = variant;
-        self.remove_all_draws();
-        true
-    }
 
     /// Visits the layer's draw groups of the frame, in drawing order: none
     /// unless the frame draws the layer. They are the groups `upload` and
@@ -637,6 +656,14 @@ impl<L: TypedLayer> LayerParts for L {
         base.style_dependencies = <L::Type as StyleLayerType>::PaintProperties::dependencies(&values.unevaluated);
     }
 
+    fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
+        let mut evaluated = self.parts_mut().values.evaluate(parameters);
+        let passes = self.passes(parameters, &mut evaluated);
+        let PartsMut { base, values, .. } = self.parts_mut();
+        base.passes = passes;
+        values.set_evaluated(base, evaluated);
+    }
+
     fn has_transition(&self) -> bool {
         <L::Type as StyleLayerType>::PaintProperties::has_transition(&self.parts().values.unevaluated)
     }
@@ -647,13 +674,12 @@ impl<L: TypedLayer> LayerParts for L {
 
     fn update(&mut self, parameters: &mut LayerUpdateParameters<'_>) -> Option<TileOrder> {
         let order = parameters.source.map(|_| L::TILE_ORDER);
-        let tiles = parameters.tiles(order).map(LayerTiles::typed::<L::Type>);
+        let style = Arc::clone(&self.base().style);
+        let tiles = parameters.tiles(order).map(|tiles| tiles.typed::<L::Type>(&style.base().id));
         if let Some(tiles) = tiles {
-            let base = self.parts_mut().base;
-            for tile in tiles.iter() {
-                if let Some(bucket) = tile.bucket(&*base.style) {
-                    base.passes |= RenderPass(bucket.layer.render_passes);
-                }
+            let base = self.base_mut();
+            for bucket in tiles.iter().filter_map(FrameTile::bucket) {
+                base.passes |= RenderPass(bucket.layer.render_passes);
             }
         }
         TypedLayer::update(self, parameters, tiles);
@@ -668,10 +694,25 @@ impl<L: TypedLayer> LayerParts for L {
         &mut self,
         parameters: &mut PaintParameters<'_>,
         atlases: &Atlases,
-        update_parameters: &UpdateParameters,
         source: Option<LayerSource<'_>>,
     ) {
-        TypedLayer::update_draws(self, parameters, atlases, update_parameters, source.map(LayerSource::typed));
+        let state = parameters.state;
+        let variant = if state.is_globe_rendering() { ProjectionVariant::Globe } else { ProjectionVariant::Mercator };
+        if variant != self.base().projection_variant {
+            self.base_mut().projection_variant = variant;
+            self.remove_all_draws();
+            self.projection_changed();
+        }
+        let style = Arc::clone(&self.base().style);
+        let source = source.map(|source| source.typed::<L::Type>(&style.base().id));
+        if <L::Type as StyleLayerType>::INFO.source != SourceKind::None {
+            if source.is_none_or(LayerSource::is_empty) {
+                self.remove_all_draws();
+                return;
+            }
+            self.parts_mut().drawing.begin_frame();
+        }
+        TypedLayer::update_draws(self, parameters, atlases, source);
     }
 
     fn mark_changed(&mut self, changed: &ChangedBuckets) {
@@ -735,10 +776,6 @@ fn set_tiles<L: TypedLayer, T>(layer: &mut L, tiles: Option<LayerTiles<'_, T>>) 
 /// What a layer type does that the engine can't do for it, whatever the
 /// type: the hooks the engine calls on the layers it holds.
 pub(crate) trait RenderLayer: LayerParts {
-    /// Fully evaluate possibly-transitioning paint properties based on a
-    /// zoom and some evaluated layout properties.
-    fn evaluate(&mut self, parameters: &PropertyEvaluationParameters);
-
     /// Whether the layer draws 3D geometry, whose depth it writes in the
     /// range of [`PaintParameters::depth_mode_for_3d`].
     fn is_3d(&self) -> bool {
@@ -778,13 +815,12 @@ pub(crate) trait RenderLayer: LayerParts {
         !self.placement_data().is_empty()
     }
 
-    /// symbols: the buckets the layer places, which only a symbol layer
-    /// has.
+    /// The buckets the layer places, which only a symbol layer has.
     fn placement_data(&self) -> &[BucketPlacementData] {
         &[]
     }
 
-    /// symbols: the buckets that another layer places and this layer draws,
+    /// The buckets that another layer places and this layer draws,
     /// at its own translation.
     fn follower_data(&self) -> &[BucketPlacementData] {
         &[]
