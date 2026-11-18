@@ -1,6 +1,3 @@
-mod gtest_query;
-mod support;
-
 use std::sync::{Arc, OnceLock};
 
 use geojson::{Feature, GeoJson, Geometry};
@@ -18,10 +15,11 @@ use mln_style::sources::geojson::GeoJSONOptions;
 use mln_util::geo::{LatLng, LatLngBounds};
 use mln_util::pool::Pool;
 use serde_json::json;
-use support::*;
+
+use crate::support::*;
 
 #[must_use]
-pub fn style_image(
+pub(crate) fn style_image(
     id: &str,
     image: mln_util::image::PremultipliedImage,
     pixel_ratio: f32,
@@ -34,7 +32,7 @@ pub fn style_image(
 
 /// Sets `layer`'s property `name` from style JSON.
 #[track_caller]
-pub fn set(layer: &mut Layer, name: &str, value: &serde_json::Value) {
+pub(crate) fn set(layer: &mut Layer, name: &str, value: &serde_json::Value) {
     let error = layer.set_property(name, &Convertible::from(value), None);
     assert!(error.is_none(), "{name}: {error:?}");
 }

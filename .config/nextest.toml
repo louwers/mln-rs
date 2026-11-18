@@ -18,5 +18,5 @@ default-filter = """
     | package(mln-rs-storage) | package(mln-rs-storage-offline) | package(mln-rs-runtime)
     | package(mln-rs-c) | package(mln-rs-gl) | package(mln-rs-vulkan) | package(mln-rs-mtl)
     | package(mln-rs-d3d12) | package(mln-rs-webgpu)
-) & not test(=render_tests_through_the_codec)
+) & not test(=render_tests::render_tests_through_the_codec)
 """

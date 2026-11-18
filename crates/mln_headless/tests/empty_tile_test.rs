@@ -3,15 +3,14 @@
 // raster tile's parent is drawn in its place, as in GL JS, and a vector tile is empty unless the
 // source is `sparse`.
 
-mod support;
-
 use std::sync::Arc;
 
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::{Data, Kind, Resource, Response};
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
-use support::*;
+
+use crate::support::*;
 
 // protobuf encoding for a hand-made tile.
 fn varint(out: &mut Vec<u8>, mut value: u64) {

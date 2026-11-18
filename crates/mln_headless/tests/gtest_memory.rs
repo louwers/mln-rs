@@ -1,5 +1,3 @@
-mod support;
-
 use std::sync::Arc;
 
 use mln_headless::HeadlessFrontend;
@@ -12,7 +10,8 @@ use mln_util::hash::HashMap;
 use mln_util::pool::Pool;
 use mln_util::size::Size;
 use parking_lot::Mutex;
-use support::{TestLoop, read_bytes};
+
+use crate::support::{TestLoop, read_bytes};
 
 /// The `MemoryTest` fixture.
 struct MemoryTest {

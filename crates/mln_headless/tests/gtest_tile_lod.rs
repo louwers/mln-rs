@@ -1,5 +1,3 @@
-mod support;
-
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, OnceLock};
 
@@ -15,7 +13,8 @@ use mln_style::sources::CustomGeometrySourceHandle;
 use mln_style::sources::custom_geometry_source::{self, Options as CustomGeometrySourceOptions};
 use mln_util::geo::LatLngBounds;
 use mln_util::pool::Pool;
-use support::*;
+
+use crate::support::*;
 
 /// Changes the map's tile settings.
 fn set_tile(map: &mut Map, change: impl FnOnce(&mut TileSettings)) {

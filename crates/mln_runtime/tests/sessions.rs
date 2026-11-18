@@ -4,8 +4,6 @@
 // offscreen,queries}.c and map/still_image.c at eae96a42c) where those test
 // the same rules.
 
-mod support;
-
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::channel;
@@ -25,7 +23,8 @@ use mln_util::chrono::Timestamp;
 use mln_util::geo::{LatLng, ScreenCoordinate};
 use mln_util::size::Size;
 use parking_lot::Mutex;
-use support::{EventLog, TIMEOUT, eventually, result_of, runtime, wait, wait_err};
+
+use crate::support::{EventLog, TIMEOUT, eventually, result_of, runtime, wait, wait_err};
 
 const SIZE: Size = Size { width: 64, height: 64 };
 

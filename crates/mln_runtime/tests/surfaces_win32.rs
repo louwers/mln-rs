@@ -6,8 +6,6 @@
 #![cfg(windows)]
 #![expect(unsafe_code, reason = "the tests make Win32 windows to present to")]
 
-mod support;
-
 use std::rc::Rc;
 use std::sync::{Arc, mpsc};
 use std::thread::JoinHandle;
@@ -23,7 +21,6 @@ use mln_runtime::{
     FrameResult, Map, MapOptions, RenderSession, RenderTarget, Runtime, Surface,
 };
 use mln_util::size::Size;
-use support::{TIMEOUT, eventually, runtime, wait};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -32,6 +29,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WNDCLASSW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP,
 };
 use windows::core::w;
+
+use crate::support::{TIMEOUT, eventually, runtime, wait};
 
 const SIZE: Size = Size { width: 64, height: 64 };
 

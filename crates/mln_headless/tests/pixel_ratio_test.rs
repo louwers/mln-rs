@@ -1,8 +1,6 @@
 // A map whose pixel ratio changes renders as a map made at the new ratio,
 // and keeps its tiles.
 
-mod support;
-
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -12,7 +10,8 @@ use mln_util::ErrorKind;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use parking_lot::Mutex;
-use support::*;
+
+use crate::support::*;
 
 const STYLE: &str = r##"{
   "version": 8,

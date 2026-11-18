@@ -1,10 +1,9 @@
 // A map whose size changes renders as a map made at the new size.
 
-mod support;
-
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
-use support::*;
+
+use crate::support::*;
 
 /// A heatmap over a grid of points that reaches every edge of the map: a
 /// heatmap drawn at the wrong size shows as a cropped or shifted grid.

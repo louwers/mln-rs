@@ -2,8 +2,6 @@
 // tests (tests/native/abi/runtime/events.c and event_generations.c at
 // eae96a42c) where those test the same rules.
 
-mod support;
-
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -12,7 +10,8 @@ use mln_map::MapEvent;
 use mln_renderer::RendererEvent;
 use mln_runtime::{ErrorKind, EventMask, EventSource, EventType, MapOptions, RuntimeEvent, RuntimeEventKind};
 use parking_lot::Mutex;
-use support::{EMPTY_STYLE, EventLog, map, map_options, runtime, wait, wait_err};
+
+use crate::support::{EMPTY_STYLE, EventLog, map, map_options, runtime, wait, wait_err};
 
 fn is_map_event(event: &RuntimeEvent, event_type: EventType) -> bool {
     event.kind.event_type() == event_type
@@ -33,7 +32,7 @@ fn a_command_sends_its_events_before_it_completes() {
         done.lock().push("completed".to_owned());
         tx.send(result).unwrap();
     });
-    rx.recv_timeout(support::TIMEOUT).unwrap().unwrap();
+    rx.recv_timeout(crate::support::TIMEOUT).unwrap().unwrap();
     let order = order.lock();
     let position = |name: &str| order.iter().position(|entry| entry == name);
     assert!(position("MapLoadingStarted") < position("MapStyleLoaded"), "{order:?}");

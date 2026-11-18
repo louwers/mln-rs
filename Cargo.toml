@@ -569,6 +569,14 @@ workspace = true
 [patch.crates-io]
 fsst-rs = { path = "patches/fsst-rs" }
 
+# Debug builds, the tests' among them, keep line tables only: backtraces keep
+# their files and lines, but a debugger shows no variables
+# (`CARGO_PROFILE_DEV_DEBUG=true` brings them back). Full debug info makes a
+# checkout's test build gigabytes larger, more so where it goes into the
+# binaries, as on Linux and Android.
+[profile.dev]
+debug = "line-tables-only"
+
 # Fat LTO with one codegen unit: smaller release binaries, for a longer
 # build. The browser build adds opt-level "s" (`mise run web:build`).
 [profile.release]

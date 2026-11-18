@@ -1,8 +1,6 @@
 // Dropping a runtime or a render session waits for the threads that it owns
 // to end, and a drop on one of the library's threads doesn't wait there.
 
-mod support;
-
 use std::cell::RefCell;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -12,7 +10,8 @@ use httpmock::MockServer;
 use mln_runtime::{AttachOptions, Map, RenderSession, RenderTarget, Runtime, RuntimeOptions};
 use mln_util::size::Size;
 use parking_lot::Mutex;
-use support::{EMPTY_STYLE, TIMEOUT, eventually, map, wait};
+
+use crate::support::{EMPTY_STYLE, TIMEOUT, eventually, map, wait};
 
 /// The calling thread's name, and a flag that it sets once it has ended.
 #[derive(Clone)]

@@ -9,11 +9,18 @@ repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
 include.workspace = true
+# The one [[test]] below, whose tests/main.rs holds the other files in tests/.
+autotests = false
 
 [lib]
 name = "mln_runtime"
 # The doc comments have no examples to run.
 doctest = false
+
+# Every integration test, in one binary.
+[[test]]
+name = "integration"
+path = "tests/main.rs"
 
 # The backends that sessions render with, each where its platform has it:
 # Metal on Apple's, Vulkan elsewhere but in the browser, D3D12 on Windows,

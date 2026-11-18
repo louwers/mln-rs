@@ -12,7 +12,7 @@ filter=()
 if [[ ${usage_backend_only:-false} == true ]]; then
     export NEXTEST_PROFILE=backend
 elif [[ "$(uname -s)" != Linux ]]; then
-    filter=(-E 'not test(=render_tests_through_the_codec)')
+    filter=(-E 'not test(=render_tests::render_tests_through_the_codec)')
 fi
 export MLN_RENDER_BACKEND="$usage_backend"
 export MLN_VULKAN_VALIDATION=0 MTL_DEBUG_LAYER=0 MTL_DEBUG_LAYER_ERROR_MODE=assert

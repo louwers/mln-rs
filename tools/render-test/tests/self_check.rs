@@ -2,7 +2,7 @@
 // rendered one: manifest, metadata and operation parsing, the pixelmatch
 // comparison and the reports. Every test that runs must pass.
 
-mod suite;
+use crate::suite;
 
 #[test]
 fn self_check() {

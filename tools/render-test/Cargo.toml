@@ -11,7 +11,7 @@ categories.workspace = true
 # The runner of the shared render and query tests. Not released: the
 # difftests (louwers/mln-rs-difftests) take it from a git revision.
 publish = false
-# The [[test]]s below; tests/ also holds their module.
+# The one [[test]] below, whose tests/main.rs holds the other files in tests/.
 autotests = false
 
 [lib]
@@ -50,28 +50,11 @@ serde_json.workspace = true
 mln_wire.workspace = true
 tempfile.workspace = true
 
-# Each test's report and actual/diff images go to target/tmp/<test name>.
-#
-# The whole shared render suite with each test's expected image as the
-# rendered one (`--self-check`).
+# Every integration test, in one binary (tests/main.rs). Each test's report and
+# actual/diff images go to target/tmp/<test name>.
 [[test]]
-name = "self_check"
-path = "tests/self_check.rs"
-
-# Every render and query test.
-[[test]]
-name = "render_tests"
-path = "tests/render_tests.rs"
-
-# Every test style's layers cross to the worker codec as they went in.
-[[test]]
-name = "layer_round_trip"
-path = "tests/layer_round_trip.rs"
-
-# --jobs against a run in one process.
-[[test]]
-name = "jobs"
-path = "tests/jobs.rs"
+name = "integration"
+path = "tests/main.rs"
 
 [lints]
 workspace = true

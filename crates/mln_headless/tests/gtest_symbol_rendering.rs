@@ -2,8 +2,6 @@
 // #4628): symbol drawables that placement hides completely draw nothing,
 // and draw again once placement shows them.
 
-mod support;
-
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -22,7 +20,8 @@ use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::pool::Pool;
 use mln_util::size::Size;
-use support::*;
+
+use crate::support::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SymbolKind {

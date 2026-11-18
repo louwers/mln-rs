@@ -4,8 +4,6 @@
 
 #![expect(unsafe_code, reason = "the tests make and wrap the host's devices and targets through each backend's API")]
 
-mod support;
-
 use mln_map::MapMode;
 use mln_runtime::{
     Adapter, AttachOptions, BackendType, BorrowedRing, ConsumerSync, DemandMode, Device, DeviceOptions, ErrorKind,
@@ -13,7 +11,8 @@ use mln_runtime::{
     SyncKinds,
 };
 use mln_util::size::Size;
-use support::{eventually, runtime, wait};
+
+use crate::support::{eventually, runtime, wait};
 
 const SIZE: Size = Size { width: 64, height: 64 };
 
@@ -690,7 +689,7 @@ mod vulkan {
 
     /// Services `driver` until `done` holds.
     fn service_until(driver: &mln_runtime::DriverWork, mut done: impl FnMut() -> bool) {
-        let deadline = std::time::Instant::now() + support::TIMEOUT;
+        let deadline = std::time::Instant::now() + crate::support::TIMEOUT;
         while !done() {
             assert!(std::time::Instant::now() < deadline, "the driver never got there");
             driver.service().unwrap();

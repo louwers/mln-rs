@@ -1,7 +1,7 @@
 // Every render and query test of the shared suite on the Rust renderer. The
 // port's ignore file (ignores/rust-port.json) lists what is expected to fail.
 
-mod suite;
+use crate::suite;
 
 #[test]
 fn render_tests() {

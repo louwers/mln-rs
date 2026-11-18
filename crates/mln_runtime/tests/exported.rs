@@ -6,8 +6,6 @@
 
 #![expect(unsafe_code, reason = "the tests import the exported images through each backend's API")]
 
-mod support;
-
 use mln_map::MapMode;
 use mln_runtime::{
     AcquiredFrame, AttachOptions, BackendType, ConsumerSync, DemandMode, Device, DeviceOptions, DmaBufFormat,
@@ -15,7 +13,8 @@ use mln_runtime::{
     GpuSync, LogicalExtent, Map, MapOptions, RenderSession, RenderTarget, Runtime, SyncKind, SyncKinds,
 };
 use mln_util::size::Size;
-use support::{eventually, runtime, wait};
+
+use crate::support::{eventually, runtime, wait};
 
 const SIZE: Size = Size { width: 64, height: 48 };
 const DEPTH: usize = 3;

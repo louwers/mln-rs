@@ -1,9 +1,6 @@
 // Markers: `// gtest: Group.Name` above each ported test; tests that need
 // code that is not ported yet are `#[ignore]`d with the missing part.
 
-mod gtest_prefetch;
-mod support;
-
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
 use std::rc::Rc;
@@ -61,7 +58,8 @@ use mln_util::size::Size;
 use mln_util::tileset::{PartialTileset, Scheme};
 use parking_lot::Mutex;
 use serde_json::json;
-use support::*;
+
+use crate::support::*;
 
 fn ll(lat: f64, lon: f64) -> LatLng {
     LatLng::new(lat, lon).expect("LatLng")
@@ -72,7 +70,7 @@ fn insets(top: f64, left: f64, bottom: f64, right: f64) -> EdgeInsets {
 }
 
 #[must_use]
-pub fn style_image(id: &str, image: PremultipliedImage, pixel_ratio: f32) -> Arc<mln_style::image::Impl> {
+pub(crate) fn style_image(id: &str, image: PremultipliedImage, pixel_ratio: f32) -> Arc<mln_style::image::Impl> {
     Arc::new(
         mln_style::image::Impl::new(id.to_owned(), image, pixel_ratio, false, Vec::new(), Vec::new(), None, None, None)
             .expect("style::Image"),

@@ -2,15 +2,14 @@
 // has no surface to give, and what an offscreen session refuses. A window
 // that presents frames is in surfaces_window.rs, which needs a display.
 
-mod support;
-
 use mln_map::MapMode;
 use mln_runtime::{
     AttachOptions, Driver, ErrorKind, Map, MapOptions, RenderSessionState, RenderTarget, Runtime, Surface,
 };
 use mln_util::size::Size;
-use support::{runtime, wait};
 use wgpu::rwh::{DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, WindowHandle};
+
+use crate::support::{runtime, wait};
 
 const SIZE: Size = Size { width: 64, height: 64 };
 

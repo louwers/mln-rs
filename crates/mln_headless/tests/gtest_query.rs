@@ -19,8 +19,8 @@ use mln_util::feature::Feature;
 use mln_util::geo::{LatLng, ScreenCoordinate};
 use serde_json::json;
 
+use crate::gtest_api::{set, style_image};
 use crate::support::*;
-use crate::{set, style_image};
 
 /// The `QueryTest` fixture: a static 256x256 map with
 /// `test/fixtures/api/query_style.json` and the "test-icon" image, rendered

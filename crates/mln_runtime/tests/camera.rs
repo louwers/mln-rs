@@ -3,8 +3,6 @@
 // (tests/native/abi/map/camera.c, camera_transitions.c and options.c at
 // eae96a42c) where those test the same rules.
 
-mod support;
-
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
 
@@ -16,7 +14,8 @@ use mln_runtime::{
     CameraFitArea, CameraFitOptions, CameraFitUpdate, ErrorKind, EventMask, TileOptions, ViewportOptions,
 };
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds};
-use support::{map, runtime, wait, wait_err};
+
+use crate::support::{map, runtime, wait, wait_err};
 
 fn animation(duration: Duration) -> AnimationOptions {
     AnimationOptions { duration: Some(duration), ..AnimationOptions::default() }

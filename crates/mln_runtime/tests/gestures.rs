@@ -1,12 +1,11 @@
 // A runtime map as the camera that mln_gestures' recognizer moves: its reads
 // come from the published snapshot, and its commands go out without waiting.
 
-mod support;
-
 use mln_gestures::{Button, GestureCamera, GestureRecognizer, Input, Modifiers, PointerKind};
 use mln_map::{CameraOptions, CameraUpdate};
 use mln_util::geo::{LatLng, ScreenCoordinate};
-use support::{map, runtime, wait};
+
+use crate::support::{map, runtime, wait};
 
 fn at(x: f64, y: f64) -> ScreenCoordinate {
     ScreenCoordinate::new(x, y)

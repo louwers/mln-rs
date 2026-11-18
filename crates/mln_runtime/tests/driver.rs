@@ -3,8 +3,6 @@
 // maplibre-native-ffi's ABI tests (tests/native/abi/render/driver.c at
 // eae96a42c) where those test the same rules for a caller driver.
 
-mod support;
-
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -16,7 +14,8 @@ use mln_runtime::{
     RenderTarget, Runtime, Wake,
 };
 use mln_util::size::Size;
-use support::{TIMEOUT, eventually, runtime, wait};
+
+use crate::support::{TIMEOUT, eventually, runtime, wait};
 
 const SIZE: Size = Size { width: 64, height: 64 };
 

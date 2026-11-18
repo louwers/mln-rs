@@ -2,8 +2,6 @@
 // tests (tests/native/abi/style/{sources,custom_sources,geojson,layers}.c at
 // eae96a42c) where those test the same rules.
 
-mod support;
-
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -18,7 +16,8 @@ use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::range::Range;
 use mln_util::size::Size;
-use support::{EMPTY_STYLE, TestRuntime, map, runtime, wait, wait_err};
+
+use crate::support::{EMPTY_STYLE, TestRuntime, map, runtime, wait, wait_err};
 
 const EMPTY_GEOJSON_SOURCE: &str = r#"{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}"#;
 

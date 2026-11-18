@@ -1,14 +1,13 @@
 // The tile debug overlays of `Map::set_debug` (tile borders, parse status,
 // timestamps) and the rendering stats view, on the headless frontend.
 
-mod support;
-
 use mln_map::{CameraOptions, MapDebugOptions};
 use mln_storage::{Kind, Resource};
 use mln_util::chrono::Timestamp;
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
-use support::{MapTest, file_response};
+
+use crate::support::{MapTest, file_response};
 
 /// A raster source of one solid tile, whose responses carry `modified` and
 /// `expires` times.

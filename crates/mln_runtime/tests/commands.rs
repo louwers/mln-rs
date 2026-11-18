@@ -3,8 +3,6 @@
 // lifecycle.c, completion/completion.c and map/command_groups.c at eae96a42c)
 // where those test the same rules.
 
-mod support;
-
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::channel;
@@ -13,7 +11,8 @@ use mln_map::{CameraOptions, CameraUpdate};
 use mln_runtime::{ErrorKind, LogicalExtent, MapOptions, ResourceRequest, Runtime, RuntimeOptions};
 use mln_util::size::Size;
 use parking_lot::Mutex;
-use support::{EMPTY_STYLE, TIMEOUT, TempDir, eventually, map, map_options, runtime, wait, wait_err};
+
+use crate::support::{EMPTY_STYLE, TIMEOUT, TempDir, eventually, map, map_options, runtime, wait, wait_err};
 
 /// `width` by `height` logical pixels at a scale factor of 1.
 fn extent(width: u32, height: u32) -> LogicalExtent {
@@ -294,7 +293,7 @@ fn maps_parse_against_the_runtime_registry() {
     builder.functions_mut().add("seven", vec![seven]).unwrap();
     let registry = builder.build();
     let custom =
-        support::TestRuntime(Runtime::with_registry(&RuntimeOptions::default(), Arc::clone(&registry)).unwrap());
+        crate::support::TestRuntime(Runtime::with_registry(&RuntimeOptions::default(), Arc::clone(&registry)).unwrap());
     assert!(Arc::ptr_eq(custom.registry(), &registry));
     let map = map(&custom);
     assert!(Arc::ptr_eq(map.registry(), &registry));
@@ -307,7 +306,7 @@ fn maps_parse_against_the_runtime_registry() {
 
     // A map of a runtime with the built-ins drops the layer it can't parse.
     let builtins = runtime();
-    let map = support::map(&builtins);
+    let map = crate::support::map(&builtins);
     wait(map.set_style_json(style));
     let layers = wait(map.style_layers());
     assert!(layers.is_empty(), "{layers:?}");

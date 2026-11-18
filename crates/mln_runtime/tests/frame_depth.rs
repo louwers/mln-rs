@@ -4,8 +4,6 @@
 // between the projection's far depth and 1. A backend that this build or
 // machine lacks skips its cases.
 
-mod support;
-
 use mln_map::{CameraOptions, CameraUpdate, MapMode};
 use mln_runtime::{
     AcquiredFrame, AttachOptions, ClipDepthRange, DemandMode, Device, DeviceOptions, ErrorKind, FrameDemand,
@@ -15,7 +13,8 @@ use mln_runtime::{
 use mln_util::geo::{EdgeInsets, LatLng};
 use mln_util::mat4::{Mat4, matrix};
 use mln_util::size::Size;
-use support::{eventually, runtime, wait};
+
+use crate::support::{eventually, runtime, wait};
 
 const SIZE: Size = Size { width: 64, height: 48 };
 /// The longitude of the extrusion's east wall: it covers the map west of it.

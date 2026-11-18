@@ -3,8 +3,6 @@
 // style/feature_state.c and render/invalidation.c at eae96a42c) where those
 // test the same rules.
 
-mod support;
-
 use feature::{Identifier, Value};
 use mln_runtime::{
     AttachOptions, DemandMode, ErrorKind, FeatureState, FeatureStateSelector, FrameDemand, FrameDisposition, Map,
@@ -12,7 +10,8 @@ use mln_runtime::{
 };
 use mln_util::geo::ScreenCoordinate;
 use mln_util::size::Size;
-use support::{EMPTY_STYLE, eventually, map, runtime, wait, wait_err};
+
+use crate::support::{EMPTY_STYLE, eventually, map, runtime, wait, wait_err};
 
 const SIZE: Size = Size { width: 64, height: 64 };
 const RED: [u8; 4] = [255, 0, 0, 255];

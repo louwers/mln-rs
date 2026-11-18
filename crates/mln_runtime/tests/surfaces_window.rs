@@ -8,8 +8,6 @@
 
 #![cfg(target_os = "linux")]
 
-mod support;
-
 use std::sync::Arc;
 
 use mln_map::MapMode;
@@ -18,11 +16,12 @@ use mln_runtime::{
     RenderSession, RenderTarget, Runtime, Surface,
 };
 use mln_util::size::Size;
-use support::{TIMEOUT, eventually, runtime, wait};
 use winit::dpi::PhysicalSize;
 use winit::event_loop::EventLoop;
 use winit::platform::x11::EventLoopBuilderExtX11;
 use winit::window::Window;
+
+use crate::support::{TIMEOUT, eventually, runtime, wait};
 
 const STYLE: &str =
     r##"{"version":8,"sources":{},"layers":[{"id":"bg","type":"background","paint":{"background-color":"#00ff00"}}]}"##;

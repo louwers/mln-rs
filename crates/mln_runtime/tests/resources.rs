@@ -3,8 +3,6 @@
 // (tests/native/abi/resources/{provider,transforms,ambient_cache,offline}.c
 // at eae96a42c) where those test the same rules.
 
-mod support;
-
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -17,7 +15,8 @@ use mln_storage::offline::{OfflineRegionDownloadState, OfflineTilePyramidRegionD
 use mln_storage::resource::Kind;
 use mln_storage::{ResourceError, Response};
 use mln_util::geo::{LatLng, LatLngBounds};
-use support::{EMPTY_STYLE, EventLog, TempDir, map, runtime, wait, wait_err};
+
+use crate::support::{EMPTY_STYLE, EventLog, TempDir, map, runtime, wait, wait_err};
 
 fn style_response() -> Response {
     Response { data: Some(Arc::new(EMPTY_STYLE.as_bytes().to_vec())), ..Response::default() }
@@ -222,7 +221,7 @@ fn a_cancelled_request_calls_back_and_takes_no_answer() {
     wait(runtime.set_resource_provider(move |request: ResourceRequest| requests.send(request).unwrap()));
     let map = map(&runtime);
     let load = map.set_style_url("custom://never").unwrap();
-    let request = held.recv_timeout(support::TIMEOUT).unwrap();
+    let request = held.recv_timeout(crate::support::TIMEOUT).unwrap();
     let (cancelled, on_cancel) = std::sync::mpsc::channel();
     request.on_cancel(move || cancelled.send(()).unwrap()).unwrap();
     assert_eq!(ErrorKind::InvalidState, request.on_cancel(|| {}).unwrap_err().kind);
@@ -230,7 +229,7 @@ fn a_cancelled_request_calls_back_and_takes_no_answer() {
     // A new style load drops the first one's request.
     wait(map.set_style_json(EMPTY_STYLE));
     assert_eq!(ErrorKind::Cancelled, load.wait().unwrap_err().kind);
-    on_cancel.recv_timeout(support::TIMEOUT).unwrap();
+    on_cancel.recv_timeout(crate::support::TIMEOUT).unwrap();
     assert!(request.is_cancelled());
     assert_eq!(ErrorKind::Cancelled, request.on_cancel(|| {}).unwrap_err().kind);
     assert_eq!(ErrorKind::InvalidState, request.respond(style_response()).unwrap_err().kind);
@@ -380,7 +379,7 @@ impl ResourceProvider for Gate {
 impl Drop for Gate {
     fn drop(&mut self) {
         let _ = self.entered.send(());
-        let _ = self.gate.lock().recv_timeout(support::TIMEOUT);
+        let _ = self.gate.lock().recv_timeout(crate::support::TIMEOUT);
     }
 }
 
@@ -400,7 +399,7 @@ fn an_offline_operation_sent_before_a_release_completes_first() {
     let (entered, parked) = std::sync::mpsc::channel::<()>();
     wait(runtime.set_resource_provider(Gate { entered, gate: parking_lot::Mutex::new(gate) }));
     let cleared = runtime.clear_resource_provider();
-    parked.recv_timeout(support::TIMEOUT).unwrap();
+    parked.recv_timeout(crate::support::TIMEOUT).unwrap();
     let (record, order) = std::sync::mpsc::channel();
     let record_created = record.clone();
     let created = runtime.offline().create_region(definition, b"raced".to_vec()).unwrap();
@@ -409,7 +408,7 @@ fn an_offline_operation_sent_before_a_release_completes_first() {
     released.on_complete(move |result| drop(record.send(result.map(|()| "released").map_err(|e| e.message))));
     drop(open);
     wait(cleared);
-    let next = || order.recv_timeout(support::TIMEOUT).unwrap();
+    let next = || order.recv_timeout(crate::support::TIMEOUT).unwrap();
     assert_eq!([Ok("created"), Ok("released")], [next(), next()]);
 
     let reopened = Runtime::new(&RuntimeOptions { cache_path: Some(cache), ..RuntimeOptions::default() }).unwrap();

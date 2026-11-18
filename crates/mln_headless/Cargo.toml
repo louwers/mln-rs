@@ -12,7 +12,7 @@ categories.workspace = true
 # maps with. Not released: mln_runtime's offscreen render session is the
 # public way to render without a window.
 publish = false
-# The [[test]]s below; tests/ also holds their modules.
+# The one [[test]] below, whose tests/main.rs holds the other files in tests/.
 autotests = false
 
 [lib]
@@ -31,76 +31,10 @@ mln_text.workspace = true
 mln_util.workspace = true
 parking_lot.workspace = true
 
-# The M1 background render tests through Map -> HeadlessFrontend, without the
-# render-test runner (see the file comment).
+# Every integration test, in one binary.
 [[test]]
-name = "m1_background_render_test"
-path = "tests/m1_background_render_test.rs"
-
-# gtests-data: test/text/local_glyph_rasterizer.test.cpp (renders a map
-# through HeadlessFrontend with a StubFileSource).
-[[test]]
-name = "local_glyph_rasterizer_test"
-path = "tests/local_glyph_rasterizer_test.rs"
-
-[[test]]
-name = "map_snapshot_test"
-path = "tests/map_snapshot_test.rs"
-
-# gtests-core: test/map/{map,prefetch}.test.cpp through Map
-# (over a StubFileSource/FakeFileSource) -> HeadlessFrontend. Shared fixture
-# in tests/support/mod.rs.
-[[test]]
-name = "gtest_map"
-path = "tests/gtest_map.rs"
-
-# gtests-core: test/api/{annotations,api_misuse,custom_geometry_source,
-# custom_layer,query}.test.cpp and test/api/recycle_map.cpp. Shared fixture
-# in tests/support/mod.rs.
-[[test]]
-name = "gtest_api"
-path = "tests/gtest_api.rs"
-
-[[test]]
-name = "gtest_tile_lod"
-path = "tests/gtest_tile_lod.rs"
-
-# gtests-core: test/util/memory.test.cpp (Map over a StubFileSource with the
-# test/fixtures/resources styles). Shared fixture in tests/support/mod.rs.
-[[test]]
-name = "gtest_memory"
-path = "tests/gtest_memory.rs"
-
-# gtests-core: test/renderer/symbol_rendering.test.cpp (maplibre-native
-# #4628). Shared fixture in tests/support/mod.rs.
-[[test]]
-name = "gtest_symbol_rendering"
-path = "tests/gtest_symbol_rendering.rs"
-
-# Map::set_debug's tile overlays and the rendering stats view. Shared fixture
-# in tests/support/mod.rs.
-[[test]]
-name = "debug_options_test"
-path = "tests/debug_options_test.rs"
-
-# Map::set_pixel_ratio and HeadlessFrontend::set_pixel_ratio.
-[[test]]
-name = "pixel_ratio_test"
-path = "tests/pixel_ratio_test.rs"
-
-# Empty and absent tiles of vector and raster sources through Map -> HeadlessFrontend.
-[[test]]
-name = "empty_tile_test"
-path = "tests/empty_tile_test.rs"
-
-[[test]]
-name = "custom_layer_test"
-path = "tests/custom_layer_test.rs"
-
-# Map::set_size and HeadlessFrontend::set_size with a heatmap, which draws into a texture of its own.
-[[test]]
-name = "resize_test"
-path = "tests/resize_test.rs"
+name = "integration"
+path = "tests/main.rs"
 
 [dev-dependencies]
 # gtest_map's MainResourceLoader and Database file source tests.
