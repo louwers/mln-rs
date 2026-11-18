@@ -20,6 +20,7 @@ use mln_util::pool::TaskGroup;
 
 use crate::bucket::UploadNeeds;
 use crate::buckets::symbol_bucket::SymbolBucket;
+use crate::gfx::context::Context;
 use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::image_store::ImageStore;
 use crate::layer_type::{recover_bucket, recover_bucket_mut};
@@ -318,7 +319,13 @@ impl TileStore {
     /// Readies the buckets of the tiles of `render_tiles`, render tiles of
     /// the source `key`, for the frame's draws, which read what `needs`
     /// says (`Contents::upload`).
-    pub(crate) fn upload(&mut self, key: SourceKey, render_tiles: &[RenderTile], needs: UploadNeeds) {
+    pub(crate) fn upload(
+        &mut self,
+        key: SourceKey,
+        render_tiles: &[RenderTile],
+        context: &mut Context,
+        needs: UploadNeeds,
+    ) {
         self.ctx.upload_needs = Some(needs);
         let Some(tiles) = self.sources.get_mut(&key) else {
             return;
@@ -328,7 +335,7 @@ impl TileStore {
                 if let Contents::Geometry(contents) = contents {
                     contents.textures.resolve(&self.ctx.atlas);
                 }
-                contents.upload(needs);
+                contents.upload(context, needs);
             }
         }
     }

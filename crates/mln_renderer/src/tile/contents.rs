@@ -28,6 +28,7 @@ use crate::bucket_geometry::BucketGeometry;
 use crate::buckets::hillshade_bucket::HillshadeBucket;
 use crate::buckets::raster_bucket::RasterBucket;
 use crate::geometry::feature_index::{FeatureIndex, QueryLayers, QueryResults};
+use crate::gfx::context::Context;
 use crate::gfx::dynamic_texture_atlas::{AtlasLease, BinUse, DynamicTextureAtlas};
 use crate::layer_drawing::{BucketChanges, ChangedBuckets};
 use crate::layer_type::{ErasedEvaluatedLayer, LayerType};
@@ -569,10 +570,14 @@ impl Contents {
     }
 
     /// Readies the buckets that are new or changed since their last upload
-    /// for the frame's draws ([`Bucket::upload`]).
-    pub(crate) fn upload(&mut self, needs: UploadNeeds) {
+    /// for the frame's draws ([`Bucket::upload`]), and uploads the indexes
+    /// they moved through `context`.
+    pub(crate) fn upload(&mut self, context: &mut Context, needs: UploadNeeds) {
         match self {
-            Contents::Geometry(contents) => contents.upload(needs),
+            Contents::Geometry(contents) => {
+                contents.upload(needs);
+                contents.bucket_geometry.upload_indexes(context);
+            }
             Contents::Raster(bucket) => bucket.upload_image(),
             Contents::Dem(bucket) => bucket.upload_dem(),
             Contents::Empty => {}

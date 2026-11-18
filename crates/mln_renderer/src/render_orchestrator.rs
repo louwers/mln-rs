@@ -1202,7 +1202,7 @@ impl RenderOrchestrator {
         let needs = crate::layers::upload_needs(context);
         for source in self.render_sources.values_mut() {
             if source.is_enabled() {
-                source.upload(&mut self.tile_store, needs);
+                source.upload(&mut self.tile_store, context, needs);
             }
         }
     }

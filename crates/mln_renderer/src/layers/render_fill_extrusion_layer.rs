@@ -57,7 +57,7 @@ use crate::draw::{DrawGeometry, DrawObjects, copy_shared_attributes};
 use crate::frame_projection::zero_to_one_clip_z;
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
-use crate::gfx::index_vector::{IndexVector, IndexVectorPtr};
+use crate::gfx::index_vector::Indexes;
 use crate::gfx::texture2d::Texture2D;
 use crate::layer_drawing::{
     DrawDepth, DrawList, DrawObjectsMut, DrawPriority, FrameDraw, TileDraws, TileObjects, UniformWriter,
@@ -124,7 +124,7 @@ struct SharedGeometry<'a> {
     vertices: &'a VertexAttributeArray,
     instances: Option<&'a VertexAttributeArray>,
     vertex_count: usize,
-    indexes: &'a IndexVectorPtr,
+    indexes: &'a Indexes,
     segments: &'a [SegmentBase],
 }
 
@@ -267,7 +267,7 @@ fn extrusion_draw(
         vertices: copy_shared_attributes(geometry.vertices),
         vertex_count: if geometry.segments.is_empty() { 0 } else { geometry.vertex_count },
         mode: DrawMode::Triangles(),
-        indexes: Rc::clone(geometry.indexes),
+        indexes: geometry.indexes.clone(),
         segments: geometry.segments.iter().map(SegmentBase::copy).collect(),
         instances: geometry.instances.map(copy_shared_attributes),
     };
@@ -324,7 +324,7 @@ pub(crate) struct RenderFillExtrusionLayer {
     static_data_vertices: Option<VertexVectorBasePtr>,
     /// The triangles of the wall quad, or of the walls' own quads
     /// (`RenderStaticData::fill_extrusion_wall_indices`).
-    static_data_indices: Option<IndexVectorPtr>,
+    static_data_indices: Option<Indexes>,
 }
 
 impl RenderFillExtrusionLayer {
@@ -412,13 +412,17 @@ impl TypedLayer for RenderFillExtrusionLayer {
             self.static_data_vertices
                 .get_or_insert_with(|| shared_vertices(&RenderStaticData::fill_extrusion_vertices())),
         );
-        let static_indices = Rc::clone(self.static_data_indices.get_or_insert_with(|| {
-            IndexVector::new(if instanced_walls {
-                RenderStaticData::fill_extrusion_triangle_indices()
-            } else {
-                RenderStaticData::fill_extrusion_wall_indices()
+        let static_indices = self
+            .static_data_indices
+            .get_or_insert_with(|| {
+                let indexes = if instanced_walls {
+                    RenderStaticData::fill_extrusion_triangle_indices()
+                } else {
+                    RenderStaticData::fill_extrusion_wall_indices()
+                };
+                Indexes::new(indexes)
             })
-        }));
+            .share(paint_parameters.context);
         let mut builder = TileBuilder {
             shaders,
             wall_shaders,
@@ -528,7 +532,7 @@ struct TileBuilder {
     instanced_walls: bool,
     /// The static quad, and the indexes the walls draw.
     static_vertices: VertexVectorBasePtr,
-    static_indices: IndexVectorPtr,
+    static_indices: Indexes,
     has_pattern: bool,
     /// Whether the layer draws into depth before it draws in color.
     depth_pass: bool,

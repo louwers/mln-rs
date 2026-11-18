@@ -8,7 +8,7 @@ use mln_tile_id::CanonicalTileID;
 use mln_util::constants::EXTENT;
 use mln_util::subdivision_granularity::{SubdivisionGranularityExpression, SubdivisionGranularitySetting};
 
-use crate::gfx::index_vector::{IndexVector, IndexVectorPtr};
+use crate::gfx::index_vector::Indexes;
 use crate::tile_mask::TileMask;
 use crate::util::subdivision::{NORTH_POLE_Y, SOUTH_POLE_Y};
 use crate::util::tile_mesh::{TileMeshOptions, create_tile_mesh};
@@ -19,7 +19,7 @@ use crate::util::tile_mesh::{TileMeshOptions, create_tile_mesh};
 /// positions stay inside the tile so the pole rows sample the tile's edge.
 pub(crate) struct GlobeTileMesh<V: bytemuck::Pod> {
     pub(crate) vertices: Rc<VertexVector<V>>,
-    pub(crate) indices: IndexVectorPtr,
+    pub(crate) indices: Indexes,
     pub(crate) segments: Vec<SegmentBase>,
 }
 
@@ -71,11 +71,7 @@ impl<V: bytemuck::Pod> GlobeTileMesh<V> {
             segment.vertex_length += vertex_count;
             segment.index_length += mesh.indices.len();
         }
-        GlobeTileMesh {
-            vertices: Rc::new(VertexVector::from_vec(vertices)),
-            indices: IndexVector::new(indices),
-            segments,
-        }
+        GlobeTileMesh { vertices: Rc::new(VertexVector::from_vec(vertices)), indices: Indexes::new(indices), segments }
     }
 }
 
@@ -110,7 +106,7 @@ impl<V: bytemuck::Pod> GlobeTileMeshCache<V> {
         canonical: &CanonicalTileID,
         mask: &TileMask,
         layout_vertex: fn(Point<i16>, Point<u16>) -> V,
-    ) -> &GlobeTileMesh<V> {
+    ) -> &mut GlobeTileMesh<V> {
         let key = (canonical.z, canonical.y == 0, canonical.y == (1u32 << canonical.z) - 1, mask.clone());
         // Tiles that are loading go through many masks; the one used longest
         // ago makes room, so the meshes every frame draws stay. The draws share
@@ -127,7 +123,7 @@ impl<V: bytemuck::Pod> GlobeTileMeshCache<V> {
             .entry(key)
             .or_insert_with(|| Entry { mesh: GlobeTileMesh::new(canonical, mask, layout_vertex), last_use: 0 });
         entry.last_use = self.uses;
-        &entry.mesh
+        &mut entry.mesh
     }
 
     pub(crate) fn clear(&mut self) {

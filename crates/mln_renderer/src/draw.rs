@@ -24,7 +24,7 @@ use mln_util::logging::{Event, Log};
 use mln_util::time::Instant;
 
 use crate::gfx::context::Context;
-use crate::gfx::index_vector::IndexVectorPtr;
+use crate::gfx::index_vector::Indexes;
 use crate::gfx::owned::Owned;
 use crate::gfx::texture2d::TextureKey;
 use crate::gfx::uniform_buffer::UniformBufferArray;
@@ -47,7 +47,7 @@ pub(crate) struct DrawGeometry {
     pub(crate) vertex_count: usize,
     /// The primitive the segments draw.
     pub(crate) mode: DrawMode,
-    pub(crate) indexes: IndexVectorPtr,
+    pub(crate) indexes: Indexes,
     /// The ranges of the indexes and vertices each draw call draws.
     pub(crate) segments: Vec<SegmentBase>,
     /// The attributes of each instance, for a draw of instances.
@@ -127,7 +127,7 @@ pub(crate) struct DrawObjects {
 
     mode: DrawMode,
     segments: Vec<SegmentBase>,
-    indexes: IndexVectorPtr,
+    indexes: Indexes,
     vertex_count: usize,
     attribute_bindings: AttributeBindingArray,
     instance_bindings: AttributeBindingArray,
@@ -484,7 +484,7 @@ impl DrawObjects {
     }
 
     /// Replaces the indexes and the segments drawn from them.
-    pub(crate) fn replace_indexes(&mut self, indexes: IndexVectorPtr, segments: Vec<SegmentBase>) {
+    pub(crate) fn replace_indexes(&mut self, indexes: Indexes, segments: Vec<SegmentBase>) {
         self.indexes = indexes;
         self.segments = segments;
     }

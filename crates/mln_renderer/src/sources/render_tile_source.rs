@@ -41,7 +41,7 @@ use crate::bucket::UploadNeeds;
 use crate::buckets::line_bucket::{LineBucket, LineLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::gfx::context::Context;
-use crate::gfx::index_vector::IndexVector;
+use crate::gfx::index_vector::Indexes;
 use crate::layer_drawing::{DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptDraw, LayerDraws};
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layers::cast_matrix;
@@ -123,7 +123,7 @@ fn polyline_objects(
         vertices: attrs,
         vertex_count,
         mode: DrawMode::Triangles(),
-        indexes: IndexVector::new(indexes),
+        indexes: Indexes::new(indexes),
         segments,
         instances: None,
     };
@@ -394,8 +394,8 @@ impl RenderSource for RenderTileSource {
         self.order_by_y = Vec::new();
     }
 
-    fn upload(&mut self, store: &mut TileStore, needs: UploadNeeds) {
-        store.upload(self.key, &self.render_tiles, needs);
+    fn upload(&mut self, store: &mut TileStore, context: &mut Context, needs: UploadNeeds) {
+        store.upload(self.key, &self.render_tiles, context, needs);
     }
 
     /// Updates the source's draws of the debug overlays.

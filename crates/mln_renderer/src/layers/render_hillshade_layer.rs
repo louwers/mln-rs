@@ -48,7 +48,7 @@ use crate::buckets::hillshade_bucket::{HillshadeBucket, HillshadeLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::geometry::dem_data::get_unpack_vector;
 use crate::gfx::context::Context;
-use crate::gfx::index_vector::{IndexVector, IndexVectorPtr};
+use crate::gfx::index_vector::Indexes;
 use crate::gfx::texture2d::OwnedTexture;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_drawing::{
@@ -129,7 +129,7 @@ pub(crate) struct RenderHillshadeLayer {
 
     static_data_shared_vertices: Option<VertexVectorBasePtr>,
     /// The triangles of the static data's quad.
-    static_data_indices: Option<IndexVectorPtr>,
+    static_data_indices: Option<Indexes>,
     globe_meshes: GlobeTileMeshCache<HillshadeLayoutVertex>,
 
     /// Each bucket's render target, by bucket id. They draw while the layer
@@ -360,9 +360,10 @@ impl TypedLayer for RenderHillshadeLayer {
             self.static_data_shared_vertices
                 .get_or_insert_with(|| shared_vertices(&RenderStaticData::raster_vertices())),
         );
-        let static_data_indices = Rc::clone(
-            self.static_data_indices.get_or_insert_with(|| IndexVector::new(RenderStaticData::quad_triangle_indices())),
-        );
+        let static_data_indices = self
+            .static_data_indices
+            .get_or_insert_with(|| Indexes::new(RenderStaticData::quad_triangle_indices()))
+            .share(paint_parameters.context);
 
         // `resampling` filters the prepared texture the tile's draw samples;
         // the prepare pass reads the DEM with Nearest regardless.
@@ -425,7 +426,7 @@ impl TypedLayer for RenderHillshadeLayer {
             let geometry_time = geometry.last_modified;
             // The tile's geometry: the globe's mesh of its mask, the mask's
             // geometry, or the whole tile's quad.
-            let mut tile_geometry = || -> (VertexVectorBasePtr, usize, IndexVectorPtr, Vec<SegmentBase>) {
+            let mut tile_geometry = || -> (VertexVectorBasePtr, usize, Indexes, Vec<SegmentBase>) {
                 if self.base.projection_variant == ProjectionVariant::Globe {
                     let globe_mesh =
                         self.globe_meshes.get(&tile_id.canonical, &geometry.mask, HillshadeBucket::layout_vertex);
@@ -434,7 +435,7 @@ impl TypedLayer for RenderHillshadeLayer {
                     (
                         vertices,
                         globe_mesh.vertices.elements(),
-                        Rc::clone(&globe_mesh.indices),
+                        globe_mesh.indices.share(paint_parameters.context),
                         globe_mesh.segments.iter().map(SegmentBase::copy).collect(),
                     )
                 } else if !geometry.vertices.is_empty() && !geometry.indices.is_empty() && !geometry.segments.is_empty()
@@ -442,14 +443,14 @@ impl TypedLayer for RenderHillshadeLayer {
                     (
                         shared_vertices(&geometry.vertices),
                         geometry.vertices.len(),
-                        IndexVector::new(geometry.indices.clone()),
+                        Indexes::new(geometry.indices.clone()),
                         geometry.segments.iter().map(SegmentBase::copy).collect(),
                     )
                 } else {
                     (
                         Rc::clone(&static_data_shared_vertices),
                         4,
-                        Rc::clone(&static_data_indices),
+                        static_data_indices.clone(),
                         RenderStaticData::raster_segments(),
                     )
                 }
@@ -557,7 +558,7 @@ impl BucketTarget {
         maxzoom: u8,
         shader: &ShaderProgramPtr,
         attrs: VertexAttributeArray,
-        indexes: &IndexVectorPtr,
+        indexes: &Indexes,
     ) -> BucketTarget {
         let (tilesize, stride, encoding, dem_image) = {
             let dem = bucket.get_dem_data();
@@ -583,7 +584,7 @@ impl BucketTarget {
             vertices: attrs,
             vertex_count: 4,
             mode: DrawMode::Triangles(),
-            indexes: Rc::clone(indexes),
+            indexes: indexes.clone(),
             segments: RenderStaticData::raster_segments(),
             instances: None,
         };

@@ -21,6 +21,7 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use crate::bucket::{Bucket, UploadNeeds};
 use crate::buckets::raster_bucket::RasterBucket;
+use crate::gfx::context::Context;
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::render_source::{RenderSource, RenderSourceBase, SourcePrepareParameters};
 use crate::tile::store::TileStore;
@@ -358,7 +359,7 @@ impl RenderSource for RenderImageSource {
 
     fn prepare(&mut self, _store: &mut TileStore, _parameters: &SourcePrepareParameters<'_>) {}
 
-    fn upload(&mut self, _store: &mut TileStore, _needs: UploadNeeds) {
+    fn upload(&mut self, _store: &mut TileStore, _context: &mut Context, _needs: UploadNeeds) {
         if let Some(bucket) = &mut self.bucket
             && bucket.needs_upload()
         {

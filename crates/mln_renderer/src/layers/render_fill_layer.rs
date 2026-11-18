@@ -36,7 +36,7 @@ use crate::buckets::fill_bucket::{FillBinders, FillBucket, FillLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, copy_shared_attributes};
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
-use crate::gfx::index_vector::{IndexVector, IndexVectorPtr};
+use crate::gfx::index_vector::Indexes;
 use crate::gfx::texture2d::Texture2D;
 use crate::layer_composite::Composite;
 use crate::layer_drawing::{DrawDepth, DrawList, DrawObjectsMut, FrameDraw, TileDraws, TileObjects, UniformWriter};
@@ -114,7 +114,7 @@ fn fill_geometry(
     vertices: VertexAttributeArray,
     vertex_count: usize,
     mode: DrawMode,
-    indexes: IndexVectorPtr,
+    indexes: Indexes,
     segments: &[SegmentBase],
 ) -> DrawGeometry {
     DrawGeometry {
@@ -171,7 +171,7 @@ struct FillUniforms {
 /// attributes every instanced outline reads of it.
 struct OutlineQuad {
     vertices: VertexVectorBasePtr,
-    indexes: IndexVectorPtr,
+    indexes: Indexes,
     attributes: VertexAttributeArray,
 }
 
@@ -179,7 +179,7 @@ impl OutlineQuad {
     /// The quad, whose corners every instanced outline reads per vertex.
     fn new() -> OutlineQuad {
         let vertices = shared_vertices(&RenderStaticData::fill_outline_vertices());
-        let indexes = IndexVector::new(RenderStaticData::quad_triangle_indices());
+        let indexes = Indexes::new(RenderStaticData::quad_triangle_indices());
         let mut attributes = VertexAttributeArray::new();
         if let Some(attr) = attributes.set(ID_FILL_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
             let stride = size_of::<[i16; 2]>() as u32;
@@ -303,7 +303,7 @@ impl TileBuilder<'_> {
                         copy_shared_attributes(&quad.attributes),
                         quad.vertices.get_raw_count(),
                         DrawMode::Triangles(),
-                        Rc::clone(&quad.indexes),
+                        quad.indexes.clone(),
                         &[RenderStaticData::fill_outline_segment(fill_vertex_count)],
                     )
                 };
