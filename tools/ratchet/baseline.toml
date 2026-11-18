@@ -27,9 +27,7 @@
 "crates/mln_storage/src/offline_database.rs" = 3
 "crates/mln_storage/src/stub_file_source.rs" = 1
 "crates/mln_storage/src/ureq_transport.rs" = 1
-"crates/mln_style/src/color_ramp_property_value.rs" = 2
 "crates/mln_style/src/layers/heatmap_layer_properties.rs" = 1
-"crates/mln_style/src/property_value.rs" = 3
 "crates/mln_text/src/harfbuzz_impl.rs" = 1
 "crates/mln_util/src/geo.rs" = 3
 "crates/mln_util/src/image.rs" = 1
