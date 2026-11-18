@@ -4921,14 +4921,21 @@ in highp vec2 v_pos1;
 
 void main() {
 
-    // read and cross-fade colors from the main and parent tiles
-    vec4 color0 = texture(u_image0, v_pos0);
-    vec4 color1 = texture(u_image1, v_pos1);
-    if (color0.a > 0.0) {
-        color0.rgb = color0.rgb / color0.a;
+    // read and cross-fade colors from the main and parent tiles, skipping
+    // the one the fade leaves out
+    vec4 color0 = vec4(0.0);
+    if (u_fade_t < 1.0) {
+        color0 = texture(u_image0, v_pos0);
+        if (color0.a > 0.0) {
+            color0.rgb = color0.rgb / color0.a;
+        }
     }
-    if (color1.a > 0.0) {
-        color1.rgb = color1.rgb / color1.a;
+    vec4 color1 = vec4(0.0);
+    if (u_fade_t > 0.0) {
+        color1 = texture(u_image1, v_pos1);
+        if (color1.a > 0.0) {
+            color1.rgb = color1.rgb / color1.a;
+        }
     }
     vec4 color = mix(color0, color1, u_fade_t);
     float alpha = color.a * u_opacity;

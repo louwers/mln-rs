@@ -5255,14 +5255,20 @@ struct RasterEvaluatedPropsUBO {
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
-    var color0 = textureSample(image0, texture_sampler, in.pos0);
-    var color1 = textureSample(image1, texture_sampler, in.pos1);
-
-    if (color0.a > 0.0) {
-        color0 = vec4<f32>(color0.rgb / color0.a, color0.a);
+    // Skip the tile the fade leaves out.
+    var color0 = vec4<f32>(0.0);
+    if (props.fade_t < 1.0) {
+        color0 = textureSample(image0, texture_sampler, in.pos0);
+        if (color0.a > 0.0) {
+            color0 = vec4<f32>(color0.rgb / color0.a, color0.a);
+        }
     }
-    if (color1.a > 0.0) {
-        color1 = vec4<f32>(color1.rgb / color1.a, color1.a);
+    var color1 = vec4<f32>(0.0);
+    if (props.fade_t > 0.0) {
+        color1 = textureSample(image1, texture_sampler, in.pos1);
+        if (color1.a > 0.0) {
+            color1 = vec4<f32>(color1.rgb / color1.a, color1.a);
+        }
     }
 
     var color = mix(color0, color1, props.fade_t);
