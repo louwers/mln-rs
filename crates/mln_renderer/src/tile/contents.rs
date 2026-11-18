@@ -16,6 +16,7 @@ use mln_text::tagged_string::font_stack_hash;
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
 use mln_util::feature::Feature;
+use mln_util::hash::HashMap;
 use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
 use mln_util::mat4::Mat4;
@@ -47,7 +48,9 @@ use crate::tile_render_data::TileAtlasTextures;
 #[derive(Default)]
 pub(crate) struct LayoutBuckets {
     buckets: Vec<Box<dyn Bucket>>,
-    layers: VecMap<String, LaidLayer>,
+    laid: Vec<LaidLayer>,
+    /// Where each layer is in `laid`, by its id.
+    layers: HashMap<String, usize>,
 }
 
 /// A layer a layout laid out: the index of its bucket, and its values.
@@ -58,6 +61,12 @@ struct LaidLayer {
 }
 
 impl LayoutBuckets {
+    /// A layout's buckets with room for `layers` layers' values.
+    #[must_use]
+    pub(crate) fn with_capacity(layers: usize) -> Self {
+        LayoutBuckets { buckets: Vec::new(), laid: Vec::with_capacity(layers), layers: HashMap::default() }
+    }
+
     /// Adds `bucket`, the bucket of `layers`, for those of them that have
     /// none yet. Drops it if they all have one.
     pub(crate) fn add(
@@ -70,7 +79,8 @@ impl LayoutBuckets {
         for (id, layer) in layers {
             self.layers.entry(id).or_insert_with(|| {
                 used = true;
-                LaidLayer { bucket: index, layer }
+                self.laid.push(LaidLayer { bucket: index, layer });
+                self.laid.len() - 1
             });
         }
         if used {
@@ -78,24 +88,29 @@ impl LayoutBuckets {
         }
     }
 
+    /// Frees the room for the values of layers that weren't laid out.
+    pub(crate) fn shrink_to_fit(&mut self) {
+        self.laid.shrink_to_fit();
+    }
+
     /// The bucket of the layer `layer_id`.
     #[inline]
     pub(crate) fn get(&self, layer_id: &str) -> Option<ErasedLayerBucket<'_>> {
-        Some(self.layer_bucket(self.layers.get(layer_id)?))
+        self.laid(self.find(layer_id)?)
     }
 
     /// Where the layer `layer_id` is among the layers laid out, which
-    /// [`laid`](Self::laid) takes while the layout stays as it is.
+    /// [`laid`](Self::laid) takes.
     #[inline]
     pub(crate) fn find(&self, layer_id: &str) -> Option<usize> {
-        self.layers.index_of(layer_id)
+        self.layers.get(layer_id).copied()
     }
 
     /// The bucket of the layer at `index` among those laid out, which
     /// [`find`](Self::find) gave.
     #[inline]
     pub(crate) fn laid(&self, index: usize) -> Option<ErasedLayerBucket<'_>> {
-        Some(self.layer_bucket(self.layers.get_index(index)?.1))
+        Some(self.layer_bucket(self.laid.get(index)?))
     }
 
     fn layer_bucket<'a>(&'a self, laid: &'a LaidLayer) -> ErasedLayerBucket<'a> {
@@ -112,7 +127,7 @@ impl LayoutBuckets {
     /// The bucket of the layer `layer_id`, out of the layout.
     #[cfg(test)]
     pub(crate) fn into_bucket(mut self, layer_id: &str) -> Option<Box<dyn Bucket>> {
-        let index = self.layers.get(layer_id)?.bucket;
+        let index = self.laid[self.find(layer_id)?].bucket;
         Some(self.buckets.swap_remove(index))
     }
 
@@ -122,16 +137,19 @@ impl LayoutBuckets {
         self.layers.contains_key(layer_id)
     }
 
-    /// The layers laid out, with their buckets, in the order of their ids.
+    /// The layers laid out, with their buckets, in no order.
     #[cfg(test)]
     pub(crate) fn iter(&self) -> impl Iterator<Item = (&String, ErasedLayerBucket<'_>)> + '_ {
-        self.layers.iter().map(|(id, laid)| (id, self.layer_bucket(laid)))
+        self.layers.iter().map(|(id, &index)| (id, self.layer_bucket(&self.laid[index])))
     }
 
     /// The layers laid out, each with the index of its bucket and the values
-    /// it was laid out with, in the order of their ids.
+    /// it was laid out with, in no order.
     pub(crate) fn laid_layers(&self) -> impl Iterator<Item = (&String, usize, &Arc<dyn ErasedEvaluatedLayer>)> + '_ {
-        self.layers.iter().map(|(id, laid)| (id, laid.bucket, &laid.layer))
+        self.layers.iter().map(|(id, &index)| {
+            let laid = &self.laid[index];
+            (id, laid.bucket, &laid.layer)
+        })
     }
 
     /// The number of buckets, each of which some layer renders.
@@ -156,14 +174,16 @@ impl LayoutBuckets {
 
     /// The values the layout laid the layer `layer_id` out with.
     pub(crate) fn layer_mut(&mut self, layer_id: &str) -> Option<&mut Arc<dyn ErasedEvaluatedLayer>> {
-        Some(&mut self.layers.get_mut(layer_id)?.layer)
+        let index = self.find(layer_id)?;
+        Some(&mut self.laid.get_mut(index)?.layer)
     }
 
     /// A copy of the layers that `keep` keeps, and of their buckets.
     pub(crate) fn copy_where(&self, mut keep: impl FnMut(&Arc<dyn ErasedEvaluatedLayer>) -> bool) -> Self {
-        let mut copy = LayoutBuckets::default();
+        let mut copy = LayoutBuckets::with_capacity(self.laid.len());
         let mut copied: Vec<Option<usize>> = vec![None; self.buckets.len()];
-        for (id, laid) in &self.layers {
+        for (id, &index) in &self.layers {
+            let laid = &self.laid[index];
             if !keep(&laid.layer) {
                 continue;
             }
@@ -171,7 +191,8 @@ impl LayoutBuckets {
                 copy.buckets.push(self.buckets[laid.bucket].clone_bucket());
                 copy.buckets.len() - 1
             });
-            copy.layers.insert(id.clone(), LaidLayer { bucket, layer: Arc::clone(&laid.layer) });
+            copy.laid.push(LaidLayer { bucket, layer: Arc::clone(&laid.layer) });
+            copy.layers.insert(id.clone(), copy.laid.len() - 1);
         }
         copy
     }
@@ -218,8 +239,9 @@ impl LayoutResult {
         if states.is_empty() {
             return changed;
         }
-        let LayoutBuckets { buckets, layers: laid } = &mut self.layer_render_data;
-        for (layer_id, laid) in laid.iter() {
+        let LayoutBuckets { buckets, laid, layers: ids } = &mut self.layer_render_data;
+        for (layer_id, &index) in ids.iter() {
+            let laid = &laid[index];
             let source_layer_id = &laid.layer.style().base().source_layer;
             // The worker got the layer from the same data.
             if let Ok(Some(source_layer)) = layers.layer(source_layer_id) {

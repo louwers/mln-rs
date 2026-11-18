@@ -200,9 +200,9 @@ impl TileView<'_> for NoTileBucket {
     }
 }
 
-/// Where a layer's tile of a frame is, as the frame's update found it: its
-/// index among its source's render tiles, and where what it shows the layer
-/// is in its contents ([`TileView::find`]).
+/// A layer's tile of a frame, as the frame's update found it: its index
+/// among its source's render tiles, and where what it shows the layer is in
+/// its contents ([`TileView::find`]).
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct FoundTile {
     pub(crate) tile: usize,

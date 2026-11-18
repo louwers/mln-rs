@@ -213,6 +213,8 @@ pub(crate) fn build(discovered: Discovered, input: &LayoutInput<'_>, resolved: &
     let Some(data) = input.data else {
         return Ok(built);
     };
+    // Room for every layer of the groups, of which those with data keep it.
+    built.buckets = LayoutBuckets::with_capacity(groups.iter().map(|group| group.layers.len()).sum());
     let LayoutParams { first_load, show_collision_boxes, .. } = input.params;
     let build = BuildParams { first_load, show_collision_boxes, canonical: input.id.canonical };
     let bucket_parameters = input.bucket_parameters();
@@ -250,5 +252,6 @@ pub(crate) fn build(discovered: Discovered, input: &LayoutInput<'_>, resolved: &
     for mut layout in waiting {
         layout.create_bucket(Some(resolved), &mut built, &build)?;
     }
+    built.buckets.shrink_to_fit();
     Ok(built)
 }

@@ -38,7 +38,7 @@ use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;
 use crate::render_layer::{Atlases, FrameSourceTiles, LayerSource, LayerUpdateParameters, RenderLayer};
 use crate::render_source::{self, RenderSource, RenderTileParameters, TileOrder};
-use crate::render_tile::RenderTile;
+use crate::render_tile::{FoundTile, RenderTile};
 use crate::renderer_event::RendererEvent;
 use crate::sources::render_tile_source::{DebugLayer, DebugLayers};
 use crate::text::glyph_store::GlyphStore;
@@ -145,6 +145,9 @@ pub(crate) struct RenderOrchestrator {
     /// resolve through and the atlas they pack them into.
     tile_store: TileStore,
     atlases: Atlases,
+    /// The tiles the frame's layers draw, as their updates found them, each
+    /// layer's in a range of its own.
+    found_tiles: Vec<FoundTile>,
 
     /// The version of the style the last update drew, or `None` before
     /// the first and after `clear_data`: no layers, sources or images.
@@ -223,6 +226,7 @@ impl RenderOrchestrator {
             cross_tile_symbol_index: crate::text::cross_tile_symbol_index::CrossTileSymbolIndex::default(),
             placement_controller: crate::text::placement::PlacementController::new(),
             atlases: Atlases::default(),
+            found_tiles: Vec::new(),
             style: None,
             sources_by_id: Vec::new(),
             render_sources: HashMap::default(),
@@ -458,6 +462,7 @@ impl RenderOrchestrator {
         let mut placed = PlacementLayers::default();
         let mut opaque_pass_cutoff_estimation = frame.layers.len();
         let mut contents = SourceContents::default();
+        self.found_tiles.clear();
         for (&index, frame_layer) in &frame.layers {
             let index = index as usize;
             let render_layer = &mut self.layers[index];
@@ -472,6 +477,7 @@ impl RenderOrchestrator {
                 contents: source_contents,
                 images: self.tile_store.images(),
                 atlases: &mut self.atlases,
+                found: &mut self.found_tiles,
             });
             if render_layer.needs_placement() {
                 placed.leaders.push(index);
@@ -1250,7 +1256,9 @@ impl RenderOrchestrator {
             let source_contents = contents.of(source, &self.tile_store);
             let layer_source = source.map(|(_, source)| match source.image_render_data() {
                 Some(image) => LayerSource::Image(image),
-                None => LayerSource::Tiles(FrameSourceTiles::new(source.render_tiles(), source_contents)),
+                None => {
+                    LayerSource::Tiles(FrameSourceTiles::new(source.render_tiles(), source_contents), &self.found_tiles)
+                }
             });
             render_layer.update_draws(paint_parameters, &self.atlases, layer_source);
             needs_globe_depth = needs_globe_depth || render_layer.needs_globe_depth();

@@ -6,6 +6,7 @@
 // orchestrator owns the render layers, in the style's order.
 
 use std::any::Any;
+use std::ops::Range;
 use std::sync::Arc;
 
 use mln_gfx::gpu::Gpu;
@@ -269,9 +270,10 @@ impl SymbolBuckets for HeldBuckets {
 /// without the layer's type.
 #[derive(Clone, Copy)]
 pub(crate) enum LayerSource<'a> {
-    /// The source's render tiles, of which the layer draws those its update
-    /// found.
-    Tiles(FrameSourceTiles<'a>),
+    /// The source's render tiles, and the tiles that the frame's updates of
+    /// the layers found ([`LayerUpdateParameters::found`]), among which the
+    /// layer draws those its update found.
+    Tiles(FrameSourceTiles<'a>, &'a [FoundTile]),
     /// An image source's image.
     Image(ImageSourceRenderData<'a>),
 }
@@ -348,6 +350,9 @@ pub(crate) struct LayerUpdateParameters<'a> {
     pub(crate) images: &'a crate::image_store::ImageStore,
     /// The atlases, to add what the layer draws to.
     pub(crate) atlases: &'a mut Atlases,
+    /// The tiles of the frame's layers, as their updates find them, which
+    /// the update adds the layer's to: those the encode draws.
+    pub(crate) found: &'a mut Vec<FoundTile>,
 }
 
 impl<'a> LayerUpdateParameters<'a> {
@@ -373,9 +378,9 @@ pub(crate) struct RenderLayerBase {
     /// The projection variant this layer's draws are built with.
     pub(crate) projection_variant: ProjectionVariant,
 
-    /// The layer's tiles of the frame, as its update found them, which its
-    /// encode draws.
-    found_tiles: Vec<FoundTile>,
+    /// Where the tiles the layer's update found are among the frame's
+    /// ([`LayerUpdateParameters::found`]).
+    found: Range<usize>,
 }
 
 impl RenderLayerBase {
@@ -388,7 +393,7 @@ impl RenderLayerBase {
             style_dependencies: Dependency::NONE,
             is_renderable: false,
             projection_variant: ProjectionVariant::Mercator,
-            found_tiles: Vec::new(),
+            found: 0..0,
         }
     }
 }
@@ -571,10 +576,11 @@ pub(crate) trait LayerParts {
     fn has_crossfade(&self) -> bool;
 
     /// The frame's update of the layer: finds the tiles of `parameters`'
-    /// source the layer draws, adds the passes their buckets were laid out
-    /// for to the layer's, runs the layer's [`TypedLayer::update`], and
-    /// keeps entries for the tiles; or runs the
-    /// [`TypedLayer::update_without_source`] of a layer without a source.
+    /// source the layer draws, which it adds to `parameters.found`, adds the
+    /// passes their buckets were laid out for to the layer's, runs the
+    /// layer's [`TypedLayer::update`], and keeps entries for the tiles; or
+    /// runs the [`TypedLayer::update_without_source`] of a layer without a
+    /// source.
     fn update(&mut self, parameters: &mut LayerUpdateParameters<'_>);
 
     /// The encode's update of the layer's draws: picks the shader variant
@@ -583,7 +589,7 @@ pub(crate) trait LayerParts {
     /// its draws of the frame ([`LayerDrawing::begin_frame`]); drops them
     /// again for a layer that draws in no pass, and otherwise runs the
     /// layer's [`TypedLayer::update_draws`] with the tiles of its type that
-    /// its update found in `source`, its
+    /// its update found in `source` (its [`LayerSource::Tiles`]), its
     /// [`TypedLayer::update_image_draws`] with an image source's image, or
     /// its [`TypedLayer::update_draws_without_source`].
     fn update_draws(
@@ -704,11 +710,12 @@ impl<L: TypedLayer> LayerParts for L {
             return;
         }
         let base = self.base_mut();
-        base.found_tiles.clear();
+        let start = parameters.found.len();
         let tiles = match parameters.tiles(L::TILE_ORDER) {
-            Some((tiles, order)) => tiles.find::<L::Type>(order, &base.style.base().id, &mut base.found_tiles),
+            Some((tiles, order)) => tiles.find::<L::Type>(order, &base.style.base().id, parameters.found),
             None => FrameTiles::new(),
         };
+        base.found = start..parameters.found.len();
         for bucket in tiles.iter().filter_map(|tile| tile.bucket()) {
             base.passes |= bucket.passes();
         }
@@ -741,9 +748,10 @@ impl<L: TypedLayer> LayerParts for L {
             return;
         }
         match source {
-            Some(LayerSource::Tiles(source)) if !self.base().found_tiles.is_empty() => {
-                let base = self.base();
-                let tiles = source.at::<L::Type>(&base.found_tiles, &base.style.base().id);
+            Some(LayerSource::Tiles(source, found))
+                if let Some(found) = found.get(self.base().found.clone()).filter(|found| !found.is_empty()) =>
+            {
+                let tiles = source.at::<L::Type>(found, self.id());
                 if begin_frame(self) {
                     TypedLayer::update_draws(self, parameters, atlases, &tiles);
                 }
