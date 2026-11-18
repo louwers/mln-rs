@@ -28,7 +28,7 @@ use crate::render_tile::RenderTile;
 use crate::renderer_event::RendererEvent;
 use crate::source_state::SourceFeatureState;
 use crate::text::glyph_store::GlyphStore;
-use crate::tile::contents::{Answer, Contents, TileAtlases};
+use crate::tile::contents::{Answer, TileAtlases};
 use crate::tile::inbox::{Inbox, InboxSender, TileEvent, Waker};
 use crate::tile::job::{SourceKey, TileKey};
 use crate::tile::loading::{DataOrigin, Load};
@@ -309,13 +309,6 @@ impl TileStore {
         Some((self.sources.get_mut(&key)?, &mut self.ctx))
     }
 
-    /// What the tiles of `render_tiles`, render tiles of the source `key`,
-    /// show, at their indexes.
-    pub(crate) fn contents_of(&self, key: Option<SourceKey>, render_tiles: &[RenderTile]) -> Vec<Option<&Contents>> {
-        let tiles = key.and_then(|key| self.sources.get(&key));
-        render_tiles.iter().map(|render_tile| tiles?.tile(render_tile.get_overscaled_tile_id())?.contents()).collect()
-    }
-
     /// Readies the buckets of the tiles of `render_tiles`, render tiles of
     /// the source `key`, for the frame's draws (`Contents::upload`).
     pub(crate) fn upload(&mut self, key: SourceKey, render_tiles: &[RenderTile], context: &Context) {
@@ -323,7 +316,7 @@ impl TileStore {
             return;
         };
         for render_tile in render_tiles {
-            if let Some(contents) = tiles.contents_mut(render_tile.get_overscaled_tile_id()) {
+            if let Some(contents) = tiles.contents_at_mut(render_tile.get_overscaled_tile_id(), render_tile.slot()) {
                 contents.upload(context);
             }
         }
@@ -513,12 +506,12 @@ impl TileStore {
 /// The symbol buckets of the tiles' layouts.
 impl SymbolBuckets for TileStore {
     fn get(&self, key: &BucketKey) -> Option<&SymbolBucket> {
-        let contents = self.sources.get(&key.source)?.tile(&key.tile)?.contents()?.geometry()?;
+        let contents = self.sources.get(&key.source)?.contents_at(&key.tile, key.slot)?.geometry()?;
         contents.result.layer_render_data.bucket(key.bucket)?.downcast_ref()
     }
 
     fn get_mut(&mut self, key: &BucketKey) -> Option<&mut SymbolBucket> {
-        let contents = self.sources.get_mut(&key.source)?.contents_mut(&key.tile)?.geometry_mut()?;
+        let contents = self.sources.get_mut(&key.source)?.contents_at_mut(&key.tile, key.slot)?.geometry_mut()?;
         contents.result.layer_render_data.bucket_mut(key.bucket)?.downcast_mut()
     }
 }

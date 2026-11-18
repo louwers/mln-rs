@@ -78,6 +78,7 @@ impl LayoutBuckets {
     }
 
     /// The render data of the layer `layer_id`.
+    #[inline]
     pub(crate) fn get(&self, layer_id: &str) -> Option<LayerRenderData<'_>> {
         let laid = self.layers.get(layer_id)?;
         Some(LayerRenderData { bucket: &*self.buckets[laid.bucket], bucket_index: laid.bucket, layer: &laid.layer })
@@ -125,11 +126,9 @@ impl LayoutBuckets {
         self.buckets.iter_mut().map(|bucket| &mut **bucket)
     }
 
-    /// Makes `layer` the values of its layer, which has a bucket.
-    pub(crate) fn set_layer(&mut self, layer: &Arc<dyn ErasedEvaluatedLayer>) {
-        if let Some(laid) = self.layers.get_mut(&layer.style().base().id) {
-            laid.layer = Arc::clone(layer);
-        }
+    /// The values the layout laid the layer `layer_id` out with.
+    pub(crate) fn layer_mut(&mut self, layer_id: &str) -> Option<&mut Arc<dyn ErasedEvaluatedLayer>> {
+        Some(&mut self.layers.get_mut(layer_id)?.layer)
     }
 
     /// A copy of the layers that `keep` keeps, and of their buckets.
@@ -166,6 +165,7 @@ impl LayoutResult {
     /// of the same type. A tile shows its contents until a relayout for a
     /// changed layer arrives, so a layer that changed type meanwhile finds
     /// nothing.
+    #[inline]
     pub(crate) fn get_layer_render_data(&self, layer_impl: &dyn ErasedLayerStyle) -> Option<LayerRenderData<'_>> {
         let result = self.layer_render_data.get(&layer_impl.base().id)?;
         if result.layer.style().info().name != layer_impl.info().name {
@@ -563,13 +563,16 @@ impl Contents {
             return !matches!(self, Contents::Empty);
         };
         let layer_impl = layer_properties.style();
-        let Some(render_data) = contents.result.get_layer_render_data(layer_impl) else {
+        let Some(layer) = contents.result.layer_render_data.layer_mut(&layer_impl.base().id) else {
             return false;
         };
-        if !Arc::ptr_eq(render_data.layer, layer_properties)
-            && render_data.layer.constants_mask() == layer_properties.constants_mask()
-        {
-            contents.result.layer_render_data.set_layer(layer_properties);
+        // A layer that changed type meanwhile isn't laid out (see
+        // `get_layer_render_data`).
+        if layer.style().info().name != layer_impl.info().name {
+            return false;
+        }
+        if !Arc::ptr_eq(layer, layer_properties) && layer.constants_mask() == layer_properties.constants_mask() {
+            *layer = Arc::clone(layer_properties);
         }
         true
     }

@@ -36,12 +36,16 @@ pub(crate) struct RenderTile {
     /// `tile.id`.
     tile_id: OverscaledTileID,
     tile_hold_for_fade: bool,
+    /// Where the tile is among its source's, which finds its contents.
+    slot: usize,
     needs_rendering: bool,
 }
 
 impl RenderTile {
-    pub(crate) fn new(id: UnwrappedTileID, tile: &Tile, hold_for_fade: bool) -> Self {
-        RenderTile::of_tile_id(id, tile.id, hold_for_fade)
+    /// The render tile of `tile`, at `slot` of its source's tiles, drawn as
+    /// `id`, before it is prepared.
+    pub(crate) fn new(id: UnwrappedTileID, tile: &Tile, slot: usize, hold_for_fade: bool) -> Self {
+        RenderTile { slot, ..RenderTile::of_tile_id(id, tile.id, hold_for_fade) }
     }
 
     /// The render tile of the tile `tile_id`, drawn as `id`, before it is
@@ -54,6 +58,7 @@ impl RenderTile {
             matrix: [0.0; 16],
             tile_id,
             tile_hold_for_fade: hold_for_fade,
+            slot: usize::MAX,
             needs_rendering: false,
             debug_bucket: None, // layers: debug
         }
@@ -78,6 +83,12 @@ impl RenderTile {
     #[must_use]
     pub(crate) fn get_overscaled_tile_id(&self) -> &OverscaledTileID {
         &self.tile_id
+    }
+
+    /// Where the tile is among its source's, as of `prepare`.
+    #[must_use]
+    pub(crate) fn slot(&self) -> usize {
+        self.slot
     }
 
     #[must_use]

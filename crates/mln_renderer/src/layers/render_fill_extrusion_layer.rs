@@ -541,7 +541,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
 
         frame_draws.sort_by_key(|(draw, _)| draw.order());
         let frame = self.drawing.frame.get_or_insert_with(FrameDraws::new);
-        frame.stencil_tiles = Some(Rc::new(render_tiles.iter().map(|tile| tile.id).collect()));
+        frame.stencil_tiles = Some(Rc::new(render_tiles.render_tiles().map(|tile| tile.id).collect()));
         if !frame_draws.is_empty() {
             Self::write_uniforms(&self.values.evaluated, frame, &frame_draws, paint_parameters);
         }

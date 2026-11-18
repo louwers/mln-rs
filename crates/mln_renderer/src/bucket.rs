@@ -106,7 +106,7 @@ pub(crate) trait Bucket: Any + Send {
     fn write_wire(&self, w: &mut Writer);
 
     fn needs_upload(&self) -> bool {
-        self.has_data() && !self.base().uploaded
+        !self.base().uploaded && self.has_data()
     }
 
     fn get_id(&self) -> SimpleIdentity {
@@ -168,10 +168,10 @@ impl dyn Bucket {
     }
 }
 
-/// bench: a copy of `bucket`, if it is a symbol bucket, for a benchmark's
-/// layer to hold and place.
+/// bench: a copy of `bucket`, if it is a symbol bucket, which `HeldBuckets`
+/// holds for a benchmark's layer to place, at the index this returns.
 #[cfg(feature = "bench")]
-pub(crate) fn recover(bucket: &&dyn Bucket) -> Option<crate::render_layer::HeldBucket> {
+pub(crate) fn recover(bucket: &&dyn Bucket) -> Option<usize> {
     let bucket: &crate::buckets::symbol_bucket::SymbolBucket = bucket.downcast_ref()?;
-    Some(std::rc::Rc::new(std::cell::Cell::new(Some(Box::new(bucket.clone())))))
+    Some(crate::render_layer::HeldBuckets::hold(bucket.clone()))
 }

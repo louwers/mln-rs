@@ -38,6 +38,7 @@ use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;
 use crate::render_layer::{LayerPrepareParameters, LayerTiles, RenderLayer};
 use crate::render_source::{self, RenderSource, SourcePrepareParameters};
+use crate::render_tile::RenderTile;
 use crate::render_tree::{DebugLayers, LayerRenderItem, RenderTree, RenderTreeParameters};
 use crate::renderer_event::RendererEvent;
 use crate::sky_pass::FullscreenDraw;
@@ -427,15 +428,17 @@ impl RenderOrchestrator {
         let mut layers_need_placement: Vec<usize> = Vec::new();
         let mut layers_following_placement: Vec<usize> = Vec::new();
         let mut opaque_pass_cut_off_estimation = layer_render_items.len();
-        let source_contents = frame_contents(&self.render_sources, &self.tile_store);
+        let mut contents = SourceContents::default();
         for (&index, render_item) in &mut layer_render_items {
             let index = index as usize;
             let render_layer = &mut self.layers[index];
-            let source = render_item.source.as_ref().and_then(|id| self.render_sources.get(id)).map(AsRef::as_ref);
-            let contents = render_item.source.as_ref().and_then(|id| source_contents.get(id.as_str()));
+            let source = render_item.source.as_ref().and_then(|id| self.render_sources.get_key_value(id));
+            let source = source.map(|(id, source)| (id.as_str(), &**source));
+            let source_contents = contents.of(source, &self.tile_store);
+            let source = source.map(|(_, source)| source);
             render_item.tile_order = render_layer.prepare(&LayerPrepareParameters {
                 source,
-                contents: contents.map_or(&[], Vec::as_slice),
+                contents: source_contents,
                 images: self.tile_store.images(), // conformance
                 pattern_atlas: &self.pattern_atlas,
                 line_atlas: &self.line_atlas,
@@ -1253,15 +1256,14 @@ impl RenderOrchestrator {
         render_tree: &RenderTree,
     ) {
         let mut has_3d = false;
-        let source_contents = frame_contents(&self.render_sources, &self.tile_store);
+        let mut contents = SourceContents::default();
         for (&index, render_item) in render_tree.get_layer_render_item_map() {
             let render_layer = &mut self.layers[index as usize];
-            let source = render_item.source.as_ref().and_then(|id| Some((id, self.render_sources.get(id)?)));
-            let tiles = source.and_then(|(id, source)| match render_item.tile_order.as_deref() {
-                Some(order) => {
-                    let contents = source_contents.get(id.as_str()).map_or(&[][..], Vec::as_slice);
-                    Some(LayerTiles::new(source.render_tiles(), contents, order))
-                }
+            let source = render_item.source.as_ref().and_then(|id| self.render_sources.get_key_value(id));
+            let source = source.map(|(id, source)| (id.as_str(), &**source));
+            let source_contents = contents.of(source, &self.tile_store);
+            let tiles = source.and_then(|(_, source)| match render_item.tile_order.as_deref() {
+                Some(order) => Some(LayerTiles::new(source.render_tiles(), source_contents, order)),
                 None => source.get_image_render_data().map(LayerTiles::of_image),
             });
             render_layer.update(paint_parameters, update_parameters, tiles);
@@ -1567,17 +1569,30 @@ impl RenderOrchestrator {
     }
 }
 
-/// What the render tiles of each enabled source show, at their indexes, by
-/// source id.
-fn frame_contents<'a>(
-    render_sources: &'a HashMap<String, Box<dyn RenderSource>>,
-    store: &'a TileStore,
-) -> HashMap<&'a str, Vec<Option<&'a Contents>>> {
-    render_sources
-        .iter()
-        .filter(|(_, source)| source.is_enabled() && source.tiles().is_some())
-        .map(|(id, source)| (id.as_str(), store.contents_of(source.tiles(), source.render_tiles())))
-        .collect()
+/// What the render tiles of a source show, at their indexes, for the layers
+/// of a phase of the frame, which go through their sources in runs.
+#[derive(Default)]
+struct SourceContents<'a> {
+    source: Option<&'a str>,
+    contents: Vec<Option<&'a Contents>>,
+}
+
+impl<'a> SourceContents<'a> {
+    /// What the render tiles of `source`, an id and its render source,
+    /// show, from `store`; none for no source.
+    fn of(&mut self, source: Option<(&'a str, &'a dyn RenderSource)>, store: &'a TileStore) -> &[Option<&'a Contents>] {
+        let Some((id, source)) = source else {
+            return &[];
+        };
+        if self.source != Some(id) {
+            self.source = Some(id);
+            self.contents.clear();
+            let tiles = source.tiles().and_then(|key| store.source(key));
+            let contents_of = |tile: &RenderTile| tiles?.contents_at(tile.get_overscaled_tile_id(), tile.slot());
+            self.contents.extend(source.render_tiles().iter().map(contents_of));
+        }
+        &self.contents
+    }
 }
 
 /// Drops `value` on `thread_pool`, the orchestrator's workers, instead of

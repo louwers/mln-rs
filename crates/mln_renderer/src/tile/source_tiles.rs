@@ -118,6 +118,8 @@ impl Rendered {
 pub(crate) struct RenderedTile<'a> {
     pub(crate) id: &'a UnwrappedTileID,
     pub(crate) tile: &'a Tile,
+    /// Where the tile is among the source's tiles (`contents_at`).
+    pub(crate) slot: usize,
     /// The entry is no longer ideal, and stays so that its symbols fade out.
     pub(crate) hold_for_fade: bool,
     pub(crate) needs_rendering: bool,
@@ -373,9 +375,23 @@ impl SourceTiles {
         self.tiles.get(id).map(|slot| &slot.tile)
     }
 
-    /// What tile `id` shows, whose buckets the frame changes.
-    pub(crate) fn contents_mut(&mut self, id: &OverscaledTileID) -> Option<&mut Contents> {
-        self.tiles.get_mut(id)?.tile.contents_mut()
+    /// What tile `id` shows, which is at `slot` of the tiles if they haven't
+    /// changed since `rendered` said so.
+    pub(crate) fn contents_at(&self, id: &OverscaledTileID, slot: usize) -> Option<&Contents> {
+        match self.tiles.get_index(slot) {
+            Some((key, slot)) if key == id => slot.tile.contents(),
+            _ => self.tile(id)?.contents(),
+        }
+    }
+
+    /// What tile `id` shows, whose buckets the frame changes, see
+    /// `contents_at`.
+    pub(crate) fn contents_at_mut(&mut self, id: &OverscaledTileID, slot: usize) -> Option<&mut Contents> {
+        let index = match self.tiles.get_index(slot) {
+            Some((key, _)) if key == id => slot,
+            _ => self.tiles.index_of(id)?,
+        };
+        self.tiles.get_index_mut(index)?.1.tile.contents_mut()
     }
 
     pub(crate) fn slots(&self) -> impl Iterator<Item = &Slot> + '_ {
@@ -893,10 +909,12 @@ impl SourceTiles {
 
     pub(crate) fn rendered(&self) -> impl Iterator<Item = RenderedTile<'_>> + '_ {
         self.rendered.iter().filter_map(|(id, entry)| {
-            let tile = self.tile(&entry.key)?;
+            let slot = self.tiles.index_of(&entry.key)?;
+            let tile = &self.tiles.get_index(slot)?.1.tile;
             Some(RenderedTile {
                 id,
                 tile,
+                slot,
                 hold_for_fade: entry.holds_for_fade(tile),
                 needs_rendering: entry.needs_rendering,
             })

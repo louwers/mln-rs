@@ -581,7 +581,7 @@ impl RenderLayer for RenderLineLayer {
         let frame = self.drawing.frame.get_or_insert_with(FrameDraws::new);
         let paint = &self.values.evaluated.paint;
         frame.composite = Composite::of(*paint.line_layer_opacity.uniform(), *paint.line_layer_blend.uniform());
-        frame.stencil_tiles = Some(Rc::new(render_tiles.iter().map(|tile| tile.id).collect()));
+        frame.stencil_tiles = Some(Rc::new(render_tiles.render_tiles().map(|tile| tile.id).collect()));
 
         let render_pass =
             RenderPass(self.base.evaluated_properties.render_passes() & !RenderPass::Opaque.underlying_type());

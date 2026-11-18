@@ -643,8 +643,6 @@ impl RenderSymbolLayer {
             sort_key_range,
             text_translate,
             icon_translate,
-            #[cfg(feature = "bench")]
-            held: None,
         };
         if bucket.bucket_leader_id != self.base.style.base().id {
             let data = data(None, None);
@@ -679,33 +677,33 @@ impl RenderSymbolLayer {
         }
     }
 
-    /// bench: [`add_bucket`](Self::add_bucket) of `bucket`, a copy the
-    /// layer's placement data hold, of the tile at `tile_index` of `tiles`.
+    /// bench: [`add_bucket`](Self::add_bucket) of the bucket that
+    /// `HeldBuckets` holds at `bucket`, of the tile at `tile_index` of
+    /// `tiles`.
     #[cfg(feature = "bench")]
-    #[expect(clippy::needless_pass_by_value, reason = "a benchmark passes the copy it recovered")]
     pub(crate) fn add_placement_data(
         &mut self,
         tiles: &[RenderTile],
         tile_index: usize,
-        bucket: crate::render_layer::HeldBucket,
+        bucket: usize,
         feature_index: impl FnOnce() -> Option<Arc<FeatureIndex>>,
         translates: (SymbolTranslate, SymbolTranslate),
     ) {
-        let (Some(tile), Some(held)) = (tiles.get(tile_index), bucket.take()) else {
+        use crate::render_layer::{HeldBuckets, SymbolBuckets as _};
+        let Some(tile) = tiles.get(tile_index) else {
             return;
         };
         let key = BucketKey {
-            source: crate::tile::job::SourceKey(0),
+            bucket,
+            slot: tile_index,
             tile: *tile.get_overscaled_tile_id(),
-            bucket: held.bucket_instance_id as usize,
+            source: crate::tile::job::SourceKey(0),
         };
-        self.add_bucket(&PlacedTile::new(tile), key, &held, feature_index, translates);
-        bucket.set(Some(held));
-        for data in self.placement_data.iter_mut().chain(&mut self.follower_data) {
-            if data.bucket == key {
-                data.held = Some(Rc::clone(&bucket));
-            }
+        let held = HeldBuckets::take();
+        if let Some(bucket) = held.get(&key) {
+            self.add_bucket(&PlacedTile::new(tile), key, bucket, feature_index, translates);
         }
+        held.restore();
     }
 
     /// Whether the layer places or draws any bucket.
@@ -1208,8 +1206,12 @@ impl RenderLayer for RenderSymbolLayer {
             let (Some(source), Some(bucket)) = (source_key, render_data.bucket::<Symbol>()) else {
                 continue;
             };
-            let key =
-                BucketKey { source, tile: *render_tile.get_overscaled_tile_id(), bucket: render_data.bucket_index };
+            let key = BucketKey {
+                source,
+                tile: *render_tile.get_overscaled_tile_id(),
+                slot: render_tile.slot(),
+                bucket: render_data.bucket_index,
+            };
             let feature_index = || render_tile.get_feature_index();
             self.add_bucket(&PlacedTile::new(render_tile.tile), key, bucket, feature_index, translates);
         }

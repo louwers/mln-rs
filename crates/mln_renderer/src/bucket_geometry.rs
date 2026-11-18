@@ -47,6 +47,8 @@ pub(crate) struct GeometryVec<T> {
     key: Option<SimpleIdentity>,
     /// The element count of the data moved out.
     moved: usize,
+    /// Whether the data moved out.
+    taken: bool,
 }
 
 impl<T> Default for GeometryVec<T> {
@@ -64,6 +66,7 @@ impl<T> GeometryVec<T> {
             host: None,
             key: None,
             moved: 0,
+            taken: false,
         }
     }
 
@@ -95,7 +98,7 @@ impl<T> GeometryVec<T> {
 
     /// True once the data has moved to the render thread's gfx vector.
     pub(crate) fn is_moved(&self) -> bool {
-        self.moved != 0
+        self.taken
     }
 
     /// The data, empty once it is moved out.
@@ -122,6 +125,7 @@ impl<T: bytemuck::Pod> GeometryVec<T> {
     fn take(&mut self) -> Vec<T> {
         let data = std::mem::take(&mut self.v);
         self.moved += data.len();
+        self.taken = true;
         data
     }
 
@@ -130,6 +134,7 @@ impl<T: bytemuck::Pod> GeometryVec<T> {
     fn take_host(&mut self) -> Option<HostBytes> {
         let bytes = self.host.take()?;
         self.moved += bytes.len() / size_of::<T>();
+        self.taken = true;
         Some(bytes)
     }
 
@@ -171,13 +176,14 @@ impl<T: Clone> Clone for GeometryVec<T> {
             host: self.host.clone(),
             key: self.key,
             moved: self.moved,
+            taken: self.taken,
         }
     }
 }
 
 impl<T: bytemuck::Pod + PartialEq> PartialEq for GeometryVec<T> {
     fn eq(&self, other: &Self) -> bool {
-        self.moved == other.moved && self.data() == other.data()
+        self.moved == other.moved && self.taken == other.taken && self.data() == other.data()
     }
 }
 
@@ -187,7 +193,7 @@ impl<T: std::fmt::Debug> std::fmt::Debug for GeometryVec<T> {
         f.field("v", &self.v);
         #[cfg(target_family = "wasm")]
         f.field("host", &self.host);
-        f.field("key", &self.key).field("moved", &self.moved).finish()
+        f.field("key", &self.key).field("moved", &self.moved).field("taken", &self.taken).finish()
     }
 }
 
@@ -230,6 +236,9 @@ impl BucketGeometry {
     /// Moves the data of `vec`, a bucket's, into a shared vertex vector,
     /// unless it moved before.
     pub(crate) fn move_vertices<V: bytemuck::Pod>(&mut self, vec: &mut GeometryVec<V>) {
+        if vec.is_moved() {
+            return;
+        }
         let key = vec.key();
         self.vertices.entry(key).or_insert_with(|| Rc::new(vec.vertex_vector()));
     }
@@ -237,6 +246,9 @@ impl BucketGeometry {
     /// Moves the data of `vec`, a bucket's, into a shared index vector,
     /// unless it moved before.
     pub(crate) fn move_indexes(&mut self, vec: &mut GeometryVec<u16>) {
+        if vec.is_moved() {
+            return;
+        }
         let key = vec.key();
         self.indexes.entry(key).or_insert_with(|| Rc::new(RefCell::new(vec.index_vector())));
     }

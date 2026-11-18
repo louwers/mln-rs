@@ -930,7 +930,7 @@ impl Placement {
 
     /// Places the symbols of the buckets `layers` place, of `buckets`, and
     /// marks the buckets as placed.
-    pub(crate) fn place(&mut self, layers: &[&dyn RenderLayer], buckets: &mut impl SymbolBuckets) {
+    pub(crate) fn place<B: SymbolBuckets + ?Sized>(&mut self, layers: &[&dyn RenderLayer], buckets: &mut B) {
         self.reloaded_placed.clear();
         self.place_layers_of(layers, &*buckets);
         for key in self.reloaded_placed.drain() {
@@ -940,16 +940,16 @@ impl Placement {
         }
     }
 
-    /// bench: [`place`](Self::place) of the buckets that `layers`'
-    /// placement data hold.
+    /// bench: [`place`](Self::place) of the buckets that `HeldBuckets`
+    /// holds.
     #[cfg(feature = "bench")]
     pub(crate) fn place_layers(&mut self, layers: &[&dyn RenderLayer]) {
-        let mut buckets = crate::render_layer::HeldBuckets::take(layers);
+        let mut buckets = crate::render_layer::HeldBuckets::take();
         self.place(layers, &mut buckets);
         buckets.restore();
     }
 
-    fn place_layers_of(&mut self, layers: &[&dyn RenderLayer], buckets: &dyn SymbolBuckets) {
+    fn place_layers_of<B: SymbolBuckets + ?Sized>(&mut self, layers: &[&dyn RenderLayer], buckets: &B) {
         if matches!(self.kind, PlacementKind::Tile(_)) {
             self.tile_place_layers(layers, buckets);
             return;
@@ -2468,7 +2468,7 @@ impl Placement {
         }
     }
 
-    fn tile_place_layers<'a>(&mut self, layers: &[&dyn RenderLayer], buckets: &'a dyn SymbolBuckets) {
+    fn tile_place_layers<'a, B: SymbolBuckets + ?Sized>(&mut self, layers: &[&dyn RenderLayer], buckets: &'a B) {
         {
             let tile = self.tile_state();
             tile.placed_symbols_data.clear();

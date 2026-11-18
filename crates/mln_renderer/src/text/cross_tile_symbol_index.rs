@@ -433,10 +433,10 @@ impl CrossTileSymbolIndex {
     }
 
     /// bench: [`index_layer`](Self::index_layer) of the buckets that
-    /// `layer`'s placement data hold.
+    /// `HeldBuckets` holds.
     #[cfg(feature = "bench")]
     pub(crate) fn add_layer(&mut self, layer: &dyn RenderLayer, lng: f32, state: &TransformState) -> AddLayerResult {
-        let mut buckets = crate::render_layer::HeldBuckets::take(&[layer]);
+        let mut buckets = crate::render_layer::HeldBuckets::take();
         let result = self.index_layer(layer, lng, state, &mut buckets);
         buckets.restore();
         result

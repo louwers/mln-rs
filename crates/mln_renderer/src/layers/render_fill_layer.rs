@@ -658,7 +658,7 @@ impl RenderLayer for RenderFillLayer {
         let frame = self.drawing.frame.get_or_insert_with(FrameDraws::new);
         let paint = &self.values.evaluated.paint;
         frame.composite = Composite::of(*paint.fill_layer_opacity.uniform(), *paint.fill_layer_blend.uniform());
-        frame.stencil_tiles = Some(Rc::new(render_tiles.iter().map(|tile| tile.id).collect()));
+        frame.stencil_tiles = Some(Rc::new(render_tiles.render_tiles().map(|tile| tile.id).collect()));
 
         // The quad's corners, which every instanced outline reads per vertex.
         let outline_quad = outline_quads.then(|| {

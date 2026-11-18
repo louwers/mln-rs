@@ -481,7 +481,7 @@ impl RenderSource for RenderTileSource {
         };
         self.render_tiles.reserve(source.rendered_count());
         for rendered in source.rendered() {
-            let mut render_tile = RenderTile::new(*rendered.id, rendered.tile, rendered.hold_for_fade);
+            let mut render_tile = RenderTile::new(*rendered.id, rendered.tile, rendered.slot, rendered.hold_for_fade);
             render_tile.prepare(rendered.tile, rendered.needs_rendering, parameters);
             self.render_tiles.push(render_tile);
         }

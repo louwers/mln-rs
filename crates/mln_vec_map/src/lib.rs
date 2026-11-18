@@ -110,6 +110,17 @@ impl<K, V> VecMap<K, V> {
         self.values.iter()
     }
 
+    /// The entry at `index` in key order.
+    #[must_use]
+    pub fn get_index(&self, index: usize) -> Option<(&K, &V)> {
+        Some((self.keys.get(index)?, self.values.get(index)?))
+    }
+
+    /// The entry at `index` in key order.
+    pub fn get_index_mut(&mut self, index: usize) -> Option<(&K, &mut V)> {
+        Some((self.keys.get(index)?, self.values.get_mut(index)?))
+    }
+
     pub fn values_mut(&mut self) -> std::slice::IterMut<'_, V> {
         self.values.iter_mut()
     }
@@ -162,6 +173,16 @@ impl<K: Ord, V> VecMap<K, V> {
         K: Borrow<Q>,
     {
         self.search(key).ok().map(|i| &mut self.values[i])
+    }
+
+    /// The position of `key`'s entry in key order, which stays its position
+    /// until an entry is inserted or removed.
+    #[must_use]
+    pub fn index_of<Q: Ord + ?Sized>(&self, key: &Q) -> Option<usize>
+    where
+        K: Borrow<Q>,
+    {
+        self.search(key).ok()
     }
 
     pub fn contains_key<Q: Ord + ?Sized>(&self, key: &Q) -> bool

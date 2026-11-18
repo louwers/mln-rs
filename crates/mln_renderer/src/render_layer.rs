@@ -98,13 +98,15 @@ impl PlacedTile {
     }
 }
 
-/// symbols: where a symbol bucket is: its tile, in the tile store, and its
-/// index among the tile's buckets.
+/// symbols: where a symbol bucket is: its tile, in the tile store, with
+/// where the tile is among its source's tiles as the frame's render tiles
+/// found it, and its index among the tile's buckets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct BucketKey {
-    pub(crate) source: SourceKey,
-    pub(crate) tile: OverscaledTileID,
     pub(crate) bucket: usize,
+    pub(crate) slot: usize,
+    pub(crate) tile: OverscaledTileID,
+    pub(crate) source: SourceKey,
 }
 
 /// symbols: the symbol buckets of the frame's tiles, by key.
@@ -123,52 +125,48 @@ pub(crate) struct BucketPlacementData {
     pub(crate) sort_key_range: Option<crate::buckets::symbol_bucket::SortKeyRange>,
     pub(crate) text_translate: SymbolTranslate,
     pub(crate) icon_translate: SymbolTranslate,
-    /// bench: the copy of the bucket a benchmark's layer places, which it
-    /// holds instead of a tile store.
-    #[cfg(feature = "bench")]
-    pub(crate) held: Option<HeldBucket>,
 }
 
-/// bench: a copy of a symbol bucket that a benchmark's layer holds, and
-/// lends to the index and the placement (`HeldBuckets`).
+/// bench: the copies of symbol buckets that benchmarks' layers place, kept
+/// where a tile store would keep the buckets, by their index, which is
+/// their keys' `bucket`. They stay for the thread's life.
 #[cfg(feature = "bench")]
-pub(crate) type HeldBucket = std::rc::Rc<std::cell::Cell<Option<Box<SymbolBucket>>>>;
+pub(crate) struct HeldBuckets(Vec<SymbolBucket>);
 
-/// bench: the buckets that the placement data of `layers` hold, lent until
-/// `restore`.
 #[cfg(feature = "bench")]
-pub(crate) struct HeldBuckets(mln_util::hash::HashMap<BucketKey, (HeldBucket, Box<SymbolBucket>)>);
+thread_local! {
+    static HELD_BUCKETS: std::cell::Cell<Vec<SymbolBucket>> = const { std::cell::Cell::new(Vec::new()) };
+}
 
 #[cfg(feature = "bench")]
 impl HeldBuckets {
-    pub(crate) fn take(layers: &[&dyn RenderLayer]) -> Self {
-        let mut buckets = mln_util::hash::HashMap::default();
-        for data in layers.iter().flat_map(|layer| layer.get_placement_data()) {
-            if let Some(held) = &data.held
-                && let Some(bucket) = held.take()
-            {
-                buckets.insert(data.bucket, (std::rc::Rc::clone(held), bucket));
-            }
-        }
-        HeldBuckets(buckets)
+    /// Keeps `bucket`, and returns its index.
+    pub(crate) fn hold(bucket: SymbolBucket) -> usize {
+        let mut buckets = Self::take();
+        buckets.0.push(bucket);
+        let index = buckets.0.len() - 1;
+        buckets.restore();
+        index
     }
 
-    /// Gives the buckets back to the placement data that holds them.
+    /// The buckets, lent until `restore`.
+    pub(crate) fn take() -> Self {
+        HeldBuckets(HELD_BUCKETS.take())
+    }
+
     pub(crate) fn restore(self) {
-        for (held, bucket) in self.0.into_values() {
-            held.set(Some(bucket));
-        }
+        HELD_BUCKETS.set(self.0);
     }
 }
 
 #[cfg(feature = "bench")]
 impl SymbolBuckets for HeldBuckets {
     fn get(&self, key: &BucketKey) -> Option<&SymbolBucket> {
-        self.0.get(key).map(|(_, bucket)| &**bucket)
+        self.0.get(key.bucket)
     }
 
     fn get_mut(&mut self, key: &BucketKey) -> Option<&mut SymbolBucket> {
-        self.0.get_mut(key).map(|(_, bucket)| &mut **bucket)
+        self.0.get_mut(key.bucket)
     }
 }
 
@@ -193,7 +191,6 @@ impl<'a> LayerTiles<'a> {
         contents: &'a [Option<&'a Contents>],
         order: &'a [usize],
     ) -> LayerTiles<'a> {
-        debug_assert_eq!(tiles.len(), contents.len());
         LayerTiles { tiles, contents, order, image: None }
     }
 
@@ -211,6 +208,11 @@ impl<'a> LayerTiles<'a> {
 
     pub(crate) fn iter(self) -> impl Iterator<Item = FrameTile<'a>> + 'a {
         self.order.iter().filter_map(move |&i| self.tile(i))
+    }
+
+    /// The render tiles in order, without what they show.
+    pub(crate) fn render_tiles(self) -> impl Iterator<Item = &'a RenderTile> + 'a {
+        self.order.iter().filter_map(move |&i| self.tiles.get(i))
     }
 
     /// An image source's image.
@@ -435,7 +437,7 @@ impl<L: TypedLayer> LayerParts for L {
         let PartsMut { drawing, .. } = self.parts_mut();
         let caches = &mut drawing.caches;
         match tiles {
-            Some(tiles) => caches.set_tiles(tiles.iter().map(|tile| *tile.get_overscaled_tile_id())),
+            Some(tiles) => caches.set_tiles(tiles.render_tiles().map(|tile| *tile.get_overscaled_tile_id())),
             None => caches.clear_tiles(),
         }
     }
