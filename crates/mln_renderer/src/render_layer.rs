@@ -34,7 +34,7 @@ use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;
 use crate::render_pass::RenderPass;
 use crate::render_source::{RenderSource, TileOrder};
-use crate::render_tile::{FoundTile, FrameTile, RenderTile, TileView};
+use crate::render_tile::{FoundTile, FrameTile, RenderTile, TileView, ViewPlace};
 use crate::sources::render_image_source::ImageSourceRenderData;
 use crate::tile::contents::{Contents, GeometryContents};
 use crate::tile::job::SourceKey;
@@ -114,16 +114,21 @@ impl<'a, T: LayerType> LayerBucket<'a, T> {
 }
 
 impl<'a, T: LayerType> TileView<'a> for LayerBucket<'a, T> {
-    fn find(contents: &'a Contents, layer_id: &str) -> Option<(Self, usize)> {
+    fn find(contents: &'a Contents, layer_id: &str) -> Option<(Self, ViewPlace)> {
         let contents = contents.geometry()?;
         let index = contents.result.layer_render_data.find(layer_id)?;
-        Some((LayerBucket::laid(contents, index)?, index))
+        Some((LayerBucket::laid(contents, index)?, ViewPlace::Laid(index)))
     }
 
-    fn at(contents: &'a Contents, layer_id: &str, index: usize) -> Option<Self> {
-        let bucket = LayerBucket::laid(contents.geometry()?, index)?;
-        debug_assert_eq!(bucket.layer.style.id, layer_id, "a layer found at another's place");
-        Some(bucket)
+    fn at(contents: &'a Contents, place: ViewPlace) -> Option<Self> {
+        match place {
+            ViewPlace::Laid(index) => LayerBucket::laid(contents.geometry()?, index),
+            ViewPlace::Own => None,
+        }
+    }
+
+    fn is_for(self, layer_id: &str) -> bool {
+        self.layer.style.id == layer_id
     }
 
     fn passes(self) -> RenderPass {
@@ -318,8 +323,10 @@ impl<'a> FrameSourceTiles<'a> {
         found
             .iter()
             .filter_map(|&FoundTile { tile, view }| {
+                let render_tile = self.tiles.get(tile);
+                debug_assert!(render_tile.is_some(), "a tile found past the frame's render tiles");
                 let contents = self.contents.get(tile).copied().flatten();
-                Some(FrameTile::at(self.tiles.get(tile)?, contents, layer_id, view))
+                Some(FrameTile::at(render_tile?, contents, layer_id, view))
             })
             .collect()
     }
