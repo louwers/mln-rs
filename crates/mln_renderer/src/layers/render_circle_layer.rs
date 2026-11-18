@@ -191,17 +191,18 @@ impl RenderCircleLayer {
     }
 
     /// The entries in the layer's storage buffers of the draw of `tile_id`,
-    /// whose bucket's binders are `binders`: its matrix, the scales of its
-    /// circles' extrusion, and the interpolation of the layer's values.
+    /// whose bucket's binders are `binders`, with the layer's values `layer`:
+    /// its matrix, the scales of its circles' extrusion, and the
+    /// interpolation of the layer's values.
     fn uniforms(
-        &self,
+        layer: &EvaluatedLayer<Circle>,
         tile_id: &OverscaledTileID,
         binders: &CircleBinders,
         parameters: &PaintParameters<'_>,
     ) -> CircleUniforms {
         const IN_VIEWPORT_PIXEL_UNITS: bool = false; // from RenderTile::translatedMatrix
         const NEAR_CLIPPED: bool = false;
-        let evaluated = &self.values.evaluated.paint;
+        let evaluated = &layer.paint;
         let zoom = parameters.state.get_zoom() as f32;
         let tile_id = tile_id.to_unwrapped();
         let projection = get_projection_data(
@@ -441,9 +442,8 @@ impl RenderLayer for RenderCircleLayer {
             return;
         }
 
-        let evaluated_properties = Arc::clone(&self.values.evaluated);
-        let evaluated = &evaluated_properties.paint;
-        let mut draw_list = std::mem::take(&mut self.draw_list);
+        let layer = &*self.values.evaluated;
+        let evaluated = &layer.paint;
         for tile in render_tiles.iter() {
             let tile_id = *tile.tile.get_overscaled_tile_id();
 
@@ -510,12 +510,10 @@ impl RenderLayer for RenderCircleLayer {
             else {
                 continue;
             };
-            draw_list.push(draw, self.uniforms(&tile_id, binders, paint_parameters));
+            self.draw_list.push(draw, Self::uniforms(layer, &tile_id, binders, paint_parameters));
         }
 
         let frame = self.drawing.frame.get_or_insert_with(FrameDraws::new);
-        let layer = &self.values.evaluated;
-        draw_list.finish(frame, context, |writer| Self::write_uniforms(layer, writer));
-        self.draw_list = draw_list;
+        self.draw_list.finish(frame, context, |writer| Self::write_uniforms(layer, writer));
     }
 }

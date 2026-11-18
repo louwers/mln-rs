@@ -357,8 +357,7 @@ impl CrossTileSymbolLayerIndex {
     pub(crate) fn remove_stale_buckets(&mut self, current_ids: &HashSet<u32>) -> bool {
         let mut tiles_changed = false;
         let used_cross_tile_ids = &mut self.used_cross_tile_ids;
-        for i in 0..self.indexes.len() {
-            let Some((&zoom, indexes)) = self.indexes.get_index_mut(i) else { continue };
+        for (&zoom, indexes) in &mut self.indexes {
             indexes.retain(|_, index| {
                 let current = current_ids.contains(&index.bucket_instance_id);
                 if !current {
@@ -403,11 +402,9 @@ impl CrossTileSymbolIndex {
         state: &TransformState,
         buckets: &mut (impl SymbolBuckets + ?Sized),
     ) -> AddLayerResult {
-        if !self.layer_indexes.contains_key(layer.get_id()) {
-            self.layer_indexes.insert(layer.get_id().to_owned(), CrossTileSymbolLayerIndex::new());
-        }
-        let Some(layer_index) = self.layer_indexes.get_mut(layer.get_id()) else {
-            return AddLayerResult::default();
+        let layer_index = match self.layer_indexes.index_of(layer.get_id()) {
+            Some(index) => &mut self.layer_indexes.values_mut().into_slice()[index],
+            None => self.layer_indexes.entry(layer.get_id().to_owned()).or_insert_with(CrossTileSymbolLayerIndex::new),
         };
 
         let mut result = AddLayerResult::default();

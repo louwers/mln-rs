@@ -403,7 +403,7 @@ impl LineAtlas {
 
     /// Uploads the textures to the GPU to be available when we need it.
     pub(crate) fn upload(&mut self, context: &Context) {
-        for index in std::mem::take(&mut self.needs_upload) {
+        for index in self.needs_upload.drain(..) {
             if let Some((_, texture)) = self.textures.get_mut(index) {
                 texture.upload(context);
             }

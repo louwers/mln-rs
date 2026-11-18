@@ -248,11 +248,6 @@ impl<U> Default for DrawList<U> {
 }
 
 impl<U> DrawList<U> {
-    #[must_use]
-    pub(crate) fn is_empty(&self) -> bool {
-        self.draws.is_empty()
-    }
-
     /// Drops the list's draws.
     pub(crate) fn clear(&mut self) {
         self.draws.clear();
@@ -339,8 +334,9 @@ pub(crate) struct FrameDraws {
     /// surface, after they draw into a texture of their own; `None` where
     /// they draw straight onto the frame.
     pub(crate) composite: Option<Composite>,
-    /// The tiles whose masks the stencil buffer holds when the draws draw,
-    /// none where the draws clip to no tiles' masks.
+    /// The tiles whose masks the stencil buffer holds when the draws draw.
+    /// Draws that don't clip need none, and neither does a layer without
+    /// tiles, whose draws are none.
     stencil_tiles: Vec<UnwrappedTileID>,
 }
 
@@ -382,7 +378,8 @@ pub(crate) enum DrawGroup<'a> {
 }
 
 impl<'a> DrawGroup<'a> {
-    /// The tiles whose masks the stencil buffer holds when the group draws.
+    /// The tiles whose masks the stencil buffer holds when the group draws;
+    /// `None` for a group that needs no masks.
     #[must_use]
     pub(crate) fn stencil_tiles(self) -> Option<&'a [UnwrappedTileID]> {
         match self {

@@ -848,19 +848,20 @@ impl RenderSymbolLayer {
     }
 
     /// The entries in the layer's storage buffers of `draw`, of the tile
-    /// `tile_id` and its `bucket`.
+    /// `tile_id` and its `bucket`, of the layer `layer_id` with the values
+    /// `layer`.
     fn uniforms(
-        &self,
+        layer_id: &str,
+        layer: &EvaluatedLayer<Symbol>,
         tile_id: &OverscaledTileID,
         bucket: &SymbolBucket,
         draw: &SymbolDraw,
         parameters: &PaintParameters<'_>,
     ) -> Option<SymbolUniforms> {
         let state = parameters.state;
-        let layer = &*self.values.evaluated;
         let evaluated = &layer.paint;
         let zoom = state.get_zoom() as f32;
-        let paint_properties = bucket.paint_properties.get(self.get_id())?;
+        let paint_properties = bucket.paint_properties.get(layer_id)?;
 
         let data = &draw.data;
         let tile_id = tile_id.to_unwrapped();
@@ -995,19 +996,20 @@ impl RenderSymbolLayer {
         paint_parameters: &PaintParameters<'_>,
         context: &Context,
     ) {
-        let mut draw_list = std::mem::take(&mut self.draw_list);
-        let mut collision_draws = self.drawing.overlay.as_mut().map(|overlay| std::mem::take(&mut overlay.draws));
-        if let Some(draws) = &mut collision_draws {
-            draws.clear();
-        }
+        let layer_id = self.base.style.base().id.as_str();
+        let layer = &*self.values.evaluated;
+        let mut collision_draws = self.drawing.overlay.as_mut().map(|overlay| {
+            overlay.draws.clear();
+            &mut overlay.draws
+        });
         for tile in tiles {
             let tile_id = *tile.tile.get_overscaled_tile_id();
             if let Some(cached) = self.drawing.caches.cache(&tile_id) {
                 let bucket = tile.get_layer_render_data(&*self.base.style).and_then(LayerRenderData::bucket::<Symbol>);
                 debug_assert!(bucket.is_some() || cached.draws.is_empty());
                 for (slot, draw) in cached.draws.iter().enumerate().filter(|(_, draw)| draw.visible) {
-                    let Some(uniforms) =
-                        bucket.and_then(|bucket| self.uniforms(&tile_id, bucket, draw, paint_parameters))
+                    let Some(uniforms) = bucket
+                        .and_then(|bucket| Self::uniforms(layer_id, layer, &tile_id, bucket, draw, paint_parameters))
                     else {
                         continue;
                     };
@@ -1016,7 +1018,7 @@ impl RenderSymbolLayer {
                         atlases: Some(Rc::clone(&draw.atlases)),
                         ..FrameDraw::new(Some(tile_id), slot as u32, draw.id)
                     };
-                    draw_list.push(frame_draw, uniforms);
+                    self.draw_list.push(frame_draw, uniforms);
                 }
             }
             if let Some(cached) = self.drawing.caches.cache_mut(&tile_id) {
@@ -1036,15 +1038,14 @@ impl RenderSymbolLayer {
         }
 
         if let Some(frame) = &mut self.drawing.frame {
-            let evaluated = &self.values.evaluated.paint;
-            draw_list.finish(frame, context, |writer| write_uniforms(evaluated, writer));
+            self.draw_list.finish(frame, context, |writer| write_uniforms(&layer.paint, writer));
         } else {
-            draw_list.clear();
+            self.draw_list.clear();
         }
-        self.draw_list = draw_list;
-        if let (Some(overlay), Some(mut collision_draws)) = (&mut self.drawing.overlay, collision_draws) {
-            collision_draws.sort_by_key(FrameDraw::order);
-            overlay.draws = collision_draws;
+        // Each collision draw has its own GPU objects, so no two share an
+        // order.
+        if let Some(collision_draws) = collision_draws {
+            collision_draws.sort_unstable_by_key(FrameDraw::order);
         }
     }
 }

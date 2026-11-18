@@ -124,17 +124,22 @@ impl RenderRasterLayer {
         }
     }
 
-    /// The bucket's texture, which this creates if needed, with the layer's
-    /// sampler; `None` for a bucket without an image.
-    fn bucket_texture(&mut self, context: &Context, bucket: &RasterBucket) -> Option<Texture2DPtr> {
+    /// The bucket's texture in `textures`, which this creates if needed,
+    /// with `sampler`; `None` for a bucket without an image.
+    fn bucket_texture(
+        textures: &mut HashMap<SimpleIdentity, Texture2DPtr>,
+        sampler: SamplerState,
+        context: &Context,
+        bucket: &RasterBucket,
+    ) -> Option<Texture2DPtr> {
         let image = bucket.image.as_ref()?;
-        let texture = Rc::clone(self.textures.entry(bucket.base.bucket_id).or_insert_with(|| {
+        let texture = Rc::clone(textures.entry(bucket.base.bucket_id).or_insert_with(|| {
             let texture = context.create_texture_2d();
             texture.borrow_mut().set_image(Some(Rc::new((**image).clone())));
             texture
         }));
 
-        texture.borrow_mut().set_sampler(self.sampler_state());
+        texture.borrow_mut().set_sampler(sampler);
         Some(texture)
     }
 
@@ -188,10 +193,11 @@ impl RenderRasterLayer {
 
         // TODO: Share textures
         let mut image_draws = Vec::new();
+        let sampler = self.sampler_state();
         for (slot, tile_id) in image_data.tile_ids.iter().enumerate() {
             let geometry = {
-                // buildVertexData(builder, nullptr, bucket): the bucket's own
-                // geometry (shared: vertices, indices and segments are set).
+                // The bucket's own geometry, which an image source's bucket
+                // always has.
                 let geometry = bucket.geometry();
                 let vertices = shared_vertices(&geometry.vertices);
                 raster_geometry(
@@ -201,7 +207,7 @@ impl RenderRasterLayer {
                     &geometry.segments,
                 )
             };
-            let texture = self.bucket_texture(context, bucket);
+            let texture = Self::bucket_texture(&mut self.textures, sampler, context, bucket);
             let draw = KeptDraw::new(new_objects(raster_shader, geometry, texture));
             let uniforms = Self::uniforms(tile_id, paint_parameters);
             self.draw_list.push(FrameDraw::new(None, slot as u32, draw.id), uniforms);
@@ -404,13 +410,12 @@ impl RenderLayer for RenderRasterLayer {
         };
         self.drawing.frame.get_or_insert_with(FrameDraws::new);
 
+        let sampler = self.sampler_state();
         let static_geometry = self.static_geometry.get_or_insert_with(|| StaticGeometry {
             vertices: shared_vertices(&RenderStaticData::raster_vertices()),
             indexes: Rc::new(RefCell::new(IndexVectorBase::new(RenderStaticData::quad_triangle_indices()))),
             segments: RenderStaticData::raster_segments(),
         });
-        let static_vertices = Rc::clone(&static_geometry.vertices);
-        let static_indexes = Rc::clone(&static_geometry.indexes);
 
         // Drop the textures of buckets that are no longer rendered.
         let live_buckets = &mut self.live_buckets;
@@ -420,7 +425,6 @@ impl RenderLayer for RenderRasterLayer {
         self.textures.retain(|id, _| live_buckets.contains(id));
         // Kept draws keep their textures, so a changed filter is applied to
         // the textures themselves.
-        let sampler = self.sampler_state();
         for texture in self.textures.values() {
             texture.borrow_mut().set_sampler(sampler);
         }
@@ -444,12 +448,12 @@ impl RenderLayer for RenderRasterLayer {
             }
 
             if self.drawing.caches.cache_mut(&tile_id).is_none() {
-                let texture = self.bucket_texture(context, bucket);
+                let texture = Self::bucket_texture(&mut self.textures, sampler, context, bucket);
 
-                // buildVertexData(builder, nullptr, bucket, tileID): the
-                // bucket only fills in geometry for masked tiles, otherwise
-                // the standard tile extent geometry is used; on the globe,
-                // the pole-capped grid of what the mask keeps.
+                // The bucket only has geometry for a masked tile; any other
+                // tile is drawn with the static quad over the tile's extent.
+                // On the globe, the draw is the pole-capped grid of what the
+                // mask keeps.
                 let geometry = bucket.geometry();
                 let globe = self.base.projection_variant == ProjectionVariant::Globe;
                 let shared = !globe
@@ -476,8 +480,12 @@ impl RenderLayer for RenderRasterLayer {
                         &geometry.segments,
                     )
                 } else {
-                    let segments = self.static_geometry.as_ref().map_or(&[][..], |geometry| &geometry.segments);
-                    raster_geometry(&static_vertices, 4, Rc::clone(&static_indexes), segments)
+                    raster_geometry(
+                        &static_geometry.vertices,
+                        4,
+                        Rc::clone(&static_geometry.indexes),
+                        &static_geometry.segments,
+                    )
                 };
                 let objects = new_objects(&raster_shader, draw_geometry, texture);
                 self.drawing

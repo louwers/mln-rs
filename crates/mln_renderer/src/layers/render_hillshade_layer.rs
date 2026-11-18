@@ -138,10 +138,10 @@ pub(crate) struct RenderHillshadeLayer {
     bucket_render_targets: HashMap<SimpleIdentity, BucketTarget>,
     /// The buckets of the frame's tiles, which keep their render targets.
     live_buckets: HashSet<SimpleIdentity>,
-    /// The illumination of the evaluation the draws last drew with: a
-    /// viewport anchor's takes the bearing of the first frame that draws
-    /// with it.
-    evaluated_props: Option<(Arc<EvaluatedLayer<Hillshade>>, HillshadeEvaluatedPropsUBO)>,
+    /// The illumination of the evaluation the draws last drew with, and its
+    /// number of light sources: a viewport anchor's takes the bearing of the
+    /// first frame that draws with it.
+    illumination: Option<(Arc<EvaluatedLayer<Hillshade>>, Illumination)>,
 }
 
 impl RenderHillshadeLayer {
@@ -160,7 +160,7 @@ impl RenderHillshadeLayer {
             globe_meshes: GlobeTileMeshCache::new(),
             bucket_render_targets: HashMap::default(),
             live_buckets: HashSet::default(),
-            evaluated_props: None,
+            illumination: None,
         }
     }
 }
@@ -173,16 +173,12 @@ struct IlluminationProperties {
     highlight_colors: Vec<Color>,
 }
 
-/// How many light sources the layer's illumination has: as many as its
-/// longest list of illumination values, up to `MAX_ILLUMINATION_SOURCES`,
-/// and at least one, or as many directions as it has past that limit.
-fn num_light_sources(evaluated: &HillshadePaintProperties::PossiblyEvaluated) -> usize {
-    let directions = evaluated.hillshade_illumination_direction.uniform().len();
-    let longest = directions
-        .max(evaluated.hillshade_illumination_altitude.uniform().len())
-        .max(evaluated.hillshade_highlight_color.uniform().len())
-        .max(evaluated.hillshade_shadow_color.uniform().len());
-    longest.min(MAX_ILLUMINATION_SOURCES).max(directions).max(1)
+/// The packed illumination of an evaluation, and its number of light
+/// sources.
+#[derive(Clone, Copy)]
+struct Illumination {
+    props: HillshadeEvaluatedPropsUBO,
+    num_lights: usize,
 }
 
 /// Pad shorter arrays by repeating the last element.
@@ -195,10 +191,10 @@ fn pad_array<T: Clone + Default>(arr: &mut Vec<T>, max_length: usize) {
 /// Convert style properties to illumination properties
 fn get_illumination_properties(evaluated: &HillshadePaintProperties::PossiblyEvaluated) -> IlluminationProperties {
     // Get the values from evaluated properties (these are now vectors)
-    let mut directions: Vec<f32> = evaluated.hillshade_illumination_direction.clone().uniform().clone();
-    let mut altitudes: Vec<f32> = evaluated.hillshade_illumination_altitude.clone().uniform().clone();
-    let mut highlights: Vec<Color> = evaluated.hillshade_highlight_color.clone().uniform().clone();
-    let mut shadows: Vec<Color> = evaluated.hillshade_shadow_color.clone().uniform().clone();
+    let mut directions: Vec<f32> = evaluated.hillshade_illumination_direction.uniform().clone();
+    let mut altitudes: Vec<f32> = evaluated.hillshade_illumination_altitude.uniform().clone();
+    let mut highlights: Vec<Color> = evaluated.hillshade_highlight_color.uniform().clone();
+    let mut shadows: Vec<Color> = evaluated.hillshade_shadow_color.uniform().clone();
 
     // Find the maximum length to ensure all arrays are the same size
     let mut max_length = directions.len().max(altitudes.len()).max(highlights.len()).max(shadows.len());
@@ -410,16 +406,15 @@ impl RenderLayer for RenderHillshadeLayer {
             ResamplingType::Nearest => TextureFilterType::Nearest,
         };
 
-        // Drop the render targets of buckets that are no longer rendered
-        // (C++ releases them with the bucket).
+        // Drop the render targets of buckets that are no longer rendered.
         let live_buckets = &mut self.live_buckets;
         live_buckets.clear();
         live_buckets
             .extend(render_tiles.iter().filter_map(|tile| tile.get_bucket(&*self.base.style).map(Bucket::get_id)));
         self.bucket_render_targets.retain(|id, _| live_buckets.contains(id));
 
-        let num_lights = num_light_sources(&self.values.evaluated.paint);
-        let mut draw_list = std::mem::take(&mut self.draw_list);
+        // The illumination, which the first draw computes.
+        let mut illumination = None;
         for tile in render_tiles.iter() {
             let tile_id = *tile.tile.get_overscaled_tile_id();
 
@@ -533,20 +528,23 @@ impl RenderLayer for RenderHillshadeLayer {
                 continue;
             };
             let draw = FrameDraw { depth: DrawDepth::Off, ..cached.draw.frame_draw(Some(tile_id)) };
-            draw_list.push(draw, self.uniforms(&tile_id.to_unwrapped(), num_lights, paint_parameters));
+            let Illumination { num_lights, .. } = *illumination.get_or_insert_with(|| {
+                Self::illumination(&mut self.illumination, &self.values.evaluated, paint_parameters)
+            });
+            let uniforms =
+                Self::uniforms(&self.values.evaluated.paint, &tile_id.to_unwrapped(), num_lights, paint_parameters);
+            self.draw_list.push(draw, uniforms);
         }
 
-        let props = (!draw_list.is_empty()).then(|| self.evaluated_props(paint_parameters));
         let frame = self.drawing.frame.get_or_insert_with(FrameDraws::new);
-        draw_list.finish(frame, context, |writer| {
-            if let Some(props) = &props {
+        self.draw_list.finish(frame, context, |writer| {
+            if let Some(Illumination { props, .. }) = &illumination {
                 writer.uniform(ID_HILLSHADE_EVALUATED_PROPS_UBO, props);
             }
             writer.storage(ID_HILLSHADE_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
             writer.storage(ID_HILLSHADE_TILE_PROPS_UBO, |uniforms| uniforms.tile_props);
             writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
         });
-        self.draw_list = draw_list;
     }
 }
 
@@ -625,15 +623,15 @@ impl BucketTarget {
 }
 
 impl RenderHillshadeLayer {
-    /// The entries in the layer's storage buffers of the draw of `tile_id`,
-    /// lit by `num_lights` light sources.
+    /// The entries in the layer's storage buffers of the draw of `tile_id`
+    /// with the layer's values `evaluated`, lit by `num_lights` light
+    /// sources.
     fn uniforms(
-        &self,
+        evaluated: &HillshadePaintProperties::PossiblyEvaluated,
         tile_id: &UnwrappedTileID,
         num_lights: usize,
         parameters: &PaintParameters<'_>,
     ) -> HillshadeUniforms {
-        let evaluated = &self.values.evaluated.paint;
         let projection = get_projection_data(
             tile_id,
             parameters,
@@ -659,15 +657,20 @@ impl RenderHillshadeLayer {
         }
     }
 
-    /// The illumination of the layer's evaluation, which it computes with
-    /// the frame's bearing the first time it draws with the evaluation.
-    fn evaluated_props(&mut self, parameters: &PaintParameters<'_>) -> HillshadeEvaluatedPropsUBO {
-        if let Some((layer, props)) = &self.evaluated_props
-            && Arc::ptr_eq(layer, &self.values.evaluated)
+    /// The illumination of the layer's evaluation `layer`, kept in `cache`,
+    /// which this computes with the frame's bearing the first time it draws
+    /// with the evaluation.
+    fn illumination(
+        cache: &mut Option<(Arc<EvaluatedLayer<Hillshade>>, Illumination)>,
+        layer: &Arc<EvaluatedLayer<Hillshade>>,
+        parameters: &PaintParameters<'_>,
+    ) -> Illumination {
+        if let Some((cached_layer, illumination)) = cache
+            && Arc::ptr_eq(cached_layer, layer)
         {
-            return *props;
+            return *illumination;
         }
-        let evaluated = &self.values.evaluated.paint;
+        let evaluated = &layer.paint;
         let mut illumination = get_illumination_properties(evaluated);
         if *evaluated.hillshade_illumination_anchor.uniform() == HillshadeIlluminationAnchorType::Viewport {
             let bearing = parameters.state.get_bearing() as f32;
@@ -676,7 +679,8 @@ impl RenderHillshadeLayer {
             }
         }
         let props = pack_evaluated_props(&illumination, evaluated.hillshade_accent_color.uniform());
-        self.evaluated_props = Some((Arc::clone(&self.values.evaluated), props));
-        props
+        let illumination = Illumination { props, num_lights: illumination.direction_radians.len() };
+        *cache = Some((Arc::clone(layer), illumination));
+        illumination
     }
 }

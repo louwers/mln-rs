@@ -128,9 +128,9 @@ pub(crate) struct RenderColorReliefLayer {
     static_data_indices: Option<IndexVectorBasePtr>,
     globe_meshes: GlobeTileMeshCache<HillshadeLayoutVertex>,
 
-    /// The DEM texture of each bucket, with the bucket's prepare generation
-    /// it was made at (C++ makes one per drawable and frame from the
-    /// current, possibly backfilled, DEM image).
+    /// The DEM texture of each bucket, made from its current, possibly
+    /// backfilled, DEM image, with the bucket's prepare generation it was
+    /// made at.
     dem_textures: HashMap<SimpleIdentity, (Texture2DPtr, u64)>,
     /// The buckets of the frame's tiles, whose DEM textures stay.
     live_buckets: HashSet<SimpleIdentity>,

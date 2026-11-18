@@ -433,12 +433,17 @@ impl RenderFillLayer {
     }
 
     /// The entries in the layer's storage buffers of `draw`, the fill or the
-    /// `outline` of `tile`, with or without a `pattern`: its matrix and the
-    /// interpolation of the layer's values, and for a pattern, where the
-    /// pattern is in the tile's atlas.
-    #[expect(clippy::too_many_arguments, reason = "the draw, its tile and bucket, and the frame's parameters")]
+    /// `outline` of `tile`, with or without a `pattern`, of the layer
+    /// `layer_id` with the values `layer`: its matrix and the interpolation
+    /// of the layer's values, and for a pattern, where the pattern is in the
+    /// tile's atlas.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the layer, the draw, its tile and bucket, and the frame's parameters"
+    )]
     fn uniforms(
-        &self,
+        layer_id: &str,
+        layer: &EvaluatedLayer<Fill>,
         tile: FrameTile<'_>,
         bucket: &FillBucket,
         binders: &FillBinders,
@@ -449,7 +454,7 @@ impl RenderFillLayer {
     ) -> FillUniforms {
         const IN_VIEWPORT_PIXEL_UNITS: bool = false; // from RenderTile::translatedMatrix
         const NEAR_CLIPPED: bool = false;
-        let evaluated = &self.values.evaluated.paint;
+        let evaluated = &layer.paint;
         let zoom = parameters.state.get_zoom() as f32;
         let tile_id = tile.tile.get_overscaled_tile_id().to_unwrapped();
 
@@ -524,7 +529,7 @@ impl RenderFillLayer {
             pattern_from: tlbr(faded.from.id()),
             pattern_to: tlbr(faded.to.id()),
             texsize: [texture_size.width as f32, texture_size.height as f32],
-            sdf: if bucket.is_sdf_pattern(self.get_id()) { 1.0 } else { 0.0 },
+            sdf: if bucket.is_sdf_pattern(layer_id) { 1.0 } else { 0.0 },
             pad2: 0.0,
         };
         uniforms
@@ -682,7 +687,8 @@ impl RenderLayer for RenderFillLayer {
             fill_depth: None,
         };
 
-        let mut draw_list = std::mem::take(&mut self.draw_list);
+        let layer_id = self.base.style.base().id.as_str();
+        let layer = &*self.values.evaluated;
         for tile in render_tiles.iter() {
             let tile_id = *tile.tile.get_overscaled_tile_id();
 
@@ -694,7 +700,7 @@ impl RenderLayer for RenderFillLayer {
             let Some(bucket) = render_data.bucket::<Fill>() else {
                 continue;
             };
-            let Some(binders) = bucket.paint_property_binders.get(self.get_id()) else {
+            let Some(binders) = bucket.paint_property_binders.get(layer_id) else {
                 continue;
             };
 
@@ -743,7 +749,17 @@ impl RenderLayer for RenderFillLayer {
                 let Some(draw) = draw else {
                     continue;
                 };
-                let uniforms = self.uniforms(tile, bucket, binders, cached.pattern, draw, outline, paint_parameters);
+                let uniforms = Self::uniforms(
+                    layer_id,
+                    layer,
+                    tile,
+                    bucket,
+                    binders,
+                    cached.pattern,
+                    draw,
+                    outline,
+                    paint_parameters,
+                );
                 let tile_draw = FrameDraw {
                     pass: RENDER_PASS,
                     depth: DrawDepth::Layer { sub_layer: draw.sub_layer, mask: draw.depth },
@@ -751,13 +767,11 @@ impl RenderLayer for RenderFillLayer {
                     atlases: cached.atlases.clone(),
                     ..FrameDraw::new(Some(tile_id), slot as u32, draw.id)
                 };
-                draw_list.push(tile_draw, uniforms);
+                self.draw_list.push(tile_draw, uniforms);
             }
         }
 
         let frame = self.drawing.frame.get_or_insert_with(FrameDraws::new);
-        let layer = &self.values.evaluated;
-        draw_list.finish(frame, context, |writer| Self::write_uniforms(layer, writer));
-        self.draw_list = draw_list;
+        self.draw_list.finish(frame, context, |writer| Self::write_uniforms(layer, writer));
     }
 }

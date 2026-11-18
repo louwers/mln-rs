@@ -2,7 +2,7 @@
 // and the parse status and timestamp text, drawn as polylines by the line
 // shader.
 
-use std::cell::RefCell;
+use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -262,28 +262,35 @@ pub(crate) struct RenderTileSource {
     key: SourceKey,
     origin: Box<dyn TileOrigin>,
     fast_pfor_enabled: bool,
-    pub(crate) render_tiles: Vec<RenderTile>,
-    /// The render tiles in each [`TileOrder`], as indexes into them.
+    render_tiles: Vec<RenderTile>,
+    /// The render tiles in [`TileOrder::ById`], as indexes into them.
     order_by_id: Vec<usize>,
-    order_by_y: Vec<usize>,
+    /// The render tiles in [`TileOrder::ByY`], which the frame's first
+    /// request for them sorts.
+    order_by_y: OnceCell<Vec<usize>>,
+    /// The memory of an earlier frame's `order_by_y`, which the next sort
+    /// reuses.
+    spare_order: Cell<Vec<usize>>,
+    /// The bearing the render tiles are seen at in `order_by_y`.
+    bearing: f32,
 }
 
 impl RenderTileSource {
-    /// Sorts the render tiles into each [`TileOrder`], seen at `bearing`.
-    fn sort_tiles(&mut self, bearing: f32) {
+    /// The render tiles in [`TileOrder::ByY`] seen at the frame's bearing:
+    /// the deeper zooms first, then by rotated y and x.
+    fn sort_by_y(&self) -> Vec<usize> {
         let tiles = &self.render_tiles;
-        self.order_by_id.clear();
-        self.order_by_id.extend((0..tiles.len()).filter(|&i| !tiles[i].hold_for_fade()));
-        let rotation = Vec2::from_angle(bearing);
-        self.order_by_y.clear();
-        self.order_by_y.extend(0..tiles.len());
-        self.order_by_y.sort_by(|&a, &b| {
+        let rotation = Vec2::from_angle(self.bearing);
+        let mut order = self.spare_order.take();
+        order.clear();
+        order.extend(0..tiles.len());
+        order.sort_by(|&a, &b| {
             let (a, b) = (&tiles[a].id.canonical, &tiles[b].id.canonical);
-            let par = rotation.rotate(Vec2::new(a.x as f32, a.y as f32));
-            let pbr = rotation.rotate(Vec2::new(b.x as f32, b.y as f32));
-            // std::tie(b.z, par.y, par.x) < std::tie(a.z, pbr.y, pbr.x)
-            b.z.cmp(&a.z).then(par.y.total_cmp(&pbr.y)).then(par.x.total_cmp(&pbr.x))
+            let pa = rotation.rotate(Vec2::new(a.x as f32, a.y as f32));
+            let pb = rotation.rotate(Vec2::new(b.x as f32, b.y as f32));
+            b.z.cmp(&a.z).then(pa.y.total_cmp(&pb.y)).then(pa.x.total_cmp(&pb.x))
         });
+        order
     }
 
     /// The render source of `style_source`, whose tiles of `kind` go in `store`
@@ -305,7 +312,9 @@ impl RenderTileSource {
             fast_pfor_enabled: false,
             render_tiles: Vec::new(),
             order_by_id: Vec::new(),
-            order_by_y: Vec::new(),
+            order_by_y: OnceCell::new(),
+            spare_order: Cell::default(),
+            bearing: 0.0,
         }
     }
 }
@@ -361,13 +370,20 @@ impl RenderSource for RenderTileSource {
                 self.render_tiles.push(render_tile);
             }
         }
-        self.sort_tiles(parameters.transform.state.get_bearing() as f32);
+        let tiles = &self.render_tiles;
+        self.order_by_id.clear();
+        self.order_by_id.extend((0..tiles.len()).filter(|&i| !tiles[i].hold_for_fade()));
+        if let Some(order) = self.order_by_y.take() {
+            *self.spare_order.get_mut() = order;
+        }
+        self.bearing = parameters.transform.state.get_bearing() as f32;
     }
 
     fn release_render_data(&mut self) {
         self.render_tiles = Vec::new();
         self.order_by_id = Vec::new();
-        self.order_by_y = Vec::new();
+        self.order_by_y = OnceCell::new();
+        *self.spare_order.get_mut() = Vec::new();
     }
 
     fn upload(&mut self, store: &mut TileStore, needs: UploadNeeds) {
@@ -528,7 +544,7 @@ impl RenderSource for RenderTileSource {
     fn tile_order(&self, order: TileOrder) -> Option<&[usize]> {
         Some(match order {
             TileOrder::ById => &self.order_by_id,
-            TileOrder::ByY => &self.order_by_y,
+            TileOrder::ByY => self.order_by_y.get_or_init(|| self.sort_by_y()),
         })
     }
 

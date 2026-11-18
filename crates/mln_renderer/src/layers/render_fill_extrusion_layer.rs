@@ -473,7 +473,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
             first_shaders: None,
         };
 
-        let mut draw_list = std::mem::take(&mut self.draw_list);
+        let layer = &*self.values.evaluated;
         for tile in render_tiles.iter() {
             let tile_id = *tile.tile.get_overscaled_tile_id();
 
@@ -499,7 +499,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
             // feature state doesn't reach an extrusion: the tile's changes go
             // unread.
             if self.drawing.caches.cache_mut(&tile_id).is_none() {
-                let built = builder.build(tile, bucket, binders, &self.values.evaluated.paint);
+                let built = builder.build(tile, bucket, binders, &layer.paint);
                 self.drawing.caches.set_cache(&tile_id, built);
             }
             let Some(cached) = self.drawing.caches.cache(&tile_id) else {
@@ -514,15 +514,13 @@ impl RenderLayer for RenderFillExtrusionLayer {
                     atlases: cached.atlases.clone(),
                     ..FrameDraw::new(Some(tile_id), slot as u32, draw.id)
                 };
-                draw_list.push(frame_draw, self.uniforms(tile, binders, &draw.objects, paint_parameters));
+                self.draw_list.push(frame_draw, Self::uniforms(layer, tile, binders, &draw.objects, paint_parameters));
             }
         }
 
         let frame = self.drawing.frame.get_or_insert_with(FrameDraws::new);
         frame.set_stencil_tiles(render_tiles.render_tiles().map(|tile| tile.id));
-        let layer = &self.values.evaluated;
-        draw_list.finish(frame, context, |writer| Self::write_uniforms(layer, writer, paint_parameters));
-        self.draw_list = draw_list;
+        self.draw_list.finish(frame, context, |writer| Self::write_uniforms(layer, writer, paint_parameters));
     }
 }
 
@@ -669,9 +667,10 @@ impl TileBuilder {
 
 impl RenderFillExtrusionLayer {
     /// The entries in the layer's storage buffers of a draw of `objects`, a
-    /// draw of `tile`, whose bucket's binders are `binders`.
+    /// draw of `tile`, whose bucket's binders are `binders`, with the layer's
+    /// values `layer`.
     fn uniforms(
-        &self,
+        layer: &EvaluatedLayer<FillExtrusion>,
         tile: FrameTile<'_>,
         binders: &FillExtrusionBinders,
         objects: &DrawObjects,
@@ -679,7 +678,7 @@ impl RenderFillExtrusionLayer {
     ) -> ExtrusionUniforms {
         const IN_VIEWPORT_PIXEL_UNITS: bool = false; // from RenderTile::translatedMatrix
         const NEAR_CLIPPED: bool = true;
-        let evaluated = &self.values.evaluated.paint;
+        let evaluated = &layer.paint;
         let state = parameters.state;
         let zoom = state.get_zoom() as f32;
         let tile_id = tile.tile.get_overscaled_tile_id().to_unwrapped();
