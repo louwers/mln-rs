@@ -390,9 +390,8 @@ impl SessionShared {
         Ok(())
     }
 
-    /// The refresh that `waiter`, a pacing's, waited for: demands the frame
-    /// that the map has to draw, unless a demand answered it first or the
-    /// pacing ended.
+    /// Demands the frame that the map has to draw at `waiter`'s refresh,
+    /// unless a demand came first or `waiter`'s pacing ended.
     fn demand_paced(&self, waiter: &PacedSession) {
         with_unlocked_wakes(|| {
             let mut state = self.state.lock();
@@ -1317,16 +1316,14 @@ impl RenderSession {
         with_unlocked_wakes(|| shared.demand_locked(&mut shared.state.lock(), demand))
     }
 
-    /// Paces the session's frames with `pacer`, or with none, stops pacing
-    /// them. At the first refresh that the pacer allows after the map has
-    /// something new to draw, the pacer demands a frame in
+    /// Paces the session's frames with `pacer`, or with none, stops. At the
+    /// first refresh that the pacer allows after the map has something new to
+    /// draw, it demands a frame in
     /// [`DemandMode::IfChanged`](super::DemandMode::IfChanged) with token 0,
-    /// unless a demand answered it first. A new pacer demands at its next
-    /// refresh what the map had to draw. One pacer can pace many sessions,
-    /// and a session holds its pacer until it takes another or is released.
+    /// unless a demand came first. One pacer can pace many sessions.
     ///
     /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) for a
-    /// session with a redraw wake, which the pacer would take the place of.
+    /// session with a redraw wake.
     pub fn set_frame_pacer(&self, pacer: Option<Arc<FramePacer>>) -> Result<(), Error> {
         let shared = self.shared();
         let request = {

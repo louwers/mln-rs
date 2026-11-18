@@ -72,8 +72,7 @@ use crate::ui::{Action, Controls, Shown};
 
 /// What the render thread starts with.
 pub(crate) struct Launch {
-    /// The display's frame pacer, made on the main thread, except in
-    /// benchmark mode.
+    /// The display's frame pacer, except in benchmark mode.
     pub frame_pacer: Option<Result<Arc<FramePacer>, Error>>,
     pub args: Args,
     pub settings: Settings,

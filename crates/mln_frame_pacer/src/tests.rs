@@ -303,7 +303,7 @@ fn a_display_link_calls_back_at_refreshes() {
 
 /// A pacer for a view must be made on the main thread, which the tests
 /// don't run on.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
 #[test]
 #[expect(unsafe_code, reason = "the view is a pointer to an Objective-C object")]
 fn a_pacer_for_a_view_needs_the_main_thread() {

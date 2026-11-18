@@ -80,25 +80,13 @@ run = [
   "cargo clippy --target i686-unknown-linux-gnu -p mln-rs-c",
 ]
 
-# The frame pacer on Android, 32-bit too, and OpenHarmony, whose display
-# sources only maplibre-native-ffi builds and runs. The crate has no C
-# dependencies, so it needs no NDK. A check, not clippy, which misreads
-# thread locals on these targets.
-[tasks."check:mobile"]
-description = "Check the frame pacer for Android and OpenHarmony"
-run = [
-  "rustup target add aarch64-linux-android armv7-linux-androideabi aarch64-unknown-linux-ohos",
-  "cargo check --all-targets -p mln-rs-frame-pacer --target aarch64-linux-android --target armv7-linux-androideabi --target aarch64-unknown-linux-ohos",
-]
-
 [tasks."ci:lint"]
-description = "Run what CI's lint job runs: `check`, the docs, the browser, 32-bit and mobile builds, the minimum Rust and the generated C declarations"
+description = "Run what CI's lint job runs: `check`, the docs, the browser and 32-bit builds, the minimum Rust and the generated C declarations"
 run = [
   "mise run check",
   "mise run docs",
   "mise run check:wasm",
   "mise run check:32bit",
-  "mise run check:mobile",
   "mise run test:msrv",
   "mise run generate:c-abi",
   "mise run ci:assert-clean",

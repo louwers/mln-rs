@@ -410,15 +410,15 @@ fn frame_pacer(options: &mln_frame_pacing_options) -> Result<Arc<FramePacer>, Er
     };
     let view = core::ptr::NonNull::new(view)
         .ok_or_else(|| Error::invalid_argument("mln_frame_pacing_options.view must not be null"))?;
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
     {
-        // SAFETY: the header's contract makes the view an NSView.
+        // SAFETY: the header's contract makes the view an NSView or a UIView.
         Ok(unsafe { FramePacer::for_view(view, limit) }?)
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "tvos")))]
     {
         let _ = view;
-        Err(Error::new(ErrorKind::Unsupported, "mln_frame_pacing_options.view needs macOS"))
+        Err(Error::new(ErrorKind::Unsupported, "mln_frame_pacing_options.view needs macOS, iOS or tvOS"))
     }
 }
 

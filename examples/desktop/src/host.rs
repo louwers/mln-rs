@@ -46,8 +46,7 @@ use crate::metal_layer::MetalLayer;
 use crate::settings::Settings;
 use crate::view::{self, Launch};
 
-/// A frame pacer of the display that `window` is on. On macOS it follows
-/// the window to another display, and `AppKit` makes it on the main thread.
+/// A frame pacer of `window`'s display. Runs on the main thread.
 #[cfg_attr(target_os = "macos", expect(unsafe_code, reason = "the window's view is a pointer to an NSView"))]
 fn frame_pacer(window: &Window) -> Result<Arc<FramePacer>, Error> {
     #[cfg(target_os = "macos")]

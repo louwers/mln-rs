@@ -2,10 +2,6 @@
 // session. The files tagged _apple, _android, and _ohos test the pacing of the
 // platforms with a display to follow.
 
-#if defined(__APPLE__)
-#include <TargetConditionals.h>
-#endif
-
 #include "support/frames.h"
 #include "support/test_support.h"
 
@@ -46,9 +42,9 @@ SESSION_CASE(null_options_stop_pacing) {
   MLN_TEST_OK(mln_render_session_set_frame_pacing(session, NULL, NULL));
 }
 
-#if !defined(__APPLE__) || !TARGET_OS_OSX
-// Only macOS paces to a view's display.
-SESSION_CASE(a_view_needs_macos) {
+#if !defined(__APPLE__)
+// Only Apple platforms pace to a view's display.
+SESSION_CASE(a_view_needs_an_apple_platform) {
   int view = 0;
   mln_frame_pacing_options options = {.size = sizeof(mln_frame_pacing_options)};
   options.fields = MLN_FRAME_PACING_OPTION_VIEW;
@@ -97,8 +93,8 @@ static void a_session_with_a_redraw_wake_takes_no_frame_pacing(void) {
 MLN_TEST_GROUP {
   RUN_TEST(invalid_frame_pacing_options_are_refused);
   RUN_TEST(null_options_stop_pacing);
-#if !defined(__APPLE__) || !TARGET_OS_OSX
-  RUN_TEST(a_view_needs_macos);
+#if !defined(__APPLE__)
+  RUN_TEST(a_view_needs_an_apple_platform);
 #endif
 #if defined(NO_DISPLAY_SOURCE)
   RUN_TEST(a_platform_without_a_display_source_has_no_frame_pacing);

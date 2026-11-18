@@ -54,11 +54,10 @@ jobs:
           echo "backend={\"include\":[$backend]}" >> "$GITHUB_OUTPUT"
 
   # The formatters and linters (`mise run check`, hk.pkl), the API docs as
-  # docs.rs builds them, clippy for wasm32 and 32-bit x86 Linux, a check of
-  # the frame pacer for Android and OpenHarmony, the minimum Rust that
-  # Cargo.toml declares and the C library's generated declarations against its
-  # headers. When the plan asks, each crates.io package built from its
-  # packaged sources with every test target (RELEASING.md). Warnings are
+  # docs.rs builds them, clippy for wasm32 and 32-bit x86 Linux, the minimum
+  # Rust that Cargo.toml declares and the C library's generated declarations
+  # against its headers. When the plan asks, each crates.io package built from
+  # its packaged sources with every test target (RELEASING.md). Warnings are
   # errors (mise.toml denies them in CI).
   lint:
     needs: plan

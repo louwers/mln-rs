@@ -5,9 +5,9 @@
 //! A [`VsyncSource`] reports each refresh. [`FramePacer::new`] follows the
 //! platform's display: a `CADisplayLink` on macOS, iOS and tvOS, the calling
 //! thread's `AChoreographer` on Android, and an `OH_NativeVSync` on
-//! `OpenHarmony`. On macOS, [`FramePacer::for_view`] follows the display that
-//! a view's window is on. A host with a source of its own gives it to
-//! [`FramePacer::with_source`].
+//! `OpenHarmony`. On macOS, iOS and tvOS, [`FramePacer::for_view`] follows
+//! the display that a view's window is on. A host with a source of its own
+//! gives it to [`FramePacer::with_source`].
 
 use std::sync::{Arc, OnceLock, Weak};
 use std::time::Duration;
@@ -179,14 +179,11 @@ struct PacerState {
 }
 
 impl FramePacer {
-    /// A pacer on the platform's display: a `CADisplayLink` of the main
-    /// display on macOS 14 and later, and of the main screen on iOS and
-    /// tvOS, on a thread of the pacer's own; the `AChoreographer` of the
-    /// calling thread on Android, whose looper calls back; and an
-    /// `OH_NativeVSync` on `OpenHarmony`, on a thread of its own.
+    /// A pacer on the platform's main display. It calls back on a thread of
+    /// its own, or on Android, on the calling thread's looper.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) elsewhere,
-    /// including on older macOS, with
+    /// including before macOS 14, with
     /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) on Android when the
     /// calling thread has no `ALooper`, and with
     /// [`ErrorKind::Native`](mln_util::ErrorKind) without a display.
@@ -208,18 +205,17 @@ impl FramePacer {
         Self::with_source(limit, source)
     }
 
-    /// A pacer on the display that the window of `view`, an `NSView`, is on,
-    /// which it follows when the window moves to another display. While the
-    /// view is hidden or on no display, the pacer calls back at no refresh.
+    /// A pacer on the display that `view`'s window is on. On iOS and tvOS,
+    /// make a new one when the scene moves to another screen.
     ///
     /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) off the
-    /// main thread, and with [`ErrorKind::Unsupported`](mln_util::ErrorKind)
-    /// before macOS 14.
+    /// main thread or for a `UIView` in no window, and with
+    /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) before macOS 14.
     ///
     /// # Safety
     ///
-    /// `view` points to an `NSView`.
-    #[cfg(target_os = "macos")]
+    /// `view` points to an `NSView` on macOS, or a `UIView` on iOS and tvOS.
+    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
     #[expect(unsafe_code, reason = "the view is a pointer to an Objective-C object")]
     pub unsafe fn for_view(
         view: core::ptr::NonNull<core::ffi::c_void>,

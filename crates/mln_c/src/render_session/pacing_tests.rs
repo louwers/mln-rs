@@ -105,14 +105,15 @@ fn options_check_their_fields_limit_and_view() {
     end(runtime, map, session);
 }
 
-/// Only macOS takes a view, and only on the main thread, which the tests
-/// don't run on.
+/// Only macOS, iOS and tvOS take a view, and only on the main thread, which
+/// the tests don't run on.
 #[test]
-fn a_view_needs_macos_and_its_main_thread() {
+fn a_view_needs_an_apple_platform_and_its_main_thread() {
     let (runtime, map, session) = settled_session();
     let mut view = 0_u8;
     let options = pacing(MLN_FRAME_PACING_OPTION_VIEW, 0, (&raw mut view).cast());
-    let expected = if cfg!(target_os = "macos") { MLN_STATUS_INVALID_STATE } else { MLN_STATUS_UNSUPPORTED };
+    let apple = cfg!(any(target_os = "macos", target_os = "ios", target_os = "tvos"));
+    let expected = if apple { MLN_STATUS_INVALID_STATE } else { MLN_STATUS_UNSUPPORTED };
     assert_eq!(set_pacing(session, Some(&options)), expected);
     end(runtime, map, session);
 }

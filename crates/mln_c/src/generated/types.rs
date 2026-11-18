@@ -3918,11 +3918,10 @@ pub struct mln_frame_pacing_options {
  It skips display refreshes to stay within it. By default, it can demand a
  frame at every refresh.*/
     pub maximum_frames_per_second: u32,
-    /** On macOS, the `NSView*` that shows the session's frames. The library then
- paces them to the display that the view's window is on, and follows the
- window when it moves to another display. While the view is hidden or on no
- display, it demands no frames. By default, it paces them to the main
- display, the one with the menu bar.*/
+    /** The `NSView*` on macOS, or the `UIView*` on iOS and tvOS, that shows the
+ session's frames, to pace them to its window's display rather than the
+ main one. On iOS and tvOS, set the pacing again when the scene moves to
+ another screen, as `windowScene:didUpdateEffectiveGeometry:` reports.*/
     pub view: *mut ::core::ffi::c_void,
 }
 /// Any type.

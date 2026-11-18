@@ -336,11 +336,10 @@ typedef struct mln_frame_pacing_options {
     "mask=fields;bit=MLN_FRAME_PACING_OPTION_MAXIMUM_FRAMES_PER_SECOND"
   );
   /**
-   * On macOS, the `NSView*` that shows the session's frames. The library then
-   * paces them to the display that the view's window is on, and follows the
-   * window when it moves to another display. While the view is hidden or on no
-   * display, it demands no frames. By default, it paces them to the main
-   * display, the one with the menu bar.
+   * The `NSView*` on macOS, or the `UIView*` on iOS and tvOS, that shows the
+   * session's frames, to pace them to its window's display rather than the
+   * main one. On iOS and tvOS, set the pacing again when the scene moves to
+   * another screen, as `windowScene:didUpdateEffectiveGeometry:` reports.
    */
   void* view MLN_BINDING("mask=fields;bit=MLN_FRAME_PACING_OPTION_VIEW");
 } mln_frame_pacing_options;
@@ -350,18 +349,14 @@ typedef struct mln_frame_pacing_options {
  *
  * At the first display refresh after the session has something new to draw,
  * the library demands a frame without flags and with token 0, unless you
- * demanded one first. Each call replaces the session's pacing, so settings
- * that `options` doesn't set take their defaults, from the next display
- * refresh. A null `options` stops pacing the session. You can call it once
- * the attach call returns.
+ * demanded one first. Each call replaces the session's pacing, and a null
+ * `options` stops it. You can call it once the attach call returns.
  *
- * On iOS, macOS, and tvOS, the library follows the display through a
- * `CADisplayLink`, which calls back on a thread of the library's own, so the
- * session needs no run loop of yours. With mln_frame_pacing_options.view,
- * call it on the main thread. With
- * mln_frame_pacing_options.maximum_frames_per_second, the library also asks
- * the system for that refresh rate. On iPhone, a rate above 60 needs
- * `CADisableMinimumFrameDurationOnPhone` in the app's `Info.plist`.
+ * On iOS, macOS, and tvOS, the library uses a `CADisplayLink` on a thread of
+ * its own. With mln_frame_pacing_options.view, call it on the main thread.
+ * The library asks the system for the frame rate limit's refresh rate. On
+ * iPhone, a rate above 60 needs `CADisableMinimumFrameDurationOnPhone` in the
+ * app's `Info.plist`.
  *
  * On Android, the library follows the display through the calling thread's
  * `AChoreographer`. Call it on a thread with an `ALooper`, such as the app's
@@ -371,23 +366,22 @@ typedef struct mln_frame_pacing_options {
  * still shows the map. The library then keeps demanding frames from a timer
  * on the looper, within the frame rate limit, until vsyncs arrive again.
  *
- * On OpenHarmony, the library follows the display through `OH_NativeVSync`.
- * You can call it on any thread, and the session needs no event loop of
- * yours.
+ * On OpenHarmony, the library uses `OH_NativeVSync`, from any thread.
  *
  * Returns:
  * - MLN_STATUS_INVALID_ARGUMENT when `options` sets `maximum_frames_per_second`
  *   to 0, or sets `view` to null.
  * - MLN_STATUS_UNSUPPORTED on the other platforms, such as visionOS, Linux, and
  *   Windows, where the library has no source of display refreshes, on macOS
- *   before 14, and when `options` sets `view` on a platform other than macOS.
+ *   before 14, and when `options` sets `view` on a platform other than macOS,
+ *   iOS, and tvOS.
  * - MLN_STATUS_TARGET_LOST or MLN_STATUS_NATIVE_ERROR, as
  *   mln_render_session_snapshot.failure_status reports, when the session has
  *   failed.
  * - MLN_STATUS_INVALID_STATE when you attached the session with a redraw
  *   wake, or detached, abandoned, released, or disposed it, on Android when
- *   the calling thread has no `ALooper`, and on macOS when `options` sets
- *   `view` and you call it off the main thread.
+ *   the calling thread has no `ALooper`, and when `options` sets `view` off
+ *   the main thread or, on iOS and tvOS, to a view in no window.
  * - MLN_STATUS_NATIVE_ERROR on iOS, macOS, and tvOS when the system has no
  *   display to follow, and on OpenHarmony when the system can't report the
  *   display's refreshes to the process.
