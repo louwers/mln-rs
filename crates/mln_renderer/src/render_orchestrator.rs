@@ -36,7 +36,7 @@ use crate::layer_type::ErasedEvaluatedLayer;
 use crate::line_atlas::LineAtlas;
 use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;
-use crate::render_layer::{LayerPrepareParameters, LayerTiles, RenderLayer};
+use crate::render_layer::{LayerPrepareParameters, LayerSource, LayerTiles, RenderLayer};
 use crate::render_source::{self, RenderSource, SourcePrepareParameters};
 use crate::render_tile::RenderTile;
 use crate::render_tree::{DebugLayers, LayerRenderItem, RenderTree, RenderTreeParameters};
@@ -1215,9 +1215,10 @@ impl RenderOrchestrator {
 
     /// Readies the buckets of the frame's sources for the frame's draws.
     pub(crate) fn upload_sources(&mut self, context: &Context) {
+        let needs = crate::layers::upload_needs(context);
         for source in self.render_sources.values_mut() {
             if source.is_enabled() {
-                source.upload(&mut self.tile_store, context);
+                source.upload(&mut self.tile_store, needs);
             }
         }
     }
@@ -1262,11 +1263,11 @@ impl RenderOrchestrator {
             let source = render_item.source.as_ref().and_then(|id| self.render_sources.get_key_value(id));
             let source = source.map(|(id, source)| (id.as_str(), &**source));
             let source_contents = contents.of(source, &self.tile_store);
-            let tiles = source.and_then(|(_, source)| match render_item.tile_order.as_deref() {
-                Some(order) => Some(LayerTiles::new(source.render_tiles(), source_contents, order)),
-                None => source.get_image_render_data().map(LayerTiles::of_image),
+            let layer_source = source.and_then(|(_, source)| match render_item.tile_order.as_deref() {
+                Some(order) => Some(LayerSource::Tiles(LayerTiles::new(source.render_tiles(), source_contents, order))),
+                None => source.get_image_render_data().map(LayerSource::Image),
             });
-            render_layer.update(paint_parameters, update_parameters, tiles);
+            render_layer.update(paint_parameters, update_parameters, layer_source);
             has_3d = has_3d || render_layer.needs_globe_depth();
         }
         let shaders = &paint_parameters.static_data.shaders;

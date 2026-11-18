@@ -1,6 +1,6 @@
-// C++ moves the `ImageSourceRenderData` into the render tree in
-// `createRenderItem` and the raster layers keep a raw pointer to it from
-// `prepare`; here the layers borrow it from the source for the frame.
+// An image source draws one image, stretched over the quad of its
+// coordinates, in the tiles that the quad covers. The raster layers that
+// draw it borrow its bucket from the source for the frame.
 
 use std::sync::Arc;
 
@@ -19,9 +19,8 @@ use mln_util::logging::{Event, Log};
 use mln_util::range::Range;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
-use crate::bucket::Bucket;
+use crate::bucket::{Bucket, UploadNeeds};
 use crate::buckets::raster_bucket::RasterBucket;
-use crate::gfx::context::Context;
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::render_source::{RenderSource, RenderSourceBase, SourcePrepareParameters};
 use crate::tile::store::TileStore;
@@ -335,8 +334,8 @@ impl RenderSource for RenderImageSource {
             .map(|tile_coords| TileCoordinate::to_geometry_coordinate(&tile_cover_ids[0], tile_coords))
             .collect();
 
-        // C++ swaps the image of its bucket in place; a changed image gets a
-        // new bucket here, whose id tells the layers to make its texture.
+        // A changed image gets a new bucket, whose id tells the layers to
+        // make its texture.
         let bucket = match &mut self.bucket {
             Some(bucket) if bucket.image.as_ref().is_some_and(|i| Arc::ptr_eq(i, &image)) => bucket,
             slot => slot.insert(RasterBucket::with_shared_image(Some(image))),
@@ -359,7 +358,7 @@ impl RenderSource for RenderImageSource {
 
     fn prepare(&mut self, _store: &mut TileStore, _parameters: &SourcePrepareParameters<'_>) {}
 
-    fn upload(&mut self, _store: &mut TileStore, _context: &Context) {
+    fn upload(&mut self, _store: &mut TileStore, _needs: UploadNeeds) {
         if let Some(bucket) = &mut self.bucket
             && bucket.needs_upload()
         {

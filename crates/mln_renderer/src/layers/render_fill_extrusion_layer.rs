@@ -34,7 +34,7 @@ use mln_gfx::shaders::shader_defines::{
 };
 use mln_gfx::shaders::shader_program::ShaderProgramPtr;
 use mln_gfx::vertex_attribute::VertexAttributeArray;
-use mln_gfx::vertex_vector::{VertexVector, VertexVectorBasePtr};
+use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_map_types::TransformState;
 use mln_style::PropertyEvaluationParameters;
@@ -52,7 +52,7 @@ use super::{cast_matrix, shared_vertices};
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, derived_vertices, paint_vertices};
 use crate::buckets::fill_extrusion_bucket::{
     FillExtrusionBinders, FillExtrusionBucket, FillExtrusionLayoutSpec, FillExtrusionLayoutVertex,
-    FillExtrusionStaticVertex, FillExtrusionWallVertex,
+    FillExtrusionStaticVertex, FillExtrusionWallVertex, wall_quad_paint, wall_quad_vertices,
 };
 use crate::draw::{DrawGeometry, DrawObjects, copy_shared_attributes};
 use crate::draw_cache::{DrawDepth, DrawPriority, DrawSlots, FrameDraw, FrameDraws, LayerDrawing};
@@ -64,7 +64,7 @@ use crate::layout::pattern_layout::{PatternLayout, uses_pattern};
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
 use crate::render_layer::{
-    LayerParts, LayerTiles, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
+    LayerParts, LayerSource, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
 };
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
@@ -177,33 +177,6 @@ fn read_paint_properties(
 /// quads of their own, which a device that rasterizes on the CPU draws.
 pub(crate) fn instanced_walls(context: &crate::gfx::context::Context) -> bool {
     !context.caps().cpu_rasterizer
-}
-
-/// The quads of the walls of `vertices`: each vertex with each corner of the
-/// static quad, in its order. The quad of the wall from a vertex is its four
-/// corners, and the next four are the next vertex's.
-pub(crate) fn wall_quad_vertices(vertices: &[FillExtrusionLayoutVertex]) -> VertexVectorBasePtr {
-    let corners = RenderStaticData::fill_extrusion_vertices();
-    let quads: Vec<FillExtrusionWallVertex> = vertices
-        .iter()
-        .flat_map(|&vertex| corners.iter().map(move |&corner| FillExtrusionWallVertex { corner, vertex }))
-        .collect();
-    Rc::new(VertexVector::from_vec_released(quads))
-}
-
-/// The paint values of the quads of `wall_quad_vertices`: those of each of
-/// the first `walls` vertices in `paint`, `stride` bytes each, for each
-/// corner of its wall.
-pub(crate) fn wall_quad_paint(paint: &[u8], stride: usize, walls: usize) -> VertexVectorBasePtr {
-    let mut values = Vec::with_capacity(4 * stride * walls);
-    if stride > 0 {
-        for vertex in paint.chunks_exact(stride).take(walls) {
-            for _ in 0..4 {
-                values.extend_from_slice(vertex);
-            }
-        }
-    }
-    Rc::new(VertexVector::from_vec_released(values))
 }
 
 /// Points each attribute of `attrs` that reads `paint` at `quad_paint`
@@ -424,8 +397,9 @@ impl RenderLayer for RenderFillExtrusionLayer {
         &mut self,
         paint_parameters: &PaintParameters<'_>,
         _update_parameters: &UpdateParameters,
-        tiles: Option<LayerTiles<'_>>,
+        source: Option<LayerSource<'_>>,
     ) {
+        let tiles = source.and_then(LayerSource::tiles);
         let (shaders, context, state) =
             (&paint_parameters.static_data.shaders, paint_parameters.context, paint_parameters.state);
         self.update_projection_variant(state);
@@ -496,7 +470,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
 
         let mut frame_draws: Vec<(FrameDraw, ExtrusionUniforms)> = Vec::new();
         for tile in render_tiles.iter() {
-            let tile_id = *tile.get_overscaled_tile_id();
+            let tile_id = *tile.tile.get_overscaled_tile_id();
 
             let render_data = super::render_data_for_pass(tile, &*self.base.style, RENDER_PASS);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
@@ -706,7 +680,7 @@ impl RenderFillExtrusionLayer {
         let evaluated = &self.values.evaluated.paint;
         let state = parameters.state;
         let zoom = state.get_zoom() as f32;
-        let tile_id = tile.get_overscaled_tile_id().to_unwrapped();
+        let tile_id = tile.tile.get_overscaled_tile_id().to_unwrapped();
 
         let mut projection = get_projection_data(
             &tile_id,

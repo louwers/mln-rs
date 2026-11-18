@@ -46,7 +46,7 @@ use crate::layout::pattern_layout::{FillLayoutSpec, PatternLayout, uses_pattern}
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
 use crate::render_layer::{
-    LayerParts, LayerTiles, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
+    LayerParts, LayerSource, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
 };
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
@@ -435,7 +435,7 @@ impl RenderFillLayer {
         const NEAR_CLIPPED: bool = false;
         let evaluated = &self.values.evaluated.paint;
         let zoom = parameters.state.get_zoom() as f32;
-        let tile_id = tile.get_overscaled_tile_id().to_unwrapped();
+        let tile_id = tile.tile.get_overscaled_tile_id().to_unwrapped();
 
         let projection = get_projection_data(
             &tile_id,
@@ -616,8 +616,9 @@ impl RenderLayer for RenderFillLayer {
         &mut self,
         paint_parameters: &PaintParameters<'_>,
         _update_parameters: &UpdateParameters,
-        tiles: Option<LayerTiles<'_>>,
+        source: Option<LayerSource<'_>>,
     ) {
+        let tiles = source.and_then(LayerSource::tiles);
         let (shaders, context, state) =
             (&paint_parameters.static_data.shaders, paint_parameters.context, paint_parameters.state);
         let Some(render_tiles) = tiles.filter(|tiles| !tiles.is_empty()) else {
@@ -690,7 +691,7 @@ impl RenderLayer for RenderFillLayer {
 
         let mut frame_draws: Vec<(FrameDraw, FillUniforms)> = Vec::new();
         for tile in render_tiles.iter() {
-            let tile_id = *tile.get_overscaled_tile_id();
+            let tile_id = *tile.tile.get_overscaled_tile_id();
 
             let render_data = super::render_data_for_pass(tile, &*self.base.style, RENDER_PASS);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {

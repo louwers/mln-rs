@@ -18,9 +18,8 @@ use mln_util::logging::{Event, Log};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecMap;
 
-use crate::bucket::{Bucket, BucketBase};
+use crate::bucket::{Bucket, BucketBase, UploadNeeds};
 use crate::bucket_geometry::{BucketGeometry, GeometryVec};
-use crate::gfx::context::Context;
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::paint_property_binder::{CrossFadedPaintPropertyBinder, DashArrayBinder, PaintPropertyBinder};
@@ -317,7 +316,7 @@ impl Bucket for LineBucket {
         Ok(())
     }
 
-    fn upload(&mut self, geometry: &mut BucketGeometry, _context: &Context) {
+    fn upload(&mut self, geometry: &mut BucketGeometry, _needs: UploadNeeds) {
         geometry.move_vertices(&mut self.vertices);
         geometry.move_indexes(&mut self.triangles);
         for binders in self.paint_property_binders.values_mut() {
@@ -333,10 +332,6 @@ impl Bucket for LineBucket {
 
     fn write_wire(&self, w: &mut mln_wire::Writer) {
         mln_wire::Wire::write(self, w);
-    }
-
-    fn clone_bucket(&self) -> Box<dyn Bucket> {
-        Box::new(self.clone())
     }
 
     fn update(

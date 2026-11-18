@@ -11,9 +11,8 @@ use mln_util::constants;
 use mln_util::image::PremultipliedImage;
 use mln_util::time::Instant;
 
-use crate::bucket::{Bucket, BucketBase};
+use crate::bucket::{Bucket, BucketBase, UploadNeeds};
 use crate::bucket_geometry::BucketGeometry;
-use crate::gfx::context::Context;
 use crate::tile_mask::TileMask;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
@@ -188,9 +187,7 @@ impl RasterBucket {
 
         geometry.last_modified = Instant::now();
     }
-}
 
-impl RasterBucket {
     /// Marks the bucket uploaded, if it has an image: its geometry draws as
     /// it is, and the layer makes the image's texture.
     pub(crate) fn upload_image(&mut self) {
@@ -205,7 +202,7 @@ impl Bucket for RasterBucket {
         &self.base
     }
 
-    fn upload(&mut self, _geometry: &mut BucketGeometry, _context: &Context) {
+    fn upload(&mut self, _geometry: &mut BucketGeometry, _needs: UploadNeeds) {
         self.upload_image();
     }
 
@@ -215,10 +212,6 @@ impl Bucket for RasterBucket {
 
     fn write_wire(&self, w: &mut mln_wire::Writer) {
         w.fail("a raster bucket, which no layout makes".to_owned());
-    }
-
-    fn clone_bucket(&self) -> Box<dyn Bucket> {
-        Box::new(self.clone())
     }
 }
 

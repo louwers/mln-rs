@@ -36,7 +36,7 @@ use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{
-    LayerParts, LayerPrepareParameters, LayerTiles, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase,
+    LayerParts, LayerPrepareParameters, LayerSource, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase,
     TypedLayer,
 };
 use crate::render_pass::RenderPass;
@@ -240,7 +240,7 @@ impl RenderLayer for RenderBackgroundLayer {
         &mut self,
         paint_parameters: &PaintParameters<'_>,
         update_parameters: &UpdateParameters,
-        _tiles: Option<LayerTiles<'_>>,
+        _source: Option<LayerSource<'_>>,
     ) {
         let (shaders, context, state) =
             (&paint_parameters.static_data.shaders, paint_parameters.context, paint_parameters.state);

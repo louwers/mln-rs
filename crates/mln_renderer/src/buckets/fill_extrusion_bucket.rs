@@ -1,11 +1,12 @@
-// The vertex/index vectors are plain `Vec`s (the bucket is built on the
-// worker thread and shared with `Arc`); the render layer copies them into
-// the shared gfx vectors its draws reference.
+// The vertex and index vectors are `GeometryVec`s, which a worker fills
+// and the bucket's upload moves into the gfx vectors its draws reference.
 
+use std::rc::Rc;
 use std::sync::Arc;
 
 use geometry::Point;
 use mln_gfx::shaders::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
+use mln_gfx::vertex_vector::{VertexVector, VertexVectorBasePtr};
 use mln_map_types::TransformState;
 use mln_style::PropertyEvaluationParameters;
 use mln_style::evaluated::Evaluated;
@@ -24,13 +25,13 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::vectors::Vec3f;
 use mln_vec_map::VecMap;
 
-use crate::bucket::{Bucket, BucketBase};
+use crate::bucket::{Bucket, BucketBase, UploadNeeds};
 use crate::bucket_geometry::{BucketGeometry, GeometryVec};
-use crate::gfx::context::Context;
 use crate::gfx::fill_large_mesh_arrays::fill_large_mesh_arrays;
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::pattern_layout::{PatternLayerMap, PatternLayoutSpec};
 use crate::paint_property_binder::{CrossFadedPaintPropertyBinder, PaintPropertyBinder};
+use crate::render_static_data::RenderStaticData;
 use crate::util::subdivision::{SubdivisionResult, subdivide_polygon, subdivide_vertex_line};
 use crate::util::triangulate::triangulate;
 
@@ -67,6 +68,33 @@ pub(crate) struct FillExtrusionWallVertex {
 }
 
 pub(crate) use crate::render_light::EvaluatedLight;
+
+/// The quads of the walls of `vertices`: each vertex with each corner of the
+/// static quad, in its order. The quad of the wall from a vertex is its four
+/// corners, and the next four are the next vertex's.
+pub(crate) fn wall_quad_vertices(vertices: &[FillExtrusionLayoutVertex]) -> VertexVectorBasePtr {
+    let corners = RenderStaticData::fill_extrusion_vertices();
+    let quads: Vec<FillExtrusionWallVertex> = vertices
+        .iter()
+        .flat_map(|&vertex| corners.iter().map(move |&corner| FillExtrusionWallVertex { corner, vertex }))
+        .collect();
+    Rc::new(VertexVector::from_vec_released(quads))
+}
+
+/// The paint values of the quads of `wall_quad_vertices`: those of each of
+/// the first `walls` vertices in `paint`, `stride` bytes each, for each
+/// corner of its wall.
+pub(crate) fn wall_quad_paint(paint: &[u8], stride: usize, walls: usize) -> VertexVectorBasePtr {
+    let mut values = Vec::with_capacity(4 * stride * walls);
+    if stride > 0 {
+        for vertex in paint.chunks_exact(stride).take(walls) {
+            for _ in 0..4 {
+                values.extend_from_slice(vertex);
+            }
+        }
+    }
+    Rc::new(VertexVector::from_vec_released(values))
+}
 
 #[derive(Clone, mln_wire::Wire)]
 pub(crate) struct FillExtrusionBucket {
@@ -317,12 +345,11 @@ impl Bucket for FillExtrusionBucket {
         Ok(())
     }
 
-    fn upload(&mut self, geometry: &mut BucketGeometry, context: &Context) {
-        use crate::layers::render_fill_extrusion_layer::{instanced_walls, wall_quad_paint, wall_quad_vertices};
+    fn upload(&mut self, geometry: &mut BucketGeometry, needs: UploadNeeds) {
         // Walls that aren't instances of the static quad are quads of their
         // own, made of the vertices and paint values before those move.
         let walls = self.vertices.len().saturating_sub(1);
-        if !instanced_walls(context) {
+        if needs.wall_quads {
             geometry.derive_vertices(&mut self.vertices, wall_quad_vertices);
         }
         geometry.move_vertices(&mut self.vertices);
@@ -330,7 +357,7 @@ impl Bucket for FillExtrusionBucket {
         for binders in self.paint_property_binders.values_mut() {
             let depends_on_feature_state = binders.depends_on_feature_state();
             let buffer = &mut binders.interleaved_vertex_buffer;
-            if !instanced_walls(context) && !depends_on_feature_state {
+            if needs.wall_quads && !depends_on_feature_state {
                 let stride = buffer.stride;
                 geometry
                     .derive_vertices(&mut buffer.shared_vertex_vector, |paint| wall_quad_paint(paint, stride, walls));
@@ -346,10 +373,6 @@ impl Bucket for FillExtrusionBucket {
 
     fn write_wire(&self, w: &mut mln_wire::Writer) {
         mln_wire::Wire::write(self, w);
-    }
-
-    fn clone_bucket(&self) -> Box<dyn Bucket> {
-        Box::new(self.clone())
     }
 
     fn update(

@@ -151,21 +151,24 @@ impl Context for Tables {
     }
 }
 
-/// A bucket, its index among the layout's, and the ids of the layers that
-/// render it with the properties they were laid out with.
-type RenderedBucket<'a> = (&'a dyn Bucket, usize, Vec<(&'a String, &'a Arc<dyn ErasedEvaluatedLayer>)>);
+/// A bucket and the ids of the layers that render it with the properties
+/// they were laid out with.
+type RenderedBucket<'a> = (&'a dyn Bucket, Vec<(&'a String, &'a Arc<dyn ErasedEvaluatedLayer>)>);
 
 impl LayoutResult {
     /// Each bucket with the layers that render it, in layer id order.
     fn buckets(&self) -> Vec<RenderedBucket<'_>> {
         let mut layers: Vec<_> = self.layer_render_data.iter().collect();
         layers.sort_unstable_by_key(|(layer_id, _)| *layer_id);
+        // Where each of the layout's buckets is among `buckets`.
+        let mut positions: Vec<Option<usize>> = vec![None; self.layer_render_data.bucket_count()];
         let mut buckets: Vec<RenderedBucket<'_>> = Vec::new();
         for (layer_id, LayerRenderData { bucket, bucket_index, layer }) in layers {
-            match buckets.iter_mut().find(|(_, index, _)| *index == bucket_index) {
-                Some((_, _, layers)) => layers.push((layer_id, layer)),
-                None => buckets.push((bucket, bucket_index, vec![(layer_id, layer)])),
-            }
+            let position = *positions[bucket_index].get_or_insert_with(|| {
+                buckets.push((bucket, Vec::new()));
+                buckets.len() - 1
+            });
+            buckets[position].1.push((layer_id, layer));
         }
         buckets
     }
@@ -173,7 +176,7 @@ impl LayoutResult {
     fn write_buckets(&self, w: &mut Writer) {
         let buckets = self.buckets();
         buckets.len().write(w);
-        for (bucket, _, layers) in buckets {
+        for (bucket, layers) in buckets {
             layers.len().write(w);
             for (layer_id, properties) in layers {
                 layer_id.write(w);

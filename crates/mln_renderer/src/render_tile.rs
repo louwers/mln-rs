@@ -1,9 +1,10 @@
-// C++ `RenderTile` keeps a `Tile&`. A RenderTile lives in its render
-// source, apart from the tile store, so it copies what it reads from the
-// tile and its render entry (its id, hold-for-fade state and whether it
-// draws a visible layer) when it is created and prepared. The frame's
-// phases borrow the tile's contents from the store by the tile's id
-// (`FrameTile`); the store changes them only between frames.
+// A render tile is a tile as a frame draws it: where it draws, its
+// matrices, and what it copies of the tile and its render entry (its id,
+// hold-for-fade state and whether it draws a visible layer) when it is
+// created and prepared. It lives in its render source, apart from the tile
+// store. The frame's phases look the tile's contents up in the store by the
+// tile's slot and id (`FrameTile`); the store changes them only between
+// frames.
 
 use std::rc::Rc;
 
@@ -36,8 +37,9 @@ pub(crate) struct RenderTile {
     /// `tile.id`.
     tile_id: OverscaledTileID,
     tile_hold_for_fade: bool,
-    /// Where the tile is among its source's, which finds its contents.
-    slot: usize,
+    /// Where the tile is among its source's, which finds its contents
+    /// first; `None` for a tile that isn't among a source's.
+    slot: Option<usize>,
     needs_rendering: bool,
 }
 
@@ -45,20 +47,20 @@ impl RenderTile {
     /// The render tile of `tile`, at `slot` of its source's tiles, drawn as
     /// `id`, before it is prepared.
     pub(crate) fn new(id: UnwrappedTileID, tile: &Tile, slot: usize, hold_for_fade: bool) -> Self {
-        RenderTile { slot, ..RenderTile::of_tile_id(id, tile.id, hold_for_fade) }
+        RenderTile { slot: Some(slot), ..RenderTile::of_tile_id(id, tile.id, hold_for_fade) }
     }
 
     /// The render tile of the tile `tile_id`, drawn as `id`, before it is
-    /// prepared.
+    /// prepared, which isn't among a source's tiles.
     pub(crate) fn of_tile_id(id: UnwrappedTileID, tile_id: OverscaledTileID, hold_for_fade: bool) -> Self {
         RenderTile {
             id,
             projection: ProjectionData::default(),
-            // C++ default-constructs `mat4` (uninitialized); prepare sets it.
+            // Prepare sets it.
             matrix: [0.0; 16],
             tile_id,
             tile_hold_for_fade: hold_for_fade,
-            slot: usize::MAX,
+            slot: None,
             needs_rendering: false,
             debug_bucket: None, // layers: debug
         }
@@ -85,9 +87,10 @@ impl RenderTile {
         &self.tile_id
     }
 
-    /// Where the tile is among its source's, as of `prepare`.
+    /// Where the tile is among its source's, as of `prepare`; `None` for a
+    /// tile that isn't among a source's.
     #[must_use]
-    pub(crate) fn slot(&self) -> usize {
+    pub(crate) fn slot(&self) -> Option<usize> {
         self.slot
     }
 
@@ -186,13 +189,5 @@ impl<'a> FrameTile<'a> {
     #[must_use]
     pub(crate) fn get_atlas_textures(self) -> Option<&'a Rc<TileAtlasTextures>> {
         self.contents?.geometry().map(|contents| &contents.textures)
-    }
-}
-
-impl std::ops::Deref for FrameTile<'_> {
-    type Target = RenderTile;
-
-    fn deref(&self) -> &RenderTile {
-        self.tile
     }
 }

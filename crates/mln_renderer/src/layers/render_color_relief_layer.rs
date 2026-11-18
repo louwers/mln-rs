@@ -44,7 +44,7 @@ use mln_util::size::Size;
 use mln_util::time::Instant;
 
 use super::{cast_matrix, shared_vertices};
-use crate::bucket::NoBucket;
+use crate::bucket::{Bucket, NoBucket};
 use crate::buckets::hillshade_bucket::{HillshadeBucket, HillshadeLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::draw_cache::{DrawDepth, DrawSlots, FrameDraw, FrameDraws, KeptDraw, LayerDrawing};
@@ -54,7 +54,7 @@ use crate::layer_type::LayerType;
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{
-    LayerParts, LayerPrepareParameters, LayerTiles, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase,
+    LayerParts, LayerPrepareParameters, LayerSource, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase,
     TypedLayer, set_layer_tiles,
 };
 use crate::render_pass::RenderPass;
@@ -343,8 +343,9 @@ impl RenderLayer for RenderColorReliefLayer {
         &mut self,
         paint_parameters: &PaintParameters<'_>,
         _update_parameters: &UpdateParameters,
-        tiles: Option<LayerTiles<'_>>,
+        source: Option<LayerSource<'_>>,
     ) {
+        let tiles = source.and_then(LayerSource::tiles);
         let (shaders, context, state) =
             (&paint_parameters.static_data.shaders, paint_parameters.context, paint_parameters.state);
         if self.update_projection_variant(state) {
@@ -423,10 +424,8 @@ impl RenderLayer for RenderColorReliefLayer {
         };
 
         // Drop the DEM textures of buckets that are no longer rendered.
-        let live_buckets: HashSet<SimpleIdentity> = render_tiles
-            .iter()
-            .filter_map(|tile| tile.get_bucket(&*self.base.style).map(super::super::bucket::Bucket::get_id))
-            .collect();
+        let live_buckets: HashSet<SimpleIdentity> =
+            render_tiles.iter().filter_map(|tile| tile.get_bucket(&*self.base.style).map(Bucket::get_id)).collect();
         self.dem_textures.retain(|id, _| live_buckets.contains(id));
 
         let dem_sampler = SamplerState {
@@ -441,7 +440,7 @@ impl RenderLayer for RenderColorReliefLayer {
 
         let mut frame_draws: Vec<(FrameDraw, ReliefUniforms)> = Vec::new();
         for tile in render_tiles.iter() {
-            let tile_id = *tile.get_overscaled_tile_id();
+            let tile_id = *tile.tile.get_overscaled_tile_id();
 
             let bucket = tile.get_bucket(&*self.base.style).filter(|b| b.has_data());
             let Some(bucket) = bucket.and_then(|bucket| bucket.downcast_ref::<HillshadeBucket>()) else {

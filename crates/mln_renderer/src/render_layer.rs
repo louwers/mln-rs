@@ -100,11 +100,11 @@ impl PlacedTile {
 
 /// symbols: where a symbol bucket is: its tile, in the tile store, with
 /// where the tile is among its source's tiles as the frame's render tiles
-/// found it, and its index among the tile's buckets.
+/// found it ([`RenderTile::slot`]), and its index among the tile's buckets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct BucketKey {
     pub(crate) bucket: usize,
-    pub(crate) slot: usize,
+    pub(crate) slot: Option<usize>,
     pub(crate) tile: OverscaledTileID,
     pub(crate) source: SourceKey,
 }
@@ -129,13 +129,15 @@ pub(crate) struct BucketPlacementData {
 
 /// bench: the copies of symbol buckets that benchmarks' layers place, kept
 /// where a tile store would keep the buckets, by their index, which is
-/// their keys' `bucket`. They stay for the thread's life.
+/// their keys' `bucket`. The benchmarks' entry points pass no store, so the
+/// copies are the thread's, and the layer that places one frees it
+/// ([`HeldBuckets::release`]) when it drops.
 #[cfg(feature = "bench")]
-pub(crate) struct HeldBuckets(Vec<SymbolBucket>);
+pub(crate) struct HeldBuckets(Vec<Option<SymbolBucket>>);
 
 #[cfg(feature = "bench")]
 thread_local! {
-    static HELD_BUCKETS: std::cell::Cell<Vec<SymbolBucket>> = const { std::cell::Cell::new(Vec::new()) };
+    static HELD_BUCKETS: std::cell::Cell<Vec<Option<SymbolBucket>>> = const { std::cell::Cell::new(Vec::new()) };
 }
 
 #[cfg(feature = "bench")]
@@ -143,10 +145,23 @@ impl HeldBuckets {
     /// Keeps `bucket`, and returns its index.
     pub(crate) fn hold(bucket: SymbolBucket) -> usize {
         let mut buckets = Self::take();
-        buckets.0.push(bucket);
+        buckets.0.push(Some(bucket));
         let index = buckets.0.len() - 1;
         buckets.restore();
         index
+    }
+
+    /// Frees the bucket at `index`. The indexes start again once no bucket
+    /// is held.
+    pub(crate) fn release(index: usize) {
+        let mut buckets = Self::take();
+        if let Some(bucket) = buckets.0.get_mut(index) {
+            *bucket = None;
+        }
+        if buckets.0.iter().all(Option::is_none) {
+            buckets.0.clear();
+        }
+        buckets.restore();
     }
 
     /// The buckets, lent until `restore`.
@@ -162,24 +177,51 @@ impl HeldBuckets {
 #[cfg(feature = "bench")]
 impl SymbolBuckets for HeldBuckets {
     fn get(&self, key: &BucketKey) -> Option<&SymbolBucket> {
-        self.0.get(key.bucket)
+        self.0.get(key.bucket)?.as_ref()
     }
 
     fn get_mut(&mut self, key: &BucketKey) -> Option<&mut SymbolBucket> {
-        self.0.get_mut(key.bucket)
+        self.0.get_mut(key.bucket)?.as_mut()
+    }
+}
+
+/// What a layer draws in a frame from its source.
+#[derive(Clone, Copy)]
+pub(crate) enum LayerSource<'a> {
+    /// A selection of the source's render tiles.
+    Tiles(LayerTiles<'a>),
+    /// An image source's image.
+    Image(ImageSourceRenderData<'a>),
+}
+
+impl<'a> LayerSource<'a> {
+    /// The tiles, of a source with tiles.
+    #[must_use]
+    pub(crate) fn tiles(self) -> Option<LayerTiles<'a>> {
+        match self {
+            LayerSource::Tiles(tiles) => Some(tiles),
+            LayerSource::Image(_) => None,
+        }
+    }
+
+    /// The image, of an image source.
+    #[must_use]
+    pub(crate) fn image(self) -> Option<ImageSourceRenderData<'a>> {
+        match self {
+            LayerSource::Tiles(_) => None,
+            LayerSource::Image(image) => Some(image),
+        }
     }
 }
 
 /// The tiles a layer draws in a frame: a selection of its source's render
-/// tiles, in the order the layer draws them, with what their tiles show;
-/// or an image source's image.
+/// tiles, in the order the layer draws them, with what their tiles show.
 #[derive(Clone, Copy)]
 pub(crate) struct LayerTiles<'a> {
     tiles: &'a [RenderTile],
     /// What each of `tiles` shows, at its index.
     contents: &'a [Option<&'a Contents>],
     order: &'a [usize],
-    image: Option<ImageSourceRenderData<'a>>,
 }
 
 impl<'a> LayerTiles<'a> {
@@ -191,13 +233,7 @@ impl<'a> LayerTiles<'a> {
         contents: &'a [Option<&'a Contents>],
         order: &'a [usize],
     ) -> LayerTiles<'a> {
-        LayerTiles { tiles, contents, order, image: None }
-    }
-
-    /// An image source's image, without tiles.
-    #[must_use]
-    pub(crate) fn of_image(image: ImageSourceRenderData<'a>) -> LayerTiles<'a> {
-        LayerTiles { tiles: &[], contents: &[], order: &[], image: Some(image) }
+        LayerTiles { tiles, contents, order }
     }
 
     /// The tile at `index` of the source's tiles.
@@ -213,12 +249,6 @@ impl<'a> LayerTiles<'a> {
     /// The render tiles in order, without what they show.
     pub(crate) fn render_tiles(self) -> impl Iterator<Item = &'a RenderTile> + 'a {
         self.order.iter().filter_map(move |&i| self.tiles.get(i))
-    }
-
-    /// An image source's image.
-    #[must_use]
-    pub(crate) fn image(self) -> Option<ImageSourceRenderData<'a>> {
-        self.image
     }
 
     #[must_use]
@@ -510,14 +540,15 @@ pub(crate) trait RenderLayer: LayerParts {
         None
     }
 
-    /// Makes the layer's draws of the frame, from the frame's `tiles` of the
-    /// layer, in the order its `prepare` returned, and what it keeps of
-    /// them, with the values of their uniforms.
+    /// Makes the layer's draws of the frame, from what it draws of its
+    /// `source`: the frame's tiles of the layer, in the order its `prepare`
+    /// returned, or an image source's image; and what it keeps of them,
+    /// with the values of their uniforms.
     fn update(
         &mut self,
         _parameters: &PaintParameters<'_>,
         _update_parameters: &UpdateParameters,
-        _tiles: Option<LayerTiles<'_>>,
+        _source: Option<LayerSource<'_>>,
     ) {
     }
 

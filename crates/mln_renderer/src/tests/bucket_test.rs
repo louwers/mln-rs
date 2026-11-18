@@ -112,7 +112,7 @@ fn circle_bucket() {
     assert!(bucket.has_data());
     assert!(bucket.needs_upload());
 
-    with_context(|context| bucket.upload(&mut BucketGeometry::default(), context));
+    with_context(|context| bucket.upload(&mut BucketGeometry::default(), crate::layers::upload_needs(context)));
     assert!(bucket.has_data());
     assert!(!bucket.needs_upload());
 }
@@ -139,7 +139,7 @@ fn fill_bucket() {
     assert!(bucket.has_data());
     assert!(bucket.needs_upload());
 
-    with_context(|context| bucket.upload(&mut BucketGeometry::default(), context));
+    with_context(|context| bucket.upload(&mut BucketGeometry::default(), crate::layers::upload_needs(context)));
     assert!(!bucket.needs_upload());
 }
 
@@ -232,7 +232,7 @@ fn fill_bucket_frees_cpu_geometry_after_upload() {
         // The bucket's upload moves its data to the render thread's
         // vectors, which hold it until they are uploaded.
         let mut geometry = BucketGeometry::default();
-        bucket.upload(&mut geometry, context);
+        bucket.upload(&mut geometry, crate::layers::upload_needs(context));
         let vertices = bucket_vertices(Some(&geometry), &bucket.vertices);
         assert!(bucket.vertices.data().is_empty());
         assert_eq!(bucket.vertices.len(), vertex_count);
@@ -282,7 +282,7 @@ fn fill_bucket_keeps_paint_data_that_feature_state_rewrites() {
 
     with_context(|context| {
         let mut geometry = BucketGeometry::default();
-        bucket.upload(&mut geometry, context);
+        bucket.upload(&mut geometry, crate::layers::upload_needs(context));
         let binders = bucket.paint_property_binders.get("fill").unwrap();
         assert!(binders.depends_on_feature_state());
         let buffer = &binders.interleaved_vertex_buffer;
@@ -330,7 +330,7 @@ fn line_bucket() {
     assert!(bucket.has_data());
     assert!(bucket.needs_upload());
 
-    with_context(|context| bucket.upload(&mut BucketGeometry::default(), context));
+    with_context(|context| bucket.upload(&mut BucketGeometry::default(), crate::layers::upload_needs(context)));
     assert!(!bucket.needs_upload());
 }
 
@@ -356,7 +356,7 @@ fn line_bucket_drawables_build_from_freed_indexes() {
     let context = &Context::new(Rc::clone(&backend));
     let mut geometry = BucketGeometry::default();
     let index_count = bucket.triangles.len();
-    bucket.upload(&mut geometry, context);
+    bucket.upload(&mut geometry, crate::layers::upload_needs(context));
 
     // An earlier draw put the indexes in a buffer, which frees their CPU
     // copy.
@@ -428,7 +428,7 @@ fn symbol_bucket() {
     assert!(bucket.has_data());
     assert!(bucket.needs_upload());
 
-    with_context(|context| bucket.upload(&mut BucketGeometry::default(), context));
+    with_context(|context| bucket.upload(&mut BucketGeometry::default(), crate::layers::upload_needs(context)));
     assert!(!bucket.needs_upload());
 }
 
@@ -442,7 +442,7 @@ fn raster_bucket() {
     assert!(bucket.has_data());
     assert!(bucket.needs_upload());
 
-    with_context(|context| bucket.upload(&mut BucketGeometry::default(), context));
+    with_context(|context| bucket.upload(&mut BucketGeometry::default(), crate::layers::upload_needs(context)));
     assert!(!bucket.needs_upload());
 
     bucket.clear();

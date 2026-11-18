@@ -10,10 +10,9 @@ use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
 use mln_util::time::Instant;
 
-use crate::bucket::{Bucket, BucketBase};
+use crate::bucket::{Bucket, BucketBase, UploadNeeds};
 use crate::bucket_geometry::BucketGeometry;
 use crate::geometry::dem_data::DEMData;
-use crate::gfx::context::Context;
 use crate::tile_mask::TileMask;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
@@ -180,9 +179,7 @@ impl HillshadeBucket {
 
         geometry.last_modified = Instant::now();
     }
-}
 
-impl HillshadeBucket {
     /// Marks the bucket uploaded, if it has a DEM: its geometry draws as it
     /// is, and the layers make the DEM's textures.
     pub(crate) fn upload_dem(&mut self) {
@@ -197,7 +194,7 @@ impl Bucket for HillshadeBucket {
         &self.base
     }
 
-    fn upload(&mut self, _geometry: &mut BucketGeometry, _context: &Context) {
+    fn upload(&mut self, _geometry: &mut BucketGeometry, _needs: UploadNeeds) {
         self.upload_dem();
     }
 
@@ -207,9 +204,5 @@ impl Bucket for HillshadeBucket {
 
     fn write_wire(&self, w: &mut mln_wire::Writer) {
         w.fail("a hillshade bucket, which no layout makes".to_owned());
-    }
-
-    fn clone_bucket(&self) -> Box<dyn Bucket> {
-        Box::new(self.clone())
     }
 }

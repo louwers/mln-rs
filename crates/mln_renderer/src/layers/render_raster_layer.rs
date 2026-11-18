@@ -36,7 +36,7 @@ use mln_util::identity::SimpleIdentity;
 use mln_util::time::Instant;
 
 use super::{cast_matrix, shared_vertices};
-use crate::bucket::NoBucket;
+use crate::bucket::{Bucket, NoBucket};
 use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::draw_cache::{DrawSlots, FrameDraw, FrameDraws, KeptDraw, LayerDrawing};
@@ -48,7 +48,7 @@ use crate::layer_type::LayerType;
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{
-    LayerParts, LayerPrepareParameters, LayerTiles, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase,
+    LayerParts, LayerPrepareParameters, LayerSource, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase,
     TypedLayer, set_layer_tiles,
 };
 use crate::render_pass::RenderPass;
@@ -369,7 +369,7 @@ impl RenderLayer for RenderRasterLayer {
         &mut self,
         paint_parameters: &PaintParameters<'_>,
         _update_parameters: &UpdateParameters,
-        tiles: Option<LayerTiles<'_>>,
+        source: Option<LayerSource<'_>>,
     ) {
         let (shaders, context, state) =
             (&paint_parameters.static_data.shaders, paint_parameters.context, paint_parameters.state);
@@ -379,8 +379,8 @@ impl RenderLayer for RenderRasterLayer {
                 self.globe_meshes.clear();
             }
         }
-        let render_tiles = tiles.filter(|tiles| !tiles.is_empty());
-        let image_data = tiles.and_then(LayerTiles::image);
+        let render_tiles = source.and_then(LayerSource::tiles).filter(|tiles| !tiles.is_empty());
+        let image_data = source.and_then(LayerSource::image);
         if render_tiles.is_none() && image_data.is_none() {
             self.remove_all_draws();
             self.textures.clear();
@@ -413,10 +413,8 @@ impl RenderLayer for RenderRasterLayer {
         let static_segments: Vec<SegmentBase> = static_geometry.segments.iter().map(SegmentBase::copy).collect();
 
         // Drop the textures of buckets that are no longer rendered.
-        let live_buckets: mln_util::hash::HashSet<SimpleIdentity> = render_tiles
-            .iter()
-            .filter_map(|tile| tile.get_bucket(&*self.base.style).map(super::super::bucket::Bucket::get_id))
-            .collect();
+        let live_buckets: mln_util::hash::HashSet<SimpleIdentity> =
+            render_tiles.iter().filter_map(|tile| tile.get_bucket(&*self.base.style).map(Bucket::get_id)).collect();
         self.textures.retain(|id, _| live_buckets.contains(id));
         // Kept draws keep their textures, so a changed filter is applied to
         // the textures themselves.
@@ -427,7 +425,7 @@ impl RenderLayer for RenderRasterLayer {
 
         let mut frame_draws = Vec::new();
         for tile in render_tiles.iter() {
-            let tile_id = *tile.get_overscaled_tile_id();
+            let tile_id = *tile.tile.get_overscaled_tile_id();
 
             let bucket = tile.get_bucket(&*self.base.style).filter(|b| b.has_data());
             let Some(bucket) = bucket.and_then(|bucket| bucket.downcast_ref::<RasterBucket>()) else {

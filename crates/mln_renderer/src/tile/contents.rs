@@ -23,7 +23,7 @@ use mln_util::mat4::Mat4;
 use mln_util::pool::TaskGroup;
 use mln_vec_map::{VecMap, VecSet};
 
-use crate::bucket::{Bucket, LayerFeatureStates};
+use crate::bucket::{Bucket, LayerFeatureStates, UploadNeeds};
 use crate::bucket_geometry::BucketGeometry;
 use crate::buckets::hillshade_bucket::HillshadeBucket;
 use crate::buckets::raster_bucket::RasterBucket;
@@ -109,6 +109,11 @@ impl LayoutBuckets {
         self.layers.iter().map(|(id, laid)| {
             (id, LayerRenderData { bucket: &*self.buckets[laid.bucket], bucket_index: laid.bucket, layer: &laid.layer })
         })
+    }
+
+    /// The number of buckets, each of which some layer renders.
+    pub(crate) fn bucket_count(&self) -> usize {
+        self.buckets.len()
     }
 
     /// The bucket at `index`, as [`LayerRenderData::bucket_index`] gives it.
@@ -362,6 +367,16 @@ impl GeometryContents {
         self.answer.atlases.as_ref().map(|atlases| &atlases.pattern_positions)
     }
 
+    /// Readies the buckets that are new or changed since their last upload
+    /// for the tile's draws ([`Bucket::upload`]).
+    pub(crate) fn upload(&mut self, needs: UploadNeeds) {
+        for bucket in self.result.layer_render_data.buckets_mut() {
+            if bucket.needs_upload() {
+                bucket.upload(&mut self.bucket_geometry, needs);
+            }
+        }
+    }
+
     /// Brings the buckets' feature state to `states`, for the features of
     /// the data they were built from, and adds the buckets whose vertex data
     /// that changed to `changed`.
@@ -538,17 +553,11 @@ impl Contents {
         self.geometry()?.pattern_positions()?.get(pattern).cloned()
     }
 
-    /// Readies the buckets that changed since for the frame's draws
-    /// ([`Bucket::upload`]).
-    pub(crate) fn upload(&mut self, context: &crate::gfx::context::Context) {
+    /// Readies the buckets that are new or changed since their last upload
+    /// for the frame's draws ([`Bucket::upload`]).
+    pub(crate) fn upload(&mut self, needs: UploadNeeds) {
         match self {
-            Contents::Geometry(GeometryContents { result, bucket_geometry, .. }) => {
-                for bucket in result.layer_render_data.buckets_mut() {
-                    if bucket.needs_upload() {
-                        bucket.upload(bucket_geometry, context);
-                    }
-                }
-            }
+            Contents::Geometry(contents) => contents.upload(needs),
             Contents::Raster(bucket) => bucket.upload_image(),
             Contents::Dem(bucket) => bucket.upload_dem(),
             Contents::Empty => {}

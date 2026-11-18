@@ -22,6 +22,7 @@ use mln_vec_map::VecMap;
 
 use crate::algorithm::update_renderables::{PrefetchedTile, RenderablesContext, update_renderables};
 use crate::algorithm::update_tile_masks::update_tile_masks;
+use crate::bucket::UploadNeeds;
 use crate::draw_cache::ChangedBuckets;
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layout::tile_layout::LayoutParams;
@@ -271,7 +272,11 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
         // A flat map draws each world copy of a tile from a tile of its own,
         // which starts from a loaded copy rather than leave its world bare
         // until it has loaded and laid out the same data.
-        let copy = if parameters.transform_state.is_globe_rendering() { None } else { self.source.world_copy(id) };
+        let copy = if parameters.transform_state.is_globe_rendering() {
+            None
+        } else {
+            self.source.world_copy(id, self.ctx.upload_needs)
+        };
         self.source.insert(tile);
         let style = self.style;
         self.source.update(id, self.ctx, |tile| {
@@ -377,8 +382,8 @@ impl SourceTiles {
 
     /// What tile `id` shows, which is at `slot` of the tiles if they haven't
     /// changed since `rendered` said so.
-    pub(crate) fn contents_at(&self, id: &OverscaledTileID, slot: usize) -> Option<&Contents> {
-        match self.tiles.get_index(slot) {
+    pub(crate) fn contents_at(&self, id: &OverscaledTileID, slot: Option<usize>) -> Option<&Contents> {
+        match slot.and_then(|slot| self.tiles.get_index(slot)) {
             Some((key, slot)) if key == id => slot.tile.contents(),
             _ => self.tile(id)?.contents(),
         }
@@ -386,10 +391,10 @@ impl SourceTiles {
 
     /// What tile `id` shows, whose buckets the frame changes, see
     /// `contents_at`.
-    pub(crate) fn contents_at_mut(&mut self, id: &OverscaledTileID, slot: usize) -> Option<&mut Contents> {
-        let index = match self.tiles.get_index(slot) {
-            Some((key, _)) if key == id => slot,
-            _ => self.tiles.index_of(id)?,
+    pub(crate) fn contents_at_mut(&mut self, id: &OverscaledTileID, slot: Option<usize>) -> Option<&mut Contents> {
+        let index = match slot.filter(|&slot| self.tiles.get_index(slot).is_some_and(|(key, _)| key == id)) {
+            Some(slot) => slot,
+            None => self.tiles.index_of(id)?,
         };
         self.tiles.get_index_mut(index)?.1.tile.contents_mut()
     }
@@ -839,15 +844,21 @@ impl SourceTiles {
         true
     }
 
-    /// A copy of a renderable tile that is `id` in another world copy.
-    fn world_copy(&self, id: &OverscaledTileID) -> Option<WorldCopy> {
-        self.tiles
-            .values()
-            .map(|slot| &slot.tile)
-            .filter(|tile| {
-                tile.id.overscaled_z == id.overscaled_z && tile.id.canonical == id.canonical && tile.id.wrap != id.wrap
-            })
-            .find_map(WorldCopy::of)
+    /// A copy of a renderable tile that is `id` in another world copy. A
+    /// geometry tile's buckets upload for `needs` first, when the renderer
+    /// has uploaded any, so that the copy draws from their gfx vectors
+    /// rather than copying their data.
+    fn world_copy(&mut self, id: &OverscaledTileID, needs: Option<UploadNeeds>) -> Option<WorldCopy> {
+        let tile = self.tiles.values_mut().map(|slot| &mut slot.tile).find(|tile| {
+            tile.id.overscaled_z == id.overscaled_z
+                && tile.id.canonical == id.canonical
+                && tile.id.wrap != id.wrap
+                && tile.is_renderable()
+        })?;
+        if let (Some(needs), Some(Contents::Geometry(contents))) = (needs, tile.contents_mut()) {
+            contents.upload(needs);
+        }
+        WorldCopy::of(tile)
     }
 
     /// Moves the tile cached under any wrap of `id` into the cover under

@@ -15,9 +15,18 @@ pub(crate) mod render_symbol_layer;
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_style::layer_type::ErasedLayerStyle;
 
+use crate::bucket::UploadNeeds;
 use crate::draw::DrawObjects;
 use crate::draw_cache::BucketChanges;
 use crate::render_tile::FrameTile;
+
+/// What the layers' draws read of the buckets on the device of `context`.
+pub(crate) fn upload_needs(context: &crate::gfx::context::Context) -> UploadNeeds {
+    UploadNeeds {
+        fill_outline_ends: render_fill_layer::draws_outline_quads(context),
+        wall_quads: !render_fill_extrusion_layer::instanced_walls(context),
+    }
+}
 
 /// Copies the bucket's data-driven attributes into a draw again where
 /// `changes` says their values changed: `refresh(attrs)` reads them into its

@@ -4,7 +4,6 @@
 //
 // Not ported: the MLN_SYMBOL_GUARDS `check` (memory-corruption guards).
 
-use std::cell::OnceCell;
 use std::cmp::Reverse;
 use std::collections::BTreeMap;
 use std::num::NonZeroU32;
@@ -29,9 +28,8 @@ use mln_util::range::Range;
 use mln_util::serialization::payload::pod;
 use mln_vec_map::VecMap;
 
-use crate::bucket::{Bucket, BucketBase, FeatureStates};
+use crate::bucket::{Bucket, BucketBase, FeatureStates, UploadNeeds};
 use crate::bucket_geometry::{BucketGeometry, GeometryVec};
-use crate::gfx::context::Context;
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::symbol_instance::{SymbolInstance, SymbolInstancePools};
 use crate::paint_property_binder::PaintPropertyBinder;
@@ -497,13 +495,13 @@ pub(crate) struct SymbolBucket {
     pub(crate) tile_pixel_ratio: f32,
     /// The highest `symbol-height-offset` of the bucket's symbols, in meters.
     pub(crate) max_height_offset: f32,
-    /// Port-only: a bucket another side made gets an id of this side's.
-    #[wire(skip, default = "crate::text::cross_tile_symbol_index::next_bucket_instance_id")]
+    /// The id by which the cross-tile index and placement tell symbol
+    /// buckets apart, which the index gives the bucket the first time it
+    /// indexes it; 0 until then.
+    #[wire(skip)]
     pub(crate) bucket_instance_id: u32,
     pub(crate) allow_vertical_placement: bool,
     pub(crate) placement_modes: Vec<TextWritingModeType>,
-    #[wire(skip)]
-    has_format_section_overrides: OnceCell<bool>,
 
     /// What placement, cross-tile indexing and sorting change.
     pub(crate) state: SymbolBucketState,
@@ -562,10 +560,9 @@ impl SymbolBucket {
             icon_size_binder: SymbolSizeBinder::create(zoom, icon_size, SymbolLayoutProperties::Defaults::icon_size()),
             tile_pixel_ratio,
             max_height_offset,
-            bucket_instance_id: crate::text::cross_tile_symbol_index::next_bucket_instance_id(),
+            bucket_instance_id: 0,
             allow_vertical_placement,
             placement_modes,
-            has_format_section_overrides: OnceCell::new(),
             state: SymbolBucketState {
                 sorted_angle: f32::MAX,
                 symbol_instances,
@@ -598,9 +595,7 @@ impl SymbolBucket {
     }
 
     pub(crate) fn has_format_section_overrides(&self) -> bool {
-        *self
-            .has_format_section_overrides
-            .get_or_init(|| SymbolLayerPaintPropertyOverrides::has_overrides(&self.layout.text_field))
+        SymbolLayerPaintPropertyOverrides::has_overrides(&self.layout.text_field)
     }
 
     pub(crate) fn has_variable_text_anchors(&self) -> bool {
@@ -803,7 +798,7 @@ impl Bucket for SymbolBucket {
         self.max_height_offset
     }
 
-    fn upload(&mut self, geometry: &mut BucketGeometry, _context: &Context) {
+    fn upload(&mut self, geometry: &mut BucketGeometry, _needs: UploadNeeds) {
         let state = &mut self.state;
         for buffer in [&mut state.text, &mut state.icon, &mut state.sdf_icon] {
             geometry.move_vertices(&mut buffer.attribute_data);
@@ -829,10 +824,6 @@ impl Bucket for SymbolBucket {
 
     fn write_wire(&self, w: &mut mln_wire::Writer) {
         mln_wire::Wire::write(self, w);
-    }
-
-    fn clone_bucket(&self) -> Box<dyn Bucket> {
-        Box::new(self.clone())
     }
 
     fn update(

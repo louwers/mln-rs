@@ -9,7 +9,7 @@ use mln_style::Source;
 use mln_util::constants;
 use mln_util::error::Error;
 
-use crate::gfx::context::Context;
+use crate::bucket::UploadNeeds;
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::registry::Registry;
@@ -57,8 +57,8 @@ pub(crate) trait RenderSource {
     fn prepare(&mut self, store: &mut TileStore, parameters: &SourcePrepareParameters<'_>);
 
     /// Readies the buckets the frame draws, before its layers make their
-    /// draws.
-    fn upload(&mut self, store: &mut TileStore, context: &Context);
+    /// draws, which read what `needs` says.
+    fn upload(&mut self, store: &mut TileStore, needs: UploadNeeds);
 
     /// Updates the source's draws of the debug overlays; a no-op for the
     /// sources that have none (the image source) (layers: debug).

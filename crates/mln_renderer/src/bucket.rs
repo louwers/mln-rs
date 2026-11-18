@@ -1,9 +1,10 @@
-// C++ `Bucket` is an abstract class with data members: the data is
-// `BucketBase`, the virtual interface is the `Bucket` trait. Workers build
+// A bucket is what a tile's layout makes of a layer's features for the
+// layer's draws: their vertices, indices and paint values. Workers build
 // buckets and send them to the render thread, which owns each one once, in
 // its tile's contents, and changes it only where it has the contents
 // mutably: feature state and symbol placement in a frame's prepare, the
-// upload that moves its geometry to the draws in the frame's encode.
+// upload that moves its geometry to the draws in the frame's encode. What
+// every bucket has is `BucketBase`; what each type does, the `Bucket` trait.
 
 use std::any::Any;
 
@@ -16,7 +17,6 @@ use mln_util::identity::SimpleIdentity;
 use mln_wire::{Reader, Wire, Writer};
 
 use crate::bucket_geometry::BucketGeometry;
-use crate::gfx::context::Context;
 use crate::layout::pattern_layout::PatternLayerMap;
 
 pub(crate) type FeatureStates = mln_util::hash::HashMap<String, mln_style::expression::expression::FeatureState>;
@@ -48,7 +48,20 @@ pub(crate) fn geometry_too_long() -> Error {
     Error::native("a polygon has more vertices than a 16-bit index can address")
 }
 
-pub(crate) trait Bucket: Any + Send {
+/// What the frame's draws read of the buckets apart from their own
+/// geometry, which depends on the device.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct UploadNeeds {
+    /// Whether fill outlines draw as instanced quads, which read the fill
+    /// buckets' outline ends.
+    pub(crate) fill_outline_ends: bool,
+    /// Whether fill-extrusion walls draw as quads of their own, which their
+    /// buckets make of their vertices, rather than as instances of a static
+    /// quad.
+    pub(crate) wall_quads: bool,
+}
+
+pub(crate) trait Bucket: Any + Send + CloneBucket {
     fn base(&self) -> &BucketBase;
 
     /// Feature geometries are also used to populate the feature index.
@@ -95,8 +108,9 @@ pub(crate) trait Bucket: Any + Send {
     /// Readies the bucket for its tile's draws, once it has data and until
     /// it changes again: moves its vertices and indices into `geometry`,
     /// the gfx vectors the draws share, all but the values that feature
-    /// state rewrites, which stay with the bucket.
-    fn upload(&mut self, geometry: &mut BucketGeometry, context: &Context);
+    /// state rewrites, which stay with the bucket. What else the draws
+    /// read, `needs` says.
+    fn upload(&mut self, geometry: &mut BucketGeometry, needs: UploadNeeds);
 
     fn has_data(&self) -> bool;
 
@@ -112,14 +126,23 @@ pub(crate) trait Bucket: Any + Send {
     fn get_id(&self) -> SimpleIdentity {
         self.base().bucket_id
     }
+}
 
-    /// A copy of the bucket, for the tile in another world copy, which
-    /// draws the same geometry: what the bucket moved to its tile's
-    /// geometry, the copy finds in a copy of that.
+/// A bucket's copy, for the tile in another world copy, which draws the
+/// same geometry: what the bucket moved to its tile's geometry, the copy
+/// finds in a copy of that.
+pub(crate) trait CloneBucket {
     fn clone_bucket(&self) -> Box<dyn Bucket>;
 }
 
+impl<B: Bucket + Clone> CloneBucket for B {
+    fn clone_bucket(&self) -> Box<dyn Bucket> {
+        Box::new(self.clone())
+    }
+}
+
 /// The bucket of a layer type that doesn't lay out: there is no value.
+#[derive(Clone)]
 pub(crate) enum NoBucket {}
 
 impl Bucket for NoBucket {
@@ -127,7 +150,7 @@ impl Bucket for NoBucket {
         match *self {}
     }
 
-    fn upload(&mut self, _geometry: &mut BucketGeometry, _context: &Context) {
+    fn upload(&mut self, _geometry: &mut BucketGeometry, _needs: UploadNeeds) {
         match *self {}
     }
 
@@ -136,10 +159,6 @@ impl Bucket for NoBucket {
     }
 
     fn write_wire(&self, _w: &mut Writer) {
-        match *self {}
-    }
-
-    fn clone_bucket(&self) -> Box<dyn Bucket> {
         match *self {}
     }
 }
@@ -168,10 +187,11 @@ impl dyn Bucket {
     }
 }
 
-/// bench: a copy of `bucket`, if it is a symbol bucket, which `HeldBuckets`
-/// holds for a benchmark's layer to place, at the index this returns.
+/// bench: a copy of the bucket `bucket` points to, if it is a symbol
+/// bucket, which `HeldBuckets` holds for a benchmark's layer to place, at
+/// the index this returns, until the layer drops.
 #[cfg(feature = "bench")]
-pub(crate) fn recover(bucket: &&dyn Bucket) -> Option<usize> {
+pub(crate) fn recover(bucket: &impl std::ops::Deref<Target = dyn Bucket>) -> Option<usize> {
     let bucket: &crate::buckets::symbol_bucket::SymbolBucket = bucket.downcast_ref()?;
     Some(crate::render_layer::HeldBuckets::hold(bucket.clone()))
 }

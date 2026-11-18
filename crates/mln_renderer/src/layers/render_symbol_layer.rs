@@ -62,8 +62,8 @@ use crate::layout::symbol_projection::{get_gl_coord_matrix, get_label_plane_matr
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
 use crate::render_layer::{
-    BucketKey, BucketPlacementData, LayerParts, LayerPrepareParameters, LayerTiles, LayerValues, Parts, PartsMut,
-    PlacedTile, RenderLayer, RenderLayerBase, SymbolTranslate, TypedLayer, set_layer_tiles,
+    BucketKey, BucketPlacementData, LayerParts, LayerPrepareParameters, LayerRenderData, LayerSource, LayerValues,
+    Parts, PartsMut, PlacedTile, RenderLayer, RenderLayerBase, SymbolTranslate, TypedLayer, set_layer_tiles,
 };
 use crate::render_pass::RenderPass;
 use crate::render_tile::{FrameTile, RenderTile};
@@ -605,6 +605,18 @@ pub(crate) struct RenderSymbolLayer {
     collision_circle_group: Option<ShaderGroupPtr>,
     /// The passes the layer's draws were built for.
     draws_passes: RenderPass,
+    /// bench: the indexes of the buckets `HeldBuckets` holds for the layer.
+    #[cfg(feature = "bench")]
+    held: Vec<usize>,
+}
+
+#[cfg(feature = "bench")]
+impl Drop for RenderSymbolLayer {
+    fn drop(&mut self) {
+        for &index in &self.held {
+            crate::render_layer::HeldBuckets::release(index);
+        }
+    }
 }
 
 impl RenderSymbolLayer {
@@ -678,8 +690,9 @@ impl RenderSymbolLayer {
     }
 
     /// bench: [`add_bucket`](Self::add_bucket) of the bucket that
-    /// `HeldBuckets` holds at `bucket`, of the tile at `tile_index` of
-    /// `tiles`.
+    /// `HeldBuckets` holds at `bucket` ([`crate::bucket::recover`]), of the
+    /// tile at `tile_index` of `tiles`. The layer frees the bucket when it
+    /// drops.
     #[cfg(feature = "bench")]
     pub(crate) fn add_placement_data(
         &mut self,
@@ -690,12 +703,13 @@ impl RenderSymbolLayer {
         translates: (SymbolTranslate, SymbolTranslate),
     ) {
         use crate::render_layer::{HeldBuckets, SymbolBuckets as _};
+        self.held.push(bucket);
         let Some(tile) = tiles.get(tile_index) else {
             return;
         };
         let key = BucketKey {
             bucket,
-            slot: tile_index,
+            slot: tile.slot(),
             tile: *tile.get_overscaled_tile_id(),
             source: crate::tile::job::SourceKey(0),
         };
@@ -728,6 +742,8 @@ impl RenderSymbolLayer {
             collision_box_group: None,
             collision_circle_group: None,
             draws_passes: RenderPass::None,
+            #[cfg(feature = "bench")]
+            held: Vec::new(),
         }
     }
 
@@ -976,11 +992,9 @@ impl RenderSymbolLayer {
         let mut frame_draws: Vec<(FrameDraw, SymbolUniforms)> = Vec::new();
         let mut collision_draws: Vec<FrameDraw> = Vec::new();
         for tile in tiles {
-            let tile_id = *tile.get_overscaled_tile_id();
+            let tile_id = *tile.tile.get_overscaled_tile_id();
             if let Some(cached) = self.drawing.caches.cache(&tile_id) {
-                let bucket = tile
-                    .get_layer_render_data(&*self.base.style)
-                    .and_then(super::super::render_layer::LayerRenderData::bucket::<Symbol>);
+                let bucket = tile.get_layer_render_data(&*self.base.style).and_then(LayerRenderData::bucket::<Symbol>);
                 debug_assert!(bucket.is_some() || cached.draws.is_empty());
                 for (slot, draw) in cached.draws.iter().enumerate().filter(|(_, draw)| draw.visible) {
                     let Some(uniforms) =
@@ -1208,8 +1222,8 @@ impl RenderLayer for RenderSymbolLayer {
             };
             let key = BucketKey {
                 source,
-                tile: *render_tile.get_overscaled_tile_id(),
-                slot: render_tile.slot(),
+                tile: *render_tile.tile.get_overscaled_tile_id(),
+                slot: render_tile.tile.slot(),
                 bucket: render_data.bucket_index,
             };
             let feature_index = || render_tile.get_feature_index();
@@ -1226,7 +1240,7 @@ impl RenderLayer for RenderSymbolLayer {
         &mut self,
         paint_parameters: &PaintParameters<'_>,
         _update_parameters: &UpdateParameters,
-        tiles: Option<LayerTiles<'_>>,
+        source: Option<LayerSource<'_>>,
     ) {
         /// The atlases' textures given to one tile's draws.
         #[derive(Default)]
@@ -1239,7 +1253,7 @@ impl RenderLayer for RenderSymbolLayer {
             (&paint_parameters.static_data.shaders, paint_parameters.context, paint_parameters.state);
         self.update_projection_variant(state);
         let passes = self.base.passes;
-        let Some(render_tiles) = tiles.filter(|tiles| !tiles.is_empty()) else {
+        let Some(render_tiles) = source.and_then(LayerSource::tiles).filter(|tiles| !tiles.is_empty()) else {
             self.remove_all_draws();
             return;
         };
@@ -1292,7 +1306,7 @@ impl RenderLayer for RenderSymbolLayer {
 
         let tiles: Vec<FrameTile<'_>> = render_tiles.iter().collect();
         for (tile_index, &tile) in tiles.iter().enumerate() {
-            let tile_id = *tile.get_overscaled_tile_id();
+            let tile_id = *tile.tile.get_overscaled_tile_id();
 
             let render_data = super::render_data_for_pass(tile, &*style, passes);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
@@ -1359,7 +1373,7 @@ impl RenderLayer for RenderSymbolLayer {
                             sort_key: segment.sort_key,
                             type_,
                             tile_index,
-                            tile_id: tile.id,
+                            tile_id: tile.tile.id,
                             overscaled_z: tile_id.overscaled_z,
                             segment: Some(i),
                         });
@@ -1373,7 +1387,7 @@ impl RenderLayer for RenderSymbolLayer {
                         sort_key,
                         type_,
                         tile_index,
-                        tile_id: tile.id,
+                        tile_id: tile.tile.id,
                         overscaled_z: tile_id.overscaled_z,
                         segment: None,
                     });
@@ -1427,7 +1441,7 @@ impl RenderLayer for RenderSymbolLayer {
             let sdf_icons = group.type_ == SymbolType::IconSDF;
 
             let tile = tiles[group.tile_index];
-            let tile_id = tile.id.overscale_to(group.overscaled_z);
+            let tile_id = tile.tile.id.overscale_to(group.overscaled_z);
             let Some(render_data) = super::render_data_for_pass(tile, &*style, passes) else {
                 continue;
             };
@@ -1512,7 +1526,7 @@ impl RenderLayer for RenderSymbolLayer {
                 };
 
                 // The draws of a tile share the atlases' textures.
-                let tile_atlases = tile_atlases.entry(tile.id).or_default();
+                let tile_atlases = tile_atlases.entry(tile.tile.id).or_default();
                 let draw_atlases = if is_text {
                     tile_atlases.text.get_or_insert_with(|| {
                         let text_size_is_zoom_constant =

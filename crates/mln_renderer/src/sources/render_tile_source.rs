@@ -39,10 +39,10 @@ use mln_util::geometry::FeatureType;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
+use crate::bucket::UploadNeeds;
 use crate::buckets::line_bucket::{LineBucket, LineLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::draw_cache::{DrawDepth, DrawSlots, Draws, FrameDraw, KeptDraw};
-use crate::gfx::context::Context;
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layers::cast_matrix;
 use crate::paint_parameters::PaintParameters;
@@ -138,12 +138,225 @@ fn polyline_objects(
     ))
 }
 
+// layers: debug --------------------------------------------------------------
+
+/// A draw of a debug overlay: polylines over a tile of a source.
+struct DebugDraw {
+    /// The id of the source.
+    source: Rc<str>,
+    tile: OverscaledTileID,
+    /// The lines of text the polylines spell, of a text overlay.
+    text: Option<Vec<String>>,
+    draw: KeptDraw,
+}
+
+/// The draws of a debug overlay, in the order they were made, which is the
+/// order they draw in, each in the slot of its index.
+#[derive(Default)]
+pub(crate) struct DebugDraws(Vec<DebugDraw>);
+
+impl DrawSlots for DebugDraws {
+    fn slot_mut(&mut self, slot: u32) -> Option<&mut DrawObjects> {
+        self.0.get_mut(slot as usize).map(|draw| &mut draw.draw.objects)
+    }
+}
+
+/// A debug overlay: polylines over the tiles of the sources, in the color
+/// and width of its type (layers: debug).
+pub(crate) struct DebugLayer {
+    properties: LineEvaluatedPropsUBO,
+    /// The overlay's draws, and the frame's draws of them, with the buffers
+    /// they read.
+    pub(crate) draws: Draws<(), DebugDraws>,
+}
+
+impl DebugLayer {
+    #[must_use]
+    pub(crate) fn new(type_: DebugType) -> Self {
+        DebugLayer { properties: debug_line_properties(type_), draws: Draws::default() }
+    }
+
+    /// The overlay's draws, in drawing order.
+    fn draws(&mut self) -> &mut Vec<DebugDraw> {
+        &mut self.draws.caches.layer_cache_mut().0
+    }
+
+    /// The tiles with draws of the source `source`.
+    fn tiles_of(&mut self, source: &str) -> HashSet<OverscaledTileID> {
+        self.draws().iter().filter(|draw| *draw.source == *source).map(|draw| draw.tile).collect()
+    }
+
+    /// Adds a draw of `objects` over `tile_id` of the source `source`,
+    /// spelling `text`.
+    fn add(&mut self, source: &Rc<str>, tile_id: OverscaledTileID, text: Option<Vec<String>>, objects: DrawObjects) {
+        let draw = KeptDraw::new(objects);
+        self.draws().push(DebugDraw { source: Rc::clone(source), tile: tile_id, text, draw });
+    }
+
+    /// Makes the frame's draws of the overlay, and writes the buffers they
+    /// read.
+    pub(crate) fn prepare(&mut self, parameters: &PaintParameters<'_>) {
+        let context = parameters.context;
+        let Draws { caches, frame } = &mut self.draws;
+        frame.draws.clear();
+        let draws = &caches.layer_cache().0;
+        if draws.is_empty() {
+            return;
+        }
+
+        let buffers = &mut frame.uniform_buffers;
+        buffers.create_or_update_pod(ID_LINE_EVALUATED_PROPS_UBO, &self.properties, context);
+        // We would need to set up `idLineExpressionUBO` if the expression
+        // mask isn't empty
+        debug_assert_eq!(self.properties.expression_mask, line_expression_mask::NONE);
+        // No GPU expressions; only line shaders of `Caps::line_expressions`
+        // read it.
+        if context.caps().line_expressions && buffers.get(ID_LINE_EXPRESSION_UBO).is_none() {
+            buffers.set(ID_LINE_EXPRESSION_UBO, context.create_uniform_buffer(&[0; LINE_EXPRESSION_UBO_SIZE]));
+        }
+
+        let zoom = parameters.state.get_zoom();
+        let mut draw_ubos = Vec::with_capacity(draws.len());
+        let mut projection_ubos: Vec<ProjectionUBO> = Vec::with_capacity(draws.len());
+        for (slot, draw) in draws.iter().enumerate() {
+            let tile_id = draw.tile.to_unwrapped();
+            let projection = get_projection_data(
+                &tile_id,
+                parameters,
+                [0.0, 0.0],
+                TranslateAnchorType::Viewport,
+                false,
+                false,
+                None,
+                false,
+            );
+            projection_ubos.push(to_projection_ubo(&projection));
+            let mut draw_ubo = LineDrawableUnionUBO::default();
+            draw_ubo.set(&LineDrawableUBO {
+                matrix: cast_matrix(&projection.fallback_matrix),
+                ratio: 1.0 / tile_id.pixels_to_tile_units(1.0, zoom as f32),
+                color_t: 0.0,
+                blur_t: 0.0,
+                opacity_t: 0.0,
+                gapwidth_t: 0.0,
+                offset_t: 0.0,
+                width_t: 0.0,
+                pad1: 0.0,
+            });
+            draw_ubos.push(draw_ubo);
+            let frame_draw = FrameDraw::new(None, slot as u32, draw.draw.id);
+            frame.draws.push(FrameDraw { depth: DrawDepth::Off, ..frame_draw });
+        }
+        let buffers = &mut frame.uniform_buffers;
+        buffers.write_storage(ID_LINE_DRAWABLE_UBO, bytemuck::cast_slice(&draw_ubos), context);
+        buffers.write_storage(ID_PROJECTION_UBO, bytemuck::cast_slice(&projection_ubos), context);
+    }
+}
+
+/// The render source of a source with tiles: a view into the tile store,
+/// which keeps the tiles, with the render tiles of the last `prepare`.
+pub(crate) struct RenderTileSource {
+    pub(crate) base: RenderSourceBase,
+    /// The source's id, which its debug overlays' draws carry.
+    id: Rc<str>,
+    key: SourceKey,
+    origin: Box<dyn TileOrigin>,
+    fast_pfor_enabled: bool,
+    pub(crate) render_tiles: Vec<RenderTile>,
+    bearing: f32,
+}
+
 impl RenderTileSource {
+    /// The render source of `style_source`, whose tiles of `kind` go in `store`
+    /// and get their data through `origin`. A tile of a `single_layer`
+    /// source holds one source layer.
+    pub(crate) fn new(
+        style_source: Source,
+        kind: TileKind,
+        single_layer: bool,
+        origin: Box<dyn TileOrigin>,
+        store: &mut TileStore,
+    ) -> Self {
+        let key = store.add_source(style_source.id().to_owned(), kind, single_layer);
+        RenderTileSource {
+            id: Rc::from(style_source.id()),
+            base: RenderSourceBase::new(style_source),
+            key,
+            origin,
+            fast_pfor_enabled: false,
+            render_tiles: Vec::new(),
+            bearing: 0.0,
+        }
+    }
+}
+
+impl RenderSource for RenderTileSource {
+    fn base(&self) -> &RenderSourceBase {
+        &self.base
+    }
+
+    fn is_loaded(&self, store: &TileStore) -> bool {
+        store.source(self.key).is_none_or(SourceTiles::is_loaded)
+    }
+
+    fn update(
+        &mut self,
+        store: &mut TileStore,
+        style_source: Source,
+        layers: &[Arc<dyn ErasedEvaluatedLayer>],
+        needs_rendering: bool,
+        needs_relayout: bool,
+        parameters: &TileParameters<'_>,
+    ) {
+        let previous = std::mem::replace(&mut self.base.style_source, style_source);
+        self.base.enabled = needs_rendering;
+        let Some((source, ctx)) = store.source_mut(self.key) else {
+            return;
+        };
+        let origin_update = OriginUpdate { parameters, needs_relayout, fast_pfor_enabled: self.fast_pfor_enabled };
+        let Some(cover) = self.origin.update(&previous, &self.base.style_source, source, ctx, &origin_update) else {
+            return;
+        };
+        let update = CoverUpdate {
+            layers,
+            needs_rendering,
+            needs_relayout,
+            parameters,
+            style_source: &self.base.style_source,
+            tile_size: cover.tile_size,
+            zoom_range: cover.zoom_range,
+            bounds: cover.bounds,
+        };
+        source.update_cover(&update, ctx);
+    }
+
+    fn prepare(&mut self, store: &mut TileStore, parameters: &SourcePrepareParameters<'_>) {
+        self.bearing = parameters.transform.state.get_bearing() as f32;
+        self.render_tiles.clear();
+        let Some(source) = store.source(self.key) else {
+            return;
+        };
+        self.render_tiles.reserve(source.rendered_count());
+        for rendered in source.rendered() {
+            let mut render_tile = RenderTile::new(*rendered.id, rendered.tile, rendered.slot, rendered.hold_for_fade);
+            render_tile.prepare(rendered.tile, rendered.needs_rendering, parameters);
+            self.render_tiles.push(render_tile);
+        }
+    }
+
+    fn release_render_data(&mut self) {
+        self.render_tiles = Vec::new();
+    }
+
+    fn upload(&mut self, store: &mut TileStore, needs: UploadNeeds) {
+        store.upload(self.key, &self.render_tiles, needs);
+    }
+
     /// Updates the source's draws of the debug overlays (layers: debug).
     ///
     /// The text is polylines, like the tile borders: WebGPU draws line
     /// primitives one pixel wide.
-    fn update_tile_debug_draws(&self, debug_layers: &mut DebugLayers, parameters: &PaintParameters<'_>) {
+    fn update_debug_draws(&self, debug_layers: &mut DebugLayers, parameters: &PaintParameters<'_>) {
         if !parameters
             .debug_options
             .contains(MapDebugOptions::TIMESTAMPS | MapDebugOptions::PARSE_STATUS | MapDebugOptions::TILE_BORDERS)
@@ -153,8 +366,7 @@ impl RenderTileSource {
         }
 
         let shaders = &*parameters.static_data.shaders;
-        let source: Rc<str> = Rc::from(self.base.style_source.id());
-        let source = &source;
+        let source = &self.id;
         let globe = parameters.state.is_globe_rendering();
         let projection_variant = if globe { ProjectionVariant::Globe } else { ProjectionVariant::Mercator };
 
@@ -281,222 +493,6 @@ impl RenderTileSource {
             // if tile borders are not required, erase their overlay
             debug_layers.remove(&DebugType::Border);
         }
-    }
-}
-
-// layers: debug --------------------------------------------------------------
-
-/// A draw of a debug overlay: polylines over a tile of a source.
-struct DebugDraw {
-    /// The id of the source.
-    source: Rc<str>,
-    tile: OverscaledTileID,
-    /// The lines of text the polylines spell, of a text overlay.
-    text: Option<Vec<String>>,
-    draw: KeptDraw,
-}
-
-/// The draws of a debug overlay, in the order they were made, which is the
-/// order they draw in, each in the slot of its index.
-#[derive(Default)]
-pub(crate) struct DebugDraws(Vec<DebugDraw>);
-
-impl DrawSlots for DebugDraws {
-    fn slot_mut(&mut self, slot: u32) -> Option<&mut DrawObjects> {
-        self.0.get_mut(slot as usize).map(|draw| &mut draw.draw.objects)
-    }
-}
-
-/// A debug overlay: polylines over the tiles of the sources, in the color
-/// and width of its type (layers: debug).
-pub(crate) struct DebugLayer {
-    properties: LineEvaluatedPropsUBO,
-    /// The overlay's draws, and the frame's draws of them, with the buffers
-    /// they read.
-    pub(crate) draws: Draws<(), DebugDraws>,
-}
-
-impl DebugLayer {
-    #[must_use]
-    pub(crate) fn new(type_: DebugType) -> Self {
-        DebugLayer { properties: debug_line_properties(type_), draws: Draws::default() }
-    }
-
-    /// The overlay's draws, in drawing order.
-    fn draws(&mut self) -> &mut Vec<DebugDraw> {
-        &mut self.draws.caches.layer_cache_mut().0
-    }
-
-    /// The tiles with draws of the source `source`.
-    fn tiles_of(&mut self, source: &str) -> HashSet<OverscaledTileID> {
-        self.draws().iter().filter(|draw| *draw.source == *source).map(|draw| draw.tile).collect()
-    }
-
-    /// Adds a draw of `objects` over `tile_id` of the source `source`,
-    /// spelling `text`.
-    fn add(&mut self, source: &Rc<str>, tile_id: OverscaledTileID, text: Option<Vec<String>>, objects: DrawObjects) {
-        let draw = KeptDraw::new(objects);
-        self.draws().push(DebugDraw { source: Rc::clone(source), tile: tile_id, text, draw });
-    }
-
-    /// Makes the frame's draws of the overlay, and writes the buffers they
-    /// read.
-    pub(crate) fn prepare(&mut self, parameters: &PaintParameters<'_>) {
-        let context = parameters.context;
-        let Draws { caches, frame } = &mut self.draws;
-        frame.draws.clear();
-        let draws = &caches.layer_cache().0;
-        if draws.is_empty() {
-            return;
-        }
-
-        let buffers = &mut frame.uniform_buffers;
-        buffers.create_or_update_pod(ID_LINE_EVALUATED_PROPS_UBO, &self.properties, context);
-        // We would need to set up `idLineExpressionUBO` if the expression
-        // mask isn't empty
-        debug_assert_eq!(self.properties.expression_mask, line_expression_mask::NONE);
-        // No GPU expressions; only line shaders of `Caps::line_expressions`
-        // read it.
-        if context.caps().line_expressions && buffers.get(ID_LINE_EXPRESSION_UBO).is_none() {
-            buffers.set(ID_LINE_EXPRESSION_UBO, context.create_uniform_buffer(&[0; LINE_EXPRESSION_UBO_SIZE]));
-        }
-
-        let zoom = parameters.state.get_zoom();
-        let mut draw_ubos = Vec::with_capacity(draws.len());
-        let mut projection_ubos: Vec<ProjectionUBO> = Vec::with_capacity(draws.len());
-        for (slot, draw) in draws.iter().enumerate() {
-            let tile_id = draw.tile.to_unwrapped();
-            let projection = get_projection_data(
-                &tile_id,
-                parameters,
-                [0.0, 0.0],
-                TranslateAnchorType::Viewport,
-                false,
-                false,
-                None,
-                false,
-            );
-            projection_ubos.push(to_projection_ubo(&projection));
-            let mut draw_ubo = LineDrawableUnionUBO::default();
-            draw_ubo.set(&LineDrawableUBO {
-                matrix: cast_matrix(&projection.fallback_matrix),
-                ratio: 1.0 / tile_id.pixels_to_tile_units(1.0, zoom as f32),
-                color_t: 0.0,
-                blur_t: 0.0,
-                opacity_t: 0.0,
-                gapwidth_t: 0.0,
-                offset_t: 0.0,
-                width_t: 0.0,
-                pad1: 0.0,
-            });
-            draw_ubos.push(draw_ubo);
-            let frame_draw = FrameDraw::new(None, slot as u32, draw.draw.id);
-            frame.draws.push(FrameDraw { depth: DrawDepth::Off, ..frame_draw });
-        }
-        let buffers = &mut frame.uniform_buffers;
-        buffers.write_storage(ID_LINE_DRAWABLE_UBO, bytemuck::cast_slice(&draw_ubos), context);
-        buffers.write_storage(ID_PROJECTION_UBO, bytemuck::cast_slice(&projection_ubos), context);
-    }
-}
-
-/// The render source of a source with tiles: a view into the tile store,
-/// which keeps the tiles, with the render tiles of the last `prepare`.
-pub(crate) struct RenderTileSource {
-    pub(crate) base: RenderSourceBase,
-    key: SourceKey,
-    origin: Box<dyn TileOrigin>,
-    fast_pfor_enabled: bool,
-    pub(crate) render_tiles: Vec<RenderTile>,
-    bearing: f32,
-}
-
-impl RenderTileSource {
-    /// The render source of `style_source`, whose tiles of `kind` go in `store`
-    /// and get their data through `origin`. A tile of a `single_layer`
-    /// source holds one source layer.
-    pub(crate) fn new(
-        style_source: Source,
-        kind: TileKind,
-        single_layer: bool,
-        origin: Box<dyn TileOrigin>,
-        store: &mut TileStore,
-    ) -> Self {
-        let key = store.add_source(style_source.id().to_owned(), kind, single_layer);
-        RenderTileSource {
-            base: RenderSourceBase::new(style_source),
-            key,
-            origin,
-            fast_pfor_enabled: false,
-            render_tiles: Vec::new(),
-            bearing: 0.0,
-        }
-    }
-}
-
-impl RenderSource for RenderTileSource {
-    fn base(&self) -> &RenderSourceBase {
-        &self.base
-    }
-
-    fn is_loaded(&self, store: &TileStore) -> bool {
-        store.source(self.key).is_none_or(SourceTiles::is_loaded)
-    }
-
-    fn update(
-        &mut self,
-        store: &mut TileStore,
-        style_source: Source,
-        layers: &[Arc<dyn ErasedEvaluatedLayer>],
-        needs_rendering: bool,
-        needs_relayout: bool,
-        parameters: &TileParameters<'_>,
-    ) {
-        let previous = std::mem::replace(&mut self.base.style_source, style_source);
-        self.base.enabled = needs_rendering;
-        let Some((source, ctx)) = store.source_mut(self.key) else {
-            return;
-        };
-        let origin_update = OriginUpdate { parameters, needs_relayout, fast_pfor_enabled: self.fast_pfor_enabled };
-        let Some(cover) = self.origin.update(&previous, &self.base.style_source, source, ctx, &origin_update) else {
-            return;
-        };
-        let update = CoverUpdate {
-            layers,
-            needs_rendering,
-            needs_relayout,
-            parameters,
-            style_source: &self.base.style_source,
-            tile_size: cover.tile_size,
-            zoom_range: cover.zoom_range,
-            bounds: cover.bounds,
-        };
-        source.update_cover(&update, ctx);
-    }
-
-    fn prepare(&mut self, store: &mut TileStore, parameters: &SourcePrepareParameters<'_>) {
-        self.bearing = parameters.transform.state.get_bearing() as f32;
-        self.render_tiles.clear();
-        let Some(source) = store.source(self.key) else {
-            return;
-        };
-        self.render_tiles.reserve(source.rendered_count());
-        for rendered in source.rendered() {
-            let mut render_tile = RenderTile::new(*rendered.id, rendered.tile, rendered.slot, rendered.hold_for_fade);
-            render_tile.prepare(rendered.tile, rendered.needs_rendering, parameters);
-            self.render_tiles.push(render_tile);
-        }
-    }
-
-    fn release_render_data(&mut self) {
-        self.render_tiles = Vec::new();
-    }
-
-    fn upload(&mut self, store: &mut TileStore, context: &Context) {
-        store.upload(self.key, &self.render_tiles, context);
-    }
-
-    fn update_debug_draws(&self, debug_layers: &mut DebugLayers, parameters: &PaintParameters<'_>) {
-        self.update_tile_debug_draws(debug_layers, parameters);
     }
 
     fn tiles(&self) -> Option<SourceKey> {

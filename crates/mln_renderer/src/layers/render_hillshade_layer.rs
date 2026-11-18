@@ -48,7 +48,7 @@ use mln_util::size::Size;
 use mln_util::time::Instant;
 
 use super::{cast_matrix, shared_vertices};
-use crate::bucket::NoBucket;
+use crate::bucket::{Bucket, NoBucket};
 use crate::buckets::hillshade_bucket::{HillshadeBucket, HillshadeLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::draw_cache::{DrawCaches, DrawDepth, DrawSlots, Draws, FrameDraw, FrameDraws, KeptDraw, LayerDrawing};
@@ -59,7 +59,7 @@ use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{
-    LayerParts, LayerPrepareParameters, LayerTiles, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase,
+    LayerParts, LayerPrepareParameters, LayerSource, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase,
     TypedLayer, set_layer_tiles,
 };
 use crate::render_pass::RenderPass;
@@ -343,8 +343,9 @@ impl RenderLayer for RenderHillshadeLayer {
         &mut self,
         paint_parameters: &PaintParameters<'_>,
         _update_parameters: &UpdateParameters,
-        tiles: Option<LayerTiles<'_>>,
+        source: Option<LayerSource<'_>>,
     ) {
+        let tiles = source.and_then(LayerSource::tiles);
         let (shaders, context, state) =
             (&paint_parameters.static_data.shaders, paint_parameters.context, paint_parameters.state);
         if self.update_projection_variant(state) {
@@ -393,15 +394,13 @@ impl RenderLayer for RenderHillshadeLayer {
 
         // Drop the render targets of buckets that are no longer rendered
         // (C++ releases them with the bucket).
-        let live_buckets: HashSet<SimpleIdentity> = render_tiles
-            .iter()
-            .filter_map(|tile| tile.get_bucket(&*self.base.style).map(super::super::bucket::Bucket::get_id))
-            .collect();
+        let live_buckets: HashSet<SimpleIdentity> =
+            render_tiles.iter().filter_map(|tile| tile.get_bucket(&*self.base.style).map(Bucket::get_id)).collect();
         self.bucket_render_targets.retain(|id, _| live_buckets.contains(id));
 
         let mut frame_draws: Vec<(FrameDraw, HillshadeUniforms)> = Vec::new();
         for tile in render_tiles.iter() {
-            let tile_id = *tile.get_overscaled_tile_id();
+            let tile_id = *tile.tile.get_overscaled_tile_id();
 
             let bucket = tile.get_bucket(&*self.base.style).filter(|b| b.has_data());
             let Some(bucket) = bucket.and_then(|bucket| bucket.downcast_ref::<HillshadeBucket>()) else {

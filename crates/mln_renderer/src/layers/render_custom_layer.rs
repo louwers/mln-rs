@@ -30,7 +30,7 @@ use crate::layer_type::LayerType;
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{
-    DrawGroups, LayerParts, LayerPrepareParameters, LayerTiles, LayerValues, RenderLayer, RenderLayerBase,
+    DrawGroups, LayerParts, LayerPrepareParameters, LayerSource, LayerTiles, LayerValues, RenderLayer, RenderLayerBase,
 };
 use crate::render_pass::RenderPass;
 use crate::update_parameters::UpdateParameters;
@@ -223,7 +223,7 @@ impl RenderLayer for RenderCustomLayer {
         &mut self,
         _parameters: &PaintParameters<'_>,
         _update_parameters: &UpdateParameters,
-        _tiles: Option<LayerTiles<'_>>,
+        _source: Option<LayerSource<'_>>,
     ) {
         self.updated = true;
     }

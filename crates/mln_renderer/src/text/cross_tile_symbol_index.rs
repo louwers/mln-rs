@@ -6,7 +6,6 @@
 
 use std::collections::BTreeSet;
 use std::num::NonZeroU32;
-use std::sync::atomic::{AtomicU32, Ordering};
 
 use geometry::Point;
 use glam::Vec2;
@@ -19,15 +18,6 @@ use mln_vec_map::{VecMap, VecSet};
 use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::layout::symbol_instance::{SymbolInstance, SymbolInstancePools};
 use crate::render_layer::{PlacedTile, RenderLayer, SymbolBuckets};
-
-static MAX_BUCKET_INSTANCE_ID: AtomicU32 = AtomicU32::new(0);
-
-/// A new symbol bucket instance id, by which the index and placement tell
-/// symbol buckets apart. Workers make buckets, so the ids are the
-/// process's.
-pub(crate) fn next_bucket_instance_id() -> u32 {
-    MAX_BUCKET_INSTANCE_ID.fetch_add(1, Ordering::Relaxed) + 1
-}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct IndexedSymbolInstance {
@@ -394,6 +384,9 @@ pub(crate) struct CrossTileSymbolIndex {
     layer_indexes: VecMap<String, CrossTileSymbolLayerIndex>,
     /// The last cross-tile id given to a symbol, in any layer.
     max_cross_tile_id: u32,
+    /// The last instance id given to a symbol bucket. It outlives `reset`,
+    /// so that a bucket indexed again keeps an id no other bucket has.
+    max_bucket_instance_id: u32,
 }
 
 impl CrossTileSymbolIndex {
@@ -419,6 +412,10 @@ impl CrossTileSymbolIndex {
             let Some(bucket) = buckets.get_mut(&item.bucket) else {
                 continue;
             };
+            if bucket.bucket_instance_id == 0 {
+                self.max_bucket_instance_id += 1;
+                bucket.bucket_instance_id = self.max_bucket_instance_id;
+            }
             let render_tile = &item.tile;
             let pair =
                 bucket.register_at_cross_tile_index(layer_index, render_tile, state, &mut self.max_cross_tile_id);
