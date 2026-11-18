@@ -44,10 +44,11 @@ use super::{cast_matrix, shared_vertices};
 use crate::bucket::{Bucket, NoBucket};
 use crate::buckets::hillshade_bucket::{HillshadeBucket, HillshadeLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
-use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::texture2d::Texture2DPtr;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
-use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDraws, TileDraws, TileObjects};
+use crate::layer_drawing::{
+    DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptDraw, LayerDraws, TileDraws, TileObjects,
+};
 use crate::layer_type::LayerType;
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
@@ -77,7 +78,7 @@ pub(crate) struct ReliefTile {
 impl TileObjects for ReliefTile {
     type Part = ();
 
-    fn objects(&mut self, (): ()) -> Option<(&mut DrawObjects, Option<&AtlasBinding>)> {
+    fn objects(&mut self, (): ()) -> Option<DrawObjectsMut<'_>> {
         self.draw.objects(())
     }
 }

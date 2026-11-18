@@ -46,7 +46,7 @@ use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
 use crate::gfx::texture2d::Texture2DPtr;
 use crate::layer_composite::Composite;
-use crate::layer_drawing::{DrawList, FrameDraw, LayerDraws, TileDraws, TileObjects, UniformWriter};
+use crate::layer_drawing::{DrawList, DrawObjectsMut, FrameDraw, LayerDraws, TileDraws, TileObjects, UniformWriter};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::pattern_layout::{LineLayoutSpec, PatternLayout, uses_pattern};
@@ -94,8 +94,8 @@ pub(crate) struct LineTile {
 impl TileObjects for LineTile {
     type Part = ();
 
-    fn objects(&mut self, (): ()) -> Option<(&mut DrawObjects, Option<&AtlasBinding>)> {
-        Some((&mut self.objects, self.atlases.as_ref()))
+    fn objects(&mut self, (): ()) -> Option<DrawObjectsMut<'_>> {
+        Some(DrawObjectsMut { objects: &mut self.objects, atlases: self.atlases.as_ref() })
     }
 }
 

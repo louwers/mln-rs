@@ -56,8 +56,8 @@ use crate::geometry::feature_index::FeatureIndex;
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
 use crate::layer_drawing::{
-    BucketChanges, DrawDepth, DrawList, DrawOrder, FrameDraw, FrameDraws, KeptDraw, LayerDrawing, LayerDraws, TileMap,
-    UniformWriter,
+    BucketChanges, DrawDepth, DrawList, DrawObjectsMut, DrawOrder, FrameDraw, FrameDraws, KeptDraw, LayerDrawing,
+    LayerDraws, TileMap, UniformWriter,
 };
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
@@ -429,13 +429,9 @@ pub(crate) struct SymbolDrawing {
 impl SymbolDrawing {
     /// The GPU objects of `draw`, the draw at `index` of its tile, with what
     /// gives them the textures of the tile's atlases.
-    fn objects<'a>(
-        tiles: &'a mut TileMap<SymbolTile>,
-        draw: &FrameDraw,
-        index: usize,
-    ) -> Option<(&'a mut DrawObjects, Option<&'a AtlasBinding>)> {
+    fn objects<'a>(tiles: &'a mut TileMap<SymbolTile>, draw: &FrameDraw, index: usize) -> Option<DrawObjectsMut<'a>> {
         let draw = tiles.get_mut(&draw.tile?)?.draws.get_mut(index)?;
-        Some((&mut draw.objects, Some(&*draw.atlases)))
+        Some(DrawObjectsMut { objects: &mut draw.objects, atlases: Some(&*draw.atlases) })
     }
 
     /// The GPU objects of `draw`, the collision draw at `index` of its tile.
@@ -443,8 +439,8 @@ impl SymbolDrawing {
         tiles: &'a mut TileMap<SymbolTile>,
         draw: &FrameDraw,
         index: usize,
-    ) -> Option<(&'a mut DrawObjects, Option<&'a AtlasBinding>)> {
-        Some((&mut tiles.get_mut(&draw.tile?)?.collision.get_mut(index)?.draw.objects, None))
+    ) -> Option<DrawObjectsMut<'a>> {
+        Some((&mut tiles.get_mut(&draw.tile?)?.collision.get_mut(index)?.draw.objects).into())
     }
 
     /// Draws the pass's draws of the layer's draw group, if it has it.

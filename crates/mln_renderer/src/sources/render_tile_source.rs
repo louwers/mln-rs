@@ -43,9 +43,8 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use crate::bucket::UploadNeeds;
 use crate::buckets::line_bucket::{LineBucket, LineLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
-use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
-use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDraws};
+use crate::layer_drawing::{DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptDraw, LayerDraws};
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layers::cast_matrix;
 use crate::paint_parameters::PaintParameters;
@@ -185,12 +184,8 @@ impl DebugLayer {
     }
 
     /// The GPU objects of the overlay's draw at `index`.
-    fn objects<'a>(
-        draws: &'a mut [DebugDraw],
-        _: &FrameDraw,
-        index: usize,
-    ) -> Option<(&'a mut DrawObjects, Option<&'a AtlasBinding>)> {
-        Some((&mut draws.get_mut(index)?.draw.objects, None))
+    fn objects<'a>(draws: &'a mut [DebugDraw], _: &FrameDraw, index: usize) -> Option<DrawObjectsMut<'a>> {
+        Some((&mut draws.get_mut(index)?.draw.objects).into())
     }
 
     /// Uploads the GPU objects of the frame's draws.

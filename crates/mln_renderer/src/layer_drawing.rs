@@ -384,22 +384,35 @@ impl KeptDraw {
     }
 }
 
+/// The GPU objects of a draw, with what gives them the textures of their
+/// tile's atlases where they sample them.
+pub(crate) struct DrawObjectsMut<'a> {
+    pub(crate) objects: &'a mut DrawObjects,
+    pub(crate) atlases: Option<&'a AtlasBinding>,
+}
+
+impl<'a> From<&'a mut DrawObjects> for DrawObjectsMut<'a> {
+    /// GPU objects that sample no atlases.
+    fn from(objects: &'a mut DrawObjects) -> Self {
+        DrawObjectsMut { objects, atlases: None }
+    }
+}
+
 /// What a layer keeps of a tile, whose draws a frame's draws name by a part
 /// of the layer's own type.
 pub(crate) trait TileObjects {
     /// Which of the tile's draws a frame's draw draws.
     type Part: Copy;
 
-    /// The GPU objects of the tile's draw `part`, with what gives them the
-    /// textures of the tile's atlases.
-    fn objects(&mut self, part: Self::Part) -> Option<(&mut DrawObjects, Option<&AtlasBinding>)>;
+    /// The GPU objects of the tile's draw `part`.
+    fn objects(&mut self, part: Self::Part) -> Option<DrawObjectsMut<'_>>;
 }
 
 impl TileObjects for KeptDraw {
     type Part = ();
 
-    fn objects(&mut self, (): ()) -> Option<(&mut DrawObjects, Option<&AtlasBinding>)> {
-        Some((&mut self.objects, None))
+    fn objects(&mut self, (): ()) -> Option<DrawObjectsMut<'_>> {
+        Some((&mut self.objects).into())
     }
 }
 
@@ -409,7 +422,7 @@ pub(crate) fn tile_objects<'a, T: TileObjects>(
     tiles: &'a mut TileMap<T>,
     draw: &FrameDraw,
     part: T::Part,
-) -> Option<(&'a mut DrawObjects, Option<&'a AtlasBinding>)> {
+) -> Option<DrawObjectsMut<'a>> {
     tiles.get_mut(&draw.tile?)?.objects(part)
 }
 
@@ -675,10 +688,11 @@ impl FrameDraws {
         let drawing = composited.as_ref().is_none_or(Composited::draws);
         let draws = if drawing { &self.draws[..] } else { &[] };
         let mut pass = DrawPass { frame: self, draws, pass: parameters.pass, volume_stencil: None, composited };
-        let (volume, volume_clips) = pass.draws().fold((false, false), |(volume, clips), (_, draw)| match draw.depth {
-            DrawDepth::Volume { .. } => (true, clips || draw.clip),
-            _ => (volume, clips),
-        });
+        let (volume, volume_clips) =
+            pass.draws().fold((false, false), |(volume, clips), PassDraw { draw, .. }| match draw.depth {
+                DrawDepth::Volume { .. } => (true, clips || draw.clip),
+                _ => (volume, clips),
+            });
         if volume {
             pass.volume_stencil = volume_clips.then(|| parameters.stencil_mode_for_3d(gpu));
         } else if drawing && !self.stencil_tiles.is_empty() {
@@ -705,8 +719,8 @@ impl FrameDraws {
         let Some(pass) = self.begin(gpu, parameters) else {
             return;
         };
-        for (index, _) in pass.draws() {
-            pass.draw(gpu, parameters, objects, index, None);
+        for draw in pass.draws() {
+            pass.draw(gpu, parameters, objects.into(), draw);
         }
         pass.end(gpu, parameters);
     }
@@ -726,24 +740,41 @@ pub(crate) struct DrawPass<'a> {
     composited: Option<Composited>,
 }
 
+/// A draw of a [`DrawPass`], as [`DrawPass::draws`] yields it.
+#[derive(Clone, Copy)]
+pub(crate) struct PassDraw<'a> {
+    /// The draw's index among the frame's draws.
+    index: usize,
+    draw: &'a FrameDraw,
+}
+
+impl<'a> PassDraw<'a> {
+    #[must_use]
+    pub(crate) fn draw(self) -> &'a FrameDraw {
+        self.draw
+    }
+}
+
 impl<'a> DrawPass<'a> {
-    /// The draws of the pass, in drawing order, each with its index.
-    pub(crate) fn draws(&self) -> impl Iterator<Item = (usize, &'a FrameDraw)> + use<'a> {
+    /// The draws of the pass, in drawing order.
+    pub(crate) fn draws(&self) -> impl Iterator<Item = PassDraw<'a>> + use<'a> {
         let pass = self.pass;
-        self.draws.iter().enumerate().filter(move |(_, draw)| draw.pass & pass != RenderPass::None)
+        let draws = self.draws.iter().enumerate();
+        draws
+            .filter(move |(_, draw)| draw.pass & pass != RenderPass::None)
+            .map(|(index, draw)| PassDraw { index, draw })
     }
 
-    /// Draws `objects`, the GPU objects of the draw at `index`, with the
-    /// textures of `atlases` where they sample a tile's atlases.
+    /// Draws `objects`, the GPU objects of `draw`, one of the pass's.
     pub(crate) fn draw(
         &self,
         gpu: &mut dyn Gpu,
         parameters: &PaintParameters<'_>,
-        objects: &mut DrawObjects,
-        index: usize,
-        atlases: Option<&AtlasBinding>,
+        objects: DrawObjectsMut<'_>,
+        draw: PassDraw<'_>,
     ) {
-        let draw = &self.draws[index];
+        let DrawObjectsMut { objects, atlases } = objects;
+        let PassDraw { index, draw } = draw;
         if let Some(atlases) = atlases {
             atlases.bind(objects, parameters);
         }
@@ -820,12 +851,12 @@ impl<P: Copy> LayerDraws<P> {
     pub(crate) fn upload<C: ?Sized>(
         &self,
         caches: &mut C,
-        objects: impl for<'c> Fn(&'c mut C, &FrameDraw, P) -> Option<(&'c mut DrawObjects, Option<&'c AtlasBinding>)>,
+        objects: impl for<'c> Fn(&'c mut C, &FrameDraw, P) -> Option<DrawObjectsMut<'c>>,
         context: &Context,
     ) {
         for (draw, &part) in self.frame.draws.iter().zip(&self.parts) {
-            if let Some((objects, _)) = objects(caches, draw, part) {
-                upload_objects(objects, context);
+            if let Some(objects) = objects(caches, draw, part) {
+                upload_objects(objects.objects, context);
             }
         }
     }
@@ -835,17 +866,17 @@ impl<P: Copy> LayerDraws<P> {
     pub(crate) fn render<C: ?Sized>(
         &self,
         caches: &mut C,
-        objects: impl for<'c> Fn(&'c mut C, &FrameDraw, P) -> Option<(&'c mut DrawObjects, Option<&'c AtlasBinding>)>,
+        objects: impl for<'c> Fn(&'c mut C, &FrameDraw, P) -> Option<DrawObjectsMut<'c>>,
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
     ) {
         let Some(pass) = self.frame.begin(gpu, parameters) else {
             return;
         };
-        for (index, draw) in pass.draws() {
-            match objects(caches, draw, self.parts[index]) {
-                Some((objects, atlases)) => pass.draw(gpu, parameters, objects, index, atlases),
-                None => debug_assert!(false, "a draw of tile {:?} has no GPU objects", draw.tile),
+        for draw in pass.draws() {
+            match objects(caches, draw.draw(), self.parts[draw.index]) {
+                Some(objects) => pass.draw(gpu, parameters, objects, draw),
+                None => debug_assert!(false, "a draw of tile {:?} has no GPU objects", draw.draw().tile),
             }
         }
         pass.end(gpu, parameters);

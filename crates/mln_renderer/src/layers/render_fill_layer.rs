@@ -39,7 +39,9 @@ use crate::draw::{DrawGeometry, DrawObjects, copy_shared_attributes};
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
 use crate::layer_composite::Composite;
-use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, LayerDraws, TileDraws, TileObjects, UniformWriter};
+use crate::layer_drawing::{
+    DrawDepth, DrawList, DrawObjectsMut, FrameDraw, LayerDraws, TileDraws, TileObjects, UniformWriter,
+};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::pattern_layout::{FillLayoutSpec, PatternLayout, uses_pattern};
@@ -152,12 +154,12 @@ pub(crate) enum FillPart {
 impl TileObjects for FillTile {
     type Part = FillPart;
 
-    fn objects(&mut self, part: FillPart) -> Option<(&mut DrawObjects, Option<&AtlasBinding>)> {
+    fn objects(&mut self, part: FillPart) -> Option<DrawObjectsMut<'_>> {
         let draw = match part {
             FillPart::Fill => &mut self.fill,
             FillPart::Outline => &mut self.outline,
         };
-        Some((&mut draw.as_mut()?.objects, self.atlases.as_ref()))
+        Some(DrawObjectsMut { objects: &mut draw.as_mut()?.objects, atlases: self.atlases.as_ref() })
     }
 }
 

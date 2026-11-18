@@ -59,7 +59,7 @@ use crate::frame_projection::zero_to_one_clip_z;
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
 use crate::layer_drawing::{
-    DrawDepth, DrawList, DrawPriority, FrameDraw, LayerDraws, TileDraws, TileObjects, UniformWriter,
+    DrawDepth, DrawList, DrawObjectsMut, DrawPriority, FrameDraw, LayerDraws, TileDraws, TileObjects, UniformWriter,
 };
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
@@ -105,8 +105,8 @@ impl TileObjects for ExtrusionTile {
     /// The index of the draw among the tile's.
     type Part = usize;
 
-    fn objects(&mut self, index: usize) -> Option<(&mut DrawObjects, Option<&AtlasBinding>)> {
-        Some((&mut self.draws.get_mut(index)?.objects, self.atlases.as_ref()))
+    fn objects(&mut self, index: usize) -> Option<DrawObjectsMut<'_>> {
+        Some(DrawObjectsMut { objects: &mut self.draws.get_mut(index)?.objects, atlases: self.atlases.as_ref() })
     }
 }
 

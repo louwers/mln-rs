@@ -33,12 +33,13 @@ use super::{cast_matrix, shared_vertices};
 use crate::bucket::{Bucket, NoBucket};
 use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
-use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
 use crate::gfx::texture2d::Texture2DPtr;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_composite::Composite;
-use crate::layer_drawing::{DrawList, DrawOrder, FrameDraw, FrameDraws, KeptDraw, LayerDrawing, LayerDraws, TileMap};
+use crate::layer_drawing::{
+    DrawList, DrawObjectsMut, DrawOrder, FrameDraw, FrameDraws, KeptDraw, LayerDrawing, LayerDraws, TileMap,
+};
 use crate::layer_type::LayerType;
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
@@ -86,16 +87,12 @@ pub(crate) struct RasterDrawing {
 
 impl RasterDrawing {
     /// The GPU objects of `draw`, `part` of the layer's.
-    fn objects<'a>(
-        objects: &'a mut RasterObjects,
-        draw: &FrameDraw,
-        part: RasterPart,
-    ) -> Option<(&'a mut DrawObjects, Option<&'a AtlasBinding>)> {
+    fn objects<'a>(objects: &'a mut RasterObjects, draw: &FrameDraw, part: RasterPart) -> Option<DrawObjectsMut<'a>> {
         let draw = match part {
             RasterPart::Tile => &mut objects.tiles.get_mut(&draw.tile?)?.draw,
             RasterPart::Image(index) => objects.images.get_mut(index)?,
         };
-        Some((&mut draw.objects, None))
+        Some((&mut draw.objects).into())
     }
 }
 

@@ -48,10 +48,11 @@ use crate::bucket::{Bucket, NoBucket};
 use crate::buckets::hillshade_bucket::{HillshadeBucket, HillshadeLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::geometry::dem_data::get_unpack_vector;
-use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
-use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDraws, SingleDraw, TileDraws, TileObjects};
+use crate::layer_drawing::{
+    DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptDraw, LayerDraws, SingleDraw, TileDraws, TileObjects,
+};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
@@ -102,7 +103,7 @@ pub(crate) struct HillshadeTile {
 impl TileObjects for HillshadeTile {
     type Part = ();
 
-    fn objects(&mut self, (): ()) -> Option<(&mut DrawObjects, Option<&AtlasBinding>)> {
+    fn objects(&mut self, (): ()) -> Option<DrawObjectsMut<'_>> {
         self.draw.objects(())
     }
 }
