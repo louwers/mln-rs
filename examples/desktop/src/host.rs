@@ -28,7 +28,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use mln_frame_pacer::FramePacer;
-use mln_gestures::{Button, Input, Modifiers, PinchPhase, PointerKind, WheelDelta};
+use mln_gestures::{Input, Modes, PinchPhase, PointerKind};
 use mln_map::MapEvent;
 use mln_util::error::Error;
 use mln_util::geo::ScreenCoordinate;
@@ -37,7 +37,7 @@ use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
-use winit::keyboard::{KeyCode, PhysicalKey};
+use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
 use winit::window::{Fullscreen, Window, WindowId};
 
 use crate::Args;
@@ -83,7 +83,7 @@ pub(crate) enum Message {
     Key {
         code: KeyCode,
         pressed: bool,
-        modifiers: Modifiers,
+        modifiers: ModifiersState,
         at: Instant,
     },
     /// The controls' input since the last.
@@ -94,7 +94,6 @@ pub(crate) enum Message {
     ScaleFactorChanged(f64),
     Focused {
         focused: bool,
-        at: Instant,
     },
     /// The window was asked to close.
     Close,
@@ -119,6 +118,8 @@ pub(crate) enum UserEvent {
     RequestSize(LogicalSize<f64>),
     /// What egui asks of the window after a frame: its cursor, a link to open.
     Ui(Box<egui::PlatformOutput>),
+    /// A gesture reached a notch: the trackpad ticks, where it can.
+    Notch,
     /// The render thread has dropped the map and ended.
     Ended,
 }
@@ -207,15 +208,6 @@ impl Inbox {
     }
 }
 
-/// A mouse button's key in `Open::buttons`.
-fn button_key(button: Button) -> u8 {
-    match button {
-        Button::Primary => 0,
-        Button::Secondary => 1,
-        Button::Middle => 2,
-    }
-}
-
 /// Opens the window and runs the app in it until it closes.
 pub(crate) fn run(args: Args, settings: Settings) -> Result<(), winit::error::EventLoopError> {
     let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
@@ -241,9 +233,9 @@ struct Open {
     cursor: ScreenCoordinate,
     cursor_points: egui::Pos2,
     /// The mouse buttons and touches that went down on the map.
-    buttons: BTreeSet<u8>,
+    buttons: BTreeSet<MouseButton>,
     touches: BTreeSet<u32>,
-    modifiers: Modifiers,
+    modifiers: ModifiersState,
     /// Whether the trackpad's pinch and rotation streams are under way:
     /// macOS phases each apart, and the map gets one pinch of both.
     pinching: bool,
@@ -321,9 +313,9 @@ fn egui_over(ctx: &egui::Context, at: egui::Pos2) -> bool {
     crate::ui::over_controls(ctx, at.x, at.y)
 }
 
-/// The recognizer's modifiers for winit's.
-fn modifiers(state: winit::keyboard::ModifiersState) -> Modifiers {
-    Modifiers { shift: state.shift_key(), ctrl: state.control_key(), alt: state.alt_key(), meta: state.super_key() }
+/// What held keys do to drags: Ctrl rotates and tilts, Shift zooms to a box.
+fn key_modes(state: ModifiersState) -> Modes {
+    Modes { rotate: state.control_key(), box_zoom: state.shift_key() }
 }
 
 /// The recognizer's pointer id for a touch: the mouse is 0.
@@ -397,7 +389,7 @@ impl ApplicationHandler<UserEvent> for Host {
             cursor_points: egui::Pos2::ZERO,
             buttons: BTreeSet::new(),
             touches: BTreeSet::new(),
-            modifiers: Modifiers::default(),
+            modifiers: ModifiersState::default(),
             pinching: false,
             rotating: false,
             #[cfg(target_os = "macos")]
@@ -440,8 +432,24 @@ impl ApplicationHandler<UserEvent> for Host {
                 open.pixel_ratio = scale_factor;
                 open.inbox.send(Message::ScaleFactorChanged(scale_factor));
             }
-            WindowEvent::Focused(focused) => open.inbox.send(Message::Focused { focused, at: Instant::now() }),
-            WindowEvent::ModifiersChanged(state) => open.modifiers = modifiers(state.state()),
+            WindowEvent::Focused(focused) => {
+                if !focused {
+                    // Drags and keys the window can't see the end of end here.
+                    if !std::mem::take(&mut open.buttons).is_empty() {
+                        open.input(Input::PointerCancel { id: 0 });
+                    }
+                    for id in std::mem::take(&mut open.touches) {
+                        open.input(Input::PointerCancel { id });
+                    }
+                    open.modifiers = ModifiersState::default();
+                    open.input(Input::Modes(Modes::default()));
+                }
+                open.inbox.send(Message::Focused { focused });
+            }
+            WindowEvent::ModifiersChanged(state) => {
+                open.modifiers = state.state();
+                open.input(Input::Modes(key_modes(open.modifiers)));
+            }
             WindowEvent::KeyboardInput { event, is_synthetic: false, .. } if !response.consumed => {
                 if let PhysicalKey::Code(code) = event.physical_key {
                     open.inbox.send(Message::Key {
@@ -460,44 +468,37 @@ impl ApplicationHandler<UserEvent> for Host {
                     open.input(Input::PointerMove { id: 0, position: open.cursor });
                 }
             }
+            // The left button drags, the right one rotates and tilts, and the
+            // others mean nothing to the map.
             WindowEvent::MouseInput { state, button, .. } => {
-                let button = match button {
-                    MouseButton::Left => Button::Primary,
-                    MouseButton::Right => Button::Secondary,
-                    MouseButton::Middle => Button::Middle,
+                let modes = match button {
+                    MouseButton::Left => Modes::default(),
+                    MouseButton::Right => Modes { rotate: true, box_zoom: false },
                     _ => return,
                 };
                 let position = open.cursor;
                 match state {
                     ElementState::Pressed if !egui_over(open.egui.egui_ctx(), open.cursor_points) => {
-                        open.buttons.insert(button_key(button));
-                        open.input(Input::PointerDown {
-                            id: 0,
-                            kind: PointerKind::Mouse,
-                            button,
-                            position,
-                            modifiers: open.modifiers,
-                        });
+                        open.buttons.insert(button);
+                        open.input(Input::PointerDown { id: 0, kind: PointerKind::Mouse, position, modes });
                     }
-                    ElementState::Released if open.buttons.remove(&button_key(button)) => {
+                    ElementState::Released if open.buttons.remove(&button) => {
                         open.input(Input::PointerUp { id: 0, position });
                     }
                     _ => {}
                 }
             }
-            // winit's positive y scrolls up, which zooms in; the recognizer's
-            // scrolls down. Line deltas are a wheel's notches, pixel deltas a
-            // trackpad's or a precise wheel's scrolling.
+            // winit's positive y scrolls up, which zooms in. Line deltas are a
+            // wheel's detents, a third of a level each, eased; pixel deltas a
+            // trackpad's or a precise wheel's scrolling, 1/300 level a pixel.
             WindowEvent::MouseWheel { delta, .. } => {
-                let delta = match delta {
-                    MouseScrollDelta::LineDelta(_, y) => WheelDelta::Notches(-f64::from(y)),
-                    MouseScrollDelta::PixelDelta(pixels) => WheelDelta::Pixels(-pixels.y / open.pixel_ratio),
+                let (discrete, zoom) = match delta {
+                    MouseScrollDelta::LineDelta(_, y) => (true, f64::from(y) / 3.0),
+                    MouseScrollDelta::PixelDelta(pixels) => (false, pixels.y / open.pixel_ratio / 300.0),
                 };
-                if delta != WheelDelta::Notches(0.0)
-                    && delta != WheelDelta::Pixels(0.0)
-                    && !egui_over(open.egui.egui_ctx(), open.cursor_points)
-                {
-                    open.input(Input::Wheel { position: open.cursor, delta, modifiers: open.modifiers });
+                if zoom != 0.0 && !egui_over(open.egui.egui_ctx(), open.cursor_points) {
+                    let pan = ScreenCoordinate::default();
+                    open.input(Input::Delta { position: open.cursor, discrete, pan, zoom, bearing: 0.0, pitch: 0.0 });
                 }
             }
             WindowEvent::Touch(touch) => {
@@ -506,13 +507,7 @@ impl ApplicationHandler<UserEvent> for Host {
                 let input = match touch.phase {
                     TouchPhase::Started if !open.over_controls(touch.location) => {
                         open.touches.insert(id);
-                        Input::PointerDown {
-                            id,
-                            kind: PointerKind::Touch,
-                            button: Button::Primary,
-                            position,
-                            modifiers: open.modifiers,
-                        }
+                        Input::PointerDown { id, kind: PointerKind::Touch, position, modes: Modes::default() }
                     }
                     TouchPhase::Moved if open.touches.contains(&id) => Input::PointerMove { id, position },
                     TouchPhase::Ended if open.touches.remove(&id) => Input::PointerUp { id, position },
@@ -546,6 +541,21 @@ impl ApplicationHandler<UserEvent> for Host {
                 let _ = reply.send(open.metal_layer());
             }
             UserEvent::SetTitle(title) => open.window.set_title(&title),
+            // A Force Touch trackpad's alignment tick, as AppKit plays when a
+            // dragged item snaps into place; elsewhere nothing to play.
+            #[cfg(target_os = "macos")]
+            UserEvent::Notch => {
+                use objc2_app_kit::{
+                    NSHapticFeedbackManager, NSHapticFeedbackPattern, NSHapticFeedbackPerformanceTime,
+                    NSHapticFeedbackPerformer,
+                };
+                NSHapticFeedbackManager::defaultPerformer().performFeedbackPattern_performanceTime(
+                    NSHapticFeedbackPattern::Alignment,
+                    NSHapticFeedbackPerformanceTime::Now,
+                );
+            }
+            #[cfg(not(target_os = "macos"))]
+            UserEvent::Notch => {}
             UserEvent::Ui(output) => open.egui.handle_platform_output(&open.window, *output),
             UserEvent::RequestSize(size) => {
                 // A size that is applied at once (Wayland) comes back here

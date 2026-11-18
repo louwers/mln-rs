@@ -133,7 +133,7 @@ static const mln_test_validation_case update_cases[] = {
   {"undersized update", update_undersized, MLN_STATUS_INVALID_ARGUMENT,
    "valid size"},
   {"mode out of range", update_bad_mode, MLN_STATUS_INVALID_ARGUMENT,
-   "mode or gesture phase"},
+   "mode is invalid"},
   {"camera without size", camera_without_size, MLN_STATUS_OK, NULL},
   {"unknown camera field", camera_unknown_field, MLN_STATUS_INVALID_ARGUMENT,
    "unknown bits"},
@@ -598,10 +598,7 @@ static void delta_undersized(void* descriptor) {
   ((mln_camera_delta*)descriptor)->size -= 1;
 }
 static void delta_unknown_field(void* descriptor) {
-  ((mln_camera_delta*)descriptor)->fields = MLN_CAMERA_DELTA_MOMENTUM << 1U;
-}
-static void delta_bad_gesture(void* descriptor) {
-  ((mln_camera_delta*)descriptor)->gesture_phase = MLN_GESTURE_PHASE_CANCEL + 1;
+  ((mln_camera_delta*)descriptor)->fields = MLN_CAMERA_DELTA_ANCHOR << 1U;
 }
 static void delta_unselected_garbage(void* descriptor) {
   mln_camera_delta* delta = descriptor;
@@ -639,90 +636,10 @@ static void delta_animated_anchored_pan(void* descriptor) {
   delta->animation.duration_ms = 300.0;
 }
 
-static void delta_momentum_outside_end(void* descriptor) {
-  mln_camera_delta* delta = descriptor;
-  delta->fields = MLN_CAMERA_DELTA_MOMENTUM;
-  delta->gesture_phase = MLN_GESTURE_PHASE_UPDATE;
-}
-static void delta_momentum_with_duration(void* descriptor) {
-  mln_camera_delta* delta = descriptor;
-  delta->fields = MLN_CAMERA_DELTA_MOMENTUM;
-  delta->gesture_phase = MLN_GESTURE_PHASE_END;
-  delta->animation.fields = MLN_ANIMATION_OPTION_DURATION;
-  delta->animation.duration_ms = 300.0;
-}
-// A delta whose momentum's zoom sets `fields`, for the momentum cases.
-static mln_anchored_momentum* zoom_momentum(
-  void* descriptor, mln_anchored_momentum_fields fields
-) {
-  mln_camera_delta* delta = descriptor;
-  delta->fields = MLN_CAMERA_DELTA_MOMENTUM;
-  delta->gesture_phase = MLN_GESTURE_PHASE_END;
-  delta->momentum.zoom.fields = fields;
-  return &delta->momentum.zoom;
-}
-static void delta_momentum_infinite_velocity(void* descriptor) {
-  zoom_momentum(descriptor, MLN_ANCHORED_MOMENTUM_VELOCITY)->velocity =
-    INFINITY;
-}
-static void delta_momentum_negative_option(void* descriptor) {
-  mln_camera_delta* delta = descriptor;
-  delta->fields = MLN_CAMERA_DELTA_MOMENTUM;
-  delta->gesture_phase = MLN_GESTURE_PHASE_END;
-  delta->momentum.pan.fields = MLN_PAN_MOMENTUM_VELOCITY;
-  delta->momentum.pan.friction.fields = MLN_MOMENTUM_FRICTION_MIN_SPEED;
-  delta->momentum.pan.friction.min_speed = -1.0;
-}
-static void delta_momentum_zero_half_life(void* descriptor) {
-  mln_momentum_friction* friction =
-    &zoom_momentum(descriptor, MLN_ANCHORED_MOMENTUM_VELOCITY)->friction;
-  friction->fields = MLN_MOMENTUM_FRICTION_HALF_LIFE_MS;
-  friction->half_life_ms = 0.0;
-}
-static void delta_momentum_velocity_and_delta(void* descriptor) {
-  zoom_momentum(
-    descriptor, MLN_ANCHORED_MOMENTUM_VELOCITY | MLN_ANCHORED_MOMENTUM_DELTA
-  );
-}
-static void delta_momentum_delta_without_duration(void* descriptor) {
-  zoom_momentum(descriptor, MLN_ANCHORED_MOMENTUM_DELTA)->delta = 1.0;
-}
-static void delta_momentum_snap_without_spacing(void* descriptor) {
-  mln_camera_delta* delta = descriptor;
-  delta->fields = MLN_CAMERA_DELTA_MOMENTUM;
-  delta->gesture_phase = MLN_GESTURE_PHASE_END;
-  delta->momentum.bearing.fields = MLN_ANCHORED_MOMENTUM_SNAP;
-  delta->momentum.bearing.snap.fields = MLN_MOMENTUM_SNAP_SPACING;
-  delta->momentum.bearing.snap.spacing = 0.0;
-}
-static void delta_momentum_unselected_garbage(void* descriptor) {
-  mln_camera_delta* delta = descriptor;
-  delta->fields = MLN_CAMERA_DELTA_MOMENTUM;
-  delta->gesture_phase = MLN_GESTURE_PHASE_END;
-  delta->momentum.pan.velocity.x = NAN;
-  delta->momentum.zoom.anchor.y = INFINITY;
-  delta->momentum.zoom.friction.min_speed = -1.0;
-  delta->momentum.bearing.snap.tolerance = -1.0;
-}
-
-static void delta_momentum_overshooting_curve(void* descriptor) {
-  mln_anchored_momentum* zoom = zoom_momentum(
-    descriptor, MLN_ANCHORED_MOMENTUM_DELTA |
-                  MLN_ANCHORED_MOMENTUM_DURATION_MS |
-                  MLN_ANCHORED_MOMENTUM_EASING
-  );
-  zoom->delta = 1.0;
-  zoom->duration_ms = 300.0;
-  zoom->easing =
-    (mln_unit_bezier){.x1 = 1.0 / 3, .y1 = 2.0, .x2 = 2.0 / 3, .y2 = 2.0};
-}
-
 static const mln_test_validation_case delta_cases[] = {
   {"undersized", delta_undersized, MLN_STATUS_INVALID_ARGUMENT, "valid size"},
   {"unknown field", delta_unknown_field, MLN_STATUS_INVALID_ARGUMENT,
    "unknown bits"},
-  {"gesture phase out of range", delta_bad_gesture, MLN_STATUS_INVALID_ARGUMENT,
-   "gesture phase is invalid"},
   {"unselected fields stay unread", delta_unselected_garbage, MLN_STATUS_OK,
    NULL},
   {"infinite offset", delta_infinite_offset, MLN_STATUS_INVALID_ARGUMENT,
@@ -735,26 +652,6 @@ static const mln_test_validation_case delta_cases[] = {
    "requires scale, bearing, or pitch"},
   {"animated anchored pan", delta_animated_anchored_pan,
    MLN_STATUS_INVALID_ARGUMENT, "only in an immediate delta"},
-  {"momentum outside the end phase", delta_momentum_outside_end,
-   MLN_STATUS_INVALID_ARGUMENT, "end phase carries momentum"},
-  {"momentum with a duration", delta_momentum_with_duration,
-   MLN_STATUS_INVALID_ARGUMENT, "sets only the transition ID"},
-  {"infinite momentum velocity", delta_momentum_infinite_velocity,
-   MLN_STATUS_INVALID_ARGUMENT, "velocities must be finite"},
-  {"negative momentum option", delta_momentum_negative_option,
-   MLN_STATUS_INVALID_ARGUMENT, "isn't negative"},
-  {"zero momentum half-life", delta_momentum_zero_half_life,
-   MLN_STATUS_INVALID_ARGUMENT, "positive half-life"},
-  {"velocity and delta", delta_momentum_velocity_and_delta,
-   MLN_STATUS_INVALID_ARGUMENT, "both a velocity and a delta"},
-  {"delta without a duration", delta_momentum_delta_without_duration,
-   MLN_STATUS_INVALID_ARGUMENT, "needs a positive duration"},
-  {"planned curve that overshoots", delta_momentum_overshooting_curve,
-   MLN_STATUS_INVALID_ARGUMENT, "control points are within [0, 1]"},
-  {"snap without a spacing", delta_momentum_snap_without_spacing,
-   MLN_STATUS_INVALID_ARGUMENT, "positive spacing"},
-  {"unselected momentum fields stay unread", delta_momentum_unselected_garbage,
-   MLN_STATUS_OK, NULL},
 };
 
 static mln_camera_options finish_camera_query(mln_test_completion* query) {

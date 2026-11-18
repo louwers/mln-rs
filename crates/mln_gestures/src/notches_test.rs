@@ -135,15 +135,7 @@ fn zoom_and_pitch_report_their_notches_without_wrapping() {
 }
 
 #[test]
-fn invalid_notches_report_nothing_and_tiny_spacings_stay_bounded() {
-    let invalid = [
-        Notch { spacing: 0.0, offset: 0.0, kind: 1 },
-        Notch { spacing: f64::NAN, offset: 0.0, kind: 1 },
-        Notch { spacing: 1.0, offset: f64::INFINITY, kind: 1 },
-    ];
-    let mut probe = Probe::new(Axis::Zoom, &invalid, 1.5);
-    assert_eq!(probe.to(5.5, 0.0), None);
-
+fn tiny_spacings_stay_bounded() {
     // A tiny spacing checks a bounded number of notches per sample, so a
     // long move returns promptly.
     let mut probe = Probe::new(Axis::Zoom, &[Notch { spacing: 1e-12, offset: 0.0, kind: 1 }], 0.5);

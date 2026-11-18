@@ -691,88 +691,6 @@ static void cancel_camera_transitions_with_id_ends_only_its_identity(void) {
   mln_test_destroy_runtime(runtime);
 }
 
-static void gesture_phase_publishes_the_snapshot_flag(void) {
-  mln_runtime runtime = mln_test_create_runtime();
-  mln_map map = mln_test_create_map(runtime);
-  TEST_ASSERT_FALSE(read_settled_snapshot(runtime, map).gesture_in_progress);
-
-  mln_camera_update update = {
-    .size = sizeof(mln_camera_update),
-    .camera = {.size = sizeof(mln_camera_options)}
-  };
-  update.camera = test_camera();
-  update.gesture_phase = MLN_GESTURE_PHASE_BEGIN;
-  update_camera(map, &update);
-  TEST_ASSERT_TRUE(read_settled_snapshot(runtime, map).gesture_in_progress);
-
-  update.gesture_phase = MLN_GESTURE_PHASE_UPDATE;
-  update.camera.zoom = 12.0;
-  update_camera(map, &update);
-  TEST_ASSERT_TRUE(read_settled_snapshot(runtime, map).gesture_in_progress);
-
-  update.gesture_phase = MLN_GESTURE_PHASE_END;
-  update_camera(map, &update);
-  mln_map_snapshot snapshot = read_settled_snapshot(runtime, map);
-  TEST_ASSERT_FALSE(snapshot.gesture_in_progress);
-  TEST_ASSERT_EQUAL_DOUBLE(12.0, snapshot.view.camera.zoom);
-
-  mln_test_destroy_map(map);
-  mln_test_destroy_runtime(runtime);
-}
-
-// A gesture that starts with UPDATE keeps a running animation of other fields,
-// BEGIN cancels it before its own change, and CANCEL cancels animations that
-// started during the gesture.
-static void a_gesture_begin_cancels_running_transitions(void) {
-  mln_runtime runtime = mln_test_create_runtime();
-  mln_map map = mln_test_create_map(runtime);
-  mln_camera_update update = {
-    .size = sizeof(mln_camera_update),
-    .camera = {.size = sizeof(mln_camera_options)}
-  };
-  update.camera = test_camera();
-  update_camera(map, &update);
-
-  mln_test_transition_end kept;
-  mln_test_transition_end_init(&kept);
-  const mln_camera_update eased = ease_to_zoom(3.0, 60000.0, &kept);
-  update_camera(map, &eased);
-  mln_camera_update gesture = {
-    .size = sizeof(mln_camera_update),
-    .camera = {.size = sizeof(mln_camera_options)}
-  };
-  gesture.camera.fields = MLN_CAMERA_OPTION_BEARING;
-  gesture.camera.bearing = 20.0;
-  gesture.gesture_phase = MLN_GESTURE_PHASE_UPDATE;
-  update_camera(map, &gesture);
-  mln_map_snapshot snapshot = read_settled_snapshot(runtime, map);
-  TEST_ASSERT_TRUE(snapshot.gesture_in_progress);
-  TEST_ASSERT_TRUE(snapshot.transition_in_progress);
-  TEST_ASSERT_DOUBLE_WITHIN(1e-9, 20.0, snapshot.view.camera.bearing);
-  TEST_ASSERT_EQUAL_INT(0, atomic_load(&kept.calls));
-
-  gesture.camera.bearing = 30.0;
-  gesture.gesture_phase = MLN_GESTURE_PHASE_BEGIN;
-  update_camera(map, &gesture);
-  assert_ended(&kept, MLN_CAMERA_TRANSITION_OUTCOME_CANCELLED, "begin");
-  snapshot = read_settled_snapshot(runtime, map);
-  TEST_ASSERT_TRUE(snapshot.gesture_in_progress);
-  TEST_ASSERT_FALSE(snapshot.transition_in_progress);
-  TEST_ASSERT_DOUBLE_WITHIN(1e-9, 30.0, snapshot.view.camera.bearing);
-
-  mln_test_transition_end started;
-  mln_test_transition_end_init(&started);
-  const mln_camera_update during = ease_to_zoom(3.0, 60000.0, &started);
-  update_camera(map, &during);
-  gesture.gesture_phase = MLN_GESTURE_PHASE_CANCEL;
-  update_camera(map, &gesture);
-  TEST_ASSERT_FALSE(read_settled_snapshot(runtime, map).gesture_in_progress);
-  assert_ended(&started, MLN_CAMERA_TRANSITION_OUTCOME_CANCELLED, "cancel");
-
-  mln_test_destroy_map(map);
-  mln_test_destroy_runtime(runtime);
-}
-
 static mln_camera_delta animated_delta(
   uint32_t fields, double duration_ms, mln_test_transition_end* probe
 ) {
@@ -881,64 +799,6 @@ static void an_animated_delta_replaces_the_running_one(void) {
   );
 
   mln_test_render_fixture_destroy(&fixture);
-  mln_test_destroy_map(map);
-  mln_test_destroy_runtime(runtime);
-}
-
-// A delta without components runs its handler before its completion, as a
-// release without inertia needs.
-static void a_delta_carries_its_gesture_phase(void) {
-  mln_runtime runtime = mln_test_create_runtime();
-  mln_map map = mln_test_create_map(runtime);
-  mln_camera_update update = {
-    .size = sizeof(mln_camera_update),
-    .camera = {.size = sizeof(mln_camera_options)}
-  };
-  update.camera = test_camera();
-  update_camera(map, &update);
-  mln_test_transition_end running;
-  mln_test_transition_end_init(&running);
-  mln_camera_update pitch = {
-    .size = sizeof(mln_camera_update),
-    .camera = {.size = sizeof(mln_camera_options)}
-  };
-  pitch.mode = MLN_CAMERA_UPDATE_MODE_EASE;
-  pitch.camera.fields = MLN_CAMERA_OPTION_PITCH;
-  pitch.camera.pitch = 50.0;
-  pitch.animation.fields = MLN_ANIMATION_OPTION_DURATION;
-  pitch.animation.duration_ms = 60000.0;
-  pitch.animation.end_handler = mln_test_transition_end_handler(&running);
-  update_camera(map, &pitch);
-
-  mln_camera_delta delta = {.size = sizeof(mln_camera_delta)};
-  delta.gesture_phase = MLN_GESTURE_PHASE_BEGIN;
-  apply_delta(map, &delta);
-  assert_ended(&running, MLN_CAMERA_TRANSITION_OUTCOME_CANCELLED, "begin");
-  mln_map_snapshot snapshot = read_settled_snapshot(runtime, map);
-  TEST_ASSERT_TRUE(snapshot.gesture_in_progress);
-  TEST_ASSERT_FALSE(snapshot.transition_in_progress);
-  TEST_ASSERT_EQUAL_DOUBLE(11.0, snapshot.view.camera.zoom);
-
-  delta.fields = MLN_CAMERA_DELTA_SCALE;
-  delta.scale = 2.0;
-  delta.gesture_phase = MLN_GESTURE_PHASE_UPDATE;
-  apply_delta(map, &delta);
-  snapshot = read_settled_snapshot(runtime, map);
-  TEST_ASSERT_TRUE(snapshot.gesture_in_progress);
-  TEST_ASSERT_EQUAL_DOUBLE(12.0, snapshot.view.camera.zoom);
-
-  mln_test_transition_end probe;
-  mln_test_transition_end_init(&probe);
-  delta = (mln_camera_delta){.size = sizeof(mln_camera_delta)};
-  delta.animation.end_handler = mln_test_transition_end_handler(&probe);
-  delta.gesture_phase = MLN_GESTURE_PHASE_END;
-  apply_delta(map, &delta);
-  TEST_ASSERT_EQUAL_INT(1, atomic_load(&probe.calls));
-  assert_ended(&probe, MLN_CAMERA_TRANSITION_OUTCOME_COMPLETED, "release");
-  snapshot = read_settled_snapshot(runtime, map);
-  TEST_ASSERT_FALSE(snapshot.gesture_in_progress);
-  TEST_ASSERT_EQUAL_DOUBLE(12.0, snapshot.view.camera.zoom);
-
   mln_test_destroy_map(map);
   mln_test_destroy_runtime(runtime);
 }
@@ -1062,7 +922,7 @@ static void a_rejected_command_runs_no_handler(void) {
   mln_completion rejected = mln_test_discard_completion();
 
   mln_camera_update update = ease_to_zoom(4.0, 60000.0, &probe);
-  update.gesture_phase = MLN_GESTURE_PHASE_CANCEL + 1;
+  update.mode = MLN_CAMERA_UPDATE_MODE_FLY + 1;
   MLN_TEST_INVALID(mln_map_update_camera(map, &update, &rejected, NULL));
   mln_camera_delta delta = animated_delta(MLN_CAMERA_DELTA_SCALE, 10.0, &probe);
   delta.scale = -1.0;
@@ -1177,11 +1037,8 @@ MLN_TEST_GROUP {
   RUN_TEST(free_camera_options_and_a_constraining_resize_cancel);
   RUN_TEST(cancel_camera_transitions_commits_and_leaves_the_camera);
   RUN_TEST(cancel_camera_transitions_with_id_ends_only_its_identity);
-  RUN_TEST(gesture_phase_publishes_the_snapshot_flag);
-  RUN_TEST(a_gesture_begin_cancels_running_transitions);
   RUN_TEST(an_animated_delta_reports_its_end_once);
   RUN_TEST(an_animated_delta_replaces_the_running_one);
-  RUN_TEST(a_delta_carries_its_gesture_phase);
   RUN_TEST(a_map_release_or_dispose_ends_running_transitions);
   RUN_TEST(a_handler_may_submit_a_command);
   RUN_TEST(a_rejected_command_runs_no_handler);

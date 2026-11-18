@@ -456,6 +456,7 @@ async function run({
   let lastDrawn: number | null = null;
   function drawFrame(time: number) {
     const drew = map.frame(performance.now());
+    if (map.take_notch()) post({ type: "notch" });
     if (drew) {
       if (debug && lastDrawn !== null) {
         post({
@@ -579,6 +580,7 @@ async function run({
             box = next;
             post({ type: "box", box });
           }
+          if (map.take_notch()) post({ type: "notch" });
           break;
         }
         case "debug":
@@ -644,6 +646,9 @@ function applyInput(map: WebMap, input: Input) {
       break;
     case "key":
       map.key(input.key, input.modifiers, time);
+      break;
+    case "modifiers":
+      map.modifiers(input.modifiers, time);
       break;
     case "blur":
       map.blur(time);

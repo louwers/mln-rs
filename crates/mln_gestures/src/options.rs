@@ -1,17 +1,15 @@
-//! The recognizer's rates, thresholds, and how gestures move each part of
-//! the camera.
+//! How gestures move each part of the camera, and the recognizer's rates and
+//! thresholds.
 
-use mln_map::{MomentumFriction, MomentumSnap};
+use mln_map::{InvalidMomentum, MomentumDecay, MomentumSnap};
 
 /// Values every `spacing` from `offset`, in the part's unit, that report a
 /// [`GestureEvent::Notch`](crate::GestureEvent::Notch) as a gesture moves the
 /// part to or across one, for the host to play as haptic feedback. Bearing
-/// notches wrap around the circle.
-///
-/// The recognizer ignores a notch unless its spacing is positive and finite
-/// and its offset is finite.
+/// notches lie within one turn from the offset.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Notch {
+    /// Positive.
     pub spacing: f64,
     pub offset: f64,
     /// The host's name for the feedback, such as which haptic to play, which
@@ -20,19 +18,18 @@ pub struct Notch {
 }
 
 impl Notch {
-    /// North, as MapLibre Compose ticks by default.
+    /// North.
     pub const NORTH: Notch = Notch { spacing: 360.0, offset: 0.0, kind: 0 };
 }
 
 /// How gestures move the map's content.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PanOptions {
-    /// Whether gestures pan: drags, two fingers moving together, and the
-    /// arrow keys.
+    /// Whether gestures pan: drags, two fingers moving together, and deltas.
     pub enabled: bool,
-    /// How a release's glide slows; without it, the pan stops where the
-    /// gesture leaves it.
-    pub momentum: Option<MomentumFriction>,
+    /// How a release glides; without it, the pan stops where the gesture
+    /// leaves it.
+    pub momentum: Option<MomentumDecay>,
 }
 
 /// How gestures move the zoom, the bearing or the pitch.
@@ -40,9 +37,9 @@ pub struct PanOptions {
 pub struct AxisOptions {
     /// Whether gestures move the part.
     pub enabled: bool,
-    /// How a release's glide slows; without it, the part stops where the
-    /// gesture leaves it.
-    pub momentum: Option<MomentumFriction>,
+    /// How a release glides; without it, the part stops where the gesture
+    /// leaves it.
+    pub momentum: Option<MomentumDecay>,
     /// Where the part settles once its glide ends, after a gesture that
     /// changed it.
     pub snap: Option<MomentumSnap>,
@@ -63,29 +60,36 @@ pub enum Axis {
     Pitch,
 }
 
-/// How the recognizer turns input into camera moves. The defaults are
-/// maplibre-native-ffi's browser demo's rates where it has the gesture, GL
-/// JS's handlers' rates and thresholds where it doesn't, and MapLibre
-/// Compose's momentum, snaps and notches. The crate's README compares each
-/// with ffi, Orbis, Compose and GL JS.
+/// Why [`GestureOptions`] are out of range.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum InvalidGestureOptions {
+    #[error("the momentum of {0}: {1}")]
+    Momentum(&'static str, InvalidMomentum),
+    #[error("the snap of {0}: {1}")]
+    Snap(&'static str, InvalidMomentum),
+    #[error("a notch of {0} needs a positive spacing and a finite offset")]
+    Notch(&'static str),
+}
+
+/// How the recognizer moves each part of the camera. By default every part
+/// moves and glides with its default decay ([`MomentumDecay::PAN`] and the
+/// rest); the bearing settles on north within 7° and notches there; zoom and
+/// pitch stay where gestures leave them, without notches
+/// ([`MomentumSnap::ZOOM`] and [`MomentumSnap::PITCH`] settle them on a whole
+/// level and flat).
 ///
-/// Distances are in logical pixels, and times in milliseconds (`_ms`).
+/// The recognizer's rates and thresholds come from maplibre-native-ffi's
+/// browser demo where it has the gesture and GL JS's handlers elsewhere; the
+/// crate's README compares each. Distances are in logical pixels, and times
+/// in milliseconds (`_ms`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct GestureOptions {
-    /// Each part of the camera: the C API's default friction; the bearing
-    /// settles on north within 7° and notches there; zoom and pitch stay
-    /// where gestures leave them, without notches
-    /// ([`MomentumSnap::ZOOM`] and [`MomentumSnap::PITCH`] settle them on a
-    /// whole level and flat).
     pub pan: PanOptions,
     pub zoom: AxisOptions,
     pub bearing: AxisOptions,
     pub pitch: AxisOptions,
-    /// Whether a wheel or trackpad scroll zooms. Off, the recognizer leaves
-    /// scrolls unhandled.
-    pub scroll_zoom: bool,
 
-    /// How far a press may move and still be a click; drags start past it.
+    /// How far a press may move and still be a tap; drags start past it.
     pub(crate) click_tolerance: f64,
     /// How far apart two taps of a double tap may be, and the most time
     /// between them. A two-finger tap's fingers may move this far.
@@ -103,33 +107,20 @@ pub struct GestureOptions {
     pub(crate) pinch_zoom_threshold: f64,
     /// Pixels along the fingers' circle a twist travels before it rotates.
     pub(crate) rotate_threshold: f64,
-    /// Zoom levels per wheel notch, toward the user zooming in, and how long
-    /// a notch eases: ffi's demo's and Compose's 100 px at 1/300 per px (⅓),
-    /// over GL JS's 200 ms. Provisional: unlike glides, no one has measured
-    /// the native map apps' notches yet (see the README).
-    pub(crate) notch_zoom: f64,
-    pub(crate) notch_duration_ms: f64,
-    /// Zoom levels per pixel of continuous scroll, toward the user zooming
-    /// in: ffi's demo's and Compose's 1/300. Provisional, as `notch_zoom`.
-    pub(crate) scroll_zoom_rate: f64,
-    /// The same with Ctrl held, as a browser's trackpad pinch sends: ffi's
-    /// demo's 1/100.
-    pub(crate) pinch_zoom_rate: f64,
-    /// The most a scroll zooms in one step, in levels: GL JS's
-    /// `maxScalePerFrame` of 2. A notch carries the rest to later frames.
-    pub(crate) max_scroll_zoom: f64,
-    /// A scroll is one gesture until this long after its last event and its
-    /// eases (Compose's and GL JS's 200 ms).
-    pub(crate) scroll_idle_ms: f64,
-    /// Keyboard steps: pixels of pan, degrees of bearing, degrees of pitch.
-    pub(crate) key_pan: f64,
-    pub(crate) key_bearing: f64,
-    pub(crate) key_pitch: f64,
+    /// How long a discrete delta eases (GL JS's wheel's 200 ms).
+    pub(crate) step_duration_ms: f64,
+    /// The most a delta zooms in one step, in levels: GL JS's
+    /// `maxScalePerFrame` of 2. A discrete delta carries the rest to later
+    /// frames.
+    pub(crate) max_step_zoom: f64,
+    /// Deltas are one gesture until this long after their last input and
+    /// ease (Compose's and GL JS's 200 ms for scrolls).
+    pub(crate) delta_idle_ms: f64,
 
     /// Whether a release that catches the recognizer's last glide (a flick
     /// that interrupts a glide going its way) adds that glide's speed, as
     /// `UIScrollView`, Android's scroll flywheel and Compose do. Each part's
-    /// friction still caps the speed. No map app measured in
+    /// decay still caps the speed. No map app measured in
     /// maplibre-native-ffi#1705 does it (Apple Maps, Google Maps), nor do GL
     /// JS and ffi's demo.
     pub(crate) carry_caught_glide: bool,
@@ -142,7 +133,7 @@ pub struct GestureOptions {
 }
 
 impl GestureOptions {
-    /// How far a press may move and still be a click, in logical pixels.
+    /// How far a press may move and still be a tap, in logical pixels.
     #[must_use]
     pub fn click_tolerance(&self) -> f64 {
         self.click_tolerance
@@ -157,22 +148,41 @@ impl GestureOptions {
             Axis::Pitch => &self.pitch,
         }
     }
+
+    /// Checks every part's momentum, snap and notches.
+    pub fn validate(&self) -> Result<(), InvalidGestureOptions> {
+        let momentum = |name, momentum: Option<MomentumDecay>| {
+            momentum
+                .map_or(Ok(()), |decay| decay.validate().map_err(|error| InvalidGestureOptions::Momentum(name, error)))
+        };
+        momentum("pan", self.pan.momentum)?;
+        for (name, part) in [("zoom", &self.zoom), ("bearing", &self.bearing), ("pitch", &self.pitch)] {
+            momentum(name, part.momentum)?;
+            if let Some(snap) = part.snap {
+                snap.validate().map_err(|error| InvalidGestureOptions::Snap(name, error))?;
+            }
+            let valid = |notch: &Notch| notch.spacing.is_finite() && notch.spacing > 0.0 && notch.offset.is_finite();
+            if !part.notches.iter().all(valid) {
+                return Err(InvalidGestureOptions::Notch(name));
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Default for GestureOptions {
     fn default() -> Self {
-        let axis = |momentum: MomentumFriction, snap: Option<MomentumSnap>, notches: Vec<Notch>| AxisOptions {
+        let axis = |momentum: MomentumDecay, snap: Option<MomentumSnap>, notches: Vec<Notch>| AxisOptions {
             enabled: true,
             momentum: Some(momentum),
             snap,
             notches,
         };
         GestureOptions {
-            pan: PanOptions { enabled: true, momentum: Some(MomentumFriction::PAN) },
-            zoom: axis(MomentumFriction::ZOOM, None, Vec::new()),
-            bearing: axis(MomentumFriction::BEARING, Some(MomentumSnap::BEARING), vec![Notch::NORTH]),
-            pitch: axis(MomentumFriction::PITCH, None, Vec::new()),
-            scroll_zoom: true,
+            pan: PanOptions { enabled: true, momentum: Some(MomentumDecay::PAN) },
+            zoom: axis(MomentumDecay::ZOOM, None, Vec::new()),
+            bearing: axis(MomentumDecay::BEARING, Some(MomentumSnap::BEARING), vec![Notch::NORTH]),
+            pitch: axis(MomentumDecay::PITCH, None, Vec::new()),
             click_tolerance: 3.0,
             tap_tolerance: 30.0,
             tap_interval_ms: 500.0,
@@ -181,15 +191,9 @@ impl Default for GestureOptions {
             tap_drag_zoom: 1.0 / 128.0,
             pinch_zoom_threshold: 0.1,
             rotate_threshold: 25.0,
-            notch_zoom: 1.0 / 3.0,
-            notch_duration_ms: 200.0,
-            scroll_zoom_rate: 1.0 / 300.0,
-            pinch_zoom_rate: 1.0 / 100.0,
-            max_scroll_zoom: 1.0,
-            scroll_idle_ms: 200.0,
-            key_pan: 100.0,
-            key_bearing: 15.0,
-            key_pitch: 10.0,
+            step_duration_ms: 200.0,
+            max_step_zoom: 1.0,
+            delta_idle_ms: 200.0,
             carry_caught_glide: true,
             interrupt_animations: true,
             // "gestures" in ASCII.

@@ -259,9 +259,9 @@ typedef enum mln_camera_change_source : uint32_t {
    * keeps the camera within its bounds.
    */
   MLN_CAMERA_CHANGE_SOURCE_COMMAND = 0,
-  /** A camera command with a gesture phase. */
+  /** A gesture that a gesture recognizer recognized. */
   MLN_CAMERA_CHANGE_SOURCE_GESTURE = 1,
-  /** The momentum and bearing snap that a gesture's end started. */
+  /** The glide and snap after a gesture recognizer's gesture. */
   MLN_CAMERA_CHANGE_SOURCE_MOMENTUM = 2,
 } mln_camera_change_source;
 

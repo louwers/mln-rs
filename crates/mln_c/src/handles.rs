@@ -44,10 +44,11 @@ pub(crate) enum HandleKind {
     DeliveryQueue = 23,
     StyleExpression = 25,
     GpuDevice = 26,
+    GestureRecognizer = 27,
 }
 
 impl HandleKind {
-    const ALL: [Self; 11] = [
+    const ALL: [Self; 12] = [
         Self::Runtime,
         Self::Map,
         Self::MapProjection,
@@ -59,6 +60,7 @@ impl HandleKind {
         Self::DeliveryQueue,
         Self::StyleExpression,
         Self::GpuDevice,
+        Self::GestureRecognizer,
     ];
 
     pub(crate) fn of(handle: u64) -> Option<Self> {
@@ -80,6 +82,7 @@ impl HandleKind {
             Self::DeliveryQueue => "mln_delivery_queue",
             Self::StyleExpression => "mln_style_expression",
             Self::GpuDevice => "mln_gpu_device",
+            Self::GestureRecognizer => "mln_gesture_recognizer",
         }
     }
 }

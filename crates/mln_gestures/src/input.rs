@@ -1,10 +1,18 @@
 //! What hosts feed the recognizer, and the gestures it reports back.
+//!
+//! Hosts translate each platform event on its own, with no memory: which
+//! buttons and keys mean which [`Modes`], and how far a wheel, dial or key
+//! moves the camera ([`Input::Delta`]). The recognizer interprets them over
+//! time.
+
+use std::ops::BitOr;
 
 use mln_util::geo::ScreenCoordinate;
 
 use crate::options::Axis;
 
-/// What kind of device a pointer is.
+/// What kind of device a pointer is. Touches pinch, twist and tilt with two
+/// fingers, and a held second tap zooms as it drags.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PointerKind {
     Mouse,
@@ -12,64 +20,39 @@ pub enum PointerKind {
     Pen,
 }
 
-/// The pointer button that went down. Touches and pens are `Primary`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Button {
-    Primary,
-    Secondary,
-    Middle,
-}
-
-/// The modifier keys held with an input.
+/// What a one-pointer drag does instead of panning, from the pointer's held
+/// buttons (a mouse's secondary button rotates on most platforms) or from
+/// held keys ([`Input::Modes`]). A drag reads the modes when it starts and
+/// keeps them until it ends; rotating wins over a box zoom.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct Modifiers {
-    pub shift: bool,
-    pub ctrl: bool,
-    pub alt: bool,
-    pub meta: bool,
+pub struct Modes {
+    /// Sideways turns the map and up and down tilts it.
+    pub rotate: bool,
+    /// Draws a box that the map zooms to when the pointer lifts.
+    pub box_zoom: bool,
 }
 
-/// The keys the map responds to; hosts map platform key codes to them.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Key {
-    Left,
-    Right,
-    Up,
-    Down,
-    /// `+` or `=`.
-    ZoomIn,
-    /// `-`.
-    ZoomOut,
-    /// Cancels a box zoom.
-    Escape,
-}
+impl BitOr for Modes {
+    type Output = Modes;
 
-/// How far a scroll went, as its host classifies it. Positive scrolls down,
-/// as the DOM's `deltaY` does, which zooms out.
-///
-/// The host knows best which device scrolled (macOS's
-/// `hasPreciseScrollingDeltas`, the DOM's `deltaMode`, the platform's wheel
-/// units), so the recognizer doesn't guess from the deltas' sizes and timing,
-/// which GL JS does and which read a slow trackpad start as a wheel.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum WheelDelta {
-    /// Detents of a mouse wheel, fractional for high-resolution wheels: each
-    /// zooms by a fixed amount, eased.
-    Notches(f64),
-    /// Continuous scrolling, as trackpads and precise wheels send, in logical
-    /// pixels: zooms at once, as the platform already smoothed it.
-    Pixels(f64),
+    fn bitor(self, other: Modes) -> Modes {
+        Modes { rotate: self.rotate || other.rotate, box_zoom: self.box_zoom || other.box_zoom }
+    }
 }
 
 /// One input, in logical pixels from the viewport's top-left corner.
+///
+/// When the view loses focus, hosts cancel the pointers they sent and send
+/// empty modes.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Input {
+    /// A pointer whose buttons the host maps to `modes`. Hosts send no
+    /// pointer whose buttons mean nothing, such as a mouse's middle button.
     PointerDown {
         id: u32,
         kind: PointerKind,
-        button: Button,
         position: ScreenCoordinate,
-        modifiers: Modifiers,
+        modes: Modes,
     },
     PointerMove {
         id: u32,
@@ -79,36 +62,43 @@ pub enum Input {
         id: u32,
         position: ScreenCoordinate,
     },
-    /// The platform took the pointer away (a system gesture, lost capture):
-    /// no click and no momentum.
+    /// The platform or the host took the pointer away (a system gesture,
+    /// lost capture, Escape during a box zoom): no tap and no momentum.
     PointerCancel {
         id: u32,
     },
-    /// A scroll at `position`. With Ctrl, which browsers add to a trackpad
-    /// pinch, pixels zoom at the pinch rate.
-    Wheel {
+    /// The modes that held keys select, for every pointer.
+    Modes(Modes),
+    /// Camera movement from anything but a pointer (a wheel, a trackpad
+    /// scroll, a dial, a crown, keys, buttons), which the host converts into
+    /// camera units: `pan` moves the map's content on screen in logical
+    /// pixels, `zoom` adds levels, `bearing` turns clockwise in degrees, and
+    /// `pitch` tilts in degrees. Zoom and turns hold `position` in place.
+    ///
+    /// A continuous delta (a trackpad scroll) applies at once. A discrete one
+    /// (a wheel detent, a key press) eases, and a quick run of them merges
+    /// into one ease that speeds up. Deltas are one gesture until they idle.
+    Delta {
         position: ScreenCoordinate,
-        delta: WheelDelta,
-        modifiers: Modifiers,
-    },
-    Key {
-        key: Key,
-        modifiers: Modifiers,
+        discrete: bool,
+        pan: ScreenCoordinate,
+        zoom: f64,
+        bearing: f64,
+        pitch: f64,
     },
     /// A pinch the platform recognized, such as a macOS trackpad's magnify
-    /// and rotate: each update zooms by `scale` (above 1 spreads the
-    /// fingers, zooming in) and turns `rotation` degrees clockwise on screen
-    /// since the last, around `center`. It glides on when it ends, as a touch
-    /// pinch does. An update without a begin begins; pointers already down
-    /// keep the map, and a touch that goes down takes over from the pinch.
+    /// and rotate or a browser's Ctrl+wheel: each update zooms by `scale`
+    /// (above 1 spreads the fingers, zooming in) and turns `rotation` degrees
+    /// clockwise on screen since the last, around `center`. It glides on when
+    /// it ends, as a touch pinch does. An update without a begin begins;
+    /// pointers already down keep the map, and a touch that goes down takes
+    /// over from the pinch.
     Pinch {
         center: ScreenCoordinate,
         scale: f64,
         rotation: f64,
         phase: PinchPhase,
     },
-    /// The view lost focus: every pointer is released.
-    Blur,
 }
 
 /// Where a platform-recognized pinch is.
@@ -123,18 +113,21 @@ pub enum PinchPhase {
     Cancel,
 }
 
-/// What a gesture means beyond moving the camera.
+/// What a gesture means beyond moving the camera. The recognizer doesn't
+/// zoom on taps: hosts answer them, such as a double tap with a discrete
+/// [`Input::Delta`] that zooms in.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum GestureEvent {
-    /// A press and release that didn't move the map: a click or a tap.
-    Click { position: ScreenCoordinate, button: Button },
-    /// The second click or tap of a double click or double tap.
-    DoubleClick { position: ScreenCoordinate },
+    /// The pointer `id` pressed and lifted without moving the map.
+    Tap { id: u32, position: ScreenCoordinate },
+    /// The second tap of a double tap, by pointer `id`.
+    DoubleTap { id: u32, position: ScreenCoordinate },
+    /// Two fingers tapped together, around `position`.
+    TwoFingerTap { position: ScreenCoordinate },
     /// A gesture, its glide or its snap moved `axis` to or across the
     /// [`Notch`](crate::Notch) of `kind` at `value`, in the axis's unit, a
     /// bearing in [0°, 360°): the host plays its feedback. A gesture that
     /// starts at a notch reports it only once it leaves and comes back, an
-    /// axis reports at most one notch every 50 ms, and keys, double taps and
-    /// box zooms report none unless they step within a gesture under way.
+    /// axis reports at most one notch every 50 ms, and box zooms report none.
     Notch { axis: Axis, value: f64, kind: u32 },
 }

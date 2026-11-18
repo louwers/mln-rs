@@ -41,7 +41,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use mln_frame_pacer::{FramePacer, RefreshWaiter};
-use mln_gestures::{Button, GestureRecognizer, Input, Key, Modifiers, PinchPhase, PointerKind, WheelDelta};
+use mln_gestures::{GestureEvent, GestureRecognizer, Input, Modes, PinchPhase, PointerKind};
 use mln_map::{
     AnimationOptions, BoundOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, MapDebugOptions,
     MapEvent, RenderMode,
@@ -58,7 +58,7 @@ use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event_loop::EventLoopProxy;
-use winit::keyboard::KeyCode;
+use winit::keyboard::{KeyCode, ModifiersState};
 
 use crate::Args;
 use crate::backend::{self, Kind, WindowSession, WindowSurfaces};
@@ -257,6 +257,7 @@ pub(crate) fn run(launch: Launch) {
         idle: false,
         gestures: GestureRecognizer::default(),
         gestures_animating: false,
+        box_zoom: None,
         ui,
         controls: Controls::default(),
         ui_input: None,
@@ -395,6 +396,8 @@ struct View {
     gestures: GestureRecognizer,
     /// The recognizer eases a scroll, and wants frames.
     gestures_animating: bool,
+    /// The box a box-zoom drag draws, which the controls show.
+    box_zoom: Option<[ScreenCoordinate; 2]>,
 
     ui: egui::Context,
     controls: Controls,
@@ -588,6 +591,7 @@ impl View {
         let now = Instant::now();
         let ms = self.ms(now);
         self.gestures_animating = self.gestures.frame(&mut self.map, ms);
+        self.answer_events(ms);
 
         self.redraw |= self.inbox.take_redraw();
         let controls_due =
@@ -643,13 +647,9 @@ impl View {
             },
             Message::Resized(size) => self.on_resize(size),
             Message::ScaleFactorChanged(pixel_ratio) => self.on_scale_factor_changed(pixel_ratio),
-            Message::Focused { focused, at } => {
-                if !focused {
-                    // A drag the window can't see the end of ends here.
-                    self.gesture(Input::Blur, at);
-                    if let Some(window) = &self.window {
-                        log_failure(window.session().reduce_memory_use());
-                    }
+            Message::Focused { focused } => {
+                if !focused && let Some(window) = &self.window {
+                    log_failure(window.session().reduce_memory_use());
                 }
             }
             Message::Close => self.quit = true,
@@ -667,12 +667,34 @@ impl View {
         }
     }
 
-    /// Feeds one input to the gesture recognizer.
+    /// Feeds one input to the gesture recognizer, answers its events, and
+    /// draws the controls again when a box zoom's box moved.
     fn gesture(&mut self, input: Input, at: Instant) {
-        let at = self.ms(at);
-        self.gestures.handle(&mut self.map, input, at);
-        // The app has no use for clicks.
-        self.gestures.take_events();
+        let ms = self.ms(at);
+        self.gestures.handle(&mut self.map, input, ms);
+        self.answer_events(ms);
+        let box_zoom = self.gestures.box_zoom();
+        if box_zoom != self.box_zoom {
+            self.box_zoom = box_zoom;
+            self.ui_repaint_at = Some(Instant::now());
+        }
+    }
+
+    /// Answers the recognizer's events: a double tap zooms in a level and a
+    /// two-finger tap out, where they were, and a notch ticks the trackpad.
+    fn answer_events(&mut self, ms: f64) {
+        for event in self.gestures.take_events() {
+            let (position, zoom) = match event {
+                GestureEvent::DoubleTap { position, .. } => (position, 1.0),
+                GestureEvent::TwoFingerTap { position } => (position, -1.0),
+                GestureEvent::Notch { .. } => {
+                    let _ = self.proxy.send_event(UserEvent::Notch);
+                    continue;
+                }
+                GestureEvent::Tap { .. } => continue,
+            };
+            self.gestures.handle(&mut self.map, zoom_step(position, zoom), ms);
+        }
     }
 
     fn on_resize(&mut self, size: PhysicalSize<u32>) {
@@ -693,23 +715,43 @@ impl View {
         self.on_resize(self.physical_size);
     }
 
-    /// The keys the map takes, which the controls didn't: the arrows pan
-    /// (Shift: rotate and tilt), `+` and `-` zoom, each repeating while held,
-    /// and Escape ends a box zoom.
-    fn on_key(&mut self, code: KeyCode, pressed: bool, modifiers: Modifiers, at: Instant) {
-        let key = match code {
-            KeyCode::ArrowLeft => Key::Left,
-            KeyCode::ArrowRight => Key::Right,
-            KeyCode::ArrowUp => Key::Up,
-            KeyCode::ArrowDown => Key::Down,
-            KeyCode::Equal | KeyCode::NumpadAdd => Key::ZoomIn,
-            KeyCode::Minus | KeyCode::NumpadSubtract => Key::ZoomOut,
-            KeyCode::Escape => Key::Escape,
+    /// The keys the map takes, which the controls didn't, each repeating
+    /// while held: the arrows pan 100 px (Shift: turn 15° and tilt 10°),
+    /// `+` and `-` zoom a level (Shift: two), and Escape drops a drag.
+    fn on_key(&mut self, code: KeyCode, pressed: bool, modifiers: ModifiersState, at: Instant) {
+        if !pressed {
+            return;
+        }
+        let shift = modifiers.shift_key();
+        let levels = if shift { 2.0 } else { 1.0 };
+        let (pan, zoom, bearing, pitch) = match (code, shift) {
+            (KeyCode::Escape, _) => return self.gesture(Input::PointerCancel { id: 0 }, at),
+            (KeyCode::Equal | KeyCode::NumpadAdd, _) => ((0.0, 0.0), levels, 0.0, 0.0),
+            (KeyCode::Minus | KeyCode::NumpadSubtract, _) => ((0.0, 0.0), -levels, 0.0, 0.0),
+            (KeyCode::ArrowLeft, true) => ((0.0, 0.0), 0.0, -15.0, 0.0),
+            (KeyCode::ArrowRight, true) => ((0.0, 0.0), 0.0, 15.0, 0.0),
+            (KeyCode::ArrowUp, true) => ((0.0, 0.0), 0.0, 0.0, 10.0),
+            (KeyCode::ArrowDown, true) => ((0.0, 0.0), 0.0, 0.0, -10.0),
+            (KeyCode::ArrowLeft, false) => ((100.0, 0.0), 0.0, 0.0, 0.0),
+            (KeyCode::ArrowRight, false) => ((-100.0, 0.0), 0.0, 0.0, 0.0),
+            (KeyCode::ArrowUp, false) => ((0.0, 100.0), 0.0, 0.0, 0.0),
+            (KeyCode::ArrowDown, false) => ((0.0, -100.0), 0.0, 0.0, 0.0),
             _ => return,
         };
-        if pressed {
-            self.gesture(Input::Key { key, modifiers }, at);
-        }
+        let input = Input::Delta {
+            position: self.center(),
+            discrete: true,
+            pan: ScreenCoordinate::new(pan.0, pan.1),
+            zoom,
+            bearing,
+            pitch,
+        };
+        self.gesture(input, at);
+    }
+
+    /// The middle of the map, in logical pixels.
+    fn center(&self) -> ScreenCoordinate {
+        ScreenCoordinate::new(f64::from(self.size.width) / 2.0, f64::from(self.size.height) / 2.0)
     }
 
     /// The controls' frame: lays them out with their input, carries out what
@@ -745,6 +787,7 @@ impl View {
             free_bearing: snapshot.as_ref().is_some_and(|snapshot| snapshot.globe_free_bearing),
             backend: self.kind,
             status: &status,
+            box_zoom: self.box_zoom,
         };
         let mut actions = Vec::new();
         let controls = &mut self.controls;
@@ -774,8 +817,8 @@ impl View {
     /// Carries out what the controls ask.
     fn apply(&mut self, action: Action, now: Instant) {
         match action {
-            Action::ZoomIn => self.gesture(Input::Key { key: Key::ZoomIn, modifiers: Modifiers::default() }, now),
-            Action::ZoomOut => self.gesture(Input::Key { key: Key::ZoomOut, modifiers: Modifiers::default() }, now),
+            Action::ZoomIn => self.gesture(zoom_step(self.center(), 1.0), now),
+            Action::ZoomOut => self.gesture(zoom_step(self.center(), -1.0), now),
             Action::ResetNorth => {
                 let north = CameraUpdate {
                     mode: CameraUpdateMode::Ease,
@@ -1026,21 +1069,15 @@ impl View {
         let step = test.step;
         test.step += 1;
 
-        let center = ScreenCoordinate::new(f64::from(self.size.width) / 2.0, f64::from(self.size.height) / 2.0);
+        let center = self.center();
         let (cx, cy) = (center.x, center.y);
-        let none = Modifiers::default();
-        let ctrl = Modifiers { ctrl: true, ..none };
-        let shift = Modifiers { shift: true, ..none };
+        let none = Modes::default();
+        let rotate = Modes { rotate: true, ..none };
+        let box_zoom = Modes { box_zoom: true, ..none };
         let at = |x: f64, y: f64| ScreenCoordinate::new(x, y);
-        let down = |button: Button, modifiers: Modifiers| Input::PointerDown {
-            id: 0,
-            kind: PointerKind::Mouse,
-            button,
-            position: center,
-            modifiers,
-        };
-        let drag = |button: Button, modifiers: Modifiers, dx: f64, dy: f64| {
-            let mut inputs = vec![Input::PointerMove { id: 0, position: center }, down(button, modifiers)];
+        let down = |modes: Modes| Input::PointerDown { id: 0, kind: PointerKind::Mouse, position: center, modes };
+        let drag = |modes: Modes, dx: f64, dy: f64| {
+            let mut inputs = vec![Input::PointerMove { id: 0, position: center }, down(modes)];
             for i in 1..=10 {
                 let t = f64::from(i) / 10.0;
                 inputs.push(Input::PointerMove { id: 0, position: at(cx + dx * t, cy + dy * t) });
@@ -1048,29 +1085,36 @@ impl View {
             inputs.push(Input::PointerUp { id: 0, position: at(cx + dx, cy + dy) });
             inputs
         };
-        let wheel = |delta: WheelDelta| Input::Wheel { position: center, delta, modifiers: none };
+        let wheel = |discrete: bool, zoom: f64| Input::Delta {
+            position: center,
+            discrete,
+            pan: ScreenCoordinate::default(),
+            zoom,
+            bearing: 0.0,
+            pitch: 0.0,
+        };
         let pinch = |scale: f64, rotation: f64, phase: PinchPhase| Input::Pinch { center, scale, rotation, phase };
         let (name, inputs, keys, actions): (&str, Vec<Input>, Vec<KeyCode>, Vec<Action>) = match step {
             0 => ("start", vec![], vec![], vec![]),
-            1 => ("drag (pan, then glide) by (200, 100)", drag(Button::Primary, none, 200.0, 100.0), vec![], vec![]),
-            2 => ("scroll up 5 wheel notches (eased)", vec![wheel(WheelDelta::Notches(-1.0)); 5], vec![], vec![]),
-            3 => ("scroll down 2 wheel notches (eased)", vec![wheel(WheelDelta::Notches(1.0)); 2], vec![], vec![]),
-            4 => ("scroll a trackpad up 240 px", vec![wheel(WheelDelta::Pixels(-30.0)); 8], vec![], vec![]),
+            1 => ("drag (pan, then glide) by (200, 100)", drag(none, 200.0, 100.0), vec![], vec![]),
+            2 => ("scroll up 5 wheel detents (eased)", vec![wheel(true, 1.0 / 3.0); 5], vec![], vec![]),
+            3 => ("scroll down 2 wheel detents (eased)", vec![wheel(true, -1.0 / 3.0); 2], vec![], vec![]),
+            4 => ("scroll a trackpad up 240 px", vec![wheel(false, 0.1); 8], vec![], vec![]),
             5 => (
                 "double click (zoom in, animated)",
                 vec![
                     Input::PointerMove { id: 0, position: center },
-                    down(Button::Primary, none),
+                    down(none),
                     Input::PointerUp { id: 0, position: center },
-                    down(Button::Primary, none),
+                    down(none),
                     Input::PointerUp { id: 0, position: center },
                 ],
                 vec![],
                 vec![],
             ),
-            6 => ("ctrl+drag (rotate)", drag(Button::Primary, ctrl, 150.0, 0.0), vec![], vec![]),
-            7 => ("right drag up (tilt)", drag(Button::Secondary, none, 0.0, -120.0), vec![], vec![]),
-            8 => ("shift+drag (box zoom)", drag(Button::Primary, shift, 200.0, 150.0), vec![], vec![]),
+            6 => ("ctrl+drag (rotate)", drag(rotate, 150.0, 0.0), vec![], vec![]),
+            7 => ("right drag up (tilt)", drag(rotate, 0.0, -120.0), vec![], vec![]),
+            8 => ("shift+drag (box zoom)", drag(box_zoom, 200.0, 150.0), vec![], vec![]),
             9 => (
                 "trackpad pinch (zoom out half a level, turn 20 degrees counterclockwise, then glide)",
                 std::iter::once(pinch(1.0, 0.0, PinchPhase::Begin))
@@ -1113,7 +1157,7 @@ impl View {
             time += Duration::from_millis(16);
         }
         for code in keys {
-            self.handle(Message::Key { code, pressed: true, modifiers: none, at: time });
+            self.handle(Message::Key { code, pressed: true, modifiers: ModifiersState::default(), at: time });
         }
         for action in actions {
             self.apply(action, time);
@@ -1138,4 +1182,10 @@ impl View {
             ),
         );
     }
+}
+
+/// A discrete delta that zooms `levels` around `position`, as a button or a
+/// key does.
+fn zoom_step(position: ScreenCoordinate, levels: f64) -> Input {
+    Input::Delta { position, discrete: true, pan: ScreenCoordinate::default(), zoom: levels, bearing: 0.0, pitch: 0.0 }
 }

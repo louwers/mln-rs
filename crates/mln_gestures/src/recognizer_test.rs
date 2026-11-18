@@ -8,7 +8,7 @@ use std::ops::{Deref, DerefMut};
 use std::time::Duration;
 
 use mln_map::transform::{CameraCommandId, Transform, TransformEvent};
-use mln_map::{CameraChangeSource, ConstrainMode, MomentumSnap, ViewportMode};
+use mln_map::{CameraChangeSource, ConstrainMode, MomentumDecay, MomentumSnap, ViewportMode};
 use mln_style_types::ProjectionDefinition;
 use mln_util::LatLng;
 use mln_util::geo::LatLngBounds;
@@ -17,7 +17,7 @@ use mln_util::size::Size;
 use mln_util::time::Instant;
 
 use super::*;
-use crate::{Axis, Notch};
+use crate::{Axis, InvalidGestureOptions, Modes, Notch};
 
 /// A transform as the recognizer's camera. It sets its releases' commands'
 /// ends, and keeps the source of each camera change that started.
@@ -122,7 +122,29 @@ fn distance(a: ScreenCoordinate, b: ScreenCoordinate) -> f64 {
     (a.x - b.x).hypot(a.y - b.y)
 }
 
-const SHIFT: Modifiers = Modifiers { shift: true, ctrl: false, alt: false, meta: false };
+const ROTATE: Modes = Modes { rotate: true, box_zoom: false };
+const BOX: Modes = Modes { rotate: false, box_zoom: true };
+
+/// A discrete delta, as a host maps a wheel's `n` detents: a third of a level
+/// each, scrolling down zooming out.
+fn detents(at: ScreenCoordinate, n: f64) -> Input {
+    zoom_delta(at, true, -n / 3.0)
+}
+
+/// A continuous delta, as a host maps a trackpad's scroll: 1/300 level per
+/// pixel, scrolling down zooming out.
+fn pixels(at: ScreenCoordinate, px: f64) -> Input {
+    zoom_delta(at, false, -px / 300.0)
+}
+
+fn zoom_delta(position: ScreenCoordinate, discrete: bool, zoom: f64) -> Input {
+    Input::Delta { position, discrete, pan: p(0.0, 0.0), zoom, bearing: 0.0, pitch: 0.0 }
+}
+
+/// A discrete delta that pans, turns or tilts, as a host maps a key.
+fn key(pan: ScreenCoordinate, bearing: f64, pitch: f64) -> Input {
+    Input::Delta { position: p(400.0, 300.0), discrete: true, pan, zoom: 0.0, bearing, pitch }
+}
 
 struct Rig {
     camera: TestCamera,
@@ -142,7 +164,7 @@ impl Rig {
         camera.set_frame_time(Some(time));
         camera.drain_events().for_each(drop);
         let camera = TestCamera { transform: camera, ends: HashMap::default(), sources: Vec::new() };
-        Rig { camera, input: GestureRecognizer::new(options.clone()), now: 1000.0, time }
+        Rig { camera, input: GestureRecognizer::new(options.clone()).unwrap(), now: 1000.0, time }
     }
 
     fn zoom(&self) -> f64 {
@@ -170,11 +192,11 @@ impl Rig {
     }
 
     fn down(&mut self, id: u32, kind: PointerKind, x: f64, y: f64) {
-        self.down_with(id, kind, x, y, Modifiers::default());
+        self.down_with(id, kind, x, y, Modes::default());
     }
 
-    fn down_with(&mut self, id: u32, kind: PointerKind, x: f64, y: f64, modifiers: Modifiers) {
-        self.send(Input::PointerDown { id, kind, button: Button::Primary, position: p(x, y), modifiers });
+    fn down_with(&mut self, id: u32, kind: PointerKind, x: f64, y: f64, modes: Modes) {
+        self.send(Input::PointerDown { id, kind, position: p(x, y), modes });
     }
 
     fn to(&mut self, id: u32, x: f64, y: f64) {
@@ -187,10 +209,6 @@ impl Rig {
 
     fn pinch(&mut self, scale: f64, rotation: f64, phase: PinchPhase) {
         self.send(Input::Pinch { center: p(200.0, 200.0), scale, rotation, phase });
-    }
-
-    fn key(&mut self, key: Key, modifiers: Modifiers) {
-        self.send(Input::Key { key, modifiers });
     }
 
     /// One display frame: 16 ms on, for the recognizer and the transform.
@@ -278,35 +296,31 @@ fn holding_still_before_release_stops_momentum() {
 }
 
 #[test]
-fn clicks_and_double_clicks() {
+fn taps_and_double_taps_report_without_zooming() {
     let mut rig = Rig::new();
-    let zoom = rig.zoom();
     rig.down(1, PointerKind::Mouse, 200.0, 200.0);
     rig.to(1, 201.0, 200.0);
     rig.up(1, 201.0, 200.0);
-    assert_eq!(rig.input.take_events(), [GestureEvent::Click { position: p(201.0, 200.0), button: Button::Primary }]);
+    let position = p(201.0, 200.0);
+    assert_eq!(rig.input.take_events(), [GestureEvent::Tap { id: 1, position }]);
     rig.now += 100.0;
-    let ground = rig.unproject(p(201.0, 200.0));
     rig.down(1, PointerKind::Mouse, 201.0, 200.0);
     rig.up(1, 201.0, 200.0);
-    assert!(rig.input.take_events().contains(&GestureEvent::DoubleClick { position: p(201.0, 200.0) }));
+    let double = [GestureEvent::Tap { id: 1, position }, GestureEvent::DoubleTap { id: 1, position }];
+    assert_eq!(rig.input.take_events(), double);
     rig.settle();
-    assert!((rig.zoom() - (zoom + 1.0)).abs() < 1e-9);
-    let under = rig.project(ground);
-    assert!(distance(under, p(201.0, 200.0)) < 1e-6, "{under:?}");
-}
+    assert_eq!(rig.zoom(), 12.0);
 
-#[test]
-fn shift_double_click_zooms_out() {
-    let mut rig = Rig::new();
-    let zoom = rig.zoom();
-    for _ in 0..2 {
-        rig.down_with(1, PointerKind::Mouse, 200.0, 200.0, SHIFT);
-        rig.up(1, 200.0, 200.0);
-        rig.now += 100.0;
-    }
-    rig.settle();
-    assert!((rig.zoom() - (zoom - 1.0)).abs() < 1e-9);
+    // A third tap starts over, and a long press isn't the first of a double.
+    rig.now += 100.0;
+    rig.down(1, PointerKind::Mouse, 201.0, 200.0);
+    rig.now += 600.0;
+    rig.up(1, 201.0, 200.0);
+    rig.now += 100.0;
+    rig.down(1, PointerKind::Mouse, 201.0, 200.0);
+    rig.up(1, 201.0, 200.0);
+    let taps = [GestureEvent::Tap { id: 1, position }, GestureEvent::Tap { id: 1, position }];
+    assert_eq!(rig.input.take_events(), taps);
 }
 
 #[test]
@@ -404,9 +418,9 @@ fn a_platform_pinch_held_still_before_it_ends_doesnt_glide() {
 }
 
 #[test]
-fn a_platform_pinch_stops_a_notch_ease() {
+fn a_platform_pinch_stops_a_delta_ease() {
     let mut rig = Rig::new();
-    rig.send(notches(p(400.0, 300.0), -1.0));
+    rig.send(detents(p(400.0, 300.0), -1.0));
     rig.pinch(1.0, 0.0, PinchPhase::Begin);
     rig.settle();
     assert!((rig.zoom() - 12.0).abs() < 1e-9, "{}", rig.zoom());
@@ -429,24 +443,24 @@ fn two_fingers_moving_up_together_tilt() {
 }
 
 #[test]
-fn double_tap_zooms_in_and_two_finger_tap_zooms_out() {
+fn double_taps_and_two_finger_taps_report_without_zooming() {
     let mut rig = Rig::new();
-    let zoom = rig.zoom();
     rig.down(1, PointerKind::Touch, 300.0, 300.0);
     rig.up(1, 300.0, 300.0);
     rig.now += 150.0;
     rig.down(1, PointerKind::Touch, 305.0, 302.0);
     rig.up(1, 305.0, 302.0);
-    rig.settle();
-    assert!((rig.zoom() - (zoom + 1.0)).abs() < 1e-9);
+    let events = rig.input.take_events();
+    assert!(events.contains(&GestureEvent::DoubleTap { id: 1, position: p(305.0, 302.0) }), "{events:?}");
     rig.now += 1000.0;
     rig.down(1, PointerKind::Touch, 300.0, 300.0);
     rig.down(2, PointerKind::Touch, 400.0, 300.0);
     rig.now += 60.0;
     rig.up(1, 300.0, 300.0);
     rig.up(2, 400.0, 300.0);
+    assert_eq!(rig.input.take_events(), [GestureEvent::TwoFingerTap { position: p(350.0, 300.0) }]);
     rig.settle();
-    assert!((rig.zoom() - zoom).abs() < 1e-9);
+    assert_eq!(rig.zoom(), 12.0);
 }
 
 #[test]
@@ -465,23 +479,15 @@ fn tap_and_drag_zooms() {
     assert!((rig.zoom() - (zoom + 1.0)).abs() < 1e-9);
 }
 
-fn notches(at: ScreenCoordinate, n: f64) -> Input {
-    Input::Wheel { position: at, delta: WheelDelta::Notches(n), modifiers: Modifiers::default() }
-}
-
-fn pixels(at: ScreenCoordinate, px: f64, modifiers: Modifiers) -> Input {
-    Input::Wheel { position: at, delta: WheelDelta::Pixels(px), modifiers }
-}
-
 #[test]
-fn a_wheel_notch_eases_a_third_of_a_level_around_the_pointer() {
+fn a_discrete_delta_eases_around_its_position() {
     let mut rig = Rig::new();
     let zoom = rig.zoom();
     let at = p(100.0, 100.0);
     let ground = rig.unproject(at);
-    // A notch toward the user zooms in.
-    rig.send(notches(at, -1.0));
-    assert_eq!(rig.zoom(), zoom, "the notch eases from the next frame");
+    // A detent toward the user zooms in.
+    rig.send(detents(at, -1.0));
+    assert_eq!(rig.zoom(), zoom, "the delta eases from the next frame");
     let mut steps = Vec::new();
     let mut last = zoom;
     for _ in 0..13 {
@@ -496,18 +502,18 @@ fn a_wheel_notch_eases_a_third_of_a_level_around_the_pointer() {
     assert!((rig.zoom() - (zoom + 1.0 / 3.0)).abs() < 1e-9, "{}", rig.zoom() - zoom);
     assert!(steps.iter().all(|&step| step >= 0.0), "{steps:?}");
     assert!(steps[0] < 1.0 / 6.0, "it eases in: {steps:?}");
-    // The scroll is one gesture until 200 ms after its last event and ease.
+    // Deltas are one gesture until 200 ms after their last input and ease.
     assert!(rig.camera.is_gesture_in_progress());
     rig.settle();
     assert!(!rig.camera.is_gesture_in_progress());
 }
 
 #[test]
-fn a_notch_mid_ease_adds_up_without_slowing_the_zoom() {
+fn a_discrete_delta_mid_ease_adds_up_without_slowing() {
     let mut rig = Rig::new();
     let zoom = rig.zoom();
     let at = p(400.0, 300.0);
-    rig.send(notches(at, -1.0));
+    rig.send(detents(at, -1.0));
     let mut last = zoom;
     let mut speed = 0.0;
     for _ in 0..6 {
@@ -515,8 +521,8 @@ fn a_notch_mid_ease_adds_up_without_slowing_the_zoom() {
         speed = rig.zoom() - last;
         last = rig.zoom();
     }
-    // A second notch 96 ms in: the zoom keeps going at least as fast.
-    rig.send(notches(at, -1.0));
+    // A second detent 96 ms in: the zoom keeps going at least as fast.
+    rig.send(detents(at, -1.0));
     rig.frame();
     let after = rig.zoom() - last;
     assert!(after >= speed - 1e-9, "{after} after {speed}");
@@ -524,17 +530,17 @@ fn a_notch_mid_ease_adds_up_without_slowing_the_zoom() {
     assert!((rig.zoom() - (zoom + 2.0 / 3.0)).abs() < 1e-9, "{}", rig.zoom() - zoom);
 }
 
-/// Spins the wheel at `at` faster than notches ease, 10 notches a frame for
-/// a second (`direction` 1 zooms out), then turns back a notch; returns the
-/// zoom it reached and the zoom once the notch back settles. Each notch
+/// Spins the wheel at `at` faster than detents ease, 10 detents a frame for
+/// a second (`direction` 1 zooms out), then turns back a detent; returns the
+/// zoom it reached and the zoom once the detent back settles. Each detent
 /// retargets the ease to the limit, which the zoom closes in on.
 fn spin_into_a_limit_and_back(rig: &mut Rig, at: ScreenCoordinate, direction: f64) -> (f64, f64) {
     for _ in 0..60 {
-        rig.send(notches(at, 10.0 * direction));
+        rig.send(detents(at, 10.0 * direction));
         rig.frame();
     }
     let limit = rig.zoom();
-    rig.send(notches(at, -direction));
+    rig.send(detents(at, -direction));
     rig.settle();
     (limit, rig.zoom())
 }
@@ -589,91 +595,83 @@ fn notches_zoom_out_to_the_floor_screen_bounds_set() {
 }
 
 #[test]
-fn pixels_zoom_at_once_and_a_pinch_three_times_as_fast() {
+fn a_continuous_delta_moves_at_once_at_most_a_level_a_step() {
     let mut rig = Rig::new();
     let at = p(100.0, 100.0);
     let zoom = rig.zoom();
-    rig.send(pixels(at, -30.0, Modifiers::default()));
+    rig.send(pixels(at, -30.0));
     assert!((rig.zoom() - (zoom + 0.1)).abs() < 1e-9, "{}", rig.zoom() - zoom);
-    let ctrl = Modifiers { ctrl: true, ..Modifiers::default() };
-    let zoom = rig.zoom();
-    rig.send(pixels(at, 10.0, ctrl));
-    assert!((rig.zoom() - (zoom - 0.1)).abs() < 1e-9, "{}", rig.zoom() - zoom);
     // One huge delta zooms at most a level.
     let zoom = rig.zoom();
-    rig.send(pixels(at, -10_000.0, Modifiers::default()));
+    rig.send(pixels(at, -10_000.0));
     assert!((rig.zoom() - (zoom + 1.0)).abs() < 1e-9, "{}", rig.zoom() - zoom);
 }
 
 #[test]
-fn a_slow_trackpad_start_doesnt_change_how_a_notch_zooms() {
+fn continuous_and_discrete_deltas_mix() {
     // GL JS classified a scroll by its first deltas, for 400 ms: a slow
     // trackpad start read as a trackpad and zoomed twice as fast. Here each
-    // event is what its host says.
+    // delta is what its host says.
     let mut rig = Rig::new();
     let zoom = rig.zoom();
     for _ in 0..10 {
         rig.now += 16.0;
-        rig.send(pixels(p(400.0, 300.0), -2.0, Modifiers::default()));
+        rig.send(pixels(p(400.0, 300.0), -2.0));
     }
     assert!((rig.zoom() - (zoom + 20.0 / 300.0)).abs() < 1e-9, "{}", rig.zoom() - zoom);
     let zoom = rig.zoom();
-    rig.send(notches(p(400.0, 300.0), -1.0));
+    rig.send(detents(p(400.0, 300.0), -1.0));
     assert_eq!(rig.zoom(), zoom, "eased");
     rig.settle();
     assert!((rig.zoom() - (zoom + 1.0 / 3.0)).abs() < 1e-9, "{}", rig.zoom() - zoom);
 }
 
 #[test]
-fn the_scroll_zooms_around_where_the_pointer_is_now() {
+fn deltas_zoom_around_where_the_pointer_is_now() {
     let mut rig = Rig::new();
-    rig.send(pixels(p(100.0, 100.0), -30.0, Modifiers::default()));
+    rig.send(pixels(p(100.0, 100.0), -30.0));
     let at = p(600.0, 400.0);
     let ground = rig.unproject(at);
-    rig.send(pixels(at, -30.0, Modifiers::default()));
+    rig.send(pixels(at, -30.0));
     let under = rig.project(ground);
     assert!(distance(under, at) < 1e-6, "{under:?}");
 }
 
 #[test]
-fn a_scroll_stops_the_cameras_animations() {
+fn a_delta_stops_the_cameras_animations() {
     let mut rig = Rig::new();
     rig.camera.ease_to(
         &CameraOptions { bearing: Some(45.0), ..Default::default() },
         &AnimationOptions::new(Duration::from_millis(500)),
     );
-    rig.send(notches(p(400.0, 300.0), 1.0));
+    rig.send(detents(p(400.0, 300.0), 1.0));
     assert!(!rig.camera.in_transition());
     assert!(rig.camera.is_gesture_in_progress());
 }
 
 #[test]
-fn keys_step_the_camera() {
+fn discrete_deltas_pan_turn_and_tilt() {
     let mut rig = Rig::new();
-    let zoom = rig.zoom();
-    rig.key(Key::ZoomIn, Modifiers::default());
-    rig.settle();
-    assert!((rig.zoom() - (zoom + 1.0)).abs() < 1e-9);
-    rig.key(Key::Right, SHIFT);
+    rig.send(key(p(0.0, 0.0), 15.0, 10.0));
     rig.settle();
     assert!((rig.bearing() - 15.0).abs() < 1e-9, "{}", rig.bearing());
+    assert!((rig.pitch() - 10.0).abs() < 1e-9, "{}", rig.pitch());
     let ground = rig.unproject(p(400.0, 300.0));
-    rig.key(Key::Left, Modifiers::default());
+    rig.send(key(p(100.0, 0.0), 0.0, 0.0));
     rig.settle();
     let moved = rig.project(ground);
     assert!(distance(moved, p(500.0, 300.0)) < 1e-6, "{moved:?}");
 }
 
 #[test]
-fn rotate_pitch_and_scroll_zoom_turn_their_gestures_off() {
+fn rotate_and_pitch_turn_their_gestures_off() {
     let mut off = GestureOptions::default();
     off.bearing.enabled = false;
     off.pitch.enabled = false;
-    off.scroll_zoom = false;
 
     // A rotate drag neither turns nor pitches.
     let mut rig = Rig::with(&off);
-    rig.down_with(1, PointerKind::Mouse, 400.0, 300.0, Modifiers { ctrl: true, ..Modifiers::default() });
+    rig.down_with(1, PointerKind::Mouse, 400.0, 300.0, ROTATE);
     for i in 1..=10 {
         rig.now += 16.0;
         rig.to(1, 400.0 + 10.0 * f64::from(i), 300.0 - 10.0 * f64::from(i));
@@ -722,14 +720,10 @@ fn rotate_pitch_and_scroll_zoom_turn_their_gestures_off() {
     assert!(rig.zoom() > 12.5, "{}", rig.zoom());
     assert_eq!(rig.bearing(), 0.0);
 
-    // Shift with the arrow keys and scrolls go unhandled.
+    // Deltas that only turn or tilt go unhandled.
     let mut rig = Rig::with(&off);
-    for key in [Key::Left, Key::Right, Key::Up, Key::Down] {
-        assert!(!rig.input.handle(&mut rig.camera, Input::Key { key, modifiers: SHIFT }, rig.now), "{key:?}");
-    }
-    let at = p(100.0, 100.0);
-    assert!(!rig.input.handle(&mut rig.camera, notches(at, -1.0), rig.now));
-    assert!(!rig.input.handle(&mut rig.camera, pixels(at, -30.0, Modifiers::default()), rig.now));
+    assert!(!rig.input.handle(&mut rig.camera, key(p(0.0, 0.0), 15.0, 0.0), rig.now));
+    assert!(!rig.input.handle(&mut rig.camera, key(p(0.0, 0.0), 0.0, 10.0), rig.now));
     rig.settle();
     assert_eq!((rig.zoom(), rig.bearing(), rig.pitch()), (12.0, 0.0, 0.0));
 }
@@ -894,11 +888,11 @@ fn turning_near_north_settles_on_north() {
 }
 
 #[test]
-fn shift_drag_zooms_to_a_box() {
+fn a_box_zoom_drag_zooms_to_its_box() {
     let mut rig = Rig::new();
     let zoom = rig.zoom();
     let middle = rig.unproject(p(300.0, 250.0));
-    rig.down_with(1, PointerKind::Mouse, 100.0, 100.0, SHIFT);
+    rig.down_with(1, PointerKind::Mouse, 100.0, 100.0, BOX);
     rig.now += 16.0;
     rig.to(1, 500.0, 400.0);
     assert_eq!(rig.input.box_zoom(), Some([p(100.0, 100.0), p(500.0, 400.0)]));
@@ -911,16 +905,39 @@ fn shift_drag_zooms_to_a_box() {
     assert!((rig.zoom() - (zoom + 1.0)).abs() < 1e-9);
     let at = rig.project(middle);
     assert!(distance(at, p(400.0, 300.0)) < 1e-6, "{at:?}");
-    assert!(rig.input.take_events().is_empty(), "a box isn't a click");
+    assert!(rig.input.take_events().is_empty(), "a box isn't a tap");
 
-    // Escape drops it.
-    rig.down_with(1, PointerKind::Mouse, 100.0, 100.0, SHIFT);
+    // Cancelling the pointer, as a host does on Escape, drops it.
+    rig.down_with(1, PointerKind::Mouse, 100.0, 100.0, BOX);
     rig.to(1, 300.0, 300.0);
-    rig.key(Key::Escape, Modifiers::default());
+    rig.send(Input::PointerCancel { id: 1 });
     assert_eq!(rig.input.box_zoom(), None);
-    rig.up(1, 300.0, 300.0);
     rig.settle();
     assert!((rig.zoom() - (zoom + 1.0)).abs() < 1e-9);
+}
+
+#[test]
+fn a_drag_reads_its_modes_as_it_starts() {
+    // Held keys select modes for every pointer: pressing, then holding the
+    // key, then moving draws a box.
+    let mut rig = Rig::new();
+    rig.down(1, PointerKind::Mouse, 100.0, 100.0);
+    rig.send(Input::Modes(BOX));
+    rig.to(1, 300.0, 300.0);
+    assert_eq!(rig.input.box_zoom(), Some([p(100.0, 100.0), p(300.0, 300.0)]));
+    // A change mid-drag doesn't switch it.
+    rig.send(Input::Modes(ROTATE));
+    rig.to(1, 400.0, 300.0);
+    assert_eq!(rig.input.box_zoom(), Some([p(100.0, 100.0), p(400.0, 300.0)]));
+    assert_eq!(rig.bearing(), 0.0);
+    rig.send(Input::PointerCancel { id: 1 });
+
+    // Rotating wins over a box.
+    rig.send(Input::Modes(BOX));
+    rig.down_with(1, PointerKind::Mouse, 400.0, 300.0, ROTATE);
+    rig.to(1, 450.0, 300.0);
+    assert_eq!(rig.input.box_zoom(), None);
+    assert!(rig.bearing() > 20.0, "{}", rig.bearing());
 }
 
 /// Pinches out by about 0.93 levels and tilts by about 5° with two fingers,
@@ -983,21 +1000,11 @@ fn gestures_and_their_steps_report_themselves_as_gestures() {
     assert!(seen[..seen.len() - 1].iter().all(|&s| s == Gesture), "{seen:?}");
     assert_eq!(seen.last(), Some(&Momentum));
 
-    // A key step and a double click: gestures, eased, that don't hold the
-    // gesture in progress.
-    rig.key(Key::ZoomIn, Modifiers::default());
-    assert!(!rig.camera.is_gesture_in_progress());
-    assert!(rig.camera.in_transition());
+    // A key's delta: a gesture until it idles.
+    rig.send(key(p(100.0, 0.0), 0.0, 0.0));
+    assert!(rig.camera.is_gesture_in_progress());
     rig.settle();
-    assert!(take(&mut rig).iter().all(|&s| s == Gesture));
-    for _ in 0..2 {
-        rig.down(1, PointerKind::Mouse, 400.0, 300.0);
-        rig.now += 50.0;
-        rig.up(1, 400.0, 300.0);
-        rig.now += 50.0;
-    }
     assert!(!rig.camera.is_gesture_in_progress());
-    rig.settle();
     assert!(take(&mut rig).iter().all(|&s| s == Gesture));
 }
 
@@ -1048,7 +1055,7 @@ fn lifting_a_finger_out_of_a_pinch_doesnt_fling_the_map() {
 }
 
 #[test]
-fn a_key_step_during_a_drag_leaves_the_drag_going() {
+fn a_delta_during_a_drag_leaves_the_drag_going() {
     let mut rig = Rig::new();
     let zoom = rig.zoom();
     rig.down(1, PointerKind::Mouse, 400.0, 300.0);
@@ -1056,8 +1063,8 @@ fn a_key_step_during_a_drag_leaves_the_drag_going() {
         rig.now += 16.0;
         rig.to(1, 400.0 + 10.0 * f64::from(i), 300.0);
     }
-    // A key mid-drag eases its step within the drag's gesture.
-    rig.key(Key::ZoomIn, Modifiers::default());
+    // A key mid-drag eases its delta within the drag's gesture.
+    rig.send(zoom_delta(p(400.0, 300.0), true, 1.0));
     assert!(rig.camera.is_gesture_in_progress());
     for i in 5..=8 {
         rig.now += 16.0;
@@ -1075,79 +1082,19 @@ fn a_key_step_during_a_drag_leaves_the_drag_going() {
 }
 
 #[test]
-fn a_key_step_during_a_scroll_leaves_the_scroll_going() {
+fn a_command_through_the_recognizer_stops_its_eases() {
     let mut rig = Rig::new();
-    let zoom = rig.zoom();
-    let at = p(100.0, 100.0);
-    rig.send(notches(at, -1.0));
+    rig.send(key(p(0.0, 0.0), 30.0, 0.0));
     rig.frame();
-    // `+` mid-ease is an update of the scroll's gesture, not its end.
-    rig.key(Key::ZoomIn, Modifiers::default());
-    for _ in 0..3 {
-        rig.frame();
-        assert!(rig.camera.is_gesture_in_progress());
-    }
+    let north = CameraUpdate {
+        mode: CameraUpdateMode::Ease,
+        camera: CameraOptions { bearing: Some(0.0), ..Default::default() },
+        animation: AnimationOptions::new(Duration::from_millis(100)),
+        phase: GesturePhase::None,
+    };
+    rig.input.step_to(&mut rig.camera, &north);
     rig.settle();
-    assert!(!rig.camera.is_gesture_in_progress());
-    assert!((rig.zoom() - (zoom + 1.0 / 3.0 + 1.0)).abs() < 1e-6, "{}", rig.zoom() - zoom);
-}
-
-/// A host's own step: zoom in by `levels`, around `at` or the center, over
-/// 500 ms (the desktop app's `+`).
-fn host_zoom(levels: f64, at: Option<ScreenCoordinate>) -> CameraDelta {
-    CameraDelta {
-        scale: Some(levels.exp2()),
-        anchor: at,
-        animation: AnimationOptions::new(Duration::from_millis(500)),
-        // Ignored: the recognizer picks the phase.
-        phase: GesturePhase::End,
-        ..CameraDelta::default()
-    }
-}
-
-#[test]
-fn a_host_step_during_a_drag_leaves_the_drag_going() {
-    let mut rig = Rig::new();
-    let zoom = rig.zoom();
-    rig.down(1, PointerKind::Mouse, 400.0, 300.0);
-    for i in 1..=4 {
-        rig.now += 16.0;
-        rig.to(1, 400.0 + 10.0 * f64::from(i), 300.0);
-    }
-    // Unanchored: an anchored zoom couples the center, which the drag's next
-    // move takes over, ending the step (maplibre-native-ffi's patch 0015).
-    rig.input.step(&mut rig.camera, &host_zoom(0.5, None)).unwrap();
-    assert!(rig.camera.is_gesture_in_progress());
-    for i in 5..=8 {
-        rig.now += 16.0;
-        rig.to(1, 400.0 + 10.0 * f64::from(i), 300.0);
-        rig.frame();
-    }
-    assert!(rig.camera.is_gesture_in_progress());
-    rig.up(1, 480.0, 300.0);
-    rig.settle();
-    assert!(!rig.camera.is_gesture_in_progress());
-    assert!((rig.zoom() - (zoom + 0.5)).abs() < 1e-9, "{}", rig.zoom() - zoom);
-}
-
-#[test]
-fn a_host_step_during_a_notch_ease_keeps_both_zooms() {
-    let mut rig = Rig::new();
-    let zoom = rig.zoom();
-    let at = p(100.0, 100.0);
-    rig.send(notches(at, -1.0));
-    rig.frame();
-    rig.input.step(&mut rig.camera, &host_zoom(0.5, Some(at))).unwrap();
-    assert!(rig.camera.is_gesture_in_progress());
-    rig.settle();
-    assert!((rig.zoom() - (zoom + 1.0 / 3.0 + 0.5)).abs() < 1e-6, "{}", rig.zoom() - zoom);
-}
-
-#[test]
-fn a_host_step_must_be_valid() {
-    let mut rig = Rig::new();
-    let step = CameraDelta { scale: Some(0.0), ..CameraDelta::default() };
-    assert!(rig.input.step(&mut rig.camera, &step).is_err());
+    assert!(rig.bearing().abs() < 1e-9, "{}", rig.bearing());
 }
 
 // Port-only: a mouse drag on the globe turns it around the cursor, as
@@ -1401,7 +1348,7 @@ fn a_twist_and_its_snap_report_the_notches_they_reach() {
     rig.camera.jump_to(&CameraOptions { bearing: Some(-10.0), ..Default::default() });
     let mut options = GestureOptions::default();
     options.bearing.notches = vec![Notch { spacing: 90.0, offset: 0.0, kind: 3 }];
-    rig.input.set_options(options);
+    rig.input.set_options(options).unwrap();
     twist(&mut rig, 40.0);
     assert_eq!(notch_events(&mut rig), [(Axis::Bearing, 0.0, 3)]);
     rig.settle();
@@ -1409,13 +1356,13 @@ fn a_twist_and_its_snap_report_the_notches_they_reach() {
 }
 
 #[test]
-fn a_scroll_reports_zoom_notches() {
+fn a_delta_reports_zoom_notches() {
     let mut rig = Rig::new();
     let mut options = GestureOptions::default();
     options.zoom.notches = vec![Notch { spacing: 1.0, offset: 0.0, kind: 7 }];
-    rig.input.set_options(options);
+    rig.input.set_options(options).unwrap();
     for _ in 0..4 {
-        rig.send(pixels(p(400.0, 300.0), -90.0, Modifiers::default()));
+        rig.send(pixels(p(400.0, 300.0), -90.0));
         rig.frame();
     }
     rig.settle();
@@ -1424,16 +1371,9 @@ fn a_scroll_reports_zoom_notches() {
 }
 
 #[test]
-fn steps_and_commands_after_a_gesture_report_no_notches() {
+fn commands_after_a_gesture_report_no_notches() {
     let mut rig = Rig::new();
-    rig.camera.jump_to(&CameraOptions { bearing: Some(-20.0), ..Default::default() });
-    // Keys turn across north without a tick.
-    for _ in 0..3 {
-        rig.key(Key::Right, SHIFT);
-        rig.settle();
-    }
-    assert!((rig.bearing() - 25.0).abs() < 1e-9, "{}", rig.bearing());
-    assert_eq!(notch_events(&mut rig), []);
+    rig.camera.jump_to(&CameraOptions { bearing: Some(25.0), ..Default::default() });
 
     // Once a gesture's snap ends, so do its notches: a command that turns
     // back across north reports nothing.
@@ -1465,7 +1405,7 @@ fn pan_and_zoom_turn_their_gestures_off() {
     rig.up(1, 200.0, 200.0);
     rig.settle();
     assert_eq!(rig.zoom(), 12.0);
-    assert!(rig.input.take_events().contains(&GestureEvent::DoubleClick { position: p(200.0, 200.0) }));
+    assert!(rig.input.take_events().contains(&GestureEvent::DoubleTap { id: 1, position: p(200.0, 200.0) }));
 
     // Spreading and moving two fingers neither zooms nor pans.
     rig.down(1, PointerKind::Touch, 300.0, 300.0);
@@ -1482,17 +1422,72 @@ fn pan_and_zoom_turn_their_gestures_off() {
     assert_eq!(rig.zoom(), 12.0);
     assert!(distance(rig.project(ground), p(400.0, 300.0)) < 1e-6);
 
-    // Shift-drag pans nothing rather than zooming to a box, and scrolls and
-    // the arrow and zoom keys go unhandled.
-    rig.down_with(1, PointerKind::Mouse, 100.0, 100.0, SHIFT);
+    // A box-zoom drag pans nothing rather than zooming to a box, and deltas
+    // that pan or zoom go unhandled.
+    rig.down_with(1, PointerKind::Mouse, 100.0, 100.0, BOX);
     rig.to(1, 500.0, 400.0);
     assert_eq!(rig.input.box_zoom(), None);
     rig.up(1, 500.0, 400.0);
-    for key in [Key::Left, Key::Up, Key::ZoomIn, Key::ZoomOut] {
-        assert!(!rig.input.handle(&mut rig.camera, Input::Key { key, modifiers: Modifiers::default() }, rig.now));
-    }
-    assert!(!rig.input.handle(&mut rig.camera, notches(p(100.0, 100.0), -1.0), rig.now));
+    assert!(!rig.input.handle(&mut rig.camera, key(p(100.0, 0.0), 0.0, 0.0), rig.now));
+    assert!(!rig.input.handle(&mut rig.camera, detents(p(100.0, 100.0), -1.0), rig.now));
     rig.settle();
     assert_eq!(rig.zoom(), 12.0);
     assert!(distance(rig.project(ground), p(400.0, 300.0)) < 1e-6);
+}
+
+#[test]
+fn options_out_of_range_are_rejected() {
+    let mut rig = Rig::new();
+    let mut options = GestureOptions::default();
+    options.bearing.notches = vec![Notch { spacing: 0.0, offset: 0.0, kind: 0 }];
+    assert_eq!(rig.input.set_options(options.clone()), Err(InvalidGestureOptions::Notch("bearing")));
+    assert!(GestureRecognizer::new(options).is_err());
+    let mut options = GestureOptions::default();
+    let mut decay = MomentumDecay::ANDROID_FLING;
+    decay.max_speed = -1.0;
+    options.pan.momentum = Some(decay);
+    assert!(matches!(rig.input.set_options(options), Err(InvalidGestureOptions::Momentum("pan", _))));
+    // The recognizer keeps the options it had.
+    assert_eq!(rig.input.options(), &GestureOptions::default());
+}
+
+#[test]
+fn a_pan_can_glide_as_androids_fling() {
+    let mut options = GestureOptions::default();
+    options.pan.momentum = Some(MomentumDecay::ANDROID_FLING);
+    let mut rig = Rig::with(&options);
+    // 500 px/s: Android's fling glides 0.35 × the speed × its duration.
+    let past = rig.fling(100.0, 8.0);
+    let seconds = 0.555_182 * 0.5f64.powf(0.736_267_6);
+    assert!((past - 0.35 * 500.0 * seconds).abs() < 1.0, "{past}");
+}
+
+#[test]
+fn a_cancelled_finger_cancels_the_whole_gesture() {
+    // Two fingers that would tap: one is taken away, so the other's lift
+    // reports no two-finger tap.
+    let mut rig = Rig::new();
+    rig.down(1, PointerKind::Touch, 300.0, 300.0);
+    rig.down(2, PointerKind::Touch, 400.0, 300.0);
+    rig.now += 60.0;
+    rig.send(Input::PointerCancel { id: 1 });
+    rig.up(2, 400.0, 300.0);
+    assert_eq!(rig.input.take_events(), []);
+
+    // A delta that joined the gesture stops with it, and the remaining
+    // finger moves nothing.
+    rig.down(1, PointerKind::Touch, 300.0, 300.0);
+    rig.down(2, PointerKind::Touch, 400.0, 300.0);
+    rig.send(detents(p(350.0, 300.0), -3.0));
+    rig.frame();
+    rig.send(Input::PointerCancel { id: 1 });
+    let zoom = rig.zoom();
+    let ground = rig.unproject(p(400.0, 300.0));
+    rig.now += 16.0;
+    rig.to(2, 450.0, 300.0);
+    rig.up(2, 450.0, 300.0);
+    rig.settle();
+    assert_eq!(rig.zoom(), zoom);
+    assert!(distance(rig.project(ground), p(400.0, 300.0)) < 1e-6);
+    assert!(!rig.camera.is_gesture_in_progress());
 }

@@ -2575,6 +2575,7 @@ dependencies = [
  "mln-rs-expression",
  "mln-rs-feature",
  "mln-rs-frame-pacer",
+ "mln-rs-gestures",
  "mln-rs-gl",
  "mln-rs-map",
  "mln-rs-map-types",
@@ -2666,6 +2667,7 @@ dependencies = [
  "mln-rs-vulkan",
  "mln-rs-webgpu",
  "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
  "objc2-metal 0.3.2",
  "objc2-quartz-core 0.3.2",
@@ -2783,6 +2785,7 @@ dependencies = [
  "mln-rs-style-types",
  "mln-rs-util",
  "parking_lot",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

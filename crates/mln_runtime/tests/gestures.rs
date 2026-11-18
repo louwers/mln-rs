@@ -1,7 +1,7 @@
 // A runtime map as the camera that mln_gestures' recognizer moves: its reads
 // come from the published snapshot, and its commands go out without waiting.
 
-use mln_gestures::{Button, GestureCamera, GestureRecognizer, Input, Modifiers, PointerKind};
+use mln_gestures::{GestureCamera, GestureRecognizer, Input, Modes, PointerKind};
 use mln_map::{CameraOptions, CameraUpdate};
 use mln_util::geo::{LatLng, ScreenCoordinate};
 
@@ -32,13 +32,8 @@ fn the_recognizer_reads_and_moves_a_runtime_map() {
 
     // A drag to the right moves the map's content right: the center goes west.
     let mut gestures = GestureRecognizer::default();
-    let down = Input::PointerDown {
-        id: 1,
-        kind: PointerKind::Mouse,
-        button: Button::Primary,
-        position: at(100.0, 128.0),
-        modifiers: Modifiers::default(),
-    };
+    let down =
+        Input::PointerDown { id: 1, kind: PointerKind::Mouse, position: at(100.0, 128.0), modes: Modes::default() };
     gestures.handle(&mut map, down, 0.0);
     for step in 1..=10 {
         let position = at(100.0 + 10.0 * f64::from(step), 128.0);

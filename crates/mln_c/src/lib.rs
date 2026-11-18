@@ -52,6 +52,7 @@ mod diagnostic;
 mod error;
 mod events;
 mod geo;
+mod gesture;
 mod gpu_device;
 mod handles;
 mod logging;

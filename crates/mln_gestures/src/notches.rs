@@ -128,12 +128,7 @@ fn reached(axis: Axis, notches: &[Notch], from: f64, travel: f64, capture: f64) 
     notches
         .iter()
         .enumerate()
-        .filter(|(_, notch)| valid(notch))
         .flat_map(move |(index, notch)| steps(axis, notch, low, high).into_iter().map(move |step| (index, step)))
-}
-
-fn valid(notch: &Notch) -> bool {
-    notch.spacing.is_finite() && notch.spacing > 0.0 && notch.offset.is_finite()
 }
 
 /// The steps of `notch` from `low` to `high`, at most [`MAX_CROSSED`]. On

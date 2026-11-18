@@ -15,9 +15,9 @@ use std::time::Duration;
 use geometry::Point;
 use mln_map_types::{
     AnchoredMomentum, AnimationOptions, CameraDelta, CameraError, CameraMomentum, CameraOptions, CameraUpdate,
-    CameraUpdateMode, CameraVelocity, CenterAndBearing, ConstrainMode, FreeCameraOptions, GesturePhase, MomentumEasing,
-    MomentumFriction, MomentumGlide, MomentumSnap, NorthOrientation, ProjectionMode, TransformState, TransitionEnd,
-    TransitionOutcome, VerticalPerspectiveProjection, ViewportMode,
+    CameraUpdateMode, CameraVelocity, CenterAndBearing, ConstrainMode, FreeCameraOptions, GesturePhase, MomentumDecay,
+    MomentumDecayModel, MomentumEasing, MomentumGlide, MomentumSnap, NorthOrientation, ProjectionMode, TransformState,
+    TransitionEnd, TransitionOutcome, VerticalPerspectiveProjection, ViewportMode,
 };
 use mln_style_types::ProjectionDefinition;
 use mln_util::UnitBezier;
@@ -278,38 +278,42 @@ struct GlidePlan {
 }
 
 impl GlidePlan {
-    /// Plans a friction release at `speed`, or returns nothing when it
-    /// doesn't move.
-    fn friction(speed: f64, friction: &MomentumFriction) -> Option<GlidePlan> {
-        let MomentumFriction { half_life, stop_speed, min_speed, max_speed, max_distance } = *friction;
-        let half_life = half_life.as_secs_f64();
-        if speed.is_nan()
-            || speed <= 0.0
-            || speed < min_speed
-            || half_life.is_nan()
-            || half_life <= 0.0
-            || stop_speed.is_nan()
-            || stop_speed <= 0.0
-        {
+    /// Plans a release at `speed` by `decay`, or returns nothing when it
+    /// doesn't move. A decay out of range doesn't move either.
+    fn plan(speed: f64, decay: &MomentumDecay) -> Option<GlidePlan> {
+        if decay.validate().is_err() || speed.is_nan() || speed <= 0.0 || speed < decay.min_speed {
             return None;
         }
-        let rate = std::f64::consts::LN_2 / half_life;
-        let speed = speed.min(max_speed).min(stop_speed + rate * max_distance);
-        if speed <= stop_speed {
-            return None;
+        let speed = speed.min(decay.max_speed);
+        match decay.model {
+            MomentumDecayModel::Friction { half_life, stop_speed } => {
+                let rate = std::f64::consts::LN_2 / half_life.as_secs_f64();
+                let speed = speed.min(stop_speed + rate * decay.max_distance);
+                if speed <= stop_speed {
+                    return None;
+                }
+                GlidePlan::new((speed - stop_speed) / rate, (speed / stop_speed).ln() / rate, rate, None)
+            }
+            MomentumDecayModel::Curve { reference_speed, duration, exponent, easing } => {
+                // The curve starts at the release speed: its starting slope
+                // times the average speed, distance / duration.
+                let slope = easing.y1 / easing.x1;
+                let seconds = |speed: f64| duration.as_secs_f64() * (speed / reference_speed).powf(exponent);
+                let distance = |speed: f64| speed * seconds(speed) / slope;
+                // The distance grows as speed^(1 + exponent).
+                let speed = if distance(speed) > decay.max_distance {
+                    speed * (decay.max_distance / distance(speed)).powf(1.0 / (1.0 + exponent))
+                } else {
+                    speed
+                };
+                GlidePlan::new(distance(speed), seconds(speed), 0.0, Some(easing))
+            }
         }
-        GlidePlan::new((speed - stop_speed) / rate, (speed / stop_speed).ln() / rate, rate, None)
-    }
-
-    /// A caller's planned glide `distance` long, or nothing when it doesn't
-    /// move.
-    fn planned(distance: f64, duration: Duration, easing: MomentumEasing) -> Option<GlidePlan> {
-        GlidePlan::new(distance, duration.as_secs_f64(), 0.0, Some(easing))
     }
 
     /// A glide too short or too long for the clock doesn't move.
     fn new(distance: f64, seconds: f64, rate: f64, easing: Option<MomentumEasing>) -> Option<GlidePlan> {
-        if distance.is_nan() || distance <= 0.0 {
+        if !distance.is_finite() || distance <= 0.0 {
             return None;
         }
         let duration = nanos_from_secs(seconds).filter(|duration| !duration.is_zero())?;
@@ -318,30 +322,17 @@ impl GlidePlan {
 
     /// A scalar part's plan and its signed distance.
     fn scalar(glide: &MomentumGlide<f64>) -> Option<(GlidePlan, f64)> {
-        match *glide {
-            MomentumGlide::Friction { velocity, friction } => {
-                let plan = GlidePlan::friction(velocity.abs(), &friction)?;
-                Some((plan, plan.distance.copysign(velocity)))
-            }
-            MomentumGlide::Planned { delta, duration, easing } => {
-                Some((GlidePlan::planned(delta.abs(), duration, easing)?, delta))
-            }
-        }
+        let plan = GlidePlan::plan(glide.velocity.abs(), &glide.decay)?;
+        Some((plan, plan.distance.copysign(glide.velocity)))
     }
 
     /// The pan's plan and its offset on screen.
     fn pan(glide: &MomentumGlide<ScreenCoordinate>) -> Option<(GlidePlan, ScreenCoordinate)> {
-        match *glide {
-            MomentumGlide::Friction { velocity, friction } => {
-                let speed = velocity.x.hypot(velocity.y);
-                let plan = GlidePlan::friction(speed, &friction)?;
-                let scale = plan.distance / speed;
-                Some((plan, ScreenCoordinate::new(velocity.x * scale, velocity.y * scale)))
-            }
-            MomentumGlide::Planned { delta, duration, easing } => {
-                Some((GlidePlan::planned(delta.x.hypot(delta.y), duration, easing)?, delta))
-            }
-        }
+        let velocity = glide.velocity;
+        let speed = velocity.x.hypot(velocity.y);
+        let plan = GlidePlan::plan(speed, &glide.decay)?;
+        let scale = plan.distance / speed;
+        Some((plan, ScreenCoordinate::new(velocity.x * scale, velocity.y * scale)))
     }
 
     /// The share of the distance covered after `elapsed`, from 0 to 1.

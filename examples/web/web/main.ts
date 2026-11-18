@@ -332,6 +332,11 @@ map.onmessage = ({ data }: MessageEvent<FromMap>) => {
     case "box":
       showBox(data.box);
       break;
+    case "notch":
+      // Phones that vibrate tick; elsewhere `vibrate` is missing or does
+      // nothing.
+      navigator.vibrate?.(10);
+      break;
     case "status":
       status.textContent = data.text;
       break;
@@ -489,15 +494,24 @@ canvas.addEventListener(
   },
   { passive: false },
 );
+// Shift and Ctrl change what a drag does (Shift draws a box, Ctrl rotates),
+// so the map learns of them as they go down and up.
+const MODIFIER_KEYS = new Set(["Shift", "Control"]);
+const keyEvent = (e: KeyboardEvent) => {
+  if (MODIFIER_KEYS.has(e.key))
+    send({ kind: "modifiers", modifiers: modifiers(e), time: time(e) });
+};
 canvas.addEventListener("keydown", (e) => {
+  keyEvent(e);
   if (KEYS.has(e.key)) e.preventDefault();
   if (KEYS.has(e.key) || e.key === "Escape")
     send({ kind: "key", key: e.key, modifiers: modifiers(e), time: time(e) });
 });
+canvas.addEventListener("keyup", keyEvent);
 canvas.addEventListener("blur", (e) => send({ kind: "blur", time: time(e) }));
 canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
-// A Shift-drag's box, which the worker reports while it is drawn.
+// A box-zoom drag's box, which the worker reports while it is drawn.
 const box = element("box", HTMLElement);
 function showBox(corners: Box | null) {
   box.hidden = !corners;

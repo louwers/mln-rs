@@ -18,7 +18,8 @@ pub use camera::{
     GesturePhase, TransitionEnd, TransitionOutcome,
 };
 pub use camera_momentum::{
-    AnchoredMomentum, CameraMomentum, MomentumEasing, MomentumFriction, MomentumGlide, MomentumSnap,
+    AnchoredMomentum, CameraMomentum, InvalidMomentum, MomentumDecay, MomentumDecayModel, MomentumEasing,
+    MomentumGlide, MomentumSnap,
 };
 pub use frame_projection::{ClipDepthRange, FrameProjection};
 pub use map_view::{Camera, LogicalExtent, MapView, Viewport};

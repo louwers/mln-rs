@@ -1,8 +1,6 @@
 //! `camera.h`: the camera's commands and queries, the map's viewport, tile and
 //! debug settings, and the camera that shows one tile.
 
-mod momentum;
-
 use core::ffi::c_void;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -30,30 +28,29 @@ use crate::generated::types::{
     MLN_ANIMATION_OPTION_MIN_ZOOM, MLN_ANIMATION_OPTION_TRANSITION_ID, MLN_ANIMATION_OPTION_VELOCITY,
     MLN_BOUND_OPTION_BOUNDS, MLN_BOUND_OPTION_MAX_PITCH, MLN_BOUND_OPTION_MAX_ZOOM, MLN_BOUND_OPTION_MIN_PITCH,
     MLN_BOUND_OPTION_MIN_ZOOM, MLN_BOUND_OPTION_UNBOUNDED, MLN_CAMERA_DELTA_ANCHOR, MLN_CAMERA_DELTA_BEARING,
-    MLN_CAMERA_DELTA_MOMENTUM, MLN_CAMERA_DELTA_OFFSET, MLN_CAMERA_DELTA_PITCH, MLN_CAMERA_DELTA_SCALE,
-    MLN_CAMERA_FIT_OPTION_BEARING, MLN_CAMERA_FIT_OPTION_PADDING, MLN_CAMERA_FIT_OPTION_PITCH,
-    MLN_CAMERA_OPTION_ANCHOR, MLN_CAMERA_OPTION_BEARING, MLN_CAMERA_OPTION_CENTER, MLN_CAMERA_OPTION_CENTER_ALTITUDE,
-    MLN_CAMERA_OPTION_FOV, MLN_CAMERA_OPTION_PADDING, MLN_CAMERA_OPTION_PITCH, MLN_CAMERA_OPTION_ROLL,
-    MLN_CAMERA_OPTION_ZOOM, MLN_CAMERA_TRANSITION_OUTCOME_CANCELLED, MLN_CAMERA_TRANSITION_OUTCOME_CLOSED,
-    MLN_CAMERA_TRANSITION_OUTCOME_COMPLETED, MLN_CAMERA_TRANSITION_OUTCOME_REPLACED, MLN_CAMERA_UPDATE_MODE_EASE,
-    MLN_CAMERA_UPDATE_MODE_FLY, MLN_CAMERA_UPDATE_MODE_JUMP, MLN_CONSTRAIN_MODE_HEIGHT_ONLY, MLN_CONSTRAIN_MODE_NONE,
-    MLN_CONSTRAIN_MODE_SCREEN, MLN_CONSTRAIN_MODE_WIDTH_AND_HEIGHT, MLN_FREE_CAMERA_OPTION_ORIENTATION,
-    MLN_FREE_CAMERA_OPTION_POSITION, MLN_GESTURE_PHASE_BEGIN, MLN_GESTURE_PHASE_CANCEL, MLN_GESTURE_PHASE_END,
-    MLN_GESTURE_PHASE_NONE, MLN_GESTURE_PHASE_UPDATE, MLN_MAP_DEBUG_COLLISION, MLN_MAP_DEBUG_DEPTH_BUFFER,
-    MLN_MAP_DEBUG_OVERDRAW, MLN_MAP_DEBUG_PARSE_STATUS, MLN_MAP_DEBUG_STENCIL_CLIP, MLN_MAP_DEBUG_TILE_BORDERS,
-    MLN_MAP_DEBUG_TIMESTAMPS, MLN_MAP_TILE_OPTION_LOD_MIN_RADIUS, MLN_MAP_TILE_OPTION_LOD_MODE,
-    MLN_MAP_TILE_OPTION_LOD_PITCH_THRESHOLD, MLN_MAP_TILE_OPTION_LOD_SCALE, MLN_MAP_TILE_OPTION_LOD_ZOOM_SHIFT,
-    MLN_MAP_TILE_OPTION_PREFETCH_ZOOM_DELTA, MLN_MAP_VIEWPORT_OPTION_CONSTRAIN_MODE,
-    MLN_MAP_VIEWPORT_OPTION_FRUSTUM_OFFSET, MLN_MAP_VIEWPORT_OPTION_NORTH_ORIENTATION,
-    MLN_MAP_VIEWPORT_OPTION_VIEWPORT_MODE, MLN_NORTH_ORIENTATION_DOWN, MLN_NORTH_ORIENTATION_LEFT,
-    MLN_NORTH_ORIENTATION_RIGHT, MLN_NORTH_ORIENTATION_UP, MLN_PROJECTION_MODE_OPTION_AXONOMETRIC,
-    MLN_PROJECTION_MODE_OPTION_X_SKEW, MLN_PROJECTION_MODE_OPTION_Y_SKEW, MLN_TILE_LOD_MODE_DEFAULT,
-    MLN_TILE_LOD_MODE_DISTANCE, MLN_VIEWPORT_MODE_DEFAULT, MLN_VIEWPORT_MODE_FLIPPED_Y, mln_animation_options,
-    mln_bound_options, mln_buffer_view, mln_camera, mln_camera_delta, mln_camera_fit_options, mln_camera_fit_update,
-    mln_camera_options, mln_camera_query_result, mln_camera_transition_end, mln_camera_transition_handler,
-    mln_camera_update, mln_camera_velocity, mln_canonical_tile_id, mln_completion, mln_diagnostic, mln_edge_insets,
-    mln_free_camera_options, mln_lat_lng, mln_lat_lng_bounds, mln_logical_size, mln_map, mln_map_debug_flags,
-    mln_map_tile_options, mln_map_viewport_options, mln_projection_mode_options, mln_screen_point, mln_status,
+    MLN_CAMERA_DELTA_OFFSET, MLN_CAMERA_DELTA_PITCH, MLN_CAMERA_DELTA_SCALE, MLN_CAMERA_FIT_OPTION_BEARING,
+    MLN_CAMERA_FIT_OPTION_PADDING, MLN_CAMERA_FIT_OPTION_PITCH, MLN_CAMERA_OPTION_ANCHOR, MLN_CAMERA_OPTION_BEARING,
+    MLN_CAMERA_OPTION_CENTER, MLN_CAMERA_OPTION_CENTER_ALTITUDE, MLN_CAMERA_OPTION_FOV, MLN_CAMERA_OPTION_PADDING,
+    MLN_CAMERA_OPTION_PITCH, MLN_CAMERA_OPTION_ROLL, MLN_CAMERA_OPTION_ZOOM, MLN_CAMERA_TRANSITION_OUTCOME_CANCELLED,
+    MLN_CAMERA_TRANSITION_OUTCOME_CLOSED, MLN_CAMERA_TRANSITION_OUTCOME_COMPLETED,
+    MLN_CAMERA_TRANSITION_OUTCOME_REPLACED, MLN_CAMERA_UPDATE_MODE_EASE, MLN_CAMERA_UPDATE_MODE_FLY,
+    MLN_CAMERA_UPDATE_MODE_JUMP, MLN_CONSTRAIN_MODE_HEIGHT_ONLY, MLN_CONSTRAIN_MODE_NONE, MLN_CONSTRAIN_MODE_SCREEN,
+    MLN_CONSTRAIN_MODE_WIDTH_AND_HEIGHT, MLN_FREE_CAMERA_OPTION_ORIENTATION, MLN_FREE_CAMERA_OPTION_POSITION,
+    MLN_MAP_DEBUG_COLLISION, MLN_MAP_DEBUG_DEPTH_BUFFER, MLN_MAP_DEBUG_OVERDRAW, MLN_MAP_DEBUG_PARSE_STATUS,
+    MLN_MAP_DEBUG_STENCIL_CLIP, MLN_MAP_DEBUG_TILE_BORDERS, MLN_MAP_DEBUG_TIMESTAMPS,
+    MLN_MAP_TILE_OPTION_LOD_MIN_RADIUS, MLN_MAP_TILE_OPTION_LOD_MODE, MLN_MAP_TILE_OPTION_LOD_PITCH_THRESHOLD,
+    MLN_MAP_TILE_OPTION_LOD_SCALE, MLN_MAP_TILE_OPTION_LOD_ZOOM_SHIFT, MLN_MAP_TILE_OPTION_PREFETCH_ZOOM_DELTA,
+    MLN_MAP_VIEWPORT_OPTION_CONSTRAIN_MODE, MLN_MAP_VIEWPORT_OPTION_FRUSTUM_OFFSET,
+    MLN_MAP_VIEWPORT_OPTION_NORTH_ORIENTATION, MLN_MAP_VIEWPORT_OPTION_VIEWPORT_MODE, MLN_NORTH_ORIENTATION_DOWN,
+    MLN_NORTH_ORIENTATION_LEFT, MLN_NORTH_ORIENTATION_RIGHT, MLN_NORTH_ORIENTATION_UP,
+    MLN_PROJECTION_MODE_OPTION_AXONOMETRIC, MLN_PROJECTION_MODE_OPTION_X_SKEW, MLN_PROJECTION_MODE_OPTION_Y_SKEW,
+    MLN_TILE_LOD_MODE_DEFAULT, MLN_TILE_LOD_MODE_DISTANCE, MLN_VIEWPORT_MODE_DEFAULT, MLN_VIEWPORT_MODE_FLIPPED_Y,
+    mln_animation_options, mln_bound_options, mln_buffer_view, mln_camera, mln_camera_delta, mln_camera_fit_options,
+    mln_camera_fit_update, mln_camera_options, mln_camera_query_result, mln_camera_transition_end,
+    mln_camera_transition_handler, mln_camera_update, mln_canonical_tile_id, mln_completion, mln_diagnostic,
+    mln_edge_insets, mln_free_camera_options, mln_lat_lng, mln_lat_lng_bounds, mln_logical_size, mln_map,
+    mln_map_debug_flags, mln_map_tile_options, mln_map_viewport_options, mln_projection_mode_options, mln_screen_point,
+    mln_status,
 };
 use crate::map::{command, query};
 use crate::{buffer, geo, handles};
@@ -175,12 +172,12 @@ unsafe fn read_struct<T: abi::Versioned>(pointer: *const T, message: &'static st
 /// Whether `milliseconds` converts to a [`Duration`] of whole nanoseconds:
 /// finite, not negative, and below `u64::MAX` nanoseconds, which the nearest
 /// double rounds up past.
-fn is_duration_ms(milliseconds: f64) -> bool {
+pub(crate) fn is_duration_ms(milliseconds: f64) -> bool {
     milliseconds.is_finite() && milliseconds >= 0.0 && milliseconds * 1e6 < u64::MAX as f64
 }
 
 /// `milliseconds`, which [`is_duration_ms`] accepts, in whole nanoseconds.
-fn duration(milliseconds: f64) -> Duration {
+pub(crate) fn duration(milliseconds: f64) -> Duration {
     Duration::from_nanos((milliseconds * 1e6) as u64)
 }
 
@@ -253,7 +250,6 @@ impl Drop for EndHandler {
 }
 
 fn from_transition_end(end: &TransitionEnd) -> mln_camera_transition_end {
-    let velocity = end.velocity;
     mln_camera_transition_end {
         size: size_of::<mln_camera_transition_end>() as u32,
         outcome: match end.outcome {
@@ -263,12 +259,6 @@ fn from_transition_end(end: &TransitionEnd) -> mln_camera_transition_end {
             TransitionOutcome::Closed => MLN_CAMERA_TRANSITION_OUTCOME_CLOSED,
         },
         generation: end.generation,
-        velocity: mln_camera_velocity {
-            pan: geo::from_screen_point(velocity.pan),
-            zoom: velocity.zoom,
-            bearing: velocity.bearing,
-            pitch: velocity.pitch,
-        },
     }
 }
 
@@ -366,17 +356,6 @@ fn update_mode(mode: u32) -> Option<CameraUpdateMode> {
         MLN_CAMERA_UPDATE_MODE_JUMP => Some(CameraUpdateMode::Jump),
         MLN_CAMERA_UPDATE_MODE_EASE => Some(CameraUpdateMode::Ease),
         MLN_CAMERA_UPDATE_MODE_FLY => Some(CameraUpdateMode::Fly),
-        _ => None,
-    }
-}
-
-fn gesture_phase(phase: u32) -> Option<GesturePhase> {
-    match phase {
-        MLN_GESTURE_PHASE_NONE => Some(GesturePhase::None),
-        MLN_GESTURE_PHASE_BEGIN => Some(GesturePhase::Begin),
-        MLN_GESTURE_PHASE_UPDATE => Some(GesturePhase::Update),
-        MLN_GESTURE_PHASE_END => Some(GesturePhase::End),
-        MLN_GESTURE_PHASE_CANCEL => Some(GesturePhase::Cancel),
         _ => None,
     }
 }
@@ -606,13 +585,13 @@ pub(crate) unsafe extern "C" fn mln_map_update_camera(
     export!(out_diagnostic, {
         // SAFETY: the caller's contract.
         let update = unsafe { read_struct(update, "camera update must have a valid size") }?;
-        let (Some(mode), Some(phase)) = (update_mode(update.mode), gesture_phase(update.gesture_phase)) else {
-            return Err(Error::invalid_argument("camera update mode or gesture phase is invalid"));
+        let Some(mode) = update_mode(update.mode) else {
+            return Err(Error::invalid_argument("camera update mode is invalid"));
         };
         // The update versions the camera that it holds.
         let camera = camera_options(&update.camera)?;
         let Animation { options: animation, handler } = Animation::new(&update.animation)?;
-        let update = CameraUpdate { mode, camera, animation, phase };
+        let update = CameraUpdate { mode, camera, animation, phase: GesturePhase::None };
         // SAFETY: the caller's contract.
         unsafe {
             command(map, completion, move |map| send_with(handler, |on_end| map.update_camera_then(update, on_end)))
@@ -624,8 +603,7 @@ const KNOWN_DELTA_FIELDS: u32 = MLN_CAMERA_DELTA_OFFSET
     | MLN_CAMERA_DELTA_SCALE
     | MLN_CAMERA_DELTA_BEARING
     | MLN_CAMERA_DELTA_PITCH
-    | MLN_CAMERA_DELTA_ANCHOR
-    | MLN_CAMERA_DELTA_MOMENTUM;
+    | MLN_CAMERA_DELTA_ANCHOR;
 
 /// `mln_map_apply_camera_delta()`.
 ///
@@ -643,11 +621,8 @@ pub(crate) unsafe extern "C" fn mln_map_apply_camera_delta(
         // SAFETY: the caller's contract.
         let delta = unsafe { read_struct(delta, "camera delta must have a valid size") }?;
         let fields = Fields::new(delta.fields, KNOWN_DELTA_FIELDS, "mln_camera_delta.fields")?;
-        let phase = gesture_phase(delta.gesture_phase)
-            .ok_or_else(|| Error::invalid_argument("camera delta gesture phase is invalid"))?;
         let offset = fields.get(MLN_CAMERA_DELTA_OFFSET, delta.offset).map(geo::screen_point).transpose()?;
         let anchor = fields.get(MLN_CAMERA_DELTA_ANCHOR, delta.anchor);
-        let momentum = fields.get(MLN_CAMERA_DELTA_MOMENTUM, &delta.momentum).map(momentum::momentum).transpose()?;
         let Animation { options: animation, handler } = Animation::new(&delta.animation)?;
         let delta = CameraDelta {
             offset,
@@ -655,9 +630,9 @@ pub(crate) unsafe extern "C" fn mln_map_apply_camera_delta(
             bearing: fields.get(MLN_CAMERA_DELTA_BEARING, delta.bearing),
             pitch: fields.get(MLN_CAMERA_DELTA_PITCH, delta.pitch),
             anchor: anchor.map(|anchor| ScreenCoordinate::new(anchor.x, anchor.y)),
-            momentum,
+            momentum: None,
             animation,
-            phase,
+            phase: GesturePhase::None,
         };
         delta.validate().map_err(|error| Error::invalid_argument(error.to_string()))?;
         // SAFETY: the caller's contract.

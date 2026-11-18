@@ -127,6 +127,11 @@ typedef uint64_t mln_map MLN_BINDING(
   "kind=handle;release=mln_map_release;parent=mln_runtime;"
   "dispose=mln_map_dispose"
 );
+/** A gesture recognizer that moves a map's camera. */
+typedef uint64_t mln_gesture_recognizer MLN_BINDING(
+  "kind=handle;release=mln_gesture_recognizer_release;"
+  "dispose=mln_gesture_recognizer_release"
+);
 /** A parsed style expression. */
 typedef uint64_t mln_style_expression MLN_BINDING(
   "kind=handle;release=mln_style_expression_release;"

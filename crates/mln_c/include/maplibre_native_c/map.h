@@ -378,11 +378,10 @@ typedef enum mln_camera_transition_outcome : uint32_t {
   MLN_CAMERA_TRANSITION_OUTCOME_COMPLETED = 0,
   /**
    * mln_map_cancel_camera_transitions(),
-   * mln_map_cancel_camera_transitions_with_id(), a gesture's
-   * MLN_GESTURE_PHASE_BEGIN or MLN_GESTURE_PHASE_CANCEL,
-   * mln_map_set_free_camera_options(), or a resize that moved the camera back
-   * inside its bounds stopped the change. A command that fails before it moves
-   * the camera also reports this.
+   * mln_map_cancel_camera_transitions_with_id(), a gesture that a gesture
+   * recognizer begins or cancels, mln_map_set_free_camera_options(), or a
+   * resize that moved the camera back inside its bounds stopped the change. A
+   * command that fails before it moves the camera also reports this.
    */
   MLN_CAMERA_TRANSITION_OUTCOME_CANCELLED = 1,
   /** The map closed before the change ended. */
@@ -399,21 +398,6 @@ typedef enum mln_camera_transition_outcome : uint32_t {
   MLN_CAMERA_TRANSITION_OUTCOME_REPLACED = 3,
 } mln_camera_transition_outcome;
 
-/** How fast each part of a camera change moves. */
-typedef struct mln_camera_velocity {
-  /**
-   * How fast the map's content moves on the screen, in logical pixels per
-   * second.
-   */
-  mln_screen_point pan;
-  /** In zoom levels per second. */
-  double zoom;
-  /** In degrees per second. */
-  double bearing;
-  /** In degrees per second. */
-  double pitch;
-} mln_camera_velocity;
-
 /** The end of a camera change. */
 typedef struct mln_camera_transition_end {
   uint32_t size;
@@ -423,12 +407,6 @@ typedef struct mln_camera_transition_end {
    * the camera, or 0 when the map closed first.
    */
   uint64_t generation;
-  /**
-   * How fast a gesture's momentum still moved when it was cancelled, which the
-   * next gesture can add to its own release velocities. Zero for every other
-   * end.
-   */
-  mln_camera_velocity velocity;
 } mln_camera_transition_end;
 
 /**
@@ -497,231 +475,6 @@ typedef enum mln_camera_update_mode : uint32_t {
   MLN_CAMERA_UPDATE_MODE_FLY = 2,
 } mln_camera_update_mode;
 
-/**
- * Where a camera change falls in a gesture that the user makes.
- *
- * MLN_GESTURE_PHASE_BEGIN and MLN_GESTURE_PHASE_UPDATE mark a gesture in
- * progress, and MLN_GESTURE_PHASE_END and MLN_GESTURE_PHASE_CANCEL end it.
- */
-typedef enum mln_gesture_phase : uint32_t {
-  /** The change isn't part of a gesture. */
-  MLN_GESTURE_PHASE_NONE = 0,
-  /**
-   * The gesture starts. This cancels every running camera animation before
-   * the change applies.
-   */
-  MLN_GESTURE_PHASE_BEGIN = 1,
-  /**
-   * The gesture continues. To start a gesture that keeps the running camera
-   * animations, start it with this phase instead of MLN_GESTURE_PHASE_BEGIN.
-   */
-  MLN_GESTURE_PHASE_UPDATE = 2,
-  MLN_GESTURE_PHASE_END = 3,
-  /**
-   * The platform cancelled the gesture. This also cancels every running camera
-   * animation after the change applies.
-   */
-  MLN_GESTURE_PHASE_CANCEL = 4,
-} mln_gesture_phase;
-
-/** The fields that mln_momentum_friction sets. */
-typedef enum MLN_BINDING(
-  "kind=bitmask"
-) mln_momentum_friction_field : uint32_t {
-  MLN_MOMENTUM_FRICTION_HALF_LIFE_MS = 1U << 0U,
-  MLN_MOMENTUM_FRICTION_STOP_SPEED = 1U << 1U,
-  MLN_MOMENTUM_FRICTION_MIN_SPEED = 1U << 2U,
-  MLN_MOMENTUM_FRICTION_MAX_SPEED = 1U << 3U,
-  MLN_MOMENTUM_FRICTION_MAX_DISTANCE = 1U << 4U,
-} mln_momentum_friction_field;
-
-/** A set of mln_momentum_friction_field bits. */
-typedef uint32_t mln_momentum_friction_fields;
-
-/**
- * How a part slows from its release speed by friction: the speed halves every
- * `half_life_ms`, until it drops to `stop_speed`.
- *
- * Speeds and distances are in the part's unit: logical pixels for pan, zoom
- * levels for zoom, and degrees for bearing and pitch. A setting whose bit
- * isn't set takes the part's default, which mln_gesture_momentum lists.
- * `min_speed` is finite and not negative, and every other number is finite
- * and positive. UIScrollView's normal deceleration is a half-life of 346 ms,
- * and its fast deceleration 69 ms.
- */
-typedef struct mln_momentum_friction {
-  mln_momentum_friction_fields fields;
-  double half_life_ms
-    MLN_BINDING("mask=fields;bit=MLN_MOMENTUM_FRICTION_HALF_LIFE_MS");
-  /** The speed at which the glide ends. */
-  double stop_speed
-    MLN_BINDING("mask=fields;bit=MLN_MOMENTUM_FRICTION_STOP_SPEED");
-  /** A slower release doesn't glide. */
-  double min_speed
-    MLN_BINDING("mask=fields;bit=MLN_MOMENTUM_FRICTION_MIN_SPEED");
-  /** A faster release counts as this. */
-  double max_speed
-    MLN_BINDING("mask=fields;bit=MLN_MOMENTUM_FRICTION_MAX_SPEED");
-  /**
-   * The farthest the part glides. A release that would glide farther starts
-   * slower, so it ends sooner.
-   */
-  double max_distance
-    MLN_BINDING("mask=fields;bit=MLN_MOMENTUM_FRICTION_MAX_DISTANCE");
-} mln_momentum_friction;
-
-/** The fields that mln_pan_momentum sets. */
-typedef enum MLN_BINDING("kind=bitmask") mln_pan_momentum_field : uint32_t {
-  MLN_PAN_MOMENTUM_VELOCITY = 1U << 0U,
-  MLN_PAN_MOMENTUM_DELTA = 1U << 1U,
-  MLN_PAN_MOMENTUM_DURATION_MS = 1U << 2U,
-  MLN_PAN_MOMENTUM_EASING = 1U << 3U,
-} mln_pan_momentum_field;
-
-/** A set of mln_pan_momentum_field bits. */
-typedef uint32_t mln_pan_momentum_fields;
-
-/**
- * How a gesture's pan keeps moving the map's content after release.
- *
- * The pan glides from its release `velocity`, slowing by `friction`, or it
- * moves by `delta` over `duration_ms`, as the caller planned the glide, for
- * example from the platform's own fling physics. It does one or the other, or
- * neither, and then stops. On a tilted map, the content moves the same
- * distance on the screen in every direction.
- */
-typedef struct mln_pan_momentum {
-  mln_pan_momentum_fields fields;
-  /**
-   * How fast the map's content moved on the screen at release, in logical
-   * pixels per second.
-   */
-  mln_screen_point velocity
-    MLN_BINDING("mask=fields;bit=MLN_PAN_MOMENTUM_VELOCITY");
-  /** How the glide from `velocity` slows. Read only with `velocity`. */
-  mln_momentum_friction friction;
-  /** How far the map's content moves on the screen, in logical pixels. */
-  mln_screen_point delta MLN_BINDING("mask=fields;bit=MLN_PAN_MOMENTUM_DELTA");
-  /** How long `delta` takes. Positive, and required with `delta`. */
-  double duration_ms
-    MLN_BINDING("mask=fields;bit=MLN_PAN_MOMENTUM_DURATION_MS");
-  /**
-   * The share of `delta` covered over the share of `duration_ms`. Its control
-   * points are between 0 and 1, so the glide never passes `delta`. Defaults to
-   * (0, 0, 0.25, 1), the curve that camera animations ease along by default.
-   * Android's scroll fling follows (0.175, 0.5, 0.35, 1). Only with `delta`.
-   */
-  mln_unit_bezier easing MLN_BINDING("mask=fields;bit=MLN_PAN_MOMENTUM_EASING");
-} mln_pan_momentum;
-
-/** The fields that mln_momentum_snap sets. */
-typedef enum MLN_BINDING("kind=bitmask") mln_momentum_snap_field : uint32_t {
-  MLN_MOMENTUM_SNAP_SPACING = 1U << 0U,
-  MLN_MOMENTUM_SNAP_OFFSET = 1U << 1U,
-  MLN_MOMENTUM_SNAP_TOLERANCE = 1U << 2U,
-  MLN_MOMENTUM_SNAP_DURATION_MS = 1U << 3U,
-} mln_momentum_snap_field;
-
-/** A set of mln_momentum_snap_field bits. */
-typedef uint32_t mln_momentum_snap_fields;
-
-/**
- * Where a part settles after a gesture that changed it.
- *
- * The targets are every `spacing` from `offset`, in the part's unit. Bearing
- * targets lie within one turn from `offset`, and the bearing takes the
- * shorter way around to the nearest. Once the part's glide ends, or right
- * away when it has none, the part eases to the nearest target if it is within
- * `tolerance` of it, and otherwise stays where it is. A setting whose bit
- * isn't set takes the part's default, which mln_gesture_momentum lists.
- */
-typedef struct mln_momentum_snap {
-  mln_momentum_snap_fields fields;
-  /** Positive. */
-  double spacing MLN_BINDING("mask=fields;bit=MLN_MOMENTUM_SNAP_SPACING");
-  /** Defaults to 0. */
-  double offset MLN_BINDING("mask=fields;bit=MLN_MOMENTUM_SNAP_OFFSET");
-  /** Not negative. */
-  double tolerance MLN_BINDING("mask=fields;bit=MLN_MOMENTUM_SNAP_TOLERANCE");
-  /** Zero settles without easing. Defaults to 300. */
-  double duration_ms
-    MLN_BINDING("mask=fields;bit=MLN_MOMENTUM_SNAP_DURATION_MS");
-} mln_momentum_snap;
-
-/** The fields that mln_anchored_momentum sets. */
-typedef enum MLN_BINDING(
-  "kind=bitmask"
-) mln_anchored_momentum_field : uint32_t {
-  MLN_ANCHORED_MOMENTUM_VELOCITY = 1U << 0U,
-  MLN_ANCHORED_MOMENTUM_DELTA = 1U << 1U,
-  MLN_ANCHORED_MOMENTUM_DURATION_MS = 1U << 2U,
-  MLN_ANCHORED_MOMENTUM_EASING = 1U << 3U,
-  MLN_ANCHORED_MOMENTUM_ANCHOR = 1U << 4U,
-  MLN_ANCHORED_MOMENTUM_SNAP = 1U << 5U,
-} mln_anchored_momentum_field;
-
-/** A set of mln_anchored_momentum_field bits. */
-typedef uint32_t mln_anchored_momentum_fields;
-
-/**
- * How a gesture's zoom, bearing, or pitch keeps changing after release.
- *
- * The part glides from its release `velocity`, slowing by `friction`, or it
- * changes by `delta` over `duration_ms`, as the caller planned the glide. It
- * does one or the other, or neither, and then settles on its snap. Values
- * are in the part's unit: zoom levels for zoom, and degrees for bearing and
- * pitch.
- */
-typedef struct mln_anchored_momentum {
-  mln_anchored_momentum_fields fields;
-  /** How fast the value changed at release, per second. */
-  double velocity MLN_BINDING("mask=fields;bit=MLN_ANCHORED_MOMENTUM_VELOCITY");
-  /** How the glide from `velocity` slows. Read only with `velocity`. */
-  mln_momentum_friction friction;
-  /** How far the value changes, signed. */
-  double delta MLN_BINDING("mask=fields;bit=MLN_ANCHORED_MOMENTUM_DELTA");
-  /** How long `delta` takes. Positive, and required with `delta`. */
-  double duration_ms
-    MLN_BINDING("mask=fields;bit=MLN_ANCHORED_MOMENTUM_DURATION_MS");
-  /** As mln_pan_momentum's `easing`. Only with `delta`. */
-  mln_unit_bezier easing
-    MLN_BINDING("mask=fields;bit=MLN_ANCHORED_MOMENTUM_EASING");
-  /**
-   * The screen point that the change keeps in place. Without one, the change
-   * keeps the center of the view in place.
-   */
-  mln_screen_point anchor
-    MLN_BINDING("mask=fields;bit=MLN_ANCHORED_MOMENTUM_ANCHOR");
-  /**
-   * Where the part settles. Without this, it stays where the gesture and its
-   * glide leave it.
-   */
-  mln_momentum_snap snap
-    MLN_BINDING("mask=fields;bit=MLN_ANCHORED_MOMENTUM_SNAP");
-} mln_anchored_momentum;
-
-/**
- * How a gesture keeps moving the camera after the user lets go.
- *
- * Each part glides on its own. Friction defaults to a half-life of 140 ms, a
- * minimum speed of 0, and no maximum speed or distance, with these exceptions:
- *
- * - Pan stops at 10 logical pixels per second, needs a release of at least
- *   200, and counts a release faster than 10000 as 10000.
- * - Zoom stops at 0.01 levels per second and glides at most 2.5 levels. Its
- *   snap settles on the nearest whole level.
- * - Bearing stops at 1 degree per second and needs a release of at least 60.
- *   Its snap settles on north within 7 degrees.
- * - Pitch stops at 1 degree per second and needs a release of at least 5. Its
- *   snap settles flat within 7 degrees.
- */
-typedef struct mln_gesture_momentum {
-  mln_pan_momentum pan;
-  mln_anchored_momentum zoom;
-  mln_anchored_momentum bearing;
-  mln_anchored_momentum pitch;
-} mln_gesture_momentum;
-
 /** The fields that mln_camera_delta sets. */
 typedef enum MLN_BINDING("kind=bitmask") mln_camera_delta_field : uint32_t {
   MLN_CAMERA_DELTA_OFFSET = 1U << 0U,
@@ -729,13 +482,12 @@ typedef enum MLN_BINDING("kind=bitmask") mln_camera_delta_field : uint32_t {
   MLN_CAMERA_DELTA_BEARING = 1U << 2U,
   MLN_CAMERA_DELTA_PITCH = 1U << 3U,
   MLN_CAMERA_DELTA_ANCHOR = 1U << 4U,
-  MLN_CAMERA_DELTA_MOMENTUM = 1U << 5U,
 } mln_camera_delta_field;
 
 /** A set of mln_camera_delta_field bits. */
 typedef uint32_t mln_camera_delta_fields;
 
-/** A change to the camera from where it is now, for gestures. */
+/** A change to the camera from where it is now. */
 typedef struct mln_camera_delta {
   uint32_t size;
   mln_camera_delta_fields fields;
@@ -755,15 +507,7 @@ typedef struct mln_camera_delta {
    */
   mln_screen_point anchor
     MLN_BINDING("mask=fields;bit=MLN_CAMERA_DELTA_ANCHOR");
-  /**
-   * How the gesture keeps moving after this delta. Only a delta in the
-   * MLN_GESTURE_PHASE_END phase carries it.
-   */
-  mln_gesture_momentum momentum
-    MLN_BINDING("mask=fields;bit=MLN_CAMERA_DELTA_MOMENTUM");
   mln_animation_options animation;
-  mln_gesture_phase gesture_phase;
-  uint32_t reserved MLN_BINDING("kind=reserved");
 } mln_camera_delta;
 
 /**
@@ -777,8 +521,6 @@ typedef struct mln_camera_update {
   mln_camera_update_mode mode;
   mln_camera_options camera;
   mln_animation_options animation;
-  mln_gesture_phase gesture_phase;
-  uint32_t reserved MLN_BINDING("kind=reserved");
 } mln_camera_update;
 
 /** Options for finding the camera that fits an area. */
@@ -1403,6 +1145,10 @@ typedef struct mln_map_snapshot {
   /** Whether the style and every resource that the view needs have loaded. */
   bool fully_loaded;
   bool rendering_stats_view_enabled;
+  /**
+   * Whether a gesture recognizer's gesture, or the glide and snap after it,
+   * moves the camera.
+   */
   bool gesture_in_progress;
   bool transition_in_progress;
   mln_runtime_event_flags event_mask;

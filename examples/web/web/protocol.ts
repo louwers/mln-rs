@@ -58,6 +58,8 @@ export type Input =
       time: number;
     }
   | { kind: "key"; key: string; modifiers: number; time: number }
+  // A modifier key went down or up: the modifiers held now.
+  | { kind: "modifiers"; modifiers: number; time: number }
   | { kind: "blur"; time: number };
 
 /** WebMap::wheel's `kind`: continuous scrolling, in pixels. */
@@ -131,7 +133,7 @@ export interface Pixels {
   pixels: Uint8Array;
 }
 
-/** A Shift-drag's box, [x0, y0, x1, y1] in CSS pixels. */
+/** A box-zoom drag's box, [x0, y0, x1, y1] in CSS pixels. */
 export type Box = [number, number, number, number];
 
 /** A frame that the map's Web Worker drew, for the debug overlay. */
@@ -178,6 +180,8 @@ export type FromMap =
   // The map's next animation frame has run, with the inputs before it.
   | { type: "nextFrame" }
   | { type: "box"; box: Box | null }
+  // A gesture reached a notch: the page plays its haptic.
+  | { type: "notch" }
   | { type: "camera"; camera: Camera }
   | { type: "attribution"; attribution: string[] }
   | { type: "styleName"; name: string }

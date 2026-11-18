@@ -108,6 +108,31 @@ const _: unsafe extern "C" fn(
 const _: unsafe extern "C" fn(mln_delivery_queue, *mut mln_diagnostic) -> mln_status = crate::delivery::mln_delivery_queue_dispatch;
 const _: unsafe extern "C" fn(mln_delivery_queue) = crate::delivery::mln_delivery_queue_release;
 const _: unsafe extern "C" fn(
+    mln_map,
+    *const mln_gesture_options,
+    *mut mln_gesture_recognizer,
+    *mut mln_diagnostic,
+) -> mln_status = crate::gesture::mln_gesture_recognizer_create;
+const _: unsafe extern "C" fn(
+    mln_gesture_recognizer,
+    f64,
+    *mut mln_gesture_result,
+    *mut mln_diagnostic,
+) -> mln_status = crate::gesture::mln_gesture_recognizer_frame;
+const _: unsafe extern "C" fn(
+    mln_gesture_recognizer,
+    *const mln_gesture_input,
+    f64,
+    *mut mln_gesture_result,
+    *mut mln_diagnostic,
+) -> mln_status = crate::gesture::mln_gesture_recognizer_handle;
+const _: unsafe extern "C" fn(mln_gesture_recognizer) = crate::gesture::mln_gesture_recognizer_release;
+const _: unsafe extern "C" fn(
+    mln_gesture_recognizer,
+    *const mln_gesture_options,
+    *mut mln_diagnostic,
+) -> mln_status = crate::gesture::mln_gesture_recognizer_set_options;
+const _: unsafe extern "C" fn(
     *const mln_gpu_device_options,
     *mut mln_gpu_device,
     *mut mln_diagnostic,

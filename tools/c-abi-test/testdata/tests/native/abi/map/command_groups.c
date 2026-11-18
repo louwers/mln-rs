@@ -83,33 +83,6 @@ static void a_style_command_publishes_one_render_update(void) {
   mln_test_destroy_runtime(runtime);
 }
 
-// A gesture phase sets the gesture flag and moves the camera, and each step
-// publishes on its own in MapLibre. One update keeps a frame from showing the
-// new camera with a stale gesture flag.
-static void a_camera_gesture_update_publishes_once(void) {
-  mln_runtime runtime = mln_test_create_runtime();
-  mln_map map = mln_test_create_map(runtime);
-  const uint32_t phases[] = {MLN_GESTURE_PHASE_BEGIN, MLN_GESTURE_PHASE_END};
-  for (size_t index = 0; index < sizeof(phases) / sizeof(phases[0]); ++index) {
-    const uint64_t before = render_update_generation(map);
-    mln_camera_update update = {
-      .size = sizeof(mln_camera_update),
-      .camera = {.size = sizeof(mln_camera_options)}
-    };
-    update.mode = MLN_CAMERA_UPDATE_MODE_JUMP;
-    update.gesture_phase = phases[index];
-    update.camera.fields = MLN_CAMERA_OPTION_ZOOM;
-    update.camera.zoom = 2.0 + (double)index;
-    MLN_TEST_AWAIT_OK(
-      mln_map_update_camera(map, &update, &completion.descriptor, NULL)
-    );
-    TEST_ASSERT_EQUAL_UINT64(before + 1, render_update_generation(map));
-  }
-
-  mln_test_destroy_map(map);
-  mln_test_destroy_runtime(runtime);
-}
-
 static void a_group_publishes_one_render_update_at_its_end(void) {
   mln_runtime runtime = mln_test_create_runtime();
   mln_map map = create_loaded_map(runtime);
@@ -229,7 +202,6 @@ static void a_map_releases_with_an_open_group(void) {
 
 MLN_TEST_GROUP {
   RUN_TEST(a_style_command_publishes_one_render_update);
-  RUN_TEST(a_camera_gesture_update_publishes_once);
   RUN_TEST(a_group_publishes_one_render_update_at_its_end);
   RUN_TEST(nested_groups_publish_at_the_outermost_end);
   RUN_TEST(a_failed_command_leaves_the_group_open);

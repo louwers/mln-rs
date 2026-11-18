@@ -4484,24 +4484,34 @@ fn friction_rate(half_life: Duration) -> f64 {
     std::f64::consts::LN_2 / half_life.as_secs_f64()
 }
 
-fn friction(half_life: Duration, stop_speed: f64) -> MomentumFriction {
-    MomentumFriction { half_life, stop_speed, ..MomentumFriction::DEFAULT }
+fn friction(half_life: Duration, stop_speed: f64) -> MomentumDecay {
+    MomentumDecay { model: MomentumDecayModel::Friction { half_life, stop_speed }, ..MomentumDecay::DEFAULT }
+}
+
+/// A curve at an even speed, `reference_speed` units per second for
+/// `duration` at that speed, whatever the release.
+fn even(reference_speed: f64, duration: Duration) -> MomentumDecay {
+    let easing = MomentumEasing { x1: 1.0 / 3.0, y1: 1.0 / 3.0, x2: 2.0 / 3.0, y2: 2.0 / 3.0 };
+    MomentumDecay {
+        model: MomentumDecayModel::Curve { reference_speed, duration, exponent: 0.0, easing },
+        ..MomentumDecay::DEFAULT
+    }
 }
 
 /// A glide from `velocity` that slows by `friction`.
-fn glide<T>(velocity: T, friction: MomentumFriction) -> MomentumGlide<T> {
-    MomentumGlide::Friction { velocity, friction }
+fn glide<T>(velocity: T, decay: MomentumDecay) -> MomentumGlide<T> {
+    MomentumGlide { velocity, decay }
 }
 
 /// A glide from `velocity` with the C++ header's plain friction, which the
 /// ported gtests use, rather than a part's own.
 fn plain<T>(velocity: T) -> MomentumGlide<T> {
-    glide(velocity, MomentumFriction::DEFAULT)
+    glide(velocity, MomentumDecay::DEFAULT)
 }
 
-/// A momentum that only pans, from `velocity` by `friction`.
-fn panning(velocity: ScreenCoordinate, friction: MomentumFriction) -> CameraMomentum {
-    CameraMomentum { pan: Some(glide(velocity, friction)), ..CameraMomentum::default() }
+/// A momentum that only pans, from `velocity` by `decay`.
+fn panning(velocity: ScreenCoordinate, decay: MomentumDecay) -> CameraMomentum {
+    CameraMomentum { pan: Some(glide(velocity, decay)), ..CameraMomentum::default() }
 }
 
 /// How long the command that `command` starts on a new transform runs: the
@@ -4593,7 +4603,7 @@ fn momentum_pans_its_distance_on_screen() {
     transform.resize(Size::new(1000, 1000)).unwrap();
     transform.jump_to(&CameraOptions { center: Some(ll(10.0, 20.0)), zoom: Some(8.0), ..Default::default() });
     let center = transform.get_lat_lng(WrapMode::Wrapped);
-    let momentum = panning(sc(1200.0, -500.0), MomentumFriction::DEFAULT);
+    let momentum = panning(sc(1200.0, -500.0), MomentumDecay::DEFAULT);
     let start = start_clock(&mut transform);
     transform.start_momentum(&momentum, &AnimationOptions::default());
     let rate = friction_rate(Duration::from_millis(140));
@@ -4619,7 +4629,7 @@ fn momentum_pans_the_globe_as_a_drag_does() {
     let mut transform = new_transform();
     set_up_globe_camera(&mut transform, &ll(10.0, 20.0), 3.0);
     let start = transform.get_lat_lng(WrapMode::Wrapped);
-    let momentum = panning(sc(0.0, 800.0), MomentumFriction::DEFAULT);
+    let momentum = panning(sc(0.0, 800.0), MomentumDecay::DEFAULT);
     let begin = start_clock(&mut transform);
     transform.start_momentum(&momentum, &AnimationOptions::default());
     transform.update_transitions(Some(begin + Duration::from_secs(3)));
@@ -4665,11 +4675,7 @@ fn momentum_follows_an_eased_glide() {
     transform.resize(Size::new(1000, 1000)).unwrap();
     transform.jump_to(&CameraOptions { zoom: Some(8.0), ..Default::default() });
     let mut momentum = CameraMomentum::default();
-    momentum.zoom.glide = Some(MomentumGlide::Planned {
-        delta: -2.0,
-        duration: Duration::from_secs(1),
-        easing: MomentumEasing { x1: 1.0 / 3.0, y1: 1.0 / 3.0, x2: 2.0 / 3.0, y2: 2.0 / 3.0 },
-    });
+    momentum.zoom.glide = Some(glide(-2.0, even(2.0, Duration::from_secs(1))));
     let (animation, ended) = record_end();
     let start = start_clock(&mut transform);
     transform.start_momentum(&momentum, &animation);
@@ -4721,7 +4727,7 @@ fn momentum_caps_its_distance() {
     transform.resize(Size::new(1000, 1000)).unwrap();
     transform.jump_to(&CameraOptions { zoom: Some(8.0), ..Default::default() });
     let mut momentum = CameraMomentum::default();
-    momentum.zoom.glide = Some(glide(50.0, MomentumFriction { max_distance: 2.5, ..MomentumFriction::DEFAULT }));
+    momentum.zoom.glide = Some(glide(50.0, MomentumDecay { max_distance: 2.5, ..MomentumDecay::DEFAULT }));
     let start = start_clock(&mut transform);
     transform.start_momentum(&momentum, &AnimationOptions::default());
     transform.update_transitions(Some(start + Duration::from_secs(3)));
@@ -4857,21 +4863,61 @@ fn momentum_stops_a_part_that_limits_hold() {
 // decays that can't glide, which the gtests don't cover.
 #[test]
 fn momentum_ignores_slow_releases_and_bad_decays() {
-    let pan = MomentumFriction::PAN;
-    assert!(GlidePlan::friction(150.0, &pan).is_none());
-    assert!(GlidePlan::friction(f64::NAN, &pan).is_none());
-    assert!(GlidePlan::friction(f64::INFINITY, &MomentumFriction::DEFAULT).is_none());
-    assert!(GlidePlan::friction(100.0, &friction(Duration::ZERO, 1.0)).is_none());
-    assert!(GlidePlan::friction(100.0, &friction(Duration::from_millis(100), 0.0)).is_none());
+    let pan = MomentumDecay::PAN;
+    assert!(GlidePlan::plan(150.0, &pan).is_none());
+    assert!(GlidePlan::plan(f64::NAN, &pan).is_none());
+    assert!(GlidePlan::plan(f64::INFINITY, &MomentumDecay::DEFAULT).is_none());
+    assert!(GlidePlan::plan(100.0, &friction(Duration::ZERO, 1.0)).is_none());
+    assert!(GlidePlan::plan(100.0, &friction(Duration::from_millis(100), 0.0)).is_none());
     // A release faster than the cap glides as the cap does.
-    let capped = GlidePlan::friction(50_000.0, &pan).unwrap();
-    let max = GlidePlan::friction(10_000.0, &pan).unwrap();
+    let capped = GlidePlan::plan(50_000.0, &pan).unwrap();
+    let max = GlidePlan::plan(10_000.0, &pan).unwrap();
     assert_eq!(capped.distance, max.distance);
     assert_eq!(capped.duration, max.duration);
     assert_near(max.distance, 9990.0 / friction_rate(Duration::from_millis(140)), 1e-9);
-    // A planned glide that goes nowhere, or takes no time, doesn't move.
-    assert!(GlidePlan::planned(0.0, Duration::from_secs(1), MomentumEasing::DEFAULT).is_none());
-    assert!(GlidePlan::planned(1.0, Duration::ZERO, MomentumEasing::DEFAULT).is_none());
+    // A curve that starts flat would start the glide at rest.
+    let flat = MomentumEasing { x1: 0.0, y1: 0.0, x2: 0.25, y2: 1.0 };
+    let model = MomentumDecayModel::Curve {
+        reference_speed: 1.0,
+        duration: Duration::from_secs(1),
+        exponent: 0.0,
+        easing: flat,
+    };
+    assert!(GlidePlan::plan(100.0, &MomentumDecay { model, ..MomentumDecay::DEFAULT }).is_none());
+    // A curve whose glide would shrink as the release speeds up is out of
+    // range.
+    let MomentumDecayModel::Curve { reference_speed, duration, easing, .. } = MomentumDecay::ANDROID_FLING.model else {
+        unreachable!()
+    };
+    for exponent in [-1.0, -2.0] {
+        let model = MomentumDecayModel::Curve { reference_speed, duration, exponent, easing };
+        let decay = MomentumDecay { model, ..MomentumDecay::ANDROID_FLING };
+        assert!(decay.validate().is_err(), "{exponent}");
+        assert!(GlidePlan::plan(1000.0, &decay).is_none(), "{exponent}");
+    }
+}
+
+// Android's fling, as its `OverScroller` plans it: the curve model with the
+// preset's numbers gives the same distance and duration.
+#[test]
+fn the_android_fling_preset_follows_androids_spline() {
+    let fling = MomentumDecay::ANDROID_FLING;
+    // A 1000 dp/s fling travels 194.3 dp over 555.2 ms, a 300 dp/s one
+    // 24.0 dp over 228.8 ms, and a 4000 dp/s one 2157 dp over 1541 ms.
+    for (speed, distance, ms) in [(1000.0, 194.314, 555.182), (300.0, 24.024, 228.800), (4000.0, 2156.95, 1540.68)] {
+        let glide = GlidePlan::plan(speed, &fling).unwrap();
+        assert_near(glide.distance, distance, distance * 1e-4);
+        assert_near(glide.duration.as_secs_f64() * 1000.0, ms, ms * 1e-4);
+        assert_eq!(glide.easing, Some(MomentumEasing::ANDROID_FLING));
+        // It starts at the release speed.
+        assert_near(glide.distance * glide.speed(Duration::ZERO), speed, speed * 1e-3);
+    }
+    assert!(GlidePlan::plan(40.0, &fling).is_none());
+    // A release that would glide past the maximum distance glides it, at
+    // the speed that does.
+    let short = GlidePlan::plan(1000.0, &MomentumDecay { max_distance: 24.024, ..fling }).unwrap();
+    assert_near(short.distance, 24.024, 1e-9);
+    assert_near(short.duration.as_secs_f64() * 1000.0, 228.800, 0.01);
 }
 
 #[test]
@@ -4881,7 +4927,7 @@ fn the_pans_default_friction_limits_its_release() {
     transform.jump_to(&CameraOptions { center: Some(ll(0.0, 0.0)), zoom: Some(8.0), ..Default::default() });
 
     // Slower than the pan's 200 px/s minimum: no glide.
-    transform.start_momentum(&panning(sc(150.0, 0.0), MomentumFriction::PAN), &AnimationOptions::default());
+    transform.start_momentum(&panning(sc(150.0, 0.0), MomentumDecay::PAN), &AnimationOptions::default());
     assert!(!transform.in_transition());
 
     // Faster than its 10 000 px/s cap glides as the cap does.
@@ -4890,7 +4936,7 @@ fn the_pans_default_friction_limits_its_release() {
         transform.resize(Size::new(1000, 1000)).unwrap();
         transform.jump_to(&CameraOptions { center: Some(ll(0.0, 0.0)), zoom: Some(8.0), ..Default::default() });
         let start = transform.get_lat_lng(WrapMode::Unwrapped);
-        transform.start_momentum(&panning(sc(speed, 0.0), MomentumFriction::PAN), &AnimationOptions::default());
+        transform.start_momentum(&panning(sc(speed, 0.0), MomentumDecay::PAN), &AnimationOptions::default());
         transform.update_transitions(None);
         transform.get_lat_lng(WrapMode::Unwrapped).longitude() - start.longitude()
     };
@@ -4898,22 +4944,14 @@ fn the_pans_default_friction_limits_its_release() {
     assert!(glide(10_000.0).abs() > glide(5_000.0).abs());
 }
 
-// A planned pan moves its offset over its duration, whatever the release.
+// A curve pans along the release, its distance on screen.
 #[test]
-fn a_planned_pan_moves_its_offset() {
+fn a_curve_pans_along_the_release() {
     let mut transform = new_transform();
     transform.resize(Size::new(1000, 1000)).unwrap();
     transform.jump_to(&CameraOptions { center: Some(ll(10.0, 20.0)), zoom: Some(8.0), ..Default::default() });
     let center = transform.get_lat_lng(WrapMode::Wrapped);
-    let linear = MomentumEasing { x1: 1.0 / 3.0, y1: 1.0 / 3.0, x2: 2.0 / 3.0, y2: 2.0 / 3.0 };
-    let momentum = CameraMomentum {
-        pan: Some(MomentumGlide::Planned {
-            delta: sc(300.0, -400.0),
-            duration: Duration::from_secs(1),
-            easing: linear,
-        }),
-        ..CameraMomentum::default()
-    };
+    let momentum = panning(sc(300.0, -400.0), even(500.0, Duration::from_secs(1)));
     let start = start_clock(&mut transform);
     transform.start_momentum(&momentum, &AnimationOptions::default());
     transform.update_transitions(Some(start + Duration::from_millis(500)));
@@ -5065,7 +5103,7 @@ fn camera_changes_report_whether_a_command_or_a_momentum_made_them() {
     );
     transform.start_momentum(
         // A 1.4 s glide, which outlasts the ease.
-        &panning(sc(10_000.0, 0.0), MomentumFriction::PAN),
+        &panning(sc(10_000.0, 0.0), MomentumDecay::PAN),
         &AnimationOptions::default(),
     );
     assert_eq!(take_changes(&mut transform), [('w', change(Animated, Command)), ('w', change(Animated, Momentum))]);
@@ -5105,7 +5143,7 @@ fn a_gesture_reports_gesture_then_momentum_and_lasts_until_its_glide_ends() {
     let (animation, ended) = record_end();
     transform
         .apply_camera_delta(&CameraDelta {
-            momentum: Some(panning(sc(2000.0, 0.0), MomentumFriction::PAN)),
+            momentum: Some(panning(sc(2000.0, 0.0), MomentumDecay::PAN)),
             animation,
             ..delta(GesturePhase::End)
         })
@@ -5127,7 +5165,7 @@ fn a_new_gesture_catches_the_last_ones_glide_and_keeps_the_gesture_going() {
     let (animation, ended) = record_end();
     transform
         .apply_camera_delta(&CameraDelta {
-            momentum: Some(panning(sc(2000.0, 0.0), MomentumFriction::PAN)),
+            momentum: Some(panning(sc(2000.0, 0.0), MomentumDecay::PAN)),
             animation,
             ..delta(GesturePhase::End)
         })
@@ -5148,7 +5186,7 @@ fn a_new_gesture_catches_the_last_ones_glide_and_keeps_the_gesture_going() {
     // the glide; the glide's end leaves the third gesture in progress.
     transform
         .apply_camera_delta(&CameraDelta {
-            momentum: Some(panning(sc(2000.0, 0.0), MomentumFriction::PAN)),
+            momentum: Some(panning(sc(2000.0, 0.0), MomentumDecay::PAN)),
             ..delta(GesturePhase::End)
         })
         .unwrap();
@@ -5407,7 +5445,7 @@ fn with_a_frame_time_commands_start_at_the_latest_frame() {
     // A momentum starts there too: from a frame an hour ahead, it still
     // glides one frame after that frame.
     let frame = start_clock(&mut transform);
-    transform.start_momentum(&panning(sc(1000.0, 0.0), MomentumFriction::PAN), &AnimationOptions::default());
+    transform.start_momentum(&panning(sc(1000.0, 0.0), MomentumDecay::PAN), &AnimationOptions::default());
     transform.update_transitions(Some(frame + Duration::from_millis(16)));
     assert!(transform.in_transition());
     transform.cancel_transitions();

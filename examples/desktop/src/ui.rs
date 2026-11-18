@@ -16,10 +16,11 @@
 // under licence.
 
 use egui::{
-    Align2, Color32, CornerRadius, CursorIcon, Frame, Id, Margin, Order, Rect, Response, RichText, Sense, Shadow,
-    Shape, Stroke, Ui, Vec2, pos2, vec2,
+    Align2, Color32, CornerRadius, CursorIcon, Frame, Id, LayerId, Margin, Order, Rect, Response, RichText, Sense,
+    Shadow, Shape, Stroke, StrokeKind, Ui, Vec2, pos2, vec2,
 };
 use mln_map::MapDebugOptions;
+use mln_util::geo::ScreenCoordinate;
 
 use crate::backend::Kind;
 use crate::styles::Style;
@@ -64,6 +65,9 @@ pub(crate) struct Shown<'a> {
     pub backend: Kind,
     /// Lines about the renderer: its adapter, its frame time.
     pub status: &'a [String],
+    /// The box a box-zoom drag draws, corner to corner in the map's logical
+    /// pixels, which are egui's points.
+    pub box_zoom: Option<[ScreenCoordinate; 2]>,
 }
 
 /// The controls' own state: which panels are open.
@@ -148,6 +152,14 @@ impl Palette {
     }
 }
 
+/// The box a box-zoom drag draws, under the controls.
+fn box_zoom(ctx: &egui::Context, palette: &Palette, [a, b]: [ScreenCoordinate; 2]) {
+    let rect = Rect::from_two_pos(pos2(a.x as f32, a.y as f32), pos2(b.x as f32, b.y as f32));
+    let painter = ctx.layer_painter(LayerId::new(Order::Background, Id::unique("box zoom")));
+    let fill = palette.accent.gamma_multiply(0.15);
+    painter.rect(rect, CornerRadius::ZERO, fill, Stroke::new(1.0, palette.accent), StrokeKind::Inside);
+}
+
 /// A layer over the map, at a corner of the window.
 fn layer(id: &str, anchor: Align2, offset: Vec2) -> egui::Area {
     egui::Area::new(Id::unique(id)).anchor(anchor, offset).order(Order::Foreground).constrain(true)
@@ -196,6 +208,9 @@ impl Controls {
             backend_label(ctx, &palette, shown.backend, &mut actions);
         }
         attribution(ctx, &palette, shown.attributions);
+        if let Some(corners) = shown.box_zoom {
+            box_zoom(ctx, &palette, corners);
+        }
         actions
     }
 

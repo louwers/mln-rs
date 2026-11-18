@@ -283,6 +283,10 @@ jni = { version = "0.22.4", default-features = false }
 # Apple platforms: Foundation's NSURLSession for the online file source.
 block2 = { version = "0.6.2" }
 objc2 = { version = "0.6.5" }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = [
+  "std",
+  "NSHapticFeedback",
+] }
 objc2-foundation = { version = "0.3.2", default-features = false, features = [
   "std",
   "block2",
