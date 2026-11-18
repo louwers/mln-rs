@@ -40,6 +40,7 @@ use mln_util::Color;
 use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
+use smallvec::SmallVec;
 
 use crate::gfx::attachment::Attachment;
 use crate::gfx::buffer::SharedBuffer;
@@ -451,8 +452,9 @@ impl LayerComposite {
                     Some(frame) => (layer, &frame.backdrop),
                     None => (layer, layer),
                 };
-                let mut held = Vec::new();
-                let mut entries: Vec<BindGroupEntry> = (0..MAX_UBO_COUNT_PER_SHADER)
+                let mut held = Vec::with_capacity(MAX_UBO_COUNT_PER_SHADER + 2);
+                let mut entries: SmallVec<[BindGroupEntry; MAX_UBO_COUNT_PER_SHADER + 2]> = (0
+                    ..MAX_UBO_COUNT_PER_SHADER)
                     .filter_map(|id| {
                         let (buffer, offset, size) = match id {
                             ID_LAYER_COMPOSITE_UBO => (uniforms, (slot * stride) as u64, size as u64),

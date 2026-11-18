@@ -14,8 +14,8 @@ pub(crate) enum Release {
     /// A store entry whose last handle dropped, which the context takes out
     /// of its store, destroying a buffer's or a texture's resource.
     Entry(StoreKey),
-    /// Bindings, geometry, a pipeline or a shader, which nothing in the
-    /// stores holds.
+    /// A resource of the backend's `Gpu` that no store holds: bindings,
+    /// geometry, or one of the context's samplers, pipelines and shaders.
     Resource(ResourceId),
 }
 

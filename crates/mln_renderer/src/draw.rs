@@ -20,6 +20,7 @@ use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{MAX_TEXTURE_COUNT_PER_SHADER, MAX_UBO_COUNT_PER_SHADER};
 use mln_gfx::stencil_mode::StencilMode;
 use mln_util::logging::{Event, Log};
+use smallvec::SmallVec;
 
 use crate::gfx::buffer::SharedBuffer;
 use crate::gfx::context::Context;
@@ -303,7 +304,9 @@ impl DrawObjects {
             Some((geometry, indices)) if *indices == index_buffer => geometry.id(),
             _ => {
                 self.geometry = None;
-                let buffers: Vec<(BufferId, u64)> = slots.iter().map(|slot| (slot.buffer.id(), slot.offset)).collect();
+                // On the stack: the geometry's handles take the allocation.
+                let buffers: SmallVec<[(BufferId, u64); MAX_VERTEX_BUFFERS]> =
+                    slots.iter().map(|slot| (slot.buffer.id(), slot.offset)).collect();
                 let geometry = gpu.create_geometry(&GeometryDesc {
                     shader: shader_id,
                     layouts: &self.pipeline_layouts,
@@ -398,7 +401,9 @@ impl DrawObjects {
             return Ok(bindings.id());
         }
         self.bindings = None;
-        let mut entries = Vec::with_capacity(MAX_UBO_COUNT_PER_SHADER + MAX_TEXTURE_COUNT_PER_SHADER);
+        // On the stack: the bindings' handles take the allocation.
+        let mut entries: SmallVec<[BindGroupEntry; MAX_UBO_COUNT_PER_SHADER + MAX_TEXTURE_COUNT_PER_SHADER]> =
+            SmallVec::new();
         let mut held = Vec::with_capacity(MAX_UBO_COUNT_PER_SHADER + MAX_TEXTURE_COUNT_PER_SHADER);
         for id in 0..MAX_UBO_COUNT_PER_SHADER {
             // The draw's buffer wins over its frame's, and that over the

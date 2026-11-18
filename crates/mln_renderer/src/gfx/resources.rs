@@ -4,7 +4,7 @@
 
 use std::rc::Rc;
 
-use mln_gfx::gpu::{BufferDesc, BufferUsage, Gpu, GpuError, TextureDesc, TextureId};
+use mln_gfx::gpu::{BufferDesc, BufferId, BufferUsage, Gpu, GpuError, TextureDesc, TextureId};
 use mln_gfx::rendering_stats::RenderingStats;
 
 use crate::gfx::buffer::{self, Buffer, SharedBuffer};
@@ -119,7 +119,7 @@ impl Resources {
 
     /// Takes the buffer `key` out of its store and the stats, returning its
     /// id to destroy.
-    pub(crate) fn remove_buffer(&mut self, key: BufferKey) -> Option<mln_gfx::gpu::BufferId> {
+    pub(crate) fn remove_buffer(&mut self, key: BufferKey) -> Option<BufferId> {
         let buffer = self.buffers.remove(key)?;
         buffer.uncount(&mut self.stats);
         Some(buffer.id)

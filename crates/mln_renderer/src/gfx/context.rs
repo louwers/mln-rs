@@ -122,13 +122,6 @@ impl Device {
     ) -> Result<Attachment, GpuError> {
         Attachment::new(gpu, &mut self.resources, label, size, format)
     }
-
-    /// Bindings or geometry `id` of the device's `Gpu`, made of `held`,
-    /// which the context destroys once the returned value drops, before
-    /// what they were made of.
-    pub(crate) fn own<T: Copy + Into<ResourceId>>(&self, id: T, held: Vec<Held>) -> Owned<T> {
-        Owned::new(id, held, &self.resources.queue)
-    }
 }
 
 pub(crate) struct Context {
@@ -228,10 +221,11 @@ impl Context {
         Attachment::new(&mut *backend.gpu(), resources, label, size, format)
     }
 
-    /// Bindings or geometry `id`, made of `held`, as [`Device::own`] makes
-    /// them.
+    /// Bindings or geometry `id` of the context's `Gpu`, made of `held`,
+    /// which the context destroys once the returned value drops, before
+    /// what they were made of.
     pub(crate) fn own<T: Copy + Into<ResourceId>>(&self, id: T, held: Vec<Held>) -> Owned<T> {
-        self.device.own(id, held)
+        Owned::new(id, held, &self.device.resources.queue)
     }
 
     /// The rendering stats, to count what the renderer makes and does.
