@@ -804,7 +804,8 @@ impl RenderSymbolLayer {
                 self.placement_data.push(layer_data);
                 continue;
             }
-            // std::upper_bound by sort key
+            // After every range of a sort key no greater, as ranges of
+            // equal keys keep their order.
             let sort_position = self.placement_data.partition_point(|lhs| {
                 let key = lhs.sort_key_range.expect("sort key range").sort_key;
                 sort_key_range.sort_key.partial_cmp(&key) != Some(std::cmp::Ordering::Less)

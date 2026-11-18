@@ -53,7 +53,7 @@ pub(crate) struct PatternFeature {
 
 impl PatternFeature {
     #[must_use]
-    pub(crate) fn get_patterns(&self) -> &PatternLayerMap {
+    pub(crate) fn patterns(&self) -> &PatternLayerMap {
         &self.patterns
     }
 }
@@ -287,7 +287,7 @@ impl<S: PatternLayoutSpec> Layout<S::Type> for PatternLayout<S> {
         for pattern_feature in &self.features {
             let i = pattern_feature.i;
             let feature = source_layer.feature(i)?;
-            let patterns = pattern_feature.get_patterns();
+            let patterns = pattern_feature.patterns();
             let geometries = feature.geometry()?;
 
             for (layer_id, pattern) in patterns {

@@ -30,8 +30,8 @@ use crate::util::tile_cover::{TileCoverParameters, tile_cover, tile_cover_bounds
 
 // The mapping from the unit square onto the image's corners: the perspective
 // terms of the projective warp and how far it is blended towards the
-// bilinear one, as the "auto" warp blends them, after Heckbert, "Fundamentals of Texture Mapping and Image Warping"
-// (1989), 2.2.3 and A.2.
+// bilinear one, as the "auto" warp blends them, after Heckbert,
+// "Fundamentals of Texture Mapping and Image Warping" (1989), 2.2.3 and A.2.
 #[derive(Clone, Copy, Debug)]
 struct ImageWarp {
     perspective_x: f64,
@@ -135,7 +135,6 @@ fn build_image_mesh(bucket: &mut RasterBucket, corners: &GeometryCoordinates, ce
             let u = f64::from(i) / f64::from(cells);
             let v = f64::from(j) / f64::from(cells);
             let position = warp_position(corners, &warp, u, v);
-            // std::lround
             vertices.push(RasterLayoutVertex::new(
                 Point::new(to_vertex_coordinate(position.x), to_vertex_coordinate(position.y)),
                 Point::new(

@@ -109,7 +109,7 @@ fn icons(store: &mut ImageStore, wants: &ImageDependencies, wait: &mut ImageWait
 #[test]
 fn missing() {
     let store = ImageStore::default();
-    assert!(store.get_image("doesnotexist").is_none());
+    assert!(store.image("doesnotexist").is_none());
 }
 
 // gtest: ImageManager.Basic
@@ -126,7 +126,7 @@ fn basic() {
     .expect("parseSprite");
     for image in &images {
         store.add_image(Arc::clone(image));
-        let stored = store.get_image(&image.id).expect("stored");
+        let stored = store.image(&image.id).expect("stored");
         assert_eq!(image.image.size, stored.image.size);
     }
 
@@ -146,9 +146,9 @@ fn add_remove() {
     store.remove_image("one");
     store.remove_image("two");
 
-    assert!(store.get_image("three").is_some());
-    assert!(store.get_image("two").is_none());
-    assert!(store.get_image("four").is_none());
+    assert!(store.image("three").is_some());
+    assert!(store.image("two").is_none());
+    assert!(store.image("four").is_none());
     assert_eq!(store.available_images().iter().collect::<Vec<_>>(), ["three"]);
 }
 
@@ -172,7 +172,7 @@ fn sdf_change_requires_relayout() {
     store.add_image(make_image("one", Size::new(16, 16), 2.0, false));
 
     assert!(store.update_image(make_image("one", Size::new(16, 16), 2.0, true)));
-    assert!(store.get_image("one").expect("one").sdf);
+    assert!(store.image("one").expect("one").sdf);
 }
 
 // gtest: ImageManager.RemoveReleasesBinPackRect
@@ -182,12 +182,12 @@ fn remove_releases_bin_pack_rect() {
     let mut store = ImageStore::default();
 
     store.add_image(make_image("big", Size::new(32, 32), 1.0, false));
-    assert!(store.get_image("big").is_some());
+    assert!(store.image("big").is_some());
 
     store.remove_image("big");
 
     store.add_image(make_image("big", Size::new(32, 32), 1.0, false));
-    assert!(store.get_image("big").is_some());
+    assert!(store.image("big").is_some());
     assert!(log.empty());
 }
 
@@ -301,7 +301,7 @@ fn remove_unused_style_images() {
         store.begin_update();
         assert!(store.resolve(&dependencies(ids), &mut ImageWait::default()).is_none());
         for id in ids {
-            if store.get_image(id).is_none() {
+            if store.image(id).is_none() {
                 store.add_image(make_image(id, Size::new(size, size), 1.0, false));
             }
         }
@@ -358,7 +358,7 @@ fn mixed_dependencies_retain_provided_images() {
         let mut wait = ImageWait::default();
         if store.resolve(wants, &mut wait).is_none() {
             for id in &reported.take(store).missing {
-                if store.get_image(id).is_none() {
+                if store.image(id).is_none() {
                     store.add_image(make_image(id, Size::new(ON_DEMAND_IMAGE_SIDE, ON_DEMAND_IMAGE_SIDE), 3.0, false));
                 }
             }

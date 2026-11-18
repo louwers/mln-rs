@@ -14,7 +14,7 @@ const UNPACK_TERRARIUM: [f32; 4] = [256.0, 1.0, 1.0 / 256.0, 32768.0];
 /// The DEM unpack vector for an encoding (`DEMData::getUnpackVector`): the
 /// red, green and blue factors and the base shift.
 #[must_use]
-pub(crate) fn get_unpack_vector(encoding: RasterEncoding) -> [f32; 4] {
+pub(crate) fn unpack_vector(encoding: RasterEncoding) -> [f32; 4] {
     match encoding {
         RasterEncoding::Mapbox => UNPACK_MAPBOX,
         RasterEncoding::Terrarium => UNPACK_TERRARIUM,
@@ -195,19 +195,19 @@ impl DEMData {
     #[cfg(test)]
     #[must_use]
     pub(crate) fn get(&self, x: i32, y: i32) -> i32 {
-        let unpack = self.get_unpack_vector();
+        let unpack = self.unpack_vector();
         let value = pixel(&self.image.data, self.idx(x, y));
         (f32::from(value[0]) * unpack[0] + f32::from(value[1]) * unpack[1] + f32::from(value[2]) * unpack[2]
             - unpack[3]) as i32
     }
 
     #[must_use]
-    pub(crate) fn get_unpack_vector(&self) -> [f32; 4] {
-        get_unpack_vector(self.encoding)
+    pub(crate) fn unpack_vector(&self) -> [f32; 4] {
+        unpack_vector(self.encoding)
     }
 
     #[must_use]
-    pub(crate) fn get_image(&self) -> &PremultipliedImage {
+    pub(crate) fn image(&self) -> &PremultipliedImage {
         &self.image
     }
 }
@@ -236,7 +236,7 @@ mod tests {
 
         assert_eq!(demdata.dim, 16);
         assert_eq!(demdata.stride, 18);
-        assert_eq!(demdata.get_image().bytes(), 18 * 18 * 4);
+        assert_eq!(demdata.image().bytes(), 18 * 18 * 4);
     }
 
     // gtest: DEMData.ConstructorTerrarium
@@ -247,7 +247,7 @@ mod tests {
 
         assert_eq!(demdata.dim, 16);
         assert_eq!(demdata.stride, 18);
-        assert_eq!(demdata.get_image().bytes(), 18 * 18 * 4);
+        assert_eq!(demdata.image().bytes(), 18 * 18 * 4);
     }
 
     #[test]
@@ -260,7 +260,7 @@ mod tests {
 
         // 10 * 100 + 20 * 10 + 30 * 0.5 - 1000
         assert_eq!(demdata.get(0, 0), 215);
-        assert_eq!(demdata.get_unpack_vector(), [100.0, 10.0, 0.5, 1000.0]);
+        assert_eq!(demdata.unpack_vector(), [100.0, 10.0, 0.5, 1000.0]);
     }
 
     #[test]

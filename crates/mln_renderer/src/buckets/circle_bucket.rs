@@ -81,7 +81,7 @@ impl CircleBucket {
             binders.and_then(|b| b.circle_stroke_width.statistics.max()),
         );
         let translate = evaluated.circle_translate.uniform();
-        // util::length(a, b) = std::sqrt(a * a + b * b), in float
+        // The translation's length, in `f32`.
         radius + stroke + (translate[0] * translate[0] + translate[1] * translate[1]).sqrt()
     }
 
@@ -102,8 +102,8 @@ impl CircleBucket {
     }
 }
 
-/// The anonymous-namespace `get<Property>(evaluated, id, binders)` of
-/// `circle_bucket.cpp`.
+/// A data-driven property's largest value over the bucket's features, from
+/// its binder's `statistics_max`, or else its constant value or default.
 fn radius_or_width(evaluated_constant: Option<f32>, default_value: f32, statistics_max: Option<f32>) -> f32 {
     match statistics_max {
         Some(max) => max,

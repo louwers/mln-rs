@@ -763,7 +763,7 @@ fn dem_decodes_cross() {
             panic!("not DEMs");
         };
         assert_eq!((through.dim, through.stride, through.encoding), (16, 18, encoding));
-        assert_eq!(through.get_image().data, direct.get_image().data);
+        assert_eq!(through.image().data, direct.image().data);
         assert_eq!(through.get(-1, 3), through.get(0, 3), "the border repeats the edge");
     }
 

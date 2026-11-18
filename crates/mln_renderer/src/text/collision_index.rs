@@ -189,11 +189,11 @@ impl CollisionIndex {
         }
     }
 
-    pub(crate) fn get_transform_state(&self) -> &TransformState {
+    pub(crate) fn transform_state(&self) -> &TransformState {
         &self.transform_state
     }
 
-    pub(crate) fn get_viewport_padding(&self) -> f32 {
+    pub(crate) fn viewport_padding(&self) -> f32 {
         self.viewport_padding
     }
 

@@ -146,8 +146,8 @@ pub(crate) fn multiply_with_projection_matrix(
     near_clipped: bool,
     aligned: bool,
 ) {
-    // nearClippedMatrix has near plane moved further, to enhance depth buffer
-    // precision
+    // The near-clipped matrix moves the near plane further out, for the
+    // depth buffer's precision.
     let proj_matrix_ref = if aligned {
         &transform_params.aligned_proj_matrix
     } else if near_clipped {

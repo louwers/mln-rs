@@ -1000,12 +1000,12 @@ impl Placement {
             params,
             symbol_bucket,
             just_reloaded(reloaded_placed, &params.bucket, symbol_bucket),
-            self.collision_index.get_transform_state(),
+            self.collision_index.transform_state(),
             self.placement_zoom,
             collision_group,
             avoid_edges,
         );
-        let transform_state = self.collision_index.get_transform_state().clone();
+        let transform_state = self.collision_index.transform_state().clone();
         let projectors = ctx.projectors(&transform_state);
         let state = &symbol_bucket.state;
         for symbol_index in self.placement_order(params, symbol_bucket, state, ctx.pixel_ratio) {
@@ -1557,7 +1557,7 @@ impl Placement {
             bucket,
             state,
             params.sort_key_range.as_ref(),
-            self.collision_index.get_transform_state().get_bearing(),
+            self.collision_index.transform_state().get_bearing(),
         );
         if let Some(previous_placement) = self.prev_placement()
             && self.is_tilted_view()
@@ -1748,8 +1748,8 @@ impl Placement {
                 }
             }
         }
-        // GL JS rewrites a shared bucket's positions for each layer it draws;
-        // one at another translation keeps its own (`positions_and_symbols`).
+        // A layer that shares the bucket at another translation keeps
+        // positions of its own (`positions_and_symbols`).
 
         if along_line {
             if *layout.icon_rotation_alignment.uniform() == AlignmentType::Map {
@@ -2375,7 +2375,7 @@ impl Placement {
         text_collision_boxes: &[ProjectedCollisionBox],
         icon_collision_boxes: &[ProjectedCollisionBox],
     ) {
-        let viewport_padding = self.collision_index.get_viewport_padding();
+        let viewport_padding = self.collision_index.viewport_padding();
         let should_retry = self.should_retry_placement(placement, ctx);
         let PlacementKind::Tile(tile) = &mut self.kind else {
             return;
@@ -2529,7 +2529,7 @@ impl Placement {
                 .then(a.anchor_point.x.total_cmp(&b.anchor_point.x))
         });
         // Place intersections.
-        let transform_state = self.collision_index.get_transform_state().clone();
+        let transform_state = self.collision_index.transform_state().clone();
         for &i in &order {
             let intersection = &intersections[i];
             let ctx = &contexts[intersection.ctx];
@@ -2593,7 +2593,7 @@ impl Placement {
             params,
             bucket,
             just_reloaded(reloaded_placed, &params.bucket, bucket),
-            self.collision_index.get_transform_state(),
+            self.collision_index.transform_state(),
             self.placement_zoom,
             collision_group,
             avoid_edges,
@@ -2607,11 +2607,11 @@ impl Placement {
             bucket,
             state,
             params.sort_key_range.as_ref(),
-            self.collision_index.get_transform_state().get_bearing(),
+            self.collision_index.transform_state().get_bearing(),
         );
 
         let neighbor_tile_data = |collision_index: &CollisionIndex, id: UnwrappedTileID, shift: Vec2| {
-            let m = collision_index.get_transform_state().get_projection_data(&id).fallback_matrix;
+            let m = collision_index.transform_state().get_projection_data(&id).fallback_matrix;
             let borders = collision_index.project_tile_boundaries(&m);
             NeighborTileData { shift, matrix: m, borders }
         };

@@ -441,7 +441,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn layout_vertex_packs_like_cpp() {
+    fn layout_vertex_packs_the_position_and_wall_data() {
         let v = FillExtrusionBucket::layout_vertex(Point::new(10.0, 20.0), 7, true);
         assert_eq!(v.a1, [10, 20]);
         assert_eq!(v.a2, [1, 7]);

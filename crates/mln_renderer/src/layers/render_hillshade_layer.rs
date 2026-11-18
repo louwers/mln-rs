@@ -46,7 +46,7 @@ use crate::bucket_geometry::copied_vertices;
 use crate::buckets::hillshade_bucket::HillshadeBucket;
 use crate::buckets::raster_bucket::RasterLayoutVertex;
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
-use crate::geometry::dem_data::get_unpack_vector;
+use crate::geometry::dem_data::unpack_vector;
 use crate::gfx::context::Context;
 use crate::gfx::indexes::{DrawIndexes, Indexes, SharedIndexes};
 use crate::gfx::store::SharedTexture;
@@ -546,7 +546,7 @@ impl BucketTarget {
     ) -> BucketTarget {
         let (tilesize, stride, encoding, dem_image) = {
             let dem = bucket.dem_data();
-            (dem.dim as u16, dem.stride, dem.encoding, dem.get_image().clone())
+            (dem.dim as u16, dem.stride, dem.encoding, dem.image().clone())
         };
         let render_target = RenderTarget::new(
             context,
@@ -587,7 +587,7 @@ impl BucketTarget {
         let draw_ubo = HillshadePrepareDrawableUBO { matrix: cast_matrix(&m) };
         buffers.create_or_update_pod(ID_HILLSHADE_PREPARE_DRAWABLE_UBO, &draw_ubo, context.device());
         let tile_props = HillshadePrepareTilePropsUBO {
-            unpack: get_unpack_vector(encoding),
+            unpack: unpack_vector(encoding),
             dimension: [stride as f32, stride as f32],
             zoom: f32::from(tile_id.canonical.z),
             maxzoom: f32::from(maxzoom),

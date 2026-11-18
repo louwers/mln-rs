@@ -200,7 +200,7 @@ impl Test {
 
     /// The id of the bin the atlas packs `id` into now.
     fn bin_of(&mut self, id: &str) -> DynamicTextureBinId {
-        let image = self.tile.store.images().get_image(id).cloned().expect("image");
+        let image = self.tile.store.images().image(id).cloned().expect("image");
         let icons = [(id.to_owned(), image)].into_iter().collect();
         let page = self.tile.store.atlas().pack_images(&icons, &mln_style_types::image::ImageMap::default());
         page.lease.texture_handles()[0].id()

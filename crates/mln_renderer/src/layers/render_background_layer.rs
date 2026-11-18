@@ -48,7 +48,7 @@ const BACKGROUND_PATTERN_SHADER_NAME: &str = "BackgroundPatternShader";
 /// Adds the image `id` to the pattern atlas if it isn't there yet.
 fn add_pattern_if_needed(id: &str, params: &mut LayerUpdateParameters<'_>) {
     if params.atlases.pattern.pattern(id).is_none()
-        && let Some(image) = params.images.get_image(id)
+        && let Some(image) = params.images.image(id)
     {
         params.atlases.pattern.add_pattern(image);
     }

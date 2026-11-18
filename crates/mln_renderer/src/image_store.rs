@@ -104,7 +104,7 @@ impl ImageStore {
         Log::info(Event::General, format!("ImageManager::loaded: {}", if self.is_loaded() { "1" } else { "0" }));
     }
 
-    pub(crate) fn get_image(&self, id: &str) -> Option<&Arc<ImageImpl>> {
+    pub(crate) fn image(&self, id: &str) -> Option<&Arc<ImageImpl>> {
         self.images.get(id)
     }
 

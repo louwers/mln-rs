@@ -457,9 +457,9 @@ impl TypedLayer for RenderColorReliefLayer {
             let geometry = bucket.geometry();
             let geometry_generation = geometry.generation();
             let dem_data = bucket.dem_data();
-            if dem_data.get_image().valid() {
+            if dem_data.image().valid() {
                 let tile_props = ColorReliefTilePropsUBO {
-                    unpack: dem_data.get_unpack_vector(),
+                    unpack: dem_data.unpack_vector(),
                     // Use stride (dim + 2) for dimension, as the texture
                     // includes a 1-pixel border
                     dimension: [dem_data.stride as f32, dem_data.stride as f32],
@@ -472,7 +472,7 @@ impl TypedLayer for RenderColorReliefLayer {
                     Entry::Occupied(entry) if entry.get().1 == generation => entry.into_mut(),
                     entry => {
                         let texture = context.add_texture_with(|texture| {
-                            texture.set_image(Some(Rc::new(dem_data.get_image().clone())));
+                            texture.set_image(Some(Rc::new(dem_data.image().clone())));
                         });
                         entry.insert_entry((texture, generation)).into_mut()
                     }

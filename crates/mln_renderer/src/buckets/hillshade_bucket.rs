@@ -70,7 +70,7 @@ impl HillshadeBucket {
     /// Whether the bucket has a DEM to draw.
     #[must_use]
     pub(crate) fn has_data(&self) -> bool {
-        self.dem_data().get_image().valid()
+        self.dem_data().image().valid()
     }
 
     /// Readies a bucket with a DEM for its draws, once and again after its

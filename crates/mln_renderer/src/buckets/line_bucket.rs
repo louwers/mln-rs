@@ -271,8 +271,8 @@ impl LineBucket {
     }
 }
 
-/// The anonymous-namespace `get<Property>(evaluated, id, binders)` of
-/// `line_bucket.cpp`.
+/// A data-driven property's largest value over the bucket's features, from
+/// its binder's `statistics_max`, or else its constant value or default.
 fn evaluated_or_max(evaluated_constant: Option<f32>, default_value: f32, statistics_max: Option<f32>) -> f32 {
     match statistics_max {
         Some(max) => max,
