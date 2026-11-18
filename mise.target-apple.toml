@@ -7,7 +7,7 @@
 # devices-cli gives this checkout its own simulator and runs each test in it.
 # The go backend builds it with this Go.
 "core:go" = "1.27.3"
-"go:github.com/sargunv/devices-cli" = "v0.0.0-20261118012549-21309b1fbfc5"
+"go:github.com/sargunv/devices-cli" = "v0.0.0-20261118022140-4bddbd21331f"
 
 [env]
 # Cargo's runners: a test gets its package directory and the RUST_ and MLN_
