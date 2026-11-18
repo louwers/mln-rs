@@ -36,11 +36,10 @@ use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{
-    LayerParts, LayerPrepareParameters, LayerSource, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase,
-    TypedLayer,
+    LayerParts, LayerSource, LayerTiles, LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer,
+    RenderLayerBase, TypedLayer,
 };
 use crate::render_pass::RenderPass;
-use crate::render_source::TileOrder;
 use crate::render_static_data::RenderStaticData;
 use crate::tile_matrix::{get_projection_data, to_projection_ubo};
 use crate::update_parameters::UpdateParameters;
@@ -50,7 +49,7 @@ const BACKGROUND_PLAIN_SHADER_NAME: &str = "BackgroundShader";
 const BACKGROUND_PATTERN_SHADER_NAME: &str = "BackgroundPatternShader";
 
 /// Adds the image `id` to the pattern atlas if it isn't there yet.
-fn add_pattern_if_needed(id: &str, params: &LayerPrepareParameters<'_>) {
+fn add_pattern_if_needed(id: &str, params: &LayerUpdateParameters<'_>) {
     if params.pattern_atlas.borrow().get_pattern(id).is_none()
         && let Some(image) = params.images.get_image(id)
     {
@@ -204,52 +203,15 @@ impl TypedLayer for RenderBackgroundLayer {
     fn parts_mut(&mut self) -> PartsMut<'_, Self> {
         PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
-}
-
-impl RenderLayer for RenderBackgroundLayer {
-    fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
-        let previous_evaluated = self.values.evaluated.paint.clone();
-        let evaluated = self.values.unevaluated.evaluate_with_previous(parameters, &previous_evaluated);
-        let properties = EvaluatedLayer::<Background> {
-            crossfade: parameters.get_crossfade_parameters(),
-            ..EvaluatedLayer::with_paint(Arc::clone(&self.values.style), evaluated)
-        };
-
-        self.base.passes = self.passes_for(&properties.paint);
-        self.values.set_evaluated(&mut self.base, properties);
-    }
-
-    fn get_solid_background(&self) -> Option<Color> {
-        let evaluated = &self.values.evaluated.paint;
-        if !evaluated.background_pattern.faded().from.empty() || *evaluated.background_opacity.uniform() <= 0.0 {
-            return None;
-        }
-
-        Some(*evaluated.background_color.uniform() * *evaluated.background_opacity.uniform())
-    }
-
-    /// Adds the layer's pattern to the pattern atlas. The layer draws
-    /// the tiles that cover the view, not its source's.
-    fn prepare(&mut self, parameters: &LayerPrepareParameters<'_>) -> Option<TileOrder> {
-        let evaluated = &self.values.evaluated.paint;
-        if !evaluated.background_pattern.faded().to.empty() {
-            // Ensures that the pattern bitmap gets copied to atlas bitmap.
-            // Atlas bitmap is uploaded to atlas texture in upload.
-            // (conformance)
-            add_pattern_if_needed(evaluated.background_pattern.faded().from.id(), parameters);
-            add_pattern_if_needed(evaluated.background_pattern.faded().to.id(), parameters);
-        }
-        None
-    }
 
     /// Makes the frame's draws of the layer, one of each tile that covers
     /// the view, which it builds for a tile it keeps none of, and writes the
     /// layer's buffers they read.
-    fn update(
+    fn update_draws(
         &mut self,
         paint_parameters: &PaintParameters<'_>,
         update_parameters: &UpdateParameters,
-        _source: Option<LayerSource<'_>>,
+        _source: Option<LayerSource<'_, Background>>,
     ) {
         let (shaders, context, state) =
             (&paint_parameters.static_data.shaders, paint_parameters.context, paint_parameters.state);
@@ -392,5 +354,39 @@ impl RenderLayer for RenderBackgroundLayer {
             writer.storage(ID_BACKGROUND_DRAWABLE_UBO, |(draw_ubo, _)| *draw_ubo);
             writer.storage(ID_PROJECTION_UBO, |(_, projection)| *projection);
         });
+    }
+
+    /// Adds the layer's pattern to the pattern atlas. The layer draws
+    /// the tiles that cover the view, not its source's.
+    fn update(&mut self, parameters: &LayerUpdateParameters<'_>, _tiles: Option<LayerTiles<'_, Background>>) {
+        let evaluated = &self.values.evaluated.paint;
+        if !evaluated.background_pattern.faded().to.empty() {
+            // The encode uploads the atlas image with the patterns.
+            add_pattern_if_needed(evaluated.background_pattern.faded().from.id(), parameters);
+            add_pattern_if_needed(evaluated.background_pattern.faded().to.id(), parameters);
+        }
+    }
+}
+
+impl RenderLayer for RenderBackgroundLayer {
+    fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
+        let previous_evaluated = self.values.evaluated.paint.clone();
+        let evaluated = self.values.unevaluated.evaluate_with_previous(parameters, &previous_evaluated);
+        let properties = EvaluatedLayer::<Background> {
+            crossfade: parameters.get_crossfade_parameters(),
+            ..EvaluatedLayer::with_paint(Arc::clone(&self.values.style), evaluated)
+        };
+
+        self.base.passes = self.passes_for(&properties.paint);
+        self.values.set_evaluated(&mut self.base, properties);
+    }
+
+    fn solid_background(&self) -> Option<Color> {
+        let evaluated = &self.values.evaluated.paint;
+        if !evaluated.background_pattern.faded().from.empty() || *evaluated.background_opacity.uniform() <= 0.0 {
+            return None;
+        }
+
+        Some(*evaluated.background_color.uniform() * *evaluated.background_opacity.uniform())
     }
 }

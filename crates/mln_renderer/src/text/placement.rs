@@ -969,7 +969,7 @@ impl Placement {
         }
         for layer in layers.iter().rev() {
             let mut seen_cross_tile_ids = BTreeSet::new();
-            for data in layer.get_placement_data() {
+            for data in layer.placement_data() {
                 if let Some(bucket) = buckets.get(&data.bucket) {
                     self.base_place_symbol_bucket(data, bucket, &mut seen_cross_tile_ids, reloaded_placed);
                 }
@@ -1662,7 +1662,7 @@ impl Placement {
         buckets: &mut impl SymbolBuckets,
     ) {
         let mut seen_cross_tile_ids: BTreeSet<NonZeroU32> = BTreeSet::new();
-        for item in layer.get_placement_data() {
+        for item in layer.placement_data() {
             // `sortKeyRange->isFirstRange()`: `start == 0u`.
             if item.sort_key_range.is_none_or(|range| range.start == 0)
                 && let Some(bucket) = buckets.get_mut(&item.bucket)
@@ -1683,11 +1683,11 @@ impl Placement {
         changed: &mut ChangedBuckets,
         buckets: &mut impl SymbolBuckets,
     ) {
-        for item in layer.get_follower_data() {
+        for item in layer.follower_data() {
             let Some(bucket) = buckets.get_mut(&item.bucket) else {
                 continue;
             };
-            if bucket.update_layer_vertices(self, state, item, layer.get_id()) {
+            if bucket.update_layer_vertices(self, state, item, layer.id()) {
                 changed.mark(bucket.base.bucket_id, BucketChanges { dynamic: true, ..BucketChanges::default() });
             }
         }
@@ -2494,7 +2494,7 @@ impl Placement {
         let mut contexts: Vec<PlacementContext<'a>> = Vec::new();
         let mut intersections: Vec<Intersection> = Vec::new();
         for layer in layers.iter().rev() {
-            for data in layer.get_placement_data() {
+            for data in layer.placement_data() {
                 if let Some(bucket) = buckets.get(&data.bucket) {
                     self.collect_intersections(data, bucket, reloaded_placed, &mut contexts, &mut intersections);
                 }
@@ -2542,7 +2542,7 @@ impl Placement {
         // Place the rest labels.
         self.tile_state().populate_intersections = false;
         for layer in layers.iter().rev() {
-            for data in layer.get_placement_data() {
+            for data in layer.placement_data() {
                 if let Some(bucket) = buckets.get(&data.bucket) {
                     self.base_place_symbol_bucket(data, bucket, &mut seen_cross_tile_ids, reloaded_placed);
                 }

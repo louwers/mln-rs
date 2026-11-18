@@ -49,6 +49,7 @@ use mln_util::mat4::ClipDepthRange;
 use mln_util::size::Size;
 
 use super::{cast_matrix, shared_vertices};
+use crate::bucket::Bucket;
 use crate::bucket_geometry::{BucketGeometry, bucket_indexes, bucket_vertices, derived_vertices, paint_vertices};
 use crate::buckets::fill_extrusion_bucket::{
     FillExtrusionBinders, FillExtrusionBucket, FillExtrusionLayoutSpec, FillExtrusionLayoutVertex,
@@ -355,59 +356,15 @@ impl TypedLayer for RenderFillExtrusionLayer {
     fn parts_mut(&mut self) -> PartsMut<'_, Self> {
         PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
-}
-
-impl RenderLayer for RenderFillExtrusionLayer {
-    fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
-        let properties = self.values.evaluate(parameters);
-
-        self.base.passes = if *properties.paint.fill_extrusion_opacity.uniform() > 0.0 {
-            RenderPass::Translucent
-        } else {
-            RenderPass::None
-        };
-        self.values.set_evaluated(&mut self.base, properties);
-    }
-
-    fn is_3d(&self) -> bool {
-        true
-    }
-
-    // query
-    fn query_intersects_feature(
-        &self,
-        query_geometry: &mln_tile_id::geometry_tile_data::GeometryCoordinates,
-        _feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
-        geometry: &mln_tile_id::geometry_tile_data::GeometryCollection,
-        _zoom: f32,
-        transform_state: &TransformState,
-        pixels_to_tile_units: f32,
-        _projector: &mln_map_types::TileProjector<'_>,
-        _feature_state: &mln_style::expression::expression::FeatureState,
-    ) -> bool {
-        let evaluated = &self.values.evaluated.paint;
-        let translated_query_geometry = crate::geometry::feature_index::FeatureIndex::translate_query_geometry(
-            query_geometry,
-            *evaluated.fill_extrusion_translate.uniform(),
-            *evaluated.fill_extrusion_translate_anchor.uniform(),
-            transform_state.get_bearing() as f32,
-            pixels_to_tile_units,
-        );
-
-        mln_util::intersection_tests::polygon_intersects_multi_polygon(
-            translated_query_geometry.as_ref().unwrap_or(query_geometry),
-            geometry,
-        )
-    }
 
     /// Makes the frame's draws of the layer, those of each of its tiles,
     /// which it builds for a tile it keeps none of, and writes the layer's
     /// buffers they read.
-    fn update(
+    fn update_draws(
         &mut self,
         paint_parameters: &PaintParameters<'_>,
         _update_parameters: &UpdateParameters,
-        source: Option<LayerSource<'_>>,
+        source: Option<LayerSource<'_, FillExtrusion>>,
     ) {
         let tiles = source.and_then(LayerSource::tiles);
         let (shaders, context, state) =
@@ -485,14 +442,12 @@ impl RenderLayer for RenderFillExtrusionLayer {
                 continue;
             };
 
-            let render_data = super::layer_bucket_for_pass(tile, &*self.base.style, RENDER_PASS);
+            let render_data = tile.bucket_for_pass(&*self.base.style, RENDER_PASS);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
                 *entry.value = None;
                 continue;
             };
-            let Some(bucket) = render_data.bucket::<FillExtrusion>() else {
-                continue;
-            };
+            let bucket = render_data.bucket;
             // Draws built from another bucket go.
             entry.set_bucket(bucket.base.bucket_id);
 
@@ -529,6 +484,50 @@ impl RenderLayer for RenderFillExtrusionLayer {
     }
 }
 
+impl RenderLayer for RenderFillExtrusionLayer {
+    fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
+        let properties = self.values.evaluate(parameters);
+
+        self.base.passes = if *properties.paint.fill_extrusion_opacity.uniform() > 0.0 {
+            RenderPass::Translucent
+        } else {
+            RenderPass::None
+        };
+        self.values.set_evaluated(&mut self.base, properties);
+    }
+
+    fn is_3d(&self) -> bool {
+        true
+    }
+
+    // query
+    fn query_intersects_feature(
+        &self,
+        query_geometry: &mln_tile_id::geometry_tile_data::GeometryCoordinates,
+        _feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
+        geometry: &mln_tile_id::geometry_tile_data::GeometryCollection,
+        _zoom: f32,
+        transform_state: &TransformState,
+        pixels_to_tile_units: f32,
+        _projector: &mln_map_types::TileProjector<'_>,
+        _feature_state: &mln_style::expression::expression::FeatureState,
+    ) -> bool {
+        let evaluated = &self.values.evaluated.paint;
+        let translated_query_geometry = crate::geometry::feature_index::FeatureIndex::translate_query_geometry(
+            query_geometry,
+            *evaluated.fill_extrusion_translate.uniform(),
+            *evaluated.fill_extrusion_translate_anchor.uniform(),
+            transform_state.get_bearing() as f32,
+            pixels_to_tile_units,
+        );
+
+        mln_util::intersection_tests::polygon_intersects_multi_polygon(
+            translated_query_geometry.as_ref().unwrap_or(query_geometry),
+            geometry,
+        )
+    }
+}
+
 /// What building the draws of an update's tiles reads of the layer.
 struct TileBuilder {
     /// The shaders of the roofs and of the walls.
@@ -555,7 +554,7 @@ impl TileBuilder {
     /// layer draws it, then in color.
     fn build(
         &mut self,
-        tile: FrameTile<'_>,
+        tile: FrameTile<'_, FillExtrusion>,
         bucket: &FillExtrusionBucket,
         binders: &FillExtrusionBinders,
         evaluated: &FillExtrusionPaintProperties::PossiblyEvaluated,
@@ -683,7 +682,7 @@ impl TileBuilder {
     fn refresh_paint(
         &self,
         cached: &mut ExtrusionTile,
-        tile: FrameTile<'_>,
+        tile: FrameTile<'_, FillExtrusion>,
         bucket: &FillExtrusionBucket,
         binders: &FillExtrusionBinders,
         evaluated: &FillExtrusionPaintProperties::PossiblyEvaluated,
@@ -709,7 +708,7 @@ impl RenderFillExtrusionLayer {
     /// values `layer`.
     fn uniforms(
         layer: &EvaluatedLayer<FillExtrusion>,
-        tile: FrameTile<'_>,
+        tile: FrameTile<'_, FillExtrusion>,
         binders: &FillExtrusionBinders,
         objects: &DrawObjects,
         parameters: &PaintParameters<'_>,

@@ -51,11 +51,9 @@ use crate::layer_type::LayerType;
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{
-    LayerParts, LayerPrepareParameters, LayerSource, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase,
-    TypedLayer, set_layer_tiles,
+    LayerParts, LayerSource, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
 };
 use crate::render_pass::RenderPass;
-use crate::render_source::TileOrder;
 use crate::render_static_data::RenderStaticData;
 use crate::tile_matrix::to_projection_ubo;
 use crate::update_parameters::UpdateParameters;
@@ -300,59 +298,15 @@ impl TypedLayer for RenderColorReliefLayer {
     fn parts_mut(&mut self) -> PartsMut<'_, Self> {
         PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
-}
-
-impl RenderLayer for RenderColorReliefLayer {
-    fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
-        // Build the ramp here rather than in transition(), which has no global
-        // state. A new or changed layer always needs one; otherwise only a
-        // change to a state key that the ramp reads does.
-        let global_state_differs = match (&self.color_ramp_global_state, &parameters.global_state) {
-            (None, None) => false,
-            (Some(a), Some(b)) => !Arc::ptr_eq(a, b),
-            _ => true,
-        };
-        let ramp_value = self.values.unevaluated.color_relief_color.get_value();
-        let ramp_affected = parameters.layer_changed
-            || (global_state_differs
-                && ramp_value.get_dependencies().intersects(Dependency::GLOBAL_STATE)
-                && global_state_refs_intersect(
-                    ramp_value.get_global_state_refs(),
-                    parameters.changed_global_state_keys.as_deref(),
-                ));
-        self.color_ramp_global_state = parameters.global_state.clone();
-        if ramp_affected {
-            self.update_color_ramp();
-        }
-
-        let properties = self.values.evaluate(parameters);
-
-        self.base.passes = if *properties.paint.color_relief_opacity.uniform() > 0.0 {
-            RenderPass::Translucent
-        } else {
-            RenderPass::None
-        };
-        self.values.set_evaluated(&mut self.base, properties);
-    }
-
-    fn release_render_data(&mut self) {
-        crate::render_layer::release_render_data_base(self);
-        self.dem_textures.clear();
-    }
-
-    fn prepare(&mut self, params: &LayerPrepareParameters<'_>) -> Option<TileOrder> {
-        let order = params.source.map(|_| TileOrder::ById);
-        set_layer_tiles(self, params, order)
-    }
 
     /// Makes the frame's draws of the layer, those of each of its tiles,
     /// which it builds for a tile it keeps none of, and writes the layer's
     /// buffers they read.
-    fn update(
+    fn update_draws(
         &mut self,
         paint_parameters: &PaintParameters<'_>,
         _update_parameters: &UpdateParameters,
-        source: Option<LayerSource<'_>>,
+        source: Option<LayerSource<'_, ColorRelief>>,
     ) {
         let tiles = source.and_then(LayerSource::tiles);
         let (shaders, context, state) =
@@ -435,7 +389,7 @@ impl RenderLayer for RenderColorReliefLayer {
         // Drop the DEM textures of buckets that are no longer rendered.
         let live_buckets = &mut self.live_buckets;
         live_buckets.clear();
-        live_buckets.extend(render_tiles.iter().filter_map(|tile| tile.bucket(&*self.base.style).map(Bucket::get_id)));
+        live_buckets.extend(render_tiles.iter().filter_map(|tile| tile.dem().map(Bucket::get_id)));
         self.dem_textures.retain(|id, _| live_buckets.contains(id));
 
         let dem_sampler = SamplerState {
@@ -454,8 +408,7 @@ impl RenderLayer for RenderColorReliefLayer {
                 continue;
             };
 
-            let bucket = tile.bucket(&*self.base.style).filter(|b| b.has_data());
-            let Some(bucket) = bucket.and_then(|bucket| bucket.downcast_ref::<HillshadeBucket>()) else {
+            let Some(bucket) = tile.dem().filter(|bucket| bucket.has_data()) else {
                 *entry.value = None;
                 continue;
             };
@@ -582,5 +535,43 @@ impl RenderLayer for RenderColorReliefLayer {
             writer.storage(ID_COLOR_RELIEF_TILE_PROPS_UBO, |uniforms| uniforms.tile_props);
             writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
         });
+    }
+
+    fn release(&mut self) {
+        self.dem_textures.clear();
+    }
+}
+
+impl RenderLayer for RenderColorReliefLayer {
+    fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
+        // Build the ramp here rather than in transition(), which has no global
+        // state. A new or changed layer always needs one; otherwise only a
+        // change to a state key that the ramp reads does.
+        let global_state_differs = match (&self.color_ramp_global_state, &parameters.global_state) {
+            (None, None) => false,
+            (Some(a), Some(b)) => !Arc::ptr_eq(a, b),
+            _ => true,
+        };
+        let ramp_value = self.values.unevaluated.color_relief_color.get_value();
+        let ramp_affected = parameters.layer_changed
+            || (global_state_differs
+                && ramp_value.get_dependencies().intersects(Dependency::GLOBAL_STATE)
+                && global_state_refs_intersect(
+                    ramp_value.get_global_state_refs(),
+                    parameters.changed_global_state_keys.as_deref(),
+                ));
+        self.color_ramp_global_state = parameters.global_state.clone();
+        if ramp_affected {
+            self.update_color_ramp();
+        }
+
+        let properties = self.values.evaluate(parameters);
+
+        self.base.passes = if *properties.paint.color_relief_opacity.uniform() > 0.0 {
+            RenderPass::Translucent
+        } else {
+            RenderPass::None
+        };
+        self.values.set_evaluated(&mut self.base, properties);
     }
 }

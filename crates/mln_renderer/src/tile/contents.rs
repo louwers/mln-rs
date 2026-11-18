@@ -33,7 +33,7 @@ use crate::layer_drawing::{BucketChanges, ChangedBuckets};
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layout::tile_layout::{Dependencies, Resolved};
 use crate::query::{RenderedQueryOptions, SourceQueryOptions};
-use crate::render_layer::LayerBucket;
+use crate::render_layer::ErasedLayerBucket;
 use crate::render_orchestrator::drop_on_workers;
 use crate::source_state::SourceFeatureState;
 use crate::text::glyph_store::HBShapeResults;
@@ -79,12 +79,12 @@ impl LayoutBuckets {
 
     /// The bucket of the layer `layer_id`.
     #[inline]
-    pub(crate) fn get(&self, layer_id: &str) -> Option<LayerBucket<'_>> {
+    pub(crate) fn get(&self, layer_id: &str) -> Option<ErasedLayerBucket<'_>> {
         Some(self.layer_bucket(self.layers.get(layer_id)?))
     }
 
-    fn layer_bucket<'a>(&'a self, laid: &'a LaidLayer) -> LayerBucket<'a> {
-        LayerBucket { bucket: &*self.buckets[laid.bucket], bucket_index: laid.bucket, layer: &*laid.layer }
+    fn layer_bucket<'a>(&'a self, laid: &'a LaidLayer) -> ErasedLayerBucket<'a> {
+        ErasedLayerBucket { bucket: &*self.buckets[laid.bucket], bucket_index: laid.bucket, layer: &*laid.layer }
     }
 
     /// The number of layers laid out.
@@ -109,7 +109,7 @@ impl LayoutBuckets {
 
     /// The layers laid out, with their buckets, in no order.
     #[cfg(test)]
-    pub(crate) fn iter(&self) -> impl Iterator<Item = (&String, LayerBucket<'_>)> + '_ {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&String, ErasedLayerBucket<'_>)> + '_ {
         self.layers.iter().map(|(id, laid)| (id, self.layer_bucket(laid)))
     }
 
@@ -124,12 +124,12 @@ impl LayoutBuckets {
         self.buckets.len()
     }
 
-    /// The bucket at `index`, as [`LayerBucket::bucket_index`] gives it.
+    /// The bucket at `index`, as [`ErasedLayerBucket::bucket_index`] gives it.
     pub(crate) fn bucket_mut(&mut self, index: usize) -> Option<&mut dyn Bucket> {
         Some(&mut **self.buckets.get_mut(index)?)
     }
 
-    /// The bucket at `index`, as [`LayerBucket::bucket_index`] gives it.
+    /// The bucket at `index`, as [`ErasedLayerBucket::bucket_index`] gives it.
     pub(crate) fn bucket(&self, index: usize) -> Option<&dyn Bucket> {
         Some(&**self.buckets.get(index)?)
     }
@@ -179,7 +179,7 @@ impl LayoutResult {
     /// changed layer arrives, so a layer that changed type meanwhile finds
     /// nothing.
     #[inline]
-    pub(crate) fn layer_bucket(&self, layer_impl: &dyn ErasedLayerStyle) -> Option<LayerBucket<'_>> {
+    pub(crate) fn layer_bucket(&self, layer_impl: &dyn ErasedLayerStyle) -> Option<ErasedLayerBucket<'_>> {
         let result = self.layer_render_data.get(&layer_impl.base().id)?;
         if result.layer.style().info().name != layer_impl.info().name {
             return None;

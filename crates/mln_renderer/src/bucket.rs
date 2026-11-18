@@ -173,17 +173,12 @@ impl Wire for NoBucket {
     }
 }
 
+#[cfg(test)]
 impl dyn Bucket {
     /// Downcasts to the bucket type `B`; `None` if it is another type.
     pub(crate) fn downcast_ref<B: Bucket>(&self) -> Option<&B> {
         let any: &dyn Any = self;
         any.downcast_ref()
-    }
-
-    /// Downcasts to the bucket type `B`; `None` if it is another type.
-    pub(crate) fn downcast_mut<B: Bucket>(&mut self) -> Option<&mut B> {
-        let any: &mut dyn Any = self;
-        any.downcast_mut()
     }
 }
 

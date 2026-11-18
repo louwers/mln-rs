@@ -49,11 +49,10 @@ use crate::line_atlas::LinePatternCap;
 use crate::paint_parameters::PaintParameters;
 use crate::paint_property_binder::read_data_driven_paint_property;
 use crate::render_layer::{
-    LayerParts, LayerPrepareParameters, LayerSource, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase,
-    TypedLayer,
+    LayerParts, LayerSource, LayerTiles, LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer,
+    RenderLayerBase, TypedLayer,
 };
 use crate::render_pass::RenderPass;
-use crate::render_source::TileOrder;
 use crate::render_tile::FrameTile;
 use crate::tile_matrix::{get_projection_data, to_projection_ubo};
 use crate::update_parameters::UpdateParameters;
@@ -435,6 +434,110 @@ impl TypedLayer for RenderLineLayer {
     fn parts_mut(&mut self) -> PartsMut<'_, Self> {
         PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
+
+    /// Makes the frame's draws of the layer, those of each of its tiles,
+    /// which it builds for a tile it keeps none of, and writes the layer's
+    /// buffers they read.
+    fn update_draws(
+        &mut self,
+        paint_parameters: &PaintParameters<'_>,
+        _update_parameters: &UpdateParameters,
+        source: Option<LayerSource<'_, Line>>,
+    ) {
+        let tiles = source.and_then(LayerSource::tiles);
+        let (shaders, context, state) =
+            (&paint_parameters.static_data.shaders, paint_parameters.context, paint_parameters.state);
+        if std::mem::take(&mut self.color_ramp_changed) {
+            // The gradients' draws read the old ramp's texture.
+            self.remove_all_draws();
+        }
+        self.update_projection_variant(state);
+
+        let Some(render_tiles) = tiles.filter(|tiles| !tiles.is_empty()) else {
+            self.remove_all_draws();
+            return;
+        };
+
+        let frame = self.drawing.frame_mut();
+        let paint = &self.values.evaluated.paint;
+        frame.set_composite(Composite::of(*paint.line_layer_opacity.uniform(), *paint.line_layer_blend.uniform()));
+        frame.set_stencil_tiles(render_tiles.render_tiles().map(|tile| tile.id));
+
+        let render_pass =
+            RenderPass(self.base.evaluated_properties.render_passes() & !RenderPass::Opaque.underlying_type());
+        for tile in render_tiles.iter() {
+            let tile_id = tile.id();
+
+            let Some(render_data) = tile.bucket_for_pass(&*self.base.style, render_pass) else {
+                self.drawing.tiles_mut().drop_value(&tile_id);
+                continue;
+            };
+            let bucket = render_data.bucket;
+            if bucket.triangles.is_empty() {
+                self.drawing.tiles_mut().drop_value(&tile_id);
+                continue;
+            }
+            let Some(binders) = bucket.paint_property_binders.get(self.id()) else {
+                continue;
+            };
+            let evaluated = &render_data.layer.paint;
+
+            let Some(mut entry) = self.drawing.tiles_mut().entry(&tile_id) else {
+                continue;
+            };
+            if entry.value.as_ref().is_some_and(|cached| cached.pass != render_pass) {
+                // The tile's draw was built for other passes.
+                *entry.value = None;
+            }
+            // A draw built from another bucket goes.
+            entry.set_bucket(bucket.base.bucket_id);
+
+            // The draw's attributes point into the bucket's shared vectors,
+            // which upload again when they change.
+            let changes = entry.take_changes();
+            let cached = if let Some(cached) = entry.value {
+                refresh_paint_attributes(&mut cached.objects, changes, |attrs| {
+                    let geometry = tile.bucket_geometry();
+                    let buffer = &binders.interleaved_vertex_buffer;
+                    let paint = paint_vertices(geometry, buffer, binders.depends_on_feature_state());
+                    read_line_attributes(attrs, binders, &paint, evaluated, &mut Default::default());
+                });
+                cached
+            } else {
+                let built = self.build_tile(shaders, context, tile, bucket, binders, evaluated, render_pass);
+                let Some(cached) = built.and_then(|built| self.drawing.tiles_mut().insert(&tile_id, built).ok()) else {
+                    continue;
+                };
+                cached
+            };
+            if let Some(uniforms) = Self::uniforms(&self.values.evaluated, tile, binders, cached, paint_parameters) {
+                let draw = FrameDraw { pass: cached.pass, clip: true, ..FrameDraw::new(Some(tile_id), cached.id) };
+                self.draw_list.push(draw, uniforms);
+            }
+        }
+
+        let frame = self.drawing.frame_mut();
+        let layer = &self.values.evaluated;
+        self.draw_list.finish(frame, context, |writer| Self::write_uniforms(layer, writer));
+    }
+
+    /// Adds the dash patterns of the tiles' buckets to the line atlas.
+    fn update(&mut self, params: &LayerUpdateParameters<'_>, tiles: Option<LayerTiles<'_, Line>>) {
+        let Some(tiles) = tiles else {
+            return;
+        };
+        for tile in tiles.iter() {
+            let Some(bucket) = tile.bucket(&*self.base.style) else {
+                continue;
+            };
+            let dasharray = bucket.layer.paint.line_dasharray.faded();
+            if dasharray.from.is_empty() {
+                continue;
+            }
+            let cap = dash_pattern_cap(bucket.bucket);
+            params.line_atlas.borrow_mut().get_dash_pattern_texture(dasharray.from, dasharray.to, cap);
+        }
+    }
 }
 
 impl RenderLayer for RenderLineLayer {
@@ -519,130 +622,6 @@ impl RenderLayer for RenderLineLayer {
 
         mln_util::intersection_tests::polygon_intersects_buffered_multi_line(query, geometry, half_width)
     }
-
-    /// Picks the tiles as the default does, and adds the dash patterns of
-    /// their buckets to the line atlas.
-    fn prepare(&mut self, params: &LayerPrepareParameters<'_>) -> Option<TileOrder> {
-        let order = crate::render_layer::prepare_base(self, params);
-        let Some(render_tiles) = params.tiles(order) else {
-            return order;
-        };
-        let style = Arc::clone(&self.base.style);
-        for tile in render_tiles.iter() {
-            let Some(render_data) = tile.layer_bucket(&*style) else {
-                continue;
-            };
-
-            let Some(evaluated) = render_data.layer::<Line>().map(|layer| &layer.paint) else {
-                continue;
-            };
-            if evaluated.line_dasharray.faded().from.is_empty() {
-                continue;
-            }
-
-            let Some(bucket) = render_data.bucket::<Line>() else {
-                continue;
-            };
-            let cap = dash_pattern_cap(bucket);
-            // Ensures that the dash data gets added to the atlas.
-            params.line_atlas.borrow_mut().get_dash_pattern_texture(
-                evaluated.line_dasharray.faded().from,
-                evaluated.line_dasharray.faded().to,
-                cap,
-            );
-        }
-        order
-    }
-
-    /// Makes the frame's draws of the layer, those of each of its tiles,
-    /// which it builds for a tile it keeps none of, and writes the layer's
-    /// buffers they read.
-    fn update(
-        &mut self,
-        paint_parameters: &PaintParameters<'_>,
-        _update_parameters: &UpdateParameters,
-        source: Option<LayerSource<'_>>,
-    ) {
-        let tiles = source.and_then(LayerSource::tiles);
-        let (shaders, context, state) =
-            (&paint_parameters.static_data.shaders, paint_parameters.context, paint_parameters.state);
-        if std::mem::take(&mut self.color_ramp_changed) {
-            // The gradients' draws read the old ramp's texture.
-            self.remove_all_draws();
-        }
-        self.update_projection_variant(state);
-
-        let Some(render_tiles) = tiles.filter(|tiles| !tiles.is_empty()) else {
-            self.remove_all_draws();
-            return;
-        };
-
-        let frame = self.drawing.frame_mut();
-        let paint = &self.values.evaluated.paint;
-        frame.set_composite(Composite::of(*paint.line_layer_opacity.uniform(), *paint.line_layer_blend.uniform()));
-        frame.set_stencil_tiles(render_tiles.render_tiles().map(|tile| tile.id));
-
-        let render_pass =
-            RenderPass(self.base.evaluated_properties.render_passes() & !RenderPass::Opaque.underlying_type());
-        for tile in render_tiles.iter() {
-            let tile_id = tile.id();
-
-            let Some(render_data) = super::layer_bucket_for_pass(tile, &*self.base.style, render_pass) else {
-                self.drawing.tiles_mut().drop_value(&tile_id);
-                continue;
-            };
-            let Some(bucket) = render_data.bucket::<Line>() else {
-                continue;
-            };
-            if bucket.triangles.is_empty() {
-                self.drawing.tiles_mut().drop_value(&tile_id);
-                continue;
-            }
-            let Some(binders) = bucket.paint_property_binders.get(self.get_id()) else {
-                continue;
-            };
-            let Some(evaluated) = render_data.layer::<Line>().map(|layer| &layer.paint) else {
-                continue;
-            };
-
-            let Some(mut entry) = self.drawing.tiles_mut().entry(&tile_id) else {
-                continue;
-            };
-            if entry.value.as_ref().is_some_and(|cached| cached.pass != render_pass) {
-                // The tile's draw was built for other passes.
-                *entry.value = None;
-            }
-            // A draw built from another bucket goes.
-            entry.set_bucket(bucket.base.bucket_id);
-
-            // The draw's attributes point into the bucket's shared vectors,
-            // which upload again when they change.
-            let changes = entry.take_changes();
-            let cached = if let Some(cached) = entry.value {
-                refresh_paint_attributes(&mut cached.objects, changes, |attrs| {
-                    let geometry = tile.bucket_geometry();
-                    let buffer = &binders.interleaved_vertex_buffer;
-                    let paint = paint_vertices(geometry, buffer, binders.depends_on_feature_state());
-                    read_line_attributes(attrs, binders, &paint, evaluated, &mut Default::default());
-                });
-                cached
-            } else {
-                let built = self.build_tile(shaders, context, tile, bucket, binders, evaluated, render_pass);
-                let Some(cached) = built.and_then(|built| self.drawing.tiles_mut().insert(&tile_id, built).ok()) else {
-                    continue;
-                };
-                cached
-            };
-            if let Some(uniforms) = Self::uniforms(&self.values.evaluated, tile, binders, cached, paint_parameters) {
-                let draw = FrameDraw { pass: cached.pass, clip: true, ..FrameDraw::new(Some(tile_id), cached.id) };
-                self.draw_list.push(draw, uniforms);
-            }
-        }
-
-        let frame = self.drawing.frame_mut();
-        let layer = &self.values.evaluated;
-        self.draw_list.finish(frame, context, |writer| Self::write_uniforms(layer, writer));
-    }
 }
 
 impl RenderLineLayer {
@@ -653,7 +632,7 @@ impl RenderLineLayer {
         &mut self,
         shaders: &ShaderRegistry,
         context: &Context,
-        tile: FrameTile<'_>,
+        tile: FrameTile<'_, Line>,
         bucket: &LineBucket,
         binders: &LineBinders,
         evaluated: &LinePaintProperties::PossiblyEvaluated,
@@ -771,7 +750,7 @@ impl RenderLineLayer {
     /// doesn't draw.
     fn uniforms(
         layer: &EvaluatedLayer<Line>,
-        tile: FrameTile<'_>,
+        tile: FrameTile<'_, Line>,
         binders: &LineBinders,
         cached: &mut LineTile,
         parameters: &PaintParameters<'_>,

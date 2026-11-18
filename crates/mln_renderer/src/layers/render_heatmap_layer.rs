@@ -256,6 +256,36 @@ impl TypedLayer for RenderHeatmapLayer {
     fn parts_mut(&mut self) -> PartsMut<'_, Self> {
         PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
+
+    /// Makes the tiles' draws into the render target, which it builds for a
+    /// tile it keeps none of, and the layer's draw of the frame, which colors
+    /// the render target's heat onto it, and writes the buffers they read.
+    fn update_draws(
+        &mut self,
+        paint_parameters: &PaintParameters<'_>,
+        _update_parameters: &UpdateParameters,
+        source: Option<LayerSource<'_, Heatmap>>,
+    ) {
+        let tiles = source.and_then(LayerSource::tiles);
+        let (shaders, context, state) =
+            (&paint_parameters.static_data.shaders, paint_parameters.context, paint_parameters.state);
+        self.update_projection_variant(state);
+        let Some(render_tiles) = tiles.filter(|tiles| !tiles.is_empty()) else {
+            self.remove_all_draws();
+            return;
+        };
+
+        let viewport_size = state.get_size();
+        let size = Size::new(viewport_size.width / 2, viewport_size.height / 2);
+        let render_target = self
+            .render_target
+            .get_or_insert_with(|| RenderTarget::new(context, size, TextureChannelDataType::HalfFloat));
+        render_target.set_size(context, size);
+        let render_target_texture = render_target.get_texture();
+        if self.draw_tiles(shaders, context, render_tiles, paint_parameters) {
+            self.draw_texture(shaders, context, render_target_texture, paint_parameters);
+        }
+    }
 }
 
 impl RenderLayer for RenderHeatmapLayer {
@@ -308,36 +338,6 @@ impl RenderLayer for RenderHeatmapLayer {
             passes.end(parameters);
         }
     }
-
-    /// Makes the tiles' draws into the render target, which it builds for a
-    /// tile it keeps none of, and the layer's draw of the frame, which colors
-    /// the render target's heat onto it, and writes the buffers they read.
-    fn update(
-        &mut self,
-        paint_parameters: &PaintParameters<'_>,
-        _update_parameters: &UpdateParameters,
-        source: Option<LayerSource<'_>>,
-    ) {
-        let tiles = source.and_then(LayerSource::tiles);
-        let (shaders, context, state) =
-            (&paint_parameters.static_data.shaders, paint_parameters.context, paint_parameters.state);
-        self.update_projection_variant(state);
-        let Some(render_tiles) = tiles.filter(|tiles| !tiles.is_empty()) else {
-            self.remove_all_draws();
-            return;
-        };
-
-        let viewport_size = state.get_size();
-        let size = Size::new(viewport_size.width / 2, viewport_size.height / 2);
-        let render_target = self
-            .render_target
-            .get_or_insert_with(|| RenderTarget::new(context, size, TextureChannelDataType::HalfFloat));
-        render_target.set_size(context, size);
-        let render_target_texture = render_target.get_texture();
-        if self.draw_tiles(shaders, context, render_tiles, paint_parameters) {
-            self.draw_texture(shaders, context, render_target_texture, paint_parameters);
-        }
-    }
 }
 
 impl RenderHeatmapLayer {
@@ -348,7 +348,7 @@ impl RenderHeatmapLayer {
         &mut self,
         shaders: &ShaderRegistry,
         context: &Context,
-        render_tiles: LayerTiles<'_>,
+        render_tiles: LayerTiles<'_, Heatmap>,
         paint_parameters: &PaintParameters<'_>,
     ) -> bool {
         if self.heatmap_shader_group.is_none() {
@@ -369,14 +369,12 @@ impl RenderHeatmapLayer {
         for tile in render_tiles.iter() {
             let tile_id = tile.id();
 
-            let Some(render_data) = super::layer_bucket_for_pass(tile, &*self.base.style, RENDER_PASS) else {
+            let Some(render_data) = tile.bucket_for_pass(&*self.base.style, RENDER_PASS) else {
                 self.drawing.tiles.drop_value(&tile_id);
                 continue;
             };
-            let Some(bucket) = render_data.bucket::<Heatmap>() else {
-                continue;
-            };
-            let Some(binders) = bucket.paint_property_binders.get(self.get_id()) else {
+            let bucket = render_data.bucket;
+            let Some(binders) = bucket.paint_property_binders.get(self.id()) else {
                 continue;
             };
             let geometry = tile.bucket_geometry();

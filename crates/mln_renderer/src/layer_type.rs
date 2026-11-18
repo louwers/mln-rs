@@ -25,7 +25,7 @@ use smallvec::SmallVec;
 use crate::bucket::Bucket;
 use crate::layout::layout::{BuildParams, Layout, LayoutParameters, SourceLayer};
 use crate::layout::tile_layout::{Built, Resolved};
-use crate::render_layer::RenderLayer;
+use crate::render_layer::{ErasedLayerBucket, LayerBucket, RenderLayer};
 
 /// A layer type that the renderer draws.
 pub(crate) trait LayerType: StyleLayerType {
@@ -232,8 +232,7 @@ impl<T: LayerType> ErasedLayerType for LayerTypeEntry<T> {
     }
 
     fn query_radius(&self, bucket: &dyn Bucket, layer: &Arc<dyn ErasedEvaluatedLayer>) -> f32 {
-        let any: &dyn Any = bucket;
-        match (any.downcast_ref::<T::Bucket>(), EvaluatedLayer::<T>::recover(layer)) {
+        match (recover_bucket::<T>(bucket), EvaluatedLayer::<T>::recover(layer)) {
             (Some(bucket), Some(layer)) => T::query_radius(bucket, &layer),
             _ => 0.0,
         }
@@ -254,6 +253,33 @@ impl<T: LayerType> ErasedLayerType for LayerTypeEntry<T> {
 
     fn read_bucket(&self, r: &mut Reader<'_>) -> Option<Box<dyn Bucket>> {
         Some(Box::new(T::Bucket::read(r)?))
+    }
+}
+
+/// `bucket` as a bucket of a `T` layer, or `None` for another type's. The
+/// engine holds buckets as `dyn Bucket`; a layer type gets its own through
+/// this, in its glue, and never names another type's.
+pub(crate) fn recover_bucket<T: LayerType>(bucket: &dyn Bucket) -> Option<&T::Bucket> {
+    let any: &dyn Any = bucket;
+    any.downcast_ref()
+}
+
+/// [`recover_bucket`], to change the bucket.
+pub(crate) fn recover_bucket_mut<T: LayerType>(bucket: &mut dyn Bucket) -> Option<&mut T::Bucket> {
+    let any: &mut dyn Any = bucket;
+    any.downcast_mut()
+}
+
+impl<'a> ErasedLayerBucket<'a> {
+    /// The bucket and the layer's values as those of a `T` layer, or `None`
+    /// for another type's.
+    pub(crate) fn recover<T: LayerType>(self) -> Option<LayerBucket<'a, T>> {
+        let layer: &dyn Any = self.layer;
+        Some(LayerBucket {
+            bucket: recover_bucket::<T>(self.bucket)?,
+            bucket_index: self.bucket_index,
+            layer: layer.downcast_ref()?,
+        })
     }
 }
 

@@ -44,11 +44,9 @@ use crate::layer_type::LayerType;
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{
-    LayerParts, LayerPrepareParameters, LayerSource, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase,
-    TypedLayer, set_layer_tiles,
+    LayerParts, LayerSource, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
 };
 use crate::render_pass::RenderPass;
-use crate::render_source::TileOrder;
 use crate::render_static_data::RenderStaticData;
 use crate::sources::render_image_source::ImageSourceRenderData;
 use crate::tile_matrix::{get_projection_data, to_projection_ubo};
@@ -402,39 +400,16 @@ impl TypedLayer for RenderRasterLayer {
     fn parts_mut(&mut self) -> PartsMut<'_, Self> {
         PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
-}
-
-impl RenderLayer for RenderRasterLayer {
-    fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
-        let properties = self.values.evaluate(parameters);
-
-        self.base.passes =
-            if *properties.paint.raster_opacity.uniform() > 0.0 { RenderPass::Translucent } else { RenderPass::None };
-        self.values.set_evaluated(&mut self.base, properties);
-    }
-
-    /// Picks the source's tiles; an image source has none, and its image
-    /// comes with the update. The passes are the layer's own, whatever its
-    /// tiles' buckets were laid out for.
-    fn prepare(&mut self, params: &LayerPrepareParameters<'_>) -> Option<TileOrder> {
-        let order = params.source.map(|_| TileOrder::ById);
-        set_layer_tiles(self, params, order)
-    }
-
-    fn release_render_data(&mut self) {
-        crate::render_layer::release_render_data_base(self);
-        self.textures.clear();
-    }
 
     /// Makes the frame's draws of the layer: those of an image source's
     /// image, or one of each of its tiles, which it builds for a tile it
     /// keeps none of or whose bucket's geometry changed since, and writes
     /// the layer's buffers they read.
-    fn update(
+    fn update_draws(
         &mut self,
         paint_parameters: &PaintParameters<'_>,
         _update_parameters: &UpdateParameters,
-        source: Option<LayerSource<'_>>,
+        source: Option<LayerSource<'_, Raster>>,
     ) {
         let (shaders, context, state) =
             (&paint_parameters.static_data.shaders, paint_parameters.context, paint_parameters.state);
@@ -478,7 +453,7 @@ impl RenderLayer for RenderRasterLayer {
         // Drop the textures of buckets that are no longer rendered.
         let live_buckets = &mut self.live_buckets;
         live_buckets.clear();
-        live_buckets.extend(render_tiles.iter().filter_map(|tile| tile.bucket(&*self.base.style).map(Bucket::get_id)));
+        live_buckets.extend(render_tiles.iter().filter_map(|tile| tile.raster().map(Bucket::get_id)));
         self.textures.retain(|id, _| live_buckets.contains(id));
         // Kept draws keep their textures, so a changed filter is applied to
         // the textures themselves.
@@ -492,8 +467,7 @@ impl RenderLayer for RenderRasterLayer {
                 continue;
             };
 
-            let bucket = tile.bucket(&*self.base.style).filter(|b| b.has_data());
-            let Some(bucket) = bucket.and_then(|bucket| bucket.downcast_ref::<RasterBucket>()) else {
+            let Some(bucket) = tile.raster().filter(|bucket| bucket.has_data()) else {
                 *entry.value = None;
                 continue;
             };
@@ -559,5 +533,19 @@ impl RenderLayer for RenderRasterLayer {
         }
 
         self.finish_frame_draws(context);
+    }
+
+    fn release(&mut self) {
+        self.textures.clear();
+    }
+}
+
+impl RenderLayer for RenderRasterLayer {
+    fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
+        let properties = self.values.evaluate(parameters);
+
+        self.base.passes =
+            if *properties.paint.raster_opacity.uniform() > 0.0 { RenderPass::Translucent } else { RenderPass::None };
+        self.values.set_evaluated(&mut self.base, properties);
     }
 }

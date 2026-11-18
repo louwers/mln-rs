@@ -57,11 +57,10 @@ use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{
-    LayerParts, LayerPrepareParameters, LayerSource, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase,
-    TypedLayer, set_layer_tiles,
+    LayerParts, LayerSource, LayerTiles, LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer,
+    RenderLayerBase, TypedLayer,
 };
 use crate::render_pass::RenderPass;
-use crate::render_source::TileOrder;
 use crate::render_static_data::RenderStaticData;
 use crate::render_target::RenderTarget;
 use crate::tile_matrix::{bind_no_projection, get_projection_data, to_projection_ubo};
@@ -301,66 +300,16 @@ impl TypedLayer for RenderHillshadeLayer {
     fn parts_mut(&mut self) -> PartsMut<'_, Self> {
         PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
-}
-
-impl RenderLayer for RenderHillshadeLayer {
-    fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
-        let properties = self.values.evaluate(parameters);
-
-        self.base.passes = if *properties.paint.hillshade_exaggeration.uniform() > 0.0 {
-            RenderPass::Translucent | RenderPass::Pass3D
-        } else {
-            RenderPass::None
-        };
-        self.values.set_evaluated(&mut self.base, properties);
-    }
-
-    fn prepare(&mut self, params: &LayerPrepareParameters<'_>) -> Option<TileOrder> {
-        let order = params.source.map(|source| {
-            self.maxzoom = source.get_max_zoom();
-            TileOrder::ById
-        });
-        set_layer_tiles(self, params, order)
-    }
-
-    fn release_render_data(&mut self) {
-        crate::render_layer::release_render_data_base(self);
-        self.bucket_render_targets.clear();
-    }
-
-    fn upload_render_targets(&mut self, context: &Context) {
-        if self.base.is_renderable {
-            for target in self.bucket_render_targets.values_mut() {
-                target.prepare.upload(context);
-            }
-        }
-    }
-
-    fn render_targets(&mut self, parameters: &mut PaintParameters<'_>) {
-        if !self.base.is_renderable {
-            return;
-        }
-        for BucketTarget { render_target, prepare, .. } in self.bucket_render_targets.values_mut() {
-            parameters.current_layer = 0;
-            let Some(mut passes) = render_target.begin(parameters) else {
-                continue;
-            };
-            while let Some(gpu) = passes.next(parameters) {
-                prepare.render(gpu, parameters);
-            }
-            passes.end(parameters);
-        }
-    }
 
     /// Makes the render target of each bucket it has none of, which prepares
     /// its slopes, and the frame's draws of the layer, those of each of its
     /// tiles, which shade the slopes and which it builds for a tile it keeps
     /// none of, and writes the layer's buffers they read.
-    fn update(
+    fn update_draws(
         &mut self,
         paint_parameters: &PaintParameters<'_>,
         _update_parameters: &UpdateParameters,
-        source: Option<LayerSource<'_>>,
+        source: Option<LayerSource<'_, Hillshade>>,
     ) {
         let tiles = source.and_then(LayerSource::tiles);
         let (shaders, context, state) =
@@ -412,7 +361,7 @@ impl RenderLayer for RenderHillshadeLayer {
         // Drop the render targets of buckets that are no longer rendered.
         let live_buckets = &mut self.live_buckets;
         live_buckets.clear();
-        live_buckets.extend(render_tiles.iter().filter_map(|tile| tile.bucket(&*self.base.style).map(Bucket::get_id)));
+        live_buckets.extend(render_tiles.iter().filter_map(|tile| tile.dem().map(Bucket::get_id)));
         self.bucket_render_targets.retain(|id, _| live_buckets.contains(id));
 
         // The illumination, which the first draw computes.
@@ -423,8 +372,7 @@ impl RenderLayer for RenderHillshadeLayer {
                 continue;
             };
 
-            let bucket = tile.bucket(&*self.base.style).filter(|b| b.has_data());
-            let Some(bucket) = bucket.and_then(|bucket| bucket.downcast_ref::<HillshadeBucket>()) else {
+            let Some(bucket) = tile.dem().filter(|bucket| bucket.has_data()) else {
                 *entry.value = None;
                 continue;
             };
@@ -544,6 +492,54 @@ impl RenderLayer for RenderHillshadeLayer {
             writer.storage(ID_HILLSHADE_TILE_PROPS_UBO, |uniforms| uniforms.tile_props);
             writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
         });
+    }
+
+    /// Keeps the source's maximum zoom, which the DEMs' preparation reads.
+    fn update(&mut self, params: &LayerUpdateParameters<'_>, _tiles: Option<LayerTiles<'_, Hillshade>>) {
+        if let Some(source) = params.source {
+            self.maxzoom = source.get_max_zoom();
+        }
+    }
+
+    fn release(&mut self) {
+        self.bucket_render_targets.clear();
+    }
+}
+
+impl RenderLayer for RenderHillshadeLayer {
+    fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
+        let properties = self.values.evaluate(parameters);
+
+        self.base.passes = if *properties.paint.hillshade_exaggeration.uniform() > 0.0 {
+            RenderPass::Translucent | RenderPass::Pass3D
+        } else {
+            RenderPass::None
+        };
+        self.values.set_evaluated(&mut self.base, properties);
+    }
+
+    fn upload_render_targets(&mut self, context: &Context) {
+        if self.base.is_renderable {
+            for target in self.bucket_render_targets.values_mut() {
+                target.prepare.upload(context);
+            }
+        }
+    }
+
+    fn render_targets(&mut self, parameters: &mut PaintParameters<'_>) {
+        if !self.base.is_renderable {
+            return;
+        }
+        for BucketTarget { render_target, prepare, .. } in self.bucket_render_targets.values_mut() {
+            parameters.current_layer = 0;
+            let Some(mut passes) = render_target.begin(parameters) else {
+                continue;
+            };
+            while let Some(gpu) = passes.next(parameters) {
+                prepare.render(gpu, parameters);
+            }
+            passes.end(parameters);
+        }
     }
 }
 

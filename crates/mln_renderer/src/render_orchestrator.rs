@@ -38,7 +38,7 @@ use crate::layer_type::ErasedEvaluatedLayer;
 use crate::line_atlas::LineAtlas;
 use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;
-use crate::render_layer::{LayerPrepareParameters, LayerSource, LayerTiles, RenderLayer};
+use crate::render_layer::{LayerSource, LayerTiles, LayerUpdateParameters, RenderLayer};
 use crate::render_source::{self, RenderSource, SourcePrepareParameters, TileOrder};
 use crate::render_tile::RenderTile;
 use crate::renderer_event::RendererEvent;
@@ -372,8 +372,8 @@ impl RenderOrchestrator {
             if wrap_delta != 0 {
                 layer.handle_wrap_jump(wrap_delta);
             }
-            if layer.is_layer_renderable() != will_render {
-                layer.mark_layer_renderable(will_render);
+            if layer.is_renderable() != will_render {
+                layer.set_renderable(will_render);
             }
         }
 
@@ -480,7 +480,7 @@ impl RenderOrchestrator {
             let source = source.map(|(id, source)| (id.as_str(), &**source));
             let source_contents = contents.of(source, &self.tile_store);
             let source = source.map(|(_, source)| source);
-            frame_layer.tile_order = render_layer.prepare(&LayerPrepareParameters {
+            frame_layer.tile_order = render_layer.update(&LayerUpdateParameters {
                 source,
                 contents: source_contents,
                 images: self.tile_store.images(),
@@ -490,7 +490,7 @@ impl RenderOrchestrator {
             if render_layer.needs_placement() {
                 placed.leaders.push(index);
             }
-            if !render_layer.get_follower_data().is_empty() {
+            if !render_layer.follower_data().is_empty() {
                 placed.followers.push(index);
             }
             if frame.opaque_pass_cutoff == 0 {
@@ -670,7 +670,7 @@ impl RenderOrchestrator {
 
         if layer_changes.order_changed {
             let mut by_id: HashMap<String, Box<dyn RenderLayer>> =
-                self.layers.drain(..).map(|layer| (layer.get_id().to_owned(), layer)).collect();
+                self.layers.drain(..).map(|layer| (layer.id().to_owned(), layer)).collect();
 
             // Remove render layers for removed layers.
             for (id, _) in layer_changes.iter().filter(|(_, change)| change.removes()) {
@@ -690,7 +690,7 @@ impl RenderOrchestrator {
             // A layer type without a render layer is skipped.
             self.layers = layers.iter().filter_map(|layer| by_id.remove(layer.get_id())).collect();
             self.layer_indexes =
-                self.layers.iter().enumerate().map(|(index, layer)| (layer.get_id().to_owned(), index)).collect();
+                self.layers.iter().enumerate().map(|(index, layer)| (layer.id().to_owned(), index)).collect();
         }
 
         // Update render layers for changed layers.
@@ -698,7 +698,6 @@ impl RenderOrchestrator {
             if let (Some(&index), Some(layer)) = (self.layer_indexes.get(&**id), layers.get(id)) {
                 let new_layer = layer.style();
                 let render_layer = &mut self.layers[index];
-                render_layer.layer_changed(&clock.transition, new_layer);
                 render_layer.restyle(&clock.transition, new_layer);
             }
         }
@@ -722,7 +721,7 @@ impl RenderOrchestrator {
     ) -> VecSet<String> {
         let mut constants_mask_changed: VecSet<String> = VecSet::new();
         for layer in &mut self.layers {
-            let id = layer.get_id().to_owned();
+            let id = layer.id().to_owned();
             let layer_added_or_changed =
                 render_layers_remade || layer_changes.get(&id).is_some_and(|change| change != LayerChange::Removed);
             clock.evaluation.layer_changed = layer_added_or_changed;
@@ -732,13 +731,13 @@ impl RenderOrchestrator {
             // reference to it
             let zoom_changed_and_matters = clock.zoom_changed
                 && !layer_added_or_changed
-                && layer.get_style_dependencies().intersects(Dependency::ZOOM);
+                && layer.style_dependencies().intersects(Dependency::ZOOM);
 
             // Similarly, only re-evaluate on a global state change if the
             // layer references the global state.
             let global_state_changed_and_matters = clock.global_state_changed
                 && !layer_added_or_changed
-                && layer.get_style_dependencies().intersects(Dependency::GLOBAL_STATE);
+                && layer.style_dependencies().intersects(Dependency::GLOBAL_STATE);
 
             // A running transition may read the changed state too, from a
             // value the layer no longer has.
@@ -868,7 +867,7 @@ impl RenderOrchestrator {
                     {
                         let layer_is_visible = style.base().visibility != mln_style_types::VisibilityType::None;
                         let zoom_fits_layer = layer.supports_zoom(self.zoom_history.last_zoom);
-                        let layer_id = layer.get_id().to_owned();
+                        let layer_id = layer.id().to_owned();
                         // A global state change requires a relayout of
                         // this layer's source if one of the changed state
                         // properties is referenced by anything that is
@@ -925,7 +924,7 @@ impl RenderOrchestrator {
                         && !update_parameters.transform_state.is_globe_rendering()
                         && layers.first().is_some_and(|first| Arc::ptr_eq(style, first.style()))
                     {
-                        let solid_background = layer.get_solid_background();
+                        let solid_background = layer.solid_background();
                         if let Some(solid_background) = solid_background {
                             frame.background_color = solid_background;
                             continue; // This layer is shown with background color,
@@ -984,7 +983,7 @@ impl RenderOrchestrator {
                 &mut self.tile_store,
             );
             if continuous {
-                used_symbol_layers.insert(layer.get_id().to_owned());
+                used_symbol_layers.insert(layer.id().to_owned());
                 symbol_buckets_added |= result.buckets_added;
                 symbol_buckets_changed |= result.buckets_added || result.buckets_removed;
             }
@@ -1267,7 +1266,7 @@ impl RenderOrchestrator {
                     None => source.get_image_render_data().map(LayerSource::Image),
                 }
             });
-            render_layer.update(paint_parameters, update_parameters, layer_source);
+            render_layer.update_draws(paint_parameters, update_parameters, layer_source);
             has_3d = has_3d || render_layer.needs_globe_depth();
         }
         let shaders = &paint_parameters.static_data.shaders;
@@ -1332,7 +1331,7 @@ impl RenderOrchestrator {
         };
         let mut layers = crate::geometry::feature_index::QueryLayers::default();
         for layer in render_layers {
-            layers.entry(layer.get_id().to_owned()).or_insert(layer);
+            layers.entry(layer.id().to_owned()).or_insert(layer);
         }
 
         self.query_rendered_features_in(geometry, options, &layers)

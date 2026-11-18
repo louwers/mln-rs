@@ -213,7 +213,7 @@ impl TileBuilder<'_> {
     /// any to draw.
     fn build(
         &mut self,
-        tile: FrameTile<'_>,
+        tile: FrameTile<'_, Fill>,
         bucket: &FillBucket,
         binders: &FillBinders,
         evaluated: &FillPaintProperties::PossiblyEvaluated,
@@ -451,7 +451,7 @@ impl RenderFillLayer {
     fn uniforms(
         layer_id: &str,
         layer: &EvaluatedLayer<Fill>,
-        tile: FrameTile<'_>,
+        tile: FrameTile<'_, Fill>,
         bucket: &FillBucket,
         binders: &FillBinders,
         pattern: bool,
@@ -579,66 +579,15 @@ impl TypedLayer for RenderFillLayer {
     fn parts_mut(&mut self) -> PartsMut<'_, Self> {
         PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
-}
-
-impl RenderLayer for RenderFillLayer {
-    fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
-        let mut properties = self.values.evaluate(parameters);
-        let evaluated = &mut properties.paint;
-
-        if self.values.unevaluated.fill_outline_color.is_undefined() {
-            evaluated.fill_outline_color = evaluated.fill_color.clone();
-        }
-
-        self.base.passes =
-            if *evaluated.fill_layer_opacity.uniform() > 0.0 { RenderPass::Translucent } else { RenderPass::None };
-
-        if self.base.passes != RenderPass::None
-            && self.values.unevaluated.fill_pattern.is_undefined()
-            && evaluated.fill_color.constant_or(&Color::default()).a >= 1.0
-            && evaluated.fill_opacity.constant_or(&0.0) >= 1.0
-        {
-            // Supply both - evaluated based on opaquePassCutoff in render().
-            self.base.passes |= RenderPass::Opaque;
-        }
-        self.values.set_evaluated(&mut self.base, properties);
-    }
-
-    // query
-    fn query_intersects_feature(
-        &self,
-        query_geometry: &mln_tile_id::geometry_tile_data::GeometryCoordinates,
-        _feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
-        geometry: &mln_tile_id::geometry_tile_data::GeometryCollection,
-        _zoom: f32,
-        transform_state: &TransformState,
-        pixels_to_tile_units: f32,
-        _projector: &mln_map_types::TileProjector<'_>,
-        _feature_state: &mln_style::expression::expression::FeatureState,
-    ) -> bool {
-        let evaluated = &self.values.evaluated.paint;
-        let translated_query_geometry = crate::geometry::feature_index::FeatureIndex::translate_query_geometry(
-            query_geometry,
-            *evaluated.fill_translate.uniform(),
-            *evaluated.fill_translate_anchor.uniform(),
-            transform_state.get_bearing() as f32,
-            pixels_to_tile_units,
-        );
-
-        mln_util::intersection_tests::polygon_intersects_multi_polygon(
-            translated_query_geometry.as_ref().unwrap_or(query_geometry),
-            geometry,
-        )
-    }
 
     /// Makes the frame's draws of the layer, those of each of its tiles,
     /// which it builds for a tile it keeps none of, and writes the layer's
     /// buffers they read.
-    fn update(
+    fn update_draws(
         &mut self,
         paint_parameters: &PaintParameters<'_>,
         _update_parameters: &UpdateParameters,
-        source: Option<LayerSource<'_>>,
+        source: Option<LayerSource<'_, Fill>>,
     ) {
         let tiles = source.and_then(LayerSource::tiles);
         let (shaders, context, state) =
@@ -696,14 +645,12 @@ impl RenderLayer for RenderFillLayer {
                 continue;
             };
 
-            let render_data = super::layer_bucket_for_pass(tile, &*self.base.style, RENDER_PASS);
+            let render_data = tile.bucket_for_pass(&*self.base.style, RENDER_PASS);
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
                 *entry.value = None;
                 continue;
             };
-            let Some(bucket) = render_data.bucket::<Fill>() else {
-                continue;
-            };
+            let bucket = render_data.bucket;
             let Some(binders) = bucket.paint_property_binders.get(layer_id) else {
                 continue;
             };
@@ -711,9 +658,7 @@ impl RenderLayer for RenderFillLayer {
             // Draws built from another bucket go.
             entry.set_bucket(bucket.base.bucket_id);
 
-            let Some(evaluated) = render_data.layer::<Fill>().map(|layer| &layer.paint) else {
-                continue;
-            };
+            let evaluated = &render_data.layer.paint;
 
             // The draws' attributes point into the bucket's shared vectors,
             // which upload again when they change.
@@ -780,5 +725,56 @@ impl RenderLayer for RenderFillLayer {
         ));
         frame.set_stencil_tiles(render_tiles.render_tiles().map(|tile| tile.id));
         self.draw_list.finish(frame, context, |writer| Self::write_uniforms(layer, writer));
+    }
+}
+
+impl RenderLayer for RenderFillLayer {
+    fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
+        let mut properties = self.values.evaluate(parameters);
+        let evaluated = &mut properties.paint;
+
+        if self.values.unevaluated.fill_outline_color.is_undefined() {
+            evaluated.fill_outline_color = evaluated.fill_color.clone();
+        }
+
+        self.base.passes =
+            if *evaluated.fill_layer_opacity.uniform() > 0.0 { RenderPass::Translucent } else { RenderPass::None };
+
+        if self.base.passes != RenderPass::None
+            && self.values.unevaluated.fill_pattern.is_undefined()
+            && evaluated.fill_color.constant_or(&Color::default()).a >= 1.0
+            && evaluated.fill_opacity.constant_or(&0.0) >= 1.0
+        {
+            // Supply both - evaluated based on opaquePassCutoff in render().
+            self.base.passes |= RenderPass::Opaque;
+        }
+        self.values.set_evaluated(&mut self.base, properties);
+    }
+
+    // query
+    fn query_intersects_feature(
+        &self,
+        query_geometry: &mln_tile_id::geometry_tile_data::GeometryCoordinates,
+        _feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
+        geometry: &mln_tile_id::geometry_tile_data::GeometryCollection,
+        _zoom: f32,
+        transform_state: &TransformState,
+        pixels_to_tile_units: f32,
+        _projector: &mln_map_types::TileProjector<'_>,
+        _feature_state: &mln_style::expression::expression::FeatureState,
+    ) -> bool {
+        let evaluated = &self.values.evaluated.paint;
+        let translated_query_geometry = crate::geometry::feature_index::FeatureIndex::translate_query_geometry(
+            query_geometry,
+            *evaluated.fill_translate.uniform(),
+            *evaluated.fill_translate_anchor.uniform(),
+            transform_state.get_bearing() as f32,
+            pixels_to_tile_units,
+        );
+
+        mln_util::intersection_tests::polygon_intersects_multi_polygon(
+            translated_query_geometry.as_ref().unwrap_or(query_geometry),
+            geometry,
+        )
     }
 }

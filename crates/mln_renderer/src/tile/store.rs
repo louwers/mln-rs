@@ -12,6 +12,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_storage::FileSource;
+use mln_style::layers::Symbol;
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
 use mln_util::hash::{HashMap, HashSet};
@@ -21,6 +22,7 @@ use crate::bucket::UploadNeeds;
 use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::image_store::ImageStore;
+use crate::layer_type::{recover_bucket, recover_bucket_mut};
 use crate::layout::tile_layout::{LayoutParams, Resolved};
 use crate::render_layer::{BucketKey, SymbolBuckets};
 use crate::render_orchestrator::drop_on_workers;
@@ -513,11 +515,11 @@ impl TileStore {
 impl SymbolBuckets for TileStore {
     fn get(&self, key: &BucketKey) -> Option<&SymbolBucket> {
         let contents = self.sources.get(&key.source)?.contents_at(&key.tile, key.slot)?.geometry()?;
-        contents.result.layer_render_data.bucket(key.bucket)?.downcast_ref()
+        recover_bucket::<Symbol>(contents.result.layer_render_data.bucket(key.bucket)?)
     }
 
     fn get_mut(&mut self, key: &BucketKey) -> Option<&mut SymbolBucket> {
         let contents = self.sources.get_mut(&key.source)?.contents_at_mut(&key.tile, key.slot)?.geometry_mut()?;
-        contents.result.layer_render_data.bucket_mut(key.bucket)?.downcast_mut()
+        recover_bucket_mut::<Symbol>(contents.result.layer_render_data.bucket_mut(key.bucket)?)
     }
 }

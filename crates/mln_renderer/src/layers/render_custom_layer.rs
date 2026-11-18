@@ -15,11 +15,11 @@ use std::sync::Arc;
 
 use mln_gfx::RendererBackend;
 use mln_gfx::gpu::Gpu;
-use mln_style::layer_type::{ErasedLayerStyle, LayerStyle};
+use mln_style::PropertyEvaluationParameters;
+use mln_style::layer_type::LayerStyle;
 use mln_style::layers::{
     Custom, CustomLayerFrame, CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerRenderParameters,
 };
-use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_util::logging::{Event, Log};
 
 use crate::bucket::NoBucket;
@@ -28,12 +28,8 @@ use crate::layer_drawing::{DrawGroup, DrawOrder, LayerDrawing, TileMap};
 use crate::layer_type::LayerType;
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{
-    LayerParts, LayerPrepareParameters, LayerSource, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase,
-    TypedLayer,
-};
+use crate::render_layer::{LayerSource, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer};
 use crate::render_pass::RenderPass;
-use crate::render_source::TileOrder;
 use crate::update_parameters::UpdateParameters;
 
 impl LayerType for Custom {
@@ -166,39 +162,33 @@ impl TypedLayer for RenderCustomLayer {
     fn parts_mut(&mut self) -> PartsMut<'_, Self> {
         PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
-}
 
-impl RenderLayer for RenderCustomLayer {
+    fn update_draws(
+        &mut self,
+        _parameters: &PaintParameters<'_>,
+        _update_parameters: &UpdateParameters,
+        _source: Option<LayerSource<'_, Custom>>,
+    ) {
+        self.drawing.updated = true;
+    }
+
     /// A new host for the same layer ID is a new layer to the host: the old
     /// one hears that the renderer stopped.
-    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>) {
-        self.set_style(style);
+    fn style_changed(&mut self) {
         let drawing = &mut self.drawing;
         let same = drawing.host.as_ref().is_some_and(|host| self.values.style.has_host(host));
         if !same {
             drawing.end(false);
             drawing.host = self.values.style.host();
         }
-        self.transition(parameters);
     }
+}
 
+impl RenderLayer for RenderCustomLayer {
     /// The layer has no properties: it only keeps drawing in the
     /// translucent pass.
     fn evaluate(&mut self, _parameters: &PropertyEvaluationParameters) {
         self.base.passes = RenderPass::Translucent;
-    }
-
-    fn prepare(&mut self, _parameters: &LayerPrepareParameters<'_>) -> Option<TileOrder> {
-        None
-    }
-
-    fn update(
-        &mut self,
-        _parameters: &PaintParameters<'_>,
-        _update_parameters: &UpdateParameters,
-        _source: Option<LayerSource<'_>>,
-    ) {
-        self.drawing.updated = true;
     }
 
     fn prerender(&mut self, parameters: &PaintParameters<'_>) {

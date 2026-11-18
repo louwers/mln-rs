@@ -6,6 +6,7 @@
 // tile's slot and id (`FrameTile`); the store changes them only between
 // frames.
 
+use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -17,12 +18,15 @@ use mln_style_types::image::ImagePosition;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::mat4::Mat4;
 
-use crate::bucket::Bucket;
 use crate::bucket_geometry::BucketGeometry;
 use crate::buckets::debug_bucket::DebugBucket; // layers: debug
+use crate::buckets::hillshade_bucket::HillshadeBucket;
+use crate::buckets::raster_bucket::RasterBucket;
 use crate::geometry::feature_index::FeatureIndex;
+use crate::layer_type::LayerType;
 use crate::paint_parameters::TransformParameters;
-use crate::render_layer::LayerBucket;
+use crate::render_layer::{Erased, LayerBucket};
+use crate::render_pass::RenderPass;
 use crate::render_source::SourcePrepareParameters;
 use crate::tile::contents::Contents;
 use crate::tile::tile::Tile;
@@ -147,17 +151,39 @@ impl RenderTile {
     }
 }
 
-/// A render tile of a frame, with what its tile shows.
-#[derive(Clone, Copy)]
-pub(crate) struct FrameTile<'a> {
+/// A render tile of a frame, with what its tile shows, as a layer of the
+/// type `T` sees it.
+pub(crate) struct FrameTile<'a, T = Erased> {
     pub(crate) tile: &'a RenderTile,
     contents: Option<&'a Contents>,
+    layer_type: PhantomData<fn() -> T>,
 }
 
-impl<'a> FrameTile<'a> {
+impl<T> Clone for FrameTile<'_, T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> Copy for FrameTile<'_, T> {}
+
+impl<'a, T: LayerType> FrameTile<'a, T> {
+    /// The bucket of `style`'s layer in the tile's layout, if it was laid
+    /// out as a layer of the same type.
+    pub(crate) fn bucket(self, style: &dyn ErasedLayerStyle) -> Option<LayerBucket<'a, T>> {
+        self.contents?.geometry()?.result.layer_bucket(style)?.recover()
+    }
+
+    /// [`bucket`](Self::bucket), if it was laid out to draw in `pass`.
+    pub(crate) fn bucket_for_pass(self, style: &dyn ErasedLayerStyle, pass: RenderPass) -> Option<LayerBucket<'a, T>> {
+        self.bucket(style).filter(|bucket| bucket.layer.render_passes & pass.underlying_type() != 0)
+    }
+}
+
+impl<'a, T> FrameTile<'a, T> {
     #[must_use]
     pub(crate) fn new(tile: &'a RenderTile, contents: Option<&'a Contents>) -> Self {
-        FrameTile { tile, contents }
+        FrameTile { tile, contents, layer_type: PhantomData }
     }
 
     /// The tile's id.
@@ -166,10 +192,22 @@ impl<'a> FrameTile<'a> {
         *self.tile.get_overscaled_tile_id()
     }
 
-    /// The bucket of `impl_`'s layer; a raster or raster-dem tile's for any
-    /// layer.
-    pub(crate) fn bucket(self, impl_: &dyn ErasedLayerStyle) -> Option<&'a dyn Bucket> {
-        self.contents?.get_bucket(impl_)
+    /// A raster tile's image.
+    #[must_use]
+    pub(crate) fn raster(self) -> Option<&'a RasterBucket> {
+        match self.contents? {
+            Contents::Raster(bucket) => Some(bucket),
+            _ => None,
+        }
+    }
+
+    /// A raster-dem tile's DEM.
+    #[must_use]
+    pub(crate) fn dem(self) -> Option<&'a HillshadeBucket> {
+        match self.contents? {
+            Contents::Dem(bucket) => Some(bucket),
+            _ => None,
+        }
     }
 
     /// symbols: the feature index of the tile's layout.
@@ -183,12 +221,6 @@ impl<'a> FrameTile<'a> {
     #[must_use]
     pub(crate) fn bucket_geometry(self) -> Option<&'a BucketGeometry> {
         self.contents?.geometry().map(|contents| &contents.bucket_geometry)
-    }
-
-    /// The bucket of `impl_`'s layer in the tile's layout, if it was laid out
-    /// as a layer of the same type.
-    pub(crate) fn layer_bucket(self, impl_: &dyn ErasedLayerStyle) -> Option<LayerBucket<'a>> {
-        self.contents?.geometry()?.result.layer_bucket(impl_)
     }
 
     /// Where the pattern `pattern` is in the tile's icon atlas.
