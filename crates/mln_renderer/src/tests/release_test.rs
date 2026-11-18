@@ -1,11 +1,13 @@
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::gpu::{
-    BindGroupEntry, BindingsDesc, BufferUsage, GeometryDesc, GpuError, ShaderKey, TextureRegion, VertexAttribute,
-    VertexBufferLayout, VertexStep,
+    BindGroupEntry, BindingsDesc, BindingsId, BufferUsage, ColorAttachment, Draw, DynamicState, GeometryDesc,
+    GeometryId, GpuError, LoadOp, PassDesc, Scissor, ShaderKey, TextureDesc, TextureFormat, TextureRegion,
+    TextureUsage, VertexAttribute, VertexBufferLayout, VertexStep,
 };
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::{ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO};
 use mln_gfx::shaders::shader_source::BuiltIn;
+use mln_util::Color;
 use mln_util::size::Size;
 
 use super::with_context;
@@ -44,15 +46,7 @@ fn bindings_and_geometry_keep_what_they_were_made_of() {
         ];
         let bindings =
             gpu.create_bindings(&BindingsDesc { label: "test", shader, entries: &entries }).expect("the bindings");
-        let layout = VertexBufferLayout {
-            stride: 4,
-            step: VertexStep::Vertex,
-            attributes: vec![VertexAttribute {
-                id: ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE as u32,
-                format: AttributeDataType::Short2,
-                offset: 0,
-            }],
-        };
+        let layout = position_layout();
         let geometry = gpu
             .create_geometry(&GeometryDesc {
                 shader,
@@ -96,4 +90,96 @@ fn bindings_and_geometry_keep_what_they_were_made_of() {
         assert_eq!(gone.num_active_textures, stats.num_active_textures - 1);
         assert_eq!(gone.mem_textures, stats.mem_textures - 2 * 2 * 4);
     });
+}
+
+// The shaders and pipelines that a new pixel ratio replaces go with the
+// next destroy, and the context makes new ones for their keys.
+#[test]
+fn released_shaders_and_pipelines_go() {
+    with_context(|context| {
+        let backend = std::rc::Rc::clone(context.backend());
+        let key = ShaderKey::new(BuiltIn::ClippingMaskProgram, []);
+        let shader = context.shader(&mut *backend.gpu(), &key).expect("the shader");
+        let pipeline_key = clip_mask_pipeline(shader);
+        let pipeline = context.pipeline(&mut *backend.gpu(), &pipeline_key).expect("the pipeline");
+        context.release_shaders();
+        context.destroy_released();
+
+        let mut gpu = backend.gpu();
+        let gone = gpu.create_pipeline(&pipeline_key.desc());
+        assert!(matches!(gone, Err(GpuError::UnknownId("shader"))), "{gone:?}");
+        let size = Size::new(1, 1);
+        let usage = TextureUsage { render_target: true, ..TextureUsage::default() };
+        let target = gpu
+            .create_texture(&TextureDesc { label: "target", size, format: TextureFormat::Rgba8Unorm, usage })
+            .expect("a target");
+        let color = Some(ColorAttachment { texture: target, load: LoadOp::Load });
+        gpu.begin_pass(&PassDesc { label: "test", color, depth_stencil: None }).expect("the pass");
+        let dynamic = DynamicState {
+            depth_range: (0.0, 1.0),
+            scissor: Scissor { x: 0, y: 0, width: 1, height: 1 },
+            stencil_reference: 0,
+            blend_constant: Color::black(),
+            line_width: 1.0,
+        };
+        let draw = Draw {
+            pipeline,
+            bindings: BindingsId::default(),
+            geometry: GeometryId::default(),
+            first_index: 0,
+            index_count: 3,
+            base_vertex: 0,
+            first_instance: 0,
+            instance_count: 1,
+            global_index: 0,
+            dynamic,
+        };
+        assert!(matches!(gpu.draw(&draw), Err(GpuError::UnknownId("pipeline"))), "a draw of the pipeline");
+        gpu.end_pass().expect("the pass's end");
+        gpu.destroy(target.into()).expect("the target's destroy");
+        drop(gpu);
+        let remade = context.shader(&mut *backend.gpu(), &key).expect("a new shader");
+        assert_ne!(remade, shader);
+        let remade = context.pipeline(&mut *backend.gpu(), &clip_mask_pipeline(remade)).expect("a new pipeline");
+        assert_ne!(remade, pipeline);
+    });
+}
+
+/// The key of a pipeline of the clipping mask program `shader`, drawing into
+/// RGBA8 without depth or stencil.
+fn clip_mask_pipeline(shader: mln_gfx::gpu::ShaderId) -> mln_gfx::gpu::PipelineKey {
+    use mln_gfx::color_mode::ColorMode;
+    use mln_gfx::cull_face_mode::CullFaceMode;
+    use mln_gfx::depth_mode::DepthMode;
+    use mln_gfx::gfx_types::DrawModeType;
+    use mln_gfx::gpu::{DepthState, FixedState, PipelineKey, StencilState, TargetFormats};
+    use mln_gfx::stencil_mode::StencilMode;
+
+    let color = ColorMode::unblended();
+    PipelineKey {
+        shader,
+        vertex_buffers: vec![position_layout()],
+        state: FixedState {
+            primitive: DrawModeType::Triangles,
+            cull: CullFaceMode::disabled(),
+            blend: color.blend_function,
+            color_mask: color.mask,
+            depth: DepthState::from(&DepthMode::disabled()),
+            stencil: StencilState::from(&StencilMode::disabled()),
+        },
+        targets: TargetFormats { color: Some(TextureFormat::Rgba8Unorm), depth_stencil: None },
+    }
+}
+
+/// The clipping mask program's vertex layout: a position of two shorts.
+fn position_layout() -> VertexBufferLayout {
+    VertexBufferLayout {
+        stride: 4,
+        step: VertexStep::Vertex,
+        attributes: vec![VertexAttribute {
+            id: ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE as u32,
+            format: AttributeDataType::Short2,
+            offset: 0,
+        }],
+    }
 }
