@@ -484,19 +484,24 @@ impl<L: TypedLayer> LayerParts for L {
     }
 
     fn set_tiles(&mut self, tiles: Option<LayerTiles<'_>>) {
-        let tiles_kept = self.parts_mut().drawing.tiles();
-        match tiles {
-            Some(tiles) => tiles_kept.set_tiles(tiles.tile_ids()),
-            None => tiles_kept.clear_tiles(),
+        if let Some(tiles_kept) = self.parts_mut().drawing.tiles() {
+            match tiles {
+                Some(tiles) => tiles_kept.set_tiles(tiles.tile_ids()),
+                None => tiles_kept.clear_tiles(),
+            }
         }
     }
 
     fn mark_changed(&mut self, changed: &ChangedBuckets) {
-        self.parts_mut().drawing.tiles().mark_changed(changed);
+        if let Some(tiles) = self.parts_mut().drawing.tiles() {
+            tiles.mark_changed(changed);
+        }
     }
 
     fn handle_wrap_jump(&mut self, wrap_delta: i16) {
-        self.parts_mut().drawing.tiles().shift_wraps(wrap_delta);
+        if let Some(tiles) = self.parts_mut().drawing.tiles() {
+            tiles.shift_wraps(wrap_delta);
+        }
     }
 
     fn remove_all_draws(&mut self) {
@@ -506,7 +511,7 @@ impl<L: TypedLayer> LayerParts for L {
     fn visit_draw_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>)) {
         let Parts { base, drawing, .. } = self.parts();
         if base.is_renderable {
-            drawing.visit_groups(&mut |frame| visit(DrawGroup::Draws(frame)));
+            drawing.visit_groups(visit);
         }
     }
 

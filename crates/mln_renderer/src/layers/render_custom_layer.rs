@@ -24,12 +24,13 @@ use mln_util::logging::{Event, Log};
 
 use crate::bucket::NoBucket;
 use crate::gfx::context::Context;
-use crate::layer_drawing::{ChangedBuckets, DrawGroup, DrawOrder};
+use crate::layer_drawing::{DrawGroup, DrawOrder, LayerDrawing, TileMap};
 use crate::layer_type::LayerType;
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{
-    LayerParts, LayerPrepareParameters, LayerSource, LayerTiles, LayerValues, RenderLayer, RenderLayerBase,
+    LayerParts, LayerPrepareParameters, LayerSource, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase,
+    TypedLayer,
 };
 use crate::render_pass::RenderPass;
 use crate::render_source::TileOrder;
@@ -46,7 +47,13 @@ impl LayerType for Custom {
 
 pub(crate) struct RenderCustomLayer {
     base: RenderLayerBase,
-    style: Arc<LayerStyle<Custom>>,
+    values: LayerValues<Custom>,
+    drawing: CustomDrawing,
+}
+
+/// The layer's drawing, which keeps no tiles and no draws of its own: its
+/// one draw group is what the host draws.
+pub(crate) struct CustomDrawing {
     /// The host, while the renderer draws through it.
     host: Option<Arc<dyn CustomLayerHost>>,
     /// The frame the host last prerendered for.
@@ -66,9 +73,12 @@ impl RenderCustomLayer {
         let host = impl_.host();
         let (mut base, values) = LayerValues::new(impl_);
         base.passes = RenderPass::Translucent;
-        RenderCustomLayer { base, style: values.style, host, frame: None, used: false, backend: None, updated: false }
+        let drawing = CustomDrawing { host, frame: None, used: false, backend: None, updated: false };
+        RenderCustomLayer { base, values, drawing }
     }
+}
 
+impl CustomDrawing {
     /// Lets go of the host: tells it the renderer stopped, once the GPU
     /// finished its work, or that its graphics objects are lost. The
     /// renderer calls it inside the backend's hold, so the host
@@ -93,11 +103,6 @@ impl RenderCustomLayer {
         }
     }
 
-    /// Whether the frame draws the layer's draw group.
-    fn draws(&self) -> bool {
-        self.updated && self.base.is_renderable
-    }
-
     /// In the translucent pass, lends the live pass to the host.
     fn lend_pass(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         if parameters.pass_target().is_none() || parameters.pass != RenderPass::Translucent {
@@ -119,61 +124,47 @@ impl RenderCustomLayer {
     }
 }
 
-impl Drop for RenderCustomLayer {
+impl Drop for CustomDrawing {
     fn drop(&mut self) {
         self.end(false);
     }
 }
 
-/// The layer has no paint properties to transition, and no draws of its
-/// own: its one draw group is what the host draws.
-impl LayerParts for RenderCustomLayer {
-    fn base(&self) -> &RenderLayerBase {
-        &self.base
+impl LayerDrawing for CustomDrawing {
+    type Tile = ();
+
+    fn tiles(&mut self) -> Option<&mut TileMap<()>> {
+        None
     }
 
-    fn base_mut(&mut self) -> &mut RenderLayerBase {
-        &mut self.base
-    }
-
-    fn set_style(&mut self, style: &Arc<dyn ErasedLayerStyle>) {
-        if let Some(recovered) = LayerStyle::recover(style) {
-            self.style = recovered;
-            self.base.style = Arc::clone(style);
-        }
-    }
-
-    fn transition(&mut self, _parameters: &TransitionParameters) {}
-
-    fn has_transition(&self) -> bool {
-        false
-    }
-
-    fn has_crossfade(&self) -> bool {
-        false
-    }
-
-    fn set_tiles(&mut self, _tiles: Option<LayerTiles<'_>>) {}
-
-    fn mark_changed(&mut self, _changed: &ChangedBuckets) {}
-
-    fn handle_wrap_jump(&mut self, _wrap_delta: i16) {}
-
-    fn remove_all_draws(&mut self) {}
-
-    fn visit_draw_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>)) {
-        if self.draws() {
+    fn visit_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>)) {
+        if self.updated {
             visit(DrawGroup::Custom);
         }
     }
 
+    fn clear(&mut self) {}
+
     fn upload(&mut self, _context: &Context) {}
 
     fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
-        if self.draws() {
+        if self.updated {
             self.lend_pass(gpu, parameters);
             order.step(parameters);
         }
+    }
+}
+
+impl TypedLayer for RenderCustomLayer {
+    type Type = Custom;
+    type Drawing = CustomDrawing;
+
+    fn parts(&self) -> Parts<'_, Self> {
+        Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
+    }
+
+    fn parts_mut(&mut self) -> PartsMut<'_, Self> {
+        PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
 }
 
@@ -182,10 +173,11 @@ impl RenderLayer for RenderCustomLayer {
     /// one hears that the renderer stopped.
     fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>) {
         self.set_style(style);
-        let same = self.host.as_ref().is_some_and(|host| self.style.has_host(host));
+        let drawing = &mut self.drawing;
+        let same = drawing.host.as_ref().is_some_and(|host| self.values.style.has_host(host));
         if !same {
-            self.end(false);
-            self.host = self.style.host();
+            drawing.end(false);
+            drawing.host = self.values.style.host();
         }
         self.transition(parameters);
     }
@@ -206,26 +198,27 @@ impl RenderLayer for RenderCustomLayer {
         _update_parameters: &UpdateParameters,
         _source: Option<LayerSource<'_>>,
     ) {
-        self.updated = true;
+        self.drawing.updated = true;
     }
 
     fn prerender(&mut self, parameters: &PaintParameters<'_>) {
         let Some(frame) = parameters.custom_layer_frame else {
             return;
         };
-        self.frame = Some(frame);
-        self.backend = Some(Rc::clone(parameters.context.backend()));
-        let Some(host) = &self.host else { return };
+        let drawing = &mut self.drawing;
+        drawing.frame = Some(frame);
+        drawing.backend = Some(Rc::clone(parameters.context.backend()));
+        let Some(host) = &drawing.host else { return };
         let lent = parameters.context.gpu().lend(&mut |encoder| {
             host.prerender(&mut CustomLayerPrerenderParameters { encoder, frame: &frame });
         });
         match lent {
-            Ok(()) => self.used = true,
+            Ok(()) => drawing.used = true,
             Err(error) => Log::error(Event::Render, format!("Lending a custom layer the commands failed: {error}")),
         }
     }
 
     fn lose_context(&mut self) {
-        self.end(true);
+        self.drawing.end(true);
     }
 }

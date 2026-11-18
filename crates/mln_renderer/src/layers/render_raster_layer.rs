@@ -38,7 +38,7 @@ use crate::gfx::texture2d::Texture2DPtr;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_composite::Composite;
 use crate::layer_drawing::{
-    DrawList, DrawObjectsMut, DrawOrder, FrameDraw, FrameDraws, KeptDraw, LayerDrawing, LayerDraws, TileMap,
+    DrawGroup, DrawList, DrawObjectsMut, DrawOrder, FrameDraw, KeptDraw, LayerDrawing, LayerDraws, TileMap,
 };
 use crate::layer_type::LayerType;
 use crate::layout::layout::NoLayout;
@@ -99,13 +99,13 @@ impl RasterDrawing {
 impl LayerDrawing for RasterDrawing {
     type Tile = RasterTile;
 
-    fn tiles(&mut self) -> &mut TileMap<RasterTile> {
-        &mut self.objects.tiles
+    fn tiles(&mut self) -> Option<&mut TileMap<RasterTile>> {
+        Some(&mut self.objects.tiles)
     }
 
-    fn visit_groups<'a>(&'a self, visit: &mut dyn FnMut(&'a FrameDraws)) {
+    fn visit_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>)) {
         if let Some(frame) = &self.frame {
-            visit(frame.frame());
+            visit(DrawGroup::Draws(frame.frame()));
         }
     }
 

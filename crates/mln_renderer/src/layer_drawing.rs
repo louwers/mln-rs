@@ -1016,13 +1016,13 @@ impl<T: TileObjects> TileDraws<T> {
 impl<T: TileObjects> LayerDrawing for TileDraws<T> {
     type Tile = T;
 
-    fn tiles(&mut self) -> &mut TileMap<T> {
-        &mut self.tiles
+    fn tiles(&mut self) -> Option<&mut TileMap<T>> {
+        Some(&mut self.tiles)
     }
 
-    fn visit_groups<'a>(&'a self, visit: &mut dyn FnMut(&'a FrameDraws)) {
+    fn visit_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>)) {
         if let Some(frame) = &self.frame {
-            visit(&frame.frame);
+            visit(DrawGroup::Draws(&frame.frame));
         }
     }
 
@@ -1055,14 +1055,15 @@ pub(crate) trait LayerDrawing {
     /// What the layer keeps of a tile.
     type Tile;
 
-    /// What the layer keeps of the frame's tiles.
-    fn tiles(&mut self) -> &mut TileMap<Self::Tile>;
+    /// What the layer keeps of the frame's tiles; `None` for a layer type
+    /// that draws no tiles.
+    fn tiles(&mut self) -> Option<&mut TileMap<Self::Tile>>;
 
     /// Visits the layer's draw groups of the frame, in drawing order: from
     /// its first update with something to draw, a group of its draws, and
     /// any of draws over them. While the layer is renderable, a group takes
     /// a place in the layers' order and depth, even when it has no draws.
-    fn visit_groups<'a>(&'a self, visit: &mut dyn FnMut(&'a FrameDraws));
+    fn visit_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>));
 
     /// Drops the frame's draws, and the GPU objects of the tiles' draws and
     /// of the others. The tiles' entries stay.

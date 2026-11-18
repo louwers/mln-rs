@@ -56,7 +56,7 @@ use crate::geometry::feature_index::FeatureIndex;
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
 use crate::layer_drawing::{
-    BucketChanges, DrawDepth, DrawList, DrawObjectsMut, DrawOrder, FrameDraw, FrameDraws, KeptDraw, LayerDrawing,
+    BucketChanges, DrawDepth, DrawGroup, DrawList, DrawObjectsMut, DrawOrder, FrameDraw, KeptDraw, LayerDrawing,
     LayerDraws, TileMap, UniformWriter,
 };
 use crate::layer_type::{EvaluatedLayer, LayerType};
@@ -463,13 +463,13 @@ impl SymbolDrawing {
 impl LayerDrawing for SymbolDrawing {
     type Tile = SymbolTile;
 
-    fn tiles(&mut self) -> &mut TileMap<SymbolTile> {
-        &mut self.tiles
+    fn tiles(&mut self) -> Option<&mut TileMap<SymbolTile>> {
+        Some(&mut self.tiles)
     }
 
-    fn visit_groups<'a>(&'a self, visit: &mut dyn FnMut(&'a FrameDraws)) {
+    fn visit_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>)) {
         for draws in [&self.frame, &self.overlay].into_iter().flatten() {
-            visit(draws.frame());
+            visit(DrawGroup::Draws(draws.frame()));
         }
     }
 

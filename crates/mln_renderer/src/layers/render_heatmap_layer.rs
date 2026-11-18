@@ -44,8 +44,8 @@ use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::gfx::context::Context;
 use crate::gfx::texture2d::Texture2DPtr;
 use crate::layer_drawing::{
-    DrawDepth, DrawList, DrawOrder, FrameDraw, FrameDraws, KeptDraw, LayerDrawing, LayerDraws, TileMap, UniformWriter,
-    tile_objects,
+    DrawDepth, DrawGroup, DrawList, DrawOrder, FrameDraw, FrameDraws, KeptDraw, LayerDrawing, LayerDraws, TileMap,
+    UniformWriter, tile_objects,
 };
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::heatmap_layout::HeatmapLayout;
@@ -139,13 +139,13 @@ impl HeatmapDrawing {
 impl LayerDrawing for HeatmapDrawing {
     type Tile = KeptDraw;
 
-    fn tiles(&mut self) -> &mut TileMap<KeptDraw> {
-        &mut self.tiles
+    fn tiles(&mut self) -> Option<&mut TileMap<KeptDraw>> {
+        Some(&mut self.tiles)
     }
 
-    fn visit_groups<'a>(&'a self, visit: &mut dyn FnMut(&'a FrameDraws)) {
+    fn visit_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>)) {
         if let Some(frame) = &self.frame {
-            visit(frame);
+            visit(DrawGroup::Draws(frame));
         }
     }
 
