@@ -121,6 +121,8 @@ pub(crate) fn measure_render_passes() {
     mln_vulkan::bench::measure_render_passes();
     #[cfg(mln_bench_gl)]
     mln_gl::bench::measure_render_passes();
+    #[cfg(all(mln_bench_d3d12, windows))]
+    mln_d3d12::bench::measure_render_passes();
 }
 
 /// Leaves the render passes of the devices made from now on untimed, for a
@@ -132,11 +134,13 @@ pub(crate) fn leave_gpu_untimed() {
     mln_vulkan::bench::leave_render_passes_untimed();
     #[cfg(mln_bench_gl)]
     mln_gl::bench::leave_render_passes_untimed();
+    #[cfg(all(mln_bench_d3d12, windows))]
+    mln_d3d12::bench::leave_render_passes_untimed();
 }
 
 /// The time the GPU has spent in the render passes of the process's frames
 /// so far, from timestamp queries, or `None` until a device that has them
-/// is made: WebGPU's, and those of the native Vulkan and OpenGL backends
+/// is made: WebGPU's, and those of the native Vulkan, OpenGL and D3D12 backends
 /// where the libraries time them (build.rs). A frame counts once the GPU has
 /// finished it and the backend has waited for it, which waiting for a frame
 /// does: a frame's time comes in the reading after that wait.
@@ -149,6 +153,8 @@ pub(crate) fn gpu_time() -> Option<Duration> {
         mln_vulkan::bench::take_gpu_time(),
         #[cfg(mln_bench_gl)]
         mln_gl::bench::take_gpu_time(),
+        #[cfg(all(mln_bench_d3d12, windows))]
+        mln_d3d12::bench::take_gpu_time(),
     ];
     for time in taken.into_iter().flatten() {
         *total = Some(total.unwrap_or_default() + time);

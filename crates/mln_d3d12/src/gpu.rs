@@ -298,6 +298,9 @@ pub struct D3d12Gpu {
     /// submit, and signals after it.
     waits: Vec<(ID3D12Fence, u64)>,
     signals: Vec<(ID3D12Fence, u64)>,
+    /// The timestamps of each pass, where the process measures them.
+    #[cfg(feature = "bench")]
+    timer: Option<crate::bench::Timer>,
     /// The fences and values that the first pass to draw into a texture has
     /// the queue wait for: the host's reads of it.
     texture_waits: HashMap<TextureId, (ID3D12Fence, u64)>,
@@ -458,6 +461,8 @@ impl D3d12Gpu {
             garbage: Vec::new(),
             waits: Vec::new(),
             signals: Vec::new(),
+            #[cfg(feature = "bench")]
+            timer: crate::bench::Timer::new(device.queue()),
             texture_waits: HashMap::default(),
             memory: Memory::new(d3d)?,
             device: device.clone(),
@@ -779,6 +784,10 @@ impl D3d12Gpu {
             }
             lists.push(copies);
         }
+        #[cfg(feature = "bench")]
+        if let (Some(timer), Some(frame)) = (&mut self.timer, &self.frame) {
+            timer.submit(&frame.list, self.serial);
+        }
         lists.extend(self.frame.take());
         let mut submitted = Vec::with_capacity(lists.len());
         for recording in &lists {
@@ -826,6 +835,10 @@ impl D3d12Gpu {
     /// finished, and takes back the memory nothing uses any more.
     fn collect_garbage(&mut self) {
         let completed = self.completed();
+        #[cfg(feature = "bench")]
+        if let Some(timer) = &mut self.timer {
+            timer.finished(completed);
+        }
         let (done, waiting): (Vec<_>, Vec<_>) =
             std::mem::take(&mut self.garbage).into_iter().partition(|(serial, _)| *serial <= completed);
         self.garbage = waiting;
@@ -1354,6 +1367,10 @@ impl Gpu for D3d12Gpu {
             }
             let render_targets = color.as_ref().map(|(_, desc)| std::slice::from_ref(desc));
             let depth = depth_stencil.as_ref().map(|(_, desc)| std::ptr::from_ref(desc));
+            #[cfg(feature = "bench")]
+            if let Some(timer) = &mut self.timer {
+                timer.begin(self.device.device(), &list);
+            }
             list.BeginRenderPass(render_targets, depth, D3D12_RENDER_PASS_FLAG_NONE);
         }
         self.pass = Some(OpenPass {
@@ -1516,6 +1533,10 @@ impl Gpu for D3d12Gpu {
         // attachments to their rest.
         unsafe {
             open.list.EndRenderPass();
+            #[cfg(feature = "bench")]
+            if let Some(timer) = &mut self.timer {
+                timer.end(&open.list);
+            }
             if !barriers.is_empty() {
                 open.list.ResourceBarrier(&barriers);
             }

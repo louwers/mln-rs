@@ -15,6 +15,11 @@ name = "mln_d3d12"
 # The doc comments have no examples to run.
 doctest = false
 
+[features]
+# `bench`, how long the GPU took, which the benchmarks (tools/bench) measure.
+# Not API: hidden from the documentation.
+bench = []
+
 # The crate is empty except on Windows. DXC, which compiles its HLSL, loads at
 # run time.
 [target.'cfg(windows)'.dependencies]

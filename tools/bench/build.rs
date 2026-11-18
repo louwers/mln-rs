@@ -39,7 +39,8 @@ fn main() {
     layout_probe();
 }
 
-/// Sets `mln_bench_vulkan` and `mln_bench_gl` where the native backends'
+/// Sets `mln_bench_vulkan`, `mln_bench_gl` and `mln_bench_d3d12` where the
+/// native backends'
 /// `bench` modules, which time the GPU's work (`meter::gpu_time`), are
 /// built: where the runtime's `bench` feature turns on theirs. A base of
 /// `mln-bench compare` from before they had them builds without them, and
@@ -47,9 +48,11 @@ fn main() {
 fn backend_timers(workspace: &Path) {
     let manifest = workspace.join("crates/mln_runtime/Cargo.toml");
     println!("cargo::rerun-if-changed={}", manifest.display());
-    println!("cargo::rustc-check-cfg=cfg(mln_bench_vulkan, mln_bench_gl)");
+    println!("cargo::rustc-check-cfg=cfg(mln_bench_vulkan, mln_bench_gl, mln_bench_d3d12)");
     let manifest = std::fs::read_to_string(&manifest).expect("the runtime's manifest");
-    for (library, cfg) in [("mln_vulkan", "mln_bench_vulkan"), ("mln_gl", "mln_bench_gl")] {
+    for (library, cfg) in
+        [("mln_vulkan", "mln_bench_vulkan"), ("mln_gl", "mln_bench_gl"), ("mln_d3d12", "mln_bench_d3d12")]
+    {
         // Only the runtime's `bench` feature names a library's.
         if manifest.contains(&format!("\"{library}?/bench\"")) {
             println!("cargo::rustc-cfg={cfg}");

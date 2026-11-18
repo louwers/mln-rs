@@ -14,6 +14,9 @@
 #![cfg(windows)]
 #![expect(unsafe_code, reason = "D3D12 and DXC through the windows crate are the FFI here")]
 
+#[cfg(feature = "bench")]
+#[doc(hidden)]
+pub mod bench;
 mod borrowed_target;
 mod conv;
 mod custom_layer;

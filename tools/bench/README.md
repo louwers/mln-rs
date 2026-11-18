@@ -252,7 +252,7 @@ is left out):
 
 `gpu` adds up the time from each render pass's beginning to its end, from the
 GPU's timestamp queries, where the device has them: WebGPU on Vulkan, D3D12 or
-Metal, and the Vulkan and OpenGL backends (`GL_TIME_ELAPSED`, or
+Metal, and the Vulkan, D3D12 and OpenGL backends (`GL_TIME_ELAPSED`, or
 `EXT_disjoint_timer_query` on GL ES). It counts what a shader change costs on a
 GPU, where `instructions` don't, and a frame's `wall` time, mostly the CPU's
 work in these scenarios, may not show it. On lavapipe it is the time the
@@ -438,12 +438,13 @@ code for the stage rather than a copy of it, so that it measures what the
 library runs and keeps building against other commits.
 
 The GPU backends' `bench` modules measure the GPU's work instead: WebGPU's
-counts and times each render pass, and the Vulkan and OpenGL backends' time
-them, once a scenario's process asks for it (`meter::measure_render_passes`), so
-that a workspace's tests, which build with the features too, measure nothing.
-The runtime's `bench` feature turns the backends' on, and where a commit's
-runtime doesn't turn on a native backend's, the harness builds without it
-(`build.rs`) and reports no `gpu` time on that backend.
+counts and times each render pass, and the Vulkan, D3D12 and OpenGL backends'
+time them, once a scenario's process asks for it
+(`meter::measure_render_passes`), so that a workspace's tests, which build with
+the features too, measure nothing. The runtime's `bench` feature turns the
+backends' on, and where a commit's runtime doesn't turn on a native backend's,
+the harness builds without it (`build.rs`) and reports no `gpu` time on that
+backend.
 
 ### Driving a map
 
