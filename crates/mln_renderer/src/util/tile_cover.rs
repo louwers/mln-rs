@@ -199,13 +199,11 @@ impl TileCover {
         TileCover { impl_: Box::new(Impl::new(i32::from(z), &Geometry::Polygon(p))) }
     }
 
-    /// The cover of `geom` at zoom `z`. With `project`, projects the geometry
-    /// points to tile coordinates, and fails with
-    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a point that
-    /// isn't a valid `LatLng`.
-    pub fn new_from_geometry(geom: &Geometry<f64>, z: u8, project: bool) -> Result<TileCover, Error> {
-        let impl_ = if project { Impl::new_projected(i32::from(z), geom)? } else { Impl::new(i32::from(z), geom) };
-        Ok(TileCover { impl_: Box::new(impl_) })
+    /// The cover at zoom `z` of `geom` in longitudes and latitudes. Fails
+    /// with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a point
+    /// that isn't a valid `LatLng`.
+    pub fn new_from_geometry(geom: &Geometry<f64>, z: u8) -> Result<TileCover, Error> {
+        Ok(TileCover { impl_: Box::new(Impl::new_projected(i32::from(z), geom)?) })
     }
 
     #[must_use]
@@ -1169,7 +1167,7 @@ pub fn tile_cover_bounds(bounds_: &LatLngBounds, z: u8) -> Vec<UnwrappedTileID> 
 #[cfg(test)]
 pub(crate) fn tile_cover_geometry(geometry: &Geometry<f64>, z: u8) -> Result<Vec<UnwrappedTileID>, Error> {
     let mut result = Vec::new();
-    let mut tc = TileCover::new_from_geometry(geometry, z, true)?;
+    let mut tc = TileCover::new_from_geometry(geometry, z)?;
     while tc.has_next() {
         result.push(tc.next().expect("has_next"));
     }
@@ -1205,7 +1203,7 @@ pub fn tile_count_bounds(bounds: &LatLngBounds, zoom: u8) -> u64 {
 pub fn tile_count_geometry(geometry: &Geometry<f64>, z: u8) -> Result<u64, Error> {
     let mut tile_count: u64 = 0;
 
-    let mut tc = TileCover::new_from_geometry(geometry, z, true)?;
+    let mut tc = TileCover::new_from_geometry(geometry, z)?;
     while tc.next().is_some() {
         tile_count += 1;
     }

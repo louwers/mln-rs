@@ -17,8 +17,8 @@ use mln_util::vectors::{Vec3, Vec4};
 use crate::projection::{ProjectedTilePoint, ProjectionData, mercator_tile_coords};
 use crate::transform_state::{NorthOrientation, TransformState};
 
-/// A `LatLng` from coordinates computed from a transform state and valid
-/// locations, which the state keeps finite.
+/// A `LatLng` from coordinates the transform state keeps valid, saturating
+/// any that aren't (see [`LatLng::saturating`]).
 fn lat_lng(lat: f64, lon: f64, mode: WrapMode) -> LatLng {
     LatLng::saturating(lat, lon, mode)
 }

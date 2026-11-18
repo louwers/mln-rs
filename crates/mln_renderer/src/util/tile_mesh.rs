@@ -6,7 +6,8 @@ const EXTENT_STENCIL_BORDER: i32 = EXTENT / 128;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct TileMeshOptions {
-    /// Quads per axis; 1 is the plain tile quad.
+    /// Quads per axis; 1 is the plain tile quad. Capped so that every index
+    /// fits in 16 bits.
     pub(crate) granularity: u32,
     /// Adds a ring of quads `EXTENT / 128` units outside the tile, for
     /// stencil masks.
@@ -45,7 +46,7 @@ pub(crate) fn create_tile_mesh(options: TileMeshOptions) -> TileMesh {
         + i32::from(options.extend_to_south_pole || options.generate_borders);
     // At most 256 vertices per axis, so every index fits in 16 bits.
     let max_granularity = 255 - extra_quads_x.max(extra_quads_y);
-    let granularity = i32::try_from(options.granularity).unwrap_or(i32::MAX).clamp(1, max_granularity);
+    let granularity = options.granularity.clamp(1, max_granularity as u32) as i32;
     let quads_per_axis_x = granularity + extra_quads_x;
     let quads_per_axis_y = granularity + extra_quads_y;
     let vertices_per_axis_x = quads_per_axis_x + 1;

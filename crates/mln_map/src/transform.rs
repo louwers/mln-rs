@@ -61,8 +61,8 @@ fn normalize_angle(mut angle: f64, anchor_angle: f64) -> f64 {
     angle
 }
 
-/// A `LatLng` from coordinates computed from the transform state's valid
-/// locations, which the state keeps finite.
+/// A `LatLng` from coordinates the transform state keeps valid, saturating
+/// any that aren't (see [`LatLng::saturating`]).
 fn lat_lng(lat: f64, lon: f64) -> LatLng {
     LatLng::saturating(lat, lon, WrapMode::Unwrapped)
 }

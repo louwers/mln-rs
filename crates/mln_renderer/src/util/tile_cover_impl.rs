@@ -252,8 +252,8 @@ fn scan_row(y: u32, active_bounds: &mut Bounds) -> Vec<TileSpan> {
     tile_range
 }
 
-/// The geometry visitor that builds the edge table. Projecting a point with
-/// an out-of-range latitude is an `Err`.
+/// The geometry visitor that builds the edge table, mapping each point through
+/// `project`.
 struct BuildBoundsMap<P> {
     zoom: i32,
     project: P,

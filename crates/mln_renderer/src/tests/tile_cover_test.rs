@@ -733,7 +733,7 @@ mod tile_cover {
             }
 
             eprint!(".");
-            let mut tc = TileCover::new_from_geometry(&Geometry::Polygon(polygon(rings)), 5, true).unwrap();
+            let mut tc = TileCover::new_from_geometry(&Geometry::Polygon(polygon(rings)), 5).unwrap();
             while tc.next().is_some() {}
         }
     }
@@ -762,8 +762,7 @@ mod tile_cover {
             }
 
             eprint!(".");
-            let mut tc =
-                TileCover::new_from_geometry(&Geometry::MultiLineString(MultiLineString(mls)), 5, true).unwrap();
+            let mut tc = TileCover::new_from_geometry(&Geometry::MultiLineString(MultiLineString(mls)), 5).unwrap();
             while tc.next().is_some() {}
         }
     }

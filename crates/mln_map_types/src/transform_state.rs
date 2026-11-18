@@ -42,8 +42,8 @@ fn max_mercator_horizon_angle() -> f64 {
     mln_math::deg2rad(89.25)
 }
 
-/// A `LatLng` from coordinates that the state keeps finite: its setters take
-/// only finite numbers.
+/// A `LatLng` from coordinates the transform state keeps valid, saturating
+/// any that aren't (see [`LatLng::saturating`]).
 fn lat_lng(lat: f64, lon: f64, mode: WrapMode) -> LatLng {
     LatLng::saturating(lat, lon, mode)
 }

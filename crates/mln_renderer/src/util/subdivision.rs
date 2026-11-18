@@ -662,7 +662,7 @@ pub(crate) fn fix_winding_order(vertices: &[i16], indices: &[u32]) -> Vec<u32> {
 }
 
 /// Triangulates an ordered convex ring of vertex indices by walking outward
-/// from its leftmost vertex.
+/// from its leftmost vertex. An empty ring adds no triangles.
 pub(crate) fn scanline_triangulate_vertex_ring(vertices: &[i16], ring: &[u32], out_indices: &mut Vec<u32>) {
     if ring.is_empty() {
         return;
