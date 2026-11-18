@@ -831,7 +831,7 @@ impl RenderFillExtrusionLayer {
     /// Writes the layer's buffers of the frame's draws.
     fn write_uniforms(
         layer: &EvaluatedLayer<FillExtrusion>,
-        writer: &mut UniformWriter<'_, ExtrusionUniforms, usize>,
+        writer: &mut UniformWriter<'_, ExtrusionUniforms>,
         parameters: &PaintParameters<'_>,
     ) {
         let evaluated = &layer.paint;

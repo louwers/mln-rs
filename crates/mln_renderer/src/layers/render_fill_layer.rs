@@ -596,7 +596,7 @@ impl RenderFillLayer {
     }
 
     /// Writes the layer's buffers of the frame's draws.
-    fn write_uniforms(layer: &EvaluatedLayer<Fill>, writer: &mut UniformWriter<'_, FillUniforms, FillPart>) {
+    fn write_uniforms(layer: &EvaluatedLayer<Fill>, writer: &mut UniformWriter<'_, FillUniforms>) {
         let evaluated = &layer.paint;
         let props = FillEvaluatedPropsUBO {
             color: evaluated.fill_color.constant_or(&FillPaintProperties::Defaults::fill_color()).to_float_array(),

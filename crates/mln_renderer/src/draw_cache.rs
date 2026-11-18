@@ -107,7 +107,7 @@ struct TileState {
 struct TileSet {
     tiles: VecMap<OverscaledTileID, TileState>,
     /// For each tile of the set, the index it had before the last
-    /// `retarget`, `None` for a tile new to the set. The indexes it had go
+    /// `set_tiles`, `None` for a tile new to the set. The indexes it had go
     /// up.
     moves: Vec<Option<usize>>,
     /// The tile `index_of` found last, and its index: a layer's update asks
@@ -142,8 +142,17 @@ impl TileSet {
 
     /// Makes `tiles` the set's: keeps the entries of those it has, and
     /// drops the others. Returns the number of tiles it had where any tile's
-    /// index changed, which `moves` then says.
-    fn retarget(&mut self, tiles: impl Iterator<Item = OverscaledTileID> + Clone) -> Option<usize> {
+    /// index changed, which `moves` then says; a set without tiles had no
+    /// values to move.
+    fn set_tiles(&mut self, tiles: impl Iterator<Item = OverscaledTileID> + Clone) -> Option<usize> {
+        if self.tiles.is_empty() {
+            let (min, max) = tiles.size_hint();
+            self.tiles.reserve(max.unwrap_or(min));
+            for id in tiles {
+                self.tiles.insert(id, TileState::default());
+            }
+            return None;
+        }
         if tiles.clone().eq(self.tiles.keys().copied()) {
             return None;
         }
@@ -214,20 +223,16 @@ impl<T> TileMap<T> {
         I: IntoIterator<Item = OverscaledTileID>,
         I::IntoIter: Clone,
     {
-        let tiles = tiles.into_iter();
-        if self.set.tiles.is_empty() {
-            // Without tiles, the map has no values to move.
-            debug_assert!(self.values.is_empty());
-            let (min, max) = tiles.size_hint();
-            self.set.tiles.reserve(max.unwrap_or(min));
-            for id in tiles {
-                self.set.tiles.insert(id, TileState::default());
-            }
-            return;
+        debug_assert!(!self.set.tiles.is_empty() || self.values.is_empty());
+        if let Some(old_len) = self.set.set_tiles(tiles.into_iter()) {
+            self.apply_moves(old_len);
         }
-        let Some(old_len) = self.set.retarget(tiles) else {
-            return;
-        };
+    }
+
+    /// Moves the values of the `old_len` tiles the set had to their tiles'
+    /// indexes, as the set's `moves` say, and drops those of the tiles that
+    /// left.
+    fn apply_moves(&mut self, old_len: usize) {
         let (values, moves) = (&mut self.values, &self.set.moves);
         // The values of the tiles that stay, in order, then those of the new
         // tiles at their indexes, moving the others up.
@@ -435,10 +440,12 @@ impl FrameDraw {
 /// memory from frame to frame, so that a frame of no more draws than one
 /// before it allocates nothing.
 pub(crate) struct DrawList<U, P = ()> {
-    /// The draws, each with its part and the index of its values in
-    /// `uniforms`.
-    draws: Vec<(FrameDraw, P, usize)>,
+    /// The draws, each with the index of its values in `uniforms` and of its
+    /// part in `parts`. The draws sort without their parts, so that the
+    /// sort is one function for all the layers' lists.
+    draws: Vec<(FrameDraw, usize)>,
     uniforms: Vec<U>,
+    parts: Vec<P>,
     /// The bytes of a storage buffer's entries, as [`UniformWriter`] writes
     /// them.
     bytes: Vec<u8>,
@@ -446,7 +453,7 @@ pub(crate) struct DrawList<U, P = ()> {
 
 impl<U, P> Default for DrawList<U, P> {
     fn default() -> Self {
-        DrawList { draws: Vec::new(), uniforms: Vec::new(), bytes: Vec::new() }
+        DrawList { draws: Vec::new(), uniforms: Vec::new(), parts: Vec::new(), bytes: Vec::new() }
     }
 }
 
@@ -461,12 +468,14 @@ impl<U, P: Copy> DrawList<U, P> {
     pub(crate) fn clear(&mut self) {
         self.draws.clear();
         self.uniforms.clear();
+        self.parts.clear();
     }
 
     /// Adds `draw`, of the GPU objects of the layer's `part`.
     pub(crate) fn push_part(&mut self, draw: FrameDraw, part: P, uniforms: U) {
-        self.draws.push((draw, part, self.uniforms.len()));
+        self.draws.push((draw, self.uniforms.len()));
         self.uniforms.push(uniforms);
+        self.parts.push(part);
     }
 
     /// Makes the list's draws `layer`'s, in [`FrameDraw::order`] and in the
@@ -477,9 +486,9 @@ impl<U, P: Copy> DrawList<U, P> {
         &mut self,
         layer: &mut LayerDraws<P>,
         context: &Context,
-        write: impl FnOnce(&mut UniformWriter<'_, U, P>),
+        write: impl FnOnce(&mut UniformWriter<'_, U>),
     ) {
-        self.draws.sort_unstable_by_key(|(draw, _, index)| (draw.order(), *index));
+        self.draws.sort_unstable_by_key(|(draw, index)| (draw.order(), *index));
         if !self.draws.is_empty() {
             write(&mut UniformWriter {
                 draws: &self.draws,
@@ -490,36 +499,37 @@ impl<U, P: Copy> DrawList<U, P> {
             });
         }
         layer.parts.clear();
-        layer.parts.extend(self.draws.iter().map(|&(_, part, _)| part));
+        layer.parts.extend(self.draws.iter().map(|&(_, index)| self.parts[index]));
         layer.frame.draws.clear();
-        layer.frame.draws.extend(self.draws.drain(..).map(|(draw, _, _)| draw));
+        layer.frame.draws.extend(self.draws.drain(..).map(|(draw, _)| draw));
         self.uniforms.clear();
+        self.parts.clear();
     }
 }
 
 /// Writes the buffers that a frame's draws read, each draw's entries at its
 /// index in drawing order.
-pub(crate) struct UniformWriter<'a, U, P = ()> {
-    draws: &'a [(FrameDraw, P, usize)],
+pub(crate) struct UniformWriter<'a, U> {
+    draws: &'a [(FrameDraw, usize)],
     uniforms: &'a [U],
     bytes: &'a mut Vec<u8>,
     buffers: &'a mut UniformBufferArray,
     context: &'a Context,
 }
 
-impl<U, P> UniformWriter<'_, U, P> {
+impl<U> UniformWriter<'_, U> {
     /// Writes each draw's `entry` of its uniform values to the storage
     /// buffer `id`.
-    pub(crate) fn storage<E: bytemuck::Pod>(&mut self, id: usize, entry: impl Fn(&U) -> E) {
+    pub(crate) fn storage<P: bytemuck::Pod>(&mut self, id: usize, entry: impl Fn(&U) -> P) {
         self.bytes.clear();
-        for (_, _, index) in self.draws {
-            self.bytes.extend_from_slice(bytemuck::bytes_of(&entry(&self.uniforms[*index])));
+        for &(_, index) in self.draws {
+            self.bytes.extend_from_slice(bytemuck::bytes_of(&entry(&self.uniforms[index])));
         }
         self.buffers.write_storage(id, self.bytes, self.context);
     }
 
     /// Writes `value`, which all the draws read, to the uniform buffer `id`.
-    pub(crate) fn uniform<E: bytemuck::Pod>(&mut self, id: usize, value: &E) {
+    pub(crate) fn uniform<P: bytemuck::Pod>(&mut self, id: usize, value: &P) {
         self.buffers.create_or_update_pod(id, value, self.context);
     }
 
