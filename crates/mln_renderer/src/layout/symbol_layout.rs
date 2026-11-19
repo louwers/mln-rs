@@ -514,7 +514,7 @@ impl SymbolLayout {
                         u8string = u8string.to_lowercase();
                     }
 
-                    // Only the sections that draw from glyph PBFs take ICU's
+                    // Only the sections that draw from glyph PBFs take their
                     // Arabic presentation forms. HarfBuzz needs the letters
                     // themselves, to apply the font's own joining rules.
                     let u16_string = u8string.encode_utf16().collect::<Vec<u16>>();

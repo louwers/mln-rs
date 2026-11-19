@@ -122,7 +122,7 @@ run = "cargo run -q -p mln-rs-c-abi-gen"
 # The Unicode version is unicode-bidi's (its char_data's UNICODE_VERSION):
 # bump it with the crate, here and in generate:bidi-mirroring.
 [tasks."generate:arabic-shaping"]
-description = "Regenerate mln_text's Arabic joining types and presentation forms from the Unicode Character Database"
+description = "Regenerate mln_text's Arabic presentation forms from the Unicode Character Database"
 run = '''
 set -e
 ucd=$(mktemp -d)

@@ -3,48 +3,63 @@
 //! presentation form of its place in a word instead. Text that HarfRust
 //! shapes doesn't need it.
 //!
-//! Joining types and presentation forms come from the Unicode Character
-//! Database (`arabic_tables`), in the Unicode version of unicode-bidi's
-//! tables.
+//! The presentation forms come from the Unicode Character Database
+//! (`arabic_tables`), in the Unicode version of unicode-bidi's tables. A
+//! letter joins on the sides its forms connect, so that a letter without
+//! forms, which a glyph PBF can only draw on its own, isn't joined.
 
 use std::borrow::Cow;
 
-use crate::arabic_tables::{JOINING_TYPES, LAM_ALEF_FORMS, LETTER_FORMS, MARK_FORMS};
+use unicode_properties::{GeneralCategory, UnicodeGeneralCategory};
+
+use crate::arabic_tables::{LAM_ALEF_FORMS, LETTER_FORMS, MARK_FORMS};
 
 const LAM: u16 = 0x0644;
 
-/// A character's Unicode `Joining_Type`.
+/// How a character joins the characters around it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum JoiningType {
-    NonJoining,
-    Dual,
-    Right,
-    Left,
-    JoinCausing,
+enum Joining {
+    /// Joins the character before it in logical order if `prev`, and the
+    /// one after it if `next`, when that one joins it.
+    Joins { prev: bool, next: bool },
+    /// Doesn't break a join between the characters around it, as marks
+    /// don't.
     Transparent,
 }
 
-impl JoiningType {
-    /// The joining type of a UTF-16 code unit. Surrogates, like the
-    /// characters outside the BMP that they encode, are non-joining here.
+impl Joining {
+    const NONE: Self = Joining::Joins { prev: false, next: false };
+
+    /// How a UTF-16 code unit joins. Surrogates don't.
     fn of(unit: u16) -> Self {
-        let i = JOINING_TYPES.partition_point(|&(_, last, _)| last < unit);
-        match JOINING_TYPES.get(i) {
-            Some(&(first, _, joining_type)) if first <= unit => joining_type,
-            _ => JoiningType::NonJoining,
+        if let Ok(i) = LETTER_FORMS.binary_search_by_key(&unit, |&(letter, _)| letter) {
+            let [_, final_, initial, medial] = LETTER_FORMS[i].1;
+            return Joining::Joins { prev: final_ != 0 || medial != 0, next: initial != 0 || medial != 0 };
+        }
+        match unit {
+            // Tatweel and zero width joiner.
+            0x0640 | 0x200D => Joining::Joins { prev: true, next: true },
+            // The format characters that ArabicShaping.txt makes
+            // non-joining: the number signs, the Mongolian vowel separator,
+            // the zero width non-joiner and the BiDi isolates.
+            0x0600..=0x0605 | 0x06DD | 0x0890 | 0x0891 | 0x08E2 | 0x180E | 0x200C | 0x2066..=0x2069 => Joining::NONE,
+            _ => match char::from_u32(u32::from(unit)).map(UnicodeGeneralCategory::general_category) {
+                Some(GeneralCategory::NonspacingMark | GeneralCategory::EnclosingMark | GeneralCategory::Format) => {
+                    Joining::Transparent
+                }
+                _ => Joining::NONE,
+            },
         }
     }
 
-    /// Whether the character joins the one before it in logical order, if
-    /// that one joins it.
-    fn joins_preceding(self) -> bool {
-        matches!(self, JoiningType::Dual | JoiningType::Right | JoiningType::JoinCausing)
+    /// Whether the character joins the one after it, if that one joins it.
+    fn joins_next(self) -> bool {
+        matches!(self, Joining::Joins { next: true, .. })
     }
 
-    /// Whether the character joins the one after it in logical order, if
-    /// that one joins it.
-    fn joins_following(self) -> bool {
-        matches!(self, JoiningType::Dual | JoiningType::Left | JoiningType::JoinCausing)
+    /// Whether the character joins the one before it, if that one joins it.
+    fn joins_prev(self) -> bool {
+        matches!(self, Joining::Joins { prev: true, .. })
     }
 }
 
@@ -55,49 +70,50 @@ impl JoiningType {
 /// become their ligature, and the marks with presentation forms (fathatan
 /// to sukun) take their form on a tatweel between two joined letters, or
 /// their form on their own otherwise. Transparent characters, such as
-/// marks, don't break a join. Presentation forms of letters in `text` are
-/// read as their letters first. Returns `text` itself if it has no Arabic.
+/// marks, don't break a join, and a letter without presentation forms joins
+/// neither side. Presentation forms of letters in `text` are read as their
+/// letters first. Returns `text` itself if it has no Arabic.
 #[must_use]
 pub fn shape_arabic(text: &[u16]) -> Cow<'_, [u16]> {
     if !text.iter().any(|&unit| matches!(unit, 0x0600..=0x06FF | 0xFB50..=0xFDFF | 0xFE70..=0xFEFF)) {
         return Cow::Borrowed(text);
     }
     let letters = to_letters(text);
-    let types: Vec<JoiningType> = letters.iter().map(|&unit| JoiningType::of(unit)).collect();
-    // The index and joining type of the first character after `i` that
-    // isn't transparent, or the end of the text, which doesn't join.
+    let joinings: Vec<Joining> = letters.iter().map(|&unit| Joining::of(unit)).collect();
+    // The index and joining of the first character after `i` that isn't
+    // transparent, or the end of the text, which doesn't join.
     let next = |i: usize| {
         (i + 1..letters.len())
-            .find(|&j| types[j] != JoiningType::Transparent)
-            .map_or((letters.len(), JoiningType::NonJoining), |j| (j, types[j]))
+            .find(|&j| joinings[j] != Joining::Transparent)
+            .map_or((letters.len(), Joining::NONE), |j| (j, joinings[j]))
     };
 
     let mut shaped = Vec::with_capacity(letters.len());
-    // The joining type of the last character that isn't transparent.
-    let mut prev = JoiningType::NonJoining;
+    // The joining of the last character that isn't transparent.
+    let mut prev = Joining::NONE;
     let mut i = 0;
     while i < letters.len() {
-        let (unit, joining_type) = (letters[i], types[i]);
-        let (next_index, next_type) = next(i);
-        if joining_type == JoiningType::Transparent {
-            shaped.push(mark_form(unit, prev.joins_following() && next_type.joins_preceding()));
+        let (unit, joining) = (letters[i], joinings[i]);
+        let (next_index, next_joining) = next(i);
+        if joining == Joining::Transparent {
+            shaped.push(mark_form(unit, prev.joins_next() && next_joining.joins_prev()));
             i += 1;
             continue;
         }
-        let joins_prev = joining_type.joins_preceding() && prev.joins_following();
+        let joins_prev = joining.joins_prev() && prev.joins_next();
         if unit == LAM
             && let Some(ligature) = letters.get(next_index).and_then(|&alef| lam_alef_forms(alef))
         {
             shaped.push(ligature[usize::from(joins_prev)]);
             // The ligature has no tatweel for the marks between them.
             shaped.extend(letters[i + 1..next_index].iter().map(|&mark| mark_form(mark, false)));
-            prev = next_type;
+            prev = next_joining;
             i = next_index + 1;
             continue;
         }
-        let joins_next = joining_type.joins_following() && next_type.joins_preceding();
+        let joins_next = joining.joins_next() && next_joining.joins_prev();
         shaped.push(letter_form(unit, joins_prev, joins_next));
-        prev = joining_type;
+        prev = joining;
         i += 1;
     }
     Cow::Owned(shaped)
@@ -194,6 +210,16 @@ mod tests {
     #[test]
     fn lam_alef_with_a_mark_between_them() {
         assert_eq!(shape("لَا"), [0xFEFB, 0xFE76]);
+    }
+
+    #[test]
+    fn zero_width_non_joiner_breaks_a_join() {
+        assert_eq!(shape("ب\u{200C}ب"), [0xFE8F, 0x200C, 0xFE8F]);
+    }
+
+    #[test]
+    fn letters_without_forms_dont_join() {
+        assert_eq!(shape("ب\u{0750}ب"), [0xFE8F, 0x0750, 0xFE8F]);
     }
 
     #[test]
