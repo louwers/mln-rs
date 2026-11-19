@@ -687,3 +687,9 @@ fn hsl_turns_away_an_infinite_hue() {
     assert_invalid("hsl(1e999 50% 50%)");
     assert_invalid("hsl(-1e999deg, 50%, 50%)");
 }
+
+#[test]
+fn hex_turns_away_a_sign() {
+    assert_invalid("#+f00ff");
+    assert_invalid("#00+f00");
+}

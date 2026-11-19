@@ -49,6 +49,9 @@ fn parse_hex(hex: &str) -> Option<(Vector3, f64)> {
         6 | 8 => 2,
         _ => return None,
     };
+    if !hex.bytes().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
     let channel = |i: usize| {
         let value = u8::from_str_radix(hex.get(i * digits..(i + 1) * digits)?, 16).ok()?;
         // A single digit stands for itself twice: f is ff.
