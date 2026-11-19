@@ -19,7 +19,10 @@ use mln_util::geo::{LatLng, LatLngBounds};
 use super::TempDir;
 use crate::database_file_source::{DatabaseFileSourceExt, RegionDatabase, region_database};
 
-const TIMEOUT: Duration = Duration::from_secs(10);
+/// How long a test waits for a callback or a status before it fails as
+/// hung. Generous: a download from the local server takes seconds where
+/// the platform's HTTP stack is slow to reach it, and longer under load.
+const TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Calls `operation` with a callback and waits for its result.
 fn wait<T: Send + 'static>(operation: impl FnOnce(Box<dyn FnOnce(T) + Send>)) -> T {
