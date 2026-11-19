@@ -185,7 +185,8 @@ impl RendererBackend {
 /// between don't each make it current and release it, which flushes on
 /// Mesa. The scope's end leaves no samplers bound, for what draws on the
 /// context outside the renderer, and in debug builds logs an error GL
-/// recorded.
+/// recorded; a scope that a panic unwinds through only releases the
+/// context.
 pub struct GlScope<'a> {
     gpu: &'a mut GlGpu,
     current: Option<Current>,
@@ -207,7 +208,11 @@ impl DerefMut for GlScope<'_> {
 
 impl Drop for GlScope<'_> {
     fn drop(&mut self) {
-        self.gpu.end_frame();
+        // No GL calls while a panic unwinds, which a panic in them would
+        // turn into an abort.
+        if !std::thread::panicking() {
+            self.gpu.end_frame();
+        }
         drop(self.current.take());
     }
 }

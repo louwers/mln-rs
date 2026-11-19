@@ -106,6 +106,9 @@ pub(crate) struct SurfaceResource {
     read_requested: bool,
     /// The readback of the last frame read, and its size.
     readback: Option<(ReadbackId, Size)>,
+    /// Whether a tear-down destroyed the resource's objects, after the
+    /// device's work.
+    torn_down: bool,
 }
 
 impl SurfaceResource {
@@ -144,6 +147,7 @@ impl SurfaceResource {
             overlay: None,
             read_requested: false,
             readback: None,
+            torn_down: false,
         };
         resource.init(gpu, size.width, size.height);
         resource
@@ -740,6 +744,7 @@ impl SurfaceResource {
         }
         self.destroy_images(Some(gpu));
         self.destroy_surface();
+        self.torn_down = true;
     }
 }
 
@@ -747,6 +752,9 @@ impl Drop for SurfaceResource {
     /// Destroys the native objects that a tear-down didn't, after the
     /// device's work, and leaves their textures to the `Gpu`.
     fn drop(&mut self) {
+        if self.torn_down {
+            return;
+        }
         self.backend.wait_idle("surface deletion");
         self.destroy_images(None);
         self.destroy_surface();

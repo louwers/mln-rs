@@ -301,6 +301,9 @@ pub struct BorrowedTarget {
     /// The host's D3D12 fences that releases named, by their handles.
     #[cfg(windows)]
     imported_fences: Vec<(u64, Rc<ImportedFence>)>,
+    /// Whether a tear-down waited for the device's work, after which the
+    /// target's semaphores are free to destroy.
+    torn_down: bool,
 }
 
 impl BorrowedTarget {
@@ -336,6 +339,7 @@ impl BorrowedTarget {
             shared_fence: None,
             #[cfg(windows)]
             imported_fences: Vec::new(),
+            torn_down: false,
         };
         if let Err(error) = this.create_sync() {
             this.tear_down(gpu);
@@ -419,14 +423,6 @@ impl BorrowedTarget {
     #[cfg_attr(not(unix), expect(clippy::needless_pass_by_value, reason = "a Unix release takes the host's sync file"))]
     pub fn release(&mut self, gpu: &mut VulkanGpu, slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
         use ash::vk::Handle as _;
-        if slot >= self.slots.len() {
-            return Err(Error::invalid_argument("the ring has no such slot"));
-        }
-        #[cfg(windows)]
-        let fence = match consumer.sync.kind {
-            SyncKind::D3d12Fence => Some(self.imported_fence(consumer.sync.handle)?),
-            _ => None,
-        };
         let Some(state) = self.slots.get_mut(slot) else {
             return Err(Error::invalid_argument("the ring has no such slot"));
         };
@@ -493,8 +489,8 @@ impl BorrowedTarget {
             }
             #[cfg(windows)]
             SyncKind::D3d12Fence => {
-                let fence = fence.ok_or_else(|| Error::native("the host's D3D12 fence wasn't imported"))?;
-                state.consumer_wait = Some(ConsumerWait::Fence(fence, consumer.value));
+                let fence = self.imported_fence(consumer.handle)?;
+                self.slots[slot].consumer_wait = Some(ConsumerWait::Fence(fence, consumer.value));
                 Ok(())
             }
             kind => Err(Error::unsupported(format!("the Vulkan target waits for no {kind:?}"))),
@@ -753,6 +749,7 @@ impl FrameTarget for BorrowedTarget {
             forget_wait(gpu, &self.backend, &mut slot);
         }
         self.imports.tear_down(gpu);
+        self.torn_down = true;
     }
 }
 
@@ -761,7 +758,9 @@ impl Drop for BorrowedTarget {
     /// tear-down didn't, after the backend's work.
     fn drop(&mut self) {
         let backend = &*self.backend;
-        backend.wait_idle("borrowed target deletion");
+        if !self.torn_down {
+            backend.wait_idle("borrowed target deletion");
+        }
         let device = backend.get_device();
         for slot in std::mem::take(&mut self.slots) {
             if let Some(wait) = slot.consumer_wait {
