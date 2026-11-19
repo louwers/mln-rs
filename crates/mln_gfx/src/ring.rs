@@ -330,15 +330,17 @@ impl<B: RingBackend> BorrowedTarget<B> {
     ///
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for
     /// another number of textures, and as the check and [`Imports::new`] do.
-    /// The target then keeps its textures. Returns the host's reads of the
-    /// textures that the ring let go of, which the ring waits for before the
-    /// host may use them.
+    /// The target then keeps its textures. Otherwise it first submits what
+    /// was recorded, as [`take_pending`](Self::take_pending) does. Returns
+    /// the host's reads of the textures that the ring let go of, which the
+    /// ring waits for before the host may use them.
     pub fn replace(&mut self, gpu: &mut B::Gpu, textures: B::Textures) -> Result<PendingReads<B>, Error> {
         if textures.images().len() != self.textures.images().len() {
             return Err(Error::invalid_argument("a ring keeps its depth"));
         }
         self.ring.check_replacement(&self.textures, &textures)?;
         let imports = Imports::new::<B>(gpu, &textures)?;
+        self.submit_recorded(gpu, "borrowed texture replacement");
         self.ring.wait_for_frames("borrowed texture replacement");
         std::mem::replace(&mut self.imports, imports).tear_down(gpu);
         let old = std::mem::replace(&mut self.textures, textures);
@@ -365,12 +367,34 @@ impl<B: RingBackend> BorrowedTarget<B> {
 
     /// Takes what the ring's textures still wait for, the host's reads of
     /// them, for the ring to wait for before it lets go of the textures.
+    ///
+    /// It first submits the work recorded so far, so that none of it draws
+    /// into the textures later: a frame begun and not ended has its passes
+    /// submitted, after the host's reads that its slot waits for.
     pub fn take_pending(&mut self, gpu: &mut B::Gpu) -> PendingReads<B> {
-        for slot in &mut self.slots {
-            slot.detach(gpu);
-        }
+        self.submit_recorded(gpu, "borrowed target release");
         let waits = self.slots.iter_mut().filter_map(|slot| slot.wait.take()).collect();
         self.pending(gpu, waits)
+    }
+
+    /// Submits the work recorded so far, which the ring is about to let go
+    /// of the textures it draws into, with what the slot of a frame begun
+    /// and not ended waits for. The ring lets go of that wait after the
+    /// submit's work. Logs `what` was going on when the submit fails.
+    fn submit_recorded(&mut self, gpu: &mut B::Gpu, what: &str) {
+        let mut taken = Vec::new();
+        for slot in &mut self.slots {
+            if let Some(texture) = slot.attached.take() {
+                B::take_waits_into_next_submit(gpu, texture);
+                taken.extend(slot.wait.take());
+            }
+        }
+        if let Err(error) = gpu.flush(false) {
+            Log::error(Event::Render, format!("Submitting the frames before a {what} failed: {error}"));
+        }
+        for wait in taken {
+            B::waited(gpu, wait);
+        }
     }
 
     /// `waits`, and the end of the work submitted to `gpu` where the backend
@@ -452,10 +476,12 @@ impl<B: RingBackend> FrameTarget for BorrowedTarget<B> {
         Handoff::GivenBack { slot, sync }
     }
 
-    /// Lets go of the slots and what they wait for, and destroys the
-    /// imports, once the frames drawn so far are done where the backend
-    /// must wait.
+    /// Submits the work recorded so far, as
+    /// [`take_pending`](BorrowedTarget::take_pending) does, then lets go of
+    /// the slots and what they wait for, and destroys the imports, once the
+    /// frames drawn so far are done where the backend must wait.
     fn tear_down(&mut self, gpu: &mut B::Gpu) {
+        self.submit_recorded(gpu, "borrowed target deletion");
         self.ring.wait_for_frames("borrowed target deletion");
         for mut slot in std::mem::take(&mut self.slots) {
             slot.forget(gpu, self.ring.reads());
@@ -1070,8 +1096,10 @@ mod tests {
         let gpu = &mut backend.gpu;
         ring.release(gpu, 0, timeline(7)).expect("a release");
         ring.begin_frame(gpu);
-        // A tear-down has the wait go after the next submit's work.
+        // A tear-down submits the frame with its wait, which goes after the
+        // submit's work.
         ring.tear_down(gpu);
+        assert_eq!(gpu.submits, [vec![7]]);
         assert_eq!(gpu.waited, [7]);
         drop(ring);
         // Without a gpu, a drop leaves the wait to the backend.
@@ -1101,11 +1129,39 @@ mod tests {
         // Image 20 keeps its read, at slot 0.
         let image = ring.begin_frame(gpu).expect("a frame");
         assert_eq!(gpu.texture_waits[&image.color], [8]);
+        ring.end_frame(gpu);
+        assert_eq!(gpu.submits.last(), Some(&vec![8]));
+        ring.release(gpu, 0, timeline(9)).expect("a release");
         let mut pending = ring.take_pending(gpu);
-        assert!(gpu.texture_waits.is_empty());
         assert!(!pending.poll());
         ring.release(gpu, 1, timeline(100)).expect("a release");
         assert!(ring.take_pending(gpu).poll());
+    }
+
+    #[test]
+    fn a_ring_that_lets_go_of_a_begun_frame_submits_it_with_its_wait() {
+        let mut backend = FakeBackend::default();
+        let record = Rc::clone(&backend.record);
+        let mut ring = target(&mut backend, &[10, 20]);
+        let gpu = &mut backend.gpu;
+        ring.release(gpu, 0, timeline(7)).expect("a release");
+        let image = ring.begin_frame(gpu).expect("a frame");
+        // A pass of the frame took the wait into the work recorded so far.
+        FakeRing::take_waits_into_next_submit(gpu, image.color);
+        let mut pending = ring.replace(gpu, images(&[10, 30])).expect("a replacement");
+        assert_eq!(gpu.submits, [vec![7]]);
+        assert_eq!(gpu.waited, [7]);
+        assert!(pending.poll());
+        // A frame begun with its wait not taken yet has it taken by the
+        // submit.
+        ring.release(gpu, 1, timeline(8)).expect("a release");
+        ring.select(1);
+        ring.begin_frame(gpu);
+        assert!(ring.take_pending(gpu).poll());
+        assert_eq!(gpu.submits, [vec![7], vec![8]]);
+        assert_eq!(gpu.waited, [7, 8]);
+        assert!(gpu.texture_waits.is_empty());
+        assert_eq!(record.borrow().forgotten, [] as [u32; 0]);
     }
 
     #[test]
