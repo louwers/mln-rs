@@ -101,6 +101,7 @@ fn pending(mut reads: impl PendingReads + 'static) -> Pending {
 /// A ring target of the backend `$backend` of the type `$type`, whose
 /// textures come in `RingKind::$kind`, and whose replacement's result
 /// `$pending` makes the host's reads that the ring waits for.
+#[cfg(all(feature = "gl", not(target_family = "wasm")))]
 macro_rules! borrowed {
     ($backend:ty, $type:ty, $kind:ident, $what:literal, $pending:expr) => {
         impl Borrowed<$backend> for $type {
@@ -134,6 +135,11 @@ macro_rules! borrowed {
 
 /// A ring target written once in `mln_gfx`, on the backend `$backend`,
 /// whose ring waits for the host's reads as it lets go of its textures.
+#[cfg(any(
+    all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))),
+    all(feature = "metal", target_vendor = "apple"),
+    all(feature = "d3d12", windows)
+))]
 macro_rules! borrowed_ring {
     ($backend:ty, $ring:ty, $kind:ident, $what:literal) => {
         impl Borrowed<$backend> for ring::BorrowedTarget<$ring> {
