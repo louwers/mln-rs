@@ -264,8 +264,8 @@ impl FrameTarget for BorrowedTarget {
         // which it does at its next draw or clear. Without that, radeonsi
         // hands the host's context the compressed data of its depth texture.
         if !self.textures.depth_textures.is_empty() {
-            let mut context = gpu.context_mut().enter();
-            let (gl, state) = context.parts();
+            let mut current = gpu.enter();
+            let (gl, state) = current.context_mut().parts();
             state.bind_framebuffer(gl, None);
             // SAFETY: the context is current, on its own surface, whose
             // color nothing reads.
@@ -339,7 +339,7 @@ impl FrameTarget for HostSurfaceTarget {
         if !self.image.release(gpu) {
             return Handoff::Dropped;
         }
-        let _current = gpu.context_mut().enter();
+        let _current = gpu.enter();
         if self.swap.swap() { Handoff::Presented } else { Handoff::Dropped }
     }
 

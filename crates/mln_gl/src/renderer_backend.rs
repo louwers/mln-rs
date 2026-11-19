@@ -32,7 +32,8 @@ pub(crate) trait PlatformContext {
 
 /// A GL context: the platform's, the functions that call it and the GL
 /// state last set on it. Each call that uses it makes it current for the
-/// call with [`enter`](Self::enter); calls inside it keep it current.
+/// call with [`make_current`](Self::make_current); calls inside it keep it
+/// current.
 pub(crate) struct GlContext {
     // Dropped before the platform's context, which its functions belong to.
     // An `Arc` for the code that draws beside the backend with a library
@@ -45,29 +46,6 @@ pub(crate) struct GlContext {
     platform: Box<dyn PlatformContext>,
     /// How many calls have the context current.
     depth: u32,
-}
-
-/// The context, current until the guard drops.
-pub(crate) struct Current<'a>(&'a mut GlContext);
-
-impl Deref for Current<'_> {
-    type Target = GlContext;
-
-    fn deref(&self) -> &GlContext {
-        self.0
-    }
-}
-
-impl DerefMut for Current<'_> {
-    fn deref_mut(&mut self) -> &mut GlContext {
-        self.0
-    }
-}
-
-impl Drop for Current<'_> {
-    fn drop(&mut self) {
-        self.0.done_current();
-    }
 }
 
 impl GlContext {
@@ -114,20 +92,13 @@ impl GlContext {
         &mut *self.platform
     }
 
-    /// Makes the context current until the returned guard drops.
-    pub(crate) fn enter(&mut self) -> Current<'_> {
-        self.make_current();
-        Current(self)
-    }
-
     /// Makes the context current, unless a call outside this one has it
     /// current already. Where something else used the context since, the
     /// cached GL state is forgotten. Each call is ended by a
     /// [`done_current`](Self::done_current).
     pub(crate) fn make_current(&mut self) {
-        let depth = self.depth;
-        self.depth = depth + 1;
-        if depth == 0 {
+        self.depth += 1;
+        if self.depth == 1 {
             self.platform.make_current();
             if self.platform.take_state_lost() {
                 self.state.set_dirty();

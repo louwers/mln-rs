@@ -393,40 +393,33 @@ impl Generation {
     ) -> Result<Generation, Error> {
         let mut objects =
             Objects { exporter: std::sync::Arc::clone(exporter), slots: Vec::new(), canvas: None, canvas_depth: None };
-        {
-            let mut current = gpu.context_mut().enter();
-            let (gl, state) = current.parts();
-            if let Err(error) = objects.make(gl, state, layout, depth, size, keep_depth) {
+        let mut current = gpu.enter();
+        let (gl, state) = current.context_mut().parts();
+        let target = objects.make(gl, state, layout, depth, size, keep_depth).and_then(|()| {
+            let textures = BorrowedTextures {
+                textures: objects.canvas.iter().map(|(canvas, _)| canvas.0.get()).collect(),
+                size,
+                depth_textures: objects.canvas_depth.iter().map(|texture| texture.0.get()).collect(),
+            };
+            // The ring hands its frames over itself, so the canvas's frames
+            // end with none but a finished one.
+            BorrowedTarget::new(textures, SyncKind::CpuComplete)
+        });
+        match target {
+            Ok(target) => Ok(Generation { target, objects, size, layout: layout.clone() }),
+            Err(error) => {
                 objects.delete(gl, state);
-                return Err(error);
+                Err(error)
             }
         }
-        let canvas = objects.canvas.map(|(canvas, _)| canvas.0.get());
-        let textures = BorrowedTextures {
-            textures: canvas.into_iter().collect(),
-            size,
-            depth_textures: objects.canvas_depth.iter().map(|texture| texture.0.get()).collect(),
-        };
-        // The ring hands its frames over itself, so the canvas's frames end
-        // with none but a finished one.
-        let target = match BorrowedTarget::new(textures, SyncKind::CpuComplete) {
-            Ok(target) => target,
-            Err(error) => {
-                let mut current = gpu.context_mut().enter();
-                let (gl, state) = current.parts();
-                objects.delete(gl, state);
-                return Err(error);
-            }
-        };
-        Ok(Generation { target, objects, size, layout: layout.clone() })
     }
 
     /// Tears the canvas's target down, and deletes the generation's objects
     /// and images, with the context of `gpu` current.
     fn tear_down(&mut self, gpu: &mut GlGpu) {
         self.target.tear_down(gpu);
-        let mut current = gpu.context_mut().enter();
-        let (gl, state) = current.parts();
+        let mut current = gpu.enter();
+        let (gl, state) = current.context_mut().parts();
         self.objects.delete(gl, state);
     }
 
@@ -634,8 +627,8 @@ impl ExportedTarget {
         let (Some(fences), Some(texture)) = (&self.exporter.fences, generation.objects.slots.get_mut(slot)) else {
             return Handoff::Dropped;
         };
-        let current = gpu.context_mut().enter();
-        match fences.signal(current.gl()) {
+        let mut current = gpu.enter();
+        match fences.signal(current.context_mut().gl()) {
             Ok(file) => {
                 let handle = file.as_raw_fd() as u64;
                 texture.producer = Some(file);
@@ -659,8 +652,8 @@ impl FrameTarget for ExportedTarget {
     fn end_frame(&mut self, gpu: &mut GlGpu) -> Handoff {
         let slot = self.selected;
         {
-            let mut current = gpu.context_mut().enter();
-            let (gl, state) = current.parts();
+            let mut current = gpu.enter();
+            let (gl, state) = current.context_mut().parts();
             if !self.generations.current().blit(gl, state, slot) {
                 return Handoff::Dropped;
             }

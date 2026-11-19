@@ -582,8 +582,8 @@ impl FrameTarget for SurfaceTarget {
     fn begin_frame(&mut self, gpu: &mut GlGpu) -> Option<FrameImage> {
         let size = self.size;
         let on_surface = {
-            let mut context = gpu.context_mut().enter();
-            let window = context.platform().window()?;
+            let mut current = gpu.enter();
+            let window = current.context_mut().platform().window()?;
             if window.size != size {
                 window.resize(size);
             }

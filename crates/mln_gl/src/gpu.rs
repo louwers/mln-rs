@@ -469,8 +469,8 @@ impl GlGpu {
 
     /// A backend on `context`.
     pub(crate) fn on(mut context: GlContext) -> GlGpu {
-        let current = context.enter();
-        let gl = current.gl();
+        context.make_current();
+        let gl = context.gl();
         let desktop = !gl.version().is_embedded;
         // SAFETY: the context is current, and the parameters and the
         // capability are GL ES 3.0's or desktop OpenGL 3.0's.
@@ -511,7 +511,7 @@ impl GlGpu {
         };
         #[cfg(feature = "bench")]
         let timer = crate::bench::Timer::new(gl, caps.cpu_rasterizer);
-        drop(current);
+        context.done_current();
         GlGpu {
             context,
             renderer,
@@ -566,8 +566,8 @@ impl GlGpu {
     /// Runs `delete`, which deletes GL objects, with the context current.
     /// It binds nothing, so the open pass's state stays.
     fn delete(&mut self, delete: impl FnOnce(&Gl, &mut State)) {
-        let mut context = self.context.enter();
-        let (gl, state) = context.parts();
+        let mut current = self.enter();
+        let (gl, state) = current.context.parts();
         delete(gl, state);
     }
 
@@ -892,9 +892,10 @@ impl GlGpu {
     /// Deletes the framebuffers that draw into `texture`, and `owned`, its
     /// GL texture if the backend made it.
     fn delete_texture(&mut self, texture: TextureId, owned: Option<TextureID>) {
-        let mut context = self.context.enter();
-        let (gl, state) = context.parts();
-        self.framebuffers.retain(|&(color, depth_stencil), &mut framebuffer| {
+        let mut current = self.enter();
+        let gpu = &mut *current;
+        let (gl, state) = gpu.context.parts();
+        gpu.framebuffers.retain(|&(color, depth_stencil), &mut framebuffer| {
             if color != Some(texture) && depth_stencil != Some(texture) {
                 return true;
             }
@@ -1552,7 +1553,7 @@ impl Gpu for GlGpu {
         });
         #[cfg(feature = "bench")]
         if let Some(timer) = &mut self.timer {
-            // The pass holds the context current.
+            // The pass has the context current.
             timer.begin(self.context.gl());
         }
         let clear_color = desc.color.and_then(|attachment| match attachment.load {
@@ -1595,8 +1596,7 @@ impl Gpu for GlGpu {
         }
         let bases = (draw.base_vertex, draw.first_instance);
         let mode = enums::draw_mode(pipeline.state.primitive);
-        let geometry_bound = open.geometry == Some((draw.geometry, bases));
-        if !geometry_bound {
+        if open.geometry != Some((draw.geometry, bases)) {
             self.bind_vertex_array(draw.geometry, bases)?;
         }
         if let Some(open) = &mut self.pass {
@@ -1650,7 +1650,7 @@ impl Gpu for GlGpu {
         let pass = self.pass.take().ok_or_else(|| no_pass("the end of a pass"))?;
         #[cfg(feature = "bench")]
         if let Some(timer) = &mut self.timer {
-            // The pass holds the context current until it drops.
+            // The pass has the context current.
             timer.end(self.context.gl());
         }
         for &(id, owned) in &pass.destroyed {
@@ -1729,11 +1729,14 @@ fn open_pass(what: &str) -> GpuError {
 impl Drop for GlGpu {
     /// Deletes the backend's objects.
     fn drop(&mut self) {
-        let open = self.pass.take();
-        let pass_open = open.is_some();
-        let mut context = self.context.enter();
-        let (gl, state) = context.parts();
-        let destroyed = open.into_iter().flat_map(|pass| pass.destroyed);
+        // An open pass has the context current already.
+        let destroyed = if let Some(pass) = self.pass.take() {
+            pass.destroyed
+        } else {
+            self.context.make_current();
+            Vec::new()
+        };
+        let (gl, state) = self.context.parts();
         let textures = self.textures.drain().map(|(_, texture)| texture.object.owned());
         let buffers = self.buffers.drain().filter_map(|(_, buffer)| match buffer.object {
             BufferObject::Buffer(object) => Some(object),
@@ -1755,7 +1758,7 @@ impl Drop for GlGpu {
         // SAFETY: the context is current, and the objects are alive and
         // only this backend's.
         unsafe {
-            for name in destroyed.map(|(_, owned)| owned).chain(textures).flatten() {
+            for name in destroyed.into_iter().map(|(_, owned)| owned).chain(textures).flatten() {
                 state.forget_texture(name);
                 gl.delete_texture(name);
             }
@@ -1772,11 +1775,8 @@ impl Drop for GlGpu {
                 gl.delete_vertex_array(vertex_array);
             }
         }
-        drop(context);
-        // Ends `begin_pass`'s.
-        if pass_open {
-            self.context.done_current();
-        }
+        // Ends this call's, or `begin_pass`'s.
+        self.context.done_current();
     }
 }
 
