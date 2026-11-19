@@ -10,7 +10,6 @@ use mln_gfx::gpu::{GpuError, TargetFormats, TextureFormat, TextureId, TextureUsa
 use mln_gfx::ring::{self, RingBackend, RingTextures};
 use mln_gfx::{ConsumerSync, GpuSync, SyncKind};
 use mln_util::error::Error;
-#[cfg(unix)]
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
@@ -142,18 +141,29 @@ enum Waiting {
     /// D3D12 fence, imported, until it reaches the value.
     #[cfg(windows)]
     Fence(vk::Semaphore, u64),
+    /// A fence of the target's own that signals once the work submitted
+    /// before the ring let go of the images finished.
+    Submitted(vk::Fence),
 }
 
 impl Waiting {
-    /// The semaphore of the ring's own that the wait holds, which the caller
-    /// destroys. A timeline is the host's.
-    fn into_own_semaphore(self) -> Option<vk::Semaphore> {
-        match self {
-            Waiting::Timeline(..) => None,
-            #[cfg(unix)]
-            Waiting::Imported { semaphore, .. } => Some(semaphore),
-            #[cfg(windows)]
-            Waiting::Fence(semaphore, _) => Some(semaphore),
+    /// Destroys what of the ring's own the wait holds, with `device`. A
+    /// timeline is the host's.
+    ///
+    /// # Safety
+    ///
+    /// No submit that hasn't finished waits on or signals it.
+    unsafe fn destroy(self, device: &ash::Device) {
+        // SAFETY: as the caller says.
+        unsafe {
+            match self {
+                Waiting::Timeline(..) => {}
+                #[cfg(unix)]
+                Waiting::Imported { semaphore, .. } => device.destroy_semaphore(semaphore, None),
+                #[cfg(windows)]
+                Waiting::Fence(semaphore, _) => device.destroy_semaphore(semaphore, None),
+                Waiting::Submitted(fence) => device.destroy_fence(fence, None),
+            }
         }
     }
 }
@@ -200,8 +210,8 @@ pub type BorrowedTarget = ring::BorrowedTarget<VulkanRing>;
 pub type PendingReads = ring::PendingReads<VulkanRing>;
 
 /// A [`BorrowedTarget`]'s part on Vulkan: the semaphores that its frames
-/// signal. Dropping it destroys them, once the target waited for its
-/// frames.
+/// signal. A tear-down destroys them once the frames are done, and dropping
+/// it without one once the target waited for them.
 pub struct VulkanRing {
     device: Device,
     producer: SyncKind,
@@ -343,7 +353,8 @@ impl VulkanRing {
 }
 
 impl Drop for VulkanRing {
-    /// Destroys the semaphores, which the target's frames are done with.
+    /// Destroys the semaphores that no tear-down took, which the target's
+    /// frames are done with.
     fn drop(&mut self) {
         let device = self.device.shared.device();
         // SAFETY: the target waited for its frames, and the semaphores are
@@ -491,6 +502,9 @@ impl RingBackend for VulkanRing {
             Waiting::Imported { semaphore, .. } => gpu.wait_before_using(texture, *semaphore, None, stages),
             #[cfg(windows)]
             Waiting::Fence(semaphore, value) => gpu.wait_before_using(texture, *semaphore, Some(*value), stages),
+            // Only the reads that a ring let go of end with the fence, and no
+            // frame draws into their images again.
+            Waiting::Submitted(_) => Err(GpuError::Invalid("a ring's frames' fence isn't the host's read".into())),
         }
     }
 
@@ -504,10 +518,9 @@ impl RingBackend for VulkanRing {
 
     /// A semaphore of the ring's own goes once the submit is done.
     fn waited(gpu: &mut VulkanGpu, wait: ConsumerWait) {
-        if let Some(semaphore) = wait.waiting.into_own_semaphore() {
-            // SAFETY: destroyed once the frame that waits on it is done.
-            gpu.destroy_later(move |device| unsafe { device.destroy_semaphore(semaphore, None) });
-        }
+        let waiting = wait.waiting;
+        // SAFETY: destroyed once the frame that waits on it is done.
+        gpu.destroy_later(move |device| unsafe { waiting.destroy(device) });
     }
 
     fn signal_after_next_submit(&mut self, gpu: &mut VulkanGpu) {
@@ -544,6 +557,34 @@ impl RingBackend for VulkanRing {
         }
     }
 
+    /// A fence that signals once the queue's work so far finished. Without
+    /// one, it waits for that work, so that the host may use the images.
+    fn submitted(gpu: &VulkanGpu) -> Option<ConsumerWait> {
+        match gpu.fence_after_submits() {
+            Ok(fence) => Some(ConsumerWait { device: gpu.device().clone(), waiting: Waiting::Submitted(fence) }),
+            Err(error) => {
+                Log::error(Event::Render, format!("Fencing a ring's frames failed: {error}"));
+                gpu.device().wait_idle("a ring's frames");
+                None
+            }
+        }
+    }
+
+    /// The semaphores go once the frames that signal them are done.
+    fn tear_down(&mut self, gpu: &mut VulkanGpu) {
+        let semaphores = [
+            std::mem::replace(&mut self.timeline, vk::Semaphore::null()),
+            std::mem::replace(&mut self.export_semaphore, vk::Semaphore::null()),
+        ];
+        // SAFETY: destroyed once the frames that signal them are done, and
+        // they are the ring's.
+        gpu.destroy_later(move |device| unsafe {
+            for semaphore in semaphores.into_iter().filter(|semaphore| *semaphore != vk::Semaphore::null()) {
+                device.destroy_semaphore(semaphore, None);
+            }
+        });
+    }
+
     /// Waits for the work submitted to the device's queue.
     fn wait_for_frames(&self, what: &str) {
         self.device.wait_idle(what);
@@ -558,15 +599,29 @@ impl RingBackend for VulkanRing {
             Waiting::Imported { file, .. } => poll_until(file, now),
             #[cfg(windows)]
             Waiting::Fence(semaphore, value) => wait_timeline(device, *semaphore, *value, now),
+            // SAFETY: a plain query of the ring's fence. A lost device ends
+            // the wait.
+            Waiting::Submitted(fence) => unsafe { device.shared.device().get_fence_status(*fence) }.unwrap_or(true),
         }
     }
 
+    /// A fence that hasn't signaled stays allocated: destroying it while
+    /// its submit is pending isn't allowed.
     fn forget(wait: ConsumerWait) {
-        if let Some(semaphore) = wait.waiting.into_own_semaphore() {
-            // SAFETY: no submitted frame waits on the semaphore, which the
-            // ring made.
-            unsafe { wait.device.shared.device().destroy_semaphore(semaphore, None) };
+        let device = wait.device.shared.device();
+        if let Waiting::Submitted(fence) = wait.waiting
+            // SAFETY: a plain query of the ring's fence.
+            && unsafe { device.get_fence_status(fence) } != Ok(true)
+        {
+            Log::warning(
+                Event::Render,
+                "Stopped waiting for a ring's frames before they finished, so their fence stays allocated",
+            );
+            return;
         }
+        // SAFETY: no pending submit waits on the semaphores, which the ring
+        // made, and the fence signaled.
+        unsafe { wait.waiting.destroy(device) };
     }
 }
 

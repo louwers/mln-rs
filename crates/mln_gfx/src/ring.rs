@@ -116,10 +116,16 @@ pub trait RingBackend: Sized {
         None
     }
 
-    /// Waits for the work submitted so far, where the backend must before
-    /// the target lets go of the textures that it drew into or of the
-    /// objects that it signals. Logs `what` was going on when the wait
-    /// fails.
+    /// Lets go of the objects that the frames signal once the work
+    /// submitted so far is done, as the target goes.
+    fn tear_down(&mut self, gpu: &mut Self::Gpu) {
+        let _ = gpu;
+    }
+
+    /// Blocks until the work submitted so far is done, where the backend
+    /// must before a target dropped without its tear-down, and so without
+    /// the `Gpu` to defer to, lets go of what the frames used. Logs `what`
+    /// was going on when the wait fails.
     fn wait_for_frames(&self, what: &str) {
         let _ = what;
     }
@@ -259,8 +265,8 @@ pub struct BorrowedTarget<B: RingBackend> {
     selected: usize,
     slots: Vec<Slot<B>>,
     producer: SyncKind,
-    /// Whether a tear-down waited for the frames, after which dropping the
-    /// target needs no wait.
+    /// Whether a tear-down deferred the release of what the frames use,
+    /// after which dropping the target needs no wait.
     torn_down: bool,
     ring: B,
 }
@@ -323,7 +329,6 @@ impl<B: RingBackend> BorrowedTarget<B> {
         self.ring.check_replacement(&self.textures, &textures)?;
         let imports = Imports::new::<B>(gpu, &textures)?;
         self.submit_recorded(gpu, "borrowed texture replacement");
-        self.ring.wait_for_frames("borrowed texture replacement");
         std::mem::replace(&mut self.imports, imports).tear_down(gpu);
         let old = std::mem::replace(&mut self.textures, textures);
         // A texture that the new ring has again keeps what it waits for, at
@@ -458,22 +463,24 @@ impl<B: RingBackend> FrameTarget for BorrowedTarget<B> {
 
     /// Submits the work recorded so far, as
     /// [`take_pending`](BorrowedTarget::take_pending) does, then lets go of
-    /// the slots and what they wait for, and destroys the imports, once the
-    /// frames drawn so far are done where the backend must wait.
+    /// the slots and what they wait for, and destroys the imports and the
+    /// ring's objects once the frames drawn so far are done. It doesn't
+    /// block: the host waits for the frames through the reads that
+    /// [`take_pending`](BorrowedTarget::take_pending) returns.
     fn tear_down(&mut self, gpu: &mut B::Gpu) {
         self.submit_recorded(gpu, "borrowed target deletion");
-        self.ring.wait_for_frames("borrowed target deletion");
         for mut slot in std::mem::take(&mut self.slots) {
             slot.forget(gpu);
         }
         self.imports.tear_down(gpu);
+        self.ring.tear_down(gpu);
         self.torn_down = true;
     }
 }
 
 impl<B: RingBackend> Drop for BorrowedTarget<B> {
     /// Lets go of what the slots wait for, after the frames drawn so far
-    /// where the backend must wait and a tear-down didn't. The wait of a
+    /// where the backend must wait and no tear-down deferred it. The wait of a
     /// frame begun and not ended drops without [`RingBackend::forget`],
     /// which leaks what the backend made for it: a submit to come may have
     /// taken it, and without the `Gpu` nothing defers its release past that
@@ -548,6 +555,13 @@ pub trait Exporter: Sized {
         size: Size,
     ) -> Result<(Self::Images, <Self::Ring as RingBackend>::Textures), Error>;
 
+    /// Lets go of `images`, which `gpu`'s frames drew into, once the work
+    /// submitted so far is done.
+    fn release_images(gpu: &mut <Self::Ring as RingBackend>::Gpu, images: Self::Images) {
+        let _ = gpu;
+        drop(images);
+    }
+
     /// The frame at `slot` of a generation of `images`, whose textures are
     /// `textures`.
     fn frame(
@@ -561,10 +575,11 @@ pub trait Exporter: Sized {
 /// One generation of an exported ring's images, of one size, and the
 /// borrowed target that draws into them.
 struct Generation<E: Exporter> {
-    // Before the images: dropping or tearing it down waits, where the
+    // Before the images: dropping it without a tear-down waits, where the
     // backend must, for the frames that drew into them.
     target: BorrowedTarget<E::Ring>,
-    images: E::Images,
+    /// The images, until a tear-down hands them to the exporter.
+    images: Option<E::Images>,
 }
 
 impl<E: Exporter> Generation<E> {
@@ -576,7 +591,16 @@ impl<E: Exporter> Generation<E> {
     ) -> Result<Self, Error> {
         let (images, textures) = exporter.allocate(backend, size)?;
         let target = BorrowedTarget::new(backend, textures, producer)?;
-        Ok(Generation { target, images })
+        Ok(Generation { target, images: Some(images) })
+    }
+
+    /// Tears the target down, and lets the exporter release the images
+    /// once the frames that drew into them are done.
+    fn tear_down(&mut self, gpu: &mut <E::Ring as RingBackend>::Gpu) {
+        self.target.tear_down(gpu);
+        if let Some(images) = self.images.take() {
+            E::release_images(gpu, images);
+        }
     }
 }
 
@@ -623,7 +647,7 @@ impl<E: Exporter> ExportedTarget<E> {
         slot: usize,
         consumer: ConsumerSync,
     ) -> Result<(), Error> {
-        if self.generations.give_back(slot, |mut generation| generation.target.tear_down(gpu)) {
+        if self.generations.give_back(slot, |mut generation| generation.tear_down(gpu)) {
             return Ok(());
         }
         self.generations.current_mut().target.release(gpu, slot, consumer)
@@ -632,7 +656,7 @@ impl<E: Exporter> ExportedTarget<E> {
     /// The host gave the frame at `slot` up without saying when its reads
     /// end.
     pub fn discard(&mut self, gpu: &mut <E::Ring as RingBackend>::Gpu, slot: usize) {
-        if !self.generations.give_back(slot, |mut generation| generation.target.tear_down(gpu)) {
+        if !self.generations.give_back(slot, |mut generation| generation.tear_down(gpu)) {
             self.generations.current_mut().target.discard(gpu, slot);
         }
     }
@@ -654,7 +678,7 @@ impl<E: Exporter> ExportedTarget<E> {
         }
         let next = Generation::new(&self.exporter, backend, size, self.producer)?;
         let mut gpu = backend.gpu();
-        self.generations.replace(next, held, |mut generation| generation.target.tear_down(&mut gpu));
+        self.generations.replace(next, held, |mut generation| generation.tear_down(&mut gpu));
         Ok(true)
     }
 
@@ -670,7 +694,7 @@ impl<E: Exporter> ExportedTarget<E> {
     pub fn image(&self, slot: usize) -> Option<ExportedFrame> {
         let generations = &self.generations;
         let generation = generations.retired(slot).unwrap_or(generations.current());
-        self.exporter.frame(&generation.images, &generation.target.textures, slot)
+        self.exporter.frame(generation.images.as_ref()?, &generation.target.textures, slot)
     }
 }
 
@@ -689,7 +713,7 @@ impl<E: Exporter> FrameTarget for ExportedTarget<E> {
     }
 
     fn tear_down(&mut self, gpu: &mut Self::Gpu) {
-        self.generations.clear(|generation| generation.target.tear_down(gpu));
+        self.generations.clear(|generation| generation.tear_down(gpu));
     }
 }
 
@@ -863,6 +887,8 @@ mod tests {
     struct Record {
         /// How many times they waited for the frames drawn so far.
         frames_waited: usize,
+        /// How many times a tear-down deferred the release of their objects.
+        torn_down: usize,
         /// The waits that they let go of without a submit.
         forgotten: Vec<u32>,
     }
@@ -873,6 +899,10 @@ mod tests {
 
     fn frames_waited() -> usize {
         RECORD.with_borrow(|record| record.frames_waited)
+    }
+
+    fn torn_down() -> usize {
+        RECORD.with_borrow(|record| record.torn_down)
     }
 
     fn forgotten() -> Vec<u32> {
@@ -945,6 +975,9 @@ mod tests {
         }
         fn submitted(gpu: &FakeGpu) -> Option<u32> {
             gpu.last_submit
+        }
+        fn tear_down(&mut self, _: &mut FakeGpu) {
+            RECORD.with_borrow_mut(|record| record.torn_down += 1);
         }
         fn wait_for_frames(&self, _: &str) {
             RECORD.with_borrow_mut(|record| record.frames_waited += 1);
@@ -1049,21 +1082,25 @@ mod tests {
         assert!(ring.take_pending(gpu).poll());
     }
 
+    // A tear-down or a replacement never blocks: the ring's objects go once
+    // the frames are done. Only a target dropped without its tear-down, and
+    // so without a `Gpu` to defer to, waits for its frames.
     #[test]
-    fn a_ring_waits_for_its_frames_once_before_it_goes() {
+    fn a_ring_waits_for_its_frames_only_when_dropped_without_a_tear_down() {
         let mut backend = FakeBackend::default();
         let mut ring = target(&mut backend, &[10, 20]);
         ring.release(&mut backend.gpu, 0, timeline(7)).expect("a release");
+        drop(ring.replace(&mut backend.gpu, images(&[20, 30])).expect("a replacement"));
         ring.tear_down(&mut backend.gpu);
-        assert_eq!(frames_waited(), 1);
+        assert_eq!((frames_waited(), torn_down()), (0, 1));
         assert_eq!(forgotten(), [7]);
         drop(ring);
-        assert_eq!(frames_waited(), 1);
+        assert_eq!(frames_waited(), 0);
         // Dropped without a tear-down, it waits as it drops.
         let mut ring = target(&mut backend, &[10]);
         ring.release(&mut backend.gpu, 0, timeline(8)).expect("a release");
         drop(ring);
-        assert_eq!(frames_waited(), 2);
+        assert_eq!((frames_waited(), torn_down()), (1, 1));
         assert_eq!(forgotten(), [7, 8]);
     }
 

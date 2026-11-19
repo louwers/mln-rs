@@ -1789,6 +1789,24 @@ impl VulkanGpu {
         Ok(())
     }
 
+    /// A new fence, which the caller destroys, that signals once the work
+    /// submitted to the device's queue so far has finished.
+    pub(crate) fn fence_after_submits(&self) -> Result<vk::Fence, GpuError> {
+        let device = self.device.shared.device();
+        // SAFETY: the create info is valid for the device.
+        let fence = unsafe { device.create_fence(&vk::FenceCreateInfo::default(), None) }
+            .map_err(vk_error("making a fence"))?;
+        // SAFETY: a submit of no batches signals the fence once the queue's
+        // earlier work finished, and the queue is held for the call.
+        let submitted = self.device.with_queue(|queue| unsafe { device.queue_submit(queue, &[], fence) });
+        if let Err(error) = submitted {
+            // SAFETY: no submit took the fence.
+            unsafe { device.destroy_fence(fence, None) };
+            return Err(vk_error("submitting a fence")(error));
+        }
+        Ok(fence)
+    }
+
     /// Blocks until the submit of `serial` has finished.
     pub(crate) fn wait_for(&mut self, serial: u64) -> Result<(), GpuError> {
         if serial <= self.finished_serial {

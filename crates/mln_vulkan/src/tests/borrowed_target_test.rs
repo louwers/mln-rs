@@ -155,6 +155,13 @@ impl Owned {
         });
         (std::time::Instant::now(), signal)
     }
+
+    /// Signals `semaphore`, a timeline, to `value` now, from the host's CPU.
+    fn signal(&self, semaphore: vk::Semaphore, value: u64) {
+        let info = vk::SemaphoreSignalInfo::default().semaphore(semaphore).value(value);
+        // SAFETY: a timeline of the device, below `value`.
+        unsafe { self.device.shared.device().signal_semaphore(&info) }.unwrap();
+    }
 }
 
 /// How long the host takes to signal its timeline.
@@ -231,6 +238,9 @@ fn wait_for(mut pending: crate::PendingReads) {
 // slot waits for before the ring lets go of its images, and the semaphores
 // imported for the waits outlive that submit: on release (`take_pending`),
 // on replacement and on tear-down, for the host's sync files and timelines.
+// A replacement or a tear-down doesn't block for the host's reads: a host
+// that signals its timeline only once the call returns gets the images
+// back when the reads that the call returned end.
 #[test]
 fn a_frame_drawn_and_not_ended_is_submitted_with_its_waits() {
     let (device, mut backend) = backend();
@@ -284,26 +294,27 @@ fn a_frame_drawn_and_not_ended_is_submitted_with_its_waits() {
     });
     #[cfg(not(unix))]
     let replaced_after_sync_file = None::<()>;
-    let delayed = match (replaced_after_sync_file, timeline) {
+    let signaled_after = match (replaced_after_sync_file, timeline) {
         (None, Some(timeline)) => {
             target.release(gpu, 0, timeline_sync(timeline, 2)).unwrap();
-            Some(owned.signal_later(timeline, 2))
+            Some((timeline, 2))
         }
         _ => None,
     };
     target.select(0);
     draw_without_ending(&mut target, gpu);
-    wait_for(target.replace(gpu, owned.ring(2, size)).expect("new images"));
-    if let Some((since, signal)) = delayed {
-        assert!(since.elapsed() >= DELAY, "the replacement waited for no timeline");
-        signal.join().unwrap();
+    let mut pending = target.replace(gpu, owned.ring(2, size)).expect("new images");
+    if let Some((timeline, value)) = signaled_after {
+        assert!(!pending.poll(), "the replacement's reads ended before the host's");
+        owned.signal(timeline, value);
     }
+    wait_for(pending);
 
     // Tear-down with a frame drawn at slot 1, which waits for a timeline
     // where the device takes them, and otherwise a sync file.
-    let delayed = if let Some(timeline) = timeline {
+    let signaled_after = if let Some(timeline) = timeline {
         target.release(gpu, 1, timeline_sync(timeline, 3)).unwrap();
-        Some(owned.signal_later(timeline, 3))
+        Some((timeline, 3))
     } else {
         #[cfg(unix)]
         if let Some(producer) = &mut producer {
@@ -315,11 +326,13 @@ fn a_frame_drawn_and_not_ended_is_submitted_with_its_waits() {
     };
     target.select(1);
     draw_without_ending(&mut target, gpu);
+    let mut pending = target.take_pending(gpu);
     target.tear_down(gpu);
-    if let Some((since, signal)) = delayed {
-        assert!(since.elapsed() >= DELAY, "the tear-down waited for no timeline");
-        signal.join().unwrap();
+    if let Some((timeline, value)) = signaled_after {
+        assert!(!pending.poll(), "the tear-down's reads ended before the host's");
+        owned.signal(timeline, value);
     }
+    wait_for(pending);
     #[cfg(unix)]
     if let Some(mut producer) = producer {
         producer.tear_down(gpu);

@@ -36,6 +36,7 @@ use mln_util::size::Size;
 
 use crate::borrowed_target::{BorrowedDepth, BorrowedImage, BorrowedImages, ImageOwner, VulkanRing};
 use crate::device::{Device, depth_vk_format};
+use crate::gpu::VulkanGpu;
 use crate::renderer_backend::RendererBackend;
 
 const DMA_BUF_USAGE: vk::ImageUsageFlags = vk::ImageUsageFlags::from_raw(
@@ -442,8 +443,9 @@ impl DepthMemory {
 
 impl Drop for DepthMemory {
     fn drop(&mut self) {
-        // SAFETY: the objects are this image's, and its generation's target
-        // waited for the frames that drew into it.
+        // SAFETY: the objects are this image's, and the frames that drew
+        // into it are done: its generation's target waited for them, or its
+        // tear-down deferred this until they were.
         unsafe {
             if self.view != vk::ImageView::null() {
                 self.device.destroy_image_view(self.view, None);
@@ -776,8 +778,9 @@ impl ExportedMemory {
 
 impl Drop for ExportedMemory {
     fn drop(&mut self) {
-        // SAFETY: the objects are this image's, and its generation's target
-        // waited for the frames that drew into it.
+        // SAFETY: the objects are this image's, and the frames that drew
+        // into it are done: its generation's target waited for them, or its
+        // tear-down deferred this until they were.
         unsafe {
             if self.view != vk::ImageView::null() {
                 self.device.destroy_image_view(self.view, None);
@@ -873,6 +876,11 @@ pub struct ExportedImages {
 impl Exporter for VulkanExporter {
     type Ring = VulkanRing;
     type Images = ExportedImages;
+
+    /// The images go once the frames that drew into them are done.
+    fn release_images(gpu: &mut VulkanGpu, images: ExportedImages) {
+        gpu.destroy_later(move |_| drop(images));
+    }
 
     /// The kind `kind` is one that [`plan`] picked, and `producer` one of
     /// [`sync_kinds`]'s.
