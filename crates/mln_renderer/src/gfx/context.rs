@@ -1,7 +1,8 @@
 //! What the renderer keeps over its backend's `Gpu`: its caps, the caches
-//! its draws share, the stores of the textures, indexes, vertices and
-//! buffers they share, the buffers every draw binds, its rendering stats and
-//! the queue of the resources it dropped. The renderer owns it, and lends it
+//! its draws share, the stores of the textures, indexes and vertices they
+//! share, the buffers every draw binds, and the device that makes its
+//! buffers and textures, with the rendering stats and the queue of what it
+//! dropped. The renderer owns it, and lends it
 //! to a frame's encode, which changes it through `&mut`. The context holds
 //! no `Gpu`: each call that makes, writes or destroys a resource takes the
 //! one the renderer was made for.
@@ -79,7 +80,7 @@ impl Context {
         }
     }
 
-    /// What the renderer makes its buffers with.
+    /// What the renderer makes its buffers and textures with.
     pub(crate) fn device(&mut self) -> &mut Device {
         &mut self.device
     }
@@ -342,7 +343,9 @@ impl Context {
         Ok(shader)
     }
 
-    /// The buffers every draw binds, at the ids they bind at.
+    /// The buffers every draw binds, at the ids they bind at, which the
+    /// context replaces only at its tear-down: the draws' bindings bind
+    /// them.
     pub(crate) fn global_uniform_buffers(&self) -> &UniformBufferArray {
         &self.global_uniform_buffers
     }
