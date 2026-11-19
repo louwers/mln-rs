@@ -172,6 +172,30 @@ fn fill_extrusion_bucket_rounds_corners_in_meters() {
 }
 
 #[test]
+fn fill_extrusion_walls_on_clip_lines_leave_the_pattern_where_it_was() {
+    // The edge from (-64, 100) to (-64, 0) is a clip line, and has no wall
+    // to wrap the pattern around: the wall after it starts where the one
+    // before it ended.
+    let square = collection(&[&[(100, 100), (-64, 100), (-64, 0), (100, 0), (100, 100)]]);
+    let layout = FillExtrusionLayoutProperties::PossiblyEvaluated {
+        fill_extrusion_rounded_corner_distance: Evaluated::Constant(0.0),
+    };
+    let mut bucket = FillExtrusionBucket::new(layout, &VecMap::new(), 16.0, 1);
+    bucket
+        .add_feature(
+            &feature(FeatureType::Polygon, &square),
+            &square,
+            &ImagePositions::default(),
+            &PatternLayerMap::default(),
+            0,
+            &CanonicalTileID::new(16, 32768, 32768),
+        )
+        .unwrap();
+    let edge_distances: Vec<u16> = bucket.vertices.get_mut().iter().map(|v| v.a2[1]).collect();
+    assert_eq!(edge_distances, [0, 164, 164, 328, 428]);
+}
+
+#[test]
 fn fill_extrusion_bucket_skips_polygons_rounded_off_the_tile() {
     // Only the corner at (0, 100) is on the tile, and rounding cuts it off.
     let triangle = collection(&[&[(0, 100), (-10, 90), (-10, 110), (0, 100)]]);

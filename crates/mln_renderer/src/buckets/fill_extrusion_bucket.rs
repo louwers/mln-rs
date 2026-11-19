@@ -193,7 +193,8 @@ impl FillExtrusionBucket {
 
                 vertices.push(Self::layout_vertex(p1, edge_distance as u16, is_discarded));
 
-                if let Some(p2) = p2 {
+                // Walls that aren't drawn don't move the pattern along.
+                if let Some(p2) = p2.filter(|_| !is_discarded) {
                     let dist = usize::from(dist_u16(p1, p2));
                     if edge_distance + dist > usize::from(u16::MAX) {
                         edge_distance = 0;
