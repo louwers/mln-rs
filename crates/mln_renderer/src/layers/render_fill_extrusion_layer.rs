@@ -126,6 +126,7 @@ struct SharedGeometry<'a> {
     vertices: &'a VertexAttributeArray,
     instances: Option<&'a VertexAttributeArray>,
     vertex_count: usize,
+    mode: DrawMode,
     indexes: &'a SharedIndexes,
     segments: &'a [SegmentBase],
 }
@@ -260,7 +261,7 @@ fn extrusion_draw(
     let draw_geometry = DrawGeometry {
         vertices: copy_shared_attributes(geometry.vertices),
         vertex_count: if geometry.segments.is_empty() { 0 } else { geometry.vertex_count },
-        mode: DrawMode::Triangles(),
+        mode: geometry.mode,
         indexes: geometry.indexes.clone().into(),
         segments: geometry.segments.iter().map(SegmentBase::copy).collect(),
         instances: geometry.instances.map(copy_shared_attributes),
@@ -402,7 +403,7 @@ impl TypedLayer for RenderFillExtrusionLayer {
             .get_or_insert_with(|| copied_vertices(context, &RenderStaticData::fill_extrusion_vertices()));
         let static_indices = &*self.static_data_indices.get_or_insert_with(|| {
             let indexes = if instanced_walls {
-                RenderStaticData::fill_extrusion_triangle_indices()
+                RenderStaticData::fill_extrusion_strip_indices()
             } else {
                 RenderStaticData::fill_extrusion_wall_indices()
             };
@@ -631,6 +632,7 @@ impl TileBuilder<'_> {
             vertices: &vertex_attrs,
             instances: None,
             vertex_count,
+            mode: DrawMode::Triangles(),
             indexes: &triangles,
             segments: &bucket.triangle_segments,
         };
@@ -645,6 +647,7 @@ impl TileBuilder<'_> {
             vertices: &wall_attrs,
             instances: wall_instance_attrs.as_ref(),
             vertex_count: wall_vertex_count,
+            mode: if self.instanced_walls { DrawMode::TriangleStrip() } else { DrawMode::Triangles() },
             indexes: self.static_indices,
             segments: &wall_segments,
         };

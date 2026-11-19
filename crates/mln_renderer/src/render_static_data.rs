@@ -58,6 +58,16 @@ impl RenderStaticData {
     }
 
     #[must_use]
+    pub(crate) fn fill_extrusion_strip_indices() -> Vec<u16> {
+        // ┌──────┐
+        // │ 0  1 │ Counter-Clockwise winding order.
+        // │      │ Triangle 1: 0 => 2 => 1
+        // │ 2  3 │ Triangle 2: 1 => 2 => 3
+        // └──────┘
+        vec![0, 2, 1, 3]
+    }
+
+    #[must_use]
     pub(crate) fn fill_extrusion_triangle_indices() -> Vec<u16> {
         // ┌──────┐
         // │ 0  1 │ Counter-Clockwise winding order.
@@ -67,10 +77,11 @@ impl RenderStaticData {
         vec![0, 2, 1, 1, 2, 3]
     }
 
-    /// A segment that draws `instance_count` fill-extrusion walls.
+    /// A segment that draws `instance_count` fill-extrusion walls as a
+    /// triangle strip.
     #[must_use]
     pub(crate) fn fill_extrusion_segment(instance_count: usize) -> SegmentBase {
-        SegmentBase { instance_count, ..SegmentBase::with_lengths(0, 0, 4, 6) }
+        SegmentBase { instance_count, ..SegmentBase::with_lengths(0, 0, 4, 4) }
     }
 
     /// The triangles of the walls that a segment of
@@ -105,11 +116,16 @@ impl RenderStaticData {
         vec![[0, 0], [0, 1], [1, 0], [1, 1]]
     }
 
+    #[must_use]
+    pub(crate) fn quad_strip_indices() -> Vec<u16> {
+        vec![0, 1, 2, 3]
+    }
+
     /// A segment that draws `instance_count` fill outline segments, as
-    /// quads of `fill_outline_vertices` and `quad_triangle_indices`.
+    /// triangle-strip quads of `fill_outline_vertices` and `quad_strip_indices`.
     #[must_use]
     pub(crate) fn fill_outline_segment(instance_count: usize) -> SegmentBase {
-        SegmentBase { instance_count, ..SegmentBase::with_lengths(0, 0, 4, 6) }
+        SegmentBase { instance_count, ..SegmentBase::with_lengths(0, 0, 4, 4) }
     }
 
     #[must_use]

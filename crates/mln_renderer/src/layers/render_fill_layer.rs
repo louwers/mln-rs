@@ -181,7 +181,7 @@ impl OutlineQuad {
     /// `context`'s stores.
     fn new(context: &mut Context) -> OutlineQuad {
         let vertices = copied_vertices(context, &RenderStaticData::fill_outline_vertices());
-        let indexes = context.add_indexes(Indexes::new(RenderStaticData::quad_triangle_indices()));
+        let indexes = context.add_indexes(Indexes::new(RenderStaticData::quad_strip_indices()));
         let vertex_count = vertices.count();
         let mut attributes = VertexAttributeArray::new();
         {
@@ -310,7 +310,7 @@ impl TileBuilder<'_> {
                     ..fill_geometry(
                         copy_shared_attributes(&quad.attributes),
                         quad.vertex_count,
-                        DrawMode::Triangles(),
+                        DrawMode::TriangleStrip(),
                         DrawIndexes::Shared(quad.indexes.clone()),
                         &[RenderStaticData::fill_outline_segment(fill_vertex_count)],
                     )

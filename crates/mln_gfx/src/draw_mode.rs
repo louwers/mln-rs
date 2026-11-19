@@ -23,6 +23,12 @@ impl DrawMode {
         DrawMode { type_: DrawModeType::Triangles, size: 0.0 }
     }
 
+    #[expect(non_snake_case, reason = "`DrawMode::TriangleStrip()` reads as the draw mode's variant")]
+    #[must_use]
+    pub fn TriangleStrip() -> DrawMode {
+        DrawMode { type_: DrawModeType::TriangleStrip, size: 0.0 }
+    }
+
     #[must_use]
     pub fn primitive_type(&self) -> PrimitiveType {
         match self.type_ {
