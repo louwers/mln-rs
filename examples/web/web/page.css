@@ -13,6 +13,7 @@
   --gap: 10px;
   --radius: 6px;
   --page: #e8e4dc;
+  --webgl-logo: #990000;
   color-scheme: light;
 }
 
@@ -25,6 +26,7 @@
   --north: #ff6a5a;
   --focus: #7eaaf2;
   --shadow: 0 1px 3px rgb(0 0 0 / 0.5), 0 0 0 1px var(--line);
+  --webgl-logo: #ffffff;
   color-scheme: dark;
 }
 
@@ -362,6 +364,10 @@ kbd {
   flex: none;
 }
 
+.backend-logo-webgl {
+  fill: var(--webgl-logo);
+}
+
 .backend-logo[hidden] {
   display: none;
 }
@@ -382,7 +388,8 @@ a {
     560px,
     calc(
       100vw - max(var(--gap), env(safe-area-inset-left)) -
-        max(var(--gap), env(safe-area-inset-right)) - var(--gap) - 112px
+        max(var(--gap), env(safe-area-inset-right)) - var(--gap) -
+        var(--backend-width, 128px)
     )
   );
   padding: 2px 4px 2px 8px;

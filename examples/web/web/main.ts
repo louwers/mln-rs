@@ -802,9 +802,22 @@ if (params.has("freeBearing")) setFreeBearing(true);
 // The backend indicator and toggle, at the bottom left. Always shown; clicking
 // switches backends where the other one is available.
 const backendButton = element("backend-button", HTMLButtonElement);
-const backendLogo = element("backend-logo", SVGElement);
 element("backend-name", HTMLElement).textContent = BACKEND_NAME[backend];
-backendLogo.toggleAttribute("hidden", backend !== "webgpu");
+element("backend-logo-webgpu", SVGElement).toggleAttribute(
+  "hidden",
+  backend !== "webgpu",
+);
+element("backend-logo-webgl", SVGElement).toggleAttribute(
+  "hidden",
+  backend !== "webgl2",
+);
+const updateBackendWidth = () => {
+  const width = Math.ceil(backendButton.getBoundingClientRect().width);
+  if (width > 0)
+    document.documentElement.style.setProperty("--backend-width", `${width}px`);
+};
+new ResizeObserver(updateBackendWidth).observe(backendButton);
+updateBackendWidth();
 function setBackendSwitchable(switchable: boolean) {
   const currentName = BACKEND_NAME[backend];
   const otherName = BACKEND_NAME[OTHER_BACKEND[backend]];
