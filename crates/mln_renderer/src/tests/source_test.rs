@@ -62,7 +62,7 @@ fn tile_parameters(
         pixel_ratio: 1.0,
         debug_options: MapDebugOptions::NO_DEBUG,
         view: state.view(),
-        min_zoom: state.get_min_zoom(),
+        min_zoom: state.min_zoom(),
         max_zoom: state.limits().max_zoom,
         file_source,
         mode: map_mode,
@@ -98,7 +98,7 @@ impl SourceTest {
     }
 
     fn tile_parameters_with(&self, map_mode: MapMode, file_source: Option<Arc<dyn FileSource>>) -> TileParameters<'_> {
-        tile_parameters(self.transform.get_state(), map_mode, file_source)
+        tile_parameters(self.transform.state(), map_mode, file_source)
     }
 
     /// A tile store whose jobs run on the thread pool.

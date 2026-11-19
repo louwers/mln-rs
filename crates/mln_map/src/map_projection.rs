@@ -64,7 +64,7 @@ impl MapProjection {
     pub fn set_camera(&mut self, camera: &CameraOptions) {
         let mut transform = self.transform();
         transform.jump_to(camera);
-        self.state = transform.get_state().clone();
+        self.state = transform.state().clone();
     }
 
     /// The camera, with its center in the copy of the world that it is in.

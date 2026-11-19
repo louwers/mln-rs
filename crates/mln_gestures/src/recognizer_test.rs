@@ -61,16 +61,16 @@ impl DerefMut for TestCamera {
 
 impl GestureCamera for TestCamera {
     fn viewport(&self) -> ScreenCoordinate {
-        let size = self.transform.get_state().view().size();
+        let size = self.transform.state().view().size();
         ScreenCoordinate::new(f64::from(size.width), f64::from(size.height))
     }
 
     fn camera(&self) -> CameraOptions {
-        self.transform.get_camera_options(None)
+        self.transform.camera_options(None)
     }
 
     fn zoom_range(&self) -> (f64, f64) {
-        let state = self.transform.get_state();
+        let state = self.transform.state();
         crate::zoom_range(state, state.view().center(WrapMode::Unwrapped).latitude())
     }
 
@@ -641,8 +641,8 @@ fn notches_on_the_globe_zoom_out_to_the_floor_at_the_center_latitude() {
     });
     let (limit, back) = spin_into_a_limit_and_back(&mut rig, p(400.0, 300.0), 1.0);
     // The floor at 60° is a level below the plain minimum.
-    assert!((limit - rig.input.camera.get_state().get_min_zoom_at_latitude(60.0)).abs() < 1e-6, "{limit}");
-    assert!(limit < rig.input.camera.get_state().get_min_zoom() - 0.5, "{limit}");
+    assert!((limit - rig.input.camera.state().min_zoom_at_latitude(60.0)).abs() < 1e-6, "{limit}");
+    assert!(limit < rig.input.camera.state().min_zoom() - 0.5, "{limit}");
     assert!((back - (limit + 1.0 / 3.0)).abs() < 1e-6, "{}", back - limit);
 }
 
@@ -651,7 +651,7 @@ fn notches_zoom_out_to_the_floor_screen_bounds_set() {
     let mut rig = Rig::new();
     rig.input.camera.set_constrain_mode(ConstrainMode::Screen);
     let bounds = LatLngBounds::hull(LatLng::new(52.3, 4.8).unwrap(), LatLng::new(52.4, 5.0).unwrap());
-    let limits = CameraLimits { bounds, ..*rig.input.camera.get_state().limits() };
+    let limits = CameraLimits { bounds, ..*rig.input.camera.state().limits() };
     rig.input.camera.set_limits(limits).unwrap();
     rig.input.camera.jump_to(&CameraOptions {
         center: Some(LatLng::new(52.35, 4.9).unwrap()),
@@ -661,9 +661,9 @@ fn notches_zoom_out_to_the_floor_screen_bounds_set() {
     let (limit, back) = spin_into_a_limit_and_back(&mut rig, p(400.0, 300.0), 1.0);
     // The bounds fill the 800 px width at about 11.46, far above the plain
     // minimum.
-    let floor = rig.input.camera.get_state().get_min_zoom_for_screen_bounds().unwrap();
+    let floor = rig.input.camera.state().min_zoom_for_screen_bounds().unwrap();
     assert!((limit - floor).abs() < 1e-6, "{limit} {floor}");
-    assert!(limit > rig.input.camera.get_state().get_min_zoom() + 10.0, "{limit}");
+    assert!(limit > rig.input.camera.state().min_zoom() + 10.0, "{limit}");
     assert!((back - (limit + 1.0 / 3.0)).abs() < 1e-6, "{}", back - limit);
 }
 
@@ -1197,7 +1197,7 @@ fn a_drag_on_the_globe_turns_it_around_the_cursor() {
         direct.move_by_with_anchor(&p(6.0, 3.0), Some(cursor), &AnimationOptions::default()).unwrap();
         centered.move_by(&p(6.0, 3.0), &AnimationOptions::default()).unwrap();
     }
-    let center = |transform: &Transform| transform.get_lat_lng(WrapMode::Unwrapped);
+    let center = |transform: &Transform| transform.view().center(WrapMode::Unwrapped);
     assert_eq!(center(&rig.input.camera), center(&direct));
     let (dragged, around_the_center) = (center(&rig.input.camera), center(&centered));
     assert!(
@@ -1292,7 +1292,7 @@ fn a_drag_on_the_globe_holds_the_location_it_grabbed() {
     let drift = drag_drift(&mut rig, &paths[5].1);
     assert!(drift < 0.01, "at latitude 60: {drift} px");
     // A drag that returns to its press returns the camera.
-    let center = rig.input.camera.get_lat_lng(WrapMode::Unwrapped);
+    let center = rig.input.camera.view().center(WrapMode::Unwrapped);
     assert!((center.latitude() - 60.0).abs() < 1e-6 && (center.longitude() - 20.0).abs() < 1e-6, "{center:?}");
     assert!((rig.zoom() - 2.0).abs() < 1e-6, "{}", rig.zoom());
 }
@@ -1327,12 +1327,12 @@ fn a_drag_on_the_globe_changes_how_it_holds_without_a_jump() {
         let mut fastest = 0.0f64;
         for at in &path[1..] {
             rig.now += 16.0;
-            let before = rig.input.camera.get_lat_lng(WrapMode::Unwrapped);
+            let before = rig.input.camera.view().center(WrapMode::Unwrapped);
             let radius = 512.0 * rig.zoom().exp2()
                 / std::f64::consts::TAU
                 / before.latitude().to_radians().cos().max(85.051_129f64.to_radians().cos());
             rig.to(1, at.x, at.y);
-            let after = rig.input.camera.get_lat_lng(WrapMode::Unwrapped);
+            let after = rig.input.camera.view().center(WrapMode::Unwrapped);
             if after == before {
                 continue;
             }

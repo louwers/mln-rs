@@ -135,7 +135,7 @@ impl TransformState {
             * Projection::get_meters_per_pixel_at_latitude(self.view.center(WrapMode::Unwrapped).latitude(), 0.0)
             * TILE_SIZE_D;
         self.set_center_altitude(alt_m);
-        self.set_bearing(new_bearing);
+        self.set_angle(new_bearing);
         self.set_pitch(new_pitch);
         self.set_roll(new_roll);
     }
@@ -147,7 +147,7 @@ impl TransformState {
             return None;
         }
         let max_world_size = Projection::world_size(2.0f64.powf(self.limits.max_zoom));
-        let min_world_size = Projection::world_size(2.0f64.powf(self.get_min_zoom()));
+        let min_world_size = Projection::world_size(2.0f64.powf(self.min_zoom()));
         let dist_to_center = self.view.camera_to_center_distance();
         Some(DVec3::new(
             position.x,
@@ -168,7 +168,7 @@ impl TransformState {
     }
 
     pub fn set_free_camera_options(&mut self, options: &FreeCameraOptions) {
-        if !self.valid() {
+        if !self.is_valid() {
             return;
         }
 
@@ -210,7 +210,7 @@ impl TransformState {
     }
 
     #[must_use]
-    pub fn get_constrain_mode(&self) -> ConstrainMode {
+    pub fn constrain_mode(&self) -> ConstrainMode {
         self.view.params().constrain_mode
     }
 
@@ -222,7 +222,7 @@ impl TransformState {
         self.update(|p| p.viewport_mode = mode);
     }
 
-    pub fn set_edge_insets(&mut self, padding: &EdgeInsets) {
+    pub fn set_padding(&mut self, padding: &EdgeInsets) {
         self.update(|p| p.padding = *padding);
     }
 
@@ -230,7 +230,7 @@ impl TransformState {
 
     /// The camera, with `padding` in place of its own if given.
     #[must_use]
-    pub fn get_camera_options(&self, padding: Option<EdgeInsets>) -> CameraOptions {
+    pub fn camera_options(&self, padding: Option<EdgeInsets>) -> CameraOptions {
         let mut camera = self.view.camera();
         if let Some(padding) = padding {
             camera.padding = padding;
@@ -241,19 +241,19 @@ impl TransformState {
     // MARK: - Zoom
 
     /// Lowest zoom allowed with the map centered at this latitude: the globe
-    /// lets the zoom fall below `get_min_zoom()` toward the poles by the
+    /// lets the zoom fall below `min_zoom()` toward the poles by the
     /// anchored-zoom adjustment, so the planet keeps its size on screen.
     #[must_use]
-    pub fn get_min_zoom_at_latitude(&self, latitude: f64) -> f64 {
-        self.get_min_zoom_at_latitude_with(latitude, self.view.is_globe())
+    pub fn min_zoom_at_latitude(&self, latitude: f64) -> f64 {
+        self.min_zoom_at_latitude_with(latitude, self.view.is_globe())
     }
 
-    /// [`get_min_zoom_at_latitude`](Self::get_min_zoom_at_latitude) for a
+    /// [`min_zoom_at_latitude`](Self::min_zoom_at_latitude) for a
     /// camera on the globe or not, whatever the current projection.
     #[must_use]
-    pub fn get_min_zoom_at_latitude_with(&self, latitude: f64, globe: bool) -> f64 {
+    pub fn min_zoom_at_latitude_with(&self, latitude: f64, globe: bool) -> f64 {
         if !globe {
-            return self.get_min_zoom();
+            return self.min_zoom();
         }
         // The globe's constraint never raises the scale, whichever projection
         // the map is in now.
@@ -264,12 +264,12 @@ impl TransformState {
     /// the globe the zoom decides how close to a pole the center can be.
     #[must_use]
     pub fn constrained_center(&self, lat_lng: &LatLng, zoom: f64) -> LatLng {
-        if self.get_constrain_mode() == ConstrainMode::None || !self.view.is_globe() {
+        if self.constrain_mode() == ConstrainMode::None || !self.view.is_globe() {
             return *lat_lng;
         }
         let max_latitude = VerticalPerspectiveProjection::max_latitude(
             &self.view,
-            mln_math::clamp_f64(zoom, self.get_min_zoom_at_latitude(lat_lng.latitude()), self.limits.max_zoom),
+            mln_math::clamp_f64(zoom, self.min_zoom_at_latitude(lat_lng.latitude()), self.limits.max_zoom),
         );
         LatLng::saturating(
             mln_math::clamp_f64(lat_lng.latitude(), -max_latitude, max_latitude),
@@ -319,7 +319,7 @@ impl TransformState {
     /// The lowest zoom the constrain mode allows: the minimum zoom, raised
     /// so that the view shows no area off the world.
     #[must_use]
-    pub fn get_min_zoom(&self) -> f64 {
+    pub fn min_zoom(&self) -> f64 {
         scale_zoom(self.constrained_min_scale())
     }
 
@@ -331,13 +331,13 @@ impl TransformState {
 
     /// Sets the map's rotation, in radians counterclockwise: the negated
     /// bearing.
-    pub fn set_bearing(&mut self, angle: f64) {
+    pub fn set_angle(&mut self, angle: f64) {
         if angle.is_finite() {
             self.update(|p| p.angle = angle);
         }
     }
 
-    pub fn set_field_of_view(&mut self, fov: f64) {
+    pub fn set_fov(&mut self, fov: f64) {
         if fov.is_finite() {
             self.update(|p| p.fov = fov);
         }
@@ -377,7 +377,7 @@ impl TransformState {
     /// range. Toward the poles the globe goes below the minimum scale;
     /// `set_lat_lng_zoom` holds it to the floor there.
     #[must_use]
-    pub fn valid(&self) -> bool {
+    pub fn is_valid(&self) -> bool {
         let scale = self.view.scale();
         self.view.is_valid()
             && (if self.view.is_globe() { scale > 0.0 } else { scale >= self.min_scale() })
@@ -395,7 +395,7 @@ impl TransformState {
     /// move. Other modes return `scale` unchanged and no center.
     #[must_use]
     pub fn constrain_screen(&self, scale: f64) -> (f64, Option<LatLng>) {
-        if self.get_constrain_mode() != ConstrainMode::Screen {
+        if self.constrain_mode() != ConstrainMode::Screen {
             return (scale, None);
         }
         let mut zoom = scale_zoom(scale);
@@ -408,7 +408,7 @@ impl TransformState {
     /// allows.
     #[must_use]
     pub fn constrain(&self, mut scale: f64, mut x: f64, mut y: f64) -> (f64, f64, f64) {
-        let constrain_mode = self.get_constrain_mode();
+        let constrain_mode = self.constrain_mode();
         if constrain_mode == ConstrainMode::None || constrain_mode == ConstrainMode::Screen {
             return (scale, x, y);
         }
@@ -457,7 +457,7 @@ impl TransformState {
     }
 
     pub fn constrain_camera_and_zoom_to_bounds(&self, requested_camera: &mut CameraOptions, requested_zoom: &mut f64) {
-        if self.get_constrain_mode() != ConstrainMode::Screen || self.limits.bounds == LatLngBounds::default() {
+        if self.constrain_mode() != ConstrainMode::Screen || self.limits.bounds == LatLngBounds::default() {
             return;
         }
 
@@ -591,8 +591,8 @@ impl TransformState {
     /// [`constrain_camera_and_zoom_to_bounds`](Self::constrain_camera_and_zoom_to_bounds)
     /// raises lower zooms to. `None` in the other modes or without bounds.
     #[must_use]
-    pub fn get_min_zoom_for_screen_bounds(&self) -> Option<f64> {
-        if self.get_constrain_mode() != ConstrainMode::Screen || self.limits.bounds == LatLngBounds::default() {
+    pub fn min_zoom_for_screen_bounds(&self) -> Option<f64> {
+        if self.constrain_mode() != ConstrainMode::Screen || self.limits.bounds == LatLngBounds::default() {
             return None;
         }
         // The bounds' extent on screen grows with the scale alone, so they
@@ -680,7 +680,7 @@ impl TransformState {
         }
 
         let min_scale = if globe {
-            zoom_scale(self.get_min_zoom_at_latitude(constrained.latitude()))
+            zoom_scale(self.min_zoom_at_latitude(constrained.latitude()))
         } else {
             self.constrained_min_scale()
         };

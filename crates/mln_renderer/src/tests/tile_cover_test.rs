@@ -773,7 +773,7 @@ mod tile_cover {
         transform.resize(size).unwrap();
         transform.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
         transform
-            .set_limits(CameraLimits { max_pitch: mln_math::deg2rad(80.0), ..*transform.get_state().limits() })
+            .set_limits(CameraLimits { max_pitch: mln_math::deg2rad(80.0), ..*transform.state().limits() })
             .unwrap();
         transform.jump_to(&CameraOptions {
             center: Some(center),

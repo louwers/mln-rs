@@ -223,7 +223,7 @@ mod tests {
         let mut state = TransformState::default();
         state.set_size(Size::new(512, 512));
         state.set_lat_lng_zoom(&LatLng::new(latitude, longitude).unwrap(), 1.0);
-        state.set_bearing(bearing);
+        state.set_angle(bearing);
         state
     }
 

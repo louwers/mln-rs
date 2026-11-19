@@ -113,8 +113,8 @@ fn numbers_out_of_range_do_not_panic() {
         [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, f64::MAX, -f64::MAX, f64::MIN_POSITIVE, 0.0, 1e300, -1e300];
     let setters: &[Setter] = &[
         ("constrained scale", |s, v| s.constrain_position(v)),
-        ("bearing", |s, v| s.set_bearing(v)),
-        ("field of view", |s, v| s.set_field_of_view(v)),
+        ("bearing", |s, v| s.set_angle(v)),
+        ("field of view", |s, v| s.set_fov(v)),
         ("roll", |s, v| s.set_roll(v)),
         ("pitch", |s, v| s.set_pitch(v)),
         ("x skew", |s, v| {
@@ -159,7 +159,7 @@ fn numbers_out_of_range_do_not_panic() {
                 orientation: Some(DQuat::from_xyzw(v, 0.0, 0.0, 1.0)),
             });
         }),
-        ("edge insets", |s, v| s.set_edge_insets(&EdgeInsets { top: v, left: v, bottom: v, right: v })),
+        ("edge insets", |s, v| s.set_padding(&EdgeInsets { top: v, left: v, bottom: v, right: v })),
         ("frustum offset", |s, v| {
             s.set_frustum_offset(&EdgeInsets { top: v, left: v, bottom: v, right: v });
         }),

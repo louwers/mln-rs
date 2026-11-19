@@ -694,8 +694,8 @@ impl Transform {
 
     /// Returns the current camera options.
     #[must_use]
-    pub fn get_camera_options(&self, padding: Option<EdgeInsets>) -> CameraOptions {
-        self.state.get_camera_options(padding)
+    pub fn camera_options(&self, padding: Option<EdgeInsets>) -> CameraOptions {
+        self.state.camera_options(padding)
     }
 
     /// Change any combination of center, zoom, bearing, and pitch, without a
@@ -713,9 +713,9 @@ impl Transform {
             && let Some(center) = camera.center
             && camera.zoom.is_none()
         {
-            let zoom = self.get_zoom()
+            let zoom = self.view().zoom()
                 + VerticalPerspectiveProjection::zoom_adjustment(
-                    self.get_lat_lng(WrapMode::Wrapped).latitude(),
+                    self.view().center(WrapMode::Wrapped).latitude(),
                     center.latitude(),
                 );
             self.ease_to(&CameraOptions { zoom: Some(zoom), ..*camera }, &AnimationOptions::default());
@@ -750,20 +750,20 @@ impl Transform {
             return;
         }
 
-        let mut zoom = camera.zoom.unwrap_or(self.get_zoom());
+        let mut zoom = camera.zoom.unwrap_or(self.view().zoom());
         if camera.zoom.is_none()
             && let Some(center) = camera.center
             && globe
         {
             zoom += VerticalPerspectiveProjection::zoom_adjustment(
-                self.get_lat_lng(WrapMode::Wrapped).latitude(),
+                self.view().center(WrapMode::Wrapped).latitude(),
                 center.latitude(),
             );
         }
         self.state.constrain_camera_and_zoom_to_bounds(&mut camera, &mut zoom);
 
         let padding = camera.padding.unwrap_or(self.state.view().padding());
-        let mut start_lat_lng = self.get_lat_lng(WrapMode::Unwrapped);
+        let mut start_lat_lng = self.view().center(WrapMode::Unwrapped);
         let unwrapped_lat_lng = camera.center.unwrap_or(start_lat_lng);
         // On the globe the ease heads for the center the zoom it was given
         // allows, or else the zoom it starts from, as GL JS's does; its last
@@ -774,25 +774,25 @@ impl Transform {
             } else {
                 unwrapped_lat_lng
             },
-            if camera.zoom.is_some() { zoom } else { self.get_zoom() },
+            if camera.zoom.is_some() { zoom } else { self.view().zoom() },
         );
 
         let mut bearing = match camera.bearing {
             Some(b) => mln_math::deg2rad(-b),
-            None => self.get_bearing(),
+            None => self.view().angle(),
         };
         let mut pitch = match camera.pitch {
             Some(p) => mln_math::deg2rad(p),
-            None => self.get_pitch(),
+            None => self.view().pitch(),
         };
         let mut fov = match camera.fov {
             Some(f) => mln_math::deg2rad(f),
-            None => self.get_field_of_view(),
+            None => self.view().fov(),
         };
         let center_alt = camera.center_altitude.unwrap_or(self.state.view().center_altitude());
         let roll = match camera.roll {
             Some(r) => mln_math::deg2rad(r),
-            None => self.get_roll(),
+            None => self.view().roll(),
         };
 
         if zoom.is_nan() || bearing.is_nan() || pitch.is_nan() || roll.is_nan() || fov.is_nan() {
@@ -827,7 +827,7 @@ impl Transform {
         };
         zoom = mln_math::clamp_f64(
             zoom,
-            self.state.get_min_zoom_at_latitude_with(lat_lng_end.latitude(), target_globe),
+            self.state.min_zoom_at_latitude_with(lat_lng_end.latitude(), target_globe),
             self.state.limits().max_zoom,
         );
         pitch = mln_math::clamp_f64(pitch, self.state.limits().min_pitch, self.state.limits().max_pitch);
@@ -965,13 +965,13 @@ impl Transform {
         let mut camera = *input_camera;
         let globe = self.state.view().is_globe();
 
-        let mut zoom = camera.zoom.unwrap_or(self.get_zoom());
+        let mut zoom = camera.zoom.unwrap_or(self.view().zoom());
         if camera.zoom.is_none()
             && let Some(center) = camera.center
             && globe
         {
             zoom += VerticalPerspectiveProjection::zoom_adjustment(
-                self.get_lat_lng(WrapMode::Wrapped).latitude(),
+                self.view().center(WrapMode::Wrapped).latitude(),
                 center.latitude(),
             );
         }
@@ -981,25 +981,25 @@ impl Transform {
         // As in easeTo, the globe's flight heads for the center the zoom it
         // was given, or else starts from, allows.
         let lat_lng_end = self.state.constrained_center(
-            &camera.center.unwrap_or(self.get_lat_lng(WrapMode::Unwrapped)).wrapped(),
-            if camera.zoom.is_some() { zoom } else { self.get_zoom() },
+            &camera.center.unwrap_or(self.view().center(WrapMode::Unwrapped)).wrapped(),
+            if camera.zoom.is_some() { zoom } else { self.view().zoom() },
         );
         let center_alt = camera.center_altitude.unwrap_or(self.state.view().center_altitude());
         let mut bearing = match camera.bearing {
             Some(b) => mln_math::deg2rad(-b),
-            None => self.get_bearing(),
+            None => self.view().angle(),
         };
         let mut pitch = match camera.pitch {
             Some(p) => mln_math::deg2rad(p),
-            None => self.get_pitch(),
+            None => self.view().pitch(),
         };
         let roll = match camera.roll {
             Some(r) => mln_math::deg2rad(r),
-            None => self.get_roll(),
+            None => self.view().roll(),
         };
         let mut fov = match camera.fov {
             Some(f) => mln_math::deg2rad(f),
-            None => self.get_field_of_view(),
+            None => self.view().fov(),
         };
 
         if zoom.is_nan()
@@ -1014,7 +1014,7 @@ impl Transform {
         }
 
         // Determine endpoints.
-        let mut start_lat_lng = self.get_lat_lng(WrapMode::Unwrapped).wrapped();
+        let mut start_lat_lng = self.view().center(WrapMode::Unwrapped).wrapped();
         start_lat_lng.unwrap_for_shortest_path(&lat_lng_end);
         let start_center_alt = self.state.view().center_altitude();
 
@@ -1030,7 +1030,7 @@ impl Transform {
         };
         zoom = mln_math::clamp_f64(
             zoom,
-            self.state.get_min_zoom_at_latitude_with(lat_lng_end.latitude(), target_globe),
+            self.state.min_zoom_at_latitude_with(lat_lng_end.latitude(), target_globe),
             self.state.limits().max_zoom,
         );
         pitch = mln_math::clamp_f64(pitch, self.state.limits().min_pitch, self.state.limits().max_pitch);
@@ -1092,8 +1092,7 @@ impl Transform {
         if globe {
             // GL JS: the arc may not dip below the map's or the flight's
             // minimum zoom, and that only ever lowers ρ.
-            let floor_zoom =
-                f64::max(animation.min_zoom.unwrap_or(self.state.get_min_zoom()), self.state.get_min_zoom());
+            let floor_zoom = f64::max(animation.min_zoom.unwrap_or(self.state.min_zoom()), self.state.min_zoom());
             let normalized_floor_zoom = f64::min(
                 f64::min(
                     floor_zoom + VerticalPerspectiveProjection::zoom_adjustment(lat_lng_end.latitude(), 0.0),
@@ -1103,7 +1102,7 @@ impl Transform {
             );
             let min_zoom = mln_math::clamp_f64(
                 normalized_floor_zoom + VerticalPerspectiveProjection::zoom_adjustment(0.0, lat_lng_end.latitude()),
-                self.state.get_min_zoom_at_latitude(lat_lng_end.latitude()),
+                self.state.min_zoom_at_latitude(lat_lng_end.latitude()),
                 self.state.limits().max_zoom,
             );
             let w_max = w0
@@ -1120,7 +1119,7 @@ impl Transform {
                 mln_math::fmin(animation.min_zoom.unwrap_or(start_zoom), mln_math::fmin(start_zoom, zoom));
             min_zoom = mln_math::clamp_f64(
                 min_zoom,
-                self.state.get_min_zoom_at_latitude(lat_lng_end.latitude()),
+                self.state.min_zoom_at_latitude(lat_lng_end.latitude()),
                 self.state.limits().max_zoom,
             );
             // w<sub>m</sub>: Maximum visible span, measured in pixels with
@@ -1332,15 +1331,15 @@ impl Transform {
             // the drag turned it about, so it carries on over a pole instead
             // of spinning round it.
             let start = CenterAndBearing {
-                center: self.get_lat_lng(WrapMode::Unwrapped),
-                bearing: -mln_math::rad2deg(self.get_bearing()),
+                center: self.view().center(WrapMode::Unwrapped),
+                bearing: -mln_math::rad2deg(self.view().angle()),
             };
             let end = VerticalPerspectiveProjection::fling_camera(
                 self.state.view(),
                 &flipped(&self.state, &view_center),
                 &ScreenCoordinate::new(offset.x, -offset.y),
             );
-            let start_zoom = self.get_zoom();
+            let start_zoom = self.view().zoom();
             let frame: FrameFn = Box::new(move |state: &TransformState, t: f64| {
                 let camera = VerticalPerspectiveProjection::interpolate_camera(&start, &end, t);
                 let center = state.constrained_center(&camera.center, state.view().zoom());
@@ -1376,9 +1375,9 @@ impl Transform {
             // the ease would take the other way round.
             let mut center = self.state.constrained_center(
                 &VerticalPerspectiveProjection::pan_center(self.state.view(), offset),
-                self.get_zoom(),
+                self.view().zoom(),
             );
-            let longitude = self.get_lat_lng(WrapMode::Unwrapped).longitude();
+            let longitude = self.view().center(WrapMode::Unwrapped).longitude();
             if (center.longitude() - longitude).abs() > 180.0 {
                 center = lat_lng(center.latitude(), longitude + 179.5f64.copysign(center.longitude() - longitude));
             }
@@ -1417,7 +1416,7 @@ impl Transform {
                         Some(held)
                             if (held.cursor.x - from.x).hypot(held.cursor.y - from.y) < 1e-3
                                 && held.size == size
-                                && held.camera == self.get_camera_options(None) =>
+                                && held.camera == self.camera_options(None) =>
                         {
                             Some(held.location)
                         }
@@ -1452,17 +1451,17 @@ impl Transform {
             } else {
                 VerticalPerspectiveProjection::drag_center(self.state.view(), &flipped(&self.state, &grab), &pan_delta)
             };
-            center = self.state.constrained_center(&center, self.get_zoom());
-            let zoom = self.get_zoom()
+            center = self.state.constrained_center(&center, self.view().zoom());
+            let zoom = self.view().zoom()
                 + VerticalPerspectiveProjection::zoom_adjustment(
-                    self.get_lat_lng(WrapMode::Wrapped).latitude(),
+                    self.view().center(WrapMode::Wrapped).latitude(),
                     center.latitude(),
                 );
             self.ease_to(&CameraOptions { center: Some(center), zoom: Some(zoom), ..camera }, animation);
             self.globe_drag_hold = hold.map(|(location, cursor, _)| GlobeDragHold {
                 location,
                 cursor,
-                camera: self.get_camera_options(None),
+                camera: self.camera_options(None),
                 size,
             });
             return Ok(());
@@ -1496,16 +1495,7 @@ impl Transform {
         Ok(())
     }
 
-    #[must_use]
-    pub fn get_lat_lng(&self, wrap: WrapMode) -> LatLng {
-        self.state.view().center(wrap)
-    }
-
     // MARK: - Zoom
-
-    pub(crate) fn get_zoom(&self) -> f64 {
-        self.state.view().zoom()
-    }
 
     // MARK: - Limits
 
@@ -1521,25 +1511,7 @@ impl Transform {
 
     // MARK: - Bearing
 
-    pub(crate) fn get_bearing(&self) -> f64 {
-        self.state.view().angle()
-    }
-
     // MARK: - Pitch
-
-    #[must_use]
-    pub fn get_pitch(&self) -> f64 {
-        self.state.view().pitch()
-    }
-
-    pub(crate) fn get_roll(&self) -> f64 {
-        self.state.view().roll()
-    }
-
-    /// Returns `state.getFieldOfView()` (a float) as double.
-    pub(crate) fn get_field_of_view(&self) -> f64 {
-        self.state.view().fov()
-    }
 
     // MARK: - Projection
 
@@ -1600,11 +1572,6 @@ impl Transform {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn get_projection_mode(&self) -> ProjectionMode {
-        self.state.view().projection_mode()
-    }
-
     // MARK: - Transition
 
     /// Starts one camera command. `camera` is the command as given: the
@@ -1648,9 +1615,9 @@ impl Transform {
         }
 
         let target = frame(&self.state, 1.0);
-        let panning = flight || anchor.is_some() || camera.center != Some(self.get_lat_lng(WrapMode::Unwrapped));
-        let scaling = flight || target.zoom != Some(self.get_zoom());
-        let rotating = target.bearing != Some(-mln_math::rad2deg(self.get_bearing()));
+        let panning = flight || anchor.is_some() || camera.center != Some(self.view().center(WrapMode::Unwrapped));
+        let scaling = flight || target.zoom != Some(self.view().zoom());
+        let rotating = target.bearing != Some(-mln_math::rad2deg(self.view().angle()));
         let moving_fields = (if panning { CENTER } else { 0 })
             | (if scaling { ZOOM } else { 0 })
             | (if rotating { BEARING } else { 0 });
@@ -1687,8 +1654,8 @@ impl Transform {
     /// the fields it still owns, then applies the result.
     fn apply_transitions(&mut self, only: Option<usize>, now: Option<Instant>) {
         // The center is unwrapped, or wrapped on the globe without bounds
-        // (TransformState::get_camera_options).
-        let current = self.state.get_camera_options(None);
+        // (TransformState::camera_options).
+        let current = self.state.camera_options(None);
         let mut camera = current;
 
         let active = match only {
@@ -1764,12 +1731,12 @@ impl Transform {
         // no command changed as they are, so that converting them to degrees
         // and back doesn't move them.
         let padding = camera.padding.unwrap_or_default();
-        self.state.set_edge_insets(&padding);
+        self.state.set_padding(&padding);
         if let Some(fov) = camera.fov.filter(|_| camera.fov != current.fov) {
-            self.state.set_field_of_view(mln_math::deg2rad(fov));
+            self.state.set_fov(mln_math::deg2rad(fov));
         }
         if let Some(bearing) = camera.bearing.filter(|_| camera.bearing != current.bearing) {
-            self.state.set_bearing(mln_math::deg2rad(-bearing));
+            self.state.set_angle(mln_math::deg2rad(-bearing));
         }
         if let Some(roll) = camera.roll.filter(|_| camera.roll != current.roll) {
             self.state.set_roll(mln_math::deg2rad(roll));
@@ -1778,7 +1745,7 @@ impl Transform {
             Some(pitch) => mln_math::deg2rad(pitch),
             None => self.state.view().pitch(),
         };
-        self.state.set_pitch(f64::min(get_max_pitch_for_edge_insets(&self.state, &padding), pitch));
+        self.state.set_pitch(f64::min(max_pitch_for_padding(&self.state, &padding), pitch));
         let mut zoom = camera.zoom.unwrap_or_default();
         self.state.constrain_camera_and_zoom_to_bounds(&mut camera, &mut zoom);
         self.state.set_lat_lng_zoom(&camera.center.unwrap_or_default(), zoom);
@@ -2182,7 +2149,7 @@ impl Transform {
         if distance.is_nan() || distance <= 0.0 {
             return true;
         }
-        let before = self.get_lat_lng(WrapMode::Unwrapped);
+        let before = self.view().center(WrapMode::Unwrapped);
         let altitude = self.state.view().center_altitude();
         let steps = f64::min((distance / MAX_STEP).ceil(), MAX_STEPS);
         let step = ScreenCoordinate::new(offset.x / steps, offset.y / steps);
@@ -2213,7 +2180,7 @@ impl Transform {
             self.state.set_lat_lng_zoom(&camera.center.unwrap_or(unwrapped), zoom);
         }
         self.state.set_center_altitude(altitude);
-        self.get_lat_lng(WrapMode::Unwrapped) != before
+        self.view().center(WrapMode::Unwrapped) != before
     }
 
     /// One pan step on the globe, as a drag around the view center
@@ -2231,14 +2198,14 @@ impl Transform {
         } else {
             (VerticalPerspectiveProjection::drag_center(self.state.view(), &grab, &pan_delta), None)
         };
-        let center = self.state.constrained_center(&center, self.get_zoom());
-        let zoom = self.get_zoom()
+        let center = self.state.constrained_center(&center, self.view().zoom());
+        let zoom = self.view().zoom()
             + VerticalPerspectiveProjection::zoom_adjustment(
-                self.get_lat_lng(WrapMode::Wrapped).latitude(),
+                self.view().center(WrapMode::Wrapped).latitude(),
                 center.latitude(),
             );
         if let Some(bearing) = bearing {
-            self.state.set_bearing(mln_math::deg2rad(-bearing));
+            self.state.set_angle(mln_math::deg2rad(-bearing));
         }
         self.state.set_lat_lng_zoom(&center, zoom);
     }
@@ -2247,10 +2214,10 @@ impl Transform {
         let before = self.state.view().zoom();
         let altitude = self.state.view().center_altitude();
         let anchor = self.momentum_anchor(anchor);
-        let center = self.get_lat_lng(WrapMode::Unwrapped);
+        let center = self.view().center(WrapMode::Unwrapped);
         let mut target = mln_math::clamp_f64(
             before + zoom,
-            self.state.get_min_zoom_at_latitude(center.latitude()),
+            self.state.min_zoom_at_latitude(center.latitude()),
             self.state.limits().max_zoom,
         );
         let mut camera = CameraOptions { center: Some(center), ..Default::default() };
@@ -2280,14 +2247,14 @@ impl Transform {
 
     fn step_bearing(&mut self, bearing: f64, anchor: Option<ScreenCoordinate>) {
         let anchor = self.momentum_anchor(anchor);
-        self.state.set_bearing(mln_math::wrap(self.state.view().angle() - mln_math::deg2rad(bearing), -PI, PI));
+        self.state.set_angle(mln_math::wrap(self.state.view().angle() - mln_math::deg2rad(bearing), -PI, PI));
         self.hold_momentum_anchor(anchor);
     }
 
     fn step_pitch(&mut self, pitch: f64, anchor: Option<ScreenCoordinate>) -> bool {
         let anchor = self.momentum_anchor(anchor);
         let before = self.state.view().pitch();
-        let max_pitch = get_max_pitch_for_edge_insets(&self.state, &self.state.view().padding());
+        let max_pitch = max_pitch_for_padding(&self.state, &self.state.view().padding());
         self.state.set_pitch(mln_math::clamp_f64(
             before + mln_math::deg2rad(pitch),
             self.state.limits().min_pitch,
@@ -2417,7 +2384,7 @@ impl Transform {
                 let _ = transform.move_by_with_anchor(&offset, delta.anchor, &parts);
             }
             if eases {
-                let current = transform.get_camera_options(None);
+                let current = transform.camera_options(None);
                 let target = CameraOptions {
                     zoom: delta.scale.map(|scale| current.zoom.unwrap_or(0.0) + scale.log2()),
                     bearing: delta.bearing.map(|bearing| current.bearing.unwrap_or(0.0) + bearing),
@@ -2457,7 +2424,7 @@ impl Transform {
         self.gesture_phase_before(update.phase);
         if update.phase != GesturePhase::None {
             // A gesture's update can repeat a field it doesn't change.
-            let current = self.get_camera_options(None);
+            let current = self.camera_options(None);
             let changes = |value: Option<f64>, now: Option<f64>| value.is_some() && value != now;
             self.gesture.change(
                 changes(update.camera.zoom, current.zoom),
@@ -2535,7 +2502,7 @@ impl Transform {
     // MARK: - Transform state
 
     #[must_use]
-    pub fn get_state(&self) -> &TransformState {
+    pub fn state(&self) -> &TransformState {
         &self.state
     }
 
@@ -2578,11 +2545,6 @@ impl Transform {
         self.state.view().screen_coordinate_to_lat_lng(&flipped_point, wrap_mode)
     }
 
-    #[cfg(test)]
-    pub(crate) fn get_free_camera_options(&self) -> FreeCameraOptions {
-        self.state.view().free_camera_options()
-    }
-
     pub(crate) fn set_free_camera_options(&mut self, options: &FreeCameraOptions) {
         self.cancel_transitions();
         self.state.set_free_camera_options(options);
@@ -2612,7 +2574,7 @@ fn interpolate_edge_insets(start: &EdgeInsets, end: &EdgeInsets, t: f64) -> Opti
 /// We don't want to show horizon: limit max pitch based on edge insets.
 /// (`Transform::getMaxPitchForEdgeInsets`, called on the state inside the
 /// frame function.)
-fn get_max_pitch_for_edge_insets(state: &TransformState, insets: &EdgeInsets) -> f64 {
+fn max_pitch_for_padding(state: &TransformState, insets: &EdgeInsets) -> f64 {
     // See TransformState::getCenterOffset.
     let center_offset_y = 0.5 * (insets.top - insets.bottom);
     if center_offset_y == 0.0 {

@@ -164,7 +164,7 @@ impl MapView {
         let limits = TransformState::default();
         // The globe lets the zoom fall below the minimum toward the poles.
         let globe = projection.at_zoom(camera.zoom).transition_state() > 0.0;
-        let min_zoom = limits.get_min_zoom_at_latitude_with(camera.center.latitude(), globe);
+        let min_zoom = limits.min_zoom_at_latitude_with(camera.center.latitude(), globe);
         if !(min_zoom..=constants::MAX_ZOOM).contains(&camera.zoom)
             || !(mln_math::rad2deg(constants::PITCH_MIN)..=mln_math::rad2deg(constants::PITCH_MAX))
                 .contains(&camera.pitch)

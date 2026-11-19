@@ -265,7 +265,7 @@ impl SymbolView {
             debug_options: MapDebugOptions::NO_DEBUG,
             time_point: Some(Instant::now()),
             view: state.view().clone(),
-            min_zoom: state.get_min_zoom(),
+            min_zoom: state.min_zoom(),
             max_zoom: state.limits().max_zoom,
             camera_moving: false,
             style: Arc::new(style.clone()),

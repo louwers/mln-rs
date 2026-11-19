@@ -410,7 +410,7 @@ impl VerticalPerspectiveProjection {
     /// the longitude of the center swings, the view does not spin: the exact
     /// part is the rotation that brings `zoom_location` back under `anchor`,
     /// the heuristic part moves the center along the great circle towards
-    /// it. (C++ defaults `freeBearing` to false.)
+    /// it.
     pub fn zoom_around_point(
         state: &mut TransformState,
         anchor: &ScreenCoordinate,
@@ -920,7 +920,7 @@ fn zoom_turning_the_planet(
     let zoom =
         state.view().zoom() + VerticalPerspectiveProjection::zoom_adjustment(center.latitude(), constrained.latitude());
     state.set_lat_lng_zoom(&constrained, zoom);
-    state.set_bearing(-mln_math::deg2rad(camera.bearing));
+    state.set_angle(-mln_math::deg2rad(camera.bearing));
 }
 
 impl VerticalPerspectiveProjection {

@@ -25,14 +25,12 @@ impl<'a> TileProjector<'a> {
     }
 
     /// GL JS's `projectTileCoordinates`, for queries and label placement.
-    /// (C++ defaults `elevation` to 0.)
     #[must_use]
     pub fn project(&self, point: &Point<f64>, elevation: f64) -> ProjectedTilePoint {
         self.view.projection().project_tile_point(&self.data, &self.tile_id, point, elevation)
     }
 
     /// Where the renderer draws the point, for the rendered feature capture.
-    /// (C++ defaults `elevation` to 0.)
     #[must_use]
     pub fn project_as_drawn(&self, point: &Point<f64>, elevation: f64) -> ProjectedTilePoint {
         self.view.projection().drawn_tile_point(&self.data, &self.tile_id, point, elevation)
