@@ -41,8 +41,7 @@ mod window;
 
 pub use ash;
 pub use borrowed_target::{
-    BorrowedDepth, BorrowedImage, BorrowedImages, BorrowedTarget, ConsumerWait, ImageOwner, PendingReads, RingDevice,
-    VulkanRing,
+    BorrowedDepth, BorrowedImage, BorrowedImages, BorrowedTarget, ConsumerWait, ImageOwner, PendingReads, VulkanRing,
 };
 pub use custom_layer::{CustomLayerEncoder, CustomLayerPass};
 pub use device::{AdapterId, Device, HostDevice, QueueLease, QueueLock, RawDevice};

@@ -7,7 +7,7 @@ use std::convert::Infallible;
 use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _, OwnedHandle};
 
 use mln_gfx::gpu::{GpuError, TargetFormats, TextureFormat, TextureId};
-use mln_gfx::ring::{self, RingBackend};
+use mln_gfx::ring::{self, RingBackend, RingTextures};
 use mln_gfx::{ConsumerSync, DepthStencilFormat, DepthStencilFormats, GpuSync, SyncKind, SyncKinds};
 use mln_util::error::Error;
 use mln_util::hash::HashMap;
@@ -128,6 +128,26 @@ impl BorrowedTextures {
     }
 }
 
+impl RingTextures for BorrowedTextures {
+    type Image = ID3D12Resource;
+
+    fn images(&self) -> &[ID3D12Resource] {
+        &self.textures
+    }
+
+    fn same_image(a: &ID3D12Resource, b: &ID3D12Resource) -> bool {
+        a == b
+    }
+
+    fn size(&self) -> Size {
+        self.size
+    }
+
+    fn has_depth(&self) -> bool {
+        !self.depth_textures.is_empty()
+    }
+}
+
 /// Checks that `texture` is a 2D texture of `device`, `size` and `format`,
 /// with one mip level, layer and sample, that allows `flag`.
 fn check_texture(
@@ -240,7 +260,6 @@ impl RingBackend for D3d12Ring {
     type Gpu = D3d12Gpu;
     type Renderer = RendererBackend;
     type Textures = BorrowedTextures;
-    type Image = ID3D12Resource;
     /// A fence, and the value that the work to wait for reaches.
     type Wait = (ID3D12Fence, u64);
     type Handed = Infallible;
@@ -262,22 +281,6 @@ impl RingBackend for D3d12Ring {
             _ => None,
         };
         Ok(D3d12Ring { device, fence, fence_value: 0, host_fences: HashMap::default() })
-    }
-
-    fn images(textures: &BorrowedTextures) -> &[ID3D12Resource] {
-        &textures.textures
-    }
-
-    fn same_image(a: &ID3D12Resource, b: &ID3D12Resource) -> bool {
-        a == b
-    }
-
-    fn size(textures: &BorrowedTextures) -> Size {
-        textures.size
-    }
-
-    fn has_depth(textures: &BorrowedTextures) -> bool {
-        !textures.depth_textures.is_empty()
     }
 
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for

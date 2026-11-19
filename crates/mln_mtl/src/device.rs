@@ -7,6 +7,7 @@ use mln_gfx::ExportKinds;
 use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
 use objc2::rc::Retained;
+use objc2::runtime::ProtocolObject;
 use objc2_metal::{MTLCommandQueue, MTLCreateSystemDefaultDevice, MTLDevice};
 
 use crate::Id;
@@ -85,7 +86,7 @@ impl Device {
     }
 
     #[must_use]
-    pub fn device(&self) -> &Id<dyn MTLDevice> {
+    pub fn device(&self) -> &Retained<ProtocolObject<dyn MTLDevice>> {
         &self.device
     }
 

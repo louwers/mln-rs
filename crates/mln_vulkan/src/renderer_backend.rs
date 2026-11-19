@@ -13,7 +13,6 @@ use gpu_allocator::vulkan::{Allocator, AllocatorCreateDesc};
 use gpu_allocator::{AllocationSizes, AllocatorDebugSettings};
 use mln_gfx::renderer_backend;
 use mln_util::error::Error;
-use mln_util::logging::{Event, Log};
 
 use crate::device::Device;
 use crate::gpu::VulkanGpu;
@@ -101,12 +100,6 @@ impl BackendImpl {
         self.device.shared.swapchain()
     }
 
-    /// `VK_KHR_external_semaphore_fd`, when the device has it.
-    #[cfg_attr(not(unix), expect(dead_code, reason = "sync files are Unix's"))]
-    pub(crate) fn get_semaphore_fd_loader(&self) -> Option<&ash::khr::external_semaphore_fd::Device> {
-        self.device.shared.semaphore_fd()
-    }
-
     pub(crate) fn get_command_pool(&self) -> vk::CommandPool {
         self.command_pool
     }
@@ -187,27 +180,10 @@ impl BackendImpl {
         }
     }
 
-    /// Waits for the work the backend submitted to the device's queue, by
-    /// submitting an empty batch with a fence: the fence signals once
-    /// everything submitted to the queue before it has finished. It never
-    /// waits on the whole device, which would need every queue of it, nor
-    /// holds the queue while it waits. Logs `what` was going on when the
-    /// wait fails.
+    /// Waits for the work submitted to the device's queue, as
+    /// [`Device::wait_idle`] does.
     pub(crate) fn wait_idle(&self, what: &str) {
-        let device = self.get_device();
-        // SAFETY: the fence is made, waited for and destroyed here, and the
-        // empty submission is valid for the queue.
-        let waited = unsafe {
-            device.create_fence(&vk::FenceCreateInfo::default(), None).is_ok_and(|fence| {
-                let done =
-                    self.submit(&[], fence).and_then(|()| device.wait_for_fences(&[fence], true, u64::MAX)).is_ok();
-                device.destroy_fence(fence, None);
-                done
-            })
-        };
-        if !waited {
-            Log::error(Event::Render, format!("Vulkan device lost during {what}"));
-        }
+        self.device.wait_idle(what);
     }
 }
 

@@ -1079,6 +1079,30 @@ impl Device {
         result
     }
 
+    /// Waits for the work submitted to the device's queue, by submitting an
+    /// empty batch with a fence: the fence signals once everything submitted
+    /// to the queue before it has finished. It never waits on the whole
+    /// device, which would need every queue of it, nor holds the queue while
+    /// it waits. Logs `what` was going on when the wait fails.
+    pub(crate) fn wait_idle(&self, what: &str) {
+        let device = self.shared.device();
+        // SAFETY: the fence is made, waited for and destroyed here, and the
+        // empty submission is valid for the queue, which is held for it.
+        let waited = unsafe {
+            device.create_fence(&vk::FenceCreateInfo::default(), None).is_ok_and(|fence| {
+                let done = self
+                    .with_queue(|queue| device.queue_submit(queue, &[], fence))
+                    .and_then(|()| device.wait_for_fences(&[fence], true, u64::MAX))
+                    .is_ok();
+                device.destroy_fence(fence, None);
+                done
+            })
+        };
+        if !waited {
+            Log::error(Event::Render, format!("Vulkan device lost during {what}"));
+        }
+    }
+
     /// The device's raw handles.
     #[must_use]
     pub fn raw(&self) -> RawDevice {

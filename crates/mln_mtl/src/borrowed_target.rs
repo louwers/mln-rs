@@ -9,7 +9,7 @@ use std::ffi::c_void;
 use std::ptr::NonNull;
 
 use mln_gfx::gpu::{GpuError, TargetFormats, TextureFormat, TextureId};
-use mln_gfx::ring::{self, RingBackend};
+use mln_gfx::ring::{self, RingBackend, RingTextures};
 use mln_gfx::{ConsumerSync, DepthStencilFormat, DepthStencilFormats, GpuSync, SyncKind, SyncKinds};
 use mln_util::error::Error;
 use mln_util::size::Size;
@@ -30,13 +30,13 @@ use crate::renderer_backend::RendererBackend;
 /// one device, with `MTLTextureUsageRenderTarget`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BorrowedTextures {
-    pub textures: Vec<Id<dyn MTLTexture>>,
+    pub textures: Vec<Retained<ProtocolObject<dyn MTLTexture>>>,
     pub size: Size,
     /// The host's textures that frames draw their depth and stencil into
     /// and store, one for each of `textures`, of their size and device, one
     /// depth and stencil pixel format, and `MTLTextureUsageRenderTarget`, or
     /// none for depth of the target's own.
-    pub depth_textures: Vec<Id<dyn MTLTexture>>,
+    pub depth_textures: Vec<Retained<ProtocolObject<dyn MTLTexture>>>,
 }
 
 // SAFETY: Metal textures may be used from any thread; the target that draws
@@ -161,6 +161,26 @@ impl BorrowedTextures {
     }
 }
 
+impl RingTextures for BorrowedTextures {
+    type Image = Retained<ProtocolObject<dyn MTLTexture>>;
+
+    fn images(&self) -> &[Self::Image] {
+        &self.textures
+    }
+
+    fn same_image(a: &Self::Image, b: &Self::Image) -> bool {
+        std::ptr::eq(Retained::as_ptr(a), Retained::as_ptr(b))
+    }
+
+    fn size(&self) -> Size {
+        self.size
+    }
+
+    fn has_depth(&self) -> bool {
+        !self.depth_textures.is_empty()
+    }
+}
+
 type SharedEvent = Id<dyn MTLSharedEvent>;
 
 /// Metal's one depth and stencil format of every GPU.
@@ -186,7 +206,6 @@ impl RingBackend for MetalRing {
     type Gpu = MetalGpu;
     type Renderer = RendererBackend;
     type Textures = BorrowedTextures;
-    type Image = Id<dyn MTLTexture>;
     /// The host's shared event, and the value its reads reach.
     type Wait = (SharedEvent, u64);
     type Handed = Infallible;
@@ -213,22 +232,6 @@ impl RingBackend for MetalRing {
             _ => None,
         };
         Ok(MetalRing { device, event, event_value: 0 })
-    }
-
-    fn images(textures: &BorrowedTextures) -> &[Self::Image] {
-        &textures.textures
-    }
-
-    fn same_image(a: &Self::Image, b: &Self::Image) -> bool {
-        std::ptr::eq(Retained::as_ptr(a), Retained::as_ptr(b))
-    }
-
-    fn size(textures: &BorrowedTextures) -> Size {
-        textures.size
-    }
-
-    fn has_depth(textures: &BorrowedTextures) -> bool {
-        !textures.depth_textures.is_empty()
     }
 
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for
