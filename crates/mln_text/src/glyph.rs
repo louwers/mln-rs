@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use mln_style_types::image::RectU16;
 use mln_util::font_stack::FontStack;
-use mln_util::hash::HashMap;
 use mln_util::image::AlphaImage;
 use mln_vec_map::VecMap;
 use parking_lot::Mutex;
@@ -445,29 +444,31 @@ pub struct GlyphPosition {
 /// whose range failed to load.
 pub type GlyphPositions = VecMap<FontStackHash, BTreeMap<GlyphID, Option<GlyphPosition>>>;
 
-/// The glyph types handed out, by the font file, font and ranges they were
-/// for, and the last one.
+/// The font file, font and ranges a glyph type was handed out for.
+type FaceKey = (String, String, Vec<FontFaceRange>);
+
+/// The glyph types handed out, a few for each style: by what they were for,
+/// and the last one.
 struct FaceTypes {
     last: u16,
-    types: HashMap<(String, String, Vec<FontFaceRange>), NonZeroU16>,
+    types: Vec<(FaceKey, NonZeroU16)>,
 }
 
-static FACE_TYPES: Mutex<Option<FaceTypes>> = Mutex::new(None);
+static FACE_TYPES: Mutex<FaceTypes> = Mutex::new(FaceTypes { last: 0, types: Vec::new() });
 
 /// The glyph type of the face of the font file at `url` that draws `font`'s
 /// `ranges`: the same for the same three for the life of the process, and
 /// a new one otherwise, which after `u16::MAX - 1` types repeats the first.
 pub fn face_type(url: &str, font: &str, ranges: &[FontFaceRange]) -> GlyphIDType {
     let mut types = FACE_TYPES.lock();
-    let types = types.get_or_insert_with(|| FaceTypes { last: 0, types: HashMap::default() });
-    let key = (url.to_owned(), font.to_owned(), ranges.to_vec());
-    if let Some(&id) = types.types.get(&key) {
+    let found = types.types.iter().find(|((u, f, r), _)| u == url && f == font && r == ranges);
+    if let Some(&(_, id)) = found {
         return GlyphIDType::Face(id);
     }
     // Neither 0 (`FontPBF`) nor `u16::MAX` (`System`).
     types.last = if types.last >= u16::MAX - 1 { 1 } else { types.last + 1 };
     let id = NonZeroU16::new(types.last).unwrap_or(NonZeroU16::MIN);
-    types.types.insert(key, id);
+    types.types.push(((url.to_owned(), font.to_owned(), ranges.to_vec()), id));
     GlyphIDType::Face(id)
 }
 

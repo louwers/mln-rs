@@ -189,11 +189,9 @@ pub(crate) struct GlyphStore {
     /// request each answers.
     deferred_responses: Vec<(FontData, FontStack, GlyphRange, u64)>,
     shapers: Shapers,
-    /// The device's fonts that shaped text, by `LocalFont::key`, with the
-    /// type of their glyphs: `None` for one the engine can't read.
-    system_shapers: HashMap<Arc<str>, Option<SystemShaper>>,
-    /// Those shapers by the type of their glyphs.
-    system_types: HashMap<GlyphIDType, Rc<dyn FontFaceShaper>>,
+    /// The device's fonts that shaped text, a few, by `LocalFont::key`:
+    /// `None` for one the engine can't read.
+    system_shapers: Vec<(Arc<str>, Option<SystemShaper>)>,
 }
 
 impl GlyphStore {
@@ -225,8 +223,7 @@ impl GlyphStore {
             engine_readiness: Arc::default(),
             deferred_responses: Vec::new(),
             shapers: VecMap::new(),
-            system_shapers: HashMap::default(),
-            system_types: HashMap::default(),
+            system_shapers: Vec::new(),
         }
     }
 
@@ -533,7 +530,7 @@ impl GlyphStore {
     /// `font_stack`, loaded the first time.
     fn system_shaper(&mut self, font_stack: &FontStack, c: char) -> Option<Rc<dyn FontFaceShaper>> {
         let font = self.local.rasterizer.as_ref()?.font(font_stack, c)?;
-        if let Some(loaded) = self.system_shapers.get(&font.key) {
+        if let Some((_, loaded)) = self.system_shapers.iter().find(|(key, _)| *key == font.key) {
             return loaded.as_ref().map(|(_, shaper)| Rc::clone(shaper));
         }
         self.prepare_engine();
@@ -542,11 +539,9 @@ impl GlyphStore {
             .then(|| self.engine.load(type_, font.data, font.weight))
             .flatten()
             .map(|shaper| (type_, Rc::<dyn FontFaceShaper>::from(shaper)));
-        if let Some((type_, shaper)) = &loaded {
-            self.system_types.insert(*type_, Rc::clone(shaper));
-        }
-        self.system_shapers.insert(font.key, loaded.clone());
-        loaded.map(|(_, shaper)| shaper)
+        let shaper = loaded.as_ref().map(|(_, shaper)| Rc::clone(shaper));
+        self.system_shapers.push((font.key, loaded));
+        shaper
     }
 
     fn request_range(
@@ -751,7 +746,8 @@ impl GlyphStore {
     /// the device's fonts, by the type of its glyphs.
     fn shaper(&self, font_stack: &FontStack, type_: GlyphIDType) -> Option<Rc<dyn FontFaceShaper>> {
         let face = self.shapers.get(font_stack).and_then(|shapers| shapers.get(&type_));
-        face.or_else(|| self.system_types.get(&type_)).cloned()
+        let system = || self.system_shapers.iter().filter_map(|(_, loaded)| loaded.as_ref()).find(|(t, _)| *t == type_);
+        face.or_else(|| system().map(|(_, shaper)| shaper)).cloned()
     }
 
     /// Loads the font face `data` for `font_stack`; false, as for an invalid
