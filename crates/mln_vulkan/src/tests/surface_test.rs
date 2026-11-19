@@ -133,10 +133,6 @@ impl Window {
         self.target.set_overlay(self.backend.gpu(), overlay);
     }
 
-    fn gpu(&mut self) -> &mut VulkanGpu {
-        self.backend.gpu()
-    }
-
     /// Presents with `target`, a target on the backend, in place of the
     /// window's, which it tears down.
     fn set_target(&mut self, target: SurfaceTarget) {
@@ -201,7 +197,7 @@ fn buffer(gpu: &mut VulkanGpu, usage: BufferUsage, data: &[u8]) -> BufferId {
 
 impl Scene {
     fn new(backend: &mut Window) -> Scene {
-        let gpu = backend.gpu();
+        let gpu = backend.backend.gpu();
         let program = program_info(BuiltIn::BackgroundShader).expect("BackgroundShader");
         let parameters = ProgramParameters::new(1.0, false);
         let key = program.variant_key(&parameters, std::iter::empty(), ProjectionVariant::Mercator);
