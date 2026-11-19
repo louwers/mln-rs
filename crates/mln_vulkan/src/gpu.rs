@@ -2,6 +2,7 @@
 
 use std::any::Any;
 use std::collections::VecDeque;
+use std::collections::hash_map::Entry;
 use std::fmt::Write as _;
 use std::mem::ManuallyDrop;
 
@@ -1496,15 +1497,14 @@ impl VulkanGpu {
     /// may use it have finished.
     fn release_sets(&mut self, keys: impl IntoIterator<Item = SetKey>) {
         for key in keys {
-            let Some(set) = self.descriptor_sets.get_mut(&key) else { continue };
-            set.users -= 1;
-            if set.users > 0 {
+            let type_ = key.set;
+            let Entry::Occupied(mut set) = self.descriptor_sets.entry(key) else { continue };
+            set.get_mut().users -= 1;
+            if set.get().users > 0 {
                 continue;
             }
-            if let Some(set) = self.descriptor_sets.remove(&key) {
-                for (handle, pool) in set.sets {
-                    self.discard(Garbage::DescriptorSet(key.set, pool, handle));
-                }
+            for (handle, pool) in set.remove().sets {
+                self.discard(Garbage::DescriptorSet(type_, pool, handle));
             }
         }
     }
