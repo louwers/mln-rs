@@ -3388,7 +3388,7 @@ fn globe_hand_off_keeps_tiles() {
     map.jump_to(&CameraOptions { center: Some(center), zoom: Some(10.5), ..Default::default() });
     frontend.render(&mut map).unwrap_or_else(|e| panic!("render: {e}"));
     map.drain_events().into_iter().for_each(|event| observer.dispatch(event));
-    assert!(map.get_transform_state().view().is_globe());
+    assert!(map.transform_state().view().is_globe());
     let first_visit = std::mem::take(&mut *parsed.borrow_mut());
     assert_ne!(first_visit, Vec::<OverscaledTileID>::new());
 
@@ -3397,7 +3397,7 @@ fn globe_hand_off_keeps_tiles() {
     map.jump_to(&CameraOptions { center: Some(center), zoom: Some(12.5), ..Default::default() });
     frontend.render(&mut map).unwrap_or_else(|e| panic!("render: {e}"));
     map.drain_events().into_iter().for_each(|event| observer.dispatch(event));
-    assert!(!map.get_transform_state().view().is_globe());
+    assert!(!map.transform_state().view().is_globe());
     let parsed = parsed.borrow();
     let reparsed: Vec<&OverscaledTileID> = parsed.iter().filter(|id| first_visit.contains(id)).collect();
     assert!(
@@ -3509,7 +3509,7 @@ fn globe_keeps_its_tiles_across_the_antimeridian() {
 
     test.map().jump_to(&CameraOptions { center: Some(ll(0.0, 179.0)), zoom: Some(0.0), ..Default::default() });
     test.render();
-    assert!(test.map().get_transform_state().view().is_globe());
+    assert!(test.map().transform_state().view().is_globe());
     {
         let mut parsed = parsed.borrow_mut();
         assert!(!parsed.is_empty());
@@ -3521,7 +3521,7 @@ fn globe_keeps_its_tiles_across_the_antimeridian() {
 
     test.map().jump_to(&CameraOptions { center: Some(ll(0.0, 181.0)), ..Default::default() });
     test.render();
-    assert_near(181.0, test.map().get_transform_state().view().center(WrapMode::Unwrapped).longitude(), 1e-9);
+    assert_near(181.0, test.map().transform_state().view().center(WrapMode::Unwrapped).longitude(), 1e-9);
     let parsed = parsed.borrow();
     assert!(parsed.is_empty(), "{} tiles parsed again, the first {}", parsed.len(), parsed[0]);
 }
@@ -3765,7 +3765,7 @@ fn globe_bounded_source_loads_finer_tiles() {
     map.jump_to(&CameraOptions { center: Some(ll(37.8, -122.5)), zoom: Some(10.95), ..Default::default() });
     frontend.render(&mut map).unwrap_or_else(|e| panic!("render: {e}"));
     map.drain_events().into_iter().for_each(|event| observer.dispatch(event));
-    assert!(map.get_transform_state().view().is_globe());
+    assert!(map.transform_state().view().is_globe());
 
     let parsed = parsed.borrow();
     assert!(parsed.iter().any(|id| id.canonical.z == 11), "{} tiles parsed, none at zoom 11", parsed.len());

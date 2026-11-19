@@ -473,7 +473,7 @@ pub(crate) unsafe extern "C" fn mln_map_projection_meters_per_pixel_at_latitude(
         }
         let zoom = with_projection(projection, |projection| projection.camera().zoom)?;
         // SAFETY: non-null, and the caller's contract.
-        unsafe { out_meters_per_pixel.write(Projection::get_meters_per_pixel_at_latitude(latitude, zoom)) };
+        unsafe { out_meters_per_pixel.write(Projection::meters_per_pixel_at_latitude(latitude, zoom)) };
         Ok(())
     })
 }
@@ -816,7 +816,7 @@ mod tests {
             let status =
                 mln_map_projection_meters_per_pixel_at_latitude(projection, 0.0, &raw mut meters, NULL_DIAGNOSTIC);
             assert_eq!(status, MLN_STATUS_OK);
-            assert!((meters - Projection::get_meters_per_pixel_at_latitude(0.0, 24.0)).abs() < 1e-12);
+            assert!((meters - Projection::meters_per_pixel_at_latitude(0.0, 24.0)).abs() < 1e-12);
             let status =
                 mln_map_projection_meters_per_pixel_at_latitude(projection, f64::NAN, &raw mut meters, NULL_DIAGNOSTIC);
             assert_eq!(status, MLN_STATUS_INVALID_ARGUMENT);

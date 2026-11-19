@@ -134,7 +134,7 @@ fn snapshot_reports_every_member() {
         CameraBounds { bounds: Some(bounds), min_zoom: 1.0, max_zoom: 18.0, min_pitch: 5.0, max_pitch: 50.0 }
     );
 
-    let free_camera = map.get_transform_state().view().free_camera_options();
+    let free_camera = map.transform_state().view().free_camera_options();
     assert_eq!(
         snapshot.free_camera,
         FreeCamera { position: free_camera.position.unwrap(), orientation: free_camera.orientation.unwrap() }

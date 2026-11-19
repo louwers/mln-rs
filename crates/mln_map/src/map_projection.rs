@@ -22,7 +22,7 @@ const _: () = {
 impl MapProjection {
     #[must_use]
     pub fn new(map: &Map) -> Self {
-        Self::from_state(map.get_transform_state())
+        Self::from_state(map.transform_state().clone())
     }
 
     pub(crate) fn from_state(state: TransformState) -> Self {

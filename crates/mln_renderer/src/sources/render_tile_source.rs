@@ -530,7 +530,7 @@ impl RenderSource for RenderTileSource {
                 let border = if globe {
                     let z = tile_id.canonical.z;
                     globe_borders.entry(z).or_insert_with(|| {
-                        let steps = SubdivisionGranularitySetting::globe().tile.get_granularity_for_zoom_level(z);
+                        let steps = SubdivisionGranularitySetting::globe().tile.granularity_for_zoom_level(z);
                         subdivide_vertex_line(&tile_border, steps, false)
                     })
                 } else {

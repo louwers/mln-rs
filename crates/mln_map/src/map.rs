@@ -735,7 +735,7 @@ impl Map {
     /// The state of the feature `feature_id` of the source `source_id`, in
     /// its source layer `source_layer_id`, empty when it has none.
     #[must_use]
-    pub fn get_feature_state(
+    pub fn feature_state(
         &self,
         source_id: &str,
         source_layer_id: Option<&str>,
@@ -1313,9 +1313,10 @@ impl Map {
 
     // MARK: - Transform
 
+    /// The camera, the viewport and the limits the camera moves within.
     #[must_use]
-    pub fn get_transform_state(&self) -> TransformState {
-        self.transform.state().clone()
+    pub fn transform_state(&self) -> &TransformState {
+        self.transform.state()
     }
 
     // MARK: - Tile settings

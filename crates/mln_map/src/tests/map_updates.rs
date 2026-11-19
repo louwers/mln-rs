@@ -139,7 +139,7 @@ fn feature_state_changes_publish_updates_that_carry_the_state() {
     assert!(map.set_feature_state("points", None, "1", hover(true)));
     assert_eq!(map.update_generation(), before + 1);
     assert_eq!(carried_hover(&reader), Some(Value::Bool(true)));
-    assert_eq!(map.get_feature_state("points", Some(""), "1"), hover(true));
+    assert_eq!(map.feature_state("points", Some(""), "1"), hover(true));
 
     // What changes nothing publishes nothing.
     assert!(!map.set_feature_state("points", None, "1", hover(true)));
@@ -177,8 +177,8 @@ fn a_style_load_clears_the_feature_state_that_it_publishes() {
         r#"{"version":8,"sources":{"points":{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}},"layers":[]}"#,
     );
     map.process_events();
-    assert!(map.get_feature_state("points", None, "1").is_empty());
-    assert!(map.get_feature_state("other", None, "1").is_empty());
+    assert!(map.feature_state("points", None, "1").is_empty());
+    assert!(map.feature_state("other", None, "1").is_empty());
     let update = reader.latest().expect("an update");
     assert!(update.parameters.feature_states.is_empty());
     assert_eq!(1, update.parameters.style.get_sources().len());

@@ -70,7 +70,7 @@ pub(crate) fn globe_mesh_data<V>(
         let mesh = create_tile_mesh(TileMeshOptions {
             granularity: SubdivisionGranularitySetting::globe()
                 .tile
-                .get_granularity_for_zoom_level(canonical.z.wrapping_add(part.z)),
+                .granularity_for_zoom_level(canonical.z.wrapping_add(part.z)),
             generate_borders: false,
             extend_to_north_pole: canonical.y == 0 && part.y == 0,
             extend_to_south_pole: canonical.y == (1u32 << canonical.z) - 1 && part.y == (1u32 << part.z) - 1,
@@ -193,7 +193,7 @@ pub(crate) fn raw_globe_tile_mesh(
     granularity: SubdivisionGranularityExpression,
 ) -> RawGlobeTileMesh {
     let mesh = create_tile_mesh(TileMeshOptions {
-        granularity: granularity.get_granularity_for_zoom_level(canonical.z),
+        granularity: granularity.granularity_for_zoom_level(canonical.z),
         generate_borders,
         extend_to_north_pole: canonical.y == 0,
         extend_to_south_pole: canonical.y == (1u32 << canonical.z) - 1,

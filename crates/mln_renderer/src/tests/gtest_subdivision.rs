@@ -277,7 +277,7 @@ fn roof_granularity(bucket: &FillExtrusionBucket, polygon: &GeometryCollection, 
             i += 3;
         }
     }
-    let mut granularity = SubdivisionGranularitySetting::globe().fill.get_granularity_for_zoom_level(tile.z);
+    let mut granularity = SubdivisionGranularitySetting::globe().fill.granularity_for_zoom_level(tile.z);
     while granularity >= 1 {
         let roof = subdivide_polygon(polygon, tile, granularity, false);
         let count = roof.triangle_indices.len() / 3;
@@ -317,21 +317,21 @@ fn y_coordinates(r: &SubdivisionResult) -> BTreeSet<i16> {
 #[test]
 fn granularity() {
     let fill = SubdivisionGranularityExpression::new(128, 2);
-    assert_eq!(128, fill.get_granularity_for_zoom_level(0));
-    assert_eq!(64, fill.get_granularity_for_zoom_level(1));
-    assert_eq!(2, fill.get_granularity_for_zoom_level(6));
-    assert_eq!(2, fill.get_granularity_for_zoom_level(12));
-    assert_eq!(1, SubdivisionGranularityExpression::new(0, 0).get_granularity_for_zoom_level(3));
+    assert_eq!(128, fill.granularity_for_zoom_level(0));
+    assert_eq!(64, fill.granularity_for_zoom_level(1));
+    assert_eq!(2, fill.granularity_for_zoom_level(6));
+    assert_eq!(2, fill.granularity_for_zoom_level(12));
+    assert_eq!(1, SubdivisionGranularityExpression::new(0, 0).granularity_for_zoom_level(3));
 }
 
 // gtest: Subdivision.GranularityKeepsTheSurfaceGranularity
 #[test]
 fn granularity_keeps_the_surface_granularity() {
     let fill = SubdivisionGranularityExpression::new(128, 2).with_surface_granularity(32);
-    let granularities: Vec<u32> = (0..=12).map(|zoom| fill.get_granularity_for_zoom_level(zoom)).collect();
+    let granularities: Vec<u32> = (0..=12).map(|zoom| fill.granularity_for_zoom_level(zoom)).collect();
     // The base granularity alone gives 4 at zoom 5 and 2 from zoom 6.
     assert_eq!(vec![128, 64, 32, 16, 8, 8, 4, 4, 2, 2, 2, 2, 2], granularities);
-    assert_eq!(2, fill.get_granularity_for_zoom_level(u8::MAX));
+    assert_eq!(2, fill.granularity_for_zoom_level(u8::MAX));
 }
 
 // gtest: Subdivision.NoSubdivisionKeepsTriangles
@@ -678,7 +678,7 @@ fn globe_mask_keeps_the_uncovered_parts() {
 
     let full = globe_mesh_data(&tile, &mask(&[(0, 0, 0)]), globe_test_vertex);
     let grid = create_tile_mesh(TileMeshOptions {
-        granularity: SubdivisionGranularitySetting::globe().tile.get_granularity_for_zoom_level(1),
+        granularity: SubdivisionGranularitySetting::globe().tile.granularity_for_zoom_level(1),
         extend_to_north_pole: true,
         ..TileMeshOptions::default()
     });

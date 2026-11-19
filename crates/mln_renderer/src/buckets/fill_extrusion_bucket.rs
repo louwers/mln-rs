@@ -306,7 +306,7 @@ impl Bucket for FillExtrusionBucket {
             // subdivided mesh of its own, spread over as many segments as it
             // needs. Rings with more vertices than a polygon may have are
             // extruded as on Mercator. Rounded corners are not subdivided.
-            let granularity = self.subdivision_granularity.fill.get_granularity_for_zoom_level(canonical.z);
+            let granularity = self.subdivision_granularity.fill.granularity_for_zoom_level(canonical.z);
             if granularity >= 2 {
                 let subdivided_rings: Vec<GeometryCoordinates> =
                     polygon.iter().map(|ring| subdivide_vertex_line(ring, granularity, true)).collect();

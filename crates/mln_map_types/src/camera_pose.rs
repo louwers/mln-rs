@@ -33,7 +33,7 @@ fn lng_from_mercator_x(x: f64) -> f64 {
 
 #[cfg(test)]
 fn to_mercator(location: &LatLng, altitude_meters: f64) -> DVec3 {
-    let pixels_per_meter = 1.0 / Projection::get_meters_per_pixel_at_latitude(location.latitude(), 0.0);
+    let pixels_per_meter = 1.0 / Projection::meters_per_pixel_at_latitude(location.latitude(), 0.0);
     let world_size = Projection::world_size(1.0);
     DVec3::new(
         mercator_x_from_lng(location.longitude()),
@@ -143,7 +143,7 @@ impl FreeCameraOptions {
     /// `position` is invalid or is not set.
     #[cfg(test)]
     #[must_use]
-    pub(crate) fn get_location(&self) -> Option<LatLngAltitude> {
+    pub(crate) fn location(&self) -> Option<LatLngAltitude> {
         let position_value = self.position?;
         if !(0.0..=1.0).contains(&position_value.y) {
             return None;
@@ -151,7 +151,7 @@ impl FreeCameraOptions {
         let location =
             LatLng::new(lat_from_mercator_y(position_value.y), lng_from_mercator_x(position_value.x)).ok()?;
 
-        let meters_per_pixel = Projection::get_meters_per_pixel_at_latitude(location.latitude(), 0.0);
+        let meters_per_pixel = Projection::meters_per_pixel_at_latitude(location.latitude(), 0.0);
         let world_size = Projection::world_size(1.0);
         let altitude = position_value.z * world_size * meters_per_pixel;
 

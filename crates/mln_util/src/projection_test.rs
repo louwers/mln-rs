@@ -86,40 +86,40 @@ fn boundaries() {
 #[test]
 fn meters_per_pixel_at_latitude() {
     let mut zoom = 0.0;
-    expect_near!(Projection::get_meters_per_pixel_at_latitude(0.0, zoom), 78_271.516_964_020_48, 1e-7);
-    expect_near!(Projection::get_meters_per_pixel_at_latitude(-LATITUDE_MAX, zoom), 6_752.228_472_944_65, 1e-7);
+    expect_near!(Projection::meters_per_pixel_at_latitude(0.0, zoom), 78_271.516_964_020_48, 1e-7);
+    expect_near!(Projection::meters_per_pixel_at_latitude(-LATITUDE_MAX, zoom), 6_752.228_472_944_65, 1e-7);
     expect_double_eq!(
-        Projection::get_meters_per_pixel_at_latitude(LATITUDE_MAX, zoom),
-        Projection::get_meters_per_pixel_at_latitude(-LATITUDE_MAX, zoom)
+        Projection::meters_per_pixel_at_latitude(LATITUDE_MAX, zoom),
+        Projection::meters_per_pixel_at_latitude(-LATITUDE_MAX, zoom)
     );
 
     zoom = 20.0;
-    expect_near!(Projection::get_meters_per_pixel_at_latitude(0.0, zoom), 0.074_645_535_434_742_44, 1e-7);
-    expect_near!(Projection::get_meters_per_pixel_at_latitude(-LATITUDE_MAX, zoom), 0.006_439_426_873_154_306_5, 1e-7);
+    expect_near!(Projection::meters_per_pixel_at_latitude(0.0, zoom), 0.074_645_535_434_742_44, 1e-7);
+    expect_near!(Projection::meters_per_pixel_at_latitude(-LATITUDE_MAX, zoom), 0.006_439_426_873_154_306_5, 1e-7);
 
     // std::numeric_limits<double>::lowest() / max()
     expect_double_eq!(
-        Projection::get_meters_per_pixel_at_latitude(f64::MIN, zoom),
-        Projection::get_meters_per_pixel_at_latitude(f64::MAX, zoom)
+        Projection::meters_per_pixel_at_latitude(f64::MIN, zoom),
+        Projection::meters_per_pixel_at_latitude(f64::MAX, zoom)
     );
 
     // std::numeric_limits<double>::min() is the smallest positive normal.
     zoom = f64::MIN_POSITIVE;
     expect_double_eq!(
-        Projection::get_meters_per_pixel_at_latitude(0.0, zoom),
-        Projection::get_meters_per_pixel_at_latitude(0.0, MIN_ZOOM)
+        Projection::meters_per_pixel_at_latitude(0.0, zoom),
+        Projection::meters_per_pixel_at_latitude(0.0, MIN_ZOOM)
     );
 
     zoom = f64::MIN;
     expect_double_eq!(
-        Projection::get_meters_per_pixel_at_latitude(0.0, zoom),
-        Projection::get_meters_per_pixel_at_latitude(0.0, MIN_ZOOM)
+        Projection::meters_per_pixel_at_latitude(0.0, zoom),
+        Projection::meters_per_pixel_at_latitude(0.0, MIN_ZOOM)
     );
 
     zoom = f64::MAX;
     expect_double_eq!(
-        Projection::get_meters_per_pixel_at_latitude(0.0, zoom),
-        Projection::get_meters_per_pixel_at_latitude(0.0, MAX_ZOOM)
+        Projection::meters_per_pixel_at_latitude(0.0, zoom),
+        Projection::meters_per_pixel_at_latitude(0.0, MAX_ZOOM)
     );
 }
 

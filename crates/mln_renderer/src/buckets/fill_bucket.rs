@@ -109,7 +109,7 @@ impl FillBucket {
             &mut self.basic_line_segments,
             self.outline_ends.get_mut(),
             canonical,
-            self.subdivision_granularity.fill.get_granularity_for_zoom_level(canonical.z),
+            self.subdivision_granularity.fill.granularity_for_zoom_level(canonical.z),
         )
     }
 

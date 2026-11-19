@@ -97,24 +97,24 @@ fn set_location_unwrapped_location() {
 
 // gtest: FreeCameraOptions.GetLocation
 #[test]
-fn get_location() {
+fn location() {
     let mut options = FreeCameraOptions { position: Some(dvec3(0.5, 0.5, 0.5)), ..FreeCameraOptions::default() };
-    assert!(options.get_location().is_some());
-    let lat_lng_altitude = options.get_location().unwrap();
+    assert!(options.location().is_some());
+    let lat_lng_altitude = options.location().unwrap();
     assert_double_eq(lat_lng_altitude.location.latitude(), 0.0);
     assert_double_eq(lat_lng_altitude.location.longitude(), 0.0);
     assert_double_eq(lat_lng_altitude.altitude, 20_037_508.342_789_244);
 
     options.position = Some(dvec3(0.0, 0.428_240_962_5, 0.000_027_532_812_465));
-    assert!(options.get_location().is_some());
-    let lat_lng_altitude = options.get_location().unwrap();
+    assert!(options.location().is_some());
+    let lat_lng_altitude = options.location().unwrap();
     assert_near(lat_lng_altitude.location.latitude(), 25.0, 1e-7);
     assert_near(lat_lng_altitude.location.longitude(), -180.0, 1e-7);
     assert_near(lat_lng_altitude.altitude, 1000.0, 1e-7);
 
     options.position = Some(dvec3(0.5, 0.0, 0.5));
-    assert!(options.get_location().is_some());
-    let lat_lng_altitude = options.get_location().unwrap();
+    assert!(options.location().is_some());
+    let lat_lng_altitude = options.location().unwrap();
     assert_near(lat_lng_altitude.location.latitude(), LATITUDE_MAX, 1e-7);
     assert_near(lat_lng_altitude.location.longitude(), 0.0, 1e-7);
     assert_near(lat_lng_altitude.altitude, 1_728_570.489_074, 1e-6);
@@ -125,20 +125,20 @@ fn get_location() {
 fn get_location_invalid_position() {
     let mut options = FreeCameraOptions::default();
     // Mercator position not set. Should return nothing
-    assert!(options.get_location().is_none());
+    assert!(options.location().is_none());
 
     // Invalid latitude
     options.position = Some(dvec3(0.0, -0.1, 0.0));
-    assert!(options.get_location().is_none());
+    assert!(options.location().is_none());
     options.position = Some(dvec3(0.0, 2.0, 0.0));
-    assert!(options.get_location().is_none());
+    assert!(options.location().is_none());
 }
 
 // gtest: FreeCameraOptions.GetLocationNegativeAltitude
 #[test]
 fn get_location_negative_altitude() {
     let options = FreeCameraOptions { position: Some(dvec3(0.5, 0.5, -0.25)), ..FreeCameraOptions::default() };
-    let lat_lng_altitude = options.get_location();
+    let lat_lng_altitude = options.location();
     assert!(lat_lng_altitude.is_some());
 
     assert_double_eq(lat_lng_altitude.unwrap().altitude, -0.5 * EARTH_RADIUS_M * PI);
@@ -148,7 +148,7 @@ fn get_location_negative_altitude() {
 #[test]
 fn get_location_unwrapped_position() {
     let options = FreeCameraOptions { position: Some(dvec3(1.25, 0.5, 0.0)), ..FreeCameraOptions::default() };
-    let lat_lng_altitude = options.get_location();
+    let lat_lng_altitude = options.location();
     assert!(lat_lng_altitude.is_some());
     let lat_lng_altitude = lat_lng_altitude.unwrap();
     assert_double_eq(lat_lng_altitude.location.longitude(), 270.0);

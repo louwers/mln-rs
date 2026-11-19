@@ -309,7 +309,7 @@ impl View {
     #[must_use]
     pub fn center_altitude(&self) -> f64 {
         self.params.z
-            * Projection::get_meters_per_pixel_at_latitude(self.center(WrapMode::Unwrapped).latitude(), self.zoom())
+            * Projection::meters_per_pixel_at_latitude(self.center(WrapMode::Unwrapped).latitude(), self.zoom())
     }
 
     #[must_use]
@@ -597,10 +597,7 @@ impl View {
             // Without perspective, z skews x and y instead.
             proj_matrix.z_axis.w = 0.0;
             let pixels_per_meter = 1.0
-                / Projection::get_meters_per_pixel_at_latitude(
-                    self.center(WrapMode::Unwrapped).latitude(),
-                    self.zoom(),
-                );
+                / Projection::meters_per_pixel_at_latitude(self.center(WrapMode::Unwrapped).latitude(), self.zoom());
             proj_matrix.z_axis.x = params.x_skew * pixels_per_meter;
             proj_matrix.z_axis.y = params.y_skew * pixels_per_meter;
         }

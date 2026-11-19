@@ -343,7 +343,7 @@ impl RenderSource for RenderImageSource {
         // The globe bends the quad over the sphere with the tile mesh
         // granularity of its tile.
         let cells = if view.is_globe() {
-            SubdivisionGranularitySetting::globe().tile.get_granularity_for_zoom_level(self.tile_ids[0].canonical.z)
+            SubdivisionGranularitySetting::globe().tile.granularity_for_zoom_level(self.tile_ids[0].canonical.z)
         } else {
             1
         };

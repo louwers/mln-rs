@@ -1006,7 +1006,7 @@ impl Map {
         let key = selector.key(true)?;
         self.query(move |map| {
             let feature_id = key.feature_id.as_deref().unwrap_or_default();
-            Ok(map.get_feature_state(&key.source_id, Some(&key.source_layer_id), feature_id))
+            Ok(map.feature_state(&key.source_id, Some(&key.source_layer_id), feature_id))
         })
     }
 

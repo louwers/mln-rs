@@ -178,7 +178,7 @@ impl LineBucket {
         if input_coordinates.is_empty() {
             return;
         }
-        let granularity = self.subdivision_granularity.line.get_granularity_for_zoom_level(canonical.z);
+        let granularity = self.subdivision_granularity.line.granularity_for_zoom_level(canonical.z);
         let subdivided;
         let coordinates = if granularity >= 2 {
             subdivided = subdivide_vertex_line(input_coordinates, granularity, false);

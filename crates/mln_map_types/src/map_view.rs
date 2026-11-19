@@ -138,10 +138,7 @@ impl MapView {
         // The altitude in pixels at the center as the view places it.
         let placed = View::new(params);
         params.z = camera.center_altitude
-            / Projection::get_meters_per_pixel_at_latitude(
-                placed.center(WrapMode::Unwrapped).latitude(),
-                placed.zoom(),
-            );
+            / Projection::meters_per_pixel_at_latitude(placed.center(WrapMode::Unwrapped).latitude(), placed.zoom());
         Ok(TransformState::from_parts(params, CameraLimits::widest()))
     }
 
