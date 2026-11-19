@@ -557,7 +557,7 @@ impl Context {
     /// Lets go of the shaders and pipelines the draws made, which the next
     /// [`destroy_released`](Self::destroy_released) destroys after the
     /// bindings and geometry released before it: for a new pixel ratio,
-    /// whose draws the renderer makes again with new shaders.
+    /// once the draws made with them went. Draws made later make new ones.
     pub(crate) fn release_shaders(&mut self) {
         let queue = &self.device.resources.queue;
         for (_, pipeline) in self.pipelines.drain() {

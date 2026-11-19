@@ -1099,10 +1099,11 @@ impl RenderOrchestrator {
         self.tile_store.glyphs().evict(&VecSet::new());
     }
 
-    /// Drops what holds the renderer's shaders: the render layers, the sky
-    /// and globe depth passes, and the debug overlays. The next update
-    /// makes them again, from the shaders the renderer has then. The
-    /// sources keep their tiles, and the tiles their layout.
+    /// Drops what holds the renderer's shaders: the sky and globe depth
+    /// passes and the debug overlays now, and the render layers in the next
+    /// update, which makes them again. The draws made after that use the
+    /// shaders the renderer has then. The sources keep their tiles, and the
+    /// tiles their layout.
     pub(crate) fn release_shaders(&mut self) {
         self.remake_render_layers = true;
         self.debug_layers.clear();

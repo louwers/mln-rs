@@ -136,6 +136,21 @@ fn a_map_whose_pixel_ratio_changes_renders_as_one_made_at_that_ratio() {
     assert_eq!(requests.tiles.load(Ordering::SeqCst), 1);
 }
 
+// The old shaders go after the draws made with them, which go with the
+// next frame: a debug build's backend refuses to destroy a shader that
+// live bindings or geometry were made for.
+#[test]
+fn memory_reduced_between_a_ratio_change_and_its_frame_keeps_the_drawn_shaders() {
+    let made_at_2 = render_made_at(2.0);
+    let (test, _) = map_test(1.0);
+    test.render();
+    test.map().set_pixel_ratio(2.0).unwrap();
+    test.frontend().set_pixel_ratio(2.0);
+    test.frontend().renderer().reduce_memory_use();
+    assert_same(&test.render().image, &made_at_2);
+    test.frontend().renderer().reduce_memory_use();
+}
+
 #[test]
 fn a_ratio_that_picks_the_same_sprite_loads_nothing() {
     let (test, requests) = map_test(2.0);

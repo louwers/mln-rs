@@ -96,6 +96,9 @@ struct Encoder {
     /// What layers drawn as a whole draw into and composite with, between
     /// frames.
     layer_composite: LayerComposite,
+    /// Whether the context's shaders and pipelines are of an earlier pixel
+    /// ratio, which the next update's render layers no longer draw with.
+    shaders_replaced: bool,
     render_state: RenderState,
     /// Where the last frame drew the map.
     frame_projection: Option<FrameProjection>,
@@ -171,6 +174,7 @@ impl Renderer {
                 static_data: None,
                 clip_masks: ClipMasks::default(),
                 layer_composite: LayerComposite::default(),
+                shaders_replaced: false,
                 render_state: RenderState::Never,
                 frame_projection: None,
                 timings: RenderTimings::default(),
@@ -191,14 +195,15 @@ impl Renderer {
             return;
         }
         // The shaders build the pixel ratio in on some backends, so a new
-        // ratio takes new shaders, and new draws that use them. The next
-        // frame destroys the old ones after the draws that used them.
+        // ratio takes new shaders, and new draws that use them. The render
+        // layers' draws go with the next update, which makes the layers
+        // again, and the old shaders after it.
         let encoder = &mut self.encoder;
         encoder.pixel_ratio = pixel_ratio;
         encoder.static_data = None;
         encoder.clip_masks = ClipMasks::default();
         encoder.layer_composite = LayerComposite::default();
-        encoder.context.release_shaders();
+        encoder.shaders_replaced = true;
         self.orchestrator.release_shaders();
     }
 
@@ -247,9 +252,12 @@ impl Renderer {
         let orchestrator = &mut *self.orchestrator;
         let frame = orchestrator.update(update_parameters);
         report(orchestrator, self.events.as_ref());
+        let encoder = &mut self.encoder;
+        if std::mem::take(&mut encoder.shaders_replaced) {
+            encoder.context.release_shaders();
+        }
         let frame = frame?;
         let updated = Instant::now();
-        let encoder = &mut self.encoder;
         let handoff =
             encoder.encode(orchestrator, &*self.backend, self.events.as_ref(), &frame, update_parameters, target);
         if handoff.is_some() {
