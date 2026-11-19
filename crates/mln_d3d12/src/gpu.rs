@@ -429,6 +429,7 @@ impl D3d12Gpu {
             clear_stencil_with_pass: true,
             cpu_rasterizer: device.is_software(),
             max_line_width: 1.0,
+            prefer_lines_for_opaque_fills: false,
         };
         Ok(D3d12Gpu {
             compiler,

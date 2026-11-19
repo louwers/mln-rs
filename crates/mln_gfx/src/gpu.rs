@@ -83,6 +83,8 @@ pub struct Caps {
     /// The widest line in pixels that a pipeline of line primitives draws
     /// ([`DynamicState::line_width`]): 1 on a device without wide lines.
     pub max_line_width: f32,
+    /// Whether opaque planar fills should use hardware lines on narrow-line devices.
+    pub prefer_lines_for_opaque_fills: bool,
 }
 
 /// How a buffer is bound.

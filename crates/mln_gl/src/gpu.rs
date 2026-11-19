@@ -584,6 +584,7 @@ impl GlGpu {
                 clear_stencil_with_pass: false,
                 cpu_rasterizer: renderer.contains("llvmpipe") || renderer.contains("softpipe"),
                 max_line_width,
+                prefer_lines_for_opaque_fills: false,
             };
             (caps, anisotropic, line_widths[0].min(1.0)..=max_line_width)
         };

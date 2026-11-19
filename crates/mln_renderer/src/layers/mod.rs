@@ -20,7 +20,7 @@ use crate::layer_drawing::BucketChanges;
 /// What the layers' draws read of the buckets on the device of `context`.
 pub(crate) fn upload_needs(context: &crate::gfx::context::Context) -> UploadNeeds {
     UploadNeeds {
-        fill_outline_ends: render_fill_layer::draws_outline_quads(context),
+        fill_outline_ends: render_fill_layer::needs_outline_quads(context),
         wall_quads: !render_fill_extrusion_layer::instanced_walls(context),
     }
 }

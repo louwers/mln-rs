@@ -16,7 +16,7 @@ use mln_gfx::shaders::shader_defines::{
 };
 use mln_gfx::shaders::shader_program::ShaderProgramPtr;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
-use mln_map_types::TransformState;
+use mln_map_types::{Projection, TransformState};
 use mln_style::PropertyEvaluationParameters;
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Fill;
@@ -61,21 +61,18 @@ const FILL_OUTLINE_PATTERN_SHADER_NAME: &str = "FillOutlinePatternShader";
 const FILL_OUTLINE_INSTANCED_SHADER_NAME: &str = "FillOutlineInstancedShader";
 const FILL_OUTLINE_PATTERN_INSTANCED_SHADER_NAME: &str = "FillOutlinePatternInstancedShader";
 
-/// The outlines' line width, which the style spec doesn't give. The render
-/// tests' expected images have outlines of 1 px and of 2 px; the outline
-/// shaders fade the pixels on both sides of a fill's edge by their distance
-/// from it, which a 2 px line covers. A device that
-/// draws no lines this wide draws each segment of an outline as an instance
-/// of a quad, which the instanced outline shaders lay over the pixels such a
-/// line covers. One that rasterizes on the CPU, where an instance costs about
-/// as much as a draw, draws its 1 px lines instead.
+/// Two framebuffer pixels cover the antialiasing fringe on both sides of the
+/// fill's 1 px stroke.
 const LINE_WIDTH: f32 = 2.0;
 
-/// Whether the layer draws the outlines as instanced quads, which read the
-/// buckets' outline ends, rather than as lines (`LINE_WIDTH`).
-pub(crate) fn draws_outline_quads(context: &Context) -> bool {
+/// Whether fill buckets need segment endpoints to emulate a wide line on this device.
+pub(crate) fn needs_outline_quads(context: &Context) -> bool {
     let caps = context.caps();
     caps.max_line_width < LINE_WIDTH && !caps.cpu_rasterizer
+}
+
+fn is_opaque_fill(paint: &FillPaintProperties::PossiblyEvaluated) -> bool {
+    paint.fill_color.constant_or(&Color::default()).a >= 1.0 && paint.fill_opacity.constant_or(&0.0) >= 1.0
 }
 
 /// The pass the layer's draws draw in.
@@ -254,9 +251,7 @@ impl TileBuilder<'_> {
             (DepthMaskType::ReadWrite, 2)
         } else {
             // Only opaque fills write depth.
-            let opaque = evaluated.fill_color.constant_or(&Color::default()).a >= 1.0
-                && evaluated.fill_opacity.constant_or(&0.0) >= 1.0;
-            let depth = if opaque { DepthMaskType::ReadWrite } else { DepthMaskType::ReadOnly };
+            let depth = if is_opaque_fill(evaluated) { DepthMaskType::ReadWrite } else { DepthMaskType::ReadOnly };
             (*self.fill_depth.get_or_insert(depth), if self.outline_is_fill_color { 2 } else { 0 })
         };
         if fill_vertex_count == 0 {
@@ -420,14 +415,11 @@ pub(crate) struct RenderFillLayer {
     draw_list: DrawList<FillUniforms, FillPart>,
 
     fill_shader_group: Option<ShaderGroupPtr>,
-    /// The outline shaders: the line ones, or the instanced ones on a
-    /// device that draws no `LINE_WIDTH` lines and rasterizes on the GPU.
     outline_shader_group: Option<ShaderGroupPtr>,
     pattern_shader_group: Option<ShaderGroupPtr>,
     outline_pattern_shader_group: Option<ShaderGroupPtr>,
 
-    /// The instanced outlines' quad (`RenderStaticData::fill_outline_vertices`),
-    /// from the first update on a device that draws them.
+    /// Present while the layer draws its outlines as instanced quads.
     outline_quad: Option<OutlineQuad>,
 }
 
@@ -604,9 +596,7 @@ impl TypedLayer for RenderFillLayer {
 
     fn passes(&self, evaluated: &EvaluatedLayer<Fill>) -> RenderPass {
         let evaluated = &evaluated.paint;
-        let opaque = self.values.unevaluated.fill_pattern.is_undefined()
-            && evaluated.fill_color.constant_or(&Color::default()).a >= 1.0
-            && evaluated.fill_opacity.constant_or(&0.0) >= 1.0;
+        let opaque = self.values.unevaluated.fill_pattern.is_undefined() && is_opaque_fill(evaluated);
         let shows = *evaluated.fill_layer_opacity.uniform() > 0.0;
         if shows && opaque {
             RenderPass::Translucent | RenderPass::Opaque
@@ -628,8 +618,20 @@ impl TypedLayer for RenderFillLayer {
     ) {
         let shaders = &paint_parameters.static_data.shaders;
 
-        let outline_quads = draws_outline_quads(paint_parameters.context);
         let pattern = !self.values.unevaluated.fill_pattern.is_undefined();
+        let paint = &self.values.evaluated.paint;
+        let use_lines = paint_parameters.context.caps().prefer_lines_for_opaque_fills
+            && paint_parameters.state.get_projection() == Projection::Mercator
+            && !pattern
+            && is_opaque_fill(paint)
+            && *paint.fill_layer_opacity.uniform() >= 1.0
+            && paint.fill_outline_color.constant_or(&Color::default()).a >= 1.0;
+        let outline_quads = needs_outline_quads(paint_parameters.context) && !use_lines;
+        if self.outline_quad.is_some() != outline_quads {
+            self.outline_quad = outline_quads.then(|| OutlineQuad::new(paint_parameters.context));
+            self.outline_shader_group = None;
+            self.drawing.tiles_mut().clear();
+        }
         let (outline_name, outline_pattern_name) = if outline_quads {
             (FILL_OUTLINE_INSTANCED_SHADER_NAME, FILL_OUTLINE_PATTERN_INSTANCED_SHADER_NAME)
         } else {
@@ -652,17 +654,13 @@ impl TypedLayer for RenderFillLayer {
             return;
         };
 
-        if outline_quads && self.outline_quad.is_none() {
-            self.outline_quad = Some(OutlineQuad::new(paint_parameters.context));
-        }
-
         let mut builder = TileBuilder {
             fill_shaders,
             outline_shaders,
             pattern,
             outline_is_fill_color: self.values.unevaluated.fill_outline_color.is_undefined(),
             projection_variant: self.base.projection_variant,
-            outline_quad: self.outline_quad.as_ref().filter(|_| outline_quads),
+            outline_quad: self.outline_quad.as_ref(),
             fill_depth: None,
         };
 

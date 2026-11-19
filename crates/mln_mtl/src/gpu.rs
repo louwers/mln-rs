@@ -353,6 +353,7 @@ impl MetalGpu {
             clear_stencil_with_pass: false,
             cpu_rasterizer: false,
             max_line_width: 1.0,
+            prefer_lines_for_opaque_fills: false,
         };
         MetalGpu {
             device: device.clone(),

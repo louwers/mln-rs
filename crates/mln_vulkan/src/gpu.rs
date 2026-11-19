@@ -686,6 +686,7 @@ impl VulkanGpu {
             clear_stencil_with_pass: true,
             cpu_rasterizer: properties.device_type == vk::PhysicalDeviceType::CPU,
             max_line_width: line_widths.map_or(1.0, |(_, max)| max),
+            prefer_lines_for_opaque_fills: false,
         };
         let discard = Rc::new(Discard { next_serial: Cell::new(1), garbage: Cell::default() });
         // At least two, so that the CPU writes the next batch's while the
