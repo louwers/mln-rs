@@ -254,7 +254,7 @@ fn clear_frame<B: mln_gfx::RendererBackend>(
 #[cfg(feature = "vulkan")]
 #[test]
 fn a_vulkan_target_takes_no_frame_once_its_window_is_minimized() {
-    use mln_gfx::{FrameTarget as _, Handoff};
+    use mln_gfx::{FrameTarget as _, Handoff, RendererBackend as _};
 
     let Some(Device::Vulkan(device)) = device_of(BackendType::Vulkan) else { return };
     let window = TestWindow::new();
@@ -275,7 +275,7 @@ fn a_vulkan_target_takes_no_frame_once_its_window_is_minimized() {
     assert_eq!(None, *frames.last().unwrap(), "the frames to the minimized window: {frames:?}");
     window.set_minimized(false);
     assert_eq!(Some(Handoff::Presented), clear_frame(&mut backend, &mut target));
-    target.tear_down(mln_gfx::RendererBackend::gpu(&mut backend));
+    target.tear_down(backend.gpu());
     drop(target);
     drop(backend);
 }
@@ -303,7 +303,7 @@ fn a_d3d12_target_takes_no_frame_while_its_window_is_minimized() {
     assert_eq!(None, clear_frame(&mut backend, &mut target));
     window.set_minimized(false);
     assert_eq!(Some(Handoff::Presented), clear_frame(&mut backend, &mut target));
-    target.tear_down(mln_gfx::RendererBackend::gpu(&mut backend));
+    target.tear_down(backend.gpu());
     drop(target);
     drop(backend);
 }

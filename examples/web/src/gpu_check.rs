@@ -67,8 +67,7 @@ impl GpuCheck {
             State::Starting => Ok(false),
             State::Failed(error) => Err(error.clone()),
             State::Running { backend, readback } => {
-                let readback = *readback;
-                let Some(pixels) = backend.gpu().take_readback(readback, false).map_err(|e| e.to_string())? else {
+                let Some(pixels) = backend.gpu().take_readback(*readback, false).map_err(|e| e.to_string())? else {
                     return Ok(false);
                 };
                 conformance::check_host_writes(&pixels);

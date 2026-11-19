@@ -175,7 +175,7 @@ impl Overlay for D3d12Overlay {
         }
         let Some(painter) = self.painter.as_mut() else { return };
         for buffer in painter.buffers.drain(..) {
-            destroy_unused(&mut *target.gpu, [ResourceId::Buffer(buffer)]);
+            destroy_unused(target.gpu, [ResourceId::Buffer(buffer)]);
         }
         painter.frame = None;
         if let Err(e) = painter.set_format(target) {
@@ -426,7 +426,7 @@ impl Painter {
     /// frames that draw with it are done, when the `Gpu` destroys the
     /// texture too.
     fn free_texture(&self, gpu: &mut D3d12Gpu, texture: Texture) {
-        destroy_unused(&mut *gpu, [ResourceId::Texture(texture.texture)]);
+        destroy_unused(gpu, [ResourceId::Texture(texture.texture)]);
         gpu.destroy_later(Box::new(FreeSlot { slot: texture.slot, free: Rc::clone(&self.free_slots) }));
     }
 
@@ -465,7 +465,7 @@ impl Painter {
         });
         let texture = match texture.and_then(|texture| {
             gpu.write_texture(texture, TextureRegion::whole(size), &pixels).map(|()| texture).inspect_err(|_| {
-                destroy_unused(&mut *gpu, [ResourceId::Texture(texture)]);
+                destroy_unused(gpu, [ResourceId::Texture(texture)]);
             })
         }) {
             Ok(texture) => texture,
@@ -475,7 +475,7 @@ impl Painter {
             }
         };
         let Some((resource, _)) = gpu.native_texture(texture) else {
-            destroy_unused(&mut *gpu, [ResourceId::Texture(texture)]);
+            destroy_unused(gpu, [ResourceId::Texture(texture)]);
             self.free_slots.borrow_mut().push(slot);
             return Err(GpuError::UnknownId("texture"));
         };
@@ -605,10 +605,10 @@ impl Painter {
     /// done.
     fn destroy(self, gpu: &mut D3d12Gpu) {
         for (_, texture) in self.textures {
-            destroy_unused(&mut *gpu, [ResourceId::Texture(texture.texture)]);
+            destroy_unused(gpu, [ResourceId::Texture(texture.texture)]);
         }
         for buffer in self.buffers {
-            destroy_unused(&mut *gpu, [ResourceId::Buffer(buffer)]);
+            destroy_unused(gpu, [ResourceId::Buffer(buffer)]);
         }
         gpu.destroy_later(Box::new((self.root_signature, self.pipeline, self.heap)));
     }
@@ -632,7 +632,7 @@ fn buffer(gpu: &mut D3d12Gpu, usage: BufferUsage, data: &[u8]) -> Result<BufferI
     let buffer = gpu.create_buffer(&BufferDesc { label: "egui", usage, size: data.len() as u64 });
     let buffer = buffer.map_err(|e| e.to_string())?;
     if let Err(e) = gpu.write_buffer(buffer, 0, data) {
-        destroy_unused(&mut *gpu, [ResourceId::Buffer(buffer)]);
+        destroy_unused(gpu, [ResourceId::Buffer(buffer)]);
         return Err(e.to_string());
     }
     Ok(buffer)

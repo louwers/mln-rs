@@ -354,7 +354,7 @@ impl Painter {
     /// the texture and its sampler too.
     fn free_texture(&self, gpu: &mut VulkanGpu, texture: Texture) {
         let Texture { texture, sampler, set } = texture;
-        destroy_unused(&mut *gpu, [ResourceId::Texture(texture), ResourceId::Sampler(sampler)]);
+        destroy_unused(gpu, [ResourceId::Texture(texture), ResourceId::Sampler(sampler)]);
         let free_sets = Rc::clone(&self.free_sets);
         gpu.destroy_later(move |_| free_sets.borrow_mut().push(set));
     }
@@ -393,7 +393,7 @@ impl Painter {
         let sampler = match gpu.create_sampler(&sampler_state(delta.options)) {
             Ok(sampler) => sampler,
             Err(e) => {
-                destroy_unused(&mut *gpu, [ResourceId::Texture(texture)]);
+                destroy_unused(gpu, [ResourceId::Texture(texture)]);
                 return Err(e);
             }
         };
@@ -404,7 +404,7 @@ impl Painter {
                 Ok(())
             }
             Err(e) => {
-                destroy_unused(&mut *gpu, [ResourceId::Texture(texture.texture), ResourceId::Sampler(texture.sampler)]);
+                destroy_unused(gpu, [ResourceId::Texture(texture.texture), ResourceId::Sampler(texture.sampler)]);
                 Err(e)
             }
         }
@@ -492,7 +492,7 @@ impl Painter {
             .ok()
             .and_then(|&index_buffer| target.gpu.raw_buffer(vertex_buffer).zip(target.gpu.raw_buffer(index_buffer)));
         let (Ok(index_buffer), Some((raw_vertex_buffer, raw_index_buffer))) = (index_buffer, raw) else {
-            destroy_unused(&mut *target.gpu, [ResourceId::Buffer(vertex_buffer)]);
+            destroy_unused(target.gpu, [ResourceId::Buffer(vertex_buffer)]);
             return Err("the meshes' buffers".to_owned());
         };
 
@@ -557,7 +557,7 @@ impl Painter {
                 );
             }
         }
-        destroy_unused(&mut *target.gpu, [ResourceId::Buffer(vertex_buffer), ResourceId::Buffer(index_buffer)]);
+        destroy_unused(target.gpu, [ResourceId::Buffer(vertex_buffer), ResourceId::Buffer(index_buffer)]);
         Ok(())
     }
 
@@ -565,7 +565,7 @@ impl Painter {
     /// done.
     fn destroy(self, gpu: &mut VulkanGpu) {
         for (_, texture) in self.textures {
-            destroy_unused(&mut *gpu, [ResourceId::Texture(texture.texture), ResourceId::Sampler(texture.sampler)]);
+            destroy_unused(gpu, [ResourceId::Texture(texture.texture), ResourceId::Sampler(texture.sampler)]);
         }
         let (set_layout, pipeline_layout, pipeline, pools) =
             (self.set_layout, self.pipeline_layout, self.pipeline, self.pools);
@@ -589,7 +589,7 @@ fn buffer(gpu: &mut VulkanGpu, usage: BufferUsage, data: &[u8]) -> Result<Buffer
     let buffer = gpu.create_buffer(&BufferDesc { label: "egui", usage, size: data.len() as u64 });
     let buffer = buffer.map_err(|e| e.to_string())?;
     if let Err(e) = gpu.write_buffer(buffer, 0, data) {
-        destroy_unused(&mut *gpu, [ResourceId::Buffer(buffer)]);
+        destroy_unused(gpu, [ResourceId::Buffer(buffer)]);
         return Err(e.to_string());
     }
     Ok(buffer)
