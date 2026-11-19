@@ -165,13 +165,12 @@ impl SurfaceTarget {
         framebuffer_size: Size,
         cap_frame_rate: bool,
     ) -> Result<SurfaceTarget, Error> {
-        let backend_impl = backend.backend_impl();
-        let shared = &backend_impl.device().shared;
+        let shared = &backend.device().shared;
         let missing = provider.instance_extensions().into_iter().find(|name| !shared.has_instance_extension(name));
         if let Some(name) = missing {
             return Err(Error::unsupported(format!("The Vulkan instance lacks {}", name.to_string_lossy())));
         }
-        let surface = provider.create_surface(backend_impl.entry(), backend_impl.get_instance())?;
+        let surface = provider.create_surface(shared.entry(), shared.instance())?;
         Self::on_surface(backend, surface, Some(provider), framebuffer_size, cap_frame_rate)
     }
 
@@ -206,17 +205,17 @@ impl SurfaceTarget {
         framebuffer_size: Size,
         cap_frame_rate: bool,
     ) -> Result<SurfaceTarget, Error> {
-        let backend_impl = backend.backend_impl();
-        let (Some(surface_loader), Some(_)) = (backend_impl.get_surface_loader(), backend_impl.get_swapchain_loader())
-        else {
+        let device = backend.device();
+        let shared = &device.shared;
+        let (Some(surface_loader), Some(_)) = (shared.surface(), shared.swapchain()) else {
             return Err(Error::unsupported("The Vulkan device presents to no windows"));
         };
         // SAFETY: the surface is the instance's, and the queue family the
         // physical device's.
         let supported = unsafe {
             surface_loader.get_physical_device_surface_support(
-                backend_impl.get_physical_device(),
-                backend_impl.get_graphics_queue_index(),
+                shared.physical_device(),
+                shared.queue_family_index(),
                 surface,
             )
         };
@@ -228,7 +227,7 @@ impl SurfaceTarget {
             }
             return Err(Error::unsupported("The Vulkan device's queue can't present to the surface"));
         }
-        if crate::surface_resource::surface_extent(backend_impl.device(), surface).is_some_and(is_empty) {
+        if crate::surface_resource::surface_extent(device, surface).is_some_and(is_empty) {
             if provider.is_some() {
                 // SAFETY: nothing was made on the surface, which is the
                 // target's.
@@ -240,7 +239,7 @@ impl SurfaceTarget {
         // it.
         let present_modes = unsafe {
             surface_loader
-                .get_physical_device_surface_present_modes(backend_impl.get_physical_device(), surface)
+                .get_physical_device_surface_present_modes(shared.physical_device(), surface)
                 .unwrap_or_default()
         };
         let resource = SurfaceResource::new(

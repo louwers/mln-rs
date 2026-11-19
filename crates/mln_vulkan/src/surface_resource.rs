@@ -126,10 +126,9 @@ impl SurfaceResource {
         provider: Option<Box<dyn SurfaceProvider>>,
         present_mode: vk::PresentModeKHR,
     ) -> Self {
-        let backend = gpu.backend_impl();
         let mut resource = SurfaceResource {
-            device: backend.device().clone(),
-            max_frames: backend.get_max_frames(),
+            device: gpu.device().clone(),
+            max_frames: gpu.max_frames(),
             owns_surface: provider.is_some(),
             provider,
             state: SurfaceState {

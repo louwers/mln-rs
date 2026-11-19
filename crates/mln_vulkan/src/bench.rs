@@ -13,7 +13,7 @@ use std::time::Duration;
 use ash::vk;
 use parking_lot::Mutex;
 
-use crate::renderer_backend::BackendImpl;
+use crate::device::Device;
 
 /// The passes one submission times at most; a pass past them goes untimed.
 const PASSES: u32 = 1024;
@@ -62,18 +62,18 @@ pub(crate) struct Timer {
 }
 
 impl Timer {
-    /// The timer of a backend on `backend`, if the process measures and the
+    /// The timer of a backend on `device`, if the process measures and the
     /// device's queue writes timestamps.
-    pub(crate) fn new(backend: &BackendImpl) -> Option<Timer> {
+    pub(crate) fn new(device: &Device) -> Option<Timer> {
         if !COUNTING.load(Ordering::Relaxed) {
             return None;
         }
+        let shared = &device.shared;
         // SAFETY: a plain query of the GPU.
-        let families = unsafe {
-            backend.get_instance().get_physical_device_queue_family_properties(backend.get_physical_device())
-        };
-        let bits = families.get(backend.get_graphics_queue_index() as usize)?.timestamp_valid_bits;
-        let period = backend.get_device_properties().limits.timestamp_period;
+        let families =
+            unsafe { shared.instance().get_physical_device_queue_family_properties(shared.physical_device()) };
+        let bits = families.get(shared.queue_family_index() as usize)?.timestamp_valid_bits;
+        let period = shared.properties().limits.timestamp_period;
         if bits == 0 || period <= 0.0 {
             return None;
         }

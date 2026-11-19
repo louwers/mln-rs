@@ -8,7 +8,7 @@ use mln_glsl::layout::{
     LAYER_UNIFORM_COUNT, image_sampler_binding, image_texture_binding, layer_storage_binding,
 };
 
-use crate::renderer_backend::BackendImpl;
+use crate::device::Device;
 
 /// The most buffers a set has.
 const MAX_BUFFER_BINDINGS: usize = 8;
@@ -135,7 +135,7 @@ impl DescriptorPoolGrowable {
 
 /// The layout of the sets of `type_`.
 pub(crate) fn build_descriptor_set_layout(
-    backend: &BackendImpl,
+    device: &Device,
     type_: DescriptorSetType,
 ) -> Result<vk::DescriptorSetLayout, String> {
     let mut bindings = Vec::new();
@@ -173,16 +173,16 @@ pub(crate) fn build_descriptor_set_layout(
     }
     let create_info = vk::DescriptorSetLayoutCreateInfo::default().bindings(&bindings);
     // SAFETY: the create info is valid for the device.
-    let layout = unsafe { backend.get_device().create_descriptor_set_layout(&create_info, None) }
+    let layout = unsafe { device.shared.device().create_descriptor_set_layout(&create_info, None) }
         .map_err(|e| format!("Failed to create a descriptor set layout: {e}"))?;
-    backend.device().set_debug_name(layout, &format!("{type_:?}DescriptorSetLayout"));
+    device.set_debug_name(layout, &format!("{type_:?}DescriptorSetLayout"));
     Ok(layout)
 }
 
 /// A pipeline layout of the sets `layouts` and `push_constant_size` bytes
 /// of push constants, which both stages read.
 pub(crate) fn build_pipeline_layout(
-    backend: &BackendImpl,
+    device: &Device,
     layouts: &[vk::DescriptorSetLayout],
     push_constant_size: u32,
     name: &str,
@@ -193,8 +193,8 @@ pub(crate) fn build_pipeline_layout(
     let create_info = vk::PipelineLayoutCreateInfo::default().push_constant_ranges(&push_constant).set_layouts(layouts);
     // SAFETY: the layouts are live, and the push constants fit the 128
     // bytes every device has.
-    let layout = unsafe { backend.get_device().create_pipeline_layout(&create_info, None) }
+    let layout = unsafe { device.shared.device().create_pipeline_layout(&create_info, None) }
         .map_err(|e| format!("Failed to create a pipeline layout: {e}"))?;
-    backend.device().set_debug_name(layout, name);
+    device.set_debug_name(layout, name);
     Ok(layout)
 }
