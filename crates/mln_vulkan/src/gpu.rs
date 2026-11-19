@@ -2295,7 +2295,9 @@ impl Gpu for VulkanGpu {
         let pipeline = self.create_vk_pipeline(desc)?;
         let layout = self.layout_tags.tag(desc.shader, desc.vertex_buffers);
         let tags = PipelineTags { shader: desc.shader, layout, targets: desc.targets };
-        Ok(self.pipelines.insert(Pipeline { pipeline, tags }))
+        let id = self.pipelines.insert(Pipeline { pipeline, tags });
+        self.dependents.pipeline(id, desc.shader);
+        Ok(id)
     }
 
     fn create_bindings(&mut self, desc: &BindingsDesc<'_>) -> Result<BindingsId, GpuError> {

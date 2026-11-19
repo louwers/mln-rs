@@ -296,7 +296,7 @@ type BeforeCommit = Box<dyn Fn(&ProtocolObject<dyn MTLCommandBuffer>)>;
 /// once. Writes go into a staging buffer that a command buffer of their
 /// own, committed ahead of the frame's at each flush, copies in. Command
 /// buffers keep what they use alive, so a destroyed resource goes once the
-/// last of its holders and the command buffers that use it do. Each call
+/// command buffers that use it do. Each call
 /// that encodes commands or compiles a pipeline drains an autorelease pool
 /// of its own.
 pub struct MetalGpu {
@@ -1359,7 +1359,9 @@ impl Gpu for MetalGpu {
 
     fn create_pipeline(&mut self, desc: &PipelineDesc<'_>) -> Result<PipelineId, GpuError> {
         let pipeline = autoreleasepool(|_| self.make_pipeline(desc))?;
-        Ok(self.pipelines.insert(pipeline))
+        let id = self.pipelines.insert(pipeline);
+        self.dependents.pipeline(id, desc.shader);
+        Ok(id)
     }
 
     fn create_bindings(&mut self, desc: &BindingsDesc<'_>) -> Result<BindingsId, GpuError> {

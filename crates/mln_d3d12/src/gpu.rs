@@ -1131,7 +1131,9 @@ impl Gpu for D3d12Gpu {
         let state = self.device.pipeline(key, || create_pipeline_state(&self.device, program, desc, topology_type))?;
         let layout = self.layout_tags.tag(desc.shader, desc.vertex_buffers);
         let tags = PipelineTags { shader: desc.shader, layout, targets: desc.targets };
-        Ok(self.pipelines.insert(Pipeline { state, topology, tags }))
+        let id = self.pipelines.insert(Pipeline { state, topology, tags });
+        self.dependents.pipeline(id, desc.shader);
+        Ok(id)
     }
 
     fn create_bindings(&mut self, desc: &BindingsDesc<'_>) -> Result<BindingsId, GpuError> {

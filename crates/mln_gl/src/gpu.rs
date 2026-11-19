@@ -1407,7 +1407,9 @@ impl Gpu for GlGpu {
         }
         let layout = self.layout_tags.tag(desc.shader, desc.vertex_buffers);
         let tags = PipelineTags { shader: desc.shader, layout, targets: desc.targets };
-        Ok(self.pipelines.insert(Pipeline { program, state: desc.state, tags }))
+        let id = self.pipelines.insert(Pipeline { program, state: desc.state, tags });
+        self.dependents.pipeline(id, desc.shader);
+        Ok(id)
     }
 
     fn create_bindings(&mut self, desc: &BindingsDesc<'_>) -> Result<BindingsId, GpuError> {

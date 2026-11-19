@@ -7,8 +7,8 @@
 //! [`foreign_ids`] that a backend takes no other backend's ids,
 //! [`readbacks`] what a readback copies, [`custom_layers`] what a custom
 //! layer is lent, [`imported_textures`] textures made elsewhere, and
-//! [`resources_in_use`] what destroying a resource that bindings or
-//! geometry were made of does.
+//! [`resources_in_use`] what destroying a resource that pipelines, bindings
+//! or geometry were made of does.
 //! [`instanced_walls`] draws fill extrusion walls over the left half, and
 //! [`wall_quads`] draws them again from quads of their own. The
 //! other cases draw one color over the whole target, as

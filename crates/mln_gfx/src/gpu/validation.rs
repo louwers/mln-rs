@@ -7,16 +7,16 @@
 //! comparisons of what the pipeline, bindings and geometry it names were
 //! made for. [`check_pass`] checks a pass's attachments in `begin_pass`,
 //! [`check_readback`] a readback in `read_texture`, and [`check_write`] a
-//! write in `write_buffer`. [`Dependents`] keeps what bindings and geometry
-//! are made of, which `destroy` checks.
+//! write in `write_buffer`. [`Dependents`] keeps what pipelines, bindings
+//! and geometry are made of, which `destroy` checks.
 
 use mln_util::hash::HashMap;
 use mln_util::size::Size;
 
 use super::{
     BindGroupEntry, BindingsDesc, BindingsId, BufferId, BufferUsage, Draw, GeometryDesc, GeometryId, GpuError,
-    PassDesc, ResourceId, SamplerId, ShaderId, TargetFormats, TextureFormat, TextureId, TextureRegion, TextureUsage,
-    VertexBufferLayout, VertexStep,
+    PassDesc, PipelineId, ResourceId, SamplerId, ShaderId, TargetFormats, TextureFormat, TextureId, TextureRegion,
+    TextureUsage, VertexBufferLayout, VertexStep,
 };
 
 /// What the checks read of a buffer.
@@ -247,9 +247,10 @@ impl LayoutTags {
 }
 
 /// The buffers, textures, samplers and shaders that a backend's live
-/// bindings and geometry were made of, which a backend keeps in debug
-/// builds: there, destroying one of them fails with [`GpuError::InUse`]
-/// until the bindings and geometry made of it go. A backend records what it made in
+/// pipelines, bindings and geometry were made of, which a backend keeps in
+/// debug builds: there, destroying one of them fails with
+/// [`GpuError::InUse`] until what was made of it goes. A backend records
+/// what it made in `create_pipeline` ([`pipeline`](Self::pipeline)),
 /// `create_bindings` ([`bindings`](Self::bindings)) and `create_geometry`
 /// ([`geometry`](Self::geometry)), and checks each `destroy` first
 /// ([`destroy`](Self::destroy)). Release builds keep nothing, and every
@@ -258,12 +259,19 @@ impl LayoutTags {
 pub struct Dependents {
     #[cfg(debug_assertions)]
     counts: HashMap<ResourceId, u32>,
-    /// What each of the live bindings and geometry was made of.
+    /// What each of the live pipelines, bindings and geometry was made of.
     #[cfg(debug_assertions)]
     made_of: HashMap<ResourceId, Vec<ResourceId>>,
 }
 
 impl Dependents {
+    /// Records that `pipeline` was made of its shader.
+    #[cfg_attr(not(debug_assertions), expect(unused_variables, reason = "release builds keep nothing"))]
+    pub fn pipeline(&mut self, pipeline: PipelineId, shader: ShaderId) {
+        #[cfg(debug_assertions)]
+        self.made(pipeline.into(), vec![shader.into()]);
+    }
+
     /// Records that `bindings` were made of `desc`'s shader, buffers,
     /// textures and samplers.
     #[cfg_attr(not(debug_assertions), expect(unused_variables, reason = "release builds keep nothing"))]
@@ -306,8 +314,9 @@ impl Dependents {
 
     /// Checks that `resource` may be destroyed, and forgets it: fails with
     /// [`GpuError::InUse`] in debug builds for a buffer, texture, sampler
-    /// or shader that live bindings or geometry were made of. Destroying bindings or
-    /// geometry lets go of what they were made of.
+    /// or shader that live pipelines, bindings or geometry were made of.
+    /// Destroying a pipeline, bindings or geometry lets go of what they
+    /// were made of.
     #[cfg_attr(not(debug_assertions), expect(unused_variables, reason = "release builds keep nothing"))]
     pub fn destroy(&mut self, resource: ResourceId) -> Result<(), GpuError> {
         #[cfg(debug_assertions)]
@@ -317,7 +326,7 @@ impl Dependents {
                     return Err(GpuError::InUse(kind(resource)));
                 }
             }
-            ResourceId::Bindings(_) | ResourceId::Geometry(_) => {
+            ResourceId::Pipeline(_) | ResourceId::Bindings(_) | ResourceId::Geometry(_) => {
                 for of in self.made_of.remove(&resource).into_iter().flatten() {
                     if let Some(count) = self.counts.get_mut(&of) {
                         *count -= 1;
@@ -327,7 +336,7 @@ impl Dependents {
                     }
                 }
             }
-            ResourceId::Pipeline(_) | ResourceId::Readback(_) => {}
+            ResourceId::Readback(_) => {}
         }
         Ok(())
     }
@@ -575,7 +584,7 @@ mod tests {
         let bindings = BindingsTags { shader, elements: 2 };
         let geometry = GeometryTags { layout: 0, ranges: GeometryRanges { indices: 6, instances: u32::MAX } };
         let draw = Draw {
-            pipeline: crate::gpu::PipelineId::default(),
+            pipeline: PipelineId::default(),
             bindings: BindingsId::default(),
             geometry: GeometryId::default(),
             first_index: 0,
@@ -636,6 +645,7 @@ mod tests {
         let mut bindings = SlotMap::<BindingsId, ()>::with_key();
         let (first, second) = (bindings.insert(()), bindings.insert(()));
         let geometry = SlotMap::<GeometryId, ()>::with_key().insert(());
+        let pipeline = SlotMap::<PipelineId, ()>::with_key().insert(());
         let entries = [
             BindGroupEntry::Buffer { id: 0, buffer: uniform, offset: 0, size: 4 },
             BindGroupEntry::Texture { id: 0, texture, sampler },
@@ -665,6 +675,10 @@ mod tests {
         assert_eq!(in_use(&mut dependents, indices.into()), cfg!(debug_assertions), "the geometry's");
         assert!(dependents.destroy(geometry.into()).is_ok());
         assert!(dependents.destroy(indices.into()).is_ok());
+        dependents.pipeline(pipeline, shader);
+        assert_eq!(in_use(&mut dependents, shader.into()), cfg!(debug_assertions), "the pipeline's");
+        assert!(dependents.destroy(pipeline.into()).is_ok());
+        assert!(dependents.destroy(shader.into()).is_ok());
     }
 
     #[test]

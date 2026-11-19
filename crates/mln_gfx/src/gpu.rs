@@ -529,15 +529,19 @@ pub struct Draw {
 /// [`SlotMap`]. Another backend's id names nothing there: a call that names
 /// one fails with [`GpuError::UnknownId`], and destroying it does nothing.
 ///
-/// The caller destroys bindings and geometry before the buffers, textures,
-/// samplers and shaders they were made of: in debug builds, destroying one
-/// that live bindings or geometry were made of fails with
-/// [`GpuError::InUse`] and keeps it, as every backend checks with
-/// [`validation::Dependents`].
-/// Destroying a resource frees it once nothing uses it: the work flushed
-/// and recorded so far, and the pipelines made of it. Its id is invalid
-/// from the call on: a later call that names it fails with
-/// [`GpuError::UnknownId`], and destroying it again does nothing.
+/// The caller destroys what was made of a resource before the resource:
+/// pipelines before their shader, and bindings and geometry before the
+/// buffers, textures, samplers and shader they were made of. In debug
+/// builds, destroying a resource that live pipelines, bindings or geometry
+/// were made of fails with [`GpuError::InUse`] and keeps it, as every
+/// backend checks with [`validation::Dependents`]; release builds don't
+/// check, and a draw with what was made of a destroyed resource is then
+/// the caller's error.
+///
+/// A destroyed resource's id is invalid from the call on: a later call that
+/// names it fails with [`GpuError::UnknownId`], and destroying it again
+/// does nothing. The backend keeps the native object alive while the work
+/// recorded before the call, flushed or not, still reads it.
 ///
 /// A draw reads what the buffers and textures it binds hold when the work
 /// is flushed, or what they held when it was recorded, for each write since

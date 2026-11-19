@@ -827,12 +827,13 @@ pub fn readbacks(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     Ok(())
 }
 
-/// Checks destroying what bindings and geometry were made of. In debug
-/// builds, destroying a buffer, texture, sampler or shader that live
-/// bindings or geometry were made of fails with [`GpuError::InUse`] and
-/// keeps it, so that it draws as before, until the last of them goes. Then
-/// it destroys, calls that name it fail, and the work flushed before reads
-/// it until done. Returns the error of a call that should succeed.
+/// Checks destroying what pipelines, bindings and geometry were made of. In
+/// debug builds, destroying a buffer, texture, sampler or shader that live
+/// pipelines, bindings or geometry were made of fails with
+/// [`GpuError::InUse`] and keeps it, so that it draws as before, until the
+/// last of them goes. Then it destroys, calls that name it fail, and the
+/// work recorded before, flushed or not, reads it until done. Returns the
+/// error of a call that should succeed.
 ///
 /// # Panics
 ///
@@ -883,8 +884,8 @@ pub fn resources_in_use<G: Gpu>(gpu: &mut G) -> Result<(), GpuError> {
         vertex_buffers: &[(vertices, 0)],
         index_buffer: indices,
     })?;
-    let target = target(gpu, TextureFormat::Rgba8Unorm)?;
-    let frame = |gpu: &mut G, bindings: BindingsId| -> Result<(), GpuError> {
+    let (flushed, recorded) = (target(gpu, TextureFormat::Rgba8Unorm)?, target(gpu, TextureFormat::Rgba8Unorm)?);
+    let frame = |gpu: &mut G, target: TextureId, bindings: BindingsId| -> Result<(), GpuError> {
         gpu.begin_pass(&PassDesc {
             label: "heatmap",
             color: Some(ColorAttachment { texture: target, load: LoadOp::Clear(BLACK) }),
@@ -893,12 +894,12 @@ pub fn resources_in_use<G: Gpu>(gpu: &mut G) -> Result<(), GpuError> {
         gpu.draw(&draw(pipeline, bindings, geometry, 6))?;
         gpu.end_pass()
     };
-    let red = |gpu: &mut G, what: &str| -> Result<(), GpuError> {
+    let red = |gpu: &mut G, target: TextureId, what: &str| -> Result<(), GpuError> {
         assert!(read(gpu, target)?.chunks(4).all(|texel| texel == [255, 0, 0, 255]), "{what}");
         Ok(())
     };
-    frame(gpu, first)?;
-    red(gpu, "the draw")?;
+    frame(gpu, flushed, first)?;
+    red(gpu, flushed, "the draw")?;
 
     let buffers = [paint_buffer, props_buffer, projection_buffer, vertices, indices].map(ResourceId::Buffer);
     let resources: Vec<ResourceId> = buffers.into_iter().chain([image.into(), sampler.into()]).collect();
@@ -912,12 +913,13 @@ pub fn resources_in_use<G: Gpu>(gpu: &mut G) -> Result<(), GpuError> {
             assert!(in_use(gpu.destroy(resource)), "{resource:?}, which the second bindings or the geometry use");
         }
         gpu.write_buffer(props_buffer, 0, props)?;
-        frame(gpu, second)?;
-        red(gpu, "a draw of the resources kept")?;
+        frame(gpu, flushed, second)?;
+        red(gpu, flushed, "a draw of the resources kept")?;
     }
 
-    frame(gpu, second)?;
+    frame(gpu, flushed, second)?;
     gpu.flush(false)?;
+    frame(gpu, recorded, second)?;
     for dependent in [first.into(), second.into(), geometry.into()] {
         gpu.destroy(dependent)?;
     }
@@ -934,6 +936,9 @@ pub fn resources_in_use<G: Gpu>(gpu: &mut G) -> Result<(), GpuError> {
         index_buffer: indices,
     });
     assert!(matches!(destroyed, Err(GpuError::UnknownId("buffer"))), "geometry of destroyed buffers");
+    if cfg!(debug_assertions) {
+        assert!(in_use(gpu.destroy(shader.into())), "the shader, which the pipeline was made of");
+    }
     gpu.destroy(pipeline.into())?;
     gpu.destroy(shader.into())?;
     let destroyed = gpu.create_pipeline(&PipelineDesc {
@@ -943,7 +948,8 @@ pub fn resources_in_use<G: Gpu>(gpu: &mut G) -> Result<(), GpuError> {
         targets: RGBA8,
     });
     assert!(matches!(destroyed, Err(GpuError::UnknownId("shader"))), "a pipeline of a destroyed shader");
-    red(gpu, "the frame flushed before the destroys")?;
+    red(gpu, flushed, "the frame flushed before the destroys")?;
+    red(gpu, recorded, "the frame recorded before the destroys")?;
     gpu.flush(true)
 }
 
