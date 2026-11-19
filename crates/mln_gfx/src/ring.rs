@@ -1161,7 +1161,7 @@ mod tests {
         assert_eq!(gpu.submits, [vec![7], vec![8]]);
         assert_eq!(gpu.waited, [7, 8]);
         assert!(gpu.texture_waits.is_empty());
-        assert_eq!(record.borrow().forgotten, [] as [u32; 0]);
+        assert_eq!(record.borrow().forgotten, Vec::<u32>::new());
     }
 
     #[test]

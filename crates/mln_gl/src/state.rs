@@ -192,7 +192,14 @@ impl State {
 
     /// Binds `size` bytes at `offset` of `buffer` to the uniform buffer
     /// binding point `index`.
-    pub(crate) fn bind_uniform_buffer_range(&mut self, gl: &Gl, index: usize, buffer: BufferID, offset: i32, size: i32) {
+    pub(crate) fn bind_uniform_buffer_range(
+        &mut self,
+        gl: &Gl,
+        index: usize,
+        buffer: BufferID,
+        offset: i32,
+        size: i32,
+    ) {
         let Some(cached) = self.uniform_buffers.get_mut(index) else {
             debug_assert!(false, "uniform buffer binding out of range");
             return;

@@ -26,8 +26,8 @@ use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
-use crate::gpu::{ImportedImage, VulkanGpu};
 use crate::device::Device;
+use crate::gpu::{ImportedImage, VulkanGpu};
 use crate::renderer_backend::SurfaceProvider;
 use crate::surface_target::{Overlay, OverlayTarget};
 
@@ -185,12 +185,7 @@ impl SurfaceResource {
         self.state.extent
     }
 
-    fn init_swapchain(
-        device: &Device,
-        state: &mut SurfaceState,
-        w: u32,
-        h: u32,
-    ) -> Result<Vec<vk::Image>, String> {
+    fn init_swapchain(device: &Device, state: &mut SurfaceState, w: u32, h: u32) -> Result<Vec<vk::Image>, String> {
         let physical_device = device.shared.physical_device();
         let surface_loader = device.shared.surface().ok_or("The instance has no surfaces")?;
         let swapchain_loader = device.shared.swapchain().ok_or("The device has no swapchains")?;

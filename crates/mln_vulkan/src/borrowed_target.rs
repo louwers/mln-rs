@@ -149,10 +149,8 @@ enum Waiting {
 /// import it.
 #[cfg(windows)]
 fn import_fence(device: &Device, handle: u64) -> Result<vk::Semaphore, Error> {
-    let loader = device
-        .shared
-        .semaphore_win32()
-        .ok_or_else(|| Error::native("the Vulkan device imports no D3D12 fences"))?;
+    let loader =
+        device.shared.semaphore_win32().ok_or_else(|| Error::native("the Vulkan device imports no D3D12 fences"))?;
     let vk_device = device.shared.device();
     let mut type_info = vk::SemaphoreTypeCreateInfo::default().semaphore_type(vk::SemaphoreType::TIMELINE);
     let info = vk::SemaphoreCreateInfo::default().push_next(&mut type_info);
@@ -567,10 +565,7 @@ impl RingBackend for VulkanRing {
 
 /// Lets go of `wait`, destroying a semaphore of the target's that no frame
 /// waits on.
-#[cfg_attr(
-    not(unix),
-    expect(clippy::needless_pass_by_value, reason = "a wait is let go of once: the call takes it")
-)]
+#[cfg_attr(not(unix), expect(clippy::needless_pass_by_value, reason = "a wait is let go of once: the call takes it"))]
 fn drop_wait(device: &Device, wait: ConsumerWait) {
     let semaphore = match wait.0 {
         Waiting::Timeline(..) => return,

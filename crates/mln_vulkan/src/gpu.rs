@@ -2104,7 +2104,7 @@ impl Gpu for VulkanGpu {
             MemoryLocation::GpuOnly,
             desc.label,
         )
-            .ok_or_else(|| GpuError::Invalid(format!("{}: Vulkan couldn't make the texture", desc.label)))?;
+        .ok_or_else(|| GpuError::Invalid(format!("{}: Vulkan couldn't make the texture", desc.label)))?;
         // Alpha-only formats aren't core Vulkan: an `A8Unorm` texture is a
         // red one whose view reads red as alpha.
         let components = if format == TextureFormat::A8Unorm {

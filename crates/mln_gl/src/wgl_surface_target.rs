@@ -150,13 +150,8 @@ impl SurfaceTarget {
         let gl = gl?;
         let (hwnd, dc) = (window.window, window.dc.dc());
         let backend = RendererBackend::from_parts(gl, Box::new(WindowContext(window)));
-        let target = SurfaceTarget {
-            window: hwnd,
-            dc,
-            size: framebuffer_size,
-            image: FrameImports::default(),
-            overlay: None,
-        };
+        let target =
+            SurfaceTarget { window: hwnd, dc, size: framebuffer_size, image: FrameImports::default(), overlay: None };
         Ok((backend, target))
     }
 
@@ -281,26 +276,29 @@ mod tests {
         let (mut backend, mut target) = SurfaceTarget::with_backend(handle, size, false).unwrap();
         let pixels = Rc::new(Cell::new(Vec::new()));
         let seen = Rc::clone(&pixels);
-        target.set_overlay(&mut backend.gpu(), Some(Box::new(move |target| {
-            assert_eq!(size, target.size);
-            let mut pixel = [0u8; 4];
-            // SAFETY: the context is current, with the window's framebuffer
-            // bound, and the pixel holds the one RGBA texel read.
-            unsafe {
-                target.gl.read_pixels(
-                    4,
-                    4,
-                    1,
-                    1,
-                    glow::RGBA,
-                    glow::UNSIGNED_BYTE,
-                    glow::PixelPackData::Slice(Some(&mut pixel)),
-                );
-            }
-            let mut pixels = seen.take();
-            pixels.push(pixel);
-            seen.set(pixels);
-        })));
+        target.set_overlay(
+            &mut backend.gpu(),
+            Some(Box::new(move |target| {
+                assert_eq!(size, target.size);
+                let mut pixel = [0u8; 4];
+                // SAFETY: the context is current, with the window's framebuffer
+                // bound, and the pixel holds the one RGBA texel read.
+                unsafe {
+                    target.gl.read_pixels(
+                        4,
+                        4,
+                        1,
+                        1,
+                        glow::RGBA,
+                        glow::UNSIGNED_BYTE,
+                        glow::PixelPackData::Slice(Some(&mut pixel)),
+                    );
+                }
+                let mut pixels = seen.take();
+                pixels.push(pixel);
+                seen.set(pixels);
+            })),
+        );
         assert_eq!(Handoff::Presented, red_frame(&mut backend, &mut target));
         assert_eq!(Handoff::Presented, red_frame(&mut backend, &mut target));
         assert_eq!(vec![[255, 0, 0, 255]; 2], pixels.take());

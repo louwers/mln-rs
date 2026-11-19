@@ -160,7 +160,8 @@ fn surface_backend_on(provider: HeadlessSurface, size: Size, cap_frame_rate: boo
     }
     let device = Device::new(None).expect("Vulkan device");
     let (backend, target) =
-        SurfaceTarget::with_backend_from_provider(&device, Box::new(provider), size, cap_frame_rate).expect("Vulkan backend");
+        SurfaceTarget::with_backend_from_provider(&device, Box::new(provider), size, cap_frame_rate)
+            .expect("Vulkan backend");
     eprintln!("rendering with {}", backend.get_device_name());
     Some(Window { backend, target })
 }
@@ -765,8 +766,8 @@ fn a_new_target_on_the_backend_presents() {
     // Replaced with a frame in flight: the scene and its uniforms are as
     // they were.
     render_frame(&mut window, Some(&scene), set(red), clear, false);
-    let target = SurfaceTarget::from_provider(&mut window.backend, Box::new(provider.clone()), size, true)
-        .expect("target");
+    let target =
+        SurfaceTarget::from_provider(&mut window.backend, Box::new(provider.clone()), size, true).expect("target");
     window.set_target(target);
     assert_eq!(provider.made.get(), 2);
     let image = render_frame(&mut window, Some(&scene), Change::default(), clear, true).unwrap();
@@ -774,17 +775,15 @@ fn a_new_target_on_the_backend_presents() {
 
     // At another size.
     let size = Size::new(80, 24);
-    let target = SurfaceTarget::from_provider(&mut window.backend, Box::new(provider.clone()), size, true)
-        .expect("target");
+    let target =
+        SurfaceTarget::from_provider(&mut window.backend, Box::new(provider.clone()), size, true).expect("target");
     window.set_target(target);
     let image = render_frame(&mut window, Some(&scene), set(green), clear, true).unwrap();
     check_halves(&image, size, clear, green, "new target at another size");
 
     // A surface that can't be made leaves the target the window has.
     provider.fail.set(true);
-    assert!(
-        SurfaceTarget::from_provider(&mut window.backend, Box::new(provider.clone()), size, true).is_err()
-    );
+    assert!(SurfaceTarget::from_provider(&mut window.backend, Box::new(provider.clone()), size, true).is_err());
     provider.fail.set(false);
     let image = render_frame(&mut window, Some(&scene), set(red), clear, true).unwrap();
     check_halves(&image, size, clear, red, "after a failed target");
