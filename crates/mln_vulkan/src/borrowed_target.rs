@@ -379,7 +379,7 @@ impl RingBackend for VulkanRing {
     /// and with [`ErrorKind::Native`](mln_util::ErrorKind) when a Vulkan
     /// call fails.
     fn new(backend: &mut RendererBackend, images: &BorrowedImages, producer: SyncKind) -> Result<Self, Error> {
-        let device = backend.backend_impl().device().clone();
+        let device = backend.device().clone();
         images.check(&device)?;
         if !device.sync_kinds().0.contains(producer) {
             return Err(Error::unsupported(format!("the Vulkan device can't hand frames over with {producer:?}")));

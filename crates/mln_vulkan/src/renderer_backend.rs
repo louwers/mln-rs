@@ -62,11 +62,6 @@ impl RendererBackend {
         self.gpu.device()
     }
 
-    /// The backend's `Gpu`, for the ring targets' `.device()`.
-    pub(crate) fn backend_impl(&self) -> &VulkanGpu {
-        &self.gpu
-    }
-
     /// The name of the GPU.
     #[must_use]
     pub fn get_device_name(&self) -> String {

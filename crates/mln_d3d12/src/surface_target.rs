@@ -337,9 +337,7 @@ impl SurfaceTarget {
             return Ok(());
         }
         if let Some(old) = buffers.take() {
-            for texture in old.color.into_iter().chain([old.depth_stencil]) {
-                destroy_unused(gpu, [ResourceId::Texture(texture)]);
-            }
+            destroy_unused(gpu, old.color.into_iter().chain([old.depth_stencil]).map(ResourceId::Texture));
             gpu.flush(true).map_err(|error| Error::native(format!("Waiting for the GPU failed: {error}")))?;
             // SAFETY: nothing holds the buffers any more: their textures
             // went with the work that used them.

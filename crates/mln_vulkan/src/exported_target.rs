@@ -885,7 +885,7 @@ impl Exporter for VulkanExporter {
         kind: ExportKind,
         producer: SyncKind,
     ) -> Result<VulkanExporter, Error> {
-        let device = backend.backend_impl().device();
+        let device = backend.device();
         if !device.export_kinds().contains(kind) {
             return Err(Error::unsupported(format!("the Vulkan device exports no {kind:?}")));
         }
@@ -920,7 +920,7 @@ impl Exporter for VulkanExporter {
     /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when Vulkan
     /// can't make the images.
     fn allocate(&self, backend: &mut RendererBackend, size: Size) -> Result<(ExportedImages, BorrowedImages), Error> {
-        let device = backend.backend_impl().device();
+        let device = backend.device();
         let extent = vk::Extent2D { width: size.width, height: size.height };
         let images = (0..self.depth)
             .map(|_| ExportedMemory::new(device, extent, &self.layout))
