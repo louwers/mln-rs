@@ -6,7 +6,7 @@ use glam::{DMat4, DVec2, DVec3, Vec2};
 use mln_gfx::gpu::Gpu;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
-use mln_map_types::{ProjectionData, TransformState};
+use mln_map_types::{ProjectionData, View};
 use mln_style_types::TranslateAnchorType;
 use mln_tile_id::UnwrappedTileID;
 use mln_util::constants::{EXTENT, M2PI};
@@ -53,7 +53,7 @@ pub(crate) fn tile_matrix(
 ) -> DMat4 {
     tile_matrix_for(
         tile_id,
-        parameters.state,
+        parameters.view,
         parameters.transform_params,
         translation,
         anchor,
@@ -80,12 +80,12 @@ pub(crate) fn projection_data(
     origin: Option<Point<f64>>,
     aligned: bool,
 ) -> ProjectionData {
-    let mut data = parameters.state.get_projection_data_for_matrix(
+    let mut data = parameters.view.projection_data_for_matrix(
         tile_id,
         &tile_matrix(tile_id, parameters, translation, anchor, near_clipped, in_viewport_pixel_units, origin, aligned),
     );
     if !in_viewport_pixel_units {
-        let translate = RenderTile::tile_unit_translation(tile_id, translation, anchor, parameters.state);
+        let translate = RenderTile::tile_unit_translation(tile_id, translation, anchor, parameters.view);
         data.translate = DVec2::new(f64::from(translate[0]), f64::from(translate[1]));
     }
     // A draw's depth range keeps the layers apart, so the shader's depth
@@ -116,7 +116,7 @@ pub(crate) fn globe_extrude_scale(tile_id: &UnwrappedTileID, zoom: f32, latitude
         * latitude_scale) as f32
 }
 
-/// [`tile_matrix`] in `transform_state`'s view, projected with the
+/// [`tile_matrix`] in `view`, projected with the
 /// matrices of `transform_params`.
 #[expect(
     clippy::too_many_arguments,
@@ -124,7 +124,7 @@ pub(crate) fn globe_extrude_scale(tile_id: &UnwrappedTileID, zoom: f32, latitude
 )]
 pub(crate) fn tile_matrix_for(
     tile_id: &UnwrappedTileID,
-    transform_state: &TransformState,
+    view: &View,
     transform_params: &TransformParameters,
     translation: [f32; 2],
     anchor: TranslateAnchorType,
@@ -133,12 +133,12 @@ pub(crate) fn tile_matrix_for(
     in_viewport_pixel_units: bool,
     aligned: bool,
 ) -> DMat4 {
-    let mut tile_matrix = transform_state.matrix_for(tile_id);
+    let mut tile_matrix = view.tile_matrix(tile_id);
     if let Some(origin) = origin {
         tile_matrix *= DMat4::from_translation(DVec3::new(origin.x, origin.y, 0.0));
     }
     let tile_matrix = with_projection_matrix(&tile_matrix, transform_params, near_clipped, aligned);
-    translate_vtx_matrix(tile_id, &tile_matrix, translation, anchor, transform_state, in_viewport_pixel_units)
+    translate_vtx_matrix(tile_id, &tile_matrix, translation, anchor, view, in_viewport_pixel_units)
 }
 
 /// `matrix` projected with the frame's projection matrix: the pixel-aligned
@@ -166,7 +166,7 @@ pub(crate) fn translate_vtx_matrix(
     tile_matrix: &DMat4,
     translation: [f32; 2],
     anchor: TranslateAnchorType,
-    state: &TransformState,
+    state: &View,
     in_viewport_pixel_units: bool,
 ) -> DMat4 {
     if translation[0] == 0.0 && translation[1] == 0.0 {
@@ -174,9 +174,9 @@ pub(crate) fn translate_vtx_matrix(
     }
 
     let angle: f32 = if in_viewport_pixel_units {
-        if anchor == TranslateAnchorType::Map { state.get_bearing() as f32 } else { 0.0 }
+        if anchor == TranslateAnchorType::Map { state.angle() as f32 } else { 0.0 }
     } else if anchor == TranslateAnchorType::Viewport {
-        (-state.get_bearing()) as f32
+        (-state.angle()) as f32
     } else {
         0.0
     };
@@ -186,7 +186,7 @@ pub(crate) fn translate_vtx_matrix(
     let offset = if in_viewport_pixel_units {
         DVec3::new(f64::from(translate.x), f64::from(translate.y), 0.0)
     } else {
-        let zoom = state.get_zoom() as f32;
+        let zoom = state.zoom() as f32;
         DVec3::new(
             f64::from(id.pixels_to_tile_units(translate.x, zoom)),
             f64::from(id.pixels_to_tile_units(translate.y, zoom)),

@@ -6,7 +6,7 @@ use std::num::NonZeroU32;
 
 use geometry::Point;
 use glam::Vec2;
-use mln_map_types::{TileProjector, TransformState};
+use mln_map_types::{TileProjector, View};
 use mln_tile_id::OverscaledTileID;
 use mln_util::constants::EXTENT;
 use mln_util::hash::HashSet;
@@ -397,7 +397,7 @@ impl CrossTileSymbolIndex {
         &mut self,
         layer: &dyn RenderLayer,
         lng: f32,
-        state: &TransformState,
+        state: &View,
         buckets: &mut (impl SymbolBuckets + ?Sized),
     ) -> AddLayerResult {
         let layer_index = self.layer_indexes.get_or_insert_with(layer.id(), CrossTileSymbolLayerIndex::new);
@@ -432,7 +432,7 @@ impl CrossTileSymbolIndex {
     /// [`index_layer`](Self::index_layer) of the buckets that
     /// `HeldBuckets` holds, for the benchmarks.
     #[cfg(feature = "bench")]
-    pub(crate) fn add_layer(&mut self, layer: &dyn RenderLayer, lng: f32, state: &TransformState) -> AddLayerResult {
+    pub(crate) fn add_layer(&mut self, layer: &dyn RenderLayer, lng: f32, state: &View) -> AddLayerResult {
         let mut buckets = crate::render_layer::HeldBuckets::take();
         let result = self.index_layer(layer, lng, state, &mut buckets);
         buckets.restore();
@@ -453,7 +453,7 @@ impl SymbolBucket {
         &mut self,
         index: &mut CrossTileSymbolLayerIndex,
         render_tile: &PlacedTile,
-        state: &TransformState,
+        state: &View,
         max_cross_tile_id: &mut u32,
     ) -> (u32, bool) {
         let first_time_added = index.add_bucket(
@@ -583,19 +583,19 @@ mod tests {
         bucket.state.symbol_instances[i].cross_tile_id().map(NonZeroU32::get)
     }
 
-    fn camera_at(lat: f64, lon: f64, zoom: f64, globe: bool) -> TransformState {
-        let mut state = TransformState::default();
+    fn camera_at(lat: f64, lon: f64, zoom: f64, globe: bool) -> View {
+        let mut state = mln_map_types::TransformState::default();
         state.set_size(Size { width: 512, height: 512 });
         if globe {
             state.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
         }
         state.set_lat_lng_zoom(&LatLng::new(lat, lon).expect("valid LatLng"), zoom);
-        state
+        state.view().clone()
     }
 
     // Only overscaled tiles check the viewport, so any camera does for the
     // others.
-    fn any_camera() -> TransformState {
+    fn any_camera() -> View {
         camera_at(0.0, 0.0, 0.0, false)
     }
 
@@ -900,7 +900,7 @@ mod tests {
         let mut symbol_bucket = make_bucket(vec![(1000.0, 1000.0, "Pittsburgh"), (8000.0, 8000.0, "Norfolk")], 1);
         let over = camera_at(40.5, -78.0, 7.0, false);
         let away = camera_at(60.0, 25.0, 7.0, false);
-        let mut register = |camera: &TransformState| {
+        let mut register = |camera: &View| {
             let projector = TileProjector::new(camera, &tile_id.to_unwrapped());
             assert!(index.add_bucket(&tile_id, &projector, &mut symbol_bucket, &mut max_cross_tile_id));
             let ids = (cross_tile_id(&symbol_bucket, 0), cross_tile_id(&symbol_bucket, 1));

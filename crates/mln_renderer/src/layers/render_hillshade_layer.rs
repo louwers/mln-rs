@@ -652,7 +652,7 @@ impl RenderHillshadeLayer {
         let evaluated = &layer.paint;
         let mut illumination = illumination_properties(evaluated);
         if *evaluated.hillshade_illumination_anchor.uniform() == HillshadeIlluminationAnchorType::Viewport {
-            let bearing = parameters.state.get_bearing() as f32;
+            let bearing = parameters.view.angle() as f32;
             for azimuth in &mut illumination.direction_radians {
                 *azimuth -= bearing;
             }

@@ -9,7 +9,7 @@ use geo_types::Geometry;
 use glam::{DMat4, DVec3};
 use mln_map_types::{
     AnimationOptions, BoundOptions, CameraDelta, CameraError, CameraOptions, CameraUpdate, MapDebugOptions, MapMode,
-    MapView, ProjectionMode, TileLodMode, TransformState, VerticalPerspectiveProjection, Viewport,
+    ProjectionMode, TileLodMode, TransformState, VerticalPerspectiveProjection, Viewport,
 };
 use mln_renderer::{
     Registry, RendererEvent, RendererEvents, RenderingStats, UpdateParameters, UpdateReader, UpdateSlot,
@@ -214,11 +214,13 @@ impl Map {
     // MARK: - Renderer
 
     /// A reader of the updates that the map publishes for its renderer.
+    #[must_use]
     pub fn update_reader(&self) -> UpdateReader {
         self.updates.reader()
     }
 
     /// The queue that the map's renderer reports its events to.
+    #[must_use]
     pub fn renderer_events(&self) -> RendererEvents {
         self.renderer_events.clone()
     }
@@ -239,6 +241,7 @@ impl Map {
     }
 
     /// How many command groups are open.
+    #[must_use]
     pub fn command_group_depth(&self) -> u32 {
         self.updates.group_depth()
     }
@@ -585,7 +588,9 @@ impl Map {
             pixel_ratio: self.pixel_ratio,
             debug_options: self.debug_options,
             time_point,
-            transform_state: self.transform.get_state().clone(),
+            view: self.transform.get_state().view().clone(),
+            min_zoom: self.transform.get_state().get_min_zoom(),
+            max_zoom: self.transform.get_state().get_max_zoom(),
             camera_moving: self.transform.is_camera_moving(),
             style: Arc::clone(&self.style),
             sprite_loaded: self.loader.sprites_loaded(),
@@ -729,6 +734,7 @@ impl Map {
 
     /// The state of the feature `feature_id` of the source `source_id`, in
     /// its source layer `source_layer_id`, empty when it has none.
+    #[must_use]
     pub fn get_feature_state(
         &self,
         source_id: &str,
@@ -771,6 +777,7 @@ impl Map {
     // MARK: - Style
 
     /// The map's style.
+    #[must_use]
     pub fn style(&self) -> &Arc<Style> {
         &self.style
     }
@@ -1070,10 +1077,10 @@ impl Map {
     /// corners have no `LatLng`.
     pub fn lat_lng_bounds_for_camera(&self, camera: &CameraOptions) -> Result<LatLngBounds, Error> {
         let mut shallow = Transform::from_state(self.transform.get_state().clone());
-        let size = shallow.get_state().get_size();
+        let size = shallow.get_state().view().size();
 
         shallow.jump_to(camera);
-        if shallow.get_state().is_globe_rendering() {
+        if shallow.get_state().view().is_globe() {
             return globe_bounds(&shallow);
         }
         Ok(LatLngBounds::hull(
@@ -1165,10 +1172,10 @@ impl Map {
     /// [`lat_lng_bounds_for_camera`](Self::lat_lng_bounds_for_camera) does.
     pub fn lat_lng_bounds_for_camera_unwrapped(&self, camera: &CameraOptions) -> Result<LatLngBounds, Error> {
         let mut shallow = Transform::from_state(self.transform.get_state().clone());
-        let size = shallow.get_state().get_size();
+        let size = shallow.get_state().view().size();
 
         shallow.jump_to(camera);
-        if shallow.get_state().is_globe_rendering() {
+        if shallow.get_state().view().is_globe() {
             return globe_bounds(&shallow);
         }
         let width = f64::from(size.width);
@@ -1212,7 +1219,7 @@ impl Map {
                 // On the globe the lowest zoom falls with latitude; on
                 // Mercator it is the minimum.
                 let state = transform.get_state();
-                let latitude_term = state.get_min_zoom_at_latitude(state.get_lat_lng(WrapMode::Unwrapped).latitude())
+                let latitude_term = state.get_min_zoom_at_latitude(state.view().center(WrapMode::Unwrapped).latitude())
                     - state.get_min_zoom();
                 let min_zoom = min_zoom + latitude_term;
                 if transform.get_zoom() < min_zoom {
@@ -1259,10 +1266,10 @@ impl Map {
     pub fn set_viewport(&mut self, viewport: &Viewport) {
         let state = self.transform.get_state();
         let (orientation, constrain_mode, viewport_mode, frustum_offset) = (
-            state.get_north_orientation(),
+            state.view().north_orientation(),
             state.get_constrain_mode(),
-            state.get_viewport_mode(),
-            state.get_frustum_offset(),
+            state.view().viewport_mode(),
+            state.view().frustum_offset(),
         );
         if viewport.north_orientation != orientation {
             self.transform.set_north_orientation(viewport.north_orientation);
@@ -1316,6 +1323,7 @@ impl Map {
 
     // MARK: - Transform
 
+    #[must_use]
     pub fn get_transform_state(&self) -> TransformState {
         self.transform.get_state().clone()
     }
@@ -1335,9 +1343,10 @@ impl Map {
     // gtests-core: projection and prefetch zoom delta (test/map, test/api).
     // MARK: - Projection
 
+    #[must_use]
     pub fn pixel_for_lat_lng(&self, lat_lng: &LatLng) -> ScreenCoordinate {
         let transform = &self.transform;
-        transform.lat_lng_to_screen_coordinate(&transform.get_state().lat_lng_near_center(lat_lng))
+        transform.lat_lng_to_screen_coordinate(&transform.get_state().view().lat_lng_near_center(lat_lng))
     }
 
     /// The location under `pixel`. Fails with
@@ -1400,12 +1409,14 @@ impl Map {
 
     /// Grows with each change to the map's state: each call that changes it,
     /// and each change that loading, rendering and animations make.
+    #[must_use]
     pub fn generation(&self) -> u64 {
         self.generation
     }
 
     /// Counts the updates that the map has published for its renderer.
     /// An update that a command group holds back counts when it shows.
+    #[must_use]
     pub fn update_generation(&self) -> u64 {
         self.updates.generation()
     }
@@ -1414,16 +1425,18 @@ impl Map {
     /// [`update_generation`](Self::update_generation), or while a command
     /// group holds an update back, the one that the outermost group's end
     /// shows.
+    #[must_use]
     pub fn pending_update_generation(&self) -> u64 {
         self.updates.pending_generation()
     }
 
     /// Copies the map's state.
+    #[must_use]
     pub fn snapshot(&self) -> MapSnapshot {
         let transform = &self.transform;
         let state = transform.get_state();
         let bounds = state.get_lat_lng_bounds();
-        let free_camera = state.get_free_camera_options();
+        let free_camera = state.view().free_camera_options();
         MapSnapshot {
             generation: self.generation,
             update_generation: self.updates.generation(),
@@ -1444,8 +1457,8 @@ impl Map {
                 position: free_camera.position.unwrap_or_default(),
                 orientation: free_camera.orientation.unwrap_or_default(),
             },
-            view: MapView::from_state(state, f64::from(self.pixel_ratio)),
-            globe_rendering: state.is_globe_rendering(),
+            view: state.view().map_view(f64::from(self.pixel_ratio)),
+            globe_rendering: state.view().is_globe(),
             globe_free_bearing: transform.is_globe_free_bearing(),
         }
     }
@@ -1492,7 +1505,7 @@ pub(crate) fn camera_for_lat_lngs(
     if lat_lngs.is_empty() {
         return Ok(CameraOptions::default());
     }
-    if transform.get_state().is_globe_rendering() {
+    if transform.get_state().view().is_globe() {
         camera_for_lat_lngs_on_globe(lat_lngs, transform, padding)
     } else {
         camera_for_lat_lngs_on_screen(lat_lngs, transform, padding)
@@ -1505,7 +1518,7 @@ fn camera_for_lat_lngs_on_screen(
     transform: &Transform,
     padding: &EdgeInsets,
 ) -> Result<CameraOptions, Error> {
-    let size = transform.get_state().get_size();
+    let size = transform.get_state().view().size();
     // Calculate the bounds of the possibly rotated shape with respect to the viewport.
     let mut ne_pixel = ScreenCoordinate::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
     let mut sw_pixel = ScreenCoordinate::new(f64::INFINITY, f64::INFINITY);
@@ -1628,8 +1641,8 @@ fn camera_for_lat_lngs_on_globe(
         ..Default::default()
     });
     let state = globe.get_state();
-    let matrix = state.get_globe_view_projection_matrix();
-    let size = state.get_size();
+    let matrix = state.view().globe_view_projection_matrix();
+    let size = state.view().size();
     let width = f64::from(size.width);
     let height = f64::from(size.height);
     let left = padding.left() / width * 2.0 - 1.0;
@@ -1680,7 +1693,7 @@ fn camera_for_lat_lngs_on_globe(
         return Ok(fit);
     }
     Ok(CameraOptions {
-        zoom: Some(f64::min(globe.get_zoom() + state.scale_zoom(smallest), state.get_max_zoom())),
+        zoom: Some(f64::min(globe.get_zoom() + mln_map_types::scale_zoom(smallest), state.get_max_zoom())),
         ..fit
     })
 }
@@ -1690,8 +1703,8 @@ fn camera_for_lat_lngs_on_globe(
 /// every longitude when a pole is on screen.
 /// Fails as `Map::lat_lng_bounds_for_camera` does.
 fn globe_bounds(transform: &Transform) -> Result<LatLngBounds, Error> {
-    let width = f64::from(transform.get_state().get_size().width);
-    let height = f64::from(transform.get_state().get_size().height);
+    let width = f64::from(transform.get_state().view().size().width);
+    let height = f64::from(transform.get_state().view().size().height);
     let center = transform.get_lat_lng(WrapMode::Wrapped);
     let mut west = 0.0;
     let mut east = 0.0;
@@ -1725,12 +1738,12 @@ fn globe_bounds(transform: &Transform) -> Result<LatLngBounds, Error> {
     let on_screen = |pole: &LatLng| {
         // In front of the camera and inside its depth range, as GL JS's
         // isSurfacePointOnScreen asks.
-        let (_, clip) = VerticalPerspectiveProjection::lat_lng_to_screen_coordinate(transform.get_state(), pole);
+        let (_, clip) = VerticalPerspectiveProjection::lat_lng_to_screen_coordinate(transform.get_state().view(), pole);
         if clip[3] <= 0.0 || (clip[2] / clip[3]).abs() >= 1.0 {
             return false;
         }
         let point = transform.lat_lng_to_screen_coordinate(pole);
-        !transform.get_state().is_location_occluded(pole)
+        !transform.get_state().view().is_location_occluded(pole)
             && point.x > 0.0
             && point.x < width
             && point.y > 0.0

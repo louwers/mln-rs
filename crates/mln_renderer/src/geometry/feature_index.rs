@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use geometry::Point;
-use mln_map_types::{ProjectionData, TileProjector, TransformState};
+use mln_map_types::{ProjectionData, TileProjector, View};
 use mln_style::expression::expression::FeatureState;
 use mln_style::expression::{EvaluationContext, GlobalStateMap};
 use mln_style_types::TranslateAnchorType;
@@ -203,7 +203,7 @@ impl FeatureIndex {
         &self,
         result: &mut QueryResults,
         query_geometry: &GeometryCoordinates,
-        transform_state: &TransformState,
+        view: &View,
         projector: &TileProjector<'_>,
         tile_size: f64,
         scale: f64,
@@ -262,7 +262,7 @@ impl FeatureIndex {
                 tile_id,
                 layers,
                 query_geometry,
-                transform_state,
+                view,
                 pixels_to_tile_units,
                 projector,
                 Some(source_feature_state),
@@ -309,9 +309,8 @@ impl FeatureIndex {
             }
         });
 
-        let transform_state = TransformState::default();
-        let unused_projector =
-            TileProjector::with_data(&transform_state, &tile_id.to_unwrapped(), ProjectionData::default());
+        let view = View::default();
+        let unused_projector = TileProjector::with_data(&view, &tile_id.to_unwrapped(), ProjectionData::default());
         for symbol_feature in sorted_features {
             self.add_feature(
                 &mut result,
@@ -323,7 +322,7 @@ impl FeatureIndex {
                 tile_id,
                 layers,
                 &GeometryCoordinates::new(),
-                &transform_state,
+                &view,
                 0.0,
                 &unused_projector,
                 None,
@@ -347,7 +346,7 @@ impl FeatureIndex {
         tile_id: &OverscaledTileID,
         layers: &QueryLayers<'_>,
         query_geometry: &GeometryCoordinates,
-        transform_state: &TransformState,
+        view: &View,
         pixels_to_tile_units: f32,
         projector: &TileProjector<'_>,
         source_feature_state: Option<&SourceFeatureState>,
@@ -395,8 +394,8 @@ impl FeatureIndex {
                     query_geometry,
                     &feature,
                     &geometry,
-                    transform_state.get_zoom() as f32,
-                    transform_state,
+                    view.zoom() as f32,
+                    view,
                     pixels_to_tile_units,
                     projector,
                     &state,

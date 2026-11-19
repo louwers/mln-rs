@@ -998,9 +998,9 @@ impl RenderSymbolLayer {
         draw: &SymbolDraw,
         parameters: &PaintParameters<'_>,
     ) -> Option<SymbolUniforms> {
-        let state = parameters.state;
+        let state = parameters.view;
         let evaluated = &layer.paint;
-        let zoom = state.get_zoom() as f32;
+        let zoom = state.zoom() as f32;
         let paint_properties = bucket.paint_properties.get(layer_id)?;
 
         let data = &draw.data;
@@ -1015,7 +1015,7 @@ impl RenderSymbolLayer {
         let translate = if is_text { &evaluated.text_translate } else { &evaluated.icon_translate };
         let anchor = if is_text { &evaluated.text_translate_anchor } else { &evaluated.icon_translate_anchor };
         let mut projection: ProjectionData = if is_screen_space {
-            Projection::Mercator.get_projection_data(state, &tile_id, &screen_matrix(*translate.uniform()))
+            Projection::Mercator.projection_data(state, &tile_id, &screen_matrix(*translate.uniform()))
         } else {
             const NEAR_CLIPPED: bool = false;
             const IN_VIEWPORT_PIXEL_UNITS: bool = false;
@@ -1054,7 +1054,7 @@ impl RenderSymbolLayer {
         };
         let gl_coord_matrix = gl_coord_matrix(pitch_with_map, rotate_with_map, state, pixels_to_tile_units);
         let gamma_scale =
-            if pitch_with_map { (state.get_pitch().cos() as f32) * state.get_camera_to_center_distance() } else { 1.0 };
+            if pitch_with_map { (state.pitch().cos() * state.camera_to_center_distance()) as f32 } else { 1.0 };
 
         // Line labels rotate as their placement projects them along their
         // lines (`reproject_line_labels`). Pitched point labels rotate with
@@ -1107,7 +1107,7 @@ impl RenderSymbolLayer {
                 halo_blur_t,
                 is_along_line: i32::from(along_line),
                 is_variable_anchor: i32::from(has_variable_placement),
-                pitched_scale: state.get_projection().circle_radius_correction(state) as f32,
+                pitched_scale: state.projection().circle_radius_correction(state) as f32,
                 translation: tile_translation,
                 gamma_scale,
                 is_halo: i32::from(data.is_halo),
@@ -1228,7 +1228,7 @@ fn write_collision_uniforms(
         false,
     );
 
-    let zoom = parameters.state.get_zoom();
+    let zoom = parameters.view.zoom();
     let pixel_ratio = unwrapped.pixels_to_tile_units(1.0, zoom as f32);
     let scale = 2f64.powf(zoom - f64::from(tile_id.overscaled_z)) as f32;
     let extrude_scale = [
@@ -1345,7 +1345,7 @@ impl TypedLayer for RenderSymbolLayer {
             icon: Option<AtlasBinding>,
         }
 
-        let (static_data, transform) = (paint_parameters.static_data, paint_parameters.state);
+        let (static_data, transform) = (paint_parameters.static_data, paint_parameters.view);
         let shaders = &static_data.shaders;
         let passes = self.base.passes;
         if passes != self.draws_passes {
@@ -1383,7 +1383,7 @@ impl TypedLayer for RenderSymbolLayer {
             if is_screen_space { ProjectionVariant::Mercator } else { self.base.projection_variant };
         let is_offset = !layout.icon_offset.is_undefined();
 
-        let current_zoom = transform.get_zoom() as f32;
+        let current_zoom = transform.zoom() as f32;
 
         let mut renderable_segments = std::mem::take(&mut self.renderable_segments);
         renderable_segments.clear();

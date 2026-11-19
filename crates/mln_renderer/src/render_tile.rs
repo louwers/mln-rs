@@ -7,7 +7,7 @@
 // the frame's update, before the layers read them.
 
 use glam::{DMat4, Vec2};
-use mln_map_types::{MapDebugOptions, ProjectionData, TransformState};
+use mln_map_types::{MapDebugOptions, ProjectionData, View};
 use mln_style_types::TranslateAnchorType;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 
@@ -66,14 +66,14 @@ impl RenderTile {
         id: &UnwrappedTileID,
         translation: [f32; 2],
         anchor: TranslateAnchorType,
-        state: &TransformState,
+        state: &View,
     ) -> [f32; 2] {
         if translation[0] == 0.0 && translation[1] == 0.0 {
             return [0.0, 0.0];
         }
-        let angle = if anchor == TranslateAnchorType::Viewport { (-state.get_bearing()) as f32 } else { 0.0f32 };
+        let angle = if anchor == TranslateAnchorType::Viewport { (-state.angle()) as f32 } else { 0.0f32 };
         let translate = Vec2::from_angle(angle).rotate(Vec2::new(translation[0], translation[1]));
-        let zoom = state.get_zoom() as f32;
+        let zoom = state.zoom() as f32;
         [id.pixels_to_tile_units(translate.x, zoom), id.pixels_to_tile_units(translate.y, zoom)]
     }
 
@@ -134,7 +134,7 @@ impl RenderTile {
 
     /// Sets the tile's projection and its standard matrix for `transform`.
     pub(crate) fn set_projection(&mut self, transform: &TransformParameters) {
-        self.projection = transform.state.get_projection_data_with(&self.id, &transform.proj_matrix);
+        self.projection = transform.view.projection_data_with(&self.id, &transform.proj_matrix);
         self.matrix = self.projection.main_matrix;
     }
 }

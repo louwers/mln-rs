@@ -52,6 +52,13 @@ fn biased_f32(x: f32) -> u32 {
     if bits & SIGN != 0 { (!bits).wrapping_add(1) } else { bits | SIGN }
 }
 
+/// `actual` at C++'s screen point `expected`, within the 1e-7 of its
+/// distance from the origin that C++'s float field of view moves it.
+#[track_caller]
+fn assert_cpp_pixel(expected: f64, actual: f64) {
+    assert_near(expected, actual, expected.abs() * 1e-7 + 1e-9);
+}
+
 /// `EXPECT_DOUBLE_EQ`/`ASSERT_DOUBLE_EQ`: at most 4 ULPs apart, NaN never
 /// equal.
 #[track_caller]
@@ -286,8 +293,8 @@ fn integer_zoom() {
     let mut check_integer_zoom = |zoom_int: u8, zoom: f64| {
         transform.jump_to(&CameraOptions { zoom: Some(zoom), ..Default::default() });
         assert_near(transform.get_zoom(), zoom, 1e-8);
-        assert_eq!(transform.get_state().get_integer_zoom(), zoom_int);
-        assert_near(transform.get_state().get_zoom_fraction(), zoom - f64::from(zoom_int), 1e-8);
+        assert_eq!(transform.get_state().view().integer_zoom(), zoom_int);
+        assert_near(transform.get_state().view().zoom_fraction(), zoom - f64::from(zoom_int), 1e-8);
     };
 
     for zoom_int in 0u8..20 {
@@ -321,24 +328,27 @@ fn perspective_projection() {
     assert_double_eq(-77.0, loc.longitude());
     assert_double_eq(38.0, loc.latitude());
 
-    let loc = transform.get_state().screen_coordinate_to_lat_lng(&sc(0.0, 1000.0), WrapMode::Unwrapped).unwrap();
+    let loc = transform.get_state().view().screen_coordinate_to_lat_lng(&sc(0.0, 1000.0), WrapMode::Unwrapped).unwrap();
     assert_near(-77.591_989_611_991_48, loc.longitude(), 1e-6);
     assert_near(38.746_613_263_020_18, loc.latitude(), 1e-6);
 
-    let loc = transform.get_state().screen_coordinate_to_lat_lng(&sc(1000.0, 0.0), WrapMode::Unwrapped).unwrap();
+    let loc = transform.get_state().view().screen_coordinate_to_lat_lng(&sc(1000.0, 0.0), WrapMode::Unwrapped).unwrap();
     assert_near(-76.758_232_392_056_41, loc.longitude(), 1e-6);
     assert_near(37.692_872_969_426_375, loc.latitude(), 1e-6);
 
-    let point = transform.get_state().lat_lng_to_screen_coordinate(&ll(38.746_613_263_020_18, -77.591_989_611_991_48));
+    let point =
+        transform.get_state().view().lat_lng_to_screen_coordinate(&ll(38.746_613_263_020_18, -77.591_989_611_991_48));
     assert_near(point.x, 0.0, 1e-5);
     assert_near(point.y, 1000.0, 1e-4);
 
-    let point = transform.get_state().lat_lng_to_screen_coordinate(&ll(37.692_872_969_426_375, -76.758_232_392_056_41));
+    let point =
+        transform.get_state().view().lat_lng_to_screen_coordinate(&ll(37.692_872_969_426_375, -76.758_232_392_056_41));
     assert_near(point.x, 1000.0, 1e-5);
     assert_near(point.y, 0.0, 1e-4);
 
     let (point, p) = transform
         .get_state()
+        .view()
         .lat_lng_to_screen_coordinate_with_clip(&ll(37.692_872_969_426_375, -76.758_232_392_056_41));
     assert_near(point.x, 1000.0, 1e-5);
     assert_near(point.y, 0.0, 1e-4);
@@ -352,6 +362,7 @@ fn perspective_projection() {
     });
     let (_, p) = transform
         .get_state()
+        .view()
         .lat_lng_to_screen_coordinate_with_clip(&ll(7.692_872_969_426_375, -76.758_232_392_056_41));
     assert!(p[3] < 0.0);
 }
@@ -372,16 +383,18 @@ fn unwrapped_lat_lng() {
 
     let state = transform.get_state();
 
-    let from_get_lat_lng = state.get_lat_lng(WrapMode::Unwrapped);
+    let from_get_lat_lng = state.view().center(WrapMode::Unwrapped);
     assert_double_eq(from_get_lat_lng.latitude(), 38.0);
     assert_double_eq(from_get_lat_lng.longitude(), -77.0);
 
-    let from_screen_coordinate = state.screen_coordinate_to_lat_lng(&sc(500.0, 500.0), WrapMode::Unwrapped).unwrap();
+    let from_screen_coordinate =
+        state.view().screen_coordinate_to_lat_lng(&sc(500.0, 500.0), WrapMode::Unwrapped).unwrap();
     assert_near(from_screen_coordinate.latitude(), 38.0, 1e-8);
     assert_near(from_screen_coordinate.longitude(), -77.0, 1e-8);
 
     let mut wrapped_rightwards = state
-        .screen_coordinate_to_lat_lng(&state.lat_lng_to_screen_coordinate(&ll(38.0, 283.0)), WrapMode::Unwrapped)
+        .view()
+        .screen_coordinate_to_lat_lng(&state.view().lat_lng_to_screen_coordinate(&ll(38.0, 283.0)), WrapMode::Unwrapped)
         .unwrap();
     assert_near(wrapped_rightwards.latitude(), 38.0, 1e-8);
     assert_near(wrapped_rightwards.longitude(), 283.0, 1e-8);
@@ -389,7 +402,11 @@ fn unwrapped_lat_lng() {
     assert_near(wrapped_rightwards.longitude(), -77.0, 1e-8);
 
     let mut wrapped_leftwards = state
-        .screen_coordinate_to_lat_lng(&state.lat_lng_to_screen_coordinate(&ll(38.0, -437.0)), WrapMode::Unwrapped)
+        .view()
+        .screen_coordinate_to_lat_lng(
+            &state.view().lat_lng_to_screen_coordinate(&ll(38.0, -437.0)),
+            WrapMode::Unwrapped,
+        )
         .unwrap();
     assert_double_eq(wrapped_leftwards.latitude(), wrapped_rightwards.latitude());
     assert_near(wrapped_leftwards.longitude(), -437.0, 1e-8);
@@ -407,15 +424,15 @@ fn lat_lng_near_center() {
     transform.resize(Size::new(512, 512)).unwrap();
 
     transform.jump_to(&CameraOptions { center: Some(ll(0.0, -10.0)), zoom: Some(4.0), ..Default::default() });
-    assert_near(-181.0, transform.get_state().lat_lng_near_center(&ll(0.0, 179.0)).longitude(), 1e-9);
-    assert_near(170.0, transform.get_state().lat_lng_near_center(&ll(0.0, 170.0)).longitude(), 1e-9);
+    assert_near(-181.0, transform.get_state().view().lat_lng_near_center(&ll(0.0, 179.0)).longitude(), 1e-9);
+    assert_near(170.0, transform.get_state().view().lat_lng_near_center(&ll(0.0, 170.0)).longitude(), 1e-9);
 
     transform.set_lat_lng_bounds(LatLngBounds::hull(ll(-10.0, 170.0), ll(10.0, 190.0))).unwrap();
     transform.jump_to(&CameraOptions { center: Some(ll(0.0, 181.0)), ..Default::default() });
-    assert_near(181.0, transform.get_state().get_lat_lng(WrapMode::Unwrapped).longitude(), 1e-9);
-    assert_near(179.0, transform.get_state().lat_lng_near_center(&ll(0.0, 179.0)).longitude(), 1e-9);
-    assert_near(180.2, transform.get_state().lat_lng_near_center(&ll(0.0, -179.8)).longitude(), 1e-9);
-    assert_near(350.0, transform.get_state().lat_lng_near_center(&ll(0.0, -10.0)).longitude(), 1e-9);
+    assert_near(181.0, transform.get_state().view().center(WrapMode::Unwrapped).longitude(), 1e-9);
+    assert_near(179.0, transform.get_state().view().lat_lng_near_center(&ll(0.0, 179.0)).longitude(), 1e-9);
+    assert_near(180.2, transform.get_state().view().lat_lng_near_center(&ll(0.0, -179.8)).longitude(), 1e-9);
+    assert_near(350.0, transform.get_state().view().lat_lng_near_center(&ll(0.0, -10.0)).longitude(), 1e-9);
 }
 
 // gtest: Transform.ConstrainHeightOnly
@@ -472,7 +489,7 @@ fn anchor() {
     assert_double_eq(0.0, transform.get_bearing());
 
     let anchor_lat_lng =
-        transform.get_state().screen_coordinate_to_lat_lng(&anchor_point, WrapMode::Unwrapped).unwrap();
+        transform.get_state().view().screen_coordinate_to_lat_lng(&anchor_point, WrapMode::Unwrapped).unwrap();
     assert_ne!(lat_lng.latitude(), anchor_lat_lng.latitude());
     assert_ne!(lat_lng.longitude(), anchor_lat_lng.longitude());
 
@@ -690,19 +707,19 @@ fn antimeridian() {
     // San Francisco
     let coordinate_san_francisco = ll(37.7833, -122.4167);
     let pixel_sf = transform.lat_lng_to_screen_coordinate(&coordinate_san_francisco);
-    assert_double_eq(151.792_494_371_764_32, pixel_sf.x);
-    assert_double_eq(383.767_207_825_276_6, pixel_sf.y);
+    assert_cpp_pixel(151.792_494_371_764_32, pixel_sf.x);
+    assert_cpp_pixel(383.767_207_825_276_6, pixel_sf.y);
 
     transform.jump_to(&CameraOptions { center: Some(ll(0.0, -181.0)), ..Default::default() });
 
     let pixel_sf_longest = transform.lat_lng_to_screen_coordinate(&coordinate_san_francisco);
-    assert_double_eq(-357.363_066_164_128_16, pixel_sf_longest.x);
+    assert_cpp_pixel(-357.363_066_164_128_16, pixel_sf_longest.x);
     assert_double_eq(pixel_sf.y, pixel_sf_longest.y);
     let mut unwrapped_sf = coordinate_san_francisco.wrapped();
     unwrapped_sf.unwrap_for_shortest_path(&transform.get_lat_lng(WrapMode::Wrapped));
 
     let pixel_sf_shortest = transform.lat_lng_to_screen_coordinate(&unwrapped_sf);
-    assert_double_eq(666.636_943_852_191_7, pixel_sf_shortest.x);
+    assert_cpp_pixel(666.636_943_852_191_7, pixel_sf_shortest.x);
     assert_double_eq(pixel_sf.y, pixel_sf_shortest.y);
 
     transform.jump_to(&CameraOptions { center: Some(ll(0.0, 179.0)), ..Default::default() });
@@ -714,19 +731,19 @@ fn antimeridian() {
     let coordinate_waikiri = ll(-16.9310, 179.9787);
     transform.jump_to(&CameraOptions { center: Some(coordinate_waikiri), zoom: Some(10.0), ..Default::default() });
     let pixel_waikiri = transform.lat_lng_to_screen_coordinate(&coordinate_waikiri);
-    assert_double_eq(500.0, pixel_waikiri.x);
-    assert_double_eq(500.0, pixel_waikiri.y);
+    assert_cpp_pixel(500.0, pixel_waikiri.x);
+    assert_cpp_pixel(500.0, pixel_waikiri.y);
 
     transform
         .jump_to(&CameraOptions { center: Some(ll(coordinate_waikiri.latitude(), 180.0213)), ..Default::default() });
     let pixel_waikiri_longest = transform.lat_lng_to_screen_coordinate(&coordinate_waikiri);
-    assert_double_eq(524_725.964_381_082_3, pixel_waikiri_longest.x);
+    assert_cpp_pixel(524_725.964_381_082_3, pixel_waikiri_longest.x);
     assert_double_eq(pixel_waikiri.y, pixel_waikiri_longest.y);
 
     let mut unwrapped_waikiri = coordinate_waikiri.wrapped();
     unwrapped_waikiri.unwrap_for_shortest_path(&transform.get_lat_lng(WrapMode::Wrapped));
     let pixel_waikiri_shortest = transform.lat_lng_to_screen_coordinate(&unwrapped_waikiri);
-    assert_double_eq(437.959_252_726_483_44, pixel_waikiri_shortest.x);
+    assert_cpp_pixel(437.959_252_726_483_44, pixel_waikiri_shortest.x);
     assert_double_eq(pixel_waikiri.y, pixel_waikiri_shortest.y);
 
     let coordinate_from_pixel =
@@ -945,11 +962,11 @@ fn default_transform() {
     assert_eq!(count(&transform, did_change), 1);
 
     let center = sc(f64::from(max) / 2.0, f64::from(max) / 2.0);
-    let lat_lng = transform.get_state().screen_coordinate_to_lat_lng(&center, WrapMode::Unwrapped).unwrap();
+    let lat_lng = transform.get_state().view().screen_coordinate_to_lat_lng(&center, WrapMode::Unwrapped).unwrap();
     assert_near(lat_lng.latitude(), null_island.latitude(), 1e-8);
     assert_near(lat_lng.longitude(), null_island.longitude(), 1e-8);
 
-    let point = transform.get_state().lat_lng_to_screen_coordinate(&null_island);
+    let point = transform.get_state().view().lat_lng_to_screen_coordinate(&null_island);
     assert_double_eq(point.x, center.x);
     assert_double_eq(point.y, center.y);
 
@@ -973,7 +990,7 @@ fn default_transform() {
     assert!(!transform.in_transition());
     assert_near(transform.get_lat_lng(WrapMode::Wrapped).longitude(), 8.22103, 1e-4);
     assert_near(transform.get_lat_lng(WrapMode::Wrapped).latitude(), 46.6905, 1e-4);
-    assert_near(transform.get_state().get_scale(), 38.1529, 1e-4);
+    assert_near(transform.get_state().view().scale(), 38.1529, 1e-4);
 }
 
 // gtest: Transform.LatLngBounds
@@ -1344,7 +1361,7 @@ fn padding_preserves_minimum_pitch() {
                 ..Default::default()
             });
             assert_double_eq(deg2rad(min_pitch), transform.get_pitch());
-            assert_double_eq(f64::from(size) * 24.0, transform.get_state().get_edge_insets().top());
+            assert_double_eq(f64::from(size) * 24.0, transform.get_state().view().padding().top());
 
             transform.resize(Size::new(800, 600)).unwrap();
             assert_double_eq(deg2rad(min_pitch), transform.get_pitch());
@@ -1458,12 +1475,12 @@ fn free_camera_options_invalid_z() {
     // Invalid z-value (<= 0.0 || > 1) should be clamped to respect both min&max zoom values
     let mut options = FreeCameraOptions { position: Some(dvec3(0.1, 0.1, 0.0)), ..FreeCameraOptions::default() };
     transform.set_free_camera_options(&options);
-    assert_double_eq(transform.get_state().get_max_zoom(), transform.get_state().get_zoom());
+    assert_double_eq(transform.get_state().get_max_zoom(), transform.get_state().view().zoom());
     assert!(transform.get_free_camera_options().position.unwrap()[2] > 0.0);
 
     options.position = Some(dvec3(0.5, 0.2, 123.456));
     transform.set_free_camera_options(&options);
-    assert_double_eq(transform.get_state().get_min_zoom(), transform.get_state().get_zoom());
+    assert_double_eq(transform.get_state().get_min_zoom(), transform.get_state().view().zoom());
     assert!(transform.get_free_camera_options().position.unwrap()[2] <= 1.0);
 }
 
@@ -1500,15 +1517,15 @@ fn free_camera_options_high_pitch() {
         orientation: Some(DQuat::from_axis_angle(dvec3(1.0, 0.0, 0.0), deg2rad(-90.0))),
     };
     transform.set_free_camera_options(&options);
-    assert_double_eq(deg2rad(90.0), transform.get_state().get_pitch());
-    assert_double_eq(0.0, transform.get_state().get_bearing());
+    assert_double_eq(deg2rad(90.0), transform.get_state().view().pitch());
+    assert_double_eq(0.0, transform.get_state().view().angle());
     assert_vec3_near_1e5(transform.get_free_camera_options().position.unwrap(), dvec3(0.1, 0.1, 0.1));
 
     options.position = Some(dvec3(0.1, 0.1, 0.1));
     options.orientation = Some(DQuat::from_axis_angle(dvec3(1.0, 0.0, 0.0), deg2rad(-135.0)));
     transform.set_free_camera_options(&options);
-    assert_double_eq(deg2rad(135.0), transform.get_state().get_pitch());
-    assert_double_eq(0.0, transform.get_state().get_bearing());
+    assert_double_eq(deg2rad(135.0), transform.get_state().view().pitch());
+    assert_double_eq(0.0, transform.get_state().view().angle());
     assert_vec3_near_1e5(transform.get_free_camera_options().position.unwrap(), dvec3(0.1, 0.1, 0.1));
 }
 
@@ -1555,32 +1572,32 @@ fn free_camera_options_set_orientation() {
     transform.resize(Size::new(100, 100)).unwrap();
     let mut options = FreeCameraOptions { orientation: Some(DQuat::IDENTITY), ..FreeCameraOptions::default() };
     transform.set_free_camera_options(&options);
-    assert_double_eq(0.0, transform.get_state().get_bearing());
-    assert_double_eq(0.0, transform.get_state().get_pitch());
-    assert_double_eq(0.0, transform.get_state().get_x());
-    assert_double_eq(0.0, transform.get_state().get_y());
+    assert_double_eq(0.0, transform.get_state().view().angle());
+    assert_double_eq(0.0, transform.get_state().view().pitch());
+    assert_double_eq(0.0, transform.get_state().view().x());
+    assert_double_eq(0.0, transform.get_state().view().y());
 
     options.orientation = Some(DQuat::from_axis_angle(dvec3(1.0, 0.0, 0.0), deg2rad(-60.0)));
     transform.set_free_camera_options(&options);
-    assert_double_eq(0.0, transform.get_state().get_bearing());
-    assert_double_eq(deg2rad(60.0), transform.get_state().get_pitch());
-    assert_double_eq(0.0, transform.get_state().get_x());
-    assert_double_eq(206.0, transform.get_state().get_y());
+    assert_double_eq(0.0, transform.get_state().view().angle());
+    assert_double_eq(deg2rad(60.0), transform.get_state().view().pitch());
+    assert_double_eq(0.0, transform.get_state().view().x());
+    assert_double_eq(206.0, transform.get_state().view().y());
 
     options.orientation = Some(DQuat::from_axis_angle(dvec3(0.0, 0.0, 1.0), deg2rad(56.0)));
     transform.set_free_camera_options(&options);
-    assert_double_eq(deg2rad(-56.0), transform.get_state().get_bearing());
-    assert_double_eq(0.0, transform.get_state().get_pitch());
-    assert_double_eq(0.0, transform.get_state().get_roll());
-    assert_double_eq(0.0, transform.get_state().get_x());
-    assert_near(152.192_378, transform.get_state().get_y(), 1e-6);
+    assert_double_eq(deg2rad(-56.0), transform.get_state().view().angle());
+    assert_double_eq(0.0, transform.get_state().view().pitch());
+    assert_double_eq(0.0, transform.get_state().view().roll());
+    assert_double_eq(0.0, transform.get_state().view().x());
+    assert_near(152.192_378, transform.get_state().view().y(), 1e-6);
 
     options.orientation = Some(euler(0.0, 0.0, deg2rad(-179.0)) * (euler(deg2rad(-30.0), 0.0, 0.0)));
     transform.set_free_camera_options(&options);
-    assert_double_eq(deg2rad(179.0), transform.get_state().get_bearing());
-    assert_double_eq(deg2rad(30.0), transform.get_state().get_pitch());
-    assert_near(1.308_930, transform.get_state().get_x(), 1e-6);
-    assert_near(56.813_889, transform.get_state().get_y(), 1e-6);
+    assert_double_eq(deg2rad(179.0), transform.get_state().view().angle());
+    assert_double_eq(deg2rad(30.0), transform.get_state().view().pitch());
+    assert_near(1.308_930, transform.get_state().view().x(), 1e-6);
+    assert_near(56.813_889, transform.get_state().view().y(), 1e-6);
 
     options.orientation = Some(
         DQuat::from_axis_angle(dvec3(0.0, 0.0, 1.0), deg2rad(-33.0))
@@ -1588,9 +1605,9 @@ fn free_camera_options_set_orientation() {
             * (DQuat::from_axis_angle(dvec3(0.0, 0.0, 1.0), deg2rad(11.0))),
     );
     transform.set_free_camera_options(&options);
-    assert_double_eq(deg2rad(33.0), transform.get_state().get_bearing());
-    assert_double_eq(deg2rad(22.0), transform.get_state().get_pitch());
-    assert_float_eq(deg2rad(11.0), transform.get_state().get_roll());
+    assert_double_eq(deg2rad(33.0), transform.get_state().view().angle());
+    assert_double_eq(deg2rad(22.0), transform.get_state().view().pitch());
+    assert_float_eq(deg2rad(11.0), transform.get_state().view().roll());
 }
 
 // gtest: Transform.FreeCameraOptionsClampToBounds
@@ -1609,10 +1626,10 @@ fn free_camera_options_clamp_to_bounds() {
     transform.set_free_camera_options(&options);
 
     // Map center should be clamped to width/2 pixels away from map borders
-    assert_double_eq(206.0, transform.get_state().get_x());
-    assert_double_eq(206.0, transform.get_state().get_y());
-    assert_double_eq(0.0, transform.get_state().get_bearing());
-    assert_double_eq(deg2rad(45.0), transform.get_state().get_pitch());
+    assert_double_eq(206.0, transform.get_state().view().x());
+    assert_double_eq(206.0, transform.get_state().view().y());
+    assert_double_eq(0.0, transform.get_state().view().angle());
+    assert_double_eq(deg2rad(45.0), transform.get_state().view().pitch());
 
     let (right, up, forward) = rotated_frame(transform.get_free_camera_options().orientation.unwrap());
     assert_vec3_near_1e5(transform.get_free_camera_options().position.unwrap(), dvec3(0.097_656_2, 0.304_816, 0.20716));
@@ -1627,10 +1644,10 @@ fn free_camera_options_invalid_state() {
     let transform = new_transform();
 
     // Invalid size
-    assert_double_eq(0.0, transform.get_state().get_x());
-    assert_double_eq(0.0, transform.get_state().get_y());
-    assert_double_eq(0.0, transform.get_state().get_bearing());
-    assert_double_eq(0.0, transform.get_state().get_pitch());
+    assert_double_eq(0.0, transform.get_state().view().x());
+    assert_double_eq(0.0, transform.get_state().view().y());
+    assert_double_eq(0.0, transform.get_state().view().angle());
+    assert_double_eq(0.0, transform.get_state().view().pitch());
 
     let options = transform.get_free_camera_options();
     assert_vec3_near_1e5(options.position.unwrap(), dvec3(0.0, 0.0, 0.0));
@@ -1701,23 +1718,26 @@ fn projection_data_matches_tile_matrix() {
                             ..Default::default()
                         });
                         let state = transform.get_state();
-                        let scale = state.get_scale();
+                        let scale = state.view().scale();
 
                         for aligned in [false, true] {
-                            let proj_matrix = state.get_proj_matrix(1, aligned);
+                            let proj_matrix = state.view().projection_matrix_with(1, aligned);
 
                             for tile_id in &tile_ids {
                                 let tile_matrix = reference_tile_matrix(scale, tile_id);
-                                assert_eq!(tile_matrix, state.matrix_for(tile_id));
+                                assert_eq!(tile_matrix, state.view().tile_matrix(tile_id));
 
                                 let expected = proj_matrix * tile_matrix;
-                                assert_eq!(expected, state.get_projection_data_with(tile_id, &proj_matrix).main_matrix);
+                                assert_eq!(
+                                    expected,
+                                    state.view().projection_data_with(tile_id, &proj_matrix).main_matrix
+                                );
                             }
                         }
 
                         for tile_id in &tile_ids {
-                            let expected = state.get_projection_matrix() * reference_tile_matrix(scale, tile_id);
-                            assert_eq!(expected, state.get_projection_data(tile_id).main_matrix);
+                            let expected = state.view().projection_matrix() * reference_tile_matrix(scale, tile_id);
+                            assert_eq!(expected, state.view().projection_data(tile_id).main_matrix);
                         }
                     }
                 }
@@ -1745,7 +1765,7 @@ fn projection_data_mercator_fields() {
         UnwrappedTileID::new(3, 5, 2),
         UnwrappedTileID::with_wrap(-1, CanonicalTileID::new(2, 1, 1)),
     ] {
-        let data = state.get_projection_data(&tile_id);
+        let data = state.view().projection_data(&tile_id);
         let tile_scale = f64::from(1u32 << tile_id.canonical.z);
         assert_eq!(data.main_matrix, data.fallback_matrix);
         assert_eq!(f64::from(tile_id.canonical.x) / tile_scale, data.tile_mercator_coords[0]);
@@ -1761,20 +1781,20 @@ fn projection_data_mercator_fields() {
 #[test]
 fn globe_projection_definition() {
     let mut transform = new_transform();
-    assert!(!transform.get_state().is_globe_rendering());
-    assert_double_eq(0.0, transform.get_state().get_projection_transition());
+    assert!(!transform.get_state().view().is_globe());
+    assert_double_eq(0.0, transform.get_state().view().projection_transition());
     transform.set_projection_definition(&ProjectionDefinition::between_names("vertical-perspective", "mercator", 0.5));
-    assert!(transform.get_state().is_globe_rendering());
-    assert_double_eq(0.5, transform.get_state().get_projection_transition());
+    assert!(transform.get_state().view().is_globe());
+    assert_double_eq(0.5, transform.get_state().view().projection_transition());
     // The transition is how far the globe has gone, whichever way the
     // definition reads.
     transform.set_projection_definition(&ProjectionDefinition::between_names("vertical-perspective", "mercator", 0.25));
-    assert_double_eq(0.75, transform.get_state().get_projection_transition());
+    assert_double_eq(0.75, transform.get_state().view().projection_transition());
     transform.set_projection_definition(&ProjectionDefinition::between_names("mercator", "vertical-perspective", 0.25));
-    assert_double_eq(0.25, transform.get_state().get_projection_transition());
+    assert_double_eq(0.25, transform.get_state().view().projection_transition());
     transform.set_projection_definition(&ProjectionDefinition::from_name("mercator"));
-    assert!(!transform.get_state().is_globe_rendering());
-    assert_double_eq(0.0, transform.get_state().get_projection_transition());
+    assert!(!transform.get_state().view().is_globe());
+    assert_double_eq(0.0, transform.get_state().view().projection_transition());
 }
 
 // A transition past either end, from a literal or an overshooting curve,
@@ -1785,19 +1805,19 @@ fn globe_projection_transition_past_either_end() {
     let mut transform = new_transform();
     transform.resize(Size::new(512, 512)).unwrap();
     transform.set_projection_definition(&ProjectionDefinition::between_names("mercator", "vertical-perspective", 1.5));
-    assert_double_eq(1.0, transform.get_state().get_projection_transition());
+    assert_double_eq(1.0, transform.get_state().view().projection_transition());
     transform.jump_to(&CameraOptions { zoom: Some(1.0), ..Default::default() });
     for step in 1..=3 {
         transform
             .jump_to(&CameraOptions { center: Some(ll(0.0, 40.0 + 120.0 * f64::from(step))), ..Default::default() });
     }
-    assert_near(400.0, transform.get_state().get_lat_lng(WrapMode::Unwrapped).longitude(), 1e-9);
+    assert_near(400.0, transform.get_state().view().center(WrapMode::Unwrapped).longitude(), 1e-9);
     // Past Mercator the globe leaves as it does at 0, so the center wraps back
     // into Mercator's world.
     transform.set_projection_definition(&ProjectionDefinition::between_names("vertical-perspective", "mercator", 1.5));
-    assert!(!transform.get_state().is_globe_rendering());
-    assert_double_eq(0.0, transform.get_state().get_projection_transition());
-    assert_near(40.0, transform.get_state().get_lat_lng(WrapMode::Unwrapped).longitude(), 1e-9);
+    assert!(!transform.get_state().view().is_globe());
+    assert_double_eq(0.0, transform.get_state().view().projection_transition());
+    assert_near(40.0, transform.get_state().view().center(WrapMode::Unwrapped).longitude(), 1e-9);
 }
 
 // An animation that crosses into the globe ends where a jump to its camera
@@ -1839,7 +1859,7 @@ fn animation_into_the_globe_takes_the_globes_minimum_zoom() {
                     let definition = projection_for_zoom(transform.get_zoom());
                     transform.set_projection_definition(&definition);
                 }
-                assert!(transform.get_state().is_globe_rendering());
+                assert!(transform.get_state().view().is_globe());
                 assert_near(zoom, transform.get_zoom(), 1e-9);
             }
         }
@@ -1903,8 +1923,8 @@ fn linear_second() -> AnimationOptions {
 /// The globe's radius in pixels for `state`'s camera.
 fn globe_radius(state: &TransformState) -> f64 {
     VerticalPerspectiveProjection::globe_radius_pixels(
-        Projection::world_size(state.get_scale()),
-        state.get_lat_lng(WrapMode::Unwrapped).latitude(),
+        Projection::world_size(state.view().scale()),
+        state.view().center(WrapMode::Unwrapped).latitude(),
     )
 }
 
@@ -1924,20 +1944,20 @@ fn center_projects_to_screen_center() {
     let mut transform = new_transform();
     set_up_globe(&mut transform, &ll(37.0, -122.0), 3.0, 20.0, 30.0);
     let state = transform.get_state();
-    assert!(state.is_globe_rendering());
+    assert!(state.view().is_globe());
 
     let radius = VerticalPerspectiveProjection::globe_radius_pixels(
-        Projection::world_size(state.get_scale()),
-        state.get_lat_lng(WrapMode::Unwrapped).latitude(),
+        Projection::world_size(state.view().scale()),
+        state.view().center(WrapMode::Unwrapped).latitude(),
     );
-    let m = VerticalPerspectiveProjection::globe_view_projection_matrix(state, radius);
-    let center = VerticalPerspectiveProjection::surface_vector(&state.get_lat_lng(WrapMode::Unwrapped));
+    let m = VerticalPerspectiveProjection::globe_view_projection_matrix(state.view(), radius);
+    let center = VerticalPerspectiveProjection::surface_vector(&state.view().center(WrapMode::Unwrapped));
     let surface = center.extend(1.0);
     let clip = m * surface;
     assert_near(0.0, clip[0] / clip[3], 1e-6);
     assert_near(0.0, clip[1] / clip[3], 1e-6);
 
-    let plane = VerticalPerspectiveProjection::clipping_plane(state, radius);
+    let plane = VerticalPerspectiveProjection::clipping_plane(state.view(), radius);
     assert!(plane.dot(surface) > 0.0);
     assert!(plane.dot((-center).extend(1.0)) < 0.0);
 }
@@ -1949,26 +1969,27 @@ fn cached_view_state_follows_the_camera() {
     set_up_globe(&mut transform, &ll(20.0, -40.0), 2.5, 35.0, 25.0);
     let check = |state: &TransformState| {
         let radius = VerticalPerspectiveProjection::globe_radius_pixels(
-            Projection::world_size(state.get_scale()),
-            state.get_lat_lng(WrapMode::Unwrapped).latitude(),
+            Projection::world_size(state.view().scale()),
+            state.view().center(WrapMode::Unwrapped).latitude(),
         );
-        let expected = VerticalPerspectiveProjection::globe_view_projection_matrix(state, radius);
-        let plane = VerticalPerspectiveProjection::clipping_plane(state, radius);
-        let camera = VerticalPerspectiveProjection::camera_position(state, radius);
-        let actual = state.get_globe_view_projection_matrix().to_cols_array();
+        let expected = VerticalPerspectiveProjection::globe_view_projection_matrix(state.view(), radius);
+        let plane = VerticalPerspectiveProjection::clipping_plane(state.view(), radius);
+        let camera = VerticalPerspectiveProjection::camera_position(state.view(), radius);
+        let actual = state.view().globe_view_projection_matrix().to_cols_array();
         for (i, &value) in expected.to_cols_array().iter().enumerate() {
             let _trace = ScopedTrace(format!("element {i}"));
             assert_double_eq(value, actual[i]);
         }
         for (i, &value) in plane.to_array().iter().enumerate() {
             let _trace = ScopedTrace(format!("plane {i}"));
-            assert_double_eq(value, state.get_globe_clipping_plane()[i]);
+            assert_double_eq(value, state.view().globe_clipping_plane()[i]);
         }
         for (i, &value) in camera.to_array().iter().enumerate() {
             let _trace = ScopedTrace(format!("camera {i}"));
-            assert_double_eq(value, state.get_globe_camera_position()[i]);
+            assert_double_eq(value, state.view().globe_camera_position()[i]);
         }
-        let round_trip = state.get_globe_view_projection_matrix() * state.get_inverse_globe_view_projection_matrix();
+        let round_trip =
+            state.view().globe_view_projection_matrix() * state.view().inverse_globe_view_projection_matrix();
         for (i, value) in round_trip.to_cols_array().iter().enumerate() {
             let _trace = ScopedTrace(format!("inverse element {i}"));
             assert_near(if i % 5 == 0 { 1.0 } else { 0.0 }, *value, 1e-9);
@@ -2016,7 +2037,7 @@ fn off_globe_pixels_snap_to_the_horizon() {
     assert!(corner.longitude() < 0.0);
     // The snap lands on the horizon: from a camera `d` radii out, that circle
     // is acos(1 / d) from the center.
-    let camera = transform.get_state().get_globe_camera_position();
+    let camera = transform.get_state().view().globe_camera_position();
     let horizon = (1.0 / hypot3(camera[0], camera[1], camera[2])).acos();
     let angle = (deg2rad(corner.latitude()).cos() * deg2rad(corner.longitude()).cos()).acos();
     assert_near(horizon, angle, 1e-6);
@@ -2235,12 +2256,12 @@ fn min_zoom_follows_latitude() {
     assert_near(transform.get_state().get_min_zoom_at_latitude(80.0), transform.get_zoom(), 1e-9);
     transform.jump_to(&CameraOptions { center: Some(ll(0.0, 0.0)), zoom: Some(-1.0), ..Default::default() });
     assert_double_eq(0.0, transform.get_zoom());
-    assert_eq!(0, transform.get_state().get_integer_zoom());
+    assert_eq!(0, transform.get_state().view().integer_zoom());
 
     // Integer zoom never wraps below zero.
     transform.jump_to(&CameraOptions { center: Some(ll(80.0, 0.0)), zoom: Some(-2.0), ..Default::default() });
     assert_near(-2.0, transform.get_zoom(), 1e-9);
-    assert_eq!(0, transform.get_state().get_integer_zoom());
+    assert_eq!(0, transform.get_state().view().integer_zoom());
 
     // Mercator keeps the plain minimum.
     transform.set_projection_definition(&ProjectionDefinition::from_name("mercator"));
@@ -2505,7 +2526,7 @@ fn camera_for_bounds_fits_the_padded_view() {
         let mut nearest = f64::INFINITY;
         for sample in &samples {
             let surface = VerticalPerspectiveProjection::surface_vector(sample);
-            let clip = state.get_globe_view_projection_matrix() * surface.extend(1.0);
+            let clip = state.view().globe_view_projection_matrix() * surface.extend(1.0);
             let x = clip[0] / clip[3];
             let y = clip[1] / clip[3];
             nearest = [x - left, right - x, top - y, y - bottom].into_iter().fold(nearest, f64::min);
@@ -2527,13 +2548,13 @@ fn mercator_matches_the_tile_matrix() {
         ..Default::default()
     });
     let state = transform.get_state();
-    assert!(!state.is_globe_rendering());
+    assert!(!state.view().is_globe());
 
     // The bottom-right corner of tile 1/0/0 is lat 0, lng 0: the map center.
     let tile_id = UnwrappedTileID::new(1, 0, 0);
-    let projector = TileProjector::new(state, &tile_id);
+    let projector = TileProjector::new(state.view(), &tile_id);
     let corner = Point::new(f64::from(EXTENT), f64::from(EXTENT));
-    let pos = state.get_projection_data(&tile_id).main_matrix * DVec4::new(corner.x, corner.y, 0.0, 1.0);
+    let pos = state.view().projection_data(&tile_id).main_matrix * DVec4::new(corner.x, corner.y, 0.0, 1.0);
 
     let projected = projector.project(&corner, 0.0);
     assert_near(pos[0] / pos[3], projected.point.x, 1e-9);
@@ -2545,7 +2566,7 @@ fn mercator_matches_the_tile_matrix() {
     assert!(!projector.project(&Point::new(0.0, 0.0), 0.0).occluded);
     assert_double_eq(1.0, projector.circle_radius_correction());
     assert_double_eq(1.0, projector.pitched_text_correction(&Point::new(100.0, 100.0)));
-    assert_double_eq(1.0, state.get_projection().pixel_scale(state));
+    assert_double_eq(1.0, state.view().projection().pixel_scale(state.view()));
 }
 
 // gtest: TileProjector.GlobeOccludesTheFarSideAndCorrectsForLatitude
@@ -2555,7 +2576,7 @@ fn globe_occludes_the_far_side_and_corrects_for_latitude() {
     set_up_globe(&mut transform, &ll(40.0, 0.0), 1.0, 0.0, 0.0);
     let state = transform.get_state();
     let tile_id = UnwrappedTileID::new(1, 0, 0);
-    let projector = TileProjector::new(state, &tile_id);
+    let projector = TileProjector::new(state.view(), &tile_id);
 
     // The bottom-right corner (lat 0, lng 0) faces the camera; the bottom-left
     // one (lng -180, lat 0) is behind it.
@@ -2564,7 +2585,7 @@ fn globe_occludes_the_far_side_and_corrects_for_latitude() {
 
     let cos40 = deg2rad(40.0).cos();
     assert_near(cos40, projector.circle_radius_correction(), 1e-12);
-    assert_near(1.0 / cos40, state.get_projection().pixel_scale(state), 1e-12);
+    assert_near(1.0 / cos40, state.view().projection().pixel_scale(state.view()), 1e-12);
     // Tile y of latitude 60 in tile 1/0/0.
     let tile_y = Projection::project(&ll(60.0, 0.0), 2.0).y / TILE_SIZE_D * f64::from(EXTENT);
     assert_near(cos40 / deg2rad(60.0).cos(), projector.pitched_text_correction(&Point::new(100.0, tile_y)), 1e-6);
@@ -2612,14 +2633,18 @@ fn globe_size_corrections_blend_through_the_transition() {
             ..Default::default()
         });
         let state = transform.get_state();
-        let projection = state.get_projection();
-        assert_near(c.circle, projection.circle_radius_correction(state), 1e-9);
-        assert_near(c.pixel, projection.pixel_scale(state), 1e-9);
+        let projection = state.view().projection();
+        assert_near(c.circle, projection.circle_radius_correction(state.view()), 1e-9);
+        assert_near(c.pixel, projection.pixel_scale(state.view()), 1e-9);
         // An anchor a quarter of the way down the zoom 0 tile, at 66.5 degrees
         // north.
         assert_near(
             c.pitched,
-            projection.pitched_text_correction(state, &Point::new(4096.0, 2048.0), &UnwrappedTileID::new(0, 0, 0)),
+            projection.pitched_text_correction(
+                state.view(),
+                &Point::new(4096.0, 2048.0),
+                &UnwrappedTileID::new(0, 0, 0),
+            ),
             1e-9,
         );
     }
@@ -2648,7 +2673,7 @@ fn globe_max_pitch_scale_factor() {
             pitch: Some(view.pitch),
             ..Default::default()
         });
-        assert_near(view.factor, f64::from(transform.get_state().max_pitch_scale_factor()), 1e-4);
+        assert_near(view.factor, transform.get_state().view().max_pitch_scale_factor(), 1e-4);
     }
 }
 
@@ -3210,7 +3235,7 @@ fn drag_center_matches_gljs() {
             ..Default::default()
         });
         let center = VerticalPerspectiveProjection::drag_center(
-            transform.get_state(),
+            transform.get_state().view(),
             &sc(point.0, 480.0 - point.1),
             &sc(pan_delta.0, -pan_delta.1),
         );
@@ -3496,7 +3521,7 @@ fn free_bearing_drag_matches_gljs() {
             ..Default::default()
         });
         let drag = VerticalPerspectiveProjection::drag_camera(
-            transform.get_state(),
+            transform.get_state().view(),
             &sc(anchor.0, 480.0 - anchor.1),
             &sc(pan_delta.0, -pan_delta.1),
         );
@@ -3954,15 +3979,15 @@ fn padding_interpolated_to_nan_keeps_the_insets() {
     transform.resize(Size::new(1000, 1000)).unwrap();
     let infinite = EdgeInsets { top: f64::INFINITY, left: 0.0, bottom: 0.0, right: 0.0 };
     transform.jump_to(&CameraOptions { padding: Some(infinite), ..Default::default() });
-    assert_eq!(transform.get_state().get_edge_insets(), infinite);
+    assert_eq!(transform.get_state().view().padding(), infinite);
     transform.jump_to(&CameraOptions { padding: Some(EdgeInsets::default()), ..Default::default() });
-    assert_eq!(transform.get_state().get_edge_insets(), infinite);
+    assert_eq!(transform.get_state().view().padding(), infinite);
     transform.fly_to(
         &CameraOptions { padding: Some(EdgeInsets::default()), ..Default::default() },
         &AnimationOptions::default(),
         false,
     );
-    assert_eq!(transform.get_state().get_edge_insets(), infinite);
+    assert_eq!(transform.get_state().view().padding(), infinite);
 }
 
 // Port-only: a screen coordinate without a LatLng is the C++ LatLng
@@ -4060,7 +4085,7 @@ fn independent_camera_tracks() {
     assert_near(transform.get_zoom(), 12.0, 1e-5);
     assert!(transform.get_lat_lng(WrapMode::Wrapped).longitude() > 0.0);
     assert!(transform.get_lat_lng(WrapMode::Wrapped).longitude() < 30.0);
-    assert_near(transform.get_state().get_center_altitude(), 120.0, 1e-5);
+    assert_near(transform.get_state().view().center_altitude(), 120.0, 1e-5);
     assert_eq!(zoom_finished.count(&transform), 1);
     assert_eq!(center_finished.count(&transform), 0);
     assert!(transform.is_panning());
@@ -4086,7 +4111,7 @@ fn ease_with_an_easing_follows_it() {
         let from = ll(48.0, 11.0);
         let to = ll(48.002, 11.003);
         transform.jump_to(&CameraOptions { center: Some(from), zoom: Some(15.5), ..Default::default() });
-        let scale = transform.get_state().get_scale();
+        let scale = transform.get_state().view().scale();
         let (start_point, end_point) = (Projection::project(&from, scale), Projection::project(&to, scale));
         let animation = AnimationOptions { easing: Some(easing), ..AnimationOptions::new(Duration::from_secs(4)) };
         let start = start_clock(&mut transform);
@@ -4207,7 +4232,7 @@ fn compose_padding_pitch_and_field_of_view() {
     transform.ease_to(&CameraOptions { pitch: Some(60.0), fov: Some(45.0), ..Default::default() }, &animation);
     let end = start + Duration::from_secs(4);
     transform.update_transitions(Some(end));
-    assert_eq!(transform.get_state().get_edge_insets(), insets(300.0, 20.0, 0.0, 0.0));
+    assert_eq!(transform.get_state().view().padding(), insets(300.0, 20.0, 0.0, 0.0));
     assert_near(mln_math::rad2deg(transform.get_field_of_view()), 45.0, 1e-5);
     let max_pitch =
         transform.get_state().get_max_pitch() + deg2rad(45.0) / 2.0 - (1.3 * (deg2rad(45.0) / 2.0).tan()).atan();
@@ -4644,7 +4669,7 @@ fn momentum_keeps_its_anchor_in_place() {
     // less than a pixel.
     assert_near(point.x, anchor.x, 1e-4);
     assert_near(point.y, anchor.y, 1e-4);
-    assert_near(transform.get_state().get_center_altitude(), 120.0, 1e-6);
+    assert_near(transform.get_state().view().center_altitude(), 120.0, 1e-6);
 }
 
 // gtest: Transform.MomentumCapsItsDistance

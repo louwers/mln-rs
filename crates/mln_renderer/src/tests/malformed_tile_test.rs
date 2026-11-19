@@ -91,7 +91,9 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn ErasedEvaluatedLayer>]) -> Outcome {
         &TileParameters {
             pixel_ratio: 1.0,
             debug_options: MapDebugOptions::NO_DEBUG,
-            transform_state: transform.get_state(),
+            view: transform.view(),
+            min_zoom: transform.get_state().get_min_zoom(),
+            max_zoom: transform.get_state().get_max_zoom(),
             file_source: Some(file_source),
             mode: MapMode::Continuous,
             prefetch_zoom_delta: 0,

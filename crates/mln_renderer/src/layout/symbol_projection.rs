@@ -3,7 +3,7 @@
 
 use geometry::Point;
 use glam::{DMat4, DVec2, DVec3, DVec4, Vec2};
-use mln_map_types::{ProjectedTilePoint, TileProjector, TransformState};
+use mln_map_types::{ProjectedTilePoint, TileProjector, View};
 use mln_text::glyph::WritingModeType;
 use mln_tile_id::geometry_tile_data::GeometryCoordinate;
 use mln_util::constants::ONE_EM;
@@ -15,12 +15,12 @@ use crate::render_layer::PlacedTile;
 
 /// The directions on screen that a pitched, unrotated label's east and south
 /// axes take, as unit vectors, or zero where an axis is edge-on.
-pub(crate) fn tile_skew_vectors(state: &TransformState) -> (DVec2, DVec2) {
-    let cos_roll = state.get_roll().cos();
-    let sin_roll = state.get_roll().sin();
-    let cos_pitch = state.get_pitch().cos();
-    let cos_bearing = (-state.get_bearing()).cos();
-    let sin_bearing = (-state.get_bearing()).sin();
+pub(crate) fn tile_skew_vectors(state: &View) -> (DVec2, DVec2) {
+    let cos_roll = state.roll().cos();
+    let sin_roll = state.roll().sin();
+    let cos_pitch = state.pitch().cos();
+    let cos_bearing = (-state.angle()).cos();
+    let sin_bearing = (-state.angle()).sin();
     let unit = |v: DVec2| if v.length() < 1.0e-9 { DVec2::ZERO } else { v / v.length() };
     let vec_south = unit(DVec2::new(
         -cos_bearing * cos_pitch * sin_roll - sin_bearing * cos_roll,
@@ -33,7 +33,7 @@ pub(crate) fn tile_skew_vectors(state: &TransformState) -> (DVec2, DVec2) {
     (vec_east, vec_south)
 }
 
-pub(crate) fn tile_skew_matrix(state: &TransformState) -> DMat4 {
+pub(crate) fn tile_skew_matrix(state: &View) -> DMat4 {
     let (vec_east, vec_south) = tile_skew_vectors(state);
     DMat4::from_cols(vec_east.extend(0.0).extend(0.0), vec_south.extend(0.0).extend(0.0), DVec4::Z, DVec4::W)
 }
@@ -44,7 +44,7 @@ pub(crate) fn tile_skew_matrix(state: &TransformState) -> DMat4 {
 pub(crate) fn label_plane_matrix(
     pitch_with_map: bool,
     rotate_with_map: bool,
-    state: &TransformState,
+    state: &View,
     pixels_to_tile_units: f32,
 ) -> DMat4 {
     if pitch_with_map {
@@ -57,7 +57,7 @@ pub(crate) fn label_plane_matrix(
             scale * skew.try_inverse().unwrap_or(skew)
         }
     } else {
-        let size = state.get_size();
+        let size = state.size();
         DMat4::from_scale(DVec3::new(f64::from(size.width) / 2.0, -(f64::from(size.height) / 2.0), 1.0))
             * DMat4::from_translation(DVec3::new(1.0, -1.0, 0.0))
     }
@@ -68,7 +68,7 @@ pub(crate) fn label_plane_matrix(
 pub(crate) fn gl_coord_matrix(
     pitch_with_map: bool,
     rotate_with_map: bool,
-    state: &TransformState,
+    state: &View,
     pixels_to_tile_units: f32,
 ) -> DMat4 {
     if pitch_with_map {
@@ -76,7 +76,7 @@ pub(crate) fn gl_coord_matrix(
         let scale = DMat4::from_scale(DVec3::new(s, s, 1.0));
         if rotate_with_map { scale } else { scale * tile_skew_matrix(state) }
     } else {
-        let size = state.get_size();
+        let size = state.size();
         DMat4::from_scale(DVec3::new(1.0, -1.0, 1.0))
             * DMat4::from_translation(DVec3::new(-1.0, -1.0, 0.0))
             * DMat4::from_scale(DVec3::new(2.0 / f64::from(size.width), 2.0 / f64::from(size.height), 1.0))
@@ -169,11 +169,11 @@ impl<'a> LabelPlaneProjector<'a> {
         pixels_to_tile_units: f32,
         translation: Vec2,
     ) -> Self {
-        let size = tile.get_transform_state().get_size();
+        let size = tile.view().size();
         // Only pitched labels lay out in the pitched plane; the others go
         // through the projection.
         let (pitched_label_plane_matrix, pitched_label_plane_matrix_inverse) = if pitch_with_map {
-            let matrix = label_plane_matrix(true, rotate_with_map, tile.get_transform_state(), pixels_to_tile_units);
+            let matrix = label_plane_matrix(true, rotate_with_map, tile.view(), pixels_to_tile_units);
             (matrix, matrix.try_inverse().unwrap_or(DMat4::ZERO))
         } else {
             (DMat4::IDENTITY, DMat4::IDENTITY)
@@ -686,16 +686,16 @@ pub(crate) fn reproject_line_labels(
     keep_upright: bool,
     tile: &PlacedTile,
     size_binder: &SymbolSizeBinder,
-    state: &TransformState,
+    state: &View,
     translation: Vec2,
 ) {
-    let partially_evaluated_size = size_binder.evaluate_for_zoom(state.get_zoom() as f32);
+    let partially_evaluated_size = size_binder.evaluate_for_zoom(state.zoom() as f32);
 
-    let size = state.get_size();
+    let size = state.size();
     let clipping_buffer: [f64; 2] =
         [256.0 / f64::from(size.width) * 2.0 + 1.0, 256.0 / f64::from(size.height) * 2.0 + 1.0];
 
-    let pixels_to_tile_units = tile.id.pixels_to_tile_units(1.0, state.get_zoom() as f32);
+    let pixels_to_tile_units = tile.id.pixels_to_tile_units(1.0, state.zoom() as f32);
 
     let label_plane =
         LabelPlaneProjector::new(tile_projector, pitch_with_map, rotate_with_map, pixels_to_tile_units, translation);
@@ -728,7 +728,7 @@ pub(crate) fn reproject_line_labels(
         }
 
         let camera_to_anchor_distance = anchor_pos.signed_distance_from_camera as f32;
-        let perspective_ratio = 0.5 + 0.5 * (camera_to_anchor_distance / state.get_camera_to_center_distance());
+        let perspective_ratio = 0.5 + 0.5 * (camera_to_anchor_distance / state.camera_to_center_distance() as f32);
 
         let font_size = evaluate_size_for_feature(&partially_evaluated_size, placed_symbol);
         let pitch_scaled_font_size = if pitch_with_map {

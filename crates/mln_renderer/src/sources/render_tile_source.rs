@@ -231,7 +231,7 @@ impl DebugLayer {
     /// Makes the frame's draws of the overlay, and writes the buffers they
     /// read.
     pub(crate) fn update_draws(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        let zoom = parameters.state.get_zoom();
+        let zoom = parameters.view.zoom();
         for (index, draw) in self.draws.iter().enumerate() {
             let tile_id = draw.tile.to_unwrapped();
             let projection = projection_data(
@@ -390,7 +390,7 @@ impl RenderSource for RenderTileSource {
         self.order_by_id.extend((0..tiles.len()).filter(|&i| !tiles[i].hold_for_fade()));
         self.order_by_y.clear();
         if parameters.sort_by_y {
-            self.sort_by_y(parameters.transform.state.get_bearing() as f32);
+            self.sort_by_y(parameters.transform.view.angle() as f32);
         }
     }
 
@@ -419,7 +419,7 @@ impl RenderSource for RenderTileSource {
 
         let shaders = &*parameters.static_data.shaders;
         let source = &self.id;
-        let globe = parameters.state.is_globe_rendering();
+        let globe = parameters.view.is_globe();
         let projection_variant = if globe { ProjectionVariant::Globe } else { ProjectionVariant::Mercator };
 
         let Some(polyline_shader) = shaders.shader_group("LineShader").map(|shader_group| {

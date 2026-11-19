@@ -1,6 +1,6 @@
 //! The map vocabulary that crates below the map need: camera options and
-//! momentum, map modes, bound options, the transform state, and the
-//! projection it draws with. The `Map` itself is in `mln_map`, which
+//! momentum, map modes, bound options, the transform state, and the view it
+//! shows and draws with. The `Map` itself is in `mln_map`, which
 //! re-exports these.
 
 mod bound_options;
@@ -30,10 +30,12 @@ pub mod tile_coordinate;
 mod tile_projector;
 mod transform_state;
 mod vertical_perspective_projection;
+mod view;
 
 pub use camera::FreeCameraOptions;
 pub use projection::{ProjectedTilePoint, Projection, ProjectionData};
 pub use tile_coordinate::TileCoordinate;
 pub use tile_projector::TileProjector;
-pub use transform_state::{NorthOrientation, TransformState};
+pub use transform_state::TransformState;
 pub use vertical_perspective_projection::{CenterAndBearing, VerticalPerspectiveProjection};
+pub use view::{NorthOrientation, View, scale_zoom, zoom_scale};

@@ -171,17 +171,17 @@ fn keeps_globe_base_level(
     tile_zoom: i32,
     max_parent_overscale_factor: Option<u8>,
 ) -> bool {
-    let state = parameters.transform_state;
-    if !state.is_globe_rendering() || zoom_range.min > GLOBE_BASE_LEVEL_MAX_ZOOM {
+    let state = parameters.view;
+    if !state.is_globe() || zoom_range.min > GLOBE_BASE_LEVEL_MAX_ZOOM {
         return false;
     }
     if max_parent_overscale_factor.is_some_and(|factor| tile_zoom - i32::from(zoom_range.min) > i32::from(factor)) {
         return false;
     }
-    let size = state.get_size();
+    let size = state.size();
     let radius = VerticalPerspectiveProjection::globe_radius_pixels(
-        Projection::world_size(state.get_scale()),
-        state.get_lat_lng(WrapMode::Unwrapped).latitude(),
+        Projection::world_size(state.scale()),
+        state.center(WrapMode::Unwrapped).latitude(),
     );
     radius <= GLOBE_BASE_LEVEL_MAX_RADIUS * f64::from(std::cmp::max(size.width, size.height))
 }
@@ -231,7 +231,7 @@ impl CoverContext<'_, '_, '_> {
     /// Whether a tile lookup that misses looks under the neighbouring wraps:
     /// on the full globe only, as a flat map places a tile by its wrap.
     fn finds_tiles_across_wraps(&self) -> bool {
-        self.update.parameters.transform_state.get_projection_transition() >= 1.0
+        self.update.parameters.view.projection_transition() >= 1.0
     }
 
     fn tile(&self, key: &OverscaledTileID) -> Option<&Tile> {
@@ -270,7 +270,7 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
         }
         let parameters = self.update.parameters;
         let mut found = self.source.cache_pop(id);
-        if !found && parameters.transform_state.is_globe_rendering() {
+        if !found && parameters.view.is_globe() {
             found = self.source.cache_pop_any_wrap(id, self.ctx);
         }
         // A tile cached before the pixel ratio changed lays out again as
@@ -289,7 +289,7 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
         // A flat map draws each world copy of a tile from a tile of its own,
         // which starts from a loaded copy rather than leave its world bare
         // until it has loaded and laid out the same data.
-        let copy = if parameters.transform_state.is_globe_rendering() { None } else { self.source.world_copy(id) };
+        let copy = if parameters.view.is_globe() { None } else { self.source.world_copy(id) };
         self.source.insert(tile);
         let style = self.style;
         self.source.update(id, self.ctx, |tile| {
@@ -603,12 +603,12 @@ impl SourceTiles {
             return;
         }
 
-        self.handle_wrap_jump(parameters.transform_state.get_lat_lng(WrapMode::Unwrapped).longitude() as f32, ctx);
+        self.handle_wrap_jump(parameters.view.center(WrapMode::Unwrapped).longitude() as f32, ctx);
 
         let zoom = mln_math::clamp_f64(
-            parameters.transform_state.get_zoom() + parameters.tile_lod_zoom_shift,
-            parameters.transform_state.get_min_zoom(),
-            parameters.transform_state.get_max_zoom(),
+            parameters.view.zoom() + parameters.tile_lod_zoom_shift,
+            parameters.min_zoom,
+            parameters.max_zoom,
         );
 
         let style_source = update.style_source;
@@ -628,7 +628,7 @@ impl SourceTiles {
         let mut pan_tiles: Vec<OverscaledTileID> = Vec::new();
 
         let tile_cover_parameters = TileCoverParameters {
-            transform_state: parameters.transform_state.clone(),
+            view: parameters.view.clone(),
             tile_lod_min_radius: parameters.tile_lod_min_radius,
             tile_lod_scale: parameters.tile_lod_scale,
             tile_lod_pitch_threshold: parameters.tile_lod_pitch_threshold,
@@ -703,8 +703,7 @@ impl SourceTiles {
         // tiles finer than the nominal zoom, up to the source's maximum.
         let mut tile_range: Option<TileRange> = None;
         if let Some(bounds) = &update.bounds {
-            let variable_zoom =
-                parameters.tile_lod_mode == TileLodMode::Distance || parameters.transform_state.is_globe_rendering();
+            let variable_zoom = parameters.tile_lod_mode == TileLodMode::Distance || parameters.view.is_globe();
             let max_zoom: i32 = if variable_zoom {
                 i32::from(zoom_range.max)
             } else {
@@ -713,7 +712,7 @@ impl SourceTiles {
             tile_range = Some(TileRange::from_lat_lng_bounds_range(bounds, zoom_range.min, max_zoom as u8));
         }
 
-        if parameters.transform_state.is_globe_rendering() {
+        if parameters.view.is_globe() {
             self.move_tiles_to_wanted_wraps(&ideal_tiles, &pan_tiles, ctx);
         }
 
@@ -768,10 +767,10 @@ impl SourceTiles {
         }
 
         if self.cache_enabled {
-            let size = parameters.transform_state.get_size();
+            let size = parameters.view.size();
             let conservative_cache_size = (f64::max(f64::from(size.width) / f64::from(tile_size), 1.0)
                 * f64::max(f64::from(size.height) / f64::from(tile_size), 1.0)
-                * (parameters.transform_state.get_max_zoom() - parameters.transform_state.get_min_zoom() + 1.0)
+                * (parameters.max_zoom - parameters.min_zoom + 1.0)
                 * 0.5) as usize;
             // A tilted view holds more tiles than its size suggests, and as it
             // turns it passes over more again.
@@ -1068,7 +1067,7 @@ impl SourceTiles {
     pub(crate) fn query_rendered_features(
         &self,
         geometry: &[mln_util::geo::ScreenCoordinate],
-        transform_state: &mln_map_types::TransformState,
+        view: &mln_map_types::View,
         layers: &crate::geometry::feature_index::QueryLayers<'_>,
         options: &crate::query::RenderedQueryOptions,
         global_state: Option<&mln_style::expression::GlobalStateMap>,
@@ -1083,19 +1082,14 @@ impl SourceTiles {
             return Ok(result);
         }
 
-        let height = f64::from(transform_state.get_size().height);
+        let height = f64::from(view.size().height);
         let to_world = |p: &mln_util::geo::ScreenCoordinate| {
-            TileCoordinate::from_screen_coordinate(
-                transform_state,
-                0,
-                &mln_util::geo::ScreenCoordinate::new(p.x, height - p.y),
-            )
-            .p
+            TileCoordinate::from_screen_coordinate(view, 0, &mln_util::geo::ScreenCoordinate::new(p.x, height - p.y)).p
         };
-        let globe = transform_state.is_globe_rendering();
+        let globe = view.is_globe();
         let on_planet = |p: &mln_util::geo::ScreenCoordinate| {
             VerticalPerspectiveProjection::screen_coordinate_hits_globe(
-                transform_state,
+                view,
                 &mln_util::geo::ScreenCoordinate::new(p.x, height - p.y),
             )
         };
@@ -1212,7 +1206,7 @@ impl SourceTiles {
             ))
         });
 
-        let max_pitch_scale_factor = transform_state.max_pitch_scale_factor();
+        let max_pitch_scale_factor = view.max_pitch_scale_factor() as f32;
 
         // The globe returns a feature once per tile, though the tile is
         // tested at three copies and can be rendered at two wraps: these are
@@ -1229,7 +1223,7 @@ impl SourceTiles {
             };
 
             // 2 to the power of the zoom's distance above the tile's.
-            let scale = (transform_state.get_scale() / f64::from(1u32 << id.canonical.z)) as f32;
+            let scale = (view.scale() / f64::from(1u32 << id.canonical.z)) as f32;
             let query_padding =
                 f64::from(max_pitch_scale_factor * contents.query_padding(layers) * constants::EXTENT as f32)
                     / constants::TILE_SIZE_D
@@ -1277,7 +1271,7 @@ impl SourceTiles {
                         &tile.id,
                         &mut result,
                         &tile_space_query_geometry,
-                        transform_state,
+                        view,
                         layers,
                         options,
                         global_state,
@@ -1292,7 +1286,7 @@ impl SourceTiles {
                     &tile.id,
                     &mut found,
                     &tile_space_query_geometry,
-                    transform_state,
+                    view,
                     layers,
                     options,
                     global_state,

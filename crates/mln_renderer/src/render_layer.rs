@@ -12,7 +12,7 @@ use std::sync::Arc;
 use glam::DMat4;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_map_types::{ProjectionData, TileProjector, TransformState};
+use mln_map_types::{ProjectionData, TileProjector, View};
 use mln_style::expression::Dependency;
 use mln_style::layer_type::{ErasedLayerStyle, LayerStyle, PaintSet, SourceKind, StyleLayerType};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters};
@@ -372,7 +372,7 @@ pub(crate) struct Atlases {
 /// What a layer reads in the frame's update, besides its tiles.
 pub(crate) struct LayerUpdateParameters<'a> {
     /// The frame's camera.
-    pub(crate) state: &'a TransformState,
+    pub(crate) view: &'a View,
     /// The update the frame draws.
     pub(crate) update_parameters: &'a UpdateParameters,
     /// The layer's source, `None` for a layer without one or a source type
@@ -787,8 +787,8 @@ impl<L: TypedLayer> LayerParts for L {
         atlases: &Atlases,
         source: Option<LayerSource<'_>>,
     ) {
-        let state = parameters.state;
-        let variant = if state.is_globe_rendering() { ProjectionVariant::Globe } else { ProjectionVariant::Mercator };
+        let state = parameters.view;
+        let variant = if state.is_globe() { ProjectionVariant::Globe } else { ProjectionVariant::Mercator };
         if variant != self.base().projection_variant {
             self.base_mut().projection_variant = variant;
             self.remove_all_draws();
@@ -957,7 +957,7 @@ pub(crate) trait RenderLayer: LayerParts {
         _feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
         _geometry: &mln_tile_id::geometry_tile_data::GeometryCollection,
         _zoom: f32,
-        _transform_state: &TransformState,
+        _transform_state: &View,
         _pixels_to_tile_units: f32,
         _projector: &TileProjector<'_>,
         _feature_state: &mln_style::expression::expression::FeatureState,

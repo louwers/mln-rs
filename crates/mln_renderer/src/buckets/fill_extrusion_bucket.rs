@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use geometry::Point;
 use mln_gfx::shaders::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
-use mln_map_types::TransformState;
+use mln_map_types::View;
 use mln_style::PropertyEvaluationParameters;
 use mln_style::evaluated::Evaluated;
 use mln_style::expression::{Image, Value};
@@ -261,11 +261,11 @@ impl FillExtrusionBucket {
         [color.r, color.g, color.b]
     }
 
-    pub(crate) fn light_position(light: &EvaluatedLight, state: &TransformState) -> [f32; 3] {
+    pub(crate) fn light_position(light: &EvaluatedLight, state: &View) -> [f32; 3] {
         let light_pos = glam::Vec3::from_array(light.light_position.uniform().get_cartesian());
         if *light.light_anchor.uniform() == LightAnchorType::Viewport {
             // A viewport-anchored light turns with the map.
-            (glam::Mat3::from_rotation_z(-state.get_bearing() as f32) * light_pos).to_array()
+            (glam::Mat3::from_rotation_z(-state.angle() as f32) * light_pos).to_array()
         } else {
             light_pos.to_array()
         }

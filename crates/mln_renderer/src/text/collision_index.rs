@@ -1,6 +1,6 @@
 use geometry::Point;
 use glam::{DMat4, DVec4, Vec2};
-use mln_map_types::{MapMode, ProjectedTilePoint, TileProjector, TransformState};
+use mln_map_types::{MapMode, ProjectedTilePoint, TileProjector, View};
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style_types::IconOverlapType;
 use mln_tile_id::geometry_tile_data::GeometryCoordinates;
@@ -87,11 +87,11 @@ const VIEWPORT_PADDING_FOR_STATIC_TILES: f32 = 1024.0;
 /// behind the camera, whose ratio is below 0.5.
 const PERSPECTIVE_RATIO_CUTOFF: f32 = 0.6;
 
-fn find_viewport_padding(transform_state: &TransformState, map_mode: MapMode) -> f32 {
+fn find_viewport_padding(view: &View, map_mode: MapMode) -> f32 {
     if map_mode == MapMode::Tile {
         return VIEWPORT_PADDING_FOR_STATIC_TILES;
     }
-    if transform_state.get_pitch() == 0.0 { VIEWPORT_PADDING_DEFAULT } else { VIEWPORT_PADDING_DEFAULT * 2.0 }
+    if view.pitch() == 0.0 { VIEWPORT_PADDING_DEFAULT } else { VIEWPORT_PADDING_DEFAULT * 2.0 }
 }
 
 fn indexed_subfeature(
@@ -126,7 +126,7 @@ struct ProjectedBox {
 }
 
 pub(crate) struct CollisionIndex {
-    transform_state: TransformState,
+    view: View,
 
     viewport_padding: f32,
     collision_grid: CollisionGrid,
@@ -141,21 +141,17 @@ pub(crate) struct CollisionIndex {
 }
 
 impl CollisionIndex {
-    pub(crate) fn new(transform_state: &TransformState, map_mode: MapMode) -> Self {
-        CollisionIndex::reusing(transform_state, map_mode, None)
+    pub(crate) fn new(view: &View, map_mode: MapMode) -> Self {
+        CollisionIndex::reusing(view, map_mode, None)
     }
 
     /// An empty collision index, as [`new`](Self::new) makes, that reuses
     /// the grids of `previous`, an index placement no longer reads.
     /// Placement makes one for every placement, and the grids' cells keep
     /// their allocations while the viewport keeps its size.
-    pub(crate) fn reusing(
-        transform_state: &TransformState,
-        map_mode: MapMode,
-        previous: Option<CollisionIndex>,
-    ) -> Self {
-        let viewport_padding = find_viewport_padding(transform_state, map_mode);
-        let size = transform_state.get_size();
+    pub(crate) fn reusing(view: &View, map_mode: MapMode, previous: Option<CollisionIndex>) -> Self {
+        let viewport_padding = find_viewport_padding(view, map_mode);
+        let size = view.size();
         // The grid covers the viewport and its padding on each side.
         let width = size.width as f32;
         let height = size.height as f32;
@@ -170,7 +166,7 @@ impl CollisionIndex {
             None => (CollisionGrid::new(grid_width, grid_height, 25), CollisionGrid::new(grid_width, grid_height, 25)),
         };
         CollisionIndex {
-            transform_state: transform_state.clone(),
+            view: view.clone(),
             viewport_padding,
             collision_grid,
             ignored_grid,
@@ -178,13 +174,12 @@ impl CollisionIndex {
             screen_bottom_boundary: height + viewport_padding,
             grid_right_boundary: grid_width,
             grid_bottom_boundary: grid_height,
-            pitch_factor: (transform_state.get_pitch().cos()
-                * f64::from(transform_state.get_camera_to_center_distance())) as f32,
+            pitch_factor: (view.pitch().cos() * view.camera_to_center_distance()) as f32,
         }
     }
 
-    pub(crate) fn transform_state(&self) -> &TransformState {
-        &self.transform_state
+    pub(crate) fn view(&self) -> &View {
+        &self.view
     }
 
     pub(crate) fn viewport_padding(&self) -> f32 {
@@ -699,7 +694,7 @@ impl CollisionIndex {
     }
 
     fn to_viewport(&self, projected: &ProjectedTilePoint) -> ProjectedAnchor {
-        let size = self.transform_state.get_size();
+        let size = self.view.size();
         let viewport_padding = f64::from(self.viewport_padding);
         let distance = projected.signed_distance_from_camera as f32;
         ProjectedAnchor {
@@ -710,7 +705,7 @@ impl CollisionIndex {
             // See perspective ratio comment in symbol_sdf.vertex
             // We're doing collision detection in viewport space so we need
             // to scale down boxes in the distance
-            perspective_ratio: 0.5 + 0.5 * self.transform_state.get_camera_to_center_distance() / distance,
+            perspective_ratio: 0.5 + 0.5 * self.view.camera_to_center_distance() as f32 / distance,
             signed_distance_from_camera: distance,
             occluded: projected.occluded,
         }
@@ -718,7 +713,7 @@ impl CollisionIndex {
 
     fn project_point_with_projector(&self, tile_projector: &TileProjector<'_>, point: Vec2) -> Vec2 {
         let projected = tile_projector.project(&Point::new(f64::from(point.x), f64::from(point.y)), 0.0);
-        let size = self.transform_state.get_size();
+        let size = self.view.size();
         let viewport_padding = f64::from(self.viewport_padding);
         Vec2::new(
             ((f64::midpoint(projected.point.x, 1.0) * f64::from(size.width)) + viewport_padding) as f32,
@@ -728,7 +723,7 @@ impl CollisionIndex {
 
     fn project_point(&self, pos_matrix: &DMat4, point: Vec2) -> Vec2 {
         let p = transform(pos_matrix, point);
-        let size = self.transform_state.get_size();
+        let size = self.view.size();
         let viewport_padding = f64::from(self.viewport_padding);
         Vec2::new(
             ((f64::midpoint(p[0] / p[3], 1.0) * f64::from(size.width)) + viewport_padding) as f32,
@@ -804,7 +799,7 @@ impl CollisionIndex {
             vec_south = Vec2::new(-angle.sin(), angle.cos());
         } else if !rotate_with_map && pitch_with_map {
             // Pitched texts that stay aligned with the viewport's X axis.
-            let (east, south) = tile_skew_vectors(&self.transform_state);
+            let (east, south) = tile_skew_vectors(&self.view);
             vec_east = east.as_vec2();
             vec_south = south.as_vec2();
         }
@@ -822,7 +817,7 @@ impl CollisionIndex {
             // anchors already account for it.
             if shift.is_none() {
                 let distance_ratio =
-                    projected_point.signed_distance_from_camera / self.transform_state.get_camera_to_center_distance();
+                    projected_point.signed_distance_from_camera / self.view.camera_to_center_distance() as f32;
                 let ratio = 0.5 + 0.5 * distance_ratio;
                 distance_multiplier *= ratio.clamp(0.0, 4.0);
             }
@@ -926,9 +921,9 @@ mod tests {
     }
 
     fn collision_index() -> CollisionIndex {
-        let mut state = TransformState::default();
+        let mut state = mln_map_types::TransformState::default();
         state.set_size(Size::new(512, 512));
-        CollisionIndex::new(&state, MapMode::Static)
+        CollisionIndex::new(state.view(), MapMode::Static)
     }
 
     fn insert(index: &mut CollisionIndex, overlap_mode: OverlapMode, collision_group_id: u16) {

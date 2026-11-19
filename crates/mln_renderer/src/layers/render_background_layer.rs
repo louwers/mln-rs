@@ -146,13 +146,13 @@ impl RenderBackgroundLayer {
             projection_data(&tile_id, parameters, [0.0, 0.0], TranslateAnchorType::Viewport, false, false, None, false);
         let matrix = cast_matrix(&projection.fallback_matrix);
         let draw_ubo = if pattern {
-            let state = parameters.state;
-            let int_zoom = state.get_integer_zoom();
+            let state = parameters.view;
+            let int_zoom = state.integer_zoom();
             let tile_size_at_nearest_zoom =
-                (TILE_SIZE_D * state.zoom_scale(f64::from(int_zoom) - f64::from(tile_id.canonical.z))) as i32;
+                (TILE_SIZE_D * mln_map_types::zoom_scale(f64::from(int_zoom) - f64::from(tile_id.canonical.z))) as i32;
             let pixel_x = (f64::from(tile_size_at_nearest_zoom)
                 * (f64::from(tile_id.canonical.x)
-                    + f64::from(tile_id.wrap) * state.zoom_scale(f64::from(tile_id.canonical.z))))
+                    + f64::from(tile_id.wrap) * mln_map_types::zoom_scale(f64::from(tile_id.canonical.z))))
                 as i32;
             let pixel_y = tile_size_at_nearest_zoom.wrapping_mul(tile_id.canonical.y as i32);
             let pix_to_tile = tile_id.pixels_to_tile_units(1.0, f32::from(int_zoom));
@@ -322,11 +322,11 @@ impl TypedLayer for RenderBackgroundLayer {
     /// Picks the tiles that cover the view, which the layer draws, having no
     /// source, and adds its pattern to the pattern atlas.
     fn update_without_source(&mut self, parameters: &mut LayerUpdateParameters<'_>) {
-        let (state, update_parameters) = (parameters.state, parameters.update_parameters);
-        let zoom = state.get_integer_zoom();
+        let (state, update_parameters) = (parameters.view, parameters.update_parameters);
+        let zoom = state.integer_zoom();
         self.tile_cover = tile_cover(
             &TileCoverParameters {
-                transform_state: state.clone(),
+                view: state.clone(),
                 tile_lod_min_radius: update_parameters.tile_lod_min_radius,
                 tile_lod_scale: update_parameters.tile_lod_scale,
                 tile_lod_pitch_threshold: update_parameters.tile_lod_pitch_threshold,

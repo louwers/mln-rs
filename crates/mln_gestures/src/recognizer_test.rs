@@ -61,7 +61,7 @@ impl DerefMut for TestCamera {
 
 impl GestureCamera for TestCamera {
     fn viewport(&self) -> ScreenCoordinate {
-        let size = self.transform.get_state().get_size();
+        let size = self.transform.get_state().view().size();
         ScreenCoordinate::new(f64::from(size.width), f64::from(size.height))
     }
 
@@ -71,7 +71,7 @@ impl GestureCamera for TestCamera {
 
     fn zoom_range(&self) -> (f64, f64) {
         let state = self.transform.get_state();
-        crate::zoom_range(state, state.get_lat_lng(WrapMode::Unwrapped).latitude())
+        crate::zoom_range(state, state.view().center(WrapMode::Unwrapped).latitude())
     }
 
     fn lat_lng_for_pixel(&self, pixel: ScreenCoordinate) -> Option<LatLng> {

@@ -136,11 +136,41 @@ fn aabb_intersects_frustum() {
 
     let aabb_array: [AABB; 2] = [
         AABB::new(dvec3(-6.0, -6.0, 0.0), dvec3(6.0, 6.0, 0.0)),
-        AABB::new(dvec3(-6.0, -6.0, 0.0), dvec3(-5.0, -5.0, 0.0)),
+        AABB::new(dvec3(-6.0, -6.0, 0.0), dvec3(-4.5, -4.5, 0.0)),
     ];
 
     assert_eq!(frustum.intersects(&aabb_array[0]), IntersectionResult::Intersects);
     assert_eq!(frustum.intersects(&aabb_array[1]), IntersectionResult::Intersects);
+}
+
+#[test]
+fn aabb_touching_the_frustum_is_separate_from_it() {
+    let frustum = create_test_frustum(PI / 2.0, 1.0, 0.1, 100.0, -5.0, 0.0);
+
+    // At a corner and along an edge, from outside.
+    let corner = AABB::new(dvec3(-6.0, -6.0, 0.0), dvec3(-5.0, -5.0, 0.0));
+    let edge = AABB::new(dvec3(5.0, -1.0, 0.0), dvec3(6.0, 1.0, 0.0));
+    assert_eq!(frustum.intersects(&corner), IntersectionResult::Separate);
+    assert_eq!(frustum.intersects(&edge), IntersectionResult::Separate);
+    // From inside, the frustum still contains it.
+    let inside = AABB::new(dvec3(4.0, -1.0, 0.0), dvec3(5.0, 1.0, 0.0));
+    assert_eq!(frustum.intersects(&inside), IntersectionResult::Contains);
+}
+
+#[test]
+fn aabb_one_pixel_inside_the_frustum_far_from_the_origin_intersects_it() {
+    // In tile units at zoom 25 near the antimeridian, where a pixel is
+    // 1/512: the frustum's footprint spans x ± 5.
+    let x = f64::from(1u32 << 25);
+    let proj = perspective(PI / 2.0, 1.0, 0.1, 100.0)
+        * DMat4::from_scale(dvec3(1.0, -1.0, 1.0))
+        * DMat4::from_translation(dvec3(-x, 0.0, -5.0));
+    let frustum = Frustum::from_inv_proj_matrix(&proj.try_inverse().unwrap(), 1.0, 0.0, false, None);
+
+    let overlapping = AABB::new(dvec3(x + 5.0 - 1.0 / 512.0, -1.0, 0.0), dvec3(x + 6.0, 1.0, 0.0));
+    let touching = AABB::new(dvec3(x + 5.0, -1.0, 0.0), dvec3(x + 6.0, 1.0, 0.0));
+    assert_eq!(frustum.intersects(&overlapping), IntersectionResult::Intersects);
+    assert_eq!(frustum.intersects(&touching), IntersectionResult::Separate);
 }
 
 // gtest: BoundingVolumes.AabbIntersectsFrustumEdgeCase

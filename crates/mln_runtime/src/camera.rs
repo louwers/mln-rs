@@ -75,7 +75,7 @@ pub(crate) fn camera_for(
     area: &CameraFitArea,
     options: &CameraFitOptions,
 ) -> Result<CameraOptions, Error> {
-    let size = map.get_transform_state().get_size();
+    let size = map.get_transform_state().view().size();
     let padding = options.padding;
     if padding.left + padding.right >= f64::from(size.width) || padding.top + padding.bottom >= f64::from(size.height) {
         return Err(Error::invalid_argument("camera fit padding must be less than the map's width and height"));

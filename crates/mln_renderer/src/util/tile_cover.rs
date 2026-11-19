@@ -11,7 +11,7 @@
 use geo_types::{Coord, Geometry, LineString, Polygon};
 use geometry::Point;
 use glam::DVec3;
-use mln_map_types::{TileCoordinate, TileLodMode, TransformState, ViewportMode};
+use mln_map_types::{TileCoordinate, TileLodMode, View, ViewportMode};
 use mln_math::{fmax, fmin};
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::bounding_volumes::{AABB, Frustum, IntersectionResult};
@@ -223,7 +223,7 @@ impl Iterator for TileCover {
 /// which C++ holds by reference.
 #[derive(Clone, Debug)]
 pub(crate) struct TileCoverParameters {
-    pub(crate) transform_state: TransformState,
+    pub(crate) view: View,
     pub(crate) tile_lod_min_radius: f64,
     pub(crate) tile_lod_scale: f64,
     pub(crate) tile_lod_pitch_threshold: f64,
@@ -242,12 +242,12 @@ pub(crate) struct TileCoverParameters {
 }
 
 impl TileCoverParameters {
-    /// Parameters for `transform_state`, with the defaults for the other
+    /// Parameters for `view`, with the defaults for the other
     /// fields.
     #[cfg(test)]
-    pub(crate) fn new(transform_state: TransformState) -> Self {
+    pub(crate) fn new(view: View) -> Self {
         TileCoverParameters {
-            transform_state,
+            view,
             tile_lod_min_radius: 3.0,
             tile_lod_scale: 1.0,
             tile_lod_pitch_threshold: (60.0 / 180.0) * std::f64::consts::PI,
@@ -599,8 +599,8 @@ mod globe {
             sqr_dist: f64,
         }
 
-        let transform = &state.transform_state;
-        let projection = transform.get_projection_data(&UnwrappedTileID::new(0, 0, 0));
+        let transform = &state.view;
+        let projection = transform.projection_data(&UnwrappedTileID::new(0, 0, 0));
         let Some(inverse) = projection.main_matrix.try_inverse() else {
             return Vec::new();
         };
@@ -622,10 +622,8 @@ mod globe {
             let horizon_cos = (-horizon.w / normal_length).clamp(-1.0, 1.0);
             let shell_cos = (horizon_cos.acos() + (1.0 / shell_radius).acos()).cos();
             culling_horizon.w = -shell_cos * normal_length;
-            frustum = frustum.with_far_plane_pushed(
-                (shell_radius * shell_radius - 1.0).sqrt(),
-                transform.get_globe_camera_position(),
-            );
+            frustum = frustum
+                .with_far_plane_pushed((shell_radius * shell_radius - 1.0).sqrt(), transform.globe_camera_position());
         }
 
         // Tiles nearer the camera than the center may load finer than the
@@ -634,16 +632,14 @@ mod globe {
         let min_zoom = zoom_range.min;
         let overscaled_zoom = std::cmp::max(overscaled_z.unwrap_or(z), max_zoom);
         let num_tiles = 2.0f64.powf(f64::from(z));
-        let transform_zoom = transform.get_zoom();
+        let transform_zoom = transform.zoom();
         let requested_center_zoom =
             state.requested_zoom.unwrap_or(transform_zoom + (f64::from(z) - transform_zoom.floor()));
         let whole_zoom = |zoom: f64| if state.round_zoom { zoom.round() } else { zoom.floor() };
         let allow_variable_zoom = whole_zoom(requested_center_zoom) > 4.0;
 
-        let center = Projection::project(
-            &transform.get_lat_lng(mln_util::geo::WrapMode::Unwrapped),
-            1.0 / constants::TILE_SIZE_D,
-        );
+        let center =
+            Projection::project(&transform.center(mln_util::geo::WrapMode::Unwrapped), 1.0 / constants::TILE_SIZE_D);
         let center_coord = DVec3::new(center.x, center.y, 0.0);
         // The globe keeps its center on whichever world copy it has reached,
         // where GL JS keeps it on the first. Wraps, sort keys and tile
@@ -652,7 +648,7 @@ mod globe {
         // copy.
         let center_world = center_coord[0].floor();
         let first_copy_center_x = center_coord[0] - center_world;
-        let camera_position = transform.get_free_camera_options().position;
+        let camera_position = transform.free_camera_options().position;
         debug_assert!(camera_position.is_some());
         let Some(camera_position) = camera_position else {
             return Vec::new();
@@ -661,25 +657,21 @@ mod globe {
         // are chosen around the center brought back to the edge of the range,
         // and the camera moves with it.
         let mut camera_coord = camera_position;
-        let latitude = transform.get_lat_lng(mln_util::geo::WrapMode::Unwrapped).latitude();
+        let latitude = transform.center(mln_util::geo::WrapMode::Unwrapped).latitude();
         if latitude.abs() > constants::LATITUDE_MAX {
             camera_coord[1] += center.y - (0.5 - mln_math::deg2rad(latitude).tan().asinh() / constants::M2PI);
         }
         let distance_to_center_2d = (center_coord[0] - camera_coord[0]).hypot(center_coord[1] - camera_coord[1]);
         let distance_z = (center_coord[2] - camera_coord[2]).abs();
         let distance_to_center_3d = distance_to_center_2d.hypot(distance_z);
-        let fov_degrees = f64::from(transform.get_field_of_view()) * 180.0 / PI;
+        let fov_degrees = transform.fov() * 180.0 / PI;
         let tile_zoom = TileZoomFunction::new(
             fov_degrees,
             TileZoomFunction::DEFAULT_MAX_ZOOM_LEVELS_ON_SCREEN,
             TileZoomFunction::DEFAULT_TILE_COUNT_MAX_MIN_RATIO,
         );
-        let culling_elevation = elevation_for_tile_culling(
-            transform.get_pitch() * 180.0 / PI,
-            fov_degrees,
-            0.0,
-            state.max_content_elevation,
-        );
+        let culling_elevation =
+            elevation_for_tile_culling(transform.pitch() * 180.0 / PI, fov_degrees, 0.0, state.max_content_elevation);
 
         let mut stack: Vec<Node> = Vec::with_capacity(64);
         let mut result: Vec<ResultTile> = Vec::with_capacity(64);
@@ -761,10 +753,8 @@ mod globe {
         zoom_range: Range<u8>,
         overscaled_z: Option<u8>,
     ) -> Vec<OverscaledTileID> {
-        let center = Projection::project(
-            &state.transform_state.get_lat_lng(mln_util::geo::WrapMode::Unwrapped),
-            1.0 / constants::TILE_SIZE_D,
-        );
+        let center =
+            Projection::project(&state.view.center(mln_util::geo::WrapMode::Unwrapped), 1.0 / constants::TILE_SIZE_D);
         let center_world = center.x.floor();
         let first_copy_center_x = center.x - center_world;
         let overscaled_zoom =
@@ -816,7 +806,7 @@ pub(crate) fn tile_cover(
         sqr_dist: f64,
     }
 
-    if state.transform_state.is_globe_rendering() {
+    if state.view.is_globe() {
         return globe::tile_cover(state, z, zoom_range, overscaled_z);
     }
 
@@ -834,17 +824,17 @@ pub(crate) fn tile_cover(
         children
     };
 
-    let transform = &state.transform_state;
+    let transform = &state.view;
     let num_tiles = 2.0f64.powf(f64::from(z));
-    let world_size = Projection::world_size(transform.get_scale());
-    let allow_variable_zoom = transform.get_pitch() > state.tile_lod_pitch_threshold;
+    let world_size = Projection::world_size(transform.scale());
+    let allow_variable_zoom = transform.pitch() > state.tile_lod_pitch_threshold;
     let min_zoom: u8 = if allow_variable_zoom { zoom_range.min } else { z };
     let max_zoom: u8 =
         if (state.tile_lod_mode == TileLodMode::Distance) && allow_variable_zoom { zoom_range.max } else { z };
     let overscaled_zoom: u8 = std::cmp::max(overscaled_z.unwrap_or(z), max_zoom);
-    let flipped_y = transform.get_viewport_mode() == ViewportMode::FlippedY;
+    let flipped_y = transform.viewport_mode() == ViewportMode::FlippedY;
 
-    let size = transform.get_size();
+    let size = transform.size();
     let center_point = TileCoordinate::from_screen_coordinate(
         transform,
         z,
@@ -854,7 +844,7 @@ pub(crate) fn tile_cover(
 
     let center_coord = DVec3::new(center_point.x, center_point.y, 0.0);
 
-    let camera_position = transform.get_free_camera_options().position;
+    let camera_position = transform.free_camera_options().position;
     debug_assert!(camera_position.is_some());
     let Some(camera_position_mercator) = camera_position else {
         return Vec::new();
@@ -864,7 +854,7 @@ pub(crate) fn tile_cover(
     let camera_to_center_distance_mercator = camera_coord.distance(center_coord) / world_size;
 
     let frustum = Frustum::from_inv_proj_matrix(
-        &transform.get_inv_projection_matrix(),
+        &transform.inverse_projection_matrix(),
         world_size,
         f64::from(z),
         flipped_y,

@@ -11,6 +11,7 @@ use crate::camera::CameraOptions;
 use crate::mode::{ConstrainMode, ViewportMode};
 use crate::projection_mode::ProjectionMode;
 use crate::transform_state::TransformState;
+use crate::view::View;
 
 /// A camera with every member set: the camera that a map has, where
 /// [`CameraOptions`] is a change to one.
@@ -81,7 +82,7 @@ pub struct MapView {
     pub camera: Camera,
     pub extent: LogicalExtent,
     /// Sets every member when it comes from a map. A member that a view leaves
-    /// unset takes the default of [`TransformState`].
+    /// unset takes the default of [`View`].
     pub projection_mode: ProjectionMode,
     pub viewport: Viewport,
     /// The style's projection at the camera's zoom. A view from a map never
@@ -91,27 +92,6 @@ pub struct MapView {
 }
 
 impl MapView {
-    /// The view that `state` shows, at `scale_factor` physical pixels in each
-    /// logical pixel.
-    pub fn from_state(state: &TransformState, scale_factor: f64) -> MapView {
-        MapView {
-            camera: state.camera(),
-            extent: LogicalExtent { size: state.get_size(), scale_factor },
-            projection_mode: ProjectionMode {
-                axonometric: Some(state.get_axonometric()),
-                x_skew: Some(state.get_x_skew()),
-                y_skew: Some(state.get_y_skew()),
-            },
-            viewport: Viewport {
-                north_orientation: state.get_north_orientation(),
-                constrain_mode: state.get_constrain_mode(),
-                viewport_mode: state.get_viewport_mode(),
-                frustum_offset: state.get_frustum_offset(),
-            },
-            projection: state.get_projection_definition(),
-        }
-    }
-
     /// A transform state that shows exactly this view, to convert coordinates
     /// for it.
     ///
@@ -156,6 +136,12 @@ impl MapView {
         // Last, so that no constraint applies while the members are set.
         state.set_constrain_mode(viewport.constrain_mode);
         Ok(state)
+    }
+
+    /// The view that this describes, to draw it or convert coordinates for
+    /// it. `Err`: as [`to_state`](Self::to_state).
+    pub fn to_view(&self) -> Result<View, Error> {
+        Ok(self.to_state()?.view().clone())
     }
 
     fn validate(&self) -> Result<(), Error> {

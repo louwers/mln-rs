@@ -23,8 +23,8 @@ pub(crate) fn compute(
     depth_range_size: f32,
     clip_depth_range: ClipDepthRange,
 ) -> FrameProjection {
-    let state = &transform.state;
-    let world_size = Projection::world_size(state.get_scale());
+    let state = &transform.view;
+    let world_size = Projection::world_size(state.scale());
     let mut world_to_clip =
         transform.near_clipped_proj_matrix * DMat4::from_scale(DVec3::new(world_size, world_size, 1.0));
     let far_depth = f64::from(depth_range_size);
@@ -39,7 +39,7 @@ pub(crate) fn compute(
         },
     );
     let near = transform.near_clipped_near_z;
-    let far = state.get_far_z();
+    let far = state.far_z();
     FrameProjection {
         matrix: world_to_clip,
         clip_depth_range,
@@ -47,7 +47,7 @@ pub(crate) fn compute(
         near_distance: 2.0 * near * far / (far + near),
         far_distance: far,
         far_depth,
-        globe: state.is_globe_rendering(),
+        globe: state.is_globe(),
     }
 }
 
@@ -88,7 +88,7 @@ mod tests {
             viewport: Viewport::default(),
             projection: ProjectionDefinition::default(),
         };
-        TransformParameters::new(&view.to_state().unwrap())
+        TransformParameters::new(&view.to_view().unwrap())
     }
 
     /// `point`, of x and y in Web Mercator's 0 to 1 and z in meters, through
@@ -111,7 +111,7 @@ mod tests {
         for (lat, lng) in [(40.7, -74.0), (40.703, -73.996), (40.698, -74.004), (40.705, -74.001)] {
             let lat_lng = LatLng::new(lat, lng).unwrap();
             // The state counts its screen points from the bottom.
-            let mut expected = transform.state.lat_lng_to_screen_coordinate(&lat_lng);
+            let mut expected = transform.view.lat_lng_to_screen_coordinate(&lat_lng);
             expected.y = f64::from(SIZE.height) - expected.y;
             let (x, y, _) = project(&projection.matrix, mercator(&lat_lng));
             assert!(
@@ -138,7 +138,7 @@ mod tests {
         let far_depth = zero_to_one.far_depth;
         // A 3D layer's OpenGL matrix, as Metal, Vulkan, D3D12 and WebGPU draw
         // it, and as OpenGL does through `zero_to_one_clip_z`.
-        let world_size = Projection::world_size(transform.state.get_scale());
+        let world_size = Projection::world_size(transform.view.scale());
         let layer = transform.near_clipped_proj_matrix * DMat4::from_scale(DVec3::new(world_size, world_size, 1.0));
         let mut gl_layer = layer;
         zero_to_one_clip_z(&mut gl_layer);
@@ -179,12 +179,12 @@ mod tests {
             viewport: Viewport::default(),
             projection: ProjectionDefinition::default(),
         };
-        let transform = TransformParameters::new(&view.to_state().unwrap());
+        let transform = TransformParameters::new(&view.to_view().unwrap());
         let projection = compute(&transform, 1.0, ClipDepthRange::ZeroToOne);
-        assert_eq!(transform.state.get_far_z(), projection.far_distance);
+        assert_eq!(transform.view.far_z(), projection.far_distance);
         // The ground north of the center: what is drawn below the horizon
         // is nearer than the far depth, and what is drawn above it is past.
-        let horizon_row = f64::from(SIZE.height) / 2.0 - transform.state.get_mercator_horizon();
+        let horizon_row = f64::from(SIZE.height) / 2.0 - transform.view.mercator_horizon();
         let mut past = 0;
         for step in 0..8500 {
             let (_, row, depth) =

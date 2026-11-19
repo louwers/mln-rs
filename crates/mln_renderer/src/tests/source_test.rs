@@ -54,14 +54,16 @@ struct SourceTest {
 /// The tile parameters for `map_mode`, from a transform state the caller
 /// owns.
 fn tile_parameters(
-    transform_state: &TransformState,
+    state: &TransformState,
     map_mode: MapMode,
     file_source: Option<Arc<dyn FileSource>>,
 ) -> TileParameters<'_> {
     TileParameters {
         pixel_ratio: 1.0,
         debug_options: MapDebugOptions::NO_DEBUG,
-        transform_state,
+        view: state.view(),
+        min_zoom: state.get_min_zoom(),
+        max_zoom: state.get_max_zoom(),
         file_source,
         mode: map_mode,
         prefetch_zoom_delta: 0,

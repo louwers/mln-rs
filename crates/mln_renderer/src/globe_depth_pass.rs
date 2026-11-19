@@ -13,7 +13,7 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO};
 use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
-use mln_map_types::TransformState;
+use mln_map_types::View;
 use mln_util::range::Range;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
@@ -55,14 +55,14 @@ impl GlobeDepthPass {
         gpu: &mut dyn Gpu,
         shaders: &ShaderRegistry,
         context: &mut Context,
-        state: &TransformState,
+        state: &View,
         update_parameters: &UpdateParameters,
         needed: bool,
     ) {
-        if !state.is_globe_rendering() || !needed {
+        if !state.is_globe() || !needed {
             self.tiles.clear_tiles();
             self.frame.clear();
-            if !state.is_globe_rendering() {
+            if !state.is_globe() {
                 self.meshes.clear();
             }
             return;
@@ -76,10 +76,10 @@ impl GlobeDepthPass {
         };
         let caches = &mut self.tiles;
 
-        let zoom = state.get_integer_zoom();
+        let zoom = state.integer_zoom();
         let tile_cover = tile_cover(
             &TileCoverParameters {
-                transform_state: state.clone(),
+                view: state.clone(),
                 tile_lod_min_radius: update_parameters.tile_lod_min_radius,
                 tile_lod_scale: update_parameters.tile_lod_scale,
                 tile_lod_pitch_threshold: update_parameters.tile_lod_pitch_threshold,
@@ -135,7 +135,7 @@ impl GlobeDepthPass {
                 continue;
             };
             let depth = DrawDepth::Volume { mask: DepthMaskType::ReadWrite };
-            let projection = to_projection_ubo(&state.get_projection_data(&tile_id.to_unwrapped()));
+            let projection = to_projection_ubo(&state.projection_data(&tile_id.to_unwrapped()));
             self.draw_list.push(FrameDraw { depth, ..draw.frame_draw(Some(*tile_id)) }, projection);
         }
         // The draws draw in the order their GPU objects were made.

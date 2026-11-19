@@ -10,6 +10,26 @@ fn ray_plane_intersection(origin: DVec3, direction: DVec3, plane: DVec4) -> Opti
     Some((-origin.dot(normal) - plane.w) / along)
 }
 
+/// Where a point is from a plane, as `ax + by + cz + d`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PlaneSide {
+    Inside,
+    /// On the plane, within `rounding`.
+    On,
+    Outside,
+}
+
+fn plane_side(plane: DVec4, point: DVec4, rounding: f64) -> PlaneSide {
+    let distance = plane.dot(point);
+    if distance > rounding {
+        PlaneSide::Inside
+    } else if distance < -rounding {
+        PlaneSide::Outside
+    } else {
+        PlaneSide::On
+    }
+}
+
 fn plane_through(p0: DVec3, p1: DVec3, p2: DVec3) -> DVec4 {
     let n = (p0 - p1).cross(p2 - p1).normalize();
     n.extend(-n.dot(p1))
@@ -251,7 +271,9 @@ impl Frustum {
 
     /// A conservative intersection test by the separating axis theorem: it
     /// may report an intersection where there is none (in under 1% of cases)
-    /// for speed. `aabb` must lie on the plane z = 0.
+    /// for speed. A box that only touches the frustum is separate from it,
+    /// and one that touches it from inside is within it. `aabb` must lie on
+    /// the plane z = 0.
     #[must_use]
     pub fn intersects(&self, aabb: &AABB) -> IntersectionResult {
         // Each frustum plane together with 3 major axes define the separating
@@ -272,17 +294,17 @@ impl Frustum {
 
         let mut fully_inside = true;
 
-        let epsilon = 1e-10;
-
+        // A plane is placed as precisely as the coordinates of the points it
+        // passes through, which along each axis are as large as the frustum's.
+        let magnitude = self.points.iter().fold(DVec3::ZERO, |magnitude, point| magnitude.max(point.abs()));
         for plane in &self.planes {
-            let points_inside = aabb_points.iter().filter(|point| plane.dot(**point) >= -epsilon).count();
-
-            if points_inside == 0 {
+            let rounding = 1e-12 * plane.xyz().abs().dot(magnitude);
+            let sides = aabb_points.map(|point| plane_side(*plane, point, rounding));
+            if !sides.contains(&PlaneSide::Inside) {
                 // Separating axis found, no intersection
                 return IntersectionResult::Separate;
             }
-
-            if points_inside != aabb_points.len() {
+            if sides.contains(&PlaneSide::Outside) {
                 fully_inside = false;
             }
         }

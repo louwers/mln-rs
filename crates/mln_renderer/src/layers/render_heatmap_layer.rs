@@ -320,10 +320,10 @@ impl TypedLayer for RenderHeatmapLayer {
         _atlases: &Atlases,
         render_tiles: &[FrameTile<'_, Heatmap>],
     ) {
-        let (static_data, state) = (paint_parameters.static_data, paint_parameters.state);
+        let (static_data, state) = (paint_parameters.static_data, paint_parameters.view);
         let shaders = &static_data.shaders;
 
-        let viewport_size = state.get_size();
+        let viewport_size = state.size();
         let size = Size::new(viewport_size.width / 2, viewport_size.height / 2);
         let render_target = self.render_target.get_or_insert_with(|| {
             RenderTarget::new(paint_parameters.context, size, TextureChannelDataType::HalfFloat)
@@ -480,7 +480,7 @@ impl RenderHeatmapLayer {
     ) -> HeatmapUniforms {
         const NEAR_CLIPPED: bool = false;
         const IN_VIEWPORT_PIXEL_UNITS: bool = false;
-        let zoom = parameters.state.get_zoom() as f32;
+        let zoom = parameters.view.zoom() as f32;
         let tile_id = tile_id.to_unwrapped();
         let projection = projection_data(
             &tile_id,
@@ -492,7 +492,7 @@ impl RenderHeatmapLayer {
             None,
             false,
         );
-        let latitude_scale = parameters.state.get_projection().circle_radius_correction(parameters.state);
+        let latitude_scale = parameters.view.projection().circle_radius_correction(parameters.view);
         HeatmapUniforms {
             draw_ubo: HeatmapDrawableUBO {
                 matrix: cast_matrix(&projection.fallback_matrix),

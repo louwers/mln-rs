@@ -4,7 +4,7 @@ use mln_util::constants;
 use mln_util::geo::{LatLng, ScreenCoordinate};
 use mln_util::projection::Projection;
 
-use crate::transform_state::TransformState;
+use crate::view::View;
 
 pub type TileCoordinatePoint = Point<f64>;
 
@@ -25,12 +25,9 @@ impl TileCoordinate {
         TileCoordinate { p: Point::new(p.x / constants::TILE_SIZE, p.y / constants::TILE_SIZE), z: zoom }
     }
 
-    pub fn from_screen_coordinate(
-        state: &TransformState,
-        zoom: u8,
-        screen_coordinate: &ScreenCoordinate,
-    ) -> TileCoordinate {
-        state.screen_coordinate_to_tile_coordinate(screen_coordinate, zoom)
+    #[must_use]
+    pub fn from_screen_coordinate(view: &View, zoom: u8, screen_coordinate: &ScreenCoordinate) -> TileCoordinate {
+        view.screen_coordinate_to_tile_coordinate(screen_coordinate, zoom)
     }
 
     #[must_use]

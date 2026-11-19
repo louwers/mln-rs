@@ -10,13 +10,8 @@ use mln_util::interpolate::interpolate;
 use mln_util::projection::Projection;
 
 use crate::projection::{ProjectedTilePoint, ProjectionData, mercator_tile_coords};
-use crate::transform_state::{NorthOrientation, TransformState};
-
-/// A `LatLng` from coordinates the transform state keeps valid, saturating
-/// any that aren't (see [`LatLng::saturating`]).
-fn lat_lng(lat: f64, lon: f64, mode: WrapMode) -> LatLng {
-    LatLng::saturating(lat, lon, mode)
-}
+use crate::transform_state::TransformState;
+use crate::view::{NorthOrientation, View};
 
 /// How far from the polar axis a unit-sphere point can be and still be on its
 /// pole, with no longitude of its own: GL JS
@@ -74,15 +69,11 @@ fn point_plane_signed_distance(plane: DVec4, point: DVec3) -> f64 {
     plane.dot(point.extend(1.0))
 }
 
-fn ray_direction_from_pixel(
-    state: &TransformState,
-    point: &ScreenCoordinate,
-    inverse_view_projection: &DMat4,
-) -> DVec3 {
-    let size = state.get_size();
+fn ray_direction_from_pixel(view: &View, point: &ScreenCoordinate, inverse_view_projection: &DMat4) -> DVec3 {
+    let size = view.size();
     let clip =
         DVec3::new(point.x / f64::from(size.width) * 2.0 - 1.0, point.y / f64::from(size.height) * 2.0 - 1.0, 1.0);
-    (inverse_view_projection.project_point3(clip) - state.get_globe_camera_position()).normalize()
+    (inverse_view_projection.project_point3(clip) - view.globe_camera_position()).normalize()
 }
 
 /// Angle to rotate the vector (x0, y0) onto the direction of (x1, y1).
@@ -189,31 +180,32 @@ impl VerticalPerspectiveProjection {
 
     /// The view-projection matrix that takes unit-sphere positions to clip
     /// space.
-    pub fn globe_view_projection_matrix(state: &TransformState, radius: f64) -> DMat4 {
-        let size = state.get_size();
-        let camera_to_center_distance = f64::from(state.get_camera_to_center_distance());
-        let center = state.get_lat_lng(WrapMode::Unwrapped);
+    #[must_use]
+    pub fn globe_view_projection_matrix(view: &View, radius: f64) -> DMat4 {
+        let size = view.size();
+        let camera_to_center_distance = view.camera_to_center_distance();
+        let center = view.center(WrapMode::Unwrapped);
 
         let mut projection = perspective(
-            f64::from(state.get_field_of_view()),
+            view.perspective_fov(),
             f64::from(size.width) / f64::from(size.height),
             0.5,
             camera_to_center_distance + radius * 2.0,
         );
         // Move the vanishing point to the center of the padded view.
-        let offset = state.get_center_offset();
+        let offset = view.center_offset();
         projection.z_axis.x = -offset.x * 2.0 / f64::from(size.width);
         projection.z_axis.y = offset.y * 2.0 / f64::from(size.height);
 
-        if state.get_north_orientation() != NorthOrientation::Upwards {
-            projection *= DMat4::from_rotation_z(-state.get_north_orientation_angle());
+        if view.north_orientation() != NorthOrientation::Upwards {
+            projection *= DMat4::from_rotation_z(-view.north_orientation_angle());
         }
 
         projection
             * DMat4::from_translation(DVec3::new(0.0, 0.0, -camera_to_center_distance))
-            * DMat4::from_rotation_z(state.get_roll())
-            * DMat4::from_rotation_x(-state.get_pitch())
-            * DMat4::from_rotation_z(-state.get_bearing())
+            * DMat4::from_rotation_z(view.roll())
+            * DMat4::from_rotation_x(-view.pitch())
+            * DMat4::from_rotation_z(-view.angle())
             * DMat4::from_translation(DVec3::new(0.0, 0.0, -radius))
             * DMat4::from_rotation_x(mln_math::deg2rad(center.latitude()))
             * DMat4::from_rotation_y(-mln_math::deg2rad(center.longitude()))
@@ -222,9 +214,10 @@ impl VerticalPerspectiveProjection {
 
     /// The plane (as ax + by + cz + d) that separates the visible hemisphere
     /// from the back of the globe.
-    pub fn clipping_plane(state: &TransformState, radius: f64) -> DVec4 {
-        let pitch = state.get_pitch();
-        let distance_camera_to_b = f64::from(state.get_camera_to_center_distance()) / radius;
+    #[must_use]
+    pub fn clipping_plane(view: &View, radius: f64) -> DVec4 {
+        let pitch = view.pitch();
+        let distance_camera_to_b = view.camera_to_center_distance() / radius;
         let distance_camera_to_a = pitch.sin() * distance_camera_to_b;
         let distance_a_to_c = pitch.cos() * distance_camera_to_b + 1.0;
         let distance_camera_to_c =
@@ -234,8 +227,8 @@ impl VerticalPerspectiveProjection {
         let mut plane =
             DVec3::new(0.0, -distance_camera_to_a / distance_camera_to_c, distance_a_to_c / distance_camera_to_c);
 
-        let center = state.get_lat_lng(WrapMode::Unwrapped);
-        plane = rotate_z(plane, state.get_bearing());
+        let center = view.center(WrapMode::Unwrapped);
+        plane = rotate_z(plane, view.angle());
         plane = rotate_x(plane, -mln_math::deg2rad(center.latitude()));
         plane = rotate_y(plane, mln_math::deg2rad(center.longitude()));
 
@@ -243,12 +236,13 @@ impl VerticalPerspectiveProjection {
     }
 
     /// Camera position in unit-sphere space.
-    pub fn camera_position(state: &TransformState, radius: f64) -> DVec3 {
-        let center = state.get_lat_lng(WrapMode::Unwrapped);
-        let mut position = DVec3::new(0.0, 0.0, f64::from(state.get_camera_to_center_distance()) / radius);
-        position = rotate_z(position, -state.get_roll());
-        position = rotate_x(position, state.get_pitch());
-        position = rotate_z(position, state.get_bearing());
+    #[must_use]
+    pub fn camera_position(view: &View, radius: f64) -> DVec3 {
+        let center = view.center(WrapMode::Unwrapped);
+        let mut position = DVec3::new(0.0, 0.0, view.camera_to_center_distance() / radius);
+        position = rotate_z(position, -view.roll());
+        position = rotate_x(position, view.pitch());
+        position = rotate_z(position, view.angle());
         position += DVec3::Z;
         position = rotate_x(position, -mln_math::deg2rad(center.latitude()));
         rotate_y(position, mln_math::deg2rad(center.longitude()))
@@ -278,9 +272,9 @@ impl VerticalPerspectiveProjection {
     /// Unit-sphere point under a screen pixel (y up, as `TransformState`
     /// takes it); pixels off the globe snap to the nearest point on the
     /// horizon.
-    pub(crate) fn screen_coordinate_to_surface(state: &TransformState, point: &ScreenCoordinate) -> DVec3 {
-        let origin = state.get_globe_camera_position();
-        let direction = ray_direction_from_pixel(state, point, &state.get_inverse_globe_view_projection_matrix());
+    pub(crate) fn screen_coordinate_to_surface(view: &View, point: &ScreenCoordinate) -> DVec3 {
+        let origin = view.globe_camera_position();
+        let direction = ray_direction_from_pixel(view, point, &view.inverse_globe_view_projection_matrix());
 
         if let Some(t) = ray_sphere_intersection(origin, direction) {
             return (origin + direction * t).normalize();
@@ -288,7 +282,7 @@ impl VerticalPerspectiveProjection {
 
         // The ray misses the globe: take the nearest point on the horizon, the
         // circle where the clipping plane cuts the sphere.
-        let plane = state.get_globe_clipping_plane();
+        let plane = view.globe_clipping_plane();
         let normal = plane.xyz();
         let distance_to_intersection = -point_plane_signed_distance(plane, origin) / direction.dot(normal);
 
@@ -307,25 +301,27 @@ impl VerticalPerspectiveProjection {
     }
 
     /// Whether a screen pixel (y up) looks at the globe rather than past it.
-    pub fn screen_coordinate_hits_globe(state: &TransformState, point: &ScreenCoordinate) -> bool {
-        let direction = ray_direction_from_pixel(state, point, &state.get_inverse_globe_view_projection_matrix());
-        ray_sphere_intersection(state.get_globe_camera_position(), direction).is_some()
+    #[must_use]
+    pub fn screen_coordinate_hits_globe(view: &View, point: &ScreenCoordinate) -> bool {
+        let direction = ray_direction_from_pixel(view, point, &view.inverse_globe_view_projection_matrix());
+        ray_sphere_intersection(view.globe_camera_position(), direction).is_some()
     }
 
     pub(crate) fn screen_coordinate_to_lat_lng(
-        state: &TransformState,
+        view: &View,
         point: &ScreenCoordinate,
         wrap_mode: WrapMode,
     ) -> Option<LatLng> {
-        let lat_lng = Self::surface_vector_to_lat_lng(Self::screen_coordinate_to_surface(state, point))?;
+        let lat_lng = Self::surface_vector_to_lat_lng(Self::screen_coordinate_to_surface(view, point))?;
         Some(if wrap_mode == WrapMode::Wrapped { lat_lng.wrapped() } else { lat_lng })
     }
 
     /// The screen point of a location on the globe and its clip-space
     /// position.
-    pub fn lat_lng_to_screen_coordinate(state: &TransformState, lat_lng: &LatLng) -> (ScreenCoordinate, DVec4) {
-        let clip = state.get_globe_view_projection_matrix() * Self::surface_vector(lat_lng).extend(1.0);
-        let size = state.get_size();
+    #[must_use]
+    pub fn lat_lng_to_screen_coordinate(view: &View, lat_lng: &LatLng) -> (ScreenCoordinate, DVec4) {
+        let clip = view.globe_view_projection_matrix() * Self::surface_vector(lat_lng).extend(1.0);
+        let size = view.size();
         let point = Point::new(
             (clip.x / clip.w * 0.5 + 0.5) * f64::from(size.width),
             (clip.y / clip.w * 0.5 + 0.5) * f64::from(size.height),
@@ -336,15 +332,15 @@ impl VerticalPerspectiveProjection {
     /// The center that puts `lat_lng` under `anchor` with the bearing
     /// unchanged, if one exists.
     pub(crate) fn center_for_location_at_point(
-        state: &TransformState,
+        view: &View,
         lat_lng: &LatLng,
         anchor: &ScreenCoordinate,
     ) -> Option<LatLng> {
         // GL JS `setLocationAtPoint`: solve the rotation that carries the
         // surface point under the pixel onto the target.
         const LIMIT: f64 = PI * 0.5;
-        let center = state.get_lat_lng(WrapMode::Unwrapped);
-        let vec_to_pixel_current = Self::screen_coordinate_to_surface(state, anchor);
+        let center = view.center(WrapMode::Unwrapped);
+        let vec_to_pixel_current = Self::screen_coordinate_to_surface(view, anchor);
         let vec_to_target = Self::surface_vector(lat_lng);
 
         let rotated_pixel_vector = rotate_x(
@@ -398,7 +394,11 @@ impl VerticalPerspectiveProjection {
         } else {
             return None;
         };
-        Some(self::lat_lng((mln_math::rad2deg(lat)).clamp(-90.0, 90.0), mln_math::rad2deg(lng), WrapMode::Unwrapped))
+        Some(LatLng::saturating(
+            (mln_math::rad2deg(lat)).clamp(-90.0, 90.0),
+            mln_math::rad2deg(lng),
+            WrapMode::Unwrapped,
+        ))
     }
 
     /// GL JS `handleMapControlsRollPitchBearingZoom`: after the zoom changed
@@ -421,7 +421,7 @@ impl VerticalPerspectiveProjection {
         if zoom_delta == 0.0 {
             return;
         }
-        let center = state.get_lat_lng(WrapMode::Unwrapped);
+        let center = state.view().center(WrapMode::Unwrapped);
         // A location on a pole has no longitude of its own, so the zoom keeps
         // the center's meridian rather than turning the planet about the pole
         // towards the longitude the location was given.
@@ -436,8 +436,9 @@ impl VerticalPerspectiveProjection {
 
         // Slow the movement down when the anchor's ray passes far from the
         // planet.
-        let ray_origin = state.get_globe_camera_position();
-        let ray_direction = ray_direction_from_pixel(state, anchor, &state.get_inverse_globe_view_projection_matrix());
+        let ray_origin = state.view().globe_camera_position();
+        let ray_direction =
+            ray_direction_from_pixel(state.view(), anchor, &state.view().inverse_globe_view_projection_matrix());
         let closest_point = ray_origin - ray_direction * ray_origin.dot(ray_direction);
         let ray_distance_from_globe_center = closest_point.length();
         let distance_factor =
@@ -454,8 +455,8 @@ impl VerticalPerspectiveProjection {
 
         // And when the globe is small on the viewport, where that is a
         // stand-in for the anchor being near the horizon.
-        let size = state.get_size();
-        let radius = Self::globe_radius_pixels(Projection::world_size(state.get_scale()), center.latitude())
+        let size = state.view().size();
+        let radius = Self::globe_radius_pixels(Projection::world_size(state.view().scale()), center.latitude())
             / f64::from(size.width.min(size.height));
         let radius_factor =
             remap_saturate(radius, SLOWING_RADIUS_START, SLOWING_RADIUS_STOP, 1.0, SLOWING_RADIUS_SLOW_FACTOR);
@@ -466,15 +467,16 @@ impl VerticalPerspectiveProjection {
             zoom_turning_the_planet(state, anchor, zoom_location, factor, interpolation_factor_horizon);
             return;
         }
-        let heuristic_center = lat_lng(
+        let heuristic_center = LatLng::saturating(
             (center.latitude() + d_lat * factor).clamp(-90.0, 90.0),
             center.longitude() + d_lng * factor,
             WrapMode::Unwrapped,
         );
 
-        let mut exact_center = Self::center_for_location_at_point(state, zoom_location, anchor).unwrap_or(center);
+        let mut exact_center =
+            Self::center_for_location_at_point(state.view(), zoom_location, anchor).unwrap_or(center);
         if on_pole {
-            exact_center = lat_lng(exact_center.latitude(), center.longitude(), WrapMode::Unwrapped);
+            exact_center = LatLng::saturating(exact_center.latitude(), center.longitude(), WrapMode::Unwrapped);
         }
 
         let interpolation_factor_longitude = remap_saturate(
@@ -486,7 +488,7 @@ impl VerticalPerspectiveProjection {
         );
         let heuristic_factor = f64::max(interpolation_factor_longitude, interpolation_factor_horizon)
             .powf(INTERPOLATE_TO_HEURISTIC_EXPONENT);
-        let target = lat_lng(
+        let target = LatLng::saturating(
             (exact_center.latitude()
                 + Self::difference_of_angles_degrees(exact_center.latitude(), heuristic_center.latitude())
                     * heuristic_factor)
@@ -496,8 +498,8 @@ impl VerticalPerspectiveProjection {
                     * heuristic_factor,
             WrapMode::Unwrapped,
         );
-        let constrained = state.constrained_center(&target, state.get_zoom());
-        let zoom = state.get_zoom() + Self::zoom_adjustment(center.latitude(), constrained.latitude());
+        let constrained = state.constrained_center(&target, state.view().zoom());
+        let zoom = state.view().zoom() + Self::zoom_adjustment(center.latitude(), constrained.latitude());
         state.set_lat_lng_zoom(&constrained, zoom);
     }
 
@@ -512,11 +514,11 @@ impl VerticalPerspectiveProjection {
     /// given zoom. Past the Mercator range there are no tiles, so the center
     /// reaches the pole only while that area fits in the view, and eases back
     /// to the edge of the range as the area outgrows the view.
-    pub(crate) fn max_latitude(state: &TransformState, zoom: f64) -> f64 {
+    pub(crate) fn max_latitude(view: &View, zoom: f64) -> f64 {
         let area_radians = mln_math::deg2rad(90.0 - LATITUDE_MAX);
         let area_pixels =
             Self::globe_radius_pixels(Projection::world_size(2.0f64.powf(zoom)), LATITUDE_MAX) * area_radians;
-        let size = state.get_size();
+        let size = view.size();
         let reach_pixels = f64::from(size.width.min(size.height)) / 2.0;
         let center_pixels = f64::min(area_pixels, reach_pixels)
             * remap_saturate(area_pixels, reach_pixels, reach_pixels * POLE_AREA_FADE_SCALE, 1.0, 0.0);
@@ -527,25 +529,26 @@ impl VerticalPerspectiveProjection {
     /// pixels, turning the planet by degrees per pixel at the center's
     /// latitude. The longitude is unwrapped and the latitude clamped to the
     /// poles.
-    pub fn pan_center(state: &TransformState, offset: &ScreenCoordinate) -> LatLng {
-        // GL JS turns the pan by its bearing, which is the state's with the
+    #[must_use]
+    pub fn pan_center(view: &View, offset: &ScreenCoordinate) -> LatLng {
+        // GL JS turns the pan by its bearing, which is the view's angle with the
         // sign flipped.
-        let bearing = -state.get_bearing();
+        let bearing = -view.angle();
         let x = offset.x * bearing.cos() - offset.y * bearing.sin();
         let y = offset.x * bearing.sin() + offset.y * bearing.cos();
 
-        let center = state.get_lat_lng(WrapMode::Unwrapped);
+        let center = view.center(WrapMode::Unwrapped);
         let latitude = center.latitude();
         let inverse_scale = |lat: f64| 1.0 / Self::planet_scale(lat);
         // Longitude speeds up towards the poles, where the planet is
         // narrower, but as the globe zooms out from 7 to 3 the latitude it
         // speeds up for is capped at 60°: GL JS's numbers.
-        let zoomed_out = ((7.0 - (state.get_zoom() + Self::zoom_adjustment(latitude, 0.0))) / 4.0).clamp(0.0, 1.0);
+        let zoomed_out = ((7.0 - (view.zoom() + Self::zoom_adjustment(latitude, 0.0))) / 4.0).clamp(0.0, 1.0);
         let longitude_speed =
             interpolate(&inverse_scale(latitude), &inverse_scale(f64::min(latitude.abs(), 60.0)), zoomed_out);
         let degrees_per_pixel =
-            360.0 / (2.0 * PI * Self::globe_radius_pixels(Projection::world_size(state.get_scale()), latitude));
-        lat_lng(
+            360.0 / (2.0 * PI * Self::globe_radius_pixels(Projection::world_size(view.scale()), latitude));
+        LatLng::saturating(
             (latitude + y * degrees_per_pixel).clamp(-90.0, 90.0),
             center.longitude() - x * degrees_per_pixel * longitude_speed,
             WrapMode::Unwrapped,
@@ -558,18 +561,15 @@ impl VerticalPerspectiveProjection {
     /// and the bearing turns with the planet, over the poles too. The
     /// longitude stays unwrapped around the current center, the latitude is
     /// not yet constrained.
-    pub fn drag_camera(
-        state: &TransformState,
-        point: &ScreenCoordinate,
-        pan_delta: &ScreenCoordinate,
-    ) -> CenterAndBearing {
+    #[must_use]
+    pub fn drag_camera(view: &View, point: &ScreenCoordinate, pan_delta: &ScreenCoordinate) -> CenterAndBearing {
         center_and_bearing(
             turned(
-                camera_orientation(state),
-                pan_surface_vector(state, &Point::new(point.x - pan_delta.x, point.y - pan_delta.y)),
-                pan_surface_vector(state, point),
+                camera_orientation(view),
+                pan_surface_vector(view, &Point::new(point.x - pan_delta.x, point.y - pan_delta.y)),
+                pan_surface_vector(view, point),
             ),
-            &state.get_lat_lng(WrapMode::Unwrapped),
+            &view.center(WrapMode::Unwrapped),
         )
     }
 
@@ -577,22 +577,19 @@ impl VerticalPerspectiveProjection {
     /// the planet turns about the axis a drag in that direction at `center`
     /// (y up) turns it about, by GL JS's degrees per pixel at the center's
     /// latitude and short of half a turn, the orientation carried along.
-    pub fn fling_camera(
-        state: &TransformState,
-        center: &ScreenCoordinate,
-        offset: &ScreenCoordinate,
-    ) -> CenterAndBearing {
-        let lat_lng = state.get_lat_lng(WrapMode::Unwrapped);
+    #[must_use]
+    pub fn fling_camera(view: &View, center: &ScreenCoordinate, offset: &ScreenCoordinate) -> CenterAndBearing {
+        let lat_lng = view.center(WrapMode::Unwrapped);
         let pixels = offset.x.hypot(offset.y);
         if pixels == 0.0 {
-            return CenterAndBearing { center: lat_lng, bearing: -mln_math::rad2deg(state.get_bearing()) };
+            return CenterAndBearing { center: lat_lng, bearing: -mln_math::rad2deg(view.angle()) };
         }
-        let axis = pan_surface_vector(state, &Point::new(center.x - offset.x / pixels, center.y - offset.y / pixels))
-            .cross(pan_surface_vector(state, center));
-        let degrees_per_pixel = 360.0
-            / (2.0 * PI * Self::globe_radius_pixels(Projection::world_size(state.get_scale()), lat_lng.latitude()));
+        let axis = pan_surface_vector(view, &Point::new(center.x - offset.x / pixels, center.y - offset.y / pixels))
+            .cross(pan_surface_vector(view, center));
+        let degrees_per_pixel =
+            360.0 / (2.0 * PI * Self::globe_radius_pixels(Projection::world_size(view.scale()), lat_lng.latitude()));
         center_and_bearing(
-            camera_orientation(state) * rotation(axis, mln_math::deg2rad(f64::min(pixels * degrees_per_pixel, 179.5))),
+            camera_orientation(view) * rotation(axis, mln_math::deg2rad(f64::min(pixels * degrees_per_pixel, 179.5))),
             &lat_lng,
         )
     }
@@ -614,14 +611,15 @@ impl VerticalPerspectiveProjection {
     /// of the pole's edge the cursor turns a dial around the pole, and a
     /// swing over a pole stops on it. The longitude stays unwrapped around
     /// the current center, the latitude is not yet constrained.
-    pub fn drag_center(state: &TransformState, point: &ScreenCoordinate, pan_delta: &ScreenCoordinate) -> LatLng {
-        let center = state.get_lat_lng(WrapMode::Unwrapped);
-        // GL JS's bearing is the state's with the sign flipped.
-        let bearing = -mln_math::rad2deg(state.get_bearing());
+    #[must_use]
+    pub fn drag_center(view: &View, point: &ScreenCoordinate, pan_delta: &ScreenCoordinate) -> LatLng {
+        let center = view.center(WrapMode::Unwrapped);
+        // GL JS's bearing is the view's angle with the sign flipped.
+        let bearing = -mln_math::rad2deg(view.angle());
         let swung = orientation_to_lat_lng_bearing(turned(
-            camera_orientation(state),
-            pan_surface_vector(state, &Point::new(point.x - pan_delta.x, point.y - pan_delta.y)),
-            pan_surface_vector(state, point),
+            camera_orientation(view),
+            pan_surface_vector(view, &Point::new(point.x - pan_delta.x, point.y - pan_delta.y)),
+            pan_surface_vector(view, point),
         ));
 
         // A swing over a pole turns the bearing around; with the bearing held,
@@ -639,7 +637,8 @@ impl VerticalPerspectiveProjection {
         // around the pole instead, blended in with a smoothstep and in full
         // from the edge on. GL JS takes the sweep from the screen with y down.
         let pole_latitude = if center.latitude() >= 0.0 { 90.0 } else { -90.0 };
-        let (pole, _) = Self::lat_lng_to_screen_coordinate(state, &lat_lng(pole_latitude, 0.0, WrapMode::Unwrapped));
+        let (pole, _) =
+            Self::lat_lng_to_screen_coordinate(view, &LatLng::saturating(pole_latitude, 0.0, WrapMode::Unwrapped));
         let rx = point.x - pole.x;
         let ry = pole.y - point.y;
         let ramp = (1.0 - (LATITUDE_MAX - center.latitude().abs()) / DIAL_RAMP_DEGREES).clamp(0.0, 1.0);
@@ -651,7 +650,11 @@ impl VerticalPerspectiveProjection {
             let d_theta = (rx * -pan_delta.y - ry * pan_delta.x) / radius_squared;
             d_lng_dial = (if pole_latitude > 0.0 { 1.0 } else { -1.0 }) * mln_math::rad2deg(d_theta);
         }
-        lat_lng(latitude, center.longitude() + (1.0 - dial) * d_lng_swing + dial * d_lng_dial, WrapMode::Unwrapped)
+        LatLng::saturating(
+            latitude,
+            center.longitude() + (1.0 - dial) * d_lng_swing + dial * d_lng_dial,
+            WrapMode::Unwrapped,
+        )
     }
 
     /// The center that puts `location` under `point` (y up) with the bearing
@@ -670,15 +673,16 @@ impl VerticalPerspectiveProjection {
     /// ([`Self::zoom_adjustment`]), so the center holds `location` at the
     /// adjusted zoom. The longitude stays unwrapped around the current
     /// center, the latitude is not yet constrained.
-    pub fn drag_center_holding(state: &TransformState, location: &LatLng, point: &ScreenCoordinate) -> Option<LatLng> {
-        let center = state.get_lat_lng(WrapMode::Unwrapped);
+    #[must_use]
+    pub fn drag_center_holding(view: &View, location: &LatLng, point: &ScreenCoordinate) -> Option<LatLng> {
+        let center = view.center(WrapMode::Unwrapped);
         if center.latitude().abs() > LATITUDE_MAX - DIAL_RAMP_DEGREES
-            || !Self::screen_coordinate_hits_globe(state, point)
-            || pan_falloff(state, point).is_some()
+            || !Self::screen_coordinate_hits_globe(view, point)
+            || pan_falloff(view, point).is_some()
         {
             return None;
         }
-        let held = Self::center_for_location_at_point(state, location, point)?;
+        let held = Self::center_for_location_at_point(view, location, point)?;
         // A pixel of cursor travel turns the center 1 / (cos(latitude) *
         // cos(longitude from the center)) times as far as it does for a
         // location at the center.
@@ -687,7 +691,7 @@ impl VerticalPerspectiveProjection {
         if gain.abs() * DRAG_HOLD_MAX_GAIN < 1.0 {
             return None;
         }
-        Some(lat_lng(
+        Some(LatLng::saturating(
             held.latitude(),
             center.longitude() + Self::difference_of_angles_degrees(center.longitude(), held.longitude()),
             WrapMode::Unwrapped,
@@ -722,7 +726,7 @@ impl VerticalPerspectiveProjection {
         let start_latitude = start.latitude().clamp(-LATITUDE_MAX, LATITUDE_MAX);
         let end_latitude = (start.latitude() + delta_latitude).clamp(-LATITUDE_MAX, LATITUDE_MAX);
         if (end_latitude - start_latitude).abs() <= 1.0 {
-            return lat_lng(latitude, start.longitude() + delta_longitude * t, WrapMode::Unwrapped);
+            return LatLng::saturating(latitude, start.longitude() + delta_longitude * t, WrapMode::Unwrapped);
         }
         let on_different_hemispheres = sign(end_latitude) != sign(start_latitude);
         let sample_start =
@@ -732,7 +736,7 @@ impl VerticalPerspectiveProjection {
         let value_end = integrate_secant(sample_end);
         let value_t = integrate_secant(sample_start + t * (sample_end - sample_start));
         let longitude_t = (value_t - value_start) / (value_end - value_start);
-        lat_lng(latitude, start.longitude() + delta_longitude * longitude_t, WrapMode::Unwrapped)
+        LatLng::saturating(latitude, start.longitude() + delta_longitude * longitude_t, WrapMode::Unwrapped)
     }
 }
 
@@ -792,14 +796,14 @@ struct PanFalloff {
 /// The falloff a drag towards `point` is in, if any: none while the ray is
 /// well inside the silhouette, where the drag aims at the surface point under
 /// `point`.
-fn pan_falloff(state: &TransformState, point: &ScreenCoordinate) -> Option<PanFalloff> {
-    let origin = state.get_globe_camera_position();
+fn pan_falloff(view: &View, point: &ScreenCoordinate) -> Option<PanFalloff> {
+    let origin = view.globe_camera_position();
     let distance = origin.length();
     if distance <= 1.0 {
         return None;
     }
     let toward_camera = origin / distance;
-    let direction = ray_direction_from_pixel(state, point, &state.get_inverse_globe_view_projection_matrix());
+    let direction = ray_direction_from_pixel(view, point, &view.inverse_globe_view_projection_matrix());
     let c = -direction.dot(toward_camera);
     let lateral = direction + toward_camera * c;
     let lateral_length = lateral.length();
@@ -822,11 +826,11 @@ fn pan_falloff(state: &TransformState, point: &ScreenCoordinate) -> Option<PanFa
 /// at. Exact while the ray is well inside the silhouette, then eased off along
 /// a hyperbola that matches it in value and slope and saturates short of the
 /// far side, so the drag keeps going once the cursor leaves the planet.
-fn pan_surface_vector(state: &TransformState, point: &ScreenCoordinate) -> DVec3 {
+fn pan_surface_vector(view: &View, point: &ScreenCoordinate) -> DVec3 {
     let Some(PanFalloff { toward_camera: u, distance, lateral, lateral_length: s, angle, handover_angle }) =
-        pan_falloff(state, point)
+        pan_falloff(view, point)
     else {
-        return VerticalPerspectiveProjection::screen_coordinate_to_surface(state, point);
+        return VerticalPerspectiveProjection::screen_coordinate_to_surface(view, point);
     };
     let sin_handover = distance * handover_angle.sin();
     let target_at_handover = sin_handover.clamp(-1.0, 1.0).asin() - handover_angle;
@@ -839,10 +843,10 @@ fn pan_surface_vector(state: &TransformState, point: &ScreenCoordinate) -> DVec3
     (u * target.cos() + lateral * (target.sin() / s)).normalize()
 }
 
-/// The globe camera's orientation; GL JS's bearing is the state's with the
+/// The globe camera's orientation; GL JS's bearing is the view's angle with the
 /// sign flipped.
-fn camera_orientation(state: &TransformState) -> DQuat {
-    orientation_from_lat_lng_bearing(&state.get_lat_lng(WrapMode::Unwrapped), -mln_math::rad2deg(state.get_bearing()))
+fn camera_orientation(view: &View) -> DQuat {
+    orientation_from_lat_lng_bearing(&view.center(WrapMode::Unwrapped), -mln_math::rad2deg(view.angle()))
 }
 
 /// The rotation about `axis` by `angle`, composed as GL JS's drag composes
@@ -878,7 +882,7 @@ fn slerp_vec3(a: DVec3, b: DVec3, t: f64) -> DVec3 {
 fn center_and_bearing(orientation: DQuat, center: &LatLng) -> CenterAndBearing {
     let o = orientation_to_lat_lng_bearing(orientation);
     CenterAndBearing {
-        center: lat_lng(
+        center: LatLng::saturating(
             o.latitude,
             center.longitude()
                 + VerticalPerspectiveProjection::difference_of_angles_degrees(center.longitude(), o.longitude),
@@ -902,37 +906,33 @@ fn zoom_turning_the_planet(
     factor: f64,
     interpolation_factor_horizon: f64,
 ) {
-    let center = state.get_lat_lng(WrapMode::Unwrapped);
-    let orientation = camera_orientation(state);
+    let center = state.view().center(WrapMode::Unwrapped);
+    let orientation = camera_orientation(state.view());
     let location = VerticalPerspectiveProjection::surface_vector(zoom_location);
     let center_vector = VerticalPerspectiveProjection::surface_vector(&center);
-    let exact = turned(orientation, location, pan_surface_vector(state, anchor));
+    let exact = turned(orientation, location, pan_surface_vector(state.view(), anchor));
     let heuristic = turned(orientation, slerp_vec3(center_vector, location, factor), center_vector);
     let camera = center_and_bearing(
         exact.slerp(heuristic, interpolation_factor_horizon.powf(INTERPOLATE_TO_HEURISTIC_EXPONENT)),
         &center,
     );
-    let constrained = state.constrained_center(&camera.center, state.get_zoom());
+    let constrained = state.constrained_center(&camera.center, state.view().zoom());
     let zoom =
-        state.get_zoom() + VerticalPerspectiveProjection::zoom_adjustment(center.latitude(), constrained.latitude());
+        state.view().zoom() + VerticalPerspectiveProjection::zoom_adjustment(center.latitude(), constrained.latitude());
     state.set_lat_lng_zoom(&constrained, zoom);
     state.set_bearing(-mln_math::deg2rad(camera.bearing));
 }
 
 impl VerticalPerspectiveProjection {
-    /// [`Projection::get_projection_data`](crate::Projection::get_projection_data) on the globe.
-    pub(crate) fn projection_data(
-        state: &TransformState,
-        tile_id: &UnwrappedTileID,
-        mercator_matrix: &DMat4,
-    ) -> ProjectionData {
+    /// [`Projection::projection_data`](crate::Projection::projection_data) on the globe.
+    pub(crate) fn projection_data(view: &View, tile_id: &UnwrappedTileID, mercator_matrix: &DMat4) -> ProjectionData {
         ProjectionData {
-            main_matrix: state.get_globe_view_projection_matrix(),
+            main_matrix: view.globe_view_projection_matrix(),
             tile_mercator_coords: mercator_tile_coords(tile_id),
-            clipping_plane: state.get_globe_clipping_plane(),
-            projection_transition: state.get_projection_transition(),
+            clipping_plane: view.globe_clipping_plane(),
+            projection_transition: view.projection_transition(),
             fallback_matrix: *mercator_matrix,
-            camera_position: state.get_globe_camera_position(),
+            camera_position: view.globe_camera_position(),
             ..ProjectionData::default()
         }
     }
@@ -999,36 +999,32 @@ impl VerticalPerspectiveProjection {
     }
 
     /// [`Projection::circle_radius_correction`](crate::Projection::circle_radius_correction) on the globe.
-    pub(crate) fn circle_radius_correction(state: &TransformState) -> f64 {
+    pub(crate) fn circle_radius_correction(view: &View) -> f64 {
         interpolate(
             &1.0,
-            &Self::planet_scale(state.get_lat_lng(WrapMode::Unwrapped).latitude()),
-            state.get_projection_transition(),
+            &Self::planet_scale(view.center(WrapMode::Unwrapped).latitude()),
+            view.projection_transition(),
         )
     }
 
     /// [`Projection::pixel_scale`](crate::Projection::pixel_scale) on the globe.
-    pub(crate) fn pixel_scale(state: &TransformState) -> f64 {
+    pub(crate) fn pixel_scale(view: &View) -> f64 {
         interpolate(
             &1.0,
-            &(1.0 / Self::planet_scale(state.get_lat_lng(WrapMode::Unwrapped).latitude())),
-            state.get_projection_transition(),
+            &(1.0 / Self::planet_scale(view.center(WrapMode::Unwrapped).latitude())),
+            view.projection_transition(),
         )
     }
 
     /// [`Projection::pitched_text_correction`](crate::Projection::pitched_text_correction) on the globe.
-    pub(crate) fn pitched_text_correction(
-        state: &TransformState,
-        tile_anchor: &Point<f64>,
-        tile_id: &UnwrappedTileID,
-    ) -> f64 {
+    pub(crate) fn pitched_text_correction(view: &View, tile_anchor: &Point<f64>, tile_id: &UnwrappedTileID) -> f64 {
         let scale = 1.0 / (1u64 << tile_id.canonical.z) as f64;
         let mercator_y = tile_anchor.y / f64::from(EXTENT) * scale + f64::from(tile_id.canonical.y) * scale;
         let latitude = 2.0 * (PI - (mercator_y * PI * 2.0)).exp().atan() - PI * 0.5;
         interpolate(
             &1.0,
-            &(Self::planet_scale(state.get_lat_lng(WrapMode::Unwrapped).latitude()) / latitude.cos()),
-            state.get_projection_transition(),
+            &(Self::planet_scale(view.center(WrapMode::Unwrapped).latitude()) / latitude.cos()),
+            view.projection_transition(),
         )
     }
 }

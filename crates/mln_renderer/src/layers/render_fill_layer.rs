@@ -15,7 +15,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_PROJECTION_UBO,
 };
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
-use mln_map_types::TransformState;
+use mln_map_types::View;
 use mln_style::PropertyEvaluationParameters;
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Fill;
@@ -477,7 +477,7 @@ impl RenderFillLayer {
         const IN_VIEWPORT_PIXEL_UNITS: bool = false;
         const NEAR_CLIPPED: bool = false;
         let evaluated = &layer.paint;
-        let zoom = parameters.state.get_zoom() as f32;
+        let zoom = parameters.view.zoom() as f32;
         let tile_id = tile.id().to_unwrapped();
 
         let projection = projection_data(
@@ -520,14 +520,14 @@ impl RenderFillLayer {
 
         // Where the tile is in pixels at the nearest integer zoom, which the
         // pattern is laid out over.
-        let state = parameters.state;
-        let int_zoom = state.get_integer_zoom();
+        let state = parameters.view;
+        let int_zoom = state.integer_zoom();
         let tile_ratio = 1.0f32 / tile_id.pixels_to_tile_units(1.0, f32::from(int_zoom));
         let tile_size_at_nearest_zoom =
-            (TILE_SIZE_D * state.zoom_scale(f64::from(int_zoom) - f64::from(tile_id.canonical.z))) as i32;
+            (TILE_SIZE_D * mln_map_types::zoom_scale(f64::from(int_zoom) - f64::from(tile_id.canonical.z))) as i32;
         let pixel_x = (f64::from(tile_size_at_nearest_zoom)
             * (f64::from(tile_id.canonical.x)
-                + f64::from(tile_id.wrap) * state.zoom_scale(f64::from(tile_id.canonical.z))))
+                + f64::from(tile_id.wrap) * mln_map_types::zoom_scale(f64::from(tile_id.canonical.z))))
             as i32;
         let pixel_y = tile_size_at_nearest_zoom.wrapping_mul(tile_id.canonical.y as i32);
         uniforms.draw_ubo.set_fill_pattern(&FillPatternDrawableUBO {
@@ -776,7 +776,7 @@ impl RenderLayer for RenderFillLayer {
         _feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
         geometry: &mln_tile_id::geometry_tile_data::GeometryCollection,
         _zoom: f32,
-        transform_state: &TransformState,
+        view: &View,
         pixels_to_tile_units: f32,
         _projector: &mln_map_types::TileProjector<'_>,
         _feature_state: &mln_style::expression::expression::FeatureState,
@@ -786,7 +786,7 @@ impl RenderLayer for RenderFillLayer {
             query_geometry,
             *evaluated.fill_translate.uniform(),
             *evaluated.fill_translate_anchor.uniform(),
-            transform_state.get_bearing() as f32,
+            view.angle() as f32,
             pixels_to_tile_units,
         );
 

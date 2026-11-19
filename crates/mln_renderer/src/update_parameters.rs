@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, TransformState};
+use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, View};
 use mln_style::Style;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::time::Instant;
@@ -14,7 +14,11 @@ pub struct UpdateParameters {
     /// The frame's time; `None` in still modes, which have no clock and show
     /// every transition and fade as ended.
     pub time_point: Option<Instant>,
-    pub transform_state: TransformState,
+    /// The view the frame shows.
+    pub view: View,
+    /// The map's zoom range, which the sources load tiles within.
+    pub min_zoom: f64,
+    pub max_zoom: f64,
     /// Whether a gesture or an animation moves the camera, which the frame
     /// draws for speed rather than crispness.
     pub camera_moving: bool,

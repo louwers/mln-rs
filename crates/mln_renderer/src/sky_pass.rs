@@ -12,7 +12,7 @@ use mln_gfx::shaders::shader_defines::{
 };
 use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
 use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
-use mln_map_types::TransformState;
+use mln_map_types::View;
 use mln_style_types::LightAnchorType;
 use mln_util::Color;
 use mln_util::geo::WrapMode;
@@ -61,18 +61,18 @@ fn fullscreen_draw(shader: &ShaderProgramPtr, vertex_attribute: usize, depth: Dr
 /// is fixed to the globe, so its direction is already in that frame. A
 /// viewport-anchored light is fixed to the view, so it goes back through the
 /// globe's rotation into the view, inverted.
-fn sun_position(light: &EvaluatedLight, state: &TransformState, blend: f32) -> [f32; 4] {
+fn sun_position(light: &EvaluatedLight, state: &View, blend: f32) -> [f32; 4] {
     let position = light.light_position.uniform().get_cartesian();
     let mut sun = -DVec3::new(f64::from(position[0]), f64::from(position[1]), f64::from(position[2]));
 
     if *light.light_anchor.uniform() == LightAnchorType::Viewport {
-        let center = state.get_lat_lng(WrapMode::Unwrapped);
+        let center = state.center(WrapMode::Unwrapped);
         let view_to_globe = DMat3::from_rotation_y(center.longitude() * PI / 180.0)
             * DMat3::from_rotation_x(-center.latitude() * PI / 180.0)
-            * DMat3::from_rotation_z(state.get_bearing())
-            * DMat3::from_rotation_x(state.get_pitch())
-            * DMat3::from_rotation_z(-state.get_roll())
-            * DMat3::from_rotation_z(state.get_north_orientation_angle());
+            * DMat3::from_rotation_z(state.angle())
+            * DMat3::from_rotation_x(state.pitch())
+            * DMat3::from_rotation_z(-state.roll())
+            * DMat3::from_rotation_z(state.north_orientation_angle());
         sun = view_to_globe * sun;
     }
 
@@ -105,7 +105,7 @@ impl SkyPass {
         gpu: &mut dyn Gpu,
         shaders: &ShaderRegistry,
         context: &mut Context,
-        state: &TransformState,
+        state: &View,
         viewport_size: Size,
         pixel_ratio: f32,
         evaluated: Option<&EvaluatedSky>,
@@ -117,7 +117,7 @@ impl SkyPass {
             return;
         };
 
-        let projection_transition = state.get_projection_transition().clamp(0.0, 1.0);
+        let projection_transition = state.projection_transition().clamp(0.0, 1.0);
         if projection_transition < 1.0 {
             if self.sky_shader.is_none() {
                 self.sky_shader = shaders.shader(SKY_SHADER_NAME, ProjectionVariant::Mercator);
@@ -129,8 +129,8 @@ impl SkyPass {
             }
 
             if let Some(sky) = &mut self.sky {
-                let horizon_distance = state.get_mercator_horizon() * f64::from(pixel_ratio);
-                let roll = state.get_roll();
+                let horizon_distance = state.mercator_horizon() * f64::from(pixel_ratio);
+                let roll = state.roll();
                 let normal = [(-roll.sin()) as f32, roll.cos() as f32];
                 let horizon = [
                     (f64::from(viewport_size.width) * 0.5 + f64::from(normal[0]) * horizon_distance) as f32,
@@ -154,7 +154,7 @@ impl SkyPass {
         }
 
         let atmosphere_blend = *evaluated.sky_atmosphere_blend.uniform() * projection_transition as f32;
-        if !state.is_globe_rendering() || atmosphere_blend <= 0.0 {
+        if !state.is_globe() || atmosphere_blend <= 0.0 {
             self.atmosphere = None;
             return;
         }
@@ -173,9 +173,9 @@ impl SkyPass {
             return;
         };
 
-        let camera = state.get_globe_camera_position();
+        let camera = state.globe_camera_position();
         let props = AtmospherePropsUBO {
-            inv_view_projection: state.get_inverse_globe_view_projection_matrix().as_mat4().to_cols_array(),
+            inv_view_projection: state.inverse_globe_view_projection_matrix().as_mat4().to_cols_array(),
             camera_position: camera.as_vec3().extend(0.0).to_array(),
             sun_position: sun_position(light, state, atmosphere_blend),
         };
@@ -204,7 +204,7 @@ impl SkyPass {
 
 #[cfg(test)]
 mod tests {
-    use mln_map_types::NorthOrientation;
+    use mln_map_types::{NorthOrientation, TransformState};
     use mln_style::evaluated::Evaluated;
     use mln_style_types::Position;
     use mln_util::geo::LatLng;
@@ -243,7 +243,7 @@ mod tests {
     fn map_light_stays_over_one_place() {
         let light = light(LightAnchorType::Map, [1.5, 90.0, 90.0]);
         for state in [camera(0.0, 0.0, 0.0), camera(0.0, 160.0, 0.0), camera(30.0, 160.0, 0.6)] {
-            assert_sun([1.5, 0.0, 0.0], sun_position(&light, &state, 1.0));
+            assert_sun([1.5, 0.0, 0.0], sun_position(&light, state.view(), 1.0));
         }
     }
 
@@ -255,8 +255,8 @@ mod tests {
     #[test]
     fn viewport_light_stays_on_screen() {
         let light = light(LightAnchorType::Viewport, [1.5, 90.0, 90.0]);
-        assert_sun([1.5, 0.0, 0.0], sun_position(&light, &camera(0.0, 0.0, 0.0), 1.0));
-        assert_sun([0.0, 0.0, -1.5], sun_position(&light, &camera(0.0, 90.0, 0.0), 1.0));
+        assert_sun([1.5, 0.0, 0.0], sun_position(&light, camera(0.0, 0.0, 0.0).view(), 1.0));
+        assert_sun([0.0, 0.0, -1.5], sun_position(&light, camera(0.0, 90.0, 0.0).view(), 1.0));
     }
 
     // With north down, the right of the view is west of the center: the same
@@ -266,6 +266,6 @@ mod tests {
         let light = light(LightAnchorType::Viewport, [1.5, 90.0, 90.0]);
         let mut state = camera(0.0, 0.0, 0.0);
         state.set_north_orientation(NorthOrientation::Downwards);
-        assert_sun([-1.5, 0.0, 0.0], sun_position(&light, &state, 1.0));
+        assert_sun([-1.5, 0.0, 0.0], sun_position(&light, state.view(), 1.0));
     }
 }

@@ -472,7 +472,7 @@ impl GeometryContents {
         id: &OverscaledTileID,
         result: &mut QueryResults,
         query_geometry: &mln_tile_id::geometry_tile_data::GeometryCoordinates,
-        transform_state: &mln_map_types::TransformState,
+        view: &mln_map_types::View,
         layers: &QueryLayers<'_>,
         options: &RenderedQueryOptions,
         global_state: Option<&GlobalStateMap>,
@@ -484,22 +484,22 @@ impl GeometryContents {
         }
         let query_padding = self.query_padding(layers);
         let projector = mln_map_types::TileProjector::with_data(
-            transform_state,
+            view,
             &id.to_unwrapped(),
-            transform_state.get_projection_data_with(&id.to_unwrapped(), proj_matrix),
+            view.projection_data_with(&id.to_unwrapped(), proj_matrix),
         );
         self.result.feature_index.query(
             result,
             query_geometry,
-            transform_state,
+            view,
             &projector,
             mln_util::constants::TILE_SIZE_D * f64::from(id.overscale_factor()),
-            2f64.powf(transform_state.get_zoom() - f64::from(id.overscaled_z)),
+            2f64.powf(view.zoom() - f64::from(id.overscaled_z)),
             options,
             global_state,
             id,
             layers,
-            query_padding * transform_state.max_pitch_scale_factor(),
+            query_padding * view.max_pitch_scale_factor() as f32,
             feature_state,
         )
     }

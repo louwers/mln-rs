@@ -37,7 +37,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_PROJECTION_UBO,
 };
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
-use mln_map_types::TransformState;
+use mln_map_types::View;
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::FillExtrusion;
 use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionPaintProperties;
@@ -489,7 +489,7 @@ impl TypedLayer for RenderFillExtrusionLayer {
         let frame = self.drawing.frame_mut();
         frame.set_composite(composite);
         frame.set_stencil_tiles(render_tiles.iter().map(|tile| tile.tile.id));
-        let (light, state) = (paint_parameters.light, paint_parameters.state);
+        let (light, state) = (paint_parameters.light, paint_parameters.view);
         // The draws that composite draw opaque: the composite has the
         // layer's opacity.
         let opacity = if composite.is_some() { 1.0 } else { opacity };
@@ -511,7 +511,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
         _feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
         geometry: &mln_tile_id::geometry_tile_data::GeometryCollection,
         _zoom: f32,
-        transform_state: &TransformState,
+        view: &View,
         pixels_to_tile_units: f32,
         _projector: &mln_map_types::TileProjector<'_>,
         _feature_state: &mln_style::expression::expression::FeatureState,
@@ -521,7 +521,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
             query_geometry,
             *evaluated.fill_extrusion_translate.uniform(),
             *evaluated.fill_extrusion_translate_anchor.uniform(),
-            transform_state.get_bearing() as f32,
+            view.angle() as f32,
             pixels_to_tile_units,
         );
 
@@ -746,8 +746,8 @@ impl RenderFillExtrusionLayer {
         const IN_VIEWPORT_PIXEL_UNITS: bool = false;
         const NEAR_CLIPPED: bool = true;
         let evaluated = &layer.paint;
-        let state = parameters.state;
-        let zoom = state.get_zoom() as f32;
+        let state = parameters.view;
+        let zoom = state.zoom() as f32;
         let tile_id = tile_id.to_unwrapped();
 
         let mut projection = projection_data(
@@ -763,15 +763,15 @@ impl RenderFillExtrusionLayer {
         // A backend whose clip depth runs from -1 writes the depth of one
         // whose runs from 0 (`frame_projection`). The globe projects in its
         // shaders.
-        if parameters.context.caps().clip_depth == ClipDepthRange::NegativeOneToOne && !state.is_globe_rendering() {
+        if parameters.context.caps().clip_depth == ClipDepthRange::NegativeOneToOne && !state.is_globe() {
             zero_to_one_clip_z(&mut projection.main_matrix);
             zero_to_one_clip_z(&mut projection.fallback_matrix);
         }
 
-        let int_zoom = state.get_integer_zoom();
+        let int_zoom = state.integer_zoom();
         let tile_ratio = 1.0f32 / tile_id.pixels_to_tile_units(1.0, f32::from(int_zoom));
-        let zoom_scale = state.zoom_scale(f64::from(tile_id.canonical.z));
-        let nearest_zoom_scale = state.zoom_scale(f64::from(int_zoom) - f64::from(tile_id.canonical.z));
+        let zoom_scale = mln_map_types::zoom_scale(f64::from(tile_id.canonical.z));
+        let nearest_zoom_scale = mln_map_types::zoom_scale(f64::from(int_zoom) - f64::from(tile_id.canonical.z));
         let tile_size_at_nearest_zoom = (TILE_SIZE_D * nearest_zoom_scale).floor();
         let pixel_x = (tile_size_at_nearest_zoom
             * (f64::from(tile_id.canonical.x) + f64::from(tile_id.wrap) * zoom_scale)) as i32;
@@ -817,7 +817,7 @@ impl RenderFillExtrusionLayer {
         layer: &EvaluatedLayer<FillExtrusion>,
         writer: &mut UniformWriter<'_, ExtrusionUniforms>,
         light: &EvaluatedLight,
-        state: &TransformState,
+        state: &View,
         opacity: f32,
     ) {
         let evaluated = &layer.paint;

@@ -224,7 +224,7 @@ impl RenderSource for RenderImageSource {
             return;
         }
 
-        let transform_state = parameters.transform_state;
+        let view = parameters.view;
         self.base.style_source = style_source;
 
         let Some(data) = self.data() else {
@@ -262,7 +262,7 @@ impl RenderSource for RenderImageSource {
 
         // Only enable if the long side of the image is > 2 pixels. Resulting
         // in a display of at least 2 x 1 px image
-        self.base.enabled = d_max * 2.0f64.powf(transform_state.get_zoom()) * constants::TILE_SIZE_D > 2.0;
+        self.base.enabled = d_max * 2.0f64.powf(view.zoom()) * constants::TILE_SIZE_D > 2.0;
         if !self.base.enabled {
             return;
         }
@@ -283,12 +283,12 @@ impl RenderSource for RenderImageSource {
         let mut has_visible_tile = false;
         // A wrap does not move a tile on the globe, so the image draws once
         // there, in the world copy the cover chose.
-        let globe = transform_state.is_globe_rendering();
+        let globe = view.is_globe();
         // Add additional wrapped tile ids if necessary
         let zoom_range = Range::new(0u8, zoom);
         let ideal_tiles = tile_cover(
             &TileCoverParameters {
-                transform_state: transform_state.clone(),
+                view: view.clone(),
                 tile_lod_min_radius: parameters.tile_lod_min_radius,
                 tile_lod_scale: parameters.tile_lod_scale,
                 tile_lod_pitch_threshold: parameters.tile_lod_pitch_threshold,
@@ -297,7 +297,7 @@ impl RenderSource for RenderImageSource {
                 round_zoom: false,
                 max_content_elevation: 0.0,
             },
-            transform_state.get_integer_zoom(),
+            view.integer_zoom(),
             zoom_range,
             None,
         );
@@ -342,7 +342,7 @@ impl RenderSource for RenderImageSource {
 
         // The globe bends the quad over the sphere with the tile mesh
         // granularity of its tile.
-        let cells = if transform_state.is_globe_rendering() {
+        let cells = if view.is_globe() {
             SubdivisionGranularitySetting::globe().tile.get_granularity_for_zoom_level(self.tile_ids[0].canonical.z)
         } else {
             1
