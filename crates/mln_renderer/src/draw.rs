@@ -20,7 +20,6 @@ use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{MAX_TEXTURE_COUNT_PER_SHADER, MAX_UBO_COUNT_PER_SHADER};
 use mln_gfx::stencil_mode::StencilMode;
 use mln_util::logging::{Event, Log};
-use smallvec::SmallVec;
 
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
@@ -70,6 +69,29 @@ pub(crate) fn raw_vertices(
     }
     attributes.set_own(id, data_type, data);
     attributes
+}
+
+/// The entries of bindings, on the stack: at most a buffer at each uniform
+/// buffer id and a texture at each texture id.
+pub(crate) struct Entries {
+    entries: [BindGroupEntry; MAX_UBO_COUNT_PER_SHADER + MAX_TEXTURE_COUNT_PER_SHADER],
+    len: usize,
+}
+
+impl Entries {
+    pub(crate) fn new() -> Entries {
+        let none = BindGroupEntry::Texture { id: 0, texture: TextureId::default(), sampler: SamplerId::default() };
+        Entries { entries: [none; MAX_UBO_COUNT_PER_SHADER + MAX_TEXTURE_COUNT_PER_SHADER], len: 0 }
+    }
+
+    pub(crate) fn push(&mut self, entry: BindGroupEntry) {
+        self.entries[self.len] = entry;
+        self.len += 1;
+    }
+
+    pub(crate) fn as_slice(&self) -> &[BindGroupEntry] {
+        &self.entries[..self.len]
+    }
 }
 
 /// A vertex buffer a draw binds, what keeps it where others share it, and
@@ -310,12 +332,14 @@ impl DrawObjects {
             _ => {
                 self.geometry = None;
                 // On the stack: the geometry's handles take the allocation.
-                let buffers: SmallVec<[(BufferId, u64); MAX_VERTEX_BUFFERS]> =
-                    slots.iter().map(|slot| (slot.buffer, slot.offset)).collect();
+                let mut buffers = [(BufferId::default(), 0); MAX_VERTEX_BUFFERS];
+                for (buffer, slot) in buffers.iter_mut().zip(slots) {
+                    *buffer = (slot.buffer, slot.offset);
+                }
                 let geometry = gpu.create_geometry(&GeometryDesc {
                     shader: shader_id,
                     layouts: &self.pipeline_layouts,
-                    vertex_buffers: &buffers,
+                    vertex_buffers: &buffers[..slots.len()],
                     index_buffer,
                 })?;
                 let held = slots.iter().filter_map(|slot| slot.held.clone()).chain(self.indexes.held()).collect();
@@ -401,9 +425,7 @@ impl DrawObjects {
             return Ok(bindings.id());
         }
         self.bindings = None;
-        // On the stack: the bindings' handles take the allocation.
-        let mut entries: SmallVec<[BindGroupEntry; MAX_UBO_COUNT_PER_SHADER + MAX_TEXTURE_COUNT_PER_SHADER]> =
-            SmallVec::new();
+        let mut entries = Entries::new();
         for id in 0..MAX_UBO_COUNT_PER_SHADER {
             // The draw's buffer wins over its frame's, and that over the
             // global one.
@@ -428,8 +450,11 @@ impl DrawObjects {
             .iter()
             .filter_map(|&id| context.gpu_texture(self.textures.get(id)?.as_ref()?).cloned().map(Held::Texture))
             .collect();
-        let bindings =
-            gpu.create_bindings(&BindingsDesc { label: self.shader.name(), shader: shader_id, entries: &entries })?;
+        let bindings = gpu.create_bindings(&BindingsDesc {
+            label: self.shader.name(),
+            shader: shader_id,
+            entries: entries.as_slice(),
+        })?;
         self.bindings = Some((context.own(bindings, held), stamp));
         Ok(bindings)
     }
@@ -525,6 +550,8 @@ impl DrawObjects {
     }
 
     /// Drops the bindings, for an owner that replaces a buffer they bind.
+    // Not inlined: every layer type's loop over its draws calls it.
+    #[inline(never)]
     pub(crate) fn drop_bindings(&mut self) {
         self.bindings = None;
     }

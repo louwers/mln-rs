@@ -17,8 +17,8 @@ use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMode, DrawModeTyp
 use mln_tile_id::UnwrappedTileID;
 use mln_util::logging::{Event, Log};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
-use smallvec::SmallVec;
 
+use crate::draw::Entries;
 use crate::gfx::buffer::Buffer;
 use crate::gfx::context::Context;
 use crate::gfx::owned::Owned;
@@ -239,20 +239,21 @@ impl ClipMasks {
             let size = size_of::<ProjectionUBO>();
             let stride = size.next_multiple_of(context.caps().buffer_offset_alignment as usize);
             for slot in 0..projections.size() / stride {
-                let entries: SmallVec<[BindGroupEntry; MAX_UBO_COUNT_PER_SHADER + 2]> = (0..MAX_UBO_COUNT_PER_SHADER)
-                    .filter_map(|id| {
-                        let (buffer, offset, size) = if id == ID_PROJECTION_UBO {
-                            (projections, (slot * stride) as u64, size as u64)
-                        } else {
-                            global.get(id).map(|buffer| (buffer, 0, buffer.size() as u64))?
-                        };
-                        Some(BindGroupEntry::Buffer { id: id as u32, buffer: buffer.id(), offset, size })
-                    })
-                    .collect();
+                let mut entries = Entries::new();
+                for id in 0..MAX_UBO_COUNT_PER_SHADER {
+                    let (buffer, offset, size) = if id == ID_PROJECTION_UBO {
+                        (projections, (slot * stride) as u64, size as u64)
+                    } else if let Some(buffer) = global.get(id) {
+                        (buffer, 0, buffer.size() as u64)
+                    } else {
+                        continue;
+                    };
+                    entries.push(BindGroupEntry::Buffer { id: id as u32, buffer: buffer.id(), offset, size });
+                }
                 let bindings = gpu.create_bindings(&BindingsDesc {
                     label: "clipping mask",
                     shader: shader_id,
-                    entries: &entries,
+                    entries: entries.as_slice(),
                 })?;
                 self.bindings.push(context.own(bindings, Vec::new()));
             }

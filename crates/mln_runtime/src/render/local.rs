@@ -20,6 +20,7 @@
 use std::sync::Arc;
 
 use mln_gfx::gpu::Gpu;
+#[cfg(not(target_family = "wasm"))]
 use mln_gfx::offscreen_target::OffscreenTarget;
 use mln_gfx::rendering_stats::RenderingStats;
 use mln_gfx::ring::{self, Exporter, RingBackend};
@@ -574,6 +575,8 @@ struct BackendGfx<B: LocalBackend> {
 
 /// What a [`BackendGfx`] draws into.
 enum Frames<B: LocalBackend> {
+    /// None in the browser, which renders into canvases only.
+    #[cfg(not(target_family = "wasm"))]
     Offscreen(OffscreenTarget<B::Gpu>),
     /// `None` once the surface is released.
     Presenting(Option<Target<B>>),
@@ -589,6 +592,7 @@ impl<B: LocalBackend> Frames<B> {
     /// The target to draw into, or `None` while there is no surface or ring.
     fn target(&mut self) -> Option<&mut dyn FrameTarget<Gpu = B::Gpu>> {
         match self {
+            #[cfg(not(target_family = "wasm"))]
             Frames::Offscreen(target) => Some(target),
             Frames::Presenting(target) => Some(&mut **target.as_mut()?),
             Frames::Borrowed { target, .. } => Some(&mut **target.as_mut()?),
@@ -609,11 +613,12 @@ impl<B: LocalBackend> Frames<B> {
 /// `backend`, and what `init` says it draws into, made on it.
 fn gfx<B: LocalBackend>(mut backend: B, init: FramesInit<'_>) -> Result<Box<dyn Gfx>, Error> {
     let frames = match init {
+        #[cfg(not(target_family = "wasm"))]
+        FramesInit::Offscreen(size) => Frames::Offscreen(OffscreenTarget::new(size)),
+        #[cfg(target_family = "wasm")]
         FramesInit::Offscreen(size) => {
-            if cfg!(target_family = "wasm") {
-                return Err(Error::unsupported("the browser build renders into canvases only"));
-            }
-            Frames::Offscreen(OffscreenTarget::new(size))
+            let _ = size;
+            return Err(Error::unsupported("the browser build renders into canvases only"));
         }
         FramesInit::Borrowed(ring, producer) => {
             let textures = B::ring_textures(ring.kind).ok_or_else(no_ring)?;
@@ -645,6 +650,7 @@ impl<B: LocalBackend> Gfx for BackendGfx<B> {
 
     fn frames(&self) -> FramesKind {
         match &self.frames {
+            #[cfg(not(target_family = "wasm"))]
             Frames::Offscreen(_) => FramesKind::Offscreen,
             Frames::Presenting(_) => FramesKind::Presenting,
             Frames::Borrowed { target, .. } => FramesKind::Borrowed { released: target.is_none() },
@@ -766,6 +772,7 @@ impl<B: LocalBackend> Gfx for BackendGfx<B> {
 
     fn read_image(&mut self) -> Result<PremultipliedImage, Error> {
         match &mut self.frames {
+            #[cfg(not(target_family = "wasm"))]
             Frames::Offscreen(target) => target.read_image(&mut self.backend.gpu()),
             Frames::Presenting(_) => Err(Error::unsupported("a surface session can't read its frames back")),
             Frames::Borrowed { .. } | Frames::Exported(_) => {
@@ -788,7 +795,9 @@ impl<B: LocalBackend> Gfx for BackendGfx<B> {
                 target.tear_down(gpu);
                 pending
             }),
-            Frames::Offscreen(_) | Frames::Exported(_) => None,
+            #[cfg(not(target_family = "wasm"))]
+            Frames::Offscreen(_) => None,
+            Frames::Exported(_) => None,
         }
     }
 

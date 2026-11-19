@@ -41,8 +41,8 @@ use mln_util::Color;
 use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
-use smallvec::SmallVec;
 
+use crate::draw::Entries;
 use crate::gfx::buffer::Buffer;
 use crate::gfx::context::Context;
 use crate::gfx::owned::Owned;
@@ -471,17 +471,18 @@ impl LayerComposite {
                     Some(frame) => (layer, &frame.backdrop),
                     None => (layer, layer),
                 };
-                let mut entries: SmallVec<[BindGroupEntry; MAX_UBO_COUNT_PER_SHADER + 2]> = (0
-                    ..MAX_UBO_COUNT_PER_SHADER)
-                    .filter_map(|id| {
-                        let (buffer, offset, size) = match id {
-                            ID_LAYER_COMPOSITE_UBO => (uniforms, (slot * stride) as u64, size as u64),
-                            ID_PROJECTION_UBO => (projection, 0, projection.size() as u64),
-                            _ => global.get(id).map(|buffer| (buffer, 0, buffer.size() as u64))?,
-                        };
-                        Some(BindGroupEntry::Buffer { id: id as u32, buffer: buffer.id(), offset, size })
-                    })
-                    .collect();
+                let mut entries = Entries::new();
+                for id in 0..MAX_UBO_COUNT_PER_SHADER {
+                    let (buffer, offset, size) = match id {
+                        ID_LAYER_COMPOSITE_UBO => (uniforms, (slot * stride) as u64, size as u64),
+                        ID_PROJECTION_UBO => (projection, 0, projection.size() as u64),
+                        _ => match global.get(id) {
+                            Some(buffer) => (buffer, 0, buffer.size() as u64),
+                            None => continue,
+                        },
+                    };
+                    entries.push(BindGroupEntry::Buffer { id: id as u32, buffer: buffer.id(), offset, size });
+                }
                 for (id, texture) in
                     [(ID_LAYER_COMPOSITE_IMAGE_TEXTURE, image), (ID_LAYER_COMPOSITE_BACKDROP_TEXTURE, backdrop)]
                 {
@@ -494,7 +495,7 @@ impl LayerComposite {
                 let bindings = gpu.create_bindings(&BindingsDesc {
                     label: "layer composite",
                     shader: shader_id,
-                    entries: &entries,
+                    entries: entries.as_slice(),
                 })?;
                 self.bindings.push(context.own(bindings, Vec::new()));
             }
