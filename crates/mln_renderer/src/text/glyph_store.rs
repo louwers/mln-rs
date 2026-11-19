@@ -46,7 +46,7 @@ use mln_text::glyph_cache::{GlyphCache, GlyphCacheRange};
 use mln_text::glyph_pbf::parse_glyph_pbf;
 use mln_text::local_glyph_rasterizer::LocalGlyphs;
 use mln_text::tagged_string::font_stack_hash;
-use mln_text::{BiDi, HBShapeAdjust};
+use mln_text::{HBShapeAdjust, visual_runs};
 use mln_util::error::Error;
 use mln_util::font_stack::FontStack;
 use mln_util::hash::HashMap;
@@ -454,7 +454,6 @@ impl GlyphStore {
     /// shaped to `glyphs`.
     fn shape(&mut self, requests: &HBShapeRequests, glyphs: &mut GlyphMap) -> HBShapeResults {
         let mut results = HBShapeResults::new();
-        let mut bidi = BiDi::new();
         for (font_stack, font_types) in requests {
             let font_stack_hash = font_stack_hash(font_stack);
             for (type_, strs) in font_types {
@@ -464,7 +463,7 @@ impl GlyphStore {
                     let mut shaped_adjusts = Vec::new();
                     // Shapes each run in its own direction, in visual order.
                     if let Some(shaper) = &shaper {
-                        for run in bidi.visual_runs(str_) {
+                        for run in visual_runs(str_) {
                             shaper.shape(&run.text, run.rtl, &mut shaped_glyph_ids, &mut shaped_adjusts);
                         }
                     }

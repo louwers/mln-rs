@@ -1,8 +1,6 @@
 // Float types and the order of float operations follow the C++ exactly
 // (`double` section scales and line offsets, `float` positions); the
-// comments note where C++ promotes to double. getShaping returns Err where
-// the C++ BiDi throws (it cannot for the line breaks determineLineBreaks
-// produces).
+// comments note where C++ promotes to double.
 
 use mln_style_types::image::{ImagePosition, ImagePositions, RectU16, TextFit};
 use mln_style_types::types::{IconTextFitType, SymbolAnchorType, TextJustifyType, VerticalAlign};
@@ -10,13 +8,13 @@ use mln_util::constants::ONE_EM;
 use mln_util::{Padding, i18n};
 use mln_vec_map::VecSet;
 
-use crate::bidi::{BiDi, StyledText};
+use crate::bidi;
 use crate::glyph::{
     Glyph, GlyphID, GlyphIDType, GlyphMetrics, GlyphPositions, PositionedGlyph, PositionedLine, Shaping,
     WritingModeType,
 };
 use crate::harfbuzz::HBShapeAdjust;
-use crate::tagged_string::{SectionOptions, TaggedString};
+use crate::tagged_string::{SectionOptions, StyledText, TaggedString};
 
 /// Zero width space that is used to suggest break points for Japanese
 /// labels.
@@ -857,17 +855,13 @@ fn shape_lines(
 /// order, into visual order. The bidi analysis covers the whole text, and
 /// sees each shaped section as characters of the section's direction, which
 /// it moves as a block without reversing them again.
-fn reorder_shaped_lines(
-    formatted_string: &TaggedString,
-    bidi: &mut BiDi,
-    lines: &mut Vec<TaggedString>,
-) -> Result<(), String> {
+fn reorder_shaped_lines(formatted_string: &TaggedString, lines: &mut Vec<TaggedString>) {
     let sections = formatted_string.get_sections();
     let styled_text = formatted_string.get_styled_text();
 
-    let mut bidi_text = styled_text.0.clone();
+    let mut bidi_text = styled_text.text.clone();
     for (i, ch) in bidi_text.iter_mut().enumerate() {
-        let section = &sections[styled_text.1[i] as usize];
+        let section = &sections[styled_text.styles[i] as usize];
         if section.type_ != GlyphIDType::FontPBF {
             *ch = if section.rtl { 0x05D0 } else { 'a' as u16 };
         }
@@ -882,25 +876,25 @@ fn reorder_shaped_lines(
     }
 
     lines.clear();
-    for line in bidi.process_styled_text_with_blocks(styled_text, line_breaks, &bidi_text, &block_styles)? {
+    for line in bidi::reorder_styled_lines_with_blocks(styled_text, line_breaks, &bidi_text, &block_styles) {
         // A shaped section's adjustments start where its block now starts.
         let mut line_sections = sections.to_vec();
         for (i, line_section) in line_sections.iter_mut().enumerate() {
             if !block_styles[i] {
                 continue;
             }
-            let start = line.1.iter().position(|&style| style as usize == i).unwrap_or(line.1.len());
+            let start = line.styles.iter().position(|&style| style as usize == i).unwrap_or(line.styles.len());
             line_section.start_index = start as i32;
         }
         lines.push(TaggedString::from_styled_text(line, line_sections));
     }
-    Ok(())
 }
 
 #[expect(
     clippy::too_many_arguments,
-    reason = "the text, the text layout options, the bidi state, and the glyphs and images it shapes with"
+    reason = "the text, the text layout options, and the glyphs and images it shapes with"
 )]
+#[must_use]
 pub fn get_shaping(
     formatted_string: &TaggedString,
     max_width: f32,
@@ -910,19 +904,18 @@ pub fn get_shaping(
     spacing: f32,
     translate: &[f32; 2],
     writing_mode: WritingModeType,
-    bidi: &mut BiDi,
     glyphs: &GlyphPositions,
     image_positions: &ImagePositions,
     layout_text_size: f32,
     layout_text_size_at_bucket_zoom_level: f32,
     allow_vertical_placement: bool,
-) -> Result<Shaping, String> {
+) -> Shaping {
     debug_assert!(layout_text_size != 0.0);
     let mut reordered_lines: Vec<TaggedString> = Vec::new();
     if !formatted_string.raw_text().is_empty() {
         if formatted_string.section_count() == 1 {
             if formatted_string.get_section(0).type_ == GlyphIDType::FontPBF {
-                let untagged_lines = bidi.process_text(
+                let untagged_lines = bidi::reorder_lines(
                     formatted_string.raw_text(),
                     determine_line_breaks(
                         formatted_string,
@@ -932,7 +925,7 @@ pub fn get_shaping(
                         image_positions,
                         layout_text_size,
                     ),
-                )?;
+                );
                 for line in untagged_lines {
                     reordered_lines.push(TaggedString::new(line, formatted_string.section_at(0).clone()));
                 }
@@ -940,9 +933,9 @@ pub fn get_shaping(
                 reordered_lines.push(formatted_string.clone());
             }
         } else {
-            let mut sub_string: StyledText = (Vec::new(), Vec::new());
+            let mut sub_string = StyledText::default();
             let mut section_type = GlyphIDType::FontPBF;
-            let str_len = formatted_string.get_styled_text().0.len();
+            let str_len = formatted_string.length();
 
             let mut formatted_sections: Vec<SectionOptions> = formatted_string.get_sections().to_vec();
             if !formatted_sections.is_empty() {
@@ -960,7 +953,7 @@ pub fn get_shaping(
             let process_aline = |line: StyledText,
                                  formatted_sections: &mut Vec<SectionOptions>,
                                  reordered_lines: &mut Vec<TaggedString>| {
-                let cut_lens = line.0.len() as i32;
+                let cut_lens = line.text.len() as i32;
                 reordered_lines.push(TaggedString::from_styled_text(line, formatted_sections.clone()));
 
                 for sec in formatted_sections.iter_mut() {
@@ -976,25 +969,24 @@ pub fn get_shaping(
                     if pend_strings.is_empty() {
                         process_aline(line, formatted_sections, reordered_lines);
                     } else {
-                        let mut combine: StyledText = (Vec::new(), Vec::new());
+                        let mut combine = StyledText::default();
                         for pend_string in pend_strings.iter() {
-                            combine.0.extend_from_slice(&pend_string.0);
-                            combine.1.extend_from_slice(&pend_string.1);
+                            combine.text.extend_from_slice(&pend_string.text);
+                            combine.styles.extend_from_slice(&pend_string.styles);
                         }
                         pend_strings.clear();
-                        combine.0.extend_from_slice(&line.0);
-                        combine.1.extend_from_slice(&line.1);
+                        combine.text.extend_from_slice(&line.text);
+                        combine.styles.extend_from_slice(&line.styles);
                         process_aline(combine, formatted_sections, reordered_lines);
                     }
                 };
 
-            let mut apply_sub_string = |sub_string: &StyledText,
-                                        section_type: GlyphIDType,
-                                        pend_strings: &mut Vec<StyledText>,
-                                        formatted_sections: &mut Vec<SectionOptions>,
-                                        reordered_lines: &mut Vec<TaggedString>|
-             -> Result<(), String> {
-                if !sub_string.0.is_empty() {
+            let apply_sub_string = |sub_string: &StyledText,
+                                    section_type: GlyphIDType,
+                                    pend_strings: &mut Vec<StyledText>,
+                                    formatted_sections: &mut Vec<SectionOptions>,
+                                    reordered_lines: &mut Vec<TaggedString>| {
+                if !sub_string.text.is_empty() {
                     if GlyphIDType::FontPBF == section_type {
                         let line_breaks = determine_line_breaks(
                             &TaggedString::from_styled_text(
@@ -1008,14 +1000,14 @@ pub fn get_shaping(
                             layout_text_size,
                         );
                         let mut processed_lines = if has_shaped_sections {
-                            bidi.split_styled_text(sub_string, line_breaks)?
+                            bidi::split_styled_lines(sub_string, line_breaks)
                         } else {
-                            bidi.process_styled_text(sub_string, line_breaks)?
+                            bidi::reorder_styled_lines(sub_string, line_breaks)
                         };
 
                         let mut last_char: u16 = 'x' as u16;
-                        if !sub_string.0.is_empty() {
-                            last_char = sub_string.0[sub_string.0.len() - 1];
+                        if !sub_string.text.is_empty() {
+                            last_char = sub_string.text[sub_string.text.len() - 1];
                         }
 
                         if '\n' as u16 == last_char {
@@ -1037,12 +1029,11 @@ pub fn get_shaping(
                         pend_strings.push(sub_string.clone());
                     }
                 }
-                Ok(())
             };
 
             for char_index in 0..str_len {
-                let ch = formatted_string.get_styled_text().0[char_index];
-                let sec = formatted_string.get_styled_text().1[char_index];
+                let ch = formatted_string.get_char_code_at(char_index);
+                let sec = formatted_string.get_section_index(char_index);
                 let sec_type = formatted_sections[sec as usize].type_;
 
                 if section_type != sec_type {
@@ -1052,16 +1043,16 @@ pub fn get_shaping(
                         &mut pend_strings,
                         &mut formatted_sections,
                         &mut reordered_lines,
-                    )?;
+                    );
 
-                    sub_string.0.clear();
-                    sub_string.1.clear();
+                    sub_string.text.clear();
+                    sub_string.styles.clear();
 
                     section_type = sec_type;
                 }
 
-                sub_string.0.push(ch);
-                sub_string.1.push(sec);
+                sub_string.text.push(ch);
+                sub_string.styles.push(sec);
             }
 
             apply_sub_string(
@@ -1070,20 +1061,20 @@ pub fn get_shaping(
                 &mut pend_strings,
                 &mut formatted_sections,
                 &mut reordered_lines,
-            )?;
+            );
 
             if !pend_strings.is_empty() {
-                let mut combine: StyledText = (Vec::new(), Vec::new());
+                let mut combine = StyledText::default();
                 for pend_string in &pend_strings {
-                    combine.0.extend_from_slice(&pend_string.0);
-                    combine.1.extend_from_slice(&pend_string.1);
+                    combine.text.extend_from_slice(&pend_string.text);
+                    combine.styles.extend_from_slice(&pend_string.styles);
                 }
                 pend_strings.clear();
                 process_aline(combine, &mut formatted_sections, &mut reordered_lines);
             }
 
             if has_shaped_sections {
-                reorder_shaped_lines(formatted_string, bidi, &mut reordered_lines)?;
+                reorder_shaped_lines(formatted_string, &mut reordered_lines);
             }
         }
     }
@@ -1103,5 +1094,5 @@ pub fn get_shaping(
         allow_vertical_placement,
     );
 
-    Ok(shaping)
+    shaping
 }

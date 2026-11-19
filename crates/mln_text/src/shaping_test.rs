@@ -8,7 +8,6 @@ use mln_util::i18n;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
-use crate::bidi::BiDi;
 use crate::glyph::{
     GlyphID, GlyphIDType, GlyphMetrics, GlyphPosition, GlyphPositions, PositionedGlyph, PositionedLine, Shaping,
     WritingModeType, gen_new_glyph_id_type,
@@ -61,7 +60,6 @@ fn shape_tagged_text(
     let mut glyph_positions = GlyphPositions::new();
     add_stub_glyphs(string, &mut glyph_positions);
 
-    let mut bidi = BiDi::new();
     get_shaping(
         string,
         4096.0,
@@ -71,14 +69,12 @@ fn shape_tagged_text(
         0.0,
         &[0.0, 0.0],
         writing_mode,
-        &mut bidi,
         &glyph_positions,
         image_positions,
         ONE_EM,
         ONE_EM,
         allow_vertical_placement,
     )
-    .unwrap()
 }
 
 fn shape_line_label_with(text: &str, writing_mode: WritingModeType, allow_vertical_placement: bool) -> Shaping {
@@ -118,7 +114,6 @@ fn zwsp() {
     let metrics = GlyphMetrics { width: 18, height: 18, left: 2.0, top: -8.0, advance: 21, ..Default::default() };
     let glyph_position = GlyphPosition { metrics, ..Default::default() };
 
-    let mut bidi = BiDi::new();
     let font_stack: FontStack = vec!["font-stack".to_string()];
     let section_options = SectionOptions::new(1.0, font_stack.clone(), GlyphIDType::FontPBF, 0, None);
     let layout_text_size = 16.0f32;
@@ -130,7 +125,7 @@ fn zwsp() {
         .insert(GlyphID::from('中' as u16), Some(glyph_position));
     let image_positions = ImagePositions::default();
 
-    let mut test_get_shaping = |string: &TaggedString, max_width_in_chars: u32| {
+    let test_get_shaping = |string: &TaggedString, max_width_in_chars: u32| {
         get_shaping(
             string,
             max_width_in_chars as f32 * ONE_EM,
@@ -140,14 +135,12 @@ fn zwsp() {
             0.0,         // spacing
             &[0.0, 0.0], // translate
             WritingModeType::Horizontal,
-            &mut bidi,
             &glyph_positions,
             &image_positions,
             layout_text_size,
             layout_text_size_at_bucket_zoom_level,
             /*allowVerticalPlacement*/ false,
         )
-        .unwrap()
     };
 
     // 3 lines
@@ -445,7 +438,6 @@ fn vertical_missing_glyph_preserves_indices() {
     // Missing "w" must not shift the character index used for the remaining glyphs.
     glyph_positions.get_mut(&hash).unwrap().remove(&GlyphID::from('w' as u16));
 
-    let mut bidi = BiDi::new();
     let shaped_line_label = get_shaping(
         &text,
         4096.0,
@@ -455,14 +447,12 @@ fn vertical_missing_glyph_preserves_indices() {
         0.0,
         &[0.0, 0.0],
         WritingModeType::Vertical,
-        &mut bidi,
         &glyph_positions,
         &ImagePositions::default(),
         ONE_EM,
         ONE_EM,
         false,
-    )
-    .unwrap();
+    );
     let orientations = get_glyph_orientations(&shaped_line_label);
 
     let expected = expect(&[
@@ -786,7 +776,6 @@ fn break_before_left_parenthesis() {
     let metrics = GlyphMetrics { width: 18, height: 18, left: 2.0, top: -8.0, advance: 21, ..Default::default() };
     let glyph_position = GlyphPosition { metrics, ..Default::default() };
 
-    let mut bidi = BiDi::new();
     let font_stack: FontStack = vec!["font-stack".to_string()];
     let section_options = SectionOptions::new(1.0, font_stack.clone(), GlyphIDType::FontPBF, 0, None);
     let mut glyph_positions = GlyphPositions::new();
@@ -796,7 +785,7 @@ fn break_before_left_parenthesis() {
     }
     let image_positions = ImagePositions::default();
 
-    let mut glyphs_per_line = |text: &str| {
+    let glyphs_per_line = |text: &str| {
         let shaping = get_shaping(
             &TaggedString::new(u(text), section_options.clone()),
             5.0 * ONE_EM,
@@ -806,14 +795,12 @@ fn break_before_left_parenthesis() {
             0.0,         // spacing
             &[0.0, 0.0], // translate
             WritingModeType::Horizontal,
-            &mut bidi,
             &glyph_positions,
             &image_positions,
             16.0, // layoutTextSize
             16.0, // layoutTextSizeAtBucketZoomLevel
             /*allowVerticalPlacement*/ false,
-        )
-        .unwrap();
+        );
         shaping.positioned_lines.iter().map(|line| line.positioned_glyphs.len()).collect::<Vec<usize>>()
     };
 

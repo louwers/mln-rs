@@ -30,7 +30,7 @@ pub mod weight;
 mod woff;
 
 pub use arabic::shape_arabic;
-pub use bidi::{BiDi, starts_right_to_left};
+pub use bidi::{BiDiRun, starts_right_to_left, visual_runs};
 pub use face::{FontFile, FreeTypeLibrary};
 pub use glyph::{
     Glyph, GlyphID, GlyphIDType, GlyphMap, GlyphMetrics, GlyphPosition, GlyphPositions, GlyphRange, PositionedGlyph,

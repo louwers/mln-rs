@@ -17,7 +17,7 @@ use mln_style_types::{SymbolAnchorType, TextJustifyType};
 use mln_text::glyph::{GlyphID, GlyphIDType, GlyphPosition, GlyphPositions, GlyphRange, get_glyph_range};
 use mln_text::glyph_pbf::parse_glyph_pbf;
 use mln_text::tagged_string::font_stack_hash;
-use mln_text::{BiDi, FreeTypeLibrary, HBShaper, SectionOptions, TaggedString, WritingModeType, get_shaping};
+use mln_text::{FreeTypeLibrary, HBShaper, SectionOptions, TaggedString, WritingModeType, get_shaping};
 use mln_tile_id::GeometryTileFeature;
 use mln_util::constants::ONE_EM;
 use mln_util::tiny_sdf::transform_raster_to_sdf;
@@ -242,7 +242,6 @@ fn shape(bench: &mut Bench, tile: LabelTile, repeats: u64) {
     let section = SectionOptions::new(1.0, font_stack, GlyphIDType::FontPBF, 0, None);
     let texts: Vec<TaggedString> =
         labels.iter().map(|label| TaggedString::new(label.text.clone(), section.clone())).collect();
-    let mut bidi = BiDi::new();
     let images = ImagePositions::default();
 
     for _ in 0..repeats {
@@ -259,14 +258,12 @@ fn shape(bench: &mut Bench, tile: LabelTile, repeats: u64) {
                         0.0,
                         &[0.0, 0.6 * ONE_EM],
                         WritingModeType::Horizontal,
-                        &mut bidi,
                         &positions,
                         &images,
                         TEXT_SIZE,
                         TEXT_SIZE,
                         false,
-                    )
-                    .expect("a label shapes");
+                    );
                     shaping.positioned_lines.len()
                 })
                 .sum::<usize>()

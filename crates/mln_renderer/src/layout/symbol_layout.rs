@@ -28,7 +28,7 @@ use mln_style_types::{
 use mln_text::glyph::{GlyphID, GlyphIDType, GlyphPositions, Shaping, WritingModeType};
 use mln_text::shaping::{PositionedIcon, get_anchor_justification, get_shaping};
 use mln_text::tagged_string::SectionOptions;
-use mln_text::{BiDi, TaggedString, shape_arabic, starts_right_to_left};
+use mln_text::{TaggedString, shape_arabic, starts_right_to_left};
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCoordinate, GeometryCoordinates, GeometryTileFeature};
 use mln_util::constants::{EXTENT, ONE_EM, TILE_SIZE_D};
@@ -339,11 +339,6 @@ pub(crate) struct SymbolLayout {
 
     features: Vec<SymbolFeature>,
 
-    // Consider moving this up to geometry tile worker to reduce
-    // reinstantiation costs; use of BiDi/ubiditransform object must be
-    // constrained to one thread
-    bidi: BiDi,
-
     need_finalize_symbols_val: bool,
 }
 
@@ -394,7 +389,6 @@ impl SymbolLayout {
             text_variable_anchor_offset: leader.layout.text_variable_anchor_offset.clone(),
             layout,
             features: Vec::new(),
-            bidi: BiDi::new(),
             need_finalize_symbols_val: false,
         };
 
@@ -1502,7 +1496,7 @@ impl SymbolLayout {
             let style_text = formatted_text.get_styled_text();
 
             let mut sub_string: Vec<u16> = Vec::new();
-            let mut section_index = style_text.1.first().copied().unwrap_or(0);
+            let mut section_index = style_text.styles.first().copied().unwrap_or(0);
 
             let apply_sub_string = |sub_string: &[u16], section_index: u8, shaped_string: &mut TaggedString| {
                 if sub_string.is_empty() {
@@ -1540,7 +1534,7 @@ impl SymbolLayout {
                 }
             };
 
-            for (ch, sec) in style_text.0.iter().zip(style_text.1.iter()) {
+            for (ch, sec) in style_text.text.iter().zip(style_text.styles.iter()) {
                 if section_index != *sec {
                     apply_sub_string(&sub_string, section_index, &mut shaped_string);
 
@@ -1651,13 +1645,12 @@ impl SymbolLayout {
                     )
                 };
 
-                let bidi = &mut self.bidi;
                 let allow_vertical_placement = self.allow_vertical_placement;
-                let mut apply_shaping = |formatted_text: &TaggedString,
-                                         writing_mode: WritingModeType,
-                                         text_anchor: SymbolAnchorType,
-                                         text_justify: TextJustifyType,
-                                         text_offset: &[f32; 2]|
+                let apply_shaping = |formatted_text: &TaggedString,
+                                     writing_mode: WritingModeType,
+                                     text_anchor: SymbolAnchorType,
+                                     text_justify: TextJustifyType,
+                                     text_offset: &[f32; 2]|
                  -> Shaping {
                     get_shaping(
                         formatted_text,
@@ -1668,14 +1661,12 @@ impl SymbolLayout {
                         spacing,
                         text_offset,
                         writing_mode,
-                        bidi,
                         glyphs,
                         icons,
                         layout_text_size,
                         layout_text_size_at_bucket_zoom_level,
                         allow_vertical_placement,
                     )
-                    .unwrap_or_default()
                 };
 
                 let formatted_text = feature.formatted_text.as_mut().expect("text");

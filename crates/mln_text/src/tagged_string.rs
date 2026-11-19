@@ -9,8 +9,13 @@ use mln_util::{Color, i18n};
 use crate::glyph::GlyphIDType;
 use crate::harfbuzz::HBShapeAdjust;
 
-/// Each UTF-16 code unit with the index of its section.
-pub(crate) type StyledText = (Vec<u16>, Vec<u8>);
+/// Text as UTF-16 code units, with the index of each code unit's section.
+/// `text` and `styles` are equally long.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct StyledText {
+    pub text: Vec<u16>,
+    pub styles: Vec<u8>,
+}
 
 pub(crate) type FontStackHash = u64;
 
@@ -114,7 +119,11 @@ impl TaggedString {
     #[must_use]
     pub fn new(text: Vec<u16>, options: SectionOptions) -> Self {
         let size = text.len();
-        TaggedString { styled_text: (text, vec![0; size]), sections: vec![options], ..Default::default() }
+        TaggedString {
+            styled_text: StyledText { text, styles: vec![0; size] },
+            sections: vec![options],
+            ..Default::default()
+        }
     }
 
     #[must_use]
@@ -124,7 +133,7 @@ impl TaggedString {
 
     #[must_use]
     pub fn length(&self) -> usize {
-        self.styled_text.0.len()
+        self.styled_text.text.len()
     }
 
     #[must_use]
@@ -134,23 +143,23 @@ impl TaggedString {
 
     #[must_use]
     pub(crate) fn empty(&self) -> bool {
-        self.styled_text.0.is_empty()
+        self.styled_text.text.is_empty()
     }
 
     /// The section of the code unit at `index`. Panics when out of range.
     #[must_use]
     pub(crate) fn get_section(&self, index: usize) -> &SectionOptions {
-        &self.sections[self.styled_text.1[index] as usize]
+        &self.sections[self.styled_text.styles[index] as usize]
     }
 
     #[must_use]
     pub fn get_char_code_at(&self, index: usize) -> u16 {
-        self.styled_text.0[index]
+        self.styled_text.text[index]
     }
 
     #[must_use]
     pub fn raw_text(&self) -> &[u16] {
-        &self.styled_text.0
+        &self.styled_text.text
     }
 
     #[must_use]
@@ -171,15 +180,15 @@ impl TaggedString {
         text_color: Option<Color>,
         vertical_align: VerticalAlign,
     ) {
-        self.styled_text.0.extend_from_slice(section_text);
-        let start_index = self.styled_text.0.len() as u32;
+        self.styled_text.text.extend_from_slice(section_text);
+        let start_index = self.styled_text.text.len() as u32;
         self.sections.push(SectionOptions {
             key_section,
             vertical_align,
             ..SectionOptions::new(scale, font_stack.clone(), type_, start_index, text_color)
         });
         let index = (self.sections.len() - 1) as u8;
-        self.styled_text.1.resize(self.styled_text.0.len(), index);
+        self.styled_text.styles.resize(self.styled_text.text.len(), index);
         self.supports_vertical_writing_mode = None;
         if type_ != GlyphIDType::FontPBF {
             self.has_need_shape_text_val = true;
@@ -201,7 +210,7 @@ impl TaggedString {
         text_color: Option<Color>,
         vertical_align: VerticalAlign,
     ) {
-        let start_index = self.styled_text.0.len() as u32;
+        let start_index = self.styled_text.text.len() as u32;
         self.sections.push(SectionOptions {
             vertical_align,
             adjusts: adjusts.clone(),
@@ -209,9 +218,9 @@ impl TaggedString {
             key_section,
             ..SectionOptions::new(scale, font_stack.clone(), type_, start_index, text_color)
         });
-        self.styled_text.0.extend_from_slice(section_text);
+        self.styled_text.text.extend_from_slice(section_text);
         let index = (self.sections.len() - 1) as u8;
-        self.styled_text.1.resize(self.styled_text.0.len(), index);
+        self.styled_text.styles.resize(self.styled_text.text.len(), index);
         if type_ != GlyphIDType::FontPBF {
             self.has_need_shape_text_val = true;
         }
@@ -222,10 +231,10 @@ impl TaggedString {
             Log::warning(Event::Style, "Exceeded maximum number of images in a label.");
             return;
         };
-        self.styled_text.0.push(next);
+        self.styled_text.text.push(next);
         self.sections.push(SectionOptions::image(image_id.to_string(), vertical_align));
         let index = (self.sections.len() - 1) as u8;
-        self.styled_text.1.resize(self.styled_text.0.len(), index);
+        self.styled_text.styles.resize(self.styled_text.text.len(), index);
     }
 
     #[must_use]
@@ -240,14 +249,14 @@ impl TaggedString {
 
     #[must_use]
     pub fn get_section_index(&self, character_index: usize) -> u8 {
-        self.styled_text.1[character_index]
+        self.styled_text.styles[character_index]
     }
 
     /// The largest section scale, compared with `fmax`.
     #[must_use]
     pub(crate) fn get_max_scale(&self) -> f64 {
         let mut max_scale = 0.0;
-        for i in 0..self.styled_text.0.len() {
+        for i in 0..self.styled_text.text.len() {
             max_scale = mln_math::fmax(max_scale, self.get_section(i).scale);
         }
         max_scale
@@ -256,7 +265,7 @@ impl TaggedString {
     /// `trim`: removes leading and trailing " \t\n\v\f\r", but not from
     /// sections that need shaping.
     pub(crate) fn trim(&mut self) {
-        let text = &self.styled_text.0;
+        let text = &self.styled_text.text;
         // find_first_not_of (npos = None)
         let mut beginning_whitespace = text.iter().position(|&c| !is_trim_whitespace(c));
         let limit = beginning_whitespace.unwrap_or(usize::MAX);
@@ -275,8 +284,8 @@ impl TaggedString {
                     section.start_index = 0;
                 }
                 // Entirely whitespace
-                self.styled_text.0.clear();
-                self.styled_text.1.clear();
+                self.styled_text.text.clear();
+                self.styled_text.styles.clear();
             }
             Some(beginning_whitespace) => {
                 // find_last_not_of + 1 (npos + 1 == 0)
@@ -289,7 +298,7 @@ impl TaggedString {
                     }
                 }
 
-                let mut i = self.styled_text.0.len() as i32 - 1;
+                let mut i = self.styled_text.text.len() as i32 - 1;
                 while i >= trailing_whitespace {
                     if self.get_section(i as usize).type_ != GlyphIDType::FontPBF {
                         trailing_whitespace = i + 1;
@@ -299,8 +308,8 @@ impl TaggedString {
                 }
 
                 let end = trailing_whitespace as usize;
-                self.styled_text.0 = self.styled_text.0[beginning_whitespace..end].to_vec();
-                self.styled_text.1 = self.styled_text.1[beginning_whitespace..end].to_vec();
+                self.styled_text.text = self.styled_text.text[beginning_whitespace..end].to_vec();
+                self.styled_text.styles = self.styled_text.styles[beginning_whitespace..end].to_vec();
             }
         }
     }
@@ -309,13 +318,13 @@ impl TaggedString {
     /// verticalization changing characters in place so that style indices
     /// don't need updating.
     pub fn verticalize_punctuation(&mut self) {
-        let mut replaced = i18n::verticalize_punctuation_str(&self.styled_text.0);
+        let mut replaced = i18n::verticalize_punctuation_str(&self.styled_text.text);
         for (i, unit) in replaced.iter_mut().enumerate() {
             if self.get_section(i).type_ != GlyphIDType::FontPBF {
-                *unit = self.styled_text.0[i];
+                *unit = self.styled_text.text[i];
             }
         }
-        self.styled_text.0 = replaced;
+        self.styled_text.text = replaced;
     }
 
     /// Whether the text allows vertical writing mode (cached until the next
@@ -324,9 +333,9 @@ impl TaggedString {
         if let Some(allows) = self.supports_vertical_writing_mode {
             return allows;
         }
-        let allows = (0..self.styled_text.0.len()).any(|i| {
+        let allows = (0..self.styled_text.text.len()).any(|i| {
             self.get_section(i).type_ == GlyphIDType::FontPBF
-                && i18n::has_upright_vertical_orientation(self.styled_text.0[i])
+                && i18n::has_upright_vertical_orientation(self.styled_text.text[i])
         });
         self.supports_vertical_writing_mode = Some(allows);
         allows

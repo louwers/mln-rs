@@ -1,21 +1,25 @@
-// The `unicode-bidi` crate resolves levels and visual runs (UAX #9), and
-// this module writes them: runs in visual order, RTL runs reversed by code
-// point with each character replaced by its Bidi_Mirroring_Glyph (rule L4,
-// which unicode-bidi leaves to the renderer; crate::bidi_mirroring, from the
-// same Unicode version as unicode-bidi's tables), and BiDi controls (ZWNJ,
-// ZWJ, LRM, RLM, LRE..RLO, LRI..PDI) removed.
-//
-// Where the C++ throws std::runtime_error, these return Err with the same
-// message (`what()`).
+//! Lines and runs of text in visual order.
+//!
+//! The `unicode-bidi` crate resolves levels and visual runs (UAX #9), and
+//! this module writes them: runs in visual order, RTL runs reversed by
+//! character with each character replaced by its `Bidi_Mirroring_Glyph`
+//! (rule L4, which unicode-bidi leaves to the renderer; `crate::bidi_mirroring`,
+//! from the same Unicode version as unicode-bidi's tables), and BiDi controls
+//! removed.
+//!
+//! The line splitters take line break points as offsets into the text, in
+//! code units. Each must end a nonempty line within the text (`0 < point <=
+//! len`); the end of each paragraph is a line break point whether or not the
+//! caller passes it.
 
 use std::ops::Range;
 
 use mln_vec_map::VecSet;
+use unicode_bidi::BidiClass;
 use unicode_bidi::utf16::BidiInfo;
-use unicode_bidi::{BidiClass, ParagraphInfo};
 
 use crate::bidi_mirroring::BIDI_MIRRORING_GLYPH;
-pub(crate) use crate::tagged_string::StyledText;
+use crate::tagged_string::StyledText;
 
 /// Whether the first character in `text` with a strong direction runs right
 /// to left. Unpaired surrogates have no direction.
@@ -33,53 +37,50 @@ pub fn starts_right_to_left(text: &[u16]) -> bool {
 
 /// The character's `Bidi_Mirroring_Glyph`, or the character itself if it has
 /// none.
-fn mirror(c: u32) -> u32 {
-    u16::try_from(c)
+fn mirror(c: char) -> char {
+    u16::try_from(u32::from(c))
         .ok()
         .and_then(|c| BIDI_MIRRORING_GLYPH.binary_search_by_key(&c, |&(from, _)| from).ok())
-        .map_or(c, |i| u32::from(BIDI_MIRRORING_GLYPH[i].1))
+        .and_then(|i| char::from_u32(u32::from(BIDI_MIRRORING_GLYPH[i].1)))
+        .unwrap_or(c)
 }
 
-/// `IS_BIDI_CONTROL_CHAR(c)` (ICU ubidiimp.h): what
-/// `UBIDI_REMOVE_BIDI_CONTROLS` removes.
-fn is_bidi_control_char(c: u16) -> bool {
-    let c = u32::from(c);
-    (c & 0xffff_fffc) == 0x200c || c.wrapping_sub(0x202a) < 5 || c.wrapping_sub(0x2066) < 4
+/// Whether `c` is a BiDi control that visual-order text leaves out.
+fn is_bidi_control(c: char) -> bool {
+    matches!(
+        c,
+        // ZWNJ, ZWJ, LRM and RLM
+        '\u{200C}'..='\u{200F}'
+        // LRE, RLE, PDF, LRO and RLO
+        | '\u{202A}'..='\u{202E}'
+        // LRI, RLI, FSI and PDI
+        | '\u{2066}'..='\u{2069}'
+    )
 }
 
-/// The code point ending at `text[end - 1]` and its first index.
-fn code_point_before(text: &[u16], end: usize) -> (u32, usize) {
-    let c = u32::from(text[end - 1]);
-    if (c & 0xfc00) == 0xdc00 && end >= 2 {
-        let lead = u32::from(text[end - 2]);
-        if (lead & 0xfc00) == 0xd800 {
-            return (((lead - 0xd800) << 10) + (c - 0xdc00) + 0x10000, end - 2);
+/// Appends the run `src` to `out` in visual order without BiDi controls: an
+/// RTL run reversed by character, each character mirrored, and an LTR run as
+/// it is. Unpaired surrogates are kept as characters of their own.
+fn write_run(src: &[u16], rtl: bool, out: &mut Vec<u16>) {
+    let start = out.len();
+    for c in char::decode_utf16(src.iter().copied()) {
+        match c {
+            Ok(c) if is_bidi_control(c) => {}
+            Ok(c) if rtl => {
+                let mut units = [0; 2];
+                let units = mirror(c).encode_utf16(&mut units);
+                units.reverse();
+                out.extend_from_slice(units);
+            }
+            Ok(c) => out.extend_from_slice(c.encode_utf16(&mut [0; 2])),
+            Err(e) => out.push(e.unpaired_surrogate()),
         }
     }
-    (c, end - 1)
-}
-
-fn push_code_point(out: &mut Vec<u16>, c: u32) {
-    if c <= 0xffff {
-        out.push(c as u16);
-    } else {
-        out.push(((c >> 10) + 0xd7c0) as u16);
-        out.push(((c & 0x3ff) | 0xdc00) as u16);
-    }
-}
-
-/// An RTL run written as `ubidi_writeReverse`/`writeReordered` do with
-/// `UBIDI_DO_MIRRORING` | `UBIDI_REMOVE_BIDI_CONTROLS`: code points in reverse
-/// order, mirrored, BiDi controls dropped.
-fn write_reverse_mirrored(src: &[u16], out: &mut Vec<u16>) {
-    let mut end = src.len();
-    while end > 0 {
-        let (c, start) = code_point_before(src, end);
-        end = start;
-        if c <= 0xffff && is_bidi_control_char(c as u16) {
-            continue;
-        }
-        push_code_point(out, mirror(c));
+    if rtl {
+        // Each character went in with its code units reversed, so reversing
+        // the whole run reverses the characters and puts their units back in
+        // order.
+        out[start..].reverse();
     }
 }
 
@@ -90,240 +91,166 @@ pub struct BiDiRun {
     pub rtl: bool,
 }
 
-#[derive(Default)]
-pub struct BiDi {}
-
-/// The paragraph of `info` that holds the line `[start, end)`, or the
-/// error ICU's `ubidi_setLine` reports (an empty line, a line past the end
-/// or across a paragraph boundary).
-fn line_paragraph<'a>(info: &'a BidiInfo<'_>, start: usize, end: usize) -> Option<&'a ParagraphInfo> {
-    if start >= end || end > info.text.len() {
-        return None;
+/// The lines of `info`'s text that end at `line_breaks` and at the ends of
+/// its paragraphs, so that no line crosses a paragraph boundary.
+fn lines(info: &BidiInfo<'_>, mut line_breaks: VecSet<usize>) -> impl Iterator<Item = Range<usize>> {
+    let len = info.text.len();
+    debug_assert!(
+        line_breaks.iter().all(|&point| 0 < point && point <= len),
+        "line breaks {line_breaks:?} outside 1..={len}"
+    );
+    for paragraph in &info.paragraphs {
+        line_breaks.insert(paragraph.range.end);
     }
-    info.paragraphs.iter().find(|p| p.range.start <= start && end <= p.range.end)
+    let mut start = 0;
+    // A release build drops points outside the text rather than panic.
+    line_breaks.into_iter().filter(move |&end| 0 < end && end <= len).map(move |end| {
+        let line = start..end;
+        start = end;
+        line
+    })
 }
 
-/// Resolves the visual runs of a line: (is RTL, logical range), in visual
-/// order (ICU's `ubidi_countRuns` / `ubidi_getVisualRun`).
-fn visual_runs(info: &BidiInfo<'_>, para: &ParagraphInfo, line: Range<usize>) -> Vec<(bool, Range<usize>)> {
-    let (levels, runs) = info.visual_runs(para, line);
+/// The visual runs of `line`, a nonempty line of `info`'s text within one
+/// paragraph: whether each runs right to left, and its logical range, in
+/// visual order.
+fn line_runs(info: &BidiInfo<'_>, line: Range<usize>) -> Vec<(bool, Range<usize>)> {
+    let paragraph = &info.paragraphs[info.paragraphs.partition_point(|p| p.range.end <= line.start)];
+    let (levels, runs) = info.visual_runs(paragraph, line);
     runs.into_iter().map(|run| (levels[run.start].is_rtl(), run)).collect()
 }
 
-impl BiDi {
-    #[must_use]
-    pub fn new() -> Self {
-        BiDi {}
-    }
-
-    fn merge_paragraph_line_breaks(info: &BidiInfo<'_>, line_break_points: &mut VecSet<usize>) {
-        for paragraph in &info.paragraphs {
-            line_break_points.insert(paragraph.range.end);
-        }
-    }
-
-    /// Given text in logical ordering and a set of line break points,
-    /// return a set of lines in visual order with bidi and line breaking
-    /// applied.
-    #[expect(clippy::unused_self, reason = "the shaper threads one `BiDi` through, as the C++ shaping API does")]
-    pub(crate) fn process_text(
-        &mut self,
-        input: &[u16],
-        mut line_break_points: VecSet<usize>,
-    ) -> Result<Vec<Vec<u16>>, String> {
-        let info = BidiInfo::new(input, None);
-
-        // BiDi::getLine will error if called across a paragraph boundary,
-        // so we need to ensure that all paragraph boundaries are included
-        // in the set of line break points. The calling code might not
-        // include the line break because it didn't need to wrap at that
-        // point, or because the text was separated with a more exotic code
-        // point such as (U+001C)
-        Self::merge_paragraph_line_breaks(&info, &mut line_break_points);
-
-        let mut transformed_lines = Vec::with_capacity(line_break_points.len());
-
-        let mut start = 0;
-        for line_break_point in line_break_points {
-            transformed_lines.push(Self::get_line(&info, start, line_break_point)?);
-            start = line_break_point;
-        }
-
-        Ok(transformed_lines)
-    }
-
-    /// Same as processText but preserves per-code-point formatting
-    /// information.
-    pub(crate) fn process_styled_text(
-        &mut self,
-        input: &StyledText,
-        line_break_points: VecSet<usize>,
-    ) -> Result<Vec<StyledText>, String> {
-        self.process_styled_text_with_blocks(input, line_break_points, &input.0, &[])
-    }
-
-    /// Splits text in logical order into lines at the line break points and
-    /// at the ends of paragraphs, without reordering it.
-    #[expect(clippy::unused_self, reason = "the shaper threads one `BiDi` through, as the C++ shaping API does")]
-    #[expect(clippy::unnecessary_wraps, reason = "fails as the other line splitters do, which its callers treat alike")]
-    pub(crate) fn split_styled_text(
-        &mut self,
-        input: &StyledText,
-        mut line_break_points: VecSet<usize>,
-    ) -> Result<Vec<StyledText>, String> {
-        let info = BidiInfo::new(&input.0, None);
-        Self::merge_paragraph_line_breaks(&info, &mut line_break_points);
-
-        let mut lines = Vec::new();
-        let mut line_start_index = 0usize;
-        for line_break_point in line_break_points {
-            lines.push((
-                input.0[line_start_index..line_break_point].to_vec(),
-                input.1[line_start_index..line_break_point].to_vec(),
-            ));
-            line_start_index = line_break_point;
-        }
-        Ok(lines)
-    }
-
-    /// The `processStyledText(input, lineBreakPoints, bidiText,
-    /// blockStyles)` overload: same as processStyledText, but the bidi
-    /// analysis reads `bidi_text`, which is as long as the input's text, and
-    /// a right-to-left run keeps the order of the text in the styles that
-    /// `block_styles` marks, which a shaper already laid out in visual
-    /// order.
-    #[expect(clippy::unused_self, reason = "the shaper threads one `BiDi` through, as the C++ shaping API does")]
-    pub(crate) fn process_styled_text_with_blocks(
-        &mut self,
-        input: &StyledText,
-        mut line_break_points: VecSet<usize>,
-        bidi_text: &[u16],
-        block_styles: &[bool],
-    ) -> Result<Vec<StyledText>, String> {
-        let mut lines = Vec::new();
-        let input_text = &input.0;
-        let style_indices = &input.1;
-        let is_block = |style: u8| block_styles.get(style as usize).copied().unwrap_or(false);
-
-        let info = BidiInfo::new(bidi_text, None);
-
-        Self::merge_paragraph_line_breaks(&info, &mut line_break_points);
-
-        let mut line_start_index = 0usize;
-
-        for line_break_point in line_break_points {
-            let mut line: StyledText =
-                (Vec::new(), Vec::with_capacity(line_break_point.saturating_sub(line_start_index)));
-
-            let Some(para) = line_paragraph(&info, line_start_index, line_break_point) else {
-                return Err("BiDi::processStyledText (setLine): U_ILLEGAL_ARGUMENT_ERROR".to_string());
-            };
-
-            for (is_reversed, run) in visual_runs(&info, para, line_start_index..line_break_point) {
-                let logical_start = run.start;
-                let logical_end = run.end;
-                if is_reversed {
-                    // Within this reversed section, iterate logically
-                    // backwards. Each time we see a change in style, render
-                    // a reversed chunk of everything since the last change.
-                    //
-                    let mut style_run_start = logical_end;
-                    let mut current_style_index = style_indices[style_run_start - 1];
-                    let mut add_chunk = |start: usize, end: usize, style: u8| {
-                        // A block's text is already in visual order.
-                        let mut reversed = Vec::new();
-                        if is_block(style) {
-                            reversed.extend_from_slice(&input_text[start..end]);
-                        } else {
-                            write_reverse_mirrored(&input_text[start..end], &mut reversed);
-                        }
-                        line.0.extend_from_slice(&reversed);
-                        line.1.extend(std::iter::repeat_n(style, reversed.len()));
-                    };
-                    let mut i = logical_end - 1;
-                    while i >= logical_start {
-                        if current_style_index != style_indices[i] || i == logical_start {
-                            // The run's first character joins the chunk
-                            // after it even when its style differs, as GL JS
-                            // lays it out, except next to a block, which
-                            // holds only its own text.
-                            let split_first = i == logical_start
-                                && current_style_index != style_indices[i]
-                                && (is_block(current_style_index) || is_block(style_indices[i]));
-                            let style_run_end = if i == logical_start && !split_first { i } else { i + 1 };
-                            add_chunk(style_run_end, style_run_start, current_style_index);
-                            current_style_index = style_indices[i];
-                            style_run_start = style_run_end;
-                            if split_first {
-                                add_chunk(i, i + 1, current_style_index);
-                                style_run_start = i;
-                            }
-                        }
-                        if i == 0 {
-                            break;
-                        }
-                        i -= 1;
-                    }
-                } else {
-                    line.0.extend_from_slice(&input_text[logical_start..logical_end]);
-                    line.1.extend_from_slice(&style_indices[logical_start..logical_end]);
-                }
+/// Splits `text`, in logical order, into lines at `line_breaks`, and writes
+/// each line in visual order.
+pub(crate) fn reorder_lines(text: &[u16], line_breaks: VecSet<usize>) -> Vec<Vec<u16>> {
+    let info = BidiInfo::new(text, None);
+    lines(&info, line_breaks)
+        .map(|line| {
+            let mut out = Vec::with_capacity(line.len());
+            for (rtl, run) in line_runs(&info, line) {
+                write_run(&text[run], rtl, &mut out);
             }
+            out
+        })
+        .collect()
+}
 
-            lines.push(line);
-            line_start_index = line_break_point;
-        }
+/// Like [`reorder_lines`], and each code unit keeps its style.
+pub(crate) fn reorder_styled_lines(input: &StyledText, line_breaks: VecSet<usize>) -> Vec<StyledText> {
+    reorder_styled_lines_with_blocks(input, line_breaks, &input.text, &[])
+}
 
-        Ok(lines)
-    }
+/// Splits text in logical order into lines at `line_breaks` and at the ends
+/// of paragraphs, without reordering it.
+pub(crate) fn split_styled_lines(input: &StyledText, line_breaks: VecSet<usize>) -> Vec<StyledText> {
+    let info = BidiInfo::new(&input.text, None);
+    lines(&info, line_breaks)
+        .map(|line| StyledText { text: input.text[line.clone()].to_vec(), styles: input.styles[line].to_vec() })
+        .collect()
+}
 
-    /// Splits text in logical order into runs of one direction each, and
-    /// returns the runs in visual order. Each run keeps its logical order, so
-    /// a shaper such as HarfBuzz can lay it out in its direction.
-    pub fn visual_runs(&mut self, input: &[u16]) -> Vec<BiDiRun> {
-        let mut runs = Vec::new();
-        if input.is_empty() {
-            return runs;
-        }
+/// Like [`reorder_styled_lines`], but the bidi analysis reads `bidi_text`,
+/// which is as long as the input's text, and a right-to-left run keeps the
+/// order of the text in the styles that `block_styles` marks, which a shaper
+/// already laid out in visual order.
+pub(crate) fn reorder_styled_lines_with_blocks(
+    input: &StyledText,
+    line_breaks: VecSet<usize>,
+    bidi_text: &[u16],
+    block_styles: &[bool],
+) -> Vec<StyledText> {
+    debug_assert_eq!(bidi_text.len(), input.text.len());
+    let input_text = &input.text;
+    let style_indices = &input.styles;
+    let is_block = |style: u8| block_styles.get(style as usize).copied().unwrap_or(false);
 
-        // ICU's ubidi_getVisualRun without ubidi_setLine: each paragraph's
-        // runs in visual order, the paragraphs in logical order.
-        let info = BidiInfo::new(input, None);
-        for para in &info.paragraphs {
-            for (rtl, run) in visual_runs(&info, para, para.range.clone()) {
-                if run.is_empty() {
-                    continue;
-                }
-                runs.push(BiDiRun { text: input[run].to_vec(), rtl });
-            }
-        }
+    let info = BidiInfo::new(bidi_text, None);
+    let mut out = Vec::new();
+    for line_range in lines(&info, line_breaks) {
+        let mut line = StyledText { text: Vec::new(), styles: Vec::with_capacity(line_range.len()) };
 
-        if runs.is_empty() {
-            runs.push(BiDiRun { text: input.to_vec(), rtl: false });
-        }
-        runs
-    }
-
-    /// The line `start..end` in visual order, mirrored, with BiDi controls
-    /// removed.
-    fn get_line(info: &BidiInfo<'_>, start: usize, end: usize) -> Result<Vec<u16>, String> {
-        let Some(para) = line_paragraph(info, start, end) else {
-            return Err("BiDi::getLine (setLine): U_ILLEGAL_ARGUMENT_ERROR".to_string());
-        };
-
-        let mut output_text = Vec::with_capacity(end - start);
-        for (is_reversed, run) in visual_runs(info, para, start..end) {
-            let src = &info.text[run];
+        for (is_reversed, run) in line_runs(&info, line_range) {
+            let logical_start = run.start;
+            let logical_end = run.end;
             if is_reversed {
-                write_reverse_mirrored(src, &mut output_text);
+                // Within this reversed section, iterate logically
+                // backwards. Each time we see a change in style, render
+                // a reversed chunk of everything since the last change.
+                //
+                let mut style_run_start = logical_end;
+                let mut current_style_index = style_indices[style_run_start - 1];
+                let mut add_chunk = |start: usize, end: usize, style: u8| {
+                    // A block's text is already in visual order.
+                    let mut reversed = Vec::new();
+                    if is_block(style) {
+                        reversed.extend_from_slice(&input_text[start..end]);
+                    } else {
+                        write_run(&input_text[start..end], true, &mut reversed);
+                    }
+                    line.text.extend_from_slice(&reversed);
+                    line.styles.extend(std::iter::repeat_n(style, reversed.len()));
+                };
+                let mut i = logical_end - 1;
+                while i >= logical_start {
+                    if current_style_index != style_indices[i] || i == logical_start {
+                        // The run's first character joins the chunk
+                        // after it even when its style differs, as GL JS
+                        // lays it out, except next to a block, which
+                        // holds only its own text.
+                        let split_first = i == logical_start
+                            && current_style_index != style_indices[i]
+                            && (is_block(current_style_index) || is_block(style_indices[i]));
+                        let style_run_end = if i == logical_start && !split_first { i } else { i + 1 };
+                        add_chunk(style_run_end, style_run_start, current_style_index);
+                        current_style_index = style_indices[i];
+                        style_run_start = style_run_end;
+                        if split_first {
+                            add_chunk(i, i + 1, current_style_index);
+                            style_run_start = i;
+                        }
+                    }
+                    if i == 0 {
+                        break;
+                    }
+                    i -= 1;
+                }
             } else {
-                // LTR runs are not mirrored.
-                output_text.extend(src.iter().copied().filter(|&c| !is_bidi_control_char(c)));
+                line.text.extend_from_slice(&input_text[logical_start..logical_end]);
+                line.styles.extend_from_slice(&style_indices[logical_start..logical_end]);
             }
         }
 
-        Ok(output_text)
+        out.push(line);
     }
+    out
+}
+
+/// Splits text in logical order into runs of one direction each, and
+/// returns the runs in visual order: each paragraph's runs in visual order,
+/// the paragraphs in logical order. Each run keeps its logical order, so a
+/// shaper such as HarfBuzz can lay it out in its direction. Text with no runs
+/// is one LTR run.
+#[must_use]
+pub fn visual_runs(text: &[u16]) -> Vec<BiDiRun> {
+    let mut runs = Vec::new();
+    if text.is_empty() {
+        return runs;
+    }
+
+    let info = BidiInfo::new(text, None);
+    for paragraph in &info.paragraphs {
+        for (rtl, run) in line_runs(&info, paragraph.range.clone()) {
+            if run.is_empty() {
+                continue;
+            }
+            runs.push(BiDiRun { text: text[run].to_vec(), rtl });
+        }
+    }
+
+    if runs.is_empty() {
+        runs.push(BiDiRun { text: text.to_vec(), rtl: false });
+    }
+    runs
 }
 
 /// These tests mirror the unit tests in mapbox-gl-rtl-text's arabic.test.js.
@@ -340,20 +267,21 @@ mod bidi_test {
         v.iter().copied().collect()
     }
 
+    fn styled(text: Vec<u16>, styles: Vec<u8>) -> StyledText {
+        StyledText { text, styles }
+    }
+
     // gtest: BiDi.ReverseArabic
     #[test]
     fn reverse_arabic() {
-        let mut bidi = BiDi::new();
-        assert_eq!(bidi.process_text(&shape_arabic(&u("سلام۳۹")), set(&[])).unwrap(), vec![u("۳۹ﻡﻼﺳ")]);
+        assert_eq!(reorder_lines(&shape_arabic(&u("سلام۳۹")), set(&[])), vec![u("۳۹ﻡﻼﺳ")]);
     }
 
     // gtest: BiDi.ReverseMixed
     #[test]
     fn reverse_mixed() {
-        let mut bidi = BiDi::new();
         assert_eq!(
-            bidi.process_text(&shape_arabic(&u("مكتبة الإسكندرية\u{200E}\u{200E} Maktabat al-Iskandarīyah")), set(&[]))
-                .unwrap(),
+            reorder_lines(&shape_arabic(&u("مكتبة الإسكندرية\u{200E}\u{200E} Maktabat al-Iskandarīyah")), set(&[])),
             vec![u(" Maktabat al-Iskandarīyahﺔﻳﺭﺪﻨﻜﺳﻹﺍ ﺔﺒﺘﻜﻣ")]
         );
     }
@@ -361,14 +289,12 @@ mod bidi_test {
     // gtest: BiDi.WithLineBreaks
     #[test]
     fn with_line_breaks() {
-        let mut bidi = BiDi::new();
         let expected = vec![u(" ﺔﻳﺭﺪﻨﻜﺳﻹﺍ ﺔﺒﺘﻜﻣ"), u("Maktabat al-"), u("Iskandarīyah")];
         assert_eq!(
-            bidi.process_text(
+            reorder_lines(
                 &shape_arabic(&u("مكتبة الإسكندرية\u{200E}\u{200E} Maktabat al-Iskandarīyah")),
                 set(&[18, 30])
-            )
-            .unwrap(),
+            ),
             expected
         );
     }
@@ -378,8 +304,7 @@ mod bidi_test {
     fn styled_text() {
         // This test uses line breaks that intentionally split/reorder/
         // interleave styled blocks that are contiguous in the input
-        let mut bidi = BiDi::new();
-        let input: StyledText = (
+        let input = styled(
             shape_arabic(&u("مكتبة الإسكندرية\u{200E}\u{200E} Maktabat al-Iskandarīyah")).into_owned(),
             vec![
                 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4, 5, 5, 5, 5, 6, 6, 6, 6, 6,
@@ -388,23 +313,22 @@ mod bidi_test {
         );
 
         let expected: Vec<StyledText> = vec![
-            (u("ﺔﺒﺘﻜﻣ"), vec![0, 0, 0, 0, 0]),
-            (u(" \u{200E}\u{200E}ﺔﻳﺭﺪﻨﻜﺳﻹﺍ "), vec![2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1]),
-            (u("Maktabat al-"), vec![2, 3, 3, 3, 3, 3, 4, 5, 5, 5, 5, 6]),
-            (u("Iskandarīyah"), vec![6, 6, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7]),
+            styled(u("ﺔﺒﺘﻜﻣ"), vec![0, 0, 0, 0, 0]),
+            styled(u(" \u{200E}\u{200E}ﺔﻳﺭﺪﻨﻜﺳﻹﺍ "), vec![2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1]),
+            styled(u("Maktabat al-"), vec![2, 3, 3, 3, 3, 3, 4, 5, 5, 5, 5, 6]),
+            styled(u("Iskandarīyah"), vec![6, 6, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7]),
         ];
         for line in &expected {
-            assert_eq!(line.0.len(), line.1.len());
+            assert_eq!(line.text.len(), line.styles.len());
         }
 
-        assert_eq!(bidi.process_styled_text(&input, set(&[5, 18, 30])).unwrap(), expected);
+        assert_eq!(reorder_styled_lines(&input, set(&[5, 18, 30])), expected);
     }
 
     // gtest: BiDi.VisualRuns
     #[test]
-    fn visual_runs() {
-        let mut bidi = BiDi::new();
-        let runs = bidi.visual_runs(&u("Erbil هەولێر"));
+    fn visual_runs_split_by_direction() {
+        let runs = visual_runs(&u("Erbil هەولێر"));
         assert_eq!(runs.len(), 2);
         assert_eq!(runs[0].text, u("Erbil "));
         assert!(!runs[0].rtl);
@@ -415,9 +339,8 @@ mod bidi_test {
     // gtest: BiDi.VisualRunsRightToLeftParagraph
     #[test]
     fn visual_runs_right_to_left_paragraph() {
-        let mut bidi = BiDi::new();
         // The runs come in visual order, left to right, each in logical order.
-        let runs = bidi.visual_runs(&u("هەولێر Erbil"));
+        let runs = visual_runs(&u("هەولێر Erbil"));
         assert_eq!(runs.len(), 2);
         assert_eq!(runs[0].text, u("Erbil"));
         assert!(!runs[0].rtl);
@@ -428,38 +351,35 @@ mod bidi_test {
     // gtest: BiDi.BlocksKeepTheirOrderInRightToLeftRuns
     #[test]
     fn blocks_keep_their_order_in_right_to_left_runs() {
-        let mut bidi = BiDi::new();
         // "XY" stands for glyphs that a shaper already laid out right to
         // left. Bidi sees them as Hebrew letters, and moves them without
         // reversing them.
-        let input: StyledText = (u("XY Erbil"), vec![0, 0, 1, 1, 1, 1, 1, 1]);
-        let lines = bidi.process_styled_text_with_blocks(&input, set(&[]), &u("אא Erbil"), &[true, false]).unwrap();
+        let input = styled(u("XY Erbil"), vec![0, 0, 1, 1, 1, 1, 1, 1]);
+        let lines = reorder_styled_lines_with_blocks(&input, set(&[]), &u("אא Erbil"), &[true, false]);
         assert_eq!(lines.len(), 1);
-        assert_eq!(lines[0].0, u("Erbil XY"));
-        assert_eq!(lines[0].1, vec![1, 1, 1, 1, 1, 1, 0, 0]);
+        assert_eq!(lines[0].text, u("Erbil XY"));
+        assert_eq!(lines[0].styles, vec![1, 1, 1, 1, 1, 1, 0, 0]);
     }
 
     // gtest: BiDi.SplitStyledTextKeepsLogicalOrder
     #[test]
     fn split_styled_text_keeps_logical_order() {
-        let mut bidi = BiDi::new();
-        let lines = bidi.split_styled_text(&(u("سلام\nabc"), vec![0, 0, 0, 0, 0, 1, 1, 1]), set(&[])).unwrap();
+        let lines = split_styled_lines(&styled(u("سلام\nabc"), vec![0, 0, 0, 0, 0, 1, 1, 1]), set(&[]));
         assert_eq!(lines.len(), 2);
-        assert_eq!(lines[0].0, u("سلام\n"));
-        assert_eq!(lines[1].0, u("abc"));
+        assert_eq!(lines[0].text, u("سلام\n"));
+        assert_eq!(lines[1].text, u("abc"));
     }
 
     // gtest: BiDi.BlockAtTheStartOfARunTakesOnlyItsOwnText
     #[test]
     fn block_at_the_start_of_a_run_takes_only_its_own_text() {
-        let mut bidi = BiDi::new();
         // The run "-XY" reads right to left, and its first character, "-",
         // is not part of the block.
-        let input: StyledText = (u("-XY"), vec![0, 1, 1]);
-        let lines = bidi.process_styled_text_with_blocks(&input, set(&[]), &u("-אא"), &[false, true]).unwrap();
+        let input = styled(u("-XY"), vec![0, 1, 1]);
+        let lines = reorder_styled_lines_with_blocks(&input, set(&[]), &u("-אא"), &[false, true]);
         assert_eq!(lines.len(), 1);
-        assert_eq!(lines[0].0, u("XY-"));
-        assert_eq!(lines[0].1, vec![1, 1, 0]);
+        assert_eq!(lines[0].text, u("XY-"));
+        assert_eq!(lines[0].styles, vec![1, 1, 0]);
     }
 
     #[test]
@@ -474,26 +394,46 @@ mod bidi_test {
 
     #[test]
     fn mirrors_the_characters_unicode_mirrors() {
-        assert_eq!(mirror('(' as u32), ')' as u32);
-        assert_eq!(mirror('<' as u32), '>' as u32);
-        assert_eq!(mirror('«' as u32), '»' as u32);
-        assert_eq!(mirror('≤' as u32), '≥' as u32);
-        assert_eq!(mirror('a' as u32), 'a' as u32);
-        assert_eq!(mirror(0x1E900), 0x1E900);
+        assert_eq!(mirror('('), ')');
+        assert_eq!(mirror('<'), '>');
+        assert_eq!(mirror('«'), '»');
+        assert_eq!(mirror('≤'), '≥');
+        assert_eq!(mirror('a'), 'a');
+        assert_eq!(mirror('\u{1E900}'), '\u{1E900}');
     }
 
     #[test]
     fn writes_rtl_runs_mirrored() {
         let mut out = Vec::new();
-        write_reverse_mirrored(&u("א<ב(ג"), &mut out);
+        write_run(&u("א<ב(ג"), true, &mut out);
         assert_eq!(out, u("ג)ב>א"));
+    }
+
+    #[test]
+    fn writes_runs_without_bidi_controls() {
+        let mut out = Vec::new();
+        write_run(&u("a\u{200D}b\u{202A}c\u{2069}(\u{200F}"), false, &mut out);
+        assert_eq!(out, u("abc("));
+    }
+
+    #[test]
+    fn reverses_rtl_runs_by_character() {
+        // A surrogate pair stays in order; unpaired surrogates move alone.
+        let mut out = Vec::new();
+        let mut src = u("א\u{1E900}ב");
+        src.extend([0xDC00, 0xD800]);
+        write_run(&src, true, &mut out);
+        let mut expected = vec![0xD800, 0xDC00];
+        expected.extend(u("ב\u{1E900}א"));
+        assert_eq!(out, expected);
     }
 
     #[test]
     fn mirroring_table_is_sorted_and_symmetric() {
         assert!(BIDI_MIRRORING_GLYPH.windows(2).all(|w| w[0].0 < w[1].0));
         for &(from, to) in &BIDI_MIRRORING_GLYPH {
-            assert_eq!(mirror(u32::from(to)), u32::from(from), "U+{from:04X}");
+            let (from, to) = (char::from_u32(from.into()).unwrap(), char::from_u32(to.into()).unwrap());
+            assert_eq!(mirror(to), from, "U+{:04X}", u32::from(from));
         }
     }
 }
