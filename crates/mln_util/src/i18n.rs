@@ -633,6 +633,17 @@ pub fn is_variation_selector(chr: char) -> bool {
     matches!(chr, '\u{180B}'..='\u{180D}' | '\u{180F}' | '\u{FE00}'..='\u{FE0F}' | '\u{E0100}'..='\u{E01EF}')
 }
 
+/// Whether line breaking or vertical writing places `chr` on its own: a
+/// line may break before or after it, or it stands upright in vertical
+/// text. Such a character loses no shaping drawn one at a time.
+#[must_use]
+pub fn breaks_or_stands_upright(chr: char) -> bool {
+    allows_word_breaking(chr)
+        || allows_word_breaking_before(chr)
+        || allows_ideographic_breaking(chr)
+        || has_upright_vertical_orientation(chr)
+}
+
 /// Whether `chr` belongs with the character before it, so that the font
 /// that draws that one draws it too: a mark, or a joiner or non-joiner.
 #[must_use]

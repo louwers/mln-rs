@@ -192,6 +192,8 @@ pub(crate) struct GlyphStore {
     /// The device's fonts that shaped text, a few, by `LocalFont::key`:
     /// `None` for one the engine can't read.
     system_shapers: Vec<(Arc<str>, Option<SystemShaper>)>,
+    /// Whether text of the device's fonts waits for the engine.
+    system_waits: bool,
 }
 
 impl GlyphStore {
@@ -224,6 +226,7 @@ impl GlyphStore {
             deferred_responses: Vec::new(),
             shapers: VecMap::new(),
             system_shapers: Vec::new(),
+            system_waits: false,
         }
     }
 
@@ -252,8 +255,13 @@ impl GlyphStore {
     }
 
     /// Takes in the font files that waited for the engine once it reported
-    /// back.
+    /// back, and has the text of the device's fonts that waited for it
+    /// resolve again.
     pub(crate) fn update(&mut self) {
+        if self.system_waits && self.engine_readiness.lock().result.is_some() {
+            self.system_waits = false;
+            self.revision += 1;
+        }
         if !self.deferred_responses.is_empty() && self.engine_readiness.lock().result.is_some() {
             for (data, font_stack, range, id) in std::mem::take(&mut self.deferred_responses) {
                 if self.is_loading(&font_stack, range, id) {
@@ -329,6 +337,10 @@ impl GlyphStore {
             if waits {
                 return None;
             }
+        }
+
+        if self.waits_for_engine(&dependencies.shapes) {
+            return None;
         }
 
         let mut glyphs = GlyphMap::new();
@@ -409,7 +421,9 @@ impl GlyphStore {
         let code = u32::from(glyph_id.code);
         let faces: Vec<GlyphIDType> = (self.font_faces.iter().flat_map(|faces| faces.iter()))
             .filter(|face| {
-                face.name.is_empty() && face.ranges.iter().any(|&(first, last)| (first..=last).contains(&code))
+                face.name.is_empty()
+                    && face.type_ != GlyphIDType::SYSTEM
+                    && face.ranges.iter().any(|&(first, last)| (first..=last).contains(&code))
             })
             .map(|face| face.type_)
             .collect();
@@ -526,6 +540,23 @@ impl GlyphStore {
         }
     }
 
+    /// Whether `shapes` has text of the device's fonts, which load with the
+    /// engine, and the engine isn't ready yet: then it has `update` answer
+    /// once it is.
+    fn waits_for_engine(&mut self, shapes: &ShapeRequests) -> bool {
+        if !shapes.values().any(|types| types.contains_key(&GlyphIDType::SYSTEM)) {
+            return false;
+        }
+        self.prepare_engine();
+        let mut readiness = self.engine_readiness.lock();
+        if readiness.result.is_some() {
+            return false;
+        }
+        readiness.waiting = true;
+        self.system_waits = true;
+        true
+    }
+
     /// The shaper of the device's font that draws `c` for a label in
     /// `font_stack`, loaded the first time.
     fn system_shaper(&mut self, font_stack: &FontStack, c: char) -> Option<Rc<dyn FontFaceShaper>> {
@@ -533,7 +564,6 @@ impl GlyphStore {
         if let Some((_, loaded)) = self.system_shapers.iter().find(|(key, _)| *key == font.key) {
             return loaded.as_ref().map(|(_, shaper)| Rc::clone(shaper));
         }
-        self.prepare_engine();
         let type_ = face_type(&font.key, "", &[]);
         let loaded = matches!(self.engine_readiness.lock().result, Some(Ok(())))
             .then(|| self.engine.load(type_, font.data, font.weight))

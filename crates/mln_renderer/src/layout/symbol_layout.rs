@@ -86,9 +86,12 @@ struct GlyphTypeSpan {
 /// faces, which have no name, come before the PBFs only for the text they
 /// can't shape (`i18n::char_in_supported_script`); in a style without PBFs,
 /// they and then the device's fonts draw the rest, if the faces include
-/// them ([`FontFace::system`](mln_text::glyph::FontFace::system)). Else the
+/// them ([`FontFace::system`](mln_text::glyph::FontFace::system)), except
+/// the characters that line breaking and vertical writing place on their
+/// own, such as spaces and CJK (`i18n::breaks_or_stands_upright`). Else the
 /// rest takes its glyphs one at a time, from PBFs or local fonts
-/// (`glyph_store.rs`).
+/// (`glyph_store.rs`). Marks and joiners stay with the font of the
+/// character before them.
 ///
 /// The spans are sorted and disjoint, so a lookup is a binary search.
 #[derive(Debug, Default)]
@@ -138,14 +141,13 @@ impl GlyphTypeTable {
         GlyphTypeTable { spans, glyph_pbfs, rest }
     }
 
-    /// The glyph type of `c`. A variation selector keeps `previous`, the
-    /// type of the character before it.
+    /// The glyph type of `c`, after a character of type `previous`.
     fn get(&self, c: char, previous: GlyphIDType) -> GlyphIDType {
-        if self.spans.is_empty() {
-            return self.rest;
-        }
-        if i18n::is_variation_selector(c) {
+        if i18n::is_variation_selector(c) || (previous != GlyphIDType::FontPBF && i18n::extends_previous(c)) {
             return previous;
+        }
+        if self.spans.is_empty() {
+            return self.rest_for(c);
         }
         let code_point = u32::from(c);
         let index = self.spans.partition_point(|span| span.range.last < code_point);
@@ -156,7 +158,16 @@ impl GlyphTypeTable {
             {
                 span.type_
             }
-            _ => self.rest,
+            _ => self.rest_for(c),
+        }
+    }
+
+    /// The type of `c` where no face draws it.
+    fn rest_for(&self, c: char) -> GlyphIDType {
+        if self.rest == GlyphIDType::SYSTEM && i18n::breaks_or_stands_upright(c) {
+            GlyphIDType::FontPBF
+        } else {
+            self.rest
         }
     }
 }
@@ -1516,7 +1527,9 @@ impl SymbolLayout {
                     return;
                 }
                 let section = &sections[section_index as usize];
-                if section.type_ == GlyphIDType::FontPBF {
+                if let Some(image_id) = &section.image_id {
+                    shaped_string.add_image_section(image_id, section.vertical_align);
+                } else if section.type_ == GlyphIDType::FontPBF {
                     shaped_string.add_text_section(
                         sub_string,
                         section.scale,
@@ -2105,7 +2118,9 @@ mod tests {
 
     /// The faces' rule, read off them for each character.
     fn scan(c: char, stack: &[String], faces: &FontFaces, glyph_pbfs: bool, previous: GlyphIDType) -> GlyphIDType {
-        if mln_util::i18n::is_variation_selector(c) {
+        if mln_util::i18n::is_variation_selector(c)
+            || (previous != GlyphIDType::FontPBF && mln_util::i18n::extends_previous(c))
+        {
             return previous;
         }
         let covers = |face: &FontFace| face.ranges.iter().any(|&(first, last)| (first..=last).contains(&u32::from(c)));
@@ -2115,7 +2130,11 @@ mod tests {
         let fallbacks =
             faces.iter().filter(|face| face.name.is_empty() && !(glyph_pbfs && char_in_supported_script(c)));
         let system = !glyph_pbfs && faces.iter().any(|face| face.type_ == GlyphIDType::SYSTEM);
-        let rest = if system { GlyphIDType::SYSTEM } else { GlyphIDType::FontPBF };
+        let rest = if system && !mln_util::i18n::breaks_or_stands_upright(c) {
+            GlyphIDType::SYSTEM
+        } else {
+            GlyphIDType::FontPBF
+        };
         named.chain(fallbacks).find(|face| covers(face)).map_or(rest, |face| face.type_)
     }
 
@@ -2181,9 +2200,16 @@ mod tests {
         // A script the device has no font for stays with the PBFs.
         assert_eq!(with_pbfs.get('\u{1780}', GlyphIDType::FontPBF), GlyphIDType::FontPBF);
         let without_pbfs = GlyphTypeTable::new(&stack, &faces, false);
-        for c in ['a', '\u{0915}', '\u{1780}', '\u{4E2D}'] {
+        for c in ['a', '\u{0915}', '\u{1780}', '\u{0627}'] {
             assert_eq!(without_pbfs.get(c, GlyphIDType::FontPBF), GlyphIDType::SYSTEM, "{c:?}");
         }
+        // Line breaking and vertical writing place these on their own.
+        for c in [' ', '\n', '-', '\u{4E2D}', '\u{AC00}'] {
+            assert_eq!(without_pbfs.get(c, GlyphIDType::SYSTEM), GlyphIDType::FontPBF, "{c:?}");
+        }
+        // A joiner stays with the shaped text before it.
+        assert_eq!(with_pbfs.get('\u{200D}', GlyphIDType::SYSTEM), GlyphIDType::SYSTEM);
+        assert_eq!(with_pbfs.get('\u{200D}', GlyphIDType::FontPBF), GlyphIDType::FontPBF);
     }
 
     #[test]

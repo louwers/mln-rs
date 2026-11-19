@@ -180,16 +180,6 @@ pub(crate) fn reorder_styled_lines(input: &StyledText, line_breaks: VecSet<usize
     reorder_styled_lines_with_blocks(input, line_breaks, &input.text, &[])
 }
 
-/// Splits text in logical order into lines at `line_breaks` and at the ends
-/// of paragraphs, without reordering it.
-pub(crate) fn split_styled_lines(input: &StyledText, line_breaks: VecSet<usize>) -> Vec<StyledText> {
-    let mut utf8 = String::new();
-    Analysis::new(&input.text, &mut utf8)
-        .lines(line_breaks)
-        .map(|line| StyledText { text: input.text[line.clone()].to_vec(), styles: input.styles[line].to_vec() })
-        .collect()
-}
-
 /// Like [`reorder_styled_lines`], but the bidi analysis reads `bidi_text`,
 /// which is as long as the input's text, and a right-to-left run keeps the
 /// order of the text in the styles that `block_styles` marks, which a shaper
@@ -402,15 +392,6 @@ mod bidi_test {
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].text, u("Erbil XY"));
         assert_eq!(lines[0].styles, vec![1, 1, 1, 1, 1, 1, 0, 0]);
-    }
-
-    // gtest: BiDi.SplitStyledTextKeepsLogicalOrder
-    #[test]
-    fn split_styled_text_keeps_logical_order() {
-        let lines = split_styled_lines(&styled(u("سلام\nabc"), vec![0, 0, 0, 0, 0, 1, 1, 1]), set(&[]));
-        assert_eq!(lines.len(), 2);
-        assert_eq!(lines[0].text, u("سلام\n"));
-        assert_eq!(lines[1].text, u("abc"));
     }
 
     // gtest: BiDi.BlockAtTheStartOfARunTakesOnlyItsOwnText

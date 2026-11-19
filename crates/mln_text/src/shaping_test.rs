@@ -700,6 +700,31 @@ fn shaped_section_keeps_its_adjustments_when_it_moves() {
     assert_eq!(glyphs[4].x - glyphs[3].x, 5.0);
 }
 
+// Line breaking measures a shaped section by its shaping.
+#[test]
+fn shaped_glyphs_take_up_their_width_on_a_line() {
+    let adjusts = vec![GlyphAdjust::new(0.0, 0.0, 100.0), GlyphAdjust::new(0.0, 0.0, 100.0)];
+    let text = label_with_shaped_section("", false, " ab", adjusts);
+    let mut glyph_positions = GlyphPositions::new();
+    add_stub_glyphs(&text, &mut glyph_positions);
+    let shaping = get_shaping(
+        &text,
+        150.0,
+        ONE_EM,
+        SymbolAnchorType::TopLeft,
+        TextJustifyType::Left,
+        0.0,
+        &[0.0, 0.0],
+        WritingModeType::Horizontal,
+        &glyph_positions,
+        &ImagePositions::default(),
+        ONE_EM,
+        ONE_EM,
+        false,
+    );
+    assert_eq!(shaping.positioned_lines.len(), 2);
+}
+
 fn setup_shaped_text(shaped_text: &mut Shaping, text_size: f32) {
     let glyph = PositionedGlyph::new(
         GlyphID::new(32),

@@ -1325,3 +1325,47 @@ fn the_devices_fonts_shape_each_piece_with_its_font() {
     assert_ne!(type_of('\u{062C}'), type_of('\u{05D0}'));
     assert!(glyphs.iter().all(|(_, type_)| ![GlyphIDType::FontPBF, GlyphIDType::SYSTEM].contains(type_)));
 }
+
+/// The device's fonts as one font file, "font".
+struct OneFont;
+
+impl LocalGlyphRasterizer for OneFont {
+    fn rasterize_glyph(&self, _font_stack: &FontStack, _glyph_id: GlyphID) -> Option<Glyph> {
+        None
+    }
+
+    fn font(&self, _font_stack: &FontStack, _c: char) -> Option<LocalFont> {
+        Some(LocalFont { key: Arc::from("font"), data: FontData::from(b"font".to_vec()), weight: 400 })
+    }
+}
+
+#[test]
+fn the_devices_fonts_wait_for_the_engine() {
+    let engine = Arc::new(DeferredEngine::default());
+    let test = GlyphStoreTest::with_all(
+        local(OneFont),
+        ResponseType::Synchronous,
+        Arc::default(),
+        Arc::<DeferredEngine>::clone(&engine),
+    );
+    let available: Rc<RefCell<Option<GlyphMap>>> = Rc::default();
+    let a = Rc::clone(&available);
+    *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |glyphs: GlyphMap| {
+        *a.borrow_mut() = Some(glyphs);
+    }));
+    let text = vec!['\u{5}', '\u{6}'];
+    let shapes = VecMap::from([(test_stack(), VecMap::from([(GlyphIDType::SYSTEM, [text.clone()].into())]))]);
+    test.request_glyphs(GlyphDependencies { glyphs: VecMap::new(), shapes });
+    test.run_loop.run_once(&mut test.local());
+    assert!(available.borrow().is_none());
+    assert_eq!(engine.loads.load(Ordering::SeqCst), 0);
+
+    engine.report(&Ok(()));
+    test.run_loop.run_once(&mut test.local());
+    test.run_loop.run_once(&mut test.local());
+    assert!(available.borrow().is_some());
+    assert_eq!(engine.loads.load(Ordering::SeqCst), 1);
+    let shaping = test.requestor.shaping.borrow();
+    let shaped = &shaping.as_ref().expect("an answer")[&test_stack()][&GlyphIDType::SYSTEM][&text];
+    assert_eq!(shaped.glyphs.iter().map(|glyph| glyph.code).collect::<Vec<_>>(), [5, 6]);
+}
