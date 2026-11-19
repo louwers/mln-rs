@@ -8,11 +8,10 @@
 //   (`PaintParameters::lend_pass`, through `Gpu::lend`).
 // - A host that drew is told the renderer stopped once the layer leaves it,
 //   after the GPU finished the host's work (`Gpu::flush`), or that
-//   its graphics objects are lost (`Renderer::lose_custom_layers`). The
-//   orchestrator makes a layer leave (`RenderLayer::leave`) without a `Gpu`
-//   at hand, so the host goes to the orchestrator's `EndedHosts`, which the
-//   renderer tells with the `Gpu` passed in (`end_hosts`) after the update,
-//   or in the tear-down.
+//   its graphics objects are lost (`Renderer::lose_custom_layers`). A layer
+//   leaves (`RenderLayer::leave`) without a `Gpu` at hand, so its host waits
+//   in the orchestrator's `EndedHosts` until the renderer ends it with one
+//   (`end_hosts`).
 
 use std::sync::Arc;
 
@@ -94,21 +93,15 @@ pub(crate) fn end_hosts(gpu: &mut dyn Gpu, hosts: EndedHosts) {
 }
 
 impl CustomDrawing {
-    /// Lets go of the host, which goes to `ended` if it drew.
-    fn leave(&mut self, ended: &mut EndedHosts) {
-        if let Some(host) = self.host.take()
-            && std::mem::take(&mut self.used)
-        {
-            ended.push(host);
-        }
+    /// Lets go of the host, and returns it if it drew.
+    fn take_host(&mut self) -> Option<Arc<dyn CustomLayerHost>> {
+        self.host.take().filter(|_| std::mem::take(&mut self.used))
     }
 
     /// Lets go of the host, telling it that its graphics objects are lost if
     /// it drew.
     fn lose(&mut self) {
-        if let Some(host) = self.host.take()
-            && std::mem::take(&mut self.used)
-        {
+        if let Some(host) = self.take_host() {
             host.context_lost();
         }
     }
@@ -196,7 +189,7 @@ impl TypedLayer for RenderCustomLayer {
         let drawing = &mut self.drawing;
         let same = drawing.host.as_ref().is_some_and(|host| self.values.style.has_host(host));
         if !same {
-            drawing.leave(ended);
+            ended.extend(drawing.take_host());
             drawing.host = self.values.style.host();
         }
     }
@@ -222,7 +215,7 @@ impl RenderLayer for RenderCustomLayer {
     }
 
     fn leave(&mut self, ended: &mut EndedHosts) {
-        self.drawing.leave(ended);
+        ended.extend(self.drawing.take_host());
     }
 
     fn lose_context(&mut self) {

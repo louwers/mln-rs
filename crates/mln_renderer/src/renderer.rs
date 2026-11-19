@@ -280,8 +280,6 @@ impl Renderer {
         let frame = orchestrator.update(update_parameters);
         report(orchestrator, self.events.as_ref());
         let encoder = &mut self.encoder;
-        // A custom layer that the update removed or gave a new host hears
-        // that the renderer stopped.
         end_hosts(gpu, orchestrator.take_ended_hosts());
         if std::mem::take(&mut encoder.shaders_replaced) {
             encoder.context.release_shaders();
@@ -295,9 +293,7 @@ impl Renderer {
     /// and submits the frame's passes. Returns the frame, which the host
     /// ends on its target and then [finishes](Self::finish_frame).
     pub fn render(&mut self, gpu: &mut dyn Gpu, image: &FrameImage, frame: UpdatedFrame) -> DrawnFrame {
-        let UpdatedFrame { frame, parameters, updated } = frame;
-        let events = self.events.as_ref();
-        self.encoder.encode(gpu, &mut self.orchestrator, events, &frame, image, &parameters, updated)
+        self.encoder.encode(gpu, &mut self.orchestrator, self.events.as_ref(), image, frame)
     }
 
     /// Ends `frame`, which [`render`](Self::render) drew, once the host's
@@ -524,17 +520,15 @@ impl Encoder {
     /// It uploads the atlases and the tiles' buckets; then the draw update
     /// makes the layers' draws of the frame, the draw upload uploads what
     /// they bind, and the draw section encodes the passes and submits them.
-    #[expect(clippy::too_many_arguments, reason = "the frame's parts, which the renderer's fields and its host lend")]
     fn encode(
         &mut self,
         gpu: &mut dyn Gpu,
         orchestrator: &mut RenderOrchestrator,
         events: Option<&RendererEvents>,
-        frame: &Frame,
         image: &FrameImage,
-        update_parameters: &Arc<UpdateParameters>,
-        updated: Instant,
+        frame: UpdatedFrame,
     ) -> DrawnFrame {
+        let UpdatedFrame { frame, parameters: update_parameters, updated } = frame;
         let start = Instant::now();
         {
             let stats = self.context.rendering_stats();
@@ -573,7 +567,7 @@ impl Encoder {
             &mut self.clip_masks,
             &mut self.layer_composite,
             composites_with_frame_depth,
-            frame,
+            &frame,
             static_data,
             self.pixel_ratio,
             renderable_size,
@@ -589,7 +583,7 @@ impl Encoder {
         // - DRAW UPDATE ---------------------------------------------------
         // The layers' draws of the frame, and those of the debug overlays.
         let uploaded = Instant::now();
-        orchestrator.update_layer_draws(gpu, update_parameters, &mut parameters, frame);
+        orchestrator.update_layer_draws(gpu, &update_parameters, &mut parameters, &frame);
         let layers_updated = Instant::now();
         orchestrator.update_debug_layers(gpu, &mut parameters);
 
@@ -651,7 +645,7 @@ impl Encoder {
             width: renderable_size.width,
             height: renderable_size.height,
         });
-        draw(orchestrator, gpu, &mut parameters, frame, image, draw_groups.count, depth_range_size);
+        draw(orchestrator, gpu, &mut parameters, &frame, image, draw_groups.count, depth_range_size);
         let start_rendering = Instant::now();
         if let Err(error) = parameters.end_pass(gpu).and_then(|()| gpu.flush(false)) {
             Log::error(Event::Render, format!("Submitting the frame failed: {error}"));
