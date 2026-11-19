@@ -561,13 +561,10 @@ impl ExportedTarget {
 
     /// The host gave the frame at `slot` up.
     pub fn discard(&mut self, gpu: &mut GlGpu, slot: usize) {
-        let given_back = self.generations.give_back(slot, |mut generation| generation.tear_down(gpu));
-        #[cfg(target_os = "android")]
-        if !given_back {
+        if !self.generations.give_back(slot, |mut generation| generation.tear_down(gpu)) {
+            #[cfg(target_os = "android")]
             self.generations.current_mut().given_back(slot);
         }
-        #[cfg(not(target_os = "android"))]
-        let _ = given_back;
     }
 
     /// Draws into buffers of `size` pixels from now on. The frames that the
