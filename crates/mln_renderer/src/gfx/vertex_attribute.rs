@@ -101,7 +101,7 @@ impl VertexAttribute {
                 Ok(Some(AttributeBinding {
                     attribute: AttributeDescriptor { data_type: *data_type, offset: 0 },
                     vertex_stride: data_type.stride() as u32,
-                    buffer: Some(buffer),
+                    buffer,
                     vertex_offset: 0,
                     held: None,
                 }))
@@ -119,7 +119,7 @@ impl VertexAttribute {
                 Ok(Some(AttributeBinding {
                     attribute: AttributeDescriptor { data_type: shared.data_type, offset: shared.offset },
                     vertex_stride: shared.stride,
-                    buffer: Some(buffer),
+                    buffer,
                     vertex_offset: shared.vertex_offset,
                     held: Some(shared.vertices.held()),
                 }))

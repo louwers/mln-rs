@@ -349,7 +349,11 @@ impl DrawObjects {
                     vertex_buffers: &buffers[..slots.len()],
                     index_buffer,
                 })?;
-                let held = slots.iter().filter_map(|slot| slot.held.clone()).chain(self.indexes.held()).collect();
+                let index_held = self.indexes.held();
+                // Of the exact length: geometry is made as tiles come.
+                let len = slots.iter().filter(|slot| slot.held.is_some()).count() + usize::from(index_held.is_some());
+                let mut held = Vec::with_capacity(len);
+                held.extend(slots.iter().filter_map(|slot| slot.held.clone()).chain(index_held));
                 self.geometry = Some((context.own(geometry, held), index_buffer));
                 geometry
             }
@@ -623,8 +627,7 @@ fn vertex_slots(
     let mut slots: Vec<VertexSlot> = Vec::new();
     for (bindings, step) in [(attributes, VertexStep::Vertex), (instances, VertexStep::Instance)] {
         for (index, binding) in bindings.iter().enumerate() {
-            let Some(binding) = binding else { continue };
-            let Some(buffer) = &binding.buffer else { continue };
+            let buffer = &binding.buffer;
             let Some(id) = shader.attribute_id(step, index) else { continue };
             let offset = u64::from(binding.vertex_offset) * u64::from(binding.vertex_stride);
             let attribute = GpuVertexAttribute {

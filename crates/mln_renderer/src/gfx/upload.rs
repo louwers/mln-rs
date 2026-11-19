@@ -3,7 +3,6 @@
 
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::gpu::{BufferId, Gpu, GpuError};
-use mln_gfx::shaders::shader_defines::MAX_ATTRIBUTE_COUNT_PER_SHADER;
 
 use crate::gfx::context::Context;
 use crate::gfx::owned::Held;
@@ -17,15 +16,14 @@ pub(crate) struct AttributeDescriptor {
     pub(crate) offset: u32,
 }
 
-/// A vertex attribute bound to a vertex buffer, or to none where the
-/// draw doesn't provide the attribute, with what keeps a buffer that other
-/// owners share. Bindings are equal where they bind the same buffer the
+/// A vertex attribute bound to a vertex buffer, with what keeps a buffer
+/// that other owners share. Bindings are equal where they bind the same buffer the
 /// same way.
 #[derive(Clone)]
 pub(crate) struct AttributeBinding {
     pub(crate) attribute: AttributeDescriptor,
     pub(crate) vertex_stride: u32,
-    pub(crate) buffer: Option<BufferId>,
+    pub(crate) buffer: BufferId,
     pub(crate) vertex_offset: u32,
     pub(crate) held: Option<Held>,
 }
@@ -40,7 +38,7 @@ impl PartialEq for AttributeBinding {
 }
 
 /// A draw's attribute bindings, indexed by the shader's attribute index.
-pub(crate) type AttributeBindingArray = Vec<Option<AttributeBinding>>;
+pub(crate) type AttributeBindingArray = Vec<AttributeBinding>;
 
 /// Makes `bindings` the vertex bindings of a draw, indexed by shader
 /// attribute index: one for each of the shader's `attributes`, its id and
@@ -57,7 +55,7 @@ pub(crate) fn update_attribute_bindings(
     vertex_count: usize,
     bindings: &mut AttributeBindingArray,
 ) -> Result<bool, GpuError> {
-    bindings.resize(MAX_ATTRIBUTE_COUNT_PER_SHADER.max(attributes.len()), None);
+    bindings.reserve_exact(attributes.len().saturating_sub(bindings.len()));
     let mut changed = false;
     for (index, &(id, default)) in attributes.iter().enumerate() {
         let binding = match overrides.get_mut(id) {
@@ -71,14 +69,21 @@ pub(crate) fn update_attribute_bindings(
             AttributeBinding {
                 attribute: AttributeDescriptor { data_type: default, offset: 0 },
                 vertex_stride: default.stride() as u32,
-                buffer: Some(buffer.id()),
+                buffer: buffer.id(),
                 vertex_offset: 0,
                 held: Some(Held::Buffer(buffer)),
             }
         };
-        if bindings[index].as_ref() != Some(&binding) {
-            bindings[index] = Some(binding);
-            changed = true;
+        match bindings.get_mut(index) {
+            Some(bound) if *bound == binding => {}
+            Some(bound) => {
+                *bound = binding;
+                changed = true;
+            }
+            None => {
+                bindings.push(binding);
+                changed = true;
+            }
         }
     }
     Ok(changed)
