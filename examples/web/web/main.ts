@@ -7,10 +7,11 @@
 // same module with its own memory, so nothing needs SharedArrayBuffer or
 // COOP/COEP headers.
 //
-// The map draws with WebGPU. A browser without it gets the module's other
-// build, which draws with WebGL2 (pkg/webgl, worker-webgl.ts). So does one
-// whose WebGPU can't start the map: the page then loads again with WebGL2,
-// and the tab remembers that.
+// The map draws with WebGPU by default. A browser without it gets the module's
+// other build, which draws with WebGL2 (pkg/webgl, worker-webgl.ts). So does
+// one whose WebGPU can't start the map: the tab remembers which backend failed
+// and loads the other when available. Where both backends are available, the
+// bottom-left control switches between them.
 //
 // URL parameters:
 //   style=<key|url>        a style of styles.ts, or any style's URL
@@ -68,6 +69,19 @@
 // map: the page shows its message, `fatal` resolves with it as an Error,
 // and `loaded` and the methods reject with it.
 
+import {
+  BACKEND_NAME,
+  type BackendCapabilities,
+  OTHER_BACKEND,
+  canSwitchBackend,
+  chooseBackend,
+  fallbackUrl,
+  probeWebGl2,
+  probeWebGpu,
+  readUnsupported,
+  rememberUnsupported,
+  switchBackendUrl,
+} from "./backend.ts";
 import type { Comparison } from "./compare.ts";
 import { createDebugOverlay } from "./debug.ts";
 import wasmUrl from "./pkg/mln_web_bg.wasm?url";
@@ -119,7 +133,7 @@ const banner = element("error", HTMLElement);
 const mapBox = element("map-box", HTMLElement);
 const canvas = element("map", HTMLCanvasElement);
 // The debug overlay (debug.ts), wired up at the end.
-const debug = createDebugOverlay(document.body);
+const debug = createDebugOverlay(element("bottom-left", HTMLElement));
 
 if (params.has("width") && params.has("height")) {
   mapBox.style.width = `${number("width", 0)}px`;
@@ -145,21 +159,12 @@ fitCanvas();
 
 const localFamily = params.get("localIdeographFontFamily");
 
-// What a tab whose WebGPU couldn't start the map draws with from then on.
-const BACKEND_KEY = "mln-backend";
-function rememberedBackend(): string | null {
-  try {
-    return sessionStorage.getItem(BACKEND_KEY);
-  } catch {
-    return null; // no storage for this page
-  }
-}
-const backend: Backend =
-  (params.get("backend") ??
-    rememberedBackend() ??
-    ("gpu" in navigator ? "webgpu" : "webgl2")) === "webgl2"
-    ? "webgl2"
-    : "webgpu";
+const capabilities: BackendCapabilities = {
+  hasWebGpuApi: "gpu" in navigator,
+  hasWebGl2Api: "WebGL2RenderingContext" in window,
+  unsupported: readUnsupported(params),
+};
+const backend: Backend = chooseBackend(params.get("backend"), capabilities);
 
 const compiling = WebAssembly.compileStreaming(
   fetch(backend === "webgl2" ? webglWasmUrl : wasmUrl),
@@ -265,23 +270,27 @@ function showBanner(text: string) {
   banner.hidden = false;
 }
 
-// The browser's API couldn't start the map. After WebGPU the page loads
-// again to draw with WebGL2, in this tab from now on; after WebGL2 there is
-// nothing left to draw with.
+// The browser's API couldn't start the map. Remember the failure for this tab
+// and load the other backend when available; otherwise stop.
 function unsupported(message: string) {
-  if (backend === "webgl2") {
+  const remembered = rememberUnsupported(backend);
+  capabilities.unsupported[backend] = true;
+  const next = fallbackUrl(backend, location.href, capabilities, remembered);
+  if (next === null) {
     stop(
       `this browser has neither WebGPU nor WebGL2 for the map to draw with (${message})`,
     );
     return;
   }
-  try {
-    sessionStorage.setItem(BACKEND_KEY, "webgl2");
+  const nextUrl = new URL(next);
+  if (
+    nextUrl.origin === location.origin &&
+    nextUrl.pathname === location.pathname &&
+    nextUrl.search === location.search
+  ) {
     location.reload();
-  } catch {
-    const url = new URL(location.href);
-    url.searchParams.set("backend", "webgl2");
-    location.replace(url);
+  } else {
+    location.replace(next);
   }
 }
 
@@ -790,11 +799,60 @@ freeBearingToggle.addEventListener("change", () =>
 );
 if (params.has("freeBearing")) setFreeBearing(true);
 
+// The backend indicator and toggle, at the bottom left. Always shown; clicking
+// switches backends where the other one is available.
+const backendButton = element("backend-button", HTMLButtonElement);
+const backendLogo = element("backend-logo", SVGElement);
+element("backend-name", HTMLElement).textContent = BACKEND_NAME[backend];
+backendLogo.toggleAttribute("hidden", backend !== "webgpu");
+function setBackendSwitchable(switchable: boolean) {
+  const currentName = BACKEND_NAME[backend];
+  const otherName = BACKEND_NAME[OTHER_BACKEND[backend]];
+  backendButton.disabled = !switchable;
+  backendButton.title = switchable
+    ? `Switch to ${otherName}`
+    : `${currentName} (${otherName} unavailable)`;
+  backendButton.setAttribute(
+    "aria-label",
+    switchable
+      ? `${currentName} renderer. Switch to ${otherName}`
+      : `${currentName} renderer`,
+  );
+}
+backendButton.addEventListener("click", () => {
+  const next = OTHER_BACKEND[backend];
+  location.replace(
+    switchBackendUrl(next, location.href, hashFromCamera(latestCamera)),
+  );
+});
+if (backend === "webgl2" && canSwitchBackend(backend, capabilities)) {
+  setBackendSwitchable(false);
+  void probeWebGpu().then((available) => {
+    if (available) {
+      setBackendSwitchable(true);
+    } else {
+      rememberUnsupported("webgpu");
+      capabilities.unsupported.webgpu = true;
+      setBackendSwitchable(false);
+    }
+  });
+} else if (backend === "webgpu" && canSwitchBackend(backend, capabilities)) {
+  if (probeWebGl2()) {
+    setBackendSwitchable(true);
+  } else {
+    rememberUnsupported("webgl2");
+    capabilities.unsupported.webgl2 = true;
+    setBackendSwitchable(false);
+  }
+} else {
+  setBackendSwitchable(false);
+}
+
 // The debug overlay (debug.ts), off as the page starts unless `?debug`.
 const debugToggle = element("debug-toggle", HTMLInputElement);
 function showDebugPage() {
   debug.page({
-    backend: backend === "webgl2" ? "WebGL2" : "WebGPU",
+    backend: BACKEND_NAME[backend],
     width: size[0],
     height: size[1],
     ratio,

@@ -43,9 +43,10 @@ Serve dist/ over HTTP and open `index.html`. It takes these URL parameters
 | `fallbackFontFaces=<json>`               | font files that every font stack falls back to, as a style's `font-faces` entry, unnamed |
 | `panic=map` or `panic=tile`              | make the map's or the first tile worker's wasm instance panic at startup, for the check  |
 
-The page draws its own controls over the map: a style picker, zoom buttons, a
-compass, attributions, and a panel that lists the gestures and has switches for
-`compare`, `debug` and `freeBearing`.
+The page draws its own controls over the map: a style picker, a backend
+indicator that switches between WebGPU and WebGL2 where both are available, zoom
+buttons, a compass, attributions, and a panel that lists the gestures and has
+switches for `compare`, `debug` and `freeBearing`.
 
 ## How it runs
 

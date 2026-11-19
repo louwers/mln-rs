@@ -16,6 +16,7 @@
     "skipLibCheck": true
   },
   "include": [
+    "web/backend.ts",
     "web/main.ts",
     "web/compare.ts",
     "web/debug.ts",

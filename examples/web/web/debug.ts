@@ -138,7 +138,7 @@ export function createDebugOverlay(parent: HTMLElement): DebugOverlay {
     legendNote,
   );
   hud.hidden = true;
-  parent.append(hud);
+  parent.prepend(hud);
 
   const bars: Bar[] = [];
   // The frames of the last second, for the frame rate, which the graph's

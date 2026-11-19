@@ -86,6 +86,12 @@ button {
   right: max(var(--gap), env(safe-area-inset-right));
 }
 
+.bottom-left {
+  bottom: max(var(--gap), env(safe-area-inset-bottom));
+  left: max(var(--gap), env(safe-area-inset-left));
+  align-items: flex-start;
+}
+
 .bottom-right {
   bottom: max(var(--gap), env(safe-area-inset-bottom));
   right: max(var(--gap), env(safe-area-inset-right));
@@ -321,6 +327,45 @@ kbd {
   font-size: 12px;
 }
 
+.credit {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* The backend's logo and name, at the bottom left; a click switches where the
+   other backend is available. */
+
+.backend-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 4px 8px;
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.backend-button:hover:not(:disabled) {
+  background-image: linear-gradient(var(--hover), var(--hover));
+}
+
+.backend-button:disabled {
+  color: var(--ink);
+  cursor: default;
+  pointer-events: none;
+}
+
+.backend-logo {
+  height: 18px;
+  width: auto;
+  flex: none;
+}
+
+.backend-logo[hidden] {
+  display: none;
+}
+
 a {
   color: var(--focus);
 }
@@ -329,10 +374,17 @@ a {
    narrow window it folds into its button. */
 
 .attribution {
+  box-sizing: border-box;
   display: flex;
   align-items: flex-end;
   gap: 4px;
-  max-width: min(560px, calc(100vw - 2 * var(--gap)));
+  max-width: min(
+    560px,
+    calc(
+      100vw - max(var(--gap), env(safe-area-inset-left)) -
+        max(var(--gap), env(safe-area-inset-right)) - var(--gap) - 112px
+    )
+  );
   padding: 2px 4px 2px 8px;
   border-radius: 12px;
   background: color-mix(in srgb, var(--surface) 85%, transparent);
@@ -496,13 +548,12 @@ a {
 
 /* The debug overlay (debug.ts): a heads-up display that stays dark over
    any style, its numbers in tabular figures so that they hold still as they
-   change. It sits bottom-left. */
+   change. It sits in the bottom-left corner, above the backend control. */
 
 .debug {
   --debug-ink: #e8ecf0;
   --debug-muted: #8d99a6;
   --debug-line: rgb(255 255 255 / 0.1);
-  position: fixed;
   box-sizing: border-box;
   margin: 0;
   padding: 10px 12px;
@@ -528,8 +579,6 @@ a {
 }
 
 .debug-hud {
-  bottom: max(var(--gap), env(safe-area-inset-bottom));
-  left: max(var(--gap), env(safe-area-inset-left));
   width: calc(240px + 24px);
 }
 

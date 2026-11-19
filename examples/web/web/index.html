@@ -49,6 +49,51 @@
       </button>
     </div>
 
+    <div class="corner bottom-left" id="bottom-left">
+      <button
+        class="control backend-button"
+        id="backend-button"
+        type="button"
+        disabled
+      >
+        <svg
+          class="backend-logo"
+          id="backend-logo"
+          viewBox="0 0 768 600"
+          stroke-linejoin="round"
+          aria-hidden="true"
+          hidden
+        >
+          <path
+            fill="#0086e8"
+            stroke="#0086e8"
+            d="m626.63 295.5-60.189-104.25h120.55z"
+          />
+          <path
+            fill="#0093ff"
+            stroke="#0093ff"
+            d="m626.63 87.001-60.189 104.25h120.55z"
+          />
+          <path
+            fill="#0076cc"
+            stroke="#0076cc"
+            d="m506.26 504-120.38-208.5 240.76-2e-3z"
+          />
+          <path
+            fill="#0066b0"
+            stroke="#0066b0"
+            d="m506.26 87-120.38 208.5 240.76-2e-3z"
+          />
+          <path
+            fill="#005a9c"
+            stroke="#005a9c"
+            d="m265.5 504-240.76-417h481.51z"
+          />
+        </svg>
+        <span id="backend-name"></span>
+      </button>
+    </div>
+
     <div class="corner bottom-right">
       <div class="control group" role="group" aria-label="Zoom">
         <button
@@ -144,6 +189,11 @@
       >
       <p class="status" id="status">Loading…</p>
       <p><a href="https://github.com/louwers/mln-rs">Source on GitHub</a></p>
+      <p class="credit">
+        WebGPU logo by
+        <a href="https://www.w3.org/2023/02/webgpu-logos.html">W3C</a>,
+        <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>.
+      </p>
     </div>
 
     <p class="notice" id="error" role="alert" hidden></p>

@@ -9,7 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.worker.json",
-    "test": "node --test web/wheel.test.mjs"
+    "test": "node --test web/wheel.test.mjs web/backend.test.mjs"
   },
   "dependencies": {
     "maplibre-gl": "^6.17.0"
