@@ -165,12 +165,11 @@ fn build(id: &str) -> Result<(), String> {
                 if set.name == CJK.name && text.chars().any(is_cjk) {
                     cjk_labels += 1;
                 }
-                // A map shapes text as UTF-16, and asks for the range of each
-                // code unit: a character beyond the BMP asks for its
-                // surrogates' ranges.
+                // A map asks for the glyph range of each character a glyph
+                // PBF can hold, which are those in the BMP.
                 let upper = text.to_uppercase();
-                for unit in text.encode_utf16().chain(upper.encode_utf16()) {
-                    ranges.insert(u32::from(unit) & !0xFF);
+                for c in text.chars().chain(upper.chars()).map(u32::from).filter(|&c| c <= 0xFFFF) {
+                    ranges.insert(c & !0xFF);
                 }
             }
         }

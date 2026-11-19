@@ -226,6 +226,11 @@ mod tests {
     }
 
     #[test]
+    fn marks_beyond_the_bmp_dont_break_a_join() {
+        assert_eq!(shape("ب\u{E0100}ب"), ['\u{FE91}', '\u{E0100}', '\u{FE90}']);
+    }
+
+    #[test]
     fn hamza_takes_its_isolated_form() {
         assert_eq!(shape("ء"), ['\u{FE80}']);
         assert_eq!(shape("\u{FE80}"), ['\u{FE80}']);

@@ -136,7 +136,7 @@ impl GlyphTypeTable {
         if self.spans.is_empty() {
             return GlyphIDType::FontPBF;
         }
-        if i18n::is_variation_selector1(c) {
+        if i18n::is_variation_selector(c) {
             return previous;
         }
         let code_point = u32::from(c);
@@ -2084,7 +2084,7 @@ mod tests {
 
     /// The faces' rule, read off them for each character.
     fn scan(c: char, stack: &[String], faces: &FontFaces, previous: GlyphIDType) -> GlyphIDType {
-        if mln_util::i18n::is_variation_selector1(c) {
+        if mln_util::i18n::is_variation_selector(c) {
             return previous;
         }
         let covers = |face: &FontFace| face.ranges.iter().any(|&(first, last)| (first..=last).contains(&u32::from(c)));
@@ -2139,6 +2139,16 @@ mod tests {
         assert_eq!(table.get('a', GlyphIDType::FontPBF), GlyphIDType::FontPBF);
         assert_eq!(table.get('\u{4E2D}', GlyphIDType::FontPBF), GlyphIDType::FontPBF);
         assert_eq!(table.get('\u{0915}', GlyphIDType::FontPBF), devanagari);
+    }
+
+    #[test]
+    fn variation_selectors_stay_with_their_base() {
+        let faces: FontFaces = vec![face("Noto Sans", 2, &[(0x4E00, 0x9FFF)])];
+        let table = GlyphTypeTable::new(&["Noto Sans".to_owned()], &faces);
+        let han = GlyphIDType::face(NonZeroU16::new(2).unwrap());
+        for selector in ['\u{FE00}', '\u{FE0F}', '\u{E0100}'] {
+            assert_eq!(table.get(selector, han), han, "{selector:?}");
+        }
     }
 
     #[test]

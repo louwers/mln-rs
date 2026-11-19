@@ -626,9 +626,11 @@ pub fn is_punctuation_or_symbol(chr: char) -> bool {
     matches!(chr.general_category_group(), GeneralCategoryGroup::Punctuation | GeneralCategoryGroup::Symbol)
 }
 
+/// Whether `chr` has the Unicode `Variation_Selector` property, so it selects
+/// a variant of the character before it.
 #[must_use]
-pub fn is_variation_selector1(chr: char) -> bool {
-    chr == '\u{FE00}'
+pub fn is_variation_selector(chr: char) -> bool {
+    matches!(chr, '\u{180B}'..='\u{180D}' | '\u{180F}' | '\u{FE00}'..='\u{FE0F}' | '\u{E0100}'..='\u{E01EF}')
 }
 
 #[cfg(test)]
