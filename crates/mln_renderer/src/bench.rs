@@ -265,6 +265,7 @@ impl SymbolView {
             debug_options: MapDebugOptions::NO_DEBUG,
             time_point: Some(Instant::now()),
             transform_state: state,
+            camera_moving: false,
             style: Arc::new(style.clone()),
             sprite_loaded: true,
             feature_states: Arc::default(),

@@ -549,6 +549,11 @@ pub struct Transform {
     /// or a momentum starts them (see [`Self::with_source`]).
     source: CameraChangeSource,
     gesture: GestureState,
+    /// From a gesture's first change until it ends, its momentum included.
+    gesture_in_progress: bool,
+    /// The fields that the running commands move (`CENTER`, `ZOOM`,
+    /// `BEARING`), as of the last frame.
+    moving: u16,
     /// The host's current frame time (see [`Self::set_frame_time`]).
     frame_time: FrameClock,
     projection_for_zoom: Option<ProjectionForZoomFn>,
@@ -627,6 +632,8 @@ impl Transform {
             joint_ends: Vec::new(),
             source: CameraChangeSource::Command,
             gesture: GestureState::default(),
+            gesture_in_progress: false,
+            moving: 0,
             frame_time: FrameClock::default(),
             projection_for_zoom: None,
             globe_free_bearing: false,
@@ -1855,13 +1862,9 @@ impl Transform {
         self.state.set_center_altitude(camera.center_altitude.unwrap_or_default());
     }
 
-    /// Reports the fields the running commands move as the state's panning,
-    /// scaling and rotating flags.
+    /// Records the fields the running commands move.
     fn update_movement_flags(&mut self) {
-        let moving = self.transitions.iter().fold(0, |moving, t| moving | (t.fields & t.moving_fields));
-        self.state.set_panning_in_progress(moving & CENTER != 0);
-        self.state.set_scaling_in_progress(moving & ZOOM != 0);
-        self.state.set_rotating_in_progress(moving & BEARING != 0);
+        self.moving = self.transitions.iter().fold(0, |moving, t| moving | (t.fields & t.moving_fields));
     }
 
     fn finish_transitions(&mut self, finished: Vec<Transition>) {
@@ -2569,11 +2572,17 @@ impl Transform {
     }
 
     pub(crate) fn set_gesture_in_progress(&mut self, in_progress: bool) {
-        self.state.set_gesture_in_progress(in_progress);
+        self.gesture_in_progress = in_progress;
     }
 
     pub fn is_gesture_in_progress(&self) -> bool {
-        self.state.is_gesture_in_progress()
+        self.gesture_in_progress
+    }
+
+    /// Whether a gesture or a command moves the camera: the renderer draws
+    /// such frames for speed rather than crispness.
+    pub fn is_camera_moving(&self) -> bool {
+        self.gesture_in_progress || self.moving & (CENTER | ZOOM | BEARING) != 0
     }
 
     // MARK: - Transform state
@@ -2584,17 +2593,17 @@ impl Transform {
 
     #[cfg(test)]
     pub(crate) fn is_rotating(&self) -> bool {
-        self.state.is_rotating()
+        self.moving & BEARING != 0
     }
 
     #[cfg(test)]
     pub(crate) fn is_scaling(&self) -> bool {
-        self.state.is_scaling()
+        self.moving & ZOOM != 0
     }
 
     #[cfg(test)]
     pub(crate) fn is_panning(&self) -> bool {
-        self.state.is_panning()
+        self.moving & CENTER != 0
     }
 
     // MARK: Conversion and projection

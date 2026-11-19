@@ -153,6 +153,9 @@ pub(crate) struct PaintParameters<'a> {
 
     pub(crate) transform_params: &'a TransformParameters,
     pub(crate) state: &'a TransformState,
+    /// Whether a gesture or an animation moves the camera: draws favor speed
+    /// over crispness then.
+    pub(crate) camera_moving: bool,
     /// The light of the frame.
     pub(crate) light: &'a crate::render_light::EvaluatedLight,
     pub(crate) static_data: &'a RenderStaticData,
@@ -221,6 +224,7 @@ impl<'a> PaintParameters<'a> {
             open_pass: None,
             transform_params,
             state,
+            camera_moving: frame.camera_moving,
             static_data,
             light: &frame.light,
             pass: RenderPass::Opaque,

@@ -307,7 +307,7 @@ impl RenderRasterLayer {
             false,
             false,
             None,
-            !parameters.state.is_changing(),
+            !parameters.camera_moving,
         );
         (RasterDrawableUBO { matrix: cast_matrix(&projection.fallback_matrix) }, to_projection_ubo(&projection))
     }

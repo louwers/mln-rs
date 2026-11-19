@@ -586,6 +586,7 @@ impl Map {
             debug_options: self.debug_options,
             time_point,
             transform_state: self.transform.get_state().clone(),
+            camera_moving: self.transform.is_camera_moving(),
             style: Arc::clone(&self.style),
             sprite_loaded: self.loader.sprites_loaded(),
             feature_states: self.feature_state.shared(),

@@ -887,7 +887,7 @@ fn is_panning() {
     let log = EndLog::install(&mut ease_options);
     let check = |transform: &Transform| {
         if transform.in_transition() {
-            assert!(transform.get_state().is_panning());
+            assert!(transform.is_panning());
         }
         log.take_finish(transform);
     };

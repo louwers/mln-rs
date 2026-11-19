@@ -283,7 +283,11 @@ impl RenderOrchestrator {
     /// only what draws it on the GPU, uploading the atlases and the tiles'
     /// buckets and making the layers' draws.
     pub(crate) fn update(&mut self, update_parameters: &Arc<UpdateParameters>) -> Option<Frame> {
-        let mut frame = Frame::new(&update_parameters.transform_state, update_parameters.debug_options);
+        let mut frame = Frame::new(
+            &update_parameters.transform_state,
+            update_parameters.camera_moving,
+            update_parameters.debug_options,
+        );
         let mut clock = self.advance_clock(update_parameters);
         let style = &update_parameters.style;
 

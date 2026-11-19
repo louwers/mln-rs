@@ -68,9 +68,9 @@ impl AtlasBinding {
         let state = parameters.state;
         let transformed = self.rotation_alignment == AlignmentType::Map || state.get_pitch() != 0.0;
         let linear_filter_for_icons = if self.is_text {
-            state.is_changing() || transformed || !self.text_size_is_zoom_constant
+            parameters.camera_moving || transformed || !self.text_size_is_zoom_constant
         } else {
-            self.sdf_icons || state.is_changing() || self.icon_scaled || transformed
+            self.sdf_icons || parameters.camera_moving || self.icon_scaled || transformed
         };
         if self.glyph_texture_id.is_some()
             && let Some((glyph, icon)) = &self.atlases

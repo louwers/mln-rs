@@ -15,6 +15,9 @@ pub struct UpdateParameters {
     /// every transition and fade as ended.
     pub time_point: Option<Instant>,
     pub transform_state: TransformState,
+    /// Whether a gesture or an animation moves the camera, which the frame
+    /// draws for speed rather than crispness.
+    pub camera_moving: bool,
 
     /// The version of the style to draw. A renderer compares it with the
     /// version it drew last ([`mln_style::diff::StyleDiff`]).

@@ -99,12 +99,6 @@ pub struct TransformState {
     constrain_mode: ConstrainMode,
     viewport_mode: ViewportMode,
 
-    // animation state
-    rotating: bool,
-    scaling: bool,
-    panning: bool,
-    gesture_in_progress: bool,
-
     // map position
     x: f64,
     y: f64,
@@ -195,10 +189,6 @@ impl TransformState {
             projection_transition: 0.0,
             constrain_mode,
             viewport_mode,
-            rotating: false,
-            scaling: false,
-            panning: false,
-            gesture_in_progress: false,
             x: 0.0,
             y: 0.0,
             z: 0.0,
@@ -1009,44 +999,6 @@ impl TransformState {
             self.axonometric = val;
             self.invalidate_matrices();
         }
-    }
-
-    // MARK: - State
-
-    pub fn is_changing(&self) -> bool {
-        self.rotating || self.scaling || self.panning || self.gesture_in_progress
-    }
-
-    pub fn is_rotating(&self) -> bool {
-        self.rotating
-    }
-
-    pub fn set_rotating_in_progress(&mut self, val: bool) {
-        self.rotating = val;
-    }
-
-    pub fn is_scaling(&self) -> bool {
-        self.scaling
-    }
-
-    pub fn set_scaling_in_progress(&mut self, val: bool) {
-        self.scaling = val;
-    }
-
-    pub fn is_panning(&self) -> bool {
-        self.panning
-    }
-
-    pub fn set_panning_in_progress(&mut self, val: bool) {
-        self.panning = val;
-    }
-
-    pub fn is_gesture_in_progress(&self) -> bool {
-        self.gesture_in_progress
-    }
-
-    pub fn set_gesture_in_progress(&mut self, val: bool) {
-        self.gesture_in_progress = val;
     }
 
     // MARK: - Projection
