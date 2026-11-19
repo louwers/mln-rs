@@ -63,7 +63,7 @@ fn tile_parameters(
         debug_options: MapDebugOptions::NO_DEBUG,
         view: state.view(),
         min_zoom: state.get_min_zoom(),
-        max_zoom: state.get_max_zoom(),
+        max_zoom: state.limits().max_zoom,
         file_source,
         mode: map_mode,
         prefetch_zoom_delta: 0,

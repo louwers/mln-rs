@@ -298,6 +298,11 @@ MLN_API mln_status mln_map_lat_lng_bounds_for_camera(
  *
  * Limits that `options` doesn't set keep their current values. When the camera
  * is outside the new limits, it moves inside them.
+ *
+ * Completes with:
+ * - MLN_STATUS_INVALID_ARGUMENT, changing nothing, when the minimum zoom would
+ *   be above the maximum zoom, the minimum pitch above the maximum pitch, or
+ *   the maximum zoom below the lowest zoom the map can show at its size.
  */
 MLN_BINDING("execution=command")
 MLN_API mln_status mln_map_set_bounds(

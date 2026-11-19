@@ -8,7 +8,7 @@ use std::ops::{Deref, DerefMut};
 use std::time::Duration;
 
 use mln_map::transform::{CameraCommandId, Transform, TransformEvent};
-use mln_map::{CameraChangeSource, ConstrainMode, MomentumDecay, MomentumSnap, ViewportMode};
+use mln_map::{CameraChangeSource, CameraLimits, ConstrainMode, MomentumDecay, MomentumSnap, ViewportMode};
 use mln_style_types::ProjectionDefinition;
 use mln_util::LatLng;
 use mln_util::geo::{LatLngBounds, WrapMode};
@@ -651,7 +651,8 @@ fn notches_zoom_out_to_the_floor_screen_bounds_set() {
     let mut rig = Rig::new();
     rig.input.camera.set_constrain_mode(ConstrainMode::Screen);
     let bounds = LatLngBounds::hull(LatLng::new(52.3, 4.8).unwrap(), LatLng::new(52.4, 5.0).unwrap());
-    rig.input.camera.set_lat_lng_bounds(bounds).unwrap();
+    let limits = CameraLimits { bounds, ..*rig.input.camera.get_state().limits() };
+    rig.input.camera.set_limits(limits).unwrap();
     rig.input.camera.jump_to(&CameraOptions {
         center: Some(LatLng::new(52.35, 4.9).unwrap()),
         zoom: Some(14.0),

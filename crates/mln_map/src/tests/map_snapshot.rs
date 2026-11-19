@@ -168,6 +168,25 @@ fn snapshot_reports_every_member() {
 }
 
 #[test]
+fn bounds_that_cross_the_current_limits_change_nothing() {
+    let run_loop = Queue::<()>::new();
+    let mut map = map(MapOptions { size: Size::new(256, 256), ..Default::default() }, &run_loop);
+    map.set_bounds(&BoundOptions { min_zoom: Some(2.0), max_zoom: Some(10.0), ..Default::default() }).unwrap();
+    let generation = map.generation();
+
+    // A minimum above the maximum that stays.
+    assert!(map.set_bounds(&BoundOptions { min_zoom: Some(12.0), ..Default::default() }).is_err());
+    let bounds = map.snapshot().bounds;
+    assert_eq!((2.0, 10.0), (bounds.min_zoom, bounds.max_zoom));
+    assert_eq!(generation, map.generation());
+
+    // Both at once move the range.
+    map.set_bounds(&BoundOptions { min_zoom: Some(12.0), max_zoom: Some(14.0), ..Default::default() }).unwrap();
+    let bounds = map.snapshot().bounds;
+    assert_eq!((12.0, 14.0), (bounds.min_zoom, bounds.max_zoom));
+}
+
+#[test]
 fn generation_grows_with_each_change() {
     let run_loop = Queue::<()>::new();
     let mut map = map(MapOptions { size: Size::new(256, 256), ..Default::default() }, &run_loop);

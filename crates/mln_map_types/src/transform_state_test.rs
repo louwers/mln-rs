@@ -6,7 +6,7 @@ use mln_util::projection::Projection;
 use mln_util::size::Size;
 
 use super::TransformState;
-use crate::{Camera, LogicalExtent, MapView, ProjectionMode, Viewport};
+use crate::{Camera, CameraLimits, LogicalExtent, MapView, ProjectionMode, Viewport};
 
 /// A 512 by 512 view at `pitch` degrees, looking north.
 fn pitched(pitch: f64) -> TransformState {
@@ -125,10 +125,18 @@ fn numbers_out_of_range_do_not_panic() {
             s.set_axonometric(true);
             s.set_y_skew(v);
         }),
-        ("min zoom", |s, v| s.set_min_zoom(v)),
-        ("max zoom", |s, v| s.set_max_zoom(v)),
-        ("min pitch", |s, v| s.set_min_pitch(v)),
-        ("max pitch", |s, v| s.set_max_pitch(v)),
+        ("min zoom", |s, v| {
+            let _ = s.set_limits(CameraLimits { min_zoom: v, ..*s.limits() });
+        }),
+        ("max zoom", |s, v| {
+            let _ = s.set_limits(CameraLimits { max_zoom: v, ..*s.limits() });
+        }),
+        ("min pitch", |s, v| {
+            let _ = s.set_limits(CameraLimits { min_pitch: v, ..*s.limits() });
+        }),
+        ("max pitch", |s, v| {
+            let _ = s.set_limits(CameraLimits { max_pitch: v, ..*s.limits() });
+        }),
         ("center altitude", |s, v| s.set_center_altitude(v)),
         ("zoom", |s, v| s.set_lat_lng_zoom(&LatLng::new(10.0, 10.0).unwrap(), v)),
         ("longitude", |s, v| {
@@ -183,4 +191,48 @@ fn numbers_out_of_range_do_not_panic() {
             }
         }
     }
+}
+
+#[test]
+fn limits_apply_as_a_whole() {
+    let mut state = pitched(30.0);
+    // A minimum above the current maximum takes a maximum above it at once.
+    let raised = CameraLimits { min_zoom: 23.0, max_zoom: 24.0, ..*state.limits() };
+    state.set_limits(raised).unwrap();
+    assert_eq!((23.0, 24.0), (state.limits().min_zoom, state.limits().max_zoom));
+    // Limits that leave the camera nowhere to go change nothing.
+    let crossed = CameraLimits { min_zoom: 10.0, max_zoom: 5.0, ..*state.limits() };
+    assert!(state.set_limits(crossed).is_err());
+    // Even when clamping would make them meet.
+    let crossed_past_the_range = CameraLimits { min_zoom: 27.0, max_zoom: 26.0, ..*state.limits() };
+    assert!(state.set_limits(crossed_past_the_range).is_err());
+    assert_eq!(raised, *state.limits());
+    // Out of the range any map allows, they are clamped to it.
+    let wide = CameraLimits { min_zoom: -3.0, max_pitch: 4.0, ..*state.limits() };
+    state.set_limits(wide).unwrap();
+    assert_eq!(0.0, state.limits().min_zoom);
+    assert_eq!(mln_util::constants::PITCH_MAX, state.limits().max_pitch);
+}
+
+#[test]
+fn a_maximum_zoom_below_the_least_zoom_the_view_allows_changes_nothing() {
+    // The world fills a 768 pixel high view at zoom log2(768 / 512).
+    let mut state = pitched(0.0);
+    state.set_size(Size::new(512, 768));
+    let limits = *state.limits();
+    assert!(state.set_limits(CameraLimits { max_zoom: 0.0, ..limits }).is_err());
+    assert_eq!(limits, *state.limits());
+    let least_zoom = 1.5f64.log2();
+    state.set_limits(CameraLimits { max_zoom: least_zoom, ..limits }).unwrap();
+    assert_eq!(least_zoom, state.limits().max_zoom);
+}
+
+#[test]
+fn equal_zoom_limits_just_below_the_least_zoom_the_view_allows_apply() {
+    // A 1024 pixel high view allows zoom 1, the scale that a zoom this close
+    // to 1 rounds to.
+    let mut state = pitched(0.0);
+    state.set_size(Size::new(512, 1024));
+    let zoom = 0.999_999_999_9;
+    state.set_limits(CameraLimits { min_zoom: zoom, max_zoom: zoom, ..*state.limits() }).unwrap();
 }

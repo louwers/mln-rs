@@ -236,7 +236,7 @@ impl Scene {
             debug_options: MapDebugOptions::NO_DEBUG,
             view: self.transform.view(),
             min_zoom: self.transform.get_state().get_min_zoom(),
-            max_zoom: self.transform.get_state().get_max_zoom(),
+            max_zoom: self.transform.get_state().limits().max_zoom,
             file_source: Some(file_source),
             mode: MapMode::Continuous,
             // The map's default.

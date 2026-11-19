@@ -40,9 +40,15 @@ impl GestureCamera for Map {
             return (snapshot.bounds.min_zoom, snapshot.bounds.max_zoom);
         };
         let bounds = snapshot.bounds;
-        state.set_lat_lng_bounds(bounds.bounds.unwrap_or_else(LatLngBounds::infinite));
-        state.set_min_zoom(bounds.min_zoom);
-        state.set_max_zoom(bounds.max_zoom);
+        let limits = mln_map::CameraLimits {
+            bounds: bounds.bounds.unwrap_or_else(LatLngBounds::infinite),
+            min_zoom: bounds.min_zoom,
+            max_zoom: bounds.max_zoom,
+            ..*state.limits()
+        };
+        if state.set_limits(limits).is_err() {
+            return (bounds.min_zoom, bounds.max_zoom);
+        }
         mln_gestures::zoom_range(&state, snapshot.view.camera.center.latitude())
     }
 

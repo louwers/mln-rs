@@ -8,8 +8,8 @@ use std::sync::Arc;
 use geo_types::Geometry;
 use glam::{DMat4, DVec3};
 use mln_map_types::{
-    AnimationOptions, BoundOptions, CameraDelta, CameraError, CameraOptions, CameraUpdate, MapDebugOptions, MapMode,
-    ProjectionMode, TileLodMode, TransformState, VerticalPerspectiveProjection, Viewport,
+    AnimationOptions, BoundOptions, CameraDelta, CameraError, CameraLimits, CameraOptions, CameraUpdate,
+    MapDebugOptions, MapMode, ProjectionMode, TileLodMode, TransformState, VerticalPerspectiveProjection, Viewport,
 };
 use mln_renderer::{
     Registry, RendererEvent, RendererEvents, RenderingStats, UpdateParameters, UpdateReader, UpdateSlot,
@@ -590,7 +590,7 @@ impl Map {
             time_point,
             view: self.transform.get_state().view().clone(),
             min_zoom: self.transform.get_state().get_min_zoom(),
-            max_zoom: self.transform.get_state().get_max_zoom(),
+            max_zoom: self.transform.get_state().limits().max_zoom,
             camera_moving: self.transform.is_camera_moving(),
             style: Arc::clone(&self.style),
             sprite_loaded: self.loader.sprites_loaded(),
@@ -1200,57 +1200,47 @@ impl Map {
     // MARK: - Bounds
 
     pub fn set_bounds(&mut self, options: &BoundOptions) -> Result<(), Error> {
+        let current = *self.transform.get_state().limits();
+        let limits = CameraLimits {
+            bounds: options.bounds.unwrap_or(current.bounds),
+            min_zoom: options.min_zoom.unwrap_or(current.min_zoom),
+            max_zoom: options.max_zoom.unwrap_or(current.max_zoom),
+            min_pitch: options.min_pitch.map_or(current.min_pitch, mln_math::deg2rad),
+            max_pitch: options.max_pitch.map_or(current.max_pitch, mln_math::deg2rad),
+        };
+        self.transform.set_limits(limits)?;
         if *options != BoundOptions::default() {
             self.changed();
         }
-        let mut change_camera = false;
+
+        // The camera moves inside the limits that changed.
+        let state = self.transform.get_state();
+        let view = state.view();
+        let limits = *state.limits();
         let mut camera_options = CameraOptions::default();
-
-        {
-            let transform = &mut self.transform;
-
-            if let Some(bounds) = options.bounds {
+        let mut change_camera = options.bounds.is_some();
+        if options.min_zoom.is_some() {
+            // On the globe the lowest zoom falls with latitude; on Mercator it
+            // is the minimum.
+            let latitude_term =
+                state.get_min_zoom_at_latitude(view.center(WrapMode::Unwrapped).latitude()) - state.get_min_zoom();
+            let min_zoom = limits.min_zoom + latitude_term;
+            if view.zoom() < min_zoom {
                 change_camera = true;
-                transform.set_lat_lng_bounds(bounds)?;
+                camera_options.zoom = Some(min_zoom);
             }
-
-            if let Some(min_zoom) = options.min_zoom {
-                transform.set_min_zoom(min_zoom);
-                // On the globe the lowest zoom falls with latitude; on
-                // Mercator it is the minimum.
-                let state = transform.get_state();
-                let latitude_term = state.get_min_zoom_at_latitude(state.view().center(WrapMode::Unwrapped).latitude())
-                    - state.get_min_zoom();
-                let min_zoom = min_zoom + latitude_term;
-                if transform.get_zoom() < min_zoom {
-                    change_camera = true;
-                    camera_options = CameraOptions { zoom: Some(min_zoom), ..camera_options };
-                }
-            }
-
-            if let Some(max_zoom) = options.max_zoom {
-                transform.set_max_zoom(max_zoom);
-                if transform.get_zoom() > max_zoom {
-                    change_camera = true;
-                    camera_options = CameraOptions { zoom: options.max_zoom, ..camera_options };
-                }
-            }
-
-            if let Some(max_pitch) = options.max_pitch {
-                transform.set_max_pitch(max_pitch);
-                if transform.get_pitch() > transform.get_state().get_max_pitch() {
-                    change_camera = true;
-                    camera_options = CameraOptions { pitch: options.max_pitch, ..camera_options };
-                }
-            }
-
-            if let Some(min_pitch) = options.min_pitch {
-                transform.set_min_pitch(min_pitch);
-                if transform.get_pitch() < transform.get_state().get_min_pitch() {
-                    change_camera = true;
-                    camera_options = CameraOptions { pitch: options.min_pitch, ..camera_options };
-                }
-            }
+        }
+        if options.max_zoom.is_some() && view.zoom() > limits.max_zoom {
+            change_camera = true;
+            camera_options.zoom = Some(limits.max_zoom);
+        }
+        if options.max_pitch.is_some() && view.pitch() > limits.max_pitch {
+            change_camera = true;
+            camera_options.pitch = Some(mln_math::rad2deg(limits.max_pitch));
+        }
+        if options.min_pitch.is_some() && view.pitch() < limits.min_pitch {
+            change_camera = true;
+            camera_options.pitch = Some(mln_math::rad2deg(limits.min_pitch));
         }
 
         if change_camera {
@@ -1435,7 +1425,7 @@ impl Map {
     pub fn snapshot(&self) -> MapSnapshot {
         let transform = &self.transform;
         let state = transform.get_state();
-        let bounds = state.get_lat_lng_bounds();
+        let bounds = state.limits().bounds;
         let free_camera = state.view().free_camera_options();
         MapSnapshot {
             generation: self.generation,
@@ -1449,9 +1439,9 @@ impl Map {
             bounds: CameraBounds {
                 bounds: (bounds != LatLngBounds::infinite()).then_some(bounds),
                 min_zoom: state.get_min_zoom(),
-                max_zoom: state.get_max_zoom(),
-                min_pitch: mln_math::rad2deg(state.get_min_pitch()),
-                max_pitch: mln_math::rad2deg(state.get_max_pitch()),
+                max_zoom: state.limits().max_zoom,
+                min_pitch: mln_math::rad2deg(state.limits().min_pitch),
+                max_pitch: mln_math::rad2deg(state.limits().max_pitch),
             },
             free_camera: FreeCamera {
                 position: free_camera.position.unwrap_or_default(),
@@ -1548,7 +1538,7 @@ fn camera_for_lat_lngs_on_screen(
         zoom = mln_math::clamp_f64(
             zoom + min_scale.log2(),
             transform.get_state().get_min_zoom(),
-            transform.get_state().get_max_zoom(),
+            transform.get_state().limits().max_zoom,
         );
     } else {
         Log::error(
@@ -1693,7 +1683,7 @@ fn camera_for_lat_lngs_on_globe(
         return Ok(fit);
     }
     Ok(CameraOptions {
-        zoom: Some(f64::min(globe.get_zoom() + mln_map_types::scale_zoom(smallest), state.get_max_zoom())),
+        zoom: Some(f64::min(globe.get_zoom() + mln_map_types::scale_zoom(smallest), state.limits().max_zoom)),
         ..fit
     })
 }

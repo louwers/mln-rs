@@ -51,6 +51,20 @@ pub fn scale_zoom(scale: f64) -> f64 {
     round_for_accuracy(scale.log2())
 }
 
+/// The map's offset from the world's center that puts `center` at the
+/// center of a view at `scale`, in pixels: the negated center. The globe's
+/// center can be on a pole, which Mercator's stops short of.
+pub(crate) fn map_offset(center: &LatLng, scale: f64, globe: bool) -> (f64, f64) {
+    let world_size = Projection::world_size(scale);
+    let latitude = mln_math::deg2rad(center.latitude());
+    let m = 1.0 - 1e-15;
+    let f = mln_math::clamp_f64(latitude.sin(), -m, m);
+    let x = -center.longitude() * (world_size / 360.0);
+    let cc = world_size / M2PI;
+    let y = if globe { cc * latitude.tan().asinh() } else { 0.5 * cc * ((1.0 + f) / (1.0 - f)).ln() };
+    (x, y)
+}
+
 /// The fractional part of `x`, with the sign of `x`.
 fn modf_fraction(x: f64) -> f64 {
     if x.is_infinite() {

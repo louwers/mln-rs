@@ -90,6 +90,47 @@ fn assert_vec3_near_1e5(arg: DVec3, vec: DVec3) {
     assert!(arg.abs_diff_eq(vec, ABS_DOUBLE_ERROR), "{arg:?} vs {vec:?}");
 }
 
+/// The C++ tests' setters of one limit each, which leave the limits as they
+/// were where C++ ignores the value.
+trait LimitSetters {
+    fn limits(&self) -> CameraLimits;
+    fn set_one_limit(&mut self, limits: CameraLimits) {
+        let _ = self.set_limits_to(limits);
+    }
+    fn set_limits_to(&mut self, limits: CameraLimits) -> Result<(), Error>;
+    fn set_lat_lng_bounds(&mut self, bounds: LatLngBounds) -> Result<(), Error> {
+        self.set_limits_to(CameraLimits { bounds, ..self.limits() })
+    }
+    fn set_min_zoom(&mut self, min_zoom: f64) {
+        self.set_one_limit(CameraLimits { min_zoom, ..self.limits() });
+    }
+    fn set_max_zoom(&mut self, max_zoom: f64) {
+        self.set_one_limit(CameraLimits { max_zoom, ..self.limits() });
+    }
+    /// In degrees.
+    fn set_min_pitch(&mut self, min_pitch: f64) {
+        self.set_one_limit(CameraLimits { min_pitch: deg2rad(min_pitch), ..self.limits() });
+    }
+    /// In degrees.
+    fn set_max_pitch(&mut self, max_pitch: f64) {
+        self.set_one_limit(CameraLimits { max_pitch: deg2rad(max_pitch), ..self.limits() });
+    }
+}
+
+impl LimitSetters for Transform {
+    fn limits(&self) -> CameraLimits {
+        *self.get_state().limits()
+    }
+    fn set_limits_to(&mut self, limits: CameraLimits) -> Result<(), Error> {
+        self.set_limits(limits)
+    }
+}
+
+/// Formats `value` with six decimals, as `std::to_string(double)` does.
+fn std_to_string(value: f64) -> String {
+    format!("{value:.6}")
+}
+
 /// gtest's `SCOPED_TRACE`: prints the trace when a failed assertion unwinds
 /// the scope.
 struct ScopedTrace(String);
@@ -227,12 +268,12 @@ fn invalid_zoom() {
     assert_double_eq(0.0, transform.get_lat_lng(WrapMode::Wrapped).longitude());
     assert_double_eq(1.0, transform.get_zoom());
 
-    let max_zoom = transform.get_state().get_max_zoom();
+    let max_zoom = transform.get_state().limits().max_zoom;
     transform.jump_to(&CameraOptions { zoom: Some(max_zoom + 0.1), ..Default::default() });
-    assert_double_eq(transform.get_zoom(), transform.get_state().get_max_zoom());
+    assert_double_eq(transform.get_zoom(), transform.get_state().limits().max_zoom);
 
     // Executing flyTo with an empty size causes frameZoom to be NaN.
-    let max_zoom = transform.get_state().get_max_zoom();
+    let max_zoom = transform.get_state().limits().max_zoom;
     let start = start_clock(&mut transform);
     transform.fly_to(
         &CameraOptions { center: Some(ll(LATITUDE_MAX, LONGITUDE_MAX)), zoom: Some(max_zoom), ..Default::default() },
@@ -240,12 +281,12 @@ fn invalid_zoom() {
         false,
     );
     run_to_end(&mut transform, start);
-    assert_double_eq(transform.get_zoom(), transform.get_state().get_max_zoom());
+    assert_double_eq(transform.get_zoom(), transform.get_state().limits().max_zoom);
 
     // Executing flyTo with maximum zoom level to the same zoom level causes
     // frameZoom to be bigger than maximum zoom.
     transform.resize(Size::new(100, 100)).unwrap();
-    let max_zoom = transform.get_state().get_max_zoom();
+    let max_zoom = transform.get_state().limits().max_zoom;
     let start = start_clock(&mut transform);
     transform.fly_to(
         &CameraOptions { center: Some(ll(LATITUDE_MAX, LONGITUDE_MAX)), zoom: Some(max_zoom), ..Default::default() },
@@ -256,7 +297,7 @@ fn invalid_zoom() {
     assert!(!transform.in_transition());
 
     assert!(transform.get_state().valid());
-    assert_double_eq(transform.get_state().get_max_zoom(), transform.get_zoom());
+    assert_double_eq(transform.get_state().limits().max_zoom, transform.get_zoom());
 }
 
 // gtest: Transform.InvalidBearing
@@ -869,7 +910,7 @@ fn camera() {
     let camera = CameraOptions {
         center: Some(ll(0.0, 0.0)),
         anchor: Some(sc(0.0, 0.0)), // top-left
-        zoom: Some(transform.get_state().get_max_zoom()),
+        zoom: Some(transform.get_state().limits().max_zoom),
         ..CameraOptions::default()
     };
     let start = start_clock(&mut transform);
@@ -1002,17 +1043,17 @@ fn lat_lng_bounds() {
     let mut transform = new_transform();
     transform.resize(Size::new(1000, 1000)).unwrap();
 
-    let max_zoom = transform.get_state().get_max_zoom();
+    let max_zoom = transform.get_state().limits().max_zoom;
     transform.jump_to(&CameraOptions { center: Some(LatLng::default()), zoom: Some(max_zoom), ..Default::default() });
 
     // Default bounds.
-    assert_eq!(transform.get_state().get_lat_lng_bounds(), LatLngBounds::default());
+    assert_eq!(transform.get_state().limits().bounds, LatLngBounds::default());
     assert_eq!(transform.get_lat_lng(WrapMode::Wrapped), null_island);
 
     // Invalid bounds.
     match transform.set_lat_lng_bounds(LatLngBounds::empty()) {
         Ok(()) => panic!("Should throw"),
-        Err(_) => assert_eq!(transform.get_state().get_lat_lng_bounds(), LatLngBounds::default()),
+        Err(_) => assert_eq!(transform.get_state().limits().bounds, LatLngBounds::default()),
     }
 
     transform.jump_to(&CameraOptions { center: Some(san_francisco), ..Default::default() });
@@ -1388,42 +1429,42 @@ fn min_max_pitch() {
 
     transform.jump_to(&CameraOptions { zoom: Some(1.0), pitch: Some(60.0), ..Default::default() });
     assert_double_eq(1.0, transform.get_zoom());
-    assert_double_eq(transform.get_state().get_max_pitch(), transform.get_pitch());
+    assert_double_eq(transform.get_state().limits().max_pitch, transform.get_pitch());
     assert_double_eq(deg2rad(60.0), transform.get_pitch());
 
     transform.set_max_pitch(70.0);
     transform.jump_to(&CameraOptions { pitch: Some(70.0), ..Default::default() });
-    assert_double_eq(transform.get_state().get_max_pitch(), transform.get_pitch());
+    assert_double_eq(transform.get_state().limits().max_pitch, transform.get_pitch());
 
     transform.set_max_pitch(45.0);
     transform.jump_to(&CameraOptions { pitch: Some(60.0), ..Default::default() });
-    assert_double_eq(transform.get_state().get_max_pitch(), transform.get_pitch());
+    assert_double_eq(transform.get_state().limits().max_pitch, transform.get_pitch());
     assert_double_eq(deg2rad(45.0), transform.get_pitch());
 
     transform.jump_to(&CameraOptions { pitch: Some(0.0), ..Default::default() });
-    assert_double_eq(transform.get_state().get_min_pitch(), transform.get_pitch());
+    assert_double_eq(transform.get_state().limits().min_pitch, transform.get_pitch());
     assert_double_eq(0.0, transform.get_pitch());
 
     transform.set_min_pitch(-10.0);
     transform.jump_to(&CameraOptions { pitch: Some(-10.0), ..Default::default() });
-    assert_double_eq(transform.get_state().get_min_pitch(), transform.get_pitch());
+    assert_double_eq(transform.get_state().limits().min_pitch, transform.get_pitch());
     assert_double_eq(0.0, transform.get_pitch());
 
     transform.set_min_pitch(15.0);
     transform.jump_to(&CameraOptions { pitch: Some(0.0), ..Default::default() });
-    assert_double_eq(transform.get_state().get_min_pitch(), transform.get_pitch());
+    assert_double_eq(transform.get_state().limits().min_pitch, transform.get_pitch());
     assert_double_eq(deg2rad(15.0), transform.get_pitch());
 
     transform.set_min_pitch(45.0);
-    assert_double_eq(deg2rad(45.0), transform.get_state().get_min_pitch());
+    assert_double_eq(deg2rad(45.0), transform.get_state().limits().min_pitch);
     transform.set_max_pitch(45.0);
-    assert_double_eq(deg2rad(45.0), transform.get_state().get_max_pitch());
+    assert_double_eq(deg2rad(45.0), transform.get_state().limits().max_pitch);
 
     transform.set_max_pitch(10.0);
-    assert_double_eq(deg2rad(45.0), transform.get_state().get_max_pitch());
+    assert_double_eq(deg2rad(45.0), transform.get_state().limits().max_pitch);
 
     transform.set_min_pitch(60.0);
-    assert_double_eq(deg2rad(45.0), transform.get_state().get_min_pitch());
+    assert_double_eq(deg2rad(45.0), transform.get_state().limits().min_pitch);
 }
 
 // gtest: Transform.FreeCameraOptionsInvalidSize
@@ -1475,7 +1516,7 @@ fn free_camera_options_invalid_z() {
     // Invalid z-value (<= 0.0 || > 1) should be clamped to respect both min&max zoom values
     let mut options = FreeCameraOptions { position: Some(dvec3(0.1, 0.1, 0.0)), ..FreeCameraOptions::default() };
     transform.set_free_camera_options(&options);
-    assert_double_eq(transform.get_state().get_max_zoom(), transform.get_state().view().zoom());
+    assert_double_eq(transform.get_state().limits().max_zoom, transform.get_state().view().zoom());
     assert!(transform.get_free_camera_options().position.unwrap()[2] > 0.0);
 
     options.position = Some(dvec3(0.5, 0.2, 123.456));
@@ -4235,7 +4276,7 @@ fn compose_padding_pitch_and_field_of_view() {
     assert_eq!(transform.get_state().view().padding(), insets(300.0, 20.0, 0.0, 0.0));
     assert_near(mln_math::rad2deg(transform.get_field_of_view()), 45.0, 1e-5);
     let max_pitch =
-        transform.get_state().get_max_pitch() + deg2rad(45.0) / 2.0 - (1.3 * (deg2rad(45.0) / 2.0).tan()).atan();
+        transform.get_state().limits().max_pitch + deg2rad(45.0) / 2.0 - (1.3 * (deg2rad(45.0) / 2.0).tan()).atan();
     assert!(max_pitch < deg2rad(60.0));
     assert_near(transform.get_pitch(), max_pitch, 1e-5);
     assert!(!transform.in_transition());

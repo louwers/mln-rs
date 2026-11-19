@@ -4,18 +4,18 @@ use geometry::Point;
 use glam::{DQuat, DVec3};
 use mln_style_types::ProjectionDefinition;
 use mln_util::constants;
-use mln_util::constants::{DEFAULT_MAX_ZOOM, DEFAULT_PITCH_MAX, M2PI, PITCH_MAX, TILE_SIZE_D};
+use mln_util::constants::{M2PI, TILE_SIZE_D};
 use mln_util::error::Error;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
-use mln_util::logging::{Event, Log};
 use mln_util::projection::Projection;
 use mln_util::size::Size;
 
 use crate::camera::{CameraOptions, FreeCameraOptions};
+use crate::camera_limits::CameraLimits;
 use crate::camera_pose::CameraPose;
 use crate::mode::{ConstrainMode, ViewportMode};
 use crate::vertical_perspective_projection::VerticalPerspectiveProjection;
-use crate::view::{NorthOrientation, View, ViewParams, max_mercator_horizon_angle, scale_zoom, zoom_scale};
+use crate::view::{NorthOrientation, View, ViewParams, map_offset, max_mercator_horizon_angle, scale_zoom, zoom_scale};
 
 fn lat_lng_from_mercator(mercator_coordinate: Point<f64>, wrap_mode: WrapMode) -> Result<LatLng, Error> {
     LatLng::with_mode(
@@ -32,14 +32,7 @@ fn lat_lng_from_mercator(mercator_coordinate: Point<f64>, wrap_mode: WrapMode) -
 #[derive(Clone, Debug, PartialEq)]
 pub struct TransformState {
     view: View,
-
-    bounds: LatLngBounds,
-    min_scale: f64,
-    max_scale: f64,
-    min_pitch: f64,
-    max_pitch: f64,
-    min_fov: f64,
-    max_fov: f64,
+    limits: CameraLimits,
 }
 
 impl Default for TransformState {
@@ -53,14 +46,15 @@ impl TransformState {
     pub fn new(constrain_mode: ConstrainMode, viewport_mode: ViewportMode) -> Self {
         TransformState {
             view: View::new(ViewParams::new(constrain_mode, viewport_mode)),
-            bounds: LatLngBounds::default(),
-            min_scale: 1.0,
-            max_scale: 2.0f64.powf(f64::from(DEFAULT_MAX_ZOOM)),
-            min_pitch: constants::PITCH_MIN,
-            max_pitch: DEFAULT_PITCH_MAX,
-            min_fov: mln_math::deg2rad(0.1),
-            max_fov: mln_math::deg2rad(150.0),
+            limits: CameraLimits::default(),
         }
+    }
+
+    /// A state that shows `params` within `limits`, as they are.
+    pub(crate) fn from_parts(params: ViewParams, limits: CameraLimits) -> Self {
+        let mut state = TransformState { view: View::new(params), limits };
+        state.update(|_| ());
+        state
     }
 
     /// The view the camera shows now.
@@ -74,7 +68,7 @@ impl TransformState {
     fn update(&mut self, change: impl FnOnce(&mut ViewParams)) {
         let mut params = *self.view.params();
         change(&mut params);
-        params.center_wrap = if params.projection_transition > 0.0 && self.bounds == LatLngBounds::default() {
+        params.center_wrap = if params.projection_transition > 0.0 && self.limits.bounds == LatLngBounds::default() {
             WrapMode::Wrapped
         } else {
             WrapMode::Unwrapped
@@ -99,7 +93,7 @@ impl TransformState {
         let leaves_globe = transition == 0.0 && previous > 0.0;
         if leaves_globe && !self.view.size().is_empty() {
             let wrap_mode =
-                if self.bounds == LatLngBounds::default() { WrapMode::Wrapped } else { WrapMode::Unwrapped };
+                if self.limits.bounds == LatLngBounds::default() { WrapMode::Wrapped } else { WrapMode::Unwrapped };
             let center = self.view.center(wrap_mode);
             let zoom = self.view.zoom();
             self.set_lat_lng_zoom(&center, zoom);
@@ -113,7 +107,7 @@ impl TransformState {
         let DVec3 { x: dx, y: dy, z: dz } = camera.forward();
 
         let (new_roll, mut new_pitch, new_bearing) = camera.orientation_angles();
-        new_pitch = mln_math::clamp_f64(new_pitch, self.min_pitch, self.max_pitch);
+        new_pitch = mln_math::clamp_f64(new_pitch, self.limits.min_pitch, self.limits.max_pitch);
 
         // The zoom from the camera's altitude, and how far along its line of
         // sight the ground is.
@@ -125,7 +119,7 @@ impl TransformState {
             travel = -position.z / dz;
         } else {
             zoom = 14.0;
-            let new_scale = mln_math::clamp_f64(2.0f64.powf(zoom), self.min_scale, self.max_scale);
+            let new_scale = mln_math::clamp_f64(2.0f64.powf(zoom), self.min_scale(), self.max_scale());
             travel = center_distance / new_scale / TILE_SIZE_D;
         }
 
@@ -133,7 +127,7 @@ impl TransformState {
         let Ok(center) = lat_lng_from_mercator(mercator_point, WrapMode::Unwrapped) else {
             return;
         };
-        let zoom = f64::min(zoom, scale_zoom(self.max_scale));
+        let zoom = f64::min(zoom, self.limits.max_zoom);
         self.set_lat_lng_zoom(&center, zoom);
 
         let mercator_z = position.z + dz * travel;
@@ -152,7 +146,7 @@ impl TransformState {
         if position.is_nan() {
             return None;
         }
-        let max_world_size = Projection::world_size(2.0f64.powf(self.get_max_zoom()));
+        let max_world_size = Projection::world_size(2.0f64.powf(self.limits.max_zoom));
         let min_world_size = Projection::world_size(2.0f64.powf(self.get_min_zoom()));
         let dist_to_center = self.view.camera_to_center_distance();
         Some(DVec3::new(
@@ -263,7 +257,7 @@ impl TransformState {
         }
         // The globe's constraint never raises the scale, whichever projection
         // the map is in now.
-        scale_zoom(self.min_scale) + VerticalPerspectiveProjection::zoom_adjustment(0.0, latitude)
+        scale_zoom(self.min_scale()) + VerticalPerspectiveProjection::zoom_adjustment(0.0, latitude)
     }
 
     /// The center `constrain` would settle on for this one at this zoom: on
@@ -275,7 +269,7 @@ impl TransformState {
         }
         let max_latitude = VerticalPerspectiveProjection::max_latitude(
             &self.view,
-            mln_math::clamp_f64(zoom, self.get_min_zoom_at_latitude(lat_lng.latitude()), self.get_max_zoom()),
+            mln_math::clamp_f64(zoom, self.get_min_zoom_at_latitude(lat_lng.latitude()), self.limits.max_zoom),
         );
         LatLng::saturating(
             mln_math::clamp_f64(lat_lng.latitude(), -max_latitude, max_latitude),
@@ -284,83 +278,53 @@ impl TransformState {
         )
     }
 
-    // MARK: - Bounds
+    // MARK: - Limits
 
-    pub fn set_lat_lng_bounds(&mut self, bounds: LatLngBounds) {
-        if bounds != self.bounds {
-            self.bounds = bounds;
+    /// The limits the camera moves within.
+    #[must_use]
+    pub fn limits(&self) -> &CameraLimits {
+        &self.limits
+    }
+
+    /// Sets the limits the camera moves within, clamped to what any map
+    /// allows (see [`CameraLimits::validated`]), and moves the center into
+    /// new bounds. `Err`, changing nothing, for limits that leave the camera
+    /// nowhere to go.
+    pub fn set_limits(&mut self, limits: CameraLimits) -> Result<(), Error> {
+        let limits = limits.validated()?;
+        // The view can't zoom out past the zoom at which the world fills it.
+        let least_scale = self.constrain(zoom_scale(limits.min_zoom), self.view.x(), self.view.y()).0;
+        if zoom_scale(limits.max_zoom) < least_scale {
+            return Err(Error::invalid_argument("the maximum zoom must be at least the least zoom the view allows"));
+        }
+        let bounds_changed = limits.bounds != self.limits.bounds;
+        self.limits = limits;
+        if bounds_changed {
             let lat_lng = self.view.center(WrapMode::Unwrapped);
             let zoom = self.view.zoom();
             self.set_lat_lng_zoom(&lat_lng, zoom);
             self.update(|_| ());
         }
+        Ok(())
     }
 
-    #[must_use]
-    pub fn get_lat_lng_bounds(&self) -> LatLngBounds {
-        self.bounds
+    fn min_scale(&self) -> f64 {
+        zoom_scale(self.limits.min_zoom)
     }
 
-    pub fn set_min_zoom(&mut self, min_zoom: f64) {
-        if min_zoom <= self.get_max_zoom() {
-            self.min_scale = zoom_scale(mln_math::clamp_f64(min_zoom, constants::MIN_ZOOM, constants::MAX_ZOOM));
-        }
+    fn max_scale(&self) -> f64 {
+        zoom_scale(self.limits.max_zoom)
     }
 
+    /// The lowest zoom the constrain mode allows: the minimum zoom, raised
+    /// so that the view shows no area off the world.
     #[must_use]
     pub fn get_min_zoom(&self) -> f64 {
         scale_zoom(self.constrained_min_scale())
     }
 
     fn constrained_min_scale(&self) -> f64 {
-        self.constrain(self.min_scale, self.view.x(), self.view.y()).0
-    }
-
-    pub fn set_max_zoom(&mut self, max_zoom: f64) {
-        if max_zoom >= self.get_min_zoom() {
-            self.max_scale = zoom_scale(mln_math::clamp_f64(max_zoom, constants::MIN_ZOOM, constants::MAX_ZOOM));
-        }
-    }
-
-    #[must_use]
-    pub fn get_max_zoom(&self) -> f64 {
-        scale_zoom(self.max_scale)
-    }
-
-    pub fn set_min_pitch(&mut self, pitch: f64) {
-        if pitch <= self.max_pitch {
-            self.min_pitch = mln_math::clamp_f64(pitch, constants::PITCH_MIN, self.max_pitch);
-        } else {
-            Log::warning(Event::General, "Trying to set minimum pitch to larger than maximum pitch, no changes made.");
-        }
-    }
-
-    #[must_use]
-    pub fn get_min_pitch(&self) -> f64 {
-        self.min_pitch
-    }
-
-    pub fn set_max_pitch(&mut self, pitch: f64) {
-        if pitch >= self.min_pitch {
-            self.max_pitch = mln_math::clamp_f64(pitch, self.min_pitch, PITCH_MAX);
-        } else {
-            Log::warning(Event::General, "Trying to set maximum pitch to smaller than minimum pitch, no changes made.");
-        }
-    }
-
-    #[must_use]
-    pub fn get_max_pitch(&self) -> f64 {
-        self.max_pitch
-    }
-
-    #[must_use]
-    pub fn get_min_field_of_view(&self) -> f64 {
-        self.min_fov
-    }
-
-    #[must_use]
-    pub fn get_max_field_of_view(&self) -> f64 {
-        self.max_fov
+        self.constrain(self.min_scale(), self.view.x(), self.view.y()).0
     }
 
     // MARK: - Rotation
@@ -416,8 +380,8 @@ impl TransformState {
     pub fn valid(&self) -> bool {
         let scale = self.view.scale();
         self.view.is_valid()
-            && (if self.view.is_globe() { scale > 0.0 } else { scale >= self.min_scale })
-            && scale <= self.max_scale
+            && (if self.view.is_globe() { scale > 0.0 } else { scale >= self.min_scale() })
+            && scale <= self.max_scale()
     }
 
     // MARK: - Constraints
@@ -493,7 +457,7 @@ impl TransformState {
     }
 
     pub fn constrain_camera_and_zoom_to_bounds(&self, requested_camera: &mut CameraOptions, requested_zoom: &mut f64) {
-        if self.get_constrain_mode() != ConstrainMode::Screen || self.get_lat_lng_bounds() == LatLngBounds::default() {
+        if self.get_constrain_mode() != ConstrainMode::Screen || self.limits.bounds == LatLngBounds::default() {
             return;
         }
 
@@ -524,7 +488,7 @@ impl TransformState {
             }
         }
 
-        let current_bounds = self.get_lat_lng_bounds();
+        let current_bounds = self.limits.bounds;
         let ne_bounds = Projection::project(&current_bounds.northeast(), requested_scale);
         let sw_bounds = Projection::project(&current_bounds.southwest(), requested_scale);
         let center = Projection::project(&center_lat_lng, requested_scale);
@@ -628,13 +592,13 @@ impl TransformState {
     /// raises lower zooms to. `None` in the other modes or without bounds.
     #[must_use]
     pub fn get_min_zoom_for_screen_bounds(&self) -> Option<f64> {
-        if self.get_constrain_mode() != ConstrainMode::Screen || self.bounds == LatLngBounds::default() {
+        if self.get_constrain_mode() != ConstrainMode::Screen || self.limits.bounds == LatLngBounds::default() {
             return None;
         }
         // The bounds' extent on screen grows with the scale alone, so they
         // fill the screen at the same zoom wherever the center is.
-        let ne = Projection::project(&self.bounds.northeast(), 1.0);
-        let sw = Projection::project(&self.bounds.southwest(), 1.0);
+        let ne = Projection::project(&self.limits.bounds.northeast(), 1.0);
+        let sw = Projection::project(&self.limits.bounds.southwest(), 1.0);
         let size = self.view.size();
         let scale_x = f64::from(size.width) / (ne.x - sw.x);
         let scale_y = f64::from(size.height) / (sw.y - ne.y);
@@ -675,7 +639,7 @@ impl TransformState {
         )?;
         // Wrapped, as easeTo and GL JS's setLocationAtPoint leave it, unless
         // bounds keep it in their range.
-        let target = if self.bounds == LatLngBounds::default() { center.wrapped() } else { center };
+        let target = if self.limits.bounds == LatLngBounds::default() { center.wrapped() } else { center };
         let zoom = view.zoom();
         self.set_lat_lng_zoom(&target, zoom);
         Ok(())
@@ -690,19 +654,20 @@ impl TransformState {
         // Globe centers arrive wrapped, and bounds across the antimeridian
         // reach past 180 degrees: take the copy of the longitude nearest the
         // bounds before constraining it.
-        if globe && self.bounds != LatLngBounds::default() {
-            let turns = ((self.bounds.center().longitude() - lat_lng.longitude()) / constants::DEGREES_MAX).round();
+        if globe && self.limits.bounds != LatLngBounds::default() {
+            let turns =
+                ((self.limits.bounds.center().longitude() - lat_lng.longitude()) / constants::DEGREES_MAX).round();
             requested = LatLng::saturating(
                 lat_lng.latitude(),
                 lat_lng.longitude() + turns * constants::DEGREES_MAX,
                 WrapMode::Unwrapped,
             );
         }
-        let mut constrained = self.bounds.constrain(&requested);
+        let mut constrained = self.limits.bounds.constrain(&requested);
         // The globe's tile cover picks each tile's wrap from the center, so a
         // center that jumped a whole world at the antimeridian would re-key
         // every tile; keep it on the copy nearest the current one.
-        if globe && self.bounds == LatLngBounds::default() {
+        if globe && self.limits.bounds == LatLngBounds::default() {
             let current = self.view.center(WrapMode::Unwrapped).longitude();
             if current.is_finite() {
                 let turns = ((current - constrained.longitude()) / constants::DEGREES_MAX).round();
@@ -719,19 +684,8 @@ impl TransformState {
         } else {
             self.constrained_min_scale()
         };
-        let new_scale = mln_math::clamp_f64(zoom_scale(zoom), min_scale, self.max_scale);
-        let new_world_size = new_scale * TILE_SIZE_D;
-        let bc = new_world_size / constants::DEGREES_MAX;
-        let cc = new_world_size / M2PI;
-
-        // The globe's center can be on a pole, which the clamped sine stops
-        // short of.
-        let latitude = mln_math::deg2rad(constrained.latitude());
-        let m = 1.0 - 1e-15;
-        let f = mln_math::clamp_f64(latitude.sin(), -m, m);
-
-        let x = -constrained.longitude() * bc;
-        let y = if globe { cc * latitude.tan().asinh() } else { 0.5 * cc * ((1.0 + f) / (1.0 - f)).ln() };
+        let new_scale = mln_math::clamp_f64(zoom_scale(zoom), min_scale, self.max_scale());
+        let (x, y) = map_offset(&constrained, new_scale, globe);
         // A far unwrapped longitude can overflow the point.
         if !x.is_finite() || !y.is_finite() {
             return;

@@ -5,6 +5,7 @@
 
 mod bound_options;
 mod camera;
+mod camera_limits;
 mod camera_momentum;
 mod frame_projection;
 mod map_view;
@@ -17,6 +18,7 @@ pub use camera::{
     AnimationOptions, CameraDelta, CameraError, CameraOptions, CameraUpdate, CameraUpdateMode, CameraVelocity,
     GesturePhase, TransitionEnd, TransitionOutcome,
 };
+pub use camera_limits::{CameraLimits, MAX_FIELD_OF_VIEW, MIN_FIELD_OF_VIEW};
 pub use camera_momentum::{
     AnchoredMomentum, CameraMomentum, InvalidMomentum, MomentumDecay, MomentumDecayModel, MomentumEasing,
     MomentumGlide, MomentumSnap,

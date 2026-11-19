@@ -63,7 +63,7 @@ impl PendingEnd {
 pub fn zoom_range(state: &TransformState, latitude: f64) -> (f64, f64) {
     let min = state.get_min_zoom_at_latitude(latitude);
     let min = state.get_min_zoom_for_screen_bounds().map_or(min, |bounds| min.max(bounds));
-    let max = state.get_max_zoom();
+    let max = state.limits().max_zoom;
     // Bounds too small to fill the screen at the greatest zoom hold the
     // camera there.
     (min.min(max), max)

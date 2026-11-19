@@ -266,7 +266,7 @@ impl SymbolView {
             time_point: Some(Instant::now()),
             view: state.view().clone(),
             min_zoom: state.get_min_zoom(),
-            max_zoom: state.get_max_zoom(),
+            max_zoom: state.limits().max_zoom,
             camera_moving: false,
             style: Arc::new(style.clone()),
             sprite_loaded: true,

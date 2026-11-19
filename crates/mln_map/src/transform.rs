@@ -14,14 +14,14 @@ use std::time::Duration;
 
 use geometry::Point;
 use mln_map_types::{
-    AnchoredMomentum, AnimationOptions, CameraDelta, CameraError, CameraMomentum, CameraOptions, CameraUpdate,
-    CameraUpdateMode, CameraVelocity, CenterAndBearing, ConstrainMode, FreeCameraOptions, GesturePhase, MomentumDecay,
-    MomentumDecayModel, MomentumEasing, MomentumGlide, MomentumSnap, NorthOrientation, ProjectionMode, TransformState,
-    TransitionEnd, TransitionOutcome, VerticalPerspectiveProjection, View, ViewportMode,
+    AnchoredMomentum, AnimationOptions, CameraDelta, CameraError, CameraLimits, CameraMomentum, CameraOptions,
+    CameraUpdate, CameraUpdateMode, CameraVelocity, CenterAndBearing, ConstrainMode, FreeCameraOptions, GesturePhase,
+    MomentumDecay, MomentumDecayModel, MomentumEasing, MomentumGlide, MomentumSnap, NorthOrientation, ProjectionMode,
+    TransformState, TransitionEnd, TransitionOutcome, VerticalPerspectiveProjection, View, ViewportMode,
 };
 use mln_style_types::ProjectionDefinition;
 use mln_util::UnitBezier;
-use mln_util::constants::{DEFAULT_TRANSITION_EASE, M2PI, PITCH_MAX};
+use mln_util::constants::{DEFAULT_TRANSITION_EASE, M2PI};
 use mln_util::error::Error;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
 use mln_util::interpolate::interpolate;
@@ -82,11 +82,6 @@ fn frame_edge_insets(top: f64, left: f64, bottom: f64, right: f64) -> Option<Edg
 /// [`frame_edge_insets`]: the frame keeps the center and zoom.
 fn frame_unproject(p: &Point<f64>, scale: f64, wrap_mode: WrapMode) -> Option<LatLng> {
     Projection::unproject(p, scale, wrap_mode).map_err(|e| Log::error(Event::General, &e.message)).ok()
-}
-
-/// Formats `value` with six decimals, as `std::to_string(double)` does.
-fn std_to_string(value: f64) -> String {
-    format!("{value:.6}")
 }
 
 /// Identifies a camera command that the transform started, in the
@@ -689,7 +684,7 @@ impl Transform {
 
             return Ok(());
         }
-        self.constrain_position(scale);
+        self.state.constrain_position(scale);
 
         self.emit(TransformEvent::CameraDidChange(CameraChange::default()));
         Ok(())
@@ -742,7 +737,7 @@ impl Transform {
 
         let duration = animation.duration.unwrap_or(Duration::ZERO);
         if !globe
-            && self.state.get_lat_lng_bounds() == LatLngBounds::default()
+            && self.state.limits().bounds == LatLngBounds::default()
             && !self.is_gesture_in_progress()
             && duration != Duration::ZERO
             && animation.easing.is_none()
@@ -774,7 +769,7 @@ impl Transform {
         // allows, or else the zoom it starts from, as GL JS's does; its last
         // frame is bounded by the zoom it ends on.
         let lat_lng_end = self.state.constrained_center(
-            &if self.state.get_lat_lng_bounds() == LatLngBounds::default() {
+            &if self.state.limits().bounds == LatLngBounds::default() {
                 unwrapped_lat_lng.wrapped()
             } else {
                 unwrapped_lat_lng
@@ -805,7 +800,7 @@ impl Transform {
             return;
         }
 
-        if self.state.get_lat_lng_bounds() == LatLngBounds::default() {
+        if self.state.limits().bounds == LatLngBounds::default() {
             if self.is_gesture_in_progress() {
                 // If gesture in progress, we transfer the wrap rounds from the
                 // end longitude into start, so the "scroll effect" of rounding
@@ -833,10 +828,10 @@ impl Transform {
         zoom = mln_math::clamp_f64(
             zoom,
             self.state.get_min_zoom_at_latitude_with(lat_lng_end.latitude(), target_globe),
-            self.state.get_max_zoom(),
+            self.state.limits().max_zoom,
         );
-        pitch = mln_math::clamp_f64(pitch, self.state.get_min_pitch(), self.state.get_max_pitch());
-        fov = mln_math::clamp_f64(fov, self.state.get_min_field_of_view(), self.state.get_max_field_of_view());
+        pitch = mln_math::clamp_f64(pitch, self.state.limits().min_pitch, self.state.limits().max_pitch);
+        fov = mln_math::clamp_f64(fov, mln_map_types::MIN_FIELD_OF_VIEW, mln_map_types::MAX_FIELD_OF_VIEW);
 
         // Minimize rotation by taking the shorter path around the circle.
         bearing = normalize_angle(bearing, self.state.view().angle());
@@ -1036,10 +1031,10 @@ impl Transform {
         zoom = mln_math::clamp_f64(
             zoom,
             self.state.get_min_zoom_at_latitude_with(lat_lng_end.latitude(), target_globe),
-            self.state.get_max_zoom(),
+            self.state.limits().max_zoom,
         );
-        pitch = mln_math::clamp_f64(pitch, self.state.get_min_pitch(), self.state.get_max_pitch());
-        fov = mln_math::clamp_f64(fov, self.state.get_min_field_of_view(), self.state.get_max_field_of_view());
+        pitch = mln_math::clamp_f64(pitch, self.state.limits().min_pitch, self.state.limits().max_pitch);
+        fov = mln_math::clamp_f64(fov, mln_map_types::MIN_FIELD_OF_VIEW, mln_map_types::MAX_FIELD_OF_VIEW);
 
         // Minimize rotation by taking the shorter path around the circle.
         bearing = normalize_angle(bearing, self.state.view().angle());
@@ -1109,7 +1104,7 @@ impl Transform {
             let min_zoom = mln_math::clamp_f64(
                 normalized_floor_zoom + VerticalPerspectiveProjection::zoom_adjustment(0.0, lat_lng_end.latitude()),
                 self.state.get_min_zoom_at_latitude(lat_lng_end.latitude()),
-                self.state.get_max_zoom(),
+                self.state.limits().max_zoom,
             );
             let w_max = w0
                 / mln_map_types::zoom_scale(
@@ -1126,7 +1121,7 @@ impl Transform {
             min_zoom = mln_math::clamp_f64(
                 min_zoom,
                 self.state.get_min_zoom_at_latitude(lat_lng_end.latitude()),
-                self.state.get_max_zoom(),
+                self.state.limits().max_zoom,
             );
             // w<sub>m</sub>: Maximum visible span, measured in pixels with
             // respect to the initial scale.
@@ -1512,60 +1507,12 @@ impl Transform {
         self.state.view().zoom()
     }
 
-    // MARK: - Bounds
+    // MARK: - Limits
 
-    pub fn set_lat_lng_bounds(&mut self, bounds: LatLngBounds) -> Result<(), Error> {
-        if !bounds.valid() {
-            return Err(Error::invalid_argument("failed to set bounds: bounds are invalid"));
-        }
-        self.state.set_lat_lng_bounds(bounds);
-        Ok(())
-    }
-
-    pub(crate) fn set_min_zoom(&mut self, min_zoom: f64) {
-        if min_zoom.is_nan() {
-            return;
-        }
-        self.state.set_min_zoom(min_zoom);
-    }
-
-    pub(crate) fn set_max_zoom(&mut self, max_zoom: f64) {
-        if max_zoom.is_nan() {
-            return;
-        }
-        self.state.set_max_zoom(max_zoom);
-    }
-
-    pub(crate) fn set_min_pitch(&mut self, min_pitch: f64) {
-        if min_pitch.is_nan() {
-            return;
-        }
-        if mln_math::deg2rad(min_pitch) < mln_util::constants::PITCH_MIN {
-            Log::warning(
-                Event::General,
-                format!(
-                    "Trying to set minimum pitch below the limit ({} degrees), the value will be clamped.",
-                    std_to_string(mln_math::rad2deg(mln_util::constants::PITCH_MIN))
-                ),
-            );
-        }
-        self.state.set_min_pitch(mln_math::deg2rad(min_pitch));
-    }
-
-    pub fn set_max_pitch(&mut self, max_pitch: f64) {
-        if max_pitch.is_nan() {
-            return;
-        }
-        if mln_math::deg2rad(max_pitch) > PITCH_MAX {
-            Log::warning(
-                Event::General,
-                format!(
-                    "Trying to set maximum pitch above the limit ({} degrees), the value will be clamped.",
-                    std_to_string(mln_math::rad2deg(PITCH_MAX))
-                ),
-            );
-        }
-        self.state.set_max_pitch(mln_math::deg2rad(max_pitch));
+    /// Sets the limits the camera moves within (see
+    /// [`TransformState::set_limits`]).
+    pub fn set_limits(&mut self, limits: CameraLimits) -> Result<(), Error> {
+        self.state.set_limits(limits)
     }
 
     pub(crate) fn set_frustum_offset(&mut self, frustum_offset: &EdgeInsets) {
@@ -1623,20 +1570,14 @@ impl Transform {
 
     pub(crate) fn set_north_orientation(&mut self, orientation: NorthOrientation) {
         self.state.set_north_orientation(orientation);
-        self.constrain_position(self.state.view().scale());
-    }
-
-    /// Moves the state to the position nearest its own at `scale` that the
-    /// constrain mode allows.
-    fn constrain_position(&mut self, scale: f64) {
-        self.state.constrain_position(scale);
+        self.state.constrain_position(self.state.view().scale());
     }
 
     // MARK: - Constrain mode
 
     pub fn set_constrain_mode(&mut self, mode: ConstrainMode) {
         self.state.set_constrain_mode(mode);
-        self.constrain_position(self.state.view().scale());
+        self.state.constrain_position(self.state.view().scale());
     }
 
     // MARK: - Viewport mode
@@ -2245,7 +2186,7 @@ impl Transform {
         let altitude = self.state.view().center_altitude();
         let steps = f64::min((distance / MAX_STEP).ceil(), MAX_STEPS);
         let step = ScreenCoordinate::new(offset.x / steps, offset.y / steps);
-        let bounded = self.state.get_lat_lng_bounds() != LatLngBounds::default();
+        let bounded = self.state.limits().bounds != LatLngBounds::default();
         for _ in 0..steps as u32 {
             if self.globe_on_screen() {
                 self.step_globe_pan(&step);
@@ -2310,7 +2251,7 @@ impl Transform {
         let mut target = mln_math::clamp_f64(
             before + zoom,
             self.state.get_min_zoom_at_latitude(center.latitude()),
-            self.state.get_max_zoom(),
+            self.state.limits().max_zoom,
         );
         let mut camera = CameraOptions { center: Some(center), ..Default::default() };
         self.state.constrain_camera_and_zoom_to_bounds(&mut camera, &mut target);
@@ -2349,7 +2290,7 @@ impl Transform {
         let max_pitch = get_max_pitch_for_edge_insets(&self.state, &self.state.view().padding());
         self.state.set_pitch(mln_math::clamp_f64(
             before + mln_math::deg2rad(pitch),
-            self.state.get_min_pitch(),
+            self.state.limits().min_pitch,
             max_pitch,
         ));
         if self.state.view().pitch() == before {
@@ -2675,7 +2616,7 @@ fn get_max_pitch_for_edge_insets(state: &TransformState, insets: &EdgeInsets) ->
     // See TransformState::getCenterOffset.
     let center_offset_y = 0.5 * (insets.top - insets.bottom);
     if center_offset_y == 0.0 {
-        return state.get_max_pitch();
+        return state.limits().max_pitch;
     }
 
     let height = state.view().size().height;
@@ -2685,7 +2626,7 @@ fn get_max_pitch_for_edge_insets(state: &TransformState, insets: &EdgeInsets) ->
     let tangent_of_fov_above_center_angle =
         (0.5 + center_offset_y / f64::from(height)) * 2.0 * (field_of_view / 2.0).tan();
     let fov_above_center = tangent_of_fov_above_center_angle.atan();
-    f64::max(state.get_min_pitch(), state.get_max_pitch() + field_of_view / 2.0 - fov_above_center)
+    f64::max(state.limits().min_pitch, state.limits().max_pitch + field_of_view / 2.0 - fov_above_center)
 }
 
 #[cfg(test)]

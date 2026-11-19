@@ -3,7 +3,7 @@
 
 use geo_types::{Geometry, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use mln_map::transform::Transform;
-use mln_map_types::{CameraOptions, ConstrainMode, TileLodMode, ViewportMode};
+use mln_map_types::{CameraLimits, CameraOptions, ConstrainMode, TileLodMode, ViewportMode};
 use mln_style_types::ProjectionDefinition;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID, UnwrappedTileID};
 use mln_util::constants;
@@ -772,7 +772,9 @@ mod tile_cover {
     fn set_up_globe(transform: &mut Transform, size: Size, center: LatLng, zoom: f64, pitch: f64, bearing: f64) {
         transform.resize(size).unwrap();
         transform.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
-        transform.set_max_pitch(80.0);
+        transform
+            .set_limits(CameraLimits { max_pitch: mln_math::deg2rad(80.0), ..*transform.get_state().limits() })
+            .unwrap();
         transform.jump_to(&CameraOptions {
             center: Some(center),
             zoom: Some(zoom),
