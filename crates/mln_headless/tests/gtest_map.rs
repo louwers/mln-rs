@@ -1953,7 +1953,7 @@ fn reduce_memory_use_removes_unused_requested_images() {
     test.map().edit_style(|style| style.apply(Edit::AddImage(image("other-icon", false)))).unwrap();
     test.render();
     let reduce_memory_use = || {
-        test.frontend().renderer().reduce_memory_use();
+        test.frontend().reduce_memory_use();
         test.run_loop.run_once();
         let map = test.map();
         ["kept-icon", "dropped-icon", "other-icon"].map(|id| map.style().get_image(id).is_some())
@@ -2559,7 +2559,7 @@ fn keep_render_data() {
     requests_count.store(0, Ordering::SeqCst);
     // Clear render data.
     for i in 1..=iterations {
-        test.frontend().renderer().clear_data();
+        test.frontend().clear_data();
         test.render();
         assert_eq!(resources_count * i, requests_count.load(Ordering::SeqCst));
     }
@@ -5203,7 +5203,7 @@ fn clear_data_keeps_the_light_sky_and_global_state() {
     let before = test.render().image;
     assert_eq!(center_pixel(&before), [255, 0, 0, 255]);
 
-    test.frontend().renderer().clear_data();
+    test.frontend().clear_data();
     let after = test.render().image;
     assert_eq!(before, after);
 }

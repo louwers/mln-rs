@@ -431,7 +431,7 @@ fn log_gpu_identifier(context: &Rc<GlContext>) {
 ///
 /// A readback reads the texels at once, since GL runs the commands before
 /// it first: a texture of 8-bit red or RGBA texels, which GL reads as RGBA.
-pub(crate) struct GlGpu {
+pub struct GlGpu {
     context: Rc<GlContext>,
     desktop: bool,
     caps: Caps,
@@ -567,10 +567,17 @@ impl GlGpu {
         delete(self.context.gl(), self.context.state());
     }
 
-    /// Ends a hold of the context: what draws on the context outside the
-    /// renderer samples with its textures' own parameters. In debug builds,
-    /// logs an error GL recorded, which waits for GL to run every call so
-    /// far.
+    /// The context the `GlGpu` calls, which its targets make current around
+    /// their own calls to it.
+    #[cfg(not(target_family = "wasm"))]
+    pub(crate) fn context(&self) -> &Rc<GlContext> {
+        &self.context
+    }
+
+    /// Ends a lend of the `GlGpu` (`GlScope`): what draws on the context
+    /// outside the renderer samples with its textures' own parameters. In
+    /// debug builds, logs an error GL recorded, which waits for GL to run
+    /// every call so far.
     pub(crate) fn end_frame(&mut self) {
         self.current(|gpu| {
             let gl = gpu.context.gl();

@@ -7,9 +7,6 @@
 // frame's last submit signals the ring's fence. A host that submits its reads
 // to the device's queue needs neither.
 
-use std::cell::{Cell, RefCell};
-use std::rc::Rc;
-
 use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
 use mln_gfx::gpu::{
     Gpu as _, ResourceId, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureUsage, destroy_unused,
@@ -224,7 +221,6 @@ const DEPTH_STENCIL: TextureFormat = TextureFormat::Depth24PlusStencil8;
 /// The ring's textures as textures of the backend's `Gpu`, with their depth
 /// and stencil textures: the host's, or one of the target's own.
 struct Imports {
-    backend: Rc<RendererBackend>,
     size: Size,
     targets: TargetFormats,
     color: Vec<TextureId>,
@@ -237,9 +233,8 @@ struct Imports {
 impl Imports {
     /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when the `Gpu`
     /// can't import a texture or make the depth and stencil texture.
-    fn new(backend: &Rc<RendererBackend>, textures: &BorrowedTextures) -> Result<Imports, Error> {
+    fn new(gpu: &mut D3d12Gpu, textures: &BorrowedTextures) -> Result<Imports, Error> {
         let mut imports = Imports {
-            backend: Rc::clone(backend),
             size: textures.size,
             targets: TargetFormats {
                 color: conv::from_texture_format(textures.format()),
@@ -249,16 +244,25 @@ impl Imports {
             depth: Vec::new(),
             own_depth: None,
         };
-        let mut gpu = backend.d3d12_gpu();
+        match imports.import(gpu, textures) {
+            Ok(()) => Ok(imports),
+            Err(error) => {
+                imports.tear_down(gpu);
+                Err(error)
+            }
+        }
+    }
+
+    fn import(&mut self, gpu: &mut D3d12Gpu, textures: &BorrowedTextures) -> Result<(), Error> {
         let import = |gpu: &mut D3d12Gpu, texture: &ID3D12Resource, state| {
             gpu.import_texture(texture, state)
                 .map_err(|error| Error::native(format!("Importing a borrowed texture failed: {error}")))
         };
         for texture in &textures.textures {
-            imports.color.push(import(&mut gpu, texture, textures.state)?);
+            self.color.push(import(gpu, texture, textures.state)?);
         }
         for texture in &textures.depth_textures {
-            imports.depth.push(import(&mut gpu, texture, textures.depth_state)?);
+            self.depth.push(import(gpu, texture, textures.depth_state)?);
         }
         if textures.depth_textures.is_empty() {
             let desc = TextureDesc {
@@ -270,9 +274,9 @@ impl Imports {
             let texture = gpu
                 .create_texture(&desc)
                 .map_err(|error| Error::native(format!("Making the depth and stencil texture failed: {error}")))?;
-            imports.own_depth = Some(texture);
+            self.own_depth = Some(texture);
         }
-        Ok(imports)
+        Ok(())
     }
 
     /// The textures that a frame drawn into `slot` draws into.
@@ -286,32 +290,30 @@ impl Imports {
     }
 }
 
-impl Drop for Imports {
-    /// Destroys the imports, which the `Gpu` keeps, and with them the host's
+impl Imports {
+    /// Destroys the imports, which `gpu` keeps, and with them the host's
     /// textures, until the work that uses them finishes.
-    fn drop(&mut self) {
-        let mut gpu = self.backend.d3d12_gpu();
-        for texture in self.color.drain(..).chain(self.depth.drain(..)).chain(self.own_depth.take()) {
-            destroy_unused(&mut *gpu, [ResourceId::Texture(texture)]);
-        }
+    fn tear_down(&mut self, gpu: &mut D3d12Gpu) {
+        let textures = self.color.drain(..).chain(self.depth.drain(..)).chain(self.own_depth.take());
+        destroy_unused(gpu, textures.map(ResourceId::Texture));
     }
 }
 
 /// Frames drawn into the host's textures, each given back to the host.
 pub struct BorrowedTarget {
-    backend: Rc<RendererBackend>,
-    textures: RefCell<BorrowedTextures>,
-    imports: RefCell<Imports>,
+    device: Device,
+    textures: BorrowedTextures,
+    imports: Imports,
     /// The slot the next frame draws into.
-    selected: Cell<usize>,
-    slots: RefCell<Vec<Slot>>,
+    selected: usize,
+    slots: Vec<Slot>,
     producer: SyncKind,
     /// The fence that frames signal, for a fence producer, and the value of
     /// the last frame's signal.
     fence: Option<SharedFence>,
-    fence_value: Cell<u64>,
+    fence_value: u64,
     /// The host's fences, by their NT handles, opened once.
-    host_fences: RefCell<HashMap<u64, ID3D12Fence>>,
+    host_fences: HashMap<u64, ID3D12Fence>,
 }
 
 impl BorrowedTarget {
@@ -323,8 +325,9 @@ impl BorrowedTarget {
     /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for another producer
     /// kind, and with [`ErrorKind::Native`](mln_util::ErrorKind) when the
     /// device makes no shared fence or the `Gpu` can't import a texture.
-    pub fn new(backend: Rc<RendererBackend>, textures: BorrowedTextures, producer: SyncKind) -> Result<Self, Error> {
-        let device = backend.d3d12_gpu().device().clone();
+    pub fn new(backend: &mut RendererBackend, textures: BorrowedTextures, producer: SyncKind) -> Result<Self, Error> {
+        use mln_gfx::RendererBackend as _;
+        let device = backend.device().clone();
         textures.check(&device)?;
         if !BorrowedTextures::sync_kinds().0.contains(producer) {
             return Err(Error::unsupported(format!("the D3D12 device can't hand frames over with {producer:?}")));
@@ -333,24 +336,24 @@ impl BorrowedTarget {
             SyncKind::D3d12Fence => Some(SharedFence::new(&device)?),
             _ => None,
         };
-        let imports = Imports::new(&backend, &textures)?;
+        let imports = Imports::new(backend.gpu(), &textures)?;
         let slots = textures.textures.len();
         Ok(BorrowedTarget {
-            backend,
-            textures: RefCell::new(textures),
-            imports: RefCell::new(imports),
-            selected: Cell::new(0),
-            slots: RefCell::new(vec![Slot::default(); slots]),
+            device,
+            textures,
+            imports,
+            selected: 0,
+            slots: vec![Slot::default(); slots],
             producer,
             fence,
-            fence_value: Cell::new(0),
-            host_fences: RefCell::new(HashMap::default()),
+            fence_value: 0,
+            host_fences: HashMap::default(),
         })
     }
 
     /// Has the next frame draw into the texture at `slot`.
-    pub fn select(&self, slot: usize) {
-        self.selected.set(slot);
+    pub fn select(&mut self, slot: usize) {
+        self.selected = slot;
     }
 
     /// The host gave the texture at `slot` back: the next frame drawn into
@@ -364,59 +367,44 @@ impl BorrowedTarget {
         clippy::needless_pass_by_value,
         reason = "the release takes the host's sync, as every backend's does, and drops it"
     )]
-    pub fn release(&self, slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
+    pub fn release(&mut self, gpu: &mut D3d12Gpu, slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
         let sync = consumer.sync;
         let wait = match sync.kind {
             SyncKind::CpuComplete | SyncKind::QueueOrder => None,
             SyncKind::D3d12Fence => Some((self.host_fence(sync.handle)?, sync.value)),
             kind => return Err(Error::unsupported(format!("the D3D12 target waits for no {kind:?}"))),
         };
-        let mut slots = self.slots.borrow_mut();
-        let Some(state) = slots.get_mut(slot) else {
+        let Some(state) = self.slots.get_mut(slot) else {
             return Err(Error::invalid_argument("the ring has no such slot"));
         };
-        self.detach(state);
+        detach(gpu, state);
         state.wait = wait;
         Ok(())
     }
 
     /// The host's fence whose NT handle is `handle`, opened once.
-    fn host_fence(&self, handle: u64) -> Result<ID3D12Fence, Error> {
-        if let Some(fence) = self.host_fences.borrow().get(&handle) {
+    fn host_fence(&mut self, handle: u64) -> Result<ID3D12Fence, Error> {
+        if let Some(fence) = self.host_fences.get(&handle) {
             return Ok(fence.clone());
         }
-        let device = self.backend.d3d12_gpu().device().clone();
+        let device = &self.device;
         let mut fence: Option<ID3D12Fence> = None;
         // SAFETY: the host's NT handle, which the release names and which
         // stays valid for the session's life; the call doesn't take it.
         unsafe { device.device().OpenSharedHandle(HANDLE(handle as usize as *mut _), &raw mut fence) }
             .map_err(|e| Error::invalid_argument(format!("the device can't open the host's fence: {e}")))?;
         let fence = fence.ok_or_else(|| Error::invalid_argument("the host's handle names no fence"))?;
-        self.host_fences.borrow_mut().insert(handle, fence.clone());
+        self.host_fences.insert(handle, fence.clone());
         Ok(fence)
     }
 
     /// The host gave up the texture at `slot`, which is never drawn into
     /// again.
-    pub fn discard(&self, slot: usize) {
-        if let Some(state) = self.slots.borrow_mut().get_mut(slot) {
-            self.detach(state);
+    pub fn discard(&mut self, gpu: &mut D3d12Gpu, slot: usize) {
+        if let Some(state) = self.slots.get_mut(slot) {
+            detach(gpu, state);
             state.wait = None;
         }
-    }
-
-    /// Has no submit wait for what `slot` waits for.
-    fn detach(&self, slot: &mut Slot) {
-        if let Some(texture) = slot.attached.take() {
-            self.backend.d3d12_gpu().forget_waits(texture);
-        }
-    }
-
-    /// The host's reads that `waits` end with, and the frames submitted so
-    /// far, which the host may use the textures after.
-    fn pending(&self, waits: impl IntoIterator<Item = (ID3D12Fence, u64)>) -> PendingReads {
-        let submitted = self.backend.d3d12_gpu().last_submit();
-        PendingReads { waits: waits.into_iter().chain([submitted]).collect() }
     }
 
     /// Draws into `textures` from now on, which must be as many, of the
@@ -429,9 +417,9 @@ impl BorrowedTarget {
     /// and as [`BorrowedTextures::check`] does. The target then keeps its
     /// textures. Returns the host's reads of the textures that the ring let
     /// go of, which the ring waits for before the host may use them.
-    pub fn replace(&self, textures: BorrowedTextures) -> Result<PendingReads, Error> {
+    pub fn replace(&mut self, gpu: &mut D3d12Gpu, textures: BorrowedTextures) -> Result<PendingReads, Error> {
         {
-            let current = self.textures.borrow();
+            let current = &self.textures;
             if textures.textures.len() != current.textures.len() {
                 return Err(Error::invalid_argument("a ring keeps its depth"));
             }
@@ -442,20 +430,19 @@ impl BorrowedTarget {
                 return Err(Error::unsupported("a ring keeps its depth textures' format, or their lack"));
             }
         }
-        textures.check(self.backend.d3d12_gpu().device())?;
+        textures.check(&self.device)?;
         // The old imports go, and what they wait for with them: the `Gpu`
         // keeps the textures until the work that uses them finishes, and the
         // slots keep the host's fences.
-        *self.imports.borrow_mut() = Imports::new(&self.backend, &textures)?;
+        let imports = Imports::new(gpu, &textures)?;
+        std::mem::replace(&mut self.imports, imports).tear_down(gpu);
 
-        let old = std::mem::replace(&mut *self.textures.borrow_mut(), textures);
+        let old = std::mem::replace(&mut self.textures, textures);
         // A texture that the new ring has again keeps what it waits for, at
         // its new slot.
-        let mut slots = self.slots.borrow_mut();
-        let mut previous = std::mem::take(&mut *slots);
+        let mut previous = std::mem::take(&mut self.slots);
         let kept = self
             .textures
-            .borrow()
             .textures
             .iter()
             .map(|texture| {
@@ -467,31 +454,31 @@ impl BorrowedTarget {
             })
             .map(|wait| Slot { wait, attached: None })
             .collect();
-        *slots = kept;
-        Ok(self.pending(previous.into_iter().filter_map(|slot| slot.wait)))
+        self.slots = kept;
+        Ok(pending(gpu, previous.into_iter().filter_map(|slot| slot.wait)))
     }
 
     /// Takes what the ring's textures still wait for, the host's reads of
     /// them, and the frames submitted so far, for the ring to wait for before
     /// it lets go of the textures.
-    pub fn take_pending(&self) -> PendingReads {
-        let mut slots = self.slots.borrow_mut();
-        for slot in slots.iter_mut() {
-            self.detach(slot);
+    pub fn take_pending(&mut self, gpu: &mut D3d12Gpu) -> PendingReads {
+        for slot in &mut self.slots {
+            detach(gpu, slot);
         }
-        self.pending(slots.iter_mut().filter_map(|slot| slot.wait.take()).collect::<Vec<_>>())
+        let waits: Vec<_> = self.slots.iter_mut().filter_map(|slot| slot.wait.take()).collect();
+        pending(gpu, waits)
     }
 
     /// The sync the host waits for, once the frame was submitted.
-    fn producer_sync(&self) -> Option<GpuSync> {
+    fn producer_sync(&self, gpu: &mut D3d12Gpu) -> Option<GpuSync> {
         match (self.producer, &self.fence) {
             (SyncKind::D3d12Fence, Some(fence)) => Some(GpuSync {
                 kind: SyncKind::D3d12Fence,
                 handle: fence.handle.0.0 as usize as u64,
-                value: self.fence_value.get(),
+                value: self.fence_value,
             }),
             (SyncKind::QueueOrder, _) => Some(GpuSync::of(SyncKind::QueueOrder)),
-            _ => match self.backend.d3d12_gpu().flush(true) {
+            _ => match gpu.flush(true) {
                 Ok(()) => Some(GpuSync::of(SyncKind::CpuComplete)),
                 Err(error) => {
                     Log::error(Event::Render, format!("Waiting for a borrowed texture's frame failed: {error}"));
@@ -502,19 +489,34 @@ impl BorrowedTarget {
     }
 }
 
+/// Has no submit of `gpu` wait for what `slot` waits for.
+fn detach(gpu: &mut D3d12Gpu, slot: &mut Slot) {
+    if let Some(texture) = slot.attached.take() {
+        gpu.forget_waits(texture);
+    }
+}
+
+/// The host's reads that `waits` end with, and the frames submitted to `gpu`
+/// so far, which the host may use the textures after.
+fn pending(gpu: &D3d12Gpu, waits: impl IntoIterator<Item = (ID3D12Fence, u64)>) -> PendingReads {
+    let submitted = gpu.last_submit();
+    PendingReads { waits: waits.into_iter().chain([submitted]).collect() }
+}
+
 impl FrameTarget for BorrowedTarget {
+    type Gpu = D3d12Gpu;
+
     /// The selected slot's texture, which the frame's first pass that draws
     /// into it waits for the host's reads before.
-    fn begin_frame(&self) -> Option<FrameImage> {
-        let slot = self.selected.get();
-        let image = self.imports.borrow().frame_image(slot)?;
-        let mut slots = self.slots.borrow_mut();
+    fn begin_frame(&mut self, gpu: &mut D3d12Gpu) -> Option<FrameImage> {
+        let slot = self.selected;
+        let image = self.imports.frame_image(slot)?;
         // A frame begun again keeps the wait it attached.
-        if let Some(state) = slots.get_mut(slot)
+        if let Some(state) = self.slots.get_mut(slot)
             && state.attached != Some(image.color)
             && let Some((fence, value)) = &state.wait
         {
-            self.backend.d3d12_gpu().wait_before_using(image.color, fence.clone(), *value);
+            gpu.wait_before_using(image.color, fence.clone(), *value);
             state.attached = Some(image.color);
         }
         Some(image)
@@ -522,24 +524,20 @@ impl FrameTarget for BorrowedTarget {
 
     /// Submits what is left of the frame, signaling the producer's fence
     /// after it.
-    fn end_frame(&self) -> Handoff {
-        let slot = self.selected.get();
-        let Some(color) = self.imports.borrow().color.get(slot).copied() else {
+    fn end_frame(&mut self, gpu: &mut D3d12Gpu) -> Handoff {
+        let slot = self.selected;
+        let Some(color) = self.imports.color.get(slot).copied() else {
             return Handoff::Dropped;
         };
-        let submitted = {
-            let mut gpu = self.backend.d3d12_gpu();
-            // What no pass took yet, such as where the frame drew nothing.
-            gpu.take_waits_into_next_submit(color);
-            if let Some(fence) = &self.fence {
-                let value = self.fence_value.get() + 1;
-                self.fence_value.set(value);
-                gpu.signal_after_next_submit(fence.fence.clone(), value);
-            }
-            gpu.flush(false)
-        };
+        // What no pass took yet, such as where the frame drew nothing.
+        gpu.take_waits_into_next_submit(color);
+        if let Some(fence) = &self.fence {
+            self.fence_value += 1;
+            gpu.signal_after_next_submit(fence.fence.clone(), self.fence_value);
+        }
+        let submitted = gpu.flush(false);
         // The frame's submits took what the slot waited for.
-        if let Some(state) = self.slots.borrow_mut().get_mut(slot)
+        if let Some(state) = self.slots.get_mut(slot)
             && state.attached.take() == Some(color)
         {
             state.wait = None;
@@ -548,10 +546,17 @@ impl FrameTarget for BorrowedTarget {
             Log::error(Event::Render, format!("Submitting a borrowed texture's frame failed: {error}"));
             return Handoff::Dropped;
         }
-        match self.producer_sync() {
+        match self.producer_sync(gpu) {
             Some(sync) => Handoff::GivenBack { slot, sync },
             None => Handoff::Dropped,
         }
+    }
+
+    fn tear_down(&mut self, gpu: &mut D3d12Gpu) {
+        for slot in &mut self.slots {
+            detach(gpu, slot);
+        }
+        self.imports.tear_down(gpu);
     }
 }
 

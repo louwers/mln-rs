@@ -3,9 +3,10 @@
 //! implements it on `wgpu`, `mln_mtl` on Metal, `mln_vulkan` on Vulkan and
 //! `mln_gl` on OpenGL ES 3.0.
 //!
-//! A backend's `RendererBackend` hands the renderer its `Gpu`, which owns
-//! the renderer's buffers, textures and the groups of buffers its draws
-//! bind; the renderer keeps them in `mln_renderer`. Each program's
+//! A backend's `RendererBackend` owns its `Gpu` and lends it, to the
+//! renderer and to the `FrameTarget` that the renderer draws into; the `Gpu`
+//! owns the renderer's buffers, textures and the groups of buffers its
+//! draws bind, which the renderer keeps in `mln_renderer`. Each program's
 //! attributes and the keys of its variants are in `shaders::program_info`.
 
 pub mod backend;
@@ -40,7 +41,7 @@ pub use export::{
 };
 pub use frame::{ConsumerSync, FrameImage, FrameTarget, GpuSync, Handoff, SyncKind, SyncKinds};
 pub use gfx_types::{AttributeDataType, DrawModeType, PrimitiveType};
-pub use renderer_backend::{Hold, RendererBackend};
+pub use renderer_backend::RendererBackend;
 pub use scissor_rect::ScissorRect;
 pub use stencil_mode::StencilMode;
 pub use types::DepthMaskType;

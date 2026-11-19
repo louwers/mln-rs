@@ -93,7 +93,7 @@ impl Impl {
 
 impl TestRunnerImpl for Impl {
     fn reset_context(&mut self, metadata: &TestMetadata) -> Result<(), MapError> {
-        self.frontend.renderer().clear_data();
+        self.frontend.clear_data();
         self.frontend.set_size(metadata.size);
         self.map.set_size(metadata.size).map_err(|e| MapError::Exception(e.to_string()))?;
         self.map.set_projection_mode(

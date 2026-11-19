@@ -1,6 +1,7 @@
 use std::mem::offset_of;
 use std::sync::Arc;
 
+use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::fill_layer_ubo::{
     FillDrawableUBO, FillDrawableUnionUBO, FillEvaluatedPropsUBO, FillOutlineDrawableUBO, FillPatternDrawableUBO,
@@ -622,6 +623,7 @@ impl TypedLayer for RenderFillLayer {
     /// buffers they read.
     fn update_draws(
         &mut self,
+        gpu: &mut dyn Gpu,
         paint_parameters: &mut PaintParameters<'_>,
         _atlases: &Atlases,
         render_tiles: &[FrameTile<'_, Fill>],
@@ -754,7 +756,7 @@ impl TypedLayer for RenderFillLayer {
             *layer.paint.fill_layer_blend.uniform(),
         ));
         frame.set_stencil_tiles(render_tiles.iter().map(|tile| tile.tile.id));
-        self.draw_list.finish(frame, paint_parameters.context, |writer| Self::write_uniforms(layer, writer));
+        self.draw_list.finish(frame, gpu, paint_parameters.context, |writer| Self::write_uniforms(layer, writer));
     }
 }
 

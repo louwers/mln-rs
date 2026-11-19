@@ -3,7 +3,7 @@
 // which its `VulkanGpu` and the targets built on it share, and the renderer's
 // context. A window target gets its surface from a `SurfaceProvider`.
 
-use std::cell::{RefCell, RefMut};
+use std::cell::RefCell;
 use std::ffi::CStr;
 use std::mem::ManuallyDrop;
 use std::rc::Rc;
@@ -11,7 +11,6 @@ use std::rc::Rc;
 use ash::vk;
 use gpu_allocator::vulkan::{Allocator, AllocatorCreateDesc};
 use gpu_allocator::{AllocationSizes, AllocatorDebugSettings};
-use mln_gfx::gpu::Gpu;
 use mln_gfx::renderer_backend;
 use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
@@ -226,12 +225,10 @@ impl Drop for BackendImpl {
 
 /// A renderer's device and context.
 pub struct RendererBackend {
-    impl_: Rc<BackendImpl>,
-    /// The context, made with the backend so that failing to make it is the
-    /// backend's error.
-    /// The backend's `Gpu`, which owns the renderer's resources and
-    /// submits its frames.
-    gpu: RefCell<VulkanGpu>,
+    /// The backend's `Gpu`, which owns the renderer's resources and submits
+    /// its frames, made with the backend so that failing to make it is the
+    /// backend's error. It holds what the backend made on its device.
+    gpu: VulkanGpu,
 }
 
 impl RendererBackend {
@@ -259,23 +256,18 @@ impl RendererBackend {
 
     fn with_frames(device: &Device, max_frames: u32) -> Result<Self, Error> {
         let impl_ = Rc::new(BackendImpl::new(device, max_frames)?);
-        let gpu = VulkanGpu::on(Rc::clone(&impl_)).map_err(|error| Error::native(error.to_string()))?;
-        Ok(RendererBackend { impl_, gpu: RefCell::new(gpu) })
+        let gpu = VulkanGpu::on(impl_).map_err(|error| Error::native(error.to_string()))?;
+        Ok(RendererBackend { gpu })
     }
 
     pub(crate) fn backend_impl(&self) -> &Rc<BackendImpl> {
-        &self.impl_
-    }
-
-    /// The backend's `Gpu`, which the renderer's frames are submitted
-    /// through.
-    pub(crate) fn gpu(&self) -> RefMut<'_, VulkanGpu> {
-        self.gpu.borrow_mut()
+        self.gpu.backend_impl()
     }
 
     /// The name of the GPU.
+    #[must_use]
     pub fn get_device_name(&self) -> String {
-        self.impl_
+        self.backend_impl()
             .get_device_properties()
             .device_name_as_c_str()
             .map(|name| name.to_string_lossy().into_owned())
@@ -283,13 +275,17 @@ impl RendererBackend {
     }
 
     /// Whether the device renders on the CPU, as lavapipe does.
+    #[must_use]
     pub fn is_software_device(&self) -> bool {
-        self.impl_.get_device_properties().device_type == vk::PhysicalDeviceType::CPU
+        self.backend_impl().get_device_properties().device_type == vk::PhysicalDeviceType::CPU
     }
 }
 
 impl renderer_backend::RendererBackend for RendererBackend {
-    fn gpu(&self) -> RefMut<'_, dyn Gpu> {
-        RefMut::map(self.gpu.borrow_mut(), |gpu| -> &mut dyn Gpu { gpu })
+    type Gpu = VulkanGpu;
+    type Scope<'a> = &'a mut VulkanGpu;
+
+    fn gpu(&mut self) -> &mut VulkanGpu {
+        &mut self.gpu
     }
 }

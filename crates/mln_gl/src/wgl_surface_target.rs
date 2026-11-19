@@ -7,7 +7,6 @@
 // As on the other window backends, an overlay can draw over each frame
 // before it is presented (an app's controls).
 
-use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -22,8 +21,9 @@ use windows_sys::Win32::Graphics::OpenGL::HGLRC;
 use windows_sys::Win32::UI::WindowsAndMessaging::IsIconic;
 
 use crate::frame_image::{FrameImports, default_framebuffer};
+use crate::gpu::GlGpu;
 use crate::overlay::{self, Overlay};
-use crate::renderer_backend::{PlatformContext, RendererBackend};
+use crate::renderer_backend::{GlContext, PlatformContext, RendererBackend};
 use crate::wgl;
 
 /// The window's context, current on the window's device context.
@@ -93,13 +93,14 @@ impl PlatformContext for WindowContext {
 /// Frames presented to a Win32 window, from a WGL context of the window's
 /// own.
 pub struct SurfaceTarget {
-    backend: Rc<RendererBackend>,
+    /// The backend's context, which the overlay draws with and goes with.
+    context: Rc<GlContext>,
     window: Rc<WglWindow>,
-    size: Cell<Size>,
+    size: Size,
     /// The frame's default framebuffer, imported into the backend's `GlGpu`.
     image: FrameImports,
-    /// What draws over each frame, which `end_frame` takes out while it draws.
-    overlay: Cell<Option<Overlay>>,
+    /// What draws over each frame.
+    overlay: Option<Overlay>,
 }
 
 impl SurfaceTarget {
@@ -135,79 +136,83 @@ impl SurfaceTarget {
         window: Arc<dyn Window>,
         framebuffer_size: Size,
         cap_frame_rate: bool,
-    ) -> Result<(Rc<RendererBackend>, SurfaceTarget), Error> {
+    ) -> Result<(RendererBackend, SurfaceTarget), Error> {
         let window = Rc::new(WglWindow::new(window)?);
         window.make_current().map_err(|e| Error::native(format!("Switching OpenGL context failed: {e}")))?;
         wgl::set_swap_interval(None, i32::from(cap_frame_rate));
         let gl = wgl::functions(None);
         let _ = wgl::make_current(std::ptr::null_mut(), std::ptr::null_mut());
         let gl = gl?;
-        let backend = Rc::new(RendererBackend::from_parts(gl, Box::new(WindowContext(Rc::clone(&window)))));
+        let backend = RendererBackend::from_parts(gl, Box::new(WindowContext(Rc::clone(&window))));
         let target = SurfaceTarget {
-            backend: Rc::clone(&backend),
+            context: Rc::clone(backend.context()),
             window,
-            size: Cell::new(framebuffer_size),
+            size: framebuffer_size,
             image: FrameImports::default(),
-            overlay: Cell::default(),
+            overlay: None,
         };
         Ok((backend, target))
     }
 
     /// The size of the frames, in physical pixels.
+    #[must_use]
     pub fn size(&self) -> Size {
-        self.size.get()
+        self.size
     }
 
     /// The window has `size` pixels from now on.
-    pub fn resize(&self, size: Size) {
-        self.size.set(size);
+    pub fn resize(&mut self, size: Size) {
+        self.size = size;
     }
 
     /// Draws `overlay` over each frame from now on, or nothing.
-    pub fn set_overlay(&self, overlay: Option<Overlay>) {
-        let _current = self.backend.context().enter();
-        self.overlay.set(overlay);
+    pub fn set_overlay(&mut self, overlay: Option<Overlay>) {
+        let _current = self.context.enter();
+        self.overlay = overlay;
     }
 }
 
 impl FrameTarget for SurfaceTarget {
+    type Gpu = GlGpu;
+
     /// A frame begins unless the window is minimized, or has no pixels.
-    fn begin_frame(&self) -> Option<FrameImage> {
-        let size = self.size.get();
+    fn begin_frame(&mut self, gpu: &mut GlGpu) -> Option<FrameImage> {
+        let size = self.size;
         // SAFETY: a plain query of the live window.
         if size.width == 0 || size.height == 0 || unsafe { IsIconic(self.window.window) } != 0 {
             return None;
         }
-        self.image.get_or_import(|| default_framebuffer(&self.backend, size))
+        self.image.get_or_import(|| default_framebuffer(gpu, size))
     }
 
     /// Presents the frame, with the overlay over it.
-    fn end_frame(&self) -> Handoff {
+    fn end_frame(&mut self, gpu: &mut GlGpu) -> Handoff {
         let Some(image) = self.image.get() else {
             return Handoff::Dropped;
         };
-        let context = self.backend.context();
-        let _current = context.enter();
-        if let Some(mut overlay) = self.overlay.take() {
-            overlay::draw(&mut overlay, context, image.size);
-            self.overlay.set(Some(overlay));
+        let _current = self.context.enter();
+        if let Some(overlay) = self.overlay.as_mut() {
+            overlay::draw(overlay, &self.context, image.size);
         }
-        self.image.release(&self.backend);
+        self.image.release(gpu);
         if let Err(e) = wgl::swap_buffers(self.window.dc.dc()) {
             Log::error(Event::GraphicsBackend, e);
         }
         Handoff::Presented
+    }
+
+    fn tear_down(&mut self, gpu: &mut GlGpu) {
+        self.image.release(gpu);
     }
 }
 
 impl Drop for SurfaceTarget {
     fn drop(&mut self) {
         // The overlay's GL objects go with the context current.
-        if let Some(overlay) = self.overlay.get_mut().take() {
-            let _current = self.backend.context().enter();
+        if let Some(overlay) = self.overlay.take() {
+            let _current = self.context.enter();
             drop(overlay);
         }
-        self.image.release(&self.backend);
     }
 }
 
@@ -219,6 +224,7 @@ mod tests {
     use std::sync::Arc;
 
     use glow::HasContext as _;
+    use mln_gfx::RendererBackend as _;
     use mln_gfx::frame::{FrameTarget as _, Handoff};
     use mln_gfx::gpu::{ColorAttachment, Gpu as _, LoadOp, PassDesc};
     use mln_gfx::window::raw_window_handle::{
@@ -249,20 +255,19 @@ mod tests {
     }
 
     /// Clears a frame of `target` red, and presents it.
-    fn red_frame(backend: &crate::RendererBackend, target: &SurfaceTarget) -> Handoff {
-        let image = target.begin_frame().unwrap();
+    fn red_frame(backend: &mut crate::RendererBackend, target: &mut SurfaceTarget) -> Handoff {
+        let mut gpu = backend.gpu();
+        let image = target.begin_frame(&mut gpu).unwrap();
         let clear = LoadOp::Clear(Color::new(1.0, 0.0, 0.0, 1.0));
         let pass = PassDesc {
             label: "frame",
             color: Some(ColorAttachment { texture: image.color, load: clear }),
             depth_stencil: None,
         };
-        let mut gpu = backend.gpu();
         gpu.begin_pass(&pass).unwrap();
         gpu.end_pass().unwrap();
         gpu.flush(false).unwrap();
-        drop(gpu);
-        target.end_frame()
+        target.end_frame(&mut gpu)
     }
 
     // The overlay draws over each frame into the window's framebuffer, with
@@ -272,7 +277,7 @@ mod tests {
         let (window, _) = HiddenWindow::new(0).unwrap();
         let handle = Arc::new(Handle(NonZeroIsize::new(window.window() as isize).unwrap()));
         let size = Size::new(8, 8);
-        let (backend, target) = SurfaceTarget::with_backend(handle, size, false).unwrap();
+        let (mut backend, mut target) = SurfaceTarget::with_backend(handle, size, false).unwrap();
         let pixels = Rc::new(Cell::new(Vec::new()));
         let seen = Rc::clone(&pixels);
         target.set_overlay(Some(Box::new(move |target| {
@@ -295,12 +300,13 @@ mod tests {
             pixels.push(pixel);
             seen.set(pixels);
         })));
-        assert_eq!(Handoff::Presented, red_frame(&backend, &target));
-        assert_eq!(Handoff::Presented, red_frame(&backend, &target));
+        assert_eq!(Handoff::Presented, red_frame(&mut backend, &mut target));
+        assert_eq!(Handoff::Presented, red_frame(&mut backend, &mut target));
         assert_eq!(vec![[255, 0, 0, 255]; 2], pixels.take());
         target.set_overlay(None);
-        assert_eq!(Handoff::Presented, red_frame(&backend, &target));
+        assert_eq!(Handoff::Presented, red_frame(&mut backend, &mut target));
         assert_eq!(Vec::<[u8; 4]>::new(), pixels.take());
+        target.tear_down(&mut backend.gpu());
         drop(target);
         drop(backend);
     }

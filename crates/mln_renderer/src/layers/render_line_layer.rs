@@ -2,7 +2,7 @@ use std::mem::offset_of;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_gfx::gpu::TextureFormat;
+use mln_gfx::gpu::{Gpu, TextureFormat};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::line_layer_ubo::{
     LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineGradientDrawableUBO, LinePatternDrawableUBO,
@@ -257,7 +257,7 @@ fn read_line_attributes(
 
 /// A texture of the bucket's dash patterns, for a `line-dasharray` that
 /// differs by feature.
-fn dash_atlas_texture(context: &mut Context, binders: &LineBinders) -> Option<SharedTexture> {
+fn dash_atlas_texture(gpu: &mut dyn Gpu, context: &mut Context, binders: &LineBinders) -> Option<SharedTexture> {
     let image = binders.line_dasharray.atlas()?.image();
     if !image.valid() {
         return None;
@@ -271,7 +271,7 @@ fn dash_atlas_texture(context: &mut Context, binders: &LineBinders) -> Option<Sh
             ..Default::default()
         });
     });
-    if let Err(error) = context.upload_texture_data(&texture, &image.data, image.size) {
+    if let Err(error) = context.upload_texture_data(gpu, &texture, &image.data, image.size) {
         Log::error(Event::Render, format!("Uploading the dash patterns failed: {error}"));
         return None;
     }
@@ -485,6 +485,7 @@ impl TypedLayer for RenderLineLayer {
     /// buffers they read.
     fn update_draws(
         &mut self,
+        gpu: &mut dyn Gpu,
         paint_parameters: &mut PaintParameters<'_>,
         atlases: &Atlases,
         render_tiles: &[FrameTile<'_, Line>],
@@ -541,7 +542,7 @@ impl TypedLayer for RenderLineLayer {
                 });
                 cached
             } else {
-                let built = self.build_tile(shaders, context, render_data, binders, evaluated, render_pass);
+                let built = self.build_tile(gpu, shaders, context, render_data, binders, evaluated, render_pass);
                 let Some(cached) = built.and_then(|built| self.drawing.tiles_mut().insert(&tile_id, built).ok()) else {
                     continue;
                 };
@@ -563,7 +564,7 @@ impl TypedLayer for RenderLineLayer {
 
         let frame = self.drawing.frame_mut();
         let layer = &self.values.evaluated;
-        self.draw_list.finish(frame, paint_parameters.context, |writer| Self::write_uniforms(layer, writer));
+        self.draw_list.finish(frame, gpu, paint_parameters.context, |writer| Self::write_uniforms(layer, writer));
     }
 
     /// Adds the dash patterns of the tiles' buckets to the line atlas, then
@@ -652,8 +653,13 @@ impl RenderLayer for RenderLineLayer {
 impl RenderLineLayer {
     /// The draw of the tile's `bucket`, laid out with `evaluated`, in
     /// `pass`, if the layer has what it draws with.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the frame's GPU and context, and the tile's bucket, binders, values and pass"
+    )]
     fn build_tile(
         &mut self,
+        gpu: &mut dyn Gpu,
         shaders: &ShaderRegistry,
         context: &mut Context,
         tile_bucket: LayerBucket<'_, Line>,
@@ -672,8 +678,11 @@ impl RenderLineLayer {
             !evaluated.line_dasharray.is_constant() || !evaluated.line_dasharray.faded().from.is_empty();
         // A constant dash array's texture comes from the line atlas, with the
         // draw's uniforms.
-        let dash_texture =
-            if evaluated.line_dasharray.is_constant() { None } else { Some(dash_atlas_texture(context, binders)?) };
+        let dash_texture = if evaluated.line_dasharray.is_constant() {
+            None
+        } else {
+            Some(dash_atlas_texture(gpu, context, binders)?)
+        };
         let has_gradient = !self.values.unevaluated.line_gradient.get_value().is_undefined();
 
         let mut textures = Textures::default();

@@ -503,7 +503,7 @@ void main() { color = vec4(0.0, 1.0, 0.0, 1.0); }
 
     #[test]
     fn clearing_the_data_deinitializes_on_its_context() {
-        check_end(|frontend, _| frontend.as_mut().unwrap().renderer().clear_data());
+        check_end(|frontend, _| frontend.as_mut().unwrap().clear_data());
     }
 
     #[test]

@@ -510,12 +510,12 @@ impl LayerDrawing for SymbolDrawing {
         }
     }
 
-    fn upload(&mut self, context: &mut Context) {
+    fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         if let Some(frame) = &self.frame {
-            frame.upload(&mut self.tiles, Self::objects, context);
+            frame.upload(gpu, &mut self.tiles, Self::objects, context);
         }
         if let Some(overlay) = &self.overlay {
-            overlay.upload(&mut self.tiles, Self::collision_objects, context);
+            overlay.upload(gpu, &mut self.tiles, Self::collision_objects, context);
         }
     }
 
@@ -1132,6 +1132,7 @@ impl RenderSymbolLayer {
     /// writes the buffers they read.
     fn make_frame_draws(
         &mut self,
+        gpu: &mut dyn Gpu,
         tiles: &[FrameTile<'_, Symbol>],
         passes: RenderPass,
         paint_parameters: &mut PaintParameters<'_>,
@@ -1155,7 +1156,7 @@ impl RenderSymbolLayer {
                 self.draw_list.push_part(frame_draw, index, uniforms);
             }
             for (index, draw) in cached.collision.iter_mut().enumerate() {
-                write_collision_uniforms(draw, &tile_id, paint_parameters);
+                write_collision_uniforms(gpu, draw, &tile_id, paint_parameters);
                 let frame_draw =
                     FrameDraw { pass: passes, depth: DrawDepth::Off, ..FrameDraw::new(Some(tile_id), draw.draw.id) };
                 self.collision_list.push_part(frame_draw, index, ());
@@ -1163,14 +1164,14 @@ impl RenderSymbolLayer {
         }
 
         if let Some(frame) = &mut self.drawing.frame {
-            self.draw_list.finish(frame, paint_parameters.context, |writer| write_uniforms(&layer.paint, writer));
+            self.draw_list.finish(frame, gpu, paint_parameters.context, |writer| write_uniforms(&layer.paint, writer));
         } else {
             self.draw_list.clear();
         }
         // Each collision draw has its own GPU objects and buffers, so no two
         // share an order, and the overlay's buffers are none.
         if let Some(overlay) = &mut self.drawing.overlay {
-            self.collision_list.finish(overlay, paint_parameters.context, |_| {});
+            self.collision_list.finish(overlay, gpu, paint_parameters.context, |_| {});
         } else {
             self.collision_list.clear();
         }
@@ -1206,6 +1207,7 @@ fn write_uniforms(
 /// Writes the buffers of a collision draw of the tile `tile_id`: its matrix,
 /// and the scale of its boxes' and circles' extrusions.
 fn write_collision_uniforms(
+    gpu: &mut dyn Gpu,
     draw: &mut CollisionDraw,
     tile_id: &OverscaledTileID,
     parameters: &mut PaintParameters<'_>,
@@ -1236,9 +1238,9 @@ fn write_collision_uniforms(
         CollisionTilePropsUBO { extrude_scale, overscale_factor: tile_id.overscale_factor() as f32, pad1: 0.0 };
     let buffers = &mut draw.draw.objects.uniform_buffers;
     let context = &mut *parameters.context;
-    buffers.create_or_update_pod(ID_COLLISION_DRAWABLE_UBO, &draw_ubo, context.device());
-    buffers.create_or_update_pod(ID_COLLISION_TILE_PROPS_UBO, &tile_props_ubo, context.device());
-    buffers.create_or_update_pod(ID_COLLISION_PROJECTION_UBO, &to_projection_ubo(&projection), context.device());
+    buffers.create_or_update_pod(gpu, ID_COLLISION_DRAWABLE_UBO, &draw_ubo, context.device());
+    buffers.create_or_update_pod(gpu, ID_COLLISION_TILE_PROPS_UBO, &tile_props_ubo, context.device());
+    buffers.create_or_update_pod(gpu, ID_COLLISION_PROJECTION_UBO, &to_projection_ubo(&projection), context.device());
 }
 
 fn collision_vertex_attributes(context: &mut Context, buffer: &CollisionBuffer) -> VertexAttributeArray {
@@ -1329,6 +1331,7 @@ impl TypedLayer for RenderSymbolLayer {
     /// over them, and writes the buffers they read.
     fn update_draws(
         &mut self,
+        gpu: &mut dyn Gpu,
         paint_parameters: &mut PaintParameters<'_>,
         _atlases: &Atlases,
         render_tiles: &[FrameTile<'_, Symbol>],
@@ -1654,7 +1657,7 @@ impl TypedLayer for RenderSymbolLayer {
         }
 
         self.renderable_segments = renderable_segments;
-        self.make_frame_draws(render_tiles, passes, paint_parameters);
+        self.make_frame_draws(gpu, render_tiles, passes, paint_parameters);
     }
 
     /// Collects the symbol buckets of the tiles the layer places, and of

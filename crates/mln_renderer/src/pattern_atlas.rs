@@ -1,6 +1,6 @@
 use etagere::{AllocId, BucketedAtlasAllocator, size2};
 use geometry::Point;
-use mln_gfx::gpu::TextureFormat;
+use mln_gfx::gpu::{Gpu, TextureFormat};
 use mln_style_types::image::{ImagePosition, Impl as ImageImpl, RectU16};
 use mln_util::hash::HashMap;
 use mln_util::image::PremultipliedImage;
@@ -146,7 +146,7 @@ impl PatternAtlas {
 
     /// Uploads the atlas image to its texture, which is made again when the
     /// atlas grew since.
-    pub(crate) fn upload(&mut self, context: &mut Context) {
+    pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         let texture = match &self.texture {
             None => {
                 let texture = context.add_texture_with(|texture| texture.set_format(TextureFormat::Rgba8Unorm));
@@ -156,7 +156,7 @@ impl PatternAtlas {
             Some(_) => return,
         };
         let image = &self.atlas_image;
-        if let Err(error) = context.upload_texture_data(texture, &image.data, image.size) {
+        if let Err(error) = context.upload_texture_data(gpu, texture, &image.data, image.size) {
             Log::error(Event::Render, format!("Uploading the pattern atlas failed: {error}"));
         }
         self.dirty = false;

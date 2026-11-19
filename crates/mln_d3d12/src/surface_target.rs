@@ -14,9 +14,7 @@
 // - A window that is minimized or has an empty client area takes no frame
 //   (`begin_frame`), and presents nothing while it is occluded.
 
-use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_gfx::Window;
@@ -45,6 +43,7 @@ use windows::Win32::System::Threading::WaitForSingleObjectEx;
 use windows::core::{GUID, HRESULT, IUnknown, Interface};
 
 use crate::custom_layer::CustomLayerPass;
+use crate::device::Device;
 use crate::gpu::D3d12Gpu;
 use crate::renderer_backend::RendererBackend;
 
@@ -214,19 +213,19 @@ impl Drop for OwnedHandle {
 
 /// Frames presented through a flip-model swap chain.
 pub struct SurfaceTarget {
-    backend: Rc<RendererBackend>,
+    device: Device,
     swap_chain: IDXGISwapChain3,
     waitable: OwnedHandle,
     presentee: Presentee,
     /// The size of the frames, which the buffers take before the next
     /// frame.
-    size: Cell<Size>,
-    buffers: RefCell<Option<Buffers>>,
+    size: Size,
+    buffers: Option<Buffers>,
     /// Whether a frame has waited for its turn and not yet been presented.
-    waited: Cell<bool>,
+    waited: bool,
     /// The frame begun and not yet ended.
-    frame: Cell<Option<(usize, FrameImage)>>,
-    overlay: RefCell<Option<Box<dyn Overlay>>>,
+    frame: Option<(usize, FrameImage)>,
+    overlay: Option<Box<dyn Overlay>>,
 }
 
 fn native(what: &'static str) -> impl Fn(windows::core::Error) -> Error {
@@ -243,7 +242,7 @@ impl SurfaceTarget {
     /// minimized or has no client area, and with
     /// [`ErrorKind::Native`](mln_util::ErrorKind) when DXGI makes no swap
     /// chain for it.
-    pub fn new(backend: Rc<RendererBackend>, window: Arc<dyn Window>, size: Size) -> Result<SurfaceTarget, Error> {
+    pub fn new(backend: &RendererBackend, window: Arc<dyn Window>, size: Size) -> Result<SurfaceTarget, Error> {
         let handle = window.window_handle().map_err(|e| Error::native(format!("The window has no handle: {e}")))?;
         let RawWindowHandle::Win32(handle) = handle.as_raw() else {
             return Err(Error::unsupported("D3D12 presents to Win32 windows only"));
@@ -252,7 +251,7 @@ impl SurfaceTarget {
             return Err(Error::invalid_state("The window is minimized or has no client area"));
         }
         let hwnd = HWND(handle.hwnd.get() as *mut c_void);
-        let device = backend.d3d12_gpu().device().clone();
+        let device = backend.device().clone();
         let factory = device.factory();
         let desc = swap_chain_desc(size, DXGI_ALPHA_MODE_IGNORE);
         // SAFETY: the queue is the device's, the window is live (the
@@ -263,7 +262,7 @@ impl SurfaceTarget {
         // Fullscreen is the window's host's to switch, not DXGI's.
         // SAFETY: a plain call of the live window.
         let _ = unsafe { factory.MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER) };
-        Self::with_swap_chain(backend, &swap_chain, Presentee::Window(window), size)
+        Self::with_swap_chain(device, &swap_chain, Presentee::Window(window), size)
     }
 
     /// A target on `backend` that presents through a composition swap chain
@@ -274,11 +273,11 @@ impl SurfaceTarget {
     /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when DXGI makes
     /// no swap chain, or `composition` takes none.
     pub fn for_composition(
-        backend: Rc<RendererBackend>,
+        backend: &RendererBackend,
         composition: Composition,
         size: Size,
     ) -> Result<SurfaceTarget, Error> {
-        let device = backend.d3d12_gpu().device().clone();
+        let device = backend.device().clone();
         // A composition swap chain has a size even before its host has one.
         let desc = swap_chain_desc(Size::new(size.width.max(1), size.height.max(1)), DXGI_ALPHA_MODE_PREMULTIPLIED);
         // SAFETY: the queue is the device's, and the description outlives
@@ -287,11 +286,11 @@ impl SurfaceTarget {
             unsafe { device.factory().CreateSwapChainForComposition(device.queue(), &raw const desc, None) }
                 .map_err(native("CreateSwapChainForComposition"))?;
         composition.show(&swap_chain).map_err(native("Showing the swap chain"))?;
-        Self::with_swap_chain(backend, &swap_chain, Presentee::Composition(composition), size)
+        Self::with_swap_chain(device, &swap_chain, Presentee::Composition(composition), size)
     }
 
     fn with_swap_chain(
-        backend: Rc<RendererBackend>,
+        device: Device,
         swap_chain: &IDXGISwapChain1,
         presentee: Presentee,
         size: Size,
@@ -304,52 +303,51 @@ impl SurfaceTarget {
             OwnedHandle(swap_chain.GetFrameLatencyWaitableObject())
         };
         Ok(SurfaceTarget {
-            backend,
+            device,
             swap_chain,
             waitable,
             presentee,
-            size: Cell::new(size),
-            buffers: RefCell::new(None),
-            waited: Cell::new(false),
-            frame: Cell::new(None),
-            overlay: RefCell::new(None),
+            size,
+            buffers: None,
+            waited: false,
+            frame: None,
+            overlay: None,
         })
     }
 
     /// The size of the frames, in physical pixels.
+    #[must_use]
     pub fn size(&self) -> Size {
-        self.size.get()
+        self.size
     }
 
     /// Sets the size of the frames, in pixels, which the swap chain's buffers
     /// take before the next frame. No frame is drawn at an empty size.
-    pub fn resize(&self, size: Size) {
-        self.size.set(size);
+    pub fn resize(&mut self, size: Size) {
+        self.size = size;
     }
 
     /// Draws `overlay` over each frame from now on, after the map and
     /// before the frame is presented, or stops with `None`. The overlay it
-    /// replaces destroys what it made ([`Overlay::destroy`]).
-    pub fn set_overlay(&self, overlay: Option<Box<dyn Overlay>>) {
-        let old = self.overlay.replace(overlay);
-        if let Some(mut old) = old {
-            old.destroy(&mut self.backend.d3d12_gpu());
+    /// replaces destroys what it made on `gpu` ([`Overlay::destroy`]).
+    pub fn set_overlay(&mut self, gpu: &mut D3d12Gpu, overlay: Option<Box<dyn Overlay>>) {
+        if let Some(mut old) = std::mem::replace(&mut self.overlay, overlay) {
+            old.destroy(gpu);
         }
     }
 
-    /// The buffers at the target's size, made or resized for it: the
-    /// textures of buffers of another size go, and the GPU finishes with
+    /// The buffers at the target's size, made or resized for it in `gpu`:
+    /// the textures of buffers of another size go, and the GPU finishes with
     /// them, before the swap chain resizes them.
-    fn buffers(&self) -> Result<(), Error> {
-        let size = self.size.get();
-        let mut buffers = self.buffers.borrow_mut();
+    fn buffers(&mut self, gpu: &mut D3d12Gpu) -> Result<(), Error> {
+        let size = self.size;
+        let buffers = &mut self.buffers;
         if buffers.as_ref().is_some_and(|buffers| buffers.size == size) {
             return Ok(());
         }
-        let mut gpu = self.backend.d3d12_gpu();
         if let Some(old) = buffers.take() {
             for texture in old.color.into_iter().chain([old.depth_stencil]) {
-                destroy_unused(&mut *gpu, [ResourceId::Texture(texture)]);
+                destroy_unused(gpu, [ResourceId::Texture(texture)]);
             }
             gpu.flush(true).map_err(|error| Error::native(format!("Waiting for the GPU failed: {error}")))?;
             // SAFETY: nothing holds the buffers any more: their textures
@@ -373,9 +371,7 @@ impl SurfaceTarget {
             match gpu.import_texture(&buffer, D3D12_RESOURCE_STATE_PRESENT) {
                 Ok(texture) => color.push(texture),
                 Err(error) => {
-                    for texture in color {
-                        destroy_unused(&mut *gpu, [ResourceId::Texture(texture)]);
-                    }
+                    destroy_unused(gpu, color.into_iter().map(ResourceId::Texture));
                     return Err(Error::native(format!("Importing a swap chain buffer failed: {error}")));
                 }
             }
@@ -389,9 +385,7 @@ impl SurfaceTarget {
         let depth_stencil = match gpu.create_texture(&desc) {
             Ok(texture) => texture,
             Err(error) => {
-                for texture in color {
-                    destroy_unused(&mut *gpu, [ResourceId::Texture(texture)]);
-                }
+                destroy_unused(gpu, color.into_iter().map(ResourceId::Texture));
                 return Err(Error::native(format!("Making the depth and stencil texture failed: {error}")));
             }
         };
@@ -401,22 +395,20 @@ impl SurfaceTarget {
 
     /// Waits for the frame's turn, once until it is presented. Returns
     /// whether it came.
-    fn wait_turn(&self) -> bool {
-        if self.waited.get() {
+    fn wait_turn(&mut self) -> bool {
+        if self.waited {
             return true;
         }
         // SAFETY: the swap chain's waitable object, which the target owns.
         let waited = unsafe { WaitForSingleObjectEx(self.waitable.0, WAIT_MILLISECONDS, true) } == WAIT_OBJECT_0;
-        self.waited.set(waited);
+        self.waited = waited;
         waited
     }
 
     /// Draws the overlay over the frame's buffer.
-    fn draw_overlay(&self, color: TextureId, size: Size) {
-        let mut overlay = self.overlay.borrow_mut();
-        let Some(overlay) = overlay.as_mut() else { return };
-        let mut gpu = self.backend.d3d12_gpu();
-        overlay.prepare(&mut OverlayTarget { gpu: &mut gpu, size, format: DXGI_FORMAT_B8G8R8A8_UNORM });
+    fn draw_overlay(&mut self, gpu: &mut D3d12Gpu, color: TextureId, size: Size) {
+        let Some(overlay) = self.overlay.as_mut() else { return };
+        overlay.prepare(&mut OverlayTarget { gpu, size, format: DXGI_FORMAT_B8G8R8A8_UNORM });
         let pass = PassDesc {
             label: "overlay",
             color: Some(ColorAttachment { texture: color, load: LoadOp::Load }),
@@ -458,13 +450,15 @@ fn swap_chain_desc(
 }
 
 impl FrameTarget for SurfaceTarget {
+    type Gpu = D3d12Gpu;
+
     /// Waits for the frame's turn and takes the swap chain's next buffer. No
     /// frame is drawn at an empty size or into a window without an area.
-    fn begin_frame(&self) -> Option<FrameImage> {
-        if let Some((_, image)) = self.frame.get() {
+    fn begin_frame(&mut self, gpu: &mut D3d12Gpu) -> Option<FrameImage> {
+        if let Some((_, image)) = self.frame {
             return Some(image);
         }
-        let size = self.size.get();
+        let size = self.size;
         if size.width == 0 || size.height == 0 {
             return None;
         }
@@ -473,7 +467,7 @@ impl FrameTarget for SurfaceTarget {
         {
             return None;
         }
-        if let Err(error) = self.buffers() {
+        if let Err(error) = self.buffers(gpu) {
             Log::error(Event::Render, format!("Making the swap chain's buffers failed: {}", error.message));
             return None;
         }
@@ -482,37 +476,36 @@ impl FrameTarget for SurfaceTarget {
         }
         // SAFETY: a plain query.
         let index = unsafe { self.swap_chain.GetCurrentBackBufferIndex() } as usize;
-        let buffers = self.buffers.borrow();
-        let buffers = buffers.as_ref()?;
+        let buffers = self.buffers.as_ref()?;
         let image = FrameImage {
             size,
             color: *buffers.color.get(index)?,
             depth_stencil: Some(buffers.depth_stencil),
             targets: TargetFormats { color: Some(COLOR), depth_stencil: Some(DEPTH_STENCIL) },
         };
-        self.frame.set(Some((index, image)));
+        self.frame = Some((index, image));
         Some(image)
     }
 
     /// Draws the overlay over the frame, submits it, and presents it.
-    fn end_frame(&self) -> Handoff {
+    fn end_frame(&mut self, gpu: &mut D3d12Gpu) -> Handoff {
         let Some((_, image)) = self.frame.take() else {
             return Handoff::Dropped;
         };
-        self.draw_overlay(image.color, image.size);
-        if let Err(error) = self.backend.d3d12_gpu().flush(false) {
+        self.draw_overlay(gpu, image.color, image.size);
+        if let Err(error) = gpu.flush(false) {
             Log::error(Event::Render, format!("Submitting the frame failed: {error}"));
             return Handoff::Dropped;
         }
         // SAFETY: the frame's work went to the queue that the swap chain
         // presents on.
         let presented = unsafe { self.swap_chain.Present(0, DXGI_PRESENT(0)) };
-        self.waited.set(false);
+        self.waited = false;
         match presented {
             DXGI_STATUS_OCCLUDED => Handoff::Dropped,
             result if result.is_ok() => Handoff::Presented,
             result => {
-                let reason = self.backend.d3d12_gpu().device().removed_reason();
+                let reason = self.device.removed_reason();
                 Log::error(
                     Event::Render,
                     format!(
@@ -524,20 +517,17 @@ impl FrameTarget for SurfaceTarget {
             }
         }
     }
-}
 
-impl Drop for SurfaceTarget {
     /// Destroys the buffers' textures and the overlay's objects, and waits
-    /// for the GPU's work on the buffers, which the swap chain releases.
-    fn drop(&mut self) {
-        let mut gpu = self.backend.d3d12_gpu();
-        if let Some(mut overlay) = self.overlay.get_mut().take() {
-            overlay.destroy(&mut gpu);
+    /// for the GPU's work on the buffers, which the swap chain releases as
+    /// it drops.
+    fn tear_down(&mut self, gpu: &mut D3d12Gpu) {
+        if let Some(mut overlay) = self.overlay.take() {
+            overlay.destroy(gpu);
         }
-        if let Some(buffers) = self.buffers.get_mut().take() {
-            for texture in buffers.color.into_iter().chain([buffers.depth_stencil]) {
-                destroy_unused(&mut *gpu, [ResourceId::Texture(texture)]);
-            }
+        self.frame = None;
+        if let Some(buffers) = self.buffers.take() {
+            destroy_unused(gpu, buffers.color.into_iter().chain([buffers.depth_stencil]).map(ResourceId::Texture));
         }
         let _ = gpu.flush(true);
     }

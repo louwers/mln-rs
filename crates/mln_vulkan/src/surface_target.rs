@@ -18,13 +18,12 @@
 //   `set_overlay` draws over each frame before it is presented, such as an
 //   app's controls over the map.
 
-use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use ash::vk;
-use mln_gfx::Window;
 use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
+use mln_gfx::{RendererBackend as _, Window};
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
@@ -104,11 +103,11 @@ pub(crate) fn present_mode(cap_frame_rate: bool, available: &[vk::PresentModeKHR
 /// a window's surface.
 pub struct SurfaceTarget {
     resource: SurfaceResource,
-    size: Cell<Size>,
+    size: Size,
     /// Whether the swapchain is rebuilt before the next frame.
-    rebuild: Cell<bool>,
+    rebuild: bool,
     /// Whether `take_readback` has a frame to wait for or to return.
-    readback_requested: Cell<bool>,
+    readback_requested: bool,
 }
 
 impl SurfaceTarget {
@@ -123,7 +122,7 @@ impl SurfaceTarget {
         window: Arc<dyn Window>,
         framebuffer_size: Size,
         cap_frame_rate: bool,
-    ) -> Result<(Rc<RendererBackend>, SurfaceTarget), Error> {
+    ) -> Result<(RendererBackend, SurfaceTarget), Error> {
         let provider = Rc::new(WindowSurface::new(window)?);
         Self::with_backend_from_provider(device, provider, framebuffer_size, cap_frame_rate)
     }
@@ -135,9 +134,9 @@ impl SurfaceTarget {
         provider: Rc<dyn SurfaceProvider>,
         framebuffer_size: Size,
         cap_frame_rate: bool,
-    ) -> Result<(Rc<RendererBackend>, SurfaceTarget), Error> {
-        let backend = Rc::new(RendererBackend::presenting(device)?);
-        let target = Self::from_provider(Rc::clone(&backend), provider, framebuffer_size, cap_frame_rate)?;
+    ) -> Result<(RendererBackend, SurfaceTarget), Error> {
+        let mut backend = RendererBackend::presenting(device)?;
+        let target = Self::from_provider(&mut backend, provider, framebuffer_size, cap_frame_rate)?;
         Ok((backend, target))
     }
 
@@ -151,7 +150,7 @@ impl SurfaceTarget {
     /// and with [`ErrorKind::Native`](mln_util::ErrorKind) when the window
     /// gets no surface or swapchain.
     pub fn new(
-        backend: Rc<RendererBackend>,
+        backend: &mut RendererBackend,
         window: Arc<dyn Window>,
         framebuffer_size: Size,
         cap_frame_rate: bool,
@@ -162,7 +161,7 @@ impl SurfaceTarget {
 
     /// [`new`](Self::new) for the surfaces `provider` makes.
     pub(crate) fn from_provider(
-        backend: Rc<RendererBackend>,
+        backend: &mut RendererBackend,
         provider: Rc<dyn SurfaceProvider>,
         framebuffer_size: Size,
         cap_frame_rate: bool,
@@ -188,7 +187,7 @@ impl SurfaceTarget {
     /// an empty extent, and with [`ErrorKind::Native`](mln_util::ErrorKind)
     /// when the surface gets no swapchain.
     pub fn on_host_surface(
-        backend: Rc<RendererBackend>,
+        backend: &mut RendererBackend,
         surface: HostSurface,
         framebuffer_size: Size,
         cap_frame_rate: bool,
@@ -202,7 +201,7 @@ impl SurfaceTarget {
     /// one of an empty extent, such as a minimized window's, with
     /// `InvalidState`. Either is destroyed when the target would own it.
     fn on_surface(
-        backend: Rc<RendererBackend>,
+        backend: &mut RendererBackend,
         surface: vk::SurfaceKHR,
         provider: Option<Rc<dyn SurfaceProvider>>,
         framebuffer_size: Size,
@@ -246,7 +245,7 @@ impl SurfaceTarget {
                 .unwrap_or_default()
         };
         let resource = SurfaceResource::new(
-            backend,
+            backend.gpu(),
             framebuffer_size,
             surface,
             provider,
@@ -259,29 +258,26 @@ impl SurfaceTarget {
         if resource.get_image_count() == 0 && framebuffer_size.width > 0 && framebuffer_size.height > 0 {
             return Err(Error::native("Failed to create a swapchain for the window"));
         }
-        Ok(SurfaceTarget {
-            resource,
-            size: Cell::new(framebuffer_size),
-            rebuild: Cell::new(false),
-            readback_requested: Cell::new(false),
-        })
+        Ok(SurfaceTarget { resource, size: framebuffer_size, rebuild: false, readback_requested: false })
     }
 
     /// The format of the swapchain's images.
+    #[must_use]
     pub fn get_color_format(&self) -> vk::Format {
         self.resource.get_color_format()
     }
 
     /// The size of the frames, in physical pixels.
+    #[must_use]
     pub fn size(&self) -> Size {
-        self.size.get()
+        self.size
     }
 
     /// Sets the size of the window's framebuffer, in pixels. The next frame is
     /// drawn into a swapchain of that size, or of the size the surface has
     /// where the window system gives it one.
-    pub fn resize(&self, size: Size) {
-        self.size.set(size);
+    pub fn resize(&mut self, size: Size) {
+        self.size = size;
         if size.width == 0 || size.height == 0 {
             return;
         }
@@ -291,33 +287,33 @@ impl SurfaceTarget {
             self.resource.set_extent(size);
         }
         if changed || self.resource.get_image_count() == 0 {
-            self.rebuild.set(true);
+            self.rebuild = true;
         }
     }
 
     /// Copies the frame being drawn, or else the next one, when it
     /// is presented (see `take_readback`).
-    pub fn request_readback(&self) {
+    pub fn request_readback(&mut self) {
         self.resource.request_read();
-        self.readback_requested.set(true);
+        self.readback_requested = true;
     }
 
     /// The frame copied after `request_readback`, once
     /// presented, with what the overlay drew over it.
-    pub fn take_readback(&self) -> Option<PremultipliedImage> {
-        if !self.readback_requested.get() || self.resource.is_read_requested() {
+    pub fn take_readback(&mut self, gpu: &mut VulkanGpu) -> Option<PremultipliedImage> {
+        if !self.readback_requested || self.resource.is_read_requested() {
             return None;
         }
-        self.readback_requested.set(false);
-        self.resource.read_image()
+        self.readback_requested = false;
+        self.resource.read_image(gpu)
     }
 
     /// Draws `overlay` over each frame from now on, after the map and
     /// before the frame is presented (and read back), or stops with `None`.
-    /// The overlay it replaces destroys what it made
+    /// The overlay it replaces destroys what it made on `gpu`
     /// ([`Overlay::destroy`]).
-    pub fn set_overlay(&self, overlay: Option<Box<dyn Overlay>>) {
-        self.resource.set_overlay(overlay);
+    pub fn set_overlay(&mut self, gpu: &mut VulkanGpu, overlay: Option<Box<dyn Overlay>>) {
+        self.resource.set_overlay(gpu, overlay);
     }
 }
 
@@ -327,12 +323,14 @@ fn is_empty(extent: vk::Extent2D) -> bool {
 }
 
 impl FrameTarget for SurfaceTarget {
+    type Gpu = VulkanGpu;
+
     /// Acquires the frame's image. No frame is drawn into an empty
     /// framebuffer. A swapchain that couldn't be made, as for a surface of
     /// an empty extent, such as a minimized window's, is made again before
     /// the frame, once the surface has an extent.
-    fn begin_frame(&self) -> Option<FrameImage> {
-        let size = self.size.get();
+    fn begin_frame(&mut self, gpu: &mut VulkanGpu) -> Option<FrameImage> {
+        let size = self.size;
         if size.width == 0 || size.height == 0 {
             return None;
         }
@@ -340,15 +338,19 @@ impl FrameTarget for SurfaceTarget {
         if unbuilt && self.resource.current_extent().is_some_and(is_empty) {
             return None;
         }
-        if self.rebuild.take() || unbuilt {
+        if std::mem::take(&mut self.rebuild) || unbuilt {
             self.resource.request_surface_update(false);
         }
-        self.resource.begin_frame()
+        self.resource.begin_frame(gpu)
     }
 
     /// Draws the overlay over the frame, reads it back if asked, and
     /// presents it.
-    fn end_frame(&self) -> Handoff {
-        if self.resource.end_frame() { Handoff::Presented } else { Handoff::Dropped }
+    fn end_frame(&mut self, gpu: &mut VulkanGpu) -> Handoff {
+        if self.resource.end_frame(gpu) { Handoff::Presented } else { Handoff::Dropped }
+    }
+
+    fn tear_down(&mut self, gpu: &mut VulkanGpu) {
+        self.resource.tear_down(gpu);
     }
 }

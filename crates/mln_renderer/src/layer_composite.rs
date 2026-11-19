@@ -137,13 +137,13 @@ struct Texture {
 }
 
 impl Texture {
-    fn new(context: &mut Context, size: Size, format: TextureFormat) -> Result<Texture, GpuError> {
+    fn new(gpu: &mut dyn Gpu, context: &mut Context, size: Size, format: TextureFormat) -> Result<Texture, GpuError> {
         let owned = context.add_texture_with(|texture| {
             texture.set_size(size);
             texture.set_format(format);
             texture.set_render_target();
         });
-        let (texture, sampler) = context.bind_texture(&owned)?;
+        let (texture, sampler) = context.texture_binding(gpu, &owned)?;
         let held = context.gpu_texture(&owned).cloned().ok_or(GpuError::UnknownId("texture"))?;
         Ok(Texture { held, texture, sampler })
     }
@@ -207,8 +207,13 @@ impl LayerComposite {
     /// and drops it where there are none. With `overdraw`, the overdraw
     /// inspector's, every group blends as `normal`, and without `format` so
     /// does every group that blends in the shader.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the frame's GPU and context, the shaders, and the frame's size, format and composited groups"
+    )]
     pub(crate) fn update(
         &mut self,
+        gpu: &mut dyn Gpu,
         context: &mut Context,
         shaders: &ShaderRegistry,
         size: Size,
@@ -235,7 +240,7 @@ impl LayerComposite {
             self.groups.push((group, composite));
         }
         let frame_format = format.filter(|_| self.groups.iter().any(|(_, c)| c.reads_backdrop()));
-        if let Err(error) = self.make(context, size, frame_format) {
+        if let Err(error) = self.make(gpu, context, size, frame_format) {
             Log::warning(Event::Render, format!("Making the layer composite's textures failed: {error}"));
             self.groups.clear();
             self.drop_textures();
@@ -255,9 +260,9 @@ impl LayerComposite {
             };
             self.bytes[slot * stride..][..size].copy_from_slice(bytemuck::bytes_of(&ubo));
         }
-        context.device().write_uniform_buffer(&mut self.uniforms, &self.bytes);
+        context.device().write_uniform_buffer(gpu, &mut self.uniforms, &self.bytes);
         if self.projection.is_none() {
-            context.device().write_uniform_buffer_pod(&mut self.projection, &ProjectionUBO::default());
+            context.device().write_uniform_buffer_pod(gpu, &mut self.projection, &ProjectionUBO::default());
         }
     }
 
@@ -272,23 +277,30 @@ impl LayerComposite {
     /// Makes the target of `size`, unless it is made, with a depth and
     /// stencil of its own where a group draws with them, the frame copy of
     /// `frame_format` where there is one, and the quad.
-    fn make(&mut self, context: &mut Context, size: Size, frame_format: Option<TextureFormat>) -> Result<(), GpuError> {
+    fn make(
+        &mut self,
+        gpu: &mut dyn Gpu,
+        context: &mut Context,
+        size: Size,
+        frame_format: Option<TextureFormat>,
+    ) -> Result<(), GpuError> {
         if self.target.as_ref().is_none_or(|target| target.size != size) {
             self.drop_textures();
-            let color = Texture::new(context, size, COLOR)?;
+            let color = Texture::new(gpu, context, size, COLOR)?;
             self.target = Some(Target { size, color, depth_stencil: None });
         }
         if let Some(target) = self.target.as_mut().filter(|target| target.depth_stencil.is_none())
             && self.groups.iter().any(|(_, composite)| !composite.frame_depth)
         {
-            target.depth_stencil = Some(context.attachment("layer composite depth and stencil", size, DEPTH_STENCIL)?);
+            target.depth_stencil =
+                Some(context.attachment(gpu, "layer composite depth and stencil", size, DEPTH_STENCIL)?);
         }
         match frame_format {
             None => self.frame = None,
             Some(format) if self.frame.as_ref().is_none_or(|frame| frame.format != format) => {
                 self.frame = None;
-                let frame = Texture::new(context, size, format)?;
-                let backdrop = Texture::new(context, size, format)?;
+                let frame = Texture::new(gpu, context, size, format)?;
+                let backdrop = Texture::new(gpu, context, size, format)?;
                 self.frame = Some(FrameCopy { format, frame, backdrop });
             }
             Some(_) => {}
@@ -297,8 +309,8 @@ impl LayerComposite {
             let vertices: [[i16; 2]; 4] = [[0, 0], [1, 0], [0, 1], [1, 1]];
             let indices = RenderStaticData::quad_triangle_indices();
             self.quad = Some(Quad {
-                vertices: context.device().buffer(BufferUsage::Vertex, bytemuck::cast_slice(&vertices))?,
-                indices: context.device().buffer(BufferUsage::Index, bytemuck::cast_slice(&indices))?,
+                vertices: context.device().buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&vertices))?,
+                indices: context.device().buffer(gpu, BufferUsage::Index, bytemuck::cast_slice(&indices))?,
                 geometry: None,
             });
         }

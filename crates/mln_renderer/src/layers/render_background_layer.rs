@@ -1,6 +1,7 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
+use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::background_layer_ubo::{
     BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPatternDrawableUBO, BackgroundPatternPropsUBO,
@@ -186,7 +187,12 @@ impl TypedLayer for RenderBackgroundLayer {
     /// Makes the frame's draws of the layer, one of each tile that covers
     /// the view, which it builds for a tile it keeps none of, and writes the
     /// layer's buffers they read.
-    fn update_draws_without_source(&mut self, paint_parameters: &mut PaintParameters<'_>, atlases: &Atlases) {
+    fn update_draws_without_source(
+        &mut self,
+        gpu: &mut dyn Gpu,
+        paint_parameters: &mut PaintParameters<'_>,
+        atlases: &Atlases,
+    ) {
         let RenderBackgroundLayer {
             base,
             values,
@@ -260,7 +266,7 @@ impl TypedLayer for RenderBackgroundLayer {
             draw_list.push(draw, Self::uniforms(tile_id, has_pattern, paint_parameters));
         }
 
-        draw_list.finish(drawing.frame_mut(), paint_parameters.context, |writer| {
+        draw_list.finish(drawing.frame_mut(), gpu, paint_parameters.context, |writer| {
             let opacity = *evaluated.background_opacity.uniform();
             if let Some((from, to)) = pattern_positions {
                 let crossfade = &layer.crossfade;

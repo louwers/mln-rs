@@ -1,9 +1,7 @@
-use std::rc::Rc;
-
 use glow::HasContext as _;
 use mln_gfx::frame::{FrameTarget as _, Handoff};
 use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu as _, LoadOp, PassDesc, TextureId};
-use mln_gfx::{ConsumerSync, GpuSync, SyncKind};
+use mln_gfx::{ConsumerSync, GpuSync, RendererBackend as _, SyncKind};
 use mln_util::Color;
 use mln_util::size::Size;
 
@@ -12,7 +10,7 @@ use crate::borrowed_target::{BorrowedTarget, BorrowedTextures};
 use crate::renderer_backend::RendererBackend;
 
 /// A ring of `count` host textures of `size`, made on `backend`'s context.
-fn textures(backend: &RendererBackend, count: usize, size: Size) -> BorrowedTextures {
+fn textures(backend: &mut RendererBackend, count: usize, size: Size) -> BorrowedTextures {
     let textures = backend.gpu().with_gl(|gl| {
         (0..count)
             .map(|_| {
@@ -31,10 +29,10 @@ fn textures(backend: &RendererBackend, count: usize, size: Size) -> BorrowedText
 
 /// Draws a frame into `slot` and gives it back. Returns the textures the
 /// frame drew into.
-fn draw(backend: &RendererBackend, target: &BorrowedTarget, slot: usize) -> (TextureId, Option<TextureId>) {
+fn draw(backend: &mut RendererBackend, target: &mut BorrowedTarget, slot: usize) -> (TextureId, Option<TextureId>) {
     target.select(slot);
-    let image = target.begin_frame().expect("a frame");
     let mut gpu = backend.gpu();
+    let image = target.begin_frame(&mut gpu).expect("a frame");
     gpu.begin_pass(&PassDesc {
         label: "ring",
         color: Some(ColorAttachment { texture: image.color, load: LoadOp::Clear(Color::red()) }),
@@ -47,33 +45,32 @@ fn draw(backend: &RendererBackend, target: &BorrowedTarget, slot: usize) -> (Tex
     .expect("the frame");
     gpu.end_pass().expect("the frame");
     gpu.flush(false).expect("the frame");
-    drop(gpu);
-    assert!(matches!(target.end_frame(), Handoff::GivenBack { slot: given, .. } if given == slot));
-    target.release(slot, ConsumerSync::of(GpuSync::of(SyncKind::CpuComplete))).expect("the release");
+    assert!(matches!(target.end_frame(&mut gpu), Handoff::GivenBack { slot: given, .. } if given == slot));
+    target.release(&mut gpu, slot, ConsumerSync::of(GpuSync::of(SyncKind::CpuComplete))).expect("the release");
     (image.color, image.depth_stencil)
 }
 
 // Each slot keeps its imports, and the `GlGpu` the framebuffer of them, from
 // one frame to the next, until the ring's textures are replaced or the
-// target goes.
+// target is torn down.
 #[test]
 fn a_ring_keeps_each_slots_framebuffer() {
-    let Some(backend) = with_device(|device| RendererBackend::new(device).map(Rc::new)) else {
+    let Some(mut backend) = with_device(RendererBackend::new) else {
         return;
     };
     let size = Size::new(4, 4);
-    let target =
-        BorrowedTarget::new(Rc::clone(&backend), textures(&backend, 2, size), SyncKind::CpuComplete).expect("a ring");
-    let first: Vec<_> = (0..2).map(|slot| draw(&backend, &target, slot)).collect();
+    let mut target = BorrowedTarget::new(textures(&mut backend, 2, size), SyncKind::CpuComplete).expect("a ring");
+    let first: Vec<_> = (0..2).map(|slot| draw(&mut backend, &mut target, slot)).collect();
     assert_eq!(backend.gpu().framebuffer_count(), 2);
-    let second: Vec<_> = (0..2).map(|slot| draw(&backend, &target, slot)).collect();
+    let second: Vec<_> = (0..2).map(|slot| draw(&mut backend, &mut target, slot)).collect();
     assert_eq!(first, second, "the slots draw into the textures of their first frames");
     assert_eq!(backend.gpu().framebuffer_count(), 2, "the slots draw through the framebuffers of their first frames");
 
-    target.replace(textures(&backend, 2, size)).expect("new textures");
+    let replacement = textures(&mut backend, 2, size);
+    target.replace(&mut backend.gpu(), replacement).expect("new textures");
     assert_eq!(backend.gpu().framebuffer_count(), 0, "the old textures' framebuffers go with them");
-    draw(&backend, &target, 0);
+    draw(&mut backend, &mut target, 0);
     assert_eq!(backend.gpu().framebuffer_count(), 1);
-    drop(target);
+    target.tear_down(&mut backend.gpu());
     assert_eq!(backend.gpu().framebuffer_count(), 0, "the framebuffers go with the target");
 }

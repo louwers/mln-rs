@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use geometry::Point;
+use mln_gfx::gpu::Gpu;
 use mln_gfx::types::TexturePixelType;
 use mln_style_types::image::{ImageMap, ImagePosition, ImagePositions, ImageType, Impl as ImageImpl, RectU16};
 use mln_text::glyph::{Glyph, GlyphID, GlyphMap, GlyphPosition, GlyphPositions};
@@ -496,10 +497,10 @@ impl DynamicTextureAtlas {
     }
 
     /// Makes the pages' GPU textures and uploads what was queued for them.
-    pub(crate) fn upload(&mut self, context: &mut Context) {
+    pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         self.free_released();
         for page in self.pages.iter_mut().chain(&mut self.dummies) {
-            page.texture.upload(context);
+            page.texture.upload(gpu, context);
         }
     }
 

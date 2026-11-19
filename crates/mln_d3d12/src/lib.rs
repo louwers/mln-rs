@@ -37,7 +37,7 @@ pub use device::Device;
 pub use exported_target::ExportedTarget;
 pub use gpu::D3d12Gpu;
 /// Frames drawn into textures of the library's and read back.
-pub type OffscreenTarget = mln_gfx::offscreen_target::OffscreenTarget<RendererBackend>;
+pub type OffscreenTarget = mln_gfx::offscreen_target::OffscreenTarget<D3d12Gpu>;
 pub use mln_glsl::Stage as ShaderStage;
 pub use renderer_backend::RendererBackend;
 pub use shaders::{CompiledProgram, ShaderCompiler};

@@ -127,7 +127,7 @@ fn geojson(bench: &mut Bench) {
         });
     }
     bench.per_part("update");
-    finish(bench, &map, frames);
+    finish(bench, &mut map, frames);
 }
 
 /// The question: what does adding 20 layers over the map's vector source,
@@ -251,7 +251,7 @@ fn paint(bench: &mut Bench) {
         });
     }
     bench.per_part("edit");
-    finish(bench, &map, frames);
+    finish(bench, &mut map, frames);
 }
 
 fn set_paint(map: &mut HeadlessMap, layer: &str, name: &str, value: &str) {
@@ -406,7 +406,7 @@ fn images(bench: &mut Bench) {
         }
         map.settle()
     });
-    finish(bench, &map, frames);
+    finish(bench, &mut map, frames);
 }
 
 /// A round marker of 24 pixels, its color from `random`, with a white
@@ -453,7 +453,7 @@ fn color(random: &mut Random) -> String {
 
 /// Declares the frames the measured edits drew and the GPU buffers they
 /// left, and writes the last frame as the image.
-fn finish(bench: &mut Bench, map: &HeadlessMap, frames: u64) {
+fn finish(bench: &mut Bench, map: &mut HeadlessMap, frames: u64) {
     bench.count("frames", frames);
     bench.bytes("gpu_buffers", map.gpu_buffer_bytes());
     if let Some(path) = &bench.image {

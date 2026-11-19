@@ -21,20 +21,18 @@ use crate::gfx::owned::Held;
 // before them, which fails the destroy.
 #[test]
 fn bindings_and_geometry_keep_what_they_were_made_of() {
-    with_context(|context| {
+    with_context(|gpu, context| {
         let projection = size_of::<ProjectionUBO>();
         let mut slot = None;
-        context.device().write_uniform_buffer(&mut slot, &vec![0; projection]);
+        context.device().write_uniform_buffer(gpu, &mut slot, &vec![0; projection]);
         let ubo = slot.clone().expect("a uniform buffer");
         let texture = context.add_texture_with(|texture| texture.set_size(Size::new(2, 2)));
-        let (texture_id, sampler) = context.bind_texture(&texture).expect("the texture");
-        let vertices = context.device().buffer(BufferUsage::Vertex, &[0; 16]).expect("vertices");
+        let (texture_id, sampler) = context.texture_binding(gpu, &texture).expect("the texture");
+        let vertices = context.device().buffer(gpu, BufferUsage::Vertex, &[0; 16]).expect("vertices");
         let indices =
-            context.device().buffer(BufferUsage::Index, bytemuck::cast_slice(&[0u16, 1, 2, 3])).expect("indices");
+            context.device().buffer(gpu, BufferUsage::Index, bytemuck::cast_slice(&[0u16, 1, 2, 3])).expect("indices");
 
-        let backend = std::rc::Rc::clone(context.backend());
-        let mut gpu = backend.gpu();
-        let shader = context.shader(&mut *gpu, &ShaderKey::new(BuiltIn::ClippingMaskProgram, [])).expect("the shader");
+        let shader = context.shader(gpu, &ShaderKey::new(BuiltIn::ClippingMaskProgram, [])).expect("the shader");
         let entries = [
             BindGroupEntry::Buffer {
                 id: ID_PROJECTION_UBO as u32,
@@ -55,36 +53,31 @@ fn bindings_and_geometry_keep_what_they_were_made_of() {
                 index_buffer: indices.id(),
             })
             .expect("the geometry");
-        drop(gpu);
         let gpu_texture = context.gpu_texture(&texture).cloned().expect("the texture's");
         let bindings = context.own(bindings, vec![Held::Buffer(ubo.clone()), Held::Texture(gpu_texture)]);
         let geometry = context.own(geometry, vec![Held::Buffer(vertices.clone()), Held::Buffer(indices.clone())]);
         let (ubo_id, vertices_id, indices_id) = (ubo.id(), vertices.id(), indices.id());
         drop((ubo, vertices, indices));
-        context.device().write_uniform_buffer(&mut slot, &vec![0; 2 * projection]);
+        context.device().write_uniform_buffer(gpu, &mut slot, &vec![0; 2 * projection]);
         assert_ne!(slot.as_ref().map(SharedBuffer::id), Some(ubo_id), "a buffer the data fits in");
         context.texture_mut(&texture).expect("the texture").set_size(Size::new(4, 4));
-        context.bind_texture(&texture).expect("the resized texture");
+        context.texture_binding(gpu, &texture).expect("the resized texture");
 
         let stats = context.stats();
-        context.destroy_released();
+        context.destroy_released(gpu);
         assert_eq!(context.stats(), stats, "nothing went");
-        let mut gpu = backend.gpu();
         for buffer in [ubo_id, vertices_id, indices_id] {
             assert!(gpu.write_buffer(buffer, 0, &[0; 4]).is_ok(), "{buffer:?} stays");
         }
         let texel = TextureRegion { x: 0, y: 0, size: Size::new(1, 1) };
         assert!(gpu.write_texture(texture_id, texel, &[0; 4]).is_ok(), "the replaced texture stays");
-        drop(gpu);
 
         drop((bindings, geometry));
-        context.destroy_released();
-        let mut gpu = backend.gpu();
+        context.destroy_released(gpu);
         for buffer in [ubo_id, vertices_id, indices_id] {
             assert!(matches!(gpu.write_buffer(buffer, 0, &[0; 4]), Err(GpuError::UnknownId("buffer"))));
         }
         assert!(matches!(gpu.write_texture(texture_id, texel, &[0; 4]), Err(GpuError::UnknownId("texture"))));
-        drop(gpu);
         let gone = context.stats();
         assert_eq!(gone.num_buffers, stats.num_buffers - 3);
         assert_eq!(gone.num_active_textures, stats.num_active_textures - 1);
@@ -96,16 +89,14 @@ fn bindings_and_geometry_keep_what_they_were_made_of() {
 // next destroy, and the context makes new ones for their keys.
 #[test]
 fn released_shaders_and_pipelines_go() {
-    with_context(|context| {
-        let backend = std::rc::Rc::clone(context.backend());
+    with_context(|gpu, context| {
         let key = ShaderKey::new(BuiltIn::ClippingMaskProgram, []);
-        let shader = context.shader(&mut *backend.gpu(), &key).expect("the shader");
+        let shader = context.shader(gpu, &key).expect("the shader");
         let pipeline_key = clip_mask_pipeline(shader);
-        let pipeline = context.pipeline(&mut *backend.gpu(), &pipeline_key).expect("the pipeline");
+        let pipeline = context.pipeline(gpu, &pipeline_key).expect("the pipeline");
         context.release_shaders();
-        context.destroy_released();
+        context.destroy_released(gpu);
 
-        let mut gpu = backend.gpu();
         let gone = gpu.create_pipeline(&pipeline_key.desc());
         assert!(matches!(gone, Err(GpuError::UnknownId("shader"))), "{gone:?}");
         let size = Size::new(1, 1);
@@ -137,10 +128,9 @@ fn released_shaders_and_pipelines_go() {
         assert!(matches!(gpu.draw(&draw), Err(GpuError::UnknownId("pipeline"))), "a draw of the pipeline");
         gpu.end_pass().expect("the pass's end");
         gpu.destroy(target.into()).expect("the target's destroy");
-        drop(gpu);
-        let remade = context.shader(&mut *backend.gpu(), &key).expect("a new shader");
+        let remade = context.shader(gpu, &key).expect("a new shader");
         assert_ne!(remade, shader);
-        let remade = context.pipeline(&mut *backend.gpu(), &clip_mask_pipeline(remade)).expect("a new pipeline");
+        let remade = context.pipeline(gpu, &clip_mask_pipeline(remade)).expect("a new pipeline");
         assert_ne!(remade, pipeline);
     });
 }

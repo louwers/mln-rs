@@ -8,12 +8,15 @@
 //   (`PaintParameters::lend_pass`, through `Gpu::lend`).
 // - A host that drew is told the renderer stopped once the layer leaves it,
 //   after the GPU finished the host's work (`Gpu::flush`), or that
-//   its graphics objects are lost (`Renderer::lose_custom_layers`).
+//   its graphics objects are lost (`Renderer::lose_custom_layers`). The
+//   layer leaves without a `Gpu` at hand, so it queues its host
+//   (`EndedHosts`), which the renderer tells in the frame or the tear-down
+//   that follows, with the `Gpu` passed in (`Context::end_custom_layers`).
 
+use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_gfx::RendererBackend;
 use mln_gfx::gpu::Gpu;
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::{
@@ -57,9 +60,9 @@ pub(crate) struct CustomDrawing {
     /// Whether a callback ran since the renderer took the host, which then
     /// has to hear that the renderer stopped.
     used: bool,
-    /// The backend of the frame the host last prerendered for, to wait for
-    /// its work.
-    backend: Option<Rc<dyn RendererBackend>>,
+    /// Where the host goes when the layer leaves it, once it drew: the
+    /// renderer's queue, from the first prerender on.
+    ended: Option<Rc<EndedHosts>>,
     /// Whether the layer draws, which it does from the first frame that
     /// draws it.
     updated: bool,
@@ -70,33 +73,52 @@ impl RenderCustomLayer {
         let host = impl_.host();
         let (mut base, values) = LayerValues::new(impl_);
         base.passes = RenderPass::Translucent;
-        let drawing = CustomDrawing { host, frame: None, used: false, backend: None, updated: false };
+        let drawing = CustomDrawing { host, frame: None, used: false, ended: None, updated: false };
         RenderCustomLayer { base, values, drawing }
     }
 }
 
+/// The hosts of custom layers that left the renderer after they drew, which
+/// the renderer tells that it stopped once the GPU finished their work
+/// (`Context::end_custom_layers`). The hosts left in it when it drops, as
+/// when a renderer goes without its tear-down, hear that their graphics
+/// objects are lost instead.
+#[derive(Default)]
+pub(crate) struct EndedHosts(Cell<Vec<Arc<dyn CustomLayerHost>>>);
+
+impl EndedHosts {
+    fn push(&self, host: Arc<dyn CustomLayerHost>) {
+        let mut hosts = self.0.take();
+        hosts.push(host);
+        self.0.set(hosts);
+    }
+
+    /// The hosts queued since the last call.
+    pub(crate) fn take(&self) -> Vec<Arc<dyn CustomLayerHost>> {
+        self.0.take()
+    }
+}
+
+impl Drop for EndedHosts {
+    fn drop(&mut self) {
+        for host in self.0.take() {
+            host.context_lost();
+        }
+    }
+}
+
 impl CustomDrawing {
-    /// Lets go of the host: tells it the renderer stopped, once the GPU
-    /// finished its work, or that its graphics objects are lost. The
-    /// renderer calls it inside the backend's hold, so the host
-    /// deinitializes with what it drew with ready, such as OpenGL's context
-    /// current.
+    /// Lets go of the host: queues it to hear that the renderer stopped, or
+    /// tells it that its graphics objects are lost.
     fn end(&mut self, lost: bool) {
         let Some(host) = self.host.take() else { return };
-        let backend = self.backend.take();
+        let ended = self.ended.take();
         if !std::mem::take(&mut self.used) {
             return;
         }
-        if lost {
-            host.context_lost();
-        } else {
-            // The host frees what it drew with once the GPU is done with it.
-            if let Some(backend) = backend
-                && let Err(error) = backend.gpu().flush(true)
-            {
-                Log::error(Event::Render, format!("Waiting for a custom layer's frames failed: {error}"));
-            }
-            host.deinitialize();
+        match ended {
+            Some(ended) if !lost => ended.push(host),
+            _ => host.context_lost(),
         }
     }
 
@@ -149,7 +171,7 @@ impl LayerDrawing for CustomDrawing {
 
     fn clear_frame(&mut self) {}
 
-    fn upload(&mut self, _context: &mut Context) {}
+    fn upload(&mut self, _gpu: &mut dyn Gpu, _context: &mut Context) {}
 
     fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
         if self.updated {
@@ -196,8 +218,7 @@ impl RenderLayer for RenderCustomLayer {
         };
         let drawing = &mut self.drawing;
         drawing.frame = Some(frame);
-        // The renderer's backend, which stays the same.
-        drawing.backend.get_or_insert_with(|| Rc::clone(parameters.context.backend()));
+        drawing.ended.get_or_insert_with(|| Rc::clone(parameters.context.ended_hosts()));
         let Some(host) = &drawing.host else { return };
         let lent = gpu.lend(&mut |encoder| {
             host.prerender(&mut CustomLayerPrerenderParameters { encoder, frame: &frame });

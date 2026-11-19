@@ -58,9 +58,16 @@ struct Mesh {
 }
 
 impl Mesh {
-    fn new(context: &mut Context, vertices: &[u8], indices: &[u16], segments: Vec<SegmentBase>) -> Option<Mesh> {
-        let made = context.device().buffer(BufferUsage::Vertex, vertices).and_then(|vertices| {
-            Ok((vertices, context.device().buffer(BufferUsage::Index, bytemuck::cast_slice(indices))?))
+    fn new(
+        gpu: &mut dyn Gpu,
+        context: &mut Context,
+        vertices: &[u8],
+        indices: &[u16],
+        segments: Vec<SegmentBase>,
+    ) -> Option<Mesh> {
+        let device = context.device();
+        let made = device.buffer(gpu, BufferUsage::Vertex, vertices).and_then(|vertices| {
+            Ok((vertices, device.buffer(gpu, BufferUsage::Index, bytemuck::cast_slice(indices))?))
         });
         match made {
             Ok((vertices, indices)) => Some(Mesh { vertices, indices, segments, geometry: None }),
@@ -119,6 +126,7 @@ impl ClipMasks {
     /// over the area that `projection` gives its tile.
     pub(crate) fn update(
         &mut self,
+        gpu: &mut dyn Gpu,
         context: &mut Context,
         shaders: &ShaderRegistry,
         globe: bool,
@@ -168,12 +176,12 @@ impl ClipMasks {
                     let (_, _, _, borders) = key;
                     let raw =
                         raw_globe_tile_mesh(&tile.canonical, borders, SubdivisionGranularitySetting::globe().stencil);
-                    Mesh::new(context, &raw.vertices, &raw.indices, raw.segments)
+                    Mesh::new(gpu, context, &raw.vertices, &raw.indices, raw.segments)
                 } else {
                     let vertices = RenderStaticData::tile_vertices();
                     let indices = RenderStaticData::quad_triangle_indices();
                     let segment = SegmentBase::with_lengths(0, 0, vertices.len(), indices.len());
-                    Mesh::new(context, bytemuck::cast_slice(&vertices), &indices, vec![segment])
+                    Mesh::new(gpu, context, bytemuck::cast_slice(&vertices), &indices, vec![segment])
                 };
                 if let Some(mesh) = mesh {
                     self.meshes.insert(key, mesh);
@@ -186,7 +194,7 @@ impl ClipMasks {
             let masks = &self.masks;
             self.meshes.retain(|key, _| masks.values().any(|(_, keys)| keys.contains(key)));
         }
-        context.device().write_uniform_buffer(&mut self.projections, &self.bytes);
+        context.device().write_uniform_buffer(gpu, &mut self.projections, &self.bytes);
     }
 
     /// Draws the mask of each tile of `masks` with its stencil value, which

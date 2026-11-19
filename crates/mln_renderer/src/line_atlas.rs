@@ -1,7 +1,7 @@
 // The line atlas keys its textures by the dash arrays' values themselves
 // (their float bits) and the cap.
 
-use mln_gfx::gpu::TextureFormat;
+use mln_gfx::gpu::{Gpu, TextureFormat};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_util::image::AlphaImage;
@@ -224,7 +224,7 @@ impl DashPatternTexture {
     }
 
     /// Makes the texture and uploads the patterns to it, unless it did.
-    pub(crate) fn upload(&mut self, context: &mut Context) {
+    pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         let Some(image) = self.image.take() else {
             return;
         };
@@ -237,7 +237,7 @@ impl DashPatternTexture {
                 ..Default::default()
             });
         });
-        if let Err(error) = context.upload_texture_data(&texture, &image.data, image.size) {
+        if let Err(error) = context.upload_texture_data(gpu, &texture, &image.data, image.size) {
             Log::error(Event::Render, format!("Uploading a dash pattern failed: {error}"));
         }
         self.texture = Some(texture);
@@ -393,9 +393,9 @@ impl LineAtlas {
     }
 
     /// Uploads the textures to the GPU to be available when we need it.
-    pub(crate) fn upload(&mut self, context: &mut Context) {
+    pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         for index in self.needs_upload.drain(..) {
-            self.textures[index].1.upload(context);
+            self.textures[index].1.upload(gpu, context);
         }
     }
 

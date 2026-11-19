@@ -1,10 +1,11 @@
-//! How the renderer draws a frame into its target: it begins the frame,
-//! draws into the textures the target gives it, submits them, and ends the
-//! frame, which hands the image off.
+//! How a frame is drawn into a target: the target begins the frame, the
+//! renderer draws into the textures the target gives it and submits them,
+//! and the target ends the frame, which hands the image off. Each step
+//! takes the backend's `Gpu`, which the caller lends to all three.
 
 use mln_util::size::Size;
 
-use crate::gpu::{TargetFormats, TextureId};
+use crate::gpu::{Gpu, TargetFormats, TextureId};
 
 /// The textures of the backend's `Gpu` that a frame draws into.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -181,16 +182,26 @@ pub enum Handoff {
 
 /// A target that a renderer draws frames into: a window's swapchain, or an
 /// image of the library's that is read back. It belongs to the thread that
-/// built it.
+/// built it, and each call takes the `Gpu` of the backend it was built on.
 pub trait FrameTarget {
-    /// Begins a frame, and returns the textures of the backend's `Gpu` that
-    /// the renderer draws it into, or `None` when the target has nothing to
-    /// draw into now: it has no surface, or the surface is hidden or out of
-    /// date. The caller then skips the frame. Until
-    /// [`end_frame`](Self::end_frame), each call returns the same image.
-    fn begin_frame(&self) -> Option<FrameImage>;
+    /// The `Gpu` of the target's backend, whose textures the target's
+    /// frames are.
+    type Gpu: Gpu + ?Sized;
+
+    /// Begins a frame, and returns the textures of `gpu` that the renderer
+    /// draws it into, or `None` when the target has nothing to draw into
+    /// now: it has no surface, or the surface is hidden or out of date. The
+    /// caller then skips the frame. Until [`end_frame`](Self::end_frame),
+    /// each call returns the same image, so a caller may begin a frame and
+    /// leave it for the next one.
+    fn begin_frame(&mut self, gpu: &mut Self::Gpu) -> Option<FrameImage>;
 
     /// Hands the frame's image off, once the renderer has submitted the
-    /// frame's passes to the backend's `Gpu`.
-    fn end_frame(&self) -> Handoff;
+    /// frame's passes to `gpu`.
+    fn end_frame(&mut self, gpu: &mut Self::Gpu) -> Handoff;
+
+    /// Destroys the target's textures of `gpu`, after which the target
+    /// draws no more frames. A target dropped without it leaves them to the
+    /// `Gpu`, which frees them when it drops.
+    fn tear_down(&mut self, gpu: &mut Self::Gpu);
 }

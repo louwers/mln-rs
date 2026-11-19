@@ -52,6 +52,7 @@ impl GlobeDepthPass {
     /// one the planet's depth is never read.
     pub(crate) fn update(
         &mut self,
+        gpu: &mut dyn Gpu,
         shaders: &ShaderRegistry,
         context: &mut Context,
         state: &TransformState,
@@ -138,14 +139,14 @@ impl GlobeDepthPass {
             self.draw_list.push(FrameDraw { depth, ..draw.frame_draw(Some(*tile_id)) }, projection);
         }
         // The draws draw in the order their GPU objects were made.
-        self.draw_list.finish(&mut self.frame, context, |writer| {
+        self.draw_list.finish(&mut self.frame, gpu, context, |writer| {
             writer.storage(ID_PROJECTION_UBO, |projection| *projection);
         });
     }
 
     /// Uploads the GPU objects of the frame's draws.
-    pub(crate) fn upload(&mut self, context: &mut Context) {
-        self.frame.upload(&mut self.tiles, tile_objects, context);
+    pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
+        self.frame.upload(gpu, &mut self.tiles, tile_objects, context);
     }
 
     /// Draws the frame's draws of the pass into the open pass of `gpu`, the

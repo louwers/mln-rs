@@ -3,7 +3,7 @@
 //! own, or vertices of the context's store that other draws share.
 
 use mln_gfx::gfx_types::AttributeDataType;
-use mln_gfx::gpu::{BufferUsage, GpuError};
+use mln_gfx::gpu::{BufferUsage, Gpu, GpuError};
 use mln_gfx::shaders::shader_defines::MAX_ATTRIBUTE_COUNT_PER_SHADER;
 
 use crate::gfx::buffer::SharedBuffer;
@@ -80,15 +80,19 @@ impl VertexAttribute {
     }
 
     /// The attribute's binding, of the buffer it reads, which this uploads
-    /// through `context` where [`needs_upload`](Self::needs_upload) says;
-    /// `None` where there are no values.
-    pub(crate) fn binding(&mut self, context: &mut Context) -> Result<Option<AttributeBinding>, GpuError> {
+    /// to `gpu` where [`needs_upload`](Self::needs_upload) says; `None`
+    /// where there are no values.
+    pub(crate) fn binding(
+        &mut self,
+        gpu: &mut dyn Gpu,
+        context: &mut Context,
+    ) -> Result<Option<AttributeBinding>, GpuError> {
         match self {
             VertexAttribute::Own { data_type, values, .. } => {
                 let buffer = match values {
                     OwnValues::Buffer(buffer) => buffer.clone(),
                     OwnValues::Bytes(bytes) => {
-                        let buffer = context.device().buffer(BufferUsage::Vertex, bytes)?;
+                        let buffer = context.device().buffer(gpu, BufferUsage::Vertex, bytes)?;
                         *values = OwnValues::Buffer(buffer.clone());
                         buffer
                     }
@@ -101,7 +105,7 @@ impl VertexAttribute {
                 }))
             }
             VertexAttribute::Shared(shared) => {
-                let Some(buffer) = context.upload_vertices(&shared.vertices)? else {
+                let Some(buffer) = context.upload_vertices(gpu, &shared.vertices)? else {
                     return Ok(None);
                 };
                 debug_assert!(

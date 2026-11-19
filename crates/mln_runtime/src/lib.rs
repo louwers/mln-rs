@@ -61,10 +61,10 @@ pub use mln_renderer::{ClipDepthRange, FrameProjection};
 pub use mln_util::{Error, ErrorKind};
 pub use offline::Offline;
 pub use render::{
-    AcquiredFrame, Adapter, AttachOptions, BackendType, BorrowedRing, CanvasFormat, ConsumerSync, DemandMode,
-    DepthStencilFormat, DepthStencilFormats, Device, DeviceOptions, DmaBufFormat, DmaBufPlane, Driver, DriverWork,
-    ExportKind, ExportKinds, ExportedImage, ExportedRing, FrameDemand, FrameDepth, FrameDisposition, FrameResult,
-    FrameTexture, FrameTextureKind, FrameView, GlApi, GpuSync, LocalTarget, NativeTexture, RenderSession,
+    AcquiredFrame, Adapter, AttachOptions, BackendRef, BackendType, BorrowedRing, CanvasFormat, ConsumerSync,
+    DemandMode, DepthStencilFormat, DepthStencilFormats, Device, DeviceOptions, DmaBufFormat, DmaBufPlane, Driver,
+    DriverWork, ExportKind, ExportKinds, ExportedImage, ExportedRing, FrameDemand, FrameDepth, FrameDisposition,
+    FrameResult, FrameTexture, FrameTextureKind, FrameView, GlApi, GpuSync, LocalTarget, NativeTexture, RenderSession,
     RenderSessionCapabilities, RenderSessionSnapshot, RenderSessionState, RenderTarget, RenderedQueryGeometry, Surface,
     SurfaceOverlay, SurfaceType, SyncKind, SyncKinds, Wake,
 };

@@ -7,14 +7,13 @@
 // environment variable MLN_RENDER_BACKEND names for the test harness:
 // `webgpu`, `metal`, `vulkan`, `d3d12` or `gl`.
 
-use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_gfx::RendererBackend;
+use mln_gfx::gpu::Gpu;
 use mln_gfx::rendering_stats::RenderingStats;
 use mln_map::Map;
 use mln_renderer::{Renderer, RendererEvent, RendererEvents, UpdateParameters, UpdateReader};
-use mln_runtime::{BackendType, Device, DeviceOptions, GlApi, LocalTarget};
+use mln_runtime::{BackendRef, BackendType, Device, DeviceOptions, GlApi, LocalTarget};
 use mln_text::GlyphCache;
 use mln_util::error::Error;
 use mln_util::event_queue::Waker;
@@ -38,14 +37,13 @@ pub struct RenderResult {
 /// [`render`](Self::render) does too) when its owner asks: [`render`](Self::render) draws until a still image
 /// is complete, [`render_update`](Self::render_update) draws an update it
 /// hasn't drawn yet, and [`render_frame`](Self::render_frame) draws the
-/// latest one again. Once the map is gone, `render_update` drops the
-/// renderer, and the frontend makes another when next used.
+/// latest one again. Once the map is gone, `render_update` tears the
+/// renderer down, and the frontend makes another when next used. The target
+/// owns the renderer, and lends both the backend's `Gpu`.
 pub struct HeadlessFrontend {
     size: Size,
     pixel_ratio: f32,
     target: LocalTarget,
-    /// The target's backend, which the renderer draws with.
-    backend: Rc<dyn RendererBackend>,
     glyph_cache: Arc<GlyphCache>,
     /// The calling thread's queue, which [`render`](Self::render) runs.
     queue: Queue<()>,
@@ -54,8 +52,6 @@ pub struct HeadlessFrontend {
     /// The queue that the attached map's renderer reports to, where the
     /// renderer's waker asks for an update.
     reports_to: Arc<Mutex<Option<RendererEvents>>>,
-    /// Made when first used, and dropped when the attached map goes.
-    renderer: Option<Renderer>,
     /// The stats that the last renderer left as it went.
     stats: RenderingStats,
     /// The updates of the map that the frontend renders.
@@ -129,17 +125,14 @@ impl HeadlessFrontend {
         pool: &Pool,
     ) -> Result<Self, Error> {
         let target = LocalTarget::offscreen(Some(device), physical_size(size, pixel_ratio))?;
-        let backend = target.backend();
         Ok(HeadlessFrontend {
             size,
             pixel_ratio,
             target,
-            backend,
             glyph_cache,
             queue: queue.clone(),
             pool: pool.clone(),
             reports_to: Arc::default(),
-            renderer: None,
             stats: RenderingStats::default(),
             updates: None,
             drawn: 0,
@@ -165,7 +158,7 @@ impl HeadlessFrontend {
         if self.pixel_ratio != pixel_ratio {
             self.pixel_ratio = pixel_ratio;
             self.resize_target();
-            if let Some(renderer) = &mut self.renderer {
+            if let Some(renderer) = self.target.renderer_mut() {
                 renderer.set_pixel_ratio(pixel_ratio);
             }
         }
@@ -203,27 +196,48 @@ impl HeadlessFrontend {
 
     /// The renderer, made on first use.
     pub fn renderer(&mut self) -> &mut Renderer {
-        self.renderer.get_or_insert_with(|| {
-            let reports_to = Arc::clone(&self.reports_to);
+        let HeadlessFrontend { target, pixel_ratio, glyph_cache, pool, reports_to, .. } = self;
+        target.renderer_or(|gpu| {
+            let reports_to = Arc::clone(reports_to);
             Renderer::with_glyph_cache(
-                Rc::clone(&self.backend),
-                self.pixel_ratio,
+                gpu,
+                *pixel_ratio,
                 mln_text::local_glyph_rasterizer::LocalGlyphs::default(),
-                Arc::clone(&self.glyph_cache),
+                Arc::clone(glyph_cache),
                 Arc::new(move || {
                     let events = reports_to.lock().clone();
                     if let Some(events) = events {
                         events.push(RendererEvent::Invalidate);
                     }
                 }),
-                &self.pool,
+                pool,
             )
         })
     }
 
+    /// Lets go of what the renderer caches and destroys what it released,
+    /// as [`Renderer::reduce_memory_use`] does.
+    pub fn reduce_memory_use(&mut self) {
+        self.renderer();
+        self.target.with_renderer(|renderer, gpu| renderer.reduce_memory_use(gpu));
+    }
+
+    /// Lets go of the renderer's data, as [`Renderer::clear_data`] does.
+    pub fn clear_data(&mut self) {
+        self.renderer();
+        self.target.with_renderer(|renderer, gpu| renderer.clear_data(gpu));
+    }
+
+    /// The backend the frontend draws with.
     #[must_use]
-    pub fn backend(&self) -> &dyn RendererBackend {
-        &*self.backend
+    pub fn backend(&self) -> BackendRef<'_> {
+        self.target.backend()
+    }
+
+    /// Runs `f` with the backend's `Gpu`, as when the host waits for the
+    /// frames drawn so far.
+    pub fn with_gpu<R>(&mut self, f: impl FnOnce(&mut dyn Gpu) -> R) -> R {
+        self.target.with_gpu(f)
     }
 
     /// The device the frontend renders on.
@@ -234,7 +248,7 @@ impl HeadlessFrontend {
 
     /// The last frame's pixels, or an empty image without one.
     #[must_use]
-    pub fn read_still_image(&self) -> PremultipliedImage {
+    pub fn read_still_image(&mut self) -> PremultipliedImage {
         self.target.read_image().unwrap_or_else(|_| PremultipliedImage::new(Size::default()))
     }
 
@@ -291,8 +305,8 @@ impl HeadlessFrontend {
         };
         if updates.is_closed() {
             self.updates = None;
-            if let Some(renderer) = self.renderer.take() {
-                self.stats = renderer.into_rendering_stats();
+            if let Some(stats) = self.target.tear_down_renderer() {
+                self.stats = stats;
             }
             return false;
         }
@@ -318,31 +332,28 @@ impl HeadlessFrontend {
     pub fn draw(&mut self, parameters: &Arc<UpdateParameters>) {
         // Makes the renderer on first use.
         self.renderer();
-        if let (Some(renderer), Some(frames)) = (&mut self.renderer, self.target.frames()) {
-            renderer.render(parameters, frames);
-        }
+        self.target.render(parameters);
     }
 
     /// The rendering stats of the frontend's renderer, or those the last one
     /// left as it went, with all its resources released.
     #[must_use]
     pub fn rendering_stats(&self) -> RenderingStats {
-        match &self.renderer {
+        match self.target.renderer() {
             Some(renderer) => renderer.rendering_stats(),
             None => self.stats.clone(),
         }
     }
 
     /// The target the frontend draws into, so a host can reach the frame's
-    /// colour and depth-stencil textures through [`LocalTarget::frames`] and
-    /// draw into them alongside the map.
-    #[must_use]
-    pub fn target(&self) -> &LocalTarget {
-        &self.target
+    /// colour and depth-stencil textures and the backend's `Gpu` through
+    /// [`LocalTarget::with_frame`] and draw into them alongside the map.
+    pub fn target(&mut self) -> &mut LocalTarget {
+        &mut self.target
     }
 
     /// Sizes the target for the frontend's size and pixel ratio.
-    fn resize_target(&self) {
+    fn resize_target(&mut self) {
         self.target.resize(physical_size(self.size, self.pixel_ratio));
     }
 }

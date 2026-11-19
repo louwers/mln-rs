@@ -1,5 +1,6 @@
 use std::cell::Cell;
 
+use mln_gfx::gpu::Gpu;
 use mln_gfx::shaders::shader_defines::MAX_UBO_COUNT_PER_SHADER;
 
 use crate::gfx::buffer::SharedBuffer;
@@ -62,23 +63,29 @@ impl UniformBufferArray {
 
     /// Writes `data` to the uniform buffer `id`, first making one if there
     /// is none or `data` doesn't fit in it.
-    pub(crate) fn create_or_update_pod<T: bytemuck::Pod>(&mut self, id: usize, data: &T, device: &mut Device) {
-        self.write(id, bytemuck::bytes_of(data), false, device);
+    pub(crate) fn create_or_update_pod<T: bytemuck::Pod>(
+        &mut self,
+        gpu: &mut dyn Gpu,
+        id: usize,
+        data: &T,
+        device: &mut Device,
+    ) {
+        self.write(gpu, id, bytemuck::bytes_of(data), false, device);
     }
 
     /// Writes `data` to the storage buffer `id`, first making one if there
     /// is none or `data` doesn't fit in it.
-    pub(crate) fn write_storage(&mut self, id: usize, data: &[u8], device: &mut Device) {
-        self.write(id, data, true, device);
+    pub(crate) fn write_storage(&mut self, gpu: &mut dyn Gpu, id: usize, data: &[u8], device: &mut Device) {
+        self.write(gpu, id, data, true, device);
     }
 
-    fn write(&mut self, id: usize, data: &[u8], storage: bool, device: &mut Device) {
+    fn write(&mut self, gpu: &mut dyn Gpu, id: usize, data: &[u8], storage: bool, device: &mut Device) {
         let slot = &mut self.uniform_buffer_vector[id];
         let before = slot.as_ref().map(SharedBuffer::key);
         if storage {
-            device.write_storage_buffer(slot, data);
+            device.write_storage_buffer(gpu, slot, data);
         } else {
-            device.write_uniform_buffer(slot, data);
+            device.write_uniform_buffer(gpu, slot, data);
         }
         if slot.as_ref().map(SharedBuffer::key) != before {
             self.epoch = next_epoch();

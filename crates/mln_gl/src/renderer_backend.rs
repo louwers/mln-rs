@@ -1,12 +1,12 @@
 // What a GL backend draws into is a target built on it (`OffscreenTarget`,
 // `SurfaceTarget`, `CanvasTarget`, `BorrowedTarget`, `ExportedTarget`).
 
-use std::cell::{Cell, RefCell, RefMut};
+use std::cell::Cell;
+use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_gfx::gpu::Gpu;
-use mln_gfx::renderer_backend::{self, Hold};
+use mln_gfx::renderer_backend;
 
 use crate::gpu::GlGpu;
 use crate::state::State;
@@ -130,10 +130,10 @@ impl GlContext {
     }
 }
 
-/// A renderer's GL context.
+/// A renderer's GL context, and the [`GlGpu`] on it.
 pub struct RendererBackend {
     /// The `GlGpu` that owns the renderer's resources.
-    gpu: RefCell<GlGpu>,
+    gpu: GlGpu,
     context: Rc<GlContext>,
 }
 
@@ -162,11 +162,11 @@ impl RendererBackend {
     }
 
     fn on(context: Rc<GlContext>) -> Self {
-        let gpu = RefCell::new(GlGpu::on(Rc::clone(&context)));
-        RendererBackend { gpu, context }
+        RendererBackend { gpu: GlGpu::on(Rc::clone(&context)), context }
     }
 
     /// `GL_RENDERER`: the name of the GL implementation.
+    #[must_use]
     pub fn get_renderer_name(&self) -> String {
         use glow::HasContext as _;
         let _current = self.context.enter();
@@ -175,35 +175,50 @@ impl RendererBackend {
     }
 
     /// The backend's context.
-    #[cfg(not(target_family = "wasm"))]
+    #[cfg(any(test, windows, all(unix, not(target_vendor = "apple"))))]
     pub(crate) fn context(&self) -> &Rc<GlContext> {
         &self.context
     }
+}
 
-    /// The `GlGpu` that owns the renderer's resources.
-    pub(crate) fn gpu(&self) -> RefMut<'_, GlGpu> {
-        self.gpu.borrow_mut()
+/// The backend's [`GlGpu`], lent with its context current: the calls in
+/// between don't each make it current and release it, which flushes on
+/// Mesa. The scope's end leaves no samplers bound, for what draws on the
+/// context outside the renderer, and in debug builds logs an error GL
+/// recorded.
+pub struct GlScope<'a> {
+    gpu: &'a mut GlGpu,
+    current: Option<Current>,
+}
+
+impl Deref for GlScope<'_> {
+    type Target = GlGpu;
+
+    fn deref(&self) -> &GlGpu {
+        self.gpu
+    }
+}
+
+impl DerefMut for GlScope<'_> {
+    fn deref_mut(&mut self) -> &mut GlGpu {
+        self.gpu
+    }
+}
+
+impl Drop for GlScope<'_> {
+    fn drop(&mut self) {
+        self.gpu.end_frame();
+        drop(self.current.take());
     }
 }
 
 impl renderer_backend::RendererBackend for RendererBackend {
-    fn gpu(&self) -> RefMut<'_, dyn Gpu> {
-        RefMut::map(self.gpu.borrow_mut(), |gpu| -> &mut dyn Gpu { gpu })
-    }
+    type Gpu = GlGpu;
+    type Scope<'a> = GlScope<'a>;
 
-    /// Has the context current until the hold drops, so that the calls in
-    /// between don't each make it current and release it, which flushes on
-    /// Mesa. Releasing it leaves no samplers bound, for what draws on the
-    /// context outside the renderer, and in debug builds logs an error GL
-    /// recorded.
-    fn hold(&self) -> Hold<'_> {
+    /// Lends the `GlGpu` with the context current until the scope drops.
+    fn gpu(&mut self) -> GlScope<'_> {
         let current = self.context.enter();
-        Hold::new(move || {
-            // Not while a panic unwinds through a call that has the `GlGpu`.
-            if let Ok(mut gpu) = self.gpu.try_borrow_mut() {
-                gpu.end_frame();
-            }
-            drop(current);
-        })
+        GlScope { gpu: &mut self.gpu, current: Some(current) }
     }
 }

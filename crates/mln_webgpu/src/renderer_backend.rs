@@ -1,7 +1,3 @@
-use std::cell::{RefCell, RefMut};
-use std::rc::Rc;
-
-use mln_gfx::gpu::Gpu;
 use mln_gfx::renderer_backend;
 
 use crate::device::Device;
@@ -10,7 +6,7 @@ use crate::gpu::WebGpu;
 /// A renderer's backend on a [`Device`]: the [`WebGpu`] that its resources
 /// belong to, and that the targets built on it import their textures into.
 pub struct RendererBackend {
-    gpu: Rc<RefCell<WebGpu>>,
+    gpu: WebGpu,
     device: Device,
 }
 
@@ -19,8 +15,7 @@ impl RendererBackend {
     /// each submitting to the device's queue.
     #[must_use]
     pub fn new(device: &Device) -> Self {
-        let gpu = Rc::new(RefCell::new(WebGpu::new(device)));
-        RendererBackend { gpu, device: device.clone() }
+        RendererBackend { gpu: WebGpu::new(device), device: device.clone() }
     }
 
     /// The device the backend renders on.
@@ -28,14 +23,13 @@ impl RendererBackend {
     pub fn device(&self) -> &Device {
         &self.device
     }
-
-    pub(crate) fn gpu(&self) -> RefMut<'_, WebGpu> {
-        self.gpu.borrow_mut()
-    }
 }
 
 impl renderer_backend::RendererBackend for RendererBackend {
-    fn gpu(&self) -> RefMut<'_, dyn Gpu> {
-        RefMut::map(self.gpu.borrow_mut(), |gpu| -> &mut dyn Gpu { gpu })
+    type Gpu = WebGpu;
+    type Scope<'a> = &'a mut WebGpu;
+
+    fn gpu(&mut self) -> &mut WebGpu {
+        &mut self.gpu
     }
 }

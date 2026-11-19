@@ -2,6 +2,7 @@ use std::mem::offset_of;
 use std::sync::Arc;
 
 use geometry::Point;
+use mln_gfx::gpu::Gpu;
 use mln_gfx::shaders::circle_layer_ubo::{CircleDrawableUBO, CircleEvaluatedPropsUBO};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::segment::SegmentBase;
@@ -302,6 +303,7 @@ impl TypedLayer for RenderCircleLayer {
     /// they read.
     fn update_draws(
         &mut self,
+        gpu: &mut dyn Gpu,
         paint_parameters: &mut PaintParameters<'_>,
         _atlases: &Atlases,
         render_tiles: &[FrameTile<'_, Circle>],
@@ -396,8 +398,9 @@ impl TypedLayer for RenderCircleLayer {
             self.draw_list.push(draw, Self::uniforms(layer, &tile_id, binders, paint_parameters));
         }
 
-        self.draw_list
-            .finish(self.drawing.frame_mut(), paint_parameters.context, |writer| Self::write_uniforms(layer, writer));
+        self.draw_list.finish(self.drawing.frame_mut(), gpu, paint_parameters.context, |writer| {
+            Self::write_uniforms(layer, writer);
+        });
     }
 }
 

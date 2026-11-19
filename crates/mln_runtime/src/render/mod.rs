@@ -10,7 +10,7 @@ mod worker;
 
 pub use driver::DriverWork;
 pub use frame::{DemandMode, FrameDemand, FrameDisposition, FrameResult};
-pub use local::LocalTarget;
+pub use local::{BackendRef, LocalTarget};
 pub use query::RenderedQueryGeometry;
 pub(crate) use session::{Abandoner, SessionId, SessionShared, attach};
 pub use session::{

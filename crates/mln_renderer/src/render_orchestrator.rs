@@ -1113,10 +1113,10 @@ impl RenderOrchestrator {
 
     /// Makes the GPU textures of the tiles' atlas and of the layers'
     /// atlases, and uploads what they queued.
-    pub(crate) fn upload_atlases(&mut self, context: &mut Context) {
-        self.tile_store.atlas().upload(context);
-        self.atlases.line.upload(context);
-        self.atlases.pattern.upload(context);
+    pub(crate) fn upload_atlases(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
+        self.tile_store.atlas().upload(gpu, context);
+        self.atlases.line.upload(gpu, context);
+        self.atlases.pattern.upload(gpu, context);
     }
 
     /// Takes in what arrived for the tiles, and starts the jobs that it
@@ -1173,22 +1173,22 @@ impl RenderOrchestrator {
     /// groups in drawing order, the globe's depth, the sky and the
     /// atmosphere, what draws into the layers' render targets, and the debug
     /// overlays.
-    pub(crate) fn upload_draws(&mut self, context: &mut Context) {
+    pub(crate) fn upload_draws(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         for layer in &mut self.layers {
-            layer.upload(context);
+            layer.upload(gpu, context);
         }
-        self.globe_depth_pass.upload(context);
+        self.globe_depth_pass.upload(gpu, context);
         if let Some(sky) = self.sky_pass.sky() {
-            sky.upload(context);
+            sky.upload(gpu, context);
         }
         if let Some(atmosphere) = self.sky_pass.atmosphere() {
-            atmosphere.upload(context);
+            atmosphere.upload(gpu, context);
         }
         for layer in &mut self.layers {
-            layer.upload_render_targets(context);
+            layer.upload_render_targets(gpu, context);
         }
         for debug in self.debug_layers.values_mut() {
-            debug.upload(context);
+            debug.upload(gpu, context);
         }
     }
 
@@ -1227,14 +1227,14 @@ impl RenderOrchestrator {
 
     /// Updates the debug overlays' draws from the sources' tiles, and makes
     /// their draws of the frame.
-    pub(crate) fn update_debug_layers(&mut self, parameters: &mut PaintParameters<'_>) {
+    pub(crate) fn update_debug_layers(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         for source in self.render_sources.values() {
             if source.is_enabled() {
                 source.update_debug_draws(&mut self.debug_layers, parameters);
             }
         }
         for debug in self.debug_layers.values_mut() {
-            debug.update_draws(parameters);
+            debug.update_draws(gpu, parameters);
         }
     }
 
@@ -1254,6 +1254,7 @@ impl RenderOrchestrator {
     /// globe depth passes.
     pub(crate) fn update_layer_draws(
         &mut self,
+        gpu: &mut dyn Gpu,
         update_parameters: &UpdateParameters,
         paint_parameters: &mut PaintParameters<'_>,
         frame: &Frame,
@@ -1271,15 +1272,25 @@ impl RenderOrchestrator {
                     LayerSource::Tiles(FrameSourceTiles::new(source.render_tiles(), source_contents), &self.found_tiles)
                 }
             });
-            render_layer.update_draws(paint_parameters, &self.atlases, layer_source);
+            render_layer.update_draws(gpu, paint_parameters, &self.atlases, layer_source);
             needs_globe_depth = needs_globe_depth || render_layer.needs_globe_depth();
         }
         let (static_data, state) = (paint_parameters.static_data, paint_parameters.state);
         let shaders = &static_data.shaders;
         let (renderable_size, pixel_ratio) = (paint_parameters.renderable_size, paint_parameters.pixel_ratio);
         let context = &mut *paint_parameters.context;
-        self.sky_pass.update(shaders, context, state, renderable_size, pixel_ratio, frame.sky.as_ref(), &frame.light);
+        self.sky_pass.update(
+            gpu,
+            shaders,
+            context,
+            state,
+            renderable_size,
+            pixel_ratio,
+            frame.sky.as_ref(),
+            &frame.light,
+        );
         self.globe_depth_pass.update(
+            gpu,
             shaders,
             context,
             state,

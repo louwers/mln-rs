@@ -20,11 +20,21 @@
         reason = "the browser build has only canvases' backends, and none of the targets that the others make"
     )
 )]
+#![cfg_attr(
+    all(target_family = "wasm", not(feature = "webgpu")),
+    expect(dead_code, reason = "WebGL2 renders only into a canvas, whose target makes its backend")
+)]
 
-use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_gfx::{ConsumerSync, ExportKind, ExportedFrame, ExportedRing, FrameTarget, RendererBackend, SyncKind, Window};
+use mln_gfx::gpu::Gpu;
+use mln_gfx::offscreen_target::OffscreenTarget;
+use mln_gfx::rendering_stats::RenderingStats;
+use mln_gfx::{
+    ConsumerSync, ExportKind, ExportedFrame, ExportedRing, FrameImage, FrameTarget, Handoff, RendererBackend, SyncKind,
+    Window,
+};
+use mln_renderer::{Renderer, UpdateParameters};
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
@@ -33,60 +43,37 @@ use super::target::{
     BorrowedRing, Device, DeviceOptions, FrameTexture, RingKind, Surface, SurfaceKind, SurfaceOverlay,
 };
 
-/// Frames read back: an offscreen target.
-trait Offscreen: FrameTarget {
-    fn resize(&self, size: Size);
-    fn read_image(&self) -> Result<PremultipliedImage, Error>;
+/// Frames presented: a surface target on the backend `B`.
+trait Presenting<B: RendererBackend>: FrameTarget<Gpu = B::Gpu> {
+    fn resize(&mut self, size: Size);
 }
 
-/// Frames presented: a surface target.
-trait Presenting: FrameTarget {
-    fn resize(&self, size: Size);
-}
-
-#[cfg(all(feature = "metal", target_vendor = "apple"))]
-impl Borrowed for mln_mtl::BorrowedTarget {
-    fn select(&self, slot: usize) {
-        mln_mtl::BorrowedTarget::select(self, slot);
-    }
-    fn release(&self, slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
-        mln_mtl::BorrowedTarget::release(self, slot, consumer)
-    }
-    fn discard(&self, slot: usize) {
-        mln_mtl::BorrowedTarget::discard(self, slot);
-    }
-    fn replace(&self, ring: BorrowedRing) -> Result<Pending, Error> {
-        let RingKind::Metal(textures) = ring.kind else {
-            return Err(Error::unsupported("a ring of Metal textures takes Metal textures only"));
-        };
-        mln_mtl::BorrowedTarget::replace(self, textures).map(pending)
-    }
-    fn take_pending(&self) -> Pending {
-        pending(mln_mtl::BorrowedTarget::take_pending(self))
-    }
-}
-
-#[cfg(all(feature = "metal", target_vendor = "apple"))]
-impl PendingReads for mln_mtl::PendingReads {
-    fn poll(&mut self) -> bool {
-        mln_mtl::PendingReads::poll(self)
-    }
-}
-
-/// Frames given back to the host: a ring of its textures.
-trait Borrowed: FrameTarget {
-    fn select(&self, slot: usize);
-    fn release(&self, slot: usize, consumer: ConsumerSync) -> Result<(), Error>;
-    fn discard(&self, slot: usize);
+/// Frames given back to the host: a ring of its textures, on the backend
+/// `B`.
+trait Borrowed<B: RendererBackend>: FrameTarget<Gpu = B::Gpu> {
+    fn select(&mut self, slot: usize);
+    fn release(&mut self, gpu: &mut B::Gpu, slot: usize, consumer: ConsumerSync) -> Result<(), Error>;
+    fn discard(&mut self, gpu: &mut B::Gpu, slot: usize);
     /// Renders into `ring` from now on, and returns the host's reads of the
     /// textures that it let go of.
-    fn replace(&self, ring: BorrowedRing) -> Result<Pending, Error>;
+    fn replace(&mut self, gpu: &mut B::Gpu, ring: BorrowedRing) -> Result<Pending, Error>;
     /// Takes the host's reads of the textures that they still wait for, for
     /// the ring to wait for before it lets go of them. A target that waits
     /// for the host's reads as it takes each texture back has none.
-    fn take_pending(&self) -> Pending {
+    fn take_pending(&mut self, _gpu: &mut B::Gpu) -> Pending {
         None
     }
+}
+
+/// Frames queued for the host: a ring of the target's own images, which it
+/// exports, on the backend `B`.
+trait Exported<B: RendererBackend>: FrameTarget<Gpu = B::Gpu> {
+    fn select(&mut self, slot: usize);
+    fn release(&mut self, gpu: &mut B::Gpu, slot: usize, consumer: ConsumerSync) -> Result<(), Error>;
+    fn discard(&mut self, gpu: &mut B::Gpu, slot: usize);
+    fn resize(&mut self, backend: &mut B, size: Size, held: &[usize]) -> Result<bool, Error>;
+    fn size(&self) -> Size;
+    fn image(&self, slot: usize) -> Option<ExportedFrame>;
 }
 
 /// The host's reads of textures that a ring let go of, which the session
@@ -110,89 +97,144 @@ fn pending(mut reads: impl PendingReads + 'static) -> Pending {
     (!reads.poll()).then(|| -> Box<dyn PendingReads> { Box::new(reads) })
 }
 
-#[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
-impl Borrowed for mln_vulkan::BorrowedTarget {
-    fn select(&self, slot: usize) {
-        mln_vulkan::BorrowedTarget::select(self, slot);
-    }
-    fn release(&self, slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
-        mln_vulkan::BorrowedTarget::release(self, slot, consumer)
-    }
-    fn discard(&self, slot: usize) {
-        mln_vulkan::BorrowedTarget::discard(self, slot);
-    }
-    fn replace(&self, ring: BorrowedRing) -> Result<Pending, Error> {
-        let RingKind::Vulkan(images) = ring.kind else {
-            return Err(Error::unsupported("a ring of Vulkan images takes Vulkan images only"));
-        };
-        mln_vulkan::BorrowedTarget::replace(self, images).map(pending)
-    }
-    fn take_pending(&self) -> Pending {
-        pending(mln_vulkan::BorrowedTarget::take_pending(self))
-    }
-}
-
-#[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
-impl PendingReads for mln_vulkan::PendingReads {
-    fn poll(&mut self) -> bool {
-        mln_vulkan::PendingReads::poll(self)
-    }
-}
-
-#[cfg(all(feature = "d3d12", windows))]
-impl Borrowed for mln_d3d12::BorrowedTarget {
-    fn select(&self, slot: usize) {
-        mln_d3d12::BorrowedTarget::select(self, slot);
-    }
-    fn release(&self, slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
-        mln_d3d12::BorrowedTarget::release(self, slot, consumer)
-    }
-    fn discard(&self, slot: usize) {
-        mln_d3d12::BorrowedTarget::discard(self, slot);
-    }
-    fn replace(&self, ring: BorrowedRing) -> Result<Pending, Error> {
-        let RingKind::D3d12(textures) = ring.kind else {
-            return Err(Error::unsupported("a ring of D3D12 textures takes D3D12 textures only"));
-        };
-        mln_d3d12::BorrowedTarget::replace(self, textures).map(pending)
-    }
-    fn take_pending(&self) -> Pending {
-        pending(mln_d3d12::BorrowedTarget::take_pending(self))
-    }
-}
-
-#[cfg(all(feature = "d3d12", windows))]
-impl PendingReads for mln_d3d12::PendingReads {
-    fn poll(&mut self) -> bool {
-        mln_d3d12::PendingReads::poll(self)
-    }
-}
-
-/// Frames queued for the host: a ring of the target's own images, which it
-/// exports.
-trait Exported: FrameTarget {
-    fn select(&self, slot: usize);
-    fn release(&self, slot: usize, consumer: ConsumerSync) -> Result<(), Error>;
-    fn discard(&self, slot: usize);
-    fn resize(&self, size: Size, held: &[usize]) -> Result<bool, Error>;
-    fn size(&self) -> Size;
-    fn image(&self, slot: usize) -> Option<ExportedFrame>;
-}
-
-macro_rules! exported {
-    ($type:ty) => {
-        impl Exported for $type {
-            fn select(&self, slot: usize) {
+/// A ring target of the backend `$backend` of the type `$type`, whose
+/// textures come in `RingKind::$kind`, and whose replacement's result
+/// `$pending` makes the host's reads that the ring waits for.
+macro_rules! borrowed {
+    ($backend:ty, $type:ty, $kind:ident, $what:literal, $pending:expr) => {
+        impl Borrowed<$backend> for $type {
+            fn select(&mut self, slot: usize) {
                 <$type>::select(self, slot);
             }
-            fn release(&self, slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
-                <$type>::release(self, slot, consumer)
+            fn release(
+                &mut self,
+                gpu: &mut <$backend as RendererBackend>::Gpu,
+                slot: usize,
+                consumer: ConsumerSync,
+            ) -> Result<(), Error> {
+                <$type>::release(self, gpu, slot, consumer)
             }
-            fn discard(&self, slot: usize) {
-                <$type>::discard(self, slot);
+            fn discard(&mut self, gpu: &mut <$backend as RendererBackend>::Gpu, slot: usize) {
+                <$type>::discard(self, gpu, slot);
             }
-            fn resize(&self, size: Size, held: &[usize]) -> Result<bool, Error> {
-                <$type>::resize(self, size, held)
+            fn replace(
+                &mut self,
+                gpu: &mut <$backend as RendererBackend>::Gpu,
+                ring: BorrowedRing,
+            ) -> Result<Pending, Error> {
+                let RingKind::$kind(textures) = ring.kind else {
+                    return Err(Error::unsupported(concat!("a ring of ", $what, " takes ", $what, " only")));
+                };
+                <$type>::replace(self, gpu, textures).map($pending)
+            }
+        }
+    };
+}
+
+/// A ring target whose host's reads the ring waits for as it lets go of its
+/// textures.
+macro_rules! borrowed_pending {
+    ($backend:ty, $type:ty, $kind:ident, $what:literal, $reads:ty) => {
+        impl Borrowed<$backend> for $type {
+            fn select(&mut self, slot: usize) {
+                <$type>::select(self, slot);
+            }
+            fn release(
+                &mut self,
+                gpu: &mut <$backend as RendererBackend>::Gpu,
+                slot: usize,
+                consumer: ConsumerSync,
+            ) -> Result<(), Error> {
+                <$type>::release(self, gpu, slot, consumer)
+            }
+            fn discard(&mut self, gpu: &mut <$backend as RendererBackend>::Gpu, slot: usize) {
+                <$type>::discard(self, gpu, slot);
+            }
+            fn replace(
+                &mut self,
+                gpu: &mut <$backend as RendererBackend>::Gpu,
+                ring: BorrowedRing,
+            ) -> Result<Pending, Error> {
+                let RingKind::$kind(textures) = ring.kind else {
+                    return Err(Error::unsupported(concat!("a ring of ", $what, " takes ", $what, " only")));
+                };
+                <$type>::replace(self, gpu, textures).map(pending)
+            }
+            fn take_pending(&mut self, gpu: &mut <$backend as RendererBackend>::Gpu) -> Pending {
+                pending(<$type>::take_pending(self, gpu))
+            }
+        }
+
+        impl PendingReads for $reads {
+            fn poll(&mut self) -> bool {
+                <$reads>::poll(self)
+            }
+        }
+    };
+}
+
+#[cfg(all(feature = "metal", target_vendor = "apple"))]
+borrowed_pending!(mln_mtl::RendererBackend, mln_mtl::BorrowedTarget, Metal, "Metal textures", mln_mtl::PendingReads);
+#[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+borrowed_pending!(
+    mln_vulkan::RendererBackend,
+    mln_vulkan::BorrowedTarget,
+    Vulkan,
+    "Vulkan images",
+    mln_vulkan::PendingReads
+);
+#[cfg(all(feature = "d3d12", windows))]
+borrowed_pending!(
+    mln_d3d12::RendererBackend,
+    mln_d3d12::BorrowedTarget,
+    D3d12,
+    "D3D12 textures",
+    mln_d3d12::PendingReads
+);
+
+#[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
+impl Borrowed<mln_webgpu::RendererBackend> for mln_webgpu::BorrowedTarget {
+    fn select(&mut self, slot: usize) {
+        mln_webgpu::BorrowedTarget::select(self, slot);
+    }
+    fn release(&mut self, _gpu: &mut mln_webgpu::WebGpu, slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
+        mln_webgpu::BorrowedTarget::release(self, slot, consumer)
+    }
+    fn discard(&mut self, _gpu: &mut mln_webgpu::WebGpu, slot: usize) {
+        mln_webgpu::BorrowedTarget::discard(self, slot);
+    }
+    fn replace(&mut self, gpu: &mut mln_webgpu::WebGpu, ring: BorrowedRing) -> Result<Pending, Error> {
+        let RingKind::WebGpu(textures) = ring.kind else {
+            return Err(Error::unsupported("a ring of WebGPU textures takes WebGPU textures only"));
+        };
+        mln_webgpu::BorrowedTarget::replace(self, gpu, textures).map(|()| None)
+    }
+}
+
+#[cfg(all(feature = "gl", not(target_family = "wasm")))]
+borrowed!(mln_gl::RendererBackend, mln_gl::BorrowedTarget, Gl, "OpenGL textures", |()| None);
+
+/// An exported ring target of the backend `$backend` of the type `$type`,
+/// which `$resize` resizes with the backend.
+macro_rules! exported {
+    ($backend:ty, $type:ty, $resize:expr) => {
+        impl Exported<$backend> for $type {
+            fn select(&mut self, slot: usize) {
+                <$type>::select(self, slot);
+            }
+            fn release(
+                &mut self,
+                gpu: &mut <$backend as RendererBackend>::Gpu,
+                slot: usize,
+                consumer: ConsumerSync,
+            ) -> Result<(), Error> {
+                <$type>::release(self, gpu, slot, consumer)
+            }
+            fn discard(&mut self, gpu: &mut <$backend as RendererBackend>::Gpu, slot: usize) {
+                <$type>::discard(self, gpu, slot);
+            }
+            fn resize(&mut self, backend: &mut $backend, size: Size, held: &[usize]) -> Result<bool, Error> {
+                $resize(self, backend, size, held)
             }
             fn size(&self) -> Size {
                 <$type>::size(self)
@@ -205,257 +247,90 @@ macro_rules! exported {
 }
 
 #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
-exported!(mln_vulkan::ExportedTarget);
+exported!(mln_vulkan::RendererBackend, mln_vulkan::ExportedTarget, mln_vulkan::ExportedTarget::resize);
 #[cfg(all(feature = "metal", target_vendor = "apple"))]
-exported!(mln_mtl::ExportedTarget);
+exported!(mln_mtl::RendererBackend, mln_mtl::ExportedTarget, mln_mtl::ExportedTarget::resize);
 #[cfg(all(feature = "gl", unix, not(target_vendor = "apple")))]
-exported!(mln_gl::ExportedTarget);
+exported!(
+    mln_gl::RendererBackend,
+    mln_gl::ExportedTarget,
+    |target: &mut mln_gl::ExportedTarget, backend: &mut mln_gl::RendererBackend, size, held: &[usize]| {
+        target.resize(&mut backend.gpu(), size, held)
+    }
+);
 #[cfg(all(feature = "d3d12", windows))]
-exported!(mln_d3d12::ExportedTarget);
+exported!(mln_d3d12::RendererBackend, mln_d3d12::ExportedTarget, mln_d3d12::ExportedTarget::resize);
 
-macro_rules! offscreen {
-    ($type:ty) => {
-        impl Offscreen for $type {
-            fn resize(&self, size: Size) {
-                <$type>::resize(self, size);
-            }
-            fn read_image(&self) -> Result<PremultipliedImage, Error> {
-                <$type>::read_image(self)
-            }
-        }
-    };
-}
-
+/// A surface target of the backend `$backend` of the type `$type`.
 macro_rules! presenting {
-    ($type:ty) => {
-        impl Presenting for $type {
-            fn resize(&self, size: Size) {
+    ($backend:ty, $type:ty) => {
+        impl Presenting<$backend> for $type {
+            fn resize(&mut self, size: Size) {
                 <$type>::resize(self, size);
             }
         }
     };
 }
 
-#[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
-offscreen!(mln_webgpu::OffscreenTarget);
 #[cfg(feature = "webgpu")]
-presenting!(mln_webgpu::SurfaceTarget);
+presenting!(mln_webgpu::RendererBackend, mln_webgpu::SurfaceTarget);
 #[cfg(all(feature = "metal", target_vendor = "apple"))]
-offscreen!(mln_mtl::OffscreenTarget);
-#[cfg(all(feature = "metal", target_vendor = "apple"))]
-presenting!(mln_mtl::SurfaceTarget);
+presenting!(mln_mtl::RendererBackend, mln_mtl::SurfaceTarget);
 #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
-offscreen!(mln_vulkan::OffscreenTarget);
+presenting!(mln_vulkan::RendererBackend, mln_vulkan::SurfaceTarget);
 #[cfg(all(feature = "d3d12", windows))]
-offscreen!(mln_d3d12::OffscreenTarget);
-#[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
-presenting!(mln_vulkan::SurfaceTarget);
-#[cfg(all(feature = "d3d12", windows))]
-presenting!(mln_d3d12::SurfaceTarget);
-#[cfg(all(feature = "gl", not(target_family = "wasm")))]
-offscreen!(mln_gl::OffscreenTarget);
+presenting!(mln_d3d12::RendererBackend, mln_d3d12::SurfaceTarget);
 #[cfg(all(feature = "gl", any(windows, all(unix, not(target_vendor = "apple")))))]
-presenting!(mln_gl::SurfaceTarget);
+presenting!(mln_gl::RendererBackend, mln_gl::SurfaceTarget);
 #[cfg(all(feature = "gl", not(target_family = "wasm")))]
-presenting!(mln_gl::HostSurfaceTarget);
+presenting!(mln_gl::RendererBackend, mln_gl::HostSurfaceTarget);
 #[cfg(all(feature = "gl", target_family = "wasm"))]
-presenting!(mln_gl::CanvasTarget);
+presenting!(mln_gl::RendererBackend, mln_gl::CanvasTarget);
 
-#[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
-impl Borrowed for mln_webgpu::BorrowedTarget {
-    fn select(&self, slot: usize) {
-        mln_webgpu::BorrowedTarget::select(self, slot);
-    }
-    fn release(&self, slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
-        mln_webgpu::BorrowedTarget::release(self, slot, consumer)
-    }
-    fn discard(&self, slot: usize) {
-        mln_webgpu::BorrowedTarget::discard(self, slot);
-    }
-    fn replace(&self, ring: BorrowedRing) -> Result<Pending, Error> {
-        let RingKind::WebGpu(textures) = ring.kind else {
-            return Err(Error::unsupported("a ring of WebGPU textures takes WebGPU textures only"));
-        };
-        mln_webgpu::BorrowedTarget::replace(self, textures).map(|()| None)
-    }
+/// What a [`BackendGfx`] draws into, which it makes on its backend.
+enum FramesInit<'a> {
+    Offscreen(Size),
+    Borrowed(BorrowedRing, SyncKind),
+    Exported { device: &'a Device, ring: &'a ExportedRing, kind: ExportKind, size: Size, producer: SyncKind },
+    Surface(Surface, Option<SurfaceOverlay>, Size),
 }
 
-#[cfg(all(feature = "gl", not(target_family = "wasm")))]
-impl Borrowed for mln_gl::BorrowedTarget {
-    fn select(&self, slot: usize) {
-        mln_gl::BorrowedTarget::select(self, slot);
-    }
-    fn release(&self, slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
-        mln_gl::BorrowedTarget::release(self, slot, consumer)
-    }
-    fn discard(&self, slot: usize) {
-        mln_gl::BorrowedTarget::discard(self, slot);
-    }
-    fn replace(&self, ring: BorrowedRing) -> Result<Pending, Error> {
-        let RingKind::Gl(textures) = ring.kind else {
-            return Err(Error::unsupported("a ring of OpenGL textures takes OpenGL textures only"));
-        };
-        mln_gl::BorrowedTarget::replace(self, textures).map(|()| None)
-    }
-}
+/// A backend of the build, and the targets that the session makes on it.
+/// A kind of target that a backend has none of fails with `Unsupported`.
+trait LocalBackend: RendererBackend + Sized {
+    /// `gfx` as a session's.
+    fn wrap(gfx: BackendGfx<Self>) -> Gfx;
 
-/// A backend, by its type.
-#[derive(Clone)]
-enum Backend {
-    #[cfg(feature = "webgpu")]
-    WebGpu(Rc<mln_webgpu::RendererBackend>),
-    #[cfg(all(feature = "metal", target_vendor = "apple"))]
-    Metal(Rc<mln_mtl::RendererBackend>),
-    #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
-    Vulkan(Rc<mln_vulkan::RendererBackend>),
-    #[cfg(all(feature = "d3d12", windows))]
-    D3d12(Rc<mln_d3d12::RendererBackend>),
-    #[cfg(feature = "gl")]
-    Gl(Rc<mln_gl::RendererBackend>),
-}
-
-impl Backend {
-    fn as_dyn(&self) -> Rc<dyn RendererBackend> {
-        match *self {
-            #[cfg(feature = "webgpu")]
-            Backend::WebGpu(ref backend) => Rc::<mln_webgpu::RendererBackend>::clone(backend),
-            #[cfg(all(feature = "metal", target_vendor = "apple"))]
-            Backend::Metal(ref backend) => Rc::<mln_mtl::RendererBackend>::clone(backend),
-            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
-            Backend::Vulkan(ref backend) => Rc::<mln_vulkan::RendererBackend>::clone(backend),
-            #[cfg(all(feature = "d3d12", windows))]
-            Backend::D3d12(ref backend) => Rc::<mln_d3d12::RendererBackend>::clone(backend),
-            #[cfg(feature = "gl")]
-            Backend::Gl(ref backend) => Rc::<mln_gl::RendererBackend>::clone(backend),
+    /// An offscreen target of `size` pixels on the backend: none in the
+    /// browser, which renders into canvases.
+    fn offscreen(&mut self, size: Size) -> Result<OffscreenTarget<Self::Gpu>, Error> {
+        if cfg!(target_family = "wasm") {
+            let _ = size;
+            return Err(Error::unsupported("the browser build renders into canvases only"));
         }
+        Ok(OffscreenTarget::new(size))
     }
 
-    /// A backend on `device`, for offscreen targets and the surfaces that
-    /// the device's backend makes on it.
-    #[cfg_attr(
-        not(any(
-            feature = "gl",
-            all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))),
-            all(feature = "d3d12", windows)
-        )),
-        expect(clippy::unnecessary_wraps, reason = "only Vulkan, D3D12 and OpenGL backends can fail to start")
-    )]
-    fn new(device: &Device) -> Result<Backend, Error> {
-        match *device {
-            #[cfg(feature = "webgpu")]
-            Device::WebGpu(ref device) => Ok(Backend::WebGpu(Rc::new(mln_webgpu::RendererBackend::new(device)))),
-            #[cfg(all(feature = "metal", target_vendor = "apple"))]
-            Device::Metal(ref device) => Ok(Backend::Metal(Rc::new(mln_mtl::RendererBackend::new(device)))),
-            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
-            Device::Vulkan(ref device) => Ok(Backend::Vulkan(Rc::new(mln_vulkan::RendererBackend::new(device)?))),
-            #[cfg(all(feature = "d3d12", windows))]
-            Device::D3d12(ref device) => Ok(Backend::D3d12(Rc::new(
-                mln_d3d12::RendererBackend::new(device).map_err(|error| Error::native(error.to_string()))?,
-            ))),
-            #[cfg(all(feature = "gl", not(target_family = "wasm")))]
-            Device::Gl(ref device) => Ok(Backend::Gl(Rc::new(mln_gl::RendererBackend::new(device)?))),
-            #[cfg(all(feature = "gl", target_family = "wasm"))]
-            Device::WebGl => {
-                Err(Error::unsupported("WebGL2 renders only into a canvas, with the canvas's own context"))
-            }
-        }
-    }
-
-    /// A target on the backend that renders into `ring`, handing frames over
-    /// with sync of the kind `producer`.
-    fn borrowed(&self, ring: BorrowedRing, producer: SyncKind) -> Result<Box<dyn Borrowed>, Error> {
-        match (self, ring.kind) {
-            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
-            (Backend::Vulkan(backend), RingKind::Vulkan(images)) => {
-                Ok(Box::new(mln_vulkan::BorrowedTarget::new(Rc::clone(backend), images, producer)?))
-            }
-            #[cfg(all(feature = "metal", target_vendor = "apple"))]
-            (Backend::Metal(backend), RingKind::Metal(textures)) => {
-                Ok(Box::new(mln_mtl::BorrowedTarget::new(Rc::clone(backend), textures, producer)?))
-            }
-            #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
-            (Backend::WebGpu(backend), RingKind::WebGpu(textures)) => {
-                Ok(Box::new(mln_webgpu::BorrowedTarget::new(Rc::clone(backend), textures, producer)?))
-            }
-            #[cfg(all(feature = "gl", not(target_family = "wasm")))]
-            (Backend::Gl(backend), RingKind::Gl(textures)) => {
-                Ok(Box::new(mln_gl::BorrowedTarget::new(Rc::clone(backend), textures, producer)?))
-            }
-            #[cfg(all(feature = "d3d12", windows))]
-            (Backend::D3d12(backend), RingKind::D3d12(textures)) => {
-                Ok(Box::new(mln_d3d12::BorrowedTarget::new(Rc::clone(backend), textures, producer)?))
-            }
-            _ => {
-                let _ = producer;
-                Err(Error::unsupported("the session's backend renders into no ring of this kind"))
-            }
-        }
+    /// A target on the backend that renders into `ring`, handing frames
+    /// over with sync of the kind `producer`.
+    fn borrowed(&mut self, ring: BorrowedRing, producer: SyncKind) -> Result<Box<dyn Borrowed<Self>>, Error> {
+        let _ = (ring, producer);
+        Err(Error::unsupported("the session's backend renders into no ring of this kind"))
     }
 
     /// A target on the backend that renders into a ring of `ring.depth`
     /// images of `size` pixels, which it exports as `kind`, and hands frames
     /// over with sync of the kind `producer`.
     fn exported(
-        &self,
+        &mut self,
         device: &Device,
         ring: &ExportedRing,
         kind: ExportKind,
         size: Size,
         producer: SyncKind,
-    ) -> Result<Box<dyn Exported>, Error> {
-        match self {
-            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
-            Backend::Vulkan(backend) => {
-                Ok(Box::new(mln_vulkan::ExportedTarget::new(Rc::clone(backend), ring, kind, size, producer)?))
-            }
-            #[cfg(all(feature = "metal", target_vendor = "apple"))]
-            Backend::Metal(backend) => {
-                Ok(Box::new(mln_mtl::ExportedTarget::new(Rc::clone(backend), ring, kind, size, producer)?))
-            }
-            #[cfg(all(feature = "gl", unix, not(target_vendor = "apple")))]
-            Backend::Gl(backend) => {
-                // Irrefutable in a build with OpenGL alone, which has no other
-                // kind of device, and refutable in one with other backends.
-                let Device::Gl(device) = device else {
-                    return Err(Error::unsupported("an OpenGL backend renders on an OpenGL device"));
-                };
-                Ok(Box::new(mln_gl::ExportedTarget::new(Rc::clone(backend), device, ring, kind, size, producer)?))
-            }
-            #[cfg(all(feature = "d3d12", windows))]
-            Backend::D3d12(backend) => {
-                Ok(Box::new(mln_d3d12::ExportedTarget::new(Rc::clone(backend), ring, kind, size, producer)?))
-            }
-            _ => {
-                let _ = (device, ring, kind, size, producer);
-                Err(Error::unsupported("the session's backend exports no ring"))
-            }
-        }
-    }
-
-    /// An offscreen target of `size` pixels on the backend: none in the
-    /// browser, which renders into canvases.
-    #[cfg(target_family = "wasm")]
-    #[expect(clippy::unused_self, reason = "the other builds' targets are of the backend")]
-    fn offscreen(&self, _size: Size) -> Result<Box<dyn Offscreen>, Error> {
-        Err(Error::unsupported("the browser build renders into canvases only"))
-    }
-
-    /// An offscreen target of `size` pixels on the backend.
-    #[cfg(not(target_family = "wasm"))]
-    #[expect(clippy::unnecessary_wraps, reason = "the browser build's fails")]
-    fn offscreen(&self, size: Size) -> Result<Box<dyn Offscreen>, Error> {
-        Ok(match *self {
-            #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
-            Backend::WebGpu(ref backend) => Box::new(mln_webgpu::OffscreenTarget::new(Rc::clone(backend), size)),
-            #[cfg(all(feature = "metal", target_vendor = "apple"))]
-            Backend::Metal(ref backend) => Box::new(mln_mtl::OffscreenTarget::new(Rc::clone(backend), size)),
-            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
-            Backend::Vulkan(ref backend) => Box::new(mln_vulkan::OffscreenTarget::new(Rc::clone(backend), size)),
-            #[cfg(all(feature = "d3d12", windows))]
-            Backend::D3d12(ref backend) => Box::new(mln_d3d12::OffscreenTarget::new(Rc::clone(backend), size)),
-            #[cfg(all(feature = "gl", not(target_family = "wasm")))]
-            Backend::Gl(ref backend) => Box::new(mln_gl::OffscreenTarget::new(Rc::clone(backend), size)),
-        })
+    ) -> Result<Box<dyn Exported<Self>>, Error> {
+        let _ = (device, ring, kind, size, producer);
+        Err(Error::unsupported("the session's backend exports no ring"))
     }
 
     /// A target on the backend that presents to `surface`, at `size`
@@ -463,67 +338,183 @@ impl Backend {
     /// `Unsupported` when only a backend of the target's own can present to
     /// it: see [`surface_backend`].
     fn surface(
-        &self,
+        &mut self,
         surface: Surface,
         overlay: Option<SurfaceOverlay>,
         size: Size,
-    ) -> Result<Box<dyn Presenting>, Error> {
-        match (self, surface.kind) {
-            #[cfg(feature = "webgpu")]
-            (Backend::WebGpu(backend), kind) => {
-                #[cfg(target_family = "wasm")]
-                let format = match &kind {
-                    SurfaceKind::WebCanvas { format: Some(format), .. } => Some(match format {
-                        super::target::CanvasFormat::Bgra8Unorm => wgpu::TextureFormat::Bgra8Unorm,
-                        super::target::CanvasFormat::Rgba8Unorm => wgpu::TextureFormat::Rgba8Unorm,
-                        super::target::CanvasFormat::Rgba16Float => wgpu::TextureFormat::Rgba16Float,
-                    }),
-                    _ => None,
-                };
-                #[cfg(not(target_family = "wasm"))]
-                let format = None;
-                let target = webgpu_surface(backend, kind)?;
-                let options = mln_webgpu::SurfaceOptions {
-                    cap_frame_rate: surface.cap_frame_rate,
-                    format,
-                    ..mln_webgpu::SurfaceOptions::default()
-                };
-                let target = mln_webgpu::SurfaceTarget::new(Rc::clone(backend), target, size, options)?;
-                target.set_overlay(overlay_of(overlay, |overlay| {
-                    if let SurfaceOverlay::WebGpu(overlay) = overlay { Ok(overlay) } else { Err(overlay) }
-                })?);
-                Ok(Box::new(target))
+    ) -> Result<Box<dyn Presenting<Self>>, Error> {
+        let _ = (surface, overlay, size);
+        Err(Error::unsupported("the session's backend presents to no surface of this kind"))
+    }
+}
+
+#[cfg(feature = "webgpu")]
+impl LocalBackend for mln_webgpu::RendererBackend {
+    fn wrap(gfx: BackendGfx<Self>) -> Gfx {
+        Gfx::WebGpu(Box::new(gfx))
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    fn borrowed(&mut self, ring: BorrowedRing, producer: SyncKind) -> Result<Box<dyn Borrowed<Self>>, Error> {
+        let RingKind::WebGpu(textures) = ring.kind else {
+            return Err(Error::unsupported("the session's backend renders into no ring of this kind"));
+        };
+        Ok(Box::new(mln_webgpu::BorrowedTarget::new(self, textures, producer)?))
+    }
+
+    fn surface(
+        &mut self,
+        surface: Surface,
+        overlay: Option<SurfaceOverlay>,
+        size: Size,
+    ) -> Result<Box<dyn Presenting<Self>>, Error> {
+        let kind = surface.kind;
+        #[cfg(target_family = "wasm")]
+        let format = match &kind {
+            SurfaceKind::WebCanvas { format: Some(format), .. } => Some(match format {
+                super::target::CanvasFormat::Bgra8Unorm => wgpu::TextureFormat::Bgra8Unorm,
+                super::target::CanvasFormat::Rgba8Unorm => wgpu::TextureFormat::Rgba8Unorm,
+                super::target::CanvasFormat::Rgba16Float => wgpu::TextureFormat::Rgba16Float,
+            }),
+            _ => None,
+        };
+        #[cfg(not(target_family = "wasm"))]
+        let format = None;
+        let target = webgpu_surface(self, kind)?;
+        let options = mln_webgpu::SurfaceOptions {
+            cap_frame_rate: surface.cap_frame_rate,
+            format,
+            ..mln_webgpu::SurfaceOptions::default()
+        };
+        let mut target = mln_webgpu::SurfaceTarget::new(self, target, size, options)?;
+        target.set_overlay(overlay_of(overlay, |overlay| {
+            if let SurfaceOverlay::WebGpu(overlay) = overlay { Ok(overlay) } else { Err(overlay) }
+        })?);
+        Ok(Box::new(target))
+    }
+}
+
+#[cfg(all(feature = "metal", target_vendor = "apple"))]
+impl LocalBackend for mln_mtl::RendererBackend {
+    fn wrap(gfx: BackendGfx<Self>) -> Gfx {
+        Gfx::Metal(Box::new(gfx))
+    }
+
+    fn borrowed(&mut self, ring: BorrowedRing, producer: SyncKind) -> Result<Box<dyn Borrowed<Self>>, Error> {
+        let RingKind::Metal(textures) = ring.kind else {
+            return Err(Error::unsupported("the session's backend renders into no ring of this kind"));
+        };
+        Ok(Box::new(mln_mtl::BorrowedTarget::new(self, textures, producer)?))
+    }
+
+    fn exported(
+        &mut self,
+        _device: &Device,
+        ring: &ExportedRing,
+        kind: ExportKind,
+        size: Size,
+        producer: SyncKind,
+    ) -> Result<Box<dyn Exported<Self>>, Error> {
+        Ok(Box::new(mln_mtl::ExportedTarget::new(self, ring, kind, size, producer)?))
+    }
+
+    fn surface(
+        &mut self,
+        surface: Surface,
+        overlay: Option<SurfaceOverlay>,
+        size: Size,
+    ) -> Result<Box<dyn Presenting<Self>>, Error> {
+        let SurfaceKind::MetalLayer(layer) = surface.kind else {
+            return Err(Error::unsupported("the session's backend presents to no surface of this kind"));
+        };
+        let mut target = mln_mtl::SurfaceTarget::new(self, layer, size, surface.cap_frame_rate);
+        target.set_overlay(overlay_of(overlay, |overlay| {
+            if let SurfaceOverlay::Metal(overlay) = overlay { Ok(overlay) } else { Err(overlay) }
+        })?);
+        Ok(Box::new(target))
+    }
+}
+
+#[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+impl LocalBackend for mln_vulkan::RendererBackend {
+    fn wrap(gfx: BackendGfx<Self>) -> Gfx {
+        Gfx::Vulkan(Box::new(gfx))
+    }
+
+    fn borrowed(&mut self, ring: BorrowedRing, producer: SyncKind) -> Result<Box<dyn Borrowed<Self>>, Error> {
+        let RingKind::Vulkan(images) = ring.kind else {
+            return Err(Error::unsupported("the session's backend renders into no ring of this kind"));
+        };
+        Ok(Box::new(mln_vulkan::BorrowedTarget::new(self, images, producer)?))
+    }
+
+    fn exported(
+        &mut self,
+        _device: &Device,
+        ring: &ExportedRing,
+        kind: ExportKind,
+        size: Size,
+        producer: SyncKind,
+    ) -> Result<Box<dyn Exported<Self>>, Error> {
+        Ok(Box::new(mln_vulkan::ExportedTarget::new(self, ring, kind, size, producer)?))
+    }
+
+    fn surface(
+        &mut self,
+        surface: Surface,
+        overlay: Option<SurfaceOverlay>,
+        size: Size,
+    ) -> Result<Box<dyn Presenting<Self>>, Error> {
+        let mut target = match surface.kind {
+            SurfaceKind::Window(window) => mln_vulkan::SurfaceTarget::new(self, window, size, surface.cap_frame_rate)?,
+            SurfaceKind::Vulkan(host) => {
+                mln_vulkan::SurfaceTarget::on_host_surface(self, host, size, surface.cap_frame_rate)?
             }
-            #[cfg(all(feature = "metal", target_vendor = "apple"))]
-            (Backend::Metal(backend), SurfaceKind::MetalLayer(layer)) => {
-                let target = mln_mtl::SurfaceTarget::new(backend, layer, size, surface.cap_frame_rate);
-                target.set_overlay(overlay_of(overlay, |overlay| {
-                    if let SurfaceOverlay::Metal(overlay) = overlay { Ok(overlay) } else { Err(overlay) }
-                })?);
-                Ok(Box::new(target))
-            }
-            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
-            (Backend::Vulkan(backend), SurfaceKind::Window(window)) => {
-                let target = mln_vulkan::SurfaceTarget::new(Rc::clone(backend), window, size, surface.cap_frame_rate)?;
-                target.set_overlay(vulkan_overlay(overlay)?);
-                Ok(Box::new(target))
-            }
-            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
-            (Backend::Vulkan(backend), SurfaceKind::Vulkan(host)) => {
-                let target =
-                    mln_vulkan::SurfaceTarget::on_host_surface(Rc::clone(backend), host, size, surface.cap_frame_rate)?;
-                target.set_overlay(vulkan_overlay(overlay)?);
-                Ok(Box::new(target))
-            }
-            #[cfg(all(feature = "d3d12", windows))]
-            (Backend::D3d12(backend), SurfaceKind::Window(window)) => {
+            _ => return Err(Error::unsupported("the session's backend presents to no surface of this kind")),
+        };
+        target.set_overlay(self.gpu(), vulkan_overlay(overlay)?);
+        Ok(Box::new(target))
+    }
+}
+
+#[cfg(all(feature = "d3d12", windows))]
+impl LocalBackend for mln_d3d12::RendererBackend {
+    fn wrap(gfx: BackendGfx<Self>) -> Gfx {
+        Gfx::D3d12(Box::new(gfx))
+    }
+
+    fn borrowed(&mut self, ring: BorrowedRing, producer: SyncKind) -> Result<Box<dyn Borrowed<Self>>, Error> {
+        let RingKind::D3d12(textures) = ring.kind else {
+            return Err(Error::unsupported("the session's backend renders into no ring of this kind"));
+        };
+        Ok(Box::new(mln_d3d12::BorrowedTarget::new(self, textures, producer)?))
+    }
+
+    fn exported(
+        &mut self,
+        _device: &Device,
+        ring: &ExportedRing,
+        kind: ExportKind,
+        size: Size,
+        producer: SyncKind,
+    ) -> Result<Box<dyn Exported<Self>>, Error> {
+        Ok(Box::new(mln_d3d12::ExportedTarget::new(self, ring, kind, size, producer)?))
+    }
+
+    fn surface(
+        &mut self,
+        surface: Surface,
+        overlay: Option<SurfaceOverlay>,
+        size: Size,
+    ) -> Result<Box<dyn Presenting<Self>>, Error> {
+        let target = match surface.kind {
+            SurfaceKind::Window(window) => {
                 let overlay = d3d12_overlay(overlay)?;
-                let target = mln_d3d12::SurfaceTarget::new(Rc::clone(backend), window, size)?;
-                target.set_overlay(overlay);
-                Ok(Box::new(target))
+                let mut target = mln_d3d12::SurfaceTarget::new(self, window, size)?;
+                target.set_overlay(self.gpu(), overlay);
+                target
             }
-            #[cfg(all(feature = "d3d12", windows))]
-            (Backend::D3d12(backend), SurfaceKind::D3d12Composition { composition, thread }) => {
+            SurfaceKind::D3d12Composition { composition, thread } => {
                 if composition.is_swap_chain_panel() && thread != std::thread::current().id() {
                     return Err(Error::unsupported(
                         "a SwapChainPanel takes its swap chain on its UI thread, which made the surface: attach it \
@@ -531,13 +522,342 @@ impl Backend {
                     ));
                 }
                 let overlay = d3d12_overlay(overlay)?;
-                let target = mln_d3d12::SurfaceTarget::for_composition(Rc::clone(backend), composition, size)?;
-                target.set_overlay(overlay);
-                Ok(Box::new(target))
+                let mut target = mln_d3d12::SurfaceTarget::for_composition(self, composition, size)?;
+                target.set_overlay(self.gpu(), overlay);
+                target
             }
-            _ => {
-                let _ = (size, overlay);
-                Err(Error::unsupported("the session's backend presents to no surface of this kind"))
+            _ => return Err(Error::unsupported("the session's backend presents to no surface of this kind")),
+        };
+        Ok(Box::new(target))
+    }
+}
+
+#[cfg(feature = "gl")]
+impl LocalBackend for mln_gl::RendererBackend {
+    fn wrap(gfx: BackendGfx<Self>) -> Gfx {
+        Gfx::Gl(Box::new(gfx))
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    fn borrowed(&mut self, ring: BorrowedRing, producer: SyncKind) -> Result<Box<dyn Borrowed<Self>>, Error> {
+        let RingKind::Gl(textures) = ring.kind else {
+            return Err(Error::unsupported("the session's backend renders into no ring of this kind"));
+        };
+        Ok(Box::new(mln_gl::BorrowedTarget::new(textures, producer)?))
+    }
+
+    #[cfg(all(unix, not(target_vendor = "apple")))]
+    fn exported(
+        &mut self,
+        device: &Device,
+        ring: &ExportedRing,
+        kind: ExportKind,
+        size: Size,
+        producer: SyncKind,
+    ) -> Result<Box<dyn Exported<Self>>, Error> {
+        // Irrefutable in a build with OpenGL alone, which has no other kind
+        // of device, and refutable in one with other backends.
+        let Device::Gl(device) = device else {
+            return Err(Error::unsupported("an OpenGL backend renders on an OpenGL device"));
+        };
+        Ok(Box::new(mln_gl::ExportedTarget::new(self, device, ring, kind, size, producer)?))
+    }
+}
+
+/// A backend's GPU objects, which the session owns by value: the backend,
+/// the target it draws into, and the renderer that draws, once there is
+/// one. Each call that reaches the backend's `Gpu` lends it, for its scope,
+/// to the renderer and the target. Dropping it tears the renderer and the
+/// target down on the `Gpu`, before the backend goes.
+struct BackendGfx<B: LocalBackend> {
+    backend: B,
+    frames: Frames<B>,
+    renderer: Option<Renderer>,
+}
+
+/// What a [`BackendGfx`] draws into.
+enum Frames<B: RendererBackend> {
+    Offscreen(OffscreenTarget<B::Gpu>),
+    /// `None` once the surface is released.
+    Presenting(Option<Box<dyn Presenting<B>>>),
+    /// `target` is `None` once the ring is released.
+    Borrowed {
+        target: Option<Box<dyn Borrowed<B>>>,
+        producer: SyncKind,
+    },
+    Exported(Box<dyn Exported<B>>),
+}
+
+impl<B: RendererBackend> Frames<B> {
+    /// The target to draw into, or `None` while there is no surface or ring.
+    fn target(&mut self) -> Option<&mut dyn FrameTarget<Gpu = B::Gpu>> {
+        match self {
+            Frames::Offscreen(target) => Some(target),
+            Frames::Presenting(target) => {
+                target.as_deref_mut().map(|target| -> &mut dyn FrameTarget<Gpu = B::Gpu> { target })
+            }
+            Frames::Borrowed { target, .. } => {
+                target.as_deref_mut().map(|target| -> &mut dyn FrameTarget<Gpu = B::Gpu> { target })
+            }
+            Frames::Exported(target) => Some(&mut **target),
+        }
+    }
+}
+
+impl<B: LocalBackend> BackendGfx<B> {
+    /// `backend`, and what `init` says it draws into, made on it.
+    fn with_frames(mut backend: B, init: FramesInit<'_>) -> Result<Gfx, Error> {
+        let frames = match init {
+            FramesInit::Offscreen(size) => Frames::Offscreen(backend.offscreen(size)?),
+            FramesInit::Borrowed(ring, producer) => {
+                Frames::Borrowed { target: Some(backend.borrowed(ring, producer)?), producer }
+            }
+            FramesInit::Exported { device, ring, kind, size, producer } => {
+                Frames::Exported(backend.exported(device, ring, kind, size, producer)?)
+            }
+            FramesInit::Surface(surface, overlay, size) => {
+                Frames::Presenting(Some(backend.surface(surface, overlay, size)?))
+            }
+        };
+        Ok(B::wrap(BackendGfx { backend, frames, renderer: None }))
+    }
+
+    /// The renderer that draws into the target, made by `make` with the
+    /// backend's `Gpu` unless there is one.
+    fn renderer_or(&mut self, make: impl FnOnce(&dyn Gpu) -> Renderer) -> &mut Renderer {
+        let BackendGfx { backend, renderer, .. } = self;
+        renderer.get_or_insert_with(|| make(&*backend.gpu()))
+    }
+
+    /// Runs `f` with the renderer and the backend's `Gpu`, if there is a
+    /// renderer.
+    fn with_renderer<R>(&mut self, f: impl FnOnce(&mut Renderer, &mut dyn Gpu) -> R) -> Option<R> {
+        let renderer = self.renderer.as_mut()?;
+        Some(f(renderer, &mut *self.backend.gpu()))
+    }
+
+    /// Tears the renderer down, if there is one, and returns its rendering
+    /// stats as it leaves them.
+    fn tear_down_renderer(&mut self) -> Option<RenderingStats> {
+        let renderer = self.renderer.take()?;
+        Some(renderer.tear_down(&mut *self.backend.gpu()))
+    }
+
+    /// Draws `update` into a frame of the target: the target begins the
+    /// frame, the renderer draws into it, and the target ends it. Returns
+    /// where the frame went, or `None` when nothing was drawn.
+    fn render(&mut self, update: &Arc<UpdateParameters>) -> Option<Handoff> {
+        let renderer = self.renderer.as_mut()?;
+        let target = self.frames.target()?;
+        let mut gpu = self.backend.gpu();
+        let gpu = &mut *gpu;
+        let image = target.begin_frame(gpu)?;
+        let drawn = renderer.render(gpu, &image, update)?;
+        let handoff = target.end_frame(gpu);
+        renderer.finish_frame(gpu, drawn, handoff);
+        Some(handoff)
+    }
+
+    /// Whether the target begins a frame, which it then keeps for the next
+    /// render.
+    fn ready_for_frame(&mut self) -> bool {
+        let Some(target) = self.frames.target() else { return false };
+        target.begin_frame(&mut self.backend.gpu()).is_some()
+    }
+
+    /// Runs `draw` with the backend's `Gpu` and the textures of a frame of
+    /// the target, which the frame keeps until it ends, or `None` when the
+    /// target has no frame to draw into.
+    fn with_frame<R>(&mut self, draw: impl FnOnce(&mut dyn Gpu, &FrameImage) -> R) -> Option<R> {
+        let target = self.frames.target()?;
+        let mut gpu = self.backend.gpu();
+        let image = target.begin_frame(&mut gpu)?;
+        Some(draw(&mut *gpu, &image))
+    }
+
+    fn select_slot(&mut self, slot: usize) -> Result<(), Error> {
+        match &mut self.frames {
+            Frames::Exported(target) => target.select(slot),
+            frames => ring(frames)?.select(slot),
+        }
+        Ok(())
+    }
+
+    fn release_slot(&mut self, slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
+        let gpu = &mut *self.backend.gpu();
+        match &mut self.frames {
+            Frames::Exported(target) => target.release(gpu, slot, consumer),
+            frames => ring(frames)?.release(gpu, slot, consumer),
+        }
+    }
+
+    fn discard_slot(&mut self, slot: usize) -> Result<(), Error> {
+        let gpu = &mut *self.backend.gpu();
+        match &mut self.frames {
+            Frames::Exported(target) => target.discard(gpu, slot),
+            frames => ring(frames)?.discard(gpu, slot),
+        }
+        Ok(())
+    }
+
+    fn exported_size(&self) -> Option<Size> {
+        match &self.frames {
+            Frames::Exported(target) => Some(target.size()),
+            _ => None,
+        }
+    }
+
+    fn resize_exported(&mut self, size: Size, held: &[usize]) -> Result<bool, Error> {
+        match &mut self.frames {
+            Frames::Exported(target) => target.resize(&mut self.backend, size, held),
+            _ => Err(Error::unsupported("the target exports no ring")),
+        }
+    }
+
+    fn exported_image(&self, slot: usize) -> Option<ExportedFrame> {
+        match &self.frames {
+            Frames::Exported(target) => target.image(slot),
+            _ => None,
+        }
+    }
+
+    fn set_ring(&mut self, ring: BorrowedRing) -> Result<Pending, Error> {
+        match &mut self.frames {
+            Frames::Borrowed { target: Some(target), .. } => target.replace(&mut self.backend.gpu(), ring),
+            Frames::Borrowed { target, producer } => {
+                *target = Some(self.backend.borrowed(ring, *producer)?);
+                Ok(None)
+            }
+            _ => Err(Error::unsupported("the target has no ring")),
+        }
+    }
+
+    fn resize(&mut self, size: Size) {
+        match &mut self.frames {
+            Frames::Offscreen(target) => target.resize(&mut self.backend.gpu(), size),
+            Frames::Presenting(Some(target)) => target.resize(size),
+            Frames::Presenting(None) | Frames::Borrowed { .. } | Frames::Exported(_) => {}
+        }
+    }
+
+    fn read_image(&mut self) -> Result<PremultipliedImage, Error> {
+        match &mut self.frames {
+            Frames::Offscreen(target) => target.read_image(&mut self.backend.gpu()),
+            Frames::Presenting(_) => Err(Error::unsupported("a surface session can't read its frames back")),
+            Frames::Borrowed { .. } | Frames::Exported(_) => {
+                Err(Error::unsupported("a ring's frames are the host's to read"))
+            }
+        }
+    }
+
+    fn release_surface(&mut self) -> Pending {
+        let gpu = &mut *self.backend.gpu();
+        match &mut self.frames {
+            Frames::Presenting(target) => {
+                if let Some(mut target) = target.take() {
+                    target.tear_down(gpu);
+                }
+                None
+            }
+            Frames::Borrowed { target, .. } => target.take().and_then(|mut target| {
+                let pending = target.take_pending(gpu);
+                target.tear_down(gpu);
+                pending
+            }),
+            Frames::Offscreen(_) | Frames::Exported(_) => None,
+        }
+    }
+
+    /// Presents to `surface` from now on, in place of the surface the target
+    /// has, if any, on the same backend.
+    fn set_surface(&mut self, surface: Surface, overlay: Option<SurfaceOverlay>, size: Size) -> Result<(), Error> {
+        let target = self.backend.surface(surface, overlay, size)?;
+        if let Frames::Presenting(old) = &mut self.frames
+            && let Some(mut old) = old.take()
+        {
+            old.tear_down(&mut self.backend.gpu());
+        }
+        self.frames = Frames::Presenting(Some(target));
+        Ok(())
+    }
+}
+
+/// The ring that `frames` draws into.
+fn ring<B: RendererBackend>(frames: &mut Frames<B>) -> Result<&mut dyn Borrowed<B>, Error> {
+    match frames {
+        Frames::Borrowed { target: Some(target), .. } => Ok(&mut **target),
+        Frames::Borrowed { target: None, .. } => Err(Error::invalid_state("the ring was released")),
+        _ => Err(Error::unsupported("the target has no ring")),
+    }
+}
+
+impl<B: LocalBackend> Drop for BackendGfx<B> {
+    fn drop(&mut self) {
+        let mut gpu = self.backend.gpu();
+        if let Some(renderer) = self.renderer.take() {
+            renderer.tear_down(&mut *gpu);
+        }
+        if let Some(target) = self.frames.target() {
+            target.tear_down(&mut gpu);
+        }
+    }
+}
+
+/// A backend's GPU objects, by the backend's type, each boxed: a backend's
+/// `Gpu` is large.
+enum Gfx {
+    #[cfg(feature = "webgpu")]
+    WebGpu(Box<BackendGfx<mln_webgpu::RendererBackend>>),
+    #[cfg(all(feature = "metal", target_vendor = "apple"))]
+    Metal(Box<BackendGfx<mln_mtl::RendererBackend>>),
+    #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+    Vulkan(Box<BackendGfx<mln_vulkan::RendererBackend>>),
+    #[cfg(all(feature = "d3d12", windows))]
+    D3d12(Box<BackendGfx<mln_d3d12::RendererBackend>>),
+    #[cfg(feature = "gl")]
+    Gl(Box<BackendGfx<mln_gl::RendererBackend>>),
+}
+
+/// Runs `$body` with `$gfx`'s [`BackendGfx`] as `$name`, of whichever
+/// backend it is.
+macro_rules! each {
+    ($gfx:expr, $name:ident => $body:expr) => {
+        match $gfx {
+            #[cfg(feature = "webgpu")]
+            Gfx::WebGpu($name) => $body,
+            #[cfg(all(feature = "metal", target_vendor = "apple"))]
+            Gfx::Metal($name) => $body,
+            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+            Gfx::Vulkan($name) => $body,
+            #[cfg(all(feature = "d3d12", windows))]
+            Gfx::D3d12($name) => $body,
+            #[cfg(feature = "gl")]
+            Gfx::Gl($name) => $body,
+        }
+    };
+}
+
+impl Gfx {
+    /// A backend on `device`, and what `init` says it draws into.
+    fn new(device: &Device, init: FramesInit<'_>) -> Result<Gfx, Error> {
+        match device {
+            #[cfg(feature = "webgpu")]
+            Device::WebGpu(device) => BackendGfx::with_frames(mln_webgpu::RendererBackend::new(device), init),
+            #[cfg(all(feature = "metal", target_vendor = "apple"))]
+            Device::Metal(device) => BackendGfx::with_frames(mln_mtl::RendererBackend::new(device), init),
+            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+            Device::Vulkan(device) => BackendGfx::with_frames(mln_vulkan::RendererBackend::new(device)?, init),
+            #[cfg(all(feature = "d3d12", windows))]
+            Device::D3d12(device) => BackendGfx::with_frames(
+                mln_d3d12::RendererBackend::new(device).map_err(|error| Error::native(error.to_string()))?,
+                init,
+            ),
+            #[cfg(all(feature = "gl", not(target_family = "wasm")))]
+            Device::Gl(device) => BackendGfx::with_frames(mln_gl::RendererBackend::new(device)?, init),
+            #[cfg(all(feature = "gl", target_family = "wasm"))]
+            Device::WebGl => {
+                drop(init);
+                Err(Error::unsupported("WebGL2 renders only into a canvas, with the canvas's own context"))
             }
         }
     }
@@ -628,29 +948,29 @@ fn surface_backend(
     surface: Surface,
     overlay: Option<SurfaceOverlay>,
     size: Size,
-) -> Result<(Backend, Box<dyn Presenting>), Error> {
+) -> Result<Gfx, Error> {
     let cap_frame_rate = surface.cap_frame_rate;
     match (device, surface.kind) {
         #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
         (Device::Vulkan(device), SurfaceKind::Window(window)) => {
             let overlay = vulkan_overlay(overlay)?;
-            let (backend, target) = mln_vulkan::SurfaceTarget::with_backend(device, window, size, cap_frame_rate)?;
-            target.set_overlay(overlay);
-            Ok((Backend::Vulkan(backend), Box::new(target)))
+            let (mut backend, mut target) =
+                mln_vulkan::SurfaceTarget::with_backend(device, window, size, cap_frame_rate)?;
+            target.set_overlay(backend.gpu(), overlay);
+            Ok(presenting(backend, target))
         }
         #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
-        (Device::Vulkan(device), kind @ SurfaceKind::Vulkan(_)) => {
-            let backend = Backend::Vulkan(Rc::new(mln_vulkan::RendererBackend::presenting(device)?));
-            let target = backend.surface(Surface { kind, cap_frame_rate }, overlay, size)?;
-            Ok((backend, target))
-        }
+        (Device::Vulkan(device), kind @ SurfaceKind::Vulkan(_)) => BackendGfx::with_frames(
+            mln_vulkan::RendererBackend::presenting(device)?,
+            FramesInit::Surface(Surface { kind, cap_frame_rate }, overlay, size),
+        ),
         #[cfg(all(feature = "gl", not(target_family = "wasm")))]
         (Device::Gl(device), SurfaceKind::Gl(host)) => {
             if overlay.is_some() {
                 return Err(Error::unsupported("a host's EGL surface takes no overlay"));
             }
             let (backend, target) = mln_gl::HostSurfaceTarget::with_backend(device, host, size)?;
-            Ok((Backend::Gl(backend), Box::new(target)))
+            Ok(presenting(backend, target))
         }
         #[cfg(all(feature = "gl", any(windows, all(unix, not(target_vendor = "apple")))))]
         (Device::Gl(_), SurfaceKind::Window(window)) => {
@@ -658,9 +978,9 @@ fn surface_backend(
                 SurfaceOverlay::Gl(overlay) => Ok(overlay),
                 other => Err(other),
             })?;
-            let (backend, target) = mln_gl::SurfaceTarget::with_backend(window, size, cap_frame_rate)?;
+            let (backend, mut target) = mln_gl::SurfaceTarget::with_backend(window, size, cap_frame_rate)?;
             target.set_overlay(overlay);
-            Ok((Backend::Gl(backend), Box::new(target)))
+            Ok(presenting(backend, target))
         }
         #[cfg(all(feature = "gl", target_family = "wasm"))]
         (Device::WebGl, SurfaceKind::WebCanvas { canvas, .. }) => {
@@ -671,34 +991,43 @@ fn surface_backend(
                 Err(canvas) => mln_gl::WebCanvas::Element(canvas.unchecked_into()),
             };
             let (backend, target) = mln_gl::CanvasTarget::with_backend(canvas, size)?;
-            Ok((Backend::Gl(backend), Box::new(target)))
+            Ok(presenting(backend, target))
         }
-        (_, kind) => {
-            let backend = Backend::new(device)?;
-            let target = backend.surface(Surface { kind, cap_frame_rate }, overlay, size)?;
-            Ok((backend, target))
-        }
+        (_, kind) => Gfx::new(device, FramesInit::Surface(Surface { kind, cap_frame_rate }, overlay, size)),
     }
 }
 
-enum Frames {
-    Offscreen(Box<dyn Offscreen>),
-    /// `None` once the surface is released.
-    Presenting(Option<Box<dyn Presenting>>),
-    /// `target` is `None` once the ring is released.
-    Borrowed {
-        target: Option<Box<dyn Borrowed>>,
-        producer: SyncKind,
-    },
-    Exported(Box<dyn Exported>),
+/// `backend`, presenting with `target`.
+#[cfg_attr(
+    not(any(feature = "gl", all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))),
+    expect(dead_code, reason = "only Vulkan and OpenGL make backends of a surface's own")
+)]
+fn presenting<B: LocalBackend>(backend: B, target: impl Presenting<B> + 'static) -> Gfx {
+    B::wrap(BackendGfx { backend, frames: Frames::Presenting(Some(Box::new(target))), renderer: None })
 }
 
-/// A render target built on this thread: the backend that a renderer draws
-/// with, on the target's device, and the frames it draws into.
+/// A target's backend, by its type, for a host that reads what the backend
+/// tells of its device.
+#[non_exhaustive]
+pub enum BackendRef<'a> {
+    #[cfg(feature = "webgpu")]
+    WebGpu(&'a mln_webgpu::RendererBackend),
+    #[cfg(all(feature = "metal", target_vendor = "apple"))]
+    Metal(&'a mln_mtl::RendererBackend),
+    #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+    Vulkan(&'a mln_vulkan::RendererBackend),
+    #[cfg(all(feature = "d3d12", windows))]
+    D3d12(&'a mln_d3d12::RendererBackend),
+    #[cfg(feature = "gl")]
+    Gl(&'a mln_gl::RendererBackend),
+}
+
+/// A render target built on this thread: the backend, on the target's
+/// device, the frames it draws into, and the renderer that draws them,
+/// which the target owns and lends the backend's `Gpu` to.
 pub struct LocalTarget {
     device: Device,
-    backend: Backend,
-    frames: Frames,
+    gfx: Gfx,
     /// The window that a surface target presents to, if it presents to one.
     window: Option<Arc<dyn Window>>,
 }
@@ -714,9 +1043,8 @@ impl LocalTarget {
             Some(device) => device,
             None => Device::new(DeviceOptions::default())?,
         };
-        let backend = Backend::new(&device)?;
-        let frames = Frames::Offscreen(backend.offscreen(size)?);
-        Ok(LocalTarget { device, backend, frames, window: None })
+        let gfx = Gfx::new(&device, FramesInit::Offscreen(size))?;
+        Ok(LocalTarget { device, gfx, window: None })
     }
 
     /// A target of `size` pixels that presents to `surface`, with `overlay`
@@ -743,8 +1071,8 @@ impl LocalTarget {
             Some(device) => device,
             None => default_surface_device(&surface)?,
         };
-        let (backend, target) = surface_backend(&device, surface, overlay, size)?;
-        Ok(LocalTarget { device, backend, frames: Frames::Presenting(Some(target)), window })
+        let gfx = surface_backend(&device, surface, overlay, size)?;
+        Ok(LocalTarget { device, gfx, window })
     }
 
     /// A target of `size` pixels on `device` that renders into the host's
@@ -754,9 +1082,8 @@ impl LocalTarget {
     /// device can't render into the ring with `producer`, and with the
     /// backend's error.
     pub fn borrowed(device: Device, ring: BorrowedRing, producer: SyncKind) -> Result<LocalTarget, Error> {
-        let backend = Backend::new(&device)?;
-        let frames = Frames::Borrowed { target: Some(backend.borrowed(ring, producer)?), producer };
-        Ok(LocalTarget { device, backend, frames, window: None })
+        let gfx = Gfx::new(&device, FramesInit::Borrowed(ring, producer))?;
+        Ok(LocalTarget { device, gfx, window: None })
     }
 
     /// A target on `device` that renders into a ring of `ring.depth` images
@@ -774,9 +1101,8 @@ impl LocalTarget {
         size: Size,
         producer: SyncKind,
     ) -> Result<LocalTarget, Error> {
-        let backend = Backend::new(&device)?;
-        let frames = Frames::Exported(backend.exported(&device, ring, kind, size, producer)?);
-        Ok(LocalTarget { device, backend, frames, window: None })
+        let gfx = Gfx::new(&device, FramesInit::Exported { device: &device, ring, kind, size, producer })?;
+        Ok(LocalTarget { device, gfx, window: None })
     }
 
     /// The device the target renders on.
@@ -785,22 +1111,82 @@ impl LocalTarget {
         &self.device
     }
 
-    /// The backend that renderers drawing into the target draw with.
+    /// The backend the target and its renderer draw with.
     #[must_use]
-    pub fn backend(&self) -> Rc<dyn RendererBackend> {
-        self.backend.as_dyn()
+    pub fn backend(&self) -> BackendRef<'_> {
+        match &self.gfx {
+            #[cfg(feature = "webgpu")]
+            Gfx::WebGpu(gfx) => BackendRef::WebGpu(&gfx.backend),
+            #[cfg(all(feature = "metal", target_vendor = "apple"))]
+            Gfx::Metal(gfx) => BackendRef::Metal(&gfx.backend),
+            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+            Gfx::Vulkan(gfx) => BackendRef::Vulkan(&gfx.backend),
+            #[cfg(all(feature = "d3d12", windows))]
+            Gfx::D3d12(gfx) => BackendRef::D3d12(&gfx.backend),
+            #[cfg(feature = "gl")]
+            Gfx::Gl(gfx) => BackendRef::Gl(&gfx.backend),
+        }
     }
 
-    /// The frames to draw into, or `None` while a surface target has no
-    /// surface.
+    /// Runs `f` with the backend's `Gpu`, as when the host waits for the
+    /// frames drawn so far.
+    pub fn with_gpu<R>(&mut self, f: impl FnOnce(&mut dyn Gpu) -> R) -> R {
+        each!(&mut self.gfx, gfx => f(&mut *gfx.backend.gpu()))
+    }
+
+    /// The renderer that draws into the target, which `make` makes with the
+    /// backend's `Gpu` unless the target has one: the renderer draws with
+    /// that `Gpu` only.
+    pub fn renderer_or(&mut self, make: impl FnOnce(&dyn Gpu) -> Renderer) -> &mut Renderer {
+        each!(&mut self.gfx, gfx => gfx.renderer_or(make))
+    }
+
+    /// The renderer that draws into the target, if it has one.
     #[must_use]
-    pub fn frames(&self) -> Option<&dyn FrameTarget> {
-        match &self.frames {
-            Frames::Offscreen(target) => Some(&**target),
-            Frames::Presenting(target) => target.as_deref().map(|target| -> &dyn FrameTarget { target }),
-            Frames::Borrowed { target, .. } => target.as_deref().map(|target| -> &dyn FrameTarget { target }),
-            Frames::Exported(target) => Some(&**target),
-        }
+    pub fn renderer(&self) -> Option<&Renderer> {
+        each!(&self.gfx, gfx => gfx.renderer.as_ref())
+    }
+
+    /// The renderer that draws into the target, if it has one.
+    pub fn renderer_mut(&mut self) -> Option<&mut Renderer> {
+        each!(&mut self.gfx, gfx => gfx.renderer.as_mut())
+    }
+
+    /// Runs `f` with the target's renderer and the backend's `Gpu`, which the
+    /// renderer's calls that make, draw or free its GPU objects take, or
+    /// returns `None` without a renderer.
+    pub fn with_renderer<R>(&mut self, f: impl FnOnce(&mut Renderer, &mut dyn Gpu) -> R) -> Option<R> {
+        each!(&mut self.gfx, gfx => gfx.with_renderer(f))
+    }
+
+    /// Tears the renderer down on the backend's `Gpu`, if the target has
+    /// one, and returns its rendering stats as it leaves them.
+    pub fn tear_down_renderer(&mut self) -> Option<RenderingStats> {
+        each!(&mut self.gfx, gfx => gfx.tear_down_renderer())
+    }
+
+    /// Draws `update` with the target's renderer into a frame: the target
+    /// begins the frame, the renderer draws into it, and the target ends
+    /// it. Returns where the frame went, or `None` when nothing was drawn:
+    /// there is no renderer, the target had nothing to draw into, or there
+    /// was nothing to draw.
+    pub fn render(&mut self, update: &Arc<UpdateParameters>) -> Option<Handoff> {
+        each!(&mut self.gfx, gfx => gfx.render(update))
+    }
+
+    /// Runs `draw` with the backend's `Gpu` and the textures of the target's
+    /// frame, to draw into them alongside the map. The frame is the one the
+    /// next render draws into, which the target begins unless it has
+    /// begun it. `None` when the target has nothing to draw into now.
+    pub fn with_frame<R>(&mut self, draw: impl FnOnce(&mut dyn Gpu, &FrameImage) -> R) -> Option<R> {
+        each!(&mut self.gfx, gfx => gfx.with_frame(draw))
+    }
+
+    /// Whether the target can take a frame now: its window, if any, has an
+    /// area to present to, and it begins a frame, which a surface needs a
+    /// texture for, and which the next render draws into.
+    pub fn ready_for_frame(&mut self) -> bool {
+        self.window_has_area() && each!(&mut self.gfx, gfx => gfx.ready_for_frame())
     }
 
     /// Whether the target can take a frame as far as its window says: it
@@ -814,73 +1200,55 @@ impl LocalTarget {
     /// Whether frames are presented to a window or surface.
     #[must_use]
     pub fn is_presenting(&self) -> bool {
-        matches!(self.frames, Frames::Presenting(_))
+        each!(&self.gfx, gfx => matches!(gfx.frames, Frames::Presenting(_)))
     }
 
     /// Whether frames go to the host in images of the target's own.
     #[must_use]
     pub fn is_exported(&self) -> bool {
-        matches!(self.frames, Frames::Exported(_))
+        each!(&self.gfx, gfx => matches!(gfx.frames, Frames::Exported(_)))
     }
 
     /// Whether frames go to the host's ring.
     #[must_use]
     pub fn is_borrowed(&self) -> bool {
-        matches!(self.frames, Frames::Borrowed { .. })
+        each!(&self.gfx, gfx => matches!(gfx.frames, Frames::Borrowed { .. }))
     }
 
     /// Whether the target is a ring that let go of its textures.
     #[must_use]
     pub fn ring_released(&self) -> bool {
-        matches!(self.frames, Frames::Borrowed { target: None, .. })
+        each!(&self.gfx, gfx => matches!(gfx.frames, Frames::Borrowed { target: None, .. }))
     }
 
-    fn ring(&self) -> Result<&dyn Borrowed, Error> {
-        match &self.frames {
-            Frames::Borrowed { target: Some(target), .. } => Ok(&**target),
-            Frames::Borrowed { target: None, .. } => Err(Error::invalid_state("the ring was released")),
-            _ => Err(Error::unsupported("the target has no ring")),
-        }
+    /// Whether frames are read back rather than presented.
+    #[must_use]
+    pub fn is_offscreen(&self) -> bool {
+        each!(&self.gfx, gfx => matches!(gfx.frames, Frames::Offscreen(_)))
     }
 
     /// Has the next frame render into the ring's texture at `slot`.
-    pub fn select_slot(&self, slot: usize) -> Result<(), Error> {
-        if let Frames::Exported(target) = &self.frames {
-            target.select(slot);
-            return Ok(());
-        }
-        self.ring()?.select(slot);
-        Ok(())
+    pub fn select_slot(&mut self, slot: usize) -> Result<(), Error> {
+        each!(&mut self.gfx, gfx => gfx.select_slot(slot))
     }
 
     /// The host gave the ring's texture at `slot` back: the next frame
     /// rendered into it waits for `consumer`.
-    pub fn release_slot(&self, slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
-        if let Frames::Exported(target) = &self.frames {
-            return target.release(slot, consumer);
-        }
-        self.ring()?.release(slot, consumer)
+    pub fn release_slot(&mut self, slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
+        each!(&mut self.gfx, gfx => gfx.release_slot(slot, consumer))
     }
 
     /// The host gave up the ring's texture at `slot`, which the target
     /// renders into no more.
-    pub fn discard_slot(&self, slot: usize) -> Result<(), Error> {
-        if let Frames::Exported(target) = &self.frames {
-            target.discard(slot);
-            return Ok(());
-        }
-        self.ring()?.discard(slot);
-        Ok(())
+    pub fn discard_slot(&mut self, slot: usize) -> Result<(), Error> {
+        each!(&mut self.gfx, gfx => gfx.discard_slot(slot))
     }
 
     /// The size in pixels of an exported ring's images, or `None` for
     /// another target.
     #[must_use]
     pub fn exported_size(&self) -> Option<Size> {
-        match &self.frames {
-            Frames::Exported(target) => Some(target.size()),
-            _ => None,
-        }
+        each!(&self.gfx, gfx => gfx.exported_size())
     }
 
     /// Renders an exported ring's next frames into images of `size` pixels.
@@ -891,20 +1259,15 @@ impl LocalTarget {
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a
     /// target that isn't an exported ring, and with the backend's error, when
     /// the ring keeps its images.
-    pub fn resize_exported(&self, size: Size, held: &[usize]) -> Result<bool, Error> {
-        match &self.frames {
-            Frames::Exported(target) => target.resize(size, held),
-            _ => Err(Error::unsupported("the target exports no ring")),
-        }
+    pub fn resize_exported(&mut self, size: Size, held: &[usize]) -> Result<bool, Error> {
+        each!(&mut self.gfx, gfx => gfx.resize_exported(size, held))
     }
 
     /// The exported image of the frame at `slot`, of the size it has.
     #[must_use]
     pub fn exported_texture(&self, slot: usize) -> Option<FrameTexture> {
-        match &self.frames {
-            Frames::Exported(target) => target.image(slot).map(|frame| FrameTexture::exported(frame, &self.device)),
-            _ => None,
-        }
+        let image = each!(&self.gfx, gfx => gfx.exported_image(slot))?;
+        Some(FrameTexture::exported(image, &self.device))
     }
 
     /// Renders into `ring` from now on, in place of the ring's textures, and
@@ -915,29 +1278,12 @@ impl LocalTarget {
     /// target that isn't a ring, or a ring of another format, and with the
     /// backend's error.
     pub(crate) fn set_ring(&mut self, ring: BorrowedRing) -> Result<Pending, Error> {
-        match &mut self.frames {
-            Frames::Borrowed { target: Some(target), .. } => target.replace(ring),
-            Frames::Borrowed { target, producer } => {
-                *target = Some(self.backend.borrowed(ring, *producer)?);
-                Ok(None)
-            }
-            _ => Err(Error::unsupported("the target has no ring")),
-        }
-    }
-
-    /// Whether frames are read back rather than presented.
-    #[must_use]
-    pub fn is_offscreen(&self) -> bool {
-        matches!(self.frames, Frames::Offscreen(_))
+        each!(&mut self.gfx, gfx => gfx.set_ring(ring))
     }
 
     /// Draws the next frame at `size` pixels.
-    pub fn resize(&self, size: Size) {
-        match &self.frames {
-            Frames::Offscreen(target) => target.resize(size),
-            Frames::Presenting(Some(target)) => target.resize(size),
-            Frames::Presenting(None) | Frames::Borrowed { .. } | Frames::Exported(_) => {}
-        }
+    pub fn resize(&mut self, size: Size) {
+        each!(&mut self.gfx, gfx => gfx.resize(size));
     }
 
     /// The last frame's pixels.
@@ -947,37 +1293,28 @@ impl LocalTarget {
     /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) before a frame, and
     /// with [`ErrorKind::Native`](mln_util::ErrorKind) where the backend
     /// reads nothing back.
-    pub fn read_image(&self) -> Result<PremultipliedImage, Error> {
-        match &self.frames {
-            Frames::Offscreen(target) => target.read_image(),
-            Frames::Presenting(_) => Err(Error::unsupported("a surface session can't read its frames back")),
-            Frames::Borrowed { .. } | Frames::Exported(_) => {
-                Err(Error::unsupported("a ring's frames are the host's to read"))
-            }
-        }
+    pub fn read_image(&mut self) -> Result<PremultipliedImage, Error> {
+        each!(&mut self.gfx, gfx => gfx.read_image())
     }
 
     /// Lets go of a surface target's surface, or of a ring's textures, and
     /// returns the host's reads of the textures, which the host may use once
-    /// they end. The backend stays.
+    /// they end. The backend and its renderer stay.
     pub(crate) fn release_surface(&mut self) -> Pending {
-        match &mut self.frames {
-            Frames::Presenting(target) => {
-                drop(target.take());
-                self.window = None;
-                None
-            }
-            Frames::Borrowed { target, .. } => target.take().and_then(|target| target.take_pending()),
-            Frames::Offscreen(_) | Frames::Exported(_) => None,
+        let pending = each!(&mut self.gfx, gfx => gfx.release_surface());
+        if self.is_presenting() {
+            self.window = None;
         }
+        pending
     }
 
     /// Presents to `surface` at `size` pixels from now on, with `overlay`
     /// drawn over its frames, in place of the surface the target has, if
     /// any: on the same backend where it can present to `surface`, and on a
     /// new one of the device otherwise, which the target then returns true
-    /// for, and which draws no overlay. A renderer on the old backend has to
-    /// be made again on the new one.
+    /// for, and which draws no overlay. The renderer on the old backend is
+    /// torn down with it, and the target has none until one is made again
+    /// on the new backend ([`renderer_or`](Self::renderer_or)).
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for an
     /// offscreen target or when the device can't present to `surface`, and
@@ -989,23 +1326,21 @@ impl LocalTarget {
         overlay: Option<SurfaceOverlay>,
         size: Size,
     ) -> Result<bool, Error> {
-        if !matches!(self.frames, Frames::Presenting(_)) {
+        if !self.is_presenting() {
             return Err(Error::unsupported("only a surface target presents to another surface"));
         }
         surface.check_area()?;
         let window = surface.host_window();
         let retry = surface.clone_window();
-        let (new_backend, target) = match self.backend.surface(surface, overlay, size) {
-            Ok(target) => (false, target),
+        let new_backend = match each!(&mut self.gfx, gfx => gfx.set_surface(surface, overlay, size)) {
+            Ok(()) => false,
             Err(error) if error.kind == mln_util::ErrorKind::Unsupported => {
                 let surface = retry.ok_or(error)?;
-                let (backend, target) = surface_backend(&self.device, surface, None, size)?;
-                self.backend = backend;
-                (true, target)
+                self.gfx = surface_backend(&self.device, surface, None, size)?;
+                true
             }
             Err(error) => return Err(error),
         };
-        self.frames = Frames::Presenting(Some(target));
         self.window = window;
         Ok(new_backend)
     }

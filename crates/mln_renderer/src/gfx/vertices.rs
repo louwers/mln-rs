@@ -8,7 +8,7 @@
 use std::marker::PhantomData;
 use std::rc::Rc;
 
-use mln_gfx::gpu::{BufferUsage, GpuError};
+use mln_gfx::gpu::{BufferUsage, Gpu, GpuError};
 #[cfg(target_family = "wasm")]
 use mln_util::host_bytes::HostBytes;
 
@@ -174,15 +174,15 @@ impl Vertices {
         };
     }
 
-    /// The buffer of the vertices through `device`: made of them by the
-    /// first upload, and written over by the upload after an update, each
-    /// of which frees their bytes, or keeps dynamic vertices' for the next
-    /// update; `None` where there are none.
-    fn upload(&mut self, device: &mut Device) -> Result<Option<SharedBuffer>, GpuError> {
+    /// The buffer of the vertices of `gpu` through `device`: made of them
+    /// by the first upload, and written over by the upload after an update,
+    /// each of which frees their bytes, or keeps dynamic vertices' for the
+    /// next update; `None` where there are none.
+    fn upload(&mut self, gpu: &mut dyn Gpu, device: &mut Device) -> Result<Option<SharedBuffer>, GpuError> {
         if let Some(buffer) = &self.buffer {
             let buffer = buffer.clone();
             if let Some(bytes) = self.data.bytes() {
-                device.write(&buffer, bytes)?;
+                device.write(gpu, &buffer, bytes)?;
                 self.written();
             }
             return Ok(Some(buffer));
@@ -194,13 +194,13 @@ impl Vertices {
         }
         let buffer = match &self.data {
             #[cfg(target_family = "wasm")]
-            VertexData::Host(bytes) => device.buffer_from_host(BufferUsage::Vertex, bytes)?,
+            VertexData::Host(bytes) => device.buffer_from_host(gpu, BufferUsage::Vertex, bytes)?,
             data => {
                 let Some(bytes) = data.bytes() else {
                     debug_assert!(false, "vertices without data or a buffer");
                     return Err(GpuError::Invalid("vertices without data or a buffer".to_owned()));
                 };
-                device.buffer(BufferUsage::Vertex, &bytes[..size])?
+                device.buffer(gpu, BufferUsage::Vertex, &bytes[..size])?
             }
         };
         self.buffer = Some(buffer.clone());
@@ -269,10 +269,11 @@ impl VertexStore {
     /// makes it.
     pub(crate) fn upload(
         &mut self,
+        gpu: &mut dyn Gpu,
         device: &mut Device,
         shared: &SharedVertices,
     ) -> Result<Option<SharedBuffer>, GpuError> {
-        self.0.get_mut(&shared.handle).ok_or(GpuError::UnknownId("vertices"))?.upload(device)
+        self.0.get_mut(&shared.handle).ok_or(GpuError::UnknownId("vertices"))?.upload(gpu, device)
     }
 
     /// Drops the vertices `key`, whose last handle dropped.

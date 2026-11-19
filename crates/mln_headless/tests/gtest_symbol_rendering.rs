@@ -240,7 +240,7 @@ fn continuous_collision_visibility_fades_and_reappears() {
                     if draw_calls != 2 {
                         failures.borrow_mut().push(format!("initial: {draw_calls} draw calls"));
                     }
-                    *initial_image.borrow_mut() = Some(frontend.borrow().read_still_image());
+                    *initial_image.borrow_mut() = Some(frontend.borrow_mut().read_still_image());
                     phase.set(Phase::Colliding);
                     map.borrow_mut().jump_to(&CameraOptions { zoom: Some(4.1), ..Default::default() });
                 }
@@ -266,7 +266,7 @@ fn continuous_collision_visibility_fades_and_reappears() {
                     if draw_calls != 2 {
                         failures.borrow_mut().push(format!("reappeared: {draw_calls} draw calls"));
                     }
-                    if initial_image.borrow().as_ref() != Some(&frontend.borrow().read_still_image()) {
+                    if initial_image.borrow().as_ref() != Some(&frontend.borrow_mut().read_still_image()) {
                         failures.borrow_mut().push("the reappeared frame differs from the initial one".to_owned());
                     }
                     phase.set(Phase::Complete);

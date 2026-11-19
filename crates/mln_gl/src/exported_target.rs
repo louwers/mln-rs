@@ -9,7 +9,6 @@
 // buffers; the frames that the host holds keep the old generation's buffers
 // until they are given back.
 
-use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
 use std::rc::{Rc, Weak};
 
@@ -26,6 +25,7 @@ use mln_util::size::Size;
 
 use crate::borrowed_target::{BorrowedTarget, BorrowedTextures};
 use crate::device::Device;
+use crate::gpu::GlGpu;
 use crate::renderer_backend::{GlContext, RendererBackend};
 use crate::types::{FramebufferID, TextureID};
 
@@ -198,7 +198,7 @@ struct SlotTexture {
     /// The sync file of the slot's last frame, which the host may wait on
     /// until it gives the slot back.
     #[cfg(target_os = "android")]
-    producer: RefCell<Option<std::os::fd::OwnedFd>>,
+    producer: Option<std::os::fd::OwnedFd>,
 }
 
 /// A generation's GL objects and images, which go with it.
@@ -271,14 +271,13 @@ struct Generation {
 
 impl Generation {
     fn new(
-        backend: &Rc<RendererBackend>,
+        context: &Rc<GlContext>,
         exporter: &std::sync::Arc<Exporter>,
         layout: &Layout,
         depth: usize,
         size: Size,
         keep_depth: bool,
     ) -> Result<Generation, Error> {
-        let context = backend.context();
         let _current = context.enter();
         let mut objects = Objects {
             context: Rc::downgrade(context),
@@ -349,7 +348,7 @@ impl Generation {
                 framebuffer,
                 depth: None,
                 #[cfg(target_os = "android")]
-                producer: RefCell::new(None),
+                producer: None,
             });
             if keep_depth {
                 let depth = depth_texture(context, framebuffer, size)?;
@@ -385,7 +384,7 @@ impl Generation {
         };
         // The ring hands its frames over itself, so the canvas's frames end
         // with none but a finished one.
-        let target = BorrowedTarget::new(Rc::clone(backend), textures, SyncKind::CpuComplete)?;
+        let target = BorrowedTarget::new(textures, SyncKind::CpuComplete)?;
         Ok(Generation { target, objects, size, layout: layout.clone() })
     }
 
@@ -417,9 +416,9 @@ impl Generation {
     /// The host gave the frame at `slot` back: the sync file it waited on
     /// closes.
     #[cfg(target_os = "android")]
-    fn given_back(&self, slot: usize) {
-        if let Some(slot) = self.objects.slots.get(slot) {
-            slot.producer.borrow_mut().take();
+    fn given_back(&mut self, slot: usize) {
+        if let Some(slot) = self.objects.slots.get_mut(slot) {
+            slot.producer = None;
         }
     }
 }
@@ -427,7 +426,8 @@ impl Generation {
 /// Frames drawn into buffers of the target's own, and queued for the host to
 /// acquire.
 pub struct ExportedTarget {
-    backend: Rc<RendererBackend>,
+    /// The backend's context, which the generations' objects are of.
+    context: Rc<GlContext>,
     exporter: std::sync::Arc<Exporter>,
     layout: Layout,
     depth: usize,
@@ -436,9 +436,9 @@ pub struct ExportedTarget {
     #[cfg(target_os = "android")]
     producer: SyncKind,
     consumers: SyncKinds,
-    generations: RefCell<Generations<Generation>>,
+    generations: Generations<Generation>,
     /// The slot that the next frame goes to.
-    selected: Cell<usize>,
+    selected: usize,
 }
 
 impl ExportedTarget {
@@ -451,7 +451,7 @@ impl ExportedTarget {
     /// [`ErrorKind::Native`](mln_util::ErrorKind) when a buffer can't be
     /// made.
     pub fn new(
-        backend: Rc<RendererBackend>,
+        backend: &RendererBackend,
         device: &Device,
         ring: &ExportedRing,
         kind: ExportKind,
@@ -472,9 +472,10 @@ impl ExportedTarget {
             .source
             .layout(ring)
             .ok_or_else(|| Error::unsupported(format!("the EGL display can render into no {kind:?} of the ring")))?;
-        let current = Generation::new(&backend, &exporter, &layout, ring.depth, size, ring.keep_depth)?;
+        let context = Rc::clone(backend.context());
+        let current = Generation::new(&context, &exporter, &layout, ring.depth, size, ring.keep_depth)?;
         Ok(ExportedTarget {
-            backend,
+            context,
             exporter,
             layout,
             depth: ring.depth,
@@ -482,14 +483,14 @@ impl ExportedTarget {
             #[cfg(target_os = "android")]
             producer,
             consumers,
-            generations: RefCell::new(Generations::new(current)),
-            selected: Cell::new(0),
+            generations: Generations::new(current),
+            selected: 0,
         })
     }
 
     /// Has the next frame draw into the buffer at `slot`.
-    pub fn select(&self, slot: usize) {
-        self.selected.set(slot);
+    pub fn select(&mut self, slot: usize) {
+        self.selected = slot;
     }
 
     /// The host gave the frame at `slot` back, once its reads reach
@@ -499,23 +500,22 @@ impl ExportedTarget {
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for
     /// another kind of sync, and with [`ErrorKind::Native`](mln_util::ErrorKind)
     /// when the context can't wait for the sync file.
-    pub fn release(&self, slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
+    pub fn release(&mut self, gpu: &mut GlGpu, slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
         let kind = consumer.sync.kind;
         if !self.consumers.contains(kind) {
             return Err(Error::unsupported(format!("an exported ring waits for no {kind:?}")));
         }
-        let mut generations = self.generations.borrow_mut();
         // An older generation's buffer is never drawn into again.
-        if generations.give_back(slot) {
+        if self.generations.give_back(slot, |mut generation| generation.target.tear_down(gpu)) {
             return Ok(());
         }
         #[cfg(target_os = "android")]
         {
-            generations.current().given_back(slot);
+            self.generations.current_mut().given_back(slot);
             if let Some(file) = consumer.sync_file.filter(|_| kind == SyncKind::SyncFd)
                 && let Some(fences) = &self.exporter.fences
             {
-                let _current = self.backend.context().enter();
+                let _current = self.context.enter();
                 return fences.wait(file);
             }
         }
@@ -525,14 +525,14 @@ impl ExportedTarget {
     }
 
     /// The host gave the frame at `slot` up.
-    pub fn discard(&self, slot: usize) {
-        let mut generations = self.generations.borrow_mut();
+    pub fn discard(&mut self, gpu: &mut GlGpu, slot: usize) {
+        let given_back = self.generations.give_back(slot, |mut generation| generation.target.tear_down(gpu));
         #[cfg(target_os = "android")]
-        if !generations.give_back(slot) {
-            generations.current().given_back(slot);
+        if !given_back {
+            self.generations.current_mut().given_back(slot);
         }
         #[cfg(not(target_os = "android"))]
-        generations.give_back(slot);
+        let _ = given_back;
     }
 
     /// Draws into buffers of `size` pixels from now on. The frames that the
@@ -541,26 +541,28 @@ impl ExportedTarget {
     ///
     /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when a buffer
     /// can't be made, and the target then keeps its own.
-    pub fn resize(&self, size: Size, held: &[usize]) -> Result<bool, Error> {
+    pub fn resize(&mut self, gpu: &mut GlGpu, size: Size, held: &[usize]) -> Result<bool, Error> {
         if self.size() == size {
             return Ok(false);
         }
-        let next = Generation::new(&self.backend, &self.exporter, &self.layout, self.depth, size, self.keep_depth)?;
-        self.generations.borrow_mut().replace(next, held);
+        let next = Generation::new(&self.context, &self.exporter, &self.layout, self.depth, size, self.keep_depth)?;
+        self.generations.replace(next, held, |mut generation| generation.target.tear_down(gpu));
         Ok(true)
     }
 
     /// The size of the buffers that frames draw into.
+    #[must_use]
     pub fn size(&self) -> Size {
-        self.generations.borrow().current().size
+        self.generations.current().size
     }
 
     /// The buffer of the frame at `slot`, its texture over it, and its depth
     /// texture when the ring keeps depth: upside down from OpenGL's rows, as
     /// the buffer's readers take them. The depth stays on the device: a
     /// dmabuf or a hardware buffer holds no depth format.
+    #[must_use]
     pub fn image(&self, slot: usize) -> Option<ExportedFrame> {
-        let generations = self.generations.borrow();
+        let generations = &self.generations;
         let generation = generations.retired(slot).unwrap_or(generations.current());
         generation.objects.slots.get(slot).map(|texture| ExportedFrame {
             size: generation.size,
@@ -584,17 +586,17 @@ impl ExportedTarget {
     /// Hands the blitted frame at `slot` over with a sync file of its own,
     /// which the slot keeps until the host gives it back.
     #[cfg(target_os = "android")]
-    fn hand_over_with_sync_file(&self, generation: &Generation, slot: usize) -> Handoff {
+    fn hand_over_with_sync_file(&mut self, slot: usize) -> Handoff {
         use std::os::fd::AsRawFd as _;
-        let (Some(fences), Some(texture)) = (&self.exporter.fences, generation.objects.slots.get(slot)) else {
+        let generation = self.generations.current_mut();
+        let (Some(fences), Some(texture)) = (&self.exporter.fences, generation.objects.slots.get_mut(slot)) else {
             return Handoff::Dropped;
         };
-        let context = self.backend.context();
-        let _current = context.enter();
-        match fences.signal(context.gl()) {
+        let _current = self.context.enter();
+        match fences.signal(self.context.gl()) {
             Ok(file) => {
                 let handle = file.as_raw_fd() as u64;
-                *texture.producer.borrow_mut() = Some(file);
+                texture.producer = Some(file);
                 Handoff::Queued { slot, sync: mln_gfx::GpuSync { kind: SyncKind::SyncFd, handle, value: 0 } }
             }
             Err(error) => {
@@ -606,17 +608,16 @@ impl ExportedTarget {
 }
 
 impl FrameTarget for ExportedTarget {
-    fn begin_frame(&self) -> Option<FrameImage> {
-        self.generations.borrow().current().target.begin_frame()
+    type Gpu = GlGpu;
+
+    fn begin_frame(&mut self, gpu: &mut GlGpu) -> Option<FrameImage> {
+        self.generations.current_mut().target.begin_frame(gpu)
     }
 
-    fn end_frame(&self) -> Handoff {
-        let slot = self.selected.get();
-        let generations = self.generations.borrow();
-        let generation = generations.current();
-        let context = self.backend.context();
-        let current = context.enter();
-        if !generation.blit(context, slot) {
+    fn end_frame(&mut self, gpu: &mut GlGpu) -> Handoff {
+        let slot = self.selected;
+        let current = self.context.enter();
+        if !self.generations.current().blit(&self.context, slot) {
             return Handoff::Dropped;
         }
         drop(current);
@@ -624,19 +625,17 @@ impl FrameTarget for ExportedTarget {
         // frame waiting for it.
         #[cfg(target_os = "android")]
         if self.producer == SyncKind::SyncFd {
-            return self.hand_over_with_sync_file(generation, slot);
+            return self.hand_over_with_sync_file(slot);
         }
         // The canvas's frame ends, and with it the blit.
-        match generation.target.end_frame() {
+        match self.generations.current_mut().target.end_frame(gpu) {
             Handoff::GivenBack { sync, .. } => Handoff::Queued { slot, sync },
             other => other,
         }
     }
-}
 
-impl Drop for ExportedTarget {
-    fn drop(&mut self) {
-        self.generations.get_mut().clear_retired();
+    fn tear_down(&mut self, gpu: &mut GlGpu) {
+        self.generations.clear(|generation| generation.target.tear_down(gpu));
     }
 }
 

@@ -1,7 +1,5 @@
-use std::rc::Rc;
-
-use mln_gfx::SyncKind;
 use mln_gfx::frame::FrameTarget as _;
+use mln_gfx::{RendererBackend as _, SyncKind};
 use mln_util::size::Size;
 
 use crate::{BorrowedTarget, BorrowedTextures, Device, RendererBackend};
@@ -23,17 +21,17 @@ fn textures(device: &Device, size: Size) -> BorrowedTextures {
     BorrowedTextures { textures: vec![texture(), texture()], size, depth_textures: Vec::new() }
 }
 
-// A target dropped with a frame begun forgets the frame's imports.
+// A target torn down with a frame begun forgets the frame's imports.
 #[test]
-fn a_target_dropped_in_a_frame_forgets_its_imports() {
+fn a_target_torn_down_in_a_frame_forgets_its_imports() {
     let device = Device::new(None).expect("device");
-    let backend = Rc::new(RendererBackend::new(&device));
+    let mut backend = RendererBackend::new(&device);
     let size = Size::new(4, 4);
     let before = backend.gpu().texture_count();
-    let target =
-        BorrowedTarget::new(Rc::clone(&backend), textures(&device, size), SyncKind::CpuComplete).expect("a ring");
-    target.begin_frame().expect("a frame");
-    assert!(backend.gpu().texture_count() > before, "the frame imports its textures");
-    drop(target);
-    assert_eq!(backend.gpu().texture_count(), before);
+    let mut target = BorrowedTarget::new(&backend, textures(&device, size), SyncKind::CpuComplete).expect("a ring");
+    let gpu = backend.gpu();
+    target.begin_frame(gpu).expect("a frame");
+    assert!(gpu.texture_count() > before, "the frame imports its textures");
+    target.tear_down(gpu);
+    assert_eq!(gpu.texture_count(), before);
 }

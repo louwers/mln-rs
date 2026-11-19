@@ -3,9 +3,6 @@
 //! device's one queue, which orders the host's reads after the frame and the
 //! next frame after the host's reads.
 
-use std::cell::{Cell, RefCell};
-use std::rc::Rc;
-
 use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
 use mln_gfx::gpu::{Gpu as _, ResourceId, TargetFormats, destroy_unused};
 use mln_gfx::{ConsumerSync, DepthStencilFormat, DepthStencilFormats, GpuSync, SyncKind, SyncKinds};
@@ -13,7 +10,7 @@ use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
-use crate::gpu::from_wgpu_format;
+use crate::gpu::{WebGpu, from_wgpu_format};
 use crate::renderer_backend::RendererBackend;
 
 /// A ring of the host's 2D textures, of `size` pixels and one format, with
@@ -114,18 +111,18 @@ pub fn depth_stencil_format(format: wgpu::TextureFormat) -> Option<DepthStencilF
 
 /// Frames drawn into the host's textures, each given back to the host.
 pub struct BorrowedTarget {
-    backend: Rc<RendererBackend>,
-    textures: RefCell<BorrowedTextures>,
+    device: wgpu::Device,
+    textures: BorrowedTextures,
     /// The slot that the next frame draws into.
-    selected: Cell<usize>,
+    selected: usize,
     producer: SyncKind,
     depth_stencil_format: wgpu::TextureFormat,
     /// The target's own depth and stencil texture, where the host gave
     /// none.
-    depth_stencil: Cell<Option<wgpu::Texture>>,
+    depth_stencil: Option<wgpu::Texture>,
     /// The slot of the frame begun and its textures, imported into the
     /// backend's `WebGpu`, until the frame ends.
-    imports: Cell<Option<(usize, FrameImage)>>,
+    imports: Option<(usize, FrameImage)>,
 }
 
 impl BorrowedTarget {
@@ -136,31 +133,31 @@ impl BorrowedTarget {
     /// Fails as [`BorrowedTextures::check`] does, and with
     /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a producer kind
     /// the target can't hand over.
-    pub fn new(backend: Rc<RendererBackend>, textures: BorrowedTextures, producer: SyncKind) -> Result<Self, Error> {
+    pub fn new(backend: &RendererBackend, textures: BorrowedTextures, producer: SyncKind) -> Result<Self, Error> {
         textures.check()?;
         if !BorrowedTextures::sync_kinds().0.contains(producer) {
             return Err(Error::unsupported(format!("a WebGPU target hands frames over with no {producer:?}")));
         }
-        let depth_stencil_format =
-            if backend.device().device().features().contains(wgpu::Features::DEPTH32FLOAT_STENCIL8) {
-                wgpu::TextureFormat::Depth32FloatStencil8
-            } else {
-                wgpu::TextureFormat::Depth24PlusStencil8
-            };
+        let device = backend.device().device().clone();
+        let depth_stencil_format = if device.features().contains(wgpu::Features::DEPTH32FLOAT_STENCIL8) {
+            wgpu::TextureFormat::Depth32FloatStencil8
+        } else {
+            wgpu::TextureFormat::Depth24PlusStencil8
+        };
         Ok(BorrowedTarget {
-            backend,
-            textures: RefCell::new(textures),
-            selected: Cell::new(0),
+            device,
+            textures,
+            selected: 0,
             producer,
             depth_stencil_format,
-            depth_stencil: Cell::new(None),
-            imports: Cell::new(None),
+            depth_stencil: None,
+            imports: None,
         })
     }
 
     /// Has the next frame draw into the texture at `slot`.
-    pub fn select(&self, slot: usize) {
-        self.selected.set(slot);
+    pub fn select(&mut self, slot: usize) {
+        self.selected = slot;
     }
 
     /// The host gave the texture at `slot` back. The host's reads went to
@@ -169,7 +166,7 @@ impl BorrowedTarget {
         clippy::needless_pass_by_value,
         reason = "the release takes the host's sync, as every backend's does, and drops it"
     )]
-    pub fn release(&self, _slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
+    pub fn release(&mut self, _slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
         match consumer.sync.kind {
             SyncKind::CpuComplete | SyncKind::QueueOrder => Ok(()),
             kind => Err(Error::unsupported(format!("the WebGPU target waits for no {kind:?}"))),
@@ -178,7 +175,7 @@ impl BorrowedTarget {
 
     /// The host gave up the texture at `slot`, which is never drawn into
     /// again.
-    pub fn discard(&self, _slot: usize) {}
+    pub fn discard(&mut self, _slot: usize) {}
 
     /// Draws into `textures` from now on, which must be as many, of the
     /// ring's format.
@@ -187,108 +184,104 @@ impl BorrowedTarget {
     /// another number of textures, with
     /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for another format,
     /// and as [`BorrowedTextures::check`] does.
-    pub fn replace(&self, textures: BorrowedTextures) -> Result<(), Error> {
-        let current = self.textures.borrow();
+    pub fn replace(&mut self, gpu: &mut WebGpu, textures: BorrowedTextures) -> Result<(), Error> {
+        let current = &self.textures;
         if textures.textures.len() != current.textures.len() {
             return Err(Error::invalid_argument("a ring keeps its depth"));
         }
         if (textures.format(), textures.depth_format()) != (current.format(), current.depth_format()) {
             return Err(Error::unsupported("a ring keeps its formats, and its depth textures or their lack"));
         }
-        drop(current);
         textures.check()?;
         // A frame begun on the old ring draws into the new one.
         if let Some((_, image)) = self.imports.take() {
-            self.destroy_imports(image);
+            destroy_imports(gpu, image);
         }
-        *self.textures.borrow_mut() = textures;
+        self.textures = textures;
         Ok(())
     }
 
     /// The depth and stencil texture of the selected slot: the host's, or
     /// the target's own of the ring's size.
-    fn depth_stencil(&self, textures: &BorrowedTextures) -> wgpu::Texture {
-        if let Some(depth) = textures.depth_textures.get(self.selected.get()) {
+    fn depth_stencil(&mut self) -> wgpu::Texture {
+        if let Some(depth) = self.textures.depth_textures.get(self.selected) {
             return depth.clone();
         }
-        let size = textures.size;
-        let texture = match self.depth_stencil.take() {
-            Some(texture) if (texture.width(), texture.height()) == (size.width, size.height) => texture,
-            _ => self.backend.device().device().create_texture(&wgpu::TextureDescriptor {
-                label: Some("borrowed ring depth and stencil"),
-                size: wgpu::Extent3d { width: size.width, height: size.height, depth_or_array_layers: 1 },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: self.depth_stencil_format,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                view_formats: &[],
-            }),
-        };
-        self.depth_stencil.set(Some(texture.clone()));
-        texture
-    }
-
-    fn destroy_imports(&self, image: FrameImage) {
-        let mut gpu = self.backend.gpu();
-        for import in [Some(image.color), image.depth_stencil].into_iter().flatten() {
-            destroy_unused(&mut *gpu, [ResourceId::Texture(import)]);
+        let size = self.textures.size;
+        match &self.depth_stencil {
+            Some(texture) if (texture.width(), texture.height()) == (size.width, size.height) => texture.clone(),
+            _ => self
+                .depth_stencil
+                .insert(self.device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("borrowed ring depth and stencil"),
+                    size: wgpu::Extent3d { width: size.width, height: size.height, depth_or_array_layers: 1 },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: self.depth_stencil_format,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    view_formats: &[],
+                }))
+                .clone(),
         }
     }
 }
 
-impl Drop for BorrowedTarget {
-    /// Forgets the textures of a frame begun and not ended.
-    fn drop(&mut self) {
-        if let Some((_, image)) = self.imports.take() {
-            self.destroy_imports(image);
-        }
-    }
+fn destroy_imports(gpu: &mut WebGpu, image: FrameImage) {
+    let imports = [Some(image.color), image.depth_stencil].into_iter().flatten();
+    destroy_unused(gpu, imports.map(ResourceId::Texture));
 }
 
 impl FrameTarget for BorrowedTarget {
-    fn begin_frame(&self) -> Option<FrameImage> {
-        let slot = self.selected.get();
+    type Gpu = WebGpu;
+
+    fn begin_frame(&mut self, gpu: &mut WebGpu) -> Option<FrameImage> {
+        let slot = self.selected;
         match self.imports.take() {
             Some((imported, image)) if imported == slot => {
-                self.imports.set(Some((imported, image)));
+                self.imports = Some((imported, image));
                 return Some(image);
             }
             // A slot was selected since the frame began.
-            Some((_, image)) => self.destroy_imports(image),
+            Some((_, image)) => destroy_imports(gpu, image),
             None => {}
         }
-        let textures = self.textures.borrow();
-        let texture = textures.textures.get(slot)?;
-        let depth_stencil = self.depth_stencil(&textures);
-        let mut gpu = self.backend.gpu();
+        let texture = self.textures.textures.get(slot)?.clone();
+        let depth_stencil = self.depth_stencil();
         let image = FrameImage {
-            size: textures.size,
-            color: gpu.import_texture(texture),
+            size: self.textures.size,
+            color: gpu.import_texture(&texture),
             depth_stencil: Some(gpu.import_texture(&depth_stencil)),
             targets: TargetFormats {
                 color: from_wgpu_format(texture.format()),
                 depth_stencil: from_wgpu_format(depth_stencil.format()),
             },
         };
-        self.imports.set(Some((slot, image)));
+        self.imports = Some((slot, image));
         Some(image)
     }
 
-    fn end_frame(&self) -> Handoff {
+    fn end_frame(&mut self, gpu: &mut WebGpu) -> Handoff {
         let Some((_, image)) = self.imports.take() else {
             return Handoff::Dropped;
         };
-        self.destroy_imports(image);
+        destroy_imports(gpu, image);
         let sync = if self.producer == SyncKind::QueueOrder {
             GpuSync::of(SyncKind::QueueOrder)
         } else {
-            if let Err(error) = self.backend.gpu().flush(true) {
+            if let Err(error) = gpu.flush(true) {
                 Log::error(Event::Render, format!("WebGPU: waiting for a borrowed texture's frame failed: {error}"));
                 return Handoff::Dropped;
             }
             GpuSync::of(SyncKind::CpuComplete)
         };
-        Handoff::GivenBack { slot: self.selected.get(), sync }
+        Handoff::GivenBack { slot: self.selected, sync }
+    }
+
+    /// Forgets the textures of a frame begun and not ended.
+    fn tear_down(&mut self, gpu: &mut WebGpu) {
+        if let Some((_, image)) = self.imports.take() {
+            destroy_imports(gpu, image);
+        }
     }
 }

@@ -46,7 +46,7 @@ pub use device::{AdapterId, Device, HostDevice, QueueLease, QueueLock, RawDevice
 pub use exported_target::ExportedTarget;
 pub use gpu::{ImportedImage, VulkanGpu};
 /// Frames drawn into textures of the library's and read back.
-pub type OffscreenTarget = mln_gfx::offscreen_target::OffscreenTarget<RendererBackend>;
+pub type OffscreenTarget = mln_gfx::offscreen_target::OffscreenTarget<VulkanGpu>;
 pub use mln_glsl::Stage as ShaderStage;
 pub use renderer_backend::RendererBackend;
 pub use shaders::compile as compile_glsl;

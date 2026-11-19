@@ -187,19 +187,19 @@ impl DrawObjects {
 
     /// Uploads the indexes, vertex attributes and textures, where they
     /// changed since the last upload.
-    pub(crate) fn upload(&mut self, context: &mut Context) {
-        if let Err(error) = self.upload_in(context) {
+    pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
+        if let Err(error) = self.upload_in(gpu, context) {
             Log::error(Event::Render, format!("Uploading a draw of {} failed: {error}", self.shader.name()));
         }
     }
 
-    fn upload_in(&mut self, context: &mut Context) -> Result<(), GpuError> {
+    fn upload_in(&mut self, gpu: &mut dyn Gpu, context: &mut Context) -> Result<(), GpuError> {
         let shader = &*self.shader;
         if self.indexes.buffer(context).is_none() && self.indexes.len(context) == 0 {
             debug_assert!(false, "a draw of {} has no index data", shader.name());
             return Ok(());
         }
-        self.indexes.upload(context)?;
+        self.indexes.upload(gpu, context)?;
 
         // An attribute binds again where its array changed, or where the
         // upload writes what it reads, which may be new. A failed upload
@@ -207,9 +207,13 @@ impl DrawObjects {
         if self.vertex_attributes_changed
             || upload::needs_upload(context, shader.vertex_attributes(), &self.vertex_attributes)
         {
-            let mut bindings =
-                upload::build_attribute_bindings(context, shader.vertex_attributes(), &mut self.vertex_attributes)?;
-            bind_default_values(context, &mut bindings, self.vertex_count)?;
+            let mut bindings = upload::build_attribute_bindings(
+                gpu,
+                context,
+                shader.vertex_attributes(),
+                &mut self.vertex_attributes,
+            )?;
+            bind_default_values(gpu, context, &mut bindings, self.vertex_count)?;
             if self.attribute_bindings != bindings {
                 self.attribute_bindings = bindings;
                 self.vertex_slots = None;
@@ -224,8 +228,8 @@ impl DrawObjects {
             .filter(|attrs| changed || upload::needs_upload(context, shader.instance_attributes(), attrs))
         {
             let instance_count = attrs.min_count();
-            let mut bindings = upload::build_attribute_bindings(context, shader.instance_attributes(), attrs)?;
-            bind_default_values(context, &mut bindings, instance_count)?;
+            let mut bindings = upload::build_attribute_bindings(gpu, context, shader.instance_attributes(), attrs)?;
+            bind_default_values(gpu, context, &mut bindings, instance_count)?;
             if self.instance_bindings != bindings {
                 self.instance_bindings = bindings;
                 self.vertex_slots = None;
@@ -237,7 +241,7 @@ impl DrawObjects {
         self.instance_attributes_changed = false;
 
         for texture in self.textures.iter().flatten() {
-            if let Err(error) = context.upload_texture(texture) {
+            if let Err(error) = context.upload_texture(gpu, texture) {
                 Log::error(Event::Render, format!("Uploading a texture failed: {error}"));
             }
         }
@@ -547,12 +551,13 @@ fn fixed_state(variant: PipelineVariant, color_mode: &ColorMode, cull: CullFaceM
 /// Gives each binding without data a buffer of its format's default value,
 /// for `vertex_count` vertices.
 fn bind_default_values(
+    gpu: &mut dyn Gpu,
     context: &mut Context,
     bindings: &mut AttributeBindingArray,
     vertex_count: usize,
 ) -> Result<(), GpuError> {
     for binding in bindings.iter_mut().flatten().filter(|binding| binding.buffer.is_none()) {
-        binding.buffer = Some(context.default_vertex_buffer(binding.attribute.data_type, vertex_count)?);
+        binding.buffer = Some(context.default_vertex_buffer(gpu, binding.attribute.data_type, vertex_count)?);
     }
     Ok(())
 }

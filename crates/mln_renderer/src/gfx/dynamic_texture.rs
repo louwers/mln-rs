@@ -7,6 +7,7 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use etagere::{AllocId, AtlasAllocator, size2};
+use mln_gfx::gpu::Gpu;
 use mln_gfx::texture2d::{SamplerState, texture_format};
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
 use mln_style_types::image::RectU16;
@@ -243,7 +244,7 @@ impl DynamicTexture {
     }
 
     /// Makes the GPU texture on first use and uploads the queued images.
-    pub(crate) fn upload(&mut self, context: &mut Context) {
+    pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         if self.texture.is_none() {
             let texture = context.add_texture_with(|texture| {
                 texture.set_size(self.size);
@@ -255,7 +256,7 @@ impl DynamicTexture {
                     ..SamplerState::default()
                 });
             });
-            if let Err(error) = context.create_texture(&texture) {
+            if let Err(error) = context.create_texture(gpu, &texture) {
                 Log::error(Event::Render, format!("Making an atlas texture failed: {error}"));
             }
             self.texture = Some(texture);
@@ -277,7 +278,7 @@ impl DynamicTexture {
                 }
             };
             let size = Size::new(u32::from(rect.w), u32::from(rect.h));
-            if let Err(error) = context.upload_texture_region(texture, data, size, rect.x, rect.y) {
+            if let Err(error) = context.upload_texture_region(gpu, texture, data, size, rect.x, rect.y) {
                 Log::error(Event::Render, format!("Uploading to an atlas texture failed: {error}"));
             }
         }

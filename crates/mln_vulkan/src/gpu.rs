@@ -1686,6 +1686,11 @@ impl VulkanGpu {
     }
 
     /// The serial of the last submit, 0 before the first.
+    /// What the backend made on its device, which its targets share.
+    pub(crate) fn backend_impl(&self) -> &Rc<BackendImpl> {
+        &self.backend
+    }
+
     pub(crate) fn last_serial(&self) -> u64 {
         self.next_serial - 1
     }

@@ -274,14 +274,21 @@ impl<G> Generations<G> {
         &self.current
     }
 
+    pub fn current_mut(&mut self) -> &mut G {
+        &mut self.current
+    }
+
     /// Renders into `next` from now on. The current generation stays while
-    /// the host holds one of the `held` slots, and goes now otherwise.
-    pub fn replace(&mut self, next: G, held: &[usize]) {
+    /// the host holds one of the `held` slots, and goes to `release` now
+    /// otherwise.
+    pub fn replace(&mut self, next: G, held: &[usize], release: impl FnOnce(G)) {
         let previous = std::mem::replace(&mut self.current, next);
         // A slot that the host held already in an older generation isn't
         // the previous one's.
         let held: Vec<usize> = held.iter().copied().filter(|slot| self.retired_holding(*slot).is_none()).collect();
-        if !held.is_empty() {
+        if held.is_empty() {
+            release(previous);
+        } else {
             self.retired.push((previous, held));
         }
     }
@@ -296,21 +303,26 @@ impl<G> Generations<G> {
     }
 
     /// The host gave `slot` back: true when an older generation held it,
-    /// which goes once it holds no slot. The current generation's slot is
-    /// the caller's to give back then.
-    pub fn give_back(&mut self, slot: usize) -> bool {
+    /// which goes to `release` once it holds no slot. The current
+    /// generation's slot is the caller's to give back then.
+    pub fn give_back(&mut self, slot: usize, release: impl FnOnce(G)) -> bool {
         let Some(index) = self.retired_holding(slot) else { return false };
         let held = &mut self.retired[index].1;
         held.retain(|held| *held != slot);
         if held.is_empty() {
-            drop(self.retired.remove(index));
+            release(self.retired.remove(index).0);
         }
         true
     }
 
-    /// Lets go of every older generation.
-    pub fn clear_retired(&mut self) {
+    /// Lets go of every generation's images: `release` takes each, the
+    /// older ones first, and the older ones go.
+    pub fn clear(&mut self, mut release: impl FnMut(&mut G)) {
+        for (generation, _) in &mut self.retired {
+            release(generation);
+        }
         self.retired.clear();
+        release(&mut self.current);
     }
 }
 
@@ -356,22 +368,27 @@ mod tests {
     #[test]
     fn a_generation_stays_until_its_held_slots_come_back() {
         let mut generations = Generations::new("first");
-        generations.replace("second", &[0, 2]);
+        let gone = std::cell::RefCell::new(Vec::new());
+        let release = |generation| gone.borrow_mut().push(generation);
+        generations.replace("second", &[0, 2], release);
         assert_eq!(*generations.current(), "second");
         assert_eq!(generations.retired(0), Some(&"first"));
         assert_eq!(generations.retired(1), None);
         // Slot 0 is still held at the next resize, in the first generation.
-        generations.replace("third", &[0, 1]);
+        generations.replace("third", &[0, 1], release);
         assert_eq!(generations.retired(0), Some(&"first"));
         assert_eq!(generations.retired(1), Some(&"second"));
-        assert!(generations.give_back(0));
+        assert!(generations.give_back(0, release));
         assert_eq!(generations.retired(2), Some(&"first"));
-        assert!(generations.give_back(2));
+        assert!(gone.borrow().is_empty());
+        assert!(generations.give_back(2, release));
         assert_eq!(generations.retired(2), None);
-        assert!(!generations.give_back(2));
-        assert!(generations.give_back(1));
+        assert_eq!(*gone.borrow(), ["first"]);
+        assert!(!generations.give_back(2, release));
+        assert!(generations.give_back(1, release));
         // Nothing held: the previous generation goes at once.
-        generations.replace("fourth", &[]);
+        generations.replace("fourth", &[], release);
         assert_eq!(generations.retired(0), None);
+        assert_eq!(*gone.borrow(), ["first", "second", "third"]);
     }
 }

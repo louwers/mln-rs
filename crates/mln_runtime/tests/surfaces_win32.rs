@@ -6,7 +6,6 @@
 #![cfg(windows)]
 #![expect(unsafe_code, reason = "the tests make Win32 windows to present to")]
 
-use std::rc::Rc;
 use std::sync::{Arc, mpsc};
 use std::thread::JoinHandle;
 use std::time::Instant;
@@ -219,13 +218,14 @@ fn a_minimized_window_takes_no_session_and_no_frames_on_each_backend() {
 /// Draws a frame that clears `target`, a target on `backend`, as a renderer
 /// would: where it went, or `None` when the target took no frame.
 #[cfg(any(feature = "vulkan", feature = "d3d12"))]
-fn clear_frame(
-    backend: &dyn mln_gfx::renderer_backend::RendererBackend,
-    target: &dyn mln_gfx::FrameTarget,
+fn clear_frame<B: mln_gfx::RendererBackend>(
+    backend: &mut B,
+    target: &mut impl mln_gfx::FrameTarget<Gpu = B::Gpu>,
 ) -> Option<mln_gfx::Handoff> {
-    use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, LoadOp, PassDesc};
+    use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu as _, LoadOp, PassDesc};
 
-    let image = target.begin_frame()?;
+    let mut gpu = backend.gpu();
+    let image = target.begin_frame(&mut gpu)?;
     let pass = PassDesc {
         label: "frame",
         color: Some(ColorAttachment {
@@ -238,13 +238,10 @@ fn clear_frame(
             stencil: LoadOp::Clear(0),
         }),
     };
-    let mut gpu = backend.gpu();
     gpu.begin_pass(&pass).ok()?;
     gpu.end_pass().ok()?;
     gpu.flush(false).ok()?;
-    drop(gpu);
-    let handoff = target.end_frame();
-    Some(handoff)
+    Some(target.end_frame(&mut gpu))
 }
 
 // A Vulkan target finds a minimized window out through its surface alone,
@@ -257,19 +254,18 @@ fn clear_frame(
 #[cfg(feature = "vulkan")]
 #[test]
 fn a_vulkan_target_takes_no_frame_once_its_window_is_minimized() {
-    use mln_gfx::Handoff;
+    use mln_gfx::{FrameTarget as _, Handoff};
 
     let Some(Device::Vulkan(device)) = device_of(BackendType::Vulkan) else { return };
     let window = TestWindow::new();
-    let (backend, target) =
+    let (mut backend, mut target) =
         mln_vulkan::SurfaceTarget::with_backend(&device, Arc::<TestWindow>::clone(&window), SIZE, true).unwrap();
-    assert_eq!(Some(Handoff::Presented), clear_frame(&*backend, &target));
+    assert_eq!(Some(Handoff::Presented), clear_frame(&mut backend, &mut target));
     window.set_minimized(true);
-    let refused = mln_vulkan::SurfaceTarget::new(Rc::clone(&backend), Arc::<TestWindow>::clone(&window), SIZE, true)
-        .err()
-        .unwrap();
+    let refused =
+        mln_vulkan::SurfaceTarget::new(&mut backend, Arc::<TestWindow>::clone(&window), SIZE, true).err().unwrap();
     assert_eq!(ErrorKind::InvalidState, refused.kind, "{refused:?}");
-    let frames: Vec<_> = (0..12).map(|_| clear_frame(&*backend, &target)).collect();
+    let frames: Vec<_> = (0..12).map(|_| clear_frame(&mut backend, &mut target)).collect();
     let presented = frames.iter().take_while(|frame| **frame == Some(Handoff::Presented)).count();
     let rest = &frames[presented..];
     assert!(
@@ -278,7 +274,8 @@ fn a_vulkan_target_takes_no_frame_once_its_window_is_minimized() {
     );
     assert_eq!(None, *frames.last().unwrap(), "the frames to the minimized window: {frames:?}");
     window.set_minimized(false);
-    assert_eq!(Some(Handoff::Presented), clear_frame(&*backend, &target));
+    assert_eq!(Some(Handoff::Presented), clear_frame(&mut backend, &mut target));
+    target.tear_down(mln_gfx::RendererBackend::gpu(&mut backend));
     drop(target);
     drop(backend);
 }
@@ -289,24 +286,24 @@ fn a_vulkan_target_takes_no_frame_once_its_window_is_minimized() {
 #[cfg(feature = "d3d12")]
 #[test]
 fn a_d3d12_target_takes_no_frame_while_its_window_is_minimized() {
-    use mln_gfx::Handoff;
+    use mln_gfx::{FrameTarget as _, Handoff};
 
     let Some(Device::D3d12(device)) = device_of(BackendType::D3D12) else { return };
-    let backend = Rc::new(mln_d3d12::RendererBackend::new(&device).unwrap());
+    let mut backend = mln_d3d12::RendererBackend::new(&device).unwrap();
     let window = TestWindow::new();
-    let target = mln_d3d12::SurfaceTarget::new(Rc::clone(&backend), Arc::<TestWindow>::clone(&window), SIZE).unwrap();
-    assert_eq!(Some(Handoff::Presented), clear_frame(&*backend, &target));
+    let mut target = mln_d3d12::SurfaceTarget::new(&backend, Arc::<TestWindow>::clone(&window), SIZE).unwrap();
+    assert_eq!(Some(Handoff::Presented), clear_frame(&mut backend, &mut target));
     // A resize takes buffers of the new size before the next frame.
     target.resize(Size::new(32, 48));
-    assert_eq!(Some(Handoff::Presented), clear_frame(&*backend, &target));
+    assert_eq!(Some(Handoff::Presented), clear_frame(&mut backend, &mut target));
     target.resize(SIZE);
     window.set_minimized(true);
-    let refused =
-        mln_d3d12::SurfaceTarget::new(Rc::clone(&backend), Arc::<TestWindow>::clone(&window), SIZE).err().unwrap();
+    let refused = mln_d3d12::SurfaceTarget::new(&backend, Arc::<TestWindow>::clone(&window), SIZE).err().unwrap();
     assert_eq!(ErrorKind::InvalidState, refused.kind, "{refused:?}");
-    assert_eq!(None, clear_frame(&*backend, &target));
+    assert_eq!(None, clear_frame(&mut backend, &mut target));
     window.set_minimized(false);
-    assert_eq!(Some(Handoff::Presented), clear_frame(&*backend, &target));
+    assert_eq!(Some(Handoff::Presented), clear_frame(&mut backend, &mut target));
+    target.tear_down(mln_gfx::RendererBackend::gpu(&mut backend));
     drop(target);
     drop(backend);
 }

@@ -1,8 +1,7 @@
 // Backends on a device they share: with other backends, with the host that
 // made it, and on an adapter picked by index.
 
-use std::rc::Rc;
-
+use mln_gfx::RendererBackend as _;
 use mln_gfx::frame::FrameTarget as _;
 use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu as _, LoadOp, PassDesc};
 use mln_util::Color;
@@ -13,15 +12,14 @@ use crate::{Device, OffscreenTarget, RendererBackend};
 const SIZE: Size = Size { width: 16, height: 8 };
 
 /// A backend on `device`, and an offscreen target on it.
-fn headless(device: &Device) -> OffscreenTarget {
-    OffscreenTarget::new(Rc::new(RendererBackend::new(device)), SIZE)
+fn headless(device: &Device) -> (RendererBackend, OffscreenTarget) {
+    (RendererBackend::new(device), OffscreenTarget::new(SIZE))
 }
 
 /// Clears the target to `color` and reads it back.
-fn clear_and_read(target: &OffscreenTarget, color: Color) -> Vec<[u8; 4]> {
-    // The offscreen target reaches the backend's context, which a scope
-    // must hold.
-    let image = target.begin_frame().expect("a frame");
+fn clear_and_read((backend, target): &mut (RendererBackend, OffscreenTarget), color: Color) -> Vec<[u8; 4]> {
+    let gpu = backend.gpu();
+    let image = target.begin_frame(gpu).expect("a frame");
     let pass = PassDesc {
         label: "main buffer",
         color: Some(ColorAttachment { texture: image.color, load: LoadOp::Clear(color) }),
@@ -31,13 +29,11 @@ fn clear_and_read(target: &OffscreenTarget, color: Color) -> Vec<[u8; 4]> {
             stencil: LoadOp::Clear(0),
         }),
     };
-    let mut gpu = target.backend().gpu();
     gpu.begin_pass(&pass).expect("a pass");
     gpu.end_pass().expect("the pass's end");
     gpu.flush(false).expect("a flush");
-    drop(gpu);
-    target.end_frame();
-    let image = target.read_image().expect("a frame");
+    target.end_frame(gpu);
+    let image = target.read_image(gpu).expect("a frame");
     assert_eq!(image.size, SIZE);
     image.data.as_chunks::<4>().0.to_vec()
 }
@@ -53,23 +49,23 @@ const BLUE: Color = Color::blue();
 #[test]
 fn backends_on_one_device_render_in_turn() {
     let device = Device::new(None).expect("device");
-    let first = headless(&device);
-    let second = headless(&device);
-    assert_eq!(first.backend().device().device(), device.device());
-    assert_eq!(second.backend().device().device(), device.device());
+    let mut first = headless(&device);
+    let mut second = headless(&device);
+    assert_eq!(first.0.device().device(), device.device());
+    assert_eq!(second.0.device().device(), device.device());
 
-    assert_all(&clear_and_read(&first, RED), [255, 0, 0, 255]);
-    assert_all(&clear_and_read(&second, BLUE), [0, 0, 255, 255]);
+    assert_all(&clear_and_read(&mut first, RED), [255, 0, 0, 255]);
+    assert_all(&clear_and_read(&mut second, BLUE), [0, 0, 255, 255]);
     // Each keeps its own target.
-    assert_all(&clear_and_read(&first, RED), [255, 0, 0, 255]);
+    assert_all(&clear_and_read(&mut first, RED), [255, 0, 0, 255]);
 }
 
 #[test]
 fn a_backend_renders_after_the_host_drops_its_device() {
     let device = Device::new(None).expect("device");
-    let target = headless(&device);
+    let mut target = headless(&device);
     drop(device);
-    assert_all(&clear_and_read(&target, RED), [255, 0, 0, 255]);
+    assert_all(&clear_and_read(&mut target, RED), [255, 0, 0, 255]);
 }
 
 #[test]
@@ -92,9 +88,9 @@ fn a_backend_renders_on_a_device_the_host_made() {
     }))
     .expect("device");
 
-    let target = headless(&Device::from_wgpu(Some(instance), device.clone(), queue.clone(), None));
-    assert_eq!(target.backend().device().adapter_info(), adapter.get_info());
-    assert_all(&clear_and_read(&target, BLUE), [0, 0, 255, 255]);
+    let mut target = headless(&Device::from_wgpu(Some(instance), device.clone(), queue.clone(), None));
+    assert_eq!(target.0.device().adapter_info(), adapter.get_info());
+    assert_all(&clear_and_read(&mut target, BLUE), [0, 0, 255, 255]);
 
     // The host's own work on the device still runs alongside.
     let buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -110,8 +106,8 @@ fn a_backend_renders_on_a_device_the_host_made() {
 
 #[test]
 fn the_first_named_adapter_renders() {
-    let target = headless(&Device::new(Some(0)).expect("adapter 0"));
-    assert_all(&clear_and_read(&target, RED), [255, 0, 0, 255]);
+    let mut target = headless(&Device::new(Some(0)).expect("adapter 0"));
+    assert_all(&clear_and_read(&mut target, RED), [255, 0, 0, 255]);
 }
 
 #[test]

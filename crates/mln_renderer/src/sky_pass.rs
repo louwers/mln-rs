@@ -3,6 +3,7 @@ use std::rc::Rc;
 
 use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
+use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
@@ -111,6 +112,7 @@ impl SkyPass {
     )]
     pub(crate) fn update(
         &mut self,
+        gpu: &mut dyn Gpu,
         shaders: &ShaderRegistry,
         context: &mut Context,
         state: &TransformState,
@@ -155,8 +157,8 @@ impl SkyPass {
                     sky_blend: projection_transition as f32,
                 };
                 let buffers = &mut sky.frame.uniform_buffers;
-                buffers.create_or_update_pod(ID_SKY_PROPS_UBO, &props, context.device());
-                bind_no_projection(buffers, context);
+                buffers.create_or_update_pod(gpu, ID_SKY_PROPS_UBO, &props, context.device());
+                bind_no_projection(gpu, buffers, context);
             }
         } else {
             self.sky = None;
@@ -189,8 +191,8 @@ impl SkyPass {
             sun_position: sun_position(light, state, atmosphere_blend),
         };
         let buffers = &mut atmosphere.frame.uniform_buffers;
-        buffers.create_or_update_pod(ID_ATMOSPHERE_PROPS_UBO, &props, context.device());
-        bind_no_projection(buffers, context);
+        buffers.create_or_update_pod(gpu, ID_ATMOSPHERE_PROPS_UBO, &props, context.device());
+        bind_no_projection(gpu, buffers, context);
     }
 
     /// The planar sky, which draws before the layers, if the frame draws it.

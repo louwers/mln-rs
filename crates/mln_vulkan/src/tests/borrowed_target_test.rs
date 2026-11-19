@@ -1,7 +1,6 @@
-use std::rc::Rc;
-
 use ash::vk;
-use mln_gfx::SyncKind;
+use mln_gfx::frame::FrameTarget as _;
+use mln_gfx::{RendererBackend as _, SyncKind};
 use mln_util::error::ErrorKind;
 use mln_util::size::Size;
 
@@ -22,9 +21,9 @@ fn images(size: Size) -> BorrowedImages {
     }
 }
 
-fn backend() -> (Device, Rc<RendererBackend>) {
+fn backend() -> (Device, RendererBackend) {
     let device = Device::new(None).expect("Vulkan device");
-    let backend = Rc::new(RendererBackend::new(&device).expect("a backend"));
+    let backend = RendererBackend::new(&device).expect("a backend");
     (device, backend)
 }
 
@@ -34,32 +33,32 @@ fn bad_sizes(device: &Device) -> [Size; 3] {
     [Size::new(0, 4), Size::new(4, 0), Size::new(max + 1, 4)]
 }
 
-// An error past the first import returns, with what was imported destroyed,
-// instead of the destroy borrowing the `Gpu` a second time.
+// An error past the first import returns, with what was imported destroyed.
 #[test]
 fn imports_that_fail_are_destroyed() {
-    let (device, backend) = backend();
+    let (device, mut backend) = backend();
     for size in bad_sizes(&device) {
-        let error = Imports::new(&backend, &images(size)).err().expect("no depth texture of that size");
+        let error = Imports::new(backend.gpu(), &images(size)).err().expect("no depth texture of that size");
         assert_eq!(error.kind, ErrorKind::Native, "{size:?}");
     }
 }
 
 #[test]
 fn a_ring_of_images_of_no_size_or_too_large_is_rejected() {
-    let (device, backend) = backend();
+    let (device, mut backend) = backend();
     for size in bad_sizes(&device) {
-        let error = BorrowedTarget::new(Rc::clone(&backend), images(size), SyncKind::CpuComplete)
-            .err()
-            .expect("no ring of that size");
+        let error =
+            BorrowedTarget::new(&mut backend, images(size), SyncKind::CpuComplete).err().expect("no ring of that size");
         assert_eq!(error.kind, ErrorKind::InvalidArgument, "{size:?}");
     }
 
-    let target = BorrowedTarget::new(Rc::clone(&backend), images(Size::new(4, 4)), SyncKind::CpuComplete)
+    let mut target = BorrowedTarget::new(&mut backend, images(Size::new(4, 4)), SyncKind::CpuComplete)
         .expect("a ring of 4x4 images");
+    let gpu = backend.gpu();
     for size in bad_sizes(&device) {
-        let error = target.replace(images(size)).err().expect("no ring of that size");
+        let error = target.replace(gpu, images(size)).err().expect("no ring of that size");
         assert_eq!(error.kind, ErrorKind::InvalidArgument, "{size:?}");
     }
-    target.replace(images(Size::new(8, 8))).expect("a ring of 8x8 images");
+    target.replace(gpu, images(Size::new(8, 8))).expect("a ring of 8x8 images");
+    target.tear_down(gpu);
 }

@@ -1,8 +1,7 @@
 //! Frames drawn into textures of the library's and read back, which headless
 //! rendering and render tests draw into.
 
-use std::cell::Cell;
-use std::rc::Rc;
+use std::marker::PhantomData;
 
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
@@ -11,23 +10,22 @@ use mln_util::size::Size;
 
 use crate::frame::{FrameImage, FrameTarget, Handoff};
 use crate::gpu::{
-    GpuError, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage, destroy_unused,
+    Gpu, GpuError, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage, destroy_unused,
     read_texels,
 };
-use crate::renderer_backend::RendererBackend;
 
 /// The format of an offscreen frame's color, which
 /// [`read_image`](OffscreenTarget::read_image) reads as it is.
 const COLOR: TextureFormat = TextureFormat::Rgba8Unorm;
 const DEPTH_STENCIL: TextureFormat = TextureFormat::Depth24PlusStencil8;
 
-/// Frames drawn into a color texture and a depth and stencil one of the
+/// Frames drawn into a color texture and a depth and stencil one of a
 /// backend's `Gpu`, which [`read_image`](Self::read_image) reads back.
-pub struct OffscreenTarget<B: RendererBackend> {
-    backend: Rc<B>,
-    size: Cell<Size>,
+pub struct OffscreenTarget<G: ?Sized> {
+    size: Size,
     /// The textures, made with the first frame of a size.
-    image: Cell<Option<Image>>,
+    image: Option<Image>,
+    gpu: PhantomData<fn(&mut G)>,
 }
 
 /// A frame's color and depth-stencil textures, of `size`.
@@ -38,22 +36,19 @@ struct Image {
     depth_stencil: TextureId,
 }
 
-impl<B: RendererBackend> OffscreenTarget<B> {
-    /// A target of `size` physical pixels on `backend`.
-    pub fn new(backend: Rc<B>, size: Size) -> Self {
-        OffscreenTarget { backend, size: Cell::new(size), image: Cell::new(None) }
+impl<G: Gpu + ?Sized> OffscreenTarget<G> {
+    /// A target of `size` physical pixels, whose frames are textures of the
+    /// `Gpu` its calls take.
+    #[must_use]
+    pub fn new(size: Size) -> Self {
+        OffscreenTarget { size, image: None, gpu: PhantomData }
     }
 
-    /// The backend the target renders on.
-    pub fn backend(&self) -> &Rc<B> {
-        &self.backend
-    }
-
-    /// Draws the next frame at `size`, and drops the textures of the last
-    /// one.
-    pub fn resize(&self, size: Size) {
-        if self.size.replace(size) != size {
-            self.release();
+    /// Draws the next frame at `size`, and destroys the textures of the
+    /// last one.
+    pub fn resize(&mut self, gpu: &mut G, size: Size) {
+        if std::mem::replace(&mut self.size, size) != size {
+            self.tear_down(gpu);
         }
     }
 
@@ -63,54 +58,42 @@ impl<B: RendererBackend> OffscreenTarget<B> {
     /// the first frame of the size, and with
     /// [`ErrorKind::Native`](mln_util::ErrorKind) where the backend reads
     /// nothing back.
-    pub fn read_image(&self) -> Result<PremultipliedImage, Error> {
-        let image = self
-            .image
-            .get()
-            .ok_or_else(|| Error::invalid_state("the target has no frame since it was made or resized"))?;
-        let texels = read_texels(&mut *self.backend.gpu(), image.color, TextureRegion::whole(image.size))
+    pub fn read_image(&self, gpu: &mut G) -> Result<PremultipliedImage, Error> {
+        let image =
+            self.image.ok_or_else(|| Error::invalid_state("the target has no frame since it was made or resized"))?;
+        let texels = read_texels(gpu, image.color, TextureRegion::whole(image.size))
             .map_err(|error| Error::native(format!("reading the frame back failed: {error}")))?;
         Ok(PremultipliedImage::from_vec(image.size, texels))
     }
 
-    fn make_image(&self, size: Size) -> Result<Image, GpuError> {
-        let mut gpu = self.backend.gpu();
-        let texture = |gpu: &mut dyn crate::gpu::Gpu, label, format, copy_src| {
+    fn make_image(gpu: &mut G, size: Size) -> Result<Image, GpuError> {
+        let mut texture = |label, format, copy_src| {
             let usage = TextureUsage { render_target: true, copy_src, ..TextureUsage::default() };
             gpu.create_texture(&TextureDesc { label, size, format, usage })
         };
-        let color = texture(&mut *gpu, "offscreen color", COLOR, true)?;
-        match texture(&mut *gpu, "offscreen depth and stencil", DEPTH_STENCIL, false) {
+        let color = texture("offscreen color", COLOR, true)?;
+        match texture("offscreen depth and stencil", DEPTH_STENCIL, false) {
             Ok(depth_stencil) => Ok(Image { size, color, depth_stencil }),
             Err(error) => {
-                destroy_unused(&mut *gpu, [color.into()]);
+                destroy_unused(gpu, [color.into()]);
                 Err(error)
             }
         }
     }
-
-    /// Destroys the textures of the last frame, which the `Gpu` keeps until
-    /// the work that uses them finishes.
-    fn release(&self) {
-        if let Some(image) = self.image.take() {
-            destroy_unused(&mut *self.backend.gpu(), [image.color.into(), image.depth_stencil.into()]);
-        }
-    }
 }
 
-impl<B: RendererBackend> FrameTarget for OffscreenTarget<B> {
-    fn begin_frame(&self) -> Option<FrameImage> {
-        let size = self.size.get();
+impl<G: Gpu + ?Sized> FrameTarget for OffscreenTarget<G> {
+    type Gpu = G;
+
+    fn begin_frame(&mut self, gpu: &mut G) -> Option<FrameImage> {
+        let size = self.size;
         if size.width == 0 || size.height == 0 {
             return None;
         }
-        let image = match self.image.get() {
+        let image = match self.image {
             Some(image) => image,
-            None => match self.make_image(size) {
-                Ok(image) => {
-                    self.image.set(Some(image));
-                    image
-                }
+            None => match Self::make_image(gpu, size) {
+                Ok(image) => *self.image.insert(image),
                 Err(error) => {
                     Log::error(Event::Render, format!("Making an offscreen frame's textures failed: {error}"));
                     return None;
@@ -126,13 +109,15 @@ impl<B: RendererBackend> FrameTarget for OffscreenTarget<B> {
     }
 
     /// The frame is read back when it is read.
-    fn end_frame(&self) -> Handoff {
-        if self.image.get().is_some() { Handoff::ReadBack } else { Handoff::Dropped }
+    fn end_frame(&mut self, _gpu: &mut G) -> Handoff {
+        if self.image.is_some() { Handoff::ReadBack } else { Handoff::Dropped }
     }
-}
 
-impl<B: RendererBackend> Drop for OffscreenTarget<B> {
-    fn drop(&mut self) {
-        self.release();
+    /// Destroys the textures of the last frame, which the `Gpu` keeps until
+    /// the work that uses them finishes.
+    fn tear_down(&mut self, gpu: &mut G) {
+        if let Some(image) = self.image.take() {
+            destroy_unused(gpu, [image.color.into(), image.depth_stencil.into()]);
+        }
     }
 }

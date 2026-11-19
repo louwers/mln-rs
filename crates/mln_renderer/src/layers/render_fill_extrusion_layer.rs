@@ -23,6 +23,7 @@ use std::mem::offset_of;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use mln_gfx::gpu::Gpu;
 use mln_gfx::shaders::fill_extrusion_layer_ubo::{
     FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO,
 };
@@ -369,6 +370,7 @@ impl TypedLayer for RenderFillExtrusionLayer {
     /// buffers they read.
     fn update_draws(
         &mut self,
+        gpu: &mut dyn Gpu,
         paint_parameters: &mut PaintParameters<'_>,
         _atlases: &Atlases,
         render_tiles: &[FrameTile<'_, FillExtrusion>],
@@ -485,7 +487,7 @@ impl TypedLayer for RenderFillExtrusionLayer {
         // The draws that composite draw opaque: the composite has the
         // layer's opacity.
         let opacity = if composite.is_some() { 1.0 } else { opacity };
-        self.draw_list.finish(frame, paint_parameters.context, |writer| {
+        self.draw_list.finish(frame, gpu, paint_parameters.context, |writer| {
             Self::write_uniforms(layer, writer, light, state, opacity);
         });
     }

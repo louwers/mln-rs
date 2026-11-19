@@ -697,7 +697,7 @@ fn globe_mask_keeps_the_uncovered_parts() {
 // gtest: TileMesh.GlobeMeshCacheStaysBounded
 #[test]
 fn globe_mesh_cache_stays_bounded() {
-    with_context(|context| {
+    with_context(|_, context| {
         let mut cache: GlobeTileMeshCache<GlobeTestVertex> = GlobeTileMeshCache::new();
         let tile = CanonicalTileID::new(3, 2, 2);
         for i in 0..1000u32 {
@@ -714,7 +714,7 @@ fn globe_mesh_cache_stays_bounded() {
 // gtest: TileMesh.GlobeMeshCacheKeepsTheMeshesInUse
 #[test]
 fn globe_mesh_cache_keeps_the_meshes_in_use() {
-    with_context(|context| {
+    with_context(|_, context| {
         let mut cache: GlobeTileMeshCache<GlobeTestVertex> = GlobeTileMeshCache::new();
         let tile = CanonicalTileID::new(3, 2, 2);
         let whole = mask(&[(0, 0, 0)]);

@@ -4,14 +4,11 @@
 // the host holds keep the old generation's surfaces until they are given
 // back.
 
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use mln_gfx::export::Generations;
 use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
 use mln_gfx::{
     ConsumerSync, ExportKind, ExportKinds, ExportedFrame, ExportedImage, ExportedRing, FrameDepth, NativeTexture,
-    SyncKind, SyncKinds,
+    RendererBackend as _, SyncKind, SyncKinds,
 };
 use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
@@ -26,7 +23,7 @@ use objc2_metal::{MTLDevice, MTLPixelFormat, MTLStorageMode, MTLTexture, MTLText
 
 use crate::borrowed_target::{BorrowedTarget, BorrowedTextures};
 use crate::device::Device;
-use crate::gpu::texture_descriptor;
+use crate::gpu::{MetalGpu, texture_descriptor};
 use crate::mtl_fwd::{MTLDevicePtr, MTLTexturePtr};
 use crate::renderer_backend::RendererBackend;
 
@@ -125,7 +122,7 @@ struct Generation {
 
 impl Generation {
     fn new(
-        backend: &Rc<RendererBackend>,
+        backend: &mut RendererBackend,
         depth: usize,
         size: Size,
         producer: SyncKind,
@@ -144,7 +141,7 @@ impl Generation {
             }
         }
         let textures = BorrowedTextures { textures, size, depth_textures };
-        let target = BorrowedTarget::new(Rc::clone(backend), textures.clone(), producer)?;
+        let target = BorrowedTarget::new(backend, textures.clone(), producer)?;
         Ok(Generation { target, surfaces, textures, size })
     }
 }
@@ -161,11 +158,10 @@ fn depth_texture(device: &MTLDevicePtr, size: Size) -> Result<MTLTexturePtr, Err
 /// Frames drawn into IOSurfaces of the target's own, and queued for the host
 /// to acquire.
 pub struct ExportedTarget {
-    backend: Rc<RendererBackend>,
     depth: usize,
     producer: SyncKind,
     keep_depth: bool,
-    generations: RefCell<Generations<Generation>>,
+    generations: Generations<Generation>,
 }
 
 impl ExportedTarget {
@@ -178,7 +174,7 @@ impl ExportedTarget {
     /// [`ErrorKind::Native`](mln_util::ErrorKind) when a surface can't be
     /// made.
     pub fn new(
-        backend: Rc<RendererBackend>,
+        backend: &mut RendererBackend,
         ring: &ExportedRing,
         kind: ExportKind,
         size: Size,
@@ -190,38 +186,35 @@ impl ExportedTarget {
         if !sync_kinds(backend.device()).0.contains(producer) {
             return Err(Error::unsupported(format!("an exported IOSurface hands no frame over with {producer:?}")));
         }
-        let current = Generation::new(&backend, ring.depth, size, producer, ring.keep_depth)?;
+        let current = Generation::new(backend, ring.depth, size, producer, ring.keep_depth)?;
         Ok(ExportedTarget {
-            backend,
             depth: ring.depth,
             producer,
             keep_depth: ring.keep_depth,
-            generations: RefCell::new(Generations::new(current)),
+            generations: Generations::new(current),
         })
     }
 
     /// Has the next frame draw into the surface at `slot`.
-    pub fn select(&self, slot: usize) {
-        self.generations.borrow().current().target.select(slot);
+    pub fn select(&mut self, slot: usize) {
+        self.generations.current_mut().target.select(slot);
     }
 
     /// The host gave the frame at `slot` back, once its reads reach
     /// `consumer`.
     ///
     /// Fails as [`BorrowedTarget::release`] does.
-    pub fn release(&self, slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
-        let mut generations = self.generations.borrow_mut();
-        if generations.give_back(slot) {
+    pub fn release(&mut self, gpu: &mut MetalGpu, slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
+        if self.generations.give_back(slot, |mut generation| generation.target.tear_down(gpu)) {
             return Ok(());
         }
-        generations.current().target.release(slot, consumer)
+        self.generations.current_mut().target.release(gpu, slot, consumer)
     }
 
     /// The host gave the frame at `slot` up.
-    pub fn discard(&self, slot: usize) {
-        let mut generations = self.generations.borrow_mut();
-        if !generations.give_back(slot) {
-            generations.current().target.discard(slot);
+    pub fn discard(&mut self, gpu: &mut MetalGpu, slot: usize) {
+        if !self.generations.give_back(slot, |mut generation| generation.target.tear_down(gpu)) {
+            self.generations.current_mut().target.discard(gpu, slot);
         }
     }
 
@@ -231,24 +224,27 @@ impl ExportedTarget {
     ///
     /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when a surface
     /// can't be made, and the target then keeps its own.
-    pub fn resize(&self, size: Size, held: &[usize]) -> Result<bool, Error> {
+    pub fn resize(&mut self, backend: &mut RendererBackend, size: Size, held: &[usize]) -> Result<bool, Error> {
         if self.size() == size {
             return Ok(false);
         }
-        let next = Generation::new(&self.backend, self.depth, size, self.producer, self.keep_depth)?;
-        self.generations.borrow_mut().replace(next, held);
+        let next = Generation::new(backend, self.depth, size, self.producer, self.keep_depth)?;
+        let gpu = backend.gpu();
+        self.generations.replace(next, held, |mut generation| generation.target.tear_down(gpu));
         Ok(true)
     }
 
     /// The size of the surfaces that frames draw into.
+    #[must_use]
     pub fn size(&self) -> Size {
-        self.generations.borrow().current().size
+        self.generations.current().size
     }
 
     /// The surface of the frame at `slot`, the texture over it, and its
     /// depth texture when the ring keeps depth.
+    #[must_use]
     pub fn image(&self, slot: usize) -> Option<ExportedFrame> {
-        let generations = self.generations.borrow();
+        let generations = &self.generations;
         let generation = generations.retired(slot).unwrap_or(generations.current());
         let surface = generation.surfaces.get(slot)?;
         let native = |texture: &MTLTexturePtr| NativeTexture::Metal {
@@ -269,20 +265,20 @@ impl ExportedTarget {
 }
 
 impl FrameTarget for ExportedTarget {
-    fn begin_frame(&self) -> Option<FrameImage> {
-        self.generations.borrow().current().target.begin_frame()
+    type Gpu = MetalGpu;
+
+    fn begin_frame(&mut self, gpu: &mut MetalGpu) -> Option<FrameImage> {
+        self.generations.current_mut().target.begin_frame(gpu)
     }
 
-    fn end_frame(&self) -> Handoff {
-        match self.generations.borrow().current().target.end_frame() {
+    fn end_frame(&mut self, gpu: &mut MetalGpu) -> Handoff {
+        match self.generations.current_mut().target.end_frame(gpu) {
             Handoff::GivenBack { slot, sync } => Handoff::Queued { slot, sync },
             other => other,
         }
     }
-}
 
-impl Drop for ExportedTarget {
-    fn drop(&mut self) {
-        self.generations.get_mut().clear_retired();
+    fn tear_down(&mut self, gpu: &mut MetalGpu) {
+        self.generations.clear(|generation| generation.target.tear_down(gpu));
     }
 }

@@ -106,7 +106,7 @@ fn circle_bucket() {
     assert!(bucket.has_data());
     assert!(bucket.needs_upload());
 
-    with_context(|context| upload(&mut bucket, &mut BucketGeometry::default(), context));
+    with_context(|_, context| upload(&mut bucket, &mut BucketGeometry::default(), context));
     assert!(bucket.has_data());
     assert!(!bucket.needs_upload());
 }
@@ -133,7 +133,7 @@ fn fill_bucket() {
     assert!(bucket.has_data());
     assert!(bucket.needs_upload());
 
-    with_context(|context| upload(&mut bucket, &mut BucketGeometry::default(), context));
+    with_context(|_, context| upload(&mut bucket, &mut BucketGeometry::default(), context));
     assert!(!bucket.needs_upload());
 }
 
@@ -223,7 +223,7 @@ fn fill_bucket_frees_cpu_geometry_after_upload() {
     assert!(vertex_count > 0);
     assert!(index_count > 0);
 
-    with_context(|context| {
+    with_context(|gpu, context| {
         // The bucket's upload moves its data to the context's stores, which
         // hold it until it is uploaded.
         let mut geometry = BucketGeometry::default();
@@ -235,9 +235,9 @@ fn fill_bucket_frees_cpu_geometry_after_upload() {
         assert_eq!(stored.bytes().len(), vertex_count * stored.vertex_size());
 
         // A draw's upload writes them to buffers.
-        let buffer = context.upload_vertices(&vertices).expect("uploads").expect("a buffer");
+        let buffer = context.upload_vertices(gpu, &vertices).expect("uploads").expect("a buffer");
         let mut triangles = DrawIndexes::from(bucket_indexes(&geometry, &bucket.triangles).expect("moved"));
-        triangles.upload(context).expect("uploads");
+        triangles.upload(gpu, context).expect("uploads");
 
         // The CPU copies are gone, the counts that draws are built from
         // are not.
@@ -253,7 +253,7 @@ fn fill_bucket_frees_cpu_geometry_after_upload() {
         assert!(vertices == again);
         let indexes = DrawIndexes::from(bucket_indexes(&geometry, &bucket.triangles).expect("moved"));
         assert!(indexes.buffer(context).is_some_and(|buffer| triangles.buffer(context) == Some(buffer)));
-        let reused = context.upload_vertices(&again).expect("uploads").expect("a buffer");
+        let reused = context.upload_vertices(gpu, &again).expect("uploads").expect("a buffer");
         assert_eq!(buffer, reused);
 
         // Data-driven paint values are freed too when nothing can rewrite them.
@@ -262,7 +262,7 @@ fn fill_bucket_frees_cpu_geometry_after_upload() {
         let buffer = &binders.interleaved_vertex_buffer;
         let paint = paint_vertices(context, &geometry, buffer, false).expect("moved");
         assert!(paint.count() > 0);
-        assert!(context.upload_vertices(&paint).expect("uploads").is_some());
+        assert!(context.upload_vertices(gpu, &paint).expect("uploads").is_some());
         assert!(context.vertices(&paint).is_some_and(|stored| !stored.needs_upload()));
         assert!(buffer.shared_vertex_vector.data().is_empty());
     });
@@ -275,7 +275,7 @@ fn fill_bucket_frees_cpu_geometry_after_upload() {
 fn world_copies_share_their_buckets_stored_geometry() {
     let mut bucket = data_driven_fill_bucket(&serde_json::json!(["to-color", ["get", "c"]]));
     let mut copy = bucket.clone();
-    with_context(|context| {
+    with_context(|_, context| {
         let mut copy_geometry = BucketGeometry::default();
         upload(&mut copy, &mut copy_geometry, context);
         let mut geometry = BucketGeometry::default();
@@ -304,7 +304,7 @@ fn fill_bucket_keeps_paint_data_that_feature_state_rewrites() {
         ["case", ["boolean", ["feature-state", "hover"], false], "red", "blue"]
     ]));
 
-    with_context(|context| {
+    with_context(|gpu, context| {
         let mut geometry = BucketGeometry::default();
         upload(&mut bucket, &mut geometry, context);
         let binders = bucket.paint_property_binders.get("fill").unwrap();
@@ -312,7 +312,7 @@ fn fill_bucket_keeps_paint_data_that_feature_state_rewrites() {
         let buffer = &binders.interleaved_vertex_buffer;
         let paint = paint_vertices(context, &geometry, buffer, binders.depends_on_feature_state()).expect("a copy");
         assert!(paint.count() > 0);
-        assert!(context.upload_vertices(&paint).expect("uploads").is_some());
+        assert!(context.upload_vertices(gpu, &paint).expect("uploads").is_some());
         assert!(!buffer.shared_vertex_vector.is_moved());
         assert_eq!(buffer.shared_vertex_vector.data().len(), paint.count());
     });
@@ -354,7 +354,7 @@ fn line_bucket() {
     assert!(bucket.has_data());
     assert!(bucket.needs_upload());
 
-    with_context(|context| upload(&mut bucket, &mut BucketGeometry::default(), context));
+    with_context(|_, context| upload(&mut bucket, &mut BucketGeometry::default(), context));
     assert!(!bucket.needs_upload());
 }
 
@@ -375,7 +375,7 @@ fn line_bucket_drawables_build_from_freed_indexes() {
         .unwrap();
     assert!(bucket.has_data());
 
-    with_context(|context| {
+    with_context(|gpu, context| {
         let mut geometry = BucketGeometry::default();
         let index_count = bucket.triangles.len();
         upload(&mut bucket, &mut geometry, context);
@@ -383,7 +383,7 @@ fn line_bucket_drawables_build_from_freed_indexes() {
         // An earlier draw put the indexes in a buffer, which frees their CPU
         // copy.
         let mut triangles = DrawIndexes::from(bucket_indexes(&geometry, &bucket.triangles).expect("moved"));
-        triangles.upload(context).expect("uploads");
+        triangles.upload(gpu, context).expect("uploads");
         assert!(!triangles.has_data(context));
 
         // A layer that rebuilds its draws of the tile builds the segments
@@ -451,7 +451,7 @@ fn symbol_bucket() {
     assert!(bucket.has_data());
     assert!(bucket.needs_upload());
 
-    with_context(|context| upload(&mut bucket, &mut BucketGeometry::default(), context));
+    with_context(|_, context| upload(&mut bucket, &mut BucketGeometry::default(), context));
     assert!(!bucket.needs_upload());
 }
 
@@ -463,7 +463,7 @@ fn a_raster_buckets_upload_moves_its_quads_into_the_stores_once_per_mask() {
     assert!(bucket.has_data());
     bucket.set_mask(mask(&[(1, 0, 0), (1, 1, 1)]));
 
-    with_context(|context| {
+    with_context(|_, context| {
         bucket.upload(context);
         let geometry = bucket.geometry();
         let quads = geometry.quads().expect("the mask's quads");
@@ -772,11 +772,11 @@ fn line_bucket_evaluates_cap_and_limits_per_feature() {
 // Stored vertices free their CPU copy once they are in a buffer.
 #[test]
 fn stored_vertices_free_their_data_once_they_have_a_buffer() {
-    with_context(|context| {
+    with_context(|gpu, context| {
         let vertices = context.add_vertices(vec![[1i16, 2], [3, 4]]);
         assert!(context.vertices(&vertices).is_some_and(|stored| stored.needs_upload() && stored.bytes().len() == 8));
 
-        context.upload_vertices(&vertices).expect("uploads").expect("a buffer");
+        context.upload_vertices(gpu, &vertices).expect("uploads").expect("a buffer");
         assert!(context.vertices(&vertices).is_some_and(|stored| !stored.needs_upload() && stored.bytes().is_empty()));
         assert_eq!(vertices.count(), 2);
     });
@@ -786,11 +786,11 @@ fn stored_vertices_free_their_data_once_they_have_a_buffer() {
 // which their uploads keep.
 #[test]
 fn dynamic_vertices_keep_their_storage_across_uploads() {
-    with_context(|context| {
+    with_context(|gpu, context| {
         let typed = context.add_dynamic_vertices(&[[1i16, 2], [3, 4]]);
         let storage = context.vertices(typed.shared()).map(|stored| stored.bytes().as_ptr());
         for x in 5..8 {
-            context.upload_vertices(typed.shared()).expect("uploads").expect("a buffer");
+            context.upload_vertices(gpu, typed.shared()).expect("uploads").expect("a buffer");
             assert!(context.update_vertices(&typed, &[[x, x], [x, x]]));
             assert_eq!(context.vertices(typed.shared()).map(|stored| stored.bytes().as_ptr()), storage, "{x}");
         }
@@ -802,10 +802,10 @@ fn dynamic_vertices_keep_their_storage_across_uploads() {
 // update, and which the draws that bind them bind again.
 #[test]
 fn typed_vertices_take_updates_of_as_many_vertices() {
-    with_context(|context| {
+    with_context(|gpu, context| {
         let typed = context.add_dynamic_vertices(&[[1i16, 2], [3, 4]]);
         let vertices = typed.shared().clone();
-        let buffer = context.upload_vertices(&vertices).expect("uploads").expect("a buffer");
+        let buffer = context.upload_vertices(gpu, &vertices).expect("uploads").expect("a buffer");
         assert!(context.vertices(&vertices).is_some_and(|stored| !stored.needs_upload()));
 
         assert!(!context.update_vertices(&typed, &[[5, 6]]), "another count");
@@ -814,7 +814,7 @@ fn typed_vertices_take_updates_of_as_many_vertices() {
             == bytemuck::cast_slice::<i16, u8>(&[5, 6, 7, 8])
             && stored.needs_upload()));
         let before = context.rendering_stats().clone();
-        let rewritten = context.upload_vertices(&vertices).expect("uploads").expect("a buffer");
+        let rewritten = context.upload_vertices(gpu, &vertices).expect("uploads").expect("a buffer");
         assert_eq!(buffer, rewritten);
         let after = context.rendering_stats().clone();
         assert_eq!(after.vertex_update_bytes, before.vertex_update_bytes + 8);
@@ -823,7 +823,7 @@ fn typed_vertices_take_updates_of_as_many_vertices() {
         assert!(context.vertices(&vertices).is_some_and(|stored| !stored.needs_upload()));
 
         // An upload without an update writes nothing.
-        context.upload_vertices(&vertices).expect("uploads");
+        context.upload_vertices(gpu, &vertices).expect("uploads");
         assert_eq!(context.rendering_stats().buffer_updates, after.buffer_updates);
         assert_eq!(vertices.count(), 2);
     });
@@ -840,7 +840,7 @@ fn a_draw_writes_an_update_of_the_vertices_it_binds() {
     use crate::gfx::shader_registry::ShaderRegistry;
     use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
 
-    with_context(|context| {
+    with_context(|gpu, context| {
         let registry = ShaderRegistry::new(&mln_gfx::shaders::program_parameters::ProgramParameters::new(1.0, false));
         let shader = registry
             .shader("RasterShader", mln_gfx::projection_variant::ProjectionVariant::Mercator)
@@ -870,17 +870,17 @@ fn a_draw_writes_an_update_of_the_vertices_it_binds() {
             geometry,
             Default::default(),
         );
-        objects.upload(context);
+        objects.upload(gpu, context);
         let uploaded = context.rendering_stats().buffer_updates;
 
         for x in 3..6 {
             assert!(context.update_vertices(&typed, &[vertex(x), vertex(x), vertex(x)]));
-            objects.upload(context);
+            objects.upload(gpu, context);
             assert!(context.vertices(typed.shared()).is_some_and(|stored| !stored.needs_upload()), "{x}");
             assert_eq!(context.rendering_stats().buffer_updates, uploaded + x as usize - 2, "{x}");
         }
         // Without an update, an upload writes nothing.
-        objects.upload(context);
+        objects.upload(gpu, context);
         assert_eq!(context.rendering_stats().buffer_updates, uploaded + 3);
     });
 }
@@ -890,21 +890,21 @@ fn a_draw_writes_an_update_of_the_vertices_it_binds() {
 // renderer released.
 #[test]
 fn store_entries_last_as_long_as_their_handles() {
-    with_context(|context| {
+    with_context(|gpu, context| {
         let vertices = context.add_vertices(vec![[1i16, 2]]);
         let held = vertices.clone();
         let texture = context.add_texture();
         let draw_texture = texture.clone();
         drop(vertices);
         drop(texture);
-        context.destroy_released();
+        context.destroy_released(gpu);
         assert!(context.vertices(&held).is_some());
         assert!(context.texture(&draw_texture).is_some());
 
         let key = held.key();
         drop(held);
         drop(draw_texture);
-        context.destroy_released();
+        context.destroy_released(gpu);
         assert!(!context.has_vertices(key));
     });
 }

@@ -8,7 +8,7 @@ use std::mem::offset_of;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_gfx::gpu::TextureFormat;
+use mln_gfx::gpu::{Gpu, TextureFormat};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::color_relief_layer_ubo::{
     ColorReliefDrawableUBO, ColorReliefEvaluatedPropsUBO, ColorReliefTilePropsUBO,
@@ -347,6 +347,7 @@ impl TypedLayer for RenderColorReliefLayer {
     /// buffers they read.
     fn update_draws(
         &mut self,
+        gpu: &mut dyn Gpu,
         paint_parameters: &mut PaintParameters<'_>,
         _atlases: &Atlases,
         render_tiles: &[FrameTile<'_, ColorRelief>],
@@ -401,7 +402,8 @@ impl TypedLayer for RenderColorReliefLayer {
                 });
             });
             let data = bytemuck::cast_slice(elevation_stops_data.as_slice());
-            if let Err(error) = context.upload_texture_data(&elevation_stops, data, Size::new(*color_ramp_size, 1)) {
+            if let Err(error) = context.upload_texture_data(gpu, &elevation_stops, data, Size::new(*color_ramp_size, 1))
+            {
                 Log::error(Event::Render, format!("Uploading the elevation stops failed: {error}"));
             }
             *elevation_stops_texture = Some(elevation_stops);
@@ -572,7 +574,7 @@ impl TypedLayer for RenderColorReliefLayer {
 
         let frame = drawing.frame_mut();
         let opacity = *values.evaluated.paint.color_relief_opacity.uniform();
-        draw_list.finish(frame, paint_parameters.context, |writer| {
+        draw_list.finish(frame, gpu, paint_parameters.context, |writer| {
             let props = ColorReliefEvaluatedPropsUBO { opacity, pad_eval0: 0.0, pad_eval1: 0.0, pad_eval2: 0.0 };
             writer.uniform(ID_COLOR_RELIEF_EVALUATED_PROPS_UBO, &props);
             writer.storage(ID_COLOR_RELIEF_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);

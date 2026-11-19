@@ -126,9 +126,9 @@ pub(crate) struct HeatmapDrawing {
 
 impl HeatmapDrawing {
     /// Uploads the GPU objects of the tiles' draws into the render target.
-    fn upload_target(&mut self, context: &mut Context) {
+    fn upload_target(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         if let Some(target) = &self.target {
-            target.upload(&mut self.tiles, tile_objects, context);
+            target.upload(gpu, &mut self.tiles, tile_objects, context);
         }
     }
 
@@ -179,9 +179,9 @@ impl LayerDrawing for HeatmapDrawing {
         }
     }
 
-    fn upload(&mut self, context: &mut Context) {
+    fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         if let (Some(frame), Some(texture)) = (&self.frame, &mut self.texture) {
-            frame.upload_one(&mut texture.objects, context);
+            frame.upload_one(gpu, &mut texture.objects, context);
         }
     }
 
@@ -315,6 +315,7 @@ impl TypedLayer for RenderHeatmapLayer {
     /// the render target's heat onto it, and writes the buffers they read.
     fn update_draws(
         &mut self,
+        gpu: &mut dyn Gpu,
         paint_parameters: &mut PaintParameters<'_>,
         _atlases: &Atlases,
         render_tiles: &[FrameTile<'_, Heatmap>],
@@ -328,16 +329,16 @@ impl TypedLayer for RenderHeatmapLayer {
             RenderTarget::new(paint_parameters.context, size, TextureChannelDataType::HalfFloat)
         });
         render_target.set_size(paint_parameters.context, size);
-        if self.draw_tiles(shaders, render_tiles, paint_parameters) {
-            self.draw_texture(shaders, paint_parameters);
+        if self.draw_tiles(gpu, shaders, render_tiles, paint_parameters) {
+            self.draw_texture(gpu, shaders, paint_parameters);
         }
     }
 }
 
 impl RenderLayer for RenderHeatmapLayer {
-    fn upload_render_targets(&mut self, context: &mut Context) {
+    fn upload_render_targets(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         if self.base.is_renderable && self.render_target.is_some() {
-            self.drawing.upload_target(context);
+            self.drawing.upload_target(gpu, context);
         }
     }
 
@@ -360,6 +361,7 @@ impl RenderHeatmapLayer {
     /// if the layer draws nothing.
     fn draw_tiles(
         &mut self,
+        gpu: &mut dyn Gpu,
         shaders: &ShaderRegistry,
         render_tiles: &[FrameTile<'_, Heatmap>],
         paint_parameters: &mut PaintParameters<'_>,
@@ -463,7 +465,7 @@ impl RenderHeatmapLayer {
         }
 
         let target = drawing.target.get_or_insert_default();
-        tile_draws.finish(target, paint_parameters.context, |writer| Self::write_tile_uniforms(evaluated, writer));
+        tile_draws.finish(target, gpu, paint_parameters.context, |writer| Self::write_tile_uniforms(evaluated, writer));
         true
     }
 
@@ -521,7 +523,12 @@ impl RenderHeatmapLayer {
     /// Makes the layer's draw of the frame, which colors the heat of the
     /// render target onto it through the layer's color ramp, with GPU
     /// objects it builds once, and writes the buffers it reads.
-    fn draw_texture(&mut self, shaders: &ShaderRegistry, paint_parameters: &mut PaintParameters<'_>) {
+    fn draw_texture(
+        &mut self,
+        gpu: &mut dyn Gpu,
+        shaders: &ShaderRegistry,
+        paint_parameters: &mut PaintParameters<'_>,
+    ) {
         let RenderHeatmapLayer {
             values,
             drawing,
@@ -614,7 +621,7 @@ impl RenderHeatmapLayer {
             pad3: 0.0,
         };
         let context = &mut *paint_parameters.context;
-        frame.uniform_buffers.create_or_update_pod(ID_HEATMAP_TEXTURE_PROPS_UBO, &props, context.device());
-        bind_no_projection(&mut frame.uniform_buffers, context);
+        frame.uniform_buffers.create_or_update_pod(gpu, ID_HEATMAP_TEXTURE_PROPS_UBO, &props, context.device());
+        bind_no_projection(gpu, &mut frame.uniform_buffers, context);
     }
 }

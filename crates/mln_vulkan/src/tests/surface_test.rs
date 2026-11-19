@@ -23,6 +23,7 @@ use std::rc::Rc;
 
 use ash::vk;
 use bytemuck::Zeroable as _;
+use mln_gfx::RendererBackend as _;
 use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::frame::FrameTarget as _;
@@ -99,19 +100,20 @@ fn unavailable() -> Option<String> {
         .map(|name| format!("Vulkan has no {}", name.to_string_lossy()))
 }
 
-/// A backend made for a headless surface, and a target that presents to it.
+/// A backend made for a headless surface, and a target that presents to it,
+/// which it tears down as it goes.
 struct Window {
-    backend: Rc<RendererBackend>,
+    backend: RendererBackend,
     target: SurfaceTarget,
 }
 
 impl Window {
     /// Takes the next frame; false when there is none to draw into.
-    fn acquire_next_texture(&self) -> bool {
-        self.target.begin_frame().is_some()
+    fn acquire_next_texture(&mut self) -> bool {
+        self.target.begin_frame(self.backend.gpu()).is_some()
     }
 
-    fn set_framebuffer_size(&self, size: Size) {
+    fn set_framebuffer_size(&mut self, size: Size) {
         self.target.resize(size);
     }
 
@@ -119,24 +121,32 @@ impl Window {
         self.target.size()
     }
 
-    fn request_readback(&self) {
+    fn request_readback(&mut self) {
         self.target.request_readback();
     }
 
-    fn take_readback(&self) -> Option<PremultipliedImage> {
-        self.target.take_readback()
+    fn take_readback(&mut self) -> Option<PremultipliedImage> {
+        self.target.take_readback(self.backend.gpu())
     }
 
-    fn set_overlay(&self, overlay: Option<Box<dyn Overlay>>) {
-        self.target.set_overlay(overlay);
+    fn set_overlay(&mut self, overlay: Option<Box<dyn Overlay>>) {
+        self.target.set_overlay(self.backend.gpu(), overlay);
+    }
+
+    fn gpu(&mut self) -> &mut VulkanGpu {
+        self.backend.gpu()
+    }
+
+    /// Presents with `target`, a target on the backend, in place of the
+    /// window's, which it tears down.
+    fn set_target(&mut self, target: SurfaceTarget) {
+        std::mem::replace(&mut self.target, target).tear_down(self.backend.gpu());
     }
 }
 
-impl std::ops::Deref for Window {
-    type Target = RendererBackend;
-
-    fn deref(&self) -> &RendererBackend {
-        &self.backend
+impl Drop for Window {
+    fn drop(&mut self) {
+        self.target.tear_down(self.backend.gpu());
     }
 }
 
@@ -189,8 +199,8 @@ fn buffer(gpu: &mut VulkanGpu, usage: BufferUsage, data: &[u8]) -> BufferId {
 }
 
 impl Scene {
-    fn new(backend: &Window) -> Scene {
-        let gpu = &mut *backend.gpu();
+    fn new(backend: &mut Window) -> Scene {
+        let gpu = backend.gpu();
         let program = program_info(BuiltIn::BackgroundShader).expect("BackgroundShader");
         let parameters = ProgramParameters::new(1.0, false);
         let key = program.variant_key(&parameters, std::iter::empty(), ProjectionVariant::Mercator);
@@ -307,7 +317,7 @@ struct Change {
 /// draws the scene over `clear` and presents. With `read`, the presented
 /// frame is read back.
 fn render_frame(
-    backend: &Window,
+    backend: &mut Window,
     scene: Option<&Scene>,
     change: Change,
     clear: Color,
@@ -318,18 +328,19 @@ fn render_frame(
         backend.request_readback();
         assert!(backend.take_readback().is_none(), "nothing is read before the frame is presented");
     }
-    let image = backend.target.begin_frame().expect("a frame");
-    let mut gpu = backend.gpu();
+    let Window { backend: renderer, target } = &mut *backend;
+    let gpu = renderer.gpu();
+    let image = target.begin_frame(gpu).expect("a frame");
 
     let mut draw = None;
     if let Some(scene) = scene {
         if let Some(color) = change.color {
-            scene.set_color(&mut gpu, color);
+            scene.set_color(gpu, color);
         }
         if let Some(right) = change.right {
-            scene.set_half(&mut gpu, right);
+            scene.set_half(gpu, right);
         }
-        draw = Some(scene.draw(&mut gpu, image.size, image.targets));
+        draw = Some(scene.draw(gpu, image.size, image.targets));
     }
     gpu.begin_pass(&PassDesc {
         label: "main buffer",
@@ -346,8 +357,7 @@ fn render_frame(
     }
     gpu.end_pass().expect("the pass's end");
     gpu.flush(false).expect("the flush");
-    drop(gpu);
-    backend.target.end_frame();
+    target.end_frame(gpu);
 
     let image = backend.take_readback();
     assert_eq!(image.is_some(), read, "a frame is read back when asked, once");
@@ -420,18 +430,18 @@ fn frames_present_what_they_draw() {
     // different modes.
     for cap_frame_rate in [true, false] {
         let size = Size::new(64, 32);
-        let Some(backend) = surface_backend(size, cap_frame_rate) else {
+        let Some(mut backend) = surface_backend(size, cap_frame_rate) else {
             return;
         };
         assert_eq!(backend.get_framebuffer_size(), size);
         assert_ne!(backend.target.get_color_format(), vk::Format::UNDEFINED);
-        let scene = Scene::new(&backend);
+        let scene = Scene::new(&mut backend);
         // More frames than the swapchain has images.
         for frame in 0..12 {
             let (clear, background) = (frame_color(frame, 0), frame_color(frame, 3));
             let right = frame % 2 == 1;
             let change = Change { color: Some(background), right: Some(right) };
-            let image = render_frame(&backend, Some(&scene), change, clear, true).unwrap();
+            let image = render_frame(&mut backend, Some(&scene), change, clear, true).unwrap();
             let (left_color, right_color) = if right { (clear, background) } else { (background, clear) };
             check_halves(&image, size, left_color, right_color, &format!("frame {frame}"));
         }
@@ -441,10 +451,10 @@ fn frames_present_what_they_draw() {
 #[test]
 fn uniforms_follow_each_frame_in_flight() {
     let size = Size::new(32, 16);
-    let Some(backend) = surface_backend(size, false) else {
+    let Some(mut backend) = surface_backend(size, false) else {
         return;
     };
-    let scene = Scene::new(&backend);
+    let scene = Scene::new(&mut backend);
     let clear = color(0.0, 0.0, 0.0);
     let (red, green, blue) = (color(1.0, 0.0, 0.0), color(0.0, 1.0, 0.0), color(0.0, 0.0, 1.0));
     let set = |color: Color, right: bool| Change { color: Some(color), right: Some(right) };
@@ -475,7 +485,7 @@ fn uniforms_follow_each_frame_in_flight() {
         (set(blue, false), true, blue, false),
     ];
     for (index, (change, read, background, right)) in frames.into_iter().enumerate() {
-        let image = render_frame(&backend, Some(&scene), change, clear, read);
+        let image = render_frame(&mut backend, Some(&scene), change, clear, read);
         if let Some(image) = image {
             let (left_color, right_color) = if right { (clear, background) } else { (background, clear) };
             check_halves(&image, size, left_color, right_color, &format!("frame {index}"));
@@ -485,49 +495,49 @@ fn uniforms_follow_each_frame_in_flight() {
 
 #[test]
 fn resize_rebuilds_the_swapchain() {
-    let Some(backend) = surface_backend(Size::new(64, 32), true) else {
+    let Some(mut backend) = surface_backend(Size::new(64, 32), true) else {
         return;
     };
-    let scene = Scene::new(&backend);
+    let scene = Scene::new(&mut backend);
     let mut frame = 0;
-    let mut draw = |size: Size, read: bool| {
+    let mut draw = |backend: &mut Window, size: Size, read: bool| {
         frame += 1;
         let (clear, background) = (frame_color(frame, 1), frame_color(frame, 4));
         let change = Change { color: Some(background), right: Some(false) };
-        if let Some(image) = render_frame(&backend, Some(&scene), change, clear, read) {
+        if let Some(image) = render_frame(backend, Some(&scene), change, clear, read) {
             check_halves(&image, size, background, clear, &format!("frame {frame} at {size:?}"));
         }
     };
 
     let mut size = Size::new(64, 32);
-    draw(size, true);
+    draw(&mut backend, size, true);
     // Growing, shrinking, and a size the swapchain already has, each with
     // frames in flight from before, and frames after.
     for next in [Size::new(96, 48), Size::new(24, 40), Size::new(24, 40), Size::new(128, 64), Size::new(64, 32)] {
-        draw(size, false);
+        draw(&mut backend, size, false);
         backend.set_framebuffer_size(next);
         size = next;
         assert_eq!(backend.get_framebuffer_size(), size);
-        draw(size, true);
-        draw(size, false);
-        draw(size, true);
+        draw(&mut backend, size, true);
+        draw(&mut backend, size, false);
+        draw(&mut backend, size, true);
     }
     // Several sizes between two frames: the last one counts.
     backend.set_framebuffer_size(Size::new(10, 10));
     backend.set_framebuffer_size(Size::new(80, 20));
-    draw(Size::new(80, 20), true);
+    draw(&mut backend, Size::new(80, 20), true);
 }
 
 #[test]
 fn empty_framebuffer_draws_nothing() {
     let size = Size::new(64, 32);
-    let Some(backend) = surface_backend(size, true) else {
+    let Some(mut backend) = surface_backend(size, true) else {
         return;
     };
-    let scene = Scene::new(&backend);
+    let scene = Scene::new(&mut backend);
     let (clear, red, green) = (color(0.2, 0.4, 0.6), color(1.0, 0.0, 0.0), color(0.0, 1.0, 0.0));
     let set = |color: Color| Change { color: Some(color), right: Some(true) };
-    let image = render_frame(&backend, Some(&scene), set(red), clear, true).unwrap();
+    let image = render_frame(&mut backend, Some(&scene), set(red), clear, true).unwrap();
     check_halves(&image, size, clear, red, "before");
 
     // A minimized window: no frame can be drawn, and the app draws none.
@@ -542,13 +552,13 @@ fn empty_framebuffer_draws_nothing() {
 
     // Back at the size it had, and then at another.
     backend.set_framebuffer_size(size);
-    let image = render_frame(&backend, Some(&scene), set(green), clear, true).unwrap();
+    let image = render_frame(&mut backend, Some(&scene), set(green), clear, true).unwrap();
     check_halves(&image, size, clear, green, "after, at the same size");
     backend.set_framebuffer_size(Size::new(0, 0));
     assert!(!backend.acquire_next_texture());
     let size = Size::new(40, 24);
     backend.set_framebuffer_size(size);
-    let image = render_frame(&backend, Some(&scene), set(red), clear, true).unwrap();
+    let image = render_frame(&mut backend, Some(&scene), set(red), clear, true).unwrap();
     check_halves(&image, size, clear, red, "after, at another size");
 }
 
@@ -643,16 +653,16 @@ fn check_overlaid(image: &PremultipliedImage, size: Size, left: Color, right: Co
 #[test]
 fn overlay_draws_over_the_frame_and_is_read_back() {
     let mut size = Size::new(64, 32);
-    let Some(backend) = surface_backend(size, true) else {
+    let Some(mut backend) = surface_backend(size, true) else {
         return;
     };
-    let scene = Scene::new(&backend);
+    let scene = Scene::new(&mut backend);
     let (calls, sizes) = (Rc::new(Cell::new(0)), Rc::new(RefCell::new(Vec::new())));
     let (clear, blue, green) = (color(0.2, 0.2, 0.2), color(0.0, 0.0, 1.0), color(0.0, 1.0, 0.0));
     let set = |color: Color| Change { color: Some(color), right: Some(false) };
 
     // Without an overlay, the frame is the scene's.
-    let image = render_frame(&backend, Some(&scene), set(blue), clear, true).unwrap();
+    let image = render_frame(&mut backend, Some(&scene), set(blue), clear, true).unwrap();
     check_halves(&image, size, blue, clear, "no overlay");
 
     // With one, every frame has it over the scene, read back or not, and
@@ -660,22 +670,22 @@ fn overlay_draws_over_the_frame_and_is_read_back() {
     let overlay = quarter_overlay(Rc::clone(&calls), Rc::clone(&sizes));
     let destroyed = Rc::clone(&overlay.destroyed);
     backend.set_overlay(Some(Box::new(overlay)));
-    let image = render_frame(&backend, Some(&scene), set(green), clear, true).unwrap();
+    let image = render_frame(&mut backend, Some(&scene), set(green), clear, true).unwrap();
     check_overlaid(&image, size, green, clear, "overlay");
-    render_frame(&backend, Some(&scene), set(blue), clear, false);
-    let image = render_frame(&backend, Some(&scene), set(blue), clear, true).unwrap();
+    render_frame(&mut backend, Some(&scene), set(blue), clear, false);
+    let image = render_frame(&mut backend, Some(&scene), set(blue), clear, true).unwrap();
     check_overlaid(&image, size, blue, clear, "overlay, third frame");
     assert_eq!(calls.get(), 3);
 
     size = Size::new(40, 48);
     backend.set_framebuffer_size(size);
-    let image = render_frame(&backend, Some(&scene), set(green), clear, true).unwrap();
+    let image = render_frame(&mut backend, Some(&scene), set(green), clear, true).unwrap();
     check_overlaid(&image, size, green, clear, "overlay, resized");
     assert_eq!(calls.get(), 4);
     assert_eq!(*sizes.borrow(), [Size::new(64, 32), Size::new(64, 32), Size::new(64, 32), size]);
 
     // An overlay over a frame with nothing else in it.
-    let image = render_frame(&backend, None, Change::default(), clear, true).unwrap();
+    let image = render_frame(&mut backend, None, Change::default(), clear, true).unwrap();
     check_overlaid(&image, size, clear, clear, "overlay over the clear color");
 
     // Another overlay replaces it, and none stops it. Each destroys what it
@@ -685,12 +695,12 @@ fn overlay_draws_over_the_frame_and_is_read_back() {
     let other_destroyed = Rc::clone(&other.destroyed);
     backend.set_overlay(Some(Box::new(other)));
     assert_eq!(destroyed.get(), 1);
-    let image = render_frame(&backend, Some(&scene), set(blue), clear, true).unwrap();
+    let image = render_frame(&mut backend, Some(&scene), set(blue), clear, true).unwrap();
     check_overlaid(&image, size, blue, clear, "second overlay");
     assert_eq!((calls.get(), other_calls.get()), (5, 1));
     backend.set_overlay(None);
     assert_eq!((destroyed.get(), other_destroyed.get()), (1, 1));
-    let image = render_frame(&backend, Some(&scene), set(green), clear, true).unwrap();
+    let image = render_frame(&mut backend, Some(&scene), set(green), clear, true).unwrap();
     check_halves(&image, size, green, clear, "overlay removed");
     assert_eq!((calls.get(), other_calls.get()), (5, 1));
 }
@@ -702,10 +712,10 @@ fn dropped_with_frames_in_flight_then_made_again() {
     let set = |color: Color| Change { color: Some(color), right: Some(false) };
     let destroyed;
     {
-        let Some(backend) = surface_backend(size, false) else {
+        let Some(mut backend) = surface_backend(size, false) else {
             return;
         };
-        let scene = Scene::new(&backend);
+        let scene = Scene::new(&mut backend);
         let overlay = quarter_overlay(Rc::default(), Rc::default());
         destroyed = Rc::clone(&overlay.destroyed);
         backend.set_overlay(Some(Box::new(overlay)));
@@ -715,7 +725,7 @@ fn dropped_with_frames_in_flight_then_made_again() {
             if frame == 3 {
                 backend.set_framebuffer_size(Size::new(64, 64));
             }
-            render_frame(&backend, Some(&scene), set(frame_color(frame, 0)), clear, false);
+            render_frame(&mut backend, Some(&scene), set(frame_color(frame, 0)), clear, false);
         }
         // A readback that no frame came to.
         backend.request_readback();
@@ -727,13 +737,13 @@ fn dropped_with_frames_in_flight_then_made_again() {
     drop(surface_backend(size, true));
 
     // Another one in the same process draws as the first.
-    let Some(backend) = surface_backend(size, true) else {
+    let Some(mut backend) = surface_backend(size, true) else {
         return;
     };
-    let scene = Scene::new(&backend);
-    let image = render_frame(&backend, Some(&scene), set(red), clear, true).unwrap();
+    let scene = Scene::new(&mut backend);
+    let image = render_frame(&mut backend, Some(&scene), set(red), clear, true).unwrap();
     check_halves(&image, size, red, clear, "second backend");
-    let image = render_frame(&backend, Some(&scene), set(green), clear, true).unwrap();
+    let image = render_frame(&mut backend, Some(&scene), set(green), clear, true).unwrap();
     check_halves(&image, size, green, clear, "second backend, second frame");
 }
 
@@ -747,56 +757,55 @@ fn a_new_target_on_the_backend_presents() {
     let Some(mut window) = surface_backend_on(Rc::clone(&provider), size, true) else {
         return;
     };
-    let backend = Rc::clone(&window.backend);
-    let scene = Scene::new(&window);
+    let scene = Scene::new(&mut window);
     let (clear, red, green) = (color(0.4, 0.4, 0.4), color(1.0, 0.0, 0.0), color(0.0, 1.0, 0.0));
     let set = |color: Color| Change { color: Some(color), right: Some(true) };
     assert_eq!(provider.made.get(), 1);
 
     // Replaced with a frame in flight: the scene and its uniforms are as
     // they were.
-    render_frame(&window, Some(&scene), set(red), clear, false);
-    window.target =
-        SurfaceTarget::from_provider(Rc::clone(&backend), Rc::<HeadlessSurface>::clone(&provider), size, true)
-            .expect("target");
+    render_frame(&mut window, Some(&scene), set(red), clear, false);
+    let target = SurfaceTarget::from_provider(&mut window.backend, Rc::<HeadlessSurface>::clone(&provider), size, true)
+        .expect("target");
+    window.set_target(target);
     assert_eq!(provider.made.get(), 2);
-    let image = render_frame(&window, Some(&scene), Change::default(), clear, true).unwrap();
+    let image = render_frame(&mut window, Some(&scene), Change::default(), clear, true).unwrap();
     check_halves(&image, size, clear, red, "new target");
 
     // At another size.
     let size = Size::new(80, 24);
-    window.target =
-        SurfaceTarget::from_provider(Rc::clone(&backend), Rc::<HeadlessSurface>::clone(&provider), size, true)
-            .expect("target");
-    let image = render_frame(&window, Some(&scene), set(green), clear, true).unwrap();
+    let target = SurfaceTarget::from_provider(&mut window.backend, Rc::<HeadlessSurface>::clone(&provider), size, true)
+        .expect("target");
+    window.set_target(target);
+    let image = render_frame(&mut window, Some(&scene), set(green), clear, true).unwrap();
     check_halves(&image, size, clear, green, "new target at another size");
 
     // A surface that can't be made leaves the target the window has.
     provider.fail.set(true);
     assert!(
-        SurfaceTarget::from_provider(Rc::clone(&backend), Rc::<HeadlessSurface>::clone(&provider), size, true).is_err()
+        SurfaceTarget::from_provider(&mut window.backend, Rc::<HeadlessSurface>::clone(&provider), size, true).is_err()
     );
     provider.fail.set(false);
-    let image = render_frame(&window, Some(&scene), set(red), clear, true).unwrap();
+    let image = render_frame(&mut window, Some(&scene), set(red), clear, true).unwrap();
     check_halves(&image, size, clear, red, "after a failed target");
 }
 
 #[test]
 fn readback_is_of_the_frame_asked_for() {
     let size = Size::new(16, 16);
-    let Some(backend) = surface_backend(size, true) else {
+    let Some(mut backend) = surface_backend(size, true) else {
         return;
     };
     let (first, second, third) = (color(1.0, 0.0, 0.0), color(0.0, 1.0, 0.0), color(0.0, 0.0, 1.0));
     // No frame is read without a request.
     assert!(backend.take_readback().is_none());
-    render_frame(&backend, None, Change::default(), first, false);
+    render_frame(&mut backend, None, Change::default(), first, false);
     assert!(backend.take_readback().is_none());
     // The frame after the request is the one read, not one before or after.
-    let image = render_frame(&backend, None, Change::default(), second, true).unwrap();
+    let image = render_frame(&mut backend, None, Change::default(), second, true).unwrap();
     check_halves(&image, size, second, second, "the frame asked for");
-    render_frame(&backend, None, Change::default(), third, false);
+    render_frame(&mut backend, None, Change::default(), third, false);
     assert!(backend.take_readback().is_none());
-    let image = render_frame(&backend, None, Change::default(), third, true).unwrap();
+    let image = render_frame(&mut backend, None, Change::default(), third, true).unwrap();
     check_halves(&image, size, third, third, "the next frame asked for");
 }

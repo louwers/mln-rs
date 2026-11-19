@@ -54,10 +54,10 @@ fn each_device_logs_its_platform_and_the_first_context_its_gpu() {
     }
     let mut renderer = String::new();
     for device in &devices {
-        // A hold alone logs nothing; the first flush logs the GPU.
-        let backend = RendererBackend::new(device).unwrap();
-        drop(mln_gfx::RendererBackend::hold(&backend));
-        mln_gfx::RendererBackend::gpu(&backend).flush(true).unwrap();
+        // A scope alone logs nothing; the first flush logs the GPU.
+        let mut backend = RendererBackend::new(device).unwrap();
+        drop(mln_gfx::RendererBackend::gpu(&mut backend));
+        mln_gfx::gpu::Gpu::flush(&mut *mln_gfx::RendererBackend::gpu(&mut backend), true).unwrap();
         renderer = backend.get_renderer_name();
     }
     drop(Log::set_thread_observer(previous));

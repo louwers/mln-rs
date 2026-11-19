@@ -95,7 +95,7 @@ fn render_update_drops_the_renderer_once_the_map_is_gone() {
     assert!(frontend.render_update());
     drop(map);
     assert!(!frontend.render_update());
-    assert!(frontend.renderer.is_none());
+    assert!(frontend.target.renderer().is_none());
     assert!(!frontend.render_frame());
 }
 

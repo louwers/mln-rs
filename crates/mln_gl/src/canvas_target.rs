@@ -5,9 +5,6 @@
 // presents the canvas after the task that drew into it, so there is nothing
 // to activate or swap.
 
-use std::cell::Cell;
-use std::rc::Rc;
-
 use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
 use mln_util::error::Error;
 use mln_util::size::Size;
@@ -15,6 +12,7 @@ use wasm_bindgen::JsCast;
 use web_sys::{HtmlCanvasElement, OffscreenCanvas, WebGl2RenderingContext, WebGlContextAttributes};
 
 use crate::frame_image::{FrameImports, default_framebuffer};
+use crate::gpu::GlGpu;
 use crate::renderer_backend::{PlatformContext, RendererBackend};
 
 /// The canvas's context, which is always current.
@@ -71,9 +69,8 @@ impl WebCanvas {
 
 /// Frames drawn into a canvas, which the browser presents.
 pub struct CanvasTarget {
-    backend: Rc<RendererBackend>,
     canvas: WebCanvas,
-    size: Cell<Size>,
+    size: Size,
     /// The frame's default framebuffer, imported into the backend's `GlGpu`.
     image: FrameImports,
 }
@@ -88,10 +85,7 @@ impl CanvasTarget {
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the
     /// browser makes no WebGL2 context, and with
     /// [`ErrorKind::Native`](mln_util::ErrorKind) when it throws.
-    pub fn with_backend(
-        canvas: impl Into<WebCanvas>,
-        size: Size,
-    ) -> Result<(Rc<RendererBackend>, CanvasTarget), Error> {
+    pub fn with_backend(canvas: impl Into<WebCanvas>, size: Size) -> Result<(RendererBackend, CanvasTarget), Error> {
         let canvas = canvas.into();
         canvas.set_size(size);
         let attributes = WebGlContextAttributes::new();
@@ -108,19 +102,13 @@ impl CanvasTarget {
         // WebGL2 renders into float textures once this is asked for (the
         // heatmap's half-float one).
         let _ = webgl2.get_extension("EXT_color_buffer_float");
-        let backend = Rc::new(RendererBackend::from_parts(webgl2, Box::new(CanvasContext)));
-        let target = CanvasTarget {
-            backend: Rc::clone(&backend),
-            canvas,
-            size: Cell::new(size),
-            image: FrameImports::default(),
-        };
-        Ok((backend, target))
+        let backend = RendererBackend::from_parts(webgl2, Box::new(CanvasContext));
+        Ok((backend, CanvasTarget { canvas, size, image: FrameImports::default() }))
     }
 
     /// Resizes the canvas's drawing buffer.
-    pub fn resize(&self, size: Size) {
-        if size == self.size.replace(size) {
+    pub fn resize(&mut self, size: Size) {
+        if size == std::mem::replace(&mut self.size, size) {
             return;
         }
         self.canvas.set_size(size);
@@ -128,13 +116,20 @@ impl CanvasTarget {
 }
 
 impl FrameTarget for CanvasTarget {
-    fn begin_frame(&self) -> Option<FrameImage> {
-        self.image.get_or_import(|| default_framebuffer(&self.backend, self.size.get()))
+    type Gpu = GlGpu;
+
+    fn begin_frame(&mut self, gpu: &mut GlGpu) -> Option<FrameImage> {
+        let size = self.size;
+        self.image.get_or_import(|| default_framebuffer(gpu, size))
     }
 
     /// The browser presents the canvas after the task that drew into it.
-    fn end_frame(&self) -> Handoff {
-        self.image.release(&self.backend);
+    fn end_frame(&mut self, gpu: &mut GlGpu) -> Handoff {
+        self.image.release(gpu);
         Handoff::Presented
+    }
+
+    fn tear_down(&mut self, gpu: &mut GlGpu) {
+        self.image.release(gpu);
     }
 }

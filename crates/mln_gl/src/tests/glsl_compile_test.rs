@@ -8,6 +8,7 @@
 
 use std::collections::BTreeSet;
 
+use mln_gfx::RendererBackend as _;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::program_info::program_info;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
@@ -108,22 +109,22 @@ fn fragment_shaders_declare_shared_uniform_blocks_first() {
 
 #[test]
 fn every_program_links_and_matches_its_tables_on_open_gl_es() {
-    if let Some(backend) = headless_backend(Api::Gles) {
+    if let Some(mut backend) = headless_backend(Api::Gles) {
         assert!(glow::HasContext::version(backend.context().gl()).is_embedded);
-        every_program_links_and_matches_its_tables(&backend);
+        every_program_links_and_matches_its_tables(&mut backend);
     }
 }
 
 /// The programs compile as GLSL 3.30 there.
 #[test]
 fn every_program_links_and_matches_its_tables_on_desktop_open_gl() {
-    if let Some(backend) = headless_backend(Api::Gl) {
+    if let Some(mut backend) = headless_backend(Api::Gl) {
         assert!(!glow::HasContext::version(backend.context().gl()).is_embedded);
-        every_program_links_and_matches_its_tables(&backend);
+        every_program_links_and_matches_its_tables(&mut backend);
     }
 }
 
-fn every_program_links_and_matches_its_tables(backend: &RendererBackend) {
+fn every_program_links_and_matches_its_tables(backend: &mut RendererBackend) {
     let version = glow::HasContext::version(backend.context().gl());
     println!("GL_RENDERER: {}, GL_VERSION: {}", backend.get_renderer_name(), version.vendor_info);
     let parameters = ProgramParameters::new(1.0, false);
@@ -143,7 +144,7 @@ fn every_program_links_and_matches_its_tables(backend: &RendererBackend) {
                 let key = info.variant_key(&parameters, property_set.iter().copied(), variant);
                 // Fragment shaders default to mediump on a GPU and to highp
                 // on a CPU rasterizer, so both must link wherever this runs.
-                let compile = |highp_fragment| {
+                let mut compile = |highp_fragment| {
                     backend.gpu().program(&key, highp_fragment).unwrap_or_else(|error| {
                         panic!("{what} failed to compile or link with highp_fragment {highp_fragment}: {error}")
                     })

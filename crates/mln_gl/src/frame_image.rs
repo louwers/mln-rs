@@ -1,13 +1,11 @@
 //! The textures that the GL targets' frames draw into, imported into the
 //! backend's `GlGpu` for a frame.
 
-use std::cell::Cell;
-
 use mln_gfx::frame::FrameImage;
 use mln_gfx::gpu::{ResourceId, TargetFormats, TextureFormat, destroy_unused};
 use mln_util::size::Size;
 
-use crate::renderer_backend::RendererBackend;
+use crate::gpu::GlGpu;
 
 /// The format the frames of a framebuffer made elsewhere are named by.
 pub(crate) const COLOR: TextureFormat = TextureFormat::Rgba8Unorm;
@@ -17,47 +15,43 @@ pub(crate) const DEPTH_STENCIL: TextureFormat = TextureFormat::Depth24PlusStenci
 /// until it ends, and whether its depth and stencil texture is imported
 /// too, rather than the target's own.
 #[derive(Default)]
-pub(crate) struct FrameImports(Cell<Option<(FrameImage, bool)>>);
+pub(crate) struct FrameImports(Option<(FrameImage, bool)>);
 
 impl FrameImports {
     /// The frame's textures: those of `import`, at the frame's first call.
-    pub(crate) fn get_or_import(&self, import: impl FnOnce() -> Option<(FrameImage, bool)>) -> Option<FrameImage> {
-        if let Some((image, _)) = self.0.get() {
+    pub(crate) fn get_or_import(&mut self, import: impl FnOnce() -> Option<(FrameImage, bool)>) -> Option<FrameImage> {
+        if let Some((image, _)) = self.0 {
             return Some(image);
         }
-        let imported = import()?;
-        self.0.set(Some(imported));
-        Some(imported.0)
+        Some(self.0.insert(import()?).0)
     }
 
     /// The textures of the frame begun, if any.
     #[cfg(any(windows, all(unix, not(target_vendor = "apple"))))]
     pub(crate) fn get(&self) -> Option<FrameImage> {
-        self.0.get().map(|(image, _)| image)
+        self.0.map(|(image, _)| image)
     }
 
-    /// Forgets the frame's imported textures, at its end. Returns whether
-    /// there were any.
-    pub(crate) fn release(&self, backend: &RendererBackend) -> bool {
+    /// Forgets the frame's imported textures in `gpu`, at its end. Returns
+    /// whether there were any.
+    pub(crate) fn release(&mut self, gpu: &mut GlGpu) -> bool {
         let Some((image, depth_imported)) = self.0.take() else {
             return false;
         };
-        let mut gpu = backend.gpu();
         let depth_stencil = image.depth_stencil.filter(|_| depth_imported);
-        for texture in [Some(image.color), depth_stencil].into_iter().flatten() {
-            destroy_unused(&mut *gpu, [ResourceId::Texture(texture)]);
-        }
+        let textures = [Some(image.color), depth_stencil].into_iter().flatten();
+        destroy_unused(gpu, textures.map(ResourceId::Texture));
         true
     }
 }
 
 /// The default framebuffer of the surface the context is current on, of
-/// `size`, with its depth and stencil, imported into the backend's `GlGpu`.
-pub(crate) fn default_framebuffer(backend: &RendererBackend, size: Size) -> Option<(FrameImage, bool)> {
+/// `size`, with its depth and stencil, imported into `gpu`.
+pub(crate) fn default_framebuffer(gpu: &mut GlGpu, size: Size) -> Option<(FrameImage, bool)> {
     if size.width == 0 || size.height == 0 {
         return None;
     }
-    let imported = backend.gpu().import_framebuffer(None, size, Some(COLOR), Some(DEPTH_STENCIL));
+    let imported = gpu.import_framebuffer(None, size, Some(COLOR), Some(DEPTH_STENCIL));
     let image = FrameImage {
         size,
         color: imported.color?,

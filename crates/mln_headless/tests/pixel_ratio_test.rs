@@ -146,9 +146,9 @@ fn memory_reduced_between_a_ratio_change_and_its_frame_keeps_the_drawn_shaders()
     test.render();
     test.map().set_pixel_ratio(2.0).unwrap();
     test.frontend().set_pixel_ratio(2.0);
-    test.frontend().renderer().reduce_memory_use();
+    test.frontend().reduce_memory_use();
     assert_same(&test.render().image, &made_at_2);
-    test.frontend().renderer().reduce_memory_use();
+    test.frontend().reduce_memory_use();
 }
 
 #[test]

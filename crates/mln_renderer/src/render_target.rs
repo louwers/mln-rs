@@ -71,7 +71,7 @@ impl RenderTarget {
     /// The pass that clears the texture to opaque black and its depth to 1,
     /// making them through `gpu`, the context's.
     fn pass(&mut self, gpu: &mut dyn Gpu, context: &mut Context) -> Result<OpenPass, GpuError> {
-        let color = context.create_texture_with(gpu, &self.texture)?;
+        let color = context.create_texture(gpu, &self.texture)?;
         let format = context.texture(&self.texture).ok_or(GpuError::UnknownId("texture"))?.format();
         let size = self.size;
         if self.depth.is_none()

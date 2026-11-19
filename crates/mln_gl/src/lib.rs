@@ -68,12 +68,13 @@ pub use custom_layer::{CustomLayerEncoder, CustomLayerPass};
 pub use device::{Api, Device, DeviceOptions};
 #[cfg(all(unix, not(target_vendor = "apple")))]
 pub use exported_target::ExportedTarget;
+pub use gpu::GlGpu;
 #[cfg(any(windows, all(unix, not(target_vendor = "apple"))))]
 pub use overlay::{Overlay, OverlayTarget};
 /// Frames drawn into textures of the library's and read back.
 #[cfg(not(target_arch = "wasm32"))]
-pub type OffscreenTarget = mln_gfx::offscreen_target::OffscreenTarget<RendererBackend>;
-pub use renderer_backend::RendererBackend;
+pub type OffscreenTarget = mln_gfx::offscreen_target::OffscreenTarget<GlGpu>;
+pub use renderer_backend::{GlScope, RendererBackend};
 #[cfg(all(unix, not(target_vendor = "apple")))]
 pub use surface_target::SurfaceTarget;
 #[cfg(windows)]

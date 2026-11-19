@@ -27,7 +27,7 @@ pub use renderer_backend::RendererBackend;
 pub use surface_target::{Overlay, OverlayTarget, SurfaceOptions, SurfaceTarget};
 
 /// Frames drawn into textures of the library's and read back.
-pub type OffscreenTarget = mln_gfx::offscreen_target::OffscreenTarget<RendererBackend>;
+pub type OffscreenTarget = mln_gfx::offscreen_target::OffscreenTarget<WebGpu>;
 
 #[cfg(test)]
 mod tests;

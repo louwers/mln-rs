@@ -3,6 +3,7 @@
 
 use geometry::Point;
 use glam::Vec2;
+use mln_gfx::gpu::Gpu;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
 use mln_map_types::{ProjectionData, TransformState};
@@ -21,11 +22,11 @@ use crate::render_tile::RenderTile;
 /// projection, a projection block of zeros if they have none. GL's programs
 /// declare the block whether they read it or not, so a draw binds it all the
 /// same.
-pub(crate) fn bind_no_projection(layer_uniforms: &mut UniformBufferArray, context: &mut Context) {
+pub(crate) fn bind_no_projection(gpu: &mut dyn Gpu, layer_uniforms: &mut UniformBufferArray, context: &mut Context) {
     if layer_uniforms.get(ID_PROJECTION_UBO).is_none() {
         layer_uniforms.set(
             ID_PROJECTION_UBO,
-            context.device().create_storage_buffer(bytemuck::bytes_of(&ProjectionUBO::default())),
+            context.device().create_storage_buffer(gpu, bytemuck::bytes_of(&ProjectionUBO::default())),
         );
     }
 }

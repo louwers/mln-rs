@@ -15,10 +15,8 @@
 // A resize makes a new generation of images; the frames that the host holds
 // keep the old generation's images until they are given back.
 
-use std::cell::RefCell;
 #[cfg(unix)]
 use std::os::fd::{AsRawFd as _, FromRawFd as _, OwnedFd};
-use std::rc::Rc;
 
 use ash::vk;
 #[cfg(unix)]
@@ -38,6 +36,7 @@ use mln_util::size::Size;
 
 use crate::borrowed_target::{BorrowedDepth, BorrowedImage, BorrowedImages, BorrowedTarget, ImageOwner};
 use crate::device::{Device, depth_vk_format};
+use crate::gpu::VulkanGpu;
 use crate::renderer_backend::RendererBackend;
 
 const DMA_BUF_USAGE: vk::ImageUsageFlags = vk::ImageUsageFlags::from_raw(
@@ -851,8 +850,8 @@ pub fn sync_kinds(device: &Device) -> (SyncKinds, SyncKinds) {
 /// One generation of a ring's images, of one size, and the borrowed ring
 /// target that draws into them.
 struct Generation {
-    // Before the images: dropping it waits for the frames that drew into
-    // them.
+    // Before the images: dropping or tearing it down waits for the frames
+    // that drew into them.
     target: BorrowedTarget,
     images: Vec<ExportedMemory>,
     /// Each slot's depth image, when the ring keeps depth.
@@ -862,14 +861,14 @@ struct Generation {
 
 impl Generation {
     fn new(
-        backend: &Rc<RendererBackend>,
+        backend: &mut RendererBackend,
         layout: &Layout,
         depth: usize,
         size: Size,
         producer: SyncKind,
         depth_format: Option<(vk::Format, bool)>,
     ) -> Result<Generation, Error> {
-        let device = backend.backend_impl().device();
+        let device = &backend.backend_impl().device().clone();
         let extent = vk::Extent2D { width: size.width, height: size.height };
         let images = (0..depth).map(|_| ExportedMemory::new(device, extent, layout)).collect::<Result<Vec<_>, _>>()?;
         let depth_images = match depth_format {
@@ -903,7 +902,7 @@ impl Generation {
                 final_layout: vk::ImageLayout::GENERAL,
             }),
         };
-        let target = BorrowedTarget::new(Rc::clone(backend), borrowed, producer)?;
+        let target = BorrowedTarget::new(backend, borrowed, producer)?;
         Ok(Generation { target, images, depth_images, size })
     }
 }
@@ -911,14 +910,13 @@ impl Generation {
 /// Frames drawn into images of the target's own, which it exports, and
 /// queued for the host to acquire.
 pub struct ExportedTarget {
-    backend: Rc<RendererBackend>,
     layout: Layout,
     depth: usize,
     producer: SyncKind,
     /// The format of the depth images, when the ring keeps depth, and
     /// whether they are exported.
     depth_format: Option<(vk::Format, bool)>,
-    generations: RefCell<Generations<Generation>>,
+    generations: Generations<Generation>,
 }
 
 impl ExportedTarget {
@@ -936,7 +934,7 @@ impl ExportedTarget {
     /// device can't export `kind` or `producer`, and with
     /// [`ErrorKind::Native`](mln_util::ErrorKind) when a Vulkan call fails.
     pub fn new(
-        backend: Rc<RendererBackend>,
+        backend: &mut RendererBackend,
         ring: &ExportedRing,
         kind: ExportKind,
         size: Size,
@@ -971,20 +969,13 @@ impl ExportedTarget {
         } else {
             None
         };
-        let current = Generation::new(&backend, &layout, ring.depth, size, producer, depth_format)?;
-        Ok(ExportedTarget {
-            backend,
-            layout,
-            depth: ring.depth,
-            producer,
-            depth_format,
-            generations: RefCell::new(Generations::new(current)),
-        })
+        let current = Generation::new(backend, &layout, ring.depth, size, producer, depth_format)?;
+        Ok(ExportedTarget { layout, depth: ring.depth, producer, depth_format, generations: Generations::new(current) })
     }
 
     /// Has the next frame draw into the image at `slot`.
-    pub fn select(&self, slot: usize) {
-        self.generations.borrow().current().target.select(slot);
+    pub fn select(&mut self, slot: usize) {
+        self.generations.current_mut().target.select(slot);
     }
 
     /// The host gave the frame at `slot` back, once its reads reach
@@ -992,20 +983,18 @@ impl ExportedTarget {
     /// no frame draws into again.
     ///
     /// Fails as [`BorrowedTarget::release`] does.
-    pub fn release(&self, slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
-        let mut generations = self.generations.borrow_mut();
-        if generations.give_back(slot) {
+    pub fn release(&mut self, gpu: &mut VulkanGpu, slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
+        if self.generations.give_back(slot, |mut generation| generation.target.tear_down(gpu)) {
             return Ok(());
         }
-        generations.current().target.release(slot, consumer)
+        self.generations.current_mut().target.release(gpu, slot, consumer)
     }
 
     /// The host gave the frame at `slot` up without saying when its reads
     /// end.
-    pub fn discard(&self, slot: usize) {
-        let mut generations = self.generations.borrow_mut();
-        if !generations.give_back(slot) {
-            generations.current().target.discard(slot);
+    pub fn discard(&mut self, gpu: &mut VulkanGpu, slot: usize) {
+        if !self.generations.give_back(slot, |mut generation| generation.target.tear_down(gpu)) {
+            self.generations.current_mut().target.discard(gpu, slot);
         }
     }
 
@@ -1015,25 +1004,29 @@ impl ExportedTarget {
     ///
     /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when Vulkan
     /// can't make the images, and the target then keeps its own.
-    pub fn resize(&self, size: Size, held: &[usize]) -> Result<bool, Error> {
+    pub fn resize(&mut self, backend: &mut RendererBackend, size: Size, held: &[usize]) -> Result<bool, Error> {
+        use mln_gfx::RendererBackend as _;
         if self.size() == size {
             return Ok(false);
         }
-        let next = Generation::new(&self.backend, &self.layout, self.depth, size, self.producer, self.depth_format)?;
-        self.generations.borrow_mut().replace(next, held);
+        let next = Generation::new(backend, &self.layout, self.depth, size, self.producer, self.depth_format)?;
+        let gpu = backend.gpu();
+        self.generations.replace(next, held, |mut generation| generation.target.tear_down(gpu));
         Ok(true)
     }
 
     /// The size of the images that frames draw into.
+    #[must_use]
     pub fn size(&self) -> Size {
-        self.generations.borrow().current().size
+        self.generations.current().size
     }
 
     /// The images of the frame at `slot`: of the generation that the host
     /// holds it in.
+    #[must_use]
     pub fn image(&self, slot: usize) -> Option<ExportedFrame> {
         use ash::vk::Handle as _;
-        let generations = self.generations.borrow();
+        let generations = &self.generations;
         let generation = generations.retired(slot).unwrap_or(generations.current());
         let image = generation.images.get(slot)?;
         let native = |image: vk::Image, view: vk::ImageView, format: vk::Format| NativeTexture::Vulkan {
@@ -1055,20 +1048,20 @@ impl ExportedTarget {
 }
 
 impl FrameTarget for ExportedTarget {
-    fn begin_frame(&self) -> Option<FrameImage> {
-        self.generations.borrow().current().target.begin_frame()
+    type Gpu = VulkanGpu;
+
+    fn begin_frame(&mut self, gpu: &mut VulkanGpu) -> Option<FrameImage> {
+        self.generations.current_mut().target.begin_frame(gpu)
     }
 
-    fn end_frame(&self) -> Handoff {
-        match self.generations.borrow().current().target.end_frame() {
+    fn end_frame(&mut self, gpu: &mut VulkanGpu) -> Handoff {
+        match self.generations.current_mut().target.end_frame(gpu) {
             Handoff::GivenBack { slot, sync } => Handoff::Queued { slot, sync },
             other => other,
         }
     }
-}
 
-impl Drop for ExportedTarget {
-    fn drop(&mut self) {
-        self.generations.get_mut().clear_retired();
+    fn tear_down(&mut self, gpu: &mut VulkanGpu) {
+        self.generations.clear(|generation| generation.target.tear_down(gpu));
     }
 }

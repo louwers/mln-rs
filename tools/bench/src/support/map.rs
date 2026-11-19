@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 pub(crate) use mln_bench_workload::paths::{tile_at, tile_center};
 use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapEvent, MapMode, MapOptions, RenderFrameStatus, RenderMode};
-use mln_runtime::Device;
+use mln_runtime::{BackendRef, Device};
 use mln_storage::FileSource;
 use mln_style::sources::geojson::{GeoJSONOptions, GeoJsonSourceType, create_geojson_data, geojson_source};
 use mln_util::pool::Pool;
@@ -81,51 +81,45 @@ impl Frontend {
 
     /// The device the frontend draws on, described.
     pub(crate) fn gpu(&self) -> Gpu {
-        let backend = self.frontend.backend();
-        #[cfg(target_vendor = "apple")]
-        if let Device::Metal(metal) = self.frontend.device() {
-            return Gpu { name: metal.name(), backend: "Metal".to_owned(), software: false };
-        }
-        #[cfg(not(any(target_vendor = "apple", target_family = "wasm")))]
-        if let Some(vulkan) = backend.downcast_ref::<mln_vulkan::RendererBackend>() {
-            return Gpu {
+        match self.frontend.backend() {
+            #[cfg(target_vendor = "apple")]
+            BackendRef::Metal(metal) => {
+                Gpu { name: metal.device().name(), backend: "Metal".to_owned(), software: false }
+            }
+            #[cfg(not(any(target_vendor = "apple", target_family = "wasm")))]
+            BackendRef::Vulkan(vulkan) => Gpu {
                 name: vulkan.get_device_name(),
                 backend: "Vulkan".to_owned(),
                 software: vulkan.is_software_device(),
-            };
-        }
-        #[cfg(windows)]
-        if let Some(d3d12) = backend.downcast_ref::<mln_d3d12::RendererBackend>() {
-            let gpu = d3d12.d3d12_gpu();
-            return Gpu {
-                name: gpu.device().adapter_name().to_owned(),
+            },
+            #[cfg(windows)]
+            BackendRef::D3d12(d3d12) => Gpu {
+                name: d3d12.device().adapter_name().to_owned(),
                 backend: "D3D12".to_owned(),
-                software: gpu.device().is_software(),
-            };
+                software: d3d12.device().is_software(),
+            },
+            BackendRef::Gl(gl) => {
+                let name = gl.get_renderer_name();
+                let lower = name.to_lowercase();
+                let software = ["llvmpipe", "softpipe", "swiftshader"].iter().any(|s| lower.contains(s));
+                Gpu { name, backend: "OpenGL".to_owned(), software }
+            }
+            BackendRef::WebGpu(webgpu) => {
+                let info = webgpu.device().adapter_info();
+                let lower = info.name.to_lowercase();
+                let software = info.device_type == wgpu::DeviceType::Cpu
+                    || ["llvmpipe", "lavapipe", "swiftshader", "software", "warp"].iter().any(|s| lower.contains(s));
+                Gpu { name: info.name, backend: format!("WebGPU on {:?}", info.backend), software }
+            }
+            _ => panic!("a device of no known backend"),
         }
-        if let Some(gl) = backend.downcast_ref::<mln_gl::RendererBackend>() {
-            let name = gl.get_renderer_name();
-            let lower = name.to_lowercase();
-            let software = ["llvmpipe", "softpipe", "swiftshader"].iter().any(|s| lower.contains(s));
-            return Gpu { name, backend: "OpenGL".to_owned(), software };
-        }
-        let Device::WebGpu(device) = self.frontend.device() else {
-            panic!("a device of no known backend");
-        };
-        let info = device.adapter_info();
-        let lower = info.name.to_lowercase();
-        let software = info.device_type == wgpu::DeviceType::Cpu
-            || ["llvmpipe", "lavapipe", "swiftshader", "software", "warp"].iter().any(|s| lower.contains(s));
-        Gpu { name: info.name, backend: format!("WebGPU on {:?}", info.backend), software }
     }
 
     /// Waits for the GPU to finish the frame drawn last: the native backends
     /// submit it without waiting, and WebGPU leaves it to the device.
-    fn wait_for_gpu(&self) {
+    fn wait_for_gpu(&mut self) {
         let Device::WebGpu(device) = self.frontend.device() else {
-            let backend = self.frontend.backend();
-            let _hold = backend.hold();
-            backend.gpu().flush(true).expect("the GPU finishes the frame");
+            self.frontend.with_gpu(|gpu| gpu.flush(true)).expect("the GPU finishes the frame");
             return;
         };
         device.device().poll(wgpu::PollType::wait_indefinitely()).expect("the GPU finishes the frame");
@@ -374,12 +368,12 @@ impl HeadlessMap {
     }
 
     /// The last frame, read back from the GPU.
-    pub(crate) fn image(&self) -> mln_util::image::PremultipliedImage {
+    pub(crate) fn image(&mut self) -> mln_util::image::PremultipliedImage {
         self.frontend.frontend.read_still_image()
     }
 
     /// Writes the last frame as a PNG to `path`.
-    pub(crate) fn save_image(&self, path: &Path) {
+    pub(crate) fn save_image(&mut self, path: &Path) {
         save_png(&self.image(), path);
     }
 

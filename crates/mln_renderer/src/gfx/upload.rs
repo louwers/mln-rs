@@ -2,7 +2,7 @@
 //! backend's [`Gpu`](mln_gfx::gpu::Gpu).
 
 use mln_gfx::gfx_types::AttributeDataType;
-use mln_gfx::gpu::GpuError;
+use mln_gfx::gpu::{Gpu, GpuError};
 use mln_gfx::shaders::shader_defines::MAX_ATTRIBUTE_COUNT_PER_SHADER;
 
 use crate::gfx::buffer::SharedBuffer;
@@ -46,6 +46,7 @@ pub(crate) type AttributeBindingArray = Vec<Option<AttributeBinding>>;
 /// it has one. An attribute the draw doesn't have, or has no data for,
 /// binds no buffer, at the default's type and stride.
 pub(crate) fn build_attribute_bindings(
+    gpu: &mut dyn Gpu,
     context: &mut Context,
     attributes: &[(usize, AttributeDataType)],
     overrides: &mut VertexAttributeArray,
@@ -53,7 +54,7 @@ pub(crate) fn build_attribute_bindings(
     let mut bindings: AttributeBindingArray = vec![None; MAX_ATTRIBUTE_COUNT_PER_SHADER.max(attributes.len())];
     for (index, &(id, default)) in attributes.iter().enumerate() {
         let binding = match overrides.get_mut(id) {
-            Some(attribute) => attribute.binding(context)?,
+            Some(attribute) => attribute.binding(gpu, context)?,
             None => None,
         };
         bindings[index] = Some(binding.unwrap_or_else(|| AttributeBinding {

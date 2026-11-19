@@ -9,12 +9,11 @@
 use std::any::Any;
 use std::cell::Cell;
 use std::collections::VecDeque;
-use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-use mln_gfx::{ConsumerSync, Handoff, RendererBackend, SyncKind};
+use mln_gfx::{ConsumerSync, Handoff, SyncKind};
 use mln_map::{MapView, RenderMode};
 use mln_renderer::text::font_face_engine::FontFaceEngine;
 use mln_renderer::{Registry, Renderer, RendererEvent, RendererEvents, Update, UpdateReader};
@@ -234,12 +233,10 @@ pub(crate) fn build(shared: &Arc<SessionShared>, slot: &mut Option<Worker>, over
     outbox.deliver();
 }
 
-/// The renderer and what it draws into.
+/// What the session draws into, with the renderer that the target owns, and
+/// what the session makes a renderer with.
 struct Gfx {
-    renderer: Renderer,
     target: LocalTarget,
-    /// The target's backend, which the renderer draws with.
-    backend: Rc<dyn RendererBackend>,
     glyph_cache: Arc<GlyphCache>,
     font_face_engine: Arc<dyn FontFaceEngine>,
     /// What the renderer's tile workers lay out with (`Init`).
@@ -283,51 +280,38 @@ impl Gfx {
                 LocalTarget::exported(device, &ring, kind, size, producer)?
             }
         };
-        let backend = target.backend();
-        let mut renderer = Renderer::with_fonts(
-            Rc::clone(&backend),
-            pixel_ratio,
-            local_glyphs.clone(),
-            Arc::clone(&glyph_cache),
-            Arc::clone(&font_face_engine),
-            Arc::clone(&registry),
-            invalidate(events),
-            &pool,
-        );
-        renderer.set_tile_cache_enabled(tile_cache_enabled);
-        set_tile_workers(&mut renderer, &registry);
-        Ok(Gfx { renderer, target, backend, glyph_cache, font_face_engine, registry, local_glyphs, pool })
+        let mut gfx = Gfx { target, glyph_cache, font_face_engine, registry, local_glyphs, pool };
+        gfx.make_renderer(events, pixel_ratio, tile_cache_enabled);
+        Ok(gfx)
     }
 
-    /// Whether the target can take a frame now: its window, if any, has an
-    /// area to present to, and it begins a frame, which a surface needs a
-    /// texture for.
-    fn ready_for_frame(&self) -> bool {
-        if !self.target.window_has_area() {
-            return false;
-        }
-        self.target.frames().is_some_and(|frames| frames.begin_frame().is_some())
+    /// Makes the target's renderer, on its backend, which reports to
+    /// `events`, draws at `pixel_ratio` and keeps tiles that left the view
+    /// when `tile_cache_enabled` says so. The session sets its event queue.
+    fn make_renderer(&mut self, events: &RendererEvents, pixel_ratio: f32, tile_cache_enabled: bool) {
+        let Gfx { target, glyph_cache, font_face_engine, registry, local_glyphs, pool } = self;
+        target.renderer_or(|gpu| {
+            let mut renderer = Renderer::with_fonts(
+                gpu,
+                pixel_ratio,
+                local_glyphs.clone(),
+                Arc::clone(glyph_cache),
+                Arc::clone(font_face_engine),
+                Arc::clone(registry),
+                invalidate(events),
+                pool,
+            );
+            renderer.set_tile_cache_enabled(tile_cache_enabled);
+            set_tile_workers(&mut renderer, registry);
+            renderer
+        });
     }
 
-    /// Makes the renderer again on the target's backend, which replaced the
-    /// one it drew with, with what the session set on it.
-    fn renew_renderer(&mut self, events: &RendererEvents) {
-        self.backend = self.target.backend();
-        let pixel_ratio = self.renderer.pixel_ratio();
-        let mut renderer = Renderer::with_fonts(
-            Rc::clone(&self.backend),
-            pixel_ratio,
-            self.local_glyphs.clone(),
-            Arc::clone(&self.glyph_cache),
-            Arc::clone(&self.font_face_engine),
-            Arc::clone(&self.registry),
-            invalidate(events),
-            &self.pool,
-        );
-        renderer.set_tile_cache_enabled(self.renderer.tile_cache_enabled());
-        renderer.set_event_queue(Some(events.clone()));
-        set_tile_workers(&mut renderer, &self.registry);
-        self.renderer = renderer;
+    /// The target's renderer, which it has from the session's build on,
+    /// unless a new surface took a new backend and the session didn't make
+    /// it again.
+    fn renderer(&mut self) -> Option<&mut Renderer> {
+        self.target.renderer_mut()
     }
 }
 
@@ -476,7 +460,7 @@ pub(crate) struct Worker {
     behind: VecDeque<Behind>,
     /// The target and backend that a teardown keeps while views name their
     /// sync objects, until the last view ends.
-    viewed: Option<(LocalTarget, Rc<dyn RendererBackend>)>,
+    viewed: Option<LocalTarget>,
     /// The releases and replacements that wait for the host's reads of the
     /// textures that they let go of.
     settling: Vec<Settling>,
@@ -590,7 +574,9 @@ impl Worker {
         let built = attaching.then(|| Gfx::new(init, overlay, &renderer_events));
         let gfx = match built {
             Some(Ok(mut gfx)) => {
-                gfx.renderer.set_event_queue(Some(renderer_events.clone()));
+                if let Some(renderer) = gfx.renderer() {
+                    renderer.set_event_queue(Some(renderer_events.clone()));
+                }
                 let mut state = shared.state.lock();
                 state.graphics_objects = Gfx::OBJECTS - 1;
                 state.abandon_keeps_graphics = gfx.target.device().abandon_keeps_graphics();
@@ -773,8 +759,8 @@ impl Worker {
     /// update when something arrives for its tiles: it takes it in now, so
     /// that the work it starts runs before the next frame.
     fn forward_events(&mut self) {
-        if let Some(gfx) = self.gfx.as_mut() {
-            gfx.renderer.receive_tiles();
+        if let Some(renderer) = self.gfx.as_mut().and_then(Gfx::renderer) {
+            renderer.receive_tiles();
         }
         let events = self.renderer_events.take();
         self.forward(events);
@@ -1023,7 +1009,7 @@ impl Worker {
         if !asks
             || tried == Some(update.generation)
             || self.retargeting()
-            || !self.gfx.as_ref().is_some_and(Gfx::ready_for_frame)
+            || !self.gfx.as_mut().is_some_and(|gfx| gfx.target.ready_for_frame())
         {
             return;
         }
@@ -1098,7 +1084,7 @@ impl Worker {
     /// all, finishes as not ready, and the next demand draws the map again.
     /// Only the still image's own frame completes the image.
     fn render(&mut self, token: Option<u64>, update: &Update, slot: Option<usize>) -> RenderedFrame {
-        let ready = self.gfx.as_ref().is_some_and(Gfx::ready_for_frame);
+        let ready = self.gfx.as_mut().is_some_and(|gfx| gfx.target.ready_for_frame());
         let Some(gfx) = self.gfx.as_mut().filter(|_| ready) else {
             if let Some(slot) = slot {
                 self.end_slot(slot, None);
@@ -1113,7 +1099,7 @@ impl Worker {
             let result = FrameResult::unrendered(token, FrameDisposition::TargetNotReady, update.generation);
             return RenderedFrame { result, events: Vec::new(), slot: None };
         }
-        let handoff = gfx.target.frames().and_then(|frames| gfx.renderer.render(&update.parameters, frames));
+        let handoff = gfx.target.render(&update.parameters);
         {
             let mut state = self.shared.state.lock();
             state.graphics_objects = state.graphics_objects.max(Gfx::OBJECTS);
@@ -1131,14 +1117,15 @@ impl Worker {
             let result = FrameResult::unrendered(token, FrameDisposition::TargetNotReady, update.generation);
             return RenderedFrame { result, events, slot: None };
         }
-        let projection = gfx.renderer.frame_projection();
+        let projection = gfx.target.renderer().and_then(Renderer::frame_projection);
         // The previous render's sources may hold the last references to
         // replaced data, which the renderer's workers free instead.
         let sources = update.parameters.style.get_sources();
         if let Some(previous) = self.sources.replace(Arc::clone(sources))
             && !Arc::ptr_eq(&previous, sources)
+            && let Some(renderer) = gfx.target.renderer()
         {
-            gfx.renderer.drop_on_workers(previous);
+            renderer.drop_on_workers(previous);
         }
         self.rendered_update = update.generation;
         self.rendered_generation = self.generation();
@@ -1304,7 +1291,7 @@ impl Worker {
     /// is only quarantined, unless its reads are done.
     pub(crate) fn release_slot(&mut self, slot: usize, consumer: ConsumerSync, outbox: &mut Outbox) {
         let kind = consumer.sync.kind;
-        let released = match self.gfx.as_ref() {
+        let released = match self.gfx.as_mut() {
             Some(gfx) if gfx.target.ring_released() => {
                 let mut state = self.shared.state.lock();
                 if let Some(entry) = state.ring.get_mut(slot) {
@@ -1343,7 +1330,7 @@ impl Worker {
 
     /// The host gave up the ring's `slot`, which the session quarantined.
     pub(crate) fn discard_slot(&mut self, slot: usize, outbox: &mut Outbox) {
-        if let Some(gfx) = self.gfx.as_ref() {
+        if let Some(gfx) = self.gfx.as_mut() {
             let _ = gfx.target.discard_slot(slot);
         }
         self.pump(outbox);
@@ -1364,7 +1351,7 @@ impl Worker {
         let gfx = self.gfx.as_mut().ok_or_else(target_lost)?;
         // The ring it has already: nothing changes, and the frames it holds
         // stay.
-        if self.ring.as_ref() == Some(ring) && gfx.target.frames().is_some() && same_size {
+        if self.ring.as_ref() == Some(ring) && !gfx.target.ring_released() && same_size {
             // The demands that wait keep waiting for an update past the
             // replacement's resize.
             let latest = self.latest_generation();
@@ -1429,14 +1416,14 @@ impl Worker {
     }
 
     pub(crate) fn renderer(&mut self) -> Result<&mut Renderer, Error> {
-        self.gfx.as_mut().map(|gfx| &mut gfx.renderer).ok_or_else(target_lost)
+        self.gfx.as_mut().and_then(Gfx::renderer).ok_or_else(target_lost)
     }
 
     /// Resizes the target, and draws at `scale_factor`, after the map
     /// resized.
     pub(crate) fn resize(&mut self, size: Size, scale_factor: f64, outbox: &mut Outbox) -> Result<(), Error> {
         self.set_scale_factor(scale_factor)?;
-        let gfx = self.gfx.as_ref().ok_or_else(target_lost)?;
+        let gfx = self.gfx.as_mut().ok_or_else(target_lost)?;
         let physical = physical_size(size, scale_factor as f32);
         match gfx.target.exported_size() {
             // An exported ring whose images have the size already keeps
@@ -1664,9 +1651,17 @@ impl Worker {
         self.set_scale_factor(scale_factor)?;
         let gfx = self.gfx.as_mut().ok_or_else(target_lost)?;
         let physical = physical_size(size, scale_factor as f32);
+        let tile_cache_enabled = gfx.renderer().is_some_and(|renderer| renderer.tile_cache_enabled());
         let replaced = gfx.target.set_surface(surface, self.overlay.take(), physical);
         match replaced {
-            Ok(true) => gfx.renew_renderer(&self.renderer_events),
+            // The old backend's renderer went with it: one on the new
+            // backend draws what the session set.
+            Ok(true) => {
+                gfx.make_renderer(&self.renderer_events, scale_factor as f32, tile_cache_enabled);
+                if let Some(renderer) = gfx.renderer() {
+                    renderer.set_event_queue(Some(self.renderer_events.clone()));
+                }
+            }
             Ok(false) => {}
             Err(_) => gfx.target.resize(physical),
         }
@@ -1681,12 +1676,13 @@ impl Worker {
     }
 
     pub(crate) fn reduce_memory_use(&mut self) -> Result<(), Error> {
-        self.renderer()?.reduce_memory_use();
-        Ok(())
+        let gfx = self.gfx.as_mut().ok_or_else(target_lost)?;
+        gfx.target.with_renderer(|renderer, gpu| renderer.reduce_memory_use(gpu)).ok_or_else(target_lost)
     }
 
     pub(crate) fn clear_data(&mut self, outbox: &mut Outbox) -> Result<(), Error> {
-        self.renderer()?.clear_data();
+        let gfx = self.gfx.as_mut().ok_or_else(target_lost)?;
+        gfx.target.with_renderer(|renderer, gpu| renderer.clear_data(gpu)).ok_or_else(target_lost)?;
         self.rendered_update = 0;
         // The renderer loads what the image needs again, once it tries.
         if let Some(still) = self.still.as_mut() {
@@ -1703,7 +1699,7 @@ impl Worker {
     }
 
     pub(crate) fn read_texture(&mut self) -> Result<PremultipliedImage, Error> {
-        let gfx = self.gfx.as_ref().ok_or_else(target_lost)?;
+        let gfx = self.gfx.as_mut().ok_or_else(target_lost)?;
         if !gfx.target.is_offscreen() {
             return Err(Error::unsupported("a surface session can't read its frames back"));
         }
@@ -1786,16 +1782,17 @@ impl Worker {
         };
         // The host's graphics objects may be gone, and the custom layers'
         // hosts with them, so they forget theirs instead of destroying them.
-        if keep || abandoned {
-            gfx.renderer.lose_custom_layers();
+        if (keep || abandoned)
+            && let Some(renderer) = gfx.renderer()
+        {
+            renderer.lose_custom_layers();
         }
         if keep {
             // The host's graphics objects behind them may be gone already.
             std::mem::forget(gfx);
         } else if viewed {
-            let Gfx { renderer, target, backend, .. } = gfx;
-            drop(renderer);
-            self.viewed = Some((target, backend));
+            gfx.target.tear_down_renderer();
+            self.viewed = Some(gfx.target);
         }
     }
 

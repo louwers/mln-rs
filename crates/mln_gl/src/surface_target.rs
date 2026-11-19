@@ -6,7 +6,7 @@
 // before it is presented (an app's controls), and a presented frame can be
 // copied.
 
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::ffi::{c_int, c_ulong, c_void};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -24,9 +24,10 @@ use parking_lot::Mutex;
 
 use crate::egl::{Egl, library};
 use crate::frame_image::{FrameImports, default_framebuffer};
+use crate::gpu::GlGpu;
 use crate::overlay;
 pub use crate::overlay::{Overlay, OverlayTarget};
-use crate::renderer_backend::{PlatformContext, RendererBackend};
+use crate::renderer_backend::{GlContext, PlatformContext, RendererBackend};
 
 /// The window to present to, as its windowing system names it.
 #[derive(Clone, Copy)]
@@ -471,26 +472,21 @@ impl PlatformContext for WindowContext {
     }
 }
 
-/// What the target shares with its draw target.
-#[derive(Default)]
-struct Presentation {
-    overlay: RefCell<Option<Overlay>>,
-    readback_requested: Cell<bool>,
-    readback: RefCell<Option<PremultipliedImage>>,
-}
-
 /// Frames presented to a window, from a GL context of the window's own.
 pub struct SurfaceTarget {
-    backend: Rc<RendererBackend>,
+    /// The backend's context, which the overlay draws with and goes with.
+    context: Rc<GlContext>,
     window: Rc<EglWindow>,
-    presentation: Presentation,
-    size: Rc<Cell<Size>>,
+    overlay: Option<Overlay>,
+    readback_requested: bool,
+    readback: Option<PremultipliedImage>,
+    size: Size,
     /// The frame's default framebuffer, imported into the backend's `GlGpu`.
     image: FrameImports,
     /// Whether a frame began and hasn't ended. Until it ends, each
     /// `begin_frame` returns its image, as [`FrameTarget`] asks, even when
     /// the window went away in between.
-    in_frame: Cell<bool>,
+    in_frame: bool,
 }
 
 impl SurfaceTarget {
@@ -508,7 +504,7 @@ impl SurfaceTarget {
         window: Arc<dyn Window>,
         framebuffer_size: Size,
         cap_frame_rate: bool,
-    ) -> Result<(Rc<RendererBackend>, SurfaceTarget), Error> {
+    ) -> Result<(RendererBackend, SurfaceTarget), Error> {
         let window = Rc::new(EglWindow::new(window, framebuffer_size, cap_frame_rate).map_err(Error::native)?);
         // glow asks the context what it is, so it has to be current: without
         // a surface where EGL can, which leaves the window alone.
@@ -524,90 +520,95 @@ impl SurfaceTarget {
             })
         };
         let _ = window.clear_current();
-        let backend = Rc::new(RendererBackend::from_parts(gl, Box::new(WindowContext(Rc::clone(&window)))));
+        let backend = RendererBackend::from_parts(gl, Box::new(WindowContext(Rc::clone(&window))));
         let target = SurfaceTarget {
-            backend: Rc::clone(&backend),
+            context: Rc::clone(backend.context()),
             window,
-            presentation: Presentation::default(),
-            size: Rc::new(Cell::new(framebuffer_size)),
+            overlay: None,
+            readback_requested: false,
+            readback: None,
+            size: framebuffer_size,
             image: FrameImports::default(),
-            in_frame: Cell::new(false),
+            in_frame: false,
         };
         Ok((backend, target))
     }
 
     /// The size of the frames, in physical pixels.
+    #[must_use]
     pub fn size(&self) -> Size {
-        self.size.get()
+        self.size
     }
 
     /// The window has `size` pixels from now on.
-    pub fn resize(&self, size: Size) {
-        if size != self.size.replace(size) {
+    pub fn resize(&mut self, size: Size) {
+        if size != std::mem::replace(&mut self.size, size) {
             self.window.resize(size);
         }
     }
 
     /// Draws `overlay` over each frame from now on, or nothing.
-    pub fn set_overlay(&self, overlay: Option<Overlay>) {
-        let _current = self.backend.context().enter();
-        *self.presentation.overlay.borrow_mut() = overlay;
+    pub fn set_overlay(&mut self, overlay: Option<Overlay>) {
+        let _current = self.context.enter();
+        self.overlay = overlay;
     }
 
     /// Copies the next frame presented (see `take_readback`).
-    pub fn request_readback(&self) {
-        self.presentation.readback_requested.set(true);
+    pub fn request_readback(&mut self) {
+        self.readback_requested = true;
     }
 
     /// The frame copied after `request_readback`, once presented.
-    pub fn take_readback(&self) -> Option<PremultipliedImage> {
-        self.presentation.readback.borrow_mut().take()
+    pub fn take_readback(&mut self) -> Option<PremultipliedImage> {
+        self.readback.take()
     }
 }
 
 impl FrameTarget for SurfaceTarget {
+    type Gpu = GlGpu;
+
     /// Takes the window over. A frame begins while the context is current
     /// on the window's surface, and not when EGL makes no surface of the
     /// window or the window went away.
-    fn begin_frame(&self) -> Option<FrameImage> {
-        let context = self.backend.context();
-        let _current = context.enter();
+    fn begin_frame(&mut self, gpu: &mut GlGpu) -> Option<FrameImage> {
+        let _current = self.context.enter();
         if !self.window.presenting.replace(true) {
             // The context is current without a surface: make it current on
             // the window's.
-            context.make_current_again();
+            self.context.make_current_again();
         }
-        if !self.in_frame.get() && !self.window.on_surface.get() {
+        if !self.in_frame && !self.window.on_surface.get() {
             return None;
         }
-        let image = self.image.get_or_import(|| default_framebuffer(&self.backend, self.size.get()))?;
-        self.in_frame.set(true);
+        let size = self.size;
+        let image = self.image.get_or_import(|| default_framebuffer(gpu, size))?;
+        self.in_frame = true;
         Some(image)
     }
 
     /// Presents the frame, with the overlay over it. A frame that the window
     /// doesn't take, having gone away, is dropped.
-    fn end_frame(&self) -> Handoff {
-        self.in_frame.set(false);
+    fn end_frame(&mut self, gpu: &mut GlGpu) -> Handoff {
+        self.in_frame = false;
         let Some(image) = self.image.get() else {
             return Handoff::Dropped;
         };
-        let context = self.backend.context();
-        let _current = context.enter();
-        let size = self.size.get();
-        if let Some(overlay) = self.presentation.overlay.borrow_mut().as_mut() {
-            overlay::draw(overlay, context, size);
+        let _current = self.context.enter();
+        if let Some(overlay) = self.overlay.as_mut() {
+            overlay::draw(overlay, &self.context, self.size);
         }
-        if self.presentation.readback_requested.replace(false) {
-            match read_texels(&mut *self.backend.gpu(), image.color, TextureRegion::whole(image.size)) {
-                Ok(texels) => {
-                    *self.presentation.readback.borrow_mut() = Some(PremultipliedImage::from_vec(image.size, texels));
-                }
+        if std::mem::take(&mut self.readback_requested) {
+            match read_texels(gpu, image.color, TextureRegion::whole(image.size)) {
+                Ok(texels) => self.readback = Some(PremultipliedImage::from_vec(image.size, texels)),
                 Err(error) => Log::error(Event::Render, format!("Reading a window's frame back failed: {error}")),
             }
         }
-        self.image.release(&self.backend);
+        self.image.release(gpu);
         if self.window.swap() { Handoff::Presented } else { Handoff::Dropped }
+    }
+
+    fn tear_down(&mut self, gpu: &mut GlGpu) {
+        self.image.release(gpu);
     }
 }
 
@@ -617,9 +618,8 @@ impl Drop for SurfaceTarget {
         // surface, unless the window has this context's still.
         self.window.presenting.set(self.window.surface.get().is_some());
         {
-            let _current = self.backend.context().enter();
-            self.presentation.overlay.borrow_mut().take();
-            self.image.release(&self.backend);
+            let _current = self.context.enter();
+            self.overlay = None;
         }
         // The backend's context stays, current without a surface from now on.
         self.window.release_surface();

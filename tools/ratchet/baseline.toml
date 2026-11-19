@@ -29,19 +29,7 @@
 [borrow]
 "crates/mln_c/src/render_session.rs" = 3
 "crates/mln_c/src/web.rs" = 5
-"crates/mln_d3d12/src/borrowed_target.rs" = 14
-"crates/mln_d3d12/src/exported_target.rs" = 8
-"crates/mln_d3d12/src/renderer_backend.rs" = 2
-"crates/mln_d3d12/src/surface_target.rs" = 3
 "crates/mln_expression/src/parsing_context.rs" = 11
-"crates/mln_gl/src/borrowed_target.rs" = 7
-"crates/mln_gl/src/exported_target.rs" = 9
-"crates/mln_gl/src/renderer_backend.rs" = 2
-"crates/mln_gl/src/surface_target.rs" = 5
-"crates/mln_mtl/src/borrowed_target.rs" = 14
-"crates/mln_mtl/src/exported_target.rs" = 8
-"crates/mln_mtl/src/renderer_backend.rs" = 2
-"crates/mln_mtl/src/surface_target.rs" = 13
 "crates/mln_renderer/src/gfx/shader_group.rs" = 1
 "crates/mln_renderer/src/tile/worker_codec/host.rs" = 5
 "crates/mln_runtime/src/render/driver.rs" = 2
@@ -49,13 +37,8 @@
 "crates/mln_runtime/src/web.rs" = 1
 "crates/mln_util/src/host_bytes.rs" = 3
 "crates/mln_util/src/logging.rs" = 2
-"crates/mln_vulkan/src/borrowed_target.rs" = 15
-"crates/mln_vulkan/src/exported_target.rs" = 8
-"crates/mln_vulkan/src/renderer_backend.rs" = 4
-"crates/mln_vulkan/src/surface_resource.rs" = 24
+"crates/mln_vulkan/src/renderer_backend.rs" = 2
 "crates/mln_web_host/src/pump.rs" = 3
 "crates/mln_web_host/src/shaper.rs" = 6
 "crates/mln_web_host/src/tile_worker.rs" = 2
 "crates/mln_web_host/src/tile_workers.rs" = 1
-"crates/mln_webgpu/src/borrowed_target.rs" = 3
-"crates/mln_webgpu/src/renderer_backend.rs" = 2
