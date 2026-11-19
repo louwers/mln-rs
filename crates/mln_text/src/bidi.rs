@@ -135,7 +135,9 @@ pub(crate) fn reorder_lines(text: &[u16], line_breaks: VecSet<usize>) -> Vec<Vec
         .collect()
 }
 
-/// Like [`reorder_lines`], and each code unit keeps its style.
+/// Like [`reorder_lines`], with each code unit's style, except that LTR runs
+/// keep their BiDi controls, and an RTL run's first code unit takes the
+/// style of the chunk after it unless either style is a block.
 pub(crate) fn reorder_styled_lines(input: &StyledText, line_breaks: VecSet<usize>) -> Vec<StyledText> {
     reorder_styled_lines_with_blocks(input, line_breaks, &input.text, &[])
 }
