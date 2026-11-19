@@ -13,6 +13,12 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # Keep every mise command (including task-scoped tool auto-installs such as
+  # zig) locked to mise.lock so CI never resolves unlocked tools or rewrites
+  # mise.lock.
+  MISE_LOCKED: "1"
+
 jobs:
   # Which jobs and steps a pull request needs, from what it changes (`mise run
   # ci:plan`): the macOS test and backend jobs, web, and the packaging. Pushes
