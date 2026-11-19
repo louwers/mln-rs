@@ -612,55 +612,12 @@ mod vulkan {
         (vk::Semaphore::from_raw(sync.handle), sync.value)
     }
 
-    // A release of the ring's images completes once the host's reads of
-    // them end, so a new ring of the same image draws only after them. A
-    // wait that runs out still completes the release, and quarantines
-    // nothing.
+    // A replacement or a release completes without waiting for the host's
+    // reads of the images that it lets go of: each frame goes back with a
+    // timeline that the host never signals, and no frame drew into its image
+    // since.
     #[test]
-    fn a_release_of_the_ring_waits_for_the_hosts_reads() {
-        let Some((device, mut host)) = with_timelines() else { return };
-        let images = [host.image()];
-        let timeline = host.timeline();
-        let runtime = runtime();
-        let map = map_of(&runtime, "#ff0000");
-        let target = RenderTarget::Borrowed { size: SIZE, ring: Host::ring(&images), device: device.clone() };
-        let session = attach(&map, target, SyncKinds::of(&[SyncKind::VulkanTimelineSemaphore]));
-        assert_eq!(FrameDisposition::Rendered, render(&session));
-        let frame = session.acquire_frame().unwrap().expect("a frame");
-        let (producer, value) = timeline_of(&frame);
-        assert!(eventually(|| host.counter(producer) >= value));
-        frame.release(timeline_sync(timeline, 1)).unwrap();
-
-        let host = &host;
-        std::thread::scope(|scope| {
-            let released = session.release_target().unwrap();
-            scope.spawn(|| {
-                std::thread::sleep(std::time::Duration::from_millis(400));
-                host.signal(timeline, 1);
-            });
-            released.wait().unwrap();
-            wait(session.set_ring(SIZE, Host::ring(&images)));
-            assert_eq!(FrameDisposition::Rendered, render(&session));
-            let frame = session.acquire_frame().unwrap().expect("a frame");
-            let (producer, value) = timeline_of(&frame);
-            assert!(eventually(|| host.counter(producer) >= value));
-            assert!(host.counter(timeline) >= 1, "the new ring drew into the image before the host's reads ended");
-            // The host never signals 2.
-            frame.release(timeline_sync(timeline, 2)).unwrap();
-        });
-        let started = std::time::Instant::now();
-        wait(session.release_target());
-        assert!(started.elapsed() >= std::time::Duration::from_millis(900));
-        wait(session.set_ring(SIZE, Host::ring(&images)));
-        assert_eq!(FrameDisposition::Rendered, render(&session));
-        drop(session.acquire_frame().unwrap().expect("a frame"));
-        wait(session.detach());
-    }
-
-    // A new ring that lets go of an image completes once the host's reads
-    // of it end.
-    #[test]
-    fn a_new_ring_waits_for_the_hosts_reads_of_the_image_it_lets_go_of() {
+    fn a_new_ring_or_a_release_completes_without_the_hosts_reads() {
         let Some((device, mut host)) = with_timelines() else { return };
         let (old, new) = ([host.image()], [host.image()]);
         let timeline = host.timeline();
@@ -668,22 +625,18 @@ mod vulkan {
         let map = map_of(&runtime, "#ff0000");
         let target = RenderTarget::Borrowed { size: SIZE, ring: Host::ring(&old), device: device.clone() };
         let session = attach(&map, target, SyncKinds::of(&[SyncKind::VulkanTimelineSemaphore]));
-        assert_eq!(FrameDisposition::Rendered, render(&session));
-        let frame = session.acquire_frame().unwrap().expect("a frame");
-        let (producer, value) = timeline_of(&frame);
-        assert!(eventually(|| host.counter(producer) >= value));
-        frame.release(timeline_sync(timeline, 1)).unwrap();
-
-        let host = &host;
-        std::thread::scope(|scope| {
-            let replaced = session.set_ring(SIZE, Host::ring(&new)).unwrap();
-            scope.spawn(|| {
-                std::thread::sleep(std::time::Duration::from_millis(400));
-                host.signal(timeline, 1);
-            });
-            replaced.wait().unwrap();
-            assert!(host.counter(timeline) >= 1, "the new ring let go of the image before the host's reads ended");
-        });
+        for (value, next) in [(1, Some(&new)), (2, None)] {
+            assert_eq!(FrameDisposition::Rendered, render(&session));
+            let frame = session.acquire_frame().unwrap().expect("a frame");
+            let (producer, produced) = timeline_of(&frame);
+            assert!(eventually(|| host.counter(producer) >= produced));
+            frame.release(timeline_sync(timeline, value)).unwrap();
+            if let Some(images) = next {
+                wait(session.set_ring(SIZE, Host::ring(images)));
+            } else {
+                wait(session.release_target());
+            }
+        }
         wait(session.detach());
     }
 
@@ -697,11 +650,13 @@ mod vulkan {
         }
     }
 
-    // A caller-driven session's release waits for the host's reads on its
-    // later services, which return at once: the host can signal from work
-    // that it submits after a service.
+    // A release completes once the session's work on the ring's images
+    // finishes, which a frame drawn into an image that the host gave back
+    // runs after the host's reads. A caller-driven session's services return
+    // at once meanwhile: the host can signal its reads from the same thread
+    // once the release call returned.
     #[test]
-    fn a_caller_driven_release_waits_for_the_hosts_reads_on_later_services() {
+    fn a_caller_driven_release_completes_on_a_later_service_once_its_frames_finish() {
         let Some((device, mut host)) = with_timelines() else { return };
         let images = [host.image()];
         let timeline = host.timeline();
@@ -717,56 +672,35 @@ mod vulkan {
         let driver = session.take_driver_work().unwrap();
         service_until(&driver, || attached.is_complete());
         attached.wait().unwrap();
-        session.demand_frame(FrameDemand::new(DemandMode::Force, 1)).unwrap();
-        let mut results = Vec::new();
-        service_until(&driver, || {
-            results.extend(session.drain_frame_results().unwrap());
-            !results.is_empty()
-        });
-        assert_eq!(FrameDisposition::Rendered, results[0].disposition);
+        let render = |token| {
+            session.demand_frame(FrameDemand::new(DemandMode::Force, token)).unwrap();
+            let mut results = Vec::new();
+            service_until(&driver, || {
+                results.extend(session.drain_frame_results().unwrap());
+                !results.is_empty()
+            });
+            assert_eq!(FrameDisposition::Rendered, results[0].disposition);
+        };
+        render(1);
         let frame = session.acquire_frame().unwrap().expect("a frame");
         let (producer, value) = timeline_of(&frame);
         assert!(eventually(|| host.counter(producer) >= value));
         frame.release(timeline_sync(timeline, 1)).unwrap();
+        // The next frame waits for the host's reads on the device.
+        render(2);
 
         let released = session.release_target().unwrap();
         let started = std::time::Instant::now();
         driver.service().unwrap();
         driver.service().unwrap();
         assert!(started.elapsed() < std::time::Duration::from_millis(500), "a service waited for the host's reads");
-        assert!(!released.is_complete());
+        assert!(!released.is_complete(), "the release completed before its frame");
         host.signal(timeline, 1);
         service_until(&driver, || released.is_complete());
         released.wait().unwrap();
-        assert!(started.elapsed() < std::time::Duration::from_millis(900), "the release waited out its timeout");
         let detached = session.detach().unwrap();
         service_until(&driver, || detached.is_complete());
         detached.wait().unwrap();
-    }
-
-    // An abandon doesn't wait for a release that waits for the host's reads,
-    // which fails instead.
-    #[test]
-    fn an_abandon_ends_a_release_that_waits_for_the_hosts_reads() {
-        let Some((device, mut host)) = with_timelines() else { return };
-        let images = [host.image()];
-        let timeline = host.timeline();
-        let runtime = runtime();
-        let map = map_of(&runtime, "#ff0000");
-        let target = RenderTarget::Borrowed { size: SIZE, ring: Host::ring(&images), device: device.clone() };
-        let session = attach(&map, target, SyncKinds::of(&[SyncKind::VulkanTimelineSemaphore]));
-        assert_eq!(FrameDisposition::Rendered, render(&session));
-        let frame = session.acquire_frame().unwrap().expect("a frame");
-        let (producer, value) = timeline_of(&frame);
-        assert!(eventually(|| host.counter(producer) >= value));
-        frame.release(timeline_sync(timeline, 1)).unwrap();
-        let released = session.release_target().unwrap();
-        // The release runs on the session's thread before the abandon.
-        assert!(eventually(|| !session.snapshot().unwrap().has_target));
-        let started = std::time::Instant::now();
-        session.abandon().unwrap();
-        assert!(started.elapsed() < std::time::Duration::from_millis(500), "the abandon waited for the host's reads");
-        assert_eq!(ErrorKind::TargetLost, released.wait().unwrap_err().kind);
     }
 
     // The host reads each frame on the queue that it shares with the

@@ -189,10 +189,9 @@ const DEPTH_STENCIL: TextureFormat = TextureFormat::Depth32FloatStencil8;
 /// Frames drawn into the host's textures, each given back to the host.
 pub type BorrowedTarget = ring::BorrowedTarget<MetalRing>;
 
-/// The host's reads of textures that a ring let go of: each shared event's
-/// value, which the ring waits for before the host may use or destroy the
-/// textures. Dropping it stops waiting.
-pub type PendingReads = ring::PendingReads<MetalRing>;
+/// The end of a ring's work on the textures that it let go of: none, since
+/// Metal's command buffers keep the textures they use.
+pub type InFlight = ring::InFlight<MetalRing>;
 
 /// A [`BorrowedTarget`]'s part on Metal: the shared event that its frames
 /// signal, for a shared event producer.
@@ -209,6 +208,7 @@ impl RingBackend for MetalRing {
     /// The host's shared event, and the value its reads reach.
     type Wait = (SharedEvent, u64);
     type Handed = Infallible;
+    type Fence = Infallible;
 
     /// Fails as [`BorrowedTextures::check`] does, with
     /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a producer kind
@@ -316,7 +316,7 @@ impl RingBackend for MetalRing {
 
     /// Whether the event reached the value, by its signaled value, which any
     /// macOS with shared events reports.
-    fn ended((event, value): &Self::Wait) -> bool {
-        event.signaledValue() >= *value
+    fn finished(fence: &Infallible) -> bool {
+        match *fence {}
     }
 }

@@ -46,13 +46,12 @@ trait Borrowed<B: LocalBackend>: FrameTarget<Gpu = B::Gpu> {
     fn select(&mut self, slot: usize);
     fn release(&mut self, gpu: &mut B::Gpu, slot: usize, consumer: ConsumerSync) -> Result<(), Error>;
     fn discard(&mut self, gpu: &mut B::Gpu, slot: usize);
-    /// Renders into `textures` from now on, and returns the host's reads of
-    /// the textures that it let go of.
-    fn replace(&mut self, gpu: &mut B::Gpu, textures: B::RingTextures) -> Result<Pending, Error>;
-    /// Takes the host's reads of the textures that they still wait for, for
-    /// the ring to wait for before it lets go of them. A target that waits
-    /// for the host's reads as it takes each texture back has none.
-    fn take_pending(&mut self, _gpu: &mut B::Gpu) -> Pending {
+    /// Renders into `textures` from now on, and returns its work in flight
+    /// on the textures that it let go of.
+    fn replace(&mut self, gpu: &mut B::Gpu, textures: B::RingTextures) -> Result<InFlight, Error>;
+    /// Its work in flight on its textures, after its tear-down. A target
+    /// whose work the host may follow at once has none.
+    fn in_flight(&self, _gpu: &B::Gpu) -> InFlight {
         None
     }
 }
@@ -68,26 +67,25 @@ trait Exported<B: RendererBackend>: FrameTarget<Gpu = B::Gpu> {
     fn image(&self, slot: usize) -> Option<ExportedFrame>;
 }
 
-/// The host's reads of textures that a ring let go of, which the session
-/// waits for before the release or replacement completes. Dropping it stops
-/// waiting.
-pub(crate) trait PendingReads {
-    /// Whether every read ended, which it checks without blocking.
-    fn poll(&mut self) -> bool;
+/// A ring's GPU work on the textures that it let go of, which a release or
+/// replacement completes after.
+pub(crate) trait GpuWork {
+    /// Whether the work finished, which it checks without blocking.
+    fn finished(&self) -> bool;
 }
 
-/// The host's reads that a ring waits for, if any.
-pub(crate) type Pending = Option<Box<dyn PendingReads>>;
+/// A ring's GPU work in flight, if any.
+pub(crate) type InFlight = Option<Box<dyn GpuWork>>;
 
-impl<R: RingBackend + 'static> PendingReads for ring::PendingReads<R> {
-    fn poll(&mut self) -> bool {
-        ring::PendingReads::poll(self)
+impl<R: RingBackend + 'static> GpuWork for ring::InFlight<R> {
+    fn finished(&self) -> bool {
+        ring::InFlight::finished(self)
     }
 }
 
-/// `reads`, unless they ended already.
-fn pending(mut reads: impl PendingReads + 'static) -> Pending {
-    (!reads.poll()).then(|| -> Box<dyn PendingReads> { Box::new(reads) })
+/// `work`, unless it finished already.
+fn in_flight(work: impl GpuWork + 'static) -> InFlight {
+    (!work.finished()).then(|| -> Box<dyn GpuWork> { Box::new(work) })
 }
 
 impl<R: RingBackend + 'static> Borrowed<R::Renderer> for ring::BorrowedTarget<R>
@@ -103,11 +101,11 @@ where
     fn discard(&mut self, gpu: &mut R::Gpu, slot: usize) {
         ring::BorrowedTarget::discard(self, gpu, slot);
     }
-    fn replace(&mut self, gpu: &mut R::Gpu, textures: R::Textures) -> Result<Pending, Error> {
-        ring::BorrowedTarget::replace(self, gpu, textures).map(pending)
+    fn replace(&mut self, gpu: &mut R::Gpu, textures: R::Textures) -> Result<InFlight, Error> {
+        ring::BorrowedTarget::replace(self, gpu, textures).map(in_flight)
     }
-    fn take_pending(&mut self, gpu: &mut R::Gpu) -> Pending {
-        pending(ring::BorrowedTarget::take_pending(self, gpu))
+    fn in_flight(&self, gpu: &R::Gpu) -> InFlight {
+        in_flight(ring::BorrowedTarget::in_flight(self, gpu))
     }
 }
 
@@ -126,7 +124,7 @@ impl Borrowed<mln_webgpu::RendererBackend> for mln_webgpu::BorrowedTarget {
         &mut self,
         gpu: &mut mln_webgpu::WebGpu,
         textures: mln_webgpu::BorrowedTextures,
-    ) -> Result<Pending, Error> {
+    ) -> Result<InFlight, Error> {
         mln_webgpu::BorrowedTarget::replace(self, gpu, textures).map(|()| None)
     }
 }
@@ -142,7 +140,7 @@ impl Borrowed<mln_gl::RendererBackend> for mln_gl::BorrowedTarget {
     fn discard(&mut self, gpu: &mut mln_gl::GlGpu, slot: usize) {
         mln_gl::BorrowedTarget::discard(self, gpu, slot);
     }
-    fn replace(&mut self, gpu: &mut mln_gl::GlGpu, textures: mln_gl::BorrowedTextures) -> Result<Pending, Error> {
+    fn replace(&mut self, gpu: &mut mln_gl::GlGpu, textures: mln_gl::BorrowedTextures) -> Result<InFlight, Error> {
         mln_gl::BorrowedTarget::replace(self, gpu, textures).map(|()| None)
     }
 }
@@ -544,10 +542,10 @@ trait Gfx {
     fn exported_size(&self) -> Option<Size>;
     fn resize_exported(&mut self, size: Size, held: &[usize]) -> Result<bool, Error>;
     fn exported_image(&self, slot: usize) -> Option<ExportedFrame>;
-    fn set_ring(&mut self, ring: BorrowedRing) -> Result<Pending, Error>;
+    fn set_ring(&mut self, ring: BorrowedRing) -> Result<InFlight, Error>;
     fn resize(&mut self, size: Size);
     fn read_image(&mut self) -> Result<PremultipliedImage, Error>;
-    fn release_surface(&mut self) -> Pending;
+    fn release_surface(&mut self) -> InFlight;
     fn set_surface(&mut self, surface: Surface, overlay: Option<SurfaceOverlay>, size: Size) -> Result<(), Error>;
 }
 
@@ -752,7 +750,7 @@ impl<B: LocalBackend> Gfx for BackendGfx<B> {
         }
     }
 
-    fn set_ring(&mut self, ring: BorrowedRing) -> Result<Pending, Error> {
+    fn set_ring(&mut self, ring: BorrowedRing) -> Result<InFlight, Error> {
         let Frames::Borrowed { target, producer } = &mut self.frames else {
             return Err(Error::unsupported("the target has no ring"));
         };
@@ -781,7 +779,7 @@ impl<B: LocalBackend> Gfx for BackendGfx<B> {
         }
     }
 
-    fn release_surface(&mut self) -> Pending {
+    fn release_surface(&mut self) -> InFlight {
         let gpu = &mut *self.backend.gpu();
         match &mut self.frames {
             Frames::Presenting(target) => {
@@ -791,9 +789,8 @@ impl<B: LocalBackend> Gfx for BackendGfx<B> {
                 None
             }
             Frames::Borrowed { target, .. } => target.take().and_then(|mut target| {
-                let pending = target.take_pending(gpu);
                 target.tear_down(gpu);
-                pending
+                target.in_flight(gpu)
             }),
             #[cfg(not(target_family = "wasm"))]
             Frames::Offscreen(_) => None,
@@ -1237,13 +1234,13 @@ impl LocalTarget {
     }
 
     /// Renders into `ring` from now on, in place of the ring's textures, and
-    /// returns the host's reads of the textures that it let go of, which the
-    /// host may use once they end.
+    /// returns the work in flight on the textures that it let go of, which
+    /// the host may use once it finishes.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a
     /// target that isn't a ring, or a ring of another format, and with the
     /// backend's error.
-    pub(crate) fn set_ring(&mut self, ring: BorrowedRing) -> Result<Pending, Error> {
+    pub(crate) fn set_ring(&mut self, ring: BorrowedRing) -> Result<InFlight, Error> {
         self.gfx.set_ring(ring)
     }
 
@@ -1264,14 +1261,14 @@ impl LocalTarget {
     }
 
     /// Lets go of a surface target's surface, or of a ring's textures, and
-    /// returns the host's reads of the textures, which the host may use once
-    /// they end. The backend and its renderer stay.
-    pub(crate) fn release_surface(&mut self) -> Pending {
-        let pending = self.gfx.release_surface();
+    /// returns the work in flight on the textures, which the host may use
+    /// once it finishes. The backend and its renderer stay.
+    pub(crate) fn release_surface(&mut self) -> InFlight {
+        let in_flight = self.gfx.release_surface();
         if self.is_presenting() {
             self.window = None;
         }
-        pending
+        in_flight
     }
 
     /// Presents to `surface` at `size` pixels from now on, with `overlay`

@@ -304,8 +304,8 @@ static void queue_ordered_frames_share_the_hosts_queue(void) {
 }
 
 // A queue-ordered release leaves the host's read of the frame on the shared
-// queue, so a replacement of the ring waits for it before the session lets go
-// of the old texture.
+// queue, before the session's work that a replacement of the ring completes
+// after.
 static void a_queue_ordered_ring_takes_new_textures_after_the_hosts_reads(
   void
 ) {
