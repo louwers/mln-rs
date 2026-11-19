@@ -466,7 +466,7 @@ pub(crate) fn frame_result(result: &FrameResult, initial_scale_factor: f64) -> m
 /// results and custom layers report.
 pub(crate) fn frame_projection(projection: &FrameProjection) -> mln_frame_projection {
     let column = |index: usize| {
-        let [x, y, z, w] = [0, 1, 2, 3].map(|row| projection.matrix[4 * index + row]);
+        let [x, y, z, w] = projection.matrix.col(index).to_array();
         mln_vec4 { x, y, z, w }
     };
     mln_frame_projection {

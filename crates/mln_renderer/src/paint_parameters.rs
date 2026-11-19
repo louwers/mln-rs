@@ -1,5 +1,6 @@
 use std::any::Any;
 
+use glam::DMat4;
 use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, GpuError, LoadOp, PassDesc, Scissor, TargetFormats};
 use mln_gfx::stencil_mode::Test;
 use mln_gfx::types::{DepthFunctionType, StencilOpType};
@@ -8,7 +9,6 @@ use mln_map_types::{MapDebugOptions, ProjectionData, TransformState, ViewportMod
 use mln_tile_id::UnwrappedTileID;
 use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
-use mln_util::mat4::Mat4;
 use mln_util::range::Range;
 use mln_util::size::Size;
 use mln_vec_map::VecMap;
@@ -58,9 +58,9 @@ impl Composited {
 }
 
 pub(crate) struct TransformParameters {
-    pub(crate) proj_matrix: Mat4,
-    pub(crate) aligned_proj_matrix: Mat4,
-    pub(crate) near_clipped_proj_matrix: Mat4,
+    pub(crate) proj_matrix: DMat4,
+    pub(crate) aligned_proj_matrix: DMat4,
+    pub(crate) near_clipped_proj_matrix: DMat4,
     /// The near plane of `near_clipped_proj_matrix`, in pixels.
     pub(crate) near_clipped_near_z: f64,
     pub(crate) state: TransformState,

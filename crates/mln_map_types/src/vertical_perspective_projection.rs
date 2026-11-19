@@ -1,18 +1,13 @@
-// The C++ class's static functions are associated functions here, and the
-// file-local helpers are private functions. The `vec3` overload of the
-// file-local `slerp` is `slerp_vec3`.
-
 use std::f64::consts::PI;
 
 use geometry::Point;
+use glam::dcamera::rh::proj::opengl::perspective;
+use glam::{DMat3, DMat4, DQuat, DVec3, DVec4, EulerRot, Vec3Swizzles, Vec4Swizzles};
 use mln_tile_id::UnwrappedTileID;
 use mln_util::constants::{EXTENT, LATITUDE_MAX};
 use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
 use mln_util::interpolate::interpolate;
-use mln_util::mat4::{Mat4, matrix};
 use mln_util::projection::Projection;
-use mln_util::quaternion::Quaternion;
-use mln_util::vectors::{Vec3, Vec4};
 
 use crate::projection::{ProjectedTilePoint, ProjectionData, mercator_tile_coords};
 use crate::transform_state::{NorthOrientation, TransformState};
@@ -23,93 +18,47 @@ fn lat_lng(lat: f64, lon: f64, mode: WrapMode) -> LatLng {
     LatLng::saturating(lat, lon, mode)
 }
 
-/// Clamps `value` to `lo..=hi` as `std::clamp` does:
-/// `value < lo ? lo : hi < value ? hi : value`, so NaN passes through.
-fn clamp(value: f64, lo: f64, hi: f64) -> f64 {
-    if value < lo {
-        lo
-    } else if hi < value {
-        hi
-    } else {
-        value
-    }
-}
-
 /// How far from the polar axis a unit-sphere point can be and still be on its
 /// pole, with no longitude of its own: GL JS
 /// `sphereSurfacePointToCoordinates` gives it longitude 0.
 const POLE_AXIS_DISTANCE: f64 = 1e-6;
 
-fn rotate_x(v: &Vec3, rad: f64) -> Vec3 {
-    let c = rad.cos();
-    let s = rad.sin();
-    [v[0], v[1] * c - v[2] * s, v[1] * s + v[2] * c]
+fn rotate_x(v: DVec3, rad: f64) -> DVec3 {
+    DMat3::from_rotation_x(rad) * v
 }
 
-fn rotate_y(v: &Vec3, rad: f64) -> Vec3 {
-    let c = rad.cos();
-    let s = rad.sin();
-    [v[2] * s + v[0] * c, v[1], v[2] * c - v[0] * s]
+fn rotate_y(v: DVec3, rad: f64) -> DVec3 {
+    DMat3::from_rotation_y(rad) * v
 }
 
-fn rotate_z(v: &Vec3, rad: f64) -> Vec3 {
-    let c = rad.cos();
-    let s = rad.sin();
-    [v[0] * c - v[1] * s, v[0] * s + v[1] * c, v[2]]
-}
-
-fn dot(a: &Vec3, b: &Vec3) -> f64 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
-
-fn length(v: &Vec3) -> f64 {
-    dot(v, v).sqrt()
-}
-
-fn normalized(v: &Vec3) -> Vec3 {
-    let len = length(v);
-    [v[0] / len, v[1] / len, v[2] / len]
-}
-
-fn scaled(v: &Vec3, s: f64) -> Vec3 {
-    [v[0] * s, v[1] * s, v[2] * s]
-}
-
-fn add(a: &Vec3, b: &Vec3) -> Vec3 {
-    [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
+fn rotate_z(v: DVec3, rad: f64) -> DVec3 {
+    DMat3::from_rotation_z(rad) * v
 }
 
 /// GL JS `VerticalPerspectiveTransform._isLineOfSightBlocked`: whether the
 /// planet stands between the camera and a point, both on the unit sphere's
 /// scale.
-fn line_of_sight_blocked(camera: &Vec3, point: &Vec3) -> bool {
-    let to_point = add(point, &scaled(camera, -1.0));
-    let length_sq = dot(&to_point, &to_point);
+fn line_of_sight_blocked(camera: DVec3, point: DVec3) -> bool {
+    let to_point = point - camera;
+    let length_sq = to_point.length_squared();
     if length_sq == 0.0 {
         return false;
     }
-    let t = clamp(-dot(camera, &to_point) / length_sq, 0.0, 1.0);
-    let closest = add(camera, &scaled(&to_point, t));
-    dot(&closest, &closest) < 1.0
+    let t = (-camera.dot(to_point) / length_sq).clamp(0.0, 1.0);
+    (camera + to_point * t).length_squared() < 1.0
 }
 
-/// Where a ray first meets a sphere, as the distance along the ray. Only the
-/// near intersection is kept: C++ also carries `tMax`, which nothing reads.
-struct RaySphereIntersection {
-    t_min: f64,
-}
-
-/// GL JS `raySphereIntersection`: the numerically stable form for a unit
-/// sphere at the origin.
-fn ray_sphere_intersection(origin: &Vec3, direction: &Vec3) -> Option<RaySphereIntersection> {
-    let origin_dot_direction = dot(origin, direction);
-    let inner = add(origin, &scaled(direction, -origin_dot_direction));
-    let discriminant = 1.0 - dot(&inner, &inner);
+/// The distance along a ray to where it first meets the unit sphere at the
+/// origin, by GL JS's numerically stable `raySphereIntersection`.
+fn ray_sphere_intersection(origin: DVec3, direction: DVec3) -> Option<f64> {
+    let origin_dot_direction = origin.dot(direction);
+    let inner = origin - direction * origin_dot_direction;
+    let discriminant = 1.0 - inner.length_squared();
     // A NaN ray, from a NaN point, hits nothing.
     if discriminant.is_nan() || discriminant < 0.0 {
         return None;
     }
-    let c = dot(origin, origin) - 1.0;
+    let c = origin.length_squared() - 1.0;
     let q = -origin_dot_direction + (if origin_dot_direction < 0.0 { 1.0 } else { -1.0 }) * discriminant.sqrt();
     let t0 = c / q;
     let t1 = q;
@@ -118,20 +67,22 @@ fn ray_sphere_intersection(origin: &Vec3, direction: &Vec3) -> Option<RaySphereI
     if f64::max(t0, t1) < 0.0 {
         return None;
     }
-    Some(RaySphereIntersection { t_min: f64::min(t0, t1) })
+    Some(f64::min(t0, t1))
 }
 
-fn point_plane_signed_distance(plane: &Vec4, point: &Vec3) -> f64 {
-    plane[0] * point[0] + plane[1] * point[1] + plane[2] * point[2] + plane[3]
+fn point_plane_signed_distance(plane: DVec4, point: DVec3) -> f64 {
+    plane.dot(point.extend(1.0))
 }
 
-fn ray_direction_from_pixel(state: &TransformState, point: &ScreenCoordinate, inverse_view_projection: &Mat4) -> Vec3 {
+fn ray_direction_from_pixel(
+    state: &TransformState,
+    point: &ScreenCoordinate,
+    inverse_view_projection: &DMat4,
+) -> DVec3 {
     let size = state.get_size();
-    let clip: Vec4 =
-        [point.x / f64::from(size.width) * 2.0 - 1.0, point.y / f64::from(size.height) * 2.0 - 1.0, 1.0, 1.0];
-    let world = matrix::transform_mat4_value(&clip, inverse_view_projection);
-    let target: Vec3 = [world[0] / world[3], world[1] / world[3], world[2] / world[3]];
-    normalized(&add(&target, &scaled(&state.get_globe_camera_position(), -1.0)))
+    let clip =
+        DVec3::new(point.x / f64::from(size.width) * 2.0 - 1.0, point.y / f64::from(size.height) * 2.0 - 1.0, 1.0);
+    (inverse_view_projection.project_point3(clip) - state.get_globe_camera_position()).normalize()
 }
 
 /// Angle to rotate the vector (x0, y0) onto the direction of (x1, y1).
@@ -143,7 +94,7 @@ fn angle_to_rotate_between_vectors_2d(mut x0: f64, mut y0: f64, mut x1: f64, mut
     x1 /= len1;
     y1 /= len1;
     let cross = x0 * y1 - x1 * y0;
-    let angle = clamp(x0 * x1 + y0 * y1, -1.0, 1.0).acos();
+    let angle = (x0 * x1 + y0 * y1).clamp(-1.0, 1.0).acos();
     if cross > 0.0 { angle } else { -angle }
 }
 
@@ -196,7 +147,7 @@ const SLOWING_RADIUS_SLOW_FACTOR: f64 = 0.25;
 const POLE_AREA_FADE_SCALE: f64 = 4.0;
 
 fn remap_saturate(value: f64, old_min: f64, old_max: f64, new_min: f64, new_max: f64) -> f64 {
-    let t = clamp((value - old_min) / (old_max - old_min), 0.0, 1.0);
+    let t = ((value - old_min) / (old_max - old_min)).clamp(0.0, 1.0);
     new_min + (new_max - new_min) * t
 }
 
@@ -222,7 +173,7 @@ impl VerticalPerspectiveProjection {
 
     /// The unit-sphere position of a point in tile units.
     #[must_use]
-    pub fn tile_coordinates_to_sphere(tile_point: &Point<f64>, tile_id: &UnwrappedTileID) -> Vec3 {
+    pub fn tile_coordinates_to_sphere(tile_point: &Point<f64>, tile_id: &UnwrappedTileID) -> DVec3 {
         let scale = 1.0 / (1u64 << tile_id.canonical.z) as f64;
         let mercator_x = tile_point.x / f64::from(EXTENT) * scale + f64::from(tile_id.canonical.x) * scale;
         let mercator_y = tile_point.y / f64::from(EXTENT) * scale + f64::from(tile_id.canonical.y) * scale;
@@ -233,56 +184,45 @@ impl VerticalPerspectiveProjection {
         let t2 = t * t;
         let sin_y = (t2 - 1.0) / (t2 + 1.0);
         let cos_y = (2.0 * t) / (t2 + 1.0);
-        [spherical_x.sin() * cos_y, sin_y, spherical_x.cos() * cos_y]
+        DVec3::new(spherical_x.sin() * cos_y, sin_y, spherical_x.cos() * cos_y)
     }
 
     /// The view-projection matrix that takes unit-sphere positions to clip
     /// space.
-    pub fn globe_view_projection_matrix(state: &TransformState, radius: f64) -> Mat4 {
+    pub fn globe_view_projection_matrix(state: &TransformState, radius: f64) -> DMat4 {
         let size = state.get_size();
         let camera_to_center_distance = f64::from(state.get_camera_to_center_distance());
         let center = state.get_lat_lng(WrapMode::Unwrapped);
 
-        let mut m: Mat4 = [0.0; 16];
-        matrix::perspective(
-            &mut m,
+        let mut projection = perspective(
             f64::from(state.get_field_of_view()),
             f64::from(size.width) / f64::from(size.height),
             0.5,
             camera_to_center_distance + radius * 2.0,
         );
-
+        // Move the vanishing point to the center of the padded view.
         let offset = state.get_center_offset();
-        m[8] = -offset.x * 2.0 / f64::from(size.width);
-        m[9] = offset.y * 2.0 / f64::from(size.height);
+        projection.z_axis.x = -offset.x * 2.0 / f64::from(size.width);
+        projection.z_axis.y = offset.y * 2.0 / f64::from(size.height);
 
         if state.get_north_orientation() != NorthOrientation::Upwards {
-            let a = m;
-            matrix::rotate_z(&mut m, &a, -state.get_north_orientation_angle());
+            projection *= DMat4::from_rotation_z(-state.get_north_orientation_angle());
         }
 
-        let a = m;
-        matrix::translate(&mut m, &a, 0.0, 0.0, -camera_to_center_distance);
-        let a = m;
-        matrix::rotate_z(&mut m, &a, state.get_roll());
-        let a = m;
-        matrix::rotate_x(&mut m, &a, -state.get_pitch());
-        let a = m;
-        matrix::rotate_z(&mut m, &a, -state.get_bearing());
-        let a = m;
-        matrix::translate(&mut m, &a, 0.0, 0.0, -radius);
-        let a = m;
-        matrix::rotate_x(&mut m, &a, mln_math::deg2rad(center.latitude()));
-        let a = m;
-        matrix::rotate_y(&mut m, &a, -mln_math::deg2rad(center.longitude()));
-        let a = m;
-        matrix::scale(&mut m, &a, radius, radius, radius);
-        m
+        projection
+            * DMat4::from_translation(DVec3::new(0.0, 0.0, -camera_to_center_distance))
+            * DMat4::from_rotation_z(state.get_roll())
+            * DMat4::from_rotation_x(-state.get_pitch())
+            * DMat4::from_rotation_z(-state.get_bearing())
+            * DMat4::from_translation(DVec3::new(0.0, 0.0, -radius))
+            * DMat4::from_rotation_x(mln_math::deg2rad(center.latitude()))
+            * DMat4::from_rotation_y(-mln_math::deg2rad(center.longitude()))
+            * DMat4::from_scale(DVec3::splat(radius))
     }
 
     /// The plane (as ax + by + cz + d) that separates the visible hemisphere
     /// from the back of the globe.
-    pub fn clipping_plane(state: &TransformState, radius: f64) -> Vec4 {
+    pub fn clipping_plane(state: &TransformState, radius: f64) -> DVec4 {
         let pitch = state.get_pitch();
         let distance_camera_to_b = f64::from(state.get_camera_to_center_distance()) / radius;
         let distance_camera_to_a = pitch.sin() * distance_camera_to_b;
@@ -291,89 +231,85 @@ impl VerticalPerspectiveProjection {
             (distance_camera_to_a * distance_camera_to_a + distance_a_to_c * distance_a_to_c).sqrt();
         let tangent_plane_distance_to_c = 1.0 / distance_camera_to_c;
 
-        let mut plane: Vec3 =
-            [0.0, -distance_camera_to_a / distance_camera_to_c, distance_a_to_c / distance_camera_to_c];
+        let mut plane =
+            DVec3::new(0.0, -distance_camera_to_a / distance_camera_to_c, distance_a_to_c / distance_camera_to_c);
 
         let center = state.get_lat_lng(WrapMode::Unwrapped);
-        plane = rotate_z(&plane, state.get_bearing());
-        plane = rotate_x(&plane, -mln_math::deg2rad(center.latitude()));
-        plane = rotate_y(&plane, mln_math::deg2rad(center.longitude()));
+        plane = rotate_z(plane, state.get_bearing());
+        plane = rotate_x(plane, -mln_math::deg2rad(center.latitude()));
+        plane = rotate_y(plane, mln_math::deg2rad(center.longitude()));
 
-        let scale = 1.0 / (plane[0] * plane[0] + plane[1] * plane[1] + plane[2] * plane[2]).sqrt();
-        [plane[0] * scale, plane[1] * scale, plane[2] * scale, -tangent_plane_distance_to_c * scale]
+        plane.extend(-tangent_plane_distance_to_c) / plane.length()
     }
 
     /// Camera position in unit-sphere space.
-    pub fn camera_position(state: &TransformState, radius: f64) -> Vec3 {
+    pub fn camera_position(state: &TransformState, radius: f64) -> DVec3 {
         let center = state.get_lat_lng(WrapMode::Unwrapped);
-        let mut position: Vec3 = [0.0, 0.0, f64::from(state.get_camera_to_center_distance()) / radius];
-        position = rotate_z(&position, -state.get_roll());
-        position = rotate_x(&position, state.get_pitch());
-        position = rotate_z(&position, state.get_bearing());
-        position = add(&position, &[0.0, 0.0, 1.0]);
-        position = rotate_x(&position, -mln_math::deg2rad(center.latitude()));
-        position = rotate_y(&position, mln_math::deg2rad(center.longitude()));
-        position
+        let mut position = DVec3::new(0.0, 0.0, f64::from(state.get_camera_to_center_distance()) / radius);
+        position = rotate_z(position, -state.get_roll());
+        position = rotate_x(position, state.get_pitch());
+        position = rotate_z(position, state.get_bearing());
+        position += DVec3::Z;
+        position = rotate_x(position, -mln_math::deg2rad(center.latitude()));
+        rotate_y(position, mln_math::deg2rad(center.longitude()))
     }
 
     #[must_use]
-    pub fn surface_vector(lat_lng: &LatLng) -> Vec3 {
+    pub fn surface_vector(lat_lng: &LatLng) -> DVec3 {
         let lng = mln_math::deg2rad(lat_lng.longitude());
         let lat = mln_math::deg2rad(lat_lng.latitude());
         let len = lat.cos();
-        [lng.sin() * len, lat.sin(), lng.cos() * len]
+        DVec3::new(lng.sin() * len, lat.sin(), lng.cos() * len)
     }
 
     /// The location of a unit-sphere point, or `None` for a point that isn't
     /// a number, as a degenerate camera's can be.
-    pub(crate) fn surface_vector_to_lat_lng(surface: &Vec3) -> Option<LatLng> {
-        let latitude = mln_math::rad2deg(clamp(surface[1], -1.0, 1.0).asin());
-        let length_xz = (surface[0] * surface[0] + surface[2] * surface[2]).sqrt();
+    pub(crate) fn surface_vector_to_lat_lng(surface: DVec3) -> Option<LatLng> {
+        let latitude = mln_math::rad2deg(surface.y.clamp(-1.0, 1.0).asin());
+        let length_xz = surface.xz().length();
         if length_xz <= POLE_AXIS_DISTANCE {
             return LatLng::with_mode(latitude, 0.0, WrapMode::Unwrapped).ok();
         }
-        let acos_z = clamp(surface[2] / length_xz, -1.0, 1.0).acos();
-        let longitude = mln_math::rad2deg(if surface[0] > 0.0 { acos_z } else { -acos_z });
+        let acos_z = (surface.z / length_xz).clamp(-1.0, 1.0).acos();
+        let longitude = mln_math::rad2deg(if surface.x > 0.0 { acos_z } else { -acos_z });
         LatLng::with_mode(latitude, longitude, WrapMode::Wrapped).ok()
     }
 
     /// Unit-sphere point under a screen pixel (y up, as `TransformState`
     /// takes it); pixels off the globe snap to the nearest point on the
     /// horizon.
-    pub(crate) fn screen_coordinate_to_surface(state: &TransformState, point: &ScreenCoordinate) -> Vec3 {
+    pub(crate) fn screen_coordinate_to_surface(state: &TransformState, point: &ScreenCoordinate) -> DVec3 {
         let origin = state.get_globe_camera_position();
         let direction = ray_direction_from_pixel(state, point, &state.get_inverse_globe_view_projection_matrix());
 
-        if let Some(intersection) = ray_sphere_intersection(&origin, &direction) {
-            return normalized(&add(&origin, &scaled(&direction, intersection.t_min)));
+        if let Some(t) = ray_sphere_intersection(origin, direction) {
+            return (origin + direction * t).normalize();
         }
 
         // The ray misses the globe: take the nearest point on the horizon, the
         // circle where the clipping plane cuts the sphere.
         let plane = state.get_globe_clipping_plane();
-        let direction_dot_plane = plane[0] * direction[0] + plane[1] * direction[1] + plane[2] * direction[2];
-        let origin_to_plane = point_plane_signed_distance(&plane, &origin);
-        let distance_to_intersection = -origin_to_plane / direction_dot_plane;
+        let normal = plane.xyz();
+        let distance_to_intersection = -point_plane_signed_distance(plane, origin) / direction.dot(normal);
 
         let plane_intersection = if distance_to_intersection > 0.0 {
-            add(&origin, &scaled(&direction, distance_to_intersection))
+            origin + direction * distance_to_intersection
         } else {
             const MAX_RAY_LENGTH: f64 = 2.0;
-            let distant_point = add(&origin, &scaled(&direction, MAX_RAY_LENGTH));
-            let distance_from_plane = point_plane_signed_distance(&plane, &distant_point);
-            add(&distant_point, &scaled(&[plane[0], plane[1], plane[2]], -distance_from_plane))
+            let distant_point = origin + direction * MAX_RAY_LENGTH;
+            distant_point - normal * point_plane_signed_distance(plane, distant_point)
         };
 
-        let horizon_center = scaled(&[plane[0], plane[1], plane[2]], -plane[3]);
-        let horizon_radius = f64::max(0.0, 1.0 - plane[3] * plane[3]).sqrt();
-        let relative = add(&plane_intersection, &scaled(&horizon_center, -1.0));
-        add(&horizon_center, &scaled(&relative, horizon_radius / length(&relative)))
+        let horizon_center = normal * -plane.w;
+        let horizon_radius = f64::max(0.0, 1.0 - plane.w * plane.w).sqrt();
+        let relative = plane_intersection - horizon_center;
+        horizon_center + relative * (horizon_radius / relative.length())
     }
 
     /// Whether a screen pixel (y up) looks at the globe rather than past it.
     pub fn screen_coordinate_hits_globe(state: &TransformState, point: &ScreenCoordinate) -> bool {
         let direction = ray_direction_from_pixel(state, point, &state.get_inverse_globe_view_projection_matrix());
-        ray_sphere_intersection(&state.get_globe_camera_position(), &direction).is_some()
+        ray_sphere_intersection(state.get_globe_camera_position(), direction).is_some()
     }
 
     pub(crate) fn screen_coordinate_to_lat_lng(
@@ -381,20 +317,18 @@ impl VerticalPerspectiveProjection {
         point: &ScreenCoordinate,
         wrap_mode: WrapMode,
     ) -> Option<LatLng> {
-        let lat_lng = Self::surface_vector_to_lat_lng(&Self::screen_coordinate_to_surface(state, point))?;
+        let lat_lng = Self::surface_vector_to_lat_lng(Self::screen_coordinate_to_surface(state, point))?;
         Some(if wrap_mode == WrapMode::Wrapped { lat_lng.wrapped() } else { lat_lng })
     }
 
     /// The screen point of a location on the globe and its clip-space
     /// position.
-    pub fn lat_lng_to_screen_coordinate(state: &TransformState, lat_lng: &LatLng) -> (ScreenCoordinate, Vec4) {
-        let surface = Self::surface_vector(lat_lng);
-        let position: Vec4 = [surface[0], surface[1], surface[2], 1.0];
-        let clip = matrix::transform_mat4_value(&position, &state.get_globe_view_projection_matrix());
+    pub fn lat_lng_to_screen_coordinate(state: &TransformState, lat_lng: &LatLng) -> (ScreenCoordinate, DVec4) {
+        let clip = state.get_globe_view_projection_matrix() * Self::surface_vector(lat_lng).extend(1.0);
         let size = state.get_size();
         let point = Point::new(
-            (clip[0] / clip[3] * 0.5 + 0.5) * f64::from(size.width),
-            (clip[1] / clip[3] * 0.5 + 0.5) * f64::from(size.height),
+            (clip.x / clip.w * 0.5 + 0.5) * f64::from(size.width),
+            (clip.y / clip.w * 0.5 + 0.5) * f64::from(size.height),
         );
         (point, clip)
     }
@@ -413,11 +347,13 @@ impl VerticalPerspectiveProjection {
         let vec_to_pixel_current = Self::screen_coordinate_to_surface(state, anchor);
         let vec_to_target = Self::surface_vector(lat_lng);
 
-        let mut rotated_pixel_vector = rotate_y(&vec_to_pixel_current, -mln_math::deg2rad(center.longitude()));
-        rotated_pixel_vector = rotate_x(&rotated_pixel_vector, mln_math::deg2rad(center.latitude()));
+        let rotated_pixel_vector = rotate_x(
+            rotate_y(vec_to_pixel_current, -mln_math::deg2rad(center.longitude())),
+            mln_math::deg2rad(center.latitude()),
+        );
 
-        let vec_to_target_xz_length_squared = vec_to_target[0] * vec_to_target[0] + vec_to_target[2] * vec_to_target[2];
-        let target_x_squared = rotated_pixel_vector[0] * rotated_pixel_vector[0];
+        let vec_to_target_xz_length_squared = vec_to_target.xz().length_squared();
+        let target_x_squared = rotated_pixel_vector.x * rotated_pixel_vector.x;
         if vec_to_target_xz_length_squared < target_x_squared {
             return None;
         }
@@ -427,17 +363,17 @@ impl VerticalPerspectiveProjection {
 
         let solve = |intersection: f64| {
             let lng = angle_to_rotate_between_vectors_2d(
-                vec_to_target[0],
-                vec_to_target[2],
-                rotated_pixel_vector[0],
+                vec_to_target.x,
+                vec_to_target.z,
+                rotated_pixel_vector.x,
                 intersection,
             );
-            let vec_to_target_lng = rotate_y(&vec_to_target, -lng);
+            let vec_to_target_lng = rotate_y(vec_to_target, -lng);
             let lat = angle_to_rotate_between_vectors_2d(
-                vec_to_target_lng[1],
-                vec_to_target_lng[2],
-                rotated_pixel_vector[1],
-                rotated_pixel_vector[2],
+                vec_to_target_lng.y,
+                vec_to_target_lng.z,
+                rotated_pixel_vector.y,
+                rotated_pixel_vector.z,
             );
             (lng, lat)
         };
@@ -462,7 +398,7 @@ impl VerticalPerspectiveProjection {
         } else {
             return None;
         };
-        Some(self::lat_lng(clamp(mln_math::rad2deg(lat), -90.0, 90.0), mln_math::rad2deg(lng), WrapMode::Unwrapped))
+        Some(self::lat_lng((mln_math::rad2deg(lat)).clamp(-90.0, 90.0), mln_math::rad2deg(lng), WrapMode::Unwrapped))
     }
 
     /// GL JS `handleMapControlsRollPitchBearingZoom`: after the zoom changed
@@ -502,8 +438,8 @@ impl VerticalPerspectiveProjection {
         // planet.
         let ray_origin = state.get_globe_camera_position();
         let ray_direction = ray_direction_from_pixel(state, anchor, &state.get_inverse_globe_view_projection_matrix());
-        let closest_point = add(&ray_origin, &scaled(&ray_direction, -dot(&ray_origin, &ray_direction)));
-        let ray_distance_from_globe_center = length(&closest_point);
+        let closest_point = ray_origin - ray_direction * ray_origin.dot(ray_direction);
+        let ray_distance_from_globe_center = closest_point.length();
         let distance_factor =
             (-f64::max(ray_distance_from_globe_center - 1.0 - RAY_SURFACE_DISTANCE_FOR_SLOWING_START, 0.0)
                 * SLOWING_MULTIPLIER)
@@ -531,7 +467,7 @@ impl VerticalPerspectiveProjection {
             return;
         }
         let heuristic_center = lat_lng(
-            clamp(center.latitude() + d_lat * factor, -90.0, 90.0),
+            (center.latitude() + d_lat * factor).clamp(-90.0, 90.0),
             center.longitude() + d_lng * factor,
             WrapMode::Unwrapped,
         );
@@ -551,13 +487,10 @@ impl VerticalPerspectiveProjection {
         let heuristic_factor = f64::max(interpolation_factor_longitude, interpolation_factor_horizon)
             .powf(INTERPOLATE_TO_HEURISTIC_EXPONENT);
         let target = lat_lng(
-            clamp(
-                exact_center.latitude()
-                    + Self::difference_of_angles_degrees(exact_center.latitude(), heuristic_center.latitude())
-                        * heuristic_factor,
-                -90.0,
-                90.0,
-            ),
+            (exact_center.latitude()
+                + Self::difference_of_angles_degrees(exact_center.latitude(), heuristic_center.latitude())
+                    * heuristic_factor)
+                .clamp(-90.0, 90.0),
             exact_center.longitude()
                 + Self::difference_of_angles_degrees(exact_center.longitude(), heuristic_center.longitude())
                     * heuristic_factor,
@@ -607,13 +540,13 @@ impl VerticalPerspectiveProjection {
         // Longitude speeds up towards the poles, where the planet is
         // narrower, but as the globe zooms out from 7 to 3 the latitude it
         // speeds up for is capped at 60°: GL JS's numbers.
-        let zoomed_out = clamp((7.0 - (state.get_zoom() + Self::zoom_adjustment(latitude, 0.0))) / 4.0, 0.0, 1.0);
+        let zoomed_out = ((7.0 - (state.get_zoom() + Self::zoom_adjustment(latitude, 0.0))) / 4.0).clamp(0.0, 1.0);
         let longitude_speed =
             interpolate(&inverse_scale(latitude), &inverse_scale(f64::min(latitude.abs(), 60.0)), zoomed_out);
         let degrees_per_pixel =
             360.0 / (2.0 * PI * Self::globe_radius_pixels(Projection::world_size(state.get_scale()), latitude));
         lat_lng(
-            clamp(latitude + y * degrees_per_pixel, -90.0, 90.0),
+            (latitude + y * degrees_per_pixel).clamp(-90.0, 90.0),
             center.longitude() - x * degrees_per_pixel * longitude_speed,
             WrapMode::Unwrapped,
         )
@@ -631,10 +564,10 @@ impl VerticalPerspectiveProjection {
         pan_delta: &ScreenCoordinate,
     ) -> CenterAndBearing {
         center_and_bearing(
-            &turned(
-                &camera_orientation(state),
-                &pan_surface_vector(state, &Point::new(point.x - pan_delta.x, point.y - pan_delta.y)),
-                &pan_surface_vector(state, point),
+            turned(
+                camera_orientation(state),
+                pan_surface_vector(state, &Point::new(point.x - pan_delta.x, point.y - pan_delta.y)),
+                pan_surface_vector(state, point),
             ),
             &state.get_lat_lng(WrapMode::Unwrapped),
         )
@@ -654,15 +587,12 @@ impl VerticalPerspectiveProjection {
         if pixels == 0.0 {
             return CenterAndBearing { center: lat_lng, bearing: -mln_math::rad2deg(state.get_bearing()) };
         }
-        let axis = cross(
-            &pan_surface_vector(state, &Point::new(center.x - offset.x / pixels, center.y - offset.y / pixels)),
-            &pan_surface_vector(state, center),
-        );
+        let axis = pan_surface_vector(state, &Point::new(center.x - offset.x / pixels, center.y - offset.y / pixels))
+            .cross(pan_surface_vector(state, center));
         let degrees_per_pixel = 360.0
             / (2.0 * PI * Self::globe_radius_pixels(Projection::world_size(state.get_scale()), lat_lng.latitude()));
         center_and_bearing(
-            &camera_orientation(state)
-                .multiply(&rotation(&axis, mln_math::deg2rad(f64::min(pixels * degrees_per_pixel, 179.5)))),
+            camera_orientation(state) * rotation(axis, mln_math::deg2rad(f64::min(pixels * degrees_per_pixel, 179.5))),
             &lat_lng,
         )
     }
@@ -672,11 +602,8 @@ impl VerticalPerspectiveProjection {
     #[must_use]
     pub fn interpolate_camera(from: &CenterAndBearing, to: &CenterAndBearing, t: f64) -> CenterAndBearing {
         center_and_bearing(
-            &slerp(
-                &orientation_from_lat_lng_bearing(&from.center, from.bearing),
-                &orientation_from_lat_lng_bearing(&to.center, to.bearing),
-                t,
-            ),
+            orientation_from_lat_lng_bearing(&from.center, from.bearing)
+                .slerp(orientation_from_lat_lng_bearing(&to.center, to.bearing), t),
             &from.center,
         )
     }
@@ -691,10 +618,10 @@ impl VerticalPerspectiveProjection {
         let center = state.get_lat_lng(WrapMode::Unwrapped);
         // GL JS's bearing is the state's with the sign flipped.
         let bearing = -mln_math::rad2deg(state.get_bearing());
-        let swung = orientation_to_lat_lng_bearing(&turned(
-            &camera_orientation(state),
-            &pan_surface_vector(state, &Point::new(point.x - pan_delta.x, point.y - pan_delta.y)),
-            &pan_surface_vector(state, point),
+        let swung = orientation_to_lat_lng_bearing(turned(
+            camera_orientation(state),
+            pan_surface_vector(state, &Point::new(point.x - pan_delta.x, point.y - pan_delta.y)),
+            pan_surface_vector(state, point),
         ));
 
         // A swing over a pole turns the bearing around; with the bearing held,
@@ -715,7 +642,7 @@ impl VerticalPerspectiveProjection {
         let (pole, _) = Self::lat_lng_to_screen_coordinate(state, &lat_lng(pole_latitude, 0.0, WrapMode::Unwrapped));
         let rx = point.x - pole.x;
         let ry = pole.y - point.y;
-        let ramp = clamp(1.0 - (LATITUDE_MAX - center.latitude().abs()) / DIAL_RAMP_DEGREES, 0.0, 1.0);
+        let ramp = (1.0 - (LATITUDE_MAX - center.latitude().abs()) / DIAL_RAMP_DEGREES).clamp(0.0, 1.0);
         let dial = ramp * ramp * (3.0 - 2.0 * ramp);
         let d_lng_swing = mln_math::wrap(swung.longitude - center.longitude() + 180.0, 0.0, 360.0) - 180.0;
         let mut d_lng_dial = 0.0;
@@ -781,7 +708,7 @@ impl VerticalPerspectiveProjection {
     /// given world size and center latitude.
     #[must_use]
     pub fn surface_distance_pixels(world_size: f64, center_latitude: f64, a: &LatLng, b: &LatLng) -> f64 {
-        let radians = clamp(dot(&Self::surface_vector(a), &Self::surface_vector(b)), -1.0, 1.0).acos();
+        let radians = Self::surface_vector(a).dot(Self::surface_vector(b)).clamp(-1.0, 1.0).acos();
         radians * Self::globe_radius_pixels(world_size, center_latitude)
     }
 
@@ -791,9 +718,9 @@ impl VerticalPerspectiveProjection {
     /// the Mercator range it keeps its value at the edge.
     #[must_use]
     pub fn interpolate_lat_lng(start: &LatLng, delta_latitude: f64, delta_longitude: f64, t: f64) -> LatLng {
-        let latitude = clamp(start.latitude() + delta_latitude * t, -90.0, 90.0);
-        let start_latitude = clamp(start.latitude(), -LATITUDE_MAX, LATITUDE_MAX);
-        let end_latitude = clamp(start.latitude() + delta_latitude, -LATITUDE_MAX, LATITUDE_MAX);
+        let latitude = (start.latitude() + delta_latitude * t).clamp(-90.0, 90.0);
+        let start_latitude = start.latitude().clamp(-LATITUDE_MAX, LATITUDE_MAX);
+        let end_latitude = (start.latitude() + delta_latitude).clamp(-LATITUDE_MAX, LATITUDE_MAX);
         if (end_latitude - start_latitude).abs() <= 1.0 {
             return lat_lng(latitude, start.longitude() + delta_longitude * t, WrapMode::Unwrapped);
         }
@@ -819,17 +746,14 @@ const PAN_MAX_ANGLE: f64 = PI * 0.98;
 /// location at the center, before the drag stops holding it exactly.
 const DRAG_HOLD_MAX_GAIN: f64 = 2.5;
 
-fn cross(a: &Vec3, b: &Vec3) -> Vec3 {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
-}
-
-/// GL JS `orientationFromLngLatBearing`: gl-matrix's
-/// `quat.fromEuler(-lng, -lat, bearing)`, bearing in GL JS's sign.
-fn orientation_from_lat_lng_bearing(center: &LatLng, bearing_degrees: f64) -> Quaternion {
-    Quaternion::from_euler_angles(
-        mln_math::deg2rad(-center.longitude()),
-        mln_math::deg2rad(-center.latitude()),
+/// GL JS `orientationFromLngLatBearing`: the rotation by `-longitude` about
+/// x, then `-latitude` about y, then the bearing (in GL JS's sign) about z.
+fn orientation_from_lat_lng_bearing(center: &LatLng, bearing_degrees: f64) -> DQuat {
+    DQuat::from_euler(
+        EulerRot::ZYX,
         mln_math::deg2rad(bearing_degrees),
+        mln_math::deg2rad(-center.latitude()),
+        mln_math::deg2rad(-center.longitude()),
     )
 }
 
@@ -840,9 +764,9 @@ struct Orientation {
 }
 
 /// GL JS `lngLatBearingFromOrientation`.
-fn orientation_to_lat_lng_bearing(q: &Quaternion) -> Orientation {
+fn orientation_to_lat_lng_bearing(q: DQuat) -> Orientation {
     Orientation {
-        latitude: -mln_math::rad2deg(clamp(2.0 * (q.w * q.y - q.z * q.x), -1.0, 1.0).asin()),
+        latitude: -mln_math::rad2deg((2.0 * (q.w * q.y - q.z * q.x)).clamp(-1.0, 1.0).asin()),
         longitude: -mln_math::rad2deg((2.0 * (q.w * q.x + q.y * q.z)).atan2(1.0 - 2.0 * (q.x * q.x + q.y * q.y))),
         bearing: mln_math::rad2deg((2.0 * (q.w * q.z + q.x * q.y)).atan2(1.0 - 2.0 * (q.y * q.y + q.z * q.z))),
     }
@@ -852,12 +776,12 @@ fn orientation_to_lat_lng_bearing(q: &Quaternion) -> Orientation {
 /// [`pan_surface_vector`], or past it.
 struct PanFalloff {
     /// The direction from the planet's center to the camera.
-    toward_camera: Vec3,
+    toward_camera: DVec3,
     /// The camera's distance from the planet's center, in radii.
     distance: f64,
     /// The part of the ray's direction across `toward_camera`, and its
     /// length.
-    lateral: Vec3,
+    lateral: DVec3,
     lateral_length: f64,
     /// The ray's angle from the line to the planet's center, and the angle
     /// the band starts at.
@@ -870,15 +794,15 @@ struct PanFalloff {
 /// `point`.
 fn pan_falloff(state: &TransformState, point: &ScreenCoordinate) -> Option<PanFalloff> {
     let origin = state.get_globe_camera_position();
-    let distance = length(&origin);
+    let distance = origin.length();
     if distance <= 1.0 {
         return None;
     }
-    let toward_camera = normalized(&origin);
+    let toward_camera = origin / distance;
     let direction = ray_direction_from_pixel(state, point, &state.get_inverse_globe_view_projection_matrix());
-    let c = -dot(&direction, &toward_camera);
-    let lateral = add(&direction, &scaled(&toward_camera, c));
-    let lateral_length = length(&lateral);
+    let c = -direction.dot(toward_camera);
+    let lateral = direction + toward_camera * c;
+    let lateral_length = lateral.length();
     if lateral_length < 1e-9 {
         return None;
     }
@@ -898,86 +822,60 @@ fn pan_falloff(state: &TransformState, point: &ScreenCoordinate) -> Option<PanFa
 /// at. Exact while the ray is well inside the silhouette, then eased off along
 /// a hyperbola that matches it in value and slope and saturates short of the
 /// far side, so the drag keeps going once the cursor leaves the planet.
-fn pan_surface_vector(state: &TransformState, point: &ScreenCoordinate) -> Vec3 {
+fn pan_surface_vector(state: &TransformState, point: &ScreenCoordinate) -> DVec3 {
     let Some(PanFalloff { toward_camera: u, distance, lateral, lateral_length: s, angle, handover_angle }) =
         pan_falloff(state, point)
     else {
         return VerticalPerspectiveProjection::screen_coordinate_to_surface(state, point);
     };
     let sin_handover = distance * handover_angle.sin();
-    let target_at_handover = clamp(sin_handover, -1.0, 1.0).asin() - handover_angle;
+    let target_at_handover = sin_handover.clamp(-1.0, 1.0).asin() - handover_angle;
     let slope_at_handover =
         distance * handover_angle.cos() / f64::max(1.0 - sin_handover * sin_handover, 1e-12).sqrt() - 1.0;
     let room = PAN_MAX_ANGLE - target_at_handover;
     let excess = angle - handover_angle;
-    let target = clamp(
-        target_at_handover + room * (slope_at_handover * excess) / (room + slope_at_handover * excess),
-        0.0,
-        PAN_MAX_ANGLE,
-    );
-    normalized(&add(&scaled(&u, target.cos()), &scaled(&lateral, target.sin() / s)))
+    let target = (target_at_handover + room * (slope_at_handover * excess) / (room + slope_at_handover * excess))
+        .clamp(0.0, PAN_MAX_ANGLE);
+    (u * target.cos() + lateral * (target.sin() / s)).normalize()
 }
 
 /// The globe camera's orientation; GL JS's bearing is the state's with the
 /// sign flipped.
-fn camera_orientation(state: &TransformState) -> Quaternion {
+fn camera_orientation(state: &TransformState) -> DQuat {
     orientation_from_lat_lng_bearing(&state.get_lat_lng(WrapMode::Unwrapped), -mln_math::rad2deg(state.get_bearing()))
 }
 
 /// The rotation about `axis` by `angle`, composed as GL JS's drag composes
 /// it: the axis is in the surface-vector frame and the orientation in the
 /// Euler frame, hence the swizzle.
-fn rotation(axis: &Vec3, angle: f64) -> Quaternion {
-    let l = length(axis);
+fn rotation(axis: DVec3, angle: f64) -> DQuat {
+    let l = axis.length();
     if l == 0.0 {
-        return Quaternion::IDENTITY;
+        return DQuat::IDENTITY;
     }
     let s = (angle / 2.0).sin();
-    Quaternion::new(axis[1] / l * s, -axis[0] / l * s, axis[2] / l * s, (angle / 2.0).cos())
+    DQuat::from_xyzw(axis.y / l * s, -axis.x / l * s, axis.z / l * s, (angle / 2.0).cos())
 }
 
 /// The orientation after the rotation that brings the surface location
 /// `from` to where `to` is.
-fn turned(orientation: &Quaternion, from: &Vec3, to: &Vec3) -> Quaternion {
-    orientation.multiply(&rotation(&cross(from, to), clamp(dot(from, to), -1.0, 1.0).acos()))
-}
-
-/// gl-matrix's `quat.slerp`.
-fn slerp(a: &Quaternion, b: &Quaternion, t: f64) -> Quaternion {
-    let mut b = *b;
-    let mut cos_omega = a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
-    if cos_omega < 0.0 {
-        cos_omega = -cos_omega;
-        b = Quaternion::new(-b.x, -b.y, -b.z, -b.w);
-    }
-    let mut scale_a = 1.0 - t;
-    let mut scale_b = t;
-    if 1.0 - cos_omega > 1e-6 {
-        let omega = cos_omega.acos();
-        scale_a = ((1.0 - t) * omega).sin() / omega.sin();
-        scale_b = (t * omega).sin() / omega.sin();
-    }
-    Quaternion::new(
-        scale_a * a.x + scale_b * b.x,
-        scale_a * a.y + scale_b * b.y,
-        scale_a * a.z + scale_b * b.z,
-        scale_a * a.w + scale_b * b.w,
-    )
+fn turned(orientation: DQuat, from: DVec3, to: DVec3) -> DQuat {
+    orientation * rotation(from.cross(to), from.dot(to).clamp(-1.0, 1.0).acos())
 }
 
 /// The point `t` of the way from one unit vector to another along the great
 /// circle.
-fn slerp_vec3(a: &Vec3, b: &Vec3, t: f64) -> Vec3 {
-    let angle = clamp(dot(a, b), -1.0, 1.0).acos();
+fn slerp_vec3(a: DVec3, b: DVec3, t: f64) -> DVec3 {
+    let angle = a.dot(b).clamp(-1.0, 1.0).acos();
     if angle.sin() < 1e-9 {
-        return *a;
+        return a;
     }
-    add(&scaled(a, ((1.0 - t) * angle).sin() / angle.sin()), &scaled(b, (t * angle).sin() / angle.sin()))
+    a * (((1.0 - t) * angle).sin() / angle.sin()) + b * ((t * angle).sin() / angle.sin())
 }
 
 /// The center and bearing of an orientation, the longitude unwrapped around
 /// `center`.
-fn center_and_bearing(orientation: &Quaternion, center: &LatLng) -> CenterAndBearing {
+fn center_and_bearing(orientation: DQuat, center: &LatLng) -> CenterAndBearing {
     let o = orientation_to_lat_lng_bearing(orientation);
     CenterAndBearing {
         center: lat_lng(
@@ -1008,10 +906,10 @@ fn zoom_turning_the_planet(
     let orientation = camera_orientation(state);
     let location = VerticalPerspectiveProjection::surface_vector(zoom_location);
     let center_vector = VerticalPerspectiveProjection::surface_vector(&center);
-    let exact = turned(&orientation, &location, &pan_surface_vector(state, anchor));
-    let heuristic = turned(&orientation, &slerp_vec3(&center_vector, &location, factor), &center_vector);
+    let exact = turned(orientation, location, pan_surface_vector(state, anchor));
+    let heuristic = turned(orientation, slerp_vec3(center_vector, location, factor), center_vector);
     let camera = center_and_bearing(
-        &slerp(&exact, &heuristic, interpolation_factor_horizon.powf(INTERPOLATE_TO_HEURISTIC_EXPONENT)),
+        exact.slerp(heuristic, interpolation_factor_horizon.powf(INTERPOLATE_TO_HEURISTIC_EXPONENT)),
         &center,
     );
     let constrained = state.constrained_center(&camera.center, state.get_zoom());
@@ -1026,7 +924,7 @@ impl VerticalPerspectiveProjection {
     pub(crate) fn projection_data(
         state: &TransformState,
         tile_id: &UnwrappedTileID,
-        mercator_matrix: &Mat4,
+        mercator_matrix: &DMat4,
     ) -> ProjectionData {
         ProjectionData {
             main_matrix: state.get_globe_view_projection_matrix(),
@@ -1048,19 +946,18 @@ impl VerticalPerspectiveProjection {
     ) -> ProjectedTilePoint {
         let surface = Self::tile_coordinates_to_sphere(point, tile_id);
         let height_scale = 1.0 + elevation / Self::GLOBE_RADIUS_METERS;
-        let sphere = scaled(&surface, height_scale);
-        let pos = matrix::transform_mat4_value(&[sphere[0], sphere[1], sphere[2], 1.0], &data.main_matrix);
+        let sphere = surface * height_scale;
+        let pos = data.main_matrix * sphere.extend(1.0);
         // GL JS: the horizon plane hides a point on the surface, and only the
         // planet itself hides a raised one.
-        let plane = &data.clipping_plane;
         let occluded = if height_scale <= 1.0 {
-            plane[0] * surface[0] + plane[1] * surface[1] + plane[2] * surface[2] + plane[3] < 0.0
+            point_plane_signed_distance(data.clipping_plane, surface) < 0.0
         } else {
-            line_of_sight_blocked(&data.camera_position, &sphere)
+            line_of_sight_blocked(data.camera_position, sphere)
         };
         ProjectedTilePoint {
-            point: Point::new(pos[0] / pos[3], pos[1] / pos[3]),
-            signed_distance_from_camera: pos[3],
+            point: Point::new(pos.x / pos.w, pos.y / pos.w),
+            signed_distance_from_camera: pos.w,
             occluded,
         }
     }
@@ -1081,21 +978,20 @@ impl VerticalPerspectiveProjection {
         // Mercator, the horizon clipping through the blended depth from a
         // fifth of the hand-over on. Raised geometry keeps its depth and the
         // globe hides it.
-        let flat = matrix::transform_mat4_value(&[point.x, point.y, elevation, 1.0], &data.fallback_matrix);
+        let flat = data.fallback_matrix * DVec4::new(point.x, point.y, elevation, 1.0);
         let globe_w = globe.signed_distance_from_camera;
-        let w = interpolate(&flat[3], &globe_w, t);
-        let globeness = clamp((t - 0.2) / 0.8, 0.0, 1.0);
+        let w = interpolate(&flat.w, &globe_w, t);
+        let globeness = ((t - 0.2) / 0.8).clamp(0.0, 1.0);
         let mut occluded = globeness > 0.0 && globe.occluded;
         if elevation <= 0.0 {
             let surface = Self::tile_coordinates_to_sphere(point, tile_id);
-            let plane = &data.clipping_plane;
-            let clipping_z = 1.0 - (plane[0] * surface[0] + plane[1] * surface[1] + plane[2] * surface[2] + plane[3]);
+            let clipping_z = 1.0 - point_plane_signed_distance(data.clipping_plane, surface);
             occluded = globeness * clipping_z * globe_w > w;
         }
         ProjectedTilePoint {
             point: Point::new(
-                interpolate(&flat[0], &(globe.point.x * globe_w), t) / w,
-                interpolate(&flat[1], &(globe.point.y * globe_w), t) / w,
+                interpolate(&flat.x, &(globe.point.x * globe_w), t) / w,
+                interpolate(&flat.y, &(globe.point.y * globe_w), t) / w,
             ),
             signed_distance_from_camera: w,
             occluded,

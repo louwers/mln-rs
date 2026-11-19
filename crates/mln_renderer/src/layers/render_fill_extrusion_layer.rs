@@ -43,10 +43,10 @@ use mln_style::layers::FillExtrusion;
 use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionPaintProperties;
 use mln_style_types::{AlignmentType, LayerBlendType};
 use mln_tile_id::OverscaledTileID;
+use mln_util::clip_depth::ClipDepthRange;
 use mln_util::constants::TILE_SIZE_D;
 use mln_util::error::Error;
 use mln_util::identity::SimpleIdentity;
-use mln_util::mat4::ClipDepthRange;
 use mln_util::size::Size;
 
 use super::cast_matrix;

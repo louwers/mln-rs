@@ -26,8 +26,8 @@ use std::any::Any;
 use std::sync::Arc;
 
 use mln_util::Color;
+pub use mln_util::clip_depth::ClipDepthRange;
 use mln_util::logging::{Event, Log};
-pub use mln_util::mat4::ClipDepthRange;
 use mln_util::size::Size;
 
 pub use self::ids::{

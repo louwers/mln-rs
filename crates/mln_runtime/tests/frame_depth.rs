@@ -4,6 +4,7 @@
 // between the projection's far depth and 1. A backend that this build or
 // machine lacks skips its cases.
 
+use glam::{DMat4, DVec4};
 use mln_map::{CameraOptions, CameraUpdate, MapMode};
 use mln_runtime::{
     AcquiredFrame, AttachOptions, ClipDepthRange, DemandMode, Device, DeviceOptions, ErrorKind, FrameDemand,
@@ -11,7 +12,6 @@ use mln_runtime::{
     SyncKinds,
 };
 use mln_util::geo::{EdgeInsets, LatLng};
-use mln_util::mat4::{Mat4, matrix};
 use mln_util::size::Size;
 
 use crate::support::{eventually, runtime, wait};
@@ -95,10 +95,8 @@ fn loaded_frame(session: &RenderSession) -> (AcquiredFrame, FrameResult) {
 /// A point of the world, x and y in Web Mercator's 0 to 1, z in meters.
 type Point = [f64; 3];
 
-fn transform(matrix: &Mat4, point: [f64; 4]) -> [f64; 4] {
-    let mut out = [0.0; 4];
-    matrix::transform_mat4(&mut out, &point, matrix);
-    out
+fn transform(matrix: &DMat4, point: [f64; 4]) -> [f64; 4] {
+    (*matrix * DVec4::from_array(point)).to_array()
 }
 
 /// The depth that `projection` gives `point`, under the default depth range.
@@ -114,9 +112,7 @@ fn depth_of(projection: &FrameProjection, point: Point) -> f64 {
 /// Where the view ray through the center of pixel `(x, y)`, from the top
 /// left, meets the plane of altitude `z`.
 fn ray_at(projection: &FrameProjection, x: u32, y: u32, z: f64) -> Point {
-    let mut inverse = [0.0; 16];
-    // `invert` reports a singular matrix.
-    assert!(!matrix::invert(&mut inverse, &projection.matrix));
+    let inverse = projection.matrix.try_inverse().unwrap();
     let ndc_x = (f64::from(x) + 0.5) / f64::from(SIZE.width) * 2.0 - 1.0;
     let ndc_y = 1.0 - (f64::from(y) + 0.5) / f64::from(SIZE.height) * 2.0;
     let unproject = |depth: f64| {

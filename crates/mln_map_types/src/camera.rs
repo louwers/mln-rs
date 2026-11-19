@@ -1,8 +1,8 @@
 use std::time::Duration;
 
+use glam::{DQuat, DVec3};
 use mln_util::UnitBezier;
 use mln_util::geo::{EdgeInsets, LatLng, ScreenCoordinate};
-use mln_util::vectors::{Vec3, Vec4};
 
 /// Various options for describing the viewpoint of a map. All fields are
 /// optional.
@@ -138,10 +138,9 @@ pub struct FreeCameraOptions {
     /// [1, 1, 0] is the south-east corner. Z coordinate is conformal and must
     /// respect minimum and maximum zoom values. Zoom is automatically
     /// computed from the altitude (z).
-    pub position: Option<Vec3>,
-    /// Orientation of the camera represented as a unit quaternion [x, y, z,
-    /// w].
-    pub orientation: Option<Vec4>,
+    pub position: Option<DVec3>,
+    /// Orientation of the camera as a unit quaternion.
+    pub orientation: Option<DQuat>,
 }
 
 /// Where a camera change stands in a gesture, as the C API's

@@ -1,6 +1,7 @@
 use std::f64::consts::PI;
 use std::rc::Rc;
 
+use glam::{DMat3, DVec3};
 use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::gpu::Gpu;
@@ -16,9 +17,7 @@ use mln_style_types::LightAnchorType;
 use mln_util::Color;
 use mln_util::geo::WrapMode;
 use mln_util::identity::SimpleIdentity;
-use mln_util::mat4::{Mat4, matrix};
 use mln_util::size::Size;
-use mln_util::vectors::Vec4;
 
 use crate::draw::{DrawGeometry, DrawObjects, Textures, raw_vertices};
 use crate::gfx::context::Context;
@@ -64,29 +63,20 @@ fn fullscreen_draw(shader: &ShaderProgramPtr, vertex_attribute: usize, depth: Dr
 /// globe's rotation into the view, inverted.
 fn sun_position(light: &EvaluatedLight, state: &TransformState, blend: f32) -> [f32; 4] {
     let position = light.light_position.uniform().get_cartesian();
-    let mut sun: Vec4 = [-f64::from(position[0]), -f64::from(position[1]), -f64::from(position[2]), 0.0];
+    let mut sun = -DVec3::new(f64::from(position[0]), f64::from(position[1]), f64::from(position[2]));
 
     if *light.light_anchor.uniform() == LightAnchorType::Viewport {
         let center = state.get_lat_lng(WrapMode::Unwrapped);
-        let mut m: Mat4 = [0.0; 16];
-        matrix::identity(&mut m);
-        let a = m;
-        matrix::rotate_y(&mut m, &a, center.longitude() * PI / 180.0);
-        let a = m;
-        matrix::rotate_x(&mut m, &a, -center.latitude() * PI / 180.0);
-        let a = m;
-        matrix::rotate_z(&mut m, &a, state.get_bearing());
-        let a = m;
-        matrix::rotate_x(&mut m, &a, state.get_pitch());
-        let a = m;
-        matrix::rotate_z(&mut m, &a, -state.get_roll());
-        let a = m;
-        matrix::rotate_z(&mut m, &a, state.get_north_orientation_angle());
-        let a = sun;
-        matrix::transform_mat4(&mut sun, &a, &m);
+        let view_to_globe = DMat3::from_rotation_y(center.longitude() * PI / 180.0)
+            * DMat3::from_rotation_x(-center.latitude() * PI / 180.0)
+            * DMat3::from_rotation_z(state.get_bearing())
+            * DMat3::from_rotation_x(state.get_pitch())
+            * DMat3::from_rotation_z(-state.get_roll())
+            * DMat3::from_rotation_z(state.get_north_orientation_angle());
+        sun = view_to_globe * sun;
     }
 
-    [sun[0] as f32, sun[1] as f32, sun[2] as f32, blend]
+    sun.as_vec3().extend(blend).to_array()
 }
 
 fn color_components(color: &Color) -> [f32; 4] {
@@ -185,8 +175,8 @@ impl SkyPass {
 
         let camera = state.get_globe_camera_position();
         let props = AtmospherePropsUBO {
-            inv_view_projection: state.get_inverse_globe_view_projection_matrix().map(|v| v as f32),
-            camera_position: [camera[0] as f32, camera[1] as f32, camera[2] as f32, 0.0],
+            inv_view_projection: state.get_inverse_globe_view_projection_matrix().as_mat4().to_cols_array(),
+            camera_position: camera.as_vec3().extend(0.0).to_array(),
             sun_position: sun_position(light, state, atmosphere_blend),
         };
         atmosphere.write_pod(gpu, ID_ATMOSPHERE_PROPS_UBO, &props, context);

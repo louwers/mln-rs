@@ -18,9 +18,7 @@ use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinates, GeometryTileFeature};
 use mln_util::Color;
 use mln_util::error::Error;
-use mln_util::mat3::{Mat3, matrix as mat3};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
-use mln_util::vectors::Vec3f;
 use mln_vec_map::VecMap;
 
 use crate::bucket::{Bucket, BucketBase, UploadNeeds};
@@ -264,16 +262,13 @@ impl FillExtrusionBucket {
     }
 
     pub(crate) fn light_position(light: &EvaluatedLight, state: &TransformState) -> [f32; 3] {
-        let mut light_pos: Vec3f = light.light_position.uniform().get_cartesian();
-        let mut light_mat: Mat3 = [0.0; 9];
-        mat3::identity(&mut light_mat);
+        let light_pos = glam::Vec3::from_array(light.light_position.uniform().get_cartesian());
         if *light.light_anchor.uniform() == LightAnchorType::Viewport {
-            let a = light_mat;
-            mat3::rotate(&mut light_mat, &a, -state.get_bearing());
+            // A viewport-anchored light turns with the map.
+            (glam::Mat3::from_rotation_z(-state.get_bearing() as f32) * light_pos).to_array()
+        } else {
+            light_pos.to_array()
         }
-        let a = light_pos;
-        mat3::transform_mat3f(&mut light_pos, &a, &light_mat);
-        light_pos
     }
 
     #[must_use]

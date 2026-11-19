@@ -1072,7 +1072,7 @@ impl SourceTiles {
         layers: &crate::geometry::feature_index::QueryLayers<'_>,
         options: &crate::query::RenderedQueryOptions,
         global_state: Option<&mln_style::expression::GlobalStateMap>,
-        proj_matrix: &mln_util::mat4::Mat4,
+        proj_matrix: &glam::DMat4,
     ) -> Result<crate::geometry::feature_index::QueryResults, mln_util::error::Error> {
         use mln_map_types::tile_coordinate::TileCoordinate;
 
@@ -1170,8 +1170,12 @@ impl SourceTiles {
                 f64::midpoint(screen_min.1, screen_max.1),
             );
             if reaches_into_space && on_planet(&center) {
+                // The box's horizon points include the one due north or south
+                // of the center, at its longitude: a center within rounding
+                // of the box's edge is past it.
+                const EDGE: f64 = 1e-9;
                 let c = to_world(&center);
-                covered = covered && bounds_min.0 <= c.x && c.x <= bounds_max.0;
+                covered = covered && bounds_min.0 + EDGE < c.x && c.x < bounds_max.0 - EDGE;
             }
             if !covered {
                 for c in &mut query_geometry {

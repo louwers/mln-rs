@@ -147,7 +147,10 @@ mlt-core = { version = "0.22.1" }
 # instead of porting wagyu. mlt-core already depends on it through geo.
 i_overlay = { version = "4.5.2", default-features = false }
 # 2D vector maths (mln_renderer's symbol layout, placement and collision).
-glam = { version = "0.34.3", default-features = false, features = ["std"] }
+glam = { version = "0.34.3", default-features = false, features = [
+  "std",
+  "f64",
+] }
 # The GeoJSON and feature geometry (mln-rs-feature's `Feature`, the GeoJSON
 # sources, queries, the `within` and `distance` expressions), in place of a
 # port of the C++ core's vendored geometry.hpp variant. Tile geometry stays
@@ -523,6 +526,7 @@ geo-types.workspace = true
 geojson.workspace = true
 geojson_vt.workspace = true
 geometry.workspace = true
+glam.workspace = true
 kdbush.workspace = true
 mln_conversion.workspace = true
 mln_d3d12.workspace = true

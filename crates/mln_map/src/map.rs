@@ -6,6 +6,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use geo_types::Geometry;
+use glam::{DMat4, DVec3};
 use mln_map_types::{
     AnimationOptions, BoundOptions, CameraDelta, CameraError, CameraOptions, CameraUpdate, MapDebugOptions, MapMode,
     MapView, ProjectionMode, TileLodMode, TransformState, VerticalPerspectiveProjection, Viewport,
@@ -24,12 +25,10 @@ use mln_util::event_queue::{EventQueue, Waker};
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
 use mln_util::geometry::for_each_point;
 use mln_util::logging::{Event, Log};
-use mln_util::mat4::Mat4;
 use mln_util::pool::Pool;
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::time::Instant;
-use mln_util::vectors::Vec3;
 
 use crate::feature_state::FeatureStateStore;
 use crate::map_event::{MapEvent, RenderFrameStatus};
@@ -1562,23 +1561,20 @@ fn camera_for_lat_lngs_on_screen(
 /// degenerates. Zooming out also moves the camera along `to_center`, so the
 /// point solved for is `vector * t + to_center * (1 - t)`.
 fn globe_scale_for_clip_target(
-    vector: &Vec3,
-    to_center: &Vec3,
-    projection: &Mat4,
+    vector: DVec3,
+    to_center: DVec3,
+    projection: &DMat4,
     x_axis: bool,
     target: f64,
 ) -> Option<f64> {
-    let column: [f64; 4] = if x_axis {
-        [projection[0], projection[4], projection[8], projection[12]]
-    } else {
-        [projection[1], projection[5], projection[9], projection[13]]
-    };
-    let column_z: [f64; 4] = [projection[3], projection[7], projection[11], projection[15]];
+    // The rows of the clip axis and of w.
+    let column = projection.row(usize::from(!x_axis));
+    let column_z = projection.row(3);
 
-    let vector_dot = vector[0] * column[0] + vector[1] * column[1] + vector[2] * column[2];
-    let vector_dot_z = vector[0] * column_z[0] + vector[1] * column_z[1] + vector[2] * column_z[2];
-    let to_center_dot = to_center[0] * column[0] + to_center[1] * column[1] + to_center[2] * column[2];
-    let to_center_dot_z = to_center[0] * column_z[0] + to_center[1] * column_z[1] + to_center[2] * column_z[2];
+    let vector_dot = vector.dot(column.truncate());
+    let vector_dot_z = vector.dot(column_z.truncate());
+    let to_center_dot = to_center.dot(column.truncate());
+    let to_center_dot_z = to_center.dot(column_z.truncate());
 
     if to_center_dot + target * vector_dot_z == vector_dot + target * to_center_dot_z
         || column_z[3] * (vector_dot - to_center_dot)
@@ -1666,19 +1662,16 @@ fn camera_for_lat_lngs_on_globe(
     for sample in &samples {
         let vector = VerticalPerspectiveProjection::surface_vector(sample);
         if left < 0.0 {
-            keep_smallest_scale(&mut smallest, globe_scale_for_clip_target(&vector, &to_center, &matrix, true, left));
+            keep_smallest_scale(&mut smallest, globe_scale_for_clip_target(vector, to_center, &matrix, true, left));
         }
         if right > 0.0 {
-            keep_smallest_scale(&mut smallest, globe_scale_for_clip_target(&vector, &to_center, &matrix, true, right));
+            keep_smallest_scale(&mut smallest, globe_scale_for_clip_target(vector, to_center, &matrix, true, right));
         }
         if top > 0.0 {
-            keep_smallest_scale(&mut smallest, globe_scale_for_clip_target(&vector, &to_center, &matrix, false, top));
+            keep_smallest_scale(&mut smallest, globe_scale_for_clip_target(vector, to_center, &matrix, false, top));
         }
         if bottom < 0.0 {
-            keep_smallest_scale(
-                &mut smallest,
-                globe_scale_for_clip_target(&vector, &to_center, &matrix, false, bottom),
-            );
+            keep_smallest_scale(&mut smallest, globe_scale_for_clip_target(vector, to_center, &matrix, false, bottom));
         }
     }
     if !smallest.is_finite() || smallest == 0.0 {

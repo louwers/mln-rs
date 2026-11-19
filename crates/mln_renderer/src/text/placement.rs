@@ -17,7 +17,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use geometry::Point;
-use glam::Vec2;
+use glam::{DMat4, Vec2};
 use mln_map_types::{MapDebugOptions, MapMode, ProjectionData, TileProjector, TransformState};
 use mln_math::{fmaxf, fminf};
 use mln_style::TransitionOptions;
@@ -32,7 +32,6 @@ use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::constants::{DEFAULT_TRANSITION_DURATION, EXTENT, ONE_EM, TILE_SIZE_D};
 use mln_util::grid_index::BBox;
 use mln_util::hash::{HashMap, HashSet};
-use mln_util::mat4::Mat4;
 use mln_util::time::Instant;
 use mln_vec_map::VecMap;
 
@@ -251,7 +250,7 @@ fn translation_point(
 /// The projection without the horizon plane, so nothing on it counts as
 /// hidden behind the planet.
 fn without_horizon(mut data: ProjectionData) -> ProjectionData {
-    data.clipping_plane = [0.0, 0.0, 0.0, 0.0];
+    data.clipping_plane = glam::DVec4::ZERO;
     data
 }
 
@@ -1473,7 +1472,7 @@ impl Placement {
         placed_symbol: &PlacedSymbol,
         pools: &PlacedSymbolPools,
         font_size: f32,
-        pos_matrix: &Mat4,
+        pos_matrix: &DMat4,
         variable_text_anchors: &[SymbolAnchorType],
         do_variable_icon_placement: bool,
         shift: &Cell<Vec2>,
@@ -1908,8 +1907,8 @@ impl Placement {
             let mut vec_south = Vec2::new(0.0f32, 1.0);
             if pitch_with_map && !rotate_with_map {
                 let (east, south) = tile_skew_vectors(state);
-                vec_east = Vec2::new(east[0] as f32, east[1] as f32);
-                vec_south = Vec2::new(south[0] as f32, south[1] as f32);
+                vec_east = east.as_vec2();
+                vec_south = south.as_vec2();
             }
             let mut placed_text_shifts: HashMap<usize, (usize, Vec2)> = HashMap::default();
 
@@ -2484,7 +2483,7 @@ impl Placement {
 
     /// The tile borders that `bucket`'s symbols stay inside, in tile mode,
     /// where the bucket avoids its tile's edges or places along lines.
-    fn avoid_edges(&mut self, bucket: &SymbolBucket, pos_matrix: &Mat4) -> Option<CollisionBoundaries> {
+    fn avoid_edges(&mut self, bucket: &SymbolBucket, pos_matrix: &DMat4) -> Option<CollisionBoundaries> {
         let PlacementKind::Tile(tile) = &mut self.kind else {
             return None;
         };
@@ -2506,7 +2505,7 @@ impl Placement {
         anchor: SymbolAnchorType,
         shift: Vec2,
         anchors: &[SymbolAnchorType],
-        pos_matrix: &Mat4,
+        pos_matrix: &DMat4,
         text_pixel_ratio: f32,
     ) -> bool {
         let PlacementKind::Tile(tile) = &self.kind else {
@@ -2645,7 +2644,7 @@ impl Placement {
         /// Keeps the data necessary to find a feature location according to a tile.
         struct NeighborTileData {
             shift: Vec2,
-            matrix: Mat4,
+            matrix: DMat4,
             borders: CollisionBoundaries,
         }
 

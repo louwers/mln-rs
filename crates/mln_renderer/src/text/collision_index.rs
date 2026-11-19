@@ -1,5 +1,5 @@
 use geometry::Point;
-use glam::Vec2;
+use glam::{DMat4, DVec4, Vec2};
 use mln_map_types::{MapMode, ProjectedTilePoint, TileProjector, TransformState};
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style_types::IconOverlapType;
@@ -9,8 +9,6 @@ use mln_util::geo::ScreenLineString;
 use mln_util::grid_index::{BBox, GridIndex};
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::intersection_tests::polygon_intersects_polygon;
-use mln_util::mat4::{Mat4, matrix};
-use mln_util::vectors::Vec4;
 
 use crate::buckets::symbol_bucket::{PlacedSymbol, PlacedSymbolPools};
 use crate::geometry::feature_index::IndexedSubfeature;
@@ -237,7 +235,7 @@ impl CollisionIndex {
             && boundaries[1] < self.grid_bottom_boundary
     }
 
-    pub(crate) fn project_tile_boundaries(&self, pos_matrix: &Mat4) -> CollisionBoundaries {
+    pub(crate) fn project_tile_boundaries(&self, pos_matrix: &DMat4) -> CollisionBoundaries {
         let top_left = self.project_point(pos_matrix, Vec2::ZERO);
         let bottom_right = self.project_point(pos_matrix, Vec2::new(EXTENT as f32, EXTENT as f32));
 
@@ -258,7 +256,7 @@ impl CollisionIndex {
         &self,
         box_: &CollisionBox,
         shift: Vec2,
-        pos_matrix: &Mat4,
+        pos_matrix: &DMat4,
         text_pixel_ratio: f32,
         tile_edges: &CollisionBoundaries,
     ) -> IntersectStatus {
@@ -728,7 +726,7 @@ impl CollisionIndex {
         )
     }
 
-    fn project_point(&self, pos_matrix: &Mat4, point: Vec2) -> Vec2 {
+    fn project_point(&self, pos_matrix: &DMat4, point: Vec2) -> Vec2 {
         let p = transform(pos_matrix, point);
         let size = self.transform_state.get_size();
         let viewport_padding = f64::from(self.viewport_padding);
@@ -740,7 +738,7 @@ impl CollisionIndex {
 
     fn projected_collision_boundaries(
         &self,
-        pos_matrix: &Mat4,
+        pos_matrix: &DMat4,
         shift: Vec2,
         text_pixel_ratio: f32,
         box_: &CollisionBox,
@@ -807,8 +805,8 @@ impl CollisionIndex {
         } else if !rotate_with_map && pitch_with_map {
             // Pitched texts that stay aligned with the viewport's X axis.
             let (east, south) = tile_skew_vectors(&self.transform_state);
-            vec_east = Vec2::new(east[0] as f32, east[1] as f32);
-            vec_south = Vec2::new(south[0] as f32, south[1] as f32);
+            vec_east = east.as_vec2();
+            vec_south = south.as_vec2();
         }
 
         let mut base_point = projected_point.point;
@@ -876,9 +874,8 @@ impl CollisionIndex {
     }
 }
 
-fn transform(pos_matrix: &Mat4, point: Vec2) -> Vec4 {
-    let a: Vec4 = [f64::from(point.x), f64::from(point.y), 0.0, 1.0];
-    matrix::transform_mat4_value(&a, pos_matrix)
+fn transform(pos_matrix: &DMat4, point: Vec2) -> DVec4 {
+    *pos_matrix * DVec4::new(f64::from(point.x), f64::from(point.y), 0.0, 1.0)
 }
 
 fn polygon_intersects_box(polygon: &[Point<f32>], bbox: &BBox) -> bool {

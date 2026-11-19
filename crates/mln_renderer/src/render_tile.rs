@@ -6,11 +6,10 @@
 // by the tile's slot and id (`FrameTile`); the store changes them only in
 // the frame's update, before the layers read them.
 
-use glam::Vec2;
+use glam::{DMat4, Vec2};
 use mln_map_types::{MapDebugOptions, ProjectionData, TransformState};
 use mln_style_types::TranslateAnchorType;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
-use mln_util::mat4::Mat4;
 
 use crate::buckets::debug_bucket::DebugBucket;
 use crate::buckets::hillshade_bucket::HillshadeBucket;
@@ -26,7 +25,7 @@ pub(crate) struct RenderTile {
     pub(crate) id: UnwrappedTileID,
     /// The projection contract for this tile; `matrix` is its main matrix.
     pub(crate) projection: ProjectionData,
-    pub(crate) matrix: Mat4,
+    pub(crate) matrix: DMat4,
     /// The tile's debug overlay, when the map's debug options show one.
     pub(crate) debug_bucket: Option<Box<DebugBucket>>,
 
@@ -53,7 +52,7 @@ impl RenderTile {
             id,
             projection: ProjectionData::default(),
             // `set_projection` sets it.
-            matrix: [0.0; 16],
+            matrix: DMat4::ZERO,
             tile_id,
             tile_hold_for_fade: hold_for_fade,
             slot: None,

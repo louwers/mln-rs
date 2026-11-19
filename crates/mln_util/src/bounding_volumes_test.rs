@@ -1,22 +1,25 @@
 use std::f64::consts::PI;
 
+use glam::dcamera::rh::proj::opengl::perspective;
+use glam::{DMat4, DVec3, DVec4, dvec3};
+
 use super::*;
 
 // gtest: BoundingVolumes.CreateAabb
 #[test]
 fn create_aabb() {
-    let aabb = AABB::new([0.0, 0.0, 0.0], [2.0, 4.0, 6.0]);
+    let aabb = AABB::new(dvec3(0.0, 0.0, 0.0), dvec3(2.0, 4.0, 6.0));
 
-    assert_eq!(aabb.min, [0.0, 0.0, 0.0]);
-    assert_eq!(aabb.max, [2.0, 4.0, 6.0]);
+    assert_eq!(aabb.min, dvec3(0.0, 0.0, 0.0));
+    assert_eq!(aabb.max, dvec3(2.0, 4.0, 6.0));
 }
 
 // gtest: BoundingVolumes.AabbEquality
 #[test]
 fn aabb_equality() {
-    let aabb0 = AABB::new([-4.23, 1.01, 2.0], [-1.0, 1.02, 100.0]);
-    let aabb1 = AABB::new([-4.23, 1.01, 2.0], [-1.0, 1.02, 100.0]);
-    let aabb2 = AABB::new([-4.23, 1.01, 2.0], [-1.0, 1.03, 55.0]);
+    let aabb0 = AABB::new(dvec3(-4.23, 1.01, 2.0), dvec3(-1.0, 1.02, 100.0));
+    let aabb1 = AABB::new(dvec3(-4.23, 1.01, 2.0), dvec3(-1.0, 1.02, 100.0));
+    let aabb2 = AABB::new(dvec3(-4.23, 1.01, 2.0), dvec3(-1.0, 1.03, 55.0));
 
     assert_eq!(aabb0, aabb1);
     assert_ne!(aabb0, aabb2);
@@ -25,12 +28,12 @@ fn aabb_equality() {
 // gtest: BoundingVolumes.CreateAabbQuadrants
 #[test]
 fn create_aabb_quadrants() {
-    let aabb = AABB::new([0.0, 0.0, 0.0], [2.0, 4.0, 16.0]);
+    let aabb = AABB::new(dvec3(0.0, 0.0, 0.0), dvec3(2.0, 4.0, 16.0));
 
-    let quadrant0 = AABB::new([0.0, 0.0, 0.0], [1.0, 2.0, 16.0]);
-    let quadrant1 = AABB::new([1.0, 0.0, 0.0], [2.0, 2.0, 16.0]);
-    let quadrant2 = AABB::new([0.0, 2.0, 0.0], [1.0, 4.0, 16.0]);
-    let quadrant3 = AABB::new([1.0, 2.0, 0.0], [2.0, 4.0, 16.0]);
+    let quadrant0 = AABB::new(dvec3(0.0, 0.0, 0.0), dvec3(1.0, 2.0, 16.0));
+    let quadrant1 = AABB::new(dvec3(1.0, 0.0, 0.0), dvec3(2.0, 2.0, 16.0));
+    let quadrant2 = AABB::new(dvec3(0.0, 2.0, 0.0), dvec3(1.0, 4.0, 16.0));
+    let quadrant3 = AABB::new(dvec3(1.0, 2.0, 0.0), dvec3(2.0, 4.0, 16.0));
 
     assert_eq!(aabb.quadrant(0), quadrant0);
     assert_eq!(aabb.quadrant(1), quadrant1);
@@ -41,21 +44,21 @@ fn create_aabb_quadrants() {
 // gtest: BoundingVolumes.AabbDistanceToPoint
 #[test]
 fn aabb_distance_to_point() {
-    let aabb = AABB::new([-1.0, -1.0, -1.0], [1.0, 1.0, 1.0]);
+    let aabb = AABB::new(dvec3(-1.0, -1.0, -1.0), dvec3(1.0, 1.0, 1.0));
 
-    assert_eq!(aabb.distance_xyz(&[0.5, -0.5, 0.5]), [0.0, 0.0, 0.0]);
-    assert_eq!(aabb.distance_xyz(&[1.0, 1.0, 1.0]), [0.0, 0.0, 0.0]);
-    assert_eq!(aabb.distance_xyz(&[0.0, 10.0, 0.0]), [0.0, 9.0, 0.0]);
-    assert_eq!(aabb.distance_xyz(&[-2.0, -2.0, -4.0]), [1.0, 1.0, 3.0]);
+    assert_eq!(aabb.distance_xyz(dvec3(0.5, -0.5, 0.5)), dvec3(0.0, 0.0, 0.0));
+    assert_eq!(aabb.distance_xyz(dvec3(1.0, 1.0, 1.0)), dvec3(0.0, 0.0, 0.0));
+    assert_eq!(aabb.distance_xyz(dvec3(0.0, 10.0, 0.0)), dvec3(0.0, 9.0, 0.0));
+    assert_eq!(aabb.distance_xyz(dvec3(-2.0, -2.0, -4.0)), dvec3(1.0, 1.0, 3.0));
 }
 
 // gtest: BoundingVolumes.AabbAabbIntersection
 #[test]
 fn aabb_aabb_intersection() {
-    let aabb0 = AABB::new([1.0, 0.0, 0.0], [3.0, 2.0, 1.0]);
-    let aabb1 = AABB::new([2.5, 1.5, -1.0], [6.0, 2.5, 1.0]);
-    let aabb2 = AABB::new([3.5, -2.0, -2.0], [5.0, 1.0, -1.5]);
-    let aabb3 = AABB::new([0.5, -1.0, -1.0], [6.5, 3.0, 4.0]);
+    let aabb0 = AABB::new(dvec3(1.0, 0.0, 0.0), dvec3(3.0, 2.0, 1.0));
+    let aabb1 = AABB::new(dvec3(2.5, 1.5, -1.0), dvec3(6.0, 2.5, 1.0));
+    let aabb2 = AABB::new(dvec3(3.5, -2.0, -2.0), dvec3(5.0, 1.0, -1.5));
+    let aabb3 = AABB::new(dvec3(0.5, -1.0, -1.0), dvec3(6.5, 3.0, 4.0));
 
     assert!(aabb0.intersects(&aabb1));
     assert!(!aabb0.intersects(&aabb2));
@@ -68,73 +71,46 @@ fn aabb_aabb_intersection() {
 // gtest: BoundingVolumes.CreateFrustumFromProjectionMatrix
 #[test]
 fn create_frustum_from_projection_matrix() {
-    let mut proj_matrix: Mat4 = [0.0; 16];
-    let mut inv_proj_matrix: Mat4 = [0.0; 16];
-    matrix::perspective(&mut proj_matrix, PI / 2.0, 1.0, 0.1, 100.0);
-    // C++ ignores the result.
-    let _ = matrix::invert(&mut inv_proj_matrix, &proj_matrix);
+    let inv_proj_matrix = perspective(PI / 2.0, 1.0, 0.1, 100.0).try_inverse().unwrap();
 
     let frustum = Frustum::from_inv_proj_matrix(&inv_proj_matrix, 1.0, 0.0, false, None);
 
-    let expected_points: [Vec3; 8] = [
-        [-0.1, 0.1, -0.1],
-        [0.1, 0.1, -0.1],
-        [0.1, -0.1, -0.1],
-        [-0.1, -0.1, -0.1],
-        [-100.0, 100.0, -100.0],
-        [100.0, 100.0, -100.0],
-        [100.0, -100.0, -100.0],
-        [-100.0, -100.0, -100.0],
+    let expected_points: [DVec3; 8] = [
+        dvec3(-0.1, 0.1, -0.1),
+        dvec3(0.1, 0.1, -0.1),
+        dvec3(0.1, -0.1, -0.1),
+        dvec3(-0.1, -0.1, -0.1),
+        dvec3(-100.0, 100.0, -100.0),
+        dvec3(100.0, 100.0, -100.0),
+        dvec3(100.0, -100.0, -100.0),
+        dvec3(-100.0, -100.0, -100.0),
     ];
 
-    let expected_planes: [Vec4; 6] = [
-        [0.0, -0.707, 0.707, 0.0],
-        [-0.707, 0.0, 0.707, 0.0],
-        [0.707, 0.0, 0.707, 0.0],
-        [0.0, 0.707, 0.707, 0.0],
-        [0.0, 0.0, 1.0, 0.1],
-        [0.0, 0.0, -1.0, -100.0],
+    let expected_planes: [DVec4; 6] = [
+        DVec4::new(0.0, -0.707, 0.707, 0.0),
+        DVec4::new(-0.707, 0.0, 0.707, 0.0),
+        DVec4::new(0.707, 0.0, 0.707, 0.0),
+        DVec4::new(0.0, 0.707, 0.707, 0.0),
+        DVec4::new(0.0, 0.0, 1.0, 0.1),
+        DVec4::new(0.0, 0.0, -1.0, -100.0),
     ];
 
     // C `round`: half away from zero, like f64::round.
-    let round_point = |v: &mut Vec3| {
-        for p in v.iter_mut() {
-            *p = (*p * 10.0).round() / 10.0;
-        }
-    };
-
-    let round_plane = |v: &mut Vec4| {
-        for p in v.iter_mut() {
-            *p = (*p * 1000.0).round() / 1000.0;
-        }
-    };
-
-    let mut actual_points = *frustum.get_points();
-    let mut actual_planes = *frustum.get_planes();
-
-    actual_points.iter_mut().for_each(round_point);
-    actual_planes.iter_mut().for_each(round_plane);
+    let actual_points = frustum.points().map(|v| (v * 10.0).round() / 10.0);
+    let actual_planes = frustum.planes().map(|v| (v * 1000.0).round() / 1000.0);
 
     assert_eq!(actual_points, expected_points);
     assert_eq!(actual_planes, expected_planes);
 }
 
 fn create_test_frustum(fovy: f64, aspect_ratio: f64, z_near: f64, z_far: f64, elevation: f64, bearing: f64) -> Frustum {
-    let mut proj: Mat4 = [0.0; 16];
-    let mut inv_proj: Mat4 = [0.0; 16];
+    // A complete projection matrix from world space to clip space.
+    let proj = perspective(fovy, aspect_ratio, z_near, z_far)
+        * DMat4::from_scale(dvec3(1.0, -1.0, 1.0))
+        * DMat4::from_translation(dvec3(0.0, 0.0, elevation))
+        * DMat4::from_rotation_z(bearing);
 
-    // Create a complete projection matrix for transforming from world space to clip space
-    matrix::perspective(&mut proj, fovy, aspect_ratio, z_near, z_far);
-    let a = proj;
-    matrix::scale(&mut proj, &a, 1.0, -1.0, 1.0);
-    let a = proj;
-    matrix::translate(&mut proj, &a, 0.0, 0.0, elevation);
-    let a = proj;
-    matrix::rotate_z(&mut proj, &a, bearing);
-    // C++ ignores the result.
-    let _ = matrix::invert(&mut inv_proj, &proj);
-
-    Frustum::from_inv_proj_matrix(&inv_proj, 1.0, 0.0, false, None)
+    Frustum::from_inv_proj_matrix(&proj.try_inverse().unwrap(), 1.0, 0.0, false, None)
 }
 
 // gtest: BoundingVolumes.AabbFullyInsideFrustum
@@ -143,9 +119,9 @@ fn aabb_fully_inside_frustum() {
     let frustum = create_test_frustum(PI / 2.0, 1.0, 0.1, 100.0, -5.0, 0.0);
 
     let aabb_array: [AABB; 3] = [
-        AABB::new([-1.0, -1.0, 0.0], [1.0, 1.0, 0.0]),
-        AABB::new([-5.0, -5.0, 0.0], [5.0, 5.0, 0.0]),
-        AABB::new([-5.0, -5.0, 0.0], [-4.0, -2.0, 0.0]),
+        AABB::new(dvec3(-1.0, -1.0, 0.0), dvec3(1.0, 1.0, 0.0)),
+        AABB::new(dvec3(-5.0, -5.0, 0.0), dvec3(5.0, 5.0, 0.0)),
+        AABB::new(dvec3(-5.0, -5.0, 0.0), dvec3(-4.0, -2.0, 0.0)),
     ];
 
     assert_eq!(frustum.intersects(&aabb_array[0]), IntersectionResult::Contains);
@@ -158,8 +134,10 @@ fn aabb_fully_inside_frustum() {
 fn aabb_intersects_frustum() {
     let frustum = create_test_frustum(PI / 2.0, 1.0, 0.1, 100.0, -5.0, 0.0);
 
-    let aabb_array: [AABB; 2] =
-        [AABB::new([-6.0, -6.0, 0.0], [6.0, 6.0, 0.0]), AABB::new([-6.0, -6.0, 0.0], [-5.0, -5.0, 0.0])];
+    let aabb_array: [AABB; 2] = [
+        AABB::new(dvec3(-6.0, -6.0, 0.0), dvec3(6.0, 6.0, 0.0)),
+        AABB::new(dvec3(-6.0, -6.0, 0.0), dvec3(-5.0, -5.0, 0.0)),
+    ];
 
     assert_eq!(frustum.intersects(&aabb_array[0]), IntersectionResult::Intersects);
     assert_eq!(frustum.intersects(&aabb_array[1]), IntersectionResult::Intersects);
@@ -169,7 +147,7 @@ fn aabb_intersects_frustum() {
 #[test]
 fn aabb_intersects_frustum_edge_case() {
     let frustum = create_test_frustum(PI / 2.0, 1.0, 0.1, 100.0, -5.0, PI / 4.0);
-    let aabb = AABB::new([-10.0, 10.0, 0.0], [10.0, 12.0, 0.0]);
+    let aabb = AABB::new(dvec3(-10.0, 10.0, 0.0), dvec3(10.0, 12.0, 0.0));
 
     // Intersection test should report intersection even though shapes are separate
     assert_eq!(frustum.intersects(&aabb), IntersectionResult::Intersects);
@@ -179,27 +157,17 @@ fn aabb_intersects_frustum_edge_case() {
 #[test]
 fn pushing_the_far_plane_moves_the_far_corners_along_their_rays() {
     // A camera at the origin looking down -Z, its far plane at Z = -100.
-    let mut proj: Mat4 = [0.0; 16];
-    let mut inv_proj: Mat4 = [0.0; 16];
-    matrix::perspective(&mut proj, PI / 2.0, 1.0, 0.1, 100.0);
-    let a = proj;
-    matrix::scale(&mut proj, &a, 1.0, -1.0, 1.0);
-    assert!(!matrix::invert(&mut inv_proj, &proj));
-    let frustum = Frustum::from_inv_proj_matrix(&inv_proj, 1.0, 0.0, false, None);
-    let far_side = |frustum: &Frustum| {
-        let far = frustum.get_planes()[5];
-        far[0] * 0.0 + far[1] * 0.0 + far[2] * -105.0 + far[3]
-    };
+    let proj = perspective(PI / 2.0, 1.0, 0.1, 100.0) * DMat4::from_scale(dvec3(1.0, -1.0, 1.0));
+    let frustum = Frustum::from_inv_proj_matrix(&proj.try_inverse().unwrap(), 1.0, 0.0, false, None);
+    let far_side = |frustum: &Frustum| frustum.planes()[5].dot(DVec4::new(0.0, 0.0, -105.0, 1.0));
     assert!(far_side(&frustum) < 0.0);
 
-    let pushed = frustum.with_far_plane_pushed(10.0, &[0.0, 0.0, 0.0]);
+    let pushed = frustum.with_far_plane_pushed(10.0, DVec3::ZERO);
 
-    for (before, after) in frustum.get_points()[4..].iter().zip(&pushed.get_points()[4..]) {
-        for axis in 0..3 {
-            assert!((after[axis] - before[axis] * 1.1).abs() < 1e-6, "{before:?} -> {after:?}");
-        }
+    for (before, after) in frustum.points()[4..].iter().zip(&pushed.points()[4..]) {
+        assert!(after.abs_diff_eq(*before * 1.1, 1e-6), "{before:?} -> {after:?}");
     }
-    assert_eq!(&frustum.get_points()[..4], &pushed.get_points()[..4]);
+    assert_eq!(&frustum.points()[..4], &pushed.points()[..4]);
     // A point 5 past the old far plane is inside the new one.
     assert!(far_side(&pushed) > 0.0);
 }

@@ -25,10 +25,10 @@ pub use frame_projection::{ClipDepthRange, FrameProjection};
 pub use map_view::{Camera, LogicalExtent, MapView, Viewport};
 pub use mode::{ConstrainMode, MapDebugOptions, MapMode, TileLodMode, ViewportMode};
 pub use projection_mode::ProjectionMode;
+mod camera_pose;
 pub mod tile_coordinate;
 mod tile_projector;
 mod transform_state;
-pub mod util_camera;
 mod vertical_perspective_projection;
 
 pub use camera::FreeCameraOptions;

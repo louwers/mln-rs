@@ -2,15 +2,13 @@
 // `OnceLock`, which each change that moves them clears, so a state shared
 // between threads reads them without locks. The camera follows from the
 // other fields, so it is computed where it's needed rather than cached.
-//
-// `updateMatricesIfNeeded` throws `std::runtime_error` when a matrix can't be
-// inverted; nothing catches it on the paths that run, so the port panics
-// with the same message.
 
 use std::f64::consts::PI;
 use std::sync::OnceLock;
 
 use geometry::Point;
+use glam::dcamera::rh::proj::opengl::perspective;
+use glam::{DMat4, DQuat, DVec3, DVec4};
 use mln_style_types::ProjectionDefinition;
 use mln_tile_id::UnwrappedTileID;
 use mln_util::constants;
@@ -18,20 +16,16 @@ use mln_util::constants::{DEFAULT_FOV, DEFAULT_MAX_ZOOM, DEFAULT_PITCH_MAX, M2PI
 use mln_util::error::Error;
 pub use mln_util::geo::NorthOrientation;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
-use mln_util::interpolate::interpolate;
 use mln_util::logging::{Event, Log};
-use mln_util::mat4::{Mat4, matrix};
 use mln_util::projection::Projection;
-use mln_util::quaternion::Quaternion;
 use mln_util::size::Size;
-use mln_util::vectors::{Vec3, Vec4};
 
 use crate::camera::{CameraOptions, FreeCameraOptions};
+use crate::camera_pose::CameraPose;
 use crate::map_view::Camera as MapCamera;
 use crate::mode::{ConstrainMode, ViewportMode};
 use crate::projection::{ProjectionData, mercator_tile_matrix};
 use crate::tile_coordinate::TileCoordinate;
-use crate::util_camera::Camera;
 use crate::vertical_perspective_projection::VerticalPerspectiveProjection;
 
 /// The maximum angle to use for the Mercator horizon. This must be less than
@@ -146,16 +140,34 @@ impl PartialEq for MatrixCache {
 
 /// The matrices of a state, zero while its size is empty. The globe's are
 /// zero unless it renders the globe.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 struct Matrices {
-    projection: Mat4,
-    inv_projection: Mat4,
-    coord: Mat4,
-    inverted: Mat4,
-    globe_view_projection: Mat4,
-    inv_globe_view_projection: Mat4,
-    globe_clipping_plane: Vec4,
-    globe_camera_position: Vec3,
+    projection: DMat4,
+    inv_projection: DMat4,
+    coord: DMat4,
+    /// The inverse of `coord` from the center of the map: it takes a screen
+    /// point to its offset from the center, which keeps the precision that
+    /// the whole world's coordinates would lose.
+    inverted_from_center: DMat4,
+    globe_view_projection: DMat4,
+    inv_globe_view_projection: DMat4,
+    globe_clipping_plane: DVec4,
+    globe_camera_position: DVec3,
+}
+
+impl Default for Matrices {
+    fn default() -> Self {
+        Matrices {
+            projection: DMat4::ZERO,
+            inv_projection: DMat4::ZERO,
+            coord: DMat4::ZERO,
+            inverted_from_center: DMat4::ZERO,
+            globe_view_projection: DMat4::ZERO,
+            inv_globe_view_projection: DMat4::ZERO,
+            globe_clipping_plane: DVec4::ZERO,
+            globe_camera_position: DVec3::ZERO,
+        }
+    }
 }
 
 impl Default for TransformState {
@@ -246,10 +258,8 @@ impl TransformState {
     // MARK: - Matrix
 
     /// The tile-to-world matrix of a tile at the state's scale.
-    pub fn matrix_for(&self, tile_id: &UnwrappedTileID) -> Mat4 {
-        let mut matrix = [0.0; 16];
-        mercator_tile_matrix(&mut matrix, tile_id, self.scale);
-        matrix
+    pub fn matrix_for(&self, tile_id: &UnwrappedTileID) -> DMat4 {
+        mercator_tile_matrix(tile_id, self.scale)
     }
 
     /// The globe while [`is_globe_rendering`](Self::is_globe_rendering),
@@ -258,11 +268,8 @@ impl TransformState {
         if self.is_globe_rendering() { crate::Projection::VerticalPerspective } else { crate::Projection::Mercator }
     }
 
-    pub fn get_projection_data_with(&self, tile_id: &UnwrappedTileID, proj_matrix: &Mat4) -> ProjectionData {
-        let mut mercator_matrix: Mat4 = [0.0; 16];
-        mercator_tile_matrix(&mut mercator_matrix, tile_id, self.scale);
-        let a = mercator_matrix;
-        matrix::multiply(&mut mercator_matrix, proj_matrix, &a);
+    pub fn get_projection_data_with(&self, tile_id: &UnwrappedTileID, proj_matrix: &DMat4) -> ProjectionData {
+        let mercator_matrix = *proj_matrix * mercator_tile_matrix(tile_id, self.scale);
         self.get_projection().get_projection_data(self, tile_id, &mercator_matrix)
     }
 
@@ -270,7 +277,7 @@ impl TransformState {
         self.get_projection_data_with(tile_id, &self.get_projection_matrix())
     }
 
-    pub fn get_projection_data_for_matrix(&self, tile_id: &UnwrappedTileID, mercator_matrix: &Mat4) -> ProjectionData {
+    pub fn get_projection_data_for_matrix(&self, tile_id: &UnwrappedTileID, mercator_matrix: &DMat4) -> ProjectionData {
         self.get_projection().get_projection_data(self, tile_id, mercator_matrix)
     }
 
@@ -321,10 +328,9 @@ impl TransformState {
 
     /// The projection matrix with its near plane at `near_z`, aligned to the
     /// pixel grid if `aligned`; zero while the size is empty.
-    pub fn get_proj_matrix(&self, near_z: u16, aligned: bool) -> Mat4 {
-        let mut proj_matrix = [0.0; 16];
+    pub fn get_proj_matrix(&self, near_z: u16, aligned: bool) -> DMat4 {
         if self.size.is_empty() {
-            return proj_matrix;
+            return DMat4::ZERO;
         }
 
         let offset = self.get_center_offset();
@@ -332,15 +338,10 @@ impl TransformState {
         let height = f64::from(self.size.height);
         let far_z = self.get_far_z();
 
-        let camera = self.camera_state();
-        let world_to_camera = camera.get_world_to_camera(self.scale, self.viewport_mode == ViewportMode::FlippedY);
-        // getFieldOfView() returns float.
-        let mut camera_to_clip = camera.get_camera_to_clip_perspective(
-            f64::from(self.get_field_of_view()),
-            width / height,
-            f64::from(near_z),
-            far_z,
-        );
+        let camera = self.camera_pose();
+        let world_to_camera = camera.world_to_camera(self.scale, self.viewport_mode == ViewportMode::FlippedY);
+        let mut camera_to_clip =
+            perspective(f64::from(self.get_field_of_view()), width / height, f64::from(near_z), far_z);
 
         // Move the center of perspective to center of specified edgeInsets.
         // Values are in range [-1, 1] where the upper and lower range values
@@ -349,30 +350,26 @@ impl TransformState {
         // #11882).
         // TODO(astojilj): Issue #11882 should take edge insets into account, too.
         if !self.axonometric {
-            camera_to_clip[8] = -offset.x * 2.0 / width;
-            camera_to_clip[9] = offset.y * 2.0 / height;
+            camera_to_clip.z_axis.x = -offset.x * 2.0 / width;
+            camera_to_clip.z_axis.y = offset.y * 2.0 / height;
         }
 
-        // Apply north orientation angle
         if self.get_north_orientation() != NorthOrientation::Upwards {
-            let a = camera_to_clip;
-            matrix::rotate_z(&mut camera_to_clip, &a, -self.get_north_orientation_angle());
+            camera_to_clip *= DMat4::from_rotation_z(-self.get_north_orientation_angle());
         }
 
-        matrix::multiply(&mut proj_matrix, &camera_to_clip, &world_to_camera);
+        let mut proj_matrix = camera_to_clip * world_to_camera;
 
         if self.axonometric {
-            // mat[11] controls perspective
-            proj_matrix[11] = 0.0;
-
-            // mat[8], mat[9] control x-skew, y-skew
+            // Without perspective, z skews x and y instead.
+            proj_matrix.z_axis.w = 0.0;
             let pixels_per_meter = 1.0
                 / Projection::get_meters_per_pixel_at_latitude(
                     self.get_lat_lng(WrapMode::Unwrapped).latitude(),
                     self.get_zoom(),
                 );
-            proj_matrix[8] = self.x_skew * pixels_per_meter;
-            proj_matrix[9] = self.y_skew * pixels_per_meter;
+            proj_matrix.z_axis.x = self.x_skew * pixels_per_meter;
+            proj_matrix.z_axis.y = self.y_skew * pixels_per_meter;
         }
 
         // Make a second projection matrix that is aligned to a pixel grid for
@@ -396,24 +393,20 @@ impl TransformState {
             let bearing_sin = self.bearing.sin();
             let dxa = -modf_fraction(dx) + bearing_cos * x_shift + bearing_sin * y_shift;
             let dya = -modf_fraction(dy) + bearing_cos * y_shift + bearing_sin * x_shift;
-            let a = proj_matrix;
-            matrix::translate(
-                &mut proj_matrix,
-                &a,
+            proj_matrix *= DMat4::from_translation(DVec3::new(
                 if dxa > 0.5 { dxa - 1.0 } else { dxa },
                 if dya > 0.5 { dya - 1.0 } else { dya },
                 0.0,
-            );
+            ));
         }
         proj_matrix
     }
 
     /// The camera that the state's position and orientation describe, or the
     /// default camera while the state isn't valid.
-    fn camera_state(&self) -> Camera {
-        let mut camera = Camera::new();
+    fn camera_pose(&self) -> CameraPose {
         if !self.valid() {
-            return camera;
+            return CameraPose::default();
         }
 
         let world_size = Projection::world_size(self.scale);
@@ -428,44 +421,28 @@ impl TransformState {
         let dx = 0.5 * world_size - self.x;
         let dy = 0.5 * world_size - self.y;
 
-        // Set camera orientation and move it to a proper distance from the map
-        camera.set_orientation(self.get_roll(), self.get_pitch(), self.get_bearing());
-
-        let forward = camera.forward();
-        let orbit_position: Vec3 = [
-            -forward[0] * camera_to_center_distance,
-            -forward[1] * camera_to_center_distance,
-            -forward[2] * camera_to_center_distance,
-        ];
-        let mut camera_position: Vec3 = [dx + orbit_position[0], dy + orbit_position[1], self.z + orbit_position[2]];
-
-        camera_position[0] /= world_size;
-        camera_position[1] /= world_size;
-        camera_position[2] /= world_size;
-
-        camera.set_position(&camera_position);
+        // Orient the camera, then move it back from the center along its line
+        // of sight.
+        let mut camera = CameraPose::from_angles(DVec3::ZERO, self.get_roll(), self.get_pitch(), self.get_bearing());
+        let center = DVec3::new(dx, dy, self.z);
+        camera.position = (center - camera.forward() * camera_to_center_distance) / world_size;
         camera
     }
 
-    fn update_state_from_camera(&mut self, camera: &Camera) {
-        let position = camera.get_position();
-        let forward = camera.forward();
+    fn update_state_from_camera(&mut self, camera: &CameraPose) {
+        let position = camera.position;
+        let DVec3 { x: dx, y: dy, z: dz } = camera.forward();
 
-        let dx = forward[0];
-        let dy = forward[1];
-        let dz = forward[2];
-
-        // Compute bearing and pitch
-        let (new_roll, mut new_pitch, new_bearing) = camera.get_orientation_angles();
+        let (new_roll, mut new_pitch, new_bearing) = camera.orientation_angles();
         new_pitch = mln_math::clamp_f64(new_pitch, self.min_pitch, self.max_pitch);
 
         // Compute zoom level from the camera altitude
         let center_distance = f64::from(self.get_camera_to_center_distance());
         let zoom;
         let travel;
-        if dz < -1.0e-9 && position[2] > 1.0e-9 && new_pitch <= max_mercator_horizon_angle() {
-            zoom = (center_distance / (position[2] / new_pitch.cos() * TILE_SIZE_D)).log2();
-            travel = -position[2] / dz;
+        if dz < -1.0e-9 && position.z > 1.0e-9 && new_pitch <= max_mercator_horizon_angle() {
+            zoom = (center_distance / (position.z / new_pitch.cos() * TILE_SIZE_D)).log2();
+            travel = -position.z / dz;
         } else {
             zoom = 14.0;
             let new_scale = mln_math::clamp_f64(2.0f64.powf(zoom), self.min_scale, self.max_scale);
@@ -473,14 +450,14 @@ impl TransformState {
         }
 
         // Compute center point of the map
-        let mercator_point = Point::new(position[0] + dx * travel, position[1] + dy * travel);
+        let mercator_point = Point::new(position.x + dx * travel, position.y + dy * travel);
         let Ok(center) = lat_lng_from_mercator(mercator_point, WrapMode::Unwrapped) else {
             return;
         };
         let zoom = f64::min(zoom, self.scale_zoom(self.max_scale));
         self.set_lat_lng_zoom(&center, zoom);
 
-        let mercator_z = position[2] + dz * travel;
+        let mercator_z = position.z + dz * travel;
         let alt_m = mercator_z
             * Projection::get_meters_per_pixel_at_latitude(self.get_lat_lng(WrapMode::Unwrapped).latitude(), 0.0)
             * TILE_SIZE_D;
@@ -491,12 +468,12 @@ impl TransformState {
     }
 
     pub fn get_free_camera_options(&self) -> FreeCameraOptions {
-        let camera = self.camera_state();
-        FreeCameraOptions { position: Some(camera.get_position()), orientation: Some(camera.get_orientation().m()) }
+        let camera = self.camera_pose();
+        FreeCameraOptions { position: Some(camera.position), orientation: Some(camera.orientation) }
     }
 
-    fn set_camera_position(&self, camera: &mut Camera, position: &Vec3) -> bool {
-        if position[0].is_nan() || position[1].is_nan() || position[2].is_nan() {
+    fn set_camera_position(&self, camera: &mut CameraPose, position: DVec3) -> bool {
+        if position.is_nan() {
             return false;
         }
 
@@ -504,36 +481,28 @@ impl TransformState {
         let min_world_size = Projection::world_size(2.0f64.powf(self.get_min_zoom()));
         let dist_to_center = f64::from(self.get_camera_to_center_distance());
 
-        let updated_pos: Vec3 = [
-            position[0],
-            position[1],
-            mln_math::clamp_f64(position[2], dist_to_center / max_world_size, dist_to_center / min_world_size),
-        ];
-
-        camera.set_position(&updated_pos);
+        camera.position = DVec3::new(
+            position.x,
+            position.y,
+            mln_math::clamp_f64(position.z, dist_to_center / max_world_size, dist_to_center / min_world_size),
+        );
         true
     }
 
-    fn set_camera_orientation(camera: &mut Camera, orientation: &Quaternion) -> bool {
-        let c = orientation.m();
-        if c[0].is_nan() || c[1].is_nan() || c[2].is_nan() || c[3].is_nan() {
-            return false;
-        }
-
+    fn set_camera_orientation(camera: &mut CameraPose, orientation: DQuat) -> bool {
         // Zero-length quaternions are not valid
-        if orientation.length() == 0.0 {
+        if orientation.is_nan() || orientation.length() == 0.0 {
             return false;
         }
 
-        let unit_quat = orientation.normalized();
-        let forward = unit_quat.transform(&[0.0, 0.0, -1.0]);
-        let up = unit_quat.transform(&[0.0, -1.0, 0.0]);
-
-        let Some(updated_orientation) = Camera::orientation_from_frame(&forward, &up) else {
+        let unit_quat = orientation.normalize();
+        let Some(updated_orientation) =
+            CameraPose::orientation_from_frame(unit_quat * DVec3::NEG_Z, unit_quat * DVec3::NEG_Y)
+        else {
             return false;
         };
 
-        camera.set_orientation_quaternion(&updated_orientation);
+        camera.orientation = updated_orientation;
         true
     }
 
@@ -546,18 +515,18 @@ impl TransformState {
             return;
         }
 
-        let mut camera = self.camera_state();
+        let mut camera = self.camera_pose();
         let mut changed = false;
         if let Some(orientation) = options.orientation
-            && orientation != camera.get_orientation().m()
+            && orientation != camera.orientation
         {
-            changed |= Self::set_camera_orientation(&mut camera, &Quaternion::from_vec4(&orientation));
+            changed |= Self::set_camera_orientation(&mut camera, orientation);
         }
 
         if let Some(position) = options.position
-            && position != camera.get_position()
+            && position != camera.position
         {
-            changed |= self.set_camera_position(&mut camera, &position);
+            changed |= self.set_camera_position(&mut camera, position);
         }
 
         if changed {
@@ -574,13 +543,14 @@ impl TransformState {
             let projection = self.get_proj_matrix(1, false);
             let coord = self.coordinate_point_matrix(&projection);
 
-            let mut inv_projection = [0.0; 16];
-            let mut inverted = [0.0; 16];
-            // `invert` returns true when the matrix is singular.
-            if matrix::invert(&mut inv_projection, &projection) || matrix::invert(&mut inverted, &coord) {
+            let from_center = coord * DMat4::from_translation(self.center_coordinate());
+            let (Some(inv_projection), Some(inverted_from_center)) =
+                (projection.try_inverse(), from_center.try_inverse())
+            else {
                 return Matrices::default();
-            }
-            let mut matrices = Matrices { projection, inv_projection, coord, inverted, ..Matrices::default() };
+            };
+            let mut matrices =
+                Matrices { projection, inv_projection, coord, inverted_from_center, ..Matrices::default() };
             // The globe's projections read only the state's fields, never
             // these matrices, so they can run while the lock initializes.
             if self.is_globe_rendering() {
@@ -590,10 +560,7 @@ impl TransformState {
                 );
                 let globe_view_projection =
                     VerticalPerspectiveProjection::globe_view_projection_matrix(self, globe_radius);
-                let mut inv_globe_view_projection = [0.0; 16];
-                if matrix::invert(&mut inv_globe_view_projection, &globe_view_projection) {
-                    matrix::identity(&mut inv_globe_view_projection);
-                }
+                let inv_globe_view_projection = globe_view_projection.try_inverse().unwrap_or(DMat4::IDENTITY);
                 matrices.globe_view_projection = globe_view_projection;
                 matrices.inv_globe_view_projection = inv_globe_view_projection;
                 matrices.globe_clipping_plane = VerticalPerspectiveProjection::clipping_plane(self, globe_radius);
@@ -606,19 +573,19 @@ impl TransformState {
     /// The globe's view projection for the current camera, valid while
     /// `is_globe_rendering()`; cached with the matrices, as are the globe
     /// getters below.
-    pub fn get_globe_view_projection_matrix(&self) -> Mat4 {
+    pub fn get_globe_view_projection_matrix(&self) -> DMat4 {
         self.matrices().globe_view_projection
     }
 
-    pub fn get_inverse_globe_view_projection_matrix(&self) -> Mat4 {
+    pub fn get_inverse_globe_view_projection_matrix(&self) -> DMat4 {
         self.matrices().inv_globe_view_projection
     }
 
-    pub fn get_globe_clipping_plane(&self) -> Vec4 {
+    pub fn get_globe_clipping_plane(&self) -> DVec4 {
         self.matrices().globe_clipping_plane
     }
 
-    pub fn get_globe_camera_position(&self) -> Vec3 {
+    pub fn get_globe_camera_position(&self) -> DVec3 {
         self.matrices().globe_camera_position
     }
 
@@ -627,20 +594,23 @@ impl TransformState {
         self.matrices.0.take();
     }
 
-    pub fn get_projection_matrix(&self) -> Mat4 {
+    pub fn get_projection_matrix(&self) -> DMat4 {
         self.matrices().projection
     }
 
-    pub fn get_inv_projection_matrix(&self) -> Mat4 {
+    pub fn get_inv_projection_matrix(&self) -> DMat4 {
         self.matrices().inv_projection
     }
 
-    fn get_coord_matrix(&self) -> Mat4 {
+    fn get_coord_matrix(&self) -> DMat4 {
         self.matrices().coord
     }
 
-    fn get_inverted_matrix(&self) -> Mat4 {
-        self.matrices().inverted
+    /// The center of the map in the units that `coord` takes: world pixels
+    /// over the tile size, at the state's scale.
+    fn center_coordinate(&self) -> DVec3 {
+        let world_size = Projection::world_size(self.scale);
+        DVec3::new((0.5 * world_size - self.x) / TILE_SIZE_D, (0.5 * world_size - self.y) / TILE_SIZE_D, 0.0)
     }
 
     // MARK: - Dimensions
@@ -1103,9 +1073,9 @@ impl TransformState {
 
     /// The screen point of a location and its clip-space position, whose w
     /// is negative behind the camera. Both are zero while the size is empty.
-    pub fn lat_lng_to_screen_coordinate_with_clip(&self, lat_lng: &LatLng) -> (ScreenCoordinate, Vec4) {
+    pub fn lat_lng_to_screen_coordinate_with_clip(&self, lat_lng: &LatLng) -> (ScreenCoordinate, DVec4) {
         if self.size.is_empty() {
-            return (ScreenCoordinate::new(0.0, 0.0), [0.0; 4]);
+            return (ScreenCoordinate::new(0.0, 0.0), DVec4::ZERO);
         }
 
         if self.is_globe_rendering() {
@@ -1114,9 +1084,8 @@ impl TransformState {
 
         let pt = Projection::project(lat_lng, self.scale);
         let pt = Point::new(pt.x / TILE_SIZE_D, pt.y / TILE_SIZE_D);
-        let c: Vec4 = [pt.x, pt.y, 0.0, 1.0];
-        let p = matrix::transform_mat4_value(&c, &self.get_coord_matrix());
-        (ScreenCoordinate::new(p[0] / p[3], f64::from(self.size.height) - p[1] / p[3]), p)
+        let p = self.get_coord_matrix() * DVec4::new(pt.x, pt.y, 0.0, 1.0);
+        (ScreenCoordinate::new(p.x / p.w, f64::from(self.size.height) - p.y / p.w), p)
     }
 
     /// Whether the globe hides a location from the camera; a Mercator map
@@ -1126,8 +1095,7 @@ impl TransformState {
             return false;
         }
         let surface = VerticalPerspectiveProjection::surface_vector(lat_lng);
-        let plane = self.get_globe_clipping_plane();
-        plane[0] * surface[0] + plane[1] * surface[1] + plane[2] * surface[2] + plane[3] < 0.0
+        self.get_globe_clipping_plane().dot(surface.extend(1.0)) < 0.0
     }
 
     /// Implements mapbox-gl-js `pointCoordinate()` : `MercatorCoordinate`.
@@ -1155,25 +1123,17 @@ impl TransformState {
         // unproject two points to get a line and then find the point on that
         // line with z=0
 
-        let mut coord0: Vec4 = [0.0; 4];
-        let mut coord1: Vec4 = [0.0; 4];
-        let point0: Vec4 = [point.x, flipped_y, 0.0, 1.0];
-        let point1: Vec4 = [point.x, flipped_y, 1.0, 1.0];
-        let inverted = self.get_inverted_matrix();
-        matrix::transform_mat4(&mut coord0, &point0, &inverted);
-        matrix::transform_mat4(&mut coord1, &point1, &inverted);
+        let inverted = self.matrices().inverted_from_center;
+        let offset0 = inverted.project_point3(DVec3::new(point.x, flipped_y, 0.0));
+        let offset1 = inverted.project_point3(DVec3::new(point.x, flipped_y, 1.0));
 
-        let w0 = coord0[3];
-        let w1 = coord1[3];
-
-        let p0 = Point::new(coord0[0] / w0, coord0[1] / w0);
-        let p1 = Point::new(coord1[0] / w1, coord1[1] / w1);
-
-        let z0 = coord0[2] / w0;
-        let z1 = coord1[2] / w1;
+        let z0 = offset0.z;
+        let z1 = offset1.z;
         let t = if z0 <= z1 { 0.0 } else { (f64::from(target_z) - z0) / (z1 - z0) };
 
-        let p = interpolate(&p0, &p1, t);
+        let offset = offset0 + (offset1 - offset0) * t;
+        let center = self.center_coordinate();
+        let p = Point::new(center.x + offset.x, center.y + offset.y);
         // C++ `static_cast<double>(1 << atZoom)`: an int shift.
         let factor = f64::from(1i32.wrapping_shl(u32::from(at_zoom)));
         TileCoordinate { p: Point::new(p.x / self.scale * factor, p.y / self.scale * factor), z: f64::from(at_zoom) }
@@ -1198,23 +1158,15 @@ impl TransformState {
         Projection::unproject(&coord.p, 1.0 / TILE_SIZE_D, wrap_mode)
     }
 
-    fn coordinate_point_matrix(&self, proj_matrix: &Mat4) -> Mat4 {
-        let mut proj = *proj_matrix;
-        let a = proj;
-        matrix::scale(&mut proj, &a, TILE_SIZE_D, TILE_SIZE_D, 1.0);
-        let b = proj;
-        matrix::multiply(&mut proj, &self.get_pixel_matrix(), &b);
-        proj
+    /// The matrix from world space in tiles to screen pixels, y up.
+    fn coordinate_point_matrix(&self, proj_matrix: &DMat4) -> DMat4 {
+        self.get_pixel_matrix() * *proj_matrix * DMat4::from_scale(DVec3::new(TILE_SIZE_D, TILE_SIZE_D, 1.0))
     }
 
-    fn get_pixel_matrix(&self) -> Mat4 {
-        let mut m: Mat4 = [0.0; 16];
-        matrix::identity(&mut m);
-        let a = m;
-        matrix::scale(&mut m, &a, f64::from(self.size.width) / 2.0, -f64::from(self.size.height) / 2.0, 1.0);
-        let a = m;
-        matrix::translate(&mut m, &a, 1.0, -1.0, 0.0);
-        m
+    /// The matrix from clip space to screen pixels, y up.
+    fn get_pixel_matrix(&self) -> DMat4 {
+        DMat4::from_scale(DVec3::new(f64::from(self.size.width) / 2.0, -f64::from(self.size.height) / 2.0, 1.0))
+            * DMat4::from_translation(DVec3::new(1.0, -1.0, 0.0))
     }
 
     // MARK: - (private helper functions)
@@ -1577,19 +1529,17 @@ impl TransformState {
             let pt = Projection::project(&lat_lng, self.scale);
             Point::new(pt.x / TILE_SIZE_D, pt.y / TILE_SIZE_D)
         };
-        let p: Vec4 = [pt.x, pt.y, 0.0, 1.0];
-        let mut top_point: Vec4 = [0.0; 4];
-        matrix::transform_mat4(&mut top_point, &p, &self.get_coord_matrix());
-        top_point[3] as f32 / self.get_camera_to_center_distance()
+        let top_point = self.get_coord_matrix() * DVec4::new(pt.x, pt.y, 0.0, 1.0);
+        top_point.w as f32 / self.get_camera_to_center_distance()
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use glam::{DQuat, DVec3, DVec4};
     use mln_style_types::ProjectionDefinition;
     use mln_util::constants::{DEFAULT_FOV, LATITUDE_MAX};
     use mln_util::geo::LatLng;
-    use mln_util::mat4::matrix;
     use mln_util::projection::Projection;
     use mln_util::size::Size;
 
@@ -1625,9 +1575,8 @@ mod tests {
             .map(|step| {
                 let lat_lng = LatLng::new(f64::from(step) / 100.0, -60.0).unwrap();
                 let point = Projection::project(&lat_lng, state.get_scale());
-                let mut clip = [0.0; 4];
-                matrix::transform_mat4(&mut clip, &[point.x, point.y, 0.0, 1.0], &proj_matrix);
-                ((1.0 - clip[1] / clip[3]) / 2.0 * height, clip[2] / clip[3])
+                let clip = proj_matrix * DVec4::new(point.x, point.y, 0.0, 1.0);
+                ((1.0 - clip.y / clip.w) / 2.0 * height, clip.z / clip.w)
             })
             .collect()
     }
@@ -1728,13 +1677,19 @@ mod tests {
                 }
             }),
             ("free camera position", |s, v| {
-                s.set_free_camera_options(&FreeCameraOptions { position: Some([v, v, v]), orientation: None });
+                s.set_free_camera_options(&FreeCameraOptions { position: Some(DVec3::splat(v)), orientation: None });
             }),
             ("free camera altitude", |s, v| {
-                s.set_free_camera_options(&FreeCameraOptions { position: Some([0.5, 0.5, v]), orientation: None });
+                s.set_free_camera_options(&FreeCameraOptions {
+                    position: Some(DVec3::new(0.5, 0.5, v)),
+                    orientation: None,
+                });
             }),
             ("free camera orientation", |s, v| {
-                s.set_free_camera_options(&FreeCameraOptions { position: None, orientation: Some([v, 0.0, 0.0, 1.0]) });
+                s.set_free_camera_options(&FreeCameraOptions {
+                    position: None,
+                    orientation: Some(DQuat::from_xyzw(v, 0.0, 0.0, 1.0)),
+                });
             }),
             ("edge insets", |s, v| s.set_edge_insets(&EdgeInsets { top: v, left: v, bottom: v, right: v })),
             ("frustum offset", |s, v| {

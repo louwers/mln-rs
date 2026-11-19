@@ -9,6 +9,7 @@ use std::any::Any;
 use std::ops::Range;
 use std::sync::Arc;
 
+use glam::DMat4;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_map_types::{ProjectionData, TileProjector, TransformState};
@@ -19,7 +20,6 @@ use mln_style_types::image::ImagePosition;
 use mln_style_types::{TranslateAnchorType, VisibilityType};
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::Color;
-use mln_util::mat4::Mat4;
 use smallvec::SmallVec;
 
 use crate::bucket::Bucket;
@@ -161,7 +161,7 @@ pub(crate) struct PlacedTile {
     pub(crate) hold_for_fade: bool,
     /// The tile's projection; `matrix` is its main matrix.
     pub(crate) projection: ProjectionData,
-    pub(crate) matrix: Mat4,
+    pub(crate) matrix: DMat4,
 }
 
 impl PlacedTile {

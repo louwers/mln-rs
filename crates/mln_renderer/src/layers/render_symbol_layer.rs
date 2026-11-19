@@ -6,6 +6,8 @@
 
 use std::sync::Arc;
 
+use glam::dcamera::rh::proj::opengl::orthographic;
+use glam::{DMat4, DVec3};
 use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
@@ -39,7 +41,6 @@ use mln_util::constants::EXTENT;
 use mln_util::error::Error;
 use mln_util::hash::HashMap;
 use mln_util::identity::SimpleIdentity;
-use mln_util::mat4::{Mat4, matrix};
 
 use super::cast_matrix;
 use crate::bucket::Bucket;
@@ -149,14 +150,10 @@ pub(crate) fn text_property_values(
 }
 
 /// The tile matrix of screen-space symbols.
-pub(crate) fn screen_matrix(translation: [f32; 2]) -> Mat4 {
-    let mut m: Mat4 = [0.0; 16];
-    matrix::ortho(&mut m, 0.0, f64::from(EXTENT), -f64::from(EXTENT), 0.0, 0.0, 1.0);
-    let a = m;
-    matrix::translate(&mut m, &a, 0.0, -f64::from(EXTENT), 0.0);
-    let a = m;
-    matrix::translate(&mut m, &a, f64::from(translation[0]), f64::from(translation[1]), 0.0);
-    m
+pub(crate) fn screen_matrix(translation: [f32; 2]) -> DMat4 {
+    let extent = f64::from(EXTENT);
+    orthographic(0.0, extent, -extent, 0.0, 0.0, 1.0)
+        * DMat4::from_translation(DVec3::new(f64::from(translation[0]), f64::from(translation[1]) - extent, 0.0))
 }
 
 #[expect(
@@ -1041,7 +1038,7 @@ impl RenderSymbolLayer {
         } else {
             RenderTile::tile_unit_translation(&tile_id, *translate.uniform(), *anchor.uniform(), state)
         };
-        projection.translate = [0.0, 0.0];
+        projection.translate = glam::DVec2::ZERO;
         let matrix = projection.fallback_matrix;
 
         let pixels_to_tile_units = tile_id.pixels_to_tile_units(1.0, zoom);
@@ -1051,9 +1048,7 @@ impl RenderSymbolLayer {
         let has_variable_placement =
             data.bucket_variable_placement && (is_text || data.text_fit != IconTextFitType::None);
         let label_plane_matrix = if along_line || has_variable_placement {
-            let mut m: Mat4 = [0.0; 16];
-            matrix::identity(&mut m);
-            m
+            DMat4::IDENTITY
         } else {
             label_plane_matrix(pitch_with_map, rotate_with_map, state, pixels_to_tile_units)
         };

@@ -8,8 +8,8 @@
 //! to write the same depth, so the depth of a frame means one thing on every
 //! backend.
 
+use glam::{DMat4, DVec3};
 pub use mln_map_types::{ClipDepthRange, FrameProjection};
-use mln_util::mat4::{Mat4, matrix};
 use mln_util::projection::Projection;
 
 use crate::paint_parameters::TransformParameters;
@@ -25,19 +25,19 @@ pub(crate) fn compute(
 ) -> FrameProjection {
     let state = &transform.state;
     let world_size = Projection::world_size(state.get_scale());
-    let mut world_to_clip: Mat4 = [0.0; 16];
-    matrix::scale(&mut world_to_clip, &transform.near_clipped_proj_matrix, world_size, world_size, 1.0);
+    let mut world_to_clip =
+        transform.near_clipped_proj_matrix * DMat4::from_scale(DVec3::new(world_size, world_size, 1.0));
     let far_depth = f64::from(depth_range_size);
     // Clip z over w from 0 to 1 is the 3D layers' depth over `far_depth`:
     // scale it to the depth, and on OpenGL map it to -1 to 1 again.
-    for column in 0..4 {
-        let z = world_to_clip[column * 4 + 2];
-        let w = world_to_clip[column * 4 + 3];
-        world_to_clip[column * 4 + 2] = match clip_depth_range {
+    let (z, w) = (world_to_clip.row(2), world_to_clip.row(3));
+    world_to_clip.set_row(
+        2,
+        match clip_depth_range {
             ClipDepthRange::ZeroToOne => far_depth * z,
             ClipDepthRange::NegativeOneToOne => 2.0 * far_depth * z - w,
-        };
-    }
+        },
+    );
     let near = transform.near_clipped_near_z;
     let far = state.get_far_z();
     FrameProjection {
@@ -55,10 +55,8 @@ pub(crate) fn compute(
 /// D3D12 and WebGPU do with it: clip z from -w to w becomes `2z - w`, so that
 /// OpenGL clips what was below 0 and writes the depth range times the old z
 /// over w.
-pub(crate) fn zero_to_one_clip_z(matrix: &mut Mat4) {
-    for column in 0..4 {
-        matrix[column * 4 + 2] = 2.0 * matrix[column * 4 + 2] - matrix[column * 4 + 3];
-    }
+pub(crate) fn zero_to_one_clip_z(matrix: &mut DMat4) {
+    matrix.set_row(2, 2.0 * matrix.row(2) - matrix.row(3));
 }
 
 #[cfg(test)]
@@ -66,7 +64,6 @@ mod tests {
     use mln_map_types::{Camera, LogicalExtent, MapView, ProjectionMode, Viewport};
     use mln_style_types::ProjectionDefinition;
     use mln_util::geo::{EdgeInsets, LatLng};
-    use mln_util::mat4::matrix;
     use mln_util::size::Size;
 
     use super::*;
@@ -96,10 +93,8 @@ mod tests {
 
     /// `point`, of x and y in Web Mercator's 0 to 1 and z in meters, through
     /// `matrix`: its pixel from the top left, and its clip z over w.
-    fn project(matrix: &Mat4, point: [f64; 3]) -> (f64, f64, f64) {
-        let mut clip = [0.0; 4];
-        matrix::transform_mat4(&mut clip, &[point[0], point[1], point[2], 1.0], matrix);
-        let (x, y, z) = (clip[0] / clip[3], clip[1] / clip[3], clip[2] / clip[3]);
+    fn project(matrix: &DMat4, point: [f64; 3]) -> (f64, f64, f64) {
+        let DVec3 { x, y, z } = matrix.project_point3(DVec3::from_array(point));
         (f64::midpoint(x, 1.0) * f64::from(SIZE.width), (1.0 - y) / 2.0 * f64::from(SIZE.height), z)
     }
 
@@ -144,8 +139,7 @@ mod tests {
         // A 3D layer's OpenGL matrix, as Metal, Vulkan, D3D12 and WebGPU draw
         // it, and as OpenGL does through `zero_to_one_clip_z`.
         let world_size = Projection::world_size(transform.state.get_scale());
-        let mut layer = [0.0; 16];
-        matrix::scale(&mut layer, &transform.near_clipped_proj_matrix, world_size, world_size, 1.0);
+        let layer = transform.near_clipped_proj_matrix * DMat4::from_scale(DVec3::new(world_size, world_size, 1.0));
         let mut gl_layer = layer;
         zero_to_one_clip_z(&mut gl_layer);
         let center = mercator(&LatLng::new(40.7, -74.0).unwrap());

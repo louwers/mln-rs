@@ -2442,6 +2442,7 @@ dependencies = [
  "geo-traits",
  "geo-types",
  "geojson",
+ "glam",
  "mln-rs-conversion",
  "mln-rs-d3d12",
  "mln-rs-expression",
@@ -2544,6 +2545,7 @@ version = "0.0.13"
 dependencies = [
  "geo-types",
  "geojson",
+ "glam",
  "js-sys",
  "libc",
  "mln-rs-conversion",
@@ -2814,6 +2816,7 @@ version = "0.0.13"
 dependencies = [
  "geo-types",
  "geojson",
+ "glam",
  "glow",
  "khronos-egl",
  "mln-rs-d3d12",
@@ -2872,6 +2875,7 @@ version = "0.0.13"
 dependencies = [
  "geo-types",
  "geojson",
+ "glam",
  "mln-rs-feature",
  "mln-rs-geometry",
  "mln-rs-map-types",
@@ -2892,6 +2896,7 @@ dependencies = [
 name = "mln-rs-map-types"
 version = "0.0.13"
 dependencies = [
+ "glam",
  "mln-rs-geometry",
  "mln-rs-math",
  "mln-rs-style-types",
@@ -3009,6 +3014,7 @@ version = "0.0.13"
 dependencies = [
  "geo-types",
  "geojson",
+ "glam",
  "glow",
  "httpmock",
  "js-sys",
@@ -3260,6 +3266,7 @@ dependencies = [
  "flate2",
  "foldhash 0.2.0",
  "geo-types",
+ "glam",
  "httpdate",
  "js-sys",
  "mln-rs-conversion",

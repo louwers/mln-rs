@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
+use glam::DMat4;
 use mln_style::expression::GlobalStateMap;
 use mln_style::layer_type::ErasedLayerStyle;
 use mln_style_types::image::{ImagePositions, ImageType};
@@ -19,7 +20,6 @@ use mln_util::feature::Feature;
 use mln_util::hash::HashMap;
 use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
-use mln_util::mat4::Mat4;
 use mln_util::pool::TaskGroup;
 use mln_vec_map::{VecMap, VecSet};
 
@@ -476,7 +476,7 @@ impl GeometryContents {
         layers: &QueryLayers<'_>,
         options: &RenderedQueryOptions,
         global_state: Option<&GlobalStateMap>,
-        proj_matrix: &Mat4,
+        proj_matrix: &DMat4,
         feature_state: &SourceFeatureState,
     ) -> Result<(), Error> {
         if self.result.feature_index.data().is_none() {

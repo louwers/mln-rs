@@ -10,6 +10,7 @@
 
 use geo_types::{Coord, Geometry, LineString, Polygon};
 use geometry::Point;
+use glam::DVec3;
 use mln_map_types::{TileCoordinate, TileLodMode, TransformState, ViewportMode};
 use mln_math::{fmax, fmin};
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
@@ -17,10 +18,8 @@ use mln_util::bounding_volumes::{AABB, Frustum, IntersectionResult};
 use mln_util::constants;
 use mln_util::error::Error;
 use mln_util::geo::{LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
-use mln_util::mat3::{vec3_length, vec3_scale, vec3_sub};
 use mln_util::projection::Projection;
 use mln_util::range::Range;
-use mln_util::vectors::Vec3;
 
 use crate::util::tile_cover_impl::Impl;
 
@@ -278,62 +277,48 @@ mod globe {
     use std::f64::consts::PI;
 
     use geometry::Point;
+    use glam::{DVec3, DVec4, Vec4Swizzles};
     use mln_map_types::VerticalPerspectiveProjection;
     use mln_tile_id::{CanonicalTileID, OverscaledTileID, UnwrappedTileID};
     use mln_util::bounding_volumes::{Frustum, IntersectionResult};
     use mln_util::constants;
-    use mln_util::mat3::{vec3_cross, vec3_dot, vec3_normalize, vec3_scale, vec3_sub};
-    use mln_util::mat4::{Mat4, matrix};
     use mln_util::projection::Projection;
     use mln_util::range::Range;
-    use mln_util::vectors::{Vec3, Vec4};
 
     use super::TileCoverParameters;
     use crate::util::tile_lod::{TileZoomFunction, elevation_for_tile_culling};
 
-    /// Clamps `value` between `lo` and `hi` as `std::clamp` does:
-    /// `value < lo ? lo : hi < value ? hi : value`.
-    fn clamp(value: f64, lo: f64, hi: f64) -> f64 {
-        if value < lo {
-            lo
-        } else if hi < value {
-            hi
-        } else {
-            value
-        }
-    }
-
     /// A tile's bounding volume in unit-sphere space: a box at zoom 0 and 1,
     /// a wedge with up to eight corners after.
     struct ConvexVolume {
-        points: [Vec3; 8],
+        points: [DVec3; 8],
         point_count: usize,
-        planes: [Vec4; 6],
+        planes: [DVec4; 6],
     }
 
     impl ConvexVolume {
         fn new() -> Self {
-            ConvexVolume { points: [[0.0; 3]; 8], point_count: 0, planes: [[0.0; 4]; 6] }
+            ConvexVolume { points: [DVec3::ZERO; 8], point_count: 0, planes: [DVec4::ZERO; 6] }
         }
 
-        fn add_point(&mut self, point: Vec3) {
+        fn add_point(&mut self, point: DVec3) {
             debug_assert!(self.point_count < self.points.len());
             self.points[self.point_count] = point;
             self.point_count += 1;
         }
 
-        fn points(&self) -> &[Vec3] {
+        fn points(&self) -> &[DVec3] {
             &self.points[..self.point_count]
         }
     }
 
-    fn passes(plane: &Vec4, point: &Vec3) -> bool {
-        plane[0] * point[0] + plane[1] * point[1] + plane[2] * point[2] + plane[3] >= 0.0
+    fn passes(plane: &DVec4, point: &DVec3) -> bool {
+        plane.dot(point.extend(1.0)) >= 0.0
     }
 
     fn intersects_frustum(volume: &ConvexVolume, frustum: &Frustum) -> IntersectionResult {
         let mut fully_inside = true;
-        for plane in frustum.get_planes() {
+        for plane in frustum.planes() {
             let passed = volume.points().iter().filter(|point| passes(plane, point)).count();
             if passed == 0 {
                 return IntersectionResult::Separate;
@@ -346,7 +331,7 @@ mod globe {
             return IntersectionResult::Contains;
         }
         for plane in &volume.planes {
-            let passed = frustum.get_points().iter().filter(|point| passes(plane, point)).count();
+            let passed = frustum.points().iter().filter(|point| passes(plane, point)).count();
             if passed == 0 {
                 return IntersectionResult::Separate;
             }
@@ -354,7 +339,7 @@ mod globe {
         IntersectionResult::Intersects
     }
 
-    fn intersects_plane(volume: &ConvexVolume, plane: &Vec4) -> IntersectionResult {
+    fn intersects_plane(volume: &ConvexVolume, plane: &DVec4) -> IntersectionResult {
         let positive = volume.points().iter().filter(|point| passes(plane, point)).count();
         if positive == volume.point_count {
             return IntersectionResult::Contains;
@@ -365,7 +350,7 @@ mod globe {
         IntersectionResult::Intersects
     }
 
-    fn is_tile_visible(frustum: &Frustum, volume: &ConvexVolume, plane: &Vec4) -> IntersectionResult {
+    fn is_tile_visible(frustum: &Frustum, volume: &ConvexVolume, plane: &DVec4) -> IntersectionResult {
         let frustum_test = intersects_frustum(volume, frustum);
         if frustum_test == IntersectionResult::Separate {
             return frustum_test;
@@ -380,52 +365,47 @@ mod globe {
         IntersectionResult::Intersects
     }
 
-    fn three_plane_intersection(p0: &Vec4, p1: &Vec4, p2: &Vec4) -> Vec3 {
-        let n0: Vec3 = [p0[0], p0[1], p0[2]];
-        let n1: Vec3 = [p1[0], p1[1], p1[2]];
-        let n2: Vec3 = [p2[0], p2[1], p2[2]];
-        let det = vec3_dot(&n0, &vec3_cross(&n1, &n2));
+    fn three_plane_intersection(p0: DVec4, p1: DVec4, p2: DVec4) -> DVec3 {
+        let (n0, n1, n2) = (p0.xyz(), p1.xyz(), p2.xyz());
+        let det = n0.dot(n1.cross(n2));
         if det == 0.0 {
-            return [0.0, 0.0, 0.0];
+            return DVec3::ZERO;
         }
-        let mut sum = vec3_scale(&vec3_cross(&n1, &n2), -p0[3]);
-        sum = vec3_sub(&sum, &vec3_scale(&vec3_cross(&n2, &n0), p1[3]));
-        sum = vec3_sub(&sum, &vec3_scale(&vec3_cross(&n0, &n1), p2[3]));
-        vec3_scale(&sum, 1.0 / det)
+        (n1.cross(n2) * -p0.w - n2.cross(n0) * p1.w - n0.cross(n1) * p2.w) / det
     }
 
-    fn aabb_volume(min: &Vec3, max: &Vec3) -> ConvexVolume {
+    fn aabb_volume(min: DVec3, max: DVec3) -> ConvexVolume {
         let mut volume = ConvexVolume::new();
         for i in 0..8 {
-            volume.add_point([
-                if i & 1 != 0 { max[0] } else { min[0] },
-                if i & 2 != 0 { max[1] } else { min[1] },
-                if i & 4 != 0 { max[2] } else { min[2] },
-            ]);
+            volume.add_point(DVec3::new(
+                if i & 1 != 0 { max.x } else { min.x },
+                if i & 2 != 0 { max.y } else { min.y },
+                if i & 4 != 0 { max.z } else { min.z },
+            ));
         }
         volume.planes = [
-            [-1.0, 0.0, 0.0, max[0]],
-            [1.0, 0.0, 0.0, -min[0]],
-            [0.0, -1.0, 0.0, max[1]],
-            [0.0, 1.0, 0.0, -min[1]],
-            [0.0, 0.0, -1.0, max[2]],
-            [0.0, 0.0, 1.0, -min[2]],
+            DVec4::new(-1.0, 0.0, 0.0, max.x),
+            DVec4::new(1.0, 0.0, 0.0, -min.x),
+            DVec4::new(0.0, -1.0, 0.0, max.y),
+            DVec4::new(0.0, 1.0, 0.0, -min.y),
+            DVec4::new(0.0, 0.0, -1.0, max.z),
+            DVec4::new(0.0, 0.0, 1.0, -min.z),
         ];
         volume
     }
 
-    fn axis_min_max(axis: &Vec3, points: &[Vec3]) -> (f64, f64) {
+    fn axis_min_max(axis: DVec3, points: &[DVec3]) -> (f64, f64) {
         let mut min = f64::INFINITY;
         let mut max = f64::NEG_INFINITY;
         for point in points {
-            let dot = vec3_dot(axis, point);
+            let dot = axis.dot(*point);
             min = f64::min(min, dot);
             max = f64::max(max, dot);
         }
         (min, max)
     }
 
-    fn to_sphere(x: f64, y: f64, tile: &CanonicalTileID) -> Vec3 {
+    fn to_sphere(x: f64, y: f64, tile: &CanonicalTileID) -> DVec3 {
         VerticalPerspectiveProjection::tile_coordinates_to_sphere(
             &Point::new(x, y),
             &UnwrappedTileID::with_wrap(0, *tile),
@@ -439,22 +419,26 @@ mod globe {
         let min_radius = f64::min(0.0, elevation) / constants::EARTH_RADIUS_M + 1.0;
         let max_radius = f64::max(0.0, elevation) / constants::EARTH_RADIUS_M + 1.0;
         if tile.z == 0 {
-            return aabb_volume(&[-max_radius, -max_radius, -max_radius], &[max_radius, max_radius, max_radius]);
+            return aabb_volume(DVec3::splat(-max_radius), DVec3::splat(max_radius));
         }
         if tile.z == 1 {
             // X is 1 at lng 90E, Y is 1 at the north pole, Z is 1 at null
             // island.
             return aabb_volume(
-                &[
+                DVec3::new(
                     if tile.x == 0 { -max_radius } else { 0.0 },
                     if tile.y == 0 { 0.0 } else { -max_radius },
                     -max_radius,
-                ],
-                &[if tile.x == 0 { 0.0 } else { max_radius }, if tile.y == 0 { max_radius } else { 0.0 }, max_radius],
+                ),
+                DVec3::new(
+                    if tile.x == 0 { 0.0 } else { max_radius },
+                    if tile.y == 0 { max_radius } else { 0.0 },
+                    max_radius,
+                ),
             );
         }
         let extent = f64::from(constants::EXTENT);
-        let corners: [Vec3; 4] = [
+        let corners: [DVec3; 4] = [
             to_sphere(0.0, 0.0, tile),
             to_sphere(extent, 0.0, tile),
             to_sphere(extent, extent, tile),
@@ -462,25 +446,25 @@ mod globe {
         ];
         // Corners at both radii, a pole if the tile touches one, the center,
         // and the bulging edge midpoint.
-        let mut extremes: [Vec3; 11] = [[0.0; 3]; 11];
+        let mut extremes = [DVec3::ZERO; 11];
         let mut extreme_count = 0;
         for corner in &corners {
-            extremes[extreme_count] = vec3_scale(corner, max_radius);
+            extremes[extreme_count] = *corner * max_radius;
             extreme_count += 1;
         }
         if max_radius != min_radius {
             for corner in &corners {
-                extremes[extreme_count] = vec3_scale(corner, min_radius);
+                extremes[extreme_count] = *corner * min_radius;
                 extreme_count += 1;
             }
         }
         let last_row: u32 = (1u32 << tile.z) - 1;
         if tile.y == 0 {
-            extremes[extreme_count] = [0.0, 1.0, 0.0];
+            extremes[extreme_count] = DVec3::Y;
             extreme_count += 1;
         }
         if tile.y == last_row {
-            extremes[extreme_count] = [0.0, -1.0, 0.0];
+            extremes[extreme_count] = DVec3::NEG_Y;
             extreme_count += 1;
         }
 
@@ -488,50 +472,50 @@ mod globe {
         // it; the east and west planes follow the tile's meridian edges and
         // are not parallel, so the volume is a wedge rather than a box.
         let center = to_sphere(extent / 2.0, extent / 2.0, tile);
-        let center_east = vec3_normalize(&vec3_cross(&[0.0, 1.0, 0.0], &center));
-        let north = vec3_normalize(&vec3_cross(&center, &center_east));
-        let axis_east = vec3_normalize(&vec3_cross(&corners[2], &corners[1]));
-        let axis_west = vec3_normalize(&vec3_cross(&corners[0], &corners[3]));
+        let center_east = DVec3::Y.cross(center).normalize();
+        let north = center.cross(center_east).normalize();
+        let axis_east = corners[2].cross(corners[1]).normalize();
+        let axis_west = corners[0].cross(corners[3]).normalize();
 
-        extremes[extreme_count] = vec3_scale(&center, max_radius);
+        extremes[extreme_count] = center * max_radius;
         extreme_count += 1;
         // The edge midpoint that bulges away from the center: the north edge
         // in the south hemisphere, the south edge in the north.
         extremes[extreme_count] = if tile.y >= (1u32 << tile.z) / 2 {
-            vec3_scale(&to_sphere(extent / 2.0, 0.0, tile), max_radius)
+            to_sphere(extent / 2.0, 0.0, tile) * max_radius
         } else {
-            vec3_scale(&to_sphere(extent / 2.0, extent, tile), max_radius)
+            to_sphere(extent / 2.0, extent, tile) * max_radius
         };
         extreme_count += 1;
         let extreme_span = &extremes[..extreme_count];
 
-        let (up_min, up_max) = axis_min_max(&center, extreme_span);
-        let (north_min, north_max) = axis_min_max(&north, extreme_span);
-        let plane_up: Vec4 = [-center[0], -center[1], -center[2], up_max];
-        let plane_down: Vec4 = [center[0], center[1], center[2], -up_min];
-        let plane_north: Vec4 = [-north[0], -north[1], -north[2], north_max];
-        let plane_south: Vec4 = [north[0], north[1], north[2], -north_min];
-        let plane_east: Vec4 = [axis_east[0], axis_east[1], axis_east[2], 0.0];
-        let plane_west: Vec4 = [axis_west[0], axis_west[1], axis_west[2], 0.0];
+        let (up_min, up_max) = axis_min_max(center, extreme_span);
+        let (north_min, north_max) = axis_min_max(north, extreme_span);
+        let plane_up = (-center).extend(up_max);
+        let plane_down = center.extend(-up_min);
+        let plane_north = (-north).extend(north_max);
+        let plane_south = north.extend(-north_min);
+        let plane_east = axis_east.extend(0.0);
+        let plane_west = axis_west.extend(0.0);
 
         let mut volume = ConvexVolume::new();
         if tile.y == 0 {
-            volume.add_point(three_plane_intersection(&plane_west, &plane_east, &plane_up));
-            volume.add_point(three_plane_intersection(&plane_west, &plane_east, &plane_down));
+            volume.add_point(three_plane_intersection(plane_west, plane_east, plane_up));
+            volume.add_point(three_plane_intersection(plane_west, plane_east, plane_down));
         } else {
-            volume.add_point(three_plane_intersection(&plane_north, &plane_east, &plane_up));
-            volume.add_point(three_plane_intersection(&plane_north, &plane_east, &plane_down));
-            volume.add_point(three_plane_intersection(&plane_north, &plane_west, &plane_up));
-            volume.add_point(three_plane_intersection(&plane_north, &plane_west, &plane_down));
+            volume.add_point(three_plane_intersection(plane_north, plane_east, plane_up));
+            volume.add_point(three_plane_intersection(plane_north, plane_east, plane_down));
+            volume.add_point(three_plane_intersection(plane_north, plane_west, plane_up));
+            volume.add_point(three_plane_intersection(plane_north, plane_west, plane_down));
         }
         if tile.y == last_row {
-            volume.add_point(three_plane_intersection(&plane_west, &plane_east, &plane_up));
-            volume.add_point(three_plane_intersection(&plane_west, &plane_east, &plane_down));
+            volume.add_point(three_plane_intersection(plane_west, plane_east, plane_up));
+            volume.add_point(three_plane_intersection(plane_west, plane_east, plane_down));
         } else {
-            volume.add_point(three_plane_intersection(&plane_south, &plane_east, &plane_up));
-            volume.add_point(three_plane_intersection(&plane_south, &plane_east, &plane_down));
-            volume.add_point(three_plane_intersection(&plane_south, &plane_west, &plane_up));
-            volume.add_point(three_plane_intersection(&plane_south, &plane_west, &plane_down));
+            volume.add_point(three_plane_intersection(plane_south, plane_east, plane_up));
+            volume.add_point(three_plane_intersection(plane_south, plane_east, plane_down));
+            volume.add_point(three_plane_intersection(plane_south, plane_west, plane_up));
+            volume.add_point(three_plane_intersection(plane_south, plane_west, plane_down));
         }
         volume.planes = [plane_up, plane_down, plane_north, plane_south, plane_east, plane_west];
         volume
@@ -617,32 +601,30 @@ mod globe {
 
         let transform = &state.transform_state;
         let projection = transform.get_projection_data(&UnwrappedTileID::new(0, 0, 0));
-        let mut inverse: Mat4 = [0.0; 16];
-        // `invert` reports a singular matrix with `true`.
-        if matrix::invert(&mut inverse, &projection.main_matrix) {
+        let Some(inverse) = projection.main_matrix.try_inverse() else {
             return Vec::new();
-        }
+        };
         // The globe matrix has no Mercator y flip, which reverses the winding
         // the plane normals come from. The far plane stops at the horizon, so
         // the frustum's corners bound the visible cap and not the space behind
         // the planet.
         let horizon = projection.clipping_plane;
-        let mut frustum = Frustum::from_inv_proj_matrix(&inverse, 1.0, 0.0, /*flipped_y*/ true, Some(&horizon));
+        let mut frustum = Frustum::from_inv_proj_matrix(&inverse, 1.0, 0.0, /*flipped_y*/ true, Some(horizon));
         // Both the horizon plane and the far plane assume content on the
         // surface. A point raised to radius r, in planet radii, stays in view
         // up to acos(1/r) past the surface's horizon and sqrt(r^2 - 1)
         // farther away, so both move back by as much (GL JS
         // `coveringTiles`).
         let mut culling_horizon = horizon;
-        let normal_length = horizon[0].hypot(horizon[1]).hypot(horizon[2]);
+        let normal_length = horizon.xyz().length();
         if state.max_content_elevation > 0.0 && normal_length > 0.0 {
             let shell_radius = 1.0 + state.max_content_elevation / constants::EARTH_RADIUS_M;
-            let horizon_cos = (-horizon[3] / normal_length).clamp(-1.0, 1.0);
+            let horizon_cos = (-horizon.w / normal_length).clamp(-1.0, 1.0);
             let shell_cos = (horizon_cos.acos() + (1.0 / shell_radius).acos()).cos();
-            culling_horizon[3] = -shell_cos * normal_length;
+            culling_horizon.w = -shell_cos * normal_length;
             frustum = frustum.with_far_plane_pushed(
                 (shell_radius * shell_radius - 1.0).sqrt(),
-                &transform.get_globe_camera_position(),
+                transform.get_globe_camera_position(),
             );
         }
 
@@ -662,7 +644,7 @@ mod globe {
             &transform.get_lat_lng(mln_util::geo::WrapMode::Unwrapped),
             1.0 / constants::TILE_SIZE_D,
         );
-        let center_coord: Vec3 = [center.x, center.y, 0.0];
+        let center_coord = DVec3::new(center.x, center.y, 0.0);
         // The globe keeps its center on whichever world copy it has reached,
         // where GL JS keeps it on the first. Wraps, sort keys and tile
         // distances are taken against the center brought back to the first
@@ -725,7 +707,7 @@ mod globe {
                     distance_to_center_3d,
                 ));
             }
-            let target_zoom = clamp(desired_z, 0.0, f64::from(max_zoom)) as u8;
+            let target_zoom = desired_z.clamp(0.0, f64::from(max_zoom)) as u8;
 
             if node.zoom >= target_zoom {
                 if node.zoom < min_zoom {
@@ -840,14 +822,11 @@ pub(crate) fn tile_cover(
 
     let children_of = |node: &Node| -> Vec<Node> {
         let mut children = vec![*node; 4];
-        for i in 0..4u32 {
-            // uint32_t arithmetic.
-            let child_x = (node.x << 1).wrapping_add(i % 2);
-            let child_y = (node.y << 1).wrapping_add(i >> 1);
+        for (i, child) in children.iter_mut().enumerate() {
+            let child_x = (node.x << 1).wrapping_add(i as u32 % 2);
+            let child_y = (node.y << 1).wrapping_add(i as u32 >> 1);
 
-            let child = &mut children[i as usize];
-            *child = *node;
-            child.aabb = node.aabb.quadrant(i as i32);
+            child.aabb = node.aabb.quadrant(i);
             child.zoom = node.zoom.wrapping_add(1);
             child.x = child_x;
             child.y = child_y;
@@ -873,7 +852,7 @@ pub(crate) fn tile_cover(
     )
     .p;
 
-    let center_coord: Vec3 = [center_point.x, center_point.y, 0.0];
+    let center_coord = DVec3::new(center_point.x, center_point.y, 0.0);
 
     let camera_position = transform.get_free_camera_options().position;
     debug_assert!(camera_position.is_some());
@@ -881,8 +860,8 @@ pub(crate) fn tile_cover(
         return Vec::new();
     };
     let nominal_scale = 2.0f64.powf(f64::from(z));
-    let camera_coord = vec3_scale(&camera_position_mercator, nominal_scale);
-    let camera_to_center_distance_mercator = vec3_length(&vec3_sub(&camera_coord, &center_coord)) / world_size;
+    let camera_coord = camera_position_mercator * nominal_scale;
+    let camera_to_center_distance_mercator = camera_coord.distance(center_coord) / world_size;
 
     let frustum = Frustum::from_inv_proj_matrix(
         &transform.get_inv_projection_matrix(),
@@ -900,8 +879,8 @@ pub(crate) fn tile_cover(
     let new_root_tile = |wrap: i16| -> Node {
         Node {
             aabb: AABB::new(
-                [f64::from(wrap) * num_tiles, 0.0, 0.0],
-                [f64::from(i32::from(wrap) + 1) * num_tiles, num_tiles, 0.0],
+                DVec3::new(f64::from(wrap) * num_tiles, 0.0, 0.0),
+                DVec3::new(f64::from(i32::from(wrap) + 1) * num_tiles, num_tiles, 0.0),
             ),
             zoom: 0,
             x: 0,
@@ -937,23 +916,16 @@ pub(crate) fn tile_cover(
         }
 
         let should_split_tile = if state.tile_lod_mode == TileLodMode::Distance {
-            let cam_to_tile_mercator = vec3_scale(&node.aabb.distance_xyz(&camera_coord), 1.0 / world_size);
-            let distance_to_tile_mercator = vec3_length(&cam_to_tile_mercator);
-            let cos_pitch_to_tile = f64::max(0.0, cam_to_tile_mercator[2] / distance_to_tile_mercator);
+            let cam_to_tile_mercator = node.aabb.distance_xyz(camera_coord) / world_size;
+            let distance_to_tile_mercator = cam_to_tile_mercator.length();
+            let cos_pitch_to_tile = f64::max(0.0, cam_to_tile_mercator.z / distance_to_tile_mercator);
             let pitch_exponent = 0.5; // 0: constant screen width, 1/2: constant screen area, 1: constant screen height
             let tile_scale = 2.0f64.powf(f64::from(node.zoom));
             distance_to_tile_mercator * tile_scale
                 < cos_pitch_to_tile.powf(pitch_exponent) * camera_to_center_distance_mercator / state.tile_lod_scale
                     * nominal_scale
         } else {
-            let distance_xyz = node.aabb.distance_xyz(&center_coord);
-            // `std::max_element`: the first largest element.
-            let mut longest_dim = 0;
-            for i in 1..distance_xyz.len() {
-                if distance_xyz[longest_dim] < distance_xyz[i] {
-                    longest_dim = i;
-                }
-            }
+            let distance_xyz = node.aabb.distance_xyz(center_coord);
 
             // We're using distance based heuristics to determine if a tile should
             // be split into quadrants or not. radiusOfMaxLvlLodInTiles defines that
@@ -967,7 +939,7 @@ pub(crate) fn tile_cover(
             let dist_to_split = radius_of_max_lvl_lod_in_tiles
                 + f64::from(1i32.wrapping_shl((i32::from(max_zoom) - i32::from(node.zoom)) as u32))
                 - 2.0;
-            distance_xyz[longest_dim] * state.tile_lod_scale < dist_to_split
+            distance_xyz.max_element() * state.tile_lod_scale < dist_to_split
         };
 
         // Have we reached the target depth or is the tile too far away to be any split further?
@@ -982,7 +954,7 @@ pub(crate) fn tile_cover(
                     node.x,
                     node.y,
                 );
-                let coord_to_load_first: Vec3 =
+                let coord_to_load_first =
                     if state.tile_lod_mode == TileLodMode::Distance { camera_coord } else { center_coord };
                 let dx = f64::from(node.wrap) * num_tiles + f64::from(node.x) + 0.5 - coord_to_load_first[0];
                 let dy = f64::from(node.y) + 0.5 - coord_to_load_first[1];

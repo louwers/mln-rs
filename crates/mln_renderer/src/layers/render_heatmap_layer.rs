@@ -6,6 +6,7 @@ use std::mem::offset_of;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use glam::dcamera::rh::proj::opengl::orthographic;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::heatmap_layer_ubo::{HeatmapDrawableUBO, HeatmapEvaluatedPropsUBO};
@@ -29,7 +30,6 @@ use mln_style_types::TranslateAnchorType;
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
-use mln_util::mat4::{Mat4, matrix};
 use mln_util::size::Size;
 
 use super::render_line_layer::apply_color_ramp;
@@ -612,9 +612,8 @@ impl RenderHeatmapLayer {
         };
         let frame_draw = FrameDraw { depth: DrawDepth::Off, ..draw.frame_draw(None) };
         frame.push(frame_draw);
-        let mut m: Mat4 = [0.0; 16];
         let size = paint_parameters.renderable_size;
-        matrix::ortho(&mut m, 0.0, f64::from(size.width), f64::from(size.height), 0.0, -1.0, 1.0);
+        let m = orthographic(0.0, f64::from(size.width), f64::from(size.height), 0.0, -1.0, 1.0);
         let props = HeatmapTexturePropsUBO {
             matrix: cast_matrix(&m),
             opacity: *values.evaluated.paint.heatmap_opacity.uniform(),

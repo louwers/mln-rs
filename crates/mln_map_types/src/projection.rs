@@ -1,29 +1,28 @@
 use geometry::Point;
+use glam::{DMat4, DVec2, DVec3, DVec4};
 use mln_tile_id::UnwrappedTileID;
 use mln_util::constants;
-use mln_util::mat4::{Mat4, matrix};
 use mln_util::projection::Projection as WebMercator;
-use mln_util::vectors::{Vec2, Vec3, Vec4};
 
 use crate::transform_state::TransformState;
 use crate::vertical_perspective_projection::VerticalPerspectiveProjection;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ProjectionData {
-    pub main_matrix: Mat4,
-    pub tile_mercator_coords: Vec4,
-    pub clipping_plane: Vec4,
+    pub main_matrix: DMat4,
+    pub tile_mercator_coords: DVec4,
+    pub clipping_plane: DVec4,
     pub projection_transition: f64,
-    pub fallback_matrix: Mat4,
+    pub fallback_matrix: DMat4,
     /// Clip-space Z shift for this drawable's layer, the same one the
     /// Mercator matrix carries.
     pub depth_offset: f64,
     /// The layer's translation in tile units, added on the sphere; the
     /// fallback matrix already carries it.
-    pub translate: Vec2,
+    pub translate: DVec2,
     /// The camera on the unit sphere's scale, for the line of sight to points
     /// above the surface.
-    pub(crate) camera_position: Vec3,
+    pub(crate) camera_position: DVec3,
 }
 
 /// A tile point in clip space, as the vertex shaders would place it.
@@ -36,33 +35,25 @@ pub struct ProjectedTilePoint {
 }
 
 /// The tile-to-world matrix of a tile, the same on every projection.
-pub(crate) fn mercator_tile_matrix(matrix: &mut Mat4, tile_id: &UnwrappedTileID, scale: f64) {
+pub(crate) fn mercator_tile_matrix(tile_id: &UnwrappedTileID, scale: f64) -> DMat4 {
     let tile_scale: u64 = 1u64 << tile_id.canonical.z;
     let s = WebMercator::world_size(scale) / tile_scale as f64;
-
-    matrix::identity(matrix);
-    let a = *matrix;
-    matrix::translate(
-        matrix,
-        &a,
-        (i64::from(tile_id.canonical.x) + i64::from(tile_id.wrap) * tile_scale as i64) as f64 * s,
-        i64::from(tile_id.canonical.y) as f64 * s,
-        0.0,
-    );
-    let a = *matrix;
-    matrix::scale(matrix, &a, s / f64::from(constants::EXTENT), s / f64::from(constants::EXTENT), 1.0);
+    let x = (i64::from(tile_id.canonical.x) + i64::from(tile_id.wrap) * tile_scale as i64) as f64 * s;
+    let y = i64::from(tile_id.canonical.y) as f64 * s;
+    let unit = s / f64::from(constants::EXTENT);
+    DMat4::from_translation(DVec3::new(x, y, 0.0)) * DMat4::from_scale(DVec3::new(unit, unit, 1.0))
 }
 
 /// The Mercator extent of a tile, the same on every projection.
 #[must_use]
-pub(crate) fn mercator_tile_coords(tile_id: &UnwrappedTileID) -> Vec4 {
+pub(crate) fn mercator_tile_coords(tile_id: &UnwrappedTileID) -> DVec4 {
     let tile_scale = (1u64 << tile_id.canonical.z) as f64;
-    [
+    DVec4::new(
         f64::from(tile_id.canonical.x) / tile_scale,
         f64::from(tile_id.canonical.y) / tile_scale,
         1.0 / tile_scale / f64::from(constants::EXTENT),
         1.0 / tile_scale / f64::from(constants::EXTENT),
-    ]
+    )
 }
 
 /// How a [`TransformState`] places tiles on the screen. Both variants
@@ -84,13 +75,13 @@ impl Projection {
         self,
         state: &TransformState,
         tile_id: &UnwrappedTileID,
-        mercator_matrix: &Mat4,
+        mercator_matrix: &DMat4,
     ) -> ProjectionData {
         match self {
             Projection::Mercator => ProjectionData {
                 main_matrix: *mercator_matrix,
                 tile_mercator_coords: mercator_tile_coords(tile_id),
-                clipping_plane: [0.0, 0.0, 0.0, 0.0],
+                clipping_plane: DVec4::ZERO,
                 projection_transition: 0.0,
                 fallback_matrix: *mercator_matrix,
                 ..ProjectionData::default()
@@ -113,12 +104,10 @@ impl Projection {
     ) -> ProjectedTilePoint {
         match self {
             Projection::Mercator => {
-                let mut pos: Vec4 = [point.x, point.y, elevation, 1.0];
-                let a = pos;
-                matrix::transform_mat4(&mut pos, &a, &data.main_matrix);
+                let pos = data.main_matrix * DVec4::new(point.x, point.y, elevation, 1.0);
                 ProjectedTilePoint {
-                    point: Point::new(pos[0] / pos[3], pos[1] / pos[3]),
-                    signed_distance_from_camera: pos[3],
+                    point: Point::new(pos.x / pos.w, pos.y / pos.w),
+                    signed_distance_from_camera: pos.w,
                     occluded: false,
                 }
             }

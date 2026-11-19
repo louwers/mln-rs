@@ -379,15 +379,15 @@ fn free_camera_options_place_the_camera_and_cancel_commands() {
     });
     assert!(test.map().snapshot().transition_in_progress);
 
-    let position = [0.25, 0.25, 0.01];
+    let position = glam::dvec3(0.25, 0.25, 0.01);
     test.map().set_free_camera_options(&mln_map::FreeCameraOptions { position: Some(position), orientation: None });
     let ended: Vec<_> =
         test.map().drain_command_ends().filter(|end| end.command == command).map(|end| end.end.outcome).collect();
     assert_eq!(ended, [mln_map::TransitionOutcome::Cancelled]);
     assert!(!test.map().snapshot().transition_in_progress);
     let placed = test.map().snapshot().free_camera.position;
-    for (placed, wanted) in placed.iter().zip(position) {
-        assert_near(*placed, wanted, 1e-9);
+    for (placed, wanted) in placed.to_array().into_iter().zip(position.to_array()) {
+        assert_near(placed, wanted, 1e-9);
     }
     // Looking straight down from a quarter of the world's width and height:
     // the center is 90° W, north of the equator.
@@ -397,7 +397,7 @@ fn free_camera_options_place_the_camera_and_cancel_commands() {
 
     // A NaN position is ignored.
     test.map().set_free_camera_options(&mln_map::FreeCameraOptions {
-        position: Some([f64::NAN, 0.0, 0.0]),
+        position: Some(glam::dvec3(f64::NAN, 0.0, 0.0)),
         orientation: None,
     });
     assert_near(CameraOptions::from(test.map().snapshot().view.camera).center.unwrap().longitude(), -90.0, 1e-6);

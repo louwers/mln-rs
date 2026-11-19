@@ -11,17 +11,14 @@ use std::cell::Cell;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
+use glam::{DMat4, DQuat, DVec3, DVec4, EulerRot, dvec3};
 use mln_map_types::TileProjector;
-use mln_map_types::util_camera::Camera as UtilCamera;
 use mln_math::deg2rad;
 use mln_style_types::ProjectionType;
 use mln_tile_id::{CanonicalTileID, UnwrappedTileID};
 use mln_util::UnitBezier;
 use mln_util::constants::{EXTENT, LATITUDE_MAX, LONGITUDE_MAX, MAX_ZOOM, TILE_SIZE_D};
-use mln_util::mat4::{Mat4, matrix};
-use mln_util::quaternion::Quaternion;
 use mln_util::time::Instant;
-use mln_util::vectors::{Vec3, Vec4};
 
 use super::*;
 
@@ -82,11 +79,8 @@ fn assert_near(val1: f64, val2: f64, abs_error: f64) {
 const ABS_DOUBLE_ERROR: f64 = 1e-5;
 
 #[track_caller]
-fn assert_vec3_near_1e5(arg: &Vec3, vec: &Vec3) {
-    let near = (vec[0] - arg[0]).abs() <= ABS_DOUBLE_ERROR
-        && (vec[1] - arg[1]).abs() <= ABS_DOUBLE_ERROR
-        && (vec[2] - arg[2]).abs() <= ABS_DOUBLE_ERROR;
-    assert!(near, "Vec3NearEquals1E5: {arg:?} vs {vec:?}");
+fn assert_vec3_near_1e5(arg: DVec3, vec: DVec3) {
+    assert!(arg.abs_diff_eq(vec, ABS_DOUBLE_ERROR), "{arg:?} vs {vec:?}");
 }
 
 /// gtest's `SCOPED_TRACE`: prints the trace when a failed assertion unwinds
@@ -117,9 +111,13 @@ fn std_clamp(value: f64, lo: f64, hi: f64) -> f64 {
     }
 }
 
-fn rotated_frame(quaternion: &Vec4) -> (Vec3, Vec3, Vec3) {
-    let q = Quaternion::from_vec4(quaternion);
-    (q.transform(&[1.0, 0.0, 0.0]), q.transform(&[0.0, -1.0, 0.0]), q.transform(&[0.0, 0.0, -1.0]))
+fn rotated_frame(q: DQuat) -> (DVec3, DVec3, DVec3) {
+    (q * DVec3::X, q * DVec3::NEG_Y, q * DVec3::NEG_Z)
+}
+
+/// The rotation by `x` about x, then `y` about y, then `z` about z.
+fn euler(x: f64, y: f64, z: f64) -> DQuat {
+    DQuat::from_euler(EulerRot::ZYX, z, y, x)
 }
 
 /// Starts the commands made after it at the returned time: a frame time an
@@ -1415,18 +1413,21 @@ fn min_max_pitch() {
 #[test]
 fn free_camera_options_invalid_size() {
     let mut transform = new_transform();
-    let options = FreeCameraOptions { orientation: Some([1.0, 1.0, 1.0, 1.0]), position: Some([0.1, 0.2, 0.3]) };
+    let options = FreeCameraOptions {
+        orientation: Some(DQuat::from_xyzw(1.0, 1.0, 1.0, 1.0)),
+        position: Some(dvec3(0.1, 0.2, 0.3)),
+    };
     transform.set_free_camera_options(&options);
 
     let updated_orientation = transform.get_free_camera_options().orientation.unwrap();
     let updated_position = transform.get_free_camera_options().position.unwrap();
 
-    assert_double_eq(0.0, updated_orientation[0]);
-    assert_double_eq(0.0, updated_orientation[1]);
-    assert_double_eq(0.0, updated_orientation[2]);
-    assert_double_eq(1.0, updated_orientation[3]);
+    assert_double_eq(0.0, updated_orientation.x);
+    assert_double_eq(0.0, updated_orientation.y);
+    assert_double_eq(0.0, updated_orientation.z);
+    assert_double_eq(1.0, updated_orientation.w);
 
-    assert_vec3_near_1e5(&updated_position, &[0.0, 0.0, 0.0]);
+    assert_vec3_near_1e5(updated_position, dvec3(0.0, 0.0, 0.0));
 }
 
 // gtest: Transform.FreeCameraOptionsNanInput
@@ -1434,19 +1435,19 @@ fn free_camera_options_invalid_size() {
 fn free_camera_options_nan_input() {
     let mut transform = new_transform();
     transform.resize(Size::new(100, 100)).unwrap();
-    let mut options = FreeCameraOptions { position: Some([0.5, 0.5, 0.25]), ..FreeCameraOptions::default() };
+    let mut options = FreeCameraOptions { position: Some(dvec3(0.5, 0.5, 0.25)), ..FreeCameraOptions::default() };
     transform.set_free_camera_options(&options);
 
-    options.position = Some([0.0, 0.0, f64::NAN]);
+    options.position = Some(dvec3(0.0, 0.0, f64::NAN));
     transform.set_free_camera_options(&options);
-    assert_eq!([0.5, 0.5, 0.25], transform.get_free_camera_options().position.unwrap());
+    assert_eq!(dvec3(0.5, 0.5, 0.25), transform.get_free_camera_options().position.unwrap());
 
     // Only the invalid parameter should be discarded
-    options.position = Some([0.3, 0.1, 0.2]);
-    options.orientation = Some([f64::NAN, 0.0, f64::NAN, 0.0]);
+    options.position = Some(dvec3(0.3, 0.1, 0.2));
+    options.orientation = Some(DQuat::from_xyzw(f64::NAN, 0.0, f64::NAN, 0.0));
     transform.set_free_camera_options(&options);
-    assert_vec3_near_1e5(&transform.get_free_camera_options().position.unwrap(), &[0.3, 0.1, 0.2]);
-    assert_eq!(Quaternion::IDENTITY.m(), transform.get_free_camera_options().orientation.unwrap());
+    assert_vec3_near_1e5(transform.get_free_camera_options().position.unwrap(), dvec3(0.3, 0.1, 0.2));
+    assert_eq!(DQuat::IDENTITY, transform.get_free_camera_options().orientation.unwrap());
 }
 
 // gtest: Transform.FreeCameraOptionsInvalidZ
@@ -1455,12 +1456,12 @@ fn free_camera_options_invalid_z() {
     let mut transform = new_transform();
     transform.resize(Size::new(100, 100)).unwrap();
     // Invalid z-value (<= 0.0 || > 1) should be clamped to respect both min&max zoom values
-    let mut options = FreeCameraOptions { position: Some([0.1, 0.1, 0.0]), ..FreeCameraOptions::default() };
+    let mut options = FreeCameraOptions { position: Some(dvec3(0.1, 0.1, 0.0)), ..FreeCameraOptions::default() };
     transform.set_free_camera_options(&options);
     assert_double_eq(transform.get_state().get_max_zoom(), transform.get_state().get_zoom());
     assert!(transform.get_free_camera_options().position.unwrap()[2] > 0.0);
 
-    options.position = Some([0.5, 0.2, 123.456]);
+    options.position = Some(dvec3(0.5, 0.2, 123.456));
     transform.set_free_camera_options(&options);
     assert_double_eq(transform.get_state().get_min_zoom(), transform.get_state().get_zoom());
     assert!(transform.get_free_camera_options().position.unwrap()[2] <= 1.0);
@@ -1495,20 +1496,20 @@ fn free_camera_options_high_pitch() {
     transform.resize(Size::new(100, 100)).unwrap();
     transform.set_max_pitch(180.0);
     let mut options = FreeCameraOptions {
-        position: Some([0.1, 0.1, 0.1]),
-        orientation: Some(Quaternion::from_axis_angle(&[1.0, 0.0, 0.0], deg2rad(-90.0)).m()),
+        position: Some(dvec3(0.1, 0.1, 0.1)),
+        orientation: Some(DQuat::from_axis_angle(dvec3(1.0, 0.0, 0.0), deg2rad(-90.0))),
     };
     transform.set_free_camera_options(&options);
     assert_double_eq(deg2rad(90.0), transform.get_state().get_pitch());
     assert_double_eq(0.0, transform.get_state().get_bearing());
-    assert_vec3_near_1e5(&transform.get_free_camera_options().position.unwrap(), &[0.1, 0.1, 0.1]);
+    assert_vec3_near_1e5(transform.get_free_camera_options().position.unwrap(), dvec3(0.1, 0.1, 0.1));
 
-    options.position = Some([0.1, 0.1, 0.1]);
-    options.orientation = Some(Quaternion::from_axis_angle(&[1.0, 0.0, 0.0], deg2rad(-135.0)).m());
+    options.position = Some(dvec3(0.1, 0.1, 0.1));
+    options.orientation = Some(DQuat::from_axis_angle(dvec3(1.0, 0.0, 0.0), deg2rad(-135.0)));
     transform.set_free_camera_options(&options);
     assert_double_eq(deg2rad(135.0), transform.get_state().get_pitch());
     assert_double_eq(0.0, transform.get_state().get_bearing());
-    assert_vec3_near_1e5(&transform.get_free_camera_options().position.unwrap(), &[0.1, 0.1, 0.1]);
+    assert_vec3_near_1e5(transform.get_free_camera_options().position.unwrap(), dvec3(0.1, 0.1, 0.1));
 }
 
 // gtest: Transform.FreeCameraOptionsInvalidOrientation
@@ -1518,29 +1519,30 @@ fn free_camera_options_invalid_orientation() {
     let mut transform = new_transform();
     transform.resize(Size::new(100, 100)).unwrap();
 
-    let mut options = FreeCameraOptions { orientation: Some([0.0, 0.0, 0.0, 0.0]), ..FreeCameraOptions::default() };
+    let mut options =
+        FreeCameraOptions { orientation: Some(DQuat::from_xyzw(0.0, 0.0, 0.0, 0.0)), ..FreeCameraOptions::default() };
     transform.set_free_camera_options(&options);
-    assert_eq!(Some(Quaternion::IDENTITY.m()), transform.get_free_camera_options().orientation);
+    assert_eq!(Some(DQuat::IDENTITY), transform.get_free_camera_options().orientation);
 
     // Gimbal lock. Both forward and up vectors are on xy-plane
     transform.set_max_pitch(180.0);
-    options.orientation = Some(Quaternion::from_axis_angle(&[0.0, 1.0, 0.0], PI / 2.0).m());
+    options.orientation = Some(DQuat::from_axis_angle(dvec3(0.0, 1.0, 0.0), PI / 2.0));
     transform.set_free_camera_options(&options);
     for i in 0..4 {
         assert_near(
-            Quaternion::from_euler_angles(PI / 2.0, PI / 2.0, PI / 2.0).m()[i],
-            transform.get_free_camera_options().orientation.unwrap()[i],
+            euler(PI / 2.0, PI / 2.0, PI / 2.0).to_array()[i],
+            transform.get_free_camera_options().orientation.unwrap().to_array()[i],
             1.0e-12,
         );
     }
 
     // Camera is upside down
-    options.orientation = Some(Quaternion::from_axis_angle(&[1.0, 0.0, 0.0], PI / 2.0 + PI / 4.0).m());
+    options.orientation = Some(DQuat::from_axis_angle(dvec3(1.0, 0.0, 0.0), PI / 2.0 + PI / 4.0));
     transform.set_free_camera_options(&options);
     for i in 0..4 {
         assert_near(
-            options.orientation.unwrap()[i],
-            transform.get_free_camera_options().orientation.unwrap()[i],
+            options.orientation.unwrap().to_array()[i],
+            transform.get_free_camera_options().orientation.unwrap().to_array()[i],
             1.0e-12,
         );
     }
@@ -1551,21 +1553,21 @@ fn free_camera_options_invalid_orientation() {
 fn free_camera_options_set_orientation() {
     let mut transform = new_transform();
     transform.resize(Size::new(100, 100)).unwrap();
-    let mut options = FreeCameraOptions { orientation: Some(Quaternion::IDENTITY.m()), ..FreeCameraOptions::default() };
+    let mut options = FreeCameraOptions { orientation: Some(DQuat::IDENTITY), ..FreeCameraOptions::default() };
     transform.set_free_camera_options(&options);
     assert_double_eq(0.0, transform.get_state().get_bearing());
     assert_double_eq(0.0, transform.get_state().get_pitch());
     assert_double_eq(0.0, transform.get_state().get_x());
     assert_double_eq(0.0, transform.get_state().get_y());
 
-    options.orientation = Some(Quaternion::from_axis_angle(&[1.0, 0.0, 0.0], deg2rad(-60.0)).m());
+    options.orientation = Some(DQuat::from_axis_angle(dvec3(1.0, 0.0, 0.0), deg2rad(-60.0)));
     transform.set_free_camera_options(&options);
     assert_double_eq(0.0, transform.get_state().get_bearing());
     assert_double_eq(deg2rad(60.0), transform.get_state().get_pitch());
     assert_double_eq(0.0, transform.get_state().get_x());
     assert_double_eq(206.0, transform.get_state().get_y());
 
-    options.orientation = Some(Quaternion::from_axis_angle(&[0.0, 0.0, 1.0], deg2rad(56.0)).m());
+    options.orientation = Some(DQuat::from_axis_angle(dvec3(0.0, 0.0, 1.0), deg2rad(56.0)));
     transform.set_free_camera_options(&options);
     assert_double_eq(deg2rad(-56.0), transform.get_state().get_bearing());
     assert_double_eq(0.0, transform.get_state().get_pitch());
@@ -1573,11 +1575,7 @@ fn free_camera_options_set_orientation() {
     assert_double_eq(0.0, transform.get_state().get_x());
     assert_near(152.192_378, transform.get_state().get_y(), 1e-6);
 
-    options.orientation = Some(
-        Quaternion::from_euler_angles(0.0, 0.0, deg2rad(-179.0))
-            .multiply(&Quaternion::from_euler_angles(deg2rad(-30.0), 0.0, 0.0))
-            .m(),
-    );
+    options.orientation = Some(euler(0.0, 0.0, deg2rad(-179.0)) * (euler(deg2rad(-30.0), 0.0, 0.0)));
     transform.set_free_camera_options(&options);
     assert_double_eq(deg2rad(179.0), transform.get_state().get_bearing());
     assert_double_eq(deg2rad(30.0), transform.get_state().get_pitch());
@@ -1585,10 +1583,9 @@ fn free_camera_options_set_orientation() {
     assert_near(56.813_889, transform.get_state().get_y(), 1e-6);
 
     options.orientation = Some(
-        Quaternion::from_axis_angle(&[0.0, 0.0, 1.0], deg2rad(-33.0))
-            .multiply(&Quaternion::from_axis_angle(&[1.0, 0.0, 0.0], deg2rad(-22.0)))
-            .multiply(&Quaternion::from_axis_angle(&[0.0, 0.0, 1.0], deg2rad(11.0)))
-            .m(),
+        DQuat::from_axis_angle(dvec3(0.0, 0.0, 1.0), deg2rad(-33.0))
+            * (DQuat::from_axis_angle(dvec3(1.0, 0.0, 0.0), deg2rad(-22.0)))
+            * (DQuat::from_axis_angle(dvec3(0.0, 0.0, 1.0), deg2rad(11.0))),
     );
     transform.set_free_camera_options(&options);
     assert_double_eq(deg2rad(33.0), transform.get_state().get_bearing());
@@ -1606,8 +1603,8 @@ fn free_camera_options_clamp_to_bounds() {
     transform.jump_to(&CameraOptions { zoom: Some(8.56), ..Default::default() });
     // Place camera to an arbitrary position looking away from the map
     let options = FreeCameraOptions {
-        position: Some([-100.0, -10000.0, 1000.0]),
-        orientation: Some(Quaternion::from_euler_angles(deg2rad(-45.0), 0.0, 0.0).m()),
+        position: Some(dvec3(-100.0, -10000.0, 1000.0)),
+        orientation: Some(euler(deg2rad(-45.0), 0.0, 0.0)),
     };
     transform.set_free_camera_options(&options);
 
@@ -1617,11 +1614,11 @@ fn free_camera_options_clamp_to_bounds() {
     assert_double_eq(0.0, transform.get_state().get_bearing());
     assert_double_eq(deg2rad(45.0), transform.get_state().get_pitch());
 
-    let (right, up, forward) = rotated_frame(&transform.get_free_camera_options().orientation.unwrap());
-    assert_vec3_near_1e5(&transform.get_free_camera_options().position.unwrap(), &[0.097_656_2, 0.304_816, 0.20716]);
-    assert_vec3_near_1e5(&right, &[1.0, 0.0, 0.0]);
-    assert_vec3_near_1e5(&up, &[0.0, -0.707_107, 0.707_107]);
-    assert_vec3_near_1e5(&forward, &[0.0, -0.707_107, -0.707_107]);
+    let (right, up, forward) = rotated_frame(transform.get_free_camera_options().orientation.unwrap());
+    assert_vec3_near_1e5(transform.get_free_camera_options().position.unwrap(), dvec3(0.097_656_2, 0.304_816, 0.20716));
+    assert_vec3_near_1e5(right, dvec3(1.0, 0.0, 0.0));
+    assert_vec3_near_1e5(up, dvec3(0.0, -0.707_107, 0.707_107));
+    assert_vec3_near_1e5(forward, dvec3(0.0, -0.707_107, -0.707_107));
 }
 
 // gtest: Transform.FreeCameraOptionsInvalidState
@@ -1636,7 +1633,7 @@ fn free_camera_options_invalid_state() {
     assert_double_eq(0.0, transform.get_state().get_pitch());
 
     let options = transform.get_free_camera_options();
-    assert_vec3_near_1e5(&options.position.unwrap(), &[0.0, 0.0, 0.0]);
+    assert_vec3_near_1e5(options.position.unwrap(), dvec3(0.0, 0.0, 0.0));
 }
 
 // gtest: Transform.FreeCameraOptionsStateSynchronization
@@ -1646,14 +1643,14 @@ fn free_camera_options_state_synchronization() {
     transform.resize(Size::new(100, 100)).unwrap();
 
     transform.jump_to(&CameraOptions { pitch: Some(0.0), bearing: Some(0.0), ..Default::default() });
-    let (right, up, forward) = rotated_frame(&transform.get_free_camera_options().orientation.unwrap());
-    assert_vec3_near_1e5(&transform.get_free_camera_options().position.unwrap(), &[0.5, 0.5, 0.292_968_75]);
-    assert_vec3_near_1e5(&right, &[1.0, 0.0, 0.0]);
-    assert_vec3_near_1e5(&up, &[0.0, -1.0, 0.0]);
-    assert_vec3_near_1e5(&forward, &[0.0, 0.0, -1.0]);
+    let (right, up, forward) = rotated_frame(transform.get_free_camera_options().orientation.unwrap());
+    assert_vec3_near_1e5(transform.get_free_camera_options().position.unwrap(), dvec3(0.5, 0.5, 0.292_968_75));
+    assert_vec3_near_1e5(right, dvec3(1.0, 0.0, 0.0));
+    assert_vec3_near_1e5(up, dvec3(0.0, -1.0, 0.0));
+    assert_vec3_near_1e5(forward, dvec3(0.0, 0.0, -1.0));
 
     transform.jump_to(&CameraOptions { center: Some(ll(60.1699, 24.9384)), ..Default::default() });
-    assert_vec3_near_1e5(&transform.get_free_camera_options().position.unwrap(), &[0.569_273, 0.289_453, 0.292_969]);
+    assert_vec3_near_1e5(transform.get_free_camera_options().position.unwrap(), dvec3(0.569_273, 0.289_453, 0.292_969));
 
     transform.jump_to(&CameraOptions {
         pitch: Some(20.0),
@@ -1661,72 +1658,19 @@ fn free_camera_options_state_synchronization() {
         center: Some(ll(-20.0, 20.0)),
         ..Default::default()
     });
-    assert_vec3_near_1e5(&transform.get_free_camera_options().position.unwrap(), &[0.457_922, 0.57926, 0.275_301]);
-}
-
-// TEST(Camera, *) (util::Camera)
-
-// gtest: Camera.SetOrientation
-#[test]
-fn set_orientation() {
-    let mut camera = UtilCamera::new();
-    let bearing = 0.22;
-    let pitch = 0.34;
-    let roll = 0.0;
-    camera.set_orientation(roll, pitch, bearing);
-    let (roll_, pitch_, bearing_) = camera.get_orientation_angles();
-    assert_near(bearing, bearing_, 1.0e-9);
-    assert_near(pitch, pitch_, 1.0e-9);
-    assert_near(roll, roll_, 1.0e-9);
-}
-
-// gtest: Camera.SetOrientationWithRoll
-#[test]
-fn set_orientation_with_roll() {
-    let mut camera = UtilCamera::new();
-    let bearing = 0.22;
-    let pitch = 0.34;
-    let roll = 0.45;
-    camera.set_orientation(roll, pitch, bearing);
-    let (roll_, pitch_, bearing_) = camera.get_orientation_angles();
-    assert_near(bearing, bearing_, 1.0e-9);
-    assert_near(pitch, pitch_, 1.0e-9);
-    assert_near(roll, roll_, 1.0e-9);
-}
-
-// gtest: Camera.SetOrientationWithRollNoPitch
-#[test]
-fn set_orientation_with_roll_no_pitch() {
-    let mut camera = UtilCamera::new();
-    let bearing = 0.22;
-    let pitch = 0.0;
-    let roll = 0.45;
-    camera.set_orientation(roll, pitch, bearing);
-    let (roll_, pitch_, bearing_) = camera.get_orientation_angles();
-    assert_near(bearing - roll, bearing_, 1.0e-9);
-    assert_near(pitch, pitch_, 1.0e-9);
-    assert_near(0.0, roll_, 1.0e-9);
+    assert_vec3_near_1e5(transform.get_free_camera_options().position.unwrap(), dvec3(0.457_922, 0.57926, 0.275_301));
 }
 
 /// The tile matrix as `TransformState::matrix_for` computed it before the
 /// projection seam.
-fn reference_tile_matrix(scale: f64, tile_id: &UnwrappedTileID) -> Mat4 {
+fn reference_tile_matrix(scale: f64, tile_id: &UnwrappedTileID) -> DMat4 {
     let tile_scale: u64 = 1u64 << tile_id.canonical.z;
     let s = Projection::world_size(scale) / tile_scale as f64;
-
-    let mut m: Mat4 = [0.0; 16];
-    matrix::identity(&mut m);
-    let a = m;
-    matrix::translate(
-        &mut m,
-        &a,
+    DMat4::from_translation(dvec3(
         (i64::from(tile_id.canonical.x) + i64::from(tile_id.wrap) * tile_scale as i64) as f64 * s,
         f64::from(tile_id.canonical.y) * s,
         0.0,
-    );
-    let a = m;
-    matrix::scale(&mut m, &a, s / f64::from(EXTENT), s / f64::from(EXTENT), 1.0);
-    m
+    )) * DMat4::from_scale(dvec3(s / f64::from(EXTENT), s / f64::from(EXTENT), 1.0))
 }
 
 // gtest: TransformState.ProjectionDataMatchesTileMatrix
@@ -1766,19 +1710,13 @@ fn projection_data_matches_tile_matrix() {
                                 let tile_matrix = reference_tile_matrix(scale, tile_id);
                                 assert_eq!(tile_matrix, state.matrix_for(tile_id));
 
-                                let mut expected: Mat4 = [0.0; 16];
-                                matrix::multiply(&mut expected, &proj_matrix, &tile_matrix);
+                                let expected = proj_matrix * tile_matrix;
                                 assert_eq!(expected, state.get_projection_data_with(tile_id, &proj_matrix).main_matrix);
                             }
                         }
 
                         for tile_id in &tile_ids {
-                            let mut expected: Mat4 = [0.0; 16];
-                            matrix::multiply(
-                                &mut expected,
-                                &state.get_projection_matrix(),
-                                &reference_tile_matrix(scale, tile_id),
-                            );
+                            let expected = state.get_projection_matrix() * reference_tile_matrix(scale, tile_id);
                             assert_eq!(expected, state.get_projection_data(tile_id).main_matrix);
                         }
                     }
@@ -1814,7 +1752,7 @@ fn projection_data_mercator_fields() {
         assert_eq!(f64::from(tile_id.canonical.y) / tile_scale, data.tile_mercator_coords[1]);
         assert_eq!(1.0 / tile_scale / f64::from(EXTENT), data.tile_mercator_coords[2]);
         assert_eq!(1.0 / tile_scale / f64::from(EXTENT), data.tile_mercator_coords[3]);
-        assert_eq!([0.0, 0.0, 0.0, 0.0], data.clipping_plane);
+        assert_eq!(DVec4::ZERO, data.clipping_plane);
         assert_eq!(0.0, data.projection_transition);
     }
 }
@@ -1911,21 +1849,20 @@ fn animation_into_the_globe_takes_the_globes_minimum_zoom() {
 // gtest: VerticalPerspectiveProjection.TileCoordinatesToSphere
 #[test]
 fn tile_coordinates_to_sphere() {
-    let near =
-        |a: &Vec3, b: &Vec3| (a[0] - b[0]).abs() < 1e-9 && (a[1] - b[1]).abs() < 1e-9 && (a[2] - b[2]).abs() < 1e-9;
+    let near = |a: &DVec3, b: &DVec3| a.abs_diff_eq(*b, 1e-9);
     let world = UnwrappedTileID::new(0, 0, 0);
     let half = f64::from(EXTENT) / 2.0;
     // (0°, 0°) is the +Z axis; the equator runs through ±X; latitude is Y.
     assert!(near(
-        &[0.0, 0.0, 1.0],
+        &DVec3::Z,
         &VerticalPerspectiveProjection::tile_coordinates_to_sphere(&Point::new(half, half), &world)
     ));
     assert!(near(
-        &[1.0, 0.0, 0.0],
+        &DVec3::X,
         &VerticalPerspectiveProjection::tile_coordinates_to_sphere(&Point::new(half * 1.5, half), &world)
     ));
     assert!(near(
-        &[-1.0, 0.0, 0.0],
+        &DVec3::NEG_X,
         &VerticalPerspectiveProjection::tile_coordinates_to_sphere(&Point::new(half * 0.5, half), &world)
     ));
     let north = VerticalPerspectiveProjection::tile_coordinates_to_sphere(&Point::new(half, 0.0), &world);
@@ -1995,16 +1932,14 @@ fn center_projects_to_screen_center() {
     );
     let m = VerticalPerspectiveProjection::globe_view_projection_matrix(state, radius);
     let center = VerticalPerspectiveProjection::surface_vector(&state.get_lat_lng(WrapMode::Unwrapped));
-    let surface: Vec4 = [center[0], center[1], center[2], 1.0];
-    let mut clip: Vec4 = [0.0; 4];
-    matrix::transform_mat4(&mut clip, &surface, &m);
+    let surface = center.extend(1.0);
+    let clip = m * surface;
     assert_near(0.0, clip[0] / clip[3], 1e-6);
     assert_near(0.0, clip[1] / clip[3], 1e-6);
 
     let plane = VerticalPerspectiveProjection::clipping_plane(state, radius);
-    assert!(plane[0] * surface[0] + plane[1] * surface[1] + plane[2] * surface[2] + plane[3] > 0.0);
-    let antipode: Vec4 = [-surface[0], -surface[1], -surface[2], 1.0];
-    assert!(plane[0] * antipode[0] + plane[1] * antipode[1] + plane[2] * antipode[2] + plane[3] < 0.0);
+    assert!(plane.dot(surface) > 0.0);
+    assert!(plane.dot((-center).extend(1.0)) < 0.0);
 }
 
 // gtest: GlobeTransform.CachedViewStateFollowsTheCamera
@@ -2020,25 +1955,21 @@ fn cached_view_state_follows_the_camera() {
         let expected = VerticalPerspectiveProjection::globe_view_projection_matrix(state, radius);
         let plane = VerticalPerspectiveProjection::clipping_plane(state, radius);
         let camera = VerticalPerspectiveProjection::camera_position(state, radius);
-        for (i, &value) in expected.iter().enumerate() {
+        let actual = state.get_globe_view_projection_matrix().to_cols_array();
+        for (i, &value) in expected.to_cols_array().iter().enumerate() {
             let _trace = ScopedTrace(format!("element {i}"));
-            assert_double_eq(value, state.get_globe_view_projection_matrix()[i]);
+            assert_double_eq(value, actual[i]);
         }
-        for (i, &value) in plane.iter().enumerate() {
+        for (i, &value) in plane.to_array().iter().enumerate() {
             let _trace = ScopedTrace(format!("plane {i}"));
             assert_double_eq(value, state.get_globe_clipping_plane()[i]);
         }
-        for (i, &value) in camera.iter().enumerate() {
+        for (i, &value) in camera.to_array().iter().enumerate() {
             let _trace = ScopedTrace(format!("camera {i}"));
             assert_double_eq(value, state.get_globe_camera_position()[i]);
         }
-        let mut round_trip: Mat4 = [0.0; 16];
-        matrix::multiply(
-            &mut round_trip,
-            &state.get_globe_view_projection_matrix(),
-            &state.get_inverse_globe_view_projection_matrix(),
-        );
-        for (i, value) in round_trip.iter().enumerate() {
+        let round_trip = state.get_globe_view_projection_matrix() * state.get_inverse_globe_view_projection_matrix();
+        for (i, value) in round_trip.to_cols_array().iter().enumerate() {
             let _trace = ScopedTrace(format!("inverse element {i}"));
             assert_near(if i % 5 == 0 { 1.0 } else { 0.0 }, *value, 1e-9);
         }
@@ -2574,10 +2505,7 @@ fn camera_for_bounds_fits_the_padded_view() {
         let mut nearest = f64::INFINITY;
         for sample in &samples {
             let surface = VerticalPerspectiveProjection::surface_vector(sample);
-            let clip = matrix::transform_mat4_value(
-                &[surface[0], surface[1], surface[2], 1.0],
-                &state.get_globe_view_projection_matrix(),
-            );
+            let clip = state.get_globe_view_projection_matrix() * surface.extend(1.0);
             let x = clip[0] / clip[3];
             let y = clip[1] / clip[3];
             nearest = [x - left, right - x, top - y, y - bottom].into_iter().fold(nearest, f64::min);
@@ -2605,8 +2533,7 @@ fn mercator_matches_the_tile_matrix() {
     let tile_id = UnwrappedTileID::new(1, 0, 0);
     let projector = TileProjector::new(state, &tile_id);
     let corner = Point::new(f64::from(EXTENT), f64::from(EXTENT));
-    let pos =
-        matrix::transform_mat4_value(&[corner.x, corner.y, 0.0, 1.0], &state.get_projection_data(&tile_id).main_matrix);
+    let pos = state.get_projection_data(&tile_id).main_matrix * DVec4::new(corner.x, corner.y, 0.0, 1.0);
 
     let projected = projector.project(&corner, 0.0);
     assert_near(pos[0] / pos[3], projected.point.x, 1e-9);
