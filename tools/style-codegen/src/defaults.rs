@@ -114,17 +114,10 @@ fn format_number(evaluated: &EvaluatedType, property_type: &str, num: Option<&Va
     }
 }
 
-/// Parses a CSS color into the csscolorparser crate's bytes, premultiplied in
-/// JS doubles.
+/// Parses a CSS color, premultiplied in JS doubles.
 fn parse_css_color(s: &str) -> [f64; 4] {
-    let color = csscolorparser::parse(s).unwrap_or_else(|_| panic!("Could not parse CSS color {s:?}"));
-    // The JS parser keeps the alpha as a double; the crate keeps a float.
-    // They agree for alpha 0 and 1, the only alphas of the spec defaults;
-    // refuse others rather than guess.
-    let a = f64::from(color.a);
-    assert!(a == 0.0 || a == 1.0, "CSS color default {s:?} with a fractional alpha");
-    let [r, g, b, _] = color.to_rgba8();
-    [f64::from(r) / 255.0 * a, f64::from(g) / 255.0 * a, f64::from(b) / 255.0 * a, a]
+    let [r, g, b, a] = mln_util::Color::parse_straight(s).unwrap_or_else(|| panic!("Could not parse CSS color {s:?}"));
+    [r * a, g * a, b * a, a]
 }
 
 fn color_init(s: &str, in_array: bool) -> Init {

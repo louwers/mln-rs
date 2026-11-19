@@ -31,8 +31,8 @@ fn test_cases() -> Vec<(&'static str, Option<Color>)> {
         ("", None),
         ("hsl(120,100%)", None),
         ("hsl(120,100%,50%,1,0)", None),
-        // Deviation: C++ wants hsla()'s alpha. The csscolorparser crate reads
-        // hsla() without one as hsl(), as CSS Color 4 and GL JS do.
+        // Deviation: C++ wants hsla()'s alpha. The style spec reads hsla()
+        // without one as hsl(), as CSS Color 4 does.
         ("hsla(120,100%,50%)", Some(Color::new(0.0, 1.0, 0.0, 1.0))),
     ]
 }

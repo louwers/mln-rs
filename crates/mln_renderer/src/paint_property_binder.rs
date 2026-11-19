@@ -115,10 +115,10 @@ impl BinderValue for Color {
     const BASE_DATA_TYPE: AttributeDataType = AttributeDataType::Float2;
     const INTERPOLATED_DATA_TYPE: AttributeDataType = AttributeDataType::Float4;
 
-    /// Encode a four-component color value into a pair of floats. Since
-    /// csscolorparser uses 8-bit precision for each color component, for
-    /// each float we use the upper 8 bits for one component (e.g. (color.r *
-    /// 255) * 256), and the lower 8 for another.
+    /// Encode a four-component color value into a pair of floats, with 8
+    /// bits for each component: for each float we use the upper 8 bits for
+    /// one component (e.g. (color.r * 255) * 256), and the lower 8 for
+    /// another.
     ///
     /// Also note that colors come in as floats 0..1, so we scale by 255.
     fn attribute_value(&self) -> [f32; 2] {

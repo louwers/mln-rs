@@ -102,10 +102,6 @@ ab_glyph_rasterizer = { version = "0.1.10" }
 bytemuck = { version = "1.25.2", features = ["derive", "min_const_generics"] }
 # The buffers that pmtiles reads headers and directories from.
 bytes = { version = "1.10.1" }
-# CSS colors other than oklch() (mln_util's Color::parse), in place of a port
-# of the C++ core's vendored csscolorparser: on every color string of the
-# expression and render tests, Color::parse gives the port's result exactly.
-csscolorparser = { version = "0.9.1" }
 # zlib-rs backend: pure Rust, so neither native nor wasm32 builds need a C
 # compiler or a system zlib.
 flate2 = { version = "1.1.11", default-features = false, features = [

@@ -12,6 +12,8 @@ use feature::Value;
 use crate::interpolate::interpolate as util_interpolate;
 use crate::string::to_string_double;
 
+mod css;
+
 /// The space a color interpolation runs in: RGB blends the premultiplied
 /// channels, LAB and HCL the straight color, OKLCH the premultiplied lightness
 /// and chroma, and OKLAB the premultiplied lightness, a and b.
@@ -201,103 +203,6 @@ fn hcl_to_srgb(l: f64, c: f64, h: f64) -> Vector3 {
     lab_to_srgb([l, hue.cos() * c, hue.sin() * c])
 }
 
-// CSS Color 4's oklch(), oklab() and color(display-p3 ...), read as the style
-// spec's parse_css_color.ts reads them: space-separated numbers, percentages
-// and `none` (0), an optional alpha after a slash, and the hue's angle units.
-
-/// `[+-]?(\d+(\.\d+)?|\.\d+)(e[+-]?\d+)?` at the start of `text`, and what
-/// follows it.
-fn css_number(text: &str) -> Option<(f64, &str)> {
-    let bytes = text.as_bytes();
-    let digits =
-        |from: usize| bytes.get(from..).map_or(0, |rest| rest.iter().take_while(|c| c.is_ascii_digit()).count());
-    let mut end = usize::from(matches!(bytes.first(), Some(b'+' | b'-')));
-    let whole = digits(end);
-    end += whole;
-    if bytes.get(end) == Some(&b'.') {
-        let fraction = digits(end + 1);
-        if fraction == 0 {
-            return None;
-        }
-        end += 1 + fraction;
-    } else if whole == 0 {
-        return None;
-    }
-    if bytes.get(end) == Some(&b'e') {
-        let sign = usize::from(matches!(bytes.get(end + 1), Some(b'+' | b'-')));
-        let exponent = digits(end + 1 + sign);
-        if exponent > 0 {
-            end += 1 + sign + exponent;
-        }
-    }
-    Some((text[..end].parse().ok()?, &text[end..]))
-}
-
-/// A component: `none` is 0, a percentage that share of `percent`, and with
-/// `angle` an angle in degrees, its unit's turns wrapped.
-fn css_component(text: &str, percent: f64, angle: bool) -> Option<f64> {
-    if text == "none" {
-        return Some(0.0);
-    }
-    let (value, unit) = css_number(text)?;
-    let degrees_per_unit = match unit {
-        "" => return Some(value),
-        "%" if !angle => return Some(value / 100.0 * percent),
-        "deg" if angle => 1.0,
-        "grad" if angle => 0.9,
-        "rad" if angle => 180.0 / std::f64::consts::PI,
-        "turn" if angle => 360.0,
-        _ => return None,
-    };
-    Some(value % (360.0 / degrees_per_unit) * degrees_per_unit)
-}
-
-/// The finite components of a function's arguments `a b c [/ alpha]`, a
-/// percentage of each channel a share of `percents`, the third an angle when
-/// `angle`. An alpha left out is 1.
-fn css_components(arguments: &str, percents: [f64; 3], angle: bool) -> Option<[f64; 4]> {
-    let (channels, alpha) = match arguments.split_once('/') {
-        Some((channels, alpha)) => (channels, Some(alpha.trim())),
-        None => (arguments, None),
-    };
-    let mut channels = channels.split_whitespace();
-    let mut components = [0.0; 4];
-    for (i, percent) in percents.into_iter().enumerate() {
-        components[i] = css_component(channels.next()?, percent, angle && i == 2)?;
-    }
-    if channels.next().is_some() {
-        return None;
-    }
-    components[3] = match alpha {
-        Some(alpha) if alpha.contains(char::is_whitespace) => return None,
-        Some(alpha) => css_component(alpha, 1.0, false)?,
-        None => 1.0,
-    };
-    components.iter().all(|c| c.is_finite()).then_some(components)
-}
-
-/// `oklch()`, `oklab()` or `color(display-p3 ...)`, as the style spec reads them.
-fn parse_css_color_4(text: &str) -> Option<Color> {
-    let text = text.to_ascii_lowercase();
-    let arguments = |function: &str| text.strip_prefix(function).and_then(|rest| rest.strip_suffix(')'));
-    if let Some(arguments) = arguments("oklch(") {
-        let [l, c, h, alpha] = css_components(arguments, [1.0, 0.4, 1.0], true)?;
-        let rgb = oklch_to_srgb(l.clamp(0.0, 1.0), c.max(0.0), (h % 360.0).to_radians());
-        return Some(Color::from_straight(rgb, alpha.clamp(0.0, 1.0)));
-    }
-    if let Some(arguments) = arguments("oklab(") {
-        let [l, a, b, alpha] = css_components(arguments, [1.0, 0.4, 0.4], false)?;
-        return Some(Color::from_straight(oklab_via_oklch_to_srgb(l.clamp(0.0, 1.0), a, b), alpha.clamp(0.0, 1.0)));
-    }
-    // color() reads only Display P3.
-    let p3 = arguments("color(")?.trim_start().strip_prefix("display-p3")?;
-    if !p3.starts_with(char::is_whitespace) {
-        return None;
-    }
-    let [r, g, b, alpha] = css_components(p3, [1.0; 3], false)?;
-    Some(Color::from_straight(display_p3_to_srgb([r, g, b]), alpha.clamp(0.0, 1.0)))
-}
-
 fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a * (1.0 - t) + b * t
 }
@@ -483,35 +388,22 @@ impl Color {
         Color::new_unchecked(0.0, 0.0, 1.0, 1.0)
     }
 
-    /// Parse a CSS color string, returning a premultiplied Color.
+    /// Parse a CSS color string as the style spec does, returning a
+    /// premultiplied Color. Unlike the C++ core, it keeps the channels'
+    /// precision rather than rounding them to 8 bits.
     #[must_use]
     pub fn parse(s: &str) -> Option<Color> {
-        // Deviation: C++ parses with its vendored csscolorparser. The crate
-        // gives the same bytes on every color string of the expression and
-        // render tests, and also reads CSS Color 4's rgb() and hsl() forms, as
-        // GL JS does. It reads more than the style spec's colors, though: hex
-        // without its '#', and functions like hwb() and lab(), so those are
-        // turned away here. oklch(), oklab() and color() are read here as
-        // the style spec reads them, keeping their float channels.
-        let text = s.trim();
-        if let Some(open) = text.find('(') {
-            let name = text[..open].trim_end();
-            if ["oklch", "oklab", "color"].iter().any(|function| name.eq_ignore_ascii_case(function)) {
-                return parse_css_color_4(text);
-            }
-            if !["rgb", "rgba", "hsl", "hsla"].iter().any(|function| name.eq_ignore_ascii_case(function)) {
-                return None;
-            }
-        } else if text.bytes().all(|c| c.is_ascii_hexdigit()) {
-            return None;
-        }
-        let css_color = csscolorparser::parse(text).ok()?;
-        let [r, g, b, _] = css_color.to_rgba8();
+        let (rgb, alpha) = css::parse(s)?;
+        Some(Color::from_straight(rgb, alpha))
+    }
 
-        // Premultiply the color.
-        // `css_color->a / 255` is float / int; `r * factor` is int * float.
-        let factor: f32 = css_color.a / 255.0f32;
-        Some(Color::new(f32::from(r) * factor, f32::from(g) * factor, f32::from(b) * factor, css_color.a))
+    /// The straight `[r, g, b, a]` of a CSS color string, as the style spec
+    /// parses it: red, green and blue are 0..1 inside sRGB and unclipped
+    /// outside it.
+    #[must_use]
+    pub fn parse_straight(s: &str) -> Option<[f64; 4]> {
+        let ([r, g, b], alpha) = css::parse(s)?;
+        Some([r, g, b, alpha])
     }
 
     #[must_use]
