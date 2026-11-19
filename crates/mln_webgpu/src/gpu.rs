@@ -171,7 +171,6 @@ pub struct WebGpu {
     pipelines: SlotMap<PipelineId, Pipeline>,
     bindings: SlotMap<BindingsId, Bindings>,
     geometries: SlotMap<GeometryId, Geometry>,
-    /// What the live bindings and geometry were made of.
     dependents: validation::Dependents,
     readbacks: SlotMap<ReadbackId, Readback>,
     /// The buffer of the last readback taken, which the next readback of

@@ -237,13 +237,13 @@ impl FrameTarget for BorrowedTarget {
 
     fn begin_frame(&mut self, gpu: &mut WebGpu) -> Option<FrameImage> {
         let slot = self.selected;
-        match self.imports.take() {
-            Some((imported, image)) if imported == slot => {
-                self.imports = Some((imported, image));
-                return Some(image);
-            }
+        match self.imports {
+            Some((imported, image)) if imported == slot => return Some(image),
             // A slot was selected since the frame began.
-            Some((_, image)) => destroy_imports(gpu, image),
+            Some((_, image)) => {
+                self.imports = None;
+                destroy_imports(gpu, image);
+            }
             None => {}
         }
         let texture = self.textures.textures.get(slot)?.clone();

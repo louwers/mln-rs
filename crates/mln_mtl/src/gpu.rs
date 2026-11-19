@@ -979,7 +979,7 @@ fn merge_read(reads: &mut Vec<ShaderBinding>, read: ShaderBinding) {
 }
 
 /// A shader's vertex function, and its fragment function, if it has one.
-pub(crate) type Functions = (Id<dyn MTLFunction>, Option<Id<dyn MTLFunction>>);
+type Functions = (Id<dyn MTLFunction>, Option<Id<dyn MTLFunction>>);
 
 /// Compiles `source`, with `defines` as preprocessor macros, and finds its
 /// `vertex` function and its `fragment` one, if named.
