@@ -554,7 +554,7 @@ impl TestRunner {
                         width,
                         height,
                         Some(&mut image_diff.data),
-                        0.1285, // Defined in GL JS
+                        metadata.threshold,
                         false,
                     ) as f64;
                 } else {

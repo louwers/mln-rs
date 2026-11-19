@@ -377,6 +377,10 @@ pub(crate) fn parse_test_metadata(paths: &TestPaths) -> TestMetadata {
         metadata.allowed = get_f64(member(test_value, "allowed"));
     }
 
+    if has("threshold") {
+        metadata.threshold = get_f64(member(test_value, "threshold"));
+    }
+
     if has("description") {
         metadata.description = get_str(member(test_value, "description")).to_string();
     }

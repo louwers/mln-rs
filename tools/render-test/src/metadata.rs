@@ -210,6 +210,9 @@ pub struct TestMetadata {
     pub(crate) pixel_ratio: f32,
     /// diff
     pub(crate) allowed: f64,
+    /// The color difference, from 0 to 1, past which a pixel counts as
+    /// different.
+    pub(crate) threshold: f64,
     pub(crate) description: String,
     pub(crate) map_mode: MapMode,
     pub(crate) debug: MapDebugOptions,
@@ -263,6 +266,8 @@ impl Default for TestMetadata {
             max_pitch: None,
             pixel_ratio: 1.0,
             allowed: 0.00015,
+            // GL JS's default.
+            threshold: 0.1285,
             description: String::new(),
             map_mode: MapMode::Static,
             debug: MapDebugOptions::NO_DEBUG,
