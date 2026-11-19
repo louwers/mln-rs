@@ -141,6 +141,20 @@ enum Waiting {
     Fence(vk::Semaphore, u64),
 }
 
+impl ConsumerWait {
+    /// The semaphore of the ring's own that the wait holds, which the caller
+    /// destroys. A timeline is the host's.
+    fn into_own_semaphore(self) -> Option<vk::Semaphore> {
+        match self.0 {
+            Waiting::Timeline(..) => None,
+            #[cfg(unix)]
+            Waiting::Imported { semaphore, .. } => Some(semaphore),
+            #[cfg(windows)]
+            Waiting::Fence(semaphore, _) => Some(semaphore),
+        }
+    }
+}
+
 /// The host's D3D12 fence whose NT handle is `handle`, imported into a new
 /// timeline semaphore, which the caller destroys. The handle stays the
 /// host's.
@@ -487,21 +501,12 @@ impl RingBackend for VulkanRing {
         gpu.forget_waits(texture);
     }
 
-    /// A timeline is the host's; a semaphore of the ring's own goes once
-    /// the submit is done.
+    /// A semaphore of the ring's own goes once the submit is done.
     fn waited(gpu: &mut VulkanGpu, wait: ConsumerWait) {
-        let semaphore = match wait.0 {
-            Waiting::Timeline(..) => return,
-            #[cfg(unix)]
-            Waiting::Imported { semaphore, file } => {
-                drop(file);
-                semaphore
-            }
-            #[cfg(windows)]
-            Waiting::Fence(semaphore, _) => semaphore,
-        };
-        // SAFETY: destroyed once the frame that waits on it is done.
-        gpu.destroy_later(move |device| unsafe { device.destroy_semaphore(semaphore, None) });
+        if let Some(semaphore) = wait.into_own_semaphore() {
+            // SAFETY: destroyed once the frame that waits on it is done.
+            gpu.destroy_later(move |device| unsafe { device.destroy_semaphore(semaphore, None) });
+        }
     }
 
     fn signal_after_next_submit(&mut self, gpu: &mut VulkanGpu) {
@@ -559,27 +564,12 @@ impl RingBackend for VulkanRing {
     }
 
     fn forget(device: &Device, wait: ConsumerWait) {
-        drop_wait(device, wait);
-    }
-}
-
-/// Lets go of `wait`, destroying a semaphore of the target's that no frame
-/// waits on.
-#[cfg_attr(not(unix), expect(clippy::needless_pass_by_value, reason = "a wait is let go of once: the call takes it"))]
-fn drop_wait(device: &Device, wait: ConsumerWait) {
-    let semaphore = match wait.0 {
-        Waiting::Timeline(..) => return,
-        #[cfg(unix)]
-        Waiting::Imported { semaphore, file } => {
-            drop(file);
-            semaphore
+        if let Some(semaphore) = wait.into_own_semaphore() {
+            // SAFETY: no submitted frame waits on the semaphore, which the
+            // ring made.
+            unsafe { device.shared.device().destroy_semaphore(semaphore, None) };
         }
-        #[cfg(windows)]
-        Waiting::Fence(semaphore, _) => semaphore,
-    };
-    // SAFETY: no submitted frame waits on the semaphore, which the target
-    // made.
-    unsafe { device.shared.device().destroy_semaphore(semaphore, None) };
+    }
 }
 
 /// Waits until `deadline` for the host's `semaphore` to reach `value`, and
