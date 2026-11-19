@@ -96,7 +96,7 @@ pub fn shape_arabic(text: &[u16]) -> Cow<'_, [u16]> {
             continue;
         }
         let joins_next = joining_type.joins_following() && next_type.joins_preceding();
-        shaped.push(letter_form(unit, joining_type, joins_prev, joins_next));
+        shaped.push(letter_form(unit, joins_prev, joins_next));
         prev = joining_type;
         i += 1;
     }
@@ -122,12 +122,8 @@ fn to_letters(text: &[u16]) -> Vec<u16> {
 }
 
 /// The presentation form of a letter that joins the letters before and
-/// after it as given, or the letter itself if it has no such form or
-/// doesn't join.
-fn letter_form(unit: u16, joining_type: JoiningType, joins_prev: bool, joins_next: bool) -> u16 {
-    if joining_type == JoiningType::NonJoining {
-        return unit;
-    }
+/// after it as given, or the letter itself if it has no such form.
+fn letter_form(unit: u16, joins_prev: bool, joins_next: bool) -> u16 {
     let Ok(i) = LETTER_FORMS.binary_search_by_key(&unit, |&(letter, _)| letter) else {
         return unit;
     };
@@ -187,6 +183,17 @@ mod tests {
             shape("مكتبة الإسكندرية\u{200E}\u{200E} Maktabat al-Iskandarīyah"),
             u("ﻣﻜﺘﺒﺔ ﺍﻹﺳﻜﻨﺪﺭﻳﺔ\u{200E}\u{200E} Maktabat al-Iskandarīyah")
         );
+    }
+
+    #[test]
+    fn hamza_takes_its_isolated_form() {
+        assert_eq!(shape("ء"), [0xFE80]);
+        assert_eq!(shape("\u{FE80}"), [0xFE80]);
+    }
+
+    #[test]
+    fn lam_alef_with_a_mark_between_them() {
+        assert_eq!(shape("لَا"), [0xFEFB, 0xFE76]);
     }
 
     #[test]
