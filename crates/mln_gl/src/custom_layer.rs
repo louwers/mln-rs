@@ -10,7 +10,7 @@ use crate::types::{FramebufferID, Gl};
 /// Runs `lend`, which lends the current context to a custom layer, with
 /// vertex array 0 bound and no sampler objects, as hosts expect, and then
 /// forgets the GL state that `state` knew.
-pub(crate) fn lend_context<T>(gl: &Gl, state: &State, lend: impl FnOnce() -> T) -> T {
+pub(crate) fn lend_context<T>(gl: &Gl, state: &mut State, lend: impl FnOnce() -> T) -> T {
     state.bind_vertex_array(gl, None);
     state.unbind_samplers(gl);
     let lent = lend();

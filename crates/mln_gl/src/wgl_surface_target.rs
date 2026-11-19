@@ -7,7 +7,6 @@
 // As on the other window backends, an overlay can draw over each frame
 // before it is presented (an app's controls).
 
-use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_gfx::Window;
@@ -17,16 +16,18 @@ use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use windows_sys::Win32::Foundation::HWND;
+use windows_sys::Win32::Graphics::Gdi::HDC;
 use windows_sys::Win32::Graphics::OpenGL::HGLRC;
 use windows_sys::Win32::UI::WindowsAndMessaging::IsIconic;
 
 use crate::frame_image::{FrameImports, default_framebuffer};
 use crate::gpu::GlGpu;
 use crate::overlay::{self, Overlay};
-use crate::renderer_backend::{GlContext, PlatformContext, RendererBackend};
+use crate::renderer_backend::{PlatformContext, RendererBackend};
 use crate::wgl;
 
-/// The window's context, current on the window's device context.
+/// The window's context, current on the window's device context, which the
+/// backend's platform context owns.
 struct WglWindow {
     window: HWND,
     dc: wgl::WindowDc,
@@ -73,17 +74,17 @@ impl Drop for WglWindow {
     }
 }
 
-/// The backend's share of the window's context.
-struct WindowContext(Rc<WglWindow>);
+/// The backend's platform context: the window's context.
+struct WindowContext(WglWindow);
 
 impl PlatformContext for WindowContext {
-    fn make_current(&self) {
+    fn make_current(&mut self) {
         if let Err(e) = self.0.make_current() {
             Log::error(Event::GraphicsBackend, format!("Switching OpenGL context failed: {e}"));
         }
     }
 
-    fn done_current(&self) {
+    fn done_current(&mut self) {
         if let Err(e) = wgl::make_current(std::ptr::null_mut(), std::ptr::null_mut()) {
             Log::error(Event::GraphicsBackend, format!("Removing OpenGL context failed: {e}"));
         }
@@ -91,11 +92,15 @@ impl PlatformContext for WindowContext {
 }
 
 /// Frames presented to a Win32 window, from a WGL context of the window's
-/// own.
+/// own, which the backend's `GlGpu` owns.
+///
+/// The target's tear-down drops the overlay with the context current. A
+/// target dropped without it drops the overlay without.
 pub struct SurfaceTarget {
-    /// The backend's context, which the overlay draws with and goes with.
-    context: Rc<GlContext>,
-    window: Rc<WglWindow>,
+    /// The window, which the backend's context keeps open.
+    window: HWND,
+    /// The window's device context, which the backend's context keeps.
+    dc: HDC,
     size: Size,
     /// The frame's default framebuffer, imported into the backend's `GlGpu`.
     image: FrameImports,
@@ -137,16 +142,17 @@ impl SurfaceTarget {
         framebuffer_size: Size,
         cap_frame_rate: bool,
     ) -> Result<(RendererBackend, SurfaceTarget), Error> {
-        let window = Rc::new(WglWindow::new(window)?);
+        let window = WglWindow::new(window)?;
         window.make_current().map_err(|e| Error::native(format!("Switching OpenGL context failed: {e}")))?;
         wgl::set_swap_interval(None, i32::from(cap_frame_rate));
         let gl = wgl::functions(None);
         let _ = wgl::make_current(std::ptr::null_mut(), std::ptr::null_mut());
         let gl = gl?;
-        let backend = RendererBackend::from_parts(gl, Box::new(WindowContext(Rc::clone(&window))));
+        let (hwnd, dc) = (window.window, window.dc.dc());
+        let backend = RendererBackend::from_parts(gl, Box::new(WindowContext(window)));
         let target = SurfaceTarget {
-            context: Rc::clone(backend.context()),
-            window,
+            window: hwnd,
+            dc,
             size: framebuffer_size,
             image: FrameImports::default(),
             overlay: None,
@@ -165,9 +171,10 @@ impl SurfaceTarget {
         self.size = size;
     }
 
-    /// Draws `overlay` over each frame from now on, or nothing.
-    pub fn set_overlay(&mut self, overlay: Option<Overlay>) {
-        let _current = self.context.enter();
+    /// Draws `overlay` over each frame from now on, or nothing. The overlay
+    /// it had goes with the context of `gpu`, the backend's, current.
+    pub fn set_overlay(&mut self, gpu: &mut GlGpu, overlay: Option<Overlay>) {
+        let _current = gpu.enter();
         self.overlay = overlay;
     }
 }
@@ -179,7 +186,7 @@ impl FrameTarget for SurfaceTarget {
     fn begin_frame(&mut self, gpu: &mut GlGpu) -> Option<FrameImage> {
         let size = self.size;
         // SAFETY: a plain query of the live window.
-        if size.width == 0 || size.height == 0 || unsafe { IsIconic(self.window.window) } != 0 {
+        if size.width == 0 || size.height == 0 || unsafe { IsIconic(self.window) } != 0 {
             return None;
         }
         self.image.get_or_import(|| default_framebuffer(gpu, size))
@@ -190,29 +197,23 @@ impl FrameTarget for SurfaceTarget {
         let Some(image) = self.image.get() else {
             return Handoff::Dropped;
         };
-        let _current = self.context.enter();
+        let mut current = gpu.enter();
+        let gpu = &mut *current;
         if let Some(overlay) = self.overlay.as_mut() {
-            overlay::draw(overlay, &self.context, image.size);
+            overlay::draw(overlay, gpu.context_mut(), image.size);
         }
         self.image.release(gpu);
-        if let Err(e) = wgl::swap_buffers(self.window.dc.dc()) {
+        if let Err(e) = wgl::swap_buffers(self.dc) {
             Log::error(Event::GraphicsBackend, e);
         }
         Handoff::Presented
     }
 
+    /// The overlay goes with the context current.
     fn tear_down(&mut self, gpu: &mut GlGpu) {
         self.image.release(gpu);
-    }
-}
-
-impl Drop for SurfaceTarget {
-    fn drop(&mut self) {
-        // The overlay's GL objects go with the context current.
-        if let Some(overlay) = self.overlay.take() {
-            let _current = self.context.enter();
-            drop(overlay);
-        }
+        let _current = gpu.enter();
+        self.overlay = None;
     }
 }
 
@@ -280,7 +281,7 @@ mod tests {
         let (mut backend, mut target) = SurfaceTarget::with_backend(handle, size, false).unwrap();
         let pixels = Rc::new(Cell::new(Vec::new()));
         let seen = Rc::clone(&pixels);
-        target.set_overlay(Some(Box::new(move |target| {
+        target.set_overlay(&mut backend.gpu(), Some(Box::new(move |target| {
             assert_eq!(size, target.size);
             let mut pixel = [0u8; 4];
             // SAFETY: the context is current, with the window's framebuffer
@@ -303,7 +304,7 @@ mod tests {
         assert_eq!(Handoff::Presented, red_frame(&mut backend, &mut target));
         assert_eq!(Handoff::Presented, red_frame(&mut backend, &mut target));
         assert_eq!(vec![[255, 0, 0, 255]; 2], pixels.take());
-        target.set_overlay(None);
+        target.set_overlay(&mut backend.gpu(), None);
         assert_eq!(Handoff::Presented, red_frame(&mut backend, &mut target));
         assert_eq!(Vec::<[u8; 4]>::new(), pixels.take());
         target.tear_down(&mut backend.gpu());

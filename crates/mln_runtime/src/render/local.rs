@@ -983,8 +983,8 @@ fn surface_backend(
                 SurfaceOverlay::Gl(overlay) => Ok(overlay),
                 other => Err(other),
             })?;
-            let (backend, mut target) = mln_gl::SurfaceTarget::with_backend(window, size, cap_frame_rate)?;
-            target.set_overlay(overlay);
+            let (mut backend, mut target) = mln_gl::SurfaceTarget::with_backend(window, size, cap_frame_rate)?;
+            target.set_overlay(&mut backend.gpu(), overlay);
             Ok(presenting(backend, target))
         }
         #[cfg(all(feature = "gl", target_family = "wasm"))]

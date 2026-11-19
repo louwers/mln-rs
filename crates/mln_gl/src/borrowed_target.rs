@@ -264,12 +264,12 @@ impl FrameTarget for BorrowedTarget {
         // which it does at its next draw or clear. Without that, radeonsi
         // hands the host's context the compressed data of its depth texture.
         if !self.textures.depth_textures.is_empty() {
-            let context = gpu.context();
-            let _current = context.enter();
-            context.state().bind_framebuffer(context.gl(), None);
+            let mut context = gpu.context_mut().enter();
+            let (gl, state) = context.parts();
+            state.bind_framebuffer(gl, None);
             // SAFETY: the context is current, on its own surface, whose
             // color nothing reads.
-            unsafe { context.gl().clear(glow::COLOR_BUFFER_BIT) };
+            unsafe { gl.clear(glow::COLOR_BUFFER_BIT) };
         }
         let sync = if self.producer == SyncKind::OpenGlFence {
             let Ok(fence) = gpu.fence_sync() else { return Handoff::Dropped };
@@ -339,7 +339,7 @@ impl FrameTarget for HostSurfaceTarget {
         if !self.image.release(gpu) {
             return Handoff::Dropped;
         }
-        let _current = gpu.context().enter();
+        let _current = gpu.context_mut().enter();
         if self.swap.swap() { Handoff::Presented } else { Handoff::Dropped }
     }
 

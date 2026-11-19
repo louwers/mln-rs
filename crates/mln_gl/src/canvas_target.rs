@@ -19,8 +19,8 @@ use crate::renderer_backend::{PlatformContext, RendererBackend};
 struct CanvasContext;
 
 impl PlatformContext for CanvasContext {
-    fn make_current(&self) {}
-    fn done_current(&self) {}
+    fn make_current(&mut self) {}
+    fn done_current(&mut self) {}
 }
 
 /// A canvas that a [`CanvasTarget`] draws into.

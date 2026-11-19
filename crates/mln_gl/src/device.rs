@@ -30,7 +30,6 @@
 
 #![cfg_attr(windows, expect(dead_code, reason = "Windows makes no library device on EGL"))]
 
-use std::cell::Cell;
 use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -657,7 +656,7 @@ impl Device {
             }
             Kind::Single(single) => {
                 let user = single.users.fetch_add(1, Ordering::Relaxed) + 1;
-                let turns = SingleContextTurns { single: Arc::clone(single), user, lost: Cell::new(false) };
+                let turns = SingleContextTurns { single: Arc::clone(single), user, lost: false };
                 Self::functions(Box::new(turns))
             }
             Kind::Host(group) => {
@@ -694,7 +693,7 @@ impl Device {
     /// The GL functions of `context`, made current to look them up. Fails
     /// with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a desktop
     /// context older than OpenGL 3.3.
-    fn functions(context: Box<dyn PlatformContext>) -> Result<(Gl, Box<dyn PlatformContext>), Error> {
+    fn functions(mut context: Box<dyn PlatformContext>) -> Result<(Gl, Box<dyn PlatformContext>), Error> {
         let egl = library().map_err(Error::unsupported)?;
         context.make_current();
         // SAFETY: the context is current, and EGL gives the functions of its
@@ -758,22 +757,22 @@ struct SingleContextTurns {
     /// The renderer's number among the context's.
     user: u64,
     /// Whether another renderer had the context since this one's last turn.
-    lost: Cell<bool>,
+    lost: bool,
 }
 
 impl PlatformContext for SingleContextTurns {
-    fn make_current(&self) {
+    fn make_current(&mut self) {
         if self.single.take(self.user) {
-            self.lost.set(true);
+            self.lost = true;
         }
     }
 
-    fn done_current(&self) {
+    fn done_current(&mut self) {
         self.single.give(self.user);
     }
 
-    fn take_state_lost(&self) -> bool {
-        self.lost.replace(false)
+    fn take_state_lost(&mut self) -> bool {
+        std::mem::take(&mut self.lost)
     }
 }
 
@@ -809,9 +808,9 @@ struct EglContext {
     /// What the thread had current, which the context makes current again
     /// when it is done: a host's thread that services a session has its own
     /// context current.
-    previous: Cell<Previous>,
+    previous: Previous,
     /// The thread's client API before the context was made current.
-    previous_api: Cell<Option<egl::Enum>>,
+    previous_api: Option<egl::Enum>,
     /// The share group, which outlives its contexts.
     _device: Device,
 }
@@ -837,8 +836,8 @@ impl EglContext {
             api,
             surface: Some(surface),
             owns_surface: true,
-            previous: Cell::new(None),
-            previous_api: Cell::new(None),
+            previous: None,
+            previous_api: None,
             _device: device,
         })
     }
@@ -873,32 +872,32 @@ impl EglContext {
             api,
             surface,
             owns_surface,
-            previous: Cell::new(None),
-            previous_api: Cell::new(None),
+            previous: None,
+            previous_api: None,
             _device: device,
         })
     }
 }
 
 impl PlatformContext for EglContext {
-    fn make_current(&self) {
+    fn make_current(&mut self) {
         let egl = self.egl;
         // What the thread had current, asked before the API changes, since
         // EGL answers for the bound one.
-        self.previous.set(current_other_than(egl, self.context));
+        self.previous = current_other_than(egl, self.context);
         let previous_api = egl.query_api();
         if previous_api != self.api.egl()
             && let Err(e) = egl.bind_api(self.api.egl())
         {
             Log::error(Event::GraphicsBackend, format!("Error setting the EGL rendering API: {e}"));
         }
-        self.previous_api.set(Some(previous_api));
+        self.previous_api = Some(previous_api);
         if let Err(e) = egl.make_current(self.display, self.surface, self.surface, Some(self.context)) {
             Log::error(Event::GraphicsBackend, format!("Switching OpenGL context failed: {e}"));
         }
     }
 
-    fn done_current(&self) {
+    fn done_current(&mut self) {
         let egl = self.egl;
         if let Err(e) = restore(egl, self.display, self.previous.take()) {
             Log::error(Event::GraphicsBackend, format!("Removing OpenGL context failed: {e}"));

@@ -9,7 +9,6 @@
 // host's window, whose pixel format the target sets.
 
 use std::any::Any;
-use std::cell::Cell;
 use std::ffi::{CString, c_void};
 use std::sync::OnceLock;
 
@@ -347,7 +346,7 @@ impl Group {
             create_shared_context(dc, self.root)
                 .map_err(|e| Error::native(format!("Error creating a WGL context that shares the host's: {e}")))?
         };
-        let context = GroupContext { dc, context, _window: window, previous: Cell::new(None), _keep: keep };
+        let mut context = GroupContext { dc, context, _window: window, previous: None, _keep: keep };
         context.make_current();
         let gl = functions(self.loader);
         context.done_current();
@@ -373,19 +372,19 @@ struct GroupContext {
     /// What the thread had current, which the context makes current again
     /// when it is done: a host's thread that services a session has its own
     /// context current.
-    previous: Cell<Option<(HDC, HGLRC)>>,
+    previous: Option<(HDC, HGLRC)>,
     _keep: Box<dyn Any>,
 }
 
 impl PlatformContext for GroupContext {
-    fn make_current(&self) {
-        self.previous.set(current().filter(|(_, context)| *context != self.context));
+    fn make_current(&mut self) {
+        self.previous = current().filter(|(_, context)| *context != self.context);
         if let Err(e) = make_current(self.dc, self.context) {
             Log::error(Event::GraphicsBackend, format!("Switching OpenGL context failed: {e}"));
         }
     }
 
-    fn done_current(&self) {
+    fn done_current(&mut self) {
         let (dc, context) = self.previous.take().unwrap_or((std::ptr::null_mut(), std::ptr::null_mut()));
         if let Err(e) = make_current(dc, context) {
             Log::error(Event::GraphicsBackend, format!("Removing OpenGL context failed: {e}"));

@@ -10,7 +10,6 @@
 // until they are given back.
 
 use std::ffi::c_void;
-use std::rc::{Rc, Weak};
 
 use glow::HasContext;
 use khronos_egl as egl;
@@ -26,8 +25,9 @@ use mln_util::size::Size;
 use crate::borrowed_target::{BorrowedTarget, BorrowedTextures};
 use crate::device::Device;
 use crate::gpu::GlGpu;
-use crate::renderer_backend::{GlContext, RendererBackend};
-use crate::types::{FramebufferID, TextureID};
+use crate::renderer_backend::RendererBackend;
+use crate::state::State;
+use crate::types::{FramebufferID, Gl, TextureID};
 
 #[cfg(not(target_os = "android"))]
 mod dma_buf;
@@ -201,9 +201,10 @@ struct SlotTexture {
     producer: Option<std::os::fd::OwnedFd>,
 }
 
-/// A generation's GL objects and images, which go with it.
+/// A generation's GL objects and images, which its tear-down deletes. A
+/// generation dropped without it destroys its images, and leaves its GL
+/// objects to the context.
 struct Objects {
-    context: Weak<GlContext>,
     exporter: std::sync::Arc<Exporter>,
     slots: Vec<SlotTexture>,
     /// The texture that frames render into, and the framebuffer that their
@@ -214,45 +215,157 @@ struct Objects {
     canvas_depth: Option<TextureID>,
 }
 
-/// Deletes `texture`, of `context`, which is current. GL keeps it while the
-/// commands submitted so far use it.
-fn delete_texture(context: &GlContext, texture: TextureID) {
-    context.state().forget_texture(texture);
+/// Deletes `texture`, of `gl`'s context, which is current, with the state
+/// `state`. GL keeps it while the commands submitted so far use it.
+fn delete_texture(gl: &Gl, state: &mut State, texture: TextureID) {
+    state.forget_texture(texture);
     // SAFETY: the caller's contract, and the texture is alive.
-    unsafe { context.gl().delete_texture(texture) };
+    unsafe { gl.delete_texture(texture) };
 }
 
-/// Deletes `framebuffer`, of `context`, which is current.
-fn delete_framebuffer(context: &GlContext, framebuffer: FramebufferID) {
-    context.state().forget_framebuffer(framebuffer);
+/// Deletes `framebuffer`, of `gl`'s context, which is current, with the
+/// state `state`.
+fn delete_framebuffer(gl: &Gl, state: &mut State, framebuffer: FramebufferID) {
+    state.forget_framebuffer(framebuffer);
     // SAFETY: the caller's contract, and the framebuffer is alive.
-    unsafe { context.gl().delete_framebuffer(framebuffer) };
+    unsafe { gl.delete_framebuffer(framebuffer) };
 }
 
-impl Drop for Objects {
-    fn drop(&mut self) {
-        let context = self.context.upgrade();
-        let _current = context.as_ref().map(GlContext::enter);
-        let context = context.as_deref();
-        if let (Some((texture, framebuffer)), Some(context)) = (self.canvas.take(), context) {
-            delete_framebuffer(context, framebuffer);
-            delete_texture(context, texture);
+impl Objects {
+    /// Deletes the GL objects, of `gl`'s context, which is current, with the
+    /// state `state`, and destroys the images.
+    fn delete(&mut self, gl: &Gl, state: &mut State) {
+        if let Some((texture, framebuffer)) = self.canvas.take() {
+            delete_framebuffer(gl, state, framebuffer);
+            delete_texture(gl, state, texture);
         }
-        if let (Some(texture), Some(context)) = (self.canvas_depth.take(), context) {
-            delete_texture(context, texture);
+        if let Some(texture) = self.canvas_depth.take() {
+            delete_texture(gl, state, texture);
         }
         for slot in self.slots.drain(..) {
-            if let Some(context) = context {
-                delete_framebuffer(context, slot.framebuffer);
-                delete_texture(context, slot.texture);
-                if let Some(depth) = slot.depth {
-                    delete_texture(context, depth);
-                }
+            delete_framebuffer(gl, state, slot.framebuffer);
+            delete_texture(gl, state, slot.texture);
+            if let Some(depth) = slot.depth {
+                delete_texture(gl, state, depth);
             }
             // The image is the generation's, of its display; a texture over
             // it keeps its storage.
             self.exporter.images.destroy(slot.image);
         }
+    }
+}
+
+impl Drop for Objects {
+    fn drop(&mut self) {
+        for slot in self.slots.drain(..) {
+            self.exporter.images.destroy(slot.image);
+        }
+    }
+}
+
+/// The framebuffer of `texture`, of `gl`'s context, which is current, with
+/// the state `state`.
+fn framebuffer_of(gl: &Gl, state: &mut State, texture: TextureID) -> Result<FramebufferID, Error> {
+    // SAFETY: the context is current, and the framebuffer is new; the
+    // state's cache sees each binding.
+    unsafe {
+        let framebuffer = gl.create_framebuffer().map_err(Error::native)?;
+        state.bind_framebuffer(gl, Some(framebuffer));
+        gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(texture), 0);
+        let status = gl.check_framebuffer_status(glow::FRAMEBUFFER);
+        state.bind_framebuffer(gl, None);
+        if status != glow::FRAMEBUFFER_COMPLETE {
+            delete_framebuffer(gl, state, framebuffer);
+            return Err(Error::native(format!(
+                "a {:?} makes no complete framebuffer: status {status:#x}",
+                platform::KIND
+            )));
+        }
+        Ok(framebuffer)
+    }
+}
+
+impl Objects {
+    /// Makes `depth` slots of buffers of `size` pixels of `layout`, the
+    /// textures and framebuffers over them, and the canvas, with depth
+    /// textures where the ring keeps depth, on `gl`'s context, which is
+    /// current, with the state `state`. What fails leaves what was made, for
+    /// [`delete`](Self::delete).
+    fn make(
+        &mut self,
+        gl: &Gl,
+        state: &mut State,
+        layout: &Layout,
+        depth: usize,
+        size: Size,
+        keep_depth: bool,
+    ) -> Result<(), Error> {
+        let images = &self.exporter.images;
+        for _ in 0..depth {
+            let (memory, image) = self.exporter.source.allocate(images, size, layout)?;
+            // SAFETY: the context is current, and the image is of the
+            // context's display.
+            let texture = match unsafe { gl.create_texture() } {
+                Ok(texture) => texture,
+                Err(error) => {
+                    images.destroy(image);
+                    return Err(Error::native(error));
+                }
+            };
+            state.bind_texture(gl, 0, Some(texture));
+            // SAFETY: as above, with the texture bound.
+            unsafe {
+                (images.image_target_texture)(glow::TEXTURE_2D, image);
+                gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
+            }
+            state.bind_texture(gl, 0, None);
+            let framebuffer = match framebuffer_of(gl, state, texture) {
+                Ok(framebuffer) => framebuffer,
+                Err(error) => {
+                    delete_texture(gl, state, texture);
+                    images.destroy(image);
+                    return Err(error);
+                }
+            };
+            // Pushed first, so that the slot's objects go with the generation
+            // when its depth texture fails.
+            self.slots.push(SlotTexture {
+                memory,
+                image,
+                texture,
+                framebuffer,
+                depth: None,
+                #[cfg(target_os = "android")]
+                producer: None,
+            });
+            if keep_depth {
+                let depth = depth_texture(gl, state, framebuffer, size)?;
+                if let Some(slot) = self.slots.last_mut() {
+                    slot.depth = Some(depth);
+                }
+            }
+        }
+        // SAFETY: as above.
+        let canvas = unsafe { gl.create_texture() }.map_err(Error::native)?;
+        state.bind_texture(gl, 0, Some(canvas));
+        // SAFETY: as above, with the canvas bound.
+        unsafe {
+            gl.tex_storage_2d(glow::TEXTURE_2D, 1, glow::RGBA8, size.width as i32, size.height as i32);
+            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
+        }
+        state.bind_texture(gl, 0, None);
+        let read = match framebuffer_of(gl, state, canvas) {
+            Ok(read) => read,
+            Err(error) => {
+                delete_texture(gl, state, canvas);
+                return Err(error);
+            }
+        };
+        self.canvas = Some((canvas, read));
+        if keep_depth {
+            self.canvas_depth = Some(depth_texture(gl, state, read, size)?);
+        }
+        Ok(())
     }
 }
 
@@ -271,132 +384,60 @@ struct Generation {
 
 impl Generation {
     fn new(
-        context: &Rc<GlContext>,
+        gpu: &mut GlGpu,
         exporter: &std::sync::Arc<Exporter>,
         layout: &Layout,
         depth: usize,
         size: Size,
         keep_depth: bool,
     ) -> Result<Generation, Error> {
-        let _current = context.enter();
-        let mut objects = Objects {
-            context: Rc::downgrade(context),
-            exporter: std::sync::Arc::clone(exporter),
-            slots: Vec::new(),
-            canvas: None,
-            canvas_depth: None,
-        };
-        let gl = context.gl();
-        let state = context.state();
-        let framebuffer_of = |texture: TextureID| -> Result<FramebufferID, Error> {
-            // SAFETY: the context is current, and the framebuffer is new; the
-            // state's cache sees each binding.
-            unsafe {
-                let framebuffer = gl.create_framebuffer().map_err(Error::native)?;
-                state.bind_framebuffer(gl, Some(framebuffer));
-                gl.framebuffer_texture_2d(
-                    glow::FRAMEBUFFER,
-                    glow::COLOR_ATTACHMENT0,
-                    glow::TEXTURE_2D,
-                    Some(texture),
-                    0,
-                );
-                let status = gl.check_framebuffer_status(glow::FRAMEBUFFER);
-                state.bind_framebuffer(gl, None);
-                if status != glow::FRAMEBUFFER_COMPLETE {
-                    delete_framebuffer(context, framebuffer);
-                    return Err(Error::native(format!(
-                        "a {:?} makes no complete framebuffer: status {status:#x}",
-                        platform::KIND
-                    )));
-                }
-                Ok(framebuffer)
-            }
-        };
-        let images = &exporter.images;
-        for _ in 0..depth {
-            let (memory, image) = exporter.source.allocate(images, size, layout)?;
-            // SAFETY: as above, and the image is of the context's display.
-            let texture = match unsafe { gl.create_texture() } {
-                Ok(texture) => texture,
-                Err(error) => {
-                    images.destroy(image);
-                    return Err(Error::native(error));
-                }
-            };
-            state.bind_texture(gl, 0, Some(texture));
-            // SAFETY: as above, with the texture bound.
-            unsafe {
-                (images.image_target_texture)(glow::TEXTURE_2D, image);
-                gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
-            }
-            state.bind_texture(gl, 0, None);
-            let framebuffer = match framebuffer_of(texture) {
-                Ok(framebuffer) => framebuffer,
-                Err(error) => {
-                    delete_texture(context, texture);
-                    images.destroy(image);
-                    return Err(error);
-                }
-            };
-            // Pushed first, so that the slot's objects go with the generation
-            // when its depth texture fails.
-            objects.slots.push(SlotTexture {
-                memory,
-                image,
-                texture,
-                framebuffer,
-                depth: None,
-                #[cfg(target_os = "android")]
-                producer: None,
-            });
-            if keep_depth {
-                let depth = depth_texture(context, framebuffer, size)?;
-                if let Some(slot) = objects.slots.last_mut() {
-                    slot.depth = Some(depth);
-                }
-            }
-        }
-        // SAFETY: as above.
-        let canvas = unsafe { gl.create_texture() }.map_err(Error::native)?;
-        state.bind_texture(gl, 0, Some(canvas));
-        // SAFETY: as above, with the canvas bound.
-        unsafe {
-            gl.tex_storage_2d(glow::TEXTURE_2D, 1, glow::RGBA8, size.width as i32, size.height as i32);
-            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
-        }
-        state.bind_texture(gl, 0, None);
-        let read = match framebuffer_of(canvas) {
-            Ok(read) => read,
-            Err(error) => {
-                delete_texture(context, canvas);
+        let mut objects =
+            Objects { exporter: std::sync::Arc::clone(exporter), slots: Vec::new(), canvas: None, canvas_depth: None };
+        {
+            let mut current = gpu.context_mut().enter();
+            let (gl, state) = current.parts();
+            if let Err(error) = objects.make(gl, state, layout, depth, size, keep_depth) {
+                objects.delete(gl, state);
                 return Err(error);
             }
-        };
-        objects.canvas = Some((canvas, read));
-        if keep_depth {
-            objects.canvas_depth = Some(depth_texture(context, read, size)?);
         }
+        let canvas = objects.canvas.map(|(canvas, _)| canvas.0.get());
         let textures = BorrowedTextures {
-            textures: vec![canvas.0.get()],
+            textures: canvas.into_iter().collect(),
             size,
             depth_textures: objects.canvas_depth.iter().map(|texture| texture.0.get()).collect(),
         };
         // The ring hands its frames over itself, so the canvas's frames end
         // with none but a finished one.
-        let target = BorrowedTarget::new(textures, SyncKind::CpuComplete)?;
+        let target = match BorrowedTarget::new(textures, SyncKind::CpuComplete) {
+            Ok(target) => target,
+            Err(error) => {
+                let mut current = gpu.context_mut().enter();
+                let (gl, state) = current.parts();
+                objects.delete(gl, state);
+                return Err(error);
+            }
+        };
         Ok(Generation { target, objects, size, layout: layout.clone() })
     }
 
+    /// Tears the canvas's target down, and deletes the generation's objects
+    /// and images, with the context of `gpu` current.
+    fn tear_down(&mut self, gpu: &mut GlGpu) {
+        self.target.tear_down(gpu);
+        let mut current = gpu.context_mut().enter();
+        let (gl, state) = current.parts();
+        self.objects.delete(gl, state);
+    }
+
     /// Copies the canvas into the buffer of `slot`, upside down, with its
-    /// depth and stencil when the slot keeps them. Call it with `context`
-    /// current.
-    fn blit(&self, context: &GlContext, slot: usize) -> bool {
+    /// depth and stencil when the slot keeps them, on `gl`'s context, which
+    /// is current, with the state `state`.
+    fn blit(&self, gl: &Gl, state: &mut State, slot: usize) -> bool {
         let (Some((_, read)), Some(slot)) = (self.objects.canvas, self.objects.slots.get(slot)) else { return false };
-        let gl = context.gl();
         let (width, height) = (self.size.width as i32, self.size.height as i32);
-        context.state().bind_framebuffer(gl, Some(slot.framebuffer));
-        context.state().set_scissor(gl, None);
+        state.bind_framebuffer(gl, Some(slot.framebuffer));
+        state.set_scissor(gl, None);
         // SAFETY: the context is current, and both framebuffers are the
         // generation's, of its size. The read binding goes back to the one
         // that the state's cache holds.
@@ -425,9 +466,11 @@ impl Generation {
 
 /// Frames drawn into buffers of the target's own, and queued for the host to
 /// acquire.
+///
+/// The target's tear-down deletes its GL objects. A target dropped without
+/// it destroys its buffers, and leaves its GL objects to the backend's
+/// context.
 pub struct ExportedTarget {
-    /// The backend's context, which the generations' objects are of.
-    context: Rc<GlContext>,
     exporter: std::sync::Arc<Exporter>,
     layout: Layout,
     depth: usize,
@@ -451,7 +494,7 @@ impl ExportedTarget {
     /// [`ErrorKind::Native`](mln_util::ErrorKind) when a buffer can't be
     /// made.
     pub fn new(
-        backend: &RendererBackend,
+        backend: &mut RendererBackend,
         device: &Device,
         ring: &ExportedRing,
         kind: ExportKind,
@@ -472,10 +515,9 @@ impl ExportedTarget {
             .source
             .layout(ring)
             .ok_or_else(|| Error::unsupported(format!("the EGL display can render into no {kind:?} of the ring")))?;
-        let context = Rc::clone(backend.context());
-        let current = Generation::new(&context, &exporter, &layout, ring.depth, size, ring.keep_depth)?;
+        let mut gpu = mln_gfx::RendererBackend::gpu(backend);
+        let current = Generation::new(&mut gpu, &exporter, &layout, ring.depth, size, ring.keep_depth)?;
         Ok(ExportedTarget {
-            context,
             exporter,
             layout,
             depth: ring.depth,
@@ -506,7 +548,7 @@ impl ExportedTarget {
             return Err(Error::unsupported(format!("an exported ring waits for no {kind:?}")));
         }
         // An older generation's buffer is never drawn into again.
-        if self.generations.give_back(slot, |mut generation| generation.target.tear_down(gpu)) {
+        if self.generations.give_back(slot, |mut generation| generation.tear_down(gpu)) {
             return Ok(());
         }
         #[cfg(target_os = "android")]
@@ -515,7 +557,7 @@ impl ExportedTarget {
             if let Some(file) = consumer.sync_file.filter(|_| kind == SyncKind::SyncFd)
                 && let Some(fences) = &self.exporter.fences
             {
-                let _current = self.context.enter();
+                let _current = gpu.enter();
                 return fences.wait(file);
             }
         }
@@ -526,7 +568,7 @@ impl ExportedTarget {
 
     /// The host gave the frame at `slot` up.
     pub fn discard(&mut self, gpu: &mut GlGpu, slot: usize) {
-        let given_back = self.generations.give_back(slot, |mut generation| generation.target.tear_down(gpu));
+        let given_back = self.generations.give_back(slot, |mut generation| generation.tear_down(gpu));
         #[cfg(target_os = "android")]
         if !given_back {
             self.generations.current_mut().given_back(slot);
@@ -545,8 +587,8 @@ impl ExportedTarget {
         if self.size() == size {
             return Ok(false);
         }
-        let next = Generation::new(&self.context, &self.exporter, &self.layout, self.depth, size, self.keep_depth)?;
-        self.generations.replace(next, held, |mut generation| generation.target.tear_down(gpu));
+        let next = Generation::new(gpu, &self.exporter, &self.layout, self.depth, size, self.keep_depth)?;
+        self.generations.replace(next, held, |mut generation| generation.tear_down(gpu));
         Ok(true)
     }
 
@@ -586,14 +628,14 @@ impl ExportedTarget {
     /// Hands the blitted frame at `slot` over with a sync file of its own,
     /// which the slot keeps until the host gives it back.
     #[cfg(target_os = "android")]
-    fn hand_over_with_sync_file(&mut self, slot: usize) -> Handoff {
+    fn hand_over_with_sync_file(&mut self, gpu: &mut GlGpu, slot: usize) -> Handoff {
         use std::os::fd::AsRawFd as _;
         let generation = self.generations.current_mut();
         let (Some(fences), Some(texture)) = (&self.exporter.fences, generation.objects.slots.get_mut(slot)) else {
             return Handoff::Dropped;
         };
-        let _current = self.context.enter();
-        match fences.signal(self.context.gl()) {
+        let current = gpu.context_mut().enter();
+        match fences.signal(current.gl()) {
             Ok(file) => {
                 let handle = file.as_raw_fd() as u64;
                 texture.producer = Some(file);
@@ -616,16 +658,18 @@ impl FrameTarget for ExportedTarget {
 
     fn end_frame(&mut self, gpu: &mut GlGpu) -> Handoff {
         let slot = self.selected;
-        let current = self.context.enter();
-        if !self.generations.current().blit(&self.context, slot) {
-            return Handoff::Dropped;
+        {
+            let mut current = gpu.context_mut().enter();
+            let (gl, state) = current.parts();
+            if !self.generations.current().blit(gl, state, slot) {
+                return Handoff::Dropped;
+            }
         }
-        drop(current);
         // A sync file signals once the blit is done, without the canvas's
         // frame waiting for it.
         #[cfg(target_os = "android")]
         if self.producer == SyncKind::SyncFd {
-            return self.hand_over_with_sync_file(slot);
+            return self.hand_over_with_sync_file(gpu, slot);
         }
         // The canvas's frame ends, and with it the blit.
         match self.generations.current_mut().target.end_frame(gpu) {
@@ -635,16 +679,14 @@ impl FrameTarget for ExportedTarget {
     }
 
     fn tear_down(&mut self, gpu: &mut GlGpu) {
-        self.generations.clear(|generation| generation.target.tear_down(gpu));
+        self.generations.clear(|generation| generation.tear_down(gpu));
     }
 }
 
 /// A `GL_DEPTH24_STENCIL8` texture of `size`, attached to `framebuffer`: a
 /// canvas's, which frames draw into and blits read, or a slot's, which blits
-/// copy into. Call it with `context` current.
-fn depth_texture(context: &GlContext, framebuffer: FramebufferID, size: Size) -> Result<TextureID, Error> {
-    let gl = context.gl();
-    let state = context.state();
+/// copy into, on `gl`'s context, which is current, with the state `state`.
+fn depth_texture(gl: &Gl, state: &mut State, framebuffer: FramebufferID, size: Size) -> Result<TextureID, Error> {
     // SAFETY: the context is current (the caller's), and the texture is new;
     // the state's cache sees each binding.
     unsafe {
@@ -665,7 +707,7 @@ fn depth_texture(context: &GlContext, framebuffer: FramebufferID, size: Size) ->
         let status = gl.check_framebuffer_status(glow::FRAMEBUFFER);
         state.bind_framebuffer(gl, None);
         if status != glow::FRAMEBUFFER_COMPLETE {
-            delete_texture(context, texture);
+            delete_texture(gl, state, texture);
             return Err(Error::native(format!("a depth texture makes no complete framebuffer: status {status:#x}")));
         }
         Ok(texture)
