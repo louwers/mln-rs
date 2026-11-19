@@ -37,8 +37,7 @@ pub struct RenderResult {
 /// is complete, [`render_update`](Self::render_update) draws an update it
 /// hasn't drawn yet, and [`render_frame`](Self::render_frame) draws the
 /// latest one again. Once the map is gone, `render_update` tears the
-/// renderer down, and the frontend makes another when next used. The target
-/// owns the renderer, and lends both the backend's `Gpu`.
+/// renderer down, and the frontend makes another when next used.
 pub struct HeadlessFrontend {
     size: Size,
     pixel_ratio: f32,
@@ -215,15 +214,14 @@ impl HeadlessFrontend {
     }
 
     /// Lets go of what the renderer caches and destroys what it released,
-    /// as [`Renderer::reduce_memory_use`] does.
+    /// as [`Renderer::reduce_memory_use`] does, if the frontend has one.
     pub fn reduce_memory_use(&mut self) {
-        self.renderer();
         self.target.with_renderer(|renderer, gpu| renderer.reduce_memory_use(gpu));
     }
 
-    /// Lets go of the renderer's data, as [`Renderer::clear_data`] does.
+    /// Lets go of the renderer's data, as [`Renderer::clear_data`] does, if
+    /// the frontend has a renderer.
     pub fn clear_data(&mut self) {
-        self.renderer();
         self.target.with_renderer(|renderer, gpu| renderer.clear_data(gpu));
     }
 
@@ -290,7 +288,7 @@ impl HeadlessFrontend {
     }
 
     /// Draws the attached map's latest update, unless the frontend drew it
-    /// already. Once the map is gone, drops the renderer instead. Returns
+    /// already. Once the map is gone, tears the renderer down instead. Returns
     /// whether it drew.
     pub fn render_update(&mut self) -> bool {
         let Some(updates) = &self.updates else {

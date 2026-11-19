@@ -287,7 +287,7 @@ impl Gfx {
 
     /// Makes the target's renderer, on its backend, which reports to
     /// `events`, draws at `pixel_ratio` and keeps tiles that left the view
-    /// when `tile_cache_enabled` says so. The session sets its event queue.
+    /// when `tile_cache_enabled` says so.
     fn make_renderer(&mut self, events: &RendererEvents, pixel_ratio: f32, tile_cache_enabled: bool) {
         let Gfx { target, glyph_cache, font_face_engine, registry, local_glyphs, pool } = self;
         target.renderer_or(|gpu| {
@@ -302,16 +302,10 @@ impl Gfx {
                 pool,
             );
             renderer.set_tile_cache_enabled(tile_cache_enabled);
+            renderer.set_event_queue(Some(events.clone()));
             set_tile_workers(&mut renderer, registry);
             renderer
         });
-    }
-
-    /// The target's renderer, which it has from the session's build on,
-    /// unless a new surface took a new backend and the session didn't make
-    /// it again.
-    fn renderer(&mut self) -> Option<&mut Renderer> {
-        self.target.renderer_mut()
     }
 }
 
@@ -458,8 +452,8 @@ pub(crate) struct Worker {
     demands_received: u64,
     /// The work that waits for the work sent before it, in the order sent.
     behind: VecDeque<Behind>,
-    /// The target and backend that a teardown keeps while views name their
-    /// sync objects, until the last view ends.
+    /// The target that a teardown keeps while views name their sync
+    /// objects, until the last view ends.
     viewed: Option<LocalTarget>,
     /// The releases and replacements that wait for the host's reads of the
     /// textures that they let go of.
@@ -573,10 +567,7 @@ impl Worker {
         };
         let built = attaching.then(|| Gfx::new(init, overlay, &renderer_events));
         let gfx = match built {
-            Some(Ok(mut gfx)) => {
-                if let Some(renderer) = gfx.renderer() {
-                    renderer.set_event_queue(Some(renderer_events.clone()));
-                }
+            Some(Ok(gfx)) => {
                 let mut state = shared.state.lock();
                 state.graphics_objects = Gfx::OBJECTS - 1;
                 state.abandon_keeps_graphics = gfx.target.device().abandon_keeps_graphics();
@@ -759,7 +750,7 @@ impl Worker {
     /// update when something arrives for its tiles: it takes it in now, so
     /// that the work it starts runs before the next frame.
     fn forward_events(&mut self) {
-        if let Some(renderer) = self.gfx.as_mut().and_then(Gfx::renderer) {
+        if let Some(renderer) = self.gfx.as_mut().and_then(|gfx| gfx.target.renderer_mut()) {
             renderer.receive_tiles();
         }
         let events = self.renderer_events.take();
@@ -1416,7 +1407,7 @@ impl Worker {
     }
 
     pub(crate) fn renderer(&mut self) -> Result<&mut Renderer, Error> {
-        self.gfx.as_mut().and_then(Gfx::renderer).ok_or_else(target_lost)
+        self.gfx.as_mut().and_then(|gfx| gfx.target.renderer_mut()).ok_or_else(target_lost)
     }
 
     /// Resizes the target, and draws at `scale_factor`, after the map
@@ -1651,17 +1642,12 @@ impl Worker {
         self.set_scale_factor(scale_factor)?;
         let gfx = self.gfx.as_mut().ok_or_else(target_lost)?;
         let physical = physical_size(size, scale_factor as f32);
-        let tile_cache_enabled = gfx.renderer().is_some_and(|renderer| renderer.tile_cache_enabled());
+        let tile_cache_enabled = gfx.target.renderer().is_some_and(Renderer::tile_cache_enabled);
         let replaced = gfx.target.set_surface(surface, self.overlay.take(), physical);
         match replaced {
             // The old backend's renderer went with it: one on the new
             // backend draws what the session set.
-            Ok(true) => {
-                gfx.make_renderer(&self.renderer_events, scale_factor as f32, tile_cache_enabled);
-                if let Some(renderer) = gfx.renderer() {
-                    renderer.set_event_queue(Some(self.renderer_events.clone()));
-                }
-            }
+            Ok(true) => gfx.make_renderer(&self.renderer_events, scale_factor as f32, tile_cache_enabled),
             Ok(false) => {}
             Err(_) => gfx.target.resize(physical),
         }
@@ -1783,7 +1769,7 @@ impl Worker {
         // The host's graphics objects may be gone, and the custom layers'
         // hosts with them, so they forget theirs instead of destroying them.
         if (keep || abandoned)
-            && let Some(renderer) = gfx.renderer()
+            && let Some(renderer) = gfx.target.renderer_mut()
         {
             renderer.lose_custom_layers();
         }
