@@ -337,7 +337,7 @@ impl<B: RingBackend> BorrowedTarget<B> {
             .map(|image| {
                 let carried = old
                     .iter()
-                    .position(|old| <B::Textures as RingTextures>::same_image(old, image))
+                    .position(|old| B::Textures::same_image(old, image))
                     .and_then(|index| previous.get_mut(index))
                     .and_then(|slot| slot.wait.take());
                 Slot::new(carried)
