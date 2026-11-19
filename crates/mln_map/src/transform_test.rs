@@ -12,15 +12,21 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use glam::{DMat4, DQuat, DVec3, DVec4, EulerRot, dvec3};
-use mln_map_types::TileProjector;
+use mln_map_types::{
+    CameraDelta, CameraError, CameraMomentum, CameraUpdate, CameraUpdateMode, CameraVelocity, GesturePhase,
+    MomentumDecay, MomentumDecayModel, MomentumEasing, MomentumGlide, MomentumSnap, TileProjector, TransitionOutcome,
+};
 use mln_math::deg2rad;
 use mln_style_types::ProjectionType;
 use mln_tile_id::{CanonicalTileID, UnwrappedTileID};
 use mln_util::UnitBezier;
 use mln_util::constants::{EXTENT, LATITUDE_MAX, LONGITUDE_MAX, MAX_ZOOM, TILE_SIZE_D};
+use mln_util::geo::LatLngBounds;
 use mln_util::time::Instant;
 
+use super::momentum::GlidePlan;
 use super::*;
+use crate::map_event::CameraChangeMode;
 
 fn new_transform() -> Transform {
     Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default)

@@ -8,6 +8,7 @@ use mln_math::{clamp_f64, rad2deg, wrap};
 
 use crate::constants;
 use crate::error::Error;
+use crate::size::Size;
 
 pub type ScreenCoordinate = Point<f64>;
 pub type ScreenLineString = Vec<Point<f64>>;
@@ -431,11 +432,13 @@ impl EdgeInsets {
         self.right
     }
 
+    /// The center of the area these insets leave in a viewport of `size`, in
+    /// pixels from its top left.
     #[must_use]
-    pub fn get_center(&self, width: u16, height: u16) -> ScreenCoordinate {
+    pub fn center_in(&self, size: Size) -> ScreenCoordinate {
         Point::new(
-            (f64::from(width) - self.left() - self.right()) / 2.0 + self.left(),
-            (f64::from(height) - self.top() - self.bottom()) / 2.0 + self.top(),
+            (f64::from(size.width) - self.left() - self.right()) / 2.0 + self.left(),
+            (f64::from(size.height) - self.top() - self.bottom()) / 2.0 + self.top(),
         )
     }
 }
