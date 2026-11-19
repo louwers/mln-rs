@@ -799,7 +799,7 @@ impl View {
         };
         let mut actions = Vec::new();
         let controls = &mut self.controls;
-        let output = self.ui.run_pass(input, |ctx| actions.extend(controls.show(ctx, &shown)));
+        let output = self.ui.run_pass(input, |ctx| actions = controls.show(ctx, &shown));
 
         let _ = self.proxy.send_event(UserEvent::Ui(Box::new(output.platform_output)));
         self.ui_repaint_at = output

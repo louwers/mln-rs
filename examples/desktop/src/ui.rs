@@ -203,9 +203,9 @@ impl Controls {
         if self.about_open {
             about_panel(ctx, &palette, shown, &mut actions);
         }
-        let backend_width = backend_label(ctx, &palette, shown.backend, &mut actions);
-        let attribution_top = attribution(ctx, &palette, shown.attributions, backend_width);
-        camera_controls(ctx, &palette, shown, attribution_top, &mut actions);
+        camera_controls(ctx, &palette, shown, &mut actions);
+        backend_label(ctx, &palette, shown.backend, &mut actions);
+        attribution(ctx, &palette, shown.attributions);
         if let Some(corners) = shown.box_zoom {
             box_zoom(ctx, &palette, corners);
         }
@@ -391,17 +391,9 @@ fn about_panel(ctx: &egui::Context, palette: &Palette, shown: &Shown<'_>, action
     });
 }
 
-fn camera_controls(
-    ctx: &egui::Context,
-    palette: &Palette,
-    shown: &Shown<'_>,
-    attribution_top: Option<f32>,
-    actions: &mut Vec<Action>,
-) {
-    // Above the attribution's rendered top edge, including on the first frame
-    // after a resize before egui settles the area's new height.
-    let bottom = attribution_top.map_or(GAP, |top| (ctx.content_rect().bottom() - top).max(0.0) + GAP);
-    layer("camera", Align2::RIGHT_BOTTOM, vec2(-GAP, -bottom)).show(ctx, |ui| {
+fn camera_controls(ctx: &egui::Context, palette: &Palette, shown: &Shown<'_>, actions: &mut Vec<Action>) {
+    // Above the attribution's line.
+    layer("camera", Align2::RIGHT_BOTTOM, vec2(-GAP, -(GAP + 26.0))).show(ctx, |ui| {
         ui.spacing_mut().item_spacing.y = GAP;
         palette.control().show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
@@ -455,9 +447,9 @@ enum Piece {
     Link { text: String, url: String },
 }
 
-/// The backend's logo and name, at the bottom left; a click switches to the
-/// next backend where more than one is available. Returns its rendered width.
-fn backend_label(ctx: &egui::Context, palette: &Palette, backend: Kind, actions: &mut Vec<Action>) -> f32 {
+/// The backend's logo and name, at the bottom left; where the platform has
+/// another backend, a click switches to the next one.
+fn backend_label(ctx: &egui::Context, palette: &Palette, backend: Kind, actions: &mut Vec<Action>) {
     // The logos are 18 points high; Vulkan's is 708 by 570, and OpenGL's is a
     // wordmark of 12 by 5. D3D12 shows its name alone.
     let logo = match backend {
@@ -472,8 +464,9 @@ fn backend_label(ctx: &egui::Context, palette: &Palette, backend: Kind, actions:
         Kind::OpenGl => Some((egui::include_image!("../assets/opengl.svg"), 43.2)),
     };
     let switchable = Kind::ALL.len() > 1;
-    let area = layer("backend", Align2::LEFT_BOTTOM, vec2(GAP, -GAP)).interactable(switchable).show(ctx, |ui| {
-        let frame = palette
+    // A label alone lets the map's gestures through.
+    layer("backend", Align2::LEFT_BOTTOM, vec2(GAP, -GAP)).interactable(switchable).show(ctx, |ui| {
+        let response = palette
             .control()
             .inner_margin(Margin::symmetric(8, 4))
             .show(ui, |ui| {
@@ -488,44 +481,25 @@ fn backend_label(ctx: &egui::Context, palette: &Palette, backend: Kind, actions:
                 });
             })
             .response;
-        if switchable {
-            let response = frame
-                .interact(Sense::click())
-                .on_hover_cursor(CursorIcon::PointingHand)
-                .on_hover_text(format!("Switch to {}", backend.next().name()));
-            if response.clicked() {
-                actions.push(Action::SetBackend(backend.next()));
-            }
+        if switchable && response.interact(Sense::click()).on_hover_cursor(CursorIcon::PointingHand).clicked() {
+            actions.push(Action::SetBackend(backend.next()));
         }
     });
-    area.response.rect.width()
 }
 
-fn attribution(ctx: &egui::Context, palette: &Palette, attributions: &[String], backend_width: f32) -> Option<f32> {
+fn attribution(ctx: &egui::Context, palette: &Palette, attributions: &[String]) {
     let credits = credits(attributions);
     if credits.is_empty() {
-        return None;
+        return;
     }
-    let horizontal_margin = 8;
-    let viewport = ctx.content_rect();
-    let min_left = viewport.left() + GAP + backend_width + GAP;
-    let max_right = viewport.right() - GAP;
-    let max_bottom = viewport.bottom() - GAP;
-    let max_outer = max_right - min_left;
-    let max_inner = max_outer - 2.0 * f32::from(horizontal_margin);
-    if max_inner <= 0.0 {
-        return None;
-    }
-    let area = layer("attribution", Align2::RIGHT_BOTTOM, vec2(-GAP, -GAP)).show(ctx, |ui| {
-        ui.set_max_width(max_outer);
+    layer("attribution", Align2::RIGHT_BOTTOM, vec2(-GAP, -GAP)).show(ctx, |ui| {
         Frame::new()
             .fill(palette.surface.gamma_multiply(0.85))
             .corner_radius(CornerRadius::same(9))
-            .inner_margin(Margin::symmetric(horizontal_margin, 2))
+            .inner_margin(Margin::symmetric(8, 2))
             .show(ui, |ui| {
-                ui.set_max_width(max_inner);
                 ui.spacing_mut().item_spacing.x = 0.0;
-                ui.horizontal_wrapped(|ui| {
+                ui.horizontal(|ui| {
                     for (i, credit) in credits.iter().enumerate() {
                         if i > 0 {
                             ui.label(RichText::new(" ").size(11.0));
@@ -544,16 +518,6 @@ fn attribution(ctx: &egui::Context, palette: &Palette, attributions: &[String], 
                 });
             });
     });
-    let rect = area.response.rect;
-    // After a resize or credit change, Align2::RIGHT_BOTTOM placed this pass
-    // using the previous pass's size; re-run in the same frame with the new one.
-    if rect.left() < min_left - 0.5
-        || (rect.right() - max_right).abs() > 0.5
-        || (rect.bottom() - max_bottom).abs() > 0.5
-    {
-        ctx.request_discard("attribution resized");
-    }
-    Some(rect.top())
 }
 
 /// The sources' attributions, each once: an attribution is left out when a
@@ -683,172 +647,5 @@ mod tests {
         assert_eq!(credits(&attributions), vec![vec![Piece::Text("© OpenStreetMap contributors · ESA".into())]]);
         let same = ["A".to_owned(), "A".to_owned()];
         assert_eq!(credits(&same).len(), 1);
-    }
-
-    #[test]
-    fn attribution_reserves_space_for_backend_pill() {
-        let ctx = egui::Context::default();
-        let styles = crate::styles::styles();
-        let attributions = [
-            r#"<a href="https://openfreemap.org">OpenFreeMap</a> <a href="https://www.openmaptiles.org/">&copy; OpenMapTiles</a> Data from <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors"#
-                .to_owned(),
-        ];
-        let shown = Shown {
-            styles: &styles,
-            style: &styles[0],
-            style_name: "Liberty",
-            loading: false,
-            bearing: 0.0,
-            pitch: 0.0,
-            attributions: &attributions,
-            debug: MapDebugOptions::default(),
-            globe: false,
-            free_bearing: false,
-            backend: Kind::WebGpu,
-            status: &[],
-            box_zoom: None,
-        };
-        let mut controls = Controls::default();
-        let mut run_frame = |width: f32| {
-            let mut backend_rect = Rect::NOTHING;
-            let mut attribution_rect = Rect::NOTHING;
-            let mut camera_rect = Rect::NOTHING;
-            let input = egui::RawInput {
-                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(width, 480.0))),
-                ..Default::default()
-            };
-            let mut output = ctx.run_pass(input, |ctx| {
-                let _ = controls.show(ctx, &shown);
-                backend_rect = ctx.memory(|m| m.area_rect(Id::unique("backend")).unwrap_or(Rect::NOTHING));
-                attribution_rect = ctx.memory(|m| m.area_rect(Id::unique("attribution")).unwrap_or(Rect::NOTHING));
-                camera_rect = ctx.memory(|m| m.area_rect(Id::unique("camera")).unwrap_or(Rect::NOTHING));
-            });
-            output.textures_delta.clear();
-            assert!(backend_rect.width() > 0.0, "width {width}: expected backend pill rect, got {backend_rect:?}");
-            assert!(
-                attribution_rect.width() > 0.0,
-                "width {width}: expected attribution rect, got {attribution_rect:?}"
-            );
-            assert!(camera_rect.width() > 0.0, "width {width}: expected camera rect, got {camera_rect:?}");
-            assert!(
-                attribution_rect.left() >= backend_rect.right() + GAP - 1.0,
-                "width {width}: attribution {attribution_rect:?} overlaps backend pill {backend_rect:?}"
-            );
-            assert!(
-                attribution_rect.right() <= width - GAP + 1.0,
-                "width {width}: attribution {attribution_rect:?} clips past right edge"
-            );
-            assert!(
-                !attribution_rect.intersects(camera_rect) && camera_rect.bottom() <= attribution_rect.top() - GAP + 1.0,
-                "width {width}: attribution {attribution_rect:?} overlaps camera controls {camera_rect:?}"
-            );
-            attribution_rect
-        };
-
-        // First frame at narrow width, first frame after widening, first frame after narrowing back.
-        let narrow_rect = run_frame(320.0);
-        let wide_rect = run_frame(1200.0);
-        assert!(wide_rect.width() < 500.0, "expected attribution to shrink-wrap on wide window, got {wide_rect:?}");
-        assert!(
-            narrow_rect.height() > wide_rect.height(),
-            "expected attribution to wrap on narrow window: narrow={narrow_rect:?}, wide={wide_rect:?}"
-        );
-        let narrowed_rect = run_frame(320.0);
-        assert!(
-            narrowed_rect.height() > wide_rect.height(),
-            "expected attribution to re-wrap on first narrowed frame: narrowed={narrowed_rect:?}, wide={wide_rect:?}"
-        );
-    }
-
-    #[test]
-    fn click_survives_attribution_resize_pass() {
-        let ctx = egui::Context::default();
-        let styles = crate::styles::styles();
-        let attributions = [
-            r#"<a href="https://openfreemap.org">OpenFreeMap</a> <a href="https://www.openmaptiles.org/">&copy; OpenMapTiles</a> Data from <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors"#
-                .to_owned(),
-        ];
-        let shown = Shown {
-            styles: &styles,
-            style: &styles[0],
-            style_name: "Liberty",
-            loading: false,
-            bearing: 0.0,
-            pitch: 0.0,
-            attributions: &attributions,
-            debug: MapDebugOptions::default(),
-            globe: false,
-            free_bearing: false,
-            backend: Kind::WebGpu,
-            status: &[],
-            box_zoom: None,
-        };
-        let mut controls = Controls::default();
-
-        // Settle at narrow width and find the zoom-in button center.
-        let mut camera_rect = Rect::NOTHING;
-        let mut output = ctx.run_pass(
-            egui::RawInput {
-                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(320.0, 480.0))),
-                ..Default::default()
-            },
-            |ctx| {
-                let _ = controls.show(ctx, &shown);
-                camera_rect = ctx.memory(|m| m.area_rect(Id::unique("camera")).unwrap_or(Rect::NOTHING));
-            },
-        );
-        output.textures_delta.clear();
-        let zoom_in = pos2(camera_rect.center().x, camera_rect.top() + BUTTON * 0.5);
-
-        // Press on zoom-in at narrow width.
-        let mut output = ctx.run_pass(
-            egui::RawInput {
-                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(320.0, 480.0))),
-                events: vec![
-                    egui::Event::PointerMoved(zoom_in),
-                    egui::Event::PointerButton {
-                        pos: zoom_in,
-                        button: egui::PointerButton::Primary,
-                        pressed: true,
-                        modifiers: egui::Modifiers::NONE,
-                    },
-                ],
-                ..Default::default()
-            },
-            |ctx| {
-                let _ = controls.show(ctx, &shown);
-            },
-        );
-        output.textures_delta.clear();
-
-        // Release at the same position as longer attributions arrive, triggering an attribution discard pass.
-        let longer_attributions = [
-            r#"<a href="https://openfreemap.org">OpenFreeMap</a> <a href="https://www.openmaptiles.org/">&copy; OpenMapTiles</a> Data from <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors · Additional long source credit"#
-                .to_owned(),
-        ];
-        let shown_longer = Shown { attributions: &longer_attributions, ..shown };
-        let mut actions = Vec::new();
-        let mut passes = 0usize;
-        let mut output = ctx.run_pass(
-            egui::RawInput {
-                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(320.0, 480.0))),
-                events: vec![egui::Event::PointerButton {
-                    pos: zoom_in,
-                    button: egui::PointerButton::Primary,
-                    pressed: false,
-                    modifiers: egui::Modifiers::NONE,
-                }],
-                ..Default::default()
-            },
-            |ctx| {
-                passes += 1;
-                actions.extend(controls.show(ctx, &shown_longer));
-            },
-        );
-        output.textures_delta.clear();
-
-        assert!(passes >= 2, "expected attribution resize to trigger a second pass, got {passes}");
-        assert_eq!(actions.len(), 1, "expected click action to survive discard pass once");
-        assert!(matches!(actions[0], Action::ZoomIn));
     }
 }
