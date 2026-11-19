@@ -70,9 +70,9 @@ impl Ord for GlyphRange {
     }
 }
 
-/// A glyph: `code` (UTF-16 code unit or font glyph index) and `type`; `hash`
-/// is the two read as one little-endian `char32_t`, which is what C++
-/// compares.
+/// A glyph: `code` (a BMP character in glyph PBFs, or a font's glyph index)
+/// and `type`; `hash` is the two read as one little-endian `char32_t`, which
+/// is what C++ compares.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, mln_wire::Wire)]
 pub struct GlyphID {
     pub code: u16,
@@ -80,11 +80,24 @@ pub struct GlyphID {
 }
 
 impl GlyphID {
-    /// The glyph for `codepoint`, truncated to a UTF-16 code unit, of type
-    /// `FontPBF`.
+    /// The glyph for `codepoint`, truncated to 16 bits, of type `FontPBF`.
     #[must_use]
     pub fn new(codepoint: u32) -> Self {
         GlyphID { code: codepoint as u16, type_: GlyphIDType::FontPBF }
+    }
+
+    /// The glyph PBF glyph of `c`. Glyph PBFs only cover the BMP, so a
+    /// character beyond it has none.
+    #[must_use]
+    pub fn from_char(c: char) -> Option<Self> {
+        pbf_code(c).map(GlyphID::from)
+    }
+
+    /// The character that a glyph PBF glyph stands for; `None` for a
+    /// surrogate code.
+    #[must_use]
+    pub fn char(self) -> Option<char> {
+        char::from_u32(u32::from(self.code))
     }
 
     #[must_use]
@@ -116,6 +129,12 @@ impl From<u16> for GlyphID {
     fn from(code: u16) -> Self {
         GlyphID::new(u32::from(code))
     }
+}
+
+/// The code of `c`'s glyph in glyph PBFs, which only cover the BMP.
+#[must_use]
+pub(crate) fn pbf_code(c: char) -> Option<u16> {
+    u16::try_from(u32::from(c)).ok()
 }
 
 pub type GlyphIDs = BTreeSet<GlyphID>;
@@ -386,7 +405,8 @@ impl FontFace {
 
 pub type FontFaces = Vec<FontFace>;
 
-pub type HBShapeRequests = VecMap<FontStack, VecMap<GlyphIDType, BTreeSet<Vec<u16>>>>;
+/// The texts that each font face of each font stack shapes.
+pub type HBShapeRequests = VecMap<FontStack, VecMap<GlyphIDType, BTreeSet<Vec<char>>>>;
 
 #[derive(Clone, Debug, Default, PartialEq, mln_wire::Wire)]
 pub struct GlyphDependencies {
@@ -459,6 +479,8 @@ mod tests {
         assert!(a < b);
         assert_eq!(b.hash(), 0x10000);
         assert_eq!(GlyphID::new(0x1F600).code, 0xF600);
+        assert_eq!(GlyphID::from_char('\u{FFFF}'), Some(GlyphID::new(0xFFFF)));
+        assert_eq!(GlyphID::from_char('\u{1F600}'), None);
     }
 
     #[test]

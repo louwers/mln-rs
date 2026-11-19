@@ -35,16 +35,15 @@ fn get_default_language() -> Language {
     Language::new("c").expect("non-empty")
 }
 
-/// The script of `u`, as an ISO 15924 tag. Combining marks inherit the
-/// script of their bases, regardless of their own script. Called on UTF-16
-/// code units, as in C++ (surrogates are classified on their own). Uses the
-/// Unicode version of HarfRust's own tables.
+/// The script of `c`, as an ISO 15924 tag. Combining marks inherit the
+/// script of their bases, regardless of their own script. Uses the Unicode
+/// version of HarfRust's own tables.
 #[must_use]
-pub(crate) fn get_unicode_script(u: u32) -> [u8; 4] {
-    if char::from_u32(u).is_some_and(|c| c.general_category() == GeneralCategory::NonspacingMark) {
+pub(crate) fn get_unicode_script(c: char) -> [u8; 4] {
+    if c.general_category() == GeneralCategory::NonspacingMark {
         return Script::INHERITED.tag().to_be_bytes();
     }
-    harfrust::unicode::script(u).tag().to_be_bytes()
+    harfrust::unicode::script(u32::from(c)).tag().to_be_bytes()
 }
 
 /// Shape plans by script tag and right-to-left direction.
@@ -107,13 +106,13 @@ impl Impl {
 
     pub(crate) fn create_complex_glyph_ids(
         &self,
-        text: &[u16],
+        text: &[char],
         rtl: bool,
         glyph_ids: &mut Vec<GlyphID>,
         adjusts: &mut Vec<HBShapeAdjust>,
     ) {
         struct TextPart {
-            text: Vec<u16>,
+            text: Vec<char>,
             script: [u8; 4],
         }
 
@@ -139,7 +138,7 @@ impl Impl {
             // Spaces, punctuation, and marks belong to the letters before
             // them, or to the first letters.
             for &ch in text {
-                let script = get_unicode_script(u32::from(ch));
+                let script = get_unicode_script(ch);
                 let part_script = if is_neutral(&script) { INVALID } else { script };
                 match text_parts.last_mut() {
                     Some(last) if part_script == INVALID || last.script == script || last.script == INVALID => {
@@ -161,7 +160,7 @@ impl Impl {
             text_parts.reverse();
         } else {
             for &ch in text {
-                let script = get_unicode_script(u32::from(ch));
+                let script = get_unicode_script(ch);
                 match text_parts.last_mut() {
                     Some(last) if last.script == script || script == *b"Zinh" => last.text.push(ch),
                     _ => text_parts.push(TextPart { text: vec![ch], script }),
@@ -192,8 +191,8 @@ impl Impl {
     }
 
     /// One iteration of `createComplexGlyphIDs`' loop: `hb_buffer_reset`,
-    /// direction, script, language, `hb_buffer_add_utf16`, `hb_shape`.
-    fn shape_part(&self, font: &harfrust::Font, text: &[u16], script: [u8; 4], rtl: bool) -> Option<Buffer> {
+    /// direction, script, language, the text, `hb_shape`.
+    fn shape_part(&self, font: &harfrust::Font, text: &[char], script: [u8; 4], rtl: bool) -> Option<Buffer> {
         let shaper_font = ShaperFont::new(font).with_scale(SDF_FONT_SIZE * 64).with_font_funcs(Some(&NoGlyphExtents));
         let language = get_default_language();
         let features = hb_tiny_features();
@@ -203,7 +202,11 @@ impl Impl {
         buffer.set_direction(direction(rtl));
         buffer.set_script(Some(to_script(script)));
         buffer.set_language(Some(language.clone()));
-        add_utf16(&mut buffer, text);
+        // Each character is a cluster of its own, with no pre- or
+        // post-context.
+        for (cluster, &c) in (0..).zip(text) {
+            buffer.push(u32::from(c), cluster);
+        }
 
         // harfbuzz shaping
         let plan = self.plan(font, script, rtl, &language, &features);
@@ -225,53 +228,20 @@ fn to_script(tag: [u8; 4]) -> Script {
     Script::from_iso15924_tag(Tag::new(&tag)).unwrap_or(Script::UNKNOWN)
 }
 
-/// `hb_buffer_add_utf16 (buffer, text, length, 0, length)`: clusters are
-/// UTF-16 offsets; unpaired surrogates become U+FFFD (the buffer's
-/// replacement codepoint); no pre- or post-context.
-fn add_utf16(buffer: &mut Buffer, text: &[u16]) {
-    let mut i = 0;
-    while i < text.len() {
-        let cluster = i as u32;
-        let c = u32::from(text[i]);
-        i += 1;
-        let u = if (0xD800..=0xDBFF).contains(&c) {
-            match text.get(i) {
-                Some(&l) if (0xDC00..=0xDFFF).contains(&u32::from(l)) => {
-                    i += 1;
-                    (c << 10) + u32::from(l) - ((0xD800 << 10) - 0x10000 + 0xDC00)
-                }
-                _ => 0xFFFD,
-            }
-        } else if (0xDC00..=0xDFFF).contains(&c) {
-            0xFFFD
-        } else {
-            c
-        };
-        buffer.push(u, cluster);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn utf16_decoding() {
-        let mut b = Buffer::new();
-        add_utf16(&mut b, &[0x41, 0xD83D, 0xDE00, 0xD800, 0x42, 0xDC00]);
-        let cps: Vec<(u32, u32)> = b.glyph_infos().iter().map(|i| (i.glyph_id, i.cluster)).collect();
-        assert_eq!(cps, vec![(0x41, 0), (0x1F600, 1), (0xFFFD, 3), (0x42, 4), (0xFFFD, 5)]);
-    }
-
-    #[test]
-    fn script_segmentation_classifies_code_units() {
-        assert_eq!(&get_unicode_script('a' as u32), b"Latn");
-        assert_eq!(&get_unicode_script(' ' as u32), b"Zyyy");
-        assert_eq!(&get_unicode_script(0x0301), b"Zinh");
-        assert_eq!(&get_unicode_script(0x0941), b"Zinh"); // Devanagari vowel sign U (Mn)
-        assert_eq!(&get_unicode_script(0x0627), b"Arab");
-        assert_eq!(&get_unicode_script(0x4E2D), b"Hani");
-        assert_eq!(&get_unicode_script(0xAC00), b"Hang");
-        assert_eq!(&get_unicode_script(0xD83D), b"Zzzz");
+    fn script_segmentation_classifies_characters() {
+        assert_eq!(&get_unicode_script('a'), b"Latn");
+        assert_eq!(&get_unicode_script(' '), b"Zyyy");
+        assert_eq!(&get_unicode_script('\u{0301}'), b"Zinh");
+        assert_eq!(&get_unicode_script('\u{0941}'), b"Zinh"); // Devanagari vowel sign U (Mn)
+        assert_eq!(&get_unicode_script('\u{0627}'), b"Arab");
+        assert_eq!(&get_unicode_script('\u{4E2D}'), b"Hani");
+        assert_eq!(&get_unicode_script('\u{AC00}'), b"Hang");
+        assert_eq!(&get_unicode_script('\u{20000}'), b"Hani"); // CJK Extension B
+        assert_eq!(&get_unicode_script('\u{1F600}'), b"Zyyy");
     }
 }

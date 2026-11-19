@@ -37,7 +37,7 @@ pub use glyph::{
     PositionedLine, Shaping, WritingModeType,
 };
 pub use glyph_cache::GlyphCache;
-pub use harfbuzz::{HBShapeAdjust, HBShaper};
+pub use harfbuzz::{HBShapeAdjust, HBShapedText, HBShaper};
 pub use shaping::{AnchorAlignment, PositionedIcon, get_anchor_justification, get_shaping};
 pub use tagged_string::{SectionOptions, TaggedString};
 

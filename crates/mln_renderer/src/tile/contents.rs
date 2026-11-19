@@ -306,7 +306,7 @@ impl Answer {
                 for text in texts {
                     if let Some(result) = shaped.get(text) {
                         let kept = shaping.entry(font_stack.clone()).or_default().entry(*type_).or_default();
-                        kept.insert(text.clone(), result.clone());
+                        kept.insert(text.clone(), Arc::clone(result));
                     }
                 }
             }
@@ -322,7 +322,7 @@ impl Answer {
                 ids.extend(
                     texts
                         .values()
-                        .flat_map(|result| result.str_.iter().map(|code| GlyphID { code: *code, type_: *type_ })),
+                        .flat_map(|shaped| shaped.glyphs.iter().map(|code| GlyphID { code: *code, type_: *type_ })),
                 );
             }
         }

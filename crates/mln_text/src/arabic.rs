@@ -6,7 +6,8 @@
 //! The presentation forms come from the Unicode Character Database
 //! (`arabic_tables`), in the Unicode version of unicode-bidi's tables. A
 //! letter joins on the sides its forms connect, so that a letter without
-//! forms, which a glyph PBF can only draw on its own, isn't joined.
+//! forms, which a glyph PBF can only draw on its own, isn't joined. The
+//! tables hold BMP characters as `u16`.
 
 use std::borrow::Cow;
 
@@ -14,7 +15,17 @@ use unicode_properties::{GeneralCategory, UnicodeGeneralCategory};
 
 use crate::arabic_tables::{LAM_ALEF_FORMS, LETTER_FORMS, MARK_FORMS};
 
-const LAM: u16 = 0x0644;
+const LAM: char = '\u{0644}';
+
+/// `c` as a key of the tables, if it is in the BMP.
+fn key(c: char) -> Option<u16> {
+    u16::try_from(u32::from(c)).ok()
+}
+
+/// A character from the tables, which hold no surrogates.
+fn from_table(unit: u16) -> char {
+    char::from_u32(u32::from(unit)).unwrap_or(char::REPLACEMENT_CHARACTER)
+}
 
 /// How a character joins the characters around it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -30,21 +41,30 @@ enum Joining {
 impl Joining {
     const NONE: Self = Joining::Joins { prev: false, next: false };
 
-    /// How a UTF-16 code unit joins. Surrogates don't.
-    fn of(unit: u16) -> Self {
-        if let Ok(i) = LETTER_FORMS.binary_search_by_key(&unit, |&(letter, _)| letter) {
+    /// How a character joins.
+    fn of(c: char) -> Self {
+        if let Some(Ok(i)) = key(c).map(|unit| LETTER_FORMS.binary_search_by_key(&unit, |&(letter, _)| letter)) {
             let [_, final_, initial, medial] = LETTER_FORMS[i].1;
             return Joining::Joins { prev: final_ != 0 || medial != 0, next: initial != 0 || medial != 0 };
         }
-        match unit {
+        match c {
             // Tatweel and zero width joiner.
-            0x0640 | 0x200D => Joining::Joins { prev: true, next: true },
+            '\u{0640}' | '\u{200D}' => Joining::Joins { prev: true, next: true },
             // The format characters that ArabicShaping.txt makes
             // non-joining: the number signs, the Mongolian vowel separator,
             // the zero width non-joiner and the BiDi isolates.
-            0x0600..=0x0605 | 0x06DD | 0x0890 | 0x0891 | 0x08E2 | 0x180E | 0x200C | 0x2066..=0x2069 => Joining::NONE,
-            _ => match char::from_u32(u32::from(unit)).map(UnicodeGeneralCategory::general_category) {
-                Some(GeneralCategory::NonspacingMark | GeneralCategory::EnclosingMark | GeneralCategory::Format) => {
+            '\u{0600}'..='\u{0605}'
+            | '\u{06DD}'
+            | '\u{0890}'
+            | '\u{0891}'
+            | '\u{08E2}'
+            | '\u{180E}'
+            | '\u{200C}'
+            | '\u{2066}'..='\u{2069}'
+            | '\u{110BD}'
+            | '\u{110CD}' => Joining::NONE,
+            _ => match c.general_category() {
+                GeneralCategory::NonspacingMark | GeneralCategory::EnclosingMark | GeneralCategory::Format => {
                     Joining::Transparent
                 }
                 _ => Joining::NONE,
@@ -63,7 +83,7 @@ impl Joining {
     }
 }
 
-/// Shapes UTF-16 text in logical order for glyph PBFs.
+/// Shapes text in logical order for glyph PBFs.
 ///
 /// Each joining letter takes its isolated, final, initial or medial
 /// presentation form by the letters it joins, a lam and the alef after it
@@ -74,12 +94,12 @@ impl Joining {
 /// neither side. Presentation forms of letters in `text` are read as their
 /// letters first. Returns `text` itself if it has no Arabic.
 #[must_use]
-pub fn shape_arabic(text: &[u16]) -> Cow<'_, [u16]> {
-    if !text.iter().any(|&unit| matches!(unit, 0x0600..=0x06FF | 0xFB50..=0xFDFF | 0xFE70..=0xFEFF)) {
+pub fn shape_arabic(text: &[char]) -> Cow<'_, [char]> {
+    if !text.iter().any(|&c| matches!(c, '\u{0600}'..='\u{06FF}' | '\u{FB50}'..='\u{FDFF}' | '\u{FE70}'..='\u{FEFF}')) {
         return Cow::Borrowed(text);
     }
     let letters = to_letters(text);
-    let joinings: Vec<Joining> = letters.iter().map(|&unit| Joining::of(unit)).collect();
+    let joinings: Vec<Joining> = letters.iter().map(|&c| Joining::of(c)).collect();
     // The index and joining of the first character after `i` that isn't
     // transparent, or the end of the text, which doesn't join.
     let next = |i: usize| {
@@ -93,15 +113,15 @@ pub fn shape_arabic(text: &[u16]) -> Cow<'_, [u16]> {
     let mut prev = Joining::NONE;
     let mut i = 0;
     while i < letters.len() {
-        let (unit, joining) = (letters[i], joinings[i]);
+        let (c, joining) = (letters[i], joinings[i]);
         let (next_index, next_joining) = next(i);
         if joining == Joining::Transparent {
-            shaped.push(mark_form(unit, prev.joins_next() && next_joining.joins_prev()));
+            shaped.push(mark_form(c, prev.joins_next() && next_joining.joins_prev()));
             i += 1;
             continue;
         }
         let joins_prev = joining.joins_prev() && prev.joins_next();
-        if unit == LAM
+        if c == LAM
             && let Some(ligature) = letters.get(next_index).and_then(|&alef| lam_alef_forms(alef))
         {
             shaped.push(ligature[usize::from(joins_prev)]);
@@ -112,7 +132,7 @@ pub fn shape_arabic(text: &[u16]) -> Cow<'_, [u16]> {
             continue;
         }
         let joins_next = joining.joins_next() && next_joining.joins_prev();
-        shaped.push(letter_form(unit, joins_prev, joins_next));
+        shaped.push(letter_form(c, joins_prev, joins_next));
         prev = joining;
         i += 1;
     }
@@ -121,17 +141,20 @@ pub fn shape_arabic(text: &[u16]) -> Cow<'_, [u16]> {
 
 /// `text` with each presentation form of a letter replaced by the letter,
 /// and each lam-alef ligature by lam and alef.
-fn to_letters(text: &[u16]) -> Vec<u16> {
+fn to_letters(text: &[char]) -> Vec<char> {
     let mut letters = Vec::with_capacity(text.len());
-    for &unit in text {
-        if !matches!(unit, 0xFB50..=0xFDFF | 0xFE70..=0xFEFF) {
-            letters.push(unit);
-        } else if let Some(&(letter, _)) = LETTER_FORMS.iter().find(|(_, forms)| forms.contains(&unit)) {
-            letters.push(letter);
-        } else if let Some(&(alef, _)) = LAM_ALEF_FORMS.iter().find(|(_, forms)| forms.contains(&unit)) {
-            letters.extend([LAM, alef]);
+    for &c in text {
+        let form = key(c).filter(|form| matches!(form, 0xFB50..=0xFDFF | 0xFE70..=0xFEFF));
+        let Some(form) = form else {
+            letters.push(c);
+            continue;
+        };
+        if let Some(&(letter, _)) = LETTER_FORMS.iter().find(|(_, forms)| forms.contains(&form)) {
+            letters.push(from_table(letter));
+        } else if let Some(&(alef, _)) = LAM_ALEF_FORMS.iter().find(|(_, forms)| forms.contains(&form)) {
+            letters.extend([LAM, from_table(alef)]);
         } else {
-            letters.push(unit);
+            letters.push(c);
         }
     }
     letters
@@ -139,33 +162,34 @@ fn to_letters(text: &[u16]) -> Vec<u16> {
 
 /// The presentation form of a letter that joins the letters before and
 /// after it as given, or the letter itself if it has no such form.
-fn letter_form(unit: u16, joins_prev: bool, joins_next: bool) -> u16 {
-    let Ok(i) = LETTER_FORMS.binary_search_by_key(&unit, |&(letter, _)| letter) else {
-        return unit;
+fn letter_form(c: char, joins_prev: bool, joins_next: bool) -> char {
+    let Some(Ok(i)) = key(c).map(|unit| LETTER_FORMS.binary_search_by_key(&unit, |&(letter, _)| letter)) else {
+        return c;
     };
     // Isolated, final, initial, medial.
     match LETTER_FORMS[i].1[usize::from(joins_prev) + 2 * usize::from(joins_next)] {
-        0 => unit,
-        form => form,
+        0 => c,
+        form => from_table(form),
     }
 }
 
 /// The isolated and final forms of the ligature of lam and `alef`, if they
 /// have one.
-fn lam_alef_forms(alef: u16) -> Option<[u16; 2]> {
+fn lam_alef_forms(alef: char) -> Option<[char; 2]> {
+    let alef = key(alef)?;
     let i = LAM_ALEF_FORMS.binary_search_by_key(&alef, |&(alef, _)| alef).ok()?;
-    Some(LAM_ALEF_FORMS[i].1)
+    Some(LAM_ALEF_FORMS[i].1.map(from_table))
 }
 
 /// The presentation form of a mark, on a tatweel if `on_tatweel` and it has
 /// that form, or on its own; or the mark itself if it has no forms.
-fn mark_form(unit: u16, on_tatweel: bool) -> u16 {
-    let Ok(i) = MARK_FORMS.binary_search_by_key(&unit, |&(mark, _)| mark) else {
-        return unit;
+fn mark_form(c: char, on_tatweel: bool) -> char {
+    let Some(Ok(i)) = key(c).map(|unit| MARK_FORMS.binary_search_by_key(&unit, |&(mark, _)| mark)) else {
+        return c;
     };
     match MARK_FORMS[i].1 {
-        [_, medial] if on_tatweel && medial != 0 => medial,
-        [isolated, _] => isolated,
+        [_, medial] if on_tatweel && medial != 0 => from_table(medial),
+        [isolated, _] => from_table(isolated),
     }
 }
 
@@ -173,11 +197,11 @@ fn mark_form(unit: u16, on_tatweel: bool) -> u16 {
 mod tests {
     use super::*;
 
-    fn u(s: &str) -> Vec<u16> {
-        s.encode_utf16().collect()
+    fn u(s: &str) -> Vec<char> {
+        s.chars().collect()
     }
 
-    fn shape(s: &str) -> Vec<u16> {
+    fn shape(s: &str) -> Vec<char> {
         shape_arabic(&u(s)).into_owned()
     }
 
@@ -203,23 +227,23 @@ mod tests {
 
     #[test]
     fn hamza_takes_its_isolated_form() {
-        assert_eq!(shape("ء"), [0xFE80]);
-        assert_eq!(shape("\u{FE80}"), [0xFE80]);
+        assert_eq!(shape("ء"), ['\u{FE80}']);
+        assert_eq!(shape("\u{FE80}"), ['\u{FE80}']);
     }
 
     #[test]
     fn lam_alef_with_a_mark_between_them() {
-        assert_eq!(shape("لَا"), [0xFEFB, 0xFE76]);
+        assert_eq!(shape("لَا"), ['\u{FEFB}', '\u{FE76}']);
     }
 
     #[test]
     fn zero_width_non_joiner_breaks_a_join() {
-        assert_eq!(shape("ب\u{200C}ب"), [0xFE8F, 0x200C, 0xFE8F]);
+        assert_eq!(shape("ب\u{200C}ب"), ['\u{FE8F}', '\u{200C}', '\u{FE8F}']);
     }
 
     #[test]
     fn letters_without_forms_dont_join() {
-        assert_eq!(shape("ب\u{0750}ب"), [0xFE8F, 0x0750, 0xFE8F]);
+        assert_eq!(shape("ب\u{0750}ب"), ['\u{FE8F}', '\u{0750}', '\u{FE8F}']);
     }
 
     #[test]

@@ -32,7 +32,7 @@ extern "C" {
     type Face;
 
     #[wasm_bindgen(method, catch)]
-    fn shape(this: &Face, text: &[u16], rtl: bool) -> Result<Vec<f32>, JsValue>;
+    fn shape(this: &Face, text: &str, rtl: bool) -> Result<Vec<f32>, JsValue>;
 
     #[wasm_bindgen(method, catch)]
     fn rasterize(this: &Face, code: u16) -> Result<js_sys::Array, JsValue>;
@@ -183,8 +183,8 @@ struct ShaperFace {
 }
 
 impl FontFaceShaper for ShaperFace {
-    fn shape(&self, text: &[u16], rtl: bool, glyph_ids: &mut Vec<GlyphID>, adjusts: &mut Vec<HBShapeAdjust>) {
-        match self.face.shape(text, rtl) {
+    fn shape(&self, text: &[char], rtl: bool, glyph_ids: &mut Vec<GlyphID>, adjusts: &mut Vec<HBShapeAdjust>) {
+        match self.face.shape(&text.iter().collect::<String>(), rtl) {
             Ok(shaped) => {
                 for glyph in shaped.as_chunks::<4>().0 {
                     glyph_ids.push(GlyphID::with_type(glyph[0] as u16, self.type_));

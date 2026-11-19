@@ -223,8 +223,8 @@ pub trait TestRunnerImpl {
 /// A placed symbol's data, boxes as minX, minY, maxX, maxY.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlacedSymbol {
-    /// Contents of the label (UTF-16)
-    pub(crate) key: Vec<u16>,
+    /// Contents of the label
+    pub(crate) key: String,
     pub(crate) text_collision_box: Option<[f32; 4]>,
     pub(crate) icon_collision_box: Option<[f32; 4]>,
     pub(crate) text_placed: bool,
@@ -1128,7 +1128,7 @@ fn render_tiles(
     let pixel_ratio = ctx.metadata.pixel_ratio;
     let tile_screen_size = get_tile_screen_pixel_size(pixel_ratio);
 
-    let mut symbol_index: HashMap<Vec<u16>, Vec<SymbolLocationAndStatus>> = HashMap::default();
+    let mut symbol_index: HashMap<String, Vec<SymbolLocationAndStatus>> = HashMap::default();
 
     let mut result = PremultipliedImage::new(Size::new(
         x_dims.len() as u32 * tile_screen_size,
@@ -1179,7 +1179,7 @@ fn render_tiles(
                 symbols.push(SymbolLocationAndStatus { tile_id: *tile_id, location: bbox, placed, is_icon });
                 return;
             };
-            let key = String::from_utf16_lossy(&placed_symbol.key);
+            let key = &placed_symbol.key;
             let kind = if is_icon { "icon" } else { "text" };
             let location = format!(
                 "(({}, {}), ({}, {}))",

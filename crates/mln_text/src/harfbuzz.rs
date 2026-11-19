@@ -18,6 +18,14 @@ impl HBShapeAdjust {
     }
 }
 
+/// Text that a font face shaped: the indices of its glyphs in the font, in
+/// visual order, and the position of each.
+#[derive(Clone, Debug, Default, PartialEq, mln_wire::Wire)]
+pub struct HBShapedText {
+    pub glyphs: Vec<u16>,
+    pub adjusts: Vec<HBShapeAdjust>,
+}
+
 /// `HBShaper`.
 pub struct HBShaper {
     impl_: Impl,
@@ -30,12 +38,12 @@ impl HBShaper {
         HBShaper { impl_: Impl::new(type_, font_file_data, lib) }
     }
 
-    /// Appends the glyphs of `text` (UTF-16), one run of one direction in
-    /// logical order, and their positions. Glyphs come back in visual order,
-    /// so a right-to-left run's glyphs come back reversed.
+    /// Appends the glyphs of `text`, one run of one direction in logical
+    /// order, and their positions. Glyphs come back in visual order, so a
+    /// right-to-left run's glyphs come back reversed.
     pub fn create_complex_glyph_ids(
         &self,
-        text: &[u16],
+        text: &[char],
         rtl: bool,
         glyph_ids: &mut Vec<GlyphID>,
         adjusts: &mut Vec<HBShapeAdjust>,

@@ -12,12 +12,12 @@ use crate::glyph::{
     GlyphID, GlyphIDType, GlyphMetrics, GlyphPosition, GlyphPositions, PositionedGlyph, PositionedLine, Shaping,
     WritingModeType, gen_new_glyph_id_type,
 };
-use crate::harfbuzz::HBShapeAdjust;
+use crate::harfbuzz::{HBShapeAdjust, HBShapedText};
 use crate::shaping::{PositionedIcon, get_shaping};
 use crate::tagged_string::{FontStackHash, SectionOptions, TaggedString, font_stack_hash};
 
-fn u(s: &str) -> Vec<u16> {
-    s.encode_utf16().collect()
+fn u(s: &str) -> Vec<char> {
+    s.chars().collect()
 }
 
 fn add_stub_glyph(
@@ -34,19 +34,21 @@ fn add_stub_glyph(
 
 fn add_stub_glyphs(string: &TaggedString, glyph_positions: &mut GlyphPositions) {
     for i in 0..string.length() {
-        let code_point = string.get_char_code_at(i);
-
         let section = string.get_section(i);
         if section.image_id.is_some() {
             continue;
         }
-
-        add_stub_glyph(glyph_positions, section.font_stack_hash, code_point, section.type_);
-        if section.type_ == GlyphIDType::FontPBF {
-            let vertical_code_point = i18n::verticalize_punctuation(code_point);
-            if vertical_code_point != 0 {
-                add_stub_glyph(glyph_positions, section.font_stack_hash, vertical_code_point, section.type_);
-            }
+        let codes = match &section.shaped {
+            Some(shaped) => shaped.glyphs.clone(),
+            None => std::iter::once(string.char_at(i))
+                .chain(
+                    i18n::verticalize_punctuation(string.char_at(i)).filter(|_| section.type_ == GlyphIDType::FontPBF),
+                )
+                .map(|c| u16::try_from(u32::from(c)).unwrap())
+                .collect(),
+        };
+        for code in codes {
+            add_stub_glyph(glyph_positions, section.font_stack_hash, code, section.type_);
         }
     }
 }
@@ -122,7 +124,7 @@ fn zwsp() {
     glyph_positions
         .entry(font_stack_hash(&font_stack))
         .or_default()
-        .insert(GlyphID::from('中' as u16), Some(glyph_position));
+        .insert(GlyphID::from_char('中').unwrap(), Some(glyph_position));
     let image_positions = ImagePositions::default();
 
     let test_get_shaping = |string: &TaggedString, max_width_in_chars: u32| {
@@ -436,7 +438,7 @@ fn vertical_missing_glyph_preserves_indices() {
     let mut glyph_positions = GlyphPositions::new();
     add_stub_glyphs(&text, &mut glyph_positions);
     // Missing "w" must not shift the character index used for the remaining glyphs.
-    glyph_positions.get_mut(&hash).unwrap().remove(&GlyphID::from('w' as u16));
+    glyph_positions.get_mut(&hash).unwrap().remove(&GlyphID::from_char('w').unwrap());
 
     let shaped_line_label = get_shaping(
         &text,
@@ -633,40 +635,26 @@ fn vertical_glyph_orientation_delimits_native_glyph_sections() {
 
 /// A label with a section of glyphs that HarfBuzz laid out, standing in as
 /// "XY", between sections drawn from glyph PBFs.
-fn label_with_shaped_section(
-    before: &str,
-    rtl: bool,
-    after: &str,
-    adjusts: Option<&Arc<Vec<HBShapeAdjust>>>,
-) -> TaggedString {
+fn label_with_shaped_section(before: &str, rtl: bool, after: &str, adjusts: Vec<HBShapeAdjust>) -> TaggedString {
     let font_stack: FontStack = vec!["font-stack".to_string()];
     let shaped_type = gen_new_glyph_id_type("shaping-test-shaped", &font_stack, &[(0, 0xffff)]);
     let mut text = TaggedString::default();
     if !before.is_empty() {
         text.add_text_section(&u(before), 1.0, &font_stack, GlyphIDType::FontPBF, true, None, VerticalAlign::Bottom);
     }
-    text.add_text_section_with_adjusts(
-        &u("XY"),
-        1.0,
-        &font_stack,
-        shaped_type,
-        &adjusts.cloned(),
-        rtl,
-        true,
-        None,
-        VerticalAlign::Bottom,
-    );
+    let shaped = Arc::new(HBShapedText { glyphs: vec![u16::from(b'X'), u16::from(b'Y')], adjusts });
+    text.add_shaped_section(&shaped, 1.0, &font_stack, shaped_type, rtl, true, None, VerticalAlign::Bottom);
     if !after.is_empty() {
         text.add_text_section(&u(after), 1.0, &font_stack, GlyphIDType::FontPBF, true, None, VerticalAlign::Bottom);
     }
     text
 }
 
-fn shaped_codes(shaping: &Shaping) -> Vec<u16> {
+fn shaped_codes(shaping: &Shaping) -> String {
     shaping
         .positioned_lines
         .iter()
-        .flat_map(|line| line.positioned_glyphs.iter().map(|glyph| glyph.glyph.code))
+        .flat_map(|line| line.positioned_glyphs.iter().map(|glyph| char::from_u32(glyph.glyph.code.into()).unwrap()))
         .collect()
 }
 
@@ -678,36 +666,36 @@ fn shape_horizontal(text: &TaggedString) -> Shaping {
 #[test]
 fn right_to_left_shaped_section_before_latin() {
     // The label reads right to left, so its Latin word lies to the left.
-    let shaping = shape_horizontal(&label_with_shaped_section("", true, " Erbil", None));
-    assert_eq!(shaped_codes(&shaping), u("Erbil XY"));
+    let shaping = shape_horizontal(&label_with_shaped_section("", true, " Erbil", vec![]));
+    assert_eq!(shaped_codes(&shaping), "Erbil XY");
 }
 
 // gtest: Shaping.LatinBeforeRightToLeftShapedSection
 #[test]
 fn latin_before_right_to_left_shaped_section() {
-    let shaping = shape_horizontal(&label_with_shaped_section("Erbil ", true, "", None));
-    assert_eq!(shaped_codes(&shaping), u("Erbil XY"));
+    let shaping = shape_horizontal(&label_with_shaped_section("Erbil ", true, "", vec![]));
+    assert_eq!(shaped_codes(&shaping), "Erbil XY");
 }
 
 // gtest: Shaping.DigitsAfterRightToLeftShapedSection
 #[test]
 fn digits_after_right_to_left_shaped_section() {
-    let shaping = shape_horizontal(&label_with_shaped_section("", true, " 12", None));
-    assert_eq!(shaped_codes(&shaping), u("12 XY"));
+    let shaping = shape_horizontal(&label_with_shaped_section("", true, " 12", vec![]));
+    assert_eq!(shaped_codes(&shaping), "12 XY");
 }
 
 // gtest: Shaping.LeftToRightShapedSectionKeepsItsPlace
 #[test]
 fn left_to_right_shaped_section_keeps_its_place() {
-    let shaping = shape_horizontal(&label_with_shaped_section("a ", false, " b", None));
-    assert_eq!(shaped_codes(&shaping), u("a XY b"));
+    let shaping = shape_horizontal(&label_with_shaped_section("a ", false, " b", vec![]));
+    assert_eq!(shaped_codes(&shaping), "a XY b");
 }
 
 // gtest: Shaping.ShapedSectionKeepsItsAdjustmentsWhenItMoves
 #[test]
 fn shaped_section_keeps_its_adjustments_when_it_moves() {
-    let adjusts = Arc::new(vec![HBShapeAdjust::new(0.0, 0.0, 5.0), HBShapeAdjust::new(0.0, 0.0, 7.0)]);
-    let shaping = shape_horizontal(&label_with_shaped_section("", true, " 12", Some(&adjusts)));
+    let adjusts = vec![HBShapeAdjust::new(0.0, 0.0, 5.0), HBShapeAdjust::new(0.0, 0.0, 7.0)];
+    let shaping = shape_horizontal(&label_with_shaped_section("", true, " 12", adjusts));
     assert_eq!(shaping.positioned_lines.len(), 1);
     let glyphs = &shaping.positioned_lines[0].positioned_glyphs;
     assert_eq!(glyphs.len(), 5);
@@ -780,7 +768,7 @@ fn break_before_left_parenthesis() {
     let section_options = SectionOptions::new(1.0, font_stack.clone(), GlyphIDType::FontPBF, 0, None);
     let mut glyph_positions = GlyphPositions::new();
     for id in ['o', 'a', '(', ')', ' '] {
-        let id = GlyphID::from(id as u16);
+        let id = GlyphID::from_char(id).unwrap();
         glyph_positions.entry(font_stack_hash(&font_stack)).or_default().entry(id).or_insert(Some(glyph_position));
     }
     let image_positions = ImagePositions::default();

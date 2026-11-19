@@ -22,7 +22,7 @@ fn shape(font: &[u8]) -> (Vec<HBShapeAdjust>, Vec<Glyph>) {
     let shaper = HBShaper::new(GlyphIDType::face(NonZeroU16::MIN), font.to_vec(), &FreeTypeLibrary::new());
     assert!(shaper.valid());
     let (mut ids, mut adjusts) = (Vec::new(), Vec::new());
-    shaper.create_complex_glyph_ids(&[0x4E2D, 0x41], false, &mut ids, &mut adjusts);
+    shaper.create_complex_glyph_ids(&['中', 'A'], false, &mut ids, &mut adjusts);
     assert_eq!(ids.len(), 2);
     (adjusts, ids.iter().map(|id| shaper.rasterize_glyph(id)).collect())
 }

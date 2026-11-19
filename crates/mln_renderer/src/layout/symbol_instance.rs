@@ -21,8 +21,9 @@ use crate::util::pool::PoolRange;
 #[derive(Clone, Debug, Default, mln_wire::Wire)]
 pub(crate) struct SymbolInstancePools {
     pub(crate) collision_boxes: Vec<CollisionBox>,
+    /// The symbols' texts in UTF-8.
     #[wire(with = "pod")]
-    pub(crate) keys: Vec<u16>,
+    pub(crate) keys: Vec<u8>,
 }
 
 impl SymbolInstancePools {
@@ -30,7 +31,8 @@ impl SymbolInstancePools {
         feature.boxes.of(&self.collision_boxes)
     }
 
-    pub(crate) fn key(&self, symbol_instance: &SymbolInstance) -> &[u16] {
+    /// The symbol's text in UTF-8.
+    pub(crate) fn key(&self, symbol_instance: &SymbolInstance) -> &[u8] {
         symbol_instance.key.of(&self.keys)
     }
 }
@@ -256,7 +258,7 @@ impl SymbolInstance {
         indexed_feature: &IndexedSubfeature,
         layout_feature_index: usize,
         data_feature_index: usize,
-        key: &[u16],
+        key: &[u8],
         overscaling: f32,
         icon_rotation: f32,
         text_rotation: f32,

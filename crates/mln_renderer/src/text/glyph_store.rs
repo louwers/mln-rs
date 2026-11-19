@@ -46,7 +46,7 @@ use mln_text::glyph_cache::{GlyphCache, GlyphCacheRange};
 use mln_text::glyph_pbf::parse_glyph_pbf;
 use mln_text::local_glyph_rasterizer::LocalGlyphs;
 use mln_text::tagged_string::font_stack_hash;
-use mln_text::{HBShapeAdjust, visual_runs};
+use mln_text::{HBShapedText, visual_runs};
 use mln_util::error::Error;
 use mln_util::font_stack::FontStack;
 use mln_util::hash::HashMap;
@@ -61,13 +61,8 @@ use crate::renderer_event::RendererEvent;
 use crate::text::font_face_engine::{FontFaceEngine, FontFaceShaper};
 use crate::tile::inbox::{InboxSender, TileEvent, Waker};
 
-#[derive(Clone, Debug, Default, mln_wire::Wire)]
-pub(crate) struct HBShapeResult {
-    pub(crate) str_: Vec<u16>,
-    pub(crate) adjusts: Arc<Vec<HBShapeAdjust>>,
-}
-
-pub(crate) type HBShapeResults = VecMap<FontStack, VecMap<GlyphIDType, BTreeMap<Vec<u16>, HBShapeResult>>>;
+/// Each font-face text of each font stack, shaped by its face.
+pub(crate) type HBShapeResults = VecMap<FontStack, VecMap<GlyphIDType, BTreeMap<Vec<char>, Arc<HBShapedText>>>>;
 
 /// What a glyph range's response brought.
 pub(crate) enum GlyphData {
@@ -370,7 +365,7 @@ impl GlyphStore {
     /// Whether the PBF glyph `glyph_id` comes from glyph PBFs before local
     /// fonts.
     fn pbf_first(&self, glyph_id: GlyphID) -> bool {
-        !(self.local.ideographs && i18n::allows_fixed_width_glyph_generation(glyph_id.code))
+        !(self.local.ideographs && glyph_id.char().is_some_and(i18n::allows_fixed_width_glyph_generation))
     }
 
     /// Whether `font_stack`'s glyph PBF has `glyph_id`.
@@ -439,8 +434,9 @@ impl GlyphStore {
     /// the loaded font face of `type_`, unshaped.
     fn face_glyph(&self, font_stack: &FontStack, type_: GlyphIDType, glyph_id: GlyphID) -> Option<Glyph> {
         let shaper = self.hb_shaper(font_stack, type_)?;
+        let c = glyph_id.char()?;
         let (mut ids, mut adjusts) = (Vec::new(), Vec::new());
-        shaper.shape(&[glyph_id.code], false, &mut ids, &mut adjusts);
+        shaper.shape(&[c], false, &mut ids, &mut adjusts);
         let [id] = ids[..] else { return None };
         if id.code == 0 {
             return None;
@@ -467,9 +463,9 @@ impl GlyphStore {
                             shaper.shape(&run.text, run.rtl, &mut shaped_glyph_ids, &mut shaped_adjusts);
                         }
                     }
-                    let mut shaped_str: Vec<u16> = Vec::with_capacity(shaped_glyph_ids.len());
+                    let mut shaped_glyphs: Vec<u16> = Vec::with_capacity(shaped_glyph_ids.len());
                     for glyph_id in &shaped_glyph_ids {
-                        shaped_str.push(glyph_id.code);
+                        shaped_glyphs.push(glyph_id.code);
                         let need_shape =
                             !glyphs.get(&font_stack_hash).is_some_and(|glyphs| glyphs.contains_key(glyph_id));
                         if need_shape {
@@ -479,12 +475,10 @@ impl GlyphStore {
                         }
                     }
 
-                    results
-                        .entry(font_stack.clone())
-                        .or_default()
-                        .entry(*type_)
-                        .or_default()
-                        .insert(str_.clone(), HBShapeResult { str_: shaped_str, adjusts: Arc::new(shaped_adjusts) });
+                    results.entry(font_stack.clone()).or_default().entry(*type_).or_default().insert(
+                        str_.clone(),
+                        Arc::new(HBShapedText { glyphs: shaped_glyphs, adjusts: shaped_adjusts }),
+                    );
                 }
             }
         }

@@ -1,12 +1,12 @@
-// The C++ functions take `char16_t`: astral code points never reach them, so
-// these take `u16`. A lone surrogate code unit is Cs.
+// The block tables cover the Basic Multilingual Plane, as Mapbox GL's do: a
+// character beyond it is in none of them.
 
 use unicode_properties::{GeneralCategory, GeneralCategoryGroup, UnicodeGeneralCategory};
 
 /// Whether `codepoint` is in `first..=last`.
 #[inline]
-fn is_in_range(codepoint: u16, first: u16, last: u16) -> bool {
-    codepoint >= first && codepoint <= last
+fn is_in_range(chr: char, first: u32, last: u32) -> bool {
+    (first..=last).contains(&u32::from(chr))
 }
 
 // The following table comes from <http://www.unicode.org/Public/12.0.0/ucd/Blocks.txt>.
@@ -15,8 +15,8 @@ macro_rules! define_is_in_unicode_block {
     ($($name:ident, $first:expr, $last:expr;)*) => {
         $(
             #[inline]
-            fn $name(codepoint: u16) -> bool {
-                ($first..=$last).contains(&codepoint)
+            fn $name(chr: char) -> bool {
+                ($first..=$last).contains(&u32::from(chr))
             }
         )*
     };
@@ -73,128 +73,128 @@ define_is_in_unicode_block! {
 }
 
 /// The vertical form of each punctuation character, sorted by key.
-static VERTICAL_PUNCTUATION: [(u16, u16); 83] = [
-    (0x0021, 0xFE15), // ! ︕
-    (0x0023, 0xFF03), // # ＃
-    (0x0024, 0xFF04), // $ ＄
-    (0x0025, 0xFF05), // % ％
-    (0x0026, 0xFF06), // & ＆
-    (0x0028, 0xFE35), // ( ︵
-    (0x0029, 0xFE36), // ) ︶
-    (0x002A, 0xFF0A), // * ＊
-    (0x002B, 0xFF0B), // + ＋
-    (0x002C, 0xFE10), // , ︐
-    (0x002D, 0xFE32), // - ︲
-    (0x002E, 0x30FB), // . ・
-    (0x002F, 0xFF0F), // / ／
-    (0x003A, 0xFE13), // : ︓
-    (0x003B, 0xFE14), // ; ︔
-    (0x003C, 0xFE3F), // < ︿
-    (0x003D, 0xFF1D), // = ＝
-    (0x003E, 0xFE40), // > ﹀
-    (0x003F, 0xFE16), // ? ︖
-    (0x0040, 0xFF20), // @ ＠
-    (0x005B, 0xFE47), // [ ﹇
-    (0x005C, 0xFF3C), // \ ＼
-    (0x005D, 0xFE48), // ] ﹈
-    (0x005E, 0xFF3E), // ^ ＾
-    (0x005F, 0xFE33), // _ ︳
-    (0x0060, 0xFF40), // ` ｀
-    (0x007B, 0xFE37), // { ︷
-    (0x007C, 0x2015), // | ―
-    (0x007D, 0xFE38), // } ︸
-    (0x007E, 0xFF5E), // ~ ～
-    (0x00A2, 0xFFE0), // ¢ ￠
-    (0x00A3, 0xFFE1), // £ ￡
-    (0x00A5, 0xFFE5), // ¥ ￥
-    (0x00A6, 0xFFE4), // ¦ ￤
-    (0x00AC, 0xFFE2), // ¬ ￢
-    (0x00AF, 0xFFE3), // ¯ ￣
-    (0x2013, 0xFE32), // – ︲
-    (0x2014, 0xFE31), // — ︱
-    (0x2018, 0xFE43), // ‘ ﹃
-    (0x2019, 0xFE44), // ’ ﹄
-    (0x201C, 0xFE41), // “ ﹁
-    (0x201D, 0xFE42), // ” ﹂
-    (0x2026, 0xFE19), // … ︙
-    (0x2027, 0x30FB), // ‧ ・
-    (0x20A9, 0xFFE6), // ₩ ￦
-    (0x3001, 0xFE11), // 、 ︑
-    (0x3002, 0xFE12), // 。 ︒
-    (0x3008, 0xFE3F), // 〈 ︿
-    (0x3009, 0xFE40), // 〉 ﹀
-    (0x300A, 0xFE3D), // 《 ︽
-    (0x300B, 0xFE3E), // 》 ︾
-    (0x300C, 0xFE41), // 「 ﹁
-    (0x300D, 0xFE42), // 」 ﹂
-    (0x300E, 0xFE43), // 『 ﹃
-    (0x300F, 0xFE44), // 』 ﹄
-    (0x3010, 0xFE3B), // 【 ︻
-    (0x3011, 0xFE3C), // 】 ︼
-    (0x3014, 0xFE39), // 〔 ︹
-    (0x3015, 0xFE3A), // 〕 ︺
-    (0x3016, 0xFE17), // 〖 ︗
-    (0x3017, 0xFE18), // 〗 ︘
-    (0xFF01, 0xFE15), // ！ ︕
-    (0xFF08, 0xFE35), // （ ︵
-    (0xFF09, 0xFE36), // ） ︶
-    (0xFF0C, 0xFE10), // ， ︐
-    (0xFF0D, 0xFE32), // － ︲
-    (0xFF0E, 0x30FB), // ． ・
-    (0xFF1A, 0xFE13), // ： ︓
-    (0xFF1B, 0xFE14), // ； ︔
-    (0xFF1C, 0xFE3F), // ＜ ︿
-    (0xFF1E, 0xFE40), // ＞ ﹀
-    (0xFF1F, 0xFE16), // ？ ︖
-    (0xFF3B, 0xFE47), // ［ ﹇
-    (0xFF3D, 0xFE48), // ］ ﹈
-    (0xFF3F, 0xFE33), // ＿ ︳
-    (0xFF5B, 0xFE37), // ｛ ︷
-    (0xFF5C, 0x2015), // ｜ ―
-    (0xFF5D, 0xFE38), // ｝ ︸
-    (0xFF5F, 0xFE35), // ｟ ︵
-    (0xFF60, 0xFE36), // ｠ ︶
-    (0xFF61, 0xFE12), // ｡ ︒
-    (0xFF62, 0xFE41), // ｢ ﹁
-    (0xFF63, 0xFE42), // ｣ ﹂
+static VERTICAL_PUNCTUATION: [(char, char); 83] = [
+    ('\u{0021}', '\u{FE15}'), // ! ︕
+    ('\u{0023}', '\u{FF03}'), // # ＃
+    ('\u{0024}', '\u{FF04}'), // $ ＄
+    ('\u{0025}', '\u{FF05}'), // % ％
+    ('\u{0026}', '\u{FF06}'), // & ＆
+    ('\u{0028}', '\u{FE35}'), // ( ︵
+    ('\u{0029}', '\u{FE36}'), // ) ︶
+    ('\u{002A}', '\u{FF0A}'), // * ＊
+    ('\u{002B}', '\u{FF0B}'), // + ＋
+    ('\u{002C}', '\u{FE10}'), // , ︐
+    ('\u{002D}', '\u{FE32}'), // - ︲
+    ('\u{002E}', '\u{30FB}'), // . ・
+    ('\u{002F}', '\u{FF0F}'), // / ／
+    ('\u{003A}', '\u{FE13}'), // : ︓
+    ('\u{003B}', '\u{FE14}'), // ; ︔
+    ('\u{003C}', '\u{FE3F}'), // < ︿
+    ('\u{003D}', '\u{FF1D}'), // = ＝
+    ('\u{003E}', '\u{FE40}'), // > ﹀
+    ('\u{003F}', '\u{FE16}'), // ? ︖
+    ('\u{0040}', '\u{FF20}'), // @ ＠
+    ('\u{005B}', '\u{FE47}'), // [ ﹇
+    ('\u{005C}', '\u{FF3C}'), // \ ＼
+    ('\u{005D}', '\u{FE48}'), // ] ﹈
+    ('\u{005E}', '\u{FF3E}'), // ^ ＾
+    ('\u{005F}', '\u{FE33}'), // _ ︳
+    ('\u{0060}', '\u{FF40}'), // ` ｀
+    ('\u{007B}', '\u{FE37}'), // { ︷
+    ('\u{007C}', '\u{2015}'), // | ―
+    ('\u{007D}', '\u{FE38}'), // } ︸
+    ('\u{007E}', '\u{FF5E}'), // ~ ～
+    ('\u{00A2}', '\u{FFE0}'), // ¢ ￠
+    ('\u{00A3}', '\u{FFE1}'), // £ ￡
+    ('\u{00A5}', '\u{FFE5}'), // ¥ ￥
+    ('\u{00A6}', '\u{FFE4}'), // ¦ ￤
+    ('\u{00AC}', '\u{FFE2}'), // ¬ ￢
+    ('\u{00AF}', '\u{FFE3}'), // ¯ ￣
+    ('\u{2013}', '\u{FE32}'), // – ︲
+    ('\u{2014}', '\u{FE31}'), // — ︱
+    ('\u{2018}', '\u{FE43}'), // ‘ ﹃
+    ('\u{2019}', '\u{FE44}'), // ’ ﹄
+    ('\u{201C}', '\u{FE41}'), // “ ﹁
+    ('\u{201D}', '\u{FE42}'), // ” ﹂
+    ('\u{2026}', '\u{FE19}'), // … ︙
+    ('\u{2027}', '\u{30FB}'), // ‧ ・
+    ('\u{20A9}', '\u{FFE6}'), // ₩ ￦
+    ('\u{3001}', '\u{FE11}'), // 、 ︑
+    ('\u{3002}', '\u{FE12}'), // 。 ︒
+    ('\u{3008}', '\u{FE3F}'), // 〈 ︿
+    ('\u{3009}', '\u{FE40}'), // 〉 ﹀
+    ('\u{300A}', '\u{FE3D}'), // 《 ︽
+    ('\u{300B}', '\u{FE3E}'), // 》 ︾
+    ('\u{300C}', '\u{FE41}'), // 「 ﹁
+    ('\u{300D}', '\u{FE42}'), // 」 ﹂
+    ('\u{300E}', '\u{FE43}'), // 『 ﹃
+    ('\u{300F}', '\u{FE44}'), // 』 ﹄
+    ('\u{3010}', '\u{FE3B}'), // 【 ︻
+    ('\u{3011}', '\u{FE3C}'), // 】 ︼
+    ('\u{3014}', '\u{FE39}'), // 〔 ︹
+    ('\u{3015}', '\u{FE3A}'), // 〕 ︺
+    ('\u{3016}', '\u{FE17}'), // 〖 ︗
+    ('\u{3017}', '\u{FE18}'), // 〗 ︘
+    ('\u{FF01}', '\u{FE15}'), // ！ ︕
+    ('\u{FF08}', '\u{FE35}'), // （ ︵
+    ('\u{FF09}', '\u{FE36}'), // ） ︶
+    ('\u{FF0C}', '\u{FE10}'), // ， ︐
+    ('\u{FF0D}', '\u{FE32}'), // － ︲
+    ('\u{FF0E}', '\u{30FB}'), // ． ・
+    ('\u{FF1A}', '\u{FE13}'), // ： ︓
+    ('\u{FF1B}', '\u{FE14}'), // ； ︔
+    ('\u{FF1C}', '\u{FE3F}'), // ＜ ︿
+    ('\u{FF1E}', '\u{FE40}'), // ＞ ﹀
+    ('\u{FF1F}', '\u{FE16}'), // ？ ︖
+    ('\u{FF3B}', '\u{FE47}'), // ［ ﹇
+    ('\u{FF3D}', '\u{FE48}'), // ］ ﹈
+    ('\u{FF3F}', '\u{FE33}'), // ＿ ︳
+    ('\u{FF5B}', '\u{FE37}'), // ｛ ︷
+    ('\u{FF5C}', '\u{2015}'), // ｜ ―
+    ('\u{FF5D}', '\u{FE38}'), // ｝ ︸
+    ('\u{FF5F}', '\u{FE35}'), // ｟ ︵
+    ('\u{FF60}', '\u{FE36}'), // ｠ ︶
+    ('\u{FF61}', '\u{FE12}'), // ｡ ︒
+    ('\u{FF62}', '\u{FE41}'), // ｢ ﹁
+    ('\u{FF63}', '\u{FE42}'), // ｣ ﹂
 ];
 
-fn vertical_punctuation_get(chr: u16) -> Option<u16> {
+fn vertical_punctuation_get(chr: char) -> Option<char> {
     VERTICAL_PUNCTUATION.binary_search_by_key(&chr, |&(k, _)| k).ok().map(|i| VERTICAL_PUNCTUATION[i].1)
 }
 
-fn vertical_punctuation_contains(chr: u16) -> bool {
+fn vertical_punctuation_contains(chr: char) -> bool {
     vertical_punctuation_get(chr).is_some()
 }
 
 /// Returns whether a line break can be inserted after the character
 /// indicated by the given Unicode codepoint due to word breaking.
 #[must_use]
-pub fn allows_word_breaking(chr: u16) -> bool {
-    chr == 0x0a /* newline */
-        || chr == 0x20 /* space */
-        || chr == 0x26 /* ampersand */
-        || chr == 0x29 /* close parenthesis */
-        || chr == 0x2b /* plus sign */
-        || chr == 0x2d /* hyphen-minus */
-        || chr == 0x2f /* solidus */
-        || chr == 0xad /* soft hyphen */
-        || chr == 0xb7 /* middle dot */
-        || chr == 0x200b /* zero-width space */
-        || chr == 0x2010 /* hyphen */
-        || chr == 0x2013 /* en dash */
+pub fn allows_word_breaking(chr: char) -> bool {
+    chr == '\u{000A}' /* newline */
+        || chr == '\u{0020}' /* space */
+        || chr == '\u{0026}' /* ampersand */
+        || chr == '\u{0029}' /* close parenthesis */
+        || chr == '\u{002B}' /* plus sign */
+        || chr == '\u{002D}' /* hyphen-minus */
+        || chr == '\u{002F}' /* solidus */
+        || chr == '\u{00AD}' /* soft hyphen */
+        || chr == '\u{00B7}' /* middle dot */
+        || chr == '\u{200B}' /* zero-width space */
+        || chr == '\u{2010}' /* hyphen */
+        || chr == '\u{2013}' /* en dash */
 }
 
 /// Returns whether a line break can be inserted before the character
 /// indicated by the given Unicode codepoint due to word breaking.
 #[must_use]
-pub fn allows_word_breaking_before(chr: u16) -> bool {
-    chr == 0x28 /* open parenthesis */
+pub fn allows_word_breaking_before(chr: char) -> bool {
+    chr == '\u{0028}' /* open parenthesis */
 }
 
 /// Whether letter spacing applies to `chr` (it doesn't to Arabic).
 #[must_use]
-pub(crate) fn char_allows_letter_spacing(chr: u16) -> bool {
+pub(crate) fn char_allows_letter_spacing(chr: char) -> bool {
     !(is_in_arabic(chr)
         || is_in_arabic_supplement(chr)
         || is_in_arabic_extended_a(chr)
@@ -205,21 +205,21 @@ pub(crate) fn char_allows_letter_spacing(chr: u16) -> bool {
 /// Returns whether the given string can be displayed with letter-spacing.
 /// False for Arabic scripts, where letter-spacing will break ligatures.
 #[must_use]
-pub fn allows_letter_spacing(string: &[u16]) -> bool {
+pub fn allows_letter_spacing(string: &[char]) -> bool {
     string.iter().all(|&c| char_allows_letter_spacing(c))
 }
 
 /// Returns whether a line break can be inserted after the character
 /// indicated by the given Unicode codepoint due to ideographic breaking.
 #[must_use]
-pub fn allows_ideographic_breaking(chr: u16) -> bool {
+pub fn allows_ideographic_breaking(chr: char) -> bool {
     // Allow U+2027 "Interpunct" for hyphenation of Chinese words
-    if chr == 0x2027 {
+    if chr == '\u{2027}' {
         return true;
     }
 
     // Return early for characters outside all ideographic ranges.
-    if chr < 0x2E80 {
+    if chr < '\u{2E80}' {
         return false;
     }
 
@@ -252,10 +252,10 @@ pub fn allows_ideographic_breaking(chr: u16) -> bool {
 /// Conservative set of characters expected to have relatively fixed sizes
 /// and advances.
 #[must_use]
-pub fn allows_fixed_width_glyph_generation(chr: u16) -> bool {
+pub fn allows_fixed_width_glyph_generation(chr: char) -> bool {
     // Mirrors the BMP ranges in GL JS's codePointUsesLocalIdeographFontFamily.
-    // Astral-plane ranges are not included because GlyphID only carries BMP
-    // codepoints for local glyph generation.
+    // Astral-plane ranges are not included because glyph PBFs, and so the
+    // glyphs generated in their place, only cover the BMP.
     // Bopomofo tone marks.
     is_in_range(chr, 0x02EA, 0x02EB)
         // Hangul Jamo.
@@ -302,23 +302,20 @@ pub fn allows_fixed_width_glyph_generation(chr: u16) -> bool {
         || is_in_halfwidth_and_fullwidth_forms(chr)
 }
 
-/// Returns whether the whole 256-codepoint glyph range can be generated
-/// locally. Use this for range-level decisions because some ranges are
-/// mixed.
+/// Returns whether the whole 256-codepoint glyph range that starts at
+/// `range_start` can be generated locally. Use this for range-level decisions
+/// because some ranges are mixed. Code points past U+FFFF wrap around, and
+/// surrogates can't be generated.
 #[must_use]
 pub fn glyph_range_is_entirely_locally_generated(range_start: u16) -> bool {
     // Some ranges (notably 0xFF00, where Halfwidth/Fullwidth Forms ends at
     // 0xFFEF and the Specials block continues to 0xFFFD) mix locally-rendered
     // and non-local codepoints, so it is not safe to infer the whole range
     // from the first codepoint alone.
-    const GLYPHS_PER_RANGE: u32 = 256;
-    for offset in 0..GLYPHS_PER_RANGE {
-        // static_cast<char16_t>(rangeStart + offset): wraps past 0xFFFF.
-        if !allows_fixed_width_glyph_generation((u32::from(range_start) + offset) as u16) {
-            return false;
-        }
-    }
-    true
+    const GLYPHS_PER_RANGE: u16 = 256;
+    (0..GLYPHS_PER_RANGE).all(|offset| {
+        char::from_u32(u32::from(range_start.wrapping_add(offset))).is_some_and(allows_fixed_width_glyph_generation)
+    })
 }
 
 // The following logic comes from
@@ -338,8 +335,8 @@ pub fn glyph_range_is_entirely_locally_generated(range_start: u16) -> bool {
 /// always drawn upright. An uprightly oriented character causes an adjacent
 /// “neutral” character to be drawn upright as well.
 #[must_use]
-pub fn has_upright_vertical_orientation(chr: u16) -> bool {
-    if chr == 0x02EA /* ˪ */ || chr == 0x02EB
+pub fn has_upright_vertical_orientation(chr: char) -> bool {
+    if chr == '\u{02EA}' /* ˪ */ || chr == '\u{02EB}'
     /* ˫ */
     {
         return true;
@@ -347,14 +344,14 @@ pub fn has_upright_vertical_orientation(chr: u16) -> bool {
 
     // Return early for characters outside all ranges whose characters remain
     // upright in vertical writing mode.
-    if chr < 0x1100 {
+    if chr < '\u{1100}' {
         return false;
     }
 
     if is_in_bopomofo(chr) || is_in_bopomofo_extended(chr) {
         return true;
     }
-    if is_in_cjk_compatibility_forms(chr) && !(0xFE49..=0xFE4F).contains(&chr) {
+    if is_in_cjk_compatibility_forms(chr) && !('\u{FE49}'..='\u{FE4F}').contains(&chr) {
         return true;
     }
     if is_in_cjk_compatibility(chr)
@@ -365,9 +362,9 @@ pub fn has_upright_vertical_orientation(chr: u16) -> bool {
         return true;
     }
     if is_in_cjk_symbols_and_punctuation(chr)
-        && !(0x3008..=0x3011).contains(&chr)
-        && !(0x3014..=0x301F).contains(&chr)
-        && chr != 0x3030
+        && !('\u{3008}'..='\u{3011}').contains(&chr)
+        && !('\u{3014}'..='\u{301F}').contains(&chr)
+        && chr != '\u{3030}'
     /* 〰 */
     {
         return true;
@@ -387,7 +384,7 @@ pub fn has_upright_vertical_orientation(chr: u16) -> bool {
     {
         return true;
     }
-    if is_in_katakana(chr) && chr != 0x30FC
+    if is_in_katakana(chr) && chr != '\u{30FC}'
     /* ー */
     {
         return true;
@@ -396,20 +393,23 @@ pub fn has_upright_vertical_orientation(chr: u16) -> bool {
         return true;
     }
     if is_in_halfwidth_and_fullwidth_forms(chr)
-        && chr != 0xFF08 /* （ */
-        && chr != 0xFF09 /* ） */
-        && chr != 0xFF0D /* － */
-        && !(0xFF1A..=0xFF1E).contains(&chr)
-        && chr != 0xFF3B /* ［ */
-        && chr != 0xFF3D /* ］ */
-        && chr != 0xFF3F /* ＿ */
-        && !(0xFF5B..=0xFFDF).contains(&chr)
-        && chr != 0xFFE3 /* ￣ */
-        && !(0xFFE8..=0xFFEF).contains(&chr)
+        && chr != '\u{FF08}' /* （ */
+        && chr != '\u{FF09}' /* ） */
+        && chr != '\u{FF0D}' /* － */
+        && !('\u{FF1A}'..='\u{FF1E}').contains(&chr)
+        && chr != '\u{FF3B}' /* ［ */
+        && chr != '\u{FF3D}' /* ］ */
+        && chr != '\u{FF3F}' /* ＿ */
+        && !('\u{FF5B}'..='\u{FFDF}').contains(&chr)
+        && chr != '\u{FFE3}' /* ￣ */
+        && !('\u{FFE8}'..='\u{FFEF}').contains(&chr)
     {
         return true;
     }
-    if is_in_small_form_variants(chr) && !(0xFE58..=0xFE5E).contains(&chr) && !(0xFE63..=0xFE66).contains(&chr) {
+    if is_in_small_form_variants(chr)
+        && !('\u{FE58}'..='\u{FE5E}').contains(&chr)
+        && !('\u{FE63}'..='\u{FE66}').contains(&chr)
+    {
         return true;
     }
     if is_in_unified_canadian_aboriginal_syllabics(chr)
@@ -439,33 +439,33 @@ pub fn has_upright_vertical_orientation(chr: u16) -> bool {
 /// does not influence whether an adjacent character is drawn upright or
 /// rotated.
 #[must_use]
-pub(crate) fn has_neutral_vertical_orientation(chr: u16) -> bool {
+pub(crate) fn has_neutral_vertical_orientation(chr: char) -> bool {
     if is_in_latin1_supplement(chr)
-        && (chr == 0x00A7 /* § */
-            || chr == 0x00A9 /* © */
-            || chr == 0x00AE /* ® */
-            || chr == 0x00B1 /* ± */
-            || chr == 0x00BC /* ¼ */
-            || chr == 0x00BD /* ½ */
-            || chr == 0x00BE /* ¾ */
-            || chr == 0x00D7 /* × */
-            || chr == 0x00F7/* ÷ */)
+        && (chr == '\u{00A7}' /* § */
+            || chr == '\u{00A9}' /* © */
+            || chr == '\u{00AE}' /* ® */
+            || chr == '\u{00B1}' /* ± */
+            || chr == '\u{00BC}' /* ¼ */
+            || chr == '\u{00BD}' /* ½ */
+            || chr == '\u{00BE}' /* ¾ */
+            || chr == '\u{00D7}' /* × */
+            || chr == '\u{00F7}'/* ÷ */)
     {
         return true;
     }
     if is_in_general_punctuation(chr)
-        && (chr == 0x2016 /* ‖ */
-            || chr == 0x2020 /* † */
-            || chr == 0x2021 /* ‡ */
-            || chr == 0x2030 /* ‰ */
-            || chr == 0x2031 /* ‱ */
-            || chr == 0x203B /* ※ */
-            || chr == 0x203C /* ‼ */
-            || chr == 0x2042 /* ⁂ */
-            || chr == 0x2047 /* ⁇ */
-            || chr == 0x2048 /* ⁈ */
-            || chr == 0x2049 /* ⁉ */
-            || chr == 0x2051/* ⁑ */)
+        && (chr == '\u{2016}' /* ‖ */
+            || chr == '\u{2020}' /* † */
+            || chr == '\u{2021}' /* ‡ */
+            || chr == '\u{2030}' /* ‰ */
+            || chr == '\u{2031}' /* ‱ */
+            || chr == '\u{203B}' /* ※ */
+            || chr == '\u{203C}' /* ‼ */
+            || chr == '\u{2042}' /* ⁂ */
+            || chr == '\u{2047}' /* ⁇ */
+            || chr == '\u{2048}' /* ⁈ */
+            || chr == '\u{2049}' /* ⁉ */
+            || chr == '\u{2051}'/* ⁑ */)
     {
         return true;
     }
@@ -473,15 +473,15 @@ pub(crate) fn has_neutral_vertical_orientation(chr: u16) -> bool {
         return true;
     }
     if is_in_miscellaneous_technical(chr)
-        && ((0x2300..=0x2307).contains(&chr)
-            || (0x230C..=0x231F).contains(&chr)
-            || (0x2324..=0x2328).contains(&chr)
-            || chr == 0x232B /* ⌫ */
-            || (0x237D..=0x239A).contains(&chr)
-            || (0x23BE..=0x23CD).contains(&chr)
-            || chr == 0x23CF /* ⏏ */
-            || (0x23D1..=0x23DB).contains(&chr)
-            || (0x23E2..=0x23FF).contains(&chr))
+        && (('\u{2300}'..='\u{2307}').contains(&chr)
+            || ('\u{230C}'..='\u{231F}').contains(&chr)
+            || ('\u{2324}'..='\u{2328}').contains(&chr)
+            || chr == '\u{232B}' /* ⌫ */
+            || ('\u{237D}'..='\u{239A}').contains(&chr)
+            || ('\u{23BE}'..='\u{23CD}').contains(&chr)
+            || chr == '\u{23CF}' /* ⏏ */
+            || ('\u{23D1}'..='\u{23DB}').contains(&chr)
+            || ('\u{23E2}'..='\u{23FF}').contains(&chr))
     {
         return true;
     }
@@ -495,7 +495,9 @@ pub(crate) fn has_neutral_vertical_orientation(chr: u16) -> bool {
     // Quirk kept: these ranges (⬒..⬯ etc.) lie outside the Miscellaneous
     // Symbols block they are tested in, so this branch is never taken.
     if is_in_miscellaneous_symbols(chr)
-        && ((0x2B12..=0x2B2F).contains(&chr) || (0x2B50..=0x2B59).contains(&chr) || (0x2BB8..=0x2BEB).contains(&chr))
+        && (('\u{2B12}'..='\u{2B2F}').contains(&chr)
+            || ('\u{2B50}'..='\u{2B59}').contains(&chr)
+            || ('\u{2BB8}'..='\u{2BEB}').contains(&chr))
     {
         return true;
     }
@@ -508,13 +510,13 @@ pub(crate) fn has_neutral_vertical_orientation(chr: u16) -> bool {
     {
         return true;
     }
-    if chr == 0x221E /* ∞ */
-        || chr == 0x2234 /* ∴ */
-        || chr == 0x2235 /* ∵ */
-        || (0x2700..=0x2767).contains(&chr)
-        || (0x2776..=0x2793).contains(&chr)
-        || chr == 0xFFFC /* object replacement character */
-        || chr == 0xFFFD
+    if chr == '\u{221E}' /* ∞ */
+        || chr == '\u{2234}' /* ∴ */
+        || chr == '\u{2235}' /* ∵ */
+        || ('\u{2700}'..='\u{2767}').contains(&chr)
+        || ('\u{2776}'..='\u{2793}').contains(&chr)
+        || chr == '\u{FFFC}' /* object replacement character */
+        || chr == '\u{FFFD}'
     /* replacement character */
     {
         return true;
@@ -531,7 +533,7 @@ pub(crate) fn has_neutral_vertical_orientation(chr: u16) -> bool {
 /// character causes an adjacent “neutral” character to be drawn rotated as
 /// well.
 #[must_use]
-pub(crate) fn has_rotated_vertical_orientation(chr: u16) -> bool {
+pub(crate) fn has_rotated_vertical_orientation(chr: char) -> bool {
     !(has_upright_vertical_orientation(chr) || has_neutral_vertical_orientation(chr))
 }
 
@@ -540,46 +542,33 @@ pub(crate) fn has_rotated_vertical_orientation(chr: u16) -> bool {
 ///
 /// Replaces "horizontal" with "vertical" punctuation in place. Does not
 /// re-order or change length of string (`TaggedString::verticalizePunctuation`
-/// depends on this behavior).
+/// depends on this behavior). A NUL neighbor counts as no neighbor.
 #[must_use]
-pub fn verticalize_punctuation_str(input: &[u16]) -> Vec<u16> {
-    let mut output = Vec::with_capacity(input.len());
-
-    for i in 0..input.len() {
-        let next_char_code = if i < input.len() - 1 { input[i + 1] } else { 0 };
-        let prev_char_code = if i != 0 { input[i - 1] } else { 0 };
-
-        // The C++ reads input[i + 1] / input[i - 1] only when the char code
-        // is non-zero, so the indices are in range here too.
-        let can_replace_punctuation = (next_char_code == 0
-            || !has_rotated_vertical_orientation(next_char_code)
-            || vertical_punctuation_contains(input[i + 1]))
-            && (prev_char_code == 0
-                || !has_rotated_vertical_orientation(prev_char_code)
-                || vertical_punctuation_contains(input[i - 1]));
-
-        let repl = if can_replace_punctuation { verticalize_punctuation(input[i]) } else { 0 };
-        if repl != 0 {
-            output.push(repl);
-        } else {
-            output.push(input[i]);
-        }
-    }
-
-    output
+pub fn verticalize_punctuation_str(input: &[char]) -> Vec<char> {
+    // A neighbor allows the replacement unless it is rotated and has no
+    // vertical form of its own.
+    let allows = |neighbor: Option<&char>| {
+        neighbor.is_none_or(|&c| c == '\0' || !has_rotated_vertical_orientation(c) || vertical_punctuation_contains(c))
+    };
+    (0..input.len())
+        .map(|i| {
+            let can_replace_punctuation = allows(input.get(i + 1)) && allows(i.checked_sub(1).map(|i| &input[i]));
+            can_replace_punctuation.then(|| verticalize_punctuation(input[i])).flatten().unwrap_or(input[i])
+        })
+        .collect()
 }
 
 /// Returns the form of the given character appropriate for vertical text:
-/// the character’s specialized vertical form; 0 if not applicable.
+/// the character’s specialized vertical form, if it has one.
 #[must_use]
-pub fn verticalize_punctuation(chr: u16) -> u16 {
-    vertical_punctuation_get(chr).unwrap_or(0)
+pub fn verticalize_punctuation(chr: char) -> Option<char> {
+    vertical_punctuation_get(chr)
 }
 
 /// Whether `chr` is in a supported script: not one of the common scripts
 /// that need complex shaping (Indic, Sinhala, Tibetan, Myanmar, Khmer).
 #[must_use]
-pub fn char_in_supported_script(chr: u16) -> bool {
+pub fn char_in_supported_script(chr: char) -> bool {
     // This is a rough heuristic: whether we "can render" a script
     // actually depends on the properties of the font being used
     // and whether differences from the ideal rendering are considered
@@ -589,20 +578,20 @@ pub fn char_in_supported_script(chr: u16) -> bool {
     // complex text shaping, based on unicode script metadata:
     // http://www.unicode.org/repos/cldr/trunk/common/properties/scriptMetadata.txt
     // where "Web Rank <= 32" "Shaping Required = YES"
-    !((0x0900..=0x0DFF).contains(&chr)
+    !(('\u{0900}'..='\u{0DFF}').contains(&chr)
         // Main blocks for Indic scripts and Sinhala
-        || (0x0F00..=0x109F).contains(&chr)
+        || ('\u{0F00}'..='\u{109F}').contains(&chr)
         // Main blocks for Tibetan and Myanmar
         || is_in_khmer(chr))
 }
 
-/// Whether every UTF-16 code unit of `input` is in a supported script.
+/// Whether every character of `input` is in a supported script.
 pub fn is_string_in_supported_script(input: &str) -> bool {
-    input.encode_utf16().all(char_in_supported_script)
+    input.chars().all(char_in_supported_script)
 }
 
 #[must_use]
-pub fn is_char_in_complex_shaping_script(chr: u16) -> bool {
+pub fn is_char_in_complex_shaping_script(chr: char) -> bool {
     is_in_arabic(chr)
         || is_in_arabic_supplement(chr)
         || is_in_arabic_extended_a(chr)
@@ -611,37 +600,35 @@ pub fn is_char_in_complex_shaping_script(chr: u16) -> bool {
 }
 
 #[must_use]
-pub fn is_whitespace(chr: u16) -> bool {
-    chr == 0x20 || chr == 0x09 || chr == 0x0A || chr == 0x0B || chr == 0x0C || chr == 0x0D
-}
-
-/// The general category of a UTF-16 code unit; `None` for a surrogate.
-fn general_category(chr: u16) -> Option<GeneralCategory> {
-    char::from_u32(u32::from(chr)).map(UnicodeGeneralCategory::general_category)
-}
-
-#[must_use]
-pub fn is_digit(chr: u16) -> bool {
-    general_category(chr) == Some(GeneralCategory::DecimalNumber)
+pub fn is_whitespace(chr: char) -> bool {
+    chr == '\u{0020}'
+        || chr == '\u{0009}'
+        || chr == '\u{000A}'
+        || chr == '\u{000B}'
+        || chr == '\u{000C}'
+        || chr == '\u{000D}'
 }
 
 #[must_use]
-pub fn is_uppercase(chr: u16) -> bool {
-    general_category(chr) == Some(GeneralCategory::UppercaseLetter)
+pub fn is_digit(chr: char) -> bool {
+    chr.general_category() == GeneralCategory::DecimalNumber
+}
+
+#[must_use]
+pub fn is_uppercase(chr: char) -> bool {
+    chr.general_category() == GeneralCategory::UppercaseLetter
 }
 
 /// `(U_GET_GC_MASK(chr) & (U_GC_P_MASK | U_GC_S_MASK)) != 0`
 /// (platform/default).
 #[must_use]
-pub fn is_punctuation_or_symbol(chr: u16) -> bool {
-    char::from_u32(u32::from(chr)).is_some_and(|c| {
-        matches!(c.general_category_group(), GeneralCategoryGroup::Punctuation | GeneralCategoryGroup::Symbol)
-    })
+pub fn is_punctuation_or_symbol(chr: char) -> bool {
+    matches!(chr.general_category_group(), GeneralCategoryGroup::Punctuation | GeneralCategoryGroup::Symbol)
 }
 
 #[must_use]
-pub fn is_variation_selector1(chr: u16) -> bool {
-    chr == 0xFE00
+pub fn is_variation_selector1(chr: char) -> bool {
+    chr == '\u{FE00}'
 }
 
 #[cfg(test)]
@@ -651,23 +638,35 @@ mod tests {
     #[test]
     fn vertical_punctuation_table_is_sorted() {
         assert!(VERTICAL_PUNCTUATION.windows(2).all(|w| w[0].0 < w[1].0));
-        assert_eq!(verticalize_punctuation('(' as u16), 0xFE35);
-        assert_eq!(verticalize_punctuation(0xFF63), 0xFE42);
-        assert_eq!(verticalize_punctuation('a' as u16), 0);
+        assert_eq!(verticalize_punctuation('('), Some('\u{FE35}'));
+        assert_eq!(verticalize_punctuation('\u{FF63}'), Some('\u{FE42}'));
+        assert_eq!(verticalize_punctuation('a'), None);
     }
 
     #[test]
     fn general_category() {
-        assert!(is_digit('7' as u16));
-        assert!(is_digit(0x0663)); // ٣
-        assert!(!is_digit('A' as u16));
-        assert!(is_uppercase('A' as u16));
-        assert!(is_uppercase(0x041C)); // М
-        assert!(!is_uppercase('a' as u16));
-        assert!(is_punctuation_or_symbol('-' as u16));
-        assert!(is_punctuation_or_symbol('$' as u16));
-        assert!(!is_punctuation_or_symbol('a' as u16));
-        assert!(!is_punctuation_or_symbol(0xFFFF));
-        assert!(!is_digit(0xD800) && !is_uppercase(0xD800) && !is_punctuation_or_symbol(0xD800));
+        assert!(is_digit('7'));
+        assert!(is_digit('٣'));
+        assert!(!is_digit('A'));
+        assert!(is_uppercase('A'));
+        assert!(is_uppercase('М'));
+        assert!(!is_uppercase('a'));
+        assert!(is_punctuation_or_symbol('-'));
+        assert!(is_punctuation_or_symbol('$'));
+        assert!(!is_punctuation_or_symbol('a'));
+        assert!(!is_punctuation_or_symbol('\u{FFFF}'));
+        // Characters beyond the BMP have categories too.
+        assert!(is_digit('\u{1D7CE}')); // MATHEMATICAL BOLD DIGIT ZERO
+        assert!(is_uppercase('\u{10400}')); // DESERET CAPITAL LETTER LONG I
+        assert!(is_punctuation_or_symbol('\u{1F600}'));
+    }
+
+    #[test]
+    fn verticalizes_punctuation_between_upright_neighbors() {
+        let s = |s: &str| s.chars().collect::<Vec<char>>();
+        assert_eq!(verticalize_punctuation_str(&s("中(中)")), s("中\u{FE35}中\u{FE36}"));
+        // A rotated neighbor keeps it horizontal.
+        assert_eq!(verticalize_punctuation_str(&s("a(b")), s("a(b"));
+        assert_eq!(verticalize_punctuation_str(&s("(")), s("\u{FE35}"));
     }
 }

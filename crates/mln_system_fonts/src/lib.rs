@@ -282,7 +282,7 @@ mod tests {
             let nominal: Vec<u16> =
                 sample.chars().map(|c| font.charmap().map(c).map_or(0, |glyph| glyph.to_u32() as u16)).collect();
             let shaper = HBShaper::new(face.face.type_, data, &FreeTypeLibrary::new());
-            let text: Vec<u16> = sample.encode_utf16().collect();
+            let text: Vec<char> = sample.chars().collect();
             let (mut ids, mut adjusts) = (Vec::new(), Vec::new());
             shaper.create_complex_glyph_ids(&text, false, &mut ids, &mut adjusts);
             let shaped: Vec<u16> = ids.iter().map(|id| id.code).collect();

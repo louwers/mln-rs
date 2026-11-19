@@ -215,7 +215,7 @@ impl CollisionGroups {
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlacedSymbolData {
     /// Contents of the label
-    pub key: Vec<u16>,
+    pub key: String,
     /// If symbol contains text, text collision box in viewport coordinates
     pub text_collision_box: Option<BBox>,
     /// If symbol contains icon, icon collision box in viewport coordinates
@@ -2470,7 +2470,7 @@ impl Placement {
             icon_collision_box = Some(*box_.box_());
         }
         let symbol_data = PlacedSymbolData {
-            key: instance_pools.key(symbol).to_vec(),
+            key: String::from_utf8_lossy(instance_pools.key(symbol)).into_owned(),
             text_collision_box,
             icon_collision_box,
             text_placed: placement.text,

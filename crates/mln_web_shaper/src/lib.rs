@@ -46,12 +46,13 @@ pub struct Face {
 
 #[wasm_bindgen]
 impl Face {
-    /// Shapes the UTF-16 `text`: per glyph, its index, then its
-    /// `HBShapeAdjust` (x offset, y offset, advance).
-    pub fn shape(&self, text: &[u16], rtl: bool) -> Vec<f32> {
+    /// Shapes `text`: per glyph, its index, then its `HBShapeAdjust` (x
+    /// offset, y offset, advance).
+    pub fn shape(&self, text: &str, rtl: bool) -> Vec<f32> {
+        let text: Vec<char> = text.chars().collect();
         let mut glyph_ids: Vec<GlyphID> = Vec::new();
         let mut adjusts: Vec<HBShapeAdjust> = Vec::new();
-        self.shaper.create_complex_glyph_ids(text, rtl, &mut glyph_ids, &mut adjusts);
+        self.shaper.create_complex_glyph_ids(&text, rtl, &mut glyph_ids, &mut adjusts);
         glyph_ids
             .iter()
             .zip(&adjusts)

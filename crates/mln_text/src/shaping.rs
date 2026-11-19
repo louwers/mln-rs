@@ -11,14 +11,14 @@ use mln_vec_map::VecSet;
 use crate::bidi;
 use crate::glyph::{
     Glyph, GlyphID, GlyphIDType, GlyphMetrics, GlyphPositions, PositionedGlyph, PositionedLine, Shaping,
-    WritingModeType,
+    WritingModeType, pbf_code,
 };
 use crate::harfbuzz::HBShapeAdjust;
 use crate::tagged_string::{SectionOptions, StyledText, TaggedString};
 
 /// Zero width space that is used to suggest break points for Japanese
 /// labels.
-const ZWSP: u16 = 0x200b;
+const ZWSP: char = '\u{200B}';
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AnchorAlignment {
@@ -315,7 +315,7 @@ impl LineContentSize {
 }
 
 fn get_glyph_advance(
-    code_point: u16,
+    code_point: char,
     section: &SectionOptions,
     glyphs: &GlyphPositions,
     image_positions: &ImagePositions,
@@ -327,7 +327,7 @@ fn get_glyph_advance(
             let Some(glyphs) = glyphs.get(&section.font_stack_hash) else {
                 return 0.0;
             };
-            match glyphs.get(&GlyphID::from(code_point)) {
+            match GlyphID::from_char(code_point).and_then(|glyph| glyphs.get(&glyph)) {
                 Some(Some(glyph)) => (f64::from(glyph.metrics.advance) * section.scale) as f32 + spacing,
                 _ => 0.0,
             }
@@ -356,7 +356,7 @@ fn determine_average_line_width(
         if section.type_ != GlyphIDType::FontPBF {
             continue;
         }
-        let code_point = logical_input.get_char_code_at(i);
+        let code_point = logical_input.char_at(i);
         total_width += get_glyph_advance(code_point, section, glyphs, image_positions, layout_text_size, spacing);
     }
 
@@ -384,20 +384,20 @@ fn calculate_badness(line_width: f32, target_width: f32, penalty: f32, is_last_b
     raggedness + penalty * penalty
 }
 
-fn calculate_penalty(code_point: u16, next_code_point: u16, penalizable_ideographic_break: bool) -> f32 {
+fn calculate_penalty(code_point: char, next_code_point: char, penalizable_ideographic_break: bool) -> f32 {
     let mut penalty: f32 = 0.0;
     // Force break on newline
-    if code_point == 0x0a {
+    if code_point == '\n' {
         penalty -= 10000.0;
     }
 
     // Penalize open parenthesis at end of line
-    if code_point == 0x28 || code_point == 0xff08 {
+    if code_point == '(' || code_point == '\u{FF08}' {
         penalty += 50.0;
     }
 
     // Penalize close parenthesis at beginning of line
-    if next_code_point == 0x29 || next_code_point == 0xff09 {
+    if next_code_point == ')' || next_code_point == '\u{FF09}' {
         penalty += 50.0;
     }
 
@@ -490,7 +490,7 @@ pub(crate) fn determine_line_breaks(
     let length = logical_input.length();
     for i in 0..length {
         let section = logical_input.get_section(i);
-        let code_point = logical_input.get_char_code_at(i);
+        let code_point = logical_input.char_at(i);
         if !i18n::is_whitespace(code_point) {
             current_x += get_glyph_advance(code_point, section, glyphs, image_positions, layout_text_size, spacing);
         }
@@ -500,7 +500,7 @@ pub(crate) fn determine_line_breaks(
         if i < length - 1 {
             let allows_ideographic_break = i18n::allows_ideographic_breaking(code_point);
             let allows_break_before_next =
-                i != length - 2 && i18n::allows_word_breaking_before(logical_input.get_char_code_at(i + 1));
+                i != length - 2 && i18n::allows_word_breaking_before(logical_input.char_at(i + 1));
             if section.image_id.is_some()
                 || allows_ideographic_break
                 || i18n::allows_word_breaking(code_point)
@@ -513,11 +513,7 @@ pub(crate) fn determine_line_breaks(
                     current_x,
                     target_width,
                     &potential_breaks,
-                    calculate_penalty(
-                        code_point,
-                        logical_input.get_char_code_at(next_index),
-                        penalizable_ideographic_break,
-                    ),
+                    calculate_penalty(code_point, logical_input.char_at(next_index), penalizable_ideographic_break),
                     false,
                 );
                 potential_breaks.push(b);
@@ -539,7 +535,7 @@ fn run_is_upright(line: &TaggedString, start: usize, end: usize) -> bool {
     let mut is_number = true;
     let mut is_short_uppercase_code = end - start <= MAX_UPRIGHT_LETTER_RUN;
     for i in start..end {
-        let chr = line.get_char_code_at(i);
+        let chr = line.char_at(i);
         let is_digit = i18n::is_digit(chr);
         has_digit |= is_digit;
         is_number &= is_digit || i18n::is_punctuation_or_symbol(chr);
@@ -562,7 +558,7 @@ fn mark_surrounded_punctuation_upright(line: &TaggedString, verticals: &mut [boo
     for i in 0..line.length() {
         if !verticals[i]
             && is_text(line, i)
-            && i18n::verticalize_punctuation(line.get_char_code_at(i)) != 0
+            && i18n::verticalize_punctuation(line.char_at(i)).is_some()
             && (i == 0 || verticals[i - 1])
             && (i + 1 == line.length() || verticals[i + 1])
         {
@@ -576,12 +572,11 @@ fn mark_surrounded_punctuation_upright(line: &TaggedString, verticals: &mut [boo
 fn determine_line_verticals(line: &TaggedString) -> Vec<bool> {
     let mut verticals = vec![false; line.length()];
     for (i, vertical) in verticals.iter_mut().enumerate() {
-        *vertical = is_text(line, i) && i18n::has_upright_vertical_orientation(line.get_char_code_at(i));
+        *vertical = is_text(line, i) && i18n::has_upright_vertical_orientation(line.char_at(i));
     }
 
-    let is_run_character = |verticals: &[bool], i: usize| {
-        is_text(line, i) && !verticals[i] && !i18n::is_whitespace(line.get_char_code_at(i))
-    };
+    let is_run_character =
+        |verticals: &[bool], i: usize| is_text(line, i) && !verticals[i] && !i18n::is_whitespace(line.char_at(i));
     let mut start = 0;
     while start < line.length() {
         if !is_run_character(&verticals, start) {
@@ -594,7 +589,7 @@ fn determine_line_verticals(line: &TaggedString) -> Vec<bool> {
         }
         if run_is_upright(line, start, end) {
             for (i, vertical) in verticals.iter_mut().enumerate().take(end).skip(start) {
-                let chr = line.get_char_code_at(i);
+                let chr = line.char_at(i);
                 *vertical =
                     (i18n::is_uppercase(chr) || i18n::is_digit(chr)) && !i18n::is_char_in_complex_shaping_script(chr);
             }
@@ -663,18 +658,24 @@ fn shape_lines(
         for i in 0..line.length() {
             let section_index = line.get_section_index(i) as usize;
             let section = line.section_at(section_index);
+            let ch = line.char_at(i);
             let mut adjust: Option<&HBShapeAdjust> = None;
-            if let Some(adjusts) = &section.adjusts {
+            let code = if let Some(shaped) = &section.shaped {
                 debug_assert!(section.start_index >= 0);
-                // std::cmp_greater_equal(i, startIndex) && i - startIndex <
-                // adjusts->size() (size_t arithmetic)
-                let offset = (i as u64).wrapping_sub(i64::from(section.start_index) as u64);
-                if (section.start_index < 0 || i as u64 >= section.start_index as u64) && offset < adjusts.len() as u64
-                {
-                    adjust = Some(&adjusts[offset as usize]);
+                let offset = usize::try_from(section.start_index).ok().and_then(|start| i.checked_sub(start));
+                adjust = offset.and_then(|offset| shaped.adjusts.get(offset));
+                match offset.and_then(|offset| shaped.glyphs.get(offset)) {
+                    Some(&glyph) => glyph,
+                    None => continue,
                 }
-            }
-            let mut code_point = GlyphID::with_type(line.get_char_code_at(i), section.type_);
+            } else {
+                // A character beyond the BMP has no glyph.
+                match pbf_code(ch) {
+                    Some(code) => code,
+                    None => continue,
+                }
+            };
+            let mut code_point = GlyphID::with_type(code, section.type_);
 
             // (double baselineOffset = 0.0, float advance = 0.0f: every
             // path that reaches the positioned glyph assigns both)
@@ -692,19 +693,19 @@ fn shape_lines(
                 writing_mode != WritingModeType::Horizontal
                     && code_point.type_ == GlyphIDType::FontPBF
                     && (if allow_vertical_placement {
-                        !i18n::is_whitespace(code_point.code)
-                            && !i18n::is_char_in_complex_shaping_script(code_point.code)
+                        !i18n::is_whitespace(ch) && !i18n::is_char_in_complex_shaping_script(ch)
                     } else {
-                        i18n::has_upright_vertical_orientation(code_point.code)
+                        i18n::has_upright_vertical_orientation(ch)
                     })
             } else {
                 line_verticals[i]
             };
-            if !line_verticals.is_empty() && vertical && !i18n::has_upright_vertical_orientation(code_point.code) {
-                let replacement = i18n::verticalize_punctuation(code_point.code);
-                if replacement != 0 {
-                    code_point = GlyphID::with_type(replacement, section.type_);
-                }
+            if !line_verticals.is_empty()
+                && vertical
+                && !i18n::has_upright_vertical_orientation(ch)
+                && let Some(replacement) = i18n::verticalize_punctuation(ch).and_then(pbf_code)
+            {
+                code_point = GlyphID::with_type(replacement, section.type_);
             }
 
             match &section.image_id {
@@ -863,7 +864,7 @@ fn reorder_shaped_lines(formatted_string: &TaggedString, lines: &mut Vec<TaggedS
     for (i, ch) in bidi_text.iter_mut().enumerate() {
         let section = &sections[styled_text.styles[i] as usize];
         if section.type_ != GlyphIDType::FontPBF {
-            *ch = if section.rtl { 0x05D0 } else { 'a' as u16 };
+            *ch = if section.rtl { '\u{05D0}' } else { 'a' };
         }
     }
     let block_styles: Vec<bool> = sections.iter().map(|section| section.type_ != GlyphIDType::FontPBF).collect();
@@ -1005,12 +1006,7 @@ pub fn get_shaping(
                             bidi::reorder_styled_lines(sub_string, line_breaks)
                         };
 
-                        let mut last_char: u16 = 'x' as u16;
-                        if !sub_string.text.is_empty() {
-                            last_char = sub_string.text[sub_string.text.len() - 1];
-                        }
-
-                        if '\n' as u16 == last_char {
+                        if sub_string.text.last() == Some(&'\n') {
                             for line in processed_lines {
                                 apply_line_and_pending_strings(line, pend_strings, formatted_sections, reordered_lines);
                             }
@@ -1032,7 +1028,7 @@ pub fn get_shaping(
             };
 
             for char_index in 0..str_len {
-                let ch = formatted_string.get_char_code_at(char_index);
+                let ch = formatted_string.char_at(char_index);
                 let sec = formatted_string.get_section_index(char_index);
                 let sec_type = formatted_sections[sec as usize].type_;
 

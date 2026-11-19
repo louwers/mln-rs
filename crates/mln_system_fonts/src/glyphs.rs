@@ -114,7 +114,7 @@ fn names(font_stack: &FontStack) -> Vec<(&str, FontName<'_>)> {
 /// for the user's languages draws together; else the 256 code points
 /// around it.
 fn class(c: char) -> u32 {
-    let ideograph = u16::try_from(u32::from(c)).is_ok_and(i18n::allows_fixed_width_glyph_generation);
+    let ideograph = i18n::allows_fixed_width_glyph_generation(c);
     if ideograph { u32::MAX } else { u32::from(c) >> 8 }
 }
 

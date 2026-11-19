@@ -8,24 +8,23 @@
 //! removed.
 //!
 //! The line splitters take line break points as offsets into the text, in
-//! code units. Each must end a nonempty line within the text (`0 < point <=
+//! characters. Each must end a nonempty line within the text (`0 < point <=
 //! len`); the end of each paragraph is a line break point whether or not the
 //! caller passes it.
 
 use std::ops::Range;
 
 use mln_vec_map::VecSet;
-use unicode_bidi::BidiClass;
-use unicode_bidi::utf16::BidiInfo;
+use unicode_bidi::{BidiClass, BidiInfo};
 
 use crate::bidi_mirroring::BIDI_MIRRORING_GLYPH;
 use crate::tagged_string::StyledText;
 
 /// Whether the first character in `text` with a strong direction runs right
-/// to left. Unpaired surrogates have no direction.
+/// to left.
 #[must_use]
-pub fn starts_right_to_left(text: &[u16]) -> bool {
-    for ch in char::decode_utf16(text.iter().copied()).flatten() {
+pub fn starts_right_to_left(text: &[char]) -> bool {
+    for &ch in text {
         match unicode_bidi::bidi_class(ch) {
             BidiClass::L => return false,
             BidiClass::R | BidiClass::AL => return true,
@@ -59,75 +58,114 @@ fn is_bidi_control(c: char) -> bool {
 }
 
 /// Appends the run `src` to `out` in visual order without BiDi controls: an
-/// RTL run reversed by character, each character mirrored, and an LTR run as
-/// it is. Unpaired surrogates are kept as characters of their own.
-fn write_run(src: &[u16], rtl: bool, out: &mut Vec<u16>) {
-    let start = out.len();
-    for c in char::decode_utf16(src.iter().copied()) {
-        match c {
-            Ok(c) if is_bidi_control(c) => {}
-            Ok(c) if rtl => {
-                let mut units = [0; 2];
-                let units = mirror(c).encode_utf16(&mut units);
-                units.reverse();
-                out.extend_from_slice(units);
-            }
-            Ok(c) => out.extend_from_slice(c.encode_utf16(&mut [0; 2])),
-            Err(e) => out.push(e.unpaired_surrogate()),
-        }
-    }
+/// RTL run reversed, each character mirrored, and an LTR run as it is.
+fn write_run(src: &[char], rtl: bool, out: &mut Vec<char>) {
+    let kept = |&&c: &&char| !is_bidi_control(c);
     if rtl {
-        // Each character went in with its code units reversed, so reversing
-        // the whole run reverses the characters and puts their units back in
-        // order.
-        out[start..].reverse();
+        out.extend(src.iter().rev().filter(kept).map(|&c| mirror(c)));
+    } else {
+        out.extend(src.iter().filter(kept));
     }
 }
 
 /// A run of text in one direction, in logical order.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BiDiRun {
-    pub text: Vec<u16>,
+    pub text: Vec<char>,
     pub rtl: bool,
 }
 
-/// The lines of `info`'s text that end at `line_breaks` and at the ends of
-/// its paragraphs, so that no line crosses a paragraph boundary.
-fn lines(info: &BidiInfo<'_>, mut line_breaks: VecSet<usize>) -> impl Iterator<Item = Range<usize>> {
-    let len = info.text.len();
-    debug_assert!(
-        line_breaks.iter().all(|&point| 0 < point && point <= len),
-        "line breaks {line_breaks:?} outside 1..={len}"
-    );
-    for paragraph in &info.paragraphs {
-        line_breaks.insert(paragraph.range.end);
-    }
-    let mut start = 0;
-    // A release build drops points outside the text rather than panic.
-    line_breaks.into_iter().filter(move |&end| 0 < end && end <= len).map(move |end| {
-        let line = start..end;
-        start = end;
-        line
-    })
+/// The bidi analysis of text given as characters. unicode-bidi reads text
+/// as UTF-8 or UTF-16 and indexes it by code unit, so the text goes through
+/// UTF-8, and this maps between its byte offsets and the characters'
+/// indices.
+struct Analysis<'text> {
+    info: BidiInfo<'text>,
+    /// The byte offset of each character and of the end of the text; empty
+    /// when the text is ASCII, where the two are the same.
+    offsets: Vec<usize>,
 }
 
-/// The visual runs of `line`, a nonempty line of `info`'s text within one
-/// paragraph: whether each runs right to left, and its logical range, in
-/// visual order.
-fn line_runs(info: &BidiInfo<'_>, line: Range<usize>) -> Vec<(bool, Range<usize>)> {
-    let paragraph = &info.paragraphs[info.paragraphs.partition_point(|p| p.range.end <= line.start)];
-    let (levels, runs) = info.visual_runs(paragraph, line);
-    runs.into_iter().map(|run| (levels[run.start].is_rtl(), run)).collect()
+impl<'text> Analysis<'text> {
+    fn new(text: &[char], utf8: &'text mut String) -> Self {
+        utf8.reserve(text.iter().map(|c| c.len_utf8()).sum());
+        utf8.extend(text);
+        let offsets = if utf8.len() == text.len() {
+            Vec::new()
+        } else {
+            let mut offsets = Vec::with_capacity(text.len() + 1);
+            offsets.push(0);
+            offsets.extend(text.iter().scan(0, |offset, c| {
+                *offset += c.len_utf8();
+                Some(*offset)
+            }));
+            offsets
+        };
+        Analysis { info: BidiInfo::new(utf8, None), offsets }
+    }
+
+    /// The byte offset of the character at `index`, or of the text's end.
+    fn byte(&self, index: usize) -> usize {
+        if self.offsets.is_empty() { index } else { self.offsets[index] }
+    }
+
+    /// The index of the character that starts at byte `offset`, or of the
+    /// text's end.
+    fn char(&self, offset: usize) -> usize {
+        if self.offsets.is_empty() { offset } else { self.offsets.partition_point(|&o| o < offset) }
+    }
+
+    fn chars(&self, bytes: Range<usize>) -> Range<usize> {
+        self.char(bytes.start)..self.char(bytes.end)
+    }
+
+    /// The text's paragraphs, as ranges of characters.
+    fn paragraphs(&self) -> impl Iterator<Item = Range<usize>> {
+        self.info.paragraphs.iter().map(|paragraph| self.chars(paragraph.range.clone()))
+    }
+
+    /// The lines of the text that end at `line_breaks` and at the ends of its
+    /// paragraphs, so that no line crosses a paragraph boundary.
+    fn lines(&self, mut line_breaks: VecSet<usize>) -> impl Iterator<Item = Range<usize>> {
+        let len = self.char(self.info.text.len());
+        debug_assert!(
+            line_breaks.iter().all(|&point| 0 < point && point <= len),
+            "line breaks {line_breaks:?} outside 1..={len}"
+        );
+        for paragraph in self.paragraphs() {
+            line_breaks.insert(paragraph.end);
+        }
+        let mut start = 0;
+        // A release build drops points outside the text rather than panic.
+        line_breaks.into_iter().filter(move |&end| 0 < end && end <= len).map(move |end| {
+            let line = start..end;
+            start = end;
+            line
+        })
+    }
+
+    /// The visual runs of `line`, a nonempty line of the text within one
+    /// paragraph: whether each runs right to left, and its logical range, in
+    /// visual order.
+    fn line_runs(&self, line: Range<usize>) -> Vec<(bool, Range<usize>)> {
+        let line = self.byte(line.start)..self.byte(line.end);
+        let paragraphs = &self.info.paragraphs;
+        let paragraph = &paragraphs[paragraphs.partition_point(|p| p.range.end <= line.start)];
+        let (levels, runs) = self.info.visual_runs(paragraph, line);
+        runs.into_iter().map(|run| (levels[run.start].is_rtl(), self.chars(run))).collect()
+    }
 }
 
 /// Splits `text`, in logical order, into lines at `line_breaks`, and writes
 /// each line in visual order.
-pub(crate) fn reorder_lines(text: &[u16], line_breaks: VecSet<usize>) -> Vec<Vec<u16>> {
-    let info = BidiInfo::new(text, None);
-    lines(&info, line_breaks)
+pub(crate) fn reorder_lines(text: &[char], line_breaks: VecSet<usize>) -> Vec<Vec<char>> {
+    let mut utf8 = String::new();
+    let analysis = Analysis::new(text, &mut utf8);
+    analysis
+        .lines(line_breaks)
         .map(|line| {
             let mut out = Vec::with_capacity(line.len());
-            for (rtl, run) in line_runs(&info, line) {
+            for (rtl, run) in analysis.line_runs(line) {
                 write_run(&text[run], rtl, &mut out);
             }
             out
@@ -135,8 +173,8 @@ pub(crate) fn reorder_lines(text: &[u16], line_breaks: VecSet<usize>) -> Vec<Vec
         .collect()
 }
 
-/// Like [`reorder_lines`], with each code unit's style, except that LTR runs
-/// keep their BiDi controls, and an RTL run's first code unit takes the
+/// Like [`reorder_lines`], with each character's style, except that LTR runs
+/// keep their BiDi controls, and an RTL run's first character takes the
 /// style of the chunk after it unless either style is a block.
 pub(crate) fn reorder_styled_lines(input: &StyledText, line_breaks: VecSet<usize>) -> Vec<StyledText> {
     reorder_styled_lines_with_blocks(input, line_breaks, &input.text, &[])
@@ -145,8 +183,9 @@ pub(crate) fn reorder_styled_lines(input: &StyledText, line_breaks: VecSet<usize
 /// Splits text in logical order into lines at `line_breaks` and at the ends
 /// of paragraphs, without reordering it.
 pub(crate) fn split_styled_lines(input: &StyledText, line_breaks: VecSet<usize>) -> Vec<StyledText> {
-    let info = BidiInfo::new(&input.text, None);
-    lines(&info, line_breaks)
+    let mut utf8 = String::new();
+    Analysis::new(&input.text, &mut utf8)
+        .lines(line_breaks)
         .map(|line| StyledText { text: input.text[line.clone()].to_vec(), styles: input.styles[line].to_vec() })
         .collect()
 }
@@ -158,7 +197,7 @@ pub(crate) fn split_styled_lines(input: &StyledText, line_breaks: VecSet<usize>)
 pub(crate) fn reorder_styled_lines_with_blocks(
     input: &StyledText,
     line_breaks: VecSet<usize>,
-    bidi_text: &[u16],
+    bidi_text: &[char],
     block_styles: &[bool],
 ) -> Vec<StyledText> {
     debug_assert_eq!(bidi_text.len(), input.text.len());
@@ -166,12 +205,13 @@ pub(crate) fn reorder_styled_lines_with_blocks(
     let style_indices = &input.styles;
     let is_block = |style: u8| block_styles.get(style as usize).copied().unwrap_or(false);
 
-    let info = BidiInfo::new(bidi_text, None);
+    let mut utf8 = String::new();
+    let analysis = Analysis::new(bidi_text, &mut utf8);
     let mut out = Vec::new();
-    for line_range in lines(&info, line_breaks) {
+    for line_range in analysis.lines(line_breaks) {
         let mut line = StyledText { text: Vec::new(), styles: Vec::with_capacity(line_range.len()) };
 
-        for (is_reversed, run) in line_runs(&info, line_range) {
+        for (is_reversed, run) in analysis.line_runs(line_range) {
             let logical_start = run.start;
             let logical_end = run.end;
             if is_reversed {
@@ -233,15 +273,16 @@ pub(crate) fn reorder_styled_lines_with_blocks(
 /// shaper such as HarfBuzz can lay it out in its direction. Text with no runs
 /// is one LTR run.
 #[must_use]
-pub fn visual_runs(text: &[u16]) -> Vec<BiDiRun> {
+pub fn visual_runs(text: &[char]) -> Vec<BiDiRun> {
     let mut runs = Vec::new();
     if text.is_empty() {
         return runs;
     }
 
-    let info = BidiInfo::new(text, None);
-    for paragraph in &info.paragraphs {
-        for (rtl, run) in line_runs(&info, paragraph.range.clone()) {
+    let mut utf8 = String::new();
+    let analysis = Analysis::new(text, &mut utf8);
+    for paragraph in analysis.paragraphs() {
+        for (rtl, run) in analysis.line_runs(paragraph) {
             if run.is_empty() {
                 continue;
             }
@@ -261,15 +302,15 @@ mod bidi_test {
     use super::*;
     use crate::arabic::shape_arabic;
 
-    fn u(s: &str) -> Vec<u16> {
-        s.encode_utf16().collect()
+    fn u(s: &str) -> Vec<char> {
+        s.chars().collect()
     }
 
     fn set(v: &[usize]) -> VecSet<usize> {
         v.iter().copied().collect()
     }
 
-    fn styled(text: Vec<u16>, styles: Vec<u8>) -> StyledText {
+    fn styled(text: Vec<char>, styles: Vec<u8>) -> StyledText {
         StyledText { text, styles }
     }
 
@@ -389,7 +430,7 @@ mod bidi_test {
         assert!(!starts_right_to_left(&u("1 abc שלום")));
         assert!(starts_right_to_left(&u("1 שלום abc")));
         assert!(starts_right_to_left(&u("(سلام)")));
-        // A supplementary letter (Adlam), as a surrogate pair.
+        // A supplementary letter (Adlam).
         assert!(starts_right_to_left(&u("\u{1E900}")));
         assert!(!starts_right_to_left(&u("123 !?")));
     }
@@ -420,14 +461,21 @@ mod bidi_test {
 
     #[test]
     fn reverses_rtl_runs_by_character() {
-        // A surrogate pair stays in order; unpaired surrogates move alone.
         let mut out = Vec::new();
-        let mut src = u("א\u{1E900}ב");
-        src.extend([0xDC00, 0xD800]);
-        write_run(&src, true, &mut out);
-        let mut expected = vec![0xD800, 0xDC00];
-        expected.extend(u("ב\u{1E900}א"));
-        assert_eq!(out, expected);
+        write_run(&u("א\u{1E900}ב"), true, &mut out);
+        assert_eq!(out, u("ב\u{1E900}א"));
+    }
+
+    #[test]
+    fn breaks_lines_by_character_beyond_ascii() {
+        // Line breaks and runs count characters, whatever their length in
+        // UTF-8.
+        assert_eq!(reorder_lines(&u("é😀ab\nש😀"), set(&[2])), vec![u("é😀"), u("ab\n"), u("😀ש")]);
+        let runs = visual_runs(&u("a😀 שלום x"));
+        assert_eq!(
+            runs.iter().map(|run| (run.text.clone(), run.rtl)).collect::<Vec<_>>(),
+            [(u("a😀 "), false), (u("שלום"), true), (u(" x"), false)]
+        );
     }
 
     #[test]

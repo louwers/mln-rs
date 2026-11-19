@@ -19,7 +19,7 @@ fn inked_glyphs(index: u32, text: &str) -> Option<usize> {
     if !shaper.valid() {
         return None;
     }
-    let text: Vec<u16> = text.encode_utf16().collect();
+    let text: Vec<char> = text.chars().collect();
     let (mut ids, mut adjusts) = (Vec::new(), Vec::new());
     shaper.create_complex_glyph_ids(&text, false, &mut ids, &mut adjusts);
     Some(ids.iter().filter(|id| id.code != 0 && shaper.rasterize_glyph(id).bitmap.data.iter().any(|&a| a > 0)).count())

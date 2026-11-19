@@ -44,8 +44,8 @@ pub(crate) struct TileLayerIndex {
     pub(crate) bucket_leader_id: String,
     /// The keys of `symbols`, end to end. The render thread builds an index
     /// each time it adds a bucket, so the keys share one allocation rather
-    /// than taking one each.
-    keys: Vec<u16>,
+    /// than taking one each. They are UTF-8.
+    keys: Vec<u8>,
     /// The bucket's symbols that have a cross-tile id, sorted by key, and in
     /// the bucket's order among equal keys.
     symbols: Vec<IndexedSymbol>,
@@ -84,7 +84,7 @@ impl TileLayerIndex {
     }
 
     /// The indexed symbols with `key`, in their bucket's order.
-    fn symbols_with_key(&self, key: &[u16]) -> &[IndexedSymbol] {
+    fn symbols_with_key(&self, key: &[u8]) -> &[IndexedSymbol] {
         let start = self.symbols.partition_point(|symbol| key_of(&self.keys, symbol) < key);
         let len = self.symbols[start..].partition_point(|symbol| key_of(&self.keys, symbol) == key);
         &self.symbols[start..][..len]
@@ -162,7 +162,7 @@ impl TileLayerIndex {
 }
 
 /// The key of `symbol`, in its index's `keys`.
-fn key_of<'a>(keys: &'a [u16], symbol: &IndexedSymbol) -> &'a [u16] {
+fn key_of<'a>(keys: &'a [u8], symbol: &IndexedSymbol) -> &'a [u8] {
     &keys[symbol.key_start as usize..][..symbol.key_len as usize]
 }
 
@@ -540,7 +540,7 @@ mod tests {
             &subfeature,
             0,
             0,
-            &key.encode_utf16().collect::<Vec<u16>>(),
+            key.as_bytes(),
             0.0,
             0.0,
             0.0,

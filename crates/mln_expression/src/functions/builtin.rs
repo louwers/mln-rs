@@ -306,7 +306,7 @@ fn is_supported_script(args: &[Expr], cx: &EvaluationContext<'_>) -> EvalResult<
     let Some(font_faces) = cx.font_faces.filter(|faces| !faces.is_empty()) else {
         return Ok(i18n::is_string_in_supported_script(&x));
     };
-    Ok(x.encode_utf16().all(|chr| {
+    Ok(x.chars().all(|chr| {
         i18n::char_in_supported_script(chr)
             || font_faces
                 .iter()

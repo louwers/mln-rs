@@ -54,7 +54,7 @@ struct StubLocalGlyphRasterizer;
 
 impl LocalGlyphRasterizer for StubLocalGlyphRasterizer {
     fn rasterize_glyph(&self, _font_stack: &FontStack, glyph_id: GlyphID) -> Option<Glyph> {
-        i18n::allows_fixed_width_glyph_generation(glyph_id.code).then(|| stub_glyph(glyph_id))
+        glyph_id.char().is_some_and(i18n::allows_fixed_width_glyph_generation).then(|| stub_glyph(glyph_id))
     }
 }
 
@@ -1002,13 +1002,13 @@ impl FontFaceEngine for DeferredEngine {
     }
 }
 
-/// Shapes each code unit as the glyph of that index, 10 px wide.
+/// Shapes each character as the glyph of that index, 10 px wide.
 struct FakeShaper;
 
 impl FontFaceShaper for FakeShaper {
-    fn shape(&self, text: &[u16], _rtl: bool, glyph_ids: &mut Vec<GlyphID>, adjusts: &mut Vec<HBShapeAdjust>) {
-        for &unit in text {
-            glyph_ids.push(GlyphID::with_type(unit, FONT_FACE));
+    fn shape(&self, text: &[char], _rtl: bool, glyph_ids: &mut Vec<GlyphID>, adjusts: &mut Vec<HBShapeAdjust>) {
+        for &c in text {
+            glyph_ids.push(GlyphID::with_type(u32::from(c) as u16, FONT_FACE));
             adjusts.push(HBShapeAdjust::new(0.0, 0.0, 10.0));
         }
     }
@@ -1055,7 +1055,8 @@ fn request_font_face(test: &GlyphStoreTest) -> Rc<RefCell<Option<GlyphMap>>> {
         *a.borrow_mut() = Some(glyphs);
     }));
     let ids: GlyphIDs = [GlyphID::with_type(0, FONT_FACE)].into_iter().collect();
-    let shapes = VecMap::from([(test_stack(), VecMap::from([(FONT_FACE, [vec![5, 6]].into_iter().collect())]))]);
+    let shapes =
+        VecMap::from([(test_stack(), VecMap::from([(FONT_FACE, [vec!['\u{5}', '\u{6}']].into_iter().collect())]))]);
     test.request_glyphs(GlyphDependencies { glyphs: VecMap::from([(test_stack(), ids)]), shapes });
     available
 }
@@ -1064,7 +1065,7 @@ fn request_font_face(test: &GlyphStoreTest) -> Rc<RefCell<Option<GlyphMap>>> {
 fn shaped(test: &GlyphStoreTest) -> Vec<u16> {
     let shaping = test.requestor.shaping.borrow();
     let shaping = shaping.as_ref().expect("an answer");
-    shaping[&test_stack()][&FONT_FACE][&vec![5, 6]].str_.clone()
+    shaping[&test_stack()][&FONT_FACE][&vec!['\u{5}', '\u{6}']].glyphs.clone()
 }
 
 #[test]

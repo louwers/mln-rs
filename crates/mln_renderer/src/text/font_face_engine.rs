@@ -16,9 +16,9 @@ use mln_text::glyph::{FontData, Glyph, GlyphID, GlyphIDType};
 
 /// A font file loaded for shaping: what `HBShaper` does for `GlyphStore`.
 pub trait FontFaceShaper {
-    /// Appends the glyphs of `text` (UTF-16), one run of one direction in
-    /// logical order, in visual order, and their positions.
-    fn shape(&self, text: &[u16], rtl: bool, glyph_ids: &mut Vec<GlyphID>, adjusts: &mut Vec<HBShapeAdjust>);
+    /// Appends the glyphs of `text`, one run of one direction in logical
+    /// order, in visual order, and their positions.
+    fn shape(&self, text: &[char], rtl: bool, glyph_ids: &mut Vec<GlyphID>, adjusts: &mut Vec<HBShapeAdjust>);
 
     /// Rasterizes the glyph: its coverage at 24 px, before the SDF transform.
     fn rasterize(&self, glyph: &GlyphID) -> Glyph;
@@ -90,7 +90,7 @@ mod in_process {
     }
 
     impl FontFaceShaper for HBShaper {
-        fn shape(&self, text: &[u16], rtl: bool, glyph_ids: &mut Vec<GlyphID>, adjusts: &mut Vec<HBShapeAdjust>) {
+        fn shape(&self, text: &[char], rtl: bool, glyph_ids: &mut Vec<GlyphID>, adjusts: &mut Vec<HBShapeAdjust>) {
             self.create_complex_glyph_ids(text, rtl, glyph_ids, adjusts);
         }
 

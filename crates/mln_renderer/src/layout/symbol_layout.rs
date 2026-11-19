@@ -28,7 +28,7 @@ use mln_style_types::{
 use mln_text::glyph::{GlyphID, GlyphIDType, GlyphPositions, Shaping, WritingModeType};
 use mln_text::shaping::{PositionedIcon, get_anchor_justification, get_shaping};
 use mln_text::tagged_string::SectionOptions;
-use mln_text::{TaggedString, shape_arabic, starts_right_to_left};
+use mln_text::{HBShapedText, TaggedString, shape_arabic, starts_right_to_left};
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCoordinate, GeometryCoordinates, GeometryTileFeature};
 use mln_util::constants::{EXTENT, ONE_EM, TILE_SIZE_D};
@@ -55,7 +55,7 @@ use crate::layout::symbol_instance::{
 use crate::layout::tile_layout::Resolved;
 use crate::text::collision_index::OverlapMode;
 use crate::text::get_anchors::{get_anchors, get_center_anchor};
-use crate::text::glyph_store::{HBShapeResult, HBShapeResults};
+use crate::text::glyph_store::HBShapeResults;
 use crate::text::quads::{SymbolQuad, SymbolQuads};
 use crate::util::pool::PoolRange;
 
@@ -71,16 +71,16 @@ fn has_icon_image(layout: &SymbolLayoutProperties::PossiblyEvaluated) -> bool {
     layout.icon_image.constant().is_none_or(|t| !t.empty())
 }
 
-/// A run of UTF-16 code units that one font face draws.
+/// A run of code points that one font face draws.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct GlyphTypeSpan {
-    range: RangeInclusive<u16>,
+    range: RangeInclusive<u32>,
     type_: GlyphIDType,
     /// Whether a fallback face draws it, only where PBFs can't.
     fallback: bool,
 }
 
-/// Which font face draws each UTF-16 code unit of one font stack's text. The
+/// Which font face draws each character of one font stack's text. The
 /// faces that name one of the stack's fonts win, in the stack's order. The
 /// fallback faces, which have no name, draw only the text that glyph PBFs
 /// can't shape (`i18n::char_in_supported_script`). The rest takes its glyphs
@@ -99,32 +99,28 @@ impl GlyphTypeTable {
             stack.iter().flat_map(|name| faces.iter().filter(move |face| !name.is_empty() && face.name == *name));
         let fallbacks = faces.iter().filter(|face| face.name.is_empty());
         let candidates: Vec<&mln_text::glyph::FontFace> = named.chain(fallbacks).collect();
-        // The ranges as far as a UTF-16 code unit reaches.
+        // The ranges as far as a code point reaches.
         let ranges = || {
             candidates.iter().flat_map(|face| &face.ranges).filter_map(|&(first, last)| {
-                let first = u16::try_from(first).ok()?;
-                let last = u16::try_from(last).unwrap_or(u16::MAX);
+                let last = last.min(u32::from(char::MAX));
                 (first <= last).then_some((first, last))
             })
         };
-        // Which face draws a code unit stays the same between consecutive
+        // Which face draws a code point stays the same between consecutive
         // bounds.
-        let mut bounds: Vec<u32> = ranges().flat_map(|(first, last)| [u32::from(first), u32::from(last) + 1]).collect();
+        let mut bounds: Vec<u32> = ranges().flat_map(|(first, last)| [first, last + 1]).collect();
         bounds.sort_unstable();
         bounds.dedup();
         let mut spans: Vec<GlyphTypeSpan> = Vec::new();
         for pair in bounds.windows(2) {
-            let (Ok(first), Ok(last)) = (u16::try_from(pair[0]), u16::try_from(pair[1] - 1)) else {
-                continue;
-            };
-            let unit = u32::from(first);
-            let Some(face) = candidates.iter().find(|face| face.ranges.iter().any(|r| unit >= r.0 && unit <= r.1))
+            let (first, last) = (pair[0], pair[1] - 1);
+            let Some(face) = candidates.iter().find(|face| face.ranges.iter().any(|r| first >= r.0 && first <= r.1))
             else {
                 continue;
             };
             let fallback = face.name.is_empty();
             match spans.last_mut() {
-                Some(span) if span.type_ == face.type_ && u32::from(span.range.last) + 1 == unit => {
+                Some(span) if span.type_ == face.type_ && span.range.last + 1 == first => {
                     span.range = (span.range.start..=last).into();
                 }
                 _ => spans.push(GlyphTypeSpan { range: (first..=last).into(), type_: face.type_, fallback }),
@@ -133,19 +129,20 @@ impl GlyphTypeTable {
         GlyphTypeTable { spans }
     }
 
-    /// The glyph type of `unit`. A variation selector keeps `previous`, the
-    /// type of the code unit before it, which is `FontPBF` when no face
+    /// The glyph type of `c`. A variation selector keeps `previous`, the
+    /// type of the character before it, which is `FontPBF` when no face
     /// applies.
-    fn get(&self, unit: u16, previous: GlyphIDType) -> GlyphIDType {
+    fn get(&self, c: char, previous: GlyphIDType) -> GlyphIDType {
         if self.spans.is_empty() {
             return GlyphIDType::FontPBF;
         }
-        if i18n::is_variation_selector1(unit) {
+        if i18n::is_variation_selector1(c) {
             return previous;
         }
-        let index = self.spans.partition_point(|span| span.range.last < unit);
+        let code_point = u32::from(c);
+        let index = self.spans.partition_point(|span| span.range.last < code_point);
         match self.spans.get(index) {
-            Some(span) if span.range.start <= unit && !(span.fallback && i18n::char_in_supported_script(unit)) => {
+            Some(span) if span.range.start <= code_point && !(span.fallback && i18n::char_in_supported_script(c)) => {
                 span.type_
             }
             _ => GlyphIDType::FontPBF,
@@ -309,7 +306,7 @@ pub(crate) struct SymbolLayout {
     symbol_instance_pools: SymbolInstancePools,
     pub(crate) sort_key_ranges: Vec<SortKeyRange>,
 
-    compare_text: VecMap<Vec<u16>, Vec<Anchor>>,
+    compare_text: VecMap<String, Vec<Anchor>>,
 
     // Stores the layer so that we can hold on to GeometryTileFeature
     // instances in SymbolFeature, which may reference data from this object.
@@ -511,21 +508,19 @@ impl SymbolLayout {
                     // Only the sections that draw from glyph PBFs take their
                     // Arabic presentation forms. HarfBuzz needs the letters
                     // themselves, to apply the font's own joining rules.
-                    let u16_string = u8string.encode_utf16().collect::<Vec<u16>>();
-                    // `while (*u16Char)`: the text ends at the first NUL.
-                    let end = u16_string.iter().position(|&c| c == 0).unwrap_or(u16_string.len());
-                    let chars = &u16_string[..end];
+                    // The text ends at its first NUL, as in C++.
+                    let chars: Vec<char> = u8string.chars().take_while(|&c| c != '\0').collect();
                     let section_scale = section.font_scale.unwrap_or(1.0);
                     let section_font_stack = section.font_stack.clone().unwrap_or_else(|| base_font_stack.clone());
                     let glyph_types = glyph_type_tables.get(&section_font_stack);
 
-                    let mut sub_string: Vec<u16> = Vec::new();
-                    // `*u16Char` of an empty string is the terminating NUL.
+                    let mut sub_string: Vec<char> = Vec::new();
+                    // An empty string's first character is the terminating NUL.
                     let mut sub_string_type =
-                        glyph_types.get(chars.first().copied().unwrap_or(0), GlyphIDType::FontPBF);
+                        glyph_types.get(chars.first().copied().unwrap_or('\0'), GlyphIDType::FontPBF);
 
                     let mut add_sub_string =
-                        |sub_string: &mut Vec<u16>,
+                        |sub_string: &mut Vec<char>,
                          sub_string_type: GlyphIDType,
                          key_section: bool,
                          formatted_text: &mut TaggedString| {
@@ -559,7 +554,7 @@ impl SymbolLayout {
                             }
                         };
 
-                    for &ch in chars {
+                    for ch in chars {
                         let ch_type = glyph_types.get(ch, sub_string_type);
                         if ch_type != sub_string_type {
                             add_sub_string(&mut sub_string, sub_string_type, false, &mut formatted_text);
@@ -592,13 +587,11 @@ impl SymbolLayout {
                     let font_stack = section_font_stack.unwrap_or_else(|| base_font_stack.clone());
                     let dependencies = layout_parameters.glyph_dependencies.glyphs.entry(font_stack).or_default();
                     if section.type_ == GlyphIDType::FontPBF {
-                        let code_point = formatted_text.get_char_code_at(j);
-                        dependencies.insert(GlyphID::from(code_point));
+                        // Glyph PBFs have no glyphs beyond the BMP.
+                        let c = formatted_text.char_at(j);
+                        dependencies.extend(GlyphID::from_char(c));
                         if can_verticalize_text || (this.allow_vertical_placement && allows_vertical) {
-                            let vertical_chr = i18n::verticalize_punctuation(code_point);
-                            if vertical_chr != 0 {
-                                dependencies.insert(GlyphID::from(vertical_chr));
-                            }
+                            dependencies.extend(i18n::verticalize_punctuation(c).and_then(GlyphID::from_char));
                         }
                     } else {
                         dependencies.insert(GlyphID::with_type(0, section.type_));
@@ -861,7 +854,8 @@ impl SymbolLayout {
             }
         }
 
-        let key: &[u16] = feature.formatted_text.as_ref().map_or(&[], |text| text.raw_text());
+        let key: String =
+            feature.formatted_text.as_ref().map_or_else(String::new, |text| text.logical_text().iter().collect());
 
         let allow_vertical_placement = self.allow_vertical_placement;
         let create_symbol_instance_shared_data = |line: GeometryCoordinates| {
@@ -914,7 +908,7 @@ impl SymbolLayout {
                         &indexed_feature,
                         layout_feature_index,
                         feature.index,
-                        key,
+                        key.as_bytes(),
                         overscaling,
                         icon_rotation,
                         text_rotation,
@@ -966,10 +960,8 @@ impl SymbolLayout {
                 );
                 let shared_data = create_symbol_instance_shared_data(line.clone());
                 for anchor in anchors {
-                    let too_close = feature
-                        .formatted_text
-                        .as_ref()
-                        .is_some_and(|text| self.anchor_is_too_close(text.raw_text(), text_repeat_distance, &anchor));
+                    let too_close = feature.formatted_text.is_some()
+                        && self.anchor_is_too_close(&key, text_repeat_distance, &anchor);
                     if !too_close {
                         add_symbol_instance(self, anchor, Arc::clone(&shared_data));
                     }
@@ -1032,7 +1024,7 @@ impl SymbolLayout {
         }
     }
 
-    fn anchor_is_too_close(&mut self, text: &[u16], repeat_distance: f32, anchor: &Anchor) -> bool {
+    fn anchor_is_too_close(&mut self, text: &str, repeat_distance: f32, anchor: &Anchor) -> bool {
         if let Some(other_anchors) = self.compare_text.get(text) {
             for other_anchor in other_anchors {
                 if dist(anchor.point.x, anchor.point.y, other_anchor.point.x, other_anchor.point.y) < repeat_distance {
@@ -1040,7 +1032,7 @@ impl SymbolLayout {
                 }
             }
         }
-        self.compare_text.entry(text.to_vec()).or_default().push(*anchor);
+        self.compare_text.entry(text.to_owned()).or_default().push(*anchor);
         false
     }
 
@@ -1477,7 +1469,7 @@ impl SymbolLayout {
     /// Applies the HarfBuzz shaping of the text that font faces draw,
     /// before `prepare_symbols`.
     fn finalize_symbols(&mut self, results: &HBShapeResults) {
-        let unshaped = HBShapeResult::default();
+        let unshaped = Arc::new(HBShapedText::default());
         for feature in &mut self.features {
             if feature.geometry.is_empty() {
                 continue;
@@ -1495,10 +1487,10 @@ impl SymbolLayout {
             let sections = formatted_text.get_sections();
             let style_text = formatted_text.get_styled_text();
 
-            let mut sub_string: Vec<u16> = Vec::new();
+            let mut sub_string: Vec<char> = Vec::new();
             let mut section_index = style_text.styles.first().copied().unwrap_or(0);
 
-            let apply_sub_string = |sub_string: &[u16], section_index: u8, shaped_string: &mut TaggedString| {
+            let apply_sub_string = |sub_string: &[char], section_index: u8, shaped_string: &mut TaggedString| {
                 if sub_string.is_empty() {
                     return;
                 }
@@ -1514,18 +1506,17 @@ impl SymbolLayout {
                         section.vertical_align,
                     );
                 } else {
-                    let result = results
+                    let shaped = results
                         .get(&section.font_stack)
                         .and_then(|types| types.get(&section.type_))
                         .and_then(|strings| strings.get(sub_string))
                         .unwrap_or(&unshaped);
 
-                    shaped_string.add_text_section_with_adjusts(
-                        &result.str_,
+                    shaped_string.add_shaped_section(
+                        shaped,
                         section.scale,
                         &section.font_stack,
                         section.type_,
-                        &Some(Arc::clone(&result.adjusts)),
                         starts_right_to_left(sub_string),
                         section.key_section,
                         section.text_color,
@@ -1547,7 +1538,7 @@ impl SymbolLayout {
 
             apply_sub_string(&sub_string, section_index, &mut shaped_string);
 
-            shaped_string.set_hb_shaped(true);
+            shaped_string.set_unshaped_text(style_text.text.clone());
             feature.formatted_text = Some(shaped_string);
         }
 
@@ -1591,8 +1582,8 @@ impl SymbolLayout {
             // if feature has text, shape the text
             if feature.formatted_text.is_some() && layout_text_size > 0.0 {
                 let line_height = *layout.text_line_height.uniform() * ONE_EM;
-                let raw_text = feature.formatted_text.as_ref().expect("text").raw_text().to_vec();
-                let spacing = if i18n::allows_letter_spacing(&raw_text) {
+                let text = feature.formatted_text.as_ref().expect("text");
+                let spacing = if i18n::allows_letter_spacing(text.logical_text()) {
                     layout.text_letter_spacing.evaluate(
                         &EvaluationContext::with_zoom_feature(zoom, Some(feature))
                             .with_canonical_tile_id(Some(&canonical)),
@@ -2091,17 +2082,16 @@ mod tests {
         );
     }
 
-    /// The faces' rule, read off them for each code unit.
-    fn scan(unit: u16, stack: &[String], faces: &FontFaces, previous: GlyphIDType) -> GlyphIDType {
-        if mln_util::i18n::is_variation_selector1(unit) {
+    /// The faces' rule, read off them for each character.
+    fn scan(c: char, stack: &[String], faces: &FontFaces, previous: GlyphIDType) -> GlyphIDType {
+        if mln_util::i18n::is_variation_selector1(c) {
             return previous;
         }
-        let covers =
-            |face: &FontFace| face.ranges.iter().any(|&(first, last)| (first..=last).contains(&u32::from(unit)));
+        let covers = |face: &FontFace| face.ranges.iter().any(|&(first, last)| (first..=last).contains(&u32::from(c)));
         let named =
             stack.iter().flat_map(|name| faces.iter().filter(move |face| !name.is_empty() && face.name == *name));
         // PBFs draw the text they can, before a fallback face.
-        let fallbacks = faces.iter().filter(|face| face.name.is_empty() && !char_in_supported_script(unit));
+        let fallbacks = faces.iter().filter(|face| face.name.is_empty() && !char_in_supported_script(c));
         named.chain(fallbacks).find(|face| covers(face)).map_or(GlyphIDType::FontPBF, |face| face.type_)
     }
 
@@ -2112,7 +2102,7 @@ mod tests {
     }
 
     #[test]
-    fn glyph_type_table_matches_the_faces_for_every_code_unit() {
+    fn glyph_type_table_matches_the_faces_for_every_character() {
         let faces: FontFaces = vec![
             face("", 1, &[(0x3000, 0x30FF), (0x4E00, 0x9FFF)]),
             face("Noto Sans", 2, &[(0x0600, 0x06FF), (0x4E00, 0x4FFF)]),
@@ -2121,19 +2111,21 @@ mod tests {
             face("", 5, &[(0x0640, 0x0800), (0xF000, 0x1_0FFFF)]),
             face("", 6, &[(0x0900, 0x0800), (0x1_0000, 0x1_0FFF)]),
             face("", 1, &[(0x3100, 0x31FF)]),
+            face("Noto Sans", 8, &[(0x1_F600, 0x1_F64F), (0x2_0000, 0x2_A6DF)]),
+            face("Open Sans", 9, &[(0x1_F000, 0xFFFF_FFFF)]),
         ];
         let stacks: [&[&str]; 5] =
             [&[], &["Open Sans"], &["Noto Sans", "Open Sans"], &["Open Sans", "Noto Sans"], &["Missing", ""]];
         for stack in stacks {
             let stack: Vec<String> = stack.iter().map(|name| (*name).to_owned()).collect();
             let table = GlyphTypeTable::new(&stack, &faces);
-            for unit in 0..=u16::MAX {
+            // The BMP, and around the bounds beyond it.
+            let beyond = [0x1_0000, 0x1_0FFF, 0x1_F000, 0x1_F600, 0x1_F64F, 0x2_0000, 0x2_A6DF, 0x10_FFFF]
+                .into_iter()
+                .flat_map(|bound: u32| bound.saturating_sub(1)..=bound + 1);
+            for c in (0..=0xFFFF).chain(beyond).filter_map(char::from_u32) {
                 for previous in [GlyphIDType::FontPBF, GlyphIDType::face(NonZeroU16::new(7).unwrap())] {
-                    assert_eq!(
-                        table.get(unit, previous),
-                        scan(unit, &stack, &faces, previous),
-                        "{unit:#06X} in {stack:?}"
-                    );
+                    assert_eq!(table.get(c, previous), scan(c, &stack, &faces, previous), "{c:?} in {stack:?}");
                 }
             }
         }
@@ -2144,9 +2136,9 @@ mod tests {
         let faces: FontFaces = vec![face("", 1, &[(0x0000, 0xFFFF)])];
         let table = GlyphTypeTable::new(&["Open Sans".to_owned()], &faces);
         let devanagari = GlyphIDType::face(NonZeroU16::new(1).unwrap());
-        assert_eq!(table.get(u16::from(b'a'), GlyphIDType::FontPBF), GlyphIDType::FontPBF);
-        assert_eq!(table.get(0x4E2D, GlyphIDType::FontPBF), GlyphIDType::FontPBF);
-        assert_eq!(table.get(0x0915, GlyphIDType::FontPBF), devanagari);
+        assert_eq!(table.get('a', GlyphIDType::FontPBF), GlyphIDType::FontPBF);
+        assert_eq!(table.get('\u{4E2D}', GlyphIDType::FontPBF), GlyphIDType::FontPBF);
+        assert_eq!(table.get('\u{0915}', GlyphIDType::FontPBF), devanagari);
     }
 
     #[test]
@@ -2154,6 +2146,6 @@ mod tests {
         let faces: FontFaces = vec![face("Noto Sans", 2, &[(0x0600, 0x06FF)])];
         let table = GlyphTypeTable::new(&["Open Sans".to_owned()], &faces);
         assert_eq!(table.spans, Vec::new());
-        assert_eq!(table.get(0x0620, GlyphIDType::FontPBF), GlyphIDType::FontPBF);
+        assert_eq!(table.get('\u{0620}', GlyphIDType::FontPBF), GlyphIDType::FontPBF);
     }
 }

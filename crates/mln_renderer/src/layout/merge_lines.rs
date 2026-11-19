@@ -11,12 +11,12 @@ use mln_util::hash::HashMap;
 
 use crate::layout::symbol_feature::SymbolFeature;
 
-type Key = (Vec<u16>, i16, i16);
+type Key = (Vec<char>, i16, i16);
 
 /// Map of key -> index into features
 type Index = HashMap<Key, usize>;
 
-fn get_key(text: &[u16], coord: GeometryCoordinate) -> Key {
+fn get_key(text: &[char], coord: GeometryCoordinate) -> Key {
     (text.to_vec(), coord.x, coord.y)
 }
 
@@ -151,7 +151,7 @@ mod tests {
     fn symbol_feature_stub(geometry: GeometryCollection, text: &str) -> SymbolFeature {
         let mut feature = SymbolFeature::new(&StubGeometryTileFeature, geometry);
         feature.formatted_text = Some(TaggedString::new(
-            text.encode_utf16().collect(),
+            text.chars().collect(),
             SectionOptions::new(1.0, Vec::new(), GlyphIDType::FontPBF, 0, None),
         ));
         feature.icon = None;

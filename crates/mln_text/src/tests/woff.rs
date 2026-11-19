@@ -24,7 +24,7 @@ fn shape(font: &[u8]) -> (Vec<GlyphID>, Vec<HBShapeAdjust>, Vec<crate::glyph::Gl
     let type_ = GlyphIDType::face(NonZeroU16::MIN);
     let shaper = HBShaper::new(type_, font.to_vec(), &FreeTypeLibrary::new());
     assert!(shaper.valid());
-    let text: Vec<u16> = KHMER.encode_utf16().collect();
+    let text: Vec<char> = KHMER.chars().collect();
     let (mut ids, mut adjusts) = (Vec::new(), Vec::new());
     shaper.create_complex_glyph_ids(&text, false, &mut ids, &mut adjusts);
     let glyphs = ids.iter().map(|id| shaper.rasterize_glyph(id)).collect();

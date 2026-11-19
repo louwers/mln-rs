@@ -7,15 +7,19 @@ use mln_util::logging::{Event, Log};
 use mln_util::{Color, i18n};
 
 use crate::glyph::GlyphIDType;
-use crate::harfbuzz::HBShapeAdjust;
+use crate::harfbuzz::HBShapedText;
 
-/// Text as UTF-16 code units, with the index of each code unit's section.
-/// `text` and `styles` are equally long.
+/// Text as characters, with the index of each character's section. `text`
+/// and `styles` are equally long.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct StyledText {
-    pub text: Vec<u16>,
+    pub text: Vec<char>,
     pub styles: Vec<u8>,
 }
+
+/// What the text of a shaped section holds for each of its glyphs: U+FFFC
+/// OBJECT REPLACEMENT CHARACTER.
+pub(crate) const SHAPED_GLYPH: char = '\u{FFFC}';
 
 pub(crate) type FontStackHash = u64;
 
@@ -34,7 +38,10 @@ pub struct SectionOptions {
     pub font_stack: FontStack,
     pub(crate) font_stack_hash: FontStackHash,
     pub type_: GlyphIDType,
-    pub(crate) adjusts: Option<Arc<Vec<HBShapeAdjust>>>,
+    /// The glyphs of a section that a font face shaped. The section's text
+    /// holds a [`SHAPED_GLYPH`] for each, and the line that holds the section
+    /// holds its first glyph at `start_index`.
+    pub(crate) shaped: Option<Arc<HBShapedText>>,
     pub(crate) start_index: i32,
     pub key_section: bool,
     /// Whether a section of text that HarfBuzz shaped runs right to left.
@@ -62,7 +69,7 @@ impl SectionOptions {
             font_stack,
             font_stack_hash,
             type_,
-            adjusts: None,
+            shaped: None,
             start_index: start_index as i32,
             key_section: true,
             rtl: false,
@@ -81,7 +88,7 @@ impl SectionOptions {
             font_stack: FontStack::new(),
             font_stack_hash: 0,
             type_: GlyphIDType::FontPBF,
-            adjusts: None,
+            shaped: None,
             start_index: 0,
             key_section: true,
             rtl: false,
@@ -94,8 +101,8 @@ impl SectionOptions {
 
 /// Max number of images within a text is 6400 U+E000–U+F8FF that covers
 /// Basic Multilingual Plane Unicode Private Use Area (PUA).
-const PUA_BEGIN: u16 = 0xE000;
-const PUA_END: u16 = 0xF8FF;
+const PUA_BEGIN: char = '\u{E000}';
+const PUA_END: char = '\u{F8FF}';
 
 /// The shaping-code counterpart of `Formatted`, the text at a per-character
 /// level so that character-rearranging operations (e.g. BiDi) preserve
@@ -105,19 +112,21 @@ pub struct TaggedString {
     styled_text: StyledText,
     sections: Vec<SectionOptions>,
     supports_vertical_writing_mode: Option<bool>,
-    image_section_id: u16,
-    text_hb_shaped: bool,
+    /// The character of the last image section, if any.
+    image_section_id: Option<char>,
+    /// The text that font faces shaped this text from, once they have.
+    unshaped_text: Option<Vec<char>>,
     has_need_shape_text_val: bool,
 }
 
 /// `u" \t\n\v\f\r"`
-fn is_trim_whitespace(c: u16) -> bool {
-    matches!(c, 0x20 | 0x09 | 0x0A | 0x0B | 0x0C | 0x0D)
+fn is_trim_whitespace(c: char) -> bool {
+    matches!(c, ' ' | '\t' | '\n' | '\u{0B}' | '\u{0C}' | '\r')
 }
 
 impl TaggedString {
     #[must_use]
-    pub fn new(text: Vec<u16>, options: SectionOptions) -> Self {
+    pub fn new(text: Vec<char>, options: SectionOptions) -> Self {
         let size = text.len();
         TaggedString {
             styled_text: StyledText { text, styles: vec![0; size] },
@@ -146,19 +155,19 @@ impl TaggedString {
         self.styled_text.text.is_empty()
     }
 
-    /// The section of the code unit at `index`. Panics when out of range.
+    /// The section of the character at `index`. Panics when out of range.
     #[must_use]
     pub(crate) fn get_section(&self, index: usize) -> &SectionOptions {
         &self.sections[self.styled_text.styles[index] as usize]
     }
 
     #[must_use]
-    pub fn get_char_code_at(&self, index: usize) -> u16 {
+    pub fn char_at(&self, index: usize) -> char {
         self.styled_text.text[index]
     }
 
     #[must_use]
-    pub fn raw_text(&self) -> &[u16] {
+    pub fn raw_text(&self) -> &[char] {
         &self.styled_text.text
     }
 
@@ -172,7 +181,7 @@ impl TaggedString {
     #[expect(clippy::too_many_arguments, reason = "each argument is a property of the section")]
     pub fn add_text_section(
         &mut self,
-        section_text: &[u16],
+        section_text: &[char],
         scale: f64,
         font_stack: &FontStack,
         type_: GlyphIDType,
@@ -195,16 +204,16 @@ impl TaggedString {
         }
     }
 
-    /// Appends a text section with HarfBuzz adjustments. The section's start
-    /// index is the length before the text.
+    /// Appends a section of glyphs that a font face shaped, in visual order,
+    /// from text that runs right to left if `rtl`. The section's start index
+    /// is the length before the glyphs.
     #[expect(clippy::too_many_arguments, reason = "each argument is a property of the section")]
-    pub fn add_text_section_with_adjusts(
+    pub fn add_shaped_section(
         &mut self,
-        section_text: &[u16],
+        shaped: &Arc<HBShapedText>,
         scale: f64,
         font_stack: &FontStack,
         type_: GlyphIDType,
-        adjusts: &Option<Arc<Vec<HBShapeAdjust>>>,
         rtl: bool,
         key_section: bool,
         text_color: Option<Color>,
@@ -213,12 +222,13 @@ impl TaggedString {
         let start_index = self.styled_text.text.len() as u32;
         self.sections.push(SectionOptions {
             vertical_align,
-            adjusts: adjusts.clone(),
+            shaped: Some(Arc::clone(shaped)),
             rtl,
             key_section,
             ..SectionOptions::new(scale, font_stack.clone(), type_, start_index, text_color)
         });
-        self.styled_text.text.extend_from_slice(section_text);
+        let len = self.styled_text.text.len() + shaped.glyphs.len();
+        self.styled_text.text.resize(len, SHAPED_GLYPH);
         let index = (self.sections.len() - 1) as u8;
         self.styled_text.styles.resize(self.styled_text.text.len(), index);
         if type_ != GlyphIDType::FontPBF {
@@ -319,9 +329,9 @@ impl TaggedString {
     /// don't need updating.
     pub fn verticalize_punctuation(&mut self) {
         let mut replaced = i18n::verticalize_punctuation_str(&self.styled_text.text);
-        for (i, unit) in replaced.iter_mut().enumerate() {
+        for (i, c) in replaced.iter_mut().enumerate() {
             if self.get_section(i).type_ != GlyphIDType::FontPBF {
-                *unit = self.styled_text.text[i];
+                *c = self.styled_text.text[i];
             }
         }
         self.styled_text.text = replaced;
@@ -341,13 +351,23 @@ impl TaggedString {
         allows
     }
 
+    /// Whether font faces shaped the text: [`Self::set_unshaped_text`].
     #[must_use]
     pub fn hb_shaped(&self) -> bool {
-        self.text_hb_shaped
+        self.unshaped_text.is_some()
     }
 
-    pub fn set_hb_shaped(&mut self, shaped: bool) {
-        self.text_hb_shaped = shaped;
+    /// Marks the text as shaped by font faces from `text`, which the shaped
+    /// sections no longer hold.
+    pub fn set_unshaped_text(&mut self, text: Vec<char>) {
+        self.unshaped_text = Some(text);
+    }
+
+    /// What the text says, as characters: the text before font faces
+    /// shaped it, if they did. Labels with equal text compare equal.
+    #[must_use]
+    pub fn logical_text(&self) -> &[char] {
+        self.unshaped_text.as_deref().unwrap_or(&self.styled_text.text)
     }
 
     #[must_use]
@@ -355,16 +375,13 @@ impl TaggedString {
         self.has_need_shape_text_val
     }
 
-    fn get_next_image_section_char_code(&mut self) -> Option<u16> {
-        if self.image_section_id == 0 {
-            self.image_section_id = PUA_BEGIN;
-            return Some(self.image_section_id);
-        }
-        self.image_section_id = self.image_section_id.wrapping_add(1);
-        if self.image_section_id > PUA_END {
-            return None;
-        }
-        Some(self.image_section_id)
+    fn get_next_image_section_char_code(&mut self) -> Option<char> {
+        let next = match self.image_section_id {
+            None => PUA_BEGIN,
+            Some(last) => char::from_u32(u32::from(last) + 1).filter(|&next| next <= PUA_END)?,
+        };
+        self.image_section_id = Some(next);
+        Some(next)
     }
 }
 
@@ -372,8 +389,8 @@ impl TaggedString {
 mod tests {
     use super::*;
 
-    fn u(s: &str) -> Vec<u16> {
-        s.encode_utf16().collect()
+    fn u(s: &str) -> Vec<char> {
+        s.chars().collect()
     }
 
     // gtest: TaggedString.Trim
@@ -435,8 +452,8 @@ mod tests {
         }
 
         assert_eq!(max_sections.get_sections().len(), 6400);
-        assert_eq!(max_sections.get_char_code_at(0), 0xE000);
-        assert_eq!(max_sections.get_char_code_at(6399), 0xF8FF);
+        assert_eq!(max_sections.char_at(0), '\u{E000}');
+        assert_eq!(max_sections.char_at(6399), '\u{F8FF}');
     }
 
     #[test]

@@ -95,11 +95,11 @@ const LABELLED: [(&str, &str); 4] =
 /// The font stack of Liberty's labels.
 const FONT: &str = "Noto Sans Regular";
 
-/// A label, as UTF-16, and its name in Japanese script alone, when it has
-/// one.
+/// A label, as characters, and its name in Japanese script alone, when it
+/// has one.
 struct Label {
-    text: Vec<u16>,
-    japanese: Option<Vec<u16>>,
+    text: Vec<char>,
+    japanese: Option<Vec<char>>,
 }
 
 /// The labels of `tile`'s features, as Liberty's text writes them: a name
@@ -124,10 +124,7 @@ fn labels(fixtures: &Fixtures, tile: LabelTile) -> Vec<Label> {
                     None => continue,
                 },
             };
-            labels.push(Label {
-                text: text.encode_utf16().collect(),
-                japanese: japanese.map(|text| text.encode_utf16().collect()),
-            });
+            labels.push(Label { text: text.chars().collect(), japanese: japanese.map(|text| text.chars().collect()) });
         }
     }
     labels
@@ -135,7 +132,7 @@ fn labels(fixtures: &Fixtures, tile: LabelTile) -> Vec<Label> {
 
 /// The glyph ranges of [`FONT`] that `labels` need.
 fn glyph_ranges(labels: &[Label]) -> BTreeSet<GlyphRange> {
-    labels.iter().flat_map(|label| &label.text).map(|&unit| get_glyph_range(GlyphID::from(unit))).collect()
+    labels.iter().flat_map(|label| &label.text).filter_map(|&c| GlyphID::from_char(c)).map(get_glyph_range).collect()
 }
 
 /// The snapshot's path of `range` of [`FONT`].
