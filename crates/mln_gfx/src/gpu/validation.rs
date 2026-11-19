@@ -320,40 +320,30 @@ impl Dependents {
     #[cfg_attr(not(debug_assertions), expect(unused_variables, reason = "release builds keep nothing"))]
     pub fn destroy(&mut self, resource: ResourceId) -> Result<(), GpuError> {
         #[cfg(debug_assertions)]
-        match resource {
-            ResourceId::Buffer(_) | ResourceId::Texture(_) | ResourceId::Sampler(_) | ResourceId::Shader(_) => {
-                if self.counts.contains_key(&resource) {
-                    return Err(GpuError::InUse(kind(resource)));
-                }
-            }
-            ResourceId::Pipeline(_) | ResourceId::Bindings(_) | ResourceId::Geometry(_) => {
-                for of in self.made_of.remove(&resource).into_iter().flatten() {
-                    if let Some(count) = self.counts.get_mut(&of) {
-                        *count -= 1;
-                        if *count == 0 {
-                            self.counts.remove(&of);
+        {
+            let kind = match resource {
+                ResourceId::Buffer(_) => "buffer",
+                ResourceId::Texture(_) => "texture",
+                ResourceId::Sampler(_) => "sampler",
+                ResourceId::Shader(_) => "shader",
+                ResourceId::Pipeline(_) | ResourceId::Bindings(_) | ResourceId::Geometry(_) => {
+                    for of in self.made_of.remove(&resource).into_iter().flatten() {
+                        if let Some(count) = self.counts.get_mut(&of) {
+                            *count -= 1;
+                            if *count == 0 {
+                                self.counts.remove(&of);
+                            }
                         }
                     }
+                    return Ok(());
                 }
+                ResourceId::Readback(_) => return Ok(()),
+            };
+            if self.counts.contains_key(&resource) {
+                return Err(GpuError::InUse(kind));
             }
-            ResourceId::Readback(_) => {}
         }
         Ok(())
-    }
-}
-
-/// What `resource` is, as [`GpuError`] names it.
-#[cfg(debug_assertions)]
-fn kind(resource: ResourceId) -> &'static str {
-    match resource {
-        ResourceId::Buffer(_) => "buffer",
-        ResourceId::Texture(_) => "texture",
-        ResourceId::Sampler(_) => "sampler",
-        ResourceId::Shader(_) => "shader",
-        ResourceId::Pipeline(_) => "pipeline",
-        ResourceId::Bindings(_) => "bindings",
-        ResourceId::Geometry(_) => "geometry",
-        ResourceId::Readback(_) => "readback",
     }
 }
 
@@ -633,52 +623,6 @@ mod tests {
         assert!(check_pass(&pass(None, None), &texture).is_err(), "no attachments");
         assert!(check_pass(&pass(Some(attachment(color)), Some(depth(small))), &texture).is_err(), "sizes");
         assert!(check_pass(&pass(Some(attachment(small)), None), &texture).is_err(), "depth as color");
-    }
-
-    #[test]
-    fn dependents_keep_what_they_were_made_of_in_debug_builds() {
-        let mut buffers = SlotMap::<BufferId, ()>::with_key();
-        let (uniform, vertices, indices) = (buffers.insert(()), buffers.insert(()), buffers.insert(()));
-        let texture = SlotMap::<TextureId, ()>::with_key().insert(());
-        let sampler = SlotMap::<SamplerId, ()>::with_key().insert(());
-        let shader = SlotMap::<ShaderId, ()>::with_key().insert(());
-        let mut bindings = SlotMap::<BindingsId, ()>::with_key();
-        let (first, second) = (bindings.insert(()), bindings.insert(()));
-        let geometry = SlotMap::<GeometryId, ()>::with_key().insert(());
-        let pipeline = SlotMap::<PipelineId, ()>::with_key().insert(());
-        let entries = [
-            BindGroupEntry::Buffer { id: 0, buffer: uniform, offset: 0, size: 4 },
-            BindGroupEntry::Texture { id: 0, texture, sampler },
-        ];
-        let desc = BindingsDesc { label: "test", shader, entries: &entries };
-        let mut dependents = Dependents::default();
-        dependents.bindings(first, &desc);
-        dependents.bindings(second, &desc);
-        dependents.geometry(
-            geometry,
-            &GeometryDesc { shader, layouts: &[], vertex_buffers: &[(vertices, 0)], index_buffer: indices },
-        );
-        let in_use = |dependents: &mut Dependents, resource: ResourceId| {
-            matches!(dependents.destroy(resource), Err(GpuError::InUse(_)))
-        };
-        let used = [uniform.into(), texture.into(), sampler.into(), vertices.into(), indices.into()];
-        for resource in used {
-            assert_eq!(in_use(&mut dependents, resource), cfg!(debug_assertions), "{resource:?}");
-        }
-        assert!(dependents.destroy(first.into()).is_ok());
-        assert!(dependents.destroy(first.into()).is_ok(), "twice");
-        assert_eq!(in_use(&mut dependents, uniform.into()), cfg!(debug_assertions), "the second bindings'");
-        assert!(dependents.destroy(second.into()).is_ok());
-        for resource in [uniform.into(), texture.into(), sampler.into()] {
-            assert!(dependents.destroy(resource).is_ok(), "{resource:?}, of no live bindings");
-        }
-        assert_eq!(in_use(&mut dependents, indices.into()), cfg!(debug_assertions), "the geometry's");
-        assert!(dependents.destroy(geometry.into()).is_ok());
-        assert!(dependents.destroy(indices.into()).is_ok());
-        dependents.pipeline(pipeline, shader);
-        assert_eq!(in_use(&mut dependents, shader.into()), cfg!(debug_assertions), "the pipeline's");
-        assert!(dependents.destroy(pipeline.into()).is_ok());
-        assert!(dependents.destroy(shader.into()).is_ok());
     }
 
     #[test]

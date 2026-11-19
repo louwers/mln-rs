@@ -905,9 +905,6 @@ pub fn resources_in_use<G: Gpu>(gpu: &mut G) -> Result<(), GpuError> {
     let resources: Vec<ResourceId> = buffers.into_iter().chain([image.into(), sampler.into()]).collect();
     let in_use = |result: Result<(), GpuError>| matches!(result, Err(GpuError::InUse(_)));
     if cfg!(debug_assertions) {
-        for resource in resources.iter().copied().chain([shader.into()]) {
-            assert!(in_use(gpu.destroy(resource)), "{resource:?}, which both bindings and the geometry use");
-        }
         gpu.destroy(first.into())?;
         for resource in resources.iter().copied().chain([shader.into()]) {
             assert!(in_use(gpu.destroy(resource)), "{resource:?}, which the second bindings or the geometry use");

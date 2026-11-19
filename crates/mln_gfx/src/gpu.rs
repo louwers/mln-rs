@@ -50,9 +50,9 @@ pub enum GpuError {
     /// backend made, or one already destroyed.
     #[error("no such {0}")]
     UnknownId(&'static str),
-    /// A destroy of a resource that live bindings or geometry were made of,
-    /// which debug builds refuse.
-    #[error("the {0} is in use by bindings or geometry")]
+    /// A destroy of a resource that live pipelines, bindings or geometry
+    /// were made of, which debug builds refuse.
+    #[error("the {0} is in use by pipelines, bindings or geometry")]
     InUse(&'static str),
     /// The backend can't make what the descriptor asks for, such as a
     /// texture format the device lacks.
