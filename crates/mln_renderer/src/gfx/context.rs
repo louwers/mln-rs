@@ -6,8 +6,6 @@
 //! no `Gpu`: each call that makes, writes or destroys a resource takes the
 //! one the renderer was made for.
 
-use std::rc::Rc;
-
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::gpu::{
     BufferUsage, Caps, Gpu, GpuError, PipelineId, PipelineKey, ResourceId, SamplerId, ShaderId, ShaderKey,
@@ -30,7 +28,6 @@ use crate::gfx::store::{IndexesKey, SharedTexture, Store, StoreKey, TextureKey};
 use crate::gfx::texture2d::{Texture2D, TextureMut};
 use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::gfx::vertices::{SharedVertices, TypedVertices, VertexStore, Vertices};
-use crate::layers::render_custom_layer::EndedHosts;
 
 /// What the renderer makes its resources with: the resources it made on its
 /// backend's `Gpu`, with the stats that count them and the queue that they
@@ -152,10 +149,6 @@ pub(crate) struct Context {
     /// queue, and what it destroys, kept for their storage.
     releases: Vec<Release>,
     doomed: Vec<ResourceId>,
-    /// The hosts of the custom layers that left the renderer after drawing,
-    /// which [`end_custom_layers`](Self::end_custom_layers) tells that it
-    /// stopped.
-    ended_hosts: Rc<EndedHosts>,
     /// Whether [`tear_down`](Self::tear_down) destroyed what the context
     /// made.
     torn_down: bool,
@@ -177,30 +170,7 @@ impl Context {
             vertices: VertexStore::default(),
             releases: Vec::new(),
             doomed: Vec::new(),
-            ended_hosts: Rc::default(),
             torn_down: false,
-        }
-    }
-
-    /// The queue that custom layers that drew go to when they leave the
-    /// renderer.
-    pub(crate) fn ended_hosts(&self) -> &Rc<EndedHosts> {
-        &self.ended_hosts
-    }
-
-    /// Tells the hosts of the custom layers that left the renderer since the
-    /// last call that it stopped, once `gpu` finished their work, so that
-    /// they free what they drew with.
-    pub(crate) fn end_custom_layers(&mut self, gpu: &mut dyn Gpu) {
-        let hosts = self.ended_hosts.take();
-        if hosts.is_empty() {
-            return;
-        }
-        if let Err(error) = gpu.flush(true) {
-            Log::error(Event::Render, format!("Waiting for a custom layer's frames failed: {error}"));
-        }
-        for host in hosts {
-            host.deinitialize();
         }
     }
 
@@ -591,21 +561,20 @@ impl Context {
             queue.push(Release::Resource(sampler.into()));
         }
         self.destroy_released(gpu);
-        self.end_custom_layers(gpu);
         self.torn_down = true;
     }
 }
 
 impl Drop for Context {
     /// A context dropped without [`tear_down`](Context::tear_down) leaves
-    /// what it made to the `Gpu`, which frees it when it drops.
+    /// what it made to the `Gpu`, which frees it when it drops, and logs
+    /// that it did.
     fn drop(&mut self) {
         if !self.torn_down && !std::thread::panicking() {
             Log::warning(
                 Event::Render,
                 "A renderer was dropped without its tear-down; its GPU objects stay until the backend goes",
             );
-            debug_assert!(false, "a renderer was dropped without its tear-down");
         }
     }
 }

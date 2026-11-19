@@ -767,3 +767,85 @@ float4 ps() : SV_Target {
         });
     }
 }
+
+/// How a host that drew hears that the renderer stopped, on each backend.
+mod ending {
+    use mln_style::Edit;
+
+    use super::{Arc, AtomicUsize, BackendType, CustomLayerHost, HeadlessFrontend, Map, Ordering, Queue, session};
+
+    /// A host that draws nothing, and counts how it ended.
+    #[derive(Default)]
+    struct Host {
+        deinitializations: AtomicUsize,
+        losses: AtomicUsize,
+    }
+
+    impl CustomLayerHost for Host {
+        fn deinitialize(&self) {
+            self.deinitializations.fetch_add(1, Ordering::Relaxed);
+        }
+
+        fn context_lost(&self) {
+            self.losses.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    const BACKENDS: &[BackendType] = &[
+        BackendType::WebGPU,
+        #[cfg(target_vendor = "apple")]
+        BackendType::Metal,
+        #[cfg(not(any(target_vendor = "apple", target_family = "wasm")))]
+        BackendType::Vulkan,
+        #[cfg(all(unix, not(target_vendor = "apple")))]
+        BackendType::OpenGL,
+        #[cfg(windows)]
+        BackendType::D3D12,
+    ];
+
+    /// Draws a frame with the host's layer on each backend, lets go of the
+    /// layer with `end`, which can drop the frontend, and checks that the
+    /// host deinitialized once and lost nothing.
+    fn check_end(end: impl Fn(&mut Option<HeadlessFrontend>, &mut Map)) {
+        for &backend in BACKENDS {
+            let run_loop = Queue::new();
+            let host = Arc::new(Host::default());
+            let Some((frontend, mut map)) = session(backend, Arc::<Host>::clone(&host), None, &run_loop) else {
+                continue;
+            };
+            let mut frontend = Some(frontend);
+            frontend.as_mut().unwrap().render(&mut map).expect("a frame");
+            end(&mut frontend, &mut map);
+            assert_eq!(host.deinitializations.load(Ordering::Relaxed), 1, "{backend:?}");
+            assert_eq!(host.losses.load(Ordering::Relaxed), 0, "{backend:?}");
+        }
+    }
+
+    #[test]
+    fn a_removed_layer_deinitializes() {
+        check_end(|frontend, map| {
+            map.edit_style(|style| style.apply(Edit::RemoveLayer("quad".to_owned()))).expect("the layer");
+            frontend.as_mut().unwrap().render(map).expect("a frame");
+        });
+    }
+
+    #[test]
+    fn a_replaced_host_deinitializes() {
+        check_end(|frontend, map| {
+            map.edit_style(|style| style.apply(Edit::RemoveLayer("quad".to_owned()))).expect("the layer");
+            map.edit_style(|style| style.add_custom_layer("quad", Arc::new(Host::default()), None))
+                .expect("the new host");
+            frontend.as_mut().unwrap().render(map).expect("a frame");
+        });
+    }
+
+    #[test]
+    fn clearing_the_data_deinitializes() {
+        check_end(|frontend, _| frontend.as_mut().unwrap().clear_data());
+    }
+
+    #[test]
+    fn dropping_the_renderer_deinitializes() {
+        check_end(|frontend, _| drop(frontend.take()));
+    }
+}

@@ -27,6 +27,7 @@ use crate::gfx::context::Context;
 use crate::gfx::shader_registry::ShaderRegistry;
 use crate::layer_composite::{Composite, LayerComposite};
 use crate::layer_drawing::DrawOrder;
+use crate::layers::render_custom_layer::end_hosts;
 use crate::paint_parameters::{OpenPass, PaintParameters};
 use crate::render_orchestrator::RenderOrchestrator;
 use crate::render_pass::RenderPass;
@@ -81,7 +82,8 @@ pub struct RenderTimings {
 ///
 /// [`tear_down`](Self::tear_down) frees the renderer's GPU objects. A
 /// renderer dropped without it leaves them to the `Gpu`, which frees them
-/// when it drops.
+/// when it drops, and its custom layers' hosts hear that their graphics
+/// objects are lost.
 pub struct Renderer {
     orchestrator: RenderOrchestrator,
     encoder: Encoder,
@@ -278,7 +280,7 @@ impl Renderer {
         let encoder = &mut self.encoder;
         // A custom layer that the update removed or gave a new host hears
         // that the renderer stopped.
-        encoder.context.end_custom_layers(gpu);
+        end_hosts(gpu, orchestrator.take_ended_hosts());
         if std::mem::take(&mut encoder.shaders_replaced) {
             encoder.context.release_shaders();
         }
@@ -456,9 +458,7 @@ impl Renderer {
     /// before the app goes to the background.
     pub fn reduce_memory_use(&mut self, gpu: &mut dyn Gpu) {
         self.orchestrator.reduce_memory_use();
-        let context = &mut self.encoder.context;
-        context.destroy_released(gpu);
-        context.end_custom_layers(gpu);
+        self.encoder.context.destroy_released(gpu);
         if let Err(error) = gpu.flush(true) {
             Log::error(Event::Render, format!("Waiting for the GPU failed: {error}"));
         }
@@ -479,21 +479,24 @@ impl Renderer {
     /// `gpu` that the renderer stopped.
     pub fn clear_data(&mut self, gpu: &mut dyn Gpu) {
         self.orchestrator.clear_data();
-        self.encoder.context.end_custom_layers(gpu);
+        end_hosts(gpu, self.orchestrator.take_ended_hosts());
     }
 
     /// Destroys the renderer's GPU objects on `gpu`, and tells its custom
     /// layers' hosts that it stopped. Returns its rendering stats as it
     /// leaves them, with all its resources released.
     pub fn tear_down(self, gpu: &mut dyn Gpu) -> RenderingStats {
-        let Renderer { orchestrator, mut encoder, .. } = self;
+        let Renderer { mut orchestrator, mut encoder, .. } = self;
         // The layers' GPU objects go to the context's queue, and their
-        // custom layers' hosts to its ended ones.
+        // custom layers' hosts to the ended ones.
+        orchestrator.leave_layers();
+        let ended = orchestrator.take_ended_hosts();
         drop(orchestrator);
         encoder.clip_masks = ClipMasks::default();
         encoder.layer_composite = LayerComposite::default();
         encoder.static_data = None;
         encoder.context.tear_down(gpu);
+        end_hosts(gpu, ended);
         encoder.context.stats()
     }
 }

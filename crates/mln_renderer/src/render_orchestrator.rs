@@ -33,6 +33,7 @@ use crate::globe_depth_pass::GlobeDepthPass;
 use crate::image_store::ImageStore;
 use crate::layer_drawing::{ChangedBuckets, DrawGroup, DrawOrder, SingleDraw};
 use crate::layer_type::ErasedEvaluatedLayer;
+use crate::layers::render_custom_layer::EndedHosts;
 use crate::line_atlas::LineAtlas;
 use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;
@@ -176,6 +177,9 @@ pub(crate) struct RenderOrchestrator {
     /// Whether the next update makes the render layers again, for new
     /// shaders.
     remake_render_layers: bool,
+    /// The hosts of the custom layers that left since the renderer last
+    /// [took them](Self::take_ended_hosts).
+    ended_hosts: EndedHosts,
     filtered_layers_for_source: Vec<Arc<dyn ErasedEvaluatedLayer>>,
 
     thread_pool: TaskGroup,
@@ -239,6 +243,7 @@ impl RenderOrchestrator {
             longitude: 0.0,
             tile_cache_enabled: true,
             remake_render_layers: false,
+            ended_hosts: Vec::new(),
             filtered_layers_for_source: Vec::new(),
             _wait_for_thread_pool: WaitOnDrop(thread_pool.clone()),
             thread_pool,
@@ -655,6 +660,7 @@ impl RenderOrchestrator {
                     continue;
                 };
                 new_layer.transition(&clock.added_layer_transition);
+                render_layer.leave(&mut self.ended_hosts);
                 *render_layer = new_layer;
             }
         }
@@ -665,7 +671,9 @@ impl RenderOrchestrator {
 
             // Remove render layers for removed layers.
             for (id, _) in layer_changes.iter().filter(|(_, change)| change.removes()) {
-                by_id.remove(&**id);
+                if let Some(mut removed) = by_id.remove(&**id) {
+                    removed.leave(&mut self.ended_hosts);
+                }
             }
 
             // Create render layers for newly added layers.
@@ -680,6 +688,9 @@ impl RenderOrchestrator {
 
             // A layer type without a render layer is skipped.
             self.layers = layers.iter().filter_map(|layer| by_id.remove(layer.get_id())).collect();
+            for mut left in by_id.into_values() {
+                left.leave(&mut self.ended_hosts);
+            }
             self.layer_indexes =
                 self.layers.iter().enumerate().map(|(index, layer)| (layer.id().to_owned(), index)).collect();
         }
@@ -689,7 +700,7 @@ impl RenderOrchestrator {
             if let (Some(&index), Some(layer)) = (self.layer_indexes.get(&**id), layers.get(id)) {
                 let new_layer = layer.style();
                 let render_layer = &mut self.layers[index];
-                render_layer.restyle(&clock.transition, new_layer);
+                render_layer.restyle(&clock.transition, new_layer, &mut self.ended_hosts);
             }
         }
 
@@ -1084,7 +1095,7 @@ impl RenderOrchestrator {
         self.debug_layers.clear();
         self.render_sources.clear();
         self.tile_store.clear();
-        self.layers.clear();
+        self.leave_layers();
         self.layer_indexes.clear();
 
         self.cross_tile_symbol_index.reset();
@@ -1241,6 +1252,19 @@ impl RenderOrchestrator {
     /// The debug overlays, in `DebugType` order.
     pub(crate) fn debug_layers(&mut self) -> impl Iterator<Item = &mut DebugLayer> {
         self.debug_layers.values_mut()
+    }
+
+    /// Makes every render layer leave, and drops them.
+    pub(crate) fn leave_layers(&mut self) {
+        for mut layer in self.layers.drain(..) {
+            layer.leave(&mut self.ended_hosts);
+        }
+    }
+
+    /// The hosts of the custom layers that left since the last call, which
+    /// drew and hear that the renderer stopped.
+    pub(crate) fn take_ended_hosts(&mut self) -> EndedHosts {
+        std::mem::take(&mut self.ended_hosts)
     }
 
     /// Visits every render layer, in no order.

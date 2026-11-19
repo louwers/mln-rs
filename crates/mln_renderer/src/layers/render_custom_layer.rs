@@ -9,12 +9,11 @@
 // - A host that drew is told the renderer stopped once the layer leaves it,
 //   after the GPU finished the host's work (`Gpu::flush`), or that
 //   its graphics objects are lost (`Renderer::lose_custom_layers`). The
-//   layer leaves without a `Gpu` at hand, so it queues its host
-//   (`EndedHosts`), which the renderer tells in the frame or the tear-down
-//   that follows, with the `Gpu` passed in (`Context::end_custom_layers`).
+//   orchestrator makes a layer leave (`RenderLayer::leave`) without a `Gpu`
+//   at hand, so the host goes to the orchestrator's `EndedHosts`, which the
+//   renderer tells with the `Gpu` passed in (`end_hosts`) after the update,
+//   or in the tear-down.
 
-use std::cell::Cell;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_gfx::gpu::Gpu;
@@ -60,9 +59,6 @@ pub(crate) struct CustomDrawing {
     /// Whether a callback ran since the renderer took the host, which then
     /// has to hear that the renderer stopped.
     used: bool,
-    /// Where the host goes when the layer leaves it, once it drew: the
-    /// renderer's queue, from the first prerender on.
-    ended: Option<Rc<EndedHosts>>,
     /// Whether the layer draws, which it does from the first frame that
     /// draws it.
     updated: bool,
@@ -73,52 +69,47 @@ impl RenderCustomLayer {
         let host = impl_.host();
         let (mut base, values) = LayerValues::new(impl_);
         base.passes = RenderPass::Translucent;
-        let drawing = CustomDrawing { host, frame: None, used: false, ended: None, updated: false };
+        let drawing = CustomDrawing { host, frame: None, used: false, updated: false };
         RenderCustomLayer { base, values, drawing }
     }
 }
 
 /// The hosts of custom layers that left the renderer after they drew, which
-/// the renderer tells that it stopped once the GPU finished their work
-/// (`Context::end_custom_layers`). The hosts left in it when it drops, as
-/// when a renderer goes without its tear-down, hear that their graphics
-/// objects are lost instead.
-#[derive(Default)]
-pub(crate) struct EndedHosts(Cell<Vec<Arc<dyn CustomLayerHost>>>);
+/// [`end_hosts`] tells that it stopped.
+pub(crate) type EndedHosts = Vec<Arc<dyn CustomLayerHost>>;
 
-impl EndedHosts {
-    fn push(&self, host: Arc<dyn CustomLayerHost>) {
-        let mut hosts = self.0.take();
-        hosts.push(host);
-        self.0.set(hosts);
+/// Tells `hosts`, which left the renderer after drawing with `gpu`, that it
+/// stopped, once `gpu` finished their work, so that they free what they drew
+/// with.
+pub(crate) fn end_hosts(gpu: &mut dyn Gpu, hosts: EndedHosts) {
+    if hosts.is_empty() {
+        return;
     }
-
-    /// The hosts queued since the last call.
-    pub(crate) fn take(&self) -> Vec<Arc<dyn CustomLayerHost>> {
-        self.0.take()
+    if let Err(error) = gpu.flush(true) {
+        Log::error(Event::Render, format!("Waiting for a custom layer's frames failed: {error}"));
     }
-}
-
-impl Drop for EndedHosts {
-    fn drop(&mut self) {
-        for host in self.0.take() {
-            host.context_lost();
-        }
+    for host in hosts {
+        host.deinitialize();
     }
 }
 
 impl CustomDrawing {
-    /// Lets go of the host: queues it to hear that the renderer stopped, or
-    /// tells it that its graphics objects are lost.
-    fn end(&mut self, lost: bool) {
-        let Some(host) = self.host.take() else { return };
-        let ended = self.ended.take();
-        if !std::mem::take(&mut self.used) {
-            return;
+    /// Lets go of the host, which goes to `ended` if it drew.
+    fn leave(&mut self, ended: &mut EndedHosts) {
+        if let Some(host) = self.host.take()
+            && std::mem::take(&mut self.used)
+        {
+            ended.push(host);
         }
-        match ended {
-            Some(ended) if !lost => ended.push(host),
-            _ => host.context_lost(),
+    }
+
+    /// Lets go of the host, telling it that its graphics objects are lost if
+    /// it drew.
+    fn lose(&mut self) {
+        if let Some(host) = self.host.take()
+            && std::mem::take(&mut self.used)
+        {
+            host.context_lost();
         }
     }
 
@@ -144,8 +135,10 @@ impl CustomDrawing {
 }
 
 impl Drop for CustomDrawing {
+    /// A layer dropped without leaving, as with a renderer dropped without
+    /// its tear-down, loses its host's graphics objects.
     fn drop(&mut self) {
-        self.end(false);
+        self.lose();
     }
 }
 
@@ -198,12 +191,12 @@ impl TypedLayer for RenderCustomLayer {
     }
 
     /// A new host for the same layer ID is a new layer to the host: the old
-    /// one hears that the renderer stopped.
-    fn style_changed(&mut self) {
+    /// one goes to `ended`, to hear that the renderer stopped.
+    fn style_changed(&mut self, ended: &mut EndedHosts) {
         let drawing = &mut self.drawing;
         let same = drawing.host.as_ref().is_some_and(|host| self.values.style.has_host(host));
         if !same {
-            drawing.end(false);
+            drawing.leave(ended);
             drawing.host = self.values.style.host();
         }
     }
@@ -218,7 +211,6 @@ impl RenderLayer for RenderCustomLayer {
         };
         let drawing = &mut self.drawing;
         drawing.frame = Some(frame);
-        drawing.ended.get_or_insert_with(|| Rc::clone(parameters.context.ended_hosts()));
         let Some(host) = &drawing.host else { return };
         let lent = gpu.lend(&mut |encoder| {
             host.prerender(&mut CustomLayerPrerenderParameters { encoder, frame: &frame });
@@ -229,7 +221,11 @@ impl RenderLayer for RenderCustomLayer {
         }
     }
 
+    fn leave(&mut self, ended: &mut EndedHosts) {
+        self.drawing.leave(ended);
+    }
+
     fn lose_context(&mut self) {
-        self.drawing.end(true);
+        self.drawing.lose();
     }
 }
