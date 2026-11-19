@@ -1767,7 +1767,7 @@ mod metal {
     // A release completes once the session's frames finish: a frame drawn
     // into a texture that the host gave back waits for the host's event,
     // which the host signals from the session's thread once the release
-    // call returned.
+    // call returned. A release made meanwhile completes after it.
     #[test]
     fn a_caller_driven_release_completes_once_its_frames_finish() {
         let Some(device) = device_of(BackendType::Metal) else { return };
@@ -1807,12 +1807,24 @@ mod metal {
         render(2);
 
         let released = session.release_target().unwrap();
-        driver.service().unwrap();
-        driver.service().unwrap();
+        // A second release, with nothing left to let go of, completes after
+        // the first.
+        let again = session.release_target().unwrap();
+        // Long enough for the session to poll the frame's work a few times.
+        let polled = std::time::Instant::now() + std::time::Duration::from_millis(50);
+        while std::time::Instant::now() < polled {
+            driver.service().unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
         assert!(!released.is_complete(), "the release completed before its frame");
+        assert!(!again.is_complete(), "the second release completed before the first");
         host.setSignaledValue(1);
-        service_until(&driver, || released.is_complete());
+        service_until(&driver, || {
+            assert!(released.is_complete() || !again.is_complete(), "the releases completed out of order");
+            again.is_complete()
+        });
         released.wait().unwrap();
+        again.wait().unwrap();
         let detached = session.detach().unwrap();
         service_until(&driver, || detached.is_complete());
         detached.wait().unwrap();

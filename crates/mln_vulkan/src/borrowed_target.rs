@@ -575,7 +575,7 @@ impl RingBackend for VulkanRing {
     }
 
     /// A lost device finishes no submit; the session fails then.
-    fn finished(gpu: &mut VulkanGpu, serial: &u64) -> bool {
+    fn finished(gpu: &mut VulkanGpu, serial: &u64) -> Result<bool, GpuError> {
         gpu.submit_finished(*serial)
     }
 

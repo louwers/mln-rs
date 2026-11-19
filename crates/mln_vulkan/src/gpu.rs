@@ -1807,12 +1807,22 @@ impl VulkanGpu {
     }
 
     /// Whether the submit of `serial` has finished, which it checks without
-    /// blocking.
-    pub(crate) fn submit_finished(&mut self, serial: u64) -> bool {
-        if serial > self.finished_serial {
-            self.collect_garbage();
+    /// blocking. Fails when Vulkan can't tell, such as once the device is
+    /// lost.
+    pub(crate) fn submit_finished(&mut self, serial: u64) -> Result<bool, GpuError> {
+        if serial <= self.finished_serial {
+            return Ok(true);
         }
-        serial <= self.finished_serial
+        self.collect_garbage();
+        // The oldest submit that hasn't finished says why, if the device
+        // can't tell.
+        if let Some(submission) = self.in_flight.front()
+            && serial > self.finished_serial
+        {
+            // SAFETY: the fence is this backend's.
+            unsafe { self.vk().get_fence_status(submission.fence) }.map_err(vk_error("checking a submit"))?;
+        }
+        Ok(serial <= self.finished_serial)
     }
 
     /// Blocks until the submit of `serial` has finished.

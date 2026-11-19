@@ -52,7 +52,7 @@ trait Borrowed<B: LocalBackend>: FrameTarget<Gpu = B::Gpu> {
     fn replace(&mut self, gpu: &mut B::Gpu, textures: B::RingTextures) -> Result<Work<B::Gpu>, Error>;
     /// Its work in flight on its textures, after its tear-down. A target
     /// whose work the host may follow at once has none.
-    fn in_flight(&self, _gpu: &mut B::Gpu) -> Work<B::Gpu> {
+    fn in_flight(&mut self, _gpu: &mut B::Gpu) -> Work<B::Gpu> {
         None
     }
 }
@@ -71,26 +71,29 @@ trait Exported<B: RendererBackend>: FrameTarget<Gpu = B::Gpu> {
 /// A ring's GPU work on the textures that it let go of, which a release or
 /// replacement completes after, on the ring's `Gpu`, `G`.
 trait RingWork<G> {
-    /// Whether the work finished, which it checks without blocking.
-    fn finished(&self, gpu: &mut G) -> bool;
+    /// Whether the work finished, which it checks without blocking. Fails
+    /// when its submit failed or the backend can't tell.
+    fn finished(&self, gpu: &mut G) -> Result<bool, Error>;
 }
 
 /// A ring's GPU work in flight, if any.
 type Work<G> = Option<Box<dyn RingWork<G>>>;
 
-/// Whether a release or replacement has GPU work in flight, which the
-/// target's graphics objects keep until it finishes.
+/// Whether a release or replacement waits for GPU work, its own or that of
+/// the ones before it, which the target's graphics objects keep until it
+/// finishes.
 pub(crate) type InFlight = bool;
 
 impl<R: RingBackend + 'static> RingWork<R::Gpu> for ring::InFlight<R> {
-    fn finished(&self, gpu: &mut R::Gpu) -> bool {
+    fn finished(&self, gpu: &mut R::Gpu) -> Result<bool, Error> {
         ring::InFlight::finished(self, gpu)
     }
 }
 
-/// `work`, unless it finished already on `gpu`.
+/// `work`, unless it finished already on `gpu`. Work that failed stays, for
+/// the poll to report.
 fn in_flight<G, W: RingWork<G> + 'static>(work: W, gpu: &mut G) -> Work<G> {
-    (!work.finished(gpu)).then(|| -> Box<dyn RingWork<G>> { Box::new(work) })
+    (work.finished(gpu) != Ok(true)).then(|| -> Box<dyn RingWork<G>> { Box::new(work) })
 }
 
 impl<R: RingBackend + 'static> Borrowed<R::Renderer> for ring::BorrowedTarget<R>
@@ -110,8 +113,9 @@ where
         let work = ring::BorrowedTarget::replace(self, gpu, textures)?;
         Ok(in_flight(work, gpu))
     }
-    fn in_flight(&self, gpu: &mut R::Gpu) -> Work<R::Gpu> {
-        in_flight(ring::BorrowedTarget::in_flight(self, gpu), gpu)
+    fn in_flight(&mut self, gpu: &mut R::Gpu) -> Work<R::Gpu> {
+        let work = ring::BorrowedTarget::in_flight(self, gpu);
+        in_flight(work, gpu)
     }
 }
 
@@ -556,7 +560,7 @@ trait Gfx {
     fn resize(&mut self, size: Size);
     fn read_image(&mut self) -> Result<PremultipliedImage, Error>;
     fn release_surface(&mut self) -> InFlight;
-    fn in_flight(&mut self) -> usize;
+    fn in_flight(&mut self) -> Result<usize, Error>;
     fn set_surface(&mut self, surface: Surface, overlay: Option<SurfaceOverlay>, size: Size) -> Result<(), Error>;
 }
 
@@ -580,8 +584,10 @@ struct BackendGfx<B: LocalBackend> {
     frames: Frames<B>,
     renderer: Option<Renderer>,
     /// The GPU work of releases and replacements on the textures that they
-    /// let go of, in their order, until it finishes.
-    in_flight: VecDeque<Box<dyn RingWork<B::Gpu>>>,
+    /// let go of, one entry for each that waits, in their order, until it
+    /// finishes: `None` for one with no work of its own that waits for the
+    /// ones before it.
+    in_flight: VecDeque<Work<B::Gpu>>,
     backend: B,
 }
 
@@ -657,10 +663,15 @@ fn presenting<B: LocalBackend>(backend: B, target: impl FrameTarget<Gpu = B::Gpu
 }
 
 impl<B: LocalBackend> BackendGfx<B> {
-    /// Keeps `work` until it finishes, and returns whether there is any.
+    /// Keeps the entry of a release or replacement with `work` until it and
+    /// those before it finish, and returns whether it waits: not when it has
+    /// no work and none is in flight.
     fn keep_in_flight(&mut self, work: Work<B::Gpu>) -> InFlight {
-        self.in_flight.extend(work);
-        !self.in_flight.is_empty()
+        let waits = work.is_some() || !self.in_flight.is_empty();
+        if waits {
+            self.in_flight.push_back(work);
+        }
+        waits
     }
 }
 
@@ -825,12 +836,17 @@ impl<B: LocalBackend> Gfx for BackendGfx<B> {
         self.keep_in_flight(work)
     }
 
-    fn in_flight(&mut self) -> usize {
+    fn in_flight(&mut self) -> Result<usize, Error> {
         let gpu = &mut *self.backend.gpu();
-        while self.in_flight.front_mut().is_some_and(|work| work.finished(gpu)) {
+        while let Some(front) = self.in_flight.front() {
+            if let Some(work) = front
+                && !work.finished(gpu)?
+            {
+                break;
+            }
             self.in_flight.pop_front();
         }
-        self.in_flight.len()
+        Ok(self.in_flight.len())
     }
 
     fn set_surface(&mut self, surface: Surface, overlay: Option<SurfaceOverlay>, size: Size) -> Result<(), Error> {
@@ -1308,10 +1324,11 @@ impl LocalTarget {
         in_flight
     }
 
-    /// How many releases and replacements, the latest ones, still have GPU
-    /// work in flight on the textures that they let go of, which it checks
-    /// without blocking.
-    pub(crate) fn in_flight(&mut self) -> usize {
+    /// How many releases and replacements that wait, the latest ones, still
+    /// wait for GPU work on the textures that they or those before them let
+    /// go of, which it checks without blocking. Fails when that work failed
+    /// or the backend can't tell, such as once its device is lost.
+    pub(crate) fn in_flight(&mut self) -> Result<usize, Error> {
         self.gfx.in_flight()
     }
 

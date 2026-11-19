@@ -1587,11 +1587,19 @@ impl Worker {
     }
 
     /// Polls the GPU work that releases and replacements wait for, and
-    /// completes those whose work finished. Without graphics objects, they
-    /// end as the target is lost.
+    /// completes those whose work finished, in their order. Without graphics
+    /// objects, they end as the target is lost; work that failed, as on a
+    /// lost device, fails the session and ends them with its error.
     fn poll_settling(&mut self, outbox: &mut Outbox) {
         let Some(gfx) = self.gfx.as_mut() else { return self.end_settling(&target_lost(), outbox) };
-        let finished = self.settling.len().saturating_sub(gfx.target.in_flight());
+        let waiting = match gfx.target.in_flight() {
+            Ok(waiting) => waiting,
+            Err(error) => {
+                self.fail(&error, outbox);
+                return self.end_settling(&error, outbox);
+            }
+        };
+        let finished = self.settling.len().saturating_sub(waiting);
         for done in self.settling.drain(..finished) {
             done(outbox, Ok(()));
         }

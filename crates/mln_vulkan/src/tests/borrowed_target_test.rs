@@ -229,11 +229,19 @@ fn sync_file(producer: &mut BorrowedTarget, gpu: &mut crate::VulkanGpu) -> mln_g
 
 /// Waits until the work `in_flight` finishes on `gpu`.
 fn wait_for(in_flight: &crate::InFlight, gpu: &mut crate::VulkanGpu) {
+    assert!(finishes(in_flight, gpu), "the work never finished");
+}
+
+/// Whether `in_flight` finishes within ten seconds.
+fn finishes(in_flight: &crate::InFlight, gpu: &mut crate::VulkanGpu) -> bool {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while !in_flight.finished(gpu) {
-        assert!(std::time::Instant::now() < deadline, "the work never finished");
+    while !in_flight.finished(gpu).expect("the work failed") {
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
         std::thread::yield_now();
     }
+    true
 }
 
 // A frame begun and drawn into, but not ended, is submitted with what its
@@ -281,7 +289,10 @@ fn a_frame_drawn_and_not_ended_is_submitted_with_its_waits() {
         target.select(0);
         draw_without_ending(&mut target, gpu);
         let in_flight = target.replace(gpu, owned.ring(2, size)).expect("new images");
-        assert!(!in_flight.finished(gpu), "the replacement's frame ran before the host's reads");
+        assert!(
+            !in_flight.finished(gpu).expect("the work failed"),
+            "the replacement's frame ran before the host's reads"
+        );
         owned.signal(timeline, 1);
         wait_for(&in_flight, gpu);
 
@@ -306,8 +317,12 @@ fn a_frame_drawn_and_not_ended_is_submitted_with_its_waits() {
         mln_gfx::gpu::Gpu::flush(gpu, false).unwrap();
         owned.queue_host_work(timeline, 3);
         let in_flight = target.replace(gpu, owned.ring(2, size)).expect("new images");
-        wait_for(&in_flight, gpu);
+        // The host's work waits on the queue until the signal, so a
+        // replacement that waited for it fails here instead of hanging the
+        // cleanup.
+        let finished = finishes(&in_flight, gpu);
         owned.signal(timeline, 3);
+        assert!(finished, "the replacement waited for the host's work");
     }
 
     // Tear-down with a frame drawn at slot 1, which waits for a timeline that
@@ -330,7 +345,10 @@ fn a_frame_drawn_and_not_ended_is_submitted_with_its_waits() {
     target.tear_down(gpu);
     let in_flight = target.in_flight(gpu);
     if let Some((timeline, value)) = signaled_after {
-        assert!(!in_flight.finished(gpu), "the tear-down's frame ran before the host's reads");
+        assert!(
+            !in_flight.finished(gpu).expect("the work failed"),
+            "the tear-down's frame ran before the host's reads"
+        );
         owned.signal(timeline, value);
     }
     wait_for(&in_flight, gpu);

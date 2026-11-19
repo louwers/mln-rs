@@ -360,9 +360,9 @@ impl RingBackend for D3d12Ring {
         Some(gpu.last_submit())
     }
 
-    fn finished(_: &mut D3d12Gpu, (fence, value): &Self::Fence) -> bool {
+    fn finished(_: &mut D3d12Gpu, (fence, value): &Self::Fence) -> Result<bool, GpuError> {
         // SAFETY: a plain query.
-        unsafe { fence.GetCompletedValue() >= *value }
+        Ok(unsafe { fence.GetCompletedValue() } >= *value)
     }
 }
 

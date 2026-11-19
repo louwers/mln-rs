@@ -122,8 +122,9 @@ pub trait RingBackend: Sized {
     }
 
     /// Whether the work that `fence` ends has finished on `gpu`, which it
-    /// checks without blocking.
-    fn finished(gpu: &mut Self::Gpu, fence: &Self::Fence) -> bool;
+    /// checks without blocking. Fails when the backend can't tell, such as
+    /// once its device is lost.
+    fn finished(gpu: &mut Self::Gpu, fence: &Self::Fence) -> Result<bool, GpuError>;
 
     /// Lets go of the objects that the frames signal once the work
     /// submitted so far is done, as the target goes.
@@ -331,7 +332,8 @@ impl<B: RingBackend> BorrowedTarget<B> {
     /// another number of textures, and as the check and [`Imports::new`] do.
     /// The target then keeps its textures. Otherwise it submits what was
     /// recorded, and returns the end of that work: the host may use the
-    /// textures that the ring let go of once it finishes.
+    /// textures that the ring let go of once it finishes. A submit that
+    /// fails makes that work fail.
     pub fn replace(&mut self, gpu: &mut B::Gpu, textures: B::Textures) -> Result<InFlight<B>, Error> {
         if textures.images().len() != self.textures.images().len() {
             return Err(Error::invalid_argument("a ring keeps its depth"));
@@ -353,7 +355,7 @@ impl<B: RingBackend> BorrowedTarget<B> {
                 B::waited(gpu, wait);
             }
         }
-        self.submit_recorded(gpu, "borrowed texture replacement");
+        let submitted = self.submit_recorded(gpu);
         std::mem::replace(&mut self.imports, imports).tear_down(gpu);
         let mut slots: Vec<Slot<B>> = self.textures.images().iter().map(|_| Slot::new(None)).collect();
         for (mut slot, kept) in std::mem::take(&mut self.slots).into_iter().zip(kept) {
@@ -363,27 +365,27 @@ impl<B: RingBackend> BorrowedTarget<B> {
             }
         }
         self.slots = slots;
-        Ok(self.in_flight(gpu))
+        Ok(InFlight::after(submitted, gpu))
     }
 
-    /// The end of the work submitted to `gpu` so far. After a tear-down,
-    /// the host may use the textures once it finishes.
-    pub fn in_flight(&self, gpu: &B::Gpu) -> InFlight<B> {
-        InFlight { fence: B::submitted(gpu) }
+    /// Submits the work recorded so far, and returns its end, or that the
+    /// submit failed. After a tear-down, the host may use the textures once
+    /// it finishes.
+    pub fn in_flight(&mut self, gpu: &mut B::Gpu) -> InFlight<B> {
+        let submitted = gpu.flush(false);
+        InFlight::after(submitted, gpu)
     }
 
     /// Submits the work recorded so far, before the ring lets go of the
     /// textures it draws into. A frame begun and not ended lets go of what
     /// its slot waits for: a pass that drew took the wait into the submit,
     /// which the wait outlives, and a frame that drew nothing waits for no
-    /// host. Logs `what` was going on when the submit fails.
-    fn submit_recorded(&mut self, gpu: &mut B::Gpu, what: &str) {
+    /// host.
+    fn submit_recorded(&mut self, gpu: &mut B::Gpu) -> Result<(), GpuError> {
         for slot in self.slots.iter_mut().filter(|slot| slot.attached.is_some()) {
             slot.forget(gpu);
         }
-        if let Err(error) = gpu.flush(false) {
-            Log::error(Event::Render, format!("Submitting the frames before a {what} failed: {error}"));
-        }
+        gpu.flush(false)
     }
 
     /// The sync that the host waits for, once the frame was submitted, and
@@ -461,7 +463,12 @@ impl<B: RingBackend> FrameTarget for BorrowedTarget<B> {
     /// drawn so far are done. It doesn't block: the end of the frames is
     /// what [`in_flight`](BorrowedTarget::in_flight) returns after it.
     fn tear_down(&mut self, gpu: &mut B::Gpu) {
-        self.submit_recorded(gpu, "borrowed target deletion");
+        if let Err(error) = self.submit_recorded(gpu) {
+            Log::error(
+                Event::Render,
+                format!("Submitting the frames before a borrowed target's deletion failed: {error}"),
+            );
+        }
         for mut slot in std::mem::take(&mut self.slots) {
             slot.forget(gpu);
         }
@@ -495,14 +502,30 @@ impl<B: RingBackend> Drop for BorrowedTarget<B> {
 /// The end of a ring's work on the textures that it let go of, after which
 /// the host may use them.
 pub struct InFlight<B: RingBackend> {
-    fence: Option<B::Fence>,
+    /// The end of the work, if the backend has one, or why its submit
+    /// failed.
+    fence: Result<Option<B::Fence>, Error>,
 }
 
 impl<B: RingBackend> InFlight<B> {
+    /// The end of the work that a submit with result `submitted` ended.
+    fn after(submitted: Result<(), GpuError>, gpu: &B::Gpu) -> Self {
+        let fence = submitted
+            .map(|()| B::submitted(gpu))
+            .map_err(|error| Error::native(format!("Submitting a ring's frames failed: {error}")));
+        InFlight { fence }
+    }
+
     /// Whether the work finished on `gpu`, the ring's, which it checks
-    /// without blocking.
-    pub fn finished(&self, gpu: &mut B::Gpu) -> bool {
-        self.fence.as_ref().is_none_or(|fence| B::finished(gpu, fence))
+    /// without blocking. Fails when its submit failed or the backend can't
+    /// tell.
+    pub fn finished(&self, gpu: &mut B::Gpu) -> Result<bool, Error> {
+        match &self.fence {
+            Ok(None) => Ok(true),
+            Ok(Some(fence)) => B::finished(gpu, fence)
+                .map_err(|error| Error::native(format!("Checking a ring's GPU work failed: {error}"))),
+            Err(error) => Err(error.clone()),
+        }
     }
 }
 
@@ -728,6 +751,8 @@ mod tests {
         /// The read that the work submitted so far ends with, for a backend
         /// that has one.
         last_submit: Option<u32>,
+        /// Whether flushes fail, as on a lost device.
+        lost: bool,
     }
 
     impl FakeGpu {
@@ -806,6 +831,9 @@ mod tests {
             unsupported()
         }
         fn flush(&mut self, _wait: bool) -> Result<(), GpuError> {
+            if self.lost {
+                return Err(GpuError::Invalid("lost".to_owned()));
+            }
             self.submits.push(std::mem::take(&mut self.next_waits));
             Ok(())
         }
@@ -965,8 +993,8 @@ mod tests {
         fn wait_for_frames(&self, _: &str) {
             RECORD.with_borrow_mut(|record| record.frames_waited += 1);
         }
-        fn finished(_: &mut FakeGpu, fence: &u32) -> bool {
-            *fence >= 100
+        fn finished(_: &mut FakeGpu, fence: &u32) -> Result<bool, GpuError> {
+            Ok(*fence >= 100)
         }
         fn forget(wait: u32) {
             RECORD.with_borrow_mut(|record| record.forgotten.push(wait));
@@ -1011,7 +1039,7 @@ mod tests {
         // lacks fails.
         ring.release(gpu, 0, timeline(8)).expect("a release");
         ring.discard(gpu, 0);
-        assert!(ring.in_flight(gpu).finished(gpu));
+        assert!(ring.in_flight(gpu).finished(gpu).unwrap());
         assert!(ring.release(gpu, 2, timeline(9)).is_err());
         ring.tear_down(gpu);
         assert!(gpu.textures.is_empty());
@@ -1057,11 +1085,24 @@ mod tests {
         // The host's reads of slot 0 don't hold up the release.
         ring.release(gpu, 0, timeline(7)).expect("a release");
         gpu.last_submit = Some(50);
-        assert!(!ring.in_flight(gpu).finished(gpu));
-        assert!(!ring.replace(gpu, images(&[20, 30])).expect("a replacement").finished(gpu));
+        assert!(!ring.in_flight(gpu).finished(gpu).unwrap());
+        assert!(!ring.replace(gpu, images(&[20, 30])).expect("a replacement").finished(gpu).unwrap());
         gpu.last_submit = Some(100);
-        assert!(ring.in_flight(gpu).finished(gpu));
+        assert!(ring.in_flight(gpu).finished(gpu).unwrap());
         assert_eq!(forgotten(), [7]);
+    }
+
+    // A submit that fails, as on a lost device, makes the work fail, so an
+    // older submit's end can't stand for it.
+    #[test]
+    fn the_work_in_flight_fails_with_its_submit() {
+        let mut backend = FakeBackend::default();
+        let mut ring = target(&mut backend, &[10, 20]);
+        let gpu = &mut backend.gpu;
+        gpu.last_submit = Some(100);
+        gpu.lost = true;
+        assert!(ring.replace(gpu, images(&[20, 30])).expect("a replacement").finished(gpu).is_err());
+        assert!(ring.in_flight(gpu).finished(gpu).is_err());
     }
 
     // A tear-down or a replacement never blocks: the ring's objects go once
@@ -1072,7 +1113,12 @@ mod tests {
         let mut backend = FakeBackend::default();
         let mut ring = target(&mut backend, &[10, 20]);
         ring.release(&mut backend.gpu, 0, timeline(7)).expect("a release");
-        assert!(ring.replace(&mut backend.gpu, images(&[20, 30])).expect("a replacement").finished(&mut backend.gpu));
+        assert!(
+            ring.replace(&mut backend.gpu, images(&[20, 30]))
+                .expect("a replacement")
+                .finished(&mut backend.gpu)
+                .unwrap()
+        );
         ring.tear_down(&mut backend.gpu);
         assert_eq!((frames_waited(), torn_down()), (0, 1));
         assert_eq!(forgotten(), [7]);
@@ -1117,7 +1163,7 @@ mod tests {
         // Of another depth, or with depth textures, the ring keeps its own.
         assert!(ring.replace(gpu, images(&[30])).is_err());
         assert!(ring.replace(gpu, Images { depth: true, ..images(&[20, 30]) }).is_err());
-        assert!(ring.replace(gpu, images(&[20, 30])).expect("a replacement").finished(gpu));
+        assert!(ring.replace(gpu, images(&[20, 30])).expect("a replacement").finished(gpu).unwrap());
         assert_eq!(gpu.imported(), [20, 30]);
         // The ring lets go of image 10's read at once.
         assert_eq!(forgotten(), [7]);
@@ -1137,7 +1183,7 @@ mod tests {
         let image = ring.begin_frame(gpu).expect("a frame");
         // A pass of the frame took the wait into the work recorded so far.
         FakeRing::take_waits_into_next_submit(gpu, image.color);
-        assert!(ring.replace(gpu, images(&[20, 30])).expect("a replacement").finished(gpu));
+        assert!(ring.replace(gpu, images(&[20, 30])).expect("a replacement").finished(gpu).unwrap());
         assert_eq!(gpu.submits, [vec![7]]);
         assert_eq!(gpu.waited, [7]);
         // A frame begun on a texture that the new ring has again, which
@@ -1145,7 +1191,7 @@ mod tests {
         // replacement's submit waits for no host.
         ring.release(gpu, 0, timeline(8)).expect("a release");
         ring.begin_frame(gpu);
-        assert!(ring.replace(gpu, images(&[20, 40])).expect("a replacement").finished(gpu));
+        assert!(ring.replace(gpu, images(&[20, 40])).expect("a replacement").finished(gpu).unwrap());
         assert_eq!(gpu.submits, [vec![7], vec![]]);
         let image = ring.begin_frame(gpu).expect("a frame");
         assert_eq!(gpu.texture_waits[&image.color], [8]);
