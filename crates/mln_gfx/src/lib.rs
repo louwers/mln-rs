@@ -6,7 +6,9 @@
 //! A backend's `RendererBackend` owns its `Gpu` and lends it, to the
 //! renderer and to the `FrameTarget` that the renderer draws into; the `Gpu`
 //! owns the renderer's buffers, textures and the groups of buffers its
-//! draws bind, which the renderer keeps in `mln_renderer`. Each program's
+//! draws bind, which the renderer keeps in `mln_renderer`. The targets that
+//! draw into rings of the host's textures, or of images they export, are
+//! generic over each backend's part, in [`ring`]. Each program's
 //! attributes and the keys of its variants are in `shaders::program_info`.
 
 pub mod backend;
@@ -23,6 +25,7 @@ pub mod polyline_generator;
 pub mod projection_variant;
 pub mod renderer_backend;
 pub mod rendering_stats;
+pub mod ring;
 pub mod scissor_rect;
 pub mod shaders;
 pub mod stencil_mode;

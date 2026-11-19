@@ -1,19 +1,17 @@
 // A ring of IOSurfaces that the target allocates and renders into through
 // Metal textures over them, for the host to draw, such as through a
-// CVPixelBuffer. A resize makes a new generation of surfaces; the frames that
-// the host holds keep the old generation's surfaces until they are given
-// back.
+// CVPixelBuffer. The ring target (mln_gfx::ring) draws into the textures as
+// into a borrowed ring's.
 
-use mln_gfx::export::Generations;
-use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
+use mln_gfx::ring::{self, Exporter};
 use mln_gfx::{
-    ConsumerSync, ExportKind, ExportKinds, ExportedFrame, ExportedImage, ExportedRing, FrameDepth, NativeTexture,
-    RendererBackend as _, SyncKind, SyncKinds,
+    ExportKind, ExportKinds, ExportedFrame, ExportedImage, ExportedRing, FrameDepth, NativeTexture, SyncKind, SyncKinds,
 };
 use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use objc2::rc::Retained;
+use objc2::runtime::ProtocolObject;
 use objc2_core_foundation::{CFDictionary, CFNumber, CFRetained, CFString};
 use objc2_io_surface::{
     IOSurfaceRef, kIOSurfaceBytesPerElement, kIOSurfaceBytesPerRow, kIOSurfaceHeight, kIOSurfacePixelFormat,
@@ -21,10 +19,10 @@ use objc2_io_surface::{
 };
 use objc2_metal::{MTLDevice, MTLPixelFormat, MTLStorageMode, MTLTexture, MTLTextureUsage};
 
-use crate::borrowed_target::{BorrowedTarget, BorrowedTextures};
+use crate::Id;
+use crate::borrowed_target::{BorrowedTextures, MetalRing};
 use crate::device::Device;
-use crate::gpu::{MetalGpu, texture_descriptor};
-use crate::mtl_fwd::{MTLDevicePtr, MTLTexturePtr};
+use crate::gpu::texture_descriptor;
 use crate::renderer_backend::RendererBackend;
 
 /// `kCVPixelFormatType_32BGRA`, the four characters 'BGRA', which Metal
@@ -98,7 +96,10 @@ fn create_surface(size: Size) -> Result<CFRetained<IOSurfaceRef>, Error> {
 
 /// A new IOSurface of `size` pixels, and a texture of `device` over it that
 /// frames render into.
-fn surface_texture(device: &MTLDevicePtr, size: Size) -> Result<(CFRetained<IOSurfaceRef>, MTLTexturePtr), Error> {
+fn surface_texture(
+    device: &ProtocolObject<dyn MTLDevice>,
+    size: Size,
+) -> Result<(CFRetained<IOSurfaceRef>, Id<dyn MTLTexture>), Error> {
     let surface = create_surface(size)?;
     let descriptor = texture_descriptor(MTLPixelFormat::BGRA8Unorm, size);
     // No shader writes, which would cost lossless compression on Apple GPUs.
@@ -109,46 +110,9 @@ fn surface_texture(device: &MTLDevicePtr, size: Size) -> Result<(CFRetained<IOSu
     Ok((surface, texture))
 }
 
-/// One generation of a ring's surfaces, of one size, and the borrowed ring
-/// target that draws into the textures over them.
-struct Generation {
-    target: BorrowedTarget,
-    surfaces: Vec<CFRetained<IOSurfaceRef>>,
-    /// The textures over `surfaces`, and each slot's depth texture when the
-    /// ring keeps depth.
-    textures: BorrowedTextures,
-    size: Size,
-}
-
-impl Generation {
-    fn new(
-        backend: &mut RendererBackend,
-        depth: usize,
-        size: Size,
-        producer: SyncKind,
-        keep_depth: bool,
-    ) -> Result<Generation, Error> {
-        let device = backend.device().device().clone();
-        let mut surfaces = Vec::with_capacity(depth);
-        let mut textures = Vec::with_capacity(depth);
-        let mut depth_textures = Vec::new();
-        for _ in 0..depth {
-            let (surface, texture) = surface_texture(&device, size)?;
-            surfaces.push(surface);
-            textures.push(texture);
-            if keep_depth {
-                depth_textures.push(depth_texture(&device, size)?);
-            }
-        }
-        let textures = BorrowedTextures { textures, size, depth_textures };
-        let target = BorrowedTarget::new(backend, textures.clone(), producer)?;
-        Ok(Generation { target, surfaces, textures, size })
-    }
-}
-
 /// A private texture of `size` that a frame stores its depth and stencil
 /// into, for the host to sample or draw into on the device.
-fn depth_texture(device: &MTLDevicePtr, size: Size) -> Result<MTLTexturePtr, Error> {
+fn depth_texture(device: &ProtocolObject<dyn MTLDevice>, size: Size) -> Result<Id<dyn MTLTexture>, Error> {
     let descriptor = texture_descriptor(MTLPixelFormat::Depth32Float_Stencil8, size);
     descriptor.setUsage(MTLTextureUsage::ShaderRead | MTLTextureUsage::RenderTarget);
     descriptor.setStorageMode(MTLStorageMode::Private);
@@ -157,128 +121,87 @@ fn depth_texture(device: &MTLDevicePtr, size: Size) -> Result<MTLTexturePtr, Err
 
 /// Frames drawn into IOSurfaces of the target's own, and queued for the host
 /// to acquire.
-pub struct ExportedTarget {
+pub type ExportedTarget = ring::ExportedTarget<MetalExporter>;
+
+/// An [`ExportedTarget`]'s part on Metal: it allocates IOSurfaces and the
+/// textures over them, and with the ring's depth, a private depth texture
+/// beside each.
+pub struct MetalExporter {
     depth: usize,
     producer: SyncKind,
     keep_depth: bool,
-    generations: Generations<Generation>,
 }
 
-impl ExportedTarget {
-    /// A target on `backend` that draws into `ring.depth` IOSurfaces of
-    /// `size` pixels, and hands each frame over with sync of the kind
-    /// `producer`, one of [`sync_kinds`]'s.
-    ///
+impl Exporter for MetalExporter {
+    type Ring = MetalRing;
+    /// A generation's surfaces, under the textures that frames draw into.
+    type Images = Vec<CFRetained<IOSurfaceRef>>;
+
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for
-    /// another kind than IOSurfaces or `producer`, and with
-    /// [`ErrorKind::Native`](mln_util::ErrorKind) when a surface can't be
-    /// made.
-    pub fn new(
+    /// another kind than IOSurfaces, or another producer kind than
+    /// [`sync_kinds`]'s.
+    fn new(
         backend: &mut RendererBackend,
         ring: &ExportedRing,
         kind: ExportKind,
-        size: Size,
         producer: SyncKind,
-    ) -> Result<ExportedTarget, Error> {
+    ) -> Result<MetalExporter, Error> {
         if !backend.device().export_kinds().contains(kind) {
             return Err(Error::unsupported(format!("the Metal device exports no {kind:?}")));
         }
         if !sync_kinds(backend.device()).0.contains(producer) {
             return Err(Error::unsupported(format!("an exported IOSurface hands no frame over with {producer:?}")));
         }
-        let current = Generation::new(backend, ring.depth, size, producer, ring.keep_depth)?;
-        Ok(ExportedTarget {
-            depth: ring.depth,
-            producer,
-            keep_depth: ring.keep_depth,
-            generations: Generations::new(current),
-        })
+        Ok(MetalExporter { depth: ring.depth, producer, keep_depth: ring.keep_depth })
     }
 
-    /// Has the next frame draw into the surface at `slot`.
-    pub fn select(&mut self, slot: usize) {
-        self.generations.current_mut().target.select(slot);
+    fn producer(&self) -> SyncKind {
+        self.producer
     }
 
-    /// The host gave the frame at `slot` back, once its reads reach
-    /// `consumer`.
-    ///
-    /// Fails as [`BorrowedTarget::release`] does.
-    pub fn release(&mut self, gpu: &mut MetalGpu, slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
-        if self.generations.give_back(slot, |mut generation| generation.target.tear_down(gpu)) {
-            return Ok(());
-        }
-        self.generations.current_mut().target.release(gpu, slot, consumer)
-    }
-
-    /// The host gave the frame at `slot` up.
-    pub fn discard(&mut self, gpu: &mut MetalGpu, slot: usize) {
-        if !self.generations.give_back(slot, |mut generation| generation.target.tear_down(gpu)) {
-            self.generations.current_mut().target.discard(gpu, slot);
-        }
-    }
-
-    /// Draws into surfaces of `size` pixels from now on. The frames that the
-    /// host holds, at `held` slots, keep their surfaces. Returns whether the
-    /// ring has new surfaces, which it doesn't when they have `size` already.
-    ///
     /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when a surface
-    /// can't be made, and the target then keeps its own.
-    pub fn resize(&mut self, backend: &mut RendererBackend, size: Size, held: &[usize]) -> Result<bool, Error> {
-        if self.size() == size {
-            return Ok(false);
+    /// or a texture can't be made.
+    fn allocate(
+        &self,
+        backend: &mut RendererBackend,
+        size: Size,
+    ) -> Result<(Vec<CFRetained<IOSurfaceRef>>, BorrowedTextures), Error> {
+        let device = backend.device().device();
+        let mut surfaces = Vec::with_capacity(self.depth);
+        let mut textures = Vec::with_capacity(self.depth);
+        let mut depth_textures = Vec::new();
+        for _ in 0..self.depth {
+            let (surface, texture) = surface_texture(device, size)?;
+            surfaces.push(surface);
+            textures.push(texture);
+            if self.keep_depth {
+                depth_textures.push(depth_texture(device, size)?);
+            }
         }
-        let next = Generation::new(backend, self.depth, size, self.producer, self.keep_depth)?;
-        let gpu = backend.gpu();
-        self.generations.replace(next, held, |mut generation| generation.target.tear_down(gpu));
-        Ok(true)
-    }
-
-    /// The size of the surfaces that frames draw into.
-    #[must_use]
-    pub fn size(&self) -> Size {
-        self.generations.current().size
+        Ok((surfaces, BorrowedTextures { textures, size, depth_textures }))
     }
 
     /// The surface of the frame at `slot`, the texture over it, and its
     /// depth texture when the ring keeps depth.
-    #[must_use]
-    pub fn image(&self, slot: usize) -> Option<ExportedFrame> {
-        let generations = &self.generations;
-        let generation = generations.retired(slot).unwrap_or(generations.current());
-        let surface = generation.surfaces.get(slot)?;
-        let native = |texture: &MTLTexturePtr| NativeTexture::Metal {
+    fn frame(
+        &self,
+        surfaces: &Vec<CFRetained<IOSurfaceRef>>,
+        textures: &BorrowedTextures,
+        slot: usize,
+    ) -> Option<ExportedFrame> {
+        let surface = surfaces.get(slot)?;
+        let native = |texture: &Id<dyn MTLTexture>| NativeTexture::Metal {
             texture: Retained::as_ptr(texture) as usize as u64,
             pixel_format: texture.pixelFormat().0 as u64,
         };
         Some(ExportedFrame {
-            size: generation.size,
+            size: textures.size,
             image: ExportedImage::IoSurface { surface: CFRetained::as_ptr(surface).as_ptr() as usize as u64 },
-            texture: native(generation.textures.textures.get(slot)?),
-            depth: generation
-                .textures
+            texture: native(textures.textures.get(slot)?),
+            depth: textures
                 .depth_textures
                 .get(slot)
                 .map(|texture| FrameDepth { texture: native(texture), export: None }),
         })
-    }
-}
-
-impl FrameTarget for ExportedTarget {
-    type Gpu = MetalGpu;
-
-    fn begin_frame(&mut self, gpu: &mut MetalGpu) -> Option<FrameImage> {
-        self.generations.current_mut().target.begin_frame(gpu)
-    }
-
-    fn end_frame(&mut self, gpu: &mut MetalGpu) -> Handoff {
-        match self.generations.current_mut().target.end_frame(gpu) {
-            Handoff::GivenBack { slot, sync } => Handoff::Queued { slot, sync },
-            other => other,
-        }
-    }
-
-    fn tear_down(&mut self, gpu: &mut MetalGpu) {
-        self.generations.clear(|generation| generation.target.tear_down(gpu));
     }
 }

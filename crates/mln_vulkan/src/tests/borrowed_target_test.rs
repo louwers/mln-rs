@@ -1,11 +1,11 @@
 use ash::vk;
 use mln_gfx::frame::FrameTarget as _;
+use mln_gfx::ring::Imports;
 use mln_gfx::{RendererBackend as _, SyncKind};
 use mln_util::error::ErrorKind;
 use mln_util::size::Size;
 
-use crate::borrowed_target::Imports;
-use crate::{BorrowedImage, BorrowedImages, BorrowedTarget, Device, ImageOwner, RendererBackend};
+use crate::{BorrowedImage, BorrowedImages, BorrowedTarget, Device, ImageOwner, RendererBackend, VulkanRing};
 
 /// A ring of two images of `size`. The handles are null: nothing here draws
 /// into them.
@@ -38,7 +38,8 @@ fn bad_sizes(device: &Device) -> [Size; 3] {
 fn imports_that_fail_are_destroyed() {
     let (device, mut backend) = backend();
     for size in bad_sizes(&device) {
-        let error = Imports::new(backend.gpu(), &images(size)).err().expect("no depth texture of that size");
+        let error =
+            Imports::new::<VulkanRing>(backend.gpu(), &images(size)).err().expect("no depth texture of that size");
         assert_eq!(error.kind, ErrorKind::Native, "{size:?}");
     }
 }

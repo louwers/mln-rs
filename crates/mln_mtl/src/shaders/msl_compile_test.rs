@@ -26,6 +26,7 @@ use objc2_metal::{
 
 use super::msl_sources::PRELUDE;
 use super::shader_source::{AttributeInfo, ShaderSource, shader_source};
+use crate::Id;
 
 const ALL_BUILT_INS: &[BuiltIn] = &[
     BuiltIn::ClippingMaskProgram,
@@ -75,7 +76,7 @@ fn sources() -> impl Iterator<Item = &'static ShaderSource> {
 /// defines `PROJECTION_GLOBE`.
 const PROJECTIONS: [(&str, bool); 2] = [("Mercator", false), ("globe", true)];
 
-fn device() -> Retained<ProtocolObject<dyn MTLDevice>> {
+fn device() -> Id<dyn MTLDevice> {
     MTLCreateSystemDefaultDevice().expect("no Metal device")
 }
 
@@ -84,7 +85,7 @@ fn compile(
     device: &ProtocolObject<dyn MTLDevice>,
     source: &str,
     defines: &[(String, String)],
-) -> Result<Retained<ProtocolObject<dyn MTLLibrary>>, String> {
+) -> Result<Id<dyn MTLLibrary>, String> {
     let keys: Vec<Retained<NSString>> = defines.iter().map(|(key, _)| NSString::from_str(key)).collect();
     let values: Vec<Retained<NSString>> = defines.iter().map(|(_, value)| NSString::from_str(value)).collect();
     let keys: Vec<&NSString> = keys.iter().map(|key| &**key).collect();

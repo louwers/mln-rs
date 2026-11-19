@@ -1,17 +1,16 @@
 // A ring of shared textures that the target allocates and renders into, for
 // the host to open through their NT handles on a D3D11 or D3D12 device of the
-// same adapter. A resize makes a new generation of textures; the frames that
-// the host holds keep the old generation's textures until they are given
-// back.
+// same adapter. The ring target (mln_gfx::ring) draws into them as into a
+// borrowed ring's.
 //
 // The textures are committed resources in a shared heap, which rest in the
 // common state between frames, as a texture that another device opens must.
 
-use mln_gfx::export::Generations;
-use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
+use std::os::windows::io::{AsRawHandle as _, OwnedHandle};
+
+use mln_gfx::ring::{self, Exporter};
 use mln_gfx::{
-    ConsumerSync, ExportKind, ExportKinds, ExportedFrame, ExportedImage, ExportedRing, FrameDepth, NativeTexture,
-    SyncKind, SyncKinds,
+    ExportKind, ExportKinds, ExportedFrame, ExportedImage, ExportedRing, FrameDepth, NativeTexture, SyncKind, SyncKinds,
 };
 use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
@@ -28,9 +27,8 @@ use windows::Win32::Graphics::Dxgi::Common::{
 };
 use windows::core::Interface as _;
 
-use crate::borrowed_target::{BorrowedTarget, BorrowedTextures, OwnedHandle, share};
+use crate::borrowed_target::{BorrowedTextures, D3d12Ring, share};
 use crate::device::Device;
-use crate::gpu::D3d12Gpu;
 use crate::renderer_backend::RendererBackend;
 
 /// The format of the ring's textures, which D3D11 and Vulkan open as well.
@@ -136,34 +134,62 @@ impl SharedTexture {
     }
 }
 
-/// One generation of a ring's textures, of one size, and the borrowed ring
-/// target that draws into them.
-struct Generation {
-    // Before the textures: dropping it waits for the frames that drew into
-    // them.
-    target: BorrowedTarget,
+/// Frames drawn into shared textures of the target's own, and queued for the
+/// host to acquire.
+pub type ExportedTarget = ring::ExportedTarget<D3d12Exporter>;
+
+/// An [`ExportedTarget`]'s part on D3D12: it allocates shared textures, and
+/// with the ring's depth, a depth texture beside each.
+pub struct D3d12Exporter {
+    depth: usize,
+    producer: SyncKind,
+    keep_depth: bool,
+}
+
+/// A generation's textures.
+pub struct SharedTextures {
     textures: Vec<SharedTexture>,
     /// Each slot's depth texture, when the ring keeps depth.
     depth_textures: Vec<ID3D12Resource>,
-    size: Size,
 }
 
-impl Generation {
+impl Exporter for D3d12Exporter {
+    type Ring = D3d12Ring;
+    type Images = SharedTextures;
+
+    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for
+    /// another kind than DXGI shared handles, or another producer kind than
+    /// [`sync_kinds`]'s.
     fn new(
         backend: &mut RendererBackend,
-        depth: usize,
-        size: Size,
+        ring: &ExportedRing,
+        kind: ExportKind,
         producer: SyncKind,
-        keep_depth: bool,
-    ) -> Result<Generation, Error> {
-        let device = backend.device().device().clone();
-        let mut textures = Vec::with_capacity(depth);
+    ) -> Result<D3d12Exporter, Error> {
+        if !export_kinds(backend.device()).contains(kind) {
+            return Err(Error::unsupported(format!("the D3D12 device exports no {kind:?}")));
+        }
+        if !sync_kinds().0.contains(producer) {
+            return Err(Error::unsupported(format!("an exported D3D12 texture hands no frame over with {producer:?}")));
+        }
+        Ok(D3d12Exporter { depth: ring.depth, producer, keep_depth: ring.keep_depth })
+    }
+
+    fn producer(&self) -> SyncKind {
+        self.producer
+    }
+
+    /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when a texture
+    /// can't be made or shared.
+    fn allocate(&self, backend: &mut RendererBackend, size: Size) -> Result<(SharedTextures, BorrowedTextures), Error> {
+        let device = backend.device().device();
+        let mut textures = Vec::with_capacity(self.depth);
         let mut depth_textures = Vec::new();
-        for _ in 0..depth {
-            textures.push(SharedTexture::new(&device, size)?);
-            if keep_depth {
+        for _ in 0..self.depth {
+            textures.push(SharedTexture::new(device, size)?);
+            if self.keep_depth {
                 depth_textures.push(committed_texture(
-                    &device,
+                    device,
                     size,
                     DEPTH_FORMAT,
                     D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL,
@@ -179,104 +205,13 @@ impl Generation {
             depth_textures: depth_textures.clone(),
             depth_state: DEPTH_STATE,
         };
-        let target = BorrowedTarget::new(backend, borrowed, producer)?;
-        Ok(Generation { target, textures, depth_textures, size })
-    }
-}
-
-/// Frames drawn into shared textures of the target's own, and queued for the
-/// host to acquire.
-pub struct ExportedTarget {
-    depth: usize,
-    producer: SyncKind,
-    keep_depth: bool,
-    generations: Generations<Generation>,
-}
-
-impl ExportedTarget {
-    /// A target on `backend` that draws into `ring.depth` shared textures of
-    /// `size` pixels, and hands each frame over with sync of the kind
-    /// `producer`, one of [`sync_kinds`]'s.
-    ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for
-    /// another kind than DXGI shared handles or `producer`, and with
-    /// [`ErrorKind::Native`](mln_util::ErrorKind) when a texture can't be
-    /// made.
-    pub fn new(
-        backend: &mut RendererBackend,
-        ring: &ExportedRing,
-        kind: ExportKind,
-        size: Size,
-        producer: SyncKind,
-    ) -> Result<ExportedTarget, Error> {
-        if !export_kinds(backend.device()).contains(kind) {
-            return Err(Error::unsupported(format!("the D3D12 device exports no {kind:?}")));
-        }
-        if !sync_kinds().0.contains(producer) {
-            return Err(Error::unsupported(format!("an exported D3D12 texture hands no frame over with {producer:?}")));
-        }
-        let current = Generation::new(backend, ring.depth, size, producer, ring.keep_depth)?;
-        Ok(ExportedTarget {
-            depth: ring.depth,
-            producer,
-            keep_depth: ring.keep_depth,
-            generations: Generations::new(current),
-        })
-    }
-
-    /// Has the next frame draw into the texture at `slot`.
-    pub fn select(&mut self, slot: usize) {
-        self.generations.current_mut().target.select(slot);
-    }
-
-    /// The host gave the frame at `slot` back, once its reads reach
-    /// `consumer`.
-    ///
-    /// Fails as [`BorrowedTarget::release`] does.
-    pub fn release(&mut self, gpu: &mut D3d12Gpu, slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
-        if self.generations.give_back(slot, |mut generation| generation.target.tear_down(gpu)) {
-            return Ok(());
-        }
-        self.generations.current_mut().target.release(gpu, slot, consumer)
-    }
-
-    /// The host gave the frame at `slot` up.
-    pub fn discard(&mut self, gpu: &mut D3d12Gpu, slot: usize) {
-        if !self.generations.give_back(slot, |mut generation| generation.target.tear_down(gpu)) {
-            self.generations.current_mut().target.discard(gpu, slot);
-        }
-    }
-
-    /// Draws into textures of `size` pixels from now on. The frames that the
-    /// host holds, at `held` slots, keep their textures. Returns whether the
-    /// ring has new textures, which it doesn't when they have `size` already.
-    ///
-    /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when a texture
-    /// can't be made, and the target then keeps its own.
-    pub fn resize(&mut self, backend: &mut RendererBackend, size: Size, held: &[usize]) -> Result<bool, Error> {
-        use mln_gfx::RendererBackend as _;
-        if self.size() == size {
-            return Ok(false);
-        }
-        let next = Generation::new(backend, self.depth, size, self.producer, self.keep_depth)?;
-        let gpu = backend.gpu();
-        self.generations.replace(next, held, |mut generation| generation.target.tear_down(gpu));
-        Ok(true)
-    }
-
-    /// The size of the textures that frames draw into.
-    #[must_use]
-    pub fn size(&self) -> Size {
-        self.generations.current().size
+        Ok((SharedTextures { textures, depth_textures }, borrowed))
     }
 
     /// The shared texture of the frame at `slot`, its resource, and its
     /// depth texture when the ring keeps depth.
-    #[must_use]
-    pub fn image(&self, slot: usize) -> Option<ExportedFrame> {
-        let generations = &self.generations;
-        let generation = generations.retired(slot).unwrap_or(generations.current());
-        let texture = generation.textures.get(slot)?;
+    fn frame(&self, images: &SharedTextures, textures: &BorrowedTextures, slot: usize) -> Option<ExportedFrame> {
+        let texture = images.textures.get(slot)?;
         let native =
             |resource: &ID3D12Resource, format: DXGI_FORMAT, state: D3D12_RESOURCE_STATES| NativeTexture::D3d12 {
                 resource: resource.as_raw() as usize as u64,
@@ -284,35 +219,16 @@ impl ExportedTarget {
                 state: state.0 as u32,
             };
         Some(ExportedFrame {
-            size: generation.size,
+            size: textures.size,
             image: ExportedImage::DxgiSharedTexture {
-                handle: texture.handle.0.0 as usize as u64,
+                handle: texture.handle.as_raw_handle() as usize as u64,
                 format: FORMAT.0 as u32,
             },
             texture: native(&texture.resource, FORMAT, STATE),
-            depth: generation
+            depth: images
                 .depth_textures
                 .get(slot)
                 .map(|depth| FrameDepth { texture: native(depth, DEPTH_FORMAT, DEPTH_STATE), export: None }),
         })
-    }
-}
-
-impl FrameTarget for ExportedTarget {
-    type Gpu = D3d12Gpu;
-
-    fn begin_frame(&mut self, gpu: &mut D3d12Gpu) -> Option<FrameImage> {
-        self.generations.current_mut().target.begin_frame(gpu)
-    }
-
-    fn end_frame(&mut self, gpu: &mut D3d12Gpu) -> Handoff {
-        match self.generations.current_mut().target.end_frame(gpu) {
-            Handoff::GivenBack { slot, sync } => Handoff::Queued { slot, sync },
-            other => other,
-        }
-    }
-
-    fn tear_down(&mut self, gpu: &mut D3d12Gpu) {
-        self.generations.clear(|generation| generation.target.tear_down(gpu));
     }
 }

@@ -30,6 +30,7 @@ use std::sync::Arc;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::offscreen_target::OffscreenTarget;
 use mln_gfx::rendering_stats::RenderingStats;
+use mln_gfx::ring::{self, Exporter, RingBackend};
 use mln_gfx::{
     ConsumerSync, ExportKind, ExportedFrame, ExportedRing, FrameImage, FrameTarget, Handoff, RendererBackend, SyncKind,
     Window,
@@ -131,13 +132,13 @@ macro_rules! borrowed {
     };
 }
 
-/// A ring target whose host's reads the ring waits for as it lets go of its
-/// textures.
-macro_rules! borrowed_pending {
-    ($backend:ty, $type:ty, $kind:ident, $what:literal, $reads:ty) => {
-        impl Borrowed<$backend> for $type {
+/// A ring target written once in `mln_gfx`, on the backend `$backend`,
+/// whose ring waits for the host's reads as it lets go of its textures.
+macro_rules! borrowed_ring {
+    ($backend:ty, $ring:ty, $kind:ident, $what:literal) => {
+        impl Borrowed<$backend> for ring::BorrowedTarget<$ring> {
             fn select(&mut self, slot: usize) {
-                <$type>::select(self, slot);
+                ring::BorrowedTarget::select(self, slot);
             }
             fn release(
                 &mut self,
@@ -145,10 +146,10 @@ macro_rules! borrowed_pending {
                 slot: usize,
                 consumer: ConsumerSync,
             ) -> Result<(), Error> {
-                <$type>::release(self, gpu, slot, consumer)
+                ring::BorrowedTarget::release(self, gpu, slot, consumer)
             }
             fn discard(&mut self, gpu: &mut <$backend as RendererBackend>::Gpu, slot: usize) {
-                <$type>::discard(self, gpu, slot);
+                ring::BorrowedTarget::discard(self, gpu, slot);
             }
             fn replace(
                 &mut self,
@@ -158,39 +159,27 @@ macro_rules! borrowed_pending {
                 let RingKind::$kind(textures) = ring.kind else {
                     return Err(Error::unsupported(concat!("a ring of ", $what, " takes ", $what, " only")));
                 };
-                <$type>::replace(self, gpu, textures).map(pending)
+                ring::BorrowedTarget::replace(self, gpu, textures).map(pending)
             }
             fn take_pending(&mut self, gpu: &mut <$backend as RendererBackend>::Gpu) -> Pending {
-                pending(<$type>::take_pending(self, gpu))
-            }
-        }
-
-        impl PendingReads for $reads {
-            fn poll(&mut self) -> bool {
-                <$reads>::poll(self)
+                pending(ring::BorrowedTarget::take_pending(self, gpu))
             }
         }
     };
 }
 
+impl<R: RingBackend> PendingReads for ring::PendingReads<R> {
+    fn poll(&mut self) -> bool {
+        ring::PendingReads::poll(self)
+    }
+}
+
 #[cfg(all(feature = "metal", target_vendor = "apple"))]
-borrowed_pending!(mln_mtl::RendererBackend, mln_mtl::BorrowedTarget, Metal, "Metal textures", mln_mtl::PendingReads);
+borrowed_ring!(mln_mtl::RendererBackend, mln_mtl::MetalRing, Metal, "Metal textures");
 #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
-borrowed_pending!(
-    mln_vulkan::RendererBackend,
-    mln_vulkan::BorrowedTarget,
-    Vulkan,
-    "Vulkan images",
-    mln_vulkan::PendingReads
-);
+borrowed_ring!(mln_vulkan::RendererBackend, mln_vulkan::VulkanRing, Vulkan, "Vulkan images");
 #[cfg(all(feature = "d3d12", windows))]
-borrowed_pending!(
-    mln_d3d12::RendererBackend,
-    mln_d3d12::BorrowedTarget,
-    D3d12,
-    "D3D12 textures",
-    mln_d3d12::PendingReads
-);
+borrowed_ring!(mln_d3d12::RendererBackend, mln_d3d12::D3d12Ring, D3d12, "D3D12 textures");
 
 #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
 impl Borrowed<mln_webgpu::RendererBackend> for mln_webgpu::BorrowedTarget {
@@ -214,52 +203,58 @@ impl Borrowed<mln_webgpu::RendererBackend> for mln_webgpu::BorrowedTarget {
 #[cfg(all(feature = "gl", not(target_family = "wasm")))]
 borrowed!(mln_gl::RendererBackend, mln_gl::BorrowedTarget, Gl, "OpenGL textures", |()| None);
 
-/// An exported ring target of the backend `$backend` of the type `$type`,
-/// which `$resize` resizes with the backend.
-macro_rules! exported {
-    ($backend:ty, $type:ty, $resize:expr) => {
-        impl Exported<$backend> for $type {
-            fn select(&mut self, slot: usize) {
-                <$type>::select(self, slot);
-            }
-            fn release(
-                &mut self,
-                gpu: &mut <$backend as RendererBackend>::Gpu,
-                slot: usize,
-                consumer: ConsumerSync,
-            ) -> Result<(), Error> {
-                <$type>::release(self, gpu, slot, consumer)
-            }
-            fn discard(&mut self, gpu: &mut <$backend as RendererBackend>::Gpu, slot: usize) {
-                <$type>::discard(self, gpu, slot);
-            }
-            fn resize(&mut self, backend: &mut $backend, size: Size, held: &[usize]) -> Result<bool, Error> {
-                $resize(self, backend, size, held)
-            }
-            fn size(&self) -> Size {
-                <$type>::size(self)
-            }
-            fn image(&self, slot: usize) -> Option<ExportedFrame> {
-                <$type>::image(self, slot)
-            }
-        }
-    };
+impl<E: Exporter> Exported<<E::Ring as RingBackend>::Renderer> for ring::ExportedTarget<E> {
+    fn select(&mut self, slot: usize) {
+        ring::ExportedTarget::select(self, slot);
+    }
+    fn release(
+        &mut self,
+        gpu: &mut <E::Ring as RingBackend>::Gpu,
+        slot: usize,
+        consumer: ConsumerSync,
+    ) -> Result<(), Error> {
+        ring::ExportedTarget::release(self, gpu, slot, consumer)
+    }
+    fn discard(&mut self, gpu: &mut <E::Ring as RingBackend>::Gpu, slot: usize) {
+        ring::ExportedTarget::discard(self, gpu, slot);
+    }
+    fn resize(
+        &mut self,
+        backend: &mut <E::Ring as RingBackend>::Renderer,
+        size: Size,
+        held: &[usize],
+    ) -> Result<bool, Error> {
+        ring::ExportedTarget::resize(self, backend, size, held)
+    }
+    fn size(&self) -> Size {
+        ring::ExportedTarget::size(self)
+    }
+    fn image(&self, slot: usize) -> Option<ExportedFrame> {
+        ring::ExportedTarget::image(self, slot)
+    }
 }
 
-#[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
-exported!(mln_vulkan::RendererBackend, mln_vulkan::ExportedTarget, mln_vulkan::ExportedTarget::resize);
-#[cfg(all(feature = "metal", target_vendor = "apple"))]
-exported!(mln_mtl::RendererBackend, mln_mtl::ExportedTarget, mln_mtl::ExportedTarget::resize);
 #[cfg(all(feature = "gl", unix, not(target_vendor = "apple")))]
-exported!(
-    mln_gl::RendererBackend,
-    mln_gl::ExportedTarget,
-    |target: &mut mln_gl::ExportedTarget, backend: &mut mln_gl::RendererBackend, size, held: &[usize]| {
-        target.resize(&mut backend.gpu(), size, held)
+impl Exported<mln_gl::RendererBackend> for mln_gl::ExportedTarget {
+    fn select(&mut self, slot: usize) {
+        mln_gl::ExportedTarget::select(self, slot);
     }
-);
-#[cfg(all(feature = "d3d12", windows))]
-exported!(mln_d3d12::RendererBackend, mln_d3d12::ExportedTarget, mln_d3d12::ExportedTarget::resize);
+    fn release(&mut self, gpu: &mut mln_gl::GlGpu, slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
+        mln_gl::ExportedTarget::release(self, gpu, slot, consumer)
+    }
+    fn discard(&mut self, gpu: &mut mln_gl::GlGpu, slot: usize) {
+        mln_gl::ExportedTarget::discard(self, gpu, slot);
+    }
+    fn resize(&mut self, backend: &mut mln_gl::RendererBackend, size: Size, held: &[usize]) -> Result<bool, Error> {
+        mln_gl::ExportedTarget::resize(self, &mut backend.gpu(), size, held)
+    }
+    fn size(&self) -> Size {
+        mln_gl::ExportedTarget::size(self)
+    }
+    fn image(&self, slot: usize) -> Option<ExportedFrame> {
+        mln_gl::ExportedTarget::image(self, slot)
+    }
+}
 
 /// A surface target of the backend `$backend` of the type `$type`.
 macro_rules! presenting {

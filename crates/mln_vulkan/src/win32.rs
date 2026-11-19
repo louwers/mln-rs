@@ -8,11 +8,12 @@
 // the library loads on a Windows without them.
 
 use std::ffi::c_void;
+use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _, OwnedHandle};
 use std::sync::OnceLock;
 
 use mln_util::error::Error;
 use parking_lot::Mutex;
-use windows::Win32::Foundation::{CloseHandle, HANDLE, HMODULE, LUID};
+use windows::Win32::Foundation::{HMODULE, LUID};
 use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE, D3D_DRIVER_TYPE_UNKNOWN, D3D_FEATURE_LEVEL};
 use windows::Win32::Graphics::Direct3D11::{
     D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_QUERY_DESC, D3D11_QUERY_EVENT,
@@ -77,37 +78,6 @@ fn functions() -> Result<&'static Functions, Error> {
         .as_ref()
         .ok_or_else(|| Error::unsupported("This Windows has no D3D11"))
 }
-
-/// An NT handle, which dropping closes.
-pub(crate) struct OwnedHandle(HANDLE);
-
-impl OwnedHandle {
-    /// Takes `handle`, an NT handle that the caller owns.
-    ///
-    /// # Safety
-    ///
-    /// Nothing else closes `handle`.
-    pub(crate) unsafe fn from_raw(handle: isize) -> OwnedHandle {
-        OwnedHandle(HANDLE(handle as *mut c_void))
-    }
-
-    /// The handle, as an integer, as Vulkan takes it.
-    pub(crate) fn as_raw(&self) -> isize {
-        self.0.0 as isize
-    }
-}
-
-impl Drop for OwnedHandle {
-    fn drop(&mut self) {
-        // SAFETY: the handle is this one's to close.
-        let _ = unsafe { CloseHandle(self.0) };
-    }
-}
-
-// SAFETY: an NT handle may be used and closed from any thread.
-unsafe impl Send for OwnedHandle {}
-// SAFETY: as above; nothing here changes the handle.
-unsafe impl Sync for OwnedHandle {}
 
 /// A D3D11 device on the DXGI adapter of a Vulkan GPU, which makes the
 /// textures of the GPU's exported rings.
@@ -206,7 +176,7 @@ impl TextureDevice {
             let handle = resource
                 .CreateSharedHandle(None, (DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE).0, PCWSTR::null())
                 .map_err(native("D3D11 can't share the texture"))?;
-            let shared = SharedTexture { _texture: texture, handle: OwnedHandle(handle) };
+            let shared = SharedTexture { _texture: texture, handle: OwnedHandle::from_raw_handle(handle.0) };
             // A driver may clear the texture with work on the immediate
             // context, as DXVK does, which must not land after Vulkan renders
             // into it.
@@ -246,6 +216,6 @@ unsafe impl Sync for SharedTexture {}
 impl SharedTexture {
     /// The texture's NT handle, which the texture owns.
     pub(crate) fn handle(&self) -> isize {
-        self.handle.as_raw()
+        self.handle.as_raw_handle() as isize
     }
 }

@@ -31,10 +31,10 @@ mod shaders;
 mod surface_target;
 mod upload;
 
-pub use borrowed_target::{BorrowedTarget, BorrowedTextures, PendingReads, depth_stencil_format};
+pub use borrowed_target::{BorrowedTarget, BorrowedTextures, D3d12Ring, PendingReads, depth_stencil_format};
 pub use custom_layer::{CustomLayerEncoder, CustomLayerPass};
 pub use device::Device;
-pub use exported_target::ExportedTarget;
+pub use exported_target::{D3d12Exporter, ExportedTarget};
 pub use gpu::D3d12Gpu;
 /// Frames drawn into textures of the library's and read back.
 pub type OffscreenTarget = mln_gfx::offscreen_target::OffscreenTarget<D3d12Gpu>;

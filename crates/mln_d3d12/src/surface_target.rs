@@ -15,6 +15,7 @@
 //   (`begin_frame`), and presents nothing while it is occluded.
 
 use std::ffi::c_void;
+use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _, OwnedHandle};
 use std::sync::Arc;
 
 use mln_gfx::Window;
@@ -27,7 +28,7 @@ use mln_gfx::window::raw_window_handle::RawWindowHandle;
 use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
-use windows::Win32::Foundation::{CloseHandle, DXGI_STATUS_OCCLUDED, HANDLE, HWND, WAIT_OBJECT_0};
+use windows::Win32::Foundation::{DXGI_STATUS_OCCLUDED, HANDLE, HWND, WAIT_OBJECT_0};
 use windows::Win32::Graphics::Direct3D12::{D3D12_RESOURCE_STATE_PRESENT, ID3D12Resource};
 use windows::Win32::Graphics::DirectComposition::IDCompositionVisual;
 use windows::Win32::Graphics::Dxgi::Common::{
@@ -201,16 +202,6 @@ struct Buffers {
     depth_stencil: TextureId,
 }
 
-/// An event handle, which dropping closes.
-struct OwnedHandle(HANDLE);
-
-impl Drop for OwnedHandle {
-    fn drop(&mut self) {
-        // SAFETY: the handle is this one's to close.
-        let _ = unsafe { CloseHandle(self.0) };
-    }
-}
-
 /// Frames presented through a flip-model swap chain.
 pub struct SurfaceTarget {
     device: Device,
@@ -300,7 +291,7 @@ impl SurfaceTarget {
         // object (`FLAGS`) that the target then owns.
         let waitable = unsafe {
             swap_chain.SetMaximumFrameLatency(LATENCY).map_err(native("SetMaximumFrameLatency"))?;
-            OwnedHandle(swap_chain.GetFrameLatencyWaitableObject())
+            OwnedHandle::from_raw_handle(swap_chain.GetFrameLatencyWaitableObject().0)
         };
         Ok(SurfaceTarget {
             device,
@@ -400,7 +391,8 @@ impl SurfaceTarget {
             return true;
         }
         // SAFETY: the swap chain's waitable object, which the target owns.
-        let waited = unsafe { WaitForSingleObjectEx(self.waitable.0, WAIT_MILLISECONDS, true) } == WAIT_OBJECT_0;
+        let waited = unsafe { WaitForSingleObjectEx(HANDLE(self.waitable.as_raw_handle()), WAIT_MILLISECONDS, true) }
+            == WAIT_OBJECT_0;
         self.waited = waited;
         waited
     }

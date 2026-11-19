@@ -19,8 +19,8 @@ use objc2_core_foundation::CGSize;
 use objc2_metal::{MTLCommandBuffer, MTLDevice, MTLPixelFormat, MTLTexture};
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
 
+use crate::Id;
 use crate::gpu::MetalGpu;
-use crate::mtl_fwd::MTLDevicePtr;
 use crate::renderer_backend::RendererBackend;
 
 /// The format of the layer's drawables.
@@ -46,7 +46,7 @@ pub type Overlay = Box<dyn FnMut(&OverlayTarget<'_>)>;
 
 /// The frame's drawable, and the texture of the `Gpu` it is.
 struct Frame {
-    drawable: Retained<ProtocolObject<dyn CAMetalDrawable>>,
+    drawable: Id<dyn CAMetalDrawable>,
     color: TextureId,
 }
 
@@ -85,7 +85,7 @@ impl std::fmt::Debug for Layer {
 
 /// Frames presented to a `CAMetalLayer`.
 pub struct SurfaceTarget {
-    device: MTLDevicePtr,
+    device: Id<dyn MTLDevice>,
     layer: Retained<CAMetalLayer>,
     size: Size,
     /// The frame's drawable, from `begin_frame` until `end_frame`.
