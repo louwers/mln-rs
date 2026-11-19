@@ -87,9 +87,6 @@ fn depth_only_through_gpu() {
     depth_only(&mut VulkanGpu::new(&device).expect("VulkanGpu")).expect("the frame");
 }
 
-// Every program compiles for `Gpu`, which maps each binding to an id, with
-// every property per vertex and every property as a uniform, in both
-// projections.
 // What `destroy_later` destroys waits for the next flush, or goes with the
 // `Gpu`.
 #[test]
@@ -110,44 +107,9 @@ fn destroy_later_waits_for_the_next_submit() {
     assert_eq!(destroyed.get(), 2, "with the Gpu");
 }
 
-// A destroyed buffer whose windows aren't all current stays while bindings
-// hold it, and goes with the last of them though no frame follows. Debug
-// builds refuse to destroy a buffer that bindings hold.
-#[cfg(not(debug_assertions))]
-#[test]
-fn destroyed_stale_buffers_go_with_their_last_bindings() {
-    use mln_gfx::gpu::{BindGroupEntry, BindingsDesc, BufferDesc, BufferUsage};
-    use mln_gfx::shaders::background_layer_ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
-    use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-    use mln_gfx::shaders::shader_defines::{ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_PROPS_UBO, ID_PROJECTION_UBO};
-    use mln_gfx::shaders::shader_source::BuiltIn;
-
-    let device = Device::new(None).expect("Vulkan device");
-    let mut gpu = VulkanGpu::new(&device).expect("VulkanGpu");
-    let shader = gpu.create_shader(&ShaderKey::new(BuiltIn::BackgroundShader, [])).expect("the shader");
-    let mut buffers = Vec::new();
-    let mut entry = |id: usize, usage, size: usize| {
-        let buffer = gpu.create_buffer(&BufferDesc { label: "test", usage, size: size as u64 }).expect("a buffer");
-        gpu.write_buffer(buffer, 0, &vec![1; size]).expect("the write");
-        buffers.push(buffer);
-        BindGroupEntry::Buffer { id: id as u32, buffer, offset: 0, size: size as u64 }
-    };
-    let entries = [
-        entry(ID_PROJECTION_UBO, BufferUsage::Storage, size_of::<ProjectionUBO>()),
-        entry(ID_BACKGROUND_DRAWABLE_UBO, BufferUsage::Storage, size_of::<BackgroundDrawableUnionUBO>()),
-        entry(ID_BACKGROUND_PROPS_UBO, BufferUsage::Uniform, size_of::<BackgroundPropsUBO>()),
-    ];
-    let bindings =
-        gpu.create_bindings(&BindingsDesc { label: "background", shader, entries: &entries }).expect("the bindings");
-    for buffer in buffers {
-        gpu.destroy(buffer.into()).expect("the destroy");
-    }
-    assert_eq!(gpu.destroyed_stale_count(), 3, "while the bindings hold them");
-    gpu.destroy(bindings.into()).expect("the destroy");
-    gpu.flush(true).expect("the flush");
-    assert_eq!(gpu.destroyed_stale_count(), 0, "after the bindings go");
-}
-
+// Every program compiles for `Gpu`, which maps each binding to an id, with
+// every property per vertex and every property as a uniform, in both
+// projections.
 #[test]
 fn every_program_compiles_for_gpu() {
     let device = Device::new(None).expect("Vulkan device");

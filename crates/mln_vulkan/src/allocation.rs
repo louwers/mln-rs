@@ -1,8 +1,6 @@
 //! Buffers and images with their memory from gpu-allocator, which keeps
-//! host-visible memory mapped. Dropping one destroys it at once: its owner
-//! waits for the commands that use it first.
-
-use std::rc::Rc;
+//! host-visible memory mapped. Their owner destroys each through its
+//! backend, once the commands that use it have finished.
 
 use ash::vk;
 use gpu_allocator::MemoryLocation;
@@ -10,11 +8,11 @@ use gpu_allocator::vulkan::{Allocation, AllocationCreateDesc, AllocationScheme};
 
 use crate::renderer_backend::BackendImpl;
 
-/// A buffer and its memory, mapped.
+/// A buffer and its memory, mapped, which [`destroy`](Self::destroy)
+/// frees.
 pub(crate) struct BufferAllocation {
-    backend: Rc<BackendImpl>,
     buffer: vk::Buffer,
-    allocation: Option<Allocation>,
+    allocation: Allocation,
     mapped_buffer: *mut u8,
 }
 
@@ -22,7 +20,7 @@ impl BufferAllocation {
     /// Creates a buffer of `size` bytes in host-visible memory, written
     /// (`MemoryLocation::CpuToGpu`) or read (`GpuToCpu`) by the CPU.
     pub(crate) fn create(
-        backend: &Rc<BackendImpl>,
+        backend: &BackendImpl,
         size: usize,
         usage: vk::BufferUsageFlags,
         location: MemoryLocation,
@@ -64,7 +62,15 @@ impl BufferAllocation {
             }
         };
         let mapped_buffer = allocation.mapped_ptr().map_or(std::ptr::null_mut(), |p| p.as_ptr().cast::<u8>());
-        Some(BufferAllocation { backend: Rc::clone(backend), buffer, allocation: Some(allocation), mapped_buffer })
+        Some(BufferAllocation { buffer, allocation, mapped_buffer })
+    }
+
+    /// Destroys the buffer and frees its memory, which no command that
+    /// hasn't finished uses.
+    pub(crate) fn destroy(self, backend: &BackendImpl) {
+        // SAFETY: the commands that use the buffer have finished.
+        unsafe { backend.get_device().destroy_buffer(self.buffer, None) };
+        let _ = backend.with_allocator(|allocator| allocator.free(self.allocation));
     }
 
     #[must_use]
@@ -79,22 +85,11 @@ impl BufferAllocation {
     }
 }
 
-impl Drop for BufferAllocation {
-    fn drop(&mut self) {
-        // SAFETY: the owner of the allocation waited for the commands that
-        // use the buffer, if any.
-        unsafe { self.backend.get_device().destroy_buffer(self.buffer, None) };
-        if let Some(allocation) = self.allocation.take() {
-            let _ = self.backend.with_allocator(|allocator| allocator.free(allocation));
-        }
-    }
-}
-
-/// An image, its memory and its view.
+/// An image, its memory and its view, which [`destroy`](Self::destroy)
+/// frees.
 pub(crate) struct ImageAllocation {
-    backend: Rc<BackendImpl>,
     image: vk::Image,
-    allocation: Option<Allocation>,
+    allocation: Allocation,
     image_view: vk::ImageView,
 }
 
@@ -102,7 +97,7 @@ impl ImageAllocation {
     /// Creates an image in device memory (`MemoryLocation::GpuOnly`) or in
     /// memory the CPU reads (`GpuToCpu`).
     pub(crate) fn create(
-        backend: &Rc<BackendImpl>,
+        backend: &BackendImpl,
         image_info: &vk::ImageCreateInfo<'_>,
         location: MemoryLocation,
         name: &str,
@@ -138,17 +133,13 @@ impl ImageAllocation {
                 return None;
             }
         };
-        Some(ImageAllocation {
-            backend: Rc::clone(backend),
-            image,
-            allocation: Some(allocation),
-            image_view: vk::ImageView::null(),
-        })
+        Some(ImageAllocation { image, allocation, image_view: vk::ImageView::null() })
     }
 
     /// Creates the image's view, of every mip level of `aspect`.
     pub(crate) fn create_view(
         &mut self,
+        device: &ash::Device,
         format: vk::Format,
         components: vk::ComponentMapping,
         aspect: vk::ImageAspectFlags,
@@ -167,7 +158,7 @@ impl ImageAllocation {
                 layer_count: 1,
             });
         // SAFETY: the image is live and of `format`.
-        match unsafe { self.backend.get_device().create_image_view(&create_info, None) } {
+        match unsafe { device.create_image_view(&create_info, None) } {
             Ok(view) => {
                 self.image_view = view;
                 true
@@ -185,22 +176,19 @@ impl ImageAllocation {
     pub(crate) fn image_view(&self) -> vk::ImageView {
         self.image_view
     }
-}
 
-impl Drop for ImageAllocation {
-    fn drop(&mut self) {
-        let device = self.backend.get_device();
-        // SAFETY: the owner of the allocation waited for the commands that
-        // use the image, if any.
+    /// Destroys the view and the image and frees its memory, which no
+    /// command that hasn't finished uses.
+    pub(crate) fn destroy(self, backend: &BackendImpl) {
+        let device = backend.get_device();
+        // SAFETY: the commands that use the image have finished.
         unsafe {
             if self.image_view != vk::ImageView::null() {
                 device.destroy_image_view(self.image_view, None);
             }
             device.destroy_image(self.image, None);
         }
-        if let Some(allocation) = self.allocation.take() {
-            let _ = self.backend.with_allocator(|allocator| allocator.free(allocation));
-        }
+        let _ = backend.with_allocator(|allocator| allocator.free(self.allocation));
     }
 }
 
