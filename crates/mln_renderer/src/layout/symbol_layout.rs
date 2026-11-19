@@ -350,7 +350,9 @@ pub(crate) struct SymbolLayout {
 
     features: Vec<SymbolFeature>,
 
-    need_finalize_symbols_val: bool,
+    /// Whether a feature has text that font files shape, which
+    /// `finalize_symbols` takes the shaping of.
+    has_font_text: bool,
 }
 
 impl SymbolLayout {
@@ -400,7 +402,7 @@ impl SymbolLayout {
             text_variable_anchor_offset: leader.layout.text_variable_anchor_offset.clone(),
             layout,
             features: Vec::new(),
-            need_finalize_symbols_val: false,
+            has_font_text: false,
         };
 
         // These property values are retained unevaluated; capture the
@@ -521,8 +523,8 @@ impl SymbolLayout {
                     }
 
                     // Only the sections that draw from glyph PBFs take their
-                    // Arabic presentation forms. HarfBuzz needs the letters
-                    // themselves, to apply the font's own joining rules.
+                    // Arabic presentation forms. A font file needs the
+                    // letters themselves, to apply its own joining rules.
                     // The text ends at its first NUL, as in C++.
                     let chars: Vec<char> = u8string.chars().take_while(|&c| c != '\0').collect();
                     let section_scale = section.font_scale.unwrap_or(1.0);
@@ -614,7 +616,7 @@ impl SymbolLayout {
                         if section.type_ != GlyphIDType::System {
                             dependencies.insert(GlyphID::with_type(0, section.type_));
                         }
-                        this.need_finalize_symbols_val = true;
+                        this.has_font_text = true;
                     }
                 }
                 ft.formatted_text = Some(formatted_text);
@@ -1468,7 +1470,7 @@ impl Layout<Symbol> for SymbolLayout {
         build: &BuildParams,
     ) -> Result<Option<SymbolBucket>, Error> {
         if let Some(resolved) = resolved {
-            if self.need_finalize_symbols_val {
+            if self.has_font_text {
                 self.finalize_symbols(&resolved.shaping);
             }
             self.prepare_symbols(&resolved.glyphs, &resolved.icons);
@@ -1485,7 +1487,7 @@ impl Layout<Symbol> for SymbolLayout {
 }
 
 impl SymbolLayout {
-    /// Applies the HarfBuzz shaping of the text that font faces draw,
+    /// Applies the shaping of the text that font files draw,
     /// before `prepare_symbols`.
     fn finalize_symbols(&mut self, results: &ShapeResults) {
         let unshaped = Arc::new(ShapedText::default());
@@ -1497,7 +1499,7 @@ impl SymbolLayout {
             let Some(formatted_text) = &feature.formatted_text else {
                 continue;
             };
-            if !formatted_text.has_need_hb_shape_text() || formatted_text.hb_shaped() {
+            if !formatted_text.has_font_sections() || formatted_text.is_shaped() {
                 continue;
             }
 
@@ -1561,7 +1563,7 @@ impl SymbolLayout {
             feature.formatted_text = Some(shaped_string);
         }
 
-        self.need_finalize_symbols_val = false;
+        self.has_font_text = false;
     }
 
     /// Prepares the symbols once their glyphs and images are available.

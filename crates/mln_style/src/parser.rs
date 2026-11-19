@@ -200,7 +200,6 @@ impl Parser {
             self.glyph_url = glyphs.to_owned();
         }
 
-        // symbols: "font-faces" (MLN_TEXT_SHAPING_HARFBUZZ).
         if let Some(faces) = member(object, "font-faces")
             && let Some(faces) = faces.as_object()
         {

@@ -100,7 +100,8 @@ enum RangeState {
 #[derive(Default)]
 struct Entry {
     ranges: VecMap<GlyphRange, RangeState>,
-    /// Local and HarfBuzz glyphs. PBF glyphs are in the ranges.
+    /// Local glyphs and the glyphs of font files. PBF glyphs are in the
+    /// ranges.
     glyphs: BTreeMap<GlyphID, Arc<Glyph>>,
     /// The PBF glyph IDs that no local font has.
     no_local: BTreeSet<GlyphID>,
@@ -571,7 +572,7 @@ impl GlyphStore {
             let url = self.font_face_url(range.type_);
             if url.is_empty() {
                 // The request of an empty URL fails, as the glyphs do.
-                Log::error(Event::Style, "Try download a glyph doesn't in current faces");
+                Log::error(Event::Style, format!("font face {} has no URL", range.type_.id()));
             }
             Resource::font_face(&url)
         };

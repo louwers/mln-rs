@@ -682,8 +682,8 @@ fn shape_lines(
             let rect: RectU16;
             let mut metrics = GlyphMetrics::default();
             let mut advance: f32;
-            let mut x_hb_offset: f32 = 0.0;
-            let mut y_hb_offset: f32 = 0.0;
+            let mut x_glyph_offset: f32 = 0.0;
+            let mut y_glyph_offset: f32 = 0.0;
             let mut vertical_advance: f32 = ONE_EM;
             let mut section_scale: f64 = section.scale;
             debug_assert!(section_scale != 0.0);
@@ -720,13 +720,13 @@ fn shape_lines(
 
                     if let Some(adjust) = adjust {
                         advance = adjust.advance;
-                        x_hb_offset = (f64::from(adjust.x_offset) * section.scale) as f32;
-                        y_hb_offset = (f64::from(adjust.y_offset) * section.scale) as f32;
+                        x_glyph_offset = (f64::from(adjust.x_offset) * section.scale) as f32;
+                        y_glyph_offset = (f64::from(adjust.y_offset) * section.scale) as f32;
                     }
                     if advance < 0.01 {
                         // Advance is 0, this glyph should align to the
                         // preview glyph remove spacing
-                        x_hb_offset -= spacing;
+                        x_glyph_offset -= spacing;
                     }
 
                     baseline_offset = line_content_size.baseline_offset(
@@ -795,8 +795,8 @@ fn shape_lines(
             } else {
                 positioned_glyphs.push(PositionedGlyph::new(
                     code_point,
-                    x + x_hb_offset,
-                    y + baseline_offset as f32 + y_hb_offset,
+                    x + x_glyph_offset,
+                    y + baseline_offset as f32 + y_glyph_offset,
                     vertical,
                     section.font_stack_hash,
                     section_scale as f32,
@@ -942,7 +942,7 @@ pub fn get_shaping(
                 section_type = formatted_sections[0].type_;
             }
 
-            // Text that HarfBuzz shaped is already in visual order, so bidi
+            // Text that a font shaped is already in visual order, so bidi
             // can't reorder it a character at a time. The loop below then
             // only splits the text into lines, and the whole text is
             // reordered after.

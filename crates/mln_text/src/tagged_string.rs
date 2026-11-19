@@ -44,7 +44,7 @@ pub struct SectionOptions {
     pub(crate) shaped: Option<Arc<ShapedText>>,
     pub(crate) start_index: i32,
     pub key_section: bool,
-    /// Whether a section of text that HarfBuzz shaped runs right to left.
+    /// Whether a section of text that a font shaped runs right to left.
     /// Its glyphs are in visual order, so bidi reorders the section as one
     /// block.
     pub(crate) rtl: bool,
@@ -116,7 +116,8 @@ pub struct TaggedString {
     image_section_id: Option<char>,
     /// The text that font faces shaped this text from, once they have.
     unshaped_text: Option<Vec<char>>,
-    has_need_shape_text_val: bool,
+    /// Whether a section draws from a font file rather than glyph PBFs.
+    has_font_sections: bool,
 }
 
 /// `u" \t\n\v\f\r"`
@@ -200,7 +201,7 @@ impl TaggedString {
         self.styled_text.styles.resize(self.styled_text.text.len(), index);
         self.supports_vertical_writing_mode = None;
         if type_ != GlyphIDType::FontPBF {
-            self.has_need_shape_text_val = true;
+            self.has_font_sections = true;
         }
     }
 
@@ -232,7 +233,7 @@ impl TaggedString {
         let index = (self.sections.len() - 1) as u8;
         self.styled_text.styles.resize(self.styled_text.text.len(), index);
         if type_ != GlyphIDType::FontPBF {
-            self.has_need_shape_text_val = true;
+            self.has_font_sections = true;
         }
     }
 
@@ -353,7 +354,7 @@ impl TaggedString {
 
     /// Whether font faces shaped the text: [`Self::set_unshaped_text`].
     #[must_use]
-    pub fn hb_shaped(&self) -> bool {
+    pub fn is_shaped(&self) -> bool {
         self.unshaped_text.is_some()
     }
 
@@ -370,9 +371,11 @@ impl TaggedString {
         self.unshaped_text.as_deref().unwrap_or(&self.styled_text.text)
     }
 
+    /// Whether a section draws from a font file, which shapes it, rather
+    /// than glyph PBFs.
     #[must_use]
-    pub fn has_need_hb_shape_text(&self) -> bool {
-        self.has_need_shape_text_val
+    pub fn has_font_sections(&self) -> bool {
+        self.has_font_sections
     }
 
     fn get_next_image_section_char_code(&mut self) -> Option<char> {
