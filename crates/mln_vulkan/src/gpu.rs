@@ -2252,14 +2252,13 @@ impl Gpu for VulkanGpu {
             validation::check_bindings(desc, &shader.reads, self.caps.buffer_offset_alignment, &lookup)?
         };
         let sets = self.descriptor_sets(desc.shader, desc.entries)?;
-        let handles = (0..self.window_count)
-            .map(|window| {
-                sets.each_ref().map(|key| {
-                    let set = key.as_ref().and_then(|key| self.descriptor_sets.get(key));
-                    set.map_or(vk::DescriptorSet::null(), |set| set.sets[window % set.sets.len()].0)
-                })
-            })
-            .collect();
+        let mut handles = vec![[vk::DescriptorSet::null(); DescriptorSetType::COUNT]; self.window_count];
+        for (index, key) in sets.iter().enumerate() {
+            let Some(set) = key.as_ref().and_then(|key| self.descriptor_sets.get(key)) else { continue };
+            for (window, handles) in handles.iter_mut().enumerate() {
+                handles[index] = set.sets[window % set.sets.len()].0;
+            }
+        }
         let tags = BindingsTags { shader: desc.shader, elements };
         let id = self.bindings.insert(Bindings { sets, handles, tags });
         self.dependents.bindings(id, desc);
