@@ -105,18 +105,18 @@ impl CanvasTarget {
         let backend = RendererBackend::from_parts(webgl2, Box::new(CanvasContext));
         Ok((backend, CanvasTarget { canvas, size, image: FrameImports::default() }))
     }
+}
+
+impl FrameTarget for CanvasTarget {
+    type Gpu = GlGpu;
 
     /// Resizes the canvas's drawing buffer.
-    pub fn resize(&mut self, size: Size) {
+    fn resize(&mut self, _gpu: &mut GlGpu, size: Size) {
         if size == std::mem::replace(&mut self.size, size) {
             return;
         }
         self.canvas.set_size(size);
     }
-}
-
-impl FrameTarget for CanvasTarget {
-    type Gpu = GlGpu;
 
     fn begin_frame(&mut self, gpu: &mut GlGpu) -> Option<FrameImage> {
         let size = self.size;

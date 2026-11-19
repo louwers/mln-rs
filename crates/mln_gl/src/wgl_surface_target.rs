@@ -161,11 +161,6 @@ impl SurfaceTarget {
         self.size
     }
 
-    /// The window has `size` pixels from now on.
-    pub fn resize(&mut self, size: Size) {
-        self.size = size;
-    }
-
     /// Draws `overlay` over each frame from now on, or nothing. The overlay
     /// it had goes with the context of `gpu`, the backend's, current.
     pub fn set_overlay(&mut self, gpu: &mut GlGpu, overlay: Option<Overlay>) {
@@ -176,6 +171,11 @@ impl SurfaceTarget {
 
 impl FrameTarget for SurfaceTarget {
     type Gpu = GlGpu;
+
+    /// The window has `size` pixels from now on.
+    fn resize(&mut self, _gpu: &mut GlGpu, size: Size) {
+        self.size = size;
+    }
 
     /// A frame begins unless the window is minimized, or has no pixels.
     fn begin_frame(&mut self, gpu: &mut GlGpu) -> Option<FrameImage> {

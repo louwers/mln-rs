@@ -123,7 +123,7 @@ impl SurfaceTarget {
             readback: None,
             overlay: None,
         };
-        target.resize(framebuffer_size);
+        target.set_size(framebuffer_size);
         target
     }
 
@@ -140,7 +140,7 @@ impl SurfaceTarget {
     }
 
     /// Sets the size of the drawables, in pixels.
-    pub fn resize(&mut self, size: Size) {
+    fn set_size(&mut self, size: Size) {
         self.size = size;
         if size.width > 0 && size.height > 0 {
             self.layer.setDrawableSize(CGSize::new(f64::from(size.width), f64::from(size.height)));
@@ -279,6 +279,10 @@ impl SurfaceTarget {
 
 impl FrameTarget for SurfaceTarget {
     type Gpu = MetalGpu;
+
+    fn resize(&mut self, _gpu: &mut MetalGpu, size: Size) {
+        self.set_size(size);
+    }
 
     /// Takes the layer's next drawable unless the frame has one, or `None`
     /// when the layer has none right now. A frame without one is skipped: a

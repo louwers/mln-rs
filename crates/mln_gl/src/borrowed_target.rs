@@ -320,15 +320,15 @@ impl HostSurfaceTarget {
         let backend = RendererBackend::from_parts(gl, platform);
         Ok((backend, HostSurfaceTarget { swap, size, image: FrameImports::default() }))
     }
-
-    /// Draws the next frame at `size` pixels, which the host's surface has.
-    pub fn resize(&mut self, size: Size) {
-        self.size = size;
-    }
 }
 
 impl FrameTarget for HostSurfaceTarget {
     type Gpu = GlGpu;
+
+    /// Draws the next frame at `size` pixels, which the host's surface has.
+    fn resize(&mut self, _gpu: &mut GlGpu, size: Size) {
+        self.size = size;
+    }
 
     fn begin_frame(&mut self, gpu: &mut GlGpu) -> Option<FrameImage> {
         let size = self.size;

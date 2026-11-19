@@ -271,24 +271,6 @@ impl SurfaceTarget {
         self.size
     }
 
-    /// Sets the size of the window's framebuffer, in pixels. The next frame is
-    /// drawn into a swapchain of that size, or of the size the surface has
-    /// where the window system gives it one.
-    pub fn resize(&mut self, size: Size) {
-        self.size = size;
-        if size.width == 0 || size.height == 0 {
-            return;
-        }
-        let extent = self.resource.get_extent();
-        let changed = extent.width != size.width || extent.height != size.height;
-        if changed {
-            self.resource.set_extent(size);
-        }
-        if changed || self.resource.get_image_count() == 0 {
-            self.rebuild = true;
-        }
-    }
-
     /// Copies the frame being drawn, or else the next one, when it
     /// is presented (see `take_readback`).
     pub fn request_readback(&mut self) {
@@ -322,6 +304,24 @@ fn is_empty(extent: vk::Extent2D) -> bool {
 
 impl FrameTarget for SurfaceTarget {
     type Gpu = VulkanGpu;
+
+    /// Sets the size of the window's framebuffer, in pixels. The next frame is
+    /// drawn into a swapchain of that size, or of the size the surface has
+    /// where the window system gives it one.
+    fn resize(&mut self, _gpu: &mut VulkanGpu, size: Size) {
+        self.size = size;
+        if size.width == 0 || size.height == 0 {
+            return;
+        }
+        let extent = self.resource.get_extent();
+        let changed = extent.width != size.width || extent.height != size.height;
+        if changed {
+            self.resource.set_extent(size);
+        }
+        if changed || self.resource.get_image_count() == 0 {
+            self.rebuild = true;
+        }
+    }
 
     /// Acquires the frame's image. No frame is drawn into an empty
     /// framebuffer. A swapchain that couldn't be made, as for a surface of

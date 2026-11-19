@@ -44,14 +44,6 @@ impl<G: Gpu + ?Sized> OffscreenTarget<G> {
         OffscreenTarget { size, image: None, gpu: PhantomData }
     }
 
-    /// Draws the next frame at `size`, and destroys the textures of the
-    /// last one.
-    pub fn resize(&mut self, gpu: &mut G, size: Size) {
-        if std::mem::replace(&mut self.size, size) != size {
-            self.tear_down(gpu);
-        }
-    }
-
     /// The last frame's pixels: premultiplied RGBA, in rows from the top.
     ///
     /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) before
@@ -84,6 +76,13 @@ impl<G: Gpu + ?Sized> OffscreenTarget<G> {
 
 impl<G: Gpu + ?Sized> FrameTarget for OffscreenTarget<G> {
     type Gpu = G;
+
+    /// Destroys the textures of the last frame where `size` is new.
+    fn resize(&mut self, gpu: &mut G, size: Size) {
+        if std::mem::replace(&mut self.size, size) != size {
+            self.tear_down(gpu);
+        }
+    }
 
     fn begin_frame(&mut self, gpu: &mut G) -> Option<FrameImage> {
         let size = self.size;

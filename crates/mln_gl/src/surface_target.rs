@@ -549,12 +549,6 @@ impl SurfaceTarget {
         self.size
     }
 
-    /// The window has `size` pixels from now on, which the next frame
-    /// draws.
-    pub fn resize(&mut self, size: Size) {
-        self.size = size;
-    }
-
     /// Draws `overlay` over each frame from now on, or nothing. The overlay
     /// it had goes with the context of `gpu`, the backend's, current.
     pub fn set_overlay(&mut self, gpu: &mut GlGpu, overlay: Option<Overlay>) {
@@ -575,6 +569,12 @@ impl SurfaceTarget {
 
 impl FrameTarget for SurfaceTarget {
     type Gpu = GlGpu;
+
+    /// The window has `size` pixels from now on, which the next frame
+    /// draws.
+    fn resize(&mut self, _gpu: &mut GlGpu, size: Size) {
+        self.size = size;
+    }
 
     /// Takes the window over. A frame begins while the context is current
     /// on the window's surface, and not when EGL makes no surface of the

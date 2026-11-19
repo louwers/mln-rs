@@ -9,7 +9,6 @@
 
 use std::sync::Arc;
 
-use mln_gfx::gpu::Gpu;
 use mln_gfx::rendering_stats::RenderingStats;
 use mln_map::Map;
 use mln_renderer::{Renderer, RendererEvent, RendererEvents, UpdateParameters, UpdateReader};
@@ -232,12 +231,6 @@ impl HeadlessFrontend {
     #[must_use]
     pub fn backend(&self) -> BackendRef<'_> {
         self.target.backend()
-    }
-
-    /// Runs `f` with the backend's `Gpu`, as when the host waits for the
-    /// frames drawn so far.
-    pub fn with_gpu<R>(&mut self, f: impl FnOnce(&mut dyn Gpu) -> R) -> R {
-        self.target.with_gpu(f)
     }
 
     /// The device the frontend renders on.

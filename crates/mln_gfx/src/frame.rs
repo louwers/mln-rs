@@ -200,6 +200,12 @@ pub trait FrameTarget {
     /// frame's passes to `gpu`.
     fn end_frame(&mut self, gpu: &mut Self::Gpu) -> Handoff;
 
+    /// Draws the next frames at `size` physical pixels. A target whose
+    /// textures the host or the target's owner sizes ignores it.
+    fn resize(&mut self, gpu: &mut Self::Gpu, size: Size) {
+        let _ = (gpu, size);
+    }
+
     /// Destroys the target's textures of `gpu`, after which the target
     /// draws no more frames. A target dropped without it leaves them to the
     /// `Gpu`, which frees them when it drops.

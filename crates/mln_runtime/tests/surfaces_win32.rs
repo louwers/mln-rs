@@ -286,7 +286,7 @@ fn a_vulkan_target_takes_no_frame_once_its_window_is_minimized() {
 #[cfg(feature = "d3d12")]
 #[test]
 fn a_d3d12_target_takes_no_frame_while_its_window_is_minimized() {
-    use mln_gfx::{FrameTarget as _, Handoff};
+    use mln_gfx::{FrameTarget as _, Handoff, RendererBackend as _};
 
     let Some(Device::D3d12(device)) = device_of(BackendType::D3D12) else { return };
     let mut backend = mln_d3d12::RendererBackend::new(&device).unwrap();
@@ -294,9 +294,9 @@ fn a_d3d12_target_takes_no_frame_while_its_window_is_minimized() {
     let mut target = mln_d3d12::SurfaceTarget::new(&backend, Arc::<TestWindow>::clone(&window), SIZE).unwrap();
     assert_eq!(Some(Handoff::Presented), clear_frame(&mut backend, &mut target));
     // A resize takes buffers of the new size before the next frame.
-    target.resize(Size::new(32, 48));
+    target.resize(backend.gpu(), Size::new(32, 48));
     assert_eq!(Some(Handoff::Presented), clear_frame(&mut backend, &mut target));
-    target.resize(SIZE);
+    target.resize(backend.gpu(), SIZE);
     window.set_minimized(true);
     let refused = mln_d3d12::SurfaceTarget::new(&backend, Arc::<TestWindow>::clone(&window), SIZE).err().unwrap();
     assert_eq!(ErrorKind::InvalidState, refused.kind, "{refused:?}");

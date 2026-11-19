@@ -119,7 +119,9 @@ impl Frontend {
     /// submit it without waiting, and WebGPU leaves it to the device.
     fn wait_for_gpu(&mut self) {
         let Device::WebGpu(device) = self.frontend.device() else {
-            self.frontend.with_gpu(|gpu| gpu.flush(true)).expect("the GPU finishes the frame");
+            let mut flushed = Ok(());
+            self.frontend.target().with_gpu(|gpu| flushed = gpu.flush(true));
+            flushed.expect("the GPU finishes the frame");
             return;
         };
         device.device().poll(wgpu::PollType::wait_indefinitely()).expect("the GPU finishes the frame");

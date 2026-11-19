@@ -312,12 +312,6 @@ impl SurfaceTarget {
         self.size
     }
 
-    /// Sets the size of the frames, in pixels, which the swap chain's buffers
-    /// take before the next frame. No frame is drawn at an empty size.
-    pub fn resize(&mut self, size: Size) {
-        self.size = size;
-    }
-
     /// Draws `overlay` over each frame from now on, after the map and
     /// before the frame is presented, or stops with `None`. The overlay it
     /// replaces destroys what it made on `gpu` ([`Overlay::destroy`]).
@@ -441,6 +435,12 @@ fn swap_chain_desc(
 
 impl FrameTarget for SurfaceTarget {
     type Gpu = D3d12Gpu;
+
+    /// Sets the size of the frames, in pixels, which the swap chain's buffers
+    /// take before the next frame. No frame is drawn at an empty size.
+    fn resize(&mut self, _gpu: &mut D3d12Gpu, size: Size) {
+        self.size = size;
+    }
 
     /// Waits for the frame's turn and takes the swap chain's next buffer. No
     /// frame is drawn at an empty size or into a window without an area.

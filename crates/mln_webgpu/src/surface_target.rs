@@ -211,11 +211,6 @@ impl SurfaceTarget {
         self.state.size
     }
 
-    /// Draws the next frame at `size` physical pixels.
-    pub fn resize(&mut self, size: Size) {
-        self.state.size = size;
-    }
-
     /// Copies the next presented frame, for [`take_readback`](Self::take_readback).
     pub fn request_readback(&mut self) {
         self.state.readback_requested = true;
@@ -352,6 +347,11 @@ impl State {
 
 impl FrameTarget for SurfaceTarget {
     type Gpu = WebGpu;
+
+    /// Draws the next frame at `size` physical pixels.
+    fn resize(&mut self, _gpu: &mut WebGpu, size: Size) {
+        self.state.size = size;
+    }
 
     /// Acquires the surface's next texture, unless the frame has one. A
     /// frame without one is skipped.

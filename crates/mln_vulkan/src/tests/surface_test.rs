@@ -114,7 +114,7 @@ impl Window {
     }
 
     fn set_framebuffer_size(&mut self, size: Size) {
-        self.target.resize(size);
+        self.target.resize(self.backend.gpu(), size);
     }
 
     fn get_framebuffer_size(&self) -> Size {
