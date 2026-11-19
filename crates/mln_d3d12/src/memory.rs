@@ -2,13 +2,8 @@
 //! large buffers are placed in, and slabs of small buffers in placed buffers
 //! of their own, as a placed buffer takes 64 KiB at least.
 //!
-//! Memory goes back when the last of what uses it drops, which the `Gpu`
-//! arranges to be after the GPU's work with it has finished: its
-//! [`BufferMemory`] or [`TextureMemory`] sends it to the [`Freed`] queue,
-//! which [`Memory::reclaim`] empties.
-
-use std::cell::Cell;
-use std::rc::Rc;
+//! The `Gpu` gives memory back through [`Memory::free_buffer`] and
+//! [`Memory::free_texture`] once the GPU's work with it has finished.
 
 use gpu_allocator::d3d12::{
     Allocator, AllocatorCreateDesc, ID3D12DeviceVersion, Resource, ResourceCategory, ResourceCreateDesc,
@@ -64,7 +59,7 @@ pub(crate) fn buffer_desc(size: u64) -> D3D12_RESOURCE_DESC {
     }
 }
 
-/// What freed memory came from.
+/// What memory came from.
 enum Owner {
     /// A slab of the slabs of a location and size, at an offset of a page.
     Slab { location: usize, size: usize, page: usize, offset: u64 },
@@ -72,28 +67,15 @@ enum Owner {
     Resource(Resource),
 }
 
-/// The memory whose last user dropped, which [`Memory::reclaim`] takes back.
-#[derive(Default)]
-pub(crate) struct Freed(Cell<Vec<Owner>>);
-
-impl Freed {
-    fn push(&self, owner: Owner) {
-        let mut freed = self.0.take();
-        freed.push(owner);
-        self.0.set(freed);
-    }
-}
-
 /// A buffer's memory: a range of a resource, mapped where the CPU writes or
-/// reads it.
+/// reads it, which [`Memory::free_buffer`] gives back.
 pub(crate) struct BufferMemory {
     pub(crate) resource: ID3D12Resource,
     pub(crate) offset: u64,
     pub(crate) size: u64,
     /// The CPU's address of `offset` in upload memory, null elsewhere.
     mapped: *mut u8,
-    owner: Option<Owner>,
-    freed: Rc<Freed>,
+    owner: Owner,
 }
 
 impl BufferMemory {
@@ -137,34 +119,18 @@ impl BufferMemory {
     }
 }
 
-impl Drop for BufferMemory {
-    fn drop(&mut self) {
-        if let Some(owner) = self.owner.take() {
-            self.freed.push(owner);
-        }
-    }
-}
-
-/// A texture's resource: placed in gpu-allocator's heaps, or the host's.
+/// A texture's resource: placed in gpu-allocator's heaps, which
+/// [`Memory::free_texture`] gives back, or the host's.
 pub(crate) struct TextureMemory {
     pub(crate) resource: ID3D12Resource,
     /// gpu-allocator's resource, `None` for the host's.
     owner: Option<Owner>,
-    freed: Rc<Freed>,
 }
 
 impl TextureMemory {
     /// The resource of a texture the host made, which stays the host's.
-    pub(crate) fn imported(resource: ID3D12Resource, freed: &Rc<Freed>) -> TextureMemory {
-        TextureMemory { resource, owner: None, freed: Rc::clone(freed) }
-    }
-}
-
-impl Drop for TextureMemory {
-    fn drop(&mut self) {
-        if let Some(owner) = self.owner.take() {
-            self.freed.push(owner);
-        }
+    pub(crate) fn imported(resource: ID3D12Resource) -> TextureMemory {
+        TextureMemory { resource, owner: None }
     }
 }
 
@@ -186,7 +152,6 @@ struct Slabs {
 pub(crate) struct Memory {
     allocator: Allocator,
     slabs: [Slabs; LOCATIONS.len()],
-    freed: Rc<Freed>,
 }
 
 impl Memory {
@@ -200,12 +165,7 @@ impl Memory {
                 .with_max_host_memblock_size(64 * MB),
         })
         .map_err(allocation_error("the allocator"))?;
-        Ok(Memory { allocator, slabs: Default::default(), freed: Rc::default() })
-    }
-
-    /// The queue that memory goes to when its last user drops.
-    pub(crate) fn freed(&self) -> &Rc<Freed> {
-        &self.freed
+        Ok(Memory { allocator, slabs: Default::default() })
     }
 
     /// A resource of `desc` placed in a heap of `location`, in `state`.
@@ -271,8 +231,7 @@ impl Memory {
                 offset: 0,
                 size,
                 mapped,
-                owner: Some(Owner::Resource(resource)),
-                freed: Rc::clone(&self.freed),
+                owner: Owner::Resource(resource),
             });
         }
         if self.slabs[index].free[slab].is_empty() {
@@ -294,8 +253,7 @@ impl Memory {
             size: MIN_SLAB << slab,
             // SAFETY: the offset is inside the page's mapping.
             mapped: if mapped.is_null() { std::ptr::null_mut() } else { unsafe { mapped.add(offset as usize) } },
-            owner: Some(Owner::Slab { location: index, size: slab, page, offset }),
-            freed: Rc::clone(&self.freed),
+            owner: Owner::Slab { location: index, size: slab, page, offset },
         })
     }
 
@@ -320,11 +278,7 @@ impl Memory {
             }
         }
         let resource = self.place("texture", MemoryLocation::GpuOnly, &desc, state)?;
-        Ok(TextureMemory {
-            resource: resource.resource().clone(),
-            owner: Some(Owner::Resource(resource)),
-            freed: Rc::clone(&self.freed),
-        })
+        Ok(TextureMemory { resource: resource.resource().clone(), owner: Some(Owner::Resource(resource)) })
     }
 
     /// How many pages the slabs of every location and size have.
@@ -333,15 +287,25 @@ impl Memory {
         self.slabs.iter().map(|slabs| slabs.pages.len()).sum()
     }
 
-    /// Takes back the memory whose last user dropped.
-    pub(crate) fn reclaim(&mut self) {
-        for owner in self.freed.0.take() {
-            match owner {
-                Owner::Slab { location, size, page, offset } => self.slabs[location].free[size].push((page, offset)),
-                Owner::Resource(resource) => {
-                    if let Err(error) = self.allocator.free_resource(resource) {
-                        Log::error(Event::Render, format!("freeing GPU memory failed: {error}"));
-                    }
+    /// Takes back `memory`, which no work that hasn't finished uses.
+    pub(crate) fn free_buffer(&mut self, memory: BufferMemory) {
+        self.free(memory.owner);
+    }
+
+    /// Takes back `memory`, which no work that hasn't finished uses, unless
+    /// it is the host's.
+    pub(crate) fn free_texture(&mut self, memory: TextureMemory) {
+        if let Some(owner) = memory.owner {
+            self.free(owner);
+        }
+    }
+
+    fn free(&mut self, owner: Owner) {
+        match owner {
+            Owner::Slab { location, size, page, offset } => self.slabs[location].free[size].push((page, offset)),
+            Owner::Resource(resource) => {
+                if let Err(error) = self.allocator.free_resource(resource) {
+                    Log::error(Event::Render, format!("freeing GPU memory failed: {error}"));
                 }
             }
         }
@@ -349,10 +313,9 @@ impl Memory {
 }
 
 impl Drop for Memory {
-    /// Frees the slabs' pages and what was reclaimed last, before the
-    /// allocator goes. The `Gpu` has dropped everything else of its memory.
+    /// Frees the slabs' pages before the allocator goes. The `Gpu` has
+    /// freed everything else of its memory.
     fn drop(&mut self) {
-        self.reclaim();
         for slabs in &mut self.slabs {
             for page in slabs.pages.drain(..) {
                 let _ = self.allocator.free_resource(page.resource);

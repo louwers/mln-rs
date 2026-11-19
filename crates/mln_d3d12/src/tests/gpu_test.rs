@@ -156,8 +156,7 @@ fn a_uniform_buffer_in_reused_memory_starts_zeroed() {
     let first = gpu.create_buffer(&desc).expect("a buffer");
     gpu.write_buffer(first, 0, &[0xAB; 256]).expect("the write");
     gpu.flush(true).expect("the flush");
-    // A pass in the next batch brings its window up to date, so the buffer
-    // goes once its work finishes.
+    // A pass in the next batch brings its other window up to date.
     let size = mln_util::size::Size::new(4, 4);
     let usage = TextureUsage { render_target: true, ..TextureUsage::default() };
     let target = gpu

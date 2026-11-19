@@ -3,7 +3,6 @@
 use std::any::Any;
 use std::collections::VecDeque;
 use std::mem::ManuallyDrop;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use gpu_allocator::MemoryLocation;
@@ -73,7 +72,7 @@ const WINDOWS: usize = 2;
 /// A buffer: a uniform or storage buffer's windows in upload memory, or a
 /// vertex or index buffer in GPU memory, which copies write.
 struct Buffer {
-    memory: Rc<BufferMemory>,
+    memory: BufferMemory,
     usage: BufferUsage,
     size: u64,
     windows: Option<Windows>,
@@ -101,7 +100,7 @@ impl Windows {
 }
 
 struct Texture {
-    memory: Rc<TextureMemory>,
+    memory: TextureMemory,
     info: TextureInfo,
     format: DXGI_FORMAT,
     /// The state the texture is in between passes and copies, which they
@@ -146,17 +145,12 @@ struct BoundBuffer {
 struct Bindings {
     buffers: Vec<BoundBuffer>,
     textures: Option<(u32, u64)>,
-    /// The memory they bind, which lives as long as the bindings.
-    #[expect(dead_code, reason = "held, not read")]
-    keep: (Vec<Rc<BufferMemory>>, Vec<Rc<TextureMemory>>),
     tags: BindingsTags,
 }
 
 struct Geometry {
     vertex_views: Vec<D3D12_VERTEX_BUFFER_VIEW>,
     index_view: D3D12_INDEX_BUFFER_VIEW,
-    /// The buffers it reads, which live as long as the geometry.
-    keep: Vec<Rc<BufferMemory>>,
     tags: GeometryTags,
 }
 
@@ -179,9 +173,9 @@ struct Recording {
 }
 
 /// An attachment of a pass, which the end of the pass returns to its rest,
-/// even if it was destroyed: bindings may still sample it.
+/// even if it was destroyed while the pass was open.
 struct Attachment {
-    memory: Rc<TextureMemory>,
+    resource: ID3D12Resource,
     rest: D3D12_RESOURCE_STATES,
     view: D3D12_CPU_DESCRIPTOR_HANDLE,
     format: DXGI_FORMAT,
@@ -219,12 +213,15 @@ impl OpenPass {
     }
 }
 
-/// What a resource left behind when it was destroyed, held until the work
-/// recorded until then has finished. Memory goes back when its last user
-/// drops (`memory`).
+/// What a resource left behind when it was destroyed, freed once the work
+/// recorded until then has finished.
 enum Garbage {
+    Buffer(BufferMemory),
+    /// A texture's memory and views.
     Texture(Texture),
-    Bindings(Bindings),
+    /// A texture table of bindings.
+    Table(u32),
+    /// A caller's object, of [`D3d12Gpu::destroy_later`].
     Held(#[expect(dead_code, reason = "held, not read")] Box<dyn Any>),
 }
 
@@ -243,10 +240,11 @@ enum Garbage {
 /// state, which passes and copies return them to.
 ///
 /// A process compiles each program once, and a device makes each pipeline
-/// state once for the backends on it.
+/// state once for the backends on it, and keeps it.
 ///
 /// Destroying a resource frees it once the work recorded until then has
-/// finished, as each flush signals a fence.
+/// finished, as each flush signals a fence: what it leaves goes into one
+/// list, keyed by the batch being recorded.
 pub struct D3d12Gpu {
     device: Device,
     compiler: ShaderCompiler,
@@ -260,9 +258,6 @@ pub struct D3d12Gpu {
     buffers: SlotMap<BufferId, Buffer>,
     /// The buffers that some window doesn't hold the contents of.
     stale: Vec<BufferId>,
-    /// The windows of destroyed buffers that bindings still bind, which
-    /// each batch brings up to date until they all hold the last contents.
-    retired: Vec<(Rc<BufferMemory>, Windows)>,
     upload: UploadRing,
     /// The resources of the vertex and index buffers that the copies of the
     /// batch write, which they transition to and from the copy state.
@@ -283,7 +278,7 @@ pub struct D3d12Gpu {
     pipelines: SlotMap<PipelineId, Pipeline>,
     bindings: SlotMap<BindingsId, Bindings>,
     geometries: SlotMap<GeometryId, Geometry>,
-    /// What the live bindings and geometry were made of.
+    /// What the live pipelines, bindings and geometry were made of.
     dependents: validation::Dependents,
     readbacks: SlotMap<ReadbackId, Readback>,
     /// The memory of the last readback taken, which the next readback of
@@ -295,6 +290,7 @@ pub struct D3d12Gpu {
     pass: Option<OpenPass>,
     free_recordings: Vec<Recording>,
     in_flight: VecDeque<(u64, Recording)>,
+    /// What destroyed resources left, with the batch after which it goes.
     garbage: Vec<(u64, Garbage)>,
     /// The fences and values that the queue waits for before the next
     /// submit, and signals after it.
@@ -306,7 +302,8 @@ pub struct D3d12Gpu {
     /// The fences and values that the first pass to draw into a texture has
     /// the queue wait for: the host's reads of it.
     texture_waits: HashMap<TextureId, (ID3D12Fence, u64)>,
-    /// Last, so that what holds memory drops before it.
+    /// The memory of buffers, textures and readbacks, which `drop` gives
+    /// back.
     memory: Memory,
 }
 
@@ -440,7 +437,6 @@ impl D3d12Gpu {
             window: (0, 0),
             buffers: SlotMap::with_key(),
             stale: Vec::new(),
-            retired: Vec::new(),
             upload: UploadRing::default(),
             copied: HashSet::default(),
             copied_resources: Vec::new(),
@@ -505,7 +501,7 @@ impl D3d12Gpu {
             copy_src: true,
         };
         let size = Size::new(desc.Width as u32, desc.Height);
-        let memory = TextureMemory::imported(resource.clone(), self.memory.freed());
+        let memory = TextureMemory::imported(resource.clone());
         self.insert_texture(memory, desc.Format, TextureInfo { format, size, usage }, state)
     }
 
@@ -599,9 +595,18 @@ impl D3d12Gpu {
         info: TextureInfo,
         rest: D3D12_RESOURCE_STATES,
     ) -> Result<TextureId, GpuError> {
+        let mut texture = Texture { memory, info, format, rest, srv: None, rtv: None, dsv: None };
+        if let Err(error) = self.make_views(&mut texture) {
+            self.free(Garbage::Texture(texture));
+            return Err(error);
+        }
+        Ok(self.textures.insert(texture))
+    }
+
+    /// Makes the views of `texture` that its usage needs.
+    fn make_views(&mut self, texture: &mut Texture) -> Result<(), GpuError> {
+        let (info, device) = (texture.info, self.device.device());
         let depth = info.format.is_some_and(conv::is_depth);
-        let device = self.device.device();
-        let mut texture = Texture { memory: Rc::new(memory), info, format, rest, srv: None, rtv: None, dsv: None };
         let resource = &texture.memory.resource;
         // SAFETY: the views are of the texture, into descriptors no work
         // reads.
@@ -621,7 +626,7 @@ impl D3d12Gpu {
                 texture.rtv = Some(slot);
             }
         }
-        Ok(self.textures.insert(texture))
+        Ok(())
     }
 
     /// Clears the new render target `texture` to zeros in the copy list, as
@@ -687,18 +692,6 @@ impl D3d12Gpu {
             }
             windows.current != all
         });
-        for (memory, windows) in &mut self.retired {
-            if windows.current & (1 << window) == 0 {
-                windows.copy(memory, window, 0, windows.contents.len());
-                windows.current |= 1 << window;
-            }
-        }
-        // Up to date, they wait for the work that reads them as destroyed
-        // buffers do.
-        let (done, retired): (Vec<_>, Vec<_>) =
-            std::mem::take(&mut self.retired).into_iter().partition(|(_, windows)| windows.current == all);
-        self.retired = retired;
-        self.garbage.extend(done.into_iter().map(|(memory, _)| (serial, Garbage::Held(Box::new(memory)))));
         self.window = (serial, window);
         Ok(window)
     }
@@ -839,39 +832,47 @@ impl D3d12Gpu {
     }
 
     /// Frees what destroyed resources left behind, once their work has
-    /// finished, and takes back the memory nothing uses any more.
+    /// finished.
     fn collect_garbage(&mut self) {
         let completed = self.completed();
         #[cfg(feature = "bench")]
         if let Some(timer) = &mut self.timer {
             timer.finished(completed);
         }
-        let (done, waiting): (Vec<_>, Vec<_>) =
-            std::mem::take(&mut self.garbage).into_iter().partition(|(serial, _)| *serial <= completed);
-        self.garbage = waiting;
+        let done: Vec<_> = self.garbage.extract_if(.., |(serial, _)| *serial <= completed).collect();
         for (_, garbage) in done {
-            match garbage {
-                Garbage::Texture(texture) => {
-                    let heaps = [
-                        (texture.srv, &mut self.srv_heap),
-                        (texture.rtv, &mut self.rtv_heap),
-                        (texture.dsv, &mut self.dsv_heap),
-                    ];
-                    for (slot, heap) in heaps {
-                        if let Some(slot) = slot {
-                            heap.free(slot);
-                        }
-                    }
-                }
-                Garbage::Bindings(bindings) => {
-                    if let Some((table, _)) = bindings.textures {
-                        self.tables.free(table);
-                    }
-                }
-                Garbage::Held(_) => {}
-            }
+            self.free(garbage);
         }
-        self.memory.reclaim();
+    }
+
+    /// Frees `garbage`, which no work that hasn't finished uses.
+    fn free(&mut self, garbage: Garbage) {
+        match garbage {
+            Garbage::Buffer(memory) => self.memory.free_buffer(memory),
+            Garbage::Texture(texture) => {
+                let heaps = [
+                    (texture.srv, &mut self.srv_heap),
+                    (texture.rtv, &mut self.rtv_heap),
+                    (texture.dsv, &mut self.dsv_heap),
+                ];
+                for (slot, heap) in heaps {
+                    if let Some(slot) = slot {
+                        heap.free(slot);
+                    }
+                }
+                self.memory.free_texture(texture.memory);
+            }
+            Garbage::Table(table) => self.tables.free(table),
+            Garbage::Held(_) => {}
+        }
+    }
+
+    /// Keeps `memory` for the next readback of its size, and frees the one
+    /// kept before. No work that hasn't finished uses either.
+    fn spare(&mut self, memory: BufferMemory) {
+        if let Some(spare) = self.spare_readback.replace(memory) {
+            self.memory.free_buffer(spare);
+        }
     }
 
     /// The address of upload memory that holds `indices`, which the sampler
@@ -918,7 +919,7 @@ impl Gpu for D3d12Gpu {
             }
             BufferUsage::Vertex | BufferUsage::Index => (self.memory.buffer(MemoryLocation::GpuOnly, size)?, None),
         };
-        Ok(self.buffers.insert(Buffer { memory: Rc::new(memory), usage: desc.usage, size, windows }))
+        Ok(self.buffers.insert(Buffer { memory, usage: desc.usage, size, windows }))
     }
 
     fn write_buffer(&mut self, buffer: BufferId, offset: u64, data: &[u8]) -> Result<(), GpuError> {
@@ -1030,7 +1031,7 @@ impl Gpu for D3d12Gpu {
         }
         let row_pitch = bytes_per_row.next_multiple_of(D3D12_TEXTURE_DATA_PITCH_ALIGNMENT as usize);
         let rows = region.size.height as usize;
-        let (memory, dxgi_format, rest) = (Rc::clone(&entry.memory), entry.format, entry.rest);
+        let (resource, dxgi_format, rest) = (entry.memory.resource.clone(), entry.format, entry.rest);
         let completed = self.completed();
         let upload = self.upload.write(
             &mut self.memory,
@@ -1045,7 +1046,7 @@ impl Gpu for D3d12Gpu {
             },
         )?;
         let list = self.copy_list()?;
-        let resource = &memory.resource;
+        let resource = &resource;
         let dst = D3D12_TEXTURE_COPY_LOCATION {
             // SAFETY: copies of the pointers without references, which the
             // locations' ManuallyDrop never releases.
@@ -1147,7 +1148,6 @@ impl Gpu for D3d12Gpu {
         let missing = |what: &str, id: u32| {
             GpuError::Invalid(format!("{} reads {what} {id}, which no entry binds", shader.program.name))
         };
-        let (mut kept_buffers, mut kept_textures) = (Vec::new(), Vec::new());
         let mut buffers = Vec::new();
         for &(id, parameter, view) in &shader.buffers {
             let (buffer, offset) = desc
@@ -1163,7 +1163,6 @@ impl Gpu for D3d12Gpu {
             let buffer = self.buffers.get(buffer).ok_or(GpuError::UnknownId("buffer"))?;
             let stride = buffer.windows.as_ref().map_or(0, |windows| windows.stride);
             buffers.push(BoundBuffer { parameter, view, address: buffer.memory.address() + offset, stride });
-            kept_buffers.push(Rc::clone(&buffer.memory));
         }
         let textures = if shader.textures.is_empty() {
             None
@@ -1186,7 +1185,6 @@ impl Gpu for D3d12Gpu {
                     texture.srv.ok_or_else(|| GpuError::Invalid("a texture that shaders can't sample".to_owned()))?;
                 views[index as usize] = Some(srv.handle);
                 indices[index as usize] = *self.samplers.get(sampler).ok_or(GpuError::UnknownId("sampler"))?;
-                kept_textures.push(Rc::clone(&texture.memory));
             }
             let table = self.tables.allocate(self.device.device(), &views)?;
             match self.sampler_index_address(indices) {
@@ -1198,7 +1196,7 @@ impl Gpu for D3d12Gpu {
             }
         };
         let tags = BindingsTags { shader: desc.shader, elements };
-        let id = self.bindings.insert(Bindings { buffers, textures, keep: (kept_buffers, kept_textures), tags });
+        let id = self.bindings.insert(Bindings { buffers, textures, tags });
         self.dependents.bindings(id, desc);
         Ok(id)
     }
@@ -1212,7 +1210,6 @@ impl Gpu for D3d12Gpu {
             let lookup = Lookup { buffer: &buffer, texture: &texture, sampler: &|_| false };
             validation::check_geometry(desc, &lookup)?
         };
-        let mut keep = Vec::new();
         let mut vertex_views = Vec::new();
         for (&(id, offset), layout) in desc.vertex_buffers.iter().zip(desc.layouts) {
             let buffer = self.buffers.get(id).ok_or(GpuError::UnknownId("buffer"))?;
@@ -1221,7 +1218,6 @@ impl Gpu for D3d12Gpu {
                 SizeInBytes: (buffer.size - offset) as u32,
                 StrideInBytes: layout.stride,
             });
-            keep.push(Rc::clone(&buffer.memory));
         }
         let index = self.buffers.get(desc.index_buffer).ok_or(GpuError::UnknownId("buffer"))?;
         let index_view = D3D12_INDEX_BUFFER_VIEW {
@@ -1229,27 +1225,20 @@ impl Gpu for D3d12Gpu {
             SizeInBytes: index.size as u32,
             Format: DXGI_FORMAT_R16_UINT,
         };
-        keep.push(Rc::clone(&index.memory));
         let tags = GeometryTags { layout: self.layout_tags.tag(desc.shader, desc.layouts), ranges };
-        let id = self.geometries.insert(Geometry { vertex_views, index_view, keep, tags });
+        let id = self.geometries.insert(Geometry { vertex_views, index_view, tags });
         self.dependents.geometry(id, desc);
         Ok(id)
     }
 
+    /// Forgets `resource`. What it leaves in memory and descriptor heaps
+    /// goes once the work recorded until then has finished. A pipeline's
+    /// state stays with the device, and samplers, shaders and geometry
+    /// leave nothing.
     fn destroy(&mut self, resource: ResourceId) -> Result<(), GpuError> {
-        fn held<T: Any>(value: Option<T>) -> Option<Garbage> {
-            value.map(|value| Garbage::Held(Box::new(value)))
-        }
         self.dependents.destroy(resource)?;
         let garbage = match resource {
-            ResourceId::Buffer(id) => match self.buffers.remove(id) {
-                // Bindings may still read the buffer in each window.
-                Some(Buffer { memory, windows: Some(windows), .. }) if windows.current != (1 << WINDOWS) - 1 => {
-                    self.retired.push((memory, windows));
-                    None
-                }
-                buffer => held(buffer.map(|buffer| buffer.memory)),
-            },
+            ResourceId::Buffer(id) => self.buffers.remove(id).map(|buffer| Garbage::Buffer(buffer.memory)),
             ResourceId::Texture(id) => {
                 self.texture_waits.remove(&id);
                 self.textures.remove(id).map(Garbage::Texture)
@@ -1262,10 +1251,18 @@ impl Gpu for D3d12Gpu {
                 self.shaders.remove(id);
                 None
             }
-            ResourceId::Pipeline(id) => held(self.pipelines.remove(id).map(|pipeline| pipeline.state)),
-            ResourceId::Bindings(id) => self.bindings.remove(id).map(Garbage::Bindings),
-            ResourceId::Geometry(id) => held(self.geometries.remove(id).map(|geometry| geometry.keep)),
-            ResourceId::Readback(id) => held(self.readbacks.remove(id).map(|readback| readback.memory)),
+            ResourceId::Pipeline(id) => {
+                self.pipelines.remove(id);
+                None
+            }
+            ResourceId::Bindings(id) => {
+                self.bindings.remove(id).and_then(|bindings| bindings.textures).map(|(table, _)| Garbage::Table(table))
+            }
+            ResourceId::Geometry(id) => {
+                self.geometries.remove(id);
+                None
+            }
+            ResourceId::Readback(id) => self.readbacks.remove(id).map(|readback| Garbage::Buffer(readback.memory)),
         };
         if let Some(garbage) = garbage {
             self.garbage.push((self.serial, garbage));
@@ -1313,7 +1310,7 @@ impl Gpu for D3d12Gpu {
                 EndingAccess: preserve(),
             };
             let pass_attachment = Attachment {
-                memory: Rc::clone(&texture.memory),
+                resource: texture.memory.resource.clone(),
                 rest: texture.rest,
                 view: rtv.handle,
                 format: texture.format,
@@ -1366,7 +1363,7 @@ impl Gpu for D3d12Gpu {
                 StencilEndingAccess: stencil_ending,
             };
             let pass_attachment = Attachment {
-                memory: Rc::clone(&texture.memory),
+                resource: texture.memory.resource.clone(),
                 rest: texture.rest,
                 view: dsv.handle,
                 format: texture.format,
@@ -1413,8 +1410,9 @@ impl Gpu for D3d12Gpu {
         validation::check_draw(draw, open.target.targets, &pipeline.tags, &bindings.tags, &geometry.tags)?;
         let list = &open.list;
         // SAFETY: what the draw binds lives until its work finishes: the
-        // pipeline, bindings and geometry as destroyed ones do, and they
-        // keep their memory.
+        // memory and tables that the bindings and geometry point at are
+        // destroyed after them, and freed once the work recorded before has
+        // finished, and the device keeps the pipeline's state.
         unsafe {
             if open.pipeline != Some(draw.pipeline) {
                 list.SetPipelineState(&pipeline.state);
@@ -1542,7 +1540,7 @@ impl Gpu for D3d12Gpu {
             .into_iter()
             .flatten()
             .filter(|(attachment, state)| attachment.rest != *state)
-            .map(|(attachment, state)| transition(&attachment.memory.resource, state, attachment.rest))
+            .map(|(attachment, state)| transition(&attachment.resource, state, attachment.rest))
             .collect();
         // SAFETY: the pass is open on the list, and the barriers return the
         // attachments to their rest.
@@ -1580,20 +1578,30 @@ impl Gpu for D3d12Gpu {
         let entry = self.textures.get(texture);
         let readback = validation::check_readback(entry.map(|texture| texture.info), region)?;
         let entry = entry.ok_or(GpuError::UnknownId("texture"))?;
-        let (memory, format, rest) = (Rc::clone(&entry.memory), entry.format, entry.rest);
+        let (resource, format, rest) = (entry.memory.resource.clone(), entry.format, entry.rest);
         let row_pitch = readback.bytes_per_row.next_multiple_of(D3D12_TEXTURE_DATA_PITCH_ALIGNMENT as usize);
         let rows = region.size.height as usize;
         let size = (row_pitch * rows) as u64;
         let buffer = match self.spare_readback.take() {
             Some(spare) if spare.size >= size && spare.size <= size.next_power_of_two().max(512) => spare,
-            // A copy from a texture writes from an offset of 512 bytes.
-            _ => self
-                .memory
-                .buffer(MemoryLocation::GpuToCpu, size.max(u64::from(D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT)))?,
+            spare => {
+                if let Some(spare) = spare {
+                    self.memory.free_buffer(spare);
+                }
+                // A copy from a texture writes from an offset of 512 bytes.
+                let size = size.max(u64::from(D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT));
+                self.memory.buffer(MemoryLocation::GpuToCpu, size)?
+            }
         };
         debug_assert!(buffer.offset.is_multiple_of(u64::from(D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT)));
-        let list = self.frame_list()?;
-        let resource = &memory.resource;
+        let list = match self.frame_list() {
+            Ok(list) => list,
+            Err(error) => {
+                self.spare(buffer);
+                return Err(error);
+            }
+        };
+        let resource = &resource;
         let dst = D3D12_TEXTURE_COPY_LOCATION {
             // SAFETY: copies of the pointers without references, which the
             // locations' ManuallyDrop never releases.
@@ -1633,7 +1641,13 @@ impl Gpu for D3d12Gpu {
             list.CopyTextureRegion(&raw const dst, 0, 0, 0, &raw const src, Some(&raw const area));
             list.ResourceBarrier(&[transition(resource, D3D12_RESOURCE_STATE_COPY_SOURCE, rest)]);
         }
-        let serial = self.submit()?;
+        let serial = match self.submit() {
+            Ok(serial) => serial,
+            Err(error) => {
+                self.garbage.push((self.serial, Garbage::Buffer(buffer)));
+                return Err(error);
+            }
+        };
         Ok(self.readbacks.insert(Readback {
             memory: buffer,
             row_pitch,
@@ -1650,7 +1664,9 @@ impl Gpu for D3d12Gpu {
                 return Ok(None);
             }
             if let Err(error) = self.wait_for(serial) {
-                self.readbacks.remove(readback);
+                if let Some(readback) = self.readbacks.remove(readback) {
+                    self.garbage.push((serial, Garbage::Buffer(readback.memory)));
+                }
                 return Err(error);
             }
         }
@@ -1662,28 +1678,46 @@ impl Gpu for D3d12Gpu {
         // SAFETY: the copy into the memory has finished, and the mapping
         // covers its rows.
         let texels = unsafe {
-            memory
-                .resource
-                .Map(0, Some(&raw const range), Some(&raw mut data))
-                .map_err(invalid("mapping a readback"))?;
-            let mapped = std::slice::from_raw_parts(data.cast::<u8>().add(start), row_pitch * rows);
-            let mut texels = Vec::with_capacity(bytes_per_row * rows);
-            for row in mapped.chunks(row_pitch).take(rows) {
-                texels.extend_from_slice(&row[..bytes_per_row]);
-            }
-            memory.resource.Unmap(0, Some(&raw const NO_RANGE));
-            texels
+            memory.resource.Map(0, Some(&raw const range), Some(&raw mut data)).map(|()| {
+                let mapped = std::slice::from_raw_parts(data.cast::<u8>().add(start), row_pitch * rows);
+                let mut texels = Vec::with_capacity(bytes_per_row * rows);
+                for row in mapped.chunks(row_pitch).take(rows) {
+                    texels.extend_from_slice(&row[..bytes_per_row]);
+                }
+                memory.resource.Unmap(0, Some(&raw const NO_RANGE));
+                texels
+            })
         };
-        self.spare_readback = Some(memory);
-        Ok(Some(texels))
+        self.spare(memory);
+        texels.map(Some).map_err(invalid("mapping a readback"))
     }
 }
 
 impl Drop for D3d12Gpu {
     /// Waits for the work submitted so far, which reads what the backend
-    /// frees.
+    /// frees, then gives its memory back.
     fn drop(&mut self) {
         let _ = self.wait_for(self.serial - 1);
+        for (_, garbage) in std::mem::take(&mut self.garbage) {
+            self.free(garbage);
+        }
+        let memory = &mut self.memory;
+        for (_, buffer) in self.buffers.drain() {
+            memory.free_buffer(buffer.memory);
+        }
+        for (_, texture) in self.textures.drain() {
+            memory.free_texture(texture.memory);
+        }
+        for (_, readback) in self.readbacks.drain() {
+            memory.free_buffer(readback.memory);
+        }
+        for (_, indices) in self.sampler_indices.drain() {
+            memory.free_buffer(indices);
+        }
+        if let Some(spare) = self.spare_readback.take() {
+            memory.free_buffer(spare);
+        }
+        self.upload.free(memory);
     }
 }
 

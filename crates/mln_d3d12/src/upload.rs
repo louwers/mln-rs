@@ -71,4 +71,12 @@ impl UploadRing {
         data(&mut bytes[offset as usize..(offset + size) as usize]);
         Ok(Upload { resource: page.memory.resource.clone(), offset: page.memory.offset + offset })
     }
+
+    /// Gives the pages back to `memory`, once no work reads them.
+    pub(crate) fn free(&mut self, memory: &mut Memory) {
+        self.current = None;
+        for page in self.pages.drain(..) {
+            memory.free_buffer(page.memory);
+        }
+    }
 }
