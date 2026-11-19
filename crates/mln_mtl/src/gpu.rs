@@ -296,9 +296,8 @@ type BeforeCommit = Box<dyn Fn(&ProtocolObject<dyn MTLCommandBuffer>)>;
 /// once. Writes go into a staging buffer that a command buffer of their
 /// own, committed ahead of the frame's at each flush, copies in. Command
 /// buffers keep what they use alive, so a destroyed resource goes once the
-/// command buffers that use it do. Each call
-/// that encodes commands or compiles a pipeline drains an autorelease pool
-/// of its own.
+/// command buffers that use it do. Each call that encodes commands or
+/// compiles a pipeline drains an autorelease pool of its own.
 pub struct MetalGpu {
     device: Device,
     caps: Caps,
