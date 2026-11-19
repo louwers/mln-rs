@@ -428,10 +428,7 @@ impl LocalBackend for mln_mtl::RendererBackend {
         let SurfaceKind::MetalLayer(layer) = surface.kind else {
             return Err(Error::unsupported("the session's backend presents to no surface of this kind"));
         };
-        let overlay = overlay_of(overlay, |overlay| match overlay {
-            SurfaceOverlay::Metal(overlay) => Ok(overlay),
-            other => Err(other),
-        })?;
+        let overlay = metal_overlay(overlay)?;
         let mut target = mln_mtl::SurfaceTarget::new(self, layer, size, surface.cap_frame_rate);
         target.set_overlay(overlay);
         Ok(Box::new(target))
@@ -889,6 +886,11 @@ fn overlay_of<T>(
         .map(own)
         .transpose()
         .map_err(|_| Error::unsupported("the surface's overlay is for another backend than the session's"))
+}
+
+#[cfg(all(feature = "metal", target_vendor = "apple"))]
+fn metal_overlay(overlay: Option<SurfaceOverlay>) -> Result<Option<mln_mtl::surface_target::Overlay>, Error> {
+    overlay_of(overlay, |overlay| if let SurfaceOverlay::Metal(overlay) = overlay { Ok(overlay) } else { Err(overlay) })
 }
 
 #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
