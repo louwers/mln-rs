@@ -572,8 +572,15 @@ impl FrameTarget for SurfaceTarget {
 
     /// The window has `size` pixels from now on, which the next frame
     /// draws.
-    fn resize(&mut self, _gpu: &mut GlGpu, size: Size) {
+    fn resize(&mut self, gpu: &mut GlGpu, size: Size) {
         self.size = size;
+        // The window takes the size before the next frame makes the context
+        // current on its surface, which otherwise presents at the old size.
+        if let Some(window) = gpu.context_mut().platform().window()
+            && window.size != size
+        {
+            window.resize(size);
+        }
     }
 
     /// Takes the window over. A frame begins while the context is current
@@ -584,9 +591,6 @@ impl FrameTarget for SurfaceTarget {
         let on_surface = {
             let mut current = gpu.enter();
             let window = current.context_mut().platform().window()?;
-            if window.size != size {
-                window.resize(size);
-            }
             if !window.presenting {
                 // The context is current without a surface: make it current
                 // on the window's.
