@@ -380,6 +380,9 @@ impl LocalBackend for mln_webgpu::RendererBackend {
         };
         #[cfg(not(target_family = "wasm"))]
         let format = None;
+        let overlay = overlay_of(overlay, |overlay| {
+            if let SurfaceOverlay::WebGpu(overlay) = overlay { Ok(overlay) } else { Err(overlay) }
+        })?;
         let target = webgpu_surface(self, kind)?;
         let options = mln_webgpu::SurfaceOptions {
             cap_frame_rate: surface.cap_frame_rate,
@@ -387,9 +390,7 @@ impl LocalBackend for mln_webgpu::RendererBackend {
             ..mln_webgpu::SurfaceOptions::default()
         };
         let mut target = mln_webgpu::SurfaceTarget::new(self, target, size, options)?;
-        target.set_overlay(overlay_of(overlay, |overlay| {
-            if let SurfaceOverlay::WebGpu(overlay) = overlay { Ok(overlay) } else { Err(overlay) }
-        })?);
+        target.set_overlay(overlay);
         Ok(Box::new(target))
     }
 }
@@ -427,10 +428,12 @@ impl LocalBackend for mln_mtl::RendererBackend {
         let SurfaceKind::MetalLayer(layer) = surface.kind else {
             return Err(Error::unsupported("the session's backend presents to no surface of this kind"));
         };
+        let overlay = overlay_of(overlay, |overlay| match overlay {
+            SurfaceOverlay::Metal(overlay) => Ok(overlay),
+            other => Err(other),
+        })?;
         let mut target = mln_mtl::SurfaceTarget::new(self, layer, size, surface.cap_frame_rate);
-        target.set_overlay(overlay_of(overlay, |overlay| {
-            if let SurfaceOverlay::Metal(overlay) = overlay { Ok(overlay) } else { Err(overlay) }
-        })?);
+        target.set_overlay(overlay);
         Ok(Box::new(target))
     }
 }
@@ -465,6 +468,7 @@ impl LocalBackend for mln_vulkan::RendererBackend {
         overlay: Option<SurfaceOverlay>,
         size: Size,
     ) -> Result<Box<dyn Presenting<Self>>, Error> {
+        let overlay = vulkan_overlay(overlay)?;
         let mut target = match surface.kind {
             SurfaceKind::Window(window) => mln_vulkan::SurfaceTarget::new(self, window, size, surface.cap_frame_rate)?,
             SurfaceKind::Vulkan(host) => {
@@ -472,7 +476,7 @@ impl LocalBackend for mln_vulkan::RendererBackend {
             }
             _ => return Err(Error::unsupported("the session's backend presents to no surface of this kind")),
         };
-        target.set_overlay(self.gpu(), vulkan_overlay(overlay)?);
+        target.set_overlay(self.gpu(), overlay);
         Ok(Box::new(target))
     }
 }
@@ -568,11 +572,13 @@ impl LocalBackend for mln_gl::RendererBackend {
 /// the target it draws into, and the renderer that draws, once there is
 /// one. Each call that reaches the backend's `Gpu` lends it, for its scope,
 /// to the renderer and the target. Dropping it tears the renderer and the
-/// target down on the `Gpu`, before the backend goes.
+/// target down on the `Gpu`, and drops the target before the backend.
 struct BackendGfx<B: LocalBackend> {
-    backend: B,
+    // Fields drop in order: the target's native objects, such as a swap
+    // chain, go while the backend's device and `Gpu` live.
     frames: Frames<B>,
     renderer: Option<Renderer>,
+    backend: B,
 }
 
 /// What a [`BackendGfx`] draws into.
