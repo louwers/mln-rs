@@ -63,3 +63,265 @@ fn a_ring_of_images_of_no_size_or_too_large_is_rejected() {
     target.replace(gpu, images(Size::new(8, 8))).expect("a ring of 8x8 images");
     target.tear_down(gpu);
 }
+
+/// Images of the device's own that a ring draws into, which the test
+/// destroys once the device is idle.
+struct Owned {
+    device: Device,
+    images: Vec<(vk::Image, vk::ImageView, vk::DeviceMemory)>,
+    timelines: Vec<vk::Semaphore>,
+}
+
+impl Owned {
+    fn new(device: &Device) -> Owned {
+        Owned { device: device.clone(), images: Vec::new(), timelines: Vec::new() }
+    }
+
+    /// A ring of `count` RGBA8 images of `size`, which frames draw into.
+    fn ring(&mut self, count: usize, size: Size) -> BorrowedImages {
+        let images = (0..count).map(|_| self.image(size)).collect();
+        BorrowedImages {
+            images,
+            size,
+            format: vk::Format::R8G8B8A8_UNORM,
+            final_layout: vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+            owner: ImageOwner::GraphicsQueue,
+            depth: None,
+        }
+    }
+
+    fn image(&mut self, size: Size) -> BorrowedImage {
+        let shared = &self.device.shared;
+        let device = shared.device();
+        let info = vk::ImageCreateInfo::default()
+            .image_type(vk::ImageType::TYPE_2D)
+            .format(vk::Format::R8G8B8A8_UNORM)
+            .extent(vk::Extent3D { width: size.width, height: size.height, depth: 1 })
+            .mip_levels(1)
+            .array_layers(1)
+            .samples(vk::SampleCountFlags::TYPE_1)
+            .tiling(vk::ImageTiling::OPTIMAL)
+            .usage(vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_SRC)
+            .initial_layout(vk::ImageLayout::UNDEFINED);
+        // SAFETY: valid create infos, and memory of the image's requirements.
+        unsafe {
+            let image = device.create_image(&info, None).unwrap();
+            let requirements = device.get_image_memory_requirements(image);
+            let properties = shared.instance().get_physical_device_memory_properties(shared.physical_device());
+            let index = (0..properties.memory_type_count)
+                .find(|&index| requirements.memory_type_bits & (1 << index) != 0)
+                .unwrap();
+            let allocate =
+                vk::MemoryAllocateInfo::default().allocation_size(requirements.size).memory_type_index(index);
+            let memory = device.allocate_memory(&allocate, None).unwrap();
+            device.bind_image_memory(image, memory, 0).unwrap();
+            let view_info = vk::ImageViewCreateInfo::default()
+                .image(image)
+                .view_type(vk::ImageViewType::TYPE_2D)
+                .format(vk::Format::R8G8B8A8_UNORM)
+                .subresource_range(vk::ImageSubresourceRange {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                });
+            let view = device.create_image_view(&view_info, None).unwrap();
+            self.images.push((image, view, memory));
+            BorrowedImage { image, view }
+        }
+    }
+
+    /// A timeline semaphore at zero.
+    fn timeline(&mut self) -> vk::Semaphore {
+        let mut type_info =
+            vk::SemaphoreTypeCreateInfo::default().semaphore_type(vk::SemaphoreType::TIMELINE).initial_value(0);
+        let info = vk::SemaphoreCreateInfo::default().push_next(&mut type_info);
+        // SAFETY: a valid create info, on a device with timelines.
+        let semaphore = unsafe { self.device.shared.device().create_semaphore(&info, None) }.unwrap();
+        self.timelines.push(semaphore);
+        semaphore
+    }
+
+    /// Signals `semaphore`, a timeline, to `value` from another thread once
+    /// [`DELAY`] passed, and returns when it began waiting.
+    fn signal_later(&self, semaphore: vk::Semaphore, value: u64) -> (std::time::Instant, std::thread::JoinHandle<()>) {
+        let device = self.device.shared.device().clone();
+        let signal = std::thread::spawn(move || {
+            std::thread::sleep(DELAY);
+            let info = vk::SemaphoreSignalInfo::default().semaphore(semaphore).value(value);
+            // SAFETY: a timeline of the device, below `value`.
+            unsafe { device.signal_semaphore(&info) }.unwrap();
+        });
+        (std::time::Instant::now(), signal)
+    }
+}
+
+/// How long the host takes to signal its timeline.
+const DELAY: std::time::Duration = std::time::Duration::from_millis(200);
+
+/// The host's timeline at `value`.
+fn timeline_sync(semaphore: vk::Semaphore, value: u64) -> mln_gfx::ConsumerSync {
+    use ash::vk::Handle as _;
+    mln_gfx::ConsumerSync::of(mln_gfx::GpuSync {
+        kind: SyncKind::VulkanTimelineSemaphore,
+        handle: semaphore.as_raw(),
+        value,
+    })
+}
+
+impl Drop for Owned {
+    fn drop(&mut self) {
+        self.device.wait_idle("the test's images");
+        let device = self.device.shared.device();
+        // SAFETY: the device is idle, and nothing uses the objects any more.
+        unsafe {
+            for semaphore in self.timelines.drain(..) {
+                device.destroy_semaphore(semaphore, None);
+            }
+            for (image, view, memory) in self.images.drain(..) {
+                device.destroy_image_view(view, None);
+                device.destroy_image(image, None);
+                device.free_memory(memory, None);
+            }
+        }
+    }
+}
+
+/// Begins a frame of `target` and clears its image in a pass, without
+/// ending the frame.
+fn draw_without_ending(target: &mut BorrowedTarget, gpu: &mut crate::VulkanGpu) {
+    use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu as _, LoadOp, PassDesc};
+    let image = target.begin_frame(gpu).expect("a frame");
+    let desc = PassDesc {
+        label: "Unended",
+        color: Some(ColorAttachment { texture: image.color, load: LoadOp::Clear(mln_util::Color::red()) }),
+        depth_stencil: image.depth_stencil.map(|texture| DepthStencilAttachment {
+            texture,
+            depth: LoadOp::Clear(1.0),
+            stencil: LoadOp::Clear(0),
+        }),
+    };
+    gpu.begin_pass(&desc).unwrap();
+    gpu.end_pass().unwrap();
+}
+
+/// A sync file that signals once a frame of `producer` is done.
+#[cfg(unix)]
+fn sync_file(producer: &mut BorrowedTarget, gpu: &mut crate::VulkanGpu) -> mln_gfx::ConsumerSync {
+    use std::os::fd::BorrowedFd;
+    draw_without_ending(producer, gpu);
+    let mln_gfx::frame::Handoff::GivenBack { sync, .. } = producer.end_frame(gpu) else { panic!("a handed frame") };
+    assert_eq!(SyncKind::SyncFd, sync.kind);
+    // SAFETY: the producer keeps the file open until its slot is given back.
+    let file = unsafe { BorrowedFd::borrow_raw(sync.handle as i32) }.try_clone_to_owned().unwrap();
+    mln_gfx::ConsumerSync { sync, sync_file: Some(file) }
+}
+
+/// Waits until `pending` reads end.
+fn wait_for(mut pending: crate::PendingReads) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !pending.poll() {
+        assert!(std::time::Instant::now() < deadline, "the reads never ended");
+        std::thread::yield_now();
+    }
+}
+
+// A frame begun and drawn into, but not ended, is submitted with what its
+// slot waits for before the ring lets go of its images, and the semaphores
+// imported for the waits outlive that submit: on release (`take_pending`),
+// on replacement and on tear-down, for the host's sync files and timelines.
+#[test]
+fn a_frame_drawn_and_not_ended_is_submitted_with_its_waits() {
+    let (device, mut backend) = backend();
+    let mut owned = Owned::new(&device);
+    let size = Size::new(8, 8);
+    let (producers, consumers) = device.sync_kinds();
+    let timelines = consumers.contains(SyncKind::VulkanTimelineSemaphore);
+    let sync_files = cfg!(unix) && producers.contains(SyncKind::SyncFd) && consumers.contains(SyncKind::SyncFd);
+    assert!(timelines || sync_files, "the device waits for neither timelines nor sync files");
+    #[cfg(unix)]
+    let mut producer = sync_files.then(|| {
+        BorrowedTarget::new(&mut backend, owned.ring(1, size), SyncKind::SyncFd).expect("a sync file producer")
+    });
+    let mut target =
+        BorrowedTarget::new(&mut backend, owned.ring(2, size), SyncKind::CpuComplete).expect("a ring of 8x8 images");
+    let gpu = backend.gpu();
+
+    // Release: a sync file at slot 0, and a timeline that the host signals
+    // only after the ring took the frame's waits.
+    #[cfg(unix)]
+    if let Some(producer) = &mut producer {
+        let consumer = sync_file(producer, gpu);
+        producer.release(gpu, 0, mln_gfx::ConsumerSync::of(mln_gfx::GpuSync::of(SyncKind::CpuComplete))).unwrap();
+        target.release(gpu, 0, consumer).unwrap();
+        target.select(0);
+        draw_without_ending(&mut target, gpu);
+        wait_for(target.take_pending(gpu));
+    }
+    // A timeline at slot 1, which the host signals later: the frame's
+    // submit waits for it, and the device until it's signaled.
+    let timeline = timelines.then(|| owned.timeline());
+    if let Some(timeline) = timeline {
+        target.release(gpu, 1, timeline_sync(timeline, 1)).unwrap();
+        target.select(1);
+        draw_without_ending(&mut target, gpu);
+        let pending = target.take_pending(gpu);
+        let (since, signal) = owned.signal_later(timeline, 1);
+        device.wait_idle("the frame's submit");
+        assert!(since.elapsed() >= DELAY, "the frame's submit waited for no timeline");
+        signal.join().unwrap();
+        wait_for(pending);
+    }
+
+    // Replacement with a frame drawn at slot 0, which waits for a sync file
+    // where the device takes them, and otherwise a timeline.
+    #[cfg(unix)]
+    let replaced_after_sync_file = producer.as_mut().map(|producer| {
+        let consumer = sync_file(producer, gpu);
+        producer.release(gpu, 0, mln_gfx::ConsumerSync::of(mln_gfx::GpuSync::of(SyncKind::CpuComplete))).unwrap();
+        target.release(gpu, 0, consumer).unwrap();
+    });
+    #[cfg(not(unix))]
+    let replaced_after_sync_file = None::<()>;
+    let delayed = match (replaced_after_sync_file, timeline) {
+        (None, Some(timeline)) => {
+            target.release(gpu, 0, timeline_sync(timeline, 2)).unwrap();
+            Some(owned.signal_later(timeline, 2))
+        }
+        _ => None,
+    };
+    target.select(0);
+    draw_without_ending(&mut target, gpu);
+    wait_for(target.replace(gpu, owned.ring(2, size)).expect("new images"));
+    if let Some((since, signal)) = delayed {
+        assert!(since.elapsed() >= DELAY, "the replacement waited for no timeline");
+        signal.join().unwrap();
+    }
+
+    // Tear-down with a frame drawn at slot 1, which waits for a timeline
+    // where the device takes them, and otherwise a sync file.
+    let delayed = if let Some(timeline) = timeline {
+        target.release(gpu, 1, timeline_sync(timeline, 3)).unwrap();
+        Some(owned.signal_later(timeline, 3))
+    } else {
+        #[cfg(unix)]
+        if let Some(producer) = &mut producer {
+            let consumer = sync_file(producer, gpu);
+            producer.release(gpu, 0, mln_gfx::ConsumerSync::of(mln_gfx::GpuSync::of(SyncKind::CpuComplete))).unwrap();
+            target.release(gpu, 1, consumer).unwrap();
+        }
+        None
+    };
+    target.select(1);
+    draw_without_ending(&mut target, gpu);
+    target.tear_down(gpu);
+    if let Some((since, signal)) = delayed {
+        assert!(since.elapsed() >= DELAY, "the tear-down waited for no timeline");
+        signal.join().unwrap();
+    }
+    #[cfg(unix)]
+    if let Some(mut producer) = producer {
+        producer.tear_down(gpu);
+    }
+}
