@@ -9,12 +9,16 @@ use mln_util::{Color, i18n};
 use crate::glyph::GlyphIDType;
 use crate::shaper::ShapedText;
 
+/// The index of a section of a [`TaggedString`]. A label in the device's
+/// fonts takes a section for each word and each space.
+pub type SectionIndex = u16;
+
 /// Text as characters, with the index of each character's section. `text`
 /// and `styles` are equally long.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct StyledText {
     pub text: Vec<char>,
-    pub styles: Vec<u8>,
+    pub styles: Vec<SectionIndex>,
 }
 
 /// What the text of a shaped section holds for each of its glyphs: U+FFFC
@@ -197,7 +201,7 @@ impl TaggedString {
             vertical_align,
             ..SectionOptions::new(scale, font_stack.clone(), type_, start_index, text_color)
         });
-        let index = (self.sections.len() - 1) as u8;
+        let index = (self.sections.len() - 1) as SectionIndex;
         self.styled_text.styles.resize(self.styled_text.text.len(), index);
         self.supports_vertical_writing_mode = None;
         if type_ != GlyphIDType::FontPBF {
@@ -230,7 +234,7 @@ impl TaggedString {
         });
         let len = self.styled_text.text.len() + shaped.glyphs.len();
         self.styled_text.text.resize(len, SHAPED_GLYPH);
-        let index = (self.sections.len() - 1) as u8;
+        let index = (self.sections.len() - 1) as SectionIndex;
         self.styled_text.styles.resize(self.styled_text.text.len(), index);
         if type_ != GlyphIDType::FontPBF {
             self.has_font_sections = true;
@@ -244,7 +248,7 @@ impl TaggedString {
         };
         self.styled_text.text.push(next);
         self.sections.push(SectionOptions::image(image_id.to_string(), vertical_align));
-        let index = (self.sections.len() - 1) as u8;
+        let index = (self.sections.len() - 1) as SectionIndex;
         self.styled_text.styles.resize(self.styled_text.text.len(), index);
     }
 
@@ -259,7 +263,7 @@ impl TaggedString {
     }
 
     #[must_use]
-    pub fn get_section_index(&self, character_index: usize) -> u8 {
+    pub fn get_section_index(&self, character_index: usize) -> SectionIndex {
         self.styled_text.styles[character_index]
     }
 

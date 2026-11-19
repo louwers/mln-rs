@@ -18,7 +18,7 @@ use mln_vec_map::VecSet;
 use unicode_bidi::{BidiClass, BidiInfo};
 
 use crate::bidi_mirroring::BIDI_MIRRORING_GLYPH;
-use crate::tagged_string::StyledText;
+use crate::tagged_string::{SectionIndex, StyledText};
 
 /// Whether the first character in `text` with a strong direction runs right
 /// to left.
@@ -193,7 +193,7 @@ pub(crate) fn reorder_styled_lines_with_blocks(
     debug_assert_eq!(bidi_text.len(), input.text.len());
     let input_text = &input.text;
     let style_indices = &input.styles;
-    let is_block = |style: u8| block_styles.get(style as usize).copied().unwrap_or(false);
+    let is_block = |style: SectionIndex| block_styles.get(style as usize).copied().unwrap_or(false);
 
     let mut utf8 = String::new();
     let analysis = Analysis::new(bidi_text, &mut utf8);
@@ -211,7 +211,7 @@ pub(crate) fn reorder_styled_lines_with_blocks(
                 //
                 let mut style_run_start = logical_end;
                 let mut current_style_index = style_indices[style_run_start - 1];
-                let mut add_chunk = |start: usize, end: usize, style: u8| {
+                let mut add_chunk = |start: usize, end: usize, style: SectionIndex| {
                     // A block's text is already in visual order.
                     let mut reversed = Vec::new();
                     if is_block(style) {
@@ -300,7 +300,7 @@ mod bidi_test {
         v.iter().copied().collect()
     }
 
-    fn styled(text: Vec<char>, styles: Vec<u8>) -> StyledText {
+    fn styled(text: Vec<char>, styles: Vec<SectionIndex>) -> StyledText {
         StyledText { text, styles }
     }
 

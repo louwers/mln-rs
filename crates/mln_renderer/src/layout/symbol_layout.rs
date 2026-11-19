@@ -27,7 +27,7 @@ use mln_style_types::{
 };
 use mln_text::glyph::{GlyphID, GlyphIDType, GlyphPositions, Shaping, WritingModeType};
 use mln_text::shaping::{PositionedIcon, get_anchor_justification, get_shaping};
-use mln_text::tagged_string::SectionOptions;
+use mln_text::tagged_string::{SectionIndex, SectionOptions};
 use mln_text::{ShapedText, TaggedString, shape_arabic, starts_right_to_left};
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCoordinate, GeometryCoordinates, GeometryTileFeature};
@@ -512,6 +512,14 @@ impl SymbolLayout {
 
                 let mut formatted_text = TaggedString::default();
                 let mut section_table: VecMap<usize, usize> = VecMap::new();
+                // Vertical layout reads the runs of a label that stands
+                // upright in places, such as digits among CJK, a character
+                // at a time: the device's fonts shape only its complex
+                // scripts.
+                let upright = formatted
+                    .sections
+                    .iter()
+                    .any(|section| section.text.chars().any(i18n::has_upright_vertical_orientation));
 
                 for (section_index, section) in formatted.sections.iter().enumerate() {
                     if let Some(image) = &section.image {
@@ -541,11 +549,14 @@ impl SymbolLayout {
                     let section_scale = section.font_scale.unwrap_or(1.0);
                     let section_font_stack = section.font_stack.clone().unwrap_or_else(|| base_font_stack.clone());
                     let glyph_types = glyph_type_tables.get(&section_font_stack);
+                    let type_of = |c: char, previous: GlyphIDType| match glyph_types.get(c, previous) {
+                        GlyphIDType::SYSTEM if upright && i18n::char_in_supported_script(c) => GlyphIDType::FontPBF,
+                        type_ => type_,
+                    };
 
                     let mut sub_string: Vec<char> = Vec::new();
                     // An empty string's first character is the terminating NUL.
-                    let mut sub_string_type =
-                        glyph_types.get(chars.first().copied().unwrap_or('\0'), GlyphIDType::FontPBF);
+                    let mut sub_string_type = type_of(chars.first().copied().unwrap_or('\0'), GlyphIDType::FontPBF);
 
                     let mut add_sub_string =
                         |sub_string: &mut Vec<char>,
@@ -583,7 +594,7 @@ impl SymbolLayout {
                         };
 
                     for ch in chars {
-                        let ch_type = glyph_types.get(ch, sub_string_type);
+                        let ch_type = type_of(ch, sub_string_type);
                         if ch_type != sub_string_type {
                             add_sub_string(&mut sub_string, sub_string_type, false, &mut formatted_text);
                             sub_string.clear();
@@ -1522,42 +1533,43 @@ impl SymbolLayout {
             let mut sub_string: Vec<char> = Vec::new();
             let mut section_index = style_text.styles.first().copied().unwrap_or(0);
 
-            let apply_sub_string = |sub_string: &[char], section_index: u8, shaped_string: &mut TaggedString| {
-                if sub_string.is_empty() {
-                    return;
-                }
-                let section = &sections[section_index as usize];
-                if let Some(image_id) = &section.image_id {
-                    shaped_string.add_image_section(image_id, section.vertical_align);
-                } else if section.type_ == GlyphIDType::FontPBF {
-                    shaped_string.add_text_section(
-                        sub_string,
-                        section.scale,
-                        &section.font_stack,
-                        section.type_,
-                        section.key_section,
-                        section.text_color,
-                        section.vertical_align,
-                    );
-                } else {
-                    let shaped = results
-                        .get(&section.font_stack)
-                        .and_then(|types| types.get(&section.type_))
-                        .and_then(|strings| strings.get(sub_string))
-                        .unwrap_or(&unshaped);
+            let apply_sub_string =
+                |sub_string: &[char], section_index: SectionIndex, shaped_string: &mut TaggedString| {
+                    if sub_string.is_empty() {
+                        return;
+                    }
+                    let section = &sections[section_index as usize];
+                    if let Some(image_id) = &section.image_id {
+                        shaped_string.add_image_section(image_id, section.vertical_align);
+                    } else if section.type_ == GlyphIDType::FontPBF {
+                        shaped_string.add_text_section(
+                            sub_string,
+                            section.scale,
+                            &section.font_stack,
+                            section.type_,
+                            section.key_section,
+                            section.text_color,
+                            section.vertical_align,
+                        );
+                    } else {
+                        let shaped = results
+                            .get(&section.font_stack)
+                            .and_then(|types| types.get(&section.type_))
+                            .and_then(|strings| strings.get(sub_string))
+                            .unwrap_or(&unshaped);
 
-                    shaped_string.add_shaped_section(
-                        shaped,
-                        section.scale,
-                        &section.font_stack,
-                        section.type_,
-                        starts_right_to_left(sub_string),
-                        section.key_section,
-                        section.text_color,
-                        section.vertical_align,
-                    );
-                }
-            };
+                        shaped_string.add_shaped_section(
+                            shaped,
+                            section.scale,
+                            &section.font_stack,
+                            section.type_,
+                            starts_right_to_left(sub_string),
+                            section.key_section,
+                            section.text_color,
+                            section.vertical_align,
+                        );
+                    }
+                };
 
             for (ch, sec) in style_text.text.iter().zip(style_text.styles.iter()) {
                 if section_index != *sec {

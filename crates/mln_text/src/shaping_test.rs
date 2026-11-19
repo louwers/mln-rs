@@ -700,6 +700,19 @@ fn shaped_section_keeps_its_adjustments_when_it_moves() {
     assert_eq!(glyphs[4].x - glyphs[3].x, 5.0);
 }
 
+#[test]
+fn a_label_holds_more_than_256_sections() {
+    let font_stack: FontStack = vec!["font-stack".to_string()];
+    let face = face_type("shaping-test-sections", "font-stack", &[(0, 0xffff)]);
+    let mut text = TaggedString::default();
+    for i in 0..300 {
+        let type_ = if i % 2 == 0 { GlyphIDType::FontPBF } else { face };
+        text.add_text_section(&['a'], 1.0, &font_stack, type_, true, None, VerticalAlign::Bottom);
+    }
+    assert_eq!(text.get_section_index(299), 299);
+    assert_eq!(text.get_section(299).type_, face);
+}
+
 // Line breaking measures a shaped section by its shaping.
 #[test]
 fn shaped_glyphs_take_up_their_width_on_a_line() {

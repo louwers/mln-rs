@@ -327,8 +327,9 @@ fn get_glyph_advance(
     let section = input.get_section(i);
     if let Some(shaped) = &section.shaped {
         let offset = usize::try_from(section.start_index).ok().and_then(|start| i.checked_sub(start));
-        let adjust = offset.and_then(|offset| shaped.adjusts.get(offset));
-        return adjust.map_or(0.0, |adjust| (f64::from(adjust.advance) * section.scale) as f32 + spacing);
+        let advance = offset.and_then(|offset| shaped.adjusts.get(offset)).map_or(0.0, |adjust| adjust.advance);
+        // As placed: a glyph without an advance takes no spacing either.
+        return if advance > 0.01 { (f64::from(advance) * section.scale) as f32 + spacing } else { 0.0 };
     }
     let code_point = input.char_at(i);
     match &section.image_id {
