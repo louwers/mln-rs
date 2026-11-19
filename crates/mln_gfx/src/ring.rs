@@ -56,9 +56,6 @@ pub trait RingBackend: Sized {
     /// What a slot's last frame handed the host and the target keeps until
     /// the host gives the slot back, such as a sync file.
     type Handed;
-    /// What [`PendingReads`] keep to poll and let go of waits, apart from
-    /// the target.
-    type Reads: Clone;
 
     /// The ring's objects for frames drawn into `textures` on `backend` and
     /// handed to the host with sync of the kind `producer`, once both are
@@ -127,16 +124,13 @@ pub trait RingBackend: Sized {
         let _ = what;
     }
 
-    /// What [`PendingReads`] keep.
-    fn reads(&self) -> &Self::Reads;
-
     /// Whether the read that `wait` ends with has ended, which it checks
     /// without blocking.
-    fn ended(reads: &Self::Reads, wait: &Self::Wait) -> bool;
+    fn ended(wait: &Self::Wait) -> bool;
 
     /// Lets go of `wait`, which no submit takes.
-    fn forget(reads: &Self::Reads, wait: Self::Wait) {
-        let _ = (reads, wait);
+    fn forget(wait: Self::Wait) {
+        let _ = wait;
     }
 }
 
@@ -245,13 +239,13 @@ impl<B: RingBackend> Slot<B> {
     /// Lets go of what the slot waits for, once a submit that may have
     /// taken it is done, and of what the slot handed the host. A pass of a
     /// frame begun on the slot and not ended may have taken the wait.
-    fn forget(&mut self, gpu: &mut B::Gpu, reads: &B::Reads) {
+    fn forget(&mut self, gpu: &mut B::Gpu) {
         let attached = self.attached.take();
         if let Some(texture) = attached {
             B::forget_waits(gpu, texture);
         }
         if let Some(wait) = self.wait.take() {
-            if attached.is_some() { B::waited(gpu, wait) } else { B::forget(reads, wait) }
+            if attached.is_some() { B::waited(gpu, wait) } else { B::forget(wait) }
         }
         self.handed = None;
     }
@@ -299,7 +293,7 @@ impl<B: RingBackend> BorrowedTarget<B> {
         let Some(state) = self.slots.get_mut(slot) else {
             return Err(Error::invalid_argument("the ring has no such slot"));
         };
-        state.forget(gpu, self.ring.reads());
+        state.forget(gpu);
         state.wait = self.ring.wait_for(gpu, consumer)?;
         Ok(())
     }
@@ -309,7 +303,7 @@ impl<B: RingBackend> BorrowedTarget<B> {
     /// and never draws into the texture again.
     pub fn discard(&mut self, gpu: &mut B::Gpu, slot: usize) {
         if let Some(state) = self.slots.get_mut(slot) {
-            state.forget(gpu, self.ring.reads());
+            state.forget(gpu);
         }
     }
 
@@ -350,7 +344,7 @@ impl<B: RingBackend> BorrowedTarget<B> {
             })
             .collect();
         let waits = previous.into_iter().filter_map(|slot| slot.wait).collect();
-        Ok(self.pending(gpu, waits))
+        Ok(Self::pending(gpu, waits))
     }
 
     /// Takes what the ring's textures still wait for, the host's reads of
@@ -362,7 +356,7 @@ impl<B: RingBackend> BorrowedTarget<B> {
     pub fn take_pending(&mut self, gpu: &mut B::Gpu) -> PendingReads<B> {
         self.submit_recorded(gpu, "borrowed target release");
         let waits = self.slots.iter_mut().filter_map(|slot| slot.wait.take()).collect();
-        self.pending(gpu, waits)
+        Self::pending(gpu, waits)
     }
 
     /// Submits the work recorded so far, before the ring lets go of the
@@ -387,9 +381,9 @@ impl<B: RingBackend> BorrowedTarget<B> {
 
     /// `waits`, and the end of the work submitted to `gpu` where the backend
     /// has one, as reads to wait for.
-    fn pending(&self, gpu: &B::Gpu, mut waits: Vec<B::Wait>) -> PendingReads<B> {
+    fn pending(gpu: &B::Gpu, mut waits: Vec<B::Wait>) -> PendingReads<B> {
         waits.extend(B::submitted(gpu));
-        PendingReads { reads: self.ring.reads().clone(), waits }
+        PendingReads { waits }
     }
 
     /// The sync that the host waits for, once the frame was submitted, and
@@ -470,7 +464,7 @@ impl<B: RingBackend> FrameTarget for BorrowedTarget<B> {
         self.submit_recorded(gpu, "borrowed target deletion");
         self.ring.wait_for_frames("borrowed target deletion");
         for mut slot in std::mem::take(&mut self.slots) {
-            slot.forget(gpu, self.ring.reads());
+            slot.forget(gpu);
         }
         self.imports.tear_down(gpu);
         self.torn_down = true;
@@ -492,7 +486,7 @@ impl<B: RingBackend> Drop for BorrowedTarget<B> {
             if slot.attached.is_none()
                 && let Some(wait) = slot.wait
             {
-                B::forget(self.ring.reads(), wait);
+                B::forget(wait);
             }
         }
     }
@@ -502,7 +496,6 @@ impl<B: RingBackend> Drop for BorrowedTarget<B> {
 /// for before the host may use or destroy the textures. Dropping it stops
 /// waiting.
 pub struct PendingReads<B: RingBackend> {
-    reads: B::Reads,
     waits: Vec<B::Wait>,
 }
 
@@ -510,9 +503,8 @@ impl<B: RingBackend> PendingReads<B> {
     /// Whether every read ended, which it checks without blocking. It lets
     /// go of the waits of the reads that ended.
     pub fn poll(&mut self) -> bool {
-        let reads = &self.reads;
-        for wait in self.waits.extract_if(.., |wait| B::ended(reads, wait)) {
-            B::forget(reads, wait);
+        for wait in self.waits.extract_if(.., |wait| B::ended(wait)) {
+            B::forget(wait);
         }
         self.waits.is_empty()
     }
@@ -521,7 +513,7 @@ impl<B: RingBackend> PendingReads<B> {
 impl<B: RingBackend> Drop for PendingReads<B> {
     fn drop(&mut self) {
         for wait in self.waits.drain(..) {
-            B::forget(&self.reads, wait);
+            B::forget(wait);
         }
     }
 }
@@ -705,7 +697,6 @@ impl<E: Exporter> FrameTarget for ExportedTarget<E> {
 mod tests {
     use std::any::Any;
     use std::cell::RefCell;
-    use std::rc::Rc;
 
     use mln_util::hash::HashMap;
 
@@ -826,8 +817,6 @@ mod tests {
         gpu: FakeGpu,
         /// The name of the next image that an exporter allocates.
         next_image: u32,
-        /// What the backend's rings did.
-        record: Rc<RefCell<Record>>,
     }
 
     impl RendererBackend for FakeBackend {
@@ -869,20 +858,31 @@ mod tests {
         }
     }
 
-    /// What a ring did apart from its `Gpu`.
+    /// What the test's rings did apart from their `Gpu`.
     #[derive(Default)]
     struct Record {
-        /// How many times it waited for the frames drawn so far.
+        /// How many times they waited for the frames drawn so far.
         frames_waited: usize,
-        /// The waits that it let go of without a submit.
+        /// The waits that they let go of without a submit.
         forgotten: Vec<u32>,
+    }
+
+    thread_local! {
+        static RECORD: RefCell<Record> = RefCell::default();
+    }
+
+    fn frames_waited() -> usize {
+        RECORD.with_borrow(|record| record.frames_waited)
+    }
+
+    fn forgotten() -> Vec<u32> {
+        RECORD.with_borrow(|record| record.forgotten.clone())
     }
 
     /// A ring whose waits are the host's reads by number, which have ended
     /// from 100 on, and whose frames signal a counter.
     struct FakeRing {
         value: u64,
-        record: Rc<RefCell<Record>>,
     }
 
     impl RingBackend for FakeRing {
@@ -892,16 +892,15 @@ mod tests {
         type Wait = u32;
         /// The value of the frame's signal.
         type Handed = u64;
-        type Reads = Rc<RefCell<Record>>;
 
-        fn new(backend: &mut FakeBackend, images: &Images, producer: SyncKind) -> Result<Self, Error> {
+        fn new(_: &mut FakeBackend, images: &Images, producer: SyncKind) -> Result<Self, Error> {
             if images.names.is_empty() {
                 return Err(Error::invalid_argument("no images"));
             }
             if producer == SyncKind::SyncFd {
                 return Err(Error::unsupported("no sync files"));
             }
-            Ok(FakeRing { value: 0, record: Rc::clone(&backend.record) })
+            Ok(FakeRing { value: 0 })
         }
         fn check_replacement(&self, current: &Images, next: &Images) -> Result<(), Error> {
             if current.depth == next.depth { Ok(()) } else { Err(Error::unsupported("a ring keeps its depth")) }
@@ -948,16 +947,13 @@ mod tests {
             gpu.last_submit
         }
         fn wait_for_frames(&self, _: &str) {
-            self.record.borrow_mut().frames_waited += 1;
+            RECORD.with_borrow_mut(|record| record.frames_waited += 1);
         }
-        fn reads(&self) -> &Rc<RefCell<Record>> {
-            &self.record
-        }
-        fn ended(_: &Rc<RefCell<Record>>, wait: &u32) -> bool {
+        fn ended(wait: &u32) -> bool {
             *wait >= 100
         }
-        fn forget(record: &Rc<RefCell<Record>>, wait: u32) {
-            record.borrow_mut().forgotten.push(wait);
+        fn forget(wait: u32) {
+            RECORD.with_borrow_mut(|record| record.forgotten.push(wait));
         }
     }
 
@@ -1010,7 +1006,6 @@ mod tests {
     #[test]
     fn a_ring_lets_go_of_each_wait_once() {
         let mut backend = FakeBackend::default();
-        let record = Rc::clone(&backend.record);
         let mut ring = target(&mut backend, &[10, 20]);
         let gpu = &mut backend.gpu;
         // The submit that takes a frame's wait has it go after its work.
@@ -1024,7 +1019,7 @@ mod tests {
         ring.release(gpu, 1, timeline(9)).expect("a release");
         let fence = ConsumerSync::of(GpuSync { kind: SyncKind::D3d12Fence, handle: 1, value: 10 });
         assert!(ring.release(gpu, 1, fence).is_err());
-        assert_eq!(record.borrow().forgotten, [8, 9]);
+        assert_eq!(forgotten(), [8, 9]);
         ring.select(1);
         let image = ring.begin_frame(gpu).expect("a frame");
         assert!(!gpu.texture_waits.contains_key(&image.color));
@@ -1036,9 +1031,9 @@ mod tests {
         ring.release(gpu, 1, timeline(11)).expect("a release");
         let mut pending = ring.take_pending(gpu);
         assert!(!pending.poll());
-        assert_eq!(record.borrow().forgotten, [8, 9, 100]);
+        assert_eq!(forgotten(), [8, 9, 100]);
         drop(pending);
-        assert_eq!(record.borrow().forgotten, [8, 9, 100, 11]);
+        assert_eq!(forgotten(), [8, 9, 100, 11]);
         assert_eq!(gpu.waited, [7]);
     }
 
@@ -1057,26 +1052,24 @@ mod tests {
     #[test]
     fn a_ring_waits_for_its_frames_once_before_it_goes() {
         let mut backend = FakeBackend::default();
-        let record = Rc::clone(&backend.record);
         let mut ring = target(&mut backend, &[10, 20]);
         ring.release(&mut backend.gpu, 0, timeline(7)).expect("a release");
         ring.tear_down(&mut backend.gpu);
-        assert_eq!(record.borrow().frames_waited, 1);
-        assert_eq!(record.borrow().forgotten, [7]);
+        assert_eq!(frames_waited(), 1);
+        assert_eq!(forgotten(), [7]);
         drop(ring);
-        assert_eq!(record.borrow().frames_waited, 1);
+        assert_eq!(frames_waited(), 1);
         // Dropped without a tear-down, it waits as it drops.
         let mut ring = target(&mut backend, &[10]);
         ring.release(&mut backend.gpu, 0, timeline(8)).expect("a release");
         drop(ring);
-        assert_eq!(record.borrow().frames_waited, 2);
-        assert_eq!(record.borrow().forgotten, [7, 8]);
+        assert_eq!(frames_waited(), 2);
+        assert_eq!(forgotten(), [7, 8]);
     }
 
     #[test]
     fn a_frame_left_unended_lets_go_of_its_wait_only_after_a_submit() {
         let mut backend = FakeBackend::default();
-        let record = Rc::clone(&backend.record);
         let mut ring = target(&mut backend, &[10]);
         let gpu = &mut backend.gpu;
         ring.release(gpu, 0, timeline(7)).expect("a release");
@@ -1092,7 +1085,7 @@ mod tests {
         ring.release(&mut backend.gpu, 0, timeline(8)).expect("a release");
         ring.begin_frame(&mut backend.gpu);
         drop(ring);
-        assert_eq!(record.borrow().forgotten, Vec::<u32>::new());
+        assert_eq!(forgotten(), Vec::<u32>::new());
         assert_eq!(backend.gpu.waited, [7]);
     }
 
@@ -1126,7 +1119,6 @@ mod tests {
     #[test]
     fn a_ring_that_lets_go_of_a_begun_frame_submits_it_with_its_wait() {
         let mut backend = FakeBackend::default();
-        let record = Rc::clone(&backend.record);
         let mut ring = target(&mut backend, &[10, 20]);
         let gpu = &mut backend.gpu;
         ring.release(gpu, 0, timeline(7)).expect("a release");
@@ -1146,7 +1138,7 @@ mod tests {
         assert_eq!(gpu.submits, [vec![7], vec![8]]);
         assert_eq!(gpu.waited, [7, 8]);
         assert!(gpu.texture_waits.is_empty());
-        assert_eq!(record.borrow().forgotten, Vec::<u32>::new());
+        assert_eq!(forgotten(), Vec::<u32>::new());
     }
 
     #[test]

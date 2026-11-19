@@ -124,8 +124,11 @@ impl RingTextures for BorrowedImages {
 }
 
 /// What the next frame drawn into a slot's image waits for: the host's reads
-/// of it.
-pub struct ConsumerWait(Waiting);
+/// of it, on `device`.
+pub struct ConsumerWait {
+    device: Device,
+    waiting: Waiting,
+}
 
 /// What a [`ConsumerWait`] waits for.
 enum Waiting {
@@ -141,11 +144,11 @@ enum Waiting {
     Fence(vk::Semaphore, u64),
 }
 
-impl ConsumerWait {
+impl Waiting {
     /// The semaphore of the ring's own that the wait holds, which the caller
     /// destroys. A timeline is the host's.
     fn into_own_semaphore(self) -> Option<vk::Semaphore> {
-        match self.0 {
+        match self {
             Waiting::Timeline(..) => None,
             #[cfg(unix)]
             Waiting::Imported { semaphore, .. } => Some(semaphore),
@@ -276,7 +279,7 @@ impl VulkanRing {
     /// Imports the host's sync file `fd` into a semaphore of the target's
     /// own, which keeps a copy of the file for its release to poll.
     #[cfg(unix)]
-    fn import_sync_file(&self, fd: std::os::fd::OwnedFd) -> Result<ConsumerWait, Error> {
+    fn import_sync_file(&self, fd: std::os::fd::OwnedFd) -> Result<Waiting, Error> {
         use std::os::fd::{FromRawFd as _, IntoRawFd as _, OwnedFd};
         let loader = self
             .device
@@ -297,7 +300,7 @@ impl VulkanRing {
         // SAFETY: the semaphore is new; Vulkan owns the descriptor once the
         // import succeeds.
         match unsafe { loader.import_semaphore_fd(&info) } {
-            Ok(()) => Ok(ConsumerWait(Waiting::Imported { semaphore, file })),
+            Ok(()) => Ok(Waiting::Imported { semaphore, file }),
             Err(error) => {
                 // SAFETY: the import failed, so the descriptor is still the
                 // target's, and nothing uses the semaphore.
@@ -369,7 +372,6 @@ impl RingBackend for VulkanRing {
     type Textures = BorrowedImages;
     type Wait = ConsumerWait;
     type Handed = Handed;
-    type Reads = Device;
 
     /// Fails as [`BorrowedImages::check`] does, with
     /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a producer kind
@@ -457,34 +459,33 @@ impl RingBackend for VulkanRing {
         let ConsumerSync { sync: consumer, sync_file } = consumer;
         #[cfg(not(unix))]
         let ConsumerSync { sync: consumer } = consumer;
-        match consumer.kind {
-            SyncKind::CpuComplete => Ok(None),
+        let waiting = match consumer.kind {
+            SyncKind::CpuComplete => return Ok(None),
             SyncKind::QueueOrder => {
                 // The host's reads went to the queue before the next frame,
                 // which waits for them before it clears the image.
                 gpu.wait_for_queue()
                     .map_err(|error| Error::native(format!("Waiting for the host's reads failed: {error}")))?;
-                Ok(None)
+                return Ok(None);
             }
             SyncKind::VulkanTimelineSemaphore => {
-                Ok(Some(ConsumerWait(Waiting::Timeline(vk::Semaphore::from_raw(consumer.handle), consumer.value))))
+                Waiting::Timeline(vk::Semaphore::from_raw(consumer.handle), consumer.value)
             }
             #[cfg(unix)]
             SyncKind::SyncFd => {
                 let fd = sync_file.ok_or_else(|| Error::invalid_argument("a sync file release names no file"))?;
-                self.import_sync_file(fd).map(Some)
+                self.import_sync_file(fd)?
             }
             #[cfg(windows)]
-            SyncKind::D3d12Fence => {
-                Ok(Some(ConsumerWait(Waiting::Fence(import_fence(&self.device, consumer.handle)?, consumer.value))))
-            }
-            kind => Err(Error::unsupported(format!("the Vulkan target waits for no {kind:?}"))),
-        }
+            SyncKind::D3d12Fence => Waiting::Fence(import_fence(&self.device, consumer.handle)?, consumer.value),
+            kind => return Err(Error::unsupported(format!("the Vulkan target waits for no {kind:?}"))),
+        };
+        Ok(Some(ConsumerWait { device: self.device.clone(), waiting }))
     }
 
     fn wait_before_using(gpu: &mut VulkanGpu, texture: TextureId, wait: &ConsumerWait) -> Result<(), GpuError> {
         let stages = vk::PipelineStageFlags::ALL_COMMANDS;
-        match &wait.0 {
+        match &wait.waiting {
             Waiting::Timeline(semaphore, value) => gpu.wait_before_using(texture, *semaphore, Some(*value), stages),
             #[cfg(unix)]
             Waiting::Imported { semaphore, .. } => gpu.wait_before_using(texture, *semaphore, None, stages),
@@ -503,7 +504,7 @@ impl RingBackend for VulkanRing {
 
     /// A semaphore of the ring's own goes once the submit is done.
     fn waited(gpu: &mut VulkanGpu, wait: ConsumerWait) {
-        if let Some(semaphore) = wait.into_own_semaphore() {
+        if let Some(semaphore) = wait.waiting.into_own_semaphore() {
             // SAFETY: destroyed once the frame that waits on it is done.
             gpu.destroy_later(move |device| unsafe { device.destroy_semaphore(semaphore, None) });
         }
@@ -548,13 +549,10 @@ impl RingBackend for VulkanRing {
         self.device.wait_idle(what);
     }
 
-    fn reads(&self) -> &Device {
-        &self.device
-    }
-
-    fn ended(device: &Device, wait: &ConsumerWait) -> bool {
+    fn ended(wait: &ConsumerWait) -> bool {
+        let device = &wait.device;
         let now = Instant::now();
-        match &wait.0 {
+        match &wait.waiting {
             Waiting::Timeline(semaphore, value) => wait_timeline(device, *semaphore, *value, now),
             #[cfg(unix)]
             Waiting::Imported { file, .. } => poll_until(file, now),
@@ -563,11 +561,11 @@ impl RingBackend for VulkanRing {
         }
     }
 
-    fn forget(device: &Device, wait: ConsumerWait) {
-        if let Some(semaphore) = wait.into_own_semaphore() {
+    fn forget(wait: ConsumerWait) {
+        if let Some(semaphore) = wait.waiting.into_own_semaphore() {
             // SAFETY: no submitted frame waits on the semaphore, which the
             // ring made.
-            unsafe { device.shared.device().destroy_semaphore(semaphore, None) };
+            unsafe { wait.device.shared.device().destroy_semaphore(semaphore, None) };
         }
     }
 }

@@ -263,7 +263,6 @@ impl RingBackend for D3d12Ring {
     /// A fence, and the value that the work to wait for reaches.
     type Wait = (ID3D12Fence, u64);
     type Handed = Infallible;
-    type Reads = ();
 
     /// Fails as [`BorrowedTextures::check`] does, with
     /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for another producer
@@ -360,11 +359,7 @@ impl RingBackend for D3d12Ring {
         Some(gpu.last_submit())
     }
 
-    fn reads(&self) -> &() {
-        &()
-    }
-
-    fn ended((): &(), (fence, value): &Self::Wait) -> bool {
+    fn ended((fence, value): &Self::Wait) -> bool {
         // SAFETY: a plain query.
         unsafe { fence.GetCompletedValue() >= *value }
     }

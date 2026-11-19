@@ -209,7 +209,6 @@ impl RingBackend for MetalRing {
     /// The host's shared event, and the value its reads reach.
     type Wait = (SharedEvent, u64);
     type Handed = Infallible;
-    type Reads = ();
 
     /// Fails as [`BorrowedTextures::check`] does, with
     /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a producer kind
@@ -315,13 +314,9 @@ impl RingBackend for MetalRing {
         Some((GpuSync { kind: SyncKind::MetalSharedEvent, handle, value: self.event_value }, None))
     }
 
-    fn reads(&self) -> &() {
-        &()
-    }
-
     /// Whether the event reached the value, by its signaled value, which any
     /// macOS with shared events reports.
-    fn ended((): &(), (event, value): &Self::Wait) -> bool {
+    fn ended((event, value): &Self::Wait) -> bool {
         event.signaledValue() >= *value
     }
 }
