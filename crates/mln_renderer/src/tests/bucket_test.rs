@@ -1027,6 +1027,42 @@ fn the_paint_layout_of_pulled_walls_is_the_paint_attributes() {
     });
 }
 
+// The pulled outlines' shader finds a vertex's paint values where the paint
+// attributes read them.
+#[test]
+fn the_paint_layout_of_pulled_outlines_is_the_paint_attributes() {
+    use mln_gfx::AttributeDataType::{Float, Float2, Float4};
+    use mln_gfx::shaders::shader_defines::{
+        ID_FILL_COLOR_VERTEX_ATTRIBUTE, ID_FILL_OPACITY_VERTEX_ATTRIBUTE, ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE,
+    };
+
+    use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
+    use crate::layers::render_fill_layer::outline_paint_layout;
+
+    with_context(|_, context| {
+        let mut attrs = VertexAttributeArray::new();
+        assert_eq!(outline_paint_layout(&attrs), 0, "every property a uniform");
+
+        // A vertex's fill color, its opacity, then its outline color.
+        let paint = context.add_vertices(vec![[0f32; 5]]);
+        for (id, data_type, offset) in [
+            (ID_FILL_COLOR_VERTEX_ATTRIBUTE, Float2, 0),
+            (ID_FILL_OPACITY_VERTEX_ATTRIBUTE, Float, 8),
+            (ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE, Float2, 12),
+        ] {
+            attrs.set_shared(id, SharedAttribute::new(paint.clone(), data_type, offset, 20));
+        }
+        // Five words a vertex: the outline color at 3, the opacity at 2.
+        assert_eq!(outline_paint_layout(&attrs), 0x0002_0305);
+
+        // An interpolated outline color alone.
+        let mut attrs = VertexAttributeArray::new();
+        let paint = context.add_vertices(vec![[0f32; 4]]);
+        attrs.set_shared(ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE, SharedAttribute::new(paint, Float4, 0, 16));
+        assert_eq!(outline_paint_layout(&attrs), 4);
+    });
+}
+
 // What draws share stays in the context's stores while a handle to it lasts,
 // and goes once the last one drops and the context destroys what the
 // renderer released.

@@ -7,7 +7,7 @@
 //! the renderer released.
 
 use std::marker::PhantomData;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use crate::gfx::release::{Release, ReleaseQueue};
 
@@ -88,6 +88,31 @@ impl<K: Key> Shared<K> {
     #[must_use]
     pub(crate) fn key(&self) -> K {
         self.0.key
+    }
+
+    /// A handle that finds the entry while a clone of this one lasts,
+    /// without keeping it.
+    #[must_use]
+    pub(crate) fn downgrade(&self) -> WeakShared<K> {
+        WeakShared(Rc::downgrade(&self.0))
+    }
+}
+
+/// A handle of a store entry that doesn't keep it in its store.
+pub(crate) struct WeakShared<K: Key>(Weak<Holder<K>>);
+
+impl<K: Key> WeakShared<K> {
+    /// A handle of the entry, while a [`Shared`] of it lasts.
+    #[must_use]
+    pub(crate) fn upgrade(&self) -> Option<Shared<K>> {
+        self.0.upgrade().map(Shared)
+    }
+}
+
+impl<K: Key> Default for WeakShared<K> {
+    /// A handle of no entry.
+    fn default() -> Self {
+        WeakShared(Weak::new())
     }
 }
 

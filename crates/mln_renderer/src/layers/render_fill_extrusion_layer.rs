@@ -386,8 +386,7 @@ pub(crate) struct RenderFillExtrusionLayer {
     /// The triangle strip of the wall quad, which the instanced walls draw.
     strip_indices: Option<SharedIndexes>,
     /// The triangles of walls four vertices apart
-    /// (`RenderStaticData::fill_extrusion_wall_indices`), which the others
-    /// draw.
+    /// (`RenderStaticData::wall_indexes`), which the others draw.
     wall_indices: Option<SharedIndexes>,
 }
 
@@ -484,9 +483,8 @@ impl TypedLayer for RenderFillExtrusionLayer {
                 context.add_indexes(Indexes::new(RenderStaticData::fill_extrusion_strip_indices()))
             })
         } else {
-            &*self.wall_indices.get_or_insert_with(|| {
-                context.add_indexes(Indexes::new(RenderStaticData::fill_extrusion_wall_indices()))
-            })
+            let static_data = paint_parameters.static_data;
+            &*self.wall_indices.get_or_insert_with(|| static_data.wall_indexes(context))
         };
         let mut builder = TileBuilder {
             shaders,

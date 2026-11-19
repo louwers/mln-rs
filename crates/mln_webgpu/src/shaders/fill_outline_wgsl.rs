@@ -7,6 +7,11 @@
 //! segment that starts there as attributes; where no segment starts, the
 //! end is the vertex itself and the instance draws nothing. The static
 //! quad's x picks the segment's start (0) or end (1), its y the side.
+//!
+//! The pulled outlines draw four vertices a segment without vertex
+//! attributes. A vertex's index picks its segment and its corner of the
+//! quad, and the segment's ends and paint values come from the buffers that
+//! hold them for the fill, bound as storage buffers.
 
 use super::shader_source::WgslShaderSource;
 use super::wgsl_sources;
@@ -73,24 +78,10 @@ fn outline_corner(start: vec4<f32>, end: vec4<f32>, corner: vec2<i32>) -> Outlin
     };
 }
 
-/// The instanced fill outlines.
-pub(crate) const FILL_OUTLINE_INSTANCED_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "FillOutlineInstancedShader",
-    name: "FillOutlineInstancedShader",
-    vertex: Some(concat!(
+/// The vertex output, UBOs and bindings of the outlines without a pattern.
+macro_rules! plain_declarations {
+    () => {
         r#"
-struct VertexInput {
-    @location(0) corner: vec2<i32>,
-    @location(3) outline_pos: vec2<i32>,
-    @location(4) outline_end: vec2<i32>,
-#ifndef HAS_UNIFORM_u_outline_color
-    @location(1) outline_color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(2) opacity: vec2<f32>,
-#endif
-};
-
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
 #ifndef HAS_UNIFORM_u_outline_color
@@ -106,7 +97,7 @@ struct FillOutlineDrawableUBO {
     matrix: mat4x4<f32>,
     outline_color_t: f32,
     opacity_t: f32,
-    pad1: f32,
+    paint_layout: u32,
     pad2: f32,
 };
 
@@ -147,7 +138,29 @@ struct GlobalIndexUBO {
 @group(0) @binding(2) var<storage, read> drawableVector: array<FillOutlineDrawableUnionUBO>;
 @group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
 @group(0) @binding(6) var<uniform> props: FillOutlineEvaluatedPropsUBO;
+"#
+    };
+}
+
+/// The instanced fill outlines.
+pub(crate) const FILL_OUTLINE_INSTANCED_SHADER: WgslShaderSource = WgslShaderSource {
+    built_in: "FillOutlineInstancedShader",
+    name: "FillOutlineInstancedShader",
+    vertex: Some(concat!(
+        r#"
+struct VertexInput {
+    @location(0) corner: vec2<i32>,
+    @location(3) outline_pos: vec2<i32>,
+    @location(4) outline_end: vec2<i32>,
+#ifndef HAS_UNIFORM_u_outline_color
+    @location(1) outline_color: vec4<f32>,
+#endif
+#ifndef HAS_UNIFORM_u_opacity
+    @location(2) opacity: vec2<f32>,
+#endif
+};
 "#,
+        plain_declarations!(),
         outline_corner!(),
         r#"
 @vertex
@@ -168,6 +181,71 @@ fn main(in: VertexInput) -> VertexOutput {
 #endif
 #ifndef HAS_UNIFORM_u_opacity
     out.opacity = unpack_mix_float(in.opacity, drawable.opacity_t);
+#endif
+
+    return out;
+}
+"#
+    )),
+    fragment: wgsl_sources::FILL_OUTLINE_SHADER.fragment,
+    prelude: None,
+};
+
+/// The pulled fill outlines.
+pub(crate) const FILL_OUTLINE_PULLED_SHADER: WgslShaderSource = WgslShaderSource {
+    built_in: "FillOutlinePulledShader",
+    name: "FillOutlinePulledShader",
+    vertex: Some(concat!(
+        plain_declarations!(),
+        r#"
+// The fill's vertices and the ends of the outline segments that start at
+// them, a word each: x and y in its halves.
+@group(0) @binding(7) var<storage, read> outlineVertices: array<u32>;
+@group(0) @binding(8) var<storage, read> outlineEnds: array<u32>;
+#ifndef HAS_UNIFORM_u_outline_color
+@group(0) @binding(9) var<storage, read> outlinePaint: array<f32>;
+#else
+#ifndef HAS_UNIFORM_u_opacity
+@group(0) @binding(9) var<storage, read> outlinePaint: array<f32>;
+#endif
+#endif
+
+fn tile_position(word: u32) -> vec2<f32> {
+    return vec2<f32>(vec2<i32>(i32(word << 16u) >> 16u, i32(word) >> 16u));
+}
+"#,
+        outline_corner!(),
+        r#"
+@vertex
+fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
+    var out: VertexOutput;
+
+    let drawable = drawableVector[globalIndex.value].fill;
+    let projection = projectionVector[globalIndex.value];
+    // Four vertices a segment, in the order of the instanced quad's corners.
+    let segment = vertex_index / 4u;
+    let quad_corner = vertex_index % 4u;
+    let start = tile_position(outlineVertices[segment]);
+    let end = tile_position(outlineEnds[segment]);
+    let corner = outline_corner(projectTileWithPoles(start, start, projection),
+                                projectTileWithPoles(end, end, projection),
+                                vec2<i32>(i32(quad_corner >> 1u), i32(quad_corner & 1u)));
+    out.position = corner.position;
+    out.pos = corner.pos;
+
+    // The segment's paint values are its start's.
+    let paint_layout = drawable.paint_layout;
+    let paint = segment * (paint_layout & 0xffu);
+#ifndef HAS_UNIFORM_u_outline_color
+    let color_at = paint + ((paint_layout >> 8u) & 0xffu);
+    let outline_color = vec4<f32>(outlinePaint[color_at], outlinePaint[color_at + 1u],
+                                  outlinePaint[color_at + 2u], outlinePaint[color_at + 3u]);
+    out.color = unpack_mix_color(outline_color, drawable.outline_color_t);
+#endif
+#ifndef HAS_UNIFORM_u_opacity
+    let opacity_at = paint + ((paint_layout >> 16u) & 0xffu);
+    out.opacity = unpack_mix_float(vec2<f32>(outlinePaint[opacity_at], outlinePaint[opacity_at + 1u]),
+                                   drawable.opacity_t);
 #endif
 
     return out;

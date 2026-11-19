@@ -22,6 +22,10 @@ pub enum BuiltIn {
     FillOutlinePatternShader,
     FillOutlineInstancedShader,
     FillOutlinePatternInstancedShader,
+    /// Port-only: the outlines of `FillOutlineInstancedShader` as quads
+    /// without vertex attributes. A vertex reads its segment's ends and
+    /// paint values from storage buffers, by its index.
+    FillOutlinePulledShader,
     FillOutlineTriangulatedShader,
     FillExtrusionShader,
     FillExtrusionInstancedShader,

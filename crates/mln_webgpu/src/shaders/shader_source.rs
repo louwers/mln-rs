@@ -174,6 +174,13 @@ static FILL_OUTLINE_INSTANCED_SHADER: ShaderSource = ShaderSource {
     instance_attributes: FILL_OUTLINE_INSTANCED_INSTANCE_ATTRIBUTES,
     textures: &[],
 };
+static FILL_OUTLINE_PULLED_SHADER: ShaderSource = ShaderSource {
+    wgsl: &fill_outline_wgsl::FILL_OUTLINE_PULLED_SHADER,
+    name: "FillOutlinePulledShader",
+    attributes: &[],
+    instance_attributes: &[],
+    textures: &[],
+};
 static FILL_OUTLINE_PATTERN_INSTANCED_SHADER: ShaderSource = ShaderSource {
     wgsl: &fill_outline_wgsl::FILL_OUTLINE_PATTERN_INSTANCED_SHADER,
     name: "FillOutlinePatternInstancedShader",
@@ -576,6 +583,7 @@ pub(crate) fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource>
         BuiltIn::FillPatternShader => Some(&FILL_PATTERN_SHADER),
         BuiltIn::FillOutlinePatternShader => Some(&FILL_OUTLINE_PATTERN_SHADER),
         BuiltIn::FillOutlineInstancedShader => Some(&FILL_OUTLINE_INSTANCED_SHADER),
+        BuiltIn::FillOutlinePulledShader => Some(&FILL_OUTLINE_PULLED_SHADER),
         BuiltIn::FillOutlinePatternInstancedShader => Some(&FILL_OUTLINE_PATTERN_INSTANCED_SHADER),
         BuiltIn::FillOutlineTriangulatedShader => Some(&FILL_OUTLINE_TRIANGULATED_SHADER),
         BuiltIn::LineShader => Some(&LINE_SHADER),

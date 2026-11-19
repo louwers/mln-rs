@@ -70,6 +70,7 @@ pub const PROGRAMS: &[BuiltIn] = &[
     BuiltIn::FillOutlinePatternShader,
     BuiltIn::FillOutlineInstancedShader,
     BuiltIn::FillOutlinePatternInstancedShader,
+    BuiltIn::FillOutlinePulledShader,
     BuiltIn::FillOutlineTriangulatedShader,
     BuiltIn::LineShader,
     BuiltIn::LineGradientShader,
@@ -200,6 +201,13 @@ pub fn program_info(program: BuiltIn) -> Option<&'static ProgramInfo> {
                 (ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE, Float4),
                 (ID_FILL_OPACITY_VERTEX_ATTRIBUTE, Float2),
             ],
+            textures: &[],
+        }),
+        BuiltIn::FillOutlinePulledShader => Some(&ProgramInfo {
+            name: "FillOutlinePulledShader",
+            program: BuiltIn::FillOutlinePulledShader,
+            attributes: &[],
+            instance_attributes: &[],
             textures: &[],
         }),
         BuiltIn::FillOutlinePatternInstancedShader => Some(&ProgramInfo {

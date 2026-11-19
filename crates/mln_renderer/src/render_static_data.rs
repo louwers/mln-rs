@@ -1,9 +1,14 @@
+use std::cell::Cell;
+
 use mln_gfx::shaders::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
 use mln_util::constants;
 
 use crate::buckets::fill_extrusion_bucket::FillExtrusionStaticVertex;
 use crate::buckets::raster_bucket::RasterLayoutVertex;
+use crate::gfx::context::Context;
+use crate::gfx::indexes::{Indexes, SharedIndexes};
 use crate::gfx::shader_registry::ShaderRegistry;
+use crate::gfx::store::{IndexesKey, WeakShared};
 
 /// The most walls whose quads a segment draws: as many as its 16-bit
 /// indices reach.
@@ -13,12 +18,24 @@ const FILL_EXTRUSION_SEGMENT_WALLS: usize = MAX_SEGMENT_VERTICES / 4;
 /// ratio, and the vertices and indices of the geometry the layers share.
 pub(crate) struct RenderStaticData {
     pub(crate) shaders: Box<ShaderRegistry>,
+    /// `wall_indexes`, while a layer holds them.
+    wall_indexes: Cell<WeakShared<IndexesKey>>,
 }
 
 impl RenderStaticData {
     #[must_use]
     pub(crate) fn new(shaders: Box<ShaderRegistry>) -> Self {
-        RenderStaticData { shaders }
+        RenderStaticData { shaders, wall_indexes: Cell::default() }
+    }
+
+    /// `fill_extrusion_wall_indices` in `context`'s store, which the layers
+    /// that draw quads four vertices apart share: they stay in the store
+    /// while a layer holds them.
+    pub(crate) fn wall_indexes(&self, context: &mut Context) -> SharedIndexes {
+        let held = self.wall_indexes.take().upgrade();
+        let indexes = held.unwrap_or_else(|| context.add_indexes(Indexes::new(Self::fill_extrusion_wall_indices())));
+        self.wall_indexes.set(indexes.downgrade());
+        indexes
     }
 
     /// The tile's four corners, as position-only vertices (`a_pos`).

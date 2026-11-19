@@ -89,6 +89,11 @@ pub const ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE: usize = 5;
 /// outline ends, which the instanced outline shaders read per instance.
 pub const ID_FILL_OUTLINE_POS_ATTRIBUTE: usize = 6;
 pub const ID_FILL_OUTLINE_END_ATTRIBUTE: usize = 7;
+// The vertex buffers that `FillOutlinePulledShader` reads as storage
+// buffers, whose ids follow the uniform buffers'.
+pub const ID_FILL_OUTLINE_VERTICES: usize = MAX_UBO_COUNT_PER_SHADER;
+pub const ID_FILL_OUTLINE_ENDS: usize = MAX_UBO_COUNT_PER_SHADER + 1;
+pub const ID_FILL_OUTLINE_PAINT: usize = MAX_UBO_COUNT_PER_SHADER + 2;
 
 pub const ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE: usize = 0;
 pub const ID_LINE_DATA_VERTEX_ATTRIBUTE: usize = 1;

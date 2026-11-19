@@ -77,7 +77,7 @@ pub(crate) fn raw_vertices(
 }
 
 /// The most vertices a draw's shader reads as storage buffers.
-const MAX_STORAGE_VERTICES: usize = 2;
+const MAX_STORAGE_VERTICES: usize = 3;
 
 /// The most entries bindings have.
 const MAX_ENTRIES: usize = MAX_UBO_COUNT_PER_SHADER + MAX_STORAGE_VERTICES + MAX_TEXTURE_COUNT_PER_SHADER;
