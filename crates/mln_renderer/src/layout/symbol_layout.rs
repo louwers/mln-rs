@@ -514,12 +514,17 @@ impl SymbolLayout {
                 let mut section_table: VecMap<usize, usize> = VecMap::new();
                 // Vertical layout reads the runs of a label that stands
                 // upright in places, such as digits among CJK, a character
-                // at a time: the device's fonts shape only its complex
+                // at a time: where the layer can lay text out vertically,
+                // the device's fonts shape only such a label's complex
                 // scripts.
-                let upright = formatted
-                    .sections
-                    .iter()
-                    .any(|section| section.text.chars().any(i18n::has_upright_vertical_orientation));
+                let may_be_vertical = this.allow_vertical_placement
+                    || (*layout.text_rotation_alignment.uniform() != TextRotationAlignmentType::Viewport
+                        && *layout.symbol_placement.uniform() != SymbolPlacementType::Point);
+                let upright = may_be_vertical
+                    && formatted
+                        .sections
+                        .iter()
+                        .any(|section| section.text.chars().any(i18n::has_upright_vertical_orientation));
 
                 for (section_index, section) in formatted.sections.iter().enumerate() {
                     if let Some(image) = &section.image {
