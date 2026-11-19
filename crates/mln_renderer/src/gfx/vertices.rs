@@ -13,6 +13,7 @@ use mln_gfx::gpu::{BufferId, BufferUsage, Gpu, GpuError};
 use mln_util::host_bytes::HostBytes;
 
 use crate::gfx::buffer::Buffer;
+use crate::gfx::owned::Held;
 use crate::gfx::release::ReleaseQueue;
 use crate::gfx::resources::Device;
 use crate::gfx::store::{Shared, Store, VerticesKey};
@@ -297,6 +298,11 @@ pub(crate) struct SharedVertices {
 }
 
 impl SharedVertices {
+    /// What geometry made of the vertices holds.
+    pub(crate) fn held(&self) -> Held {
+        Held::Vertices(self.handle.clone())
+    }
+
     /// The entry's key in the store.
     #[cfg(test)]
     #[must_use]

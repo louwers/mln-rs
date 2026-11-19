@@ -42,32 +42,46 @@ impl PartialEq for AttributeBinding {
 /// A draw's attribute bindings, indexed by the shader's attribute index.
 pub(crate) type AttributeBindingArray = Vec<Option<AttributeBinding>>;
 
-/// The vertex bindings of a draw, indexed by shader attribute index:
-/// one for each of the shader's `attributes`, its id and the format of its
-/// default, read from the draw's attribute of that id in `overrides` where
-/// it has one. An attribute the draw doesn't have, or has no data for,
-/// binds no buffer, at the default's type and stride.
-pub(crate) fn build_attribute_bindings(
+/// Makes `bindings` the vertex bindings of a draw, indexed by shader
+/// attribute index: one for each of the shader's `attributes`, its id and
+/// the format of its default, read from the draw's attribute of that id in
+/// `overrides` where it has one. An attribute the draw doesn't have, or has
+/// no data for, binds a buffer of its default's value for `vertex_count`
+/// vertices. Returns whether a binding changed; after an error, some may
+/// have.
+pub(crate) fn update_attribute_bindings(
     gpu: &mut dyn Gpu,
     context: &mut Context,
     attributes: &[(usize, AttributeDataType)],
     overrides: &mut VertexAttributeArray,
-) -> Result<AttributeBindingArray, GpuError> {
-    let mut bindings: AttributeBindingArray = vec![None; MAX_ATTRIBUTE_COUNT_PER_SHADER.max(attributes.len())];
+    vertex_count: usize,
+    bindings: &mut AttributeBindingArray,
+) -> Result<bool, GpuError> {
+    bindings.resize(MAX_ATTRIBUTE_COUNT_PER_SHADER.max(attributes.len()), None);
+    let mut changed = false;
     for (index, &(id, default)) in attributes.iter().enumerate() {
         let binding = match overrides.get_mut(id) {
             Some(attribute) => attribute.binding(gpu, context)?,
             None => None,
         };
-        bindings[index] = Some(binding.unwrap_or_else(|| AttributeBinding {
-            attribute: AttributeDescriptor { data_type: default, offset: 0 },
-            vertex_stride: default.stride() as u32,
-            buffer: None,
-            vertex_offset: 0,
-            held: None,
-        }));
+        let binding = if let Some(binding) = binding {
+            binding
+        } else {
+            let buffer = context.default_vertex_buffer(gpu, default, vertex_count)?;
+            AttributeBinding {
+                attribute: AttributeDescriptor { data_type: default, offset: 0 },
+                vertex_stride: default.stride() as u32,
+                buffer: Some(buffer.id()),
+                vertex_offset: 0,
+                held: Some(Held::Buffer(buffer)),
+            }
+        };
+        if bindings[index].as_ref() != Some(&binding) {
+            bindings[index] = Some(binding);
+            changed = true;
+        }
     }
-    Ok(bindings)
+    Ok(changed)
 }
 
 /// Whether the next upload writes what one of `overrides`' attributes

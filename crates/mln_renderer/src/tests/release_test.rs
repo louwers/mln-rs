@@ -53,7 +53,7 @@ fn bindings_and_geometry_go_before_what_they_were_made_of() {
             .expect("the geometry");
         let gpu_texture = context.gpu_texture(&texture).cloned().expect("the texture's");
         let bindings = context.own(bindings, vec![Held::Texture(gpu_texture)]);
-        let geometry = context.own(geometry, vec![Held::Vertices(vertices.clone()), Held::Indexes(indexes.clone())]);
+        let geometry = context.own(geometry, vec![vertices.held(), Held::Indexes(indexes.clone())]);
         drop((vertices, indexes));
         context.texture_mut(&texture).expect("the texture").set_size(Size::new(4, 4));
         context.texture_binding(gpu, &texture).expect("the resized texture");

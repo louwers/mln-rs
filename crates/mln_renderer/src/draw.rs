@@ -230,18 +230,19 @@ impl DrawObjects {
         if self.vertex_attributes_changed
             || upload::needs_upload(context, shader.vertex_attributes(), &self.vertex_attributes)
         {
-            let mut bindings = upload::build_attribute_bindings(
+            let updated = upload::update_attribute_bindings(
                 gpu,
                 context,
                 shader.vertex_attributes(),
                 &mut self.vertex_attributes,
-            )?;
-            bind_default_values(gpu, context, &mut bindings, self.vertex_count)?;
-            if self.attribute_bindings != bindings {
-                self.attribute_bindings = bindings;
+                self.vertex_count,
+                &mut self.attribute_bindings,
+            );
+            if !matches!(updated, Ok(false)) {
                 self.vertex_slots = None;
                 self.geometry = None;
             }
+            updated?;
         }
 
         let changed = self.instance_attributes_changed;
@@ -251,13 +252,19 @@ impl DrawObjects {
             .filter(|attrs| changed || upload::needs_upload(context, shader.instance_attributes(), attrs))
         {
             let instance_count = attrs.min_count();
-            let mut bindings = upload::build_attribute_bindings(gpu, context, shader.instance_attributes(), attrs)?;
-            bind_default_values(gpu, context, &mut bindings, instance_count)?;
-            if self.instance_bindings != bindings {
-                self.instance_bindings = bindings;
+            let updated = upload::update_attribute_bindings(
+                gpu,
+                context,
+                shader.instance_attributes(),
+                attrs,
+                instance_count,
+                &mut self.instance_bindings,
+            );
+            if !matches!(updated, Ok(false)) {
                 self.vertex_slots = None;
                 self.geometry = None;
             }
+            updated?;
         }
 
         self.vertex_attributes_changed = false;
@@ -600,22 +607,6 @@ fn fixed_state(variant: PipelineVariant, color_mode: &ColorMode, cull: CullFaceM
         depth: variant.depth,
         stencil: variant.stencil,
     }
-}
-
-/// Gives each binding without data a buffer of its format's default value,
-/// for `vertex_count` vertices.
-fn bind_default_values(
-    gpu: &mut dyn Gpu,
-    context: &mut Context,
-    bindings: &mut AttributeBindingArray,
-    vertex_count: usize,
-) -> Result<(), GpuError> {
-    for binding in bindings.iter_mut().flatten().filter(|binding| binding.buffer.is_none()) {
-        let buffer = context.default_vertex_buffer(gpu, binding.attribute.data_type, vertex_count)?;
-        binding.buffer = Some(buffer.id());
-        binding.held = Some(Held::Buffer(buffer));
-    }
-    Ok(())
 }
 
 /// The vertex buffers of a draw's attribute and instance bindings, which

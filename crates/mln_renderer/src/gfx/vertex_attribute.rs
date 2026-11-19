@@ -8,7 +8,6 @@ use mln_gfx::shaders::shader_defines::MAX_ATTRIBUTE_COUNT_PER_SHADER;
 
 use crate::gfx::buffer::Buffer;
 use crate::gfx::context::Context;
-use crate::gfx::owned::Held;
 use crate::gfx::upload::{AttributeBinding, AttributeDescriptor};
 use crate::gfx::vertices::{SharedVertices, Vertices};
 
@@ -122,7 +121,7 @@ impl VertexAttribute {
                     vertex_stride: shared.stride,
                     buffer: Some(buffer),
                     vertex_offset: shared.vertex_offset,
-                    held: Some(Held::Vertices(shared.vertices.clone())),
+                    held: Some(shared.vertices.held()),
                 }))
             }
         }
