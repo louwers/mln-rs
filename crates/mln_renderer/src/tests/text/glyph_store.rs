@@ -1304,10 +1304,10 @@ fn shape_with_system_fonts(text: &str) -> Vec<(char, GlyphIDType)> {
     let test =
         GlyphStoreTest::with_all(local(ScriptFonts), ResponseType::Synchronous, Arc::default(), Arc::new(LetterEngine));
     let text: Vec<char> = text.chars().collect();
-    let shapes = VecMap::from([(test_stack(), VecMap::from([(GlyphIDType::System, [text.clone()].into())]))]);
+    let shapes = VecMap::from([(test_stack(), VecMap::from([(GlyphIDType::SYSTEM, [text.clone()].into())]))]);
     test.request_glyphs(GlyphDependencies { glyphs: VecMap::new(), shapes });
     let shaping = test.requestor.shaping.borrow();
-    let shaped = &shaping.as_ref().expect("an answer")[&test_stack()][&GlyphIDType::System][&text];
+    let shaped = &shaping.as_ref().expect("an answer")[&test_stack()][&GlyphIDType::SYSTEM][&text];
     shaped.glyphs.iter().map(|glyph| (char::from_u32(u32::from(glyph.code)).unwrap(), glyph.type_)).collect()
 }
 
@@ -1323,5 +1323,5 @@ fn the_devices_fonts_shape_each_piece_with_its_font() {
     assert_eq!(type_of('\u{0301}'), type_of('c'));
     assert_ne!(type_of('\u{05D0}'), type_of('a'));
     assert_ne!(type_of('\u{062C}'), type_of('\u{05D0}'));
-    assert!(glyphs.iter().all(|(_, type_)| matches!(type_, GlyphIDType::Face(_))));
+    assert!(glyphs.iter().all(|(_, type_)| ![GlyphIDType::FontPBF, GlyphIDType::SYSTEM].contains(type_)));
 }

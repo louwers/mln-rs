@@ -17,13 +17,15 @@ pub enum GlyphIDType {
     #[default]
     FontPBF,
     Face(NonZeroU16),
-    /// Text that the device's fonts shape ([`FontFace::system`]): the glyph
-    /// store picks a font for each of its characters, and its glyphs have
-    /// those fonts' `Face` types. No glyph has this type.
-    System,
 }
 
 impl GlyphIDType {
+    /// Text that the device's fonts shape ([`FontFace::system`]): the glyph
+    /// store picks a font for each of its characters, and its glyphs have
+    /// those fonts' types. No glyph has this type, and no face its number.
+    /// A constant rather than a variant, so that a type stays a `u16`.
+    pub const SYSTEM: GlyphIDType = GlyphIDType::Face(NonZeroU16::MAX);
+
     /// The type of the font face numbered `id`.
     #[must_use]
     pub const fn face(id: NonZeroU16) -> Self {
@@ -31,13 +33,12 @@ impl GlyphIDType {
     }
 
     /// The type's number as stored in a glyph ID's upper half: 0 for
-    /// `FontPBF`, and `u16::MAX`, which no face has, for `System`.
+    /// `FontPBF`.
     #[must_use]
     pub const fn id(self) -> u16 {
         match self {
             GlyphIDType::FontPBF => 0,
             GlyphIDType::Face(id) => id.get(),
-            GlyphIDType::System => u16::MAX,
         }
     }
 }
@@ -405,7 +406,7 @@ impl FontFace {
     /// and that has it, else the font the device picks for it.
     #[must_use]
     pub fn system(ranges: Vec<FontFaceRange>) -> Self {
-        FontFace { type_: GlyphIDType::System, ..FontFace::new("", "", ranges) }
+        FontFace { type_: GlyphIDType::SYSTEM, ..FontFace::new("", "", ranges) }
     }
 
     /// The face with its font file in memory, so that `url` only names it.
@@ -465,7 +466,7 @@ pub fn face_type(url: &str, font: &str, ranges: &[FontFaceRange]) -> GlyphIDType
     if let Some(&(_, id)) = found {
         return GlyphIDType::Face(id);
     }
-    // Neither 0 (`FontPBF`) nor `u16::MAX` (`System`).
+    // Neither 0 (`FontPBF`) nor `u16::MAX` (`SYSTEM`).
     types.last = if types.last >= u16::MAX - 1 { 1 } else { types.last + 1 };
     let id = NonZeroU16::new(types.last).unwrap_or(NonZeroU16::MIN);
     types.types.push(((url.to_owned(), font.to_owned(), ranges.to_vec()), id));
@@ -493,6 +494,13 @@ mod tests {
         assert_eq!((r.first, r.second), (0, 255));
         let r = get_glyph_range(GlyphID::new(0xFFFF));
         assert_eq!((r.first, r.second), (65280, 65535));
+    }
+
+    // Layouts compare and hash glyph IDs by the million.
+    #[test]
+    fn a_glyph_id_is_two_u16s() {
+        assert_eq!(size_of::<GlyphIDType>(), 2);
+        assert_eq!(size_of::<GlyphID>(), 4);
     }
 
     #[test]

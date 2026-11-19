@@ -133,8 +133,8 @@ impl GlyphTypeTable {
                 _ => spans.push(GlyphTypeSpan { range: (first..=last).into(), type_: face.type_, fallback }),
             }
         }
-        let system = faces.iter().any(|face| face.type_ == GlyphIDType::System);
-        let rest = if system && !glyph_pbfs { GlyphIDType::System } else { GlyphIDType::FontPBF };
+        let system = faces.iter().any(|face| face.type_ == GlyphIDType::SYSTEM);
+        let rest = if system && !glyph_pbfs { GlyphIDType::SYSTEM } else { GlyphIDType::FontPBF };
         GlyphTypeTable { spans, glyph_pbfs, rest }
     }
 
@@ -613,7 +613,7 @@ impl SymbolLayout {
                     } else {
                         // A face's glyph 0 stands for its font file; the
                         // device's fonts have none to load.
-                        if section.type_ != GlyphIDType::System {
+                        if section.type_ != GlyphIDType::SYSTEM {
                             dependencies.insert(GlyphID::with_type(0, section.type_));
                         }
                         this.has_font_text = true;
@@ -2114,8 +2114,8 @@ mod tests {
         // PBFs draw the text they can, before a fallback face.
         let fallbacks =
             faces.iter().filter(|face| face.name.is_empty() && !(glyph_pbfs && char_in_supported_script(c)));
-        let system = !glyph_pbfs && faces.iter().any(|face| face.type_ == GlyphIDType::System);
-        let rest = if system { GlyphIDType::System } else { GlyphIDType::FontPBF };
+        let system = !glyph_pbfs && faces.iter().any(|face| face.type_ == GlyphIDType::SYSTEM);
+        let rest = if system { GlyphIDType::SYSTEM } else { GlyphIDType::FontPBF };
         named.chain(fallbacks).find(|face| covers(face)).map_or(rest, |face| face.type_)
     }
 
@@ -2177,12 +2177,12 @@ mod tests {
         let stack = ["Open Sans".to_owned()];
         let with_pbfs = GlyphTypeTable::new(&stack, &faces, true);
         assert_eq!(with_pbfs.get('a', GlyphIDType::FontPBF), GlyphIDType::FontPBF);
-        assert_eq!(with_pbfs.get('\u{0915}', GlyphIDType::FontPBF), GlyphIDType::System);
+        assert_eq!(with_pbfs.get('\u{0915}', GlyphIDType::FontPBF), GlyphIDType::SYSTEM);
         // A script the device has no font for stays with the PBFs.
         assert_eq!(with_pbfs.get('\u{1780}', GlyphIDType::FontPBF), GlyphIDType::FontPBF);
         let without_pbfs = GlyphTypeTable::new(&stack, &faces, false);
         for c in ['a', '\u{0915}', '\u{1780}', '\u{4E2D}'] {
-            assert_eq!(without_pbfs.get(c, GlyphIDType::FontPBF), GlyphIDType::System, "{c:?}");
+            assert_eq!(without_pbfs.get(c, GlyphIDType::FontPBF), GlyphIDType::SYSTEM, "{c:?}");
         }
     }
 

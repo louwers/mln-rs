@@ -28,7 +28,7 @@
 // fallback faces can), and shaped here, on the render thread, with the
 // `FontFaceEngine` (font_face_engine.rs): mln_text's Shaper (HarfRust)
 // natively, ready at once. Text that the device's fonts shape
-// (`GlyphIDType::System`) is shaped the same way, a piece at a time: each
+// (`GlyphIDType::SYSTEM`) is shaped the same way, a piece at a time: each
 // piece with the font that `LocalGlyphs`' rasterizer gives for its first
 // character. An engine that needs time to
 // get ready (the browser build loads its shaper as a second wasm module) is
@@ -470,7 +470,7 @@ impl GlyphStore {
                     let mut shaped = ShapedText::default();
                     // Shapes each run in its own direction, in visual order.
                     for run in visual_runs(str_) {
-                        if *type_ == GlyphIDType::System {
+                        if *type_ == GlyphIDType::SYSTEM {
                             self.shape_with_system_fonts(font_stack, &run, &mut shaped);
                         } else if let Some(shaper) = &shaper {
                             shaper.shape(&run.text, run.rtl, &mut shaped);
