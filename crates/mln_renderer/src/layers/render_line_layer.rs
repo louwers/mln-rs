@@ -94,6 +94,10 @@ impl TileObjects for LineTile {
     fn objects(&mut self, (): ()) -> Option<DrawObjectsMut<'_>> {
         Some(DrawObjectsMut { objects: &mut self.objects, atlases: self.atlases.as_ref() })
     }
+
+    fn drop_bindings(&mut self) {
+        self.objects.drop_bindings();
+    }
 }
 
 /// A draw's entries in the layer's storage buffers.
@@ -562,9 +566,10 @@ impl TypedLayer for RenderLineLayer {
             }
         }
 
-        let frame = self.drawing.frame_mut();
         let layer = &self.values.evaluated;
-        self.draw_list.finish(frame, gpu, paint_parameters.context, |writer| Self::write_uniforms(layer, writer));
+        self.drawing.finish(&mut self.draw_list, gpu, paint_parameters.context, |writer| {
+            Self::write_uniforms(layer, writer);
+        });
     }
 
     /// Adds the dash patterns of the tiles' buckets to the line atlas, then

@@ -4,7 +4,7 @@
 
 use std::cell::Cell;
 
-use mln_gfx::gpu::ResourceId;
+use mln_gfx::gpu::{BufferId, BufferUsage, ResourceId, TextureId};
 
 use crate::gfx::store::StoreKey;
 
@@ -12,16 +12,22 @@ use crate::gfx::store::StoreKey;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Release {
     /// A store entry whose last handle dropped, which the context takes out
-    /// of its store, destroying a buffer's or a texture's resource.
+    /// of its store.
     Entry(StoreKey),
-    /// A resource of the backend's `Gpu` that no store holds: bindings,
-    /// geometry, or one of the context's samplers, pipelines and shaders.
+    /// A buffer, of a usage and the bytes it takes, which the rendering
+    /// stats count until the context destroys it.
+    Buffer(BufferId, BufferUsage, usize),
+    /// A texture of the bytes it takes, which the rendering stats count
+    /// until the context destroys it.
+    Texture(TextureId, usize),
+    /// Any other resource of the backend's `Gpu`: bindings, geometry, an
+    /// attachment, or one of the context's samplers, pipelines and shaders.
     Resource(ResourceId),
 }
 
 /// The queue that handles and owned resources go to when they drop. The
-/// context owns it, and each handle and owned resource holds it to push
-/// itself.
+/// context's device owns it, and each handle and owned resource holds it to
+/// push itself.
 #[derive(Default)]
 pub(crate) struct ReleaseQueue(Cell<Vec<Release>>);
 

@@ -6,8 +6,8 @@ use mln_util::Color;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
-use crate::gfx::attachment::Attachment;
 use crate::gfx::context::Context;
+use crate::gfx::resources::GpuTexture;
 use crate::gfx::store::SharedTexture;
 use crate::paint_parameters::{OpenPass, PaintParameters};
 use crate::render_pass::RenderPass;
@@ -19,7 +19,7 @@ pub(crate) struct RenderTarget {
     texture: SharedTexture,
     size: Size,
     /// Made with the first pass, of the texture's size.
-    depth: Option<Attachment>,
+    depth: Option<GpuTexture>,
     /// The channel type the texture was asked for.
     type_: TextureChannelDataType,
 }
@@ -88,7 +88,10 @@ impl RenderTarget {
                 stencil: LoadOp::Load,
             }),
             size,
-            targets: TargetFormats { color: Some(format), depth_stencil: self.depth.as_ref().map(Attachment::format) },
+            targets: TargetFormats {
+                color: Some(format),
+                depth_stencil: self.depth.as_ref().and(context.render_target_depth()),
+            },
         })
     }
 }

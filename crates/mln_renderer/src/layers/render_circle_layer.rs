@@ -398,7 +398,7 @@ impl TypedLayer for RenderCircleLayer {
             self.draw_list.push(draw, Self::uniforms(layer, &tile_id, binders, paint_parameters));
         }
 
-        self.draw_list.finish(self.drawing.frame_mut(), gpu, paint_parameters.context, |writer| {
+        self.drawing.finish(&mut self.draw_list, gpu, paint_parameters.context, |writer| {
             Self::write_uniforms(layer, writer);
         });
     }

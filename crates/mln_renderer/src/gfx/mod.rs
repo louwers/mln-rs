@@ -8,7 +8,6 @@
 //! bucket geometry.
 
 pub(crate) mod atlas_binding;
-pub(crate) mod attachment;
 pub(crate) mod buffer;
 pub(crate) mod context;
 pub(crate) mod dynamic_texture;

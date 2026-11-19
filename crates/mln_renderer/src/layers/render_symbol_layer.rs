@@ -1164,14 +1164,21 @@ impl RenderSymbolLayer {
         }
 
         if let Some(frame) = &mut self.drawing.frame {
-            self.draw_list.finish(frame, gpu, paint_parameters.context, |writer| write_uniforms(&layer.paint, writer));
+            if self
+                .draw_list
+                .finish(frame, gpu, paint_parameters.context, |writer| write_uniforms(&layer.paint, writer))
+            {
+                for draw in self.drawing.tiles.values_mut().flat_map(|tile| &mut tile.draws) {
+                    draw.objects.drop_bindings();
+                }
+            }
         } else {
             self.draw_list.clear();
         }
         // Each collision draw has its own GPU objects and buffers, so no two
         // share an order, and the overlay's buffers are none.
         if let Some(overlay) = &mut self.drawing.overlay {
-            self.collision_list.finish(overlay, gpu, paint_parameters.context, |_| {});
+            let _ = self.collision_list.finish(overlay, gpu, paint_parameters.context, |_| {});
         } else {
             self.collision_list.clear();
         }
@@ -1236,11 +1243,11 @@ fn write_collision_uniforms(
     let draw_ubo = CollisionDrawableUBO { matrix: cast_matrix(&projection.fallback_matrix) };
     let tile_props_ubo =
         CollisionTilePropsUBO { extrude_scale, overscale_factor: tile_id.overscale_factor() as f32, pad1: 0.0 };
-    let buffers = &mut draw.draw.objects.uniform_buffers;
+    let objects = &mut draw.draw.objects;
     let context = &mut *parameters.context;
-    buffers.create_or_update_pod(gpu, ID_COLLISION_DRAWABLE_UBO, &draw_ubo, context.device());
-    buffers.create_or_update_pod(gpu, ID_COLLISION_TILE_PROPS_UBO, &tile_props_ubo, context.device());
-    buffers.create_or_update_pod(gpu, ID_COLLISION_PROJECTION_UBO, &to_projection_ubo(&projection), context.device());
+    objects.write_pod(gpu, ID_COLLISION_DRAWABLE_UBO, &draw_ubo, context);
+    objects.write_pod(gpu, ID_COLLISION_TILE_PROPS_UBO, &tile_props_ubo, context);
+    objects.write_pod(gpu, ID_COLLISION_PROJECTION_UBO, &to_projection_ubo(&projection), context);
 }
 
 fn collision_vertex_attributes(context: &mut Context, buffer: &CollisionBuffer) -> VertexAttributeArray {

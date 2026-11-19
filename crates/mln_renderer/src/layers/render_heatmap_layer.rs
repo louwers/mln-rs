@@ -47,7 +47,7 @@ use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
 use crate::layer_drawing::{
     DrawDepth, DrawGroup, DrawList, DrawOrder, FrameDraw, FrameDraws, KeptDraw, LayerDrawing, LayerDraws, TileMap,
-    UniformWriter, tile_objects,
+    UniformWriter, finish_tiles, tile_objects,
 };
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::heatmap_layout::HeatmapLayout;
@@ -465,7 +465,9 @@ impl RenderHeatmapLayer {
         }
 
         let target = drawing.target.get_or_insert_default();
-        tile_draws.finish(target, gpu, paint_parameters.context, |writer| Self::write_tile_uniforms(evaluated, writer));
+        finish_tiles(tile_draws, target, &mut drawing.tiles, gpu, paint_parameters.context, |writer| {
+            Self::write_tile_uniforms(evaluated, writer);
+        });
         true
     }
 
@@ -621,7 +623,11 @@ impl RenderHeatmapLayer {
             pad3: 0.0,
         };
         let context = &mut *paint_parameters.context;
-        frame.uniform_buffers.create_or_update_pod(gpu, ID_HEATMAP_TEXTURE_PROPS_UBO, &props, context.device());
+        if frame.uniform_buffers.write_pod(gpu, ID_HEATMAP_TEXTURE_PROPS_UBO, &props, context.device())
+            && let Some(texture) = &mut drawing.texture
+        {
+            texture.objects.drop_bindings();
+        }
         bind_no_projection(gpu, &mut frame.uniform_buffers, context);
     }
 }

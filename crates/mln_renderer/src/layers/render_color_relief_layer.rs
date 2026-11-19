@@ -79,6 +79,10 @@ impl TileObjects for ReliefTile {
     fn objects(&mut self, (): ()) -> Option<DrawObjectsMut<'_>> {
         self.draw.objects(())
     }
+
+    fn drop_bindings(&mut self) {
+        self.draw.drop_bindings();
+    }
 }
 
 /// A draw's entries in the layer's storage buffers.
@@ -572,9 +576,8 @@ impl TypedLayer for RenderColorReliefLayer {
             draw_list.push(draw, uniforms);
         }
 
-        let frame = drawing.frame_mut();
         let opacity = *values.evaluated.paint.color_relief_opacity.uniform();
-        draw_list.finish(frame, gpu, paint_parameters.context, |writer| {
+        drawing.finish(draw_list, gpu, paint_parameters.context, |writer| {
             let props = ColorReliefEvaluatedPropsUBO { opacity, pad_eval0: 0.0, pad_eval1: 0.0, pad_eval2: 0.0 };
             writer.uniform(ID_COLOR_RELIEF_EVALUATED_PROPS_UBO, &props);
             writer.storage(ID_COLOR_RELIEF_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);

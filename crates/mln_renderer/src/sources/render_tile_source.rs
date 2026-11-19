@@ -262,11 +262,16 @@ impl DebugLayer {
         }
 
         let properties = &self.properties;
-        self.draw_list.finish(&mut self.frame, gpu, parameters.context, |writer| {
+        let replaced = self.draw_list.finish(&mut self.frame, gpu, parameters.context, |writer| {
             writer.uniform(ID_LINE_EVALUATED_PROPS_UBO, properties);
             writer.storage(ID_LINE_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
             writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
         });
+        if replaced {
+            for draw in &mut self.draws {
+                draw.draw.objects.drop_bindings();
+            }
+        }
     }
 }
 

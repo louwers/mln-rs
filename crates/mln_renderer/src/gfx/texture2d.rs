@@ -10,13 +10,12 @@ use mln_gfx::texture2d::SamplerState;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
-use crate::gfx::resources::{Resources, SharedGpuTexture};
+use crate::gfx::resources::{Device, SharedGpuTexture};
 
 /// A texture of the renderer: its size, format and sampler state, the image
 /// it waits to upload, and once made, a texture of the backend's
-/// [`Gpu`](mln_gfx::gpu::Gpu) in the context's store, which the texture lets
-/// go of when it replaces it or drops, and which bindings made of it hold
-/// until they go. The context changes it, and lends it to set up as a
+/// [`Gpu`](mln_gfx::gpu::Gpu), which the texture lets go of when it
+/// replaces it or drops, and which bindings made of it hold until they go. The context changes it, and lends it to set up as a
 /// [`TextureMut`].
 pub(crate) struct Texture2D {
     texture: Option<SharedGpuTexture>,
@@ -99,8 +98,8 @@ impl Texture2D {
     }
 
     /// Makes the backend's texture of the size and format set through `gpu`
-    /// into `resources`, unless it is made. Fails for an empty size.
-    pub(crate) fn create(&mut self, gpu: &mut dyn Gpu, resources: &mut Resources) -> Result<TextureId, GpuError> {
+    /// and `device`, unless it is made. Fails for an empty size.
+    pub(crate) fn create(&mut self, gpu: &mut dyn Gpu, device: &mut Device) -> Result<TextureId, GpuError> {
         if let Some(texture) = &self.texture {
             return Ok(texture.id());
         }
@@ -110,9 +109,9 @@ impl Texture2D {
             format: self.format,
             usage: TextureUsage { sampled: true, render_target: self.render_target, copy_src: self.render_target },
         };
-        let texture = resources.texture(gpu, &desc, Some(self.bytes()))?;
+        let texture = device.texture(gpu, &desc, Some(self.bytes()))?;
         let id = texture.id();
-        self.texture = Some(texture);
+        self.texture = Some(Rc::new(texture));
         Ok(id)
     }
 
@@ -122,7 +121,7 @@ impl Texture2D {
     pub(crate) fn upload_data(
         &mut self,
         gpu: &mut dyn Gpu,
-        resources: &mut Resources,
+        device: &mut Device,
         data: &[u8],
         size: Size,
     ) -> Result<(), GpuError> {
@@ -130,11 +129,11 @@ impl Texture2D {
         if size.is_empty() {
             return Ok(());
         }
-        let texture = self.create(gpu, resources)?;
+        let texture = self.create(gpu, device)?;
         if data.is_empty() {
             return Ok(());
         }
-        write(gpu, &mut resources.stats, texture, data, TextureRegion { x: 0, y: 0, size })
+        write(gpu, &mut device.stats, texture, data, TextureRegion { x: 0, y: 0, size })
     }
 
     /// Writes `data`, the texels of a region of `size` in rows from the top,
@@ -142,29 +141,29 @@ impl Texture2D {
     pub(crate) fn upload_sub_region(
         &mut self,
         gpu: &mut dyn Gpu,
-        resources: &mut Resources,
+        device: &mut Device,
         data: &[u8],
         size: Size,
         x: u16,
         y: u16,
     ) -> Result<(), GpuError> {
-        let texture = self.create(gpu, resources)?;
+        let texture = self.create(gpu, device)?;
         let region = TextureRegion { x: u32::from(x), y: u32::from(y), size };
-        write(gpu, &mut resources.stats, texture, data, region)
+        write(gpu, &mut device.stats, texture, data, region)
     }
 
     /// Writes the image [`TextureMut::set_image`] set, if any.
-    pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, resources: &mut Resources) -> Result<(), GpuError> {
+    pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, device: &mut Device) -> Result<(), GpuError> {
         match self.image.take() {
-            Some(image) if image.valid() => self.upload_data(gpu, resources, &image.data, image.size),
+            Some(image) if image.valid() => self.upload_data(gpu, device, &image.data, image.size),
             _ => Ok(()),
         }
     }
 
     /// The texture a draw binds, made through `gpu` and holding its image.
-    pub(crate) fn bind(&mut self, gpu: &mut dyn Gpu, resources: &mut Resources) -> Result<TextureId, GpuError> {
-        self.upload(gpu, resources)?;
-        self.create(gpu, resources)
+    pub(crate) fn bind(&mut self, gpu: &mut dyn Gpu, device: &mut Device) -> Result<TextureId, GpuError> {
+        self.upload(gpu, device)?;
+        self.create(gpu, device)
     }
 
     /// The bytes the texture takes.

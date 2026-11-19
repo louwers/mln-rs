@@ -160,6 +160,12 @@ impl TileObjects for FillTile {
         };
         Some(DrawObjectsMut { objects: &mut draw.as_mut()?.objects, atlases: self.atlases.as_ref() })
     }
+
+    fn drop_bindings(&mut self) {
+        for draw in self.fill.iter_mut().chain(&mut self.outline) {
+            draw.objects.drop_bindings();
+        }
+    }
 }
 
 /// A draw's entries in the layer's storage buffers.
@@ -756,7 +762,9 @@ impl TypedLayer for RenderFillLayer {
             *layer.paint.fill_layer_blend.uniform(),
         ));
         frame.set_stencil_tiles(render_tiles.iter().map(|tile| tile.tile.id));
-        self.draw_list.finish(frame, gpu, paint_parameters.context, |writer| Self::write_uniforms(layer, writer));
+        self.drawing.finish(&mut self.draw_list, gpu, paint_parameters.context, |writer| {
+            Self::write_uniforms(layer, writer);
+        });
     }
 }
 

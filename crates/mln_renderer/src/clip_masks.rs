@@ -19,9 +19,9 @@ use mln_util::logging::{Event, Log};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use smallvec::SmallVec;
 
-use crate::gfx::buffer::SharedBuffer;
+use crate::gfx::buffer::Buffer;
 use crate::gfx::context::Context;
-use crate::gfx::owned::{Held, Owned};
+use crate::gfx::owned::Owned;
 use crate::gfx::shader_program::ShaderProgramPtr;
 use crate::gfx::shader_registry::ShaderRegistry;
 use crate::globe_tile_mesh::raw_globe_tile_mesh;
@@ -51,8 +51,8 @@ const SQUARE: MeshKey = (0, false, false, false);
 
 /// A mesh that masks draw, and its geometry, made at its first draw.
 struct Mesh {
-    vertices: SharedBuffer,
-    indices: SharedBuffer,
+    vertices: Buffer,
+    indices: Buffer,
     segments: Vec<SegmentBase>,
     geometry: Option<Owned<GeometryId>>,
 }
@@ -88,8 +88,7 @@ impl Mesh {
             vertex_buffers: &[(self.vertices.id(), 0)],
             index_buffer: self.indices.id(),
         })?;
-        let held = vec![Held::Buffer(self.vertices.clone()), Held::Buffer(self.indices.clone())];
-        self.geometry = Some(context.own(geometry, held));
+        self.geometry = Some(context.own(geometry, Vec::new()));
         Ok(geometry)
     }
 }
@@ -110,13 +109,14 @@ pub(crate) struct ClipMasks {
     masks: BTreeMap<UnwrappedTileID, (usize, [MeshKey; 2])>,
     /// The masks' projections, each at an offset the GPU can bind, in the
     /// order of their tiles: one write a frame.
-    projections: Option<SharedBuffer>,
+    projections: Option<Buffer>,
     /// The bytes of `projections`, kept between frames.
     bytes: Vec<u8>,
-    /// The bindings of each slot of `projections`, and what they were made
-    /// of: the epoch of the frame's buffers and the projections' buffer.
+    /// The bindings of each slot of `projections`, which go with the
+    /// projections' buffer, and the epoch of the global buffers they were
+    /// made at.
     bindings: Vec<Owned<BindingsId>>,
-    bindings_made: Option<(u64, mln_gfx::gpu::BufferId)>,
+    bindings_made: Option<u64>,
     pipelines: Vec<(TargetFormats, PipelineId)>,
 }
 
@@ -194,7 +194,10 @@ impl ClipMasks {
             let masks = &self.masks;
             self.meshes.retain(|key, _| masks.values().any(|(_, keys)| keys.contains(key)));
         }
-        context.device().write_uniform_buffer(gpu, &mut self.projections, &self.bytes);
+        if context.device().write_uniforms(gpu, &mut self.projections, &self.bytes, false) {
+            self.bindings.clear();
+            self.bindings_made = None;
+        }
     }
 
     /// Draws the mask of each tile of `masks` with its stencil value, which
@@ -228,7 +231,7 @@ impl ClipMasks {
             None => *self.shader_id.insert(context.shader(gpu, shader.key())?),
         };
 
-        let made = (context.global_uniform_buffers().epoch(), projections.id());
+        let made = context.global_uniform_buffers().epoch();
         if self.bindings_made != Some(made) || self.bindings.len() < self.masks.len() {
             self.bindings.clear();
             self.bindings_made = None;
@@ -236,7 +239,6 @@ impl ClipMasks {
             let size = size_of::<ProjectionUBO>();
             let stride = size.next_multiple_of(context.caps().buffer_offset_alignment as usize);
             for slot in 0..projections.size() / stride {
-                let mut held = Vec::with_capacity(MAX_UBO_COUNT_PER_SHADER);
                 let entries: SmallVec<[BindGroupEntry; MAX_UBO_COUNT_PER_SHADER + 2]> = (0..MAX_UBO_COUNT_PER_SHADER)
                     .filter_map(|id| {
                         let (buffer, offset, size) = if id == ID_PROJECTION_UBO {
@@ -244,7 +246,6 @@ impl ClipMasks {
                         } else {
                             global.get(id).map(|buffer| (buffer, 0, buffer.size() as u64))?
                         };
-                        held.push(Held::Buffer(buffer.clone()));
                         Some(BindGroupEntry::Buffer { id: id as u32, buffer: buffer.id(), offset, size })
                     })
                     .collect();
@@ -253,7 +254,7 @@ impl ClipMasks {
                     shader: shader_id,
                     entries: &entries,
                 })?;
-                self.bindings.push(context.own(bindings, held));
+                self.bindings.push(context.own(bindings, Vec::new()));
             }
             self.bindings_made = Some(made);
         }

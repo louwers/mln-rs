@@ -119,6 +119,12 @@ impl TileObjects for ExtrusionTile {
     fn objects(&mut self, index: usize) -> Option<DrawObjectsMut<'_>> {
         Some(DrawObjectsMut { objects: &mut self.draws.get_mut(index)?.objects, atlases: self.atlases.as_ref() })
     }
+
+    fn drop_bindings(&mut self) {
+        for draw in &mut self.draws {
+            draw.objects.drop_bindings();
+        }
+    }
 }
 
 /// A draw's entries in the layer's storage buffers.
@@ -487,7 +493,7 @@ impl TypedLayer for RenderFillExtrusionLayer {
         // The draws that composite draw opaque: the composite has the
         // layer's opacity.
         let opacity = if composite.is_some() { 1.0 } else { opacity };
-        self.draw_list.finish(frame, gpu, paint_parameters.context, |writer| {
+        self.drawing.finish(&mut self.draw_list, gpu, paint_parameters.context, |writer| {
             Self::write_uniforms(layer, writer, light, state, opacity);
         });
     }

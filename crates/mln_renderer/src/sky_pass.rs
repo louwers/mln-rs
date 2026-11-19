@@ -156,9 +156,8 @@ impl SkyPass {
                     sky_horizon_blend: *evaluated.sky_horizon_blend.uniform() * viewport_size.height as f32 * 0.5,
                     sky_blend: projection_transition as f32,
                 };
-                let buffers = &mut sky.frame.uniform_buffers;
-                buffers.create_or_update_pod(gpu, ID_SKY_PROPS_UBO, &props, context.device());
-                bind_no_projection(gpu, buffers, context);
+                sky.write_pod(gpu, ID_SKY_PROPS_UBO, &props, context);
+                bind_no_projection(gpu, &mut sky.frame.uniform_buffers, context);
             }
         } else {
             self.sky = None;
@@ -190,9 +189,8 @@ impl SkyPass {
             camera_position: [camera[0] as f32, camera[1] as f32, camera[2] as f32, 0.0],
             sun_position: sun_position(light, state, atmosphere_blend),
         };
-        let buffers = &mut atmosphere.frame.uniform_buffers;
-        buffers.create_or_update_pod(gpu, ID_ATMOSPHERE_PROPS_UBO, &props, context.device());
-        bind_no_projection(gpu, buffers, context);
+        atmosphere.write_pod(gpu, ID_ATMOSPHERE_PROPS_UBO, &props, context);
+        bind_no_projection(gpu, &mut atmosphere.frame.uniform_buffers, context);
     }
 
     /// The planar sky, which draws before the layers, if the frame draws it.

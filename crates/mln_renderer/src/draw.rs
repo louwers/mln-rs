@@ -22,7 +22,6 @@ use mln_gfx::stencil_mode::StencilMode;
 use mln_util::logging::{Event, Log};
 use smallvec::SmallVec;
 
-use crate::gfx::buffer::SharedBuffer;
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
 use crate::gfx::owned::{Held, Owned};
@@ -73,9 +72,11 @@ pub(crate) fn raw_vertices(
     attributes
 }
 
-/// A vertex buffer a draw binds, and how its pipeline reads it.
+/// A vertex buffer a draw binds, what keeps it where others share it, and
+/// how its pipeline reads it.
 struct VertexSlot {
-    buffer: SharedBuffer,
+    buffer: BufferId,
+    held: Option<Held>,
     offset: u64,
     layout: VertexBufferLayout,
 }
@@ -120,7 +121,7 @@ pub(crate) struct DrawObjects {
     textures: Textures,
     /// The draw's own uniform and storage buffers, by id, which win over
     /// its layer's and the frame's.
-    pub(crate) uniform_buffers: UniformBufferArray,
+    uniform_buffers: UniformBufferArray,
     color_mode: ColorMode,
     cull_face_mode: CullFaceMode,
 
@@ -280,7 +281,7 @@ impl DrawObjects {
             return Ok(());
         };
         let context = &mut *parameters.context;
-        let index_buffer = self.indexes.buffer_id(context);
+        let index_buffer = self.indexes.buffer(context);
         debug_assert!(index_buffer.is_some(), "a draw of {} draws indexes it didn't upload", self.shader.name());
         let Some(index_buffer) = index_buffer else {
             return Ok(());
@@ -310,19 +311,14 @@ impl DrawObjects {
                 self.geometry = None;
                 // On the stack: the geometry's handles take the allocation.
                 let buffers: SmallVec<[(BufferId, u64); MAX_VERTEX_BUFFERS]> =
-                    slots.iter().map(|slot| (slot.buffer.id(), slot.offset)).collect();
+                    slots.iter().map(|slot| (slot.buffer, slot.offset)).collect();
                 let geometry = gpu.create_geometry(&GeometryDesc {
                     shader: shader_id,
                     layouts: &self.pipeline_layouts,
                     vertex_buffers: &buffers,
                     index_buffer,
                 })?;
-                let held = slots
-                    .iter()
-                    .map(|slot| &slot.buffer)
-                    .chain(self.indexes.buffer(context))
-                    .map(|buffer| Held::Buffer(buffer.clone()))
-                    .collect();
+                let held = slots.iter().filter_map(|slot| slot.held.clone()).chain(self.indexes.held()).collect();
                 self.geometry = Some((context.own(geometry, held), index_buffer));
                 geometry
             }
@@ -408,7 +404,6 @@ impl DrawObjects {
         // On the stack: the bindings' handles take the allocation.
         let mut entries: SmallVec<[BindGroupEntry; MAX_UBO_COUNT_PER_SHADER + MAX_TEXTURE_COUNT_PER_SHADER]> =
             SmallVec::new();
-        let mut held = Vec::with_capacity(MAX_UBO_COUNT_PER_SHADER + MAX_TEXTURE_COUNT_PER_SHADER);
         for id in 0..MAX_UBO_COUNT_PER_SHADER {
             // The draw's buffer wins over its frame's, and that over the
             // global one.
@@ -420,7 +415,6 @@ impl DrawObjects {
                     offset: 0,
                     size: buffer.size() as u64,
                 });
-                held.push(Held::Buffer(buffer.clone()));
             }
         }
         for (id, binding) in textures.iter().enumerate() {
@@ -428,9 +422,12 @@ impl DrawObjects {
                 entries.push(BindGroupEntry::Texture { id: id as u32, texture, sampler });
             }
         }
-        for texture in self.shader.textures().iter().filter_map(|&id| self.textures.get(id)?.as_ref()) {
-            held.extend(context.gpu_texture(texture).cloned().map(Held::Texture));
-        }
+        let held = self
+            .shader
+            .textures()
+            .iter()
+            .filter_map(|&id| context.gpu_texture(self.textures.get(id)?.as_ref()?).cloned().map(Held::Texture))
+            .collect();
         let bindings =
             gpu.create_bindings(&BindingsDesc { label: self.shader.name(), shader: shader_id, entries: &entries })?;
         self.bindings = Some((context.own(bindings, held), stamp));
@@ -441,6 +438,7 @@ impl DrawObjects {
     /// even where they appear unchanged.
     pub(crate) fn replace_geometry(&mut self, geometry: DrawGeometry) {
         let DrawGeometry { vertices, vertex_count, mode, indexes, segments, instances } = geometry;
+        self.geometry = None;
         self.vertex_attributes = vertices;
         self.instance_attributes = instances;
         self.vertex_attributes_changed = true;
@@ -452,8 +450,13 @@ impl DrawObjects {
     }
 
     /// The vertex attributes, to change, which the next upload binds again.
+    /// The draw drops its geometry where they have values of their own,
+    /// whose buffers a change may drop.
     pub(crate) fn vertex_attributes_mut(&mut self) -> &mut VertexAttributeArray {
         self.vertex_attributes_changed = true;
+        if self.vertex_attributes.has_own() {
+            self.geometry = None;
+        }
         &mut self.vertex_attributes
     }
 
@@ -461,12 +464,15 @@ impl DrawObjects {
     /// next upload binds again: the instance attributes of a draw of
     /// instances, else the vertex attributes.
     pub(crate) fn paint_attributes_mut(&mut self) -> &mut VertexAttributeArray {
-        if self.instance_attributes.is_some() {
-            self.instance_attributes_changed = true;
-        } else {
-            self.vertex_attributes_changed = true;
+        let (attributes, changed) = match &mut self.instance_attributes {
+            Some(instances) => (instances, &mut self.instance_attributes_changed),
+            None => (&mut self.vertex_attributes, &mut self.vertex_attributes_changed),
+        };
+        *changed = true;
+        if attributes.has_own() {
+            self.geometry = None;
         }
-        self.instance_attributes.as_mut().unwrap_or(&mut self.vertex_attributes)
+        attributes
     }
 
     /// Whether the draw draws instances.
@@ -478,8 +484,7 @@ impl DrawObjects {
     /// Replaces the vertex attributes with a copy of those of `other`
     /// ([`copy_shared_attributes`]), which the next upload binds.
     pub(crate) fn share_vertex_attributes(&mut self, other: &DrawObjects) {
-        self.vertex_attributes = copy_shared_attributes(&other.vertex_attributes);
-        self.vertex_attributes_changed = true;
+        *self.vertex_attributes_mut() = copy_shared_attributes(&other.vertex_attributes);
     }
 
     /// The texture it binds as `id`.
@@ -512,8 +517,30 @@ impl DrawObjects {
 
     /// Replaces the indexes and the segments drawn from them.
     pub(crate) fn replace_indexes(&mut self, indexes: DrawIndexes, segments: Vec<SegmentBase>) {
+        if let DrawIndexes::Own(_) = self.indexes {
+            self.geometry = None;
+        }
         self.indexes = indexes;
         self.segments = segments;
+    }
+
+    /// Drops the bindings, for an owner that replaces a buffer they bind.
+    pub(crate) fn drop_bindings(&mut self) {
+        self.bindings = None;
+    }
+
+    /// Writes `value` to the draw's own uniform buffer `id`, as
+    /// [`UniformBufferArray::write_pod`] does.
+    pub(crate) fn write_pod<T: bytemuck::Pod>(
+        &mut self,
+        gpu: &mut dyn Gpu,
+        id: usize,
+        value: &T,
+        context: &mut Context,
+    ) {
+        if self.uniform_buffers.write_pod(gpu, id, value, context.device()) {
+            self.drop_bindings();
+        }
     }
 
     #[must_use]
@@ -557,7 +584,9 @@ fn bind_default_values(
     vertex_count: usize,
 ) -> Result<(), GpuError> {
     for binding in bindings.iter_mut().flatten().filter(|binding| binding.buffer.is_none()) {
-        binding.buffer = Some(context.default_vertex_buffer(gpu, binding.attribute.data_type, vertex_count)?);
+        let buffer = context.default_vertex_buffer(gpu, binding.attribute.data_type, vertex_count)?;
+        binding.buffer = Some(buffer.id());
+        binding.held = Some(Held::Buffer(buffer));
     }
     Ok(())
 }
@@ -586,7 +615,7 @@ fn vertex_slots(
                 offset: binding.attribute.offset,
             };
             let shared = slots.iter_mut().find(|slot| {
-                slot.buffer.id() == buffer.id()
+                slot.buffer == *buffer
                     && slot.layout.stride == binding.vertex_stride
                     && slot.layout.step == step
                     && slot.offset == offset
@@ -594,7 +623,8 @@ fn vertex_slots(
             match shared {
                 Some(slot) => slot.layout.attributes.push(attribute),
                 None => slots.push(VertexSlot {
-                    buffer: buffer.clone(),
+                    buffer: *buffer,
+                    held: binding.held.clone(),
                     offset,
                     layout: VertexBufferLayout { stride: binding.vertex_stride, step, attributes: vec![attribute] },
                 }),

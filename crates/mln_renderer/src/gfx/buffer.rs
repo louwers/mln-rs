@@ -1,12 +1,11 @@
-//! The renderer's buffers: each a buffer of the backend's `Gpu` in the
-//! context's store ([`Resources`](crate::gfx::resources::Resources)), which
-//! its owners and the bindings and geometry made of it hold as a
-//! [`SharedBuffer`].
+//! The renderer's buffers of its backend's `Gpu`, each with one owner.
+
+use std::rc::Rc;
 
 use mln_gfx::gpu::{BufferId, BufferUsage};
 use mln_gfx::rendering_stats::RenderingStats;
 
-use crate::gfx::store::{BufferKey, Shared};
+use crate::gfx::release::{Release, ReleaseQueue};
 
 /// The bytes a uniform or storage buffer takes are a multiple of this, so
 /// that a binding covers a shader's whole struct where the renderer writes
@@ -14,84 +13,45 @@ use crate::gfx::store::{BufferKey, Shared};
 /// any device can bind.
 const UNIFORM_BUFFER_ALIGNMENT: usize = 256;
 
-/// A buffer in the context's store, which the context destroys once its
-/// last handle drops, and which the rendering stats count until then.
+/// A buffer of the context's `Gpu`, which goes to the context's release
+/// queue when it drops, and which the rendering stats count until the
+/// context destroys it. Its owner drops the bindings and geometry made of
+/// it no later than the buffer; draws that share one hold it in an `Rc`.
 pub(crate) struct Buffer {
-    pub(crate) id: BufferId,
-    pub(crate) usage: BufferUsage,
-    /// The bytes of its GPU buffer.
-    pub(crate) allocated: usize,
-}
-
-/// What a buffer's handles read of it.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct BufferInfo {
     id: BufferId,
     size: usize,
     usage: BufferUsage,
+    queue: Rc<ReleaseQueue>,
 }
 
-/// A buffer of the context's store, which stays while a clone of this does.
-pub(crate) type SharedBuffer = Shared<BufferKey, BufferInfo>;
+impl Buffer {
+    /// The buffer `id` of `usage`, which writes of up to `size` bytes fit
+    /// in, and which goes to `queue` when it drops.
+    pub(crate) fn new(id: BufferId, usage: BufferUsage, size: usize, queue: &Rc<ReleaseQueue>) -> Buffer {
+        Buffer { id, size, usage, queue: Rc::clone(queue) }
+    }
 
-impl SharedBuffer {
     #[must_use]
     pub(crate) fn id(&self) -> BufferId {
-        self.data().id
+        self.id
     }
 
     /// The size of the data the buffer was made with. Writes may fill this
     /// much.
     #[must_use]
     pub(crate) fn size(&self) -> usize {
-        self.data().size
+        self.size
     }
 
     #[must_use]
     pub(crate) fn usage(&self) -> BufferUsage {
-        self.data().usage
-    }
-
-    /// Whether the buffer binds as a storage buffer, which a layer's draws
-    /// index with their index among its draws.
-    #[must_use]
-    pub(crate) fn is_storage(&self) -> bool {
-        self.usage() == BufferUsage::Storage
+        self.usage
     }
 }
 
-impl Buffer {
-    /// A buffer of `usage` that writes of up to `size` bytes fit in, and
-    /// what its handles read of it.
-    pub(crate) fn new(id: BufferId, usage: BufferUsage, size: usize) -> (Buffer, BufferInfo) {
-        (Buffer { id, usage, allocated: allocated_size(usage, size) }, BufferInfo { id, size, usage })
-    }
-
-    /// Adds the buffer to the live buffers of `stats`.
-    pub(crate) fn count(&self, stats: &mut RenderingStats) {
-        self.add_to(stats, 1);
-        stats.total_buffers += 1;
-        stats.total_buffer_objs += 1;
-    }
-
-    /// Takes the buffer out of the live buffers of `stats`.
-    pub(crate) fn uncount(&self, stats: &mut RenderingStats) {
-        self.add_to(stats, -1);
-    }
-
-    fn add_to(&self, stats: &mut RenderingStats, sign: i32) {
-        let bytes = sign * self.allocated as i32;
-        stats.num_buffers += sign;
-        stats.mem_buffers += bytes;
-        let (num, mem) = match self.usage {
-            BufferUsage::Vertex => (&mut stats.num_vertex_buffers, &mut stats.mem_vertex_buffers),
-            BufferUsage::Index => (&mut stats.num_index_buffers, &mut stats.mem_index_buffers),
-            BufferUsage::Uniform | BufferUsage::Storage => {
-                (&mut stats.num_uniform_buffers, &mut stats.mem_uniform_buffers)
-            }
-        };
-        *num += sign;
-        *mem += bytes;
+impl Drop for Buffer {
+    fn drop(&mut self) {
+        self.queue.push(Release::Buffer(self.id, self.usage, allocated_size(self.usage, self.size)));
     }
 }
 
@@ -111,6 +71,21 @@ pub(crate) fn allocated_size(usage: BufferUsage, size: usize) -> usize {
         BufferUsage::Vertex | BufferUsage::Index => size.max(1).next_multiple_of(4),
         BufferUsage::Uniform | BufferUsage::Storage => size.max(1).next_multiple_of(UNIFORM_BUFFER_ALIGNMENT),
     }
+}
+
+/// Adds `sign` buffers of `usage` taking `allocated` bytes each to the live
+/// buffers of `stats`.
+pub(crate) fn count(stats: &mut RenderingStats, usage: BufferUsage, allocated: usize, sign: i32) {
+    let bytes = sign * allocated as i32;
+    stats.num_buffers += sign;
+    stats.mem_buffers += bytes;
+    let (num, mem) = match usage {
+        BufferUsage::Vertex => (&mut stats.num_vertex_buffers, &mut stats.mem_vertex_buffers),
+        BufferUsage::Index => (&mut stats.num_index_buffers, &mut stats.mem_index_buffers),
+        BufferUsage::Uniform | BufferUsage::Storage => (&mut stats.num_uniform_buffers, &mut stats.mem_uniform_buffers),
+    };
+    *num += sign;
+    *mem += bytes;
 }
 
 /// Counts a write of `bytes` to a buffer of `usage` in `stats`. Every

@@ -1,11 +1,10 @@
 //! The context's stores of what draws share on the GPU: textures, indexes
-//! and vertices, and the buffers and textures of the backend's `Gpu` that
-//! the renderer made. Each entry is held through [`Shared`] handles, which
-//! the entry's owner and every draw, bindings or geometry that reads it
-//! clone: the entry stays while a handle to it does, so nothing names one
-//! that is gone. When the last handle drops, its key goes to the renderer's
-//! release queue, and the context removes the entry the next time it
-//! destroys what the renderer released.
+//! and vertices. Each entry is held through [`Shared`] handles, which the
+//! entry's owner and every draw, bindings or geometry that reads it clone:
+//! the entry stays while a handle to it does, so nothing names one that is
+//! gone. When the last handle drops, its key goes to the renderer's release
+//! queue, and the context removes the entry the next time it destroys what
+//! the renderer released.
 
 use std::marker::PhantomData;
 use std::rc::Rc;
@@ -57,10 +56,6 @@ keys! {
     IndexesKey => Indexes,
     /// Vertices of the context's store.
     VerticesKey => Vertices,
-    /// A buffer of the backend's `Gpu` in the context's store.
-    BufferKey => Buffer,
-    /// A texture of the backend's `Gpu` in the context's store.
-    GpuTextureKey => GpuTexture,
 }
 
 /// A key of one of the context's stores.
@@ -69,64 +64,49 @@ pub(crate) enum StoreKey {
     Texture(TextureKey),
     Indexes(IndexesKey),
     Vertices(VerticesKey),
-    Buffer(BufferKey),
-    GpuTexture(GpuTextureKey),
 }
 
 /// A handle of the store entry `key`, which stays in its store while a
-/// clone of the handle does, with `data` that the clones read of it.
-pub(crate) struct Shared<K: Key, D = ()>(Rc<Holder<K, D>>);
+/// clone of the handle does.
+pub(crate) struct Shared<K: Key>(Rc<Holder<K>>);
 
-/// What the clones of a [`Shared`] share: the key, their data, and the
-/// queue the key goes to once the last of them drops.
-struct Holder<K: Key, D> {
+/// What the clones of a [`Shared`] share: the key, and the queue it goes to
+/// once the last of them drops.
+struct Holder<K: Key> {
     key: K,
-    data: D,
     queue: Rc<ReleaseQueue>,
 }
 
-impl<K: Key, D> Drop for Holder<K, D> {
+impl<K: Key> Drop for Holder<K> {
     fn drop(&mut self) {
         self.queue.push(Release::Entry(self.key.into()));
     }
 }
 
-impl<K: Key, D> Shared<K, D> {
-    /// The first handle of the entry `key`, with `data`, whose key goes to
-    /// `queue` when the last clone of it drops.
-    pub(crate) fn new(key: K, data: D, queue: &Rc<ReleaseQueue>) -> Shared<K, D> {
-        Shared(Rc::new(Holder { key, data, queue: Rc::clone(queue) }))
-    }
-
+impl<K: Key> Shared<K> {
     /// The entry's key in its store.
     #[must_use]
     pub(crate) fn key(&self) -> K {
         self.0.key
     }
-
-    /// What the handles read of the entry.
-    #[must_use]
-    pub(crate) fn data(&self) -> &D {
-        &self.0.data
-    }
 }
 
 /// Handles are equal where they hold the same entry.
-impl<K: Key, D> PartialEq for Shared<K, D> {
+impl<K: Key> PartialEq for Shared<K> {
     fn eq(&self, other: &Self) -> bool {
         Rc::ptr_eq(&self.0, &other.0)
     }
 }
 
-impl<K: Key, D> Eq for Shared<K, D> {}
+impl<K: Key> Eq for Shared<K> {}
 
-impl<K: Key, D> Clone for Shared<K, D> {
+impl<K: Key> Clone for Shared<K> {
     fn clone(&self) -> Self {
         Shared(Rc::clone(&self.0))
     }
 }
 
-impl<K: Key + std::fmt::Debug, D> std::fmt::Debug for Shared<K, D> {
+impl<K: Key + std::fmt::Debug> std::fmt::Debug for Shared<K> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("Shared").field(&self.0.key).finish()
     }
@@ -184,11 +164,6 @@ impl<K: Key, V> Store<K, V> {
     /// Keeps `value`, while a clone of the returned handle lasts, whose key
     /// goes to `queue` once the last clone drops.
     pub(crate) fn add(&mut self, value: V, queue: &Rc<ReleaseQueue>) -> Shared<K> {
-        self.add_with(value, (), queue)
-    }
-
-    /// [`add`](Self::add), with `data` that the handles read.
-    pub(crate) fn add_with<D>(&mut self, value: V, data: D, queue: &Rc<ReleaseQueue>) -> Shared<K, D> {
         let version = self.next_version;
         self.next_version = version.wrapping_add(1);
         if let Some(offset) = self.chunks.iter().skip(self.first_vacant).position(|chunk| chunk.vacant != 0) {
@@ -202,7 +177,7 @@ impl<K: Key, V> Store<K, V> {
         let index = chunk.vacant.trailing_zeros() as usize;
         chunk.vacant &= !(1 << index);
         chunk.slots[index] = Slot { version, value: Some(value) };
-        Shared::new(K::new(EntryKey { slot: at * CHUNK + index, version }), data, queue)
+        Shared(Rc::new(Holder { key: K::new(EntryKey { slot: at * CHUNK + index, version }), queue: Rc::clone(queue) }))
     }
 
     /// The slot that `key` names, if the store has its entry.
@@ -220,14 +195,14 @@ impl<K: Key, V> Store<K, V> {
     }
 
     /// The entry of `handle`, which is there while the handle is.
-    pub(crate) fn get<D>(&self, handle: &Shared<K, D>) -> Option<&V> {
+    pub(crate) fn get(&self, handle: &Shared<K>) -> Option<&V> {
         let entry = self.slot(handle.key());
         debug_assert!(entry.is_some(), "a handle outlived its store entry");
         entry
     }
 
     /// [`get`](Self::get), to change.
-    pub(crate) fn get_mut<D>(&mut self, handle: &Shared<K, D>) -> Option<&mut V> {
+    pub(crate) fn get_mut(&mut self, handle: &Shared<K>) -> Option<&mut V> {
         let entry = self.slot_mut(handle.key()).and_then(|slot| slot.value.as_mut());
         debug_assert!(entry.is_some(), "a handle outlived its store entry");
         entry

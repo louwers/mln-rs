@@ -266,7 +266,7 @@ impl TypedLayer for RenderBackgroundLayer {
             draw_list.push(draw, Self::uniforms(tile_id, has_pattern, paint_parameters));
         }
 
-        draw_list.finish(drawing.frame_mut(), gpu, paint_parameters.context, |writer| {
+        drawing.finish(draw_list, gpu, paint_parameters.context, |writer| {
             let opacity = *evaluated.background_opacity.uniform();
             if let Some((from, to)) = pattern_positions {
                 let crossfade = &layer.crossfade;

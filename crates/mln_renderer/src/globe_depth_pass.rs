@@ -23,7 +23,7 @@ use crate::gfx::indexes::DrawIndexes;
 use crate::gfx::shader_program::ShaderProgramPtr;
 use crate::gfx::shader_registry::ShaderRegistry;
 use crate::globe_tile_mesh::{RawGlobeTileMesh, raw_globe_tile_mesh};
-use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDraws, TileMap, tile_objects};
+use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDraws, TileMap, finish_tiles, tile_objects};
 use crate::paint_parameters::PaintParameters;
 use crate::tile_matrix::to_projection_ubo;
 use crate::update_parameters::UpdateParameters;
@@ -139,7 +139,7 @@ impl GlobeDepthPass {
             self.draw_list.push(FrameDraw { depth, ..draw.frame_draw(Some(*tile_id)) }, projection);
         }
         // The draws draw in the order their GPU objects were made.
-        self.draw_list.finish(&mut self.frame, gpu, context, |writer| {
+        finish_tiles(&mut self.draw_list, &mut self.frame, &mut self.tiles, gpu, context, |writer| {
             writer.storage(ID_PROJECTION_UBO, |projection| *projection);
         });
     }

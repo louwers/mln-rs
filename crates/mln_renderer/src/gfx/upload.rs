@@ -2,11 +2,11 @@
 //! backend's [`Gpu`](mln_gfx::gpu::Gpu).
 
 use mln_gfx::gfx_types::AttributeDataType;
-use mln_gfx::gpu::{Gpu, GpuError};
+use mln_gfx::gpu::{BufferId, Gpu, GpuError};
 use mln_gfx::shaders::shader_defines::MAX_ATTRIBUTE_COUNT_PER_SHADER;
 
-use crate::gfx::buffer::SharedBuffer;
 use crate::gfx::context::Context;
+use crate::gfx::owned::Held;
 use crate::gfx::vertex_attribute::VertexAttributeArray;
 
 /// How a vertex attribute reads its buffer: as `data_type`, at `offset` in
@@ -18,14 +18,16 @@ pub(crate) struct AttributeDescriptor {
 }
 
 /// A vertex attribute bound to a vertex buffer, or to none where the
-/// draw doesn't provide the attribute. Bindings are equal where they
-/// bind the same buffer the same way.
+/// draw doesn't provide the attribute, with what keeps a buffer that other
+/// owners share. Bindings are equal where they bind the same buffer the
+/// same way.
 #[derive(Clone)]
 pub(crate) struct AttributeBinding {
     pub(crate) attribute: AttributeDescriptor,
     pub(crate) vertex_stride: u32,
-    pub(crate) buffer: Option<SharedBuffer>,
+    pub(crate) buffer: Option<BufferId>,
     pub(crate) vertex_offset: u32,
+    pub(crate) held: Option<Held>,
 }
 
 impl PartialEq for AttributeBinding {
@@ -62,6 +64,7 @@ pub(crate) fn build_attribute_bindings(
             vertex_stride: default.stride() as u32,
             buffer: None,
             vertex_offset: 0,
+            held: None,
         }));
     }
     Ok(bindings)

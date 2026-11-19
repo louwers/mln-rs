@@ -321,7 +321,7 @@ impl RenderRasterLayer {
         };
         frame.set_composite(composite);
         let evaluated = &self.values.evaluated.paint;
-        self.draw_list.finish(frame, gpu, context, |writer| {
+        let replaced = self.draw_list.finish(frame, gpu, context, |writer| {
             let props = RasterEvaluatedPropsUBO {
                 spin_weights: spin_weights(*evaluated.raster_hue_rotate.uniform()),
                 tl_parent: [0.0, 0.0],
@@ -340,6 +340,12 @@ impl RenderRasterLayer {
             writer.storage(ID_RASTER_DRAWABLE_UBO, |(draw_ubo, _)| *draw_ubo);
             writer.storage(ID_PROJECTION_UBO, |(_, projection)| *projection);
         });
+        if replaced {
+            let objects = &mut self.drawing.objects;
+            for draw in objects.tiles.values_mut().map(|tile| &mut tile.draw).chain(&mut objects.images) {
+                draw.objects.drop_bindings();
+            }
+        }
     }
 }
 

@@ -1,8 +1,8 @@
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::gpu::{
-    BindGroupEntry, BindingsDesc, BindingsId, BufferUsage, ColorAttachment, Draw, DynamicState, GeometryDesc,
-    GeometryId, GpuError, LoadOp, PassDesc, Scissor, ShaderKey, TextureDesc, TextureFormat, TextureRegion,
-    TextureUsage, VertexAttribute, VertexBufferLayout, VertexStep,
+    BindGroupEntry, BindingsDesc, BindingsId, ColorAttachment, Draw, DynamicState, GeometryDesc, GeometryId, GpuError,
+    LoadOp, PassDesc, Scissor, ShaderKey, TextureDesc, TextureFormat, TextureRegion, TextureUsage, VertexAttribute,
+    VertexBufferLayout, VertexStep,
 };
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::{ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO};
@@ -11,35 +11,33 @@ use mln_util::Color;
 use mln_util::size::Size;
 
 use super::with_context;
-use crate::gfx::buffer::SharedBuffer;
+use crate::gfx::indexes::{DrawIndexes, Indexes};
 use crate::gfx::owned::Held;
 
-// A uniform buffer replaced because its data grew, a texture replaced
-// because its size changed, and vertices and indexes their owners let go of
-// stay while the bindings and geometry made of them do, and go after them,
-// out of the stats too. A backend refuses, in debug builds, to destroy one
-// before them, which fails the destroy.
+// A texture that a resize replaced, and vertices and indexes of the
+// context's stores that their owners let go of, stay while the bindings and
+// geometry made of them do, and go after them, out of the stats too. A
+// buffer dropped with the bindings made of it goes after them. A backend
+// refuses, in debug builds, to destroy one before them, which fails the
+// destroy.
 #[test]
-fn bindings_and_geometry_keep_what_they_were_made_of() {
+fn bindings_and_geometry_go_before_what_they_were_made_of() {
     with_context(|gpu, context| {
         let projection = size_of::<ProjectionUBO>();
-        let mut slot = None;
-        context.device().write_uniform_buffer(gpu, &mut slot, &vec![0; projection]);
-        let ubo = slot.clone().expect("a uniform buffer");
+        let mut ubo = None;
+        context.device().write_uniforms(gpu, &mut ubo, &vec![0; projection], false);
+        let ubo_id = ubo.as_ref().expect("a uniform buffer").id();
         let texture = context.add_texture_with(|texture| texture.set_size(Size::new(2, 2)));
         let (texture_id, sampler) = context.texture_binding(gpu, &texture).expect("the texture");
-        let vertices = context.device().buffer(gpu, BufferUsage::Vertex, &[0; 16]).expect("vertices");
-        let indices =
-            context.device().buffer(gpu, BufferUsage::Index, bytemuck::cast_slice(&[0u16, 1, 2, 3])).expect("indices");
+        let vertices = context.add_vertices(vec![[0i16; 2]; 4]);
+        let vertices_id = context.upload_vertices(gpu, &vertices).expect("vertices").expect("a buffer");
+        let indexes = context.add_indexes(Indexes::new(vec![0, 1, 2, 3]));
+        context.upload_indexes(gpu, &indexes).expect("indexes");
+        let indices_id = DrawIndexes::Shared(indexes.clone()).buffer(context).expect("a buffer");
 
         let shader = context.shader(gpu, &ShaderKey::new(BuiltIn::ClippingMaskProgram, [])).expect("the shader");
         let entries = [
-            BindGroupEntry::Buffer {
-                id: ID_PROJECTION_UBO as u32,
-                buffer: ubo.id(),
-                offset: 0,
-                size: projection as u64,
-            },
+            BindGroupEntry::Buffer { id: ID_PROJECTION_UBO as u32, buffer: ubo_id, offset: 0, size: projection as u64 },
             BindGroupEntry::Texture { id: 0, texture: texture_id, sampler },
         ];
         let bindings =
@@ -49,30 +47,27 @@ fn bindings_and_geometry_keep_what_they_were_made_of() {
             .create_geometry(&GeometryDesc {
                 shader,
                 layouts: &[layout],
-                vertex_buffers: &[(vertices.id(), 0)],
-                index_buffer: indices.id(),
+                vertex_buffers: &[(vertices_id, 0)],
+                index_buffer: indices_id,
             })
             .expect("the geometry");
         let gpu_texture = context.gpu_texture(&texture).cloned().expect("the texture's");
-        let bindings = context.own(bindings, vec![Held::Buffer(ubo.clone()), Held::Texture(gpu_texture)]);
-        let geometry = context.own(geometry, vec![Held::Buffer(vertices.clone()), Held::Buffer(indices.clone())]);
-        let (ubo_id, vertices_id, indices_id) = (ubo.id(), vertices.id(), indices.id());
-        drop((ubo, vertices, indices));
-        context.device().write_uniform_buffer(gpu, &mut slot, &vec![0; 2 * projection]);
-        assert_ne!(slot.as_ref().map(SharedBuffer::id), Some(ubo_id), "a buffer the data fits in");
+        let bindings = context.own(bindings, vec![Held::Texture(gpu_texture)]);
+        let geometry = context.own(geometry, vec![Held::Vertices(vertices.clone()), Held::Indexes(indexes.clone())]);
+        drop((vertices, indexes));
         context.texture_mut(&texture).expect("the texture").set_size(Size::new(4, 4));
         context.texture_binding(gpu, &texture).expect("the resized texture");
 
         let stats = context.stats();
         context.destroy_released(gpu);
         assert_eq!(context.stats(), stats, "nothing went");
-        for buffer in [ubo_id, vertices_id, indices_id] {
+        for buffer in [vertices_id, indices_id] {
             assert!(gpu.write_buffer(buffer, 0, &[0; 4]).is_ok(), "{buffer:?} stays");
         }
         let texel = TextureRegion { x: 0, y: 0, size: Size::new(1, 1) };
         assert!(gpu.write_texture(texture_id, texel, &[0; 4]).is_ok(), "the replaced texture stays");
 
-        drop((bindings, geometry));
+        drop((ubo, bindings, geometry));
         context.destroy_released(gpu);
         for buffer in [ubo_id, vertices_id, indices_id] {
             assert!(matches!(gpu.write_buffer(buffer, 0, &[0; 4]), Err(GpuError::UnknownId("buffer"))));

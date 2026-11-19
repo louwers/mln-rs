@@ -6,8 +6,9 @@ use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::gpu::{BufferUsage, Gpu, GpuError};
 use mln_gfx::shaders::shader_defines::MAX_ATTRIBUTE_COUNT_PER_SHADER;
 
-use crate::gfx::buffer::SharedBuffer;
+use crate::gfx::buffer::Buffer;
 use crate::gfx::context::Context;
+use crate::gfx::owned::Held;
 use crate::gfx::upload::{AttributeBinding, AttributeDescriptor};
 use crate::gfx::vertices::{SharedVertices, Vertices};
 
@@ -37,10 +38,10 @@ impl SharedAttribute {
 }
 
 /// Where an attribute's own values are: in their bytes until the first
-/// upload moves them into a buffer.
+/// upload moves them into a buffer, which the draw owns.
 pub(crate) enum OwnValues {
     Bytes(Vec<u8>),
-    Buffer(SharedBuffer),
+    Buffer(Buffer),
 }
 
 /// What a vertex attribute reads.
@@ -90,11 +91,12 @@ impl VertexAttribute {
         match self {
             VertexAttribute::Own { data_type, values, .. } => {
                 let buffer = match values {
-                    OwnValues::Buffer(buffer) => buffer.clone(),
+                    OwnValues::Buffer(buffer) => buffer.id(),
                     OwnValues::Bytes(bytes) => {
                         let buffer = context.device().buffer(gpu, BufferUsage::Vertex, bytes)?;
-                        *values = OwnValues::Buffer(buffer.clone());
-                        buffer
+                        let id = buffer.id();
+                        *values = OwnValues::Buffer(buffer);
+                        id
                     }
                 };
                 Ok(Some(AttributeBinding {
@@ -102,6 +104,7 @@ impl VertexAttribute {
                     vertex_stride: data_type.stride() as u32,
                     buffer: Some(buffer),
                     vertex_offset: 0,
+                    held: None,
                 }))
             }
             VertexAttribute::Shared(shared) => {
@@ -119,6 +122,7 @@ impl VertexAttribute {
                     vertex_stride: shared.stride,
                     buffer: Some(buffer),
                     vertex_offset: shared.vertex_offset,
+                    held: Some(Held::Vertices(shared.vertices.clone())),
                 }))
             }
         }
@@ -180,6 +184,12 @@ impl VertexAttributeArray {
             VertexAttribute::Shared(shared) => Some(shared),
             VertexAttribute::Own { .. } => None,
         })
+    }
+
+    /// Whether an attribute has values of its own, in a buffer the draw
+    /// owns.
+    pub(crate) fn has_own(&self) -> bool {
+        self.iter().any(|(_, attr)| matches!(attr, VertexAttribute::Own { .. }))
     }
 
     /// The attributes, with their ids.

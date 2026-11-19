@@ -24,9 +24,11 @@ use crate::render_tile::RenderTile;
 /// same.
 pub(crate) fn bind_no_projection(gpu: &mut dyn Gpu, layer_uniforms: &mut UniformBufferArray, context: &mut Context) {
     if layer_uniforms.get(ID_PROJECTION_UBO).is_none() {
-        layer_uniforms.set(
+        layer_uniforms.write_storage(
+            gpu,
             ID_PROJECTION_UBO,
-            context.device().create_storage_buffer(gpu, bytemuck::bytes_of(&ProjectionUBO::default())),
+            bytemuck::bytes_of(&ProjectionUBO::default()),
+            context.device(),
         );
     }
 }
