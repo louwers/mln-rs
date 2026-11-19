@@ -1934,7 +1934,6 @@ impl Gpu for VulkanGpu {
                 MemoryLocation::CpuToGpu,
                 desc.label,
             )
-            .filter(|allocation| !allocation.mapped_buffer().is_null())
         } else {
             BufferAllocation::create(
                 &self.backend,
@@ -2014,7 +2013,6 @@ impl Gpu for VulkanGpu {
             MemoryLocation::CpuToGpu,
             "Gpu_Staging",
         )
-        .filter(|staging| !staging.mapped_buffer().is_null())
         .ok_or_else(|| GpuError::Invalid("Vulkan couldn't make a staging buffer".to_owned()))?;
         // SAFETY: the mapping holds `data.len()` bytes, which nothing reads
         // until the copy runs.
@@ -2144,6 +2142,7 @@ impl Gpu for VulkanGpu {
             return Ok(());
         }
         let (image, layout, aspect) = (entry.image.image(), entry.layout, entry.aspect);
+        let uploads = self.uploads()?;
         let staging = BufferAllocation::create(
             &self.backend,
             data.len(),
@@ -2151,13 +2150,11 @@ impl Gpu for VulkanGpu {
             MemoryLocation::CpuToGpu,
             "Gpu_Staging",
         )
-        .filter(|staging| !staging.mapped_buffer().is_null())
         .ok_or_else(|| GpuError::Invalid("Vulkan couldn't make a staging buffer".to_owned()))?;
         // SAFETY: the mapping holds `data.len()` bytes, which nothing reads
         // until the copy runs.
         unsafe { std::ptr::copy_nonoverlapping(data.as_ptr(), staging.mapped_buffer(), data.len()) };
 
-        let uploads = self.uploads()?;
         let device = self.backend.get_device();
         let range = whole_range(aspect);
         transition_image(
@@ -2567,7 +2564,6 @@ impl Gpu for VulkanGpu {
             MemoryLocation::GpuToCpu,
             "Gpu_Readback",
         )
-        .filter(|staging| !staging.mapped_buffer().is_null())
         .ok_or_else(|| GpuError::Invalid("Vulkan couldn't make a readback buffer".to_owned()))?;
         let device = self.backend.get_device();
         let range = whole_range(vk::ImageAspectFlags::COLOR);

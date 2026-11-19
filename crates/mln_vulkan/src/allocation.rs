@@ -8,8 +8,8 @@ use gpu_allocator::vulkan::{Allocation, AllocationCreateDesc, AllocationScheme};
 
 use crate::renderer_backend::BackendImpl;
 
-/// A buffer and its memory, mapped, which [`destroy`](Self::destroy)
-/// frees.
+/// A buffer and its memory, which [`destroy`](Self::destroy) frees: in
+/// debug builds, dropping one that isn't destroyed panics.
 pub(crate) struct BufferAllocation {
     buffer: vk::Buffer,
     allocation: Allocation,
@@ -17,8 +17,10 @@ pub(crate) struct BufferAllocation {
 }
 
 impl BufferAllocation {
-    /// Creates a buffer of `size` bytes in host-visible memory, written
-    /// (`MemoryLocation::CpuToGpu`) or read (`GpuToCpu`) by the CPU.
+    /// Creates a buffer of `size` bytes in device memory
+    /// (`MemoryLocation::GpuOnly`) or in mapped memory that the CPU writes
+    /// (`CpuToGpu`) or reads (`GpuToCpu`). Fails if the CPU's memory isn't
+    /// mapped.
     pub(crate) fn create(
         backend: &BackendImpl,
         size: usize,
@@ -62,15 +64,21 @@ impl BufferAllocation {
             }
         };
         let mapped_buffer = allocation.mapped_ptr().map_or(std::ptr::null_mut(), |p| p.as_ptr().cast::<u8>());
-        Some(BufferAllocation { buffer, allocation, mapped_buffer })
+        let allocation = BufferAllocation { buffer, allocation, mapped_buffer };
+        if mapped_buffer.is_null() && location != MemoryLocation::GpuOnly {
+            allocation.destroy(backend);
+            return None;
+        }
+        Some(allocation)
     }
 
     /// Destroys the buffer and frees its memory, which no command that
     /// hasn't finished uses.
-    pub(crate) fn destroy(self, backend: &BackendImpl) {
+    pub(crate) fn destroy(mut self, backend: &BackendImpl) {
         // SAFETY: the commands that use the buffer have finished.
         unsafe { backend.get_device().destroy_buffer(self.buffer, None) };
-        let _ = backend.with_allocator(|allocator| allocator.free(self.allocation));
+        let allocation = std::mem::take(&mut self.allocation);
+        let _ = backend.with_allocator(|allocator| allocator.free(allocation));
     }
 
     #[must_use]
@@ -78,7 +86,7 @@ impl BufferAllocation {
         self.buffer
     }
 
-    /// The buffer's memory, or null if the allocator couldn't map it.
+    /// The buffer's memory, or null if it is in device memory.
     #[must_use]
     pub(crate) fn mapped_buffer(&self) -> *mut u8 {
         self.mapped_buffer
@@ -86,7 +94,7 @@ impl BufferAllocation {
 }
 
 /// An image, its memory and its view, which [`destroy`](Self::destroy)
-/// frees.
+/// frees: in debug builds, dropping one that isn't destroyed panics.
 pub(crate) struct ImageAllocation {
     image: vk::Image,
     allocation: Allocation,
@@ -179,7 +187,7 @@ impl ImageAllocation {
 
     /// Destroys the view and the image and frees its memory, which no
     /// command that hasn't finished uses.
-    pub(crate) fn destroy(self, backend: &BackendImpl) {
+    pub(crate) fn destroy(mut self, backend: &BackendImpl) {
         let device = backend.get_device();
         // SAFETY: the commands that use the image have finished.
         unsafe {
@@ -188,7 +196,26 @@ impl ImageAllocation {
             }
             device.destroy_image(self.image, None);
         }
-        let _ = backend.with_allocator(|allocator| allocator.free(self.allocation));
+        let allocation = std::mem::take(&mut self.allocation);
+        let _ = backend.with_allocator(|allocator| allocator.free(allocation));
+    }
+}
+
+impl Drop for BufferAllocation {
+    fn drop(&mut self) {
+        debug_assert!(
+            self.allocation.is_null() || std::thread::panicking(),
+            "a Vulkan buffer was dropped without being destroyed"
+        );
+    }
+}
+
+impl Drop for ImageAllocation {
+    fn drop(&mut self) {
+        debug_assert!(
+            self.allocation.is_null() || std::thread::panicking(),
+            "a Vulkan image was dropped without being destroyed"
+        );
     }
 }
 
