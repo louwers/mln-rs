@@ -4,10 +4,10 @@ use std::any::Any;
 use std::collections::VecDeque;
 use std::fmt::Write as _;
 use std::mem::ManuallyDrop;
-use std::rc::Rc;
 
 use ash::vk;
 use gpu_allocator::MemoryLocation;
+use gpu_allocator::vulkan::Allocator;
 use mln_gfx::color_mode::BlendFunction;
 use mln_gfx::gfx_types::DrawModeType;
 use mln_gfx::gpu::validation::{
@@ -335,7 +335,10 @@ impl OpenPass {
 /// that their shader uses (`mln_glsl::layout`), shared by bindings of the
 /// same resources. `globalIndex` is a push constant.
 pub struct VulkanGpu {
-    backend: Rc<BackendImpl>,
+    /// Before `backend`: it drops while the device it frees memory on
+    /// lives.
+    allocator: Allocator,
+    backend: BackendImpl,
     caps: Caps,
     set_layouts: [vk::DescriptorSetLayout; DescriptorSetType::COUNT],
     pipeline_layout: vk::PipelineLayout,
@@ -521,14 +524,18 @@ impl VulkanGpu {
     /// A backend on `device`. Fails if the device can't make its pipeline
     /// layout or the placeholders it binds.
     pub fn new(device: &Device) -> Result<VulkanGpu, GpuError> {
-        let backend = Rc::new(BackendImpl::new(device, 1).map_err(|error| GpuError::Invalid(error.to_string()))?);
+        let backend = BackendImpl::new(device, 1).map_err(|error| GpuError::Invalid(error.to_string()))?;
         VulkanGpu::on(backend)
     }
 
     /// A backend on a renderer backend's device and queue.
-    pub(crate) fn on(backend: Rc<BackendImpl>) -> Result<VulkanGpu, GpuError> {
+    pub(crate) fn on(backend: BackendImpl) -> Result<VulkanGpu, GpuError> {
+        let mut allocator =
+            crate::allocation::allocator(backend.device()).map_err(|error| GpuError::Invalid(error.to_string()))?;
+        let device = backend.get_device();
         let placeholder_buffer = BufferAllocation::create(
-            &backend,
+            device,
+            &mut allocator,
             256,
             vk::BufferUsageFlags::UNIFORM_BUFFER | vk::BufferUsageFlags::STORAGE_BUFFER,
             MemoryLocation::GpuOnly,
@@ -536,7 +543,8 @@ impl VulkanGpu {
         )
         .ok_or_else(|| GpuError::Invalid("Vulkan couldn't make the placeholder buffer".to_owned()))?;
         let placeholder_image = ImageAllocation::create(
-            &backend,
+            device,
+            &mut allocator,
             &vk::ImageCreateInfo::default()
                 .image_type(vk::ImageType::TYPE_2D)
                 .format(vk::Format::R8G8B8A8_UNORM)
@@ -550,18 +558,18 @@ impl VulkanGpu {
             "Gpu_PlaceholderImage",
         );
         let Some(mut placeholder_image) = placeholder_image else {
-            placeholder_buffer.destroy(&backend);
+            placeholder_buffer.destroy(device, &mut allocator);
             return Err(GpuError::Invalid("Vulkan couldn't make the placeholder image".to_owned()));
         };
         if !placeholder_image.create_view(
-            backend.get_device(),
+            device,
             vk::Format::R8G8B8A8_UNORM,
             vk::ComponentMapping::default(),
             vk::ImageAspectFlags::COLOR,
             1,
         ) {
-            placeholder_image.destroy(&backend);
-            placeholder_buffer.destroy(&backend);
+            placeholder_image.destroy(device, &mut allocator);
+            placeholder_buffer.destroy(device, &mut allocator);
             return Err(GpuError::Invalid("Vulkan couldn't make the placeholder image's view".to_owned()));
         }
 
@@ -610,6 +618,7 @@ impl VulkanGpu {
         // Made with null handles, which `drop` destroys as it does the
         // others if a step below fails.
         let mut gpu = VulkanGpu {
+            allocator,
             backend,
             caps,
             set_layouts: [vk::DescriptorSetLayout::null(); DescriptorSetType::COUNT],
@@ -1020,8 +1029,8 @@ impl VulkanGpu {
         // recorded since names it.
         unsafe {
             match garbage {
-                Garbage::Buffer(buffer) => buffer.destroy(&self.backend),
-                Garbage::Image(image) => image.destroy(&self.backend),
+                Garbage::Buffer(buffer) => buffer.destroy(device, &mut self.allocator),
+                Garbage::Image(image) => image.destroy(device, &mut self.allocator),
                 Garbage::Sampler(sampler) => device.destroy_sampler(sampler, None),
                 Garbage::Pipeline(pipeline) => device.destroy_pipeline(pipeline, None),
                 Garbage::Framebuffer(framebuffer) => device.destroy_framebuffer(framebuffer, None),
@@ -1081,8 +1090,8 @@ impl VulkanGpu {
         for set_bindings in &mut bindings {
             set_bindings.sort_unstable_by_key(|&(binding, _)| binding);
         }
-        self.backend.set_debug_name(modules[0], &format!("{}.vert", source.name));
-        self.backend.set_debug_name(modules[1], &format!("{}.frag", source.name));
+        self.backend.device().set_debug_name(modules[0], &format!("{}.vert", source.name));
+        self.backend.device().set_debug_name(modules[1], &format!("{}.frag", source.name));
         Ok(Shader {
             name: source.name,
             vertex: modules[0],
@@ -1344,7 +1353,7 @@ impl VulkanGpu {
         // the layout and the render pass are this backend's.
         let pipeline = unsafe { self.device().create_graphics_pipelines(self.pipeline_cache, &[create_info], None) }
             .map_err(|(_, error)| GpuError::Invalid(format!("{name} pipeline: {error}")))?[0];
-        self.backend.set_debug_name(pipeline, &format!("{name}_pipeline"));
+        self.backend.device().set_debug_name(pipeline, &format!("{name}_pipeline"));
         Ok(pipeline)
     }
 
@@ -1576,7 +1585,7 @@ impl VulkanGpu {
             .render_area(full)
             .clear_values(&clear_values);
         let device = self.backend.get_device();
-        self.backend.begin_debug_label(command_buffer, pass.label, [0.0, 0.0, 0.0, 0.0]);
+        self.backend.device().begin_debug_label(command_buffer, pass.label, [0.0, 0.0, 0.0, 0.0]);
         // SAFETY: the command buffer is recording outside a render pass, and
         // the framebuffer is of the render pass.
         unsafe { device.cmd_begin_render_pass(command_buffer, &begin_info, vk::SubpassContents::INLINE) };
@@ -1686,7 +1695,7 @@ impl VulkanGpu {
     }
 
     /// What the backend made on its device, which its targets share.
-    pub(crate) fn backend_impl(&self) -> &Rc<BackendImpl> {
+    pub(crate) fn backend_impl(&self) -> &BackendImpl {
         &self.backend
     }
 
@@ -1933,7 +1942,8 @@ impl Gpu for VulkanGpu {
         let stride = size.next_multiple_of(u64::from(self.caps.buffer_offset_alignment));
         let allocation = if windowed {
             BufferAllocation::create(
-                &self.backend,
+                self.backend.get_device(),
+                &mut self.allocator,
                 (stride * self.window_count as u64) as usize,
                 usage,
                 MemoryLocation::CpuToGpu,
@@ -1941,7 +1951,8 @@ impl Gpu for VulkanGpu {
             )
         } else {
             BufferAllocation::create(
-                &self.backend,
+                self.backend.get_device(),
+                &mut self.allocator,
                 size as usize,
                 usage | vk::BufferUsageFlags::TRANSFER_DST,
                 MemoryLocation::GpuOnly,
@@ -1949,7 +1960,7 @@ impl Gpu for VulkanGpu {
             )
         }
         .ok_or_else(|| GpuError::Invalid(format!("{}: Vulkan couldn't make the buffer", desc.label)))?;
-        self.backend.set_debug_name(allocation.buffer(), desc.label);
+        self.backend.device().set_debug_name(allocation.buffer(), desc.label);
         let windows = windowed.then(|| {
             // SAFETY: the mapping holds every window, which nothing reads
             // yet.
@@ -2012,7 +2023,8 @@ impl Gpu for VulkanGpu {
             return Ok(());
         }
         let staging = BufferAllocation::create(
-            &self.backend,
+            self.backend.get_device(),
+            &mut self.allocator,
             data.len(),
             vk::BufferUsageFlags::TRANSFER_SRC,
             MemoryLocation::CpuToGpu,
@@ -2085,7 +2097,13 @@ impl Gpu for VulkanGpu {
             .usage(vk_usage)
             .sharing_mode(vk::SharingMode::EXCLUSIVE)
             .initial_layout(vk::ImageLayout::UNDEFINED);
-        let mut image = ImageAllocation::create(&self.backend, &image_info, MemoryLocation::GpuOnly, desc.label)
+        let mut image = ImageAllocation::create(
+            self.backend.get_device(),
+            &mut self.allocator,
+            &image_info,
+            MemoryLocation::GpuOnly,
+            desc.label,
+        )
             .ok_or_else(|| GpuError::Invalid(format!("{}: Vulkan couldn't make the texture", desc.label)))?;
         // Alpha-only formats aren't core Vulkan: an `A8Unorm` texture is a
         // red one whose view reads red as alpha.
@@ -2100,16 +2118,16 @@ impl Gpu for VulkanGpu {
             vk::ComponentMapping::default()
         };
         if !image.create_view(self.device(), vk_format, components, aspect, 1) {
-            image.destroy(&self.backend);
+            image.destroy(self.backend.get_device(), &mut self.allocator);
             return Err(GpuError::Invalid(format!("{}: Vulkan couldn't make the texture's view", desc.label)));
         }
-        self.backend.set_debug_name(image.image(), desc.label);
+        self.backend.device().set_debug_name(image.image(), desc.label);
 
         let layout = resting_layout(format, usage);
         let uploads = match self.uploads() {
             Ok(uploads) => uploads,
             Err(error) => {
-                image.destroy(&self.backend);
+                image.destroy(self.backend.get_device(), &mut self.allocator);
                 return Err(error);
             }
         };
@@ -2149,7 +2167,8 @@ impl Gpu for VulkanGpu {
         let (image, layout, aspect) = (entry.image.image(), entry.layout, entry.aspect);
         let uploads = self.uploads()?;
         let staging = BufferAllocation::create(
-            &self.backend,
+            self.backend.get_device(),
+            &mut self.allocator,
             data.len(),
             vk::BufferUsageFlags::TRANSFER_SRC,
             MemoryLocation::CpuToGpu,
@@ -2529,7 +2548,7 @@ impl Gpu for VulkanGpu {
         if let Some(command_buffer) = self.frame {
             // SAFETY: the command buffer is recording inside a render pass.
             unsafe { self.device().cmd_end_render_pass(command_buffer) };
-            self.backend.end_debug_label(command_buffer);
+            self.backend.device().end_debug_label(command_buffer);
             #[cfg(feature = "bench")]
             if let Some(timer) = &mut self.timer {
                 timer.end(self.backend.get_device(), command_buffer);
@@ -2563,7 +2582,8 @@ impl Gpu for VulkanGpu {
         let entry = self.textures.get(texture).ok_or(GpuError::UnknownId("texture"))?;
         let (image, layout) = (entry.image.image(), entry.layout);
         let staging = BufferAllocation::create(
-            &self.backend,
+            self.backend.get_device(),
+            &mut self.allocator,
             readback.len(),
             vk::BufferUsageFlags::TRANSFER_DST,
             MemoryLocation::GpuToCpu,
@@ -2643,7 +2663,7 @@ impl Gpu for VulkanGpu {
         // SAFETY: the copy has finished, and the mapping starts with the
         // region's `len` bytes of texels.
         let texels = unsafe { std::slice::from_raw_parts(staging.mapped_buffer(), len) }.to_vec();
-        staging.destroy(&self.backend);
+        staging.destroy(self.backend.get_device(), &mut self.allocator);
         Ok(Some(texels))
     }
 }
@@ -2652,22 +2672,22 @@ impl Drop for VulkanGpu {
     fn drop(&mut self) {
         self.backend.wait_idle("dropping a VulkanGpu");
         self.collect_garbage();
-        let backend = &*self.backend;
+        let (device, allocator) = (self.backend.get_device(), &mut self.allocator);
         for (_, buffer) in self.buffers.drain() {
-            buffer.allocation.destroy(backend);
+            buffer.allocation.destroy(device, allocator);
         }
         for (_, texture) in self.textures.drain() {
             if let Image::Owned(image) = texture.image {
-                image.destroy(backend);
+                image.destroy(device, allocator);
             }
         }
         for (_, Readback { staging, .. }) in self.readbacks.drain() {
-            staging.destroy(backend);
+            staging.destroy(device, allocator);
         }
         // SAFETY: taken here only, and never used after.
         unsafe {
-            ManuallyDrop::take(&mut self.placeholder_buffer).destroy(backend);
-            ManuallyDrop::take(&mut self.placeholder_image).destroy(backend);
+            ManuallyDrop::take(&mut self.placeholder_buffer).destroy(device, allocator);
+            ManuallyDrop::take(&mut self.placeholder_image).destroy(device, allocator);
         }
         for (_, garbage) in std::mem::take(&mut self.garbage) {
             self.destroy_now(garbage);

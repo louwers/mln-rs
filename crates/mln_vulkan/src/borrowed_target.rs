@@ -3,8 +3,6 @@
 // that the host waits on before it reads an image, and the host's syncs that
 // the target waits for before it draws into an image the host read.
 
-#[cfg(windows)]
-use std::rc::Rc;
 use std::time::Instant;
 
 use ash::vk;
@@ -137,57 +135,44 @@ enum Waiting {
     /// the file again, which a release of the image polls.
     #[cfg(unix)]
     Imported { semaphore: vk::Semaphore, file: std::os::fd::OwnedFd },
-    /// The host's D3D12 fence, imported, until it reaches the value.
+    /// A timeline semaphore of the target's own that holds the host's
+    /// D3D12 fence, imported, until it reaches the value.
     #[cfg(windows)]
-    Fence(Rc<ImportedFence>, u64),
+    Fence(vk::Semaphore, u64),
 }
 
-/// A timeline semaphore of the target's own that shares a D3D12 fence of the
-/// host's, which dropping destroys.
+/// The host's D3D12 fence whose NT handle is `handle`, imported into a new
+/// timeline semaphore, which the caller destroys. The handle stays the
+/// host's.
+///
+/// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when Vulkan can't
+/// import it.
 #[cfg(windows)]
-struct ImportedFence {
-    device: ash::Device,
-    semaphore: vk::Semaphore,
-}
-
-#[cfg(windows)]
-impl ImportedFence {
-    /// The fence whose NT handle is `handle`, imported into a new timeline.
-    /// The handle stays the host's.
-    ///
-    /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when Vulkan
-    /// can't import it.
-    fn import(device: &Device, handle: u64) -> Result<ImportedFence, Error> {
-        let loader = device
-            .shared
-            .semaphore_win32()
-            .ok_or_else(|| Error::native("the Vulkan device imports no D3D12 fences"))?;
-        let device = device.shared.device().clone();
-        let mut type_info = vk::SemaphoreTypeCreateInfo::default().semaphore_type(vk::SemaphoreType::TIMELINE);
-        let info = vk::SemaphoreCreateInfo::default().push_next(&mut type_info);
-        // SAFETY: the create info is valid for the device, which has
-        // timelines when it imports D3D12 fences.
-        let semaphore = unsafe { device.create_semaphore(&info, None) }
-            .map_err(|e| Error::native(format!("Failed to create a timeline semaphore: {e}")))?;
-        let fence = ImportedFence { device, semaphore };
-        let import = vk::ImportSemaphoreWin32HandleInfoKHR::default()
-            .semaphore(semaphore)
-            .handle_type(vk::ExternalSemaphoreHandleTypeFlags::D3D12_FENCE)
-            .handle(handle as vk::HANDLE);
-        // SAFETY: the semaphore is new, and an import of an NT handle leaves
-        // the handle to its owner.
-        unsafe { loader.import_semaphore_win32_handle(&import) }
-            .map_err(|e| Error::native(format!("Failed to import the host's D3D12 fence: {e}")))?;
-        Ok(fence)
-    }
-}
-
-#[cfg(windows)]
-impl Drop for ImportedFence {
-    fn drop(&mut self) {
-        // SAFETY: the last frame that waited on the semaphore is done: its
-        // target waited for the queue before it let go of its fences.
-        unsafe { self.device.destroy_semaphore(self.semaphore, None) };
+fn import_fence(device: &Device, handle: u64) -> Result<vk::Semaphore, Error> {
+    let loader = device
+        .shared
+        .semaphore_win32()
+        .ok_or_else(|| Error::native("the Vulkan device imports no D3D12 fences"))?;
+    let vk_device = device.shared.device();
+    let mut type_info = vk::SemaphoreTypeCreateInfo::default().semaphore_type(vk::SemaphoreType::TIMELINE);
+    let info = vk::SemaphoreCreateInfo::default().push_next(&mut type_info);
+    // SAFETY: the create info is valid for the device, which has timelines
+    // when it imports D3D12 fences.
+    let semaphore = unsafe { vk_device.create_semaphore(&info, None) }
+        .map_err(|e| Error::native(format!("Failed to create a timeline semaphore: {e}")))?;
+    let import = vk::ImportSemaphoreWin32HandleInfoKHR::default()
+        .semaphore(semaphore)
+        .handle_type(vk::ExternalSemaphoreHandleTypeFlags::D3D12_FENCE)
+        .handle(handle as vk::HANDLE);
+    // SAFETY: the semaphore is new, and an import of an NT handle leaves the
+    // handle to its owner.
+    match unsafe { loader.import_semaphore_win32_handle(&import) } {
+        Ok(()) => Ok(semaphore),
+        Err(error) => {
+            // SAFETY: nothing uses the semaphore.
+            unsafe { vk_device.destroy_semaphore(semaphore, None) };
+            Err(Error::native(format!("Failed to import the host's D3D12 fence: {error}")))
+        }
     }
 }
 
@@ -200,8 +185,8 @@ pub type BorrowedTarget = ring::BorrowedTarget<VulkanRing>;
 pub type PendingReads = ring::PendingReads<VulkanRing>;
 
 /// A [`BorrowedTarget`]'s part on Vulkan: the semaphores that its frames
-/// signal, and the host's D3D12 fences that it imported. Dropping it
-/// destroys them, once the target waited for its frames.
+/// signal. Dropping it destroys them, once the target waited for its
+/// frames.
 pub struct VulkanRing {
     device: Device,
     producer: SyncKind,
@@ -215,9 +200,6 @@ pub struct VulkanRing {
     /// fence producer.
     #[cfg(windows)]
     shared_fence: Option<std::os::windows::io::OwnedHandle>,
-    /// The host's D3D12 fences that releases named, by their handles.
-    #[cfg(windows)]
-    imported_fences: Vec<(u64, Rc<ImportedFence>)>,
 }
 
 impl VulkanRing {
@@ -277,17 +259,6 @@ impl VulkanRing {
             }
         }
         Ok(())
-    }
-
-    /// The host's D3D12 fence whose NT handle is `handle`, imported once.
-    #[cfg(windows)]
-    fn imported_fence(&mut self, handle: u64) -> Result<Rc<ImportedFence>, Error> {
-        if let Some((_, fence)) = self.imported_fences.iter().find(|(known, _)| *known == handle) {
-            return Ok(Rc::clone(fence));
-        }
-        let fence = Rc::new(ImportedFence::import(&self.device, handle)?);
-        self.imported_fences.push((handle, Rc::clone(&fence)));
-        Ok(fence)
     }
 
     /// Imports the host's sync file `fd` into a semaphore of the target's
@@ -407,8 +378,6 @@ impl RingBackend for VulkanRing {
             export_semaphore: vk::Semaphore::null(),
             #[cfg(windows)]
             shared_fence: None,
-            #[cfg(windows)]
-            imported_fences: Vec::new(),
         };
         ring.create_sync()?;
         Ok(ring)
@@ -495,7 +464,7 @@ impl RingBackend for VulkanRing {
             }
             #[cfg(windows)]
             SyncKind::D3d12Fence => {
-                Ok(Some(ConsumerWait(Waiting::Fence(self.imported_fence(consumer.handle)?, consumer.value))))
+                Ok(Some(ConsumerWait(Waiting::Fence(import_fence(&self.device, consumer.handle)?, consumer.value))))
             }
             kind => Err(Error::unsupported(format!("the Vulkan target waits for no {kind:?}"))),
         }
@@ -508,7 +477,7 @@ impl RingBackend for VulkanRing {
             #[cfg(unix)]
             Waiting::Imported { semaphore, .. } => gpu.wait_before_using(texture, *semaphore, None, stages),
             #[cfg(windows)]
-            Waiting::Fence(fence, value) => gpu.wait_before_using(texture, fence.semaphore, Some(*value), stages),
+            Waiting::Fence(semaphore, value) => gpu.wait_before_using(texture, *semaphore, Some(*value), stages),
         }
     }
 
@@ -520,18 +489,21 @@ impl RingBackend for VulkanRing {
         gpu.forget_waits(texture);
     }
 
-    /// A timeline is the host's, and the ring keeps a fence until the target
-    /// waits for the queue; a semaphore of the ring's own goes once the
-    /// submit is done.
+    /// A timeline is the host's; a semaphore of the ring's own goes once
+    /// the submit is done.
     fn waited(gpu: &mut VulkanGpu, wait: ConsumerWait) {
-        #[cfg(unix)]
-        if let Waiting::Imported { semaphore, file } = wait.0 {
-            drop(file);
-            // SAFETY: destroyed once the frame that waits on it is done.
-            gpu.destroy_later(move |device| unsafe { device.destroy_semaphore(semaphore, None) });
-        }
-        #[cfg(not(unix))]
-        let _ = (gpu, wait);
+        let semaphore = match wait.0 {
+            Waiting::Timeline(..) => return,
+            #[cfg(unix)]
+            Waiting::Imported { semaphore, file } => {
+                drop(file);
+                semaphore
+            }
+            #[cfg(windows)]
+            Waiting::Fence(semaphore, _) => semaphore,
+        };
+        // SAFETY: destroyed once the frame that waits on it is done.
+        gpu.destroy_later(move |device| unsafe { device.destroy_semaphore(semaphore, None) });
     }
 
     fn signal_after_next_submit(&mut self, gpu: &mut VulkanGpu) {
@@ -584,7 +556,7 @@ impl RingBackend for VulkanRing {
             #[cfg(unix)]
             Waiting::Imported { file, .. } => poll_until(file, now),
             #[cfg(windows)]
-            Waiting::Fence(fence, value) => wait_timeline(device, fence.semaphore, *value, now),
+            Waiting::Fence(semaphore, value) => wait_timeline(device, *semaphore, *value, now),
         }
     }
 
@@ -595,21 +567,24 @@ impl RingBackend for VulkanRing {
 
 /// Lets go of `wait`, destroying a semaphore of the target's that no frame
 /// waits on.
-#[cfg_attr(not(unix), expect(unused_variables, clippy::needless_pass_by_value, reason = "sync files are Unix's"))]
+#[cfg_attr(
+    not(unix),
+    expect(clippy::needless_pass_by_value, reason = "a wait is let go of once: the call takes it")
+)]
 fn drop_wait(device: &Device, wait: ConsumerWait) {
-    match wait.0 {
-        Waiting::Timeline(..) => {}
+    let semaphore = match wait.0 {
+        Waiting::Timeline(..) => return,
         #[cfg(unix)]
         Waiting::Imported { semaphore, file } => {
             drop(file);
-            // SAFETY: no submitted frame waits on the semaphore, which the
-            // target made.
-            unsafe { device.shared.device().destroy_semaphore(semaphore, None) };
+            semaphore
         }
-        // The last reference destroys the fence's semaphore.
         #[cfg(windows)]
-        Waiting::Fence(..) => {}
-    }
+        Waiting::Fence(semaphore, _) => semaphore,
+    };
+    // SAFETY: no submitted frame waits on the semaphore, which the target
+    // made.
+    unsafe { device.shared.device().destroy_semaphore(semaphore, None) };
 }
 
 /// Waits until `deadline` for the host's `semaphore` to reach `value`, and

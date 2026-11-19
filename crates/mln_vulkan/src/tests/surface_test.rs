@@ -55,11 +55,11 @@ use crate::{Device, RendererBackend, SurfaceTarget, VulkanGpu};
 const EXTENT: i16 = 8192;
 
 /// A surface that no window system shows. It counts the surfaces it was
-/// asked for, and makes none while `fail` is set.
-#[derive(Default)]
+/// asked for, and makes none while `fail` is set, which its clones share.
+#[derive(Clone, Default)]
 struct HeadlessSurface {
-    made: Cell<u32>,
-    fail: Cell<bool>,
+    made: Rc<Cell<u32>>,
+    fail: Rc<Cell<bool>>,
 }
 
 impl SurfaceProvider for HeadlessSurface {
@@ -152,7 +152,7 @@ impl Drop for Window {
 
 /// A backend and a target on a headless surface that `provider` makes, or
 /// `None` where there can't be one, which fails the test on CI.
-fn surface_backend_on(provider: Rc<HeadlessSurface>, size: Size, cap_frame_rate: bool) -> Option<Window> {
+fn surface_backend_on(provider: HeadlessSurface, size: Size, cap_frame_rate: bool) -> Option<Window> {
     if let Some(reason) = unavailable() {
         assert!(std::env::var_os("CI").is_none(), "the swapchain tests can't run on CI: {reason}");
         eprintln!("skipping the swapchain test: {reason}");
@@ -160,13 +160,13 @@ fn surface_backend_on(provider: Rc<HeadlessSurface>, size: Size, cap_frame_rate:
     }
     let device = Device::new(None).expect("Vulkan device");
     let (backend, target) =
-        SurfaceTarget::with_backend_from_provider(&device, provider, size, cap_frame_rate).expect("Vulkan backend");
+        SurfaceTarget::with_backend_from_provider(&device, Box::new(provider), size, cap_frame_rate).expect("Vulkan backend");
     eprintln!("rendering with {}", backend.get_device_name());
     Some(Window { backend, target })
 }
 
 fn surface_backend(size: Size, cap_frame_rate: bool) -> Option<Window> {
-    surface_backend_on(Rc::default(), size, cap_frame_rate)
+    surface_backend_on(HeadlessSurface::default(), size, cap_frame_rate)
 }
 
 /// Column-major matrix mapping the tile to the left or the right half of
@@ -752,9 +752,9 @@ fn a_new_target_on_the_backend_presents() {
     // What a session does with a surface the host gives it in place of
     // another: the old target's swapchain and surface go, the backend and
     // what the renderer made on it stay, and the new target presents.
-    let provider = Rc::new(HeadlessSurface::default());
+    let provider = HeadlessSurface::default();
     let size = Size::new(48, 32);
-    let Some(mut window) = surface_backend_on(Rc::clone(&provider), size, true) else {
+    let Some(mut window) = surface_backend_on(provider.clone(), size, true) else {
         return;
     };
     let scene = Scene::new(&mut window);
@@ -765,7 +765,7 @@ fn a_new_target_on_the_backend_presents() {
     // Replaced with a frame in flight: the scene and its uniforms are as
     // they were.
     render_frame(&mut window, Some(&scene), set(red), clear, false);
-    let target = SurfaceTarget::from_provider(&mut window.backend, Rc::<HeadlessSurface>::clone(&provider), size, true)
+    let target = SurfaceTarget::from_provider(&mut window.backend, Box::new(provider.clone()), size, true)
         .expect("target");
     window.set_target(target);
     assert_eq!(provider.made.get(), 2);
@@ -774,7 +774,7 @@ fn a_new_target_on_the_backend_presents() {
 
     // At another size.
     let size = Size::new(80, 24);
-    let target = SurfaceTarget::from_provider(&mut window.backend, Rc::<HeadlessSurface>::clone(&provider), size, true)
+    let target = SurfaceTarget::from_provider(&mut window.backend, Box::new(provider.clone()), size, true)
         .expect("target");
     window.set_target(target);
     let image = render_frame(&mut window, Some(&scene), set(green), clear, true).unwrap();
@@ -783,7 +783,7 @@ fn a_new_target_on_the_backend_presents() {
     // A surface that can't be made leaves the target the window has.
     provider.fail.set(true);
     assert!(
-        SurfaceTarget::from_provider(&mut window.backend, Rc::<HeadlessSurface>::clone(&provider), size, true).is_err()
+        SurfaceTarget::from_provider(&mut window.backend, Box::new(provider.clone()), size, true).is_err()
     );
     provider.fail.set(false);
     let image = render_frame(&mut window, Some(&scene), set(red), clear, true).unwrap();

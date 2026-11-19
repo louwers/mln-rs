@@ -175,7 +175,7 @@ pub(crate) fn build_descriptor_set_layout(
     // SAFETY: the create info is valid for the device.
     let layout = unsafe { backend.get_device().create_descriptor_set_layout(&create_info, None) }
         .map_err(|e| format!("Failed to create a descriptor set layout: {e}"))?;
-    backend.set_debug_name(layout, &format!("{type_:?}DescriptorSetLayout"));
+    backend.device().set_debug_name(layout, &format!("{type_:?}DescriptorSetLayout"));
     Ok(layout)
 }
 
@@ -195,6 +195,6 @@ pub(crate) fn build_pipeline_layout(
     // bytes every device has.
     let layout = unsafe { backend.get_device().create_pipeline_layout(&create_info, None) }
         .map_err(|e| format!("Failed to create a pipeline layout: {e}"))?;
-    backend.set_debug_name(layout, name);
+    backend.device().set_debug_name(layout, name);
     Ok(layout)
 }

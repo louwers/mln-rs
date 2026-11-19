@@ -16,8 +16,6 @@
 //   its own, after the frame's passes and before the frame is read back and
 //   presented.
 
-use std::rc::Rc;
-
 use ash::vk;
 use mln_gfx::frame::FrameImage;
 use mln_gfx::gpu::{
@@ -29,7 +27,8 @@ use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use crate::gpu::{ImportedImage, VulkanGpu};
-use crate::renderer_backend::{BackendImpl, SurfaceProvider};
+use crate::device::Device;
+use crate::renderer_backend::SurfaceProvider;
 use crate::surface_target::{Overlay, OverlayTarget};
 
 const MAXIMUM_SURFACE_UPDATE_RETRIES: u8 = 3;
@@ -37,15 +36,15 @@ const MAXIMUM_SURFACE_UPDATE_RETRIES: u8 = 3;
 /// The format of the depth and stencil attachment.
 const DEPTH_STENCIL: TextureFormat = TextureFormat::Depth24PlusStencil8;
 
-/// The extent that `surface`, a surface of `backend`'s instance,
+/// The extent that `surface`, a surface of `device`'s instance,
 /// has now, which is empty for a minimized window's. `None` when the
 /// swapchain sets the surface's extent, as on Wayland, or the surface can't
 /// say, such as once it is lost.
-pub(crate) fn surface_extent(backend: &BackendImpl, surface: vk::SurfaceKHR) -> Option<vk::Extent2D> {
-    let loader = backend.get_surface_loader()?;
+pub(crate) fn surface_extent(device: &Device, surface: vk::SurfaceKHR) -> Option<vk::Extent2D> {
+    let loader = device.shared.surface()?;
     // SAFETY: the surface is the instance's.
     let capabilities =
-        unsafe { loader.get_physical_device_surface_capabilities(backend.get_physical_device(), surface) }.ok()?;
+        unsafe { loader.get_physical_device_surface_capabilities(device.shared.physical_device(), surface) }.ok()?;
     let extent = capabilities.current_extent;
     (extent.width != u32::MAX || extent.height != u32::MAX).then_some(extent)
 }
@@ -95,8 +94,11 @@ struct SurfaceState {
 /// images and a depth and stencil attachment, all textures of the backend's
 /// `Gpu`, which each call that reaches them takes.
 pub(crate) struct SurfaceResource {
-    backend: Rc<BackendImpl>,
-    provider: Option<Rc<dyn SurfaceProvider>>,
+    device: Device,
+    /// The backend's frames in flight, each of which acquires an image with
+    /// a semaphore of its own.
+    max_frames: u32,
+    provider: Option<Box<dyn SurfaceProvider>>,
     /// Whether the resource destroys its surface: one that `provider` made,
     /// and not a host's.
     owns_surface: bool,
@@ -121,11 +123,13 @@ impl SurfaceResource {
         gpu: &mut VulkanGpu,
         size: Size,
         surface: vk::SurfaceKHR,
-        provider: Option<Rc<dyn SurfaceProvider>>,
+        provider: Option<Box<dyn SurfaceProvider>>,
         present_mode: vk::PresentModeKHR,
     ) -> Self {
+        let backend = gpu.backend_impl();
         let mut resource = SurfaceResource {
-            backend: Rc::clone(gpu.backend_impl()),
+            device: backend.device().clone(),
+            max_frames: backend.get_max_frames(),
             owns_surface: provider.is_some(),
             provider,
             state: SurfaceState {
@@ -153,10 +157,6 @@ impl SurfaceResource {
         resource
     }
 
-    fn backend(&self) -> &BackendImpl {
-        &self.backend
-    }
-
     /// The extent of the resource's surface now, or `None` when
     /// it has no surface or its surface doesn't say ([`surface_extent`]).
     pub(crate) fn current_extent(&self) -> Option<vk::Extent2D> {
@@ -164,7 +164,7 @@ impl SurfaceResource {
         if surface == vk::SurfaceKHR::null() {
             return None;
         }
-        surface_extent(self.backend(), surface)
+        surface_extent(&self.device, surface)
     }
 
     /// Whether the resource presents to a surface: a lost one that couldn't
@@ -186,14 +186,14 @@ impl SurfaceResource {
     }
 
     fn init_swapchain(
-        backend: &BackendImpl,
+        device: &Device,
         state: &mut SurfaceState,
         w: u32,
         h: u32,
     ) -> Result<Vec<vk::Image>, String> {
-        let physical_device = backend.get_physical_device();
-        let surface_loader = backend.get_surface_loader().ok_or("The instance has no surfaces")?;
-        let swapchain_loader = backend.get_swapchain_loader().ok_or("The device has no swapchains")?;
+        let physical_device = device.shared.physical_device();
+        let surface_loader = device.shared.surface().ok_or("The instance has no surfaces")?;
+        let swapchain_loader = device.shared.swapchain().ok_or("The device has no swapchains")?;
         let surface = state.surface;
 
         // SAFETY: the surface is the instance's, and the device can present
@@ -296,7 +296,7 @@ impl SurfaceResource {
     /// Makes the swapchain, its images and their textures in `gpu`, the
     /// depth and stencil attachment, and the semaphores.
     fn init(&mut self, gpu: &mut VulkanGpu, w: u32, h: u32) -> bool {
-        match Self::init_swapchain(&self.backend, &mut self.state, w, h)
+        match Self::init_swapchain(&self.device, &mut self.state, w, h)
             .and_then(|images| self.init_images(gpu, &images))
         {
             Ok(()) => true,
@@ -309,9 +309,8 @@ impl SurfaceResource {
     }
 
     fn init_images(&mut self, gpu: &mut VulkanGpu, images: &[vk::Image]) -> Result<(), String> {
-        let backend = &*self.backend;
         let state = &mut self.state;
-        let device = backend.get_device();
+        let device = self.device.shared.device();
         let size = Size::new(state.extent.width, state.extent.height);
         for (index, &image) in images.iter().enumerate() {
             let create_info = vk::ImageViewCreateInfo::default()
@@ -328,8 +327,8 @@ impl SurfaceResource {
             // SAFETY: the image is live and of the color format.
             let view = unsafe { device.create_image_view(&create_info, None) }
                 .map_err(|e| format!("Vulkan color view creation failed: {e}"))?;
-            backend.set_debug_name(image, &format!("SwapchainImage_{index}"));
-            backend.set_debug_name(view, &format!("SwapchainImageView_{index}"));
+            self.device.set_debug_name(image, &format!("SwapchainImage_{index}"));
+            self.device.set_debug_name(view, &format!("SwapchainImageView_{index}"));
             let imported = gpu.import_image(&ImportedImage {
                 image,
                 view,
@@ -351,16 +350,16 @@ impl SurfaceResource {
             // SAFETY: the create info is valid for the device.
             let semaphore = unsafe { device.create_semaphore(&vk::SemaphoreCreateInfo::default(), None) }
                 .map_err(|e| format!("Failed to create a semaphore: {e}"))?;
-            backend.set_debug_name(semaphore, &format!("PresentSemaphore_{index}"));
+            self.device.set_debug_name(semaphore, &format!("PresentSemaphore_{index}"));
             if let Some(image) = state.images.last_mut() {
                 image.present_semaphore = semaphore;
             }
         }
-        for index in 0..backend.get_max_frames() {
+        for index in 0..self.max_frames {
             // SAFETY: the create info is valid for the device.
             let semaphore = unsafe { device.create_semaphore(&vk::SemaphoreCreateInfo::default(), None) }
                 .map_err(|e| format!("Failed to create a semaphore: {e}"))?;
-            backend.set_debug_name(semaphore, &format!("AcquireSemaphore_{index}"));
+            self.device.set_debug_name(semaphore, &format!("AcquireSemaphore_{index}"));
             state.acquire_semaphores.push((semaphore, 0));
         }
         let depth_stencil = gpu
@@ -379,7 +378,7 @@ impl SurfaceResource {
     /// textures in `gpu`, or, without it, only the native objects, which
     /// leaves the textures to the `Gpu`. The device is idle.
     fn destroy_images(&mut self, mut gpu: Option<&mut VulkanGpu>) {
-        let device = self.backend.get_device();
+        let device = self.device.shared.device();
         let state = &mut self.state;
         let mut destroy = |resource| {
             if let Some(gpu) = gpu.as_deref_mut() {
@@ -413,19 +412,19 @@ impl SurfaceResource {
     /// Destroys the swapchain and the surface, whose images are gone
     /// (`destroy_images`).
     fn destroy_surface(&mut self) {
-        let backend = &*self.backend;
+        let shared = &self.device.shared;
         let state = &mut self.state;
         // SAFETY: the device is idle, and the swapchain and the surface are
         // this resource's.
         unsafe {
             if state.swapchain != vk::SwapchainKHR::null()
-                && let Some(loader) = backend.get_swapchain_loader()
+                && let Some(loader) = shared.swapchain()
             {
                 loader.destroy_swapchain(state.swapchain, None);
             }
             if state.surface != vk::SurfaceKHR::null()
                 && self.owns_surface
-                && let Some(loader) = backend.get_surface_loader()
+                && let Some(loader) = shared.surface()
             {
                 loader.destroy_surface(state.surface, None);
             }
@@ -442,7 +441,7 @@ impl SurfaceResource {
         if self.state.surface == vk::SurfaceKHR::null() && !recreate_surface {
             return true;
         }
-        self.backend.wait_idle("swapchain recreation");
+        self.device.wait_idle("swapchain recreation");
         self.destroy_images(Some(gpu));
 
         if recreate_surface {
@@ -450,7 +449,7 @@ impl SurfaceResource {
             let Some(provider) = &self.provider else {
                 return false;
             };
-            match provider.create_surface(self.backend.entry(), self.backend.get_instance()) {
+            match provider.create_surface(self.device.shared.entry(), self.device.shared.instance()) {
                 Ok(surface) => self.state.surface = surface,
                 Err(error) => {
                     Log::error(Event::Render, error.message);
@@ -471,7 +470,7 @@ impl SurfaceResource {
     /// Has the swapchain rebuilt, a few frames from now or, without
     /// `use_delay`, before the next one.
     pub(crate) fn request_surface_update(&mut self, use_delay: bool) {
-        let max_frames = self.backend.get_max_frames();
+        let max_frames = self.max_frames;
         let state = &mut self.state;
         if state.update_requested {
             if !use_delay {
@@ -563,8 +562,8 @@ impl SurfaceResource {
     /// Acquires an image with the next frame in flight's semaphore, making
     /// the swapchain again where it is out of date.
     fn acquire(&mut self, gpu: &mut VulkanGpu) -> Result<Acquired, String> {
-        let backend = Rc::clone(&self.backend);
-        let loader = backend.get_swapchain_loader().ok_or("the device has no swapchains")?;
+        let device = self.device.clone();
+        let loader = device.shared.swapchain().ok_or("the device has no swapchains")?;
         for _ in 0..MAXIMUM_SURFACE_UPDATE_RETRIES {
             let (swapchain, slot, semaphore, serial) = {
                 let state = &mut self.state;
@@ -619,13 +618,12 @@ impl SurfaceResource {
                 return;
             }
         };
-        let backend = &*self.backend;
-        let device = backend.get_device();
+        let device = self.device.shared.device();
         let begin_info = vk::RenderPassBeginInfo::default()
             .render_pass(render_pass)
             .framebuffer(framebuffer)
             .render_area(vk::Rect2D { offset: vk::Offset2D::default(), extent });
-        backend.begin_debug_label(command_buffer, "overlay", [0.0; 4]);
+        self.device.begin_debug_label(command_buffer, "overlay", [0.0; 4]);
         // SAFETY: the command buffer is recording outside a render pass, and
         // the framebuffer is the render pass's, over the acquired image in
         // the layout the frame's passes left it in.
@@ -639,7 +637,7 @@ impl SurfaceResource {
         });
         // SAFETY: the command buffer is in the overlay's render pass.
         unsafe { device.cmd_end_render_pass(command_buffer) };
-        backend.end_debug_label(command_buffer);
+        self.device.end_debug_label(command_buffer);
         gpu.take_waits_into_next_submit(texture);
         if let Err(error) = gpu.submit_recording(command_buffer) {
             Log::error(Event::Render, format!("Submitting the overlay failed: {error}"));
@@ -700,7 +698,7 @@ impl SurfaceResource {
             .image_indices(&image_indices);
         // The image was acquired from the swapchain, and the submit signals
         // the semaphore.
-        match self.backend.present(&present_info) {
+        match self.device.present(&present_info) {
             Ok(true) => self.request_surface_update(true),
             Ok(false) => {}
             Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => self.request_surface_update(false),
@@ -738,7 +736,7 @@ impl SurfaceResource {
     /// Destroys the overlay's objects and the resource's textures in `gpu`,
     /// and the swapchain and the surface, after the device's work.
     pub(crate) fn tear_down(&mut self, gpu: &mut VulkanGpu) {
-        self.backend.wait_idle("surface deletion");
+        self.device.wait_idle("surface deletion");
         if let Some(mut overlay) = self.overlay.take() {
             overlay.destroy(gpu);
         }
@@ -755,7 +753,7 @@ impl Drop for SurfaceResource {
         if self.torn_down {
             return;
         }
-        self.backend.wait_idle("surface deletion");
+        self.device.wait_idle("surface deletion");
         self.destroy_images(None);
         self.destroy_surface();
     }

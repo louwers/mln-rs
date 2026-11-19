@@ -18,7 +18,6 @@
 //   `set_overlay` draws over each frame before it is presented, such as an
 //   app's controls over the map.
 
-use std::rc::Rc;
 use std::sync::Arc;
 
 use ash::vk;
@@ -123,7 +122,7 @@ impl SurfaceTarget {
         framebuffer_size: Size,
         cap_frame_rate: bool,
     ) -> Result<(RendererBackend, SurfaceTarget), Error> {
-        let provider = Rc::new(WindowSurface::new(window)?);
+        let provider = Box::new(WindowSurface::new(window)?);
         Self::with_backend_from_provider(device, provider, framebuffer_size, cap_frame_rate)
     }
 
@@ -131,7 +130,7 @@ impl SurfaceTarget {
     /// makes, which may be of no window, such as `VK_EXT_headless_surface`'s.
     pub(crate) fn with_backend_from_provider(
         device: &Device,
-        provider: Rc<dyn SurfaceProvider>,
+        provider: Box<dyn SurfaceProvider>,
         framebuffer_size: Size,
         cap_frame_rate: bool,
     ) -> Result<(RendererBackend, SurfaceTarget), Error> {
@@ -155,14 +154,14 @@ impl SurfaceTarget {
         framebuffer_size: Size,
         cap_frame_rate: bool,
     ) -> Result<SurfaceTarget, Error> {
-        let provider = Rc::new(WindowSurface::new(window)?);
+        let provider = Box::new(WindowSurface::new(window)?);
         Self::from_provider(backend, provider, framebuffer_size, cap_frame_rate)
     }
 
     /// [`new`](Self::new) for the surfaces `provider` makes.
     pub(crate) fn from_provider(
         backend: &mut RendererBackend,
-        provider: Rc<dyn SurfaceProvider>,
+        provider: Box<dyn SurfaceProvider>,
         framebuffer_size: Size,
         cap_frame_rate: bool,
     ) -> Result<SurfaceTarget, Error> {
@@ -203,7 +202,7 @@ impl SurfaceTarget {
     fn on_surface(
         backend: &mut RendererBackend,
         surface: vk::SurfaceKHR,
-        provider: Option<Rc<dyn SurfaceProvider>>,
+        provider: Option<Box<dyn SurfaceProvider>>,
         framebuffer_size: Size,
         cap_frame_rate: bool,
     ) -> Result<SurfaceTarget, Error> {
@@ -229,7 +228,7 @@ impl SurfaceTarget {
             }
             return Err(Error::unsupported("The Vulkan device's queue can't present to the surface"));
         }
-        if crate::surface_resource::surface_extent(backend_impl, surface).is_some_and(is_empty) {
+        if crate::surface_resource::surface_extent(backend_impl.device(), surface).is_some_and(is_empty) {
             if provider.is_some() {
                 // SAFETY: nothing was made on the surface, which is the
                 // target's.

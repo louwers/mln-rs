@@ -1103,6 +1103,50 @@ impl Device {
         }
     }
 
+    /// Presents to the device's queue, which presents to the swapchains
+    /// that `info` names. `Ok(true)` when a swapchain is suboptimal.
+    pub(crate) fn present(&self, info: &vk::PresentInfoKHR<'_>) -> ash::prelude::VkResult<bool> {
+        let Some(loader) = self.shared.swapchain() else {
+            return Err(vk::Result::ERROR_EXTENSION_NOT_PRESENT);
+        };
+        // SAFETY: the caller's present info is valid for the device, and the
+        // queue is held for the call.
+        self.with_queue(|queue| unsafe { loader.queue_present(queue, info) })
+    }
+
+    /// Names an object for the validation layer's messages and for
+    /// debuggers.
+    pub(crate) fn set_debug_name<T: vk::Handle>(&self, object: T, name: &str) {
+        let Some(debug_utils) = self.shared.debug_utils() else {
+            return;
+        };
+        let Ok(name) = CString::new(name) else {
+            return;
+        };
+        let info = vk::DebugUtilsObjectNameInfoEXT::default().object_handle(object).object_name(&name);
+        // SAFETY: `object` is a live object of the device.
+        let _ = unsafe { debug_utils.set_debug_utils_object_name(&info) };
+    }
+
+    pub(crate) fn begin_debug_label(&self, buffer: vk::CommandBuffer, name: &str, color: [f32; 4]) {
+        let Some(debug_utils) = self.shared.debug_utils() else {
+            return;
+        };
+        let Ok(name) = CString::new(name) else {
+            return;
+        };
+        let label = vk::DebugUtilsLabelEXT::default().label_name(&name).color(color);
+        // SAFETY: `buffer` is a command buffer of the device, recording.
+        unsafe { debug_utils.cmd_begin_debug_utils_label(buffer, &label) };
+    }
+
+    pub(crate) fn end_debug_label(&self, buffer: vk::CommandBuffer) {
+        if let Some(debug_utils) = self.shared.debug_utils() {
+            // SAFETY: as in `begin_debug_label`, which opened the label.
+            unsafe { debug_utils.cmd_end_debug_utils_label(buffer) };
+        }
+    }
+
     /// The device's raw handles.
     #[must_use]
     pub fn raw(&self) -> RawDevice {
