@@ -1,6 +1,7 @@
 // The vertices and indices are `GeometryVec`s, which a worker fills and the
 // bucket's upload moves into the context's stores, which its draws read.
 
+use std::f64::consts::PI;
 use std::sync::Arc;
 
 use geometry::Point;
@@ -13,10 +14,13 @@ use mln_style::layers::FillExtrusion;
 use mln_style::layers::fill_extrusion_layer_properties::{FillExtrusionLayoutProperties, FillExtrusionPaintProperties};
 use mln_style_types::LightAnchorType;
 use mln_style_types::image::ImagePositions;
-use mln_tile::geometry_tile_data::{classify_rings, limit_holes, round_polygon_corners};
+use mln_tile::geometry_tile_data::{
+    classify_rings, is_boundary_edge, is_entirely_outside, limit_holes, round_polygon_corners,
+};
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinates, GeometryTileFeature};
 use mln_util::Color;
+use mln_util::constants::{EARTH_RADIUS_M, EXTENT, M2PI};
 use mln_util::error::Error;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecMap;
@@ -107,6 +111,14 @@ pub(crate) struct FillExtrusionBucket {
 
 static EMPTY_FORMATTED_SECTION: Value = Value::Null;
 
+/// The tile units in a meter at the center of `tile`, the scale that
+/// distances in meters on its features take.
+pub(crate) fn tile_units_per_meter(tile: &CanonicalTileID) -> f64 {
+    let tiles = 2f64.powi(i32::from(tile.z));
+    let latitude = (PI * (1.0 - 2.0 * (f64::from(tile.y) + 0.5) / tiles)).sinh().atan();
+    f64::from(EXTENT) * tiles / (latitude.cos() * M2PI * EARTH_RADIUS_M)
+}
+
 /// The distance from `a` to `b`, cast to `u16` through a wider integer,
 /// keeping the low bits.
 fn dist_u16(a: Point<f64>, b: Point<f64>) -> u16 {
@@ -164,17 +176,22 @@ impl FillExtrusionBucket {
     }
 
     /// Appends the outline of `polygon`: each vertex of a ring is a wall
-    /// instance up to the next one, the last vertex ends the ring.
-    fn add_outline<T: Copy + Into<f64>, R: AsRef<[Point<T>]>>(&mut self, polygon: &[R]) {
+    /// instance up to the next one, the last vertex ends the ring. Edges on
+    /// the lines the tile was clipped at have no walls, and neither do rings
+    /// in the tile's buffer, which the neighbouring tile draws.
+    fn add_outline<R: AsRef<[Point<i16>]>>(&mut self, polygon: &[R]) {
         let vertices = self.vertices.get_mut();
         for ring in polygon {
             let ring = ring.as_ref();
+            let outside = is_entirely_outside(ring);
             let mut edge_distance: usize = 0;
-            for (i, p) in ring.iter().enumerate() {
-                let p1 = Point::new(p.x.into(), p.y.into());
-                let p2 = ring.get(i + 1).map(|p| Point::new(p.x.into(), p.y.into()));
+            for (i, &p) in ring.iter().enumerate() {
+                let next = ring.get(i + 1).copied();
+                let is_discarded = outside || next.is_none_or(|next| is_boundary_edge(p, next));
+                let p1 = Point::new(f64::from(p.x), f64::from(p.y));
+                let p2 = next.map(|p| Point::new(f64::from(p.x), f64::from(p.y)));
 
-                vertices.push(Self::layout_vertex(p1, edge_distance as u16, p2.is_none()));
+                vertices.push(Self::layout_vertex(p1, edge_distance as u16, is_discarded));
 
                 if let Some(p2) = p2 {
                     let dist = usize::from(dist_u16(p1, p2));
@@ -189,11 +206,11 @@ impl FillExtrusionBucket {
     }
 
     /// Adds the walls and the roof of one polygon (its outer ring, then its
-    /// holes), with integer or, after corner rounding, float coordinates.
+    /// holes).
     /// The outline's vertices are the roof's, unless a subdivided `roof`
     /// (the globe's) is that mesh, with vertices of its own: the outline
     /// then stays out of the segments, as only its walls draw it.
-    fn add_polygon<T: Copy + Into<f64>, R: AsRef<[Point<T>]>>(
+    fn add_polygon<R: AsRef<[Point<i16>]>>(
         &mut self,
         polygon: &[R],
         roof: Option<&SubdivisionResult>,
@@ -298,14 +315,19 @@ impl Bucket for FillExtrusionBucket {
 
             let rounded_corner_distance = f64::from(*self.layout.fill_extrusion_rounded_corner_distance.uniform());
             if rounded_corner_distance > 0.0 {
-                self.add_polygon(&round_polygon_corners(&polygon, rounded_corner_distance), None)?;
+                polygon = round_polygon_corners(&polygon, rounded_corner_distance * tile_units_per_meter(canonical));
+            }
+
+            // The neighbouring tile draws a polygon that lies in this tile's
+            // buffer.
+            if polygon.first().is_none_or(|outer| is_entirely_outside(outer)) {
                 continue;
             }
 
             // On the globe the walls follow subdivided rings and the roof is a
             // subdivided mesh of its own, spread over as many segments as it
             // needs. Rings with more vertices than a polygon may have are
-            // extruded as on Mercator. Rounded corners are not subdivided.
+            // extruded as on Mercator.
             let granularity = self.subdivision_granularity.fill.granularity_for_zoom_level(canonical.z);
             if granularity >= 2 {
                 let subdivided_rings: Vec<GeometryCoordinates> =

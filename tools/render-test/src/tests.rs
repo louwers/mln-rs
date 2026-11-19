@@ -87,7 +87,7 @@ fn parses_our_manifest() {
 
     // Every render and query test is found.
     let test_paths = manifest.get_test_paths();
-    assert_eq!(test_paths.len(), 1548 + 152);
+    assert_eq!(test_paths.len(), 1552 + 152);
     let default = test_paths
         .iter()
         .find(|t| t.style_path.ends_with("/render-tests/background-color/default/style.json"))
@@ -241,6 +241,10 @@ fn parses_test_metadata() {
     assert_eq!(allowed.allowed, 0.00025);
     assert_eq!(allowed.threshold, 0.1285);
     assert_eq!(allowed.size, Size::new(512, 256));
+
+    let threshold =
+        parse_test_metadata(&style_paths("render-tests/fill-extrusion-rounded-corner-distance/smooth-shading"));
+    assert_eq!(threshold.threshold, 0.02);
 
     let skew = parse_test_metadata(&style_paths("render-tests/projection/skew"));
     assert!(skew.axonometric);

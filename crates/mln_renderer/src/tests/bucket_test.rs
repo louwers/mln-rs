@@ -31,7 +31,7 @@ use crate::bucket::Bucket;
 use crate::bucket_geometry::{BucketGeometry, GeometryUpload, bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::circle_bucket::CircleBucket;
 use crate::buckets::fill_bucket::FillBucket;
-use crate::buckets::fill_extrusion_bucket::FillExtrusionBucket;
+use crate::buckets::fill_extrusion_bucket::{FillExtrusionBucket, tile_units_per_meter};
 use crate::buckets::line_bucket::{LineBucket, LineLayoutVertex};
 use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
 use crate::buckets::symbol_bucket::SymbolBucket;
@@ -137,13 +137,13 @@ fn fill_bucket() {
     assert!(!bucket.needs_upload());
 }
 
-/// The vertices of a fill-extrusion bucket holding `polygon` extruded with
-/// `fill-extrusion-rounded-corner-distance` set to `distance`.
-fn fill_extrusion_vertex_count(polygon: &GeometryCollection, distance: f32) -> usize {
+/// The vertices of a fill-extrusion bucket of `tile` holding `polygon`
+/// extruded with `fill-extrusion-rounded-corner-distance` set to `meters`.
+fn fill_extrusion_vertex_count(polygon: &GeometryCollection, meters: f32, tile: CanonicalTileID) -> usize {
     let layout = FillExtrusionLayoutProperties::PossiblyEvaluated {
-        fill_extrusion_rounded_corner_distance: Evaluated::Constant(distance),
+        fill_extrusion_rounded_corner_distance: Evaluated::Constant(meters),
     };
-    let mut bucket = FillExtrusionBucket::new(layout, &VecMap::new(), 16.0, 1);
+    let mut bucket = FillExtrusionBucket::new(layout, &VecMap::new(), f32::from(tile.z), 1);
     bucket
         .add_feature(
             &feature(FeatureType::Polygon, polygon),
@@ -151,7 +151,7 @@ fn fill_extrusion_vertex_count(polygon: &GeometryCollection, distance: f32) -> u
             &ImagePositions::default(),
             &PatternLayerMap::default(),
             0,
-            &CanonicalTileID::new(0, 0, 0),
+            &tile,
         )
         .unwrap();
     assert!(bucket.has_data());
@@ -159,13 +159,48 @@ fn fill_extrusion_vertex_count(polygon: &GeometryCollection, distance: f32) -> u
 }
 
 #[test]
-fn fill_extrusion_bucket_rounds_corners() {
-    let square = collection(&[&[(0, 0), (100, 0), (100, 100), (0, 100), (0, 0)]]);
+fn fill_extrusion_bucket_rounds_corners_in_meters() {
+    let square = collection(&[&[(0, 0), (1000, 0), (1000, 1000), (0, 1000), (0, 0)]]);
+    let z16 = CanonicalTileID::new(16, 32768, 32768);
 
     // A ring of n points has n vertices, each the roof's and a wall's.
-    assert_eq!(fill_extrusion_vertex_count(&square, 0.0), 5);
-    // Rounding replaces each of the 4 corners with 5 points.
-    assert_eq!(fill_extrusion_vertex_count(&square, 10.0), 21);
+    assert_eq!(fill_extrusion_vertex_count(&square, 0.0, z16), 5);
+    // Rounding replaces each of the 4 corners with 4 points.
+    assert_eq!(fill_extrusion_vertex_count(&square, 2.0, z16), 17);
+    // At z0 a tile unit is about 5 km, and 2 m rounds to nothing.
+    assert_eq!(fill_extrusion_vertex_count(&square, 2.0, CanonicalTileID::new(0, 0, 0)), 5);
+}
+
+#[test]
+fn fill_extrusion_bucket_skips_polygons_rounded_off_the_tile() {
+    // Only the corner at (0, 100) is on the tile, and rounding cuts it off.
+    let triangle = collection(&[&[(0, 100), (-10, 90), (-10, 110), (0, 100)]]);
+    let layout = FillExtrusionLayoutProperties::PossiblyEvaluated {
+        fill_extrusion_rounded_corner_distance: Evaluated::Constant(100.0),
+    };
+    let mut bucket = FillExtrusionBucket::new(layout, &VecMap::new(), 16.0, 1);
+    bucket
+        .add_feature(
+            &feature(FeatureType::Polygon, &triangle),
+            &triangle,
+            &ImagePositions::default(),
+            &PatternLayerMap::default(),
+            0,
+            &CanonicalTileID::new(16, 32768, 32768),
+        )
+        .unwrap();
+    assert!(!bucket.has_data());
+}
+
+#[test]
+fn tile_units_per_meter_grows_with_zoom_and_latitude() {
+    // A z16 tile at the equator spans about 611 m.
+    let equator = tile_units_per_meter(&CanonicalTileID::new(16, 32768, 32768));
+    assert!((equator - 8192.0 / 611.5).abs() < 0.01, "{equator}");
+    assert!((tile_units_per_meter(&CanonicalTileID::new(17, 65536, 65536)) / equator - 2.0).abs() < 1e-3);
+    // Near 60° N a meter is twice as many units.
+    let north = tile_units_per_meter(&CanonicalTileID::new(16, 32768, 19031));
+    assert!((north / equator - 2.0).abs() < 0.01, "{north}");
 }
 
 /// A fill bucket whose "fill-color" is the given data-driven expression, with
