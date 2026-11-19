@@ -484,8 +484,8 @@ impl WebMap {
     /// A DOM `keydown`, by its `key`, each repeating while held: the arrows
     /// pan 100 px (Shift: turn 15° and tilt 10°), `+`/`=` and `-`/`_` zoom a
     /// level (Shift: two), and Escape drops a drag; the map ignores the
-    /// others and returns false.
-    pub fn key(&mut self, key: &str, modifiers: u32, time: f64) -> bool {
+    /// others and returns false. Repeats move half as far as the initial press.
+    pub fn key(&mut self, key: &str, modifiers: u32, repeat: bool, time: f64) -> bool {
         self.gesture(Input::Modes(key_modes(modifiers)), time);
         let shift = modifiers & SHIFT != 0;
         let levels = if shift { 2.0 } else { 1.0 };
@@ -504,8 +504,19 @@ impl WebMap {
             _ => return false,
         };
         let position = ScreenCoordinate::new(f64::from(self.size.width) / 2.0, f64::from(self.size.height) / 2.0);
-        let pan = ScreenCoordinate::new(pan.0, pan.1);
-        self.gesture(Input::Delta { position, discrete: true, pan, zoom, bearing, pitch }, time)
+        let factor = if repeat { 0.5 } else { 1.0 };
+        let pan = ScreenCoordinate::new(pan.0 * factor, pan.1 * factor);
+        self.gesture(
+            Input::Delta {
+                position,
+                discrete: true,
+                pan,
+                zoom: zoom * factor,
+                bearing: bearing * factor,
+                pitch: pitch * factor,
+            },
+            time,
+        )
     }
 
     /// A modifier key went down or up: `modifiers` are the bits held now.

@@ -535,7 +535,13 @@ canvas.addEventListener("keydown", (e) => {
   keyEvent(e);
   if (KEYS.has(e.key)) e.preventDefault();
   if (KEYS.has(e.key) || e.key === "Escape")
-    send({ kind: "key", key: e.key, modifiers: modifiers(e), time: time(e) });
+    send({
+      kind: "key",
+      key: e.key,
+      modifiers: modifiers(e),
+      repeat: e.repeat,
+      time: time(e),
+    });
 });
 canvas.addEventListener("keyup", keyEvent);
 canvas.addEventListener("blur", (e) => send({ kind: "blur", time: time(e) }));
@@ -640,11 +646,11 @@ window.addEventListener("hashchange", () => {
 // Zoom and the compass.
 element("zoom-in", HTMLButtonElement).addEventListener("click", (e) => {
   comparison?.lead();
-  send({ kind: "key", key: "+", modifiers: 0, time: time(e) });
+  send({ kind: "key", key: "+", modifiers: 0, repeat: false, time: time(e) });
 });
 element("zoom-out", HTMLButtonElement).addEventListener("click", (e) => {
   comparison?.lead();
-  send({ kind: "key", key: "-", modifiers: 0, time: time(e) });
+  send({ kind: "key", key: "-", modifiers: 0, repeat: false, time: time(e) });
 });
 element("compass", HTMLButtonElement).addEventListener("click", () => {
   comparison?.lead();
