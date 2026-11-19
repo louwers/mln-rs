@@ -10,6 +10,11 @@
 //! the base (0) or the top (1). The wall shaders run the same vertex stages
 //! with every input per vertex, for walls whose quads are in the vertex
 //! buffer.
+//!
+//! The pulled walls draw four vertices a wall without vertex attributes. A
+//! vertex's index picks its wall and its corner of the quad, and the wall's
+//! outline vertex, the next one and its paint values come from the buffers
+//! that hold them for the roofs, bound as storage buffers.
 
 use super::shader_source::WgslShaderSource;
 use super::wgsl_sources;
@@ -34,7 +39,7 @@ struct FillExtrusionDrawableUBO {
     color_t: f32,
     pattern_from_t: f32,
     pattern_to_t: f32,
-    pad1: f32,
+    paint_layout: u32,
 };
 
 struct FillExtrusionPropsUBO {
@@ -384,6 +389,118 @@ struct VertexInput {
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     let drawable = drawableVector[globalIndex.value];
+"#,
+        base_and_height!(),
+        wall!(),
+        r#"
+#ifdef OVERDRAW_INSPECTOR
+    out.color = vec4<f32>(1.0, 1.0, 1.0, 1.0);
+    return out;
+#endif
+
+#ifndef HAS_UNIFORM_u_color
+    let color = unpack_mix_color(in.color, drawable.color_t);
+#else
+    let color = props.color;
+#endif
+    out.color = lit_color(color, normal, t, baseValue, heightValue);
+    return out;
+}
+"#
+    )),
+    fragment: wgsl_sources::FILL_EXTRUSION_SHADER.fragment,
+    prelude: None,
+};
+
+/// The paint values' buffer of the pulled walls, where a paint property is
+/// data-driven.
+macro_rules! wall_paint {
+    () => {
+        r#"
+#ifndef HAS_UNIFORM_u_color
+@group(0) @binding(8) var<storage, read> wallPaint: array<f32>;
+#else
+#ifndef HAS_UNIFORM_u_base
+@group(0) @binding(8) var<storage, read> wallPaint: array<f32>;
+#else
+#ifndef HAS_UNIFORM_u_height
+@group(0) @binding(8) var<storage, read> wallPaint: array<f32>;
+#endif
+#endif
+#endif
+"#
+    };
+}
+
+/// The pulled fill extrusion walls.
+pub(crate) const FILL_EXTRUSION_PULLED_SHADER: WgslShaderSource = WgslShaderSource {
+    built_in: "FillExtrusionPulledShader",
+    name: "FillExtrusionPulledShader",
+    vertex: Some(concat!(
+        r#"
+// What the instanced walls read as attributes.
+struct VertexInput {
+    position: vec2<i32>,
+    outline_pos: vec2<i32>,
+    decimals_ed: vec2<u32>,
+    next_outline_pos: vec2<i32>,
+    next_decimals_ed: vec2<u32>,
+#ifndef HAS_UNIFORM_u_color
+    color: vec4<f32>,
+#endif
+#ifndef HAS_UNIFORM_u_base
+    base: vec2<f32>,
+#endif
+#ifndef HAS_UNIFORM_u_height
+    height: vec2<f32>,
+#endif
+};
+"#,
+        plain_declarations!(),
+        r#"
+// The bucket's vertices, two words each: the position's x and y in the
+// halves of the first, `decimals_ed`'s in those of the second.
+@group(0) @binding(7) var<storage, read> wallVertices: array<u32>;
+"#,
+        wall_paint!(),
+        r#"
+@vertex
+fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
+    var out: VertexOutput;
+    let drawable = drawableVector[globalIndex.value];
+
+    // Four vertices a wall, in the order of the static quad's corners.
+    let wall = vertex_index / 4u;
+    let corner = vertex_index % 4u;
+    let vertex = 2u * wall;
+    let pos = wallVertices[vertex];
+    let decimals_ed = wallVertices[vertex + 1u];
+    let next_pos = wallVertices[vertex + 2u];
+    let next_decimals_ed = wallVertices[vertex + 3u];
+
+    var in: VertexInput;
+    in.position = vec2<i32>(i32(corner < 2u), i32(corner & 1u));
+    in.outline_pos = vec2<i32>(i32(pos << 16u) >> 16u, i32(pos) >> 16u);
+    in.decimals_ed = vec2<u32>(decimals_ed & 0xffffu, decimals_ed >> 16u);
+    in.next_outline_pos = vec2<i32>(i32(next_pos << 16u) >> 16u, i32(next_pos) >> 16u);
+    in.next_decimals_ed = vec2<u32>(next_decimals_ed & 0xffffu, next_decimals_ed >> 16u);
+
+    // The wall's paint values are its outline vertex's.
+    let paint_layout = drawable.paint_layout;
+    let paint = wall * (paint_layout & 0xffu);
+#ifndef HAS_UNIFORM_u_base
+    let base_at = paint + ((paint_layout >> 8u) & 0xffu);
+    in.base = vec2<f32>(wallPaint[base_at], wallPaint[base_at + 1u]);
+#endif
+#ifndef HAS_UNIFORM_u_height
+    let height_at = paint + ((paint_layout >> 16u) & 0xffu);
+    in.height = vec2<f32>(wallPaint[height_at], wallPaint[height_at + 1u]);
+#endif
+#ifndef HAS_UNIFORM_u_color
+    let color_at = paint + (paint_layout >> 24u);
+    in.color = vec4<f32>(wallPaint[color_at], wallPaint[color_at + 1u],
+                         wallPaint[color_at + 2u], wallPaint[color_at + 3u]);
+#endif
 "#,
         base_and_height!(),
         wall!(),

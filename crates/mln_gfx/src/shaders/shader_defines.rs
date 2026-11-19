@@ -121,6 +121,10 @@ pub const ID_FILL_EXTRUSION_TILE_PROPS_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT;
 pub(crate) const FILL_EXTRUSION_LAYER_SSBO_COUNT: usize = ID_FILL_EXTRUSION_TILE_PROPS_UBO + 1;
 pub const ID_FILL_EXTRUSION_PROPS_UBO: usize = FILL_EXTRUSION_LAYER_SSBO_COUNT; // packed
 pub const FILL_EXTRUSION_LAYER_UBO_COUNT: usize = ID_FILL_EXTRUSION_PROPS_UBO + 1;
+// The vertex buffers that `FillExtrusionPulledShader` reads as storage
+// buffers, whose ids follow the uniform buffers'.
+pub const ID_FILL_EXTRUSION_WALL_VERTICES: usize = MAX_UBO_COUNT_PER_SHADER;
+pub const ID_FILL_EXTRUSION_WALL_PAINT: usize = MAX_UBO_COUNT_PER_SHADER + 1;
 pub const ID_FILL_EXTRUSION_IMAGE_TEXTURE: usize = 0;
 pub const ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE: usize = 0;
 pub const ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE: usize = 1;

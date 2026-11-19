@@ -427,6 +427,7 @@ impl D3d12Gpu {
             clear_stencil_with_pass: true,
             cpu_rasterizer: device.is_software(),
             max_line_width: 1.0,
+            binds_vertex_buffers: false,
         };
         Ok(D3d12Gpu {
             compiler,
@@ -1142,7 +1143,13 @@ impl Gpu for D3d12Gpu {
             let (buffer, texture) = self.info();
             let sampler = |id| self.samplers.contains_key(id);
             let lookup = Lookup { buffer: &buffer, texture: &texture, sampler: &sampler };
-            validation::check_bindings(desc, &shader.reads, self.caps.buffer_offset_alignment, &lookup)?
+            validation::check_bindings(
+                desc,
+                &shader.reads,
+                self.caps.buffer_offset_alignment,
+                self.caps.binds_vertex_buffers,
+                &lookup,
+            )?
         };
         let missing = |what: &str, id: u32| {
             GpuError::Invalid(format!("{} reads {what} {id}, which no entry binds", shader.program.name))

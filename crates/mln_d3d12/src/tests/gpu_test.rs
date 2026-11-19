@@ -1,6 +1,7 @@
 use mln_gfx::gpu::conformance::{
     clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures, instanced_walls,
-    invalid_calls, readbacks, resources_in_use, topologies, transparent_replace, vertex_layouts, wall_quads,
+    invalid_calls, pulled_walls, readbacks, resources_in_use, topologies, transparent_replace, vertex_layouts,
+    wall_quads,
 };
 use mln_gfx::gpu::{Gpu as _, GpuError, ShaderKey};
 use mln_gfx::shaders::program_info::GLOBE_DEFINE;
@@ -65,6 +66,11 @@ fn instanced_walls_through_gpu() {
 #[test]
 fn wall_quads_through_gpu() {
     wall_quads(&mut gpu()).expect("the frame");
+}
+
+#[test]
+fn pulled_walls_through_gpu() {
+    pulled_walls(&mut gpu()).expect("the bindings");
 }
 
 #[test]

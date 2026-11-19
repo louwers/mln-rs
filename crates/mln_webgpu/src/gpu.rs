@@ -28,6 +28,11 @@ use crate::{CustomLayerEncoder, CustomLayerPass, Device};
 /// buffers in one kind of page, vertex and index buffers in another.
 const PAGE: u64 = 16 << 10;
 
+/// How a vertex buffer binds: to a draw's vertex buffer slots, and as a
+/// storage buffer that a shader reads by vertex index
+/// (`Caps::binds_vertex_buffers`).
+const VERTEX_USAGES: wgpu::BufferUsages = wgpu::BufferUsages::VERTEX.union(wgpu::BufferUsages::STORAGE);
+
 /// The alignment of a small uniform or storage buffer in its page: WebGPU's
 /// largest allowed `minUniformBufferOffsetAlignment`, so an offset any
 /// device binds.
@@ -163,6 +168,9 @@ pub struct WebGpu {
     /// The page that small vertex and index buffers are taken from, and how
     /// many of its bytes are taken.
     geometry_page: Option<(wgpu::Buffer, u64)>,
+    /// The alignment of the offset a storage buffer binds at, which a small
+    /// vertex buffer starts at in its page.
+    storage_alignment: u64,
     writes: Writes,
     textures: SlotMap<TextureId, Texture>,
     samplers: SlotMap<SamplerId, wgpu::Sampler>,
@@ -206,6 +214,7 @@ impl WebGpu {
             clear_stencil_with_pass: false,
             cpu_rasterizer: device.adapter_info().device_type == wgpu::DeviceType::Cpu,
             max_line_width: 1.0,
+            binds_vertex_buffers: true,
         };
         WebGpu {
             index_table: IndexTable::new(device.device()),
@@ -214,6 +223,7 @@ impl WebGpu {
             buffers: SlotMap::with_key(),
             uniform_page: None,
             geometry_page: None,
+            storage_alignment: u64::from(limits.min_storage_buffer_offset_alignment).max(wgpu::COPY_BUFFER_ALIGNMENT),
             writes: Writes::default(),
             textures: SlotMap::with_key(),
             samplers: SlotMap::with_key(),
@@ -383,23 +393,25 @@ impl WebGpu {
     /// zero filled: the page and their offset in it.
     fn allocate_uniform(&mut self, size: u64) -> Result<(wgpu::Buffer, u64), GpuError> {
         let mut page = self.uniform_page.take();
-        let allocated = allocate_in_page(&mut page, size.next_multiple_of(UNIFORM_ALIGNMENT), || {
-            self.create_uniform_buffer("uniform page", PAGE)
-        });
+        let allocated =
+            allocate_in_page(&mut page, size.next_multiple_of(UNIFORM_ALIGNMENT), UNIFORM_ALIGNMENT, || {
+                self.create_uniform_buffer("uniform page", PAGE)
+            });
         self.uniform_page = page;
         allocated
     }
 
     /// `size` bytes of a page that small vertex and index buffers share,
-    /// zero filled: the page and their offset in it.
-    fn allocate_geometry(&mut self, size: u64) -> Result<(wgpu::Buffer, u64), GpuError> {
+    /// zero filled: the page and their offset in it, a multiple of
+    /// `alignment`.
+    fn allocate_geometry(&mut self, size: u64, alignment: u64) -> Result<(wgpu::Buffer, u64), GpuError> {
         let mut page = self.geometry_page.take();
-        let allocated = allocate_in_page(&mut page, size, || {
+        let allocated = allocate_in_page(&mut page, size, alignment, || {
             self.validated("geometry page", |device| {
                 device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some("geometry page"),
                     size: PAGE,
-                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+                    usage: VERTEX_USAGES | wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
                 })
             })
@@ -429,21 +441,22 @@ impl WebGpu {
 }
 
 /// `size` bytes of `page`, or of a new page that `create` makes when it has
-/// too few left: the page and the offset in it.
+/// too few left: the page and the offset in it, a multiple of `alignment`.
 fn allocate_in_page(
     page: &mut Option<(wgpu::Buffer, u64)>,
     size: u64,
+    alignment: u64,
     create: impl FnOnce() -> Result<wgpu::Buffer, GpuError>,
 ) -> Result<(wgpu::Buffer, u64), GpuError> {
     let (buffer, taken) = match page {
-        Some((buffer, taken)) if *taken + size <= PAGE => (buffer, taken),
+        Some((buffer, taken)) if taken.next_multiple_of(alignment) + size <= PAGE => (buffer, taken),
         _ => {
             let (buffer, taken) = page.insert((create()?, 0));
             (buffer, taken)
         }
     };
-    let offset = *taken;
-    *taken += size;
+    let offset = taken.next_multiple_of(alignment);
+    *taken = offset + size;
     Ok((buffer.clone(), offset))
 }
 
@@ -549,11 +562,16 @@ impl Gpu for WebGpu {
         let size = desc.size.next_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT);
         let usage = match desc.usage {
             BufferUsage::Vertex | BufferUsage::Index if size <= PAGE / 4 => {
-                let (buffer, offset) = self.allocate_geometry(size)?;
+                // A vertex buffer starts where a storage buffer may bind.
+                let alignment = match desc.usage {
+                    BufferUsage::Vertex => self.storage_alignment,
+                    _ => wgpu::COPY_BUFFER_ALIGNMENT,
+                };
+                let (buffer, offset) = self.allocate_geometry(size, alignment)?;
                 let written = Some(0);
                 return Ok(self.buffers.insert(Buffer { buffer, usage: desc.usage, offset, size, written }));
             }
-            BufferUsage::Vertex => wgpu::BufferUsages::VERTEX,
+            BufferUsage::Vertex => VERTEX_USAGES,
             BufferUsage::Index => wgpu::BufferUsages::INDEX,
             BufferUsage::Uniform | BufferUsage::Storage => {
                 let (buffer, offset, written) = if size <= PAGE / 4 {
@@ -741,7 +759,13 @@ impl Gpu for WebGpu {
             let (buffer, texture) = self.info();
             let sampler = |id| self.samplers.contains_key(id);
             let lookup = Lookup { buffer: &buffer, texture: &texture, sampler: &sampler };
-            validation::check_bindings(desc, &shader.reads, self.caps.buffer_offset_alignment, &lookup)?
+            validation::check_bindings(
+                desc,
+                &shader.reads,
+                self.caps.buffer_offset_alignment,
+                self.caps.binds_vertex_buffers,
+                &lookup,
+            )?
         };
         let program = &shader.program;
         let mut groups = Vec::new();

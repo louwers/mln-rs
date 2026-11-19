@@ -10,7 +10,8 @@
 //! [`resources_in_use`] what destroying a resource that pipelines, bindings
 //! or geometry were made of does.
 //! [`instanced_walls`] draws fill extrusion walls over the left half, and
-//! [`wall_quads`] draws them again from quads of their own. The
+//! [`wall_quads`] draws them again from quads of their own, as
+//! [`pulled_walls`] does from a vertex buffer it reads by vertex index. The
 //! other cases draw one color over the whole target, as
 //! [`transparent_replace`] does to check that `Replace` doesn't blend. On
 //! wasm, [`host_writes`] checks writes from JS arrays.

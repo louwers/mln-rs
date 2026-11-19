@@ -445,6 +445,13 @@ static FILL_EXTRUSION_WALL_SHADER: ShaderSource = ShaderSource {
     instance_attributes: &[],
     textures: &[],
 };
+static FILL_EXTRUSION_PULLED_SHADER: ShaderSource = ShaderSource {
+    wgsl: &fill_extrusion_wgsl::FILL_EXTRUSION_PULLED_SHADER,
+    name: "FillExtrusionPulledShader",
+    attributes: &[],
+    instance_attributes: &[],
+    textures: &[],
+};
 static FILL_EXTRUSION_PATTERN_WALL_SHADER: ShaderSource = ShaderSource {
     wgsl: &fill_extrusion_wgsl::FILL_EXTRUSION_PATTERN_INSTANCED_SHADER,
     name: "FillExtrusionPatternWallShader",
@@ -580,6 +587,7 @@ pub(crate) fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource>
         BuiltIn::FillExtrusionShader => Some(&FILL_EXTRUSION_SHADER),
         BuiltIn::FillExtrusionInstancedShader => Some(&FILL_EXTRUSION_INSTANCED_SHADER),
         BuiltIn::FillExtrusionWallShader => Some(&FILL_EXTRUSION_WALL_SHADER),
+        BuiltIn::FillExtrusionPulledShader => Some(&FILL_EXTRUSION_PULLED_SHADER),
         BuiltIn::FillExtrusionPatternShader => Some(&FILL_EXTRUSION_PATTERN_SHADER),
         BuiltIn::FillExtrusionPatternInstancedShader => Some(&FILL_EXTRUSION_PATTERN_INSTANCED_SHADER),
         BuiltIn::FillExtrusionPatternWallShader => Some(&FILL_EXTRUSION_PATTERN_WALL_SHADER),

@@ -28,8 +28,8 @@ use crate::shaders::shader_defines::{
     ID_FILL_EVALUATED_PROPS_UBO, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_DRAWABLE_UBO,
     ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE,
     ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_PROPS_UBO,
-    ID_FILL_EXTRUSION_TILE_PROPS_UBO, ID_FILL_OPACITY_VERTEX_ATTRIBUTE, ID_FILL_POS_VERTEX_ATTRIBUTE,
-    ID_GLOBAL_PAINT_PARAMS_UBO, ID_HEATMAP_COLOR_RAMP_TEXTURE, ID_HEATMAP_IMAGE_TEXTURE,
+    ID_FILL_EXTRUSION_TILE_PROPS_UBO, ID_FILL_EXTRUSION_WALL_VERTICES, ID_FILL_OPACITY_VERTEX_ATTRIBUTE,
+    ID_FILL_POS_VERTEX_ATTRIBUTE, ID_GLOBAL_PAINT_PARAMS_UBO, ID_HEATMAP_COLOR_RAMP_TEXTURE, ID_HEATMAP_IMAGE_TEXTURE,
     ID_HEATMAP_POS_VERTEX_ATTRIBUTE, ID_HEATMAP_TEXTURE_PROPS_UBO, ID_PROJECTION_UBO,
 };
 use crate::shaders::shader_source::BuiltIn;
@@ -564,7 +564,8 @@ pub fn vertex_layouts(gpu: &mut impl Gpu) -> Result<(), GpuError> {
 /// the next one (1), y the base (0) or the top (1).
 const WALL_CORNERS: [[i16; 2]; 4] = [[0, 0], [1, 0], [0, 1], [1, 1]];
 
-/// The outline of the walls of `instanced_walls` and `wall_quads`. Each
+/// The outline of the walls of `instanced_walls`, `wall_quads` and
+/// `pulled_walls`. Each
 /// vertex is its position, then `decimals_ed`, whose x is odd where the
 /// vertex ends a ring.
 fn wall_outline() -> [[i16; 4]; 3] {
@@ -574,8 +575,13 @@ fn wall_outline() -> [[i16; 4]; 3] {
 
 /// A frame for the walls, and the shader of `program` with its bindings,
 /// which map tile x `0..EXTENT` to clip x `-1..1` and elevation `0..1` to
-/// clip y `-1..1`, and color the walls opaque red, lit evenly.
-fn wall_frame(gpu: &mut impl Gpu, program: BuiltIn) -> Result<(Solid, ShaderId, BindingsId), GpuError> {
+/// clip y `-1..1`, and color the walls opaque red, lit evenly. The bindings
+/// bind `more` too.
+fn wall_frame(
+    gpu: &mut impl Gpu,
+    program: BuiltIn,
+    more: &[BindGroupEntry],
+) -> Result<(Solid, ShaderId, BindingsId), GpuError> {
     let frame = solid(gpu, TextureFormat::Rgba8Unorm, [0.0, 0.0, 0.0, 0.0])?;
     let shader = gpu.create_shader(&ShaderKey::new(
         program,
@@ -602,16 +608,14 @@ fn wall_frame(gpu: &mut impl Gpu, program: BuiltIn) -> Result<(Solid, ShaderId, 
     let drawable_buffer = buffer(gpu, BufferUsage::Storage, drawable)?;
     let tile_props_buffer = buffer(gpu, BufferUsage::Storage, tile_props)?;
     let props_buffer = buffer(gpu, BufferUsage::Uniform, props)?;
-    let bindings = gpu.create_bindings(&BindingsDesc {
-        label: "fill extrusion layer",
-        shader,
-        entries: &[
-            whole(ID_PROJECTION_UBO, projection_buffer, projection),
-            whole(ID_FILL_EXTRUSION_DRAWABLE_UBO, drawable_buffer, drawable),
-            whole(ID_FILL_EXTRUSION_TILE_PROPS_UBO, tile_props_buffer, tile_props),
-            whole(ID_FILL_EXTRUSION_PROPS_UBO, props_buffer, props),
-        ],
-    })?;
+    let mut entries = vec![
+        whole(ID_PROJECTION_UBO, projection_buffer, projection),
+        whole(ID_FILL_EXTRUSION_DRAWABLE_UBO, drawable_buffer, drawable),
+        whole(ID_FILL_EXTRUSION_TILE_PROPS_UBO, tile_props_buffer, tile_props),
+        whole(ID_FILL_EXTRUSION_PROPS_UBO, props_buffer, props),
+    ];
+    entries.extend_from_slice(more);
+    let bindings = gpu.create_bindings(&BindingsDesc { label: "fill extrusion layer", shader, entries: &entries })?;
     Ok((frame, shader, bindings))
 }
 
@@ -650,7 +654,7 @@ pub fn instanced_walls(gpu: &mut impl Gpu) -> Result<(), GpuError> {
 
 /// The texels of the frame of `instanced_walls`.
 fn instanced_wall_texels(gpu: &mut impl Gpu) -> Result<Vec<u8>, GpuError> {
-    let (frame, shader, bindings) = wall_frame(gpu, BuiltIn::FillExtrusionInstancedShader)?;
+    let (frame, shader, bindings) = wall_frame(gpu, BuiltIn::FillExtrusionInstancedShader, &[])?;
     let corners = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&WALL_CORNERS))?;
     let outline = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&wall_outline()))?;
 
@@ -699,7 +703,7 @@ fn instanced_wall_texels(gpu: &mut impl Gpu) -> Result<Vec<u8>, GpuError> {
 ///
 /// Where a check doesn't hold.
 pub fn wall_quads(gpu: &mut impl Gpu) -> Result<(), GpuError> {
-    let (frame, shader, bindings) = wall_frame(gpu, BuiltIn::FillExtrusionWallShader)?;
+    let (frame, shader, bindings) = wall_frame(gpu, BuiltIn::FillExtrusionWallShader, &[])?;
     let mut quads: Vec<i16> = Vec::new();
     for vertex in wall_outline() {
         for corner in WALL_CORNERS {
@@ -737,6 +741,46 @@ pub fn wall_quads(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     let pixels = read(gpu, frame.target)?;
     check_walls(&pixels);
     assert!(pixels == instanced_wall_texels(gpu)?, "the wall quads draw other texels than the instanced walls");
+    Ok(())
+}
+
+/// Checks that the pulled fill extrusion shader draws the walls of
+/// [`instanced_walls`] into the texels that the instanced shader draws, from
+/// geometry without vertex buffers: a vertex reads the outline, a vertex
+/// buffer its bindings bind, by its index. A backend that binds no vertex
+/// buffers ([`Caps::binds_vertex_buffers`]) fails to make bindings of one
+/// instead. Returns the error of a call that should succeed.
+///
+/// # Panics
+///
+/// Where a check doesn't hold.
+///
+/// [`Caps::binds_vertex_buffers`]: crate::gpu::Caps::binds_vertex_buffers
+pub fn pulled_walls(gpu: &mut impl Gpu) -> Result<(), GpuError> {
+    let outline = wall_outline();
+    let outline: &[u8] = bytemuck::cast_slice(&outline);
+    let outline_buffer = buffer(gpu, BufferUsage::Vertex, outline)?;
+    let outline = whole(ID_FILL_EXTRUSION_WALL_VERTICES, outline_buffer, outline);
+    if !gpu.caps().binds_vertex_buffers {
+        let frame = solid(gpu, TextureFormat::Rgba8Unorm, [0.0; 4])?;
+        let entries = [frame.entries.as_slice(), &[outline]].concat();
+        let bound = gpu.create_bindings(&BindingsDesc { label: "test", shader: frame.shader, entries: &entries });
+        assert!(invalid(&bound), "bindings of a vertex buffer");
+        return Ok(());
+    }
+
+    let (frame, shader, bindings) = wall_frame(gpu, BuiltIn::FillExtrusionPulledShader, &[outline])?;
+    // The corners of a wall's quad are in the static quad's order.
+    let indices: [u16; 12] = [0, 2, 1, 1, 2, 3, 4, 6, 5, 5, 6, 7];
+    let indices = buffer(gpu, BufferUsage::Index, bytemuck::cast_slice(&indices))?;
+    let pipeline = gpu.create_pipeline(&PipelineDesc { shader, vertex_buffers: &[], ..background(shader, RGBA8) })?;
+    let geometry =
+        gpu.create_geometry(&GeometryDesc { shader, layouts: &[], vertex_buffers: &[], index_buffer: indices })?;
+    frame.frame(gpu, &[draw(pipeline, bindings, geometry, 12)])?;
+
+    let pixels = read(gpu, frame.target)?;
+    check_walls(&pixels);
+    assert!(pixels == instanced_wall_texels(gpu)?, "the pulled walls draw other texels than the instanced walls");
     Ok(())
 }
 

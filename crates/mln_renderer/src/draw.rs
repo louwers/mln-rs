@@ -5,6 +5,10 @@
 //! holds what it shares with other draws, its textures and the indexes and
 //! vertices of buckets and static geometry, through handles of the context's
 //! stores (`gfx::store`), which keep them while the draw lasts.
+//!
+//! A shader reads vertices as attributes, or, where the device binds vertex
+//! buffers (`Caps::binds_vertex_buffers`), as a storage buffer that it
+//! indexes itself (`DrawObjects::read_as_storage`).
 
 use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
@@ -29,6 +33,7 @@ use crate::gfx::store::SharedTexture;
 use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::gfx::upload::{self, AttributeBindingArray};
 use crate::gfx::vertex_attribute::VertexAttributeArray;
+use crate::gfx::vertices::SharedVertices;
 use crate::paint_parameters::{DrawTarget, PaintParameters};
 
 /// The textures a draw binds, by texture id.
@@ -71,17 +76,24 @@ pub(crate) fn raw_vertices(
     attributes
 }
 
+/// The most vertices a draw's shader reads as storage buffers.
+const MAX_STORAGE_VERTICES: usize = 2;
+
+/// The most entries bindings have.
+const MAX_ENTRIES: usize = MAX_UBO_COUNT_PER_SHADER + MAX_STORAGE_VERTICES + MAX_TEXTURE_COUNT_PER_SHADER;
+
 /// The entries of bindings, on the stack: at most a buffer at each uniform
-/// buffer id and a texture at each texture id.
+/// buffer id, one of each of the vertices read as storage buffers, and a
+/// texture at each texture id.
 pub(crate) struct Entries {
-    entries: [BindGroupEntry; MAX_UBO_COUNT_PER_SHADER + MAX_TEXTURE_COUNT_PER_SHADER],
+    entries: [BindGroupEntry; MAX_ENTRIES],
     len: usize,
 }
 
 impl Entries {
     pub(crate) fn new() -> Entries {
         let none = BindGroupEntry::Texture { id: 0, texture: TextureId::default(), sampler: SamplerId::default() };
-        Entries { entries: [none; MAX_UBO_COUNT_PER_SHADER + MAX_TEXTURE_COUNT_PER_SHADER], len: 0 }
+        Entries { entries: [none; MAX_ENTRIES], len: 0 }
     }
 
     pub(crate) fn push(&mut self, entry: BindGroupEntry) {
@@ -104,13 +116,15 @@ struct VertexSlot {
 }
 
 /// What a draw's bindings were made of: the epochs of the global uniform
-/// buffers, those of its frame's draws and its own, and the texture and
+/// buffers, those of its frame's draws and its own, how often the buffers
+/// of the vertices it reads as storage buffers changed, and the texture and
 /// sampler it bound at each texture id.
 #[derive(Clone, Copy, PartialEq)]
 struct BindingsStamp {
     global: u64,
     frame: u64,
     own: u64,
+    storage: u64,
     textures: [Option<(TextureId, SamplerId)>; MAX_TEXTURE_COUNT_PER_SHADER],
 }
 
@@ -144,6 +158,12 @@ pub(crate) struct DrawObjects {
     /// The draw's own uniform and storage buffers, by id, which win over
     /// its layer's and the frame's.
     uniform_buffers: UniformBufferArray,
+    /// The vertices the shader reads as storage buffers, each with the
+    /// buffer id it binds at, past the uniform buffers' ids, and its buffer
+    /// as of the last upload.
+    storage_vertices: Vec<(usize, SharedVertices, Option<BufferId>)>,
+    /// How often a buffer of `storage_vertices` changed.
+    storage_epoch: u64,
     color_mode: ColorMode,
     cull_face_mode: CullFaceMode,
 
@@ -191,6 +211,8 @@ impl DrawObjects {
             instance_attributes_changed: true,
             textures,
             uniform_buffers: UniformBufferArray::new(),
+            storage_vertices: Vec::new(),
+            storage_epoch: 0,
             color_mode,
             cull_face_mode,
             mode,
@@ -208,8 +230,8 @@ impl DrawObjects {
         }
     }
 
-    /// Uploads the indexes, vertex attributes and textures, where they
-    /// changed since the last upload.
+    /// Uploads the indexes, vertex attributes, vertices read as storage
+    /// buffers and textures, where they changed since the last upload.
     pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         if let Err(error) = self.upload_in(gpu, context) {
             Log::error(Event::Render, format!("Uploading a draw of {} failed: {error}", self.shader.name()));
@@ -269,6 +291,14 @@ impl DrawObjects {
 
         self.vertex_attributes_changed = false;
         self.instance_attributes_changed = false;
+
+        for (_, vertices, bound) in &mut self.storage_vertices {
+            let buffer = context.upload_vertices(gpu, vertices)?;
+            if *bound != buffer {
+                *bound = buffer;
+                self.storage_epoch += 1;
+            }
+        }
 
         for texture in self.textures.iter().flatten() {
             if let Err(error) = context.upload_texture(gpu, texture) {
@@ -428,8 +458,13 @@ impl DrawObjects {
             }
         }
         let global = context.global_uniform_buffers();
-        let stamp =
-            BindingsStamp { global: global.epoch(), frame: frame.epoch(), own: self.uniform_buffers.epoch(), textures };
+        let stamp = BindingsStamp {
+            global: global.epoch(),
+            frame: frame.epoch(),
+            own: self.uniform_buffers.epoch(),
+            storage: self.storage_epoch,
+            textures,
+        };
         if let Some((bindings, made)) = &self.bindings
             && *made == stamp
         {
@@ -450,17 +485,24 @@ impl DrawObjects {
                 });
             }
         }
+        let mut held = Vec::new();
+        for (id, vertices, buffer) in &self.storage_vertices {
+            let size = context.vertices(vertices).map_or(0, |stored| stored.count() * stored.vertex_size());
+            if let Some(buffer) = buffer.filter(|_| size > 0) {
+                entries.push(BindGroupEntry::Buffer { id: *id as u32, buffer, offset: 0, size: size as u64 });
+                held.push(vertices.held());
+            }
+        }
         for (id, binding) in textures.iter().enumerate() {
             if let Some((texture, sampler)) = *binding {
                 entries.push(BindGroupEntry::Texture { id: id as u32, texture, sampler });
             }
         }
-        let held = self
-            .shader
-            .textures()
-            .iter()
-            .filter_map(|&id| context.gpu_texture(self.textures.get(id)?.as_ref()?).cloned().map(Held::Texture))
-            .collect();
+        let textures = self.shader.textures().iter();
+        held.extend(
+            textures
+                .filter_map(|&id| context.gpu_texture(self.textures.get(id)?.as_ref()?).cloned().map(Held::Texture)),
+        );
         let bindings = gpu.create_bindings(&BindingsDesc {
             label: self.shader.name(),
             shader: shader_id,
@@ -509,6 +551,27 @@ impl DrawObjects {
             self.geometry = None;
         }
         attributes
+    }
+
+    /// Makes `vertices` what the shader reads as the storage buffer `id`,
+    /// an id past the uniform buffers', on a device that binds vertex
+    /// buffers; nothing with `None`. The next upload writes them, and the
+    /// draws after it bind their buffer.
+    pub(crate) fn read_as_storage(&mut self, id: usize, vertices: Option<SharedVertices>) {
+        debug_assert!(id >= MAX_UBO_COUNT_PER_SHADER, "a uniform buffer's id");
+        self.storage_vertices.retain(|(at, ..)| *at != id);
+        debug_assert!(vertices.is_none() || self.storage_vertices.len() < MAX_STORAGE_VERTICES);
+        if let Some(vertices) = vertices {
+            self.storage_vertices.push((id, vertices, None));
+        }
+        self.storage_epoch += 1;
+    }
+
+    /// The buffer the draws bind as the storage buffer `id`, of the
+    /// vertices read there as of the last upload.
+    #[cfg(test)]
+    pub(crate) fn storage_buffer(&self, id: usize) -> Option<BufferId> {
+        self.storage_vertices.iter().find(|(at, ..)| *at == id).and_then(|&(_, _, buffer)| buffer)
     }
 
     /// Whether the draw draws instances.

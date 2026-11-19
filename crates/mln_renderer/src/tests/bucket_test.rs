@@ -944,6 +944,89 @@ fn a_draw_writes_an_update_of_the_vertices_it_binds() {
     });
 }
 
+// A draw binds the buffer of the vertices it reads as a storage buffer as a
+// buffer of its own, which its uploads write the vertices' updates to.
+#[test]
+fn a_draw_binds_the_vertices_it_reads_as_a_storage_buffer() {
+    use mln_gfx::shaders::shader_defines::ID_FILL_EXTRUSION_WALL_VERTICES as ID;
+    use mln_gfx::{ColorMode, CullFaceMode, DrawMode};
+
+    use crate::draw::{DrawGeometry, DrawObjects};
+    use crate::gfx::shader_registry::ShaderRegistry;
+    use crate::gfx::vertex_attribute::VertexAttributeArray;
+
+    with_context(|gpu, context| {
+        let registry = ShaderRegistry::new(&mln_gfx::shaders::program_parameters::ProgramParameters::new(1.0, false));
+        let shader = registry
+            .shader("FillExtrusionPulledShader", mln_gfx::projection_variant::ProjectionVariant::Mercator)
+            .expect("the pulled wall shader");
+        let typed = context.add_dynamic_vertices(&[[0u32; 2], [1; 2]]);
+        let geometry = DrawGeometry {
+            vertices: VertexAttributeArray::new(),
+            vertex_count: 4,
+            mode: DrawMode::Triangles(),
+            indexes: DrawIndexes::new(vec![0, 2, 1, 1, 2, 3]),
+            segments: vec![SegmentBase::new(0, 0)],
+            instances: None,
+        };
+        let mut objects = DrawObjects::new(
+            shader,
+            ColorMode::alpha_blended(),
+            CullFaceMode::back_ccw(),
+            geometry,
+            Default::default(),
+        );
+        objects.read_as_storage(ID, Some(typed.shared().clone()));
+        assert!(objects.storage_buffer(ID).is_none(), "bound before the upload");
+
+        objects.upload(gpu, context);
+        let buffer = context.upload_vertices(gpu, typed.shared()).expect("uploads");
+        assert!(buffer.is_some() && objects.storage_buffer(ID) == buffer);
+        let uploaded = context.rendering_stats().buffer_updates;
+
+        // An update goes to the same buffer.
+        assert!(context.update_vertices(&typed, &[[2; 2], [3; 2]]));
+        objects.upload(gpu, context);
+        assert_eq!(context.rendering_stats().buffer_updates, uploaded + 1);
+        assert_eq!(objects.storage_buffer(ID), buffer);
+
+        objects.read_as_storage(ID, None);
+        objects.upload(gpu, context);
+        assert!(objects.storage_buffer(ID).is_none());
+    });
+}
+
+// The pulled walls' shader finds a vertex's paint values where the paint
+// attributes read them.
+#[test]
+fn the_paint_layout_of_pulled_walls_is_the_paint_attributes() {
+    use mln_gfx::AttributeDataType::{Float, Float4};
+    use mln_gfx::shaders::shader_defines::{
+        ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE,
+        ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE,
+    };
+
+    use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
+    use crate::layers::render_fill_extrusion_layer::paint_layout;
+
+    with_context(|_, context| {
+        let mut attrs = VertexAttributeArray::new();
+        assert_eq!(paint_layout(&attrs), 0, "every property a uniform");
+
+        // A vertex's base, its color's four floats, then its height.
+        let paint = context.add_vertices(vec![[0f32; 6]]);
+        for (id, data_type, offset) in [
+            (ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, Float, 0),
+            (ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE, Float4, 4),
+            (ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE, Float, 20),
+        ] {
+            attrs.set_shared(id, SharedAttribute::new(paint.clone(), data_type, offset, 24));
+        }
+        // Six words a vertex: the base at 0, the height at 5, the color at 1.
+        assert_eq!(paint_layout(&attrs), 0x0105_0006);
+    });
+}
+
 // What draws share stays in the context's stores while a handle to it lasts,
 // and goes once the last one drops and the context destroys what the
 // renderer released.
