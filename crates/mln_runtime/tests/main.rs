@@ -12,6 +12,7 @@ mod exported;
 mod feature_state;
 mod frame_depth;
 mod gestures;
+mod placement;
 mod resources;
 mod sessions;
 mod style;
