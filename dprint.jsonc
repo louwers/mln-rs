@@ -47,6 +47,7 @@
     "crates/mln_style/src/layers/*_layer_properties.rs",
     "crates/mln_style/src/light_properties.rs",
     "crates/mln_style/src/sky_properties.rs",
+    "crates/mln_text/src/arabic_tables.rs",
     "crates/mln_text/src/bidi_mirroring.rs",
     "examples/web/pnpm-lock.yaml",
     // Copies of other projects' files, kept as they are there.

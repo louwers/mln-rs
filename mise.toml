@@ -120,7 +120,20 @@ description = "Regenerate the C library's bindings (crates/mln_c/src/generated) 
 run = "cargo run -q -p mln-rs-c-abi-gen"
 
 # The Unicode version is unicode-bidi's (its char_data's UNICODE_VERSION):
-# bump it with the crate.
+# bump it with the crate, here and in generate:bidi-mirroring.
+[tasks."generate:arabic-shaping"]
+description = "Regenerate mln_text's Arabic joining types and presentation forms from the Unicode Character Database"
+run = '''
+set -e
+ucd=$(mktemp -d)
+trap 'rm -rf "$ucd"' EXIT
+curl -fsSL -o "$ucd/ArabicShaping.txt" https://www.unicode.org/Public/16.0.0/ucd/ArabicShaping.txt
+curl -fsSL -o "$ucd/UnicodeData.txt" https://www.unicode.org/Public/16.0.0/ucd/UnicodeData.txt
+python3 -I crates/mln_text/tools/gen_arabic_shaping.py "$ucd/ArabicShaping.txt" "$ucd/UnicodeData.txt" > crates/mln_text/src/arabic_tables.rs
+'''
+
+# The Unicode version is unicode-bidi's (its char_data's UNICODE_VERSION):
+# bump it with the crate, here and in generate:arabic-shaping.
 [tasks."generate:bidi-mirroring"]
 description = "Regenerate mln_text's Bidi_Mirroring_Glyph table from the Unicode Character Database"
 run = '''

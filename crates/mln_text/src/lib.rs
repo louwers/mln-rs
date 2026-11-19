@@ -1,10 +1,13 @@
-//! Text shaping and glyphs, with the parts of ICU that the BiDi code uses
-//! (`icu`).
+//! Text shaping and glyphs.
 //!
 //! Font faces shape with HarfRust and draw their glyphs from skrifa's
 //! hinted outlines. `harfbuzz_impl.rs` says where HarfRust's shaping differs
-//! from the C++ core's HarfBuzz.
+//! from the C++ core's HarfBuzz. Arabic text drawn with glyph PBFs takes
+//! presentation forms instead (`arabic.rs`).
 
+mod arabic;
+#[rustfmt::skip]
+mod arabic_tables;
 mod bidi;
 #[rustfmt::skip]
 mod bidi_mirroring;
@@ -17,7 +20,6 @@ pub mod glyph_cache;
 pub mod glyph_pbf;
 mod harfbuzz;
 mod harfbuzz_impl;
-mod icu;
 pub mod local_glyph_rasterizer;
 mod rasterize;
 pub mod shaping;
@@ -27,7 +29,8 @@ pub mod tagged_string;
 pub mod weight;
 mod woff;
 
-pub use bidi::{BiDi, apply_arabic_shaping, starts_right_to_left};
+pub use arabic::shape_arabic;
+pub use bidi::{BiDi, starts_right_to_left};
 pub use face::{FontFile, FreeTypeLibrary};
 pub use glyph::{
     Glyph, GlyphID, GlyphIDType, GlyphMap, GlyphMetrics, GlyphPosition, GlyphPositions, GlyphRange, PositionedGlyph,

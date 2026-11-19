@@ -7,13 +7,12 @@
 > this crate as `mln_rs::mln_text`.
 
 Ports text shaping and glyphs (`src/mln/text`) on HarfRust, skrifa and
-unicode-bidi, with the ICU behaviour the C++ core depends on.
+unicode-bidi.
 
 Licensed under the BSD 2-Clause License, as the rest of mln-rs is
-([LICENSE.md](../../LICENSE.md)), except ICU's Arabic shaping (`icu`), under
-ICU's license ([LICENSE-ICU](LICENSE-ICU)), whose Unicode License V3 also covers
-the Unicode data in its tables and in the BiDi mirroring table
-(`bidi_mirroring.rs`).
+([LICENSE.md](../../LICENSE.md)), except the Unicode data in the Arabic shaping
+and BiDi mirroring tables (`arabic_tables.rs`, `bidi_mirroring.rs`), under the
+[Unicode License V3](https://www.unicode.org/license.txt).
 
 Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering

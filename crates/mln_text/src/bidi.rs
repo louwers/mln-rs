@@ -3,8 +3,7 @@
 // point with each character replaced by its Bidi_Mirroring_Glyph (rule L4,
 // which unicode-bidi leaves to the renderer; crate::bidi_mirroring, from the
 // same Unicode version as unicode-bidi's tables), and BiDi controls (ZWNJ,
-// ZWJ, LRM, RLM, LRE..RLO, LRI..PDI) removed. Arabic letter shaping
-// (`applyArabicShaping`) is a port of ICU's ushape.cpp (crate::icu::ushape).
+// ZWJ, LRM, RLM, LRE..RLO, LRI..PDI) removed.
 //
 // Where the C++ throws std::runtime_error, these return Err with the same
 // message (`what()`).
@@ -16,31 +15,7 @@ use unicode_bidi::utf16::BidiInfo;
 use unicode_bidi::{BidiClass, ParagraphInfo};
 
 use crate::bidi_mirroring::BIDI_MIRRORING_GLYPH;
-use crate::icu::ushape::u_shape_arabic;
 pub(crate) use crate::tagged_string::StyledText;
-
-/// Takes UTF16 input in logical order and applies Arabic shaping to the
-/// input while maintaining logical order. Output won't be intelligible
-/// until the bidirectional algorithm is applied.
-#[must_use]
-pub fn apply_arabic_shaping(input: &[u16]) -> Vec<u16> {
-    // (U_SHAPE_LETTERS_SHAPE & U_SHAPE_LETTERS_MASK) |
-    // (U_SHAPE_TEXT_DIRECTION_LOGICAL & U_SHAPE_TEXT_DIRECTION_MASK)
-    let (_, output_length, _) = u_shape_arabic(input, 0);
-
-    // Pre-flighting will always set U_BUFFER_OVERFLOW_ERROR
-    let mut output_text = vec![0u16; output_length.max(0) as usize];
-
-    let (written, _, error_code) = u_shape_arabic(input, output_length);
-    output_text[..written.len()].copy_from_slice(&written);
-
-    // If the algorithm fails for any reason, fall back to non-transformed text
-    if error_code.is_failure() {
-        return input.to_vec();
-    }
-
-    output_text
-}
 
 /// Whether the first character in `text` with a strong direction runs right
 /// to left. Unpaired surrogates have no direction.
@@ -355,6 +330,7 @@ impl BiDi {
 #[cfg(test)]
 mod bidi_test {
     use super::*;
+    use crate::arabic::shape_arabic;
 
     fn u(s: &str) -> Vec<u16> {
         s.encode_utf16().collect()
@@ -364,32 +340,11 @@ mod bidi_test {
         v.iter().copied().collect()
     }
 
-    // gtest: BiDi.ArabicShaping
-    #[test]
-    fn arabic_shaping() {
-        assert_eq!(apply_arabic_shaping(&u("اليَمَن\u{200E}\u{200E}")), u("ﺍﻟﻴﹷﻤﹷﻦ\u{200E}\u{200E}"));
-    }
-
-    // gtest: BiDi.Tashkeel
-    #[test]
-    fn tashkeel() {
-        assert_eq!(apply_arabic_shaping(&u("سلام۳۹")), u("ﺳﻼﻡ۳۹"));
-    }
-
-    // gtest: BiDi.MixedShaping
-    #[test]
-    fn mixed_shaping() {
-        assert_eq!(
-            apply_arabic_shaping(&u("مكتبة الإسكندرية\u{200E}\u{200E} Maktabat al-Iskandarīyah")),
-            u("ﻣﻜﺘﺒﺔ ﺍﻹﺳﻜﻨﺪﺭﻳﺔ\u{200E}\u{200E} Maktabat al-Iskandarīyah")
-        );
-    }
-
     // gtest: BiDi.ReverseArabic
     #[test]
     fn reverse_arabic() {
         let mut bidi = BiDi::new();
-        assert_eq!(bidi.process_text(&apply_arabic_shaping(&u("سلام۳۹")), set(&[])).unwrap(), vec![u("۳۹ﻡﻼﺳ")]);
+        assert_eq!(bidi.process_text(&shape_arabic(&u("سلام۳۹")), set(&[])).unwrap(), vec![u("۳۹ﻡﻼﺳ")]);
     }
 
     // gtest: BiDi.ReverseMixed
@@ -397,11 +352,8 @@ mod bidi_test {
     fn reverse_mixed() {
         let mut bidi = BiDi::new();
         assert_eq!(
-            bidi.process_text(
-                &apply_arabic_shaping(&u("مكتبة الإسكندرية\u{200E}\u{200E} Maktabat al-Iskandarīyah")),
-                set(&[])
-            )
-            .unwrap(),
+            bidi.process_text(&shape_arabic(&u("مكتبة الإسكندرية\u{200E}\u{200E} Maktabat al-Iskandarīyah")), set(&[]))
+                .unwrap(),
             vec![u(" Maktabat al-Iskandarīyahﺔﻳﺭﺪﻨﻜﺳﻹﺍ ﺔﺒﺘﻜﻣ")]
         );
     }
@@ -413,7 +365,7 @@ mod bidi_test {
         let expected = vec![u(" ﺔﻳﺭﺪﻨﻜﺳﻹﺍ ﺔﺒﺘﻜﻣ"), u("Maktabat al-"), u("Iskandarīyah")];
         assert_eq!(
             bidi.process_text(
-                &apply_arabic_shaping(&u("مكتبة الإسكندرية\u{200E}\u{200E} Maktabat al-Iskandarīyah")),
+                &shape_arabic(&u("مكتبة الإسكندرية\u{200E}\u{200E} Maktabat al-Iskandarīyah")),
                 set(&[18, 30])
             )
             .unwrap(),
@@ -428,7 +380,7 @@ mod bidi_test {
         // interleave styled blocks that are contiguous in the input
         let mut bidi = BiDi::new();
         let input: StyledText = (
-            apply_arabic_shaping(&u("مكتبة الإسكندرية\u{200E}\u{200E} Maktabat al-Iskandarīyah")),
+            shape_arabic(&u("مكتبة الإسكندرية\u{200E}\u{200E} Maktabat al-Iskandarīyah")).into_owned(),
             vec![
                 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4, 5, 5, 5, 5, 6, 6, 6, 6, 6,
                 6, 6, 6, 6, 6, 7, 7, 7,
