@@ -757,45 +757,53 @@ impl GlGpu {
             vertex_locations: Vec::with_capacity(source.attributes.len()),
             instance_locations: Vec::with_capacity(source.instance_attributes.len()),
         };
-        // SAFETY: the program is alive and linked, and the indexes and names
-        // asked about are the ones it reports or its sources declare.
-        let described = unsafe {
-            let block_count = gl.get_program_parameter_i32(object, glow::ACTIVE_UNIFORM_BLOCKS).max(0) as u32;
-            (0..block_count).try_for_each(|index| {
-                let block_name = gl.get_active_uniform_block_name(object, index);
-                let info = source
-                    .uniform_blocks
-                    .iter()
-                    .find(|info| info.name == block_name)
-                    .ok_or_else(|| GpuError::Invalid(format!("{name}'s uniform block {block_name} has no id")))?;
-                let size = gl.get_active_uniform_block_parameter_i32(object, index, glow::UNIFORM_BLOCK_DATA_SIZE);
-                gl.uniform_block_binding(object, index, info.id as u32);
-                program.blocks.push(Block { id: info.id, size: size.max(0) as usize, element_size: info.element_size });
-                Ok(())
-            })?;
+        // A closure, so that its early returns reach the program's deletion
+        // below.
+        let mut describe = || -> Result<(), GpuError> {
+            // SAFETY: the program is alive and linked, and the indexes and
+            // names asked about are the ones it reports or its sources declare.
+            unsafe {
+                let block_count = gl.get_program_parameter_i32(object, glow::ACTIVE_UNIFORM_BLOCKS).max(0) as u32;
+                (0..block_count).try_for_each(|index| {
+                    let block_name = gl.get_active_uniform_block_name(object, index);
+                    let info =
+                        source.uniform_blocks.iter().find(|info| info.name == block_name).ok_or_else(|| {
+                            GpuError::Invalid(format!("{name}'s uniform block {block_name} has no id"))
+                        })?;
+                    let size = gl.get_active_uniform_block_parameter_i32(object, index, glow::UNIFORM_BLOCK_DATA_SIZE);
+                    gl.uniform_block_binding(object, index, info.id as u32);
+                    program.blocks.push(Block {
+                        id: info.id,
+                        size: size.max(0) as usize,
+                        element_size: info.element_size,
+                    });
+                    Ok(())
+                })?;
 
-            self.context.state().use_program(gl, Some(object));
-            for info in source.textures {
-                if let Some(location) = gl.get_uniform_location(object, info.name) {
-                    if info.id >= MAX_ACTIVE_TEXTURE_UNITS as usize {
-                        return Err(GpuError::Unsupported(format!("{name} samples texture id {}", info.id)));
-                    }
-                    gl.uniform_1_i32(Some(&location), info.id as i32);
-                    program.textures.push(info.id);
-                }
-            }
-            for (infos, locations) in [
-                (source.attributes, &mut program.vertex_locations),
-                (source.instance_attributes, &mut program.instance_locations),
-            ] {
-                for info in infos {
-                    if let Some(location) = gl.get_attrib_location(object, info.name) {
-                        locations.push((info.id as u32, location));
+                self.context.state().use_program(gl, Some(object));
+                for info in source.textures {
+                    if let Some(location) = gl.get_uniform_location(object, info.name) {
+                        if info.id >= MAX_ACTIVE_TEXTURE_UNITS as usize {
+                            return Err(GpuError::Unsupported(format!("{name} samples texture id {}", info.id)));
+                        }
+                        gl.uniform_1_i32(Some(&location), info.id as i32);
+                        program.textures.push(info.id);
                     }
                 }
+                for (infos, locations) in [
+                    (source.attributes, &mut program.vertex_locations),
+                    (source.instance_attributes, &mut program.instance_locations),
+                ] {
+                    for info in infos {
+                        if let Some(location) = gl.get_attrib_location(object, info.name) {
+                            locations.push((info.id as u32, location));
+                        }
+                    }
+                }
+                Ok(())
             }
-            Ok(())
         };
+        let described = describe();
         if described.is_err() {
             delete_program(gl, self.context.state(), object);
         }
