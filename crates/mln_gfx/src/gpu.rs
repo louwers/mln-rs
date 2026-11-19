@@ -593,6 +593,14 @@ pub trait Gpu {
     /// one size, a color one and a depth one, at least one of them. Fails
     /// while a pass is open.
     fn begin_pass(&mut self, desc: &PassDesc<'_>) -> Result<(), GpuError>;
+    /// Whether a pass can draw into `depth_stencil`, a depth attachment,
+    /// together with any color attachment of its size. Not where it is an
+    /// attachment of a framebuffer made elsewhere, such as a window
+    /// surface's, which a pass draws into only with that framebuffer's
+    /// color.
+    fn attaches_with_any_color(&self, _depth_stencil: TextureId) -> bool {
+        true
+    }
     /// Draws `draw` into the open pass. Fails, drawing nothing, outside a
     /// pass, for a pipeline of other target formats than the pass's
     /// attachments, for bindings or geometry made for another shader or

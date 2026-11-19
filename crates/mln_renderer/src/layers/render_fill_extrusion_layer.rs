@@ -12,6 +12,12 @@
 // from the same buffer four vertices further on. The wall shaders run the
 // instanced ones' code with every attribute per vertex: the same vertices in
 // the same order, drawn without instances.
+//
+// A translucent layer blends only its nearest surface over each pixel. Where
+// the layer composite's texture can draw with the frame's depth, the layer
+// draws into it once, opaque, and composites at its opacity. Elsewhere, and
+// with a pattern, whose texels may be translucent themselves, it draws into
+// the frame's depth first and then in color where that depth is its own.
 
 use std::mem::offset_of;
 use std::rc::Rc;
@@ -36,7 +42,7 @@ use mln_map_types::TransformState;
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::FillExtrusion;
 use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionPaintProperties;
-use mln_style_types::AlignmentType;
+use mln_style_types::{AlignmentType, LayerBlendType};
 use mln_tile_id::OverscaledTileID;
 use mln_util::constants::TILE_SIZE_D;
 use mln_util::error::Error;
@@ -61,6 +67,7 @@ use crate::gfx::indexes::{Indexes, SharedIndexes};
 use crate::gfx::texture2d::Texture2D;
 use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
+use crate::layer_composite::Composite;
 use crate::layer_drawing::{
     DrawDepth, DrawList, DrawObjectsMut, DrawPriority, FrameDraw, TileDraws, TileObjects, UniformWriter,
 };
@@ -397,6 +404,10 @@ impl TypedLayer for RenderFillExtrusionLayer {
             return;
         };
 
+        let opacity = *self.values.evaluated.paint.fill_extrusion_opacity.uniform();
+        let composite = (opacity < 1.0 && !has_pattern && paint_parameters.composites_with_frame_depth)
+            .then_some(Composite { opacity, blend: LayerBlendType::Normal, frame_depth: true });
+
         let context = &mut *paint_parameters.context;
         let static_vertices = &*self
             .static_data_vertices
@@ -418,8 +429,8 @@ impl TypedLayer for RenderFillExtrusionLayer {
             static_indices,
             has_pattern,
             // The layer draws into depth before it draws in color where it
-            // is translucent or has a pattern.
-            depth_pass: *self.values.evaluated.paint.fill_extrusion_opacity.uniform() < 1.0 || has_pattern,
+            // is translucent or has a pattern, unless it composites.
+            depth_pass: composite.is_none() && (opacity < 1.0 || has_pattern),
             first_shaders: None,
         };
 
@@ -468,10 +479,15 @@ impl TypedLayer for RenderFillExtrusionLayer {
         }
 
         let frame = self.drawing.frame_mut();
+        frame.set_composite(composite);
         frame.set_stencil_tiles(render_tiles.iter().map(|tile| tile.tile.id));
         let (light, state) = (paint_parameters.light, paint_parameters.state);
-        self.draw_list
-            .finish(frame, paint_parameters.context, |writer| Self::write_uniforms(layer, writer, light, state));
+        // The draws that composite draw opaque: the composite has the
+        // layer's opacity.
+        let opacity = if composite.is_some() { 1.0 } else { opacity };
+        self.draw_list.finish(frame, paint_parameters.context, |writer| {
+            Self::write_uniforms(layer, writer, light, state, opacity);
+        });
     }
 }
 
@@ -787,12 +803,14 @@ impl RenderFillExtrusionLayer {
         }
     }
 
-    /// Writes the layer's buffers of the frame's draws.
+    /// Writes the layer's buffers of the frame's draws, which draw at
+    /// `opacity`.
     fn write_uniforms(
         layer: &EvaluatedLayer<FillExtrusion>,
         writer: &mut UniformWriter<'_, ExtrusionUniforms>,
         light: &EvaluatedLight,
         state: &TransformState,
+        opacity: f32,
     ) {
         let evaluated = &layer.paint;
         let crossfade = layer.crossfade;
@@ -812,7 +830,7 @@ impl RenderFillExtrusionLayer {
                 .constant_or(&FillExtrusionPaintProperties::Defaults::fill_extrusion_height()),
             light_intensity: FillExtrusionBucket::light_intensity(light),
             vertical_gradient: if *evaluated.fill_extrusion_vertical_gradient.uniform() { 1.0 } else { 0.0 },
-            opacity: *evaluated.fill_extrusion_opacity.uniform(),
+            opacity,
             fade: crossfade.t,
             from_scale: crossfade.from_scale,
             to_scale: crossfade.to_scale,

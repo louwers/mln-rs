@@ -29,8 +29,10 @@ pub(crate) struct Composited {
     group: SimpleIdentity,
     /// The frame's pass, which resumes after the group's draws.
     frame: OpenPass,
-    /// The frame's tile masks and next stencil value, which the group's
-    /// draws don't share; `None` where the texture's pass didn't begin.
+    /// Whether the texture's pass began.
+    began: bool,
+    /// The frame's tile masks and next stencil value, where the group's
+    /// draws don't share them: they draw with the texture's own stencil.
     frame_stencil: Option<(VecMap<UnwrappedTileID, i32>, i32)>,
     unended: Unended,
 }
@@ -51,7 +53,7 @@ impl Composited {
     /// begin.
     #[must_use]
     pub(crate) fn draws(&self) -> bool {
-        self.frame_stencil.is_some()
+        self.began
     }
 }
 
@@ -166,6 +168,10 @@ pub(crate) struct PaintParameters<'a> {
     pub(crate) clip_masks: &'a mut ClipMasks,
     /// What the frame's layers drawn as a whole draw into and composite with.
     pub(crate) layer_composite: &'a mut LayerComposite,
+    /// Whether a layer drawn as a whole can draw with the frame's depth and
+    /// stencil: the frame has them, and a pass can draw into them together
+    /// with the layer composite's texture.
+    pub(crate) composites_with_frame_depth: bool,
     /// The stencil value of each tile whose mask the stencil buffer holds.
     tile_clipping_mask_ids: VecMap<UnwrappedTileID, i32>,
     next_stencil_id: i32,
@@ -188,12 +194,14 @@ impl<'a> PaintParameters<'a> {
     /// The parameters of the encode of `frame`, into a target of
     /// `renderable_size` device pixels at `pixel_ratio`, drawn within
     /// `scissor_rect`, which clips with `clip_masks` and composites with
-    /// `layer_composite`.
+    /// `layer_composite`, with the frame's depth where
+    /// `composites_with_frame_depth` says it can.
     #[expect(clippy::too_many_arguments, reason = "the renderer's GPU state, the frame and where it draws")]
     pub(crate) fn new(
         context: &'a mut Context,
         clip_masks: &'a mut ClipMasks,
         layer_composite: &'a mut LayerComposite,
+        composites_with_frame_depth: bool,
         frame: &'a Frame,
         static_data: &'a RenderStaticData,
         pixel_ratio: f32,
@@ -222,6 +230,7 @@ impl<'a> PaintParameters<'a> {
             pixels_to_gl_units,
             clip_masks,
             layer_composite,
+            composites_with_frame_depth,
             tile_clipping_mask_ids: VecMap::new(),
             next_stencil_id: 1,
             // The renderer sets these before use.
@@ -278,12 +287,15 @@ impl<'a> PaintParameters<'a> {
     /// texture, rather than into the pass begun on `gpu`, the context's,
     /// where the frame composites `group`; `None` where it doesn't, and the
     /// group draws into the pass begun. The group draws only where
-    /// [`Composited::draws`] says, starting with the texture's stencil
-    /// clear, and [`end_composited`](Self::end_composited) then composites
-    /// the texture onto the pass begun, whose stencil stays as it was.
+    /// [`Composited::draws`] says, and
+    /// [`end_composited`](Self::end_composited) then composites the texture
+    /// onto the pass begun. A group that draws with the texture's own
+    /// stencil starts with it cleared and leaves the frame's as it was; one
+    /// that draws with the frame's depth and stencil goes on with them.
     pub(crate) fn begin_composited(&mut self, gpu: &mut dyn Gpu, group: SimpleIdentity) -> Option<Composited> {
-        let (frame, composite) =
-            self.open_pass.zip(self.layer_composite.pass()).filter(|_| self.layer_composite.composites(group))?;
+        let frame = self.open_pass.filter(|_| self.layer_composite.composites(group))?;
+        let composite = self.layer_composite.pass(group, &frame)?;
+        let own_stencil = !self.layer_composite.draws_with_frame_depth(group);
         let mut drawn = self.end_pass(gpu);
         if drawn.is_ok()
             && let Some(backdrop) = self.layer_composite.backdrop_pass(group)
@@ -295,17 +307,14 @@ impl<'a> PaintParameters<'a> {
             }
         }
         drawn = drawn.and_then(|()| self.begin_pass(gpu, composite));
-        let frame_stencil = match drawn {
-            Ok(()) => Some((
-                std::mem::take(&mut self.tile_clipping_mask_ids),
-                std::mem::replace(&mut self.next_stencil_id, 1),
-            )),
-            Err(error) => {
-                Log::error(Event::Render, format!("Beginning the layer composite's pass failed: {error}"));
-                None
-            }
-        };
-        Some(Composited { group, frame, frame_stencil, unended: Unended })
+        let began = drawn.is_ok();
+        if let Err(error) = drawn {
+            Log::error(Event::Render, format!("Beginning the layer composite's pass failed: {error}"));
+        }
+        let frame_stencil = (began && own_stencil).then(|| {
+            (std::mem::take(&mut self.tile_clipping_mask_ids), std::mem::replace(&mut self.next_stencil_id, 1))
+        });
+        Some(Composited { group, frame, began, frame_stencil, unended: Unended })
     }
 
     /// Copies the layer composite's frame texture onto the open pass.
@@ -318,20 +327,27 @@ impl<'a> PaintParameters<'a> {
     /// Ends the draws `begin_composited` began, and composites what they drew
     /// onto the frame's pass, which this begins again.
     pub(crate) fn end_composited(&mut self, gpu: &mut dyn Gpu, composited: Composited) {
-        let Composited { group, frame, frame_stencil, unended } = composited;
+        let Composited { group, frame, began, frame_stencil, unended } = composited;
         std::mem::forget(unended);
-        let drawn = frame_stencil.is_some();
         if let Some((tile_clipping_mask_ids, next_stencil_id)) = frame_stencil {
             self.tile_clipping_mask_ids = tile_clipping_mask_ids;
             self.next_stencil_id = next_stencil_id;
-            if let Err(error) = self.end_pass(gpu) {
-                Log::error(Event::Render, format!("Ending the layer composite's pass failed: {error}"));
-            }
+        }
+        if began && let Err(error) = self.end_pass(gpu) {
+            Log::error(Event::Render, format!("Ending the layer composite's pass failed: {error}"));
         }
         if let Err(error) = self.begin_pass(gpu, frame.loading(LoadOp::Load)) {
             Log::error(Event::Render, format!("Resuming the {} pass failed: {error}", frame.label));
-        } else if drawn && let Some(target) = self.draw_target() {
-            let depth = self.depth_mode_for_sublayer(0, DepthMaskType::ReadOnly);
+        } else if began && let Some(target) = self.draw_target() {
+            // What drew with the frame's depth tested it as it drew, and
+            // left its own there, in front of the layer's. The others
+            // composite at the depth of the current layer: layers above
+            // that drew into the depth buffer hide them.
+            let depth = if self.layer_composite.draws_with_frame_depth(group) {
+                DepthMode::disabled()
+            } else {
+                self.depth_mode_for_sublayer(0, DepthMaskType::ReadOnly)
+            };
             self.layer_composite.draw(gpu, target, depth, self.context, group);
         }
     }

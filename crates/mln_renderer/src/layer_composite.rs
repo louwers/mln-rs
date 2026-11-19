@@ -5,6 +5,11 @@
 //! overlap within the texture as they would on the frame, so the opacity and
 //! blend apply once to the layer rather than to each feature.
 //!
+//! A translucent fill extrusion layer draws the same way, opaque, where the
+//! texture's pass can test and write the frame's depth: the nearest of its
+//! surfaces then covers each pixel once, behind and in front of the other
+//! layers' 3D geometry as on the frame.
+//!
 //! `screen` and `plus-lighter` are blend functions. The other blends are
 //! computed in the shader against the backdrop, which a pass can't sample
 //! while it draws into it: a frame with such a layer draws into a texture of
@@ -74,15 +79,21 @@ fn layout() -> VertexBufferLayout {
 pub(crate) struct Composite {
     pub(crate) opacity: f32,
     pub(crate) blend: LayerBlendType,
+    /// Whether the draws test and write the frame's depth and stencil rather
+    /// than the texture's own, as a 3D layer's do: they and the other
+    /// layers' 3D draws then hide each other as they would on the frame.
+    pub(crate) frame_depth: bool,
 }
 
 impl Composite {
     /// How a layer with the layer opacity `opacity` and the layer blend
-    /// `blend` composites: `None` for an opaque layer of the `normal` blend,
-    /// which draws straight onto the frame.
+    /// `blend` composites, with a depth and stencil of its own: `None` for
+    /// an opaque layer of the `normal` blend, which draws straight onto the
+    /// frame.
     #[must_use]
     pub(crate) fn of(opacity: f32, blend: LayerBlendType) -> Option<Composite> {
-        (opacity < 1.0 || blend != LayerBlendType::Normal).then_some(Composite { opacity, blend })
+        let composites = opacity < 1.0 || blend != LayerBlendType::Normal;
+        composites.then_some(Composite { opacity, blend, frame_depth: false })
     }
 
     /// The blend the shader computes: none for the blends a blend function
@@ -141,7 +152,9 @@ impl Texture {
 struct Target {
     size: Size,
     color: Texture,
-    depth_stencil: Attachment,
+    /// The depth and stencil of the layers that don't draw with the frame's,
+    /// from the first frame that composites one.
+    depth_stencil: Option<Attachment>,
 }
 
 /// The textures of a frame with a layer that blends in the shader: the
@@ -205,6 +218,7 @@ impl LayerComposite {
         self.groups.clear();
         if groups.is_empty() || size.is_empty() {
             self.drop_textures();
+            self.quad = None;
             return;
         }
         if self.shader.is_none() {
@@ -229,7 +243,7 @@ impl LayerComposite {
 
         let size = size_of::<LayerCompositeUBO>();
         let stride = size.next_multiple_of(context.caps().buffer_offset_alignment as usize);
-        let copy = Composite { opacity: 1.0, blend: LayerBlendType::Normal };
+        let copy = Composite { opacity: 1.0, blend: LayerBlendType::Normal, frame_depth: false };
         self.bytes.clear();
         self.bytes.resize((self.groups.len() + 1) * stride, 0);
         for (slot, composite) in self.groups.iter().map(|&(_, composite)| composite).chain([copy]).enumerate() {
@@ -254,20 +268,25 @@ impl LayerComposite {
         self.bindings_made = None;
     }
 
-    /// Makes the target of `size`, unless it is made, the frame copy of
+    /// Makes the target of `size`, unless it is made, with a depth and
+    /// stencil of its own where a group draws with them, the frame copy of
     /// `frame_format` where there is one, and the quad.
     fn make(&mut self, context: &mut Context, size: Size, frame_format: Option<TextureFormat>) -> Result<(), GpuError> {
         if self.target.as_ref().is_none_or(|target| target.size != size) {
             self.drop_textures();
             let color = Texture::new(context, size, COLOR)?;
-            let depth_stencil = Attachment::new(
+            self.target = Some(Target { size, color, depth_stencil: None });
+        }
+        if let Some(target) = self.target.as_mut().filter(|target| target.depth_stencil.is_none())
+            && self.groups.iter().any(|(_, composite)| !composite.frame_depth)
+        {
+            target.depth_stencil = Some(Attachment::new(
                 &mut *context.gpu(),
                 context.released(),
                 "layer composite depth and stencil",
                 size,
                 DEPTH_STENCIL,
-            )?;
-            self.target = Some(Target { size, color, depth_stencil });
+            )?);
         }
         match frame_format {
             None => self.frame = None,
@@ -324,30 +343,45 @@ impl LayerComposite {
         self.target.is_some() && self.groups.iter().any(|(id, _)| *id == group)
     }
 
-    /// The pass that draws a layer into the texture, cleared to transparent,
-    /// with its depth cleared to 1 and its stencil to 0. `None` without a
-    /// target.
-    pub(crate) fn pass(&self) -> Option<OpenPass> {
+    /// Whether the draw group `group` draws into the texture with the
+    /// frame's depth and stencil rather than the texture's own.
+    #[must_use]
+    pub(crate) fn draws_with_frame_depth(&self, group: SimpleIdentity) -> bool {
+        self.groups.iter().any(|(id, composite)| *id == group && composite.frame_depth)
+    }
+
+    /// The pass that draws the draw group `group` into the texture, cleared
+    /// to transparent: with the texture's depth cleared to 1 and its stencil
+    /// to 0, or with the depth and stencil of `frame`, the frame's pass, as
+    /// they are, where the group draws with those. `None` without a target.
+    pub(crate) fn pass(&self, group: SimpleIdentity, frame: &OpenPass) -> Option<OpenPass> {
         let target = self.target.as_ref()?;
+        let (depth_stencil, format) = if self.draws_with_frame_depth(group) {
+            let loaded =
+                |attachment| DepthStencilAttachment { depth: LoadOp::Load, stencil: LoadOp::Load, ..attachment };
+            (frame.depth_stencil.map(loaded), frame.targets.depth_stencil)
+        } else {
+            let own = DepthStencilAttachment {
+                texture: target.depth_stencil.as_ref()?.id(),
+                depth: LoadOp::Clear(1.0),
+                stencil: LoadOp::Clear(0),
+            };
+            (Some(own), Some(DEPTH_STENCIL))
+        };
         Some(OpenPass {
             label: "layer composite",
             color: Some(ColorAttachment {
                 texture: target.color.texture,
                 load: LoadOp::Clear(Color::new(0.0, 0.0, 0.0, 0.0)),
             }),
-            depth_stencil: Some(DepthStencilAttachment {
-                texture: target.depth_stencil.id(),
-                depth: LoadOp::Clear(1.0),
-                stencil: LoadOp::Clear(0),
-            }),
+            depth_stencil,
             size: target.size,
-            targets: TargetFormats { color: Some(COLOR), depth_stencil: Some(DEPTH_STENCIL) },
+            targets: TargetFormats { color: Some(COLOR), depth_stencil: format },
         })
     }
 
     /// Composites the texture onto the open pass, as the draw group `group`
-    /// does, at the depth of the current layer: layers above that drew into
-    /// the depth buffer hide it.
+    /// does, testing `depth`.
     pub(crate) fn draw(
         &mut self,
         gpu: &mut dyn Gpu,

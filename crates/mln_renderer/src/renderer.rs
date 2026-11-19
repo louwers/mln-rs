@@ -503,10 +503,13 @@ impl Encoder {
                 .wrapping_sub(((frustum_offset.top + frustum_offset.bottom) * pixel_ratio) as u32),
         };
 
+        let composites_with_frame_depth =
+            image.depth_stencil.is_some_and(|texture| self.context.gpu().attaches_with_any_color(texture));
         let mut parameters = PaintParameters::new(
             &mut self.context,
             &mut self.clip_masks,
             &mut self.layer_composite,
+            composites_with_frame_depth,
             frame,
             static_data,
             self.pixel_ratio,

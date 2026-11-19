@@ -1528,6 +1528,11 @@ impl Gpu for GlGpu {
         }
     }
 
+    fn attaches_with_any_color(&self, depth_stencil: TextureId) -> bool {
+        let texture = self.textures.get(depth_stencil);
+        texture.is_some_and(|texture| matches!(texture.native.object, Object::Texture { .. }))
+    }
+
     fn begin_pass(&mut self, desc: &PassDesc<'_>) -> Result<(), GpuError> {
         log_gpu_identifier(&self.context);
         if self.pass.is_some() {
