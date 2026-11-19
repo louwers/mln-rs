@@ -243,8 +243,7 @@ enum Garbage {
 /// state once for the backends on it, and keeps it.
 ///
 /// Destroying a resource frees it once the work recorded until then has
-/// finished, as each flush signals a fence: what it leaves goes into one
-/// list, keyed by the batch being recorded.
+/// finished, as each flush signals a fence.
 pub struct D3d12Gpu {
     device: Device,
     compiler: ShaderCompiler,
