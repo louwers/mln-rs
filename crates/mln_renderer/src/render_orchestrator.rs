@@ -1658,6 +1658,11 @@ impl Drop for WaitOnDrop {
 
 impl Drop for RenderOrchestrator {
     fn drop(&mut self) {
+        // Hosts that left and that the renderer didn't take, as when it
+        // goes without its tear-down, lose their graphics objects.
+        for host in std::mem::take(&mut self.ended_hosts) {
+            host.context_lost();
+        }
         self.tile_store.log_stats();
         // The render sources and their tiles go before the wait, since
         // their data drops on the thread pool.
