@@ -368,11 +368,11 @@ impl<B: RingBackend> BorrowedTarget<B> {
         Ok(InFlight::after(submitted, gpu))
     }
 
-    /// Submits the work recorded so far, and returns its end, or that the
-    /// submit failed. After a tear-down, the host may use the textures once
-    /// it finishes.
+    /// Submits the work recorded so far, as the tear-down that follows it
+    /// would, and returns its end, or that the submit failed. After the
+    /// tear-down, the host may use the textures once it finishes.
     pub fn in_flight(&mut self, gpu: &mut B::Gpu) -> InFlight<B> {
-        let submitted = gpu.flush(false);
+        let submitted = self.submit_recorded(gpu);
         InFlight::after(submitted, gpu)
     }
 
@@ -461,7 +461,7 @@ impl<B: RingBackend> FrameTarget for BorrowedTarget<B> {
     /// Submits the work recorded so far, lets go of what the slots wait
     /// for, and destroys the imports and the ring's objects once the frames
     /// drawn so far are done. It doesn't block: the end of the frames is
-    /// what [`in_flight`](BorrowedTarget::in_flight) returns after it.
+    /// what [`in_flight`](BorrowedTarget::in_flight) returns before it.
     fn tear_down(&mut self, gpu: &mut B::Gpu) {
         if let Err(error) = self.submit_recorded(gpu) {
             Log::error(

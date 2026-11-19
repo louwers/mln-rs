@@ -360,9 +360,15 @@ impl RingBackend for D3d12Ring {
         Some(gpu.last_submit())
     }
 
-    fn finished(_: &mut D3d12Gpu, (fence, value): &Self::Fence) -> Result<bool, GpuError> {
+    /// A removed device's fences read `u64::MAX`, which fails the work.
+    fn finished(gpu: &mut D3d12Gpu, (fence, value): &Self::Fence) -> Result<bool, GpuError> {
         // SAFETY: a plain query.
-        Ok(unsafe { fence.GetCompletedValue() } >= *value)
+        let completed = unsafe { fence.GetCompletedValue() };
+        if completed == u64::MAX {
+            let reason = gpu.device().removed_reason();
+            return Err(GpuError::Invalid(reason.unwrap_or_else(|| "the D3D12 device was removed".into())));
+        }
+        Ok(completed >= *value)
     }
 }
 

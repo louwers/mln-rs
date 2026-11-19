@@ -342,8 +342,8 @@ fn a_frame_drawn_and_not_ended_is_submitted_with_its_waits() {
     };
     target.select(1);
     draw_without_ending(&mut target, gpu);
-    target.tear_down(gpu);
     let in_flight = target.in_flight(gpu);
+    target.tear_down(gpu);
     if let Some((timeline, value)) = signaled_after {
         assert!(
             !in_flight.finished(gpu).expect("the work failed"),

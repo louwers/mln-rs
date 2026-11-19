@@ -825,8 +825,9 @@ impl<B: LocalBackend> Gfx for BackendGfx<B> {
                     None
                 }
                 Frames::Borrowed { target, .. } => target.take().and_then(|mut target| {
+                    let work = target.in_flight(gpu);
                     target.tear_down(gpu);
-                    target.in_flight(gpu)
+                    work
                 }),
                 #[cfg(not(target_family = "wasm"))]
                 Frames::Offscreen(_) => None,
