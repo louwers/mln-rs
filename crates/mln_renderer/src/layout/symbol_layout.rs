@@ -28,7 +28,7 @@ use mln_style_types::{
 use mln_text::glyph::{GlyphID, GlyphIDType, GlyphPositions, Shaping, WritingModeType};
 use mln_text::shaping::{PositionedIcon, get_anchor_justification, get_shaping};
 use mln_text::tagged_string::SectionOptions;
-use mln_text::{HBShapedText, TaggedString, shape_arabic, starts_right_to_left};
+use mln_text::{ShapedText, TaggedString, shape_arabic, starts_right_to_left};
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCoordinate, GeometryCoordinates, GeometryTileFeature};
 use mln_util::constants::{EXTENT, ONE_EM, TILE_SIZE_D};
@@ -55,7 +55,7 @@ use crate::layout::symbol_instance::{
 use crate::layout::tile_layout::Resolved;
 use crate::text::collision_index::OverlapMode;
 use crate::text::get_anchors::{get_anchors, get_center_anchor};
-use crate::text::glyph_store::HBShapeResults;
+use crate::text::glyph_store::ShapeResults;
 use crate::text::quads::{SymbolQuad, SymbolQuads};
 use crate::util::pool::PoolRange;
 
@@ -1468,8 +1468,8 @@ impl Layout<Symbol> for SymbolLayout {
 impl SymbolLayout {
     /// Applies the HarfBuzz shaping of the text that font faces draw,
     /// before `prepare_symbols`.
-    fn finalize_symbols(&mut self, results: &HBShapeResults) {
-        let unshaped = Arc::new(HBShapedText::default());
+    fn finalize_symbols(&mut self, results: &ShapeResults) {
+        let unshaped = Arc::new(ShapedText::default());
         for feature in &mut self.features {
             if feature.geometry.is_empty() {
                 continue;

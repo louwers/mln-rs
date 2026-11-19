@@ -7,7 +7,7 @@ use mln_util::logging::{Event, Log};
 use mln_util::{Color, i18n};
 
 use crate::glyph::GlyphIDType;
-use crate::harfbuzz::HBShapedText;
+use crate::shaper::ShapedText;
 
 /// Text as characters, with the index of each character's section. `text`
 /// and `styles` are equally long.
@@ -41,7 +41,7 @@ pub struct SectionOptions {
     /// The glyphs of a section that a font face shaped. The section's text
     /// holds a [`SHAPED_GLYPH`] for each, and the line that holds the section
     /// holds its first glyph at `start_index`.
-    pub(crate) shaped: Option<Arc<HBShapedText>>,
+    pub(crate) shaped: Option<Arc<ShapedText>>,
     pub(crate) start_index: i32,
     pub key_section: bool,
     /// Whether a section of text that HarfBuzz shaped runs right to left.
@@ -210,7 +210,7 @@ impl TaggedString {
     #[expect(clippy::too_many_arguments, reason = "each argument is a property of the section")]
     pub fn add_shaped_section(
         &mut self,
-        shaped: &Arc<HBShapedText>,
+        shaped: &Arc<ShapedText>,
         scale: f64,
         font_stack: &FontStack,
         type_: GlyphIDType,

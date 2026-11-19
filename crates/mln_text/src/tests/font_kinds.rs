@@ -7,7 +7,7 @@
 use std::num::NonZeroU16;
 
 use crate::glyph::GlyphIDType;
-use crate::{FreeTypeLibrary, HBShaper};
+use crate::{ShapedText, Shaper};
 
 const MAC_ROMAN: &[u8] = include_bytes!("../../tests/fixtures/mac-roman.ttf");
 const BARE_CFF: &[u8] = include_bytes!("../../tests/fixtures/bare.cff");
@@ -15,14 +15,17 @@ const BARE_CFF: &[u8] = include_bytes!("../../tests/fixtures/bare.cff");
 /// The number of glyphs of `text` that `font` maps and draws with ink, or
 /// `None` when it isn't a font the shaper reads.
 fn inked_glyphs(font: &[u8], text: &str) -> Option<usize> {
-    let shaper = HBShaper::new(GlyphIDType::face(NonZeroU16::MIN), font.to_vec(), &FreeTypeLibrary::new());
+    let shaper = Shaper::new(GlyphIDType::face(NonZeroU16::MIN), font.to_vec());
     if !shaper.valid() {
         return None;
     }
     let text: Vec<char> = text.chars().collect();
-    let (mut ids, mut adjusts) = (Vec::new(), Vec::new());
-    shaper.create_complex_glyph_ids(&text, false, &mut ids, &mut adjusts);
-    Some(ids.iter().filter(|id| id.code != 0 && shaper.rasterize_glyph(id).bitmap.data.iter().any(|&a| a > 0)).count())
+    let mut shaped = ShapedText::default();
+    shaper.shape(&text, false, &mut shaped);
+    let ids = shaped.glyphs;
+    Some(
+        ids.iter().filter(|id| id.code != 0 && shaper.rasterize_glyph(**id).bitmap.data.iter().any(|&a| a > 0)).count(),
+    )
 }
 
 #[test]

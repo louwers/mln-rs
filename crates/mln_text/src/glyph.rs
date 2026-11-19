@@ -406,12 +406,12 @@ impl FontFace {
 pub type FontFaces = Vec<FontFace>;
 
 /// The texts that each font face of each font stack shapes.
-pub type HBShapeRequests = VecMap<FontStack, VecMap<GlyphIDType, BTreeSet<Vec<char>>>>;
+pub type ShapeRequests = VecMap<FontStack, VecMap<GlyphIDType, BTreeSet<Vec<char>>>>;
 
 #[derive(Clone, Debug, Default, PartialEq, mln_wire::Wire)]
 pub struct GlyphDependencies {
     pub glyphs: VecMap<FontStack, GlyphIDs>,
-    pub shapes: HBShapeRequests,
+    pub shapes: ShapeRequests,
 }
 
 /// Where a glyph is in an atlas, and its metrics. A glyph without a bitmap

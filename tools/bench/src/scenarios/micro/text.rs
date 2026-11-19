@@ -17,7 +17,7 @@ use mln_style_types::{SymbolAnchorType, TextJustifyType};
 use mln_text::glyph::{GlyphID, GlyphIDType, GlyphPosition, GlyphPositions, GlyphRange, get_glyph_range};
 use mln_text::glyph_pbf::parse_glyph_pbf;
 use mln_text::tagged_string::font_stack_hash;
-use mln_text::{FreeTypeLibrary, HBShaper, SectionOptions, TaggedString, WritingModeType, get_shaping};
+use mln_text::{SectionOptions, ShapedText, Shaper, TaggedString, WritingModeType, get_shaping};
 use mln_tile_id::GeometryTileFeature;
 use mln_util::constants::ONE_EM;
 use mln_util::tiny_sdf::transform_raster_to_sdf;
@@ -189,17 +189,17 @@ fn glyph_sdf_dense(bench: &mut Bench) {
 fn glyph_sdf(bench: &mut Bench, tile: LabelTile, repeats: u64) {
     let fixtures = Fixtures::open(bench);
     let face = GlyphIDType::face(NonZeroU16::MIN);
-    let shaper = HBShaper::new(face, fixtures.read("fonts/NotoSansJP-Regular.otf"), &FreeTypeLibrary::new());
+    let shaper = Shaper::new(face, fixtures.read("fonts/NotoSansJP-Regular.otf"));
     assert!(shaper.valid(), "Noto Sans JP opens");
     let mut glyphs = BTreeSet::new();
     for japanese in labels(&fixtures, tile).iter().filter_map(|label| label.japanese.as_ref()) {
-        let (mut ids, mut adjusts) = (Vec::new(), Vec::new());
-        shaper.create_complex_glyph_ids(japanese, false, &mut ids, &mut adjusts);
-        glyphs.extend(ids);
+        let mut shaped = ShapedText::default();
+        shaper.shape(japanese, false, &mut shaped);
+        glyphs.extend(shaped.glyphs);
     }
     for _ in 0..repeats {
         bench.measure(|| {
-            for glyph in &glyphs {
+            for &glyph in &glyphs {
                 let drawn = shaper.rasterize_glyph(glyph);
                 black_box(transform_raster_to_sdf(&drawn.bitmap, 8.0, 0.25));
             }

@@ -26,7 +26,7 @@ use crate::Registry;
 use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::layout::tile_layout::{Dependencies, LayoutParams, Resolved};
-use crate::text::glyph_store::HBShapeResults;
+use crate::text::glyph_store::ShapeResults;
 use crate::tile::contents::LayoutResult;
 use crate::tile::job::{
     DataCache, DataInput, DataKey, Job, JobId, JobResult, LayoutJob, LayoutOutput, Run, SourceKey, SourceStyle,
@@ -138,7 +138,7 @@ fn answer(dependencies: &Dependencies) -> Resolved {
     let image_page = atlas.pack_images(&icon_map, &pattern_map);
     Resolved {
         glyphs: glyph_page.positions,
-        shaping: HBShapeResults::new(),
+        shaping: ShapeResults::new(),
         icons: image_page.icons,
         patterns: image_page.patterns,
         missing_images,

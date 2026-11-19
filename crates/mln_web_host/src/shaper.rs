@@ -9,8 +9,8 @@
 use std::cell::RefCell;
 
 use mln_renderer::text::font_face_engine::{FontFaceEngine, FontFaceShaper};
-use mln_text::HBShapeAdjust;
 use mln_text::glyph::{FontData, Glyph, GlyphID, GlyphIDType, GlyphMetrics};
+use mln_text::{GlyphAdjust, ShapedText};
 use mln_util::image::AlphaImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
@@ -183,20 +183,20 @@ struct ShaperFace {
 }
 
 impl FontFaceShaper for ShaperFace {
-    fn shape(&self, text: &[char], rtl: bool, glyph_ids: &mut Vec<GlyphID>, adjusts: &mut Vec<HBShapeAdjust>) {
+    fn shape(&self, text: &[char], rtl: bool, shaped: &mut ShapedText) {
         match self.face.shape(&text.iter().collect::<String>(), rtl) {
-            Ok(shaped) => {
-                for glyph in shaped.as_chunks::<4>().0 {
-                    glyph_ids.push(GlyphID::with_type(glyph[0] as u16, self.type_));
-                    adjusts.push(HBShapeAdjust::new(glyph[1], glyph[2], glyph[3]));
+            Ok(glyphs) => {
+                for glyph in glyphs.as_chunks::<4>().0 {
+                    shaped.glyphs.push(GlyphID::with_type(glyph[0] as u16, self.type_));
+                    shaped.adjusts.push(GlyphAdjust::new(glyph[1], glyph[2], glyph[3]));
                 }
             }
             Err(error) => Log::error(Event::Glyph, format!("shaping with a font face failed: {}", message(&error))),
         }
     }
 
-    fn rasterize(&self, glyph: &GlyphID) -> Glyph {
-        let empty = Glyph { id: *glyph, ..Glyph::default() };
+    fn rasterize(&self, glyph: GlyphID) -> Glyph {
+        let empty = Glyph { id: glyph, ..Glyph::default() };
         let parts = match self.face.rasterize(glyph.code) {
             Ok(parts) => parts,
             Err(error) => {
@@ -213,7 +213,7 @@ impl FontFaceShaper for ShaperFace {
             return empty;
         };
         Glyph {
-            id: *glyph,
+            id: glyph,
             bitmap,
             metrics: GlyphMetrics {
                 width: width as u32,

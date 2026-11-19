@@ -37,7 +37,7 @@ use crate::query::{RenderedQueryOptions, SourceQueryOptions};
 use crate::render_layer::ErasedLayerBucket;
 use crate::render_orchestrator::drop_on_workers;
 use crate::source_state::SourceFeatureState;
-use crate::text::glyph_store::HBShapeResults;
+use crate::text::glyph_store::ShapeResults;
 use crate::tile_mask::TileMask;
 use crate::tile_render_data::TileAtlasTextures;
 
@@ -294,7 +294,7 @@ impl Answer {
         let resolved = &*self.resolved;
         let atlases = self.atlases.as_ref()?;
 
-        let mut shaping = HBShapeResults::new();
+        let mut shaping = ShapeResults::new();
         for (font_stack, types) in &deps.glyphs.shapes {
             let Some(shaped) = resolved.shaping.get(font_stack) else {
                 continue;
@@ -318,12 +318,8 @@ impl Answer {
         }
         for (font_stack, types) in &shaping {
             let ids = wanted.entry(font_stack_hash(font_stack)).or_default();
-            for (type_, texts) in types {
-                ids.extend(
-                    texts
-                        .values()
-                        .flat_map(|shaped| shaped.glyphs.iter().map(|code| GlyphID { code: *code, type_: *type_ })),
-                );
+            for texts in types.values() {
+                ids.extend(texts.values().flat_map(|shaped| shaped.glyphs.iter().copied()));
             }
         }
         let mut glyphs = GlyphPositions::new();
@@ -347,7 +343,7 @@ impl Answer {
             resolved.missing_images.iter().filter(|id| deps.images.contains_key(*id)).cloned().collect();
 
         let glyph_count = |positions: &GlyphPositions| positions.values().map(BTreeMap::len).sum::<usize>();
-        let shaping_count = |shaping: &HBShapeResults| {
+        let shaping_count = |shaping: &ShapeResults| {
             shaping.values().flat_map(|types| types.values()).map(BTreeMap::len).sum::<usize>()
         };
         if glyph_count(&glyphs) == glyph_count(&resolved.glyphs)

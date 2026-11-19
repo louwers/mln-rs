@@ -1,4 +1,4 @@
-//! The browser build's font-face shaper: `mln_text`'s `HBShaper` in a wasm
+//! The browser build's font-face shaper: `mln_text`'s `Shaper` in a wasm
 //! module of its own. The map's Web Worker (examples/web) imports it the
 //! first time a style declares font faces, a second instance beside its own,
 //! and calls it through JavaScript as its map's `FontFaceEngine`
@@ -10,7 +10,7 @@
 use std::num::NonZeroU16;
 
 use mln_text::glyph::{FontData, GlyphID, GlyphIDType};
-use mln_text::{FreeTypeLibrary, HBShapeAdjust, HBShaper};
+use mln_text::{ShapedText, Shaper};
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
@@ -33,29 +33,29 @@ fn start() {
 pub fn open_face(type_: u16, data: Vec<u8>, face_index: u32) -> Option<Face> {
     let data = FontData::from(data).with_face_index(face_index);
     let type_ = GlyphIDType::face(NonZeroU16::new(type_)?);
-    let shaper = HBShaper::new(type_, data, &FreeTypeLibrary::new());
+    let shaper = Shaper::new(type_, data);
     shaper.valid().then_some(Face { shaper, type_ })
 }
 
 /// A font file `openFace` opened.
 #[wasm_bindgen]
 pub struct Face {
-    shaper: HBShaper,
+    shaper: Shaper,
     type_: GlyphIDType,
 }
 
 #[wasm_bindgen]
 impl Face {
-    /// Shapes `text`: per glyph, its index, then its `HBShapeAdjust` (x
-    /// offset, y offset, advance).
+    /// Shapes `text`: per glyph, its index, then its x offset, y offset and
+    /// advance.
     pub fn shape(&self, text: &str, rtl: bool) -> Vec<f32> {
         let text: Vec<char> = text.chars().collect();
-        let mut glyph_ids: Vec<GlyphID> = Vec::new();
-        let mut adjusts: Vec<HBShapeAdjust> = Vec::new();
-        self.shaper.create_complex_glyph_ids(&text, rtl, &mut glyph_ids, &mut adjusts);
-        glyph_ids
+        let mut shaped = ShapedText::default();
+        self.shaper.shape(&text, rtl, &mut shaped);
+        shaped
+            .glyphs
             .iter()
-            .zip(&adjusts)
+            .zip(&shaped.adjusts)
             .flat_map(|(id, adjust)| [f32::from(id.code), adjust.x_offset, adjust.y_offset, adjust.advance])
             .collect()
     }
@@ -65,7 +65,7 @@ impl Face {
     /// (0 or 1), and the bitmap's width and height, the bitmap a
     /// `Uint8Array`.
     pub fn rasterize(&self, code: u16) -> js_sys::Array {
-        let glyph = self.shaper.rasterize_glyph(&GlyphID::with_type(code, self.type_));
+        let glyph = self.shaper.rasterize_glyph(GlyphID::with_type(code, self.type_));
         let m = &glyph.metrics;
         let size = glyph.bitmap.size;
         let metrics = [

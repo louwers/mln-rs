@@ -10,7 +10,7 @@ use std::sync::Arc;
 use crate::face::Face;
 use crate::glyph::{FontData, GlyphID, GlyphIDType};
 use crate::woff::{self, WoffError};
-use crate::{FreeTypeLibrary, HBShapeAdjust, HBShaper};
+use crate::{GlyphAdjust, ShapedText, Shaper};
 
 const TTF: &[u8] = include_bytes!("../../tests/fixtures/khmer.ttf");
 const WOFF: &[u8] = include_bytes!("../../tests/fixtures/khmer.woff");
@@ -20,14 +20,15 @@ const WOFF2: &[u8] = include_bytes!("../../tests/fixtures/khmer.woff2");
 /// and GPOS rearrange and position.
 const KHMER: &str = "ខ្មែរ";
 
-fn shape(font: &[u8]) -> (Vec<GlyphID>, Vec<HBShapeAdjust>, Vec<crate::glyph::Glyph>) {
+fn shape(font: &[u8]) -> (Vec<GlyphID>, Vec<GlyphAdjust>, Vec<crate::glyph::Glyph>) {
     let type_ = GlyphIDType::face(NonZeroU16::MIN);
-    let shaper = HBShaper::new(type_, font.to_vec(), &FreeTypeLibrary::new());
+    let shaper = Shaper::new(type_, font.to_vec());
     assert!(shaper.valid());
     let text: Vec<char> = KHMER.chars().collect();
-    let (mut ids, mut adjusts) = (Vec::new(), Vec::new());
-    shaper.create_complex_glyph_ids(&text, false, &mut ids, &mut adjusts);
-    let glyphs = ids.iter().map(|id| shaper.rasterize_glyph(id)).collect();
+    let mut shaped = ShapedText::default();
+    shaper.shape(&text, false, &mut shaped);
+    let (ids, adjusts) = (shaped.glyphs, shaped.adjusts);
+    let glyphs = ids.iter().map(|&id| shaper.rasterize_glyph(id)).collect();
     (ids, adjusts, glyphs)
 }
 
@@ -66,9 +67,9 @@ fn woff_decodes_to_the_ttf_tables() {
 fn woff2_decodes_to_a_font() {
     let sfnt = woff::decode_woff2(WOFF2).unwrap();
     let glyph = |face: Face| face.font().and_then(|font| font.charmap().map_unicode('ខ'));
-    let decoded = glyph(Face::from_memory(sfnt));
+    let decoded = glyph(Face::new(sfnt, crate::weight::REGULAR_WEIGHT));
     assert!(decoded.is_some());
-    assert_eq!(decoded, glyph(Face::from_memory(TTF.to_vec())));
+    assert_eq!(decoded, glyph(Face::new(TTF.to_vec(), crate::weight::REGULAR_WEIGHT)));
 }
 
 #[test]
@@ -84,7 +85,7 @@ fn to_sfnt_keeps_other_data_uncopied() {
 #[test]
 fn face_opens_woff_and_woff2() {
     for font in [WOFF, WOFF2] {
-        let face = Face::from_memory(font.to_vec());
+        let face = Face::new(font.to_vec(), crate::weight::REGULAR_WEIGHT);
         let Some(skrifa::font::Source::Blob(data)) = face.font().map(skrifa::Font::source) else {
             panic!("a valid face reads the font's bytes");
         };
@@ -130,7 +131,7 @@ fn malformed_woff_is_an_error() {
     assert_eq!(woff::decode_woff(TTF), Err(WoffError::InvalidWoff));
     assert_eq!(woff::decode_woff2(b"wOF2"), Err(WoffError::InvalidWoff2));
     assert_eq!(woff::to_sfnt(FontData::from(b"wOFF".to_vec())), Err(WoffError::InvalidWoff));
-    assert!(!Face::from_memory(corrupt).is_valid());
+    assert!(!Face::new(corrupt, crate::weight::REGULAR_WEIGHT).is_valid());
 }
 
 /// A decoder from a font file to its sfnt.
@@ -150,7 +151,7 @@ fn damaged_files_never_panic() {
                 let mut damaged = font.to_vec();
                 damaged[at] ^= flip;
                 if let Ok(sfnt) = woff::to_sfnt(FontData::from(damaged)) {
-                    let _ = Face::from_memory(sfnt);
+                    let _ = Face::new(sfnt, crate::weight::REGULAR_WEIGHT);
                 }
             }
         }

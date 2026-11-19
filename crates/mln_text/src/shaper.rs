@@ -9,8 +9,8 @@
 //   HB_TINY never adds the automatic fraction features);
 // - no glyph extents, as hb-ft under HB_TINY gives none, which keeps
 //   HarfRust's fallback mark positioning from moving marks.
-// Unlike HB_TINY's HB_NO_VAR, a variable font shapes at regular weight
-// (`weight::at_regular_weight`), with its GSUB/GPOS feature variations.
+// Unlike HB_TINY's HB_NO_VAR, a variable font shapes at its weight (regular
+// unless made `Shaper::at_weight`), with its GSUB/GPOS feature variations.
 // HarfRust has no switch for some HB_TINY options (HB_NO_OT_SHAPE_FALLBACK,
 // HB_NO_OT_SHAPER_VOWEL_CONSTRAINTS, HB_NO_UCD_UNASSIGNED), so a few texts
 // shape differently: fallback mark positioning, an inserted U+25CC, and
@@ -26,9 +26,31 @@ use mln_util::hash::HashMap;
 use parking_lot::Mutex;
 use unicode_properties::{GeneralCategory, UnicodeGeneralCategory};
 
-use crate::face::{Face, FreeTypeLibrary, SDF_FONT_SIZE};
+use crate::face::{Face, SDF_FONT_SIZE};
 use crate::glyph::{FontData, Glyph, GlyphID, GlyphIDType};
-use crate::harfbuzz::HBShapeAdjust;
+
+/// Where a shaped glyph goes, in pixels at 24 px: its offset from the pen,
+/// and how far it moves the pen.
+#[derive(Clone, Copy, PartialEq, Debug, Default, mln_wire::Wire)]
+pub struct GlyphAdjust {
+    pub x_offset: f32,
+    pub y_offset: f32,
+    pub advance: f32,
+}
+
+impl GlyphAdjust {
+    #[must_use]
+    pub fn new(x_offset: f32, y_offset: f32, advance: f32) -> Self {
+        GlyphAdjust { x_offset, y_offset, advance }
+    }
+}
+
+/// Shaped text: its glyphs in visual order, and where each goes.
+#[derive(Clone, Debug, Default, PartialEq, mln_wire::Wire)]
+pub struct ShapedText {
+    pub glyphs: Vec<GlyphID>,
+    pub adjusts: Vec<GlyphAdjust>,
+}
 
 /// HarfBuzz's default language, which with `HB_NO_SETLOCALE` is "c".
 fn get_default_language() -> Language {
@@ -49,7 +71,8 @@ pub(crate) fn get_unicode_script(c: char) -> [u8; 4] {
 /// Shape plans by script tag and right-to-left direction.
 type ShapePlans = HashMap<([u8; 4], bool), Arc<ShapePlan>>;
 
-pub(crate) struct Impl {
+/// A font file that shapes text with HarfRust and draws its glyphs.
+pub struct Shaper {
     type_: GlyphIDType,
     face: Face,
     /// HarfBuzz caches shape plans per segment properties (script and
@@ -75,18 +98,28 @@ impl FontFuncs for NoGlyphExtents {
     }
 }
 
-impl Impl {
-    /// A shaper for the font in `font_file_data`, whose glyphs have type
-    /// `type_`.
-    pub(crate) fn new(type_: GlyphIDType, font_file_data: impl Into<FontData>, _lib: &FreeTypeLibrary) -> Self {
-        Impl { type_, face: Face::from_memory(font_file_data), plans: Mutex::new(HashMap::default()) }
+impl Shaper {
+    /// A shaper for the font in `data`, whose glyphs have type `type_`. It
+    /// keeps `data` instead of copying it.
+    pub fn new(type_: GlyphIDType, data: impl Into<FontData>) -> Self {
+        Shaper::at_weight(type_, data, crate::weight::REGULAR_WEIGHT)
     }
 
-    pub(crate) fn valid(&self) -> bool {
+    /// [`Shaper::new`], with a variable font at the OpenType `weight` within
+    /// its `wght` axis rather than at regular weight.
+    pub fn at_weight(type_: GlyphIDType, data: impl Into<FontData>, weight: f32) -> Self {
+        Shaper { type_, face: Face::new(data, weight), plans: Mutex::new(HashMap::default()) }
+    }
+
+    /// Whether the data is a font the shaper reads.
+    #[must_use]
+    pub fn valid(&self) -> bool {
         self.face.is_valid()
     }
 
-    pub(crate) fn rasterize_glyph(&self, glyph: GlyphID) -> Glyph {
+    /// The glyph's coverage at 24 px, before the signed distance field.
+    #[must_use]
+    pub fn rasterize_glyph(&self, glyph: GlyphID) -> Glyph {
         self.face.rasterize_glyph(glyph)
     }
 
@@ -104,13 +137,10 @@ impl Impl {
         }))
     }
 
-    pub(crate) fn create_complex_glyph_ids(
-        &self,
-        text: &[char],
-        rtl: bool,
-        glyph_ids: &mut Vec<GlyphID>,
-        adjusts: &mut Vec<HBShapeAdjust>,
-    ) {
+    /// Appends the glyphs of `text`, one run of one direction in logical
+    /// order, and where each goes. Glyphs come back in visual order, so a
+    /// right-to-left run's glyphs come back reversed.
+    pub fn shape(&self, text: &[char], rtl: bool, shaped: &mut ShapedText) {
         struct TextPart {
             text: Vec<char>,
             script: [u8; 4],
@@ -122,8 +152,7 @@ impl Impl {
         if text.is_empty() {
             return;
         }
-        // The C++ never checks `face.isValid()` here (font and buffer are
-        // uninitialized then); callers only shape with valid shapers.
+        // An invalid font shapes nothing.
         let Some(font) = self.face.font() else {
             return;
         };
@@ -173,31 +202,27 @@ impl Impl {
                 continue;
             };
 
-            // Get Harfbuzz adjustion
             let glyph_info = buffer.glyph_infos();
             let glyph_pos = buffer.glyph_positions();
-            glyph_ids.reserve(glyph_info.len());
-            adjusts.reserve(glyph_info.len());
+            shaped.glyphs.reserve(glyph_info.len());
+            shaped.adjusts.reserve(glyph_info.len());
             for (info, pos) in glyph_info.iter().zip(glyph_pos) {
-                glyph_ids.push(GlyphID::with_type(info.glyph_id as u16, self.type_));
-
-                let x_advance = pos.x_advance as f32 / 64.0;
-                let x_offset = pos.x_offset as f32 / 64.0;
-                let y_offset = pos.y_offset.wrapping_neg() as f32 / 64.0;
-
-                adjusts.push(HBShapeAdjust::new(x_offset, y_offset, x_advance));
+                shaped.glyphs.push(GlyphID::with_type(info.glyph_id as u16, self.type_));
+                shaped.adjusts.push(GlyphAdjust {
+                    x_offset: pos.x_offset as f32 / 64.0,
+                    y_offset: pos.y_offset.wrapping_neg() as f32 / 64.0,
+                    advance: pos.x_advance as f32 / 64.0,
+                });
             }
         }
     }
 
-    /// One iteration of `createComplexGlyphIDs`' loop: `hb_buffer_reset`,
-    /// direction, script, language, the text, `hb_shape`.
+    /// Shapes one part of a run, of one script.
     fn shape_part(&self, font: &harfrust::Font, text: &[char], script: [u8; 4], rtl: bool) -> Option<Buffer> {
         let shaper_font = ShaperFont::new(font).with_scale(SDF_FONT_SIZE * 64).with_font_funcs(Some(&NoGlyphExtents));
         let language = get_default_language();
         let features = hb_tiny_features();
 
-        // Setup harfbuzz
         let mut buffer = Buffer::new();
         buffer.set_direction(direction(rtl));
         buffer.set_script(Some(to_script(script)));
@@ -208,7 +233,6 @@ impl Impl {
             buffer.push(u32::from(c), cluster);
         }
 
-        // harfbuzz shaping
         let plan = self.plan(font, script, rtl, &language, &features);
         let options = ShapeOptions::new().plan(Some(&plan)).features(&features);
         // hb_shape cannot fail on a valid buffer; HarfRust only fails on

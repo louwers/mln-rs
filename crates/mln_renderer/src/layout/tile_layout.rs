@@ -25,7 +25,7 @@ use crate::group_by_layout::group_layers;
 use crate::layer_type::{ErasedEvaluatedLayer, ErasedLayout};
 use crate::layout::filter_groups::FilterGroups;
 use crate::layout::layout::{BuildParams, LayoutParameters, SourceLayer};
-use crate::text::glyph_store::HBShapeResults;
+use crate::text::glyph_store::ShapeResults;
 use crate::tile::contents::LayoutBuckets;
 
 /// How a tile is laid out, apart from its style and data.
@@ -116,7 +116,7 @@ impl Dependencies {
 pub(crate) struct Resolved {
     /// `None` for a glyph that no font has, or whose range failed.
     pub(crate) glyphs: GlyphPositions,
-    pub(crate) shaping: HBShapeResults,
+    pub(crate) shaping: ShapeResults,
     #[wire(with = "sorted::map")]
     pub(crate) icons: ImagePositions,
     #[wire(with = "sorted::map")]

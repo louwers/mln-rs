@@ -10,7 +10,7 @@ use std::num::NonZeroU16;
 
 use crate::glyph::{Glyph, GlyphID, GlyphIDType};
 use crate::weight::{REGULAR_WEIGHT, at_weight};
-use crate::{FontFile, FreeTypeLibrary, HBShapeAdjust, HBShaper};
+use crate::{FontFile, GlyphAdjust, ShapedText, Shaper};
 
 const VARIABLE: &[u8] = include_bytes!("../../tests/fixtures/cjk-vf.otf");
 const REGULAR: &[u8] = include_bytes!("../../tests/fixtures/cjk-400.otf");
@@ -18,13 +18,14 @@ const THIN: &[u8] = include_bytes!("../../tests/fixtures/cjk-100.otf");
 const KHMER: &[u8] = include_bytes!("../../tests/fixtures/khmer.ttf");
 
 /// The positions and glyphs of "中A", shaped and rasterized.
-fn shape(font: &[u8]) -> (Vec<HBShapeAdjust>, Vec<Glyph>) {
-    let shaper = HBShaper::new(GlyphIDType::face(NonZeroU16::MIN), font.to_vec(), &FreeTypeLibrary::new());
+fn shape(font: &[u8]) -> (Vec<GlyphAdjust>, Vec<Glyph>) {
+    let shaper = Shaper::new(GlyphIDType::face(NonZeroU16::MIN), font.to_vec());
     assert!(shaper.valid());
-    let (mut ids, mut adjusts) = (Vec::new(), Vec::new());
-    shaper.create_complex_glyph_ids(&['中', 'A'], false, &mut ids, &mut adjusts);
-    assert_eq!(ids.len(), 2);
-    (adjusts, ids.iter().map(|id| shaper.rasterize_glyph(id)).collect())
+    let mut shaped = ShapedText::default();
+    shaper.shape(&['中', 'A'], false, &mut shaped);
+    assert_eq!(shaped.glyphs.len(), 2);
+    let glyphs = shaped.glyphs.iter().map(|&id| shaper.rasterize_glyph(id)).collect();
+    (shaped.adjusts, glyphs)
 }
 
 /// The glyph's coverage: the sum of its alpha values.
@@ -37,7 +38,7 @@ fn a_variable_font_draws_as_its_regular_instance() {
     let (variable, regular, thin) = (shape(VARIABLE), shape(REGULAR), shape(THIN));
     // "A" is wider at regular weight than at Thin. The static instance's
     // advances, like its outlines, are rounded to whole units.
-    let advances = |adjusts: &[HBShapeAdjust]| adjusts.iter().map(|adjust| adjust.advance).collect::<Vec<_>>();
+    let advances = |adjusts: &[GlyphAdjust]| adjusts.iter().map(|adjust| adjust.advance).collect::<Vec<_>>();
     for ((variable, regular), thin) in advances(&variable.0).iter().zip(advances(&regular.0)).zip(advances(&thin.0)) {
         assert!((variable - regular).abs() <= 1.0 / 64.0, "{variable} vs {regular}");
         assert!(thin == regular || (thin - regular).abs() > 0.5, "{thin} vs {regular}");

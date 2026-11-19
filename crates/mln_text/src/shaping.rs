@@ -13,7 +13,7 @@ use crate::glyph::{
     Glyph, GlyphID, GlyphIDType, GlyphMetrics, GlyphPositions, PositionedGlyph, PositionedLine, Shaping,
     WritingModeType, pbf_code,
 };
-use crate::harfbuzz::HBShapeAdjust;
+use crate::shaper::GlyphAdjust;
 use crate::tagged_string::{SectionOptions, StyledText, TaggedString};
 
 /// Zero width space that is used to suggest break points for Japanese
@@ -659,8 +659,8 @@ fn shape_lines(
             let section_index = line.get_section_index(i) as usize;
             let section = line.section_at(section_index);
             let ch = line.char_at(i);
-            let mut adjust: Option<&HBShapeAdjust> = None;
-            let code = if let Some(shaped) = &section.shaped {
+            let mut adjust: Option<&GlyphAdjust> = None;
+            let mut code_point = if let Some(shaped) = &section.shaped {
                 debug_assert!(section.start_index >= 0);
                 let offset = usize::try_from(section.start_index).ok().and_then(|start| i.checked_sub(start));
                 adjust = offset.and_then(|offset| shaped.adjusts.get(offset));
@@ -670,12 +670,11 @@ fn shape_lines(
                 }
             } else {
                 // A character beyond the BMP has no glyph.
-                match pbf_code(ch) {
-                    Some(code) => code,
+                match GlyphID::from_char(ch) {
+                    Some(glyph) => glyph,
                     None => continue,
                 }
             };
-            let mut code_point = GlyphID::with_type(code, section.type_);
 
             // (double baselineOffset = 0.0, float advance = 0.0f: every
             // path that reaches the positioned glyph assigns both)

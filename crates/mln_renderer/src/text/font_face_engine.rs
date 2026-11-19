@@ -1,9 +1,8 @@
-// What GlyphStore shapes and rasterizes a style's "font-faces" with: the
-// C++ core's HBShaper (src/mln/text/harfbuzz.hpp) behind a trait, so that a
-// host can load it elsewhere. Not a C++ type.
+// What GlyphStore shapes and rasterizes font files with: mln_text's Shaper
+// behind a trait, so that a host can load it elsewhere.
 //
 // Natively, and for any build with the `font-face-shaper` feature, the
-// engine is mln_text's HBShaper in-process, ready at once. The browser build
+// engine is mln_text's Shaper in-process, ready at once. The browser build
 // (examples/web) turns the feature off, which leaves HarfRust, skrifa and
 // the glyph rasterizer out of its module, and sets an engine that loads them
 // as a second wasm module the first time a style declares font faces
@@ -11,17 +10,17 @@
 
 use std::sync::Arc;
 
-use mln_text::HBShapeAdjust;
+use mln_text::ShapedText;
 use mln_text::glyph::{FontData, Glyph, GlyphID, GlyphIDType};
 
-/// A font file loaded for shaping: what `HBShaper` does for `GlyphStore`.
+/// A font file loaded for shaping: what `Shaper` does for `GlyphStore`.
 pub trait FontFaceShaper {
     /// Appends the glyphs of `text`, one run of one direction in logical
     /// order, in visual order, and their positions.
-    fn shape(&self, text: &[char], rtl: bool, glyph_ids: &mut Vec<GlyphID>, adjusts: &mut Vec<HBShapeAdjust>);
+    fn shape(&self, text: &[char], rtl: bool, shaped: &mut ShapedText);
 
     /// Rasterizes the glyph: its coverage at 24 px, before the SDF transform.
-    fn rasterize(&self, glyph: &GlyphID) -> Glyph;
+    fn rasterize(&self, glyph: GlyphID) -> Glyph;
 }
 
 /// Loads font files as `FontFaceShaper`s.
@@ -38,12 +37,12 @@ pub trait FontFaceEngine: Send + Sync {
 }
 
 /// The engine of a renderer that wasn't given one
-/// (`Renderer::set_font_face_engine`): `mln_text`'s `HBShaper` with the
+/// (`Renderer::set_font_face_engine`): `mln_text`'s `Shaper` with the
 /// `font-face-shaper` feature, else one that loads nothing.
 #[cfg(feature = "font-face-shaper")]
 #[must_use]
 pub fn default_engine() -> Arc<dyn FontFaceEngine> {
-    Arc::new(in_process::HBShaperEngine)
+    Arc::new(in_process::ShaperEngine)
 }
 
 /// Without the shaper, a style's font faces load nothing until a host sets
@@ -70,31 +69,30 @@ pub fn default_engine() -> Arc<dyn FontFaceEngine> {
 #[cfg(feature = "font-face-shaper")]
 mod in_process {
     use mln_text::glyph::{FontData, Glyph, GlyphID, GlyphIDType};
-    use mln_text::{FreeTypeLibrary, HBShapeAdjust, HBShaper};
+    use mln_text::{ShapedText, Shaper};
 
     use super::{FontFaceEngine, FontFaceShaper};
 
-    /// `mln_text`'s `HBShaper` in this thread, as the C++ core shapes.
-    pub(super) struct HBShaperEngine;
+    /// `mln_text`'s `Shaper` in this thread.
+    pub(super) struct ShaperEngine;
 
-    impl FontFaceEngine for HBShaperEngine {
+    impl FontFaceEngine for ShaperEngine {
         fn prepare(&self, ready: Box<dyn FnOnce(Result<(), String>) + Send>) {
             ready(Ok(()));
         }
 
-        /// `loadHBShaper`'s `HBShaper(type, data, ftLibrary)` and `valid()`.
         fn load(&self, type_: GlyphIDType, data: FontData) -> Option<Box<dyn FontFaceShaper>> {
-            let shaper = HBShaper::new(type_, data, &FreeTypeLibrary::new());
+            let shaper = Shaper::new(type_, data);
             shaper.valid().then(|| -> Box<dyn FontFaceShaper> { Box::new(shaper) })
         }
     }
 
-    impl FontFaceShaper for HBShaper {
-        fn shape(&self, text: &[char], rtl: bool, glyph_ids: &mut Vec<GlyphID>, adjusts: &mut Vec<HBShapeAdjust>) {
-            self.create_complex_glyph_ids(text, rtl, glyph_ids, adjusts);
+    impl FontFaceShaper for Shaper {
+        fn shape(&self, text: &[char], rtl: bool, shaped: &mut ShapedText) {
+            Shaper::shape(self, text, rtl, shaped);
         }
 
-        fn rasterize(&self, glyph: &GlyphID) -> Glyph {
+        fn rasterize(&self, glyph: GlyphID) -> Glyph {
             self.rasterize_glyph(glyph)
         }
     }

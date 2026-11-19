@@ -9,22 +9,10 @@ use crate::glyph::{FontData, Glyph, GlyphID};
 /// The size glyphs are drawn and shaped at, in pixels per em.
 pub(crate) const SDF_FONT_SIZE: i32 = 24;
 
-/// A handle that [`HBShaper::new`](crate::HBShaper::new) takes. It holds no
-/// state.
-#[derive(Debug, Default)]
-pub struct FreeTypeLibrary;
-
-impl FreeTypeLibrary {
-    #[must_use]
-    pub fn new() -> Self {
-        FreeTypeLibrary
-    }
-}
-
 #[derive(Clone)]
 pub(crate) struct Face {
     /// The font at its weight (`weight::REGULAR_WEIGHT`, unless
-    /// made with [`Face::from_memory_at_weight`]), or `None` when the data
+    /// made at another weight), or `None` when the data
     /// holds no font this can read or the font maps no characters.
     font: Option<Font>,
     /// The hinted glyph loader at `SDF_FONT_SIZE`, made on first use.
@@ -39,14 +27,9 @@ impl Face {
     ///
     /// The face reads `font_data` instead of copying it, unless it is a WOFF
     /// or WOFF2 file: then it reads the font decoded from it, and isn't valid
-    /// when that fails.
-    pub(crate) fn from_memory(font_data: impl Into<FontData>) -> Self {
-        Self::from_memory_at_weight(font_data, crate::weight::REGULAR_WEIGHT)
-    }
-
-    /// [`Face::from_memory`], with a variable font at `weight` within its
-    /// `wght` axis rather than at regular weight.
-    pub(crate) fn from_memory_at_weight(font_data: impl Into<FontData>, weight: f32) -> Self {
+    /// when that fails. A variable font is at the OpenType `weight` within
+    /// its `wght` axis.
+    pub(crate) fn new(font_data: impl Into<FontData>, weight: f32) -> Self {
         let font = crate::woff::to_sfnt(font_data.into())
             .ok()
             .and_then(|data| Font::new(data.shared(), data.face_index()))
@@ -95,7 +78,7 @@ impl FontFile {
     /// `None` when it isn't a font the map can draw.
     #[must_use]
     pub fn new(data: FontData, weight: u16) -> Option<Self> {
-        let face = Face::from_memory_at_weight(data, f32::from(weight));
+        let face = Face::new(data, f32::from(weight));
         face.is_valid().then_some(FontFile { face })
     }
 

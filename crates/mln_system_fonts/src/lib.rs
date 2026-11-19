@@ -243,7 +243,7 @@ mod tests {
     // font it chose, and pass with none; `--nocapture` lists them.
 
     use mln_text::glyph::GlyphIDType;
-    use mln_text::{FreeTypeLibrary, HBShaper};
+    use mln_text::{ShapedText, Shaper};
     use skrifa::MetadataProvider;
 
     use super::{SystemFontFace, fallback_font_faces, scripts};
@@ -281,10 +281,11 @@ mod tests {
             let font = skrifa::FontRef::from_index(data.as_bytes(), data.face_index()).unwrap();
             let nominal: Vec<u16> =
                 sample.chars().map(|c| font.charmap().map(c).map_or(0, |glyph| glyph.to_u32() as u16)).collect();
-            let shaper = HBShaper::new(face.face.type_, data, &FreeTypeLibrary::new());
+            let shaper = Shaper::new(face.face.type_, data);
             let text: Vec<char> = sample.chars().collect();
-            let (mut ids, mut adjusts) = (Vec::new(), Vec::new());
-            shaper.create_complex_glyph_ids(&text, false, &mut ids, &mut adjusts);
+            let mut shaped = ShapedText::default();
+            shaper.shape(&text, false, &mut shaped);
+            let (ids, adjusts) = (shaped.glyphs, shaped.adjusts);
             let shaped: Vec<u16> = ids.iter().map(|id| id.code).collect();
             let moved = adjusts.iter().any(|adjust| adjust.x_offset != 0.0 || adjust.y_offset != 0.0);
             println!("{}: {sample} {nominal:?} -> {shaped:?}{}", face.family, if moved { " moved" } else { "" });
