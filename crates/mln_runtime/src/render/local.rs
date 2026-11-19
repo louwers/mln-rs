@@ -641,16 +641,18 @@ impl<B: LocalBackend> BackendGfx<B> {
         Some(renderer.tear_down(&mut *self.backend.gpu()))
     }
 
-    /// Draws `update` into a frame of the target: the target begins the
-    /// frame, the renderer draws into it, and the target ends it. Returns
-    /// where the frame went, or `None` when nothing was drawn.
+    /// Draws `update` into a frame of the target: the renderer updates to
+    /// it, the target begins the frame, the renderer draws into it, and the
+    /// target ends it. Returns where the frame went, or `None` when nothing
+    /// was drawn.
     fn render(&mut self, update: &Arc<UpdateParameters>) -> Option<Handoff> {
         let renderer = self.renderer.as_mut()?;
         let target = self.frames.target()?;
         let mut gpu = self.backend.gpu();
         let gpu = &mut *gpu;
+        let frame = renderer.update(gpu, update)?;
         let image = target.begin_frame(gpu)?;
-        let drawn = renderer.render(gpu, &image, update)?;
+        let drawn = renderer.render(gpu, &image, frame);
         let handoff = target.end_frame(gpu);
         renderer.finish_frame(gpu, drawn, handoff);
         Some(handoff)

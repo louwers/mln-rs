@@ -45,8 +45,9 @@ enum RenderState {
 }
 
 /// What the last frame that [`Renderer::render`] drew spent on
-/// each of its steps, on the CPU. They follow each other, and together take
-/// nearly all of `render`.
+/// each of its steps, on the CPU, from its [update](Renderer::update) on.
+/// They follow each other, and together take nearly all of `update` and
+/// `render`.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct RenderTimings {
     /// The update up to symbol placement: the style's changes, the layers'
@@ -74,8 +75,9 @@ pub struct RenderTimings {
 /// host, with one `Gpu` lent to all of it:
 ///
 /// ```ignore
+/// let frame = renderer.update(gpu, &update)?;
 /// let image = target.begin_frame(gpu)?;
-/// let drawn = renderer.render(gpu, &image, &update)?;
+/// let drawn = renderer.render(gpu, &image, frame);
 /// let handoff = target.end_frame(gpu);
 /// renderer.finish_frame(gpu, drawn, handoff);
 /// ```
@@ -89,6 +91,15 @@ pub struct Renderer {
     encoder: Encoder,
     /// Where the renderer reports its events, once the host gives it one.
     events: Option<RendererEvents>,
+}
+
+/// A frame that [`Renderer::update`] brought the renderer's state to, for
+/// [`Renderer::render`] to draw.
+#[must_use = "an updated frame is drawn"]
+pub struct UpdatedFrame {
+    frame: Frame,
+    parameters: Arc<UpdateParameters>,
+    updated: Instant,
 }
 
 /// A frame that [`Renderer::render`] drew, for
@@ -258,22 +269,13 @@ impl Renderer {
         self.events = events;
     }
 
-    /// Draws `update_parameters` into `image`, textures of `gpu` that the
-    /// host's target began a frame with, and submits the frame's passes.
-    /// Returns the frame, which the host ends on its target and then
-    /// [finishes](Self::finish_frame), or `None` when there was nothing to
-    /// draw: a still image that hasn't loaded yet, whose frame the host
-    /// leaves begun.
-    ///
-    /// A frame runs in two phases: the orchestrator's update brings the
-    /// renderer's state to the update and returns the frame as a value, and
-    /// the encode builds the layers' GPU objects and draws from it.
-    pub fn render(
-        &mut self,
-        gpu: &mut dyn Gpu,
-        image: &FrameImage,
-        update_parameters: &Arc<UpdateParameters>,
-    ) -> Option<DrawnFrame> {
+    /// Brings the renderer's state to `update_parameters`: its style,
+    /// sources, tiles, layers and placement. Returns the frame to draw,
+    /// which the host [renders](Self::render) into a frame of its target,
+    /// or `None` when there is nothing to draw: a still image that hasn't
+    /// loaded yet. Custom layers that the update removed or gave a new host
+    /// end on `gpu`.
+    pub fn update(&mut self, gpu: &mut dyn Gpu, update_parameters: &Arc<UpdateParameters>) -> Option<UpdatedFrame> {
         let orchestrator = &mut self.orchestrator;
         let frame = orchestrator.update(update_parameters);
         report(orchestrator, self.events.as_ref());
@@ -285,8 +287,17 @@ impl Renderer {
             encoder.context.release_shaders();
         }
         let frame = frame?;
-        let updated = Instant::now();
-        Some(encoder.encode(gpu, orchestrator, self.events.as_ref(), &frame, image, update_parameters, updated))
+        Some(UpdatedFrame { frame, parameters: Arc::clone(update_parameters), updated: Instant::now() })
+    }
+
+    /// Draws `frame`, which the last [`update`](Self::update) returned, into
+    /// `image`, textures of `gpu` that the host's target began a frame with,
+    /// and submits the frame's passes. Returns the frame, which the host
+    /// ends on its target and then [finishes](Self::finish_frame).
+    pub fn render(&mut self, gpu: &mut dyn Gpu, image: &FrameImage, frame: UpdatedFrame) -> DrawnFrame {
+        let UpdatedFrame { frame, parameters, updated } = frame;
+        let events = self.events.as_ref();
+        self.encoder.encode(gpu, &mut self.orchestrator, events, &frame, image, &parameters, updated)
     }
 
     /// Ends `frame`, which [`render`](Self::render) drew, once the host's
