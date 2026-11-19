@@ -1031,7 +1031,7 @@ impl Gpu for D3d12Gpu {
         }
         let row_pitch = bytes_per_row.next_multiple_of(D3D12_TEXTURE_DATA_PITCH_ALIGNMENT as usize);
         let rows = region.size.height as usize;
-        let (resource, dxgi_format, rest) = (entry.memory.resource.clone(), entry.format, entry.rest);
+        let (dxgi_format, rest) = (entry.format, entry.rest);
         let completed = self.completed();
         let upload = self.upload.write(
             &mut self.memory,
@@ -1046,7 +1046,7 @@ impl Gpu for D3d12Gpu {
             },
         )?;
         let list = self.copy_list()?;
-        let resource = &resource;
+        let resource = &self.textures.get(texture).ok_or(GpuError::UnknownId("texture"))?.memory.resource;
         let dst = D3D12_TEXTURE_COPY_LOCATION {
             // SAFETY: copies of the pointers without references, which the
             // locations' ManuallyDrop never releases.
@@ -1578,7 +1578,7 @@ impl Gpu for D3d12Gpu {
         let entry = self.textures.get(texture);
         let readback = validation::check_readback(entry.map(|texture| texture.info), region)?;
         let entry = entry.ok_or(GpuError::UnknownId("texture"))?;
-        let (resource, format, rest) = (entry.memory.resource.clone(), entry.format, entry.rest);
+        let (format, rest) = (entry.format, entry.rest);
         let row_pitch = readback.bytes_per_row.next_multiple_of(D3D12_TEXTURE_DATA_PITCH_ALIGNMENT as usize);
         let rows = region.size.height as usize;
         let size = (row_pitch * rows) as u64;
@@ -1601,7 +1601,11 @@ impl Gpu for D3d12Gpu {
                 return Err(error);
             }
         };
-        let resource = &resource;
+        let Some(entry) = self.textures.get(texture) else {
+            self.spare(buffer);
+            return Err(GpuError::UnknownId("texture"));
+        };
+        let resource = &entry.memory.resource;
         let dst = D3D12_TEXTURE_COPY_LOCATION {
             // SAFETY: copies of the pointers without references, which the
             // locations' ManuallyDrop never releases.
