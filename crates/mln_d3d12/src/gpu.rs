@@ -554,9 +554,10 @@ impl D3d12Gpu {
         self.waits.extend(self.texture_waits.remove(&texture));
     }
 
-    /// Drops what `texture` waits for, which no submit takes.
-    pub fn forget_waits(&mut self, texture: TextureId) {
-        self.texture_waits.remove(&texture);
+    /// Drops what `texture` waits for, which no submit takes. Returns
+    /// whether it waited for something, which no pass took.
+    pub fn forget_waits(&mut self, texture: TextureId) -> bool {
+        self.texture_waits.remove(&texture).is_some()
     }
 
     /// The fence that the backend's submits signal, and the value of the

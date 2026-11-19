@@ -213,8 +213,7 @@ MLN_API mln_status mln_map_attach(
  * same formats, final layouts, and owner. Release every acquired frame of a
  * borrowed ring first. Once the replacement completes, the session is also
  * done with the textures that the new ring doesn't have and with their
- * consumer syncs, as mln_render_session_release_target() says, so you can
- * reuse or destroy them.
+ * consumer syncs, as mln_render_session_release_target() says.
  *
  * Returns:
  * - MLN_STATUS_INVALID_ARGUMENT when a borrowed ring gets more or fewer
@@ -558,15 +557,16 @@ MLN_API mln_status mln_render_session_resize(
  * sooner, as mln_android_window_target and mln_ohos_window_target say.
  *
  * For a borrowed ring, a completed release also means that the session's GPU
- * work on the textures has finished and that it holds none of the consumer
- * syncs that you released its frames with, so you can reuse or destroy the
- * textures and the syncs. A frame that the session drew into a texture after
- * you released it waits for that release's consumer sync, so signal it: the
- * release completes after that frame. The session checks its work without
- * blocking a thread: keep servicing a session driven by
- * MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD until the release completes. The
- * session keeps nothing of the released textures: a texture that a later target
- * gives it again is a new one, even one that you discarded a frame of.
+ * work on the textures has finished and that it no longer uses the textures or
+ * the consumer syncs that you released its frames with. Your own GPU work on
+ * them is yours to finish before you reuse or destroy them. A frame that the
+ * session drew into a texture after you released it waits for that release's
+ * consumer sync, so signal it: the release completes after that frame. The
+ * session checks its work without blocking a thread: keep servicing a session
+ * driven by MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD until the release
+ * completes. The session keeps nothing of the released textures: a texture that
+ * a later target gives it again is a new one, even one that you discarded a
+ * frame of.
  *
  * Returns:
  * - MLN_STATUS_UNSUPPORTED when the session renders offscreen or into an

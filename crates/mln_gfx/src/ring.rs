@@ -92,7 +92,9 @@ pub trait RingBackend: Sized {
     fn take_waits_into_next_submit(gpu: &mut Self::Gpu, texture: TextureId);
 
     /// Drops what `texture` waits for, which no submit of `gpu` takes now.
-    fn forget_waits(gpu: &mut Self::Gpu, texture: TextureId);
+    /// Returns whether it waited for something, which no pass took: false
+    /// where a pass that drew into it took its waits into a submit.
+    fn forget_waits(gpu: &mut Self::Gpu, texture: TextureId) -> bool;
 
     /// A submit of `gpu` took `wait`, or may have, which the ring lets go of
     /// once the work submitted so far and the next submit's is done.
@@ -245,18 +247,22 @@ impl<B: RingBackend> Slot<B> {
         Slot { wait, attached: None, handed: None }
     }
 
-    /// Lets go of what the slot waits for, once a submit that may have
-    /// taken it is done, and of what the slot handed the host. A pass of a
-    /// frame begun on the slot and not ended may have taken the wait.
+    /// Lets go of what the slot waits for, and of what the slot handed the
+    /// host: at once, unless a pass of a frame begun on the slot took the
+    /// wait into a submit, which the wait then outlives.
     fn forget(&mut self, gpu: &mut B::Gpu) {
-        let attached = self.attached.take();
-        if let Some(texture) = attached {
-            B::forget_waits(gpu, texture);
-        }
+        let taken = self.detach(gpu);
         if let Some(wait) = self.wait.take() {
-            if attached.is_some() { B::waited(gpu, wait) } else { B::forget(wait) }
+            if taken { B::waited(gpu, wait) } else { B::forget(wait) }
         }
         self.handed = None;
+    }
+
+    /// Ends the frame begun on the slot, if any, without a submit of its
+    /// own. Returns whether a pass that drew took the slot's wait into a
+    /// submit; otherwise the wait is the next frame's still.
+    fn detach(&mut self, gpu: &mut B::Gpu) -> bool {
+        self.attached.take().is_some_and(|texture| !B::forget_waits(gpu, texture))
     }
 }
 
@@ -338,14 +344,13 @@ impl<B: RingBackend> BorrowedTarget<B> {
             .iter()
             .map(|old| self.textures.images().iter().position(|image| B::Textures::same_image(old, image)))
             .collect();
-        // The frame begun on a texture that the new ring has again waits
-        // for the host's reads of it, as its next frame would.
+        // A texture that the new ring has again keeps its wait for its
+        // next frame, unless a pass of the frame begun on it took it.
         for (slot, _) in self.slots.iter_mut().zip(&kept).filter(|(_, kept)| kept.is_some()) {
-            if let Some(texture) = slot.attached.take() {
-                B::take_waits_into_next_submit(gpu, texture);
-                if let Some(wait) = slot.wait.take() {
-                    B::waited(gpu, wait);
-                }
+            if slot.detach(gpu)
+                && let Some(wait) = slot.wait.take()
+            {
+                B::waited(gpu, wait);
             }
         }
         self.submit_recorded(gpu, "borrowed texture replacement");
@@ -936,8 +941,8 @@ mod tests {
         fn take_waits_into_next_submit(gpu: &mut FakeGpu, texture: TextureId) {
             gpu.next_waits.extend(gpu.texture_waits.remove(&texture).unwrap_or_default());
         }
-        fn forget_waits(gpu: &mut FakeGpu, texture: TextureId) {
-            gpu.texture_waits.remove(&texture);
+        fn forget_waits(gpu: &mut FakeGpu, texture: TextureId) -> bool {
+            gpu.texture_waits.remove(&texture).is_some()
         }
         fn waited(gpu: &mut FakeGpu, wait: u32) {
             gpu.waited.push(wait);
@@ -1081,25 +1086,24 @@ mod tests {
     }
 
     #[test]
-    fn a_frame_left_unended_lets_go_of_its_wait_only_after_a_submit() {
+    fn a_frame_left_unended_lets_go_of_a_wait_that_no_pass_took_at_once() {
         let mut backend = FakeBackend::default();
         let mut ring = target(&mut backend, &[10]);
         let gpu = &mut backend.gpu;
         ring.release(gpu, 0, timeline(7)).expect("a release");
         ring.begin_frame(gpu);
         // A tear-down submits the frame, which drew nothing and so waits for
-        // no host, and lets go of the wait after the submit's work.
+        // no host, and lets go of the wait at once.
         ring.tear_down(gpu);
         assert_eq!(gpu.submits, [Vec::<u32>::new()]);
-        assert_eq!(gpu.waited, [7]);
+        assert_eq!((forgotten(), gpu.waited.clone()), (vec![7], vec![]));
         drop(ring);
         // Without a gpu, a drop leaves the wait to the backend.
         let mut ring = target(&mut backend, &[10]);
         ring.release(&mut backend.gpu, 0, timeline(8)).expect("a release");
         ring.begin_frame(&mut backend.gpu);
         drop(ring);
-        assert_eq!(forgotten(), Vec::<u32>::new());
-        assert_eq!(backend.gpu.waited, [7]);
+        assert_eq!(forgotten(), [7]);
     }
 
     #[test]
@@ -1124,7 +1128,7 @@ mod tests {
     }
 
     #[test]
-    fn a_ring_that_lets_go_of_a_begun_frame_submits_the_waits_that_it_drew_with() {
+    fn a_ring_that_lets_go_of_a_begun_frame_submits_only_the_waits_that_it_drew_with() {
         let mut backend = FakeBackend::default();
         let mut ring = target(&mut backend, &[10, 20]);
         let gpu = &mut backend.gpu;
@@ -1135,21 +1139,28 @@ mod tests {
         assert!(ring.replace(gpu, images(&[20, 30])).expect("a replacement").finished());
         assert_eq!(gpu.submits, [vec![7]]);
         assert_eq!(gpu.waited, [7]);
-        // A frame begun on a texture that the new ring has again waits for
-        // the host's reads of it, as its next frame would.
+        // A frame begun on a texture that the new ring has again, which
+        // drew nothing, leaves the wait to the texture's next frame: the
+        // replacement's submit waits for no host.
         ring.release(gpu, 0, timeline(8)).expect("a release");
         ring.begin_frame(gpu);
         assert!(ring.replace(gpu, images(&[20, 40])).expect("a replacement").finished());
-        assert_eq!(gpu.submits, [vec![7], vec![8]]);
-        // A frame that drew nothing waits for no host as the ring goes.
+        assert_eq!(gpu.submits, [vec![7], vec![]]);
+        let image = ring.begin_frame(gpu).expect("a frame");
+        assert_eq!(gpu.texture_waits[&image.color], [8]);
+        ring.end_frame(gpu);
+        assert_eq!(gpu.submits.last(), Some(&vec![8]));
+        assert_eq!(gpu.waited, [7, 8]);
+        // A frame that drew nothing waits for no host as the ring goes, and
+        // lets go of its wait at once.
         ring.release(gpu, 1, timeline(9)).expect("a release");
         ring.select(1);
         ring.begin_frame(gpu);
         ring.tear_down(gpu);
-        assert_eq!(gpu.submits, [vec![7], vec![8], vec![]]);
-        assert_eq!(gpu.waited, [7, 8, 9]);
+        assert_eq!(gpu.submits.last(), Some(&vec![]));
+        assert_eq!(gpu.waited, [7, 8]);
         assert!(gpu.texture_waits.is_empty());
-        assert_eq!(forgotten(), Vec::<u32>::new());
+        assert_eq!(forgotten(), [9]);
     }
 
     #[test]

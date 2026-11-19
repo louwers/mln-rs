@@ -1253,9 +1253,10 @@ impl RenderSession {
 
     /// Gives a borrowed ring new textures, of `size` logical pixels: as many
     /// as it has, of its format. Once the completion reports success, the
-    /// session's GPU work on the old textures has finished, and it references
-    /// none of the consumer syncs that they were given back with: the host
-    /// may reuse or destroy them. The session's thread polls that work on
+    /// session's GPU work on the old textures has finished, and it no longer
+    /// uses them or the consumer syncs that they were given back with; the
+    /// host's own work on them is the host's to finish before it reuses or
+    /// destroys them. The session's thread polls that work on
     /// its later turns without blocking. Frames wait for it meanwhile.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a
@@ -1449,9 +1450,10 @@ impl RenderSession {
     /// finish as [`FrameDisposition::TargetNotReady`](super::FrameDisposition).
     /// Once the release completes, the session no longer uses the surface or
     /// the window it was made from, or a ring's textures: its GPU work on
-    /// them has finished, and it references none of the consumer syncs that
-    /// the textures were given back with, so the host may reuse or destroy
-    /// them. The session's thread polls that work on its later turns without
+    /// them has finished, and it no longer uses the consumer syncs that the
+    /// textures were given back with; the host's own work on them is the
+    /// host's to finish before it reuses or destroys them. The session's
+    /// thread polls that work on its later turns without
     /// blocking. The session keeps nothing of the released textures: one
     /// that a later ring has again starts fresh, even one that the host gave
     /// up.

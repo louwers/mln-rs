@@ -261,13 +261,13 @@ impl Uploads {
 /// unretained references until it runs its own handler, so a resource
 /// freed on the status alone can fail validation.
 #[derive(Default)]
-struct Completion {
+pub struct Completion {
     done: Mutex<bool>,
     changed: Condvar,
 }
 
 impl Completion {
-    fn is_done(&self) -> bool {
+    pub(crate) fn is_done(&self) -> bool {
         *self.done.lock()
     }
 
@@ -459,6 +459,13 @@ impl MetalGpu {
         self.presents.push(drawable.retain());
     }
 
+    /// What says when the command buffers committed so far have finished:
+    /// the last one's completion, as the queue runs them in order. `None`
+    /// before the first, or once every one finished.
+    pub(crate) fn last_submit(&self) -> Option<Arc<Completion>> {
+        self.in_flight.back().map(|(_, completion)| Arc::clone(completion))
+    }
+
     /// The number of the last command buffer known to have finished, as
     /// every one before it has (see [`Completion`]).
     fn finished(&self) -> u64 {
@@ -565,10 +572,13 @@ impl MetalGpu {
     }
 
     /// Drops what `texture` still waits for, which no flush takes now.
-    pub(crate) fn forget_waits(&mut self, texture: TextureId) {
-        if let Some(texture) = self.textures.get_mut(texture) {
+    /// Returns whether it waited for something, which no pass took.
+    pub(crate) fn forget_waits(&mut self, texture: TextureId) -> bool {
+        self.textures.get_mut(texture).is_some_and(|texture| {
+            let waited = !texture.waits.is_empty();
             texture.waits.clear();
-        }
+            waited
+        })
     }
 
     /// Has the next flush wait for what `texture` still waits for

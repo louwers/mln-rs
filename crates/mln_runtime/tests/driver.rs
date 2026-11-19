@@ -15,7 +15,7 @@ use mln_runtime::{
 };
 use mln_util::size::Size;
 
-use crate::support::{TIMEOUT, eventually, runtime, wait};
+use crate::support::{TIMEOUT, eventually, runtime, service_until, wait};
 
 const SIZE: Size = Size { width: 64, height: 64 };
 
@@ -55,16 +55,6 @@ fn counter() -> (Wake, Arc<AtomicUsize>) {
         }),
         count,
     )
-}
-
-/// Services `driver` until `done` holds.
-fn service_until(driver: &DriverWork, mut done: impl FnMut() -> bool) {
-    let deadline = std::time::Instant::now() + TIMEOUT;
-    while !done() {
-        assert!(std::time::Instant::now() < deadline, "the driver never got there");
-        driver.service().unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(1));
-    }
 }
 
 /// Services `driver` until `completion` completes, and returns its result.

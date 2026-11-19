@@ -1678,10 +1678,13 @@ impl VulkanGpu {
     }
 
     /// Drops what `texture` still waits for, which no flush takes now.
-    pub(crate) fn forget_waits(&mut self, texture: TextureId) {
-        if let Some(texture) = self.textures.get_mut(texture) {
+    /// Returns whether it waited for something, which no pass took.
+    pub(crate) fn forget_waits(&mut self, texture: TextureId) -> bool {
+        self.textures.get_mut(texture).is_some_and(|texture| {
+            let waited = !texture.waits.is_empty();
             texture.waits.clear();
-        }
+            waited
+        })
     }
 
     /// Has the next flush wait for what `texture` still waits for

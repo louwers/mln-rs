@@ -477,6 +477,10 @@ type SettleDone = Box<dyn FnOnce(&mut Outbox, Result<(), Error>)>;
 /// which waits for its thread to end.
 struct Ticker {
     stop: Arc<AtomicBool>,
+    /// Whether a poll is on the session's queue, which the poll clears: a
+    /// caller-driven session that isn't serviced gets one queued, not one
+    /// for each tick.
+    queued: Arc<AtomicBool>,
     #[cfg(not(target_family = "wasm"))]
     thread: Option<std::thread::JoinHandle<()>>,
 }
@@ -500,34 +504,38 @@ impl Drop for Ticker {
 fn start_ticker(queue: SessionQueue) -> Ticker {
     // The browser's one thread polls in the pump's slices instead, which it
     // asks for meanwhile.
-    let stop = Arc::new(AtomicBool::new(false));
-    let stopped = Arc::clone(&stop);
+    let (stop, queued) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
+    let (stopped, posted) = (Arc::clone(&stop), Arc::clone(&queued));
     mln_web_host::pump::add(move || {
         if stopped.load(Ordering::SeqCst) {
             return false;
         }
-        post(&queue, Worker::poll_settling);
+        if !posted.swap(true, Ordering::SeqCst) {
+            post(&queue, Worker::poll_settling);
+        }
         mln_web_host::pump::wake();
         true
     })
     .detach();
-    Ticker { stop }
+    Ticker { stop, queued }
 }
 
 #[cfg(not(target_family = "wasm"))]
 fn start_ticker(queue: SessionQueue) -> Ticker {
-    let stop = Arc::new(AtomicBool::new(false));
-    let stopped = Arc::clone(&stop);
+    let (stop, queued) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
+    let (stopped, posted) = (Arc::clone(&stop), Arc::clone(&queued));
     let spawned = mln_util::thread::spawn("RenderSessionSettle", move || {
         while !stopped.load(Ordering::SeqCst) {
             std::thread::sleep(SETTLE_POLL);
-            post(&queue, Worker::poll_settling);
+            if !posted.swap(true, Ordering::SeqCst) {
+                post(&queue, Worker::poll_settling);
+            }
         }
     });
     if spawned.is_err() {
         Log::error(Event::Render, "Can't start the thread that polls the GPU work on released textures");
     }
-    Ticker { stop, thread: spawned.ok() }
+    Ticker { stop, queued, thread: spawned.ok() }
 }
 
 impl Drop for Worker {
@@ -1576,6 +1584,9 @@ impl Worker {
     /// Polls the GPU work that releases and replacements wait for, and
     /// completes those whose work finished.
     fn poll_settling(&mut self, outbox: &mut Outbox) {
+        if let Some(ticker) = &self.ticker {
+            ticker.queued.store(false, Ordering::SeqCst);
+        }
         let (settled, settling): (Vec<_>, Vec<_>) =
             std::mem::take(&mut self.settling).into_iter().partition(|settling| settling.work.finished());
         self.settling = settling;

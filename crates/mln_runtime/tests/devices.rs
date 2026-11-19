@@ -169,6 +169,7 @@ mod vulkan {
     use mln_vulkan::ash::{self, vk};
 
     use super::*;
+    use crate::support::service_until;
 
     /// A host's lock that counts the times sessions take it.
     #[derive(Default)]
@@ -638,16 +639,6 @@ mod vulkan {
             }
         }
         wait(session.detach());
-    }
-
-    /// Services `driver` until `done` holds.
-    fn service_until(driver: &mln_runtime::DriverWork, mut done: impl FnMut() -> bool) {
-        let deadline = std::time::Instant::now() + crate::support::TIMEOUT;
-        while !done() {
-            assert!(std::time::Instant::now() < deadline, "the driver never got there");
-            driver.service().unwrap();
-            std::thread::sleep(std::time::Duration::from_millis(1));
-        }
     }
 
     // A release completes once the session's work on the ring's images
@@ -1699,6 +1690,7 @@ mod metal {
     };
 
     use super::*;
+    use crate::support::service_until;
 
     type Texture = Retained<ProtocolObject<dyn MTLTexture>>;
 
@@ -1722,25 +1714,28 @@ mod metal {
         pixel
     }
 
+    /// A texture of the host's on `metal`, which a ring draws into and the
+    /// CPU reads.
+    fn texture(metal: &mln_mtl::Device) -> Texture {
+        // SAFETY: a valid 2D format and a non-zero size.
+        let descriptor = unsafe {
+            MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
+                MTLPixelFormat::BGRA8Unorm,
+                SIZE.width as usize,
+                SIZE.height as usize,
+                false,
+            )
+        };
+        descriptor.setUsage(MTLTextureUsage::RenderTarget | MTLTextureUsage::ShaderRead);
+        descriptor.setStorageMode(MTLStorageMode::Shared);
+        metal.device().newTextureWithDescriptor(&descriptor).unwrap()
+    }
+
     #[test]
     fn a_ring_of_the_hosts_textures_hands_frames_back_with_shared_events() {
         let Some(device) = device_of(BackendType::Metal) else { return };
         let Device::Metal(metal) = &device else { unreachable!() };
-        let texture = || -> Texture {
-            // SAFETY: a valid 2D format and a non-zero size.
-            let descriptor = unsafe {
-                MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
-                    MTLPixelFormat::BGRA8Unorm,
-                    SIZE.width as usize,
-                    SIZE.height as usize,
-                    false,
-                )
-            };
-            descriptor.setUsage(MTLTextureUsage::RenderTarget | MTLTextureUsage::ShaderRead);
-            descriptor.setStorageMode(MTLStorageMode::Shared);
-            metal.device().newTextureWithDescriptor(&descriptor).unwrap()
-        };
-        let textures = vec![texture(), texture()];
+        let textures = vec![texture(metal), texture(metal)];
         let ring = BorrowedRing::metal(mln_mtl::BorrowedTextures {
             textures: textures.clone(),
             size: SIZE,
@@ -1767,6 +1762,60 @@ mod metal {
             frame.release(ConsumerSync::of(GpuSync::of(SyncKind::CpuComplete))).unwrap();
         }
         wait(session.detach());
+    }
+
+    // A release completes once the session's frames finish: a frame drawn
+    // into a texture that the host gave back waits for the host's event,
+    // which the host signals from the session's thread once the release
+    // call returned.
+    #[test]
+    fn a_caller_driven_release_completes_once_its_frames_finish() {
+        let Some(device) = device_of(BackendType::Metal) else { return };
+        let Device::Metal(metal) = &device else { unreachable!() };
+        let ring = BorrowedRing::metal(mln_mtl::BorrowedTextures {
+            textures: vec![texture(metal)],
+            size: SIZE,
+            depth_textures: Vec::new(),
+        });
+        let runtime = runtime();
+        let map = map_of(&runtime, "#ff0000");
+        let target = RenderTarget::Borrowed { size: SIZE, ring, device: device.clone() };
+        let options = AttachOptions {
+            driver: mln_runtime::Driver::CallerThread,
+            producer_sync_kinds: SyncKinds::of(&[SyncKind::MetalSharedEvent]),
+            ..AttachOptions::default()
+        };
+        let (session, attached) = map.attach(target, options).unwrap();
+        let driver = session.take_driver_work().unwrap();
+        service_until(&driver, || attached.is_complete());
+        attached.wait().unwrap();
+        let render = |token| {
+            session.demand_frame(FrameDemand::new(DemandMode::Force, token)).unwrap();
+            let mut results = Vec::new();
+            service_until(&driver, || {
+                results.extend(session.drain_frame_results().unwrap());
+                !results.is_empty()
+            });
+            assert_eq!(FrameDisposition::Rendered, results[0].disposition);
+        };
+        render(1);
+        let frame = session.acquire_frame().unwrap().expect("a frame");
+        let host = metal.device().newSharedEvent().unwrap();
+        let handle = Retained::as_ptr(&host) as usize as u64;
+        frame.release(ConsumerSync::of(GpuSync { kind: SyncKind::MetalSharedEvent, handle, value: 1 })).unwrap();
+        // The next frame waits for the host's event on the GPU.
+        render(2);
+
+        let released = session.release_target().unwrap();
+        driver.service().unwrap();
+        driver.service().unwrap();
+        assert!(!released.is_complete(), "the release completed before its frame");
+        host.setSignaledValue(1);
+        service_until(&driver, || released.is_complete());
+        released.wait().unwrap();
+        let detached = session.detach().unwrap();
+        service_until(&driver, || detached.is_complete());
+        detached.wait().unwrap();
     }
 }
 

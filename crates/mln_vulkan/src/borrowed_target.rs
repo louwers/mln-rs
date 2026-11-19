@@ -501,8 +501,8 @@ impl RingBackend for VulkanRing {
         gpu.take_waits_into_next_submit(texture);
     }
 
-    fn forget_waits(gpu: &mut VulkanGpu, texture: TextureId) {
-        gpu.forget_waits(texture);
+    fn forget_waits(gpu: &mut VulkanGpu, texture: TextureId) -> bool {
+        gpu.forget_waits(texture)
     }
 
     /// A semaphore of the ring's own goes once the submit is done.

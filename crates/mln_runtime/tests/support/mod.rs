@@ -98,6 +98,16 @@ pub(crate) fn wait_err<T: Send + 'static + std::fmt::Debug>(completion: Result<C
     result_of(completion.unwrap()).unwrap_err()
 }
 
+/// Services `driver` until `done` holds.
+pub(crate) fn service_until(driver: &mln_runtime::DriverWork, mut done: impl FnMut() -> bool) {
+    let deadline = Instant::now() + TIMEOUT;
+    while !done() {
+        assert!(Instant::now() < deadline, "the driver never got there");
+        driver.service().unwrap();
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
 /// Waits until `done` holds, polling.
 pub(crate) fn eventually(mut done: impl FnMut() -> bool) -> bool {
     let deadline = Instant::now() + TIMEOUT;

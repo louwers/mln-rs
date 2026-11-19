@@ -337,8 +337,8 @@ impl RingBackend for D3d12Ring {
         gpu.take_waits_into_next_submit(texture);
     }
 
-    fn forget_waits(gpu: &mut D3d12Gpu, texture: TextureId) {
-        gpu.forget_waits(texture);
+    fn forget_waits(gpu: &mut D3d12Gpu, texture: TextureId) -> bool {
+        gpu.forget_waits(texture)
     }
 
     fn signal_after_next_submit(&mut self, gpu: &mut D3d12Gpu) {
