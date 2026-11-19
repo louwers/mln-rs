@@ -36,6 +36,16 @@ float2 unpack_float(const float packedValue) {
     const int v0 = packedIntValue / 256;
     return float2(v0, packedIntValue - v0 * 256);
 }
+// The normal at the end of a fill extrusion wall from its outline vertex's
+// packed decimals_ed.x: the one the walls there share, whose angle from -pi
+// its bits 2 to 15 hold where bit 1 is set, or else `own`, the wall's.
+float2 wall_normal(const uint bits, const float2 own) {
+    if ((bits & 2u) == 0u) {
+        return own;
+    }
+    const float angle = float(bits >> 2) * (2.0 * M_PI_F / 16384.0) - M_PI_F;
+    return float2(metal::cos(angle), metal::sin(angle));
+}
 float2 unpack_opacity(const float packedOpacity) {
     return float2(float(int(packedOpacity) / 2) / 127.0, glMod(packedOpacity, 2.0));
 }
@@ -1528,11 +1538,12 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const auto height = max(unpack_mix_float(vertx.height, drawable.height_t), 0.0);
 #endif
 
-    const float2 p1 = float2(vertx.outline_pos) + unpack_float(float(vertx.decimals_ed.x / 2)) / 128.0;
-    const float2 p2 = float2(vertx.next_outline_pos) + unpack_float(float(vertx.next_decimals_ed.x / 2)) / 128.0;
+    const float2 p1 = float2(vertx.outline_pos);
+    const float2 p2 = float2(vertx.next_outline_pos);
     const float2 edgevector = normalize(p2 - p1);
+    const float2 own = float2(-edgevector.y, edgevector.x);
 
-    const float3 normal = float3(-edgevector.y, edgevector.x, 0.0);
+    const float3 normal = float3(vertx.pos.x == 0 ? wall_normal(vertx.decimals_ed.x, own) : wall_normal(vertx.next_decimals_ed.x, own), 0.0);
     const float t = float(vertx.pos.y);
     const float z = (t != 0.0) ? height : base;     // TODO: This would come out wrong on GL for negative values, check it...
 
@@ -1737,11 +1748,12 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const auto height = max(unpack_mix_float(vertx.height, drawable.height_t), 0.0);
 #endif
 
-    const float2 p1 = float2(vertx.outline_pos) + unpack_float(float(vertx.decimals_ed.x / 2)) / 128.0;
-    const float2 p2 = float2(vertx.next_outline_pos) + unpack_float(float(vertx.next_decimals_ed.x / 2)) / 128.0;
+    const float2 p1 = float2(vertx.outline_pos);
+    const float2 p2 = float2(vertx.next_outline_pos);
     const float2 edgevector = normalize(p2 - p1);
+    const float2 own = float2(-edgevector.y, edgevector.x);
 
-    const float3 normal = float3(-edgevector.y, edgevector.x, 0.0);
+    const float3 normal = float3(vertx.pos.x == 0 ? wall_normal(vertx.decimals_ed.x, own) : wall_normal(vertx.next_decimals_ed.x, own), 0.0);
     const float edgedistance = vertx.pos.x == 0 ? vertx.next_decimals_ed.y : vertx.decimals_ed.y;
     const float t = float(vertx.pos.y);
     const float z = (t != 0.0) ? height : base;     // TODO: This would come out wrong on GL for negative values, check it...
@@ -1991,9 +2003,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float3 normal = float3(0.0, 0.0, 1.0);
     const float t = 1.0;
     const float z = (t != 0.0) ? height : base;     // TODO: This would come out wrong on GL for negative values, check it...
-    const float2 decimals = unpack_float(float(vertx.decimals_ed.x / 2)) / 128.0;
-
-    const float4 position = projectTileFor3D(float2(vertx.pos) + decimals, z, projectionVector[uboIndex]);
+    const float4 position = projectTileFor3D(float2(vertx.pos), z, projectionVector[uboIndex]);
 
 #if defined(OVERDRAW_INSPECTOR)
     return {
@@ -2221,9 +2231,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float3 normal = float3(0.0, 0.0, 1.0);
     const float t = 1.0;
     const float z = (t != 0.0) ? height : base;     // TODO: This would come out wrong on GL for negative values, check it...
-    const float2 decimals = unpack_float(float(vertx.decimals_ed.x / 2)) / 128.0;
-
-    const float4 position = projectTileFor3D(float2(vertx.pos) + decimals, z, projectionVector[uboIndex]);
+    const float4 position = projectTileFor3D(float2(vertx.pos), z, projectionVector[uboIndex]);
 
 #if defined(OVERDRAW_INSPECTOR)
     return {

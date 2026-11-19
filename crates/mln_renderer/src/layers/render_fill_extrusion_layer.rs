@@ -865,7 +865,7 @@ mod tests {
     #[test]
     fn wall_quads_are_the_instances() {
         let vertices: Vec<FillExtrusionLayoutVertex> = (0..4)
-            .map(|i| FillExtrusionBucket::layout_vertex(Point::new(f64::from(i) + 0.5, 1.0), i as u16, i == 3))
+            .map(|i| FillExtrusionBucket::layout_vertex(Point::new(i as i16, 1), i as u16, i == 3, None))
             .collect();
         let quads = wall_quad_vertices(&vertices);
         assert_eq!(quads.len(), 4 * 4);

@@ -119,6 +119,60 @@ pub(crate) fn tile_units_per_meter(tile: &CanonicalTileID) -> f64 {
     f64::from(EXTENT) * tiles / (latitude.cos() * M2PI * EARTH_RADIUS_M)
 }
 
+/// The direction of the normal each vertex of `ring` gives the walls on
+/// either side of it, for lighting that blends across a rounded corner as
+/// GL JS's does. Where the ring turns by under 35°, the walls share a wall's
+/// own normal if it is at least twice as long as the other, and otherwise
+/// the sum of both walls' normals weighted by their lengths. At a sharper
+/// turn, or next to an edge that `has_wall` rejects, each wall keeps its own
+/// (`None`). A closed ring's first and last vertex join its last and first
+/// wall.
+fn shared_wall_normals(
+    ring: &[Point<i16>],
+    has_wall: impl Fn(Point<i16>, Point<i16>) -> bool,
+) -> Vec<Option<Point<f64>>> {
+    let n = ring.len();
+    // The normal of the wall from vertex i to vertex i + 1, as long as it.
+    let perps: Vec<Option<Point<f64>>> = ring
+        .windows(2)
+        .map(|edge| {
+            has_wall(edge[0], edge[1]).then(|| {
+                Point::new(-(f64::from(edge[1].y) - f64::from(edge[0].y)), f64::from(edge[1].x) - f64::from(edge[0].x))
+            })
+        })
+        .collect();
+    let closed = n > 2 && ring[0] == ring[n - 1];
+    (0..n)
+        .map(|i| {
+            let incoming = if i > 0 {
+                perps[i - 1]
+            } else if closed {
+                perps[n - 2]
+            } else {
+                None
+            };
+            let outgoing = if i + 1 < n {
+                perps[i]
+            } else if closed {
+                perps[0]
+            } else {
+                None
+            };
+            let (a, b) = (incoming?, outgoing?);
+            let (len_a, len_b) = (a.x.hypot(a.y), b.x.hypot(b.y));
+            if a.x * b.x + a.y * b.y < mln_math::deg2rad(35.0).cos() * len_a * len_b {
+                None
+            } else if len_a >= 2.0 * len_b {
+                Some(a)
+            } else if len_b >= 2.0 * len_a {
+                Some(b)
+            } else {
+                Some(Point::new(a.x + b.x, a.y + b.y))
+            }
+        })
+        .collect()
+}
+
 /// The distance from `a` to `b`, cast to `u16` through a wider integer,
 /// keeping the low bits.
 fn dist_u16(a: Point<f64>, b: Point<f64>) -> u16 {
@@ -156,34 +210,41 @@ impl FillExtrusionBucket {
         self.subdivision_granularity = *value;
     }
 
+    /// A vertex at `p`, whose wall to the next vertex is drawn unless
+    /// `is_discarded`. Its walls share `shared_normal`, if any, where they
+    /// meet.
     #[must_use]
-    pub(crate) fn layout_vertex(p: Point<f64>, edge_distance: u16, is_discarded: bool) -> FillExtrusionLayoutVertex {
-        let int_part = Point::new(p.x.floor(), p.y.floor());
-        // Multiply factional part by 2^7 to pack them into integers [0..127]
-        let frac_x = ((p.x - int_part.x) * 128.0) as u8;
-        let frac_y = ((p.y - int_part.y) * 128.0) as u8;
-
+    pub(crate) fn layout_vertex(
+        p: Point<i16>,
+        edge_distance: u16,
+        is_discarded: bool,
+        shared_normal: Option<Point<f64>>,
+    ) -> FillExtrusionLayoutVertex {
+        // The shared normal's angle from -π, in 2^14ths of a turn, above a
+        // bit that says there is one.
+        let normal = shared_normal.map_or(0, |n| {
+            let turn = n.y.atan2(n.x) / M2PI + 0.5;
+            (((turn * 16384.0).round() as u16 % 16384) << 2) | 2
+        });
         FillExtrusionLayoutVertex {
-            a1: [int_part.x as i16, int_part.y as i16],
-            a2: [
-                // Packs whether this instance is discarded in the low bit.
-                ((i32::from(frac_x) * 256 + i32::from(frac_y)) * 2 + i32::from(is_discarded)) as u16,
-                // The edge distance, which fill-extrusion patterns wrap
-                // along.
-                edge_distance,
-            ],
+            a1: [p.x, p.y],
+            // The edge distance, which fill-extrusion patterns wrap along.
+            a2: [normal | u16::from(is_discarded), edge_distance],
         }
     }
 
     /// Appends the outline of `polygon`: each vertex of a ring is a wall
     /// instance up to the next one, the last vertex ends the ring. Edges on
     /// the lines the tile was clipped at have no walls, and neither do rings
-    /// in the tile's buffer, which the neighbouring tile draws.
+    /// in the tile's buffer, which the neighbouring tile draws. With rounded
+    /// corners, the walls of an arc share their normals.
     fn add_outline<R: AsRef<[Point<i16>]>>(&mut self, polygon: &[R]) {
+        let rounded = *self.layout.fill_extrusion_rounded_corner_distance.uniform() > 0.0;
         let vertices = self.vertices.get_mut();
         for ring in polygon {
             let ring = ring.as_ref();
             let outside = is_entirely_outside(ring);
+            let normals = rounded.then(|| shared_wall_normals(ring, |a, b| a != b && !is_boundary_edge(a, b)));
             let mut edge_distance: usize = 0;
             for (i, &p) in ring.iter().enumerate() {
                 let next = ring.get(i + 1).copied();
@@ -191,7 +252,8 @@ impl FillExtrusionBucket {
                 let p1 = Point::new(f64::from(p.x), f64::from(p.y));
                 let p2 = next.map(|p| Point::new(f64::from(p.x), f64::from(p.y)));
 
-                vertices.push(Self::layout_vertex(p1, edge_distance as u16, is_discarded));
+                let shared_normal = normals.as_ref().and_then(|normals| normals[i]);
+                vertices.push(Self::layout_vertex(p, edge_distance as u16, is_discarded, shared_normal));
 
                 // Walls that aren't drawn don't move the pattern along.
                 if let Some(p2) = p2.filter(|_| !is_discarded) {
@@ -233,7 +295,7 @@ impl FillExtrusionBucket {
             // The roof's vertices have no walls.
             fill_large_mesh_arrays(
                 self.vertices.get_mut(),
-                |x, y| Self::layout_vertex(Point::new(f64::from(x), f64::from(y)), 0, true),
+                |x, y| Self::layout_vertex(Point::new(x, y), 0, true, None),
                 &mut self.triangle_segments,
                 self.triangles.get_mut(),
                 &roof.vertices,
@@ -460,12 +522,75 @@ mod tests {
 
     #[test]
     fn layout_vertex_packs_the_position_and_wall_data() {
-        let v = FillExtrusionBucket::layout_vertex(Point::new(10.0, 20.0), 7, true);
+        let v = FillExtrusionBucket::layout_vertex(Point::new(10, 20), 7, true, None);
         assert_eq!(v.a1, [10, 20]);
         assert_eq!(v.a2, [1, 7]);
 
-        let v = FillExtrusionBucket::layout_vertex(Point::new(-1.5, 2.25), 9, false);
+        // A normal along +y is three quarters of a turn from -π.
+        let v = FillExtrusionBucket::layout_vertex(Point::new(-2, 2), 9, false, Some(Point::new(0.0, 1.0)));
         assert_eq!(v.a1, [-2, 2]);
-        assert_eq!(v.a2, [(64 * 256 + 32) * 2, 9]);
+        assert_eq!(v.a2, [(12288 << 2) | 2, 9]);
+        // -π and π are one direction.
+        let v = FillExtrusionBucket::layout_vertex(Point::new(0, 0), 0, false, Some(Point::new(-1.0, 0.0)));
+        assert_eq!(v.a2[0], 2);
+    }
+
+    fn normals(ring: &[(i16, i16)]) -> Vec<Option<(f64, f64)>> {
+        let ring: Vec<Point<i16>> = ring.iter().map(|&(x, y)| Point::new(x, y)).collect();
+        shared_wall_normals(&ring, |a, b| a != b && !is_boundary_edge(a, b))
+            .into_iter()
+            .map(|n| {
+                n.map(|n| {
+                    let len = n.x.hypot(n.y);
+                    ((n.x / len * 1000.0).round() / 1000.0, (n.y / len * 1000.0).round() / 1000.0)
+                })
+            })
+            .collect()
+    }
+
+    #[test]
+    fn walls_share_normals_at_shallow_turns() {
+        // Equal walls turning by 20° share the normal halfway between theirs.
+        let (x, y) = (100.0 * 20f64.to_radians().cos(), 100.0 * 20f64.to_radians().sin());
+        let ring = [(0, 0), (100, 0), (100 + x as i16, y as i16)];
+        let mid = (-10f64.to_radians().sin(), 10f64.to_radians().cos());
+        let half = normals(&ring);
+        assert_eq!(half[0], None);
+        let (nx, ny) = half[1].unwrap();
+        assert!((nx - mid.0).abs() < 0.01 && (ny - mid.1).abs() < 0.01, "{half:?}");
+        assert_eq!(half[2], None);
+
+        // A wall at least twice as long as the next keeps its own normal.
+        let long = normals(&[(0, 0), (100, 0), (109, 4)]);
+        assert_eq!(long[1], Some((0.0, 1.0)));
+
+        // A right angle is sharp.
+        assert_eq!(normals(&[(0, 0), (100, 0), (100, 100)])[1], None);
+    }
+
+    #[test]
+    fn closed_rings_share_normals_across_their_first_vertex() {
+        // A ring of 12 equal walls, closed at (100, 0).
+        let ring: Vec<(i16, i16)> = (0..=12)
+            .map(|k| {
+                let a = f64::from(k % 12) * 30f64.to_radians();
+                ((100.0 * a.cos()).round() as i16, (100.0 * a.sin()).round() as i16)
+            })
+            .collect();
+        let shared = normals(&ring);
+        assert!(shared.iter().all(Option::is_some), "{shared:?}");
+        assert_eq!(shared[0], shared[12]);
+        // At (100, 0) the walls either side share a normal along x.
+        let (nx, ny) = shared[0].unwrap();
+        assert!(nx.abs() > 0.99 && ny.abs() < 0.01, "{shared:?}");
+    }
+
+    #[test]
+    fn walls_by_clip_lines_keep_their_own_normals() {
+        // The edge from (-64, 100) to (-64, 0) is a clip line, and the ring
+        // goes on almost straight from it.
+        let shared = normals(&[(-64, 100), (-64, 0), (-60, -100), (-56, -200)]);
+        assert_eq!(shared[1], None);
+        assert!(shared[2].is_some());
     }
 }

@@ -5,7 +5,8 @@
 //! A wall instance reads its outline vertex and the next one as attributes,
 //! the same buffer bound twice, one vertex apart. Where the lowest bit of the
 //! vertex's `decimals_ed.x` is set, it ends a ring and the instance draws
-//! nothing. The static quad's x picks the vertex (0) or the next one (1), its y
+//! nothing. Where its next bit is set, the walls on either side of the vertex
+//! share the normal whose angle the remaining bits hold. The static quad's x picks the vertex (0) or the next one (1), its y
 //! the base (0) or the top (1). The wall shaders run the same vertex stages
 //! with every input per vertex, for walls whose quads are in the vertex
 //! buffer.
@@ -260,8 +261,25 @@ macro_rules! patterns {
     };
 }
 
-/// A wall instance's two outline vertices, `p1` and `p2`, its `normal`, and
-/// the corner's `t` and `z`. Returns `out` for an instance that ends a ring.
+/// `wall_normal`, the normal at a wall's end from its outline vertex's
+/// `decimals_ed.x`: the one the walls there share, or else `own`, the
+/// wall's own.
+macro_rules! wall_normal {
+    () => {
+        r#"
+fn wall_normal(bits: u32, own: vec2<f32>) -> vec2<f32> {
+    if ((bits & 2u) == 0u) {
+        return own;
+    }
+    let angle = f32(bits >> 2u) * (6.28318530718 / 16384.0) - 3.14159265359;
+    return vec2<f32>(cos(angle), sin(angle));
+}
+"#
+    };
+}
+
+/// A wall instance's two outline vertices, `p1` and `p2`, the corner's
+/// `normal`, `t` and `z`. Returns `out` for an instance that ends a ring.
 macro_rules! wall {
     () => {
         r#"
@@ -269,10 +287,14 @@ macro_rules! wall {
         return out;
     }
 
-    let p1 = vec2<f32>(in.outline_pos) + unpack_float(f32(in.decimals_ed.x / 2)) / 128.0;
-    let p2 = vec2<f32>(in.next_outline_pos) + unpack_float(f32(in.next_decimals_ed.x / 2)) / 128.0;
+    let p1 = vec2<f32>(in.outline_pos);
+    let p2 = vec2<f32>(in.next_outline_pos);
     let edge = normalize(p2 - p1);
-    let normal = vec3<f32>(-edge.y, edge.x, 0.0);
+    let own = vec2<f32>(-edge.y, edge.x);
+    let normal = vec3<f32>(
+        select(wall_normal(in.next_decimals_ed.x, own), wall_normal(in.decimals_ed.x, own), in.position.x == 0),
+        0.0,
+    );
 
     let t = f32(in.position.y);
     let z = select(baseValue, heightValue, t > 0.0);
@@ -311,8 +333,7 @@ fn main(in: VertexInput) -> VertexOutput {
 "#,
         base_and_height!(),
         r#"
-    let decimals = unpack_float(f32(in.decimals_ed.x / 2)) / 128.0;
-    out.position = projectTileFor3D(vec2<f32>(in.position) + decimals, heightValue, projectionVector[globalIndex.value]);
+    out.position = projectTileFor3D(vec2<f32>(in.position), heightValue, projectionVector[globalIndex.value]);
 
 #ifdef OVERDRAW_INSPECTOR
     out.color = vec4<f32>(1.0, 1.0, 1.0, 1.0);
@@ -357,6 +378,7 @@ struct VertexInput {
 };
 "#,
         plain_declarations!(),
+        wall_normal!(),
         r#"
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
@@ -418,8 +440,7 @@ fn main(in: VertexInput) -> VertexOutput {
         base_and_height!(),
         patterns!(),
         r#"
-    let decimals = unpack_float(f32(in.decimals_ed.x / 2)) / 128.0;
-    out.position = projectTileFor3D(vec2<f32>(in.position) + decimals, heightValue, projectionVector[globalIndex.value]);
+    out.position = projectTileFor3D(vec2<f32>(in.position), heightValue, projectionVector[globalIndex.value]);
 
     out.lighting = lighting_of(vec3<f32>(0.0, 0.0, 1.0), 1.0, baseValue, heightValue);
     set_pattern(&out, drawable, patternFrom, patternTo, vec2<f32>(in.position));
@@ -458,6 +479,7 @@ struct VertexInput {
 };
 "#,
         pattern_declarations!(),
+        wall_normal!(),
         r#"
 @vertex
 fn main(in: VertexInput) -> VertexOutput {

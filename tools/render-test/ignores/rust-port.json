@@ -27,6 +27,5 @@
   "query-tests/symbol-features-in/tilted-inside": "In this tilted or rotated view of tiles cut from shallower ones, a few labels are placed or hidden where GL JS's aren't. Not yet explained",
   "query-tests/symbol-features-in/tilted-outside": "In this tilted or rotated view of tiles cut from shallower ones, a few labels are placed or hidden where GL JS's aren't. Not yet explained",
   "query-tests/line-width-features-in/tilt-inside": "mln-rs also returns feature 33, a county next to the one GL JS returns, whose outline in a tile cut from a shallower one runs along the clipped edge in the tile's buffer. Not yet explained",
-  "render-tests/fill-extrusion-rounded-corner-distance/houses": "The roofs and walls match GL JS's, but about 50 single pixels along building edges rasterize differently, just over the default allowance of 0.00015 (0.00018). GL JS also shades the walls of each arc as one curved surface, where mln-rs shades each facet flat; that difference stays under the per-pixel threshold",
-  "render-tests/fill-extrusion-rounded-corner-distance/smooth-shading": "GL JS shades the walls of each rounded corner as one curved surface, blending their normals across the arc; mln-rs shades each facet flat"
+  "render-tests/fill-extrusion-rounded-corner-distance/houses": "The roofs and walls match GL JS's, but about 50 single pixels along building edges rasterize differently, just over the default allowance of 0.00015 (0.00018)"
 }

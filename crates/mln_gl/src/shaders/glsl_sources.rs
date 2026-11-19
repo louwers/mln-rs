@@ -1031,10 +1031,11 @@ highp vec4 color = unpack_mix_color(a_color, u_color_t);
 highp vec4 color = u_color;
 #endif
 
-    vec2 p1 = a_outline_pos + unpack_float(floor(a_decimals_ed.x / 2.0)) / 128.0;
-    vec2 p2 = a_next_outline_pos + unpack_float(floor(a_next_decimals_ed.x / 2.0)) / 128.0;
+    vec2 p1 = a_outline_pos;
+    vec2 p2 = a_next_outline_pos;
     vec2 edge = normalize(p2 - p1);
-    vec3 normal = vec3(-edge.y, edge.x, 0.0);
+    vec2 own = vec2(-edge.y, edge.x);
+    vec3 normal = vec3(a_pos.x == 0.0 ? wall_normal(a_decimals_ed.x, own) : wall_normal(a_next_decimals_ed.x, own), 0.0);
 
     base = max(0.0, base);
     height = max(0.0, height);
@@ -1214,10 +1215,11 @@ highp vec4 pattern_to = u_pattern_to;
     float fromScale = u_from_scale;
     float toScale = u_to_scale;
 
-    vec2 p1 = a_outline_pos + unpack_float(floor(a_decimals_ed.x / 2.0)) / 128.0;
-    vec2 p2 = a_next_outline_pos + unpack_float(floor(a_next_decimals_ed.x / 2.0)) / 128.0;
+    vec2 p1 = a_outline_pos;
+    vec2 p2 = a_next_outline_pos;
     vec2 edge = normalize(p2 - p1);
-    vec3 normal = vec3(-edge.y, edge.x, 0.0);
+    vec2 own = vec2(-edge.y, edge.x);
+    vec3 normal = vec3(a_pos.x == 0.0 ? wall_normal(a_decimals_ed.x, own) : wall_normal(a_next_decimals_ed.x, own), 0.0);
     float edgedistance = a_pos.x == 0.0 ? a_next_decimals_ed.y : a_decimals_ed.y;
 
     vec2 display_size_a = vec2((pattern_br_a.x - pattern_tl_a.x) / pixelRatio, (pattern_br_a.y - pattern_tl_a.y) / pixelRatio);
@@ -1466,9 +1468,7 @@ highp vec4 pattern_to = u_pattern_to;
 
     float t = 1.0;
     float z = height;
-    vec2 decimals = unpack_float(floor(a_decimals_ed.x / 2.0)) / 128.0;
-
-    gl_Position = projectTileFor3D(a_pos + decimals, z);
+    gl_Position = projectTileFor3D(a_pos, z);
 
     // extrusion top or side
     vec2 pos = normal.z == 1.0 ? a_pos : vec2(edgedistance, z * u_height_factor);
@@ -1664,9 +1664,7 @@ highp vec4 color = u_color;
 
     float t = 1.0;
     float z = height;
-    vec2 decimals = unpack_float(floor(a_decimals_ed.x / 2.0)) / 128.0;
-
-    gl_Position = projectTileFor3D(a_pos + decimals, z);
+    gl_Position = projectTileFor3D(a_pos, z);
 
     // Relative luminance (how dark/bright is the surface color?)
     float colorvalue = color.r * 0.2126 + color.g * 0.7152 + color.b * 0.0722;
@@ -4668,6 +4666,17 @@ vec2 unpack_float(const float packedValue) {
     int packedIntValue = int(packedValue);
     int v0 = packedIntValue / 256;
     return vec2(v0, packedIntValue - v0 * 256);
+}
+
+// The normal at the end of a fill extrusion wall from its outline vertex's
+// packed decimals_ed.x: the one the walls there share, whose angle from -pi
+// its bits 2 to 15 hold where bit 1 is set, or else `own`, the wall's.
+vec2 wall_normal(const float bits, const vec2 own) {
+    if (mod(floor(bits / 2.0), 2.0) == 0.0) {
+        return own;
+    }
+    float angle = floor(bits / 4.0) * (2.0 * PI / 16384.0) - PI;
+    return vec2(cos(angle), sin(angle));
 }
 
 vec2 unpack_opacity(const float packedOpacity) {
