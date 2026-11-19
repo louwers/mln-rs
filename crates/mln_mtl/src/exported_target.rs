@@ -128,7 +128,6 @@ pub type ExportedTarget = ring::ExportedTarget<MetalExporter>;
 /// beside each.
 pub struct MetalExporter {
     depth: usize,
-    producer: SyncKind,
     keep_depth: bool,
 }
 
@@ -152,11 +151,7 @@ impl Exporter for MetalExporter {
         if !sync_kinds(backend.device()).0.contains(producer) {
             return Err(Error::unsupported(format!("an exported IOSurface hands no frame over with {producer:?}")));
         }
-        Ok(MetalExporter { depth: ring.depth, producer, keep_depth: ring.keep_depth })
-    }
-
-    fn producer(&self) -> SyncKind {
-        self.producer
+        Ok(MetalExporter { depth: ring.depth, keep_depth: ring.keep_depth })
     }
 
     /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when a surface

@@ -858,7 +858,6 @@ pub type ExportedTarget = ring::ExportedTarget<VulkanExporter>;
 pub struct VulkanExporter {
     layout: Layout,
     depth: usize,
-    producer: SyncKind,
     /// The format of the depth images, when the ring keeps depth, and
     /// whether they are exported.
     depth_format: Option<(vk::Format, bool)>,
@@ -915,11 +914,7 @@ impl Exporter for VulkanExporter {
         } else {
             None
         };
-        Ok(VulkanExporter { layout, depth: ring.depth, producer, depth_format })
-    }
-
-    fn producer(&self) -> SyncKind {
-        self.producer
+        Ok(VulkanExporter { layout, depth: ring.depth, depth_format })
     }
 
     /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when Vulkan

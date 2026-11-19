@@ -142,7 +142,6 @@ pub type ExportedTarget = ring::ExportedTarget<D3d12Exporter>;
 /// with the ring's depth, a depth texture beside each.
 pub struct D3d12Exporter {
     depth: usize,
-    producer: SyncKind,
     keep_depth: bool,
 }
 
@@ -172,11 +171,7 @@ impl Exporter for D3d12Exporter {
         if !sync_kinds().0.contains(producer) {
             return Err(Error::unsupported(format!("an exported D3D12 texture hands no frame over with {producer:?}")));
         }
-        Ok(D3d12Exporter { depth: ring.depth, producer, keep_depth: ring.keep_depth })
-    }
-
-    fn producer(&self) -> SyncKind {
-        self.producer
+        Ok(D3d12Exporter { depth: ring.depth, keep_depth: ring.keep_depth })
     }
 
     /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when a texture

@@ -221,7 +221,7 @@ impl Imports {
 
     /// Destroys the imports in `gpu`, which keeps what the work submitted
     /// so far uses until it finishes.
-    pub fn tear_down(&mut self, gpu: &mut (impl Gpu + ?Sized)) {
+    fn tear_down(&mut self, gpu: &mut (impl Gpu + ?Sized)) {
         let textures = self.color.drain(..).chain(self.depth.drain(..)).chain(self.own_depth.take());
         destroy_unused(gpu, textures.map(ResourceId::Texture));
     }
@@ -242,23 +242,16 @@ impl<B: RingBackend> Slot<B> {
         Slot { wait, attached: None, handed: None }
     }
 
-    /// Has no submit of `gpu` that comes wait for what the slot waits for.
-    /// Returns whether a submit may have taken it already: a pass of a
-    /// frame begun on the slot and not ended.
-    fn detach(&mut self, gpu: &mut B::Gpu) -> bool {
+    /// Lets go of what the slot waits for, once a submit that may have
+    /// taken it is done, and of what the slot handed the host. A pass of a
+    /// frame begun on the slot and not ended may have taken the wait.
+    fn forget(&mut self, gpu: &mut B::Gpu, reads: &B::Reads) {
         let attached = self.attached.take();
         if let Some(texture) = attached {
             B::forget_waits(gpu, texture);
         }
-        attached.is_some()
-    }
-
-    /// Lets go of what the slot waits for, once a submit that may have
-    /// taken it is done, and of what the slot handed the host.
-    fn forget(&mut self, gpu: &mut B::Gpu, reads: &B::Reads) {
-        let taken = self.detach(gpu);
         if let Some(wait) = self.wait.take() {
-            if taken { B::waited(gpu, wait) } else { B::forget(reads, wait) }
+            if attached.is_some() { B::waited(gpu, wait) } else { B::forget(reads, wait) }
         }
         self.handed = None;
     }
@@ -288,11 +281,6 @@ impl<B: RingBackend> BorrowedTarget<B> {
         let imports = Imports::new::<B>(&mut backend.gpu(), &textures)?;
         let slots = textures.images().iter().map(|_| Slot::new(None)).collect();
         Ok(BorrowedTarget { textures, imports, selected: 0, slots, producer, torn_down: false, ring })
-    }
-
-    /// The host's textures that frames draw into.
-    pub fn textures(&self) -> &B::Textures {
-        &self.textures
     }
 
     /// Has the next frame draw into the texture at `slot`.
@@ -377,10 +365,10 @@ impl<B: RingBackend> BorrowedTarget<B> {
         self.pending(gpu, waits)
     }
 
-    /// Submits the work recorded so far, which the ring is about to let go
-    /// of the textures it draws into, with what the slot of a frame begun
-    /// and not ended waits for. The ring lets go of that wait after the
-    /// submit's work. Logs `what` was going on when the submit fails.
+    /// Submits the work recorded so far, before the ring lets go of the
+    /// textures it draws into, with what the slot of a frame begun and not
+    /// ended waits for, which the ring lets go of after the submit's work.
+    /// Logs `what` was going on when the submit fails.
     fn submit_recorded(&mut self, gpu: &mut B::Gpu, what: &str) {
         let mut taken = Vec::new();
         for slot in &mut self.slots {
@@ -428,11 +416,9 @@ impl<B: RingBackend> FrameTarget for BorrowedTarget<B> {
     /// draws into it waits for the host's reads before.
     fn begin_frame(&mut self, gpu: &mut B::Gpu) -> Option<FrameImage> {
         let image = self.imports.frame_image(self.selected)?;
-        let Some(state) = self.slots.get_mut(self.selected) else {
-            return Some(image);
-        };
         // A frame begun again keeps the wait it attached.
-        if state.attached != Some(image.color)
+        if let Some(state) = self.slots.get_mut(self.selected)
+            && state.attached != Some(image.color)
             && let Some(wait) = &state.wait
         {
             if let Err(error) = B::wait_before_using(gpu, image.color, wait) {
@@ -562,9 +548,6 @@ pub trait Exporter: Sized {
         producer: SyncKind,
     ) -> Result<Self, Error>;
 
-    /// The kind of sync with which frames are handed over.
-    fn producer(&self) -> SyncKind;
-
     /// A generation of images of `size` pixels, and the textures over them
     /// that frames draw into.
     fn allocate(
@@ -593,14 +576,15 @@ struct Generation<E: Exporter> {
 }
 
 impl<E: Exporter> Generation<E> {
-    fn new(exporter: &E, backend: &mut <E::Ring as RingBackend>::Renderer, size: Size) -> Result<Self, Error> {
+    fn new(
+        exporter: &E,
+        backend: &mut <E::Ring as RingBackend>::Renderer,
+        size: Size,
+        producer: SyncKind,
+    ) -> Result<Self, Error> {
         let (images, textures) = exporter.allocate(backend, size)?;
-        let target = BorrowedTarget::new(backend, textures, exporter.producer())?;
+        let target = BorrowedTarget::new(backend, textures, producer)?;
         Ok(Generation { target, images })
-    }
-
-    fn size(&self) -> Size {
-        self.target.textures.size()
     }
 }
 
@@ -608,6 +592,7 @@ impl<E: Exporter> Generation<E> {
 /// queued for the host to acquire.
 pub struct ExportedTarget<E: Exporter> {
     exporter: E,
+    producer: SyncKind,
     generations: Generations<Generation<E>>,
 }
 
@@ -626,8 +611,8 @@ impl<E: Exporter> ExportedTarget<E> {
         producer: SyncKind,
     ) -> Result<Self, Error> {
         let exporter = E::new(backend, ring, kind, producer)?;
-        let current = Generation::new(&exporter, backend, size)?;
-        Ok(ExportedTarget { exporter, generations: Generations::new(current) })
+        let current = Generation::new(&exporter, backend, size, producer)?;
+        Ok(ExportedTarget { exporter, producer, generations: Generations::new(current) })
     }
 
     /// Has the next frame draw into the image at `slot`.
@@ -675,7 +660,7 @@ impl<E: Exporter> ExportedTarget<E> {
         if self.size() == size {
             return Ok(false);
         }
-        let next = Generation::new(&self.exporter, backend, size)?;
+        let next = Generation::new(&self.exporter, backend, size, self.producer)?;
         let mut gpu = backend.gpu();
         self.generations.replace(next, held, |mut generation| generation.target.tear_down(&mut gpu));
         Ok(true)
@@ -684,7 +669,7 @@ impl<E: Exporter> ExportedTarget<E> {
     /// The size of the images that frames draw into.
     #[must_use]
     pub fn size(&self) -> Size {
-        self.generations.current().size()
+        self.generations.current().target.textures.size()
     }
 
     /// The images of the frame at `slot`: of the generation that the host
@@ -1193,9 +1178,6 @@ mod tests {
 
         fn new(_: &mut FakeBackend, ring: &ExportedRing, _: ExportKind, _: SyncKind) -> Result<Self, Error> {
             Ok(FakeExporter { depth: ring.depth })
-        }
-        fn producer(&self) -> SyncKind {
-            SyncKind::VulkanTimelineSemaphore
         }
         fn allocate(&self, backend: &mut FakeBackend, size: Size) -> Result<((), Images), Error> {
             let names = (0..self.depth)
