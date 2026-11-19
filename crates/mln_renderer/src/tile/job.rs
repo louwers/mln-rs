@@ -135,6 +135,8 @@ pub(crate) struct SourceStyle {
     pub(crate) layers: Vec<Arc<dyn ErasedEvaluatedLayer>>,
     pub(crate) global_state: Option<Arc<GlobalStateMap>>,
     pub(crate) font_faces: Option<Arc<FontFaces>>,
+    /// Whether the style has a `glyphs` URL.
+    pub(crate) glyph_pbfs: bool,
 }
 
 impl SourceStyle {
@@ -144,6 +146,7 @@ impl SourceStyle {
         layers: &[Arc<dyn ErasedEvaluatedLayer>],
         global_state: Option<&Arc<GlobalStateMap>>,
         font_faces: Option<&Arc<FontFaces>>,
+        glyph_pbfs: bool,
     ) -> bool {
         fn same<T: ?Sized>(a: Option<&Arc<T>>, b: Option<&Arc<T>>) -> bool {
             match (a, b) {
@@ -156,6 +159,7 @@ impl SourceStyle {
             && self.layers.iter().zip(layers).all(|(a, b)| Arc::ptr_eq(a, b))
             && same(self.global_state.as_ref(), global_state)
             && same(self.font_faces.as_ref(), font_faces)
+            && self.glyph_pbfs == glyph_pbfs
     }
 }
 
@@ -281,6 +285,7 @@ fn layout(
         layers: &layers,
         global_state: style.global_state.as_ref(),
         font_faces: style.font_faces.as_ref(),
+        glyph_pbfs: style.glyph_pbfs,
         available_images: &available_images,
         params,
     };

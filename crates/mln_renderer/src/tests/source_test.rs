@@ -74,6 +74,7 @@ fn tile_parameters(
         global_state: None,
         is_update_synchronous: false,
         font_faces: None,
+        glyph_pbfs: true,
         placement_commits: 0,
     }
 }

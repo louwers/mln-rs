@@ -63,7 +63,13 @@ fn layers(jsons: &[&str]) -> Vec<Arc<dyn ErasedEvaluatedLayer>> {
 }
 
 fn style(layers: &[Arc<dyn ErasedEvaluatedLayer>]) -> Arc<SourceStyle> {
-    Arc::new(SourceStyle { version: 0, layers: layers.to_vec(), global_state: None, font_faces: None })
+    Arc::new(SourceStyle {
+        version: 0,
+        layers: layers.to_vec(),
+        global_state: None,
+        font_faces: None,
+        glyph_pbfs: true,
+    })
 }
 
 /// The job id of tile 0/0/0's `generation`.

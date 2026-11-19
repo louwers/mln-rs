@@ -1,4 +1,5 @@
-//! Local glyphs from the system's fonts, one character at a time.
+//! The system's font for each character of a label: for shaping, and for
+//! local glyphs, one character at a time.
 //!
 //! The font of a character, for a label in a font stack, is the first font
 //! the stack names that the system has and that has the character, else the
@@ -12,7 +13,7 @@ use std::sync::{Arc, LazyLock};
 use mln_text::FontFile;
 use mln_text::font_name::{self, FontName};
 use mln_text::glyph::{Glyph, GlyphID};
-use mln_text::local_glyph_rasterizer::LocalGlyphRasterizer;
+use mln_text::local_glyph_rasterizer::{LocalFont, LocalGlyphRasterizer};
 use mln_util::font_stack::FontStack;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::i18n;
@@ -21,15 +22,32 @@ use parking_lot::Mutex;
 use crate::source::{self, Source};
 use crate::{Query, languages, system};
 
-/// Draws local glyphs from the system's fonts (see the module docs). Every
-/// rasterizer shares the fonts the process has found.
+/// The system's fonts for labels (see the module docs): their glyphs, and
+/// the fonts that shape them. Every rasterizer shares the fonts the process
+/// has found.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SystemGlyphRasterizer;
 
 impl LocalGlyphRasterizer for SystemGlyphRasterizer {
     fn rasterize_glyph(&self, font_stack: &FontStack, glyph_id: GlyphID) -> Option<Glyph> {
         let c = char::from_u32(u32::from(glyph_id.code))?;
-        font_for(font_stack, c)?.rasterize_char(c, glyph_id)
+        font_for(font_stack, c)?.file.rasterize_char(c, glyph_id)
+    }
+
+    fn font(&self, font_stack: &FontStack, c: char) -> Option<LocalFont> {
+        Some(font_for(font_stack, c)?.local.clone())
+    }
+}
+
+/// A font the system has, at the weight it was found for.
+pub(crate) struct SystemFont {
+    file: FontFile,
+    local: LocalFont,
+}
+
+impl SystemFont {
+    fn has_char(&self, c: char) -> bool {
+        self.file.has_char(c)
     }
 }
 
@@ -38,10 +56,10 @@ impl LocalGlyphRasterizer for SystemGlyphRasterizer {
 struct Fonts {
     files: source::Files,
     /// The font of each font name, if the system has it.
-    named: HashMap<String, Option<Arc<FontFile>>>,
+    named: HashMap<String, Option<Arc<SystemFont>>>,
     /// The fonts the system picked for each font stack and class of
     /// characters, in the order found.
-    picked: HashMap<(FontStack, u32), Vec<Arc<FontFile>>>,
+    picked: HashMap<(FontStack, u32), Vec<Arc<SystemFont>>>,
     /// The characters that no font has, for each font stack.
     missing: HashSet<(FontStack, char)>,
 }
@@ -49,7 +67,7 @@ struct Fonts {
 static FONTS: LazyLock<Mutex<Fonts>> = LazyLock::new(Mutex::default);
 
 /// The font that draws `c` for a label in `font_stack`.
-fn font_for(font_stack: &FontStack, c: char) -> Option<Arc<FontFile>> {
+pub(crate) fn font_for(font_stack: &FontStack, c: char) -> Option<Arc<SystemFont>> {
     let mut fonts = FONTS.lock();
     let fonts = &mut *fonts;
     let names = names(font_stack);
@@ -93,11 +111,13 @@ fn first_drawing(
     candidates: Vec<(String, Source)>,
     c: char,
     weight: u16,
-) -> Option<Arc<FontFile>> {
-    candidates
-        .into_iter()
-        .find_map(|(_, source)| FontFile::new(files.data(&source), weight).filter(|font| font.has_char(c)))
-        .map(Arc::new)
+) -> Option<Arc<SystemFont>> {
+    candidates.into_iter().find_map(|(_, source)| {
+        let data = files.data(&source);
+        let file = FontFile::new(data.clone(), weight).filter(|font| font.has_char(c))?;
+        let key = Arc::from(format!("{}@{weight}", source.url()));
+        Some(Arc::new(SystemFont { file, local: LocalFont { key, data, weight } }))
+    })
 }
 
 /// The names of `font_stack` that name a font, with their parts.
@@ -154,7 +174,7 @@ pub(crate) fn picked_fonts(first: &FontName<'_>, c: char) -> Vec<(String, Source
 }
 
 /// How many of a lookup's candidates to read.
-const MAX_CANDIDATES: usize = 16;
+pub(crate) const MAX_CANDIDATES: usize = 16;
 
 /// The first of `candidates` that have `c`, with the weight they draw at
 /// when asked for `weight`.

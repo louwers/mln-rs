@@ -30,10 +30,11 @@ pub trait FontFaceEngine: Send + Sync {
     /// thread. It may be called again, before or after `ready` was called.
     fn prepare(&self, ready: Box<dyn FnOnce(Result<(), String>) + Send>);
 
-    /// Loads a font, once `prepare` reported the engine ready: `None` when
-    /// `data` isn't a font the engine can read. The shaper may keep `data`
-    /// (the response's bytes) instead of copying it.
-    fn load(&self, type_: GlyphIDType, data: FontData) -> Option<Box<dyn FontFaceShaper>>;
+    /// Loads a font, a variable font at the OpenType `weight`, once
+    /// `prepare` reported the engine ready: `None` when `data` isn't a font
+    /// the engine can read. The shaper may keep `data` (the response's
+    /// bytes) instead of copying it.
+    fn load(&self, type_: GlyphIDType, data: FontData, weight: u16) -> Option<Box<dyn FontFaceShaper>>;
 }
 
 /// The engine of a renderer that wasn't given one
@@ -59,7 +60,7 @@ pub fn default_engine() -> Arc<dyn FontFaceEngine> {
                 .to_owned()));
         }
 
-        fn load(&self, _type: GlyphIDType, _data: FontData) -> Option<Box<dyn FontFaceShaper>> {
+        fn load(&self, _type: GlyphIDType, _data: FontData, _weight: u16) -> Option<Box<dyn FontFaceShaper>> {
             None
         }
     }
@@ -81,8 +82,8 @@ mod in_process {
             ready(Ok(()));
         }
 
-        fn load(&self, type_: GlyphIDType, data: FontData) -> Option<Box<dyn FontFaceShaper>> {
-            let shaper = Shaper::new(type_, data);
+        fn load(&self, type_: GlyphIDType, data: FontData, weight: u16) -> Option<Box<dyn FontFaceShaper>> {
+            let shaper = Shaper::at_weight(type_, data, f32::from(weight));
             shaper.valid().then(|| -> Box<dyn FontFaceShaper> { Box::new(shaper) })
         }
     }

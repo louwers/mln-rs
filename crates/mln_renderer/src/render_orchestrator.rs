@@ -826,6 +826,7 @@ impl RenderOrchestrator {
             global_state: self.global_state.clone(),
             is_update_synchronous: false,
             font_faces: update_parameters.style.get_font_faces().cloned(),
+            glyph_pbfs: !update_parameters.style.get_glyph_url().is_empty(),
             placement_commits: self.placement_controller.commits(),
         };
 

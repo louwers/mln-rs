@@ -633,6 +633,13 @@ pub fn is_variation_selector(chr: char) -> bool {
     matches!(chr, '\u{180B}'..='\u{180D}' | '\u{180F}' | '\u{FE00}'..='\u{FE0F}' | '\u{E0100}'..='\u{E01EF}')
 }
 
+/// Whether `chr` belongs with the character before it, so that the font
+/// that draws that one draws it too: a mark, or a joiner or non-joiner.
+#[must_use]
+pub fn extends_previous(chr: char) -> bool {
+    chr.general_category_group() == GeneralCategoryGroup::Mark || matches!(chr, '\u{200C}' | '\u{200D}')
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

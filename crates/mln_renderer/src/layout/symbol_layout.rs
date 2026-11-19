@@ -80,21 +80,28 @@ struct GlyphTypeSpan {
     fallback: bool,
 }
 
-/// Which font face draws each character of one font stack's text. The
-/// faces that name one of the stack's fonts win, in the stack's order. The
-/// fallback faces, which have no name, draw only the text that glyph PBFs
-/// can't shape (`i18n::char_in_supported_script`). The rest takes its glyphs
-/// from PBFs, or from local fonts where the PBFs have none (`glyph_store.rs`).
+/// Which font draws each character of one font stack's text, as the style
+/// spec resolves fonts. The faces that name one of the stack's fonts win, in
+/// the stack's order; then glyph PBFs, if the style has them. The fallback
+/// faces, which have no name, come before the PBFs only for the text they
+/// can't shape (`i18n::char_in_supported_script`); in a style without PBFs,
+/// they and then the device's fonts draw the rest, if the faces include
+/// them ([`FontFace::system`](mln_text::glyph::FontFace::system)). Else the
+/// rest takes its glyphs one at a time, from PBFs or local fonts
+/// (`glyph_store.rs`).
 ///
-/// The spans are sorted and disjoint, so a lookup is a binary search, and a
-/// stack that no face applies to has none.
+/// The spans are sorted and disjoint, so a lookup is a binary search.
 #[derive(Debug, Default)]
 struct GlyphTypeTable {
     spans: Vec<GlyphTypeSpan>,
+    /// Whether the style has glyph PBFs.
+    glyph_pbfs: bool,
+    /// What draws the characters that no face does.
+    rest: GlyphIDType,
 }
 
 impl GlyphTypeTable {
-    fn new(stack: &[String], faces: &mln_text::glyph::FontFaces) -> Self {
+    fn new(stack: &[String], faces: &mln_text::glyph::FontFaces, glyph_pbfs: bool) -> Self {
         let named =
             stack.iter().flat_map(|name| faces.iter().filter(move |face| !name.is_empty() && face.name == *name));
         let fallbacks = faces.iter().filter(|face| face.name.is_empty());
@@ -126,15 +133,16 @@ impl GlyphTypeTable {
                 _ => spans.push(GlyphTypeSpan { range: (first..=last).into(), type_: face.type_, fallback }),
             }
         }
-        GlyphTypeTable { spans }
+        let system = faces.iter().any(|face| face.type_ == GlyphIDType::System);
+        let rest = if system && !glyph_pbfs { GlyphIDType::System } else { GlyphIDType::FontPBF };
+        GlyphTypeTable { spans, glyph_pbfs, rest }
     }
 
     /// The glyph type of `c`. A variation selector keeps `previous`, the
-    /// type of the character before it, which is `FontPBF` when no face
-    /// applies.
+    /// type of the character before it.
     fn get(&self, c: char, previous: GlyphIDType) -> GlyphIDType {
         if self.spans.is_empty() {
-            return GlyphIDType::FontPBF;
+            return self.rest;
         }
         if i18n::is_variation_selector(c) {
             return previous;
@@ -142,10 +150,13 @@ impl GlyphTypeTable {
         let code_point = u32::from(c);
         let index = self.spans.partition_point(|span| span.range.last < code_point);
         match self.spans.get(index) {
-            Some(span) if span.range.start <= code_point && !(span.fallback && i18n::char_in_supported_script(c)) => {
+            Some(span)
+                if span.range.start <= code_point
+                    && !(span.fallback && self.glyph_pbfs && i18n::char_in_supported_script(c)) =>
+            {
                 span.type_
             }
-            _ => GlyphIDType::FontPBF,
+            _ => self.rest,
         }
     }
 }
@@ -154,21 +165,24 @@ impl GlyphTypeTable {
 /// few at most, so it searches them in order.
 struct GlyphTypeTables {
     faces: Option<Arc<mln_text::glyph::FontFaces>>,
+    glyph_pbfs: bool,
     tables: Vec<(Vec<String>, GlyphTypeTable)>,
 }
 
 impl GlyphTypeTables {
-    fn new(faces: Option<Arc<mln_text::glyph::FontFaces>>) -> Self {
-        GlyphTypeTables { faces: faces.filter(|faces| !faces.is_empty()), tables: Vec::new() }
+    fn new(faces: Option<Arc<mln_text::glyph::FontFaces>>, glyph_pbfs: bool) -> Self {
+        GlyphTypeTables { faces: faces.filter(|faces| !faces.is_empty()), glyph_pbfs, tables: Vec::new() }
     }
 
     fn get(&mut self, stack: &[String]) -> &GlyphTypeTable {
         let Some(faces) = &self.faces else {
-            static EMPTY: GlyphTypeTable = GlyphTypeTable { spans: Vec::new() };
+            static EMPTY: GlyphTypeTable =
+                GlyphTypeTable { spans: Vec::new(), glyph_pbfs: true, rest: GlyphIDType::FontPBF };
             return &EMPTY;
         };
+        let glyph_pbfs = self.glyph_pbfs;
         let index = self.tables.iter().position(|(known, _)| known.as_slice() == stack).unwrap_or_else(|| {
-            self.tables.push((stack.to_vec(), GlyphTypeTable::new(stack, faces)));
+            self.tables.push((stack.to_vec(), GlyphTypeTable::new(stack, faces, glyph_pbfs)));
             self.tables.len() - 1
         });
         &self.tables[index].1
@@ -453,7 +467,8 @@ impl SymbolLayout {
             &context,
             passes,
         );
-        let mut glyph_type_tables = GlyphTypeTables::new(layout_parameters.font_faces.clone());
+        let mut glyph_type_tables =
+            GlyphTypeTables::new(layout_parameters.font_faces.clone(), layout_parameters.glyph_pbfs);
         for i in 0..feature_count {
             if selected.as_ref().is_some_and(|selected| !selected[i]) {
                 continue;
@@ -594,7 +609,11 @@ impl SymbolLayout {
                             dependencies.extend(i18n::verticalize_punctuation(c).and_then(GlyphID::from_char));
                         }
                     } else {
-                        dependencies.insert(GlyphID::with_type(0, section.type_));
+                        // A face's glyph 0 stands for its font file; the
+                        // device's fonts have none to load.
+                        if section.type_ != GlyphIDType::System {
+                            dependencies.insert(GlyphID::with_type(0, section.type_));
+                        }
                         this.need_finalize_symbols_val = true;
                     }
                 }
@@ -2083,7 +2102,7 @@ mod tests {
     }
 
     /// The faces' rule, read off them for each character.
-    fn scan(c: char, stack: &[String], faces: &FontFaces, previous: GlyphIDType) -> GlyphIDType {
+    fn scan(c: char, stack: &[String], faces: &FontFaces, glyph_pbfs: bool, previous: GlyphIDType) -> GlyphIDType {
         if mln_util::i18n::is_variation_selector(c) {
             return previous;
         }
@@ -2091,8 +2110,11 @@ mod tests {
         let named =
             stack.iter().flat_map(|name| faces.iter().filter(move |face| !name.is_empty() && face.name == *name));
         // PBFs draw the text they can, before a fallback face.
-        let fallbacks = faces.iter().filter(|face| face.name.is_empty() && !char_in_supported_script(c));
-        named.chain(fallbacks).find(|face| covers(face)).map_or(GlyphIDType::FontPBF, |face| face.type_)
+        let fallbacks =
+            faces.iter().filter(|face| face.name.is_empty() && !(glyph_pbfs && char_in_supported_script(c)));
+        let system = !glyph_pbfs && faces.iter().any(|face| face.type_ == GlyphIDType::System);
+        let rest = if system { GlyphIDType::System } else { GlyphIDType::FontPBF };
+        named.chain(fallbacks).find(|face| covers(face)).map_or(rest, |face| face.type_)
     }
 
     fn face(name: &str, type_: u16, ranges: &[(u32, u32)]) -> FontFace {
@@ -2103,7 +2125,7 @@ mod tests {
 
     #[test]
     fn glyph_type_table_matches_the_faces_for_every_character() {
-        let faces: FontFaces = vec![
+        let mut faces: FontFaces = vec![
             face("", 1, &[(0x3000, 0x30FF), (0x4E00, 0x9FFF)]),
             face("Noto Sans", 2, &[(0x0600, 0x06FF), (0x4E00, 0x4FFF)]),
             face("Open Sans", 3, &[(0x0000, 0x007F), (0x0500, 0x0650)]),
@@ -2116,25 +2138,31 @@ mod tests {
         ];
         let stacks: [&[&str]; 5] =
             [&[], &["Open Sans"], &["Noto Sans", "Open Sans"], &["Open Sans", "Noto Sans"], &["Missing", ""]];
-        for stack in stacks {
-            let stack: Vec<String> = stack.iter().map(|name| (*name).to_owned()).collect();
-            let table = GlyphTypeTable::new(&stack, &faces);
-            // The BMP, and around the bounds beyond it.
-            let beyond = [0x1_0000, 0x1_0FFF, 0x1_F000, 0x1_F600, 0x1_F64F, 0x2_0000, 0x2_A6DF, 0x10_FFFF]
-                .into_iter()
-                .flat_map(|bound: u32| bound.saturating_sub(1)..=bound + 1);
-            for c in (0..=0xFFFF).chain(beyond).filter_map(char::from_u32) {
-                for previous in [GlyphIDType::FontPBF, GlyphIDType::face(NonZeroU16::new(7).unwrap())] {
-                    assert_eq!(table.get(c, previous), scan(c, &stack, &faces, previous), "{c:?} in {stack:?}");
+        let check = |faces: &FontFaces| {
+            for (stack, glyph_pbfs) in stacks.iter().flat_map(|stack| [(stack, true), (stack, false)]) {
+                let stack: Vec<String> = stack.iter().map(|name| (*name).to_owned()).collect();
+                let table = GlyphTypeTable::new(&stack, faces, glyph_pbfs);
+                // The BMP, and around the bounds beyond it.
+                let beyond = [0x1_0000, 0x1_0FFF, 0x1_F000, 0x1_F600, 0x1_F64F, 0x2_0000, 0x2_A6DF, 0x10_FFFF]
+                    .into_iter()
+                    .flat_map(|bound: u32| bound.saturating_sub(1)..=bound + 1);
+                for c in (0..=0xFFFF).chain(beyond).filter_map(char::from_u32) {
+                    for previous in [GlyphIDType::FontPBF, GlyphIDType::face(NonZeroU16::new(7).unwrap())] {
+                        let expected = scan(c, &stack, faces, glyph_pbfs, previous);
+                        assert_eq!(table.get(c, previous), expected, "{c:?} in {stack:?}, PBFs {glyph_pbfs}");
+                    }
                 }
             }
-        }
+        };
+        check(&faces);
+        faces.push(FontFace::system(vec![(0x0900, 0x097F), (0x1780, 0x17FF)]));
+        check(&faces);
     }
 
     #[test]
     fn fallback_faces_draw_only_what_pbfs_cannot() {
         let faces: FontFaces = vec![face("", 1, &[(0x0000, 0xFFFF)])];
-        let table = GlyphTypeTable::new(&["Open Sans".to_owned()], &faces);
+        let table = GlyphTypeTable::new(&["Open Sans".to_owned()], &faces, true);
         let devanagari = GlyphIDType::face(NonZeroU16::new(1).unwrap());
         assert_eq!(table.get('a', GlyphIDType::FontPBF), GlyphIDType::FontPBF);
         assert_eq!(table.get('\u{4E2D}', GlyphIDType::FontPBF), GlyphIDType::FontPBF);
@@ -2142,9 +2170,24 @@ mod tests {
     }
 
     #[test]
+    fn the_devices_fonts_draw_what_pbfs_cannot_or_all_without_pbfs() {
+        let faces: FontFaces = vec![FontFace::system(vec![(0x0900, 0x097F)])];
+        let stack = ["Open Sans".to_owned()];
+        let with_pbfs = GlyphTypeTable::new(&stack, &faces, true);
+        assert_eq!(with_pbfs.get('a', GlyphIDType::FontPBF), GlyphIDType::FontPBF);
+        assert_eq!(with_pbfs.get('\u{0915}', GlyphIDType::FontPBF), GlyphIDType::System);
+        // A script the device has no font for stays with the PBFs.
+        assert_eq!(with_pbfs.get('\u{1780}', GlyphIDType::FontPBF), GlyphIDType::FontPBF);
+        let without_pbfs = GlyphTypeTable::new(&stack, &faces, false);
+        for c in ['a', '\u{0915}', '\u{1780}', '\u{4E2D}'] {
+            assert_eq!(without_pbfs.get(c, GlyphIDType::FontPBF), GlyphIDType::System, "{c:?}");
+        }
+    }
+
+    #[test]
     fn variation_selectors_stay_with_their_base() {
         let faces: FontFaces = vec![face("Noto Sans", 2, &[(0x4E00, 0x9FFF)])];
-        let table = GlyphTypeTable::new(&["Noto Sans".to_owned()], &faces);
+        let table = GlyphTypeTable::new(&["Noto Sans".to_owned()], &faces, true);
         let han = GlyphIDType::face(NonZeroU16::new(2).unwrap());
         for selector in ['\u{FE00}', '\u{FE0F}', '\u{E0100}'] {
             assert_eq!(table.get(selector, han), han, "{selector:?}");
@@ -2154,7 +2197,7 @@ mod tests {
     #[test]
     fn glyph_type_table_is_empty_without_a_face_for_the_stack() {
         let faces: FontFaces = vec![face("Noto Sans", 2, &[(0x0600, 0x06FF)])];
-        let table = GlyphTypeTable::new(&["Open Sans".to_owned()], &faces);
+        let table = GlyphTypeTable::new(&["Open Sans".to_owned()], &faces, true);
         assert_eq!(table.spans, Vec::new());
         assert_eq!(table.get('\u{0620}', GlyphIDType::FontPBF), GlyphIDType::FontPBF);
     }

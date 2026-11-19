@@ -113,13 +113,6 @@ impl Files {
     }
 }
 
-/// Whether a font that draws at `weight` is near regular. Every label in a
-/// fallback font's script draws at the font's one weight, whatever the font
-/// stack asks for.
-pub(crate) fn near_regular(weight: u16) -> bool {
-    (300..=600).contains(&weight)
-}
-
 /// The weight the map draws a font with `tables` at when asked for
 /// `weight`, if it has a glyph for `probe`.
 ///
@@ -185,7 +178,7 @@ fn map(path: &Path) -> Option<Mmap> {
 
 #[cfg(test)]
 mod tests {
-    use super::{drawn_weight, family_name, near_regular};
+    use super::{drawn_weight, family_name};
     use crate::sfnt::Table;
 
     fn os2(weight: u16) -> Table {
@@ -266,13 +259,5 @@ mod tests {
         let both = name(&[(1, "Noto Sans Display SemiBold"), (16, "Noto Sans Display")]);
         assert_eq!(family_name(&[both]).as_deref(), Some("Noto Sans Display"));
         assert_eq!(family_name(&[name(&[(2, "Regular")])]), None);
-    }
-
-    #[test]
-    fn regular_is_300_to_600() {
-        assert!(!near_regular(200));
-        assert!(near_regular(300));
-        assert!(near_regular(600));
-        assert!(!near_regular(700));
     }
 }

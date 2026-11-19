@@ -106,8 +106,10 @@ pub(crate) fn layers_by_id<T: LayerType>(group: &[Arc<EvaluatedLayer<T>>]) -> Ve
 
 pub(crate) struct LayoutParameters<'a> {
     pub(crate) bucket_parameters: &'a BucketParameters,
-    /// symbols: `std::shared_ptr<FontFaces> fontFaces`.
+    /// The style's font faces, and its fallback faces after them.
     pub(crate) font_faces: Option<Arc<mln_text::glyph::FontFaces>>,
+    /// Whether the style has a `glyphs` URL.
+    pub(crate) glyph_pbfs: bool,
     pub(crate) glyph_dependencies: &'a mut GlyphDependencies,
     pub(crate) image_dependencies: &'a mut ImageDependencies,
     pub(crate) available_images: &'a VecSet<String>,

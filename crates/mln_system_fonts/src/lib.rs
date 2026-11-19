@@ -1,15 +1,16 @@
 //! The system's fonts, for the text that a style's own fonts leave to them:
 //!
-//! - [`fallback_font_faces`]: a font for each script that glyph PBFs can't
-//!   shape (the Indic scripts, Sinhala, Tibetan, Myanmar and Khmer), which
-//!   the map shapes with HarfBuzz. For each script, it picks one installed
-//!   font that has the script's glyphs and draws near regular weight
-//!   (`pick`).
-//! - [`SystemGlyphRasterizer`]: the glyph of any other character, one at a
-//!   time, for a style without glyph PBFs, a glyph its PBFs lack, or a CJK
-//!   character. It draws from the font that the label's font stack names, if
-//!   the system has it, else from the font the system picks for the
-//!   character, at the weight and style that the stack's names imply.
+//! - [`font_face`]: the system's fonts as a map's fallback face
+//!   (`FontFace::system`), which the map shapes text with: in a style with
+//!   glyph PBFs, the scripts they can't shape (the Indic scripts, Sinhala,
+//!   Tibetan, Myanmar and Khmer) that the system has fonts for; in a style
+//!   without, all the text the style's font faces don't draw.
+//! - [`SystemGlyphRasterizer`]: the font of each character of a label, for
+//!   that shaping, and the glyph of any other character, one at a time: a
+//!   glyph a style's PBFs lack, or a CJK character. Either comes from the
+//!   first font that the label's font stack names that the system has and
+//!   that has the character, else from the font the system picks for it, at
+//!   the weight and style that the stack's names imply.
 //!
 //! It asks the platform's font matcher, for the user's preferred languages:
 //! fontconfig on Linux and the BSDs, `AFontMatcher` on Android 10 and later,
@@ -23,7 +24,7 @@
 
 use std::sync::OnceLock;
 
-use mln_text::glyph::{FontFace, FontFaces};
+use mln_text::glyph::{FontFace, FontFaceRange};
 
 #[cfg(not(target_family = "wasm"))]
 mod glyphs;
@@ -48,98 +49,77 @@ mod fontconfig;
 #[cfg(not(target_family = "wasm"))]
 pub use glyphs::SystemGlyphRasterizer;
 
-/// A system font chosen as a fallback.
-#[derive(Clone, Debug)]
-pub struct SystemFontFace {
-    /// Its family name.
-    pub family: String,
-    pub face: FontFace,
-}
+/// The ranges of [`shaped_ranges`], once found.
+static SHAPED: OnceLock<Vec<FontFaceRange>> = OnceLock::new();
 
-/// The fallback fonts, once found.
-static FACES: OnceLock<Vec<SystemFontFace>> = OnceLock::new();
-
-/// Starts loading the platform's font matcher and finding the fallback
-/// fonts on a thread of their own, unless that has started, so that the
-/// first map that needs them waits less.
+/// Starts loading the platform's font matcher and finding
+/// [`shaped_ranges`] on a thread of their own, unless that has started, so
+/// that the first map that needs them waits less.
 pub fn prefetch() {
     static STARTED: OnceLock<()> = OnceLock::new();
-    if FACES.get().is_some() {
+    if SHAPED.get().is_some() {
         return;
     }
     STARTED.get_or_init(|| {
-        // Without a thread, the first `fallback_font_faces` finds them.
-        let _ = mln_util::thread::builder("system fonts").spawn(fallback_font_faces);
+        // Without a thread, the first `shaped_ranges` finds them.
+        let _ = mln_util::thread::builder("system fonts").spawn(shaped_ranges);
     });
 }
 
-/// The fallback fonts for the scripts that glyph PBFs can't shape, from the
-/// fonts installed on this system: at most one per script. Finds them the
-/// first time, which can take a moment; then it returns the same fonts.
-pub fn fallback_font_faces() -> &'static [SystemFontFace] {
-    FACES.get_or_init(find)
+/// The code points of the scripts that glyph PBFs can't shape that the
+/// system has a font for. Finds them the first time, which can take a
+/// moment; then it returns the same ranges.
+pub fn shaped_ranges() -> &'static [FontFaceRange] {
+    SHAPED.get_or_init(find)
 }
 
-/// The faces of [`fallback_font_faces`] alone, for
-/// `Map::set_fallback_font_face_list`.
+/// The system's fonts as a map's fallback face, for [`shaped_ranges`]
+/// where the style has glyph PBFs (`Map::set_fallback_font_face_list`):
+/// `None` without a font matcher, as in the browser.
 #[must_use]
-pub fn fallback_font_face_list() -> FontFaces {
-    fallback_font_faces().iter().map(|face| face.face.clone()).collect()
+pub fn font_face() -> Option<FontFace> {
+    #[cfg(target_family = "wasm")]
+    return None;
+    #[cfg(not(target_family = "wasm"))]
+    system().finder.is_some().then(|| FontFace::system(shaped_ranges().to_vec()))
 }
 
 #[cfg(target_family = "wasm")]
-fn find() -> Vec<SystemFontFace> {
+fn find() -> Vec<FontFaceRange> {
     Vec::new()
 }
 
 #[cfg(not(target_family = "wasm"))]
-fn find() -> Vec<SystemFontFace> {
+fn find() -> Vec<FontFaceRange> {
     let Some(finder) = &system().finder else { return Vec::new() };
     let finder = finder.lock();
-    let faces = find_with(&finder);
+    let ranges = find_with(&finder);
     #[cfg(target_os = "android")]
     {
         let Finder::Android(matcher) = &*finder;
         matcher.prepare();
     }
-    faces
+    ranges
 }
 
-/// The fallback fonts that `finder` finds.
+/// The ranges of the scripts that `finder` has a font for.
 #[cfg(not(target_family = "wasm"))]
-fn find_with(finder: &Finder) -> Vec<SystemFontFace> {
-    let mut files = source::Files::default();
-    let mut faces = Vec::new();
+fn find_with(finder: &Finder) -> Vec<FontFaceRange> {
+    let mut ranges = Vec::new();
     for script in scripts::SCRIPTS {
         let languages = [script.language.to_owned()];
         let query =
             Query { name: None, family: None, probe: script.probe, languages: &languages, weight: 400, italic: false };
-        let Some((family, source)) = pick(script, finder.candidates(&query)) else {
-            continue;
-        };
-        let url = source.url();
-        let bytes = files.data(&source);
-        faces.push(SystemFontFace { family, face: FontFace::fallback(&url, script.ranges.to_vec()).with_data(bytes) });
-    }
-    faces
-}
-
-/// The best of `candidates` for `script`: the first that has its glyphs and
-/// draws near regular weight, else the first that has its glyphs. Glyph PBFs
-/// can't shape the script, so any weight beats none.
-#[cfg(not(target_family = "wasm"))]
-fn pick(script: &scripts::Script, candidates: Vec<(String, source::Source)>) -> Option<(String, source::Source)> {
-    let mut last_resort = None;
-    for (family, source) in candidates {
-        let Some(weight) = source.drawn_weight(script.probe, 400) else { continue };
-        if source::near_regular(weight) {
-            return Some((family, source));
-        }
-        if last_resort.is_none() {
-            last_resort = Some((family, source));
+        let has_font = finder
+            .candidates(&query)
+            .iter()
+            .take(glyphs::MAX_CANDIDATES)
+            .any(|(_, source)| source.drawn_weight(script.probe, 400).is_some());
+        if has_font {
+            ranges.extend_from_slice(script.ranges);
         }
     }
-    last_resort
+    ranges
 }
 
 /// What to look a font up for.
@@ -239,19 +219,22 @@ impl Finder {
 
 #[cfg(all(test, not(target_family = "wasm")))]
 mod tests {
-    // Which fonts it finds depends on the machine, so the tests check each
-    // font it chose, and pass with none; `--nocapture` lists them.
+    // Which fonts it finds depends on the machine, so the tests check the
+    // fonts it finds, and pass with none; `--nocapture` lists them.
+
+    use std::num::NonZeroU16;
 
     use mln_text::glyph::GlyphIDType;
+    use mln_text::local_glyph_rasterizer::LocalGlyphRasterizer;
     use mln_text::{ShapedText, Shaper};
     use skrifa::MetadataProvider;
 
-    use super::{SystemFontFace, fallback_font_faces, scripts};
+    use super::{SystemGlyphRasterizer, scripts, shaped_ranges};
 
     /// Text of the script of `probe` that its font's shaping rules change:
     /// a conjunct, a split or reordered vowel, or a stack.
-    fn shaped_sample(probe: char) -> Option<&'static str> {
-        Some(match probe {
+    fn shaped_sample(probe: char) -> &'static str {
+        match probe {
             '\u{0915}' => "क्ष",
             '\u{0995}' => "ক্ষ",
             '\u{0A15}' => "ਕ੍ਰ",
@@ -265,59 +248,44 @@ mod tests {
             '\u{0F40}' => "སྒྲ",
             '\u{1000}' => "ကြ",
             '\u{1780}' => "ក្ក",
-            _ => return None,
-        })
-    }
-
-    /// Each font for a script that needs shaping shapes it: its rules
-    /// substitute, reorder or position the glyphs of a sample, which the
-    /// map's shaper would otherwise draw one after another as the font maps
-    /// them.
-    fn check_shaping(faces: &[SystemFontFace]) {
-        for script in scripts::SCRIPTS {
-            let Some(face) = faces.iter().find(|face| face.face.ranges == script.ranges) else { continue };
-            let sample = shaped_sample(script.probe).expect("a sample for each script that needs shaping");
-            let data = face.face.data.clone().unwrap();
-            let font = skrifa::FontRef::from_index(data.as_bytes(), data.face_index()).unwrap();
-            let nominal: Vec<u16> =
-                sample.chars().map(|c| font.charmap().map(c).map_or(0, |glyph| glyph.to_u32() as u16)).collect();
-            let shaper = Shaper::new(face.face.type_, data);
-            let text: Vec<char> = sample.chars().collect();
-            let mut shaped = ShapedText::default();
-            shaper.shape(&text, false, &mut shaped);
-            let (ids, adjusts) = (shaped.glyphs, shaped.adjusts);
-            let shaped: Vec<u16> = ids.iter().map(|id| id.code).collect();
-            let moved = adjusts.iter().any(|adjust| adjust.x_offset != 0.0 || adjust.y_offset != 0.0);
-            println!("{}: {sample} {nominal:?} -> {shaped:?}{}", face.family, if moved { " moved" } else { "" });
-            assert!(shaped != nominal || moved, "{} doesn't shape {sample}", face.family);
+            _ => panic!("no sample for {probe:?}"),
         }
     }
 
-    fn check(faces: &[SystemFontFace]) {
-        for face in faces {
-            let (family, face) = (&face.family, &face.face);
-            let bytes = face.data.as_ref().expect("a system face holds its font file").as_bytes();
-            println!("{family}: {} ({} bytes) for {:04X?}", face.url, bytes.len(), face.ranges);
-            assert_eq!(face.name, "");
-            assert!(face.url.starts_with("file://") || face.url.starts_with("font://"));
-            assert_ne!(face.type_, GlyphIDType::FontPBF);
-            let font = skrifa::FontRef::from_index(bytes, face.data.as_ref().unwrap().face_index()).expect("a font");
-            let covered =
-                font.charmap().mappings().any(|(c, _)| face.ranges.iter().any(|&(lo, hi)| c >= lo && c <= hi));
-            assert!(covered, "{family} has no glyph in its ranges");
-            assert!(
-                scripts::SCRIPTS.iter().any(|script| script.ranges == face.ranges),
-                "{family} is for a script that needs shaping"
-            );
+    /// For each script the system has fonts for, the font a label gets for
+    /// it shapes it: its rules substitute, reorder or position the glyphs of
+    /// a sample, which would otherwise come out one after another as the
+    /// font maps them.
+    #[test]
+    fn the_fonts_of_the_shaped_scripts_shape_them() {
+        let started = std::time::Instant::now();
+        let ranges = shaped_ranges();
+        println!("found fonts for {ranges:04X?} in {:?}", started.elapsed());
+        for script in scripts::SCRIPTS.iter().filter(|script| script.ranges.iter().all(|r| ranges.contains(r))) {
+            let sample = shaped_sample(script.probe);
+            let font = SystemGlyphRasterizer.font(&Vec::new(), script.probe).expect("a font for a shaped script");
+            let face = skrifa::FontRef::from_index(font.data.as_bytes(), font.data.face_index()).unwrap();
+            let nominal: Vec<u16> =
+                sample.chars().map(|c| face.charmap().map(c).map_or(0, |glyph| glyph.to_u32() as u16)).collect();
+            let shaper =
+                Shaper::at_weight(GlyphIDType::face(NonZeroU16::MIN), font.data.clone(), f32::from(font.weight));
+            let mut shaped = ShapedText::default();
+            shaper.shape(&sample.chars().collect::<Vec<_>>(), false, &mut shaped);
+            let glyphs: Vec<u16> = shaped.glyphs.iter().map(|id| id.code).collect();
+            let moved = shaped.adjusts.iter().any(|adjust| adjust.x_offset != 0.0 || adjust.y_offset != 0.0);
+            println!("{}: {sample} {nominal:?} -> {glyphs:?}{}", font.key, if moved { " moved" } else { "" });
+            assert!(glyphs != nominal || moved, "{} doesn't shape {sample}", font.key);
         }
     }
 
     #[test]
-    fn chosen_faces_load_and_cover_their_ranges() {
-        let started = std::time::Instant::now();
-        let faces = fallback_font_faces();
-        println!("found {} fallback faces in {:?}", faces.len(), started.elapsed());
-        check(faces);
-        check_shaping(faces);
+    fn a_font_has_the_character_it_is_for() {
+        for c in ['a', 'ب', '\u{0915}', '中'] {
+            let Some(font) = SystemGlyphRasterizer.font(&vec!["Open Sans Bold".to_owned()], c) else { continue };
+            let face = skrifa::FontRef::from_index(font.data.as_bytes(), font.data.face_index()).unwrap();
+            println!("{c}: {} at {}", font.key, font.weight);
+            assert!(face.charmap().map(c).is_some(), "{c} in {}", font.key);
+            assert_eq!(font.weight, 700);
+        }
     }
 }

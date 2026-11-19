@@ -68,6 +68,7 @@ fn input<'a>(
         layers,
         global_state: None,
         font_faces: None,
+        glyph_pbfs: true,
         available_images: available,
         params: params(),
     }

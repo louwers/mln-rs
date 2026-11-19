@@ -14,6 +14,7 @@ use mln_map::Map;
 use mln_renderer::{Renderer, RendererEvent, RendererEvents, UpdateParameters, UpdateReader};
 use mln_runtime::{BackendRef, BackendType, Device, DeviceOptions, GlApi, LocalTarget};
 use mln_text::GlyphCache;
+use mln_text::local_glyph_rasterizer::LocalGlyphs;
 use mln_util::error::Error;
 use mln_util::event_queue::Waker;
 use mln_util::image::PremultipliedImage;
@@ -43,6 +44,8 @@ pub struct HeadlessFrontend {
     pixel_ratio: f32,
     target: LocalTarget,
     glyph_cache: Arc<GlyphCache>,
+    /// The local fonts the renderer draws from: none unless set.
+    local_glyphs: LocalGlyphs,
     /// The calling thread's queue, which [`render`](Self::render) runs.
     queue: Queue<()>,
     /// Where the renderer's background work runs.
@@ -128,6 +131,7 @@ impl HeadlessFrontend {
             pixel_ratio,
             target,
             glyph_cache,
+            local_glyphs: LocalGlyphs::default(),
             queue: queue.clone(),
             pool: pool.clone(),
             reports_to: Arc::default(),
@@ -135,6 +139,16 @@ impl HeadlessFrontend {
             updates: None,
             drawn: 0,
         })
+    }
+
+    /// Draws from `local` fonts, such as the system's, rather than none:
+    /// with a new renderer, which lays out the map again.
+    pub fn set_local_glyphs(&mut self, local: LocalGlyphs) {
+        self.local_glyphs = local;
+        if let Some(stats) = self.target.tear_down_renderer() {
+            self.stats = stats;
+        }
+        self.drawn = 0;
     }
 
     #[must_use]
@@ -192,15 +206,16 @@ impl HeadlessFrontend {
         })
     }
 
-    /// The renderer, made on first use.
+    /// The renderer, made on first use, which reports to the attached map.
     pub fn renderer(&mut self) -> &mut Renderer {
-        let HeadlessFrontend { target, pixel_ratio, glyph_cache, pool, reports_to, .. } = self;
+        let HeadlessFrontend { target, pixel_ratio, glyph_cache, local_glyphs, pool, reports_to, .. } = self;
         target.renderer_or(|gpu| {
             let reports_to = Arc::clone(reports_to);
-            Renderer::with_glyph_cache(
+            let events = reports_to.lock().clone();
+            let mut renderer = Renderer::with_glyph_cache(
                 gpu,
                 *pixel_ratio,
-                mln_text::local_glyph_rasterizer::LocalGlyphs::default(),
+                local_glyphs.clone(),
                 Arc::clone(glyph_cache),
                 Arc::new(move || {
                     let events = reports_to.lock().clone();
@@ -209,7 +224,9 @@ impl HeadlessFrontend {
                     }
                 }),
                 pool,
-            )
+            );
+            renderer.set_event_queue(events);
+            renderer
         })
     }
 

@@ -23,11 +23,14 @@
 // lacks. Either way the glyph keeps its PBF glyph ID, so the layout doesn't
 // change.
 //
-// Font faces (MLN_TEXT_SHAPING_HARFBUZZ): the style's "font-faces" are
-// fetched as font files (`Resource::font_face`), or read from the bytes a
-// face holds (an app's fallback faces can), and shaped here, on the render
-// thread, with the `FontFaceEngine` (font_face_engine.rs): mln_text's
-// Shaper (HarfRust) natively, ready at once. An engine that needs time to
+// Font faces: the style's "font-faces" are fetched as font files
+// (`Resource::font_face`), or read from the bytes a face holds (an app's
+// fallback faces can), and shaped here, on the render thread, with the
+// `FontFaceEngine` (font_face_engine.rs): mln_text's Shaper (HarfRust)
+// natively, ready at once. Text that the device's fonts shape
+// (`GlyphIDType::System`) is shaped the same way, a piece at a time: each
+// piece with the font that `LocalGlyphs`' rasterizer gives for its first
+// character. An engine that needs time to
 // get ready (the browser build loads its shaper as a second wasm module) is
 // asked to as soon as the style has font faces; a font file that arrives
 // before it is ready waits, parsed in the update after the engine reports
@@ -40,13 +43,14 @@ use std::sync::Arc;
 use mln_storage::{FileSource, Request, Resource, Response};
 use mln_text::glyph::{
     FontData, FontFaces, Glyph, GlyphDependencies, GlyphID, GlyphIDType, GlyphMap, GlyphRange, ShapeRequests,
-    get_glyph_range,
+    face_type, get_glyph_range,
 };
 use mln_text::glyph_cache::{GlyphCache, GlyphCacheRange};
 use mln_text::glyph_pbf::parse_glyph_pbf;
 use mln_text::local_glyph_rasterizer::LocalGlyphs;
 use mln_text::tagged_string::font_stack_hash;
-use mln_text::{ShapedText, visual_runs};
+use mln_text::weight::REGULAR_WEIGHT;
+use mln_text::{BiDiRun, ShapedText, visual_runs};
 use mln_util::error::Error;
 use mln_util::font_stack::FontStack;
 use mln_util::hash::HashMap;
@@ -117,6 +121,9 @@ impl Entry {
     }
 }
 
+/// One of the device's fonts loaded for shaping, with the type of its glyphs.
+type SystemShaper = (GlyphIDType, Rc<dyn FontFaceShaper>);
+
 /// The loaded HarfBuzz shapers of each font stack, by font face type.
 type Shapers = VecMap<FontStack, VecMap<GlyphIDType, Rc<dyn FontFaceShaper>>>;
 
@@ -181,6 +188,11 @@ pub(crate) struct GlyphStore {
     /// request each answers.
     deferred_responses: Vec<(FontData, FontStack, GlyphRange, u64)>,
     shapers: Shapers,
+    /// The device's fonts that shaped text, by `LocalFont::key`, with the
+    /// type of their glyphs: `None` for one the engine can't read.
+    system_shapers: HashMap<Arc<str>, Option<SystemShaper>>,
+    /// Those shapers by the type of their glyphs.
+    system_types: HashMap<GlyphIDType, Rc<dyn FontFaceShaper>>,
 }
 
 impl GlyphStore {
@@ -212,6 +224,8 @@ impl GlyphStore {
             engine_readiness: Arc::default(),
             deferred_responses: Vec::new(),
             shapers: VecMap::new(),
+            system_shapers: HashMap::default(),
+            system_types: HashMap::default(),
         }
     }
 
@@ -446,8 +460,8 @@ impl GlyphStore {
         Some(glyph)
     }
 
-    /// Shapes each font-face text with its font, and adds the glyphs it
-    /// shaped to `glyphs`.
+    /// Shapes each font-face text with its font, and the device's fonts'
+    /// text with theirs, and adds the glyphs it shaped to `glyphs`.
     fn shape(&mut self, requests: &ShapeRequests, glyphs: &mut GlyphMap) -> ShapeResults {
         let mut results = ShapeResults::new();
         for (font_stack, font_types) in requests {
@@ -457,8 +471,10 @@ impl GlyphStore {
                 for str_ in strs {
                     let mut shaped = ShapedText::default();
                     // Shapes each run in its own direction, in visual order.
-                    if let Some(shaper) = &shaper {
-                        for run in visual_runs(str_) {
+                    for run in visual_runs(str_) {
+                        if *type_ == GlyphIDType::System {
+                            self.shape_with_system_fonts(font_stack, &run, &mut shaped);
+                        } else if let Some(shaper) = &shaper {
                             shaper.shape(&run.text, run.rtl, &mut shaped);
                         }
                     }
@@ -482,6 +498,54 @@ impl GlyphStore {
             }
         }
         results
+    }
+
+    /// Shapes `run` with the device's fonts, a piece at a time: each piece
+    /// the characters that one font draws, with the marks and joiners after
+    /// them. A character that no font has is left out.
+    fn shape_with_system_fonts(&mut self, font_stack: &FontStack, run: &BiDiRun, shaped: &mut ShapedText) {
+        let mut pieces: Vec<(Rc<dyn FontFaceShaper>, Vec<char>)> = Vec::new();
+        for &c in &run.text {
+            if i18n::extends_previous(c)
+                && let Some((_, piece)) = pieces.last_mut()
+            {
+                piece.push(c);
+                continue;
+            }
+            let Some(shaper) = self.system_shaper(font_stack, c) else { continue };
+            match pieces.last_mut() {
+                Some((last, piece)) if Rc::ptr_eq(last, &shaper) => piece.push(c),
+                _ => pieces.push((shaper, vec![c])),
+            }
+        }
+        // A right-to-left run's later pieces lie to the left of its earlier
+        // ones.
+        if run.rtl {
+            pieces.reverse();
+        }
+        for (shaper, piece) in pieces {
+            shaper.shape(&piece, run.rtl, shaped);
+        }
+    }
+
+    /// The shaper of the device's font that draws `c` for a label in
+    /// `font_stack`, loaded the first time.
+    fn system_shaper(&mut self, font_stack: &FontStack, c: char) -> Option<Rc<dyn FontFaceShaper>> {
+        let font = self.local.rasterizer.as_ref()?.font(font_stack, c)?;
+        if let Some(loaded) = self.system_shapers.get(&font.key) {
+            return loaded.as_ref().map(|(_, shaper)| Rc::clone(shaper));
+        }
+        self.prepare_engine();
+        let type_ = face_type(&font.key, "", &[]);
+        let loaded = matches!(self.engine_readiness.lock().result, Some(Ok(())))
+            .then(|| self.engine.load(type_, font.data, font.weight))
+            .flatten()
+            .map(|shaper| (type_, Rc::<dyn FontFaceShaper>::from(shaper)));
+        if let Some((type_, shaper)) = &loaded {
+            self.system_types.insert(*type_, Rc::clone(shaper));
+        }
+        self.system_shapers.insert(font.key, loaded.clone());
+        loaded.map(|(_, shaper)| shaper)
     }
 
     fn request_range(
@@ -682,8 +746,11 @@ impl GlyphStore {
         true
     }
 
+    /// The shaper of a style or fallback face of `font_stack`, or of one of
+    /// the device's fonts, by the type of its glyphs.
     fn shaper(&self, font_stack: &FontStack, type_: GlyphIDType) -> Option<Rc<dyn FontFaceShaper>> {
-        self.shapers.get(font_stack).and_then(|shapers| shapers.get(&type_)).cloned()
+        let face = self.shapers.get(font_stack).and_then(|shapers| shapers.get(&type_));
+        face.or_else(|| self.system_types.get(&type_)).cloned()
     }
 
     /// Loads the font face `data` for `font_stack`; false, as for an invalid
@@ -692,7 +759,7 @@ impl GlyphStore {
         if !matches!(self.engine_readiness.lock().result, Some(Ok(()))) {
             return false;
         }
-        let Some(shaper) = self.engine.load(type_, data) else {
+        let Some(shaper) = self.engine.load(type_, data, REGULAR_WEIGHT as u16) else {
             return false;
         };
         self.shapers.entry(font_stack.clone()).or_default().insert(type_, Rc::from(shaper));

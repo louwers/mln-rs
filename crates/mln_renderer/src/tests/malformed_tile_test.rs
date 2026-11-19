@@ -104,6 +104,7 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn ErasedEvaluatedLayer>]) -> Outcome {
             global_state: None,
             is_update_synchronous: false,
             font_faces: None,
+            glyph_pbfs: true,
             placement_commits: 0,
         },
     );

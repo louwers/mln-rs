@@ -6,12 +6,12 @@
 > Depend on [`mln-rs`](https://crates.io/crates/mln-rs) instead: it re-exports
 > this crate as `mln_rs::mln_system_fonts`.
 
-Finds the system's fonts for the text that a style's own fonts don't draw: the
-scripts that glyph PBFs can't shape, like Devanagari or Myanmar, and the glyphs
-of a style without glyph PBFs, those its PBFs lack, and CJK. It looks fonts up
+Finds the system's fonts for the text that a style's own fonts don't draw, which
+the map shapes with them: the scripts that glyph PBFs can't shape, like
+Devanagari or Myanmar, and all the text of a style without glyph PBFs. It also
+draws the glyphs a style's PBFs lack, and CJK, one at a time. It looks fonts up
 by a font stack's names, or by the character and the user's languages, through
-the platform's font matcher where it has one. MapLibre Native draws such text
-through each platform's text API instead.
+the platform's font matcher where it has one.
 
 Licensed under the BSD 2-Clause License, as the rest of mln-rs is
 ([LICENSE.md](../../LICENSE.md)).

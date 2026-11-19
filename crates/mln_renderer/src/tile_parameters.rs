@@ -24,6 +24,8 @@ pub(crate) struct TileParameters<'a> {
     pub(crate) is_update_synchronous: bool,
     /// The style's font faces, which the tiles' layouts shape text with.
     pub(crate) font_faces: Option<Arc<FontFaces>>,
+    /// Whether the style has a `glyphs` URL.
+    pub(crate) glyph_pbfs: bool,
     /// How many placements have committed before the update
     /// (`PlacementController::commits`), which the tiles the view leaves
     /// stay rendered for while their symbols fade out.

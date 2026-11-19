@@ -10,7 +10,7 @@ use mln_util::size::Size;
 
 use crate::glyph::{
     GlyphID, GlyphIDType, GlyphMetrics, GlyphPosition, GlyphPositions, PositionedGlyph, PositionedLine, Shaping,
-    WritingModeType, gen_new_glyph_id_type,
+    WritingModeType, face_type,
 };
 use crate::shaper::{GlyphAdjust, ShapedText};
 use crate::shaping::{PositionedIcon, get_shaping};
@@ -615,7 +615,7 @@ fn vertical_glyph_orientation_delimits_inline_images() {
 #[test]
 fn vertical_glyph_orientation_delimits_native_glyph_sections() {
     let font_stack: FontStack = vec!["font-stack".to_string()];
-    let native_type = gen_new_glyph_id_type("shaping-test-native", &font_stack, &[(0, 0xffff)]);
+    let native_type = face_type("shaping-test-native", "font-stack", &[(0, 0xffff)]);
     let mut text = TaggedString::default();
     text.add_text_section(&u("AB"), 1.0, &font_stack, GlyphIDType::FontPBF, true, None, VerticalAlign::Bottom);
     text.add_text_section(&u("C"), 1.0, &font_stack, native_type, true, None, VerticalAlign::Bottom);
@@ -631,7 +631,7 @@ fn vertical_glyph_orientation_delimits_native_glyph_sections() {
 /// "XY", between sections drawn from glyph PBFs.
 fn label_with_shaped_section(before: &str, rtl: bool, after: &str, adjusts: Vec<GlyphAdjust>) -> TaggedString {
     let font_stack: FontStack = vec!["font-stack".to_string()];
-    let shaped_type = gen_new_glyph_id_type("shaping-test-shaped", &font_stack, &[(0, 0xffff)]);
+    let shaped_type = face_type("shaping-test-shaped", "font-stack", &[(0, 0xffff)]);
     let mut text = TaggedString::default();
     if !before.is_empty() {
         text.add_text_section(&u(before), 1.0, &font_stack, GlyphIDType::FontPBF, true, None, VerticalAlign::Bottom);

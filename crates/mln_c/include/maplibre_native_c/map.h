@@ -238,20 +238,22 @@ typedef struct mln_map_options {
   /**
    * Fonts for the text that a style's own fonts don't draw. A JSON array of
    * font files, each an object with a `url` and an optional `unicode-range`,
-   * as in a font face of a style's `font-faces`. They draw, in order, the
-   * text that glyph PBFs can't shape, such as Myanmar or Devanagari, and the
-   * glyphs that come from local fonts: those of a style without glyph PBFs,
-   * those its PBFs lack, and CJK with `local_ideographs_enabled`. Empty for
-   * the system's fonts alone.
+   * as in a font face of a style's `font-faces`. They shape, in order, the
+   * text that glyph PBFs can't shape, such as Myanmar or Devanagari, or all
+   * the text of a style without glyph PBFs, and draw the glyphs that come
+   * from local fonts: those a style's PBFs lack, and CJK with
+   * `local_ideographs_enabled`. Empty for the system's fonts alone.
    */
   mln_buffer_view fallback_font_faces;
   /**
    * Whether the map draws from the system's fonts what the style's fonts and
    * `fallback_font_faces` don't: fonts that the platform's font matcher picks
    * for the font stack's names, or for the character and the user's preferred
-   * languages. Without it, the map does. The first map that uses them waits
-   * for the matcher to load. In the browser, the browser draws those glyphs in
-   * the font stack's families, then its sans-serif font.
+   * languages. It shapes with them the text that glyph PBFs can't shape, and
+   * all the text of a style without glyph PBFs. Without it, the map does. The
+   * first map that uses them waits for the matcher to load. In the browser,
+   * the browser draws those glyphs in the font stack's families, then its
+   * sans-serif font, one at a time.
    */
   bool system_fonts_enabled
     MLN_BINDING("mask=fields;bit=MLN_MAP_OPTION_SYSTEM_FONTS_ENABLED");

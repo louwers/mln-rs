@@ -931,9 +931,10 @@ impl Map {
     }
 
     /// Sets the font faces that every font stack falls back to, for the
-    /// style documents that load after this call. They draw the text that
-    /// glyph PBFs can't shape, and the glyphs that come from local fonts
-    /// (`LocalGlyphs`) before the platform's fonts do.
+    /// style documents that load after this call. They shape the text that
+    /// glyph PBFs can't shape, or all the text of a style without glyph
+    /// PBFs, and draw the glyphs that come from local fonts (`LocalGlyphs`)
+    /// before the platform's fonts do.
     ///
     /// `json` is an array of font files, each an object with a `url` and an
     /// optional `unicode-range`, as in a font face of a style's `font-faces`.
@@ -948,7 +949,8 @@ impl Map {
 
     /// [`set_fallback_font_faces`](Self::set_fallback_font_faces) with faces
     /// an app has made, such as `FontFace::fallback(url, ranges).with_data(bytes)`
-    /// for a font file it holds in memory.
+    /// for a font file it holds in memory, or `FontFace::system`, for the
+    /// fonts of the renderer's `LocalGlyphs`.
     pub fn set_fallback_font_face_list(&mut self, faces: mln_text::glyph::FontFaces) {
         self.loader.set_fallback_font_faces(Some(Arc::new(faces)));
     }

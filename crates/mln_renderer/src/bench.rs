@@ -121,6 +121,7 @@ impl TileLayout {
                 layers,
                 global_state: Some(Arc::clone(style.get_global_state())),
                 font_faces: style.get_font_faces().cloned(),
+                glyph_pbfs: !style.get_glyph_url().is_empty(),
             }),
             available_images: Arc::new(style.get_images().iter().map(|image| image.id.clone()).collect()),
             params: LayoutParams {

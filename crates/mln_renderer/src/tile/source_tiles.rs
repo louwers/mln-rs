@@ -1458,13 +1458,14 @@ impl SourceTiles {
         let global_state = parameters.global_state.as_ref();
         let font_faces = parameters.font_faces.as_ref();
         match &self.style {
-            Some(style) if style.is(layers, global_state, font_faces) => Arc::clone(style),
+            Some(style) if style.is(layers, global_state, font_faces, parameters.glyph_pbfs) => Arc::clone(style),
             previous => {
                 let style = Arc::new(SourceStyle {
                     version: previous.as_ref().map_or(0, |style| style.version + 1),
                     layers: layers.to_vec(),
                     global_state: global_state.cloned(),
                     font_faces: font_faces.cloned(),
+                    glyph_pbfs: parameters.glyph_pbfs,
                 });
                 self.style = Some(Arc::clone(&style));
                 style

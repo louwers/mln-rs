@@ -26,14 +26,15 @@ fn start() {
     std::panic::set_hook(Box::new(|info| error(&info.to_string())));
 }
 
-/// Opens face `face_index` of the font in `data`; `undefined` unless `data`
-/// is a font with that face. The face keeps `data` instead of copying it.
+/// Opens face `face_index` of the font in `data`, a variable font at the
+/// OpenType `weight`; `undefined` unless `data` is a font with that face.
+/// The face keeps `data` instead of copying it.
 #[wasm_bindgen(js_name = openFace)]
 #[must_use]
-pub fn open_face(type_: u16, data: Vec<u8>, face_index: u32) -> Option<Face> {
+pub fn open_face(type_: u16, data: Vec<u8>, face_index: u32, weight: u16) -> Option<Face> {
     let data = FontData::from(data).with_face_index(face_index);
     let type_ = GlyphIDType::face(NonZeroU16::new(type_)?);
-    let shaper = Shaper::new(type_, data);
+    let shaper = Shaper::at_weight(type_, data, f32::from(weight));
     shaper.valid().then_some(Face { shaper, type_ })
 }
 

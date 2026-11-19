@@ -38,3 +38,5 @@ mod placement_test;
 mod pixel_ratio_test;
 // Map::set_size and HeadlessFrontend::set_size with a heatmap, which draws into a texture of its own.
 mod resize_test;
+// Text that the device's fonts shape, with a font file standing in for them.
+mod system_fonts_test;
