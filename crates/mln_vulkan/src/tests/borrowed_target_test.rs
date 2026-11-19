@@ -60,7 +60,9 @@ fn a_ring_of_images_of_no_size_or_too_large_is_rejected() {
         let error = target.replace(gpu, images(size)).err().expect("no ring of that size");
         assert_eq!(error.kind, ErrorKind::InvalidArgument, "{size:?}");
     }
-    target.replace(gpu, images(Size::new(8, 8))).expect("a ring of 8x8 images");
+    // A replacement doesn't block: the old images are the host's again once
+    // the reads that it returns end.
+    wait_for(target.replace(gpu, images(Size::new(8, 8))).expect("a ring of 8x8 images"));
     target.tear_down(gpu);
 }
 
