@@ -321,7 +321,7 @@ impl RingBackend for MetalRing {
         gpu.last_submit()
     }
 
-    fn finished(fence: &Arc<Completion>) -> bool {
+    fn finished(_: &mut MetalGpu, fence: &Arc<Completion>) -> bool {
         fence.is_done()
     }
 }

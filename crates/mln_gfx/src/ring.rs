@@ -121,9 +121,9 @@ pub trait RingBackend: Sized {
         None
     }
 
-    /// Whether the work that `fence` ends has finished, which it checks
-    /// without blocking.
-    fn finished(fence: &Self::Fence) -> bool;
+    /// Whether the work that `fence` ends has finished on `gpu`, which it
+    /// checks without blocking.
+    fn finished(gpu: &mut Self::Gpu, fence: &Self::Fence) -> bool;
 
     /// Lets go of the objects that the frames signal once the work
     /// submitted so far is done, as the target goes.
@@ -499,9 +499,10 @@ pub struct InFlight<B: RingBackend> {
 }
 
 impl<B: RingBackend> InFlight<B> {
-    /// Whether the work finished, which it checks without blocking.
-    pub fn finished(&self) -> bool {
-        self.fence.as_ref().is_none_or(B::finished)
+    /// Whether the work finished on `gpu`, the ring's, which it checks
+    /// without blocking.
+    pub fn finished(&self, gpu: &mut B::Gpu) -> bool {
+        self.fence.as_ref().is_none_or(|fence| B::finished(gpu, fence))
     }
 }
 
@@ -964,7 +965,7 @@ mod tests {
         fn wait_for_frames(&self, _: &str) {
             RECORD.with_borrow_mut(|record| record.frames_waited += 1);
         }
-        fn finished(fence: &u32) -> bool {
+        fn finished(_: &mut FakeGpu, fence: &u32) -> bool {
             *fence >= 100
         }
         fn forget(wait: u32) {
@@ -1010,7 +1011,7 @@ mod tests {
         // lacks fails.
         ring.release(gpu, 0, timeline(8)).expect("a release");
         ring.discard(gpu, 0);
-        assert!(ring.in_flight(gpu).finished());
+        assert!(ring.in_flight(gpu).finished(gpu));
         assert!(ring.release(gpu, 2, timeline(9)).is_err());
         ring.tear_down(gpu);
         assert!(gpu.textures.is_empty());
@@ -1056,10 +1057,10 @@ mod tests {
         // The host's reads of slot 0 don't hold up the release.
         ring.release(gpu, 0, timeline(7)).expect("a release");
         gpu.last_submit = Some(50);
-        assert!(!ring.in_flight(gpu).finished());
-        assert!(!ring.replace(gpu, images(&[20, 30])).expect("a replacement").finished());
+        assert!(!ring.in_flight(gpu).finished(gpu));
+        assert!(!ring.replace(gpu, images(&[20, 30])).expect("a replacement").finished(gpu));
         gpu.last_submit = Some(100);
-        assert!(ring.in_flight(gpu).finished());
+        assert!(ring.in_flight(gpu).finished(gpu));
         assert_eq!(forgotten(), [7]);
     }
 
@@ -1071,7 +1072,7 @@ mod tests {
         let mut backend = FakeBackend::default();
         let mut ring = target(&mut backend, &[10, 20]);
         ring.release(&mut backend.gpu, 0, timeline(7)).expect("a release");
-        assert!(ring.replace(&mut backend.gpu, images(&[20, 30])).expect("a replacement").finished());
+        assert!(ring.replace(&mut backend.gpu, images(&[20, 30])).expect("a replacement").finished(&mut backend.gpu));
         ring.tear_down(&mut backend.gpu);
         assert_eq!((frames_waited(), torn_down()), (0, 1));
         assert_eq!(forgotten(), [7]);
@@ -1116,7 +1117,7 @@ mod tests {
         // Of another depth, or with depth textures, the ring keeps its own.
         assert!(ring.replace(gpu, images(&[30])).is_err());
         assert!(ring.replace(gpu, Images { depth: true, ..images(&[20, 30]) }).is_err());
-        assert!(ring.replace(gpu, images(&[20, 30])).expect("a replacement").finished());
+        assert!(ring.replace(gpu, images(&[20, 30])).expect("a replacement").finished(gpu));
         assert_eq!(gpu.imported(), [20, 30]);
         // The ring lets go of image 10's read at once.
         assert_eq!(forgotten(), [7]);
@@ -1136,7 +1137,7 @@ mod tests {
         let image = ring.begin_frame(gpu).expect("a frame");
         // A pass of the frame took the wait into the work recorded so far.
         FakeRing::take_waits_into_next_submit(gpu, image.color);
-        assert!(ring.replace(gpu, images(&[20, 30])).expect("a replacement").finished());
+        assert!(ring.replace(gpu, images(&[20, 30])).expect("a replacement").finished(gpu));
         assert_eq!(gpu.submits, [vec![7]]);
         assert_eq!(gpu.waited, [7]);
         // A frame begun on a texture that the new ring has again, which
@@ -1144,7 +1145,7 @@ mod tests {
         // replacement's submit waits for no host.
         ring.release(gpu, 0, timeline(8)).expect("a release");
         ring.begin_frame(gpu);
-        assert!(ring.replace(gpu, images(&[20, 40])).expect("a replacement").finished());
+        assert!(ring.replace(gpu, images(&[20, 40])).expect("a replacement").finished(gpu));
         assert_eq!(gpu.submits, [vec![7], vec![]]);
         let image = ring.begin_frame(gpu).expect("a frame");
         assert_eq!(gpu.texture_waits[&image.color], [8]);

@@ -29,7 +29,7 @@ use mln_util::queue::Queue;
 use mln_util::size::Size;
 
 use super::frame::{DemandMode, FrameDemand, FrameDisposition, FrameResult};
-use super::local::{GpuWork, InFlight, LocalTarget};
+use super::local::{InFlight, LocalTarget};
 use super::session::{Published, RenderSessionState, SessionShared, WorkId, physical_size};
 use super::target::{
     BorrowedRing, Device, DeviceLease, Driver, ExportKind, ExportedRing, SentSurface, Surface, SurfaceOverlay,
@@ -453,9 +453,10 @@ pub(crate) struct Worker {
     /// The target that a teardown keeps while views name their sync
     /// objects, until the last view ends.
     viewed: Option<LocalTarget>,
-    /// The releases and replacements that wait for the ring's GPU work on
-    /// the textures that they let go of.
-    settling: Vec<Settling>,
+    /// What runs as each release or replacement completes, in their order,
+    /// once the GPU work on the textures that it let go of finishes, which
+    /// the target keeps.
+    settling: VecDeque<SettleDone>,
     /// The thread that has the session's thread poll `settling`.
     ticker: Option<Ticker>,
 }
@@ -464,12 +465,6 @@ pub(crate) struct Worker {
 #[cfg(not(target_family = "wasm"))]
 const SETTLE_POLL: std::time::Duration = std::time::Duration::from_millis(2);
 
-/// A release or replacement that waits for the ring's GPU work.
-struct Settling {
-    work: Box<dyn GpuWork>,
-    done: SettleDone,
-}
-
 /// What runs once a release or replacement has settled, with its result.
 type SettleDone = Box<dyn FnOnce(&mut Outbox, Result<(), Error>)>;
 
@@ -477,10 +472,6 @@ type SettleDone = Box<dyn FnOnce(&mut Outbox, Result<(), Error>)>;
 /// which waits for its thread to end.
 struct Ticker {
     stop: Arc<AtomicBool>,
-    /// Whether a poll is on the session's queue, which the poll clears: a
-    /// caller-driven session that isn't serviced gets one queued, not one
-    /// for each tick.
-    queued: Arc<AtomicBool>,
     #[cfg(not(target_family = "wasm"))]
     thread: Option<std::thread::JoinHandle<()>>,
 }
@@ -505,37 +496,45 @@ fn start_ticker(queue: SessionQueue) -> Ticker {
     // The browser's one thread polls in the pump's slices instead, which it
     // asks for meanwhile.
     let (stop, queued) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
-    let (stopped, posted) = (Arc::clone(&stop), Arc::clone(&queued));
+    let stopped = Arc::clone(&stop);
     mln_web_host::pump::add(move || {
         if stopped.load(Ordering::SeqCst) {
             return false;
         }
-        if !posted.swap(true, Ordering::SeqCst) {
-            post(&queue, Worker::poll_settling);
-        }
+        post_poll(&queue, &queued);
         mln_web_host::pump::wake();
         true
     })
     .detach();
-    Ticker { stop, queued }
+    Ticker { stop }
 }
 
 #[cfg(not(target_family = "wasm"))]
 fn start_ticker(queue: SessionQueue) -> Ticker {
     let (stop, queued) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
-    let (stopped, posted) = (Arc::clone(&stop), Arc::clone(&queued));
+    let stopped = Arc::clone(&stop);
     let spawned = mln_util::thread::spawn("RenderSessionSettle", move || {
         while !stopped.load(Ordering::SeqCst) {
             std::thread::sleep(SETTLE_POLL);
-            if !posted.swap(true, Ordering::SeqCst) {
-                post(&queue, Worker::poll_settling);
-            }
+            post_poll(&queue, &queued);
         }
     });
     if spawned.is_err() {
         Log::error(Event::Render, "Can't start the thread that polls the GPU work on released textures");
     }
-    Ticker { stop, queued, thread: spawned.ok() }
+    Ticker { stop, thread: spawned.ok() }
+}
+
+/// Posts a poll of the GPU work unless one that `queued` marks is on the
+/// queue, and clears the mark as the poll runs.
+fn post_poll(queue: &SessionQueue, queued: &Arc<AtomicBool>) {
+    if !queued.swap(true, Ordering::SeqCst) {
+        let queued = Arc::clone(queued);
+        post(queue, move |worker, outbox| {
+            queued.store(false, Ordering::SeqCst);
+            worker.poll_settling(outbox);
+        });
+    }
 }
 
 impl Drop for Worker {
@@ -620,7 +619,7 @@ impl Worker {
             demands_received: 0,
             behind: VecDeque::new(),
             viewed: None,
-            settling: Vec::new(),
+            settling: VecDeque::new(),
             ticker: None,
         }
     }
@@ -1309,7 +1308,8 @@ impl Worker {
                 _ => false,
             }
         };
-        if failure {
+        if let (true, Err(error)) = (failure, &released) {
+            self.end_settling(error, outbox);
             self.end_demands(FrameDisposition::Failed, outbox);
             self.drop_gfx();
             return self.run_queued(outbox);
@@ -1347,7 +1347,7 @@ impl Worker {
             for (_, seen) in &mut self.waiting {
                 *seen = latest;
             }
-            return Ok(None);
+            return Ok(false);
         }
         let in_flight = gfx.target.set_ring(ring.clone())?;
         let old = self.ring.replace(ring.clone());
@@ -1449,7 +1449,7 @@ impl Worker {
                     // The map has the new size already, which the old images
                     // can't show.
                     Err(error) => {
-                        self.fail(error.clone(), outbox);
+                        self.fail(&error, outbox);
                         return Err(error);
                     }
                 }
@@ -1465,23 +1465,24 @@ impl Worker {
     fn fail_if_device_lost(&mut self, outbox: &mut Outbox) -> bool {
         let Some(error) = self.gfx.as_ref().and_then(|gfx| gfx.target.device().lost()) else { return false };
         Log::error(Event::Render, error.message.clone());
-        self.fail(error, outbox);
+        self.fail(&error, outbox);
         true
     }
 
     /// Fails the attached session with `error`, ending the demands on their
     /// way, and lets go of its renderer and target.
-    fn fail(&mut self, error: Error, outbox: &mut Outbox) {
+    fn fail(&mut self, error: &Error, outbox: &mut Outbox) {
         let failed = {
             let mut state = self.shared.state.lock();
             let attached = self.gfx.is_some() && state.lifecycle == RenderSessionState::Attached;
             if attached {
                 state.lifecycle = RenderSessionState::Failed;
-                state.failure = Some(error);
+                state.failure = Some(error.clone());
             }
             attached
         };
         if failed {
+            self.end_settling(error, outbox);
             self.end_demands(FrameDisposition::Failed, outbox);
             self.drop_gfx();
             self.run_queued(outbox);
@@ -1504,7 +1505,7 @@ impl Worker {
             state.attach.take()
         };
         if let Some(attach) = attach {
-            outbox.resolve(attach, Err(error));
+            outbox.resolve(attach, Err(error.clone()));
         }
         // These run on the state that the panic left, so they may panic too.
         let _ = mln_util::panic::catch(|| {
@@ -1512,6 +1513,7 @@ impl Worker {
                 let result = FrameResult::unrendered(Some(token), FrameDisposition::Failed, self.latest_generation());
                 self.publish(&result, outbox);
             }
+            self.end_settling(&error, outbox);
             self.end_demands(FrameDisposition::Failed, outbox);
             self.drop_gfx();
             self.run_queued(outbox);
@@ -1565,32 +1567,32 @@ impl Worker {
 
     // MARK: - The GPU work on released textures
 
-    /// Runs `done` once the work `in_flight` finishes: at once when there is
-    /// none, and else on a later turn of the session's thread, which polls
-    /// it without blocking. Frames wait for it meanwhile.
+    /// Runs `done` once the GPU work of the release or replacement that was
+    /// just made finishes: at once when `in_flight` says there is none, and
+    /// else on a later turn of the session's thread, which polls it without
+    /// blocking. Frames wait for it meanwhile.
     pub(crate) fn settle_then(
         &mut self,
         in_flight: InFlight,
         done: impl FnOnce(&mut Outbox, Result<(), Error>) + 'static,
         outbox: &mut Outbox,
     ) {
-        let Some(work) = in_flight else { return done(outbox, Ok(())) };
-        self.settling.push(Settling { work, done: Box::new(done) });
+        if !in_flight {
+            return done(outbox, Ok(()));
+        }
+        self.settling.push_back(Box::new(done));
         if self.ticker.is_none() {
             self.ticker = Some(start_ticker(self.shared.queue.clone()));
         }
     }
 
     /// Polls the GPU work that releases and replacements wait for, and
-    /// completes those whose work finished.
+    /// completes those whose work finished. Without graphics objects, they
+    /// end as the target is lost.
     fn poll_settling(&mut self, outbox: &mut Outbox) {
-        if let Some(ticker) = &self.ticker {
-            ticker.queued.store(false, Ordering::SeqCst);
-        }
-        let (settled, settling): (Vec<_>, Vec<_>) =
-            std::mem::take(&mut self.settling).into_iter().partition(|settling| settling.work.finished());
-        self.settling = settling;
-        for Settling { done, .. } in settled {
+        let Some(gfx) = self.gfx.as_mut() else { return self.end_settling(&target_lost(), outbox) };
+        let finished = self.settling.len().saturating_sub(gfx.target.in_flight());
+        for done in self.settling.drain(..finished) {
             done(outbox, Ok(()));
         }
         if self.settling.is_empty() {
@@ -1603,17 +1605,13 @@ impl Worker {
         self.ticker = None;
     }
 
-    /// Ends the releases and replacements that wait for the ring's GPU
-    /// work with `error`, and returns the work, for the caller to let go of
-    /// after the graphics objects that it ran on.
-    fn end_settling(&mut self, error: &Error, outbox: &mut Outbox) -> Vec<Box<dyn GpuWork>> {
+    /// Ends the releases and replacements that wait for GPU work with
+    /// `error`.
+    fn end_settling(&mut self, error: &Error, outbox: &mut Outbox) {
         self.stop_ticker();
-        let mut work = Vec::new();
-        for settling in std::mem::take(&mut self.settling) {
-            work.push(settling.work);
-            (settling.done)(outbox, Err(error.clone()));
+        for done in std::mem::take(&mut self.settling) {
+            done(outbox, Err(error.clone()));
         }
-        work
     }
 
     /// Presents to `surface` from now on, at `size` logical pixels, after
@@ -1726,7 +1724,7 @@ impl Worker {
     /// Lets go of the map's updates and the graphics objects, and ends the
     /// demands on their way.
     pub(crate) fn tear_down(&mut self, outbox: &mut Outbox) {
-        let work = self.end_settling(&target_lost(), outbox);
+        self.end_settling(&target_lost(), outbox);
         self.end_demands(FrameDisposition::TargetNotReady, outbox);
         self.torn_down = true;
         if let Some(reader) = self.reader.take() {
@@ -1735,13 +1733,6 @@ impl Worker {
         self.renderer_events.set_waker(None);
         self.forward_events();
         self.drop_gfx();
-        // The work goes after the backend, which waits for it as it drops,
-        // or with it, where the session keeps its graphics objects.
-        if self.shared.state.lock().keep_graphics {
-            std::mem::forget(work);
-        } else {
-            drop(work);
-        }
         self.map_events = None;
         self.sources = None;
         self.has_frame = false;

@@ -8,6 +8,7 @@ use mln_gfx::gpu::{GpuError, TargetFormats, TextureFormat, TextureId, TextureUsa
 use mln_gfx::ring::{self, RingBackend, RingTextures};
 use mln_gfx::{ConsumerSync, GpuSync, SyncKind};
 use mln_util::error::Error;
+#[cfg(unix)]
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
@@ -374,7 +375,8 @@ impl RingBackend for VulkanRing {
     type Textures = BorrowedImages;
     type Wait = ConsumerWait;
     type Handed = Handed;
-    type Fence = SubmitFence;
+    /// The serial of a submit of the ring's `VulkanGpu`.
+    type Fence = u64;
 
     /// Fails as [`BorrowedImages::check`] does, with
     /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a producer kind
@@ -546,15 +548,10 @@ impl RingBackend for VulkanRing {
         }
     }
 
-    /// A fence that signals once the queue's work so far finished.
-    fn submitted(gpu: &VulkanGpu) -> Option<SubmitFence> {
-        match gpu.fence_after_submits() {
-            Ok(fence) => Some(SubmitFence { device: gpu.device().clone(), fence }),
-            Err(error) => {
-                Log::error(Event::Render, format!("Fencing a ring's frames failed: {error}"));
-                None
-            }
-        }
+    /// The serial of the last submit with work: of the ring's own, not of
+    /// the host's on a queue it shares.
+    fn submitted(gpu: &VulkanGpu) -> Option<u64> {
+        Some(gpu.work_serial()).filter(|serial| *serial != 0)
     }
 
     /// The semaphores go once the frames that signal them are done.
@@ -577,43 +574,13 @@ impl RingBackend for VulkanRing {
         self.device.wait_idle(what);
     }
 
-    fn finished(fence: &SubmitFence) -> bool {
-        fence.signaled()
+    /// A lost device finishes no submit; the session fails then.
+    fn finished(gpu: &mut VulkanGpu, serial: &u64) -> bool {
+        gpu.submit_finished(*serial)
     }
 
     fn forget(wait: ConsumerWait) {
         // SAFETY: no submit waits on the semaphore, which the ring made.
         unsafe { wait.waiting.destroy(wait.device.shared.device()) };
-    }
-}
-
-/// A fence of the ring's own on `device` that signals once the work
-/// submitted before it finished. Dropping it waits for that work, where it
-/// hasn't finished, since a fence that a pending submit signals can't be
-/// destroyed; the session drops one early only as it ends.
-pub struct SubmitFence {
-    device: Device,
-    fence: vk::Fence,
-}
-
-impl SubmitFence {
-    fn signaled(&self) -> bool {
-        // SAFETY: a plain query of the ring's fence. A lost device ends the
-        // work.
-        unsafe { self.device.shared.device().get_fence_status(self.fence) }.unwrap_or(true)
-    }
-}
-
-impl Drop for SubmitFence {
-    fn drop(&mut self) {
-        let device = self.device.shared.device();
-        // SAFETY: the fence is the ring's, and its submit has finished once
-        // the wait returns; a lost device signals no submit.
-        unsafe {
-            if !self.signaled() {
-                let _ = device.wait_for_fences(&[self.fence], true, u64::MAX);
-            }
-            device.destroy_fence(self.fence, None);
-        }
     }
 }

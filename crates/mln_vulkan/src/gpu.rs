@@ -400,6 +400,9 @@ pub struct VulkanGpu {
     pass: Option<OpenPass>,
     /// The serial of the last submit known to have finished.
     finished_serial: u64,
+    /// The serial of the last submit with commands, waits or signals, 0
+    /// before the first.
+    work_serial: u64,
     in_flight: VecDeque<Submission>,
     free_command_buffers: Vec<vk::CommandBuffer>,
     free_fences: Vec<vk::Fence>,
@@ -663,6 +666,7 @@ impl VulkanGpu {
             drawn: Vec::new(),
             pass: None,
             finished_serial: 0,
+            work_serial: 0,
             in_flight: VecDeque::new(),
             free_command_buffers: Vec::new(),
             free_fences: Vec::new(),
@@ -1787,27 +1791,28 @@ impl VulkanGpu {
         self.signals.clear();
         self.timeline = false;
         let serial = self.next_serial;
+        if !(command_buffers.is_empty() && wait_semaphores.is_empty() && signal_semaphores.is_empty()) {
+            self.work_serial = serial;
+        }
         self.in_flight.push_back(Submission { serial, fence, command_buffers });
         self.next_serial = serial + 1;
         Ok(())
     }
 
-    /// A new fence, which the caller destroys, that signals once the work
-    /// submitted to the device's queue so far has finished.
-    pub(crate) fn fence_after_submits(&self) -> Result<vk::Fence, GpuError> {
-        let device = self.device.shared.device();
-        // SAFETY: the create info is valid for the device.
-        let fence = unsafe { device.create_fence(&vk::FenceCreateInfo::default(), None) }
-            .map_err(vk_error("making a fence"))?;
-        // SAFETY: a submit of no batches signals the fence once the queue's
-        // earlier work finished, and the queue is held for the call.
-        let submitted = self.device.with_queue(|queue| unsafe { device.queue_submit(queue, &[], fence) });
-        if let Err(error) = submitted {
-            // SAFETY: no submit took the fence.
-            unsafe { device.destroy_fence(fence, None) };
-            return Err(vk_error("submitting a fence")(error));
+    /// The serial of the last submit with commands, waits or signals: an
+    /// empty one, as a flush with nothing to submit makes, may finish only
+    /// after the work before it on a queue that the host shares.
+    pub(crate) fn work_serial(&self) -> u64 {
+        self.work_serial
+    }
+
+    /// Whether the submit of `serial` has finished, which it checks without
+    /// blocking.
+    pub(crate) fn submit_finished(&mut self, serial: u64) -> bool {
+        if serial > self.finished_serial {
+            self.collect_garbage();
         }
-        Ok(fence)
+        serial <= self.finished_serial
     }
 
     /// Blocks until the submit of `serial` has finished.

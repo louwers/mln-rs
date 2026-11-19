@@ -1121,7 +1121,7 @@ impl RenderSession {
         &self,
         task: impl FnOnce(&mut Worker, &mut Outbox) -> Result<T, Error> + Send + 'static,
     ) -> Result<Completion<T>, Error> {
-        self.settled_operation(|worker, outbox| task(worker, outbox).map(|value| (value, None)))
+        self.settled_operation(|worker, outbox| task(worker, outbox).map(|value| (value, false)))
     }
 
     /// Sends `task` as [`operation`](Self::operation) does, and completes
@@ -1387,7 +1387,7 @@ impl RenderSession {
             return Err(Error::invalid_argument(format!("scale factor {scale_factor} isn't finite and positive")));
         }
         self.resize_then(size, Some(scale_factor), |worker, size, scale_factor, outbox| {
-            worker.resize(size, scale_factor, outbox).map(|()| None)
+            worker.resize(size, scale_factor, outbox).map(|()| false)
         })
     }
 
@@ -1522,7 +1522,7 @@ impl RenderSession {
         surface.check_area()?;
         let surface = SentSurface::new(surface, self.shared().id);
         self.resize_then(size, None, move |worker, size, scale_factor, outbox| {
-            worker.set_surface(size, scale_factor, surface.receive()?, outbox).map(|()| None)
+            worker.set_surface(size, scale_factor, surface.receive()?, outbox).map(|()| false)
         })
     }
 
