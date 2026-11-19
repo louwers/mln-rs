@@ -5,10 +5,7 @@ lockfile_version = 4
 [[tools."aqua:EmbarkStudios/cargo-deny"]]
 version = "0.20.2"
 backend = "aqua:EmbarkStudios/cargo-deny"
-specifiers = [
-    "0.20.2",
-    "latest",
-]
+specifiers = ["0.20.2"]
 
 [tools."aqua:EmbarkStudios/cargo-deny"."platforms.linux-arm64"]
 checksum = "sha256:995c82be0defc7a025cae49a2aa2644ce8245c9a3318fc4103907c6a285e8c7d"
@@ -176,10 +173,7 @@ provenance = "github-attestations"
 [[tools."aqua:jqlang/jq"]]
 version = "1.8.2"
 backend = "aqua:jqlang/jq"
-specifiers = [
-    "1.8.2",
-    "latest",
-]
+specifiers = ["1.8.2"]
 
 [tools."aqua:jqlang/jq"."platforms.linux-arm64"]
 checksum = "sha256:8b85c817833814ddca00a144c33705546355afccf0cf39b188f3cdb48b852309"
@@ -284,10 +278,7 @@ provenance = "github-attestations"
 [[tools."aqua:taiki-e/cargo-llvm-cov"]]
 version = "0.9.1"
 backend = "aqua:taiki-e/cargo-llvm-cov"
-specifiers = [
-    "0.9.1",
-    "latest",
-]
+specifiers = ["0.9.1"]
 
 [tools."aqua:taiki-e/cargo-llvm-cov"."platforms.linux-arm64"]
 checksum = "sha256:abf5f13c1520f8756d2192bfaaeadb0208f5b7eaa8cadc15bf847befa42b7360"
@@ -322,10 +313,7 @@ provenance = "github-attestations"
 [[tools."github:est31/cargo-udeps"]]
 version = "0.1.61"
 backend = "github:est31/cargo-udeps"
-specifiers = [
-    "0.1.61",
-    "latest",
-]
+specifiers = ["0.1.61"]
 
 [tools."github:est31/cargo-udeps"."platforms.linux-arm64"]
 checksum = "sha256:e59b967cfd4ee60fda5bc615f96e6702fde22641282decce662a6ba4e6d4b843"
