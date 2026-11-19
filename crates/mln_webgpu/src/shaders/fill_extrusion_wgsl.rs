@@ -457,6 +457,7 @@ struct VertexInput {
 };
 "#,
         plain_declarations!(),
+        wall_normal!(),
         r#"
 // The bucket's vertices, two words each: the position's x and y in the
 // halves of the first, `decimals_ed`'s in those of the second.
