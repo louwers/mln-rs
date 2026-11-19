@@ -828,11 +828,11 @@ pub fn readbacks(gpu: &mut impl Gpu) -> Result<(), GpuError> {
 }
 
 /// Checks destroying what bindings and geometry were made of. In debug
-/// builds, destroying a buffer, texture or sampler that live bindings or
-/// geometry were made of fails with [`GpuError::InUse`] and keeps it, so
-/// that it draws as before, until the last of them goes. Then it destroys,
-/// calls that name it fail, and the work flushed before reads it until
-/// done. Returns the error of a call that should succeed.
+/// builds, destroying a buffer, texture, sampler or shader that live
+/// bindings or geometry were made of fails with [`GpuError::InUse`] and
+/// keeps it, so that it draws as before, until the last of them goes. Then
+/// it destroys, calls that name it fail, and the work flushed before reads
+/// it until done. Returns the error of a call that should succeed.
 ///
 /// # Panics
 ///
@@ -904,11 +904,11 @@ pub fn resources_in_use<G: Gpu>(gpu: &mut G) -> Result<(), GpuError> {
     let resources: Vec<ResourceId> = buffers.into_iter().chain([image.into(), sampler.into()]).collect();
     let in_use = |result: Result<(), GpuError>| matches!(result, Err(GpuError::InUse(_)));
     if cfg!(debug_assertions) {
-        for &resource in &resources {
+        for resource in resources.iter().copied().chain([shader.into()]) {
             assert!(in_use(gpu.destroy(resource)), "{resource:?}, which both bindings and the geometry use");
         }
         gpu.destroy(first.into())?;
-        for &resource in &resources {
+        for resource in resources.iter().copied().chain([shader.into()]) {
             assert!(in_use(gpu.destroy(resource)), "{resource:?}, which the second bindings or the geometry use");
         }
         gpu.write_buffer(props_buffer, 0, props)?;
@@ -927,6 +927,22 @@ pub fn resources_in_use<G: Gpu>(gpu: &mut G) -> Result<(), GpuError> {
     assert!(matches!(gpu.write_buffer(props_buffer, 0, props), Err(GpuError::UnknownId("buffer"))));
     let destroyed = gpu.create_bindings(&BindingsDesc { label: "destroyed", shader, entries: &entries });
     assert!(matches!(destroyed, Err(GpuError::UnknownId(_))), "bindings of destroyed resources");
+    let destroyed = gpu.create_geometry(&GeometryDesc {
+        shader,
+        layouts: &layouts,
+        vertex_buffers: &[(vertices, 0)],
+        index_buffer: indices,
+    });
+    assert!(matches!(destroyed, Err(GpuError::UnknownId("buffer"))), "geometry of destroyed buffers");
+    gpu.destroy(pipeline.into())?;
+    gpu.destroy(shader.into())?;
+    let destroyed = gpu.create_pipeline(&PipelineDesc {
+        shader,
+        vertex_buffers: &layouts,
+        state: fixed(ColorMode::unblended(), StencilState::from(&StencilMode::disabled())),
+        targets: RGBA8,
+    });
+    assert!(matches!(destroyed, Err(GpuError::UnknownId("shader"))), "a pipeline of a destroyed shader");
     red(gpu, "the frame flushed before the destroys")?;
     gpu.flush(true)
 }

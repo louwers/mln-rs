@@ -246,10 +246,10 @@ impl LayoutTags {
     }
 }
 
-/// The buffers, textures and samplers that a backend's live bindings and
-/// geometry were made of, which a backend keeps in debug builds: there,
-/// destroying one of them fails with [`GpuError::InUse`] until the bindings
-/// and geometry made of it go. A backend records what it made in
+/// The buffers, textures, samplers and shaders that a backend's live
+/// bindings and geometry were made of, which a backend keeps in debug
+/// builds: there, destroying one of them fails with [`GpuError::InUse`]
+/// until the bindings and geometry made of it go. A backend records what it made in
 /// `create_bindings` ([`bindings`](Self::bindings)) and `create_geometry`
 /// ([`geometry`](Self::geometry)), and checks each `destroy` first
 /// ([`destroy`](Self::destroy)). Release builds keep nothing, and every
@@ -264,13 +264,14 @@ pub struct Dependents {
 }
 
 impl Dependents {
-    /// Records that `bindings` were made of `desc`'s buffers, textures and
-    /// samplers.
+    /// Records that `bindings` were made of `desc`'s shader, buffers,
+    /// textures and samplers.
     #[cfg_attr(not(debug_assertions), expect(unused_variables, reason = "release builds keep nothing"))]
     pub fn bindings(&mut self, bindings: BindingsId, desc: &BindingsDesc<'_>) {
         #[cfg(debug_assertions)]
         {
-            let mut of = Vec::with_capacity(2 * desc.entries.len());
+            let mut of = Vec::with_capacity(1 + 2 * desc.entries.len());
+            of.push(desc.shader.into());
             for entry in desc.entries {
                 match *entry {
                     BindGroupEntry::Buffer { buffer, .. } => of.push(buffer.into()),
@@ -283,14 +284,15 @@ impl Dependents {
         }
     }
 
-    /// Records that `geometry` was made of `desc`'s vertex and index
-    /// buffers.
+    /// Records that `geometry` was made of `desc`'s shader and its vertex
+    /// and index buffers.
     #[cfg_attr(not(debug_assertions), expect(unused_variables, reason = "release builds keep nothing"))]
     pub fn geometry(&mut self, geometry: GeometryId, desc: &GeometryDesc<'_>) {
         #[cfg(debug_assertions)]
         {
             let buffers = desc.vertex_buffers.iter().map(|&(buffer, _)| buffer).chain([desc.index_buffer]);
-            self.made(geometry.into(), buffers.map(ResourceId::Buffer).collect());
+            let of = [desc.shader.into()].into_iter().chain(buffers.map(ResourceId::Buffer)).collect();
+            self.made(geometry.into(), of);
         }
     }
 
@@ -303,14 +305,14 @@ impl Dependents {
     }
 
     /// Checks that `resource` may be destroyed, and forgets it: fails with
-    /// [`GpuError::InUse`] in debug builds for a buffer, texture or sampler
-    /// that live bindings or geometry were made of. Destroying bindings or
+    /// [`GpuError::InUse`] in debug builds for a buffer, texture, sampler
+    /// or shader that live bindings or geometry were made of. Destroying bindings or
     /// geometry lets go of what they were made of.
     #[cfg_attr(not(debug_assertions), expect(unused_variables, reason = "release builds keep nothing"))]
     pub fn destroy(&mut self, resource: ResourceId) -> Result<(), GpuError> {
         #[cfg(debug_assertions)]
         match resource {
-            ResourceId::Buffer(_) | ResourceId::Texture(_) | ResourceId::Sampler(_) => {
+            ResourceId::Buffer(_) | ResourceId::Texture(_) | ResourceId::Sampler(_) | ResourceId::Shader(_) => {
                 if self.counts.contains_key(&resource) {
                     return Err(GpuError::InUse(kind(resource)));
                 }
@@ -325,7 +327,7 @@ impl Dependents {
                     }
                 }
             }
-            ResourceId::Shader(_) | ResourceId::Pipeline(_) | ResourceId::Readback(_) => {}
+            ResourceId::Pipeline(_) | ResourceId::Readback(_) => {}
         }
         Ok(())
     }

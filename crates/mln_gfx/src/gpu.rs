@@ -529,10 +529,11 @@ pub struct Draw {
 /// [`SlotMap`]. Another backend's id names nothing there: a call that names
 /// one fails with [`GpuError::UnknownId`], and destroying it does nothing.
 ///
-/// The caller destroys bindings and geometry before the buffers, textures
-/// and samplers they were made of: in debug builds, destroying one that
-/// live bindings or geometry were made of fails with [`GpuError::InUse`]
-/// and keeps it, as every backend checks with [`validation::Dependents`].
+/// The caller destroys bindings and geometry before the buffers, textures,
+/// samplers and shaders they were made of: in debug builds, destroying one
+/// that live bindings or geometry were made of fails with
+/// [`GpuError::InUse`] and keeps it, as every backend checks with
+/// [`validation::Dependents`].
 /// Destroying a resource frees it once nothing uses it: the work flushed
 /// and recorded so far, and the pipelines made of it. Its id is invalid
 /// from the call on: a later call that names it fails with
