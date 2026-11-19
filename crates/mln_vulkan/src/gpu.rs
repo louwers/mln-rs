@@ -400,8 +400,8 @@ pub struct VulkanGpu {
     pass: Option<OpenPass>,
     /// The serial of the last submit known to have finished.
     finished_serial: u64,
-    /// The serial of the last submit with commands, waits or signals, 0
-    /// before the first.
+    /// The serial of the last submit with passes, recorded commands, waits
+    /// or signals, 0 before the first.
     work_serial: u64,
     in_flight: VecDeque<Submission>,
     free_command_buffers: Vec<vk::CommandBuffer>,
@@ -1729,6 +1729,7 @@ impl VulkanGpu {
     /// since then, which release what they drew into to its queue family,
     /// then `recorded`, with the waits and signals of the next submit.
     fn submit_batch(&mut self, recorded: Option<vk::CommandBuffer>) -> Result<(), GpuError> {
+        let draws = self.frame.is_some() || recorded.is_some();
         let mut command_buffers = Vec::with_capacity(3);
         if let Some(uploads) = self.uploads.take() {
             memory_barrier(
@@ -1791,7 +1792,7 @@ impl VulkanGpu {
         self.signals.clear();
         self.timeline = false;
         let serial = self.next_serial;
-        if !(command_buffers.is_empty() && wait_semaphores.is_empty() && signal_semaphores.is_empty()) {
+        if draws || !wait_semaphores.is_empty() || !signal_semaphores.is_empty() {
             self.work_serial = serial;
         }
         self.in_flight.push_back(Submission { serial, fence, command_buffers });
@@ -1799,9 +1800,11 @@ impl VulkanGpu {
         Ok(())
     }
 
-    /// The serial of the last submit with commands, waits or signals: an
-    /// empty one, as a flush with nothing to submit makes, may finish only
-    /// after the work before it on a queue that the host shares.
+    /// The serial of the last submit with passes, recorded commands, waits
+    /// or signals. One of writes alone, such as a new texture's layout, or
+    /// of nothing, as a flush with nothing to submit makes, touches no
+    /// ring's images, and may finish only after the work before it on a
+    /// queue that the host shares.
     pub(crate) fn work_serial(&self) -> u64 {
         self.work_serial
     }
