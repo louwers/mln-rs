@@ -992,8 +992,9 @@ fn merge_read(reads: &mut Vec<ShaderBinding>, read: ShaderBinding) {
 /// A shader's vertex function, and its fragment function, if it has one.
 type Functions = (Id<dyn MTLFunction>, Option<Id<dyn MTLFunction>>);
 
-/// Compiles `source`, with `defines` as preprocessor macros, and finds its
-/// `vertex` function and its `fragment` one, if named.
+/// Compiles `source`, with `defines` as preprocessor macros and with fast
+/// math if `fast_math`, and finds its `vertex` function and its `fragment`
+/// one, if named.
 pub(crate) fn compile<'a>(
     device: &ProtocolObject<dyn MTLDevice>,
     name: &str,
@@ -1001,6 +1002,7 @@ pub(crate) fn compile<'a>(
     vertex: &str,
     fragment: &str,
     defines: impl IntoIterator<Item = (&'a str, &'a str)>,
+    fast_math: bool,
 ) -> Result<Functions, GpuError> {
     let (keys, values): (Vec<_>, Vec<_>) = defines
         .into_iter()
@@ -1012,6 +1014,10 @@ pub(crate) fn compile<'a>(
     // SAFETY: the dictionary maps strings to strings, as Metal expects.
     unsafe { options.setPreprocessorMacros(Some(&defines)) };
     // Fast math is Metal's default.
+    if !fast_math {
+        #[expect(deprecated, reason = "its replacement, mathMode, needs macOS 15 and iOS 18")]
+        options.setFastMathEnabled(false);
+    }
     options.setLanguageVersion(MTLLanguageVersion::Version2_4);
     // Lets the position outputs marked [[invariant]] be computed the same
     // way in every shader.
@@ -1391,6 +1397,7 @@ impl Gpu for MetalGpu {
                 source.msl.vertex_main_function,
                 source.msl.fragment_main_function,
                 key.define_values(),
+                source.fast_math,
             )
         })?;
         let active_attributes = active_attributes(&vertex);

@@ -92,6 +92,9 @@ pub(crate) struct ShaderSource {
     pub(crate) attributes: &'static [AttributeInfo],
     pub(crate) instance_attributes: &'static [AttributeInfo],
     pub(crate) textures: &'static [TextureInfo],
+    /// Whether its library compiles with fast math, Metal's default, which
+    /// lets the compiler fuse and reorder floating-point operations.
+    pub(crate) fast_math: bool,
 }
 
 // The number of UBOs each shader binds before its vertex buffers, for the
@@ -125,6 +128,16 @@ const fn tex(index: usize, id: usize) -> TextureInfo {
 use AttributeDataType::{Float, Float2, Float3, Float4, Short2, Short4, UByte4, UShort2, UShort4};
 
 macro_rules! shader_source {
+    // A shader that compiles without fast math.
+    (precise $name:ident, $attrs:expr, $textures:expr) => {
+        static $name: ShaderSource = ShaderSource {
+            msl: &msl_sources::$name,
+            attributes: $attrs,
+            instance_attributes: &[],
+            textures: $textures,
+            fast_math: false,
+        };
+    };
     ($name:ident, $attrs:expr, $textures:expr) => {
         shader_source!($name, $attrs, &[], $textures);
     };
@@ -134,6 +147,7 @@ macro_rules! shader_source {
             attributes: $attrs,
             instance_attributes: $instance_attrs,
             textures: $textures,
+            fast_math: true,
         };
     };
 }
@@ -346,14 +360,21 @@ const VERTEX_TEXEL_ATTRIBUTES: &[AttributeInfo] =
     &[attr(0, Short4, VERTEX_TEXEL_UBO_COUNT, ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE)];
 shader_source!(VERTEX_TEXEL_SHADER, VERTEX_TEXEL_ATTRIBUTES, &[tex(0, ID_VERTEX_TEXEL_TEXTURE)]);
 
+// Fast math would let the compiler fuse or reorder the f32 operations of the
+// terrain's height rule, which the CPU does one at a time, in order
+// (`mln_util::dem`).
 const TERRAIN_ATTRIBUTES: &[AttributeInfo] = &[attr(0, Short4, TERRAIN_UBO_COUNT, ID_TERRAIN_POS_VERTEX_ATTRIBUTE)];
-shader_source!(TERRAIN_SHADER, TERRAIN_ATTRIBUTES, &[tex(0, ID_TERRAIN_DEM_TEXTURE), tex(1, ID_TERRAIN_DRAPE_TEXTURE)]);
+shader_source!(
+    precise TERRAIN_SHADER,
+    TERRAIN_ATTRIBUTES,
+    &[tex(0, ID_TERRAIN_DEM_TEXTURE), tex(1, ID_TERRAIN_DRAPE_TEXTURE)]
+);
 
 const TERRAIN_PROBE_ATTRIBUTES: &[AttributeInfo] = &[
     attr(0, Float4, TERRAIN_UBO_COUNT, ID_TERRAIN_PROBE_POS_VERTEX_ATTRIBUTE),
     attr(1, Float4, TERRAIN_UBO_COUNT, ID_TERRAIN_PROBE_DEM_COORDS_VERTEX_ATTRIBUTE),
 ];
-shader_source!(TERRAIN_PROBE_SHADER, TERRAIN_PROBE_ATTRIBUTES, &[tex(0, ID_TERRAIN_DEM_TEXTURE)]);
+shader_source!(precise TERRAIN_PROBE_SHADER, TERRAIN_PROBE_ATTRIBUTES, &[tex(0, ID_TERRAIN_DEM_TEXTURE)]);
 
 const HILLSHADE_ATTRIBUTES: &[AttributeInfo] = &[
     attr(0, Short2, HILLSHADE_UBO_COUNT, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE),

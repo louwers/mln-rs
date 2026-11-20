@@ -1,6 +1,7 @@
 //! Compiles every built-in program's MSL with the system's
 //! Metal compiler, the way `MetalGpu` does: `PRELUDE + prelude + source`,
-//! MSL 2.4, fast math, the `ProgramParameters` defines, a
+//! MSL 2.4, fast math unless the program's table turns it off, the
+//! `ProgramParameters` defines, a
 //! `HAS_UNIFORM_u_<name>` define per property passed as a uniform, and
 //! `PROJECTION_GLOBE` for the globe variant. Also checks that the UBO ids and
 //! sizes the MSL declares are the renderer's, and that the shaders' pipelines
@@ -39,11 +40,13 @@ fn device() -> Id<dyn MTLDevice> {
     MTLCreateSystemDefaultDevice().expect("no Metal device")
 }
 
-/// The library of `source` with `defines`, or the compiler's error.
+/// The library of `source` with `defines`, and with fast math if
+/// `fast_math`, or the compiler's error.
 fn compile(
     device: &ProtocolObject<dyn MTLDevice>,
     source: &str,
     defines: &[(String, String)],
+    fast_math: bool,
 ) -> Result<Id<dyn MTLLibrary>, String> {
     let keys: Vec<Retained<NSString>> = defines.iter().map(|(key, _)| NSString::from_str(key)).collect();
     let values: Vec<Retained<NSString>> = defines.iter().map(|(_, value)| NSString::from_str(value)).collect();
@@ -55,6 +58,10 @@ fn compile(
     // SAFETY: the macros map NSString names to NSString values.
     unsafe { options.setPreprocessorMacros(Some(&macros)) };
     // Fast math is Metal's default.
+    if !fast_math {
+        #[expect(deprecated, reason = "its replacement, mathMode, needs macOS 15 and iOS 18")]
+        options.setFastMathEnabled(false);
+    }
     options.setLanguageVersion(MTLLanguageVersion::Version2_4);
     options.setPreserveInvariance(true);
     device
@@ -146,7 +153,7 @@ fn every_shader_source_compiles() {
             ];
             variants.extend(properties.iter().map(|name| (format!("uniform {name}"), defines(false, globe, [name]))));
             for (variant, defines) in variants {
-                match compile(&device, &text, &defines) {
+                match compile(&device, &text, &defines, source.fast_math) {
                     Ok(library) => {
                         compiled += 1;
                         for function in [source.msl.vertex_main_function, source.msl.fragment_main_function] {
@@ -399,7 +406,7 @@ fn ubo_ids_and_sizes_are_the_renderers() {
         }
         text.push_str(&asserts);
         for (projection, globe) in PROJECTIONS {
-            if let Err(error) = compile(&device, &text, &defines(false, globe, [])) {
+            if let Err(error) = compile(&device, &text, &defines(false, globe, []), source.fast_math) {
                 failures.push(format!("{} ({projection}):\n{error}", program.name));
             }
         }
@@ -496,7 +503,7 @@ fn pipelines_build_with_the_tables_vertex_layout() {
             ]
         });
         for (variant, defines) in variants {
-            let library = compile(&device, &text, &defines)
+            let library = compile(&device, &text, &defines, source.fast_math)
                 .unwrap_or_else(|error| panic!("{} ({variant}): {error}", program.name));
             let function = |name: &str| library.newFunctionWithName(&NSString::from_str(name)).unwrap();
             let vertex = function(source.msl.vertex_main_function);

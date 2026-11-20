@@ -123,7 +123,7 @@ fragment half4 fragmentMain() { return half4(1.0); }
     let mut gpu = MetalGpu::new(&device);
     let program = &programs::FILL_EXTRUSION_INSTANCED;
     let (vertex, fragment) =
-        compile(device.device(), "direct read", MSL, "vertexMain", "fragmentMain", []).expect("the MSL compiles");
+        compile(device.device(), "direct read", MSL, "vertexMain", "fragmentMain", [], true).expect("the MSL compiles");
     let source = gpu.sources.get(program).expect("the table");
     let active_attributes = active_attributes(&vertex);
     let shader = gpu.shaders.insert(Shader { program, source, vertex, active_attributes, fragment, table: None });
