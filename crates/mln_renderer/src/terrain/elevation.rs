@@ -62,7 +62,7 @@ fn drawn_dem(dem: Option<&SourceTiles>, bound: Option<(OverscaledTileID, DemCoor
     let (id, coords) = bound?;
     let data = dem_bucket(dem?.tile(&id)?)?.dem_data();
     let dim = u32::try_from(data.dim).ok()?;
-    Some(DrawnDem { id, image: Arc::clone(data.shared_image()), dim, coords, min: data.min })
+    Some(DrawnDem { id, image: Arc::clone(data.shared_image()), dim, coords, min: data.range().0 })
 }
 
 impl TerrainElevation {

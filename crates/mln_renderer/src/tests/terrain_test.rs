@@ -537,7 +537,7 @@ fn the_ground_the_map_stands_on_is_the_height_rule_on_the_drawn_dem() {
     let height = mln_util::dem::sample(dim, coords, uv, texel) * 1.5;
     assert_eq!(Some(f64::from(height)), ground.at(center));
     assert!(height.fract() != 0.0, "{height} reads between pixels");
-    assert_eq!(Some(f64::from(data.min * 1.5)), ground.min_at(center));
+    assert_eq!(Some(f64::from(data.range().0 * 1.5)), ground.min_at(center));
     // Ground far from the view, where no tile drew.
     assert_eq!(None, ground.at(LatLng::new(-45.0, -170.0).unwrap()));
 

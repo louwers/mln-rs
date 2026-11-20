@@ -93,7 +93,8 @@ impl ElevationRanges {
             .flat_map(SourceTiles::slots)
             .filter_map(|slot| {
                 let data = dem_data(&slot.tile)?;
-                let range = (f64::from(data.min) * exaggeration, f64::from(data.max) * exaggeration);
+                let (min, max) = data.range();
+                let range = (f64::from(min) * exaggeration, f64::from(max) * exaggeration);
                 Some((slot.tile.id.canonical, range))
             })
             .collect();
