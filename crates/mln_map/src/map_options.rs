@@ -40,12 +40,15 @@ pub struct MapOptions {
     /// default, it removes the image.
     pub unused_style_image_policy: UnusedStyleImagePolicy,
     /// Whether the center of a camera at rest stands on the terrain, at its
-    /// height under the center. On by default. [`Map::set_center_clamped_to_ground`]
-    /// changes it.
+    /// height under the center, once that has loaded. A camera that a
+    /// gesture or an animation moves keeps its altitude, and so does every
+    /// camera when this is off. On by default.
+    /// [`Map::set_center_clamped_to_ground`] changes it.
     ///
     /// [`Map::set_center_clamped_to_ground`]: crate::Map::set_center_clamped_to_ground
     pub center_clamped_to_ground: bool,
-    /// How far the skirts of terrain tiles reach down. `Auto` by default.
+    /// How far the skirts of terrain tiles reach down, for the map's
+    /// lifetime. `Auto` by default.
     pub terrain_skirt_length: TerrainSkirtLength,
 }
 

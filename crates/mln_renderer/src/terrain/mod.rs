@@ -1,5 +1,79 @@
-//! 3D terrain: the style's `terrain` drawn as a surface whose height comes
-//! from a raster-dem source.
+//! 3D terrain: the style's `terrain` drawn as a surface whose heights come
+//! from a raster-dem source, with the layers that drape over it drawn into
+//! textures that the surface samples.
+//!
+//! Terrain draws when the style's terrain names a raster-dem source whose
+//! tileset has loaded, on a Mercator view, in continuous and static modes.
+//! In tile mode, and on the globe, the map draws flat. A frame without
+//! terrain takes none of the paths below: its tile covers, matrices and
+//! draws are a flat map's.
+//!
+//! # A frame with terrain
+//!
+//! The map owns the camera and runs on its own thread; the renderer, which
+//! may run on another, owns [`RenderTerrain`] through its orchestrator, and
+//! with it the cover, the drapes and the layers' drawings in them, the
+//! surface's draws and DEM textures, and the last ground it told the map
+//! of. In each update:
+//!
+//! 1. Before the sources update, [`RenderTerrain::update`] covers the view
+//!    with terrain tiles and lists the DEM tiles they read. Every source
+//!    then covers the view the same way, culled by the same elevation
+//!    ranges, and the terrain's source keeps its DEM tiles loaded, whether
+//!    or not a layer draws them. They count toward the frame's being loaded.
+//! 2. Once the sources have updated, [`RenderTerrain::bind`] binds each
+//!    terrain tile's DEM and tells the map of the ground the tiles draw, if
+//!    it changed.
+//! 3. The layers that drape (background, fill, line, hillshade, color
+//!    relief, and raster but for an image source's) make no draws in the
+//!    frame: they draw in each drape whose key changed
+//!    ([`RenderTerrain::begin_drapes`]). The surface makes a draw per tile
+//!    ([`RenderTerrain::update_draws`]).
+//! 4. The drapes draw into their textures before the frame's pass. The
+//!    frame clears to transparent, and its translucent pass draws the
+//!    surface after the globe's depth, then the layers that don't drape,
+//!    flat over it, with their layer depth off.
+//!
+//! # Contracts
+//!
+//! - **The cover** ([`TerrainCover`]) is GL JS's Mercator `coveringTiles`
+//!   with a zoom for each tile: terrain tiles twice the DEM's tile size, of
+//!   zooms 0 to 22, nearest the center first. Each is culled by a box over
+//!   the elevation range of the DEM under it, with the exaggeration, or by
+//!   GL JS's flat range where none has loaded. While no tile holds the
+//!   view's center, the cover keeps the tile under it, undrawn, so that the
+//!   camera has a DEM to stand on.
+//! - **The DEM bindings.** A tile at zoom z reads the DEM tile at z − 1,
+//!   within the DEM's zoom levels; while that loads, the sub-rect of the
+//!   deepest ancestor that has loaded; else it draws flat. A frame binds the
+//!   DEM tiles it has, so a loaded frame draws each tile with its own. The
+//!   surface reads each DEM's bordered RGBA8 image texel by texel and
+//!   decodes it by the height rule of `mln_util::dem`, as the CPU does.
+//! - **The drapes** ([`Drapes`]): a texture for each drawn tile, which the
+//!   draped layers draw into with the map's camera, through their own draw
+//!   updates. A drape draws again only when its key differs from the one it
+//!   was drawn from: the draped layers' styles, paint revisions and tiles,
+//!   the overlapping tiles' buckets and generations, and, with the camera
+//!   at rest, the layers' evaluated values, the zoom, and the bearing where
+//!   a layer draws by it. A change of the style's images, or of the feature
+//!   state of a bucket a drape shows, draws it again too. While the camera
+//!   moves, a drape drawn at another zoom or bearing stays.
+//! - **The elevation snapshot** ([`TerrainElevation`]) holds the drawn
+//!   tiles, and the DEM images and sub-rects they read, which don't change
+//!   once it shares them, so the map reads it on its thread. The renderer
+//!   makes a new one only when the tiles, the DEM images they read, where
+//!   they read them, whether their own DEM loads, or the decode change: a
+//!   fixed camera over loaded tiles keeps one snapshot. It reaches the map
+//!   as [`RendererEvent::TerrainElevation`] before the frame of its update
+//!   finishes, and `None` does once terrain stops, and for an update that
+//!   carries a snapshot while terrain doesn't draw.
+//! - **Stills.** An update carries the snapshot the map's camera stands on
+//!   ([`UpdateParameters::elevation`]), and the map answers each new one
+//!   with an update that carries it. A frame is loaded only for an update
+//!   that carries the renderer's current snapshot, the same `Arc` (both
+//!   `None` without terrain): a still image draws only that update's frame,
+//!   and a continuous frame of any other reports itself partial, so it
+//!   doesn't make the map idle.
 
 mod cover;
 mod dem_textures;

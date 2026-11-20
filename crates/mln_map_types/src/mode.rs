@@ -44,7 +44,7 @@ pub enum TileLodMode {
 
 /// How far the skirts that hang from the edges of terrain tiles reach down.
 /// The skirts hide the cracks between neighboring tiles of different zooms,
-/// but show through a terrain that draws translucent.
+/// and show where the layers draped over the terrain are translucent.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum TerrainSkirtLength {
     /// A fifth of the width of a tile at the map's zoom, in meters at the
