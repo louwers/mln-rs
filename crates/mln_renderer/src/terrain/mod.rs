@@ -102,12 +102,19 @@
 //!   two texels a logical pixel or one a physical pixel, whichever is
 //!   more: GL JS's side (twice the terrain tile's) where the tile shows at
 //!   half its size or larger, down to a sixteenth of it. Where the drapes
-//!   with a texture and those that draw again would hold more than a byte
-//!   cap (256 MiB on phones and in the browser, 384 MiB elsewhere), the
-//!   largest side allowed falls a step at a time for the tiles that show
-//!   smallest; no tile loses its drape. A drape larger than its side draws
-//!   again at once, so the cap holds; one smaller draws again at rest, as
-//!   one stale by the camera does.
+//!   with a texture, with the depth and stencil of each side and the layer
+//!   composite of a side whose drapes composite, would hold more than a
+//!   byte cap (256 MiB on phones and in the browser, 384 MiB elsewhere),
+//!   the largest side
+//!   allowed falls a step at a time for the tiles that show smallest, below
+//!   a sixteenth if the cap needs it; no tile loses its drape. The frame's
+//!   sides are those of the drapes that hold a texture once its layers
+//!   have drawn the drapes that draw again, so a still's are exact, and a
+//!   stack that draws nothing in a tile takes none of the cap there. A
+//!   drape larger than its side draws again at once, so the cap holds,
+//!   but for one stale by the camera that the frame's own drawing lowered,
+//!   which draws again in the next frame; one smaller draws again at rest,
+//!   as one stale by the camera does.
 //! - **The drape composite.** A draped layer with a layer opacity below 1
 //!   or a layer blend other than `normal` draws as a whole inside each
 //!   drape, as in 2D (`LayerComposite`): into a texture of the drape's
@@ -253,7 +260,7 @@ pub(crate) struct RenderTerrain {
     logged_globe: bool,
     /// The drapes' byte cap in place of [`drapes::BYTE_CAP`].
     #[cfg(test)]
-    pub(crate) drape_byte_cap: Option<usize>,
+    pub(crate) drape_byte_cap: Option<u64>,
 }
 
 impl RenderTerrain {
@@ -458,10 +465,16 @@ impl RenderTerrain {
         self.draws.upload(gpu, context);
     }
 
-    /// Makes what the drapes draw with, and uploads their draws, through
-    /// `gpu`, the context of `parameters`, the frame's.
-    pub(crate) fn upload_drapes(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        self.drapes.upload(gpu, parameters);
+    /// Makes what the drapes draw with, and uploads their draws, with the
+    /// uniforms of a pattern atlas of `pattern_atlas_size`, through `gpu`,
+    /// the context of `parameters`, the frame's.
+    pub(crate) fn upload_drapes(
+        &mut self,
+        gpu: &mut dyn Gpu,
+        parameters: &mut PaintParameters<'_>,
+        pattern_atlas_size: mln_util::size::Size,
+    ) {
+        self.drapes.upload(gpu, parameters, pattern_atlas_size);
     }
 
     /// Draws the drapes into their textures, outside any pass, before the

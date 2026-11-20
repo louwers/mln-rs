@@ -128,6 +128,46 @@ impl Composite {
     }
 }
 
+/// The textures a layer composite holds for a frame's composited groups,
+/// as [`LayerComposite::update`] makes them without the overdraw
+/// inspector: its target's color, its depth and stencil where a group
+/// draws with its own, and the frame and backdrop, of the frame's color
+/// format, where a group blends in the shader.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct CompositeTextures {
+    target: bool,
+    depth_stencil: bool,
+    frame: Option<TextureFormat>,
+}
+
+impl CompositeTextures {
+    /// Those of `groups` on a frame whose color is of `format`.
+    pub(crate) fn of(groups: impl IntoIterator<Item = Composite>, format: Option<TextureFormat>) -> CompositeTextures {
+        groups.into_iter().fold(CompositeTextures::default(), |textures, composite| CompositeTextures {
+            target: true,
+            depth_stencil: textures.depth_stencil || !composite.frame_depth,
+            frame: textures.frame.or(format.filter(|_| composite.reads_backdrop())),
+        })
+    }
+
+    /// Those of the groups of both.
+    #[must_use]
+    pub(crate) fn union(self, other: CompositeTextures) -> CompositeTextures {
+        CompositeTextures {
+            target: self.target || other.target,
+            depth_stencil: self.depth_stencil || other.depth_stencil,
+            frame: self.frame.or(other.frame),
+        }
+    }
+
+    /// Their bytes on a frame of `size`.
+    pub(crate) fn bytes(self, size: Size) -> usize {
+        let depth_stencil = if self.depth_stencil { attachment_bytes(size, DEPTH_STENCIL) } else { 0 };
+        let frame = self.frame.map_or(0, |format| 2 * attachment_bytes(size, format));
+        if self.target { attachment_bytes(size, COLOR) + depth_stencil + frame } else { 0 }
+    }
+}
+
 /// A texture that passes draw into and draws sample, with the sampler
 /// they sample it with.
 struct Texture {
@@ -327,10 +367,12 @@ impl LayerComposite {
     /// the shader.
     pub(crate) fn bytes(&self) -> usize {
         let Some(target) = &self.target else { return 0 };
-        let size = target.size;
-        let depth_stencil = target.depth_stencil.as_ref().map_or(0, |_| attachment_bytes(size, DEPTH_STENCIL));
-        let frame = self.frame.as_ref().map_or(0, |frame| 2 * attachment_bytes(size, frame.format));
-        attachment_bytes(size, COLOR) + depth_stencil + frame
+        let textures = CompositeTextures {
+            target: true,
+            depth_stencil: target.depth_stencil.is_some(),
+            frame: self.frame.as_ref().map(|frame| frame.format),
+        };
+        textures.bytes(target.size)
     }
 
     /// The texture the frame draws into rather than its target's, where a

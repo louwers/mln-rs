@@ -19,10 +19,13 @@
 //! A drape's side follows its tile's on screen ([`shown_size`]): GL JS's
 //! where the tile shows large, fewer texels where it shows small. A byte
 //! cap ([`BYTE_CAP`]) lowers the sides of the tiles that show smallest
-//! where the drapes would hold more; it never drops a tile. A drape whose
-//! side grows draws again once the camera rests, as one drawn at another
-//! zoom does, and one whose side shrinks at once, so that the cap holds
-//! while the camera moves.
+//! where the drapes that hold a texture, and what they draw with, would
+//! hold more; it never drops a tile. The frame's sides are settled once
+//! the layers have drawn the drapes that draw again, which tells which of
+//! them hold a texture ([`Drapes::finish_update`]). A drape whose side
+//! grows draws again once the camera rests, as one drawn at another zoom
+//! does, and one whose side shrinks at once, so that the cap holds while
+//! the camera moves.
 
 use std::sync::Arc;
 
@@ -44,7 +47,7 @@ use crate::clip_masks::ClipMasks;
 use crate::gfx::context::Context;
 use crate::gfx::resources::{GpuTexture, attachment_bytes};
 use crate::gfx::store::SharedTexture;
-use crate::layer_composite::LayerComposite;
+use crate::layer_composite::{CompositeTextures, LayerComposite};
 use crate::layer_drawing::{ChangedBuckets, DrapeDrawing, DrawGroups, DrawOrder};
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::paint_parameters::{OpenPass, PaintParameters, TransformParameters};
@@ -68,14 +71,15 @@ pub(crate) fn drape_size(tile_size: u16) -> u32 {
     u32::from(tile_size) * 2
 }
 
-/// How many times a drape's side may halve the most: to a sixteenth, 128
-/// texels over a 512-pixel DEM.
+/// How many times a drape's side may halve the most for its tile's size
+/// on screen: to a sixteenth, 128 texels over a 512-pixel DEM.
 const SMALLEST_SHIFT: u32 = 4;
 
-/// The most bytes the drapes' textures hold, with their mips, before the
-/// tiles that show smallest take fewer texels: less on phones and in the
+/// The most bytes the drapes' textures hold, with their mips, and the
+/// depth, stencil and layer composite they draw with, before the tiles
+/// that show smallest take fewer texels: less on phones and in the
 /// browser, whose GPU shares a smaller memory with the system.
-pub(crate) const BYTE_CAP: usize = if cfg!(any(
+pub(crate) const BYTE_CAP: u64 = if cfg!(any(
     target_os = "android",
     target_os = "ios",
     target_os = "tvos",
@@ -91,9 +95,38 @@ pub(crate) const BYTE_CAP: usize = if cfg!(any(
 /// The bytes of a drape's texture of `size` texels a side, with its mips,
 /// as [`Texture2D::bytes`](crate::gfx::texture2d::Texture2D::bytes)
 /// counts them.
-fn texture_bytes(size: u32) -> usize {
-    let bytes = attachment_bytes(Size::new(size, size), COLOR);
+fn texture_bytes(size: u32) -> u64 {
+    let bytes = attachment_bytes(Size::new(size, size), COLOR) as u64;
     bytes + bytes / 3
+}
+
+/// What the drapes of a tile hold, which the byte cap counts: the number
+/// of them with a texture, and what the layer composite of their side
+/// holds while they draw.
+#[derive(Clone, Copy, Default)]
+struct Held {
+    textures: u64,
+    composite: CompositeTextures,
+}
+
+/// The bytes that the drapes of tiles of `sizes`, each holding what
+/// `held` does, hold with what each side draws with: a depth and stencil,
+/// and the layer composite.
+fn held_bytes(sizes: &[u32], held: &[Held]) -> u64 {
+    let mut sides: Vec<(u32, CompositeTextures)> = Vec::new();
+    let mut bytes = 0;
+    for (&size, held) in sizes.iter().zip(held).filter(|(_, held)| held.textures > 0) {
+        bytes += held.textures * texture_bytes(size);
+        match sides.iter_mut().find(|(side, _)| *side == size) {
+            Some((_, composite)) => *composite = composite.union(held.composite),
+            None => sides.push((size, held.composite)),
+        }
+    }
+    for (side, composite) in sides {
+        let size = Size::new(side, side);
+        bytes += (attachment_bytes(size, DEPTH_STENCIL) + composite.bytes(size)) as u64;
+    }
+    bytes
 }
 
 /// The logical pixels that `tile` spans in `view`, whose projection is
@@ -132,22 +165,21 @@ pub(crate) fn shown_size(shown: f64, pixel_ratio: f32, largest: u32) -> u32 {
     (texels.ceil() as u32).next_power_of_two().clamp(largest >> SMALLEST_SHIFT, largest)
 }
 
-/// Lowers `sizes`, each the side of `counts`' drapes of a tile, until the
-/// drapes hold at most `cap` bytes: the largest side allowed falls a step
-/// at a time, for the tiles that show smallest first, which `order` lists
-/// last, down to `smallest`.
-fn cap_sizes(sizes: &mut [u32], counts: &[usize], order: &[usize], smallest: u32, cap: usize) {
-    let mut held: usize = sizes.iter().zip(counts).map(|(&size, &count)| count * texture_bytes(size)).sum();
+/// Lowers `sizes`, each the side of the drapes of a tile that hold what
+/// `held` does, until they hold at most `cap` bytes ([`held_bytes`]): the
+/// largest side allowed falls a step at a time, for the tiles that show
+/// smallest first, which `order` lists last, down to a texel, below the
+/// smallest side a tile's size on screen gives where the cap needs it.
+fn cap_sizes(sizes: &mut [u32], held: &[Held], order: &[usize], cap: u64) {
     let mut limit = sizes.iter().copied().max().unwrap_or(0);
-    while held > cap && limit > smallest {
+    while held_bytes(sizes, held) > cap && limit > 1 {
         let lower = limit / 2;
         for &tile in order.iter().rev() {
-            if held <= cap {
-                return;
-            }
             if sizes[tile] > lower {
-                held -= counts[tile] * (texture_bytes(sizes[tile]) - texture_bytes(lower));
                 sizes[tile] = lower;
+                if held_bytes(sizes, held) <= cap {
+                    return;
+                }
             }
         }
         limit = lower;
@@ -256,9 +288,11 @@ struct StackDrape {
     key: DrapeKey,
     /// Whether the frame draws the drape again.
     redraws: bool,
-    /// Whether, at rest, its key differs from the one it was drawn from by
-    /// the camera only, or its texture is smaller than its tile's side.
-    camera_stale: bool,
+    /// How its key differs from the one it was drawn from.
+    difference: Difference,
+    /// What the layer composite holds while its layers draw it, as they
+    /// last drew it.
+    composite: CompositeTextures,
 }
 
 /// A drape's texture, of `size` texels a side, with its mips.
@@ -282,7 +316,19 @@ impl StackDrape {
     /// Whether it draws again in the frame into a texture of `side` texels a
     /// side.
     fn redraws_at(&self, side: u32) -> bool {
-        self.redraws && self.texture.as_ref().is_some_and(|&(_, texture_side)| texture_side == side)
+        self.redraws && self.side() == Some(side)
+    }
+
+    /// The side of its texture, if it has one.
+    fn side(&self) -> Option<u32> {
+        self.texture.as_ref().map(|&(_, side)| side)
+    }
+
+    /// Whether, with the camera `at_rest`, it waits to draw again in a tile
+    /// whose drapes draw at `size`: its key differs from the one it was
+    /// drawn from by the camera only, or its texture is smaller.
+    fn stale(&self, at_rest: bool, size: u32) -> bool {
+        at_rest && (self.difference == Difference::Camera || self.side().is_some_and(|side| side < size))
     }
 
     /// A drape not drawn yet, without a texture.
@@ -296,7 +342,8 @@ impl StackDrape {
             drawn: None,
             key: DrapeKey::default(),
             redraws: false,
-            camera_stale: false,
+            difference: Difference::Content,
+            composite: CompositeTextures::default(),
         }
     }
 }
@@ -333,14 +380,22 @@ pub(crate) struct Drapes {
     stacks: usize,
     /// The most texels a side of a drape ([`drape_size`]).
     largest: u32,
-    /// The most bytes the drapes' textures hold before the tiles that show
-    /// smallest take fewer texels.
-    byte_cap: usize,
+    /// The physical pixels of the frame's target a logical one.
+    pixel_ratio: f32,
+    /// The most bytes the drapes and what they draw with hold before the
+    /// tiles that show smallest take fewer texels.
+    byte_cap: u64,
     /// What the drapes draw with, for each side a drape's texture has.
     targets: Vec<Targets>,
     /// The frames that [`choose`](Self::choose) chose drapes for.
     frame: u64,
-    /// Whether drapes stale by the camera only wait for a later frame.
+    /// Whether the frame's camera is at rest, as the drapes take it, and
+    /// whether it draws the drapes stale by the camera one tile a frame
+    /// ([`choose`](Self::choose)).
+    at_rest: bool,
+    paced: bool,
+    /// Whether drapes stale by the camera only, or of another side than
+    /// their tile's, wait for a later frame.
     waiting: bool,
     /// The tiles and stacks of the drapes drawn since the last
     /// [`take_passes`](Self::take_passes).
@@ -354,34 +409,34 @@ impl Drapes {
     /// `pixel_ratio`, and of `stacks` stacks: keeps the drapes of the tiles
     /// and stacks it had, and drops the others. Each tile's drapes draw at
     /// the side its tile shows at ([`shown_size`]), which
-    /// [`choose`](Self::choose) lowers where they would hold more than
-    /// `byte_cap` bytes. The frame's draped layers then give their keys
-    /// ([`key_layer`](Self::key_layer)), which choose the drapes that draw
-    /// again, whose drawings they then update
+    /// [`choose`](Self::choose) and
+    /// [`finish_update`](Self::finish_update) lower where they would hold
+    /// more than `byte_cap` bytes. The frame's draped layers then give their
+    /// keys ([`key_layer`](Self::key_layer)), which choose the drapes that
+    /// draw again, whose drawings they then update
     /// ([`update_layer`](Self::update_layer)).
     pub(crate) fn begin(
         &mut self,
         (view, projection, pixel_ratio): (&View, &DMat4, f32),
         cover: &TerrainCover,
         stacks: usize,
-        byte_cap: usize,
+        byte_cap: u64,
     ) {
         let largest = drape_size(cover.tile_size);
         if largest != self.largest {
             *self = Drapes { largest, ..Drapes::default() };
         }
         self.stacks = stacks;
-        self.byte_cap = byte_cap;
+        (self.byte_cap, self.pixel_ratio) = (byte_cap, pixel_ratio);
         let mut kept = std::mem::take(&mut self.drapes);
         self.drapes.reserve(cover.tiles.len());
         for tile in &cover.tiles {
             let unwrapped = tile.id.to_unwrapped();
             let transform = TransformParameters::for_drape(view, &unwrapped);
             let shown = shown_px(view, projection, &unwrapped);
-            let size = shown_size(shown, pixel_ratio, largest);
             let mut drape = match kept.iter().position(|drape| drape.tile == tile.id) {
-                Some(index) => Drape { transform, shown, size, ..kept.swap_remove(index) },
-                None => Drape { tile: tile.id, transform, shown, size, drawn_at: 0, stacks: Vec::new() },
+                Some(index) => Drape { transform, shown, ..kept.swap_remove(index) },
+                None => Drape { tile: tile.id, transform, shown, size: 0, drawn_at: 0, stacks: Vec::new() },
             };
             drape.stacks.resize_with(stacks, StackDrape::new);
             for drape in &mut drape.stacks {
@@ -424,7 +479,8 @@ impl Drapes {
     }
 
     /// Chooses the drapes the frame draws again, once every draped layer
-    /// gave its key, and the side the drapes of each tile draw at.
+    /// gave its key, and the side the drapes of each tile draw at, which
+    /// [`finish_update`](Self::finish_update) settles.
     ///
     /// A drape not drawn yet or stale, or whose key differs from the one it
     /// was drawn from by its content ([`DrapeKey::difference`]), draws again
@@ -437,50 +493,38 @@ impl Drapes {
     /// others [wait](Self::waiting) for a later frame. While the camera
     /// moves, a drape drawn at another zoom or bearing stays.
     ///
-    /// Where the drapes with a texture and those stale would hold more than
-    /// the byte cap, the sides of the tiles that show smallest go down
-    /// ([`cap_sizes`]), and a drape whose texture is larger than its side
-    /// draws again at once, so that the cap holds. Their layers' drawings
-    /// wait for the layers to take them.
+    /// The sides are those the byte cap gives the drapes with a texture and
+    /// those that draw again for their content, which may make one
+    /// ([`cap_sizes`]); a drape whose texture is larger than its side draws
+    /// again at once, so that the cap holds. Their layers' drawings wait for
+    /// the layers to take them.
     pub(crate) fn choose(&mut self, at_rest: bool, paced: bool) {
+        (self.at_rest, self.paced) = (at_rest, paced);
         self.frame += 1;
-        let mut counts = Vec::with_capacity(self.drapes.len());
-        for Drape { stacks, .. } in &mut self.drapes {
-            let mut count = 0;
-            for drape in stacks {
-                let difference = drape.drawn.as_ref().map_or(Difference::Content, |drawn| drape.key.difference(drawn));
-                drape.redraws = difference == Difference::Content;
-                drape.camera_stale = at_rest && difference == Difference::Camera;
-                count += usize::from(drape.redraws || drape.camera_stale || drape.texture.is_some());
-            }
-            counts.push(count);
+        for drape in self.drapes.iter_mut().flat_map(|drape| &mut drape.stacks) {
+            drape.difference = drape.drawn.as_ref().map_or(Difference::Content, |drawn| drape.key.difference(drawn));
+            drape.redraws = drape.difference == Difference::Content;
         }
-        let mut order: Vec<usize> = (0..self.drapes.len()).collect();
-        order.sort_by(|&a, &b| self.drapes[b].shown.total_cmp(&self.drapes[a].shown));
-        let mut sizes: Vec<u32> = self.drapes.iter().map(|drape| drape.size).collect();
-        cap_sizes(&mut sizes, &counts, &order, self.largest >> SMALLEST_SHIFT, self.byte_cap);
-        for (Drape { size, stacks, .. }, capped) in self.drapes.iter_mut().zip(sizes) {
-            *size = capped;
+        // A drape stale by the camera without a texture drew nothing from
+        // the same content: it takes none of the cap until it draws
+        // something, which `finish_update` then counts.
+        self.cap(|drape| drape.redraws || drape.texture.is_some());
+        for Drape { size, stacks, .. } in &mut self.drapes {
             for drape in stacks {
-                if let Some(&(_, side)) = drape.texture.as_ref() {
-                    drape.redraws |= side > capped;
-                    drape.camera_stale |= at_rest && side < capped;
-                }
+                drape.redraws |= drape.side().is_some_and(|side| side > *size);
             }
         }
         let redraws = |drape: &Drape| drape.stacks.iter().any(|drape| drape.redraws);
+        let stale = |drape: &Drape| drape.stacks.iter().any(|stack| stack.stale(at_rest, drape.size));
         let next = (self.drapes.iter().enumerate())
-            .filter(|(_, drape)| paced && !redraws(drape) && drape.stacks.iter().any(|drape| drape.camera_stale))
+            .filter(|(_, drape)| paced && !redraws(drape) && stale(drape))
             .min_by_key(|&(index, drape)| (drape.drawn_at, index))
             .map(|(index, _)| index);
-        self.waiting = false;
         for (index, drape) in self.drapes.iter_mut().enumerate() {
             let now = !paced || next == Some(index) || redraws(drape);
+            let size = drape.size;
             for drape in &mut drape.stacks {
-                if drape.camera_stale {
-                    drape.redraws |= now;
-                    self.waiting |= !now;
-                }
+                drape.redraws |= now && drape.stale(at_rest, size);
                 if drape.redraws {
                     drape.previous = std::mem::take(&mut drape.layers);
                 }
@@ -491,9 +535,33 @@ impl Drapes {
         }
     }
 
-    /// Whether the last frame left drapes stale by the camera only for a
-    /// later frame to draw ([`choose`](Self::choose)): the map then isn't
-    /// done drawing.
+    /// Sets the side of each tile's drapes: the one its tile shows at,
+    /// lowered where the drapes that `hold` a texture, and what they draw
+    /// with, would hold more than the byte cap ([`cap_sizes`]).
+    fn cap(&mut self, hold: impl Fn(&StackDrape) -> bool) {
+        let held: Vec<Held> = (self.drapes.iter())
+            .map(|drape| {
+                drape.stacks.iter().filter(|drape| hold(drape)).fold(Held::default(), |held, drape| Held {
+                    textures: held.textures + 1,
+                    composite: held.composite.union(drape.composite),
+                })
+            })
+            .collect();
+        let mut order: Vec<usize> = (0..self.drapes.len()).collect();
+        order.sort_by(|&a, &b| self.drapes[b].shown.total_cmp(&self.drapes[a].shown));
+        let (pixel_ratio, largest) = (self.pixel_ratio, self.largest);
+        let mut sizes: Vec<u32> =
+            self.drapes.iter().map(|drape| shown_size(drape.shown, pixel_ratio, largest)).collect();
+        cap_sizes(&mut sizes, &held, &order, self.byte_cap);
+        for (drape, size) in self.drapes.iter_mut().zip(sizes) {
+            drape.size = size;
+        }
+    }
+
+    /// Whether the last frame left drapes stale by the camera only, or of
+    /// another side than their tile's, for a later frame to draw
+    /// ([`choose`](Self::choose), [`finish_update`](Self::finish_update)):
+    /// the map then isn't done drawing.
     pub(crate) fn waiting(&self) -> bool {
         self.waiting
     }
@@ -510,11 +578,10 @@ impl Drapes {
         layer: &mut dyn RenderLayer,
         source: Option<LayerSource<'_>>,
     ) {
-        let style = &layer.base().style;
-        let style = Arc::clone(style);
-        let pattern_atlas_size = atlases.pattern.pixel_size();
+        let style = Arc::clone(&layer.base().style);
         // The layers' draw updates don't read the composite, which only
-        // the passes do.
+        // the passes do, nor the drape's size, which `finish_update` may
+        // change.
         let layer_composite = &mut LayerComposite::default();
         for Drape { tile, transform, size, stacks, .. } in &mut self.drapes {
             let Some(StackDrape { clip_masks, layers, previous, .. }) =
@@ -531,8 +598,6 @@ impl Drapes {
             };
             let mut parameters = parameters.drape(transform, clip_masks, layer_composite, size, tile.to_unwrapped());
             layer.update_drape_draws(gpu, &mut parameters, atlases, source, *tile, &mut kept.drawing);
-            let global = parameters.global_paint_params(pattern_atlas_size);
-            kept.drawing.write_uniform(gpu, ID_GLOBAL_PAINT_PARAMS_UBO, &global, parameters.context);
             layers.push(kept);
         }
     }
@@ -542,23 +607,63 @@ impl Drapes {
     /// layers draw something has a texture of its tile's side, made in
     /// `context`; one whose layers draw nothing has none and draws no pass,
     /// drawn from its key.
+    ///
+    /// The sides are then those the byte cap gives the drapes that hold a
+    /// texture once the frame has drawn, so that a still, which draws every
+    /// drape it would draw again, draws them at the sides the same still
+    /// drawn again would. A drape that [`choose`](Self::choose) chose only
+    /// for a side that it no longer takes keeps its texture. A drape kept
+    /// whose texture's side then differs from its tile's, drawn from its
+    /// key, draws again from the drawings its layers made of it: where its
+    /// texture is larger, and, with the camera at rest, where it is smaller
+    /// in a tile that draws now as `choose` draws them. One stale by the
+    /// camera whose texture is larger waits, and draws again smaller in the
+    /// next frame.
     pub(crate) fn finish_update(&mut self, context: &mut Context) {
-        for Drape { size, stacks, .. } in &mut self.drapes {
-            for drape in stacks {
-                drape.previous.clear();
-                if !drape.redraws {
-                    continue;
-                }
-                let mut draws = false;
-                for layer in &drape.layers {
-                    layer.drawing.visit_groups(&mut |group| draws = draws || group.draws());
-                }
-                if !draws {
-                    drape.texture = None;
-                    drape.drawn = Some(std::mem::take(&mut drape.key));
+        for drape in self.drapes.iter_mut().flat_map(|drape| &mut drape.stacks) {
+            drape.previous.clear();
+            if !drape.redraws {
+                continue;
+            }
+            let (mut draws, mut composited) = (false, Vec::new());
+            for layer in &drape.layers {
+                layer.drawing.visit_groups(&mut |group| {
+                    draws = draws || group.draws();
+                    composited.extend(group.composite().map(|(_, composite)| composite));
+                });
+            }
+            drape.composite = CompositeTextures::of(composited, Some(COLOR));
+            if !draws {
+                drape.texture = None;
+                drape.drawn = Some(std::mem::take(&mut drape.key));
+                drape.redraws = false;
+                drape.difference = Difference::None;
+            }
+        }
+        self.cap(|drape| drape.redraws || drape.texture.is_some());
+        let (at_rest, paced, frame) = (self.at_rest, self.paced, self.frame);
+        self.waiting = false;
+        for Drape { size, drawn_at, stacks, .. } in &mut self.drapes {
+            let now = !paced || *drawn_at == frame;
+            for drape in stacks.iter_mut() {
+                let side = drape.side();
+                // One that `choose` drew again only for a side it no longer
+                // takes keeps its texture.
+                if side == Some(*size) && drape.difference != Difference::Content && !drape.stale(at_rest, *size) {
                     drape.redraws = false;
-                } else if drape.texture.as_ref().is_none_or(|&(_, side)| side != *size) {
-                    drape.texture = Some((drape_texture(context, *size), *size));
+                }
+                let larger = side.is_some_and(|side| side > *size);
+                let resized = larger || (now && at_rest && side.is_some_and(|side| side < *size));
+                if !drape.redraws && resized && drape.difference == Difference::None {
+                    drape.redraws = true;
+                    *drawn_at = frame;
+                }
+                if drape.redraws {
+                    if side != Some(*size) {
+                        drape.texture = Some((drape_texture(context, *size), *size));
+                    }
+                } else {
+                    self.waiting |= larger || drape.stale(at_rest, *size);
                 }
             }
         }
@@ -631,14 +736,15 @@ impl Drapes {
     }
 
     /// Makes the textures of the drapes that draw again and what they draw
-    /// with, and uploads the GPU objects of their draws and the masks of the
-    /// tiles they clip to, through `gpu`, the context of `parameters`, the
-    /// frame's. The drapes of a side share what they draw with, kept while
-    /// a drape's texture has that side: a depth and stencil, made once one
-    /// of them draws again, and a layer composite, which takes the
-    /// composited draw groups of those that draw again, and drops its
-    /// textures where there are none.
-    pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+    /// with, and uploads the GPU objects of their draws, with the uniforms
+    /// of their side and of a pattern atlas of `pattern_atlas_size`, and the
+    /// masks of the tiles they clip to, through `gpu`, the context of
+    /// `parameters`, the frame's. The drapes of a side share what they draw
+    /// with, kept while a drape's texture has that side: a depth and
+    /// stencil, made once one of them draws again, and a layer composite,
+    /// which takes the composited draw groups of those that draw again, and
+    /// drops its textures where there are none.
+    pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, pattern_atlas_size: Size) {
         if self.drapes.is_empty() {
             self.targets.clear();
             return;
@@ -668,10 +774,16 @@ impl Drapes {
             }
         }
         let stencil_clear_tile = parameters.stencil_clear_tile();
-        for Drape { tile, transform, stacks, .. } in &mut self.drapes {
+        for Drape { tile, transform, size, stacks, .. } in &mut self.drapes {
             for drape in stacks.iter_mut().filter(|drape| drape.redraws) {
+                let size = Size::new(*size, *size);
+                let composite = &mut LayerComposite::default();
+                let drape_parameters =
+                    parameters.drape(transform, &mut drape.clip_masks, composite, size, tile.to_unwrapped());
+                let global = drape_parameters.global_paint_params(pattern_atlas_size);
                 let context = &mut *parameters.context;
                 for layer in &mut drape.layers {
+                    layer.drawing.write_uniform(gpu, ID_GLOBAL_PAINT_PARAMS_UBO, &global, context);
                     layer.drawing.upload(gpu, context);
                 }
                 let layers = &drape.layers;
@@ -799,6 +911,7 @@ mod tests {
     use mln_util::geo::LatLng;
 
     use super::*;
+    use crate::layer_composite::Composite;
 
     /// A camera over the equator at zoom 10, pitched by `pitch` degrees,
     /// over a view of 1024 by 768 pixels.
@@ -865,27 +978,57 @@ mod tests {
         assert_eq!(2048, shown_size(f64::INFINITY, 1.0, 2048));
     }
 
+    /// Three tiles, the first showing largest and the last smallest, with two
+    /// drapes each, of `sizes`, lowered under `cap`.
+    fn capped(cap: u64) -> [u32; 3] {
+        let mut sizes = [2048, 2048, 1024];
+        let held = [Held { textures: 2, composite: CompositeTextures::default() }; 3];
+        cap_sizes(&mut sizes, &held, &[0, 1, 2], cap);
+        sizes
+    }
+
+    /// The bytes of three tiles' two drapes each, of `sizes`, and of the
+    /// depth and stencil of each side.
+    fn held(sizes: [u32; 3]) -> u64 {
+        held_bytes(&sizes, &[Held { textures: 2, composite: CompositeTextures::default() }; 3])
+    }
+
     /// The cap lowers the largest side a step at a time, for the tiles that
     /// show smallest first: every tile takes a side before any takes the
     /// next one down.
     #[test]
     fn the_cap_lowers_the_sides_of_the_tiles_that_show_smallest_first() {
-        // Three tiles, the first showing largest and the last smallest, with
-        // two drapes each.
-        let order = [0, 1, 2];
-        let counts = [2, 2, 2];
-        let capped = |cap: usize| {
-            let mut sizes = [2048, 2048, 1024];
-            cap_sizes(&mut sizes, &counts, &order, 128, cap);
-            sizes
-        };
-        let held = |sizes: [u32; 3]| sizes.iter().map(|&size| 2 * texture_bytes(size)).sum::<usize>();
-        assert_eq!([2048, 2048, 1024], capped(usize::MAX));
+        assert_eq!([2048, 2048, 1024], capped(u64::MAX));
         assert_eq!([2048, 1024, 1024], capped(held([2048, 1024, 1024])));
         assert_eq!([1024, 1024, 1024], capped(held([2048, 1024, 1024]) - 1));
         assert_eq!([1024, 1024, 512], capped(held([1024, 1024, 1024]) - 1));
         assert_eq!([1024, 512, 512], capped(held([1024, 1024, 512]) - 1));
-        // Never below the smallest side, though the cap then doesn't hold.
-        assert_eq!([128, 128, 128], capped(0));
+    }
+
+    /// The cap counts a depth and stencil for each side the drapes have, and
+    /// the layer composite's textures where a tile's drapes composite.
+    #[test]
+    fn the_cap_counts_what_each_side_draws_with() {
+        let side = |size: u32| attachment_bytes(Size::new(size, size), COLOR) as u64;
+        assert_eq!(
+            4 * texture_bytes(2048) + 2 * texture_bytes(1024) + side(2048) + side(1024),
+            held([2048, 2048, 1024])
+        );
+        let composite =
+            Composite { opacity: 0.5, blend: mln_style_types::LayerBlendType::Multiply, frame_depth: false };
+        let held = [Held { textures: 1, composite: CompositeTextures::of([composite], Some(COLOR)) }, Held::default()];
+        // The drape, its depth and stencil, and the composite's color, depth
+        // and stencil, frame and backdrop.
+        assert_eq!(texture_bytes(2048) + 5 * side(2048), held_bytes(&[2048, 2048], &held));
+    }
+
+    /// Where the drapes at the smallest side their tiles' size on screen
+    /// gives hold more than the cap, the cap lowers them further, to a
+    /// texel.
+    #[test]
+    fn the_cap_lowers_the_sides_below_the_smallest_where_it_needs() {
+        assert_eq!(128, shown_size(0.0, 1.0, 2048));
+        assert_eq!([128, 128, 64], capped(held([128, 128, 128]) - 1));
+        assert_eq!([1, 1, 1], capped(0));
     }
 }

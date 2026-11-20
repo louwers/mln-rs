@@ -266,7 +266,7 @@ impl Renderer {
     /// Caps the bytes of the terrain's drapes at `bytes`.
     #[cfg(test)]
     pub(crate) fn set_drape_byte_cap(&mut self, bytes: usize) {
-        self.orchestrator.terrain().drape_byte_cap = Some(bytes);
+        self.orchestrator.terrain().drape_byte_cap = Some(bytes as u64);
     }
 
     /// The tiles of the terrain's drapes, those of the last update's cover.
@@ -644,7 +644,8 @@ impl Encoder {
         parameters.clip_masks.update(gpu, parameters.context, proj_state.is_globe(), &draw_groups.clip_tiles, |tile| {
             to_projection_ubo(&transform.projection_data_for_tile(tile, false))
         });
-        orchestrator.terrain().upload_drapes(gpu, &mut parameters);
+        let pattern_atlas_size = orchestrator.atlases().pattern.pixel_size();
+        orchestrator.terrain().upload_drapes(gpu, &mut parameters, pattern_atlas_size);
         parameters.layer_composite.update(
             gpu,
             parameters.context,
