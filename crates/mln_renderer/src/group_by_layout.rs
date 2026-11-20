@@ -14,7 +14,7 @@ use mln_style::layer_type::{ErasedLayerStyle, LayerTypeInfo};
 use mln_style_types::VisibilityType;
 use mln_util::hash::{HashMap, RandomState};
 
-use crate::layer_type::ErasedEvaluatedLayer;
+use crate::erased_layer::ErasedEvaluatedLayer;
 
 pub(crate) struct LayoutGroupKey {
     // Direct comparable fields (fast path)

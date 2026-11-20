@@ -208,7 +208,7 @@ impl Tile {
     /// Returns whether the tile draws the layer.
     pub(crate) fn layer_properties_updated(
         &mut self,
-        layer_properties: &Arc<dyn crate::layer_type::ErasedEvaluatedLayer>,
+        layer_properties: &Arc<dyn crate::erased_layer::ErasedEvaluatedLayer>,
     ) -> bool {
         self.shown.as_mut().is_some_and(|shown| shown.contents.layer_properties_updated(layer_properties))
     }

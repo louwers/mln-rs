@@ -29,8 +29,8 @@ use parking_lot::Mutex;
 use serde_json::json;
 
 use crate::Registry;
+use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::gfx::dynamic_texture::DynamicTextureBinId;
-use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layout::tile_layout::LayoutParams;
 use crate::renderer_event::RendererEvent;
 use crate::tests::tile::png;
@@ -540,7 +540,7 @@ fn a_missing_image_a_relayout_drops_resolves_when_used_again() {
 struct Mistyped(Arc<dyn mln_style::layer_type::ErasedLayerStyle>);
 
 impl ErasedEvaluatedLayer for Mistyped {
-    fn entry(&self) -> &'static dyn crate::layer_type::ErasedLayerType {
+    fn entry(&self) -> &'static dyn crate::erased_layer::ErasedLayerType {
         panic!("evaluated values of no layer type")
     }
     fn style(&self) -> &dyn mln_style::layer_type::ErasedLayerStyle {

@@ -28,8 +28,8 @@ use mln_vec_map::VecSet;
 
 use crate::Registry;
 use crate::bucket::LayerFeatureStates;
+use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
-use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layers::render_symbol_layer::symbol_translates;
 use crate::layout::tile_layout::{Dependencies, LayoutParams, Resolved};
 use crate::paint_parameters::TransformParameters;

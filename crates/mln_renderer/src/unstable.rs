@@ -27,7 +27,6 @@ pub use crate::layer_drawing::{
     KeptDraw, LayerDrawing, LayerDraws, SingleDraw, TileDraws, TileMap, TileObjects, UniformWriter, finish_tiles,
     tile_objects,
 };
-pub use crate::layers::cast_matrix;
 pub use crate::line_atlas::{DashAtlas, DashEntry, DashPatternTexture, LineAtlas, LinePatternCap, LinePatternPos};
 pub use crate::paint_parameters::PaintParameters;
 pub use crate::paint_property_binder::{
@@ -39,7 +38,7 @@ pub use crate::render_light::EvaluatedLight;
 pub use crate::render_static_data::RenderStaticData;
 pub use crate::render_target::{RenderTarget, TargetPasses};
 pub use crate::render_tile::RenderTile;
-pub use crate::tile_matrix::{globe_extrude_scale, projection_data, to_projection_ubo};
+pub use crate::tile_matrix::{cast_matrix, globe_extrude_scale, projection_data, to_projection_ubo};
 pub use crate::tile_render_data::TileAtlasTextures;
 pub use crate::util::subdivision::{
     SubdividedPolygon, TILE_BORDER_STRIP_WIDTH, add_tile_border_strips, subdivide_polygon, subdivide_vertex_line,

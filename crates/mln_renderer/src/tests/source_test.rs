@@ -36,7 +36,7 @@ use mln_util::tileset::{PartialTileset, Tileset};
 use parking_lot::Mutex;
 
 use crate::Registry;
-use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
+use crate::erased_layer::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::render_source::RenderSource;
 use crate::tests::fixture_layer::{Dot, Shade, Tint};
 use crate::tile::source_tiles::SourceTiles;

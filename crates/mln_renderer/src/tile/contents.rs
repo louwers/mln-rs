@@ -25,11 +25,11 @@ use mln_vec_map::{VecMap, VecSet};
 
 use crate::bucket::{Bucket, LayerFeatureStates};
 use crate::bucket_geometry::{BucketGeometry, GeometryUpload};
+use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::geometry::feature_index::{FeatureIndex, FeatureSelection, QueryLayers, QueryRegion, QueryResults};
 use crate::gfx::context::Context;
 use crate::gfx::dynamic_texture_atlas::{AtlasLease, BinUse, DynamicTextureAtlas};
 use crate::layer_drawing::{BucketChanges, ChangedBuckets};
-use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layout::tile_layout::{Dependencies, Resolved};
 use crate::query::{RenderedQueryOptions, SourceQueryOptions};
 use crate::render_layer::ErasedLayerBucket;

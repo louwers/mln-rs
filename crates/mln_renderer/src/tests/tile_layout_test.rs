@@ -17,7 +17,7 @@ use mln_vec_map::VecSet;
 use serde_json::json;
 
 use crate::Registry;
-use crate::layer_type::ErasedEvaluatedLayer;
+use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::layout::tile_layout::{LayoutInput, LayoutParams, Resolved, build, discover};
 use crate::tile::job::{DataInput, DataKey, Job, JobId, JobResult, LayoutJob, Run, SourceKey, TileKey, run_job};
 use crate::tile::tile_workers::InlineWorkers;

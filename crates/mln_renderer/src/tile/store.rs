@@ -19,10 +19,10 @@ use mln_util::hash::{HashMap, HashSet};
 use mln_util::pool::TaskGroup;
 
 use crate::buckets::symbol_bucket::SymbolBucket;
+use crate::erased_layer::{recover_bucket, recover_bucket_mut};
 use crate::gfx::context::Context;
 use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::image_store::ImageStore;
-use crate::layer_type::{recover_bucket, recover_bucket_mut};
 use crate::layout::tile_layout::{LayoutParams, Resolved};
 use crate::render_layer::{BucketKey, SymbolBuckets};
 use crate::render_orchestrator::drop_on_workers;

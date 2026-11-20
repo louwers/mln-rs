@@ -44,7 +44,6 @@ use mln_util::error::Error;
 use mln_util::hash::HashMap;
 use mln_util::identity::SimpleIdentity;
 
-use super::cast_matrix;
 use crate::bucket::Bucket;
 use crate::bucket_geometry::{BucketGeometry, bucket_vertices, copied_indexes, copied_vertices, paint_vertices};
 use crate::buckets::symbol_bucket::{
@@ -70,7 +69,7 @@ use crate::render_layer::{BucketKey, BucketPlacementData, LayerBucket, PlacedTil
 use crate::render_pass::RenderPass;
 use crate::render_source::{RenderSource, TileOrder};
 use crate::render_tile::{FrameTile, RenderTile};
-use crate::tile_matrix::{projection_data, to_projection_ubo};
+use crate::tile_matrix::{cast_matrix, projection_data, to_projection_ubo};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SymbolType {

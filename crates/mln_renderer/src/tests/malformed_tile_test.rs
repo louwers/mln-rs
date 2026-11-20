@@ -25,7 +25,7 @@ use proptest::prelude::*;
 use serde_json::json;
 
 use crate::Registry;
-use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
+use crate::erased_layer::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::tests::fixture_layer::Dot;
 use crate::tile::store::StoreEvent;
 use crate::tile_parameters::TileParameters;

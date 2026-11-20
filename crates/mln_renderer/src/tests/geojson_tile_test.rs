@@ -12,7 +12,7 @@ use mln_util::error::Error;
 use mln_util::pool::TaskGroup;
 
 use crate::Registry;
-use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
+use crate::erased_layer::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::tests::fixture_layer::Dot;
 use crate::tests::{OneTile, style};
 use crate::tile::loading::DataOrigin;

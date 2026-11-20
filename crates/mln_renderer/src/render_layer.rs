@@ -25,11 +25,11 @@ use smallvec::SmallVec;
 use crate::bucket::Bucket;
 use crate::bucket_geometry::BucketGeometry;
 use crate::buckets::symbol_bucket::SymbolBucket;
+use crate::erased_layer::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::geometry::feature_index::FeatureIndex;
 use crate::gfx::context::Context;
 use crate::layer::{DrawContext, EndedHost, HitTest, LayerType, LayerValues, UpdateContext};
 use crate::layer_drawing::{ChangedBuckets, DrawGroup, DrawOrder, LayerDrawing};
-use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::line_atlas::LineAtlas;
 use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;
@@ -80,7 +80,7 @@ impl<'a, T: LayerType> LayerBucket<'a, T> {
         let ErasedLayerBucket { bucket, bucket_index, layer } = contents.result.layer_render_data.laid(index)?;
         let layer: &dyn Any = layer;
         Some(LayerBucket {
-            bucket: crate::layer_type::recover_bucket::<T>(bucket)?,
+            bucket: crate::erased_layer::recover_bucket::<T>(bucket)?,
             bucket_index,
             layer: layer.downcast_ref()?,
             contents,
@@ -250,7 +250,7 @@ thread_local! {
 /// the index this returns, until the layer drops.
 #[cfg(feature = "bench")]
 pub(crate) fn hold_symbol_bucket(bucket: &impl std::ops::Deref<Target = dyn Bucket>) -> Option<usize> {
-    let bucket = crate::layer_type::recover_bucket::<mln_style::layers::Symbol>(&**bucket)?;
+    let bucket = crate::erased_layer::recover_bucket::<mln_style::layers::Symbol>(&**bucket)?;
     Some(HeldBuckets::hold(bucket.clone()))
 }
 
