@@ -1014,6 +1014,47 @@ mod d3d12_ring {
         unsafe { CloseHandle(reads_handle).unwrap() };
     }
 
+    // A replacement or a release completes without waiting for the frames
+    // drawn into the textures that it lets go of: it hands over the
+    // session's fence at the value that their work signals. Each time, a
+    // frame drawn into a texture that the host gave back waits for the
+    // host's fence, which the host signals only after the completion.
+    #[test]
+    fn a_new_ring_or_a_release_hands_over_the_sync_after_its_frames() {
+        let Some((device, host)) = Host::new() else { return };
+        let (old, new) = ([host.color()], [host.color()]);
+        let runtime = runtime();
+        let map = map_of(&runtime, "#ff0000");
+        let target = RenderTarget::Borrowed { size: SIZE, ring: Host::ring(&old, &[]), device };
+        let session = attach(&map, target, SyncKinds::of(&[SyncKind::D3d12Fence]));
+        let reads_handle = host.share_reads();
+        for value in [1, 2] {
+            assert_eq!(FrameDisposition::Rendered, render(&session));
+            let frame = session.acquire_frame().unwrap().expect("a frame");
+            let held = GpuSync { kind: SyncKind::D3d12Fence, handle: reads_handle.0 as usize as u64, value };
+            frame.release(ConsumerSync::of(held)).unwrap();
+            // The next frame waits for the host's fence on the device.
+            assert_eq!(FrameDisposition::Rendered, render(&session));
+            let sync = if value == 1 {
+                wait(session.set_ring(SIZE, Host::ring(&new, &[]))).1
+            } else {
+                wait(session.release_target()).expect("a ring's sync")
+            };
+            assert_eq!(SyncKind::D3d12Fence, sync.kind);
+            let ended = host.open(sync.handle);
+            // SAFETY: plain calls of live fences.
+            unsafe {
+                assert!(ended.GetCompletedValue() < sync.value, "the frame ran before the host's fence");
+                host.reads.Signal(value).unwrap();
+            }
+            // SAFETY: as above.
+            assert!(eventually(|| unsafe { ended.GetCompletedValue() } >= sync.value));
+        }
+        wait(session.detach());
+        // SAFETY: the test's handle, which the detached session let go of.
+        unsafe { CloseHandle(reads_handle).unwrap() };
+    }
+
     // A host that submits its reads to the device's queue needs no fence,
     // and a ring with depth textures hands each frame's over with it.
     #[test]
