@@ -14,8 +14,8 @@ use mln_style::layer_type::ErasedStyleLayerType;
 use mln_style::source_type::ErasedStyleSourceType;
 use mln_vec_map::VecMap;
 
+use crate::erased_layer::{ErasedLayerType, entry};
 use crate::layer::LayerType;
-use crate::layer_type::{ErasedLayerType, entry};
 use crate::source_type::{self, ErasedSourceType, SourceType};
 
 /// What a [`Registry`] is built from.

@@ -29,7 +29,7 @@ use mln_vec_map::VecMap;
 
 use crate::bucket::{Bucket, BucketBase, FeatureStates};
 use crate::bucket_geometry::{GeometryUpload, GeometryVec};
-use crate::layer_type::EvaluatedLayer;
+use crate::erased_layer::EvaluatedLayer;
 use crate::layout::symbol_instance::{SymbolInstance, SymbolInstancePools, WritingModes};
 use crate::paint_property_binder::PaintPropertyBinder;
 use crate::text::quads::SymbolQuad;

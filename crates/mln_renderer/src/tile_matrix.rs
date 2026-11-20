@@ -13,7 +13,6 @@ use mln_util::constants::{EXTENT, M2PI};
 
 use crate::gfx::context::Context;
 use crate::gfx::uniform_buffer::UniformBufferArray;
-use crate::layers::cast_matrix;
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::render_tile::RenderTile;
 
@@ -92,6 +91,12 @@ pub fn projection_data(
     // A draw's depth range keeps the layers apart, so the shader's depth
     // offset stays 0.
     data
+}
+
+/// The column-major `f32` matrix of `m`, as a uniform block holds it.
+#[must_use]
+pub fn cast_matrix(m: &DMat4) -> [f32; 16] {
+    m.as_mat4().to_cols_array()
 }
 
 #[must_use]

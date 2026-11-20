@@ -20,8 +20,8 @@ use mln_util::logging::{Event, Log};
 use mln_util::range::Range;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
+use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::gfx::context::Context;
-use crate::layer_type::ErasedEvaluatedLayer;
 use crate::render_source::{RenderSource, RenderSourceBase, RenderTileParameters, TileOrder};
 use crate::render_tile::RenderTile;
 use crate::tile::raster::{RasterContents, RasterLayoutVertex};

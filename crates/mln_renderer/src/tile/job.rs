@@ -29,8 +29,8 @@ use mln_util::time::Instant;
 use mln_vec_map::VecSet;
 use parking_lot::Mutex;
 
+use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::geometry::dem_data::DemData;
-use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layout::tile_layout::{Dependencies, Discovered, LayoutInput, LayoutParams, Resolved, build, discover};
 use crate::tile::contents::LayoutResult;
 use crate::tile::worker_codec::fields::{SharedAvailableImages, SharedSourceStyle};

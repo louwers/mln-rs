@@ -15,7 +15,7 @@ use parking_lot::Mutex;
 
 use super::RasterTileTest;
 use crate::Registry;
-use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
+use crate::erased_layer::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::query::SourceQueryOptions;
 use crate::tests::OneTile;
 use crate::tests::fixture_layer::Dot;

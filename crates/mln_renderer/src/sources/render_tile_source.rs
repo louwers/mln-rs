@@ -35,14 +35,13 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecMap;
 
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
+use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
 use crate::gfx::line_mesh::{LineLayoutVertex, LineOptions, LineScratch, add_line};
 use crate::gfx::mesh::Indexed;
 use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
 use crate::layer_drawing::{DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptDraw, LayerDraws};
-use crate::layer_type::ErasedEvaluatedLayer;
-use crate::layers::cast_matrix;
 use crate::paint_parameters::PaintParameters;
 use crate::query::FeatureExtensionValue;
 use crate::render_source::{RenderSource, RenderSourceBase, RenderTileParameters, TileOrder};
@@ -52,7 +51,7 @@ use crate::tile::job::SourceKey;
 use crate::tile::source_tiles::{CoverUpdate, SourceTiles};
 use crate::tile::store::TileStore;
 use crate::tile::tile::TileKind;
-use crate::tile_matrix::{projection_data, to_projection_ubo};
+use crate::tile_matrix::{cast_matrix, projection_data, to_projection_ubo};
 use crate::tile_parameters::TileParameters;
 use crate::util::subdivision::subdivide_vertex_line;
 

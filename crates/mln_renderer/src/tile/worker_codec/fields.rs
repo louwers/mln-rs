@@ -13,8 +13,8 @@ use mln_wire::{Context, Reader, Request, Wire, Writer};
 
 use crate::Registry;
 use crate::bucket::Bucket;
+use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::geometry::feature_index::FeatureIndex;
-use crate::layer_type::ErasedEvaluatedLayer;
 use crate::tile::contents::{LayoutBuckets, LayoutResult};
 use crate::tile::job::SourceStyle;
 

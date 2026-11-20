@@ -9,8 +9,8 @@ use mln_map_types::MapDebugOptions;
 use mln_style::Source;
 use mln_util::error::Error;
 
+use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::gfx::context::Context;
-use crate::layer_type::ErasedEvaluatedLayer;
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::registry::Registry;
 use crate::render_tile::RenderTile;

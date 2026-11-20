@@ -22,8 +22,8 @@ use super::map_side::MapCodec;
 use super::worker_side::WorkerCodec;
 use super::{Encoded, TileWorkerHost, envelope, fields};
 use crate::Registry;
+use crate::erased_layer::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
-use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::layout::tile_layout::{Dependencies, LayoutParams, Resolved};
 use crate::tests::fixture_layer::Dot;
 use crate::text::glyph_store::ShapeResults;
@@ -547,8 +547,8 @@ fn answers_cross_without_pixels() {
 struct Unknown(Arc<dyn mln_style::layer_type::ErasedLayerStyle>);
 
 impl ErasedEvaluatedLayer for Unknown {
-    fn entry(&self) -> &'static dyn crate::layer_type::ErasedLayerType {
-        crate::layer_type::entry::<Dot>()
+    fn entry(&self) -> &'static dyn crate::erased_layer::ErasedLayerType {
+        crate::erased_layer::entry::<Dot>()
     }
     fn style(&self) -> &dyn mln_style::layer_type::ErasedLayerStyle {
         &*self.0

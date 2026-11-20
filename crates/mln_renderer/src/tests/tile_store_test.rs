@@ -20,8 +20,8 @@ use parking_lot::Mutex;
 use serde_json::json;
 
 use super::tile_jobs_test::{Manual, icons, layer, points};
+use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::layer_drawing::ChangedBuckets;
-use crate::layer_type::ErasedEvaluatedLayer;
 use crate::query::SourceQueryOptions;
 use crate::tests::tile::{dem_png, png};
 use crate::tests::{OneTile, style, tile_store};

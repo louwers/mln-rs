@@ -20,9 +20,9 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 
 use crate::bucket_parameters::BucketParameters;
+use crate::erased_layer::{ErasedEvaluatedLayer, ErasedLayout};
 use crate::geometry::feature_index::FeatureIndexBuilder;
 use crate::group_by_layout::group_layers;
-use crate::layer_type::{ErasedEvaluatedLayer, ErasedLayout};
 use crate::layout::filter_groups::FilterGroups;
 use crate::layout::layout::{BuildParams, LayoutParameters, SourceLayer};
 use crate::text::glyph_store::ShapeResults;
