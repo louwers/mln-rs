@@ -161,7 +161,7 @@ fn evaluated_circle_layer_properties() -> Arc<dyn ErasedEvaluatedLayer> {
     let layer = Layer::new(Registry::with_builtins().style(), "circle", "circle", "source").unwrap();
     let mut render_layer = crate::tests::render_layer(layer.style());
     render_layer.evaluate(&PropertyEvaluationParameters::new(0.0));
-    Arc::clone(&render_layer.base().evaluated_properties)
+    render_layer.evaluated()
 }
 
 // Port-only: tiles whose workers are in worker instances on other threads

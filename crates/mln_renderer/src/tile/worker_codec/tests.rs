@@ -55,7 +55,7 @@ fn convert(json: &str) -> Layer {
 fn layer(json: &str, z: f32) -> Arc<dyn ErasedEvaluatedLayer> {
     let mut render_layer = crate::tests::render_layer(convert(json).style());
     render_layer.evaluate(&PropertyEvaluationParameters::new(z));
-    Arc::clone(&render_layer.base().evaluated_properties)
+    render_layer.evaluated()
 }
 
 fn layers(jsons: &[&str]) -> Vec<Arc<dyn ErasedEvaluatedLayer>> {
@@ -361,7 +361,7 @@ fn format_section_overrides_cross() {
     let mut render_layer = crate::tests::render_layer(layer.style());
     render_layer.transition(&TransitionParameters::new(None, TransitionOptions::default()));
     render_layer.evaluate(&PropertyEvaluationParameters::new(0.0));
-    let layers = vec![Arc::clone(&render_layer.base().evaluated_properties)];
+    let layers = vec![render_layer.evaluated()];
     cross(&layers, &tile_data());
 }
 
@@ -494,7 +494,7 @@ fn properties_cross_while_a_paint_property_transitions() {
         &mut Vec::new(),
     );
     render_layer.evaluate(&at(start + Duration::from_millis(100)));
-    let transitioning = Arc::clone(&render_layer.base().evaluated_properties);
+    let transitioning = render_layer.evaluated();
     assert!(!EvaluatedLayer::<Fill>::recover(&transitioning).unwrap().paint.fill_color.is_constant());
 
     let mut codec = ThroughCodec::new();
@@ -550,7 +550,7 @@ fn styles_and_layers_are_defined_once() {
     // again, but not the layer or its expressions, and the fill layer by key.
     let mut line = crate::tests::render_layer(&layers[1].shared_style());
     line.evaluate(&PropertyEvaluationParameters::new(1.0));
-    let again = style(&[Arc::clone(&layers[0]), Arc::clone(&line.base().evaluated_properties)]);
+    let again = style(&[Arc::clone(&layers[0]), line.evaluated()]);
     drop(line);
     let third = map.encode_run(&job(&again, data_input(&data), Resolved::default())).unwrap();
     assert!(third.len() < first.len() / 2 && third.len() > second.len());

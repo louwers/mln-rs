@@ -158,7 +158,7 @@ mod tests {
 
     use super::*;
     use crate::Registry;
-    use crate::layer_type::{EvaluatedLayer, LayerType};
+    use crate::layer::{EvaluatedLayer, LayerType};
 
     /// A filter of its own, which shares no expression with another.
     fn filter(json: &str) -> Filter {

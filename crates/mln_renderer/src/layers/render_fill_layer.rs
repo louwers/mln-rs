@@ -20,7 +20,6 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_map_types::View;
 use mln_style::PropertyEvaluationParameters;
-use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Fill;
 use mln_style::layers::fill_layer_properties::FillPaintProperties;
 use mln_style_types::AlignmentType;
@@ -40,15 +39,13 @@ use crate::gfx::context::Context;
 use crate::gfx::indexes::{DrawIndexes, Indexes, SharedIndexes};
 use crate::gfx::texture2d::Texture2D;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
+use crate::layer::{DrawContext, EvaluatedLayer, LayerType, LayerValues};
 use crate::layer_composite::Composite;
 use crate::layer_drawing::{DrawDepth, DrawList, DrawObjectsMut, FrameDraw, TileDraws, TileObjects, UniformWriter};
-use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::pattern_layout::{FillLayoutSpec, PatternLayout, uses_pattern};
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{
-    Atlases, LayerBucket, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
-};
+use crate::render_layer::LayerBucket;
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_tile::FrameTile;
@@ -169,7 +166,7 @@ fn fill_geometry(
 
 /// What the layer keeps of a tile: its fill and its outline, as they were
 /// built for the tile's bucket.
-pub(crate) struct FillTile {
+pub struct FillTile {
     /// Whether the draws fill with the layer's pattern.
     pattern: bool,
     /// The fill of the bucket's triangles, if it has any.
@@ -183,7 +180,7 @@ pub(crate) struct FillTile {
 
 /// Which of a tile's draws a frame's draw draws.
 #[derive(Clone, Copy)]
-pub(crate) enum FillPart {
+pub enum FillPart {
     Fill,
     Outline,
 }
@@ -419,39 +416,8 @@ impl TileBuilder<'_> {
     }
 }
 
-impl LayerType for Fill {
-    type Layout = PatternLayout<FillLayoutSpec>;
-    type Bucket = FillBucket;
-    type TileBucket<'a> = LayerBucket<'a, Fill>;
-    const CROSSFADES: bool = true;
-
-    /// Whether a layer of the group has a pattern.
-    fn layout_can_need_dependencies(group: &[Arc<EvaluatedLayer<Fill>>]) -> bool {
-        uses_pattern::<FillLayoutSpec>(group)
-    }
-
-    fn create_layout(
-        group: &[Arc<EvaluatedLayer<Fill>>],
-        parameters: &mut LayoutParameters<'_>,
-        source_layer: SourceLayer,
-    ) -> Result<Option<PatternLayout<FillLayoutSpec>>, Error> {
-        PatternLayout::new(parameters, group, source_layer).map(Some)
-    }
-
-    fn query_radius(_bucket: &FillBucket, layer: &EvaluatedLayer<Fill>) -> f32 {
-        let translate = layer.paint.fill_translate.uniform();
-        (translate[0] * translate[0] + translate[1] * translate[1]).sqrt()
-    }
-
-    fn render_layer(style: Arc<LayerStyle<Fill>>) -> Box<dyn RenderLayer> {
-        Box::new(RenderFillLayer::new(style))
-    }
-}
-
-pub(crate) struct RenderFillLayer {
-    base: RenderLayerBase,
-    values: LayerValues<Fill>,
-    drawing: TileDraws<FillTile>,
+/// What a fill layer keeps besides its drawing.
+pub struct FillState {
     /// The frame's draws as the update makes them.
     draw_list: DrawList<FillUniforms, FillPart>,
 
@@ -464,19 +430,7 @@ pub(crate) struct RenderFillLayer {
     pulled_indexes: Option<SharedIndexes>,
 }
 
-impl RenderFillLayer {
-    pub(crate) fn new(impl_: Arc<LayerStyle<Fill>>) -> Self {
-        let (base, values) = LayerValues::new(impl_);
-        RenderFillLayer {
-            base,
-            values,
-            drawing: TileDraws::default(),
-            draw_list: DrawList::default(),
-            outline_quad: None,
-            pulled_indexes: None,
-        }
-    }
-
+impl FillState {
     /// The entries in the layer's storage buffers of `draw`, the fill or the
     /// `outline` of `tile`, with or without a `pattern`, of the layer
     /// `layer_id` with the values `layer`: its matrix and the interpolation
@@ -608,33 +562,53 @@ impl RenderFillLayer {
     }
 }
 
-impl TypedLayer for RenderFillLayer {
-    type Type = Fill;
+impl LayerType for Fill {
+    type Layout = PatternLayout<FillLayoutSpec>;
+    type Bucket = FillBucket;
+    type TileBucket<'a> = LayerBucket<'a, Fill>;
     type Drawing = TileDraws<FillTile>;
+    type State = FillState;
+    const CROSSFADES: bool = true;
 
-    fn parts(&self) -> Parts<'_, Self> {
-        Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
+    /// Whether a layer of the group has a pattern.
+    fn layout_can_need_dependencies(group: &[Arc<EvaluatedLayer<Fill>>]) -> bool {
+        uses_pattern::<FillLayoutSpec>(group)
     }
 
-    fn parts_mut(&mut self) -> PartsMut<'_, Self> {
-        PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
+    fn create_layout(
+        group: &[Arc<EvaluatedLayer<Fill>>],
+        parameters: &mut LayoutParameters<'_>,
+        source_layer: SourceLayer,
+    ) -> Result<Option<PatternLayout<FillLayoutSpec>>, Error> {
+        PatternLayout::new(parameters, group, source_layer).map(Some)
+    }
+
+    fn query_radius(_bucket: &FillBucket, layer: &EvaluatedLayer<Fill>) -> f32 {
+        let translate = layer.paint.fill_translate.uniform();
+        (translate[0] * translate[0] + translate[1] * translate[1]).sqrt()
+    }
+
+    fn new_layer(_layer: &LayerValues<Fill>) -> (FillState, TileDraws<FillTile>) {
+        let state = FillState { draw_list: DrawList::default(), outline_quad: None, pulled_indexes: None };
+        (state, TileDraws::default())
     }
 
     /// An undefined outline color is the fill color.
     fn complete_evaluation(
-        &mut self,
+        _state: &mut FillState,
+        layer: &LayerValues<Fill>,
         _parameters: &PropertyEvaluationParameters,
         evaluated: &mut EvaluatedLayer<Fill>,
     ) {
         let evaluated = &mut evaluated.paint;
-        if self.values.unevaluated.fill_outline_color.is_undefined() {
+        if layer.unevaluated.fill_outline_color.is_undefined() {
             evaluated.fill_outline_color = evaluated.fill_color.clone();
         }
     }
 
-    fn passes(&self, evaluated: &EvaluatedLayer<Fill>) -> RenderPass {
+    fn passes(layer: &LayerValues<Fill>, evaluated: &EvaluatedLayer<Fill>) -> RenderPass {
         let evaluated = &evaluated.paint;
-        let opaque = self.values.unevaluated.fill_pattern.is_undefined()
+        let opaque = layer.unevaluated.fill_pattern.is_undefined()
             && evaluated.fill_color.constant_or(&Color::default()).a >= 1.0
             && evaluated.fill_opacity.constant_or(&0.0) >= 1.0;
         let shows = *evaluated.fill_layer_opacity.uniform() > 0.0;
@@ -650,14 +624,15 @@ impl TypedLayer for RenderFillLayer {
     /// Makes the frame's draws of the layer, those of each of its tiles,
     /// which it builds for a tile it keeps none of, and writes the layer's
     /// buffers they read.
-    fn update_draws(
-        &mut self,
+    fn make_draws(
+        state: &mut FillState,
+        drawing: &mut TileDraws<FillTile>,
         gpu: &mut dyn Gpu,
-        paint_parameters: &mut PaintParameters<'_>,
-        _atlases: &Atlases,
-        render_tiles: &[FrameTile<'_, Fill>],
+        cx: &mut DrawContext<'_, '_, '_, Fill>,
     ) {
-        let pattern = !self.values.unevaluated.fill_pattern.is_undefined();
+        let paint_parameters = &mut *cx.paint;
+        let render_tiles = cx.tiles;
+        let pattern = !cx.layer.unevaluated.fill_pattern.is_undefined();
         let outlines = Outlines::of(paint_parameters.context, pattern);
         // The outlines draw as lines, or as quads on a device that draws no
         // `LINE_WIDTH` lines and rasterizes on the GPU.
@@ -671,29 +646,29 @@ impl TypedLayer for RenderFillLayer {
             }
         };
 
-        if outlines == Outlines::Instanced && self.outline_quad.is_none() {
-            self.outline_quad = Some(OutlineQuad::new(paint_parameters.context));
+        if outlines == Outlines::Instanced && state.outline_quad.is_none() {
+            state.outline_quad = Some(OutlineQuad::new(paint_parameters.context));
         }
-        if outlines == Outlines::Pulled && self.pulled_indexes.is_none() {
-            self.pulled_indexes = Some(paint_parameters.static_data.wall_indexes(paint_parameters.context));
+        if outlines == Outlines::Pulled && state.pulled_indexes.is_none() {
+            state.pulled_indexes = Some(paint_parameters.static_data.wall_indexes(paint_parameters.context));
         }
 
         let mut builder = TileBuilder {
             fill_program,
             outline_program,
             pattern,
-            outline_is_fill_color: self.values.unevaluated.fill_outline_color.is_undefined(),
-            projection_variant: self.base.projection_variant,
-            outline_quad: self.outline_quad.as_ref().filter(|_| outlines == Outlines::Instanced),
-            pulled_indexes: self.pulled_indexes.as_ref().filter(|_| outlines == Outlines::Pulled),
+            outline_is_fill_color: cx.layer.unevaluated.fill_outline_color.is_undefined(),
+            projection_variant: cx.projection_variant,
+            outline_quad: state.outline_quad.as_ref().filter(|_| outlines == Outlines::Instanced),
+            pulled_indexes: state.pulled_indexes.as_ref().filter(|_| outlines == Outlines::Pulled),
             fill_depth: None,
         };
 
-        let layer_id = self.base.style.base().id.as_str();
-        let layer = &*self.values.evaluated;
+        let layer_id = cx.layer.id();
+        let layer = &*cx.layer.evaluated;
         for &tile in render_tiles {
             let tile_id = tile.id();
-            let Some(mut entry) = self.drawing.tiles_mut().entry(&tile_id) else {
+            let Some(mut entry) = drawing.tiles_mut().entry(&tile_id) else {
                 continue;
             };
 
@@ -761,7 +736,7 @@ impl TypedLayer for RenderFillLayer {
                 let Some(draw) = draw else {
                     continue;
                 };
-                let Some(uniforms) = Self::uniforms(
+                let Some(uniforms) = FillState::uniforms(
                     layer_id,
                     layer,
                     tile,
@@ -780,26 +755,23 @@ impl TypedLayer for RenderFillLayer {
                     clip: true,
                     ..FrameDraw::new(Some(tile_id), draw.id)
                 };
-                self.draw_list.push_part(tile_draw, part, uniforms);
+                state.draw_list.push_part(tile_draw, part, uniforms);
             }
         }
 
-        let frame = self.drawing.frame_mut();
+        let frame = drawing.frame_mut();
         frame.set_composite(Composite::of(
             *layer.paint.fill_layer_opacity.uniform(),
             *layer.paint.fill_layer_blend.uniform(),
         ));
         frame.set_stencil_tiles(render_tiles.iter().map(|tile| tile.tile.id));
-        self.drawing.finish(&mut self.draw_list, gpu, paint_parameters.context, |writer| {
-            Self::write_uniforms(layer, writer);
+        drawing.finish(&mut state.draw_list, gpu, paint_parameters.context, |writer| {
+            FillState::write_uniforms(layer, writer);
         });
     }
-}
 
-impl RenderLayer for RenderFillLayer {
-    // query
     fn query_intersects_feature(
-        &self,
+        layer: &EvaluatedLayer<Fill>,
         query_geometry: &mln_tile_id::geometry_tile_data::GeometryCoordinates,
         _feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
         geometry: &mln_tile_id::geometry_tile_data::GeometryCollection,
@@ -809,7 +781,7 @@ impl RenderLayer for RenderFillLayer {
         _projector: &mln_map_types::TileProjector<'_>,
         _feature_state: &mln_style::expression::expression::FeatureState,
     ) -> bool {
-        let evaluated = &self.values.evaluated.paint;
+        let evaluated = &layer.paint;
         let translated_query_geometry = crate::geometry::feature_index::FeatureIndex::translate_query_geometry(
             query_geometry,
             *evaluated.fill_translate.uniform(),

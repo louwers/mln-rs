@@ -22,7 +22,6 @@ use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_style::expression::{Dependency, GlobalStateMap, global_state_refs_intersect};
-use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Heatmap;
 use mln_style::layers::heatmap_layer_properties::{HeatmapPaintProperties, default_heatmap_color};
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
@@ -42,17 +41,15 @@ use crate::gfx::indexes::DrawIndexes;
 use crate::gfx::store::SharedTexture;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
+use crate::layer::{DrawContext, EvaluatedLayer, LayerType, LayerValues};
 use crate::layer_drawing::{
     DrawDepth, DrawGroup, DrawList, DrawOrder, FrameDraw, FrameDraws, KeptDraw, LayerDrawing, LayerDraws, TileMap,
     UniformWriter, finish_tiles, tile_objects,
 };
-use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::heatmap_layout::HeatmapLayout;
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{
-    Atlases, LayerBucket, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
-};
+use crate::render_layer::LayerBucket;
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_target::RenderTarget;
@@ -72,7 +69,7 @@ struct HeatmapUniforms {
 /// The layer's drawing: the tiles' draws into the render target, and the
 /// layer's draw of the frame, which colors the render target's heat onto it.
 #[derive(Default)]
-pub(crate) struct HeatmapDrawing {
+pub struct HeatmapDrawing {
     tiles: TileMap<KeptDraw>,
     /// The tiles' draws into the render target.
     target: Option<LayerDraws>,
@@ -157,28 +154,8 @@ impl LayerDrawing for HeatmapDrawing {
     }
 }
 
-impl LayerType for Heatmap {
-    type Layout = HeatmapLayout;
-    type Bucket = HeatmapBucket;
-    type TileBucket<'a> = LayerBucket<'a, Heatmap>;
-
-    fn create_layout(
-        group: &[Arc<EvaluatedLayer<Heatmap>>],
-        parameters: &mut LayoutParameters<'_>,
-        source_layer: SourceLayer,
-    ) -> Result<Option<HeatmapLayout>, Error> {
-        HeatmapLayout::new(parameters.bucket_parameters, group, source_layer, parameters.filter_groups).map(Some)
-    }
-
-    fn render_layer(style: Arc<LayerStyle<Heatmap>>) -> Box<dyn RenderLayer> {
-        Box::new(RenderHeatmapLayer::new(style))
-    }
-}
-
-pub(crate) struct RenderHeatmapLayer {
-    base: RenderLayerBase,
-    values: LayerValues<Heatmap>,
-    drawing: HeatmapDrawing,
+/// What a heatmap layer keeps besides its drawing.
+pub struct HeatmapState {
     /// The tiles' draws into the render target as the update makes them.
     tile_draws: DrawList<HeatmapUniforms>,
     color_ramp: Rc<PremultipliedImage>,
@@ -193,23 +170,10 @@ pub(crate) struct RenderHeatmapLayer {
     shared_texture_vertices: Option<SharedVertices>,
 }
 
-impl RenderHeatmapLayer {
-    pub(crate) fn new(impl_: Arc<LayerStyle<Heatmap>>) -> Self {
-        let (base, values) = LayerValues::new(impl_);
-        RenderHeatmapLayer {
-            base,
-            values,
-            drawing: HeatmapDrawing::default(),
-            tile_draws: DrawList::default(),
-            color_ramp: Rc::new(PremultipliedImage::new(Size::new(256, 1))),
-            color_ramp_global_state: None,
-            render_target: None,
-            shared_texture_vertices: None,
-        }
-    }
-
-    fn update_color_ramp(&mut self) {
-        let mut color_value = self.values.unevaluated.heatmap_color.get_value().clone();
+impl HeatmapState {
+    /// Makes the color ramp of `layer`'s `heatmap-color` again.
+    fn update_color_ramp(&mut self, layer: &LayerValues<Heatmap>) {
+        let mut color_value = layer.unevaluated.heatmap_color.get_value().clone();
         if color_value.is_undefined() {
             color_value = default_heatmap_color();
         }
@@ -221,32 +185,47 @@ impl RenderHeatmapLayer {
     }
 }
 
-impl TypedLayer for RenderHeatmapLayer {
-    type Type = Heatmap;
+impl LayerType for Heatmap {
+    type Layout = HeatmapLayout;
+    type Bucket = HeatmapBucket;
+    type TileBucket<'a> = LayerBucket<'a, Heatmap>;
     type Drawing = HeatmapDrawing;
+    type State = HeatmapState;
 
-    fn parts(&self) -> Parts<'_, Self> {
-        Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
+    fn create_layout(
+        group: &[Arc<EvaluatedLayer<Heatmap>>],
+        parameters: &mut LayoutParameters<'_>,
+        source_layer: SourceLayer,
+    ) -> Result<Option<HeatmapLayout>, Error> {
+        HeatmapLayout::new(parameters.bucket_parameters, group, source_layer, parameters.filter_groups).map(Some)
     }
 
-    fn parts_mut(&mut self) -> PartsMut<'_, Self> {
-        PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
+    fn new_layer(_layer: &LayerValues<Heatmap>) -> (HeatmapState, HeatmapDrawing) {
+        let state = HeatmapState {
+            tile_draws: DrawList::default(),
+            color_ramp: Rc::new(PremultipliedImage::new(Size::new(256, 1))),
+            color_ramp_global_state: None,
+            render_target: None,
+            shared_texture_vertices: None,
+        };
+        (state, HeatmapDrawing::default())
     }
 
     fn complete_evaluation(
-        &mut self,
+        state: &mut HeatmapState,
+        layer: &LayerValues<Heatmap>,
         parameters: &PropertyEvaluationParameters,
         _evaluated: &mut EvaluatedLayer<Heatmap>,
     ) {
         // Build the ramp here rather than in transition(), which has no global
         // state. A new or changed layer always needs one; otherwise only a
         // change to a state key that the ramp reads does.
-        let global_state_differs = match (&self.color_ramp_global_state, &parameters.global_state) {
+        let global_state_differs = match (&state.color_ramp_global_state, &parameters.global_state) {
             (None, None) => false,
             (Some(a), Some(b)) => !Arc::ptr_eq(a, b),
             _ => true,
         };
-        let ramp_value = self.values.unevaluated.heatmap_color.get_value();
+        let ramp_value = layer.unevaluated.heatmap_color.get_value();
         let ramp_affected = parameters.layer_changed
             || (global_state_differs
                 && ramp_value.get_dependencies().intersects(Dependency::GLOBAL_STATE)
@@ -254,13 +233,13 @@ impl TypedLayer for RenderHeatmapLayer {
                     ramp_value.get_global_state_refs(),
                     parameters.changed_global_state_keys.as_deref(),
                 ));
-        self.color_ramp_global_state = parameters.global_state.clone();
+        state.color_ramp_global_state = parameters.global_state.clone();
         if ramp_affected {
-            self.update_color_ramp();
+            state.update_color_ramp(layer);
         }
     }
 
-    fn passes(&self, evaluated: &EvaluatedLayer<Heatmap>) -> RenderPass {
+    fn passes(_layer: &LayerValues<Heatmap>, evaluated: &EvaluatedLayer<Heatmap>) -> RenderPass {
         if *evaluated.paint.heatmap_opacity.uniform() > 0.0 {
             RenderPass::Translucent | RenderPass::Pass3D
         } else {
@@ -271,60 +250,68 @@ impl TypedLayer for RenderHeatmapLayer {
     /// Makes the tiles' draws into the render target, which it builds for a
     /// tile it keeps none of, and the layer's draw of the frame, which colors
     /// the render target's heat onto it, and writes the buffers they read.
-    fn update_draws(
-        &mut self,
+    fn make_draws(
+        state: &mut HeatmapState,
+        drawing: &mut HeatmapDrawing,
         gpu: &mut dyn Gpu,
-        paint_parameters: &mut PaintParameters<'_>,
-        _atlases: &Atlases,
-        render_tiles: &[FrameTile<'_, Heatmap>],
+        cx: &mut DrawContext<'_, '_, '_, Heatmap>,
     ) {
-        let state = paint_parameters.view;
-
-        let viewport_size = state.size();
+        let paint_parameters = &mut *cx.paint;
+        let viewport_size = paint_parameters.view.size();
         let size = Size::new(viewport_size.width / 2, viewport_size.height / 2);
-        let render_target = self.render_target.get_or_insert_with(|| {
+        let render_target = state.render_target.get_or_insert_with(|| {
             RenderTarget::new(paint_parameters.context, size, TextureChannelDataType::HalfFloat)
         });
         render_target.set_size(paint_parameters.context, size);
-        if self.draw_tiles(gpu, render_tiles, paint_parameters) {
-            self.draw_texture(gpu, paint_parameters);
-        }
-    }
-}
-
-impl RenderLayer for RenderHeatmapLayer {
-    fn upload_render_targets(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
-        if self.base.is_renderable && self.render_target.is_some() {
-            self.drawing.upload_target(gpu, context);
+        if state.draw_tiles(drawing, cx.layer, cx.projection_variant, gpu, cx.tiles, paint_parameters) {
+            state.draw_texture(drawing, cx.layer, gpu, paint_parameters);
         }
     }
 
-    fn render_targets(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        if self.base.is_renderable
-            && let Some(render_target) = &mut self.render_target
+    fn upload_render_targets(
+        state: &mut HeatmapState,
+        drawing: &mut HeatmapDrawing,
+        gpu: &mut dyn Gpu,
+        context: &mut Context,
+    ) {
+        if state.render_target.is_some() {
+            drawing.upload_target(gpu, context);
+        }
+    }
+
+    fn render_targets(
+        state: &mut HeatmapState,
+        drawing: &mut HeatmapDrawing,
+        gpu: &mut dyn Gpu,
+        parameters: &mut PaintParameters<'_>,
+    ) {
+        if let Some(render_target) = &mut state.render_target
             && let Some(mut passes) = render_target.begin(gpu, parameters)
         {
             while passes.next(parameters) {
-                self.drawing.render_target(gpu, parameters);
+                drawing.render_target(gpu, parameters);
             }
             passes.end(gpu, parameters);
         }
     }
 }
 
-impl RenderHeatmapLayer {
-    /// Makes the tiles' draws into the render target, with their GPU objects
-    /// in the tiles' caches, and writes the buffers they read. Returns false
-    /// if the layer draws nothing.
+impl HeatmapState {
+    /// Makes the tiles' draws into the render target of a layer of `layer`'s
+    /// values in the projection `variant`, with their GPU objects in the
+    /// tiles' caches, and writes the buffers they read. Returns false if the
+    /// layer draws nothing.
     fn draw_tiles(
         &mut self,
+        drawing: &mut HeatmapDrawing,
+        layer: &LayerValues<Heatmap>,
+        variant: ProjectionVariant,
         gpu: &mut dyn Gpu,
         render_tiles: &[FrameTile<'_, Heatmap>],
         paint_parameters: &mut PaintParameters<'_>,
     ) -> bool {
-        let RenderHeatmapLayer { base, values, drawing, tile_draws, .. } = self;
-
-        let evaluated = &values.evaluated.paint;
+        let tile_draws = &mut self.tile_draws;
+        let evaluated = &layer.evaluated.paint;
         for tile in render_tiles {
             let tile_id = tile.id();
 
@@ -333,7 +320,7 @@ impl RenderHeatmapLayer {
                 continue;
             };
             let bucket = render_data.bucket;
-            let Some(binders) = bucket.paint_property_binders.get(&base.style.base().id) else {
+            let Some(binders) = bucket.paint_property_binders.get(layer.id()) else {
                 continue;
             };
             let geometry = render_data.geometry();
@@ -367,7 +354,7 @@ impl RenderHeatmapLayer {
                 let mut uniforms = Uniforms::default();
                 let mut attrs = VertexAttributeArray::new();
                 binders.bind(evaluated, paint(context).as_ref(), &mut attrs, &mut uniforms);
-                let shader = context.shader_key(&programs::HEATMAP, uniforms, base.projection_variant);
+                let shader = context.shader_key(&programs::HEATMAP, uniforms, variant);
                 attrs.set_shared(
                     ID_HEATMAP_POS_VERTEX_ATTRIBUTE,
                     SharedAttribute::new(
@@ -463,8 +450,14 @@ impl RenderHeatmapLayer {
     /// Makes the layer's draw of the frame, which colors the heat of the
     /// render target onto it through the layer's color ramp, with GPU
     /// objects it builds once, and writes the buffers it reads.
-    fn draw_texture(&mut self, gpu: &mut dyn Gpu, paint_parameters: &mut PaintParameters<'_>) {
-        let RenderHeatmapLayer { values, drawing, color_ramp, render_target, shared_texture_vertices, .. } = self;
+    fn draw_texture(
+        &mut self,
+        drawing: &mut HeatmapDrawing,
+        layer: &LayerValues<Heatmap>,
+        gpu: &mut dyn Gpu,
+        paint_parameters: &mut PaintParameters<'_>,
+    ) {
+        let HeatmapState { color_ramp, render_target, shared_texture_vertices, .. } = self;
         let Some(render_target) = render_target.as_ref() else {
             return;
         };
@@ -535,7 +528,7 @@ impl RenderHeatmapLayer {
         let m = orthographic(0.0, f64::from(size.width), f64::from(size.height), 0.0, -1.0, 1.0);
         let props = HeatmapTexturePropsUBO {
             matrix: cast_matrix(&m),
-            opacity: *values.evaluated.paint.heatmap_opacity.uniform(),
+            opacity: *layer.evaluated.paint.heatmap_opacity.uniform(),
             pad1: 0.0,
             pad2: 0.0,
             pad3: 0.0,

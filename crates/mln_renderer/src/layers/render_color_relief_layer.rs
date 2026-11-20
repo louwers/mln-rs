@@ -28,7 +28,6 @@ use mln_style::color_ramp_property_value::ColorRampPropertyValue;
 use mln_style::expression::{
     Dependency, EvaluationContext, GlobalStateMap, from_expression_value, global_state_refs_intersect,
 };
-use mln_style::layer_type::LayerStyle;
 use mln_style::layers::ColorRelief;
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 use mln_style_types::ResamplingType;
@@ -50,20 +49,17 @@ use crate::gfx::store::SharedTexture;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
+use crate::layer::{DrawContext, EvaluatedLayer, LayerType, LayerValues};
 use crate::layer_drawing::{DrawList, DrawObjectsMut, KeptDraw, TileDraws, TileObjects};
-use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
-use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{Atlases, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer};
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
-use crate::render_tile::FrameTile;
 use crate::tile_matrix::to_projection_ubo;
 
 /// What the layer keeps of a tile: the draw that colors its bucket's DEM,
 /// with the generation of the bucket's geometry and the DEM's properties it
 /// was built with.
-pub(crate) struct ReliefTile {
+pub struct ReliefTile {
     draw: KeptDraw,
     geometry_generation: u64,
     tile_props: ColorReliefTilePropsUBO,
@@ -88,20 +84,8 @@ struct ReliefUniforms {
     projection: ProjectionUBO,
 }
 
-impl LayerType for ColorRelief {
-    type Layout = NoLayout;
-    type Bucket = NoBucket;
-    type TileBucket<'a> = &'a HillshadeBucket;
-
-    fn render_layer(style: Arc<LayerStyle<ColorRelief>>) -> Box<dyn RenderLayer> {
-        Box::new(RenderColorReliefLayer::new(style))
-    }
-}
-
-pub(crate) struct RenderColorReliefLayer {
-    base: RenderLayerBase,
-    values: LayerValues<ColorRelief>,
-    drawing: TileDraws<ReliefTile>,
+/// What a color-relief layer keeps besides its drawing.
+pub struct ReliefState {
     /// The frame's draws as the update makes them.
     draw_list: DrawList<ReliefUniforms>,
 
@@ -134,16 +118,12 @@ pub(crate) struct RenderColorReliefLayer {
     live_buckets: HashSet<SimpleIdentity>,
 }
 
-impl RenderColorReliefLayer {
-    pub(crate) fn new(impl_: Arc<LayerStyle<ColorRelief>>) -> Self {
-        let (base, values) = LayerValues::new(impl_);
-
+impl ReliefState {
+    /// What a new layer of `layer`'s values keeps.
+    fn new(layer: &LayerValues<ColorRelief>) -> Self {
         // Initialize color ramp data with RGBA format (4 floats per stop)
         let color_ramp_size = 256;
-        let mut layer = RenderColorReliefLayer {
-            base,
-            values,
-            drawing: TileDraws::default(),
+        let mut state = ReliefState {
             draw_list: DrawList::default(),
             color_ramp_size,
             color_ramp_changed: true,
@@ -161,13 +141,14 @@ impl RenderColorReliefLayer {
 
         // Initialize with default color ramp immediately to avoid
         // uninitialized state
-        layer.update_color_ramp();
-        layer
+        state.update_color_ramp(layer);
+        state
     }
 
-    fn update_color_ramp(&mut self) {
+    /// Makes the color ramp of `layer`'s `color-relief-color` again.
+    fn update_color_ramp(&mut self, layer: &LayerValues<ColorRelief>) {
         // Get the color property value, using default if undefined
-        let mut color_value = self.values.unevaluated.color_relief_color.get_value().clone();
+        let mut color_value = layer.unevaluated.color_relief_color.get_value().clone();
         if color_value.is_undefined() {
             color_value = ColorRampPropertyValue::default();
             if color_value.is_undefined() {
@@ -287,39 +268,40 @@ fn color_relief_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeA
     attrs
 }
 
-impl TypedLayer for RenderColorReliefLayer {
-    type Type = ColorRelief;
+impl LayerType for ColorRelief {
+    type Layout = NoLayout;
+    type Bucket = NoBucket;
+    type TileBucket<'a> = &'a HillshadeBucket;
+
     type Drawing = TileDraws<ReliefTile>;
+    type State = ReliefState;
 
-    fn parts(&self) -> Parts<'_, Self> {
-        Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
-    }
-
-    fn parts_mut(&mut self) -> PartsMut<'_, Self> {
-        PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
+    fn new_layer(layer: &LayerValues<ColorRelief>) -> (ReliefState, TileDraws<ReliefTile>) {
+        (ReliefState::new(layer), TileDraws::default())
     }
 
     /// Drops the globe's meshes when the frame isn't on the globe.
-    fn projection_changed(&mut self) {
-        if self.base.projection_variant == ProjectionVariant::Mercator {
-            self.globe_meshes.clear();
+    fn projection_changed(state: &mut ReliefState, variant: ProjectionVariant) {
+        if variant == ProjectionVariant::Mercator {
+            state.globe_meshes.clear();
         }
     }
 
     fn complete_evaluation(
-        &mut self,
+        state: &mut ReliefState,
+        layer: &LayerValues<ColorRelief>,
         parameters: &PropertyEvaluationParameters,
         _evaluated: &mut EvaluatedLayer<ColorRelief>,
     ) {
         // Build the ramp here rather than in transition(), which has no global
         // state. A new or changed layer always needs one; otherwise only a
         // change to a state key that the ramp reads does.
-        let global_state_differs = match (&self.color_ramp_global_state, &parameters.global_state) {
+        let global_state_differs = match (&state.color_ramp_global_state, &parameters.global_state) {
             (None, None) => false,
             (Some(a), Some(b)) => !Arc::ptr_eq(a, b),
             _ => true,
         };
-        let ramp_value = self.values.unevaluated.color_relief_color.get_value();
+        let ramp_value = layer.unevaluated.color_relief_color.get_value();
         let ramp_affected = parameters.layer_changed
             || (global_state_differs
                 && ramp_value.get_dependencies().intersects(Dependency::GLOBAL_STATE)
@@ -327,30 +309,27 @@ impl TypedLayer for RenderColorReliefLayer {
                     ramp_value.get_global_state_refs(),
                     parameters.changed_global_state_keys.as_deref(),
                 ));
-        self.color_ramp_global_state = parameters.global_state.clone();
+        state.color_ramp_global_state = parameters.global_state.clone();
         if ramp_affected {
-            self.update_color_ramp();
+            state.update_color_ramp(layer);
         }
     }
 
-    fn passes(&self, evaluated: &EvaluatedLayer<ColorRelief>) -> RenderPass {
+    fn passes(_layer: &LayerValues<ColorRelief>, evaluated: &EvaluatedLayer<ColorRelief>) -> RenderPass {
         if *evaluated.paint.color_relief_opacity.uniform() > 0.0 { RenderPass::Translucent } else { RenderPass::None }
     }
 
     /// Makes the frame's draws of the layer, those of each of its tiles,
     /// which it builds for a tile it keeps none of, and writes the layer's
     /// buffers they read.
-    fn update_draws(
-        &mut self,
+    fn make_draws(
+        state: &mut ReliefState,
+        drawing: &mut TileDraws<ReliefTile>,
         gpu: &mut dyn Gpu,
-        paint_parameters: &mut PaintParameters<'_>,
-        _atlases: &Atlases,
-        render_tiles: &[FrameTile<'_, ColorRelief>],
+        cx: &mut DrawContext<'_, '_, '_, ColorRelief>,
     ) {
-        let RenderColorReliefLayer {
-            base,
-            values,
-            drawing,
+        let (paint_parameters, render_tiles, values) = (&mut *cx.paint, cx.tiles, cx.layer);
+        let ReliefState {
             draw_list,
             color_ramp_size,
             color_ramp_changed,
@@ -364,10 +343,10 @@ impl TypedLayer for RenderColorReliefLayer {
             dem_textures,
             live_buckets,
             ..
-        } = self;
+        } = state;
 
         let color_relief_shader =
-            paint_parameters.context.shader_key(&programs::COLOR_RELIEF, Uniforms::default(), base.projection_variant);
+            paint_parameters.context.shader_key(&programs::COLOR_RELIEF, Uniforms::default(), cx.projection_variant);
 
         let context = &mut *paint_parameters.context;
         let static_data_shared_vertices = &*static_data_shared_vertices
@@ -495,7 +474,7 @@ impl TypedLayer for RenderColorReliefLayer {
                         usize,
                         DrawIndexes,
                         Vec<SegmentBase>,
-                    ) = if base.projection_variant == ProjectionVariant::Globe {
+                    ) = if cx.projection_variant == ProjectionVariant::Globe {
                         let globe_mesh =
                             globe_meshes.get(context, &tile_id.canonical, &geometry.mask, RasterLayoutVertex::new);
                         (
@@ -569,9 +548,7 @@ impl TypedLayer for RenderColorReliefLayer {
         });
     }
 
-    fn release(&mut self) {
-        self.dem_textures.clear();
+    fn release(state: &mut ReliefState) {
+        state.dem_textures.clear();
     }
 }
-
-impl RenderLayer for RenderColorReliefLayer {}
