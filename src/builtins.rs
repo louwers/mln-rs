@@ -28,7 +28,7 @@ pub fn register_builtins(builder: &mut RegistryBuilder) -> Result<(), RegisterEr
 pub fn builtin_registry() -> Arc<Registry> {
     static BUILTINS: LazyLock<Arc<Registry>> = LazyLock::new(|| {
         let mut builder = RegistryBuilder::new();
-        // Into no registrations, the built-ins register.
+        // An empty builder has no name the built-ins could clash with.
         let registered = register_builtins(&mut builder);
         debug_assert_eq!(registered, Ok(()));
         builder.build()

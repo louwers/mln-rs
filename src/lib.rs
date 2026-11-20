@@ -19,7 +19,8 @@
 //! `gl`) and so are SQLite (`sqlite`: the ambient cache, offline regions
 //! and `mbtiles://` sources) and the in-process font-face shaper
 //! (`font-face-shaper`). A browser build turns on one backend and leaves
-//! the others out.
+//! the others out. A native runtime always has SQLite, so there `sqlite`
+//! only re-exports `mln_storage_offline`.
 
 mod builtins;
 
