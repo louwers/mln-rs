@@ -45,6 +45,8 @@ mod map_snapshot_test;
 mod placement_test;
 // Map::set_pixel_ratio and HeadlessFrontend::set_pixel_ratio.
 mod pixel_ratio_test;
+// The textures that raster, hillshade and color-relief layers keep of their tiles.
+mod raster_textures_test;
 // Map::set_size and HeadlessFrontend::set_size with a heatmap, which draws into a texture of its own.
 mod resize_test;
 // A frame whose stencil values overflow, with several world copies in view.

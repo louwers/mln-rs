@@ -352,12 +352,6 @@ impl TypedLayer for RenderHillshadeLayer {
             ResamplingType::Nearest => TextureFilterType::Nearest,
         };
 
-        // Drop the render targets of buckets that are no longer rendered.
-        let live_buckets = &mut self.live_buckets;
-        live_buckets.clear();
-        live_buckets.extend(render_tiles.iter().filter_map(|tile| Some(tile.bucket()?.base.bucket_id)));
-        self.bucket_render_targets.retain(|id, _| live_buckets.contains(id));
-
         // The illumination, which the first draw computes.
         let mut illumination = None;
         for tile in render_tiles {
@@ -485,11 +479,18 @@ impl TypedLayer for RenderHillshadeLayer {
         });
     }
 
-    /// Keeps the source's maximum zoom, which the DEMs' preparation reads.
-    fn update(&mut self, params: &mut LayerUpdateParameters<'_>, _tiles: &[FrameTile<'_, Hillshade>]) {
+    /// Keeps the source's maximum zoom, which the DEMs' preparation reads,
+    /// and drops the render targets of the buckets of tiles the frame
+    /// doesn't draw, in every frame, including one the layer draws nothing
+    /// in.
+    fn update(&mut self, params: &mut LayerUpdateParameters<'_>, tiles: &[FrameTile<'_, Hillshade>]) {
         if let Some(max_zoom) = params.source.and_then(RenderSource::max_zoom) {
             self.maxzoom = max_zoom;
         }
+        let live_buckets = &mut self.live_buckets;
+        live_buckets.clear();
+        live_buckets.extend(tiles.iter().filter_map(|tile| Some(tile.bucket()?.base.bucket_id)));
+        self.bucket_render_targets.retain(|id, _| live_buckets.contains(id));
     }
 
     fn release(&mut self) {

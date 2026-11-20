@@ -45,7 +45,9 @@ use crate::layer_drawing::{
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{Atlases, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer};
+use crate::render_layer::{
+    Atlases, LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
+};
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_tile::FrameTile;
@@ -462,17 +464,11 @@ impl TypedLayer for RenderRasterLayer {
         render_tiles: &[FrameTile<'_, Raster>],
     ) {
         let sampler = self.sampler_state();
-        let RenderRasterLayer {
-            base, drawing, draw_list, static_geometry, globe_meshes, textures, live_buckets, ..
-        } = self;
+        let RenderRasterLayer { base, drawing, draw_list, static_geometry, globe_meshes, textures, .. } = self;
         let raster_shader =
             paint_parameters.context.shader_key(&programs::RASTER, Uniforms::default(), base.projection_variant);
         let static_geometry = static_geometry.get_or_insert_with(|| StaticGeometry::new(paint_parameters.context));
 
-        // Drop the textures of buckets that are no longer rendered.
-        live_buckets.clear();
-        live_buckets.extend(render_tiles.iter().filter_map(|tile| Some(tile.bucket()?.base.bucket_id)));
-        textures.retain(|id, _| live_buckets.contains(id));
         // Kept draws keep their textures, so a changed filter is applied to
         // the textures themselves.
         for texture in textures.values() {
@@ -559,11 +555,20 @@ impl TypedLayer for RenderRasterLayer {
         self.update_image(gpu, image, paint_parameters);
     }
 
-    fn release(&mut self) {
-        self.textures.clear();
+    /// Drops the textures of the buckets of tiles the frame doesn't draw,
+    /// in every frame, including one the layer draws nothing in. An image
+    /// source's draws keep their image's texture themselves.
+    fn update(&mut self, params: &mut LayerUpdateParameters<'_>, tiles: &[FrameTile<'_, Raster>]) {
+        if params.source.is_some_and(|source| source.image_render_data().is_some()) {
+            return;
+        }
+        let live_buckets = &mut self.live_buckets;
+        live_buckets.clear();
+        live_buckets.extend(tiles.iter().filter_map(|tile| Some(tile.bucket()?.base.bucket_id)));
+        self.textures.retain(|id, _| live_buckets.contains(id));
     }
 
-    fn nothing_to_draw(&mut self) {
+    fn release(&mut self) {
         self.textures.clear();
     }
 }
