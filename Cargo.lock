@@ -2899,7 +2899,6 @@ dependencies = [
  "mln-rs-style-types",
  "mln-rs-tile-id",
  "mln-rs-util",
- "mln-rs-wire",
  "serde_json",
 ]
 
