@@ -292,7 +292,7 @@ impl VertexStore {
 /// Vertices of the context's store that draws bind, with their count. They
 /// are equal where they are the same entry.
 #[derive(Clone, PartialEq, Eq)]
-pub(crate) struct SharedVertices {
+pub struct SharedVertices {
     handle: Shared<VerticesKey>,
     count: usize,
 }

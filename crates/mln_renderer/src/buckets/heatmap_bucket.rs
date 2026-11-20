@@ -24,7 +24,7 @@ use crate::layer_type::EvaluatedLayer;
 use crate::paint_property_binder::PaintPropertyBinder;
 
 crate::paint_property_binders!(
-    pub struct HeatmapBinders for HeatmapPaintProperties::PossiblyEvaluated {
+    pub(crate) struct HeatmapBinders for HeatmapPaintProperties::PossiblyEvaluated {
         heatmap_radius: PaintPropertyBinder<f32> => [ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE],
         heatmap_weight: PaintPropertyBinder<f32> => [ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE],
     }

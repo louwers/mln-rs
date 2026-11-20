@@ -15,7 +15,7 @@ use crate::gfx::vertices::{SharedVertices, Vertices};
 /// in each of `stride` bytes, from the vertex `vertex_offset` on, as
 /// `data_type`.
 #[derive(Clone)]
-pub(crate) struct SharedAttribute {
+pub struct SharedAttribute {
     pub(crate) vertices: SharedVertices,
     pub(crate) data_type: AttributeDataType,
     pub(crate) offset: u32,

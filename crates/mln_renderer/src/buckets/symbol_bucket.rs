@@ -36,7 +36,7 @@ use crate::text::quads::SymbolQuad;
 use crate::util::pool::PoolRange;
 
 crate::paint_property_binders!(
-    pub struct SymbolIconBinders for SymbolPaintProperties::PossiblyEvaluated {
+    pub(crate) struct SymbolIconBinders for SymbolPaintProperties::PossiblyEvaluated {
         icon_opacity: PaintPropertyBinder<f32> => [ID_SYMBOL_OPACITY_ATTRIBUTE],
         icon_color: PaintPropertyBinder<Color> => [ID_SYMBOL_COLOR_ATTRIBUTE],
         icon_halo_color: PaintPropertyBinder<Color> => [ID_SYMBOL_HALO_COLOR_ATTRIBUTE],
@@ -46,7 +46,7 @@ crate::paint_property_binders!(
 );
 
 crate::paint_property_binders!(
-    pub struct SymbolTextBinders for SymbolPaintProperties::PossiblyEvaluated {
+    pub(crate) struct SymbolTextBinders for SymbolPaintProperties::PossiblyEvaluated {
         text_opacity: PaintPropertyBinder<f32> => [ID_SYMBOL_OPACITY_ATTRIBUTE],
         text_color: PaintPropertyBinder<Color> => [ID_SYMBOL_COLOR_ATTRIBUTE],
         text_halo_color: PaintPropertyBinder<Color> => [ID_SYMBOL_HALO_COLOR_ATTRIBUTE],

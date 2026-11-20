@@ -40,7 +40,7 @@ use crate::util::subdivision::{SubdividedPolygon, subdivide_polygon, subdivide_v
 use crate::util::tessellator::Tessellator;
 
 crate::paint_property_binders!(
-    pub struct FillExtrusionBinders for FillExtrusionPaintProperties::PossiblyEvaluated {
+    pub(crate) struct FillExtrusionBinders for FillExtrusionPaintProperties::PossiblyEvaluated {
         fill_extrusion_base: PaintPropertyBinder<f32> => [ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE],
         fill_extrusion_color: PaintPropertyBinder<Color> => [ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE],
         fill_extrusion_height: PaintPropertyBinder<f32> => [ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE],

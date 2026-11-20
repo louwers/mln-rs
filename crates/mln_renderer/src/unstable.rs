@@ -8,11 +8,17 @@
 
 pub use crate::draw::{DrawGeometry, DrawObjects, Textures, raw_vertices};
 pub use crate::gfx::indexes::DrawIndexes;
-pub use crate::gfx::vertex_attribute::Uniforms;
+pub use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
+pub use crate::gfx::vertices::SharedVertices;
 pub use crate::globe_tile_mesh::raw_globe_tile_mesh;
 pub use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDrawing, TileDraws};
 pub use crate::layout::layout::NoLayout;
+pub use crate::layout::pattern_layout::PatternDependency;
 pub use crate::paint_parameters::PaintParameters;
+pub use crate::paint_property_binder::{
+    BinderValue, InterleavedVertexBuffer, PaintPropertyBinderBase, bind_paint_property,
+};
+pub use crate::paint_property_statistics::StatisticValue;
 pub use crate::render_layer::Atlases;
 pub use crate::render_static_data::RenderStaticData;
 pub use crate::tile_matrix::{projection_data, to_projection_ubo};
