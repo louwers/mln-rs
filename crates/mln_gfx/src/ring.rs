@@ -191,6 +191,7 @@ impl Imports {
                 size: self.size,
                 format,
                 usage: TextureUsage { sampled: false, render_target: true, copy_src: false },
+                mipmapped: false,
             };
             let texture = gpu
                 .create_texture(&desc)
@@ -796,6 +797,9 @@ mod tests {
             Ok(self.textures.insert(None))
         }
         fn write_texture(&mut self, _: TextureId, _: TextureRegion, _: &[u8]) -> Result<(), GpuError> {
+            unsupported()
+        }
+        fn generate_mipmaps(&mut self, _: TextureId) -> Result<(), GpuError> {
             unsupported()
         }
         fn create_sampler(&mut self, _: &SamplerState) -> Result<SamplerId, GpuError> {

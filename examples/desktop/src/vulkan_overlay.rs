@@ -389,6 +389,7 @@ impl Painter {
             size,
             format: TextureFormat::Rgba8Unorm,
             usage: TextureUsage { sampled: true, ..TextureUsage::default() },
+            mipmapped: false,
         })?;
         let sampler = match gpu.create_sampler(&sampler_state(delta.options)) {
             Ok(sampler) => sampler,

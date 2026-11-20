@@ -176,7 +176,13 @@ fn a_uniform_buffer_in_reused_memory_starts_zeroed() {
     let size = mln_util::size::Size::new(4, 4);
     let usage = TextureUsage { render_target: true, ..TextureUsage::default() };
     let target = gpu
-        .create_texture(&TextureDesc { label: "target", size, format: TextureFormat::Rgba8Unorm, usage })
+        .create_texture(&TextureDesc {
+            label: "target",
+            size,
+            format: TextureFormat::Rgba8Unorm,
+            usage,
+            mipmapped: false,
+        })
         .expect("a texture");
     let color = Some(ColorAttachment { texture: target, load: LoadOp::Load });
     gpu.begin_pass(&PassDesc { label: "pass", color, depth_stencil: None }).expect("the pass");
@@ -205,7 +211,13 @@ fn small_readbacks_waiting_at_once_read_their_rows() {
     let size = Size::new(4, 4);
     let usage = TextureUsage { sampled: true, copy_src: true, ..TextureUsage::default() };
     let texture = gpu
-        .create_texture(&TextureDesc { label: "rows", size, format: TextureFormat::Rgba8Unorm, usage })
+        .create_texture(&TextureDesc {
+            label: "rows",
+            size,
+            format: TextureFormat::Rgba8Unorm,
+            usage,
+            mipmapped: false,
+        })
         .expect("a texture");
     let texels: Vec<u8> = (0..64).collect();
     gpu.write_texture(texture, TextureRegion::whole(size), &texels).expect("the write");
@@ -229,7 +241,13 @@ fn a_textures_wait_holds_back_only_its_passes() {
     let mut gpu = gpu();
     let texture = |gpu: &mut D3d12Gpu| {
         let usage = TextureUsage { render_target: true, ..TextureUsage::default() };
-        let desc = TextureDesc { label: "target", size: Size::new(4, 4), format: TextureFormat::Rgba8Unorm, usage };
+        let desc = TextureDesc {
+            label: "target",
+            size: Size::new(4, 4),
+            format: TextureFormat::Rgba8Unorm,
+            usage,
+            mipmapped: false,
+        };
         gpu.create_texture(&desc).expect("a texture")
     };
     let (held, free) = (texture(&mut gpu), texture(&mut gpu));

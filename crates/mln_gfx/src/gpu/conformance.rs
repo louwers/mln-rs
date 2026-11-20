@@ -138,12 +138,14 @@ pub fn clip_mask_and_background(gpu: &mut impl Gpu) -> Result<(), GpuError> {
         size: SIZE,
         format: TextureFormat::Rgba8Unorm,
         usage: TextureUsage { render_target: true, copy_src: true, ..TextureUsage::default() },
+        mipmapped: false,
     })?;
     let depth_stencil = gpu.create_texture(&TextureDesc {
         label: "depth-stencil",
         size: SIZE,
         format: TextureFormat::Depth24PlusStencil8,
         usage: TextureUsage { render_target: true, ..TextureUsage::default() },
+        mipmapped: false,
     })?;
     let frame = clipped_frame(gpu)?;
     frame.draw(gpu, frame_pass(color, depth_stencil), true)?;
@@ -325,12 +327,14 @@ pub fn imported_textures<G: Gpu>(
         size: SIZE,
         format: TextureFormat::Rgba8Unorm,
         usage: TextureUsage { render_target: true, copy_src: true, ..TextureUsage::default() },
+        mipmapped: false,
     })?;
     let depth_stencil = gpu.create_texture(&TextureDesc {
         label: "native depth-stencil",
         size: SIZE,
         format: TextureFormat::Depth24PlusStencil8,
         usage: TextureUsage { render_target: true, ..TextureUsage::default() },
+        mipmapped: false,
     })?;
     let (imported_color, imported_depth_stencil) = (import(gpu, color)?, import(gpu, depth_stencil)?);
     let frame = clipped_frame(gpu)?;

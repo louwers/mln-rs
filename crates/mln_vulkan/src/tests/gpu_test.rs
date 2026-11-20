@@ -189,6 +189,7 @@ fn imported_images_go_to_their_queue_family_and_signal() {
             size,
             format: TextureFormat::Rgba8Unorm,
             usage: TextureUsage { render_target: true, copy_src: true, ..TextureUsage::default() },
+            mipmapped: false,
         })
         .unwrap();
     let imported = gpu.as_imported(owned).unwrap();

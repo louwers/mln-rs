@@ -87,6 +87,7 @@ fn a_readback_copies_into_the_last_ones_buffer() {
             size,
             format: TextureFormat::Rgba8Unorm,
             usage: TextureUsage { sampled: true, copy_src: true, ..TextureUsage::default() },
+            mipmapped: false,
         })
         .expect("a texture");
     let whole = TextureRegion::whole(size);

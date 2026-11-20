@@ -291,6 +291,7 @@ impl BorrowedTarget {
             size,
             format,
             usage: TextureUsage { render_target: true, ..TextureUsage::default() },
+            mipmapped: false,
         };
         let color = host_texture(*textures.textures.get(slot).ok_or_else(|| Error::invalid_argument("no such slot"))?)?;
         let host_depth = textures.depth_textures.get(slot).map(|&depth| host_texture(depth)).transpose()?;

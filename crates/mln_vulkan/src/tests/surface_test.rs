@@ -589,6 +589,7 @@ impl Overlay for QuarterOverlay {
                 size,
                 format: TextureFormat::Rgba8Unorm,
                 usage: TextureUsage { sampled: true, ..TextureUsage::default() },
+                mipmapped: false,
             })
             .expect("a texture")
         });

@@ -37,6 +37,8 @@ use crate::types::{BufferID, FramebufferID, Gl, ProgramID, SamplerID, ShaderID, 
 
 /// `GL_TEXTURE_MAX_ANISOTROPY_EXT` (`EXT_texture_filter_anisotropic`).
 const TEXTURE_MAX_ANISOTROPY: u32 = 0x84FE;
+/// `GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT` (`EXT_texture_filter_anisotropic`).
+const MAX_TEXTURE_MAX_ANISOTROPY: u32 = 0x84FF;
 
 /// A storage buffer's bytes. OpenGL ES 3.0 has no storage buffers, so a
 /// draw binds the element at its global index as a uniform block. GL binds
@@ -178,6 +180,7 @@ struct Texture {
     size: Size,
     format: TextureFormat,
     usage: TextureUsage,
+    mipmapped: bool,
 }
 
 /// A uniform block of a program.
@@ -429,7 +432,9 @@ pub struct GlGpu {
     renderer: String,
     desktop: bool,
     caps: Caps,
-    anisotropic: bool,
+    /// The most anisotropy that samplers filter with, 1 without
+    /// `EXT_texture_filter_anisotropic`.
+    max_anisotropy: f32,
     /// The widths that lines may be drawn at.
     line_widths: RangeInclusive<f32>,
     /// The vertex array bound outside draws, which takes the index buffers
@@ -474,7 +479,7 @@ impl GlGpu {
         let desktop = !gl.version().is_embedded;
         // SAFETY: the context is current, and the parameters and the
         // capability are GL ES 3.0's or desktop OpenGL 3.0's.
-        let (caps, anisotropic, line_widths, renderer) = unsafe {
+        let (caps, max_anisotropy, line_widths, renderer) = unsafe {
             if desktop {
                 // OpenGL ES encodes what it writes to an sRGB framebuffer as
                 // sRGB; desktop OpenGL only with this.
@@ -484,7 +489,11 @@ impl GlGpu {
             let max_texture_size = gl.get_parameter_i32(glow::MAX_TEXTURE_SIZE);
             let extensions = gl.supported_extensions();
             let has = |name: &str| extensions.contains(name) || extensions.contains(&format!("GL_{name}"));
-            let anisotropic = has("EXT_texture_filter_anisotropic");
+            let max_anisotropy = if has("EXT_texture_filter_anisotropic") {
+                gl.get_parameter_f32(MAX_TEXTURE_MAX_ANISOTROPY).max(1.0)
+            } else {
+                1.0
+            };
             // Desktop OpenGL draws into half floats without an extension.
             let half_float_render_targets =
                 desktop || has("EXT_color_buffer_half_float") || has("EXT_color_buffer_float");
@@ -508,7 +517,7 @@ impl GlGpu {
                 max_line_width,
                 binds_vertex_buffers: false,
             };
-            (caps, anisotropic, line_widths[0].min(1.0)..=max_line_width, renderer)
+            (caps, max_anisotropy, line_widths[0].min(1.0)..=max_line_width, renderer)
         };
         #[cfg(feature = "bench")]
         let timer = crate::bench::Timer::new(gl, caps.cpu_rasterizer);
@@ -518,7 +527,7 @@ impl GlGpu {
             renderer,
             desktop,
             caps,
-            anisotropic,
+            max_anisotropy,
             line_widths,
             vertex_array: None,
             buffers: SlotMap::with_key(),
@@ -609,12 +618,13 @@ impl GlGpu {
 
     #[cfg(not(target_family = "wasm"))]
     /// Takes a `GL_TEXTURE_2D` texture made elsewhere, such as a host's in
-    /// the context's share group, of `desc`'s size, format and usage, as a
-    /// texture of this backend. Destroying it forgets it; the texture stays
-    /// the caller's.
+    /// the context's share group, of `desc`'s size, format, usage and mips,
+    /// as a texture of this backend. Destroying it forgets it; the texture
+    /// stays the caller's.
     pub(crate) fn import_texture(&mut self, texture: TextureID, desc: &TextureDesc<'_>) -> TextureId {
         let object = Object::Texture { name: texture, owned: false };
-        self.textures.insert(Texture { object, size: desc.size, format: desc.format, usage: desc.usage })
+        let (size, format, usage, mipmapped) = (desc.size, desc.format, desc.usage, desc.mipmapped);
+        self.textures.insert(Texture { object, size, format, usage, mipmapped })
     }
 
     /// Takes a framebuffer made elsewhere, of `size` pixels, such as a
@@ -637,6 +647,7 @@ impl GlGpu {
                 size,
                 format,
                 usage: TextureUsage { render_target: true, copy_src, ..TextureUsage::default() },
+                mipmapped: false,
             })
         };
         FramebufferTextures {
@@ -655,7 +666,13 @@ impl GlGpu {
     #[cfg(all(test, not(target_family = "wasm")))]
     pub(crate) fn import_again(&mut self, texture: TextureId) -> Option<TextureId> {
         let entry = self.textures.get(texture)?;
-        let desc = TextureDesc { label: "imported", size: entry.size, format: entry.format, usage: entry.usage };
+        let desc = TextureDesc {
+            label: "imported",
+            size: entry.size,
+            format: entry.format,
+            usage: entry.usage,
+            mipmapped: entry.mipmapped,
+        };
         Some(self.import_texture(entry.object.name()?, &desc))
     }
 
@@ -1240,6 +1257,7 @@ impl Gpu for GlGpu {
         if desc.size.width == 0 || desc.size.height == 0 || desc.size.width > max || desc.size.height > max {
             return Err(GpuError::Invalid(format!("{}: a texture of {:?}", desc.label, desc.size)));
         }
+        let levels = validation::check_mips(desc)?;
         let object = self.current(|gpu| {
             let (gl, state) = gpu.context.parts();
             // SAFETY: the texture is new, and its format, internal format
@@ -1247,20 +1265,21 @@ impl Gpu for GlGpu {
             unsafe {
                 let object = gl.create_texture().map_err(GpuError::Invalid)?;
                 state.activate_texture(gl, 0, Some(object));
-                gl.tex_image_2d(
-                    glow::TEXTURE_2D,
-                    0,
-                    internal_format as i32,
-                    desc.size.width as i32,
-                    desc.size.height as i32,
-                    0,
-                    format,
-                    type_,
-                    glow::PixelUnpackData::Slice(None),
-                );
-                // One level, which a sampler that filters between levels
-                // reads as the texture's every level.
-                gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAX_LEVEL, 0);
+                for level in 0..levels {
+                    gl.tex_image_2d(
+                        glow::TEXTURE_2D,
+                        level as i32,
+                        internal_format as i32,
+                        (desc.size.width >> level).max(1) as i32,
+                        (desc.size.height >> level).max(1) as i32,
+                        0,
+                        format,
+                        type_,
+                        glow::PixelUnpackData::Slice(None),
+                    );
+                }
+                // Its levels and no more, so that it is complete.
+                gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAX_LEVEL, levels as i32 - 1);
                 if desc.format == TextureFormat::A8Unorm && gpu.desktop {
                     for (name, source) in ALPHA_SWIZZLE {
                         gl.tex_parameter_i32(glow::TEXTURE_2D, name, source as i32);
@@ -1270,7 +1289,8 @@ impl Gpu for GlGpu {
             }
         })?;
         let object = Object::Texture { name: object, owned: true };
-        Ok(self.textures.insert(Texture { object, size: desc.size, format: desc.format, usage: desc.usage }))
+        let (size, format, usage, mipmapped) = (desc.size, desc.format, desc.usage, desc.mipmapped);
+        Ok(self.textures.insert(Texture { object, size, format, usage, mipmapped }))
     }
 
     fn write_texture(&mut self, texture: TextureId, region: TextureRegion, data: &[u8]) -> Result<(), GpuError> {
@@ -1305,8 +1325,27 @@ impl Gpu for GlGpu {
         Ok(())
     }
 
+    fn generate_mipmaps(&mut self, texture: TextureId) -> Result<(), GpuError> {
+        if self.pass.is_some() {
+            return Err(open_pass("generating mips"));
+        }
+        let entry = self.textures.get(texture).ok_or(GpuError::UnknownId("texture"))?;
+        let object = entry
+            .object
+            .name()
+            .filter(|_| entry.mipmapped)
+            .ok_or_else(|| GpuError::Invalid("generating the mips of a texture without them".to_owned()))?;
+        self.current(|gpu| {
+            let (gl, state) = gpu.context.parts();
+            state.activate_texture(gl, 0, Some(object));
+            // SAFETY: the texture is alive, and its levels are allocated.
+            unsafe { gl.generate_mipmap(glow::TEXTURE_2D) };
+        });
+        Ok(())
+    }
+
     fn create_sampler(&mut self, state: &SamplerState) -> Result<SamplerId, GpuError> {
-        let anisotropic = self.anisotropic;
+        let anisotropy = f32::from(state.anisotropy()).min(self.max_anisotropy);
         let sampler = self.current(|gpu| {
             let gl = gpu.context.gl();
             let min_filter = match (state.filter, state.mipmapped) {
@@ -1323,8 +1362,8 @@ impl Gpu for GlGpu {
                 gl.sampler_parameter_i32(sampler, glow::TEXTURE_MAG_FILTER, enums::texture_filter(state.filter));
                 gl.sampler_parameter_i32(sampler, glow::TEXTURE_WRAP_S, enums::texture_wrap(state.wrap_u));
                 gl.sampler_parameter_i32(sampler, glow::TEXTURE_WRAP_T, enums::texture_wrap(state.wrap_v));
-                if anisotropic && state.max_anisotropy > 1 {
-                    gl.sampler_parameter_f32(sampler, TEXTURE_MAX_ANISOTROPY, f32::from(state.max_anisotropy));
+                if anisotropy > 1.0 {
+                    gl.sampler_parameter_f32(sampler, TEXTURE_MAX_ANISOTROPY, anisotropy);
                 }
                 Ok::<_, GpuError>(sampler)
             }

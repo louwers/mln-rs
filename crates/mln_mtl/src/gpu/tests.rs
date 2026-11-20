@@ -155,6 +155,7 @@ fn a_destroyed_buffer_stays_for_the_flushes_before() {
             size: Size { width: 4, height: 4 },
             format: TextureFormat::Rgba8Unorm,
             usage: TextureUsage { render_target: true, ..Default::default() },
+            mipmapped: false,
         })
         .unwrap();
     let pass = PassDesc {
@@ -257,6 +258,7 @@ fn flushes_wait_for_and_signal_events() {
             size: Size { width: 4, height: 4 },
             format: TextureFormat::Rgba8Unorm,
             usage: TextureUsage { render_target: true, ..Default::default() },
+            mipmapped: false,
         })
         .unwrap();
     let pass = PassDesc {

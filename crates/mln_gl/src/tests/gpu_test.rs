@@ -299,6 +299,7 @@ fn draws_read_only_what_is_bound() {
             size,
             format: TextureFormat::Rgba8Unorm,
             usage: TextureUsage { render_target: true, copy_src: true, ..TextureUsage::default() },
+            mipmapped: false,
         })
         .unwrap();
     let red = BackgroundPropsUBO { color: [1.0, 0.0, 0.0, 1.0], opacity: 1.0, ..BackgroundPropsUBO::default() };
@@ -431,6 +432,7 @@ fn imported_framebuffers_draw_as_they_are() {
             size,
             format: TextureFormat::Depth24PlusStencil8,
             usage: TextureUsage { render_target: true, ..TextureUsage::default() },
+            mipmapped: false,
         })
         .unwrap();
     assert!(matches!(gpu.begin_pass(&pass(Some(color_id), Some(own_depth))), Err(GpuError::Invalid(_))));

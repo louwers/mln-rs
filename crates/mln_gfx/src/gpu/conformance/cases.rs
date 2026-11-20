@@ -116,6 +116,7 @@ fn target(gpu: &mut (impl Gpu + ?Sized), format: TextureFormat) -> Result<Textur
         size: SIZE,
         format,
         usage: TextureUsage { render_target: true, copy_src: true, ..TextureUsage::default() },
+        mipmapped: false,
     })
 }
 
@@ -272,6 +273,7 @@ pub fn invalid_calls(gpu: &mut impl Gpu) -> Result<(), GpuError> {
         size: Size::new(4, 4),
         format: TextureFormat::Rgba8Unorm,
         usage: TextureUsage { sampled: true, ..TextureUsage::default() },
+        mipmapped: false,
     })?;
     let texels = [255u8; 2 * 2 * 4];
     let region = |x, y| TextureRegion { x, y, size: Size::new(2, 2) };
@@ -436,6 +438,7 @@ pub fn depth_only(gpu: &mut impl Gpu) -> Result<(), GpuError> {
         size: SIZE,
         format: TextureFormat::Depth32Float,
         usage: TextureUsage { render_target: true, ..TextureUsage::default() },
+        mipmapped: false,
     })?;
     let frame = solid_at(gpu, TextureFormat::Rgba8Unorm, [1.0, 0.0, 0.0, 1.0], at_depth(tile_matrix(1.0), 0.5))?;
     let left = solid_at(gpu, TextureFormat::Rgba8Unorm, [0.0; 4], at_depth(tile_matrix(0.0), 0.25))?;
@@ -500,6 +503,7 @@ pub fn written_vertex_texels(gpu: &mut impl Gpu) -> Result<(), GpuError> {
         size,
         format: TextureFormat::Rgba8Unorm,
         usage: TextureUsage { sampled: true, ..TextureUsage::default() },
+        mipmapped: false,
     })?;
     gpu.write_texture(texture, TextureRegion::whole(size), QUADRANTS.as_flattened())?;
     check_vertex_texels(&vertex_texels(gpu, texture)?, QUADRANTS);
@@ -522,6 +526,7 @@ pub fn drawn_vertex_texels(gpu: &mut impl Gpu) -> Result<(), GpuError> {
         size,
         format: TextureFormat::Rgba8Unorm,
         usage: TextureUsage { sampled: true, render_target: true, ..TextureUsage::default() },
+        mipmapped: false,
     })?;
     let red = solid_at(gpu, TextureFormat::Rgba8Unorm, [1.0, 0.0, 0.0, 1.0], tile_matrix(0.0))?;
     gpu.begin_pass(&PassDesc {
@@ -983,6 +988,7 @@ pub fn readbacks(gpu: &mut impl Gpu) -> Result<(), GpuError> {
         size,
         format: TextureFormat::Rgba8Unorm,
         usage: TextureUsage { sampled: true, copy_src: true, ..TextureUsage::default() },
+        mipmapped: false,
     })?;
     gpu.write_texture(written, TextureRegion::whole(size), &[1; 4 * 4 * 2])?;
     let part = TextureRegion { x: 1, y: 0, size: Size { width: 2, height: 2 } };
@@ -1001,6 +1007,7 @@ pub fn readbacks(gpu: &mut impl Gpu) -> Result<(), GpuError> {
         size,
         format: TextureFormat::Depth32Float,
         usage: TextureUsage { render_target: true, ..TextureUsage::default() },
+        mipmapped: false,
     })?;
     assert!(invalid(&gpu.read_texture(depth, TextureRegion::whole(size))), "a depth texture");
     assert!(invalid(&gpu.read_texture(written, TextureRegion { x: 1, ..TextureRegion::whole(size) })), "past it");
@@ -1031,6 +1038,7 @@ pub fn resources_in_use<G: Gpu>(gpu: &mut G) -> Result<(), GpuError> {
         size,
         format: TextureFormat::Rgba8Unorm,
         usage: TextureUsage { sampled: true, ..TextureUsage::default() },
+        mipmapped: false,
     })?;
     gpu.write_texture(image, TextureRegion::whole(size), &[255, 0, 0, 255].repeat(4))?;
     let sampler = gpu.create_sampler(&SamplerState::default())?;

@@ -20,6 +20,7 @@ use mln_util::Color;
 use mln_util::size::Size;
 
 use crate::index_table::IndexTable;
+use crate::mipmaps::Mipmapper;
 use crate::shaders::shader_program::{self, BindingType, ShaderProgram, validated};
 use crate::writes::Writes;
 use crate::{CustomLayerEncoder, CustomLayerPass, Device};
@@ -55,7 +56,18 @@ struct Buffer {
 
 struct Texture {
     texture: wgpu::Texture,
+    /// The view of every level, which shaders sample.
     view: wgpu::TextureView,
+    /// Of a texture with mips, a view of each level, which passes draw into
+    /// level 0 of.
+    levels: Vec<wgpu::TextureView>,
+}
+
+impl Texture {
+    /// The view of level 0, which passes draw into.
+    fn attachment(&self) -> &wgpu::TextureView {
+        self.levels.first().unwrap_or(&self.view)
+    }
 }
 
 /// A compiled program, and what it reads from its bindings.
@@ -181,6 +193,8 @@ pub struct WebGpu {
     geometries: SlotMap<GeometryId, Geometry>,
     dependents: validation::Dependents,
     readbacks: SlotMap<ReadbackId, Readback>,
+    /// What draws mips, made for the first texture whose mips are made.
+    mipmapper: Option<Mipmapper>,
     /// The buffer of the last readback taken, which the next readback of
     /// its size copies into, as a frame read back each time is.
     spare_readback: Option<wgpu::Buffer>,
@@ -234,6 +248,7 @@ impl WebGpu {
             geometries: SlotMap::with_key(),
             dependents: validation::Dependents::default(),
             readbacks: SlotMap::with_key(),
+            mipmapper: None,
             spare_readback: None,
             #[cfg(feature = "bench")]
             queries: crate::bench::Queries::new(device.device())
@@ -248,7 +263,7 @@ impl WebGpu {
     /// reference.
     pub fn import_texture(&mut self, texture: &wgpu::Texture) -> TextureId {
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        self.textures.insert(Texture { texture: texture.clone(), view })
+        self.textures.insert(Texture { texture: texture.clone(), view, levels: Vec::new() })
     }
 
     /// The wgpu texture of `texture`.
@@ -310,7 +325,7 @@ impl WebGpu {
         let color_format = color.map(|(texture, _)| texture.texture.format());
         let depth_stencil_format = depth_stencil.map(|(texture, _)| texture.texture.format());
         let color_attachment = color.map(|(texture, load)| wgpu::RenderPassColorAttachment {
-            view: &texture.view,
+            view: texture.attachment(),
             depth_slice: None,
             resolve_target: None,
             ops: wgpu::Operations {
@@ -323,7 +338,7 @@ impl WebGpu {
         });
         let depth_stencil_attachment =
             depth_stencil.map(|(texture, attachment)| wgpu::RenderPassDepthStencilAttachment {
-                view: &texture.view,
+                view: texture.attachment(),
                 depth_ops: Some(wgpu::Operations {
                     load: match attachment.depth {
                         LoadOp::Load => wgpu::LoadOp::Load,
@@ -645,6 +660,7 @@ impl Gpu for WebGpu {
     }
 
     fn create_texture(&mut self, desc: &TextureDesc<'_>) -> Result<TextureId, GpuError> {
+        let mip_level_count = validation::check_mips(desc)?;
         let mut usage = wgpu::TextureUsages::empty();
         if desc.usage.sampled {
             usage |= wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST;
@@ -664,7 +680,7 @@ impl Gpu for WebGpu {
             device.create_texture(&wgpu::TextureDescriptor {
                 label: Some(desc.label),
                 size: wgpu::Extent3d { width: desc.size.width, height: desc.size.height, depth_or_array_layers: 1 },
-                mip_level_count: 1,
+                mip_level_count,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
                 format,
@@ -673,7 +689,17 @@ impl Gpu for WebGpu {
             })
         })?;
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        Ok(self.textures.insert(Texture { texture, view }))
+        let levels = if desc.mipmapped {
+            let level = |base_mip_level| wgpu::TextureViewDescriptor {
+                base_mip_level,
+                mip_level_count: Some(1),
+                ..Default::default()
+            };
+            (0..mip_level_count).map(|base| texture.create_view(&level(base))).collect()
+        } else {
+            Vec::new()
+        };
+        Ok(self.textures.insert(Texture { texture, view, levels }))
     }
 
     fn write_texture(&mut self, texture: TextureId, region: TextureRegion, data: &[u8]) -> Result<(), GpuError> {
@@ -703,6 +729,24 @@ impl Gpu for WebGpu {
         Ok(())
     }
 
+    /// Draws each level from the one before, in a pass of its own.
+    fn generate_mipmaps(&mut self, texture: TextureId) -> Result<(), GpuError> {
+        if self.pass.is_some() {
+            return Err(Self::open_pass("generating mips"));
+        }
+        let texture = self.textures.get(texture).ok_or(GpuError::UnknownId("texture"))?;
+        if texture.levels.is_empty() {
+            return Err(GpuError::Invalid("generating the mips of a texture without them".to_owned()));
+        }
+        let device = self.device.device();
+        let encoder = self.encoder.get_or_insert_with(|| {
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("frame") })
+        });
+        let mipmapper = self.mipmapper.get_or_insert_with(|| Mipmapper::new(device));
+        mipmapper.generate(device, encoder, texture.texture.format(), &texture.levels);
+        Ok(())
+    }
+
     fn create_sampler(&mut self, state: &SamplerState) -> Result<SamplerId, GpuError> {
         let filter = match state.filter {
             TextureFilterType::Linear => wgpu::FilterMode::Linear,
@@ -725,7 +769,9 @@ impl Gpu for WebGpu {
                 } else {
                     wgpu::MipmapFilterMode::Nearest
                 },
-                anisotropy_clamp: u16::from(state.max_anisotropy.max(1)),
+                // Without mips, level 0 only.
+                lod_max_clamp: if state.mipmapped { 32.0 } else { 0.0 },
+                anisotropy_clamp: u16::from(state.anisotropy()),
                 ..Default::default()
             })
         })?;

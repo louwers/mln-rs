@@ -108,6 +108,7 @@ impl Texture2D {
             size: self.size,
             format: self.format,
             usage: TextureUsage { sampled: true, render_target: self.render_target, copy_src: self.render_target },
+            mipmapped: false,
         };
         let texture = device.texture(gpu, &desc, Some(self.bytes()))?;
         let id = texture.id();
