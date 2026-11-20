@@ -646,13 +646,15 @@ static void cluster_queries_read_a_clustered_source(void) {
   TEST_ASSERT_NOT_NULL_MESSAGE(strstr(cluster, "\"point_count\":3"), cluster);
   const uint32_t id = cluster_id_of(cluster);
 
-  // One zoom level closer, the three points still form one cluster.
+  // The cluster formed at the cluster max zoom, 5, and keeps its ID at the
+  // zooms below, where it takes no more points, so its children are the three
+  // points.
   static char result[4096];
   MLN_TEST_OK(
     cluster_children(&fixture, "clustered", id, result, sizeof(result))
   );
-  TEST_ASSERT_EQUAL_size_t_MESSAGE(1, count_features(result), result);
-  TEST_ASSERT_NOT_NULL_MESSAGE(strstr(result, "\"point_count\":3"), result);
+  TEST_ASSERT_EQUAL_size_t_MESSAGE(3, count_features(result), result);
+  TEST_ASSERT_EQUAL_UINT(ONE | TWO | THREE, leaf_names(result));
 
   const leaves_row leaves[] = {
     {"every leaf", 10, 0, 3},
@@ -865,7 +867,7 @@ static void cluster_queries_read_the_most_recent_render_attempt(void) {
   MLN_TEST_OK(
     cluster_children(&fixture, "clustered", id, result, sizeof(result))
   );
-  TEST_ASSERT_NOT_NULL_MESSAGE(strstr(result, "\"point_count\":2"), result);
+  TEST_ASSERT_EQUAL_UINT(ONE | TWO, leaf_names(result));
 
   const mln_test_provider_request* request =
     mln_test_provider_request_at(provider, held_tile_url, 0);
