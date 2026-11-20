@@ -231,7 +231,9 @@ impl BorrowedTarget {
         for slot in 0..self.depth() {
             self.delete_fence(gpu, slot);
         }
-        self.begun = None;
+        if self.begun.take().is_some() {
+            self.leave_host_depth(gpu);
+        }
         self.forget_imports(gpu);
         if let Some(fence) = self.handed.take() {
             gpu.delete_sync(fence);
@@ -248,6 +250,24 @@ impl BorrowedTarget {
 }
 
 impl BorrowedTarget {
+    /// Has the context leave the host's depth texture that a frame drew
+    /// into, before a fence that hands it over. Mesa marks a depth texture
+    /// that a framebuffer rendered into as compressed, for another context
+    /// that samples it to decompress it first, only once the context
+    /// applies a change of framebuffer, which it does at its next draw or
+    /// clear. Without that, radeonsi hands the host's context the
+    /// compressed data of its depth texture.
+    fn leave_host_depth(&self, gpu: &mut GlGpu) {
+        if self.textures.as_ref().is_some_and(|textures| !textures.depth_textures.is_empty()) {
+            let mut current = gpu.enter();
+            let (gl, state) = current.context_mut().parts();
+            state.bind_framebuffer(gl, None);
+            // SAFETY: the context is current, on its own surface, whose
+            // color nothing reads.
+            unsafe { gl.clear(glow::COLOR_BUFFER_BIT) };
+        }
+    }
+
     /// The textures of `slot`, imported into `gpu` at its first frame.
     fn slot_image(&mut self, gpu: &mut GlGpu, slot: usize) -> Result<FrameImage, Error> {
         if let Some((image, _)) = self.imports.get(slot).copied().flatten() {
@@ -310,19 +330,7 @@ impl FrameTarget for BorrowedTarget {
             return Handoff::Dropped;
         };
         self.delete_fence(gpu, slot);
-        // Mesa marks a depth texture that a framebuffer rendered into as
-        // compressed, for another context that samples it to decompress it
-        // first, only once the context applies a change of framebuffer,
-        // which it does at its next draw or clear. Without that, radeonsi
-        // hands the host's context the compressed data of its depth texture.
-        if self.textures.as_ref().is_some_and(|textures| !textures.depth_textures.is_empty()) {
-            let mut current = gpu.enter();
-            let (gl, state) = current.context_mut().parts();
-            state.bind_framebuffer(gl, None);
-            // SAFETY: the context is current, on its own surface, whose
-            // color nothing reads.
-            unsafe { gl.clear(glow::COLOR_BUFFER_BIT) };
-        }
+        self.leave_host_depth(gpu);
         let sync = if self.producer == SyncKind::OpenGlFence {
             let Ok(fence) = gpu.fence_sync() else { return Handoff::Dropped };
             if let Some(entry) = self.fences.get_mut(slot) {

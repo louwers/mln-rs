@@ -809,7 +809,10 @@ impl<B: LocalBackend> Drop for BackendGfx<B> {
         if let Some(renderer) = self.renderer.take() {
             renderer.tear_down(&mut *gpu);
         }
-        if let Some(target) = self.frames.target() {
+        // A released ring keeps the objects that its release's sync names.
+        if let Frames::Borrowed { target, .. } = &mut self.frames {
+            target.tear_down(&mut gpu);
+        } else if let Some(target) = self.frames.target() {
             target.tear_down(&mut gpu);
         }
     }

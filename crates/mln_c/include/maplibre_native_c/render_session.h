@@ -558,16 +558,20 @@ MLN_API mln_status mln_render_session_resize(
  * Use it when the platform takes a surface away, such as when your app goes to
  * the background. Release every acquired frame first. Frame demands that are
  * still pending, and later ones until you give the session a new target,
- * finish with MLN_RENDER_RESULT_TARGET_NOT_READY. Once the release completes,
- * you can destroy the old target. An Android or OpenHarmony window can go away
- * sooner, as mln_android_window_target and mln_ohos_window_target say.
+ * finish with MLN_RENDER_RESULT_TARGET_NOT_READY. Once the release of a window
+ * or surface completes, you can destroy it. An Android or OpenHarmony window
+ * can go away sooner, as mln_android_window_target and mln_ohos_window_target
+ * say.
  *
  * For a borrowed ring, the release completes with an mln_gpu_sync of
- * mln_render_session_capabilities.producer_sync_kind. Wait for it before you
- * reuse or destroy the textures, as you wait for an acquired frame's producer
- * sync. The session's GPU work on the textures, and its waits for the consumer
- * syncs that you released its frames with, end there, so keep those syncs
- * until then too. The session keeps nothing of the released textures: a
+ * mln_render_session_capabilities.producer_sync_kind, or
+ * MLN_GPU_SYNC_CPU_COMPLETE when the session has no textures since an earlier
+ * release. Wait for it before you reuse or destroy the textures, as you wait
+ * for an acquired frame's producer sync: for MLN_GPU_SYNC_QUEUE_ORDER, destroy
+ * them once work that you submit to the queue after the completion has
+ * finished. The session's GPU work on the textures, and its waits for the
+ * consumer syncs that you released its frames with, end there, so keep those
+ * syncs until then too. The session keeps nothing of the released textures: a
  * texture that a later target gives it again is a new one, even one that you
  * discarded a frame of. For another target, the completion has no value.
  *
