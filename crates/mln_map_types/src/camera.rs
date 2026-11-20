@@ -184,9 +184,9 @@ pub struct CameraDelta {
     /// The screen point that `scale`, `bearing` and `pitch` keep in place,
     /// and that a drag's `offset` holds: on the globe the location under it
     /// follows the drag, as the C++ globe's `moveBy(offset, anchor)` does,
-    /// while a flat map moves the same wherever it is held. It needs one of
-    /// them, and it combines with `offset` and one of the others only in a
-    /// delta without a duration.
+    /// and over terrain the ground under it does, while a flat map moves the
+    /// same wherever it is held. It needs one of them, and it combines with
+    /// `offset` and one of the others only in a delta without a duration.
     pub anchor: Option<ScreenCoordinate>,
     /// How the gesture keeps moving after this delta, which only a delta in
     /// the [`GesturePhase::End`] phase carries. Its parts' snaps apply only

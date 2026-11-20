@@ -159,25 +159,25 @@ fn a_momentum_end_moves_neither_the_eye_nor_the_picture() {
 /// A cone of ground 3000 m high, sloping 45 degrees, `north` meters north
 /// of the start.
 #[derive(Debug)]
-struct Hill {
+pub(super) struct Hill {
     peak: DVec2,
 }
 
 impl Hill {
     const HEIGHT: f64 = 3000.0;
 
-    fn new(north: f64) -> Hill {
+    pub(super) fn new(north: f64) -> Hill {
         Hill { peak: world(&start()) - DVec2::new(0.0, north / meters()) }
     }
 
-    fn height(&self, world: DVec2) -> f64 {
+    pub(super) fn height(&self, world: DVec2) -> f64 {
         (Self::HEIGHT - (world - self.peak).length() * meters()).max(0.0)
     }
 }
 
 /// Meters along the ground in a unit of Web Mercator at zoom 0, at the
 /// start, on the sphere heights scale on.
-fn meters() -> f64 {
+pub(super) fn meters() -> f64 {
     Projection::altitude_meters_per_pixel(start().latitude(), 0.0) * 512.0
 }
 

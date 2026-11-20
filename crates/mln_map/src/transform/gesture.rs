@@ -22,6 +22,18 @@ pub(super) struct GestureState {
     /// The altitude that a gesture in progress over a center the terrain
     /// clamps holds, under its lift ([`Transform::follow_terrain`]).
     pub(super) hold: Option<f64>,
+    /// The plane over terrain that the gesture's anchored steps solve on
+    /// ([`Transform::anchor_plane`]).
+    pub(super) anchor_plane: Option<AnchorPlane>,
+}
+
+/// The height of the ground a gesture grabbed, at its first anchored step,
+/// and the altitude it held then, at which the plane holds.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct AnchorPlane {
+    /// `None` where the pointer grabbed no drawn ground.
+    pub(super) height: Option<f64>,
+    pub(super) at_altitude: f64,
 }
 
 impl GestureState {

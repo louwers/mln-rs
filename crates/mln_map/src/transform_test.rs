@@ -5349,6 +5349,98 @@ fn a_drag_delta_holds_its_anchor() {
     assert_eq!(drag(&mut flat(), Some(cursor)), drag(&mut flat(), None));
 }
 
+/// Without terrain, a gesture moves the camera exactly as the flat map's
+/// own steps do, also with the center 800 m up: a drag pans by its offset at
+/// the view's center on the plane at sea level, whatever its anchor, and a
+/// pinch's zoom, a turn, and their momentum hold the anchor's location at sea
+/// level. Each step is compared with the same step put together from the
+/// state's flat conversions.
+#[test]
+fn without_terrain_gestures_are_bit_identical() {
+    let flipped = |point: ScreenCoordinate| sc(point.x, 600.0 - point.y);
+    for altitude in [0.0, 800.0] {
+        let mut transform = new_transform();
+        transform.resize(Size::new(800, 600)).unwrap();
+        transform.jump_to(&CameraOptions {
+            center: Some(ll(30.0, 20.0)),
+            zoom: Some(10.0),
+            pitch: Some(55.0),
+            bearing: Some(20.0),
+            center_altitude: Some(altitude),
+            ..Default::default()
+        });
+        let start = start_clock(&mut transform);
+        // The location under `anchor` at sea level, and the camera before.
+        let grab = |transform: &Transform, anchor: ScreenCoordinate| {
+            let state = transform.state().clone();
+            let location = state.view().screen_coordinate_to_lat_lng(&flipped(anchor), WrapMode::Unwrapped).unwrap();
+            (state, location, transform.camera_options(None))
+        };
+        let anchor = sc(500.0, 400.0);
+
+        let (mut expected, _, before) = grab(&transform, anchor);
+        let offset = sc(12.0, -30.0);
+        transform
+            .apply_camera_delta(&CameraDelta {
+                offset: Some(offset),
+                anchor: Some(anchor),
+                phase: GesturePhase::Begin,
+                ..CameraDelta::default()
+            })
+            .unwrap();
+        let center = expected
+            .view()
+            .screen_coordinate_to_lat_lng(&flipped(sc(400.0 - offset.x, 300.0 - offset.y)), WrapMode::Unwrapped)
+            .unwrap();
+        expected.set_lat_lng_zoom(&center, before.zoom.unwrap());
+        assert_eq!(expected.camera_options(None), transform.camera_options(None), "{altitude} m: the drag");
+
+        let (mut expected, location, before) = grab(&transform, anchor);
+        transform
+            .apply_camera_delta(&CameraDelta {
+                scale: Some(1.3),
+                bearing: Some(-12.0),
+                anchor: Some(anchor),
+                phase: GesturePhase::Update,
+                ..CameraDelta::default()
+            })
+            .unwrap();
+        expected.set_angle(deg2rad(-(before.bearing.unwrap() - 12.0)));
+        expected.set_lat_lng_zoom(&before.center.unwrap(), before.zoom.unwrap() + 1.3f64.log2());
+        expected.move_lat_lng(&location, &flipped(anchor)).unwrap();
+        assert_eq!(expected.camera_options(None), transform.camera_options(None), "{altitude} m: the pinch");
+
+        let mut momentum = CameraMomentum::default();
+        momentum.bearing.glide = Some(plain(40.0));
+        momentum.bearing.anchor = Some(sc(450.0, 200.0));
+        momentum.pitch.glide = Some(plain(-10.0));
+        momentum.pitch.anchor = Some(sc(420.0, 520.0));
+        transform
+            .apply_camera_delta(&CameraDelta {
+                momentum: Some(momentum),
+                phase: GesturePhase::End,
+                ..CameraDelta::default()
+            })
+            .unwrap();
+        for ms in [16, 33, 100, 400] {
+            let (mut expected, turned, _) = grab(&transform, momentum.bearing.anchor.unwrap());
+            transform.update_transitions(Some(start + Duration::from_millis(ms)));
+            let after = transform.state().clone();
+            // The turn steps before the tilt, each around the location under
+            // its own anchor as the step finds it.
+            expected.set_angle(after.view().angle());
+            expected.move_lat_lng(&turned, &flipped(momentum.bearing.anchor.unwrap())).unwrap();
+            let tilted = expected
+                .view()
+                .screen_coordinate_to_lat_lng(&flipped(momentum.pitch.anchor.unwrap()), WrapMode::Unwrapped)
+                .unwrap();
+            expected.set_pitch(after.view().pitch());
+            expected.move_lat_lng(&tilted, &flipped(momentum.pitch.anchor.unwrap())).unwrap();
+            assert_eq!(expected.camera_options(None), after.camera_options(None), "{altitude} m: {ms} ms of momentum");
+        }
+    }
+}
+
 #[test]
 fn camera_deltas_are_validated_as_maplibre_native_ffi_validates_them() {
     let mut transform = outcome_transform();

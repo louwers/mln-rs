@@ -1,8 +1,9 @@
 //! The terrain under the camera: the ground a camera at rest stands on, the
 //! altitude a command eases onto the ground it ends on, the altitude a
 //! gesture holds and the ground its end moves the center onto, the eye kept
-//! above the ground while a command or a gesture moves the camera, and the
-//! conversions between screen points and the ground drawn under them.
+//! above the ground while a command or a gesture moves the camera, the
+//! planes that moves around an anchor solve on, and the conversions between
+//! screen points and the ground drawn under them.
 
 use std::sync::Arc;
 
@@ -14,6 +15,7 @@ use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
 use mln_util::interpolate::interpolate;
 use mln_util::projection::Projection;
 
+use super::gesture::AnchorPlane;
 use super::transition::AlongFn;
 use super::{CENTER, Transform, ZOOM, flip_y};
 
@@ -27,6 +29,15 @@ const MAX_EYE_RAISES: usize = 3;
 /// `recenterOnTerrain`).
 const RECENTER_PASSES: usize = 3;
 const RECENTER_TOLERANCE: f64 = 1e-4;
+
+/// How near the view's center, in squared pixels, an anchor stands at it:
+/// a move around it leaves the center where it is (GL JS's).
+const NEAR_CENTER: f64 = 1e-2;
+
+/// The share of the way up from the center to the eye that an anchor's
+/// plane must stay under (GL JS's
+/// `TERRAIN_ANCHOR_MAX_CAMERA_ALTITUDE_FRACTION`).
+const MAX_ANCHOR_RISE: f64 = 0.9;
 
 /// The terrain the camera stands on, which the map hands the transform
 /// while its style's terrain draws on a Mercator view.
@@ -227,6 +238,82 @@ impl Transform {
         }
         self.follow_terrain();
         *self.view() != before
+    }
+
+    /// The height of the plane on which a move around `anchor` (y down)
+    /// holds the ground it grabbed under `grabbed`, the pointer before the
+    /// move, over terrain (GL JS's `_terrainGestureElevation`): for a
+    /// gesture and its momentum (`gesture`), the height of the ground the
+    /// gesture grabbed at its first anchored step, which holds while the
+    /// gesture holds the same altitude, so that the map moves as far for
+    /// each pixel throughout; for a command, the height of the ground its own
+    /// line of sight meets.
+    ///
+    /// `None`, for the plane at the center's altitude, without terrain,
+    /// where the pointer grabbed no drawn ground, for an anchor at the view's
+    /// center or above the horizon, and for a plane nine tenths or more of
+    /// the way up from the center to the eye, where the line of sight meets
+    /// it at too shallow a depth to solve on.
+    pub(super) fn anchor_plane(
+        &mut self,
+        grabbed: &ScreenCoordinate,
+        anchor: &ScreenCoordinate,
+        gesture: bool,
+    ) -> Option<f64> {
+        let elevation = self.terrain.as_ref()?.elevation.clone();
+        let grab = |view: &View| {
+            let ground = elevation.as_deref()?;
+            Some(view.ground_under(&flip_y(view, grabbed), ground)?.height)
+        };
+        let height = if gesture {
+            let altitude = self.gesture.hold.unwrap_or(self.view().center_altitude());
+            match self.gesture.anchor_plane {
+                Some(plane) if plane.at_altitude == altitude => plane.height,
+                _ => {
+                    let height = grab(self.view());
+                    self.gesture.anchor_plane = Some(AnchorPlane { height, at_altitude: altitude });
+                    height
+                }
+            }
+        } else {
+            grab(self.view())
+        }?;
+        let view = self.view();
+        let center = view.padding().center_in(view.size());
+        let near_center = (anchor.x - center.x).powi(2) + (anchor.y - center.y).powi(2) < NEAR_CENTER;
+        let below_horizon = anchor.y > center.y - view.mercator_horizon();
+        let altitude = view.center_altitude();
+        let solvable = height - altitude < MAX_ANCHOR_RISE * (view.eye_position().z - altitude);
+        (!near_center && below_horizon && solvable).then_some(height)
+    }
+
+    /// The height of the plane on which a move around `anchor` holds the
+    /// location under it ([`Self::anchor_plane`] for `grabbed`): the plane at
+    /// the center's altitude where that is `None` over terrain, and sea
+    /// level, the flat map, without terrain.
+    pub(super) fn anchor_height(
+        &mut self,
+        grabbed: &ScreenCoordinate,
+        anchor: &ScreenCoordinate,
+        gesture: bool,
+    ) -> f64 {
+        if self.terrain.is_none() {
+            return 0.0;
+        }
+        self.anchor_plane(grabbed, anchor, gesture).unwrap_or(self.view().center_altitude())
+    }
+
+    /// The center that moves the location on the plane `height` meters
+    /// above sea level under `from` to `to`, both screen points (y down),
+    /// unwrapped.
+    pub(super) fn center_moving_on_plane(
+        &self,
+        from: &ScreenCoordinate,
+        to: &ScreenCoordinate,
+        height: f64,
+    ) -> Result<LatLng, Error> {
+        let location = self.screen_coordinate_to_lat_lng_at(from, height, WrapMode::Unwrapped)?;
+        self.state.center_for_lat_lng_at(&location, &flip_y(self.view(), to), height)
     }
 
     /// Keeps the eye of a command's camera out of the terrain: where the

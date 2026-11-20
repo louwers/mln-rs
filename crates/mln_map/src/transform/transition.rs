@@ -47,6 +47,9 @@ pub(super) struct Transition {
     frame: FrameFn,
     anchor: Option<ScreenCoordinate>,
     anchor_lat_lng: LatLng,
+    /// The height in meters of the plane the anchor holds its location on
+    /// ([`Transform::anchor_height`]): 0, the flat map, without terrain.
+    anchor_height: f64,
     /// Set for a momentum, which moves the camera relative to where it
     /// stands instead of through `frame`.
     pub(super) momentum: Option<MomentumState>,
@@ -89,6 +92,7 @@ impl Transition {
             frame,
             anchor: None,
             anchor_lat_lng: LatLng::default(),
+            anchor_height: 0.0,
             momentum: None,
             stopped: None,
             source,
@@ -248,11 +252,13 @@ impl Transform {
         // transforms. An explicit center takes precedence over an anchor.
         let mut anchor = if camera.center.is_some() { None } else { camera.anchor };
         let mut anchor_lat_lng = LatLng::default();
+        let mut anchor_height = 0.0;
         if let Some(a) = anchor.as_mut() {
+            anchor_height = self.anchor_height(a, a, self.source != CameraChangeSource::Command);
             a.y = f64::from(self.state.view().size().height) - a.y;
             // An anchor that has no LatLng (NaN or infinite) is logged and
             // ignored.
-            match self.state.view().screen_coordinate_to_lat_lng(a, WrapMode::Unwrapped) {
+            match self.state.view().screen_coordinate_to_lat_lng_at(a, anchor_height, WrapMode::Unwrapped) {
                 Ok(lat_lng) => {
                     anchor_lat_lng = lat_lng;
                     fields |= CENTER;
@@ -276,7 +282,7 @@ impl Transform {
         let clamped = !self.gesture_in_progress && self.terrain.as_ref().is_some_and(|terrain| terrain.clamped);
         let end = if clamped {
             match anchor {
-                Some(anchor) => Some(self.anchored_end(fields, &target, &anchor, &anchor_lat_lng)),
+                Some(anchor) => Some(self.anchored_end(fields, &target, &anchor, &anchor_lat_lng, anchor_height)),
                 None => camera.center.and(target.center).map(|end| end.wrapped()),
             }
         } else {
@@ -296,6 +302,7 @@ impl Transform {
             coupled_fields,
             anchor,
             anchor_lat_lng,
+            anchor_height,
             command: self.reporting(),
             eased_altitude,
             ..Transition::new(fields, moving_fields, start, duration, animation, frame, self.source)
@@ -360,7 +367,7 @@ impl Transform {
         // properties.
         let anchored = self.transitions.iter().rev().find_map(|transition| {
             let anchor = transition.anchor.filter(|_| transition.fields & CENTER != 0)?;
-            Some((anchor, transition.anchor_lat_lng))
+            Some((anchor, transition.anchor_lat_lng, transition.anchor_height))
         });
 
         // On the globe the anchor is re-read every frame and the zoom around
@@ -369,7 +376,7 @@ impl Transform {
         // LatLng in a frame is logged, and the anchor's location at the
         // start stands in.
         let globe_zoom_around = match anchored {
-            Some((anchor, anchor_lat_lng)) if self.globe_on_screen() => {
+            Some((anchor, anchor_lat_lng, _)) if self.globe_on_screen() => {
                 let location =
                     self.state.view().screen_coordinate_to_lat_lng(&anchor, WrapMode::Unwrapped).unwrap_or_else(|e| {
                         Log::error(Event::General, &e.message);
@@ -380,8 +387,10 @@ impl Transform {
             _ => None,
         };
 
+        // The altitude is set before the anchor holds its location, so that
+        // it holds at the frame's altitude (see `place`).
         place(&mut self.state, &current, &mut camera);
-        if let Some((anchor, anchor_lat_lng)) = anchored {
+        if let Some((anchor, anchor_lat_lng, height)) = anchored {
             match globe_zoom_around {
                 Some((location, zoom_before)) if self.state.view().zoom() != zoom_before => {
                     let zoom_delta = self.state.view().zoom() - zoom_before;
@@ -393,29 +402,36 @@ impl Transform {
                         self.globe_free_bearing,
                     );
                 }
-                // The anchor had a LatLng at the start; a frame that has none
-                // logs it, as frame_edge_insets does.
-                _ => {
-                    if let Err(e) = self.state.move_lat_lng(&anchor_lat_lng, &anchor) {
-                        Log::error(Event::General, &e.message);
-                    }
-                }
+                _ => self.hold_anchor(&anchor_lat_lng, &anchor, height),
             }
         }
+        // Last, so that the eye stays clear: a gesture's lift that changes
+        // this frame moves the anchor's location on the screen a little,
+        // and the next step holds the location under it then.
         self.keep_clear_of_ground();
+    }
+
+    /// Moves the center so that `location`, `height` meters up, is at
+    /// `anchor` (y up) again. The anchor had a `LatLng` at the start; a frame
+    /// that has none logs it, as `frame_edge_insets` does.
+    fn hold_anchor(&mut self, location: &LatLng, anchor: &ScreenCoordinate, height: f64) {
+        if let Err(e) = self.state.move_lat_lng_at(location, anchor, height) {
+            Log::error(Event::General, &e.message);
+        }
     }
 
     /// Where an anchored command's center ends: its camera at the end,
     /// `target`, for the fields it sets, put on a copy of the state, with
-    /// the anchor's location moved under it. The anchor holds its location
-    /// at the end's altitude, so where the ground at a first end is known,
-    /// the end is found again at that altitude.
+    /// the anchor's location, `height` meters up, moved under it. The anchor
+    /// holds its location at the end's altitude, so where the ground at a
+    /// first end is known, the end is found again at that altitude.
     fn anchored_end(
         &self,
         fields: u16,
         target: &CameraOptions,
         anchor: &ScreenCoordinate,
         location: &LatLng,
+        height: f64,
     ) -> LatLng {
         let end_at = |altitude: f64| {
             let mut state = self.state.clone();
@@ -424,7 +440,7 @@ impl Transform {
             compose(&mut camera, target, fields & !ALTITUDE);
             place(&mut state, &current, &mut camera);
             // The anchor had a location at the start, so it has one here.
-            let _ = state.move_lat_lng(location, anchor);
+            let _ = state.move_lat_lng_at(location, anchor, height);
             state.view().center(WrapMode::Wrapped)
         };
         let end = end_at(self.state.view().center_altitude());
