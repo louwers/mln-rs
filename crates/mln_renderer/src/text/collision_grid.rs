@@ -176,8 +176,8 @@ impl<T> Grid<T> {
     }
 
     /// The columns and rows of the cells at `bounds`' corners, clamped to
-    /// the grid. Reversed bounds, as negative padding makes, give an empty
-    /// range.
+    /// the grid. Bounds reversed across cells, as negative padding makes,
+    /// give a range whose start cell is past its end, which is empty.
     fn cell_range(&self, bounds: &Aabb) -> ((usize, usize), (usize, usize)) {
         // Casting saturates: a negative or NaN coordinate is in the first
         // cell.

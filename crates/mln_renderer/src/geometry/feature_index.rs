@@ -616,9 +616,12 @@ mod tests {
     }
 
     #[test]
-    fn indexes_boxes_whose_coordinates_overflow_i16_when_summed() {
-        let boxes: Vec<Bounds> = (0..20).map(|i| [-2000, i * 10, 31000, i * 10 + 5]).collect();
-        let tree = build_tree(&boxes).expect("boxes");
-        assert_eq!(tree.search(0, 0, 10, 10).len(), 2);
+    fn indexes_boxes_whose_extent_or_center_overflows_i16() {
+        // Wider than i16 holds, and with an x sum past it.
+        for (min_x, max_x) in [(-2000, 31000), (2000, 31000)] {
+            let boxes: Vec<Bounds> = (0..20).map(|i| [min_x, i * 10, max_x, i * 10 + 5]).collect();
+            let tree = build_tree(&boxes).expect("boxes");
+            assert_eq!(tree.search(3000, 0, 3010, 10).len(), 2);
+        }
     }
 }
