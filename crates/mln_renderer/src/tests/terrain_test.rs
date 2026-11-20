@@ -299,7 +299,10 @@ impl TerrainLoad {
     /// One update, as a frame's.
     fn update(&mut self) {
         crate::tests::update(&mut self.store);
-        let parameters = update_parameters(self.style.clone(), &self.transform, MapMode::Static);
+        let parameters = UpdateParameters {
+            elevation: self.seen.clone(),
+            ..update_parameters(self.style.clone(), &self.transform, MapMode::Static)
+        };
         let (store, render_source) = (&self.store, &self.render_source);
         self.terrain.update(&parameters, |_| store.source(render_source.tiles()?));
         let file_source: Arc<dyn FileSource> = Arc::<DemTiles>::clone(&self.tiles);
@@ -328,8 +331,7 @@ impl TerrainLoad {
         let relayout = std::mem::take(&mut self.relayout);
         self.render_source.update(&mut self.store, self.source.clone(), &[], false, relayout, &tile_parameters);
         let (store, render_source) = (&self.store, &self.render_source);
-        self.grounded =
-            self.terrain.bind(|_| store.source(render_source.tiles()?), self.seen.as_ref(), &mut self.events);
+        self.grounded = self.terrain.bind(|_| store.source(render_source.tiles()?), &parameters, &mut self.events);
         self.store.drive();
         self.errors +=
             self.store.take_events().iter().filter(|event| matches!(event, StoreEvent::Error { .. })).count();
@@ -549,11 +551,13 @@ fn the_ground_the_map_stands_on_is_the_height_rule_on_the_drawn_dem() {
     // Ground far from the view, where no tile drew.
     assert_eq!(None, ground.at(LatLng::new(-45.0, -170.0).unwrap()));
 
+    load.seen = Some(ground);
     load.frame();
     assert!(load.ground_events().is_empty(), "no change, nothing to tell");
 
     load.style.apply(Edit::SetTerrain(None)).unwrap();
     load.update();
+    load.seen = None;
     load.update();
     assert!(matches!(load.ground_events()[..], [None]));
 }
@@ -561,7 +565,9 @@ fn the_ground_the_map_stands_on_is_the_height_rule_on_the_drawn_dem() {
 /// An update's camera stands on the terrain's current ground only when the
 /// update carries the snapshot of it that the terrain last told the map of,
 /// which a still image waits for: not one that came before, and not none
-/// while terrain draws. Without terrain, an update that carries none does.
+/// while terrain draws. For an update that carries another, the terrain
+/// tells the map of its current ground again, though it didn't change.
+/// Without terrain, an update that carries none stands on it.
 #[test]
 fn an_update_stands_on_the_current_ground_when_it_carries_its_snapshot() {
     let mut load = TerrainLoad::new((0, 14), 1.0);
@@ -571,6 +577,7 @@ fn an_update_stands_on_the_current_ground_when_it_carries_its_snapshot() {
     load.seen = Some(Arc::clone(&loading));
     load.frame();
     assert!(load.grounded);
+    assert!(load.ground_events().is_empty());
 
     load.answer(|_| Some(terrarium_png(100)));
     assert!(load.is_loaded());
@@ -578,7 +585,9 @@ fn an_update_stands_on_the_current_ground_when_it_carries_its_snapshot() {
     let loaded = load.ground_events().pop().flatten().expect("the loaded ground");
     load.frame();
     assert!(!load.grounded, "the update carries the ground from before");
-    load.seen = Some(loaded);
+    let again = load.ground_events();
+    assert!(matches!(&again[..], [Some(ground)] if Arc::ptr_eq(ground, &loaded)), "{again:?}");
+    load.seen = Some(Arc::clone(&loaded));
     load.frame();
     assert!(load.grounded);
     assert!(load.ground_events().is_empty());
@@ -702,21 +711,25 @@ fn a_renderer_without_terrain_tells_a_grounded_map_there_is_no_ground() {
             .collect()
     };
     assert_eq!(Vec::<bool>::new(), ground(None));
-    let elsewhere: Arc<dyn Elevation> = Arc::new(Nowhere);
+    let elsewhere: Arc<dyn Elevation> = Arc::new(Uniform { at: None, min_at: None });
     assert_eq!(vec![false], ground(Some(Arc::clone(&elsewhere))));
     assert_eq!(vec![false], ground(Some(elsewhere)));
 }
 
-/// Ground that another renderer drew.
+/// Ground of one height and floor everywhere, as another renderer may
+/// have drawn.
 #[derive(Debug)]
-struct Nowhere;
+struct Uniform {
+    at: Option<f64>,
+    min_at: Option<f64>,
+}
 
-impl Elevation for Nowhere {
+impl Elevation for Uniform {
     fn at(&self, _: LatLng) -> Option<f64> {
-        None
+        self.at
     }
 
     fn min_at(&self, _: LatLng) -> Option<f64> {
-        None
+        self.min_at
     }
 }

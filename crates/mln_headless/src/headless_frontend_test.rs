@@ -278,6 +278,47 @@ fn a_still_image_whose_terrain_goes_away_ends_flat() {
     assert_eq!((0.0, None), ground(&map));
 }
 
+/// Asks for a still image and draws the map's updates until it ends, or
+/// gives up after a while: `None` for a still that never ends.
+fn try_still(map: &mut Map, frontend: &mut HeadlessFrontend, run_loop: &Queue<()>) -> Option<Result<(), Error>> {
+    map.process_events();
+    map.render_still().unwrap();
+    (0..2_000).find_map(|_| {
+        map.process_events();
+        let ended = map.take_still_image();
+        if ended.is_none() && !frontend.render_update() && !run_loop.run_once(&mut ()) {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        ended
+    })
+}
+
+/// A still image over terrain that the style dropped and then set again
+/// as it was, between two images, draws: the map let go of the ground with
+/// the terrain, and the renderer, whose ground is the same as before, tells
+/// it of that ground again.
+#[test]
+fn a_still_image_over_terrain_removed_and_restored_draws() {
+    let size = Size::new(64, 64);
+    let run_loop = Queue::new();
+    let pool = Pool::new(4);
+    let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop, &pool).expect("a headless frontend");
+    let options = MapOptions { map_mode: MapMode::Static, size, ..Default::default() };
+    let mut map = Map::with_file_source(dem_source(true), options, &pool).unwrap();
+    frontend.attach(&mut map);
+    map.load_style_json(TERRAIN_STYLE);
+    assert_eq!(Some(Ok(())), try_still(&mut map, &mut frontend, &run_loop));
+    assert_eq!(1, frontend.rendering_stats().num_frames);
+
+    let terrain = map.style().get_terrain().map(|terrain| (**terrain).clone());
+    map.edit_style(|style| style.apply(mln_style::Edit::SetTerrain(None))).unwrap();
+    map.edit_style(|style| style.apply(mln_style::Edit::SetTerrain(terrain))).unwrap();
+    assert_eq!(Some(Ok(())), try_still(&mut map, &mut frontend, &run_loop), "the second still never ended");
+    assert_eq!(2, frontend.rendering_stats().num_frames);
+    let altitude = map.update_reader().latest().expect("an update").parameters.view.center_altitude();
+    assert!((altitude - 1000.0).abs() < 1e-6, "{altitude}");
+}
+
 /// A continuous map over terrain goes idle only once a complete frame
 /// showed the camera standing on the newest ground: the frame of an update
 /// from before the camera stood on it isn't complete.
