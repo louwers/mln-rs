@@ -5,8 +5,8 @@ use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
 use mln_gfx::gpu::conformance::{
     clip_mask_and_background, custom_layers, depth_only, drawn_vertex_texels, foreign_ids, imported_textures,
-    instanced_walls, invalid_calls, pulled_walls, readbacks, resources_in_use, topologies, transparent_replace,
-    vertex_layouts, wall_quads, written_vertex_texels,
+    instanced_walls, invalid_calls, mipmapped_targets, pulled_walls, readbacks, resources_in_use, topologies,
+    transparent_replace, vertex_layouts, wall_quads, written_vertex_texels,
 };
 use mln_gfx::gpu::{
     BindGroupEntry, BindingsDesc, BindingsId, BufferDesc, BufferId, BufferUsage, ColorAttachment, DepthState,
@@ -97,6 +97,14 @@ fn drawn_vertex_texels_through_gpu() {
         return;
     };
     drawn_vertex_texels(&mut gpu).expect("the frames");
+}
+
+#[test]
+fn mipmapped_targets_through_gpu() {
+    let Some(mut gpu) = gpu() else {
+        return;
+    };
+    mipmapped_targets(&mut gpu).expect("the frames");
 }
 
 #[test]

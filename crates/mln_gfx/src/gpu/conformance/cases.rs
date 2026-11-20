@@ -23,6 +23,7 @@ use crate::shaders::fill_extrusion_layer_ubo::{
 use crate::shaders::fill_layer_ubo::{FillDrawableUBO, FillDrawableUnionUBO, FillEvaluatedPropsUBO};
 use crate::shaders::heatmap_texture_layer_ubo::HeatmapTexturePropsUBO;
 use crate::shaders::layer_ubo::{GlobalPaintParamsUBO, ProjectionUBO};
+use crate::shaders::raster_layer_ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
 use crate::shaders::shader_defines::{
     ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_PROPS_UBO,
     ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE, ID_FILL_COLOR_VERTEX_ATTRIBUTE, ID_FILL_DRAWABLE_UBO,
@@ -31,13 +32,14 @@ use crate::shaders::shader_defines::{
     ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_PROPS_UBO,
     ID_FILL_EXTRUSION_TILE_PROPS_UBO, ID_FILL_EXTRUSION_WALL_VERTICES, ID_FILL_OPACITY_VERTEX_ATTRIBUTE,
     ID_FILL_POS_VERTEX_ATTRIBUTE, ID_GLOBAL_PAINT_PARAMS_UBO, ID_HEATMAP_COLOR_RAMP_TEXTURE, ID_HEATMAP_IMAGE_TEXTURE,
-    ID_HEATMAP_POS_VERTEX_ATTRIBUTE, ID_HEATMAP_TEXTURE_PROPS_UBO, ID_PROJECTION_UBO,
-    ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE, ID_VERTEX_TEXEL_TEXTURE,
+    ID_HEATMAP_POS_VERTEX_ATTRIBUTE, ID_HEATMAP_TEXTURE_PROPS_UBO, ID_PROJECTION_UBO, ID_RASTER_DRAWABLE_UBO,
+    ID_RASTER_EVALUATED_PROPS_UBO, ID_RASTER_IMAGE0_TEXTURE, ID_RASTER_IMAGE1_TEXTURE, ID_RASTER_POS_VERTEX_ATTRIBUTE,
+    ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE, ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE, ID_VERTEX_TEXEL_TEXTURE,
 };
 use crate::shaders::shader_source::BuiltIn;
 use crate::stencil_mode::StencilMode;
 use crate::texture2d::SamplerState;
-use crate::types::DepthFunctionType;
+use crate::types::{DepthFunctionType, TextureFilterType};
 
 const BLACK: Color = Color::black();
 const RGBA8: TargetFormats = TargetFormats { color: Some(TextureFormat::Rgba8Unorm), depth_stencil: None };
@@ -616,6 +618,151 @@ fn check_vertex_texels(pixels: &[u8], texels: [[u8; 4]; 4]) {
             assert_eq!(texel(pixels, x, y), expected, "the texel the vertices at ({x}, {y}) read");
         }
     }
+}
+
+/// Checks that a mipmapped render target's mips are made of what a pass
+/// drew into level 0, and that a trilinear, anisotropic sampler reads
+/// them: [`columns`] of a mipmapped texture and of one without mips, each
+/// sampled at a quarter of its size by [`minified`]. The mipmapped one
+/// reads as the average of its texels, its level 2, and through a sampler
+/// without mips as the texels at its center, as the texture without mips
+/// does through either. Its mips leave level 0 as the pass drew it, and the
+/// texture without mips has none to make. Returns the error of a call that
+/// should succeed.
+///
+/// # Panics
+///
+/// Where a check doesn't hold.
+pub fn mipmapped_targets(gpu: &mut impl Gpu) -> Result<(), GpuError> {
+    let mipmapped = columns(gpu, true)?;
+    gpu.generate_mipmaps(mipmapped)?;
+    let plain = columns(gpu, false)?;
+    assert!(invalid(&gpu.generate_mipmaps(plain)), "the mips of a texture without them");
+
+    let trilinear = SamplerState {
+        filter: TextureFilterType::Linear,
+        max_anisotropy: 16,
+        mipmapped: true,
+        ..SamplerState::default()
+    };
+    let bilinear = SamplerState { filter: TextureFilterType::Linear, ..SamplerState::default() };
+    // A quarter red and three quarters blue, each rounded at two levels.
+    let near = |pixel: [u8; 4], expected: [u8; 4]| pixel.iter().zip(expected).all(|(&a, b)| a.abs_diff(b) <= 3);
+    let average = minified(gpu, mipmapped, trilinear)?;
+    assert!(near(average, [64, 0, 191, 255]), "the mips' average, {average:?}");
+    let blue = [0, 0, 255, 255];
+    assert_eq!(minified(gpu, mipmapped, bilinear)?, blue, "level 0 through a sampler without mips");
+    assert_eq!(minified(gpu, plain, trilinear)?, blue, "a texture without mips");
+    assert_eq!(minified(gpu, plain, bilinear)?, blue);
+
+    let size = Size::new(4, 4);
+    let level = read_texels(gpu, mipmapped, TextureRegion::whole(size))?;
+    for (index, pixel) in level.chunks(4).enumerate() {
+        let expected = if index % 4 == 0 { [255, 0, 0, 255] } else { blue };
+        assert_eq!(pixel, expected, "texel {index} of level 0");
+    }
+    Ok(())
+}
+
+/// A 4×4 texture, with mips if `mipmapped`, that a pass clears to blue and
+/// draws red into the left column of. (A backend may store what a pass
+/// draws bottom row first, so the rows are alike.)
+fn columns(gpu: &mut impl Gpu, mipmapped: bool) -> Result<TextureId, GpuError> {
+    let size = Size::new(4, 4);
+    let texture = gpu.create_texture(&TextureDesc {
+        label: "columns",
+        size,
+        format: TextureFormat::Rgba8Unorm,
+        usage: TextureUsage { sampled: true, render_target: true, copy_src: true },
+        mipmapped,
+    })?;
+    let red = solid(gpu, TextureFormat::Rgba8Unorm, [1.0, 0.0, 0.0, 1.0])?;
+    gpu.begin_pass(&PassDesc {
+        label: "columns",
+        color: Some(ColorAttachment { texture, load: LoadOp::Clear(Color::new_unchecked(0.0, 0.0, 1.0, 1.0)) }),
+        depth_stencil: None,
+    })?;
+    let scissor = Scissor { x: 0, y: 0, width: 1, height: size.height };
+    gpu.draw(&Draw { dynamic: DynamicState { scissor, ..dynamic() }, ..red.draw(red.pipeline) })?;
+    gpu.end_pass()?;
+    Ok(texture)
+}
+
+/// The color that the raster shader draws into a 1×1 target from all of
+/// `texture`, a 4×4 one of [`columns`], through a sampler of `state`: at a
+/// quarter of its size, where a sampler with mips reads its level 2.
+fn minified(gpu: &mut impl Gpu, texture: TextureId, state: SamplerState) -> Result<[u8; 4], GpuError> {
+    let size = Size::new(1, 1);
+    let target = gpu.create_texture(&TextureDesc {
+        label: "minified",
+        size,
+        format: TextureFormat::Rgba8Unorm,
+        usage: TextureUsage { render_target: true, copy_src: true, ..TextureUsage::default() },
+        mipmapped: false,
+    })?;
+    let shader = gpu.create_shader(&ShaderKey::new(BuiltIn::RasterShader, []))?;
+    let sampler = gpu.create_sampler(&state)?;
+    let projection = [ProjectionUBO { matrix: tile_matrix(1.0), ..ProjectionUBO::default() }];
+    let drawable = [RasterDrawableUBO { matrix: tile_matrix(1.0) }];
+    // Each texture's color as it is.
+    let props = RasterEvaluatedPropsUBO {
+        spin_weights: [1.0, 0.0, 0.0, 0.0],
+        scale_parent: 1.0,
+        buffer_scale: 1.0,
+        opacity: 1.0,
+        brightness_high: 1.0,
+        contrast_factor: 1.0,
+        ..RasterEvaluatedPropsUBO::default()
+    };
+    let (projection, drawable) = (bytemuck::cast_slice(&projection), bytemuck::cast_slice(&drawable));
+    let props = bytemuck::bytes_of(&props);
+    let projection_buffer = buffer(gpu, BufferUsage::Storage, projection)?;
+    let drawable_buffer = buffer(gpu, BufferUsage::Storage, drawable)?;
+    let props_buffer = buffer(gpu, BufferUsage::Uniform, props)?;
+    let bindings = gpu.create_bindings(&BindingsDesc {
+        label: "minified",
+        shader,
+        entries: &[
+            whole(ID_PROJECTION_UBO, projection_buffer, projection),
+            whole(ID_RASTER_DRAWABLE_UBO, drawable_buffer, drawable),
+            whole(ID_RASTER_EVALUATED_PROPS_UBO, props_buffer, props),
+            BindGroupEntry::Texture { id: ID_RASTER_IMAGE0_TEXTURE as u32, texture, sampler },
+            BindGroupEntry::Texture { id: ID_RASTER_IMAGE1_TEXTURE as u32, texture, sampler },
+        ],
+    })?;
+    // The tile's quad, each vertex its position, then the same as its
+    // texture position.
+    let e = EXTENT as i16;
+    let quad: [[i16; 4]; 4] = [[0, 0, 0, 0], [e, 0, e, 0], [0, e, 0, e], [e, e, e, e]];
+    let vertices = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&quad))?;
+    let indices = buffer(gpu, BufferUsage::Index, bytemuck::cast_slice(&[0u16, 1, 2, 1, 2, 3]))?;
+    let attribute = |id: usize, offset| VertexAttribute { id: id as u32, format: AttributeDataType::Short2, offset };
+    let layouts = [VertexBufferLayout {
+        stride: 8,
+        step: VertexStep::Vertex,
+        attributes: vec![
+            attribute(ID_RASTER_POS_VERTEX_ATTRIBUTE, 0),
+            attribute(ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE, 4),
+        ],
+    }];
+    let geometry = gpu.create_geometry(&GeometryDesc {
+        shader,
+        layouts: &layouts,
+        vertex_buffers: &[(vertices, 0)],
+        index_buffer: indices,
+    })?;
+    let pipeline =
+        gpu.create_pipeline(&PipelineDesc { shader, vertex_buffers: &layouts, ..background(shader, RGBA8) })?;
+    gpu.begin_pass(&PassDesc {
+        label: "minified",
+        color: Some(ColorAttachment { texture: target, load: LoadOp::Clear(BLACK) }),
+        depth_stencil: None,
+    })?;
+    let scissor = Scissor { x: 0, y: 0, width: size.width, height: size.height };
+    gpu.draw(&Draw { dynamic: DynamicState { scissor, ..dynamic() }, ..draw(pipeline, bindings, geometry, 6) })?;
+    gpu.end_pass()?;
+    let pixel = read_texels(gpu, target, TextureRegion::whole(size))?;
+    Ok([pixel[0], pixel[1], pixel[2], pixel[3]])
 }
 
 /// Checks that a pipeline reads its attributes from whichever vertex

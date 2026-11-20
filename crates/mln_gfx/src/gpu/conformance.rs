@@ -14,7 +14,8 @@
 //! [`pulled_walls`] does from a vertex buffer it reads by vertex index.
 //! [`written_vertex_texels`] and [`drawn_vertex_texels`] draw each quarter of
 //! the target in the color of a texel that the vertex stage reads, of a
-//! texture written or drawn into just before. The other cases draw one color
+//! texture written or drawn into just before. [`mipmapped_targets`] samples
+//! the mips of a texture drawn into, minified. The other cases draw one color
 //! over the whole target, as [`transparent_replace`] does to check that
 //! `Replace` doesn't blend. On wasm, [`host_writes`] checks writes from JS
 //! arrays.
