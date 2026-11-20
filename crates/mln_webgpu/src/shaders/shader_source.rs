@@ -446,6 +446,7 @@ pub(crate) static BUILT_INS: &[(&Program, &Source)] = &[
     (&programs::SKY, &SKY_SHADER),
     (&programs::ATMOSPHERE, &ATMOSPHERE_SHADER),
     (&programs::LAYER_COMPOSITE, &LAYER_COMPOSITE_SHADER),
+    (&programs::TILE_DEBUG, &LINE_SHADER),
 ];
 
 /// The source of each program of the built-in layer types, which the

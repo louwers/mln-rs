@@ -254,7 +254,12 @@ fn ubo_ids(program: &Program, source: &msl::Source) -> Vec<(&'static str, usize)
             ],
             "hillshadePrepareUBOCount",
         ),
-        "LineShader" | "LineGradientShader" | "LinePatternShader" | "LineSDFShader" | "LineGradientSDFShader" => (
+        "LineShader"
+        | "LineGradientShader"
+        | "LinePatternShader"
+        | "LineSDFShader"
+        | "LineGradientSDFShader"
+        | "TileDebugShader" => (
             &[
                 ("idLineDrawableUBO", ID_LINE_DRAWABLE_UBO),
                 ("idLineTilePropsUBO", ID_LINE_TILE_PROPS_UBO),

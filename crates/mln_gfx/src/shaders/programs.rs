@@ -1,5 +1,8 @@
-//! The built-in programs.
+//! The built-in programs: the engine's own (`CLIPPING_MASK`, `SKY`,
+//! `ATMOSPHERE`, `GLOBE_DEPTH`, `LAYER_COMPOSITE` and `TILE_DEBUG`), whose
+//! sources each backend has, and the built-in layer types'.
 
+use crate::gfx_types::AttributeDataType;
 use crate::gfx_types::AttributeDataType::{Float, Float2, Float3, Float4, Short2, Short4, UByte4, UShort2, UShort4};
 use crate::shaders::program::{Program, Property};
 use crate::shaders::shader_defines::{
@@ -208,28 +211,32 @@ pub static FILL_OUTLINE_PATTERN_INSTANCED: Program = Program {
     ],
 };
 
+const LINE_ATTRIBUTES: &[(usize, AttributeDataType)] = &[
+    (ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, Short2),
+    (ID_LINE_DATA_VERTEX_ATTRIBUTE, UByte4),
+    (ID_LINE_COLOR_VERTEX_ATTRIBUTE, Float4),
+    (ID_LINE_BLUR_VERTEX_ATTRIBUTE, Float2),
+    (ID_LINE_OPACITY_VERTEX_ATTRIBUTE, Float2),
+    (ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE, Float2),
+    (ID_LINE_OFFSET_VERTEX_ATTRIBUTE, Float2),
+    (ID_LINE_WIDTH_VERTEX_ATTRIBUTE, Float2),
+];
+
+const LINE_PROPERTIES: &[Property] = &[
+    property("color", ID_LINE_COLOR_VERTEX_ATTRIBUTE),
+    property("blur", ID_LINE_BLUR_VERTEX_ATTRIBUTE),
+    property("opacity", ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
+    property("gapwidth", ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
+    property("offset", ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
+    property("width", ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
+];
+
 pub static LINE: Program = Program {
     name: "LineShader",
-    attributes: &[
-        (ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, Short2),
-        (ID_LINE_DATA_VERTEX_ATTRIBUTE, UByte4),
-        (ID_LINE_COLOR_VERTEX_ATTRIBUTE, Float4),
-        (ID_LINE_BLUR_VERTEX_ATTRIBUTE, Float2),
-        (ID_LINE_OPACITY_VERTEX_ATTRIBUTE, Float2),
-        (ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE, Float2),
-        (ID_LINE_OFFSET_VERTEX_ATTRIBUTE, Float2),
-        (ID_LINE_WIDTH_VERTEX_ATTRIBUTE, Float2),
-    ],
+    attributes: LINE_ATTRIBUTES,
     instance_attributes: &[],
     textures: &[],
-    properties: &[
-        property("color", ID_LINE_COLOR_VERTEX_ATTRIBUTE),
-        property("blur", ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-        property("opacity", ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-        property("gapwidth", ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-        property("offset", ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-        property("width", ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
-    ],
+    properties: LINE_PROPERTIES,
 };
 
 pub static LINE_GRADIENT: Program = Program {
@@ -667,4 +674,15 @@ pub static LAYER_COMPOSITE: Program = Program {
     instance_attributes: &[],
     textures: &[ID_LAYER_COMPOSITE_IMAGE_TEXTURE, ID_LAYER_COMPOSITE_BACKDROP_TEXTURE],
     properties: &[],
+};
+
+/// The engine's debug overlays of tiles: their borders and their text, drawn
+/// as lines whose properties are all uniforms. Each backend compiles it from
+/// its line shader.
+pub static TILE_DEBUG: Program = Program {
+    name: "TileDebugShader",
+    attributes: LINE_ATTRIBUTES,
+    instance_attributes: &[],
+    textures: &[],
+    properties: LINE_PROPERTIES,
 };

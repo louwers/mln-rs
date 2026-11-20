@@ -247,7 +247,7 @@ fn buffers(program: &Program) -> Vec<(Buffer, usize)> {
             (DrawableUniform(ID_HILLSHADE_PREPARE_DRAWABLE_UBO), size_of::<HillshadePrepareDrawableUBO>()),
             (DrawableUniform(ID_HILLSHADE_PREPARE_TILE_PROPS_UBO), size_of::<HillshadePrepareTilePropsUBO>()),
         ],
-        "LineShader" | "LineGradientShader" => vec![
+        "LineShader" | "LineGradientShader" | "TileDebugShader" => vec![
             (LayerStorage(ID_LINE_DRAWABLE_UBO), size_of::<LineDrawableUnionUBO>()),
             projection,
             (LayerUniform(ID_LINE_EVALUATED_PROPS_UBO), size_of::<LineEvaluatedPropsUBO>()),

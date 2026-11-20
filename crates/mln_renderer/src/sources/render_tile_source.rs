@@ -420,7 +420,7 @@ impl RenderSource for RenderTileSource {
             ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
         ];
         let polyline_shader =
-            parameters.context.shader_key(&programs::LINE, uniforms.into_iter().collect(), projection_variant);
+            parameters.context.shader_key(&programs::TILE_DEBUG, uniforms.into_iter().collect(), projection_variant);
 
         // The tiles to cover, whose draws stay where they were built with
         // the same shader and spell the tile's text: one of the other
