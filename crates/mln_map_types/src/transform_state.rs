@@ -13,6 +13,7 @@ use mln_util::size::Size;
 use crate::camera::{CameraOptions, FreeCameraOptions};
 use crate::camera_limits::CameraLimits;
 use crate::camera_pose::CameraPose;
+use crate::ground::GroundHit;
 use crate::mode::{ConstrainMode, ViewportMode};
 use crate::vertical_perspective_projection::VerticalPerspectiveProjection;
 use crate::view::{NorthOrientation, View, ViewParams, map_offset, max_mercator_horizon_angle, scale_zoom, zoom_scale};
@@ -735,6 +736,57 @@ impl TransformState {
         self.set_pitch(pitch);
         self.set_lat_lng_zoom(&center, zoom);
         *self.view.params() != before
+    }
+
+    /// Moves the center along the view onto `hit`, the ground its line of
+    /// sight meets, with the eye, the pitch and the bearing kept: the center
+    /// stands as far along the view as `hit` is from the eye, at the height
+    /// the view reaches there, and the zoom follows from that distance (GL
+    /// JS's `moveCenterToElevation`, orbis's `recenter_on`). Distances across
+    /// the ground convert to meters at `hit`'s latitude, so where the
+    /// center's latitude was another, the center lands off `hit` by that
+    /// share of the distance between the latitudes' scales.
+    ///
+    /// Returns whether it moved the center there. It leaves the state as it
+    /// is on the globe, while the view shows nothing, where `hit` isn't in
+    /// front of the eye, and where the limits refuse the zoom or the center.
+    pub fn recenter_on(&mut self, hit: &GroundHit) -> bool {
+        let view = &self.view;
+        if view.is_globe() || !view.is_valid() {
+            return false;
+        }
+        let eye = view.eye_position();
+        let forward = view.camera_pose().forward();
+        // Meters per Web Mercator unit at zoom 0, across the ground at `hit`.
+        let latitude = hit.location(WrapMode::Unwrapped).latitude();
+        let meters = Projection::altitude_meters_per_pixel(latitude, 0.0) * TILE_SIZE_D;
+        let to_hit = DVec3::new((hit.world.x - eye.x) * meters, (hit.world.y - eye.y) * meters, hit.height - eye.z);
+        let distance = to_hit.dot(forward);
+        if !(distance.is_finite() && distance > 0.0) {
+            return false;
+        }
+        let world = Point::new(eye.x + forward.x * distance / meters, eye.y + forward.y * distance / meters);
+        let Ok(center) = Projection::unproject(&world, 1.0 / TILE_SIZE_D, WrapMode::Unwrapped) else {
+            return false;
+        };
+        // Wrapped, as move_lat_lng leaves it, unless bounds keep it in their
+        // range.
+        let center = if self.limits.bounds == LatLngBounds::default() { center.wrapped() } else { center };
+        let zoom = scale_zoom(view.camera_to_center_distance() * meters / distance / TILE_SIZE_D);
+
+        let mut moved = self.clone();
+        moved.set_center_altitude(eye.z + forward.z * distance);
+        moved.set_lat_lng_zoom(&center, zoom);
+        // The limits clamp what they refuse.
+        let landed = moved.view.center(WrapMode::Unwrapped);
+        let refused = (moved.view.zoom() - zoom).abs() > 1e-9
+            || (landed.latitude() - center.latitude()).abs() > 1e-9
+            || (landed.longitude() - center.longitude()).abs() > 1e-9;
+        if refused {
+            return false;
+        }
+        *self = moved;
+        true
     }
 
     /// Sets the lowest ground near the center while terrain draws, in

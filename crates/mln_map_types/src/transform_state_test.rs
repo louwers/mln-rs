@@ -472,6 +472,69 @@ fn an_eye_raised_level_with_the_center_looks_level() {
     assert!((state.view().zoom() - zoom).abs() < 1e-12, "{}", state.view().zoom());
 }
 
+/// A view at latitude 45, zoom 14 and pitch 60, turned, with the center at
+/// sea level, and the point 1000 m up on its center's line of sight, where
+/// ground that rises in front of the center would meet it.
+fn looking_at_a_rise() -> (TransformState, crate::GroundHit) {
+    use mln_util::geo::WrapMode;
+
+    let mut state = pitched(60.0);
+    state.set_angle(0.5);
+    state.set_lat_lng_zoom(&LatLng::new(45.0, 10.0).unwrap(), 14.0);
+    let view = state.view();
+    let center = view.lat_lng_to_screen_coordinate(&view.center(WrapMode::Unwrapped));
+    let (near, far) = view.line_of_sight(&center).unwrap();
+    let point = near + (far - near) * ((1000.0 - near.z) / (far.z - near.z));
+    (state, crate::GroundHit { world: point.truncate(), height: 1000.0 })
+}
+
+/// Meters along the ground at latitude 45 in a unit of Web Mercator at zoom 0.
+fn meters_at_45() -> f64 {
+    Projection::altitude_meters_per_pixel(45.0, 0.0) * mln_util::constants::TILE_SIZE_D
+}
+
+/// Moving the center along the view onto a point of its line of sight keeps
+/// the eye, the pitch and the bearing, and zooms in to the nearer center,
+/// which stands where the view at the new latitude reaches the point's
+/// height, off it by far less than a meter.
+#[test]
+fn recentering_keeps_the_eye_and_moves_the_center_along_the_view() {
+    use mln_util::geo::WrapMode;
+
+    let (mut state, hit) = looking_at_a_rise();
+    let before = state.view().clone();
+    assert!(state.recenter_on(&hit));
+    let view = state.view();
+    assert_eq!((before.pitch(), before.angle()), (view.pitch(), view.angle()));
+    let moved = view.eye_position() - before.eye_position();
+    let moved = DVec3::new(moved.x * meters_at_45(), moved.y * meters_at_45(), moved.z);
+    assert!(moved.length() < 1e-5, "the eye moved {moved} m");
+    assert!(view.zoom() > before.zoom() + 0.1, "{}", view.zoom());
+    let center = Projection::project(&view.center(WrapMode::Unwrapped), 1.0 / mln_util::constants::TILE_SIZE_D);
+    let off = DVec3::new(
+        (center.x - hit.world.x) * meters_at_45(),
+        (center.y - hit.world.y) * meters_at_45(),
+        view.center_altitude() - hit.height,
+    );
+    assert!(off.length() > 1e-3 && off.length() < 1.0, "the center stands {off} m off the point");
+}
+
+/// A point behind the eye, or a zoom past the limit, leaves the state as it
+/// is.
+#[test]
+fn recentering_refuses_a_point_behind_the_eye_or_past_the_zoom_limit() {
+    let (mut state, hit) = looking_at_a_rise();
+    let before = state.clone();
+    let eye = state.view().eye_position();
+    let behind = crate::GroundHit { world: hit.world + (eye.truncate() - hit.world) * 2.0, height: hit.height };
+    assert!(!state.recenter_on(&behind));
+    assert_eq!(before, state);
+    state.set_limits(CameraLimits { max_zoom: 14.0, ..*state.limits() }).unwrap();
+    let before = state.clone();
+    assert!(!state.recenter_on(&hit));
+    assert_eq!(before, state);
+}
+
 /// With terrain, the near and far planes are GL JS's (`calculateNearFarZ`
 /// in `mercator_camera_math.ts`): the camera below sea level is GL JS's own
 /// test, with its expected far plane, and the others pin the same function
