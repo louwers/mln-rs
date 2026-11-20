@@ -22,9 +22,10 @@ use crate::{
 };
 
 fn map(options: MapOptions, run_loop: &Queue<()>) -> Map {
-    Map::with_file_source(
+    Map::new(
         StubFileSource::on_queue(run_loop, ResponseType::Asynchronous),
         options,
+        crate::tests::registry(),
         &crate::tests::pool(),
     )
     .expect("map")
@@ -109,7 +110,7 @@ fn each_change_to_the_style_projection_reaches_the_transform() {
         Some(response)
     });
     let options = MapOptions { size: Size::new(512, 1024), ..Default::default() };
-    let mut map = Map::with_file_source(file_source, options, &crate::tests::pool()).expect("map");
+    let mut map = Map::new(file_source, options, crate::tests::registry(), &crate::tests::pool()).expect("map");
     assert!(lowest_jump(&mut map) >= 1.0);
 
     // A style load.

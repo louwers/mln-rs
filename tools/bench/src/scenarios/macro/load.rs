@@ -3,7 +3,7 @@
 //! the first frame with nothing missing.
 
 use mln_map::{CameraOptions, CameraUpdate, MapMode};
-use mln_runtime::{AttachOptions, MapOptions, RenderTarget, Runtime, RuntimeOptions};
+use mln_runtime::{AttachOptions, MapOptions, RenderTarget, RuntimeOptions};
 use mln_util::geo::LatLng;
 use mln_util::size::Size;
 
@@ -136,7 +136,7 @@ fn runtime(bench: &mut Bench) {
     };
     let target = RenderTarget::Offscreen { size: VIEW, device: Some(device) };
     let (runtime, map, session) = bench.measure(move || {
-        let runtime = Runtime::new(&options).expect("a runtime");
+        let runtime = mln_rs::start_runtime(&options).expect("a runtime");
         let (map, created) = runtime.create_map(map_options).expect("a map");
         created.wait().expect("the map");
         // Sent without waiting, as an application sends them: the still

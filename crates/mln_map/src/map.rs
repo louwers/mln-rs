@@ -11,9 +11,7 @@ use mln_map_types::{
     AnimationOptions, BoundOptions, CameraDelta, CameraError, CameraLimits, CameraOptions, CameraUpdate,
     MapDebugOptions, MapMode, ProjectionMode, TileLodMode, TransformState, VerticalPerspectiveProjection, Viewport,
 };
-use mln_renderer::{
-    Registry, RendererEvent, RendererEvents, RenderingStats, UpdateParameters, UpdateReader, UpdateSlot,
-};
+use mln_renderer::{RendererEvent, RendererEvents, RenderingStats, UpdateParameters, UpdateReader, UpdateSlot};
 use mln_storage::FileSource;
 #[cfg(not(target_family = "wasm"))]
 use mln_storage::{Loader, ResourceOptions};
@@ -113,46 +111,17 @@ pub struct Map {
 }
 
 impl Map {
-    /// A map with a [`Loader`] of its own for the default
-    /// `ResourceOptions`, whose background work runs on `pool`.
-    ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty `map_options.size`.
-    #[cfg(not(target_family = "wasm"))]
-    pub fn new(map_options: MapOptions, pool: &Pool) -> Result<Map, Error> {
-        Self::with_resource_options(map_options, &ResourceOptions::default(), pool)
-    }
-
-    /// A map with a [`Loader`] of its own for `resource_options`, on
-    /// `pool`.
-    #[cfg(not(target_family = "wasm"))]
-    pub fn with_resource_options(
-        map_options: MapOptions,
-        resource_options: &ResourceOptions,
-        pool: &Pool,
-    ) -> Result<Map, Error> {
-        let loader: Arc<dyn FileSource> = Arc::new(Loader::new(resource_options, pool));
-        Self::with_registry(loader, map_options, Arc::clone(Registry::with_builtins().style()), pool)
-    }
-
     // gtests-core: the C++ tests' `MapAdapter` (test/include/mln/test/
     // map_adapter.hpp): a map over a given file source.
-    /// A map whose resources come from `file_source`, on `pool`.
-    pub fn with_file_source(
-        file_source: Arc<dyn FileSource>,
-        map_options: MapOptions,
-        pool: &Pool,
-    ) -> Result<Map, Error> {
-        Self::with_registry(file_source, map_options, Arc::clone(Registry::with_builtins().style()), pool)
-    }
-
     /// A map whose resources come from `file_source` and whose style parses
-    /// against `registry`, on `pool`. The other constructors
-    /// use the built-in registrations.
+    /// against `registry`, on `pool`.
     ///
     /// The renderer that draws the map must be given a registry filled by
     /// the same calls as `registry` ([`mln_renderer::Registry::style`]): it
     /// finds a layer's type by name, and draws no layer whose type it lacks.
-    pub fn with_registry(
+    ///
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty `map_options.size`.
+    pub fn new(
         file_source: Arc<dyn FileSource>,
         map_options: MapOptions,
         registry: Arc<StyleRegistry>,
@@ -203,6 +172,19 @@ impl Map {
         map.share_projection_with_transform();
         map.transform.resize(map_options.size)?;
         Ok(map)
+    }
+
+    /// A map with a [`Loader`] of its own for `resource_options`, otherwise
+    /// as [`new`](Self::new).
+    #[cfg(not(target_family = "wasm"))]
+    pub fn with_resource_options(
+        map_options: MapOptions,
+        resource_options: &ResourceOptions,
+        registry: Arc<StyleRegistry>,
+        pool: &Pool,
+    ) -> Result<Map, Error> {
+        let loader: Arc<dyn FileSource> = Arc::new(Loader::new(resource_options, pool));
+        Self::new(loader, map_options, registry, pool)
     }
 
     /// Where the map's background work runs.

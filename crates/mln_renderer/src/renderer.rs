@@ -143,8 +143,12 @@ struct Encoder {
 }
 
 impl Renderer {
-    /// A renderer with a glyph cache of its own, which runs its background
-    /// work on `pool` and draws `local_glyphs` from the device's fonts.
+    /// A renderer with a glyph cache of its own, which draws the layer types
+    /// of `registry`, runs its background work on `pool` and draws
+    /// `local_glyphs` from the device's fonts.
+    ///
+    /// The map that the renderer draws must have a registry filled by the
+    /// same calls: a layer whose type `registry` lacks isn't drawn.
     ///
     /// `waker` runs, on any thread, when something the renderer waits for
     /// arrives, such as a tile's data or a font engine that got ready: the
@@ -155,8 +159,15 @@ impl Renderer {
     ///
     /// The renderer draws with `gpu` and only with it: every later call
     /// that takes a `Gpu` takes this one.
-    pub fn new(gpu: &dyn Gpu, pixel_ratio: f32, local_glyphs: LocalGlyphs, waker: Waker, pool: &Pool) -> Self {
-        Self::with_glyph_cache(gpu, pixel_ratio, local_glyphs, Arc::default(), waker, pool)
+    pub fn new(
+        gpu: &dyn Gpu,
+        pixel_ratio: f32,
+        local_glyphs: LocalGlyphs,
+        registry: Arc<Registry>,
+        waker: Waker,
+        pool: &Pool,
+    ) -> Self {
+        Self::with_glyph_cache(gpu, pixel_ratio, local_glyphs, Arc::default(), registry, waker, pool)
     }
 
     /// A renderer that uses `glyph_cache`: renderers given the same
@@ -166,21 +177,17 @@ impl Renderer {
         pixel_ratio: f32,
         local_glyphs: LocalGlyphs,
         glyph_cache: Arc<GlyphCache>,
+        registry: Arc<Registry>,
         waker: Waker,
         pool: &Pool,
     ) -> Self {
         let engine = crate::text::font_face_engine::default_engine();
-        let registry = Registry::with_builtins();
         Self::with_fonts(gpu, pixel_ratio, local_glyphs, glyph_cache, engine, registry, waker, pool)
     }
 
     /// A renderer that uses `glyph_cache`, loads the font files of a style's
     /// font faces with `font_face_engine` instead of
-    /// `font_face_engine::default_engine()`, and draws the layer types of
-    /// `registry` instead of the built-in ones.
-    ///
-    /// The map that the renderer draws must have a registry filled by the
-    /// same calls: a layer whose type `registry` lacks isn't drawn.
+    /// `font_face_engine::default_engine()`.
     #[expect(clippy::too_many_arguments, reason = "each argument is a part of the renderer that its host picks")]
     pub fn with_fonts(
         gpu: &dyn Gpu,

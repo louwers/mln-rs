@@ -1635,7 +1635,7 @@ pub(crate) fn create(
     outbox: &mut Outbox,
 ) {
     let registry = Arc::clone(core.registry.style());
-    let mut map = match mln_map::Map::with_registry(Arc::clone(core.loader()), options.map, registry, &core.pool) {
+    let mut map = match mln_map::Map::new(Arc::clone(core.loader()), options.map, registry, &core.pool) {
         Ok(map) => map,
         Err(error) => return outbox.resolve(resolver, Err(error)),
     };

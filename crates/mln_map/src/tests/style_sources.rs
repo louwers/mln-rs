@@ -24,7 +24,7 @@ const EMPTY_GEOJSON_SOURCE: &str = r#"{"type":"geojson","data":{"type":"FeatureC
 
 fn loaded_map(run_loop: &Queue<()>) -> Map {
     let file_source = StubFileSource::on_queue(run_loop, ResponseType::Asynchronous);
-    let mut map = Map::with_file_source(file_source, MapOptions::default(), &Pool::local()).expect("map");
+    let mut map = Map::new(file_source, MapOptions::default(), crate::tests::registry(), &Pool::local()).expect("map");
     map.load_style_json(r#"{"version":8,"sources":{},"layers":[]}"#);
     map
 }
@@ -107,7 +107,7 @@ fn malformed_sources_are_invalid_arguments() {
 fn a_source_json_needs_a_loaded_style() {
     let run_loop = Queue::<()>::new();
     let file_source = StubFileSource::on_queue(&run_loop, ResponseType::Asynchronous);
-    let mut map = Map::with_file_source(file_source, MapOptions::default(), &Pool::local()).expect("map");
+    let mut map = Map::new(file_source, MapOptions::default(), crate::tests::registry(), &Pool::local()).expect("map");
     let error = map.add_source_json("points", EMPTY_GEOJSON_SOURCE).unwrap_err();
     assert_eq!(ErrorKind::InvalidState, error.kind);
     assert_eq!("style is not loaded", error.message);
@@ -119,7 +119,7 @@ fn a_source_json_needs_a_loaded_style() {
 /// background work runs when the test runs its pool.
 fn map_over(file_source: &Arc<StubFileSource>) -> Map {
     let file_source: Arc<dyn mln_storage::FileSource> = Arc::<StubFileSource>::clone(file_source);
-    let mut map = Map::with_file_source(file_source, MapOptions::default(), &Pool::local()).expect("map");
+    let mut map = Map::new(file_source, MapOptions::default(), crate::tests::registry(), &Pool::local()).expect("map");
     map.load_style_json(r#"{"version":8,"sources":{},"layers":[]}"#);
     map
 }

@@ -47,9 +47,10 @@ fn prefetch_tiles() {
 
     let mut frontend =
         HeadlessFrontend::new(Size::new(512, 512), 1.0, run_loop.queue(), &pool).expect("a headless frontend");
-    let mut map = Map::with_file_source(
+    let mut map = Map::new(
         Arc::<StubFileSource>::clone(&file_source),
         MapOptions { map_mode: MapMode::Continuous, size: frontend.size(), ..Default::default() },
+        registry(),
         &pool,
     )
     .unwrap();

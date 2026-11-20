@@ -3,7 +3,7 @@
 // through the online file source to the platform's HTTP transport, and the
 // style's parser. Needs network access.
 
-use mln_runtime::{Completion, MapOptions, Runtime, RuntimeOptions};
+use mln_runtime::{Completion, MapOptions, RuntimeOptions};
 use mln_util::size::Size;
 
 const LIBERTY: &str = "https://tiles.openfreemap.org/styles/liberty";
@@ -11,7 +11,7 @@ const LIBERTY: &str = "https://tiles.openfreemap.org/styles/liberty";
 #[test]
 #[ignore = "needs network access"]
 fn loads_liberty_over_https() {
-    let runtime = Runtime::new(&RuntimeOptions::default()).unwrap();
+    let runtime = mln_rs::start_runtime(&RuntimeOptions::default()).unwrap();
     let options = MapOptions {
         map: mln_map::MapOptions { size: Size::new(256, 256), pixel_ratio: 1.0, ..Default::default() },
         ..Default::default()

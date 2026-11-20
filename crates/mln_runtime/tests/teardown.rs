@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Sender, channel};
 
 use httpmock::MockServer;
-use mln_runtime::{AttachOptions, Map, RenderSession, RenderTarget, Runtime, RuntimeOptions};
+use mln_runtime::{AttachOptions, Map, RenderSession, RenderTarget, RuntimeOptions};
 use mln_util::size::Size;
 use parking_lot::Mutex;
 
@@ -71,7 +71,7 @@ fn dropping_a_runtime_waits_for_its_threads() {
         when.method("GET").path("/style.json");
         then.status(200).body(EMPTY_STYLE);
     });
-    let runtime = Runtime::new(&RuntimeOptions::default()).unwrap();
+    let runtime = mln_rs::start_runtime(&RuntimeOptions::default()).unwrap();
     // The header transform runs on the thread of the runtime's network file
     // source.
     let (network, network_thread) = channel();
@@ -92,7 +92,7 @@ fn dropping_a_runtime_waits_for_its_threads() {
 
 #[test]
 fn dropping_a_render_session_waits_for_its_thread() {
-    let runtime = Runtime::new(&RuntimeOptions::default()).unwrap();
+    let runtime = mln_rs::start_runtime(&RuntimeOptions::default()).unwrap();
     let map = map(&runtime);
     let session = attach(&map);
     let ended = session_thread(&session);
@@ -102,7 +102,7 @@ fn dropping_a_render_session_waits_for_its_thread() {
 
 #[test]
 fn a_runtime_dropped_on_its_own_thread_ends() {
-    let runtime = Runtime::new(&RuntimeOptions::default()).unwrap();
+    let runtime = mln_rs::start_runtime(&RuntimeOptions::default()).unwrap();
     let map = map(&runtime);
     let ended = runtime_thread(&map);
     drop(runtime);
@@ -120,7 +120,7 @@ fn a_runtime_dropped_on_its_own_thread_ends() {
 
 #[test]
 fn a_session_dropped_in_its_own_callback_ends() {
-    let runtime = Runtime::new(&RuntimeOptions::default()).unwrap();
+    let runtime = mln_rs::start_runtime(&RuntimeOptions::default()).unwrap();
     let map = map(&runtime);
     let session = attach(&map);
     let ended = session_thread(&session);
@@ -145,7 +145,7 @@ fn dropping_a_released_runtime_doesnt_wait_for_its_thread() {
             let _ = self.1.send(self.0.get_mut().recv_timeout(TIMEOUT).is_ok());
         }
     }
-    let runtime = Runtime::new(&RuntimeOptions::default()).unwrap();
+    let runtime = mln_rs::start_runtime(&RuntimeOptions::default()).unwrap();
     let (go_on, gone_on) = channel();
     let (saw, saw_host) = channel();
     let blocker = WaitsForHost(Mutex::new(gone_on), saw);

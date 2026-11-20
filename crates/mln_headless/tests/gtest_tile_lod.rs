@@ -4,7 +4,6 @@ use std::sync::{Arc, OnceLock};
 use geojson::{Feature, Geometry};
 use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapDebugOptions, MapMode, MapOptions, TileSettings};
-use mln_renderer::Registry;
 use mln_storage::ResourceOptions;
 use mln_style::Edit;
 use mln_style::conversion::Convertible;
@@ -42,6 +41,7 @@ impl TileLODTest {
                 asset_path: cpp_root().join("test/fixtures/api/assets").to_str().unwrap().to_owned(),
                 ..ResourceOptions::default()
             },
+            registry(),
             &pool,
         )
         .unwrap();
@@ -66,7 +66,7 @@ impl TileLODTest {
         handle.set(CustomGeometrySourceHandle::of(&source).unwrap()).unwrap();
         map.add_source(source).unwrap();
 
-        let mut layer = Layer::new(Registry::with_builtins().style(), "circle", "circles", "custom").unwrap();
+        let mut layer = Layer::new(mln_rs::builtin_registry().style(), "circle", "circles", "custom").unwrap();
         let error = layer.set_property("circle-color", &Convertible::from(&serde_json::json!("rgba(0,0,255,0)")), None);
         assert!(error.is_none(), "{error:?}");
         map.edit_style(|style| style.apply(Edit::AddLayer { layer, before: None })).unwrap();

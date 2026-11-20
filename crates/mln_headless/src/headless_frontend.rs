@@ -39,6 +39,9 @@ pub struct RenderResult {
 /// hasn't drawn yet, and [`render_frame`](Self::render_frame) draws the
 /// latest one again. Once the map is gone, `render_update` tears the
 /// renderer down, and the frontend makes another when next used.
+///
+/// Its renderer draws the built-in layer types (`mln_rs::builtin_registry`),
+/// so the maps it draws parse their styles against the same registry.
 pub struct HeadlessFrontend {
     size: Size,
     pixel_ratio: f32,
@@ -217,6 +220,7 @@ impl HeadlessFrontend {
                 *pixel_ratio,
                 local_glyphs.clone(),
                 Arc::clone(glyph_cache),
+                mln_rs::builtin_registry(),
                 Arc::new(move || {
                     let events = reports_to.lock().clone();
                     if let Some(events) = events {

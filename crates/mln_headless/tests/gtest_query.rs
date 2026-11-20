@@ -4,7 +4,6 @@ use feature::{PropertyMap, Value};
 use geojson::{GeoJson, Geometry};
 use mln_expression::dsl::{eq, get_str, gt, id, literal, literal_str, ne, number};
 use mln_map::{CameraOptions, MapMode};
-use mln_renderer::Registry;
 use mln_renderer::query::{FeatureExtensionValue, RenderedQueryOptions, SourceQueryOptions};
 use mln_storage::Kind;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
@@ -326,7 +325,7 @@ fn query_rendered_features_filter_uses_overscaled_zoom() {
             let mut map = test.map();
             // Keep the point away from tile boundaries so source queries return one copy.
             set_geojson(&mut map, "source1", GeoJson::from(Geometry::new_point([1.003, 1.003])));
-            let layer = Layer::new(Registry::with_builtins().style(), "circle", "circle_layer", "source1").unwrap();
+            let layer = Layer::new(mln_rs::builtin_registry().style(), "circle", "circle_layer", "source1").unwrap();
             map.edit_style(|style| style.apply(Edit::AddLayer { layer, before: None })).unwrap();
         }
         // std::to_string(int).
@@ -567,7 +566,7 @@ fn get_top_cluster_feature(test: &QueryTest) -> Vec<Feature> {
     let source = mln_style::sources::geojson_source("cluster_source", Arc::new(options));
 
     let mut cluster_layer =
-        Layer::new(Registry::with_builtins().style(), "symbol", "cluster_layer", "cluster_source").unwrap();
+        Layer::new(mln_rs::builtin_registry().style(), "symbol", "cluster_layer", "cluster_source").unwrap();
     set(&mut cluster_layer, "icon-image", &json!("test-icon"));
     set(&mut cluster_layer, "icon-size", &json!(12.0));
 

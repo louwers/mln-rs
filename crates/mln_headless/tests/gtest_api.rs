@@ -3,7 +3,6 @@ use std::sync::{Arc, OnceLock};
 use geojson::{Feature, GeoJson, Geometry};
 use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapMode, MapOptions};
-use mln_renderer::Registry;
 use mln_storage::ResourceOptions;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::Edit;
@@ -50,6 +49,7 @@ fn grid() {
             asset_path: cpp_root().join("test/fixtures/api/assets").to_str().unwrap().to_owned(),
             ..ResourceOptions::default()
         },
+        registry(),
         &pool,
     )
     .unwrap();
@@ -89,12 +89,12 @@ fn grid() {
     handle.set(CustomGeometrySourceHandle::of(&source).unwrap()).unwrap();
     map.add_source(source).unwrap();
 
-    let mut fill_layer = Layer::new(Registry::with_builtins().style(), "fill", "landcover", "mapbox").unwrap();
+    let mut fill_layer = Layer::new(mln_rs::builtin_registry().style(), "fill", "landcover", "mapbox").unwrap();
     fill_layer.set_source_layer("landcover");
     set(&mut fill_layer, "fill-color", &json!("rgba(255,255,0,1)"));
     map.edit_style(|style| style.apply(Edit::AddLayer { layer: fill_layer, before: None })).unwrap();
 
-    let mut layer = Layer::new(Registry::with_builtins().style(), "line", "grid", "custom").unwrap();
+    let mut layer = Layer::new(mln_rs::builtin_registry().style(), "line", "grid", "custom").unwrap();
     set(&mut layer, "line-color", &json!("rgba(255,255,255,1)"));
     map.edit_style(|style| style.apply(Edit::AddLayer { layer, before: None })).unwrap();
 
@@ -113,9 +113,10 @@ fn recycle_map_update_images() {
     let pool = Pool::new(4);
 
     let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, run_loop.queue(), &pool).expect("a headless frontend");
-    let mut map = Map::with_file_source(
+    let mut map = Map::new(
         StubFileSource::on_queue(run_loop.queue(), ResponseType::Asynchronous),
         MapOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
+        registry(),
         &pool,
     )
     .unwrap();
@@ -128,7 +129,7 @@ fn recycle_map_update_images() {
             GeoJson::from(Geometry::new_point([0.0, 0.0])),
         );
 
-        let mut layer = Layer::new(Registry::with_builtins().style(), "symbol", "geometry", "geometry").unwrap();
+        let mut layer = Layer::new(mln_rs::builtin_registry().style(), "symbol", "geometry", "geometry").unwrap();
         set(&mut layer, "icon-image", &json!(marker_name));
 
         map.load_style_json(&read_file("test/fixtures/api/empty.json"));

@@ -24,9 +24,16 @@ doctest = false
 mln_gfx.workspace = true
 mln_map.workspace = true
 mln_renderer.workspace = true
-# The devices and offscreen targets the frontend renders on, of every
-# backend.
-mln_runtime = { workspace = true, features = ["default"] }
+# The built-in registrations, and the devices and offscreen targets the
+# frontend renders on, of every backend.
+mln_rs = { workspace = true, features = [
+  "webgpu",
+  "metal",
+  "vulkan",
+  "d3d12",
+  "gl",
+] }
+mln_runtime.workspace = true
 mln_text.workspace = true
 mln_util.workspace = true
 parking_lot.workspace = true

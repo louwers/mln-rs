@@ -35,7 +35,8 @@ mod map;
 use std::sync::Arc;
 
 pub use map::{WebMap, set_preloads};
-use mln_runtime::registry::{Registry, RegistryBuilder, register_builtins};
+use mln_rs::register_builtins;
+use mln_runtime::registry::{Registry, RegistryBuilder};
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
 use wasm_bindgen::prelude::*;
 

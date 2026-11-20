@@ -146,7 +146,7 @@ pub(crate) fn run(launch: Launch) -> Result<(), String> {
         let cache_db = args.cache.clone().map_or_else(|| std::env::temp_dir().join("mbgl-cache.db"), PathBuf::from);
         RuntimeOptions { cache_path: Some(cache_db), ..RuntimeOptions::default() }
     };
-    let runtime = Runtime::new(&runtime_options).map_err(|e| e.message)?;
+    let runtime = mln_rs::start_runtime(&runtime_options).map_err(|e| e.message)?;
     if !settings.online || benchmark.is_some() {
         // The cache still serves what it has.
         log_failure(runtime.set_resource_provider(|request: ResourceRequest| {

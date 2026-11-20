@@ -9,6 +9,7 @@ pub mod bucket;
 mod bucket_geometry;
 mod bucket_parameters;
 mod buckets;
+pub mod builtins;
 mod clip_masks;
 mod draw;
 mod frame;
@@ -58,7 +59,7 @@ pub mod util;
 
 pub use frame_projection::{ClipDepthRange, FrameProjection};
 pub(crate) use paint_property_binder::paint_property_binders;
-pub use registry::{Registry, RegistryBuilder, register_builtins};
+pub use registry::{Registry, RegistryBuilder};
 pub use renderer::{DrawnFrame, RenderTimings, Renderer, UpdatedFrame};
 pub use renderer_event::{
     FontStack, GlyphRange, OverscaledTileID, RenderMode, RendererEvent, RendererEvents, RenderingStats, TileOperation,

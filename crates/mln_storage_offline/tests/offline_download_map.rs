@@ -10,7 +10,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapEvent, MapMode, MapOptions, RenderFrameStatus, RenderMode};
-use mln_renderer::Registry;
 use mln_storage::offline::{
     OfflineRegionDownloadState, OfflineRegionMetadata, OfflineRegionObserver, OfflineRegionStatus,
     OfflineTilePyramidRegionDefinition,
@@ -77,7 +76,7 @@ fn resource_offline_usage_unset() {
     let network: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&file_source);
     *host.borrow_mut() = Some((
         OfflineDatabase::new(filename.as_str()),
-        Downloads::new(Some(network), Arc::clone(&post), Arc::clone(Registry::with_builtins().style())),
+        Downloads::new(Some(network), Arc::clone(&post), Arc::clone(mln_rs::builtin_registry().style())),
     ));
     let with = |f: &mut dyn FnMut(&mut OfflineDatabase, &mut Downloads)| {
         let mut host = host.borrow_mut();
@@ -120,7 +119,7 @@ fn resource_offline_usage_unset() {
         .into(),
         Arc::<StubFileSource>::clone(&file_source),
         Arc::clone(&post),
-        Arc::clone(Registry::with_builtins().style()),
+        Arc::clone(mln_rs::builtin_registry().style()),
     );
 
     let s = Arc::clone(&size);
@@ -169,9 +168,10 @@ fn resource_offline_usage_unset() {
     });
 
     let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, &queue, &pool).expect("a headless frontend");
-    let mut map = Map::with_file_source(
+    let mut map = Map::new(
         stubfile_source,
         MapOptions { map_mode: MapMode::Continuous, size: frontend.size(), ..Default::default() },
+        Arc::clone(mln_rs::builtin_registry().style()),
         &pool,
     )
     .unwrap();
