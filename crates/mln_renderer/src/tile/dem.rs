@@ -23,20 +23,12 @@ pub struct DemContents {
     dem: DemData,
     /// Counts the changes of the DEM's border.
     dem_generation: u64,
-    /// Whether the geometry is in the context's stores as it is.
-    uploaded: bool,
 }
 
 impl DemContents {
     #[must_use]
     pub(crate) fn new(dem: DemData) -> Self {
-        DemContents {
-            id: SimpleIdentity::new(),
-            geometry: MaskedGeometry::default(),
-            dem,
-            dem_generation: 0,
-            uploaded: false,
-        }
+        DemContents { id: SimpleIdentity::new(), geometry: MaskedGeometry::default(), dem, dem_generation: 0 }
     }
 
     /// The contents' identity, which tells what the layers keep of them
@@ -66,16 +58,12 @@ impl DemContents {
     }
 
     pub(crate) fn set_mask(&mut self, mask: TileMask) {
-        if self.geometry.set_mask(mask) {
-            self.uploaded = false;
-        }
+        self.geometry.set_mask(mask);
     }
 
     /// [`MaskedGeometry::unmask`].
     pub(crate) fn unmask(&mut self) {
-        if self.geometry.unmask() {
-            self.uploaded = false;
-        }
+        self.geometry.unmask();
     }
 
     /// Whether there is a DEM to draw.
@@ -88,9 +76,8 @@ impl DemContents {
     /// their geometry changes: moves the geometry into `context`'s stores.
     /// The layers make the DEM's textures.
     pub(crate) fn upload(&mut self, context: &mut Context) {
-        if !self.uploaded && self.has_data() {
+        if self.has_data() {
             self.geometry.upload(context);
-            self.uploaded = true;
         }
     }
 }
