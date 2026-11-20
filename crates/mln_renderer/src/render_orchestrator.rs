@@ -1647,8 +1647,12 @@ impl Drop for WaitOnDrop {
 
 impl Drop for RenderOrchestrator {
     fn drop(&mut self) {
-        // Hosts that left and that the renderer didn't take, as when it
-        // goes without its tear-down, lose their graphics objects.
+        // Without the renderer's tear-down, the hosts of the layers still
+        // here, and those that left and that the renderer didn't take, lose
+        // their graphics objects.
+        for layer in &mut self.layers {
+            layer.lose_context();
+        }
         for host in std::mem::take(&mut self.ended_hosts) {
             host.lose();
         }
