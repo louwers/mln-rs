@@ -1,6 +1,7 @@
-//! The terrain's draws: one per terrain tile, of the shared grid, each with
-//! the tile's matrix and where it reads its DEM in an entry of one storage
-//! buffer, raised by the DEM's texture and sampling the tile's drape.
+//! The terrain's draws: one per terrain tile and stack of draped layers, of
+//! the shared grid, each with the tile's matrix and where it reads its DEM
+//! in an entry of its stack's storage buffer, raised by the DEM's texture
+//! and sampling the tile's drape of the stack.
 
 use std::mem::size_of;
 
@@ -51,17 +52,25 @@ struct SharedMesh {
     index_count: usize,
 }
 
-/// The draws of the terrain's tiles, which draw in the translucent pass
-/// before the layers, nearest the center first, testing and writing the 3D
-/// depth range.
+/// The draws of the terrain's tiles for one stack of draped layers.
 #[derive(Default)]
-pub(crate) struct TerrainDraws {
+struct StackDraws {
     /// The GPU objects of each tile's draw.
     tiles: TileMap<KeptDraw>,
     /// The frame's draws of them.
     frame: LayerDraws,
     /// The frame's draws as the update makes them, with their uniforms.
     draw_list: DrawList<TerrainDrawableUBO>,
+}
+
+/// The draws of the terrain's tiles, a set for each stack, which draw in the
+/// translucent pass, nearest the center first, testing and writing the 3D
+/// depth range. The stacks share the grid, the DEM textures and each tile's
+/// matrix and DEM coordinates.
+#[derive(Default)]
+pub(crate) struct TerrainDraws {
+    /// The draws of each of the frame's stacks.
+    stacks: Vec<StackDraws>,
     shader: Option<ShaderKey>,
     mesh: Option<SharedMesh>,
     /// The textures of the DEM tiles the tiles read.
@@ -71,9 +80,11 @@ pub(crate) struct TerrainDraws {
 }
 
 impl TerrainDraws {
-    /// Makes the frame's draws of `cover`'s tiles, which read their DEM from
-    /// the tiles of `dem` and draw as `surface` says, or drops the draws
-    /// and what they share for `None`, a frame without terrain.
+    /// Makes the frame's draws of `cover`'s tiles, one for each of the
+    /// stacks of `drapes`, which read their DEM from the tiles of `dem`,
+    /// sample the tile's drape of their stack and draw as `surface` says, or
+    /// drops the draws and what they share for `None`, a frame without
+    /// terrain.
     pub(crate) fn update(
         &mut self,
         gpu: &mut dyn Gpu,
@@ -85,8 +96,7 @@ impl TerrainDraws {
     ) {
         let shader = cover.and_then(|_| self.shader(gpu, parameters));
         let (Some(cover), Some(shader)) = (cover, shader) else {
-            self.tiles.clear_tiles();
-            self.frame.clear();
+            self.stacks.clear();
             self.mesh = None;
             self.dem_textures = DemTextures::default();
             return;
@@ -101,7 +111,7 @@ impl TerrainDraws {
         let built_for = (surface.skirts, cull_face_mode);
         if self.mesh.as_ref().is_some_and(|mesh| (mesh.skirts, mesh.cull_face_mode) != built_for) {
             // The draws hold the other grid, or cull the other way.
-            self.tiles.clear_tiles();
+            self.stacks.clear();
             self.mesh = None;
         }
         let mesh = self.mesh.get_or_insert_with(|| {
@@ -120,12 +130,11 @@ impl TerrainDraws {
         // whose runs from 0, as fill extrusions do.
         let remap_clip_z = context.caps().clip_depth == ClipDepthRange::NegativeOneToOne;
         let (view, proj_matrix) = (parameters.view, &parameters.transform_params.proj_matrix);
-        self.tiles.set_tiles(cover.tiles.iter().map(|tile| tile.id));
+        self.stacks.resize_with(drapes.stacks(), StackDraws::default);
+        for stack in &mut self.stacks {
+            stack.tiles.set_tiles(cover.tiles.iter().map(|tile| tile.id));
+        }
         for (index, tile) in cover.tiles.iter().enumerate() {
-            let Some(entry) = self.tiles.entry(&tile.id) else {
-                continue;
-            };
-            let draw = entry.value.get_or_insert_with(|| KeptDraw::new(mesh_objects(&shader, mesh)));
             let bound = tile.dem.and_then(|(id, coords)| Some((dem_bucket(dem?.tile(&id)?)?, coords)));
             let (dem_texture, dem_coords) = match bound {
                 Some((bucket, coords)) => {
@@ -137,27 +146,36 @@ impl TerrainDraws {
                 }
                 None => (self.dem_textures.flat(context), [0.0; 4]),
             };
-            draw.objects.set_texture(ID_TERRAIN_DEM_TEXTURE, Some(&dem_texture));
-            draw.objects.set_texture(ID_TERRAIN_DRAPE_TEXTURE, drapes.texture(index, &tile.id));
             let mut matrix = *proj_matrix * view.tile_matrix(&tile.id.to_unwrapped());
             if remap_clip_z {
                 zero_to_one_clip_z(&mut matrix);
             }
-            let frame_draw = FrameDraw {
-                priority: index as i64,
-                depth: DrawDepth::Volume { mask: DepthMaskType::ReadWrite },
-                ..draw.frame_draw(Some(tile.id))
-            };
-            self.draw_list.push(frame_draw, TerrainDrawableUBO { matrix: cast_matrix(&matrix), dem_coords });
+            let drawable = TerrainDrawableUBO { matrix: cast_matrix(&matrix), dem_coords };
+            for (stack, draws) in self.stacks.iter_mut().enumerate() {
+                let Some(entry) = draws.tiles.entry(&tile.id) else {
+                    continue;
+                };
+                let draw = entry.value.get_or_insert_with(|| KeptDraw::new(mesh_objects(&shader, mesh)));
+                draw.objects.set_texture(ID_TERRAIN_DEM_TEXTURE, Some(&dem_texture));
+                draw.objects.set_texture(ID_TERRAIN_DRAPE_TEXTURE, drapes.texture(stack, index, &tile.id));
+                let frame_draw = FrameDraw {
+                    priority: index as i64,
+                    depth: DrawDepth::Volume { mask: DepthMaskType::ReadWrite },
+                    ..draw.frame_draw(Some(tile.id))
+                };
+                draws.draw_list.push(frame_draw, drawable);
+            }
         }
         self.dem_textures.finish_frame();
-        finish_tiles(&mut self.draw_list, &mut self.frame, &mut self.tiles, gpu, context, |writer| {
-            writer.storage(ID_TERRAIN_DRAWABLE_UBO, |drawable| *drawable);
-            // GL's program declares the projection block whether it reads it
-            // or not, so every draw binds one of zeros.
-            writer.storage(ID_PROJECTION_UBO, |_| ProjectionUBO::default());
-            writer.uniform(ID_TERRAIN_PROPS_UBO, &surface.props);
-        });
+        for StackDraws { tiles, frame, draw_list } in &mut self.stacks {
+            finish_tiles(draw_list, frame, tiles, gpu, context, |writer| {
+                writer.storage(ID_TERRAIN_DRAWABLE_UBO, |drawable| *drawable);
+                // GL's program declares the projection block whether it
+                // reads it or not, so every draw binds one of zeros.
+                writer.storage(ID_PROJECTION_UBO, |_| ProjectionUBO::default());
+                writer.uniform(ID_TERRAIN_PROPS_UBO, &surface.props);
+            });
+        }
     }
 
     /// Whether the backend has the terrain's shader, which this makes on
@@ -187,12 +205,17 @@ impl TerrainDraws {
 
     /// Uploads the GPU objects of the frame's draws.
     pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
-        self.frame.upload(gpu, &mut self.tiles, tile_objects, context);
+        for StackDraws { tiles, frame, .. } in &mut self.stacks {
+            frame.upload(gpu, tiles, tile_objects, context);
+        }
     }
 
-    /// Draws the frame's draws into the open pass of `gpu`, the context's.
-    pub(crate) fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        self.frame.render(&mut self.tiles, tile_objects, gpu, parameters);
+    /// Draws the frame's draws of `stack` into the open pass of `gpu`, the
+    /// context's.
+    pub(crate) fn render(&mut self, stack: usize, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        if let Some(StackDraws { tiles, frame, .. }) = self.stacks.get_mut(stack) {
+            frame.render(tiles, tile_objects, gpu, parameters);
+        }
     }
 }
 

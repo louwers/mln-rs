@@ -1339,7 +1339,9 @@ impl RenderOrchestrator {
             render_layer.update_draws(gpu, paint_parameters, &self.atlases, layer_source);
             needs_globe_depth = needs_globe_depth || render_layer.needs_globe_depth();
         }
-        if let Some(drapes) = self.terrain.begin_drapes(gpu, paint_parameters, frame.terrain) {
+        // Every draped layer is in the one stack.
+        let stacks = usize::from(frame.terrain);
+        if let Some(drapes) = self.terrain.begin_drapes(gpu, paint_parameters, stacks) {
             let mut contents = SourceContents::default();
             for &index in &draped {
                 let Some(frame_layer) = frame.layers.get(&index) else {
@@ -1347,7 +1349,7 @@ impl RenderOrchestrator {
                 };
                 let layer_source =
                     layer_source(frame_layer, &self.render_sources, &self.tile_store, &self.found_tiles, &mut contents);
-                drapes.key_layer(&*self.layers[index as usize], layer_source);
+                drapes.key_layer(0, &*self.layers[index as usize], layer_source);
             }
             drapes.choose(!paint_parameters.camera_moving);
             for index in draped {
@@ -1357,7 +1359,7 @@ impl RenderOrchestrator {
                 let layer_source =
                     layer_source(frame_layer, &self.render_sources, &self.tile_store, &self.found_tiles, &mut contents);
                 let render_layer = &mut *self.layers[index as usize];
-                drapes.update_layer(gpu, paint_parameters, &self.atlases, render_layer, layer_source);
+                drapes.update_layer(0, gpu, paint_parameters, &self.atlases, render_layer, layer_source);
             }
             drapes.finish_update();
         }

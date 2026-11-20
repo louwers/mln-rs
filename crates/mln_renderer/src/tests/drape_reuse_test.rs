@@ -263,7 +263,7 @@ impl DrapedMap {
     }
 
     /// Draws a frame, and returns whether everything it shows had loaded and
-    /// the tiles of the drapes it drew.
+    /// the tiles of the drapes of the first stack it drew.
     fn frame(&mut self) -> (bool, BTreeSet<OverscaledTileID>) {
         let parameters = Arc::new(self.update_parameters());
         let gpu = self.backend.gpu();
@@ -282,9 +282,9 @@ impl DrapedMap {
             }
         }
         let passes = self.renderer.take_drape_passes();
-        let unique: BTreeSet<OverscaledTileID> = passes.iter().copied().collect();
+        let unique: BTreeSet<(OverscaledTileID, usize)> = passes.iter().copied().collect();
         assert_eq!(unique.len(), passes.len(), "a drape drawn twice in a frame");
-        (full, unique)
+        (full, unique.into_iter().filter(|&(_, stack)| stack == 0).map(|(tile, _)| tile).collect())
     }
 
     /// Draws frames until the renderer waits for nothing but the held tile,
@@ -339,6 +339,18 @@ fn a_map_at_rest_draws_no_drape_again() {
     let (_, passes) = map.frame();
     assert!(passes.is_empty(), "drapes drawn again: {passes:?}");
     assert_eq!(drapes, map.drapes());
+}
+
+/// With every draped layer in one stack, a map at rest draws the surface once
+/// for each terrain tile and nothing else.
+#[test]
+fn a_map_of_one_stack_at_rest_draws_each_terrain_tile_once() {
+    let (mut map, drapes) = settled(Tiles::default());
+    let (full, passes) = map.frame();
+    assert!(full);
+    assert!(passes.is_empty(), "drapes drawn again: {passes:?}");
+    let draw_calls = map.renderer.rendering_stats().num_draw_calls;
+    assert_eq!(drapes.len(), usize::try_from(draw_calls).unwrap());
 }
 
 #[test]

@@ -26,8 +26,9 @@
 //!    it changed.
 //! 3. The layers that drape (background, fill, line, hillshade, color
 //!    relief, and raster, an image source's too) make no draws in the
-//!    frame: they draw in each drape whose key changed
-//!    ([`RenderTerrain::begin_drapes`]). The surface makes a draw per tile
+//!    frame: they draw in each drape of their stack whose key changed
+//!    ([`RenderTerrain::begin_drapes`]). Every draped layer is in one stack.
+//!    The surface makes a draw per tile and stack
 //!    ([`RenderTerrain::update_draws`]).
 //! 4. The drapes draw into their textures before the frame's pass. The
 //!    frame clears to transparent, and its translucent pass draws the
@@ -57,15 +58,15 @@
 //!   DEM tiles it has, so a loaded frame draws each tile with its own. The
 //!   surface reads each DEM's bordered RGBA8 image texel by texel and
 //!   decodes it by the height rule of `mln_util::dem`, as the CPU does.
-//! - **The drapes** ([`Drapes`]): a texture for each drawn tile, which the
-//!   draped layers draw into with the map's camera, through their own draw
-//!   updates. A drape draws again only when its key differs from the one it
-//!   was drawn from: the draped layers' styles, paint revisions and tiles,
-//!   the overlapping tiles' buckets and generations (an image source's
-//!   bucket and quad, in each copy of the image that overlaps the drape's
-//!   tile), and, with the camera
-//!   at rest, the layers' evaluated values, the zoom, and the bearing where
-//!   a layer draws by it. A change of the style's images, or of the feature
+//! - **The drapes** ([`Drapes`]): a texture for each drawn tile and stack,
+//!   which the stack's draped layers draw into with the map's camera,
+//!   through their own draw updates. A drape draws again only when its key
+//!   differs from the one it was drawn from: its stack's layers' styles,
+//!   paint revisions and tiles, the overlapping tiles' buckets and
+//!   generations (an image source's bucket and quad, in each copy of the
+//!   image that overlaps the drape's tile), and, with the camera at rest,
+//!   the layers' evaluated values, the zoom, and the bearing where a layer
+//!   draws by it. A change of the style's images, or of the feature
 //!   state of a bucket a drape shows, draws it again too. While the camera
 //!   moves, a drape drawn at another zoom or bearing stays.
 //! - **The drape composite.** A draped layer with a layer opacity below 1
@@ -317,29 +318,29 @@ impl RenderTerrain {
     }
 
     /// Starts the encode's update of the drapes of the frame of the last
-    /// update, whose draped layers then make their draws in them
-    /// ([`Drapes::update_layer`]); `None`, dropping the drapes, for a frame
-    /// that doesn't draw terrain (`draws` false) or a backend without the
-    /// terrain's shader.
+    /// update, of `stacks` stacks of draped layers, whose layers then make
+    /// their draws in them ([`Drapes::update_layer`]); `None`, dropping the
+    /// drapes, for a frame that doesn't draw terrain, a backend without the
+    /// terrain's shader, or no stack.
     pub(crate) fn begin_drapes(
         &mut self,
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
-        draws: bool,
+        stacks: usize,
     ) -> Option<&mut Drapes> {
-        let cover = self.cover.as_ref().filter(|_| draws);
+        let cover = self.cover.as_ref().filter(|_| stacks > 0);
         let Some(cover) = cover.filter(|_| self.draws.supported(gpu, parameters)) else {
             self.drapes = Drapes::default();
             return None;
         };
-        self.drapes.begin(parameters.context, parameters.view, cover);
+        self.drapes.begin(parameters.context, parameters.view, cover, stacks);
         Some(&mut self.drapes)
     }
 
-    /// Makes the draws of the frame of the last update, which read the DEM
-    /// tiles of the terrain's source that `dem` finds by its id and sample
-    /// the drapes, or drops them for a frame that doesn't draw terrain
-    /// (`draws` false).
+    /// Makes the draws of the frame of the last update, a set for each stack
+    /// of the drapes, which read the DEM tiles of the terrain's source that
+    /// `dem` finds by its id and sample their stack's drapes, or drops them
+    /// for a frame that doesn't draw terrain (`draws` false).
     pub(crate) fn update_draws<'a>(
         &mut self,
         gpu: &mut dyn Gpu,
@@ -364,9 +365,9 @@ impl RenderTerrain {
         self.drapes.redraw();
     }
 
-    /// The tiles of the drapes drawn since the last call.
+    /// The tiles and stacks of the drapes drawn since the last call.
     #[cfg(test)]
-    pub(crate) fn take_drape_passes(&mut self) -> Vec<mln_tile_id::OverscaledTileID> {
+    pub(crate) fn take_drape_passes(&mut self) -> Vec<(mln_tile_id::OverscaledTileID, usize)> {
         self.drapes.take_passes()
     }
 
@@ -393,9 +394,10 @@ impl RenderTerrain {
         self.drapes.render(gpu, parameters);
     }
 
-    /// Draws the surface into the open pass of `gpu`, the context's.
-    pub(crate) fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        self.draws.render(gpu, parameters);
+    /// Draws the surface of `stack`, which samples the stack's drapes, into
+    /// the open pass of `gpu`, the context's.
+    pub(crate) fn render(&mut self, stack: usize, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        self.draws.render(stack, gpu, parameters);
     }
 
     /// Drops all it made from the map's data, for the renderer's

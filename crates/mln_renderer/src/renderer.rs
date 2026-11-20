@@ -242,9 +242,10 @@ impl Renderer {
         self.orchestrator.release_shaders();
     }
 
-    /// The tiles of the terrain's drapes drawn since the last call.
+    /// The tiles and stacks of the terrain's drapes drawn since the last
+    /// call.
     #[cfg(test)]
-    pub(crate) fn take_drape_passes(&mut self) -> Vec<mln_tile_id::OverscaledTileID> {
+    pub(crate) fn take_drape_passes(&mut self) -> Vec<(mln_tile_id::OverscaledTileID, usize)> {
         self.orchestrator.terrain().take_drape_passes()
     }
 
@@ -815,7 +816,7 @@ fn draw(
     parameters.pass = RenderPass::Translucent;
     parameters.depth_range_size = depth_range_size;
     orchestrator.globe_depth().render(gpu, parameters);
-    orchestrator.terrain().render(gpu, parameters);
+    orchestrator.terrain().render(0, gpu, parameters);
     parameters.current_layer = (num_draw_groups as u32).wrapping_sub(1);
     orchestrator.render_draw_groups(gpu, parameters, DrawOrder::BottomUp);
 
