@@ -31,7 +31,7 @@ fn layer(mut json: serde_json::Value) -> Arc<dyn ErasedEvaluatedLayer> {
         .unwrap_or_else(|| panic!("{}", error.message));
     let mut render_layer = crate::tests::render_layer(layer.style());
     render_layer.evaluate(&PropertyEvaluationParameters::new(0.0));
-    Arc::clone(&render_layer.base().evaluated_properties)
+    render_layer.evaluated()
 }
 
 /// Two squares.

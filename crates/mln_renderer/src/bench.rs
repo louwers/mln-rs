@@ -30,10 +30,10 @@ use crate::Registry;
 use crate::bucket::LayerFeatureStates;
 use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::layer_type::ErasedEvaluatedLayer;
-use crate::layers::render_symbol_layer::RenderSymbolLayer;
+use crate::layers::render_symbol_layer::symbol_translates;
 use crate::layout::tile_layout::{Dependencies, LayoutParams, Resolved};
 use crate::paint_parameters::TransformParameters;
-use crate::render_layer::{LayerParts, RenderLayer};
+use crate::render_layer::{Layer, RenderLayer};
 use crate::render_tile::RenderTile;
 use crate::text::cross_tile_symbol_index::CrossTileSymbolIndex;
 use crate::text::glyph_store::ShapeResults;
@@ -113,7 +113,7 @@ impl TileLayout {
                 .and_then(|layer_type| layer_type.create_render_layer(layer.style()))
                 .ok_or_else(|| Error::invalid_argument(format!("no render layer for {}", layer.get_id())))?;
             render_layer.evaluate(&parameters);
-            layers.push(Arc::clone(&render_layer.base().evaluated_properties));
+            layers.push(render_layer.evaluated());
         }
 
         let mut layout = TileLayout {
@@ -206,7 +206,7 @@ pub struct SymbolView {
     update: Arc<UpdateParameters>,
     /// The style's symbol layers that lead a bucket of the tiles, in the
     /// style's order.
-    layers: Vec<RenderSymbolLayer>,
+    layers: Vec<Layer<mln_style::layers::Symbol>>,
 }
 
 impl SymbolView {
@@ -246,17 +246,25 @@ impl SymbolView {
             }
             let style = mln_style::layer_type::LayerStyle::<mln_style::layers::Symbol>::recover(layer.style())
                 .ok_or_else(|| Error::invalid_argument(format!("no render layer for {}", layer.get_id())))?;
-            let mut render_layer = RenderSymbolLayer::new(style);
+            let mut render_layer = Layer::new(style);
             render_layer.evaluate(&parameters);
             // As the layer's update adds its tiles' buckets.
-            let translates = render_layer.symbol_translates();
+            let translates = symbol_translates(&render_layer.values().evaluated);
+            let style = Arc::clone(&render_layer.values().style);
             for (tile_index, laid_out) in tiles.iter().enumerate() {
                 let Some(render_data) = laid_out.result.layer_render_data.get(layer.get_id()) else { continue };
                 let Some(bucket) = crate::bucket::recover(&render_data.bucket) else { continue };
                 let feature_index = || Some(Arc::clone(&laid_out.result.feature_index));
-                render_layer.add_placement_data(&render_tiles, tile_index, bucket, feature_index, translates);
+                render_layer.state_mut().add_placement_data(
+                    &style,
+                    &render_tiles,
+                    tile_index,
+                    bucket,
+                    feature_index,
+                    translates,
+                );
             }
-            if render_layer.has_placement_data() {
+            if render_layer.state().has_placement_data() {
                 layers.push(render_layer);
             }
         }

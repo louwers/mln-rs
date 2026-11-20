@@ -20,6 +20,7 @@ mod globe_depth_pass;
 mod globe_tile_mesh;
 mod group_by_layout;
 mod image_store;
+pub mod layer;
 mod layer_composite;
 mod layer_drawing;
 mod layer_type;
@@ -61,7 +62,6 @@ pub mod util;
 
 pub use bucket::LayerFeatureStates;
 pub use frame_projection::{ClipDepthRange, FrameProjection};
-pub use layer_type::LayerType;
 pub use mln_style::expression::functions::RegisterError;
 pub(crate) use paint_property_binder::paint_property_binders;
 pub use registry::{Registry, RegistryBuilder};

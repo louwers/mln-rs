@@ -1,20 +1,16 @@
-//! The render half of the layer types: each marker type's [`LayerType`]
-//! impl, which says how a tile lays out the type's layers and which render
-//! layer draws them. The registry holds the types as
+//! The layer types as the engine holds them: the registry holds each as
 //! `&'static dyn ErasedLayerType` ([`entry`]).
 //!
 //! A layer's values for a frame are an [`EvaluatedLayer<T>`], shared as an
 //! `Arc<dyn ErasedEvaluatedLayer>`. An erased value gets back to its type
-//! only through [`EvaluatedLayer::recover`] or [`evaluated`].
+//! only through [`EvaluatedLayer::recover`].
 
 use std::any::Any;
 use std::sync::Arc;
 
 use mln_style::CrossfadeParameters;
 use mln_style::expression::Dependency;
-use mln_style::layer_type::{
-    ErasedLayerStyle, ErasedStyleLayerType, LayerStyle, LayerTypeEntry, PaintSet, StyleLayerType,
-};
+use mln_style::layer_type::{ErasedLayerStyle, ErasedStyleLayerType, LayerStyle, LayerTypeEntry, PaintSet};
 use mln_style::serialization::SharedLayer;
 use mln_util::error::Error;
 use mln_util::serialization::shared;
@@ -23,64 +19,11 @@ use mln_wire::{Reader, Wire, Writer};
 use smallvec::SmallVec;
 
 use crate::bucket::Bucket;
+use crate::layer::LayerType;
 use crate::layout::layout::{BuildParams, Layout, LayoutParameters, SourceLayer};
 use crate::layout::tile_layout::{Built, Resolved};
-use crate::render_layer::RenderLayer;
+use crate::render_layer::{Layer, RenderLayer};
 use crate::render_pass::RenderPass;
-use crate::render_tile::TileView;
-
-/// A layer type that the renderer draws: the render half of a type whose
-/// style half is its [`StyleLayerType`]. A
-/// [`RegistryBuilder`](crate::RegistryBuilder) registers it by name with
-/// [`add_layer_type`](crate::RegistryBuilder::add_layer_type).
-pub trait LayerType: StyleLayerType {
-    /// How a tile lays out a group of the type's layers.
-    /// [`NoLayout`](crate::layout::layout::NoLayout) for a type that
-    /// doesn't lay out.
-    type Layout: Layout<Self>;
-
-    /// The bucket the layout makes. `NoBucket` for a type that doesn't lay
-    /// out.
-    type Bucket: Bucket + Wire;
-
-    /// What a frame's tile shows a layer of the type, which its draws draw:
-    /// its bucket in the tile's layout
-    /// (`LayerBucket`), a raster or
-    /// raster-dem tile's own bucket, or nothing for a type without a source
-    /// ([`NoTileBucket`](crate::render_tile::NoTileBucket)).
-    type TileBucket<'a>: TileView<'a>;
-
-    /// Whether the layout of `group` can need glyphs or images. A tile
-    /// makes such a group's layout before the dependencies are resolved,
-    /// and every other group's once they are.
-    fn layout_can_need_dependencies(_group: &[Arc<EvaluatedLayer<Self>>]) -> bool {
-        false
-    }
-
-    /// The layout of `group`, layers of the same layout on `source_layer`,
-    /// with the dependencies it records in `parameters`. `None` for a type
-    /// that doesn't lay out.
-    fn create_layout(
-        _group: &[Arc<EvaluatedLayer<Self>>],
-        _parameters: &mut LayoutParameters<'_>,
-        _source_layer: SourceLayer,
-    ) -> Result<Option<Self::Layout>, Error> {
-        Ok(None)
-    }
-
-    /// How far outside a feature of `bucket` a query still hits it, from
-    /// `layer`'s current values and the bucket's statistics of them.
-    fn query_radius(_bucket: &Self::Bucket, _layer: &EvaluatedLayer<Self>) -> f32 {
-        0.0
-    }
-
-    /// Whether the type has cross-faded properties, whose evaluation takes
-    /// the frame's cross-fade.
-    const CROSSFADES: bool = false;
-
-    /// The render half of the layer `style`, which a frame updates and draws.
-    fn render_layer(style: Arc<LayerStyle<Self>>) -> Box<dyn RenderLayer>;
-}
 
 /// The values of a layer of the type `T` for a frame.
 pub struct EvaluatedLayer<T: LayerType> {
@@ -226,7 +169,7 @@ pub(crate) trait ErasedLayerType: ErasedStyleLayerType {
 
 impl<T: LayerType> ErasedLayerType for LayerTypeEntry<T> {
     fn create_render_layer(&self, style: &Arc<dyn ErasedLayerStyle>) -> Option<Box<dyn RenderLayer>> {
-        LayerStyle::<T>::recover(style).map(T::render_layer)
+        LayerStyle::<T>::recover(style).map(|style| -> Box<dyn RenderLayer> { Box::new(Layer::<T>::new(style)) })
     }
 
     fn layout_can_need_dependencies(&self, group: &[Arc<dyn ErasedEvaluatedLayer>]) -> bool {

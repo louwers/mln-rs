@@ -386,7 +386,7 @@ impl FeatureIndex {
                 continue;
             };
 
-            let needs_cross_tile_index = render_layer.base().style.info().cross_tile_index;
+            let needs_cross_tile_index = render_layer.style().info().cross_tile_index;
             // we use the float camera zoom here, not the integer tile ID zoom,
             // because for the query we take into account the actual rendered
             // size of the geometry (#2781)
@@ -418,7 +418,7 @@ impl FeatureIndex {
 
             let converted = mln_tile::convert_feature(&feature, &geometry, &tile_id.canonical)?;
             let mut converted = Feature::from(converted);
-            converted.source = render_layer.base().style.base().source.clone();
+            converted.source = render_layer.style().base().source.clone();
             converted.source_layer = source_layer_id.clone();
             converted.state = state.clone();
             result.entry(layer_id.clone()).or_default().push(converted);

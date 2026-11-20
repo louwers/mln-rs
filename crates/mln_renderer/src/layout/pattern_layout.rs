@@ -27,7 +27,7 @@ use crate::bucket::Bucket;
 use crate::buckets::fill_bucket::FillBucket;
 use crate::buckets::line_bucket::LineBucket;
 use crate::geometry::feature_index::FeatureIndexBuilder;
-use crate::layer_type::{EvaluatedLayer, LayerType};
+use crate::layer::{EvaluatedLayer, LayerType};
 use crate::layout::layout::{BuildParams, Layout, LayoutParameters, SourceLayer, layers_by_id};
 use crate::layout::tile_layout::Resolved;
 use crate::util::tessellator::Tessellator;

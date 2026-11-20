@@ -46,7 +46,6 @@ use mln_gfx::shaders::shader_defines::{
 };
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_map_types::View;
-use mln_style::layer_type::LayerStyle;
 use mln_style::layers::FillExtrusion;
 use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionPaintProperties;
 use mln_style_types::{AlignmentType, LayerBlendType};
@@ -74,21 +73,18 @@ use crate::gfx::indexes::{Indexes, SharedIndexes};
 use crate::gfx::texture2d::Texture2D;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
+use crate::layer::{DrawContext, EvaluatedLayer, LayerType, LayerValues};
 use crate::layer_composite::Composite;
 use crate::layer_drawing::{
     DrawDepth, DrawList, DrawObjectsMut, DrawPriority, FrameDraw, TileDraws, TileObjects, UniformWriter,
 };
-use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::pattern_layout::{PatternLayout, uses_pattern};
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{
-    Atlases, LayerBucket, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
-};
+use crate::render_layer::LayerBucket;
 use crate::render_light::EvaluatedLight;
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
-use crate::render_tile::FrameTile;
 use crate::tile_matrix::{projection_data, to_projection_ubo};
 
 /// The pass the layer's draws draw in.
@@ -111,7 +107,7 @@ struct ExtrusionDraw {
 
 /// What the layer keeps of a tile: the draws of its roofs and walls, as they
 /// were built for the tile's bucket.
-pub(crate) struct ExtrusionTile {
+pub struct ExtrusionTile {
     draws: Vec<ExtrusionDraw>,
     /// Where the pulled walls' shader finds a vertex's paint values
     /// (`FillExtrusionDrawableUBO::paint_layout`).
@@ -283,11 +279,35 @@ fn extrusion_draw(
     ExtrusionDraw { id: SimpleIdentity::new(), objects, priority: DrawPriority::from(in_color), walls, clip }
 }
 
+/// What a fill-extrusion layer keeps besides its drawing.
+pub struct ExtrusionState {
+    /// The frame's draws as the update makes them.
+    draw_list: DrawList<ExtrusionUniforms, usize>,
+
+    /// The wall quad (`RenderStaticData::fill_extrusion_vertices`) of the
+    /// instanced walls.
+    static_data_vertices: Option<SharedVertices>,
+    /// The triangle strip of the wall quad, which the instanced walls draw.
+    strip_indices: Option<SharedIndexes>,
+    /// The triangles of walls four vertices apart
+    /// (`RenderStaticData::wall_indexes`), which the others draw.
+    wall_indices: Option<SharedIndexes>,
+}
+
+/// The layer's opacity: as `fill-extrusion-opacity` is the same for every
+/// extrusion, both opacities apply to the layer drawn as one surface.
+fn opacity(evaluated: &EvaluatedLayer<FillExtrusion>) -> f32 {
+    evaluated.paint.fill_extrusion_layer_opacity.uniform() * evaluated.paint.fill_extrusion_opacity.uniform()
+}
+
 impl LayerType for FillExtrusion {
     type Layout = PatternLayout<FillExtrusionLayoutSpec>;
     type Bucket = FillExtrusionBucket;
     type TileBucket<'a> = LayerBucket<'a, FillExtrusion>;
+    type Drawing = TileDraws<ExtrusionTile>;
+    type State = ExtrusionState;
     const CROSSFADES: bool = true;
+    const IS_3D: bool = true;
 
     /// Whether a layer of the group has a pattern.
     fn layout_can_need_dependencies(group: &[Arc<EvaluatedLayer<FillExtrusion>>]) -> bool {
@@ -307,76 +327,32 @@ impl LayerType for FillExtrusion {
         (translate[0] * translate[0] + translate[1] * translate[1]).sqrt()
     }
 
-    fn render_layer(style: Arc<LayerStyle<FillExtrusion>>) -> Box<dyn RenderLayer> {
-        Box::new(RenderFillExtrusionLayer::new(style))
-    }
-}
-
-pub(crate) struct RenderFillExtrusionLayer {
-    base: RenderLayerBase,
-    values: LayerValues<FillExtrusion>,
-    drawing: TileDraws<ExtrusionTile>,
-    /// The frame's draws as the update makes them.
-    draw_list: DrawList<ExtrusionUniforms, usize>,
-
-    /// The wall quad (`RenderStaticData::fill_extrusion_vertices`) of the
-    /// instanced walls.
-    static_data_vertices: Option<SharedVertices>,
-    /// The triangle strip of the wall quad, which the instanced walls draw.
-    strip_indices: Option<SharedIndexes>,
-    /// The triangles of walls four vertices apart
-    /// (`RenderStaticData::wall_indexes`), which the others draw.
-    wall_indices: Option<SharedIndexes>,
-}
-
-impl RenderFillExtrusionLayer {
-    pub(crate) fn new(impl_: Arc<LayerStyle<FillExtrusion>>) -> Self {
-        let (base, values) = LayerValues::new(impl_);
-        RenderFillExtrusionLayer {
-            base,
-            values,
-            drawing: TileDraws::default(),
+    fn new_layer(_layer: &LayerValues<FillExtrusion>) -> (ExtrusionState, TileDraws<ExtrusionTile>) {
+        let state = ExtrusionState {
             draw_list: DrawList::default(),
             static_data_vertices: None,
             strip_indices: None,
             wall_indices: None,
-        }
-    }
-}
-
-/// The layer's opacity: as `fill-extrusion-opacity` is the same for every
-/// extrusion, both opacities apply to the layer drawn as one surface.
-fn opacity(evaluated: &EvaluatedLayer<FillExtrusion>) -> f32 {
-    evaluated.paint.fill_extrusion_layer_opacity.uniform() * evaluated.paint.fill_extrusion_opacity.uniform()
-}
-
-impl TypedLayer for RenderFillExtrusionLayer {
-    type Type = FillExtrusion;
-    type Drawing = TileDraws<ExtrusionTile>;
-
-    fn parts(&self) -> Parts<'_, Self> {
-        Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
+        };
+        (state, TileDraws::default())
     }
 
-    fn parts_mut(&mut self) -> PartsMut<'_, Self> {
-        PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
-    }
-
-    fn passes(&self, evaluated: &EvaluatedLayer<FillExtrusion>) -> RenderPass {
+    fn passes(_layer: &LayerValues<FillExtrusion>, evaluated: &EvaluatedLayer<FillExtrusion>) -> RenderPass {
         if opacity(evaluated) > 0.0 { RenderPass::Translucent } else { RenderPass::None }
     }
 
     /// Makes the frame's draws of the layer, those of each of its tiles,
     /// which it builds for a tile it keeps none of, and writes the layer's
     /// buffers they read.
-    fn update_draws(
-        &mut self,
+    fn make_draws(
+        state: &mut ExtrusionState,
+        drawing: &mut TileDraws<ExtrusionTile>,
         gpu: &mut dyn Gpu,
-        paint_parameters: &mut PaintParameters<'_>,
-        _atlases: &Atlases,
-        render_tiles: &[FrameTile<'_, FillExtrusion>],
+        cx: &mut DrawContext<'_, '_, '_, FillExtrusion>,
     ) {
-        let has_pattern = !self.values.unevaluated.fill_extrusion_pattern.is_undefined();
+        let paint_parameters = &mut *cx.paint;
+        let render_tiles = cx.tiles;
+        let has_pattern = !cx.layer.unevaluated.fill_extrusion_pattern.is_undefined();
         let walls = Walls::of(paint_parameters.context, has_pattern);
         let (program, wall_program) = match (has_pattern, walls) {
             (false, Walls::Instanced) => (&programs::FILL_EXTRUSION, &programs::FILL_EXTRUSION_INSTANCED),
@@ -388,26 +364,26 @@ impl TypedLayer for RenderFillExtrusionLayer {
             }
         };
 
-        let opacity = opacity(&self.values.evaluated);
+        let opacity = opacity(&cx.layer.evaluated);
         let composite = (opacity < 1.0 && !has_pattern && paint_parameters.composites_with_frame_depth)
             .then_some(Composite { opacity, blend: LayerBlendType::Normal, frame_depth: true });
 
         let context = &mut *paint_parameters.context;
-        let static_vertices = &*self
+        let static_vertices = &*state
             .static_data_vertices
             .get_or_insert_with(|| copied_vertices(context, &RenderStaticData::fill_extrusion_vertices()));
         let static_indices = if walls == Walls::Instanced {
-            &*self.strip_indices.get_or_insert_with(|| {
+            &*state.strip_indices.get_or_insert_with(|| {
                 context.add_indexes(Indexes::new(RenderStaticData::fill_extrusion_strip_indices()))
             })
         } else {
             let static_data = paint_parameters.static_data;
-            &*self.wall_indices.get_or_insert_with(|| static_data.wall_indexes(context))
+            &*state.wall_indices.get_or_insert_with(|| static_data.wall_indexes(context))
         };
         let builder = TileBuilder {
             program,
             wall_program,
-            projection_variant: self.base.projection_variant,
+            projection_variant: cx.projection_variant,
             walls,
             static_vertices,
             static_indices,
@@ -417,10 +393,10 @@ impl TypedLayer for RenderFillExtrusionLayer {
             depth_pass: composite.is_none() && (opacity < 1.0 || has_pattern),
         };
 
-        let layer = &*self.values.evaluated;
+        let layer = &*cx.layer.evaluated;
         for tile in render_tiles {
             let tile_id = tile.id();
-            let Some(mut entry) = self.drawing.tiles_mut().entry(&tile_id) else {
+            let Some(mut entry) = drawing.tiles_mut().entry(&tile_id) else {
                 continue;
             };
 
@@ -433,7 +409,7 @@ impl TypedLayer for RenderFillExtrusionLayer {
             // Draws built from another bucket go.
             entry.set_bucket(bucket.base.bucket_id);
 
-            let Some(binders) = bucket.paint_property_binders.get(self.base.style.base().id.as_str()) else {
+            let Some(binders) = bucket.paint_property_binders.get(cx.layer.id()) else {
                 continue;
             };
 
@@ -457,33 +433,33 @@ impl TypedLayer for RenderFillExtrusionLayer {
                     ..FrameDraw::new(Some(tile_id), draw.id)
                 };
                 let layout = cached.paint_layout;
-                let uniforms =
-                    Self::uniforms(layer, tile_id, render_data, binders, &draw.objects, layout, paint_parameters);
-                self.draw_list.push_part(frame_draw, index, uniforms);
+                let uniforms = ExtrusionState::uniforms(
+                    layer,
+                    tile_id,
+                    render_data,
+                    binders,
+                    &draw.objects,
+                    layout,
+                    paint_parameters,
+                );
+                state.draw_list.push_part(frame_draw, index, uniforms);
             }
         }
 
-        let frame = self.drawing.frame_mut();
+        let frame = drawing.frame_mut();
         frame.set_composite(composite);
         frame.set_stencil_tiles(render_tiles.iter().map(|tile| tile.tile.id));
-        let (light, state) = (paint_parameters.light, paint_parameters.view);
+        let (light, view) = (paint_parameters.light, paint_parameters.view);
         // The draws that composite draw opaque: the composite has the
         // layer's opacity.
         let opacity = if composite.is_some() { 1.0 } else { opacity };
-        self.drawing.finish(&mut self.draw_list, gpu, paint_parameters.context, |writer| {
-            Self::write_uniforms(layer, writer, light, state, opacity);
+        drawing.finish(&mut state.draw_list, gpu, paint_parameters.context, |writer| {
+            ExtrusionState::write_uniforms(layer, writer, light, view, opacity);
         });
     }
-}
 
-impl RenderLayer for RenderFillExtrusionLayer {
-    fn is_3d(&self) -> bool {
-        true
-    }
-
-    // query
     fn query_intersects_feature(
-        &self,
+        layer: &EvaluatedLayer<FillExtrusion>,
         query_geometry: &mln_tile_id::geometry_tile_data::GeometryCoordinates,
         _feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
         geometry: &mln_tile_id::geometry_tile_data::GeometryCollection,
@@ -493,7 +469,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
         _projector: &mln_map_types::TileProjector<'_>,
         _feature_state: &mln_style::expression::expression::FeatureState,
     ) -> bool {
-        let evaluated = &self.values.evaluated.paint;
+        let evaluated = &layer.paint;
         let translated_query_geometry = crate::geometry::feature_index::FeatureIndex::translate_query_geometry(
             query_geometry,
             *evaluated.fill_extrusion_translate.uniform(),
@@ -719,7 +695,7 @@ impl TileBuilder<'_> {
     }
 }
 
-impl RenderFillExtrusionLayer {
+impl ExtrusionState {
     /// The entries in the layer's storage buffers of a draw of `objects`, a
     /// draw of `tile`, whose bucket's binders are `binders` and whose pulled
     /// walls find their paint values by `paint_layout`, with the layer's

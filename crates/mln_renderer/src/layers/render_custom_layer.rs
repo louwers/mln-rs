@@ -1,6 +1,6 @@
 // How a custom layer differs from the others:
 // - The host's prerender runs in a step of its own after the layers' draws
-//   upload (`RenderLayer::prerender`), not in `update`, so it gets the frame's
+//   upload (`LayerType::prerender`), not in `make_draws`, so it gets the frame's
 //   final projection, whose depth range depends on how many draw groups the
 //   frame has.
 // - What it draws is a draw group of its own (`DrawGroup::Custom`), whose
@@ -9,14 +9,13 @@
 // - A host that drew is told the renderer stopped once the layer leaves it,
 //   after the GPU finished the host's work (`Gpu::flush`), or that
 //   its graphics objects are lost (`Renderer::lose_custom_layers`). A layer
-//   leaves (`RenderLayer::leave`) without a `Gpu` at hand, so its host waits
+//   leaves (`LayerType::leave`) without a `Gpu` at hand, so its host waits
 //   in the orchestrator's `EndedHosts` until the renderer ends it with one
 //   (`end_hosts`).
 
 use std::sync::Arc;
 
 use mln_gfx::gpu::Gpu;
-use mln_style::layer_type::LayerStyle;
 use mln_style::layers::{
     Custom, CustomLayerFrame, CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerRenderParameters,
 };
@@ -24,33 +23,16 @@ use mln_util::logging::{Event, Log};
 
 use crate::bucket::NoBucket;
 use crate::gfx::context::Context;
+use crate::layer::{DrawContext, EvaluatedLayer, LayerType, LayerValues};
 use crate::layer_drawing::{DrawGroup, DrawOrder, LayerDrawing, TileMap};
-use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer};
 use crate::render_pass::RenderPass;
 use crate::render_tile::NoTileBucket;
 
-impl LayerType for Custom {
-    type Layout = NoLayout;
-    type Bucket = NoBucket;
-    type TileBucket<'a> = NoTileBucket;
-
-    fn render_layer(style: Arc<LayerStyle<Custom>>) -> Box<dyn RenderLayer> {
-        Box::new(RenderCustomLayer::new(style))
-    }
-}
-
-pub(crate) struct RenderCustomLayer {
-    base: RenderLayerBase,
-    values: LayerValues<Custom>,
-    drawing: CustomDrawing,
-}
-
 /// The layer's drawing, which keeps no tiles and no draws of its own: its
 /// one draw group is what the host draws.
-pub(crate) struct CustomDrawing {
+pub struct CustomDrawing {
     /// The host, while the renderer draws through it.
     host: Option<Arc<dyn CustomLayerHost>>,
     /// The frame the host last prerendered for.
@@ -61,16 +43,6 @@ pub(crate) struct CustomDrawing {
     /// Whether the layer draws, which it does from the first frame that
     /// draws it.
     updated: bool,
-}
-
-impl RenderCustomLayer {
-    pub(crate) fn new(impl_: Arc<LayerStyle<Custom>>) -> Self {
-        let host = impl_.host();
-        let (mut base, values) = LayerValues::new(impl_);
-        base.passes = RenderPass::Translucent;
-        let drawing = CustomDrawing { host, frame: None, used: false, updated: false };
-        RenderCustomLayer { base, values, drawing }
-    }
 }
 
 /// The hosts of custom layers that left the renderer after they drew, which
@@ -167,42 +139,48 @@ impl LayerDrawing for CustomDrawing {
     }
 }
 
-impl TypedLayer for RenderCustomLayer {
-    type Type = Custom;
+impl LayerType for Custom {
+    type Layout = NoLayout;
+    type Bucket = NoBucket;
+    type TileBucket<'a> = NoTileBucket;
+
     type Drawing = CustomDrawing;
+    type State = ();
 
-    fn parts(&self) -> Parts<'_, Self> {
-        Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
+    fn new_layer(layer: &LayerValues<Custom>) -> ((), CustomDrawing) {
+        let drawing = CustomDrawing { host: layer.style.host(), frame: None, used: false, updated: false };
+        ((), drawing)
     }
 
-    fn parts_mut(&mut self) -> PartsMut<'_, Self> {
-        PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
-    }
-
-    fn passes(&self, _evaluated: &EvaluatedLayer<Custom>) -> RenderPass {
+    /// The layer has no properties: it only keeps drawing in the
+    /// translucent pass.
+    fn passes(_layer: &LayerValues<Custom>, _evaluated: &EvaluatedLayer<Custom>) -> RenderPass {
         RenderPass::Translucent
+    }
+
+    /// The layer's draws are what its host draws, in its draw group.
+    fn make_draws(
+        (): &mut (),
+        _drawing: &mut CustomDrawing,
+        _gpu: &mut dyn Gpu,
+        _cx: &mut DrawContext<'_, '_, '_, Custom>,
+    ) {
     }
 
     /// A new host for the same layer ID is a new layer to the host: the old
     /// one goes to `ended`, to hear that the renderer stopped.
-    fn style_changed(&mut self, ended: &mut EndedHosts) {
-        let drawing = &mut self.drawing;
-        let same = drawing.host.as_ref().is_some_and(|host| self.values.style.has_host(host));
+    fn style_changed(drawing: &mut CustomDrawing, layer: &LayerValues<Custom>, ended: &mut EndedHosts) {
+        let same = drawing.host.as_ref().is_some_and(|host| layer.style.has_host(host));
         if !same {
             ended.extend(drawing.take_host());
-            drawing.host = self.values.style.host();
+            drawing.host = layer.style.host();
         }
     }
-}
 
-impl RenderLayer for RenderCustomLayer {
-    /// The layer has no properties: it only keeps drawing in the
-    /// translucent pass.
-    fn prerender(&mut self, gpu: &mut dyn Gpu, parameters: &PaintParameters<'_>) {
+    fn prerender(drawing: &mut CustomDrawing, gpu: &mut dyn Gpu, parameters: &PaintParameters<'_>) {
         let Some(frame) = parameters.custom_layer_frame else {
             return;
         };
-        let drawing = &mut self.drawing;
         drawing.frame = Some(frame);
         let Some(host) = &drawing.host else { return };
         let lent = gpu.lend(&mut |encoder| {
@@ -214,11 +192,11 @@ impl RenderLayer for RenderCustomLayer {
         }
     }
 
-    fn leave(&mut self, ended: &mut EndedHosts) {
-        ended.extend(self.drawing.take_host());
+    fn leave(drawing: &mut CustomDrawing, ended: &mut EndedHosts) {
+        ended.extend(drawing.take_host());
     }
 
-    fn lose_context(&mut self) {
-        self.drawing.lose();
+    fn lose_context(drawing: &mut CustomDrawing) {
+        drawing.lose();
     }
 }

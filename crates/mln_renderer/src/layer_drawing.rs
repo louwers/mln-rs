@@ -71,7 +71,7 @@ impl BitOrAssign for BucketChanges {
 
 /// The buckets whose vertex data changed, by bucket id, with what changed.
 #[derive(Default)]
-pub struct ChangedBuckets(HashMap<SimpleIdentity, BucketChanges>);
+pub(crate) struct ChangedBuckets(HashMap<SimpleIdentity, BucketChanges>);
 
 impl ChangedBuckets {
     /// Records that `changes` of the bucket `bucket` changed.

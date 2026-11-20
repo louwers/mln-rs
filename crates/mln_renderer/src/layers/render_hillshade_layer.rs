@@ -30,7 +30,6 @@ use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_math::deg2radf;
-use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Hillshade;
 use mln_style::layers::hillshade_layer_properties::HillshadePaintProperties;
 use mln_style_types::{HillshadeIlluminationAnchorType, HillshadeMethodType, ResamplingType, TranslateAnchorType};
@@ -55,29 +54,14 @@ use crate::gfx::store::SharedTexture;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
+use crate::layer::{DrawContext, EvaluatedLayer, LayerType, LayerValues, UpdateContext};
 use crate::layer_drawing::{DrawList, DrawObjectsMut, FrameDraw, KeptDraw, SingleDraw, TileDraws, TileObjects};
-use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{
-    Atlases, LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
-};
 use crate::render_pass::RenderPass;
-use crate::render_source::RenderSource;
 use crate::render_static_data::RenderStaticData;
 use crate::render_target::RenderTarget;
-use crate::render_tile::FrameTile;
 use crate::tile_matrix::{bind_no_projection, projection_data, to_projection_ubo};
-
-impl LayerType for Hillshade {
-    type Layout = NoLayout;
-    type Bucket = NoBucket;
-    type TileBucket<'a> = &'a HillshadeBucket;
-
-    fn render_layer(style: Arc<LayerStyle<Hillshade>>) -> Box<dyn RenderLayer> {
-        Box::new(RenderHillshadeLayer::new(style))
-    }
-}
 
 /// What the layer keeps of a bucket: the render target the slopes of its DEM
 /// are prepared in, and the draw that prepares them.
@@ -93,7 +77,7 @@ struct BucketTarget {
 
 /// What the layer keeps of a tile: the draw that shades the slopes of its
 /// bucket, with the generation of the bucket's geometry it took.
-pub(crate) struct HillshadeTile {
+pub struct HillshadeTile {
     draw: KeptDraw,
     geometry_generation: u64,
 }
@@ -117,10 +101,8 @@ struct HillshadeUniforms {
     projection: ProjectionUBO,
 }
 
-pub(crate) struct RenderHillshadeLayer {
-    base: RenderLayerBase,
-    values: LayerValues<Hillshade>,
-    drawing: TileDraws<HillshadeTile>,
+/// What a hillshade layer keeps besides its drawing.
+pub struct HillshadeState {
     /// The frame's draws as the update makes them.
     draw_list: DrawList<HillshadeUniforms>,
     maxzoom: u8,
@@ -139,25 +121,6 @@ pub(crate) struct RenderHillshadeLayer {
     /// number of light sources: a viewport anchor's takes the bearing of the
     /// first frame that draws with it.
     illumination: Option<(Arc<EvaluatedLayer<Hillshade>>, Illumination)>,
-}
-
-impl RenderHillshadeLayer {
-    pub(crate) fn new(impl_: Arc<LayerStyle<Hillshade>>) -> Self {
-        let (base, values) = LayerValues::new(impl_);
-        RenderHillshadeLayer {
-            base,
-            values,
-            drawing: TileDraws::default(),
-            draw_list: DrawList::default(),
-            maxzoom: constants::TERRAIN_RGB_MAXZOOM,
-            static_data_shared_vertices: None,
-            static_data_indices: None,
-            globe_meshes: GlobeTileMeshCache::new(),
-            bucket_render_targets: HashMap::default(),
-            live_buckets: HashSet::default(),
-            illumination: None,
-        }
-    }
 }
 
 /// Structure to hold processed illumination properties
@@ -287,26 +250,36 @@ fn hillshade_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeArra
     attrs
 }
 
-impl TypedLayer for RenderHillshadeLayer {
-    type Type = Hillshade;
+impl LayerType for Hillshade {
+    type Layout = NoLayout;
+    type Bucket = NoBucket;
+    type TileBucket<'a> = &'a HillshadeBucket;
+
     type Drawing = TileDraws<HillshadeTile>;
+    type State = HillshadeState;
 
-    fn parts(&self) -> Parts<'_, Self> {
-        Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
-    }
-
-    fn parts_mut(&mut self) -> PartsMut<'_, Self> {
-        PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
+    fn new_layer(_layer: &LayerValues<Hillshade>) -> (HillshadeState, TileDraws<HillshadeTile>) {
+        let state = HillshadeState {
+            draw_list: DrawList::default(),
+            maxzoom: constants::TERRAIN_RGB_MAXZOOM,
+            static_data_shared_vertices: None,
+            static_data_indices: None,
+            globe_meshes: GlobeTileMeshCache::new(),
+            bucket_render_targets: HashMap::default(),
+            live_buckets: HashSet::default(),
+            illumination: None,
+        };
+        (state, TileDraws::default())
     }
 
     /// Drops the globe's meshes when the frame isn't on the globe.
-    fn projection_changed(&mut self) {
-        if self.base.projection_variant == ProjectionVariant::Mercator {
-            self.globe_meshes.clear();
+    fn projection_changed(state: &mut HillshadeState, variant: ProjectionVariant) {
+        if variant == ProjectionVariant::Mercator {
+            state.globe_meshes.clear();
         }
     }
 
-    fn passes(&self, evaluated: &EvaluatedLayer<Hillshade>) -> RenderPass {
+    fn passes(_layer: &LayerValues<Hillshade>, evaluated: &EvaluatedLayer<Hillshade>) -> RenderPass {
         if *evaluated.paint.hillshade_exaggeration.uniform() > 0.0 {
             RenderPass::Translucent | RenderPass::Pass3D
         } else {
@@ -318,44 +291,43 @@ impl TypedLayer for RenderHillshadeLayer {
     /// its slopes, and the frame's draws of the layer, those of each of its
     /// tiles, which shade the slopes and which it builds for a tile it keeps
     /// none of, and writes the layer's buffers they read.
-    fn update_draws(
-        &mut self,
+    fn make_draws(
+        state: &mut HillshadeState,
+        drawing: &mut TileDraws<HillshadeTile>,
         gpu: &mut dyn Gpu,
-        paint_parameters: &mut PaintParameters<'_>,
-        _atlases: &Atlases,
-        render_tiles: &[FrameTile<'_, Hillshade>],
+        cx: &mut DrawContext<'_, '_, '_, Hillshade>,
     ) {
+        let (paint_parameters, render_tiles) = (&mut *cx.paint, cx.tiles);
         let context = &mut *paint_parameters.context;
         let hillshade_prepare_shader =
             context.shader_key(&programs::HILLSHADE_PREPARE, Uniforms::default(), ProjectionVariant::Mercator);
-        let hillshade_shader =
-            context.shader_key(&programs::HILLSHADE, Uniforms::default(), self.base.projection_variant);
+        let hillshade_shader = context.shader_key(&programs::HILLSHADE, Uniforms::default(), cx.projection_variant);
         let color_mode = context.color_mode(ColorMode::alpha_blended());
-        let static_data_shared_vertices = &*self
+        let static_data_shared_vertices = &*state
             .static_data_shared_vertices
             .get_or_insert_with(|| copied_vertices(context, &RenderStaticData::raster_vertices()));
-        let static_data_indices = &*self
+        let static_data_indices = &*state
             .static_data_indices
             .get_or_insert_with(|| context.add_indexes(Indexes::new(RenderStaticData::quad_triangle_indices())));
 
         // `resampling` filters the prepared texture the tile's draw samples;
         // the prepare pass reads the DEM with Nearest regardless.
-        let resampling_filter = match *self.values.evaluated.paint.resampling.uniform() {
+        let resampling_filter = match *cx.layer.evaluated.paint.resampling.uniform() {
             ResamplingType::Linear => TextureFilterType::Linear,
             ResamplingType::Nearest => TextureFilterType::Nearest,
         };
 
         // Drop the render targets of buckets that are no longer rendered.
-        let live_buckets = &mut self.live_buckets;
+        let live_buckets = &mut state.live_buckets;
         live_buckets.clear();
         live_buckets.extend(render_tiles.iter().filter_map(|tile| Some(tile.bucket()?.base.bucket_id)));
-        self.bucket_render_targets.retain(|id, _| live_buckets.contains(id));
+        state.bucket_render_targets.retain(|id, _| live_buckets.contains(id));
 
         // The illumination, which the first draw computes.
         let mut illumination = None;
         for tile in render_tiles {
             let tile_id = tile.id();
-            let Some(mut entry) = self.drawing.tiles_mut().entry(&tile_id) else {
+            let Some(mut entry) = drawing.tiles_mut().entry(&tile_id) else {
                 continue;
             };
 
@@ -368,7 +340,7 @@ impl TypedLayer for RenderHillshadeLayer {
             entry.set_bucket(bucket_id);
 
             let generation = bucket.render_target_generation();
-            let target = match self.bucket_render_targets.entry(bucket_id) {
+            let target = match state.bucket_render_targets.entry(bucket_id) {
                 Entry::Occupied(entry) if entry.get().generation == generation => entry.into_mut(),
                 entry => {
                     let attrs = hillshade_vertex_attributes(static_data_shared_vertices);
@@ -377,7 +349,7 @@ impl TypedLayer for RenderHillshadeLayer {
                         paint_parameters.context,
                         bucket,
                         &tile_id.to_unwrapped(),
-                        self.maxzoom,
+                        state.maxzoom,
                         &hillshade_prepare_shader,
                         attrs,
                         static_data_indices,
@@ -401,9 +373,9 @@ impl TypedLayer for RenderHillshadeLayer {
             // The tile's geometry: the globe's mesh of its mask, the mask's
             // geometry, or the whole tile's quad.
             let mut tile_geometry = || -> (SharedVertices, usize, DrawIndexes, Vec<SegmentBase>) {
-                if self.base.projection_variant == ProjectionVariant::Globe {
+                if cx.projection_variant == ProjectionVariant::Globe {
                     let globe_mesh =
-                        self.globe_meshes.get(context, &tile_id.canonical, &geometry.mask, RasterLayoutVertex::new);
+                        state.globe_meshes.get(context, &tile_id.canonical, &geometry.mask, RasterLayoutVertex::new);
                     (
                         globe_mesh.vertices.clone(),
                         globe_mesh.vertices.count(),
@@ -461,14 +433,18 @@ impl TypedLayer for RenderHillshadeLayer {
             };
             let draw = cached.draw.frame_draw(Some(tile_id));
             let Illumination { num_lights, .. } = *illumination.get_or_insert_with(|| {
-                Self::illumination(&mut self.illumination, &self.values.evaluated, paint_parameters)
+                HillshadeState::illumination(&mut state.illumination, &cx.layer.evaluated, paint_parameters)
             });
-            let uniforms =
-                Self::uniforms(&self.values.evaluated.paint, &tile_id.to_unwrapped(), num_lights, paint_parameters);
-            self.draw_list.push(draw, uniforms);
+            let uniforms = HillshadeState::uniforms(
+                &cx.layer.evaluated.paint,
+                &tile_id.to_unwrapped(),
+                num_lights,
+                paint_parameters,
+            );
+            state.draw_list.push(draw, uniforms);
         }
 
-        self.drawing.finish(&mut self.draw_list, gpu, paint_parameters.context, |writer| {
+        drawing.finish(&mut state.draw_list, gpu, paint_parameters.context, |writer| {
             if let Some(Illumination { props, .. }) = &illumination {
                 writer.uniform(ID_HILLSHADE_EVALUATED_PROPS_UBO, props);
             }
@@ -479,31 +455,38 @@ impl TypedLayer for RenderHillshadeLayer {
     }
 
     /// Keeps the source's maximum zoom, which the DEMs' preparation reads.
-    fn update(&mut self, params: &mut LayerUpdateParameters<'_>, _tiles: &[FrameTile<'_, Hillshade>]) {
-        if let Some(max_zoom) = params.source.and_then(RenderSource::max_zoom) {
-            self.maxzoom = max_zoom;
+    fn update(
+        state: &mut HillshadeState,
+        _drawing: &mut TileDraws<HillshadeTile>,
+        cx: &mut UpdateContext<'_, '_, Hillshade>,
+    ) {
+        if let Some(max_zoom) = cx.source_max_zoom() {
+            state.maxzoom = max_zoom;
         }
     }
 
-    fn release(&mut self) {
-        self.bucket_render_targets.clear();
+    fn release(state: &mut HillshadeState) {
+        state.bucket_render_targets.clear();
     }
-}
 
-impl RenderLayer for RenderHillshadeLayer {
-    fn upload_render_targets(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
-        if self.base.is_renderable {
-            for target in self.bucket_render_targets.values_mut() {
-                target.prepare.upload(gpu, context);
-            }
+    fn upload_render_targets(
+        state: &mut HillshadeState,
+        _drawing: &mut TileDraws<HillshadeTile>,
+        gpu: &mut dyn Gpu,
+        context: &mut Context,
+    ) {
+        for target in state.bucket_render_targets.values_mut() {
+            target.prepare.upload(gpu, context);
         }
     }
 
-    fn render_targets(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        if !self.base.is_renderable {
-            return;
-        }
-        for BucketTarget { render_target, prepare, .. } in self.bucket_render_targets.values_mut() {
+    fn render_targets(
+        state: &mut HillshadeState,
+        _drawing: &mut TileDraws<HillshadeTile>,
+        gpu: &mut dyn Gpu,
+        parameters: &mut PaintParameters<'_>,
+    ) {
+        for BucketTarget { render_target, prepare, .. } in state.bucket_render_targets.values_mut() {
             parameters.current_layer = 0;
             let Some(mut passes) = render_target.begin(gpu, parameters) else {
                 continue;
@@ -586,7 +569,7 @@ impl BucketTarget {
     }
 }
 
-impl RenderHillshadeLayer {
+impl HillshadeState {
     /// The entries in the layer's storage buffers of the draw of `tile_id`
     /// with the layer's values `evaluated`, lit by `num_lights` light
     /// sources.

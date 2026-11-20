@@ -446,12 +446,12 @@ impl GeometryContents {
     pub(crate) fn query_padding(&self, layers: &QueryLayers<'_>) -> f32 {
         let mut query_padding: f32 = 0.0;
         for layer in layers.values() {
-            let Some(data) = self.result.layer_bucket(&*layer.base().style) else {
+            let Some(data) = self.result.layer_bucket(layer.style()) else {
                 continue;
             };
             if data.bucket.has_data() {
-                let evaluated = &layer.base().evaluated_properties;
-                query_padding = query_padding.max(evaluated.entry().query_radius(data.bucket, evaluated));
+                let evaluated = layer.evaluated();
+                query_padding = query_padding.max(evaluated.entry().query_radius(data.bucket, &evaluated));
             }
         }
         query_padding

@@ -15,7 +15,7 @@ use mln_vec_map::{VecMap, VecSet};
 
 use crate::bucket_parameters::BucketParameters;
 use crate::geometry::feature_index::FeatureIndexBuilder;
-use crate::layer_type::{EvaluatedLayer, LayerType};
+use crate::layer::{EvaluatedLayer, LayerType};
 use crate::layout::filter_groups::FilterGroups;
 use crate::layout::tile_layout::Resolved;
 
