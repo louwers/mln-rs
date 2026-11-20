@@ -1140,6 +1140,12 @@ checksum = "98de4bbd547a563b716d8dfa9aad1cb19bfab00f4fa09a6a4ed21dbcf44ce9c4"
 
 [[package]]
 name = "float_next_after"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8bf7cc16383c4b8d58b9905a8509f02926ce3058053c056376248d958c9df1e8"
+
+[[package]]
+name = "float_next_after"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37007738a80ea34f969af54a3390dd72cacdef654974cfd449c9f6f72dbaac10"
@@ -1300,7 +1306,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "30eb1fdc57c1e5cfd11826fe0caec4b9dc7901f3758263bb506228d88c8d9e9a"
 dependencies = [
  "earcut",
- "float_next_after",
+ "float_next_after 2.0.0",
  "geo-types",
  "geographiclib-rs",
  "i_overlay",
@@ -1311,6 +1317,20 @@ dependencies = [
  "robust",
  "rstar 0.12.2",
  "sif-itree",
+]
+
+[[package]]
+name = "geo-index"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bfff90b0f9cfdb74b7a1e381d0349b641b2b78c5798d281bc9c8c7cef8ce47d3"
+dependencies = [
+ "bytemuck",
+ "float_next_after 1.0.0",
+ "geo-traits",
+ "num-traits",
+ "thiserror 1.0.69",
+ "tinyvec",
 ]
 
 [[package]]
@@ -2448,13 +2468,13 @@ dependencies = [
  "mln-rs-expression",
  "mln-rs-feature",
  "mln-rs-frame-pacer",
+ "mln-rs-geojson",
  "mln-rs-geojson-vt",
  "mln-rs-geometry",
  "mln-rs-gestures",
  "mln-rs-gfx",
  "mln-rs-gl",
  "mln-rs-image",
- "mln-rs-kdbush",
  "mln-rs-map",
  "mln-rs-map-types",
  "mln-rs-math",
@@ -2467,7 +2487,6 @@ dependencies = [
  "mln-rs-storage-offline",
  "mln-rs-style",
  "mln-rs-style-types",
- "mln-rs-supercluster",
  "mln-rs-system-fonts",
  "mln-rs-text",
  "mln-rs-tile",
@@ -2735,6 +2754,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mln-rs-geojson"
+version = "0.0.13"
+dependencies = [
+ "geo-index",
+ "geo-types",
+ "mln-rs-feature",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "mln-rs-geojson-vt"
 version = "0.0.13"
 dependencies = [
@@ -2864,10 +2894,6 @@ dependencies = [
  "web-sys",
  "zune-jpeg",
 ]
-
-[[package]]
-name = "mln-rs-kdbush"
-version = "0.0.13"
 
 [[package]]
 name = "mln-rs-map"
@@ -3127,13 +3153,13 @@ dependencies = [
  "mln-rs-conversion",
  "mln-rs-expression",
  "mln-rs-feature",
+ "mln-rs-geojson",
  "mln-rs-geojson-vt",
  "mln-rs-image",
  "mln-rs-map-types",
  "mln-rs-math",
  "mln-rs-storage",
  "mln-rs-style-types",
- "mln-rs-supercluster",
  "mln-rs-text",
  "mln-rs-tile",
  "mln-rs-tile-id",
@@ -3163,18 +3189,6 @@ dependencies = [
  "mln-rs-util",
  "mln-rs-vec-map",
  "mln-rs-wire",
-]
-
-[[package]]
-name = "mln-rs-supercluster"
-version = "0.0.13"
-dependencies = [
- "foldhash 0.2.0",
- "geo-types",
- "mln-rs-feature",
- "mln-rs-geometry",
- "mln-rs-kdbush",
- "serde_json",
 ]
 
 [[package]]

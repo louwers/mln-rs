@@ -21,12 +21,12 @@ pub use geojson;
 pub use geojson_vt;
 pub use geometry;
 pub use glam;
-pub use kdbush;
 pub use mln_conversion;
 /// Empty except on Windows.
 pub use mln_d3d12;
 pub use mln_expression;
 pub use mln_frame_pacer;
+pub use mln_geojson;
 pub use mln_gestures;
 pub use mln_gfx;
 pub use mln_gl;
@@ -57,4 +57,3 @@ pub use mln_vulkan;
 pub use mln_web_host;
 pub use mln_webgpu;
 pub use polylabel;
-pub use supercluster;

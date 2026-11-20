@@ -48,13 +48,13 @@ categories = ["graphics", "science::geo"]
 feature = { package = "mln-rs-feature", path = "vendor/feature", version = "=0.0.13" }
 geojson_vt = { package = "mln-rs-geojson-vt", path = "vendor/geojson-vt", version = "=0.0.13" }
 geometry = { package = "mln-rs-geometry", path = "vendor/geometry", version = "=0.0.13" }
-kdbush = { package = "mln-rs-kdbush", path = "vendor/kdbush", version = "=0.0.13" }
 mln_conversion = { package = "mln-rs-conversion", path = "crates/mln_conversion", version = "=0.0.13" }
 mln_d3d12 = { package = "mln-rs-d3d12", path = "crates/mln_d3d12", version = "=0.0.13" }
 mln_expression = { package = "mln-rs-expression", path = "crates/mln_expression", version = "=0.0.13" }
 mln_bench_workload = { package = "mln-rs-bench-workload", path = "tools/bench/workload" }
 mln_frame_pacer = { package = "mln-rs-frame-pacer", path = "crates/mln_frame_pacer", version = "=0.0.13" }
 mln_gestures = { package = "mln-rs-gestures", path = "crates/mln_gestures", version = "=0.0.13" }
+mln_geojson = { package = "mln-rs-geojson", path = "crates/mln_geojson", version = "=0.0.13" }
 mln_gfx = { package = "mln-rs-gfx", path = "crates/mln_gfx", version = "=0.0.13" }
 mln_gl = { package = "mln-rs-gl", path = "crates/mln_gl", version = "=0.0.13" }
 mln_glsl = { package = "mln-rs-glsl", path = "crates/mln_glsl", version = "=0.0.13" }
@@ -91,7 +91,6 @@ mln_webgpu = { package = "mln-rs-webgpu", path = "crates/mln_webgpu", version = 
 pixelmatch = { package = "mln-rs-pixelmatch", path = "vendor/pixelmatch", version = "=0.0.13" }
 polylabel = { package = "mln-rs-polylabel", path = "vendor/polylabel", version = "=0.0.13" }
 style_codegen = { package = "mln-rs-style-codegen", path = "tools/style-codegen", version = "=0.0.13" }
-supercluster = { package = "mln-rs-supercluster", path = "vendor/supercluster", version = "=0.0.13" }
 
 # Third-party crates, for both builds (Cargo.lock pins their versions). Only
 # add a crate when nothing in the C++ core has to be ported for it.
@@ -159,6 +158,9 @@ geo-types = { version = "0.7.20" }
 # The geometry that geojson-vt reads, so that it takes any geometry type
 # that implements the traits, `geo_types`' among them.
 geo-traits = { version = "0.3.0", features = ["geo-types"] }
+# The k-d tree that GeoJSON sources cluster their points with (mln_geojson),
+# instead of porting kdbush.
+geo-index = { version = "0.4.0", default-features = false }
 # GeoJSON, in place of a port of the C++ core's vendored geojson.hpp: the
 # sources, the C API and the expressions take its types.
 geojson = { version = "1.0.0" }
@@ -527,11 +529,11 @@ geojson.workspace = true
 geojson_vt.workspace = true
 geometry.workspace = true
 glam.workspace = true
-kdbush.workspace = true
 mln_conversion.workspace = true
 mln_d3d12.workspace = true
 mln_expression.workspace = true
 mln_frame_pacer.workspace = true
+mln_geojson.workspace = true
 mln_gestures.workspace = true
 mln_gfx.workspace = true
 mln_gl.workspace = true
@@ -558,7 +560,6 @@ mln_vulkan.workspace = true
 mln_web_host.workspace = true
 mln_webgpu.workspace = true
 polylabel.workspace = true
-supercluster.workspace = true
 
 [lints]
 workspace = true

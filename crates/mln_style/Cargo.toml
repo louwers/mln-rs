@@ -21,6 +21,7 @@ geojson.workspace = true
 geo-types.workspace = true
 geojson_vt.workspace = true
 mln_conversion.workspace = true
+mln_geojson.workspace = true
 mln_expression.workspace = true
 mln_image.workspace = true
 mln_map_types.workspace = true
@@ -34,7 +35,6 @@ mln_vec_map.workspace = true
 parking_lot.workspace = true
 mln_wire.workspace = true
 serde_json.workspace = true
-supercluster.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]

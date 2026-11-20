@@ -1,23 +1,28 @@
 [package]
-name = "mln-rs-kdbush"
+name = "mln-rs-geojson"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 description.workspace = true
-license = "ISC"
+license = "BSD-2-Clause AND ISC"
 repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
 include.workspace = true
-# The [[test]]s below; tests/ also holds their modules.
-autotests = false
 
 [lib]
-name = "kdbush"
+name = "mln_geojson"
 # The doc comments have no examples to run.
 doctest = false
 
 [dependencies]
+feature.workspace = true
+geo-index.workspace = true
+geo-types.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
 
 [lints]
 workspace = true

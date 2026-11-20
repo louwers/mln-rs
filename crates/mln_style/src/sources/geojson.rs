@@ -6,6 +6,7 @@ use std::sync::{Arc, OnceLock};
 use feature::{Feature, PropertyMap, Value};
 use geojson::GeoJson;
 use mln_expression::expression::evaluate_accumulated;
+use mln_geojson::cluster;
 use mln_storage::{Data, Resource};
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
@@ -82,31 +83,31 @@ impl GeoJSONData for GeoJSONVTData {
     }
 }
 
-struct SuperclusterData {
-    impl_: supercluster::Supercluster,
+struct ClusterData {
+    clusters: cluster::Clusters,
 }
 
-impl std::fmt::Debug for SuperclusterData {
+impl std::fmt::Debug for ClusterData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("SuperclusterData")
+        f.write_str("ClusterData")
     }
 }
 
-impl GeoJSONData for SuperclusterData {
+impl GeoJSONData for ClusterData {
     fn get_tile(&self, id: &CanonicalTileID, callback: Box<dyn FnOnce(TileFeatures) + Send>, _pool: Option<&Pool>) {
-        callback(self.impl_.get_tile(id.z, id.x, id.y));
+        callback(self.clusters.tile(id.z, id.x, id.y));
     }
 
     fn get_children(&self, cluster_id: u32) -> Result<Features, Error> {
-        self.impl_.get_children(cluster_id).map_err(Error::not_found)
+        self.clusters.children(cluster_id).map_err(|e| Error::not_found(e.to_string()))
     }
 
     fn get_leaves(&self, cluster_id: u32, limit: u32, offset: u32) -> Result<Features, Error> {
-        self.impl_.get_leaves(cluster_id, limit, offset).map_err(Error::not_found)
+        self.clusters.leaves(cluster_id, limit as usize, offset as usize).map_err(|e| Error::not_found(e.to_string()))
     }
 
     fn get_cluster_expansion_zoom(&self, cluster_id: u32) -> Result<u8, Error> {
-        self.impl_.get_cluster_expansion_zoom(cluster_id).map_err(Error::not_found)
+        self.clusters.expansion_zoom(cluster_id).map_err(|e| Error::not_found(e.to_string()))
     }
 }
 
@@ -119,49 +120,53 @@ fn evaluate_feature(f: &Feature<f64>, expression: &Arc<Expr>, accumulated: Optio
     Value::default()
 }
 
+/// A source's `clusterProperties`: each property's map expression evaluated
+/// on a point, folded with its reduce expression.
+struct ClusterExpressions<'a>(&'a ClusterProperties);
+
+impl cluster::Aggregate for ClusterExpressions<'_> {
+    fn map(&self, properties: &PropertyMap) -> PropertyMap {
+        let mut mapped = PropertyMap::new();
+        if properties.is_empty() {
+            return mapped;
+        }
+        let feature = Feature { properties: properties.clone(), ..Feature::default() };
+        for (key, (map_expression, _)) in self.0 {
+            mapped.insert(key.clone(), evaluate_feature(&feature, map_expression, None));
+        }
+        mapped
+    }
+
+    fn reduce(&self, accumulated: &mut PropertyMap, other: &PropertyMap) {
+        let feature = Feature { properties: other.clone(), ..Feature::default() };
+        for (key, (_, reduce_expression)) in self.0 {
+            if !other.contains_key(key) {
+                continue;
+            }
+            let value =
+                evaluate_feature(&feature, reduce_expression, Some(accumulated.get(key).unwrap_or(&Value::Null)));
+            accumulated.insert(key.clone(), value);
+        }
+    }
+}
+
 /// The data of `features`. Only the features of a feature collection
 /// (`collection`) cluster.
 fn create(features: Features, collection: bool, options: &Arc<GeoJSONOptions>) -> Result<Arc<dyn GeoJSONData>, Error> {
     let scale: f64 = f64::from(constants::EXTENT) / constants::TILE_SIZE_D;
     if options.cluster && collection && !features.is_empty() {
-        let mut cluster_options = supercluster::Options {
+        let cluster_options = cluster::Options {
             max_zoom: options.cluster_max_zoom,
             extent: constants::EXTENT as u16,
-            radius: (scale * f64::from(options.cluster_radius)).round() as u16,
+            radius: scale * f64::from(options.cluster_radius),
             min_points: options.cluster_min_points,
-            ..Default::default()
         };
-
-        // C++ shares one feature (default geometry) between the two
-        // closures and assigns its properties before each
-        // evaluation; a fresh feature per evaluation is the same.
-        let map_options = Arc::clone(options);
-        cluster_options.map = Arc::new(move |properties: &PropertyMap| -> PropertyMap {
-            let mut ret = PropertyMap::new();
-            if properties.is_empty() {
-                return ret;
-            }
-            for (key, (map_expression, _)) in &map_options.cluster_properties {
-                let feature = Feature { properties: properties.clone(), ..Feature::default() };
-                ret.insert(key.clone(), evaluate_feature(&feature, map_expression, None));
-            }
-            ret
-        });
-        let reduce_options = Arc::clone(options);
-        cluster_options.reduce = Some(Arc::new(move |to_return: &mut PropertyMap, to_fill: &PropertyMap| {
-            for (key, (_, reduce_expression)) in &reduce_options.cluster_properties {
-                if !to_fill.contains_key(key) {
-                    continue;
-                }
-                let feature = Feature { properties: to_fill.clone(), ..Feature::default() };
-                // `toReturn[p.first]` default-constructs a missing entry.
-                let accumulated = to_return.entry(key.clone()).or_default().clone();
-                let value = evaluate_feature(&feature, reduce_expression, Some(&accumulated));
-                to_return.insert(key.clone(), value);
-            }
-        }));
-        let impl_ = supercluster::Supercluster::new(features, cluster_options).map_err(Error::invalid_argument)?;
-        return Ok(Arc::new(SuperclusterData { impl_ }));
+        let expressions = ClusterExpressions(&options.cluster_properties);
+        let aggregate: Option<&dyn cluster::Aggregate> =
+            (!options.cluster_properties.is_empty()).then_some(&expressions);
+        let clusters = cluster::Clusters::new(features, cluster_options, aggregate)
+            .map_err(|e| Error::invalid_argument(e.to_string()))?;
+        return Ok(Arc::new(ClusterData { clusters }));
     }
 
     let vt_options = geojson_vt::Options {
@@ -191,7 +196,7 @@ pub struct GeoJSONOptions {
     pub tolerance: f64,
     pub line_metrics: bool,
 
-    // Supercluster options
+    // Clustering options
     pub cluster: bool,
     pub cluster_radius: u16,
     pub cluster_max_zoom: u8,
@@ -264,7 +269,7 @@ pub trait GeoJSONData: Send + Sync {
     /// pool, always right away.
     fn get_tile(&self, id: &CanonicalTileID, callback: Box<dyn FnOnce(TileFeatures) + Send>, pool: Option<&Pool>);
 
-    // SuperclusterData: data that isn't clustered has no clusters, and
+    // Data that isn't clustered has no clusters, and
     // gives empty results. A cluster ID the data doesn't have fails with
     // `ErrorKind::NotFound`.
     fn get_children(&self, cluster_id: u32) -> Result<Features, Error>;

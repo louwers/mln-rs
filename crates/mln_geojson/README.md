@@ -1,14 +1,16 @@
-# mln-rs-supercluster
+# mln-rs-geojson
 
 > **Warning: this is an internal crate of
 > [mln-rs](https://crates.io/crates/mln-rs).** It is published only because
 > mln-rs depends on it, and its API can change in any release without notice.
 > Depend on [`mln-rs`](https://crates.io/crates/mln-rs) instead: it re-exports
-> this crate as `mln_rs::supercluster`.
+> this crate as `mln_rs::mln_geojson`.
 
-Ports supercluster.hpp, the point clustering behind clustered GeoJSON sources.
+Prepares a GeoJSON source's features for drawing: clusters its points, as
+supercluster does.
 
-Licensed under the ISC License, as supercluster.hpp is ([LICENSE](LICENSE)).
+Its code is under the root license ([LICENSE.md](LICENSE.md)); the algorithms it
+follows are Mapbox's, under the ISC License ([LICENSE-ISC](LICENSE-ISC)).
 
 Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering
