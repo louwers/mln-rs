@@ -22,7 +22,6 @@ use mln_style::TransitionOptions;
 use mln_style_types::{SymbolAnchorType, TextWritingModeType};
 use mln_tile_id::OverscaledTileID;
 use mln_util::constants::DEFAULT_TRANSITION_DURATION;
-use crate::text::collision_grid::Aabb;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::time::Instant;
 
@@ -32,7 +31,7 @@ use crate::geometry::feature_index::FeatureIndex;
 use crate::layer_drawing::{BucketChanges, ChangedBuckets};
 use crate::layout::symbol_instance::SymbolInstance;
 use crate::render_layer::{BucketKey, BucketPlacementData, RenderLayer, SymbolBuckets};
-use crate::text::collision_grid::Shape;
+use crate::text::collision_grid::{Aabb, Shape};
 use crate::text::collision_index::CollisionIndex;
 use crate::update_parameters::UpdateParameters;
 

@@ -9,7 +9,7 @@ use std::sync::{Arc, OnceLock};
 
 use geo_index::rtree::sort::HilbertSort;
 use geo_index::rtree::{RTree, RTreeBuilder, RTreeIndex};
-use mln_map_types::{ProjectionData, TileProjector, View};
+use mln_map_types::{TileProjector, View};
 use mln_style::expression::expression::FeatureState;
 use mln_style::expression::{EvaluationContext, GlobalStateMap};
 use mln_style_types::TranslateAnchorType;
@@ -31,6 +31,30 @@ use crate::text::collision_index::OverlapMode;
 
 /// The render layers a query looks at, by id.
 pub(crate) type QueryLayers<'a> = HashMap<String, &'a dyn RenderLayer>;
+
+/// What a query reads of a tile's features: those of its layers that its
+/// filter accepts, with their state.
+#[derive(Clone, Copy)]
+pub(crate) struct FeatureSelection<'a> {
+    pub(crate) layers: &'a QueryLayers<'a>,
+    pub(crate) options: &'a RenderedQueryOptions,
+    pub(crate) global_state: Option<&'a GlobalStateMap>,
+    pub(crate) tile_id: &'a OverscaledTileID,
+    pub(crate) feature_state: Option<&'a SourceFeatureState>,
+}
+
+/// Where a query looks in a tile: its geometry in tile units, seen through
+/// the camera.
+#[derive(Clone, Copy)]
+pub(crate) struct QueryRegion<'a> {
+    pub(crate) geometry: &'a GeometryCoordinates,
+    pub(crate) view: &'a View,
+    pub(crate) projector: &'a TileProjector<'a>,
+    pub(crate) pixels_to_tile_units: f32,
+    /// How far around the geometry the layers' features may reach, in
+    /// pixels.
+    pub(crate) padding: f32,
+}
 
 /// The features a query found, by layer id.
 pub(crate) type QueryResults = HashMap<String, Vec<Feature>>;
@@ -222,24 +246,13 @@ impl FeatureIndex {
         self.tile_data = tile_data;
     }
 
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the query geometry, camera, tile and options that select and filter the tile's features"
-    )]
+    /// Adds the features of `selection` that `region` touches to `result`,
+    /// later features first.
     pub(crate) fn query(
         &self,
         result: &mut QueryResults,
-        query_geometry: &GeometryCoordinates,
-        view: &View,
-        projector: &TileProjector<'_>,
-        tile_size: f64,
-        scale: f64,
-        query_options: &RenderedQueryOptions,
-        global_state: Option<&GlobalStateMap>,
-        tile_id: &OverscaledTileID,
-        layers: &QueryLayers<'_>,
-        additional_query_padding: f32,
-        source_feature_state: &SourceFeatureState,
+        selection: &FeatureSelection<'_>,
+        region: &QueryRegion<'_>,
     ) -> Result<(), Error> {
         if self.tile_data.is_none() {
             return Ok(());
@@ -248,15 +261,8 @@ impl FeatureIndex {
             return Ok(());
         };
 
-        // Determine query radius
-        let pixels_to_tile_units = (f64::from(constants::EXTENT) / tile_size / scale) as f32;
-        let additional_padding = {
-            let p = additional_query_padding * pixels_to_tile_units;
-            let extent = constants::EXTENT as f32;
-            (if p < extent { p } else { extent }) as i16
-        };
-
-        let Some((min, max)) = envelope(query_geometry.iter().copied()) else {
+        let additional_padding = (region.padding * region.pixels_to_tile_units).min(constants::EXTENT as f32) as i16;
+        let Some((min, max)) = envelope(region.geometry.iter().copied()) else {
             return Ok(());
         };
         // The padded box's corners are tile coordinates, which wrap in i16.
@@ -279,33 +285,19 @@ impl FeatureIndex {
         // Later features first, each once.
         features.sort_unstable_by_key(|feature| Reverse(feature.sort_index));
         features.dedup_by_key(|feature| feature.sort_index);
-        for indexed_feature in features {
-            self.add_feature(
-                result,
-                indexed_feature.index,
-                &indexed_feature.source_layer_name,
-                &indexed_feature.bucket_leader_id,
-                query_options,
-                global_state,
-                tile_id,
-                layers,
-                query_geometry,
-                view,
-                pixels_to_tile_units,
-                projector,
-                Some(source_feature_state),
-            )?;
+        for feature in features {
+            let entry = (feature.index, &*feature.source_layer_name, &*feature.bucket_leader_id);
+            self.add_feature(result, entry, selection, Some(region))?;
         }
         Ok(())
     }
 
+    /// The features of `symbol_features`, which the collision index found,
+    /// that `selection` selects, in the order their bucket last drew them.
     pub(crate) fn lookup_symbol_features(
         &self,
         symbol_features: &[IndexedSubfeature],
-        query_options: &RenderedQueryOptions,
-        global_state: Option<&GlobalStateMap>,
-        layers: &QueryLayers<'_>,
-        tile_id: &OverscaledTileID,
+        selection: &FeatureSelection<'_>,
         feature_sort_order: &FeatureSortOrder,
     ) -> Result<QueryResults, Error> {
         let mut result = QueryResults::default();
@@ -337,48 +329,25 @@ impl FeatureIndex {
             }
         });
 
-        let view = View::default();
-        let unused_projector = TileProjector::with_data(&view, &tile_id.to_unwrapped(), ProjectionData::default());
-        for symbol_feature in sorted_features {
-            self.add_feature(
-                &mut result,
-                symbol_feature.index,
-                &symbol_feature.source_layer_name,
-                &symbol_feature.bucket_leader_id,
-                query_options,
-                global_state,
-                tile_id,
-                layers,
-                &GeometryCoordinates::new(),
-                &view,
-                0.0,
-                &unused_projector,
-                None,
-            )?;
+        for feature in sorted_features {
+            let entry = (feature.index, &*feature.source_layer_name, &*feature.bucket_leader_id);
+            self.add_feature(&mut result, entry, selection, None)?;
         }
         Ok(result)
     }
 
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "one candidate feature and the query's geometry, camera, layers and feature state that test it"
-    )]
+    /// Adds the feature `index` of the source layer `source_layer_name`,
+    /// of the bucket of `bucket_leader_id`, to `result` under each layer of
+    /// `selection` it is in, where it touches `region`. A symbol layer's
+    /// features need no region: the collision index found them.
     fn add_feature(
         &self,
         result: &mut QueryResults,
-        index: usize,
-        source_layer_name: &str,
-        bucket_leader_id: &str,
-        options: &RenderedQueryOptions,
-        global_state: Option<&GlobalStateMap>,
-        tile_id: &OverscaledTileID,
-        layers: &QueryLayers<'_>,
-        query_geometry: &GeometryCoordinates,
-        view: &View,
-        pixels_to_tile_units: f32,
-        projector: &TileProjector<'_>,
-        source_feature_state: Option<&SourceFeatureState>,
+        (index, source_layer_name, bucket_leader_id): (usize, &str, &str),
+        selection: &FeatureSelection<'_>,
+        region: Option<&QueryRegion<'_>>,
     ) -> Result<(), Error> {
+        let FeatureSelection { layers, options, global_state, tile_id, feature_state } = *selection;
         let Some(tile_data) = &self.tile_data else {
             return Ok(());
         };
@@ -402,7 +371,7 @@ impl FeatureIndex {
         let geometry = feature.geometry()?;
         let source_layer_id = source_layer.name().to_owned();
         let mut state = FeatureState::default();
-        if let Some(source_feature_state) = source_feature_state
+        if let Some(source_feature_state) = feature_state
             && let Some(id_str) = feature_id_to_string(&feature.get_id())
         {
             state = source_feature_state.state(Some(&source_layer_id), &id_str);
@@ -418,16 +387,18 @@ impl FeatureIndex {
             // because for the query we take into account the actual rendered
             // size of the geometry (#2781)
             let intersects = needs_cross_tile_index
-                || render_layer.query_intersects_feature(
-                    query_geometry,
-                    &feature,
-                    &geometry,
-                    view.zoom() as f32,
-                    view,
-                    pixels_to_tile_units,
-                    projector,
-                    &state,
-                );
+                || region.is_some_and(|region| {
+                    render_layer.query_intersects_feature(
+                        region.geometry,
+                        &feature,
+                        &geometry,
+                        region.view.zoom() as f32,
+                        region.view,
+                        region.pixels_to_tile_units,
+                        region.projector,
+                        &state,
+                    )
+                });
             if !intersects {
                 continue;
             }

@@ -27,7 +27,7 @@ use crate::bucket::{Bucket, LayerFeatureStates, UploadNeeds};
 use crate::bucket_geometry::{BucketGeometry, GeometryUpload};
 use crate::buckets::hillshade_bucket::HillshadeBucket;
 use crate::buckets::raster_bucket::RasterBucket;
-use crate::geometry::feature_index::{FeatureIndex, QueryLayers, QueryResults};
+use crate::geometry::feature_index::{FeatureIndex, FeatureSelection, QueryLayers, QueryRegion, QueryResults};
 use crate::gfx::context::Context;
 use crate::gfx::dynamic_texture_atlas::{AtlasLease, BinUse, DynamicTextureAtlas};
 use crate::layer_drawing::{BucketChanges, ChangedBuckets};
@@ -484,20 +484,18 @@ impl GeometryContents {
             &id.to_unwrapped(),
             view.projection_data_with(&id.to_unwrapped(), proj_matrix),
         );
-        self.result.feature_index.query(
-            result,
-            query_geometry,
+        let selection =
+            FeatureSelection { layers, options, global_state, tile_id: id, feature_state: Some(feature_state) };
+        let tile_size = mln_util::constants::TILE_SIZE_D * f64::from(id.overscale_factor());
+        let scale = 2f64.powf(view.zoom() - f64::from(id.overscaled_z));
+        let region = QueryRegion {
+            geometry: query_geometry,
             view,
-            &projector,
-            mln_util::constants::TILE_SIZE_D * f64::from(id.overscale_factor()),
-            2f64.powf(view.zoom() - f64::from(id.overscaled_z)),
-            options,
-            global_state,
-            id,
-            layers,
-            query_padding * view.max_pitch_scale_factor() as f32,
-            feature_state,
-        )
+            projector: &projector,
+            pixels_to_tile_units: (f64::from(mln_util::constants::EXTENT) / tile_size / scale) as f32,
+            padding: query_padding * view.max_pitch_scale_factor() as f32,
+        };
+        self.result.feature_index.query(result, &selection, &region)
     }
 
     /// Adds the features of tile `id` that `options` select to `result`:

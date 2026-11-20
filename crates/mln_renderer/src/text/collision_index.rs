@@ -487,13 +487,14 @@ impl CollisionIndex {
     /// Whether `shape`, placed with `overlap_mode`, collides with a symbol in
     /// the grid of `collision_group`, or of any group without one.
     fn collides(&self, overlap_mode: OverlapMode, collision_group: Option<u16>, shape: &Shape) -> bool {
-        let in_group = |feature: &IndexedSubfeature| collision_group.is_none_or(|group| feature.collision_group_id == group);
+        let in_group =
+            |feature: &IndexedSubfeature| collision_group.is_none_or(|group| feature.collision_group_id == group);
         match overlap_mode {
             OverlapMode::Never => self.collision_grid.any(shape, in_group),
             OverlapMode::Always => false,
-            OverlapMode::Cooperative => {
-                self.collision_grid.any(shape, |feature| feature.overlap_mode == OverlapMode::Never && in_group(feature))
-            }
+            OverlapMode::Cooperative => self
+                .collision_grid
+                .any(shape, |feature| feature.overlap_mode == OverlapMode::Never && in_group(feature)),
         }
     }
 

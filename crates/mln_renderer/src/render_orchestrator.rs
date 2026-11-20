@@ -1398,14 +1398,15 @@ impl RenderOrchestrator {
                 continue;
             };
             let symbol_features = rendered_symbols.remove(&query_data.bucket_instance_id).unwrap_or_default();
-            let bucket_symbols = feature_index.lookup_symbol_features(
-                &symbol_features,
+            let selection = crate::geometry::feature_index::FeatureSelection {
+                layers: &cross_tile_symbol_index_layers,
                 options,
-                self.global_state.as_deref(),
-                &cross_tile_symbol_index_layers,
-                &query_data.tile_id,
-                &query_data.feature_sort_order,
-            )?;
+                global_state: self.global_state.as_deref(),
+                tile_id: &query_data.tile_id,
+                feature_state: None,
+            };
+            let bucket_symbols =
+                feature_index.lookup_symbol_features(&symbol_features, &selection, &query_data.feature_sort_order)?;
 
             for (layer_id, features) in bucket_symbols {
                 results_by_layer.entry(layer_id).or_default().extend(features);

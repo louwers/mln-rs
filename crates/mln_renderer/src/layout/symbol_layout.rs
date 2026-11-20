@@ -39,8 +39,8 @@ use mln_vec_map::VecMap;
 
 use crate::bucket_parameters::BucketParameters;
 use crate::buckets::symbol_bucket::{
-    Buffer, PaintProperties, PlacedSymbol, QuadCorner, SortKeyRange, SymbolBucket, SymbolBucketState, SymbolBucketStyle,
-    SymbolLayoutFlags, SymbolSizeBinder,
+    Buffer, PaintProperties, PlacedSymbol, QuadCorner, SortKeyRange, SymbolBucket, SymbolBucketState,
+    SymbolBucketStyle, SymbolLayoutFlags, SymbolSizeBinder,
 };
 use crate::geometry::anchor::Anchor;
 use crate::geometry::feature_index::{FeatureIndexBuilder, IndexedSubfeature};
@@ -377,8 +377,8 @@ impl FeatureSymbols<'_> {
         // Vertical text turns its boxes a quarter.
         const VERTICAL_ROTATION: f32 = 90.0;
         let line = &quads.line;
-        let along_line =
-            (self.text_placement != SymbolPlacementType::Point).then_some(AlongLine { line, overscaling: self.overscaling });
+        let along_line = (self.text_placement != SymbolPlacementType::Point)
+            .then_some(AlongLine { line, overscaling: self.overscaling });
         let text_feature = |shaping: &Shaping, rotate: f32, boxes: &mut Vec<CollisionBox>| {
             let layout = BoxLayout { scale: self.text_box_scale, padding: Padding::uniform(self.text_padding), rotate };
             CollisionFeature::new_text(&anchor, shaping, along_line, &layout, &self.indexed_feature, boxes)
@@ -840,9 +840,8 @@ impl SymbolLayout {
         let canonical = &self.canonical_id;
         // If style specifies text-variable-anchor-offset, just return it
         if !self.text_variable_anchor_offset.is_undefined() {
-            let variable_anchor_offset = self.layout.text_variable_anchor_offset.evaluate(
-                &feature_context(zoom, feature, canonical),
-            );
+            let variable_anchor_offset =
+                self.layout.text_variable_anchor_offset.evaluate(&feature_context(zoom, feature, canonical));
             if variable_anchor_offset.is_empty() {
                 return None;
             }
@@ -865,21 +864,16 @@ impl SymbolLayout {
             return Some(VariableAnchorOffsetCollection::new(anchor_offsets));
         }
 
-        let variable_text_anchor: Vec<TextVariableAnchorType> = self.layout.text_variable_anchor.evaluate(
-            &feature_context(zoom, feature, canonical),
-        );
+        let variable_text_anchor: Vec<TextVariableAnchorType> =
+            self.layout.text_variable_anchor.evaluate(&feature_context(zoom, feature, canonical));
         if variable_text_anchor.is_empty() {
             return None;
         }
         let (variable_text_offset, radial_offset) = if self.text_radial_offset.is_undefined() {
-            let text_offset = self.layout.text_offset.evaluate(
-                &feature_context(zoom, feature, canonical),
-            );
+            let text_offset = self.layout.text_offset.evaluate(&feature_context(zoom, feature, canonical));
             (Some([text_offset[0] * ONE_EM, text_offset[1] * ONE_EM]), 0.0)
         } else {
-            let radial_offset = self.layout.text_radial_offset.evaluate(
-                &feature_context(zoom, feature, canonical),
-            );
+            let radial_offset = self.layout.text_radial_offset.evaluate(&feature_context(zoom, feature, canonical));
             (None, radial_offset * ONE_EM)
         };
 
@@ -909,9 +903,7 @@ impl SymbolLayout {
 
         // A text size from a high zoom level, the same for every zoom, so
         // that labels keep their anchors as the map zooms.
-        let text_max_size = layout.text_size.evaluate(
-            &feature_context(18.0, feature, &self.canonical_id),
-        );
+        let text_max_size = layout.text_size.evaluate(&feature_context(18.0, feature, &self.canonical_id));
         let text_max_box_scale = self.tile_pixel_ratio * text_max_size / GLYPH_SIZE;
         let symbol_spacing = self.tile_pixel_ratio * *layout.symbol_spacing.uniform();
         let text_max_angle = layout.text_max_angle.uniform().to_radians();
@@ -1288,9 +1280,10 @@ fn add_quad(buffer: &mut Buffer, run: &RunInfo, quad: &SymbolQuad) -> usize {
     ];
     let anchor = run.anchor.point;
     let first = buffer.attribute_data.len();
-    buffer.attribute_data.get_mut().extend(
-        corners.map(|corner| SymbolBucket::layout_vertex(anchor, quad, corner, run.size, run.height_offset)),
-    );
+    buffer
+        .attribute_data
+        .get_mut()
+        .extend(corners.map(|corner| SymbolBucket::layout_vertex(anchor, quad, corner, run.size, run.height_offset)));
     // Placement writes these before the quad draws; until then they agree
     // in count with the layout vertices.
     buffer.dynamic_attribute_data.extend([SymbolBucket::dynamic_layout_attributes(anchor, 0.0); 4]);
@@ -1479,47 +1472,34 @@ impl SymbolLayout {
             let mut shaped_text_orientations = ShapedTextOrientations::default();
             let mut shaped_icon: Option<PositionedIcon> = None;
             let mut text_offset = [0.0_f32, 0.0_f32];
-            let layout_text_size = layout.text_size.evaluate(
-                &feature_context(zoom + 1.0, feature, &canonical),
-            );
-            let layout_text_size_at_bucket_zoom_level = layout.text_size.evaluate(
-                &feature_context(zoom, feature, &canonical),
-            );
-            let layout_icon_size = layout.icon_size.evaluate(
-                &feature_context(zoom + 1.0, feature, &canonical),
-            );
+            let layout_text_size = layout.text_size.evaluate(&feature_context(zoom + 1.0, feature, &canonical));
+            let layout_text_size_at_bucket_zoom_level =
+                layout.text_size.evaluate(&feature_context(zoom, feature, &canonical));
+            let layout_icon_size = layout.icon_size.evaluate(&feature_context(zoom + 1.0, feature, &canonical));
 
             // if feature has text, shape the text
             if feature.formatted_text.is_some() && layout_text_size > 0.0 {
                 let line_height = *layout.text_line_height.uniform() * ONE_EM;
                 let text = feature.formatted_text.as_ref().expect("text");
                 let spacing = if i18n::allows_letter_spacing(text.logical_text()) {
-                    layout.text_letter_spacing.evaluate(
-                        &feature_context(zoom, feature, &canonical),
-                    ) * ONE_EM
+                    layout.text_letter_spacing.evaluate(&feature_context(zoom, feature, &canonical)) * ONE_EM
                 } else {
                     0.0
                 };
                 let max_width = if is_point_placement {
-                    layout.text_max_width.evaluate(
-                        &feature_context(zoom, feature, &canonical),
-                    ) * ONE_EM
+                    layout.text_max_width.evaluate(&feature_context(zoom, feature, &canonical)) * ONE_EM
                 } else {
                     0.0
                 };
 
                 let variable_anchor_offsets = self.text_variable_anchor_offset(feature);
-                let text_anchor = layout.text_anchor.evaluate(
-                    &feature_context(zoom, feature, &canonical),
-                );
+                let text_anchor = layout.text_anchor.evaluate(&feature_context(zoom, feature, &canonical));
                 if variable_anchor_offsets.as_ref().is_none_or(VariableAnchorOffsetCollection::is_empty) {
                     // Layers with variable anchors use the
                     // `text-radial-offset` property and the [x, y] offset
                     // vector is calculated at placement time instead of
                     // layout time
-                    let radial_offset = layout.text_radial_offset.evaluate(
-                        &feature_context(zoom, feature, &canonical),
-                    );
+                    let radial_offset = layout.text_radial_offset.evaluate(&feature_context(zoom, feature, &canonical));
                     if radial_offset > 0.0 {
                         // The style spec says don't use `text-offset` and
                         // `text-radial-offset` together but doesn't actually
@@ -1527,18 +1507,14 @@ impl SymbolLayout {
                         // the radial offset.
                         text_offset = evaluate_radial_offset(text_anchor, radial_offset * ONE_EM);
                     } else {
-                        let offset = layout.text_offset.evaluate(
-                            &feature_context(zoom, feature, &canonical),
-                        );
+                        let offset = layout.text_offset.evaluate(&feature_context(zoom, feature, &canonical));
                         text_offset = [offset[0] * ONE_EM, offset[1] * ONE_EM];
                     }
                 }
                 let mut text_justify = if text_along_line {
                     TextJustifyType::Center
                 } else {
-                    layout.text_justify.evaluate(
-                        &feature_context(zoom, feature, &canonical),
-                    )
+                    layout.text_justify.evaluate(&feature_context(zoom, feature, &canonical))
                 };
 
                 let allow_vertical_placement = self.allow_vertical_placement;
@@ -1674,12 +1650,8 @@ impl SymbolLayout {
                 icon_type = SymbolContent::IconRGBA;
                 shaped_icon = Some(PositionedIcon::shape_icon(
                     image,
-                    &layout.icon_offset.evaluate(
-                        &feature_context(zoom, feature, &canonical),
-                    ),
-                    layout.icon_anchor.evaluate(
-                        &feature_context(zoom, feature, &canonical),
-                    ),
+                    &layout.icon_offset.evaluate(&feature_context(zoom, feature, &canonical)),
+                    layout.icon_anchor.evaluate(&feature_context(zoom, feature, &canonical)),
                 ));
                 if image.sdf {
                     icon_type = SymbolContent::IconSDF;
