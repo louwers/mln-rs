@@ -49,7 +49,7 @@ impl FillLayoutVertex {
 }
 
 #[derive(Clone, mln_wire::Wire)]
-pub(crate) struct FillBucket {
+pub struct FillBucket {
     pub(crate) base: BucketBase,
 
     pub(crate) basic_lines: GeometryVec<u16>,

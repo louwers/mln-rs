@@ -53,13 +53,17 @@ mod tile_mask;
 mod tile_matrix;
 mod tile_parameters;
 mod tile_render_data;
+#[doc(hidden)]
+pub mod unstable;
 mod update_parameters;
 pub mod update_slot;
 pub mod util;
 
 pub use frame_projection::{ClipDepthRange, FrameProjection};
+pub use layer_type::LayerType;
 pub(crate) use paint_property_binder::paint_property_binders;
 pub use registry::{Registry, RegistryBuilder};
+pub use render_layer::{RenderLayer, TypedLayer};
 pub use renderer::{DrawnFrame, RenderTimings, Renderer, UpdatedFrame};
 pub use renderer_event::{
     FontStack, GlyphRange, OverscaledTileID, RenderMode, RendererEvent, RendererEvents, RenderingStats, TileOperation,

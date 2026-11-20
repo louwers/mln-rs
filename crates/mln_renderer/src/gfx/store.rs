@@ -14,13 +14,13 @@ use crate::gfx::release::{Release, ReleaseQueue};
 /// Where an entry is in its store: its slot, and which of the entries the
 /// slot held in turn it is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct EntryKey {
+pub struct EntryKey {
     slot: usize,
     version: u32,
 }
 
 /// The key of an entry of a store, which only the store makes.
-pub(crate) trait Key: Copy + Into<StoreKey> {
+pub trait Key: Copy + Into<StoreKey> {
     fn new(entry: EntryKey) -> Self;
     fn entry(self) -> EntryKey;
 }
@@ -29,7 +29,7 @@ macro_rules! keys {
     ($($(#[$meta:meta])* $name:ident => $variant:ident,)*) => {$(
         $(#[$meta])*
         #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-        pub(crate) struct $name(EntryKey);
+        pub struct $name(EntryKey);
 
         impl Key for $name {
             fn new(entry: EntryKey) -> Self {
@@ -60,7 +60,7 @@ keys! {
 
 /// A key of one of the context's stores.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum StoreKey {
+pub enum StoreKey {
     Texture(TextureKey),
     Indexes(IndexesKey),
     Vertices(VerticesKey),
@@ -68,7 +68,7 @@ pub(crate) enum StoreKey {
 
 /// A handle of the store entry `key`, which stays in its store while a
 /// clone of the handle does.
-pub(crate) struct Shared<K: Key>(Rc<Holder<K>>);
+pub struct Shared<K: Key>(Rc<Holder<K>>);
 
 /// What the clones of a [`Shared`] share: the key, and the queue it goes to
 /// once the last of them drops.

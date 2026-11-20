@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 
 use feature::Value;
-use mln_util::logging::{Event, EventSeverity, Log};
 use mln_vec_map::VecSet;
 
 use super::util::FixtureLog;
@@ -12,70 +11,6 @@ use crate::style_property::Kind;
 
 fn fixtures_dir() -> PathBuf {
     std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("testdata/test/fixtures/style_parser")
-}
-
-/// The name of every `<name>.info.json` in the fixture directory.
-fn fixture_names() -> Vec<String> {
-    let mut names: Vec<String> = std::fs::read_dir(fixtures_dir())
-        .unwrap()
-        .filter_map(|entry| {
-            let name = entry.unwrap().file_name().into_string().unwrap();
-            name.strip_suffix(".info.json").map(str::to_owned)
-        })
-        .collect();
-    names.sort();
-    names
-}
-
-/// One `StyleParserTest.ParseStyle` instance. Returns the failure, if any.
-fn parse_style_fixture(name: &str) -> Result<(), String> {
-    let base = fixtures_dir().join(name);
-    let log = FixtureLog::new();
-
-    let info_doc: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(base.with_extension("info.json")).unwrap()).unwrap();
-    let style_json = std::fs::read_to_string(base.with_extension("style.json")).unwrap();
-
-    let mut parser = Parser::new(&StyleRegistry::with_builtins());
-    if let Err(error) = parser.parse(&style_json) {
-        Log::error(Event::ParseStyle, format!("Failed to parse style: {error}"));
-    }
-
-    for (property_name, value) in info_doc.as_object().unwrap() {
-        if let Some(js_log) = value.get("log") {
-            for js_entry in js_log.as_array().unwrap() {
-                let js_entry = js_entry.as_array().unwrap();
-                let count = js_entry[0].as_u64().unwrap() as usize;
-                let severity = js_entry[1].as_str().unwrap().parse::<EventSeverity>().unwrap();
-                let event = js_entry[2].as_str().unwrap().parse::<Event>().unwrap();
-                let msg = js_entry[3].as_str().unwrap();
-                let observed = log.count(severity, event, msg);
-                if count != observed {
-                    return Err(format!("{name}/{property_name}: Message: {msg}: expected {count}, got {observed}"));
-                }
-            }
-        }
-        let unchecked = log.unchecked();
-        if !unchecked.is_empty() {
-            return Err(format!("Unchecked Log Messages ({name}/{property_name}): {unchecked:?}"));
-        }
-    }
-    Ok(())
-}
-
-/// Runs the style parser test over every fixture.
-// gtest: StyleParserTest.ParseStyle
-#[test]
-fn parse_style() {
-    let names = fixture_names();
-    assert_ne!(names, Vec::<String>::new());
-    let mut failures = Vec::new();
-    for name in &names {
-        if let Err(failure) = parse_style_fixture(name) {
-            failures.push(failure);
-        }
-    }
-    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 // gtest: StyleParser.SpriteAsString

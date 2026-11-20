@@ -33,7 +33,7 @@ use crate::layout::tile_layout::Resolved;
 use crate::util::tessellator::Tessellator;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) struct PatternDependency {
+pub struct PatternDependency {
     pub(crate) min: String,
     pub(crate) mid: String,
     pub(crate) max: String,
@@ -58,7 +58,7 @@ impl PatternFeature {
 }
 
 /// The template arguments of a `PatternLayout` instantiation.
-pub(crate) trait PatternLayoutSpec: Send + 'static {
+pub trait PatternLayoutSpec: Send + 'static {
     /// The layer type the layout lays out.
     type Type: LayerType<Bucket = Self::Bucket>;
     type Bucket: Bucket;
@@ -88,7 +88,7 @@ pub(crate) trait PatternLayoutSpec: Send + 'static {
     fn set_subdivision_granularity(_bucket: &mut Self::Bucket, _value: &SubdivisionGranularitySetting) {}
 }
 
-pub(crate) struct PatternLayout<S: PatternLayoutSpec> {
+pub struct PatternLayout<S: PatternLayoutSpec> {
     pub(crate) layer_properties_map: VecMap<String, Arc<EvaluatedLayer<S::Type>>>,
     pub(crate) bucket_leader_id: String,
 
@@ -313,7 +313,7 @@ impl<S: PatternLayoutSpec> Layout<S::Type> for PatternLayout<S> {
     }
 }
 
-pub(crate) struct FillLayoutSpec;
+pub struct FillLayoutSpec;
 
 impl PatternLayoutSpec for FillLayoutSpec {
     type Type = Fill;
@@ -356,7 +356,7 @@ impl PatternLayoutSpec for FillLayoutSpec {
     }
 }
 
-pub(crate) struct LineLayoutSpec;
+pub struct LineLayoutSpec;
 
 impl PatternLayoutSpec for LineLayoutSpec {
     type Type = Line;

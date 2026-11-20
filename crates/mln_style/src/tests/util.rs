@@ -15,18 +15,18 @@ pub(crate) struct LogMessage {
     pub(crate) msg: String,
 }
 
-struct Recorder(Arc<Mutex<Vec<(LogMessage, bool)>>>);
+struct Recorder(Arc<Mutex<Vec<LogMessage>>>);
 
 impl Observer for Recorder {
     fn on_record(&self, severity: EventSeverity, event: Event, code: i64, msg: &str) -> bool {
-        self.0.lock().push((LogMessage { severity, event, code, msg: msg.to_owned() }, false));
+        self.0.lock().push(LogMessage { severity, event, code, msg: msg.to_owned() });
         true
     }
 }
 
 /// Records this thread's log messages while alive.
 pub(crate) struct FixtureLog {
-    messages: Arc<Mutex<Vec<(LogMessage, bool)>>>,
+    messages: Arc<Mutex<Vec<LogMessage>>>,
 }
 
 impl FixtureLog {
@@ -36,31 +36,12 @@ impl FixtureLog {
         FixtureLog { messages }
     }
 
-    /// `count(message)`: the number of matching messages, which are then
-    /// checked (C++ ignores the code when it is -1 in the pattern).
-    pub(crate) fn count(&self, severity: EventSeverity, event: Event, msg: &str) -> usize {
-        let mut messages = self.messages.lock();
-        let mut count = 0;
-        for (m, checked) in messages.iter_mut() {
-            if m.severity == severity && m.event == event && m.msg == msg {
-                *checked = true;
-                count += 1;
-            }
-        }
-        count
-    }
-
-    /// The messages no `count` call has matched.
-    pub(crate) fn unchecked(&self) -> Vec<LogMessage> {
-        self.messages.lock().iter().filter(|(_, checked)| !checked).map(|(m, _)| m.clone()).collect()
-    }
-
     pub(crate) fn is_empty(&self) -> bool {
         self.messages.lock().is_empty()
     }
 
     pub(crate) fn messages(&self) -> Vec<LogMessage> {
-        self.messages.lock().iter().map(|(m, _)| m.clone()).collect()
+        self.messages.lock().clone()
     }
 }
 

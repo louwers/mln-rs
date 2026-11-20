@@ -32,7 +32,7 @@ fn geometry_types_relayout_on_the_filter_and_visibility() {
 #[test]
 fn types_without_geometry_never_relayout() {
     let layers = [
-        ("background", ("background-opacity", "0.5")),
+        ("plain", ("plain-opacity", "0.5")),
         ("color-relief", ("color-relief-opacity", "0.5")),
         ("hillshade", ("hillshade-exaggeration", "0.1")),
         ("raster", ("raster-opacity", "0.5")),
@@ -103,8 +103,8 @@ fn a_change_between_two_constant_patterns_relayouts() {
 }
 
 #[test]
-fn a_background_pattern_never_relayouts() {
-    assert!(!relayouts(new_layer("background", "l", "s"), &[("background-pattern", r#""dots""#)]));
+fn a_pattern_of_a_type_without_geometry_never_relayouts() {
+    assert!(!relayouts(new_layer("plain", "l", "s"), &[("plain-pattern", r#""dots""#)]));
 }
 
 /// A symbol layer with the `text-field` `text_field` and a green

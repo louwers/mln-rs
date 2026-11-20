@@ -3,13 +3,13 @@ use std::time::Duration;
 use feature::Value;
 use mln_conversion::{Convertible, Error};
 
+use super::fixture_layer::Plain;
 use super::util::{parse_json, style_of, value_to_json};
 use crate::StyleRegistry;
 use crate::conversion::{convert_filter, convert_layer};
 use crate::expression::Functions;
 use crate::filter::Filter;
 use crate::layer::Layer;
-use crate::layers::Background;
 
 fn parse_layer(src: &str) -> Option<Layer> {
     let mut error = Error::default();
@@ -29,10 +29,10 @@ fn object_len(value: &Value) -> usize {
 fn layer_transition() {
     let layer = parse_layer(
         r#"{
-        "type": "background",
+        "type": "plain",
         "id": "background",
         "paint": {
-            "background-color-transition": {
+            "plain-color-transition": {
                 "duration": 400,
                 "delay": 500
             }
@@ -40,10 +40,10 @@ fn layer_transition() {
     }"#,
     )
     .unwrap();
-    assert_eq!("background", layer.info().name);
-    let background = style_of::<Background>(&layer);
-    assert_eq!(Some(Duration::from_millis(400)), background.paint.background_color.options.duration);
-    assert_eq!(Some(Duration::from_millis(500)), background.paint.background_color.options.delay);
+    assert_eq!("plain", layer.info().name);
+    let plain = style_of::<Plain>(&layer);
+    assert_eq!(Some(Duration::from_millis(400)), plain.paint.plain_color.options.duration);
+    assert_eq!(Some(Duration::from_millis(500)), plain.paint.plain_color.options.delay);
 }
 
 // gtest: StyleConversion.SerializeDefaults
@@ -51,7 +51,7 @@ fn layer_transition() {
 fn serialize_defaults() {
     let layer = parse_layer(
         r#"{
-        "type": "background",
+        "type": "plain",
         "id": "background"
     }"#,
     );
@@ -66,10 +66,10 @@ fn serialize_defaults() {
 fn roundtrip_with_transitions() {
     let layer = parse_layer(
         r#"{
-        "type": "background",
+        "type": "plain",
         "id": "background",
         "paint": {
-            "background-color-transition": {
+            "plain-color-transition": {
                 "duration": 400,
                 "delay": 500
             }

@@ -29,7 +29,7 @@ use crate::render_layer::RenderLayer;
 use crate::render_tile::TileView;
 
 /// A layer type that the renderer draws.
-pub(crate) trait LayerType: StyleLayerType {
+pub trait LayerType: StyleLayerType {
     /// How a tile lays out a group of the type's layers.
     /// [`NoLayout`](crate::layout::layout::NoLayout) for a type that
     /// doesn't lay out.
@@ -41,7 +41,7 @@ pub(crate) trait LayerType: StyleLayerType {
 
     /// What a frame's tile shows a layer of the type, which its draws draw:
     /// its bucket in the tile's layout
-    /// ([`LayerBucket`](crate::render_layer::LayerBucket)), a raster or
+    /// (`LayerBucket`), a raster or
     /// raster-dem tile's own bucket, or nothing for a type without a source
     /// ([`NoTileBucket`](crate::render_tile::NoTileBucket)).
     type TileBucket<'a>: TileView<'a>;
@@ -78,13 +78,13 @@ pub(crate) trait LayerType: StyleLayerType {
 }
 
 /// The values of a layer of the type `T` for a frame.
-pub(crate) struct EvaluatedLayer<T: LayerType> {
+pub struct EvaluatedLayer<T: LayerType> {
     pub(crate) style: Arc<LayerStyle<T>>,
-    pub(crate) paint: <T::PaintProperties as PaintSet>::Evaluated,
+    pub paint: <T::PaintProperties as PaintSet>::Evaluated,
     /// The default for a type without cross-faded properties.
-    pub(crate) crossfade: CrossfadeParameters,
+    pub crossfade: CrossfadeParameters,
     /// The `RenderPass` bits the layer draws in.
-    pub(crate) render_passes: u8,
+    pub render_passes: u8,
 }
 
 impl<T: LayerType> EvaluatedLayer<T> {
@@ -336,38 +336,37 @@ pub(crate) const fn entry<T: LayerType>() -> &'static dyn ErasedLayerType {
 mod tests {
     use mln_map_types::MapMode;
     use mln_style::evaluated::Evaluated;
-    use mln_style::layers::{Background, BackgroundPaintProperties, Circle, Symbol};
-    use mln_util::Color;
+    use mln_style::layers::{Circle, Raster, RasterPaintProperties, Symbol};
     use mln_vec_map::VecMap;
 
     use super::*;
     use crate::buckets::circle_bucket::CircleBucket;
 
-    fn background() -> Arc<dyn ErasedEvaluatedLayer> {
-        let paint = BackgroundPaintProperties::PossiblyEvaluated {
-            background_color: Evaluated::Constant(Color::new(0.25, 0.5, 0.75, 1.0)),
-            background_opacity: Evaluated::Constant(0.5),
-            ..BackgroundPaintProperties::PossiblyEvaluated::default()
+    fn raster() -> Arc<dyn ErasedEvaluatedLayer> {
+        let paint = RasterPaintProperties::PossiblyEvaluated {
+            raster_hue_rotate: Evaluated::Constant(90.0),
+            raster_opacity: Evaluated::Constant(0.5),
+            ..RasterPaintProperties::PossiblyEvaluated::default()
         };
-        let style = Arc::new(LayerStyle::<Background>::new("background".to_owned(), String::new()));
+        let style = Arc::new(LayerStyle::<Raster>::new("raster".to_owned(), "source".to_owned()));
         let crossfade = CrossfadeParameters { from_scale: 2.0, to_scale: 1.0, t: 0.25 };
         Arc::new(EvaluatedLayer { style, paint, crossfade, render_passes: 0 })
     }
 
     #[test]
     fn recover_keeps_the_allocation() {
-        let layer = background();
-        let recovered = EvaluatedLayer::<Background>::recover(&layer).unwrap();
+        let layer = raster();
+        let recovered = EvaluatedLayer::<Raster>::recover(&layer).unwrap();
         assert!(std::ptr::addr_eq(Arc::as_ptr(&recovered), Arc::as_ptr(&layer)));
-        assert_eq!(*recovered.paint.background_color.uniform(), Color::new(0.25, 0.5, 0.75, 1.0));
-        assert_eq!(*recovered.paint.background_opacity.uniform(), 0.5);
+        assert_eq!(*recovered.paint.raster_hue_rotate.uniform(), 90.0);
+        assert_eq!(*recovered.paint.raster_opacity.uniform(), 0.5);
         assert_eq!(recovered.crossfade.t, 0.25);
         assert!(EvaluatedLayer::<Circle>::recover(&layer).is_none());
     }
 
     #[test]
     fn a_type_reads_no_other_types_values() {
-        let layer = background();
+        let layer = raster();
         let circles = entry::<Circle>();
         assert!(!circles.layout_can_need_dependencies(std::slice::from_ref(&layer)));
         let bucket = CircleBucket::new(&VecMap::new(), MapMode::Static, 0.0);

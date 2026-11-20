@@ -10,7 +10,7 @@ use crate::edit::Edit;
 use crate::expression::{Functions, Image};
 use crate::filter::Filter;
 use crate::layer::Layer;
-use crate::layers::{Background, Circle, Fill, Line, Raster};
+use crate::layers::{Circle, Fill, Line, Raster};
 use crate::property_value::PropertyValue;
 use crate::registry::StyleRegistry;
 use crate::style::Style;
@@ -78,19 +78,6 @@ macro_rules! layout {
 }
 
 const RED: &str = r##""#ff0000""##;
-
-// gtest: Layer.BackgroundProperties
-#[test]
-fn background_properties() {
-    let mut layer = new_layer("background", "background", "");
-    assert_eq!("background", layer.info().name);
-
-    // Paint properties
-
-    paint!(Background, layer, background_color, "background-color", RED, c(color()));
-    paint!(Background, layer, background_opacity, "background-opacity", "1", c(OPACITY));
-    paint!(Background, layer, background_pattern, "background-pattern", r#""foo""#, pattern());
-}
 
 // gtest: Layer.CircleProperties
 #[test]

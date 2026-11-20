@@ -28,9 +28,9 @@
 //!   of its type `T`; `layer_type::LayerBase` holds the members every layer
 //!   type has.
 //! - Each layer type is a marker type that implements
-//!   `layer_type::StyleLayerType`, such as `layers::Background`, with
+//!   `layer_type::StyleLayerType`, such as `layers::Circle`, with
 //!   property sets such as
-//!   `layers::BackgroundPaintProperties::{Transitionable, Unevaluated, PossiblyEvaluated, Evaluated}`.
+//!   `layers::CirclePaintProperties::{Transitionable, Unevaluated, PossiblyEvaluated, Evaluated}`.
 //! - Each layer type, the light and the sky have a property table, which
 //!   `property_table` reads to get, set and serialize properties by name.
 //!   `layers/<type>_layer_properties.rs`, `light_properties.rs` and
@@ -82,11 +82,6 @@ pub use edit::Edit;
 pub use layer::Layer;
 pub use layer_list::LayerList;
 pub use layer_type::LayerTypeInfo;
-// The property macros, at the root so that the generated code and the
-// macros themselves name them as `crate::name!`.
-pub(crate) use properties::{
-    __possibly_evaluated_methods, __property_data_driven, __property_evaluation, __property_value, properties,
-};
 pub use property_value::{PropertyValue, StyleValue};
 pub use registry::StyleRegistry;
 pub use renderer::property_evaluation_parameters::{CrossfadeParameters, PropertyEvaluationParameters};

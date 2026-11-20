@@ -2473,6 +2473,7 @@ dependencies = [
  "mln-rs-gfx",
  "mln-rs-gl",
  "mln-rs-image",
+ "mln-rs-layers",
  "mln-rs-map",
  "mln-rs-map-types",
  "mln-rs-math",
@@ -2480,6 +2481,7 @@ dependencies = [
  "mln-rs-polylabel",
  "mln-rs-renderer",
  "mln-rs-runtime",
+ "mln-rs-sources",
  "mln-rs-sprite",
  "mln-rs-storage",
  "mln-rs-storage-offline",
@@ -2884,6 +2886,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "mln-rs-layers"
+version = "0.0.13"
+dependencies = [
+ "bytemuck",
+ "mln-rs-conversion",
+ "mln-rs-gfx",
+ "mln-rs-map-types",
+ "mln-rs-renderer",
+ "mln-rs-style",
+ "mln-rs-style-types",
+ "mln-rs-tile-id",
+ "mln-rs-util",
+ "mln-rs-vec-map",
+ "mln-rs-wire",
+ "serde_json",
+]
+
+[[package]]
 name = "mln-rs-map"
 version = "0.0.13"
 dependencies = [
@@ -2892,6 +2912,7 @@ dependencies = [
  "glam",
  "mln-rs-feature",
  "mln-rs-geometry",
+ "mln-rs-layers",
  "mln-rs-map-types",
  "mln-rs-math",
  "mln-rs-renderer",
@@ -3071,6 +3092,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "mln-rs-sources"
+version = "0.0.13"
+dependencies = [
+ "mln-rs-renderer",
+ "mln-rs-style",
+]
+
+[[package]]
 name = "mln-rs-sprite"
 version = "0.0.13"
 dependencies = [
@@ -3124,6 +3153,7 @@ dependencies = [
  "mln-rs",
  "mln-rs-feature",
  "mln-rs-headless",
+ "mln-rs-layers",
  "mln-rs-map",
  "mln-rs-renderer",
  "mln-rs-storage",
@@ -3148,8 +3178,10 @@ dependencies = [
  "mln-rs-feature",
  "mln-rs-geojson",
  "mln-rs-image",
+ "mln-rs-layers",
  "mln-rs-map-types",
  "mln-rs-math",
+ "mln-rs-renderer",
  "mln-rs-storage",
  "mln-rs-style-types",
  "mln-rs-text",

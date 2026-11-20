@@ -36,7 +36,7 @@ fn empty() {
 
 #[test]
 fn the_same_list_has_no_changes() {
-    let layers = list(&[&new_layer("background", "a", "")]);
+    let layers = list(&[&new_layer("plain", "a", "")]);
     let changes = LayerChanges::between(&layers, &layers);
     assert!(changes.is_empty() && !changes.order_changed);
 }
@@ -44,7 +44,7 @@ fn the_same_list_has_no_changes() {
 // gtest: StyleDiff.Add
 #[test]
 fn add() {
-    let (l1, l2) = (new_layer("background", "id-1", "src-1"), new_layer("background", "id-2", "src-2"));
+    let (l1, l2) = (new_layer("plain", "id-1", "src-1"), new_layer("plain", "id-2", "src-2"));
     assert_eq!(changes(&[&l1], &[&l1, &l2]), [("id-2".to_owned(), LayerChange::Added)]);
     assert!(LayerChanges::between(&list(&[&l1]), &list(&[&l1, &l2])).order_changed);
 }
@@ -52,7 +52,7 @@ fn add() {
 // gtest: StyleDiff.Remove
 #[test]
 fn remove() {
-    let (l1, l2) = (new_layer("background", "id-1", "src-1"), new_layer("background", "id-2", "src-2"));
+    let (l1, l2) = (new_layer("plain", "id-1", "src-1"), new_layer("plain", "id-2", "src-2"));
     assert_eq!(changes(&[&l1, &l2], &[&l1]), [("id-2".to_owned(), LayerChange::Removed)]);
 }
 
@@ -60,8 +60,8 @@ fn remove() {
 // gtest: StyleDiff.Compare
 #[test]
 fn compare() {
-    let old = [new_layer("background", "id-1", "src-1"), new_layer("background", "id-2", "src-2")];
-    let new = [new_layer("background", "id-1", "src-1"), new_layer("background", "id-2", "src-2")];
+    let old = [new_layer("plain", "id-1", "src-1"), new_layer("plain", "id-2", "src-2")];
+    let new = [new_layer("plain", "id-1", "src-1"), new_layer("plain", "id-2", "src-2")];
     let changes = LayerChanges::between(&list(&[&old[0], &old[1]]), &list(&[&new[0], &new[1]]));
     assert_eq!(Some(LayerChange::Restyled), changes.get("id-1"));
     assert_eq!(Some(LayerChange::Restyled), changes.get("id-2"));
@@ -73,7 +73,7 @@ fn compare() {
 // gtest: StyleDiff.Order
 #[test]
 fn order() {
-    let (l1, l2) = (new_layer("background", "id-1", "src-1"), new_layer("background", "id-2", "src-2"));
+    let (l1, l2) = (new_layer("plain", "id-1", "src-1"), new_layer("plain", "id-2", "src-2"));
     let changes = LayerChanges::between(&list(&[&l1, &l2]), &list(&[&l2, &l1]));
     assert!(changes.is_empty());
     assert!(changes.order_changed);
@@ -91,7 +91,7 @@ fn a_moved_layer_that_changed_keeps_its_class() {
 
 #[test]
 fn a_layer_of_another_type_is_replaced() {
-    let old = new_layer("background", "a", "");
+    let old = new_layer("plain", "a", "");
     let new = new_layer("line", "a", "s");
     assert_eq!(changes(&[&old], &[&new]), [("a".to_owned(), LayerChange::Replaced)]);
 }
@@ -131,7 +131,7 @@ mod versions {
     const STYLE: &str = r#"{"version":8,
         "sources":{"c":{"type":"geojson","data":{"type":"FeatureCollection","features":[]}},
                    "a":{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}},
-        "layers":[{"id":"bg","type":"background"},{"id":"dots","type":"circle","source":"a"}]}"#;
+        "layers":[{"id":"bg","type":"plain"},{"id":"dots","type":"circle","source":"a"}]}"#;
 
     fn style() -> crate::Style {
         crate::Style::from_json(&StyleRegistry::with_builtins(), STYLE, None).unwrap()

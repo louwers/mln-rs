@@ -288,19 +288,10 @@ const EXTRUSION_PATTERN: &str = r#"{"id": "extrusion-pattern", "type": "fill-ext
 /// properties.
 #[test]
 fn every_geometry_layer_type_crosses() {
-    // The layer types of the style specification (v8.json).
-    let types = [
-        "fill",
-        "line",
-        "symbol",
-        "circle",
-        "heatmap",
-        "fill-extrusion",
-        "raster",
-        "hillshade",
-        "color-relief",
-        "background",
-    ];
+    // The layer types of the style specification (v8.json) that the engine
+    // registers. Background, in mln_layers, takes no source.
+    let types =
+        ["fill", "line", "symbol", "circle", "heatmap", "fill-extrusion", "raster", "hillshade", "color-relief"];
     let layers_of_type = [
         ("fill", vec![FILL, LEGACY_FILL]),
         ("line", vec![LINE]),

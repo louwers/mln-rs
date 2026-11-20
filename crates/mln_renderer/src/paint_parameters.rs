@@ -144,14 +144,14 @@ impl OpenPass {
 
 /// The state of a frame's encode: the renderer's GPU state, which the
 /// encode changes, the frame's camera and values, and where its passes are.
-pub(crate) struct PaintParameters<'a> {
-    pub(crate) context: &'a mut Context,
+pub struct PaintParameters<'a> {
+    pub context: &'a mut Context,
     /// The pass of the backend's `Gpu` that draws draw into, while one
     /// is open.
     open_pass: Option<OpenPass>,
 
     pub(crate) transform_params: &'a TransformParameters,
-    pub(crate) view: &'a View,
+    pub view: &'a View,
     /// Whether a gesture or an animation moves the camera: draws favor speed
     /// over crispness then.
     pub(crate) camera_moving: bool,

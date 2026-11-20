@@ -31,7 +31,7 @@ enum Place {
 
 /// Indexes, which don't change once made: an upload moves them into their
 /// buffer.
-pub(crate) struct Indexes {
+pub struct Indexes {
     len: usize,
     place: Place,
 }
@@ -91,7 +91,7 @@ impl Indexes {
 
 /// The indexes a draw binds: its own, or those it shares through the
 /// context's store.
-pub(crate) enum DrawIndexes {
+pub enum DrawIndexes {
     Own(Indexes),
     Shared(SharedIndexes),
 }
@@ -111,7 +111,7 @@ impl From<SharedIndexes> for DrawIndexes {
 impl DrawIndexes {
     /// The draw's own indexes holding `indexes`.
     #[must_use]
-    pub(crate) fn new(indexes: Vec<u16>) -> DrawIndexes {
+    pub fn new(indexes: Vec<u16>) -> DrawIndexes {
         DrawIndexes::Own(Indexes::new(indexes))
     }
 

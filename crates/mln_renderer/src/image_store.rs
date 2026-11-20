@@ -28,7 +28,7 @@ pub(crate) struct ResolvedImages {
     pub(crate) patterns: ImageMap,
 }
 
-pub(crate) struct ImageStore {
+pub struct ImageStore {
     /// Whether the sprite loaded: before, a missing image may still come
     /// with it.
     loaded: bool,
@@ -104,7 +104,7 @@ impl ImageStore {
         Log::info(Event::General, format!("ImageManager::loaded: {}", if self.is_loaded() { "1" } else { "0" }));
     }
 
-    pub(crate) fn image(&self, id: &str) -> Option<&Arc<ImageImpl>> {
+    pub fn image(&self, id: &str) -> Option<&Arc<ImageImpl>> {
         self.images.get(id)
     }
 

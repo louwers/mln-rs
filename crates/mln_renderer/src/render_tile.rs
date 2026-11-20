@@ -144,7 +144,7 @@ impl RenderTile {
 /// type's views can reach another's [`TileView::at`], which asserts that it
 /// doesn't.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ViewPlace {
+pub enum ViewPlace {
     /// The layer's place among the layers of the tile's layout.
     Laid(usize),
     /// The tile's own bucket, a raster or raster-dem tile's, which every
@@ -156,7 +156,7 @@ pub(crate) enum ViewPlace {
 /// layout, or a raster or raster-dem tile's own bucket. A frame finds it by
 /// the layer's id once ([`find`](Self::find)), in its update, and its encode
 /// takes it again from where it was found ([`at`](Self::at)).
-pub(crate) trait TileView<'a>: Copy {
+pub trait TileView<'a>: Copy {
     /// What `contents` show the layer `layer_id`, if anything, and where it
     /// is in them.
     fn find(contents: &'a Contents, layer_id: &str) -> Option<(Self, ViewPlace)>;
@@ -208,7 +208,7 @@ impl<'a> TileView<'a> for &'a HillshadeBucket {
 
 /// What a tile shows a layer of a type without a source: nothing.
 #[derive(Clone, Copy)]
-pub(crate) enum NoTileBucket {}
+pub enum NoTileBucket {}
 
 impl TileView<'_> for NoTileBucket {
     fn find(_contents: &Contents, _layer_id: &str) -> Option<(Self, ViewPlace)> {
@@ -224,13 +224,13 @@ impl TileView<'_> for NoTileBucket {
 /// among its source's render tiles, and where what it shows the layer is in
 /// its contents ([`TileView::find`]).
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct FoundTile {
+pub struct FoundTile {
     pub(crate) tile: usize,
     pub(crate) view: Option<ViewPlace>,
 }
 
 /// A render tile of a frame, with what it shows a layer of the type `T`.
-pub(crate) struct FrameTile<'a, T: LayerType> {
+pub struct FrameTile<'a, T: LayerType> {
     pub(crate) tile: &'a RenderTile,
     bucket: Option<T::TileBucket<'a>>,
 }

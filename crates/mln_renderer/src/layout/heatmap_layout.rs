@@ -23,7 +23,7 @@ use crate::layout::pattern_layout::PatternLayerMap;
 use crate::layout::tile_layout::Resolved;
 use crate::util::tessellator::Tessellator;
 
-pub(crate) struct HeatmapLayout {
+pub struct HeatmapLayout {
     layers: VecMap<String, Arc<EvaluatedLayer<Heatmap>>>,
     bucket_leader_id: String,
     source_layer_id: String,

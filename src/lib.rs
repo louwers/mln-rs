@@ -41,6 +41,7 @@ pub use mln_gfx;
 #[cfg(feature = "gl")]
 pub use mln_gl;
 pub use mln_image;
+pub use mln_layers;
 pub use mln_map;
 pub use mln_map_types;
 pub use mln_math;
@@ -51,6 +52,7 @@ pub use mln_renderer;
 // Every runtime type is at the root, so the root can't miss one that a
 // root type's methods take or return.
 pub use mln_runtime::{self, *};
+pub use mln_sources;
 pub use mln_sprite;
 pub use mln_storage;
 #[cfg(feature = "sqlite")]

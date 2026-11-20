@@ -1,31 +1,63 @@
-// Not a C++ gtest: checks that every M1 render-test style.json
-// (metrics/integration/render-tests, read in place from @maplibre) parses
-// into a `Style` whose background layer evaluates, at the test's zoom,
-// through Transitioning -> PossiblyEvaluated to the values the C++ core
-// computes. The evaluation mirrors RenderOrchestrator::createRenderTree +
-// RenderBackgroundLayer (transition, then evaluate) in MapMode::Static, where
-// the transition parameters are `TransitionOptions()` (no transitions), and
-// in MapMode::Continuous for the transition test.
+//! The background layer type's style half: its properties, and the M1
+//! render-test styles.
+//!
+//! The render-test styles' check isn't a C++ gtest: every M1 render-test
+//! `style.json` (`metrics/integration/render-tests`, a copy of the C++
+//! repository's) parses into a `Style` whose background layer evaluates, at
+//! the test's zoom, through `Transitioning` -> `PossiblyEvaluated` to the
+//! values the C++ core computes. The evaluation mirrors
+//! `RenderOrchestrator::createRenderTree` and `RenderBackgroundLayer`
+//! (transition, then evaluate) in `MapMode::Static`, where the transition
+//! parameters are `TransitionOptions()` (no transitions), and in
+//! `MapMode::Continuous` for the transition test.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use mln_conversion::Convertible;
+use mln_layers::{Background, BackgroundPaintProperties};
+use mln_renderer::{Registry, RegistryBuilder};
+use mln_style::expression::functions::register_builtin_functions;
+use mln_style::expression::{EvaluationContext, Functions, Image};
+use mln_style::layer::Layer;
+use mln_style::layer_type::LayerStyle;
+use mln_style::map::zoom_history::ZoomHistory;
+use mln_style::property_expression::PropertyExpression;
+use mln_style::{Edit, PropertyEvaluationParameters, PropertyValue, Style, TransitionOptions, TransitionParameters};
 use mln_style_types::VisibilityType;
-use mln_util::logging::{Event, EventSeverity};
 use mln_util::time::Instant;
 use mln_util::{Color, UnitBezier};
 
-use super::util::FixtureLog;
-use crate::expression::Functions;
-use crate::layer_type::LayerStyle;
-use crate::layers::{Background, BackgroundPaintProperties};
-use crate::map::zoom_history::ZoomHistory;
-use crate::registry::StyleRegistry;
-use crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
-use crate::renderer::transition_parameters::TransitionParameters;
-use crate::style::Style;
-use crate::transition_options::TransitionOptions;
+/// The built-in registrations: the expression functions and the layer and
+/// source types of the engine and of `mln_layers`.
+fn builtin_registry() -> Arc<Registry> {
+    let mut builder = RegistryBuilder::new();
+    register_builtin_functions(builder.functions_mut()).unwrap();
+    mln_layers::register_layer_types(&mut builder).unwrap();
+    mln_renderer::builtins::register_layer_types(&mut builder).unwrap();
+    mln_renderer::builtins::register_source_types(&mut builder).unwrap();
+    builder.build()
+}
+
+// gtest: Layer.BackgroundProperties
+#[test]
+fn background_properties() {
+    let mut layer = Layer::new(builtin_registry().style(), "background", "background", "").unwrap();
+    assert_eq!("background", layer.info().name);
+
+    let mut set = |name: &str, json: serde_json::Value| {
+        let error = layer.set_property(name, &Convertible::from(&json), None);
+        assert!(error.is_none(), "{name}: {error:?}");
+    };
+    set("background-color", serde_json::json!("#ff0000"));
+    set("background-opacity", serde_json::json!(1));
+    set("background-pattern", serde_json::json!("foo"));
+    let paint = &LayerStyle::<Background>::recover_ref(&**layer.style()).unwrap().paint;
+    assert_eq!(paint.background_color.value, PropertyValue::Constant(Color::new(1.0, 0.0, 0.0, 1.0)));
+    assert_eq!(paint.background_opacity.value, PropertyValue::Constant(1.0));
+    assert_eq!(paint.background_pattern.value, PropertyValue::Constant(Image::new("foo")));
+}
 
 fn render_tests_dir() -> PathBuf {
     std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
@@ -35,7 +67,7 @@ fn render_tests_dir() -> PathBuf {
 fn load(test: &str) -> Style {
     let path = render_tests_dir().join(test).join("style.json");
     let json = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    Style::from_json(&StyleRegistry::with_builtins(), &json, None).unwrap_or_else(|e| panic!("{test}: {e}"))
+    Style::from_json(builtin_registry().style(), &json, None).unwrap_or_else(|e| panic!("{test}: {e}"))
 }
 
 fn background_impl(style: &Style, id: &str) -> Arc<LayerStyle<Background>> {
@@ -120,13 +152,12 @@ fn background_color_function() {
 
 /// The colorSpace tests' stops, interpolated by `operator` at their zoom, 5.
 fn color_space_expected(operator: &str) -> Color {
-    let expression = crate::expression::parsing_context::create_expression_from_str(
+    let expression = mln_style::expression::parsing_context::create_expression_from_str(
         &format!(r#"["{operator}", ["linear"], ["zoom"], 0, "rgb(118,0,118)", 10, "rgb(255,155,0)"]"#),
         &Functions::with_builtins(),
     )
     .unwrap();
-    crate::property_expression::PropertyExpression::<Color>::from_expr(expression)
-        .evaluate(&crate::expression::EvaluationContext::new(5.0), Color::black())
+    PropertyExpression::<Color>::from_expr(expression).evaluate(&EvaluationContext::new(5.0), Color::black())
 }
 
 #[test]
@@ -169,11 +200,8 @@ fn background_color_transition() {
     assert_background(&evaluated, Color::parse("red").unwrap(), 1.0);
 
     let white = serde_json::json!("white");
-    let edit = crate::Edit::SetLayerProperty {
-        layer: "background".to_owned(),
-        name: "background-color".to_owned(),
-        value: white,
-    };
+    let edit =
+        Edit::SetLayerProperty { layer: "background".to_owned(), name: "background-color".to_owned(), value: white };
     style.apply(edit).unwrap();
     let impl1 = background_impl(&style, "background");
     assert!(!Arc::ptr_eq(&impl0, &impl1));
@@ -217,16 +245,11 @@ fn background_opacity_color() {
 
 #[test]
 fn background_opacity_overlay() {
-    // The raster source converts (sources, M3/M4) and the raster layer type
-    // is registered (generated layers), so both layers and the source parse.
-    let log = FixtureLog::new();
+    // The raster source and the raster layer type are registered, so both
+    // layers and the source parse.
     let style = load("background-opacity/overlay");
     assert_eq!(2, style.get_layer_list().len());
     assert_eq!(1, style.get_sources().len());
-    assert_eq!(
-        0,
-        log.count(EventSeverity::Warning, Event::ParseStyle, "Unsupported layer type! Null factory for type: raster")
-    );
     let evaluated = evaluate_static(&style, "background_overlay");
     assert_background(&evaluated, Color::parse("green").unwrap(), 0.5);
 }

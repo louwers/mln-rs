@@ -46,7 +46,7 @@ impl RegistryBuilder {
     }
 
     /// Adds the layer type `T`. Fails for a name that an earlier type took.
-    pub(crate) fn add_layer_type<T: LayerType>(&mut self) -> Result<(), RegisterError> {
+    pub fn add_layer_type<T: LayerType>(&mut self) -> Result<(), RegisterError> {
         let name = T::INFO.name;
         if self.layer_types.contains_key(name) {
             return Err(RegisterError::Duplicate(name.to_owned()));

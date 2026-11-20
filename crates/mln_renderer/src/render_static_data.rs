@@ -15,7 +15,7 @@ const FILL_EXTRUSION_SEGMENT_WALLS: usize = MAX_SEGMENT_VERTICES / 4;
 
 /// The vertices and indices of the geometry the layers share.
 #[derive(Default)]
-pub(crate) struct RenderStaticData {
+pub struct RenderStaticData {
     /// `wall_indexes`, while a layer holds them.
     wall_indexes: Cell<WeakShared<IndexesKey>>,
 }
@@ -33,13 +33,13 @@ impl RenderStaticData {
 
     /// The tile's four corners, as position-only vertices (`a_pos`).
     #[must_use]
-    pub(crate) fn tile_vertices() -> Vec<[i16; 2]> {
+    pub fn tile_vertices() -> Vec<[i16; 2]> {
         let extent = constants::EXTENT as i16;
         vec![[0, 0], [extent, 0], [0, extent], [extent, extent]]
     }
 
     #[must_use]
-    pub(crate) fn quad_triangle_indices() -> Vec<u16> {
+    pub fn quad_triangle_indices() -> Vec<u16> {
         vec![0, 1, 2, 1, 2, 3]
     }
 
@@ -139,7 +139,7 @@ impl RenderStaticData {
     }
 
     #[must_use]
-    pub(crate) fn tile_triangle_segments() -> Vec<SegmentBase> {
+    pub fn tile_triangle_segments() -> Vec<SegmentBase> {
         vec![SegmentBase::with_lengths(0, 0, 4, 6)]
     }
 

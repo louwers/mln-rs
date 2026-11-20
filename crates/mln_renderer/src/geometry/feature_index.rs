@@ -95,7 +95,7 @@ struct Entry {
 type Bounds = [i16; 4];
 
 /// A feature index as a tile's layout fills it.
-pub(crate) struct FeatureIndexBuilder {
+pub struct FeatureIndexBuilder {
     /// The rings' entries and boxes, in insertion order.
     entries: Vec<Entry>,
     boxes: Vec<Bounds>,

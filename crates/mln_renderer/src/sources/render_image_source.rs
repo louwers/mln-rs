@@ -164,7 +164,7 @@ fn build_image_mesh(bucket: &mut RasterBucket, corners: &GeometryCoordinates, ce
 /// What a frame draws of an image source: its bucket, once the image has
 /// arrived, in each of the tiles it covers.
 #[derive(Clone, Copy)]
-pub(crate) struct ImageSourceRenderData<'a> {
+pub struct ImageSourceRenderData<'a> {
     pub(crate) bucket: Option<&'a RasterBucket>,
     pub(crate) tile_ids: &'a [UnwrappedTileID],
 }

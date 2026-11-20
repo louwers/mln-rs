@@ -55,7 +55,7 @@ fn missing_style_ids_report_not_found() {
         r#"layer "absent-layer" does not exist"#,
     );
     assert_fails(
-        style.add_layer_json(r#"{"id":"paper","type":"background"}"#, Some("absent-layer")),
+        style.add_layer_json(r#"{"id":"paper","type":"plain"}"#, Some("absent-layer")),
         ErrorKind::NotFound,
         r#"before_layer_id "absent-layer" does not exist"#,
     );
@@ -71,8 +71,8 @@ fn missing_style_ids_report_not_found() {
 #[test]
 fn layers_go_below_the_before_layer() {
     let mut style = style_with_dots();
-    style.add_layer_json(r#"{"id":"paper","type":"background"}"#, Some("dots")).unwrap();
-    style.add_layer_json(r#"{"id":"top","type":"background"}"#, None).unwrap();
+    style.add_layer_json(r#"{"id":"paper","type":"plain"}"#, Some("dots")).unwrap();
+    style.add_layer_json(r#"{"id":"top","type":"plain"}"#, None).unwrap();
     let ids: Vec<String> = style.get_layers().map(|layer| layer.get_id().to_owned()).collect();
     assert_eq!(ids, ["paper", "dots", "top"]);
 }
@@ -188,18 +188,13 @@ fn root_properties_match_serialization_and_null_resets_zoom() {
 #[test]
 fn layer_json_serializes_the_current_layer() {
     let mut style = loaded_style();
-    style
-        .add_layer_json(r##"{"id":"paper","type":"background","paint":{"background-color":"#ff0000"}}"##, None)
-        .unwrap();
+    style.add_layer_json(r##"{"id":"paper","type":"plain","paint":{"plain-color":"#ff0000"}}"##, None).unwrap();
     set_property(&mut style, "paper", "minzoom", "2.0");
 
     let json = style.layer_json("paper").unwrap();
-    for part in [
-        r#""id":"paper""#,
-        r#""type":"background""#,
-        r#""background-color":["rgba",255.0,0.0,0.0,1.0]"#,
-        r#""minzoom":2.0"#,
-    ] {
+    for part in
+        [r#""id":"paper""#, r#""type":"plain""#, r#""plain-color":["rgba",255.0,0.0,0.0,1.0]"#, r#""minzoom":2.0"#]
+    {
         assert!(json.contains(part), "{json} doesn't contain {part}");
     }
 
@@ -213,7 +208,7 @@ fn layer_json_serializes_the_current_layer() {
 #[test]
 fn source_bindings_change_only_on_layers_that_take_a_source() {
     let mut style = style_with_dots();
-    style.add_layer_json(r#"{"id":"paper","type":"background"}"#, None).unwrap();
+    style.add_layer_json(r#"{"id":"paper","type":"plain"}"#, None).unwrap();
 
     set_property(&mut style, "dots", "source", r#""not-yet-added""#);
     assert_eq!(style.get_layer("dots").unwrap().get_source_id(), "not-yet-added");
@@ -226,12 +221,12 @@ fn source_bindings_change_only_on_layers_that_take_a_source() {
     assert_fails(
         style.set_layer_property_json("paper", "source", r#""points""#),
         ErrorKind::InvalidArgument,
-        r#"background layer "paper" does not take a source"#,
+        r#"plain layer "paper" does not take a source"#,
     );
     assert_fails(
         style.set_layer_property_json("paper", "source-layer", r#""pois""#),
         ErrorKind::InvalidArgument,
-        r#"background layer "paper" does not take a source-layer"#,
+        r#"plain layer "paper" does not take a source-layer"#,
     );
     assert_eq!(property(&style, "paper", "source"), None);
     assert_eq!(property(&style, "paper", "source-layer"), None);

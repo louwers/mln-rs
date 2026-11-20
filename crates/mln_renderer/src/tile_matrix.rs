@@ -70,7 +70,8 @@ pub(crate) fn tile_matrix(
     clippy::too_many_arguments,
     reason = "the tile, the paint parameters and the translation, origin, clipping and alignment options of its projection"
 )]
-pub(crate) fn projection_data(
+#[must_use]
+pub fn projection_data(
     tile_id: &UnwrappedTileID,
     parameters: &PaintParameters<'_>,
     translation: [f32; 2],
@@ -94,7 +95,7 @@ pub(crate) fn projection_data(
 }
 
 #[must_use]
-pub(crate) fn to_projection_ubo(data: &ProjectionData) -> ProjectionUBO {
+pub fn to_projection_ubo(data: &ProjectionData) -> ProjectionUBO {
     ProjectionUBO {
         matrix: cast_matrix(&data.main_matrix),
         fallback_matrix: cast_matrix(&data.fallback_matrix),

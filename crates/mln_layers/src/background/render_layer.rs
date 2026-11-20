@@ -16,8 +16,14 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
+use mln_renderer::unstable::{
+    Atlases, DrawDepth, DrawGeometry, DrawIndexes, DrawList, DrawObjects, EvaluatedLayer, FrameDraw, KeptDraw,
+    LayerDrawing, LayerUpdateParameters, LayerValues, NoBucket, NoLayout, NoTileBucket, PaintParameters, Parts,
+    PartsMut, RenderLayerBase, RenderPass, RenderStaticData, Textures, TileCoverParameters, TileDraws, Uniforms,
+    projection_data, raw_globe_tile_mesh, raw_vertices, tile_cover, to_projection_ubo,
+};
+use mln_renderer::{LayerType, RenderLayer, TypedLayer};
 use mln_style::layer_type::LayerStyle;
-use mln_style::layers::Background;
 use mln_style_types::TranslateAnchorType;
 use mln_tile_id::OverscaledTileID;
 use mln_util::Color;
@@ -25,24 +31,7 @@ use mln_util::constants::TILE_SIZE_D;
 use mln_util::range::Range;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
-use super::cast_matrix;
-use crate::bucket::NoBucket;
-use crate::draw::{DrawGeometry, DrawObjects, Textures, raw_vertices};
-use crate::gfx::indexes::DrawIndexes;
-use crate::gfx::vertex_attribute::Uniforms;
-use crate::globe_tile_mesh::raw_globe_tile_mesh;
-use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDrawing, TileDraws};
-use crate::layer_type::{EvaluatedLayer, LayerType};
-use crate::layout::layout::NoLayout;
-use crate::paint_parameters::PaintParameters;
-use crate::render_layer::{
-    Atlases, LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
-};
-use crate::render_pass::RenderPass;
-use crate::render_static_data::RenderStaticData;
-use crate::render_tile::NoTileBucket;
-use crate::tile_matrix::{projection_data, to_projection_ubo};
-use crate::util::tile_cover::{TileCoverParameters, tile_cover};
+use super::Background;
 
 /// Adds the image `id` to the pattern atlas if it isn't there yet.
 fn add_pattern_if_needed(id: &str, params: &mut LayerUpdateParameters<'_>) {
@@ -64,7 +53,7 @@ impl LayerType for Background {
     }
 }
 
-pub(crate) struct RenderBackgroundLayer {
+struct RenderBackgroundLayer {
     base: RenderLayerBase,
     values: LayerValues<Background>,
     drawing: TileDraws<KeptDraw>,
@@ -80,7 +69,7 @@ pub(crate) struct RenderBackgroundLayer {
 }
 
 impl RenderBackgroundLayer {
-    pub(crate) fn new(impl_: Arc<LayerStyle<Background>>) -> Self {
+    fn new(impl_: Arc<LayerStyle<Background>>) -> Self {
         let (base, values) = LayerValues::new(impl_);
         RenderBackgroundLayer {
             base,
@@ -135,7 +124,7 @@ impl RenderBackgroundLayer {
         let tile_id = tile_id.to_unwrapped();
         let projection =
             projection_data(&tile_id, parameters, [0.0, 0.0], TranslateAnchorType::Viewport, false, false, None, false);
-        let matrix = cast_matrix(&projection.fallback_matrix);
+        let matrix = projection.fallback_matrix.as_mat4().to_cols_array();
         let draw_ubo = if pattern {
             let state = parameters.view;
             let int_zoom = state.integer_zoom();

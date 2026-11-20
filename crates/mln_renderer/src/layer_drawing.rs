@@ -71,7 +71,7 @@ impl BitOrAssign for BucketChanges {
 
 /// The buckets whose vertex data changed, by bucket id, with what changed.
 #[derive(Default)]
-pub(crate) struct ChangedBuckets(HashMap<SimpleIdentity, BucketChanges>);
+pub struct ChangedBuckets(HashMap<SimpleIdentity, BucketChanges>);
 
 impl ChangedBuckets {
     /// Records that `changes` of the bucket `bucket` changed.
@@ -255,7 +255,7 @@ fn kept_tiles<'a>(
 /// What a layer keeps of each of the frame's tiles it draws, by tile id: the
 /// bucket the tile's draws were built from and what of it changed since,
 /// and the layer's own `T` of the tile, from when the layer builds one.
-pub(crate) struct TileMap<T> {
+pub struct TileMap<T> {
     set: TileSet,
     /// Each tile's `T`, at the tile's index in the set.
     values: Vec<Option<T>>,
@@ -271,7 +271,7 @@ impl<T> TileMap<T> {
     /// Makes `tiles`, the frame's tiles of the layer in any order, those the
     /// map has entries for: it keeps the entries of those it had, and drops
     /// the others.
-    pub(crate) fn set_tiles(&mut self, tiles: impl IntoIterator<Item = OverscaledTileID>) {
+    pub fn set_tiles(&mut self, tiles: impl IntoIterator<Item = OverscaledTileID>) {
         self.set.incoming.clear();
         self.set.incoming.extend(tiles);
         if self.set.set_tiles() {
@@ -353,17 +353,17 @@ impl<T> TileMap<T> {
     }
 
     /// The entry of `tile_id`, if the tile is one of the frame's.
-    pub(crate) fn entry(&mut self, tile_id: &OverscaledTileID) -> Option<TileEntry<'_, T>> {
+    pub fn entry(&mut self, tile_id: &OverscaledTileID) -> Option<TileEntry<'_, T>> {
         let index = self.set.index_of(tile_id)?;
         Some(TileEntry { state: self.set.states.get_mut(index)?, value: self.values.get_mut(index)? })
     }
 }
 
 /// The entry of a tile in a [`TileMap`].
-pub(crate) struct TileEntry<'a, T> {
+pub struct TileEntry<'a, T> {
     state: &'a mut TileState,
     /// What the layer keeps of the tile, if anything.
-    pub(crate) value: &'a mut Option<T>,
+    pub value: &'a mut Option<T>,
 }
 
 impl<T> TileEntry<'_, T> {
@@ -399,28 +399,28 @@ impl<T> TileEntry<'_, T> {
 
 /// The GPU objects of one draw a layer keeps, with the id that orders the
 /// draws by when their objects were made.
-pub(crate) struct KeptDraw {
+pub struct KeptDraw {
     pub(crate) id: SimpleIdentity,
-    pub(crate) objects: DrawObjects,
+    pub objects: DrawObjects,
 }
 
 impl KeptDraw {
     #[must_use]
-    pub(crate) fn new(objects: DrawObjects) -> KeptDraw {
+    pub fn new(objects: DrawObjects) -> KeptDraw {
         KeptDraw { id: SimpleIdentity::new(), objects }
     }
 
     /// A draw of the objects, which `tile` holds, or the layer for `None`
     /// (see [`FrameDraw::new`]).
     #[must_use]
-    pub(crate) fn frame_draw(&self, tile: Option<OverscaledTileID>) -> FrameDraw {
+    pub fn frame_draw(&self, tile: Option<OverscaledTileID>) -> FrameDraw {
         FrameDraw::new(tile, self.id)
     }
 }
 
 /// The GPU objects of a draw, with what gives them the textures of their
 /// tile's atlases where they sample them.
-pub(crate) struct DrawObjectsMut<'a> {
+pub struct DrawObjectsMut<'a> {
     pub(crate) objects: &'a mut DrawObjects,
     pub(crate) atlases: Option<&'a AtlasBinding>,
 }
@@ -434,7 +434,7 @@ impl<'a> From<&'a mut DrawObjects> for DrawObjectsMut<'a> {
 
 /// What a layer keeps of a tile, whose draws a frame's draws name by a part
 /// of the layer's own type.
-pub(crate) trait TileObjects {
+pub trait TileObjects {
     /// Which of the tile's draws a frame's draw draws.
     type Part: Copy;
 
@@ -485,7 +485,7 @@ pub(crate) fn tile_objects<'a, T: TileObjects>(
 
 /// How a draw tests and writes depth.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum DrawDepth {
+pub enum DrawDepth {
     /// It draws without a depth test.
     Off,
     /// It tests the depth of a sub-layer of the layer's depth, and writes it
@@ -498,21 +498,21 @@ pub(crate) enum DrawDepth {
 
 /// One draw of a frame: the state it draws its GPU objects with. Its uniform
 /// values are the entries at its index in the storage buffers of its
-/// [`FrameDraws`].
-pub(crate) struct FrameDraw {
+/// `FrameDraws`.
+pub struct FrameDraw {
     /// The tile whose draw it is, or `None` for a draw of the layer's.
-    pub(crate) tile: Option<OverscaledTileID>,
+    pub tile: Option<OverscaledTileID>,
     /// The id of the draw's GPU objects, which orders the draws by when
     /// their objects were made.
-    pub(crate) id: SimpleIdentity,
-    pub(crate) priority: DrawPriority,
+    pub id: SimpleIdentity,
+    pub priority: DrawPriority,
     /// The passes the draw draws in.
-    pub(crate) pass: RenderPass,
-    pub(crate) depth: DrawDepth,
+    pub pass: RenderPass,
+    pub depth: DrawDepth,
     /// Whether the draw clips: a draw at the layer's depth to the mask of
     /// its tile, a 3D one to where none of the layer's 3D draws of the pass
     /// drew before it, so no pixel blends twice.
-    pub(crate) clip: bool,
+    pub clip: bool,
 }
 
 impl FrameDraw {
@@ -541,10 +541,10 @@ impl FrameDraw {
 
 /// The draws an update makes for a frame, each with its uniform values of
 /// type `U` and the part of the layer's GPU objects it binds, of type `P`,
-/// before they become the draws of a [`LayerDraws`]. The list keeps its
+/// before they become the draws of a `LayerDraws`. The list keeps its
 /// memory from frame to frame, so that a frame of no more draws than one
 /// before it allocates nothing.
-pub(crate) struct DrawList<U, P = ()> {
+pub struct DrawList<U, P = ()> {
     /// The draws, each with the index of its values in `uniforms` and of its
     /// part in `parts`. The draws sort without their parts, so that the
     /// sort is one function for all the layers' lists.
@@ -563,7 +563,7 @@ impl<U, P> Default for DrawList<U, P> {
 }
 
 impl<U> DrawList<U> {
-    pub(crate) fn push(&mut self, draw: FrameDraw, uniforms: U) {
+    pub fn push(&mut self, draw: FrameDraw, uniforms: U) {
         self.push_part(draw, (), uniforms);
     }
 }
@@ -636,7 +636,7 @@ fn take_draws(draws: &mut Vec<(FrameDraw, usize)>, frame: &mut Vec<FrameDraw>) {
 
 /// Writes the buffers that a frame's draws read, each draw's entries at its
 /// index in drawing order.
-pub(crate) struct UniformWriter<'a, U> {
+pub struct UniformWriter<'a, U> {
     draws: &'a [(FrameDraw, usize)],
     uniforms: &'a [U],
     bytes: &'a mut Vec<u8>,
@@ -650,7 +650,7 @@ pub(crate) struct UniformWriter<'a, U> {
 impl<U> UniformWriter<'_, U> {
     /// Writes each draw's `entry` of its uniform values to the storage
     /// buffer `id`.
-    pub(crate) fn storage<P: bytemuck::Pod>(&mut self, id: usize, entry: impl Fn(&U) -> P) {
+    pub fn storage<P: bytemuck::Pod>(&mut self, id: usize, entry: impl Fn(&U) -> P) {
         self.bytes.clear();
         for &(_, index) in self.draws {
             self.bytes.extend_from_slice(bytemuck::bytes_of(&entry(&self.uniforms[index])));
@@ -659,13 +659,13 @@ impl<U> UniformWriter<'_, U> {
     }
 
     /// Writes `value`, which all the draws read, to the uniform buffer `id`.
-    pub(crate) fn uniform<P: bytemuck::Pod>(&mut self, id: usize, value: &P) {
+    pub fn uniform<P: bytemuck::Pod>(&mut self, id: usize, value: &P) {
         self.replaced |= self.buffers.write_pod(self.gpu, id, value, self.context.device());
     }
 }
 
 /// Draws of a frame, and what they share.
-pub(crate) struct FrameDraws {
+pub struct FrameDraws {
     /// Tells the draws apart in the layer composite.
     id: SimpleIdentity,
     /// The draws, in [`FrameDraw::order`]. A draw's index is the index of its
@@ -995,7 +995,7 @@ impl SingleDraw {
 /// What the frame draws of a layer in one place in the layers' order and
 /// depth.
 #[derive(Clone, Copy)]
-pub(crate) enum DrawGroup<'a> {
+pub enum DrawGroup<'a> {
     /// Draws of the layer's GPU objects.
     Draws(&'a FrameDraws),
     /// What a custom layer's host draws, with objects of its own.
@@ -1028,7 +1028,7 @@ impl<'a> DrawGroup<'a> {
 /// of [`PaintParameters::current_layer`], which [`DrawOrder::step`] moves to
 /// the next group's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum DrawOrder {
+pub enum DrawOrder {
     /// The layers' order, bottom to top, with the depth going down by one
     /// after each group, to 0.
     BottomUp,
@@ -1049,7 +1049,7 @@ impl DrawOrder {
 
 /// The drawing of a layer that draws one group of draws, each of a part of
 /// the tile it draws, and keeps a `T` of each tile.
-pub(crate) struct TileDraws<T: TileObjects> {
+pub struct TileDraws<T: TileObjects> {
     tiles: TileMap<T>,
     /// The frame's draws, from the layer's first update with something to
     /// draw.
@@ -1064,7 +1064,7 @@ impl<T: TileObjects> Default for TileDraws<T> {
 
 impl<T: TileObjects> TileDraws<T> {
     /// What the layer keeps of the frame's tiles.
-    pub(crate) fn tiles_mut(&mut self) -> &mut TileMap<T> {
+    pub fn tiles_mut(&mut self) -> &mut TileMap<T> {
         &mut self.tiles
     }
 
@@ -1077,7 +1077,7 @@ impl<T: TileObjects> TileDraws<T> {
     /// Makes the draws of `list` the frame's, as [`DrawList::finish`] does,
     /// and drops the bindings of the tiles' draws where that replaced a
     /// buffer they bind.
-    pub(crate) fn finish<U>(
+    pub fn finish<U>(
         &mut self,
         list: &mut DrawList<U, T::Part>,
         gpu: &mut dyn Gpu,
@@ -1133,10 +1133,10 @@ impl<T: TileObjects> LayerDrawing for TileDraws<T> {
 }
 
 /// What a layer type keeps of its drawing: the GPU objects of its draws, in
-/// types of its own, those of its tiles in a [`TileMap`], and its draw
+/// types of its own, those of its tiles in a `TileMap`, and its draw
 /// groups of the frame, whose draws it uploads and draws in loops of its
 /// own.
-pub(crate) trait LayerDrawing {
+pub trait LayerDrawing {
     /// What the layer keeps of a tile.
     type Tile;
 
