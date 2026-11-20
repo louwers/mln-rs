@@ -4,8 +4,9 @@
 use ash::vk;
 use mln_gfx::shaders::shader_defines::{ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO, ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO};
 use mln_glsl::layout::{
-    DRAWABLE_UNIFORM_COUNT, DescriptorSetType, GLOBAL_UNIFORM_COUNT, IMAGE_TEXTURE_COUNT, LAYER_STORAGE_COUNT,
-    LAYER_UNIFORM_COUNT, image_sampler_binding, image_texture_binding, layer_storage_binding,
+    BufferSetShape, DRAWABLE_UNIFORM_COUNT, DRAWABLE_VERTEX_COUNT, DescriptorSetType, GLOBAL_UNIFORM_COUNT,
+    IMAGE_TEXTURE_COUNT, LAYER_STORAGE_COUNT, LAYER_UNIFORM_COUNT, image_sampler_binding, image_texture_binding,
+    layer_storage_binding,
 };
 
 use crate::device::Device;
@@ -15,15 +16,32 @@ const MAX_BUFFER_BINDINGS: usize = 8;
 const _: () = assert!(
     GLOBAL_UNIFORM_COUNT <= MAX_BUFFER_BINDINGS
         && LAYER_STORAGE_COUNT + LAYER_UNIFORM_COUNT <= MAX_BUFFER_BINDINGS
-        && DRAWABLE_UNIFORM_COUNT <= MAX_BUFFER_BINDINGS
+        && DRAWABLE_UNIFORM_COUNT + DRAWABLE_VERTEX_COUNT <= MAX_BUFFER_BINDINGS
 );
 
+/// The buffers of the sets of `type_`: with `vertex_buffers`, the storage
+/// buffers that bind vertex buffers too (`Caps::binds_vertex_buffers`).
+#[must_use]
+pub(crate) const fn buffer_shape(type_: DescriptorSetType, vertex_buffers: bool) -> BufferSetShape {
+    let shape = type_.buffer_shape();
+    if vertex_buffers { shape } else { BufferSetShape { vertex: 0, ..shape } }
+}
+
+/// How many storage buffers the vertex stage of a pipeline reads at most
+/// with the bindings of vertex buffers, which a device's
+/// `maxPerStageDescriptorStorageBuffers` has to allow: the layer set's but
+/// its fragment-only one, and the vertex buffers.
+pub(crate) const VERTEX_STAGE_STORAGE_BUFFERS: usize = LAYER_STORAGE_COUNT - 1 + DRAWABLE_VERTEX_COUNT;
+
 /// The stages that read the buffer at `binding` of a set of `type_`: all
-/// but the fragment stage for a layer's vertex-only buffer, and all but the
-/// vertex stage for its fragment-only one.
+/// but the fragment stage for a layer's vertex-only buffer and for a vertex
+/// buffer, and all but the vertex stage for a layer's fragment-only buffer.
 fn buffer_stages(type_: DescriptorSetType, binding: u32) -> vk::ShaderStageFlags {
     let mut stages = vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT;
-    if type_ == DescriptorSetType::Layer {
+    let shape = type_.buffer_shape();
+    if binding as usize >= shape.storage + shape.uniform {
+        stages = vk::ShaderStageFlags::VERTEX;
+    } else if type_ == DescriptorSetType::Layer {
         if layer_storage_binding(ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO) == Some(binding) {
             stages = vk::ShaderStageFlags::VERTEX;
         } else if layer_storage_binding(ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO) == Some(binding) {
@@ -133,10 +151,12 @@ impl DescriptorPoolGrowable {
     }
 }
 
-/// The layout of the sets of `type_`.
+/// The layout of the sets of `type_`, with the bindings of vertex buffers
+/// if `vertex_buffers`.
 pub(crate) fn build_descriptor_set_layout(
     device: &Device,
     type_: DescriptorSetType,
+    vertex_buffers: bool,
 ) -> Result<vk::DescriptorSetLayout, String> {
     let mut bindings = Vec::new();
     if type_ == DescriptorSetType::DrawableImage {
@@ -155,9 +175,9 @@ pub(crate) fn build_descriptor_set_layout(
             }
         }
     } else {
-        let shape = type_.buffer_shape();
-        for binding in 0..(shape.storage + shape.uniform) as u32 {
-            let descriptor_type = if (binding as usize) < shape.storage {
+        let shape = buffer_shape(type_, vertex_buffers);
+        for binding in 0..shape.len() as u32 {
+            let descriptor_type = if shape.is_storage(binding as usize) {
                 vk::DescriptorType::STORAGE_BUFFER
             } else {
                 vk::DescriptorType::UNIFORM_BUFFER

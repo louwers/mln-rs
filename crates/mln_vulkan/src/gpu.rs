@@ -34,7 +34,10 @@ use mln_util::size::Size;
 
 use crate::allocation::{BufferAllocation, ImageAllocation, transition_image};
 use crate::custom_layer::{CustomLayerEncoder, CustomLayerPass};
-use crate::descriptor_set::{DescriptorPoolGrowable, build_descriptor_set_layout, build_pipeline_layout};
+use crate::descriptor_set::{
+    DescriptorPoolGrowable, VERTEX_STAGE_STORAGE_BUFFERS, buffer_shape, build_descriptor_set_layout,
+    build_pipeline_layout,
+};
 use crate::device::Device;
 use crate::{shaders, vk_state};
 
@@ -576,15 +579,6 @@ impl VulkanGpu {
             return Err(GpuError::Invalid("Vulkan couldn't make the placeholder image's view".to_owned()));
         }
 
-        let pool = |type_: DescriptorSetType, textures: usize| {
-            let shape = type_.buffer_shape();
-            DescriptorPoolGrowable::new(
-                DESCRIPTOR_POOL_SIZE,
-                shape.storage as u32,
-                shape.uniform as u32,
-                textures as u32,
-            )
-        };
         // SAFETY: a plain query of the GPU.
         let d24s8 = unsafe {
             shared
@@ -613,7 +607,17 @@ impl VulkanGpu {
             clear_stencil_with_pass: true,
             cpu_rasterizer: properties.device_type == vk::PhysicalDeviceType::CPU,
             max_line_width: line_widths.map_or(1.0, |(_, max)| max),
-            binds_vertex_buffers: false,
+            binds_vertex_buffers: limits.max_per_stage_descriptor_storage_buffers as usize
+                >= VERTEX_STAGE_STORAGE_BUFFERS,
+        };
+        let pool = |type_: DescriptorSetType, textures: usize| {
+            let shape = buffer_shape(type_, caps.binds_vertex_buffers);
+            DescriptorPoolGrowable::new(
+                DESCRIPTOR_POOL_SIZE,
+                (shape.storage + shape.vertex) as u32,
+                shape.uniform as u32,
+                textures as u32,
+            )
         };
         // At least two, so that the CPU writes the next batch's while the
         // GPU runs the last.
@@ -685,7 +689,8 @@ impl VulkanGpu {
         gpu.command_pool =
             unsafe { raw.create_command_pool(&create_info, None) }.map_err(vk_error("the command pool"))?;
         for type_ in DescriptorSetType::ALL {
-            gpu.set_layouts[type_ as usize] = build_descriptor_set_layout(device, type_).map_err(GpuError::Invalid)?;
+            gpu.set_layouts[type_ as usize] =
+                build_descriptor_set_layout(device, type_, gpu.caps.binds_vertex_buffers).map_err(GpuError::Invalid)?;
         }
         gpu.pipeline_layout =
             build_pipeline_layout(device, &gpu.set_layouts, UBO_INDEX_PUSH_CONSTANT_SIZE, "Gpu_PipelineLayout")
@@ -1425,12 +1430,16 @@ impl VulkanGpu {
                 }
             }
         } else {
-            let shape = type_.buffer_shape();
-            for binding in 0..(shape.storage + shape.uniform) as u32 {
-                let storage = (binding as usize) < shape.storage;
+            let shape = buffer_shape(type_, self.caps.binds_vertex_buffers);
+            for binding in 0..shape.len() as u32 {
+                let storage = shape.is_storage(binding as usize);
                 let info = if let Some(Resource::Buffer(id, offset, size)) = resource(binding) {
                     let buffer = self.buffers.get(id).ok_or(GpuError::UnknownId("buffer"))?;
-                    let expected = if storage { BufferUsage::Storage } else { BufferUsage::Uniform };
+                    let expected = match binding as usize {
+                        binding if binding < shape.storage => BufferUsage::Storage,
+                        binding if binding < shape.storage + shape.uniform => BufferUsage::Uniform,
+                        _ => BufferUsage::Vertex,
+                    };
                     if buffer.usage != expected {
                         return Err(GpuError::Invalid(format!(
                             "a {:?} buffer bound where the shader reads a {expected:?} buffer",
@@ -1951,6 +1960,10 @@ impl Gpu for VulkanGpu {
 
     fn create_buffer(&mut self, desc: &BufferDesc<'_>) -> Result<BufferId, GpuError> {
         let usage = match desc.usage {
+            // A shader may read a vertex buffer as a storage buffer.
+            BufferUsage::Vertex if self.caps.binds_vertex_buffers => {
+                vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::STORAGE_BUFFER
+            }
             BufferUsage::Vertex => vk::BufferUsageFlags::VERTEX_BUFFER,
             BufferUsage::Index => vk::BufferUsageFlags::INDEX_BUFFER,
             BufferUsage::Uniform => vk::BufferUsageFlags::UNIFORM_BUFFER,
