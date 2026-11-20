@@ -26,11 +26,11 @@ use mln_util::constants::TILE_SIZE_D;
 use mln_util::range::Range;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
-use super::{Background, programs};
-use crate::background::ubo::{
+use super::ubo::{
     BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPatternDrawableUBO, BackgroundPatternPropsUBO,
     BackgroundPropsUBO,
 };
+use super::{Background, programs};
 
 /// Adds the image `id` to the pattern atlas if it isn't there yet.
 fn add_pattern_if_needed(id: &str, cx: &mut UpdateContext<'_, '_, Background>) {

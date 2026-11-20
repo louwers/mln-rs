@@ -418,8 +418,8 @@ impl<'a> PaintParameters<'a> {
 
     /// The frame's camera and target.
     #[must_use]
-    pub fn frame(&self) -> &DrawFrame<'a> {
-        &self.frame
+    pub fn frame(&self) -> DrawFrame<'a> {
+        self.frame
     }
 
     /// Where the frame draws the map, and the depth it writes there: known

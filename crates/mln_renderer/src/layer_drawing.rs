@@ -1077,7 +1077,7 @@ pub enum DrawOrder {
 
 impl DrawOrder {
     /// Moves the encode `parameters` to the depth of the group after the one
-    /// it is at.
+    /// it is at, as [`LayerDrawing::render`] does after each of its groups.
     pub fn step(self, parameters: &mut PaintParameters<'_>) {
         match self {
             DrawOrder::BottomUp => parameters.current_layer = parameters.current_layer.saturating_sub(1),
@@ -1207,7 +1207,10 @@ pub trait LayerDrawing {
     fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context);
 
     /// Draws the draw groups' draws of the pass into the open pass of `gpu`,
-    /// the context's, in `order`, each at its depth.
+    /// the context's, in `order`, each at its depth. After each group that
+    /// [`visit_groups`](LayerDrawing::visit_groups) visits, drawn in the pass
+    /// or not, it steps the depth once ([`DrawOrder::step`]), so that the
+    /// groups after it draw at theirs.
     fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder);
 }
 

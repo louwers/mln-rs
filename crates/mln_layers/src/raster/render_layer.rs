@@ -34,8 +34,8 @@ use mln_tile_id::UnwrappedTileID;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::identity::SimpleIdentity;
 
+use super::ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
 use super::{Raster, programs};
-use crate::raster::ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
 
 /// What the layer keeps of a tile: its draw, and the generation of the
 /// contents' geometry it was built of.

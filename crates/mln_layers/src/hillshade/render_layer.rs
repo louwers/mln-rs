@@ -46,11 +46,11 @@ use mln_util::hash::{HashMap, HashSet};
 use mln_util::identity::SimpleIdentity;
 use mln_util::size::Size;
 
-use super::{Hillshade, HillshadePaintProperties, programs};
-use crate::hillshade::ubo::{
+use super::ubo::{
     HillshadeDrawableUBO, HillshadeEvaluatedPropsUBO, HillshadePrepareDrawableUBO, HillshadePrepareTilePropsUBO,
     HillshadeTilePropsUBO, MAX_ILLUMINATION_SOURCES,
 };
+use super::{Hillshade, HillshadePaintProperties, programs};
 
 /// What the layer keeps of a DEM: the render target its slopes
 /// are prepared in, and the draw that prepares them.

@@ -34,11 +34,11 @@ use mln_util::size::Size;
 
 use super::bucket::{FillBinders, FillBucket, FillLayoutVertex};
 use super::properties::FillPaintProperties;
-use super::{Fill, programs};
-use crate::fill::ubo::{
+use super::ubo::{
     FillDrawableUBO, FillDrawableUnionUBO, FillEvaluatedPropsUBO, FillOutlineDrawableUBO, FillPatternDrawableUBO,
     FillPatternTilePropsUBO, FillTilePropsUnionUBO,
 };
+use super::{Fill, programs};
 use crate::pattern_layout::{FillLayoutSpec, PatternLayout, uses_pattern};
 use crate::refresh_paint_attributes;
 

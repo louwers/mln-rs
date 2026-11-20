@@ -357,7 +357,7 @@ pub(super) fn texel(pixels: &[u8], x: u32, y: u32) -> [u8; 4] {
     [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
 }
 
-/// Checks that [`BlendFunction::Replace`](crate::color_mode::BlendFunction)
+/// Checks that [`BlendFunction::Replace`](mln_gfx::color_mode::BlendFunction)
 /// writes a translucent color as it is, over opaque black. Returns the
 /// error of a call that should succeed.
 ///
