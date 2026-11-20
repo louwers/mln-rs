@@ -435,6 +435,9 @@ fn layout_difference<T: StyleLayerType>(a: &LayerStyle<T>, b: &LayerStyle<T>) ->
 pub trait ErasedStyleLayerType: Send + Sync + 'static {
     fn info(&self) -> LayerTypeInfo;
 
+    /// Whether `style` is the style data of a layer of the type.
+    fn is_type_of(&self, style: &dyn ErasedLayerStyle) -> bool;
+
     /// The style data of a layer of the type named `id` of the source
     /// `source`, with every property undefined.
     fn create(&self, id: &str, source: &str) -> Arc<dyn ErasedLayerStyle>;
@@ -474,6 +477,10 @@ impl<T: 'static> LayerTypeEntry<T> {
 impl<T: StyleLayerType> ErasedStyleLayerType for LayerTypeEntry<T> {
     fn info(&self) -> LayerTypeInfo {
         T::INFO
+    }
+
+    fn is_type_of(&self, style: &dyn ErasedLayerStyle) -> bool {
+        LayerStyle::<T>::recover_ref(style).is_some()
     }
 
     fn create(&self, id: &str, source: &str) -> Arc<dyn ErasedLayerStyle> {
