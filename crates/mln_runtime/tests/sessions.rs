@@ -349,34 +349,6 @@ fn a_command_after_still_frames_starts_from_the_latest_frame() {
     );
 }
 
-// The frames of a running animation each sample it at their demand, so a
-// frame's report adds no update, which would show the frame's camera again
-// and report it as moving again.
-#[test]
-fn a_frame_report_adds_no_update_while_frames_sample_an_animation() {
-    let runtime = runtime();
-    let events = EventLog::install(&runtime);
-    let map = red_map(&runtime);
-    wait(map.set_event_mask(EventMask::ALL_MAP_EVENTS));
-    let session = attach(&map);
-    render_until_idle(&map, &session);
-    let count = |wanted: fn(&MapEvent) -> bool| {
-        let events = events.events();
-        events.iter().filter(|event| matches!(&event.kind, RuntimeEventKind::Map(event) if wanted(event))).count()
-    };
-    let finished = |event: &MapEvent| matches!(event, MapEvent::RenderFrameFinished(_));
-    let changing = |event: &MapEvent| matches!(event, MapEvent::CameraIsChanging);
-
-    let _ease = start_ease(&map, 100.0, std::time::Duration::from_secs(5));
-    for token in 1..=3 {
-        let (frames, moves) = (count(finished), count(changing));
-        let (_, _, frame) = timed_frame(&session, DemandMode::IfChanged, token);
-        assert!(eventually(|| count(finished) > frames), "the frame's report never reached the map");
-        assert_eq!(map.snapshot().unwrap().update_generation, frame.map_update_generation);
-        assert_eq!(count(changing) - moves, 1);
-    }
-}
-
 // A frame demand's sample is not a command of the host's: it neither
 // numbers one nor keeps the map's commands from counting as applied.
 #[test]
@@ -396,24 +368,53 @@ fn frame_demands_send_the_map_no_commands() {
 
 // Demands that come while the runtime's thread is busy share one sample:
 // the map updates once, for the latest of them, however many waited.
+//
+// A frame's report that reaches the map once its frame clock is stale adds
+// an update of its own, as for a host that stopped drawing. A slow run can
+// take that long, so the test checks a burst whose reports all came within
+// the clock's freshness, and tries again until one does.
 #[test]
 fn demands_share_a_frame_sample_while_the_runtimes_thread_is_busy() {
     let runtime = runtime();
+    let events = EventLog::install(&runtime);
     let map = red_map(&runtime);
+    wait(map.set_event_mask(EventMask::ALL_MAP_EVENTS));
     let other = red_map(&runtime);
     let session = attach(&map);
     render_until_idle(&map, &session);
+    let reported = || {
+        let events = events.events();
+        events
+            .iter()
+            .filter(|event| matches!(&event.kind, RuntimeEventKind::Map(MapEvent::RenderFrameFinished(_))))
+            .count() as u64
+    };
+    // Every frame drawn so far has reached the map.
+    let settle = || {
+        let drawn = session.snapshot().unwrap().frame_generation;
+        assert!(eventually(|| reported() == drawn), "a frame's report never reached the map");
+    };
 
-    let _ease = start_ease(&map, 100.0, std::time::Duration::from_secs(5));
-    let (_, _, first) = timed_frame(&session, DemandMode::IfChanged, 1);
-    let open = hold_runtime(&other);
-    for token in 2..=5 {
-        demand(&session, DemandMode::Force, token);
+    let _ease = start_ease(&map, 100.0, std::time::Duration::from_secs(60));
+    let deadline = std::time::Instant::now() + TIMEOUT;
+    loop {
+        settle();
+        let latest = map.snapshot().unwrap().update_generation;
+        let start = std::time::Instant::now();
+        let open = hold_runtime(&other);
+        for token in 1..=4 {
+            demand(&session, DemandMode::Force, token);
+        }
+        drop(open);
+        let frames = take_results(&session, 4);
+        settle();
+        if start.elapsed() <= mln_map::transform::STALE_FRAME_TIME {
+            let updates: Vec<u64> = frames.iter().map(|frame| frame.map_update_generation).collect();
+            assert_eq!(updates, [latest + 1; 4], "{frames:?}");
+            return;
+        }
+        assert!(std::time::Instant::now() < deadline, "no burst's reports came while its frame clock was fresh");
     }
-    drop(open);
-    let frames = take_results(&session, 4);
-    let updates: Vec<u64> = frames.iter().map(|frame| frame.map_update_generation).collect();
-    assert_eq!(updates, [first.map_update_generation + 1; 4], "{frames:?}");
 }
 
 // While the runtime's thread runs queued commands as one burst, it holds

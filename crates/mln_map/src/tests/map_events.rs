@@ -16,7 +16,10 @@ use mln_util::size::Size;
 use mln_util::time::Instant;
 
 use crate::map_options::UnusedStyleImagePolicy;
-use crate::{CameraChange, CameraChangeMode, CameraChangeSource, CameraOptions, Map, MapEvent, MapMode, MapOptions};
+use crate::{
+    AnimationOptions, CameraChange, CameraChangeMode, CameraChangeSource, CameraOptions, CameraUpdate,
+    CameraUpdateMode, Map, MapEvent, MapMode, MapOptions,
+};
 
 fn map(options: MapOptions, run_loop: &Queue<()>) -> Map {
     Map::with_file_source(
@@ -195,6 +198,54 @@ fn a_frame_waiting_for_a_placement_asks_for_no_update_until_then() {
     report(&map, frame(None));
     map.process_events();
     assert_eq!(finished(&mut map), (Some(true), true));
+}
+
+/// While a host's frame clock samples a running animation, each frame
+/// already showed the animation at its time: the frame's report adds no
+/// update, which would show the frame's camera again and report it as
+/// moving again. Without the clock, the report's update is what moves it.
+#[test]
+fn a_frame_report_adds_no_update_while_the_frame_clock_samples_an_animation() {
+    let run_loop = Queue::<()>::new();
+    let mut map = map(MapOptions { map_mode: MapMode::Continuous, ..Default::default() }, &run_loop);
+    map.load_style_json(STYLE);
+    map.update_camera(&CameraUpdate {
+        mode: CameraUpdateMode::Ease,
+        camera: CameraOptions { zoom: Some(10.0), ..Default::default() },
+        animation: AnimationOptions { duration: Some(Duration::from_secs(60)), ..Default::default() },
+        ..Default::default()
+    });
+    let frame = || RendererEvent::RenderFrameFinished {
+        mode: mln_renderer::RenderMode::Full,
+        needs_repaint: false,
+        repaint_at: None,
+        placement_changed: false,
+        still_image_request_id: 0,
+        stats: Arc::default(),
+    };
+    let moving =
+        |events: &[MapEvent]| events.iter().filter(|event| matches!(event, MapEvent::CameraIsChanging)).count();
+
+    // The frame's sample updates the map once.
+    let updates = map.update_generation();
+    map.set_frame_time(Some(Instant::now()));
+    assert_eq!(map.update_generation(), updates + 1);
+    map.process_events();
+    map.drain_events();
+    report(&map, frame());
+    map.process_events();
+    let events = map.drain_events();
+    assert_eq!(map.update_generation(), updates + 1);
+    assert_eq!(moving(&events), 0, "{events:?}");
+
+    map.set_frame_time(None);
+    map.drain_events();
+    let updates = map.update_generation();
+    report(&map, frame());
+    map.process_events();
+    let events = map.drain_events();
+    assert_eq!(map.update_generation(), updates + 1);
+    assert_eq!(moving(&events), 1, "{events:?}");
 }
 
 #[test]

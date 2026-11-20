@@ -1043,7 +1043,7 @@ impl Map {
     /// Samples the camera's animations at the host's frame time, from now on,
     /// and starts new ones from it: call it at the start of each frame with
     /// `Instant::now()`, before rendering. One older than
-    /// `STALE_FRAME_TIME` counts as
+    /// [`STALE_FRAME_TIME`](crate::transform::STALE_FRAME_TIME) counts as
     /// unset, so commands made while the host isn't drawing start now. If an
     /// animation runs, the map updates for this frame at once. `None` goes
     /// back to sampling at `Instant::now()` whenever the map updates. Still

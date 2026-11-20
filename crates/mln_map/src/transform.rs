@@ -38,10 +38,10 @@ use transition::{FrameFn, JointEnd, Transition};
 
 use crate::map_event::{CameraChange, CameraChangeSource};
 
-/// A frame time older than this is stale (see [`Transform::frame_time`]):
-/// longer than a frame at 10 fps, so any host that draws sets a fresh one
-/// first.
-pub(crate) const STALE_FRAME_TIME: Duration = Duration::from_millis(100);
+/// A frame time older than this is stale, and counts as unset (see
+/// [`Transform::set_frame_time`]): longer than a frame at 10 fps, so any host
+/// that draws sets a fresh one first.
+pub const STALE_FRAME_TIME: Duration = Duration::from_millis(100);
 
 /// Converts the given angle (in radians) to be numerically close to the
 /// anchor angle, allowing it to be interpolated properly without sudden
