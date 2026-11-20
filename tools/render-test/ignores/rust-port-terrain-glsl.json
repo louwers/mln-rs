@@ -1,4 +1,5 @@
 {
+  "gljs/render-tests/terrain/dem-cell-centre-hillshade-peak": "P1a (Vulkan GLSL port): the terrain's shaders have no Vulkan GLSL yet, so terrain and the layers that drape over it draw nothing",
   "gljs/render-tests/terrain/fog-no-sky-blend": "P1a (Vulkan GLSL port): the terrain's shaders have no Vulkan GLSL yet, so terrain and the layers that drape over it draw nothing",
   "gljs/render-tests/terrain/fog-no-sky-blend-roll": "P1a (Vulkan GLSL port): the terrain's shaders have no Vulkan GLSL yet, so terrain and the layers that drape over it draw nothing",
   "gljs/render-tests/terrain/image-wrap-eq-zl": "P1a (Vulkan GLSL port): the terrain's shaders have no Vulkan GLSL yet, so terrain and the layers that drape over it draw nothing",

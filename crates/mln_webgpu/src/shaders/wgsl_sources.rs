@@ -2857,11 +2857,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-/// Port-only, for the backend conformance cases: quads at clip positions,
-/// each vertex colored by the texel of `image_texture` it names, which the
-/// vertex stage loads.
 /// The terrain's surface: a tile's grid, drawn with the tile's matrix from
-/// `drawableVector`, flat at sea level, in the colors of the tile's drape.
+/// `drawableVector`, raised to the heights of the tile's DEM with its skirts
+/// lowered, in the colors of the tile's drape.
 pub(crate) const TERRAIN_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "TerrainShader",
     name: r"TerrainShader",
@@ -2896,8 +2894,10 @@ struct GlobalIndexUBO {
 fn main(in: VertexInput) -> VertexOutput {
     let drawable = drawableVector[globalIndex.value];
     let pos = vec2<f32>(in.pos.xy);
+    let skirt = f32(in.pos.z);
+    let elevation = terrain_elevation(pos, drawable.dem_coords) - skirt * terrainProps.skirt_length;
     var out: VertexOutput;
-    out.position = drawable.matrix * vec4<f32>(pos, 0.0, 1.0);
+    out.position = drawable.matrix * vec4<f32>(pos, elevation, 1.0);
     out.drape_pos = pos / 8192.0;
     return out;
 }
@@ -2918,9 +2918,58 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 }
 ",
     ),
-    prelude: None,
+    prelude: Some(TERRAIN_ELEVATION_PRELUDE),
 };
 
+/// The height rule of `mln_util::dem`, over the DEM tile a terrain tile
+/// reads: its RGBA8 texels behind a one-texel border, decoded by
+/// `terrainProps`.
+const TERRAIN_ELEVATION_PRELUDE: &str = r"
+struct TerrainPropsUBO {
+    unpack: vec4<f32>,
+    unpack_scale: f32,
+    exaggeration: f32,
+    skirt_length: f32,
+    pad0: f32,
+};
+
+@group(0) @binding(5) var<uniform> terrainProps: TerrainPropsUBO;
+@group(1) @binding(1) var dem_texture: texture_2d<f32>;
+
+// The height in meters of the DEM's bordered texel at `texel`, clamped to
+// the texture.
+fn terrain_texel_height(texel: vec2<i32>) -> f32 {
+    let last = vec2<i32>(textureDimensions(dem_texture)) - 1;
+    let rgb = round(textureLoad(dem_texture, clamp(texel, vec2<i32>(0), last), 0).rgb * 255.0);
+    let unpack = terrainProps.unpack;
+    return (rgb.r * unpack.x + rgb.g * unpack.y + rgb.b * unpack.z + unpack.w) * terrainProps.unpack_scale;
+}
+
+// The height in meters, exaggerated, at `pos` in tile units of a tile that
+// reads its DEM at `dem_coords`: the DEM uv's scale and offset, then the
+// DEM's width in pixels, 0 for flat ground.
+fn terrain_elevation(pos: vec2<f32>, dem_coords: vec4<f32>) -> f32 {
+    let dim = dem_coords.w;
+    if (dim == 0.0) {
+        return 0.0;
+    }
+    let coord = (pos / 8192.0 * dem_coords.x + dem_coords.yz) * dim + 0.5;
+    let first = floor(coord);
+    let f = coord - first;
+    let texel = vec2<i32>(first);
+    let tl = terrain_texel_height(texel);
+    let tr = terrain_texel_height(texel + vec2<i32>(1, 0));
+    let bl = terrain_texel_height(texel + vec2<i32>(0, 1));
+    let br = terrain_texel_height(texel + vec2<i32>(1, 1));
+    let top = tl * (1.0 - f.x) + tr * f.x;
+    let bottom = bl * (1.0 - f.x) + br * f.x;
+    return (top * (1.0 - f.y) + bottom * f.y) * terrainProps.exaggeration;
+}
+";
+
+/// Port-only, for the backend conformance cases: quads at clip positions,
+/// each vertex colored by the texel of `image_texture` it names, which the
+/// vertex stage loads.
 pub(crate) const VERTEX_TEXEL_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "VertexTexelShader",
     name: r"VertexTexelShader",

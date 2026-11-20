@@ -9,6 +9,7 @@ use mln_util::dem::DemCoords;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::range::Range;
 
+use crate::buckets::hillshade_bucket::HillshadeBucket;
 use crate::geometry::dem_data::DEMData;
 use crate::tile::contents::Contents;
 use crate::tile::source_tiles::SourceTiles;
@@ -39,12 +40,18 @@ pub(crate) fn dem_zoom(z: u8, dem_zooms: Range<u8>) -> Option<u8> {
     (zoom <= z).then_some(zoom)
 }
 
-/// The DEM of `tile`, a raster-dem source's tile, if it has one with data.
-fn dem_data(tile: &Tile) -> Option<&DEMData> {
+/// The bucket of `tile`, a raster-dem source's tile, if it has one with DEM
+/// data.
+pub(crate) fn dem_bucket(tile: &Tile) -> Option<&HillshadeBucket> {
     match tile.contents()? {
-        Contents::Dem(bucket) if bucket.has_data() => Some(bucket.dem_data()),
+        Contents::Dem(bucket) if bucket.has_data() => Some(bucket),
         _ => None,
     }
+}
+
+/// The DEM of `tile`, a raster-dem source's tile, if it has one with data.
+fn dem_data(tile: &Tile) -> Option<&DEMData> {
+    dem_bucket(tile).map(HillshadeBucket::dem_data)
 }
 
 /// The elevation range of the ground under tiles, in meters with the

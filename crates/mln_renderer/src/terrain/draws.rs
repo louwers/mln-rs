@@ -1,6 +1,6 @@
 //! The terrain's draws: one per terrain tile, of the shared grid, each with
-//! the tile's matrix in an entry of one storage buffer, sampling the tile's
-//! drape.
+//! the tile's matrix and where it reads its DEM in an entry of one storage
+//! buffer, raised by the DEM's texture and sampling the tile's drape.
 
 use std::mem::size_of;
 use std::rc::Rc;
@@ -11,15 +11,18 @@ use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
-    ID_TERRAIN_DRAPE_TEXTURE, ID_TERRAIN_DRAWABLE_UBO, ID_TERRAIN_POS_VERTEX_ATTRIBUTE,
+    ID_TERRAIN_DEM_TEXTURE, ID_TERRAIN_DRAPE_TEXTURE, ID_TERRAIN_DRAWABLE_UBO, ID_TERRAIN_POS_VERTEX_ATTRIBUTE,
+    ID_TERRAIN_PROPS_UBO,
 };
 use mln_gfx::shaders::terrain_ubo::TerrainDrawableUBO;
 use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
 use mln_util::clip_depth::ClipDepthRange;
 use mln_util::logging::{Event, Log};
 
+use super::cover::dem_bucket;
+use super::dem_textures::DemTextures;
 use super::mesh::{TerrainMesh, TerrainVertex};
-use super::{Drapes, TerrainCover};
+use super::{Drapes, Surface, TerrainCover};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::frame_projection::zero_to_one_clip_z;
 use crate::gfx::context::Context;
@@ -31,11 +34,14 @@ use crate::gfx::vertices::SharedVertices;
 use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDraws, TileMap, finish_tiles, tile_objects};
 use crate::layers::cast_matrix;
 use crate::paint_parameters::PaintParameters;
+use crate::tile::source_tiles::SourceTiles;
 
 const TERRAIN_SHADER_NAME: &str = "TerrainShader";
 
 /// The grid, in the context's stores.
 struct SharedMesh {
+    /// Whether it has skirts.
+    skirts: bool,
     vertices: SharedVertices,
     vertex_count: usize,
     indexes: SharedIndexes,
@@ -55,18 +61,23 @@ pub(crate) struct TerrainDraws {
     draw_list: DrawList<TerrainDrawableUBO>,
     shader: Option<ShaderProgramPtr>,
     mesh: Option<SharedMesh>,
+    /// The textures of the DEM tiles the tiles read.
+    dem_textures: DemTextures,
     /// Whether the backend has no terrain shader, which draws nothing then.
     unsupported: bool,
 }
 
 impl TerrainDraws {
-    /// Makes the frame's draws of `cover`'s tiles, or drops the draws and
-    /// what they share for `None`, a frame without terrain.
+    /// Makes the frame's draws of `cover`'s tiles, which read their DEM from
+    /// the tiles of `dem` and draw as `surface` says, or drops the draws
+    /// and what they share for `None`, a frame without terrain.
     pub(crate) fn update(
         &mut self,
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
         cover: Option<&TerrainCover>,
+        dem: Option<&SourceTiles>,
+        surface: Surface,
         drapes: &Drapes,
     ) {
         let shader = cover.and_then(|_| self.shader(gpu, parameters));
@@ -74,13 +85,20 @@ impl TerrainDraws {
             self.tiles.clear_tiles();
             self.frame.clear();
             self.mesh = None;
+            self.dem_textures = DemTextures::default();
             return;
         };
 
         let context = &mut *parameters.context;
+        if self.mesh.as_ref().is_some_and(|mesh| mesh.skirts != surface.skirts) {
+            // The draws hold the other grid.
+            self.tiles.clear_tiles();
+            self.mesh = None;
+        }
         let mesh = self.mesh.get_or_insert_with(|| {
-            let TerrainMesh { vertices, indices } = TerrainMesh::new(true);
+            let TerrainMesh { vertices, indices } = TerrainMesh::new(surface.skirts);
             SharedMesh {
+                skirts: surface.skirts,
                 vertex_count: vertices.len(),
                 vertices: context.add_vertices(vertices),
                 index_count: indices.len(),
@@ -98,6 +116,18 @@ impl TerrainDraws {
                 continue;
             };
             let draw = entry.value.get_or_insert_with(|| KeptDraw::new(mesh_objects(&shader, mesh)));
+            let bound = tile.dem.and_then(|(id, coords)| Some((dem_bucket(dem?.tile(&id)?)?, coords)));
+            let (dem_texture, dem_coords) = match bound {
+                Some((bucket, coords)) => {
+                    let dim = bucket.dem_data().dim as f32;
+                    (
+                        self.dem_textures.texture(context, bucket),
+                        [coords.scale, coords.offset[0], coords.offset[1], dim],
+                    )
+                }
+                None => (self.dem_textures.flat(context), [0.0; 4]),
+            };
+            draw.objects.set_texture(ID_TERRAIN_DEM_TEXTURE, Some(&dem_texture));
             draw.objects.set_texture(ID_TERRAIN_DRAPE_TEXTURE, drapes.texture(index, &tile.id));
             let mut matrix = *proj_matrix * view.tile_matrix(&tile.id.to_unwrapped());
             if remap_clip_z {
@@ -108,10 +138,12 @@ impl TerrainDraws {
                 depth: DrawDepth::Volume { mask: DepthMaskType::ReadWrite },
                 ..draw.frame_draw(Some(tile.id))
             };
-            self.draw_list.push(frame_draw, TerrainDrawableUBO { matrix: cast_matrix(&matrix), dem_coords: [0.0; 4] });
+            self.draw_list.push(frame_draw, TerrainDrawableUBO { matrix: cast_matrix(&matrix), dem_coords });
         }
+        self.dem_textures.finish_frame();
         finish_tiles(&mut self.draw_list, &mut self.frame, &mut self.tiles, gpu, context, |writer| {
             writer.storage(ID_TERRAIN_DRAWABLE_UBO, |drawable| *drawable);
+            writer.uniform(ID_TERRAIN_PROPS_UBO, &surface.props);
         });
     }
 

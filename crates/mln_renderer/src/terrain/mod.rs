@@ -2,6 +2,7 @@
 //! from a raster-dem source.
 
 mod cover;
+mod dem_textures;
 mod drapes;
 mod draws;
 mod mesh;
@@ -11,10 +12,14 @@ pub(crate) use cover::terrain_tile_size;
 pub(crate) use cover::{ElevationRanges, TerrainCover};
 pub(crate) use drapes::Drapes;
 use mln_gfx::gpu::Gpu;
-use mln_map_types::MapMode;
+use mln_gfx::shaders::terrain_ubo::TerrainPropsUBO;
+use mln_map_types::{MapMode, TerrainSkirtLength};
 use mln_style::source_type::SourceData;
 use mln_style::sources::RasterDemSourceType;
+use mln_util::constants;
+use mln_util::dem::DemUnpack;
 use mln_util::logging::{Event, Log};
+use mln_util::tileset::RasterEncoding;
 
 use crate::gfx::context::Context;
 use crate::layer_drawing::ChangedBuckets;
@@ -23,11 +28,49 @@ use crate::terrain::draws::TerrainDraws;
 use crate::tile::source_tiles::SourceTiles;
 use crate::update_parameters::UpdateParameters;
 
+/// How far the skirts of terrain tiles reach down at `zoom`, in meters
+/// (GL JS's `getSkirtLength`, with the earth's radius of mln-rs); `None`
+/// for tiles without skirts.
+fn skirt_length(length: TerrainSkirtLength, zoom: f64) -> Option<f64> {
+    match length {
+        TerrainSkirtLength::Auto => Some(constants::M2PI * constants::EARTH_RADIUS_M / zoom.max(0.0).exp2() / 5.0),
+        TerrainSkirtLength::None => None,
+    }
+}
+
+/// How the terrain's surface draws in a frame: how its DEM decodes, its
+/// exaggeration and its skirts.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct Surface {
+    /// The terrain's uniform block.
+    pub(crate) props: TerrainPropsUBO,
+    /// Whether the tiles have skirts.
+    pub(crate) skirts: bool,
+}
+
+impl Surface {
+    /// The surface of a DEM of `encoding`, raised by `exaggeration`, with
+    /// skirts of `skirt_length` meters or none.
+    fn new(encoding: RasterEncoding, exaggeration: f32, skirt_length: Option<f64>) -> Surface {
+        let DemUnpack { weights: [r, g, b], base, scale } = DemUnpack::of(encoding);
+        let props = TerrainPropsUBO {
+            unpack: [r, g, b, base],
+            unpack_scale: scale,
+            exaggeration,
+            skirt_length: skirt_length.unwrap_or(0.0) as f32,
+            pad: 0.0,
+        };
+        Surface { props, skirts: skirt_length.is_some() }
+    }
+}
+
 /// The terrain of the frames the renderer draws: whether it draws, the
 /// tiles that cover the view, their drapes and their draws.
 #[derive(Default)]
 pub(crate) struct RenderTerrain {
     cover: Option<TerrainCover>,
+    /// How the surface of the cover draws.
+    surface: Surface,
     drapes: Drapes,
     draws: TerrainDraws,
     /// Whether it has logged that terrain doesn't draw on the globe.
@@ -66,6 +109,10 @@ impl RenderTerrain {
             return None;
         }
 
+        let encoding = tileset.raster_encoding.unwrap_or(RasterEncoding::Mapbox);
+        let skirt_length = skirt_length(parameters.terrain_skirt_length, parameters.view.zoom());
+        self.surface = Surface::new(encoding, terrain.exaggeration, skirt_length);
+
         let dem_zooms = tileset.zoom_range;
         let ranges = ElevationRanges::new(dem_zooms, dem(&terrain.source), f64::from(terrain.exaggeration));
         let tile_size = data.options.tile_size;
@@ -82,6 +129,12 @@ impl RenderTerrain {
             let tiles = dem(&cover.source_id);
             cover.bind(tiles);
         }
+    }
+
+    /// How the surface of the last update's cover draws.
+    #[cfg(test)]
+    pub(crate) fn surface(&self) -> Surface {
+        self.surface
     }
 
     /// The cover of the last update, while terrain draws: [`update`]'s.
@@ -111,12 +164,20 @@ impl RenderTerrain {
         Some(&mut self.drapes)
     }
 
-    /// Makes the draws of the frame of the last update, which sample the
-    /// drapes, or drops them for a frame that doesn't draw terrain (`draws`
-    /// false).
-    pub(crate) fn update_draws(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, draws: bool) {
+    /// Makes the draws of the frame of the last update, which read the DEM
+    /// tiles of the terrain's source that `dem` finds by its id and sample
+    /// the drapes, or drops them for a frame that doesn't draw terrain
+    /// (`draws` false).
+    pub(crate) fn update_draws<'a>(
+        &mut self,
+        gpu: &mut dyn Gpu,
+        parameters: &mut PaintParameters<'_>,
+        draws: bool,
+        dem: impl FnOnce(&str) -> Option<&'a SourceTiles>,
+    ) {
         let cover = self.cover.as_ref().filter(|_| draws);
-        self.draws.update(gpu, parameters, cover, &self.drapes);
+        let dem = cover.and_then(|cover| dem(&cover.source_id));
+        self.draws.update(gpu, parameters, cover, dem, self.surface, &self.drapes);
     }
 
     /// Records that the buckets in `changed` changed, for the drapes' draws

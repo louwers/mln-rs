@@ -127,6 +127,36 @@ fn terrain_draws_from_a_raster_dem_source_whose_tileset_has_loaded() {
     assert_eq!(None, terrain_zooms(style_with(ready), &globe, MapMode::Static));
 }
 
+#[test]
+fn the_surface_decodes_the_dem_as_its_tileset_says_and_hangs_skirts_as_the_map_says() {
+    let transform = transform();
+    let tileset = PartialTileset { raster_encoding: Some(RasterEncoding::Terrarium), ..tiles() };
+    let mut style = style_with(crate::tests::ready(raster_dem_source("dem", None, tileset, 256)));
+    style.apply(Edit::SetTerrain(Some(Terrain { source: "dem".to_owned(), exaggeration: 1.5 }))).unwrap();
+    let surface = |skirts| {
+        let mut parameters = update_parameters(style.clone(), &transform, MapMode::Static);
+        parameters.terrain_skirt_length = skirts;
+        let mut terrain = RenderTerrain::default();
+        terrain.update(&parameters, |_| None).expect("terrain draws");
+        terrain.surface()
+    };
+
+    let auto = surface(TerrainSkirtLength::Auto);
+    assert!(auto.skirts);
+    assert_eq!([65536.0, 256.0, 1.0, -8_388_608.0], auto.props.unpack);
+    assert_eq!(1.0 / 256.0, auto.props.unpack_scale);
+    assert_eq!(1.5, auto.props.exaggeration);
+    // A fifth of a tile's width at the map's zoom, 10.5, in meters at the
+    // equator.
+    let tile_width = 2.0 * std::f64::consts::PI * 6_378_137.0 / 2f64.powf(10.5);
+    assert_eq!((tile_width / 5.0) as f32, auto.props.skirt_length);
+
+    let none = surface(TerrainSkirtLength::None);
+    assert!(!none.skirts, "no skirts on the mesh");
+    assert_eq!(0.0, none.props.skirt_length);
+    assert_eq!(auto.props.unpack, none.props.unpack);
+}
+
 /// A file source whose DEM tile requests wait until the test answers them.
 #[derive(Default)]
 struct DemTiles {
