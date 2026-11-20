@@ -108,6 +108,7 @@ pub fn layers_by_id<T: LayerType>(group: &[Arc<EvaluatedLayer<T>>]) -> VecMap<St
 /// What a tile's layout reads, and where it records the glyphs and images
 /// its layers need.
 pub struct LayoutParameters<'a> {
+    /// The tile the layout lays out, and how.
     pub bucket_parameters: &'a BucketParameters,
     /// The style's font faces, and its fallback faces after them.
     pub font_faces: Option<Arc<mln_text::glyph::FontFaces>>,
