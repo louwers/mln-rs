@@ -49,8 +49,9 @@ impl Style {
     /// Fails with [`ErrorKind::NotFound`](mln_util::ErrorKind) if the style has no layer named
     /// `before_layer_id` or no source with the ID that the layer uses, with
     /// `AlreadyExists` if the style has a layer with the new layer's ID, and
-    /// with `InvalidArgument` if the layer's source can't feed a layer of its
-    /// type. The style drops `layer` when it fails.
+    /// with `InvalidArgument` if the layer's type isn't the one that the
+    /// style's registry has by its name, or if the layer's source can't feed
+    /// a layer of its type. The style drops `layer` when it fails.
     pub fn add_layer(&mut self, layer: Layer, before_layer_id: Option<&str>) -> Result<(), Error> {
         self.check_before(before_layer_id)?;
         let id = layer.get_id();
@@ -58,6 +59,13 @@ impl Style {
             return Err(Error::already_exists(format!("layer {} already exists", quote(id))));
         }
         let type_info = layer.info();
+        if !self.registry().layer_type(type_info.name).is_some_and(|registered| registered.is_type_of(&**layer.style())) {
+            return Err(Error::invalid_argument(format!(
+                "layer {} is of a layer type {} that the style's registry doesn't have",
+                quote(id),
+                quote(type_info.name)
+            )));
+        }
         if type_info.source != SourceKind::None {
             let source_id = layer.get_source_id();
             let Some(source) = self.get_source(source_id) else {

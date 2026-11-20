@@ -2,10 +2,16 @@
 //! style ABI tests (`tests/native/abi/style`), which reach them through the C
 //! layer.
 
+use std::sync::Arc;
+
 use mln_util::{Error, ErrorKind};
 
 use crate::StyleRegistry;
+use crate::layer::Layer;
+use crate::layer_type::{LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};
+use crate::property_table::{PropertyTable, PropertyVisitor};
 use crate::style::Style;
+use crate::tests::fixture_layer::Plain;
 
 const EMPTY_GEOJSON_SOURCE: &str = r#"{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}"#;
 const DEM_SOURCE: &str = r#"{"type":"raster-dem","tiles":["https://example.com/dem/{z}/{x}/{y}.png"],"tileSize":256}"#;
@@ -114,6 +120,47 @@ fn a_layer_requires_a_source_that_supports_its_type() {
         ErrorKind::InvalidArgument,
         r#"source "dem" does not support symbol layer "dots""#,
     );
+    assert_eq!(style.get_layers().len(), 1);
+}
+
+/// A layer type outside the tests' registry, named as one that the registry
+/// has (`plain`) if `PLAIN`, and `unregistered` otherwise.
+struct Unregistered<const PLAIN: bool>;
+
+impl<const PLAIN: bool> StyleLayerType for Unregistered<PLAIN> {
+    const INFO: LayerTypeInfo =
+        LayerTypeInfo { name: if PLAIN { "plain" } else { "unregistered" }, source: SourceKind::None, from_json: true };
+    const PROPERTIES: &'static PropertyTable = &PropertyTable::new(&[], &[]);
+
+    type LayoutProperties = NoProperties;
+    type PaintProperties = NoProperties;
+    type Extra = ();
+
+    fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(_slot: usize, _visitor: V) -> Option<V::Output> {
+        None
+    }
+}
+
+// A layer built outside the style's registry is added only if its type is
+// the one the registry has by its name.
+#[test]
+fn a_layer_of_a_type_the_registry_lacks_is_an_invalid_argument() {
+    fn layer<T: StyleLayerType>(style: &Style, id: &str) -> Layer {
+        let style_data = Arc::new(LayerStyle::<T>::new(id.to_owned(), String::new()));
+        Layer::from_style(style_data, Arc::clone(style.registry().functions()))
+    }
+    let mut style = loaded_style();
+    assert_fails(
+        style.add_layer(layer::<Unregistered<false>>(&style, "stray"), None),
+        ErrorKind::InvalidArgument,
+        r#"layer "stray" is of a layer type "unregistered" that the style's registry doesn't have"#,
+    );
+    assert_fails(
+        style.add_layer(layer::<Unregistered<true>>(&style, "impostor"), None),
+        ErrorKind::InvalidArgument,
+        r#"layer "impostor" is of a layer type "plain" that"#,
+    );
+    style.add_layer(layer::<Plain>(&style, "paper"), None).unwrap();
     assert_eq!(style.get_layers().len(), 1);
 }
 
