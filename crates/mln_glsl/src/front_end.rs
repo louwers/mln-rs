@@ -59,7 +59,7 @@ pub struct Module {
 }
 
 impl Module {
-    /// Parses and validates GLSL, such as a `ShaderSource::compose`d stage.
+    /// Parses and validates GLSL, such as a [`compose`](crate::compose)d stage.
     pub fn parse(stage: Stage, source: &str) -> Result<Module, String> {
         let module = parse(stage, source)?;
         // Not the uniformity of control flow: it is WGSL's rule for

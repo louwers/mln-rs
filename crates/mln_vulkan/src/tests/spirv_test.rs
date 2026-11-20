@@ -1,5 +1,5 @@
 use mln_glsl::variants::variants;
-use mln_glsl::{BUILT_INS, Stage};
+use mln_glsl::{BUILT_INS, Stage, compose};
 
 use crate::shaders::compile_program;
 
@@ -17,7 +17,7 @@ fn every_program_compiles_to_spirv() {
         for variant in variants(program, true) {
             for stage in [Stage::Vertex, Stage::Fragment] {
                 let at = format!("{} ({}, {stage:?})", program.name, variant.name);
-                match compile_program(stage, &source.compose(stage, &variant.defines)) {
+                match compile_program(stage, &compose(source, stage, &variant.defines)) {
                     Ok(compiled_stage) if compiled_stage.spirv.first() == Some(&SPIRV_MAGIC) => compiled += 1,
                     Ok(_) => failures.push(format!("{at}: no SPIR-V")),
                     Err(error) => failures.push(format!("{at}:\n{error}")),

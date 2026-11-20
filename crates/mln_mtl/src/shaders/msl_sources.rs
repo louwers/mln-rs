@@ -1,7 +1,7 @@
 //! The MSL of the built-in shaders, which started as MapLibre Native's, and
 //! reads the vertices and UBOs the renderer makes.
 
-use super::shader_source::MslShaderSource;
+use mln_gfx::shaders::source::msl::Msl;
 
 /// The start of every shader's source.
 pub(crate) const PRELUDE: &str = r#"
@@ -279,7 +279,7 @@ enum {
 
 "#;
 
-pub(crate) const ATMOSPHERE_SHADER: MslShaderSource = MslShaderSource {
+pub(crate) const ATMOSPHERE_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r"
@@ -435,7 +435,7 @@ half4 fragment fragmentMain(
 ",
 };
 
-pub(crate) const BACKGROUND_PATTERN_SHADER: MslShaderSource = MslShaderSource {
+pub(crate) const BACKGROUND_PATTERN_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -570,7 +570,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-pub(crate) const BACKGROUND_SHADER: MslShaderSource = MslShaderSource {
+pub(crate) const BACKGROUND_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -671,7 +671,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-pub(crate) const CIRCLE_SHADER: MslShaderSource = MslShaderSource {
+pub(crate) const CIRCLE_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -935,7 +935,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-pub(crate) const CLIPPING_MASK_PROGRAM: MslShaderSource = MslShaderSource {
+pub(crate) const CLIPPING_MASK_PROGRAM: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r"
@@ -971,7 +971,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 ",
 };
 
-pub(crate) const COLLISION_BOX_SHADER: MslShaderSource = MslShaderSource {
+pub(crate) const COLLISION_BOX_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -1076,7 +1076,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 ",
 };
 
-pub(crate) const COLLISION_CIRCLE_SHADER: MslShaderSource = MslShaderSource {
+pub(crate) const COLLISION_CIRCLE_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -1200,7 +1200,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-pub(crate) const COLOR_RELIEF_SHADER: MslShaderSource = MslShaderSource {
+pub(crate) const COLOR_RELIEF_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -1473,7 +1473,7 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]]) {
     };
 }
 
-pub(crate) const FILL_EXTRUSION_INSTANCED_SHADER: MslShaderSource = MslShaderSource {
+pub(crate) const FILL_EXTRUSION_INSTANCED_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -1567,7 +1567,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     ),
 };
 
-pub(crate) const FILL_EXTRUSION_PULLED_SHADER: MslShaderSource = MslShaderSource {
+pub(crate) const FILL_EXTRUSION_PULLED_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: FILL_EXTRUSION_INSTANCED_SHADER.prelude,
@@ -1648,7 +1648,7 @@ FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]],
     ),
 };
 
-pub(crate) const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: MslShaderSource = MslShaderSource {
+pub(crate) const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -1920,7 +1920,7 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-pub(crate) const FILL_EXTRUSION_PATTERN_SHADER: MslShaderSource = MslShaderSource {
+pub(crate) const FILL_EXTRUSION_PATTERN_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -2163,7 +2163,7 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-pub(crate) const FILL_EXTRUSION_SHADER: MslShaderSource = MslShaderSource {
+pub(crate) const FILL_EXTRUSION_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -2394,7 +2394,7 @@ OutlineCorner outline_corner(float4 start, float4 end, short2 corner, float2 wor
 }
 
 /// The pattern fill outline, drawn as an instance of a quad per segment.
-pub(crate) const FILL_OUTLINE_PATTERN_INSTANCED_SHADER: MslShaderSource = MslShaderSource {
+pub(crate) const FILL_OUTLINE_PATTERN_INSTANCED_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -2762,7 +2762,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     };
 }
 
-pub(crate) const FILL_OUTLINE_INSTANCED_SHADER: MslShaderSource = MslShaderSource {
+pub(crate) const FILL_OUTLINE_INSTANCED_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -2937,7 +2937,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     ),
 };
 
-pub(crate) const FILL_OUTLINE_PULLED_SHADER: MslShaderSource = MslShaderSource {
+pub(crate) const FILL_OUTLINE_PULLED_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: FILL_OUTLINE_INSTANCED_SHADER.prelude,
@@ -2995,7 +2995,7 @@ FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]],
     ),
 };
 
-pub(crate) const FILL_PATTERN_SHADER: MslShaderSource = MslShaderSource {
+pub(crate) const FILL_PATTERN_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -3286,7 +3286,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-pub(crate) const FILL_SHADER: MslShaderSource = MslShaderSource {
+pub(crate) const FILL_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -3480,7 +3480,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-pub(crate) const GLOBE_DEPTH_SHADER: MslShaderSource = MslShaderSource {
+pub(crate) const GLOBE_DEPTH_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r"
@@ -3514,7 +3514,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 ",
 };
 
-pub(crate) const HEATMAP_SHADER: MslShaderSource = MslShaderSource {
+pub(crate) const HEATMAP_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -3660,7 +3660,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 "#,
 };
 
-pub(crate) const HEATMAP_TEXTURE_SHADER: MslShaderSource = MslShaderSource {
+pub(crate) const HEATMAP_TEXTURE_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -3726,7 +3726,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 /// Port-only: a layer's texture, the size of the frame, composited onto it
 /// texel for texel, with its opacity and, for the blend modes that no blend
 /// function expresses, against a copy of the frame (`backdrop`).
-pub(crate) const LAYER_COMPOSITE_SHADER: MslShaderSource = MslShaderSource {
+pub(crate) const LAYER_COMPOSITE_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -3823,7 +3823,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-pub(crate) const HILLSHADE_PREPARE_SHADER: MslShaderSource = MslShaderSource {
+pub(crate) const HILLSHADE_PREPARE_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -3946,7 +3946,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-pub(crate) const HILLSHADE_SHADER: MslShaderSource = MslShaderSource {
+pub(crate) const HILLSHADE_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -4191,7 +4191,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-pub(crate) const LINE_GRADIENT_SDF_SHADER: MslShaderSource = MslShaderSource {
+pub(crate) const LINE_GRADIENT_SDF_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -4577,7 +4577,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-pub(crate) const LINE_GRADIENT_SHADER: MslShaderSource = MslShaderSource {
+pub(crate) const LINE_GRADIENT_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -4900,7 +4900,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-pub(crate) const LINE_PATTERN_SHADER: MslShaderSource = MslShaderSource {
+pub(crate) const LINE_PATTERN_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -5311,7 +5311,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-pub(crate) const LINE_SDF_SHADER: MslShaderSource = MslShaderSource {
+pub(crate) const LINE_SDF_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -5705,7 +5705,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-pub(crate) const LINE_SHADER: MslShaderSource = MslShaderSource {
+pub(crate) const LINE_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -6033,7 +6033,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-pub(crate) const RASTER_SHADER: MslShaderSource = MslShaderSource {
+pub(crate) const RASTER_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -6152,7 +6152,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-pub(crate) const SKY_SHADER: MslShaderSource = MslShaderSource {
+pub(crate) const SKY_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r"
@@ -6223,7 +6223,7 @@ half4 fragment fragmentMain(SkyFragmentStage in [[stage_in]],
 ",
 };
 
-pub(crate) const SYMBOL_ICON_SHADER: MslShaderSource = MslShaderSource {
+pub(crate) const SYMBOL_ICON_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -6486,7 +6486,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-pub(crate) const SYMBOL_SDF_SHADER: MslShaderSource = MslShaderSource {
+pub(crate) const SYMBOL_SDF_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"
@@ -6827,7 +6827,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-pub(crate) const SYMBOL_TEXT_AND_ICON_SHADER: MslShaderSource = MslShaderSource {
+pub(crate) const SYMBOL_TEXT_AND_ICON_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: r#"

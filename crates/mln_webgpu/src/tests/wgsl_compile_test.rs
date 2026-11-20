@@ -7,14 +7,15 @@ use std::collections::BTreeSet;
 
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
+use mln_gfx::shaders::source::wgsl;
 
 use crate::Device;
 use crate::index_table::IndexTable;
 use crate::shaders::shader_program::compile;
-use crate::shaders::shader_source::{BUILT_INS, ShaderSource, prelude};
+use crate::shaders::shader_source::{BUILT_INS, prelude};
 
 /// The names after the `HAS_UNIFORM_u_` that `source`'s WGSL tests.
-fn uniforms(source: &ShaderSource) -> BTreeSet<String> {
+fn uniforms(source: &wgsl::Source) -> BTreeSet<String> {
     const PREFIX: &str = "HAS_UNIFORM_u_";
     let wgsl = source.wgsl;
     let mut names = BTreeSet::new();

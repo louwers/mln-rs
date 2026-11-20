@@ -12,10 +12,11 @@ use std::collections::BTreeSet;
 use mln_gfx::RendererBackend as _;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
+use mln_gfx::shaders::source::glsl_es;
 use mln_util::hash::HashSet;
 
 use crate::shaders::glsl_sources::PRELUDE;
-use crate::shaders::shader_source::{BUILT_INS, ShaderSource};
+use crate::shaders::shader_source::BUILT_INS;
 use crate::{Api, Device, DeviceOptions, RendererBackend};
 
 /// A backend on a device of `api`, or none where there is no EGL to make a
@@ -41,7 +42,7 @@ fn headless_backend(api: Api) -> Option<RendererBackend> {
 }
 
 /// The names after `HAS_UNIFORM_u_` in a shader's GLSL.
-fn uniforms(source: &ShaderSource) -> BTreeSet<String> {
+fn uniforms(source: &glsl_es::Source) -> BTreeSet<String> {
     const PREFIX: &str = "HAS_UNIFORM_u_";
     let mut names = BTreeSet::new();
     for glsl in [source.glsl.vertex, source.glsl.fragment] {

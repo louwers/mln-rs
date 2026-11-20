@@ -35,6 +35,7 @@ use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::raster_layer_ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
 use mln_gfx::shaders::shader_defines::*;
 use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
+use mln_gfx::shaders::source::glsl;
 use mln_gfx::shaders::symbol_layer_ubo::{
     CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
 };
@@ -48,9 +49,9 @@ use crate::layout::{
     image_texture_binding, layer_storage_binding, layer_uniform_binding,
 };
 use crate::variants::variants;
-use crate::{AttributeInfo, BUILT_INS, ShaderSource, Stage, sources};
+use crate::{BUILT_INS, Stage, compose, sources};
 
-fn programs() -> impl Iterator<Item = (&'static Program, &'static ShaderSource)> {
+fn programs() -> impl Iterator<Item = (&'static Program, &'static glsl::Source)> {
     BUILT_INS.iter().copied()
 }
 
@@ -95,8 +96,8 @@ fn every_layer_program_shows_the_overdraw_inspector() {
 }
 
 /// The module of a stage of `source` with `defines`, unvalidated.
-fn module(program: &Program, source: &ShaderSource, stage: Stage, defines: &str) -> Module {
-    parse(stage, &source.compose(stage, defines))
+fn module(program: &Program, source: &glsl::Source, stage: Stage, defines: &str) -> Module {
+    parse(stage, &compose(source, stage, defines))
         .unwrap_or_else(|error| panic!("{} ({stage:?}):\n{error}", program.name))
 }
 
@@ -110,7 +111,7 @@ fn every_stage_validates() {
     for (program, source) in programs() {
         for variant in variants(program, true) {
             for stage in STAGES {
-                match crate::Module::parse(stage, &source.compose(stage, &variant.defines)) {
+                match crate::Module::parse(stage, &compose(source, stage, &variant.defines)) {
                     Ok(_) => validated += 1,
                     Err(error) => failures.push(format!("{} ({}, {stage:?}):\n{error}", program.name, variant.name)),
                 }
@@ -544,7 +545,7 @@ fn stage_outputs(module: &Module) -> BTreeMap<u32, Varying> {
 }
 
 /// The vertex and instance attributes of a table.
-fn all_attributes(source: &ShaderSource) -> impl Iterator<Item = &AttributeInfo> {
+fn all_attributes(source: &glsl::Source) -> impl Iterator<Item = &glsl::Attribute> {
     source.attributes.iter().chain(source.instance_attributes)
 }
 

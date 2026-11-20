@@ -39,72 +39,29 @@ use mln_gfx::shaders::shader_defines::{
     ID_SYMBOL_OPACITY_ATTRIBUTE, ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE, ID_SYMBOL_POS_OFFSET_ATTRIBUTE,
     ID_SYMBOL_PROJECTED_POS_ATTRIBUTE, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE,
 };
+use mln_gfx::shaders::source::glsl::{Attribute, Source, Texture};
 
 use crate::front_end::Stage;
 use crate::sources;
 
-/// A program's GLSL.
-///
-/// A stage compiles from the stage's prelude (`sources::PRELUDE_VERTEX` or
-/// `PRELUDE_FRAGMENT`), `prelude` and the stage's source
-/// (`ShaderSource::compose`).
-#[derive(Debug)]
-pub(crate) struct GlslShaderSource {
-    /// The shader's own prelude constant (its buffer bindings), "" if none.
-    pub(crate) prelude: &'static str,
-    pub(crate) vertex: &'static str,
-    pub(crate) fragment: &'static str,
+/// The source of `stage` of `source` for naga's GLSL front end, with
+/// `defines` (`#define` lines): the version, the defines, the stage's
+/// prelude, and the program's own prelude and stage.
+#[must_use]
+pub fn compose(source: &Source, stage: Stage, defines: &str) -> String {
+    let glsl = match stage {
+        Stage::Vertex => source.glsl.vertex,
+        Stage::Fragment => source.glsl.fragment,
+    };
+    crate::front_end::compose(stage, defines, source.glsl.prelude, glsl)
 }
 
-/// The vertex or instance attribute `id` is the input at
-/// `layout(location = index)`. Every attribute, instanced or not, is a
-/// vertex input.
-#[derive(Clone, Copy, Debug)]
-pub struct AttributeInfo {
-    pub index: usize,
-    /// The format of the input.
-    pub data_type: AttributeDataType,
-    pub id: usize,
+const fn attr(index: usize, data_type: AttributeDataType, id: usize) -> Attribute {
+    Attribute { index, data_type, id }
 }
 
-/// Texture `id` binds in the image set at
-/// `layout::image_texture_binding(index)`, and its sampler at
-/// `layout::image_sampler_binding(index)`.
-#[derive(Clone, Copy, Debug)]
-pub struct TextureInfo {
-    pub index: usize,
-    pub id: usize,
-}
-
-/// A program's GLSL, and the tables of its attributes and textures.
-#[derive(Debug)]
-pub struct ShaderSource {
-    pub(crate) glsl: &'static GlslShaderSource,
-    pub attributes: &'static [AttributeInfo],
-    pub instance_attributes: &'static [AttributeInfo],
-    pub textures: &'static [TextureInfo],
-}
-
-impl ShaderSource {
-    /// The source of `stage` for naga's GLSL front end, with `defines`
-    /// (`#define` lines): the version, the defines, the stage's prelude, and
-    /// the program's own prelude and stage.
-    #[must_use]
-    pub fn compose(&self, stage: Stage, defines: &str) -> String {
-        let source = match stage {
-            Stage::Vertex => self.glsl.vertex,
-            Stage::Fragment => self.glsl.fragment,
-        };
-        crate::front_end::compose(stage, defines, self.glsl.prelude, source)
-    }
-}
-
-const fn attr(index: usize, data_type: AttributeDataType, id: usize) -> AttributeInfo {
-    AttributeInfo { index, data_type, id }
-}
-
-const fn tex(index: usize, id: usize) -> TextureInfo {
-    TextureInfo { index, id }
+const fn tex(index: usize, id: usize) -> Texture {
+    Texture { index, id }
 }
 
 use AttributeDataType::{Float, Float2, Float3, Float4, Short2, Short4, UByte4, UShort2, UShort4};
@@ -114,7 +71,7 @@ macro_rules! shader_source {
         shader_source!($name, $attrs, &[], $textures);
     };
     ($name:ident, $attrs:expr, $instance_attrs:expr, $textures:expr) => {
-        static $name: ShaderSource = ShaderSource {
+        static $name: Source = Source {
             glsl: &sources::$name,
             attributes: $attrs,
             instance_attributes: $instance_attrs,
@@ -123,11 +80,11 @@ macro_rules! shader_source {
     };
 }
 
-const BACKGROUND_ATTRIBUTES: &[AttributeInfo] = &[attr(0, Short2, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE)];
+const BACKGROUND_ATTRIBUTES: &[Attribute] = &[attr(0, Short2, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE)];
 shader_source!(BACKGROUND_SHADER, BACKGROUND_ATTRIBUTES, &[]);
 shader_source!(BACKGROUND_PATTERN_SHADER, BACKGROUND_ATTRIBUTES, &[tex(0, ID_BACKGROUND_IMAGE_TEXTURE)]);
 
-const CIRCLE_ATTRIBUTES: &[AttributeInfo] = &[
+const CIRCLE_ATTRIBUTES: &[Attribute] = &[
     attr(0, Short2, ID_CIRCLE_POS_VERTEX_ATTRIBUTE),
     // Data driven
     attr(1, Float4, ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE),
@@ -140,10 +97,10 @@ const CIRCLE_ATTRIBUTES: &[AttributeInfo] = &[
 ];
 shader_source!(CIRCLE_SHADER, CIRCLE_ATTRIBUTES, &[]);
 
-const CLIPPING_MASK_ATTRIBUTES: &[AttributeInfo] = &[attr(0, Short2, ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE)];
+const CLIPPING_MASK_ATTRIBUTES: &[Attribute] = &[attr(0, Short2, ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE)];
 shader_source!(CLIPPING_MASK_PROGRAM, CLIPPING_MASK_ATTRIBUTES, &[]);
 
-const COLLISION_BOX_ATTRIBUTES: &[AttributeInfo] = &[
+const COLLISION_BOX_ATTRIBUTES: &[Attribute] = &[
     attr(0, Short2, ID_COLLISION_POS_VERTEX_ATTRIBUTE),
     attr(1, Short2, ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE),
     attr(2, Short2, ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE),
@@ -153,7 +110,7 @@ const COLLISION_BOX_ATTRIBUTES: &[AttributeInfo] = &[
     // Layout
     attr(5, Float, ID_COLLISION_HEIGHT_OFFSET_VERTEX_ATTRIBUTE),
 ];
-const COLLISION_CIRCLE_ATTRIBUTES: &[AttributeInfo] = &[
+const COLLISION_CIRCLE_ATTRIBUTES: &[Attribute] = &[
     attr(0, Short2, ID_COLLISION_POS_VERTEX_ATTRIBUTE),
     attr(1, Short2, ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE),
     attr(2, Short2, ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE),
@@ -165,30 +122,30 @@ shader_source!(COLLISION_CIRCLE_SHADER, COLLISION_CIRCLE_ATTRIBUTES, &[]);
 
 // The color relief GLSL works the texture position out from the position,
 // and has no input for it.
-const COLOR_RELIEF_ATTRIBUTES: &[AttributeInfo] = &[
+const COLOR_RELIEF_ATTRIBUTES: &[Attribute] = &[
     attr(0, Short2, ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE),
     attr(1, Short2, ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE),
 ];
-const COLOR_RELIEF_TEXTURES: &[TextureInfo] = &[
+const COLOR_RELIEF_TEXTURES: &[Texture] = &[
     tex(0, ID_COLOR_RELIEF_IMAGE_TEXTURE),
     tex(1, ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE),
     tex(2, ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE),
 ];
 shader_source!(COLOR_RELIEF_SHADER, COLOR_RELIEF_ATTRIBUTES, COLOR_RELIEF_TEXTURES);
 
-const FILL_ATTRIBUTES: &[AttributeInfo] = &[
+const FILL_ATTRIBUTES: &[Attribute] = &[
     attr(0, Short2, ID_FILL_POS_VERTEX_ATTRIBUTE),
     // Data driven
     attr(1, Float4, ID_FILL_COLOR_VERTEX_ATTRIBUTE),
     attr(2, Float2, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
 ];
-const FILL_OUTLINE_ATTRIBUTES: &[AttributeInfo] = &[
+const FILL_OUTLINE_ATTRIBUTES: &[Attribute] = &[
     attr(0, Short2, ID_FILL_POS_VERTEX_ATTRIBUTE),
     // Data driven
     attr(1, Float4, ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
     attr(2, Float2, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
 ];
-const FILL_PATTERN_ATTRIBUTES: &[AttributeInfo] = &[
+const FILL_PATTERN_ATTRIBUTES: &[Attribute] = &[
     attr(0, Short2, ID_FILL_POS_VERTEX_ATTRIBUTE),
     // Data driven
     attr(1, Float4, ID_FILL_COLOR_VERTEX_ATTRIBUTE),
@@ -196,7 +153,7 @@ const FILL_PATTERN_ATTRIBUTES: &[AttributeInfo] = &[
     attr(3, UShort4, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
     attr(4, Float2, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
 ];
-const FILL_PATTERN_TEXTURES: &[TextureInfo] = &[tex(0, ID_FILL_IMAGE_TEXTURE)];
+const FILL_PATTERN_TEXTURES: &[Texture] = &[tex(0, ID_FILL_IMAGE_TEXTURE)];
 shader_source!(FILL_SHADER, FILL_ATTRIBUTES, &[]);
 shader_source!(FILL_OUTLINE_SHADER, FILL_OUTLINE_ATTRIBUTES, &[]);
 shader_source!(FILL_PATTERN_SHADER, FILL_PATTERN_ATTRIBUTES, FILL_PATTERN_TEXTURES);
@@ -204,8 +161,8 @@ shader_source!(FILL_OUTLINE_PATTERN_SHADER, FILL_PATTERN_ATTRIBUTES, FILL_PATTER
 
 // An instance of the instanced outline shaders is a segment of an outline:
 // a vertex and the end of its segment. The quad's corner is the vertex.
-const FILL_OUTLINE_INSTANCED_ATTRIBUTES: &[AttributeInfo] = &[attr(0, Short2, ID_FILL_POS_VERTEX_ATTRIBUTE)];
-const FILL_OUTLINE_INSTANCED_INSTANCE_ATTRIBUTES: &[AttributeInfo] = &[
+const FILL_OUTLINE_INSTANCED_ATTRIBUTES: &[Attribute] = &[attr(0, Short2, ID_FILL_POS_VERTEX_ATTRIBUTE)];
+const FILL_OUTLINE_INSTANCED_INSTANCE_ATTRIBUTES: &[Attribute] = &[
     // Data driven
     attr(1, Float4, ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
     attr(2, Float2, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
@@ -213,7 +170,7 @@ const FILL_OUTLINE_INSTANCED_INSTANCE_ATTRIBUTES: &[AttributeInfo] = &[
     attr(3, Short2, ID_FILL_OUTLINE_POS_ATTRIBUTE),
     attr(4, Short2, ID_FILL_OUTLINE_END_ATTRIBUTE),
 ];
-const FILL_OUTLINE_PATTERN_INSTANCED_INSTANCE_ATTRIBUTES: &[AttributeInfo] = &[
+const FILL_OUTLINE_PATTERN_INSTANCED_INSTANCE_ATTRIBUTES: &[Attribute] = &[
     // Data driven
     attr(1, Float4, ID_FILL_COLOR_VERTEX_ATTRIBUTE),
     attr(2, UShort4, ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
@@ -238,7 +195,7 @@ shader_source!(
 
 // An instance of the instanced fill extrusion shaders is an outline vertex
 // and the vertex after it.
-const FILL_EXTRUSION_ATTRIBUTES: &[AttributeInfo] = &[
+const FILL_EXTRUSION_ATTRIBUTES: &[Attribute] = &[
     attr(0, Short2, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
     attr(1, UShort2, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
     // Data driven
@@ -246,9 +203,8 @@ const FILL_EXTRUSION_ATTRIBUTES: &[AttributeInfo] = &[
     attr(3, Float2, ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
     attr(4, Float2, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
 ];
-const FILL_EXTRUSION_INSTANCED_ATTRIBUTES: &[AttributeInfo] =
-    &[attr(0, Short2, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE)];
-const FILL_EXTRUSION_INSTANCED_INSTANCE_ATTRIBUTES: &[AttributeInfo] = &[
+const FILL_EXTRUSION_INSTANCED_ATTRIBUTES: &[Attribute] = &[attr(0, Short2, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE)];
+const FILL_EXTRUSION_INSTANCED_INSTANCE_ATTRIBUTES: &[Attribute] = &[
     attr(1, Short2, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE),
     attr(2, UShort2, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
     // Data driven
@@ -259,7 +215,7 @@ const FILL_EXTRUSION_INSTANCED_INSTANCE_ATTRIBUTES: &[AttributeInfo] = &[
     attr(6, Short2, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE),
     attr(7, UShort2, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
 ];
-const FILL_EXTRUSION_PATTERN_ATTRIBUTES: &[AttributeInfo] = &[
+const FILL_EXTRUSION_PATTERN_ATTRIBUTES: &[Attribute] = &[
     attr(0, Short2, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
     attr(1, UShort2, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
     // Data driven
@@ -268,7 +224,7 @@ const FILL_EXTRUSION_PATTERN_ATTRIBUTES: &[AttributeInfo] = &[
     attr(4, UShort4, ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
     attr(5, UShort4, ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
 ];
-const FILL_EXTRUSION_PATTERN_INSTANCED_INSTANCE_ATTRIBUTES: &[AttributeInfo] = &[
+const FILL_EXTRUSION_PATTERN_INSTANCED_INSTANCE_ATTRIBUTES: &[Attribute] = &[
     attr(1, Short2, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE),
     attr(2, UShort2, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
     // Data driven
@@ -282,7 +238,7 @@ const FILL_EXTRUSION_PATTERN_INSTANCED_INSTANCE_ATTRIBUTES: &[AttributeInfo] = &
 ];
 // The wall shaders run the instanced ones' GLSL with every attribute per
 // vertex, for walls whose quads are in the vertex buffer.
-const FILL_EXTRUSION_WALL_ATTRIBUTES: &[AttributeInfo] = &[
+const FILL_EXTRUSION_WALL_ATTRIBUTES: &[Attribute] = &[
     attr(0, Short2, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
     attr(1, Short2, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE),
     attr(2, UShort2, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
@@ -294,7 +250,7 @@ const FILL_EXTRUSION_WALL_ATTRIBUTES: &[AttributeInfo] = &[
     attr(6, Short2, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE),
     attr(7, UShort2, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
 ];
-const FILL_EXTRUSION_PATTERN_WALL_ATTRIBUTES: &[AttributeInfo] = &[
+const FILL_EXTRUSION_PATTERN_WALL_ATTRIBUTES: &[Attribute] = &[
     attr(0, Short2, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
     attr(1, Short2, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE),
     attr(2, UShort2, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
@@ -307,7 +263,7 @@ const FILL_EXTRUSION_PATTERN_WALL_ATTRIBUTES: &[AttributeInfo] = &[
     attr(7, Short2, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE),
     attr(8, UShort2, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
 ];
-const FILL_EXTRUSION_PATTERN_TEXTURES: &[TextureInfo] = &[tex(0, ID_FILL_EXTRUSION_IMAGE_TEXTURE)];
+const FILL_EXTRUSION_PATTERN_TEXTURES: &[Texture] = &[tex(0, ID_FILL_EXTRUSION_IMAGE_TEXTURE)];
 shader_source!(FILL_EXTRUSION_SHADER, FILL_EXTRUSION_ATTRIBUTES, &[]);
 shader_source!(
     FILL_EXTRUSION_INSTANCED_SHADER,
@@ -324,13 +280,13 @@ shader_source!(
 );
 // The walls whose quads are in the vertex buffer run the instanced walls'
 // GLSL with every attribute per vertex.
-static FILL_EXTRUSION_WALL_SHADER: ShaderSource = ShaderSource {
+static FILL_EXTRUSION_WALL_SHADER: Source = Source {
     glsl: &sources::FILL_EXTRUSION_INSTANCED_SHADER,
     attributes: FILL_EXTRUSION_WALL_ATTRIBUTES,
     instance_attributes: &[],
     textures: &[],
 };
-static FILL_EXTRUSION_PATTERN_WALL_SHADER: ShaderSource = ShaderSource {
+static FILL_EXTRUSION_PATTERN_WALL_SHADER: Source = Source {
     glsl: &sources::FILL_EXTRUSION_PATTERN_INSTANCED_SHADER,
     attributes: FILL_EXTRUSION_PATTERN_WALL_ATTRIBUTES,
     instance_attributes: &[],
@@ -341,10 +297,10 @@ static FILL_EXTRUSION_PATTERN_WALL_SHADER: ShaderSource = ShaderSource {
 shader_source!(FILL_EXTRUSION_PULLED_SHADER, &[], &[]);
 shader_source!(FILL_OUTLINE_PULLED_SHADER, &[], &[]);
 
-const GLOBE_DEPTH_ATTRIBUTES: &[AttributeInfo] = &[attr(0, Short2, ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE)];
+const GLOBE_DEPTH_ATTRIBUTES: &[Attribute] = &[attr(0, Short2, ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE)];
 shader_source!(GLOBE_DEPTH_SHADER, GLOBE_DEPTH_ATTRIBUTES, &[]);
 
-const HEATMAP_ATTRIBUTES: &[AttributeInfo] = &[
+const HEATMAP_ATTRIBUTES: &[Attribute] = &[
     attr(0, Short2, ID_HEATMAP_POS_VERTEX_ATTRIBUTE),
     // Data driven
     attr(1, Float2, ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE),
@@ -352,29 +308,29 @@ const HEATMAP_ATTRIBUTES: &[AttributeInfo] = &[
 ];
 shader_source!(HEATMAP_SHADER, HEATMAP_ATTRIBUTES, &[]);
 
-const HEATMAP_TEXTURE_ATTRIBUTES: &[AttributeInfo] = &[attr(0, Short2, ID_HEATMAP_POS_VERTEX_ATTRIBUTE)];
+const HEATMAP_TEXTURE_ATTRIBUTES: &[Attribute] = &[attr(0, Short2, ID_HEATMAP_POS_VERTEX_ATTRIBUTE)];
 shader_source!(
     HEATMAP_TEXTURE_SHADER,
     HEATMAP_TEXTURE_ATTRIBUTES,
     &[tex(0, ID_HEATMAP_IMAGE_TEXTURE), tex(1, ID_HEATMAP_COLOR_RAMP_TEXTURE)]
 );
 
-const LAYER_COMPOSITE_ATTRIBUTES: &[AttributeInfo] = &[attr(0, Short2, ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE)];
+const LAYER_COMPOSITE_ATTRIBUTES: &[Attribute] = &[attr(0, Short2, ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE)];
 shader_source!(
     LAYER_COMPOSITE_SHADER,
     LAYER_COMPOSITE_ATTRIBUTES,
     &[tex(0, ID_LAYER_COMPOSITE_IMAGE_TEXTURE), tex(1, ID_LAYER_COMPOSITE_BACKDROP_TEXTURE)]
 );
 
-const HILLSHADE_ATTRIBUTES: &[AttributeInfo] =
+const HILLSHADE_ATTRIBUTES: &[Attribute] =
     &[attr(0, Short2, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE), attr(1, Short2, ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE)];
-const HILLSHADE_PREPARE_ATTRIBUTES: &[AttributeInfo] =
+const HILLSHADE_PREPARE_ATTRIBUTES: &[Attribute] =
     &[attr(0, Short2, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE), attr(1, Short2, ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE)];
-const HILLSHADE_TEXTURES: &[TextureInfo] = &[tex(0, ID_HILLSHADE_IMAGE_TEXTURE)];
+const HILLSHADE_TEXTURES: &[Texture] = &[tex(0, ID_HILLSHADE_IMAGE_TEXTURE)];
 shader_source!(HILLSHADE_SHADER, HILLSHADE_ATTRIBUTES, HILLSHADE_TEXTURES);
 shader_source!(HILLSHADE_PREPARE_SHADER, HILLSHADE_PREPARE_ATTRIBUTES, HILLSHADE_TEXTURES);
 
-const LINE_ATTRIBUTES: &[AttributeInfo] = &[
+const LINE_ATTRIBUTES: &[Attribute] = &[
     attr(0, Short2, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
     attr(1, UByte4, ID_LINE_DATA_VERTEX_ATTRIBUTE),
     // Data driven
@@ -385,7 +341,7 @@ const LINE_ATTRIBUTES: &[AttributeInfo] = &[
     attr(6, Float2, ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
     attr(7, Float2, ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
 ];
-const LINE_GRADIENT_ATTRIBUTES: &[AttributeInfo] = &[
+const LINE_GRADIENT_ATTRIBUTES: &[Attribute] = &[
     attr(0, Short2, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
     attr(1, UByte4, ID_LINE_DATA_VERTEX_ATTRIBUTE),
     // Data driven
@@ -395,7 +351,7 @@ const LINE_GRADIENT_ATTRIBUTES: &[AttributeInfo] = &[
     attr(5, Float2, ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
     attr(6, Float2, ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
 ];
-const LINE_PATTERN_ATTRIBUTES: &[AttributeInfo] = &[
+const LINE_PATTERN_ATTRIBUTES: &[Attribute] = &[
     attr(0, Short2, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
     attr(1, UByte4, ID_LINE_DATA_VERTEX_ATTRIBUTE),
     // Data driven
@@ -407,7 +363,7 @@ const LINE_PATTERN_ATTRIBUTES: &[AttributeInfo] = &[
     attr(7, UShort4, ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE),
     attr(8, UShort4, ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE),
 ];
-const LINE_SDF_ATTRIBUTES: &[AttributeInfo] = &[
+const LINE_SDF_ATTRIBUTES: &[Attribute] = &[
     attr(0, Short2, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
     attr(1, UByte4, ID_LINE_DATA_VERTEX_ATTRIBUTE),
     // Data driven
@@ -420,7 +376,7 @@ const LINE_SDF_ATTRIBUTES: &[AttributeInfo] = &[
     attr(8, Float2, ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE),
     attr(9, Float4, ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE),
 ];
-const LINE_GRADIENT_SDF_ATTRIBUTES: &[AttributeInfo] = &[
+const LINE_GRADIENT_SDF_ATTRIBUTES: &[Attribute] = &[
     attr(0, Short2, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
     attr(1, UByte4, ID_LINE_DATA_VERTEX_ATTRIBUTE),
     // Data driven
@@ -432,7 +388,7 @@ const LINE_GRADIENT_SDF_ATTRIBUTES: &[AttributeInfo] = &[
     attr(7, Float2, ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE),
     attr(8, Float4, ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE),
 ];
-const LINE_IMAGE_TEXTURES: &[TextureInfo] = &[tex(0, ID_LINE_IMAGE_TEXTURE)];
+const LINE_IMAGE_TEXTURES: &[Texture] = &[tex(0, ID_LINE_IMAGE_TEXTURE)];
 shader_source!(LINE_SHADER, LINE_ATTRIBUTES, &[]);
 shader_source!(LINE_GRADIENT_SHADER, LINE_GRADIENT_ATTRIBUTES, LINE_IMAGE_TEXTURES);
 shader_source!(LINE_PATTERN_SHADER, LINE_PATTERN_ATTRIBUTES, LINE_IMAGE_TEXTURES);
@@ -443,19 +399,19 @@ shader_source!(
     &[tex(0, ID_LINE_IMAGE_TEXTURE), tex(1, ID_LINE_DASH_TEXTURE)]
 );
 
-const RASTER_ATTRIBUTES: &[AttributeInfo] =
+const RASTER_ATTRIBUTES: &[Attribute] =
     &[attr(0, Short2, ID_RASTER_POS_VERTEX_ATTRIBUTE), attr(1, Short2, ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE)];
 shader_source!(RASTER_SHADER, RASTER_ATTRIBUTES, &[tex(0, ID_RASTER_IMAGE0_TEXTURE), tex(1, ID_RASTER_IMAGE1_TEXTURE)]);
 
-const SKY_ATTRIBUTES: &[AttributeInfo] = &[attr(0, Short2, ID_SKY_POS_VERTEX_ATTRIBUTE)];
-const ATMOSPHERE_ATTRIBUTES: &[AttributeInfo] = &[attr(0, Short2, ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE)];
+const SKY_ATTRIBUTES: &[Attribute] = &[attr(0, Short2, ID_SKY_POS_VERTEX_ATTRIBUTE)];
+const ATMOSPHERE_ATTRIBUTES: &[Attribute] = &[attr(0, Short2, ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE)];
 shader_source!(SKY_SHADER, SKY_ATTRIBUTES, &[]);
 shader_source!(ATMOSPHERE_SHADER, ATMOSPHERE_ATTRIBUTES, &[]);
 
 // Symbols: the layout vertex (`SymbolLayoutVertex`, with `tex_origin`), the
 // dynamic vertex (`projected_pos`), the opacity vertex (`fade_opacity`) and
 // the interleaved data-driven vertex, in four buffers.
-const SYMBOL_ICON_ATTRIBUTES: &[AttributeInfo] = &[
+const SYMBOL_ICON_ATTRIBUTES: &[Attribute] = &[
     attr(0, Short4, ID_SYMBOL_POS_OFFSET_ATTRIBUTE),
     attr(1, UShort4, ID_SYMBOL_DATA_ATTRIBUTE),
     attr(2, Short4, ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE),
@@ -469,7 +425,7 @@ const SYMBOL_ICON_ATTRIBUTES: &[AttributeInfo] = &[
     attr(6, UShort2, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE),
     attr(7, Float, ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE),
 ];
-const SYMBOL_SDF_ATTRIBUTES: &[AttributeInfo] = &[
+const SYMBOL_SDF_ATTRIBUTES: &[Attribute] = &[
     attr(0, Short4, ID_SYMBOL_POS_OFFSET_ATTRIBUTE),
     attr(1, UShort4, ID_SYMBOL_DATA_ATTRIBUTE),
     attr(2, Short4, ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE),
@@ -487,7 +443,7 @@ const SYMBOL_SDF_ATTRIBUTES: &[AttributeInfo] = &[
     attr(10, UShort2, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE),
     attr(11, Float, ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE),
 ];
-const SYMBOL_TEXT_AND_ICON_ATTRIBUTES: &[AttributeInfo] = &[
+const SYMBOL_TEXT_AND_ICON_ATTRIBUTES: &[Attribute] = &[
     attr(0, Short4, ID_SYMBOL_POS_OFFSET_ATTRIBUTE),
     attr(1, UShort4, ID_SYMBOL_DATA_ATTRIBUTE),
     // Dynamic
@@ -504,7 +460,7 @@ const SYMBOL_TEXT_AND_ICON_ATTRIBUTES: &[AttributeInfo] = &[
     attr(9, UShort2, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE),
     attr(10, Float, ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE),
 ];
-const SYMBOL_TEXTURES: &[TextureInfo] = &[tex(0, ID_SYMBOL_IMAGE_TEXTURE)];
+const SYMBOL_TEXTURES: &[Texture] = &[tex(0, ID_SYMBOL_IMAGE_TEXTURE)];
 shader_source!(SYMBOL_ICON_SHADER, SYMBOL_ICON_ATTRIBUTES, SYMBOL_TEXTURES);
 shader_source!(SYMBOL_SDF_SHADER, SYMBOL_SDF_ATTRIBUTES, SYMBOL_TEXTURES);
 shader_source!(
@@ -514,7 +470,7 @@ shader_source!(
 );
 
 /// The source of each built-in program.
-pub static BUILT_INS: &[(&Program, &ShaderSource)] = &[
+pub static BUILT_INS: &[(&Program, &Source)] = &[
     (&programs::BACKGROUND, &BACKGROUND_SHADER),
     (&programs::BACKGROUND_PATTERN, &BACKGROUND_PATTERN_SHADER),
     (&programs::CIRCLE, &CIRCLE_SHADER),

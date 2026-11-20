@@ -16,11 +16,11 @@ use mln_gfx::gpu::{
     ResourceId, SamplerId, Scissor, ShaderId, ShaderKey, SlotMap, TextureDesc, TextureFormat, TextureId, TextureRegion,
     TextureUsage, VertexStep, destroy_unused,
 };
-use mln_gfx::shaders::program::Sources;
 use mln_gfx::shaders::shader_defines::{DRAWABLE_RESERVED_UBO_COUNT, LAYER_SSBO_START_ID};
+use mln_gfx::shaders::source::{Sources, glsl};
 use mln_gfx::texture2d::SamplerState;
+use mln_glsl::BUILT_INS;
 use mln_glsl::layout::{DescriptorSetType, IMAGE_SAMPLER_START, LAYER_STORAGE_COUNT};
-use mln_glsl::{BUILT_INS, ShaderSource, TextureInfo as ShaderTexture};
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::size::Size;
 use windows::Win32::Foundation::{HANDLE, RECT};
@@ -282,7 +282,7 @@ pub struct D3d12Gpu {
     /// point at, kept as long as the `D3d12Gpu`, as there are few sets.
     sampler_indices: HashMap<[u32; TABLE_SIZE as usize], BufferMemory>,
     /// The source each program compiles from.
-    sources: Sources<ShaderSource>,
+    sources: Sources<glsl::Source>,
     shaders: SlotMap<ShaderId, Shader>,
     layout_tags: LayoutTags,
     pipelines: SlotMap<PipelineId, Pipeline>,
@@ -393,7 +393,7 @@ enum Resource {
     },
 }
 
-fn resource_of(name: &str, textures: &[ShaderTexture], set: u32, binding: u32) -> Result<Resource, GpuError> {
+fn resource_of(name: &str, textures: &[glsl::Texture], set: u32, binding: u32) -> Result<Resource, GpuError> {
     let texture = |index: u32| {
         textures
             .iter()
