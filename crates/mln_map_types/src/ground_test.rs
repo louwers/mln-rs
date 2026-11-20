@@ -1,0 +1,247 @@
+use glam::DVec2;
+use mln_style_types::ProjectionDefinition;
+use mln_util::geo::{EdgeInsets, LatLng, ScreenCoordinate, WrapMode};
+use mln_util::projection::Projection;
+use mln_util::size::Size;
+
+use crate::{Camera, Elevation, LogicalExtent, MapView, ProjectionMode, View, ViewportMode};
+
+const CENTER: (f64, f64) = (46.5, 7.9);
+
+/// The Web Mercator point at zoom 0 of `location`.
+fn world(location: &LatLng) -> DVec2 {
+    let point = Projection::project(location, 1.0 / mln_util::constants::TILE_SIZE_D);
+    DVec2::new(point.x, point.y)
+}
+
+/// The world's y at `px` pixels at zoom 13 south of [`CENTER`].
+fn south_of_center(px: f64) -> f64 {
+    world(&LatLng::new(CENTER.0, CENTER.1).unwrap()).y + px / Projection::world_size(zoom_scale(13.0))
+}
+
+fn zoom_scale(zoom: f64) -> f64 {
+    2f64.powf(zoom)
+}
+
+/// Ground drawn as `surface` says, between the heights of `range`.
+#[derive(Debug)]
+struct Ground {
+    surface: fn(DVec2) -> Option<f64>,
+    range: (f64, f64),
+}
+
+impl Elevation for Ground {
+    fn at(&self, location: LatLng) -> Option<f64> {
+        (self.surface)(world(&location))
+    }
+
+    fn min_at(&self, _: LatLng) -> Option<f64> {
+        Some(self.range.0)
+    }
+
+    fn surface_at(&self, world: DVec2) -> Option<f64> {
+        (self.surface)(world)
+    }
+
+    fn range(&self) -> Option<(f64, f64)> {
+        Some(self.range)
+    }
+}
+
+/// Ground 1000 m high with a ridge 600 m higher across it, 150 pixels
+/// north of the center at zoom 13.
+fn ridge() -> Ground {
+    let surface = |world: DVec2| {
+        let across = (world.y - south_of_center(-150.0)) / (south_of_center(80.0) - south_of_center(0.0));
+        Some(1000.0 + 600.0 * (-across * across).exp())
+    };
+    Ground { surface, range: (1000.0, 1600.0) }
+}
+
+/// A 512 px square view of [`CENTER`] at zoom 13, looking north at
+/// `pitch` degrees, with its far plane reaching down to `lowest`.
+fn view(pitch: f64, center_altitude: f64, lowest: f64) -> View {
+    let mut state = MapView {
+        camera: Camera {
+            center: LatLng::new(CENTER.0, CENTER.1).unwrap(),
+            center_altitude,
+            zoom: 13.0,
+            pitch,
+            fov: 36.87,
+            ..Camera::default()
+        },
+        extent: LogicalExtent::new(Size::new(512, 512), 1.0),
+        projection_mode: ProjectionMode::default(),
+        viewport: crate::Viewport::default(),
+        projection: ProjectionDefinition::default(),
+    }
+    .to_state()
+    .unwrap();
+    state.set_terrain_min_elevation(Some(lowest));
+    state.view().clone()
+}
+
+/// Points across the view, y up, every 32 pixels from 16.
+fn pixels() -> impl Iterator<Item = ScreenCoordinate> {
+    (0..16).flat_map(|row| {
+        (0..16).map(move |column| ScreenCoordinate::new(16.0 + 32.0 * f64::from(column), 16.0 + 32.0 * f64::from(row)))
+    })
+}
+
+/// Fails unless `hit` draws at `pixel`, within 0.01 px.
+fn assert_draws_at(view: &View, hit: &crate::GroundHit, pixel: &ScreenCoordinate) {
+    let drawn = view.lat_lng_to_screen_coordinate_at(&hit.location(WrapMode::Unwrapped), hit.height);
+    let off = DVec2::new(drawn.x - pixel.x, drawn.y - pixel.y).length();
+    assert!(off < 0.01, "{hit:?} draws {off} px from {pixel:?}");
+}
+
+/// A ray meets the ground where it draws: the hit draws back at its pixel,
+/// at the height of the surface there, and the line of sight is above the
+/// ground all the way to it, over the ridge too.
+#[test]
+fn a_ray_meets_a_ridge_where_it_draws() {
+    let ground = ridge();
+    let view = view(60.0, 1000.0, 1000.0);
+    let mut on_the_ridge = 0;
+    for pixel in pixels() {
+        let hit = view.ground_under(&pixel, &ground).unwrap_or_else(|| panic!("ground under {pixel:?}"));
+        assert_draws_at(&view, &hit, &pixel);
+        assert_eq!(Some(hit.height), ground.surface_at(hit.world));
+        let (near, far) = view.line_of_sight(&pixel).unwrap();
+        let along = far - near;
+        let to_hit = (hit.world - near.truncate()).length() / along.truncate().length();
+        for step in 0..1000 {
+            let point = near + along * (to_hit * f64::from(step) / 1000.0);
+            assert!(point.z > ground.surface_at(point.truncate()).unwrap() - 1e-3, "{pixel:?} passes under the ground");
+        }
+        if hit.height > 1300.0 {
+            on_the_ridge += 1;
+        }
+    }
+    assert!(on_the_ridge > 16, "{on_the_ridge} pixels show the ridge");
+}
+
+/// A ray above the horizon meets nothing, and nor does one over ground no
+/// tile drew.
+#[test]
+fn a_ray_into_the_sky_meets_nothing() {
+    let ground = ridge();
+    let high = view(85.0, 1000.0, 1000.0);
+    assert_eq!(None, high.ground_under(&ScreenCoordinate::new(256.0, 500.0), &ground));
+    assert!(high.ground_under(&ScreenCoordinate::new(256.0, 10.0), &ground).is_some());
+
+    let south = Ground { surface: |world| (world.y > south_of_center(0.0)).then_some(1000.0), range: (1000.0, 1000.0) };
+    let view = view(60.0, 1000.0, 1000.0);
+    assert_eq!(None, view.ground_under(&ScreenCoordinate::new(256.0, 400.0), &south));
+    assert!(view.ground_under(&ScreenCoordinate::new(256.0, 100.0), &south).is_some());
+}
+
+/// A ray that starts under the ground, as the eye of a camera sunk into a
+/// plateau's side does, finds where it next enters the ground: past the
+/// plateau, at the center it looks at.
+#[test]
+fn a_ray_that_starts_under_the_ground_finds_where_it_enters_next() {
+    let plateau = Ground {
+        surface: |world| Some(if world.y > south_of_center(300.0) { 8000.0 } else { 0.0 }),
+        range: (0.0, 8000.0),
+    };
+    let view = view(60.0, 0.0, 0.0);
+    let eye = view.eye_position();
+    assert!(eye.y > south_of_center(300.0) && eye.z < 8000.0, "{eye}");
+
+    let center = ScreenCoordinate::new(256.0, 256.0);
+    let hit = view.ground_under(&center, &plateau).expect("the ground past the plateau");
+    assert_eq!(0.0, hit.height);
+    assert_draws_at(&view, &hit, &center);
+    let off = (hit.world - world(&view.center(WrapMode::Unwrapped))).length() * Projection::world_size(view.scale());
+    assert!(off < 0.01, "{off} px from the center");
+}
+
+/// A tile drawn flat while its DEM loads is met at sea level, where the
+/// flat map meets it, looking straight down too.
+#[test]
+fn a_ray_through_a_flat_loading_tile_meets_it_at_sea_level() {
+    #[derive(Debug)]
+    struct Loading;
+    impl Elevation for Loading {
+        fn at(&self, _: LatLng) -> Option<f64> {
+            None
+        }
+
+        fn min_at(&self, _: LatLng) -> Option<f64> {
+            Some(0.0)
+        }
+
+        fn surface_at(&self, _: DVec2) -> Option<f64> {
+            Some(0.0)
+        }
+
+        fn range(&self) -> Option<(f64, f64)> {
+            Some((0.0, 0.0))
+        }
+    }
+    for pitch in [0.0, 45.0] {
+        let view = view(pitch, 0.0, 0.0);
+        for pixel in pixels().chain([ScreenCoordinate::new(256.0, 256.0)]) {
+            let hit = view.ground_under(&pixel, &Loading).unwrap_or_else(|| panic!("ground under {pixel:?}"));
+            assert_eq!(0.0, hit.height);
+            let flat = world(&view.screen_coordinate_to_lat_lng(&pixel, WrapMode::Unwrapped).unwrap());
+            let off = (hit.world - flat).length() * Projection::world_size(view.scale());
+            assert!(off < 0.01, "pitch {pitch}: {off} px from the flat map's point under {pixel:?}");
+        }
+    }
+}
+
+/// Conversions on the plane at sea level are the flat map's to the bit,
+/// and on any other plane they undo each other.
+#[test]
+fn height_zero_matches_the_flat_conversions_bit_for_bit() {
+    let views = [(0.0, 0.0, 0.0, ViewportMode::Default), (72.5, 20.0, 9.0, ViewportMode::FlippedY)].map(
+        |(pitch, bearing, roll, viewport_mode)| {
+            MapView {
+                camera: Camera {
+                    center: LatLng::new(CENTER.0, CENTER.1).unwrap(),
+                    center_altitude: 1200.0,
+                    padding: EdgeInsets::new(60.0, 0.0, 10.0, 25.0),
+                    zoom: 12.25,
+                    bearing,
+                    pitch,
+                    roll,
+                    fov: 37.0,
+                },
+                extent: LogicalExtent::new(Size::new(301, 200), 1.0),
+                projection_mode: ProjectionMode::default(),
+                viewport: crate::Viewport { viewport_mode, ..crate::Viewport::default() },
+                projection: ProjectionDefinition::default(),
+            }
+            .to_view()
+            .unwrap()
+        },
+    );
+    for view in &views {
+        for row in 0..=10 {
+            for column in 0..=10 {
+                let pixel = ScreenCoordinate::new(30.1 * f64::from(column), 20.0 * f64::from(row));
+                for wrap in [WrapMode::Wrapped, WrapMode::Unwrapped] {
+                    let flat = view.screen_coordinate_to_lat_lng(&pixel, wrap).unwrap();
+                    let at = view.screen_coordinate_to_lat_lng_at(&pixel, 0.0, wrap).unwrap();
+                    assert_eq!(
+                        (flat.latitude().to_bits(), flat.longitude().to_bits()),
+                        (at.latitude().to_bits(), at.longitude().to_bits())
+                    );
+                    let flat = view.lat_lng_to_screen_coordinate(&flat);
+                    let at = view.lat_lng_to_screen_coordinate_at(&at, 0.0);
+                    assert_eq!((flat.x.to_bits(), flat.y.to_bits()), (at.x.to_bits(), at.y.to_bits()));
+                }
+
+                let raised = view.screen_coordinate_to_lat_lng_at(&pixel, 900.0, WrapMode::Unwrapped).unwrap();
+                let back = view.lat_lng_to_screen_coordinate_at(&raised, 900.0);
+                let (near, far) = view.line_of_sight(&pixel).unwrap();
+                if near.z > 900.0 && far.z < 900.0 {
+                    let off = DVec2::new(back.x - pixel.x, back.y - pixel.y).length();
+                    assert!(off < 1e-6, "{off} px off at {pixel:?}");
+                }
+            }
+        }
+    }
+}

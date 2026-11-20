@@ -9,6 +9,7 @@ mod camera_limits;
 mod camera_momentum;
 mod elevation;
 mod frame_projection;
+mod ground;
 mod map_view;
 mod mode;
 mod projection;
@@ -26,6 +27,7 @@ pub use camera_momentum::{
 };
 pub use elevation::Elevation;
 pub use frame_projection::{ClipDepthRange, FrameProjection};
+pub use ground::GroundHit;
 pub use map_view::{Camera, LogicalExtent, MapView, Viewport};
 pub use mode::{ConstrainMode, MapDebugOptions, MapMode, TerrainSkirtLength, TileLodMode, ViewportMode};
 pub use projection_mode::ProjectionMode;
