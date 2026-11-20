@@ -21,15 +21,15 @@ use mln_gfx::gpu::{
     ResourceId, SamplerId, ShaderId, ShaderKey, SlotMap, TargetFormats, TextureDesc, TextureFormat, TextureId,
     TextureRegion, TextureUsage, VertexStep,
 };
-use mln_gfx::shaders::program::Sources;
 use mln_gfx::shaders::shader_defines::{DRAWABLE_RESERVED_UBO_COUNT, LAYER_SSBO_START_ID};
+use mln_gfx::shaders::source::{Sources, glsl};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{DepthFunctionType, TextureFilterType, TextureWrapType};
 use mln_glsl::layout::{
     DescriptorSetType, IMAGE_SAMPLER_START, IMAGE_TEXTURE_COUNT, LAYER_STORAGE_COUNT, UBO_INDEX_PUSH_CONSTANT_SIZE,
     image_sampler_binding, image_texture_binding,
 };
-use mln_glsl::{AttributeInfo, BUILT_INS, ResourceUse, ShaderSource, Stage, TextureInfo};
+use mln_glsl::{BUILT_INS, ResourceUse, Stage};
 use mln_util::hash::HashMap;
 use mln_util::size::Size;
 
@@ -176,9 +176,9 @@ pub(crate) struct Shader {
     /// What its stages read from its bindings, by the shaders' ids.
     reads: Vec<ShaderBinding>,
     /// The location of each per-vertex attribute, by id.
-    attributes: &'static [AttributeInfo],
+    attributes: &'static [glsl::Attribute],
     /// The location of each per-instance attribute, by id.
-    instance_attributes: &'static [AttributeInfo],
+    instance_attributes: &'static [glsl::Attribute],
 }
 
 impl Shader {
@@ -373,7 +373,7 @@ pub struct VulkanGpu {
     textures: SlotMap<TextureId, Texture>,
     samplers: SlotMap<SamplerId, vk::Sampler>,
     /// The source each program compiles from.
-    sources: Sources<ShaderSource>,
+    sources: Sources<glsl::Source>,
     shaders: SlotMap<ShaderId, Shader>,
     layout_tags: LayoutTags,
     pipelines: SlotMap<PipelineId, Pipeline>,
@@ -472,7 +472,7 @@ fn clear_color(color: mln_util::Color) -> vk::ClearValue {
 /// ids: the inverse of `mln_glsl::layout`'s `*_binding` functions.
 fn binding_of(
     name: &str,
-    textures: &[TextureInfo],
+    textures: &[glsl::Texture],
     set: u32,
     binding: u32,
 ) -> Result<(DescriptorSetType, Binding), GpuError> {
@@ -1093,7 +1093,7 @@ impl VulkanGpu {
             }
         };
         for stage in [Stage::Vertex, Stage::Fragment] {
-            let composed = source.compose(stage, &defines);
+            let composed = mln_glsl::compose(source, stage, &defines);
             let result = shaders::compile_program(stage, &composed)
                 .map_err(|error| GpuError::Invalid(format!("{name}: {error}")))
                 .and_then(|compiled| {

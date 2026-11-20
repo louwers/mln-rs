@@ -1,5 +1,6 @@
 //! The backend-independent shader code: uniform buffer layouts, binding ids
-//! and defines, and what each program reads.
+//! and defines, what each program reads, and the shader sources backends
+//! compile programs from.
 
 pub mod background_layer_ubo;
 pub mod circle_layer_ubo;
@@ -20,4 +21,5 @@ pub mod raster_layer_ubo;
 pub mod segment;
 pub mod shader_defines;
 pub mod sky_ubo;
+pub mod source;
 pub mod symbol_layer_ubo;

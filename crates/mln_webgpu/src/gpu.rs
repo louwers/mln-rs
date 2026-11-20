@@ -14,7 +14,7 @@ use mln_gfx::gpu::{
     ResourceId, SamplerId, Scissor, ShaderId, ShaderKey, SlotMap, TextureDesc, TextureFormat, TextureId, TextureRegion,
     TextureUsage,
 };
-use mln_gfx::shaders::program::Sources;
+use mln_gfx::shaders::source::{Sources, wgsl};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_util::Color;
@@ -22,7 +22,7 @@ use mln_util::size::Size;
 
 use crate::index_table::IndexTable;
 use crate::shaders::shader_program::{self, BindingType, ShaderProgram, validated};
-use crate::shaders::shader_source::{BUILT_INS, ShaderSource};
+use crate::shaders::shader_source::BUILT_INS;
 use crate::writes::Writes;
 use crate::{CustomLayerEncoder, CustomLayerPass, Device};
 
@@ -177,7 +177,7 @@ pub struct WebGpu {
     textures: SlotMap<TextureId, Texture>,
     samplers: SlotMap<SamplerId, wgpu::Sampler>,
     /// The source each program compiles from.
-    sources: Sources<ShaderSource>,
+    sources: Sources<wgsl::Source>,
     shaders: SlotMap<ShaderId, Shader>,
     layout_tags: LayoutTags,
     pipelines: SlotMap<PipelineId, Pipeline>,

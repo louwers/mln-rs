@@ -13,7 +13,8 @@
 //! quad, and the segment's ends and paint values come from the buffers that
 //! hold them for the fill, bound as storage buffers.
 
-use super::shader_source::WgslShaderSource;
+use mln_gfx::shaders::source::wgsl::Wgsl;
+
 use super::wgsl_sources;
 
 /// `outline_corner`, the quad's corner of the attributes' segment.
@@ -143,7 +144,7 @@ struct GlobalIndexUBO {
 }
 
 /// The instanced fill outlines.
-pub(crate) const FILL_OUTLINE_INSTANCED_SHADER: WgslShaderSource = WgslShaderSource {
+pub(crate) const FILL_OUTLINE_INSTANCED_SHADER: Wgsl = Wgsl {
     vertex: Some(concat!(
         r#"
 struct VertexInput {
@@ -190,7 +191,7 @@ fn main(in: VertexInput) -> VertexOutput {
 };
 
 /// The pulled fill outlines.
-pub(crate) const FILL_OUTLINE_PULLED_SHADER: WgslShaderSource = WgslShaderSource {
+pub(crate) const FILL_OUTLINE_PULLED_SHADER: Wgsl = Wgsl {
     vertex: Some(concat!(
         plain_declarations!(),
         r#"
@@ -253,7 +254,7 @@ fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
 };
 
 /// The instanced fill outlines of a pattern.
-pub(crate) const FILL_OUTLINE_PATTERN_INSTANCED_SHADER: WgslShaderSource = WgslShaderSource {
+pub(crate) const FILL_OUTLINE_PATTERN_INSTANCED_SHADER: Wgsl = Wgsl {
     vertex: Some(concat!(
         r#"
 struct VertexInput {

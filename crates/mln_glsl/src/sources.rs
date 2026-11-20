@@ -44,7 +44,7 @@
 // - Clip space is y-up, as in OpenGL, Metal, D3D and naga's IR: no stage
 //   flips Y (`applySurfaceTransform`), the SPIR-V back end does for Vulkan.
 
-use crate::program::GlslShaderSource;
+use mln_gfx::shaders::source::glsl::Glsl;
 
 /// The start of every vertex stage.
 pub(crate) const PRELUDE_VERTEX: &str = r#"
@@ -375,7 +375,7 @@ pub(crate) const BACKGROUND_SHADER_PRELUDE: &str = r"
 
 ";
 
-pub(crate) const BACKGROUND_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const BACKGROUND_SHADER: Glsl = Glsl {
     prelude: BACKGROUND_SHADER_PRELUDE,
     vertex: r"
 
@@ -428,7 +428,7 @@ void main() {
 ",
 };
 
-pub(crate) const BACKGROUND_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const BACKGROUND_PATTERN_SHADER: Glsl = Glsl {
     prelude: BACKGROUND_SHADER_PRELUDE,
     vertex: r"
 layout(location = 0) in ivec2 in_position;
@@ -546,7 +546,7 @@ pub(crate) const CIRCLE_SHADER_PRELUDE: &str = r"
 
 ";
 
-pub(crate) const CIRCLE_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const CIRCLE_SHADER: Glsl = Glsl {
     prelude: CIRCLE_SHADER_PRELUDE,
     vertex: r"
 
@@ -860,7 +860,7 @@ void main() {
 ",
 };
 
-pub(crate) const CLIPPING_MASK_PROGRAM: GlslShaderSource = GlslShaderSource {
+pub(crate) const CLIPPING_MASK_PROGRAM: Glsl = Glsl {
     prelude: "",
     vertex: r"
         layout(location = 0) in ivec2 position;
@@ -890,7 +890,7 @@ pub(crate) const COLLISION_SHADER_PRELUDE: &str = r"
 
 ";
 
-pub(crate) const COLLISION_BOX_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const COLLISION_BOX_SHADER: Glsl = Glsl {
     prelude: COLLISION_SHADER_PRELUDE,
     vertex: r"
 
@@ -975,7 +975,7 @@ void main() {
 ",
 };
 
-pub(crate) const COLLISION_CIRCLE_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const COLLISION_CIRCLE_SHADER: Glsl = Glsl {
     prelude: COLLISION_SHADER_PRELUDE,
     vertex: r"
 
@@ -1090,7 +1090,7 @@ pub(crate) const COLOR_RELIEF_SHADER_PRELUDE: &str = r"
 
 ";
 
-pub(crate) const COLOR_RELIEF_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const COLOR_RELIEF_SHADER: Glsl = Glsl {
     prelude: COLOR_RELIEF_SHADER_PRELUDE,
     vertex: r"
 
@@ -1258,7 +1258,7 @@ pub(crate) const FILL_SHADER_PRELUDE: &str = r"
 
 ";
 
-pub(crate) const FILL_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const FILL_SHADER: Glsl = Glsl {
     prelude: FILL_SHADER_PRELUDE,
     vertex: r"
 
@@ -1362,7 +1362,7 @@ void main() {
 ",
 };
 
-pub(crate) const FILL_OUTLINE_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const FILL_OUTLINE_SHADER: Glsl = Glsl {
     prelude: FILL_SHADER_PRELUDE,
     vertex: r"
 
@@ -1475,7 +1475,7 @@ void main() {
 ",
 };
 
-pub(crate) const FILL_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const FILL_PATTERN_SHADER: Glsl = Glsl {
     prelude: FILL_SHADER_PRELUDE,
     vertex: r"
 
@@ -1725,7 +1725,7 @@ void main() {
 ",
 };
 
-pub(crate) const FILL_OUTLINE_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const FILL_OUTLINE_PATTERN_SHADER: Glsl = Glsl {
     prelude: FILL_SHADER_PRELUDE,
     vertex: r"
 
@@ -2039,7 +2039,7 @@ vec4 outline_corner(vec4 start, vec4 end, vec2 corner, out vec2 pos, out float t
     };
 }
 
-pub(crate) const FILL_OUTLINE_INSTANCED_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const FILL_OUTLINE_INSTANCED_SHADER: Glsl = Glsl {
     prelude: FILL_SHADER_PRELUDE,
     vertex: concat!(
         r"
@@ -2120,7 +2120,7 @@ void main() {
     fragment: FILL_OUTLINE_SHADER.fragment,
 };
 
-pub(crate) const FILL_OUTLINE_PATTERN_INSTANCED_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const FILL_OUTLINE_PATTERN_INSTANCED_SHADER: Glsl = Glsl {
     prelude: FILL_SHADER_PRELUDE,
     vertex: concat!(
         r"
@@ -2266,7 +2266,7 @@ void main() {
 /// Port-only: the outlines of the instanced outlines as quads without vertex
 /// inputs. A vertex reads its segment's ends and paint values from storage
 /// buffers, by its index.
-pub(crate) const FILL_OUTLINE_PULLED_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const FILL_OUTLINE_PULLED_SHADER: Glsl = Glsl {
     prelude: FILL_SHADER_PRELUDE,
     vertex: concat!(
         r"
@@ -2377,7 +2377,7 @@ pub(crate) const FILL_EXTRUSION_SHADER_PRELUDE: &str = r"
 
 ";
 
-pub(crate) const FILL_EXTRUSION_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const FILL_EXTRUSION_SHADER: Glsl = Glsl {
     prelude: FILL_EXTRUSION_SHADER_PRELUDE,
     vertex: r"
 invariant gl_Position;
@@ -2668,7 +2668,7 @@ macro_rules! fill_extrusion_wall_main {
     };
 }
 
-pub(crate) const FILL_EXTRUSION_INSTANCED_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const FILL_EXTRUSION_INSTANCED_SHADER: Glsl = Glsl {
     prelude: FILL_EXTRUSION_SHADER_PRELUDE,
     vertex: concat!(
         r"
@@ -2718,7 +2718,7 @@ void main() {
 /// Port-only: the walls of the instanced walls as quads without vertex
 /// inputs. A vertex reads its wall's outline vertices and paint values from
 /// storage buffers, by its index.
-pub(crate) const FILL_EXTRUSION_PULLED_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const FILL_EXTRUSION_PULLED_SHADER: Glsl = Glsl {
     prelude: FILL_EXTRUSION_SHADER_PRELUDE,
     vertex: concat!(
         r"
@@ -2780,7 +2780,7 @@ void main() {
     fragment: FILL_EXTRUSION_INSTANCED_SHADER.fragment,
 };
 
-pub(crate) const FILL_EXTRUSION_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const FILL_EXTRUSION_PATTERN_SHADER: Glsl = Glsl {
     prelude: FILL_EXTRUSION_SHADER_PRELUDE,
     vertex: r"
 invariant gl_Position;
@@ -3056,7 +3056,7 @@ void main() {
 ",
 };
 
-pub(crate) const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: Glsl = Glsl {
     prelude: FILL_EXTRUSION_SHADER_PRELUDE,
     vertex: r"
 invariant gl_Position;
@@ -3357,7 +3357,7 @@ void main() {
 ",
 };
 
-pub(crate) const GLOBE_DEPTH_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const GLOBE_DEPTH_SHADER: Glsl = Glsl {
     prelude: "",
     vertex: r"
 
@@ -3391,7 +3391,7 @@ pub(crate) const HEATMAP_SHADER_PRELUDE: &str = r"
 
 ";
 
-pub(crate) const HEATMAP_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const HEATMAP_SHADER: Glsl = Glsl {
     prelude: HEATMAP_SHADER_PRELUDE,
     vertex: r#"
 
@@ -3543,7 +3543,7 @@ void main() {
 
 pub(crate) const HEATMAP_TEXTURE_SHADER_PRELUDE: &str = r"#define idHeatmapTexturePropsUBO    layerUBOStartId";
 
-pub(crate) const HEATMAP_TEXTURE_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const HEATMAP_TEXTURE_SHADER: Glsl = Glsl {
     prelude: HEATMAP_TEXTURE_SHADER_PRELUDE,
     vertex: r"
 
@@ -3603,7 +3603,7 @@ pub(crate) const LAYER_COMPOSITE_SHADER_PRELUDE: &str = r"#define idLayerComposi
 /// Port-only: a layer's texture, the size of the frame, composited onto it
 /// texel for texel, with its opacity and, for the blend modes that no blend
 /// function expresses, against a copy of the frame (`backdrop_texture`).
-pub(crate) const LAYER_COMPOSITE_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const LAYER_COMPOSITE_SHADER: Glsl = Glsl {
     prelude: LAYER_COMPOSITE_SHADER_PRELUDE,
     vertex: r"
 
@@ -3696,7 +3696,7 @@ pub(crate) const HILLSHADE_SHADER_PRELUDE: &str = r"
 
 ";
 
-pub(crate) const HILLSHADE_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const HILLSHADE_SHADER: Glsl = Glsl {
     prelude: HILLSHADE_SHADER_PRELUDE,
     vertex: r"
 
@@ -3936,7 +3936,7 @@ pub(crate) const HILLSHADE_PREPARE_SHADER_PRELUDE: &str = r"
 
 ";
 
-pub(crate) const HILLSHADE_PREPARE_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const HILLSHADE_PREPARE_SHADER: Glsl = Glsl {
     prelude: HILLSHADE_PREPARE_SHADER_PRELUDE,
     vertex: r"
 
@@ -4055,7 +4055,7 @@ pub(crate) const LINE_SHADE_PRELUDE: &str = r"
 
 ";
 
-pub(crate) const LINE_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const LINE_SHADER: Glsl = Glsl {
     prelude: LINE_SHADE_PRELUDE,
     vertex: r"
 
@@ -4311,7 +4311,7 @@ void main() {
 ",
 };
 
-pub(crate) const LINE_GRADIENT_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const LINE_GRADIENT_SHADER: Glsl = Glsl {
     prelude: LINE_SHADE_PRELUDE,
     vertex: r"
 
@@ -4555,7 +4555,7 @@ void main() {
 ",
 };
 
-pub(crate) const LINE_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const LINE_PATTERN_SHADER: Glsl = Glsl {
     prelude: LINE_SHADE_PRELUDE,
     vertex: r"
 
@@ -4918,7 +4918,7 @@ void main() {
 ",
 };
 
-pub(crate) const LINE_SDF_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const LINE_SDF_SHADER: Glsl = Glsl {
     prelude: LINE_SHADE_PRELUDE,
     vertex: r"
 
@@ -5269,7 +5269,7 @@ void main() {
 ",
 };
 
-pub(crate) const LINE_GRADIENT_SDF_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const LINE_GRADIENT_SDF_SHADER: Glsl = Glsl {
     prelude: LINE_SHADE_PRELUDE,
     vertex: r"
 
@@ -5613,7 +5613,7 @@ pub(crate) const RASTER_SHADER_PRELUDE: &str = r"
 
 ";
 
-pub(crate) const RASTER_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const RASTER_SHADER: Glsl = Glsl {
     prelude: RASTER_SHADER_PRELUDE,
     vertex: r"
 
@@ -5744,7 +5744,7 @@ pub(crate) const SKY_SHADER_PRELUDE: &str = r"
 
 ";
 
-pub(crate) const SKY_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const SKY_SHADER: Glsl = Glsl {
     prelude: SKY_SHADER_PRELUDE,
     vertex: r"
 layout(location = 0) in ivec2 in_position;
@@ -5786,7 +5786,7 @@ void main() {
 ",
 };
 
-pub(crate) const ATMOSPHERE_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const ATMOSPHERE_SHADER: Glsl = Glsl {
     prelude: SKY_SHADER_PRELUDE,
     vertex: r"
 layout(location = 0) in ivec2 in_position;
@@ -5914,7 +5914,7 @@ pub(crate) const SYMBOL_SHADER_PRELUDE: &str = r"
 
 ";
 
-pub(crate) const SYMBOL_ICON_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const SYMBOL_ICON_SHADER: Glsl = Glsl {
     prelude: SYMBOL_SHADER_PRELUDE,
     vertex: r"
 
@@ -6164,7 +6164,7 @@ void main() {
 ",
 };
 
-pub(crate) const SYMBOL_SDF_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const SYMBOL_SDF_SHADER: Glsl = Glsl {
     prelude: SYMBOL_SHADER_PRELUDE,
     vertex: r"
 
@@ -6523,7 +6523,7 @@ void main() {
 ",
 };
 
-pub(crate) const SYMBOL_TEXT_AND_ICON_SHADER: GlslShaderSource = GlslShaderSource {
+pub(crate) const SYMBOL_TEXT_AND_ICON_SHADER: Glsl = Glsl {
     prelude: SYMBOL_SHADER_PRELUDE,
     vertex: r"
 

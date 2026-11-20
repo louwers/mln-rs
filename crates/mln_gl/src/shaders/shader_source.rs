@@ -87,80 +87,30 @@ use mln_gfx::shaders::shader_defines::{
     ID_SYMBOL_PROJECTED_POS_ATTRIBUTE, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE, ID_SYMBOL_TILE_PROPS_UBO,
 };
 use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
+use mln_gfx::shaders::source::glsl_es::{Attribute, Source, Texture, UniformBlock};
 use mln_gfx::shaders::symbol_layer_ubo::{
     CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
 };
 
 use super::glsl_sources;
 
-/// A program's GLSL.
-///
-/// A stage compiles from `#version 300 es`, or `#version 330 core` on
-/// desktop OpenGL, the program's defines, the prelude's source of that stage
-/// and the shader's.
-#[derive(Debug)]
-pub(crate) struct GlslShaderSource {
-    pub(crate) vertex: &'static str,
-    pub(crate) fragment: &'static str,
-}
-
-/// The uniform block `name` binds to the binding point `id`, where the
-/// buffer of that id is bound.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct UniformBlockInfo {
-    pub(crate) name: &'static str,
-    pub(crate) id: usize,
-    /// The size of the block's UBO.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the tests check it against the block the shader declares"))]
-    pub(crate) size: usize,
-    /// The size of an element of the layer's buffer that holds this block for
-    /// each of its drawables, or 0 if the renderer writes no such buffer.
-    pub(crate) element_size: usize,
-}
-
-/// The vertex attribute `name` reads attribute `id`.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct AttributeInfo {
-    pub(crate) name: &'static str,
-    pub(crate) id: usize,
-}
-
-/// The sampler `name` reads texture `id`.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct TextureInfo {
-    pub(crate) name: &'static str,
-    pub(crate) id: usize,
-}
-
-/// A program's OpenGL source: its GLSL, and the tables of where its uniform
-/// blocks, attributes and textures bind.
-#[derive(Debug)]
-pub(crate) struct ShaderSource {
-    pub(crate) glsl: &'static GlslShaderSource,
-    pub(crate) uniform_blocks: &'static [UniformBlockInfo],
-    pub(crate) attributes: &'static [AttributeInfo],
-    /// The attributes that step once an instance.
-    pub(crate) instance_attributes: &'static [AttributeInfo],
-    pub(crate) textures: &'static [TextureInfo],
-}
-
 /// A block whose UBO is a `T`.
-const fn block<T>(name: &'static str, id: usize) -> UniformBlockInfo {
-    UniformBlockInfo { name, id, size: size_of::<T>(), element_size: 0 }
+const fn block<T>(name: &'static str, id: usize) -> UniformBlock {
+    UniformBlock { name, id, size: size_of::<T>(), element_size: 0 }
 }
 
 /// A block whose UBO is a `T`, one in each `Element` of a layer's buffer.
-const fn element<T, Element>(name: &'static str, id: usize) -> UniformBlockInfo {
+const fn element<T, Element>(name: &'static str, id: usize) -> UniformBlock {
     assert!(size_of::<T>() <= size_of::<Element>());
-    UniformBlockInfo { name, id, size: size_of::<T>(), element_size: size_of::<Element>() }
+    UniformBlock { name, id, size: size_of::<T>(), element_size: size_of::<Element>() }
 }
 
-const fn attr(name: &'static str, id: usize) -> AttributeInfo {
-    AttributeInfo { name, id }
+const fn attr(name: &'static str, id: usize) -> Attribute {
+    Attribute { name, id }
 }
 
-const fn tex(name: &'static str, id: usize) -> TextureInfo {
-    TextureInfo { name, id }
+const fn tex(name: &'static str, id: usize) -> Texture {
+    Texture { name, id }
 }
 
 macro_rules! shader_source {
@@ -168,7 +118,7 @@ macro_rules! shader_source {
         shader_source!($name, $blocks, $attrs, &[], $textures);
     };
     ($name:ident, $blocks:expr, $attrs:expr, $instance_attrs:expr, $textures:expr) => {
-        static $name: ShaderSource = ShaderSource {
+        static $name: Source = Source {
             glsl: &glsl_sources::$name,
             uniform_blocks: $blocks,
             attributes: $attrs,
@@ -440,7 +390,7 @@ shader_source!(
 );
 
 // Fill Extrusion: the roofs
-const FILL_EXTRUSION_BLOCKS: &[UniformBlockInfo] = &[
+const FILL_EXTRUSION_BLOCKS: &[UniformBlock] = &[
     element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
     element::<FillExtrusionDrawableUBO, FillExtrusionDrawableUBO>(
         "FillExtrusionDrawableUBO",
@@ -466,7 +416,7 @@ shader_source!(
 );
 
 // Fill Extrusion Instanced: the walls, an instance per outline vertex
-const FILL_EXTRUSION_INSTANCED_ATTRIBUTES: &[AttributeInfo] = &[attr("a_pos", ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE)];
+const FILL_EXTRUSION_INSTANCED_ATTRIBUTES: &[Attribute] = &[attr("a_pos", ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE)];
 shader_source!(
     FILL_EXTRUSION_INSTANCED_SHADER,
     FILL_EXTRUSION_BLOCKS,
@@ -485,7 +435,7 @@ shader_source!(
 
 // Fill Extrusion Wall: the instanced walls' GLSL with every attribute per
 // vertex, for walls whose quads are in the vertex buffer
-static FILL_EXTRUSION_WALL_SHADER: ShaderSource = ShaderSource {
+static FILL_EXTRUSION_WALL_SHADER: Source = Source {
     glsl: &glsl_sources::FILL_EXTRUSION_INSTANCED_SHADER,
     uniform_blocks: FILL_EXTRUSION_BLOCKS,
     attributes: &[
@@ -503,7 +453,7 @@ static FILL_EXTRUSION_WALL_SHADER: ShaderSource = ShaderSource {
 };
 
 // Fill Extrusion Pattern: the roofs
-const FILL_EXTRUSION_PATTERN_BLOCKS: &[UniformBlockInfo] = &[
+const FILL_EXTRUSION_PATTERN_BLOCKS: &[UniformBlock] = &[
     element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
     block::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
     element::<FillExtrusionDrawableUBO, FillExtrusionDrawableUBO>(
@@ -516,7 +466,7 @@ const FILL_EXTRUSION_PATTERN_BLOCKS: &[UniformBlockInfo] = &[
     ),
     block::<FillExtrusionPropsUBO>("FillExtrusionPropsUBO", ID_FILL_EXTRUSION_PROPS_UBO),
 ];
-const FILL_EXTRUSION_PATTERN_TEXTURES: &[TextureInfo] = &[tex("u_image", ID_FILL_EXTRUSION_IMAGE_TEXTURE)];
+const FILL_EXTRUSION_PATTERN_TEXTURES: &[Texture] = &[tex("u_image", ID_FILL_EXTRUSION_IMAGE_TEXTURE)];
 shader_source!(
     FILL_EXTRUSION_PATTERN_SHADER,
     FILL_EXTRUSION_PATTERN_BLOCKS,
@@ -550,7 +500,7 @@ shader_source!(
 );
 
 // Fill Extrusion Pattern Wall: as Fill Extrusion Wall
-static FILL_EXTRUSION_PATTERN_WALL_SHADER: ShaderSource = ShaderSource {
+static FILL_EXTRUSION_PATTERN_WALL_SHADER: Source = Source {
     glsl: &glsl_sources::FILL_EXTRUSION_PATTERN_INSTANCED_SHADER,
     uniform_blocks: FILL_EXTRUSION_PATTERN_BLOCKS,
     attributes: &[
@@ -858,7 +808,7 @@ shader_source!(
 );
 
 /// The source of each built-in program that has GLSL.
-pub(crate) static BUILT_INS: &[(&Program, &ShaderSource)] = &[
+pub(crate) static BUILT_INS: &[(&Program, &Source)] = &[
     (&programs::BACKGROUND, &BACKGROUND_SHADER),
     (&programs::BACKGROUND_PATTERN, &BACKGROUND_PATTERN_SHADER),
     (&programs::SKY, &SKY_SHADER),

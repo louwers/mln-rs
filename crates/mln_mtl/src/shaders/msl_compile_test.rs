@@ -14,6 +14,7 @@ use std::mem::size_of;
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::shaders::program::{GLOBE_DEFINE, Program};
 use mln_gfx::shaders::shader_defines::*;
+use mln_gfx::shaders::source::msl;
 use mln_gfx::shaders::*;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
@@ -24,10 +25,10 @@ use objc2_metal::{
 };
 
 use super::msl_sources::PRELUDE;
-use super::shader_source::{AttributeInfo, BUILT_INS, ShaderSource};
+use super::shader_source::BUILT_INS;
 use crate::Id;
 
-fn sources() -> impl Iterator<Item = (&'static Program, &'static ShaderSource)> {
+fn sources() -> impl Iterator<Item = (&'static Program, &'static msl::Source)> {
     BUILT_INS.iter().copied()
 }
 
@@ -62,7 +63,7 @@ fn compile(
         .map_err(|error| error.localizedDescription().to_string())
 }
 
-fn full_source(source: &ShaderSource) -> String {
+fn full_source(source: &msl::Source) -> String {
     format!("{PRELUDE}{}{}", source.msl.prelude, source.msl.source)
 }
 
@@ -157,7 +158,7 @@ fn every_shader_source_compiles() {
 /// The UBO id enumerators of each shader's prelude, with the renderer's
 /// values; the `<layer>UBOCount` enumerator is also where its vertex buffers
 /// start.
-fn ubo_ids(program: &Program, source: &ShaderSource) -> Vec<(&'static str, usize)> {
+fn ubo_ids(program: &Program, source: &msl::Source) -> Vec<(&'static str, usize)> {
     let first_vertex_buffer = source.attributes.iter().map(|attr| attr.buffer_index).min();
     let mut ids = vec![
         ("idGlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
@@ -403,7 +404,7 @@ fn vertex_format(data_type: AttributeDataType) -> (MTLVertexFormat, usize) {
 }
 
 /// The vertex and instance attributes of a table.
-fn all_attributes(source: &ShaderSource) -> impl Iterator<Item = &AttributeInfo> {
+fn all_attributes(source: &msl::Source) -> impl Iterator<Item = &msl::Attribute> {
     source.attributes.iter().chain(source.instance_attributes)
 }
 
@@ -411,7 +412,7 @@ fn all_attributes(source: &ShaderSource) -> impl Iterator<Item = &AttributeInfo>
 /// a buffer one after the other in its vertices, the instance attributes'
 /// buffers stepping per instance.
 fn vertex_descriptor(
-    source: &ShaderSource,
+    source: &msl::Source,
     data_type: impl Fn(AttributeDataType) -> AttributeDataType,
 ) -> Retained<MTLVertexDescriptor> {
     let descriptor = MTLVertexDescriptor::new();

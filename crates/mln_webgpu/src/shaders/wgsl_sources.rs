@@ -1,8 +1,8 @@
 //! The WGSL of the built-in shaders, which started as MapLibre Native's.
 
-use super::shader_source::WgslShaderSource;
+use mln_gfx::shaders::source::wgsl::Wgsl;
 
-pub(crate) const ATMOSPHERE_SHADER: WgslShaderSource = WgslShaderSource {
+pub(crate) const ATMOSPHERE_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
@@ -145,7 +145,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-pub(crate) const BACKGROUND_PATTERN_SHADER: WgslShaderSource = WgslShaderSource {
+pub(crate) const BACKGROUND_PATTERN_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
@@ -285,7 +285,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-pub(crate) const BACKGROUND_SHADER: WgslShaderSource = WgslShaderSource {
+pub(crate) const BACKGROUND_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
@@ -363,7 +363,7 @@ fn main() -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-pub(crate) const CIRCLE_SHADER: WgslShaderSource = WgslShaderSource {
+pub(crate) const CIRCLE_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
@@ -666,7 +666,7 @@ struct GlobalIndexUBO {
     ),
 };
 
-pub(crate) const CLIPPING_MASK_PROGRAM: WgslShaderSource = WgslShaderSource {
+pub(crate) const CLIPPING_MASK_PROGRAM: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
@@ -699,7 +699,7 @@ fn main() -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-pub(crate) const COLLISION_BOX_SHADER: WgslShaderSource = WgslShaderSource {
+pub(crate) const COLLISION_BOX_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
@@ -811,7 +811,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-pub(crate) const COLLISION_CIRCLE_SHADER: WgslShaderSource = WgslShaderSource {
+pub(crate) const COLLISION_CIRCLE_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
@@ -951,7 +951,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-pub(crate) const COLOR_RELIEF_SHADER: WgslShaderSource = WgslShaderSource {
+pub(crate) const COLOR_RELIEF_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
@@ -1118,7 +1118,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-pub(crate) const FILL_EXTRUSION_PATTERN_SHADER: WgslShaderSource = WgslShaderSource {
+pub(crate) const FILL_EXTRUSION_PATTERN_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
@@ -1402,7 +1402,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-pub(crate) const FILL_EXTRUSION_SHADER: WgslShaderSource = WgslShaderSource {
+pub(crate) const FILL_EXTRUSION_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
@@ -1539,7 +1539,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-pub(crate) const FILL_OUTLINE_PATTERN_SHADER: WgslShaderSource = WgslShaderSource {
+pub(crate) const FILL_OUTLINE_PATTERN_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
@@ -1836,7 +1836,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-pub(crate) const FILL_OUTLINE_SHADER: WgslShaderSource = WgslShaderSource {
+pub(crate) const FILL_OUTLINE_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
@@ -1985,7 +1985,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-pub(crate) const FILL_PATTERN_SHADER: WgslShaderSource = WgslShaderSource {
+pub(crate) const FILL_PATTERN_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
@@ -2269,7 +2269,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-pub(crate) const FILL_SHADER: WgslShaderSource = WgslShaderSource {
+pub(crate) const FILL_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
@@ -2396,7 +2396,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-pub(crate) const GLOBE_DEPTH_SHADER: WgslShaderSource = WgslShaderSource {
+pub(crate) const GLOBE_DEPTH_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
@@ -2434,7 +2434,7 @@ fn main() -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-pub(crate) const HEATMAP_SHADER: WgslShaderSource = WgslShaderSource {
+pub(crate) const HEATMAP_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
@@ -2566,7 +2566,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-pub(crate) const HEATMAP_TEXTURE_SHADER: WgslShaderSource = WgslShaderSource {
+pub(crate) const HEATMAP_TEXTURE_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
@@ -2647,7 +2647,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 /// Port-only: a layer's texture, the size of the frame, composited onto it
 /// texel for texel, with its opacity and, for the blend modes that no blend
 /// function expresses, against a copy of the frame (`backdrop_texture`).
-pub(crate) const LAYER_COMPOSITE_SHADER: WgslShaderSource = WgslShaderSource {
+pub(crate) const LAYER_COMPOSITE_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
@@ -2750,7 +2750,7 @@ fn main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-pub(crate) const HILLSHADE_PREPARE_SHADER: WgslShaderSource = WgslShaderSource {
+pub(crate) const HILLSHADE_PREPARE_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
@@ -2859,7 +2859,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-pub(crate) const HILLSHADE_SHADER: WgslShaderSource = WgslShaderSource {
+pub(crate) const HILLSHADE_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
@@ -3074,7 +3074,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-pub(crate) const LINE_GRADIENT_SDF_SHADER: WgslShaderSource = WgslShaderSource {
+pub(crate) const LINE_GRADIENT_SDF_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
@@ -3443,7 +3443,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-pub(crate) const LINE_GRADIENT_SHADER: WgslShaderSource = WgslShaderSource {
+pub(crate) const LINE_GRADIENT_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
@@ -3711,7 +3711,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-pub(crate) const LINE_PATTERN_SHADER: WgslShaderSource = WgslShaderSource {
+pub(crate) const LINE_PATTERN_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
@@ -4101,7 +4101,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-pub(crate) const LINE_SDF_SHADER: WgslShaderSource = WgslShaderSource {
+pub(crate) const LINE_SDF_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
@@ -4493,7 +4493,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-pub(crate) const LINE_SHADER: WgslShaderSource = WgslShaderSource {
+pub(crate) const LINE_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
@@ -4769,7 +4769,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-pub(crate) const PRELUDE: WgslShaderSource = WgslShaderSource {
+pub(crate) const PRELUDE: Wgsl = Wgsl {
     vertex: None,
     fragment: None,
     prelude: Some(
@@ -5014,7 +5014,7 @@ fn atlas_pos(origin: vec2<f32>, offset: vec2<f32>) -> vec2<f32> {
     ),
 };
 
-pub(crate) const RASTER_SHADER: WgslShaderSource = WgslShaderSource {
+pub(crate) const RASTER_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
@@ -5141,7 +5141,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-pub(crate) const SKY_SHADER: WgslShaderSource = WgslShaderSource {
+pub(crate) const SKY_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
@@ -5201,7 +5201,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-pub(crate) const SYMBOL_ICON_SHADER: WgslShaderSource = WgslShaderSource {
+pub(crate) const SYMBOL_ICON_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
@@ -5483,7 +5483,7 @@ const c_offscreen_degenerate_triangle_location: f32 = -2.0;
     ),
 };
 
-pub(crate) const SYMBOL_SDF_SHADER: WgslShaderSource = WgslShaderSource {
+pub(crate) const SYMBOL_SDF_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {
@@ -5844,7 +5844,7 @@ const c_offscreen_degenerate_triangle_location: f32 = -2.0;
     ),
 };
 
-pub(crate) const SYMBOL_TEXT_AND_ICON_SHADER: WgslShaderSource = WgslShaderSource {
+pub(crate) const SYMBOL_TEXT_AND_ICON_SHADER: Wgsl = Wgsl {
     vertex: Some(
         r"
 struct VertexInput {

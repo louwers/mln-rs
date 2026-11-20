@@ -21,7 +21,7 @@ pub(crate) struct Compiled {
     pub(crate) resources: Vec<ResourceUse>,
 }
 
-/// Compiles a `ShaderSource::compose`d stage, whose clip space is y-up, and
+/// Compiles a `mln_glsl::compose`d stage, whose clip space is y-up, and
 /// finds the resources it uses, once a process: SPIR-V doesn't depend on
 /// the device, and every renderer compiles the same stages.
 pub(crate) fn compile_program(stage: Stage, source: &str) -> Result<Arc<Compiled>, String> {
