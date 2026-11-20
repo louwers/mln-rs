@@ -36,7 +36,6 @@
 //   include/mln/shaders/gl/symbol_icon.hpp
 //   include/mln/shaders/gl/symbol_sdf.hpp
 //   include/mln/shaders/gl/symbol_text_and_icon.hpp
-//   include/mln/shaders/gl/wide_vector.hpp
 // with the port's changes, so that it reads the vertices its renderer makes
 // and draws what its WGSL does:
 // - `atlas_pos` (the fragment prelude) places the samples of an atlas image,

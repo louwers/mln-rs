@@ -29,7 +29,6 @@
 "crates/mln_c/src/render_session.rs" = 3
 "crates/mln_c/src/web.rs" = 5
 "crates/mln_expression/src/parsing_context.rs" = 11
-"crates/mln_renderer/src/gfx/shader_group.rs" = 1
 "crates/mln_renderer/src/tile/worker_codec/host.rs" = 5
 "crates/mln_runtime/src/render/driver.rs" = 2
 "crates/mln_runtime/src/render/session.rs" = 9

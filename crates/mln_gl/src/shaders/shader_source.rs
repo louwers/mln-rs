@@ -39,6 +39,8 @@ use mln_gfx::shaders::line_layer_ubo::{
     LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineGradientDrawableUBO, LinePatternDrawableUBO,
     LinePatternTilePropsUBO, LineSDFDrawableUBO, LineSDFTilePropsUBO, LineTilePropsUnionUBO,
 };
+use mln_gfx::shaders::program::Program;
+use mln_gfx::shaders::programs;
 use mln_gfx::shaders::raster_layer_ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
 use mln_gfx::shaders::shader_defines::{
     ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE, ID_ATMOSPHERE_PROPS_UBO, ID_BACKGROUND_DRAWABLE_UBO,
@@ -84,7 +86,6 @@ use mln_gfx::shaders::shader_defines::{
     ID_SYMBOL_OPACITY_ATTRIBUTE, ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE, ID_SYMBOL_POS_OFFSET_ATTRIBUTE,
     ID_SYMBOL_PROJECTED_POS_ATTRIBUTE, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE, ID_SYMBOL_TILE_PROPS_UBO,
 };
-use mln_gfx::shaders::shader_source::BuiltIn;
 use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
 use mln_gfx::shaders::symbol_layer_ubo::{
     CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
@@ -92,8 +93,7 @@ use mln_gfx::shaders::symbol_layer_ubo::{
 
 use super::glsl_sources;
 
-/// The GLSL members of a `ShaderSource<BuiltIn::X, gfx::Backend::Type::OpenGL>`
-/// specialisation.
+/// A program's GLSL.
 ///
 /// A stage compiles from `#version 300 es`, or `#version 330 core` on
 /// desktop OpenGL, the program's defines, the prelude's source of that stage
@@ -132,12 +132,11 @@ pub(crate) struct TextureInfo {
     pub(crate) id: usize,
 }
 
-/// A complete specialisation: GLSL plus the `uniformBlocks`, `attributes`,
-/// `instanceAttributes` and `textures` tables.
+/// A program's OpenGL source: its GLSL, and the tables of where its uniform
+/// blocks, attributes and textures bind.
 #[derive(Debug)]
 pub(crate) struct ShaderSource {
     pub(crate) glsl: &'static GlslShaderSource,
-    pub(crate) name: &'static str,
     pub(crate) uniform_blocks: &'static [UniformBlockInfo],
     pub(crate) attributes: &'static [AttributeInfo],
     /// The attributes that step once an instance.
@@ -165,13 +164,12 @@ const fn tex(name: &'static str, id: usize) -> TextureInfo {
 }
 
 macro_rules! shader_source {
-    ($name:ident, $str:literal, $blocks:expr, $attrs:expr, $textures:expr) => {
-        shader_source!($name, $str, $blocks, $attrs, &[], $textures);
+    ($name:ident, $blocks:expr, $attrs:expr, $textures:expr) => {
+        shader_source!($name, $blocks, $attrs, &[], $textures);
     };
-    ($name:ident, $str:literal, $blocks:expr, $attrs:expr, $instance_attrs:expr, $textures:expr) => {
+    ($name:ident, $blocks:expr, $attrs:expr, $instance_attrs:expr, $textures:expr) => {
         static $name: ShaderSource = ShaderSource {
             glsl: &glsl_sources::$name,
-            name: $str,
             uniform_blocks: $blocks,
             attributes: $attrs,
             instance_attributes: $instance_attrs,
@@ -187,7 +185,6 @@ const DEBUG_UBO: UniformBlockInfo = UniformBlockInfo { name: "DebugUBO", id: ID_
 // Clipping mask
 shader_source!(
     CLIPPING_MASK_PROGRAM,
-    "ClippingMaskProgram",
     &[element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO)],
     &[attr("a_pos", ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE)],
     &[]
@@ -196,7 +193,6 @@ shader_source!(
 // Fill Outline Triangulated
 shader_source!(
     FILL_OUTLINE_TRIANGULATED_SHADER,
-    "FillOutlineTriangulatedShader",
     &[
         element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
         block::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
@@ -213,7 +209,6 @@ shader_source!(
 // Background
 shader_source!(
     BACKGROUND_SHADER,
-    "BackgroundShader",
     &[
         element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
         element::<BackgroundDrawableUBO, BackgroundDrawableUnionUBO>(
@@ -229,7 +224,6 @@ shader_source!(
 // Background Pattern
 shader_source!(
     BACKGROUND_PATTERN_SHADER,
-    "BackgroundPatternShader",
     &[
         element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
         block::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
@@ -246,7 +240,6 @@ shader_source!(
 // Sky
 shader_source!(
     SKY_SHADER,
-    "SkyShader",
     &[
         element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
         block::<SkyPropsUBO>("SkyPropsUBO", ID_SKY_PROPS_UBO),
@@ -258,7 +251,6 @@ shader_source!(
 // Atmosphere
 shader_source!(
     ATMOSPHERE_SHADER,
-    "AtmosphereShader",
     &[
         element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
         block::<AtmospherePropsUBO>("AtmospherePropsUBO", ID_ATMOSPHERE_PROPS_UBO),
@@ -270,7 +262,6 @@ shader_source!(
 // Circle
 shader_source!(
     CIRCLE_SHADER,
-    "CircleShader",
     &[
         element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
         block::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
@@ -293,7 +284,6 @@ shader_source!(
 // Collision Box
 shader_source!(
     COLLISION_BOX_SHADER,
-    "CollisionBoxShader",
     &[
         block::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
         element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
@@ -314,7 +304,6 @@ shader_source!(
 // Collision Circle
 shader_source!(
     COLLISION_CIRCLE_SHADER,
-    "CollisionCircleShader",
     &[
         block::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
         element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
@@ -333,7 +322,6 @@ shader_source!(
 // Debug
 shader_source!(
     DEBUG_SHADER,
-    "DebugShader",
     &[element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO), DEBUG_UBO,],
     &[attr("a_pos", ID_DEBUG_POS_VERTEX_ATTRIBUTE),],
     &[tex("u_overlay", ID_DEBUG_OVERLAY_TEXTURE)]
@@ -342,7 +330,6 @@ shader_source!(
 // Globe depth
 shader_source!(
     GLOBE_DEPTH_SHADER,
-    "GlobeDepthShader",
     &[element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),],
     &[attr("a_pos", ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE),],
     &[]
@@ -351,7 +338,6 @@ shader_source!(
 // Layer composite
 shader_source!(
     LAYER_COMPOSITE_SHADER,
-    "LayerCompositeShader",
     &[
         element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
         block::<LayerCompositeUBO>("LayerCompositeUBO", ID_LAYER_COMPOSITE_UBO),
@@ -363,7 +349,6 @@ shader_source!(
 // Fill
 shader_source!(
     FILL_SHADER,
-    "FillShader",
     &[
         element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
         element::<FillDrawableUBO, FillDrawableUnionUBO>("FillDrawableUBO", ID_FILL_DRAWABLE_UBO),
@@ -380,7 +365,6 @@ shader_source!(
 // Fill Outline
 shader_source!(
     FILL_OUTLINE_SHADER,
-    "FillOutlineShader",
     &[
         element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
         block::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
@@ -398,7 +382,6 @@ shader_source!(
 // Fill Pattern
 shader_source!(
     FILL_PATTERN_SHADER,
-    "FillPatternShader",
     &[
         element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
         block::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
@@ -419,7 +402,6 @@ shader_source!(
 // Fill Outline Pattern
 shader_source!(
     FILL_OUTLINE_PATTERN_SHADER,
-    "FillOutlinePatternShader",
     &[
         element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
         block::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
@@ -444,7 +426,6 @@ shader_source!(
 // the context draws no 2 px lines
 shader_source!(
     FILL_OUTLINE_INSTANCED_SHADER,
-    "FillOutlineInstancedShader",
     &[
         element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
         block::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
@@ -464,7 +445,6 @@ shader_source!(
 // Fill Outline Pattern Instanced
 shader_source!(
     FILL_OUTLINE_PATTERN_INSTANCED_SHADER,
-    "FillOutlinePatternInstancedShader",
     &[
         element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
         block::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
@@ -502,7 +482,6 @@ const FILL_EXTRUSION_BLOCKS: &[UniformBlockInfo] = &[
 ];
 shader_source!(
     FILL_EXTRUSION_SHADER,
-    "FillExtrusionShader",
     FILL_EXTRUSION_BLOCKS,
     &[
         attr("a_pos", ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
@@ -518,7 +497,6 @@ shader_source!(
 const FILL_EXTRUSION_INSTANCED_ATTRIBUTES: &[AttributeInfo] = &[attr("a_pos", ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE)];
 shader_source!(
     FILL_EXTRUSION_INSTANCED_SHADER,
-    "FillExtrusionInstancedShader",
     FILL_EXTRUSION_BLOCKS,
     FILL_EXTRUSION_INSTANCED_ATTRIBUTES,
     &[
@@ -537,7 +515,6 @@ shader_source!(
 // vertex, for walls whose quads are in the vertex buffer
 static FILL_EXTRUSION_WALL_SHADER: ShaderSource = ShaderSource {
     glsl: &glsl_sources::FILL_EXTRUSION_INSTANCED_SHADER,
-    name: "FillExtrusionWallShader",
     uniform_blocks: FILL_EXTRUSION_BLOCKS,
     attributes: &[
         attr("a_pos", ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
@@ -570,7 +547,6 @@ const FILL_EXTRUSION_PATTERN_BLOCKS: &[UniformBlockInfo] = &[
 const FILL_EXTRUSION_PATTERN_TEXTURES: &[TextureInfo] = &[tex("u_image", ID_FILL_EXTRUSION_IMAGE_TEXTURE)];
 shader_source!(
     FILL_EXTRUSION_PATTERN_SHADER,
-    "FillExtrusionPatternShader",
     FILL_EXTRUSION_PATTERN_BLOCKS,
     &[
         attr("a_pos", ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
@@ -586,7 +562,6 @@ shader_source!(
 // Fill Extrusion Pattern Instanced: the walls
 shader_source!(
     FILL_EXTRUSION_PATTERN_INSTANCED_SHADER,
-    "FillExtrusionPatternInstancedShader",
     FILL_EXTRUSION_PATTERN_BLOCKS,
     FILL_EXTRUSION_INSTANCED_ATTRIBUTES,
     &[
@@ -605,7 +580,6 @@ shader_source!(
 // Fill Extrusion Pattern Wall: as Fill Extrusion Wall
 static FILL_EXTRUSION_PATTERN_WALL_SHADER: ShaderSource = ShaderSource {
     glsl: &glsl_sources::FILL_EXTRUSION_PATTERN_INSTANCED_SHADER,
-    name: "FillExtrusionPatternWallShader",
     uniform_blocks: FILL_EXTRUSION_PATTERN_BLOCKS,
     attributes: &[
         attr("a_pos", ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
@@ -625,7 +599,6 @@ static FILL_EXTRUSION_PATTERN_WALL_SHADER: ShaderSource = ShaderSource {
 // Heatmap
 shader_source!(
     HEATMAP_SHADER,
-    "HeatmapShader",
     &[
         element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
         element::<HeatmapDrawableUBO, HeatmapDrawableUBO>("HeatmapDrawableUBO", ID_HEATMAP_DRAWABLE_UBO),
@@ -642,7 +615,6 @@ shader_source!(
 // Heatmap Texture
 shader_source!(
     HEATMAP_TEXTURE_SHADER,
-    "HeatmapTextureShader",
     &[
         element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
         block::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
@@ -655,7 +627,6 @@ shader_source!(
 // Hillshade Prepare
 shader_source!(
     HILLSHADE_PREPARE_SHADER,
-    "HillshadePrepareShader",
     &[
         element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
         block::<HillshadePrepareDrawableUBO>("HillshadePrepareDrawableUBO", ID_HILLSHADE_PREPARE_DRAWABLE_UBO),
@@ -671,7 +642,6 @@ shader_source!(
 // Hillshade
 shader_source!(
     HILLSHADE_SHADER,
-    "HillshadeShader",
     &[
         element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
         element::<HillshadeDrawableUBO, HillshadeDrawableUBO>("HillshadeDrawableUBO", ID_HILLSHADE_DRAWABLE_UBO),
@@ -688,7 +658,6 @@ shader_source!(
 // Color Relief
 shader_source!(
     COLOR_RELIEF_SHADER,
-    "ColorReliefShader",
     &[
         element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
         element::<ColorReliefDrawableUBO, ColorReliefDrawableUBO>(
@@ -715,7 +684,6 @@ shader_source!(
 // Line
 shader_source!(
     LINE_SHADER,
-    "LineShader",
     &[
         element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
         block::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
@@ -738,7 +706,6 @@ shader_source!(
 // Line Gradient
 shader_source!(
     LINE_GRADIENT_SHADER,
-    "LineGradientShader",
     &[
         element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
         block::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
@@ -760,7 +727,6 @@ shader_source!(
 // Line Pattern
 shader_source!(
     LINE_PATTERN_SHADER,
-    "LinePatternShader",
     &[
         element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
         block::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
@@ -785,7 +751,6 @@ shader_source!(
 // Line SDF
 shader_source!(
     LINE_SDF_SHADER,
-    "LineSDFShader",
     &[
         element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
         block::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
@@ -811,7 +776,6 @@ shader_source!(
 // Line gradient SDF
 shader_source!(
     LINE_GRADIENT_SDF_SHADER,
-    "LineGradientSDFShader",
     &[
         element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
         block::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
@@ -836,7 +800,6 @@ shader_source!(
 // Raster
 shader_source!(
     RASTER_SHADER,
-    "RasterShader",
     &[
         element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
         element::<RasterDrawableUBO, RasterDrawableUBO>("RasterDrawableUBO", ID_RASTER_DRAWABLE_UBO),
@@ -849,7 +812,6 @@ shader_source!(
 // Symbol Icon
 shader_source!(
     SYMBOL_ICON_SHADER,
-    "SymbolIconShader",
     &[
         element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
         block::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
@@ -873,7 +835,6 @@ shader_source!(
 // Symbol SDF
 shader_source!(
     SYMBOL_SDF_SHADER,
-    "SymbolSDFShader",
     &[
         element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
         block::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
@@ -901,7 +862,6 @@ shader_source!(
 // Symbol Text & Icon
 shader_source!(
     SYMBOL_TEXT_AND_ICON_SHADER,
-    "SymbolTextAndIconShader",
     &[
         element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
         block::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
@@ -925,92 +885,44 @@ shader_source!(
     &[tex("u_texture", ID_SYMBOL_IMAGE_TEXTURE), tex("u_texture_icon", ID_SYMBOL_IMAGE_ICON_TEXTURE)]
 );
 
-/// The OpenGL source of `shader_id`, for the shaders the renderer draws
-/// with.
-#[must_use]
-pub(crate) fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource> {
-    match shader_id {
-        BuiltIn::BackgroundShader => Some(&BACKGROUND_SHADER),
-        BuiltIn::BackgroundPatternShader => Some(&BACKGROUND_PATTERN_SHADER),
-        BuiltIn::SkyShader => Some(&SKY_SHADER),
-        BuiltIn::AtmosphereShader => Some(&ATMOSPHERE_SHADER),
-        BuiltIn::CircleShader => Some(&CIRCLE_SHADER),
-        BuiltIn::ClippingMaskProgram => Some(&CLIPPING_MASK_PROGRAM),
-        BuiltIn::CollisionBoxShader => Some(&COLLISION_BOX_SHADER),
-        BuiltIn::CollisionCircleShader => Some(&COLLISION_CIRCLE_SHADER),
-        BuiltIn::DebugShader => Some(&DEBUG_SHADER),
-        BuiltIn::GlobeDepthShader => Some(&GLOBE_DEPTH_SHADER),
-        BuiltIn::FillShader => Some(&FILL_SHADER),
-        BuiltIn::FillOutlineShader => Some(&FILL_OUTLINE_SHADER),
-        BuiltIn::FillPatternShader => Some(&FILL_PATTERN_SHADER),
-        BuiltIn::FillOutlinePatternShader => Some(&FILL_OUTLINE_PATTERN_SHADER),
-        BuiltIn::FillOutlineInstancedShader => Some(&FILL_OUTLINE_INSTANCED_SHADER),
-        BuiltIn::FillOutlinePatternInstancedShader => Some(&FILL_OUTLINE_PATTERN_INSTANCED_SHADER),
-        BuiltIn::FillOutlineTriangulatedShader => Some(&FILL_OUTLINE_TRIANGULATED_SHADER),
-        BuiltIn::FillExtrusionShader => Some(&FILL_EXTRUSION_SHADER),
-        BuiltIn::FillExtrusionInstancedShader => Some(&FILL_EXTRUSION_INSTANCED_SHADER),
-        BuiltIn::FillExtrusionWallShader => Some(&FILL_EXTRUSION_WALL_SHADER),
-        BuiltIn::FillExtrusionPatternShader => Some(&FILL_EXTRUSION_PATTERN_SHADER),
-        BuiltIn::FillExtrusionPatternInstancedShader => Some(&FILL_EXTRUSION_PATTERN_INSTANCED_SHADER),
-        BuiltIn::FillExtrusionPatternWallShader => Some(&FILL_EXTRUSION_PATTERN_WALL_SHADER),
-        BuiltIn::HeatmapShader => Some(&HEATMAP_SHADER),
-        BuiltIn::HeatmapTextureShader => Some(&HEATMAP_TEXTURE_SHADER),
-        BuiltIn::HillshadePrepareShader => Some(&HILLSHADE_PREPARE_SHADER),
-        BuiltIn::HillshadeShader => Some(&HILLSHADE_SHADER),
-        BuiltIn::ColorReliefShader => Some(&COLOR_RELIEF_SHADER),
-        BuiltIn::LineShader => Some(&LINE_SHADER),
-        BuiltIn::LineGradientShader => Some(&LINE_GRADIENT_SHADER),
-        BuiltIn::LinePatternShader => Some(&LINE_PATTERN_SHADER),
-        BuiltIn::LineSDFShader => Some(&LINE_SDF_SHADER),
-        BuiltIn::LineGradientSDFShader => Some(&LINE_GRADIENT_SDF_SHADER),
-        BuiltIn::RasterShader => Some(&RASTER_SHADER),
-        BuiltIn::SymbolIconShader => Some(&SYMBOL_ICON_SHADER),
-        BuiltIn::SymbolSDFShader => Some(&SYMBOL_SDF_SHADER),
-        BuiltIn::SymbolTextAndIconShader => Some(&SYMBOL_TEXT_AND_ICON_SHADER),
-        BuiltIn::LayerCompositeShader => Some(&LAYER_COMPOSITE_SHADER),
-        _ => None,
-    }
-}
-
-/// The shaders `shader_source` has.
-#[cfg(test)]
-pub(crate) const REGISTERED_SHADERS: &[BuiltIn] = &[
-    BuiltIn::BackgroundShader,
-    BuiltIn::BackgroundPatternShader,
-    BuiltIn::SkyShader,
-    BuiltIn::AtmosphereShader,
-    BuiltIn::CircleShader,
-    BuiltIn::ClippingMaskProgram,
-    BuiltIn::CollisionBoxShader,
-    BuiltIn::CollisionCircleShader,
-    BuiltIn::DebugShader,
-    BuiltIn::GlobeDepthShader,
-    BuiltIn::FillShader,
-    BuiltIn::FillOutlineShader,
-    BuiltIn::FillPatternShader,
-    BuiltIn::FillOutlinePatternShader,
-    BuiltIn::FillOutlineInstancedShader,
-    BuiltIn::FillOutlinePatternInstancedShader,
-    BuiltIn::FillOutlineTriangulatedShader,
-    BuiltIn::FillExtrusionShader,
-    BuiltIn::FillExtrusionInstancedShader,
-    BuiltIn::FillExtrusionWallShader,
-    BuiltIn::FillExtrusionPatternShader,
-    BuiltIn::FillExtrusionPatternInstancedShader,
-    BuiltIn::FillExtrusionPatternWallShader,
-    BuiltIn::HeatmapShader,
-    BuiltIn::HeatmapTextureShader,
-    BuiltIn::HillshadePrepareShader,
-    BuiltIn::HillshadeShader,
-    BuiltIn::ColorReliefShader,
-    BuiltIn::LineShader,
-    BuiltIn::LineGradientShader,
-    BuiltIn::LinePatternShader,
-    BuiltIn::LineSDFShader,
-    BuiltIn::LineGradientSDFShader,
-    BuiltIn::RasterShader,
-    BuiltIn::SymbolIconShader,
-    BuiltIn::SymbolSDFShader,
-    BuiltIn::SymbolTextAndIconShader,
-    BuiltIn::LayerCompositeShader,
+/// The source of each built-in program that has GLSL.
+pub(crate) static BUILT_INS: &[(&Program, &ShaderSource)] = &[
+    (&programs::BACKGROUND, &BACKGROUND_SHADER),
+    (&programs::BACKGROUND_PATTERN, &BACKGROUND_PATTERN_SHADER),
+    (&programs::SKY, &SKY_SHADER),
+    (&programs::ATMOSPHERE, &ATMOSPHERE_SHADER),
+    (&programs::CIRCLE, &CIRCLE_SHADER),
+    (&programs::CLIPPING_MASK, &CLIPPING_MASK_PROGRAM),
+    (&programs::COLLISION_BOX, &COLLISION_BOX_SHADER),
+    (&programs::COLLISION_CIRCLE, &COLLISION_CIRCLE_SHADER),
+    (&programs::DEBUG, &DEBUG_SHADER),
+    (&programs::GLOBE_DEPTH, &GLOBE_DEPTH_SHADER),
+    (&programs::FILL, &FILL_SHADER),
+    (&programs::FILL_OUTLINE, &FILL_OUTLINE_SHADER),
+    (&programs::FILL_PATTERN, &FILL_PATTERN_SHADER),
+    (&programs::FILL_OUTLINE_PATTERN, &FILL_OUTLINE_PATTERN_SHADER),
+    (&programs::FILL_OUTLINE_INSTANCED, &FILL_OUTLINE_INSTANCED_SHADER),
+    (&programs::FILL_OUTLINE_PATTERN_INSTANCED, &FILL_OUTLINE_PATTERN_INSTANCED_SHADER),
+    (&programs::FILL_OUTLINE_TRIANGULATED, &FILL_OUTLINE_TRIANGULATED_SHADER),
+    (&programs::FILL_EXTRUSION, &FILL_EXTRUSION_SHADER),
+    (&programs::FILL_EXTRUSION_INSTANCED, &FILL_EXTRUSION_INSTANCED_SHADER),
+    (&programs::FILL_EXTRUSION_WALL, &FILL_EXTRUSION_WALL_SHADER),
+    (&programs::FILL_EXTRUSION_PATTERN, &FILL_EXTRUSION_PATTERN_SHADER),
+    (&programs::FILL_EXTRUSION_PATTERN_INSTANCED, &FILL_EXTRUSION_PATTERN_INSTANCED_SHADER),
+    (&programs::FILL_EXTRUSION_PATTERN_WALL, &FILL_EXTRUSION_PATTERN_WALL_SHADER),
+    (&programs::HEATMAP, &HEATMAP_SHADER),
+    (&programs::HEATMAP_TEXTURE, &HEATMAP_TEXTURE_SHADER),
+    (&programs::HILLSHADE_PREPARE, &HILLSHADE_PREPARE_SHADER),
+    (&programs::HILLSHADE, &HILLSHADE_SHADER),
+    (&programs::COLOR_RELIEF, &COLOR_RELIEF_SHADER),
+    (&programs::LINE, &LINE_SHADER),
+    (&programs::LINE_GRADIENT, &LINE_GRADIENT_SHADER),
+    (&programs::LINE_PATTERN, &LINE_PATTERN_SHADER),
+    (&programs::LINE_SDF, &LINE_SDF_SHADER),
+    (&programs::LINE_GRADIENT_SDF, &LINE_GRADIENT_SDF_SHADER),
+    (&programs::RASTER, &RASTER_SHADER),
+    (&programs::SYMBOL_ICON, &SYMBOL_ICON_SHADER),
+    (&programs::SYMBOL_SDF, &SYMBOL_SDF_SHADER),
+    (&programs::SYMBOL_TEXT_AND_ICON, &SYMBOL_TEXT_AND_ICON_SHADER),
+    (&programs::LAYER_COMPOSITE, &LAYER_COMPOSITE_SHADER),
 ];

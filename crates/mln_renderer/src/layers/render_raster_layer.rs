@@ -7,9 +7,10 @@ use std::mem::offset_of;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_gfx::gpu::Gpu;
+use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
+use mln_gfx::shaders::programs;
 use mln_gfx::shaders::raster_layer_ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
@@ -33,9 +34,8 @@ use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::gfx::context::Context;
 use crate::gfx::indexes::{DrawIndexes, Indexes, SharedIndexes};
-use crate::gfx::shader_program::ShaderProgramPtr;
 use crate::gfx::store::SharedTexture;
-use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
+use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_composite::Composite;
@@ -180,8 +180,6 @@ pub(crate) struct RenderRasterLayer {
     /// and projections.
     draw_list: DrawList<(RasterDrawableUBO, ProjectionUBO), RasterPart>,
 
-    raster_shader: Option<ShaderProgramPtr>,
-
     static_geometry: Option<StaticGeometry>,
     globe_meshes: GlobeTileMeshCache<RasterLayoutVertex>,
 
@@ -199,7 +197,6 @@ impl RenderRasterLayer {
             values,
             drawing: RasterDrawing::default(),
             draw_list: DrawList::default(),
-            raster_shader: None,
             static_geometry: None,
             globe_meshes: GlobeTileMeshCache::new(),
             textures: HashMap::default(),
@@ -260,10 +257,9 @@ impl RenderRasterLayer {
         paint_parameters: &mut PaintParameters<'_>,
     ) {
         let sampler = self.sampler_state();
-        let RenderRasterLayer { base, drawing, draw_list, raster_shader, textures, .. } = self;
-        let Some(raster_shader) = shader(raster_shader, base.projection_variant, paint_parameters) else {
-            return;
-        };
+        let RenderRasterLayer { base, drawing, draw_list, textures, .. } = self;
+        let raster_shader =
+            paint_parameters.context.shader_key(&programs::RASTER, Uniforms::default(), base.projection_variant);
         let objects = &mut drawing.objects;
         // The bucket is missing until the image loads. An image source's
         // bucket always has geometry of its own once it has an image.
@@ -287,7 +283,7 @@ impl RenderRasterLayer {
         while objects.images.len() < tile_ids.len() {
             let draw_geometry =
                 raster_geometry(&quads.vertices, quads.vertices.count(), quads.indexes.clone().into(), &quads.segments);
-            objects.images.push(KeptDraw::new(new_objects(raster_shader, draw_geometry, texture.as_ref())));
+            objects.images.push(KeptDraw::new(new_objects(&raster_shader, draw_geometry, texture.as_ref())));
         }
         for (index, (tile_id, draw)) in tile_ids.iter().zip(&objects.images).enumerate() {
             let uniforms = Self::uniforms(tile_id, paint_parameters);
@@ -367,11 +363,11 @@ fn contrast_factor(contrast: f32) -> f32 {
 
 /// The GPU objects of a raster draw of `geometry` with `shader`, which binds
 /// `texture` as both of its images.
-fn new_objects(shader: &ShaderProgramPtr, geometry: DrawGeometry, texture: Option<&SharedTexture>) -> DrawObjects {
+fn new_objects(shader: &ShaderKey, geometry: DrawGeometry, texture: Option<&SharedTexture>) -> DrawObjects {
     let mut textures = Textures::default();
     textures[ID_RASTER_IMAGE0_TEXTURE] = texture.cloned();
     textures[ID_RASTER_IMAGE1_TEXTURE] = texture.cloned();
-    DrawObjects::new(Rc::clone(shader), ColorMode::alpha_blended(), CullFaceMode::disabled(), geometry, textures)
+    DrawObjects::new(shader.clone(), ColorMode::alpha_blended(), CullFaceMode::disabled(), geometry, textures)
 }
 
 /// The geometry of a raster draw of `vertex_count` vertices in `vertices`,
@@ -429,10 +425,8 @@ impl TypedLayer for RenderRasterLayer {
         PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
 
-    /// Drops the shader of the last projection, and the globe's meshes
-    /// when the frame isn't on the globe.
+    /// Drops the globe's meshes when the frame isn't on the globe.
     fn projection_changed(&mut self) {
-        self.raster_shader = None;
         if self.base.projection_variant == ProjectionVariant::Mercator {
             self.globe_meshes.clear();
         }
@@ -454,19 +448,10 @@ impl TypedLayer for RenderRasterLayer {
     ) {
         let sampler = self.sampler_state();
         let RenderRasterLayer {
-            base,
-            drawing,
-            draw_list,
-            raster_shader,
-            static_geometry,
-            globe_meshes,
-            textures,
-            live_buckets,
-            ..
+            base, drawing, draw_list, static_geometry, globe_meshes, textures, live_buckets, ..
         } = self;
-        let Some(raster_shader) = shader(raster_shader, base.projection_variant, paint_parameters) else {
-            return;
-        };
+        let raster_shader =
+            paint_parameters.context.shader_key(&programs::RASTER, Uniforms::default(), base.projection_variant);
         let static_geometry = static_geometry.get_or_insert_with(|| StaticGeometry::new(paint_parameters.context));
 
         // Drop the textures of buckets that are no longer rendered.
@@ -533,7 +518,7 @@ impl TypedLayer for RenderRasterLayer {
                         &static_geometry.segments,
                     )
                 };
-                let objects = new_objects(raster_shader, draw_geometry, texture.as_ref());
+                let objects = new_objects(&raster_shader, draw_geometry, texture.as_ref());
                 let built = RasterTile { draw: KeptDraw::new(objects), geometry_generation };
                 *entry.value = Some(built);
             }
@@ -565,19 +550,6 @@ impl TypedLayer for RenderRasterLayer {
     fn nothing_to_draw(&mut self) {
         self.textures.clear();
     }
-}
-
-/// The shader of the layer's draws in `variant`, the frame's projection,
-/// which `slot` keeps from its first use.
-fn shader<'a>(
-    slot: &'a mut Option<ShaderProgramPtr>,
-    variant: ProjectionVariant,
-    paint_parameters: &PaintParameters<'_>,
-) -> Option<&'a ShaderProgramPtr> {
-    if slot.is_none() {
-        *slot = paint_parameters.static_data.shaders.shader("RasterShader", variant);
-    }
-    slot.as_ref()
 }
 
 impl RenderLayer for RenderRasterLayer {}

@@ -23,8 +23,7 @@ use mln_util::feature::feature_id_to_string;
 use mln_vec_map::VecMap;
 
 use crate::bucket_geometry::GeometryVec;
-use crate::gfx::shader_group::StringIDSetsPair;
-use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
+use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
 use crate::layout::pattern_layout::PatternDependency;
 use crate::line_atlas::{DashAtlas, LinePatternCap};
@@ -401,7 +400,6 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
         &self,
         buffer: &InterleavedVertexBuffer,
         shared: &SharedVertices,
-        _attr_index: usize,
     ) -> Option<SharedAttribute> {
         if let Some(vertex_offset) = self.kind.vertex_offset() {
             let raw_size = buffer.stride as u32;
@@ -544,13 +542,12 @@ impl CrossFadedPaintPropertyBinder<Image> {
     }
 
     /// Where the property's attributes read the pattern values in `shared`,
-    /// the vertices of `buffer`: both (`attr_index` 0 and 1) read the same
-    /// values. `None` without values.
+    /// the vertices of `buffer`: both read the same values. `None` without
+    /// values.
     pub(crate) fn apply_paint_property(
         &self,
         buffer: &InterleavedVertexBuffer,
         shared: &SharedVertices,
-        _attr_index: usize,
     ) -> Option<SharedAttribute> {
         if let Some(vertex_offset) = self.kind.vertex_offset() {
             let raw_size = buffer.stride as u32;
@@ -669,18 +666,13 @@ impl PaintPropertyBinderBase for DashArrayBinder {
         if self.vertex_offset().is_some() { buffer.vertex_count } else { 0 }
     }
 
-    fn apply(
-        &self,
-        buffer: &InterleavedVertexBuffer,
-        shared: &SharedVertices,
-        _attr_index: usize,
-    ) -> Option<SharedAttribute> {
+    fn apply(&self, buffer: &InterleavedVertexBuffer, shared: &SharedVertices) -> Option<SharedAttribute> {
         let vertex_offset = self.vertex_offset()?;
         Some(shared_paint(shared, vertex_offset, buffer.stride as u32, AttributeDataType::Float4))
     }
 }
 
-/// What a layer's set of binders and [`read_data_driven_paint_property`] do
+/// What a layer's set of binders and [`bind_paint_property`] do
 /// with either binder enum.
 pub(crate) trait PaintPropertyBinderBase {
     fn set_interleaved(&mut self, buffer: &mut InterleavedVertexBuffer);
@@ -713,12 +705,7 @@ pub(crate) trait PaintPropertyBinderBase {
         false
     }
     fn binder_vertex_count(&self, buffer: &InterleavedVertexBuffer) -> usize;
-    fn apply(
-        &self,
-        buffer: &InterleavedVertexBuffer,
-        shared: &SharedVertices,
-        attr_index: usize,
-    ) -> Option<SharedAttribute>;
+    fn apply(&self, buffer: &InterleavedVertexBuffer, shared: &SharedVertices) -> Option<SharedAttribute>;
 }
 
 impl<T: BinderValue> PaintPropertyBinderBase for PaintPropertyBinder<T> {
@@ -758,13 +745,8 @@ impl<T: BinderValue> PaintPropertyBinderBase for PaintPropertyBinder<T> {
     fn binder_vertex_count(&self, buffer: &InterleavedVertexBuffer) -> usize {
         self.vertex_count(buffer)
     }
-    fn apply(
-        &self,
-        buffer: &InterleavedVertexBuffer,
-        shared: &SharedVertices,
-        attr_index: usize,
-    ) -> Option<SharedAttribute> {
-        self.apply_paint_property(buffer, shared, attr_index)
+    fn apply(&self, buffer: &InterleavedVertexBuffer, shared: &SharedVertices) -> Option<SharedAttribute> {
+        self.apply_paint_property(buffer, shared)
     }
 }
 
@@ -788,13 +770,8 @@ impl PaintPropertyBinderBase for CrossFadedPaintPropertyBinder<Image> {
     fn binder_vertex_count(&self, buffer: &InterleavedVertexBuffer) -> usize {
         self.vertex_count(buffer)
     }
-    fn apply(
-        &self,
-        buffer: &InterleavedVertexBuffer,
-        shared: &SharedVertices,
-        attr_index: usize,
-    ) -> Option<SharedAttribute> {
-        self.apply_paint_property(buffer, shared, attr_index)
+    fn apply(&self, buffer: &InterleavedVertexBuffer, shared: &SharedVertices) -> Option<SharedAttribute> {
+        self.apply_paint_property(buffer, shared)
     }
 }
 
@@ -805,50 +782,39 @@ fn shared_paint(shared: &SharedVertices, offset: usize, stride: u32, data_type: 
     SharedAttribute::new(shared.clone(), data_type, offset as u32, stride)
 }
 
-/// Adds the attributes `attribute_names` of one property to `attrs`, which
-/// read `shared`, the vertices of the paint values, or records them as
-/// uniforms if the property is constant.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the binder and its buffers, the attribute names, and the attributes, uniform set and counter it fills"
-)]
-pub(crate) fn read_data_driven_paint_property(
-    attrs: &mut VertexAttributeArray,
+/// Binds `binder`'s values, `shared`, the vertices of `buffer`, to the
+/// attributes `attributes` in `attrs`, or records the attributes in
+/// `uniforms` if the property is constant or has no values.
+pub(crate) fn bind_paint_property(
     binder: &dyn PaintPropertyBinderBase,
     buffer: &InterleavedVertexBuffer,
     shared: Option<&SharedVertices>,
-    attribute_names: &[&str],
+    attributes: &[usize],
     is_constant: bool,
-    properties_as_uniforms: &mut StringIDSetsPair,
-    data_driven_attr_id: &mut usize,
+    attrs: &mut VertexAttributeArray,
+    uniforms: &mut Uniforms,
 ) {
-    // Consider each attribute name in the attribute (e.g., pattern_from, pattern_to)
-    for (attr_index, attribute_name) in attribute_names.iter().enumerate() {
-        // Apply the property, or add it to the uniforms collection if it's constant.
-        if !is_constant && binder.binder_vertex_count(buffer) > 0 {
-            if let Some(attribute) = shared.and_then(|shared| binder.apply(buffer, shared, attr_index)) {
-                attrs.set_shared(*data_driven_attr_id, attribute);
-            }
-        } else {
-            properties_as_uniforms.0.insert((*attribute_name).to_owned());
-            properties_as_uniforms.1.insert(*data_driven_attr_id);
+    if is_constant || binder.binder_vertex_count(buffer) == 0 {
+        for &attribute in attributes {
+            uniforms.insert(attribute);
         }
-        *data_driven_attr_id += 1;
+    } else if let Some(values) = shared.and_then(|shared| binder.apply(buffer, shared)) {
+        for &attribute in attributes {
+            attrs.set_shared(attribute, values.clone());
+        }
     }
 }
 
 /// Declares the binders of one layer type's data-driven paint properties: a
-/// struct with one binder per property (fields in the interleaved vertex
-/// order) and the shared
-/// `InterleavedVertexBuffer`. Attributes before a trailing
-/// `fn update_vertex_vectors;` go on that method.
+/// struct with one binder per property, each with the ids of the attributes a
+/// program reads its values from (fields in the interleaved vertex order),
+/// and the shared `InterleavedVertexBuffer`.
 macro_rules! paint_property_binders {
     (
         $(#[$meta:meta])*
         pub struct $name:ident for $props:path {
-            $($field:ident => $binder:ty),+ $(,)?
+            $($field:ident: $binder:ty => [$($attribute:expr),+]),+ $(,)?
         }
-        $($(#[$update_meta:meta])+ fn update_vertex_vectors;)?
     ) => {
         $(#[$meta])*
         #[derive(Clone, Debug, mln_wire::Wire)]
@@ -901,7 +867,6 @@ macro_rules! paint_property_binders {
                 // The render thread copies the vector when it builds draws.
             }
 
-            $($(#[$update_meta])+)?
             pub(crate) fn update_vertex_vectors(
                 &mut self,
                 states: &$crate::bucket::FeatureStates,
@@ -922,8 +887,28 @@ macro_rules! paint_property_binders {
                 false $(|| $crate::paint_property_binder::PaintPropertyBinderBase::depends_on_feature_state(
                     &self.$field))+
             }
+
+            /// Binds each property's values, `shared`, the vertices of the
+            /// paint values, to its attributes in `attrs`, or records its
+            /// attributes in `uniforms` where `evaluated` is constant.
+            pub(crate) fn bind(
+                &self,
+                evaluated: &$props,
+                shared: Option<&$crate::gfx::vertices::SharedVertices>,
+                attrs: &mut $crate::gfx::vertex_attribute::VertexAttributeArray,
+                uniforms: &mut $crate::gfx::vertex_attribute::Uniforms,
+            ) {
+                $($crate::paint_property_binder::bind_paint_property(
+                    &self.$field,
+                    &self.interleaved_vertex_buffer,
+                    shared,
+                    &[$($attribute),+],
+                    evaluated.$field.is_constant(),
+                    attrs,
+                    uniforms,
+                );)+
+            }
         }
     };
-
 }
 pub(crate) use paint_property_binders;

@@ -8,11 +8,12 @@ use mln_gfx::gpu::conformance::{
     wall_quads,
 };
 use mln_gfx::gpu::{
-    ColorAttachment, Gpu as _, GpuError, LoadOp, PassDesc, ShaderKey, TextureDesc, TextureFormat, TextureRegion,
-    TextureUsage, read_texels,
+    ColorAttachment, Gpu as _, GpuError, LoadOp, PassDesc, TextureDesc, TextureFormat, TextureRegion, TextureUsage,
+    read_texels,
 };
-use mln_gfx::shaders::program_info::GLOBE_DEFINE;
-use mln_glsl::PROGRAMS;
+use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::program_parameters::ProgramParameters;
+use mln_glsl::BUILT_INS;
 use mln_util::Color;
 use mln_util::size::Size;
 
@@ -122,14 +123,11 @@ fn destroy_later_waits_for_the_next_submit() {
 fn every_program_compiles_for_gpu() {
     let device = Device::new(None).expect("Vulkan device");
     let mut gpu = VulkanGpu::new(&device).expect("VulkanGpu");
-    for &(program, source) in PROGRAMS {
-        let uniforms: Vec<String> =
-            source.uniform_properties().into_iter().map(|name| format!("HAS_UNIFORM_u_{name}")).collect();
-        for globe in [false, true] {
-            let projection = globe.then(|| GLOBE_DEFINE.to_owned());
-            for defines in [Vec::new(), uniforms.clone()] {
-                let pixel_ratio = "DEVICE_PIXEL_RATIO=1.0".to_owned();
-                let key = ShaderKey::new(program, defines.into_iter().chain(projection.clone()).chain([pixel_ratio]));
+    let parameters = ProgramParameters::new(1.0, false);
+    for &(program, _) in BUILT_INS {
+        for variant in [ProjectionVariant::Mercator, ProjectionVariant::Globe] {
+            for uniforms in [&[][..], program.properties] {
+                let key = program.variant_key(&parameters, uniforms, variant);
                 if let Err(error) = gpu.create_shader(&key) {
                     panic!("{key:?}: {error}");
                 }

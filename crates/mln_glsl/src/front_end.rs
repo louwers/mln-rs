@@ -25,8 +25,7 @@ impl Stage {
         }
     }
 
-    /// The prelude of every shader of the stage
-    /// (`ShaderSource<BuiltIn::Prelude, Vulkan>`).
+    /// The prelude of every shader of the stage.
     fn prelude(self) -> &'static str {
         match self {
             Stage::Vertex => PRELUDE_VERTEX,

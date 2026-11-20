@@ -887,14 +887,11 @@ fn a_draw_writes_an_update_of_the_vertices_it_binds() {
     use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 
     use crate::draw::{DrawGeometry, DrawObjects};
-    use crate::gfx::shader_registry::ShaderRegistry;
-    use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
+    use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 
     with_context(|gpu, context| {
-        let registry = ShaderRegistry::new(&mln_gfx::shaders::program_parameters::ProgramParameters::new(1.0, false));
-        let shader = registry
-            .shader("RasterShader", mln_gfx::projection_variant::ProjectionVariant::Mercator)
-            .expect("the raster shader");
+        let variant = mln_gfx::projection_variant::ProjectionVariant::Mercator;
+        let shader = context.shader_key(&mln_gfx::shaders::programs::RASTER, Uniforms::default(), variant);
         let vertex = |x: i16| RasterLayoutVertex { a1: [x, x], a2: [0, 0] };
         let typed = context.add_dynamic_vertices(&[vertex(0), vertex(1), vertex(2)]);
         let stride = size_of::<RasterLayoutVertex>() as u32;
@@ -943,14 +940,12 @@ fn a_draw_binds_the_vertices_it_reads_as_a_storage_buffer() {
     use mln_gfx::{ColorMode, CullFaceMode, DrawMode};
 
     use crate::draw::{DrawGeometry, DrawObjects};
-    use crate::gfx::shader_registry::ShaderRegistry;
-    use crate::gfx::vertex_attribute::VertexAttributeArray;
+    use crate::gfx::vertex_attribute::{Uniforms, VertexAttributeArray};
 
     with_context(|gpu, context| {
-        let registry = ShaderRegistry::new(&mln_gfx::shaders::program_parameters::ProgramParameters::new(1.0, false));
-        let shader = registry
-            .shader("FillExtrusionPulledShader", mln_gfx::projection_variant::ProjectionVariant::Mercator)
-            .expect("the pulled wall shader");
+        let variant = mln_gfx::projection_variant::ProjectionVariant::Mercator;
+        let shader =
+            context.shader_key(&mln_gfx::shaders::programs::FILL_EXTRUSION_PULLED, Uniforms::default(), variant);
         let typed = context.add_dynamic_vertices(&[[0u32; 2], [1; 2]]);
         let geometry = DrawGeometry {
             vertices: VertexAttributeArray::new(),

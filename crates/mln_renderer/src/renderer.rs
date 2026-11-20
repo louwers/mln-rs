@@ -4,7 +4,6 @@ use std::time::Duration;
 use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, LoadOp, TargetFormats};
 use mln_gfx::rendering_stats::RenderingStats;
 use mln_gfx::shaders::layer_ubo::GlobalPaintParamsUBO;
-use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::shader_defines::ID_GLOBAL_PAINT_PARAMS_UBO;
 use mln_gfx::{FrameImage, Handoff, ScissorRect};
 use mln_map_types::MapDebugOptions;
@@ -24,7 +23,6 @@ use crate::clip_masks::ClipMasks;
 use crate::frame::Frame;
 use crate::frame_projection::{self, FrameProjection};
 use crate::gfx::context::Context;
-use crate::gfx::shader_registry::ShaderRegistry;
 use crate::layer_composite::{Composite, LayerComposite};
 use crate::layer_drawing::DrawOrder;
 use crate::layers::render_custom_layer::end_hosts;
@@ -127,8 +125,8 @@ struct Encoder {
     /// tear-down destroys after what the other fields hold.
     context: Context,
     pixel_ratio: f32,
-    /// Dropped in the tear-down, after the orchestrator.
-    static_data: Option<RenderStaticData>,
+    /// Reset in the tear-down, after the orchestrator.
+    static_data: RenderStaticData,
     /// Kept across frames; dropped in the tear-down.
     clip_masks: ClipMasks,
     /// What layers drawn as a whole draw into and composite with, between
@@ -204,9 +202,9 @@ impl Renderer {
                 pool,
             ),
             encoder: Encoder {
-                context: Context::new(*gpu.caps()),
+                context: Context::new(*gpu.caps(), pixel_ratio),
                 pixel_ratio,
-                static_data: None,
+                static_data: RenderStaticData::default(),
                 clip_masks: ClipMasks::default(),
                 layer_composite: LayerComposite::default(),
                 shaders_replaced: false,
@@ -233,7 +231,7 @@ impl Renderer {
         // again, and the old shaders after it.
         let encoder = &mut self.encoder;
         encoder.pixel_ratio = pixel_ratio;
-        encoder.static_data = None;
+        encoder.context.set_pixel_ratio(pixel_ratio);
         encoder.clip_masks = ClipMasks::default();
         encoder.layer_composite = LayerComposite::default();
         encoder.shaders_replaced = true;
@@ -501,7 +499,7 @@ impl Renderer {
         drop(orchestrator);
         encoder.clip_masks = ClipMasks::default();
         encoder.layer_composite = LayerComposite::default();
-        encoder.static_data = None;
+        encoder.static_data = RenderStaticData::default();
         encoder.context.tear_down(gpu);
         end_hosts(gpu, ended);
         encoder.context.stats()
@@ -535,10 +533,7 @@ impl Encoder {
             stats.num_draw_calls = 0;
             stats.num_frames += 1;
         }
-        let static_data = &*self.static_data.get_or_insert_with(|| {
-            let program_parameters = ProgramParameters::new(self.pixel_ratio, false);
-            RenderStaticData::new(Box::new(ShaderRegistry::new(&program_parameters)))
-        });
+        let static_data = &self.static_data;
 
         if self.render_state == RenderState::Never {
             emit(events, RendererEvent::RenderMapStarted);
@@ -595,18 +590,12 @@ impl Encoder {
         orchestrator.upload_draws(gpu, parameters.context);
         let draw_groups = DrawGroups::of(orchestrator, &parameters);
         let (proj_state, transform) = (parameters.view, parameters.transform_params);
-        parameters.clip_masks.update(
-            gpu,
-            parameters.context,
-            &static_data.shaders,
-            proj_state.is_globe(),
-            &draw_groups.clip_tiles,
-            |tile| to_projection_ubo(&transform.projection_data_for_tile(tile, false)),
-        );
+        parameters.clip_masks.update(gpu, parameters.context, proj_state.is_globe(), &draw_groups.clip_tiles, |tile| {
+            to_projection_ubo(&transform.projection_data_for_tile(tile, false))
+        });
         parameters.layer_composite.update(
             gpu,
             parameters.context,
-            &static_data.shaders,
             image.size,
             image.targets.color,
             parameters.debug_options.contains(MapDebugOptions::OVERDRAW),

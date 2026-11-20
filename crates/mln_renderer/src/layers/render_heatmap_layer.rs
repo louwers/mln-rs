@@ -7,16 +7,16 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use glam::dcamera::rh::proj::opengl::orthographic;
-use mln_gfx::gpu::Gpu;
+use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::heatmap_layer_ubo::{HeatmapDrawableUBO, HeatmapEvaluatedPropsUBO};
 use mln_gfx::shaders::heatmap_texture_layer_ubo::HeatmapTexturePropsUBO;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
+use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
     ID_HEATMAP_COLOR_RAMP_TEXTURE, ID_HEATMAP_DRAWABLE_UBO, ID_HEATMAP_EVALUATED_PROPS_UBO, ID_HEATMAP_IMAGE_TEXTURE,
-    ID_HEATMAP_POS_VERTEX_ATTRIBUTE, ID_HEATMAP_TEXTURE_PROPS_UBO, ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE,
-    ID_PROJECTION_UBO,
+    ID_HEATMAP_POS_VERTEX_ATTRIBUTE, ID_HEATMAP_TEXTURE_PROPS_UBO, ID_PROJECTION_UBO,
 };
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
@@ -39,11 +39,8 @@ use crate::buckets::heatmap_bucket::{HeatmapBinders, HeatmapBucket, HeatmapLayou
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
-use crate::gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
-use crate::gfx::shader_program::ShaderProgramPtr;
-use crate::gfx::shader_registry::ShaderRegistry;
 use crate::gfx::store::SharedTexture;
-use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
+use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
 use crate::layer_drawing::{
     DrawDepth, DrawGroup, DrawList, DrawOrder, FrameDraw, FrameDraws, KeptDraw, LayerDrawing, LayerDraws, TileMap,
@@ -53,7 +50,6 @@ use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::heatmap_layout::HeatmapLayout;
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::paint_parameters::PaintParameters;
-use crate::paint_property_binder::read_data_driven_paint_property;
 use crate::render_layer::{
     Atlases, LayerBucket, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
 };
@@ -62,40 +58,6 @@ use crate::render_static_data::RenderStaticData;
 use crate::render_target::RenderTarget;
 use crate::render_tile::FrameTile;
 use crate::tile_matrix::{bind_no_projection, globe_extrude_scale, projection_data, to_projection_ubo};
-
-fn read_heatmap_attributes(
-    attrs: &mut VertexAttributeArray,
-    b: &HeatmapBinders,
-    shared: Option<&SharedVertices>,
-    evaluated: &HeatmapPaintProperties::PossiblyEvaluated,
-    pau: &mut StringIDSetsPair,
-) {
-    let buffer = &b.interleaved_vertex_buffer;
-    let mut id = ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE;
-    read_data_driven_paint_property(
-        attrs,
-        &b.heatmap_weight,
-        buffer,
-        shared,
-        &["a_weight"],
-        evaluated.heatmap_weight.is_constant(),
-        pau,
-        &mut id,
-    );
-    read_data_driven_paint_property(
-        attrs,
-        &b.heatmap_radius,
-        buffer,
-        shared,
-        &["a_radius"],
-        evaluated.heatmap_radius.is_constant(),
-        pau,
-        &mut id,
-    );
-}
-
-const HEATMAP_SHADER_GROUP_NAME: &str = "HeatmapShader";
-const HEATMAP_TEXTURE_SHADER_GROUP_NAME: &str = "HeatmapTextureShader";
 
 /// The pass the layer's draws draw in, onto the frame and into its render
 /// target.
@@ -224,8 +186,6 @@ pub(crate) struct RenderHeatmapLayer {
     /// detect when it needs to be rebuilt.
     color_ramp_global_state: Option<Arc<GlobalStateMap>>,
 
-    heatmap_shader_group: Option<ShaderGroupPtr>,
-    heatmap_texture_shader: Option<ShaderProgramPtr>,
     /// The texture the tiles draw their heat into, which the layer's draw
     /// colors onto the frame.
     render_target: Option<RenderTarget>,
@@ -243,8 +203,6 @@ impl RenderHeatmapLayer {
             tile_draws: DrawList::default(),
             color_ramp: Rc::new(PremultipliedImage::new(Size::new(256, 1))),
             color_ramp_global_state: None,
-            heatmap_shader_group: None,
-            heatmap_texture_shader: None,
             render_target: None,
             shared_texture_vertices: None,
         }
@@ -320,8 +278,7 @@ impl TypedLayer for RenderHeatmapLayer {
         _atlases: &Atlases,
         render_tiles: &[FrameTile<'_, Heatmap>],
     ) {
-        let (static_data, state) = (paint_parameters.static_data, paint_parameters.view);
-        let shaders = &static_data.shaders;
+        let state = paint_parameters.view;
 
         let viewport_size = state.size();
         let size = Size::new(viewport_size.width / 2, viewport_size.height / 2);
@@ -329,8 +286,8 @@ impl TypedLayer for RenderHeatmapLayer {
             RenderTarget::new(paint_parameters.context, size, TextureChannelDataType::HalfFloat)
         });
         render_target.set_size(paint_parameters.context, size);
-        if self.draw_tiles(gpu, shaders, render_tiles, paint_parameters) {
-            self.draw_texture(gpu, shaders, paint_parameters);
+        if self.draw_tiles(gpu, render_tiles, paint_parameters) {
+            self.draw_texture(gpu, paint_parameters);
         }
     }
 }
@@ -362,22 +319,14 @@ impl RenderHeatmapLayer {
     fn draw_tiles(
         &mut self,
         gpu: &mut dyn Gpu,
-        shaders: &ShaderRegistry,
         render_tiles: &[FrameTile<'_, Heatmap>],
         paint_parameters: &mut PaintParameters<'_>,
     ) -> bool {
-        let RenderHeatmapLayer { base, values, drawing, tile_draws, heatmap_shader_group, .. } = self;
-        if heatmap_shader_group.is_none() {
-            *heatmap_shader_group = shaders.shader_group(HEATMAP_SHADER_GROUP_NAME);
-        }
-        let Some(heatmap_shader_group) = heatmap_shader_group.as_ref() else {
-            drawing.clear();
-            return false;
-        };
+        let RenderHeatmapLayer { base, values, drawing, tile_draws, .. } = self;
 
         let evaluated = &values.evaluated.paint;
         // The shader of the first tile this builds, which the others take.
-        let mut heatmap_shader: Option<ShaderProgramPtr> = None;
+        let mut heatmap_shader: Option<ShaderKey> = None;
         for tile in render_tiles {
             let tile_id = tile.id();
 
@@ -411,25 +360,17 @@ impl RenderHeatmapLayer {
             let context = &mut *paint_parameters.context;
             if let Some(cached) = entry.value.as_mut() {
                 refresh_paint_attributes(&mut cached.objects, changes, |attrs| {
-                    read_heatmap_attributes(
-                        attrs,
-                        binders,
-                        paint(context).as_ref(),
-                        evaluated,
-                        &mut Default::default(),
-                    );
+                    binders.bind(evaluated, paint(context).as_ref(), attrs, &mut Uniforms::default());
                 });
             } else if !bucket.vertices.is_empty()
                 && let (Some(vertices), Some(indexes)) =
                     (bucket_vertices(geometry, &bucket.vertices), bucket_indexes(geometry, &bucket.triangles))
             {
-                let mut properties_as_uniforms = StringIDSetsPair::default();
+                let mut uniforms = Uniforms::default();
                 let mut attrs = VertexAttributeArray::new();
-                let paint = paint(context);
-                read_heatmap_attributes(&mut attrs, binders, paint.as_ref(), evaluated, &mut properties_as_uniforms);
-                let shader = heatmap_shader.get_or_insert_with(|| {
-                    heatmap_shader_group.shader(&properties_as_uniforms, base.projection_variant)
-                });
+                binders.bind(evaluated, paint(context).as_ref(), &mut attrs, &mut uniforms);
+                let shader = heatmap_shader
+                    .get_or_insert_with(|| context.shader_key(&programs::HEATMAP, uniforms, base.projection_variant));
                 attrs.set_shared(
                     ID_HEATMAP_POS_VERTEX_ATTRIBUTE,
                     SharedAttribute::new(
@@ -448,7 +389,7 @@ impl RenderHeatmapLayer {
                     instances: None,
                 };
                 let objects = DrawObjects::new(
-                    Rc::clone(shader),
+                    shader.clone(),
                     ColorMode::additive(),
                     CullFaceMode::disabled(),
                     geometry,
@@ -525,36 +466,17 @@ impl RenderHeatmapLayer {
     /// Makes the layer's draw of the frame, which colors the heat of the
     /// render target onto it through the layer's color ramp, with GPU
     /// objects it builds once, and writes the buffers it reads.
-    fn draw_texture(
-        &mut self,
-        gpu: &mut dyn Gpu,
-        shaders: &ShaderRegistry,
-        paint_parameters: &mut PaintParameters<'_>,
-    ) {
-        let RenderHeatmapLayer {
-            values,
-            drawing,
-            color_ramp,
-            heatmap_texture_shader,
-            render_target,
-            shared_texture_vertices,
-            ..
-        } = self;
+    fn draw_texture(&mut self, gpu: &mut dyn Gpu, paint_parameters: &mut PaintParameters<'_>) {
+        let RenderHeatmapLayer { values, drawing, color_ramp, render_target, shared_texture_vertices, .. } = self;
         let Some(render_target) = render_target.as_ref() else {
             return;
         };
         if drawing.frame.is_none() {
             return;
         }
-        if heatmap_texture_shader.is_none() {
-            *heatmap_texture_shader = shaders.shader(HEATMAP_TEXTURE_SHADER_GROUP_NAME, ProjectionVariant::Mercator);
-        }
-        let Some(heatmap_texture_shader) = heatmap_texture_shader.as_ref() else {
-            drawing.clear();
-            return;
-        };
-
         let context = &mut *paint_parameters.context;
+        let heatmap_texture_shader =
+            context.shader_key(&programs::HEATMAP_TEXTURE, Uniforms::default(), ProjectionVariant::Mercator);
         if !drawing.color_ramp.as_ref().is_some_and(|(image, _)| Rc::ptr_eq(image, color_ramp)) {
             let texture = context.add_texture_with(|texture| {
                 texture.set_image(Some(Rc::clone(color_ramp)));
@@ -599,7 +521,7 @@ impl RenderHeatmapLayer {
             textures[ID_HEATMAP_IMAGE_TEXTURE] = Some(render_target_texture.clone());
             textures[ID_HEATMAP_COLOR_RAMP_TEXTURE] = color_ramp.cloned();
             let objects = DrawObjects::new(
-                Rc::clone(heatmap_texture_shader),
+                heatmap_texture_shader,
                 ColorMode::alpha_blended(),
                 CullFaceMode::disabled(),
                 geometry,

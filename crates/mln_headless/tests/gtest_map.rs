@@ -11,7 +11,6 @@ use std::time::Duration;
 use feature::Value;
 use geo_types::{LineString, Point};
 use geojson::{GeoJson, Geometry};
-use mln_gfx::shaders::shader_source::BuiltIn;
 use mln_headless::HeadlessFrontend;
 use mln_map::{
     AnimationOptions, BoundOptions, CameraOptions, ConstrainMode, Map, MapMode, MapOptions, MapProjection,
@@ -2701,12 +2700,6 @@ fn volatile_source() {
     test.observer.did_finish_loading_map_callback.set(move |()| run_loop.stop());
     run_with_timeout(&test.run_loop, 60);
     assert_eq!(8, requested_tiles.load(Ordering::SeqCst));
-}
-
-// gtest: Map.GlobeDepthShaderIdFollowsTheExistingShaders
-#[test]
-fn globe_depth_shader_id_follows_the_existing_shaders() {
-    assert_eq!(BuiltIn::WideVectorShader as i32 + 1, BuiltIn::GlobeDepthShader as i32);
 }
 
 // gtest: Map.ResourceError

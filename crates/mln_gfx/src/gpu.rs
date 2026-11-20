@@ -38,7 +38,7 @@ use crate::color_mode::{BlendFunction, Mask};
 use crate::cull_face_mode::CullFaceMode;
 use crate::depth_mode::DepthMode;
 use crate::gfx_types::{AttributeDataType, DrawModeType};
-use crate::shaders::shader_source::BuiltIn;
+use crate::shaders::program::Program;
 use crate::stencil_mode::{StencilMode, Test};
 use crate::texture2d::SamplerState;
 use crate::types::{DepthFunctionType, DepthMaskType, StencilOpType};
@@ -273,11 +273,11 @@ pub struct VertexBufferLayout {
     pub attributes: Vec<VertexAttribute>,
 }
 
-/// A program and the defines it is compiled with. Each backend has its own
-/// source for each [`BuiltIn`] program. Clones share the defines.
+/// A program and the defines it is compiled with, from the source the
+/// backend has registered for the program. Clones share the defines.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ShaderKey {
-    program: BuiltIn,
+    program: &'static Program,
     defines: Arc<[String]>,
 }
 
@@ -286,7 +286,7 @@ impl ShaderKey {
     /// as `PROJECTION_GLOBE` or `HAS_UNIFORM_u_color`, or `NAME=value` for
     /// a define with a value, such as `DEVICE_PIXEL_RATIO=2.0`.
     #[must_use]
-    pub fn new(program: BuiltIn, defines: impl IntoIterator<Item = String>) -> ShaderKey {
+    pub fn new(program: &'static Program, defines: impl IntoIterator<Item = String>) -> ShaderKey {
         let mut defines: Vec<String> = defines.into_iter().collect();
         defines.sort_unstable();
         defines.dedup();
@@ -294,7 +294,7 @@ impl ShaderKey {
     }
 
     #[must_use]
-    pub fn program(&self) -> BuiltIn {
+    pub fn program(&self) -> &'static Program {
         self.program
     }
 
@@ -586,7 +586,8 @@ pub trait Gpu {
 
     fn create_sampler(&mut self, state: &SamplerState) -> Result<SamplerId, GpuError>;
 
-    /// Compiles the program of `key`.
+    /// Compiles the program of `key`. Fails with [`GpuError::Unsupported`]
+    /// for a program the backend has no source for.
     fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError>;
     /// Makes a pipeline of `desc`'s shader and state. Fails with
     /// [`GpuError::Unsupported`] for a primitive the backend doesn't draw.
@@ -694,13 +695,14 @@ pub fn destroy_unused(gpu: &mut (impl Gpu + ?Sized), resources: impl IntoIterato
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shaders::programs;
 
     #[test]
     fn shader_keys_ignore_define_order_and_repeats() {
-        let key = |defines: &[&str]| ShaderKey::new(BuiltIn::FillShader, defines.iter().map(|&d| d.to_owned()));
+        let key = |defines: &[&str]| ShaderKey::new(&programs::FILL, defines.iter().map(|&d| d.to_owned()));
         assert_eq!(key(&["B", "A", "B"]), key(&["A", "B"]));
         assert_eq!(key(&["B", "A"]).defines(), ["A", "B"]);
-        assert_ne!(key(&["A"]), ShaderKey::new(BuiltIn::LineShader, ["A".to_owned()]));
+        assert_ne!(key(&["A"]), ShaderKey::new(&programs::LINE, ["A".to_owned()]));
         assert_eq!(key(&["B=2.0", "A"]).define_values().collect::<Vec<_>>(), [("A", ""), ("B", "2.0")]);
     }
 

@@ -1,11 +1,11 @@
 use std::f64::consts::PI;
-use std::rc::Rc;
 
 use glam::{DMat3, DVec3};
 use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
-use mln_gfx::gpu::Gpu;
+use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
     ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE, ID_ATMOSPHERE_PROPS_UBO, ID_SKY_POS_VERTEX_ATTRIBUTE, ID_SKY_PROPS_UBO,
@@ -22,20 +22,16 @@ use mln_util::size::Size;
 use crate::draw::{DrawGeometry, DrawObjects, Textures, raw_vertices};
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
-use crate::gfx::shader_program::ShaderProgramPtr;
-use crate::gfx::shader_registry::ShaderRegistry;
+use crate::gfx::vertex_attribute::Uniforms;
 use crate::layer_drawing::{DrawDepth, FrameDraw, SingleDraw};
 use crate::render_light::EvaluatedLight;
 use crate::render_sky::EvaluatedSky;
 use crate::render_static_data::RenderStaticData;
 use crate::tile_matrix::bind_no_projection;
 
-const SKY_SHADER_NAME: &str = "SkyShader";
-const ATMOSPHERE_SHADER_NAME: &str = "AtmosphereShader";
-
 /// A draw of `shader`, which reads the view's corners as the vertex attribute
 /// `vertex_attribute`, in the translucent pass at `depth`.
-fn fullscreen_draw(shader: &ShaderProgramPtr, vertex_attribute: usize, depth: DrawDepth) -> SingleDraw {
+fn fullscreen_draw(shader: ShaderKey, vertex_attribute: usize, depth: DrawDepth) -> SingleDraw {
     let corners: [[i16; 2]; 4] = [[-1, -1], [1, -1], [-1, 1], [1, 1]];
     let vertices = bytemuck::cast_slice(&corners).to_vec();
     let geometry = DrawGeometry {
@@ -46,13 +42,8 @@ fn fullscreen_draw(shader: &ShaderProgramPtr, vertex_attribute: usize, depth: Dr
         segments: vec![SegmentBase::with_lengths(0, 0, 4, 6)],
         instances: None,
     };
-    let objects = DrawObjects::new(
-        Rc::clone(shader),
-        ColorMode::alpha_blended(),
-        CullFaceMode::disabled(),
-        geometry,
-        Textures::default(),
-    );
+    let objects =
+        DrawObjects::new(shader, ColorMode::alpha_blended(), CullFaceMode::disabled(), geometry, Textures::default());
     SingleDraw::new(objects, FrameDraw { depth, ..FrameDraw::new(None, SimpleIdentity::new()) })
 }
 
@@ -91,19 +82,16 @@ fn color_components(color: &Color) -> [f32; 4] {
 pub(crate) struct SkyPass {
     sky: Option<SingleDraw>,
     atmosphere: Option<SingleDraw>,
-    sky_shader: Option<ShaderProgramPtr>,
-    atmosphere_shader: Option<ShaderProgramPtr>,
 }
 
 impl SkyPass {
     #[expect(
         clippy::too_many_arguments,
-        reason = "the shaders, context and camera, the viewport, and the evaluated sky and light that the pass draws"
+        reason = "the context and camera, the viewport, and the evaluated sky and light that the pass draws"
     )]
     pub(crate) fn update(
         &mut self,
         gpu: &mut dyn Gpu,
-        shaders: &ShaderRegistry,
         context: &mut Context,
         state: &View,
         viewport_size: Size,
@@ -119,36 +107,30 @@ impl SkyPass {
 
         let projection_transition = state.projection_transition().clamp(0.0, 1.0);
         if projection_transition < 1.0 {
-            if self.sky_shader.is_none() {
-                self.sky_shader = shaders.shader(SKY_SHADER_NAME, ProjectionVariant::Mercator);
-            }
-            if self.sky.is_none() {
+            let sky = self.sky.get_or_insert_with(|| {
+                let shader = context.shader_key(&programs::SKY, Uniforms::default(), ProjectionVariant::Mercator);
                 let depth = DrawDepth::Layer { sub_layer: 0, mask: DepthMaskType::ReadWrite };
-                self.sky =
-                    self.sky_shader.as_ref().map(|shader| fullscreen_draw(shader, ID_SKY_POS_VERTEX_ATTRIBUTE, depth));
-            }
+                fullscreen_draw(shader, ID_SKY_POS_VERTEX_ATTRIBUTE, depth)
+            });
+            let horizon_distance = state.mercator_horizon() * f64::from(pixel_ratio);
+            let roll = state.roll();
+            let normal = [(-roll.sin()) as f32, roll.cos() as f32];
+            let horizon = [
+                (f64::from(viewport_size.width) * 0.5 + f64::from(normal[0]) * horizon_distance) as f32,
+                (f64::from(viewport_size.height) * 0.5 + f64::from(normal[1]) * horizon_distance) as f32,
+            ];
 
-            if let Some(sky) = &mut self.sky {
-                let horizon_distance = state.mercator_horizon() * f64::from(pixel_ratio);
-                let roll = state.roll();
-                let normal = [(-roll.sin()) as f32, roll.cos() as f32];
-                let horizon = [
-                    (f64::from(viewport_size.width) * 0.5 + f64::from(normal[0]) * horizon_distance) as f32,
-                    (f64::from(viewport_size.height) * 0.5 + f64::from(normal[1]) * horizon_distance) as f32,
-                ];
-
-                let props = SkyPropsUBO {
-                    sky_color: color_components(evaluated.sky_color.uniform()),
-                    horizon_color: color_components(evaluated.sky_horizon_color.uniform()),
-                    horizon,
-                    horizon_normal: normal,
-                    viewport_size: [viewport_size.width as f32, viewport_size.height as f32],
-                    sky_horizon_blend: *evaluated.sky_horizon_blend.uniform() * viewport_size.height as f32 * 0.5,
-                    sky_blend: projection_transition as f32,
-                };
-                sky.write_pod(gpu, ID_SKY_PROPS_UBO, &props, context);
-                bind_no_projection(gpu, &mut sky.frame.uniform_buffers, context);
-            }
+            let props = SkyPropsUBO {
+                sky_color: color_components(evaluated.sky_color.uniform()),
+                horizon_color: color_components(evaluated.sky_horizon_color.uniform()),
+                horizon,
+                horizon_normal: normal,
+                viewport_size: [viewport_size.width as f32, viewport_size.height as f32],
+                sky_horizon_blend: *evaluated.sky_horizon_blend.uniform() * viewport_size.height as f32 * 0.5,
+                sky_blend: projection_transition as f32,
+            };
+            sky.write_pod(gpu, ID_SKY_PROPS_UBO, &props, context);
+            bind_no_projection(gpu, &mut sky.frame.uniform_buffers, context);
         } else {
             self.sky = None;
         }
@@ -159,19 +141,14 @@ impl SkyPass {
             return;
         }
 
-        if self.atmosphere_shader.is_none() {
-            self.atmosphere_shader = shaders.shader(ATMOSPHERE_SHADER_NAME, ProjectionVariant::Globe);
-        }
-        if self.atmosphere.is_none() {
-            let depth = DrawDepth::Volume { mask: DepthMaskType::ReadOnly };
-            self.atmosphere = self
-                .atmosphere_shader
-                .as_ref()
-                .map(|shader| fullscreen_draw(shader, ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE, depth));
-        }
-        let Some(atmosphere) = &mut self.atmosphere else {
-            return;
-        };
+        let atmosphere = self.atmosphere.get_or_insert_with(|| {
+            let shader = context.shader_key(&programs::ATMOSPHERE, Uniforms::default(), ProjectionVariant::Globe);
+            fullscreen_draw(
+                shader,
+                ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE,
+                DrawDepth::Volume { mask: DepthMaskType::ReadOnly },
+            )
+        });
 
         let camera = state.globe_camera_position();
         let props = AtmospherePropsUBO {

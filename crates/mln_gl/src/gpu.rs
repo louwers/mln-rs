@@ -17,6 +17,7 @@ use mln_gfx::gpu::{
     PipelineDesc, PipelineId, ReadbackId, ResourceId, SamplerId, ShaderId, ShaderKey, SlotMap, StencilState,
     TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage, VertexBufferLayout, VertexStep,
 };
+use mln_gfx::shaders::program::Sources;
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::{MAX_ACTIVE_TEXTURE_UNITS, SamplerState};
 use mln_gfx::types::{DepthMaskType, TextureFilterType};
@@ -29,7 +30,7 @@ use crate::custom_layer::{CustomLayerEncoder, CustomLayerPass, lend_context};
 use crate::enums::{self, AttributeFormat};
 use crate::renderer_backend::GlContext;
 use crate::shaders::glsl_sources::PRELUDE;
-use crate::shaders::shader_source::shader_source;
+use crate::shaders::shader_source::{BUILT_INS, ShaderSource};
 use crate::state::State;
 #[cfg(not(target_family = "wasm"))]
 use crate::types::FenceID;
@@ -441,6 +442,8 @@ pub struct GlGpu {
     elements: SlotMap<ElementsId, Elements>,
     textures: SlotMap<TextureId, Texture>,
     samplers: SlotMap<SamplerId, SamplerID>,
+    /// The source each program compiles from.
+    sources: Sources<ShaderSource>,
     shaders: SlotMap<ShaderId, Program>,
     layout_tags: LayoutTags,
     pipelines: SlotMap<PipelineId, Pipeline>,
@@ -525,6 +528,7 @@ impl GlGpu {
             elements: SlotMap::with_key(),
             textures: SlotMap::with_key(),
             samplers: SlotMap::with_key(),
+            sources: Sources::new(BUILT_INS),
             shaders: SlotMap::with_key(),
             layout_tags: LayoutTags::default(),
             pipelines: SlotMap::with_key(),
@@ -718,9 +722,8 @@ impl GlGpu {
     /// shader defaults to highp floats if `highp_fragment`, and to mediump
     /// otherwise.
     fn compile(&mut self, key: &ShaderKey, highp_fragment: bool) -> Result<Program, GpuError> {
-        let source = shader_source(key.program())
-            .ok_or_else(|| GpuError::Unsupported(format!("no GLSL for {:?}", key.program())))?;
-        let name = source.name;
+        let source = self.sources.get(key.program())?;
+        let name = key.program().name;
         // Desktop OpenGL compiles GLSL ES 3.00 only with
         // `GL_ARB_ES3_compatibility`, and every 3.3 context the GLSL 3.30
         // that the shaders are as well: what they use of GLSL ES is in it,

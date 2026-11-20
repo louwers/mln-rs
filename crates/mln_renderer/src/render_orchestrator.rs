@@ -1299,23 +1299,12 @@ impl RenderOrchestrator {
             render_layer.update_draws(gpu, paint_parameters, &self.atlases, layer_source);
             needs_globe_depth = needs_globe_depth || render_layer.needs_globe_depth();
         }
-        let (static_data, state) = (paint_parameters.static_data, paint_parameters.view);
-        let shaders = &static_data.shaders;
+        let state = paint_parameters.view;
         let (renderable_size, pixel_ratio) = (paint_parameters.renderable_size, paint_parameters.pixel_ratio);
         let context = &mut *paint_parameters.context;
-        self.sky_pass.update(
-            gpu,
-            shaders,
-            context,
-            state,
-            renderable_size,
-            pixel_ratio,
-            frame.sky.as_ref(),
-            &frame.light,
-        );
+        self.sky_pass.update(gpu, context, state, renderable_size, pixel_ratio, frame.sky.as_ref(), &frame.light);
         self.globe_depth_pass.update(
             gpu,
-            shaders,
             context,
             state,
             update_parameters,

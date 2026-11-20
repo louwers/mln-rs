@@ -2,6 +2,12 @@ use std::sync::{Arc, Once};
 
 use geometry::Point;
 use mln_gfx::shaders::segment::SegmentBase;
+use mln_gfx::shaders::shader_defines::{
+    ID_LINE_BLUR_VERTEX_ATTRIBUTE, ID_LINE_COLOR_VERTEX_ATTRIBUTE, ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE,
+    ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_OFFSET_VERTEX_ATTRIBUTE,
+    ID_LINE_OPACITY_VERTEX_ATTRIBUTE, ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE,
+    ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
+};
 use mln_style::expression::{EvaluationContext, Image, Value};
 use mln_style::layers::Line;
 use mln_style::layers::line_layer_properties::{LineLayoutProperties, LinePaintProperties};
@@ -27,15 +33,15 @@ use crate::util::tessellator::Tessellator;
 
 crate::paint_property_binders!(
     pub struct LineBinders for LinePaintProperties::PossiblyEvaluated {
-        line_blur => PaintPropertyBinder<f32>,
-        line_color => PaintPropertyBinder<Color>,
-        line_floor_width => PaintPropertyBinder<f32>,
-        line_gap_width => PaintPropertyBinder<f32>,
-        line_offset => PaintPropertyBinder<f32>,
-        line_opacity => PaintPropertyBinder<f32>,
-        line_pattern => CrossFadedPaintPropertyBinder<Image>,
-        line_width => PaintPropertyBinder<f32>,
-        line_dasharray => DashArrayBinder,
+        line_blur: PaintPropertyBinder<f32> => [ID_LINE_BLUR_VERTEX_ATTRIBUTE],
+        line_color: PaintPropertyBinder<Color> => [ID_LINE_COLOR_VERTEX_ATTRIBUTE],
+        line_floor_width: PaintPropertyBinder<f32> => [ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE],
+        line_gap_width: PaintPropertyBinder<f32> => [ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE],
+        line_offset: PaintPropertyBinder<f32> => [ID_LINE_OFFSET_VERTEX_ATTRIBUTE],
+        line_opacity: PaintPropertyBinder<f32> => [ID_LINE_OPACITY_VERTEX_ATTRIBUTE],
+        line_pattern: CrossFadedPaintPropertyBinder<Image> => [ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE],
+        line_width: PaintPropertyBinder<f32> => [ID_LINE_WIDTH_VERTEX_ATTRIBUTE],
+        line_dasharray: DashArrayBinder => [ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE],
     }
 );
 

@@ -8,11 +8,11 @@ use mln_gfx::shaders::line_layer_ubo::{
     LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineGradientDrawableUBO, LinePatternDrawableUBO,
     LinePatternTilePropsUBO, LineSDFDrawableUBO, LineSDFTilePropsUBO, LineTilePropsUnionUBO,
 };
+use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
-    ID_LINE_COLOR_VERTEX_ATTRIBUTE, ID_LINE_DASH_TEXTURE, ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_DRAWABLE_UBO,
-    ID_LINE_EVALUATED_PROPS_UBO, ID_LINE_IMAGE_TEXTURE, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_LINE_TILE_PROPS_UBO,
-    ID_PROJECTION_UBO,
+    ID_LINE_DASH_TEXTURE, ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_DRAWABLE_UBO, ID_LINE_EVALUATED_PROPS_UBO,
+    ID_LINE_IMAGE_TEXTURE, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_LINE_TILE_PROPS_UBO, ID_PROJECTION_UBO,
 };
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
@@ -39,12 +39,9 @@ use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
 use crate::gfx::line_mesh::LineLayoutVertex;
-use crate::gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
-use crate::gfx::shader_registry::ShaderRegistry;
 use crate::gfx::store::SharedTexture;
 use crate::gfx::texture2d::Texture2D;
-use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
-use crate::gfx::vertices::SharedVertices;
+use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::layer_composite::Composite;
 use crate::layer_drawing::{DrawList, DrawObjectsMut, FrameDraw, TileDraws, TileObjects, UniformWriter};
 use crate::layer_type::{EvaluatedLayer, LayerType};
@@ -52,7 +49,6 @@ use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::pattern_layout::{LineLayoutSpec, PatternLayout, uses_pattern};
 use crate::line_atlas::{LineAtlas, LinePatternCap};
 use crate::paint_parameters::PaintParameters;
-use crate::paint_property_binder::read_data_driven_paint_property;
 use crate::render_layer::{
     Atlases, LayerBucket, LayerParts, LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer,
     RenderLayerBase, TypedLayer,
@@ -159,107 +155,6 @@ pub(crate) fn apply_color_ramp(
     true
 }
 
-fn read_line_attributes(
-    attrs: &mut VertexAttributeArray,
-    b: &LineBinders,
-    shared: Option<&SharedVertices>,
-    evaluated: &LinePaintProperties::PossiblyEvaluated,
-    pau: &mut StringIDSetsPair,
-) {
-    let buffer = &b.interleaved_vertex_buffer;
-    let mut id = ID_LINE_COLOR_VERTEX_ATTRIBUTE;
-    read_data_driven_paint_property(
-        attrs,
-        &b.line_color,
-        buffer,
-        shared,
-        &["a_color"],
-        evaluated.line_color.is_constant(),
-        pau,
-        &mut id,
-    );
-    read_data_driven_paint_property(
-        attrs,
-        &b.line_blur,
-        buffer,
-        shared,
-        &["a_blur"],
-        evaluated.line_blur.is_constant(),
-        pau,
-        &mut id,
-    );
-    read_data_driven_paint_property(
-        attrs,
-        &b.line_opacity,
-        buffer,
-        shared,
-        &["a_opacity"],
-        evaluated.line_opacity.is_constant(),
-        pau,
-        &mut id,
-    );
-    read_data_driven_paint_property(
-        attrs,
-        &b.line_gap_width,
-        buffer,
-        shared,
-        &["a_gapwidth"],
-        evaluated.line_gap_width.is_constant(),
-        pau,
-        &mut id,
-    );
-    read_data_driven_paint_property(
-        attrs,
-        &b.line_offset,
-        buffer,
-        shared,
-        &["a_offset"],
-        evaluated.line_offset.is_constant(),
-        pau,
-        &mut id,
-    );
-    read_data_driven_paint_property(
-        attrs,
-        &b.line_width,
-        buffer,
-        shared,
-        &["a_width"],
-        evaluated.line_width.is_constant(),
-        pau,
-        &mut id,
-    );
-    read_data_driven_paint_property(
-        attrs,
-        &b.line_floor_width,
-        buffer,
-        shared,
-        &["a_floorwidth"],
-        evaluated.line_floor_width.is_constant(),
-        pau,
-        &mut id,
-    );
-    read_data_driven_paint_property(
-        attrs,
-        &b.line_pattern,
-        buffer,
-        shared,
-        &["a_pattern_to", "a_pattern_from"],
-        evaluated.line_pattern.is_constant(),
-        pau,
-        &mut id,
-    );
-    read_data_driven_paint_property(
-        attrs,
-        &b.line_dasharray,
-        buffer,
-        shared,
-        &["a_dasharray"],
-        evaluated.line_dasharray.is_constant(),
-        pau,
-        &mut id,
-    );
-}
-
 /// A texture of the bucket's dash patterns, for a `line-dasharray` that
 /// differs by feature.
 fn dash_atlas_texture(gpu: &mut dyn Gpu, context: &mut Context, binders: &LineBinders) -> Option<SharedTexture> {
@@ -326,13 +221,6 @@ pub(crate) struct RenderLineLayer {
     /// Whether the color ramp changed since the draws that read it were
     /// built, which the next update drops.
     color_ramp_changed: bool,
-
-    line_shader_group: Option<ShaderGroupPtr>,
-    line_gradient_shader_group: Option<ShaderGroupPtr>,
-    line_sdf_shader_group: Option<ShaderGroupPtr>,
-    line_gradient_sdf_shader_group: Option<ShaderGroupPtr>,
-    // Used by the line-pattern branch.
-    line_pattern_shader_group: Option<ShaderGroupPtr>,
 }
 
 impl RenderLineLayer {
@@ -347,11 +235,6 @@ impl RenderLineLayer {
             color_ramp_global_state: None,
             color_ramp_texture: None,
             color_ramp_changed: false,
-            line_shader_group: None,
-            line_gradient_shader_group: None,
-            line_sdf_shader_group: None,
-            line_gradient_sdf_shader_group: None,
-            line_pattern_shader_group: None,
         }
     }
 
@@ -495,7 +378,6 @@ impl TypedLayer for RenderLineLayer {
         atlases: &Atlases,
         render_tiles: &[FrameTile<'_, Line>],
     ) {
-        let shaders = &paint_parameters.static_data.shaders;
         if std::mem::take(&mut self.color_ramp_changed) {
             // The gradients' draws read the old ramp's texture.
             self.remove_all_draws();
@@ -543,11 +425,11 @@ impl TypedLayer for RenderLineLayer {
                     let buffer = &binders.interleaved_vertex_buffer;
                     let paint =
                         paint_vertices(context, render_data.geometry(), buffer, binders.depends_on_feature_state());
-                    read_line_attributes(attrs, binders, paint.as_ref(), evaluated, &mut Default::default());
+                    binders.bind(evaluated, paint.as_ref(), attrs, &mut Uniforms::default());
                 });
                 cached
             } else {
-                let built = self.build_tile(gpu, shaders, context, render_data, binders, evaluated, render_pass);
+                let built = self.build_tile(gpu, context, render_data, binders, evaluated, render_pass);
                 let Some(cached) = built.and_then(|built| self.drawing.tiles_mut().insert(&tile_id, built).ok()) else {
                     continue;
                 };
@@ -659,14 +541,9 @@ impl RenderLayer for RenderLineLayer {
 impl RenderLineLayer {
     /// The draw of the tile's `bucket`, laid out with `evaluated`, in
     /// `pass`, if the layer has what it draws with.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the frame's GPU and context, and the tile's bucket, binders, values and pass"
-    )]
     fn build_tile(
         &mut self,
         gpu: &mut dyn Gpu,
-        shaders: &ShaderRegistry,
         context: &mut Context,
         tile_bucket: LayerBucket<'_, Line>,
         binders: &LineBinders,
@@ -676,9 +553,9 @@ impl RenderLineLayer {
         let (bucket, geometry) = (tile_bucket.bucket, tile_bucket.geometry());
         let buffer = &binders.interleaved_vertex_buffer;
         let paint = paint_vertices(context, geometry, buffer, binders.depends_on_feature_state());
-        let mut properties_as_uniforms = StringIDSetsPair::default();
+        let mut uniforms = Uniforms::default();
         let mut attrs = VertexAttributeArray::new();
-        read_line_attributes(&mut attrs, binders, paint.as_ref(), evaluated, &mut properties_as_uniforms);
+        binders.bind(evaluated, paint.as_ref(), &mut attrs, &mut uniforms);
 
         let has_dasharray =
             !evaluated.line_dasharray.is_constant() || !evaluated.line_dasharray.faded().from.is_empty();
@@ -693,13 +570,13 @@ impl RenderLineLayer {
 
         let mut textures = Textures::default();
         let mut atlases = None;
-        let (line_type, group, name) = if has_dasharray && has_gradient {
+        let (line_type, program) = if has_dasharray && has_gradient {
             textures[ID_LINE_IMAGE_TEXTURE] = Some(self.color_ramp_texture(context)?);
             textures[ID_LINE_DASH_TEXTURE] = dash_texture;
-            (LineType::GradientSdf, &mut self.line_gradient_sdf_shader_group, "LineGradientSDFShader")
+            (LineType::GradientSdf, &programs::LINE_GRADIENT_SDF)
         } else if has_dasharray {
             textures[ID_LINE_IMAGE_TEXTURE] = dash_texture;
-            (LineType::Sdf, &mut self.line_sdf_shader_group, "LineSDFShader")
+            (LineType::Sdf, &programs::LINE_SDF)
         } else if !self.values.unevaluated.line_pattern.is_undefined() {
             let icons = Some(tile_bucket.atlas_textures()).filter(|atlases| atlases.icon().is_some())?;
             atlases = Some(AtlasBinding::new(
@@ -712,17 +589,14 @@ impl RenderLineLayer {
                 /*icon_scaled*/ false,
                 /*text_size_is_zoom_constant*/ false,
             ));
-            (LineType::Pattern, &mut self.line_pattern_shader_group, "LinePatternShader")
+            (LineType::Pattern, &programs::LINE_PATTERN)
         } else if has_gradient {
             textures[ID_LINE_IMAGE_TEXTURE] = Some(self.color_ramp_texture(context)?);
-            (LineType::Gradient, &mut self.line_gradient_shader_group, "LineGradientShader")
+            (LineType::Gradient, &programs::LINE_GRADIENT)
         } else {
-            (LineType::Simple, &mut self.line_shader_group, "LineShader")
+            (LineType::Simple, &programs::LINE)
         };
-        if group.is_none() {
-            *group = shaders.shader_group(name);
-        }
-        let shader = group.as_ref()?.shader(&properties_as_uniforms, self.base.projection_variant);
+        let shader = context.shader_key(program, uniforms, self.base.projection_variant);
         if let Some(atlases) = &atlases {
             // A pattern binds the atlas's texture and no other.
             textures = atlases.textures(&shader);

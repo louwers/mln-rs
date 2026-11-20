@@ -17,9 +17,10 @@ use mln_gfx::draw_mode::DrawMode;
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType, PrimitiveType};
 use mln_gfx::gpu::{
     BindGroupEntry, BindingsDesc, BindingsId, BufferId, DepthState, Draw, DynamicState, FixedState, GeometryDesc,
-    GeometryId, Gpu, GpuError, PipelineId, PipelineKey, SamplerId, Scissor, ShaderId, StencilState, TargetFormats,
-    TextureId, VertexAttribute as GpuVertexAttribute, VertexBufferLayout, VertexStep,
+    GeometryId, Gpu, GpuError, PipelineId, PipelineKey, SamplerId, Scissor, ShaderId, ShaderKey, StencilState,
+    TargetFormats, TextureId, VertexAttribute as GpuVertexAttribute, VertexBufferLayout, VertexStep,
 };
+use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{MAX_TEXTURE_COUNT_PER_SHADER, MAX_UBO_COUNT_PER_SHADER};
 use mln_gfx::stencil_mode::StencilMode;
@@ -28,7 +29,6 @@ use mln_util::logging::{Event, Log};
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
 use crate::gfx::owned::{Held, Owned};
-use crate::gfx::shader_program::{ShaderProgram, ShaderProgramPtr};
 use crate::gfx::store::SharedTexture;
 use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::gfx::upload::{self, AttributeBindingArray};
@@ -143,7 +143,7 @@ struct PipelineVariant {
 /// and geometry it made of them on the context's `Gpu`, which it makes again
 /// when what they are made of changes.
 pub(crate) struct DrawObjects {
-    shader: ShaderProgramPtr,
+    shader: ShaderKey,
     vertex_attributes: VertexAttributeArray,
     /// The attributes of each instance, for a draw of instances.
     instance_attributes: Option<VertexAttributeArray>,
@@ -196,7 +196,7 @@ impl DrawObjects {
     /// and `cull_face_mode`, binding `textures`, without buffers of its own.
     #[must_use]
     pub(crate) fn new(
-        shader: ShaderProgramPtr,
+        shader: ShaderKey,
         color_mode: ColorMode,
         cull_face_mode: CullFaceMode,
         geometry: DrawGeometry,
@@ -234,14 +234,14 @@ impl DrawObjects {
     /// buffers and textures, where they changed since the last upload.
     pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         if let Err(error) = self.upload_in(gpu, context) {
-            Log::error(Event::Render, format!("Uploading a draw of {} failed: {error}", self.shader.name()));
+            Log::error(Event::Render, format!("Uploading a draw of {} failed: {error}", self.shader.program().name));
         }
     }
 
     fn upload_in(&mut self, gpu: &mut dyn Gpu, context: &mut Context) -> Result<(), GpuError> {
-        let shader = &*self.shader;
+        let program = self.shader.program();
         if self.indexes.buffer(context).is_none() && self.indexes.len(context) == 0 {
-            debug_assert!(false, "a draw of {} has no index data", shader.name());
+            debug_assert!(false, "a draw of {} has no index data", program.name);
             return Ok(());
         }
         self.indexes.upload(gpu, context)?;
@@ -249,13 +249,12 @@ impl DrawObjects {
         // An attribute binds again where its array changed, or where the
         // upload writes what it reads, which may be new. A failed upload
         // leaves the attributes changed, so the next binds them again.
-        if self.vertex_attributes_changed
-            || upload::needs_upload(context, shader.vertex_attributes(), &self.vertex_attributes)
+        if self.vertex_attributes_changed || upload::needs_upload(context, program.attributes, &self.vertex_attributes)
         {
             let updated = upload::update_attribute_bindings(
                 gpu,
                 context,
-                shader.vertex_attributes(),
+                program.attributes,
                 &mut self.vertex_attributes,
                 self.vertex_count,
                 &mut self.attribute_bindings,
@@ -271,13 +270,13 @@ impl DrawObjects {
         if let Some(attrs) = self
             .instance_attributes
             .as_mut()
-            .filter(|attrs| changed || upload::needs_upload(context, shader.instance_attributes(), attrs))
+            .filter(|attrs| changed || upload::needs_upload(context, program.instance_attributes, attrs))
         {
             let instance_count = attrs.min_count();
             let updated = upload::update_attribute_bindings(
                 gpu,
                 context,
-                shader.instance_attributes(),
+                program.instance_attributes,
                 attrs,
                 instance_count,
                 &mut self.instance_bindings,
@@ -323,7 +322,7 @@ impl DrawObjects {
         global_index: u32,
     ) {
         if let Err(error) = self.draw_in(gpu, parameters, frame, depth_mode, stencil_mode, global_index) {
-            Log::warning(Event::Render, format!("Drawing a draw of {} failed: {error}", self.shader.name()));
+            Log::warning(Event::Render, format!("Drawing a draw of {} failed: {error}", self.shader.program().name));
         }
     }
 
@@ -341,20 +340,24 @@ impl DrawObjects {
         };
         let context = &mut *parameters.context;
         let index_buffer = self.indexes.buffer(context);
-        debug_assert!(index_buffer.is_some(), "a draw of {} draws indexes it didn't upload", self.shader.name());
+        debug_assert!(
+            index_buffer.is_some(),
+            "a draw of {} draws indexes it didn't upload",
+            self.shader.program().name
+        );
         let Some(index_buffer) = index_buffer else {
             return Ok(());
         };
 
         let shader_id = match self.shader_id {
             Some(id) => id,
-            None => *self.shader_id.insert(context.shader(gpu, self.shader.key())?),
+            None => *self.shader_id.insert(context.shader(gpu, &self.shader)?),
         };
         let bindings = self.bindings(gpu, context, shader_id, frame)?;
         let slots = if let Some(slots) = &self.vertex_slots {
             slots
         } else {
-            let slots = vertex_slots(&self.shader, &self.attribute_bindings, &self.instance_bindings);
+            let slots = vertex_slots(self.shader.program(), &self.attribute_bindings, &self.instance_bindings);
             // New buffers in the layouts of the old ones keep the
             // pipelines.
             let layouts = slots.iter().map(|slot| &slot.layout);
@@ -452,7 +455,7 @@ impl DrawObjects {
         frame: &UniformBufferArray,
     ) -> Result<BindingsId, GpuError> {
         let mut textures = [None; MAX_TEXTURE_COUNT_PER_SHADER];
-        for &id in self.shader.textures() {
+        for &id in self.shader.program().textures {
             if let Some(texture) = self.textures.get(id).and_then(Option::as_ref) {
                 textures[id] = Some(context.texture_binding(gpu, texture)?);
             }
@@ -498,13 +501,13 @@ impl DrawObjects {
                 entries.push(BindGroupEntry::Texture { id: id as u32, texture, sampler });
             }
         }
-        let textures = self.shader.textures().iter();
+        let textures = self.shader.program().textures.iter();
         held.extend(
             textures
                 .filter_map(|&id| context.gpu_texture(self.textures.get(id)?.as_ref()?).cloned().map(Held::Texture)),
         );
         let bindings = gpu.create_bindings(&BindingsDesc {
-            label: self.shader.name(),
+            label: self.shader.program().name,
             shader: shader_id,
             entries: entries.as_slice(),
         })?;
@@ -645,7 +648,7 @@ impl DrawObjects {
     }
 
     #[must_use]
-    pub(crate) fn shader(&self) -> &ShaderProgramPtr {
+    pub(crate) fn shader(&self) -> &ShaderKey {
         &self.shader
     }
 }
@@ -683,7 +686,7 @@ fn fixed_state(variant: PipelineVariant, color_mode: &ColorMode, cull: CullFaceM
 /// extrusion wall's outline vertex and the next one) read it through slots
 /// of their own, since an attribute's offset must stay within the stride.
 fn vertex_slots(
-    shader: &ShaderProgram,
+    program: &Program,
     attributes: &AttributeBindingArray,
     instances: &AttributeBindingArray,
 ) -> Vec<VertexSlot> {
@@ -691,7 +694,11 @@ fn vertex_slots(
     for (bindings, step) in [(attributes, VertexStep::Vertex), (instances, VertexStep::Instance)] {
         for (index, binding) in bindings.iter().enumerate() {
             let buffer = &binding.buffer;
-            let Some(id) = shader.attribute_id(step, index) else { continue };
+            let attributes = match step {
+                VertexStep::Vertex => program.attributes,
+                VertexStep::Instance => program.instance_attributes,
+            };
+            let Some(&(id, _)) = attributes.get(index) else { continue };
             let offset = u64::from(binding.vertex_offset) * u64::from(binding.vertex_stride);
             let attribute = GpuVertexAttribute {
                 id: id as u32,
@@ -718,7 +725,7 @@ fn vertex_slots(
     if slots.len() > MAX_VERTEX_BUFFERS {
         Log::warning(
             Event::Render,
-            format!("{} reads {} vertex buffers, past the {MAX_VERTEX_BUFFERS} a draw may", shader.name(), slots.len()),
+            format!("{} reads {} vertex buffers, past the {MAX_VERTEX_BUFFERS} a draw may", program.name, slots.len()),
         );
         slots.truncate(MAX_VERTEX_BUFFERS);
     }

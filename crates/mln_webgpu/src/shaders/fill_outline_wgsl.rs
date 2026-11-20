@@ -144,8 +144,6 @@ struct GlobalIndexUBO {
 
 /// The instanced fill outlines.
 pub(crate) const FILL_OUTLINE_INSTANCED_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "FillOutlineInstancedShader",
-    name: "FillOutlineInstancedShader",
     vertex: Some(concat!(
         r#"
 struct VertexInput {
@@ -193,8 +191,6 @@ fn main(in: VertexInput) -> VertexOutput {
 
 /// The pulled fill outlines.
 pub(crate) const FILL_OUTLINE_PULLED_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "FillOutlinePulledShader",
-    name: "FillOutlinePulledShader",
     vertex: Some(concat!(
         plain_declarations!(),
         r#"
@@ -258,8 +254,6 @@ fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
 
 /// The instanced fill outlines of a pattern.
 pub(crate) const FILL_OUTLINE_PATTERN_INSTANCED_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "FillOutlinePatternInstancedShader",
-    name: "FillOutlinePatternInstancedShader",
     vertex: Some(concat!(
         r#"
 struct VertexInput {

@@ -12,13 +12,14 @@ use std::sync::Arc;
 
 use glam::dcamera::rh::proj::opengl::orthographic;
 use glam::{DMat4, DVec3};
-use mln_gfx::gpu::Gpu;
+use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::hillshade_layer_ubo::{
     HillshadeDrawableUBO, HillshadeEvaluatedPropsUBO, HillshadeTilePropsUBO, MAX_ILLUMINATION_SOURCES,
 };
 use mln_gfx::shaders::hillshade_prepare_layer_ubo::{HillshadePrepareDrawableUBO, HillshadePrepareTilePropsUBO};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
+use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
     ID_HILLSHADE_DRAWABLE_UBO, ID_HILLSHADE_EVALUATED_PROPS_UBO, ID_HILLSHADE_IMAGE_TEXTURE,
@@ -50,9 +51,8 @@ use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::geometry::dem_data::unpack_vector;
 use crate::gfx::context::Context;
 use crate::gfx::indexes::{DrawIndexes, Indexes, SharedIndexes};
-use crate::gfx::shader_program::ShaderProgramPtr;
 use crate::gfx::store::SharedTexture;
-use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
+use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_drawing::{
@@ -62,7 +62,7 @@ use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{
-    Atlases, LayerParts, LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
+    Atlases, LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
 };
 use crate::render_pass::RenderPass;
 use crate::render_source::RenderSource;
@@ -70,9 +70,6 @@ use crate::render_static_data::RenderStaticData;
 use crate::render_target::RenderTarget;
 use crate::render_tile::FrameTile;
 use crate::tile_matrix::{bind_no_projection, projection_data, to_projection_ubo};
-
-const HILLSHADE_PREPARE_SHADER_GROUP_NAME: &str = "HillshadePrepareShader";
-const HILLSHADE_SHADER_GROUP_NAME: &str = "HillshadeShader";
 
 impl LayerType for Hillshade {
     type Layout = NoLayout;
@@ -130,9 +127,6 @@ pub(crate) struct RenderHillshadeLayer {
     draw_list: DrawList<HillshadeUniforms>,
     maxzoom: u8,
 
-    hillshade_prepare_shader: Option<ShaderProgramPtr>,
-    hillshade_shader: Option<ShaderProgramPtr>,
-
     static_data_shared_vertices: Option<SharedVertices>,
     /// The triangles of the static data's quad.
     static_data_indices: Option<SharedIndexes>,
@@ -158,8 +152,6 @@ impl RenderHillshadeLayer {
             drawing: TileDraws::default(),
             draw_list: DrawList::default(),
             maxzoom: constants::TERRAIN_RGB_MAXZOOM,
-            hillshade_prepare_shader: None,
-            hillshade_shader: None,
             static_data_shared_vertices: None,
             static_data_indices: None,
             globe_meshes: GlobeTileMeshCache::new(),
@@ -309,10 +301,8 @@ impl TypedLayer for RenderHillshadeLayer {
         PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
 
-    /// Drops the shader of the last projection, and the globe's meshes
-    /// when the frame isn't on the globe.
+    /// Drops the globe's meshes when the frame isn't on the globe.
     fn projection_changed(&mut self) {
-        self.hillshade_shader = None;
         if self.base.projection_variant == ProjectionVariant::Mercator {
             self.globe_meshes.clear();
         }
@@ -337,23 +327,11 @@ impl TypedLayer for RenderHillshadeLayer {
         _atlases: &Atlases,
         render_tiles: &[FrameTile<'_, Hillshade>],
     ) {
-        let shaders = &paint_parameters.static_data.shaders;
-
-        if self.hillshade_prepare_shader.is_none() {
-            self.hillshade_prepare_shader =
-                shaders.shader(HILLSHADE_PREPARE_SHADER_GROUP_NAME, ProjectionVariant::Mercator);
-        }
-        if self.hillshade_shader.is_none() {
-            self.hillshade_shader = shaders.shader(HILLSHADE_SHADER_GROUP_NAME, self.base.projection_variant);
-        }
-        let (Some(hillshade_prepare_shader), Some(hillshade_shader)) =
-            (self.hillshade_prepare_shader.as_ref(), self.hillshade_shader.as_ref())
-        else {
-            self.remove_all_draws();
-            return;
-        };
-
         let context = &mut *paint_parameters.context;
+        let hillshade_prepare_shader =
+            context.shader_key(&programs::HILLSHADE_PREPARE, Uniforms::default(), ProjectionVariant::Mercator);
+        let hillshade_shader =
+            context.shader_key(&programs::HILLSHADE, Uniforms::default(), self.base.projection_variant);
         let static_data_shared_vertices = &*self
             .static_data_shared_vertices
             .get_or_insert_with(|| copied_vertices(context, &RenderStaticData::raster_vertices()));
@@ -401,7 +379,7 @@ impl TypedLayer for RenderHillshadeLayer {
                         bucket,
                         &tile_id.to_unwrapped(),
                         self.maxzoom,
-                        hillshade_prepare_shader,
+                        &hillshade_prepare_shader,
                         attrs,
                         static_data_indices,
                     );
@@ -474,7 +452,7 @@ impl TypedLayer for RenderHillshadeLayer {
                 let mut textures = Textures::default();
                 textures[ID_HILLSHADE_IMAGE_TEXTURE] = Some(render_target_texture.clone());
                 let objects = DrawObjects::new(
-                    Rc::clone(hillshade_shader),
+                    hillshade_shader.clone(),
                     ColorMode::alpha_blended(),
                     CullFaceMode::disabled(),
                     draw_geometry(),
@@ -554,7 +532,7 @@ impl BucketTarget {
         bucket: &HillshadeBucket,
         tile_id: &UnwrappedTileID,
         maxzoom: u8,
-        shader: &ShaderProgramPtr,
+        shader: &ShaderKey,
         attrs: VertexAttributeArray,
         indexes: &SharedIndexes,
     ) -> BucketTarget {
@@ -589,7 +567,7 @@ impl BucketTarget {
         let mut textures = Textures::default();
         textures[ID_HILLSHADE_IMAGE_TEXTURE] = Some(dem.clone());
         let objects =
-            DrawObjects::new(Rc::clone(shader), ColorMode::unblended(), CullFaceMode::disabled(), geometry, textures);
+            DrawObjects::new(shader.clone(), ColorMode::unblended(), CullFaceMode::disabled(), geometry, textures);
         let mut prepare = SingleDraw::new(objects, FrameDraw::new(None, SimpleIdentity::new()));
         let extent = f64::from(EXTENT);
         let m =

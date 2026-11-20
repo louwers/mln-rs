@@ -9,7 +9,8 @@ use std::fmt::Write as _;
 use std::sync::Arc;
 
 use mln_gfx::gpu::{GpuError, ShaderKey};
-use mln_glsl::{AttributeInfo, Module, ResourceUse, ShaderSource, Stage, shader_source};
+use mln_gfx::shaders::program::Program;
+use mln_glsl::{AttributeInfo, Module, ResourceUse, ShaderSource, Stage};
 use mln_util::hash::HashMap;
 use parking_lot::Mutex;
 
@@ -43,26 +44,27 @@ impl ShaderCompiler {
         Ok(ShaderCompiler { dxc })
     }
 
-    /// The program of `key` with its defines, compiled once a process: it
-    /// doesn't depend on the device, and every renderer compiles the same.
-    pub fn compile(&self, key: &ShaderKey) -> Result<Arc<CompiledProgram>, GpuError> {
+    /// The program of `key` with its defines, compiled from `source` once a
+    /// process: it doesn't depend on the device, and every renderer compiles
+    /// the same.
+    pub fn compile(&self, key: &ShaderKey, source: &'static ShaderSource) -> Result<Arc<CompiledProgram>, GpuError> {
         static PROGRAMS: Mutex<Option<HashMap<ShaderKey, Arc<CompiledProgram>>>> = Mutex::new(None);
         if let Some(program) = PROGRAMS.lock().get_or_insert_default().get(key) {
             return Ok(Arc::clone(program));
         }
-        let program = Arc::new(self.compile_uncached(key)?);
+        let program = Arc::new(self.compile_uncached(key, source)?);
         PROGRAMS.lock().get_or_insert_default().insert(key.clone(), Arc::clone(&program));
         Ok(program)
     }
 
-    fn compile_uncached(&self, key: &ShaderKey) -> Result<CompiledProgram, GpuError> {
+    fn compile_uncached(&self, key: &ShaderKey, source: &'static ShaderSource) -> Result<CompiledProgram, GpuError> {
         let program = key.program();
-        let source = shader_source(program).ok_or_else(|| GpuError::Unsupported(format!("no GLSL for {program:?}")))?;
         let mut defines = String::new();
         for (name, value) in key.define_values() {
             let _ = writeln!(defines, "#define {name} {value}");
         }
-        self.compile_source(source, &defines).map_err(|error| GpuError::Invalid(format!("{}: {error}", source.name)))
+        self.compile_source(program, source, &defines)
+            .map_err(|error| GpuError::Invalid(format!("{}: {error}", program.name)))
     }
 
     /// Compiles the HLSL `source` of a `stage`, whose entry point is
@@ -73,9 +75,10 @@ impl ShaderCompiler {
         self.dxc.compile(stage, &hlsl).map_err(GpuError::Invalid)
     }
 
-    /// Compiles `source` with `defines` (`#define` lines).
+    /// Compiles `program` from `source` with `defines` (`#define` lines).
     pub(crate) fn compile_source(
         &self,
+        program: &'static Program,
         source: &'static ShaderSource,
         defines: &str,
     ) -> Result<CompiledProgram, String> {
@@ -99,7 +102,7 @@ impl ShaderCompiler {
         let vertex = compile(Stage::Vertex)?;
         let fragment = compile(Stage::Fragment)?;
         Ok(CompiledProgram {
-            name: source.name,
+            name: program.name,
             vertex,
             fragment,
             resources,

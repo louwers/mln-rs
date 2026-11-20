@@ -6,7 +6,7 @@ use mln_gfx::gpu::conformance::{
     invalid_calls, pulled_walls, readbacks, resources_in_use, topologies, transparent_replace, vertex_layouts,
 };
 use mln_gfx::gpu::{BufferUsage, ColorAttachment};
-use mln_gfx::shaders::shader_source::BuiltIn;
+use mln_gfx::shaders::programs;
 use mln_util::Color;
 use objc2::runtime::NSObjectProtocol as _;
 use objc2::{msg_send, sel};
@@ -96,12 +96,12 @@ fragment half4 fragmentMain() { return half4(1.0); }
 ";
     let device = Device::new(None).expect("Metal device");
     let mut gpu = MetalGpu::new(&device);
-    let program = BuiltIn::FillExtrusionInstancedShader;
+    let program = &programs::FILL_EXTRUSION_INSTANCED;
     let (vertex, fragment) =
         compile(device.device(), "direct read", MSL, "vertexMain", "fragmentMain", []).expect("the MSL compiles");
-    let source = shader_source(program).expect("the table");
+    let source = gpu.sources.get(program).expect("the table");
     let active_attributes = active_attributes(&vertex);
-    let shader = gpu.shaders.insert(Shader { source, vertex, active_attributes, fragment, table: None });
+    let shader = gpu.shaders.insert(Shader { program, source, vertex, active_attributes, fragment, table: None });
     let unblended = mln_gfx::color_mode::ColorMode::unblended();
     let layouts = [VertexBufferLayout {
         stride: 4,

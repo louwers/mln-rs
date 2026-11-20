@@ -9,6 +9,10 @@ use std::sync::Arc;
 
 use glam::Vec2;
 use mln_gfx::shaders::segment::SegmentBase;
+use mln_gfx::shaders::shader_defines::{
+    ID_SYMBOL_COLOR_ATTRIBUTE, ID_SYMBOL_HALO_BLUR_ATTRIBUTE, ID_SYMBOL_HALO_COLOR_ATTRIBUTE,
+    ID_SYMBOL_HALO_WIDTH_ATTRIBUTE, ID_SYMBOL_OPACITY_ATTRIBUTE,
+};
 use mln_style::expression::EvaluationContext;
 use mln_style::layers::Symbol;
 use mln_style::layers::symbol_layer::SymbolLayerPaintPropertyOverrides;
@@ -34,21 +38,21 @@ use crate::util::pool::PoolRange;
 
 crate::paint_property_binders!(
     pub struct SymbolIconBinders for SymbolPaintProperties::PossiblyEvaluated {
-        icon_opacity => PaintPropertyBinder<f32>,
-        icon_color => PaintPropertyBinder<Color>,
-        icon_halo_color => PaintPropertyBinder<Color>,
-        icon_halo_width => PaintPropertyBinder<f32>,
-        icon_halo_blur => PaintPropertyBinder<f32>,
+        icon_opacity: PaintPropertyBinder<f32> => [ID_SYMBOL_OPACITY_ATTRIBUTE],
+        icon_color: PaintPropertyBinder<Color> => [ID_SYMBOL_COLOR_ATTRIBUTE],
+        icon_halo_color: PaintPropertyBinder<Color> => [ID_SYMBOL_HALO_COLOR_ATTRIBUTE],
+        icon_halo_width: PaintPropertyBinder<f32> => [ID_SYMBOL_HALO_WIDTH_ATTRIBUTE],
+        icon_halo_blur: PaintPropertyBinder<f32> => [ID_SYMBOL_HALO_BLUR_ATTRIBUTE],
     }
 );
 
 crate::paint_property_binders!(
     pub struct SymbolTextBinders for SymbolPaintProperties::PossiblyEvaluated {
-        text_opacity => PaintPropertyBinder<f32>,
-        text_color => PaintPropertyBinder<Color>,
-        text_halo_color => PaintPropertyBinder<Color>,
-        text_halo_width => PaintPropertyBinder<f32>,
-        text_halo_blur => PaintPropertyBinder<f32>,
+        text_opacity: PaintPropertyBinder<f32> => [ID_SYMBOL_OPACITY_ATTRIBUTE],
+        text_color: PaintPropertyBinder<Color> => [ID_SYMBOL_COLOR_ATTRIBUTE],
+        text_halo_color: PaintPropertyBinder<Color> => [ID_SYMBOL_HALO_COLOR_ATTRIBUTE],
+        text_halo_width: PaintPropertyBinder<f32> => [ID_SYMBOL_HALO_WIDTH_ATTRIBUTE],
+        text_halo_blur: PaintPropertyBinder<f32> => [ID_SYMBOL_HALO_BLUR_ATTRIBUTE],
     }
 );
 

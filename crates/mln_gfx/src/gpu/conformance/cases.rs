@@ -22,6 +22,8 @@ use crate::shaders::fill_extrusion_layer_ubo::{
 use crate::shaders::fill_layer_ubo::{FillDrawableUBO, FillDrawableUnionUBO, FillEvaluatedPropsUBO};
 use crate::shaders::heatmap_texture_layer_ubo::HeatmapTexturePropsUBO;
 use crate::shaders::layer_ubo::{GlobalPaintParamsUBO, ProjectionUBO};
+use crate::shaders::program::Program;
+use crate::shaders::programs;
 use crate::shaders::shader_defines::{
     ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_PROPS_UBO,
     ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE, ID_FILL_COLOR_VERTEX_ATTRIBUTE, ID_FILL_DRAWABLE_UBO,
@@ -32,7 +34,6 @@ use crate::shaders::shader_defines::{
     ID_FILL_POS_VERTEX_ATTRIBUTE, ID_GLOBAL_PAINT_PARAMS_UBO, ID_HEATMAP_COLOR_RAMP_TEXTURE, ID_HEATMAP_IMAGE_TEXTURE,
     ID_HEATMAP_POS_VERTEX_ATTRIBUTE, ID_HEATMAP_TEXTURE_PROPS_UBO, ID_PROJECTION_UBO,
 };
-use crate::shaders::shader_source::BuiltIn;
 use crate::stencil_mode::StencilMode;
 use crate::texture2d::SamplerState;
 use crate::types::DepthFunctionType;
@@ -66,7 +67,7 @@ fn solid(gpu: &mut impl Gpu, format: TextureFormat, color: [f32; 4]) -> Result<S
 fn solid_at(gpu: &mut impl Gpu, format: TextureFormat, color: [f32; 4], matrix: [f32; 16]) -> Result<Solid, GpuError> {
     let target = target(gpu, format)?;
     let (quad, indices) = quad(gpu)?;
-    let shader = gpu.create_shader(&ShaderKey::new(BuiltIn::BackgroundShader, []))?;
+    let shader = gpu.create_shader(&ShaderKey::new(&programs::BACKGROUND, []))?;
     let projection = [ProjectionUBO { matrix, ..ProjectionUBO::default() }];
     let drawable = [BackgroundDrawableUnionUBO::default()];
     let props = BackgroundPropsUBO { color, opacity: 1.0, ..BackgroundPropsUBO::default() };
@@ -226,7 +227,7 @@ pub fn invalid_calls(gpu: &mut impl Gpu) -> Result<(), GpuError> {
         TargetFormats { depth_stencil: Some(TextureFormat::Depth24PlusStencil8), ..RGBA8 },
     ))?;
     assert!(invalid(&with_draw(gpu, frame.draw(depth_pipeline))), "a pipeline for a depth attachment");
-    let mask = gpu.create_shader(&ShaderKey::new(BuiltIn::ClippingMaskProgram, []))?;
+    let mask = gpu.create_shader(&ShaderKey::new(&programs::CLIPPING_MASK, []))?;
     let mask_layouts = [position_layout(ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE)];
     let mask_geometry = gpu.create_geometry(&GeometryDesc {
         shader: mask,
@@ -492,7 +493,7 @@ pub fn depth_only(gpu: &mut impl Gpu) -> Result<(), GpuError> {
 /// Where a check doesn't hold.
 pub fn vertex_layouts(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     let frame = solid(gpu, TextureFormat::Rgba8Unorm, [0.0, 0.0, 0.0, 0.0])?;
-    let shader = gpu.create_shader(&ShaderKey::new(BuiltIn::FillShader, []))?;
+    let shader = gpu.create_shader(&ShaderKey::new(&programs::FILL, []))?;
     let projection = [ProjectionUBO { matrix: tile_matrix(1.0), ..ProjectionUBO::default() }];
     let mut drawable = [FillDrawableUnionUBO::default()];
     drawable[0].set_fill(&FillDrawableUBO { matrix: tile_matrix(1.0), ..FillDrawableUBO::default() });
@@ -579,7 +580,7 @@ fn wall_outline() -> [[i16; 4]; 3] {
 /// bind `more` too.
 fn wall_frame(
     gpu: &mut impl Gpu,
-    program: BuiltIn,
+    program: &'static Program,
     more: &[BindGroupEntry],
 ) -> Result<(Solid, ShaderId, BindingsId), GpuError> {
     let frame = solid(gpu, TextureFormat::Rgba8Unorm, [0.0, 0.0, 0.0, 0.0])?;
@@ -654,7 +655,7 @@ pub fn instanced_walls(gpu: &mut impl Gpu) -> Result<(), GpuError> {
 
 /// The texels of the frame of `instanced_walls`.
 fn instanced_wall_texels(gpu: &mut impl Gpu) -> Result<Vec<u8>, GpuError> {
-    let (frame, shader, bindings) = wall_frame(gpu, BuiltIn::FillExtrusionInstancedShader, &[])?;
+    let (frame, shader, bindings) = wall_frame(gpu, &programs::FILL_EXTRUSION_INSTANCED, &[])?;
     let corners = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&WALL_CORNERS))?;
     let outline = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&wall_outline()))?;
 
@@ -703,7 +704,7 @@ fn instanced_wall_texels(gpu: &mut impl Gpu) -> Result<Vec<u8>, GpuError> {
 ///
 /// Where a check doesn't hold.
 pub fn wall_quads(gpu: &mut impl Gpu) -> Result<(), GpuError> {
-    let (frame, shader, bindings) = wall_frame(gpu, BuiltIn::FillExtrusionWallShader, &[])?;
+    let (frame, shader, bindings) = wall_frame(gpu, &programs::FILL_EXTRUSION_WALL, &[])?;
     let mut quads: Vec<i16> = Vec::new();
     for vertex in wall_outline() {
         for corner in WALL_CORNERS {
@@ -770,7 +771,7 @@ pub fn pulled_walls(gpu: &mut impl Gpu) -> Result<(), GpuError> {
         return Ok(());
     }
 
-    let (frame, shader, bindings) = wall_frame(gpu, BuiltIn::FillExtrusionPulledShader, &[outline])?;
+    let (frame, shader, bindings) = wall_frame(gpu, &programs::FILL_EXTRUSION_PULLED, &[outline])?;
     // The corners of a wall's quad are in the static quad's order.
     let indices: [u16; 12] = [0, 2, 1, 1, 2, 3, 4, 6, 5, 5, 6, 7];
     let indices = buffer(gpu, BufferUsage::Index, bytemuck::cast_slice(&indices))?;
@@ -914,7 +915,7 @@ pub fn resources_in_use<G: Gpu>(gpu: &mut G) -> Result<(), GpuError> {
     let projection = bytemuck::cast_slice(&projection);
     let projection_buffer = buffer(gpu, BufferUsage::Storage, projection)?;
     let (vertices, indices) = quad(gpu)?;
-    let shader = gpu.create_shader(&ShaderKey::new(BuiltIn::HeatmapTextureShader, []))?;
+    let shader = gpu.create_shader(&ShaderKey::new(&programs::HEATMAP_TEXTURE, []))?;
     let layouts = [position_layout(ID_HEATMAP_POS_VERTEX_ATTRIBUTE)];
     let pipeline = gpu.create_pipeline(&PipelineDesc {
         shader,
@@ -1072,7 +1073,7 @@ pub fn host_writes<G: Gpu + ?Sized>(
 ) -> Result<crate::gpu::ReadbackId, GpuError> {
     let target = target(gpu, TextureFormat::Rgba8Unorm)?;
     let (quad, indices) = quad(gpu)?;
-    let shader = gpu.create_shader(&ShaderKey::new(BuiltIn::BackgroundShader, []))?;
+    let shader = gpu.create_shader(&ShaderKey::new(&programs::BACKGROUND, []))?;
     let drawable = [BackgroundDrawableUnionUBO::default()];
     let drawable = bytemuck::cast_slice(&drawable);
     let drawable_buffer = buffer(gpu, BufferUsage::Storage, drawable)?;

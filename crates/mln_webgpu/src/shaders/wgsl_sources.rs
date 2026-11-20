@@ -3,8 +3,6 @@
 use super::shader_source::WgslShaderSource;
 
 pub(crate) const ATMOSPHERE_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "AtmosphereShader",
-    name: r"AtmosphereShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -148,8 +146,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const BACKGROUND_PATTERN_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "BackgroundPatternShader",
-    name: r"BackgroundPatternShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -286,8 +282,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const BACKGROUND_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "BackgroundShader",
-    name: r"BackgroundShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -362,8 +356,6 @@ fn main() -> @location(0) vec4<f32> {
 };
 
 pub(crate) const CIRCLE_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "CircleShader",
-    name: r"CircleShader",
     vertex: Some(
         r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
@@ -663,8 +655,6 @@ struct GlobalIndexUBO {
 };
 
 pub(crate) const CLIPPING_MASK_PROGRAM: WgslShaderSource = WgslShaderSource {
-    built_in: "ClippingMaskProgram",
-    name: r"ClippingMaskProgram",
     vertex: Some(
         r"
 struct VertexInput {
@@ -698,8 +688,6 @@ fn main() -> @location(0) vec4<f32> {
 };
 
 pub(crate) const COLLISION_BOX_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "CollisionBoxShader",
-    name: r"CollisionBoxShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -812,8 +800,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const COLLISION_CIRCLE_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "CollisionCircleShader",
-    name: r"CollisionCircleShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -954,8 +940,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const COLOR_RELIEF_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "ColorReliefShader",
-    name: r"ColorReliefShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -1123,8 +1107,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const DEBUG_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "DebugShader",
-    name: r"DebugShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -1199,8 +1181,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const FILL_EXTRUSION_PATTERN_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "FillExtrusionPatternShader",
-    name: r"FillExtrusionPatternShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -1481,8 +1461,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const FILL_EXTRUSION_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "FillExtrusionShader",
-    name: r"FillExtrusionShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -1620,8 +1598,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const FILL_OUTLINE_PATTERN_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "FillOutlinePatternShader",
-    name: r"FillOutlinePatternShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -1915,8 +1891,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const FILL_OUTLINE_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "FillOutlineShader",
-    name: r"FillOutlineShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -2062,8 +2036,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const FILL_OUTLINE_TRIANGULATED_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "FillOutlineTriangulatedShader",
-    name: r"FillOutlineTriangulatedShader",
     vertex: Some(
         r"
 const SCALE: f32 = 0.015873016;
@@ -2201,8 +2173,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const FILL_PATTERN_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "FillPatternShader",
-    name: r"FillPatternShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -2483,8 +2453,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const FILL_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "FillShader",
-    name: r"FillShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -2608,8 +2576,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const GLOBE_DEPTH_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "GlobeDepthShader",
-    name: r"GlobeDepthShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -2648,8 +2614,6 @@ fn main() -> @location(0) vec4<f32> {
 };
 
 pub(crate) const HEATMAP_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "HeatmapShader",
-    name: r"HeatmapShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -2782,8 +2746,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const HEATMAP_TEXTURE_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "HeatmapTextureShader",
-    name: r"HeatmapTextureShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -2861,8 +2823,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 /// texel for texel, with its opacity and, for the blend modes that no blend
 /// function expresses, against a copy of the frame (`backdrop_texture`).
 pub(crate) const LAYER_COMPOSITE_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "LayerCompositeShader",
-    name: r"LayerCompositeShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -2966,8 +2926,6 @@ fn main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const HILLSHADE_PREPARE_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "HillshadePrepareShader",
-    name: r"HillshadePrepareShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -3077,8 +3035,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const HILLSHADE_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "HillshadeShader",
-    name: r"HillshadeShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -3294,8 +3250,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const LINE_GRADIENT_SDF_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "LineGradientSDFShader",
-    name: r"LineGradientSDFShader",
     vertex: Some(
         r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
@@ -3662,8 +3616,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const LINE_GRADIENT_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "LineGradientShader",
-    name: r"LineGradientShader",
     vertex: Some(
         r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
@@ -3929,8 +3881,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const LINE_PATTERN_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "LinePatternShader",
-    name: r"LinePatternShader",
     vertex: Some(
         r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
@@ -4318,8 +4268,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const LINE_SDF_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "LineSDFShader",
-    name: r"LineSDFShader",
     vertex: Some(
         r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
@@ -4709,8 +4657,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const LINE_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "LineShader",
-    name: r"LineShader",
     vertex: Some(
         r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
@@ -4984,8 +4930,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const PRELUDE: WgslShaderSource = WgslShaderSource {
-    built_in: "Prelude",
-    name: r"Prelude",
     vertex: None,
     fragment: None,
     prelude: Some(
@@ -5231,8 +5175,6 @@ fn atlas_pos(origin: vec2<f32>, offset: vec2<f32>) -> vec2<f32> {
 };
 
 pub(crate) const RASTER_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "RasterShader",
-    name: r"RasterShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -5356,8 +5298,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const SKY_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "SkyShader",
-    name: r"SkyShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -5418,8 +5358,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const SYMBOL_ICON_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "SymbolIconShader",
-    name: r"SymbolIconShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -5698,8 +5636,6 @@ const c_offscreen_degenerate_triangle_location: f32 = -2.0;
 };
 
 pub(crate) const SYMBOL_SDF_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "SymbolSDFShader",
-    name: r"SymbolSDFShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -6057,8 +5993,6 @@ const c_offscreen_degenerate_triangle_location: f32 = -2.0;
 };
 
 pub(crate) const SYMBOL_TEXT_AND_ICON_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "SymbolTextAndIconShader",
-    name: r"SymbolTextAndIconShader",
     vertex: Some(
         r"
 struct VertexInput {
@@ -6431,113 +6365,3 @@ const c_offscreen_degenerate_triangle_location: f32 = -2.0;
 ",
     ),
 };
-
-#[cfg(test)]
-pub(crate) const WIDE_VECTOR_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "WideVectorShader",
-    name: r"WideVectorShader",
-    vertex: Some(
-        r"
-struct VertexInput {
-    @location(5) position: vec3<f32>,
-    @location(6) normal: vec2<f32>,
-    @location(7) texCoord: vec2<f32>,
-};
-
-struct InstanceInput {
-    @location(8) instanceCenter: vec3<f32>,
-    @location(9) instanceColor: vec4<f32>,
-    @location(10) instancePrev: i32,
-    @location(11) instanceNext: i32,
-};
-
-struct VertexOutput {
-    @builtin(position) position: vec4<f32>,
-    @location(0) color: vec4<f32>,
-    @location(1) texCoord: vec2<f32>,
-};
-
-struct WideVectorUBO {
-    mvpMatrix: mat4x4<f32>,
-    mvpMatrixDiff: mat4x4<f32>,
-    mvMatrix: mat4x4<f32>,
-    mvMatrixDiff: mat4x4<f32>,
-    pMatrix: mat4x4<f32>,
-    pMatrixDiff: mat4x4<f32>,
-    frameSize: vec2<f32>,
-    color: vec4<f32>,
-    width: f32,
-    offset: f32,
-    edge: f32,
-    texRepeat: f32,
-    texOffset: vec2<f32>,
-};
-
-@group(0) @binding(0) var<uniform> ubo: WideVectorUBO;
-
-@vertex
-fn main(in: VertexInput, instance: InstanceInput) -> VertexOutput {
-    var out: VertexOutput;
-
-    // Calculate position with offset based on normal
-    let worldPos = instance.instanceCenter + vec3<f32>(in.normal * ubo.width, 0.0);
-    out.position = ubo.mvpMatrix * vec4<f32>(worldPos, 1.0);
-
-    // Pass through color and texture coordinates
-    out.color = instance.instanceColor * ubo.color;
-    out.texCoord = in.texCoord * ubo.texRepeat + ubo.texOffset;
-
-    return out;
-}
-",
-    ),
-    fragment: Some(
-        r"
-@fragment
-fn main(@location(0) color: vec4<f32>, @location(1) texCoord: vec2<f32>) -> @location(0) vec4<f32> {
-    // Simple color output with alpha blending support
-    return color;
-}
-",
-    ),
-    prelude: None,
-};
-
-/// Every extracted specialisation, sorted by `BuiltIn` name.
-#[cfg(test)]
-pub(crate) const ALL: &[&WgslShaderSource] = &[
-    &ATMOSPHERE_SHADER,
-    &BACKGROUND_PATTERN_SHADER,
-    &BACKGROUND_SHADER,
-    &CIRCLE_SHADER,
-    &CLIPPING_MASK_PROGRAM,
-    &COLLISION_BOX_SHADER,
-    &COLLISION_CIRCLE_SHADER,
-    &COLOR_RELIEF_SHADER,
-    &DEBUG_SHADER,
-    &FILL_EXTRUSION_PATTERN_SHADER,
-    &FILL_EXTRUSION_SHADER,
-    &FILL_OUTLINE_PATTERN_SHADER,
-    &FILL_OUTLINE_SHADER,
-    &FILL_OUTLINE_TRIANGULATED_SHADER,
-    &FILL_PATTERN_SHADER,
-    &FILL_SHADER,
-    &GLOBE_DEPTH_SHADER,
-    &HEATMAP_SHADER,
-    &HEATMAP_TEXTURE_SHADER,
-    &HILLSHADE_PREPARE_SHADER,
-    &HILLSHADE_SHADER,
-    &LAYER_COMPOSITE_SHADER,
-    &LINE_GRADIENT_SDF_SHADER,
-    &LINE_GRADIENT_SHADER,
-    &LINE_PATTERN_SHADER,
-    &LINE_SDF_SHADER,
-    &LINE_SHADER,
-    &PRELUDE,
-    &RASTER_SHADER,
-    &SKY_SHADER,
-    &SYMBOL_ICON_SHADER,
-    &SYMBOL_SDF_SHADER,
-    &SYMBOL_TEXT_AND_ICON_SHADER,
-    &WIDE_VECTOR_SHADER,
-];

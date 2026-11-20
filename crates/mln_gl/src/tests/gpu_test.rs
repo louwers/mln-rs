@@ -17,10 +17,10 @@ use mln_gfx::gpu::{
 };
 use mln_gfx::shaders::background_layer_ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
+use mln_gfx::shaders::programs;
 use mln_gfx::shaders::shader_defines::{
     ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_PROPS_UBO, ID_PROJECTION_UBO,
 };
-use mln_gfx::shaders::shader_source::BuiltIn;
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::types::DepthFunctionType;
 use mln_util::Color;
@@ -232,7 +232,7 @@ impl Background {
 }
 
 fn background(gpu: &mut GlGpu, props: &BackgroundPropsUBO) -> Background {
-    let shader = gpu.create_shader(&ShaderKey::new(BuiltIn::BackgroundShader, [])).unwrap();
+    let shader = gpu.create_shader(&ShaderKey::new(&programs::BACKGROUND, [])).unwrap();
     let quad = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&[[-1i16, -1], [1, -1], [-1, 1], [1, 1]]));
     let indices = buffer(gpu, BufferUsage::Index, bytemuck::cast_slice(&[0u16, 1, 2, 1, 2, 3]));
     let projection = [ProjectionUBO {

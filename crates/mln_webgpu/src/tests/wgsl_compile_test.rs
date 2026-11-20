@@ -1,129 +1,68 @@
-// Compiles every WGSL source of `wgsl_sources` as `shader_program::compile`
-// does (the common prelude, then the shader's own if any, through the
-// preprocessor with the pixel ratio's define, in both projection variants)
-// and reports which ones wgpu's WGSL front end (naga) rejects.
-//
-// The shaders in `REQUIRED` must compile; the rest are reported only.
+// Compiles every built-in program's WGSL as `WebGpu::create_shader` does, in
+// both projection variants, with every property it declares read per vertex
+// and with every one read from its uniform.
+
+use std::collections::BTreeSet;
 
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::program_info::GLOBE_DEFINE;
-use mln_util::hash::HashMap;
+use mln_gfx::shaders::program_parameters::ProgramParameters;
 
 use crate::Device;
 use crate::index_table::IndexTable;
-use crate::shaders::shader_program::ShaderProgram;
-use crate::shaders::shader_source::{ShaderSource, WgslShaderSource, prelude};
-use crate::shaders::wgsl_preprocessor::preprocess_wgsl;
-use crate::shaders::wgsl_sources::ALL;
+use crate::shaders::shader_program::compile;
+use crate::shaders::shader_source::{BUILT_INS, ShaderSource, prelude};
 
-const REQUIRED: &[&str] = &[
-    "BackgroundShader",
-    "BackgroundPatternShader",
-    "ClippingMaskProgram",
-    "GlobeDepthShader",
-    "SkyShader",
-    "AtmosphereShader",
-    "LayerCompositeShader",
-];
-
-/// `wgsl` without inputs or textures.
-fn without_inputs(wgsl: &'static WgslShaderSource) -> ShaderSource {
-    ShaderSource { wgsl, name: wgsl.name, attributes: &[], instance_attributes: &[], textures: &[] }
+/// The names after the `HAS_UNIFORM_u_` that `source`'s WGSL tests.
+fn uniforms(source: &ShaderSource) -> BTreeSet<String> {
+    const PREFIX: &str = "HAS_UNIFORM_u_";
+    let wgsl = source.wgsl;
+    let mut names = BTreeSet::new();
+    for text in [wgsl.prelude, wgsl.vertex, wgsl.fragment].into_iter().flatten() {
+        for (start, _) in text.match_indices(PREFIX) {
+            let rest = &text[start + PREFIX.len()..];
+            let end = rest.find(|c: char| !c.is_ascii_alphanumeric() && c != '_').unwrap_or(rest.len());
+            names.insert(rest[..end].to_owned());
+        }
+    }
+    names
 }
 
-/// The common prelude, the shader's own and the stage's source, before
-/// preprocessing.
-fn assemble(source: &WgslShaderSource, stage: &str) -> String {
-    format!("{}\n{}{stage}", prelude(), source.prelude.unwrap_or(""))
-}
-
+/// A variant's defines read a property from its uniform only where the
+/// program declares it.
 #[test]
-fn all_extracted_wgsl_compiles() {
-    let device = Device::new(None).expect("device");
-    let device = device.device();
-    let index_table = IndexTable::new(device);
-
-    for variant in [ProjectionVariant::Mercator, ProjectionVariant::Globe] {
-        let mut defines: HashMap<String, bool> = [("DEVICE_PIXEL_RATIO".to_owned(), true)].into_iter().collect();
-        if variant == ProjectionVariant::Globe {
-            defines.insert(GLOBE_DEFINE.to_owned(), true);
-        }
-        let mut failed = Vec::new();
-        let mut compiled = 0;
-        for source in ALL {
-            let (Some(vertex), Some(fragment)) = (source.vertex, source.fragment) else {
-                continue; // The common prelude
-            };
-            let vertex = preprocess_wgsl(&assemble(source, vertex), &defines);
-            let fragment = preprocess_wgsl(&assemble(source, fragment), &defines);
-            match ShaderProgram::new(device, index_table.layout(), &vertex, &fragment, &without_inputs(source), 1.0) {
-                Ok(program) => {
-                    assert_eq!(
-                        program.index_group().is_some(),
-                        vertex.contains("globalIndex") || fragment.contains("globalIndex"),
-                        "{} binds globalIndex in a group of its own",
-                        source.built_in
-                    );
-                    compiled += 1;
-                }
-                Err(_) => failed.push(source.built_in),
-            }
-        }
-        eprintln!("{variant:?}: compiled {compiled} WGSL shader sources; rejected by naga: {failed:?}");
-        for required in REQUIRED {
-            assert!(!failed.contains(required), "{required} must compile ({variant:?})");
-        }
+fn every_program_declares_the_properties_its_wgsl_reads_from_uniforms() {
+    for &(program, source) in BUILT_INS {
+        let declared: BTreeSet<String> = program.properties.iter().map(|property| property.name.to_owned()).collect();
+        assert_eq!(uniforms(source), declared, "{}", program.name);
     }
 }
 
-/// Every symbol tested by `#ifdef`/`#ifndef` in the source.
-fn conditional_symbols(source: &str) -> Vec<String> {
-    let mut symbols = Vec::new();
-    for line in source.lines() {
-        let t = line.trim_start();
-        for directive in ["#ifdef", "#ifndef"] {
-            if let Some(rest) = t.strip_prefix(directive)
-                && let Some(sym) = rest.split_whitespace().next()
-            {
-                symbols.push(sym.to_owned());
-            }
-        }
-    }
-    symbols
-}
-
-/// The variant with every conditional defined (e.g. all `HAS_UNIFORM_u`_*, as
-/// when all data-driven properties are constant). Reported, not asserted.
 #[test]
-fn all_extracted_wgsl_compiles_with_all_conditionals_defined() {
+fn every_program_compiles() {
     let device = Device::new(None).expect("device");
     let device = device.device();
     let index_table = IndexTable::new(device);
+    let parameters = ProgramParameters::new(1.0, false);
     let mut failed = Vec::new();
-    let mut compiled = 0;
-    for source in ALL {
-        let (Some(vertex), Some(fragment)) = (source.vertex, source.fragment) else {
-            continue;
-        };
-        let vertex = assemble(source, vertex);
-        let fragment = assemble(source, fragment);
-        let mut defines: HashMap<String, bool> = [("DEVICE_PIXEL_RATIO".to_owned(), true)].into_iter().collect();
-        for sym in conditional_symbols(&vertex).into_iter().chain(conditional_symbols(&fragment)) {
-            defines.insert(sym, true);
-        }
-        let program = ShaderProgram::new(
-            device,
-            index_table.layout(),
-            &preprocess_wgsl(&vertex, &defines),
-            &preprocess_wgsl(&fragment, &defines),
-            &without_inputs(source),
-            1.0,
-        );
-        if program.is_ok() {
-            compiled += 1;
-        } else {
-            failed.push(source.built_in);
+    for &(program, source) in BUILT_INS {
+        for variant in [ProjectionVariant::Mercator, ProjectionVariant::Globe] {
+            for uniforms in [&[][..], program.properties] {
+                let key = program.variant_key(&parameters, uniforms, variant);
+                match compile(device, index_table.layout(), &key, source) {
+                    Ok(compiled) => {
+                        let wgsl = source.wgsl;
+                        let text = [Some(prelude()), wgsl.prelude, wgsl.vertex, wgsl.fragment];
+                        assert_eq!(
+                            compiled.index_group().is_some(),
+                            text.into_iter().flatten().any(|text| text.contains("globalIndex")),
+                            "{} binds globalIndex in a group of its own",
+                            program.name
+                        );
+                    }
+                    Err(error) => failed.push(format!("{} ({variant:?}, {:?}): {error}", program.name, key.defines())),
+                }
+            }
         }
     }
-    eprintln!("all-defined variant: compiled {compiled}; rejected by naga: {failed:?}");
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
 }

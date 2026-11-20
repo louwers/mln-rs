@@ -9,10 +9,11 @@ use std::sync::Arc;
 
 use geometry::Point;
 use glam::Vec2;
-use mln_gfx::gpu::Gpu;
+use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::line_layer_ubo::{LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO};
+use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
     ID_LINE_BLUR_VERTEX_ATTRIBUTE, ID_LINE_COLOR_VERTEX_ATTRIBUTE, ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_DRAWABLE_UBO,
@@ -39,8 +40,6 @@ use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
 use crate::gfx::line_mesh::{LineLayoutVertex, LineOptions, LineScratch, add_line};
 use crate::gfx::mesh::Indexed;
-use crate::gfx::shader_group::StringIDSetsPair;
-use crate::gfx::shader_program::ShaderProgramPtr;
 use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
 use crate::layer_drawing::{DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptDraw, LayerDraws};
 use crate::layer_type::ErasedEvaluatedLayer;
@@ -84,7 +83,7 @@ fn debug_line_properties(type_: DebugType) -> LineEvaluatedPropsUBO {
 /// `None` where they have no vertices.
 fn polyline_objects(
     context: &mut Context,
-    shader: &ShaderProgramPtr,
+    shader: &ShaderKey,
     lines: &[GeometryCoordinates],
     options: &LineOptions,
 ) -> Option<DrawObjects> {
@@ -121,7 +120,7 @@ fn polyline_objects(
         instances: None,
     };
     Some(DrawObjects::new(
-        Rc::clone(shader),
+        shader.clone(),
         ColorMode::alpha_blended(),
         CullFaceMode::disabled(),
         geometry,
@@ -410,32 +409,20 @@ impl RenderSource for RenderTileSource {
             return;
         }
 
-        let shaders = &*parameters.static_data.shaders;
         let source = &self.id;
         let globe = parameters.view.is_globe();
         let projection_variant = if globe { ProjectionVariant::Globe } else { ProjectionVariant::Mercator };
 
-        let Some(polyline_shader) = shaders.shader_group("LineShader").map(|shader_group| {
-            let properties_as_uniforms: StringIDSetsPair = (
-                ["a_color", "a_blur", "a_opacity", "a_gapwidth", "a_offset", "a_width"]
-                    .into_iter()
-                    .map(String::from)
-                    .collect(),
-                [
-                    ID_LINE_COLOR_VERTEX_ATTRIBUTE,
-                    ID_LINE_BLUR_VERTEX_ATTRIBUTE,
-                    ID_LINE_OPACITY_VERTEX_ATTRIBUTE,
-                    ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE,
-                    ID_LINE_OFFSET_VERTEX_ATTRIBUTE,
-                    ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
-                ]
-                .into_iter()
-                .collect(),
-            );
-            shader_group.shader(&properties_as_uniforms, projection_variant)
-        }) else {
-            return;
-        };
+        let uniforms = [
+            ID_LINE_COLOR_VERTEX_ATTRIBUTE,
+            ID_LINE_BLUR_VERTEX_ATTRIBUTE,
+            ID_LINE_OPACITY_VERTEX_ATTRIBUTE,
+            ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE,
+            ID_LINE_OFFSET_VERTEX_ATTRIBUTE,
+            ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
+        ];
+        let polyline_shader =
+            parameters.context.shader_key(&programs::LINE, uniforms.into_iter().collect(), projection_variant);
 
         // The tiles to cover, whose draws stay where they were built with
         // the same shader and spell the tile's text: one of the other
@@ -449,7 +436,7 @@ impl RenderSource for RenderTileSource {
             let Some(tile) = new_tiles.get(&draw.tile) else {
                 return false;
             };
-            let same_shader = std::ptr::addr_eq(Rc::as_ptr(draw.draw.objects.shader()), Rc::as_ptr(&polyline_shader));
+            let same_shader = *draw.draw.objects.shader() == polyline_shader;
             let same_text = match (&draw.text, &tile.debug_bucket) {
                 (Some(text), Some(debug_bucket)) => *text == debug_bucket.text,
                 _ => true,

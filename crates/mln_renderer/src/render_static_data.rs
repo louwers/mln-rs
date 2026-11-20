@@ -7,27 +7,20 @@ use crate::buckets::fill_extrusion_bucket::FillExtrusionStaticVertex;
 use crate::buckets::raster_bucket::RasterLayoutVertex;
 use crate::gfx::context::Context;
 use crate::gfx::indexes::{Indexes, SharedIndexes};
-use crate::gfx::shader_registry::ShaderRegistry;
 use crate::gfx::store::{IndexesKey, WeakShared};
 
 /// The most walls whose quads a segment draws: as many as its 16-bit
 /// indices reach.
 const FILL_EXTRUSION_SEGMENT_WALLS: usize = MAX_SEGMENT_VERTICES / 4;
 
-/// What every frame draws with: the shaders, made for the renderer's pixel
-/// ratio, and the vertices and indices of the geometry the layers share.
+/// The vertices and indices of the geometry the layers share.
+#[derive(Default)]
 pub(crate) struct RenderStaticData {
-    pub(crate) shaders: Box<ShaderRegistry>,
     /// `wall_indexes`, while a layer holds them.
     wall_indexes: Cell<WeakShared<IndexesKey>>,
 }
 
 impl RenderStaticData {
-    #[must_use]
-    pub(crate) fn new(shaders: Box<ShaderRegistry>) -> Self {
-        RenderStaticData { shaders, wall_indexes: Cell::default() }
-    }
-
     /// `fill_extrusion_wall_indices` in `context`'s store, which the layers
     /// that draw quads four vertices apart share: they stay in the store
     /// while a layer holds them.

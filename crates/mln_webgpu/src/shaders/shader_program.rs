@@ -15,9 +15,7 @@ use mln_gfx::types::{
 use mln_util::hash::HashMap;
 use mln_vec_map::VecMap;
 
-use crate::shaders::shader_source::{
-    AttributeInfo, ShaderSource, TextureInfo, prelude, shader_source as program_source,
-};
+use crate::shaders::shader_source::{AttributeInfo, ShaderSource, TextureInfo, prelude};
 use crate::shaders::wgsl_preprocessor::{is_space, preprocess_wgsl};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -289,8 +287,8 @@ fn constants(source: &str, pixel_ratio: f32) -> Vec<(&'static str, f64)> {
 }
 
 impl ShaderProgram {
-    /// The program of `source`, from `vertex_source` and `fragment_source`,
-    /// its WGSL preprocessed already.
+    /// The program `name` of `source`, from `vertex_source` and
+    /// `fragment_source`, its WGSL preprocessed already.
     ///
     /// A `globalIndex` the sources declare in group 0 moves to a group of its
     /// own, with layout `index_layout` (see
@@ -305,10 +303,10 @@ impl ShaderProgram {
         index_layout: &wgpu::BindGroupLayout,
         vertex_source: &str,
         fragment_source: &str,
+        name: &str,
         source: &ShaderSource,
         pixel_ratio: f32,
     ) -> Result<Self, GpuError> {
-        let name = source.name;
         let index_group = index_group_of(&[vertex_source, fragment_source]);
         let (vertex_source, fragment_source) = match index_group {
             Some(group) => (move_global_index(vertex_source, group), move_global_index(fragment_source, group)),
@@ -767,15 +765,15 @@ fn analyze_shader_bindings(binding_infos: &mut Vec<BindingInfo>, source: &str, s
     }
 }
 
-/// Compiles the program of `key`: the common prelude, the program's own
-/// prelude and each stage, preprocessed with the key's defines.
+/// Compiles the program of `key` from `source`: the common prelude, the
+/// program's own prelude and each stage, preprocessed with the key's
+/// defines.
 pub(crate) fn compile(
     device: &wgpu::Device,
     index_layout: &wgpu::BindGroupLayout,
     key: &ShaderKey,
+    source: &ShaderSource,
 ) -> Result<ShaderProgram, GpuError> {
-    let source = program_source(key.program())
-        .ok_or_else(|| GpuError::Unsupported(format!("no WGSL for {:?}", key.program())))?;
     // The common prelude goes through the preprocessor with the program, so
     // its `#ifdef`s see the defines.
     let shader_prelude = source.wgsl.prelude.unwrap_or("");
@@ -790,7 +788,7 @@ pub(crate) fn compile(
         .and_then(|(_, value)| value.parse().ok())
         .unwrap_or(1.0);
 
-    ShaderProgram::new(device, index_layout, &vertex_source, &fragment_source, source, pixel_ratio)
+    ShaderProgram::new(device, index_layout, &vertex_source, &fragment_source, key.program().name, source, pixel_ratio)
 }
 
 /// How the vendored sources declare `globalIndex`.

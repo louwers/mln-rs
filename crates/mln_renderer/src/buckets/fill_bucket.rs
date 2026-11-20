@@ -1,6 +1,10 @@
 use std::sync::Arc;
 
 use mln_gfx::shaders::segment::SegmentBase;
+use mln_gfx::shaders::shader_defines::{
+    ID_FILL_COLOR_VERTEX_ATTRIBUTE, ID_FILL_OPACITY_VERTEX_ATTRIBUTE, ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE,
+    ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE,
+};
 use mln_style::expression::{Image, Value};
 use mln_style::layers::Fill;
 use mln_style::layers::fill_layer_properties::{FillLayoutProperties, FillPaintProperties};
@@ -25,10 +29,10 @@ use crate::util::tessellator::Tessellator;
 
 crate::paint_property_binders!(
     pub struct FillBinders for FillPaintProperties::PossiblyEvaluated {
-        fill_color => PaintPropertyBinder<Color>,
-        fill_opacity => PaintPropertyBinder<f32>,
-        fill_outline_color => PaintPropertyBinder<Color>,
-        fill_pattern => CrossFadedPaintPropertyBinder<Image>,
+        fill_color: PaintPropertyBinder<Color> => [ID_FILL_COLOR_VERTEX_ATTRIBUTE],
+        fill_opacity: PaintPropertyBinder<f32> => [ID_FILL_OPACITY_VERTEX_ATTRIBUTE],
+        fill_outline_color: PaintPropertyBinder<Color> => [ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE],
+        fill_pattern: CrossFadedPaintPropertyBinder<Image> => [ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE],
     }
 );
 
