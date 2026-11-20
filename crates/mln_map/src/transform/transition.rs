@@ -139,6 +139,66 @@ impl Transition {
     }
 }
 
+/// Takes onto `camera` the fields of a command's camera `value` that
+/// `fields` names, but a center or padding it lacks (see [`FrameFn`]).
+fn compose(camera: &mut CameraOptions, value: &CameraOptions, fields: u16) {
+    if fields & CENTER != 0 && value.center.is_some() {
+        camera.center = value.center;
+    }
+    if fields & ZOOM != 0 {
+        camera.zoom = value.zoom;
+    }
+    if fields & BEARING != 0 {
+        camera.bearing = value.bearing;
+    }
+    if fields & PITCH != 0 {
+        camera.pitch = value.pitch;
+    }
+    if fields & PADDING != 0 && value.padding.is_some() {
+        camera.padding = value.padding;
+    }
+    if fields & ALTITUDE != 0 {
+        camera.center_altitude = value.center_altitude;
+    }
+    if fields & ROLL != 0 {
+        camera.roll = value.roll;
+    }
+    if fields & FOV != 0 {
+        camera.fov = value.fov;
+    }
+}
+
+/// Puts `camera`, composed over `current`, the camera of `state`, on
+/// `state` within its limits. In particular, padding and field of view
+/// determine the pitch limit, and center and zoom jointly determine the
+/// geographic bounds, which constrain `camera`.
+///
+/// The angles no command changed stay as they are, so that converting
+/// them to degrees and back doesn't move them.
+fn place(state: &mut TransformState, current: &CameraOptions, camera: &mut CameraOptions) {
+    let padding = camera.padding.unwrap_or_default();
+    state.set_padding(&padding);
+    if let Some(fov) = camera.fov.filter(|_| camera.fov != current.fov) {
+        state.set_fov(mln_math::deg2rad(fov));
+    }
+    if let Some(bearing) = camera.bearing.filter(|_| camera.bearing != current.bearing) {
+        state.set_angle(mln_math::deg2rad(-bearing));
+    }
+    if let Some(roll) = camera.roll.filter(|_| camera.roll != current.roll) {
+        state.set_roll(mln_math::deg2rad(roll));
+    }
+    let pitch = match camera.pitch.filter(|_| camera.pitch != current.pitch) {
+        Some(pitch) => mln_math::deg2rad(pitch),
+        None => state.view().pitch(),
+    };
+    state.set_pitch(f64::min(max_pitch_for_padding(state, &padding), pitch));
+    // Before the center, so that an anchor holds at the new altitude.
+    state.set_center_altitude(camera.center_altitude.unwrap_or_default());
+    let mut zoom = camera.zoom.unwrap_or_default();
+    state.constrain_camera_and_zoom_to_bounds(camera, &mut zoom);
+    state.set_lat_lng_zoom(&camera.center.unwrap_or_default(), zoom);
+}
+
 /// A command made of several transitions, which ends once with the
 /// outcome that covers them all: cancelled if any was, otherwise closed if
 /// any was, otherwise replaced if any was.
@@ -242,34 +302,9 @@ impl Transform {
             }
             let t = transition.progress(now);
             let ease = transition.animation.easing.unwrap_or(DEFAULT_TRANSITION_EASE);
-            let value = (transition.frame)(&self.state, if t == 1.0 { 1.0 } else { ease.solve(t, 0.001) });
-            let fields = transition.fields;
-            // A frame without a center or padding (see FrameFn) keeps the
-            // current one.
-            if fields & CENTER != 0 && value.center.is_some() {
-                camera.center = value.center;
-            }
-            if fields & ZOOM != 0 {
-                camera.zoom = value.zoom;
-            }
-            if fields & BEARING != 0 {
-                camera.bearing = value.bearing;
-            }
-            if fields & PITCH != 0 {
-                camera.pitch = value.pitch;
-            }
-            if fields & PADDING != 0 && value.padding.is_some() {
-                camera.padding = value.padding;
-            }
-            if fields & ALTITUDE != 0 {
-                camera.center_altitude = value.center_altitude;
-            }
-            if fields & ROLL != 0 {
-                camera.roll = value.roll;
-            }
-            if fields & FOV != 0 {
-                camera.fov = value.fov;
-            }
+            let k = if t == 1.0 { 1.0 } else { ease.solve(t, 0.001) };
+            let value = (transition.frame)(&self.state, k);
+            compose(&mut camera, &value, transition.fields);
         }
 
         // An active anchor also applies to immediate changes of other
@@ -296,33 +331,7 @@ impl Transform {
             _ => None,
         };
 
-        // Compose the camera before applying constraints. In particular,
-        // padding and field of view determine the pitch limit, and center
-        // and zoom jointly determine the geographic bounds.
-        //
-        // The angles no command changed stay as they are, so that converting
-        // them to degrees and back doesn't move them.
-        let padding = camera.padding.unwrap_or_default();
-        self.state.set_padding(&padding);
-        if let Some(fov) = camera.fov.filter(|_| camera.fov != current.fov) {
-            self.state.set_fov(mln_math::deg2rad(fov));
-        }
-        if let Some(bearing) = camera.bearing.filter(|_| camera.bearing != current.bearing) {
-            self.state.set_angle(mln_math::deg2rad(-bearing));
-        }
-        if let Some(roll) = camera.roll.filter(|_| camera.roll != current.roll) {
-            self.state.set_roll(mln_math::deg2rad(roll));
-        }
-        let pitch = match camera.pitch.filter(|_| camera.pitch != current.pitch) {
-            Some(pitch) => mln_math::deg2rad(pitch),
-            None => self.state.view().pitch(),
-        };
-        self.state.set_pitch(f64::min(max_pitch_for_padding(&self.state, &padding), pitch));
-        // Before the center, so that the anchor holds at the new altitude.
-        self.state.set_center_altitude(camera.center_altitude.unwrap_or_default());
-        let mut zoom = camera.zoom.unwrap_or_default();
-        self.state.constrain_camera_and_zoom_to_bounds(&mut camera, &mut zoom);
-        self.state.set_lat_lng_zoom(&camera.center.unwrap_or_default(), zoom);
+        place(&mut self.state, &current, &mut camera);
         if let Some((anchor, anchor_lat_lng)) = anchored {
             match globe_zoom_around {
                 Some((location, zoom_before)) if self.state.view().zoom() != zoom_before => {
