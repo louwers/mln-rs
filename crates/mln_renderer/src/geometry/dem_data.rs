@@ -1,5 +1,6 @@
 // The DEM owns its image, and textures get a copy of it (`image`): the DEM
-// lives in a bucket, which is Send, and textures live on the render thread.
+// crosses from the workers, so it is Send, and textures live on the render
+// thread.
 
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
@@ -13,7 +14,7 @@ const UNPACK_TERRARIUM: [f32; 4] = [256.0, 1.0, 1.0 / 256.0, 32768.0];
 /// The DEM unpack vector for an encoding: the red, green and blue factors
 /// and the base shift.
 #[must_use]
-pub(crate) fn unpack_vector(encoding: RasterEncoding) -> [f32; 4] {
+fn unpack_vector(encoding: RasterEncoding) -> [f32; 4] {
     match encoding {
         RasterEncoding::Mapbox => UNPACK_MAPBOX,
         RasterEncoding::Terrarium => UNPACK_TERRARIUM,
@@ -23,17 +24,18 @@ pub(crate) fn unpack_vector(encoding: RasterEncoding) -> [f32; 4] {
     }
 }
 
-/// A raster-dem tile's elevations, a pixel of border on each side. It reads
-/// back only as `new` can make it (`from_parts`).
+/// A raster-dem tile's elevations, a pixel of border on each side, encoded
+/// in an image's pixels. It reads back only as `new` can make it
+/// (`from_parts`).
 #[derive(Clone, Debug)]
-pub(crate) struct DEMData {
+pub struct DemData {
     pub(crate) dim: i32,
     pub(crate) stride: i32,
     pub(crate) encoding: RasterEncoding,
     image: PremultipliedImage,
 }
 
-impl mln_wire::Wire for DEMData {
+impl mln_wire::Wire for DemData {
     fn write(&self, w: &mut mln_wire::Writer) {
         self.dim.write(w);
         self.stride.write(w);
@@ -46,7 +48,7 @@ impl mln_wire::Wire for DEMData {
         let stride = i32::read(r)?;
         let encoding = RasterEncoding::read(r)?;
         let image = PremultipliedImage::read(r)?;
-        DEMData::from_parts(dim, stride, encoding, image).ok().or_else(|| r.fail("DEM data that `new` can't make"))
+        DemData::from_parts(dim, stride, encoding, image).ok().or_else(|| r.fail("DEM data that `new` can't make"))
     }
 }
 
@@ -59,7 +61,7 @@ fn set_pixel(data: &mut [u8], i: usize, value: [u8; 4]) {
     data[i * 4..i * 4 + 4].copy_from_slice(&value);
 }
 
-impl DEMData {
+impl DemData {
     /// Decodes a DEM image with `encoding`; `Err` if the image isn't square.
     pub(crate) fn new(image: &PremultipliedImage, encoding: RasterEncoding) -> Result<Self, String> {
         let dim = image.size.height as i32;
@@ -103,10 +105,10 @@ impl DEMData {
         // bottom horizontal border with corners
         data.copy_within(dim_u * stride_u * 4..(dim_u + 1) * stride_u * 4, (dim_u + 1) * stride_u * 4);
 
-        Ok(DEMData { dim, stride, encoding, image: out })
+        Ok(DemData { dim, stride, encoding, image: out })
     }
 
-    /// A DEM as another `DEMData` was (its members), as it reads back.
+    /// A DEM as another `DemData` was (its members), as it reads back.
     /// Fails unless the image is `stride` by `stride` pixels with
     /// `stride == dim + 2` and `dim >= 0`, as `new` makes them. The sizes are
     /// checked without overflow: on wasm32 `Image::bytes` would wrap for a
@@ -126,7 +128,7 @@ impl DEMData {
                 image.data.len()
             ));
         }
-        Ok(DEMData { dim, stride, encoding, image })
+        Ok(DemData { dim, stride, encoding, image })
     }
 
     /// `idx(x, y)`.
@@ -138,13 +140,13 @@ impl DEMData {
         ((y + 1) * self.stride + (x + 1)) as usize
     }
 
-    /// This function takes the `DEMData` from a neighboring tile and
+    /// This function takes the `DemData` from a neighboring tile and
     /// backfills the edge/corner data in order to create a one pixel
     /// "buffer" of image data around the tile. This is necessary because
     /// the hillshade formula calculates the dx/dz, dy/dz derivatives at each
     /// pixel of the tile by querying the 8 surrounding pixels, and if we
     /// don't have the pixel buffer we get seams at tile boundaries.
-    pub(crate) fn backfill_border(&mut self, border_tile_data: &DEMData, dx: i8, dy: i8) {
+    pub(crate) fn backfill_border(&mut self, border_tile_data: &DemData, dx: i8, dy: i8) {
         let o = border_tile_data;
 
         // Tiles from the same source should always be of the same
@@ -200,13 +202,34 @@ impl DEMData {
             - unpack[3]) as i32
     }
 
+    /// The number of elevations along each side, without the border.
     #[must_use]
-    pub(crate) fn unpack_vector(&self) -> [f32; 4] {
+    pub fn dim(&self) -> i32 {
+        self.dim
+    }
+
+    /// The number of pixels along each side of the image, with the border.
+    #[must_use]
+    pub fn stride(&self) -> i32 {
+        self.stride
+    }
+
+    /// How the pixels encode the elevations.
+    #[must_use]
+    pub fn encoding(&self) -> RasterEncoding {
+        self.encoding
+    }
+
+    /// The factors that turn a pixel's red, green and blue into an
+    /// elevation, and the base shift subtracted from their sum.
+    #[must_use]
+    pub fn unpack_vector(&self) -> [f32; 4] {
         unpack_vector(self.encoding)
     }
 
+    /// The image whose pixels encode the elevations, with the border.
     #[must_use]
-    pub(crate) fn image(&self) -> &PremultipliedImage {
+    pub fn image(&self) -> &PremultipliedImage {
         &self.image
     }
 }
@@ -227,22 +250,22 @@ mod tests {
         img
     }
 
-    // gtest: DEMData.ConstructorMapbox
+    // gtest: DemData.ConstructorMapbox
     #[test]
     fn constructor_mapbox() {
         let image = fake_image(Size::new(16, 16));
-        let demdata = DEMData::new(&image, RasterEncoding::Mapbox).unwrap();
+        let demdata = DemData::new(&image, RasterEncoding::Mapbox).unwrap();
 
         assert_eq!(demdata.dim, 16);
         assert_eq!(demdata.stride, 18);
         assert_eq!(demdata.image().bytes(), 18 * 18 * 4);
     }
 
-    // gtest: DEMData.ConstructorTerrarium
+    // gtest: DemData.ConstructorTerrarium
     #[test]
     fn constructor_terrarium() {
         let image = fake_image(Size::new(16, 16));
-        let demdata = DEMData::new(&image, RasterEncoding::Terrarium).unwrap();
+        let demdata = DemData::new(&image, RasterEncoding::Terrarium).unwrap();
 
         assert_eq!(demdata.dim, 16);
         assert_eq!(demdata.stride, 18);
@@ -255,7 +278,7 @@ mod tests {
         image.data.copy_from_slice(&[10, 20, 30, 255]);
         let encoding =
             RasterEncoding::Custom { red_factor: 100.0, green_factor: 10.0, blue_factor: 0.5, base_shift: 1000.0 };
-        let demdata = DEMData::new(&image, encoding).unwrap();
+        let demdata = DemData::new(&image, encoding).unwrap();
 
         // 10 * 100 + 20 * 10 + 30 * 0.5 - 1000
         assert_eq!(demdata.get(0, 0), 215);
@@ -265,14 +288,14 @@ mod tests {
     #[test]
     fn not_square() {
         let image = fake_image(Size::new(16, 8));
-        assert_eq!(DEMData::new(&image, RasterEncoding::Mapbox).unwrap_err(), "raster-dem tiles must be square.");
+        assert_eq!(DemData::new(&image, RasterEncoding::Mapbox).unwrap_err(), "raster-dem tiles must be square.");
     }
 
-    // gtest: DEMData.InitialBackfill
+    // gtest: DemData.InitialBackfill
     #[test]
     fn initial_backfill() {
         let image1 = fake_image(Size::new(4, 4));
-        let dem1 = DEMData::new(&image1, RasterEncoding::Mapbox).unwrap();
+        let dem1 = DemData::new(&image1, RasterEncoding::Mapbox).unwrap();
 
         // checking that a 1 px border around the fake image has been
         // populated with a non-empty pixel value
@@ -309,13 +332,13 @@ mod tests {
         assert_eq!(dem1.get(4, -1), dem1.get(3, 0));
     }
 
-    // gtest: DEMData.BackfillNeighbor
+    // gtest: DemData.BackfillNeighbor
     #[test]
     fn backfill_neighbor() {
         let image1 = fake_image(Size::new(4, 4));
-        let mut dem0 = DEMData::new(&image1, RasterEncoding::Mapbox).unwrap();
+        let mut dem0 = DemData::new(&image1, RasterEncoding::Mapbox).unwrap();
         let image2 = fake_image(Size::new(4, 4));
-        let dem1 = DEMData::new(&image2, RasterEncoding::Mapbox).unwrap();
+        let dem1 = DemData::new(&image2, RasterEncoding::Mapbox).unwrap();
 
         dem0.backfill_border(&dem1, -1, 0);
         for y in 0..4 {
@@ -358,10 +381,10 @@ mod tests {
     // A neighbour of another size leaves the border as it is.
     #[test]
     fn backfill_border_of_another_size() {
-        let mut dem = DEMData::new(&fake_image(Size::new(4, 4)), RasterEncoding::Mapbox).unwrap();
+        let mut dem = DemData::new(&fake_image(Size::new(4, 4)), RasterEncoding::Mapbox).unwrap();
         let border = dem.get(-1, -1);
-        let larger = DEMData::new(&fake_image(Size::new(8, 8)), RasterEncoding::Mapbox).unwrap();
-        let empty = DEMData::new(&PremultipliedImage::default(), RasterEncoding::Mapbox).unwrap();
+        let larger = DemData::new(&fake_image(Size::new(8, 8)), RasterEncoding::Mapbox).unwrap();
+        let empty = DemData::new(&PremultipliedImage::default(), RasterEncoding::Mapbox).unwrap();
         for (dx, dy) in [(-1, -1), (0, 1), (1, 0)] {
             dem.backfill_border(&larger, dx, dy);
             dem.backfill_border(&empty, dx, dy);

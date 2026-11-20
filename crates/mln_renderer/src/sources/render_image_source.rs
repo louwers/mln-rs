@@ -1,7 +1,7 @@
 // An image source draws one image, stretched over the quad of its
 // coordinates, in the tiles that the quad covers. Its render tiles are
 // those tiles, each of which shows the image, and the raster layers that
-// draw it borrow its bucket from the source for the frame.
+// draw it borrow its contents from the source for the frame.
 
 use std::sync::Arc;
 
@@ -20,11 +20,11 @@ use mln_util::logging::{Event, Log};
 use mln_util::range::Range;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
-use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
 use crate::gfx::context::Context;
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::render_source::{RenderSource, RenderSourceBase, RenderTileParameters, TileOrder};
 use crate::render_tile::RenderTile;
+use crate::tile::raster::{RasterContents, RasterLayoutVertex};
 use crate::tile::store::TileStore;
 use crate::tile_parameters::TileParameters;
 use crate::util::tile_cover::{TileCoverParameters, tile_cover, tile_cover_bounds};
@@ -129,7 +129,7 @@ fn to_vertex_coordinate(value: f64) -> i16 {
 
 // The image quad as a grid of `cells` x `cells`, textured edge to edge; one
 // cell is the flat quad.
-fn build_image_mesh(bucket: &mut RasterBucket, corners: &GeometryCoordinates, cells: u32) {
+fn build_image_mesh(image: &mut RasterContents, corners: &GeometryCoordinates, cells: u32) {
     let warp = image_warp(corners);
     let rows = cells + 1;
     let mut vertices = Vec::with_capacity((rows * rows) as usize);
@@ -159,12 +159,12 @@ fn build_image_mesh(bucket: &mut RasterBucket, corners: &GeometryCoordinates, ce
         }
     }
     let segments = vec![SegmentBase::with_lengths(0, 0, vertices.len(), indices.len())];
-    bucket.set_geometry(vertices, indices, segments);
+    image.set_geometry(vertices, indices, segments);
 }
 
 pub(crate) struct RenderImageSource {
     base: RenderSourceBase,
-    bucket: Option<RasterBucket>,
+    image: Option<RasterContents>,
     tile_ids: Vec<UnwrappedTileID>,
     /// The render tiles of `tile_ids`, and their indexes in order.
     render_tiles: Vec<RenderTile>,
@@ -178,7 +178,7 @@ impl RenderImageSource {
     pub(crate) fn new(style_source: Source) -> Self {
         RenderImageSource {
             base: RenderSourceBase::new(style_source),
-            bucket: None,
+            image: None,
             tile_ids: Vec::new(),
             render_tiles: Vec::new(),
             order: Vec::new(),
@@ -191,7 +191,7 @@ impl RenderImageSource {
     /// (one made without a url) has nothing to load, so a still render of it
     /// finishes.
     fn loaded(&self) -> bool {
-        self.bucket.is_some() || self.data().is_none_or(|data| data.description.is_none())
+        self.image.is_some() || self.data().is_none_or(|data| data.description.is_none())
     }
 
     fn data(&self) -> Option<&SourceData<ImageSourceType>> {
@@ -199,7 +199,7 @@ impl RenderImageSource {
     }
 
     /// Brings the source to `style_source` for a frame of `parameters`: the
-    /// tiles the image is drawn in, and its bucket's mesh.
+    /// tiles the image is drawn in, and its image's mesh.
     fn place(&mut self, style_source: Source, needs_rendering: bool, parameters: &TileParameters<'_>) {
         self.base.enabled = needs_rendering;
         if !needs_rendering {
@@ -315,11 +315,11 @@ impl RenderImageSource {
             .map(|tile_coords| TileCoordinate::to_geometry_coordinate(&tile_cover_ids[0], tile_coords))
             .collect();
 
-        // A changed image gets a new bucket, whose id tells the layers to
+        // A changed image gets new contents, whose id tells the layers to
         // make its texture.
-        let bucket = match &mut self.bucket {
-            Some(bucket) if bucket.image.as_ref().is_some_and(|i| Arc::ptr_eq(i, &image)) => bucket,
-            slot => slot.insert(RasterBucket::with_shared_image(Some(image))),
+        let contents = match &mut self.image {
+            Some(contents) if contents.image().is_some_and(|i| Arc::ptr_eq(i, &image)) => contents,
+            slot => slot.insert(RasterContents::with_shared_image(Some(image))),
         };
 
         // The globe bends the quad over the sphere with the tile mesh
@@ -329,8 +329,8 @@ impl RenderImageSource {
         } else {
             1
         };
-        if !bucket.geometry().has_quads() || geom_coords != self.mesh_corners || cells != self.mesh_cells {
-            build_image_mesh(bucket, &geom_coords, cells);
+        if !contents.geometry().has_quads() || geom_coords != self.mesh_corners || cells != self.mesh_cells {
+            build_image_mesh(contents, &geom_coords, cells);
             self.mesh_corners = geom_coords;
             self.mesh_cells = cells;
         }
@@ -370,8 +370,8 @@ impl RenderSource for RenderImageSource {
     fn update_render_tiles(&mut self, _store: &mut TileStore, _parameters: &RenderTileParameters<'_>) {}
 
     fn upload(&mut self, _store: &mut TileStore, context: &mut Context) {
-        if let Some(bucket) = &mut self.bucket {
-            bucket.upload(context);
+        if let Some(image) = &mut self.image {
+            image.upload(context);
         }
     }
 
@@ -384,8 +384,8 @@ impl RenderSource for RenderImageSource {
         Some(&self.order[..self.render_tiles().len()])
     }
 
-    fn image(&self) -> Option<&RasterBucket> {
-        self.bucket.as_ref()
+    fn image(&self) -> Option<&RasterContents> {
+        self.image.as_ref()
     }
 
     fn dump_debug_logs(&self) {

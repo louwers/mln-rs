@@ -34,8 +34,11 @@
 //!
 //! A layer's tiles are those of its source, each as a [`FrameTile`] with
 //! what it shows the layer, the type's [`TileView`]: its bucket in the
-//! tile's layout, a raster or raster-dem tile's own data, or an image
-//! source's image. A layer type without a source gets no tiles.
+//! tile's layout ([`LayerBucket`]), a raster tile's image or an image
+//! source's image ([`RasterView`] of [`RasterContents`]), or a raster-dem
+//! tile's DEM ([`DemContents`]). The engine masks a raster or raster-dem
+//! tile where better tiles cover it, and keeps the geometry that draws the
+//! rest ([`MaskedGeometry`]). A layer type without a source gets no tiles.
 //!
 //! What only some layer types do, a type declares as a capability: it
 //! draws 3D geometry ([`LayerType::IS_3D`]), clears the frame to a solid
@@ -65,6 +68,7 @@ use mln_wire::Wire;
 pub use crate::bucket::{Bucket, BucketBase, BucketValue, FeatureStates, NoBucket};
 pub use crate::bucket_geometry::{GeometryUpload, GeometryVec};
 pub use crate::bucket_parameters::BucketParameters;
+pub use crate::geometry::dem_data::DemData;
 pub use crate::geometry::feature_index::FeatureIndexBuilder;
 use crate::gfx::context::Context;
 use crate::image_store::ImageStore;
@@ -80,7 +84,10 @@ use crate::render_layer::{Atlases, BucketPlacementData};
 pub use crate::render_pass::RenderPass;
 use crate::render_source::RenderSource;
 pub use crate::render_source::TileOrder;
-pub use crate::render_tile::{FrameTile, NoTileBucket, TileView};
+pub use crate::render_tile::{FrameTile, NoTileBucket, RasterView, TileView};
+pub use crate::tile::dem::DemContents;
+pub use crate::tile::raster::{MaskedGeometry, RasterContents, RasterLayoutVertex, StoredQuads};
+pub use crate::tile_mask::TileMask;
 use crate::update_parameters::UpdateParameters;
 
 /// The render half of a layer type, whose style half is its

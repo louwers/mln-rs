@@ -28,7 +28,6 @@ use mln_util::identity::SimpleIdentity;
 use super::cast_matrix;
 use crate::bucket::NoBucket;
 use crate::bucket_geometry::copied_vertices;
-use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::gfx::context::Context;
 use crate::gfx::indexes::{DrawIndexes, Indexes, SharedIndexes};
@@ -45,8 +44,8 @@ use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
-use crate::render_tile::{FindView, TileContent, ViewPlace};
-use crate::tile::contents::Contents;
+use crate::render_tile::RasterView;
+use crate::tile::raster::{RasterContents, RasterLayoutVertex};
 use crate::tile_matrix::{projection_data, to_projection_ubo};
 
 /// What the layer keeps of a tile: its draw, and the generation of the
@@ -157,45 +156,6 @@ impl StaticGeometry {
     }
 }
 
-/// What a frame's tile shows a raster layer: a raster tile's own bucket,
-/// or an image source's image.
-#[derive(Clone, Copy)]
-pub enum RasterView<'a> {
-    /// A raster tile's own bucket.
-    Tile(&'a RasterBucket),
-    /// An image source's image, drawn in the tile.
-    Image(&'a RasterBucket),
-}
-
-impl<'a> RasterView<'a> {
-    /// The bucket the layer draws.
-    fn bucket(self) -> &'a RasterBucket {
-        match self {
-            RasterView::Tile(bucket) | RasterView::Image(bucket) => bucket,
-        }
-    }
-
-    /// Whether the bucket has anything to draw.
-    fn has_data(&self) -> bool {
-        self.bucket().has_data()
-    }
-}
-
-impl<'a> FindView<'a> for RasterView<'a> {
-    fn find(content: TileContent<'a>, _layer_id: &str) -> Option<(Self, ViewPlace)> {
-        Some((Self::at(content, ViewPlace::Own)?, ViewPlace::Own))
-    }
-
-    fn at(content: TileContent<'a>, place: ViewPlace) -> Option<Self> {
-        debug_assert_eq!(place, ViewPlace::Own, "a laid-out layer's place for a tile's own data");
-        match content {
-            TileContent::Tile(Contents::Raster(bucket)) => Some(RasterView::Tile(bucket)),
-            TileContent::Image(bucket) => Some(RasterView::Image(bucket)),
-            TileContent::Tile(_) => None,
-        }
-    }
-}
-
 /// What a raster layer keeps besides its drawing.
 pub struct RasterState {
     /// The frame's draws as the update makes them, with their uniform blocks
@@ -218,11 +178,11 @@ impl RasterState {
         textures: &mut HashMap<SimpleIdentity, SharedTexture>,
         sampler: SamplerState,
         context: &mut Context,
-        bucket: &RasterBucket,
+        bucket: &RasterContents,
     ) -> Option<SharedTexture> {
-        let image = bucket.image.as_ref()?;
+        let image = bucket.image()?;
         let texture = textures
-            .entry(bucket.base.bucket_id)
+            .entry(bucket.id())
             .or_insert_with(|| context.add_texture_with(|texture| texture.set_image(Some(Rc::new((**image).clone())))))
             .clone();
         if let Some(mut texture) = context.texture_mut(&texture) {
@@ -238,7 +198,7 @@ impl RasterState {
         &mut self,
         drawing: &mut RasterDrawing,
         gpu: &mut dyn Gpu,
-        bucket: &RasterBucket,
+        bucket: &RasterContents,
         cx: &mut DrawContext<'_, '_, '_, Raster>,
     ) {
         let (paint_parameters, layer) = (&mut *cx.paint, cx.layer);
@@ -254,13 +214,13 @@ impl RasterState {
             objects.image = None;
             return;
         };
-        let built_of = (bucket.base.bucket_id, bucket.geometry().generation());
+        let built_of = (bucket.id(), bucket.geometry().generation());
         if objects.image != Some(built_of) {
             objects.images.clear();
             objects.image = Some(built_of);
             // Only the image's bucket draws: the textures of the images
             // before it go.
-            textures.retain(|id, _| *id == bucket.base.bucket_id);
+            textures.retain(|id, _| *id == bucket.id());
         }
         let texture = Self::bucket_texture(textures, sampler, paint_parameters.context, bucket);
         let tiles = cx.tiles;
@@ -487,7 +447,7 @@ impl LayerType for Raster {
 
         // Drop the textures of buckets that are no longer rendered.
         live_buckets.clear();
-        live_buckets.extend(render_tiles.iter().filter_map(|tile| Some(tile.bucket()?.bucket().base.bucket_id)));
+        live_buckets.extend(render_tiles.iter().filter_map(|tile| Some(tile.bucket()?.contents().id())));
         textures.retain(|id, _| live_buckets.contains(id));
         // Kept draws keep their textures, so a changed filter is applied to
         // the textures themselves.
@@ -503,14 +463,14 @@ impl LayerType for Raster {
                 continue;
             };
 
-            let Some(RasterView::Tile(bucket)) = tile.bucket().filter(RasterView::has_data) else {
+            let Some(RasterView::Tile(bucket)) = tile.bucket().filter(|view| view.contents().has_data()) else {
                 *entry.value = None;
                 continue;
             };
 
             // A draw of another bucket, or of the bucket's geometry before
             // its mask changed, is built again.
-            entry.set_bucket(bucket.base.bucket_id);
+            entry.set_bucket(bucket.id());
             let geometry_generation = bucket.geometry().generation();
             if entry.value.as_ref().is_some_and(|cached| cached.geometry_generation != geometry_generation) {
                 *entry.value = None;
@@ -527,7 +487,7 @@ impl LayerType for Raster {
                 let context = &mut *paint_parameters.context;
                 let draw_geometry = if cx.projection_variant == ProjectionVariant::Globe {
                     let globe_mesh =
-                        globe_meshes.get(context, &tile_id.canonical, &geometry.mask, RasterLayoutVertex::new);
+                        globe_meshes.get(context, &tile_id.canonical, geometry.mask(), RasterLayoutVertex::new);
                     raster_geometry(
                         &globe_mesh.vertices,
                         globe_mesh.vertices.count(),

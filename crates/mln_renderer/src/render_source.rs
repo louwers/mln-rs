@@ -9,7 +9,6 @@ use mln_map_types::MapDebugOptions;
 use mln_style::Source;
 use mln_util::error::Error;
 
-use crate::buckets::raster_bucket::RasterBucket;
 use crate::gfx::context::Context;
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::paint_parameters::{PaintParameters, TransformParameters};
@@ -17,6 +16,7 @@ use crate::registry::Registry;
 use crate::render_tile::RenderTile;
 use crate::sources::render_tile_source::DebugLayers;
 use crate::tile::job::SourceKey;
+use crate::tile::raster::RasterContents;
 use crate::tile::store::TileStore;
 use crate::tile_parameters::TileParameters;
 
@@ -99,7 +99,7 @@ pub(crate) trait RenderSource {
 
     /// An image source's image, which each of its render tiles shows;
     /// `None` for other sources and before the image arrives.
-    fn image(&self) -> Option<&RasterBucket> {
+    fn image(&self) -> Option<&RasterContents> {
         None
     }
 

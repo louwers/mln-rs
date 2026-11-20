@@ -1439,7 +1439,7 @@ fn globe_base_level_is_not_kept_where_it_is_large_or_out_of_reach() {
 }
 
 /// The DEM of `tile`, a raster-dem tile.
-fn dem(tile: &crate::tile::tile::Tile) -> &crate::buckets::hillshade_bucket::HillshadeBucket {
+fn dem(tile: &crate::tile::tile::Tile) -> &crate::tile::dem::DemContents {
     match tile.contents() {
         Some(crate::tile::contents::Contents::Dem(bucket)) => bucket,
         _ => panic!("a DEM"),
@@ -1501,7 +1501,7 @@ fn raster_dem_borders_across_a_world_wrap() {
     let (east, west) = (tile(3), tile(0));
     assert_eq!(west.id.wrap, east.id.wrap + 1);
     let (east, west) = (dem(east), dem(west));
-    let (east, west) = (east.dem_data(), west.dem_data());
+    let (east, west) = (east.dem(), west.dem());
     for y in 0..16 {
         assert_eq!(east.get(16, y), west.get(0, y), "row {y} of the east tile's border");
         assert_eq!(west.get(-1, y), east.get(15, y), "row {y} of the west tile's border");

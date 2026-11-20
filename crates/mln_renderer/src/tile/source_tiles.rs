@@ -445,8 +445,8 @@ impl SourceTiles {
                 }
                 Arc::clone(&geometry.result.feature_index)
             }
-            Some(Contents::Raster(bucket)) => return bucket.upload(context),
-            Some(Contents::Dem(bucket)) => return bucket.upload(context),
+            Some(Contents::Raster(raster)) => return raster.upload(context),
+            Some(Contents::Dem(dem)) => return dem.upload(context),
             Some(Contents::Empty) | None => return,
         };
         let mut same: SmallVec<[usize; 4]> = self.same_place(&id);

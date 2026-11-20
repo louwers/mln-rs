@@ -41,8 +41,6 @@ use mln_util::size::Size;
 use super::cast_matrix;
 use crate::bucket::NoBucket;
 use crate::bucket_geometry::copied_vertices;
-use crate::buckets::hillshade_bucket::HillshadeBucket;
-use crate::buckets::raster_bucket::RasterLayoutVertex;
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::gfx::indexes::{DrawIndexes, Indexes, SharedIndexes};
 use crate::gfx::store::SharedTexture;
@@ -54,6 +52,8 @@ use crate::layer_drawing::{DrawList, DrawObjectsMut, KeptDraw, TileDraws, TileOb
 use crate::layout::layout::NoLayout;
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
+use crate::tile::dem::DemContents;
+use crate::tile::raster::RasterLayoutVertex;
 use crate::tile_matrix::to_projection_ubo;
 
 /// What the layer keeps of a tile: the draw that colors its bucket's DEM,
@@ -271,7 +271,7 @@ fn color_relief_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeA
 impl LayerType for ColorRelief {
     type Layout = NoLayout;
     type Bucket = NoBucket;
-    type TileBucket<'a> = &'a HillshadeBucket;
+    type TileBucket<'a> = &'a DemContents;
 
     type Drawing = TileDraws<ReliefTile>;
     type State = ReliefState;
@@ -397,7 +397,7 @@ impl LayerType for ColorRelief {
 
         // Drop the DEM textures of buckets that are no longer rendered.
         live_buckets.clear();
-        live_buckets.extend(render_tiles.iter().filter_map(|tile| Some(tile.bucket()?.base.bucket_id)));
+        live_buckets.extend(render_tiles.iter().filter_map(|tile| Some(tile.bucket()?.id())));
         dem_textures.retain(|id, _| live_buckets.contains(id));
 
         let dem_sampler = SamplerState {
@@ -420,23 +420,23 @@ impl LayerType for ColorRelief {
                 *entry.value = None;
                 continue;
             };
-            let bucket_id = bucket.base.bucket_id;
+            let bucket_id = bucket.id();
             // A draw built from another bucket goes.
             entry.set_bucket(bucket_id);
 
             let geometry = bucket.geometry();
             let geometry_generation = geometry.generation();
-            let dem_data = bucket.dem_data();
+            let dem_data = bucket.dem();
             if dem_data.image().valid() {
                 let tile_props = ColorReliefTilePropsUBO {
                     unpack: dem_data.unpack_vector(),
                     // Use stride (dim + 2) for dimension, as the texture
                     // includes a 1-pixel border
-                    dimension: [dem_data.stride as f32, dem_data.stride as f32],
+                    dimension: [dem_data.stride() as f32, dem_data.stride() as f32],
                     color_ramp_size: *color_ramp_size as i32,
                     pad_tile0: 0.0,
                 };
-                let generation = bucket.render_target_generation();
+                let generation = bucket.dem_generation();
                 let context = &mut *paint_parameters.context;
                 let (dem_texture, _) = match dem_textures.entry(bucket_id) {
                     Entry::Occupied(entry) if entry.get().1 == generation => entry.into_mut(),
@@ -476,7 +476,7 @@ impl LayerType for ColorRelief {
                         Vec<SegmentBase>,
                     ) = if cx.projection_variant == ProjectionVariant::Globe {
                         let globe_mesh =
-                            globe_meshes.get(context, &tile_id.canonical, &geometry.mask, RasterLayoutVertex::new);
+                            globe_meshes.get(context, &tile_id.canonical, geometry.mask(), RasterLayoutVertex::new);
                         (
                             globe_mesh.vertices.clone(),
                             globe_mesh.vertices.count(),

@@ -44,10 +44,7 @@ use mln_util::size::Size;
 use super::cast_matrix;
 use crate::bucket::NoBucket;
 use crate::bucket_geometry::copied_vertices;
-use crate::buckets::hillshade_bucket::HillshadeBucket;
-use crate::buckets::raster_bucket::RasterLayoutVertex;
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
-use crate::geometry::dem_data::unpack_vector;
 use crate::gfx::context::Context;
 use crate::gfx::indexes::{DrawIndexes, Indexes, SharedIndexes};
 use crate::gfx::store::SharedTexture;
@@ -61,6 +58,8 @@ use crate::paint_parameters::PaintParameters;
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_target::RenderTarget;
+use crate::tile::dem::DemContents;
+use crate::tile::raster::RasterLayoutVertex;
 use crate::tile_matrix::{bind_no_projection, projection_data, to_projection_ubo};
 
 /// What the layer keeps of a bucket: the render target the slopes of its DEM
@@ -253,7 +252,7 @@ fn hillshade_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeArra
 impl LayerType for Hillshade {
     type Layout = NoLayout;
     type Bucket = NoBucket;
-    type TileBucket<'a> = &'a HillshadeBucket;
+    type TileBucket<'a> = &'a DemContents;
 
     type Drawing = TileDraws<HillshadeTile>;
     type State = HillshadeState;
@@ -316,7 +315,7 @@ impl LayerType for Hillshade {
         // Drop the render targets of buckets that are no longer rendered.
         let live_buckets = &mut state.live_buckets;
         live_buckets.clear();
-        live_buckets.extend(render_tiles.iter().filter_map(|tile| Some(tile.bucket()?.base.bucket_id)));
+        live_buckets.extend(render_tiles.iter().filter_map(|tile| Some(tile.bucket()?.id())));
         state.bucket_render_targets.retain(|id, _| live_buckets.contains(id));
 
         // The illumination, which the first draw computes.
@@ -331,11 +330,11 @@ impl LayerType for Hillshade {
                 *entry.value = None;
                 continue;
             };
-            let bucket_id = bucket.base.bucket_id;
+            let bucket_id = bucket.id();
             // A draw built from another bucket goes.
             entry.set_bucket(bucket_id);
 
-            let generation = bucket.render_target_generation();
+            let generation = bucket.dem_generation();
             let target = match state.bucket_render_targets.entry(bucket_id) {
                 Entry::Occupied(entry) if entry.get().generation == generation => entry.into_mut(),
                 entry => {
@@ -371,7 +370,7 @@ impl LayerType for Hillshade {
             let mut tile_geometry = || -> (SharedVertices, usize, DrawIndexes, Vec<SegmentBase>) {
                 if cx.projection_variant == ProjectionVariant::Globe {
                     let globe_mesh =
-                        state.globe_meshes.get(context, &tile_id.canonical, &geometry.mask, RasterLayoutVertex::new);
+                        state.globe_meshes.get(context, &tile_id.canonical, geometry.mask(), RasterLayoutVertex::new);
                     (
                         globe_mesh.vertices.clone(),
                         globe_mesh.vertices.count(),
@@ -507,16 +506,16 @@ impl BucketTarget {
     fn new(
         gpu: &mut dyn Gpu,
         context: &mut Context,
-        bucket: &HillshadeBucket,
+        bucket: &DemContents,
         tile_id: &UnwrappedTileID,
         maxzoom: u8,
         shader: &ShaderKey,
         attrs: VertexAttributeArray,
         indexes: &SharedIndexes,
     ) -> BucketTarget {
-        let (tilesize, stride, encoding, dem_image) = {
-            let dem = bucket.dem_data();
-            (dem.dim as u16, dem.stride, dem.encoding, dem.image().clone())
+        let (tilesize, stride, unpack, dem_image) = {
+            let dem = bucket.dem();
+            (dem.dim() as u16, dem.stride(), dem.unpack_vector(), dem.image().clone())
         };
         let render_target = RenderTarget::new(
             context,
@@ -554,14 +553,14 @@ impl BucketTarget {
         let draw_ubo = HillshadePrepareDrawableUBO { matrix: cast_matrix(&m) };
         prepare.write_pod(gpu, ID_HILLSHADE_PREPARE_DRAWABLE_UBO, &draw_ubo, context);
         let tile_props = HillshadePrepareTilePropsUBO {
-            unpack: unpack_vector(encoding),
+            unpack,
             dimension: [stride as f32, stride as f32],
             zoom: f32::from(tile_id.canonical.z),
             maxzoom: f32::from(maxzoom),
         };
         prepare.write_pod(gpu, ID_HILLSHADE_PREPARE_TILE_PROPS_UBO, &tile_props, context);
 
-        BucketTarget { render_target, _dem: dem, prepare, generation: bucket.render_target_generation() }
+        BucketTarget { render_target, _dem: dem, prepare, generation: bucket.dem_generation() }
     }
 }
 

@@ -18,12 +18,11 @@ use mln_util::logging::{Event, Log};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 
-use crate::buckets::hillshade_bucket::HillshadeBucket;
-use crate::buckets::raster_bucket::RasterBucket;
 use crate::layer_drawing::ChangedBuckets;
 use crate::layout::tile_layout::{Dependencies, LayoutParams};
 use crate::render_orchestrator::drop_on_workers;
 use crate::tile::contents::{Contents, GeometryContents, LayoutResult, release};
+use crate::tile::dem::DemContents;
 use crate::tile::inbox::{SourceData, TileEvent};
 use crate::tile::job::{DataInput, DataKey, Job, JobId, JobResult, LayoutJob, LayoutOutput, Run, SourceStyle};
 use crate::tile::loading::{self, CustomLoad, CustomLoader, DataOrigin, Fetch, Method, OriginLoad, TilesetAnswered};
@@ -31,6 +30,7 @@ use crate::tile::pipeline::{
     DecodeWork, DependencyWait, InFlight, Layout, LayoutData, LayoutWork, Pipeline, Resume, Running, Waiting,
     outdated_by,
 };
+use crate::tile::raster::RasterContents;
 use crate::tile::store::{SourceInfo, StoreContext};
 use crate::tile::tile::{Shown, Tile, TileInput, TileNecessity, TileOperation, TileUpdateParameters};
 use crate::tile::tile_workers::{InlineWorkers, Lane, ReplyBody};
@@ -579,10 +579,10 @@ impl<'a> TileMut<'a> {
                 decode.work = DecodeWork::Current;
                 return match result {
                     JobResult::Raster(image) => {
-                        self.install(Some(Contents::Raster(RasterBucket::new(image))));
+                        self.install(Some(Contents::Raster(RasterContents::new(image))));
                     }
                     JobResult::Dem(dem) => {
-                        self.install(Some(Contents::Dem(HillshadeBucket::with_dem_data(dem))));
+                        self.install(Some(Contents::Dem(DemContents::new(dem))));
                     }
                     JobResult::Failed(error) => self.fail(error),
                     JobResult::Laid(_) | JobResult::NeedsDeps(_) | JobResult::NeedsData => {
@@ -792,8 +792,8 @@ impl WorldCopy {
                     bucket_geometry: contents.bucket_geometry.clone(),
                 })
             }
-            Contents::Raster(bucket) => Contents::Raster(RasterBucket::with_shared_image(bucket.image.clone())),
-            Contents::Dem(bucket) => Contents::Dem(HillshadeBucket::with_dem_data(bucket.dem_data().clone())),
+            Contents::Raster(raster) => Contents::Raster(RasterContents::with_shared_image(raster.image().cloned())),
+            Contents::Dem(dem) => Contents::Dem(DemContents::new(dem.dem().clone())),
             Contents::Empty => Contents::Empty,
         };
         let load = match (&tile.load.origin, &tile.pipeline) {

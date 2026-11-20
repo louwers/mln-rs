@@ -12,13 +12,13 @@ use mln_style_types::TranslateAnchorType;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 
 use crate::buckets::debug_bucket::DebugBucket;
-use crate::buckets::hillshade_bucket::HillshadeBucket;
-use crate::buckets::raster_bucket::RasterBucket;
 use crate::layer::LayerType;
 use crate::paint_parameters::TransformParameters;
 use crate::render_pass::RenderPass;
 use crate::render_source::RenderTileParameters;
 use crate::tile::contents::Contents;
+use crate::tile::dem::DemContents;
+use crate::tile::raster::RasterContents;
 use crate::tile::tile::Tile;
 
 pub struct RenderTile {
@@ -147,7 +147,7 @@ pub(crate) enum TileContent<'a> {
     Tile(&'a Contents),
     /// The image of an image source, which each of the source's tiles
     /// shows.
-    Image(&'a RasterBucket),
+    Image(&'a RasterContents),
 }
 
 /// Where a tile's content keeps what it shows a layer. The frame's found
@@ -158,15 +158,16 @@ pub(crate) enum TileContent<'a> {
 pub(crate) enum ViewPlace {
     /// The layer's place among the layers of the tile's layout.
     Laid(usize),
-    /// The tile's own data, a raster or raster-dem tile's bucket or an
+    /// The tile's own data, a raster or raster-dem tile's contents or an
     /// image source's image, which every layer of its source draws.
     Own,
 }
 
 /// What a frame's tile shows a layer of some type: its bucket in the tile's
-/// layout ([`LayerBucket`](crate::layer::LayerBucket)), a raster tile's own
-/// bucket or an image source's image (`RasterView`), a raster-dem tile's
-/// own bucket, or nothing for a type without a source ([`NoTileBucket`]).
+/// layout ([`LayerBucket`](crate::layer::LayerBucket)), a raster tile's
+/// image or an image source's image ([`RasterView`]), a raster-dem tile's
+/// DEM (`&`[`DemContents`]), or nothing for a type without a source
+/// ([`NoTileBucket`]).
 /// The engine's kinds of tiles are the only ones, so these are the only
 /// views: a layer type takes the one of its source's kind.
 #[expect(private_bounds, reason = "the engine's views are the only ones: `FindView` seals the trait")]
@@ -199,15 +200,51 @@ pub(crate) trait FindView<'a>: Sized {
     }
 }
 
-impl<'a> FindView<'a> for &'a HillshadeBucket {
+/// What a frame's tile shows a layer of a raster source or an image source:
+/// a raster tile's image, or the image source's image, which each of its
+/// tiles shows.
+#[derive(Clone, Copy)]
+pub enum RasterView<'a> {
+    /// A raster tile's image.
+    Tile(&'a RasterContents),
+    /// An image source's image, drawn in the tile.
+    Image(&'a RasterContents),
+}
+
+impl<'a> RasterView<'a> {
+    /// The image and the geometry that draws it.
+    #[must_use]
+    pub fn contents(self) -> &'a RasterContents {
+        match self {
+            RasterView::Tile(contents) | RasterView::Image(contents) => contents,
+        }
+    }
+}
+
+impl<'a> FindView<'a> for RasterView<'a> {
     fn find(content: TileContent<'a>, _layer_id: &str) -> Option<(Self, ViewPlace)> {
         Some((Self::at(content, ViewPlace::Own)?, ViewPlace::Own))
     }
 
     fn at(content: TileContent<'a>, place: ViewPlace) -> Option<Self> {
-        debug_assert_eq!(place, ViewPlace::Own, "a laid-out layer's place for a tile's own bucket");
+        debug_assert_eq!(place, ViewPlace::Own, "a laid-out layer's place for a tile's own data");
         match content {
-            TileContent::Tile(Contents::Dem(bucket)) => Some(bucket),
+            TileContent::Tile(Contents::Raster(contents)) => Some(RasterView::Tile(contents)),
+            TileContent::Image(contents) => Some(RasterView::Image(contents)),
+            TileContent::Tile(_) => None,
+        }
+    }
+}
+
+impl<'a> FindView<'a> for &'a DemContents {
+    fn find(content: TileContent<'a>, _layer_id: &str) -> Option<(Self, ViewPlace)> {
+        Some((Self::at(content, ViewPlace::Own)?, ViewPlace::Own))
+    }
+
+    fn at(content: TileContent<'a>, place: ViewPlace) -> Option<Self> {
+        debug_assert_eq!(place, ViewPlace::Own, "a laid-out layer's place for a tile's own data");
+        match content {
+            TileContent::Tile(Contents::Dem(contents)) => Some(contents),
             _ => None,
         }
     }
