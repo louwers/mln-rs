@@ -120,7 +120,10 @@
 //!   blend's backdrop is the drape's own texels.
 //! - **The elevation snapshot** ([`TerrainElevation`]) holds the drawn
 //!   tiles, and the DEM images and sub-rects they read, which don't change
-//!   once it shares them, so the map reads it on its thread. The renderer
+//!   once it shares them, so the map reads it on its thread. It finds the
+//!   tile at a point through an index of the drawn tiles by zoom, finest
+//!   first, which a ray the map casts against it samples hundreds of times,
+//!   and it keeps the range of the drawn heights, which bounds the ray. The renderer
 //!   makes a new one only when the tiles, the DEM images they read, where
 //!   they read them, whether their own DEM loads, or the decode change: a
 //!   fixed camera over loaded tiles keeps one snapshot. It reaches the map

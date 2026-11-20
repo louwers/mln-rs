@@ -24,4 +24,11 @@ pub trait Elevation: fmt::Debug + Send + Sync {
     /// where a drawn tile has no DEM data yet, which draws flat meanwhile.
     /// `None` where no tile was drawn.
     fn surface_at(&self, world: DVec2) -> Option<f64>;
+
+    /// The lowest and highest ground of the tiles the frame drew, in meters
+    /// with the exaggeration, as their DEM data says, 0 for a tile drawn
+    /// flat: it holds every height [`surface_at`](Self::surface_at) gives
+    /// but along a tile's edge, which reads its neighbors' data within half
+    /// a pixel of the DEM. `None` where no tile was drawn.
+    fn range(&self) -> Option<(f64, f64)>;
 }

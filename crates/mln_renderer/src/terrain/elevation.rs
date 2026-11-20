@@ -5,9 +5,10 @@ use std::sync::Arc;
 
 use glam::DVec2;
 use mln_map_types::{Elevation, TileCoordinate};
-use mln_tile_id::OverscaledTileID;
+use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::dem::{self, DemCoords, DemUnpack};
 use mln_util::geo::LatLng;
+use mln_util::hash::HashMap;
 use mln_util::image::PremultipliedImage;
 
 use crate::terrain::cover::{TerrainCover, dem_bucket, place_in};
@@ -21,9 +22,10 @@ struct DrawnDem {
     image: Arc<PremultipliedImage>,
     dim: u32,
     coords: DemCoords,
-    /// The lowest height of the DEM tile's own pixels, in meters, not
-    /// exaggerated.
+    /// The lowest and highest heights of the DEM tile's own pixels, in
+    /// meters, not exaggerated.
     min: f32,
+    max: f32,
 }
 
 /// A terrain tile as a frame drew it.
@@ -46,6 +48,13 @@ pub(crate) struct TerrainElevation {
     /// Nearest the center first, then the tile under the center when none
     /// drew there ([`TerrainCover::center`]).
     tiles: Vec<DrawnTile>,
+    /// The zoom levels of the drawn tiles, finest first.
+    zooms: Vec<u8>,
+    /// Where each drawn tile is in `tiles`, the first of its world copies,
+    /// which all read the same DEM.
+    index: HashMap<CanonicalTileID, usize>,
+    /// [`Elevation::range`]'s.
+    range: Option<(f64, f64)>,
     unpack: DemUnpack,
     exaggeration: f32,
 }
@@ -56,7 +65,7 @@ impl fmt::Debug for TerrainElevation {
             .field("tiles", &self.tiles.len())
             .field("unpack", &self.unpack)
             .field("exaggeration", &self.exaggeration)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -66,7 +75,8 @@ fn drawn_dem(dem: Option<&SourceTiles>, bound: Option<(OverscaledTileID, DemCoor
     let (id, coords) = bound?;
     let data = dem_bucket(dem?.tile(&id)?)?.dem_data();
     let dim = u32::try_from(data.dim).ok()?;
-    Some(DrawnDem { id, image: Arc::clone(data.shared_image()), dim, coords, min: data.range().0 })
+    let (min, max) = data.range();
+    Some(DrawnDem { id, image: Arc::clone(data.shared_image()), dim, coords, min, max })
 }
 
 impl TerrainElevation {
@@ -80,7 +90,7 @@ impl TerrainElevation {
         exaggeration: f32,
     ) -> TerrainElevation {
         let drawn = cover.tiles.iter().map(|tile| (tile, true));
-        let tiles = drawn
+        let tiles: Vec<DrawnTile> = drawn
             .chain(cover.center.iter().map(|tile| (tile, false)))
             .map(|(tile, drawn)| DrawnTile {
                 id: tile.id,
@@ -89,7 +99,22 @@ impl TerrainElevation {
                 drawn,
             })
             .collect();
-        TerrainElevation { tiles, unpack, exaggeration }
+        let mut index = HashMap::default();
+        let mut zooms = Vec::new();
+        let mut range: Option<(f64, f64)> = None;
+        for (at, tile) in tiles.iter().enumerate().filter(|(_, tile)| tile.drawn) {
+            index.entry(tile.id.canonical).or_insert(at);
+            if !zooms.contains(&tile.id.canonical.z) {
+                zooms.push(tile.id.canonical.z);
+            }
+            let (min, max) = tile.dem.as_ref().map_or((0.0, 0.0), |dem| {
+                let (min, max) = (f64::from(dem.min * exaggeration), f64::from(dem.max * exaggeration));
+                (min.min(max), min.max(max))
+            });
+            range = Some(range.map_or((min, max), |(low, high)| (low.min(min), high.max(max))));
+        }
+        zooms.sort_unstable_by(|a, b| b.cmp(a));
+        TerrainElevation { tiles, zooms, index, range, unpack, exaggeration }
     }
 
     /// Whether `cover`'s tiles, binding their DEM from `dem`, draw the same
@@ -140,20 +165,63 @@ impl TerrainElevation {
             .sum()
     }
 
-    /// The tile at `world`, a Web Mercator point at zoom 0, and where in it,
-    /// from 0 to 1 across, y down. Every world copy of a tile reads the same
-    /// DEM, so any does.
-    fn tile_at(&self, world: DVec2) -> Option<(&DrawnTile, [f32; 2])> {
-        self.tiles.iter().find_map(|tile| {
-            let [u, v] = place_in(tile.id.canonical, [world.x, world.y])?;
-            Some((tile, [u as f32, v as f32]))
+    /// The drawn tile at `world`, a Web Mercator point at zoom 0 whose y is
+    /// within the world, and where in it, from 0 to 1 across, y down: the
+    /// finest that has it, of which there is one but along an edge between
+    /// tiles. Every world copy of a tile reads the same DEM, so any does.
+    fn drawn_tile_at(&self, world: DVec2) -> Option<(&DrawnTile, [f32; 2])> {
+        if !world.x.is_finite() {
+            return None;
+        }
+        let x = world.x - world.x.floor();
+        self.zooms.iter().find_map(|&z| {
+            let tiles = f64::from(1u32 << z);
+            let (u, v) = (x * tiles, world.y * tiles);
+            // The world's bottom edge is in the last row's tiles.
+            let (column, row) = (u.floor(), v.floor().min(tiles - 1.0));
+            let at = *self.index.get(&CanonicalTileID::new(z, column as u32, row as u32))?;
+            Some((&self.tiles[at], [(u - column) as f32, (v - row) as f32]))
         })
     }
 
-    /// The tile at `location`, and where in it.
+    /// The tile at `location`, and where in it: a drawn one, else the tile
+    /// the cover keeps under the center.
     fn tile_at_location(&self, location: LatLng) -> Option<(&DrawnTile, [f32; 2])> {
         let world = TileCoordinate::from_lat_lng(0.0, &location).p;
-        self.tile_at(DVec2::new(world.x, world.y))
+        let world = DVec2::new(world.x, world.y.clamp(0.0, 1.0));
+        self.drawn_tile_at(world).or_else(|| {
+            let center = self.tiles.last().filter(|tile| !tile.drawn)?;
+            let [u, v] = place_in(center.id.canonical, [world.x, world.y])?;
+            Some((center, [u as f32, v as f32]))
+        })
+    }
+
+    /// [`Elevation::at`] and [`Elevation::min_at`] as the tiles, scanned in
+    /// order, give them, which the index must agree with.
+    #[cfg(test)]
+    pub(crate) fn scanned(&self, location: LatLng) -> (Option<f64>, Option<f64>) {
+        let world = TileCoordinate::from_lat_lng(0.0, &location).p;
+        let found = self.tiles.iter().find_map(|tile| {
+            let [u, v] = place_in(tile.id.canonical, [world.x, world.y])?;
+            Some((tile, [u as f32, v as f32]))
+        });
+        found.map_or((None, None), |(tile, uv)| (self.height_of(tile, uv), Some(self.min_of(tile))))
+    }
+
+    /// The height `tile` gives at `uv`: `None` while its own DEM tile loads
+    /// with no ancestor's in its place.
+    fn height_of(&self, tile: &DrawnTile, uv: [f32; 2]) -> Option<f64> {
+        // A tile whose own DEM tile loads draws an ancestor's in its place,
+        // which the camera stands on meanwhile, as in GL JS.
+        match &tile.dem {
+            Some(dem) => Some(self.height(dem, uv)),
+            None => (!tile.loading).then_some(0.0),
+        }
+    }
+
+    /// The lowest height of the DEM `tile` reads, 0 for none.
+    fn min_of(&self, tile: &DrawnTile) -> f64 {
+        tile.dem.as_ref().map_or(0.0, |dem| f64::from(dem.min * self.exaggeration))
     }
 
     /// The height that `dem` gives at `uv` by the height rule, in meters with
@@ -172,21 +240,23 @@ impl TerrainElevation {
 impl Elevation for TerrainElevation {
     fn at(&self, location: LatLng) -> Option<f64> {
         let (tile, uv) = self.tile_at_location(location)?;
-        // A tile whose own DEM tile loads draws an ancestor's in its place,
-        // which the camera stands on meanwhile, as in GL JS.
-        match &tile.dem {
-            Some(dem) => Some(self.height(dem, uv)),
-            None => (!tile.loading).then_some(0.0),
-        }
+        self.height_of(tile, uv)
     }
 
     fn min_at(&self, location: LatLng) -> Option<f64> {
         let (tile, _) = self.tile_at_location(location)?;
-        Some(tile.dem.as_ref().map_or(0.0, |dem| f64::from(dem.min * self.exaggeration)))
+        Some(self.min_of(tile))
     }
 
     fn surface_at(&self, world: DVec2) -> Option<f64> {
-        let (tile, uv) = self.tile_at(world).filter(|(tile, _)| tile.drawn)?;
+        if !(0.0..=1.0).contains(&world.y) {
+            return None;
+        }
+        let (tile, uv) = self.drawn_tile_at(world)?;
         Some(tile.dem.as_ref().map_or(0.0, |dem| self.height(dem, uv)))
+    }
+
+    fn range(&self) -> Option<(f64, f64)> {
+        self.range
     }
 }

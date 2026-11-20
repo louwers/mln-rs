@@ -17,7 +17,7 @@ use mln_style::{Edit, Source, Style};
 use mln_style_types::ProjectionDefinition;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::dem::{DemCoords, DemUnpack};
-use mln_util::geo::LatLng;
+use mln_util::geo::{LatLng, WrapMode};
 use mln_util::image::PremultipliedImage;
 use mln_util::pool::TaskGroup;
 use mln_util::size::Size;
@@ -28,7 +28,7 @@ use parking_lot::Mutex;
 use crate::Registry;
 use crate::render_source::RenderSource;
 use crate::renderer_event::RendererEvent;
-use crate::terrain::{RenderTerrain, TerrainCover};
+use crate::terrain::{RenderTerrain, TerrainCover, TerrainElevation};
 use crate::tile::contents::Contents;
 use crate::tile::store::{StoreEvent, TileStore};
 use crate::tile::tile::Tile;
@@ -664,7 +664,7 @@ fn an_update_stands_on_the_current_ground_when_it_carries_its_height_and_floor()
     let loading = load.ground_events().pop().flatten().expect("the ground while it loads");
     // The tiles draw flat while their DEM loads, which the center doesn't
     // stand on yet.
-    let center = load.transform.view().center(mln_util::geo::WrapMode::Wrapped);
+    let center = load.transform.view().center(WrapMode::Wrapped);
     let world = mln_util::projection::Projection::project(&center, 1.0 / mln_util::constants::TILE_SIZE_D);
     assert_eq!((None, Some(0.0)), (loading.at(center), loading.surface_at(DVec2::new(world.x, world.y))));
     load.seen = Some(Arc::clone(&loading));
@@ -722,6 +722,182 @@ fn a_camera_below_the_ground_stands_on_the_dem_under_its_center() {
     // No surface drew there.
     let world = mln_util::projection::Projection::project(&center, 1.0 / mln_util::constants::TILE_SIZE_D);
     assert_eq!(None, ground.surface_at(DVec2::new(world.x, world.y)));
+}
+
+/// The snapshot of the ground that `load`'s last frame drew, of a Terrarium
+/// DEM exaggerated by `exaggeration`.
+fn snapshot(load: &TerrainLoad, exaggeration: f32) -> TerrainElevation {
+    let cover = load.terrain.cover().expect("terrain draws");
+    let dem = load.store.source(load.render_source.tiles().unwrap());
+    TerrainElevation::new(cover, dem, DemUnpack::of(RasterEncoding::Terrarium), exaggeration)
+}
+
+/// The location of `world`, a Web Mercator point at zoom 0.
+fn location_of(world: DVec2) -> LatLng {
+    let point = mln_util::geometry::Point::new(world.x, world.y);
+    mln_util::projection::Projection::unproject(&point, 1.0 / mln_util::constants::TILE_SIZE_D, WrapMode::Unwrapped)
+        .unwrap()
+}
+
+/// Points over the tiles of `load`'s cover and the tile under its center,
+/// and some way around them, off the tiles' edges, in the world copy each
+/// tile is in.
+fn points_over(load: &TerrainLoad) -> Vec<DVec2> {
+    let cover = load.terrain.cover().unwrap();
+    let bounds = |tile: &crate::terrain::TerrainTile| {
+        let tiles = f64::from(1u32 << tile.id.canonical.z);
+        let (x, y) = (f64::from(tile.id.canonical.x), f64::from(tile.id.canonical.y));
+        let wrap = f64::from(tile.id.wrap);
+        (DVec2::new(x / tiles + wrap, y / tiles), DVec2::new((x + 1.0) / tiles + wrap, (y + 1.0) / tiles))
+    };
+    let (min, max) = cover
+        .tiles
+        .iter()
+        .chain(&cover.center)
+        .map(bounds)
+        .reduce(|(min, max), (low, high)| (min.min(low), max.max(high)))
+        .expect("tiles");
+    let (min, max) = (min - (max - min) * 0.1, max + (max - min) * 0.1);
+    // Steps of irrational fractions keep the points off the edges.
+    (0..120)
+        .flat_map(|row| (0..120).map(move |column| (column, row)))
+        .map(|(column, row)| {
+            let f = DVec2::new((f64::from(column) + 0.5) / 120.0, (f64::from(row) + 0.5) / 120.0);
+            let f = (f + DVec2::splat(std::f64::consts::SQRT_2 * 1e-4)).min(DVec2::ONE);
+            min + (max - min) * f
+        })
+        .filter(|world| (0.0..=1.0).contains(&world.y))
+        .collect()
+}
+
+/// The per-zoom index finds, at every point, the tile the scan of the tiles
+/// in order found, so the height and floor under the camera are as they
+/// were: while the DEM loads, with ancestors in place, once it has loaded,
+/// over tiles of several zooms, across world copies, and on the tile the
+/// cover keeps under the center.
+#[test]
+fn the_index_finds_the_tiles_the_scan_found() {
+    let check = |load: &TerrainLoad, exaggeration: f32, what: &str| {
+        let ground = snapshot(load, exaggeration);
+        let points = points_over(load);
+        let mut found = 0;
+        for world in &points {
+            let location = location_of(*world);
+            assert_eq!(ground.scanned(location), (ground.at(location), ground.min_at(location)), "{what}: {world}");
+            found += usize::from(ground.min_at(location).is_some());
+        }
+        assert!(found > points.len() / 2, "{what}: {found} of {} points on tiles", points.len());
+    };
+
+    let mut load = TerrainLoad::new((0, 14), 1.5);
+    load.frame();
+    check(&load, 1.5, "loading");
+    load.answer(|tile| (tile.z == 5).then(terrarium_slope));
+    check(&load, 1.5, "ancestors");
+    load.answer(|_| Some(terrarium_slope()));
+    check(&load, 1.5, "loaded");
+
+    load.transform.jump_to(&CameraOptions {
+        zoom: Some(14.0),
+        pitch: Some(70.0),
+        bearing: Some(30.0),
+        ..Default::default()
+    });
+    load.frame();
+    load.answer(|_| Some(terrarium_slope()));
+    let zooms: BTreeSet<u8> = load.terrain.cover().unwrap().tiles.iter().map(|tile| tile.id.canonical.z).collect();
+    assert!(zooms.len() > 2, "{zooms:?}");
+    check(&load, 1.5, "pitched");
+
+    load.transform.jump_to(&CameraOptions {
+        center: Some(LatLng::new(45.0, 179.99).unwrap()),
+        zoom: Some(10.5),
+        pitch: Some(0.0),
+        ..Default::default()
+    });
+    load.frame();
+    load.answer(|_| Some(terrarium_slope()));
+    let wraps: BTreeSet<i16> = load.terrain.cover().unwrap().tiles.iter().map(|tile| tile.id.wrap).collect();
+    assert!(wraps.len() > 1, "{wraps:?}");
+    check(&load, 1.5, "across the antimeridian");
+
+    let mut below = TerrainLoad::new((0, 14), 100.0);
+    below.transform.jump_to(&CameraOptions { pitch: Some(60.0), ..Default::default() });
+    below.frame();
+    below.answer(|_| Some(terrarium_png(30_000)));
+    let cover = below.terrain.cover().unwrap();
+    assert!(cover.tiles.is_empty(), "{:?}", cover.tiles);
+    let ground = snapshot(&below, 100.0);
+    let center = LatLng::new(45.0, 10.0).unwrap();
+    assert_eq!((Some(3_000_000.0), Some(3_000_000.0)), ground.scanned(center));
+    assert_eq!(ground.scanned(center), (ground.at(center), ground.min_at(center)));
+}
+
+/// Every tile drawn flat while its DEM loads draws at sea level, which the
+/// surface gives though the height under the camera waits; one drawn with
+/// an ancestor's DEM in its place draws that DEM's height.
+#[test]
+fn surface_at_is_zero_on_loading_tiles() {
+    let mut load = TerrainLoad::new((0, 14), 1.0);
+    load.frame();
+    let middles = |load: &TerrainLoad| -> Vec<DVec2> {
+        let cover = load.terrain.cover().unwrap();
+        assert!(cover.tiles.len() > 4);
+        cover
+            .tiles
+            .iter()
+            .map(|tile| {
+                let tiles = f64::from(1u32 << tile.id.canonical.z);
+                let middle = |at: u32| (f64::from(at) + 0.5) / tiles;
+                DVec2::new(middle(tile.id.canonical.x) + f64::from(tile.id.wrap), middle(tile.id.canonical.y))
+            })
+            .collect()
+    };
+    let loading = snapshot(&load, 1.0);
+    for world in middles(&load) {
+        assert_eq!((Some(0.0), None), (loading.surface_at(world), loading.at(location_of(world))), "{world}");
+    }
+
+    load.answer(|tile| (tile.z == 5).then(|| terrarium_png(100)));
+    let ancestors = snapshot(&load, 1.0);
+    for world in middles(&load) {
+        assert_eq!(Some(100.0), ancestors.surface_at(world), "{world}");
+        assert_eq!(Some(100.0), ancestors.at(location_of(world)), "{world}");
+    }
+}
+
+/// The range spans the drawn tiles' DEM data with the exaggeration, each
+/// tile's own pixels, and sea level for tiles drawn flat; no tiles drawn,
+/// no range. The surface stays within it.
+#[test]
+fn range_spans_the_drawn_dems_exaggerated() {
+    let mut load = TerrainLoad::new((0, 14), 1.5);
+    load.frame();
+    assert_eq!(Some((0.0, 0.0)), snapshot(&load, 1.5).range(), "drawn flat while the DEM loads");
+
+    // One DEM tile in, under some of the tiles: the others draw flat.
+    let first = load.terrain.cover().unwrap().tiles[0].id;
+    let read = first.scaled_to(first.canonical.z - 1).canonical;
+    load.answer(|tile| (tile == read).then(|| terrarium_png(400)));
+    assert_eq!(Some((0.0, 600.0)), snapshot(&load, 1.5).range());
+
+    // The slope rises from 100 m to 100 + 7·15 + 3·15 m.
+    let mut load = TerrainLoad::new((0, 14), 1.5);
+    load.frame();
+    load.answer(|_| Some(terrarium_slope()));
+    let ground = snapshot(&load, 1.5);
+    assert_eq!(Some((150.0, 375.0)), ground.range());
+    for world in points_over(&load) {
+        if let Some(height) = ground.surface_at(world) {
+            assert!((150.0..=375.0).contains(&height), "{height} at {world}");
+        }
+    }
+
+    let mut below = TerrainLoad::new((0, 14), 100.0);
+    below.transform.jump_to(&CameraOptions { pitch: Some(60.0), ..Default::default() });
+    below.frame();
+    below.answer(|_| Some(terrarium_png(30_000)));
+    assert_eq!(None, snapshot(&below, 100.0).range(), "no tile drew");
 }
 
 /// The coarse DEM tile a terrain tile reads for culling loads while its
@@ -842,5 +1018,9 @@ impl Elevation for Uniform {
 
     fn surface_at(&self, _: DVec2) -> Option<f64> {
         self.at
+    }
+
+    fn range(&self) -> Option<(f64, f64)> {
+        self.at.map(|at| (at, at))
     }
 }

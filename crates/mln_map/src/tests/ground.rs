@@ -48,6 +48,11 @@ impl Elevation for Flat {
     fn surface_at(&self, _: DVec2) -> Option<f64> {
         Some(self.height.unwrap_or(0.0))
     }
+
+    fn range(&self) -> Option<(f64, f64)> {
+        let height = self.height.unwrap_or(0.0);
+        Some((height, height))
+    }
 }
 
 /// Ground whose height alternates between 100 m and 200 m with each read,
@@ -68,6 +73,10 @@ impl Elevation for Restless {
 
     fn surface_at(&self, _: DVec2) -> Option<f64> {
         Some(100.0)
+    }
+
+    fn range(&self) -> Option<(f64, f64)> {
+        Some((100.0, 100.0))
     }
 }
 
@@ -90,6 +99,10 @@ impl Elevation for Plateau {
 
     fn surface_at(&self, world: DVec2) -> Option<f64> {
         Some(if world.y > self.y { self.height } else { 0.0 })
+    }
+
+    fn range(&self) -> Option<(f64, f64)> {
+        Some((self.height.min(0.0), self.height.max(0.0)))
     }
 }
 
@@ -125,6 +138,11 @@ impl Elevation for CenterOnly {
         self.reads_elsewhere.fetch_add(1, Ordering::SeqCst);
         Some(100_000.0)
     }
+
+    fn range(&self) -> Option<(f64, f64)> {
+        self.reads_elsewhere.fetch_add(1, Ordering::SeqCst);
+        Some((100_000.0, 100_000.0))
+    }
 }
 
 /// Ground that rises `rise` meters for each unit of Web Mercator x at zoom
@@ -154,6 +172,11 @@ impl Elevation for Slope {
 
     fn surface_at(&self, world: DVec2) -> Option<f64> {
         Some(self.height(world))
+    }
+
+    fn range(&self) -> Option<(f64, f64)> {
+        let (west, east) = (self.height - self.rise * self.x, self.height + self.rise * (1.0 - self.x));
+        Some((west.min(east), west.max(east)))
     }
 }
 
