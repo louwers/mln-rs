@@ -10,25 +10,24 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::shaders::source::msl::{Attribute, Msl, Source, Texture};
 
 use super::programs;
-use crate::shaders::msl::{attr, tex};
 
 const FILL_UBO_COUNT: usize = FILL_LAYER_UBO_COUNT;
 
 const FILL_ATTRIBUTES: &[Attribute] = &[
-    attr(0, Short2, FILL_UBO_COUNT, ID_FILL_POS_VERTEX_ATTRIBUTE),
+    Attribute::new(0, Short2, FILL_UBO_COUNT, ID_FILL_POS_VERTEX_ATTRIBUTE),
     // Data driven
-    attr(1, Float4, FILL_UBO_COUNT + 1, ID_FILL_COLOR_VERTEX_ATTRIBUTE),
-    attr(2, Float2, FILL_UBO_COUNT + 1, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
+    Attribute::new(1, Float4, FILL_UBO_COUNT + 1, ID_FILL_COLOR_VERTEX_ATTRIBUTE),
+    Attribute::new(2, Float2, FILL_UBO_COUNT + 1, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
 ];
 const FILL_PATTERN_ATTRIBUTES: &[Attribute] = &[
-    attr(0, Short2, FILL_UBO_COUNT, ID_FILL_POS_VERTEX_ATTRIBUTE),
+    Attribute::new(0, Short2, FILL_UBO_COUNT, ID_FILL_POS_VERTEX_ATTRIBUTE),
     // Data driven
-    attr(1, Float4, FILL_UBO_COUNT + 1, ID_FILL_COLOR_VERTEX_ATTRIBUTE),
-    attr(2, UShort4, FILL_UBO_COUNT + 1, ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
-    attr(3, UShort4, FILL_UBO_COUNT + 1, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
-    attr(4, Float2, FILL_UBO_COUNT + 1, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
+    Attribute::new(1, Float4, FILL_UBO_COUNT + 1, ID_FILL_COLOR_VERTEX_ATTRIBUTE),
+    Attribute::new(2, UShort4, FILL_UBO_COUNT + 1, ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
+    Attribute::new(3, UShort4, FILL_UBO_COUNT + 1, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
+    Attribute::new(4, Float2, FILL_UBO_COUNT + 1, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
 ];
-const FILL_PATTERN_TEXTURES: &[Texture] = &[tex(0, ID_FILL_IMAGE_TEXTURE)];
+const FILL_PATTERN_TEXTURES: &[Texture] = &[Texture::new(0, ID_FILL_IMAGE_TEXTURE)];
 static FILL: Source =
     Source { msl: &FILL_SHADER, attributes: FILL_ATTRIBUTES, instance_attributes: &[], textures: &[] };
 static FILL_PATTERN: Source = Source {
@@ -43,24 +42,24 @@ static FILL_PATTERN: Source = Source {
 // ends provide. The quad's corner is the vertex. Metal draws no lines wider
 // than 1 px, so it draws every outline with these.
 const FILL_OUTLINE_INSTANCED_ATTRIBUTES: &[Attribute] =
-    &[attr(0, Short2, FILL_UBO_COUNT, ID_FILL_POS_VERTEX_ATTRIBUTE)];
+    &[Attribute::new(0, Short2, FILL_UBO_COUNT, ID_FILL_POS_VERTEX_ATTRIBUTE)];
 const FILL_OUTLINE_INSTANCED_INSTANCE_ATTRIBUTES: &[Attribute] = &[
     // Data driven
-    attr(1, Float4, FILL_UBO_COUNT + 1, ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
-    attr(2, Float2, FILL_UBO_COUNT + 1, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
+    Attribute::new(1, Float4, FILL_UBO_COUNT + 1, ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
+    Attribute::new(2, Float2, FILL_UBO_COUNT + 1, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
     // The segment
-    attr(3, Short2, FILL_UBO_COUNT + 2, ID_FILL_OUTLINE_POS_ATTRIBUTE),
-    attr(4, Short2, FILL_UBO_COUNT + 3, ID_FILL_OUTLINE_END_ATTRIBUTE),
+    Attribute::new(3, Short2, FILL_UBO_COUNT + 2, ID_FILL_OUTLINE_POS_ATTRIBUTE),
+    Attribute::new(4, Short2, FILL_UBO_COUNT + 3, ID_FILL_OUTLINE_END_ATTRIBUTE),
 ];
 const FILL_OUTLINE_PATTERN_INSTANCED_INSTANCE_ATTRIBUTES: &[Attribute] = &[
     // Data driven
-    attr(1, Float4, FILL_UBO_COUNT + 1, ID_FILL_COLOR_VERTEX_ATTRIBUTE),
-    attr(2, UShort4, FILL_UBO_COUNT + 1, ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
-    attr(3, UShort4, FILL_UBO_COUNT + 1, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
-    attr(4, Float2, FILL_UBO_COUNT + 1, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
+    Attribute::new(1, Float4, FILL_UBO_COUNT + 1, ID_FILL_COLOR_VERTEX_ATTRIBUTE),
+    Attribute::new(2, UShort4, FILL_UBO_COUNT + 1, ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
+    Attribute::new(3, UShort4, FILL_UBO_COUNT + 1, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
+    Attribute::new(4, Float2, FILL_UBO_COUNT + 1, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
     // The segment
-    attr(5, Short2, FILL_UBO_COUNT + 2, ID_FILL_OUTLINE_POS_ATTRIBUTE),
-    attr(6, Short2, FILL_UBO_COUNT + 3, ID_FILL_OUTLINE_END_ATTRIBUTE),
+    Attribute::new(5, Short2, FILL_UBO_COUNT + 2, ID_FILL_OUTLINE_POS_ATTRIBUTE),
+    Attribute::new(6, Short2, FILL_UBO_COUNT + 3, ID_FILL_OUTLINE_END_ATTRIBUTE),
 ];
 static FILL_OUTLINE_INSTANCED: Source = Source {
     msl: &FILL_OUTLINE_INSTANCED_SHADER,

@@ -5,7 +5,9 @@
 //! holds a program's code in it and the tables of where the program's
 //! attributes, textures and buffers bind: [`wgsl`] for `mln_webgpu`, [`msl`]
 //! for `mln_mtl`, [`glsl_es`] for `mln_gl`, and [`glsl`] for the backends
-//! that compile through `mln_glsl`, `mln_vulkan` and `mln_d3d12`.
+//! that compile through `mln_glsl`, `mln_vulkan` and `mln_d3d12`. The
+//! languages are a closed set: [`ShaderSource`] is sealed, so a new one is a
+//! change to this crate.
 //!
 //! A backend compiles the engine's own programs from a table of its own, and
 //! every other program from the sources added to it

@@ -10,29 +10,28 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::shaders::source::glsl::{Attribute, Glsl, Source, Texture};
 
 use super::programs;
-use crate::shaders::glsl::{attr, tex};
 
 const FILL_ATTRIBUTES: &[Attribute] = &[
-    attr(0, Short2, ID_FILL_POS_VERTEX_ATTRIBUTE),
+    Attribute::new(0, Short2, ID_FILL_POS_VERTEX_ATTRIBUTE),
     // Data driven
-    attr(1, Float4, ID_FILL_COLOR_VERTEX_ATTRIBUTE),
-    attr(2, Float2, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
+    Attribute::new(1, Float4, ID_FILL_COLOR_VERTEX_ATTRIBUTE),
+    Attribute::new(2, Float2, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
 ];
 const FILL_OUTLINE_ATTRIBUTES: &[Attribute] = &[
-    attr(0, Short2, ID_FILL_POS_VERTEX_ATTRIBUTE),
+    Attribute::new(0, Short2, ID_FILL_POS_VERTEX_ATTRIBUTE),
     // Data driven
-    attr(1, Float4, ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
-    attr(2, Float2, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
+    Attribute::new(1, Float4, ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
+    Attribute::new(2, Float2, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
 ];
 const FILL_PATTERN_ATTRIBUTES: &[Attribute] = &[
-    attr(0, Short2, ID_FILL_POS_VERTEX_ATTRIBUTE),
+    Attribute::new(0, Short2, ID_FILL_POS_VERTEX_ATTRIBUTE),
     // Data driven
-    attr(1, Float4, ID_FILL_COLOR_VERTEX_ATTRIBUTE),
-    attr(2, UShort4, ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
-    attr(3, UShort4, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
-    attr(4, Float2, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
+    Attribute::new(1, Float4, ID_FILL_COLOR_VERTEX_ATTRIBUTE),
+    Attribute::new(2, UShort4, ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
+    Attribute::new(3, UShort4, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
+    Attribute::new(4, Float2, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
 ];
-const FILL_PATTERN_TEXTURES: &[Texture] = &[tex(0, ID_FILL_IMAGE_TEXTURE)];
+const FILL_PATTERN_TEXTURES: &[Texture] = &[Texture::new(0, ID_FILL_IMAGE_TEXTURE)];
 static FILL: Source =
     Source { glsl: &FILL_SHADER, attributes: FILL_ATTRIBUTES, instance_attributes: &[], textures: &[] };
 static FILL_OUTLINE: Source =
@@ -52,24 +51,24 @@ static FILL_OUTLINE_PATTERN: Source = Source {
 
 // An instance of the instanced outline shaders is a segment of an outline:
 // a vertex and the end of its segment. The quad's corner is the vertex.
-const FILL_OUTLINE_INSTANCED_ATTRIBUTES: &[Attribute] = &[attr(0, Short2, ID_FILL_POS_VERTEX_ATTRIBUTE)];
+const FILL_OUTLINE_INSTANCED_ATTRIBUTES: &[Attribute] = &[Attribute::new(0, Short2, ID_FILL_POS_VERTEX_ATTRIBUTE)];
 const FILL_OUTLINE_INSTANCED_INSTANCE_ATTRIBUTES: &[Attribute] = &[
     // Data driven
-    attr(1, Float4, ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
-    attr(2, Float2, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
+    Attribute::new(1, Float4, ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
+    Attribute::new(2, Float2, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
     // The segment
-    attr(3, Short2, ID_FILL_OUTLINE_POS_ATTRIBUTE),
-    attr(4, Short2, ID_FILL_OUTLINE_END_ATTRIBUTE),
+    Attribute::new(3, Short2, ID_FILL_OUTLINE_POS_ATTRIBUTE),
+    Attribute::new(4, Short2, ID_FILL_OUTLINE_END_ATTRIBUTE),
 ];
 const FILL_OUTLINE_PATTERN_INSTANCED_INSTANCE_ATTRIBUTES: &[Attribute] = &[
     // Data driven
-    attr(1, Float4, ID_FILL_COLOR_VERTEX_ATTRIBUTE),
-    attr(2, UShort4, ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
-    attr(3, UShort4, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
-    attr(4, Float2, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
+    Attribute::new(1, Float4, ID_FILL_COLOR_VERTEX_ATTRIBUTE),
+    Attribute::new(2, UShort4, ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
+    Attribute::new(3, UShort4, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
+    Attribute::new(4, Float2, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
     // The segment
-    attr(5, Short2, ID_FILL_OUTLINE_POS_ATTRIBUTE),
-    attr(6, Short2, ID_FILL_OUTLINE_END_ATTRIBUTE),
+    Attribute::new(5, Short2, ID_FILL_OUTLINE_POS_ATTRIBUTE),
+    Attribute::new(6, Short2, ID_FILL_OUTLINE_END_ATTRIBUTE),
 ];
 static FILL_OUTLINE_INSTANCED: Source = Source {
     glsl: &FILL_OUTLINE_INSTANCED_SHADER,

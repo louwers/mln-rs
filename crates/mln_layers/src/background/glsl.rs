@@ -3,19 +3,18 @@
 use mln_gfx::gfx_types::AttributeDataType::Short2;
 use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::shader_defines::{ID_BACKGROUND_IMAGE_TEXTURE, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE};
-use mln_gfx::shaders::source::glsl::{Attribute, Glsl, Source};
+use mln_gfx::shaders::source::glsl::{Attribute, Glsl, Source, Texture};
 
 use super::programs;
-use crate::shaders::glsl::{attr, tex};
 
-const BACKGROUND_ATTRIBUTES: &[Attribute] = &[attr(0, Short2, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE)];
+const BACKGROUND_ATTRIBUTES: &[Attribute] = &[Attribute::new(0, Short2, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE)];
 static BACKGROUND: Source =
     Source { glsl: &BACKGROUND_SHADER, attributes: BACKGROUND_ATTRIBUTES, instance_attributes: &[], textures: &[] };
 static BACKGROUND_PATTERN: Source = Source {
     glsl: &BACKGROUND_PATTERN_SHADER,
     attributes: BACKGROUND_ATTRIBUTES,
     instance_attributes: &[],
-    textures: &[tex(0, ID_BACKGROUND_IMAGE_TEXTURE)],
+    textures: &[Texture::new(0, ID_BACKGROUND_IMAGE_TEXTURE)],
 };
 
 /// The source of each of the type's programs.

@@ -9,30 +9,29 @@ use mln_gfx::shaders::shader_defines::{
     ID_CIRCLE_STROKE_OPACITY_VERTEX_ATTRIBUTE, ID_CIRCLE_STROKE_WIDTH_VERTEX_ATTRIBUTE, ID_GLOBAL_PAINT_PARAMS_UBO,
     ID_PROJECTION_UBO,
 };
-use mln_gfx::shaders::source::glsl_es::{Glsl, Source};
+use mln_gfx::shaders::source::glsl_es::{Attribute, Glsl, Source, UniformBlock};
 
 use super::programs;
 use super::ubo::{CircleDrawableUBO, CircleEvaluatedPropsUBO};
-use crate::shaders::glsl_es::{attr, block, element};
 
 // Circle
 static CIRCLE: Source = Source {
     glsl: &CIRCLE_SHADER,
     uniform_blocks: &[
-        element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        block::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
-        element::<CircleDrawableUBO, CircleDrawableUBO>("CircleDrawableUBO", ID_CIRCLE_DRAWABLE_UBO),
-        block::<CircleEvaluatedPropsUBO>("CircleEvaluatedPropsUBO", ID_CIRCLE_EVALUATED_PROPS_UBO),
+        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
+        UniformBlock::new::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
+        UniformBlock::element::<CircleDrawableUBO, CircleDrawableUBO>("CircleDrawableUBO", ID_CIRCLE_DRAWABLE_UBO),
+        UniformBlock::new::<CircleEvaluatedPropsUBO>("CircleEvaluatedPropsUBO", ID_CIRCLE_EVALUATED_PROPS_UBO),
     ],
     attributes: &[
-        attr("a_pos", ID_CIRCLE_POS_VERTEX_ATTRIBUTE),
-        attr("a_color", ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE),
-        attr("a_radius", ID_CIRCLE_RADIUS_VERTEX_ATTRIBUTE),
-        attr("a_blur", ID_CIRCLE_BLUR_VERTEX_ATTRIBUTE),
-        attr("a_opacity", ID_CIRCLE_OPACITY_VERTEX_ATTRIBUTE),
-        attr("a_stroke_color", ID_CIRCLE_STROKE_COLOR_VERTEX_ATTRIBUTE),
-        attr("a_stroke_width", ID_CIRCLE_STROKE_WIDTH_VERTEX_ATTRIBUTE),
-        attr("a_stroke_opacity", ID_CIRCLE_STROKE_OPACITY_VERTEX_ATTRIBUTE),
+        Attribute::new("a_pos", ID_CIRCLE_POS_VERTEX_ATTRIBUTE),
+        Attribute::new("a_color", ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE),
+        Attribute::new("a_radius", ID_CIRCLE_RADIUS_VERTEX_ATTRIBUTE),
+        Attribute::new("a_blur", ID_CIRCLE_BLUR_VERTEX_ATTRIBUTE),
+        Attribute::new("a_opacity", ID_CIRCLE_OPACITY_VERTEX_ATTRIBUTE),
+        Attribute::new("a_stroke_color", ID_CIRCLE_STROKE_COLOR_VERTEX_ATTRIBUTE),
+        Attribute::new("a_stroke_width", ID_CIRCLE_STROKE_WIDTH_VERTEX_ATTRIBUTE),
+        Attribute::new("a_stroke_opacity", ID_CIRCLE_STROKE_OPACITY_VERTEX_ATTRIBUTE),
     ],
     instance_attributes: &[],
     textures: &[],

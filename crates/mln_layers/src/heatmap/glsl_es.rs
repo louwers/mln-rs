@@ -7,24 +7,23 @@ use mln_gfx::shaders::shader_defines::{
     ID_HEATMAP_IMAGE_TEXTURE, ID_HEATMAP_POS_VERTEX_ATTRIBUTE, ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE,
     ID_HEATMAP_TEXTURE_PROPS_UBO, ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO,
 };
-use mln_gfx::shaders::source::glsl_es::{Glsl, Source};
+use mln_gfx::shaders::source::glsl_es::{Attribute, Glsl, Source, Texture, UniformBlock};
 
 use super::programs;
 use super::ubo::{HeatmapDrawableUBO, HeatmapEvaluatedPropsUBO, HeatmapTexturePropsUBO};
-use crate::shaders::glsl_es::{attr, block, element, tex};
 
 // Heatmap
 static HEATMAP: Source = Source {
     glsl: &HEATMAP_SHADER,
     uniform_blocks: &[
-        element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        element::<HeatmapDrawableUBO, HeatmapDrawableUBO>("HeatmapDrawableUBO", ID_HEATMAP_DRAWABLE_UBO),
-        block::<HeatmapEvaluatedPropsUBO>("HeatmapEvaluatedPropsUBO", ID_HEATMAP_EVALUATED_PROPS_UBO),
+        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
+        UniformBlock::element::<HeatmapDrawableUBO, HeatmapDrawableUBO>("HeatmapDrawableUBO", ID_HEATMAP_DRAWABLE_UBO),
+        UniformBlock::new::<HeatmapEvaluatedPropsUBO>("HeatmapEvaluatedPropsUBO", ID_HEATMAP_EVALUATED_PROPS_UBO),
     ],
     attributes: &[
-        attr("a_pos", ID_HEATMAP_POS_VERTEX_ATTRIBUTE),
-        attr("a_weight", ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE),
-        attr("a_radius", ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE),
+        Attribute::new("a_pos", ID_HEATMAP_POS_VERTEX_ATTRIBUTE),
+        Attribute::new("a_weight", ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE),
+        Attribute::new("a_radius", ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE),
     ],
     instance_attributes: &[],
     textures: &[],
@@ -34,13 +33,16 @@ static HEATMAP: Source = Source {
 static HEATMAP_TEXTURE: Source = Source {
     glsl: &HEATMAP_TEXTURE_SHADER,
     uniform_blocks: &[
-        element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        block::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
-        block::<HeatmapTexturePropsUBO>("HeatmapTexturePropsUBO", ID_HEATMAP_TEXTURE_PROPS_UBO),
+        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
+        UniformBlock::new::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
+        UniformBlock::new::<HeatmapTexturePropsUBO>("HeatmapTexturePropsUBO", ID_HEATMAP_TEXTURE_PROPS_UBO),
     ],
-    attributes: &[attr("a_pos", ID_HEATMAP_POS_VERTEX_ATTRIBUTE)],
+    attributes: &[Attribute::new("a_pos", ID_HEATMAP_POS_VERTEX_ATTRIBUTE)],
     instance_attributes: &[],
-    textures: &[tex("u_image", ID_HEATMAP_IMAGE_TEXTURE), tex("u_color_ramp", ID_HEATMAP_COLOR_RAMP_TEXTURE)],
+    textures: &[
+        Texture::new("u_image", ID_HEATMAP_IMAGE_TEXTURE),
+        Texture::new("u_color_ramp", ID_HEATMAP_COLOR_RAMP_TEXTURE),
+    ],
 };
 
 /// The source of each of the type's programs.

@@ -12,67 +12,66 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::shaders::source::glsl::{Attribute, Glsl, Source, Texture};
 
 use super::programs;
-use crate::shaders::glsl::{attr, tex};
 
 const LINE_ATTRIBUTES: &[Attribute] = &[
-    attr(0, Short2, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
-    attr(1, UByte4, ID_LINE_DATA_VERTEX_ATTRIBUTE),
+    Attribute::new(0, Short2, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
+    Attribute::new(1, UByte4, ID_LINE_DATA_VERTEX_ATTRIBUTE),
     // Data driven
-    attr(2, Float4, ID_LINE_COLOR_VERTEX_ATTRIBUTE),
-    attr(3, Float2, ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-    attr(4, Float2, ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-    attr(5, Float2, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-    attr(6, Float2, ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-    attr(7, Float2, ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
+    Attribute::new(2, Float4, ID_LINE_COLOR_VERTEX_ATTRIBUTE),
+    Attribute::new(3, Float2, ID_LINE_BLUR_VERTEX_ATTRIBUTE),
+    Attribute::new(4, Float2, ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
+    Attribute::new(5, Float2, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
+    Attribute::new(6, Float2, ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
+    Attribute::new(7, Float2, ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
 ];
 const LINE_GRADIENT_ATTRIBUTES: &[Attribute] = &[
-    attr(0, Short2, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
-    attr(1, UByte4, ID_LINE_DATA_VERTEX_ATTRIBUTE),
+    Attribute::new(0, Short2, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
+    Attribute::new(1, UByte4, ID_LINE_DATA_VERTEX_ATTRIBUTE),
     // Data driven
-    attr(2, Float2, ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-    attr(3, Float2, ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-    attr(4, Float2, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-    attr(5, Float2, ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-    attr(6, Float2, ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
+    Attribute::new(2, Float2, ID_LINE_BLUR_VERTEX_ATTRIBUTE),
+    Attribute::new(3, Float2, ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
+    Attribute::new(4, Float2, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
+    Attribute::new(5, Float2, ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
+    Attribute::new(6, Float2, ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
 ];
 const LINE_PATTERN_ATTRIBUTES: &[Attribute] = &[
-    attr(0, Short2, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
-    attr(1, UByte4, ID_LINE_DATA_VERTEX_ATTRIBUTE),
+    Attribute::new(0, Short2, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
+    Attribute::new(1, UByte4, ID_LINE_DATA_VERTEX_ATTRIBUTE),
     // Data driven
-    attr(2, Float2, ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-    attr(3, Float2, ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-    attr(4, Float2, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-    attr(5, Float2, ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-    attr(6, Float2, ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
-    attr(7, UShort4, ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE),
-    attr(8, UShort4, ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE),
+    Attribute::new(2, Float2, ID_LINE_BLUR_VERTEX_ATTRIBUTE),
+    Attribute::new(3, Float2, ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
+    Attribute::new(4, Float2, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
+    Attribute::new(5, Float2, ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
+    Attribute::new(6, Float2, ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
+    Attribute::new(7, UShort4, ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE),
+    Attribute::new(8, UShort4, ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE),
 ];
 const LINE_SDF_ATTRIBUTES: &[Attribute] = &[
-    attr(0, Short2, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
-    attr(1, UByte4, ID_LINE_DATA_VERTEX_ATTRIBUTE),
+    Attribute::new(0, Short2, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
+    Attribute::new(1, UByte4, ID_LINE_DATA_VERTEX_ATTRIBUTE),
     // Data driven
-    attr(2, Float4, ID_LINE_COLOR_VERTEX_ATTRIBUTE),
-    attr(3, Float2, ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-    attr(4, Float2, ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-    attr(5, Float2, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-    attr(6, Float2, ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-    attr(7, Float2, ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
-    attr(8, Float2, ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE),
-    attr(9, Float4, ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE),
+    Attribute::new(2, Float4, ID_LINE_COLOR_VERTEX_ATTRIBUTE),
+    Attribute::new(3, Float2, ID_LINE_BLUR_VERTEX_ATTRIBUTE),
+    Attribute::new(4, Float2, ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
+    Attribute::new(5, Float2, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
+    Attribute::new(6, Float2, ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
+    Attribute::new(7, Float2, ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
+    Attribute::new(8, Float2, ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE),
+    Attribute::new(9, Float4, ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE),
 ];
 const LINE_GRADIENT_SDF_ATTRIBUTES: &[Attribute] = &[
-    attr(0, Short2, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
-    attr(1, UByte4, ID_LINE_DATA_VERTEX_ATTRIBUTE),
+    Attribute::new(0, Short2, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
+    Attribute::new(1, UByte4, ID_LINE_DATA_VERTEX_ATTRIBUTE),
     // Data driven
-    attr(2, Float2, ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-    attr(3, Float2, ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-    attr(4, Float2, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-    attr(5, Float2, ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-    attr(6, Float2, ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
-    attr(7, Float2, ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE),
-    attr(8, Float4, ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE),
+    Attribute::new(2, Float2, ID_LINE_BLUR_VERTEX_ATTRIBUTE),
+    Attribute::new(3, Float2, ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
+    Attribute::new(4, Float2, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
+    Attribute::new(5, Float2, ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
+    Attribute::new(6, Float2, ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
+    Attribute::new(7, Float2, ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE),
+    Attribute::new(8, Float4, ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE),
 ];
-const LINE_IMAGE_TEXTURES: &[Texture] = &[tex(0, ID_LINE_IMAGE_TEXTURE)];
+const LINE_IMAGE_TEXTURES: &[Texture] = &[Texture::new(0, ID_LINE_IMAGE_TEXTURE)];
 static LINE: Source =
     Source { glsl: &LINE_SHADER, attributes: LINE_ATTRIBUTES, instance_attributes: &[], textures: &[] };
 static LINE_GRADIENT: Source = Source {
@@ -97,7 +96,7 @@ static LINE_GRADIENT_SDF: Source = Source {
     glsl: &LINE_GRADIENT_SDF_SHADER,
     attributes: LINE_GRADIENT_SDF_ATTRIBUTES,
     instance_attributes: &[],
-    textures: &[tex(0, ID_LINE_IMAGE_TEXTURE), tex(1, ID_LINE_DASH_TEXTURE)],
+    textures: &[Texture::new(0, ID_LINE_IMAGE_TEXTURE), Texture::new(1, ID_LINE_DASH_TEXTURE)],
 };
 
 /// The source of each of the type's programs.

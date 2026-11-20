@@ -6,26 +6,25 @@ use mln_gfx::shaders::shader_defines::{
     ID_PROJECTION_UBO, ID_RASTER_DRAWABLE_UBO, ID_RASTER_EVALUATED_PROPS_UBO, ID_RASTER_IMAGE0_TEXTURE,
     ID_RASTER_IMAGE1_TEXTURE, ID_RASTER_POS_VERTEX_ATTRIBUTE, ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE,
 };
-use mln_gfx::shaders::source::glsl_es::{Glsl, Source};
+use mln_gfx::shaders::source::glsl_es::{Attribute, Glsl, Source, Texture, UniformBlock};
 
 use super::programs;
 use super::ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
-use crate::shaders::glsl_es::{attr, block, element, tex};
 
 // Raster
 static RASTER: Source = Source {
     glsl: &RASTER_SHADER,
     uniform_blocks: &[
-        element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        element::<RasterDrawableUBO, RasterDrawableUBO>("RasterDrawableUBO", ID_RASTER_DRAWABLE_UBO),
-        block::<RasterEvaluatedPropsUBO>("RasterEvaluatedPropsUBO", ID_RASTER_EVALUATED_PROPS_UBO),
+        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
+        UniformBlock::element::<RasterDrawableUBO, RasterDrawableUBO>("RasterDrawableUBO", ID_RASTER_DRAWABLE_UBO),
+        UniformBlock::new::<RasterEvaluatedPropsUBO>("RasterEvaluatedPropsUBO", ID_RASTER_EVALUATED_PROPS_UBO),
     ],
     attributes: &[
-        attr("a_pos", ID_RASTER_POS_VERTEX_ATTRIBUTE),
-        attr("a_texture_pos", ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE),
+        Attribute::new("a_pos", ID_RASTER_POS_VERTEX_ATTRIBUTE),
+        Attribute::new("a_texture_pos", ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE),
     ],
     instance_attributes: &[],
-    textures: &[tex("u_image0", ID_RASTER_IMAGE0_TEXTURE), tex("u_image1", ID_RASTER_IMAGE1_TEXTURE)],
+    textures: &[Texture::new("u_image0", ID_RASTER_IMAGE0_TEXTURE), Texture::new("u_image1", ID_RASTER_IMAGE1_TEXTURE)],
 };
 
 /// The source of each of the type's programs.

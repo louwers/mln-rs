@@ -23,42 +23,41 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::shaders::source::wgsl::{Attribute, Source, Texture, Wgsl};
 
 use super::programs;
-use crate::shaders::wgsl::{attr, tex};
 
 const FILL_ATTRIBUTES: &[Attribute] = &[
-    attr(0, ID_FILL_POS_VERTEX_ATTRIBUTE),
-    attr(1, ID_FILL_COLOR_VERTEX_ATTRIBUTE),
-    attr(2, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
+    Attribute::new(0, ID_FILL_POS_VERTEX_ATTRIBUTE),
+    Attribute::new(1, ID_FILL_COLOR_VERTEX_ATTRIBUTE),
+    Attribute::new(2, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
 ];
 const FILL_OUTLINE_ATTRIBUTES: &[Attribute] = &[
-    attr(0, ID_FILL_POS_VERTEX_ATTRIBUTE),
-    attr(1, ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
-    attr(2, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
+    Attribute::new(0, ID_FILL_POS_VERTEX_ATTRIBUTE),
+    Attribute::new(1, ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
+    Attribute::new(2, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
 ];
 const FILL_PATTERN_ATTRIBUTES: &[Attribute] = &[
-    attr(4, ID_FILL_POS_VERTEX_ATTRIBUTE),
-    attr(5, ID_FILL_COLOR_VERTEX_ATTRIBUTE),
-    attr(6, ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
-    attr(7, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
-    attr(8, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
+    Attribute::new(4, ID_FILL_POS_VERTEX_ATTRIBUTE),
+    Attribute::new(5, ID_FILL_COLOR_VERTEX_ATTRIBUTE),
+    Attribute::new(6, ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
+    Attribute::new(7, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
+    Attribute::new(8, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
 ];
-const FILL_PATTERN_TEXTURES: &[Texture] = &[tex(0, ID_FILL_IMAGE_TEXTURE)];
+const FILL_PATTERN_TEXTURES: &[Texture] = &[Texture::new(0, ID_FILL_IMAGE_TEXTURE)];
 // An instance of the instanced outline shaders is a segment of an outline:
 // a vertex and the end of its segment. The quad's corner is the vertex.
-const FILL_OUTLINE_INSTANCED_ATTRIBUTES: &[Attribute] = &[attr(0, ID_FILL_POS_VERTEX_ATTRIBUTE)];
+const FILL_OUTLINE_INSTANCED_ATTRIBUTES: &[Attribute] = &[Attribute::new(0, ID_FILL_POS_VERTEX_ATTRIBUTE)];
 const FILL_OUTLINE_INSTANCED_INSTANCE_ATTRIBUTES: &[Attribute] = &[
-    attr(1, ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
-    attr(2, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
-    attr(3, ID_FILL_OUTLINE_POS_ATTRIBUTE),
-    attr(4, ID_FILL_OUTLINE_END_ATTRIBUTE),
+    Attribute::new(1, ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
+    Attribute::new(2, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
+    Attribute::new(3, ID_FILL_OUTLINE_POS_ATTRIBUTE),
+    Attribute::new(4, ID_FILL_OUTLINE_END_ATTRIBUTE),
 ];
 const FILL_OUTLINE_PATTERN_INSTANCED_INSTANCE_ATTRIBUTES: &[Attribute] = &[
-    attr(5, ID_FILL_COLOR_VERTEX_ATTRIBUTE),
-    attr(6, ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
-    attr(7, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
-    attr(8, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
-    attr(9, ID_FILL_OUTLINE_POS_ATTRIBUTE),
-    attr(10, ID_FILL_OUTLINE_END_ATTRIBUTE),
+    Attribute::new(5, ID_FILL_COLOR_VERTEX_ATTRIBUTE),
+    Attribute::new(6, ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
+    Attribute::new(7, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
+    Attribute::new(8, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
+    Attribute::new(9, ID_FILL_OUTLINE_POS_ATTRIBUTE),
+    Attribute::new(10, ID_FILL_OUTLINE_END_ATTRIBUTE),
 ];
 static FILL_OUTLINE_INSTANCED: Source = Source {
     wgsl: &FILL_OUTLINE_INSTANCED_SHADER,

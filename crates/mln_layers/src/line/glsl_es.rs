@@ -10,33 +10,32 @@ use mln_gfx::shaders::shader_defines::{
     ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE,
     ID_LINE_TILE_PROPS_UBO, ID_LINE_WIDTH_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO,
 };
-use mln_gfx::shaders::source::glsl_es::{Glsl, Source};
+use mln_gfx::shaders::source::glsl_es::{Attribute, Glsl, Source, Texture, UniformBlock};
 
 use super::programs;
 use super::ubo::{
     LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineGradientDrawableUBO, LinePatternDrawableUBO,
     LinePatternTilePropsUBO, LineSDFDrawableUBO, LineSDFTilePropsUBO, LineTilePropsUnionUBO,
 };
-use crate::shaders::glsl_es::{attr, block, element, tex};
 
 // Line
 static LINE: Source = Source {
     glsl: &LINE_SHADER,
     uniform_blocks: &[
-        element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        block::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
-        element::<LineDrawableUBO, LineDrawableUnionUBO>("LineDrawableUBO", ID_LINE_DRAWABLE_UBO),
-        block::<LineEvaluatedPropsUBO>("LineEvaluatedPropsUBO", ID_LINE_EVALUATED_PROPS_UBO),
+        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
+        UniformBlock::new::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
+        UniformBlock::element::<LineDrawableUBO, LineDrawableUnionUBO>("LineDrawableUBO", ID_LINE_DRAWABLE_UBO),
+        UniformBlock::new::<LineEvaluatedPropsUBO>("LineEvaluatedPropsUBO", ID_LINE_EVALUATED_PROPS_UBO),
     ],
     attributes: &[
-        attr("a_pos_normal", ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
-        attr("a_data", ID_LINE_DATA_VERTEX_ATTRIBUTE),
-        attr("a_color", ID_LINE_COLOR_VERTEX_ATTRIBUTE),
-        attr("a_blur", ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-        attr("a_opacity", ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-        attr("a_gapwidth", ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-        attr("a_offset", ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-        attr("a_width", ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
+        Attribute::new("a_pos_normal", ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
+        Attribute::new("a_data", ID_LINE_DATA_VERTEX_ATTRIBUTE),
+        Attribute::new("a_color", ID_LINE_COLOR_VERTEX_ATTRIBUTE),
+        Attribute::new("a_blur", ID_LINE_BLUR_VERTEX_ATTRIBUTE),
+        Attribute::new("a_opacity", ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
+        Attribute::new("a_gapwidth", ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
+        Attribute::new("a_offset", ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
+        Attribute::new("a_width", ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
     ],
     instance_attributes: &[],
     textures: &[],
@@ -46,98 +45,113 @@ static LINE: Source = Source {
 static LINE_GRADIENT: Source = Source {
     glsl: &LINE_GRADIENT_SHADER,
     uniform_blocks: &[
-        element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        block::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
-        element::<LineGradientDrawableUBO, LineDrawableUnionUBO>("LineGradientDrawableUBO", ID_LINE_DRAWABLE_UBO),
-        block::<LineEvaluatedPropsUBO>("LineEvaluatedPropsUBO", ID_LINE_EVALUATED_PROPS_UBO),
+        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
+        UniformBlock::new::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
+        UniformBlock::element::<LineGradientDrawableUBO, LineDrawableUnionUBO>(
+            "LineGradientDrawableUBO",
+            ID_LINE_DRAWABLE_UBO,
+        ),
+        UniformBlock::new::<LineEvaluatedPropsUBO>("LineEvaluatedPropsUBO", ID_LINE_EVALUATED_PROPS_UBO),
     ],
     attributes: &[
-        attr("a_pos_normal", ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
-        attr("a_data", ID_LINE_DATA_VERTEX_ATTRIBUTE),
-        attr("a_blur", ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-        attr("a_opacity", ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-        attr("a_gapwidth", ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-        attr("a_offset", ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-        attr("a_width", ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
+        Attribute::new("a_pos_normal", ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
+        Attribute::new("a_data", ID_LINE_DATA_VERTEX_ATTRIBUTE),
+        Attribute::new("a_blur", ID_LINE_BLUR_VERTEX_ATTRIBUTE),
+        Attribute::new("a_opacity", ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
+        Attribute::new("a_gapwidth", ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
+        Attribute::new("a_offset", ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
+        Attribute::new("a_width", ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
     ],
     instance_attributes: &[],
-    textures: &[tex("u_image", ID_LINE_IMAGE_TEXTURE)],
+    textures: &[Texture::new("u_image", ID_LINE_IMAGE_TEXTURE)],
 };
 
 // Line Pattern
 static LINE_PATTERN: Source = Source {
     glsl: &LINE_PATTERN_SHADER,
     uniform_blocks: &[
-        element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        block::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
-        element::<LinePatternDrawableUBO, LineDrawableUnionUBO>("LinePatternDrawableUBO", ID_LINE_DRAWABLE_UBO),
-        element::<LinePatternTilePropsUBO, LineTilePropsUnionUBO>("LinePatternTilePropsUBO", ID_LINE_TILE_PROPS_UBO),
-        block::<LineEvaluatedPropsUBO>("LineEvaluatedPropsUBO", ID_LINE_EVALUATED_PROPS_UBO),
+        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
+        UniformBlock::new::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
+        UniformBlock::element::<LinePatternDrawableUBO, LineDrawableUnionUBO>(
+            "LinePatternDrawableUBO",
+            ID_LINE_DRAWABLE_UBO,
+        ),
+        UniformBlock::element::<LinePatternTilePropsUBO, LineTilePropsUnionUBO>(
+            "LinePatternTilePropsUBO",
+            ID_LINE_TILE_PROPS_UBO,
+        ),
+        UniformBlock::new::<LineEvaluatedPropsUBO>("LineEvaluatedPropsUBO", ID_LINE_EVALUATED_PROPS_UBO),
     ],
     attributes: &[
-        attr("a_pos_normal", ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
-        attr("a_data", ID_LINE_DATA_VERTEX_ATTRIBUTE),
-        attr("a_blur", ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-        attr("a_opacity", ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-        attr("a_offset", ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-        attr("a_gapwidth", ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-        attr("a_width", ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
-        attr("a_pattern_from", ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE),
-        attr("a_pattern_to", ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE),
+        Attribute::new("a_pos_normal", ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
+        Attribute::new("a_data", ID_LINE_DATA_VERTEX_ATTRIBUTE),
+        Attribute::new("a_blur", ID_LINE_BLUR_VERTEX_ATTRIBUTE),
+        Attribute::new("a_opacity", ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
+        Attribute::new("a_offset", ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
+        Attribute::new("a_gapwidth", ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
+        Attribute::new("a_width", ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
+        Attribute::new("a_pattern_from", ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE),
+        Attribute::new("a_pattern_to", ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE),
     ],
     instance_attributes: &[],
-    textures: &[tex("u_image", ID_LINE_IMAGE_TEXTURE)],
+    textures: &[Texture::new("u_image", ID_LINE_IMAGE_TEXTURE)],
 };
 
 // Line SDF
 static LINE_SDF: Source = Source {
     glsl: &LINE_SDF_SHADER,
     uniform_blocks: &[
-        element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        block::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
-        element::<LineSDFDrawableUBO, LineDrawableUnionUBO>("LineSDFDrawableUBO", ID_LINE_DRAWABLE_UBO),
-        element::<LineSDFTilePropsUBO, LineTilePropsUnionUBO>("LineSDFTilePropsUBO", ID_LINE_TILE_PROPS_UBO),
-        block::<LineEvaluatedPropsUBO>("LineEvaluatedPropsUBO", ID_LINE_EVALUATED_PROPS_UBO),
+        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
+        UniformBlock::new::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
+        UniformBlock::element::<LineSDFDrawableUBO, LineDrawableUnionUBO>("LineSDFDrawableUBO", ID_LINE_DRAWABLE_UBO),
+        UniformBlock::element::<LineSDFTilePropsUBO, LineTilePropsUnionUBO>(
+            "LineSDFTilePropsUBO",
+            ID_LINE_TILE_PROPS_UBO,
+        ),
+        UniformBlock::new::<LineEvaluatedPropsUBO>("LineEvaluatedPropsUBO", ID_LINE_EVALUATED_PROPS_UBO),
     ],
     attributes: &[
-        attr("a_pos_normal", ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
-        attr("a_data", ID_LINE_DATA_VERTEX_ATTRIBUTE),
-        attr("a_color", ID_LINE_COLOR_VERTEX_ATTRIBUTE),
-        attr("a_blur", ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-        attr("a_opacity", ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-        attr("a_gapwidth", ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-        attr("a_offset", ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-        attr("a_width", ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
-        attr("a_floorwidth", ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE),
-        attr("a_dasharray", ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE),
+        Attribute::new("a_pos_normal", ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
+        Attribute::new("a_data", ID_LINE_DATA_VERTEX_ATTRIBUTE),
+        Attribute::new("a_color", ID_LINE_COLOR_VERTEX_ATTRIBUTE),
+        Attribute::new("a_blur", ID_LINE_BLUR_VERTEX_ATTRIBUTE),
+        Attribute::new("a_opacity", ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
+        Attribute::new("a_gapwidth", ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
+        Attribute::new("a_offset", ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
+        Attribute::new("a_width", ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
+        Attribute::new("a_floorwidth", ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE),
+        Attribute::new("a_dasharray", ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE),
     ],
     instance_attributes: &[],
-    textures: &[tex("u_image", ID_LINE_IMAGE_TEXTURE)],
+    textures: &[Texture::new("u_image", ID_LINE_IMAGE_TEXTURE)],
 };
 
 // Line gradient SDF
 static LINE_GRADIENT_SDF: Source = Source {
     glsl: &LINE_GRADIENT_SDF_SHADER,
     uniform_blocks: &[
-        element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        block::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
-        element::<LineSDFDrawableUBO, LineDrawableUnionUBO>("LineSDFDrawableUBO", ID_LINE_DRAWABLE_UBO),
-        element::<LineSDFTilePropsUBO, LineTilePropsUnionUBO>("LineSDFTilePropsUBO", ID_LINE_TILE_PROPS_UBO),
-        block::<LineEvaluatedPropsUBO>("LineEvaluatedPropsUBO", ID_LINE_EVALUATED_PROPS_UBO),
+        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
+        UniformBlock::new::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
+        UniformBlock::element::<LineSDFDrawableUBO, LineDrawableUnionUBO>("LineSDFDrawableUBO", ID_LINE_DRAWABLE_UBO),
+        UniformBlock::element::<LineSDFTilePropsUBO, LineTilePropsUnionUBO>(
+            "LineSDFTilePropsUBO",
+            ID_LINE_TILE_PROPS_UBO,
+        ),
+        UniformBlock::new::<LineEvaluatedPropsUBO>("LineEvaluatedPropsUBO", ID_LINE_EVALUATED_PROPS_UBO),
     ],
     attributes: &[
-        attr("a_pos_normal", ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
-        attr("a_data", ID_LINE_DATA_VERTEX_ATTRIBUTE),
-        attr("a_blur", ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-        attr("a_opacity", ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-        attr("a_gapwidth", ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-        attr("a_offset", ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-        attr("a_width", ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
-        attr("a_floorwidth", ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE),
-        attr("a_dasharray", ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE),
+        Attribute::new("a_pos_normal", ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
+        Attribute::new("a_data", ID_LINE_DATA_VERTEX_ATTRIBUTE),
+        Attribute::new("a_blur", ID_LINE_BLUR_VERTEX_ATTRIBUTE),
+        Attribute::new("a_opacity", ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
+        Attribute::new("a_gapwidth", ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
+        Attribute::new("a_offset", ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
+        Attribute::new("a_width", ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
+        Attribute::new("a_floorwidth", ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE),
+        Attribute::new("a_dasharray", ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE),
     ],
     instance_attributes: &[],
-    textures: &[tex("u_image", ID_LINE_IMAGE_TEXTURE), tex("u_image_dash", ID_LINE_DASH_TEXTURE)],
+    textures: &[Texture::new("u_image", ID_LINE_IMAGE_TEXTURE), Texture::new("u_image_dash", ID_LINE_DASH_TEXTURE)],
 };
 
 /// The source of each of the type's programs.

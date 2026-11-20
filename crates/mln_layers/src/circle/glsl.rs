@@ -10,18 +10,17 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::shaders::source::glsl::{Attribute, Glsl, Source};
 
 use super::programs;
-use crate::shaders::glsl::attr;
 
 const CIRCLE_ATTRIBUTES: &[Attribute] = &[
-    attr(0, Short2, ID_CIRCLE_POS_VERTEX_ATTRIBUTE),
+    Attribute::new(0, Short2, ID_CIRCLE_POS_VERTEX_ATTRIBUTE),
     // Data driven
-    attr(1, Float4, ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE),
-    attr(2, Float2, ID_CIRCLE_RADIUS_VERTEX_ATTRIBUTE),
-    attr(3, Float2, ID_CIRCLE_BLUR_VERTEX_ATTRIBUTE),
-    attr(4, Float2, ID_CIRCLE_OPACITY_VERTEX_ATTRIBUTE),
-    attr(5, Float4, ID_CIRCLE_STROKE_COLOR_VERTEX_ATTRIBUTE),
-    attr(6, Float2, ID_CIRCLE_STROKE_WIDTH_VERTEX_ATTRIBUTE),
-    attr(7, Float2, ID_CIRCLE_STROKE_OPACITY_VERTEX_ATTRIBUTE),
+    Attribute::new(1, Float4, ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE),
+    Attribute::new(2, Float2, ID_CIRCLE_RADIUS_VERTEX_ATTRIBUTE),
+    Attribute::new(3, Float2, ID_CIRCLE_BLUR_VERTEX_ATTRIBUTE),
+    Attribute::new(4, Float2, ID_CIRCLE_OPACITY_VERTEX_ATTRIBUTE),
+    Attribute::new(5, Float4, ID_CIRCLE_STROKE_COLOR_VERTEX_ATTRIBUTE),
+    Attribute::new(6, Float2, ID_CIRCLE_STROKE_WIDTH_VERTEX_ATTRIBUTE),
+    Attribute::new(7, Float2, ID_CIRCLE_STROKE_OPACITY_VERTEX_ATTRIBUTE),
 ];
 static CIRCLE: Source =
     Source { glsl: &CIRCLE_SHADER, attributes: CIRCLE_ATTRIBUTES, instance_attributes: &[], textures: &[] };

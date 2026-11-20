@@ -6,27 +6,26 @@ use mln_gfx::shaders::shader_defines::{
     ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_IMAGE_TEXTURE, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE,
     ID_BACKGROUND_PROPS_UBO, ID_GLOBAL_PAINT_PARAMS_UBO, ID_PROJECTION_UBO,
 };
-use mln_gfx::shaders::source::glsl_es::{Glsl, Source};
+use mln_gfx::shaders::source::glsl_es::{Attribute, Glsl, Source, Texture, UniformBlock};
 
 use super::programs;
 use super::ubo::{
     BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPatternDrawableUBO, BackgroundPatternPropsUBO,
     BackgroundPropsUBO,
 };
-use crate::shaders::glsl_es::{attr, block, element, tex};
 
 // Background
 static BACKGROUND: Source = Source {
     glsl: &BACKGROUND_SHADER,
     uniform_blocks: &[
-        element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        element::<BackgroundDrawableUBO, BackgroundDrawableUnionUBO>(
+        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
+        UniformBlock::element::<BackgroundDrawableUBO, BackgroundDrawableUnionUBO>(
             "BackgroundDrawableUBO",
             ID_BACKGROUND_DRAWABLE_UBO,
         ),
-        block::<BackgroundPropsUBO>("BackgroundPropsUBO", ID_BACKGROUND_PROPS_UBO),
+        UniformBlock::new::<BackgroundPropsUBO>("BackgroundPropsUBO", ID_BACKGROUND_PROPS_UBO),
     ],
-    attributes: &[attr("a_pos", ID_BACKGROUND_POS_VERTEX_ATTRIBUTE)],
+    attributes: &[Attribute::new("a_pos", ID_BACKGROUND_POS_VERTEX_ATTRIBUTE)],
     instance_attributes: &[],
     textures: &[],
 };
@@ -35,17 +34,17 @@ static BACKGROUND: Source = Source {
 static BACKGROUND_PATTERN: Source = Source {
     glsl: &BACKGROUND_PATTERN_SHADER,
     uniform_blocks: &[
-        element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        block::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
-        element::<BackgroundPatternDrawableUBO, BackgroundDrawableUnionUBO>(
+        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
+        UniformBlock::new::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
+        UniformBlock::element::<BackgroundPatternDrawableUBO, BackgroundDrawableUnionUBO>(
             "BackgroundPatternDrawableUBO",
             ID_BACKGROUND_DRAWABLE_UBO,
         ),
-        block::<BackgroundPatternPropsUBO>("BackgroundPatternPropsUBO", ID_BACKGROUND_PROPS_UBO),
+        UniformBlock::new::<BackgroundPatternPropsUBO>("BackgroundPatternPropsUBO", ID_BACKGROUND_PROPS_UBO),
     ],
-    attributes: &[attr("a_pos", ID_BACKGROUND_POS_VERTEX_ATTRIBUTE)],
+    attributes: &[Attribute::new("a_pos", ID_BACKGROUND_POS_VERTEX_ATTRIBUTE)],
     instance_attributes: &[],
-    textures: &[tex("u_image", ID_BACKGROUND_IMAGE_TEXTURE)],
+    textures: &[Texture::new("u_image", ID_BACKGROUND_IMAGE_TEXTURE)],
 };
 
 /// The source of each of the type's programs.

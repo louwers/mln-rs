@@ -6,22 +6,21 @@ use mln_gfx::shaders::shader_defines::{
     ID_RASTER_IMAGE0_TEXTURE, ID_RASTER_IMAGE1_TEXTURE, ID_RASTER_POS_VERTEX_ATTRIBUTE,
     ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE, RASTER_LAYER_UBO_COUNT,
 };
-use mln_gfx::shaders::source::msl::{Attribute, Msl, Source};
+use mln_gfx::shaders::source::msl::{Attribute, Msl, Source, Texture};
 
 use super::programs;
-use crate::shaders::msl::{attr, tex};
 
 const RASTER_UBO_COUNT: usize = RASTER_LAYER_UBO_COUNT;
 
 const RASTER_ATTRIBUTES: &[Attribute] = &[
-    attr(0, Short2, RASTER_UBO_COUNT, ID_RASTER_POS_VERTEX_ATTRIBUTE),
-    attr(1, Short2, RASTER_UBO_COUNT, ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE),
+    Attribute::new(0, Short2, RASTER_UBO_COUNT, ID_RASTER_POS_VERTEX_ATTRIBUTE),
+    Attribute::new(1, Short2, RASTER_UBO_COUNT, ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE),
 ];
 static RASTER: Source = Source {
     msl: &RASTER_SHADER,
     attributes: RASTER_ATTRIBUTES,
     instance_attributes: &[],
-    textures: &[tex(0, ID_RASTER_IMAGE0_TEXTURE), tex(1, ID_RASTER_IMAGE1_TEXTURE)],
+    textures: &[Texture::new(0, ID_RASTER_IMAGE0_TEXTURE), Texture::new(1, ID_RASTER_IMAGE1_TEXTURE)],
 };
 
 /// The source of each of the type's programs.

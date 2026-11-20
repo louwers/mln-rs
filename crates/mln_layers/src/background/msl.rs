@@ -5,20 +5,19 @@ use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::shader_defines::{
     BACKGROUND_UBO_COUNT, ID_BACKGROUND_IMAGE_TEXTURE, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE,
 };
-use mln_gfx::shaders::source::msl::{Attribute, Msl, Source};
+use mln_gfx::shaders::source::msl::{Attribute, Msl, Source, Texture};
 
 use super::programs;
-use crate::shaders::msl::{attr, tex};
 
 const BACKGROUND_ATTRIBUTES: &[Attribute] =
-    &[attr(0, Short2, BACKGROUND_UBO_COUNT, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE)];
+    &[Attribute::new(0, Short2, BACKGROUND_UBO_COUNT, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE)];
 static BACKGROUND: Source =
     Source { msl: &BACKGROUND_SHADER, attributes: BACKGROUND_ATTRIBUTES, instance_attributes: &[], textures: &[] };
 static BACKGROUND_PATTERN: Source = Source {
     msl: &BACKGROUND_PATTERN_SHADER,
     attributes: BACKGROUND_ATTRIBUTES,
     instance_attributes: &[],
-    textures: &[tex(0, ID_BACKGROUND_IMAGE_TEXTURE)],
+    textures: &[Texture::new(0, ID_BACKGROUND_IMAGE_TEXTURE)],
 };
 
 /// The source of each of the type's programs.

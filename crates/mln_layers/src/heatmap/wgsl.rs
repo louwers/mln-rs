@@ -8,17 +8,17 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::shaders::source::wgsl::{Attribute, Source, Texture, Wgsl};
 
 use super::programs;
-use crate::shaders::wgsl::{attr, tex};
 
 const HEATMAP_ATTRIBUTES: &[Attribute] = &[
-    attr(0, ID_HEATMAP_POS_VERTEX_ATTRIBUTE),
-    attr(1, ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE),
-    attr(2, ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE),
+    Attribute::new(0, ID_HEATMAP_POS_VERTEX_ATTRIBUTE),
+    Attribute::new(1, ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE),
+    Attribute::new(2, ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE),
 ];
 static HEATMAP: Source =
     Source { wgsl: &HEATMAP_SHADER, attributes: HEATMAP_ATTRIBUTES, instance_attributes: &[], textures: &[] };
-const HEATMAP_TEXTURE_ATTRIBUTES: &[Attribute] = &[attr(5, ID_HEATMAP_POS_VERTEX_ATTRIBUTE)];
-const HEATMAP_TEXTURE_TEXTURES: &[Texture] = &[tex(0, ID_HEATMAP_IMAGE_TEXTURE), tex(1, ID_HEATMAP_COLOR_RAMP_TEXTURE)];
+const HEATMAP_TEXTURE_ATTRIBUTES: &[Attribute] = &[Attribute::new(5, ID_HEATMAP_POS_VERTEX_ATTRIBUTE)];
+const HEATMAP_TEXTURE_TEXTURES: &[Texture] =
+    &[Texture::new(0, ID_HEATMAP_IMAGE_TEXTURE), Texture::new(1, ID_HEATMAP_COLOR_RAMP_TEXTURE)];
 static HEATMAP_TEXTURE: Source = Source {
     wgsl: &HEATMAP_TEXTURE_SHADER,
     attributes: HEATMAP_TEXTURE_ATTRIBUTES,

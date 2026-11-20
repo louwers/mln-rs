@@ -8,27 +8,26 @@ use mln_gfx::shaders::shader_defines::{
     ID_FILL_OUTLINE_POS_ATTRIBUTE, ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE,
     ID_FILL_POS_VERTEX_ATTRIBUTE, ID_FILL_TILE_PROPS_UBO, ID_GLOBAL_PAINT_PARAMS_UBO, ID_PROJECTION_UBO,
 };
-use mln_gfx::shaders::source::glsl_es::{Glsl, Source};
+use mln_gfx::shaders::source::glsl_es::{Attribute, Glsl, Source, Texture, UniformBlock};
 
 use super::programs;
 use super::ubo::{
     FillDrawableUBO, FillDrawableUnionUBO, FillEvaluatedPropsUBO, FillOutlineDrawableUBO, FillPatternDrawableUBO,
     FillPatternTilePropsUBO, FillTilePropsUnionUBO,
 };
-use crate::shaders::glsl_es::{attr, block, element, tex};
 
 // Fill
 static FILL: Source = Source {
     glsl: &FILL_SHADER,
     uniform_blocks: &[
-        element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        element::<FillDrawableUBO, FillDrawableUnionUBO>("FillDrawableUBO", ID_FILL_DRAWABLE_UBO),
-        block::<FillEvaluatedPropsUBO>("FillEvaluatedPropsUBO", ID_FILL_EVALUATED_PROPS_UBO),
+        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
+        UniformBlock::element::<FillDrawableUBO, FillDrawableUnionUBO>("FillDrawableUBO", ID_FILL_DRAWABLE_UBO),
+        UniformBlock::new::<FillEvaluatedPropsUBO>("FillEvaluatedPropsUBO", ID_FILL_EVALUATED_PROPS_UBO),
     ],
     attributes: &[
-        attr("a_pos", ID_FILL_POS_VERTEX_ATTRIBUTE),
-        attr("a_color", ID_FILL_COLOR_VERTEX_ATTRIBUTE),
-        attr("a_opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
+        Attribute::new("a_pos", ID_FILL_POS_VERTEX_ATTRIBUTE),
+        Attribute::new("a_color", ID_FILL_COLOR_VERTEX_ATTRIBUTE),
+        Attribute::new("a_opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
     ],
     instance_attributes: &[],
     textures: &[],
@@ -38,15 +37,18 @@ static FILL: Source = Source {
 static FILL_OUTLINE: Source = Source {
     glsl: &FILL_OUTLINE_SHADER,
     uniform_blocks: &[
-        element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        block::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
-        element::<FillOutlineDrawableUBO, FillDrawableUnionUBO>("FillOutlineDrawableUBO", ID_FILL_DRAWABLE_UBO),
-        block::<FillEvaluatedPropsUBO>("FillEvaluatedPropsUBO", ID_FILL_EVALUATED_PROPS_UBO),
+        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
+        UniformBlock::new::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
+        UniformBlock::element::<FillOutlineDrawableUBO, FillDrawableUnionUBO>(
+            "FillOutlineDrawableUBO",
+            ID_FILL_DRAWABLE_UBO,
+        ),
+        UniformBlock::new::<FillEvaluatedPropsUBO>("FillEvaluatedPropsUBO", ID_FILL_EVALUATED_PROPS_UBO),
     ],
     attributes: &[
-        attr("a_pos", ID_FILL_POS_VERTEX_ATTRIBUTE),
-        attr("a_outline_color", ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
-        attr("a_opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
+        Attribute::new("a_pos", ID_FILL_POS_VERTEX_ATTRIBUTE),
+        Attribute::new("a_outline_color", ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
+        Attribute::new("a_opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
     ],
     instance_attributes: &[],
     textures: &[],
@@ -56,45 +58,54 @@ static FILL_OUTLINE: Source = Source {
 static FILL_PATTERN: Source = Source {
     glsl: &FILL_PATTERN_SHADER,
     uniform_blocks: &[
-        element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        block::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
-        element::<FillPatternDrawableUBO, FillDrawableUnionUBO>("FillPatternDrawableUBO", ID_FILL_DRAWABLE_UBO),
-        element::<FillPatternTilePropsUBO, FillTilePropsUnionUBO>("FillPatternTilePropsUBO", ID_FILL_TILE_PROPS_UBO),
-        block::<FillEvaluatedPropsUBO>("FillEvaluatedPropsUBO", ID_FILL_EVALUATED_PROPS_UBO),
+        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
+        UniformBlock::new::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
+        UniformBlock::element::<FillPatternDrawableUBO, FillDrawableUnionUBO>(
+            "FillPatternDrawableUBO",
+            ID_FILL_DRAWABLE_UBO,
+        ),
+        UniformBlock::element::<FillPatternTilePropsUBO, FillTilePropsUnionUBO>(
+            "FillPatternTilePropsUBO",
+            ID_FILL_TILE_PROPS_UBO,
+        ),
+        UniformBlock::new::<FillEvaluatedPropsUBO>("FillEvaluatedPropsUBO", ID_FILL_EVALUATED_PROPS_UBO),
     ],
     attributes: &[
-        attr("a_pos", ID_FILL_POS_VERTEX_ATTRIBUTE),
-        attr("a_color", ID_FILL_COLOR_VERTEX_ATTRIBUTE),
-        attr("a_opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
-        attr("a_pattern_from", ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
-        attr("a_pattern_to", ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
+        Attribute::new("a_pos", ID_FILL_POS_VERTEX_ATTRIBUTE),
+        Attribute::new("a_color", ID_FILL_COLOR_VERTEX_ATTRIBUTE),
+        Attribute::new("a_opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
+        Attribute::new("a_pattern_from", ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
+        Attribute::new("a_pattern_to", ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
     ],
     instance_attributes: &[],
-    textures: &[tex("u_image", ID_FILL_IMAGE_TEXTURE)],
+    textures: &[Texture::new("u_image", ID_FILL_IMAGE_TEXTURE)],
 };
 
 // Fill Outline Pattern
 static FILL_OUTLINE_PATTERN: Source = Source {
     glsl: &FILL_OUTLINE_PATTERN_SHADER,
     uniform_blocks: &[
-        element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        block::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
-        element::<FillPatternDrawableUBO, FillDrawableUnionUBO>("FillOutlinePatternDrawableUBO", ID_FILL_DRAWABLE_UBO),
-        element::<FillPatternTilePropsUBO, FillTilePropsUnionUBO>(
+        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
+        UniformBlock::new::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
+        UniformBlock::element::<FillPatternDrawableUBO, FillDrawableUnionUBO>(
+            "FillOutlinePatternDrawableUBO",
+            ID_FILL_DRAWABLE_UBO,
+        ),
+        UniformBlock::element::<FillPatternTilePropsUBO, FillTilePropsUnionUBO>(
             "FillOutlinePatternTilePropsUBO",
             ID_FILL_TILE_PROPS_UBO,
         ),
-        block::<FillEvaluatedPropsUBO>("FillEvaluatedPropsUBO", ID_FILL_EVALUATED_PROPS_UBO),
+        UniformBlock::new::<FillEvaluatedPropsUBO>("FillEvaluatedPropsUBO", ID_FILL_EVALUATED_PROPS_UBO),
     ],
     attributes: &[
-        attr("a_pos", ID_FILL_POS_VERTEX_ATTRIBUTE),
-        attr("a_color", ID_FILL_COLOR_VERTEX_ATTRIBUTE),
-        attr("a_opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
-        attr("a_pattern_from", ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
-        attr("a_pattern_to", ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
+        Attribute::new("a_pos", ID_FILL_POS_VERTEX_ATTRIBUTE),
+        Attribute::new("a_color", ID_FILL_COLOR_VERTEX_ATTRIBUTE),
+        Attribute::new("a_opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
+        Attribute::new("a_pattern_from", ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
+        Attribute::new("a_pattern_to", ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
     ],
     instance_attributes: &[],
-    textures: &[tex("u_image", ID_FILL_IMAGE_TEXTURE)],
+    textures: &[Texture::new("u_image", ID_FILL_IMAGE_TEXTURE)],
 };
 
 // Fill Outline Instanced: an instance of a quad per outline segment, where
@@ -102,17 +113,20 @@ static FILL_OUTLINE_PATTERN: Source = Source {
 static FILL_OUTLINE_INSTANCED: Source = Source {
     glsl: &FILL_OUTLINE_INSTANCED_SHADER,
     uniform_blocks: &[
-        element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        block::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
-        element::<FillOutlineDrawableUBO, FillDrawableUnionUBO>("FillOutlineDrawableUBO", ID_FILL_DRAWABLE_UBO),
-        block::<FillEvaluatedPropsUBO>("FillEvaluatedPropsUBO", ID_FILL_EVALUATED_PROPS_UBO),
+        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
+        UniformBlock::new::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
+        UniformBlock::element::<FillOutlineDrawableUBO, FillDrawableUnionUBO>(
+            "FillOutlineDrawableUBO",
+            ID_FILL_DRAWABLE_UBO,
+        ),
+        UniformBlock::new::<FillEvaluatedPropsUBO>("FillEvaluatedPropsUBO", ID_FILL_EVALUATED_PROPS_UBO),
     ],
-    attributes: &[attr("a_pos", ID_FILL_POS_VERTEX_ATTRIBUTE)],
+    attributes: &[Attribute::new("a_pos", ID_FILL_POS_VERTEX_ATTRIBUTE)],
     instance_attributes: &[
-        attr("a_outline_pos", ID_FILL_OUTLINE_POS_ATTRIBUTE),
-        attr("a_outline_end", ID_FILL_OUTLINE_END_ATTRIBUTE),
-        attr("a_outline_color", ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
-        attr("a_opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
+        Attribute::new("a_outline_pos", ID_FILL_OUTLINE_POS_ATTRIBUTE),
+        Attribute::new("a_outline_end", ID_FILL_OUTLINE_END_ATTRIBUTE),
+        Attribute::new("a_outline_color", ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
+        Attribute::new("a_opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
     ],
     textures: &[],
 };
@@ -121,25 +135,28 @@ static FILL_OUTLINE_INSTANCED: Source = Source {
 static FILL_OUTLINE_PATTERN_INSTANCED: Source = Source {
     glsl: &FILL_OUTLINE_PATTERN_INSTANCED_SHADER,
     uniform_blocks: &[
-        element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        block::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
-        element::<FillPatternDrawableUBO, FillDrawableUnionUBO>("FillOutlinePatternDrawableUBO", ID_FILL_DRAWABLE_UBO),
-        element::<FillPatternTilePropsUBO, FillTilePropsUnionUBO>(
+        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
+        UniformBlock::new::<GlobalPaintParamsUBO>("GlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
+        UniformBlock::element::<FillPatternDrawableUBO, FillDrawableUnionUBO>(
+            "FillOutlinePatternDrawableUBO",
+            ID_FILL_DRAWABLE_UBO,
+        ),
+        UniformBlock::element::<FillPatternTilePropsUBO, FillTilePropsUnionUBO>(
             "FillOutlinePatternTilePropsUBO",
             ID_FILL_TILE_PROPS_UBO,
         ),
-        block::<FillEvaluatedPropsUBO>("FillEvaluatedPropsUBO", ID_FILL_EVALUATED_PROPS_UBO),
+        UniformBlock::new::<FillEvaluatedPropsUBO>("FillEvaluatedPropsUBO", ID_FILL_EVALUATED_PROPS_UBO),
     ],
-    attributes: &[attr("a_pos", ID_FILL_POS_VERTEX_ATTRIBUTE)],
+    attributes: &[Attribute::new("a_pos", ID_FILL_POS_VERTEX_ATTRIBUTE)],
     instance_attributes: &[
-        attr("a_outline_pos", ID_FILL_OUTLINE_POS_ATTRIBUTE),
-        attr("a_outline_end", ID_FILL_OUTLINE_END_ATTRIBUTE),
-        attr("a_color", ID_FILL_COLOR_VERTEX_ATTRIBUTE),
-        attr("a_opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
-        attr("a_pattern_from", ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
-        attr("a_pattern_to", ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
+        Attribute::new("a_outline_pos", ID_FILL_OUTLINE_POS_ATTRIBUTE),
+        Attribute::new("a_outline_end", ID_FILL_OUTLINE_END_ATTRIBUTE),
+        Attribute::new("a_color", ID_FILL_COLOR_VERTEX_ATTRIBUTE),
+        Attribute::new("a_opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
+        Attribute::new("a_pattern_from", ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
+        Attribute::new("a_pattern_to", ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
     ],
-    textures: &[tex("u_image", ID_FILL_IMAGE_TEXTURE)],
+    textures: &[Texture::new("u_image", ID_FILL_IMAGE_TEXTURE)],
 };
 
 /// The source of each of the type's programs.

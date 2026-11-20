@@ -9,18 +9,17 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::shaders::source::glsl::{Attribute, Glsl, Source, Texture};
 
 use super::programs;
-use crate::shaders::glsl::{attr, tex};
 
 // The color relief GLSL works the texture position out from the position,
 // and has no input for it.
 const COLOR_RELIEF_ATTRIBUTES: &[Attribute] = &[
-    attr(0, Short2, ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE),
-    attr(1, Short2, ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE),
+    Attribute::new(0, Short2, ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE),
+    Attribute::new(1, Short2, ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE),
 ];
 const COLOR_RELIEF_TEXTURES: &[Texture] = &[
-    tex(0, ID_COLOR_RELIEF_IMAGE_TEXTURE),
-    tex(1, ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE),
-    tex(2, ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE),
+    Texture::new(0, ID_COLOR_RELIEF_IMAGE_TEXTURE),
+    Texture::new(1, ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE),
+    Texture::new(2, ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE),
 ];
 static COLOR_RELIEF: Source = Source {
     glsl: &COLOR_RELIEF_SHADER,

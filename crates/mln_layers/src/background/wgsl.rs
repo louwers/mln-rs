@@ -5,10 +5,9 @@ use mln_gfx::shaders::shader_defines::{ID_BACKGROUND_IMAGE_TEXTURE, ID_BACKGROUN
 use mln_gfx::shaders::source::wgsl::{Attribute, Source, Texture, Wgsl};
 
 use super::programs;
-use crate::shaders::wgsl::tex;
 
 const BACKGROUND_ATTRIBUTES: &[Attribute] = &[Attribute { index: 3, id: ID_BACKGROUND_POS_VERTEX_ATTRIBUTE }];
-const BACKGROUND_PATTERN_TEXTURES: &[Texture] = &[tex(0, ID_BACKGROUND_IMAGE_TEXTURE)];
+const BACKGROUND_PATTERN_TEXTURES: &[Texture] = &[Texture::new(0, ID_BACKGROUND_IMAGE_TEXTURE)];
 
 static BACKGROUND: Source =
     Source { wgsl: &BACKGROUND_SHADER, attributes: BACKGROUND_ATTRIBUTES, instance_attributes: &[], textures: &[] };

@@ -12,8 +12,6 @@ use mln_gfx::shaders::shader_defines::{
     ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
 };
 
-use crate::shaders::property;
-
 const LINE_ATTRIBUTES: &[(usize, AttributeDataType)] = &[
     (ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, Short2),
     (ID_LINE_DATA_VERTEX_ATTRIBUTE, UByte4),
@@ -26,12 +24,12 @@ const LINE_ATTRIBUTES: &[(usize, AttributeDataType)] = &[
 ];
 
 const LINE_PROPERTIES: &[Property] = &[
-    property("color", ID_LINE_COLOR_VERTEX_ATTRIBUTE),
-    property("blur", ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-    property("opacity", ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-    property("gapwidth", ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-    property("offset", ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-    property("width", ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
+    Property::new("color", ID_LINE_COLOR_VERTEX_ATTRIBUTE),
+    Property::new("blur", ID_LINE_BLUR_VERTEX_ATTRIBUTE),
+    Property::new("opacity", ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
+    Property::new("gapwidth", ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
+    Property::new("offset", ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
+    Property::new("width", ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
 ];
 
 pub static LINE: Program = Program {
@@ -56,11 +54,11 @@ pub static LINE_GRADIENT: Program = Program {
     instance_attributes: &[],
     textures: &[ID_LINE_IMAGE_TEXTURE],
     properties: &[
-        property("blur", ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-        property("opacity", ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-        property("gapwidth", ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-        property("offset", ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-        property("width", ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
+        Property::new("blur", ID_LINE_BLUR_VERTEX_ATTRIBUTE),
+        Property::new("opacity", ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
+        Property::new("gapwidth", ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
+        Property::new("offset", ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
+        Property::new("width", ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
     ],
 };
 
@@ -80,13 +78,13 @@ pub static LINE_PATTERN: Program = Program {
     instance_attributes: &[],
     textures: &[ID_LINE_IMAGE_TEXTURE],
     properties: &[
-        property("blur", ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-        property("opacity", ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-        property("gapwidth", ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-        property("offset", ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-        property("width", ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
-        property("pattern_from", ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE),
-        property("pattern_to", ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE),
+        Property::new("blur", ID_LINE_BLUR_VERTEX_ATTRIBUTE),
+        Property::new("opacity", ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
+        Property::new("gapwidth", ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
+        Property::new("offset", ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
+        Property::new("width", ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
+        Property::new("pattern_from", ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE),
+        Property::new("pattern_to", ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE),
     ],
 };
 
@@ -107,14 +105,14 @@ pub static LINE_SDF: Program = Program {
     instance_attributes: &[],
     textures: &[ID_LINE_IMAGE_TEXTURE],
     properties: &[
-        property("color", ID_LINE_COLOR_VERTEX_ATTRIBUTE),
-        property("blur", ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-        property("opacity", ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-        property("gapwidth", ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-        property("offset", ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-        property("width", ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
-        property("floorwidth", ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE),
-        property("dasharray", ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE),
+        Property::new("color", ID_LINE_COLOR_VERTEX_ATTRIBUTE),
+        Property::new("blur", ID_LINE_BLUR_VERTEX_ATTRIBUTE),
+        Property::new("opacity", ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
+        Property::new("gapwidth", ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
+        Property::new("offset", ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
+        Property::new("width", ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
+        Property::new("floorwidth", ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE),
+        Property::new("dasharray", ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE),
     ],
 };
 
@@ -134,12 +132,12 @@ pub static LINE_GRADIENT_SDF: Program = Program {
     instance_attributes: &[],
     textures: &[ID_LINE_IMAGE_TEXTURE, ID_LINE_DASH_TEXTURE],
     properties: &[
-        property("blur", ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-        property("opacity", ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-        property("gapwidth", ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-        property("offset", ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-        property("width", ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
-        property("floorwidth", ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE),
-        property("dasharray", ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE),
+        Property::new("blur", ID_LINE_BLUR_VERTEX_ATTRIBUTE),
+        Property::new("opacity", ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
+        Property::new("gapwidth", ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
+        Property::new("offset", ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
+        Property::new("width", ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
+        Property::new("floorwidth", ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE),
+        Property::new("dasharray", ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE),
     ],
 };
