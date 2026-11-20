@@ -11,7 +11,7 @@ use mln_map::{
 use mln_renderer::text::font_face_engine::FontFaceEngine;
 use mln_renderer::{Registry, UpdateReader};
 use mln_style::Edit;
-use mln_style::layers::CustomLayerHost;
+use mln_style::layer::Layer;
 use mln_text::GlyphCache;
 use mln_text::local_glyph_rasterizer::{LocalGlyphRasterizer, LocalGlyphs};
 use mln_util::error::{Error, ErrorKind};
@@ -1131,20 +1131,13 @@ impl Map {
         self.command(move |map| map.edit_loaded_style(|style| style.add_layer_json(&json, before_layer_id.as_deref())))
     }
 
-    /// Adds a custom layer named `layer_id` that `host` draws, below
-    /// `before_layer_id` or above every layer. See `Style::add_custom_layer`
-    /// for the errors. The map lets go of `host` once the style no longer has
-    /// the layer, and no renderer draws it.
-    pub fn add_custom_layer(
-        &self,
-        layer_id: impl Into<String>,
-        host: Arc<dyn CustomLayerHost>,
-        before_layer_id: Option<String>,
-    ) -> Result<Completion<Applied>, Error> {
-        let layer_id = layer_id.into();
-        self.command(move |map| {
-            map.edit_loaded_style(|style| style.add_custom_layer(&layer_id, host, before_layer_id.as_deref()))
-        })
+    /// Adds `layer` to the style, below `before_layer_id` or above every
+    /// layer, as a layer that isn't JSON, such as a custom layer, is added.
+    /// See `Style::add_layer` for the errors. The map lets go of the layer,
+    /// and of what it keeps, such as a custom layer's host, once the style no
+    /// longer has it.
+    pub fn add_style_layer(&self, layer: Layer, before_layer_id: Option<String>) -> Result<Completion<Applied>, Error> {
+        self.command(move |map| map.edit_loaded_style(|style| style.add_layer(layer, before_layer_id.as_deref())))
     }
 
     /// Removes a layer from the style. Completes with

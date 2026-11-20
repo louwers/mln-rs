@@ -1013,8 +1013,10 @@ impl SingleDraw {
 pub enum DrawGroup<'a> {
     /// Draws of the layer's GPU objects.
     Draws(&'a FrameDraws),
-    /// What a custom layer's host draws, with objects of its own.
-    Custom,
+    /// What the layer draws with objects of its own, in its drawing's
+    /// [`render`](LayerDrawing::render), such as what a custom layer's host
+    /// draws.
+    Own,
 }
 
 impl<'a> DrawGroup<'a> {
@@ -1024,7 +1026,7 @@ impl<'a> DrawGroup<'a> {
     pub(crate) fn stencil_tiles(self) -> Option<&'a [UnwrappedTileID]> {
         match self {
             DrawGroup::Draws(frame) => Some(&frame.stencil_tiles[..]).filter(|tiles| !tiles.is_empty()),
-            DrawGroup::Custom => None,
+            DrawGroup::Own => None,
         }
     }
 
@@ -1034,7 +1036,7 @@ impl<'a> DrawGroup<'a> {
     pub(crate) fn composite(self) -> Option<(SimpleIdentity, Composite)> {
         match self {
             DrawGroup::Draws(frame) => frame.composited(),
-            DrawGroup::Custom => None,
+            DrawGroup::Own => None,
         }
     }
 }

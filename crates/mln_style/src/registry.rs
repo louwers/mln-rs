@@ -45,7 +45,7 @@ impl StyleRegistry {
     #[cfg(test)]
     pub(crate) fn with_builtins() -> Arc<Self> {
         use crate::layer_type::style_entry;
-        use crate::layers::{Custom, Symbol};
+        use crate::layers::Symbol;
         use crate::source_type::style_source_entry;
         use crate::sources::{
             CustomGeometrySourceType, CustomVectorSourceType, GeoJsonSourceType, ImageSourceType, RasterDemSourceType,
@@ -55,7 +55,6 @@ impl StyleRegistry {
             style_entry::<Symbol>(),
             style_entry::<crate::tests::fixture_layer::Plain>(),
             style_entry::<crate::tests::fixture_layer::Shade>(),
-            style_entry::<Custom>(),
         ];
         let source_types = [
             style_source_entry::<VectorSourceType>(),

@@ -6,14 +6,16 @@
 //! the style spec) and its render layer, and for a type that lays out, its
 //! bucket and its layout; the fill, line and fill-extrusion layouts are a
 //! `PatternLayout` of each type. The raster, hillshade and color-relief
-//! types draw the engine's raster and raster-dem tile contents. The other
-//! built-in layer types are in the engine, and register through
+//! types draw the engine's raster and raster-dem tile contents. The custom
+//! type's module holds the API of the hosts that draw its layers. Symbol,
+//! the one built-in layer type in the engine, registers through
 //! `mln_renderer::builtins::register_layer_types`.
 
 pub mod background;
 pub mod circle;
 mod color_ramp;
 pub mod color_relief;
+pub mod custom;
 pub mod fill;
 pub mod fill_extrusion;
 pub mod heatmap;
@@ -25,6 +27,7 @@ pub mod raster;
 pub use background::{Background, BackgroundPaintProperties};
 pub use circle::{Circle, CircleLayoutProperties, CirclePaintProperties};
 pub use color_relief::{ColorRelief, ColorReliefPaintProperties};
+pub use custom::{Custom, CustomLayerHost};
 pub use fill::{Fill, FillLayoutProperties, FillPaintProperties};
 pub use fill_extrusion::{FillExtrusion, FillExtrusionLayoutProperties, FillExtrusionPaintProperties};
 pub use heatmap::{Heatmap, HeatmapPaintProperties};
@@ -45,7 +48,8 @@ pub fn register_layer_types(builder: &mut RegistryBuilder) -> Result<(), Registe
     builder.add_layer_type::<Heatmap>()?;
     builder.add_layer_type::<Raster>()?;
     builder.add_layer_type::<Hillshade>()?;
-    builder.add_layer_type::<ColorRelief>()
+    builder.add_layer_type::<ColorRelief>()?;
+    builder.add_layer_type::<Custom>()
 }
 
 /// Copies a bucket's data-driven attributes into a draw again where

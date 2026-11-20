@@ -6,8 +6,8 @@ use std::any::Any;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use mln_style::layers::{
-    CustomLayerFrame, CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerRenderParameters,
+use mln_rs::mln_layers::custom::{
+    Custom, CustomLayerFrame, CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerRenderParameters,
 };
 
 use crate::callback::Registration;
@@ -295,7 +295,11 @@ pub(crate) unsafe extern "C" fn mln_map_add_custom_layer(
         host.registration.accept();
         let layer_host: Arc<dyn CustomLayerHost> = Arc::<Host>::clone(&host);
         // SAFETY: the caller's contract.
-        let sent = unsafe { map::command(map, completion, |map| map.add_custom_layer(id, layer_host, before)) };
+        let sent = unsafe {
+            map::command(map, completion, |map| {
+                map.add_style_layer(Custom::layer(map.registry().style(), &id, layer_host), before)
+            })
+        };
         if sent.is_err() {
             // This handle outlives the copies that the failed call dropped,
             // so the registration drops unaccepted.

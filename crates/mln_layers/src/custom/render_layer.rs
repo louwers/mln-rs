@@ -3,32 +3,26 @@
 //   layers' draws upload, not in `make_draws`, so it gets the frame's final
 //   projection, whose depth range depends on how many draw groups the frame
 //   has.
-// - What it draws is a draw group of its own (`DrawGroup::Custom`), whose
+// - What it draws is a draw group of its own (`DrawGroup::Own`), whose
 //   `render` lends the frame's pass to the host
 //   (`PaintParameters::lend_pass`, through `Gpu::lend`).
 // - A host that drew is told the renderer stopped once the layer leaves it,
-//   after the GPU finished the host's work (`Gpu::flush`), or that
-//   its graphics objects are lost (`Renderer::lose_custom_layers`). A layer
-//   leaves (`LayerHost::leave`) without a `Gpu` at hand, so its host waits
-//   in the orchestrator's `EndedHosts` until the renderer ends it with one
-//   (`end_hosts`).
+//   after the GPU finished the host's work, or that its graphics objects
+//   are lost (`Renderer::lose_layer_hosts`). A layer leaves
+//   (`LayerHost::leave`) without a `Gpu` at hand, so the engine keeps the
+//   `EndedHost` it returns until it can end it with one.
 
 use std::sync::Arc;
 
 use mln_gfx::gpu::Gpu;
-use mln_style::layers::{
-    Custom, CustomLayerFrame, CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerRenderParameters,
+use mln_renderer::layer::{
+    DrawContext, EndedHost, EvaluatedLayer, LayerHost, LayerType, LayerValues, NoBucket, NoLayout, NoTileBucket,
+    OffscreenPass, RenderPass,
 };
+use mln_renderer::unstable::{Context, DrawGroup, DrawOrder, LayerDrawing, PaintParameters, TileMap};
 use mln_util::logging::{Event, Log};
 
-use crate::bucket::NoBucket;
-use crate::gfx::context::Context;
-use crate::layer::{DrawContext, EndedHost, EvaluatedLayer, LayerHost, LayerType, LayerValues, OffscreenPass};
-use crate::layer_drawing::{DrawGroup, DrawOrder, LayerDrawing, TileMap};
-use crate::layout::layout::NoLayout;
-use crate::paint_parameters::PaintParameters;
-use crate::render_pass::RenderPass;
-use crate::render_tile::NoTileBucket;
+use super::{Custom, CustomLayerFrame, CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerRenderParameters};
 
 /// The layer's drawing, which keeps no tiles and no draws of its own: its
 /// one draw group is what the host draws.
@@ -67,7 +61,7 @@ impl CustomDrawing {
 
     /// In the translucent pass, lends the live pass to the host.
     fn lend_pass(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        if parameters.pass_target().is_none() || parameters.pass != RenderPass::Translucent {
+        if parameters.pass() != RenderPass::Translucent {
             return;
         }
         let (Some(host), Some(frame)) = (&self.host, self.frame) else {
@@ -103,7 +97,7 @@ impl LayerDrawing for CustomDrawing {
 
     fn visit_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>)) {
         if self.updated {
-            visit(DrawGroup::Custom);
+            visit(DrawGroup::Own);
         }
     }
 
@@ -135,7 +129,7 @@ impl LayerType for Custom {
     type State = ();
 
     fn new_layer(layer: &LayerValues<Custom>) -> ((), CustomDrawing) {
-        let drawing = CustomDrawing { host: layer.style.host(), frame: None, used: false, updated: false };
+        let drawing = CustomDrawing { host: layer.style.extra.get(), frame: None, used: false, updated: false };
         ((), drawing)
     }
 
@@ -166,8 +160,14 @@ impl LayerType for Custom {
 /// The host's prerender, with the frame's projection.
 impl OffscreenPass for CustomDrawing {
     fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        let Some(frame) = parameters.custom_layer_frame else {
+        let Some(projection) = parameters.frame_projection else {
             return;
+        };
+        let frame = CustomLayerFrame {
+            view: parameters.view.map_view(f64::from(parameters.pixel_ratio)),
+            projection,
+            width: parameters.renderable_size.width,
+            height: parameters.renderable_size.height,
         };
         self.frame = Some(frame);
         let Some(host) = &self.host else { return };
@@ -198,12 +198,12 @@ impl LayerHost<Custom> for CustomDrawing {
     /// A new host for the same layer ID is a new layer to the host: the old
     /// one ends.
     fn restyled(&mut self, layer: &LayerValues<Custom>) -> Option<Box<dyn EndedHost>> {
-        let same = self.host.as_ref().is_some_and(|host| layer.style.has_host(host));
+        let same = self.host.as_ref().is_some_and(|host| layer.style.extra.is(host));
         if same {
             return None;
         }
         let ended = self.end_host();
-        self.host = layer.style.host();
+        self.host = layer.style.extra.get();
         ended
     }
 

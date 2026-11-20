@@ -3,6 +3,8 @@
 // Ports test/gl/bucket.test.cpp (circle, fill, line; on the WebGPU headless
 // backend) and test/renderer/fill_bucket.test.cpp.
 mod bucket_test;
+// The custom layer's host, as its layer keeps it.
+mod custom_test;
 mod fill_mesh_test;
 // Ports test/layout/sort_key.test.cpp (fill, line, circle).
 mod sort_key_test;

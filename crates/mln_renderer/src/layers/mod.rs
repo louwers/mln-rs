@@ -1,6 +1,5 @@
 //! The render layers.
 
-pub(crate) mod render_custom_layer;
 pub(crate) mod render_symbol_layer;
 
 /// The column-major `f32` matrix of `m`, as a uniform block holds it.

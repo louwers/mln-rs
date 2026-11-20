@@ -15,6 +15,7 @@ use mln_vec_map::VecMap;
 
 use crate::clip_masks::ClipMasks;
 use crate::frame::Frame;
+use crate::frame_projection::FrameProjection;
 use crate::gfx::context::Context;
 use crate::layer_composite::LayerComposite;
 use crate::render_pass::RenderPass;
@@ -184,8 +185,9 @@ pub struct PaintParameters<'a> {
     pub(crate) symbol_fade_change: f32,
 
     pub(crate) scissor_rect: ScissorRect,
-    /// The frame that custom layers draw into, set before their prerender.
-    pub(crate) custom_layer_frame: Option<mln_style::layers::CustomLayerFrame>,
+    /// Where the frame draws the map, and the depth it writes there, once
+    /// the frame's draw groups are known, before the offscreen passes.
+    pub frame_projection: Option<FrameProjection>,
 }
 
 impl<'a> PaintParameters<'a> {
@@ -242,8 +244,14 @@ impl<'a> PaintParameters<'a> {
             opaque_pass_cutoff: frame.opaque_pass_cutoff,
             symbol_fade_change: frame.symbol_fade_change,
             scissor_rect,
-            custom_layer_frame: None,
+            frame_projection: None,
         }
+    }
+
+    /// The pass the frame draws in now.
+    #[must_use]
+    pub fn pass(&self) -> RenderPass {
+        self.pass
     }
 
     /// The size and formats of the attachments that draws draw into
@@ -372,7 +380,7 @@ impl<'a> PaintParameters<'a> {
     /// Runs `f` with `gpu`'s, the context's, commands inside the pass
     /// begun, after what drew there so far, as a custom layer draws: `f`
     /// gets the backend's `CustomLayerPass`. Returns whether `f` ran.
-    pub(crate) fn lend_pass(&self, gpu: &mut dyn Gpu, f: &mut dyn FnMut(&mut dyn Any)) -> Result<bool, GpuError> {
+    pub fn lend_pass(&self, gpu: &mut dyn Gpu, f: &mut dyn FnMut(&mut dyn Any)) -> Result<bool, GpuError> {
         if self.open_pass.is_none() {
             return Ok(false);
         }
@@ -410,7 +418,7 @@ impl<'a> PaintParameters<'a> {
     /// The depth of `depth_mode_for_sublayer(0, ..)` where 2D layers write
     /// depth, whether or not the current layer does.
     #[must_use]
-    pub(crate) fn layer_depth(&self) -> f32 {
+    pub fn layer_depth(&self) -> f32 {
         let steps = (1u32.wrapping_add(self.current_layer)).wrapping_mul(Self::NUM_SUBLAYERS as u32);
         self.depth_range_size + steps as f32 * Self::DEPTH_EPSILON
     }
