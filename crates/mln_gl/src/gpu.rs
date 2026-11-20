@@ -17,7 +17,7 @@ use mln_gfx::gpu::{
     PipelineDesc, PipelineId, ReadbackId, ResourceId, SamplerId, ShaderId, ShaderKey, SlotMap, StencilState,
     TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage, VertexBufferLayout, VertexStep,
 };
-use mln_gfx::shaders::source::{Sources, glsl_es};
+use mln_gfx::shaders::source::{ShaderSources, Sources, glsl_es};
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::{MAX_ACTIVE_TEXTURE_UNITS, SamplerState};
 use mln_gfx::types::{DepthMaskType, TextureFilterType};
@@ -1333,6 +1333,10 @@ impl Gpu for GlGpu {
             }
         })?;
         Ok(self.samplers.insert(sampler))
+    }
+
+    fn add_shader_sources(&mut self, sources: &ShaderSources) {
+        self.sources.extend(sources.of::<glsl_es::Source>().iter());
     }
 
     fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError> {

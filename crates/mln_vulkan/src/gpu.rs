@@ -22,7 +22,7 @@ use mln_gfx::gpu::{
     TextureRegion, TextureUsage, VertexStep,
 };
 use mln_gfx::shaders::shader_defines::{DRAWABLE_RESERVED_UBO_COUNT, LAYER_SSBO_START_ID};
-use mln_gfx::shaders::source::{Sources, glsl};
+use mln_gfx::shaders::source::{ShaderSources, Sources, glsl};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{DepthFunctionType, TextureFilterType, TextureWrapType};
 use mln_glsl::layout::{
@@ -2286,6 +2286,10 @@ impl Gpu for VulkanGpu {
         // SAFETY: the create info is valid for the device.
         let sampler = unsafe { self.vk().create_sampler(&create_info, None) }.map_err(vk_error("sampler"))?;
         Ok(self.samplers.insert(sampler))
+    }
+
+    fn add_shader_sources(&mut self, sources: &ShaderSources) {
+        self.sources.extend(sources.of::<glsl::Source>().iter());
     }
 
     fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError> {

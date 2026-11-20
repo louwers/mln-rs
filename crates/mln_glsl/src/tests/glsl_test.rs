@@ -49,10 +49,10 @@ use crate::layout::{
     image_texture_binding, layer_storage_binding, layer_uniform_binding,
 };
 use crate::variants::variants;
-use crate::{BUILT_INS, Stage, compose, sources};
+use crate::{BUILT_INS, LAYER_SOURCES, Stage, compose, sources};
 
 fn programs() -> impl Iterator<Item = (&'static Program, &'static glsl::Source)> {
-    BUILT_INS.iter().copied()
+    BUILT_INS.iter().chain(LAYER_SOURCES).copied()
 }
 
 const STAGES: [Stage; 2] = [Stage::Vertex, Stage::Fragment];
@@ -82,7 +82,7 @@ fn every_program_declares_the_properties_its_glsl_reads_from_uniforms() {
 fn every_layer_program_shows_the_overdraw_inspector() {
     use mln_gfx::shaders::programs::{ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY};
     let not_layers = [&CLIPPING_MASK, &COLLISION_BOX, &COLLISION_CIRCLE, &GLOBE_DEPTH, &SKY, &ATMOSPHERE];
-    for &(program, source) in BUILT_INS {
+    for (program, source) in programs() {
         if !not_layers.contains(&program) {
             assert!(
                 [source.glsl.prelude, source.glsl.vertex, source.glsl.fragment]

@@ -439,12 +439,21 @@ const LAYER_COMPOSITE_TEXTURES: &[Texture] =
     &[tex(0, ID_LAYER_COMPOSITE_IMAGE_TEXTURE), tex(1, ID_LAYER_COMPOSITE_BACKDROP_TEXTURE)];
 shader_source!(LAYER_COMPOSITE_SHADER, LAYER_COMPOSITE_SHADER, LAYER_COMPOSITE_ATTRIBUTES, LAYER_COMPOSITE_TEXTURES);
 
-/// The source of each built-in program that has WGSL.
+/// The source of each of the engine's own programs.
 pub(crate) static BUILT_INS: &[(&Program, &Source)] = &[
+    (&programs::CLIPPING_MASK, &CLIPPING_MASK_PROGRAM),
+    (&programs::GLOBE_DEPTH, &GLOBE_DEPTH_SHADER),
+    (&programs::SKY, &SKY_SHADER),
+    (&programs::ATMOSPHERE, &ATMOSPHERE_SHADER),
+    (&programs::LAYER_COMPOSITE, &LAYER_COMPOSITE_SHADER),
+];
+
+/// The source of each program of the built-in layer types, which the
+/// registry that draws them adds.
+pub static LAYER_SOURCES: &[(&Program, &Source)] = &[
     (&programs::BACKGROUND, &BACKGROUND_SHADER),
     (&programs::BACKGROUND_PATTERN, &BACKGROUND_PATTERN_SHADER),
     (&programs::CIRCLE, &CIRCLE_SHADER),
-    (&programs::CLIPPING_MASK, &CLIPPING_MASK_PROGRAM),
     (&programs::FILL, &FILL_SHADER),
     (&programs::FILL_OUTLINE, &FILL_OUTLINE_SHADER),
     (&programs::FILL_PATTERN, &FILL_PATTERN_SHADER),
@@ -475,10 +484,6 @@ pub(crate) static BUILT_INS: &[(&Program, &Source)] = &[
     (&programs::SYMBOL_TEXT_AND_ICON, &SYMBOL_TEXT_AND_ICON_SHADER),
     (&programs::COLLISION_BOX, &COLLISION_BOX_SHADER),
     (&programs::COLLISION_CIRCLE, &COLLISION_CIRCLE_SHADER),
-    (&programs::GLOBE_DEPTH, &GLOBE_DEPTH_SHADER),
-    (&programs::SKY, &SKY_SHADER),
-    (&programs::ATMOSPHERE, &ATMOSPHERE_SHADER),
-    (&programs::LAYER_COMPOSITE, &LAYER_COMPOSITE_SHADER),
 ];
 
 #[must_use]

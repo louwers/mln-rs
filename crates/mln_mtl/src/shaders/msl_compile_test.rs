@@ -25,11 +25,11 @@ use objc2_metal::{
 };
 
 use super::msl_sources::PRELUDE;
-use super::shader_source::BUILT_INS;
+use super::shader_source::{BUILT_INS, LAYER_SOURCES};
 use crate::Id;
 
 fn sources() -> impl Iterator<Item = (&'static Program, &'static msl::Source)> {
-    BUILT_INS.iter().copied()
+    BUILT_INS.iter().chain(LAYER_SOURCES).copied()
 }
 
 /// The projection variants of a program: its name, and whether it defines
@@ -101,7 +101,7 @@ fn defines<'a>(overdraw: bool, globe: bool, uniforms: impl IntoIterator<Item = &
 fn every_layer_program_shows_the_overdraw_inspector() {
     use mln_gfx::shaders::programs::{ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY};
     let not_layers = [&CLIPPING_MASK, &COLLISION_BOX, &COLLISION_CIRCLE, &GLOBE_DEPTH, &SKY, &ATMOSPHERE];
-    for &(program, source) in BUILT_INS {
+    for (program, source) in sources() {
         if !not_layers.contains(&program) {
             assert!(full_source(source).contains("OVERDRAW_INSPECTOR"), "{}", program.name);
         }

@@ -22,7 +22,7 @@ use mln_gfx::gpu::{
 };
 use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::shader_defines::ID_GLOBAL_UBO_INDEX;
-use mln_gfx::shaders::source::{Sources, msl};
+use mln_gfx::shaders::source::{ShaderSources, Sources, msl};
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{
@@ -1348,6 +1348,10 @@ impl Gpu for MetalGpu {
             .newSamplerStateWithDescriptor(&descriptor)
             .ok_or_else(|| GpuError::Invalid("Metal made no sampler".to_owned()))?;
         Ok(self.samplers.insert(sampler))
+    }
+
+    fn add_shader_sources(&mut self, sources: &ShaderSources) {
+        self.sources.extend(sources.of::<msl::Source>().iter());
     }
 
     fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError> {

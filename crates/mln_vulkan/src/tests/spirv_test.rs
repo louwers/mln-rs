@@ -1,5 +1,5 @@
 use mln_glsl::variants::variants;
-use mln_glsl::{BUILT_INS, Stage, compose};
+use mln_glsl::{BUILT_INS, LAYER_SOURCES, Stage, compose};
 
 use crate::shaders::compile_program;
 
@@ -13,7 +13,7 @@ const SPIRV_MAGIC: u32 = 0x0723_0203;
 fn every_program_compiles_to_spirv() {
     let mut failures = Vec::new();
     let mut compiled = 0;
-    for &(program, source) in BUILT_INS {
+    for &(program, source) in BUILT_INS.iter().chain(LAYER_SOURCES) {
         for variant in variants(program, true) {
             for stage in [Stage::Vertex, Stage::Fragment] {
                 let at = format!("{} ({}, {stage:?})", program.name, variant.name);

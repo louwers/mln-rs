@@ -158,9 +158,10 @@ impl Renderer {
     /// renderer.
     ///
     /// The renderer draws with `gpu` and only with it: every later call
-    /// that takes a `Gpu` takes this one.
+    /// that takes a `Gpu` takes this one. It adds `registry`'s shader sources
+    /// to `gpu` ([`Gpu::add_shader_sources`]).
     pub fn new(
-        gpu: &dyn Gpu,
+        gpu: &mut dyn Gpu,
         pixel_ratio: f32,
         local_glyphs: LocalGlyphs,
         registry: Arc<Registry>,
@@ -173,7 +174,7 @@ impl Renderer {
     /// A renderer that uses `glyph_cache`: renderers given the same
     /// `GlyphCache` share the glyphs they parse from glyph PBFs.
     pub fn with_glyph_cache(
-        gpu: &dyn Gpu,
+        gpu: &mut dyn Gpu,
         pixel_ratio: f32,
         local_glyphs: LocalGlyphs,
         glyph_cache: Arc<GlyphCache>,
@@ -190,7 +191,7 @@ impl Renderer {
     /// `font_face_engine::default_engine()`.
     #[expect(clippy::too_many_arguments, reason = "each argument is a part of the renderer that its host picks")]
     pub fn with_fonts(
-        gpu: &dyn Gpu,
+        gpu: &mut dyn Gpu,
         pixel_ratio: f32,
         local_glyphs: LocalGlyphs,
         glyph_cache: Arc<GlyphCache>,
@@ -199,6 +200,7 @@ impl Renderer {
         waker: Waker,
         pool: &Pool,
     ) -> Self {
+        gpu.add_shader_sources(registry.shader_sources());
         Renderer {
             orchestrator: RenderOrchestrator::new(
                 true,

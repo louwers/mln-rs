@@ -6,14 +6,24 @@ use mln_gfx::gpu::conformance::{
 use mln_gfx::gpu::{Gpu as _, GpuError};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
-use mln_glsl::BUILT_INS;
+use mln_gfx::shaders::source::ShaderSources;
+use mln_glsl::{BUILT_INS, LAYER_SOURCES};
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_UNKNOWN};
 
 use crate::{D3d12Gpu, Device};
 
+/// A `D3d12Gpu` that also compiles the built-in layer types' programs,
+/// which the conformance cases draw with.
 fn gpu() -> D3d12Gpu {
     let device = Device::new(None).expect("a D3D12 device");
-    D3d12Gpu::new(&device).expect("D3d12Gpu")
+    with_layer_sources(D3d12Gpu::new(&device).expect("D3d12Gpu"))
+}
+
+fn with_layer_sources(mut gpu: D3d12Gpu) -> D3d12Gpu {
+    let mut sources = ShaderSources::default();
+    sources.add(LAYER_SOURCES);
+    gpu.add_shader_sources(&sources);
+    gpu
 }
 
 #[test]
@@ -29,8 +39,8 @@ fn invalid_calls_through_gpu() {
 #[test]
 fn foreign_ids_through_gpu() {
     let device = Device::new(None).expect("a D3D12 device");
-    let mut first = D3d12Gpu::new(&device).expect("D3d12Gpu");
-    let mut second = D3d12Gpu::new(&device).expect("D3d12Gpu");
+    let mut first = with_layer_sources(D3d12Gpu::new(&device).expect("D3d12Gpu"));
+    let mut second = with_layer_sources(D3d12Gpu::new(&device).expect("D3d12Gpu"));
     foreign_ids(&mut first, &mut second).expect("the valid calls");
 }
 
@@ -110,7 +120,7 @@ fn imported_textures_through_gpu() {
 fn every_program_compiles_for_gpu() {
     let mut gpu = gpu();
     let parameters = ProgramParameters::new(1.0, false);
-    for &(program, _) in BUILT_INS {
+    for &(program, _) in BUILT_INS.iter().chain(LAYER_SOURCES) {
         for variant in [ProjectionVariant::Mercator, ProjectionVariant::Globe] {
             for uniforms in [&[][..], program.properties] {
                 let key = program.variant_key(&parameters, uniforms, variant);

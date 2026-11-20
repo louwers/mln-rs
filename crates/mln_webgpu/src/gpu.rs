@@ -14,7 +14,7 @@ use mln_gfx::gpu::{
     ResourceId, SamplerId, Scissor, ShaderId, ShaderKey, SlotMap, TextureDesc, TextureFormat, TextureId, TextureRegion,
     TextureUsage,
 };
-use mln_gfx::shaders::source::{Sources, wgsl};
+use mln_gfx::shaders::source::{ShaderSources, Sources, wgsl};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_util::Color;
@@ -735,6 +735,10 @@ impl Gpu for WebGpu {
             })
         })?;
         Ok(self.samplers.insert(sampler))
+    }
+
+    fn add_shader_sources(&mut self, sources: &ShaderSources) {
+        self.sources.extend(sources.of::<wgsl::Source>().iter());
     }
 
     fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError> {

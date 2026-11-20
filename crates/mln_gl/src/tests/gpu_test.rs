@@ -21,6 +21,7 @@ use mln_gfx::shaders::programs;
 use mln_gfx::shaders::shader_defines::{
     ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_PROPS_UBO, ID_PROJECTION_UBO,
 };
+use mln_gfx::shaders::source::ShaderSources;
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::types::DepthFunctionType;
 use mln_util::Color;
@@ -39,11 +40,16 @@ fn knob() -> Option<String> {
     std::env::var("MLN_RENDER_BACKEND").ok()
 }
 
-/// A backend on a device of its own, or none where there is no EGL to make
-/// a context of [`api`] with: the test is skipped there, unless
-/// `MLN_RENDER_BACKEND` asks for this backend (`gl` or `gl-desktop`).
+/// A backend on a device of its own that compiles the built-in layer types'
+/// programs too, which the conformance cases draw with, or none where there
+/// is no EGL to make a context of [`api`] with: the test is skipped there,
+/// unless `MLN_RENDER_BACKEND` asks for this backend (`gl` or `gl-desktop`).
 fn gpu() -> Option<GlGpu> {
-    with_device(GlGpu::new)
+    let mut gpu = with_device(GlGpu::new)?;
+    let mut sources = ShaderSources::default();
+    sources.add(crate::LAYER_SOURCES);
+    gpu.add_shader_sources(&sources);
+    Some(gpu)
 }
 
 /// What `make` makes on a device of its own, or none where there is no EGL

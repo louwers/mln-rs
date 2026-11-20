@@ -75,6 +75,7 @@ pub use overlay::{Overlay, OverlayTarget};
 #[cfg(not(target_arch = "wasm32"))]
 pub type OffscreenTarget = mln_gfx::offscreen_target::OffscreenTarget<GlGpu>;
 pub use renderer_backend::{GlScope, RendererBackend};
+pub use shaders::shader_source::LAYER_SOURCES;
 #[cfg(all(unix, not(target_vendor = "apple")))]
 pub use surface_target::SurfaceTarget;
 #[cfg(windows)]

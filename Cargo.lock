@@ -2472,6 +2472,7 @@ dependencies = [
  "mln-rs-gestures",
  "mln-rs-gfx",
  "mln-rs-gl",
+ "mln-rs-glsl",
  "mln-rs-image",
  "mln-rs-layers",
  "mln-rs-map",

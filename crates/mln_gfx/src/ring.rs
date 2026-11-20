@@ -801,6 +801,7 @@ mod tests {
         fn create_sampler(&mut self, _: &SamplerState) -> Result<SamplerId, GpuError> {
             unsupported()
         }
+        fn add_shader_sources(&mut self, _: &crate::shaders::source::ShaderSources) {}
         fn create_shader(&mut self, _: &ShaderKey) -> Result<ShaderId, GpuError> {
             unsupported()
         }

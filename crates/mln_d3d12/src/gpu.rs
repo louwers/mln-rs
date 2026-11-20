@@ -17,7 +17,7 @@ use mln_gfx::gpu::{
     TextureUsage, VertexStep, destroy_unused,
 };
 use mln_gfx::shaders::shader_defines::{DRAWABLE_RESERVED_UBO_COUNT, LAYER_SSBO_START_ID};
-use mln_gfx::shaders::source::{Sources, glsl};
+use mln_gfx::shaders::source::{ShaderSources, Sources, glsl};
 use mln_gfx::texture2d::SamplerState;
 use mln_glsl::BUILT_INS;
 use mln_glsl::layout::{DescriptorSetType, IMAGE_SAMPLER_START, LAYER_STORAGE_COUNT};
@@ -1100,6 +1100,10 @@ impl Gpu for D3d12Gpu {
     fn create_sampler(&mut self, state: &SamplerState) -> Result<SamplerId, GpuError> {
         let slot = self.sampler_heap.slot(self.device.device(), state)?;
         Ok(self.samplers.insert(slot))
+    }
+
+    fn add_shader_sources(&mut self, sources: &ShaderSources) {
+        self.sources.extend(sources.of::<glsl::Source>().iter());
     }
 
     fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError> {
