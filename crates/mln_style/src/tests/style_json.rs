@@ -7,6 +7,7 @@ use std::sync::Arc;
 use mln_util::{Error, ErrorKind};
 
 use crate::StyleRegistry;
+use crate::edit::Edit;
 use crate::layer::Layer;
 use crate::layer_type::{LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};
 use crate::property_table::{PropertyTable, PropertyVisitor};
@@ -162,6 +163,11 @@ fn a_layer_of_a_type_the_registry_lacks_is_an_invalid_argument() {
     );
     style.add_layer(layer::<Plain>(&style, "paper"), None).unwrap();
     assert_eq!(style.get_layers().len(), 1);
+    // The edits check as `add_layer` does.
+    let stray = layer::<Unregistered<false>>(&style, "stray");
+    assert_fails(style.apply(Edit::AddLayer { layer: stray, before: None }), ErrorKind::InvalidArgument, "stray");
+    let impostor = layer::<Unregistered<true>>(&style, "paper");
+    assert_fails(style.apply(Edit::SetLayer(impostor)), ErrorKind::InvalidArgument, "paper");
 }
 
 // A bad property name or value on a live layer is an invalid argument that
@@ -241,7 +247,7 @@ fn layer_json_serializes_the_current_layer() {
         assert!(json.contains(part), "{json} doesn't contain {part}");
     }
 
-    style.apply(crate::Edit::RemoveLayer("paper".to_owned())).unwrap();
+    style.apply(Edit::RemoveLayer("paper".to_owned())).unwrap();
     style.add_layer_json(&json, None).unwrap();
     assert_eq!(style.layer_json("paper").unwrap(), json);
 }
@@ -343,7 +349,7 @@ fn the_light_and_the_transition_change_and_reset() {
 
     let mut no_placement = style.get_transition_options();
     no_placement.enable_placement_transitions = false;
-    style.apply(crate::Edit::SetTransition(no_placement)).unwrap();
+    style.apply(Edit::SetTransition(no_placement)).unwrap();
     style.set_root_property_json("transition", r#"{"delay":50,"duration":300}"#).unwrap();
     assert_eq!(root_property(&style, "transition").as_deref(), Some(r#"{"duration":300,"delay":50}"#));
     assert!(!style.get_transition_options().enable_placement_transitions);

@@ -21,6 +21,7 @@ use crate::layer_type::SourceKind;
 use crate::light::Light;
 use crate::projection::Projection;
 use crate::property_table::{Properties, defined_properties};
+use crate::registry::StyleRegistry;
 use crate::style::Style;
 use crate::style_property::{Kind, StyleProperty};
 use crate::transition_options::TransitionOptions;
@@ -58,15 +59,8 @@ impl Style {
         if self.get_layer(id).is_some() {
             return Err(Error::already_exists(format!("layer {} already exists", quote(id))));
         }
+        check_layer_type(self.registry(), &layer)?;
         let type_info = layer.info();
-        let registered = self.registry().layer_type(type_info.name);
-        if !registered.is_some_and(|registered| registered.is_type_of(&**layer.style())) {
-            return Err(Error::invalid_argument(format!(
-                "layer {} is of a layer type {} that the style's registry doesn't have",
-                quote(id),
-                quote(type_info.name)
-            )));
-        }
         if type_info.source != SourceKind::None {
             let source_id = layer.get_source_id();
             let Some(source) = self.get_source(source_id) else {
@@ -446,4 +440,19 @@ fn layer_not_found(id: &str) -> Error {
 
 fn json_text(value: &Value) -> String {
     value_to_json(value).to_string()
+}
+
+/// Fails with `InvalidArgument` unless `registry`'s layer type of
+/// `layer`'s type name is `layer`'s own type, which the renderer and the
+/// tile workers look up by that name.
+pub(crate) fn check_layer_type(registry: &StyleRegistry, layer: &Layer) -> Result<(), Error> {
+    let name = layer.info().name;
+    if registry.layer_type(name).is_some_and(|registered| registered.is_type_of(&**layer.style())) {
+        return Ok(());
+    }
+    Err(Error::invalid_argument(format!(
+        "layer {} is of a layer type {} that the style's registry doesn't have",
+        quote(layer.get_id()),
+        quote(name)
+    )))
 }
