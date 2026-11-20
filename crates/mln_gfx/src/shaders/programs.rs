@@ -18,10 +18,6 @@ use crate::shaders::shader_defines::{
     ID_SYMBOL_PROJECTED_POS_ATTRIBUTE, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE,
 };
 
-const fn property(name: &'static str, attribute: usize) -> Property {
-    Property { name, attribute }
-}
-
 pub static CLIPPING_MASK: Program = Program {
     name: "ClippingMaskProgram",
     attributes: &[(ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE, Short2)],
@@ -44,7 +40,7 @@ pub static SYMBOL_ICON: Program = Program {
     ],
     instance_attributes: &[],
     textures: &[ID_SYMBOL_IMAGE_TEXTURE],
-    properties: &[property("opacity", ID_SYMBOL_OPACITY_ATTRIBUTE)],
+    properties: &[Property::new("opacity", ID_SYMBOL_OPACITY_ATTRIBUTE)],
 };
 
 pub static SYMBOL_SDF: Program = Program {
@@ -66,11 +62,11 @@ pub static SYMBOL_SDF: Program = Program {
     instance_attributes: &[],
     textures: &[ID_SYMBOL_IMAGE_TEXTURE],
     properties: &[
-        property("opacity", ID_SYMBOL_OPACITY_ATTRIBUTE),
-        property("fill_color", ID_SYMBOL_COLOR_ATTRIBUTE),
-        property("halo_color", ID_SYMBOL_HALO_COLOR_ATTRIBUTE),
-        property("halo_width", ID_SYMBOL_HALO_WIDTH_ATTRIBUTE),
-        property("halo_blur", ID_SYMBOL_HALO_BLUR_ATTRIBUTE),
+        Property::new("opacity", ID_SYMBOL_OPACITY_ATTRIBUTE),
+        Property::new("fill_color", ID_SYMBOL_COLOR_ATTRIBUTE),
+        Property::new("halo_color", ID_SYMBOL_HALO_COLOR_ATTRIBUTE),
+        Property::new("halo_width", ID_SYMBOL_HALO_WIDTH_ATTRIBUTE),
+        Property::new("halo_blur", ID_SYMBOL_HALO_BLUR_ATTRIBUTE),
     ],
 };
 
@@ -92,11 +88,11 @@ pub static SYMBOL_TEXT_AND_ICON: Program = Program {
     instance_attributes: &[],
     textures: &[ID_SYMBOL_IMAGE_TEXTURE, ID_SYMBOL_IMAGE_ICON_TEXTURE],
     properties: &[
-        property("opacity", ID_SYMBOL_OPACITY_ATTRIBUTE),
-        property("fill_color", ID_SYMBOL_COLOR_ATTRIBUTE),
-        property("halo_color", ID_SYMBOL_HALO_COLOR_ATTRIBUTE),
-        property("halo_width", ID_SYMBOL_HALO_WIDTH_ATTRIBUTE),
-        property("halo_blur", ID_SYMBOL_HALO_BLUR_ATTRIBUTE),
+        Property::new("opacity", ID_SYMBOL_OPACITY_ATTRIBUTE),
+        Property::new("fill_color", ID_SYMBOL_COLOR_ATTRIBUTE),
+        Property::new("halo_color", ID_SYMBOL_HALO_COLOR_ATTRIBUTE),
+        Property::new("halo_width", ID_SYMBOL_HALO_WIDTH_ATTRIBUTE),
+        Property::new("halo_blur", ID_SYMBOL_HALO_BLUR_ATTRIBUTE),
     ],
 };
 

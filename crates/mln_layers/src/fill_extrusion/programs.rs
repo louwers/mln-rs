@@ -2,7 +2,7 @@
 //! paint properties of its shaders.
 
 use mln_gfx::gfx_types::AttributeDataType::{Float2, Float4, Short2, UShort2, UShort4};
-use mln_gfx::shaders::program::Program;
+use mln_gfx::shaders::program::{Program, Property};
 use mln_gfx::shaders::shader_defines::{
     ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE,
     ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE,
@@ -11,8 +11,6 @@ use mln_gfx::shaders::shader_defines::{
     ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE,
     ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE,
 };
-
-use crate::shaders::property;
 
 pub static FILL_EXTRUSION: Program = Program {
     name: "FillExtrusionShader",
@@ -26,9 +24,9 @@ pub static FILL_EXTRUSION: Program = Program {
     instance_attributes: &[],
     textures: &[],
     properties: &[
-        property("base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-        property("color", ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
-        property("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
+        Property::new("base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
+        Property::new("color", ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
+        Property::new("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
     ],
 };
 
@@ -46,9 +44,9 @@ pub static FILL_EXTRUSION_INSTANCED: Program = Program {
     ],
     textures: &[],
     properties: &[
-        property("base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-        property("color", ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
-        property("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
+        Property::new("base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
+        Property::new("color", ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
+        Property::new("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
     ],
 };
 
@@ -69,9 +67,9 @@ pub static FILL_EXTRUSION_WALL: Program = Program {
     instance_attributes: &[],
     textures: &[],
     properties: &[
-        property("base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-        property("color", ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
-        property("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
+        Property::new("base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
+        Property::new("color", ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
+        Property::new("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
     ],
 };
 
@@ -84,9 +82,9 @@ pub static FILL_EXTRUSION_PULLED: Program = Program {
     instance_attributes: &[],
     textures: &[],
     properties: &[
-        property("base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-        property("color", ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
-        property("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
+        Property::new("base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
+        Property::new("color", ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
+        Property::new("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
     ],
 };
 
@@ -103,10 +101,10 @@ pub static FILL_EXTRUSION_PATTERN: Program = Program {
     instance_attributes: &[],
     textures: &[ID_FILL_EXTRUSION_IMAGE_TEXTURE],
     properties: &[
-        property("base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-        property("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
-        property("pattern_from", ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
-        property("pattern_to", ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
+        Property::new("base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
+        Property::new("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
+        Property::new("pattern_from", ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
+        Property::new("pattern_to", ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
     ],
 };
 
@@ -125,10 +123,10 @@ pub static FILL_EXTRUSION_PATTERN_INSTANCED: Program = Program {
     ],
     textures: &[ID_FILL_EXTRUSION_IMAGE_TEXTURE],
     properties: &[
-        property("base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-        property("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
-        property("pattern_from", ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
-        property("pattern_to", ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
+        Property::new("base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
+        Property::new("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
+        Property::new("pattern_from", ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
+        Property::new("pattern_to", ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
     ],
 };
 
@@ -149,9 +147,9 @@ pub static FILL_EXTRUSION_PATTERN_WALL: Program = Program {
     instance_attributes: &[],
     textures: &[ID_FILL_EXTRUSION_IMAGE_TEXTURE],
     properties: &[
-        property("base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-        property("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
-        property("pattern_from", ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
-        property("pattern_to", ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
+        Property::new("base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
+        Property::new("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
+        Property::new("pattern_from", ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
+        Property::new("pattern_to", ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
     ],
 };

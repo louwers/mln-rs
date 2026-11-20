@@ -7,36 +7,38 @@ use mln_gfx::shaders::shader_defines::{
     ID_COLOR_RELIEF_EVALUATED_PROPS_UBO, ID_COLOR_RELIEF_IMAGE_TEXTURE, ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE,
     ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE, ID_COLOR_RELIEF_TILE_PROPS_UBO, ID_PROJECTION_UBO,
 };
-use mln_gfx::shaders::source::glsl_es::{Glsl, Source};
+use mln_gfx::shaders::source::glsl_es::{Attribute, Glsl, Source, Texture, UniformBlock};
 
 use super::programs;
 use super::ubo::{ColorReliefDrawableUBO, ColorReliefEvaluatedPropsUBO, ColorReliefTilePropsUBO};
-use crate::shaders::glsl_es::{attr, block, element, tex};
 
 // Color Relief
 static COLOR_RELIEF: Source = Source {
     glsl: &COLOR_RELIEF_SHADER,
     uniform_blocks: &[
-        element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        element::<ColorReliefDrawableUBO, ColorReliefDrawableUBO>(
+        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
+        UniformBlock::element::<ColorReliefDrawableUBO, ColorReliefDrawableUBO>(
             "ColorReliefDrawableUBO",
             ID_COLOR_RELIEF_DRAWABLE_UBO,
         ),
-        element::<ColorReliefTilePropsUBO, ColorReliefTilePropsUBO>(
+        UniformBlock::element::<ColorReliefTilePropsUBO, ColorReliefTilePropsUBO>(
             "ColorReliefTilePropsUBO",
             ID_COLOR_RELIEF_TILE_PROPS_UBO,
         ),
-        block::<ColorReliefEvaluatedPropsUBO>("ColorReliefEvaluatedPropsUBO", ID_COLOR_RELIEF_EVALUATED_PROPS_UBO),
+        UniformBlock::new::<ColorReliefEvaluatedPropsUBO>(
+            "ColorReliefEvaluatedPropsUBO",
+            ID_COLOR_RELIEF_EVALUATED_PROPS_UBO,
+        ),
     ],
     attributes: &[
-        attr("a_pos", ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE),
-        attr("a_texture_pos", ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE),
+        Attribute::new("a_pos", ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE),
+        Attribute::new("a_texture_pos", ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE),
     ],
     instance_attributes: &[],
     textures: &[
-        tex("u_image", ID_COLOR_RELIEF_IMAGE_TEXTURE),
-        tex("u_elevation_stops", ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE),
-        tex("u_color_stops", ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE),
+        Texture::new("u_image", ID_COLOR_RELIEF_IMAGE_TEXTURE),
+        Texture::new("u_elevation_stops", ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE),
+        Texture::new("u_color_stops", ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE),
     ],
 };
 

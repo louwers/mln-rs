@@ -2,14 +2,12 @@
 //! paint properties of its shaders.
 
 use mln_gfx::gfx_types::AttributeDataType::{Float2, Float4, Short2};
-use mln_gfx::shaders::program::Program;
+use mln_gfx::shaders::program::{Program, Property};
 use mln_gfx::shaders::shader_defines::{
     ID_CIRCLE_BLUR_VERTEX_ATTRIBUTE, ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE, ID_CIRCLE_OPACITY_VERTEX_ATTRIBUTE,
     ID_CIRCLE_POS_VERTEX_ATTRIBUTE, ID_CIRCLE_RADIUS_VERTEX_ATTRIBUTE, ID_CIRCLE_STROKE_COLOR_VERTEX_ATTRIBUTE,
     ID_CIRCLE_STROKE_OPACITY_VERTEX_ATTRIBUTE, ID_CIRCLE_STROKE_WIDTH_VERTEX_ATTRIBUTE,
 };
-
-use crate::shaders::property;
 
 pub static CIRCLE: Program = Program {
     name: "CircleShader",
@@ -26,12 +24,12 @@ pub static CIRCLE: Program = Program {
     instance_attributes: &[],
     textures: &[],
     properties: &[
-        property("color", ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE),
-        property("radius", ID_CIRCLE_RADIUS_VERTEX_ATTRIBUTE),
-        property("blur", ID_CIRCLE_BLUR_VERTEX_ATTRIBUTE),
-        property("opacity", ID_CIRCLE_OPACITY_VERTEX_ATTRIBUTE),
-        property("stroke_color", ID_CIRCLE_STROKE_COLOR_VERTEX_ATTRIBUTE),
-        property("stroke_width", ID_CIRCLE_STROKE_WIDTH_VERTEX_ATTRIBUTE),
-        property("stroke_opacity", ID_CIRCLE_STROKE_OPACITY_VERTEX_ATTRIBUTE),
+        Property::new("color", ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE),
+        Property::new("radius", ID_CIRCLE_RADIUS_VERTEX_ATTRIBUTE),
+        Property::new("blur", ID_CIRCLE_BLUR_VERTEX_ATTRIBUTE),
+        Property::new("opacity", ID_CIRCLE_OPACITY_VERTEX_ATTRIBUTE),
+        Property::new("stroke_color", ID_CIRCLE_STROKE_COLOR_VERTEX_ATTRIBUTE),
+        Property::new("stroke_width", ID_CIRCLE_STROKE_WIDTH_VERTEX_ATTRIBUTE),
+        Property::new("stroke_opacity", ID_CIRCLE_STROKE_OPACITY_VERTEX_ATTRIBUTE),
     ],
 };

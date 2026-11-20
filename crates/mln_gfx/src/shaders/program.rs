@@ -42,6 +42,15 @@ pub struct Property {
     pub attribute: usize,
 }
 
+impl Property {
+    /// The property `u_<name>`, whose values a layer binds to attribute
+    /// `attribute`.
+    #[must_use]
+    pub const fn new(name: &'static str, attribute: usize) -> Property {
+        Property { name, attribute }
+    }
+}
+
 /// The define that compiles a program's globe variant.
 pub const GLOBE_DEFINE: &str = "PROJECTION_GLOBE";
 

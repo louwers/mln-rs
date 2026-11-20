@@ -7,46 +7,57 @@ use mln_gfx::shaders::shader_defines::{
     ID_HILLSHADE_POS_VERTEX_ATTRIBUTE, ID_HILLSHADE_PREPARE_DRAWABLE_UBO, ID_HILLSHADE_PREPARE_TILE_PROPS_UBO,
     ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE, ID_HILLSHADE_TILE_PROPS_UBO, ID_PROJECTION_UBO,
 };
-use mln_gfx::shaders::source::glsl_es::{Glsl, Source};
+use mln_gfx::shaders::source::glsl_es::{Attribute, Glsl, Source, Texture, UniformBlock};
 
 use super::programs;
 use super::ubo::{
     HillshadeDrawableUBO, HillshadeEvaluatedPropsUBO, HillshadePrepareDrawableUBO, HillshadePrepareTilePropsUBO,
     HillshadeTilePropsUBO,
 };
-use crate::shaders::glsl_es::{attr, block, element, tex};
 
 // Hillshade Prepare
 static HILLSHADE_PREPARE: Source = Source {
     glsl: &HILLSHADE_PREPARE_SHADER,
     uniform_blocks: &[
-        element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        block::<HillshadePrepareDrawableUBO>("HillshadePrepareDrawableUBO", ID_HILLSHADE_PREPARE_DRAWABLE_UBO),
-        block::<HillshadePrepareTilePropsUBO>("HillshadePrepareTilePropsUBO", ID_HILLSHADE_PREPARE_TILE_PROPS_UBO),
+        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
+        UniformBlock::new::<HillshadePrepareDrawableUBO>(
+            "HillshadePrepareDrawableUBO",
+            ID_HILLSHADE_PREPARE_DRAWABLE_UBO,
+        ),
+        UniformBlock::new::<HillshadePrepareTilePropsUBO>(
+            "HillshadePrepareTilePropsUBO",
+            ID_HILLSHADE_PREPARE_TILE_PROPS_UBO,
+        ),
     ],
     attributes: &[
-        attr("a_pos", ID_HILLSHADE_POS_VERTEX_ATTRIBUTE),
-        attr("a_texture_pos", ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE),
+        Attribute::new("a_pos", ID_HILLSHADE_POS_VERTEX_ATTRIBUTE),
+        Attribute::new("a_texture_pos", ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE),
     ],
     instance_attributes: &[],
-    textures: &[tex("u_image", ID_HILLSHADE_IMAGE_TEXTURE)],
+    textures: &[Texture::new("u_image", ID_HILLSHADE_IMAGE_TEXTURE)],
 };
 
 // Hillshade
 static HILLSHADE: Source = Source {
     glsl: &HILLSHADE_SHADER,
     uniform_blocks: &[
-        element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        element::<HillshadeDrawableUBO, HillshadeDrawableUBO>("HillshadeDrawableUBO", ID_HILLSHADE_DRAWABLE_UBO),
-        element::<HillshadeTilePropsUBO, HillshadeTilePropsUBO>("HillshadeTilePropsUBO", ID_HILLSHADE_TILE_PROPS_UBO),
-        block::<HillshadeEvaluatedPropsUBO>("HillshadeEvaluatedPropsUBO", ID_HILLSHADE_EVALUATED_PROPS_UBO),
+        UniformBlock::element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
+        UniformBlock::element::<HillshadeDrawableUBO, HillshadeDrawableUBO>(
+            "HillshadeDrawableUBO",
+            ID_HILLSHADE_DRAWABLE_UBO,
+        ),
+        UniformBlock::element::<HillshadeTilePropsUBO, HillshadeTilePropsUBO>(
+            "HillshadeTilePropsUBO",
+            ID_HILLSHADE_TILE_PROPS_UBO,
+        ),
+        UniformBlock::new::<HillshadeEvaluatedPropsUBO>("HillshadeEvaluatedPropsUBO", ID_HILLSHADE_EVALUATED_PROPS_UBO),
     ],
     attributes: &[
-        attr("a_pos", ID_HILLSHADE_POS_VERTEX_ATTRIBUTE),
-        attr("a_texture_pos", ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE),
+        Attribute::new("a_pos", ID_HILLSHADE_POS_VERTEX_ATTRIBUTE),
+        Attribute::new("a_texture_pos", ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE),
     ],
     instance_attributes: &[],
-    textures: &[tex("u_image", ID_HILLSHADE_IMAGE_TEXTURE)],
+    textures: &[Texture::new("u_image", ID_HILLSHADE_IMAGE_TEXTURE)],
 };
 
 /// The source of each of the type's programs.

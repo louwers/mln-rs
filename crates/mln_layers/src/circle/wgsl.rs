@@ -9,17 +9,16 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::shaders::source::wgsl::{Attribute, Source, Wgsl};
 
 use super::programs;
-use crate::shaders::wgsl::attr;
 
 const CIRCLE_ATTRIBUTES: &[Attribute] = &[
-    attr(0, ID_CIRCLE_POS_VERTEX_ATTRIBUTE),
-    attr(1, ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE),
-    attr(2, ID_CIRCLE_RADIUS_VERTEX_ATTRIBUTE),
-    attr(3, ID_CIRCLE_BLUR_VERTEX_ATTRIBUTE),
-    attr(4, ID_CIRCLE_OPACITY_VERTEX_ATTRIBUTE),
-    attr(5, ID_CIRCLE_STROKE_COLOR_VERTEX_ATTRIBUTE),
-    attr(6, ID_CIRCLE_STROKE_WIDTH_VERTEX_ATTRIBUTE),
-    attr(7, ID_CIRCLE_STROKE_OPACITY_VERTEX_ATTRIBUTE),
+    Attribute::new(0, ID_CIRCLE_POS_VERTEX_ATTRIBUTE),
+    Attribute::new(1, ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE),
+    Attribute::new(2, ID_CIRCLE_RADIUS_VERTEX_ATTRIBUTE),
+    Attribute::new(3, ID_CIRCLE_BLUR_VERTEX_ATTRIBUTE),
+    Attribute::new(4, ID_CIRCLE_OPACITY_VERTEX_ATTRIBUTE),
+    Attribute::new(5, ID_CIRCLE_STROKE_COLOR_VERTEX_ATTRIBUTE),
+    Attribute::new(6, ID_CIRCLE_STROKE_WIDTH_VERTEX_ATTRIBUTE),
+    Attribute::new(7, ID_CIRCLE_STROKE_OPACITY_VERTEX_ATTRIBUTE),
 ];
 
 static CIRCLE: Source =

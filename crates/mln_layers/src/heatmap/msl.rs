@@ -6,30 +6,29 @@ use mln_gfx::shaders::shader_defines::{
     HEATMAP_LAYER_UBO_COUNT, ID_HEATMAP_COLOR_RAMP_TEXTURE, ID_HEATMAP_IMAGE_TEXTURE, ID_HEATMAP_POS_VERTEX_ATTRIBUTE,
     ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE, ID_HEATMAP_TEXTURE_PROPS_UBO, ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE,
 };
-use mln_gfx::shaders::source::msl::{Attribute, Msl, Source};
+use mln_gfx::shaders::source::msl::{Attribute, Msl, Source, Texture};
 
 use super::programs;
-use crate::shaders::msl::{attr, tex};
 
 const HEATMAP_UBO_COUNT: usize = HEATMAP_LAYER_UBO_COUNT;
 const HEATMAP_TEXTURE_UBO_COUNT: usize = ID_HEATMAP_TEXTURE_PROPS_UBO + 1;
 
 const HEATMAP_ATTRIBUTES: &[Attribute] = &[
-    attr(0, Short2, HEATMAP_UBO_COUNT, ID_HEATMAP_POS_VERTEX_ATTRIBUTE),
+    Attribute::new(0, Short2, HEATMAP_UBO_COUNT, ID_HEATMAP_POS_VERTEX_ATTRIBUTE),
     // Data driven
-    attr(1, Float2, HEATMAP_UBO_COUNT + 1, ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE),
-    attr(2, Float2, HEATMAP_UBO_COUNT + 1, ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE),
+    Attribute::new(1, Float2, HEATMAP_UBO_COUNT + 1, ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE),
+    Attribute::new(2, Float2, HEATMAP_UBO_COUNT + 1, ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE),
 ];
 static HEATMAP: Source =
     Source { msl: &HEATMAP_SHADER, attributes: HEATMAP_ATTRIBUTES, instance_attributes: &[], textures: &[] };
 
 const HEATMAP_TEXTURE_ATTRIBUTES: &[Attribute] =
-    &[attr(0, Short2, HEATMAP_TEXTURE_UBO_COUNT, ID_HEATMAP_POS_VERTEX_ATTRIBUTE)];
+    &[Attribute::new(0, Short2, HEATMAP_TEXTURE_UBO_COUNT, ID_HEATMAP_POS_VERTEX_ATTRIBUTE)];
 static HEATMAP_TEXTURE: Source = Source {
     msl: &HEATMAP_TEXTURE_SHADER,
     attributes: HEATMAP_TEXTURE_ATTRIBUTES,
     instance_attributes: &[],
-    textures: &[tex(0, ID_HEATMAP_IMAGE_TEXTURE), tex(1, ID_HEATMAP_COLOR_RAMP_TEXTURE)],
+    textures: &[Texture::new(0, ID_HEATMAP_IMAGE_TEXTURE), Texture::new(1, ID_HEATMAP_COLOR_RAMP_TEXTURE)],
 };
 
 /// The source of each of the type's programs.

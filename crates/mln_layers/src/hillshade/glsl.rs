@@ -8,13 +8,16 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::shaders::source::glsl::{Attribute, Glsl, Source, Texture};
 
 use super::programs;
-use crate::shaders::glsl::{attr, tex};
 
-const HILLSHADE_ATTRIBUTES: &[Attribute] =
-    &[attr(0, Short2, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE), attr(1, Short2, ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE)];
-const HILLSHADE_PREPARE_ATTRIBUTES: &[Attribute] =
-    &[attr(0, Short2, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE), attr(1, Short2, ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE)];
-const HILLSHADE_TEXTURES: &[Texture] = &[tex(0, ID_HILLSHADE_IMAGE_TEXTURE)];
+const HILLSHADE_ATTRIBUTES: &[Attribute] = &[
+    Attribute::new(0, Short2, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE),
+    Attribute::new(1, Short2, ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE),
+];
+const HILLSHADE_PREPARE_ATTRIBUTES: &[Attribute] = &[
+    Attribute::new(0, Short2, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE),
+    Attribute::new(1, Short2, ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE),
+];
+const HILLSHADE_TEXTURES: &[Texture] = &[Texture::new(0, ID_HILLSHADE_IMAGE_TEXTURE)];
 static HILLSHADE: Source = Source {
     glsl: &HILLSHADE_SHADER,
     attributes: HILLSHADE_ATTRIBUTES,

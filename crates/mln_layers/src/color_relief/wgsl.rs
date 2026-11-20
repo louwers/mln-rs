@@ -8,14 +8,15 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::shaders::source::wgsl::{Attribute, Source, Texture, Wgsl};
 
 use super::programs;
-use crate::shaders::wgsl::{attr, tex, unfilterable_tex};
 
-const COLOR_RELIEF_ATTRIBUTES: &[Attribute] =
-    &[attr(5, ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE), attr(6, ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE)];
+const COLOR_RELIEF_ATTRIBUTES: &[Attribute] = &[
+    Attribute::new(5, ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE),
+    Attribute::new(6, ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE),
+];
 const COLOR_RELIEF_TEXTURES: &[Texture] = &[
-    tex(0, ID_COLOR_RELIEF_IMAGE_TEXTURE),
-    unfilterable_tex(2, ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE),
-    tex(4, ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE),
+    Texture::new(0, ID_COLOR_RELIEF_IMAGE_TEXTURE),
+    Texture::unfilterable(2, ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE),
+    Texture::new(4, ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE),
 ];
 static COLOR_RELIEF: Source = Source {
     wgsl: &COLOR_RELIEF_SHADER,

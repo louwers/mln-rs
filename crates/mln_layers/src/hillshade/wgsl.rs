@@ -7,11 +7,12 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::shaders::source::wgsl::{Attribute, Source, Texture, Wgsl};
 
 use super::programs;
-use crate::shaders::wgsl::{attr, tex};
 
-const HILLSHADE_ATTRIBUTES: &[Attribute] =
-    &[attr(5, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE), attr(6, ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE)];
-const HILLSHADE_TEXTURES: &[Texture] = &[tex(0, ID_HILLSHADE_IMAGE_TEXTURE)];
+const HILLSHADE_ATTRIBUTES: &[Attribute] = &[
+    Attribute::new(5, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE),
+    Attribute::new(6, ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE),
+];
+const HILLSHADE_TEXTURES: &[Texture] = &[Texture::new(0, ID_HILLSHADE_IMAGE_TEXTURE)];
 static HILLSHADE: Source = Source {
     wgsl: &HILLSHADE_SHADER,
     attributes: HILLSHADE_ATTRIBUTES,

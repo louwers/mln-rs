@@ -6,18 +6,19 @@ use mln_gfx::shaders::shader_defines::{
     ID_RASTER_IMAGE0_TEXTURE, ID_RASTER_IMAGE1_TEXTURE, ID_RASTER_POS_VERTEX_ATTRIBUTE,
     ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE,
 };
-use mln_gfx::shaders::source::glsl::{Attribute, Glsl, Source};
+use mln_gfx::shaders::source::glsl::{Attribute, Glsl, Source, Texture};
 
 use super::programs;
-use crate::shaders::glsl::{attr, tex};
 
-const RASTER_ATTRIBUTES: &[Attribute] =
-    &[attr(0, Short2, ID_RASTER_POS_VERTEX_ATTRIBUTE), attr(1, Short2, ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE)];
+const RASTER_ATTRIBUTES: &[Attribute] = &[
+    Attribute::new(0, Short2, ID_RASTER_POS_VERTEX_ATTRIBUTE),
+    Attribute::new(1, Short2, ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE),
+];
 static RASTER: Source = Source {
     glsl: &RASTER_SHADER,
     attributes: RASTER_ATTRIBUTES,
     instance_attributes: &[],
-    textures: &[tex(0, ID_RASTER_IMAGE0_TEXTURE), tex(1, ID_RASTER_IMAGE1_TEXTURE)],
+    textures: &[Texture::new(0, ID_RASTER_IMAGE0_TEXTURE), Texture::new(1, ID_RASTER_IMAGE1_TEXTURE)],
 };
 
 /// The source of each of the type's programs.

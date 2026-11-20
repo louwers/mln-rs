@@ -8,11 +8,11 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::shaders::source::wgsl::{Attribute, Source, Texture, Wgsl};
 
 use super::programs;
-use crate::shaders::wgsl::{attr, tex};
 
 const RASTER_ATTRIBUTES: &[Attribute] =
-    &[attr(0, ID_RASTER_POS_VERTEX_ATTRIBUTE), attr(1, ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE)];
-const RASTER_TEXTURES: &[Texture] = &[tex(0, ID_RASTER_IMAGE0_TEXTURE), tex(1, ID_RASTER_IMAGE1_TEXTURE)];
+    &[Attribute::new(0, ID_RASTER_POS_VERTEX_ATTRIBUTE), Attribute::new(1, ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE)];
+const RASTER_TEXTURES: &[Texture] =
+    &[Texture::new(0, ID_RASTER_IMAGE0_TEXTURE), Texture::new(1, ID_RASTER_IMAGE1_TEXTURE)];
 static RASTER: Source =
     Source { wgsl: &RASTER_SHADER, attributes: RASTER_ATTRIBUTES, instance_attributes: &[], textures: RASTER_TEXTURES };
 

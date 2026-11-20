@@ -2,14 +2,12 @@
 //! paint properties of its shaders.
 
 use mln_gfx::gfx_types::AttributeDataType::{Float2, Float4, Short2, UShort4};
-use mln_gfx::shaders::program::Program;
+use mln_gfx::shaders::program::{Program, Property};
 use mln_gfx::shaders::shader_defines::{
     ID_FILL_COLOR_VERTEX_ATTRIBUTE, ID_FILL_IMAGE_TEXTURE, ID_FILL_OPACITY_VERTEX_ATTRIBUTE,
     ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE, ID_FILL_OUTLINE_END_ATTRIBUTE, ID_FILL_OUTLINE_POS_ATTRIBUTE,
     ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE, ID_FILL_POS_VERTEX_ATTRIBUTE,
 };
-
-use crate::shaders::property;
 
 pub static FILL: Program = Program {
     name: "FillShader",
@@ -21,8 +19,8 @@ pub static FILL: Program = Program {
     instance_attributes: &[],
     textures: &[],
     properties: &[
-        property("color", ID_FILL_COLOR_VERTEX_ATTRIBUTE),
-        property("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
+        Property::new("color", ID_FILL_COLOR_VERTEX_ATTRIBUTE),
+        Property::new("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
     ],
 };
 
@@ -36,8 +34,8 @@ pub static FILL_OUTLINE: Program = Program {
     instance_attributes: &[],
     textures: &[],
     properties: &[
-        property("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
-        property("outline_color", ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
+        Property::new("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
+        Property::new("outline_color", ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
     ],
 };
 
@@ -53,10 +51,10 @@ pub static FILL_PATTERN: Program = Program {
     instance_attributes: &[],
     textures: &[ID_FILL_IMAGE_TEXTURE],
     properties: &[
-        property("color", ID_FILL_COLOR_VERTEX_ATTRIBUTE),
-        property("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
-        property("pattern_from", ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
-        property("pattern_to", ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
+        Property::new("color", ID_FILL_COLOR_VERTEX_ATTRIBUTE),
+        Property::new("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
+        Property::new("pattern_from", ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
+        Property::new("pattern_to", ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
     ],
 };
 
@@ -72,10 +70,10 @@ pub static FILL_OUTLINE_PATTERN: Program = Program {
     instance_attributes: &[],
     textures: &[ID_FILL_IMAGE_TEXTURE],
     properties: &[
-        property("color", ID_FILL_COLOR_VERTEX_ATTRIBUTE),
-        property("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
-        property("pattern_from", ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
-        property("pattern_to", ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
+        Property::new("color", ID_FILL_COLOR_VERTEX_ATTRIBUTE),
+        Property::new("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
+        Property::new("pattern_from", ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
+        Property::new("pattern_to", ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
     ],
 };
 
@@ -90,8 +88,8 @@ pub static FILL_OUTLINE_INSTANCED: Program = Program {
     ],
     textures: &[],
     properties: &[
-        property("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
-        property("outline_color", ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
+        Property::new("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
+        Property::new("outline_color", ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
     ],
 };
 
@@ -104,8 +102,8 @@ pub static FILL_OUTLINE_PULLED: Program = Program {
     instance_attributes: &[],
     textures: &[],
     properties: &[
-        property("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
-        property("outline_color", ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
+        Property::new("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
+        Property::new("outline_color", ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
     ],
 };
 
@@ -122,9 +120,9 @@ pub static FILL_OUTLINE_PATTERN_INSTANCED: Program = Program {
     ],
     textures: &[ID_FILL_IMAGE_TEXTURE],
     properties: &[
-        property("color", ID_FILL_COLOR_VERTEX_ATTRIBUTE),
-        property("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
-        property("pattern_from", ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
-        property("pattern_to", ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
+        Property::new("color", ID_FILL_COLOR_VERTEX_ATTRIBUTE),
+        Property::new("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
+        Property::new("pattern_from", ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
+        Property::new("pattern_to", ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
     ],
 };
