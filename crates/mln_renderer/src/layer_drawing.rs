@@ -790,20 +790,22 @@ impl FrameDraws {
     }
 
     /// Draws the pass's draws, all of which bind `objects`, into the open
-    /// pass of `gpu`, the context's.
+    /// pass of `gpu`, the context's. Returns whether none failed.
     pub(crate) fn render_one(
         &self,
         objects: &mut DrawObjects,
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
-    ) {
+    ) -> bool {
         let Some(pass) = self.begin(gpu, parameters) else {
-            return;
+            return true;
         };
+        let mut drawn = true;
         for draw in pass.draws() {
-            pass.draw(gpu, parameters, objects.into(), draw);
+            drawn &= pass.draw(gpu, parameters, objects.into(), draw);
         }
         pass.end(gpu, parameters);
+        drawn
     }
 }
 
@@ -851,13 +853,14 @@ impl<'a> DrawPass<'a> {
     }
 
     /// Draws `objects`, the GPU objects of `draw`, one of the pass's.
+    /// Returns whether it didn't fail.
     pub(crate) fn draw(
         &self,
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
         objects: DrawObjectsMut<'_>,
         draw: PassDraw<'_>,
-    ) {
+    ) -> bool {
         let DrawObjectsMut { objects, atlases } = objects;
         let PassDraw { index, draw } = draw;
         if let Some(atlases) = atlases {
@@ -877,7 +880,7 @@ impl<'a> DrawPass<'a> {
                 self.volume_stencil.filter(|_| draw.clip).unwrap_or_else(StencilMode::disabled),
             ),
         };
-        objects.draw(gpu, parameters, &self.frame.uniform_buffers, depth, stencil, index as u32);
+        objects.draw(gpu, parameters, &self.frame.uniform_buffers, depth, stencil, index as u32)
     }
 
     /// Ends the pass's draws: composites what they drew where they drew
@@ -961,7 +964,9 @@ impl<P: Copy> LayerDraws<P> {
         };
         for draw in pass.draws() {
             match objects(caches, draw.draw(), self.parts[draw.index]) {
-                Some(objects) => pass.draw(gpu, parameters, objects, draw),
+                Some(objects) => {
+                    pass.draw(gpu, parameters, objects, draw);
+                }
                 None => debug_assert!(false, "a draw of tile {:?} has no GPU objects", draw.draw().tile),
             }
         }
@@ -1004,9 +1009,9 @@ impl SingleDraw {
     }
 
     /// Draws the draw, if it draws in the pass, into the open pass of `gpu`,
-    /// the context's.
-    pub(crate) fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        self.frame.render_one(&mut self.objects, gpu, parameters);
+    /// the context's. Returns whether it didn't fail.
+    pub(crate) fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) -> bool {
+        self.frame.render_one(&mut self.objects, gpu, parameters)
     }
 }
 

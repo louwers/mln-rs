@@ -5,7 +5,7 @@
 // hillshade_bucket.rs), and a tile's draw takes the bucket's masked geometry
 // again only when it changed. The slopes depend on nothing but the bucket's
 // DEM and its tile's zoom, so each target is prepared once, by the first
-// frame that draws it.
+// frame whose prepare draw and pass don't fail.
 
 use std::collections::hash_map::Entry;
 use std::mem::offset_of;
@@ -91,7 +91,8 @@ struct BucketTarget {
     prepare: SingleDraw,
     /// The bucket's prepare generation the target was made at.
     generation: u64,
-    /// Whether the target holds the slopes, which a pass drew.
+    /// Whether the target holds the slopes, which a pass drew without
+    /// failing.
     prepared: bool,
 }
 
@@ -517,11 +518,13 @@ impl RenderLayer for RenderHillshadeLayer {
             let Some(mut passes) = target.render_target.begin(gpu, parameters) else {
                 continue;
             };
+            let mut drawn = true;
             while passes.next(parameters) {
-                target.prepare.render(gpu, parameters);
+                drawn &= target.prepare.render(gpu, parameters);
             }
-            passes.end(gpu, parameters);
-            target.prepared = true;
+            // A target whose draw or pass failed prepares again in the next
+            // frame.
+            target.prepared = passes.end(gpu, parameters) && drawn;
         }
     }
 }
