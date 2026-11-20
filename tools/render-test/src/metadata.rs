@@ -214,6 +214,9 @@ pub struct TestMetadata {
     /// different.
     pub(crate) threshold: f64,
     pub(crate) description: String,
+    /// Port-only: the time a test that renders slowly asks for, in place of
+    /// the runner's limit if that is shorter (GL JS's `timeout`).
+    pub(crate) timeout: Option<std::time::Duration>,
     pub(crate) map_mode: MapMode,
     pub(crate) debug: MapDebugOptions,
     pub(crate) cross_source_collisions: bool,
@@ -269,6 +272,7 @@ impl Default for TestMetadata {
             // GL JS's default.
             threshold: 0.1285,
             description: String::new(),
+            timeout: None,
             map_mode: MapMode::Static,
             debug: MapDebugOptions::NO_DEBUG,
             cross_source_collisions: true,

@@ -46,6 +46,7 @@ impl Impl {
         queue: &Queue<()>,
         pool: &Pool,
     ) -> Result<Impl, String> {
+        let assets = (!resource_options.asset_path.is_empty()).then_some(resource_options.asset_path.as_str());
         let resource_options = mln_storage::ResourceOptions {
             cache_path: resource_options.cache_path.clone(),
             ..mln_storage::ResourceOptions::default()
@@ -61,7 +62,7 @@ impl Impl {
             });
             frontend.renderer().set_tile_workers(workers);
         }
-        let file_source = proxy_loader(&resource_options, pool);
+        let file_source = proxy_loader(&resource_options, assets, pool);
         let mut map = Map::with_registry(
             Arc::clone(&file_source),
             MapOptions {
@@ -343,6 +344,10 @@ impl TestRunnerImpl for Impl {
     // query: the remaining runner operations.
     fn set_light(&mut self, json: &str) -> Result<(), MapError> {
         self.map.edit_style(|style| style_ops::set_light(style, json))
+    }
+
+    fn set_terrain(&mut self, json: &str) -> Result<(), MapError> {
+        self.map.edit_style(|style| style_ops::set_terrain(style, json))
     }
 
     fn add_source(&mut self, id: &str, json: &str) -> Result<(), MapError> {

@@ -303,6 +303,10 @@ impl TestRunnerImpl for MockMap {
         }
         Ok(solid(self.size, self.color))
     }
+    fn set_terrain(&mut self, json: &str) -> Result<(), MapError> {
+        self.log(format!("terrain {json}"));
+        Ok(())
+    }
     fn set_layer_property(&mut self, layer: &str, name: &str, value: &serde_json::Value) -> Result<(), MapError> {
         self.log(format!("set {layer} {name} {value}"));
         if layer != "background" {
@@ -340,6 +344,29 @@ fn transition_operations_drive_the_map() {
     assert_eq!(metadata.error_message, "");
     assert_eq!(*calls.borrow(), vec!["set background background-color \"white\"", "render", "render"]);
     assert_eq!(map.color, [255, 255, 255, 255]);
+}
+
+#[test]
+fn terrain_operations_drive_the_map() {
+    let mut metadata = TestMetadata {
+        document: serde_json::json!({"metadata": {"test": {"operations": [
+            ["wait"],
+            ["setTerrain"],
+            ["idle"],
+            ["setTerrain", {"source": "dem", "exaggeration": 1}],
+        ]}}}),
+        ..TestMetadata::default()
+    };
+    let operations = parse_test_operations(&mut metadata);
+    assert_eq!(metadata.error_message, "");
+    let calls = Rc::new(RefCell::new(Vec::new()));
+    let mut map = MockMap::new(Rc::clone(&calls), [0, 0, 0, 255]);
+    let mut ctx = TestContext::with_impl(&mut metadata, &mut map);
+    assert!(operations.iter().all(|operation| operation(&mut ctx)));
+    assert_eq!(
+        *calls.borrow(),
+        vec!["render", "terrain null", "render", r#"terrain {"source":"dem","exaggeration":1}"#]
+    );
 }
 
 #[test]
@@ -728,7 +755,7 @@ fn pending_requests_leave_when_answered_or_cancelled() {
     answered(number);
     assert!(!is_pending("http://tiles/answered.mvt"));
 
-    let proxy = ProxyFileSource { default_resource_loader: std::sync::Arc::new(Unanswered) };
+    let proxy = ProxyFileSource { default_resource_loader: std::sync::Arc::new(Unanswered), assets: None };
     let request = proxy.request(&Resource::style("http://tiles/cancelled.mvt"), |_| {});
     assert!(is_pending("http://tiles/cancelled.mvt"));
     drop(request);
@@ -748,4 +775,43 @@ fn timeout_message_lists_the_pending_requests() {
     let many: Vec<_> = (0..7).map(|i| (format!("http://tiles/{i}.mvt"), Duration::from_secs(1))).collect();
     assert!(waiting_for(&many).starts_with("waiting for 7 requests: http://tiles/0.mvt (1.0 s), "));
     assert!(waiting_for(&many).ends_with("http://tiles/4.mvt (1.0 s), and 2 more"));
+}
+
+/// A file source that records the URLs it is asked for.
+struct Recording(std::sync::Arc<parking_lot::Mutex<Vec<String>>>);
+
+impl mln_storage::FileSource for Recording {
+    fn load(&self, resource: &mln_storage::Resource, responder: mln_storage::Responder) {
+        self.0.lock().push(resource.url.clone());
+        std::mem::forget(responder);
+    }
+
+    fn can_request(&self, _resource: &mln_storage::Resource) -> bool {
+        true
+    }
+}
+
+#[test]
+fn asset_files_stand_in_for_the_caches_local_resources() {
+    use mln_storage::{FileSourceExt, Resource};
+
+    use crate::file_source::ProxyFileSource;
+
+    let assets = tmp_dir("assets");
+    write(&assets.path().join("tiles/a.png"), b"a");
+    let load = |assets: Option<PathBuf>, url: &str| {
+        let urls = std::sync::Arc::default();
+        let loader = std::sync::Arc::new(Recording(std::sync::Arc::clone(&urls)));
+        let proxy = ProxyFileSource { default_resource_loader: loader, assets };
+        let _request = proxy.request(&Resource::style(url), |_| {});
+        let urls = urls.lock();
+        urls.clone()
+    };
+    let assets = || Some(assets.path().to_path_buf());
+    assert_eq!(load(assets(), "local://tiles/a.png"), ["asset://tiles/a.png"]);
+    assert_eq!(load(assets(), "http://localhost:2900/tiles/a.png"), ["asset://tiles/a.png"]);
+    // What isn't there is the cache's.
+    assert_eq!(load(assets(), "local://tiles/b.png"), ["http://tiles/b.png"]);
+    assert_eq!(load(assets(), "http://example.com/tiles/a.png"), ["http://example.com/tiles/a.png"]);
+    assert_eq!(load(None, "local://tiles/a.png"), ["http://tiles/a.png"]);
 }

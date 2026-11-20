@@ -73,6 +73,9 @@ fn unsupported<T>(what: &str) -> Result<T, MapError> {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ResourceOptions {
     pub(crate) cache_path: String,
+    /// Port-only: the directory of files that load as `local://` resources
+    /// the cache lacks (`manifest_parser`'s `asset_path`), or empty.
+    pub(crate) asset_path: String,
 }
 
 /// A frontend, file source and map for one map mode, pixel ratio and
@@ -137,6 +140,11 @@ pub trait TestRunnerImpl {
     /// (a conversion error is `MapError::Conversion`).
     fn set_light(&mut self, _json: &str) -> Result<(), MapError> {
         unsupported("Style::setLight")
+    }
+    /// Port-only: sets the root `terrain` from `json`, which is `null` to
+    /// remove it (a conversion error is `MapError::Conversion`).
+    fn set_terrain(&mut self, _json: &str) -> Result<(), MapError> {
+        unsupported("Style::setTerrain")
     }
     fn remove_source(&mut self, _id: &str) -> Result<bool, MapError> {
         unsupported("Style::removeSource")
@@ -908,7 +916,7 @@ impl TestRunner {
 
         let mut ctx = TestContext::new(metadata);
         // The per-test time limit, stopped when `run` returns.
-        let _watchdog_guard = self.watchdog.as_ref().map(|watchdog| watchdog.arm(&self.queue));
+        let _watchdog_guard = self.watchdog.as_ref().map(|watchdog| watchdog.arm(&self.queue, ctx.metadata.timeout));
 
         if !ctx.metadata.ignored_test {
             for operation in get_before_operations(&self.manifest) {
@@ -940,7 +948,10 @@ impl TestRunner {
                     ctx.metadata.render_errored += 1;
                     return;
                 };
-                let resource_options = ResourceOptions { cache_path: self.manifest.get_cache_path().to_string() };
+                let resource_options = ResourceOptions {
+                    cache_path: self.manifest.get_cache_path().to_string(),
+                    asset_path: self.manifest.get_asset_path().to_string(),
+                };
                 let created = catch_unwind(AssertUnwindSafe(|| {
                     factory(ctx.metadata, &resource_options, &self.impl_options, &self.queue, &self.pool)
                 }));
