@@ -451,7 +451,8 @@ pub(crate) struct RenderLayerBase {
     pub(crate) projection_variant: ProjectionVariant,
 
     /// Counts the evaluations of the layer's values for a reason other than
-    /// the map's zoom: a new style, a transition or a global state.
+    /// the map's zoom, a new style, a transition or a global state, while
+    /// the style has terrain, whose drapes compare it.
     pub(crate) paint_revision: u64,
 
     /// Where the tiles the layer's update found are among the frame's

@@ -329,7 +329,8 @@ impl RenderOrchestrator {
         }
 
         let render_layers_remade = self.apply_layer_changes(&layer_changes, &layers, &clock);
-        let constants_mask_changed = self.evaluate_layers(&layer_changes, render_layers_remade, &mut clock);
+        let drapes = style.get_terrain().is_some();
+        let constants_mask_changed = self.evaluate_layers(&layer_changes, render_layers_remade, drapes, &mut clock);
         self.apply_source_diff(&source_diff, update_parameters);
 
         // A still image fails at the first resource error, and nothing
@@ -733,10 +734,16 @@ impl RenderOrchestrator {
     /// global state that changed, and the ones still transitioning or
     /// crossfading. Returns the ids of the layers whose evaluated constants
     /// changed, which lays their sources out again.
+    ///
+    /// With `drapes`, for a style with terrain, it also counts each layer's
+    /// [`paint_revision`](crate::render_layer::RenderLayerBase::paint_revision),
+    /// which only the terrain's drapes read: they exist only while terrain
+    /// draws, and draw anew when it starts.
     fn evaluate_layers(
         &mut self,
         layer_changes: &LayerChanges,
         render_layers_remade: bool,
+        drapes: bool,
         clock: &mut FrameClock,
     ) -> VecSet<String> {
         let mut constants_mask_changed: VecSet<String> = VecSet::new();
@@ -776,7 +783,7 @@ impl RenderOrchestrator {
             {
                 // A drape drawn while the camera moves keeps values evaluated
                 // at another zoom, but not values of another revision.
-                if layer_added_or_changed || global_state_changed_and_matters || layer.has_transition() {
+                if drapes && (layer_added_or_changed || global_state_changed_and_matters || layer.has_transition()) {
                     layer.base_mut().paint_revision += 1;
                 }
                 let previous_mask = layer.base().evaluated_properties.constants_mask();
