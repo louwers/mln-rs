@@ -223,10 +223,20 @@ const FILL_PATTERN_TEXTURES: &[TextureInfo] = &[tex(0, ID_FILL_IMAGE_TEXTURE)];
 shader_source!(FILL_SHADER, FILL_ATTRIBUTES, &[]);
 shader_source!(FILL_PATTERN_SHADER, FILL_PATTERN_ATTRIBUTES, FILL_PATTERN_TEXTURES);
 
+// A terrain tile's drape draws the outlines as lines of 1 px.
+const FILL_OUTLINE_ATTRIBUTES: &[AttributeInfo] = &[
+    attr(0, Short2, FILL_UBO_COUNT, ID_FILL_POS_VERTEX_ATTRIBUTE),
+    // Data driven
+    attr(1, Float4, FILL_UBO_COUNT + 1, ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
+    attr(2, Float2, FILL_UBO_COUNT + 1, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
+];
+shader_source!(FILL_OUTLINE_SHADER, FILL_OUTLINE_ATTRIBUTES, &[]);
+shader_source!(FILL_OUTLINE_PATTERN_SHADER, FILL_PATTERN_ATTRIBUTES, FILL_PATTERN_TEXTURES);
+
 // An instance of the outline shaders is a segment of an outline: a vertex
 // and the end of its segment, which the same vertices and a buffer of the
 // ends provide. The quad's corner is the vertex. Metal draws no lines wider
-// than 1 px, so it draws every outline with these.
+// than 1 px, so it draws the frame's outlines with these.
 const FILL_OUTLINE_INSTANCED_ATTRIBUTES: &[AttributeInfo] =
     &[attr(0, Short2, FILL_UBO_COUNT, ID_FILL_POS_VERTEX_ATTRIBUTE)];
 const FILL_OUTLINE_INSTANCED_INSTANCE_ATTRIBUTES: &[AttributeInfo] = &[
@@ -544,6 +554,8 @@ pub(crate) static BUILT_INS: &[(&Program, &ShaderSource)] = &[
     (&programs::COLOR_RELIEF, &COLOR_RELIEF_SHADER),
     (&programs::FILL, &FILL_SHADER),
     (&programs::FILL_PATTERN, &FILL_PATTERN_SHADER),
+    (&programs::FILL_OUTLINE, &FILL_OUTLINE_SHADER),
+    (&programs::FILL_OUTLINE_PATTERN, &FILL_OUTLINE_PATTERN_SHADER),
     (&programs::FILL_OUTLINE_INSTANCED, &FILL_OUTLINE_INSTANCED_SHADER),
     (&programs::FILL_OUTLINE_PULLED, &FILL_OUTLINE_PULLED_SHADER),
     (&programs::FILL_OUTLINE_PATTERN_INSTANCED, &FILL_OUTLINE_PATTERN_INSTANCED_SHADER),
