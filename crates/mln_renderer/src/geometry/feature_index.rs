@@ -1,13 +1,13 @@
-// `RefIndexedSubfeature` refers to the index's own copies of the source
-// layer and bucket leader names; here those are shared `Arc<str>`s interned
-// in the index, so the grid entries stay cheap to copy and the index can be
-// built on a worker thread and shared (`Arc<FeatureIndex>`).
-//
-// A query names the layers it reads by id (`QueryLayers`).
+//! The index of a tile's features by their bounding boxes, which
+//! `queryRenderedFeatures` searches. A tile worker fills a
+//! [`FeatureIndexBuilder`] as it lays the tile out and finishes it into a
+//! [`FeatureIndex`], which is only read after.
 
+use std::cmp::Reverse;
 use std::sync::Arc;
 
-use geometry::Point;
+use geo_index::rtree::sort::HilbertSort;
+use geo_index::rtree::{RTree, RTreeBuilder, RTreeIndex};
 use mln_map_types::{ProjectionData, TileProjector, View};
 use mln_style::expression::expression::FeatureState;
 use mln_style::expression::{EvaluationContext, GlobalStateMap};
@@ -20,7 +20,6 @@ use mln_tile_id::geometry_tile_data::{
 use mln_util::constants;
 use mln_util::error::Error;
 use mln_util::feature::{Feature, feature_id_to_string};
-use mln_util::grid_index::{BBox, GridIndex};
 use mln_util::hash::{HashMap, HashSet};
 use mln_vec_map::VecMap;
 
@@ -35,21 +34,8 @@ pub(crate) type QueryLayers<'a> = HashMap<String, &'a dyn RenderLayer>;
 /// The features a query found, by layer id.
 pub(crate) type QueryResults = HashMap<String, Vec<Feature>>;
 
-/// An indexed element within a feature index, referring to the index's copy
-/// of its strings.
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct RefIndexedSubfeature {
-    pub(crate) index: usize,
-    pub(crate) sort_index: usize,
-    pub(crate) source_layer_name: Arc<str>,
-    pub(crate) bucket_leader_id: Arc<str>,
-    // Only used for symbol features
-    pub(crate) bucket_instance_id: u32,
-    pub(crate) collision_group_id: u16,
-}
-
-/// This version of an indexed feature has copies of the necessary strings,
-/// so that it can be used outside the index.
+/// A feature of a feature index or a collision index, which a query looks
+/// up in its tile's data.
 #[derive(Clone, Debug, PartialEq, mln_wire::Wire)]
 pub(crate) struct IndexedSubfeature {
     pub(crate) index: usize,
@@ -68,22 +54,139 @@ pub(crate) struct IndexedSubfeature {
 /// A shared order of feature indices that queries sort symbol features by.
 pub(crate) type FeatureSortOrder = Option<Arc<Vec<usize>>>;
 
-const EXPECTED_UNIQUE_LAYER_IDS: usize = 10;
-const EXPECTED_UNIQUE_LEADER_IDS: usize = 30;
-
-pub(crate) struct FeatureIndex {
-    grid: GridIndex<RefIndexedSubfeature>,
+/// A box of a feature index: one ring of a feature.
+#[derive(Clone, Debug, PartialEq)]
+struct Entry {
+    /// The feature's index in its source layer.
+    index: usize,
+    /// The order the feature was inserted in; a query returns later features
+    /// first.
     sort_index: usize,
+    source_layer_name: Arc<str>,
+    bucket_leader_id: Arc<str>,
+}
 
+/// A box's min x, min y, max x and max y, in tile units.
+type Bounds = [i16; 4];
+
+/// A feature index as a tile's layout fills it.
+pub(crate) struct FeatureIndexBuilder {
+    /// The rings' entries and boxes, in insertion order.
+    entries: Vec<Entry>,
+    boxes: Vec<Bounds>,
+    sort_index: usize,
+    source_layer_names: HashSet<Arc<str>>,
     bucket_layer_ids: HashMap<Arc<str>, Vec<String>>,
-    unique_layer_ids: HashSet<Arc<str>>,
+    tile_data: Option<TileData>,
+}
+
+impl FeatureIndexBuilder {
+    /// An empty index of `tile_data`'s features, sharing the tile data.
+    #[must_use]
+    pub(crate) fn new(tile_data: Option<TileData>) -> Self {
+        FeatureIndexBuilder {
+            entries: Vec::new(),
+            boxes: Vec::new(),
+            sort_index: 0,
+            source_layer_names: HashSet::default(),
+            bucket_layer_ids: HashMap::default(),
+            tile_data,
+        }
+    }
+
+    fn intern_layer_name(&mut self, name: &str) -> Arc<str> {
+        if let Some(existing) = self.source_layer_names.get(name) {
+            return Arc::clone(existing);
+        }
+        let name: Arc<str> = Arc::from(name);
+        self.source_layer_names.insert(Arc::clone(&name));
+        name
+    }
+
+    fn intern_leader_id(&mut self, id: &str) -> Arc<str> {
+        if let Some((existing, _)) = self.bucket_layer_ids.get_key_value(id) {
+            return Arc::clone(existing);
+        }
+        let id: Arc<str> = Arc::from(id);
+        self.bucket_layer_ids.insert(Arc::clone(&id), Vec::new());
+        id
+    }
+
+    /// Records the layers of the bucket whose leader is `bucket_leader_id`,
+    /// which a query of the bucket's features looks at.
+    pub(crate) fn set_bucket_layer_ids(&mut self, bucket_leader_id: &str, layer_ids: &[String]) {
+        let key = self.intern_leader_id(bucket_leader_id);
+        self.bucket_layer_ids.insert(key, layer_ids.to_vec());
+    }
+
+    /// Adds the feature at `index` of `source_layer_name`, with the box of
+    /// each of its rings that reaches into the tile.
+    pub(crate) fn insert(
+        &mut self,
+        geometries: &GeometryCollection,
+        index: usize,
+        source_layer_name: &str,
+        bucket_leader_id: &str,
+    ) {
+        let source_layer_name = self.intern_layer_name(source_layer_name);
+        let bucket_leader_id = self.intern_leader_id(bucket_leader_id);
+        let sort_index = self.sort_index;
+        self.sort_index += 1;
+        for ring in geometries.iter() {
+            let Some((min, max)) = envelope(ring.iter().copied()) else {
+                continue;
+            };
+            let extent = constants::EXTENT;
+            if i32::from(min.x) < extent && i32::from(min.y) < extent && max.x >= 0 && max.y >= 0 {
+                self.entries.push(Entry {
+                    index,
+                    sort_index,
+                    source_layer_name: Arc::clone(&source_layer_name),
+                    bucket_leader_id: Arc::clone(&bucket_leader_id),
+                });
+                self.boxes.push([min.x, min.y, max.x, max.y]);
+            }
+        }
+    }
+
+    /// The index of the features inserted.
+    #[must_use]
+    pub(crate) fn finish(self) -> FeatureIndex {
+        FeatureIndex {
+            tree: build_tree(&self.boxes),
+            entries: self.entries,
+            bucket_layer_ids: self.bucket_layer_ids,
+            tile_data: self.tile_data,
+        }
+    }
+}
+
+/// An R-tree of `boxes`, whose items are their indices; `None` if there are
+/// none.
+fn build_tree(boxes: &[Bounds]) -> Option<RTree<i16>> {
+    if boxes.is_empty() {
+        return None;
+    }
+    let mut builder = RTreeBuilder::new(boxes.len() as u32);
+    for &[min_x, min_y, max_x, max_y] in boxes {
+        builder.add(min_x, min_y, max_x, max_y);
+    }
+    Some(builder.finish::<HilbertSort>())
+}
+
+/// A tile's features by their bounding boxes, and the tile data they are in.
+pub(crate) struct FeatureIndex {
+    /// Indexes `entries`; `None` when there are none.
+    tree: Option<RTree<i16>>,
+    entries: Vec<Entry>,
+    bucket_layer_ids: HashMap<Arc<str>, Vec<String>>,
     tile_data: Option<TileData>,
 }
 
 impl std::fmt::Debug for FeatureIndex {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FeatureIndex")
-            .field("sort_index", &self.sort_index)
+            .field("entries", &self.entries.len())
             .field("bucket_layer_ids", &self.bucket_layer_ids)
             .finish_non_exhaustive()
     }
@@ -104,19 +207,6 @@ fn envelope(points: impl IntoIterator<Item = GeometryCoordinate>) -> Option<(Geo
 }
 
 impl FeatureIndex {
-    /// An empty index of `tile_data`'s features, sharing the tile data.
-    #[must_use]
-    pub(crate) fn new(tile_data: Option<TileData>) -> Self {
-        FeatureIndex {
-            // 16x16 grid -> 32px cell
-            grid: GridIndex::new(constants::EXTENT as f32, constants::EXTENT as f32, (constants::EXTENT / 16) as u32),
-            sort_index: 0,
-            bucket_layer_ids: HashMap::default(),
-            unique_layer_ids: HashSet::default(),
-            tile_data,
-        }
-    }
-
     #[must_use]
     pub(crate) fn data(&self) -> Option<&TileData> {
         self.tile_data.as_ref()
@@ -125,74 +215,6 @@ impl FeatureIndex {
     /// Sets the tile data the index's features are in.
     pub(crate) fn set_data(&mut self, tile_data: Option<TileData>) {
         self.tile_data = tile_data;
-    }
-
-    /// Set the expected number of elements per cell to avoid small
-    /// re-allocations for populated cells.
-    pub(crate) fn reserve(&mut self, value: usize) {
-        self.grid.reserve(value);
-    }
-
-    fn intern_layer_name(&mut self, name: &str) -> Arc<str> {
-        if self.unique_layer_ids.is_empty() {
-            self.unique_layer_ids.reserve(EXPECTED_UNIQUE_LAYER_IDS);
-        }
-        if let Some(existing) = self.unique_layer_ids.get(name) {
-            return Arc::clone(existing);
-        }
-        let name: Arc<str> = Arc::from(name);
-        self.unique_layer_ids.insert(Arc::clone(&name));
-        name
-    }
-
-    fn intern_leader_id(&mut self, id: &str) -> Arc<str> {
-        if self.bucket_layer_ids.is_empty() {
-            self.bucket_layer_ids.reserve(EXPECTED_UNIQUE_LEADER_IDS);
-        }
-        if let Some((existing, _)) = self.bucket_layer_ids.get_key_value(id) {
-            return Arc::clone(existing);
-        }
-        let id: Arc<str> = Arc::from(id);
-        self.bucket_layer_ids.insert(Arc::clone(&id), Vec::new());
-        id
-    }
-
-    pub(crate) fn insert(
-        &mut self,
-        geometries: &GeometryCollection,
-        index: usize,
-        source_layer_name: &str,
-        bucket_leader_id: &str,
-    ) {
-        let emplaced_layer_name = self.intern_layer_name(source_layer_name);
-        let emplaced_leader_id = self.intern_leader_id(bucket_leader_id);
-
-        let feature_sort_index = self.sort_index;
-        self.sort_index += 1;
-        for ring in geometries.iter() {
-            let Some((min, max)) = envelope(ring.iter().copied()) else {
-                // An empty ring has no envelope, and nothing of it is in
-                // the tile.
-                continue;
-            };
-            let extent = constants::EXTENT;
-            if i32::from(min.x) < extent && i32::from(min.y) < extent && max.x >= 0 && max.y >= 0 {
-                self.grid.insert(
-                    RefIndexedSubfeature {
-                        index,
-                        sort_index: feature_sort_index,
-                        source_layer_name: Arc::clone(&emplaced_layer_name),
-                        bucket_leader_id: Arc::clone(&emplaced_leader_id),
-                        bucket_instance_id: 0,
-                        collision_group_id: 0,
-                    },
-                    &BBox::new(
-                        Point::new(f32::from(min.x), f32::from(min.y)),
-                        Point::new(f32::from(max.x), f32::from(max.y)),
-                    ),
-                );
-            }
-        }
     }
 
     #[expect(
@@ -214,9 +236,9 @@ impl FeatureIndex {
         additional_query_padding: f32,
         source_feature_state: &SourceFeatureState,
     ) -> Result<(), Error> {
-        if self.tile_data.is_none() {
+        let (Some(tree), Some(_)) = (&self.tree, &self.tile_data) else {
             return Ok(());
-        }
+        };
 
         // Determine query radius
         let pixels_to_tile_units = (f64::from(constants::EXTENT) / tile_size / scale) as f32;
@@ -226,32 +248,30 @@ impl FeatureIndex {
             (if p < extent { p } else { extent }) as i16
         };
 
-        // Query the grid index
         let Some((min, max)) = envelope(query_geometry.iter().copied()) else {
             return Ok(());
         };
         // The padded box's corners are tile coordinates, which wrap in i16.
-        let query_box = BBox::new(
-            Point::new(
-                f32::from(min.x.wrapping_sub(additional_padding)),
-                f32::from(min.y.wrapping_sub(additional_padding)),
-            ),
-            Point::new(
-                f32::from(max.x.wrapping_add(additional_padding)),
-                f32::from(max.y.wrapping_add(additional_padding)),
-            ),
-        );
-        let mut features = self.grid.query(&query_box);
-
-        features.sort_by_key(|feature| std::cmp::Reverse(feature.sort_index));
-        let mut previous_sort_index = usize::MAX;
-        for indexed_feature in &features {
-            // If this feature is the same as the previous feature, skip it.
-            if indexed_feature.sort_index == previous_sort_index {
-                continue;
-            }
-            previous_sort_index = indexed_feature.sort_index;
-
+        let (min_x, min_y) = (min.x.wrapping_sub(additional_padding), min.y.wrapping_sub(additional_padding));
+        let (max_x, max_y) = (max.x.wrapping_add(additional_padding), max.y.wrapping_add(additional_padding));
+        // Only a box that reaches into the tile finds features, and one that
+        // wrapped around is empty.
+        let extent = constants::EXTENT;
+        if min_x > max_x
+            || min_y > max_y
+            || max_x < 0
+            || max_y < 0
+            || i32::from(min_x) >= extent
+            || i32::from(min_y) >= extent
+        {
+            return Ok(());
+        }
+        let mut features: Vec<&Entry> =
+            tree.search(min_x, min_y, max_x, max_y).into_iter().filter_map(|i| self.entries.get(i as usize)).collect();
+        // Later features first, each once.
+        features.sort_unstable_by_key(|feature| Reverse(feature.sort_index));
+        features.dedup_by_key(|feature| feature.sort_index);
+        for indexed_feature in features {
             self.add_feature(
                 result,
                 indexed_feature.index,
@@ -451,11 +471,6 @@ impl FeatureIndex {
         )
     }
 
-    pub(crate) fn set_bucket_layer_ids(&mut self, bucket_leader_id: &str, layer_ids: &[String]) {
-        let key = self.intern_leader_id(bucket_leader_id);
-        self.bucket_layer_ids.insert(key, layer_ids.to_vec());
-    }
-
     /// The bucket leaders and their layer ids (sorted, for inspection).
     #[must_use]
     pub(crate) fn bucket_layer_ids(&self) -> VecMap<String, Vec<String>> {
@@ -464,37 +479,44 @@ impl FeatureIndex {
 }
 
 /// A `FeatureIndex` as it crosses, for a tile worker in another wasm instance
-/// (`tile/worker_codec`): the grid's boxes in insertion order, which `insert`
-/// puts in an empty grid again, with their strings once each, and the tile data
-/// by key (the side that gets the index has the data it sent). A derive would
-/// write the grid's cells too, and every element's strings. Only symbol layouts
-/// insert circles, which a worker never does.
+/// (`tile/worker_codec`): its boxes, each string once, and not its tile data,
+/// which the side that gets the index has (it sent it). The side that reads
+/// it builds the tree again, as the tree's own bytes are larger than the
+/// boxes and geo-index has no owned tree to read them into.
 #[derive(mln_wire::Wire)]
-struct Grid {
-    sort_index: usize,
+struct WireIndex {
     strings: Vec<String>,
     bucket_layer_ids: VecMap<String, Vec<String>>,
-    elements: Vec<Element>,
+    elements: Vec<WireEntry>,
 }
 
-/// A box of the grid: its `RefIndexedSubfeature`, with indices into
-/// `strings`, and min x, min y, max x, max y.
+/// An [`Entry`], with indices into `strings`, and its box.
 #[derive(mln_wire::Wire)]
-struct Element {
+struct WireEntry {
     index: usize,
     sort_index: usize,
     source_layer_name: u32,
     bucket_leader_id: u32,
-    bucket_instance_id: u32,
-    collision_group_id: u16,
-    bbox: [f32; 4],
+    bounds: Bounds,
 }
 
 impl FeatureIndex {
-    fn wire_grid(&self) -> Result<Grid, &'static str> {
-        if self.grid.has_circles() {
-            return Err("a feature index with circles");
+    /// The boxes of `entries`, in their order.
+    fn boxes(&self) -> Vec<Bounds> {
+        let mut boxes = vec![[0; 4]; self.entries.len()];
+        if let Some(tree) = &self.tree {
+            // The tree's leaves come first, each with the index of its item.
+            let indices = tree.indices();
+            for (position, leaf) in tree.boxes().as_chunks::<4>().0.iter().take(self.entries.len()).enumerate() {
+                if let Some(bounds) = boxes.get_mut(indices.get(position)) {
+                    *bounds = *leaf;
+                }
+            }
         }
+        boxes
+    }
+
+    fn to_wire(&self) -> WireIndex {
         let mut strings: Vec<String> = Vec::new();
         let mut string_ids: HashMap<*const u8, u32> = HashMap::default();
         let mut intern = |s: &Arc<str>| -> u32 {
@@ -504,32 +526,30 @@ impl FeatureIndex {
             })
         };
         let elements = self
-            .grid
-            .box_elements()
+            .entries
             .iter()
-            .map(|(element, bbox)| Element {
-                index: element.index,
-                sort_index: element.sort_index,
-                source_layer_name: intern(&element.source_layer_name),
-                bucket_leader_id: intern(&element.bucket_leader_id),
-                bucket_instance_id: element.bucket_instance_id,
-                collision_group_id: element.collision_group_id,
-                bbox: [bbox.min.x, bbox.min.y, bbox.max.x, bbox.max.y],
+            .zip(self.boxes())
+            .map(|(entry, bounds)| WireEntry {
+                index: entry.index,
+                sort_index: entry.sort_index,
+                source_layer_name: intern(&entry.source_layer_name),
+                bucket_leader_id: intern(&entry.bucket_leader_id),
+                bounds,
             })
             .collect();
-        Ok(Grid { sort_index: self.sort_index, strings, bucket_layer_ids: self.bucket_layer_ids(), elements })
+        WireIndex { strings, bucket_layer_ids: self.bucket_layer_ids(), elements }
     }
 
     /// The bucket leader of each box, in the order they were inserted.
     #[cfg(test)]
     pub(crate) fn leaders(&self) -> Vec<&str> {
-        self.grid.box_elements().iter().map(|(element, _)| &*element.bucket_leader_id).collect()
+        self.entries.iter().map(|entry| &*entry.bucket_leader_id).collect()
     }
 
     /// The index as it crosses, without its tile data.
     #[cfg(test)]
     pub(crate) fn encode_grid(&self) -> Vec<u8> {
-        mln_wire::to_vec(&self.wire_grid().unwrap()).unwrap()
+        mln_wire::to_vec(&self.to_wire()).unwrap()
     }
 }
 
@@ -537,18 +557,15 @@ impl FeatureIndex {
 /// sets (`set_data`).
 impl mln_wire::Wire for FeatureIndex {
     fn write(&self, w: &mut mln_wire::Writer) {
-        match self.wire_grid() {
-            Ok(grid) => grid.write(w),
-            Err(error) => w.fail(error.to_owned()),
-        }
+        self.to_wire().write(w);
     }
 
     fn read(r: &mut mln_wire::Reader<'_>) -> Option<Self> {
-        let parts = Grid::read(r)?;
-        let mut index = FeatureIndex::new(None);
-        let strings: Vec<Arc<str>> = parts.strings.iter().map(|string| index.intern_layer_name(string)).collect();
+        let parts = WireIndex::read(r)?;
+        let mut builder = FeatureIndexBuilder::new(None);
+        let strings: Vec<Arc<str>> = parts.strings.iter().map(|string| builder.intern_layer_name(string)).collect();
         for (leader, layer_ids) in &parts.bucket_layer_ids {
-            index.set_bucket_layer_ids(leader, layer_ids);
+            builder.set_bucket_layer_ids(leader, layer_ids);
         }
         for element in parts.elements {
             let (Some(source_layer_name), Some(bucket_leader_id)) =
@@ -558,27 +575,23 @@ impl mln_wire::Wire for FeatureIndex {
             };
             // The leaders share the strings of `bucket_layer_ids`, as `insert`
             // interns them.
-            let bucket_leader_id = index.intern_leader_id(bucket_leader_id);
-            let [min_x, min_y, max_x, max_y] = element.bbox;
-            index.grid.insert(
-                RefIndexedSubfeature {
-                    index: element.index,
-                    sort_index: element.sort_index,
-                    source_layer_name: Arc::clone(source_layer_name),
-                    bucket_leader_id,
-                    bucket_instance_id: element.bucket_instance_id,
-                    collision_group_id: element.collision_group_id,
-                },
-                &BBox::new(Point::new(min_x, min_y), Point::new(max_x, max_y)),
-            );
+            let bucket_leader_id = builder.intern_leader_id(bucket_leader_id);
+            builder.entries.push(Entry {
+                index: element.index,
+                sort_index: element.sort_index,
+                source_layer_name: Arc::clone(source_layer_name),
+                bucket_leader_id,
+            });
+            builder.boxes.push(element.bounds);
         }
-        index.sort_index = parts.sort_index;
-        Some(index)
+        Some(builder.finish())
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use geometry::Point;
+
     use super::*;
 
     #[test]
@@ -607,14 +620,32 @@ mod tests {
 
     #[test]
     fn insert_records_leaders_and_skips_rings_outside_the_tile() {
-        let mut index = FeatureIndex::new(None);
-        index.set_bucket_layer_ids("a", &["a".to_owned(), "b".to_owned()]);
+        let mut builder = FeatureIndexBuilder::new(None);
+        builder.set_bucket_layer_ids("a", &["a".to_owned(), "b".to_owned()]);
         let inside = GeometryCollection::from(vec![vec![Point::new(10, 10)]]);
         let outside = GeometryCollection::from(vec![vec![Point::new(9000, 10)]]);
-        index.insert(&inside, 0, "layer", "a");
-        index.insert(&outside, 1, "layer", "a");
+        builder.insert(&inside, 0, "layer", "a");
+        builder.insert(&outside, 1, "layer", "a");
+        let index = builder.finish();
         assert_eq!(index.bucket_layer_ids()["a"], vec!["a".to_owned(), "b".to_owned()]);
-        let found = index.grid.query(&BBox::new(Point::new(0.0, 0.0), Point::new(8192.0, 8192.0)));
-        assert_eq!(found.iter().map(|f| f.index).collect::<Vec<_>>(), vec![0]);
+        assert_eq!(index.leaders(), ["a"]);
+    }
+
+    #[test]
+    fn crosses_with_its_boxes() {
+        let mut builder = FeatureIndexBuilder::new(None);
+        builder.set_bucket_layer_ids("leader", &["leader".to_owned()]);
+        for i in 0..100 {
+            let x = (i * 80) as i16;
+            let ring = vec![Point::new(x, 10), Point::new(x + 5, 4000)];
+            builder.insert(&GeometryCollection::from(vec![ring.clone(), ring]), i, "layer", "leader");
+        }
+        let index = builder.finish();
+        let encoded = index.encode_grid();
+        let decoded: FeatureIndex = mln_wire::from_slice(&mln_wire::to_vec(&index).unwrap()).unwrap();
+        assert_eq!(decoded.entries, index.entries);
+        assert_eq!(decoded.boxes(), index.boxes());
+        assert_eq!(decoded.encode_grid(), encoded);
+        assert_eq!(index.boxes()[14], [560, 10, 565, 4000]);
     }
 }

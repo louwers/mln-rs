@@ -26,7 +26,7 @@ use mln_vec_map::VecMap;
 use crate::bucket::Bucket;
 use crate::buckets::fill_bucket::FillBucket;
 use crate::buckets::line_bucket::LineBucket;
-use crate::geometry::feature_index::FeatureIndex;
+use crate::geometry::feature_index::FeatureIndexBuilder;
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::{BuildParams, Layout, LayoutParameters, SourceLayer, layers_by_id};
 use crate::layout::tile_layout::Resolved;
@@ -257,7 +257,7 @@ impl<S: PatternLayoutSpec> Layout<S::Type> for PatternLayout<S> {
     fn create_bucket(
         &mut self,
         resolved: Option<&Resolved>,
-        feature_index: &mut FeatureIndex,
+        feature_index: &mut FeatureIndexBuilder,
         build: &BuildParams,
     ) -> Result<Option<S::Bucket>, Error> {
         let no_patterns = ImagePositions::default();

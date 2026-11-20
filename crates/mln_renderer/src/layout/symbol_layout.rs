@@ -43,7 +43,7 @@ use crate::buckets::symbol_bucket::{
     SymbolLayoutFlags, SymbolSizeBinder,
 };
 use crate::geometry::anchor::Anchor;
-use crate::geometry::feature_index::{FeatureIndex, IndexedSubfeature};
+use crate::geometry::feature_index::{FeatureIndexBuilder, IndexedSubfeature};
 use crate::gfx::mesh::Indexed;
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::clip_lines::clip_lines;
@@ -1354,7 +1354,7 @@ impl Layout<Symbol> for SymbolLayout {
     fn create_bucket(
         &mut self,
         resolved: Option<&Resolved>,
-        _feature_index: &mut FeatureIndex,
+        _feature_index: &mut FeatureIndexBuilder,
         build: &BuildParams,
     ) -> Result<Option<SymbolBucket>, Error> {
         if let Some(resolved) = resolved {

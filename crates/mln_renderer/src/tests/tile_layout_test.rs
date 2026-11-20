@@ -114,7 +114,7 @@ fn build_indexes_the_layouts_that_waited_last() {
     let discovered = discover(&input).unwrap();
     let built = build(discovered, &input, &Resolved::default()).unwrap();
 
-    assert_eq!(built.feature_index.leaders(), ["outline", "outline", "patterned", "patterned"]);
+    assert_eq!(built.feature_index.finish().leaders(), ["outline", "outline", "patterned", "patterned"]);
     assert!(built.buckets.contains_key("outline"));
 }
 

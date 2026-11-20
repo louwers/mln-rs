@@ -2988,6 +2988,7 @@ dependencies = [
  "bytemuck",
  "earcut",
  "etagere",
+ "geo-index",
  "geo-types",
  "geojson",
  "glam",

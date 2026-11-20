@@ -23,7 +23,7 @@ use crate::buckets::circle_bucket::CircleBucket;
 use crate::buckets::fill_bucket::FillBucket;
 use crate::buckets::line_bucket::LineBucket;
 use crate::buckets::symbol_bucket::SymbolBucket;
-use crate::geometry::feature_index::FeatureIndex;
+use crate::geometry::feature_index::FeatureIndexBuilder;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::layout::filter_groups::FilterGroups;
 use crate::layout::layout::{BuildParams, LayoutParameters, SourceLayer};
@@ -159,7 +159,7 @@ fn create_bucket(properties: &Arc<dyn ErasedEvaluatedLayer>, shape: Shape) -> Bo
         ImagePosition::new(RectU16 { x: 0, y: 0, w: 18, h: 18 }, &marker),
     )]);
     let resolved = Resolved { icons: image_positions.clone(), patterns: image_positions, ..Resolved::default() };
-    let mut built = Built { buckets: LayoutBuckets::default(), feature_index: FeatureIndex::new(Some(data)) };
+    let mut built = Built { buckets: LayoutBuckets::default(), feature_index: FeatureIndexBuilder::new(Some(data)) };
     let build =
         BuildParams { first_load: true, show_collision_boxes: false, canonical: bucket_parameters.tile_id.canonical };
     layout.create_bucket(Some(&resolved), &mut built, &build).unwrap();

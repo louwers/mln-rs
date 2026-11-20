@@ -18,7 +18,7 @@ use mln_vec_map::VecMap;
 
 use crate::bucket_parameters::BucketParameters;
 use crate::buckets::circle_bucket::{CircleBucket, CircleLayoutVertex};
-use crate::geometry::feature_index::FeatureIndex;
+use crate::geometry::feature_index::FeatureIndexBuilder;
 use crate::gfx::mesh::{Indexed, add_point_quads};
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::filter_groups::FilterGroups;
@@ -162,7 +162,7 @@ impl Layout<Circle> for CircleLayout {
     fn create_bucket(
         &mut self,
         _resolved: Option<&Resolved>,
-        feature_index: &mut FeatureIndex,
+        feature_index: &mut FeatureIndexBuilder,
         build: &BuildParams,
     ) -> Result<Option<CircleBucket>, Error> {
         let source_layer = self.source_layer.layer()?;
