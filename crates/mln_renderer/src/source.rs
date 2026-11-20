@@ -320,7 +320,8 @@ impl<'a, O: DataOrigin> OriginUpdate<'a, O> {
             |slot| !slot.place().is_cached() && filter(&slot.tile.id),
             |tile| {
                 tile.with_load(|load, tile| {
-                    if let Some(load) = (load as &mut dyn Any).downcast_mut::<O::Load>() {
+                    let load: &mut dyn Any = load;
+                    if let Some(load) = load.downcast_mut::<O::Load>() {
                         f(load, &mut LoadContext::new(tile));
                     }
                 });
