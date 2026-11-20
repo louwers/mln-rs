@@ -58,11 +58,12 @@ use crate::layer_drawing::LayerDrawing;
 pub use crate::layer_type::EvaluatedLayer;
 use crate::layout::layout::{Layout, LayoutParameters, SourceLayer};
 use crate::paint_parameters::PaintParameters;
+pub use crate::render_layer::LayerBucket;
 use crate::render_layer::{Atlases, BucketPlacementData};
 pub use crate::render_pass::RenderPass;
 use crate::render_source::RenderSource;
 pub use crate::render_source::TileOrder;
-pub use crate::render_tile::{FrameTile, NoTileBucket, TileContent, TileView, ViewPlace};
+pub use crate::render_tile::{FrameTile, NoTileBucket, TileView};
 use crate::update_parameters::UpdateParameters;
 
 /// The render half of a layer type, whose style half is its

@@ -141,7 +141,7 @@ impl RenderTile {
 
 /// What a frame's tile holds, which a layer's [`TileView`] reads.
 #[derive(Clone, Copy)]
-pub enum TileContent<'a> {
+pub(crate) enum TileContent<'a> {
     /// The tile's contents in the tile store.
     Tile(&'a Contents),
     /// The image of an image source, which each of the source's tiles
@@ -151,10 +151,10 @@ pub enum TileContent<'a> {
 
 /// Where a tile's content keeps what it shows a layer. The frame's found
 /// tiles keep it for layers of every type in one list, so a place of one
-/// type's views can reach another's [`TileView::at`], which asserts that it
+/// type's views can reach another's [`FindView::at`], which asserts that it
 /// doesn't.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ViewPlace {
+pub(crate) enum ViewPlace {
     /// The layer's place among the layers of the tile's layout.
     Laid(usize),
     /// The tile's own data, a raster or raster-dem tile's bucket or an
@@ -163,11 +163,20 @@ pub enum ViewPlace {
 }
 
 /// What a frame's tile shows a layer of some type: its bucket in the tile's
-/// layout, a raster or raster-dem tile's own bucket, or an image source's
-/// image. A frame finds it by the layer's id once ([`find`](Self::find)),
-/// in its update, and its encode takes it again from where it was found
-/// ([`at`](Self::at)).
-pub trait TileView<'a>: Copy {
+/// layout ([`LayerBucket`](crate::layer::LayerBucket)), a raster tile's own
+/// bucket or an image source's image (`RasterView`), a raster-dem tile's
+/// own bucket, or nothing for a type without a source ([`NoTileBucket`]).
+/// The engine's kinds of tiles are the only ones, so these are the only
+/// views: a layer type takes the one of its source's kind.
+#[expect(private_bounds, reason = "the engine's views are the only ones: `FindView` seals the trait")]
+pub trait TileView<'a>: Copy + FindView<'a> {}
+
+impl<'a, V: Copy + FindView<'a>> TileView<'a> for V {}
+
+/// How the engine finds a layer's [`TileView`] in a frame's tile. A frame
+/// finds it by the layer's id once ([`find`](Self::find)), in its update,
+/// and its encode takes it again from where it was found ([`at`](Self::at)).
+pub(crate) trait FindView<'a>: Sized {
     /// What `content` shows the layer `layer_id`, if anything, and where it
     /// is in it.
     fn find(content: TileContent<'a>, layer_id: &str) -> Option<(Self, ViewPlace)>;
@@ -178,7 +187,7 @@ pub trait TileView<'a>: Copy {
 
     /// Whether this is what a tile shows the layer `layer_id`, rather than
     /// another layer.
-    fn is_for(self, _layer_id: &str) -> bool {
+    fn is_for(&self, _layer_id: &str) -> bool {
         true
     }
 
@@ -189,7 +198,7 @@ pub trait TileView<'a>: Copy {
     }
 }
 
-impl<'a> TileView<'a> for &'a HillshadeBucket {
+impl<'a> FindView<'a> for &'a HillshadeBucket {
     fn find(content: TileContent<'a>, _layer_id: &str) -> Option<(Self, ViewPlace)> {
         Some((Self::at(content, ViewPlace::Own)?, ViewPlace::Own))
     }
@@ -207,7 +216,7 @@ impl<'a> TileView<'a> for &'a HillshadeBucket {
 #[derive(Clone, Copy)]
 pub enum NoTileBucket {}
 
-impl TileView<'_> for NoTileBucket {
+impl FindView<'_> for NoTileBucket {
     fn find(_content: TileContent<'_>, _layer_id: &str) -> Option<(Self, ViewPlace)> {
         None
     }

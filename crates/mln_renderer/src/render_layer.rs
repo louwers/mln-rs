@@ -35,7 +35,7 @@ use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;
 use crate::render_pass::RenderPass;
 use crate::render_source::{RenderSource, TileOrder};
-use crate::render_tile::{FoundTile, FrameTile, RenderTile, TileContent, TileView, ViewPlace};
+use crate::render_tile::{FindView, FoundTile, FrameTile, RenderTile, TileContent, ViewPlace};
 use crate::tile::contents::GeometryContents;
 use crate::tile::job::SourceKey;
 use crate::tile_render_data::TileAtlasTextures;
@@ -113,7 +113,7 @@ impl<'a, T: LayerType> LayerBucket<'a, T> {
     }
 }
 
-impl<'a, T: LayerType> TileView<'a> for LayerBucket<'a, T> {
+impl<'a, T: LayerType> FindView<'a> for LayerBucket<'a, T> {
     fn find(content: TileContent<'a>, layer_id: &str) -> Option<(Self, ViewPlace)> {
         let TileContent::Tile(contents) = content else { return None };
         let contents = contents.geometry()?;
@@ -130,7 +130,7 @@ impl<'a, T: LayerType> TileView<'a> for LayerBucket<'a, T> {
         LayerBucket::laid(contents.geometry()?, index)
     }
 
-    fn is_for(self, layer_id: &str) -> bool {
+    fn is_for(&self, layer_id: &str) -> bool {
         self.layer.style.id == layer_id
     }
 
