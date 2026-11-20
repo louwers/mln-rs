@@ -39,10 +39,8 @@ path = "tests/offline_download_map.rs"
 # Serves the styles of the DatabaseFileSource region tests.
 httpmock.workspace = true
 mln_headless = { package = "mln-rs-headless", path = "../mln_headless" }
-# The built-in layer types outside the engine, for the unit tests' registry.
-mln_layers = { package = "mln-rs-layers", path = "../mln_layers" }
 mln_map = { package = "mln-rs-map", path = "../mln_map" }
-# The built-in registrations of the tests' maps.
+# The built-in registrations that the tests' styles parse against.
 mln_rs = { package = "mln-rs", path = "../..", default-features = false }
 mln_storage = { workspace = true, features = ["sqlite", "stub-file-source"] }
 parking_lot.workspace = true

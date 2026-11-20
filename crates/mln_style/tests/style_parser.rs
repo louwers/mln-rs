@@ -1,26 +1,14 @@
 //! The style parser over the C++ repository's style parser fixtures, whose
 //! styles have layers of every built-in type, so it parses against the
-//! built-in registrations of the engine and of `mln_layers`.
+//! facade's built-in registrations.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use mln_renderer::{Registry, RegistryBuilder};
-use mln_style::expression::functions::register_builtin_functions;
+use mln_rs::builtin_registry;
 use mln_style::parser::Parser;
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
 use parking_lot::Mutex;
-
-/// The built-in registrations: the expression functions and the layer and
-/// source types of the engine and of `mln_layers`.
-fn builtin_registry() -> Arc<Registry> {
-    let mut builder = RegistryBuilder::new();
-    register_builtin_functions(builder.functions_mut()).unwrap();
-    mln_layers::register_layer_types(&mut builder).unwrap();
-    mln_renderer::builtins::register_layer_types(&mut builder).unwrap();
-    mln_renderer::builtins::register_source_types(&mut builder).unwrap();
-    builder.build()
-}
 
 fn fixtures_dir() -> PathBuf {
     std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("testdata/test/fixtures/style_parser")
