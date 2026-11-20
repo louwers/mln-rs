@@ -5,6 +5,9 @@
 //!
 //! - `#[wire(bound = "...")]` on the type replaces the `T: Wire` bound that
 //!   each type parameter gets otherwise.
+//! - `#[wire(crate = path)]` on the type names the `mln_wire` crate by
+//!   `path` instead of `::mln_wire`, for a macro that derives `Wire` in a
+//!   crate that doesn't depend on `mln_wire` itself.
 //! - `#[wire(default)]` on a struct that implements `Default` reads it into
 //!   its default, one field after another. A struct literal of the fields
 //!   read drops those read so far at each place reading can fail, which
@@ -63,6 +66,7 @@ fn field_attrs(attrs: &[syn::Attribute]) -> syn::Result<FieldAttrs> {
 struct ContainerAttrs {
     bound: Option<Vec<WherePredicate>>,
     default: bool,
+    krate: Option<Path>,
 }
 
 fn container_attrs(attrs: &[syn::Attribute]) -> syn::Result<ContainerAttrs> {
@@ -71,6 +75,9 @@ fn container_attrs(attrs: &[syn::Attribute]) -> syn::Result<ContainerAttrs> {
         attr.parse_nested_meta(|meta| {
             if meta.path.is_ident("default") {
                 result.default = true;
+                Ok(())
+            } else if meta.path.is_ident("crate") {
+                result.krate = Some(meta.value()?.parse()?);
                 Ok(())
             } else if meta.path.is_ident("bound") {
                 let bound: LitStr = meta.value()?.parse()?;
@@ -85,7 +92,7 @@ fn container_attrs(attrs: &[syn::Attribute]) -> syn::Result<ContainerAttrs> {
                 result.bound = Some(predicates);
                 Ok(())
             } else {
-                Err(meta.error("expected `bound` or `default`"))
+                Err(meta.error("expected `bound`, `crate` or `default`"))
             }
         })?;
     }
@@ -93,19 +100,19 @@ fn container_attrs(attrs: &[syn::Attribute]) -> syn::Result<ContainerAttrs> {
 }
 
 /// How a field is written, given an expression that borrows it.
-fn write_field(attrs: &FieldAttrs, field: &TokenStream2) -> TokenStream2 {
+fn write_field(wire: &TokenStream2, attrs: &FieldAttrs, field: &TokenStream2) -> TokenStream2 {
     if attrs.skip {
         return quote! {};
     }
     if let Some(path) = &attrs.with {
         quote! { #path::write(#field, w); }
     } else {
-        quote! { ::mln_wire::Wire::write(#field, w); }
+        quote! { #wire::Wire::write(#field, w); }
     }
 }
 
 /// How a field is read: an expression of its value.
-fn read_field(attrs: &FieldAttrs) -> TokenStream2 {
+fn read_field(wire: &TokenStream2, attrs: &FieldAttrs) -> TokenStream2 {
     if attrs.skip {
         return if let Some(default) = &attrs.default {
             quote! { #default() }
@@ -116,19 +123,23 @@ fn read_field(attrs: &FieldAttrs) -> TokenStream2 {
     if let Some(path) = &attrs.with {
         quote! { #path::read(r)? }
     } else {
-        quote! { ::mln_wire::Wire::read(r)? }
+        quote! { #wire::Wire::read(r)? }
     }
 }
 
 /// The write statements and the read constructor of `fields`, whose values
 /// the write statements borrow through `bindings`.
-fn fields_code(fields: &Fields, bindings: &[TokenStream2]) -> syn::Result<(TokenStream2, TokenStream2)> {
+fn fields_code(
+    wire: &TokenStream2,
+    fields: &Fields,
+    bindings: &[TokenStream2],
+) -> syn::Result<(TokenStream2, TokenStream2)> {
     let mut writes = Vec::new();
     let mut reads = Vec::new();
     for (field, binding) in fields.iter().zip(bindings) {
         let attrs = field_attrs(&field.attrs)?;
-        writes.push(write_field(&attrs, binding));
-        let read = read_field(&attrs);
+        writes.push(write_field(wire, &attrs, binding));
+        let read = read_field(wire, &attrs);
         reads.push(match &field.ident {
             Some(name) => quote! { #name: #read },
             None => read,
@@ -158,13 +169,14 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
     let name = &input.ident;
     let mut generics = input.generics.clone();
     let container = container_attrs(&input.attrs)?;
+    let wire = container.krate.as_ref().map_or_else(|| quote! { ::mln_wire }, |path| quote! { #path });
     if let Some(predicates) = container.bound {
         generics.make_where_clause().predicates.extend(predicates);
     } else {
         let params: Vec<_> = generics.type_params().map(|param| param.ident.clone()).collect();
         let where_clause = generics.make_where_clause();
         for param in params {
-            where_clause.predicates.push(parse_quote! { #param: ::mln_wire::Wire });
+            where_clause.predicates.push(parse_quote! { #param: #wire::Wire });
         }
     }
     let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
@@ -184,7 +196,7 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
                     }
                 })
                 .collect();
-            let (write, read) = fields_code(&data.fields, &bindings)?;
+            let (write, read) = fields_code(&wire, &data.fields, &bindings)?;
             if container.default {
                 let mut reads = Vec::new();
                 for (i, field) in data.fields.iter().enumerate() {
@@ -199,10 +211,10 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
                         quote! { #index }
                     };
                     reads.push(if attrs.with.is_some() {
-                        let read = read_field(&attrs);
+                        let read = read_field(&wire, &attrs);
                         quote! { value.#member = #read; }
                     } else {
-                        quote! { ::mln_wire::read_into(&mut value.#member, r)?; }
+                        quote! { #wire::read_into(&mut value.#member, r)?; }
                     });
                 }
                 let read = quote! {
@@ -227,7 +239,7 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
                 let names = bindings(&variant.fields);
                 let pattern = pattern(&variant.fields, &names);
                 let borrowed: Vec<TokenStream2> = names.iter().map(|name| quote! { #name }).collect();
-                let (write, read) = fields_code(&variant.fields, &borrowed)?;
+                let (write, read) = fields_code(&wire, &variant.fields, &borrowed)?;
                 let ignore = match &variant.fields {
                     Fields::Named(_) => quote! { { .. } },
                     Fields::Unnamed(_) => quote! { (..) },
@@ -243,10 +255,10 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
             let write = if data.variants.is_empty() {
                 quote! { match *self {} }
             } else if write_arms.is_empty() {
-                quote! { ::mln_wire::write_tag(w, match self { #(#tag_arms)* }); }
+                quote! { #wire::write_tag(w, match self { #(#tag_arms)* }); }
             } else {
                 quote! {
-                    ::mln_wire::write_tag(w, match self { #(#tag_arms)* });
+                    #wire::write_tag(w, match self { #(#tag_arms)* });
                     #[allow(unreachable_patterns)]
                     match self { #(#write_arms)* _ => {} }
                 }
@@ -276,14 +288,14 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
 
     Ok(quote! {
         #[automatically_derived]
-        impl #impl_generics ::mln_wire::Wire for #name #type_generics #where_clause {
+        impl #impl_generics #wire::Wire for #name #type_generics #where_clause {
             #[allow(unused_variables)]
-            fn write(&self, w: &mut ::mln_wire::Writer) {
+            fn write(&self, w: &mut #wire::Writer) {
                 #write
             }
 
             #[allow(unused_variables)]
-            fn read(r: &mut ::mln_wire::Reader<'_>) -> ::core::option::Option<Self> {
+            fn read(r: &mut #wire::Reader<'_>) -> ::core::option::Option<Self> {
                 #read
             }
         }
