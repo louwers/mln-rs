@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
 use feature::{Feature, Identifier, PropertyMap, Value};
-use geo_types::{Geometry, LineString, Point, Polygon};
+use geo_types::{Geometry, Point};
 use mln_expression::image_expression::UnavailableImages;
 use mln_map_types::MapMode;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::layer_type::LayerStyle;
-use mln_style::layers::{Circle, Fill, Line, Symbol};
+use mln_style::layers::Symbol;
 use mln_style_types::image::{ImageDependencies, ImagePosition, ImagePositions, Impl as ImageImpl, RectU16};
 use mln_text::glyph::GlyphDependencies;
 use mln_tile_id::OverscaledTileID;
@@ -19,9 +19,6 @@ use serde_json::json;
 use crate::Registry;
 use crate::bucket::Bucket;
 use crate::bucket_parameters::BucketParameters;
-use crate::buckets::circle_bucket::CircleBucket;
-use crate::buckets::fill_bucket::FillBucket;
-use crate::buckets::line_bucket::LineBucket;
 use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::geometry::feature_index::FeatureIndexBuilder;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
@@ -59,13 +56,6 @@ fn expected_order(type_: SortKeyType) -> Vec<usize> {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
-enum Shape {
-    Polygon,
-    LineString,
-    Point,
-}
-
 /// The properties of a layer of the given style JSON, with `sort_key_name`
 /// set to the sort key of `type_`.
 fn layer(mut json: serde_json::Value, sort_key_name: &str, type_: SortKeyType) -> Arc<dyn ErasedEvaluatedLayer> {
@@ -77,9 +67,6 @@ fn layer(mut json: serde_json::Value, sort_key_name: &str, type_: SortKeyType) -
         .unwrap_or_else(|| panic!("{}", error.message));
     let style = layer.style();
     match json["type"].as_str().unwrap() {
-        "fill" => Arc::new(EvaluatedLayer::<Fill>::new(LayerStyle::recover(style).unwrap())),
-        "line" => Arc::new(EvaluatedLayer::<Line>::new(LayerStyle::recover(style).unwrap())),
-        "circle" => Arc::new(EvaluatedLayer::<Circle>::new(LayerStyle::recover(style).unwrap())),
         "symbol" => Arc::new(EvaluatedLayer::<Symbol>::new(LayerStyle::recover(style).unwrap())),
         other => panic!("no properties for {other}"),
     }
@@ -87,21 +74,14 @@ fn layer(mut json: serde_json::Value, sort_key_name: &str, type_: SortKeyType) -
 
 /// Lays out three features with ranks 2, 0, 1 at x = 100, 200, 300 and
 /// returns the layer's bucket.
-fn create_bucket(properties: &Arc<dyn ErasedEvaluatedLayer>, shape: Shape) -> Box<dyn Bucket> {
+fn create_bucket(properties: &Arc<dyn ErasedEvaluatedLayer>) -> Box<dyn Bucket> {
     let ranks = [2.0, 0.0, 1.0];
     let features = ranks
         .iter()
         .enumerate()
         .map(|(i, &rank)| {
             let x = ((i + 1) * 100) as i16;
-            let geometry = match shape {
-                Shape::Polygon => Geometry::Polygon(Polygon::new(
-                    LineString::from(vec![(x, 10), (x, 20), (x + 10, 20), (x, 10)]),
-                    vec![],
-                )),
-                Shape::LineString => Geometry::LineString(LineString::from(vec![(x, 10), (x, 20)])),
-                Shape::Point => Geometry::Point(Point::new(x, 300 - (i as i16) * 100)),
-            };
+            let geometry = Geometry::Point(Point::new(x, 300 - (i as i16) * 100));
             Feature {
                 geometry: Some(geometry),
                 properties: Arc::new(PropertyMap::from_iter([("rank".to_owned(), Value::Double(rank))])),
@@ -166,62 +146,6 @@ fn create_bucket(properties: &Arc<dyn ErasedEvaluatedLayer>, shape: Shape) -> Bo
     built.buckets.into_bucket(&layer_id).unwrap()
 }
 
-/// The features in the order their vertices are, from the x coordinate the
-/// vertices store `coordinate_scale` times.
-fn feature_order(xs: impl Iterator<Item = i16>, coordinate_scale: i16) -> Vec<usize> {
-    let mut order: Vec<usize> = Vec::new();
-    for x in xs {
-        let index = (x / coordinate_scale / 100 - 1) as usize;
-        if order.last() != Some(&index) {
-            order.push(index);
-        }
-    }
-    order
-}
-
-#[test]
-fn fill_order() {
-    for type_ in SORT_KEY_TYPES {
-        let properties = layer(json!({ "id": "fill", "type": "fill", "source": "source" }), "fill-sort-key", type_);
-        let bucket = create_bucket(&properties, Shape::Polygon);
-        let bucket = bucket.downcast_ref::<FillBucket>().unwrap();
-        assert_eq!(
-            expected_order(type_),
-            feature_order(bucket.vertices.data().iter().map(|v| v.a1[0]), 1),
-            "{type_:?}"
-        );
-    }
-}
-
-#[test]
-fn line_order() {
-    for type_ in SORT_KEY_TYPES {
-        let properties = layer(json!({ "id": "line", "type": "line", "source": "source" }), "line-sort-key", type_);
-        let bucket = create_bucket(&properties, Shape::LineString);
-        let bucket = bucket.downcast_ref::<LineBucket>().unwrap();
-        assert_eq!(
-            expected_order(type_),
-            feature_order(bucket.vertices.data().iter().map(|v| v.a1[0]), 2),
-            "{type_:?}"
-        );
-    }
-}
-
-#[test]
-fn circle_order() {
-    for type_ in SORT_KEY_TYPES {
-        let properties =
-            layer(json!({ "id": "circle", "type": "circle", "source": "source" }), "circle-sort-key", type_);
-        let bucket = create_bucket(&properties, Shape::Point);
-        let bucket = bucket.downcast_ref::<CircleBucket>().unwrap();
-        assert_eq!(
-            expected_order(type_),
-            feature_order(bucket.vertices.data().iter().map(|v| v.a1[0]), 2),
-            "{type_:?}"
-        );
-    }
-}
-
 fn symbol_layer(type_: SortKeyType, z_order: Option<&str>) -> Arc<dyn ErasedEvaluatedLayer> {
     let mut json = json!({
         "id": "symbol", "type": "symbol", "source": "source",
@@ -236,7 +160,7 @@ fn symbol_layer(type_: SortKeyType, z_order: Option<&str>) -> Arc<dyn ErasedEval
 #[test]
 fn symbol_order() {
     for type_ in SORT_KEY_TYPES {
-        let bucket = create_bucket(&symbol_layer(type_, None), Shape::Point);
+        let bucket = create_bucket(&symbol_layer(type_, None));
         let bucket = bucket.downcast_ref::<SymbolBucket>().unwrap();
         let order: Vec<usize> = bucket.state.symbol_instances.iter().map(|symbol| symbol.data_feature_index).collect();
         assert_eq!(expected_order(type_), order, "{type_:?}");
@@ -259,7 +183,7 @@ fn symbol_order() {
 #[test]
 fn symbol_viewport_y() {
     for type_ in SORT_KEY_TYPES {
-        let bucket = create_bucket(&symbol_layer(type_, Some("viewport-y")), Shape::Point);
+        let bucket = create_bucket(&symbol_layer(type_, Some("viewport-y")));
         let bucket = bucket.downcast_ref::<SymbolBucket>().unwrap();
         assert!(bucket.sort_features_by_y, "{type_:?}");
         assert!(bucket.sort_key_ranges.is_empty(), "{type_:?}");

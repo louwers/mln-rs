@@ -45,25 +45,18 @@ impl StyleRegistry {
     #[cfg(test)]
     pub(crate) fn with_builtins() -> Arc<Self> {
         use crate::layer_type::style_entry;
-        use crate::layers::{
-            Circle, ColorRelief, Custom, Fill, FillExtrusion, Heatmap, Hillshade, Line, Raster, Symbol,
-        };
+        use crate::layers::{ColorRelief, Custom, Hillshade, Raster, Symbol};
         use crate::source_type::style_source_entry;
         use crate::sources::{
             CustomGeometrySourceType, CustomVectorSourceType, GeoJsonSourceType, ImageSourceType, RasterDemSourceType,
             RasterSourceType, VectorSourceType,
         };
         let layer_types = [
-            style_entry::<Fill>(),
-            style_entry::<Line>(),
-            style_entry::<Circle>(),
             style_entry::<Symbol>(),
             style_entry::<Raster>(),
             style_entry::<crate::tests::fixture_layer::Plain>(),
             style_entry::<Hillshade>(),
             style_entry::<ColorRelief>(),
-            style_entry::<FillExtrusion>(),
-            style_entry::<Heatmap>(),
             style_entry::<Custom>(),
         ];
         let source_types = [

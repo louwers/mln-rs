@@ -111,7 +111,7 @@ pub fn to_projection_ubo(data: &ProjectionData) -> ProjectionUBO {
 /// `latitude_scale` is the cosine of the center latitude on the globe and 1
 /// on Mercator.
 #[must_use]
-pub(crate) fn globe_extrude_scale(tile_id: &UnwrappedTileID, zoom: f32, latitude_scale: f64) -> f32 {
+pub fn globe_extrude_scale(tile_id: &UnwrappedTileID, zoom: f32, latitude_scale: f64) -> f32 {
     (f64::from(tile_id.pixels_to_tile_units(1.0, zoom)) / (f64::from(EXTENT) * (1u64 << tile_id.canonical.z) as f64)
         * M2PI
         * latitude_scale) as f32

@@ -6,7 +6,7 @@ use crate::expression::{Dependency, Functions, ParsingContext, Type, is_expressi
 
 /// Converts a color ramp property value, an expression that parses against
 /// `functions`.
-pub(crate) fn convert_color_ramp_property_value(
+pub fn convert_color_ramp_property_value(
     value: &Convertible<'_>,
     error: &mut Error,
     functions: &Arc<Functions>,

@@ -9,7 +9,7 @@ use crate::style::Style;
 
 const EMPTY_GEOJSON_SOURCE: &str = r#"{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}"#;
 const DEM_SOURCE: &str = r#"{"type":"raster-dem","tiles":["https://example.com/dem/{z}/{x}/{y}.png"],"tileSize":256}"#;
-const DOTS: &str = r#"{"id":"dots","type":"circle","source":"points"}"#;
+const DOTS: &str = r#"{"id":"dots","type":"symbol","source":"points"}"#;
 
 fn loaded_style() -> Style {
     let mut style = Style::new(StyleRegistry::with_builtins());
@@ -17,7 +17,7 @@ fn loaded_style() -> Style {
     style
 }
 
-/// A loaded style with the GeoJSON source `points` and the circle layer
+/// A loaded style with the GeoJSON source `points` and the symbol layer
 /// `dots` on it.
 fn style_with_dots() -> Style {
     let mut style = loaded_style();
@@ -45,12 +45,12 @@ fn set_property(style: &mut Style, layer_id: &str, name: &str, json: &str) {
 fn missing_style_ids_report_not_found() {
     let mut style = loaded_style();
     assert_fails(
-        style.set_layer_property_json("absent-layer", "circle-radius", "4"),
+        style.set_layer_property_json("absent-layer", "text-halo-width", "4"),
         ErrorKind::NotFound,
         r#"layer "absent-layer" does not exist"#,
     );
     assert_fails(
-        style.layer_property_json("absent-layer", "circle-radius"),
+        style.layer_property_json("absent-layer", "text-halo-width"),
         ErrorKind::NotFound,
         r#"layer "absent-layer" does not exist"#,
     );
@@ -89,7 +89,7 @@ fn malformed_layers_are_invalid_arguments() {
     assert_eq!(style.get_layers().len(), 1);
 }
 
-// A hillshade layer requires a raster DEM source, and a circle layer can't
+// A hillshade layer requires a raster DEM source, and a symbol layer can't
 // draw one. A layer ID is taken once.
 #[test]
 fn a_layer_requires_a_source_that_supports_its_type() {
@@ -114,9 +114,9 @@ fn a_layer_requires_a_source_that_supports_its_type() {
         r#"source "points" does not support hillshade layer "on-points""#,
     );
     assert_fails(
-        style.add_layer_json(r#"{"id":"dots","type":"circle","source":"dem"}"#, None),
+        style.add_layer_json(r#"{"id":"dots","type":"symbol","source":"dem"}"#, None),
         ErrorKind::InvalidArgument,
-        r#"source "dem" does not support circle layer "dots""#,
+        r#"source "dem" does not support symbol layer "dots""#,
     );
     assert_eq!(style.get_layers().len(), 1);
 }
@@ -127,11 +127,11 @@ fn a_layer_requires_a_source_that_supports_its_type() {
 fn layer_properties_and_filters_round_trip_through_json() {
     let mut style = style_with_dots();
 
-    assert_eq!(property(&style, "dots", "circle-radius"), None);
-    set_property(&mut style, "dots", "circle-radius", "4");
-    assert_eq!(property(&style, "dots", "circle-radius").as_deref(), Some("4.0"));
-    set_property(&mut style, "dots", "circle-color", r##""#ff0000""##);
-    assert_eq!(property(&style, "dots", "circle-color").as_deref(), Some("[\"rgba\",255.0,0.0,0.0,1.0]"));
+    assert_eq!(property(&style, "dots", "text-halo-width"), None);
+    set_property(&mut style, "dots", "text-halo-width", "4");
+    assert_eq!(property(&style, "dots", "text-halo-width").as_deref(), Some("4.0"));
+    set_property(&mut style, "dots", "text-color", r##""#ff0000""##);
+    assert_eq!(property(&style, "dots", "text-color").as_deref(), Some("[\"rgba\",255.0,0.0,0.0,1.0]"));
 
     assert_fails(
         style.set_layer_property_json("dots", "fill-color", r##""#00ff00""##),
@@ -139,16 +139,16 @@ fn layer_properties_and_filters_round_trip_through_json() {
         r#"property "fill-color" of layer "dots""#,
     );
     assert_fails(
-        style.set_layer_property_json("dots", "circle-radius", r#"{"radius":"#),
+        style.set_layer_property_json("dots", "text-halo-width", r#"{"radius":"#),
         ErrorKind::InvalidArgument,
-        r#"property "circle-radius" of layer "dots" is not valid JSON"#,
+        r#"property "text-halo-width" of layer "dots" is not valid JSON"#,
     );
     assert_fails(
-        style.set_layer_property_json("dots", "circle-radius", r#""big""#),
+        style.set_layer_property_json("dots", "text-halo-width", r#""big""#),
         ErrorKind::InvalidArgument,
-        r#"property "circle-radius" of layer "dots": "#,
+        r#"property "text-halo-width" of layer "dots": "#,
     );
-    assert_eq!(property(&style, "dots", "circle-radius").as_deref(), Some("4.0"));
+    assert_eq!(property(&style, "dots", "text-halo-width").as_deref(), Some("4.0"));
     // A name the layer type lacks reads as unset rather than failing.
     assert_eq!(property(&style, "dots", "fill-color"), None);
 
@@ -159,8 +159,8 @@ fn layer_properties_and_filters_round_trip_through_json() {
     set_property(&mut style, "dots", "filter", "null");
     assert_eq!(property(&style, "dots", "filter"), None);
 
-    set_property(&mut style, "dots", "circle-radius", "null");
-    assert_eq!(property(&style, "dots", "circle-radius"), None);
+    set_property(&mut style, "dots", "text-halo-width", "null");
+    assert_eq!(property(&style, "dots", "text-halo-width"), None);
 }
 
 #[test]

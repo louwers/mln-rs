@@ -13,7 +13,6 @@ use mln_gfx::gfx_types::AttributeDataType;
 use mln_style::evaluated::{Evaluated, Faded};
 use mln_style::expression::{Dependency, EvaluationContext, Image, Value, ValueConverter};
 use mln_style::property_expression::PropertyExpression;
-use mln_style_types::LineCapType;
 use mln_style_types::image::ImagePositions;
 use mln_tile::TileLayer;
 use mln_tile_id::CanonicalTileID;
@@ -25,9 +24,16 @@ use mln_vec_map::VecMap;
 use crate::bucket_geometry::GeometryVec;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
-use crate::layout::pattern_layout::PatternDependency;
-use crate::line_atlas::{DashAtlas, LinePatternCap};
 use crate::paint_property_statistics::{PaintPropertyStatistics, StatisticValue};
+
+/// The images of a feature's `*-pattern` value one zoom level below the
+/// tile's, at it, and one above.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PatternDependency {
+    pub min: String,
+    pub mid: String,
+    pub max: String,
+}
 
 /// Maps vertex range to feature index.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, mln_wire::Wire)]
@@ -61,6 +67,24 @@ impl InterleavedVertexBuffer {
         // The render thread copies the vector when it builds draws.
     }
 
+    /// The vertices' size in bytes: their fields' sizes and padding.
+    #[must_use]
+    pub fn stride(&self) -> usize {
+        self.stride
+    }
+
+    /// How many vertices there are.
+    #[must_use]
+    pub fn vertex_count(&self) -> usize {
+        self.vertex_count
+    }
+
+    /// The interleaved vertices, `stride` bytes each.
+    #[must_use]
+    pub fn vertices(&self) -> &GeometryVec<u8> {
+        &self.shared_vertex_vector
+    }
+
     /// Whether the values moved to the render thread.
     #[must_use]
     pub fn is_moved(&self) -> bool {
@@ -68,7 +92,7 @@ impl InterleavedVertexBuffer {
     }
 
     /// Writes `value` at `offset` in each of the vertices `indexes`.
-    pub(crate) fn fill(&mut self, indexes: std::ops::Range<usize>, offset: usize, value: &[u8]) {
+    pub fn fill(&mut self, indexes: std::ops::Range<usize>, offset: usize, value: &[u8]) {
         // Taking the vertices copies a worker's buffer into wasm memory.
         if indexes.is_empty() {
             return;
@@ -84,7 +108,7 @@ impl InterleavedVertexBuffer {
 
     /// Appends a field of `size` bytes, aligned to `alignment`, to the vertex
     /// format and returns its offset.
-    pub(crate) fn extend_vertex_format(&mut self, size: usize, alignment: usize) -> usize {
+    pub fn extend_vertex_format(&mut self, size: usize, alignment: usize) -> usize {
         let mut offset = self.stride & (alignment - 1);
         if offset != 0 {
             offset = alignment - offset;
@@ -249,6 +273,13 @@ pub struct PaintPropertyBinder<T> {
 }
 
 impl<T: BinderValue> PaintPropertyBinder<T> {
+    /// The largest value the binder wrote of an `f32` property; `None` for
+    /// one of another type, or that wrote none.
+    #[must_use]
+    pub fn max(&self) -> Option<f32> {
+        self.statistics.max()
+    }
+
     /// The binder of `value` in a tile at `zoom`.
     #[must_use]
     pub fn create(value: &Evaluated<T>, zoom: f32) -> Self {
@@ -580,119 +611,6 @@ impl CrossFadedPaintPropertyBinder<Image> {
         } else {
             None
         }
-    }
-}
-
-/// The binder of `line-dasharray`. Where the dash array differs by feature,
-/// each feature's vertices hold its pattern's [`DashEntry`] in the bucket's
-/// [`DashAtlas`], as four floats with the last unused.
-#[derive(Clone, Debug, mln_wire::Wire)]
-pub(crate) enum DashArrayBinder {
-    Constant,
-    PerFeature(Box<PerFeatureDashes>),
-}
-
-/// The data of a [`DashArrayBinder`] whose dash array differs by feature.
-#[derive(Clone, Debug, mln_wire::Wire)]
-pub(crate) struct PerFeatureDashes {
-    expression: PropertyExpression<Vec<f32>>,
-    default_value: Vec<f32>,
-    zoom: f32,
-    cap: Evaluated<LineCapType>,
-    atlas: DashAtlas,
-    vertex_data: InterleavedVertexData,
-}
-
-/// The size of a dash vertex: four floats.
-const DASH_VERTEX_SIZE: usize = 16;
-
-impl DashArrayBinder {
-    #[must_use]
-    pub(crate) fn create(value: &Evaluated<Vec<f32>>, zoom: f32) -> Self {
-        match value {
-            Evaluated::Constant(_) | Evaluated::CrossFaded(_) => DashArrayBinder::Constant,
-            Evaluated::PerFeature { expression, default } => DashArrayBinder::PerFeature(Box::new(PerFeatureDashes {
-                expression: expression.clone(),
-                default_value: default.clone(),
-                zoom,
-                cap: Evaluated::Constant(LineCapType::Butt),
-                atlas: DashAtlas::default(),
-                vertex_data: InterleavedVertexData::Uninitialized,
-            })),
-        }
-    }
-
-    /// Sets the `line-cap` that gives a feature round dashes.
-    pub(crate) fn set_line_cap(&mut self, line_cap: &Evaluated<LineCapType>) {
-        if let DashArrayBinder::PerFeature(dashes) = self {
-            dashes.cap.clone_from(line_cap);
-        }
-    }
-
-    /// The patterns of the features, if the dash array differs by feature.
-    #[must_use]
-    pub(crate) fn atlas(&self) -> Option<&DashAtlas> {
-        match self {
-            DashArrayBinder::Constant => None,
-            DashArrayBinder::PerFeature(dashes) => Some(&dashes.atlas),
-        }
-    }
-
-    fn vertex_offset(&self) -> Option<usize> {
-        match self {
-            DashArrayBinder::Constant => None,
-            DashArrayBinder::PerFeature(dashes) => dashes.vertex_data.offset(),
-        }
-    }
-}
-
-impl PaintPropertyBinderBase for DashArrayBinder {
-    fn set_interleaved(&mut self, buffer: &mut InterleavedVertexBuffer) {
-        let DashArrayBinder::PerFeature(dashes) = self else {
-            return;
-        };
-        let vertex_data = &mut dashes.vertex_data;
-        let new_vertex_offset = buffer.extend_vertex_format(DASH_VERTEX_SIZE, align_of::<f32>());
-        if matches!(vertex_data, InterleavedVertexData::Uninitialized) {
-            *vertex_data = InterleavedVertexData::Interleaved { offset: new_vertex_offset };
-        }
-    }
-
-    fn populate(
-        &mut self,
-        buffer: &mut InterleavedVertexBuffer,
-        feature: &dyn GeometryTileFeature,
-        length: usize,
-        _index: usize,
-        _pattern_positions: &ImagePositions,
-        _pattern_dependencies: Option<&PatternDependency>,
-        canonical: &CanonicalTileID,
-        _formatted_section: &Value,
-    ) {
-        let DashArrayBinder::PerFeature(dashes) = self else {
-            return;
-        };
-        let PerFeatureDashes { expression, default_value, zoom, cap, atlas, vertex_data } = &mut **dashes;
-        let Some(vertex_offset) = vertex_data.offset() else {
-            return;
-        };
-        let context =
-            EvaluationContext::with_zoom_feature(*zoom, Some(feature)).with_canonical_tile_id(Some(canonical));
-        let dasharray = expression.evaluate(&context, default_value.clone());
-        let cap =
-            if cap.evaluate(&context) == LineCapType::Round { LinePatternCap::Round } else { LinePatternCap::Square };
-        let entry = atlas.add(&dasharray, cap);
-        let value = [entry.y, entry.height, entry.width, 0.0];
-        buffer.fill(buffer.vertex_count..length, vertex_offset, bytemuck::cast_slice(&value));
-    }
-
-    fn binder_vertex_count(&self, buffer: &InterleavedVertexBuffer) -> usize {
-        if self.vertex_offset().is_some() { buffer.vertex_count } else { 0 }
-    }
-
-    fn apply(&self, buffer: &InterleavedVertexBuffer, shared: &SharedVertices) -> Option<SharedAttribute> {
-        let vertex_offset = self.vertex_offset()?;
-        Some(shared_paint(shared, vertex_offset, buffer.stride as u32, AttributeDataType::Float4))
     }
 }
 

@@ -57,11 +57,11 @@ pub(crate) struct ErasedLayerBucket<'a> {
 /// values it was laid out with and the rest of what the layout's contents
 /// hold for the tile's draws.
 pub struct LayerBucket<'a, T: LayerType> {
-    pub(crate) bucket: &'a T::Bucket,
+    pub bucket: &'a T::Bucket,
     /// The index of the bucket among the layout's buckets.
     pub(crate) bucket_index: usize,
     /// The values of the layer that the bucket was laid out with.
-    pub(crate) layer: &'a EvaluatedLayer<T>,
+    pub layer: &'a EvaluatedLayer<T>,
     contents: &'a GeometryContents,
 }
 
@@ -90,7 +90,7 @@ impl<'a, T: LayerType> LayerBucket<'a, T> {
     /// The geometry of the layout's buckets in the context's stores, which
     /// the draws bind.
     #[must_use]
-    pub(crate) fn geometry(self) -> &'a BucketGeometry {
+    pub fn geometry(self) -> &'a BucketGeometry {
         &self.contents.bucket_geometry
     }
 
@@ -102,13 +102,13 @@ impl<'a, T: LayerType> LayerBucket<'a, T> {
 
     /// Where the pattern `pattern` is in the tile's icon atlas.
     #[must_use]
-    pub(crate) fn pattern(self, pattern: &str) -> Option<ImagePosition> {
+    pub fn pattern(self, pattern: &str) -> Option<ImagePosition> {
         self.contents.pattern_positions()?.get(pattern).cloned()
     }
 
     /// The textures of the tile's glyph and icon atlases.
     #[must_use]
-    pub(crate) fn atlas_textures(self) -> &'a TileAtlasTextures {
+    pub fn atlas_textures(self) -> &'a TileAtlasTextures {
         &self.contents.textures
     }
 }
@@ -354,7 +354,7 @@ impl<'a> FrameSourceTiles<'a> {
 /// layers draw, and its encode uploads them and binds their textures.
 #[derive(Default)]
 pub struct Atlases {
-    pub(crate) line: LineAtlas,
+    pub line: LineAtlas,
     pub pattern: PatternAtlas,
 }
 

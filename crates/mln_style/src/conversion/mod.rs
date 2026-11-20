@@ -41,7 +41,7 @@ pub fn convert<T: Converter>(value: &Convertible<'_>, error: &mut Error) -> Opti
     T::convert(value, error)
 }
 
-pub(crate) use color_ramp_property_value::convert_color_ramp_property_value;
+pub use color_ramp_property_value::convert_color_ramp_property_value;
 pub use filter::convert_filter;
 pub use geojson_options::convert_geojson_options;
 pub use layer::convert_layer;

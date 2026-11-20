@@ -121,8 +121,9 @@ pub struct Resolved {
     pub(crate) shaping: ShapeResults,
     #[wire(with = "sorted::map")]
     pub(crate) icons: ImagePositions,
+    /// Where the patterns are.
     #[wire(with = "sorted::map")]
-    pub(crate) patterns: ImagePositions,
+    pub patterns: ImagePositions,
     /// The requested images that are missing, which a layout lays out
     /// without.
     pub(crate) missing_images: VecSet<String>,

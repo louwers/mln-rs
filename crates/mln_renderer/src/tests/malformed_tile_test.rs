@@ -10,7 +10,7 @@ use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, Kind, Response};
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::layer_type::LayerStyle;
-use mln_style::layers::{Circle, Fill, FillExtrusion, Line, Symbol};
+use mln_style::layers::Symbol;
 use mln_style::sources::vector_source;
 use mln_style_types::image::Impl as ImageImpl;
 use mln_tile_id::OverscaledTileID;
@@ -26,6 +26,7 @@ use serde_json::json;
 
 use crate::Registry;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
+use crate::tests::fixture_layer::Dot;
 use crate::tile::store::StoreEvent;
 use crate::tile_parameters::TileParameters;
 
@@ -43,10 +44,7 @@ fn layer(json: &serde_json::Value) -> Arc<dyn ErasedEvaluatedLayer> {
         .unwrap_or_else(|| panic!("{}", error.message));
     let style = layer.style();
     match json["type"].as_str().unwrap() {
-        "line" => Arc::new(EvaluatedLayer::<Line>::new(LayerStyle::recover(style).unwrap())),
-        "fill" => Arc::new(EvaluatedLayer::<Fill>::new(LayerStyle::recover(style).unwrap())),
-        "fill-extrusion" => Arc::new(EvaluatedLayer::<FillExtrusion>::new(LayerStyle::recover(style).unwrap())),
-        "circle" => Arc::new(EvaluatedLayer::<Circle>::new(LayerStyle::recover(style).unwrap())),
+        "dot" => Arc::new(EvaluatedLayer::<Dot>::new(LayerStyle::recover(style).unwrap())),
         "symbol" => Arc::new(EvaluatedLayer::<Symbol>::new(LayerStyle::recover(style).unwrap())),
         other => panic!("no properties for {other}"),
     }
@@ -226,33 +224,20 @@ fn tile_with_bad_value() -> Vec<u8> {
     tile(&[feature(1, &[1, 1, 0, 7], POLYGON, &polygon)])
 }
 
-fn fill_layer() -> Arc<dyn ErasedEvaluatedLayer> {
-    layer(&json!({ "id": "fill", "type": "fill", "source": "source", "source-layer": "l" }))
-}
-
-fn line_layer(filter: Option<serde_json::Value>) -> Arc<dyn ErasedEvaluatedLayer> {
-    let mut json = json!({ "id": "line", "type": "line", "source": "source", "source-layer": "l" });
+fn dot_layer(filter: Option<serde_json::Value>) -> Arc<dyn ErasedEvaluatedLayer> {
+    let mut json = json!({ "id": "dots", "type": "dot", "source": "source", "source-layer": "l" });
     if let Some(filter) = filter {
         json["filter"] = filter;
     }
     layer(&json)
 }
 
-/// A layer of each type that has a worker path, reading values in filters,
-/// sort keys and layout properties.
+/// A layer of each type of this crate's tests that has a worker path,
+/// reading values in filters, sort keys and layout properties. The layer
+/// types of `mln_layers` have their own tests of malformed tiles.
 fn all_layers() -> Vec<Arc<dyn ErasedEvaluatedLayer>> {
     vec![
-        line_layer(Some(json!(["==", ["get", "k"], "v"]))),
-        layer(&json!({
-            "id": "sorted-line", "type": "line", "source": "source", "source-layer": "l",
-            "layout": { "line-sort-key": ["get", "n"] }
-        })),
-        fill_layer(),
-        layer(&json!({ "id": "extrusion", "type": "fill-extrusion", "source": "source", "source-layer": "l" })),
-        layer(&json!({
-            "id": "circle", "type": "circle", "source": "source", "source-layer": "l",
-            "layout": { "circle-sort-key": ["get", "n"] }
-        })),
+        dot_layer(Some(json!(["==", ["get", "k"], "v"]))),
         layer(&json!({
             "id": "symbol", "type": "symbol", "source": "source", "source-layer": "l",
             "layout": { "icon-image": ["get", "k"], "symbol-sort-key": ["get", "n"] }
@@ -269,7 +254,7 @@ fn valid_tile_loads() {
 #[test]
 fn truncated_tile_is_a_tile_error() {
     let tile = valid_tile();
-    let outcome = load(tile[..tile.len() - 4].to_vec(), &[line_layer(None)]);
+    let outcome = load(tile[..tile.len() - 4].to_vec(), &[dot_layer(None)]);
     assert_eq!(outcome, Outcome::Error("protobuf decode error: unexpected end of buffer".to_owned()));
 }
 
@@ -277,9 +262,7 @@ fn truncated_tile_is_a_tile_error() {
 // fails the tile whether or not anything reads its values.
 #[test]
 fn bad_value_is_a_tile_error() {
-    let mut json = json!({ "id": "fill", "type": "fill", "source": "source", "source-layer": "l" });
-    json["filter"] = json!(["==", ["get", "k"], "v"]);
-    for layer in [layer(&json), fill_layer()] {
+    for layer in [dot_layer(Some(json!(["==", ["get", "k"], "v"]))), dot_layer(None)] {
         let outcome = load(tile_with_bad_value(), &[layer]);
         assert_eq!(outcome, Outcome::Error("invalid value index 7".to_owned()));
     }

@@ -34,13 +34,13 @@ use crate::render_pass::RenderPass;
 
 /// The order of a layer's draws that its draws' ids don't give: lower
 /// priorities draw first.
-pub(crate) type DrawPriority = i64;
+pub type DrawPriority = i64;
 
 /// What of a bucket's vertex data changed since a tile's draws copied it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct BucketChanges {
+pub struct BucketChanges {
     /// The values of the paint properties that read feature state.
-    pub(crate) paint: bool,
+    pub paint: bool,
     /// A symbol bucket's opacities, which placement sets.
     pub(crate) opacity: bool,
     /// A symbol bucket's positions of labels along lines or at variable
@@ -306,7 +306,7 @@ impl<T> TileMap<T> {
     }
 
     /// Drops what the layer keeps of the tiles. The tiles' entries stay.
-    pub(crate) fn clear(&mut self) {
+    pub fn clear(&mut self) {
         self.values.fill_with(|| None);
     }
 
@@ -338,7 +338,7 @@ impl<T> TileMap<T> {
 
     /// Makes `value` what the layer keeps of `tile_id`, and returns it;
     /// gives `value` back where the tile isn't one of the frame's.
-    pub(crate) fn insert(&mut self, tile_id: &OverscaledTileID, value: T) -> Result<&mut T, T> {
+    pub fn insert(&mut self, tile_id: &OverscaledTileID, value: T) -> Result<&mut T, T> {
         match self.entry(tile_id) {
             Some(entry) => Ok(entry.value.insert(value)),
             None => Err(value),
@@ -346,7 +346,7 @@ impl<T> TileMap<T> {
     }
 
     /// Drops what the layer keeps of `tile_id`.
-    pub(crate) fn drop_value(&mut self, tile_id: &OverscaledTileID) {
+    pub fn drop_value(&mut self, tile_id: &OverscaledTileID) {
         if let Some(value) = self.set.index_of(tile_id).and_then(|index| self.values.get_mut(index)) {
             *value = None;
         }
@@ -378,7 +378,7 @@ impl<T> TileEntry<'_, T> {
     /// were built from another bucket, this drops what the layer keeps of
     /// the tile. Returns whether the bucket changed, which drops the changes
     /// of the one before.
-    pub(crate) fn set_bucket(&mut self, bucket: SimpleIdentity) -> bool {
+    pub fn set_bucket(&mut self, bucket: SimpleIdentity) -> bool {
         if self.state.bucket == Some(bucket) {
             return false;
         }
@@ -392,7 +392,7 @@ impl<T> TileEntry<'_, T> {
 
     /// What of the tile's bucket changed since its draws last copied it,
     /// which they are about to copy again.
-    pub(crate) fn take_changes(&mut self) -> BucketChanges {
+    pub fn take_changes(&mut self) -> BucketChanges {
         std::mem::take(&mut self.state.changes)
     }
 }
@@ -421,8 +421,8 @@ impl KeptDraw {
 /// The GPU objects of a draw, with what gives them the textures of their
 /// tile's atlases where they sample them.
 pub struct DrawObjectsMut<'a> {
-    pub(crate) objects: &'a mut DrawObjects,
-    pub(crate) atlases: Option<&'a AtlasBinding>,
+    pub objects: &'a mut DrawObjects,
+    pub atlases: Option<&'a AtlasBinding>,
 }
 
 impl<'a> From<&'a mut DrawObjects> for DrawObjectsMut<'a> {
@@ -457,10 +457,10 @@ impl TileObjects for KeptDraw {
     }
 }
 
-/// Makes the draws of `list` those of `layer`, as [`DrawList::finish`]
+/// Makes the draws of `list` those of `layer`, as `DrawList::finish`
 /// does, and drops the bindings of the draws of `tiles` where that replaced
 /// a buffer they bind.
-pub(crate) fn finish_tiles<U, T: TileObjects>(
+pub fn finish_tiles<U, T: TileObjects>(
     list: &mut DrawList<U, T::Part>,
     layer: &mut LayerDraws<T::Part>,
     tiles: &mut TileMap<T>,
@@ -475,7 +475,7 @@ pub(crate) fn finish_tiles<U, T: TileObjects>(
 
 /// The GPU objects of `draw`, `part` of its tile's, as
 /// [`LayerDraws::upload`] and [`LayerDraws::render`] find them.
-pub(crate) fn tile_objects<'a, T: TileObjects>(
+pub fn tile_objects<'a, T: TileObjects>(
     tiles: &'a mut TileMap<T>,
     draw: &FrameDraw,
     part: T::Part,
@@ -520,7 +520,7 @@ impl FrameDraw {
     /// in the translucent pass at the layer's depth, which it reads, without
     /// clipping.
     #[must_use]
-    pub(crate) fn new(tile: Option<OverscaledTileID>, id: SimpleIdentity) -> FrameDraw {
+    pub fn new(tile: Option<OverscaledTileID>, id: SimpleIdentity) -> FrameDraw {
         FrameDraw {
             tile,
             id,
@@ -577,7 +577,7 @@ impl<U, P: Copy> DrawList<U, P> {
     }
 
     /// Adds `draw`, of the GPU objects of the layer's `part`.
-    pub(crate) fn push_part(&mut self, draw: FrameDraw, part: P, uniforms: U) {
+    pub fn push_part(&mut self, draw: FrameDraw, part: P, uniforms: U) {
         self.draws.push((draw, self.uniforms.len()));
         self.uniforms.push(uniforms);
         self.parts.push(part);
@@ -697,13 +697,33 @@ impl Default for FrameDraws {
 }
 
 impl FrameDraws {
+    /// Writes `value` to the uniform buffer `id` that the draws bind.
+    /// Whether that replaced the buffer, which drops the bindings of the
+    /// draws that bound it.
+    pub fn write_pod<T: bytemuck::Pod>(
+        &mut self,
+        gpu: &mut dyn Gpu,
+        id: usize,
+        value: &T,
+        context: &mut Context,
+    ) -> bool {
+        self.uniform_buffers.write_pod(gpu, id, value, context.device())
+    }
+
+    /// Gives the draws, which draw without a projection, a projection block
+    /// of zeros if they have none. GL's programs declare the block whether
+    /// they read it or not, so a draw binds it all the same.
+    pub fn bind_no_projection(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
+        crate::tile_matrix::bind_no_projection(gpu, &mut self.uniform_buffers, context);
+    }
+
     /// Adds `draw`, which draws after the others.
-    pub(crate) fn push(&mut self, draw: FrameDraw) {
+    pub fn push(&mut self, draw: FrameDraw) {
         self.draws.push(draw);
     }
 
     /// Drops the draws.
-    pub(crate) fn clear(&mut self) {
+    pub fn clear(&mut self) {
         self.draws.clear();
     }
 
@@ -770,7 +790,7 @@ impl FrameDraws {
     }
 
     /// Uploads `objects`, which all the draws bind, if there are any draws.
-    pub(crate) fn upload_one(&self, gpu: &mut dyn Gpu, objects: &mut DrawObjects, context: &mut Context) {
+    pub fn upload_one(&self, gpu: &mut dyn Gpu, objects: &mut DrawObjects, context: &mut Context) {
         if !self.draws.is_empty() {
             objects.upload(gpu, context);
         }
@@ -778,12 +798,7 @@ impl FrameDraws {
 
     /// Draws the pass's draws, all of which bind `objects`, into the open
     /// pass of `gpu`, the context's.
-    pub(crate) fn render_one(
-        &self,
-        objects: &mut DrawObjects,
-        gpu: &mut dyn Gpu,
-        parameters: &mut PaintParameters<'_>,
-    ) {
+    pub fn render_one(&self, objects: &mut DrawObjects, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         let Some(pass) = self.begin(gpu, parameters) else {
             return;
         };
@@ -878,7 +893,7 @@ impl<'a> DrawPass<'a> {
 
 /// A layer's draws of a frame, each with the part of the layer's GPU objects
 /// it binds, of the layer's type `P`.
-pub(crate) struct LayerDraws<P = ()> {
+pub struct LayerDraws<P = ()> {
     frame: FrameDraws,
     /// Each draw's part, at the draw's index.
     parts: Vec<P>,
@@ -898,24 +913,24 @@ impl<P: Copy> LayerDraws<P> {
     }
 
     /// See [`FrameDraws::set_composite`].
-    pub(crate) fn set_composite(&mut self, composite: Option<Composite>) {
+    pub fn set_composite(&mut self, composite: Option<Composite>) {
         self.frame.set_composite(composite);
     }
 
     /// See [`FrameDraws::set_stencil_tiles`].
-    pub(crate) fn set_stencil_tiles(&mut self, tiles: impl IntoIterator<Item = UnwrappedTileID>) {
+    pub fn set_stencil_tiles(&mut self, tiles: impl IntoIterator<Item = UnwrappedTileID>) {
         self.frame.set_stencil_tiles(tiles);
     }
 
     /// Drops the draws.
-    pub(crate) fn clear(&mut self) {
+    pub fn clear(&mut self) {
         self.frame.draws.clear();
         self.parts.clear();
     }
 
     /// Uploads the GPU objects of the draws, in drawing order, which
     /// `objects` finds in `caches`.
-    pub(crate) fn upload<C: ?Sized>(
+    pub fn upload<C: ?Sized>(
         &self,
         gpu: &mut dyn Gpu,
         caches: &mut C,
@@ -931,7 +946,7 @@ impl<P: Copy> LayerDraws<P> {
 
     /// Draws the pass's draws, whose GPU objects `objects` finds in
     /// `caches`, into the open pass of `gpu`, the context's.
-    pub(crate) fn render<C: ?Sized>(
+    pub fn render<C: ?Sized>(
         &self,
         caches: &mut C,
         objects: impl for<'c> Fn(&'c mut C, &FrameDraw, P) -> Option<DrawObjectsMut<'c>>,
@@ -1025,7 +1040,7 @@ impl<'a> DrawGroup<'a> {
 }
 
 /// The order the frame draws the layers' draw groups in, each at the depth
-/// of [`PaintParameters::current_layer`], which [`DrawOrder::step`] moves to
+/// of `PaintParameters::current_layer`, which [`DrawOrder::step`] moves to
 /// the next group's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DrawOrder {
@@ -1039,7 +1054,7 @@ pub enum DrawOrder {
 
 impl DrawOrder {
     /// Moves `parameters` to the depth of the group after the one it is at.
-    pub(crate) fn step(self, parameters: &mut PaintParameters<'_>) {
+    pub fn step(self, parameters: &mut PaintParameters<'_>) {
         match self {
             DrawOrder::BottomUp => parameters.current_layer = parameters.current_layer.saturating_sub(1),
             DrawOrder::TopDown => parameters.current_layer += 1,
@@ -1070,7 +1085,7 @@ impl<T: TileObjects> TileDraws<T> {
 
     /// The frame's draws, which the layer has from the first call on: their
     /// group then takes a place in the layers' order and depth.
-    pub(crate) fn frame_mut(&mut self) -> &mut LayerDraws<T::Part> {
+    pub fn frame_mut(&mut self) -> &mut LayerDraws<T::Part> {
         self.frame.get_or_insert_default()
     }
 

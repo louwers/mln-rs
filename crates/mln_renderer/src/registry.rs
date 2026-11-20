@@ -100,15 +100,17 @@ impl std::fmt::Debug for Registry {
 }
 
 impl Registry {
-    /// The built-in expression functions and the engine's own layer and
-    /// source types, without those of `mln_layers` and `mln_sources`, for
-    /// this crate's tests, which can't reach the facade's registry.
+    /// The built-in expression functions, the engine's own layer and source
+    /// types, without those of `mln_layers` and `mln_sources`, and the tests'
+    /// `dot` layer type, for this crate's tests, which can't reach the
+    /// facade's registry.
     #[cfg(test)]
     pub(crate) fn with_builtins() -> Arc<Registry> {
         static BUILTINS: std::sync::LazyLock<Arc<Registry>> = std::sync::LazyLock::new(|| {
             let mut builder = RegistryBuilder::new();
             mln_style::expression::functions::register_builtin_functions(builder.functions_mut()).unwrap();
             crate::builtins::register_layer_types(&mut builder).unwrap();
+            builder.add_layer_type::<crate::tests::fixture_layer::Dot>().unwrap();
             crate::builtins::register_source_types(&mut builder).unwrap();
             builder.build()
         });
@@ -158,7 +160,7 @@ impl mln_wire::Context for &Registry {
 
 #[cfg(test)]
 mod tests {
-    use mln_style::layers::Circle;
+    use mln_style::layers::Raster;
     use mln_style::sources::GeoJsonSourceType;
 
     use super::*;
@@ -173,7 +175,7 @@ mod tests {
     #[test]
     fn a_layer_type_registers_once() {
         let mut builder = RegistryBuilder::new();
-        builder.add_layer_type::<Circle>().unwrap();
-        assert_eq!(builder.add_layer_type::<Circle>(), Err(RegisterError::Duplicate("circle".to_owned())));
+        builder.add_layer_type::<Raster>().unwrap();
+        assert_eq!(builder.add_layer_type::<Raster>(), Err(RegisterError::Duplicate("raster".to_owned())));
     }
 }

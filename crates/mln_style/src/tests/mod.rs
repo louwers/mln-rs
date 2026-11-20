@@ -16,8 +16,6 @@ mod expression_global_state;
 mod filter;
 pub(crate) mod fixture_layer;
 mod format_section_override_test;
-mod layer_round_trip;
-mod layout_difference;
 mod properties;
 mod property_expression;
 mod source;

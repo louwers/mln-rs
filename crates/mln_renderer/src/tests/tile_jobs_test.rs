@@ -253,7 +253,7 @@ fn a_cold_labelled_tile_takes_two_jobs_and_a_relayout_one() {
 fn a_stale_reply_after_a_relayout_is_dropped() {
     let manual = Manual::default();
     let mut test = Test::new(Box::new(manual.clone()), &[]);
-    let line = layer(json!({"id": "line", "type": "circle"}));
+    let line = layer(json!({"id": "line", "type": "dot"}));
     test.tile.set_style(&style(std::slice::from_ref(&line)));
     test.tile.set_data(Some(points()));
     test.update();
@@ -311,14 +311,14 @@ fn a_first_try_sent_again_gets_the_current_images() {
     let manual = Manual::default();
     manual.0.borrow_mut().caches_data = true;
     let mut test = Test::new(Box::new(manual.clone()), &[]);
-    test.load(&[layer(json!({"id": "dots", "type": "circle"}))]);
+    test.load(&[layer(json!({"id": "dots", "type": "dot"}))]);
     test.update();
     manual.run();
     test.update();
     assert!(test.shows_layout());
 
     // The relayout's first try names the data its lane got.
-    test.tile.set_style(&style(&[layer(json!({"id": "dots", "type": "circle"}))]));
+    test.tile.set_style(&style(&[layer(json!({"id": "dots", "type": "dot"}))]));
     test.update();
     let first = manual.take();
     assert!(matches!(&first.job, Job::Layout(job) if matches!(job.data, DataInput::Cached(_))));
@@ -520,7 +520,7 @@ fn a_missing_image_a_relayout_drops_resolves_when_used_again() {
     test.update();
     assert!(test.shows_layout());
 
-    test.load(&[layer(json!({"id": "dots", "type": "circle"}))]);
+    test.load(&[layer(json!({"id": "dots", "type": "dot"}))]);
     test.update();
     manual.run();
     test.update();
@@ -568,8 +568,8 @@ fn a_panicking_native_job_fails() {
     let pool = TaskGroup::new(&crate::tests::pool());
     let mut workers = PoolWorkers::new(pool, 1);
     let inbox = Inbox::new(Arc::new(|| {}));
-    let circles = layer(json!({"id": "dots", "type": "circle"}));
-    let mistyped: Arc<dyn ErasedEvaluatedLayer> = Arc::new(Mistyped(circles.shared_style()));
+    let dots = layer(json!({"id": "dots", "type": "dot"}));
+    let mistyped: Arc<dyn ErasedEvaluatedLayer> = Arc::new(Mistyped(dots.shared_style()));
     let id = JobId {
         tile: crate::tile::job::TileKey {
             source: crate::tile::job::SourceKey(1),
@@ -733,7 +733,7 @@ fn a_worker_lost_during_discovery_and_during_a_resume() {
 fn an_unreadable_reply_loses_its_worker() {
     let instances = Instances::new(2);
     let mut test = Test::new(instances.workers(), &[]);
-    test.load(&[layer(json!({"id": "dots", "type": "circle"}))]);
+    test.load(&[layer(json!({"id": "dots", "type": "dot"}))]);
     test.update();
     let lane = (0..2).find(|lane| instances.queued(*lane) == 1).expect("a lane with the job");
     instances.0.borrow().sink.as_ref().unwrap().send(lane, Encoded::from(vec![0, 1, 2]));
@@ -754,7 +754,7 @@ fn an_unreadable_reply_loses_its_worker() {
 fn replaced_workers_reach_no_other_workers() {
     let (old, new) = (Instances::new(1), Instances::new(1));
     let mut test = Test::new(old.workers(), &[]);
-    test.load(&[layer(json!({"id": "dots", "type": "circle"}))]);
+    test.load(&[layer(json!({"id": "dots", "type": "dot"}))]);
     test.update();
     assert_eq!(old.queued(0), 1);
 
@@ -801,7 +801,7 @@ fn an_image_a_first_try_only_names_resolves_without_a_relayout() {
 fn a_newer_generation_supersedes_the_job_in_flight() {
     let manual = Manual::default();
     let mut test = Test::new(Box::new(manual.clone()), &[]);
-    test.tile.set_style(&style(&[layer(json!({"id": "dots", "type": "circle"}))]));
+    test.tile.set_style(&style(&[layer(json!({"id": "dots", "type": "dot"}))]));
     test.update();
     assert_eq!(manual.submitted(), 0, "no data yet");
     test.tile.set_data(Some(points()));
@@ -906,7 +906,7 @@ fn a_worker_lost_during_a_decode() {
 #[test]
 fn a_tiles_upload_frees_the_data_its_world_copy_copied() {
     use crate::bucket_geometry::bucket_vertices;
-    use crate::buckets::circle_bucket::CircleBucket;
+    use crate::tests::fixture_layer::DotBucket;
     use crate::tile::source_tiles::SourceTiles;
 
     let thread_pool = TaskGroup::new(&crate::tests::pool());
@@ -914,27 +914,27 @@ fn a_tiles_upload_frees_the_data_its_world_copy_copied() {
     let copy_id = OverscaledTileID::new(0, 1, CanonicalTileID::new(0, 0, 0));
     let mut tiles =
         OneTile::new(tile_store(&thread_pool, Box::new(InlineWorkers)), TileKind::Geometry, id, MapMode::Continuous);
-    tiles.set_style(&style(&[layer(json!({"id": "circles", "type": "circle"}))]));
+    tiles.set_style(&style(&[layer(json!({"id": "dots", "type": "dot"}))]));
     tiles.set_data(Some(points()));
     tiles.settle(&[id]);
     tiles.add(copy_id);
     let (source, ctx) = tiles.store.source_mut(tiles.key).expect("the source");
     let copy = source.world_copy(&copy_id).expect("a copy of the tile");
     source.update(&copy_id, ctx, |tile| tile.start_as_copy(copy));
-    // Whether the circles' vertices of tile `id` moved out of its bucket and
+    // Whether the dots' vertices of tile `id` moved out of its bucket and
     // its data is gone, and the stored vertices they moved into.
-    let circles = |source: &SourceTiles, id: &OverscaledTileID| {
+    let dots = |source: &SourceTiles, id: &OverscaledTileID| {
         let contents = source.tile(id)?.contents()?.geometry()?;
         let mut buckets = contents.result.layer_render_data.buckets();
-        let vertices = &buckets.find_map(|bucket| bucket.downcast_ref::<CircleBucket>())?.vertices;
+        let vertices = &buckets.find_map(|bucket| bucket.downcast_ref::<DotBucket>())?.vertices;
         let stored = vertices.is_moved().then(|| bucket_vertices(&contents.bucket_geometry, vertices)).flatten();
         Some((vertices.is_moved(), vertices.data().is_empty(), stored))
     };
-    assert!(matches!(circles(source, &copy_id), Some((false, false, None))), "the copy holds a copy of the data");
+    assert!(matches!(dots(source, &copy_id), Some((false, false, None))), "the copy holds a copy of the data");
 
     crate::tests::with_context(|_, context| {
         source.upload_at(&id, None, &ctx.atlas, context);
-        let (tile, copy) = (circles(source, &id), circles(source, &copy_id));
+        let (tile, copy) = (dots(source, &id), dots(source, &copy_id));
         assert!(matches!(&tile, Some((true, true, Some(_)))), "the tile's data moved");
         assert!(matches!(&copy, Some((true, true, Some(_)))), "the copy freed its data");
         assert!(tile.and_then(|tile| tile.2) == copy.and_then(|copy| copy.2), "both draw the same vertices");

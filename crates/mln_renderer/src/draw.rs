@@ -539,7 +539,7 @@ impl DrawObjects {
     /// The attributes the paint values are read into, to change, which the
     /// next upload binds again: the instance attributes of a draw of
     /// instances, else the vertex attributes.
-    pub(crate) fn paint_attributes_mut(&mut self) -> &mut VertexAttributeArray {
+    pub fn paint_attributes_mut(&mut self) -> &mut VertexAttributeArray {
         let (attributes, changed) = match &mut self.instance_attributes {
             Some(instances) => (instances, &mut self.instance_attributes_changed),
             None => (&mut self.vertex_attributes, &mut self.vertex_attributes_changed),
@@ -555,7 +555,7 @@ impl DrawObjects {
     /// an id past the uniform buffers', on a device that binds vertex
     /// buffers; nothing with `None`. The next upload writes them, and the
     /// draws after it bind their buffer.
-    pub(crate) fn read_as_storage(&mut self, id: usize, vertices: Option<SharedVertices>) {
+    pub fn read_as_storage(&mut self, id: usize, vertices: Option<SharedVertices>) {
         debug_assert!(id >= MAX_UBO_COUNT_PER_SHADER, "a uniform buffer's id");
         self.storage_vertices.retain(|(at, ..)| *at != id);
         debug_assert!(vertices.is_none() || self.storage_vertices.len() < MAX_STORAGE_VERTICES);
@@ -574,19 +574,19 @@ impl DrawObjects {
 
     /// Whether the draw draws instances.
     #[must_use]
-    pub(crate) fn has_instances(&self) -> bool {
+    pub fn has_instances(&self) -> bool {
         self.instance_attributes.is_some()
     }
 
     /// Replaces the vertex attributes with a copy of those of `other`
     /// ([`copy_shared_attributes`]), which the next upload binds.
-    pub(crate) fn share_vertex_attributes(&mut self, other: &DrawObjects) {
+    pub fn share_vertex_attributes(&mut self, other: &DrawObjects) {
         *self.vertex_attributes_mut() = copy_shared_attributes(&other.vertex_attributes);
     }
 
     /// The texture it binds as `id`.
     #[must_use]
-    pub(crate) fn texture(&self, id: usize) -> Option<&SharedTexture> {
+    pub fn texture(&self, id: usize) -> Option<&SharedTexture> {
         self.textures[id].as_ref()
     }
 
@@ -600,7 +600,7 @@ impl DrawObjects {
 
     /// The texture it binds as `id`, which `make` makes where it has none;
     /// `None` where it has none and `make` returns `None`.
-    pub(crate) fn texture_or_insert_with(
+    pub fn texture_or_insert_with(
         &mut self,
         id: usize,
         make: impl FnOnce() -> Option<SharedTexture>,
@@ -624,7 +624,7 @@ impl DrawObjects {
     /// Drops the bindings, for an owner that replaces a buffer they bind.
     // Not inlined: every layer type's loop over its draws calls it.
     #[inline(never)]
-    pub(crate) fn drop_bindings(&mut self) {
+    pub fn drop_bindings(&mut self) {
         self.bindings = None;
     }
 
@@ -652,7 +652,7 @@ impl DrawObjects {
 /// context's store: the copy reads the same vertices, so draws of either
 /// bind the same buffers.
 #[must_use]
-pub(crate) fn copy_shared_attributes(attrs: &VertexAttributeArray) -> VertexAttributeArray {
+pub fn copy_shared_attributes(attrs: &VertexAttributeArray) -> VertexAttributeArray {
     let mut copy = VertexAttributeArray::new();
     for (id, attr) in attrs.iter() {
         debug_assert!(attr.shared().is_some(), "a copied attribute has values of its own");

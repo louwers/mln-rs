@@ -16,22 +16,24 @@ use crate::gfx::vertices::{SharedVertices, Vertices};
 /// `data_type`.
 #[derive(Clone)]
 pub struct SharedAttribute {
-    pub(crate) vertices: SharedVertices,
+    pub vertices: SharedVertices,
     pub(crate) data_type: AttributeDataType,
-    pub(crate) offset: u32,
+    pub offset: u32,
     pub(crate) vertex_offset: u32,
-    pub(crate) stride: u32,
+    pub stride: u32,
 }
 
 impl SharedAttribute {
     /// The attribute that reads `vertices` at `offset` in each of `stride`
     /// bytes, from the first vertex on, as `data_type`.
-    pub(crate) fn new(vertices: SharedVertices, data_type: AttributeDataType, offset: u32, stride: u32) -> Self {
+    #[must_use]
+    pub fn new(vertices: SharedVertices, data_type: AttributeDataType, offset: u32, stride: u32) -> Self {
         SharedAttribute { vertices, data_type, offset, vertex_offset: 0, stride }
     }
 
     /// The attribute, reading from the vertex `vertex_offset` on.
-    pub(crate) fn starting_at(self, vertex_offset: u32) -> Self {
+    #[must_use]
+    pub fn starting_at(self, vertex_offset: u32) -> Self {
         SharedAttribute { vertex_offset, ..self }
     }
 }
@@ -164,7 +166,7 @@ pub struct VertexAttributeArray {
 
 impl VertexAttributeArray {
     #[must_use]
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self::default()
     }
 
@@ -180,6 +182,13 @@ impl VertexAttributeArray {
         self.attrs.get(id).and_then(|a| a.as_deref())
     }
 
+    /// Where the attribute `id` reads vertices of the context's store, if it
+    /// does.
+    #[must_use]
+    pub fn shared(&self, id: usize) -> Option<&SharedAttribute> {
+        self.get(id).and_then(VertexAttribute::shared)
+    }
+
     pub(crate) fn get_mut(&mut self, id: usize) -> Option<&mut VertexAttribute> {
         self.attrs.get_mut(id).and_then(|a| a.as_deref_mut())
     }
@@ -193,7 +202,7 @@ impl VertexAttributeArray {
 
     /// Makes the attribute `id` read vertices of the context's store as
     /// `shared` says.
-    pub(crate) fn set_shared(&mut self, id: usize, shared: SharedAttribute) {
+    pub fn set_shared(&mut self, id: usize, shared: SharedAttribute) {
         self.set(id, VertexAttribute::Shared(shared));
     }
 
@@ -206,7 +215,7 @@ impl VertexAttributeArray {
 
     /// Where the attributes that read vertices of the context's store read
     /// them, to change.
-    pub(crate) fn shared_mut(&mut self) -> impl Iterator<Item = &mut SharedAttribute> {
+    pub fn shared_mut(&mut self) -> impl Iterator<Item = &mut SharedAttribute> {
         self.attrs.iter_mut().filter_map(|attr| match attr.as_deref_mut()? {
             VertexAttribute::Shared(shared) => Some(shared),
             VertexAttribute::Own { .. } => None,

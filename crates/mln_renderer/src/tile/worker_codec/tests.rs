@@ -6,7 +6,6 @@ use std::sync::Arc;
 use mln_map_types::MapMode;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::layer::Layer;
-use mln_style::layers::Fill;
 use mln_style::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
 use mln_style::renderer::transition_parameters::TransitionParameters;
 use mln_style::transition_options::TransitionOptions;
@@ -26,6 +25,7 @@ use crate::Registry;
 use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::layout::tile_layout::{Dependencies, LayoutParams, Resolved};
+use crate::tests::fixture_layer::Dot;
 use crate::text::glyph_store::ShapeResults;
 use crate::tile::contents::LayoutResult;
 use crate::tile::job::{
@@ -225,7 +225,7 @@ impl ThroughCodec {
 /// What of a layout tells it apart: the encodings of its buckets and feature
 /// index without a codec's context, with every value in full.
 fn comparable(result: &LayoutResult) -> [Vec<u8>; 2] {
-    [fields::encode_buckets(result), result.feature_index.encode_grid()]
+    [fields::encode_buckets(result).unwrap(), result.feature_index.encode_grid().unwrap()]
 }
 
 /// Lays the tile out with `layers` and `data` through the codec, then
@@ -242,13 +242,12 @@ fn cross(layers: &[Arc<dyn ErasedEvaluatedLayer>], data: &TileData) -> LayoutRes
     result
 }
 
-const FILL: &str = r#"{"id": "water", "type": "fill", "source": "s", "source-layer": "water",
-    "paint": {"fill-color": ["case", ["has", "class"], "red", "rgba(0, 0, 255, 0.678)"], "fill-opacity": 0.5}}"#;
-const LEGACY_FILL: &str = r#"{"id": "water-legacy", "type": "fill", "source": "s", "source-layer": "water",
-    "paint": {"fill-color": {"property": "class", "type": "categorical", "stops": [["ocean", "red"]]}}}"#;
-const LINE: &str = r#"{"id": "coast", "type": "line", "source": "s", "source-layer": "water",
-    "layout": {"line-join": "round"},
-    "paint": {"line-width": ["interpolate", ["linear"], ["zoom"], 0, ["get", "w"], 4, 2], "line-color": "red"}}"#;
+const DOTS: &str = r#"{"id": "water", "type": "dot", "source": "s", "source-layer": "water",
+    "paint": {"dot-color": ["case", ["has", "class"], "red", "rgba(0, 0, 255, 0.678)"]}}"#;
+const LEGACY_DOTS: &str = r#"{"id": "water-legacy", "type": "dot", "source": "s", "source-layer": "water",
+    "paint": {"dot-color": {"property": "class", "type": "categorical", "stops": [["ocean", "red"]]}}}"#;
+const ADMIN_DOTS: &str = r#"{"id": "admin", "type": "dot", "source": "s", "source-layer": "admin",
+    "paint": {"dot-color": ["case", ["==", ["get", "maritime"], 1], "blue", "red"]}}"#;
 const LABELS: &str = r#"{"id": "labels", "type": "symbol", "source": "s", "source-layer": "admin",
     "layout": {"symbol-placement": "line", "text-field": ["to-string", ["get", "admin_level"]],
         "text-font": ["Open Sans Regular"], "text-size": ["interpolate", ["linear"], ["zoom"], 0, 10, 10, 20],
@@ -259,28 +258,6 @@ const LABELS_HALO: &str = r#"{"id": "labels-halo", "type": "symbol", "source": "
         "text-font": ["Open Sans Regular"], "text-size": ["interpolate", ["linear"], ["zoom"], 0, 10, 10, 20],
         "icon-image": "interstate_1", "icon-allow-overlap": true, "text-allow-overlap": true},
     "paint": {"text-halo-color": ["case", ["==", ["get", "disputed"], 1], "red", "white"], "text-halo-width": 1}}"#;
-const CIRCLE: &str = r#"{"id": "circles", "type": "circle", "source": "s", "source-layer": "admin",
-    "paint": {"circle-radius": ["interpolate", ["linear"], ["zoom"], 0, ["get", "admin_level"], 10, 4],
-        "circle-color": ["case", ["==", ["get", "maritime"], 1], "blue", "red"], "circle-stroke-width": 1}}"#;
-const HEATMAP: &str = r#"{"id": "heat", "type": "heatmap", "source": "s", "source-layer": "admin",
-    "paint": {"heatmap-weight": ["get", "admin_level"], "heatmap-radius": 10}}"#;
-const EXTRUSION: &str = r#"{"id": "extrusion", "type": "fill-extrusion", "source": "s", "source-layer": "water",
-    "paint": {"fill-extrusion-height": ["case", ["has", "class"], 10, 20], "fill-extrusion-color": "red"}}"#;
-/// The pattern variants: a constant pattern, a zoom function of patterns
-/// (a legacy function, whose literal images must stay runtime constant)
-/// and a data-driven one, which has the cross-faded binders' vertices. They
-/// all use one image: the atlas packs a layout's images in the order of a
-/// `HashMap`, which differs between two workers, so with two images their
-/// positions (and the binders' vertices) could differ between the worker
-/// behind the codec and the one reached directly.
-const FILL_PATTERN: &str = r#"{"id": "fill-pattern", "type": "fill", "source": "s", "source-layer": "water",
-    "paint": {"fill-pattern": "grass_pattern"}}"#;
-const LINE_PATTERN: &str = r#"{"id": "line-pattern", "type": "line", "source": "s", "source-layer": "admin",
-    "paint": {"line-width": 4, "line-pattern": {"stops": [[0, "grass_pattern"]], "type": "interval"}}}"#;
-const EXTRUSION_PATTERN: &str = r#"{"id": "extrusion-pattern", "type": "fill-extrusion", "source": "s",
-    "source-layer": "water", "paint": {"fill-extrusion-height": 10,
-        "fill-extrusion-pattern": ["coalesce", ["get", "pattern"], "grass_pattern"]}}"#;
-
 /// A job behind the codec lays the tile out as one run directly, for a layer
 /// of every type that takes geometry tiles (each type of the style
 /// specification whose layers do must have a layer here, and its buckets a
@@ -288,18 +265,10 @@ const EXTRUSION_PATTERN: &str = r#"{"id": "extrusion-pattern", "type": "fill-ext
 /// properties.
 #[test]
 fn every_geometry_layer_type_crosses() {
-    // The layer types of the style specification (v8.json) that the engine
-    // registers. Background, in mln_layers, takes no source.
-    let types =
-        ["fill", "line", "symbol", "circle", "heatmap", "fill-extrusion", "raster", "hillshade", "color-relief"];
-    let layers_of_type = [
-        ("fill", vec![FILL, LEGACY_FILL]),
-        ("line", vec![LINE]),
-        ("symbol", vec![LABELS]),
-        ("circle", vec![CIRCLE]),
-        ("heatmap", vec![HEATMAP]),
-        ("fill-extrusion", vec![EXTRUSION]),
-    ];
+    // The layer types this crate's tests register. The built-in types of
+    // mln_layers cross in its tests.
+    let types = ["symbol", "dot", "raster", "hillshade", "color-relief"];
+    let layers_of_type = [("symbol", vec![LABELS]), ("dot", vec![DOTS, LEGACY_DOTS, ADMIN_DOTS])];
     for type_ in types {
         let layer = convert(&format!(r#"{{"id": "l", "type": "{type_}", "source": "s", "source-layer": "sl"}}"#));
         let takes_geometry_tiles = layer.info().source == mln_style::layer_type::SourceKind::Geometry;
@@ -369,30 +338,7 @@ fn format_section_overrides_cross() {
 #[test]
 fn mlt_tiles_cross() {
     let data = TileData::Mlt(MltTile::new(Arc::new(fixture("test/fixtures/map/issue12432/0-0-0.mlt")), false));
-    cross(&layers(&[FILL, LINE]), &data);
-}
-
-/// Pattern layers cross with their images: the worker's image request
-/// reaches the tile, the binders' vertices come back, and the layout's
-/// pattern positions with them.
-#[test]
-fn pattern_layouts_cross() {
-    let result = cross(&layers(&[FILL_PATTERN, LINE_PATTERN, EXTRUSION_PATTERN]), &tile_data());
-    let extrusion = result
-        .layer_render_data
-        .get("extrusion-pattern")
-        .unwrap()
-        .bucket
-        .downcast_ref::<crate::buckets::fill_extrusion_bucket::FillExtrusionBucket>()
-        .unwrap();
-    let binders = &extrusion.paint_property_binders["extrusion-pattern"];
-    assert!(matches!(
-        binders.fill_extrusion_pattern.kind,
-        crate::paint_property_binder::CrossFadedPaintPropertyBinderKind::Composite { .. }
-    ));
-    let buffer = &binders.interleaved_vertex_buffer;
-    assert_ne!(buffer.vertex_count, 0);
-    assert_eq!(buffer.shared_vertex_vector.data().len(), buffer.vertex_count * buffer.stride);
+    cross(&layers(&[DOTS, ADMIN_DOTS]), &data);
 }
 
 /// GeoJSON tiles cross as their features: each geometry type, properties
@@ -467,7 +413,7 @@ fn geojson_tiles_cross() {
     assert_eq!(decoded, *features);
 
     // A GeoJSON tile's one layer is every source layer.
-    cross(&layers(&[FILL, LINE, CIRCLE]), &data);
+    cross(&layers(&[DOTS, ADMIN_DOTS]), &data);
 }
 
 /// A fill layer whose color the tile's render layer is transitioning from
@@ -481,8 +427,8 @@ fn properties_cross_while_a_paint_property_transitions() {
     use mln_style::map::zoom_history::ZoomHistory;
     use mln_util::time::Instant;
 
-    let constant = FILL.replace(r#"["case", ["has", "class"], "red", "rgba(0, 0, 255, 0.678)"]"#, r#""red""#);
-    let mut render_layer = crate::tests::render_layer(convert(FILL).style());
+    let constant = DOTS.replace(r#"["case", ["has", "class"], "red", "rgba(0, 0, 255, 0.678)"]"#, r#""red""#);
+    let mut render_layer = crate::tests::render_layer(convert(DOTS).style());
     let start = Instant::now();
     let at = |now| PropertyEvaluationParameters::with_zoom_history(ZoomHistory::default(), Some(now), Duration::ZERO);
     render_layer.transition(&TransitionParameters::new(Some(start), TransitionOptions::default()));
@@ -495,7 +441,7 @@ fn properties_cross_while_a_paint_property_transitions() {
     );
     render_layer.evaluate(&at(start + Duration::from_millis(100)));
     let transitioning = render_layer.evaluated();
-    assert!(!EvaluatedLayer::<Fill>::recover(&transitioning).unwrap().paint.fill_color.is_constant());
+    assert!(!EvaluatedLayer::<Dot>::recover(&transitioning).unwrap().paint.dot_color.is_constant());
 
     let mut codec = ThroughCodec::new();
     let style = style(std::slice::from_ref(&transitioning));
@@ -509,8 +455,8 @@ fn properties_cross_while_a_paint_property_transitions() {
 /// since.
 #[test]
 fn layouts_have_the_layers_they_answer() {
-    let sent = style(&layers(&[FILL, LINE]));
-    let newer = style(&layers(&[FILL, LINE]));
+    let sent = style(&layers(&[DOTS, ADMIN_DOTS]));
+    let newer = style(&layers(&[DOTS, ADMIN_DOTS]));
 
     let mut codec = ThroughCodec::new();
     let request = codec.map.encode_run(&job(&sent, full(&tile_data()), Resolved::default())).unwrap();
@@ -540,7 +486,7 @@ fn forgotten(request: &[u8]) -> Vec<Vec<u64>> {
 fn styles_and_layers_are_defined_once() {
     let mut map = MapCodec::new(Registry::with_builtins());
     let data = DataInput::Cached(key(1));
-    let layers = layers(&[FILL, LINE]);
+    let layers = layers(&[DOTS, ADMIN_DOTS]);
     let first_style = style(&layers);
     let first = map.encode_run(&job(&first_style, data_input(&data), Resolved::default())).unwrap();
     let second = map.encode_run(&job(&first_style, data_input(&data), Resolved::default())).unwrap();
@@ -602,7 +548,7 @@ struct Unknown(Arc<dyn mln_style::layer_type::ErasedLayerStyle>);
 
 impl ErasedEvaluatedLayer for Unknown {
     fn entry(&self) -> &'static dyn crate::layer_type::ErasedLayerType {
-        crate::layer_type::entry::<mln_style::layers::Line>()
+        crate::layer_type::entry::<Dot>()
     }
     fn style(&self) -> &dyn mln_style::layer_type::ErasedLayerStyle {
         &*self.0
@@ -627,8 +573,8 @@ impl ErasedEvaluatedLayer for Unknown {
 #[test]
 fn failed_jobs_define_nothing() {
     let mut map = MapCodec::new(Registry::with_builtins());
-    let fill = layer(FILL, 0.0);
-    let unknown: Arc<dyn ErasedEvaluatedLayer> = Arc::new(Unknown(layer(LINE, 0.0).shared_style()));
+    let fill = layer(DOTS, 0.0);
+    let unknown: Arc<dyn ErasedEvaluatedLayer> = Arc::new(Unknown(layer(ADMIN_DOTS, 0.0).shared_style()));
     let failed = style(&[Arc::clone(&fill), unknown]);
     assert!(map.encode_run(&job(&failed, DataInput::Cached(key(1)), Resolved::default())).is_err());
 
@@ -647,14 +593,14 @@ fn failed_jobs_define_nothing() {
 fn a_missing_layer_type_fails_its_job() {
     let mut map = MapCodec::new(Registry::with_builtins());
     let request =
-        map.encode_run(&job(&style(&layers(&[FILL])), DataInput::Cached(key(1)), Resolved::default())).unwrap();
+        map.encode_run(&job(&style(&layers(&[DOTS])), DataInput::Cached(key(1)), Resolved::default())).unwrap();
     let (_, body) = envelope::read_job_id(&request).unwrap();
 
     let mut builder = crate::RegistryBuilder::new();
     mln_style::expression::functions::register_builtin_functions(builder.functions_mut()).unwrap();
-    builder.add_layer_type::<mln_style::layers::Line>().unwrap();
+    builder.add_layer_type::<mln_style::layers::Symbol>().unwrap();
     let Err(error) = WorkerCodec::new(builder.build()).decode_job(body) else {
-        panic!("decoded a fill layer without its type");
+        panic!("decoded a dot layer without its type");
     };
     assert!(error.contains("unknown layer type"), "{error}");
 }
@@ -696,7 +642,7 @@ fn evicted_data_needs_sending_again() {
         _ => unreachable!(),
     };
     codec.cache.set_budget(size * 3 / 2);
-    let style = style(&layers(&[FILL]));
+    let style = style(&layers(&[DOTS]));
     let full_load = |load| DataInput::Full { key: key(load), data: Some(data.clone()) };
     assert!(matches!(codec.run(&job(&style, full_load(1), Resolved::default())), JobResult::Laid(_)));
     assert!(matches!(codec.run(&job(&style, DataInput::Cached(key(1)), Resolved::default())), JobResult::Laid(_)));
@@ -715,7 +661,7 @@ fn an_ancestor_crosses_once_for_its_cut_tiles() {
     use mln_tile::cut::{Ancestor, Cut, CutData};
 
     let mut map = MapCodec::new(Registry::with_builtins());
-    let style = style(&layers(&[FILL]));
+    let style = style(&layers(&[DOTS]));
     let ancestor = Arc::new(Ancestor::new(tile_data()));
     let cut = |x| TileData::Cut(Arc::new(CutData::new(Arc::clone(&ancestor), Cut { dz: 1, x, y: 0 })));
     let first = map.encode_run(&job(&style, full(&cut(0)), Resolved::default())).unwrap();
