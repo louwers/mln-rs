@@ -7,7 +7,6 @@ use mln_gfx::shaders::layer_ubo::GlobalPaintParamsUBO;
 use mln_gfx::shaders::shader_defines::ID_GLOBAL_PAINT_PARAMS_UBO;
 use mln_gfx::{FrameImage, Handoff, ScissorRect};
 use mln_map_types::MapDebugOptions;
-use mln_style::layers::CustomLayerFrame;
 use mln_text::GlyphCache;
 use mln_text::local_glyph_rasterizer::LocalGlyphs;
 use mln_tile_id::UnwrappedTileID;
@@ -285,8 +284,8 @@ impl Renderer {
     /// sources, tiles, layers and placement. Returns the frame to draw,
     /// which the host [renders](Self::render) into a frame of its target,
     /// or `None` when there is nothing to draw: a still image that hasn't
-    /// loaded yet. Custom layers that the update removed or gave a new host
-    /// end on `gpu`.
+    /// loaded yet. The hosts that layers the update removed or restyled let
+    /// go of end on `gpu`.
     pub fn update(&mut self, gpu: &mut dyn Gpu, update_parameters: &Arc<UpdateParameters>) -> Option<UpdatedFrame> {
         // The overdraw inspector takes shaders and color modes of its own.
         let overdraw = update_parameters.debug_options.contains(MapDebugOptions::OVERDRAW);
@@ -470,10 +469,11 @@ impl Renderer {
         self.orchestrator.tile_cache_enabled()
     }
 
-    /// Tells the hosts of the custom layers that the renderer's graphics
+    /// Tells the hosts that layers draw through
+    /// ([`LayerHost`](crate::layer::LayerHost)) that the renderer's graphics
     /// objects are lost, so that they forget theirs, and lets go of them.
     /// Call it before the renderer goes when its device or target went first.
-    pub fn lose_custom_layers(&mut self) {
+    pub fn lose_layer_hosts(&mut self) {
         self.orchestrator.visit_render_layers(|layer| layer.lose_context());
     }
 
@@ -640,19 +640,15 @@ impl Encoder {
 
         // - DRAW ----------------------------------------------------------
         // The 3D layers draw into depth from 0 to the passes' depth range
-        // size, which the draw groups' count sets, and custom layers record
-        // their work with the projection that the frame's result reports.
+        // size, which the draw groups' count sets, and layers that draw
+        // through a host hand it the projection that the frame's result
+        // reports.
         let depth_range_size = 1.0
             - ((draw_groups.count + 2) * PaintParameters::NUM_SUBLAYERS as usize) as f32
                 * PaintParameters::DEPTH_EPSILON;
         let frame_projection =
             frame_projection::compute(&frame.transform, depth_range_size, parameters.context.caps().clip_depth);
-        parameters.custom_layer_frame = Some(CustomLayerFrame {
-            view: state.map_view(pixel_ratio),
-            projection: frame_projection,
-            width: renderable_size.width,
-            height: renderable_size.height,
-        });
+        parameters.frame_projection = Some(frame_projection);
         draw(orchestrator, gpu, &mut parameters, &frame, image, draw_groups.count, depth_range_size);
         let start_rendering = Instant::now();
         if let Err(error) = parameters.end_pass(gpu).and_then(|()| gpu.flush(false)) {

@@ -3,7 +3,7 @@
 //! expression functions and the types of `mln_layers` and `mln_sources`.
 
 use mln_style::expression::functions::RegisterError;
-use mln_style::layers::{Custom, Symbol};
+use mln_style::layers::Symbol;
 use mln_style::sources::{
     CustomGeometrySourceType, CustomVectorSourceType, GeoJsonSourceType, ImageSourceType, RasterDemSourceType,
     RasterSourceType, VectorSourceType,
@@ -11,12 +11,11 @@ use mln_style::sources::{
 
 use crate::RegistryBuilder;
 
-/// Adds the style specification's layer types that are in the engine, and
-/// the custom layer type.
+/// Adds the layer types that are in the engine: the style specification's
+/// symbol layer type.
 /// Fails for a name that an earlier call took.
 pub fn register_layer_types(builder: &mut RegistryBuilder) -> Result<(), RegisterError> {
-    builder.add_layer_type::<Symbol>()?;
-    builder.add_layer_type::<Custom>()
+    builder.add_layer_type::<Symbol>()
 }
 
 /// Adds the style specification's source types and the custom source types.
