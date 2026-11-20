@@ -66,6 +66,15 @@
 //!   a layer draws by it. A change of the style's images, or of the feature
 //!   state of a bucket a drape shows, draws it again too. While the camera
 //!   moves, a drape drawn at another zoom or bearing stays.
+//! - **The drape composite.** A draped layer with a layer opacity below 1
+//!   or a layer blend other than `normal` draws as a whole inside each
+//!   drape, as in 2D (`LayerComposite`): into a texture of the drape's
+//!   size, composited onto the drape. The drapes share one such composite,
+//!   which the drapes that draw again in a frame use in turn, and which
+//!   drops its textures in a frame where none of them composites. A drape
+//!   with a layer that blends in the shader draws into the composite's
+//!   frame texture, which is copied into the drape before its mips. A
+//!   blend's backdrop is the drape's own texels.
 //! - **The elevation snapshot** ([`TerrainElevation`]) holds the drawn
 //!   tiles, and the DEM images and sub-rects they read, which don't change
 //!   once it shares them, so the map reads it on its thread. The renderer

@@ -1,10 +1,5 @@
 {
-  "gljs/render-tests/fill-layer-blend/terrain": "P1b (stacks and composites): terrain drapes its layers in one stack, with no layer composites in the drapes; its DEM source declares tileSize 256 for tiles/terrain-shading's 512 px tiles",
-  "gljs/render-tests/fill-layer-opacity/terrain": "P1b (stacks and composites): terrain drapes its layers in one stack, with no layer composites in the drapes; its DEM source declares tileSize 256 for tiles/terrain-shading's 512 px tiles",
   "gljs/render-tests/high-pitch/terrain-pitch95": "P2 (camera): terrain draws, without GL JS's camera rules over terrain",
-  "gljs/render-tests/line-layer-blend/terrain": "P1b (stacks and composites): terrain drapes its layers in one stack, with no layer composites in the drapes; its DEM source declares tileSize 256 for tiles/terrain-shading's 512 px tiles",
-  "gljs/render-tests/line-layer-opacity/terrain": "P1b (stacks and composites): terrain drapes its layers in one stack, with no layer composites in the drapes; its DEM source declares tileSize 256 for tiles/terrain-shading's 512 px tiles",
-  "gljs/render-tests/raster-layer-blend/terrain": "P1b (stacks and composites): terrain drapes its layers in one stack, with no layer composites in the drapes",
   "gljs/render-tests/sky/fog-color/default": "P3 (fog): terrain draws without fog",
   "gljs/render-tests/sky/fog-color/function": "P3 (fog): terrain draws without fog",
   "gljs/render-tests/sky/fog-color/global-state": "P3 (fog): terrain draws without fog",

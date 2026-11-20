@@ -19,7 +19,7 @@ use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, LoadOp, TargetF
 use mln_gfx::shaders::shader_defines::ID_GLOBAL_PAINT_PARAMS_UBO;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
-use mln_map_types::View;
+use mln_map_types::{MapDebugOptions, View};
 use mln_style::layer_type::ErasedLayerStyle;
 use mln_tile_id::OverscaledTileID;
 use mln_util::Color;
@@ -118,8 +118,6 @@ struct Drape {
     texture: SharedTexture,
     transform: TransformParameters,
     clip_masks: ClipMasks,
-    /// Composites nothing: the layers that would composite draw straight.
-    layer_composite: LayerComposite,
     /// The frame's draped layers' drawings, in drawing order.
     layers: Vec<DrapeLayer>,
     /// The drawings of the last frame that this frame's layers haven't
@@ -158,7 +156,6 @@ impl Drape {
             texture,
             transform: TransformParameters::for_drape(view, &tile.to_unwrapped()),
             clip_masks: ClipMasks::default(),
-            layer_composite: LayerComposite::default(),
             layers: Vec::new(),
             previous: Vec::new(),
             groups: DrawGroups::default(),
@@ -177,6 +174,10 @@ pub(crate) struct Drapes {
     size: u32,
     /// The depth and stencil every drape draws with in turn, of `size`.
     depth_stencil: Option<GpuTexture>,
+    /// What the layers drawn as a whole in the drapes that draw again draw
+    /// into and composite with, of `size`, which every drape's pass uses in
+    /// turn.
+    layer_composite: LayerComposite,
     /// The tiles of the drapes drawn since the last [`take_passes`](Self::take_passes).
     #[cfg(test)]
     passes: Vec<OverscaledTileID>,
@@ -263,7 +264,8 @@ impl Drapes {
         let style = Arc::clone(style);
         let pattern_atlas_size = atlases.pattern.pixel_size();
         for drape in self.drapes.iter_mut().filter(|drape| drape.redraws) {
-            let Drape { tile, transform, clip_masks, layer_composite, layers, previous, .. } = drape;
+            let Drape { tile, transform, clip_masks, layers, previous, .. } = drape;
+            let layer_composite = &mut self.layer_composite;
             // A drawing made for another style of the layer goes, as the
             // layer's own draws do.
             let mut kept = match previous.iter().position(|kept| Arc::ptr_eq(&kept.style, &style)) {
@@ -321,10 +323,13 @@ impl Drapes {
     /// Makes the textures of the drapes that draw again and what they draw
     /// with, and uploads the GPU objects of their draws and the masks of the
     /// tiles they clip to, through `gpu`, the context of `parameters`, the
-    /// frame's.
+    /// frame's. The layer composite takes the composited draw groups of
+    /// every drape that draws again, and drops its textures where there are
+    /// none.
     pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         if self.drapes.is_empty() {
             self.depth_stencil = None;
+            self.layer_composite = LayerComposite::default();
             return;
         }
         let size = Size::new(self.size, self.size);
@@ -359,19 +364,27 @@ impl Drapes {
                 to_projection_ubo(&transform.projection_data_for_tile(tile, false))
             });
         }
+        let redrawn = self.drapes.iter().filter(|drape| drape.redraws);
+        let composited: Vec<_> = redrawn.flat_map(|drape| drape.groups.composited.iter().copied()).collect();
+        let overdraw = parameters.debug_options.contains(MapDebugOptions::OVERDRAW);
+        self.layer_composite.update(gpu, parameters.context, size, Some(COLOR), overdraw, &composited);
     }
 
     /// Draws each drape that draws again into its texture, through `gpu`,
     /// the context of `parameters`, the frame's, outside any pass, and then
     /// its texture's mips: its layers' opaque draws front to back, then
-    /// their translucent ones back to front, over transparent texels.
+    /// their translucent ones back to front, over transparent texels. A
+    /// drape with a layer that blends in the shader draws into the layer
+    /// composite's frame texture, which is then copied into its own.
     pub(crate) fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         let Some(depth_stencil) = self.depth_stencil.as_ref().map(GpuTexture::id) else {
             return;
         };
         let size = Size::new(self.size, self.size);
+        let targets = TargetFormats { color: Some(COLOR), depth_stencil: Some(DEPTH_STENCIL) };
+        let layer_composite = &mut self.layer_composite;
         for drape in self.drapes.iter_mut().filter(|drape| drape.redraws) {
-            let Drape { tile, texture, transform, clip_masks, layer_composite, layers, groups, drawn, key, .. } = drape;
+            let Drape { tile, texture, transform, clip_masks, layers, groups, drawn, key, .. } = drape;
             // A drape that fails to draw draws again in the next frame.
             *drawn = None;
             let color = match parameters.context.create_texture(gpu, texture) {
@@ -381,16 +394,18 @@ impl Drapes {
                     continue;
                 }
             };
+            let clear = LoadOp::Clear(Color::new(0.0, 0.0, 0.0, 0.0));
+            let frame_texture = layer_composite.frame_texture_for(&groups.composited);
             let pass = OpenPass {
                 label: "drape",
-                color: Some(ColorAttachment { texture: color, load: LoadOp::Clear(Color::new(0.0, 0.0, 0.0, 0.0)) }),
+                color: Some(ColorAttachment { texture: frame_texture.unwrap_or(color), load: clear }),
                 depth_stencil: Some(DepthStencilAttachment {
                     texture: depth_stencil,
                     depth: LoadOp::Clear(1.0),
                     stencil: LoadOp::Clear(0),
                 }),
                 size,
-                targets: TargetFormats { color: Some(COLOR), depth_stencil: Some(DEPTH_STENCIL) },
+                targets,
             };
             let mut drape_parameters =
                 parameters.drape(transform, clip_masks, layer_composite, size, tile.to_unwrapped());
@@ -405,6 +420,16 @@ impl Drapes {
                 drape_parameters.current_layer = (groups.count as u32).wrapping_sub(1);
                 for layer in layers.iter_mut() {
                     layer.drawing.render(gpu, &mut drape_parameters, DrawOrder::BottomUp);
+                }
+                if frame_texture.is_some() {
+                    let present = OpenPass {
+                        label: "drape",
+                        color: Some(ColorAttachment { texture: color, load: clear }),
+                        depth_stencil: None,
+                        size,
+                        targets: TargetFormats { color: Some(COLOR), depth_stencil: None },
+                    };
+                    drape_parameters.present_frame(gpu, present);
                 }
                 drape_parameters.end_pass(gpu)
             });

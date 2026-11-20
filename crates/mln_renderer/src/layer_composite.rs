@@ -329,6 +329,17 @@ impl LayerComposite {
         self.frame.as_ref().map(|frame| frame.frame.id())
     }
 
+    /// The texture a pass whose draw groups are `groups` draws into rather
+    /// than its own target: the frame copy's, where one of them blends in the
+    /// shader in this frame; `None` otherwise.
+    #[must_use]
+    pub(crate) fn frame_texture_for(&self, groups: &[(SimpleIdentity, Composite)]) -> Option<TextureId> {
+        let reads_backdrop = |group: &SimpleIdentity| {
+            self.groups.iter().any(|(id, composite)| id == group && composite.reads_backdrop())
+        };
+        self.frame_texture().filter(|_| groups.iter().any(|(group, _)| reads_backdrop(group)))
+    }
+
     /// The pass that copies the frame's texture into the backdrop before the
     /// draw group `group` composites: `None` where it doesn't blend in the
     /// shader.

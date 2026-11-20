@@ -285,10 +285,10 @@ impl<'a> PaintParameters<'a> {
     /// The parameters of the encode of a drape, which draws the frame's
     /// layers into a texture of `size` over its tile `tile` with `transform`
     /// ([`TransformParameters::for_drape`]): with the frame's camera, GPU
-    /// state and values, but its own clip masks and stencil values,
-    /// `layer_composite`, which composites nothing, and the whole target as
-    /// the scissor. The layers draw with depth, front to back in the opaque
-    /// pass. A map pixel is a pixel of the projection, so
+    /// state and values, but its own clip masks and stencil values, its
+    /// layers drawn as a whole into and composited by `layer_composite`, of
+    /// `size`, with their own depth, and the whole target as the scissor.
+    /// The layers draw with depth, front to back in the opaque pass. A map pixel is a pixel of the projection, so
     /// [`pixels_to_gl_units`](Self::pixels_to_gl_units) are its scale.
     pub(crate) fn drape<'b>(
         &'b mut self,

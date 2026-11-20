@@ -353,6 +353,27 @@ fn a_paint_change_draws_every_drape_again() {
     assert!(map.frame().1.is_empty(), "the drapes are drawn again once only");
 }
 
+/// A layer drawn as a whole in the drapes keeps them at rest, as any other
+/// layer does, and a change of its layer opacity draws them again.
+#[test]
+fn a_composited_layer_keeps_its_drapes_at_rest() {
+    let fill_layer_opacity = |value| Edit::SetLayerProperty {
+        layer: "fill".to_owned(),
+        name: "fill-layer-opacity".to_owned(),
+        value: serde_json::json!(value),
+    };
+    let (mut map, drapes) = settled(Tiles::default());
+    map.edit(fill_layer_opacity(0.5));
+    assert_eq!(drapes, map.frame().1);
+    let (full, passes) = map.frame();
+    assert!(full);
+    assert!(passes.is_empty(), "drapes drawn again: {passes:?}");
+    assert!(map.frame().1.is_empty());
+    map.edit(fill_layer_opacity(0.7));
+    assert_eq!(drapes, map.frame().1);
+    assert!(map.frame().1.is_empty(), "the drapes are drawn again once only");
+}
+
 /// A value that changes for a reason other than the zoom draws the drapes
 /// again even while the camera moves.
 #[test]
