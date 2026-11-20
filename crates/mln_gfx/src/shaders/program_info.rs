@@ -41,7 +41,7 @@ use crate::shaders::shader_defines::{
     ID_SYMBOL_HALO_COLOR_ATTRIBUTE, ID_SYMBOL_HALO_WIDTH_ATTRIBUTE, ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE,
     ID_SYMBOL_IMAGE_ICON_TEXTURE, ID_SYMBOL_IMAGE_TEXTURE, ID_SYMBOL_OPACITY_ATTRIBUTE,
     ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE, ID_SYMBOL_POS_OFFSET_ATTRIBUTE, ID_SYMBOL_PROJECTED_POS_ATTRIBUTE,
-    ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE,
+    ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE, ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE, ID_VERTEX_TEXEL_TEXTURE,
 };
 use crate::shaders::shader_source::BuiltIn;
 
@@ -58,7 +58,7 @@ pub struct ProgramInfo {
     pub textures: &'static [usize],
 }
 
-/// The built-in programs.
+/// The built-in programs the renderer draws with.
 pub const PROGRAMS: &[BuiltIn] = &[
     BuiltIn::BackgroundShader,
     BuiltIn::BackgroundPatternShader,
@@ -586,6 +586,13 @@ pub fn program_info(program: BuiltIn) -> Option<&'static ProgramInfo> {
             attributes: &[(ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE, Short2)],
             instance_attributes: &[],
             textures: &[ID_LAYER_COMPOSITE_IMAGE_TEXTURE, ID_LAYER_COMPOSITE_BACKDROP_TEXTURE],
+        }),
+        BuiltIn::VertexTexelShader => Some(&ProgramInfo {
+            name: "VertexTexelShader",
+            program: BuiltIn::VertexTexelShader,
+            attributes: &[(ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE, Short4)],
+            instance_attributes: &[],
+            textures: &[ID_VERTEX_TEXEL_TEXTURE],
         }),
         _ => None,
     }

@@ -58,4 +58,8 @@ pub enum BuiltIn {
     GlobeDepthShader,
     /// Port-only: a layer drawn into a texture, composited onto the frame.
     LayerCompositeShader,
+    /// Port-only, for the backend conformance cases: quads whose vertex
+    /// stage reads their color from a texture, by texel. The renderer
+    /// doesn't draw with it.
+    VertexTexelShader,
 }

@@ -3922,6 +3922,38 @@ void main() {
 ",
 };
 
+/// Port-only, for the backend conformance cases: quads at clip positions,
+/// each vertex colored by the texel of `image_texture` it names, which the
+/// vertex stage fetches without a sampler.
+pub(crate) const VERTEX_TEXEL_SHADER: GlslShaderSource = GlslShaderSource {
+    built_in: "VertexTexelShader",
+    name: "VertexTexelShader",
+    prelude: "",
+    vertex: r"
+
+layout(location = 0) in ivec4 in_pos_texel;
+
+layout(location = 0) out vec4 frag_color;
+
+layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image_texture;
+
+void main() {
+    frag_color = texelFetch(image_texture, in_pos_texel.zw, 0);
+    gl_Position = vec4(vec2(in_pos_texel.xy), 0.0, 1.0);
+}
+",
+    fragment: r"
+
+layout(location = 0) in vec4 frag_color;
+
+layout(location = 0) out vec4 out_color;
+
+void main() {
+    out_color = frag_color;
+}
+",
+};
+
 pub(crate) const HILLSHADE_SHADER_PRELUDE: &str = r"
 
 #define idHillshadeDrawableUBO          idDrawableReservedVertexOnlyUBO
@@ -7203,4 +7235,5 @@ pub(crate) const ALL: &[&GlslShaderSource] = &[
     &SYMBOL_SDF_SHADER,
     &SYMBOL_TEXT_AND_ICON_SHADER,
     &LAYER_COMPOSITE_SHADER,
+    &VERTEX_TEXEL_SHADER,
 ];

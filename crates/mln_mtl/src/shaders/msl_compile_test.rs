@@ -68,6 +68,7 @@ const ALL_BUILT_INS: &[BuiltIn] = &[
     BuiltIn::WideVectorShader,
     BuiltIn::GlobeDepthShader,
     BuiltIn::LayerCompositeShader,
+    BuiltIn::VertexTexelShader,
 ];
 
 fn sources() -> impl Iterator<Item = &'static ShaderSource> {
@@ -294,6 +295,7 @@ fn ubo_ids(source: &ShaderSource) -> Vec<(&'static str, usize)> {
             "rasterUBOCount",
         ),
         "SkyShader" => (&[("idSkyPropsUBO", ID_SKY_PROPS_UBO)], "skyUBOCount"),
+        "VertexTexelShader" => (&[], "vertexTexelUBOCount"),
         "SymbolIconShader" | "SymbolSDFShader" | "SymbolTextAndIconShader" => (
             &[
                 ("idSymbolDrawableUBO", ID_SYMBOL_DRAWABLE_UBO),

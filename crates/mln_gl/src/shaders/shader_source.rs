@@ -83,6 +83,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE, ID_SYMBOL_IMAGE_ICON_TEXTURE, ID_SYMBOL_IMAGE_TEXTURE,
     ID_SYMBOL_OPACITY_ATTRIBUTE, ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE, ID_SYMBOL_POS_OFFSET_ATTRIBUTE,
     ID_SYMBOL_PROJECTED_POS_ATTRIBUTE, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE, ID_SYMBOL_TILE_PROPS_UBO,
+    ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE, ID_VERTEX_TEXEL_TEXTURE,
 };
 use mln_gfx::shaders::shader_source::BuiltIn;
 use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
@@ -358,6 +359,15 @@ shader_source!(
     ],
     &[attr("a_pos", ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE)],
     &[tex("u_image", ID_LAYER_COMPOSITE_IMAGE_TEXTURE), tex("u_backdrop", ID_LAYER_COMPOSITE_BACKDROP_TEXTURE)]
+);
+
+// Vertex texel
+shader_source!(
+    VERTEX_TEXEL_SHADER,
+    "VertexTexelShader",
+    &[element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO)],
+    &[attr("a_pos_texel", ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE)],
+    &[tex("u_image", ID_VERTEX_TEXEL_TEXTURE)]
 );
 
 // Fill
@@ -968,6 +978,7 @@ pub(crate) fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource>
         BuiltIn::SymbolSDFShader => Some(&SYMBOL_SDF_SHADER),
         BuiltIn::SymbolTextAndIconShader => Some(&SYMBOL_TEXT_AND_ICON_SHADER),
         BuiltIn::LayerCompositeShader => Some(&LAYER_COMPOSITE_SHADER),
+        BuiltIn::VertexTexelShader => Some(&VERTEX_TEXEL_SHADER),
         _ => None,
     }
 }
@@ -1013,4 +1024,5 @@ pub(crate) const REGISTERED_SHADERS: &[BuiltIn] = &[
     BuiltIn::SymbolSDFShader,
     BuiltIn::SymbolTextAndIconShader,
     BuiltIn::LayerCompositeShader,
+    BuiltIn::VertexTexelShader,
 ];

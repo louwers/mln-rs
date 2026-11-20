@@ -156,6 +156,11 @@ pub const ID_LAYER_COMPOSITE_IMAGE_TEXTURE: usize = 0;
 pub const ID_LAYER_COMPOSITE_BACKDROP_TEXTURE: usize = 1;
 pub const ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE: usize = 0;
 
+// --- vertex texel (port-only): the backend conformance cases' quads, whose
+// vertex stage reads a texture.
+pub const ID_VERTEX_TEXEL_TEXTURE: usize = 0;
+pub const ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE: usize = 0;
+
 // --- sky (`idSkyPropsUBO` / `idAtmospherePropsUBO = getEnumValue(drawableReservedUBOCount, layerUBOStartId)`)
 pub const ID_SKY_PROPS_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT; // packed
 pub const SKY_LAYER_UBO_COUNT: usize = ID_SKY_PROPS_UBO + 1;

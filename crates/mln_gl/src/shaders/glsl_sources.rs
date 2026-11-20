@@ -2739,6 +2739,28 @@ void main() {
 ",
 };
 
+/// Port-only, for the backend conformance cases: quads at clip positions,
+/// each vertex colored by the texel of `u_image` it names, which the vertex
+/// stage fetches.
+pub(crate) const VERTEX_TEXEL_SHADER: GlslShaderSource = GlslShaderSource {
+    vertex: r"layout (location = 0) in vec4 a_pos_texel;
+out vec4 v_color;
+
+uniform highp sampler2D u_image;
+
+void main() {
+    v_color = texelFetch(u_image, ivec2(a_pos_texel.zw), 0);
+    gl_Position = vec4(a_pos_texel.xy, 0.0, 1.0);
+}
+",
+    fragment: r"in vec4 v_color;
+
+void main() {
+    fragColor = v_color;
+}
+",
+};
+
 pub(crate) const HEATMAP_SHADER: GlslShaderSource = GlslShaderSource {
     vertex: r#"layout (location = 0) in vec2 a_pos;
 out vec2 v_extrude;
