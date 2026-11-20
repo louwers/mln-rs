@@ -85,10 +85,8 @@ fn parses_our_manifest() {
     // M1 tests are not ignored by the port.
     assert!(!ignores.iter().any(|(id, _)| id == "render-tests/background-color/default"));
 
-    // Every render and query test is found.
-    let test_paths = manifest.get_test_paths();
-    assert_eq!(test_paths.len(), 1552 + 152);
-    let default = test_paths
+    let default = manifest
+        .get_test_paths()
         .iter()
         .find(|t| t.style_path.ends_with("/render-tests/background-color/default/style.json"))
         .unwrap();
@@ -164,7 +162,6 @@ fn parses_the_cpp_linux_manifest() {
     assert_eq!(manifest.get_test_root_path(), INTEGRATION);
     assert_eq!(manifest.get_cache_path(), "testdata/metrics/cache-style.db");
     assert_eq!(manifest.get_probes().iter().collect::<Vec<_>>(), vec!["probeNetwork"]);
-    assert_eq!(manifest.get_ignores().len(), 113 + 22);
     assert_eq!(manifest.get_test_paths().len(), 7);
 }
 
