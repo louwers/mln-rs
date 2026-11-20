@@ -18,7 +18,7 @@ use mln_style::expression::expression::FeatureState;
 use mln_style::sources::{GeoJSONOptions, GeoJsonSourceType, ImageSourceType, image_source};
 use mln_style::{Edit, Style};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
-use mln_util::geo::LatLng;
+use mln_util::geo::{LatLng, WrapMode};
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
@@ -85,10 +85,12 @@ fn png(side: u32, pixel: [u8; 4]) -> Response {
     response
 }
 
-/// Answers every tile request at once: sea level for the DEM, grey for the
-/// raster source, except a raster tile that waits while it is held.
+/// Answers every tile request at once: sea level for the DEM, or 25 km up if
+/// `high`, and grey for the raster source, except a raster tile that waits
+/// while it is held.
 #[derive(Default)]
 struct Tiles {
+    high: bool,
     held: Mutex<Option<CanonicalTileID>>,
     waiting: Mutex<Vec<Responder>>,
 }
@@ -98,8 +100,9 @@ impl FileSource for Tiles {
         let data = resource.tile_data.as_ref().expect("only tiles are requested");
         let tile = CanonicalTileID::new(data.z as u8, data.x as u32, data.y as u32);
         if data.url_template.starts_with("dem/") {
-            // (1 · 65536 + 134 · 256 + 160) · 0.1 − 10000 = 0 m.
-            responder.send(png(256, [1, 134, 160, 255]));
+            // (1 · 65536 + 134 · 256 + 160) · 0.1 − 10000 = 0 m, and
+            // (5 · 65536 + 87 · 256 + 48) · 0.1 − 10000 = 25000 m.
+            responder.send(png(256, if self.high { [5, 87, 48, 255] } else { [1, 134, 160, 255] }));
         } else if *self.held.lock() == Some(tile) {
             self.waiting.lock().push(responder);
         } else {
@@ -312,6 +315,30 @@ impl DrapedMap {
             std::thread::sleep(Duration::from_millis(1));
         }
         panic!("the map never settled");
+    }
+
+    /// Settles the map with the camera standing on the ground it draws, as a
+    /// map's camera does.
+    fn settle_on_ground(&mut self) {
+        for _ in 0..10 {
+            self.settle();
+            let Some(elevation) = &self.elevation else {
+                return;
+            };
+            let center = self.transform.view().center(WrapMode::Wrapped);
+            let (altitude, min) = (elevation.at(center), elevation.min_at(center).unwrap_or(0.0));
+            if !self.transform.set_ground(altitude, Some(min)) {
+                return;
+            }
+        }
+        panic!("the camera never stood on the ground");
+    }
+
+    /// The last frame's pixel at `x`, `y`.
+    fn pixel(&mut self, x: u32, y: u32) -> [u8; 4] {
+        let image = self.target.read_image(self.backend.gpu()).expect("the frame's pixels");
+        let start = ((y * image.size.width + x) * 4) as usize;
+        image.data[start..start + 4].try_into().unwrap()
     }
 
     /// The tiles of the drapes of the last frame.
@@ -619,13 +646,10 @@ fn corners(lat: f64, lng: f64) -> [LatLng; 4] {
         .map(|(lat, lng)| LatLng::new(lat, lng).unwrap())
 }
 
-/// An image source drapes: moving its image draws again the drapes that
-/// showed it and those that show it now, and no others.
-#[test]
-fn moving_an_image_draws_the_drapes_it_left_and_entered_again() {
-    let (mut map, drapes) = settled(Tiles::default());
-    // In the south-east drape's tile.
-    map.edit(Edit::AddSource(image_source("image", corners(-20.0, 20.0))));
+/// Adds an image source of a red image with its corners at `corners`, and a
+/// raster layer of it above the others.
+fn add_image(map: &mut DrapedMap, corners: [LatLng; 4]) {
+    map.edit(Edit::AddSource(image_source("image", corners)));
     map.edit(ImageSourceType::set_image(
         "image",
         PremultipliedImage::from_vec(Size::new(2, 2), [255, 0, 0, 255].repeat(4)),
@@ -638,6 +662,21 @@ fn moving_an_image_draws_the_drapes_it_left_and_entered_again() {
     let parsed = Style::from_json(Registry::with_builtins().style(), json, None).expect("the style");
     let layer = parsed.get_layer_list().iter().next().expect("the layer").clone();
     map.edit(Edit::AddLayer { layer, before: None });
+}
+
+/// Whether `pixel` is the image's red, and not the grey and white under it.
+fn red(pixel: [u8; 4]) -> bool {
+    let [r, g, b, _] = pixel;
+    r > 200 && g < 50 && b < 50
+}
+
+/// An image source drapes: moving its image draws again the drapes that
+/// showed it and those that show it now, and no others.
+#[test]
+fn moving_an_image_draws_the_drapes_it_left_and_entered_again() {
+    let (mut map, drapes) = settled(Tiles::default());
+    // In the south-east drape's tile.
+    add_image(&mut map, corners(-20.0, 20.0));
     // A new layer draws every drape again.
     assert_eq!(drapes, map.settle());
     assert!(map.frame().1.is_empty());
@@ -647,4 +686,109 @@ fn moving_an_image_draws_the_drapes_it_left_and_entered_again() {
     let south_east = OverscaledTileID::new(2, 0, CanonicalTileID::new(2, 2, 2));
     assert_eq!(BTreeSet::from([south_west, south_east]), map.settle());
     assert_eq!(drapes, map.drapes());
+}
+
+/// An image shrunk to under two pixels draws no more, and the drape that
+/// showed it draws again without it.
+#[test]
+fn an_image_shrunk_out_of_sight_draws_its_drape_again() {
+    let (mut map, _) = settled(Tiles::default());
+    add_image(&mut map, corners(-20.0, 20.0));
+    map.settle();
+    // 0.1° is half a pixel at zoom 2.
+    let tiny =
+        [(-20.0, 20.0), (-20.0, 20.1), (-20.1, 20.1), (-20.1, 20.0)].map(|(lat, lng)| LatLng::new(lat, lng).unwrap());
+    map.edit(ImageSourceType::set_coordinates("image", tiny));
+    let south_east = OverscaledTileID::new(2, 0, CanonicalTileID::new(2, 2, 2));
+    assert_eq!(BTreeSet::from([south_east]), map.frame().1);
+    assert!(map.frame().1.is_empty(), "the drape is drawn again once only");
+}
+
+/// An image across the antimeridian draws its part east of it in the world
+/// copy west of the image's own: the view east of the antimeridian shows it.
+#[test]
+fn an_image_across_the_antimeridian_draws_where_the_view_sees_it() {
+    let mut map = DrapedMap::new(Tiles::default());
+    map.transform.jump_to(&CameraOptions {
+        center: Some(LatLng::new(-10.0, -176.0).unwrap()),
+        zoom: Some(6.0),
+        ..Default::default()
+    });
+    map.settle();
+    // From 170° to 186°, that is to -174°.
+    let corners = [(-5.0, 170.0), (-5.0, 186.0), (-15.0, 186.0), (-15.0, 170.0)];
+    add_image(&mut map, corners.map(|(lat, lng)| LatLng::new(lat, lng).unwrap()));
+    map.settle();
+    let (full, _) = map.frame();
+    assert!(full);
+    let center = SIDE / 2;
+    let pixel = map.pixel(center, center);
+    assert!(red(pixel), "the image at the view's center: {pixel:?}");
+}
+
+/// The longitude `phase` of the way across a tile of zoom 14 east of 10°.
+fn lng_in_tile(phase: f64) -> f64 {
+    let tiles = f64::from(1u32 << 14);
+    let x = ((10.0 + 180.0) / 360.0 * tiles).floor();
+    (x + phase) / tiles * 360.0 - 180.0
+}
+
+/// A square image 0.012° a side, a little over half a tile of zoom 14,
+/// centered at latitude -10° and `lng`.
+fn small_square(lng: f64) -> [LatLng; 4] {
+    let half = 0.006;
+    [(-10.0 + half, lng - half), (-10.0 + half, lng + half), (-10.0 - half, lng + half), (-10.0 - half, lng - half)]
+        .map(|(lat, lng)| LatLng::new(lat, lng).unwrap())
+}
+
+/// A map over ground 25 km high at zoom 12, centered at latitude -10° and
+/// `lng`, pitched by `pitch`, settled with the camera on the ground.
+fn raised(lng: f64, pitch: f64) -> DrapedMap {
+    let mut map = DrapedMap::new(Tiles { high: true, ..Tiles::default() });
+    map.transform.jump_to(&CameraOptions {
+        center: Some(LatLng::new(-10.0, lng).unwrap()),
+        zoom: Some(12.0),
+        pitch: Some(pitch),
+        ..Default::default()
+    });
+    map.settle_on_ground();
+    let altitude = map.transform.view().center_altitude();
+    assert!((altitude - 25_000.0).abs() < 1.0, "the camera stands on the ground: {altitude}");
+    map
+}
+
+/// Pitched over high ground, the view's center is far nearer the camera
+/// than any ground at sea level in view: an image there loads and draws.
+#[test]
+fn an_image_on_raised_ground_loads_and_draws() {
+    let mut map = raised(10.0, 60.0);
+    add_image(&mut map, small_square(10.0));
+    map.settle();
+    let (full, _) = map.frame();
+    assert!(full, "the image loads");
+    let center = SIDE / 2;
+    let pixel = map.pixel(center, center);
+    assert!(red(pixel), "the image at the view's center: {pixel:?}");
+}
+
+/// An image that moves within its tile to ground that only its height
+/// brings into view draws where it moved to.
+#[test]
+fn an_image_moved_onto_raised_ground_draws_there() {
+    let (west, east) = (lng_in_tile(0.06), lng_in_tile(0.94));
+    // Seen from above, sea level covers more of the world than the ground
+    // in view: the image loads.
+    let mut map = raised(east, 0.0);
+    add_image(&mut map, small_square(west));
+    map.settle();
+    assert!(map.frame().0, "the image loads");
+    map.transform.jump_to(&CameraOptions { pitch: Some(60.0), ..Default::default() });
+    map.settle_on_ground();
+    map.edit(ImageSourceType::set_coordinates("image", small_square(east)));
+    map.settle();
+    let (full, _) = map.frame();
+    assert!(full);
+    let center = SIDE / 2;
+    let pixel = map.pixel(center, center);
+    assert!(red(pixel), "the image at the view's center: {pixel:?}");
 }

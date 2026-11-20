@@ -313,23 +313,27 @@ impl RenderSource for RenderImageSource {
         // A wrap does not move a tile on the globe, so the image draws once
         // there, in the world copy the cover chose.
         let globe = view.is_globe();
-        // Add additional wrapped tile ids if necessary
-        let zoom_range = Range::new(0u8, zoom);
-        let ideal_tiles = tile_cover(
-            &TileCoverParameters {
-                view: view.clone(),
-                tile_lod_min_radius: parameters.tile_lod_min_radius,
-                tile_lod_scale: parameters.tile_lod_scale,
-                tile_lod_pitch_threshold: parameters.tile_lod_pitch_threshold,
-                tile_lod_mode: parameters.tile_lod_mode,
-                requested_zoom: None,
-                round_zoom: false,
-                max_content_elevation: 0.0,
-            },
-            view.integer_zoom(),
-            zoom_range,
-            None,
-        );
+        // The image draws in each world copy whose quad overlaps the view's
+        // tiles: while terrain draws, the terrain's, raised ground's too, as
+        // every source covers the view then.
+        let ideal_tiles = match parameters.terrain {
+            Some(terrain) => terrain.tiles.iter().map(|tile| tile.id).collect(),
+            None => tile_cover(
+                &TileCoverParameters {
+                    view: view.clone(),
+                    tile_lod_min_radius: parameters.tile_lod_min_radius,
+                    tile_lod_scale: parameters.tile_lod_scale,
+                    tile_lod_pitch_threshold: parameters.tile_lod_pitch_threshold,
+                    tile_lod_mode: parameters.tile_lod_mode,
+                    requested_zoom: None,
+                    round_zoom: false,
+                    max_content_elevation: 0.0,
+                },
+                view.integer_zoom(),
+                Range::new(0u8, zoom),
+                None,
+            ),
+        };
         for tile in &ideal_tiles {
             for covering_tile in &tile_cover_ids {
                 if covering_tile.canonical == tile.canonical
@@ -337,10 +341,15 @@ impl RenderSource for RenderImageSource {
                     || tile.canonical.is_child_of(&covering_tile.canonical)
                 {
                     has_visible_tile = true;
-                    let wrapped_tile_id = UnwrappedTileID::with_wrap(tile.wrap, tile_cover_ids[0].canonical);
+                    // The copy that puts this covering tile on the view's
+                    // tile: where the quad crosses the antimeridian, the
+                    // covering tile may lie in the world next to the
+                    // first's.
+                    let wrap = tile.wrap - covering_tile.wrap + tile_cover_ids[0].wrap;
+                    let wrapped_tile_id = UnwrappedTileID::with_wrap(wrap, tile_cover_ids[0].canonical);
                     if globe {
                         self.tile_ids = vec![wrapped_tile_id];
-                    } else if tile.wrap != 0 && !self.tile_ids.contains(&wrapped_tile_id) {
+                    } else if !self.tile_ids.contains(&wrapped_tile_id) {
                         self.tile_ids.push(wrapped_tile_id);
                     }
                     break;
@@ -401,7 +410,10 @@ impl RenderSource for RenderImageSource {
     }
 
     fn image_render_data(&self) -> Option<ImageSourceRenderData<'_>> {
-        let tile_ids: &[UnwrappedTileID] = if self.loaded() { &self.tile_ids } else { &[] };
+        // A disabled source's tile ids and corners may be of other
+        // coordinates, and an image shrunk out of sight or out of view draws
+        // nowhere: the drapes that showed it draw again.
+        let tile_ids: &[UnwrappedTileID] = if self.base.enabled && self.loaded() { &self.tile_ids } else { &[] };
         let mut bounds = [i32::MAX, i32::MAX, i32::MIN, i32::MIN];
         for corner in &self.mesh_corners {
             let (x, y) = (i32::from(corner.x), i32::from(corner.y));
