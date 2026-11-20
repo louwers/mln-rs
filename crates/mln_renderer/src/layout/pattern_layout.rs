@@ -17,7 +17,7 @@ use mln_style::layers::{Fill, Line};
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 use mln_style_types::image::{ImagePositions, ImageType};
 use mln_tile_id::CanonicalTileID;
-use mln_tile_id::geometry_tile_data::GeometryTileFeature;
+use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature};
 use mln_util::error::Error;
 use mln_util::hash::HashMap;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
@@ -58,10 +58,34 @@ impl PatternFeature {
 }
 
 /// The template arguments of a `PatternLayout` instantiation.
+/// A bucket that a [`PatternLayout`] makes: of features that can draw with
+/// patterns.
+pub trait PatternBucket: Bucket {
+    /// Adds `feature`, the feature at `index` of its source layer, with
+    /// `geometries`, in the tile `canonical`, and the positions of its
+    /// patterns among `image_positions`, which `patterns` names by layer.
+    /// A bucket that meshes lines or polygons keeps its scratch in
+    /// `tessellator`.
+    #[expect(clippy::too_many_arguments, reason = "the feature and what the layout lays it out with")]
+    fn add_feature(
+        &mut self,
+        feature: &dyn GeometryTileFeature,
+        geometries: &GeometryCollection,
+        image_positions: &ImagePositions,
+        patterns: &PatternLayerMap,
+        index: usize,
+        canonical: &CanonicalTileID,
+        tessellator: &mut Tessellator,
+    );
+
+    /// Records whether a pattern of the layer `layer_id` is an SDF image.
+    fn record_sdf_pattern(&mut self, _layer_id: &str, _sdf: bool) {}
+}
+
 pub trait PatternLayoutSpec: Send + 'static {
     /// The layer type the layout lays out.
     type Type: LayerType<Bucket = Self::Bucket>;
-    type Bucket: Bucket;
+    type Bucket: PatternBucket;
     type Layout: Clone + Send + Sync;
 
     fn evaluate_layout(layer: &EvaluatedLayer<Self::Type>, parameters: &PropertyEvaluationParameters) -> Self::Layout;

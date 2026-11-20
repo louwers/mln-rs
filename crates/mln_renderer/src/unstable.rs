@@ -6,7 +6,6 @@
 //! contract to be, but outside the engine they're unnameable or
 //! `#[doc(hidden)]`.
 
-pub use crate::bucket::NoBucket;
 pub use crate::draw::{DrawGeometry, DrawObjects, Textures, raw_vertices};
 pub use crate::gfx::indexes::DrawIndexes;
 pub use crate::gfx::vertex_attribute::Uniforms;

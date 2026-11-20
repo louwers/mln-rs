@@ -15,6 +15,11 @@
 //! runs [`LayerType::make_draws`] with a [`DrawContext`]. The engine then
 //! uploads and draws the drawing's draws.
 //!
+//! A layer type that lays out makes a [`Bucket`] of each layer's features
+//! in a tile, which the engine moves between threads, uploads, rewrites for
+//! feature state and copies for the tile's other world copies; a type that
+//! doesn't lay out has [`NoBucket`].
+//!
 //! A layer's tiles are those of its source, each as a [`FrameTile`] with
 //! what it shows the layer, the type's [`TileView`]: its bucket in the
 //! tile's layout, a raster or raster-dem tile's own data, or an image
@@ -45,7 +50,8 @@ use mln_util::Color;
 use mln_util::error::Error;
 use mln_wire::Wire;
 
-use crate::bucket::Bucket;
+pub use crate::bucket::{Bucket, BucketBase, BucketValue, FeatureStates, NoBucket};
+pub use crate::bucket_geometry::GeometryUpload;
 use crate::gfx::context::Context;
 use crate::image_store::ImageStore;
 use crate::layer_drawing::LayerDrawing;
@@ -72,9 +78,8 @@ pub trait LayerType: StyleLayerType {
     /// out.
     type Layout: Layout<Self>;
 
-    /// The bucket the layout makes.
-    /// [`NoBucket`](crate::unstable::NoBucket) for a type that doesn't lay
-    /// out.
+    /// The bucket the layout makes. [`NoBucket`] for a type that doesn't
+    /// lay out.
     type Bucket: Bucket + Wire;
 
     /// What a frame's tile shows a layer of the type, which its draws draw:

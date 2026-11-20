@@ -20,7 +20,6 @@ use mln_util::logging::{Event, Log};
 use mln_util::range::Range;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
-use crate::bucket::UploadNeeds;
 use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
 use crate::gfx::context::Context;
 use crate::layer_type::ErasedEvaluatedLayer;
@@ -370,7 +369,7 @@ impl RenderSource for RenderImageSource {
 
     fn update_render_tiles(&mut self, _store: &mut TileStore, _parameters: &RenderTileParameters<'_>) {}
 
-    fn upload(&mut self, _store: &mut TileStore, context: &mut Context, _needs: UploadNeeds) {
+    fn upload(&mut self, _store: &mut TileStore, context: &mut Context) {
         if let Some(bucket) = &mut self.bucket {
             bucket.upload(context);
         }

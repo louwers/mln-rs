@@ -9,7 +9,6 @@ use mln_map_types::MapDebugOptions;
 use mln_style::Source;
 use mln_util::error::Error;
 
-use crate::bucket::UploadNeeds;
 use crate::buckets::raster_bucket::RasterBucket;
 use crate::gfx::context::Context;
 use crate::layer_type::ErasedEvaluatedLayer;
@@ -71,9 +70,8 @@ pub(crate) trait RenderSource {
     fn update_render_tiles(&mut self, store: &mut TileStore, parameters: &RenderTileParameters<'_>);
 
     /// Readies the buckets the frame draws, before its layers make their
-    /// draws, which read what `needs` says, uploading their indexes through
-    /// `context`.
-    fn upload(&mut self, store: &mut TileStore, context: &mut Context, needs: UploadNeeds);
+    /// draws, uploading their indexes through `context`.
+    fn upload(&mut self, store: &mut TileStore, context: &mut Context);
 
     /// Updates the source's draws of the debug overlays; a no-op for the
     /// sources that have none (the image source).

@@ -15,10 +15,10 @@ use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_renderer::layer::{
-    DrawContext, EvaluatedLayer, LayerType, LayerValues, NoTileBucket, RenderPass, UpdateContext,
+    DrawContext, EvaluatedLayer, LayerType, LayerValues, NoBucket, NoTileBucket, RenderPass, UpdateContext,
 };
 use mln_renderer::unstable::{
-    DrawDepth, DrawGeometry, DrawIndexes, DrawList, DrawObjects, FrameDraw, KeptDraw, LayerDrawing, NoBucket, NoLayout,
+    DrawDepth, DrawGeometry, DrawIndexes, DrawList, DrawObjects, FrameDraw, KeptDraw, LayerDrawing, NoLayout,
     PaintParameters, RenderStaticData, Textures, TileCoverParameters, TileDraws, Uniforms, projection_data,
     raw_globe_tile_mesh, raw_vertices, tile_cover, to_projection_ubo,
 };

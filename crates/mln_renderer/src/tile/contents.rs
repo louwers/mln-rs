@@ -23,7 +23,7 @@ use mln_util::logging::{Event, Log};
 use mln_util::pool::TaskGroup;
 use mln_vec_map::{VecMap, VecSet};
 
-use crate::bucket::{Bucket, LayerFeatureStates, UploadNeeds};
+use crate::bucket::{Bucket, LayerFeatureStates};
 use crate::bucket_geometry::{BucketGeometry, GeometryUpload};
 use crate::buckets::hillshade_bucket::HillshadeBucket;
 use crate::buckets::raster_bucket::RasterBucket;
@@ -414,18 +414,18 @@ impl GeometryContents {
 
     /// Whether a bucket is new or changed since its last upload.
     pub(crate) fn needs_upload(&self) -> bool {
-        self.result.layer_render_data.buckets().any(Bucket::needs_upload)
+        self.result.layer_render_data.buckets().any(<dyn Bucket>::needs_upload)
     }
 
     /// Readies the buckets that are new or changed since their last upload
     /// for the tile's draws ([`Bucket::upload`]), moving their geometry into
     /// `context`'s stores, where `copies`, the geometry of the tile's other
     /// world copies, hasn't some of it.
-    pub(crate) fn upload(&mut self, copies: &[&BucketGeometry], context: &mut Context, needs: UploadNeeds) {
+    pub(crate) fn upload(&mut self, copies: &[&BucketGeometry], context: &mut Context) {
         let mut upload = GeometryUpload::new(&mut self.bucket_geometry, copies, context);
         for bucket in self.result.layer_render_data.buckets_mut() {
             if bucket.needs_upload() {
-                bucket.upload(&mut upload, needs);
+                bucket.upload(&mut upload);
             }
         }
         self.bucket_geometry.shrink();
