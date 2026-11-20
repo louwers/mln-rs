@@ -12,10 +12,11 @@ use mln_util::error::Error;
 use mln_util::pool::TaskGroup;
 
 use crate::Registry;
+use crate::builtins::geojson::{self, GeoJsonOrigin};
 use crate::erased_layer::{ErasedEvaluatedLayer, EvaluatedLayer};
+use crate::source::LoadContext;
 use crate::tests::fixture_layer::Dot;
 use crate::tests::{OneTile, style};
-use crate::tile::loading::DataOrigin;
 use crate::tile::tile::TileKind;
 use crate::tile::tile_workers::TileWorkers;
 
@@ -39,8 +40,14 @@ impl GeoJSONTileTest {
         synchronous: bool,
     ) -> OneTile {
         let store = crate::tests::tile_store(&self.thread_pool, workers);
-        let mut tiles =
-            OneTile::with_origin(store, TileKind::Geometry, true, DataOrigin::GeoJson(data), ids, MapMode::Continuous);
+        let mut tiles = OneTile::with_origin(
+            store,
+            TileKind::Geometry,
+            true,
+            GeoJsonOrigin::with_data(data),
+            ids,
+            MapMode::Continuous,
+        );
         let key = tiles.key;
         tiles.store.source_mut(key).expect("the source").0.info.synchronous = synchronous;
         tiles
@@ -115,7 +122,7 @@ fn issue_7648() {
     tiles.settle(&[root()]);
     assert!(tiles.changes() >= 1);
 
-    tiles.with(|tile| tile.load_geojson(&data, false));
+    tiles.with(|tile| geojson::load(&data, false, &mut LoadContext::new(tile)));
     // Once present, the bucket should never "disappear", which would cause
     // flickering.
     while !tiles.tile().is_complete() {
@@ -185,7 +192,7 @@ fn update_through_the_codec() {
     }
 
     let data = point_data();
-    tiles.with_at(&ids[0], |tile| tile.load_geojson(&data, false));
+    tiles.with_at(&ids[0], |tile| geojson::load(&data, false, &mut LoadContext::new(tile)));
     assert!(!tiles.tile_at(&ids[0]).is_complete());
     tiles.settle(&ids[..1]);
     assert!(tiles.tile_at(&ids[0]).is_renderable());

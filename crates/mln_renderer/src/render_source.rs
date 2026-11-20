@@ -14,7 +14,9 @@ use crate::gfx::context::Context;
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::registry::Registry;
 use crate::render_tile::RenderTile;
-use crate::sources::render_tile_source::DebugLayers;
+use crate::source::{Supplied, Supply};
+use crate::sources::render_image_source::RenderImageSource;
+use crate::sources::render_tile_source::{DebugLayers, RenderTileSource};
 use crate::tile::job::SourceKey;
 use crate::tile::raster::RasterContents;
 use crate::tile::store::TileStore;
@@ -113,6 +115,7 @@ pub(crate) trait RenderSource {
     /// value.
     fn query_feature_extensions(
         &self,
+        _store: &TileStore,
         _feature: &mln_util::feature::Feature,
         _extension: &str,
         _extension_field: &str,
@@ -140,7 +143,15 @@ pub(crate) trait RenderSource {
 /// renderer register the same types.
 pub(crate) fn create(registry: &Registry, source: &Source, store: &mut TileStore) -> Option<Box<dyn RenderSource>> {
     let name = source.info().name;
-    let render_source = registry.source_type(name).map(|source_type| source_type.create_render_source(source, store));
-    debug_assert!(render_source.is_some(), "the renderer's registry has no source type '{name}'");
-    render_source
+    let Some(source_type) = registry.source_type(name) else {
+        debug_assert!(false, "the renderer's registry has no source type '{name}'");
+        return None;
+    };
+    let Supply(supplied) = source_type.supply(source);
+    Some(match supplied {
+        Supplied::Tiles { kind, single_layer, origin } => {
+            Box::new(RenderTileSource::new(source.clone(), kind, single_layer, origin, store))
+        }
+        Supplied::Image(image_of) => Box::new(RenderImageSource::new(source.clone(), image_of)),
+    })
 }

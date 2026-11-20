@@ -10,8 +10,6 @@ use mln_gfx::shaders::segment::SegmentBase;
 use mln_map_types::TileCoordinate;
 use mln_map_types::tile_coordinate::TileCoordinatePoint;
 use mln_style::Source;
-use mln_style::source_type::SourceData;
-use mln_style::sources::ImageSourceType;
 use mln_tile_id::{GeometryCoordinate, GeometryCoordinates, OverscaledTileID, UnwrappedTileID};
 use mln_util::constants;
 use mln_util::geo::LatLngBounds;
@@ -24,6 +22,7 @@ use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::gfx::context::Context;
 use crate::render_source::{RenderSource, RenderSourceBase, RenderTileParameters, TileOrder};
 use crate::render_tile::RenderTile;
+use crate::source::{ImageOf, SourceImage};
 use crate::tile::raster::{RasterContents, RasterLayoutVertex};
 use crate::tile::store::TileStore;
 use crate::tile_parameters::TileParameters;
@@ -164,6 +163,8 @@ fn build_image_mesh(image: &mut RasterContents, corners: &GeometryCoordinates, c
 
 pub(crate) struct RenderImageSource {
     base: RenderSourceBase,
+    /// Reads the image of each version of the source.
+    image_of: ImageOf,
     image: Option<RasterContents>,
     tile_ids: Vec<UnwrappedTileID>,
     /// The render tiles of `tile_ids`, and their indexes in order.
@@ -175,9 +176,10 @@ pub(crate) struct RenderImageSource {
 
 impl RenderImageSource {
     #[must_use]
-    pub(crate) fn new(style_source: Source) -> Self {
+    pub(crate) fn new(style_source: Source, image_of: ImageOf) -> Self {
         RenderImageSource {
             base: RenderSourceBase::new(style_source),
+            image_of,
             image: None,
             tile_ids: Vec::new(),
             render_tiles: Vec::new(),
@@ -191,11 +193,11 @@ impl RenderImageSource {
     /// (one made without a url) has nothing to load, so a still render of it
     /// finishes.
     fn loaded(&self) -> bool {
-        self.image.is_some() || self.data().is_none_or(|data| data.description.is_none())
+        self.image.is_some() || self.source_image().is_none_or(|source| source.image.is_none())
     }
 
-    fn data(&self) -> Option<&SourceData<ImageSourceType>> {
-        SourceData::recover(&self.base.style_source)
+    fn source_image(&self) -> Option<SourceImage<'_>> {
+        (self.image_of)(&self.base.style_source)
     }
 
     /// Brings the source to `style_source` for a frame of `parameters`: the
@@ -209,12 +211,12 @@ impl RenderImageSource {
         let view = parameters.view;
         self.base.style_source = style_source;
 
-        let Some(data) = self.data() else {
+        let Some(source) = self.source_image() else {
             self.base.enabled = false;
             return;
         };
-        let coords = data.options.coordinates;
-        let image = data.description.clone();
+        let coords = source.coordinates;
+        let image = source.image.cloned();
 
         let Some(image) = image.filter(|image| image.valid()) else {
             self.base.enabled = false;

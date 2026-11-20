@@ -1209,7 +1209,7 @@ impl TurningSource {
         let cached: Vec<_> = self.pyramid().slots().filter(|slot| slot.place().is_cached()).collect();
         for slot in &cached {
             assert_eq!(slot.place().order(), unwanted, "tile {}'s jobs", slot.tile.id);
-            assert_eq!(slot.tile.load.request_order(), Some(unwanted.value()), "tile {}'s request", slot.tile.id);
+            assert_eq!(slot.tile.load.order.get(), unwanted.value(), "tile {}'s request", slot.tile.id);
         }
         cached.len()
     }

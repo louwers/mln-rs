@@ -17,9 +17,10 @@ use mln_style::source_type::ErasedStyleSourceType;
 use mln_vec_map::VecMap;
 
 use crate::erased_layer::{ErasedLayerType, entry};
+use crate::erased_source::{self, ErasedSourceType};
 use crate::layer::LayerType;
 use crate::render_tile::FindView;
-use crate::source_type::{self, ErasedSourceType, SourceType};
+use crate::source::SourceType;
 
 /// What a [`Registry`] is built from.
 #[derive(Default)]
@@ -72,12 +73,12 @@ impl RegistryBuilder {
     }
 
     /// Adds the source type `T`. Fails for a name that an earlier type took.
-    pub(crate) fn add_source_type<T: SourceType>(&mut self) -> Result<(), RegisterError> {
+    pub fn add_source_type<T: SourceType>(&mut self) -> Result<(), RegisterError> {
         let name = T::INFO.name;
         if self.source_types.contains_key(name) {
             return Err(RegisterError::Duplicate(name.to_owned()));
         }
-        self.source_types.insert(name, source_type::entry::<T>());
+        self.source_types.insert(name, erased_source::entry::<T>());
         Ok(())
     }
 
