@@ -159,7 +159,7 @@ impl Drapes {
                 Some(index) => previous.swap_remove(index),
                 None => DrapeLayer { style: Arc::clone(&style), drawing: layer.new_drape_drawing() },
             };
-            let mut parameters = parameters.drape(transform, clip_masks, layer_composite, size);
+            let mut parameters = parameters.drape(transform, clip_masks, layer_composite, size, tile.to_unwrapped());
             layer.update_drape_draws(gpu, &mut parameters, atlases, source, *tile, &mut kept.drawing);
             let global = parameters.global_paint_params(pattern_atlas_size);
             kept.drawing.write_uniform(gpu, ID_GLOBAL_PAINT_PARAMS_UBO, &global, parameters.context);
@@ -224,7 +224,7 @@ impl Drapes {
                         layer.drawing.visit_groups(visit);
                     }
                 },
-                stencil_clear_tile,
+                stencil_clear_tile.map(|_| drape.tile.to_unwrapped()),
             );
             let transform = &drape.transform;
             drape.clip_masks.update(gpu, context, shaders, false, &drape.groups.clip_tiles, |tile| {
@@ -243,7 +243,7 @@ impl Drapes {
         };
         let size = Size::new(self.size, self.size);
         for drape in &mut self.drapes {
-            let Drape { texture, transform, clip_masks, layer_composite, layers, groups, .. } = drape;
+            let Drape { tile, texture, transform, clip_masks, layer_composite, layers, groups, .. } = drape;
             let color = match parameters.context.create_texture(gpu, texture) {
                 Ok(color) => color,
                 Err(error) => {
@@ -262,7 +262,8 @@ impl Drapes {
                 size,
                 targets: TargetFormats { color: Some(COLOR), depth_stencil: Some(DEPTH_STENCIL) },
             };
-            let mut drape_parameters = parameters.drape(transform, clip_masks, layer_composite, size);
+            let mut drape_parameters =
+                parameters.drape(transform, clip_masks, layer_composite, size, tile.to_unwrapped());
             let drawn = drape_parameters.begin_pass(gpu, pass).and_then(|()| {
                 drape_parameters.depth_range_size = groups.depth_range_size();
                 drape_parameters.pass = RenderPass::Opaque;

@@ -112,7 +112,7 @@ fn lines_in_a_drape_antialias_at_a_gamma_scale_of_1() {
         let transform = TransformParameters::for_drape(&view, &drape);
         let (mut drape_masks, mut drape_composite) = (ClipMasks::default(), LayerComposite::default());
         let drape_size = Size::new(1024, 1024);
-        let drape_parameters = parameters.drape(&transform, &mut drape_masks, &mut drape_composite, drape_size);
+        let drape_parameters = parameters.drape(&transform, &mut drape_masks, &mut drape_composite, drape_size, drape);
         let global = drape_parameters.global_paint_params(Size::new(1, 1));
         assert_eq!([1024.0, 1024.0], global.world_size);
         let units_to_pixels = Vec2::from(global.units_to_pixels);
@@ -132,6 +132,46 @@ fn lines_in_a_drape_antialias_at_a_gamma_scale_of_1() {
             let gamma_scale = dist.length() / with_perspective;
             assert!((gamma_scale - 1.0).abs() < 1e-4, "{tile:?}: gamma scale {gamma_scale}");
         }
+    });
+}
+
+/// Where a pass clears the stencil only as it begins, a drape clears it by
+/// drawing the mask of a tile that covers its whole target, also in another
+/// world copy than the first: its own tile.
+#[test]
+fn a_drape_clears_its_stencil_over_its_whole_target() {
+    with_context(|_, context| {
+        let view = view(0.0, 0.0);
+        let frame = Frame::new(&view, false, MapDebugOptions::NO_DEBUG);
+        let static_data = RenderStaticData::new(Box::new(ShaderRegistry::new(&ProgramParameters::new(1.0, false))));
+        let (mut clip_masks, mut layer_composite) = (ClipMasks::default(), LayerComposite::default());
+        let size = Size::new(512, 512);
+        let scissor = ScissorRect { x: 0, y: 0, width: size.width, height: size.height };
+        let mut parameters = PaintParameters::new(
+            context,
+            &mut clip_masks,
+            &mut layer_composite,
+            false,
+            &frame,
+            &static_data,
+            1.0,
+            size,
+            scissor,
+        );
+        if parameters.stencil_clear_tile().is_none() {
+            return;
+        }
+        let drape = tile(1, 3, 5, 2);
+        let transform = TransformParameters::for_drape(&view, &drape);
+        let (mut drape_masks, mut drape_composite) = (ClipMasks::default(), LayerComposite::default());
+        let drape_parameters =
+            parameters.drape(&transform, &mut drape_masks, &mut drape_composite, Size::new(1024, 1024), drape);
+        let clear = drape_parameters.stencil_clear_tile().expect("a tile that clears the stencil");
+        let extent = f64::from(EXTENT);
+        let (north_west, south_east) = (clip(&transform, clear, 0.0, 0.0), clip(&transform, clear, extent, extent));
+        let covers = |corner: DVec4, x: f64, y: f64| corner.x * x >= 1.0 - 1e-9 && corner.y * y >= 1.0 - 1e-9;
+        assert!(covers(north_west, -1.0, 1.0), "{clear:?}: {north_west}");
+        assert!(covers(south_east, 1.0, -1.0), "{clear:?}: {south_east}");
     });
 }
 

@@ -205,6 +205,9 @@ pub(crate) struct PaintParameters<'a> {
     /// The stencil value of each tile whose mask the stencil buffer holds.
     tile_clipping_mask_ids: VecMap<UnwrappedTileID, i32>,
     next_stencil_id: i32,
+    /// The tile whose mask covers the whole target: the world's, or a
+    /// drape's own.
+    target_tile: UnwrappedTileID,
 
     pub(crate) current_layer: u32,
     pub(crate) depth_range_size: f32,
@@ -267,6 +270,7 @@ impl<'a> PaintParameters<'a> {
             composites_with_frame_depth,
             tile_clipping_mask_ids: VecMap::new(),
             next_stencil_id: 1,
+            target_tile: UnwrappedTileID::new(0, 0, 0),
             // The renderer sets these before use.
             current_layer: 0,
             depth_range_size: 1.0,
@@ -279,7 +283,7 @@ impl<'a> PaintParameters<'a> {
     }
 
     /// The parameters of the encode of a drape, which draws the frame's
-    /// layers into a texture of `size` over its tile with `transform`
+    /// layers into a texture of `size` over its tile `tile` with `transform`
     /// ([`TransformParameters::for_drape`]): with the frame's camera, GPU
     /// state and values, but its own clip masks and stencil values,
     /// `layer_composite`, which composites nothing, and the whole target as
@@ -292,6 +296,7 @@ impl<'a> PaintParameters<'a> {
         clip_masks: &'b mut ClipMasks,
         layer_composite: &'b mut LayerComposite,
         size: Size,
+        tile: UnwrappedTileID,
     ) -> PaintParameters<'b> {
         let proj_matrix = &transform.proj_matrix;
         PaintParameters {
@@ -312,6 +317,7 @@ impl<'a> PaintParameters<'a> {
             composites_with_frame_depth: false,
             tile_clipping_mask_ids: VecMap::new(),
             next_stencil_id: 1,
+            target_tile: tile,
             current_layer: 0,
             depth_range_size: 1.0,
             terrain: false,
@@ -518,10 +524,11 @@ impl<'a> PaintParameters<'a> {
     }
 
     /// The tile whose mask `clear_stencil` draws zero with, where the render
-    /// pass clears the stencil buffer only where it begins.
+    /// pass clears the stencil buffer only where it begins: one that covers
+    /// the whole target.
     #[must_use]
     pub(crate) fn stencil_clear_tile(&self) -> Option<UnwrappedTileID> {
-        (!self.context.caps().clear_stencil_with_pass).then(|| UnwrappedTileID::new(0, 0, 0))
+        (!self.context.caps().clear_stencil_with_pass).then_some(self.target_tile)
     }
 
     fn draw_clip_masks(&mut self, gpu: &mut dyn Gpu, masks: &[(UnwrappedTileID, i32)]) {
