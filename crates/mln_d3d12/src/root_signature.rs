@@ -1,10 +1,11 @@
 //! The root signature of every pipeline, for the registers that
 //! `shaders::hlsl` puts the shaders' resources in: `ubo_index` as a root
 //! constant, each buffer as a root CBV or SRV (a vertex buffer that a
-//! shader reads as a storage buffer too), the textures as one table,
-//! and the sampler heap as another, with the buffer of the indices in it of
-//! a draw's samplers as a root SRV, and naga's special constants as root
-//! constants. Binding a draw sets GPU addresses and constants only.
+//! shader reads as a storage buffer too), the textures as one table for
+//! both stages, the sampler heap as another, with the buffer of the indices
+//! in it of a draw's samplers as a root SRV, both for the pixel stage only,
+//! and naga's special constants as root constants. Binding a draw sets GPU
+//! addresses and constants only.
 
 use mln_gfx::gpu::GpuError;
 use mln_glsl::layout::DescriptorSetType;
@@ -132,17 +133,18 @@ pub(crate) fn create(device: &ID3D12Device) -> Result<ID3D12RootSignature, GpuEr
         RegisterSpace: u32::from(SAMPLER_HEAP_SPACE),
         OffsetInDescriptorsFromTableStart: 0,
     };
-    let table = |range: &D3D12_DESCRIPTOR_RANGE| D3D12_ROOT_PARAMETER {
+    let table = |range: &D3D12_DESCRIPTOR_RANGE, visibility| D3D12_ROOT_PARAMETER {
         ParameterType: D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
         Anonymous: D3D12_ROOT_PARAMETER_0 {
             DescriptorTable: D3D12_ROOT_DESCRIPTOR_TABLE { NumDescriptorRanges: 1, pDescriptorRanges: range },
         },
-        ShaderVisibility: pixel,
+        ShaderVisibility: visibility,
     };
     debug_assert_eq!(parameters.len() as u32, TEXTURE_TABLE);
-    parameters.push(table(&textures));
+    // A vertex stage loads texels, without a sampler.
+    parameters.push(table(&textures, all));
     parameters.push(descriptor(D3D12_ROOT_PARAMETER_TYPE_SRV, SAMPLER_INDEX_REGISTER, image_space, pixel));
-    parameters.push(table(&samplers));
+    parameters.push(table(&samplers, pixel));
     debug_assert_eq!(parameters.len() as u32, SPECIAL_CONSTANTS);
     parameters.push(D3D12_ROOT_PARAMETER {
         ParameterType: D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,

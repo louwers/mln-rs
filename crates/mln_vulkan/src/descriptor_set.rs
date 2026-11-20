@@ -160,15 +160,17 @@ pub(crate) fn build_descriptor_set_layout(
 ) -> Result<vk::DescriptorSetLayout, String> {
     let mut bindings = Vec::new();
     if type_ == DescriptorSetType::DrawableImage {
+        // A vertex stage fetches texels, without a sampler.
+        let texture_stages = vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT;
         for index in 0..IMAGE_TEXTURE_COUNT {
-            for (binding, descriptor_type) in [
-                (image_texture_binding(index), vk::DescriptorType::SAMPLED_IMAGE),
-                (image_sampler_binding(index), vk::DescriptorType::SAMPLER),
+            for (binding, descriptor_type, stages) in [
+                (image_texture_binding(index), vk::DescriptorType::SAMPLED_IMAGE, texture_stages),
+                (image_sampler_binding(index), vk::DescriptorType::SAMPLER, vk::ShaderStageFlags::FRAGMENT),
             ] {
                 bindings.push(
                     vk::DescriptorSetLayoutBinding::default()
                         .binding(binding)
-                        .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                        .stage_flags(stages)
                         .descriptor_type(descriptor_type)
                         .descriptor_count(1),
                 );
