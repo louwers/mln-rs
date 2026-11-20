@@ -415,13 +415,35 @@ impl RenderTerrain {
     /// Draws the drapes into their textures, outside any pass, before the
     /// frame's passes, whose surface samples them.
     pub(crate) fn render_drapes(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        let stats = parameters.context.rendering_stats();
+        let (passes, draws) = (stats.num_render_passes, stats.num_draw_calls);
         self.drapes.render(gpu, parameters);
+        let stats = parameters.context.rendering_stats();
+        stats.terrain.drape_passes += usize::try_from(stats.num_render_passes - passes).unwrap_or(0);
+        stats.terrain.drape_draw_calls += usize::try_from(stats.num_draw_calls - draws).unwrap_or(0);
     }
 
     /// Draws the surface of `stack`, which samples the stack's drapes, into
     /// the open pass of `gpu`, the context's.
     pub(crate) fn render(&mut self, stack: usize, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        let draws = parameters.context.rendering_stats().num_draw_calls;
         self.draws.render(stack, gpu, parameters);
+        let stats = parameters.context.rendering_stats();
+        stats.terrain.surface_draw_calls += usize::try_from(stats.num_draw_calls - draws).unwrap_or(0);
+    }
+
+    /// Counts in the rendering stats of `context` what the terrain holds
+    /// once a frame has drawn: its stacks and drapes, and the bytes of the
+    /// drapes and what they draw with, of the DEM textures, of the DEM
+    /// images of the ground it last told the map of, and of the elevation
+    /// ranges it remembers.
+    pub(crate) fn count(&self, context: &mut Context) {
+        self.drapes.count(context);
+        let dem_textures = self.draws.dem_bytes(context);
+        let stats = &mut context.rendering_stats().terrain;
+        stats.mem_dem_textures = dem_textures;
+        stats.mem_dem_data = self.elevation.as_deref().map_or(0, TerrainElevation::dem_bytes);
+        stats.mem_height_ranges = self.cover.as_ref().map_or(0, |cover| cover.ranges.bytes());
     }
 
     /// Drops all it made from the map's data, for the renderer's

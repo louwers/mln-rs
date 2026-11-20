@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, LoadOp, TargetFormats};
-use mln_gfx::rendering_stats::RenderingStats;
+use mln_gfx::rendering_stats::{RenderingStats, TerrainStats};
 use mln_gfx::shaders::shader_defines::ID_GLOBAL_PAINT_PARAMS_UBO;
 use mln_gfx::{FrameImage, Handoff, ScissorRect};
 use mln_map_types::MapDebugOptions;
@@ -563,6 +563,9 @@ impl Encoder {
         {
             let stats = self.context.rendering_stats();
             stats.num_draw_calls = 0;
+            stats.num_render_passes = 0;
+            stats.num_mipmap_generations = 0;
+            stats.terrain = TerrainStats::default();
             stats.num_frames += 1;
         }
         let static_data = &self.static_data;
@@ -656,6 +659,7 @@ impl Encoder {
             height: renderable_size.height,
         });
         draw(orchestrator, gpu, &mut parameters, &frame, image, draw_groups.count, depth_range_size);
+        orchestrator.terrain().count(parameters.context);
         let start_rendering = Instant::now();
         if let Err(error) = parameters.end_pass(gpu).and_then(|()| gpu.flush(false)) {
             Log::error(Event::Render, format!("Submitting the frame failed: {error}"));

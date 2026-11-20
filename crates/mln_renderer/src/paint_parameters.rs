@@ -362,6 +362,7 @@ impl<'a> PaintParameters<'a> {
     /// into.
     pub(crate) fn begin_pass(&mut self, gpu: &mut dyn Gpu, pass: OpenPass) -> Result<(), GpuError> {
         gpu.begin_pass(&pass.desc())?;
+        self.context.rendering_stats().num_render_passes += 1;
         self.open_pass = Some(pass);
         Ok(())
     }

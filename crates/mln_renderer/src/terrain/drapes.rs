@@ -29,7 +29,7 @@ use mln_util::size::Size;
 use super::TerrainCover;
 use crate::clip_masks::ClipMasks;
 use crate::gfx::context::Context;
-use crate::gfx::resources::GpuTexture;
+use crate::gfx::resources::{GpuTexture, attachment_bytes};
 use crate::gfx::store::SharedTexture;
 use crate::layer_composite::LayerComposite;
 use crate::layer_drawing::{ChangedBuckets, DrapeDrawing, DrawGroups, DrawOrder};
@@ -338,6 +338,28 @@ impl Drapes {
         }
     }
 
+    /// Counts in the rendering stats of `context` the stacks, the drapes
+    /// whose textures are made, and the bytes of their textures, of the
+    /// depth and stencil they draw with, and of their composite.
+    pub(crate) fn count(&self, context: &mut Context) {
+        let mut drapes = 0;
+        let mut bytes = 0;
+        for drape in self.drapes.iter().flat_map(|drape| &drape.stacks) {
+            if let Some(texture) = context.texture(&drape.texture).filter(|texture| texture.gpu_texture().is_some()) {
+                drapes += 1;
+                bytes += texture.bytes();
+            }
+        }
+        let size = Size::new(self.size, self.size);
+        let stats = &mut context.rendering_stats().terrain;
+        stats.stacks = self.stacks;
+        stats.drapes = drapes;
+        stats.mem_drapes = bytes;
+        stats.mem_drape_depth_stencil =
+            self.depth_stencil.as_ref().map_or(0, |_| attachment_bytes(size, DEPTH_STENCIL));
+        stats.mem_drape_composite = self.layer_composite.bytes();
+    }
+
     /// The tiles and stacks of the drapes drawn since the last call.
     #[cfg(test)]
     pub(crate) fn take_passes(&mut self) -> Vec<(OverscaledTileID, usize)> {
@@ -468,6 +490,7 @@ impl Drapes {
                 match drawn_pass.and_then(|()| parameters.context.generate_mipmaps(gpu, texture)) {
                     Ok(()) => {
                         *drawn = Some(std::mem::take(key));
+                        parameters.context.rendering_stats().terrain.drapes_drawn += 1;
                         #[cfg(test)]
                         self.passes.push((*tile, stack));
                     }

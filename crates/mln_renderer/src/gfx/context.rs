@@ -329,7 +329,9 @@ impl Context {
     /// the first. Fails while a pass is open and for a texture not made.
     pub(crate) fn generate_mipmaps(&mut self, gpu: &mut dyn Gpu, handle: &SharedTexture) -> Result<(), GpuError> {
         let texture = self.gpu_texture(handle).ok_or(GpuError::UnknownId("texture"))?;
-        gpu.generate_mipmaps(texture.id())
+        gpu.generate_mipmaps(texture.id())?;
+        self.device.stats.num_mipmap_generations += 1;
+        Ok(())
     }
 
     /// Writes the image the texture of `handle` was given, if any.

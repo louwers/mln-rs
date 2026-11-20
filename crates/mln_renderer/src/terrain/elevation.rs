@@ -115,6 +115,17 @@ impl TerrainElevation {
             })
     }
 
+    /// The bytes of the DEM images it holds, each once.
+    pub(crate) fn dem_bytes(&self) -> usize {
+        let images = self.tiles.iter().filter_map(|tile| tile.dem.as_ref().map(|dem| &dem.image));
+        images
+            .clone()
+            .enumerate()
+            .filter(|&(index, image)| !images.clone().take(index).any(|before| Arc::ptr_eq(before, image)))
+            .map(|(_, image)| image.bytes())
+            .sum()
+    }
+
     /// The tile drawn at `location`, and where in it, from 0 to 1 across,
     /// y down. Every world copy of a tile reads the same DEM, so any does.
     fn tile_at(&self, location: LatLng) -> Option<(&DrawnTile, [f32; 2])> {

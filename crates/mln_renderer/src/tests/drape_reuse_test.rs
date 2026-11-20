@@ -454,6 +454,49 @@ fn a_paint_change_in_a_stack_draws_only_its_drapes_again() {
     assert!(map.frame_passes().1.is_empty(), "the drapes are drawn again once only");
 }
 
+/// The rendering stats count what a map of two stacks holds of the terrain,
+/// and what each frame drew of it: here, the drapes of one stack, and then,
+/// at rest, none.
+#[test]
+fn the_rendering_stats_count_the_terrain() {
+    let (mut map, drapes) = two_stacks();
+    map.edit(Edit::SetLayerProperty {
+        layer: "line".to_owned(),
+        name: "line-color".to_owned(),
+        value: serde_json::json!("green"),
+    });
+    map.frame_passes();
+    let stats = map.renderer.rendering_stats();
+    let tiles = drapes.len();
+    // The DEM's tiles of 256 pixels make terrain tiles of 512, and drapes
+    // of 1024 texels a side, with their mips.
+    let texels = 1024 * 1024;
+    let terrain = stats.terrain;
+    assert_eq!(2, terrain.stacks);
+    assert_eq!(2 * tiles, terrain.drapes);
+    assert_eq!(2 * tiles * (4 * texels + 4 * texels / 3), terrain.mem_drapes);
+    assert_eq!(4 * texels, terrain.mem_drape_depth_stencil);
+    assert_eq!(0, terrain.mem_drape_composite, "no layer composites");
+    assert_eq!(tiles, terrain.drapes_drawn);
+    assert_eq!(tiles, terrain.drape_passes);
+    // The line shows in one drape only.
+    assert!(terrain.drape_draw_calls > 0, "{terrain:?}");
+    assert_eq!(2 * tiles, terrain.surface_draw_calls);
+    assert!(stats.num_mipmap_generations >= tiles as i32, "{stats:?}");
+    assert!(stats.num_render_passes > tiles as i32, "{stats:?}");
+    // Each DEM image has a border of a pixel.
+    let dem = 258 * 258 * 4;
+    assert!(terrain.mem_dem_textures >= dem, "{terrain:?}");
+    assert!(terrain.mem_dem_data >= dem && terrain.mem_dem_data.is_multiple_of(dem), "{terrain:?}");
+    assert!(terrain.mem_height_ranges > 0);
+
+    map.frame_passes();
+    let at_rest = map.renderer.rendering_stats().terrain;
+    assert_eq!((0, 0, 0), (at_rest.drapes_drawn, at_rest.drape_passes, at_rest.drape_draw_calls));
+    assert_eq!(2 * tiles, at_rest.surface_draw_calls);
+    assert_eq!(terrain.mem_drapes, at_rest.mem_drapes);
+}
+
 /// [`STYLE`]'s draped layers, removed, and a circle in their place.
 fn only_a_circle(map: &mut DrapedMap) {
     for layer in ["background", "raster", "fill", "line"] {

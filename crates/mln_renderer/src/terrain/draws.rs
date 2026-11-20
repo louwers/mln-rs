@@ -224,6 +224,11 @@ impl TerrainDraws {
 
     /// Draws the frame's draws of `stack` into the open pass of `gpu`, the
     /// context's.
+    /// The bytes of the DEM textures it holds that are made, in `context`.
+    pub(crate) fn dem_bytes(&self, context: &Context) -> usize {
+        self.dem_textures.bytes(context)
+    }
+
     pub(crate) fn render(&mut self, stack: usize, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         if let Some(StackDraws { tiles, frame, .. }) = self.stacks.get_mut(stack) {
             frame.render(tiles, tile_objects, gpu, parameters);

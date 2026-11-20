@@ -159,6 +159,12 @@ impl ElevationRanges {
         Some((f64::from(min) * self.exaggeration, f64::from(max) * self.exaggeration))
     }
 
+    /// The bytes of its table of ranges: a slot of a key, a range and a
+    /// control byte for each range it has room for.
+    pub(crate) fn bytes(&self) -> usize {
+        self.dem_tiles.capacity() * (size_of::<(CanonicalTileID, (f32, f32))>() + 1)
+    }
+
     /// How many DEM tiles' ranges it holds.
     #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
