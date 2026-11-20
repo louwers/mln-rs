@@ -84,7 +84,6 @@ fn tile_features(geojson: GeoJson, tile_id: &CanonicalTileID, options: &TileOpti
         ..Default::default()
     };
     mln_geojson::tile::cut_tile(&features, tile_id.z, tile_id.x, tile_id.y, &tile_options, options.wrap, options.clip)
-        .features
 }
 
 /// A `Send` handle to a custom geometry source's provider, for the host to

@@ -501,8 +501,8 @@ pub(crate) fn get_geojson_tile(
     let inbox = inbox.clone();
     data.get_tile(
         &tile.id.canonical,
-        Box::new(move |features: TileFeatures| {
-            let data = TileData::Features(Arc::new(features));
+        Box::new(move |features: Arc<TileFeatures>| {
+            let data = TileData::Features(features);
             let mut slot = callback_slot.lock();
             if matches!(*slot, Answered::Later) {
                 drop(slot);

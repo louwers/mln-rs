@@ -11,8 +11,8 @@ use crate::TileFeatures;
 
 /// A tile's features.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Tile {
-    pub features: TileFeatures,
+pub(super) struct Tile {
+    pub(super) features: TileFeatures,
     /// The points of the features it was written from.
     pub(super) num_points: u32,
 }

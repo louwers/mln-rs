@@ -107,7 +107,7 @@ fn cut(bench: &mut Bench, every: usize) {
         let data = create_geojson_data(geojson, &options).expect("GeoJSON data");
         for tile in &tiles {
             let features = Arc::clone(&features);
-            let cut = move |tile: TileFeatures| {
+            let cut = move |tile: Arc<TileFeatures>| {
                 features.fetch_add(tile.len(), Ordering::Relaxed);
                 drop(black_box(tile));
             };

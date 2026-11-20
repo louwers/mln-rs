@@ -7,7 +7,7 @@ use mln_style::layer::Layer;
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Circle;
 use mln_style::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
-use mln_style::sources::geojson::{Features, GeoJSONData, TileFeatures};
+use mln_style::sources::geojson::{Features, GeoJSONData, TileCallback, TileFeatures};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
 use mln_util::pool::TaskGroup;
@@ -59,17 +59,12 @@ impl Drop for GeoJSONTileTest {
 
 #[derive(Debug)]
 struct FakeGeoJSONData {
-    features: TileFeatures,
+    features: Arc<TileFeatures>,
 }
 
 impl GeoJSONData for FakeGeoJSONData {
-    fn get_tile(
-        &self,
-        _id: &CanonicalTileID,
-        callback: Box<dyn FnOnce(TileFeatures) + Send>,
-        _pool: Option<&mln_util::pool::Pool>,
-    ) {
-        callback(self.features.clone());
+    fn get_tile(&self, _id: &CanonicalTileID, callback: TileCallback, _pool: Option<&mln_util::pool::Pool>) {
+        callback(Arc::clone(&self.features));
     }
 
     fn get_children(&self, _cluster_id: u32) -> Result<Features, Error> {
@@ -87,7 +82,7 @@ impl GeoJSONData for FakeGeoJSONData {
 
 fn point_data() -> Arc<dyn GeoJSONData> {
     let features = vec![Feature { geometry: Some(Point::new(0i16, 0).into()), ..Feature::default() }];
-    Arc::new(FakeGeoJSONData { features })
+    Arc::new(FakeGeoJSONData { features: Arc::new(features) })
 }
 
 fn circle_layer_properties() -> Arc<dyn ErasedEvaluatedLayer> {

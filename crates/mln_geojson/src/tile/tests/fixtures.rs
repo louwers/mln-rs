@@ -11,7 +11,7 @@ use geo_types::{Coord, Geometry, LineString, MultiLineString, Point, Polygon};
 use serde_json::Value as Json;
 
 use crate::TileFeatures;
-use crate::tile::{EMPTY_TILE, Options, TileIndex, TileOptions, cut_tile};
+use crate::tile::{Options, TileIndex, TileOptions, cut_tile};
 
 fn load_file(name: &str) -> String {
     let path =
@@ -169,19 +169,18 @@ fn read(data: &str) -> Result<Vec<Feature<f64>>, geojson::Error> {
 #[test]
 fn get_tile_us_states() {
     let geojson = read(&load_file("us-states.json")).unwrap();
-    let mut index = TileIndex::new(&geojson, Options::default());
+    let index = TileIndex::new(&geojson, Options::default());
 
-    let features = index.tile(7, 37, 48).unwrap().features.clone();
+    let features = index.tile(7, 37, 48).unwrap().to_vec();
     let expected = parse_json_tile_str(&load_file("us-states-z7-37-48.json"));
     features_eq(&features, &expected);
 
     let square = parse_json_tile_str(&load_file("us-states-square.json"));
-    features_eq(&square, &index.tile(9, 148, 192).unwrap().features); // clipped square
+    features_eq(&square, &index.tile(9, 148, 192).unwrap()); // clipped square
 
-    assert_eq!(&EMPTY_TILE, index.tile(11, 800, 400).unwrap()); // non-existing tile
-    assert!(std::ptr::eq(&raw const EMPTY_TILE, index.tile(11, 800, 400).unwrap())); // non-existing tile
+    assert!(index.tile(11, 800, 400).unwrap().is_empty()); // non-existing tile
 
-    assert_eq!(37, index.tile_ids().count());
+    assert_eq!(37, index.tile_ids().len());
 }
 
 #[test]
@@ -191,12 +190,37 @@ fn get_tile_drills_down_from_any_tile_it_holds() {
     // A tile, its sibling, a tile below it and one of another branch, each
     // drilled down from the tiles the requests before it left.
     let tiles = [(7, 37, 48), (7, 37, 49), (9, 148, 192), (10, 297, 385), (8, 60, 95), (7, 36, 48)];
-    let mut shared = index();
+    let shared = index();
     for (z, x, y) in tiles {
-        let expected = index().tile(z, x, y).unwrap().features.clone();
+        let expected = index().tile(z, x, y).unwrap().to_vec();
         assert!(!expected.is_empty(), "tile {z}/{x}/{y} has features");
-        features_eq(&expected, &shared.tile(z, x, y).unwrap().features);
+        features_eq(&expected, &shared.tile(z, x, y).unwrap());
     }
+}
+
+#[test]
+fn tiles_cut_on_several_threads_at_once_are_the_tiles_cut_on_one() {
+    let geojson = read(&load_file("us-states.json")).unwrap();
+    // Neighbors share the tiles above them that they're cut from.
+    let tiles: Vec<(u8, u32, u32)> = (36..40)
+        .flat_map(|x| (46..50).flat_map(move |y| [(7, x, y), (8, 2 * x, 2 * y + 1), (9, 4 * x + 1, 4 * y)]))
+        .collect();
+    let alone = TileIndex::new(&geojson, Options::default());
+    let expected: Vec<_> = tiles.iter().map(|&(z, x, y)| alone.tile(z, x, y).unwrap()).collect();
+
+    let shared = TileIndex::new(&geojson, Options::default());
+    std::thread::scope(|scope| {
+        for offset in 0..8 {
+            let (shared, tiles, expected) = (&shared, &tiles, &expected);
+            scope.spawn(move || {
+                for i in (0..tiles.len()).map(|i| (i + offset * 5) % tiles.len()) {
+                    let (z, x, y) = tiles[i];
+                    features_eq(&expected[i], &shared.tile(z, x, y).unwrap());
+                }
+            });
+        }
+    });
+    assert_eq!(shared.tile_ids().len(), alone.tile_ids().len());
 }
 
 #[test]
@@ -204,11 +228,11 @@ fn get_tile_antimeridian_triangle() {
     let geojson = read(&load_file("dateline-triangle.json")).unwrap();
 
     // Using default options.
-    let mut index = TileIndex::new(&geojson, Options::default());
+    let index = TileIndex::new(&geojson, Options::default());
 
     for (z, x, y) in [(1, 0, 0), (1, 0, 1), (1, 1, 0), (1, 1, 1)] {
         let tile = index.tile(z, x, y).unwrap();
-        assert_eq!(tile.features.len(), 1);
+        assert_eq!(tile.len(), 1);
     }
 }
 
@@ -219,16 +243,15 @@ fn get_tile_polygon_clipping_bug() {
     let mut options = Options::default();
     options.tile.buffer = 1024;
 
-    let mut index = TileIndex::new(&geojson, options);
+    let index = TileIndex::new(&geojson, options);
 
     let tile = index.tile(5, 19, 9).unwrap();
-    assert_eq!(tile.features.len(), 1);
-    assert_eq!(tile.num_points, 5);
+    assert_eq!(tile.len(), 1);
 
     let exterior = [(3072i16, 3072), (5120, 3072), (5120, 5120), (3072, 5120), (3072, 3072)];
     let expected = Geometry::Polygon(Polygon::new(LineString::from(exterior.to_vec()), vec![]));
 
-    assert_eq!(tile.features[0].geometry, Some(expected));
+    assert_eq!(tile[0].geometry, Some(expected));
 }
 
 #[test]
@@ -241,7 +264,7 @@ fn get_tile_projection() {
         ..Options::default()
     };
 
-    let mut index = TileIndex::new(&geojson, options);
+    let index = TileIndex::new(&geojson, options);
 
     let tile_coordinates: [(u8, u32, u32); 21] = [
         (0, 0, 0),
@@ -269,8 +292,8 @@ fn get_tile_projection() {
 
     for (z, x, y) in tile_coordinates {
         let tile = index.tile(z, x, y).unwrap();
-        assert_eq!(tile.features.len(), 1);
-        let Some(Geometry::LineString(line_string)) = &tile.features[0].geometry else { panic!("not a line string") };
+        assert_eq!(tile.len(), 1);
+        let Some(Geometry::LineString(line_string)) = &tile[0].geometry else { panic!("not a line string") };
         assert_eq!(line_string.0.len(), 2);
 
         let total_features = f64::from(1u32 << z) * 8192.0;
@@ -310,14 +333,14 @@ fn gen_tiles(
     };
 
     let geojson = read(data)?;
-    let mut index = TileIndex::new(&geojson, options);
+    let index = TileIndex::new(&geojson, options);
 
     let mut output = BTreeMap::new();
 
-    let keys: Vec<_> = index.tile_ids().map(|id| (id.z, id.x, id.y)).collect();
+    let keys: Vec<_> = index.tile_ids().into_iter().map(|id| (id.z, id.x, id.y)).collect();
     for (z, x, y) in keys {
         let key = format!("z{z}-{x}-{y}");
-        let features = index.tile(z, x, y).unwrap().features.clone();
+        let features = index.tile(z, x, y).unwrap().to_vec();
         output.entry(key).or_insert(features);
     }
 
@@ -379,8 +402,8 @@ fn cut_tile_simple() {
     let geojson = read(&load_file("single-tile.json")).unwrap();
     let tile = cut_tile(&geojson, 12, 1171, 1566, &TileOptions::default(), false, false);
 
-    assert_eq!(tile.features.len(), 1);
-    let props = &tile.features[0].properties;
+    assert_eq!(tile.len(), 1);
+    let props = &tile[0].properties;
     assert_eq!(property_string(props, "name"), "P Street Northwest - Massachusetts Avenue Northwest");
 }
 
@@ -389,8 +412,8 @@ fn cut_tile_clips() {
     let geojson = read(&load_file("us-states.json")).unwrap();
     let tile = cut_tile(&geojson, 12, 1171, 1566, &TileOptions::default(), false, true);
 
-    assert_eq!(tile.features.len(), 2);
-    let props = &tile.features[0].properties;
+    assert_eq!(tile.len(), 2);
+    let props = &tile[0].properties;
     assert_eq!(property_string(props, "name"), "District of Columbia");
 }
 
@@ -401,16 +424,16 @@ fn cut_tile_metrics() {
     let k_epsilon = 1e-5;
 
     let tile_left = cut_tile(&geojson, 13, 2342, 3133, &options, false, false);
-    assert_eq!(tile_left.features.len(), 1);
+    assert_eq!(tile_left.len(), 1);
 
     let tile_right = cut_tile(&geojson, 13, 2343, 3133, &options, false, false);
-    assert_eq!(tile_right.features.len(), 1);
+    assert_eq!(tile_right.len(), 1);
 
-    let left_props = &tile_left.features[0].properties;
+    let left_props = &tile_left[0].properties;
     assert!(double_eq(property_double(left_props, "mapbox_clip_start"), 0.0));
     assert!((property_double(left_props, "mapbox_clip_end") - 0.42103).abs() <= k_epsilon);
 
-    let right_props = &tile_right.features[0].properties;
+    let right_props = &tile_right[0].properties;
     assert!((property_double(right_props, "mapbox_clip_start") - 0.40349).abs() <= k_epsilon);
     assert!(double_eq(property_double(right_props, "mapbox_clip_end"), 1.0));
 }

@@ -15,7 +15,6 @@ use mln_util::logging::{Event, Log};
 use mln_util::pool::{Pool, Respond, TaskGroup};
 use mln_util::range::Range;
 use mln_vec_map::VecMap;
-use parking_lot::Mutex;
 
 use crate::Edit;
 use crate::conversion::geojson::convert_json_geojson;
@@ -28,24 +27,21 @@ use crate::source_type::{
 
 /// The features of tile `id`. A tile past the maximum zoom or the last row
 /// is logged, and empty.
-fn tile_features(index: &Mutex<tile::TileIndex>, id: &CanonicalTileID) -> TileFeatures {
-    match index.lock().tile(id.z, id.x, id.y) {
-        Ok(tile) => tile.features.clone(),
-        Err(e) => {
-            Log::error(Event::General, e.to_string());
-            TileFeatures::new()
-        }
-    }
+fn tile_features(index: &tile::TileIndex, id: &CanonicalTileID) -> Arc<TileFeatures> {
+    index.tile(id.z, id.x, id.y).unwrap_or_else(|e| {
+        Log::error(Event::General, e.to_string());
+        Arc::default()
+    })
 }
 
 /// A `TileIndex`'s tiles, which it cuts on the calling thread, or, given a
-/// pool, one at a time and in the order asked, so that one source never
-/// holds more than one of the pool's threads.
+/// pool, on the pool's threads, several at once.
 struct TileData {
-    index: Arc<Mutex<tile::TileIndex>>,
-    /// Where the tiles asked for with a pool are cut: a serial group on the
-    /// first pool given, kept while the data lives. The data is made when
-    /// the style is parsed, before any renderer gives it a pool.
+    index: Arc<tile::TileIndex>,
+    /// Where the tiles asked for with a pool are cut: a group on the first
+    /// pool given, kept while the data lives, so that the pool's threads
+    /// take turns between it and other work. The data is made when the style
+    /// is parsed, before any renderer gives it a pool.
     slices: OnceLock<TaskGroup>,
 }
 
@@ -56,11 +52,11 @@ impl std::fmt::Debug for TileData {
 }
 
 impl GeoJSONData for TileData {
-    fn get_tile(&self, id: &CanonicalTileID, callback: Box<dyn FnOnce(TileFeatures) + Send>, pool: Option<&Pool>) {
+    fn get_tile(&self, id: &CanonicalTileID, callback: TileCallback, pool: Option<&Pool>) {
         match pool {
             Some(pool) => {
                 let (index, id) = (Arc::clone(&self.index), *id);
-                self.slices.get_or_init(|| TaskGroup::serial(pool)).spawn(move || {
+                self.slices.get_or_init(|| TaskGroup::new(pool)).spawn(move || {
                     callback(tile_features(&index, &id));
                 });
             }
@@ -92,8 +88,8 @@ impl std::fmt::Debug for ClusterData {
 }
 
 impl GeoJSONData for ClusterData {
-    fn get_tile(&self, id: &CanonicalTileID, callback: Box<dyn FnOnce(TileFeatures) + Send>, _pool: Option<&Pool>) {
-        callback(self.clusters.tile(id.z, id.x, id.y));
+    fn get_tile(&self, id: &CanonicalTileID, callback: TileCallback, _pool: Option<&Pool>) {
+        callback(Arc::new(self.clusters.tile(id.z, id.x, id.y)));
     }
 
     fn get_children(&self, cluster_id: u32) -> Result<Features, Error> {
@@ -174,7 +170,7 @@ fn create(features: Features, collection: bool, options: &Arc<GeoJSONOptions>) -
         },
         ..Default::default()
     };
-    let index = Arc::new(Mutex::new(tile::TileIndex::new(&features, tile_options)));
+    let index = Arc::new(tile::TileIndex::new(&features, tile_options));
     Ok(Arc::new(TileData { index, slices: OnceLock::new() }))
 }
 
@@ -257,12 +253,16 @@ impl GeoJSONOptions {
 pub type TileFeatures = mln_geojson::TileFeatures;
 pub type Features = Vec<Feature<f64>>;
 
+/// What [`GeoJSONData::get_tile`] hands a tile's features to. The data may
+/// keep the features too, and hand them out again.
+pub type TileCallback = Box<dyn FnOnce(Arc<TileFeatures>) + Send>;
+
 pub trait GeoJSONData: Send + Sync {
     /// Gets the features of tile `id`. `callback` runs either right away,
     /// on the calling thread, or later on a pool, for data that cuts its
     /// tiles there: the first `pool` it was given, which it keeps. Without a
     /// pool, always right away.
-    fn get_tile(&self, id: &CanonicalTileID, callback: Box<dyn FnOnce(TileFeatures) + Send>, pool: Option<&Pool>);
+    fn get_tile(&self, id: &CanonicalTileID, callback: TileCallback, pool: Option<&Pool>);
 
     // Data that isn't clustered has no clusters, and
     // gives empty results. A cluster ID the data doesn't have fails with

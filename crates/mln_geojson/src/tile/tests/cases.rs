@@ -245,15 +245,15 @@ fn clip_vertex_on_tile_border() {
 
     let k_epsilon = 1e-5;
 
-    let mut index = TileIndex::new(&geojson, options);
+    let index = TileIndex::new(&geojson, options);
 
     let tile = index.tile(13, 2344, 3134).unwrap();
-    assert_ne!(tile.features, crate::TileFeatures::new());
+    assert!(!tile.is_empty());
     let expected = LineString::from(vec![(-2048i16, 2747), (408, 5037)]);
-    assert_eq!(tile.features[0].geometry, Some(Geometry::LineString(expected)));
+    assert_eq!(tile[0].geometry, Some(Geometry::LineString(expected)));
 
     // Check line metrics
-    let props = &tile.features[0].properties;
+    let props = &tile[0].properties;
     let Value::Double(clip_start1) = props["mapbox_clip_start"] else { panic!() };
     let Value::Double(clip_end1) = props["mapbox_clip_end"] else { panic!() };
     assert!((0.660_622 - clip_start1).abs() <= k_epsilon);
@@ -280,9 +280,9 @@ fn polygon_rings_are_closed_and_rewound() {
             [[[-40, 0], [-40, 40], [-80, 40], [-80, 0]], [[-50, 10], [-70, 10], [-70, 30], [-50, 30], [-50, 10]]]
         ]
     }"#;
-    let mut index = TileIndex::new(&feature::geojson::features(data.parse().unwrap()).unwrap(), Options::default());
+    let index = TileIndex::new(&feature::geojson::features(data.parse().unwrap()).unwrap(), Options::default());
     let tile = index.tile(0, 0, 0).unwrap();
-    let Some(Geometry::MultiPolygon(polygons)) = &tile.features[0].geometry else { panic!("{:?}", tile.features) };
+    let Some(Geometry::MultiPolygon(polygons)) = &tile[0].geometry else { panic!("{tile:?}") };
     assert_eq!(polygons.0.len(), 2);
     for polygon in polygons {
         let [hole] = polygon.interiors() else { panic!("{polygon:?}") };
@@ -295,10 +295,11 @@ fn polygon_rings_are_closed_and_rewound() {
 #[test]
 fn a_tile_past_the_max_zoom_or_the_last_row_is_an_error() {
     let geojson = feature::geojson::features(r#"{"type": "Point", "coordinates": [0, 0]}"#.parse().unwrap()).unwrap();
-    let mut index = TileIndex::new(&geojson, Options { max_zoom: 4, ..Options::default() });
+    let index = TileIndex::new(&geojson, Options { max_zoom: 4, ..Options::default() });
     assert_eq!(index.tile(5, 0, 0), Err(Error::ZoomPastMax(5)));
     assert_eq!(index.tile(2, 0, 4), Err(Error::RowPastEnd { z: 2, y: 4 }));
-    // Columns wrap around the world.
-    let tile = index.tile(1, 1, 1).unwrap().clone();
-    assert_eq!(index.tile(1, 3, 1).unwrap(), &tile);
+    // Columns wrap around the world,
+    // and share the tile.
+    let tile = index.tile(1, 1, 1).unwrap();
+    assert!(std::sync::Arc::ptr_eq(&index.tile(1, 3, 1).unwrap(), &tile));
 }

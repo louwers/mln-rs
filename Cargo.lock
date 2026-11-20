@@ -2760,6 +2760,7 @@ dependencies = [
  "geo-types",
  "geojson",
  "mln-rs-feature",
+ "parking_lot",
  "serde_json",
  "smallvec",
  "thiserror 2.0.21",

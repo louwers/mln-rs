@@ -13,9 +13,14 @@ mod geometry;
 mod output;
 mod simplify;
 
+use std::sync::Arc;
+
 use clip::clip as clip_axis;
 use geometry::{Bbox, Feature, X, Y};
-pub use output::Tile;
+use output::Tile;
+use parking_lot::{Mutex, RwLock};
+
+use crate::TileFeatures;
 
 /// foldhash's hasher, with a fixed seed in the benchmarks' builds, as
 /// `mln_util::hash`'s.
@@ -98,6 +103,12 @@ impl TileId {
         TileId { z: self.z + 1, x: self.x * 2 + dx, y: self.y * 2 + dy }
     }
 
+    /// The tile below `self` on the way to `other`, which is below it.
+    fn child_toward(self, other: TileId) -> TileId {
+        let shift = other.z - self.z - 1;
+        TileId { z: self.z + 1, x: other.x >> shift, y: other.y >> shift }
+    }
+
     /// Whether `self` is `other` or above it.
     fn contains(self, other: TileId) -> bool {
         self.z <= other.z && other.x >> (other.z - self.z) == self.x && other.y >> (other.z - self.z) == self.y
@@ -105,21 +116,19 @@ impl TileId {
 }
 
 /// A tile that the index cut.
-struct IndexedTile {
-    tile: Tile,
+struct Node {
+    features: Arc<TileFeatures>,
     bbox: Bbox,
-    /// The features that the tile was cut from, while the tiles below it
-    /// aren't cut.
-    source: Vec<Feature>,
+    /// The features it was cut from, while the tiles below it aren't cut.
+    /// Cutting them holds the lock, so that they're cut once.
+    source: Mutex<Vec<Feature>>,
 }
 
-/// The tile with no features.
-static EMPTY_TILE: Tile = Tile { features: Vec::new(), num_points: 0 };
-
-/// GeoJSON features, cut into tiles up to a maximum zoom.
+/// GeoJSON features, cut into tiles up to a maximum zoom. Tiles can be cut
+/// from several threads at once.
 pub struct TileIndex {
     options: Options,
-    tiles: HashMap<TileId, IndexedTile>,
+    tiles: RwLock<HashMap<TileId, Arc<Node>>>,
 }
 
 impl std::fmt::Debug for TileIndex {
@@ -137,14 +146,14 @@ impl TileIndex {
         let tolerance = tile.tolerance / f64::from(tile.extent) / 2f64.powi(i32::from(options.max_zoom));
         let features = convert::convert(features, tolerance, tile.line_metrics);
         let features = clip::wrap(features, f64::from(tile.buffer) / f64::from(tile.extent), tile.line_metrics);
-        let mut index = TileIndex { options, tiles: HashMap::default() };
-        index.split(&features, TileId::ROOT, None);
+        let index = TileIndex { options, tiles: RwLock::new(HashMap::default()) };
+        index.add(&features, TileId::ROOT, None);
         index
     }
 
-    /// Tile `x`, `y` at zoom `z`, cut now if it isn't yet. Columns wrap
-    /// around the world.
-    pub fn tile(&mut self, z: u8, x: u32, y: u32) -> Result<&Tile, Error> {
+    /// The features of tile `x`, `y` at zoom `z`, cut now if they aren't
+    /// yet. Columns wrap around the world.
+    pub fn tile(&self, z: u8, x: u32, y: u32) -> Result<Arc<TileFeatures>, Error> {
         if z > self.options.max_zoom {
             return Err(Error::ZoomPastMax(z));
         }
@@ -155,67 +164,80 @@ impl TileIndex {
         // `x % z2` is less than `z2`, at most 2^31.
         let id = TileId { z, x: (u64::from(x) % z2) as u32, y };
 
-        if !self.tiles.contains_key(&id) {
-            // The root tile is always there.
-            let mut ancestor = id;
-            while let Some(parent) = ancestor.parent() {
-                ancestor = parent;
-                if self.tiles.contains_key(&ancestor) {
-                    break;
+        loop {
+            let (ancestor, node) = {
+                let tiles = self.tiles.read();
+                if let Some(node) = tiles.get(&id) {
+                    return Ok(Arc::clone(&node.features));
                 }
+                // The root tile is always there.
+                let Some(nearest) = std::iter::successors(id.parent(), |t| t.parent())
+                    .find_map(|t| tiles.get(&t).map(|node| (t, Arc::clone(node))))
+                else {
+                    return Ok(Arc::default());
+                };
+                nearest
+            };
+            let mut source = node.source.lock();
+            // Another request may have cut the tiles below while this one
+            // waited for the lock: then it starts over from them.
+            if self.tiles.read().contains_key(&ancestor.child_toward(id)) {
+                continue;
             }
-            let source = self.tiles.get_mut(&ancestor).map(|tile| std::mem::take(&mut tile.source)).unwrap_or_default();
-            self.split(&source, ancestor, Some(id));
+            let features = std::mem::take(&mut *source);
+            if !features.is_empty() {
+                self.cut_below(&features, ancestor, node.bbox, Some(id));
+            }
+            drop(source);
+            return Ok(self.tiles.read().get(&id).map_or_else(Arc::default, |node| Arc::clone(&node.features)));
         }
-        Ok(self.tiles.get(&id).map_or(&EMPTY_TILE, |tile| &tile.tile))
     }
 
     /// The tiles cut so far.
     #[cfg(test)]
-    fn tile_ids(&self) -> impl Iterator<Item = TileId> {
-        self.tiles.keys().copied()
+    fn tile_ids(&self) -> Vec<TileId> {
+        self.tiles.read().keys().copied().collect()
     }
 
-    /// Cuts tile `id` from `features`, and the tiles below it: down to
-    /// `target` without one, or down to the index's limits up front.
-    fn split(&mut self, features: &[Feature], id: TileId, target: Option<TileId>) {
-        let options = self.options;
-        let tile = self.tiles.entry(id).or_insert_with(|| {
-            let tolerance = if id.z == options.max_zoom {
-                0.0
-            } else {
-                options.tile.tolerance / (2f64.powi(i32::from(id.z)) * f64::from(options.tile.extent))
-            };
-            let mut bbox = Bbox::EMPTY;
-            for feature in features {
-                bbox.extend(feature.bbox);
-            }
-            IndexedTile {
-                tile: Tile::new(features, id, options.tile.extent, tolerance, options.tile.line_metrics),
-                bbox,
-                source: Vec::new(),
-            }
-        });
-        if features.is_empty() {
-            return;
-        }
-
-        let keep_source = match target {
-            None => {
-                id.z >= options.index_max_zoom.min(options.max_zoom) || tile.tile.num_points <= options.index_max_points
-            }
-            Some(_) if id.z == options.max_zoom => return,
-            Some(target) => id.z == target.z || !id.contains(target),
+    /// Adds tile `id`, cut from `features`, and cuts the tiles below it: down
+    /// to `target` with one, or down to the index's limits without.
+    fn add(&self, features: &[Feature], id: TileId, target: Option<TileId>) {
+        let options = &self.options;
+        let tolerance = if id.z == options.max_zoom {
+            0.0
+        } else {
+            options.tile.tolerance / (2f64.powi(i32::from(id.z)) * f64::from(options.tile.extent))
         };
-        if keep_source {
-            tile.source = features.to_vec();
-            return;
+        let tile = Tile::new(features, id, options.tile.extent, tolerance, options.tile.line_metrics);
+        let mut bbox = Bbox::EMPTY;
+        for feature in features {
+            bbox.extend(feature.bbox);
         }
 
-        let bbox = tile.bbox;
-        let line_metrics = options.tile.line_metrics;
+        let deeper = !features.is_empty() && id.z < options.max_zoom;
+        let cut_below = deeper
+            && match target {
+                None => id.z < options.index_max_zoom && tile.num_points > options.index_max_points,
+                Some(target) => id.z < target.z && id.contains(target),
+            };
+        let source = if deeper && !cut_below { features.to_vec() } else { Vec::new() };
+        let node = Arc::new(Node { features: Arc::new(tile.features), bbox, source: Mutex::new(source) });
+        // A request that finds the tile before the tiles below it are cut
+        // waits for them.
+        let cutting = cut_below.then(|| node.source.lock());
+        self.tiles.write().insert(id, Arc::clone(&node));
+        if cut_below {
+            self.cut_below(features, id, bbox, target);
+        }
+        drop(cutting);
+    }
+
+    /// Cuts the four tiles below tile `id` from `features`, its features,
+    /// which `bbox` bounds.
+    fn cut_below(&self, features: &[Feature], id: TileId, bbox: Bbox, target: Option<TileId>) {
+        let line_metrics = self.options.tile.line_metrics;
         let z2 = 2f64.powi(i32::from(id.z));
-        let p = 0.5 * f64::from(options.tile.buffer) / f64::from(options.tile.extent);
+        let p = 0.5 * f64::from(self.options.tile.buffer) / f64::from(self.options.tile.extent);
         for dx in 0..2 {
             let x = f64::from(id.x) + 0.5 * f64::from(dx);
             let column =
@@ -224,12 +246,8 @@ impl TileIndex {
                 let y = f64::from(id.y) + 0.5 * f64::from(dy);
                 let quadrant =
                     clip_axis::<Y>(&column, (y - p) / z2, (y + 0.5 + p) / z2, bbox.min.y, bbox.max.y, line_metrics);
-                self.split(&quadrant, id.child(dx, dy), target);
+                self.add(&quadrant, id.child(dx, dy), target);
             }
-        }
-        // The tiles below hold the features now.
-        if let Some(tile) = self.tiles.get_mut(&id) {
-            tile.source = Vec::new();
         }
     }
 }
@@ -246,7 +264,7 @@ pub fn cut_tile(
     options: &TileOptions,
     wrap: bool,
     clip: bool,
-) -> Tile {
+) -> TileFeatures {
     let z2 = 2f64.powi(i32::from(z));
     let tolerance = options.tolerance / f64::from(options.extent) / z2;
     let buffer = f64::from(options.buffer) / f64::from(options.extent);
@@ -261,7 +279,7 @@ pub fn cut_tile(
         features = clip_axis::<Y>(&column, (y - buffer) / z2, (y + 1.0 + buffer) / z2, -1.0, 2.0, options.line_metrics)
             .into_owned();
     }
-    Tile::new(&features, TileId { z, x, y }, options.extent, tolerance, options.line_metrics)
+    Tile::new(&features, TileId { z, x, y }, options.extent, tolerance, options.line_metrics).features
 }
 
 #[cfg(test)]
