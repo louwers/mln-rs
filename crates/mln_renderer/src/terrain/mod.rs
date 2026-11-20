@@ -43,6 +43,14 @@
 //!   GL JS's flat range where none has loaded. While no tile holds the
 //!   view's center, the cover keeps the tile under it, undrawn, so that the
 //!   camera has a DEM to stand on.
+//! - **The elevation ranges** ([`ElevationRanges`]) are those of every DEM
+//!   tile of the terrain's tileset that has loaded while terrain drew,
+//!   remembered after the source lets a tile go. A range that culls the
+//!   tiles reading its DEM tile keeps culling them, so a camera at rest
+//!   settles on one cover rather than flip between it and the cover of an
+//!   ancestor's wider range. The ranges are forgotten when the tileset
+//!   changes or terrain stops, and, past a bound, those of the tiles the
+//!   source no longer holds.
 //! - **The DEM bindings.** A tile at zoom z reads the DEM tile at z − 1,
 //!   within the DEM's zoom levels; while that loads, the sub-rect of the
 //!   deepest ancestor that has loaded; else it draws flat. A frame binds the
@@ -90,9 +98,9 @@ mod mesh;
 
 use std::sync::Arc;
 
-#[cfg(test)]
-pub(crate) use cover::terrain_tile_size;
 pub(crate) use cover::{ElevationRanges, TerrainCover};
+#[cfg(test)]
+pub(crate) use cover::{REMEMBERED_RANGES, terrain_tile_size};
 pub(crate) use drapes::Drapes;
 pub(crate) use elevation::TerrainElevation;
 use mln_gfx::gpu::Gpu;
@@ -188,10 +196,12 @@ pub(crate) struct RenderTerrain {
 
 impl RenderTerrain {
     /// Brings the terrain to `parameters`, before the sources update: checks
-    /// whether it draws, takes the elevation ranges from the DEM tiles that
-    /// have loaded, covers the view with its tiles and lists the DEM tiles
-    /// they read. `dem` finds the tiles of a source by its id. Returns the
-    /// cover while terrain draws; its tiles bind their DEM in [`bind`].
+    /// whether it draws, takes in the elevation ranges of the DEM tiles that
+    /// have loaded, which the last cover's ranges remember, covers the view
+    /// with its tiles and lists the DEM tiles they read. `dem` finds the
+    /// tiles of a source by its id. Returns the cover while terrain draws;
+    /// its tiles bind their DEM in [`bind`]. While terrain doesn't draw, it
+    /// remembers no ranges.
     ///
     /// [`bind`]: Self::bind
     pub(crate) fn update<'a>(
@@ -199,7 +209,7 @@ impl RenderTerrain {
         parameters: &UpdateParameters,
         dem: impl FnOnce(&str) -> Option<&'a SourceTiles>,
     ) -> Option<&TerrainCover> {
-        self.cover = None;
+        let mut ranges = self.cover.take().map(|cover| cover.ranges).unwrap_or_default();
         let style = &parameters.style;
         let terrain = style.get_terrain()?;
         if parameters.mode == MapMode::Tile {
@@ -223,7 +233,7 @@ impl RenderTerrain {
         self.surface = Surface::new(encoding, terrain.exaggeration, skirt_length);
 
         let dem_zooms = tileset.zoom_range;
-        let ranges = ElevationRanges::new(dem_zooms, dem(&terrain.source), f64::from(terrain.exaggeration));
+        ranges.update(tileset, dem(&terrain.source), f64::from(terrain.exaggeration));
         let tile_size = data.options.tile_size;
         self.cover = Some(TerrainCover::new(&parameters.view, &terrain.source, tile_size, dem_zooms, ranges));
         self.cover.as_ref()
@@ -372,9 +382,10 @@ impl RenderTerrain {
     }
 
     /// Drops all it made from the map's data, for the renderer's
-    /// `clear_data`: the cover, the drapes and the layers' drawings in them,
-    /// the draws and the DEM textures. If it had told the map of the ground,
-    /// it tells it in `events` that the ground is gone.
+    /// `clear_data`: the cover and the elevation ranges it remembers, the
+    /// drapes and the layers' drawings in them, the draws and the DEM
+    /// textures. If it had told the map of the ground, it tells it in
+    /// `events` that the ground is gone.
     pub(crate) fn clear_data(&mut self, events: &mut Vec<RendererEvent>) {
         if self.elevation.is_some() {
             events.push(RendererEvent::TerrainElevation(None));

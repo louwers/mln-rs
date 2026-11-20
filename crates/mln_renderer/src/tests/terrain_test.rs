@@ -509,6 +509,86 @@ fn ranges_come_from_the_loaded_dem_tiles() {
     }
 }
 
+/// A DEM tile's range outlives the tile: once its source lets go of it,
+/// without the cache to keep it, the cover still culls by it, with the
+/// terrain's exaggeration of the moment. A DEM of another tileset has none
+/// of the ranges of the one before.
+#[test]
+fn the_ranges_outlive_the_dem_tiles() {
+    let mut load = TerrainLoad::new((0, 14), 2.0);
+    load.store.set_cache_enabled(false);
+    load.frame();
+    load.answer(|_| Some(terrarium_png(425)));
+    let tile = load.terrain.cover().unwrap().tiles[0].id;
+    assert_eq!(Some((850.0, 850.0)), load.frame().ranges.range(tile.canonical));
+
+    // Far away, the source lets go of the DEM tiles of the tile.
+    let elsewhere = LatLng::new(-30.0, -100.0).unwrap();
+    load.transform.jump_to(&CameraOptions { center: Some(elsewhere), ..Default::default() });
+    load.frame();
+    let source = load.store.source(load.render_source.tiles().unwrap()).unwrap();
+    assert!(source.tile(&tile.scaled_to(9)).is_none(), "the source holds the DEM tile");
+    assert!(source.tile(&tile.scaled_to(5)).is_none(), "the source holds the coarse DEM tile");
+    assert_eq!(Some((850.0, 850.0)), load.frame().ranges.range(tile.canonical));
+
+    let exaggerated = |exaggeration| Terrain { exaggeration, ..Terrain::new("dem") };
+    load.style.apply(Edit::SetTerrain(Some(exaggerated(3.0)))).unwrap();
+    assert_eq!(Some((1275.0, 1275.0)), load.frame().ranges.range(tile.canonical));
+
+    // The source, replaced by one of other tiles, has no ranges until they
+    // load: not those of the tiles before, which it still holds as the
+    // terrain covers the view, before the source updates.
+    load.answer(|_| Some(terrarium_png(425)));
+    let tileset = PartialTileset {
+        tiles: Some(vec!["other tiles".to_owned()]),
+        min_zoom: Some(0),
+        max_zoom: Some(14),
+        raster_encoding: Some(RasterEncoding::Terrarium),
+        ..Default::default()
+    };
+    load.source = crate::tests::ready(raster_dem_source("dem", None, tileset, 256));
+    load.style = style_with(load.source.clone());
+    load.style.apply(Edit::SetTerrain(Some(exaggerated(3.0)))).unwrap();
+    let here = load.frame().tiles[0].id.canonical;
+    assert_eq!(None, load.frame().ranges.range(here));
+    load.answer(|_| Some(terrarium_png(100)));
+    assert_eq!(Some((300.0, 300.0)), load.frame().ranges.range(here));
+    assert_eq!(None, load.frame().ranges.range(tile.canonical));
+}
+
+/// Past their bound, the ranges forget those of the DEM tiles that their
+/// source no longer holds, and keep those of the tiles it does.
+#[test]
+fn the_ranges_forget_the_dem_tiles_let_go_past_their_bound() {
+    use mln_style::source_type::SourceData;
+    use mln_style::sources::RasterDemSourceType;
+
+    use crate::terrain::{ElevationRanges, REMEMBERED_RANGES};
+
+    let mut load = TerrainLoad::new((0, 14), 1.0);
+    load.frame();
+    load.answer(|_| Some(terrarium_png(425)));
+    let tile = load.frame().tiles[0].id.canonical;
+    let source = load.store.source(load.render_source.tiles().unwrap());
+    let data = SourceData::<RasterDemSourceType>::recover(&load.source).unwrap();
+    let tileset = data.description.as_ref().unwrap();
+
+    let mut ranges = ElevationRanges::default();
+    ranges.update(tileset, source, 1.0);
+    let held = ranges.len();
+    let let_go = |i: usize| CanonicalTileID::new(14, i as u32, 0);
+    for i in held..REMEMBERED_RANGES {
+        ranges.insert(let_go(i), 0.0, 1.0);
+    }
+    ranges.update(tileset, source, 1.0);
+    assert_eq!(REMEMBERED_RANGES, ranges.len(), "the ranges within their bound");
+    ranges.insert(let_go(REMEMBERED_RANGES), 0.0, 1.0);
+    ranges.update(tileset, source, 1.0);
+    assert_eq!(held, ranges.len());
+    assert_eq!(Some((425.0, 425.0)), ranges.range(tile));
+    assert_eq!(None, ranges.range(CanonicalTileID::new(15, 0, 0)));
+}
+
 /// The ground the terrain tells the map is the height rule on the DEM that
 /// each tile drew: at the center, the rule's height on the DEM of the tile
 /// drawn there, exaggerated. The terrain tells the map once per change of

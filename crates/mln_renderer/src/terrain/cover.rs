@@ -9,10 +9,12 @@ use mln_util::dem::DemCoords;
 use mln_util::geo::WrapMode;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::range::Range;
+use mln_util::tileset::Tileset;
 
 use crate::buckets::hillshade_bucket::HillshadeBucket;
 use crate::geometry::dem_data::DEMData;
 use crate::tile::contents::Contents;
+use crate::tile::loading::DataOrigin;
 use crate::tile::source_tiles::SourceTiles;
 use crate::tile::tile::Tile;
 use crate::util::tile_cover::{TileCoverParameters, covering_zoom_level, terrain_tile_cover};
@@ -67,56 +69,106 @@ fn dem_data(tile: &Tile) -> Option<&DEMData> {
     dem_bucket(tile).map(HillshadeBucket::dem_data)
 }
 
-/// The elevation range of the ground under tiles, in meters with the
-/// exaggeration, from the DEM tiles that have loaded.
+/// How many DEM tiles' ranges [`ElevationRanges`] remembers before it
+/// forgets those of the tiles its source no longer holds: some 20 bytes
+/// each, so well under 0.5 MB. That is far more than the DEM tiles one
+/// view reads, ancestors and the source's cache included, so a camera at
+/// rest never forgets twice.
+pub(crate) const REMEMBERED_RANGES: usize = 8192;
+
+/// The elevation range of the ground under tiles, from the DEM tiles that
+/// have loaded.
+///
+/// It remembers the range of each DEM tile from the moment its data
+/// loads, after its source lets go of the tile too, so the cover culls by
+/// what has loaded, not by what it reads. A DEM tile whose range culls the
+/// terrain tiles that read it, so that the terrain no longer reads it,
+/// keeps culling them once its source lets it go, rather than leave them
+/// to an ancestor's wider range, which keeps them, and flip for ever. It
+/// forgets them all when the terrain's DEM is another tileset, and, past
+/// [`REMEMBERED_RANGES`], those of the tiles the source no longer holds.
+/// They are in meters as the DEM decodes them; the exaggeration applies
+/// as they are read.
 #[derive(Debug)]
 pub(crate) struct ElevationRanges {
+    /// The tileset of the DEM tiles whose ranges it holds.
+    tileset: Option<Tileset>,
     /// The lowest and highest elevation of each DEM tile.
-    dem_tiles: HashMap<CanonicalTileID, (f64, f64)>,
+    dem_tiles: HashMap<CanonicalTileID, (f32, f32)>,
     /// The zoom levels of the DEM.
     dem_zooms: Range<u8>,
+    exaggeration: f64,
 }
 
 impl Default for ElevationRanges {
     /// No ranges, of a DEM of every zoom.
     fn default() -> Self {
-        ElevationRanges::new(TERRAIN_ZOOM_RANGE, None, 1.0)
+        ElevationRanges {
+            tileset: None,
+            dem_tiles: HashMap::default(),
+            dem_zooms: TERRAIN_ZOOM_RANGE,
+            exaggeration: 1.0,
+        }
     }
 }
 
 impl ElevationRanges {
-    /// The ranges of the tiles of `dem` that have DEM data, cached ones
-    /// too, of a DEM of the zoom levels `dem_zooms`, exaggerated by
-    /// `exaggeration`.
-    pub(crate) fn new(dem_zooms: Range<u8>, dem: Option<&SourceTiles>, exaggeration: f64) -> Self {
-        let dem_tiles = dem
-            .into_iter()
-            .flat_map(SourceTiles::slots)
-            .filter_map(|slot| {
-                let data = dem_data(&slot.tile)?;
-                let (min, max) = data.range();
-                let range = (f64::from(min) * exaggeration, f64::from(max) * exaggeration);
-                Some((slot.tile.id.canonical, range))
-            })
-            .collect();
-        ElevationRanges { dem_tiles, dem_zooms }
+    /// Takes in the ranges of the tiles of `dem` that have DEM data, cached
+    /// ones too, of the DEM `tileset`, and reads them all exaggerated by
+    /// `exaggeration`. It forgets those it holds of another tileset, and
+    /// takes in none from tiles of another, which their source lets go of
+    /// as it updates.
+    pub(crate) fn update(&mut self, tileset: &Tileset, dem: Option<&SourceTiles>, exaggeration: f64) {
+        if self.tileset.as_ref() != Some(tileset) {
+            *self = ElevationRanges {
+                tileset: Some(tileset.clone()),
+                dem_zooms: tileset.zoom_range,
+                ..ElevationRanges::default()
+            };
+        }
+        self.exaggeration = exaggeration;
+        let made_from = |dem: &&SourceTiles| match &dem.info.origin {
+            Some(DataOrigin::Tileset { tileset: made_from, .. }) => made_from == tileset,
+            _ => false,
+        };
+        let Some(dem) = dem.filter(made_from) else {
+            return;
+        };
+        if self.dem_tiles.len() > REMEMBERED_RANGES {
+            self.dem_tiles.clear();
+        }
+        for slot in dem.slots() {
+            if let Some(data) = dem_data(&slot.tile) {
+                self.dem_tiles.insert(slot.tile.id.canonical, data.range());
+            }
+        }
     }
 
-    /// The lowest and highest elevation under `tile`: that of the DEM tile
-    /// it reads ([`dem_zoom`]), or of the nearest ancestor of that DEM tile
-    /// that is known; `None` where none is.
+    /// The lowest and highest elevation under `tile`, in meters with the
+    /// exaggeration: that of the DEM tile it reads ([`dem_zoom`]), or of
+    /// the nearest ancestor of that DEM tile that is known; `None` where
+    /// none is.
     pub(crate) fn range(&self, tile: CanonicalTileID) -> Option<(f64, f64)> {
         if self.dem_tiles.is_empty() {
             return None;
         }
         let zoom = dem_zoom(tile.z, self.dem_zooms)?;
         let tile = OverscaledTileID::from(tile);
-        (self.dem_zooms.min..=zoom).rev().find_map(|z| self.dem_tiles.get(&tile.scaled_to(z).canonical).copied())
+        let &(min, max) =
+            (self.dem_zooms.min..=zoom).rev().find_map(|z| self.dem_tiles.get(&tile.scaled_to(z).canonical))?;
+        Some((f64::from(min) * self.exaggeration, f64::from(max) * self.exaggeration))
     }
 
-    /// Sets the range of the DEM tile `dem`.
+    /// How many DEM tiles' ranges it holds.
     #[cfg(test)]
-    pub(crate) fn insert(&mut self, dem: CanonicalTileID, min: f64, max: f64) {
+    pub(crate) fn len(&self) -> usize {
+        self.dem_tiles.len()
+    }
+
+    /// Sets the range of the DEM tile `dem`, in meters with the
+    /// exaggeration of 1 of [`Default`].
+    #[cfg(test)]
+    pub(crate) fn insert(&mut self, dem: CanonicalTileID, min: f32, max: f32) {
         self.dem_tiles.insert(dem, (min, max));
     }
 }
@@ -202,6 +254,8 @@ pub(crate) struct TerrainCover {
     /// The DEM tiles the source keeps loaded for the tiles and the center,
     /// whether or not a layer draws them, nearest the center first.
     pub(crate) dem_tiles: Vec<OverscaledTileID>,
+    /// The ranges that cull the tiles, and every source's tiles; the next
+    /// update's cover takes them over.
     pub(crate) ranges: ElevationRanges,
 }
 
