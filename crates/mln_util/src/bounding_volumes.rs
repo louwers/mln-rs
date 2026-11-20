@@ -231,6 +231,27 @@ impl Frustum {
         flipped_y: bool,
         horizon_plane: Option<DVec4>,
     ) -> Frustum {
+        let corners = Self::clip_corners(inv_proj).map(|corner| corner / world_size * 2.0f64.powf(zoom));
+        Self::from_corners(corners, flipped_y, horizon_plane)
+    }
+
+    /// The frustum that `inv_proj` takes clip space's cube to, with x and y
+    /// in the tile units of `zoom` and z left in the units `inv_proj` gives
+    /// it, meters for a map's projection matrix (GL JS `createFrustum`). Boxes
+    /// tested against it with [`intersects_box`](Self::intersects_box) take
+    /// the same units.
+    #[must_use]
+    pub fn from_inv_proj_matrix_metres(inv_proj: &DMat4, world_size: f64, zoom: f64, flipped_y: bool) -> Frustum {
+        let scale = 2.0f64.powf(zoom);
+        let corners = Self::clip_corners(inv_proj).map(|corner| {
+            let xy = corner / world_size * scale;
+            DVec3::new(xy.x, xy.y, corner.z)
+        });
+        Self::from_corners(corners, flipped_y, None)
+    }
+
+    /// The corners of clip space's cube through `inv_proj`.
+    fn clip_corners(inv_proj: &DMat4) -> [DVec3; 8] {
         // The frustum's corners in normalized clip space.
         let clip_corners = [
             DVec3::new(-1.0, 1.0, -1.0),
@@ -242,10 +263,10 @@ impl Frustum {
             DVec3::new(1.0, -1.0, 1.0),
             DVec3::new(-1.0, -1.0, 1.0),
         ];
+        clip_corners.map(|corner| inv_proj.project_point3(corner))
+    }
 
-        let scale = 2.0f64.powf(zoom);
-        let mut corners = clip_corners.map(|corner| inv_proj.project_point3(corner) / world_size * scale);
-
+    fn from_corners(mut corners: [DVec3; 8], flipped_y: bool, horizon_plane: Option<DVec4>) -> Frustum {
         let mut frustum_plane_point_indices = [
             [NEAR_BL, NEAR_BR, FAR_BR],  // bottom
             [NEAR_TL, NEAR_BL, FAR_BL],  // left
@@ -343,6 +364,41 @@ impl Frustum {
             }
         }
 
+        IntersectionResult::Intersects
+    }
+
+    /// A conservative intersection test of a box of any height, as GL JS's
+    /// `Aabb.intersectsFrustum`: the box is separate if all of it is behind
+    /// one plane, or outside the frustum's bounds along an axis. It may
+    /// report an intersection where there is none. A box that only touches a
+    /// plane from outside intersects it.
+    #[must_use]
+    pub fn intersects_box(&self, aabb: &AABB) -> IntersectionResult {
+        let mut fully_inside = true;
+        for plane in &self.planes {
+            // The plane's distance to the box's corners nearest and farthest
+            // along its normal, summed in GL JS's order.
+            let mut distance_min = plane.w;
+            let mut distance_max = plane.w;
+            for axis in 0..3 {
+                let (near, far) =
+                    if plane[axis] > 0.0 { (aabb.min[axis], aabb.max[axis]) } else { (aabb.max[axis], aabb.min[axis]) };
+                distance_min += plane[axis] * near;
+                distance_max += plane[axis] * far;
+            }
+            if distance_max < 0.0 {
+                return IntersectionResult::Separate;
+            }
+            if distance_min < 0.0 {
+                fully_inside = false;
+            }
+        }
+        if fully_inside {
+            return IntersectionResult::Contains;
+        }
+        if !self.bounds.intersects(aabb) {
+            return IntersectionResult::Separate;
+        }
         IntersectionResult::Intersects
     }
 

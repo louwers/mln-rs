@@ -201,3 +201,84 @@ fn pushing_the_far_plane_moves_the_far_corners_along_their_rays() {
     // A point 5 past the old far plane is inside the new one.
     assert!(far_side(&pushed) > 0.0);
 }
+
+/// A map's projection, as a `View` builds it: from world pixels of a world
+/// `world_size` wide, with z in meters at `pixels_per_meter`, to clip space,
+/// for a camera `camera_to_center` pixels from the center, pitched toward
+/// -y on screen.
+fn map_projection(world_size: f64, pixels_per_meter: f64, pitch: f64, bearing: f64) -> DMat4 {
+    let camera_to_center = 500.0;
+    perspective(PI / 4.0, 1.0, 1.0, 4000.0)
+        * DMat4::from_scale(dvec3(1.0, -1.0, 1.0))
+        * DMat4::from_translation(dvec3(0.0, 0.0, -camera_to_center))
+        * DMat4::from_rotation_x(pitch)
+        * DMat4::from_rotation_z(bearing)
+        * DMat4::from_translation(dvec3(-world_size / 2.0, -world_size / 2.0, 0.0))
+        * DMat4::from_scale(dvec3(1.0, 1.0, pixels_per_meter))
+}
+
+#[test]
+fn metres_frustum_agrees_with_the_tile_unit_frustum_on_flat_boxes() {
+    let world_size = 512.0 * 2.0f64.powi(14);
+    for (pitch, bearing) in [(0.0, 0.0), (1.0, 0.3), (1.3, -2.0)] {
+        let inv_proj = map_projection(world_size, 0.25, pitch, bearing).try_inverse().unwrap();
+        let tiles = Frustum::from_inv_proj_matrix(&inv_proj, world_size, 14.0, false, None);
+        let metres = Frustum::from_inv_proj_matrix_metres(&inv_proj, world_size, 14.0, false);
+        let center = 8192.0;
+        let (mut separate, mut contained) = (0, 0);
+        // Boxes a fraction off the tile grid, so none touches a plane.
+        for i in -12..12 {
+            for j in -12..12 {
+                let min = dvec3(center + f64::from(i) * 0.37 + 0.011, center + f64::from(j) * 0.41 + 0.013, 0.0);
+                let aabb = AABB::new(min, min + dvec3(0.3, 0.3, 0.0));
+                let result = tiles.intersects(&aabb);
+                assert_eq!(result, metres.intersects_box(&aabb), "pitch {pitch}, box {aabb:?}");
+                separate += usize::from(result == IntersectionResult::Separate);
+                contained += usize::from(result == IntersectionResult::Contains);
+            }
+        }
+        assert!(separate > 0 && contained > 0, "pitch {pitch}: {separate} separate, {contained} contained");
+    }
+}
+
+#[test]
+fn raised_box_below_the_bottom_edge_is_kept_and_raising_does_not_keep_one_past_the_top() {
+    let world_size = 512.0 * 2.0f64.powi(14);
+    let pixels_per_meter = 0.25;
+    let pitch = 1.0;
+    let inv_proj = map_projection(world_size, pixels_per_meter, pitch, 0.0).try_inverse().unwrap();
+    let frustum = Frustum::from_inv_proj_matrix_metres(&inv_proj, world_size, 14.0, false);
+    let center = 8192.0;
+    // The camera's height in meters, and the side of the center it is on,
+    // where the bottom edge of the view is.
+    let camera_height = 500.0 * pitch.cos() / pixels_per_meter;
+    let near_y = frustum.points()[..4].iter().map(|point| point.y).sum::<f64>() / 4.0;
+    let toward_camera = (near_y - center).signum();
+
+    // Boxes a tenth of a tile long in a strip along the line of sight, from
+    // `depth` up to `height` meters.
+    let strip = |step: i32, depth: f64, height: f64| {
+        let y = center + toward_camera * f64::from(step) * 0.1;
+        AABB::new(
+            dvec3(center - 0.05, y.min(y + toward_camera * 0.1), depth),
+            dvec3(center + 0.05, y.max(y + toward_camera * 0.1), height),
+        )
+    };
+    let visible = |aabb: AABB| frustum.intersects_box(&aabb) != IntersectionResult::Separate;
+    assert!(visible(strip(0, 0.0, 0.0)));
+    let bottom = (0..100).find(|&step| !visible(strip(step, 0.0, 0.0))).expect("a box below the bottom edge");
+    let top =
+        (0..100).map(|step| -step).find(|&step| !visible(strip(step, 0.0, 0.0))).expect("a box past the top edge");
+
+    // Raised ground rises into view from below the bottom edge; ground as
+    // far below sea level stays out.
+    let height = camera_height * 0.8;
+    assert!(visible(strip(bottom, 0.0, height)));
+    assert!(!visible(strip(bottom, -height, 0.0)));
+    // Past the top edge, raised ground only climbs further out of view.
+    for step in (top - 20)..=top {
+        assert!(!visible(strip(step, 0.0, height)), "step {step}");
+    }
+    // Ground above the camera is behind it.
+    assert!(!visible(strip(0, camera_height * 1.5, camera_height * 2.0)));
+}
