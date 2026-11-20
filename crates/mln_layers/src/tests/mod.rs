@@ -14,7 +14,7 @@ mod subdivision_test;
 /// Runs `f` with the `Gpu` of a headless WebGPU backend, which compiles the
 /// built-in layer types' programs, and a context over it, which it then
 /// tears down.
-fn with_context(f: impl FnOnce(&mut dyn mln_gfx::gpu::Gpu, &mut mln_renderer::unstable::Context)) {
+fn with_context(f: impl FnOnce(&mut dyn mln_gfx::gpu::Gpu, &mut mln_renderer::draw::Context)) {
     use mln_gfx::RendererBackend as _;
     use mln_gfx::gpu::Gpu as _;
     let device = mln_webgpu::Device::new(None).expect("device");
@@ -23,7 +23,7 @@ fn with_context(f: impl FnOnce(&mut dyn mln_gfx::gpu::Gpu, &mut mln_renderer::un
     let mut sources = mln_gfx::shaders::source::ShaderSources::default();
     crate::add_shader_sources(&mut sources);
     gpu.add_shader_sources(&sources);
-    let mut context = mln_renderer::unstable::Context::new(*gpu.caps(), 1.0);
+    let mut context = mln_renderer::draw::Context::new(*gpu.caps(), 1.0);
     f(gpu, &mut context);
     context.tear_down(gpu);
 }

@@ -43,7 +43,7 @@ use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
-use crate::draw::Entries;
+use crate::draw_objects::Entries;
 use crate::gfx::buffer::Buffer;
 use crate::gfx::context::Context;
 use crate::gfx::owned::Owned;
@@ -77,7 +77,9 @@ fn layout() -> VertexBufferLayout {
 /// into a texture of their own.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Composite {
+    /// The opacity of the drawn texture.
     pub opacity: f32,
+    /// How the drawn texture blends with the frame.
     pub blend: LayerBlendType,
     /// Whether the draws test and write the frame's depth and stencil rather
     /// than the texture's own, as a 3D layer's do: they and the other

@@ -37,6 +37,8 @@ impl RenderStaticData {
         vec![[0, 0], [extent, 0], [0, extent], [extent, extent]]
     }
 
+    /// The two triangles of a quad of four vertices, in the order of
+    /// [`tile_vertices`](Self::tile_vertices)' corners.
     #[must_use]
     pub fn quad_triangle_indices() -> Vec<u16> {
         vec![0, 1, 2, 1, 2, 3]

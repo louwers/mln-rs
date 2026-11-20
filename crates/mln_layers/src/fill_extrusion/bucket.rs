@@ -76,7 +76,7 @@ pub(crate) struct FillExtrusionWallVertex {
     pub(crate) vertex: FillExtrusionLayoutVertex,
 }
 
-pub(crate) use mln_renderer::unstable::EvaluatedLight;
+pub(crate) use mln_renderer::draw::EvaluatedLight;
 
 /// The quads of the walls of `vertices`: each vertex with each corner of the
 /// static quad, in its order. The quad of the wall from a vertex is its four

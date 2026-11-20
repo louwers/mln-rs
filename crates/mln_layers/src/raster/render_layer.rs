@@ -17,16 +17,17 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
+use mln_renderer::draw::{
+    Composite, Context, DrawFrame, DrawGeometry, DrawGroup, DrawIndexes, DrawList, DrawObjects, DrawObjectsMut,
+    DrawOrder, FrameDraw, Indexes, KeptDraw, LayerDrawing, LayerDraws, PaintParameters, RenderStaticData,
+    SharedAttribute, SharedIndexes, SharedTexture, SharedVertices, Textures, TileMap, Uniforms, VertexAttributeArray,
+    cast_matrix, copied_vertices, projection_data, to_projection_ubo,
+};
 use mln_renderer::layer::{
     DrawContext, EvaluatedLayer, LayerType, LayerValues, NoBucket, NoLayout, RasterContents, RasterLayoutVertex,
     RasterView, RenderPass, UpdateContext,
 };
-use mln_renderer::unstable::{
-    Composite, Context, DrawGeometry, DrawGroup, DrawIndexes, DrawList, DrawObjects, DrawObjectsMut, DrawOrder,
-    FrameDraw, GlobeTileMeshCache, Indexes, KeptDraw, LayerDrawing, LayerDraws, PaintParameters, RenderStaticData,
-    SharedAttribute, SharedIndexes, SharedTexture, SharedVertices, Textures, TileMap, Uniforms, VertexAttributeArray,
-    cast_matrix, copied_vertices, projection_data, to_projection_ubo,
-};
+use mln_renderer::unstable::GlobeTileMeshCache;
 use mln_style_types::{RasterResamplingType, ResamplingType, TranslateAnchorType};
 use mln_tile_id::UnwrappedTileID;
 use mln_util::hash::{HashMap, HashSet};
@@ -186,13 +187,12 @@ impl RasterState {
         drawing: &mut RasterDrawing,
         gpu: &mut dyn Gpu,
         contents: &RasterContents,
-        cx: &mut DrawContext<'_, '_, '_, Raster>,
+        cx: &mut DrawContext<'_, '_, Raster>,
     ) {
-        let (paint_parameters, layer) = (&mut *cx.paint, cx.layer);
+        let layer = cx.layer;
         let sampler = sampler_state(layer);
         let RasterState { draw_list, textures, .. } = self;
-        let raster_shader =
-            paint_parameters.context.shader_key(&programs::RASTER, Uniforms::default(), cx.projection_variant);
+        let raster_shader = cx.context.shader_key(&programs::RASTER, Uniforms::default(), cx.projection_variant);
         let objects = &mut drawing.objects;
         // An image source's contents always have geometry of their own once
         // they have an image.
@@ -209,13 +209,13 @@ impl RasterState {
             // before it go.
             textures.retain(|id, _| *id == contents.id());
         }
-        let texture = Self::contents_texture(textures, sampler, paint_parameters.context, contents);
+        let texture = Self::contents_texture(textures, sampler, cx.context, contents);
         let tiles = cx.tiles;
         objects.images.truncate(tiles.len());
         while objects.images.len() < tiles.len() {
             let draw_geometry =
                 raster_geometry(&quads.vertices, quads.vertices.count(), quads.indexes.clone().into(), &quads.segments);
-            let color_mode = paint_parameters.context.color_mode(ColorMode::alpha_blended());
+            let color_mode = cx.context.color_mode(ColorMode::alpha_blended());
             objects.images.push(KeptDraw::new(new_objects(
                 &raster_shader,
                 color_mode,
@@ -224,24 +224,24 @@ impl RasterState {
             )));
         }
         for (index, (tile, draw)) in tiles.iter().zip(&objects.images).enumerate() {
-            let uniforms = Self::uniforms(&tile.id().to_unwrapped(), paint_parameters);
+            let uniforms = Self::uniforms(&tile.id().to_unwrapped(), &cx.frame);
             draw_list.push_part(draw.frame_draw(None), RasterPart::Image(index), uniforms);
         }
 
-        self.finish_frame_draws(drawing, layer, gpu, paint_parameters.context);
+        self.finish_frame_draws(drawing, layer, gpu, cx.context);
     }
 
     /// The entries in the layer's storage buffers of a draw of `tile_id`.
-    fn uniforms(tile_id: &UnwrappedTileID, parameters: &PaintParameters<'_>) -> (RasterDrawableUBO, ProjectionUBO) {
+    fn uniforms(tile_id: &UnwrappedTileID, frame: &DrawFrame<'_>) -> (RasterDrawableUBO, ProjectionUBO) {
         let projection = projection_data(
             tile_id,
-            parameters,
+            frame,
             [0.0, 0.0],
             TranslateAnchorType::Viewport,
             false,
             false,
             None,
-            !parameters.camera_moving,
+            !frame.camera_moving,
         );
         (RasterDrawableUBO { matrix: cast_matrix(&projection.fallback_matrix) }, to_projection_ubo(&projection))
     }
@@ -415,7 +415,7 @@ impl LayerType for Raster {
         state: &mut RasterState,
         drawing: &mut RasterDrawing,
         gpu: &mut dyn Gpu,
-        cx: &mut DrawContext<'_, '_, '_, Raster>,
+        cx: &mut DrawContext<'_, '_, Raster>,
     ) {
         let image = cx.tiles.iter().find_map(|tile| match tile.view()? {
             RasterView::Image(contents) => Some(contents),
@@ -425,12 +425,11 @@ impl LayerType for Raster {
             state.update_image(drawing, gpu, image, cx);
             return;
         }
-        let (paint_parameters, render_tiles, layer) = (&mut *cx.paint, cx.tiles, cx.layer);
+        let (render_tiles, layer) = (cx.tiles, cx.layer);
         let sampler = sampler_state(layer);
         let RasterState { draw_list, static_geometry, globe_meshes, textures, live_contents } = state;
-        let raster_shader =
-            paint_parameters.context.shader_key(&programs::RASTER, Uniforms::default(), cx.projection_variant);
-        let static_geometry = static_geometry.get_or_insert_with(|| StaticGeometry::new(paint_parameters.context));
+        let raster_shader = cx.context.shader_key(&programs::RASTER, Uniforms::default(), cx.projection_variant);
+        let static_geometry = static_geometry.get_or_insert_with(|| StaticGeometry::new(cx.context));
 
         // Drop the textures of contents that are no longer rendered.
         live_contents.clear();
@@ -439,7 +438,7 @@ impl LayerType for Raster {
         // Kept draws keep their textures, so a changed filter is applied to
         // the textures themselves.
         for texture in textures.values() {
-            if let Some(mut texture) = paint_parameters.context.texture_mut(texture) {
+            if let Some(mut texture) = cx.context.texture_mut(texture) {
                 texture.set_sampler(sampler);
             }
         }
@@ -464,14 +463,14 @@ impl LayerType for Raster {
             }
 
             if entry.value.is_none() {
-                let texture = RasterState::contents_texture(textures, sampler, paint_parameters.context, contents);
+                let texture = RasterState::contents_texture(textures, sampler, cx.context, contents);
 
                 // The contents only have geometry for a masked tile; any other
                 // tile is drawn with the static quad over the tile's extent.
                 // On the globe, the draw is the pole-capped grid of what the
                 // mask keeps.
                 let geometry = contents.geometry();
-                let context = &mut *paint_parameters.context;
+                let context = &mut *cx.context;
                 let draw_geometry = if cx.projection_variant == ProjectionVariant::Globe {
                     let globe_mesh =
                         globe_meshes.get(context, &tile_id.canonical, geometry.mask(), RasterLayoutVertex::new);
@@ -504,12 +503,12 @@ impl LayerType for Raster {
 
             if let Some(cached) = entry.value.as_ref() {
                 let draw = cached.draw.frame_draw(Some(tile_id));
-                let uniforms = RasterState::uniforms(&tile_id.to_unwrapped(), paint_parameters);
+                let uniforms = RasterState::uniforms(&tile_id.to_unwrapped(), &cx.frame);
                 draw_list.push_part(draw, RasterPart::Tile, uniforms);
             }
         }
 
-        state.finish_frame_draws(drawing, layer, gpu, paint_parameters.context);
+        state.finish_frame_draws(drawing, layer, gpu, cx.context);
     }
 
     /// A layer whose source shows it nothing keeps no textures.

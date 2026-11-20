@@ -13,15 +13,15 @@ use mln_gfx::shaders::shader_defines::{
     ID_PROJECTION_UBO,
 };
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
+use mln_renderer::draw::{
+    AtlasBinding, Composite, Context, DrawDepth, DrawGeometry, DrawIndexes, DrawList, DrawObjects, DrawObjectsMut,
+    FrameDraw, Indexes, RenderStaticData, SharedAttribute, SharedIndexes, Texture2D, TileDraws, TileObjects,
+    UniformWriter, Uniforms, VertexAttributeArray, bucket_indexes, bucket_vertices, cast_matrix, copied_vertices,
+    copy_shared_attributes, paint_vertices, projection_data, to_projection_ubo,
+};
 use mln_renderer::layer::{
     Bucket, DrawContext, EvaluatedLayer, FeatureQuery, FrameTile, HitTest, LayerBucket, LayerType, LayerValues,
     LayoutParameters, RenderPass, SourceLayer,
-};
-use mln_renderer::unstable::{
-    AtlasBinding, Composite, Context, DrawDepth, DrawGeometry, DrawIndexes, DrawList, DrawObjects, DrawObjectsMut,
-    FrameDraw, Indexes, PaintParameters, RenderStaticData, SharedAttribute, SharedIndexes, Texture2D, TileDraws,
-    TileObjects, UniformWriter, Uniforms, VertexAttributeArray, bucket_indexes, bucket_vertices, cast_matrix,
-    copied_vertices, copy_shared_attributes, paint_vertices, projection_data, to_projection_ubo,
 };
 use mln_style::PropertyEvaluationParameters;
 use mln_style_types::AlignmentType;
@@ -427,34 +427,29 @@ pub struct FillState {
 
 impl FillState {
     /// The entries in the layer's storage buffers of `draw`, the fill or the
-    /// `outline` of `tile`, with or without a `pattern`, of the layer
-    /// `layer_id` with the values `layer`: its matrix and the interpolation
-    /// of the layer's values, and for a pattern, where the pattern is in the
-    /// tile's atlas. `None` for a pattern while the tile has no atlas.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the layer, the draw, its tile and bucket, and the frame's parameters"
-    )]
+    /// `outline` of `tile`, with or without a `pattern`, in the frame of
+    /// `cx`: its matrix and the interpolation of the layer's values, and for
+    /// a pattern, where the pattern is in the tile's atlas. `None` for a
+    /// pattern while the tile has no atlas.
     fn uniforms(
-        layer_id: &str,
-        layer: &EvaluatedLayer<Fill>,
         tile: FrameTile<'_, Fill>,
         tile_bucket: LayerBucket<'_, Fill>,
         binders: &FillBinders,
         pattern: bool,
         draw: &FillDraw,
         outline: bool,
-        parameters: &PaintParameters<'_>,
+        cx: &DrawContext<'_, '_, Fill>,
     ) -> Option<FillUniforms> {
         const IN_VIEWPORT_PIXEL_UNITS: bool = false;
         const NEAR_CLIPPED: bool = false;
+        let (layer_id, layer, context, frame) = (cx.layer.id(), &*cx.layer.evaluated, &*cx.context, &cx.frame);
         let evaluated = &layer.paint;
-        let zoom = parameters.view.zoom() as f32;
+        let zoom = frame.view.zoom() as f32;
         let tile_id = tile.id().to_unwrapped();
 
         let projection = projection_data(
             &tile_id,
-            parameters,
+            frame,
             *evaluated.fill_translate.uniform(),
             *evaluated.fill_translate_anchor.uniform(),
             NEAR_CLIPPED,
@@ -492,7 +487,7 @@ impl FillState {
 
         // Where the tile is in pixels at the nearest integer zoom, which the
         // pattern is laid out over.
-        let state = parameters.view;
+        let state = frame.view;
         let int_zoom = state.integer_zoom();
         let tile_ratio = 1.0f32 / tile_id.pixels_to_tile_units(1.0, f32::from(int_zoom));
         let tile_size_at_nearest_zoom =
@@ -518,8 +513,7 @@ impl FillState {
 
         let faded = evaluated.fill_pattern.faded();
         let tlbr = |id: &str| tile_bucket.pattern(id).map_or([0.0; 4], |position| position.tlbr().map(f32::from));
-        let texture =
-            draw.objects.texture(ID_FILL_IMAGE_TEXTURE).and_then(|texture| parameters.context.texture(texture));
+        let texture = draw.objects.texture(ID_FILL_IMAGE_TEXTURE).and_then(|texture| context.texture(texture));
         let texture_size = texture.map_or(Size::new(0, 0), Texture2D::size);
         // A pattern has nothing to sample before its tile has an atlas, and
         // the shaders divide by the atlas size.
@@ -622,12 +616,12 @@ impl LayerType for Fill {
         state: &mut FillState,
         drawing: &mut TileDraws<FillTile>,
         gpu: &mut dyn Gpu,
-        cx: &mut DrawContext<'_, '_, '_, Fill>,
+        cx: &mut DrawContext<'_, '_, Fill>,
     ) {
-        let paint_parameters = &mut *cx.paint;
+        let frame = &cx.frame;
         let render_tiles = cx.tiles;
         let pattern = !cx.layer.unevaluated.fill_pattern.is_undefined();
-        let outlines = Outlines::of(paint_parameters.context, pattern);
+        let outlines = Outlines::of(cx.context, pattern);
         // The outlines draw as lines, or as quads on a device that draws no
         // `LINE_WIDTH` lines and rasterizes on the GPU.
         let (fill_program, outline_program) = match (pattern, outlines) {
@@ -641,10 +635,10 @@ impl LayerType for Fill {
         };
 
         if outlines == Outlines::Instanced && state.outline_quad.is_none() {
-            state.outline_quad = Some(OutlineQuad::new(paint_parameters.context));
+            state.outline_quad = Some(OutlineQuad::new(cx.context));
         }
         if outlines == Outlines::Pulled && state.pulled_indexes.is_none() {
-            state.pulled_indexes = Some(paint_parameters.static_data.quad_indexes(paint_parameters.context));
+            state.pulled_indexes = Some(frame.static_data.quad_indexes(cx.context));
         }
 
         let mut builder = TileBuilder {
@@ -684,7 +678,7 @@ impl LayerType for Fill {
             // The draws' attributes read the bucket's vertices in the
             // context's store, which upload again when they change.
             let changes = entry.take_changes();
-            let context = &mut *paint_parameters.context;
+            let context = &mut *cx.context;
             if let Some(cached) = entry.value.as_mut() {
                 let geometry = render_data.geometry();
                 // Reads the paint attributes, and returns the vertices they
@@ -730,17 +724,9 @@ impl LayerType for Fill {
                 let Some(draw) = draw else {
                     continue;
                 };
-                let Some(uniforms) = FillState::uniforms(
-                    layer_id,
-                    layer,
-                    tile,
-                    render_data,
-                    binders,
-                    cached.pattern,
-                    draw,
-                    matches!(part, FillPart::Outline),
-                    paint_parameters,
-                ) else {
+                let outline = matches!(part, FillPart::Outline);
+                let Some(uniforms) = FillState::uniforms(tile, render_data, binders, cached.pattern, draw, outline, cx)
+                else {
                     continue;
                 };
                 let tile_draw = FrameDraw {
@@ -759,7 +745,7 @@ impl LayerType for Fill {
             *layer.paint.fill_layer_blend.uniform(),
         ));
         frame.set_stencil_tiles(render_tiles.iter().map(|tile| tile.unwrapped_id()));
-        drawing.finish(&mut state.draw_list, gpu, paint_parameters.context, |writer| {
+        drawing.finish(&mut state.draw_list, gpu, cx.context, |writer| {
             FillState::write_uniforms(layer, writer);
         });
     }

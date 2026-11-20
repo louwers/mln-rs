@@ -90,6 +90,7 @@ impl<T> GeometryVec<T> {
         }
     }
 
+    /// Whether the vector holds no elements.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0

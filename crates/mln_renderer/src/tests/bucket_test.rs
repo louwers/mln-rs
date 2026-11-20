@@ -303,7 +303,7 @@ fn a_draw_writes_an_update_of_the_vertices_it_binds() {
     use mln_gfx::shaders::shader_defines::ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE;
     use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 
-    use crate::draw::{DrawGeometry, DrawObjects};
+    use crate::draw_objects::{DrawGeometry, DrawObjects};
     use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 
     with_context(|gpu, context| {
@@ -354,7 +354,7 @@ fn a_draw_binds_the_vertices_it_reads_as_a_storage_buffer() {
     use mln_gfx::shaders::shader_defines::ID_FILL_EXTRUSION_WALL_VERTICES as ID;
     use mln_gfx::{ColorMode, CullFaceMode, DrawMode};
 
-    use crate::draw::{DrawGeometry, DrawObjects};
+    use crate::draw_objects::{DrawGeometry, DrawObjects};
     use crate::gfx::vertex_attribute::{Uniforms, VertexAttributeArray};
 
     with_context(|gpu, context| {

@@ -37,6 +37,10 @@ use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::gfx::vertex_attribute::Uniforms;
 use crate::gfx::vertices::{SharedVertices, TypedVertices, VertexStore, Vertices};
 
+/// The renderer's GPU state over its backend's `Gpu`: the device's caps,
+/// the keys of the programs' shaders, the color modes, and the stores of
+/// the textures, indexes and vertices that draws share. The renderer owns
+/// it and lends it to the frame's hooks.
 pub struct Context {
     device: Device,
     caps: Caps,
@@ -75,7 +79,9 @@ pub struct Context {
 
 impl Context {
     /// The renderer's state over a `Gpu` of `caps`, for draws at
-    /// `pixel_ratio` device pixels per logical pixel.
+    /// `pixel_ratio` device pixels per logical pixel. Public for tests that
+    /// draw on a bare `Gpu`.
+    #[doc(hidden)]
     #[must_use]
     pub fn new(caps: Caps, pixel_ratio: f32) -> Context {
         Context {
@@ -249,7 +255,9 @@ impl Context {
 
     /// The buffer of the vertices of `shared`, made of them by their first
     /// upload and written over after an update, as [`Vertices::upload`]
-    /// says.
+    /// says. The engine uploads the vertices that draws bind; public for
+    /// tests.
+    #[doc(hidden)]
     pub fn upload_vertices(
         &mut self,
         gpu: &mut dyn Gpu,
@@ -258,9 +266,9 @@ impl Context {
         self.vertices.upload(gpu, &mut self.device, shared)
     }
 
-    /// A texture without a size, made by its first upload or
-    /// [`create_texture`](Self::create_texture), which the context keeps
-    /// while a clone of the returned handle lasts.
+    /// A texture without a size, made on the GPU by its first upload or the
+    /// first pass that draws into it, which the context keeps while a clone
+    /// of the returned handle lasts.
     pub fn add_texture(&mut self) -> SharedTexture {
         self.add_texture_with(|_| {})
     }
@@ -513,7 +521,9 @@ impl Context {
 
     /// Destroys what the context made and what the renderer released, and
     /// tells the layers' hosts that it stopped. What drops later
-    /// still goes to the queue, and goes with the `Gpu`.
+    /// still goes to the queue, and goes with the `Gpu`. Public for tests
+    /// that draw on a bare `Gpu`.
+    #[doc(hidden)]
     pub fn tear_down(&mut self, gpu: &mut dyn Gpu) {
         self.global_uniform_buffers = UniformBufferArray::new();
         self.default_vertex_buffers.clear();

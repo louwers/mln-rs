@@ -611,7 +611,7 @@ impl Encoder {
         // - DRAW UPLOAD ---------------------------------------------------
         orchestrator.upload_draws(gpu, parameters.context);
         let draw_groups = DrawGroups::of(orchestrator, &parameters);
-        let (proj_state, transform) = (parameters.view, parameters.transform_params);
+        let (proj_state, transform) = (parameters.frame.view, parameters.frame.transform);
         parameters.clip_masks.update(gpu, parameters.context, proj_state.is_globe(), &draw_groups.clip_tiles, |tile| {
             to_projection_ubo(&transform.projection_data_for_tile(tile, false))
         });
@@ -626,12 +626,15 @@ impl Encoder {
         let atlas_size = orchestrator.atlases().pattern.pixel_size();
         let global_paint_params_ubo = GlobalPaintParamsUBO {
             pattern_atlas_texsize: [atlas_size.width as f32, atlas_size.height as f32],
-            units_to_pixels: [1.0 / parameters.pixels_to_gl_units[0], 1.0 / parameters.pixels_to_gl_units[1]],
+            units_to_pixels: [
+                1.0 / parameters.frame.pixels_to_gl_units[0],
+                1.0 / parameters.frame.pixels_to_gl_units[1],
+            ],
             world_size: [renderable_size.width as f32, renderable_size.height as f32],
             camera_to_center_distance: state.camera_to_center_distance() as f32,
             symbol_fade_change: parameters.symbol_fade_change,
             aspect_ratio: state.size().aspect_ratio(),
-            pixel_ratio: parameters.pixel_ratio,
+            pixel_ratio: parameters.frame.pixel_ratio,
             map_zoom: state.zoom() as f32,
             pad1: 0.0,
         };

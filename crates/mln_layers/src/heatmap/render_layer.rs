@@ -18,16 +18,16 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
-use mln_renderer::layer::{
-    DrawContext, EvaluatedLayer, FrameTile, LayerBucket, LayerType, LayerValues, LayoutParameters, OffscreenPass,
-    RenderPass, SourceLayer,
-};
-use mln_renderer::unstable::{
-    Context, DrawDepth, DrawGeometry, DrawGroup, DrawIndexes, DrawList, DrawObjects, DrawOrder, FrameDraw, FrameDraws,
-    KeptDraw, LayerDrawing, LayerDraws, PaintParameters, RenderStaticData, RenderTarget, SharedAttribute,
+use mln_renderer::draw::{
+    Context, DrawDepth, DrawFrame, DrawGeometry, DrawGroup, DrawIndexes, DrawList, DrawObjects, DrawOrder, FrameDraw,
+    FrameDraws, KeptDraw, LayerDrawing, LayerDraws, PaintParameters, RenderStaticData, RenderTarget, SharedAttribute,
     SharedTexture, SharedVertices, Textures, TileMap, UniformWriter, Uniforms, VertexAttributeArray, bucket_indexes,
     bucket_vertices, cast_matrix, copied_vertices, finish_tiles, globe_extrude_scale, paint_vertices, projection_data,
     tile_objects, to_projection_ubo,
+};
+use mln_renderer::layer::{
+    DrawContext, EvaluatedLayer, LayerBucket, LayerType, LayerValues, LayoutParameters, OffscreenPass, RenderPass,
+    SourceLayer,
 };
 use mln_style::expression::{Dependency, GlobalStateMap, global_state_refs_intersect};
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
@@ -250,17 +250,16 @@ impl LayerType for Heatmap {
         state: &mut HeatmapState,
         drawing: &mut HeatmapDrawing,
         gpu: &mut dyn Gpu,
-        cx: &mut DrawContext<'_, '_, '_, Heatmap>,
+        cx: &mut DrawContext<'_, '_, Heatmap>,
     ) {
-        let paint_parameters = &mut *cx.paint;
-        let viewport_size = paint_parameters.view.size();
+        let viewport_size = cx.frame.view.size();
         let size = Size::new(viewport_size.width / 2, viewport_size.height / 2);
-        let render_target = drawing.render_target.get_or_insert_with(|| {
-            RenderTarget::new(paint_parameters.context, size, TextureChannelDataType::HalfFloat)
-        });
-        render_target.set_size(paint_parameters.context, size);
-        if state.draw_tiles(drawing, cx.layer, cx.projection_variant, gpu, cx.tiles, paint_parameters) {
-            state.draw_texture(drawing, cx.layer, gpu, paint_parameters);
+        let render_target = drawing
+            .render_target
+            .get_or_insert_with(|| RenderTarget::new(cx.context, size, TextureChannelDataType::HalfFloat));
+        render_target.set_size(cx.context, size);
+        if state.draw_tiles(drawing, gpu, cx) {
+            state.draw_texture(drawing, gpu, cx);
         }
     }
 
@@ -273,19 +272,16 @@ impl LayerType for Heatmap {
 }
 
 impl HeatmapState {
-    /// Makes the tiles' draws into the render target of a layer of `layer`'s
-    /// values in the projection `variant`, with their GPU objects in the
-    /// tiles' caches, and writes the buffers they read. Returns false if the
-    /// layer draws nothing.
+    /// Makes the tiles' draws into the render target of the layer, with
+    /// their GPU objects in the tiles' caches, and writes the buffers they
+    /// read. Returns false if the layer draws nothing.
     fn draw_tiles(
         &mut self,
         drawing: &mut HeatmapDrawing,
-        layer: &LayerValues<Heatmap>,
-        variant: ProjectionVariant,
         gpu: &mut dyn Gpu,
-        render_tiles: &[FrameTile<'_, Heatmap>],
-        paint_parameters: &mut PaintParameters<'_>,
+        cx: &mut DrawContext<'_, '_, Heatmap>,
     ) -> bool {
+        let (layer, variant, render_tiles, frame) = (cx.layer, cx.projection_variant, cx.tiles, &cx.frame);
         let tile_draws = &mut self.tile_draws;
         let evaluated = &layer.evaluated.paint;
         for tile in render_tiles {
@@ -318,7 +314,7 @@ impl HeatmapState {
             // The draw's attributes read the bucket's vertices in the
             // context's store, which upload again when they change.
             let changes = entry.take_changes();
-            let context = &mut *paint_parameters.context;
+            let context = &mut *cx.context;
             if let Some(cached) = entry.value.as_mut() {
                 refresh_paint_attributes(&mut cached.objects, changes, |attrs| {
                     binders.bind(evaluated, paint(context).as_ref(), attrs, &mut Uniforms::default());
@@ -362,11 +358,11 @@ impl HeatmapState {
                 continue;
             };
             let draw = FrameDraw { depth: DrawDepth::Off, ..cached.frame_draw(Some(tile_id)) };
-            tile_draws.push(draw, Self::tile_uniforms(&tile_id, binders, paint_parameters));
+            tile_draws.push(draw, Self::tile_uniforms(&tile_id, binders, frame));
         }
 
         let target = drawing.target.get_or_insert_default();
-        finish_tiles(tile_draws, target, &mut drawing.tiles, gpu, paint_parameters.context, |writer| {
+        finish_tiles(tile_draws, target, &mut drawing.tiles, gpu, cx.context, |writer| {
             Self::write_tile_uniforms(evaluated, writer);
         });
         true
@@ -374,18 +370,14 @@ impl HeatmapState {
 
     /// The entries in the render target's storage buffers of the draw of
     /// `tile_id`, whose bucket's binders are `binders`.
-    fn tile_uniforms(
-        tile_id: &OverscaledTileID,
-        binders: &HeatmapBinders,
-        parameters: &PaintParameters<'_>,
-    ) -> HeatmapUniforms {
+    fn tile_uniforms(tile_id: &OverscaledTileID, binders: &HeatmapBinders, frame: &DrawFrame<'_>) -> HeatmapUniforms {
         const NEAR_CLIPPED: bool = false;
         const IN_VIEWPORT_PIXEL_UNITS: bool = false;
-        let zoom = parameters.view.zoom() as f32;
+        let zoom = frame.view.zoom() as f32;
         let tile_id = tile_id.to_unwrapped();
         let projection = projection_data(
             &tile_id,
-            parameters,
+            frame,
             [0.0, 0.0],
             TranslateAnchorType::Viewport,
             NEAR_CLIPPED,
@@ -393,7 +385,7 @@ impl HeatmapState {
             None,
             false,
         );
-        let latitude_scale = parameters.view.projection().circle_radius_correction(parameters.view);
+        let latitude_scale = frame.view.projection().circle_radius_correction(frame.view);
         HeatmapUniforms {
             draw_ubo: HeatmapDrawableUBO {
                 matrix: cast_matrix(&projection.fallback_matrix),
@@ -426,13 +418,8 @@ impl HeatmapState {
     /// Makes the layer's draw of the frame, which colors the heat of the
     /// render target onto it through the layer's color ramp, with GPU
     /// objects it builds once, and writes the buffers it reads.
-    fn draw_texture(
-        &mut self,
-        drawing: &mut HeatmapDrawing,
-        layer: &LayerValues<Heatmap>,
-        gpu: &mut dyn Gpu,
-        paint_parameters: &mut PaintParameters<'_>,
-    ) {
+    fn draw_texture(&mut self, drawing: &mut HeatmapDrawing, gpu: &mut dyn Gpu, cx: &mut DrawContext<'_, '_, Heatmap>) {
+        let (layer, frame) = (cx.layer, &cx.frame);
         let HeatmapState { color_ramp, shared_texture_vertices, .. } = self;
         let Some(render_target) = drawing.render_target.as_ref() else {
             return;
@@ -440,7 +427,7 @@ impl HeatmapState {
         if drawing.frame.is_none() {
             return;
         }
-        let context = &mut *paint_parameters.context;
+        let context = &mut *cx.context;
         let heatmap_texture_shader =
             context.shader_key(&programs::HEATMAP_TEXTURE, Uniforms::default(), ProjectionVariant::Mercator);
         if !drawing.color_ramp.as_ref().is_some_and(|(image, _)| Rc::ptr_eq(image, color_ramp)) {
@@ -494,12 +481,11 @@ impl HeatmapState {
             );
             drawing.texture = Some(KeptDraw::new(objects));
         }
-        let (Some(draw), Some(frame)) = (&drawing.texture, drawing.frame.as_mut()) else {
+        let (Some(draw), Some(draws)) = (&drawing.texture, drawing.frame.as_mut()) else {
             return;
         };
-        let frame_draw = draw.frame_draw(None);
-        frame.push(frame_draw);
-        let size = paint_parameters.renderable_size;
+        draws.push(draw.frame_draw(None));
+        let size = frame.renderable_size;
         let m = orthographic(0.0, f64::from(size.width), f64::from(size.height), 0.0, -1.0, 1.0);
         let props = HeatmapTexturePropsUBO {
             matrix: cast_matrix(&m),
@@ -508,12 +494,11 @@ impl HeatmapState {
             pad2: 0.0,
             pad3: 0.0,
         };
-        let context = &mut *paint_parameters.context;
-        if frame.write_pod(gpu, ID_HEATMAP_TEXTURE_PROPS_UBO, &props, context)
+        if draws.write_pod(gpu, ID_HEATMAP_TEXTURE_PROPS_UBO, &props, context)
             && let Some(texture) = &mut drawing.texture
         {
             texture.objects.drop_bindings();
         }
-        frame.bind_no_projection(gpu, context);
+        draws.bind_no_projection(gpu, context);
     }
 }

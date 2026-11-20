@@ -230,7 +230,7 @@ impl LayerType for Dot {
         _state: &mut (),
         _drawing: &mut TileDraws<KeptDraw>,
         _gpu: &mut dyn mln_gfx::gpu::Gpu,
-        _cx: &mut DrawContext<'_, '_, '_, Dot>,
+        _cx: &mut DrawContext<'_, '_, Dot>,
     ) {
     }
 }
@@ -283,7 +283,7 @@ impl LayerType for Tint {
         _state: &mut (),
         _drawing: &mut TileDraws<KeptDraw>,
         _gpu: &mut dyn mln_gfx::gpu::Gpu,
-        _cx: &mut DrawContext<'_, '_, '_, Tint>,
+        _cx: &mut DrawContext<'_, '_, Tint>,
     ) {
     }
 }
@@ -325,7 +325,7 @@ impl LayerType for Shade {
         _state: &mut (),
         _drawing: &mut TileDraws<KeptDraw>,
         _gpu: &mut dyn mln_gfx::gpu::Gpu,
-        _cx: &mut DrawContext<'_, '_, '_, Shade>,
+        _cx: &mut DrawContext<'_, '_, Shade>,
     ) {
     }
 }

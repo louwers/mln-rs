@@ -43,6 +43,7 @@ impl Texture2D {
         }
     }
 
+    /// The texture's size in texels, zero before it has an image.
     #[must_use]
     pub fn size(&self) -> Size {
         self.size

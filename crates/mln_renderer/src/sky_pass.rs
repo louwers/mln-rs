@@ -18,7 +18,7 @@ use mln_util::geo::WrapMode;
 use mln_util::identity::SimpleIdentity;
 use mln_util::size::Size;
 
-use crate::draw::{DrawGeometry, DrawObjects, Textures, raw_vertices};
+use crate::draw_objects::{DrawGeometry, DrawObjects, Textures, raw_vertices};
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
 use crate::gfx::vertex_attribute::Uniforms;

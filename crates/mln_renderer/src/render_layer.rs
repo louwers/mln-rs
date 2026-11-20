@@ -495,7 +495,8 @@ impl<T: LayerType> Layer<T> {
                 passes: self.passes,
                 projection_variant: self.projection_variant,
                 atlases,
-                paint,
+                context: &mut *paint.context,
+                frame: paint.frame,
             };
             T::make_draws(&mut self.state, &mut self.drawing, gpu, &mut cx);
         }
@@ -754,7 +755,7 @@ impl<T: LayerType> RenderLayer for Layer<T> {
         source: Option<FrameSourceTiles<'_>>,
         found: &[FoundTile],
     ) {
-        let variant = if paint.view.is_globe() { ProjectionVariant::Globe } else { ProjectionVariant::Mercator };
+        let variant = if paint.frame.view.is_globe() { ProjectionVariant::Globe } else { ProjectionVariant::Mercator };
         if variant != self.projection_variant {
             self.projection_variant = variant;
             self.remove_all_draws();

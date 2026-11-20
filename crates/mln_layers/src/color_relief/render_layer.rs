@@ -20,15 +20,16 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
+use mln_renderer::draw::{
+    DrawGeometry, DrawIndexes, DrawList, DrawObjects, DrawObjectsMut, Indexes, KeptDraw, RenderStaticData,
+    SharedAttribute, SharedIndexes, SharedTexture, SharedVertices, Textures, TileDraws, TileObjects, Uniforms,
+    VertexAttributeArray, cast_matrix, copied_vertices, to_projection_ubo,
+};
 use mln_renderer::layer::{
     DemContents, DrawContext, EvaluatedLayer, LayerType, LayerValues, NoBucket, NoLayout, RasterLayoutVertex,
     RenderPass,
 };
-use mln_renderer::unstable::{
-    DrawGeometry, DrawIndexes, DrawList, DrawObjects, DrawObjectsMut, GlobeTileMeshCache, Indexes, KeptDraw,
-    RenderStaticData, SharedAttribute, SharedIndexes, SharedTexture, SharedVertices, Textures, TileDraws, TileObjects,
-    Uniforms, VertexAttributeArray, cast_matrix, copied_vertices, to_projection_ubo,
-};
+use mln_renderer::unstable::GlobeTileMeshCache;
 use mln_style::color_ramp_property_value::ColorRampPropertyValue;
 use mln_style::expression::{
     Dependency, EvaluationContext, GlobalStateMap, from_expression_value, global_state_refs_intersect,
@@ -314,9 +315,9 @@ impl LayerType for ColorRelief {
         state: &mut ReliefState,
         drawing: &mut TileDraws<ReliefTile>,
         gpu: &mut dyn Gpu,
-        cx: &mut DrawContext<'_, '_, '_, ColorRelief>,
+        cx: &mut DrawContext<'_, '_, ColorRelief>,
     ) {
-        let (paint_parameters, render_tiles, values) = (&mut *cx.paint, cx.tiles, cx.layer);
+        let (frame, render_tiles, values) = (&cx.frame, cx.tiles, cx.layer);
         let ReliefState {
             draw_list,
             color_ramp_size,
@@ -334,9 +335,9 @@ impl LayerType for ColorRelief {
         } = state;
 
         let color_relief_shader =
-            paint_parameters.context.shader_key(&programs::COLOR_RELIEF, Uniforms::default(), cx.projection_variant);
+            cx.context.shader_key(&programs::COLOR_RELIEF, Uniforms::default(), cx.projection_variant);
 
-        let context = &mut *paint_parameters.context;
+        let context = &mut *cx.context;
         let static_data_shared_vertices = &*static_data_shared_vertices
             .get_or_insert_with(|| copied_vertices(context, &RenderStaticData::raster_vertices()));
         let static_data_indices = &*static_data_indices
@@ -344,7 +345,7 @@ impl LayerType for ColorRelief {
 
         // Update color ramp textures if changed
         if *color_ramp_changed {
-            let context = &mut *paint_parameters.context;
+            let context = &mut *cx.context;
             // RGBA32F rather than R32F, which llvmpipe can't sample.
             let elevation_stops = context.add_texture_with(|texture| {
                 texture.set_format(TextureFormat::Rgba32Float);
@@ -425,7 +426,7 @@ impl LayerType for ColorRelief {
                     pad_tile0: 0.0,
                 };
                 let generation = contents.dem_generation();
-                let context = &mut *paint_parameters.context;
+                let context = &mut *cx.context;
                 let (dem_texture, _) = match dem_textures.entry(contents_id) {
                     Entry::Occupied(entry) if entry.get().1 == generation => entry.into_mut(),
                     entry => {
@@ -516,7 +517,7 @@ impl LayerType for ColorRelief {
             let Some(cached) = entry.value.as_ref() else {
                 continue;
             };
-            let projection = paint_parameters.projection_data_for_tile(&tile_id.to_unwrapped(), false);
+            let projection = frame.projection_data_for_tile(&tile_id.to_unwrapped(), false);
             let uniforms = ReliefUniforms {
                 draw_ubo: ColorReliefDrawableUBO { matrix: cast_matrix(&projection.fallback_matrix) },
                 tile_props: cached.tile_props,
@@ -527,7 +528,7 @@ impl LayerType for ColorRelief {
         }
 
         let opacity = *values.evaluated.paint.color_relief_opacity.uniform();
-        drawing.finish(draw_list, gpu, paint_parameters.context, |writer| {
+        drawing.finish(draw_list, gpu, cx.context, |writer| {
             let props = ColorReliefEvaluatedPropsUBO { opacity, pad_eval0: 0.0, pad_eval1: 0.0, pad_eval2: 0.0 };
             writer.uniform(ID_COLOR_RELIEF_EVALUATED_PROPS_UBO, &props);
             writer.storage(ID_COLOR_RELIEF_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);

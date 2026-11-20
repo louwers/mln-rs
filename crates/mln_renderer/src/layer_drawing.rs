@@ -24,7 +24,7 @@ use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::hash::HashMap;
 use mln_util::identity::SimpleIdentity;
 
-use crate::draw::DrawObjects;
+use crate::draw_objects::DrawObjects;
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
 use crate::gfx::uniform_buffer::UniformBufferArray;
@@ -401,10 +401,12 @@ impl<T> TileEntry<'_, T> {
 /// draws by when their objects were made.
 pub struct KeptDraw {
     pub(crate) id: SimpleIdentity,
+    /// The GPU objects.
     pub objects: DrawObjects,
 }
 
 impl KeptDraw {
+    /// The draw of `objects`, ordered after the draws made before it.
     #[must_use]
     pub fn new(objects: DrawObjects) -> KeptDraw {
         KeptDraw { id: SimpleIdentity::new(), objects }
@@ -421,7 +423,10 @@ impl KeptDraw {
 /// The GPU objects of a draw, with what gives them the textures of their
 /// tile's atlases where they sample them.
 pub struct DrawObjectsMut<'a> {
+    /// The GPU objects.
     pub objects: &'a mut DrawObjects,
+    /// What gives them their tile's atlases' textures, `None` for objects
+    /// that sample none.
     pub atlases: Option<&'a AtlasBinding>,
 }
 
@@ -490,10 +495,19 @@ pub enum DrawDepth {
     Off,
     /// It tests the depth of a sub-layer of the layer's depth, and writes it
     /// as `mask` says.
-    Layer { sub_layer: u8, mask: DepthMaskType },
+    Layer {
+        /// The sub-layer, of the three of each layer's depth, the lowest
+        /// first.
+        sub_layer: u8,
+        /// Whether the draw writes the depth it tests.
+        mask: DepthMaskType,
+    },
     /// It tests the depth range of 3D geometry, which the 3D draws of all
     /// layers share, and writes it as `mask` says.
-    Volume { mask: DepthMaskType },
+    Volume {
+        /// Whether the draw writes the depth it tests.
+        mask: DepthMaskType,
+    },
 }
 
 /// One draw of a frame: the state it draws its GPU objects with. Its uniform
@@ -505,9 +519,11 @@ pub struct FrameDraw {
     /// The id of the draw's GPU objects, which orders the draws by when
     /// their objects were made.
     pub id: SimpleIdentity,
+    /// Where the draw is in the layer's order, before the id orders it.
     pub priority: DrawPriority,
     /// The passes the draw draws in.
     pub pass: RenderPass,
+    /// How the draw tests and writes depth.
     pub depth: DrawDepth,
     /// Whether the draw clips: a draw at the layer's depth to the mask of
     /// its tile, a 3D one to where none of the layer's 3D draws of the pass
@@ -563,6 +579,7 @@ impl<U, P> Default for DrawList<U, P> {
 }
 
 impl<U> DrawList<U> {
+    /// Adds `draw`, of a layer whose draws have no parts.
     pub fn push(&mut self, draw: FrameDraw, uniforms: U) {
         self.push_part(draw, (), uniforms);
     }
@@ -583,8 +600,8 @@ impl<U, P: Copy> DrawList<U, P> {
         self.parts.push(part);
     }
 
-    /// Makes the list's draws `layer`'s, in [`FrameDraw::order`] and in the
-    /// order they were pushed among draws of the same order, and empties the
+    /// Makes the list's draws `layer`'s, in order of their priority, then of
+    /// their GPU objects' ids, then of when they were pushed, and empties the
     /// list. Where there are any, `write` first writes the buffers they read
     /// to `layer`'s. Returns whether that replaced one of `layer`'s buffers,
     /// whose owner then drops the bindings of the draws that bind them
@@ -912,12 +929,14 @@ impl<P: Copy> LayerDraws<P> {
         &self.frame
     }
 
-    /// See [`FrameDraws::set_composite`].
+    /// Makes the draws composite onto the frame as `composite` says, or draw
+    /// straight onto it for `None`.
     pub fn set_composite(&mut self, composite: Option<Composite>) {
         self.frame.set_composite(composite);
     }
 
-    /// See [`FrameDraws::set_stencil_tiles`].
+    /// Makes `tiles` those whose masks the stencil buffer holds when the
+    /// draws draw.
     pub fn set_stencil_tiles(&mut self, tiles: impl IntoIterator<Item = UnwrappedTileID>) {
         self.frame.set_stencil_tiles(tiles);
     }
@@ -982,6 +1001,7 @@ impl SingleDraw {
         SingleDraw { objects, frame }
     }
 
+    /// Uploads the draw's GPU objects, if the frame draws it.
     pub fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         self.frame.upload_one(gpu, &mut self.objects, context);
     }
@@ -1042,9 +1062,9 @@ impl<'a> DrawGroup<'a> {
     }
 }
 
-/// The order the frame draws the layers' draw groups in, each at the depth
-/// of `PaintParameters::current_layer`, which [`DrawOrder::step`] moves to
-/// the next group's.
+/// The order the frame draws the layers' draw groups in, each at a depth
+/// of its own, which [`DrawOrder::step`] moves the encode to after the
+/// group draws.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DrawOrder {
     /// The layers' order, bottom to top, with the depth going down by one
@@ -1056,7 +1076,8 @@ pub enum DrawOrder {
 }
 
 impl DrawOrder {
-    /// Moves `parameters` to the depth of the group after the one it is at.
+    /// Moves the encode `parameters` to the depth of the group after the one
+    /// it is at.
     pub fn step(self, parameters: &mut PaintParameters<'_>) {
         match self {
             DrawOrder::BottomUp => parameters.current_layer = parameters.current_layer.saturating_sub(1),
