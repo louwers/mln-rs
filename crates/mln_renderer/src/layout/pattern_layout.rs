@@ -30,7 +30,7 @@ use crate::geometry::feature_index::FeatureIndex;
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::{BuildParams, Layout, LayoutParameters, SourceLayer, layers_by_id};
 use crate::layout::tile_layout::Resolved;
-use crate::util::triangulate::Triangulator;
+use crate::util::tessellator::Tessellator;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct PatternDependency {
@@ -281,7 +281,7 @@ impl<S: PatternLayoutSpec> Layout<S::Type> for PatternLayout<S> {
             }
         }
 
-        let mut triangulator = Triangulator::default();
+        let mut tessellator = Tessellator::default();
         for pattern_feature in &self.features {
             let i = pattern_feature.i;
             let feature = source_layer.feature(i)?;
@@ -302,8 +302,8 @@ impl<S: PatternLayoutSpec> Layout<S::Type> for PatternLayout<S> {
                 patterns,
                 i,
                 &build.canonical,
-                &mut triangulator,
-            )?;
+                &mut tessellator,
+            );
         }
         Ok(Some(bucket))
     }

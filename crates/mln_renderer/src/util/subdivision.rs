@@ -1,468 +1,289 @@
-// The C++ lives in util/, but it takes tile ids and tile geometry, so the
-// port lives in mln_renderer, as util/tile_cover.rs does. C++ throws
-// `std::out_of_range` and `std::invalid_argument` for a vertex outside the
-// 16-bit range and an empty ring, which 16-bit tile geometry can't produce;
-// the port panics with the same messages, as broken invariants.
+//! Subdivision for the globe: polygons and lines split where they cross a
+//! grid of cells over the tile, so that they bend with the sphere. The
+//! algorithm is GL JS's `render/subdivision.ts`.
 
+use geometry::Point;
+use glam::DVec2;
 use mln_tile_id::CanonicalTileID;
-use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryCoordinates};
+use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinates};
 use mln_util::constants::EXTENT;
 use mln_util::hash::HashMap;
 
-use crate::util::triangulate::Triangulator;
+use crate::util::tessellator::Tessellator;
 
 /// Pole vertices carry these Y coordinates; the globe vertex shader maps them
 /// to the poles.
 pub(crate) const NORTH_POLE_Y: i16 = -32768;
 pub(crate) const SOUTH_POLE_Y: i16 = 32767;
 
+/// A polygon's mesh, with vertices of its own.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub(crate) struct SubdivisionResult {
-    /// Flattened `x, y, x, y, ...` positions; every index below refers into
-    /// this buffer.
-    pub(crate) vertices: Vec<i16>,
-    pub(crate) triangle_indices: Vec<u32>,
-    /// One line list per input ring, as index pairs.
-    pub(crate) line_index_lists: Vec<Vec<u32>>,
+pub(crate) struct SubdividedPolygon {
+    pub(crate) vertices: Vec<Point<i16>>,
+    pub(crate) triangles: Vec<[u32; 3]>,
+    /// The outlines of the polygon's rings.
+    pub(crate) lines: Vec<[u32; 2]>,
+}
+
+/// Triangulates `polygon`, an outer ring and its holes, and splits the
+/// triangles on a grid of `granularity` cells per axis. On a tile at a pole,
+/// the triangles along the pole's edge extend to the pole, and on the zoom 0
+/// tile, which spans the antimeridian, triangles and lines that reach
+/// outside the tile are dropped. The triangles are counter-clockwise in tile
+/// space. `outline` adds the lines of the rings, subdivided as well.
+#[must_use]
+pub(crate) fn subdivide_polygon(
+    polygon: &GeometryCollection,
+    canonical: &CanonicalTileID,
+    granularity: u32,
+    outline: bool,
+    tessellator: &mut Tessellator,
+) -> SubdividedPolygon {
+    let mut subdivider = Subdivider {
+        vertices: Vec::new(),
+        indices: HashMap::default(),
+        canonical: *canonical,
+        granularity,
+        cell_size: f64::from(EXTENT) / f64::from(granularity),
+    };
+    let rings: Vec<u32> = polygon.iter().flatten().map(|&p| subdivider.index(vec(p))).collect();
+    let triangles: Vec<[u32; 3]> =
+        tessellator.triangulate(polygon).iter().map(|triangle| triangle.map(|i| rings[i as usize])).collect();
+    let mut triangles = subdivider.split_triangles(&triangles);
+    let mut lines = if outline { subdivider.outline(polygon) } else { Vec::new() };
+
+    subdivider.move_off_pole_rows();
+    subdivider.add_pole_caps(&mut triangles);
+    if granularity >= 2 && canonical.z == 0 {
+        let inside = |i: &u32| (0..=EXTENT).contains(&i32::from(subdivider.vertices[*i as usize].x));
+        triangles.retain(|triangle| triangle.iter().all(inside));
+        lines.retain(|line| line.iter().all(inside));
+    }
+    SubdividedPolygon { vertices: subdivider.vertices, triangles, lines }
 }
 
 struct Subdivider {
-    vertices: Vec<i16>,
-    dictionary: HashMap<u32, u32>,
+    vertices: Vec<Point<i16>>,
+    /// The index of the vertex at each position.
+    indices: HashMap<u32, u32>,
     canonical: CanonicalTileID,
     granularity: u32,
     cell_size: f64,
 }
 
 impl Subdivider {
-    fn new(granularity: u32, canonical: &CanonicalTileID) -> Self {
-        Subdivider {
-            vertices: Vec::new(),
-            dictionary: HashMap::default(),
-            canonical: *canonical,
-            granularity,
-            cell_size: f64::from(EXTENT) / f64::from(granularity),
-        }
+    fn key(p: Point<i16>) -> u32 {
+        (u32::from(p.x as u16) << 16) | u32::from(p.y as u16)
     }
 
-    fn subdivide(
-        mut self,
-        polygon: &GeometryCollection,
-        generate_outline_lines: bool,
-        triangulator: &mut Triangulator,
-    ) -> SubdivisionResult {
-        let mut flattened: Vec<GeometryCoordinate> = Vec::new();
-        for ring in polygon.iter() {
-            for point in ring {
-                flattened.push(*point);
-                self.vertex_to_index(f64::from(point.x), f64::from(point.y));
-            }
-        }
-
-        let mut triangles = self.convert_indices(&flattened, &triangulator.triangulate(&polygon[..]));
-        triangles = self.subdivide_triangles_scanline(&triangles);
-
-        let mut lines: Vec<Vec<u32>> = Vec::new();
-        if generate_outline_lines {
-            lines = self.generate_outline(polygon);
-        }
-
-        self.ensure_no_pole_vertices();
-        self.handle_poles(&mut triangles);
-
-        if self.granularity >= 2 && self.canonical.z == 0 {
-            triangles = self.remove_triangles_outside_tile_x(&triangles);
-            for line in &mut lines {
-                *line = self.remove_lines_outside_tile_x(line);
-            }
-        }
-
-        SubdivisionResult { vertices: self.vertices, triangle_indices: triangles, line_index_lists: lines }
+    /// The index of the vertex at `p`, rounded to tile coordinates, which
+    /// is added if there is none there yet.
+    fn index(&mut self, p: DVec2) -> u32 {
+        // Every point is a tile coordinate, or within a triangle of them,
+        // so the casts never saturate.
+        let p = Point::new(p.x.round() as i16, p.y.round() as i16);
+        *self.indices.entry(Self::key(p)).or_insert_with(|| {
+            self.vertices.push(p);
+            (self.vertices.len() - 1) as u32
+        })
     }
 
-    fn key(x: i32, y: i32) -> u32 {
-        (((x + 32768) as u32) << 16) | ((y + 32768) as u32)
+    fn position(&self, index: u32) -> DVec2 {
+        vec(self.vertices[index as usize])
     }
 
-    fn vertex_to_index(&mut self, x: f64, y: f64) -> u32 {
-        // The inputs are `i16` tile coordinates, and every vertex made from
-        // them lies within the bounds of a triangle of them, so the casts
-        // never saturate.
-        let x_int = i32::from(x.round() as i16);
-        let y_int = i32::from(y.round() as i16);
-        let k = Self::key(x_int, y_int);
-        if let Some(&index) = self.dictionary.get(&k) {
-            return index;
-        }
-        let index = (self.vertices.len() / 2) as u32;
-        self.dictionary.insert(k, index);
-        self.vertices.push(x_int as i16);
-        self.vertices.push(y_int as i16);
-        index
-    }
-
-    fn convert_indices(&mut self, flattened: &[GeometryCoordinate], indices: &[u32]) -> Vec<u32> {
-        let mut converted = Vec::with_capacity(indices.len());
-        for &index in indices {
-            let point = flattened[index as usize];
-            converted.push(self.vertex_to_index(f64::from(point.x), f64::from(point.y)));
-        }
-        converted
-    }
-
-    fn subdivide_triangles_scanline(&mut self, input_indices: &[u32]) -> Vec<u32> {
+    /// Splits each triangle by the rows of cells it crosses, and each row
+    /// by the cell boundaries in it.
+    fn split_triangles(&mut self, triangles: &[[u32; 3]]) -> Vec<[u32; 3]> {
         if self.granularity < 2 {
-            return fix_winding_order(&self.vertices, input_indices);
+            let mut triangles = triangles.to_vec();
+            wind_counter_clockwise(&self.vertices, &mut triangles);
+            return triangles;
         }
 
-        let mut final_indices: Vec<u32> = Vec::new();
-        let mut primitive = 0;
-        while primitive + 2 < input_indices.len() {
-            let triangle_indices =
-                [input_indices[primitive], input_indices[primitive + 1], input_indices[primitive + 2]];
-            primitive += 3;
-            let mut triangle = [0.0f64; 6];
-            let mut min_x = f64::INFINITY;
-            let mut min_y = min_x;
-            let mut max_x = f64::NEG_INFINITY;
-            let mut max_y = max_x;
-            for i in 0..3 {
-                triangle[i * 2] = f64::from(self.vertices[triangle_indices[i] as usize * 2]);
-                triangle[i * 2 + 1] = f64::from(self.vertices[triangle_indices[i] as usize * 2 + 1]);
-                min_x = f64::min(min_x, triangle[i * 2]);
-                max_x = f64::max(max_x, triangle[i * 2]);
-                min_y = f64::min(min_y, triangle[i * 2 + 1]);
-                max_y = f64::max(max_y, triangle[i * 2 + 1]);
-            }
-            if min_x == max_x || min_y == max_y {
+        let mut split = Vec::new();
+        for &triangle in triangles {
+            let corners = triangle.map(|i| self.position(i));
+            let min = corners[0].min(corners[1]).min(corners[2]);
+            let max = corners[0].max(corners[1]).max(corners[2]);
+            if min.x == max.x || min.y == max.y {
                 continue;
             }
-
-            let cell_x_min = (min_x / self.cell_size).floor() as i32;
-            let cell_x_max = (max_x / self.cell_size).ceil() as i32;
-            let cell_y_min = (min_y / self.cell_size).floor() as i32;
-            let cell_y_max = (max_y / self.cell_size).ceil() as i32;
-
-            if cell_x_min == cell_x_max && cell_y_min == cell_y_max {
-                final_indices.extend_from_slice(&triangle_indices);
-                continue;
-            }
-
-            for cell_row in cell_y_min..cell_y_max {
-                let ring = self.generate_vertex_ring_for_cell_row(cell_row, &triangle, &triangle_indices);
-                scanline_triangulate_vertex_ring(&self.vertices, &ring, &mut final_indices);
+            let first_row = (min.y / self.cell_size).floor() as i32;
+            let end_row = (max.y / self.cell_size).ceil() as i32;
+            for row in first_row..end_row {
+                let ring = self.row_ring(row, &corners, &triangle);
+                scanline_triangulate_vertex_ring(&self.vertices, &ring, &mut split);
             }
         }
-        final_indices
+        split
     }
 
-    fn generate_vertex_ring_for_cell_row(
-        &mut self,
-        cell_row: i32,
-        triangle: &[f64; 6],
-        triangle_indices: &[u32; 3],
-    ) -> Vec<u32> {
-        let cell_row_y_top = f64::from(cell_row) * self.cell_size;
-        let cell_row_y_bottom = cell_row_y_top + self.cell_size;
-        let mut ring: Vec<u32> = Vec::new();
+    /// The convex ring of the part of the triangle with `corners` and
+    /// vertex `indices` that lies in a row of cells, with a vertex wherever
+    /// its edges cross a cell boundary.
+    fn row_ring(&mut self, row: i32, corners: &[DVec2; 3], indices: &[u32; 3]) -> Vec<u32> {
+        let top = f64::from(row) * self.cell_size;
+        let bottom = top + self.cell_size;
+        let row = Row { top, bottom };
+        let mut ring = Vec::new();
 
         for edge in 0..3 {
-            let a_x = triangle[edge * 2];
-            let a_y = triangle[edge * 2 + 1];
-            let b_x = triangle[((edge + 1) * 2) % 6];
-            let b_y = triangle[((edge + 1) * 2 + 1) % 6];
-            let c_x = triangle[((edge + 2) * 2) % 6];
-            let c_y = triangle[((edge + 2) * 2 + 1) % 6];
-            let dir_x = b_x - a_x;
-            let dir_y = b_y - a_y;
-            let is_parallel_y = dir_x == 0.0;
-            let is_parallel_x = dir_y == 0.0;
+            let a = corners[edge];
+            let b = corners[(edge + 1) % 3];
+            let c = corners[(edge + 2) % 3];
+            let b_index = indices[(edge + 1) % 3];
+            let dir = b - a;
+            let horizontal = dir.y == 0.0;
+            let b_in_row = b.y >= top && b.y <= bottom;
 
-            let t_top = (cell_row_y_top - a_y) / dir_y;
-            let t_bottom = (cell_row_y_bottom - a_y) / dir_y;
+            let t_top = (top - a.y) / dir.y;
+            let t_bottom = (bottom - a.y) / dir.y;
             let t_enter = f64::min(t_top, t_bottom);
             let t_exit = f64::max(t_top, t_bottom);
 
-            if (!is_parallel_x && (t_enter >= 1.0 || t_exit <= 0.0))
-                || (is_parallel_x && (a_y < cell_row_y_top || a_y > cell_row_y_bottom))
-            {
-                if b_y >= cell_row_y_top && b_y <= cell_row_y_bottom {
-                    ring.push(triangle_indices[(edge + 1) % 3]);
+            if (!horizontal && (t_enter >= 1.0 || t_exit <= 0.0)) || (horizontal && (a.y < top || a.y > bottom)) {
+                // The edge misses the row.
+                if b_in_row {
+                    ring.push(b_index);
                 }
                 continue;
             }
 
-            if !is_parallel_x && t_enter > 0.0 {
-                ring.push(self.vertex_to_index(a_x + dir_x * t_enter, a_y + dir_y * t_enter));
+            if !horizontal && t_enter > 0.0 {
+                ring.push(self.index(a + dir * t_enter));
             }
-
-            let enter_x = a_x + dir_x * f64::max(t_enter, 0.0);
-            let exit_x = a_x + dir_x * f64::min(t_exit, 1.0);
-
-            if !is_parallel_y {
-                self.generate_intra_edge_vertices(&mut ring, a_x, a_y, b_x, b_y, enter_x, exit_x);
+            let enter_x = a.x + dir.x * t_enter.max(0.0);
+            let exit_x = a.x + dir.x * t_exit.min(1.0);
+            if dir.x != 0.0 {
+                self.add_edge_crossings(&mut ring, a, b, enter_x, exit_x);
             }
-
-            if !is_parallel_x && t_exit < 1.0 {
-                ring.push(self.vertex_to_index(a_x + dir_x * t_exit, a_y + dir_y * t_exit));
+            if !horizontal && t_exit < 1.0 {
+                ring.push(self.index(a + dir * t_exit));
             }
-
-            if is_parallel_x || (b_y >= cell_row_y_top && b_y <= cell_row_y_bottom) {
-                ring.push(triangle_indices[(edge + 1) % 3]);
+            if horizontal || b_in_row {
+                ring.push(b_index);
             }
-
-            if !is_parallel_x && (b_y <= cell_row_y_top || b_y >= cell_row_y_bottom) {
-                self.generate_inter_edge_vertices(
-                    &mut ring,
-                    a_x,
-                    a_y,
-                    b_x,
-                    b_y,
-                    c_x,
-                    c_y,
-                    exit_x,
-                    cell_row_y_top,
-                    cell_row_y_bottom,
-                );
+            if !horizontal && (b.y <= top || b.y >= bottom) {
+                self.add_boundary_crossings(&mut ring, a, b, c, exit_x, row);
             }
         }
         ring
     }
 
-    #[expect(clippy::too_many_arguments, reason = "the ring, the edge's two endpoints and the cell's column range")]
-    fn generate_intra_edge_vertices(
-        &mut self,
-        ring: &mut Vec<u32>,
-        a_x: f64,
-        a_y: f64,
-        b_x: f64,
-        b_y: f64,
-        enter_x: f64,
-        exit_x: f64,
-    ) {
-        let dir_x = b_x - a_x;
-        let dir_y = b_y - a_y;
-        let is_parallel_x = dir_y == 0.0;
-        let left_x = if is_parallel_x { f64::min(a_x, b_x) } else { f64::min(enter_x, exit_x) };
-        let right_x = if is_parallel_x { f64::max(a_x, b_x) } else { f64::max(enter_x, exit_x) };
-        let left_cell_x = (left_x / self.cell_size).floor() as i32 + 1;
-        let right_cell_x = (right_x / self.cell_size).ceil() as i32 - 1;
-        let left_to_right = if is_parallel_x { a_x < b_x } else { enter_x < exit_x };
-
-        let mut emit = |this: &mut Self, cell_x: i32| {
-            let x = f64::from(cell_x) * this.cell_size;
-            ring.push(this.vertex_to_index(x, a_y + dir_y * (x - a_x) / dir_x));
-        };
-        if left_to_right {
-            for cell_x in left_cell_x..=right_cell_x {
-                emit(self, cell_x);
-            }
-        } else {
-            for cell_x in (left_cell_x..=right_cell_x).rev() {
-                emit(self, cell_x);
-            }
+    /// Adds where the edge from `a` to `b` crosses the vertical cell
+    /// boundaries between `enter_x` and `exit_x`, where it is in the row.
+    fn add_edge_crossings(&mut self, ring: &mut Vec<u32>, a: DVec2, b: DVec2, enter_x: f64, exit_x: f64) {
+        let dir = b - a;
+        let (from, to) = if dir.y == 0.0 { (a.x, b.x) } else { (enter_x, exit_x) };
+        let cells = self.cells_between(from, to);
+        for x in cells {
+            ring.push(self.index(DVec2::new(x, a.y + dir.y * (x - a.x) / dir.x)));
         }
     }
 
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the ring, the three points of two edges and the cell row's column and range"
-    )]
-    fn generate_inter_edge_vertices(
-        &mut self,
-        ring: &mut Vec<u32>,
-        a_x: f64,
-        a_y: f64,
-        b_x: f64,
-        b_y: f64,
-        c_x: f64,
-        c_y: f64,
-        exit_x: f64,
-        cell_row_y_top: f64,
-        cell_row_y_bottom: f64,
-    ) {
-        let dir_y = b_y - a_y;
-        let dir2_x = c_x - b_x;
-        let dir2_y = c_y - b_y;
-        let is_parallel_x2 = dir2_y == 0.0;
-        if is_parallel_x2 && (c_y == cell_row_y_top || c_y == cell_row_y_bottom) {
+    /// Adds the cell corners along the row's boundary between where the
+    /// edge from `a` to `b` leaves the row, at `exit_x`, and where the
+    /// triangle's next edge that enters it does.
+    fn add_boundary_crossings(&mut self, ring: &mut Vec<u32>, a: DVec2, b: DVec2, c: DVec2, exit_x: f64, row: Row) {
+        let next = c - b;
+        if next.y == 0.0 && (c.y == row.top || c.y == row.bottom) {
             return;
         }
 
-        // Where the next edge enters the cell row, or the edge after it when
-        // the next one stays out of the row; a horizontal next edge never
-        // enters it, and has no crossing to compute.
-        let mut enter_x = 0.0;
-        let mut next_edge_enters = false;
-        if !is_parallel_x2 {
-            let t2_top = (cell_row_y_top - b_y) / dir2_y;
-            let t2_bottom = (cell_row_y_bottom - b_y) / dir2_y;
-            let t2_enter = f64::min(t2_top, t2_bottom);
-            next_edge_enters = t2_enter < 1.0 && f64::max(t2_top, t2_bottom) > 0.0;
-            enter_x = b_x + dir2_x * t2_enter;
-        }
-        if !next_edge_enters {
-            let dir3_x = a_x - c_x;
-            let dir3_y = a_y - c_y;
-            let t3_top = (cell_row_y_top - c_y) / dir3_y;
-            let t3_bottom = (cell_row_y_bottom - c_y) / dir3_y;
-            enter_x = c_x + dir3_x * f64::min(t3_top, t3_bottom);
-        }
-        let left_cell_x = (f64::min(enter_x, exit_x) / self.cell_size).floor() as i32 + 1;
-        let right_cell_x = (f64::max(enter_x, exit_x) / self.cell_size).ceil() as i32 - 1;
-        let left_to_right = exit_x < enter_x;
+        // Where the next edge enters the row, or the edge after it when the
+        // next one stays out of the row; a horizontal next edge never enters
+        // it, and has no crossing to compute.
+        let next_enter = (next.y != 0.0).then(|| {
+            let t_top = (row.top - b.y) / next.y;
+            let t_bottom = (row.bottom - b.y) / next.y;
+            let t_enter = f64::min(t_top, t_bottom);
+            (t_enter < 1.0 && f64::max(t_top, t_bottom) > 0.0).then_some(b.x + next.x * t_enter)
+        });
+        let enter_x = next_enter.flatten().unwrap_or_else(|| {
+            let last = a - c;
+            c.x + last.x * f64::min((row.top - c.y) / last.y, (row.bottom - c.y) / last.y)
+        });
 
-        let boundary_y = if dir_y > 0.0 { cell_row_y_bottom } else { cell_row_y_top };
-        if left_to_right {
-            for cell_x in left_cell_x..=right_cell_x {
-                ring.push(self.vertex_to_index(f64::from(cell_x) * self.cell_size, boundary_y));
-            }
-        } else {
-            for cell_x in (left_cell_x..=right_cell_x).rev() {
-                ring.push(self.vertex_to_index(f64::from(cell_x) * self.cell_size, boundary_y));
-            }
+        let y = if b.y > a.y { row.bottom } else { row.top };
+        for x in self.cells_between(exit_x, enter_x) {
+            ring.push(self.index(DVec2::new(x, y)));
         }
     }
 
-    fn generate_outline(&mut self, polygon: &GeometryCollection) -> Vec<Vec<u32>> {
-        let mut lines: Vec<Vec<u32>> = Vec::new();
+    /// The cell boundaries strictly between `from` and `to`, in order from
+    /// `from`.
+    fn cells_between(&self, from: f64, to: f64) -> impl Iterator<Item = f64> + use<> {
+        let left = (from.min(to) / self.cell_size).floor() as i32 + 1;
+        let right = (from.max(to) / self.cell_size).ceil() as i32 - 1;
+        let cell_size = self.cell_size;
+        let forward = from < to;
+        (0..(right - left + 1).max(0))
+            .map(move |k| if forward { left + k } else { right - k })
+            .map(move |cell| f64::from(cell) * cell_size)
+    }
+
+    /// The lines of the polygon's rings, closed and subdivided.
+    fn outline(&mut self, polygon: &GeometryCollection) -> Vec<[u32; 2]> {
+        let mut lines = Vec::new();
         for ring in polygon.iter() {
             let path = subdivide_vertex_line(ring, self.granularity, true);
-            let mut line_indices: Vec<u32> = Vec::new();
-            for i in 1..path.len() {
-                line_indices.push(self.vertex_to_index(f64::from(path[i - 1].x), f64::from(path[i - 1].y)));
-                line_indices.push(self.vertex_to_index(f64::from(path[i].x), f64::from(path[i].y)));
-            }
-            lines.push(line_indices);
+            lines.extend(path.windows(2).map(|segment| [self.index(vec(segment[0])), self.index(vec(segment[1]))]));
         }
         lines
     }
 
-    // Moves any vertex on a pole row off it, so the caps get pole vertices of
-    // their own. The dictionary moves with the vertex, or a cap would find
-    // the moved one again under its old position.
-    fn ensure_no_pole_vertices(&mut self) {
-        let mut i = 1;
-        while i < self.vertices.len() {
-            let y = self.vertices[i];
-            if y == NORTH_POLE_Y || y == SOUTH_POLE_Y {
-                let x = self.vertices[i - 1];
-                let moved = if y == NORTH_POLE_Y { NORTH_POLE_Y + 1 } else { SOUTH_POLE_Y - 1 };
-                self.vertices[i] = moved;
-                self.dictionary.remove(&Self::key(i32::from(x), i32::from(y)));
-                self.dictionary.entry(Self::key(i32::from(x), i32::from(moved))).or_insert((i / 2) as u32);
-            }
-            i += 2;
+    /// Moves any vertex on a pole's row off it, so that the caps get pole
+    /// vertices of their own. The vertex's index moves with it, or a cap
+    /// would find the moved one again at its old position.
+    fn move_off_pole_rows(&mut self) {
+        for (index, vertex) in self.vertices.iter_mut().enumerate() {
+            let moved = match vertex.y {
+                NORTH_POLE_Y => NORTH_POLE_Y + 1,
+                SOUTH_POLE_Y => SOUTH_POLE_Y - 1,
+                _ => continue,
+            };
+            self.indices.remove(&Self::key(*vertex));
+            vertex.y = moved;
+            self.indices.entry(Self::key(*vertex)).or_insert(index as u32);
         }
     }
 
-    fn handle_poles(&mut self, triangles: &mut Vec<u32>) {
-        let north = self.canonical.y == 0;
-        let south = self.canonical.y == (1u32 << self.canonical.z) - 1;
-        if north || south {
-            self.fill_poles(triangles, north, south);
-        }
-    }
-
-    fn generate_pole_quad(&mut self, indices: &mut Vec<u32>, i0: u32, i1: u32, v0x: i16, v1x: i16, pole_y: i16) {
-        let flip = (v0x > v1x) != (pole_y == NORTH_POLE_Y);
-        let p0 = self.vertex_to_index(f64::from(v0x), f64::from(pole_y));
-        let p1 = self.vertex_to_index(f64::from(v1x), f64::from(pole_y));
-        if flip {
-            indices.extend_from_slice(&[i0, i1, p0, i1, p1, p0]);
-        } else {
-            indices.extend_from_slice(&[i1, i0, p0, p1, i1, p0]);
-        }
-    }
-
-    fn fill_poles(&mut self, indices: &mut Vec<u32>, north: bool, south: bool) {
-        const NORTH_EDGE: i16 = 0;
-        const SOUTH_EDGE: i16 = EXTENT as i16;
-        let count = indices.len();
-        let mut primitive = 2;
-        while primitive < count {
-            let i0 = indices[primitive - 2];
-            let i1 = indices[primitive - 1];
-            let i2 = indices[primitive];
-            primitive += 3;
-            let v0x = self.vertices[i0 as usize * 2];
-            let v0y = self.vertices[i0 as usize * 2 + 1];
-            let v1x = self.vertices[i1 as usize * 2];
-            let v1y = self.vertices[i1 as usize * 2 + 1];
-            let v2x = self.vertices[i2 as usize * 2];
-            let v2y = self.vertices[i2 as usize * 2 + 1];
-            if north {
-                if v0y == NORTH_EDGE && v1y == NORTH_EDGE {
-                    self.generate_pole_quad(indices, i0, i1, v0x, v1x, NORTH_POLE_Y);
+    /// On a tile at a pole, extends every triangle edge on the pole's edge
+    /// of the tile to the pole, with a quad.
+    fn add_pole_caps(&mut self, triangles: &mut Vec<[u32; 3]>) {
+        let last_row = (1u32 << self.canonical.z) - 1;
+        let poles =
+            [(self.canonical.y == 0, 0, NORTH_POLE_Y), (self.canonical.y == last_row, EXTENT as i16, SOUTH_POLE_Y)];
+        for i in 0..triangles.len() {
+            let triangle = triangles[i];
+            for (at_pole, edge_y, pole_y) in poles {
+                if !at_pole {
+                    continue;
                 }
-                if v1y == NORTH_EDGE && v2y == NORTH_EDGE {
-                    self.generate_pole_quad(indices, i1, i2, v1x, v2x, NORTH_POLE_Y);
-                }
-                if v2y == NORTH_EDGE && v0y == NORTH_EDGE {
-                    self.generate_pole_quad(indices, i2, i0, v2x, v0x, NORTH_POLE_Y);
-                }
-            }
-            if south {
-                if v0y == SOUTH_EDGE && v1y == SOUTH_EDGE {
-                    self.generate_pole_quad(indices, i0, i1, v0x, v1x, SOUTH_POLE_Y);
-                }
-                if v1y == SOUTH_EDGE && v2y == SOUTH_EDGE {
-                    self.generate_pole_quad(indices, i1, i2, v1x, v2x, SOUTH_POLE_Y);
-                }
-                if v2y == SOUTH_EDGE && v0y == SOUTH_EDGE {
-                    self.generate_pole_quad(indices, i2, i0, v2x, v0x, SOUTH_POLE_Y);
+                for e in 0..3 {
+                    let (i0, i1) = (triangle[e], triangle[(e + 1) % 3]);
+                    let (v0, v1) = (self.vertices[i0 as usize], self.vertices[i1 as usize]);
+                    if v0.y == edge_y && v1.y == edge_y {
+                        let p0 = self.index(DVec2::new(f64::from(v0.x), f64::from(pole_y)));
+                        let p1 = self.index(DVec2::new(f64::from(v1.x), f64::from(pole_y)));
+                        if (v0.x > v1.x) == (pole_y == NORTH_POLE_Y) {
+                            triangles.extend([[i1, i0, p0], [p1, i1, p0]]);
+                        } else {
+                            triangles.extend([[i0, i1, p0], [i1, p1, p0]]);
+                        }
+                    }
                 }
             }
         }
-    }
-
-    fn vertex_outside_tile_x(&self, index: u32) -> bool {
-        let x = i32::from(self.vertices[index as usize * 2]);
-        !(0..=EXTENT).contains(&x)
-    }
-
-    fn remove_triangles_outside_tile_x(&self, indices: &[u32]) -> Vec<u32> {
-        let mut result = Vec::new();
-        for triangle in indices.as_chunks::<3>().0 {
-            if self.vertex_outside_tile_x(triangle[0])
-                || self.vertex_outside_tile_x(triangle[1])
-                || self.vertex_outside_tile_x(triangle[2])
-            {
-                continue;
-            }
-            result.extend_from_slice(triangle);
-        }
-        result
-    }
-
-    fn remove_lines_outside_tile_x(&self, indices: &[u32]) -> Vec<u32> {
-        let mut result = Vec::new();
-        for line in indices.as_chunks::<2>().0 {
-            if self.vertex_outside_tile_x(line[0]) || self.vertex_outside_tile_x(line[1]) {
-                continue;
-            }
-            result.extend_from_slice(line);
-        }
-        result
     }
 }
 
-/// Triangulates a polygon and splits the triangles on a grid of
-/// `granularity` cells per axis. Port of GL JS `render/subdivision.ts`:
-/// earcut with `triangulator`, then a scanline pass per cell row, then pole
-/// quads on the pole tiles and removal of geometry outside the tile on zoom
-/// 0. Output triangles
-/// are counter-clockwise in tile space. (C++ defaults
-/// `generate_outline_lines` to true.)
-#[must_use]
-pub(crate) fn subdivide_polygon(
-    polygon: &GeometryCollection,
-    canonical: &CanonicalTileID,
-    granularity: u32,
-    generate_outline_lines: bool,
-    triangulator: &mut Triangulator,
-) -> SubdivisionResult {
-    Subdivider::new(granularity, canonical).subdivide(polygon, generate_outline_lines, triangulator)
+/// A row of cells' top and bottom.
+#[derive(Clone, Copy)]
+struct Row {
+    top: f64,
+    bottom: f64,
 }
 
 /// How far past the tile border [`add_tile_border_strips`] reaches: several
@@ -481,13 +302,12 @@ pub(crate) const TILE_BORDER_STRIP_WIDTH: i16 = (EXTENT / 256) as i16;
 /// triangles on both sides of the border belongs to a tile with a buffer and
 /// gets none, and neither do pole borders or the zoom 0 tile's antimeridian
 /// edges.
-pub(crate) fn add_tile_border_strips(result: &mut SubdivisionResult, canonical: &CanonicalTileID, width: i16) {
+pub(crate) fn add_tile_border_strips(mesh: &mut SubdividedPolygon, canonical: &CanonicalTileID, width: i16) {
     struct BorderEdge {
         a: u32,
         b: u32,
         /// The outward direction, -1, 0 or 1 on each axis.
-        dx: i16,
-        dy: i16,
+        out: Point<i16>,
         uses: u32,
     }
 
@@ -495,245 +315,171 @@ pub(crate) fn add_tile_border_strips(result: &mut SubdivisionResult, canonical: 
     let north_pole_tile = canonical.y == 0;
     let south_pole_tile = canonical.y == (1u32 << canonical.z) - 1;
     let wraps_x = canonical.z == 0;
-    let vertices = &mut result.vertices;
-    let position = |vertices: &[i16], index: u32| (vertices[index as usize * 2], vertices[index as usize * 2 + 1]);
+    let vertices = &mut mesh.vertices;
 
     let mut edges: Vec<BorderEdge> = Vec::new();
     let mut edge_indices: HashMap<(u32, u32), usize> = HashMap::default();
-    for triangle in result.triangle_indices.as_chunks::<3>().0 {
+    for triangle in &mesh.triangles {
         for e in 0..3 {
             let (a, b) = (triangle[e], triangle[(e + 1) % 3]);
-            let ((ax, ay), (bx, by)) = (position(vertices, a), position(vertices, b));
-            let mut dx = 0;
-            let mut dy = 0;
-            if ax == bx && !wraps_x {
-                if ax == 0 {
-                    dx = -1;
-                } else if ax == extent {
-                    dx = 1;
-                }
-            }
-            if ay == by {
-                if ay == 0 && !north_pole_tile {
-                    dy = -1;
-                } else if ay == extent && !south_pole_tile {
-                    dy = 1;
-                }
-            }
+            let (pa, pb) = (vertices[a as usize], vertices[b as usize]);
+            let dx = match pa.x {
+                _ if pa.x != pb.x || wraps_x => 0,
+                0 => -1,
+                x if x == extent => 1,
+                _ => 0,
+            };
+            let dy = match pa.y {
+                _ if pa.y != pb.y => 0,
+                0 if !north_pole_tile => -1,
+                y if y == extent && !south_pole_tile => 1,
+                _ => 0,
+            };
             if dx == 0 && dy == 0 {
                 continue;
             }
             let index = *edge_indices.entry((a.min(b), a.max(b))).or_insert_with(|| {
-                edges.push(BorderEdge { a, b, dx, dy, uses: 0 });
+                edges.push(BorderEdge { a, b, out: Point::new(dx, dy), uses: 0 });
                 edges.len() - 1
             });
             edges[index].uses += 1;
         }
     }
-    if edges.is_empty() {
-        return;
-    }
 
     let mut outer_vertices: HashMap<(u32, i16, i16), u32> = HashMap::default();
-    let mut outer = |vertices: &mut Vec<i16>, index: u32, dx: i16, dy: i16| {
-        *outer_vertices.entry((index, dx, dy)).or_insert_with(|| {
-            let (x, y) = position(vertices, index);
-            let outer_index = (vertices.len() / 2) as u32;
-            vertices.extend_from_slice(&[x + dx * width, y + dy * width]);
-            outer_index
+    let mut outer = |vertices: &mut Vec<Point<i16>>, index: u32, out: Point<i16>| {
+        *outer_vertices.entry((index, out.x, out.y)).or_insert_with(|| {
+            let p = vertices[index as usize];
+            vertices.push(Point::new(p.x + out.x * width, p.y + out.y * width));
+            (vertices.len() - 1) as u32
         })
     };
-    let mut strips = Vec::new();
+    let first_strip = mesh.triangles.len();
     for edge in edges.iter().filter(|edge| edge.uses == 1) {
-        let outer_a = outer(vertices, edge.a, edge.dx, edge.dy);
-        let outer_b = outer(vertices, edge.b, edge.dx, edge.dy);
-        strips.extend_from_slice(&[edge.a, edge.b, outer_b, edge.a, outer_b, outer_a]);
+        let outer_a = outer(vertices, edge.a, edge.out);
+        let outer_b = outer(vertices, edge.b, edge.out);
+        mesh.triangles.extend([[edge.a, edge.b, outer_b], [edge.a, outer_b, outer_a]]);
     }
-    result.triangle_indices.extend(fix_winding_order(vertices, &strips));
+    wind_counter_clockwise(vertices, &mut mesh.triangles[first_strip..]);
 }
 
 /// Inserts a vertex wherever the line crosses a cell boundary; `is_ring`
-/// closes the line first. (C++ defaults `is_ring` to false.)
+/// closes the line first.
 #[must_use]
-pub(crate) fn subdivide_vertex_line(
-    line: &GeometryCoordinates,
-    granularity: u32,
-    is_ring: bool,
-) -> GeometryCoordinates {
+pub(crate) fn subdivide_vertex_line(line: &[Point<i16>], granularity: u32, is_ring: bool) -> GeometryCoordinates {
     if line.len() < 2 {
         return GeometryCoordinates::new();
     }
-
     let close_ring = is_ring && line.first() != line.last();
+    let segment_ends = line.iter().skip(1).chain(close_ring.then_some(&line[0]));
+    let segments = line.iter().zip(segment_ends);
     if granularity < 2 {
-        let mut result = line.clone();
-        if close_ring {
-            result.push(line[0]);
-        }
-        return result;
+        return line.iter().chain(close_ring.then_some(&line[0])).copied().collect();
     }
 
     let cell_size = (f64::from(EXTENT) / f64::from(granularity)).floor();
-    let mut result: GeometryCoordinates = vec![line[0]];
-
-    // `static_cast<int16_t>`: the values are integral and in range.
-    let push_unique = |result: &mut GeometryCoordinates, x: f64, y: f64| {
-        let next = GeometryCoordinate::new(x as i16, y as i16);
-        if result.last() != Some(&next) {
-            result.push(next);
+    let mut result = vec![line[0]];
+    // The values are integral and in range.
+    let mut push = |p: DVec2| {
+        let p = Point::new(p.x as i16, p.y as i16);
+        if result.last() != Some(&p) {
+            result.push(p);
         }
     };
 
-    let total = line.len();
-    let last_index = if close_ring { total } else { total - 1 };
-    for point_index in 0..last_index {
-        let p0 = line[point_index];
-        let p1 = if point_index < total - 1 { line[point_index + 1] } else { line[0] };
-        let v0x = f64::from(p0.x);
-        let v0y = f64::from(p0.y);
-        let v1x = f64::from(p1.x);
-        let v1y = f64::from(p1.y);
-
-        let dir_x_non_zero = v0x != v1x;
-        let dir_y_non_zero = v0y != v1y;
-        if !dir_x_non_zero && !dir_y_non_zero {
+    for (&p0, &p1) in segments {
+        let (v0, v1) = (vec(p0), vec(p1));
+        let dir = v1 - v0;
+        if dir == DVec2::ZERO {
             continue;
         }
-
-        let dir_x = v1x - v0x;
-        let dir_y = v1y - v0y;
-        let abs_dir_x = dir_x.abs();
-        let abs_dir_y = dir_y.abs();
-        let mut last_x = v0x;
-        let mut last_y = v0y;
-
+        // The distance to the next boundary on an axis, as a fraction of
+        // the segment: infinite on an axis the segment doesn't move along.
+        let next_boundary = |at: f64, dir: f64| {
+            if dir > 0.0 {
+                ((at / cell_size).floor() + 1.0) * cell_size
+            } else {
+                ((at / cell_size).ceil() - 1.0) * cell_size
+            }
+        };
+        let mut at = v0;
         loop {
-            let next_boundary_x = if dir_x > 0.0 {
-                ((last_x / cell_size).floor() + 1.0) * cell_size
-            } else {
-                ((last_x / cell_size).ceil() - 1.0) * cell_size
-            };
-            let next_boundary_y = if dir_y > 0.0 {
-                ((last_y / cell_size).floor() + 1.0) * cell_size
-            } else {
-                ((last_y / cell_size).ceil() - 1.0) * cell_size
-            };
-            let axis_distance_to_boundary_x = (last_x - next_boundary_x).abs();
-            let axis_distance_to_boundary_y = (last_y - next_boundary_y).abs();
-            let axis_distance_to_end_x = (last_x - v1x).abs();
-            let axis_distance_to_end_y = (last_y - v1y).abs();
-            let real_distance_to_boundary_x =
-                if dir_x_non_zero { axis_distance_to_boundary_x / abs_dir_x } else { f64::INFINITY };
-            let real_distance_to_boundary_y =
-                if dir_y_non_zero { axis_distance_to_boundary_y / abs_dir_y } else { f64::INFINITY };
+            let boundary = DVec2::new(next_boundary(at.x, dir.x), next_boundary(at.y, dir.y));
+            let to_boundary = (at - boundary).abs();
+            let to_end = (at - v1).abs();
+            let fraction =
+                |to_boundary: f64, dir: f64| if dir == 0.0 { f64::INFINITY } else { to_boundary / dir.abs() };
+            let (fraction_x, fraction_y) = (fraction(to_boundary.x, dir.x), fraction(to_boundary.y, dir.y));
 
-            if (axis_distance_to_end_x <= axis_distance_to_boundary_x || !dir_x_non_zero)
-                && (axis_distance_to_end_y <= axis_distance_to_boundary_y || !dir_y_non_zero)
-            {
+            if (to_end.x <= to_boundary.x || dir.x == 0.0) && (to_end.y <= to_boundary.y || dir.y == 0.0) {
                 break;
             }
-
-            if (real_distance_to_boundary_x < real_distance_to_boundary_y && dir_x_non_zero) || !dir_y_non_zero {
-                last_x = next_boundary_x;
-                last_y += dir_y * real_distance_to_boundary_x;
-                push_unique(&mut result, last_x, last_y.round());
+            if (fraction_x < fraction_y && dir.x != 0.0) || dir.y == 0.0 {
+                at = DVec2::new(boundary.x, at.y + dir.y * fraction_x);
+                push(DVec2::new(at.x, at.y.round()));
             } else {
-                last_x += dir_x * real_distance_to_boundary_y;
-                last_y = next_boundary_y;
-                push_unique(&mut result, last_x.round(), last_y);
+                at = DVec2::new(at.x + dir.x * fraction_y, boundary.y);
+                push(DVec2::new(at.x.round(), at.y));
             }
         }
-        push_unique(&mut result, v1x, v1y);
+        push(v1);
     }
     result
 }
 
 /// Reorders every triangle to counter-clockwise winding in tile space.
-#[must_use]
-pub(crate) fn fix_winding_order(vertices: &[i16], indices: &[u32]) -> Vec<u32> {
-    let mut corrected = Vec::with_capacity(indices.len());
-    for triangle in indices.as_chunks::<3>().0 {
-        let (i0, i1, i2) = (triangle[0], triangle[1], triangle[2]);
-        let vertex = |index: u32, axis: usize| i32::from(vertices[index as usize * 2 + axis]);
-        let e0x = f64::from(vertex(i1, 0) - vertex(i0, 0));
-        let e0y = f64::from(vertex(i1, 1) - vertex(i0, 1));
-        let e1x = f64::from(vertex(i2, 0) - vertex(i0, 0));
-        let e1y = f64::from(vertex(i2, 1) - vertex(i0, 1));
-        if e0x * e1y - e0y * e1x > 0.0 {
-            corrected.extend_from_slice(&[i0, i2, i1]);
-        } else {
-            corrected.extend_from_slice(&[i0, i1, i2]);
+pub(crate) fn wind_counter_clockwise(vertices: &[Point<i16>], triangles: &mut [[u32; 3]]) {
+    for triangle in triangles {
+        let [a, b, c] = triangle.map(|i| vec(vertices[i as usize]));
+        if (b - a).perp_dot(c - a) > 0.0 {
+            triangle.swap(1, 2);
         }
     }
-    corrected
 }
 
 /// Triangulates an ordered convex ring of vertex indices by walking outward
 /// from its leftmost vertex. An empty ring adds no triangles.
-pub(crate) fn scanline_triangulate_vertex_ring(vertices: &[i16], ring: &[u32], out_indices: &mut Vec<u32>) {
-    if ring.is_empty() {
+pub(crate) fn scanline_triangulate_vertex_ring(vertices: &[Point<i16>], ring: &[u32], triangles: &mut Vec<[u32; 3]>) {
+    let Some(leftmost) = ring.iter().enumerate().min_by_key(|&(_, &i)| vertices[i as usize].x).map(|(at, _)| at) else {
         return;
-    }
+    };
+    let n = ring.len();
+    let position = |at: usize| vec(vertices[ring[at] as usize]);
+    let before = |at: usize| (at + n - 1) % n;
+    let after = |at: usize| (at + 1) % n;
 
-    let mut leftmost_index = 0;
-    let mut leftmost_x = vertices[ring[0] as usize * 2];
-    for (i, &index) in ring.iter().enumerate().skip(1) {
-        let x = vertices[index as usize * 2];
-        if x < leftmost_x {
-            leftmost_x = x;
-            leftmost_index = i;
-        }
-    }
-
-    let length = ring.len();
-    let mut last_edge_a = leftmost_index;
-    let mut last_edge_b = (last_edge_a + 1) % length;
-    let vertex = |position: usize, axis: usize| f64::from(vertices[ring[position] as usize * 2 + axis]);
-
+    // The edge between the two sides walked so far, from one to the other.
+    let (mut edge_a, mut edge_b) = (leftmost, after(leftmost));
     loop {
-        let candidate_a = if last_edge_a >= 1 { last_edge_a - 1 } else { length - 1 };
-        let candidate_b = (last_edge_b + 1) % length;
-
-        let candidate_a_x = vertex(candidate_a, 0);
-        let candidate_a_y = vertex(candidate_a, 1);
-        let candidate_b_x = vertex(candidate_b, 0);
-        let candidate_b_y = vertex(candidate_b, 1);
-        let last_edge_a_x = vertex(last_edge_a, 0);
-        let last_edge_a_y = vertex(last_edge_a, 1);
-        let last_edge_b_x = vertex(last_edge_b, 0);
-        let last_edge_b_y = vertex(last_edge_b, 1);
-
-        let pick_a = if candidate_a_x < candidate_b_x {
-            true
-        } else if candidate_a_x > candidate_b_x {
-            false
+        let candidate_a = before(edge_a);
+        let candidate_b = after(edge_b);
+        let (a, b) = (position(edge_a), position(edge_b));
+        let (ca, cb) = (position(candidate_a), position(candidate_b));
+        // The leftmost candidate, or of two level ones, the one furthest to
+        // the edge's right.
+        let pick_a = if ca.x == cb.x {
+            let normal = (b - a).perp() * if a.y < b.y { -1.0 } else { 1.0 };
+            (ca - a).dot(normal) > (cb - a).dot(normal)
         } else {
-            let nx = last_edge_b_y - last_edge_a_y;
-            let ny = -(last_edge_b_x - last_edge_a_x);
-            let sign = if last_edge_a_y < last_edge_b_y { 1.0 } else { -1.0 };
-            let a_right = ((candidate_a_x - last_edge_a_x) * nx + (candidate_a_y - last_edge_a_y) * ny) * sign;
-            let b_right = ((candidate_b_x - last_edge_a_x) * nx + (candidate_b_y - last_edge_a_y) * ny) * sign;
-            a_right > b_right
+            ca.x < cb.x
         };
 
-        let a = ring[last_edge_a];
-        let b = ring[last_edge_b];
-        if pick_a {
-            let c = ring[candidate_a];
-            if c != a && c != b && a != b {
-                out_indices.extend_from_slice(&[b, a, c]);
-            }
-            last_edge_a = if last_edge_a >= 1 { last_edge_a - 1 } else { length - 1 };
-        } else {
-            let c = ring[candidate_b];
-            if c != a && c != b && a != b {
-                out_indices.extend_from_slice(&[b, a, c]);
-            }
-            last_edge_b = (last_edge_b + 1) % length;
+        let (ia, ib) = (ring[edge_a], ring[edge_b]);
+        let c = ring[if pick_a { candidate_a } else { candidate_b }];
+        if c != ia && c != ib && ia != ib {
+            triangles.push([ib, ia, c]);
         }
-
+        if pick_a {
+            edge_a = candidate_a;
+        } else {
+            edge_b = candidate_b;
+        }
         if candidate_a == candidate_b {
             break;
         }
     }
+}
+
+fn vec(p: Point<i16>) -> DVec2 {
+    DVec2::new(f64::from(p.x), f64::from(p.y))
 }

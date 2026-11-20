@@ -1,37 +1,39 @@
-//! Polygon triangulation for fills and fill extrusions.
+//! The scratch of tessellating a bucket's features.
 
 use geometry::Point;
 
-/// Triangulates polygons with earcut, keeping earcut's buffers from one
-/// polygon to the next.
-#[derive(Default)]
-pub(crate) struct Triangulator(earcut::Earcut<f64>);
+use crate::gfx::line_mesh::LineScratch;
 
-impl Triangulator {
+/// Triangulates polygons with earcut and holds the line mesher's scratch,
+/// keeping their buffers from one feature to the next.
+#[derive(Default)]
+pub(crate) struct Tessellator {
+    earcut: earcut::Earcut<f64>,
+    holes: Vec<u32>,
+    indices: Vec<u32>,
+    pub(crate) line: LineScratch,
+}
+
+impl Tessellator {
     /// Triangulates `polygon`, an outer ring followed by its holes.
     ///
     /// The indices point into the polygon's rings concatenated in order. A
     /// ring may repeat its first point at the end. A polygon whose outer
     /// ring is empty has no triangles.
-    pub(crate) fn triangulate<T: Copy + Into<f64>, R: AsRef<[Point<T>]>>(&mut self, polygon: &[R]) -> Vec<u32> {
+    pub(crate) fn triangulate<T: Copy + Into<f64>, R: AsRef<[Point<T>]>>(&mut self, polygon: &[R]) -> &[[u32; 3]] {
         // earcut indexes out of bounds on an empty outer ring with holes.
         if polygon.first().is_none_or(|ring| ring.as_ref().is_empty()) {
-            return Vec::new();
+            return &[];
         }
-        let mut hole_indices = Vec::with_capacity(polygon.len().saturating_sub(1));
+        self.holes.clear();
         let mut n_vertices = 0;
-        for (i, ring) in polygon.iter().enumerate() {
-            if i > 0 {
-                hole_indices.push(n_vertices);
-            }
+        for ring in polygon {
+            self.holes.push(n_vertices);
             n_vertices += ring.as_ref().len() as u32;
         }
         let points = polygon.iter().flat_map(|ring| ring.as_ref().iter().map(|p| [p.x.into(), p.y.into()]));
-        // Room for every triangle: earcut makes at most one per vertex and
-        // two per hole (for the bridge), and reserves less.
-        let mut indices = Vec::with_capacity(3 * (n_vertices as usize + 2 * hole_indices.len()));
-        self.0.earcut(points, &hole_indices, &mut indices);
-        indices
+        self.earcut.earcut(points, &self.holes[1..], &mut self.indices);
+        self.indices.as_chunks().0
     }
 }
 
@@ -39,10 +41,8 @@ impl Triangulator {
 mod tests {
     use super::*;
 
-    fn area(points: &[Point<i16>], indices: &[u32]) -> f64 {
-        indices
-            .as_chunks::<3>()
-            .0
+    fn area(points: &[Point<i16>], triangles: &[[u32; 3]]) -> f64 {
+        triangles
             .iter()
             .map(|t| {
                 let [a, b, c] = t.map(|i| (f64::from(points[i as usize].x), f64::from(points[i as usize].y)));
@@ -64,15 +64,17 @@ mod tests {
         };
         // A closed outer ring, an empty ring and a closed hole.
         let polygon = [square(0, 10), Vec::new(), square(2, 8)];
-        let indices = Triangulator::default().triangulate(&polygon);
+        let mut tessellator = Tessellator::default();
+        let triangles = tessellator.triangulate(&polygon);
         let points: Vec<Point<i16>> = polygon.concat();
-        assert!(indices.iter().all(|&i| (i as usize) < points.len()));
-        assert_eq!(area(&points, &indices), 100.0 - 36.0);
+        assert!(triangles.iter().flatten().all(|&i| (i as usize) < points.len()));
+        assert_eq!(area(&points, triangles), 100.0 - 36.0);
     }
 
     #[test]
     fn an_empty_outer_ring_has_no_triangles() {
         let hole = vec![Point::new(2i16, 2), Point::new(8, 2), Point::new(8, 8)];
-        assert_eq!(Triangulator::default().triangulate(&[Vec::new(), hole]), Vec::<u32>::new());
+        let none: &[[u32; 3]] = &[];
+        assert_eq!(Tessellator::default().triangulate(&[Vec::new(), hole]), none);
     }
 }

@@ -32,16 +32,17 @@ use crate::bucket_geometry::{BucketGeometry, GeometryUpload, bucket_indexes, buc
 use crate::buckets::circle_bucket::CircleBucket;
 use crate::buckets::fill_bucket::FillBucket;
 use crate::buckets::fill_extrusion_bucket::{FillExtrusionBucket, tile_units_per_meter};
-use crate::buckets::line_bucket::{LineBucket, LineLayoutVertex};
+use crate::buckets::line_bucket::LineBucket;
 use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
 use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
+use crate::gfx::line_mesh::LineLayoutVertex;
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::layout::symbol_instance::SymbolInstancePools;
 use crate::tile_mask::TileMask;
-use crate::util::triangulate::Triangulator;
+use crate::util::tessellator::Tessellator;
 
 struct StubGeometryTileFeature {
     properties: PropertyMap,
@@ -90,17 +91,15 @@ fn circle_bucket() {
 
     // CircleBucket::addFeature() is a no-op.
     let point = collection(&[&[(0, 0)]]);
-    bucket
-        .add_feature(
-            &feature(FeatureType::Point, &point),
-            &point,
-            &ImagePositions::default(),
-            &PatternLayerMap::default(),
-            0,
-            &CanonicalTileID::new(0, 0, 0),
-            &mut Triangulator::default(),
-        )
-        .unwrap();
+    bucket.add_feature(
+        &feature(FeatureType::Point, &point),
+        &point,
+        &ImagePositions::default(),
+        &PatternLayerMap::default(),
+        0,
+        &CanonicalTileID::new(0, 0, 0),
+        &mut Tessellator::default(),
+    );
     assert!(!bucket.has_data());
     assert!(!bucket.needs_upload());
 
@@ -122,17 +121,15 @@ fn fill_bucket() {
     assert!(!bucket.needs_upload());
 
     let polygon = collection(&[&[(0, 0), (0, 1), (1, 1)]]);
-    bucket
-        .add_feature(
-            &feature(FeatureType::Polygon, &polygon),
-            &polygon,
-            &ImagePositions::default(),
-            &PatternLayerMap::default(),
-            0,
-            &CanonicalTileID::new(0, 0, 0),
-            &mut Triangulator::default(),
-        )
-        .unwrap();
+    bucket.add_feature(
+        &feature(FeatureType::Polygon, &polygon),
+        &polygon,
+        &ImagePositions::default(),
+        &PatternLayerMap::default(),
+        0,
+        &CanonicalTileID::new(0, 0, 0),
+        &mut Tessellator::default(),
+    );
     assert!(bucket.has_data());
     assert!(bucket.needs_upload());
 
@@ -147,17 +144,15 @@ fn fill_extrusion_vertex_count(polygon: &GeometryCollection, meters: f32, tile: 
         fill_extrusion_rounded_corner_distance: Evaluated::Constant(meters),
     };
     let mut bucket = FillExtrusionBucket::new(layout, &VecMap::new(), f32::from(tile.z), 1);
-    bucket
-        .add_feature(
-            &feature(FeatureType::Polygon, polygon),
-            polygon,
-            &ImagePositions::default(),
-            &PatternLayerMap::default(),
-            0,
-            &tile,
-            &mut Triangulator::default(),
-        )
-        .unwrap();
+    bucket.add_feature(
+        &feature(FeatureType::Polygon, polygon),
+        polygon,
+        &ImagePositions::default(),
+        &PatternLayerMap::default(),
+        0,
+        &tile,
+        &mut Tessellator::default(),
+    );
     assert!(bucket.has_data());
     bucket.vertices.len()
 }
@@ -185,17 +180,15 @@ fn fill_extrusion_walls_on_clip_lines_leave_the_pattern_where_it_was() {
         fill_extrusion_rounded_corner_distance: Evaluated::Constant(0.0),
     };
     let mut bucket = FillExtrusionBucket::new(layout, &VecMap::new(), 16.0, 1);
-    bucket
-        .add_feature(
-            &feature(FeatureType::Polygon, &square),
-            &square,
-            &ImagePositions::default(),
-            &PatternLayerMap::default(),
-            0,
-            &CanonicalTileID::new(16, 32768, 32768),
-            &mut Triangulator::default(),
-        )
-        .unwrap();
+    bucket.add_feature(
+        &feature(FeatureType::Polygon, &square),
+        &square,
+        &ImagePositions::default(),
+        &PatternLayerMap::default(),
+        0,
+        &CanonicalTileID::new(16, 32768, 32768),
+        &mut Tessellator::default(),
+    );
     let edge_distances: Vec<u16> = bucket.vertices.get_mut().iter().map(|v| v.a2[1]).collect();
     assert_eq!(edge_distances, [0, 164, 164, 328, 428]);
 }
@@ -208,17 +201,15 @@ fn fill_extrusion_bucket_skips_polygons_rounded_off_the_tile() {
         fill_extrusion_rounded_corner_distance: Evaluated::Constant(100.0),
     };
     let mut bucket = FillExtrusionBucket::new(layout, &VecMap::new(), 16.0, 1);
-    bucket
-        .add_feature(
-            &feature(FeatureType::Polygon, &triangle),
-            &triangle,
-            &ImagePositions::default(),
-            &PatternLayerMap::default(),
-            0,
-            &CanonicalTileID::new(16, 32768, 32768),
-            &mut Triangulator::default(),
-        )
-        .unwrap();
+    bucket.add_feature(
+        &feature(FeatureType::Polygon, &triangle),
+        &triangle,
+        &ImagePositions::default(),
+        &PatternLayerMap::default(),
+        0,
+        &CanonicalTileID::new(16, 32768, 32768),
+        &mut Tessellator::default(),
+    );
     assert!(!bucket.has_data());
 }
 
@@ -266,17 +257,15 @@ fn data_driven_fill_bucket(fill_color: &serde_json::Value) -> FillBucket {
     let polygon = collection(&[&[(0, 0), (0, 1), (1, 1)]]);
     let mut feature = feature(FeatureType::Polygon, &polygon);
     feature.properties.insert("c".to_owned(), Value::String("red".to_owned()));
-    bucket
-        .add_feature(
-            &feature,
-            &polygon,
-            &ImagePositions::default(),
-            &PatternLayerMap::default(),
-            0,
-            &CanonicalTileID::new(0, 0, 0),
-            &mut Triangulator::default(),
-        )
-        .unwrap();
+    bucket.add_feature(
+        &feature,
+        &polygon,
+        &ImagePositions::default(),
+        &PatternLayerMap::default(),
+        0,
+        &CanonicalTileID::new(0, 0, 0),
+        &mut Tessellator::default(),
+    );
     bucket
 }
 
@@ -394,31 +383,27 @@ fn line_bucket() {
 
     // Ignore invalid feature type.
     let point = collection(&[&[(0, 0)]]);
-    bucket
-        .add_feature(
-            &feature(FeatureType::Point, &point),
-            &point,
-            &ImagePositions::default(),
-            &PatternLayerMap::default(),
-            0,
-            &CanonicalTileID::new(0, 0, 0),
-            &mut Triangulator::default(),
-        )
-        .unwrap();
+    bucket.add_feature(
+        &feature(FeatureType::Point, &point),
+        &point,
+        &ImagePositions::default(),
+        &PatternLayerMap::default(),
+        0,
+        &CanonicalTileID::new(0, 0, 0),
+        &mut Tessellator::default(),
+    );
     assert!(!bucket.has_data());
 
     let line = collection(&[&[(0, 0), (1, 1)]]);
-    bucket
-        .add_feature(
-            &feature(FeatureType::LineString, &line),
-            &line,
-            &ImagePositions::default(),
-            &PatternLayerMap::default(),
-            1,
-            &CanonicalTileID::new(0, 0, 0),
-            &mut Triangulator::default(),
-        )
-        .unwrap();
+    bucket.add_feature(
+        &feature(FeatureType::LineString, &line),
+        &line,
+        &ImagePositions::default(),
+        &PatternLayerMap::default(),
+        1,
+        &CanonicalTileID::new(0, 0, 0),
+        &mut Tessellator::default(),
+    );
     assert!(bucket.has_data());
     assert!(bucket.needs_upload());
 
@@ -431,17 +416,15 @@ fn line_bucket() {
 fn line_bucket_drawables_build_from_freed_indexes() {
     let mut bucket = LineBucket::new(LineLayoutProperties::PossiblyEvaluated::default(), &VecMap::new(), 10.0, 1);
     let line = collection(&[&[(0, 0), (100, 100), (200, 0)]]);
-    bucket
-        .add_feature(
-            &feature(FeatureType::LineString, &line),
-            &line,
-            &ImagePositions::default(),
-            &PatternLayerMap::default(),
-            0,
-            &CanonicalTileID::new(0, 0, 0),
-            &mut Triangulator::default(),
-        )
-        .unwrap();
+    bucket.add_feature(
+        &feature(FeatureType::LineString, &line),
+        &line,
+        &ImagePositions::default(),
+        &PatternLayerMap::default(),
+        0,
+        &CanonicalTileID::new(0, 0, 0),
+        &mut Tessellator::default(),
+    );
     assert!(bucket.has_data());
 
     with_context(|gpu, context| {
@@ -502,17 +485,15 @@ fn symbol_bucket() {
 
     // SymbolBucket::addFeature() is a no-op.
     let point = collection(&[&[(0, 0)]]);
-    bucket
-        .add_feature(
-            &feature(FeatureType::Point, &point),
-            &point,
-            &ImagePositions::default(),
-            &PatternLayerMap::default(),
-            0,
-            &CanonicalTileID::new(0, 0, 0),
-            &mut Triangulator::default(),
-        )
-        .unwrap();
+    bucket.add_feature(
+        &feature(FeatureType::Point, &point),
+        &point,
+        &ImagePositions::default(),
+        &PatternLayerMap::default(),
+        0,
+        &CanonicalTileID::new(0, 0, 0),
+        &mut Tessellator::default(),
+    );
     assert!(!bucket.has_data());
     assert!(!bucket.needs_upload());
 
@@ -796,17 +777,15 @@ fn line_bucket_vertices(
             };
             feature.properties.insert(key.clone(), value);
         }
-        bucket
-            .add_feature(
-                &feature,
-                &line,
-                &ImagePositions::default(),
-                &PatternLayerMap::default(),
-                index,
-                &CanonicalTileID::new(0, 0, 0),
-                &mut Triangulator::default(),
-            )
-            .unwrap();
+        bucket.add_feature(
+            &feature,
+            &line,
+            &ImagePositions::default(),
+            &PatternLayerMap::default(),
+            index,
+            &CanonicalTileID::new(0, 0, 0),
+            &mut Tessellator::default(),
+        );
     }
     bucket.vertices.data().into_owned()
 }

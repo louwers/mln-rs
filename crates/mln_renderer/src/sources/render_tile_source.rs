@@ -10,7 +10,6 @@ use std::sync::Arc;
 use geometry::Point;
 use glam::Vec2;
 use mln_gfx::gpu::Gpu;
-use mln_gfx::polyline_generator::{PolylineGenerator, PolylineGeneratorOptions};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::line_layer_ubo::{LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO};
@@ -30,16 +29,16 @@ use mln_tile_id::geometry_tile_data::GeometryCoordinates;
 use mln_util::Color;
 use mln_util::constants::EXTENT;
 use mln_util::error::Error;
-use mln_util::geometry::FeatureType;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecMap;
 
 use crate::bucket::UploadNeeds;
-use crate::buckets::line_bucket::{LineBucket, LineLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
+use crate::gfx::line_mesh::{LineLayoutVertex, LineOptions, LineScratch, add_line};
+use crate::gfx::mesh::Indexed;
 use crate::gfx::shader_group::StringIDSetsPair;
 use crate::gfx::shader_program::ShaderProgramPtr;
 use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
@@ -87,21 +86,15 @@ fn polyline_objects(
     context: &mut Context,
     shader: &ShaderProgramPtr,
     lines: &[GeometryCoordinates],
-    options: &PolylineGeneratorOptions,
+    options: &LineOptions,
 ) -> Option<DrawObjects> {
     let mut vertices: Vec<LineLayoutVertex> = Vec::new();
     let mut segments: Vec<SegmentBase> = Vec::new();
     let mut indexes: Vec<u16> = Vec::new();
+    let mut scratch = LineScratch::default();
     for line in lines {
-        let mut generator = PolylineGenerator::new(
-            &mut vertices,
-            LineBucket::layout_vertex,
-            &mut segments,
-            &SegmentBase::new,
-            |segment: &mut SegmentBase| segment,
-            &mut indexes,
-        );
-        generator.generate(line, options);
+        let mut triangles = Indexed { indexes: &mut indexes, segments: &mut segments };
+        add_line(&mut vertices, &mut triangles, &mut scratch, line, options);
     }
     if vertices.is_empty() {
         return None;
@@ -466,12 +459,7 @@ impl RenderSource for RenderTileSource {
 
         // Timestamps or Parse Status
         if parameters.debug_options.contains(MapDebugOptions::TIMESTAMPS | MapDebugOptions::PARSE_STATUS) {
-            let text_options = PolylineGeneratorOptions {
-                join_type: LineJoinType::Round,
-                begin_cap: LineCapType::Round,
-                end_cap: LineCapType::Round,
-                ..Default::default()
-            };
+            let text_options = LineOptions { join: LineJoinType::Round, cap: LineCapType::Round, ..Default::default() };
             for type_ in [DebugType::TextOutline, DebugType::Text] {
                 let layer = debug_layer(debug_layers, type_);
                 layer.retain(keep);
@@ -518,7 +506,7 @@ impl RenderSource for RenderTileSource {
             // On the globe the edges bend with the sphere: the border
             // subdivided at the tile mesh's granularity, one per zoom.
             let mut globe_borders: BTreeMap<u8, GeometryCoordinates> = BTreeMap::new();
-            let border_options = PolylineGeneratorOptions { type_: FeatureType::Polygon, ..Default::default() };
+            let border_options = LineOptions { closed: true, ..Default::default() };
             for tile in &self.render_tiles {
                 let tile_id = *tile.overscaled_tile_id();
                 if tile.debug_bucket.is_none() || !tile.needs_rendering() {

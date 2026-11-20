@@ -50,9 +50,8 @@ pub(crate) trait Layout<T: LayerType>: Send + 'static {
     /// Makes the bucket and adds its features to `feature_index`.
     /// `resolved` is what the dependencies resolved to, or `None` for a
     /// layout without dependencies. `None` when the layout has nothing to
-    /// draw. A feature that fails to lay out, such as one that
-    /// [`geometry_too_long`](crate::bucket::geometry_too_long) reports,
-    /// fails the bucket; the worker reports it as the tile's error.
+    /// draw. A feature that fails to decode fails the bucket; the worker
+    /// reports it as the tile's error.
     fn create_bucket(
         &mut self,
         resolved: Option<&Resolved>,

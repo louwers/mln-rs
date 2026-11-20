@@ -8,7 +8,6 @@ use mln_style_types::image::ImagePositions;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryTileFeature};
 use mln_util::Color;
-use mln_util::error::Error;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::logging::{Event, Log};
 use mln_util::serialization::sorted;
@@ -17,11 +16,12 @@ use mln_vec_map::VecMap;
 
 use crate::bucket::{Bucket, BucketBase, UploadNeeds};
 use crate::bucket_geometry::{GeometryUpload, GeometryVec};
-use crate::gfx::fill_generator::generate_fill_and_outline_buffers;
+use crate::gfx::fill_mesh::FillBuffers;
+use crate::gfx::mesh::Indexed;
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::paint_property_binder::{CrossFadedPaintPropertyBinder, PaintPropertyBinder};
-use crate::util::triangulate::Triangulator;
+use crate::util::tessellator::Tessellator;
 
 crate::paint_property_binders!(
     pub struct FillBinders for FillPaintProperties::PossiblyEvaluated {
@@ -36,6 +36,12 @@ crate::paint_property_binders!(
 #[repr(C)]
 pub(crate) struct FillLayoutVertex {
     pub(crate) a1: [i16; 2],
+}
+
+impl FillLayoutVertex {
+    pub(crate) fn new(p: GeometryCoordinate) -> Self {
+        FillLayoutVertex { a1: [p.x, p.y] }
+    }
 }
 
 #[derive(Clone, mln_wire::Wire)]
@@ -95,29 +101,20 @@ impl FillBucket {
         self.subdivision_granularity = *value;
     }
 
-    #[must_use]
-    pub(crate) fn layout_vertex(p: GeometryCoordinate) -> FillLayoutVertex {
-        FillLayoutVertex { a1: [p.x, p.y] }
-    }
-
     fn generate_buffers(
         &mut self,
         geometry: &GeometryCollection,
         canonical: &CanonicalTileID,
-        triangulator: &mut Triangulator,
-    ) -> Result<(), Error> {
-        generate_fill_and_outline_buffers(
-            geometry,
-            self.vertices.get_mut(),
-            self.triangles.get_mut(),
-            &mut self.triangle_segments,
-            self.basic_lines.get_mut(),
-            &mut self.basic_line_segments,
-            self.outline_ends.get_mut(),
-            canonical,
-            self.subdivision_granularity.fill.granularity_for_zoom_level(canonical.z),
-            triangulator,
-        )
+        tessellator: &mut Tessellator,
+    ) {
+        let mut buffers = FillBuffers {
+            vertices: self.vertices.get_mut(),
+            outline_ends: self.outline_ends.get_mut(),
+            triangles: Indexed { indexes: self.triangles.get_mut(), segments: &mut self.triangle_segments },
+            lines: Indexed { indexes: self.basic_lines.get_mut(), segments: &mut self.basic_line_segments },
+        };
+        let granularity = self.subdivision_granularity.fill.granularity_for_zoom_level(canonical.z);
+        buffers.add_polygons(geometry, canonical, granularity, tessellator);
     }
 
     fn populate_binders(
@@ -156,11 +153,10 @@ impl Bucket for FillBucket {
         pattern_dependencies: &PatternLayerMap,
         index: usize,
         canonical: &CanonicalTileID,
-        triangulator: &mut Triangulator,
-    ) -> Result<(), Error> {
-        self.generate_buffers(geometry, canonical, triangulator)?;
+        tessellator: &mut Tessellator,
+    ) {
+        self.generate_buffers(geometry, canonical, tessellator);
         self.populate_binders(feature, pattern_positions, pattern_dependencies, index, canonical);
-        Ok(())
     }
 
     fn record_sdf_pattern(&mut self, layer_id: &str, sdf: bool) {

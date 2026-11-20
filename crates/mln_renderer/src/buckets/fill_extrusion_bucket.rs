@@ -21,19 +21,18 @@ use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinates, GeometryTileFeature};
 use mln_util::Color;
 use mln_util::constants::{EARTH_RADIUS_M, EXTENT, M2PI};
-use mln_util::error::Error;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecMap;
 
 use crate::bucket::{Bucket, BucketBase, UploadNeeds};
 use crate::bucket_geometry::{GeometryUpload, GeometryVec};
-use crate::gfx::fill_large_mesh_arrays::fill_large_mesh_arrays;
+use crate::gfx::mesh::Indexed;
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::pattern_layout::{PatternLayerMap, PatternLayoutSpec};
 use crate::paint_property_binder::{CrossFadedPaintPropertyBinder, PaintPropertyBinder};
 use crate::render_static_data::RenderStaticData;
-use crate::util::subdivision::{SubdivisionResult, subdivide_polygon, subdivide_vertex_line};
-use crate::util::triangulate::Triangulator;
+use crate::util::subdivision::{SubdividedPolygon, subdivide_polygon, subdivide_vertex_line};
+use crate::util::tessellator::Tessellator;
 
 crate::paint_property_binders!(
     pub struct FillExtrusionBinders for FillExtrusionPaintProperties::PossiblyEvaluated {
@@ -268,72 +267,40 @@ impl FillExtrusionBucket {
         }
     }
 
-    /// Adds the walls and the roof of one polygon (its outer ring, then its
-    /// holes).
-    /// The outline's vertices are the roof's, unless a subdivided `roof`
-    /// (the globe's) is that mesh, with vertices of its own: the outline
-    /// then stays out of the segments, as only its walls draw it.
+    /// Adds the walls and the roof of one polygon, an outer ring and its
+    /// holes. The roof's vertices are the outline's, unless it is the
+    /// globe's subdivided `roof`, which has vertices of its own.
     fn add_polygon<R: AsRef<[Point<i16>]>>(
         &mut self,
         polygon: &[R],
-        roof: Option<&SubdivisionResult>,
-        triangulator: &mut Triangulator,
-    ) -> Result<(), Error> {
-        let mut total_vertices: usize = 0;
-        for ring in polygon {
-            total_vertices += ring.as_ref().len();
-            if total_vertices > usize::from(u16::MAX) {
-                return Err(crate::bucket::geometry_too_long());
-            }
-        }
-
-        if total_vertices == 0 {
-            return Ok(());
-        }
-
-        if let Some(roof) = roof {
-            self.add_outline(polygon);
-            // The roof's vertices have no walls.
-            fill_large_mesh_arrays(
-                self.vertices.get_mut(),
-                |x, y| Self::layout_vertex(Point::new(x, y), 0, true, None),
-                &mut self.triangle_segments,
-                self.triangles.get_mut(),
-                &roof.vertices,
-                &roof.triangle_indices,
-                None,
-                MAX_SEGMENT_VERTICES,
-            );
-            return Ok(());
-        }
-
-        // The roof continues the last segment if that ends at the outline
-        // and has room for it.
-        let start_vertices = self.vertices.len();
-        let continues = self.triangle_segments.last().is_some_and(|last| {
-            last.vertex_offset + last.vertex_length == start_vertices
-                && last.vertex_length + total_vertices <= MAX_SEGMENT_VERTICES
-        });
-        if !continues {
-            self.triangle_segments.push(SegmentBase::new(start_vertices, self.triangles.len()));
-        }
-        let segment_index = self.triangle_segments.len() - 1;
-        let first_index = self.triangle_segments[segment_index].vertex_length;
-
+        roof: Option<&SubdividedPolygon>,
+        tessellator: &mut Tessellator,
+    ) {
+        let first = self.vertices.len();
         self.add_outline(polygon);
-
-        let indices: Vec<u32> = triangulator.triangulate(polygon);
-        debug_assert!(indices.len().is_multiple_of(3));
-        let index = |i: u32| (first_index + i as usize) as u16;
-        for triangle in indices.as_chunks::<3>().0 {
-            // Counter-Clockwise winding order.
-            self.triangles.get_mut().extend_from_slice(&[index(triangle[0]), index(triangle[2]), index(triangle[1])]);
+        let vertices = self.vertices.get_mut();
+        let mut triangles = Indexed { indexes: self.triangles.get_mut(), segments: &mut self.triangle_segments };
+        // A roof vertex of its own draws no wall.
+        let roof_vertex = |p: Point<i16>| Self::layout_vertex(p, 0, true, None);
+        if let Some(roof) = roof {
+            let roof_first = vertices.len();
+            vertices.extend(roof.vertices.iter().map(|&p| roof_vertex(p)));
+            triangles.add(vertices, roof_first, roof.triangles.iter().copied());
+        } else {
+            // A roof too large for a segment copies the vertices it
+            // spreads over several, and copies of the outline's would
+            // draw walls: it gets vertices of its own.
+            let roof_first = if vertices.len() - first <= MAX_SEGMENT_VERTICES {
+                first
+            } else {
+                let roof_first = vertices.len();
+                vertices.extend(polygon.iter().flat_map(|ring| ring.as_ref().iter().map(|&p| roof_vertex(p))));
+                roof_first
+            };
+            // Counter-clockwise.
+            let roof = tessellator.triangulate(polygon).iter().map(|&[a, b, c]| [a, c, b]);
+            triangles.add(vertices, roof_first, roof);
         }
-
-        let segment = &mut self.triangle_segments[segment_index];
-        segment.vertex_length += total_vertices;
-        segment.index_length += indices.len();
-        Ok(())
     }
 
     #[must_use]
@@ -371,8 +338,8 @@ impl Bucket for FillExtrusionBucket {
         pattern_dependencies: &PatternLayerMap,
         index: usize,
         canonical: &CanonicalTileID,
-        triangulator: &mut Triangulator,
-    ) -> Result<(), Error> {
+        tessellator: &mut Tessellator,
+    ) {
         for mut polygon in classify_rings(geometry) {
             // Optimize polygons with many interior rings for earcut
             // tessellation.
@@ -390,21 +357,16 @@ impl Bucket for FillExtrusionBucket {
             }
 
             // On the globe the walls follow subdivided rings and the roof is a
-            // subdivided mesh of its own, spread over as many segments as it
-            // needs. Rings with more vertices than a polygon may have are
-            // extruded as on Mercator.
+            // subdivided mesh of its own.
             let granularity = self.subdivision_granularity.fill.granularity_for_zoom_level(canonical.z);
             if granularity >= 2 {
                 let subdivided_rings: Vec<GeometryCoordinates> =
                     polygon.iter().map(|ring| subdivide_vertex_line(ring, granularity, true)).collect();
-                let ring_vertices: usize = subdivided_rings.iter().map(Vec::len).sum();
-                if ring_vertices <= MAX_SEGMENT_VERTICES {
-                    let roof = subdivide_polygon(&polygon, canonical, granularity, false, triangulator);
-                    self.add_polygon(&subdivided_rings, Some(&roof), triangulator)?;
-                    continue;
-                }
+                let roof = subdivide_polygon(&polygon, canonical, granularity, false, tessellator);
+                self.add_polygon(&subdivided_rings, Some(&roof), tessellator);
+            } else {
+                self.add_polygon(&polygon[..], None, tessellator);
             }
-            self.add_polygon(&polygon[..], None, triangulator)?;
         }
 
         let length = self.vertices.len();
@@ -419,7 +381,6 @@ impl Bucket for FillExtrusionBucket {
                 &EMPTY_FORMATTED_SECTION,
             );
         }
-        Ok(())
     }
 
     fn upload(&mut self, geometry: &mut GeometryUpload<'_>, needs: UploadNeeds) {

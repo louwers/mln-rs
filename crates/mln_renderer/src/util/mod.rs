@@ -3,8 +3,8 @@
 
 pub(crate) mod pool;
 pub(crate) mod subdivision;
+pub(crate) mod tessellator;
 pub mod tile_cover;
 pub(crate) mod tile_cover_impl;
 pub(crate) mod tile_lod;
 pub(crate) mod tile_mesh;
-pub(crate) mod triangulate;

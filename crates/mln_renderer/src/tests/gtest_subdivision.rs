@@ -22,11 +22,11 @@ use crate::globe_tile_mesh::{GlobeTileMeshCache, globe_mesh_data};
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::tile_mask::TileMask;
 use crate::util::subdivision::{
-    NORTH_POLE_Y, SOUTH_POLE_Y, SubdivisionResult, TILE_BORDER_STRIP_WIDTH, add_tile_border_strips, subdivide_polygon,
+    NORTH_POLE_Y, SOUTH_POLE_Y, SubdividedPolygon, TILE_BORDER_STRIP_WIDTH, add_tile_border_strips, subdivide_polygon,
     subdivide_vertex_line,
 };
+use crate::util::tessellator::Tessellator;
 use crate::util::tile_mesh::{TileMeshOptions, create_tile_mesh};
-use crate::util::triangulate::Triangulator;
 
 /// `EXTENT` as a tile coordinate.
 const EXTENT_I16: i16 = EXTENT as i16;
@@ -39,12 +39,10 @@ fn square(x0: i16, y0: i16, x1: i16, y1: i16) -> GeometryCollection {
     GeometryCollection::from(vec![vec![p(x0, y0), p(x1, y0), p(x1, y1), p(x0, y1), p(x0, y0)]])
 }
 
-fn signed_area(v: &[i16], i0: usize, i1: usize, i2: usize) -> f64 {
-    let e0x = f64::from(i32::from(v[i1 * 2]) - i32::from(v[i0 * 2]));
-    let e0y = f64::from(i32::from(v[i1 * 2 + 1]) - i32::from(v[i0 * 2 + 1]));
-    let e1x = f64::from(i32::from(v[i2 * 2]) - i32::from(v[i0 * 2]));
-    let e1y = f64::from(i32::from(v[i2 * 2 + 1]) - i32::from(v[i0 * 2 + 1]));
-    e0x * e1y - e0y * e1x
+/// Twice the signed area of a triangle of `vertices`.
+fn signed_area(vertices: &[Point<i16>], triangle: [u32; 3]) -> f64 {
+    let [a, b, c] = triangle.map(|i| vertices[i as usize]).map(|p| (f64::from(p.x), f64::from(p.y)));
+    (b.0 - a.0) * (c.1 - a.1) - (b.1 - a.1) * (c.0 - a.0)
 }
 
 /// gtest's `EXPECT_DOUBLE_EQ`: equal within 4 ULPs.
@@ -71,19 +69,19 @@ fn mask(parts: &[(u8, u32, u32)]) -> TileMask {
     parts.iter().map(|&(z, x, y)| CanonicalTileID::new(z, x, y)).collect()
 }
 
-fn total_area(r: &SubdivisionResult) -> f64 {
+fn total_area(r: &SubdividedPolygon) -> f64 {
     let mut area = 0.0;
-    for triangle in r.triangle_indices.as_chunks::<3>().0 {
-        area += signed_area(&r.vertices, triangle[0] as usize, triangle[1] as usize, triangle[2] as usize).abs() / 2.0;
+    for &triangle in &r.triangles {
+        area += signed_area(&r.vertices, triangle).abs() / 2.0;
     }
     area
 }
 
 type Edge = (u32, u32);
 
-fn edge_counts(r: &SubdivisionResult) -> BTreeMap<Edge, i32> {
+fn edge_counts(r: &SubdividedPolygon) -> BTreeMap<Edge, i32> {
     let mut edges = BTreeMap::new();
-    for triangle in r.triangle_indices.as_chunks::<3>().0 {
+    for triangle in &r.triangles {
         for k in 0..3 {
             let a = triangle[k];
             let b = triangle[(k + 1) % 3];
@@ -97,9 +95,9 @@ fn edge_counts(r: &SubdivisionResult) -> BTreeMap<Edge, i32> {
 // to the pole, and a polygon that reaches past that side has triangles on
 // both sides of it, so edges into a pole and edges along that side are
 // shared more than twice and are not part of the outline.
-fn touches_pole(r: &SubdivisionResult, edge: Edge) -> bool {
-    let y0 = r.vertices[edge.0 as usize * 2 + 1];
-    let y1 = r.vertices[edge.1 as usize * 2 + 1];
+fn touches_pole(r: &SubdividedPolygon, edge: Edge) -> bool {
+    let y0 = r.vertices[edge.0 as usize].y;
+    let y1 = r.vertices[edge.1 as usize].y;
     let at_pole = |y: i16| y == NORTH_POLE_Y || y == SOUTH_POLE_Y;
     if at_pole(y0) || at_pole(y1) {
         return true;
@@ -107,7 +105,7 @@ fn touches_pole(r: &SubdivisionResult, edge: Edge) -> bool {
     if y0 != y1 {
         return false;
     }
-    let has_vertex_at = |pole: i16| r.vertices.iter().skip(1).step_by(2).any(|&y| y == pole);
+    let has_vertex_at = |pole: i16| r.vertices.iter().any(|v| v.y == pole);
     (y0 == 0 && has_vertex_at(NORTH_POLE_Y)) || (y0 == EXTENT_I16 && has_vertex_at(SOUTH_POLE_Y))
 }
 
@@ -118,21 +116,19 @@ fn touches_pole(r: &SubdivisionResult, edge: Edge) -> bool {
 // exposes cut edges that were never outline, so that comparison is skipped
 // for a clipped mesh, and for one built without outlines. (C++ defaults
 // `clipped_at_zoom_zero` to false.)
-fn expect_sound_mesh(r: &SubdivisionResult, clipped_at_zoom_zero: bool) {
+fn expect_sound_mesh(r: &SubdividedPolygon, clipped_at_zoom_zero: bool) {
     let mut seen = BTreeSet::new();
-    for (i, vertex) in r.vertices.as_chunks::<2>().0.iter().enumerate() {
-        assert!(seen.insert((vertex[0], vertex[1])), "duplicate vertex {i}");
+    for (i, vertex) in r.vertices.iter().enumerate() {
+        assert!(seen.insert((vertex.x, vertex.y)), "duplicate vertex {i}");
     }
 
     let edges = edge_counts(r);
     for (edge, count) in &edges {
         assert!(
             *count <= 2 || touches_pole(r, *edge),
-            "edge ({}, {})-({}, {}) is shared by {} triangles",
-            r.vertices[edge.0 as usize * 2],
-            r.vertices[edge.0 as usize * 2 + 1],
-            r.vertices[edge.1 as usize * 2],
-            r.vertices[edge.1 as usize * 2 + 1],
+            "edge {:?}-{:?} is shared by {} triangles",
+            r.vertices[edge.0 as usize],
+            r.vertices[edge.1 as usize],
             count
         );
     }
@@ -144,16 +140,16 @@ fn expect_sound_mesh(r: &SubdivisionResult, clipped_at_zoom_zero: bool) {
         if *count != 1 {
             continue;
         }
-        let ax = f64::from(r.vertices[edge.0 as usize * 2]);
-        let ay = f64::from(r.vertices[edge.0 as usize * 2 + 1]);
-        let bx = f64::from(r.vertices[edge.1 as usize * 2]);
-        let by = f64::from(r.vertices[edge.1 as usize * 2 + 1]);
-        for v in 0..r.vertices.len() / 2 {
+        let ax = f64::from(r.vertices[edge.0 as usize].x);
+        let ay = f64::from(r.vertices[edge.0 as usize].y);
+        let bx = f64::from(r.vertices[edge.1 as usize].x);
+        let by = f64::from(r.vertices[edge.1 as usize].y);
+        for (v, vertex) in r.vertices.iter().enumerate() {
             if v == edge.0 as usize || v == edge.1 as usize {
                 continue;
             }
-            let px = f64::from(r.vertices[v * 2]);
-            let py = f64::from(r.vertices[v * 2 + 1]);
+            let px = f64::from(vertex.x);
+            let py = f64::from(vertex.y);
             let cross = (bx - ax) * (py - ay) - (by - ay) * (px - ax);
             if cross != 0.0 {
                 continue;
@@ -168,7 +164,7 @@ fn expect_sound_mesh(r: &SubdivisionResult, clipped_at_zoom_zero: bool) {
     }
     assert_eq!(0, t_junctions);
 
-    if clipped_at_zoom_zero || r.line_index_lists.is_empty() {
+    if clipped_at_zoom_zero || r.lines.is_empty() {
         return;
     }
     let mut exposed = BTreeSet::new();
@@ -178,14 +174,12 @@ fn expect_sound_mesh(r: &SubdivisionResult, clipped_at_zoom_zero: bool) {
         }
     }
     let mut outline = BTreeSet::new();
-    for lines in &r.line_index_lists {
-        for pair in lines.as_chunks::<2>().0 {
-            let edge = (pair[0].min(pair[1]), pair[0].max(pair[1]));
-            if touches_pole(r, edge) {
-                continue;
-            }
-            assert!(outline.insert(edge), "outline edge {}-{} twice", edge.0, edge.1);
+    for pair in &r.lines {
+        let edge = (pair[0].min(pair[1]), pair[0].max(pair[1]));
+        if touches_pole(r, edge) {
+            continue;
         }
+        assert!(outline.insert(edge), "outline edge {}-{} twice", edge.0, edge.1);
     }
     assert_eq!(exposed, outline);
 }
@@ -223,17 +217,15 @@ fn extrude_on_the_globe(polygon: &GeometryCollection, tile: &CanonicalTileID) ->
         type_: FeatureType::Polygon,
         geometry: polygon.clone(),
     };
-    bucket
-        .add_feature(
-            &feature,
-            polygon,
-            &ImagePositions::default(),
-            &PatternLayerMap::default(),
-            0,
-            tile,
-            &mut Triangulator::default(),
-        )
-        .expect("addFeature");
+    bucket.add_feature(
+        &feature,
+        polygon,
+        &ImagePositions::default(),
+        &PatternLayerMap::default(),
+        0,
+        tile,
+        &mut Tessellator::default(),
+    );
     let mut segments_end = 0;
     let mut indices_outside_their_segment = 0;
     let triangles = bucket.triangles.data();
@@ -288,18 +280,15 @@ fn roof_granularity(bucket: &FillExtrusionBucket, polygon: &GeometryCollection, 
     }
     let mut granularity = SubdivisionGranularitySetting::globe().fill.granularity_for_zoom_level(tile.z);
     while granularity >= 1 {
-        let roof = subdivide_polygon(polygon, tile, granularity, false, &mut Triangulator::default());
-        let count = roof.triangle_indices.len() / 3;
+        let roof = subdivide_polygon(polygon, tile, granularity, false, &mut Tessellator::default());
+        let count = roof.triangles.len();
         if count <= drawn.len() {
-            let mut matches = true;
-            let mut i = 0;
-            while i < count * 3 && matches {
-                let triangle = &drawn[drawn.len() - count + i / 3];
-                let index = roof.triangle_indices[i] as usize;
-                matches = triangle[(i % 3) * 2] == roof.vertices[index * 2]
-                    && triangle[(i % 3) * 2 + 1] == roof.vertices[index * 2 + 1];
-                i += 1;
-            }
+            let matches = roof.triangles.iter().zip(&drawn[drawn.len() - count..]).all(|(triangle, drawn)| {
+                (0..3).all(|k| {
+                    let vertex = roof.vertices[triangle[k] as usize];
+                    drawn[k * 2] == vertex.x && drawn[k * 2 + 1] == vertex.y
+                })
+            });
             if matches {
                 return granularity;
             }
@@ -309,17 +298,13 @@ fn roof_granularity(bucket: &FillExtrusionBucket, polygon: &GeometryCollection, 
     0
 }
 
-fn vertices_outside_border(r: &SubdivisionResult, distance: i16) -> usize {
-    r.vertices
-        .as_chunks::<2>()
-        .0
-        .iter()
-        .filter(|&&[x, y]| x == -distance || x == EXTENT_I16 + distance || y == -distance || y == EXTENT_I16 + distance)
-        .count()
+fn vertices_outside_border(r: &SubdividedPolygon, distance: i16) -> usize {
+    let outside = |c: i16| c == -distance || c == EXTENT_I16 + distance;
+    r.vertices.iter().filter(|v| outside(v.x) || outside(v.y)).count()
 }
 
-fn y_coordinates(r: &SubdivisionResult) -> BTreeSet<i16> {
-    r.vertices.iter().skip(1).step_by(2).copied().collect()
+fn y_coordinates(r: &SubdividedPolygon) -> BTreeSet<i16> {
+    r.vertices.iter().map(|v| v.y).collect()
 }
 
 // gtest: Subdivision.Granularity
@@ -352,18 +337,17 @@ fn no_subdivision_keeps_triangles() {
         &CanonicalTileID::new(3, 1, 1),
         1,
         true,
-        &mut Triangulator::default(),
+        &mut Tessellator::default(),
     );
-    assert_eq!(vec![0, 0, 20000, 0, 20000, 20000, 0, 20000], result.vertices);
+    assert_eq!(vec![p(0, 0), p(20000, 0), p(20000, 20000), p(0, 20000)], result.vertices);
     // Two triangles on one diagonal (earcut's pick), wound the same way as GL
     // JS's [2, 0, 3, 2, 1, 0].
-    assert_eq!(6, result.triangle_indices.len());
+    assert_eq!(2, result.triangles.len());
     assert_double_eq(20000.0 * 20000.0, total_area(&result));
-    for triangle in result.triangle_indices.as_chunks::<3>().0 {
-        assert!(signed_area(&result.vertices, triangle[0] as usize, triangle[1] as usize, triangle[2] as usize) < 0.0);
+    for &triangle in &result.triangles {
+        assert!(signed_area(&result.vertices, triangle) < 0.0);
     }
-    assert_eq!(1, result.line_index_lists.len());
-    assert_eq!(vec![0, 1, 1, 2, 2, 3, 3, 0], result.line_index_lists[0]);
+    assert_eq!(vec![[0, 1], [1, 2], [2, 3], [3, 0]], result.lines);
     expect_sound_mesh(&result, false);
 }
 
@@ -371,16 +355,15 @@ fn no_subdivision_keeps_triangles() {
 #[test]
 fn splits_on_cell_boundaries_and_keeps_area() {
     let full = square(0, 0, EXTENT_I16, EXTENT_I16);
-    let result = subdivide_polygon(&full, &CanonicalTileID::new(3, 1, 1), 4, true, &mut Triangulator::default());
+    let result = subdivide_polygon(&full, &CanonicalTileID::new(3, 1, 1), 4, true, &mut Tessellator::default());
     // A 4x4 grid: 25 unique vertices, 32 triangles.
-    assert_eq!(25, result.vertices.len() / 2);
-    assert_eq!(32 * 3, result.triangle_indices.len());
+    assert_eq!(25, result.vertices.len());
+    assert_eq!(32, result.triangles.len());
     assert_double_eq(f64::from(EXTENT) * f64::from(EXTENT), total_area(&result));
-    for triangle in result.triangle_indices.as_chunks::<3>().0 {
-        assert!(signed_area(&result.vertices, triangle[0] as usize, triangle[1] as usize, triangle[2] as usize) < 0.0);
+    for &triangle in &result.triangles {
+        assert!(signed_area(&result.vertices, triangle) < 0.0);
     }
-    assert_eq!(1, result.line_index_lists.len());
-    assert_eq!(16 * 2, result.line_index_lists[0].len());
+    assert_eq!(16, result.lines.len());
     expect_sound_mesh(&result, false);
 }
 
@@ -389,19 +372,19 @@ fn splits_on_cell_boundaries_and_keeps_area() {
 fn strips_extend_each_edge_of_a_fill_that_ends_at_the_tile_border() {
     let tile = CanonicalTileID::new(9, 255, 149);
     let mut result =
-        subdivide_polygon(&square(0, 0, EXTENT_I16, EXTENT_I16), &tile, 4, true, &mut Triangulator::default());
+        subdivide_polygon(&square(0, 0, EXTENT_I16, EXTENT_I16), &tile, 4, true, &mut Tessellator::default());
     add_tile_border_strips(&mut result, &tile, TILE_BORDER_STRIP_WIDTH);
 
     // The 4x4 grid's 32 triangles, two more for each of its 16 cell edges on
     // the border, five outer vertices per side.
-    assert_eq!(64, result.triangle_indices.len() / 3);
+    assert_eq!(64, result.triangles.len());
     assert_eq!(20, vertices_outside_border(&result, TILE_BORDER_STRIP_WIDTH));
     assert_double_eq(
         f64::from(EXTENT) * f64::from(EXTENT) + 4.0 * f64::from(EXTENT) * f64::from(TILE_BORDER_STRIP_WIDTH),
         total_area(&result),
     );
-    for triangle in result.triangle_indices.as_chunks::<3>().0 {
-        assert!(signed_area(&result.vertices, triangle[0] as usize, triangle[1] as usize, triangle[2] as usize) < 0.0);
+    for &triangle in &result.triangles {
+        assert!(signed_area(&result.vertices, triangle) < 0.0);
     }
 }
 
@@ -414,23 +397,23 @@ fn no_strips_where_the_fill_continues_past_the_tile_border() {
         &tile,
         4,
         true,
-        &mut Triangulator::default(),
+        &mut Tessellator::default(),
     );
-    let index_count = result.triangle_indices.len();
+    let triangle_count = result.triangles.len();
     add_tile_border_strips(&mut result, &tile, TILE_BORDER_STRIP_WIDTH);
 
-    assert_eq!(index_count, result.triangle_indices.len());
+    assert_eq!(triangle_count, result.triangles.len());
 }
 
 // gtest: Subdivision.NoStripsForAFillThatStaysInsideTheTile
 #[test]
 fn no_strips_for_a_fill_that_stays_inside_the_tile() {
     let tile = CanonicalTileID::new(9, 255, 149);
-    let mut result = subdivide_polygon(&square(1000, 1000, 3000, 3000), &tile, 4, true, &mut Triangulator::default());
-    let index_count = result.triangle_indices.len();
+    let mut result = subdivide_polygon(&square(1000, 1000, 3000, 3000), &tile, 4, true, &mut Tessellator::default());
+    let triangle_count = result.triangles.len();
     add_tile_border_strips(&mut result, &tile, TILE_BORDER_STRIP_WIDTH);
 
-    assert_eq!(index_count, result.triangle_indices.len());
+    assert_eq!(triangle_count, result.triangles.len());
 }
 
 // gtest: Subdivision.NoStripsOnThePoleBorderOfAPoleTile
@@ -438,10 +421,10 @@ fn no_strips_for_a_fill_that_stays_inside_the_tile() {
 fn no_strips_on_the_pole_border_of_a_pole_tile() {
     let full = square(0, 0, EXTENT_I16, EXTENT_I16);
     let north_pole_tile = CanonicalTileID::new(1, 0, 0);
-    let mut north = subdivide_polygon(&full, &north_pole_tile, 4, true, &mut Triangulator::default());
+    let mut north = subdivide_polygon(&full, &north_pole_tile, 4, true, &mut Tessellator::default());
     add_tile_border_strips(&mut north, &north_pole_tile, TILE_BORDER_STRIP_WIDTH);
     let south_pole_tile = CanonicalTileID::new(1, 1, 1);
-    let mut south = subdivide_polygon(&full, &south_pole_tile, 4, true, &mut Triangulator::default());
+    let mut south = subdivide_polygon(&full, &south_pole_tile, 4, true, &mut Tessellator::default());
     add_tile_border_strips(&mut south, &south_pole_tile, TILE_BORDER_STRIP_WIDTH);
 
     assert!(!y_coordinates(&north).contains(&-TILE_BORDER_STRIP_WIDTH));
@@ -455,7 +438,7 @@ fn no_strips_on_the_pole_border_of_a_pole_tile() {
 fn no_strips_on_the_zoom_zero_tile_whose_edges_are_the_antimeridian_and_the_poles() {
     let world_tile = CanonicalTileID::new(0, 0, 0);
     let mut result =
-        subdivide_polygon(&square(0, 0, EXTENT_I16, EXTENT_I16), &world_tile, 4, true, &mut Triangulator::default());
+        subdivide_polygon(&square(0, 0, EXTENT_I16, EXTENT_I16), &world_tile, 4, true, &mut Tessellator::default());
     add_tile_border_strips(&mut result, &world_tile, TILE_BORDER_STRIP_WIDTH);
 
     assert_eq!(0, vertices_outside_border(&result, TILE_BORDER_STRIP_WIDTH));
@@ -465,20 +448,20 @@ fn no_strips_on_the_zoom_zero_tile_whose_edges_are_the_antimeridian_and_the_pole
 #[test]
 fn pole_tiles_get_pole_quads() {
     let full = square(0, 0, EXTENT_I16, EXTENT_I16);
-    let north = subdivide_polygon(&full, &CanonicalTileID::new(1, 0, 0), 2, true, &mut Triangulator::default());
-    let ys: BTreeSet<i16> = north.vertices.iter().skip(1).step_by(2).copied().collect();
+    let north = subdivide_polygon(&full, &CanonicalTileID::new(1, 0, 0), 2, true, &mut Tessellator::default());
+    let ys = y_coordinates(&north);
     assert!(ys.contains(&NORTH_POLE_Y));
     assert!(!ys.contains(&SOUTH_POLE_Y));
     expect_sound_mesh(&north, false);
 
-    let south = subdivide_polygon(&full, &CanonicalTileID::new(1, 0, 1), 2, true, &mut Triangulator::default());
-    let ys: BTreeSet<i16> = south.vertices.iter().skip(1).step_by(2).copied().collect();
+    let south = subdivide_polygon(&full, &CanonicalTileID::new(1, 0, 1), 2, true, &mut Tessellator::default());
+    let ys = y_coordinates(&south);
     assert!(ys.contains(&SOUTH_POLE_Y));
     assert!(!ys.contains(&NORTH_POLE_Y));
     expect_sound_mesh(&south, false);
 
-    let middle = subdivide_polygon(&full, &CanonicalTileID::new(2, 1, 1), 2, true, &mut Triangulator::default());
-    for &y in middle.vertices.iter().skip(1).step_by(2) {
+    let middle = subdivide_polygon(&full, &CanonicalTileID::new(2, 1, 1), 2, true, &mut Tessellator::default());
+    for y in y_coordinates(&middle) {
         assert_ne!(NORTH_POLE_Y, y);
         assert_ne!(SOUTH_POLE_Y, y);
     }
@@ -498,17 +481,11 @@ fn pole_caps_reach_the_pole_where_the_input_touched_it() {
         p(0, EXTENT_I16),
         p(0, NORTH_POLE_Y),
     ]]);
-    let result = subdivide_polygon(&polygon, &CanonicalTileID::new(1, 0, 0), 64, true, &mut Triangulator::default());
+    let result = subdivide_polygon(&polygon, &CanonicalTileID::new(1, 0, 0), 64, true, &mut Tessellator::default());
     let mut cap_reaches_the_pole = false;
-    for triangle in result.triangle_indices.as_chunks::<3>().0 {
-        let mut corner = false;
-        let mut pole = false;
-        for &index in triangle {
-            let index = index as usize;
-            corner = corner || (result.vertices[index * 2] == 0 && result.vertices[index * 2 + 1] == 0);
-            pole = pole || (result.vertices[index * 2] == 0 && result.vertices[index * 2 + 1] == NORTH_POLE_Y);
-        }
-        cap_reaches_the_pole = cap_reaches_the_pole || (corner && pole);
+    for triangle in &result.triangles {
+        let has = |vertex: Point<i16>| triangle.iter().any(|&i| result.vertices[i as usize] == vertex);
+        cap_reaches_the_pole = cap_reaches_the_pole || (has(p(0, 0)) && has(p(0, NORTH_POLE_Y)));
     }
     assert!(cap_reaches_the_pole);
 }
@@ -517,20 +494,12 @@ fn pole_caps_reach_the_pole_where_the_input_touched_it() {
 #[test]
 fn zoom_zero_drops_geometry_outside_the_tile() {
     let wide = square(-2000, 1000, EXTENT_I16 + 2000, 2000);
-    let result = subdivide_polygon(&wide, &CanonicalTileID::new(0, 0, 0), 8, true, &mut Triangulator::default());
+    let result = subdivide_polygon(&wide, &CanonicalTileID::new(0, 0, 0), 8, true, &mut Tessellator::default());
     // A triangle with any vertex in the buffer is a wrapped copy of geometry
     // the tile itself draws.
-    for &index in &result.triangle_indices {
-        let x = result.vertices[index as usize * 2];
-        assert!(x >= 0);
-        assert!(x <= EXTENT_I16);
-    }
-    for line in &result.line_index_lists {
-        for &index in line {
-            let x = result.vertices[index as usize * 2];
-            assert!(x >= 0);
-            assert!(x <= EXTENT_I16);
-        }
+    let indices = result.triangles.iter().flatten().chain(result.lines.iter().flatten());
+    for &index in indices {
+        assert!((0..=EXTENT_I16).contains(&result.vertices[index as usize].x));
     }
     expect_sound_mesh(&result, true);
 }
@@ -563,7 +532,7 @@ fn world_polygon_with_buffer_is_sound() {
     let world = square(-BUFFER, -BUFFER, EXTENT_I16 + BUFFER, EXTENT_I16 + BUFFER);
     for z in [0u8, 1] {
         let result =
-            subdivide_polygon(&world, &CanonicalTileID::new(z, 0, 0), 128 >> z, true, &mut Triangulator::default());
+            subdivide_polygon(&world, &CanonicalTileID::new(z, 0, 0), 128 >> z, true, &mut Tessellator::default());
         expect_sound_mesh(&result, z == 0);
     }
 }
@@ -587,10 +556,10 @@ fn fill_extrusion_roof_beside_long_walls_takes_its_own_segment() {
     let polygon = fine_zigzag();
     let tile = CanonicalTileID::new(2, 1, 1);
     let bucket = extrude_on_the_globe(&polygon, &tile);
-    let roof = subdivide_polygon(&polygon, &tile, 32, false, &mut Triangulator::default());
+    let roof = subdivide_polygon(&polygon, &tile, 32, false, &mut Tessellator::default());
     let last = bucket.triangle_segments.last().expect("segment");
-    assert_eq!(roof.vertices.len() / 2, last.vertex_length);
-    assert_eq!(roof.triangle_indices.len(), last.index_length);
+    assert_eq!(roof.vertices.len(), last.vertex_length);
+    assert_eq!(roof.triangles.len() * 3, last.index_length);
     assert_eq!(32, roof_granularity(&bucket, &polygon, &tile));
 }
 
@@ -603,7 +572,7 @@ fn fill_extrusion_roof_beyond_the_index_limit_keeps_its_granularity() {
     let polygon = fine_zigzag();
     let tile = CanonicalTileID::new(1, 0, 0);
     assert!(
-        subdivide_polygon(&polygon, &tile, 64, false, &mut Triangulator::default()).vertices.len() / 2
+        subdivide_polygon(&polygon, &tile, 64, false, &mut Tessellator::default()).vertices.len()
             > MAX_SEGMENT_VERTICES
     );
     let bucket = extrude_on_the_globe(&polygon, &tile);
@@ -634,11 +603,9 @@ fn quad_and_grid() {
     assert_eq!(3 * 5, polar.vertices.len() / 2);
     assert_eq!(NORTH_POLE_Y, polar.vertices[1]);
     assert_eq!(SOUTH_POLE_Y, polar.vertices[(3 * 5 - 1) * 2 + 1]);
+    let polar_vertices: Vec<Point<i16>> = polar.vertices.as_chunks::<2>().0.iter().map(|&[x, y]| p(x, y)).collect();
     for triangle in polar.indices.as_chunks::<3>().0 {
-        assert!(
-            signed_area(&polar.vertices, usize::from(triangle[0]), usize::from(triangle[1]), usize::from(triangle[2]))
-                < 0.0
-        );
+        assert!(signed_area(&polar_vertices, triangle.map(u32::from)) < 0.0);
     }
 }
 

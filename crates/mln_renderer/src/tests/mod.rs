@@ -17,9 +17,8 @@ mod text;
 mod gtest_image_store;
 // gtests-core: test/renderer/dynamic_texture_atlas.test.cpp.
 mod gtest_dynamic_texture_atlas;
-mod gtest_fill_generator;
+mod gtest_fill_mesh;
 // gtests-core: test/renderer/pattern_atlas.test.cpp.
-mod gtest_fill_large_mesh_arrays;
 mod gtest_pattern_atlas;
 mod gtest_tile_lod;
 // gtests-core: test/algorithm/update_renderables.test.cpp.

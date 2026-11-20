@@ -34,10 +34,11 @@ use mln_util::size::Size;
 
 use super::{cast_matrix, refresh_paint_attributes};
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
-use crate::buckets::line_bucket::{LineBinders, LineBucket, LineLayoutVertex};
+use crate::buckets::line_bucket::{LineBinders, LineBucket};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
+use crate::gfx::line_mesh::LineLayoutVertex;
 use crate::gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
 use crate::gfx::shader_registry::ShaderRegistry;
 use crate::gfx::store::SharedTexture;

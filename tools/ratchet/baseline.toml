@@ -8,7 +8,6 @@
 "crates/mln_expression/src/comparison.rs" = 1
 "crates/mln_expression/src/dsl.rs" = 1
 "crates/mln_expression/src/match_.rs" = 2
-"crates/mln_gfx/src/polyline_generator.rs" = 5
 "crates/mln_image/src/png_writer.rs" = 1
 "crates/mln_renderer/src/layers/render_symbol_layer.rs" = 1
 "crates/mln_renderer/src/layout/symbol_instance.rs" = 1
