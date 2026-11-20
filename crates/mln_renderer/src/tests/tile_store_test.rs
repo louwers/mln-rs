@@ -222,7 +222,7 @@ fn a_not_modified_reload_keeps_the_data() {
     assert!(tile.tile().is_complete(), "a reload keeps the tile complete");
     file_source.respond(not_modified());
     tile.update();
-    assert!(requesting_network(&tile, false));
+    assert!(requesting_network(&tile, true), "the request stays open for the next revalidation");
     assert_eq!(tile.layout().data.as_ref().expect("data").key, key, "the same data");
     assert_eq!(manual.submitted(), 1, "nothing to lay out again");
     assert!(Arc::ptr_eq(&shown_layout(&tile), &shown), "the same contents");
@@ -244,9 +244,10 @@ fn a_not_modified_reload_keeps_the_data() {
     assert!(tile.tile().is_complete());
 }
 
-/// A tile required again keeps network data that hasn't expired, or that
-/// has no expiry, as a local file's: it neither requests nor lays it out
-/// again.
+/// A tile required again keeps network data without an expiry, as a local
+/// file's: it neither requests nor lays it out again. Data that expires is
+/// requested with its expiry, which the online file source holds the
+/// request until.
 #[test]
 fn fresh_data_is_kept_when_required_again() {
     let test = Test::new();
@@ -255,7 +256,8 @@ fn fresh_data_is_kept_when_required_again() {
     let mut tile = test.tileset_tile(&file_source, Box::new(manual.clone()));
     let id = tile.id;
     tile.set_style(&style(&[water_layer("water", "red")]));
-    for expires in [None, Some(Timestamp::from_secs(i64::MAX))] {
+    let later = Timestamp::from_secs(i64::MAX);
+    for expires in [None, Some(later)] {
         tile.set_necessity(&id, TileNecessity::Optional);
         tile.set_necessity(&id, TileNecessity::Required);
         let mut response = water();
@@ -268,7 +270,9 @@ fn fresh_data_is_kept_when_required_again() {
 
         tile.set_necessity(&id, TileNecessity::Optional);
         tile.set_necessity(&id, TileNecessity::Required);
-        assert_eq!(file_source.pending(), 0, "no request");
+        assert_eq!(file_source.pending(), usize::from(expires.is_some()), "a request only for data that expires");
+        let OriginLoad::Tileset(tileset) = &tile.tile().load.origin else { unreachable!() };
+        assert_eq!(tileset.resource.prior_expires, expires, "held until the data expires");
         assert!(tile.tile().is_complete());
         // Expired, so the next round requests it again.
         tile.with(|tile| {
@@ -734,11 +738,12 @@ fn a_relayout_keeps_only_the_bins_it_uses() {
     assert_eq!(icons(&tile), (vec!["a".to_owned()], 1));
 }
 
-/// A network error leaves the tile's request open for the file source's
-/// retry: the tile fails once however many errors come, takes the retry's
-/// data, which ends the request, and ignores what comes after it.
+/// A required tile's network request stays open, and the tile takes each
+/// answer the file source gives it: after errors, of which a streak fails
+/// the tile once, its retry's data; when the data expires, a revalidation's
+/// `not_modified`, which keeps the data, or new data, which lays out again.
 #[test]
-fn a_failed_network_load_takes_the_file_source_retry() {
+fn a_tile_takes_every_answer_to_its_open_request() {
     use TileOperation::{EndParse, Error, LoadFromNetwork, RequestedFromNetwork, StartParse};
 
     let test = Test::new();
@@ -757,18 +762,33 @@ fn a_failed_network_load_takes_the_file_source_retry() {
     responder.send(failed());
     tile.update();
     assert_eq!(tile.actions(), [StartParse, RequestedFromNetwork, Error], "one error for the streak");
-    assert!(!responder.is_cancelled(), "the request stays open");
     assert!(tile.tile().is_complete(), "a failed tile has done what it can for now");
 
-    // The retry's answer, and one more behind it.
+    // The retry's answer.
     responder.send(water());
-    responder.send(failed());
     tile.update();
     tile.update();
     assert_eq!(tile.actions(), [LoadFromNetwork, StartParse, EndParse]);
-    assert!(responder.is_cancelled(), "the answer ended the request");
     assert!(tile.shows_layout() && tile.tile().is_complete());
+
+    // Revalidations: unchanged, failed, then new data.
+    responder.send(not_modified());
+    tile.update();
+    assert_eq!(tile.actions(), [LoadFromNetwork]);
+    responder.send(failed());
+    tile.update();
+    assert_eq!(tile.actions(), [Error]);
+    assert!(tile.shows_layout(), "a failed revalidation keeps the data");
+    responder.send(water());
+    tile.update();
+    tile.update();
+    assert_eq!(tile.actions(), [LoadFromNetwork, StartParse, EndParse]);
+    assert!(tile.shows_layout() && tile.tile().is_complete());
+
+    assert!(!responder.is_cancelled(), "the request stays open");
     assert_eq!(file_source.pending(), 0, "no new request");
+    tile.set_necessity(&id, TileNecessity::Optional);
+    assert!(responder.is_cancelled(), "an optional tile drops it");
 }
 
 /// A tile that becomes optional while its failed request waits for the file

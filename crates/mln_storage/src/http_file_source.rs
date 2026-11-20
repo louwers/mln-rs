@@ -12,7 +12,8 @@
 // read in order with curl's header callback rules (case-insensitive names;
 // `Last-Modified`/`Expires` as HTTP dates, `Cache-Control`,
 // `ETag`, `Retry-After`, `X-Rate-Limit-Reset`). Status codes map to the same
-// Response fields and errors.
+// Response fields and errors, except that a 408 is a connection error, which
+// is retried, and a 5xx takes its `Retry-After` as a 429 does.
 //
 // The transfer itself is an `HttpTransport`, the platform's HTTP stack where
 // it has one: NSURLSession on Apple platforms, HttpURLConnection on Android,
@@ -199,9 +200,16 @@ fn build_response(resource: &Resource, transfer: Result<Transfer, Box<ResourceEr
             "HTTP status code 429",
             parse_retry_headers(&retry_after, &x_rate_limit_reset),
         )));
+    } else if response_code == 408 {
+        // The server timed out waiting for the request, which may be sent again.
+        response.error = Some(Box::new(ResourceError::new(Reason::Connection, "HTTP status code 408")));
     } else if (500..600).contains(&response_code) {
-        response.error =
-            Some(Box::new(ResourceError::new(Reason::Server, format!("HTTP status code {response_code}"))));
+        // A 503's `Retry-After` says how long the server expects to be unavailable.
+        response.error = Some(Box::new(ResourceError::with_retry_after(
+            Reason::Server,
+            format!("HTTP status code {response_code}"),
+            parse_retry_headers(&retry_after, &None),
+        )));
     } else {
         response.error = Some(Box::new(ResourceError::new(Reason::Other, format!("HTTP status code {response_code}"))));
     }

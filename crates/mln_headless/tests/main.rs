@@ -40,3 +40,5 @@ mod pixel_ratio_test;
 mod resize_test;
 // Text that the device's fonts shape, with a font file standing in for them.
 mod system_fonts_test;
+// Tiles reloading as their data expires, over an online file source.
+mod tile_expiry_test;

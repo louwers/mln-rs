@@ -32,7 +32,7 @@ fn server_error() {
 
     // After 3, exponential backoff
     assert_eq!(Some(Duration::from_secs(2)), error_retry_timeout(Reason::Server, 4, None));
-    assert_eq!(Some(Duration::from_secs(1 << 31)), error_retry_timeout(Reason::Server, 50, None));
+    assert_eq!(Some(Duration::from_secs(60)), error_retry_timeout(Reason::Server, 50, None));
 }
 
 // gtest: HttpRetry.ConnectionError
@@ -40,7 +40,7 @@ fn server_error() {
 fn connection_error() {
     // Exponential backoff
     assert_eq!(Some(Duration::from_secs(1)), error_retry_timeout(Reason::Server, 1, None));
-    assert_eq!(Some(Duration::from_secs(1 << 31)), error_retry_timeout(Reason::Connection, 50, None));
+    assert_eq!(Some(Duration::from_secs(60)), error_retry_timeout(Reason::Connection, 50, None));
 }
 
 // gtest: HttpRetry.RateLimit
@@ -52,8 +52,8 @@ fn rate_limit() {
     // Default
     assert_eq!(Some(Duration::from_secs(5)), error_retry_timeout(Reason::RateLimit, 1, None));
 
-    // A retry time that has already passed retries at once
-    assert_eq!(Some(Duration::ZERO), error_retry_timeout(Reason::RateLimit, 1, Some(now_plus(-1))));
+    // A retry time that has already passed waits a second
+    assert_eq!(Some(Duration::from_secs(1)), error_retry_timeout(Reason::RateLimit, 1, Some(now_plus(-1))));
 }
 
 // gtest: HttpRetry.ExpiredInitial

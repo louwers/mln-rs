@@ -2834,6 +2834,7 @@ dependencies = [
  "geojson",
  "glam",
  "glow",
+ "httpmock",
  "khronos-egl",
  "mln-rs-d3d12",
  "mln-rs-expression",
