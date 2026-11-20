@@ -12,7 +12,7 @@ use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
 use crate::manifest_parser::ManifestParser;
-use crate::metadata::{MapDebugOptions, MapMode, TestMetadata};
+use crate::metadata::{MapDebugOptions, MapMode, TerrainSkirtLength, TestMetadata};
 use crate::parser::{parse_test_metadata, parse_test_operations};
 use crate::render_test::{Arguments, RunResult, parse_arguments, run_render_tests_with};
 use crate::runner::{
@@ -256,6 +256,10 @@ fn parses_test_metadata() {
     // GL JS's fixtures, as the importer copies them.
     let imported = parse_test_metadata(&style_paths("gljs/render-tests/sky/fog-color/default"));
     assert_eq!(imported.allowed, 0.00025);
+    assert_eq!(imported.terrain_skirt_length, TerrainSkirtLength::Auto);
+    let skirts = |id| parse_test_metadata(&style_paths(id)).terrain_skirt_length;
+    assert_eq!(skirts("gljs/render-tests/terrain/skirts-auto"), TerrainSkirtLength::Auto);
+    assert_eq!(skirts("gljs/render-tests/terrain/skirts-none"), TerrainSkirtLength::None);
 
     let missing = parse_test_metadata(&style_paths("render-tests/does-not-exist"));
     assert!(missing.document_object_empty());
@@ -312,6 +316,10 @@ impl TestRunnerImpl for MockMap {
         self.log(format!("terrain {json}"));
         Ok(())
     }
+    fn set_center_clamped_to_ground(&mut self, clamped: bool) -> Result<(), MapError> {
+        self.log(format!("clamped {clamped}"));
+        Ok(())
+    }
     fn set_layer_property(&mut self, layer: &str, name: &str, value: &serde_json::Value) -> Result<(), MapError> {
         self.log(format!("set {layer} {name} {value}"));
         if layer != "background" {
@@ -359,6 +367,7 @@ fn terrain_operations_drive_the_map() {
             ["setTerrain"],
             ["idle"],
             ["setTerrain", {"source": "dem", "exaggeration": 1}],
+            ["setCenterClampedToGround", false],
         ]}}}),
         ..TestMetadata::default()
     };
@@ -370,7 +379,7 @@ fn terrain_operations_drive_the_map() {
     assert!(operations.iter().all(|operation| operation(&mut ctx)));
     assert_eq!(
         *calls.borrow(),
-        vec!["render", "terrain null", "render", r#"terrain {"source":"dem","exaggeration":1}"#]
+        vec!["render", "terrain null", "render", r#"terrain {"source":"dem","exaggeration":1}"#, "clamped false"]
     );
 }
 
@@ -784,14 +793,6 @@ fn timeout_message_lists_the_pending_requests() {
 
 // --- GL JS's terrain fixtures ---
 
-/// The fixtures that call a map API the runner doesn't have an operation for
-/// yet, and the operation. The phase that adds the API adds the operation and
-/// empties this list.
-const LATER_OPERATIONS: [(&str, &str); 2] = [
-    ("gljs/render-tests/high-pitch/terrain-pitch95", "setCenterClampedToGround"),
-    ("gljs/render-tests/terrain/dem-cell-centre-hillshade-peak", "setCenterClampedToGround"),
-];
-
 /// The ids, relative to the integration directory, of the tests in `dir`.
 fn fixture_ids(dir: &Path) -> Vec<String> {
     let root = Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join(INTEGRATION);
@@ -819,19 +820,12 @@ fn gljs_fixtures_parse_and_no_ignore_is_stale() {
     let manifest = ManifestParser::parse_manifest(OUR_MANIFEST, String::new()).unwrap();
     let ignored: Vec<&str> =
         manifest.get_ignores().iter().map(|(id, _)| id.as_str()).filter(|id| id.starts_with("gljs/")).collect();
-    let mut unsupported = Vec::new();
     for id in &ids {
         let mut metadata = parse_test_metadata(&style_paths(id));
         assert_eq!(metadata.error_message, "", "{id}");
         parse_test_operations(&mut metadata);
-        if let Some(name) = metadata.error_message.strip_prefix("Unsupported operation: ") {
-            unsupported.push((id.as_str(), name.to_string()));
-        } else {
-            assert_eq!(metadata.error_message, "", "{id}");
-        }
+        assert_eq!(metadata.error_message, "", "{id}");
     }
-    let later: Vec<_> = LATER_OPERATIONS.iter().map(|(id, name)| (*id, (*name).to_string())).collect();
-    assert_eq!(unsupported, later);
     for id in ignored {
         assert!(ids.iter().any(|fixture| fixture == id), "{id} isn't a fixture");
     }

@@ -5,7 +5,9 @@ use std::ops::Not;
 use std::sync::Arc;
 
 use mln_map::transform::Transform;
-use mln_map_types::{CameraOptions, ConstrainMode, MapDebugOptions, MapMode, TileLodMode, ViewportMode};
+use mln_map_types::{
+    CameraOptions, ConstrainMode, MapDebugOptions, MapMode, TerrainSkirtLength, TileLodMode, ViewportMode,
+};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::{FileSource, Resource, Responder, Response};
 use mln_style::sources::raster_dem_source;
@@ -74,6 +76,7 @@ fn update_parameters(style: Style, transform: &Transform, mode: MapMode) -> Upda
         still_image_request_id: 0,
         cross_source_collisions: true,
         fast_pfor_enabled: false,
+        terrain_skirt_length: TerrainSkirtLength::Auto,
         tile_lod_min_radius: 3.0,
         tile_lod_scale: 1.0,
         tile_lod_pitch_threshold: mln_math::deg2rad(60.0),

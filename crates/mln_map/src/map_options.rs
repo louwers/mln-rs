@@ -1,4 +1,4 @@
-use mln_map_types::{ConstrainMode, MapMode, NorthOrientation, ViewportMode};
+use mln_map_types::{ConstrainMode, MapMode, NorthOrientation, TerrainSkirtLength, ViewportMode};
 use mln_util::size::Size;
 
 /// What a map does with a style image once no layer uses it.
@@ -39,6 +39,14 @@ pub struct MapOptions {
     /// What the map does with a style image once no layer uses it. By
     /// default, it removes the image.
     pub unused_style_image_policy: UnusedStyleImagePolicy,
+    /// Whether the center of a camera at rest stands on the terrain, at its
+    /// height under the center. On by default. [`Map::set_center_clamped_to_ground`]
+    /// changes it.
+    ///
+    /// [`Map::set_center_clamped_to_ground`]: crate::Map::set_center_clamped_to_ground
+    pub center_clamped_to_ground: bool,
+    /// How far the skirts of terrain tiles reach down. `Auto` by default.
+    pub terrain_skirt_length: TerrainSkirtLength,
 }
 
 impl Default for MapOptions {
@@ -53,6 +61,8 @@ impl Default for MapOptions {
             pixel_ratio: 1.0,
             fast_pfor_enabled: false,
             unused_style_image_policy: UnusedStyleImagePolicy::Remove,
+            center_clamped_to_ground: true,
+            terrain_skirt_length: TerrainSkirtLength::Auto,
         }
     }
 }

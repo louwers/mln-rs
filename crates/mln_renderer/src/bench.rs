@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, TransformState};
+use mln_map_types::{MapDebugOptions, MapMode, TerrainSkirtLength, TileLodMode, TransformState};
 use mln_storage::Resource;
 use mln_style::Style;
 use mln_style::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
@@ -278,6 +278,7 @@ impl SymbolView {
             still_image_request_id: 0,
             cross_source_collisions: true,
             fast_pfor_enabled: false,
+            terrain_skirt_length: TerrainSkirtLength::Auto,
             tile_lod_min_radius: 3.0,
             tile_lod_scale: 1.0,
             tile_lod_pitch_threshold: mln_math::deg2rad(60.0),

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, View};
+use mln_map_types::{MapDebugOptions, MapMode, TerrainSkirtLength, TileLodMode, View};
 use mln_style::Style;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::time::Instant;
@@ -41,6 +41,8 @@ pub struct UpdateParameters {
     pub still_image_request_id: u64,
     pub cross_source_collisions: bool,
     pub fast_pfor_enabled: bool,
+    /// How far the skirts of terrain tiles reach down.
+    pub terrain_skirt_length: TerrainSkirtLength,
 
     pub tile_lod_min_radius: f64,
     pub tile_lod_scale: f64,

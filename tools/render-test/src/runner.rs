@@ -146,6 +146,10 @@ pub trait TestRunnerImpl {
     fn set_terrain(&mut self, _json: &str) -> Result<(), MapError> {
         unsupported("Style::setTerrain")
     }
+    /// Sets whether the center of a camera at rest stands on the terrain.
+    fn set_center_clamped_to_ground(&mut self, _clamped: bool) -> Result<(), MapError> {
+        unsupported("Map::setCenterClampedToGround")
+    }
     fn remove_source(&mut self, _id: &str) -> Result<bool, MapError> {
         unsupported("Style::removeSource")
     }
@@ -927,10 +931,11 @@ impl TestRunner {
         }
 
         let key = format!(
-            "{}/{}/{}",
+            "{}/{}/{}/{}",
             ctx.metadata.map_mode as u32,
             ctx.metadata.pixel_ratio,
-            u32::from(ctx.metadata.cross_source_collisions)
+            u32::from(ctx.metadata.cross_source_collisions),
+            ctx.metadata.terrain_skirt_length as u32
         );
 
         let mut cut_off_labels_report = String::new();

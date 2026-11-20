@@ -9,7 +9,8 @@ use geo_types::Geometry;
 use glam::{DMat4, DVec3};
 use mln_map_types::{
     AnimationOptions, BoundOptions, CameraDelta, CameraError, CameraLimits, CameraOptions, CameraUpdate,
-    MapDebugOptions, MapMode, ProjectionMode, TileLodMode, TransformState, VerticalPerspectiveProjection, Viewport,
+    MapDebugOptions, MapMode, ProjectionMode, TerrainSkirtLength, TileLodMode, TransformState,
+    VerticalPerspectiveProjection, Viewport,
 };
 use mln_renderer::{
     Registry, RendererEvent, RendererEvents, RenderingStats, UpdateParameters, UpdateReader, UpdateSlot,
@@ -73,6 +74,9 @@ pub struct Map {
     cross_source_collisions: bool,
     fast_pfor_enabled: bool,
     unused_style_image_policy: UnusedStyleImagePolicy,
+    /// Whether the center of a camera at rest stands on the terrain.
+    center_clamped_to_ground: bool,
+    terrain_skirt_length: TerrainSkirtLength,
 
     debug_options: MapDebugOptions,
     rendering_stats_view: Option<RenderingStatsView>,
@@ -173,6 +177,8 @@ impl Map {
             cross_source_collisions: map_options.cross_source_collisions,
             fast_pfor_enabled: map_options.fast_pfor_enabled,
             unused_style_image_policy: map_options.unused_style_image_policy,
+            center_clamped_to_ground: map_options.center_clamped_to_ground,
+            terrain_skirt_length: map_options.terrain_skirt_length,
             debug_options: MapDebugOptions::NO_DEBUG,
             rendering_stats_view: None,
             style,
@@ -601,6 +607,7 @@ impl Map {
             still_image_request_id: self.still_image_request_id,
             cross_source_collisions: self.cross_source_collisions,
             fast_pfor_enabled: self.fast_pfor_enabled,
+            terrain_skirt_length: self.terrain_skirt_length,
             tile_lod_min_radius: self.tile.lod_min_radius,
             tile_lod_scale: self.tile.lod_scale,
             tile_lod_pitch_threshold: mln_math::deg2rad(self.tile.lod_pitch_threshold),
@@ -1371,6 +1378,23 @@ impl Map {
         self.transform.set_free_camera_options(camera);
         self.camera_mutated = true;
         self.on_update();
+    }
+
+    // MARK: - Terrain
+
+    /// Sets whether the center of a camera at rest stands on the terrain, at
+    /// its height under the center ([`MapOptions::center_clamped_to_ground`]).
+    pub fn set_center_clamped_to_ground(&mut self, clamped: bool) {
+        if self.center_clamped_to_ground != clamped {
+            self.center_clamped_to_ground = clamped;
+            self.on_update();
+        }
+    }
+
+    /// Whether the center of a camera at rest stands on the terrain.
+    #[must_use]
+    pub fn center_clamped_to_ground(&self) -> bool {
+        self.center_clamped_to_ground
     }
 
     // MARK: - Debug
