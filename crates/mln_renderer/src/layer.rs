@@ -48,10 +48,10 @@
 //! renderer ([`LayerHost`]). The engine asks for each, and does without it
 //! for a type that has none.
 //!
-//! The drawing types that the hooks name are in the engine's unstable
-//! module until they become part of the contract. So are the frame's
-//! [`Atlases`], which the engine declares for line and background: a layer
-//! type can't yet declare state that the frame's layers share.
+//! The types a layer type draws with, which the hooks name, are the
+//! [draw services](crate::draw). The frame's [`Atlases`], which the engine
+//! declares for line and background, are in the engine's unstable module: a
+//! layer type can't yet declare state that the frame's layers share.
 
 use std::sync::Arc;
 
@@ -79,8 +79,12 @@ use crate::layer_drawing::LayerDrawing;
 pub use crate::layout::filter_groups::FilterGroups;
 pub use crate::layout::layout::{BuildParams, Layout, LayoutParameters, NoLayout, SourceLayer, layers_by_id};
 pub use crate::layout::tile_layout::Resolved;
-use crate::paint_parameters::PaintParameters;
-pub use crate::paint_property_binder::{CrossFadedPaintPropertyBinder, PaintPropertyBinder};
+use crate::paint_parameters::{DrawFrame, PaintParameters};
+pub use crate::paint_property_binder::{
+    BinderValue, CrossFadedPaintPropertyBinder, InterleavedVertexBuffer, PaintPropertyBinder, PaintPropertyBinderBase,
+    PatternDependency, bind_paint_property,
+};
+pub use crate::paint_property_statistics::StatisticValue;
 pub use crate::render_layer::LayerBucket;
 use crate::render_layer::{Atlases, BucketPlacementData};
 pub use crate::render_pass::RenderPass;
@@ -183,7 +187,7 @@ pub trait LayerType: StyleLayerType {
         state: &mut Self::State,
         drawing: &mut Self::Drawing,
         gpu: &mut dyn Gpu,
-        cx: &mut DrawContext<'_, '_, '_, Self>,
+        cx: &mut DrawContext<'_, '_, Self>,
     );
 
     /// Called in the encode when the frame draws in `variant`, another
@@ -205,7 +209,7 @@ pub trait LayerType: StyleLayerType {
     // The capabilities.
 
     /// Whether a layer of the type draws 3D geometry, with draws of
-    /// [`DrawDepth::Volume`](crate::unstable::DrawDepth::Volume). The layers
+    /// [`DrawDepth::Volume`](crate::draw::DrawDepth::Volume). The layers
     /// above the lowest 3D layer draw their opaque draws in the translucent
     /// pass, and on the globe, the planet's depth hides 3D geometry behind
     /// the horizon.
@@ -437,9 +441,9 @@ impl<T: LayerType> UpdateContext<'_, '_, T> {
     }
 }
 
-/// What a layer's draws read of the frame, and the GPU services that make
-/// them.
-pub struct DrawContext<'a, 'f, 'p, T: LayerType> {
+/// What a layer's draws read of the frame, and the renderer's GPU state that
+/// keeps their objects.
+pub struct DrawContext<'a, 'f, T: LayerType> {
     /// The layer's tiles of the frame, as its update got them, each with
     /// what it shows the layer; none for a layer without a source.
     pub tiles: &'a [FrameTile<'f, T>],
@@ -452,6 +456,8 @@ pub struct DrawContext<'a, 'f, 'p, T: LayerType> {
     pub projection_variant: ProjectionVariant,
     /// The atlases the layers' draws share.
     pub atlases: &'a Atlases,
-    /// The encode's GPU state, camera and frame values.
-    pub paint: &'a mut PaintParameters<'p>,
+    /// The renderer's GPU state, whose stores keep the draws' objects.
+    pub context: &'a mut Context,
+    /// The frame the draws are made for.
+    pub frame: DrawFrame<'a>,
 }

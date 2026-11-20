@@ -6,10 +6,9 @@
 // by the tile's slot and id (`FrameTile`); the store changes them only in
 // the frame's update, before the layers read them.
 
-use glam::{DMat4, Vec2};
-use mln_map_types::{MapDebugOptions, ProjectionData, View};
+use glam::DMat4;
+use mln_map_types::{MapDebugOptions, ProjectionData};
 use mln_style::layer_type::SourceKind;
-use mln_style_types::TranslateAnchorType;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 
 use crate::buckets::debug_bucket::DebugBucket;
@@ -22,7 +21,7 @@ use crate::tile::dem::DemContents;
 use crate::tile::raster::RasterContents;
 use crate::tile::tile::Tile;
 
-pub struct RenderTile {
+pub(crate) struct RenderTile {
     pub(crate) id: UnwrappedTileID,
     /// The projection contract for this tile; `matrix` is its main matrix.
     pub(crate) projection: ProjectionData,
@@ -60,23 +59,6 @@ impl RenderTile {
             needs_rendering: false,
             debug_bucket: None,
         }
-    }
-
-    /// The layer's translation in tile units, rotated for its anchor.
-    #[must_use]
-    pub fn tile_unit_translation(
-        id: &UnwrappedTileID,
-        translation: [f32; 2],
-        anchor: TranslateAnchorType,
-        state: &View,
-    ) -> [f32; 2] {
-        if translation[0] == 0.0 && translation[1] == 0.0 {
-            return [0.0, 0.0];
-        }
-        let angle = if anchor == TranslateAnchorType::Viewport { (-state.angle()) as f32 } else { 0.0f32 };
-        let translate = Vec2::from_angle(angle).rotate(Vec2::new(translation[0], translation[1]));
-        let zoom = state.zoom() as f32;
-        [id.pixels_to_tile_units(translate.x, zoom), id.pixels_to_tile_units(translate.y, zoom)]
     }
 
     #[must_use]

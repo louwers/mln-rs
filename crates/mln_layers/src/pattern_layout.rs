@@ -10,10 +10,10 @@
 use std::sync::Arc;
 
 use mln_renderer::layer::{
-    Bucket, BuildParams, EvaluatedLayer, FeatureIndexBuilder, LayerType, Layout, LayoutParameters, Resolved,
-    SourceLayer, layers_by_id,
+    Bucket, BuildParams, EvaluatedLayer, FeatureIndexBuilder, LayerType, Layout, LayoutParameters, PatternDependency,
+    Resolved, SourceLayer, layers_by_id,
 };
-use mln_renderer::unstable::{PatternDependency, Tessellator};
+use mln_renderer::unstable::Tessellator;
 use mln_style::evaluated::Evaluated;
 use mln_style::expression::{EvaluationContext, Image};
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};

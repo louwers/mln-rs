@@ -92,7 +92,9 @@ impl Indexes {
 /// The indexes a draw binds: its own, or those it shares through the
 /// context's store.
 pub enum DrawIndexes {
+    /// The draw's own indexes.
     Own(Indexes),
+    /// Indexes in the context's store, which other draws share.
     Shared(SharedIndexes),
 }
 

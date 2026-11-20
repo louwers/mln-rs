@@ -32,7 +32,7 @@ use mln_util::hash::{HashMap, HashSet};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecMap;
 
-use crate::draw::{DrawGeometry, DrawObjects, Textures};
+use crate::draw_objects::{DrawGeometry, DrawObjects, Textures};
 use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
@@ -217,12 +217,12 @@ impl DebugLayer {
     /// Makes the frame's draws of the overlay, and writes the buffers they
     /// read.
     pub(crate) fn update_draws(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        let zoom = parameters.view.zoom();
+        let zoom = parameters.frame.view.zoom();
         for (index, draw) in self.draws.iter().enumerate() {
             let tile_id = draw.tile.to_unwrapped();
             let projection = projection_data(
                 &tile_id,
-                parameters,
+                &parameters.frame,
                 [0.0, 0.0],
                 TranslateAnchorType::Viewport,
                 false,
@@ -400,7 +400,7 @@ impl RenderSource for RenderTileSource {
         }
 
         let source = &self.id;
-        let globe = parameters.view.is_globe();
+        let globe = parameters.frame.view.is_globe();
         let projection_variant = if globe { ProjectionVariant::Globe } else { ProjectionVariant::Mercator };
 
         let polyline_shader =

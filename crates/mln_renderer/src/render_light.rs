@@ -4,6 +4,7 @@ use mln_style::light::{Light, LightProperties};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 
 pub(crate) type TransitioningLight = LightProperties::Unevaluated;
+/// The style's light, evaluated for a frame.
 pub type EvaluatedLight = LightProperties::PossiblyEvaluated;
 
 pub(crate) struct RenderLight {

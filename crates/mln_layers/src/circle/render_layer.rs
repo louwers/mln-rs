@@ -10,14 +10,14 @@ use mln_gfx::shaders::shader_defines::{
 };
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::TileProjector;
+use mln_renderer::draw::{
+    DrawFrame, DrawGeometry, DrawList, DrawObjects, KeptDraw, SharedAttribute, Textures, TileDraws, UniformWriter,
+    Uniforms, VertexAttributeArray, bucket_indexes, bucket_vertices, cast_matrix, globe_extrude_scale, paint_vertices,
+    projection_data, tile_unit_translation, to_projection_ubo,
+};
 use mln_renderer::layer::{
     Bucket, DrawContext, EvaluatedLayer, FeatureQuery, HitTest, LayerBucket, LayerType, LayerValues, LayoutParameters,
     RenderPass, SourceLayer,
-};
-use mln_renderer::unstable::{
-    DrawGeometry, DrawList, DrawObjects, KeptDraw, PaintParameters, RenderTile, SharedAttribute, Textures, TileDraws,
-    UniformWriter, Uniforms, VertexAttributeArray, bucket_indexes, bucket_vertices, cast_matrix, globe_extrude_scale,
-    paint_vertices, projection_data, to_projection_ubo,
 };
 use mln_style::expression::EvaluationContext;
 use mln_style_types::{AlignmentType, CirclePitchScaleType};
@@ -71,16 +71,16 @@ fn uniforms(
     layer: &EvaluatedLayer<Circle>,
     tile_id: &OverscaledTileID,
     binders: &CircleBinders,
-    parameters: &PaintParameters<'_>,
+    frame: &DrawFrame<'_>,
 ) -> CircleUniforms {
     const IN_VIEWPORT_PIXEL_UNITS: bool = false;
     const NEAR_CLIPPED: bool = false;
     let evaluated = &layer.paint;
-    let zoom = parameters.view.zoom() as f32;
+    let zoom = frame.view.zoom() as f32;
     let tile_id = tile_id.to_unwrapped();
     let projection = projection_data(
         &tile_id,
-        parameters,
+        frame,
         *evaluated.circle_translate.uniform(),
         *evaluated.circle_translate_anchor.uniform(),
         NEAR_CLIPPED,
@@ -91,14 +91,14 @@ fn uniforms(
 
     let pitch_with_map = *evaluated.circle_pitch_alignment.uniform() == AlignmentType::Map;
     let pixels_to_tile_units = tile_id.pixels_to_tile_units(1.0, zoom);
-    let latitude_scale = parameters.view.projection().circle_radius_correction(parameters.view);
+    let latitude_scale = frame.view.projection().circle_radius_correction(frame.view);
     CircleUniforms {
         draw_ubo: CircleDrawableUBO {
             matrix: cast_matrix(&projection.fallback_matrix),
             extrude_scale: if pitch_with_map {
                 [pixels_to_tile_units, pixels_to_tile_units]
             } else {
-                parameters.pixels_to_gl_units
+                frame.pixels_to_gl_units
             },
             color_t: binders.circle_color.interpolation_factor(zoom),
             radius_t: binders.circle_radius.interpolation_factor(zoom),
@@ -185,12 +185,12 @@ impl LayerType for Circle {
         state: &mut CircleState,
         drawing: &mut TileDraws<KeptDraw>,
         gpu: &mut dyn Gpu,
-        cx: &mut DrawContext<'_, '_, '_, Circle>,
+        cx: &mut DrawContext<'_, '_, Circle>,
     ) {
         let layer_id = cx.layer.id();
         let layer = &*cx.layer.evaluated;
         let evaluated = &layer.paint;
-        let paint_parameters = &mut *cx.paint;
+        let frame = &cx.frame;
         for tile in cx.tiles {
             let tile_id = tile.id();
             let Some(mut entry) = drawing.tiles_mut().entry(&tile_id) else {
@@ -222,7 +222,7 @@ impl LayerType for Circle {
             // The draw's attributes read the bucket's vertices in the
             // context's store, which upload again when they change.
             let changes = entry.take_changes();
-            let context = &mut *paint_parameters.context;
+            let context = &mut *cx.context;
             if let Some(cached) = entry.value.as_mut() {
                 refresh_paint_attributes(&mut cached.objects, changes, |attrs| {
                     binders.bind(evaluated, paint(context).as_ref(), attrs, &mut Uniforms::default());
@@ -264,10 +264,10 @@ impl LayerType for Circle {
             let Some(draw) = entry.value.as_ref().map(|cached| cached.frame_draw(Some(tile_id))) else {
                 continue;
             };
-            state.draw_list.push(draw, uniforms(layer, &tile_id, binders, paint_parameters));
+            state.draw_list.push(draw, uniforms(layer, &tile_id, binders, frame));
         }
 
-        drawing.finish(&mut state.draw_list, gpu, paint_parameters.context, |writer| {
+        drawing.finish(&mut state.draw_list, gpu, cx.context, |writer| {
             write_uniforms(layer, writer);
         });
     }
@@ -321,7 +321,7 @@ impl FeatureQuery<Circle> for Circle {
         // The shader hides a circle whose center the horizon covers where it
         // draws it: translated, and through the projection as blended. The
         // query finds none there either.
-        let drawn_translation = RenderTile::tile_unit_translation(
+        let drawn_translation = tile_unit_translation(
             projector.tile_id(),
             *evaluated.circle_translate.uniform(),
             *evaluated.circle_translate_anchor.uniform(),

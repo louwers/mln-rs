@@ -50,7 +50,7 @@ use crate::buckets::symbol_bucket::{
     Buffer, CollisionBoxDynamicVertex, CollisionBoxLayoutVertex, CollisionBuffer, PaintProperties, SymbolBucket,
     SymbolDynamicLayoutVertex, SymbolOpacityVertex,
 };
-use crate::draw::{DrawGeometry, DrawObjects, Textures, copy_shared_attributes};
+use crate::draw_objects::{DrawGeometry, DrawObjects, Textures, copy_shared_attributes};
 use crate::geometry::feature_index::FeatureIndex;
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
@@ -64,12 +64,13 @@ use crate::layer_drawing::{
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::symbol_layout::SymbolLayout;
 use crate::layout::symbol_projection::{gl_coord_matrix, label_plane_matrix};
-use crate::paint_parameters::PaintParameters;
+use crate::paint_parameters::{DrawFrame, PaintParameters};
 use crate::render_layer::{BucketKey, BucketPlacementData, LayerBucket, PlacedTile, SymbolTranslate};
 use crate::render_pass::RenderPass;
 use crate::render_source::{RenderSource, TileOrder};
-use crate::render_tile::{FrameTile, RenderTile};
-use crate::tile_matrix::{cast_matrix, projection_data, to_projection_ubo};
+#[cfg(feature = "bench")]
+use crate::render_tile::RenderTile;
+use crate::tile_matrix::{cast_matrix, projection_data, tile_unit_translation, to_projection_ubo};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SymbolType {
@@ -727,18 +728,17 @@ impl SymbolState {
         !self.placement_data.is_empty() || !self.follower_data.is_empty()
     }
 
-    /// Makes the frame's draws of `drawing`'s draws of `tiles` that show any
-    /// symbols, of a layer of `layer`'s values, in `passes`, and of their
-    /// collision boxes and circles, and writes the buffers they read.
+    /// Makes the frame's draws of `drawing`'s draws of the tiles of `cx` that
+    /// show any symbols, in the layer's passes, and of their collision boxes
+    /// and circles, and writes the buffers they read.
     fn make_frame_draws(
         &mut self,
         drawing: &mut SymbolDrawing,
-        layer: &LayerValues<Symbol>,
         gpu: &mut dyn Gpu,
-        tiles: &[FrameTile<'_, Symbol>],
-        passes: RenderPass,
-        paint_parameters: &mut PaintParameters<'_>,
+        cx: &mut DrawContext<'_, '_, Symbol>,
     ) {
+        let (layer, tiles, passes, frame) = (cx.layer, cx.tiles, cx.passes, &cx.frame);
+        let context = &mut *cx.context;
         let layer_id = layer.id();
         let layer = &*layer.evaluated;
         for tile in tiles {
@@ -750,7 +750,7 @@ impl SymbolState {
             debug_assert!(bucket.is_some() || cached.draws.is_empty());
             for (index, draw) in cached.draws.iter().enumerate().filter(|(_, draw)| draw.visible) {
                 let Some(uniforms) =
-                    bucket.and_then(|bucket| Self::uniforms(layer_id, layer, &tile_id, bucket, draw, paint_parameters))
+                    bucket.and_then(|bucket| Self::uniforms(layer_id, layer, &tile_id, bucket, draw, context, frame))
                 else {
                     continue;
                 };
@@ -758,18 +758,15 @@ impl SymbolState {
                 self.draw_list.push_part(frame_draw, index, uniforms);
             }
             for (index, draw) in cached.collision.iter_mut().enumerate() {
-                write_collision_uniforms(gpu, draw, &tile_id, paint_parameters);
+                write_collision_uniforms(gpu, context, draw, &tile_id, frame);
                 let frame_draw =
                     FrameDraw { pass: passes, depth: DrawDepth::Off, ..FrameDraw::new(Some(tile_id), draw.draw.id) };
                 self.collision_list.push_part(frame_draw, index, ());
             }
         }
 
-        if let Some(frame) = &mut drawing.frame {
-            if self
-                .draw_list
-                .finish(frame, gpu, paint_parameters.context, |writer| write_uniforms(&layer.paint, writer))
-            {
+        if let Some(draws) = &mut drawing.frame {
+            if self.draw_list.finish(draws, gpu, context, |writer| write_uniforms(&layer.paint, writer)) {
                 for draw in drawing.tiles.values_mut().flat_map(|tile| &mut tile.draws) {
                     draw.objects.drop_bindings();
                 }
@@ -780,7 +777,7 @@ impl SymbolState {
         // Each collision draw has its own GPU objects and buffers, so no two
         // share an order, and the overlay's buffers are none.
         if let Some(overlay) = &mut drawing.overlay {
-            let _ = self.collision_list.finish(overlay, gpu, paint_parameters.context, |_| {});
+            let _ = self.collision_list.finish(overlay, gpu, context, |_| {});
         } else {
             self.collision_list.clear();
         }
@@ -890,9 +887,10 @@ impl SymbolState {
         tile_id: &OverscaledTileID,
         bucket: &SymbolBucket,
         draw: &SymbolDraw,
-        parameters: &PaintParameters<'_>,
+        context: &Context,
+        frame: &DrawFrame<'_>,
     ) -> Option<SymbolUniforms> {
-        let state = parameters.view;
+        let state = frame.view;
         let evaluated = &layer.paint;
         let zoom = state.zoom() as f32;
         let paint_properties = bucket.paint_properties.get(layer_id)?;
@@ -915,7 +913,7 @@ impl SymbolState {
             const IN_VIEWPORT_PIXEL_UNITS: bool = false;
             projection_data(
                 &tile_id,
-                parameters,
+                frame,
                 [0.0, 0.0],
                 *anchor.uniform(),
                 NEAR_CLIPPED,
@@ -930,7 +928,7 @@ impl SymbolState {
         let tile_translation: [f32; 2] = if is_screen_space {
             [0.0, 0.0]
         } else {
-            RenderTile::tile_unit_translation(&tile_id, *translate.uniform(), *anchor.uniform(), state)
+            tile_unit_translation(&tile_id, *translate.uniform(), *anchor.uniform(), state)
         };
         projection.translate = glam::DVec2::ZERO;
         let matrix = projection.fallback_matrix;
@@ -984,8 +982,8 @@ impl SymbolState {
                 matrix: cast_matrix(&matrix),
                 label_plane_matrix: cast_matrix(&label_plane_matrix),
                 coord_matrix: cast_matrix(&gl_coord_matrix),
-                texsize: texture_size(parameters.context, &draw.objects, ID_SYMBOL_IMAGE_TEXTURE),
-                texsize_icon: texture_size(parameters.context, &draw.objects, ID_SYMBOL_IMAGE_ICON_TEXTURE),
+                texsize: texture_size(context, &draw.objects, ID_SYMBOL_IMAGE_TEXTURE),
+                texsize_icon: texture_size(context, &draw.objects, ID_SYMBOL_IMAGE_ICON_TEXTURE),
                 is_text_prop: i32::from(is_text),
                 rotate_symbol: i32::from(rotate_in_shader),
                 pitch_with_map: i32::from(pitch_with_map),
@@ -1047,16 +1045,17 @@ fn write_uniforms(
 /// and the scale of its boxes' and circles' extrusions.
 fn write_collision_uniforms(
     gpu: &mut dyn Gpu,
+    context: &mut Context,
     draw: &mut CollisionDraw,
     tile_id: &OverscaledTileID,
-    parameters: &mut PaintParameters<'_>,
+    frame: &DrawFrame<'_>,
 ) {
     const NEAR_CLIPPED: bool = false;
     const IN_VIEWPORT_PIXEL_UNITS: bool = false;
     let unwrapped = tile_id.to_unwrapped();
     let projection = projection_data(
         &unwrapped,
-        parameters,
+        frame,
         draw.translate,
         draw.translate_anchor,
         NEAR_CLIPPED,
@@ -1065,18 +1064,15 @@ fn write_collision_uniforms(
         false,
     );
 
-    let zoom = parameters.view.zoom();
+    let zoom = frame.view.zoom();
     let pixel_ratio = unwrapped.pixels_to_tile_units(1.0, zoom as f32);
     let scale = 2f64.powf(zoom - f64::from(tile_id.overscaled_z)) as f32;
-    let extrude_scale = [
-        parameters.pixels_to_gl_units[0] / (pixel_ratio * scale),
-        parameters.pixels_to_gl_units[1] / (pixel_ratio * scale),
-    ];
+    let extrude_scale =
+        [frame.pixels_to_gl_units[0] / (pixel_ratio * scale), frame.pixels_to_gl_units[1] / (pixel_ratio * scale)];
     let draw_ubo = CollisionDrawableUBO { matrix: cast_matrix(&projection.fallback_matrix) };
     let tile_props_ubo =
         CollisionTilePropsUBO { extrude_scale, overscale_factor: tile_id.overscale_factor() as f32, pad1: 0.0 };
     let objects = &mut draw.draw.objects;
-    let context = &mut *parameters.context;
     objects.write_pod(gpu, ID_COLLISION_DRAWABLE_UBO, &draw_ubo, context);
     objects.write_pod(gpu, ID_COLLISION_TILE_PROPS_UBO, &tile_props_ubo, context);
     objects.write_pod(gpu, ID_COLLISION_PROJECTION_UBO, &to_projection_ubo(&projection), context);
@@ -1198,7 +1194,7 @@ impl LayerType for Symbol {
         state: &mut SymbolState,
         drawing: &mut SymbolDrawing,
         gpu: &mut dyn Gpu,
-        cx: &mut DrawContext<'_, '_, '_, Symbol>,
+        cx: &mut DrawContext<'_, '_, Symbol>,
     ) {
         /// The atlases' textures given to one tile's draws.
         #[derive(Default)]
@@ -1207,8 +1203,8 @@ impl LayerType for Symbol {
             icon: Option<AtlasBinding>,
         }
 
-        let (paint_parameters, render_tiles) = (&mut *cx.paint, cx.tiles);
-        let transform = paint_parameters.view;
+        let render_tiles = cx.tiles;
+        let transform = cx.frame.view;
         let passes = cx.passes;
         if passes != state.draws_passes {
             drawing.clear();
@@ -1264,18 +1260,11 @@ impl LayerType for Symbol {
             if let Some(cached) = entry.value.as_mut().filter(|cached| !cached.draws.is_empty()) {
                 // The draws that read the same attributes are next to each
                 // other, as the update builds them.
-                let (context, geometry) = (&mut *paint_parameters.context, render_data.geometry());
+                let (context, geometry) = (&mut *cx.context, render_data.geometry());
                 for draws in cached.draws.chunk_by_mut(|a, b| a.attributes_key() == b.attributes_key()) {
                     refresh_draws(context, draws, geometry, bucket, layer_id, evaluated, refresh);
                 }
-                rebuild_collision(
-                    drawing,
-                    cx.projection_variant,
-                    paint_parameters.context,
-                    &tile_id,
-                    bucket,
-                    evaluated,
-                );
+                rebuild_collision(drawing, cx.projection_variant, cx.context, &tile_id, bucket, evaluated);
                 continue;
             }
 
@@ -1330,7 +1319,7 @@ impl LayerType for Symbol {
                 add_renderables(&state.text, SymbolType::Text);
             }
 
-            rebuild_collision(drawing, cx.projection_variant, paint_parameters.context, &tile_id, bucket, evaluated);
+            rebuild_collision(drawing, cx.projection_variant, cx.context, &tile_id, bucket, evaluated);
         }
 
         // A stable sort keeps segments of the same order in the order they
@@ -1348,7 +1337,7 @@ impl LayerType for Symbol {
         // Renderables come across tiles, out of order, so the atlases' textures
         // given to a tile's draws are kept by tile.
         let mut tile_atlases: HashMap<UnwrappedTileID, TileAtlases> = HashMap::default();
-        let color_mode = paint_parameters.context.color_mode(if passes & RenderPass::TRANSLUCENT == RenderPass::NONE {
+        let color_mode = cx.context.color_mode(if passes & RenderPass::TRANSLUCENT == RenderPass::NONE {
             ColorMode::unblended()
         } else {
             ColorMode::alpha_blended()
@@ -1398,7 +1387,7 @@ impl LayerType for Symbol {
             let mut uniforms = Uniforms::default();
             let mut vertex_attribs = VertexAttributeArray::new();
             let placed = update_tile_attributes(
-                paint_parameters.context,
+                cx.context,
                 render_data.geometry(),
                 buffer,
                 layer_id,
@@ -1476,7 +1465,7 @@ impl LayerType for Symbol {
                     segments: segments.iter().map(SegmentBase::copy).collect(),
                     instances: None,
                 };
-                let shader = paint_parameters.context.shader_key(program, uniforms, symbol_projection_variant);
+                let shader = cx.context.shader_key(program, uniforms, symbol_projection_variant);
                 let textures = draw_atlases.textures(&shader);
                 let objects = DrawObjects::new(shader, color_mode, CullFaceMode::disabled(), geometry, textures);
 
@@ -1505,7 +1494,7 @@ impl LayerType for Symbol {
         }
 
         state.renderable_segments = renderable_segments;
-        state.make_frame_draws(drawing, cx.layer, gpu, render_tiles, passes, paint_parameters);
+        state.make_frame_draws(drawing, gpu, cx);
     }
 
     /// Collects the symbol buckets of the tiles the layer places, and of

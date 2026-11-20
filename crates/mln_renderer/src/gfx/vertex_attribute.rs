@@ -16,10 +16,13 @@ use crate::gfx::vertices::{SharedVertices, Vertices};
 /// `data_type`.
 #[derive(Clone)]
 pub struct SharedAttribute {
+    /// The vertices the attribute reads.
     pub vertices: SharedVertices,
     pub(crate) data_type: AttributeDataType,
+    /// Where in each vertex the attribute's value is, in bytes.
     pub offset: u32,
     pub(crate) vertex_offset: u32,
+    /// The size of a vertex, in bytes.
     pub stride: u32,
 }
 
@@ -165,6 +168,7 @@ pub struct VertexAttributeArray {
 }
 
 impl VertexAttributeArray {
+    /// No attributes.
     #[must_use]
     pub fn new() -> Self {
         Self::default()

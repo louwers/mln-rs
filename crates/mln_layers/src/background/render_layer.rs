@@ -9,14 +9,15 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
+use mln_renderer::draw::{
+    DrawDepth, DrawFrame, DrawGeometry, DrawIndexes, DrawList, DrawObjects, FrameDraw, KeptDraw, LayerDrawing,
+    RenderStaticData, Textures, TileDraws, Uniforms, projection_data, raw_vertices, to_projection_ubo,
+};
 use mln_renderer::layer::{
     DrawContext, EvaluatedLayer, LayerType, LayerValues, NoBucket, NoLayout, NoTileView, RenderPass, UpdateContext,
 };
-use mln_renderer::unstable::{
-    DrawDepth, DrawGeometry, DrawIndexes, DrawList, DrawObjects, FrameDraw, KeptDraw, LayerDrawing, PaintParameters,
-    RenderStaticData, Textures, TileCoverParameters, TileDraws, Uniforms, projection_data, raw_globe_tile_mesh,
-    raw_vertices, tile_cover, to_projection_ubo,
-};
+use mln_renderer::unstable::raw_globe_tile_mesh;
+use mln_renderer::util::tile_cover::{TileCoverParameters, tile_cover};
 use mln_style_types::TranslateAnchorType;
 use mln_tile_id::OverscaledTileID;
 use mln_util::Color;
@@ -92,14 +93,14 @@ impl BackgroundState {
     fn uniforms(
         tile_id: &OverscaledTileID,
         pattern: bool,
-        parameters: &PaintParameters<'_>,
+        frame: &DrawFrame<'_>,
     ) -> (BackgroundDrawableUnionUBO, ProjectionUBO) {
         let tile_id = tile_id.to_unwrapped();
         let projection =
-            projection_data(&tile_id, parameters, [0.0, 0.0], TranslateAnchorType::Viewport, false, false, None, false);
+            projection_data(&tile_id, frame, [0.0, 0.0], TranslateAnchorType::Viewport, false, false, None, false);
         let matrix = projection.fallback_matrix.as_mat4().to_cols_array();
         let draw_ubo = if pattern {
-            let state = parameters.view;
+            let state = frame.view;
             let int_zoom = state.integer_zoom();
             let tile_size_at_nearest_zoom =
                 (TILE_SIZE_D * mln_map_types::zoom_scale(f64::from(int_zoom) - f64::from(tile_id.canonical.z))) as i32;
@@ -144,9 +145,9 @@ impl LayerType for Background {
         state: &mut BackgroundState,
         drawing: &mut TileDraws<KeptDraw>,
         gpu: &mut dyn Gpu,
-        cx: &mut DrawContext<'_, '_, '_, Background>,
+        cx: &mut DrawContext<'_, '_, Background>,
     ) {
-        let (paint_parameters, atlases, variant) = (&mut *cx.paint, cx.atlases, cx.projection_variant);
+        let (context, frame, atlases, variant) = (&mut *cx.context, &cx.frame, cx.atlases, cx.projection_variant);
         let BackgroundState { draw_list, draws_built_for, tile_cover } = state;
         let layer = &*cx.layer.evaluated;
         let evaluated = &layer.paint;
@@ -159,7 +160,7 @@ impl LayerType for Background {
         }
 
         let program = if has_pattern { &programs::BACKGROUND_PATTERN } else { &programs::BACKGROUND };
-        let shader = paint_parameters.context.shader_key(program, Uniforms::default(), variant);
+        let shader = context.shader_key(program, Uniforms::default(), variant);
 
         let pattern_atlas = &atlases.pattern;
         let faded = evaluated.background_pattern.faded();
@@ -174,7 +175,7 @@ impl LayerType for Background {
             None
         };
         let pattern_texture = pattern_atlas.texture().filter(|_| has_pattern);
-        if let Some(mut texture) = pattern_texture.and_then(|texture| paint_parameters.context.texture_mut(texture)) {
+        if let Some(mut texture) = pattern_texture.and_then(|texture| context.texture_mut(texture)) {
             texture.set_sampler(SamplerState {
                 filter: TextureFilterType::Linear,
                 wrap_u: TextureWrapType::Clamp,
@@ -183,7 +184,7 @@ impl LayerType for Background {
             });
         }
 
-        let color_mode = paint_parameters.context.color_mode(if draw_passes == RenderPass::TRANSLUCENT {
+        let color_mode = context.color_mode(if draw_passes == RenderPass::TRANSLUCENT {
             ColorMode::alpha_blended()
         } else {
             ColorMode::unblended()
@@ -203,10 +204,10 @@ impl LayerType for Background {
                 depth: DrawDepth::Layer { sub_layer: 0, mask: DepthMaskType::ReadWrite },
                 ..cached.frame_draw(Some(*tile_id))
             };
-            draw_list.push(draw, BackgroundState::uniforms(tile_id, has_pattern, paint_parameters));
+            draw_list.push(draw, BackgroundState::uniforms(tile_id, has_pattern, frame));
         }
 
-        drawing.finish(draw_list, gpu, paint_parameters.context, |writer| {
+        drawing.finish(draw_list, gpu, context, |writer| {
             let opacity = *evaluated.background_opacity.uniform();
             if let Some((from, to)) = pattern_positions {
                 let crossfade = &layer.crossfade;

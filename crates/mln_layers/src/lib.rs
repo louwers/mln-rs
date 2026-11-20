@@ -42,7 +42,7 @@ pub use heatmap::{Heatmap, HeatmapPaintProperties};
 pub use hillshade::{Hillshade, HillshadePaintProperties};
 pub use line::{Line, LineLayoutProperties, LinePaintProperties};
 use mln_gfx::shaders::source::ShaderSources;
-use mln_renderer::unstable::{BucketChanges, DrawObjects, VertexAttributeArray};
+use mln_renderer::draw::{BucketChanges, DrawObjects, VertexAttributeArray};
 use mln_renderer::{RegisterError, RegistryBuilder};
 pub use raster::{Raster, RasterPaintProperties};
 

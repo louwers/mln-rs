@@ -42,16 +42,16 @@ use mln_gfx::shaders::shader_defines::{
 };
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_map_types::View;
+use mln_renderer::draw::{
+    AtlasBinding, BucketGeometry, Composite, Context, DrawDepth, DrawGeometry, DrawList, DrawObjects, DrawObjectsMut,
+    DrawPriority, EvaluatedLight, FrameDraw, Indexes, RenderStaticData, SharedAttribute, SharedIndexes, SharedVertices,
+    Texture2D, TileDraws, TileObjects, UniformWriter, Uniforms, VertexAttributeArray, bucket_indexes, bucket_vertices,
+    cast_matrix, copied_vertices, copy_shared_attributes, derived_vertices, paint_vertices, projection_data,
+    to_projection_ubo, zero_to_one_clip_z,
+};
 use mln_renderer::layer::{
     Bucket, DrawContext, EvaluatedLayer, FeatureQuery, HitTest, LayerBucket, LayerType, LayerValues, LayoutParameters,
     RenderPass, SourceLayer,
-};
-use mln_renderer::unstable::{
-    AtlasBinding, BucketGeometry, Composite, Context, DrawDepth, DrawGeometry, DrawList, DrawObjects, DrawObjectsMut,
-    DrawPriority, EvaluatedLight, FrameDraw, Indexes, PaintParameters, RenderStaticData, SharedAttribute,
-    SharedIndexes, SharedVertices, Texture2D, TileDraws, TileObjects, UniformWriter, Uniforms, VertexAttributeArray,
-    bucket_indexes, bucket_vertices, cast_matrix, copied_vertices, copy_shared_attributes, derived_vertices,
-    paint_vertices, projection_data, to_projection_ubo, zero_to_one_clip_z,
 };
 use mln_style_types::{AlignmentType, LayerBlendType};
 use mln_tile_id::OverscaledTileID;
@@ -330,12 +330,12 @@ impl LayerType for FillExtrusion {
         state: &mut ExtrusionState,
         drawing: &mut TileDraws<ExtrusionTile>,
         gpu: &mut dyn Gpu,
-        cx: &mut DrawContext<'_, '_, '_, FillExtrusion>,
+        cx: &mut DrawContext<'_, '_, FillExtrusion>,
     ) {
-        let paint_parameters = &mut *cx.paint;
+        let draw_frame = &cx.frame;
         let render_tiles = cx.tiles;
         let has_pattern = !cx.layer.unevaluated.fill_extrusion_pattern.is_undefined();
-        let walls = Walls::of(paint_parameters.context, has_pattern);
+        let walls = Walls::of(cx.context, has_pattern);
         let (program, wall_program) = match (has_pattern, walls) {
             (false, Walls::Instanced) => (&programs::FILL_EXTRUSION, &programs::FILL_EXTRUSION_INSTANCED),
             (false, Walls::Quads) => (&programs::FILL_EXTRUSION, &programs::FILL_EXTRUSION_WALL),
@@ -347,16 +347,16 @@ impl LayerType for FillExtrusion {
         };
 
         let opacity = opacity(&cx.layer.evaluated);
-        let composite = (opacity < 1.0 && !has_pattern && paint_parameters.composites_with_frame_depth)
+        let composite = (opacity < 1.0 && !has_pattern && draw_frame.composites_with_frame_depth)
             .then_some(Composite { opacity, blend: LayerBlendType::Normal, frame_depth: true });
 
-        let context = &mut *paint_parameters.context;
+        let context = &mut *cx.context;
         let static_vertices =
             &*state.static_data_vertices.get_or_insert_with(|| copied_vertices(context, &WALL_CORNERS));
         let static_indices = if walls == Walls::Instanced {
             &*state.strip_indices.get_or_insert_with(|| context.add_indexes(Indexes::new(WALL_STRIP_INDICES.to_vec())))
         } else {
-            let static_data = paint_parameters.static_data;
+            let static_data = draw_frame.static_data;
             &*state.wall_indices.get_or_insert_with(|| static_data.quad_indexes(context))
         };
         let builder = TileBuilder {
@@ -393,7 +393,7 @@ impl LayerType for FillExtrusion {
             };
 
             let changes = entry.take_changes();
-            let context = &mut *paint_parameters.context;
+            let context = &mut *cx.context;
             let cached = match entry.value {
                 Some(cached) => {
                     if changes.paint {
@@ -412,15 +412,7 @@ impl LayerType for FillExtrusion {
                     ..FrameDraw::new(Some(tile_id), draw.id)
                 };
                 let layout = cached.paint_layout;
-                let uniforms = ExtrusionState::uniforms(
-                    layer,
-                    tile_id,
-                    render_data,
-                    binders,
-                    &draw.objects,
-                    layout,
-                    paint_parameters,
-                );
+                let uniforms = ExtrusionState::uniforms(tile_id, render_data, binders, &draw.objects, layout, cx);
                 state.draw_list.push_part(frame_draw, index, uniforms);
             }
         }
@@ -428,11 +420,11 @@ impl LayerType for FillExtrusion {
         let frame = drawing.frame_mut();
         frame.set_composite(composite);
         frame.set_stencil_tiles(render_tiles.iter().map(|tile| tile.unwrapped_id()));
-        let (light, view) = (paint_parameters.light, paint_parameters.view);
+        let (light, view) = (draw_frame.light, draw_frame.view);
         // The draws that composite draw opaque: the composite has the
         // layer's opacity.
         let opacity = if composite.is_some() { 1.0 } else { opacity };
-        drawing.finish(&mut state.draw_list, gpu, paint_parameters.context, |writer| {
+        drawing.finish(&mut state.draw_list, gpu, cx.context, |writer| {
             ExtrusionState::write_uniforms(layer, writer, light, view, opacity);
         });
     }
@@ -672,27 +664,27 @@ impl TileBuilder<'_> {
 impl ExtrusionState {
     /// The entries in the layer's storage buffers of a draw of `objects`, a
     /// draw of `tile`, whose bucket's binders are `binders` and whose pulled
-    /// walls find their paint values by `paint_layout`, with the layer's
-    /// values `layer`.
+    /// walls find their paint values by `paint_layout`, in the frame of
+    /// `cx`.
     fn uniforms(
-        layer: &EvaluatedLayer<FillExtrusion>,
         tile_id: OverscaledTileID,
         tile_bucket: LayerBucket<'_, FillExtrusion>,
         binders: &FillExtrusionBinders,
         objects: &DrawObjects,
         paint_layout: u32,
-        parameters: &PaintParameters<'_>,
+        cx: &DrawContext<'_, '_, FillExtrusion>,
     ) -> ExtrusionUniforms {
         const IN_VIEWPORT_PIXEL_UNITS: bool = false;
         const NEAR_CLIPPED: bool = true;
+        let (layer, context, frame) = (&*cx.layer.evaluated, &*cx.context, &cx.frame);
         let evaluated = &layer.paint;
-        let state = parameters.view;
+        let state = frame.view;
         let zoom = state.zoom() as f32;
         let tile_id = tile_id.to_unwrapped();
 
         let mut projection = projection_data(
             &tile_id,
-            parameters,
+            frame,
             *evaluated.fill_extrusion_translate.uniform(),
             *evaluated.fill_extrusion_translate_anchor.uniform(),
             NEAR_CLIPPED,
@@ -703,7 +695,7 @@ impl ExtrusionState {
         // A backend whose clip depth runs from -1 writes the depth of one
         // whose runs from 0 (`frame_projection`). The globe projects in its
         // shaders.
-        if parameters.context.caps().clip_depth == ClipDepthRange::NegativeOneToOne && !state.is_globe() {
+        if context.caps().clip_depth == ClipDepthRange::NegativeOneToOne && !state.is_globe() {
             zero_to_one_clip_z(&mut projection.main_matrix);
             zero_to_one_clip_z(&mut projection.fallback_matrix);
         }
@@ -719,8 +711,7 @@ impl ExtrusionState {
         let num_tiles = 2f64.powi(i32::from(tile_id.canonical.z));
         let height_factor = (-num_tiles / TILE_SIZE_D / 8.0) as f32;
 
-        let texture =
-            objects.texture(ID_FILL_EXTRUSION_IMAGE_TEXTURE).and_then(|texture| parameters.context.texture(texture));
+        let texture = objects.texture(ID_FILL_EXTRUSION_IMAGE_TEXTURE).and_then(|texture| context.texture(texture));
         let texture_size = texture.map_or(Size::new(0, 0), Texture2D::size);
         let pattern = evaluated.fill_extrusion_pattern.faded();
         let tlbr = |id: &str| tile_bucket.pattern(id).map_or([0.0; 4], |position| position.tlbr().map(f32::from));

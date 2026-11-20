@@ -25,16 +25,17 @@ use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_math::deg2radf;
+use mln_renderer::draw::{
+    Context, DrawFrame, DrawGeometry, DrawIndexes, DrawList, DrawObjects, DrawObjectsMut, FrameDraw, Indexes, KeptDraw,
+    PaintParameters, RenderStaticData, RenderTarget, SharedAttribute, SharedIndexes, SharedTexture, SharedVertices,
+    SingleDraw, Textures, TileDraws, TileObjects, Uniforms, VertexAttributeArray, cast_matrix, copied_vertices,
+    projection_data, to_projection_ubo,
+};
 use mln_renderer::layer::{
     DemContents, DrawContext, EvaluatedLayer, LayerType, LayerValues, NoBucket, NoLayout, OffscreenPass,
     RasterLayoutVertex, RenderPass, UpdateContext,
 };
-use mln_renderer::unstable::{
-    Context, DrawGeometry, DrawIndexes, DrawList, DrawObjects, DrawObjectsMut, FrameDraw, GlobeTileMeshCache, Indexes,
-    KeptDraw, PaintParameters, RenderStaticData, RenderTarget, SharedAttribute, SharedIndexes, SharedTexture,
-    SharedVertices, SingleDraw, Textures, TileDraws, TileObjects, Uniforms, VertexAttributeArray, cast_matrix,
-    copied_vertices, projection_data, to_projection_ubo,
-};
+use mln_renderer::unstable::GlobeTileMeshCache;
 use mln_style_types::{HillshadeIlluminationAnchorType, HillshadeMethodType, ResamplingType, TranslateAnchorType};
 use mln_tile_id::UnwrappedTileID;
 use mln_util::Color;
@@ -278,10 +279,10 @@ impl LayerType for Hillshade {
         state: &mut HillshadeState,
         drawing: &mut TileDraws<HillshadeTile>,
         gpu: &mut dyn Gpu,
-        cx: &mut DrawContext<'_, '_, '_, Hillshade>,
+        cx: &mut DrawContext<'_, '_, Hillshade>,
     ) {
-        let (paint_parameters, render_tiles) = (&mut *cx.paint, cx.tiles);
-        let context = &mut *paint_parameters.context;
+        let (frame, render_tiles) = (&cx.frame, cx.tiles);
+        let context = &mut *cx.context;
         let hillshade_prepare_shader =
             context.shader_key(&programs::HILLSHADE_PREPARE, Uniforms::default(), ProjectionVariant::Mercator);
         let hillshade_shader = context.shader_key(&programs::HILLSHADE, Uniforms::default(), cx.projection_variant);
@@ -329,7 +330,7 @@ impl LayerType for Hillshade {
                     let attrs = hillshade_vertex_attributes(static_data_shared_vertices);
                     let target = DemTarget::new(
                         gpu,
-                        paint_parameters.context,
+                        cx.context,
                         contents,
                         &tile_id.to_unwrapped(),
                         state.maxzoom,
@@ -341,7 +342,7 @@ impl LayerType for Hillshade {
                 }
             };
             let render_target_texture = target.render_target.texture();
-            let context = &mut *paint_parameters.context;
+            let context = &mut *cx.context;
             if let Some(mut texture) = context.texture_mut(render_target_texture) {
                 texture.set_sampler(SamplerState {
                     filter: resampling_filter,
@@ -416,18 +417,14 @@ impl LayerType for Hillshade {
             };
             let draw = cached.draw.frame_draw(Some(tile_id));
             let Illumination { num_lights, .. } = *illumination.get_or_insert_with(|| {
-                HillshadeState::illumination(&mut state.illumination, &cx.layer.evaluated, paint_parameters)
+                HillshadeState::illumination(&mut state.illumination, &cx.layer.evaluated, frame)
             });
-            let uniforms = HillshadeState::uniforms(
-                &cx.layer.evaluated.paint,
-                &tile_id.to_unwrapped(),
-                num_lights,
-                paint_parameters,
-            );
+            let uniforms =
+                HillshadeState::uniforms(&cx.layer.evaluated.paint, &tile_id.to_unwrapped(), num_lights, frame);
             state.draw_list.push(draw, uniforms);
         }
 
-        drawing.finish(&mut state.draw_list, gpu, paint_parameters.context, |writer| {
+        drawing.finish(&mut state.draw_list, gpu, cx.context, |writer| {
             if let Some(Illumination { props, .. }) = &illumination {
                 writer.uniform(ID_HILLSHADE_EVALUATED_PROPS_UBO, props);
             }
@@ -559,10 +556,10 @@ impl HillshadeState {
         evaluated: &HillshadePaintProperties::PossiblyEvaluated,
         tile_id: &UnwrappedTileID,
         num_lights: usize,
-        parameters: &PaintParameters<'_>,
+        frame: &DrawFrame<'_>,
     ) -> HillshadeUniforms {
         let projection =
-            projection_data(tile_id, parameters, [0.0, 0.0], TranslateAnchorType::Viewport, false, false, None, true);
+            projection_data(tile_id, frame, [0.0, 0.0], TranslateAnchorType::Viewport, false, false, None, true);
         HillshadeUniforms {
             draw_ubo: HillshadeDrawableUBO { matrix: cast_matrix(&projection.fallback_matrix) },
             tile_props: HillshadeTilePropsUBO {
@@ -584,7 +581,7 @@ impl HillshadeState {
     fn illumination(
         cache: &mut Option<(Arc<EvaluatedLayer<Hillshade>>, Illumination)>,
         layer: &Arc<EvaluatedLayer<Hillshade>>,
-        parameters: &PaintParameters<'_>,
+        frame: &DrawFrame<'_>,
     ) -> Illumination {
         if let Some((cached_layer, illumination)) = cache
             && Arc::ptr_eq(cached_layer, layer)
@@ -594,7 +591,7 @@ impl HillshadeState {
         let evaluated = &layer.paint;
         let mut illumination = illumination_properties(evaluated);
         if *evaluated.hillshade_illumination_anchor.uniform() == HillshadeIlluminationAnchorType::Viewport {
-            let bearing = parameters.view.angle() as f32;
+            let bearing = frame.view.angle() as f32;
             for azimuth in &mut illumination.direction_radians {
                 *azimuth -= bearing;
             }

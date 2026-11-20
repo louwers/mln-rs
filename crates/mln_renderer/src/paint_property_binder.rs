@@ -30,8 +30,11 @@ use crate::paint_property_statistics::{PaintPropertyStatistics, StatisticValue};
 /// tile's, at it, and one above.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PatternDependency {
+    /// The image one zoom level below the tile's.
     pub min: String,
+    /// The image at the tile's zoom level.
     pub mid: String,
+    /// The image one zoom level above the tile's.
     pub max: String,
 }
 
@@ -128,13 +131,16 @@ impl InterleavedVertexBuffer {
     }
 }
 
-/// The value types of data-driven paint properties with a single attribute
-/// (`float` and `Color` in circle, fill and line): the attribute's value of
-/// a value ([`attribute_value`](Self::attribute_value)), and its type.
+/// The value types of data-driven paint properties with a single attribute,
+/// `f32` and `Color`: the attribute's value of a value
+/// ([`attribute_value`](Self::attribute_value)), and its type.
 pub trait BinderValue: Clone + Default + ValueConverter + StatisticValue + std::fmt::Debug {
     /// The number of floats `attribute_value` uses.
     const DIMENSIONS: usize;
+    /// The attribute's type, of one value.
     const BASE_DATA_TYPE: AttributeDataType;
+    /// The attribute's type, of the values at two zoom stops that the
+    /// shader interpolates between.
     const INTERPOLATED_DATA_TYPE: AttributeDataType;
 
     /// The attribute's floats; only the first `DIMENSIONS` entries are used.
@@ -626,9 +632,18 @@ impl CrossFadedPaintPropertyBinder<Image> {
 }
 
 /// What a layer's set of binders and [`bind_paint_property`] do
-/// with each binder.
+/// with each binder: a binder writes each feature's values of its property
+/// into its place in the interleaved vertices of the set's
+/// [`InterleavedVertexBuffer`], and binds them to its program's attributes.
 pub trait PaintPropertyBinderBase {
+    /// Takes the binder's place in `buffer`'s vertex format, if it writes
+    /// any values.
     fn set_interleaved(&mut self, buffer: &mut InterleavedVertexBuffer);
+    /// Writes `feature`'s values of the property, the feature at `index` of
+    /// its layer in the tile `canonical`, into the vertices of `buffer` up
+    /// to `length`, with the images of its patterns where the property is
+    /// one, and `formatted_section`, the section of a formatted text value
+    /// that the vertices draw.
     #[expect(
         clippy::too_many_arguments,
         reason = "the vertex buffer, the feature and its index range, its patterns, the tile and the formatted section that evaluate a property"
@@ -657,7 +672,12 @@ pub trait PaintPropertyBinderBase {
     fn depends_on_feature_state(&self) -> bool {
         false
     }
+    /// How many vertices of `buffer` the binder wrote values into: none for
+    /// a constant property.
     fn binder_vertex_count(&self, buffer: &InterleavedVertexBuffer) -> usize;
+    /// The attribute that reads the binder's values in `shared`, the
+    /// vertices of `buffer` in the context's store; `None` where it wrote
+    /// none.
     fn apply(&self, buffer: &InterleavedVertexBuffer, shared: &SharedVertices) -> Option<SharedAttribute>;
 }
 
@@ -805,7 +825,7 @@ macro_rules! paint_property_binders {
         #[derive(Clone, Debug, $crate::__private::mln_wire::Wire)]
         #[wire(crate = $crate::__private::mln_wire)]
         $vis struct $name {
-            $vis interleaved_vertex_buffer: $crate::unstable::InterleavedVertexBuffer,
+            $vis interleaved_vertex_buffer: $crate::layer::InterleavedVertexBuffer,
             $($vis $field: $binder,)+
         }
 
@@ -815,7 +835,7 @@ macro_rules! paint_property_binders {
                     interleaved_vertex_buffer: ::core::default::Default::default(),
                     $($field: <$binder>::create(&properties.$field, z),)+
                 };
-                $($crate::unstable::PaintPropertyBinderBase::set_interleaved(
+                $($crate::layer::PaintPropertyBinderBase::set_interleaved(
                     &mut result.$field, &mut result.interleaved_vertex_buffer);)+
                 result
             }
@@ -827,12 +847,12 @@ macro_rules! paint_property_binders {
                 length: usize,
                 index: usize,
                 pattern_positions: &$crate::__private::mln_style_types::image::ImagePositions,
-                pattern_dependencies: ::core::option::Option<&$crate::unstable::PatternDependency>,
+                pattern_dependencies: ::core::option::Option<&$crate::layer::PatternDependency>,
                 canonical: &$crate::__private::mln_tile_id::CanonicalTileID,
                 formatted_section: &$crate::__private::mln_style::expression::Value,
             ) {
                 self.interleaved_vertex_buffer.populate(length, |buffer| {
-                    $($crate::unstable::PaintPropertyBinderBase::populate(
+                    $($crate::layer::PaintPropertyBinderBase::populate(
                         &mut self.$field,
                         buffer,
                         feature,
@@ -857,13 +877,13 @@ macro_rules! paint_property_binders {
                 if self.interleaved_vertex_buffer.is_moved() {
                     return;
                 }
-                $($crate::unstable::PaintPropertyBinderBase::update_vectors(
+                $($crate::layer::PaintPropertyBinderBase::update_vectors(
                     &mut self.$field, &mut self.interleaved_vertex_buffer, states, layer);)+
             }
 
             /// True if a feature state change rewrites the data-driven values.
             $vis fn depends_on_feature_state(&self) -> bool {
-                false $(|| $crate::unstable::PaintPropertyBinderBase::depends_on_feature_state(&self.$field))+
+                false $(|| $crate::layer::PaintPropertyBinderBase::depends_on_feature_state(&self.$field))+
             }
 
             /// Binds each property's values, `shared`, the vertices of the
@@ -872,11 +892,11 @@ macro_rules! paint_property_binders {
             $vis fn bind(
                 &self,
                 evaluated: &$props,
-                shared: ::core::option::Option<&$crate::unstable::SharedVertices>,
-                attrs: &mut $crate::unstable::VertexAttributeArray,
-                uniforms: &mut $crate::unstable::Uniforms,
+                shared: ::core::option::Option<&$crate::draw::SharedVertices>,
+                attrs: &mut $crate::draw::VertexAttributeArray,
+                uniforms: &mut $crate::draw::Uniforms,
             ) {
-                $($crate::unstable::bind_paint_property(
+                $($crate::layer::bind_paint_property(
                     &self.$field,
                     &self.interleaved_vertex_buffer,
                     shared,

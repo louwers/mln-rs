@@ -16,11 +16,11 @@
 use std::sync::Arc;
 
 use mln_gfx::gpu::Gpu;
+use mln_renderer::draw::{Context, DrawGroup, DrawOrder, LayerDrawing, PaintParameters, TileMap};
 use mln_renderer::layer::{
     DrawContext, EndedHost, EvaluatedLayer, LayerHost, LayerType, LayerValues, NoBucket, NoLayout, NoTileView,
     OffscreenPass, RenderPass,
 };
-use mln_renderer::unstable::{Context, DrawGroup, DrawOrder, LayerDrawing, PaintParameters, TileMap};
 use mln_util::logging::{Event, Log};
 
 use super::{Custom, CustomLayerFrame, CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerRenderParameters};
@@ -129,7 +129,7 @@ impl LayerType for Custom {
         (): &mut (),
         _drawing: &mut CustomDrawing,
         _gpu: &mut dyn Gpu,
-        _cx: &mut DrawContext<'_, '_, '_, Custom>,
+        _cx: &mut DrawContext<'_, '_, Custom>,
     ) {
     }
 
@@ -145,14 +145,15 @@ impl LayerType for Custom {
 /// The host's prerender, with the frame's projection.
 impl OffscreenPass for CustomDrawing {
     fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        let Some(projection) = parameters.frame_projection else {
+        let Some(projection) = parameters.frame_projection() else {
             return;
         };
+        let draw_frame = parameters.frame();
         let frame = CustomLayerFrame {
-            view: parameters.view.map_view(f64::from(parameters.pixel_ratio)),
+            view: draw_frame.view.map_view(f64::from(draw_frame.pixel_ratio)),
             projection,
-            width: parameters.renderable_size.width,
-            height: parameters.renderable_size.height,
+            width: draw_frame.renderable_size.width,
+            height: draw_frame.renderable_size.height,
         };
         self.frame = Some(frame);
         let Some(host) = &self.host else { return };

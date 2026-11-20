@@ -13,16 +13,17 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
+use mln_renderer::draw::{
+    AtlasBinding, Composite, Context, DrawGeometry, DrawList, DrawObjects, DrawObjectsMut, FrameDraw, LayerDrawing,
+    SharedAttribute, SharedTexture, Texture2D, Textures, TileDraws, TileObjects, UniformWriter, Uniforms,
+    VertexAttributeArray, bucket_indexes, bucket_vertices, cast_matrix, paint_vertices, projection_data,
+    to_projection_ubo,
+};
 use mln_renderer::layer::{
     DrawContext, EvaluatedLayer, FeatureQuery, HitTest, LayerBucket, LayerType, LayerValues, LayoutParameters,
     RenderPass, SourceLayer, UpdateContext,
 };
-use mln_renderer::unstable::{
-    AtlasBinding, Composite, Context, DrawGeometry, DrawList, DrawObjects, DrawObjectsMut, FrameDraw, LayerDrawing,
-    LineAtlas, LineLayoutVertex, LinePatternCap, PaintParameters, SharedAttribute, SharedTexture, Texture2D, Textures,
-    TileDraws, TileObjects, UniformWriter, Uniforms, VertexAttributeArray, bucket_indexes, bucket_vertices,
-    cast_matrix, paint_vertices, projection_data, to_projection_ubo,
-};
+use mln_renderer::unstable::{LineLayoutVertex, LinePatternCap};
 use mln_style::expression::{Dependency, EvaluationContext, GlobalStateMap, global_state_refs_intersect};
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 use mln_style_types::{AlignmentType, LineCapType};
@@ -322,9 +323,9 @@ impl LayerType for Line {
         state: &mut LineState,
         drawing: &mut TileDraws<LineTile>,
         gpu: &mut dyn Gpu,
-        cx: &mut DrawContext<'_, '_, '_, Line>,
+        cx: &mut DrawContext<'_, '_, Line>,
     ) {
-        let (paint_parameters, render_tiles, atlases) = (&mut *cx.paint, cx.tiles, cx.atlases);
+        let render_tiles = cx.tiles;
         if std::mem::take(&mut state.color_ramp_changed) {
             // The gradients' draws read the old ramp's texture.
             drawing.clear();
@@ -367,7 +368,7 @@ impl LayerType for Line {
             // The draw's attributes read the bucket's vertices in the
             // context's store, which upload again when they change.
             let changes = entry.take_changes();
-            let context = &mut *paint_parameters.context;
+            let context = &mut *cx.context;
             let cached = if let Some(cached) = entry.value {
                 refresh_paint_attributes(&mut cached.objects, changes, |attrs| {
                     let buffer = &binders.interleaved_vertex_buffer;
@@ -392,22 +393,14 @@ impl LayerType for Line {
                 };
                 cached
             };
-            if let Some(uniforms) = LineState::uniforms(
-                &cx.layer.evaluated,
-                tile_id.to_unwrapped(),
-                render_data,
-                binders,
-                cached,
-                paint_parameters,
-                &atlases.line,
-            ) {
+            if let Some(uniforms) = LineState::uniforms(tile_id.to_unwrapped(), render_data, binders, cached, cx) {
                 let draw = FrameDraw { pass: cached.pass, clip: true, ..FrameDraw::new(Some(tile_id), cached.id) };
                 state.draw_list.push(draw, uniforms);
             }
         }
 
         let layer = &cx.layer.evaluated;
-        drawing.finish(&mut state.draw_list, gpu, paint_parameters.context, |writer| {
+        drawing.finish(&mut state.draw_list, gpu, cx.context, |writer| {
             LineState::write_uniforms(layer, writer);
         });
     }
@@ -611,33 +604,31 @@ impl LineState {
     }
 
     /// The entries in the layer's storage buffers of `cached`, the draw of
-    /// the tile `tile_id` of `tile_bucket`, whose binders are `binders`, with
-    /// the layer's values
-    /// `layer`: its matrix, the interpolation of the layer's values, and
-    /// where its patterns are. A dashed draw of the line atlas's pattern
-    /// takes the atlas's texture here; `None` where it has none yet, and
-    /// doesn't draw.
+    /// the tile `tile_id` of `tile_bucket`, whose binders are `binders`, in
+    /// the frame of `cx`: its matrix, the interpolation of the layer's
+    /// values, and where its patterns are. A dashed draw of the line atlas's
+    /// pattern takes the atlas's texture here; `None` where it has none yet,
+    /// and doesn't draw.
     fn uniforms(
-        layer: &EvaluatedLayer<Line>,
         tile_id: UnwrappedTileID,
         tile_bucket: LayerBucket<'_, Line>,
         binders: &LineBinders,
         cached: &mut LineTile,
-        parameters: &PaintParameters<'_>,
-        line_atlas: &LineAtlas,
+        cx: &DrawContext<'_, '_, Line>,
     ) -> Option<LineUniforms> {
         const NEAR_CLIPPED: bool = false;
         const IN_VIEWPORT_PIXEL_UNITS: bool = false;
+        let (layer, context, frame, line_atlas) = (&*cx.layer.evaluated, &*cx.context, &cx.frame, &cx.atlases.line);
         let evaluated = &layer.paint;
         let crossfade = layer.crossfade;
-        let state = parameters.view;
+        let state = frame.view;
         let zoom = state.zoom() as f32;
         let int_zoom = state.integer_zoom();
         let pixel_scale = state.projection().pixel_scale(state) as f32;
 
         let projection = projection_data(
             &tile_id,
-            parameters,
+            frame,
             *evaluated.line_translate.uniform(),
             *evaluated.line_translate_anchor.uniform(),
             NEAR_CLIPPED,
@@ -677,10 +668,8 @@ impl LineState {
                 pad2: 0.0,
             }),
             LineType::Pattern => {
-                let texture = cached
-                    .objects
-                    .texture(ID_LINE_IMAGE_TEXTURE)
-                    .and_then(|texture| parameters.context.texture(texture));
+                let texture =
+                    cached.objects.texture(ID_LINE_IMAGE_TEXTURE).and_then(|texture| context.texture(texture));
                 let texture_size = texture.map_or(Size::new(0, 0), Texture2D::size);
                 uniforms.draw_ubo.set(&LinePatternDrawableUBO {
                     matrix,
@@ -703,7 +692,7 @@ impl LineState {
                     pattern_from: tlbr(pattern.from.id()),
                     pattern_to: tlbr(pattern.to.id()),
                     scale: [
-                        parameters.pixel_ratio,
+                        frame.pixel_ratio,
                         1.0 / tile_id.pixels_to_tile_units(1.0, f32::from(int_zoom)),
                         crossfade.from_scale,
                         crossfade.to_scale,
@@ -734,7 +723,7 @@ impl LineState {
                         tex_y_a: 0.0,
                         tex_y_b: 0.0,
                         atlas_height: atlas_size.height as f32,
-                        sdfgamma: atlas_size.width as f32 / (min_scale * 256.0 * parameters.pixel_ratio) / 2.0,
+                        sdfgamma: atlas_size.width as f32 / (min_scale * 256.0 * frame.pixel_ratio) / 2.0,
                     }
                 } else {
                     let dasharray = evaluated.line_dasharray.faded();
@@ -752,7 +741,7 @@ impl LineState {
                         tex_y_a: pos_a.y,
                         tex_y_b: pos_b.y,
                         atlas_height: 0.0,
-                        sdfgamma: dash_pattern.size().width as f32 / (min_width * 256.0 * parameters.pixel_ratio) / 2.0,
+                        sdfgamma: dash_pattern.size().width as f32 / (min_width * 256.0 * frame.pixel_ratio) / 2.0,
                     }
                 };
 
