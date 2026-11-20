@@ -40,8 +40,7 @@ impl StyleRegistry {
     }
 
     /// The built-in expression functions, layer types and source types, for
-    /// this crate's tests, which can't reach the renderer's
-    /// `Registry::with_builtins`.
+    /// this crate's tests, which can't reach the facade's registry.
     #[cfg(test)]
     pub(crate) fn with_builtins() -> Arc<Self> {
         use crate::layer_type::style_entry;

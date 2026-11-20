@@ -2501,6 +2501,7 @@ name = "mln-rs-bench"
 version = "0.0.13"
 dependencies = [
  "libc",
+ "mln-rs",
  "mln-rs-bench-workload",
  "mln-rs-conversion",
  "mln-rs-d3d12",
@@ -2565,6 +2566,7 @@ dependencies = [
  "glam",
  "js-sys",
  "libc",
+ "mln-rs",
  "mln-rs-conversion",
  "mln-rs-d3d12",
  "mln-rs-expression",
@@ -2575,7 +2577,6 @@ dependencies = [
  "mln-rs-map",
  "mln-rs-map-types",
  "mln-rs-mtl",
- "mln-rs-renderer",
  "mln-rs-runtime",
  "mln-rs-storage",
  "mln-rs-style",
@@ -2645,6 +2646,7 @@ dependencies = [
  "egui-winit",
  "egui_extras",
  "egui_glow",
+ "mln-rs",
  "mln-rs-bench-workload",
  "mln-rs-d3d12",
  "mln-rs-frame-pacer",
@@ -2655,7 +2657,6 @@ dependencies = [
  "mln-rs-map",
  "mln-rs-math",
  "mln-rs-mtl",
- "mln-rs-renderer",
  "mln-rs-runtime",
  "mln-rs-storage",
  "mln-rs-util",
@@ -2835,6 +2836,7 @@ dependencies = [
  "glam",
  "glow",
  "khronos-egl",
+ "mln-rs",
  "mln-rs-d3d12",
  "mln-rs-expression",
  "mln-rs-feature",
@@ -2958,6 +2960,7 @@ version = "0.0.13"
 dependencies = [
  "fastrand",
  "geojson",
+ "mln-rs",
  "mln-rs-conversion",
  "mln-rs-expression",
  "mln-rs-feature",
@@ -3033,6 +3036,7 @@ dependencies = [
  "js-sys",
  "khronos-egl",
  "libc",
+ "mln-rs",
  "mln-rs-conversion",
  "mln-rs-d3d12",
  "mln-rs-feature",
@@ -3090,6 +3094,7 @@ dependencies = [
  "httpmock",
  "jni",
  "js-sys",
+ "mln-rs",
  "mln-rs-feature",
  "mln-rs-headless",
  "mln-rs-map",
@@ -3116,6 +3121,7 @@ name = "mln-rs-storage-offline"
 version = "0.0.13"
 dependencies = [
  "httpmock",
+ "mln-rs",
  "mln-rs-feature",
  "mln-rs-headless",
  "mln-rs-map",
@@ -3324,6 +3330,7 @@ name = "mln-rs-web"
 version = "0.0.13"
 dependencies = [
  "js-sys",
+ "mln-rs",
  "mln-rs-gestures",
  "mln-rs-gfx",
  "mln-rs-gl",

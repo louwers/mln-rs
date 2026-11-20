@@ -170,7 +170,8 @@ impl HeadlessMap {
     pub(crate) fn new(mut frontend: Frontend, mode: MapMode, file_source: Arc<dyn FileSource>) -> HeadlessMap {
         let size = frontend.frontend.size();
         let options = MapOptions { map_mode: mode, size, pixel_ratio: 1.0, ..Default::default() };
-        let mut map = Map::with_file_source(file_source, options, &frontend.pool).expect("a map");
+        let registry = Arc::clone(mln_rs::builtin_registry().style());
+        let mut map = Map::new(file_source, options, registry, &frontend.pool).expect("a map");
         frontend.frontend.attach(&mut map);
         let clock = Instant::now() + Duration::from_hours(24);
         HeadlessMap { map, frontend, clock, frames: 0, incomplete: 0, last_frame: None, drained: 0 }

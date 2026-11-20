@@ -44,8 +44,13 @@ fn run_on(test: &str, frontend: impl FnOnce(Size, f32, &Queue<()>, &Pool) -> Hea
     let run_loop = Queue::new();
     let pool = Pool::new(4);
     let mut frontend = frontend(size, pixel_ratio, &run_loop, &pool);
-    let mut map =
-        Map::new(MapOptions { map_mode: MapMode::Static, size, pixel_ratio, ..Default::default() }, &pool).unwrap();
+    let mut map = Map::with_resource_options(
+        MapOptions { map_mode: MapMode::Static, size, pixel_ratio, ..Default::default() },
+        &mln_storage::ResourceOptions::default(),
+        crate::support::registry(),
+        &pool,
+    )
+    .unwrap();
     frontend.attach(&mut map);
     map.load_style_json(&json);
     let camera = map.style().get_default_camera();

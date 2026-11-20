@@ -610,7 +610,10 @@ fn utf8<'a>(path: &'a Path, what: &str) -> Result<&'a str, Error> {
 }
 
 impl Runtime {
-    /// Starts a runtime and its thread, with the built-in registrations.
+    /// Starts a runtime and its thread, whose maps parse their styles
+    /// against `registry`, and whose renderers and tile workers use it. In
+    /// the browser, the tile workers' Web Workers must serve with registries
+    /// filled by the same calls (`mln_web_host::tile_worker::serve`).
     ///
     /// In the browser, the runtime's thread is the one that calls this, which
     /// a wasm instance has only one of, and the runtime never blocks it: its
@@ -620,17 +623,7 @@ impl Runtime {
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) when the
     /// cache database file can't be opened or created, and in the browser
     /// with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a cache path.
-    pub fn new(options: &RuntimeOptions) -> Result<Runtime, Error> {
-        Self::with_registry(options, Registry::with_builtins())
-    }
-
-    /// Starts a runtime and its thread, whose maps parse their styles
-    /// against `registry`, and whose renderers and tile workers use it. In
-    /// the browser, the tile workers' Web Workers must serve with registries
-    /// filled by the same calls (`mln_web_host::tile_worker::serve`).
-    ///
-    /// Fails as [`new`](Self::new) does.
-    pub fn with_registry(options: &RuntimeOptions, registry: Arc<Registry>) -> Result<Runtime, Error> {
+    pub fn new(options: &RuntimeOptions, registry: Arc<Registry>) -> Result<Runtime, Error> {
         let resource_options = resource_options(options)?;
         let network_options = NetworkOptions {
             status: options.network_status.clone().unwrap_or_default(),

@@ -56,7 +56,7 @@ pub(crate) fn tile_data(tiles: Tiles, bytes: &Arc<Vec<u8>>) -> TileData {
 
 /// What a map's styles parse against.
 pub(crate) fn registry() -> Arc<StyleRegistry> {
-    Arc::clone(mln_renderer::Registry::with_builtins().style())
+    Arc::clone(mln_rs::builtin_registry().style())
 }
 
 /// The Liberty style over the street tiles, as JSON, with its layers
@@ -128,9 +128,17 @@ impl StreetLayout {
     ) -> Self {
         let bytes = tile_bytes(fixtures, Tiles::Street, id);
         let load = |url: &str| Some(fixtures.read(&asset_path(url)));
-        let job =
-            TileLayout::overscaled(style, "openmaptiles", include, id, zoom, &tile_data(Tiles::Street, &bytes), load)
-                .unwrap_or_else(|error| panic!("{error}"));
+        let job = TileLayout::overscaled(
+            &mln_rs::builtin_registry(),
+            style,
+            "openmaptiles",
+            include,
+            id,
+            zoom,
+            &tile_data(Tiles::Street, &bytes),
+            load,
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
         StreetLayout { job, bytes }
     }
 

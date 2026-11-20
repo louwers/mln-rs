@@ -90,7 +90,7 @@ pub(crate) unsafe extern "C" fn mln_runtime_create(
         crate::web::set_defaults();
         // Before the runtime's threads can call the host.
         crate::process_exit::watch();
-        let runtime = Runtime::new(&options)?;
+        let runtime = mln_rs::start_runtime(&options)?;
         *out_runtime =
             RUNTIMES.insert(Arc::new(RuntimeObject { runtime, maps: Arc::new(Mutex::new(HashMap::default())) }))?;
         Ok(())
