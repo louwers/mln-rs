@@ -439,3 +439,45 @@ fn a_zoom_change_keeps_the_drapes_while_the_camera_moves_and_draws_them_at_rest(
     assert_eq!(drapes, map.frame().1, "the drapes drawn again at rest");
     assert!(map.frame().1.is_empty());
 }
+
+/// A hillshade of the DEM, lit from the viewport, as its lights are by
+/// default.
+fn hillshade() -> Edit {
+    let json = r#"{
+        "version": 8,
+        "sources": {"dem": {"type": "raster-dem", "tiles": ["dem/{z}/{x}/{y}.png"], "tileSize": 256, "maxzoom": 10}},
+        "layers": [{"id": "hillshade", "type": "hillshade", "source": "dem"}]
+    }"#;
+    let parsed = Style::from_json(Registry::with_builtins().style(), json, None).expect("the style");
+    let layer = parsed.get_layer_list().iter().next().expect("the layer").clone();
+    Edit::AddLayer { layer, before: None }
+}
+
+/// A rotation keeps the drapes of layers that draw nothing by the bearing,
+/// at rest too. Turned around, the view covers the same drapes.
+#[test]
+fn a_rotation_keeps_drapes_that_draw_nothing_by_the_bearing() {
+    let (mut map, drapes) = settled(Tiles::default());
+    map.transform.jump_to(&CameraOptions { bearing: Some(180.0), ..Default::default() });
+    let (_, passes) = map.frame();
+    assert_eq!(drapes, map.drapes(), "the same drapes cover the view");
+    assert!(passes.is_empty(), "drapes drawn again: {passes:?}");
+}
+
+/// A hillshade lit from the viewport turns its lights with the map: a
+/// rotation keeps its drapes while the camera moves, and draws them again
+/// once at rest.
+#[test]
+fn a_rotation_draws_a_viewport_lit_hillshade_again_at_rest() {
+    let (mut map, drapes) = settled(Tiles::default());
+    map.edit(hillshade());
+    map.settle();
+    map.camera_moving = true;
+    map.transform.jump_to(&CameraOptions { bearing: Some(180.0), ..Default::default() });
+    let (_, passes) = map.frame();
+    assert_eq!(drapes, map.drapes(), "the same drapes cover the view");
+    assert!(passes.is_empty(), "drapes drawn while the camera moves: {passes:?}");
+    map.camera_moving = false;
+    assert_eq!(drapes, map.frame().1, "the drapes drawn again at rest");
+    assert!(map.frame().1.is_empty());
+}

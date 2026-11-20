@@ -563,6 +563,12 @@ pub(crate) trait TypedLayer {
     /// a frame.
     fn passes(&self, evaluated: &EvaluatedLayer<Self::Type>) -> RenderPass;
 
+    /// Whether the layer draws a drape with its values `evaluated` by the
+    /// map's bearing: something of it is anchored to the viewport.
+    fn drapes_by_bearing(&self, _evaluated: &EvaluatedLayer<Self::Type>) -> bool {
+        false
+    }
+
     /// Called in the frame's update of a layer with a source with `tiles`,
     /// the frame's tiles of the source in the order the layer draws them,
     /// each with what it shows the layer: none for an image source. The
@@ -699,6 +705,10 @@ pub(crate) trait LayerParts {
 
     /// Whether the layer drapes over terrain ([`TypedLayer::DRAPES`]).
     fn drapes(&self) -> bool;
+
+    /// Whether the layer draws a drape by the map's bearing, with its values
+    /// of the frame ([`TypedLayer::drapes_by_bearing`]).
+    fn drapes_by_bearing(&self) -> bool;
 
     /// An empty drawing of the layer's type, which a drape keeps of the
     /// layer.
@@ -903,6 +913,10 @@ impl<L: TypedLayer> LayerParts for L {
 
     fn drapes(&self) -> bool {
         L::DRAPES
+    }
+
+    fn drapes_by_bearing(&self) -> bool {
+        TypedLayer::drapes_by_bearing(self, &self.parts().values.evaluated)
     }
 
     fn new_drape_drawing(&self) -> DrapeDrawing {

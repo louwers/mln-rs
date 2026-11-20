@@ -71,8 +71,8 @@ struct LayerKey {
 }
 
 /// What a drape's layers draw it from: the layers, their values, what they
-/// draw of their tiles, and the map's zoom. A drape drawn from the same
-/// would get the same texels.
+/// draw of their tiles, the map's zoom, and its bearing if a layer draws by
+/// it. A drape drawn from the same would get the same texels.
 ///
 /// The images of the style, and the feature state of the tiles' buckets,
 /// aren't in it: a change of them makes the drapes they show in draw again
@@ -84,13 +84,16 @@ struct DrapeKey {
     /// The layers' tiles, each layer's after the one before's.
     tiles: Vec<TileStamp>,
     zoom: f64,
+    /// The map's bearing, which a layer draws by, or `None`.
+    bearing: Option<f64>,
 }
 
 impl DrapeKey {
     /// Whether a drape drawn from `drawn` has the texels that this key would
     /// draw: of the same layers, with the same styles and paint revisions,
     /// from the same tiles, and `at_rest`, with the same values at the same
-    /// zoom. A camera that moves keeps drapes drawn at another zoom.
+    /// zoom and bearing. A camera that moves keeps drapes drawn at another
+    /// zoom or bearing.
     fn matches(&self, drawn: &DrapeKey, at_rest: bool) -> bool {
         self.tiles == drawn.tiles
             && self.layers.len() == drawn.layers.len()
@@ -100,7 +103,7 @@ impl DrapeKey {
                     && layer.tiles == drawn.tiles
                     && (!at_rest || Arc::ptr_eq(&layer.evaluated, &drawn.evaluated))
             })
-            && (!at_rest || self.zoom == drawn.zoom)
+            && (!at_rest || (self.zoom == drawn.zoom && self.bearing == drawn.bearing))
     }
 
     /// Whether a bucket in `changed` is among the key's.
@@ -205,6 +208,7 @@ impl Drapes {
             drape.key.layers.clear();
             drape.key.tiles.clear();
             drape.key.zoom = view.zoom();
+            drape.key.bearing = None;
             self.drapes.push(drape);
         }
     }
@@ -217,6 +221,9 @@ impl Drapes {
             let key = &mut drape.key;
             let start = key.tiles.len();
             layer.drape_stamps(source, drape.tile, &mut key.tiles);
+            if layer.drapes_by_bearing() {
+                key.bearing = Some(drape.transform.view.angle());
+            }
             key.layers.push(LayerKey {
                 style: Arc::clone(&base.style),
                 paint_revision: base.paint_revision,

@@ -208,3 +208,52 @@ fn a_still_image_renders_again_once_the_camera_stands_on_the_terrain() {
     let view = map.transform_state().view();
     assert_eq!((0.0, None), (view.center_altitude(), view.terrain_min_elevation()));
 }
+
+/// A hillshade lit from the viewport, as its lights are by default, turns
+/// them with the map: after a rotation it draws as a map that starts
+/// rotated does.
+#[test]
+fn a_viewport_lit_hillshade_turns_its_lights_with_the_map() {
+    use mln_storage::stub_file_source::{ResponseType, StubFileSource};
+    use mln_storage::{Kind, Resource, Response};
+
+    // A DEM that rises to the east, in the Terrarium encoding.
+    let mut dem = PremultipliedImage::new(Size::new(256, 256));
+    for (index, pixel) in dem.data.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+        let x = (index % 256) as u8;
+        pixel.copy_from_slice(&[128, x, 0, 255]);
+    }
+    let dem = Arc::new(mln_image::encode_png(&dem));
+    let style = r#"{
+        "version": 8,
+        "zoom": 2,
+        "sources": {"dem": {"type": "raster-dem", "encoding": "terrarium", "tiles": ["dem/{z}/{x}/{y}.png"], "maxzoom": 2}},
+        "layers": [{"id": "hillshade", "type": "hillshade", "source": "dem", "paint": {"hillshade-exaggeration": 1}}]
+    }"#;
+    let size = Size::new(64, 64);
+    let run_loop = Queue::new();
+    let pool = Pool::new(4);
+    let render = |bearings: &[f64]| -> PremultipliedImage {
+        let file_source = Arc::new(StubFileSource::new(ResponseType::Synchronous));
+        let dem = Arc::clone(&dem);
+        file_source.set_response(Kind::Tile, move |_: &Resource| {
+            let mut response = Response::new();
+            response.data = Some(Arc::clone(&dem));
+            Some(response)
+        });
+        let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop, &pool).expect("a headless frontend");
+        let options = MapOptions { map_mode: MapMode::Static, size, ..Default::default() };
+        let mut map = Map::with_file_source(file_source, options, &pool).unwrap();
+        frontend.attach(&mut map);
+        map.load_style_json(style);
+        let mut image = PremultipliedImage::new(Size::default());
+        for &bearing in bearings {
+            map.jump_to(&CameraOptions { bearing: Some(bearing), ..Default::default() });
+            image = frontend.render(&mut map).expect("the still image").image;
+        }
+        image
+    };
+    let turned = render(&[0.0, 90.0]);
+    assert_ne!(render(&[0.0]), turned, "the hillshade shows its lights' direction");
+    assert_eq!(render(&[90.0]), turned);
+}
