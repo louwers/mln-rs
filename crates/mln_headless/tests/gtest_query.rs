@@ -623,9 +623,10 @@ fn query_feature_extensions_supercluster_children() {
     let children = feature_collection(query_children);
     assert_eq!(children.len(), 4);
 
-    // Compare results produced by supercluster with default clustering options.
+    // GL JS's supercluster's results with the default options, less the
+    // number of points that it adds to each cluster ID.
     let cluster_ids: Vec<_> = children.iter().map(|c| uint_property(c, "cluster_id")).collect();
-    assert_eq!(cluster_ids, [Some(2), Some(34), Some(258), Some(2466)]);
+    assert_eq!(cluster_ids, [Some(2), Some(34), Some(258), Some(3267)]);
     let point_counts: Vec<_> = children.iter().map(|c| uint_property(c, "point_count")).collect();
     assert_eq!(point_counts, [Some(7), Some(16), Some(7), Some(2)]);
 }

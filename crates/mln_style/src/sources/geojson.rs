@@ -127,9 +127,6 @@ struct ClusterExpressions<'a>(&'a ClusterProperties);
 impl cluster::Aggregate for ClusterExpressions<'_> {
     fn map(&self, properties: &PropertyMap) -> PropertyMap {
         let mut mapped = PropertyMap::new();
-        if properties.is_empty() {
-            return mapped;
-        }
         let feature = Feature { properties: properties.clone(), ..Feature::default() };
         for (key, (map_expression, _)) in self.0 {
             mapped.insert(key.clone(), evaluate_feature(&feature, map_expression, None));

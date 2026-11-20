@@ -1,4 +1,6 @@
-//! Clusters testdata/places.json, the places of supercluster's tests.
+//! Clusters testdata/places.json, the places of supercluster's tests. The
+//! expectations are GL JS's supercluster's (8.0.1), whose cluster IDs are
+//! these plus the number of points.
 
 use feature::{Feature, Identifier, PropertyMap, Value};
 use geo_types::Point;
@@ -87,11 +89,13 @@ fn finds_a_clusters_children_leaves_and_expansion_zoom() {
     assert_eq!(counts, [Some(6), Some(7), Some(2), None]);
     assert_eq!(name(&children[3]), "Bermuda Islands");
 
+    let names: Vec<_> = clusters.children(994).unwrap().iter().map(|c| name(c).to_owned()).collect();
+    assert_eq!(names, ["Cape Hope", "Point Barrow"]);
+
     assert_eq!(clusters.expansion_zoom(1), Ok(1));
     assert_eq!(clusters.expansion_zoom(33), Ok(1));
-    assert_eq!(clusters.expansion_zoom(353), Ok(2));
-    assert_eq!(clusters.expansion_zoom(833), Ok(2));
-    assert_eq!(clusters.expansion_zoom(1857), Ok(3));
+    assert_eq!(clusters.expansion_zoom(257), Ok(1));
+    assert_eq!(clusters.expansion_zoom(994), Ok(2));
 
     let leaves = clusters.leaves(1, 10, 5).unwrap();
     assert_eq!(
@@ -142,7 +146,7 @@ fn an_unknown_cluster_is_not_found() {
 fn expansion_zoom_can_pass_the_max_zoom() {
     let options = Options { radius: 60.0, extent: 256, max_zoom: 4, ..DEFAULT };
     let clusters = Clusters::new(places(), options, None).unwrap();
-    assert_eq!(clusters.expansion_zoom(2436), Ok(5));
+    assert_eq!(clusters.expansion_zoom(357), Ok(5));
 }
 
 #[test]
@@ -202,7 +206,29 @@ fn clusters_no_points() {
 
 #[test]
 fn abbreviates_counts_as_gl_js_does() {
-    for (count, text) in [(999, "999"), (1000, "1k"), (1249, "1.2k"), (1250, "1.3k"), (9999, "10k"), (12_345, "12k")] {
-        assert_eq!(abbreviate(count), text);
+    assert_eq!(abbreviate(999), Value::Uint(999));
+    for (count, text) in [(1000, "1k"), (1249, "1.2k"), (1250, "1.3k"), (9999, "10k"), (12_345, "12k")] {
+        assert_eq!(abbreviate(count), Value::String(text.to_owned()));
     }
+}
+
+#[test]
+fn a_cluster_that_takes_nothing_stays_as_it_is() {
+    // Two points in one place cluster at the max zoom, and the cluster
+    // stays the same below it.
+    let mut features = places();
+    features.truncate(1);
+    features.push(features[0].clone());
+    let clusters = Clusters::new(features, DEFAULT, None).unwrap();
+    let tile = clusters.tile(0, 0, 0);
+    let [cluster] = &tile[..] else { panic!("{tile:?}") };
+    let id = uint(&cluster.properties, "cluster_id") as u32;
+    assert_eq!(clusters.children(id).unwrap().len(), 2);
+    assert_eq!(clusters.expansion_zoom(id), Ok(DEFAULT.max_zoom + 1));
+
+    // A point alone isn't a cluster, whatever the min points.
+    let mut features = places();
+    features.truncate(1);
+    let clusters = Clusters::new(features, Options { min_points: 1, ..DEFAULT }, None).unwrap();
+    assert!(!is_cluster(&clusters.tile(0, 0, 0)[0].properties));
 }

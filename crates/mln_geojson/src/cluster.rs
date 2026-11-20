@@ -91,7 +91,7 @@ struct Node {
     /// The cluster that took this node at the zoom below, if one did.
     parent: Option<ClusterId>,
     /// What the node contributes to its cluster's properties, when there's
-    /// an [`Aggregate`] and the contribution isn't empty.
+    /// an [`Aggregate`].
     properties: Option<Arc<PropertyMap>>,
 }
 
@@ -185,7 +185,7 @@ impl Clusters {
             .enumerate()
             .map(|(i, f)| {
                 let Some(Geometry::Point(p)) = f.geometry else { return Err(Error::NotAPoint(i)) };
-                let properties = aggregate.map(|a| a.map(&f.properties)).filter(|p| !p.is_empty()).map(Arc::new);
+                let properties = aggregate.map(|a| Arc::new(a.map(&f.properties)));
                 Ok(Node { pos: mercator::project(p.0), kind: Kind::Point(i as u32), parent: None, properties })
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -363,8 +363,8 @@ fn cluster(above: &mut Level, zoom: u8, r: f64, min_points: usize, aggregate: Op
             above.within(origin.pos, r).into_iter().map(|n| n as usize).filter(|&n| !taken[n]).collect();
         let num_points = origin.num_points() + neighbors.iter().map(|&n| above.nodes[n].num_points()).sum::<u32>();
 
-        if (num_points as usize) < min_points {
-            // Too few to cluster: they stay as they are.
+        if neighbors.is_empty() || (num_points as usize) < min_points {
+            // Nothing to merge, or too few points: they stay as they are.
             nodes.push(Node { parent: None, ..origin.clone() });
             for n in neighbors {
                 taken[n] = true;
@@ -390,7 +390,7 @@ fn cluster(above: &mut Level, zoom: u8, r: f64, min_points: usize, aggregate: Op
             pos: weighted / f64::from(num_points),
             kind: Kind::Cluster { id, num_points },
             parent: None,
-            properties: properties.filter(|p| !p.is_empty()).map(Arc::new),
+            properties: properties.map(Arc::new),
         });
     }
     Level::new(nodes)
@@ -403,23 +403,23 @@ fn cluster_properties(id: ClusterId, num_points: u32, aggregated: Option<&Proper
     properties.insert("cluster".to_owned(), Value::Bool(true));
     properties.insert("cluster_id".to_owned(), Value::Uint(u64::from(id.0)));
     properties.insert("point_count".to_owned(), Value::Uint(u64::from(num_points)));
-    properties.insert("point_count_abbreviated".to_owned(), Value::String(abbreviate(num_points)));
+    properties.insert("point_count_abbreviated".to_owned(), abbreviate(num_points));
     for (key, value) in aggregated.into_iter().flatten() {
         properties.entry(key.clone()).or_insert_with(|| value.clone());
     }
     properties
 }
 
-/// `count` for a label, as GL JS writes it: "12k" from 10,000 on, "1.2k"
-/// from 1,000.
-fn abbreviate(count: u32) -> String {
-    let count = f64::from(count);
-    if count >= 10_000.0 {
-        format!("{}k", (count / 1000.0).round())
-    } else if count >= 1000.0 {
-        format!("{}k", (count / 100.0).round() / 10.0)
+/// `count` for a label, as GL JS gives it: the number below 1,000, then
+/// text such as "1.2k" and, from 10,000 on, "12k".
+fn abbreviate(count: u32) -> Value {
+    let thousands = f64::from(count) / 1000.0;
+    if count >= 10_000 {
+        Value::String(format!("{}k", thousands.round()))
+    } else if count >= 1000 {
+        Value::String(format!("{}k", (thousands * 10.0).round() / 10.0))
     } else {
-        count.to_string()
+        Value::Uint(u64::from(count))
     }
 }
 
