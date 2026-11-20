@@ -18,6 +18,7 @@ use mln_wire::{Reader, Wire, Writer};
 
 use crate::bucket_geometry::GeometryUpload;
 use crate::layout::pattern_layout::PatternLayerMap;
+use crate::util::triangulate::Triangulator;
 
 pub(crate) type FeatureStates = mln_util::hash::HashMap<String, mln_style::expression::expression::FeatureState>;
 pub type LayerFeatureStates = mln_util::hash::HashMap<String, FeatureStates>;
@@ -68,8 +69,11 @@ pub(crate) trait Bucket: Any + Send + CloneBucket {
     /// Obtaining these is a costly operation, so we do it only once, and
     /// pass-by-const-ref the geometries as a second parameter.
     ///
+    /// A bucket that fills polygons triangulates them with `triangulator`.
+    ///
     /// Fails with [`geometry_too_long`] for a polygon that a bucket can't
     /// index; the worker reports it as the tile's error.
+    #[expect(clippy::too_many_arguments, reason = "the feature and what the layout lays it out with")]
     fn add_feature(
         &mut self,
         _feature: &dyn GeometryTileFeature,
@@ -78,6 +82,7 @@ pub(crate) trait Bucket: Any + Send + CloneBucket {
         _patterns: &PatternLayerMap,
         _index: usize,
         _canonical: &CanonicalTileID,
+        _triangulator: &mut Triangulator,
     ) -> Result<(), Error> {
         Ok(())
     }

@@ -41,6 +41,7 @@ use crate::layer_type::EvaluatedLayer;
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::layout::symbol_instance::SymbolInstancePools;
 use crate::tile_mask::TileMask;
+use crate::util::triangulate::Triangulator;
 
 struct StubGeometryTileFeature {
     properties: PropertyMap,
@@ -97,6 +98,7 @@ fn circle_bucket() {
             &PatternLayerMap::default(),
             0,
             &CanonicalTileID::new(0, 0, 0),
+            &mut Triangulator::default(),
         )
         .unwrap();
     assert!(!bucket.has_data());
@@ -128,6 +130,7 @@ fn fill_bucket() {
             &PatternLayerMap::default(),
             0,
             &CanonicalTileID::new(0, 0, 0),
+            &mut Triangulator::default(),
         )
         .unwrap();
     assert!(bucket.has_data());
@@ -152,6 +155,7 @@ fn fill_extrusion_vertex_count(polygon: &GeometryCollection, meters: f32, tile: 
             &PatternLayerMap::default(),
             0,
             &tile,
+            &mut Triangulator::default(),
         )
         .unwrap();
     assert!(bucket.has_data());
@@ -189,6 +193,7 @@ fn fill_extrusion_walls_on_clip_lines_leave_the_pattern_where_it_was() {
             &PatternLayerMap::default(),
             0,
             &CanonicalTileID::new(16, 32768, 32768),
+            &mut Triangulator::default(),
         )
         .unwrap();
     let edge_distances: Vec<u16> = bucket.vertices.get_mut().iter().map(|v| v.a2[1]).collect();
@@ -211,6 +216,7 @@ fn fill_extrusion_bucket_skips_polygons_rounded_off_the_tile() {
             &PatternLayerMap::default(),
             0,
             &CanonicalTileID::new(16, 32768, 32768),
+            &mut Triangulator::default(),
         )
         .unwrap();
     assert!(!bucket.has_data());
@@ -268,6 +274,7 @@ fn data_driven_fill_bucket(fill_color: &serde_json::Value) -> FillBucket {
             &PatternLayerMap::default(),
             0,
             &CanonicalTileID::new(0, 0, 0),
+            &mut Triangulator::default(),
         )
         .unwrap();
     bucket
@@ -395,6 +402,7 @@ fn line_bucket() {
             &PatternLayerMap::default(),
             0,
             &CanonicalTileID::new(0, 0, 0),
+            &mut Triangulator::default(),
         )
         .unwrap();
     assert!(!bucket.has_data());
@@ -408,6 +416,7 @@ fn line_bucket() {
             &PatternLayerMap::default(),
             1,
             &CanonicalTileID::new(0, 0, 0),
+            &mut Triangulator::default(),
         )
         .unwrap();
     assert!(bucket.has_data());
@@ -430,6 +439,7 @@ fn line_bucket_drawables_build_from_freed_indexes() {
             &PatternLayerMap::default(),
             0,
             &CanonicalTileID::new(0, 0, 0),
+            &mut Triangulator::default(),
         )
         .unwrap();
     assert!(bucket.has_data());
@@ -500,6 +510,7 @@ fn symbol_bucket() {
             &PatternLayerMap::default(),
             0,
             &CanonicalTileID::new(0, 0, 0),
+            &mut Triangulator::default(),
         )
         .unwrap();
     assert!(!bucket.has_data());
@@ -793,6 +804,7 @@ fn line_bucket_vertices(
                 &PatternLayerMap::default(),
                 index,
                 &CanonicalTileID::new(0, 0, 0),
+                &mut Triangulator::default(),
             )
             .unwrap();
     }

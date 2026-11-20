@@ -1,5 +1,3 @@
-use std::cell::Cell;
-
 use mln_gfx::gpu::Gpu;
 use mln_gfx::shaders::shader_defines::MAX_UBO_COUNT_PER_SHADER;
 
@@ -8,24 +6,10 @@ use crate::gfx::resources::Device;
 
 /// Uniform and storage buffers by id, which their array owns: the owner of
 /// the array drops the bindings made of a buffer that it replaces.
+#[derive(Default)]
 pub(crate) struct UniformBufferArray {
     buffers: [Option<Buffer>; MAX_UBO_COUNT_PER_SHADER],
     epoch: u64,
-}
-
-thread_local! {
-    /// The epoch the next change of any array takes.
-    static NEXT_EPOCH: Cell<u64> = const { Cell::new(1) };
-}
-
-fn next_epoch() -> u64 {
-    NEXT_EPOCH.with(|next| next.replace(next.get() + 1))
-}
-
-impl Default for UniformBufferArray {
-    fn default() -> Self {
-        UniformBufferArray { buffers: Default::default(), epoch: next_epoch() }
-    }
 }
 
 impl UniformBufferArray {
@@ -34,9 +18,10 @@ impl UniformBufferArray {
         Self::default()
     }
 
-    /// A number that changes whenever a buffer of the array is made or
-    /// replaced, to one that no other array has had: bindings of the
-    /// array's buffers made at one epoch bind them while it lasts.
+    /// A number for the array's buffers: 0 until one is made, and whenever
+    /// one is made, replaced or lost to a failed write, one that no other
+    /// array of its device has had. Bindings of the array's buffers made at
+    /// one epoch bind them while it lasts.
     #[must_use]
     pub(crate) fn epoch(&self) -> u64 {
         self.epoch
@@ -72,7 +57,7 @@ impl UniformBufferArray {
         let before = slot.as_ref().map(Buffer::id);
         let replaced = device.write_uniforms(gpu, slot, data, storage);
         if slot.as_ref().map(Buffer::id) != before {
-            self.epoch = next_epoch();
+            self.epoch = device.next_uniform_epoch();
         }
         replaced
     }

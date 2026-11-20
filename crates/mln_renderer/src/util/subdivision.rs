@@ -9,7 +9,7 @@ use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, Ge
 use mln_util::constants::EXTENT;
 use mln_util::hash::HashMap;
 
-use crate::util::triangulate::triangulate;
+use crate::util::triangulate::Triangulator;
 
 /// Pole vertices carry these Y coordinates; the globe vertex shader maps them
 /// to the poles.
@@ -45,7 +45,12 @@ impl Subdivider {
         }
     }
 
-    fn subdivide(mut self, polygon: &GeometryCollection, generate_outline_lines: bool) -> SubdivisionResult {
+    fn subdivide(
+        mut self,
+        polygon: &GeometryCollection,
+        generate_outline_lines: bool,
+        triangulator: &mut Triangulator,
+    ) -> SubdivisionResult {
         let mut flattened: Vec<GeometryCoordinate> = Vec::new();
         for ring in polygon.iter() {
             for point in ring {
@@ -54,7 +59,7 @@ impl Subdivider {
             }
         }
 
-        let mut triangles = self.convert_indices(&flattened, &triangulate(&polygon[..]));
+        let mut triangles = self.convert_indices(&flattened, &triangulator.triangulate(&polygon[..]));
         triangles = self.subdivide_triangles_scanline(&triangles);
 
         let mut lines: Vec<Vec<u32>> = Vec::new();
@@ -444,8 +449,9 @@ impl Subdivider {
 
 /// Triangulates a polygon and splits the triangles on a grid of
 /// `granularity` cells per axis. Port of GL JS `render/subdivision.ts`:
-/// earcut, then a scanline pass per cell row, then pole quads on the pole
-/// tiles and removal of geometry outside the tile on zoom 0. Output triangles
+/// earcut with `triangulator`, then a scanline pass per cell row, then pole
+/// quads on the pole tiles and removal of geometry outside the tile on zoom
+/// 0. Output triangles
 /// are counter-clockwise in tile space. (C++ defaults
 /// `generate_outline_lines` to true.)
 #[must_use]
@@ -454,8 +460,9 @@ pub(crate) fn subdivide_polygon(
     canonical: &CanonicalTileID,
     granularity: u32,
     generate_outline_lines: bool,
+    triangulator: &mut Triangulator,
 ) -> SubdivisionResult {
-    Subdivider::new(granularity, canonical).subdivide(polygon, generate_outline_lines)
+    Subdivider::new(granularity, canonical).subdivide(polygon, generate_outline_lines, triangulator)
 }
 
 /// How far past the tile border [`add_tile_border_strips`] reaches: several

@@ -11,7 +11,7 @@ use crate::bucket::geometry_too_long;
 use crate::buckets::fill_bucket::{FillBucket, FillLayoutVertex};
 use crate::gfx::fill_large_mesh_arrays::{MeshLines, fill_large_mesh_arrays};
 use crate::util::subdivision::{SubdivisionResult, TILE_BORDER_STRIP_WIDTH, add_tile_border_strips, subdivide_polygon};
-use crate::util::triangulate::triangulate;
+use crate::util::triangulate::Triangulator;
 
 fn add_ring_vertices(vertices: &mut Vec<FillLayoutVertex>, ring: &GeometryCoordinates) -> usize {
     for point in ring {
@@ -239,6 +239,7 @@ pub(crate) fn generate_fill_and_outline_buffers(
     outline_ends: &mut Vec<FillLayoutVertex>,
     canonical: &CanonicalTileID,
     subdivision_granularity: u32,
+    triangulator: &mut Triangulator,
 ) -> Result<(), Error> {
     if subdivision_granularity < 2
         && !geometry.get_triangles().is_empty()
@@ -260,7 +261,7 @@ pub(crate) fn generate_fill_and_outline_buffers(
         limit_holes(&mut polygon, 500);
 
         if subdivision_granularity >= 2 {
-            let mut subdivided = subdivide_polygon(&polygon, canonical, subdivision_granularity, true);
+            let mut subdivided = subdivide_polygon(&polygon, canonical, subdivision_granularity, true, triangulator);
             add_tile_border_strips(&mut subdivided, canonical, TILE_BORDER_STRIP_WIDTH);
             let first_line_index = basic_line_indexes.len();
             add_subdivided_polygon(
@@ -291,7 +292,7 @@ pub(crate) fn generate_fill_and_outline_buffers(
             add_ring_outline_ends(fill_vertices, outline_ends, base, n_vertices);
         }
 
-        let indices: Vec<u32> = triangulate(&polygon[..]);
+        let indices: Vec<u32> = triangulator.triangulate(&polygon[..]);
 
         add_fill_indices(fill_segments, fill_indexes, &indices, start_vertices, total_vertices);
     }

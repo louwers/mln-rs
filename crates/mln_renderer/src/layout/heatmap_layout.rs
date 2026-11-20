@@ -21,6 +21,7 @@ use crate::layout::filter_groups::FilterGroups;
 use crate::layout::layout::{BuildParams, Layout, SourceLayer, layers_by_id};
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::layout::tile_layout::Resolved;
+use crate::util::triangulate::Triangulator;
 
 pub(crate) struct HeatmapLayout {
     layers: VecMap<String, Arc<EvaluatedLayer<Heatmap>>>,
@@ -102,6 +103,7 @@ impl Layout<Heatmap> for HeatmapLayout {
                 &PatternLayerMap::default(),
                 i,
                 &build.canonical,
+                &mut Triangulator::default(),
             )?;
             feature_index.insert(&geometries, i, &self.source_layer_id, &self.bucket_leader_id);
         }

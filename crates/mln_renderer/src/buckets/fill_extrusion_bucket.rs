@@ -33,7 +33,7 @@ use crate::layout::pattern_layout::{PatternLayerMap, PatternLayoutSpec};
 use crate::paint_property_binder::{CrossFadedPaintPropertyBinder, PaintPropertyBinder};
 use crate::render_static_data::RenderStaticData;
 use crate::util::subdivision::{SubdivisionResult, subdivide_polygon, subdivide_vertex_line};
-use crate::util::triangulate::triangulate;
+use crate::util::triangulate::Triangulator;
 
 crate::paint_property_binders!(
     pub struct FillExtrusionBinders for FillExtrusionPaintProperties::PossiblyEvaluated {
@@ -277,6 +277,7 @@ impl FillExtrusionBucket {
         &mut self,
         polygon: &[R],
         roof: Option<&SubdivisionResult>,
+        triangulator: &mut Triangulator,
     ) -> Result<(), Error> {
         let mut total_vertices: usize = 0;
         for ring in polygon {
@@ -321,7 +322,7 @@ impl FillExtrusionBucket {
 
         self.add_outline(polygon);
 
-        let indices: Vec<u32> = triangulate(polygon);
+        let indices: Vec<u32> = triangulator.triangulate(polygon);
         debug_assert!(indices.len().is_multiple_of(3));
         let index = |i: u32| (first_index + i as usize) as u16;
         for triangle in indices.as_chunks::<3>().0 {
@@ -370,6 +371,7 @@ impl Bucket for FillExtrusionBucket {
         pattern_dependencies: &PatternLayerMap,
         index: usize,
         canonical: &CanonicalTileID,
+        triangulator: &mut Triangulator,
     ) -> Result<(), Error> {
         for mut polygon in classify_rings(geometry) {
             // Optimize polygons with many interior rings for earcut
@@ -397,12 +399,12 @@ impl Bucket for FillExtrusionBucket {
                     polygon.iter().map(|ring| subdivide_vertex_line(ring, granularity, true)).collect();
                 let ring_vertices: usize = subdivided_rings.iter().map(Vec::len).sum();
                 if ring_vertices <= MAX_SEGMENT_VERTICES {
-                    let roof = subdivide_polygon(&polygon, canonical, granularity, false);
-                    self.add_polygon(&subdivided_rings, Some(&roof))?;
+                    let roof = subdivide_polygon(&polygon, canonical, granularity, false, triangulator);
+                    self.add_polygon(&subdivided_rings, Some(&roof), triangulator)?;
                     continue;
                 }
             }
-            self.add_polygon(&polygon[..], None)?;
+            self.add_polygon(&polygon[..], None, triangulator)?;
         }
 
         let length = self.vertices.len();

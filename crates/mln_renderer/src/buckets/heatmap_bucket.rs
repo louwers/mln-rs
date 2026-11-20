@@ -21,6 +21,7 @@ use crate::bucket_geometry::{GeometryUpload, GeometryVec};
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::paint_property_binder::PaintPropertyBinder;
+use crate::util::triangulate::Triangulator;
 
 crate::paint_property_binders!(
     pub struct HeatmapBinders for HeatmapPaintProperties::PossiblyEvaluated {
@@ -98,6 +99,7 @@ impl Bucket for HeatmapBucket {
         _patterns: &PatternLayerMap,
         feature_index: usize,
         canonical: &CanonicalTileID,
+        _triangulator: &mut Triangulator,
     ) -> Result<(), Error> {
         const VERTEX_LENGTH: usize = 4;
 

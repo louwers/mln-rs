@@ -21,6 +21,7 @@ use crate::gfx::fill_generator::generate_fill_and_outline_buffers;
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::paint_property_binder::{CrossFadedPaintPropertyBinder, PaintPropertyBinder};
+use crate::util::triangulate::Triangulator;
 
 crate::paint_property_binders!(
     pub struct FillBinders for FillPaintProperties::PossiblyEvaluated {
@@ -99,7 +100,12 @@ impl FillBucket {
         FillLayoutVertex { a1: [p.x, p.y] }
     }
 
-    fn generate_buffers(&mut self, geometry: &GeometryCollection, canonical: &CanonicalTileID) -> Result<(), Error> {
+    fn generate_buffers(
+        &mut self,
+        geometry: &GeometryCollection,
+        canonical: &CanonicalTileID,
+        triangulator: &mut Triangulator,
+    ) -> Result<(), Error> {
         generate_fill_and_outline_buffers(
             geometry,
             self.vertices.get_mut(),
@@ -110,6 +116,7 @@ impl FillBucket {
             self.outline_ends.get_mut(),
             canonical,
             self.subdivision_granularity.fill.granularity_for_zoom_level(canonical.z),
+            triangulator,
         )
     }
 
@@ -149,8 +156,9 @@ impl Bucket for FillBucket {
         pattern_dependencies: &PatternLayerMap,
         index: usize,
         canonical: &CanonicalTileID,
+        triangulator: &mut Triangulator,
     ) -> Result<(), Error> {
-        self.generate_buffers(geometry, canonical)?;
+        self.generate_buffers(geometry, canonical, triangulator)?;
         self.populate_binders(feature, pattern_positions, pattern_dependencies, index, canonical);
         Ok(())
     }

@@ -24,6 +24,7 @@ use crate::layer_type::EvaluatedLayer;
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::paint_property_binder::{CrossFadedPaintPropertyBinder, DashArrayBinder, PaintPropertyBinder};
 use crate::util::subdivision::subdivide_vertex_line;
+use crate::util::triangulate::Triangulator;
 
 crate::paint_property_binders!(
     pub struct LineBinders for LinePaintProperties::PossiblyEvaluated {
@@ -295,6 +296,7 @@ impl Bucket for LineBucket {
         pattern_dependencies: &PatternLayerMap,
         index: usize,
         canonical: &CanonicalTileID,
+        _triangulator: &mut Triangulator,
     ) -> Result<(), Error> {
         for line in geometry_collection.iter() {
             self.add_geometry(line, feature, canonical);

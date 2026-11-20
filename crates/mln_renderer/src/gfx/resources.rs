@@ -43,14 +43,24 @@ impl Drop for GpuTexture {
 pub(crate) type SharedGpuTexture = Rc<GpuTexture>;
 
 /// What the renderer makes its buffers and textures with: the rendering
-/// stats that count them, and the queue that they go to when they drop.
+/// stats that count them, the queue that they go to when they drop, and the
+/// epochs of its uniform buffer arrays.
 #[derive(Default)]
 pub(crate) struct Device {
     pub(crate) stats: RenderingStats,
     pub(crate) queue: Rc<ReleaseQueue>,
+    /// The last epoch a uniform buffer array took.
+    uniform_epoch: u64,
 }
 
 impl Device {
+    /// An epoch for a uniform buffer array that changed, one that no array
+    /// of the device has had, and never 0.
+    pub(crate) fn next_uniform_epoch(&mut self) -> u64 {
+        self.uniform_epoch += 1;
+        self.uniform_epoch
+    }
+
     /// A buffer of `gpu` of `usage` holding `data`.
     pub(crate) fn buffer(&mut self, gpu: &mut dyn Gpu, usage: BufferUsage, data: &[u8]) -> Result<Buffer, GpuError> {
         let buffer = self.allocate(gpu, usage, data.len())?;

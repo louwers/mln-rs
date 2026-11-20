@@ -9,6 +9,7 @@ use mln_util::constants::EXTENT;
 use crate::buckets::fill_bucket::FillLayoutVertex;
 use crate::gfx::fill_generator::generate_fill_and_outline_buffers;
 use crate::util::subdivision::{SubdivisionResult, TILE_BORDER_STRIP_WIDTH, add_tile_border_strips, subdivide_polygon};
+use crate::util::triangulate::Triangulator;
 
 /// `EXTENT` as a tile coordinate.
 const EXTENT_I16: i16 = EXTENT as i16;
@@ -49,6 +50,7 @@ fn generate(geometry: &GeometryCollection, canonical: &CanonicalTileID, granular
         &mut buffers.outline_ends,
         canonical,
         granularity,
+        &mut Triangulator::default(),
     )
     .expect("generateFillAndOutineBuffers");
     let mut lines = drawn_lines(&buffers.fill_vertices, &buffers.basic_line_indexes, &buffers.basic_line_segments);
@@ -204,7 +206,7 @@ fn globe_subdivided_polygon_beyond_the_index_limit_keeps_its_granularity() {
 
     let buffers = generate(&polygon, &tile, 128);
 
-    let mut full = subdivide_polygon(&polygon, &tile, 128, true);
+    let mut full = subdivide_polygon(&polygon, &tile, 128, true, &mut Triangulator::default());
     add_tile_border_strips(&mut full, &tile, TILE_BORDER_STRIP_WIDTH);
     assert!(full.vertices.len() / 2 > MAX_SEGMENT_VERTICES);
     assert!(buffers.fill_segments.len() > 1);
